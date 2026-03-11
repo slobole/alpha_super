@@ -1,0 +1,15 @@
+name: MultiPod
+capital: 100000
+
+pods:
+  - strategy: DVO2Strategy
+    weight: 0.25
+
+  - strategy: QPIStrategy
+    weight: 0.25
+
+  - strategy: DefenseFirstTAAVixTranche_Btal
+    weight: 0.5
+
+  # - strategy: JNKSHYStrategy  # uncomment when pkl is available
+  #   weight: 0.10

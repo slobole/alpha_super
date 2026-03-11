@@ -1,0 +1,13 @@
+{
+  "artifact_type": "strategy",
+  "benchmarks": [
+    "$SPX"
+  ],
+  "capital_base": 100000.0,
+  "class_file": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\strategies\\strategy_taa_defense_first_corrected_upro.py",
+  "class_module": "__main__",
+  "class_name": "DefenseFirstCorrectedUPROStrategy",
+  "pickle_path": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\results\\DefenseFirstTAA_Corrected_UPRO\\2026-03-10_020651\\DefenseFirstTAA_Corrected_UPRO.pkl",
+  "saved_at": "2026-03-10T02:06:51",
+  "strategy_name": "DefenseFirstTAA_Corrected_UPRO"
+}

@@ -1,0 +1,13 @@
+{
+  "artifact_type": "strategy",
+  "benchmarks": [
+    "$SPX"
+  ],
+  "capital_base": 100000.0,
+  "class_file": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\strategies\\strategy_mr_qpi.py",
+  "class_module": "__main__",
+  "class_name": "QPIStrategy",
+  "pickle_path": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\results\\QPIStrategy\\2026-03-10_010245\\QPIStrategy.pkl",
+  "saved_at": "2026-03-10T01:02:45",
+  "strategy_name": "QPIStrategy"
+}

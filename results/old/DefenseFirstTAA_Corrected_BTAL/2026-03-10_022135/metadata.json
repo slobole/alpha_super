@@ -1,0 +1,13 @@
+{
+  "artifact_type": "strategy",
+  "benchmarks": [
+    "$SPX"
+  ],
+  "capital_base": 100000.0,
+  "class_file": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\strategies\\strategy_taa_defense_first_corrected_btal.py",
+  "class_module": "__main__",
+  "class_name": "DefenseFirstCorrectedBTALStrategy",
+  "pickle_path": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\results\\DefenseFirstTAA_Corrected_BTAL\\2026-03-10_022135\\DefenseFirstTAA_Corrected_BTAL.pkl",
+  "saved_at": "2026-03-10T02:21:35",
+  "strategy_name": "DefenseFirstTAA_Corrected_BTAL"
+}

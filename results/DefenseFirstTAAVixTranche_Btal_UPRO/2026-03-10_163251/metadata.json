@@ -1,0 +1,13 @@
+{
+  "artifact_type": "strategy",
+  "benchmarks": [
+    "$SPX"
+  ],
+  "capital_base": 100000.0,
+  "class_file": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\strategies\\strategy_taa_defense_first_btal_vix_upro.py",
+  "class_module": "__main__",
+  "class_name": "DefenseFirstVixTrancheBtalStrategy",
+  "pickle_path": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\results\\DefenseFirstTAAVixTranche_Btal_UPRO\\2026-03-10_163251\\DefenseFirstTAAVixTranche_Btal_UPRO.pkl",
+  "saved_at": "2026-03-10T16:32:51",
+  "strategy_name": "DefenseFirstTAAVixTranche_Btal_UPRO"
+}

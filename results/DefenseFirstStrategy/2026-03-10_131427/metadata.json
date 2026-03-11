@@ -1,0 +1,13 @@
+{
+  "artifact_type": "strategy",
+  "benchmarks": [
+    "$SPX"
+  ],
+  "capital_base": 100000.0,
+  "class_file": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\strategies\\strategy_taa_defense_first.py",
+  "class_module": "__main__",
+  "class_name": "DefenseFirstStrategy",
+  "pickle_path": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\results\\DefenseFirstStrategy\\2026-03-10_131427\\DefenseFirstStrategy.pkl",
+  "saved_at": "2026-03-10T13:14:27",
+  "strategy_name": "DefenseFirstStrategy"
+}

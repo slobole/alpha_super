@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv sync:*)",
+      "Bash(uv lock:*)",
+      "Bash(grep:*)",
+      "Bash(uv run:*)",
+      "Bash(python3:*)"
+    ]
+  }
+}

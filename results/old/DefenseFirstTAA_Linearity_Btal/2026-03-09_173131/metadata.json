@@ -1,0 +1,13 @@
+{
+  "artifact_type": "strategy",
+  "benchmarks": [
+    "$SPX"
+  ],
+  "capital_base": 100000.0,
+  "class_file": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\strategies\\strategy_taa_defense_first_linearity_btal.py",
+  "class_module": "__main__",
+  "class_name": "DefenseFirstLinearityBtalStrategy",
+  "pickle_path": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\results\\DefenseFirstTAA_Linearity_Btal\\2026-03-09_173131\\DefenseFirstTAA_Linearity_Btal.pkl",
+  "saved_at": "2026-03-09T17:31:31",
+  "strategy_name": "DefenseFirstTAA_Linearity_Btal"
+}

@@ -1,0 +1,13 @@
+{
+  "artifact_type": "strategy",
+  "benchmarks": [
+    "$SPX"
+  ],
+  "capital_base": 100000.0,
+  "class_file": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\strategies\\strategy_mr_dv2.py",
+  "class_module": "__main__",
+  "class_name": "DVO2Strategy",
+  "pickle_path": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\results\\DVO2Strategy\\2026-03-09_142253\\DVO2Strategy.pkl",
+  "saved_at": "2026-03-09T14:22:53",
+  "strategy_name": "DVO2Strategy"
+}
