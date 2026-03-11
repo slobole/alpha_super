@@ -1,8 +1,10 @@
+import contextlib
 import importlib.util
 import json
 import pickle
-import tempfile
+import shutil
 import unittest
+import uuid
 from pathlib import Path
 
 import pandas as pd
@@ -13,6 +15,7 @@ from alpha.engine.strategy import Strategy
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 RUN_PORTFOLIO_PATH = ROOT_DIR / 'strategies' / 'run_portfolio.py'
+TEST_TMP_ROOT = ROOT_DIR / '.tmp_test_runs'
 
 
 def load_run_portfolio_module():
@@ -20,6 +23,18 @@ def load_run_portfolio_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@contextlib.contextmanager
+def temporary_test_dir():
+    # `tempfile.TemporaryDirectory()` creates ACL-restricted folders under this
+    # Windows sandbox. Build test scratch directories explicitly in-workspace.
+    test_dir = TEST_TMP_ROOT / uuid.uuid4().hex
+    test_dir.mkdir(parents=True, exist_ok=False)
+    try:
+        yield test_dir
+    finally:
+        shutil.rmtree(test_dir, ignore_errors=True)
 
 
 class DummyLoadedStrategy(Strategy):
@@ -81,8 +96,7 @@ class RunPortfolioTests(unittest.TestCase):
         cls.run_portfolio = load_run_portfolio_module()
 
     def test_validate_portfolio_config_rejects_mismatched_pickle_name(self):
-        with tempfile.TemporaryDirectory() as temp_dir_str:
-            temp_dir = Path(temp_dir_str)
+        with temporary_test_dir() as temp_dir:
             config_path = temp_dir / 'portfolio.yaml'
             wrong_pickle_path = temp_dir / 'WrongStrategy.pkl'
             wrong_pickle_path.write_bytes(b'placeholder')
@@ -103,8 +117,7 @@ class RunPortfolioTests(unittest.TestCase):
                 self.run_portfolio.validate_portfolio_config(config_dict, config_path)
 
     def test_validate_portfolio_config_rejects_metadata_strategy_mismatch(self):
-        with tempfile.TemporaryDirectory() as temp_dir_str:
-            temp_dir = Path(temp_dir_str)
+        with temporary_test_dir() as temp_dir:
             strategy = make_strategy('QPIStrategy')
             pickle_path = write_strategy_result(temp_dir, strategy)
             metadata_path = pickle_path.parent / 'metadata.json'
@@ -129,8 +142,7 @@ class RunPortfolioTests(unittest.TestCase):
                 self.run_portfolio.validate_portfolio_config(config_dict, config_path)
 
     def test_build_portfolio_reads_rebalance_and_pod_provenance(self):
-        with tempfile.TemporaryDirectory() as temp_dir_str:
-            temp_dir = Path(temp_dir_str)
+        with temporary_test_dir() as temp_dir:
             strategy_a = make_strategy('StrategyA')
             strategy_b = make_strategy('StrategyB')
             pickle_a = write_strategy_result(temp_dir, strategy_a)
@@ -157,3 +169,4 @@ class RunPortfolioTests(unittest.TestCase):
             self.assertEqual(portfolio.pod_info_list[1]['source_pkl'], str(pickle_b))
             self.assertAlmostEqual(portfolio.pod_info_list[0]['allocated_capital'], 40000.0)
             self.assertAlmostEqual(portfolio.pod_info_list[1]['allocated_capital'], 60000.0)
+
