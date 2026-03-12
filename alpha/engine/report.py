@@ -14,6 +14,7 @@ from datetime import datetime
 _MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 _METADATA_FILENAME = 'metadata.json'
+_DAILY_RETURN_HISTOGRAM_BIN_COUNT_INT = 60
 
 
 def _json_default(value):
@@ -119,6 +120,153 @@ def _fmt_num(val, decimals=2):
         return str(val)
 
 
+def _prepare_daily_return_distribution_dict(strategy) -> dict[str, object]:
+    """
+    Prepare realized daily return data for the strategy HTML histogram.
+
+    The report uses the already-realized strategy return series:
+
+    r_t = V_t / V_{t-1} - 1
+
+    The first stored observation is excluded because it is a bootstrap
+    placeholder produced by the reporting lifecycle, not a realized return.
+
+    Compact statistics use:
+
+    mu = (1 / N) * sum_{t=1}^{N} r_t
+
+    sigma = sqrt((1 / (N - 1)) * sum_{t=1}^{N} (r_t - mu)^2)
+
+    skew = (1 / N) * sum_{t=1}^{N} ((r_t - mu) / sigma)^3
+
+    P(r_t < 0) = (1 / N) * sum_{t=1}^{N} 1[r_t < 0]
+    """
+    daily_return_ser = strategy.results['daily_returns'].astype(float)
+    realized_daily_return_ser = daily_return_ser.iloc[1:].dropna()
+    return_vec = realized_daily_return_ser.to_numpy(dtype=float)
+
+    distribution_dict: dict[str, object] = {
+        'daily_return_ser': realized_daily_return_ser,
+        'return_vec': return_vec,
+        'mean_return_float': np.nan,
+        'std_return_float': np.nan,
+        'skew_return_float': np.nan,
+        'negative_rate_float': np.nan,
+    }
+
+    sample_size_int = int(return_vec.size)
+    if sample_size_int == 0:
+        return distribution_dict
+
+    mean_return_float = float(return_vec.mean())
+    negative_rate_float = float((return_vec < 0.0).mean())
+
+    if sample_size_int >= 2:
+        std_return_float = float(return_vec.std(ddof=1))
+    else:
+        std_return_float = np.nan
+
+    if sample_size_int >= 2 and np.isfinite(std_return_float) and std_return_float > 0.0:
+        standardized_return_vec = (return_vec - mean_return_float) / std_return_float
+        skew_return_float = float(np.mean(standardized_return_vec ** 3))
+    else:
+        skew_return_float = np.nan
+
+    distribution_dict['mean_return_float'] = mean_return_float
+    distribution_dict['std_return_float'] = std_return_float
+    distribution_dict['skew_return_float'] = skew_return_float
+    distribution_dict['negative_rate_float'] = negative_rate_float
+    return distribution_dict
+
+
+def _daily_return_histogram_b64(distribution_dict: dict[str, object]) -> str | None:
+    """
+    Render a daily return histogram to base64.
+
+    Histogram bins follow:
+
+    M = max(|min(r_t)|, |max(r_t)|)
+
+    bins in [-M, M] with 60 equal-width bins.
+    """
+    return_vec = np.asarray(distribution_dict['return_vec'], dtype=float)
+    if return_vec.size < 2:
+        return None
+
+    half_range_float = float(np.max(np.abs(return_vec)))
+    if not np.isfinite(half_range_float) or half_range_float <= 0.0:
+        return None
+
+    histogram_edge_count_int = _DAILY_RETURN_HISTOGRAM_BIN_COUNT_INT + 1
+    bin_edge_vec = np.linspace(-half_range_float, half_range_float, histogram_edge_count_int)
+    mean_return_float = float(distribution_dict['mean_return_float'])
+
+    figure_obj, axis_obj = plt.subplots(figsize=(12, 4.2))
+    axis_obj.hist(
+        return_vec,
+        bins=bin_edge_vec,
+        color='#2ca02c',
+        alpha=0.75,
+        edgecolor='#1d1d1d',
+        linewidth=0.65,
+    )
+    axis_obj.axvline(0.0, color='#333333', linestyle='--', linewidth=1.0, label='Zero return')
+    axis_obj.axvline(
+        mean_return_float,
+        color='#d97a7a',
+        linestyle='-',
+        linewidth=1.1,
+        label='Mean return',
+    )
+    axis_obj.set_title('Daily Return Distribution')
+    axis_obj.set_xlabel('Daily Return')
+    axis_obj.set_ylabel('Frequency')
+    axis_obj.xaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(xmax=1.0, decimals=1))
+    axis_obj.grid(True, alpha=0.25)
+    axis_obj.legend(loc='upper right', fontsize=8)
+    figure_obj.tight_layout()
+
+    buffer_obj = io.BytesIO()
+    figure_obj.savefig(buffer_obj, format='png', dpi=140, bbox_inches='tight')
+    plt.close(figure_obj)
+    buffer_obj.seek(0)
+    return base64.b64encode(buffer_obj.read()).decode('ascii')
+
+
+def _build_daily_return_distribution_html(strategy) -> str:
+    distribution_dict = _prepare_daily_return_distribution_dict(strategy)
+    histogram_b64 = _daily_return_histogram_b64(distribution_dict)
+
+    if histogram_b64 is None:
+        return (
+            '<h2>Daily Return Distribution</h2>'
+            '<p>Not enough realized daily return variation is available to render a meaningful histogram.</p>'
+        )
+
+    mean_return_float = float(distribution_dict['mean_return_float'])
+    std_return_float = float(distribution_dict['std_return_float'])
+    skew_return_float = float(distribution_dict['skew_return_float'])
+    negative_rate_float = float(distribution_dict['negative_rate_float'])
+
+    stats_table_html = (
+        '<table class="stats-table"><thead><tr>'
+        '<th>Mean</th><th>Std. Dev.</th><th>Skew</th><th>Negative Days</th>'
+        '</tr></thead><tbody><tr>'
+        f'<td>{mean_return_float:.3%}</td>'
+        f'<td>{std_return_float:.3%}</td>'
+        f'<td>{_fmt_num(skew_return_float, 3) if np.isfinite(skew_return_float) else "N/A"}</td>'
+        f'<td>{negative_rate_float:.2%}</td>'
+        '</tr></tbody></table>'
+    )
+
+    return (
+        '<h2>Daily Return Distribution</h2>'
+        f'<div class="chart-wrap"><img src="data:image/png;base64,{histogram_b64}" '
+        'alt="Daily Return Distribution"></div>'
+        f'{stats_table_html}'
+    )
+
+
 def _fmt_cell(metric, val):
     """Format a summary metric cell based on the metric name suffix."""
     if val == '' or (isinstance(val, float) and np.isnan(val)):
@@ -139,10 +287,12 @@ def _format_summary(df: pd.DataFrame) -> str:
     headers = '<th>Metric</th>' + ''.join(f'<th>{c}</th>' for c in df.columns)
     rows = []
     for metric in df.index:
-        cells = [f'<td class="metric">{metric}</td>']
+        row_class_str = ' class="summary-row-sharpe"' if metric == 'Sharpe Ratio' else ''
+        metric_class_str = 'metric metric-sharpe' if metric == 'Sharpe Ratio' else 'metric'
+        cells = [f'<td class="{metric_class_str}">{metric}</td>']
         for col in df.columns:
             cells.append(f'<td>{_fmt_cell(metric, df.loc[metric, col])}</td>')
-        rows.append('<tr>' + ''.join(cells) + '</tr>')
+        rows.append(f'<tr{row_class_str}>' + ''.join(cells) + '</tr>')
     return f'<table><thead><tr>{headers}</tr></thead><tbody>{"".join(rows)}</tbody></table>'
 
 
@@ -292,11 +442,20 @@ th { background: #f0f0f0; padding: 6px 10px; text-align: left; border: 1px solid
 td { padding: 5px 10px; border: 1px solid #e8e8e8; }
 tr:nth-child(even) td { background: #f9f9f9; }
 td.metric { font-weight: 500; background: #f5f5f5; white-space: nowrap; }
+tr.summary-row-sharpe td { background: #eef7ee; }
+tr.summary-row-sharpe td.metric-sharpe {
+    background: #dff0df;
+    border-left: 4px solid #2ca02c;
+    color: #1e5d1e;
+    font-weight: 700;
+}
+tr.summary-row-sharpe td:not(.metric-sharpe) { font-weight: 600; }
 td.pos { color: #1a7a1a; }
 td.neg { color: #c0392b; }
 .heatmap td { text-align: center; font-size: 0.8em; min-width: 48px; padding: 4px 6px; }
 .chart-wrap { margin: 16px 0; }
 .chart-wrap img { max-width: 100%; border: 1px solid #ddd; border-radius: 4px; }
+.stats-table { width: auto; min-width: 420px; }
 .scroll { overflow-x: auto; }
 '''
 
@@ -631,6 +790,8 @@ def _build_html(strategy, chart_b64: str) -> str:
 
 <h2>Trade Statistics</h2>
 <div class="scroll">{_format_summary_trades(strategy.summary_trades)}</div>
+
+{_build_daily_return_distribution_html(strategy)}
 
 <h2>Closed Trades</h2>
 <div class="scroll">{_format_trades(strategy._trades)}</div>
