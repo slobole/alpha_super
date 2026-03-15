@@ -1,4 +1,4 @@
-import pandas as pd
+﻿import pandas as pd
 
 from IPython.display import display
 from collections import defaultdict
@@ -6,7 +6,7 @@ from typing import List
 
 from alpha.engine.strategy import Strategy
 from alpha.engine.backtest import run_daily
-from alpha.engine.indicators import qp_indicator
+from alpha.indicators import qp_indicator
 from data.norgate_loader import build_index_constituent_matrix, load_raw_prices
 
 
@@ -32,7 +32,11 @@ class QPIStrategy(Strategy):
             close = signal_data[(symbol, 'Close')]
             feature_cols[(symbol, 'bwd_return')] = close.pct_change(fill_method=None)
             feature_cols[(symbol, '3d_bwd_return')] = close.pct_change(periods=3, fill_method=None)
-            feature_cols[(symbol, 'qp_indicator')] = qp_indicator(close, window=3, lookback_years=5)
+            feature_cols[(symbol, 'qp_indicator')] = qp_indicator(
+                close,
+                window_int=3,
+                lookback_years_int=5,
+            )
             feature_cols[(symbol, 'sma_200')] = close.rolling(window=200).mean()
 
         if not feature_cols:
@@ -118,7 +122,7 @@ if __name__ == "__main__":
     index_symbols, universe_df = build_index_constituent_matrix(indexname='S&P 500')
     pricing_data = get_prices(index_symbols, benchmarks, start_date='1998-01-01', end_date=None)
     ...
-    sa = QPIStrategy(name='QPIStrategy', benchmarks=benchmarks, capital_base=100_000, slippage=0.0001,
+    sa = QPIStrategy(name='strategy_mr_qpi', benchmarks=benchmarks, capital_base=100_000, slippage=0.0001,
                      commission_per_share=0.005, commission_minimum=1.0)
     sa.universe_df = universe_df
     calendar = pricing_data.index
@@ -134,3 +138,4 @@ if __name__ == "__main__":
     display(sa.summary_trades)
     from alpha.engine.report import save_results
     save_results(sa)
+
