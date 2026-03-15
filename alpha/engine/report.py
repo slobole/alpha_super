@@ -10,6 +10,14 @@ import numpy as np
 from pathlib import Path
 from datetime import datetime
 
+from alpha.engine.theme import (
+    SEABORN_DEEP_COLOR_LIST,
+    SIGNATURE_PALETTE_DICT,
+    blend_hex_color_str,
+    build_report_css,
+    build_signature_rcparams,
+)
+
 
 _MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -201,34 +209,41 @@ def _daily_return_histogram_b64(distribution_dict: dict[str, object]) -> str | N
     bin_edge_vec = np.linspace(-half_range_float, half_range_float, histogram_edge_count_int)
     mean_return_float = float(distribution_dict['mean_return_float'])
 
-    figure_obj, axis_obj = plt.subplots(figsize=(12, 4.2))
-    axis_obj.hist(
-        return_vec,
-        bins=bin_edge_vec,
-        color='#2ca02c',
-        alpha=0.75,
-        edgecolor='#1d1d1d',
-        linewidth=0.65,
-    )
-    axis_obj.axvline(0.0, color='#333333', linestyle='--', linewidth=1.0, label='Zero return')
-    axis_obj.axvline(
-        mean_return_float,
-        color='#d97a7a',
-        linestyle='-',
-        linewidth=1.1,
-        label='Mean return',
-    )
-    axis_obj.set_title('Daily Return Distribution')
-    axis_obj.set_xlabel('Daily Return')
-    axis_obj.set_ylabel('Frequency')
-    axis_obj.xaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(xmax=1.0, decimals=1))
-    axis_obj.grid(True, alpha=0.25)
-    axis_obj.legend(loc='upper right', fontsize=8)
-    figure_obj.tight_layout()
+    with plt.rc_context(build_signature_rcparams(to_web_bool=True)):
+        figure_obj, axis_obj = plt.subplots(figsize=(12, 4.2))
+        axis_obj.hist(
+            return_vec,
+            bins=bin_edge_vec,
+            color=SEABORN_DEEP_COLOR_LIST[0],
+            alpha=0.78,
+            edgecolor=SIGNATURE_PALETTE_DICT['bar_edge'],
+            linewidth=0.65,
+        )
+        axis_obj.axvline(
+            0.0,
+            color=SIGNATURE_PALETTE_DICT['zero_line'],
+            linestyle='--',
+            linewidth=1.0,
+            label='Zero return',
+        )
+        axis_obj.axvline(
+            mean_return_float,
+            color=SEABORN_DEEP_COLOR_LIST[1],
+            linestyle='-',
+            linewidth=1.1,
+            label='Mean return',
+        )
+        axis_obj.set_title('Daily Return Distribution')
+        axis_obj.set_xlabel('Daily Return')
+        axis_obj.set_ylabel('Frequency')
+        axis_obj.xaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(xmax=1.0, decimals=1))
+        axis_obj.grid(True)
+        axis_obj.legend(loc='upper right', fontsize=8)
+        figure_obj.tight_layout()
 
-    buffer_obj = io.BytesIO()
-    figure_obj.savefig(buffer_obj, format='png', dpi=140, bbox_inches='tight')
-    plt.close(figure_obj)
+        buffer_obj = io.BytesIO()
+        figure_obj.savefig(buffer_obj, format='png', dpi=140, bbox_inches='tight')
+        plt.close(figure_obj)
     buffer_obj.seek(0)
     return base64.b64encode(buffer_obj.read()).decode('ascii')
 
@@ -369,23 +384,45 @@ def _format_transactions(df: pd.DataFrame) -> str:
 # ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ monthly returns heatmap ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
 def _ret_color(val) -> str:
-    """Map a return ratio to an inline CSS background. ????????????????????30% = full green/red."""
+    """Map a return ratio to an inline CSS background."""
     try:
-        v = float(val)
+        value_float = float(val)
     except (TypeError, ValueError):
-        return 'background-color: #f5f5f5;'
-    if np.isnan(v):
-        return 'background-color: #f5f5f5;'
-    intensity = min(abs(v) / 0.30, 1.0)
-    if v >= 0:
-        r = int(255 - intensity * 155)
-        g = int(255 - intensity * 55)
-        b = int(255 - intensity * 155)
+        return (
+            f'background-color: {SIGNATURE_PALETTE_DICT["neutral"]}; '
+            f'color: {SIGNATURE_PALETTE_DICT["ink"]};'
+        )
+    if np.isnan(value_float):
+        return (
+            f'background-color: {SIGNATURE_PALETTE_DICT["neutral"]}; '
+            f'color: {SIGNATURE_PALETTE_DICT["ink"]};'
+        )
+
+    intensity_float = min(abs(value_float) / 0.30, 1.0)
+    fill_weight_float = 0.12 + 0.45 * intensity_float
+
+    if value_float >= 0.0:
+        background_color_str = blend_hex_color_str(
+            SIGNATURE_PALETTE_DICT['page'],
+            SIGNATURE_PALETTE_DICT['strategy'],
+            fill_weight_float,
+        )
+        font_color_str = (
+            SIGNATURE_PALETTE_DICT['strategy_dark']
+            if intensity_float < 0.65 else SIGNATURE_PALETTE_DICT['page']
+        )
     else:
-        r = int(255 - intensity * 55)
-        g = int(255 - intensity * 155)
-        b = int(255 - intensity * 155)
-    return f'background-color: rgb({r},{g},{b});'
+        background_color_str = blend_hex_color_str(
+            SIGNATURE_PALETTE_DICT['page'],
+            SIGNATURE_PALETTE_DICT['benchmark'],
+            fill_weight_float,
+        )
+        font_color_str = (
+            SIGNATURE_PALETTE_DICT['benchmark_dark']
+            if intensity_float < 0.65 else SIGNATURE_PALETTE_DICT['page']
+        )
+
+    return f'background-color: {background_color_str}; color: {font_color_str};'
 
 
 def _monthly_returns_html(mr: pd.DataFrame) -> str:
@@ -426,38 +463,7 @@ def _monthly_returns_html(mr: pd.DataFrame) -> str:
 
 # ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ HTML assembly ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
-_CSS = '''
-body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    margin: 0; padding: 20px 40px; background: #fafafa; color: #222;
-}
-h1 { font-size: 1.6em; margin-bottom: 4px; }
-h2 {
-    font-size: 1.1em; margin-top: 32px; margin-bottom: 8px;
-    border-bottom: 1px solid #ddd; padding-bottom: 4px; color: #444;
-}
-.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
-table { border-collapse: collapse; font-size: 0.85em; width: 100%; margin-bottom: 16px; }
-th { background: #f0f0f0; padding: 6px 10px; text-align: left; border: 1px solid #ddd; }
-td { padding: 5px 10px; border: 1px solid #e8e8e8; }
-tr:nth-child(even) td { background: #f9f9f9; }
-td.metric { font-weight: 500; background: #f5f5f5; white-space: nowrap; }
-tr.summary-row-sharpe td { background: #eef7ee; }
-tr.summary-row-sharpe td.metric-sharpe {
-    background: #dff0df;
-    border-left: 4px solid #2ca02c;
-    color: #1e5d1e;
-    font-weight: 700;
-}
-tr.summary-row-sharpe td:not(.metric-sharpe) { font-weight: 600; }
-td.pos { color: #1a7a1a; }
-td.neg { color: #c0392b; }
-.heatmap td { text-align: center; font-size: 0.8em; min-width: 48px; padding: 4px 6px; }
-.chart-wrap { margin: 16px 0; }
-.chart-wrap img { max-width: 100%; border: 1px solid #ddd; border-radius: 4px; }
-.stats-table { width: auto; min-width: 420px; }
-.scroll { overflow-x: auto; }
-'''
+_CSS = build_report_css()
 
 
 def save_portfolio_results(portfolio, output_dir='results') -> Path:
@@ -495,17 +501,36 @@ def _corr_color(val) -> str:
     """Map a correlation value to an inline CSS background.
     Low correlation (near 0) = green, high (near 1) = red."""
     try:
-        v = float(val)
+        value_float = float(val)
     except (TypeError, ValueError):
         return ''
-    if np.isnan(v):
-        return 'background-color: #f5f5f5;'
-    # abs correlation: 0 = full green, 1 = full red
-    intensity = min(abs(v), 1.0)
-    r = int(100 + intensity * 155)
-    g = int(200 - intensity * 100)
-    b = int(100 + intensity * 55)
-    return f'background-color: rgb({r},{g},{b}); color: #fff;'
+    if np.isnan(value_float):
+        return (
+            f'background-color: {SIGNATURE_PALETTE_DICT["neutral"]}; '
+            f'color: {SIGNATURE_PALETTE_DICT["ink"]};'
+        )
+
+    intensity_float = min(abs(value_float), 1.0)
+    low_corr_color_str = blend_hex_color_str(
+        SIGNATURE_PALETTE_DICT['page'],
+        SIGNATURE_PALETTE_DICT['strategy'],
+        0.30,
+    )
+    high_corr_color_str = blend_hex_color_str(
+        SIGNATURE_PALETTE_DICT['page'],
+        SIGNATURE_PALETTE_DICT['benchmark'],
+        0.52,
+    )
+    background_color_str = blend_hex_color_str(
+        low_corr_color_str,
+        high_corr_color_str,
+        intensity_float,
+    )
+    font_color_str = (
+        SIGNATURE_PALETTE_DICT['ink']
+        if intensity_float < 0.72 else SIGNATURE_PALETTE_DICT['page']
+    )
+    return f'background-color: {background_color_str}; color: {font_color_str};'
 
 
 def _format_correlation_matrix(corr: 'pd.DataFrame') -> str:
@@ -587,39 +612,34 @@ def _weights_chart_b64(weights: pd.DataFrame, title: str) -> str | None:
     if not active_cols:
         return None
 
-    color_map = {
-        'TLT': '#1f77b4',
-        'GLD': '#ff7f0e',
-        'DBC': '#2ca02c',
-        'UUP': '#d62728',
-        'SPY': '#d4a900',
-        'UPRO': '#9467bd',
-        'BTAL': '#8c564b',
-    }
-    colors = [color_map.get(col, '#7f7f7f') for col in active_cols]
+    color_list = [
+        SEABORN_DEEP_COLOR_LIST[column_idx_int % len(SEABORN_DEEP_COLOR_LIST)]
+        for column_idx_int, _ in enumerate(active_cols)
+    ]
 
-    fig, ax = plt.subplots(figsize=(12, 4.8))
-    ax.stackplot(
-        weights.index,
-        [weights[col].fillna(0).to_numpy() for col in active_cols],
-        labels=active_cols,
-        colors=colors,
-        alpha=0.8,
-        edgecolor='#111111',
-        linewidth=0.6,
-    )
-    ax.set_title(title)
-    ax.set_ylabel('Weight')
-    ax.set_xlabel('Date')
-    ax.set_ylim(0, 1.05)
-    ax.grid(True, alpha=0.25)
-    ax.legend(loc='upper left', ncol=min(3, len(active_cols)), fontsize=8)
-    fig.autofmt_xdate()
-    fig.tight_layout()
+    with plt.rc_context(build_signature_rcparams(to_web_bool=True)):
+        fig, ax = plt.subplots(figsize=(12, 4.8))
+        ax.stackplot(
+            weights.index,
+            [weights[col].fillna(0).to_numpy() for col in active_cols],
+            labels=active_cols,
+            colors=color_list,
+            alpha=0.82,
+            edgecolor=SIGNATURE_PALETTE_DICT['page'],
+            linewidth=0.6,
+        )
+        ax.set_title(title)
+        ax.set_ylabel('Weight')
+        ax.set_xlabel('Date')
+        ax.set_ylim(0, 1.05)
+        ax.grid(True)
+        ax.legend(loc='upper left', ncol=min(3, len(active_cols)), fontsize=8)
+        fig.autofmt_xdate()
+        fig.tight_layout()
 
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=140, bbox_inches='tight')
-    plt.close(fig)
+        buf = io.BytesIO()
+        fig.savefig(buf, format='png', dpi=140, bbox_inches='tight')
+        plt.close(fig)
     buf.seek(0)
     return base64.b64encode(buf.read()).decode('ascii')
 
