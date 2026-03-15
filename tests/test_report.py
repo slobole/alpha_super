@@ -1,6 +1,9 @@
 import unittest
 from unittest import mock
 
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.axes._axes as maxes
 import numpy as np
 import pandas as pd
 
@@ -8,11 +11,14 @@ from alpha.engine.report import (
     _DAILY_RETURN_HISTOGRAM_BIN_COUNT_INT,
     _build_daily_return_distribution_html,
     _build_html,
+    _corr_color,
     _daily_return_histogram_b64,
     _format_summary,
     _prepare_daily_return_distribution_dict,
+    _ret_color,
 )
 from alpha.engine.strategy import Strategy
+from alpha.engine.theme import SEABORN_DEEP_COLOR_LIST, SIGNATURE_PALETTE_DICT, blend_hex_color_str
 
 
 class DummyStrategy(Strategy):
@@ -119,6 +125,16 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertLess(trade_statistics_idx_int, daily_distribution_idx_int)
         self.assertLess(daily_distribution_idx_int, closed_trades_idx_int)
 
+    def test_build_html_embeds_signature_css(self):
+        strategy = make_strategy([0.0, 0.01, -0.02, 0.0, 0.03, -0.01])
+
+        report_html_str = _build_html(strategy, chart_b64='equity-chart-b64')
+
+        self.assertIn(f'--color-strategy: {SIGNATURE_PALETTE_DICT["strategy"]};', report_html_str)
+        self.assertIn(f'--color-page: {SIGNATURE_PALETTE_DICT["page"]};', report_html_str)
+        self.assertIn('font-family: "Segoe UI", Arial, sans-serif;', report_html_str)
+        self.assertIn('box-shadow: none;', report_html_str)
+
     def test_daily_return_histogram_uses_60_equal_width_bins(self):
         strategy = make_strategy([0.0, 0.01, -0.02, 0.0, 0.03, -0.01])
         distribution_dict = _prepare_daily_return_distribution_dict(strategy)
@@ -130,6 +146,53 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertGreater(len(histogram_b64), 0)
         histogram_edge_count_list = [call_args.args[2] for call_args in linspace_mock_obj.call_args_list if len(call_args.args) >= 3]
         self.assertIn(_DAILY_RETURN_HISTOGRAM_BIN_COUNT_INT + 1, histogram_edge_count_list)
+
+    def test_daily_return_histogram_uses_signature_palette(self):
+        strategy = make_strategy([0.0, 0.01, -0.02, 0.0, 0.03, -0.01])
+        distribution_dict = _prepare_daily_return_distribution_dict(strategy)
+
+        with mock.patch('matplotlib.axes._axes.Axes.hist', autospec=True, wraps=maxes.Axes.hist) as hist_mock_obj:
+            histogram_b64 = _daily_return_histogram_b64(distribution_dict)
+
+        self.assertIsInstance(histogram_b64, str)
+        hist_color_list = [
+            call_args.kwargs['color']
+            for call_args in hist_mock_obj.call_args_list
+            if 'color' in call_args.kwargs
+        ]
+        self.assertIn(SEABORN_DEEP_COLOR_LIST[0], hist_color_list)
+
+    def test_signature_color_helpers_follow_palette(self):
+        positive_style_str = _ret_color(0.15)
+        negative_style_str = _ret_color(-0.15)
+        low_corr_style_str = _corr_color(0.0)
+        high_corr_style_str = _corr_color(1.0)
+
+        expected_positive_color_str = blend_hex_color_str(
+            SIGNATURE_PALETTE_DICT['page'],
+            SIGNATURE_PALETTE_DICT['strategy'],
+            0.12 + 0.45 * min(abs(0.15) / 0.30, 1.0),
+        )
+        expected_negative_color_str = blend_hex_color_str(
+            SIGNATURE_PALETTE_DICT['page'],
+            SIGNATURE_PALETTE_DICT['benchmark'],
+            0.12 + 0.45 * min(abs(-0.15) / 0.30, 1.0),
+        )
+        expected_low_corr_color_str = blend_hex_color_str(
+            SIGNATURE_PALETTE_DICT['page'],
+            SIGNATURE_PALETTE_DICT['strategy'],
+            0.30,
+        )
+        expected_high_corr_color_str = blend_hex_color_str(
+            SIGNATURE_PALETTE_DICT['page'],
+            SIGNATURE_PALETTE_DICT['benchmark'],
+            0.52,
+        )
+
+        self.assertIn(expected_positive_color_str, positive_style_str)
+        self.assertIn(expected_negative_color_str, negative_style_str)
+        self.assertIn(expected_low_corr_color_str, low_corr_style_str)
+        self.assertIn(expected_high_corr_color_str, high_corr_style_str)
 
     def test_daily_return_distribution_falls_back_when_variation_is_degenerate(self):
         strategy = make_strategy([0.0, 0.0, 0.0])
