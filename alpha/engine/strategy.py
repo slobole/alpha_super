@@ -25,6 +25,7 @@ import numpy as np
 import pickle
 
 from abc import ABC, abstractmethod
+from tqdm.auto import tqdm
 from alpha.engine.plot import plot
 from alpha.engine.order import Order, MarketOrder, LimitOrder, StopOrder
 from alpha.engine.metrics import generate_drawdowns, generate_monthly_returns, generate_overall_metrics, generate_trades, generate_trades_metrics, sharpe_ratio
@@ -64,6 +65,30 @@ class Strategy(ABC):
         self.previous_bar = None  # the timestamp of the previous trading day, used for reference
         self.signal_audit_sample_size = getattr(self, 'signal_audit_sample_size', 10)
         self.enable_signal_audit = getattr(self, 'enable_signal_audit', False)
+        self.show_signal_progress_bool = False
+        self.show_audit_progress_bool = False
+
+        self._position_amount_map: dict[str, float] = {}
+        self._daily_return_history_list: list[float] = []
+        self._portfolio_value_history_list: list[float] = []
+        self._total_value_history_list: list[float] = []
+        self._benchmark_value_history_map: dict[str, list[float]] = {
+            benchmark: [] for benchmark in self._benchmarks
+        }
+        self._daily_return_count_int = 0
+        self._daily_return_mean_float = 0.0
+        self._daily_return_m2_float = 0.0
+        self._sharpe_return_count_int = 0
+        self._sharpe_return_mean_float = 0.0
+        self._sharpe_return_m2_float = 0.0
+        self._equity_peak_float = float(self.total_value)
+        self._max_drawdown_float = 0.0
+        self._benchmark_peak_map: dict[str, float] = {
+            benchmark: float(self._capital_base) for benchmark in self._benchmarks
+        }
+        self._benchmark_max_drawdown_map: dict[str, float] = {
+            benchmark: 0.0 for benchmark in self._benchmarks
+        }
 
 
     # ------------------------------------------ 0 - INITIALIZATION  ------------------------------------------ #
@@ -104,6 +129,29 @@ class Strategy(ABC):
         """
         return pricing_data
 
+    def _progress_iter(self, iterable, desc_str: str, total_int: int | None, enabled_bool: bool):
+        if not enabled_bool:
+            return iterable
+
+        full_desc_str = f"{self.name}: {desc_str}" if self.name else desc_str
+        return tqdm(iterable, desc=full_desc_str, total=total_int, leave=False)
+
+    def signal_progress(self, iterable, desc_str: str, total_int: int | None = None):
+        return self._progress_iter(
+            iterable,
+            desc_str=desc_str,
+            total_int=total_int,
+            enabled_bool=self.show_signal_progress_bool,
+        )
+
+    def audit_progress(self, iterable, desc_str: str, total_int: int | None = None):
+        return self._progress_iter(
+            iterable,
+            desc_str=desc_str,
+            total_int=total_int,
+            enabled_bool=self.show_audit_progress_bool,
+        )
+
     def signal_audit_fields(self, pricing_data: pd.DataFrame, signal_data: pd.DataFrame):
         """
         Returns the columns that should be checked by the anti-lookahead audit.
@@ -140,26 +188,36 @@ class Strategy(ABC):
             dtype=int,
         )
         sampled_index = pricing_data.index[np.unique(sample_positions)]
+        audit_bar_iterable = self.audit_progress(
+            sampled_index,
+            desc_str='signal audit',
+            total_int=len(sampled_index),
+        )
+        prior_signal_progress_bool = self.show_signal_progress_bool
+        self.show_signal_progress_bool = False
 
-        for bar in sampled_index:
-            truncated_input = pricing_data.loc[:bar]
-            truncated_signal_data = self.compute_signals(truncated_input.copy())
+        try:
+            for bar in audit_bar_iterable:
+                truncated_input = pricing_data.loc[:bar]
+                truncated_signal_data = self.compute_signals(truncated_input.copy())
 
-            missing_cols = [col for col in audit_cols if col not in truncated_signal_data.columns]
-            if missing_cols:
-                raise ValueError(
-                    f"{self.name}: compute_signals() did not return audited fields {missing_cols} "
-                    f"when recomputed through {bar}."
-                )
-
-            for col in audit_cols:
-                full_value = signal_data.loc[bar, col]
-                truncated_value = truncated_signal_data.loc[bar, col]
-                if not self._signal_values_match(full_value, truncated_value):
+                missing_cols = [col for col in audit_cols if col not in truncated_signal_data.columns]
+                if missing_cols:
                     raise ValueError(
-                        f"{self.name}: possible lookahead leakage in feature {col} at {bar}. "
-                        "The full-history value differs from the value recomputed using only data available up to that bar."
+                        f"{self.name}: compute_signals() did not return audited fields {missing_cols} "
+                        f"when recomputed through {bar}."
                     )
+
+                for col in audit_cols:
+                    full_value = signal_data.loc[bar, col]
+                    truncated_value = truncated_signal_data.loc[bar, col]
+                    if not self._signal_values_match(full_value, truncated_value):
+                        raise ValueError(
+                            f"{self.name}: possible lookahead leakage in feature {col} at {bar}. "
+                            "The full-history value differs from the value recomputed using only data available up to that bar."
+                        )
+        finally:
+            self.show_signal_progress_bool = prior_signal_progress_bool
 
     @staticmethod
     def _signal_values_match(full_value, truncated_value, atol: float = 1e-12) -> bool:
@@ -168,6 +226,26 @@ class Strategy(ABC):
         if isinstance(full_value, (float, np.floating)) or isinstance(truncated_value, (float, np.floating)):
             return bool(np.isclose(full_value, truncated_value, atol=atol, rtol=0, equal_nan=True))
         return full_value == truncated_value
+
+    @staticmethod
+    def _update_running_moments(
+        count_int: int,
+        mean_float: float,
+        m2_float: float,
+        observation_float: float,
+    ) -> tuple[int, float, float]:
+        updated_count_int = count_int + 1
+        delta_float = observation_float - mean_float
+        updated_mean_float = mean_float + (delta_float / updated_count_int)
+        delta2_float = observation_float - updated_mean_float
+        updated_m2_float = m2_float + (delta_float * delta2_float)
+        return updated_count_int, updated_mean_float, updated_m2_float
+
+    @staticmethod
+    def _sample_std_from_moments(count_int: int, m2_float: float) -> float:
+        if count_int < 2:
+            return np.nan
+        return float(np.sqrt(m2_float / (count_int - 1)))
     
     # trade logic -> should be implemented in the subclass
     @abstractmethod
@@ -207,6 +285,8 @@ class Strategy(ABC):
             return
 
         executed_orders = []  # list to store successfully executed orders
+        total_value_sum_float = 0.0
+        commission_sum_float = 0.0
 
         # loop through all active orders
         for order in self.get_orders():
@@ -233,6 +313,8 @@ class Strategy(ABC):
                 self.add_transaction(order.trade_id, self.current_bar, order.asset,
                                     amount, price, price * amount, order.id, commission)
                 executed_orders.append(order)
+                total_value_sum_float += float(price * amount)
+                commission_sum_float += float(commission)
                 continue
 
             amount_approx = order.amount_in_shares(current_open, self.total_value, position)
@@ -249,6 +331,8 @@ class Strategy(ABC):
                 self.add_transaction(order.trade_id, self.current_bar, order.asset, amount, price,
                                     price * amount, order.id, commission)
                 executed_orders.append(order)
+                total_value_sum_float += float(price * amount)
+                commission_sum_float += float(commission)
 
             elif isinstance(order, LimitOrder):
                 # limit orders execute only if the limit price is within the day's range
@@ -267,6 +351,8 @@ class Strategy(ABC):
                     self.add_transaction(order.trade_id, self.current_bar, order.asset,
                                         amount_exact, price, price * amount_exact, order.id, commission)
                     executed_orders.append(order)
+                    total_value_sum_float += float(price * amount_exact)
+                    commission_sum_float += float(commission)
                 else:
                     # if the order is not triggered, remove it
                     self.remove_order(order)
@@ -288,6 +374,8 @@ class Strategy(ABC):
                     self.add_transaction(order.trade_id, self.current_bar, order.asset,
                                         amount_exact, price, price * amount_exact, order.id, commission)
                     executed_orders.append(order)
+                    total_value_sum_float += float(price * amount_exact)
+                    commission_sum_float += float(commission)
 
         # remove all executed orders from the active order list
         for order in executed_orders:
@@ -296,19 +384,19 @@ class Strategy(ABC):
         # --- UPDATE PORTFOLIO STATE ---
 
         # deduct cash used for executed transactions (trade value + commissions)
-        today_txns = self.get_transactions(self.current_bar)
-        self.cash -= today_txns['total_value'].sum()
-        self.cash -= today_txns['commission'].sum()
+        self.cash -= total_value_sum_float
+        self.cash -= commission_sum_float
 
         # compute the updated portfolio value
-        pos = self.get_positions()
-        if len(pos) == 0:
+        position_ser = self.get_positions()
+        active_position_ser = position_ser[position_ser != 0]
+        if len(active_position_ser) == 0:
             self.portfolio_value = 0  # No positions left
         else:
             # retrieve closing prices to value the current portfolio
             close_prices = prices.loc[self.current_bar, (slice(None), 'Close')]
             close_prices.index = close_prices.index.get_level_values(0)
-            self.portfolio_value = (pos * close_prices).sum()
+            self.portfolio_value = (active_position_ser * close_prices).sum()
 
         # update the total account value (cash + portfolio holdings)
         self.total_value = self.cash + self.portfolio_value
@@ -325,63 +413,122 @@ class Strategy(ABC):
         tdy = self.current_bar.date()  # extract the date from the current trading bar
         # if this is the first trading day (no previous bar exists), initialize metrics
         if self.previous_bar is None:
-            daily_return = 0  # no return on the first day
-            total_return = 0  # no total return yet
-            annualized_return = 0  # cannot annualize returns with one data point
-            annualized_volatility = 0  # no volatility calculated yet
-            sr = 0  # sharpe ratio is undefined initially
-            drawdown = 0  # no drawdown on the first day
-            max_drawdown = 0  # no max drawdown on the first day
+            daily_return_float = 0.0  # no return on the first day
+            total_return_float = 0.0  # no total return yet
+            annualized_return_float = 0.0  # cannot annualize returns with one data point
+            annualized_volatility_float = 0.0  # no volatility calculated yet
+            sharpe_ratio_float = 0.0  # sharpe ratio is undefined initially
+            drawdown_float = 0.0  # no drawdown on the first day
+            max_drawdown_float = 0.0  # no max drawdown on the first day
             # initialize benchmark values
-            bench = []
-            for _ in self._benchmarks:
-                bench.append((self._capital_base, 0, 0))  # starting capital, no drawdown
+            benchmark_metric_list = []
+            for benchmark_str in self._benchmarks:
+                benchmark_value_float = float(self._capital_base)
+                self._benchmark_value_history_map[benchmark_str].append(benchmark_value_float)
+                benchmark_metric_list.append((benchmark_value_float, 0.0, 0.0))
 
         else:
             # calculate daily return based on total value change
-            daily_return = self.total_value / self.previous_total_value - 1
+            daily_return_float = float(self.total_value / self.previous_total_value - 1)
             # compute total return since the start of the simulation
-            total_return = self.total_value / self._capital_base - 1
+            total_return_float = float(self.total_value / self._capital_base - 1)
             # compute annualized return, avoiding division by zero
             if self.num_days == 0:
-                annualized_return = np.nan
+                annualized_return_float = np.nan
             else:
-                annualized_return = (1 + total_return) ** (252 / self.num_days) - 1
-
-            # append the latest daily return and portfolio values to historical series
-            drs = pd.Series(np.append(self.daily_returns_series, daily_return))
-            pvs = pd.Series(np.append(self.portfolio_value_series, self.portfolio_value))
-            tvs = pd.Series(np.append(self.total_value_series, self.total_value))
-            # calculate annualized volatility (standard deviation of daily returns)
-            annualized_volatility = drs.std() * np.sqrt(252)
-            # compute the Sharpe ratio only if volatility is non-zero
-            sr = sharpe_ratio(drs, pvs) if annualized_volatility != 0 else np.nan  # mean/std of daily returns
-            # calculate drawdown (percentage decline from highest portfolio value)
-            drawdown = self.total_value / max(tvs) - 1
-            # compute max drawdown (worst observed drawdown)
-            max_drawdown = (tvs / tvs.cummax() - 1).min()
+                annualized_return_float = float((1 + total_return_float) ** (252 / self.num_days) - 1)
 
             # initialize benchmark metrics
-            bench = []
-            for benchmark in self._benchmarks:
+            benchmark_metric_list = []
+            for benchmark_str in self._benchmarks:
                 # retrieve closing price of the benchmark for the current and start dates
-                bc = prices.loc[self.current_bar, (benchmark, 'Close')]
-                b0 = prices.loc[start, (benchmark, 'Close')]
+                benchmark_close_float = float(prices.loc[self.current_bar, (benchmark_str, 'Close')])
+                benchmark_start_close_float = float(prices.loc[start, (benchmark_str, 'Close')])
                 # compute the benchmark's total value assuming it started with the same capital
-                bench_val = bc / b0 * self._capital_base
-                # append latest benchmark value to historical series
-                bvs = pd.Series(np.append(self.benchmark_value_series(benchmark), bench_val))
-                # compute benchmark drawdown and max drawdown
-                bench_drawdown = bench_val / max(bvs) - 1
-                bench_max_drawdown = (bvs / bvs.cummax() - 1).min()
+                benchmark_value_float = float(
+                    (benchmark_close_float / benchmark_start_close_float) * self._capital_base
+                )
+                benchmark_peak_float = max(
+                    self._benchmark_peak_map[benchmark_str],
+                    benchmark_value_float,
+                )
+                self._benchmark_peak_map[benchmark_str] = benchmark_peak_float
+                benchmark_drawdown_float = float(
+                    benchmark_value_float / benchmark_peak_float - 1.0
+                )
+                benchmark_max_drawdown_float = min(
+                    self._benchmark_max_drawdown_map[benchmark_str],
+                    benchmark_drawdown_float,
+                )
+                self._benchmark_max_drawdown_map[benchmark_str] = benchmark_max_drawdown_float
+                self._benchmark_value_history_map[benchmark_str].append(benchmark_value_float)
                 # store benchmark metrics
-                bench.append((bench_val, bench_drawdown, bench_max_drawdown))
+                benchmark_metric_list.append(
+                    (
+                        benchmark_value_float,
+                        benchmark_drawdown_float,
+                        benchmark_max_drawdown_float,
+                    )
+                )
+
+        self._daily_return_count_int, self._daily_return_mean_float, self._daily_return_m2_float = (
+            self._update_running_moments(
+                self._daily_return_count_int,
+                self._daily_return_mean_float,
+                self._daily_return_m2_float,
+                float(daily_return_float),
+            )
+        )
+        daily_return_std_float = self._sample_std_from_moments(
+            self._daily_return_count_int,
+            self._daily_return_m2_float,
+        )
+
+        self._equity_peak_float = max(self._equity_peak_float, float(self.total_value))
+        drawdown_float = float(self.total_value / self._equity_peak_float - 1.0)
+        self._max_drawdown_float = min(self._max_drawdown_float, drawdown_float)
+        max_drawdown_float = self._max_drawdown_float
+
+        if self.previous_bar is not None:
+            annualized_volatility_float = float(daily_return_std_float * np.sqrt(252))
+            if self.portfolio_value != 0 or daily_return_float != 0:
+                (
+                    self._sharpe_return_count_int,
+                    self._sharpe_return_mean_float,
+                    self._sharpe_return_m2_float,
+                ) = self._update_running_moments(
+                    self._sharpe_return_count_int,
+                    self._sharpe_return_mean_float,
+                    self._sharpe_return_m2_float,
+                    float(daily_return_float),
+                )
+
+            sharpe_std_float = self._sample_std_from_moments(
+                self._sharpe_return_count_int,
+                self._sharpe_return_m2_float,
+            )
+            if np.isnan(sharpe_std_float) or sharpe_std_float == 0.0:
+                sharpe_ratio_float = np.nan
+            else:
+                sharpe_ratio_float = float(
+                    (self._sharpe_return_mean_float / sharpe_std_float) * np.sqrt(252)
+                )
+
+        self._daily_return_history_list.append(float(daily_return_float))
+        self._portfolio_value_history_list.append(float(self.portfolio_value))
+        self._total_value_history_list.append(float(self.total_value))
 
         # store the computed metrics for the current day in the results DataFrame
         self.results.loc[tdy] = [
             self.portfolio_value, self.cash, self.total_value,
-            daily_return, total_return, annualized_return, annualized_volatility, sr,
-            drawdown, max_drawdown] + [item for tup in bench for item in tup]
+            daily_return_float,
+            total_return_float,
+            annualized_return_float,
+            annualized_volatility_float,
+            sharpe_ratio_float,
+            drawdown_float,
+            max_drawdown_float,
+        ] + [item for tup in benchmark_metric_list for item in tup]
 
     # finish computations and extras -> should be implemented in the subclass
     def finalize(self, current_data: pd.DataFrame):
@@ -598,6 +745,8 @@ class Strategy(ABC):
         self._transactions.loc[len(self._transactions)] = [
             trade_id, bar, asset, amount, price, total_value, order_id, commission
         ]
+        position_amount_float = float(self._position_amount_map.get(asset, 0.0)) + float(amount)
+        self._position_amount_map[asset] = position_amount_float
 
     def get_transactions(self, bar=None):
         """
@@ -640,6 +789,8 @@ class Strategy(ABC):
         - the net sum of all transactions related to the given asset.
         a positive value indicates a long position, while a negative value indicates a short position.
         """
+        if hasattr(self, '_position_amount_map'):
+            return float(self._position_amount_map.get(asset, 0.0))
         return self._transactions[self._transactions['asset'] == asset]['amount'].sum()
 
     def get_positions(self):
@@ -649,6 +800,10 @@ class Strategy(ABC):
         returns:
         - a Series where the index is the asset and the value is the net number of shares held.
         """
+        if hasattr(self, '_position_amount_map'):
+            if len(self._position_amount_map) == 0:
+                return pd.Series(dtype=float)
+            return pd.Series(self._position_amount_map, dtype=float)
         return self._transactions[['asset', 'amount']].groupby('asset').sum()['amount']
     # ------------------------------------------ 4 - DATA ACCESS CONTROL ------------------------------------------ #
     # data restriction to prevent look-ahead bias
@@ -736,6 +891,8 @@ class Strategy(ABC):
         """
         returns the total portfolio value from the previous day or the initial capital if none exist
         """
+        if hasattr(self, '_total_value_history_list') and len(self._total_value_history_list) > 0:
+            return self._total_value_history_list[-1]
         if self.num_days == 0:
             return self._capital_base
         return self.results.loc[self.results.index[-1], 'total_value']

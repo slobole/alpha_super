@@ -45,22 +45,48 @@ The second level contains the associated price data and features (e.g., open, hi
 At a minimum, each symbol must include OHLC (Open, High, Low, Close) prices to ensure the strategy has essential market data.
 """
 
+from time import perf_counter
 from tqdm import tqdm
 import pandas as pd
 from alpha.engine.strategy import Strategy
 
 
-def run_daily(strategy: Strategy, pricing_data: pd.DataFrame, calendar: pd.DatetimeIndex = None, 
-              show_progress: bool = True):
+def run_daily(
+    strategy: Strategy,
+    pricing_data: pd.DataFrame,
+    calendar: pd.DatetimeIndex = None,
+    show_progress: bool = True,
+    show_signal_progress_bool: bool = True,
+    audit_override_bool: bool | None = False,
+    audit_sample_size_int: int | None = None,
+):
     if calendar is None:
         calendar = pricing_data.index # use pricing data index if no custom calendar is provided
 
+    strategy.show_signal_progress_bool = show_signal_progress_bool
+    strategy.show_audit_progress_bool = show_signal_progress_bool
+
     # 1. compute trading signals for the entire dataset at the start of the simulation.
     # in backtests, signals are typically precomputed to avoid recalculating them on every iteration.
-    print('precomputing signals...')
+    print('signal precompute...')
+    signal_start_float = perf_counter()
     full_data = strategy.compute_signals(pricing_data)
-    if strategy.enable_signal_audit:
-        strategy.audit_signals(pricing_data, full_data)
+    signal_elapsed_float = perf_counter() - signal_start_float
+    print(f'signal precompute completed in {signal_elapsed_float:.2f}s')
+
+    audit_enabled_bool = strategy.enable_signal_audit if audit_override_bool is None else audit_override_bool
+    if audit_enabled_bool:
+        print('signal audit...')
+        audit_start_float = perf_counter()
+        strategy.audit_signals(
+            pricing_data,
+            full_data,
+            sample_size=audit_sample_size_int,
+        )
+        audit_elapsed_float = perf_counter() - audit_start_float
+        print(f'signal audit completed in {audit_elapsed_float:.2f}s')
+    else:
+        print('signal audit skipped.')
 
     # set the initial 'previous_bar' if a prior data point exists, ensuring continuity in calculations.
     # this ensures that the first iteration has a valid previous bar for reference.
@@ -68,7 +94,7 @@ def run_daily(strategy: Strategy, pricing_data: pd.DataFrame, calendar: pd.Datet
         strategy.previous_bar = pricing_data.index[pricing_data.index.get_loc(calendar[0]) - 1]
 
     # initialize progress tracking
-    print('starting backtest...')
+    print('backtest loop...')
     pbar = tqdm(calendar, desc="backtest") if show_progress else calendar
 
     # 2. iterate through the calendar, processing each bar in the pricing data.

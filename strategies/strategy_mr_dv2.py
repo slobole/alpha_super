@@ -1,12 +1,12 @@
-import pandas as pd
-import talib
+﻿import pandas as pd
 
 from IPython.display import display
+import talib
 from collections import defaultdict
 from typing import List
 from alpha.engine.strategy import Strategy
 from alpha.engine.backtest import run_daily
-from alpha.engine.indicators import dv2_indicator
+from alpha.indicators import dv2_indicator
 from data.norgate_loader import build_index_constituent_matrix, load_raw_prices
 
 
@@ -35,7 +35,7 @@ class DVO2Strategy(Strategy):
 
             feature_cols[(symbol, 'p126d_return')] = close / close.shift(126) - 1
             feature_cols[(symbol, 'natr')] = talib.NATR(high, low, close, 14)
-            feature_cols[(symbol, 'dv2')] = dv2_indicator(close, high, low, 126)
+            feature_cols[(symbol, 'dv2')] = dv2_indicator(close, high, low, length_int=126)
             feature_cols[(symbol, 'sma_200')] = close.rolling(200).mean()
 
         if not feature_cols:
@@ -121,7 +121,7 @@ if __name__ == "__main__":
     index_symbols, universe_df = build_index_constituent_matrix(indexname='S&P 500')
     pricing_data = get_prices(index_symbols, benchmarks, start_date='1998-01-01', end_date=None)
     ...
-    sa = DVO2Strategy(name='DVO2Strategy', benchmarks=benchmarks, capital_base=100_000, slippage=0.0001,
+    sa = DVO2Strategy(name='strategy_mr_dv2', benchmarks=benchmarks, capital_base=100_000, slippage=0.0001,
                       commission_per_share=0.005, commission_minimum=1.0)
     sa.universe_df = universe_df
     calendar = pricing_data.index
@@ -137,3 +137,4 @@ if __name__ == "__main__":
     display(sa.summary_trades)
     from alpha.engine.report import save_results
     save_results(sa)
+
