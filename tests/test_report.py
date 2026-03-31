@@ -1,5 +1,7 @@
 import unittest
+import tempfile
 from unittest import mock
+from pathlib import Path
 
 import matplotlib
 matplotlib.use('Agg')
@@ -11,12 +13,17 @@ from alpha.engine.report import (
     _DAILY_RETURN_HISTOGRAM_BIN_COUNT_INT,
     _build_daily_return_distribution_html,
     _build_html,
+    _build_portfolio_html,
     _corr_color,
     _daily_return_histogram_b64,
     _format_summary,
     _prepare_daily_return_distribution_dict,
+    _prepare_trade_distribution_dict,
     _ret_color,
+    _trade_return_histogram_b64,
+    save_results,
 )
+from alpha.engine.portfolio import Portfolio
 from alpha.engine.strategy import Strategy
 from alpha.engine.theme import SEABORN_DEEP_COLOR_LIST, SIGNATURE_PALETTE_DICT, blend_hex_color_str
 
@@ -75,6 +82,27 @@ def make_strategy(daily_returns_list: list[float]) -> DummyStrategy:
     return strategy
 
 
+def make_trade_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            'return': [0.02, -0.03, 0.015, -0.01],
+            'duration': ['2 days', '5 days', '1 days', '3 days'],
+        }
+    )
+
+
+def make_portfolio() -> Portfolio:
+    strategy_a = make_strategy([0.0, 0.01, -0.02, 0.0, 0.03, -0.01])
+    strategy_a.name = 'PodA'
+    strategy_b = make_strategy([0.0, -0.01, 0.02, 0.01, -0.01, 0.02])
+    strategy_b.name = 'PodB'
+    return Portfolio(
+        strategies=[strategy_a, strategy_b],
+        weights=[0.4, 0.6],
+        capital_base=100_000.0,
+    )
+
+
 class ReportFormattingTests(unittest.TestCase):
     def test_format_summary_marks_sharpe_ratio_row(self):
         summary_df = pd.DataFrame(
@@ -121,7 +149,7 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertIn('<h2>Monthly Returns</h2>', report_html_str)
         self.assertIn('<h2>Trade Statistics</h2>', report_html_str)
         self.assertIn('<h2>Closed Trades</h2>', report_html_str)
-        self.assertIn('<h2>All Transactions</h2>', report_html_str)
+        self.assertNotIn('<h2>All Transactions</h2>', report_html_str)
         self.assertLess(trade_statistics_idx_int, daily_distribution_idx_int)
         self.assertLess(daily_distribution_idx_int, closed_trades_idx_int)
 
@@ -134,6 +162,55 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertIn(f'--color-page: {SIGNATURE_PALETTE_DICT["page"]};', report_html_str)
         self.assertIn('font-family: "Segoe UI", Arial, sans-serif;', report_html_str)
         self.assertIn('box-shadow: none;', report_html_str)
+
+    def test_save_results_writes_transactions_csv(self):
+        strategy = make_strategy([0.0, 0.01, -0.02, 0.0, 0.03, -0.01])
+        strategy._transactions = pd.DataFrame(
+            [
+                {
+                    'trade_id': 1,
+                    'bar': pd.Timestamp('2024-01-03'),
+                    'asset': 'AAA',
+                    'amount': 10,
+                    'price': 101.5,
+                    'total_value': 1015.0,
+                    'order_id': 11,
+                    'commission': 1.0,
+                },
+                {
+                    'trade_id': 2,
+                    'bar': pd.Timestamp('2024-01-04'),
+                    'asset': 'BBB',
+                    'amount': -5,
+                    'price': 99.0,
+                    'total_value': -495.0,
+                    'order_id': 12,
+                    'commission': 1.0,
+                },
+            ]
+        )
+
+        def write_fake_chart(*, save_to):
+            save_to.write(b'fake-chart-bytes')
+
+        strategy.plot = mock.Mock(side_effect=write_fake_chart)
+        strategy.to_pickle = mock.Mock(side_effect=lambda path: Path(path).write_bytes(b'pickle-bytes'))
+
+        with tempfile.TemporaryDirectory() as temp_dir_str:
+            output_path = save_results(strategy, output_dir=temp_dir_str)
+
+            transaction_csv_path = output_path / 'transactions.csv'
+            report_html_path = output_path / 'report.html'
+
+            self.assertTrue(transaction_csv_path.exists())
+            transaction_df = pd.read_csv(transaction_csv_path)
+            self.assertEqual(len(transaction_df), 2)
+            self.assertListEqual(list(transaction_df.columns), list(strategy._transactions.columns))
+            self.assertEqual(transaction_df.loc[0, 'asset'], 'AAA')
+            self.assertEqual(int(transaction_df.loc[1, 'amount']), -5)
+
+            report_html_str = report_html_path.read_text(encoding='utf-8')
+            self.assertNotIn('<h2>All Transactions</h2>', report_html_str)
 
     def test_daily_return_histogram_uses_60_equal_width_bins(self):
         strategy = make_strategy([0.0, 0.01, -0.02, 0.0, 0.03, -0.01])
@@ -161,6 +238,21 @@ class ReportFormattingTests(unittest.TestCase):
             if 'color' in call_args.kwargs
         ]
         self.assertIn(SEABORN_DEEP_COLOR_LIST[0], hist_color_list)
+
+    def test_trade_return_histogram_uses_signature_palette(self):
+        distribution_dict = _prepare_trade_distribution_dict(make_trade_df())
+
+        with mock.patch('matplotlib.axes._axes.Axes.hist', autospec=True, wraps=maxes.Axes.hist) as hist_mock_obj:
+            histogram_b64 = _trade_return_histogram_b64(distribution_dict)
+
+        self.assertIsInstance(histogram_b64, str)
+        hist_color_list = [
+            call_args.kwargs['color']
+            for call_args in hist_mock_obj.call_args_list
+            if 'color' in call_args.kwargs
+        ]
+        self.assertIn(SEABORN_DEEP_COLOR_LIST[0], hist_color_list)
+        self.assertIn(SEABORN_DEEP_COLOR_LIST[1], hist_color_list)
 
     def test_signature_color_helpers_follow_palette(self):
         positive_style_str = _ret_color(0.15)
@@ -202,6 +294,21 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertIn('Daily Return Distribution', distribution_html_str)
         self.assertIn('Not enough realized daily return variation', distribution_html_str)
         self.assertNotIn('data:image/png;base64,', distribution_html_str)
+
+    def test_build_portfolio_html_includes_pod_drift_sections_and_labels(self):
+        portfolio = make_portfolio()
+
+        report_html_str = _build_portfolio_html(portfolio, chart_b64='portfolio-chart-b64')
+
+        self.assertIn('<h2>Pod Drift Diagnostics</h2>', report_html_str)
+        self.assertIn('Actual Sleeve Weights', report_html_str)
+        self.assertIn('Sleeve Equity Contributions', report_html_str)
+        self.assertIn('Rolling 63-Day Pairwise Correlations', report_html_str)
+        self.assertIn('Rolling 63-Day Diversification Ratio', report_html_str)
+        self.assertIn('<h2>Pooled Pod Trade Statistics</h2>', report_html_str)
+        self.assertIn('Allocated Sleeve Summary', report_html_str)
+        self.assertIn('Standalone Pod Summary', report_html_str)
+        self.assertIn('Common Overlap Window', report_html_str)
 
 
 if __name__ == '__main__':

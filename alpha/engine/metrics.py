@@ -91,7 +91,7 @@ def generate_trades(transactions: pd.DataFrame) -> pd.DataFrame:
     f = {
         'bar': ['min', 'max'],  # get the start and end bars (timestamps)
         'asset': concat_str,  # combine asset names into a single string
-        'total_value': ['max', 'sum'],  # capture max capital and total profit
+        'total_value': ['first', 'sum'],  # capture entry notional and total profit
         'amount': 'sum',  # sum the trade amount to determine if trade is closed
         'commission': 'sum'  # total commission for the trade
     }
@@ -100,6 +100,10 @@ def generate_trades(transactions: pd.DataFrame) -> pd.DataFrame:
     trades = trades.groupby('trade_id').agg(f)
     # rename columns for clarity
     trades.columns = ['start', 'end', 'assets', 'capital', 'profit', 'amount', 'commission']
+    # Use absolute entry notional so long and short trades share the same capital base:
+    #
+    # capital_i = |total_value_{i, first transaction}|
+    trades['capital'] = trades['capital'].abs()
     # convert profit values to negative (since sell transactions have negative total_value)
     trades['profit'] = -trades['profit'] - trades['commission']
     # filter only closed trades for final output
@@ -270,21 +274,144 @@ def generate_overall_metrics(total_value: pd.Series, trades: pd.DataFrame = None
 
 def cross_correlation_matrix(daily_rets: pd.DataFrame) -> pd.DataFrame:
     """Compute pairwise correlation matrix of strategy daily returns."""
+    if len(daily_rets) < 2:
+        correlation_df = pd.DataFrame(
+            np.nan,
+            index=daily_rets.columns,
+            columns=daily_rets.columns,
+            dtype=float,
+        )
+        for column_str in correlation_df.columns:
+            correlation_df.loc[column_str, column_str] = 1.0
+        return correlation_df
     return daily_rets.corr()
 
 
 def diversification_ratio(daily_rets: pd.DataFrame, weights: list[float]) -> float:
     """Compute the diversification ratio of a weighted portfolio.
 
+    Formula:
+
+        diversification_ratio_float
+            = (sum_i w_i * sigma_i) / sqrt(w' * Sigma * w)
+
+    where:
+
+        sigma_i = std(r_{i,t})
+        Sigma = Cov(r_t)
+
     Ratio > 1.0 means diversification benefit exists.
     Ratio = 1.0 means perfect correlation (no benefit).
     """
-    w = np.array(weights)
-    sigmas = daily_rets.std().values
-    weighted_sum_vol = (w * sigmas).sum()
-    cov = daily_rets.cov().values
-    port_vol = np.sqrt(w @ cov @ w)
-    return weighted_sum_vol / port_vol if port_vol > 0 else np.nan
+    if len(daily_rets) < 2:
+        return np.nan
+
+    weight_vec = np.asarray(weights, dtype=float)
+    weight_sum_float = float(weight_vec.sum())
+    if weight_sum_float <= 0.0:
+        return np.nan
+    if not np.isclose(weight_sum_float, 1.0, atol=1e-12):
+        weight_vec = weight_vec / weight_sum_float
+
+    sigma_vec = daily_rets.std().to_numpy(dtype=float)
+    weighted_sum_vol_float = float((weight_vec * sigma_vec).sum())
+    cov_matrix = daily_rets.cov().to_numpy(dtype=float)
+    portfolio_vol_float = float(np.sqrt(weight_vec @ cov_matrix @ weight_vec))
+    return weighted_sum_vol_float / portfolio_vol_float if portfolio_vol_float > 0.0 else np.nan
+
+
+def rolling_diversification_ratio(
+    daily_return_df: pd.DataFrame,
+    weight_df: pd.DataFrame,
+    window_int: int = 63,
+) -> pd.Series:
+    """
+    Compute a rolling diversification ratio with time-varying pod weights.
+
+    Formula at date t:
+
+        rolling_div_ratio_t
+            = (sum_i w_{i,t} * sigma_{i,t}^{(L)}) / sqrt(w_t' * Sigma_t^{(L)} * w_t)
+
+    where:
+
+        sigma_{i,t}^{(L)} = std(r_{i, t-L+1:t})
+        Sigma_t^{(L)} = Cov(r_{t-L+1:t})
+
+    `weight_df` should contain realized pod drift weights aligned by date.
+    """
+    if window_int <= 0:
+        raise ValueError(f"window_int must be positive, got {window_int}.")
+
+    common_index = daily_return_df.index.intersection(weight_df.index)
+    common_column_list = [
+        column_str for column_str in daily_return_df.columns
+        if column_str in weight_df.columns
+    ]
+    if len(common_index) == 0 or len(common_column_list) == 0:
+        return pd.Series(dtype=float, name='rolling_diversification_ratio_ser')
+
+    aligned_return_df = daily_return_df.loc[common_index, common_column_list].astype(float)
+    aligned_weight_df = weight_df.loc[common_index, common_column_list].astype(float)
+    rolling_diversification_ratio_ser = pd.Series(
+        np.nan,
+        index=common_index,
+        dtype=float,
+        name='rolling_diversification_ratio_ser',
+    )
+
+    for end_idx_int in range(window_int - 1, len(common_index)):
+        window_index = common_index[end_idx_int - window_int + 1:end_idx_int + 1]
+        window_return_df = aligned_return_df.loc[window_index]
+        cov_matrix = window_return_df.cov().to_numpy(dtype=float)
+        sigma_vec = np.sqrt(np.diag(cov_matrix))
+
+        weight_vec = aligned_weight_df.loc[common_index[end_idx_int]].to_numpy(dtype=float)
+        weight_sum_float = float(weight_vec.sum())
+        if weight_sum_float <= 0.0:
+            continue
+        if not np.isclose(weight_sum_float, 1.0, atol=1e-12):
+            weight_vec = weight_vec / weight_sum_float
+
+        weighted_sum_vol_float = float((weight_vec * sigma_vec).sum())
+        portfolio_vol_float = float(np.sqrt(weight_vec @ cov_matrix @ weight_vec))
+        if portfolio_vol_float > 0.0:
+            rolling_diversification_ratio_ser.iloc[end_idx_int] = (
+                weighted_sum_vol_float / portfolio_vol_float
+            )
+
+    return rolling_diversification_ratio_ser
+
+
+def rolling_pairwise_correlation(
+    daily_return_df: pd.DataFrame,
+    window_int: int = 63,
+) -> pd.DataFrame:
+    """
+    Compute rolling pairwise correlations for every pod pair.
+
+    Formula for pods i and j at date t:
+
+        rho_{i,j,t}^{(L)} = Corr(r_{i, t-L+1:t}, r_{j, t-L+1:t})
+    """
+    if window_int <= 0:
+        raise ValueError(f"window_int must be positive, got {window_int}.")
+
+    if daily_return_df.shape[1] < 2:
+        return pd.DataFrame(index=daily_return_df.index)
+
+    rolling_corr_dict: dict[str, pd.Series] = {}
+    column_list = list(daily_return_df.columns)
+    for left_idx_int, left_column_str in enumerate(column_list):
+        for right_column_str in column_list[left_idx_int + 1:]:
+            pair_label_str = f"{left_column_str} vs {right_column_str}"
+            rolling_corr_dict[pair_label_str] = (
+                daily_return_df[left_column_str]
+                .rolling(window_int)
+                .corr(daily_return_df[right_column_str])
+            )
+
+    return pd.DataFrame(rolling_corr_dict, index=daily_return_df.index)
 
 
 def generate_trades_metrics(all_trades: pd.DataFrame, calendar: pd.DatetimeIndex, unit='days') -> pd.DataFrame:

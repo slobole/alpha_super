@@ -34,6 +34,7 @@ METADATA_FILENAME = 'metadata.json'
 
 _strategy_classes = {}
 _strategy_import_errors = {}
+_legacy_main_symbol_map = {}
 
 
 def _resolve_path(path_like, base_dir: Path) -> Path:
@@ -75,6 +76,11 @@ def _import_strategy_module(module_path: Path):
 
 def _register_strategy_classes_from_module(module) -> list[str]:
     class_names_list = []
+    for attr_name in dir(module):
+        if attr_name.startswith('__'):
+            continue
+        _legacy_main_symbol_map[attr_name] = getattr(module, attr_name)
+
     for attr_name in dir(module):
         obj = getattr(module, attr_name)
         if isinstance(obj, type) and issubclass(obj, Strategy) and obj is not Strategy:
@@ -131,8 +137,11 @@ class _StrategyUnpickler(pickle.Unpickler):
     """Unpickler that remaps legacy __main__.* strategy classes."""
 
     def find_class(self, module, name):
-        if module == '__main__' and name in _strategy_classes:
-            return _strategy_classes[name]
+        if module == '__main__':
+            if name in _strategy_classes:
+                return _strategy_classes[name]
+            if name in _legacy_main_symbol_map:
+                return _legacy_main_symbol_map[name]
         return super().find_class(module, name)
 
 

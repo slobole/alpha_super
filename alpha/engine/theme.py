@@ -45,6 +45,23 @@ SIGNATURE_PALETTE_DICT: dict[str, object] = {
     'shadow_rgba': 'rgba(0, 0, 0, 0.0)',
 }
 
+SIGNATURE_ASSET_COLOR_DICT: dict[str, str] = {
+    'TLT': SEABORN_DEEP_COLOR_LIST[0],
+    'GLD': SEABORN_DEEP_COLOR_LIST[1],
+    'DBC': SEABORN_DEEP_COLOR_LIST[2],
+    'UUP': SEABORN_DEEP_COLOR_LIST[3],
+    'SPY': SEABORN_DEEP_COLOR_LIST[4],
+    'UPRO': SEABORN_DEEP_COLOR_LIST[5],
+    'BTAL': SEABORN_DEEP_COLOR_LIST[6],
+    'DEFAULT': SEABORN_DEEP_COLOR_LIST[7],
+}
+
+
+def get_signature_palette_dict() -> dict[str, object]:
+    signature_palette_dict = dict(SIGNATURE_PALETTE_DICT)
+    signature_palette_dict['overlay_cycle'] = list(SIGNATURE_PALETTE_DICT['overlay_cycle'])
+    return signature_palette_dict
+
 
 def build_signature_rcparams(to_web_bool: bool) -> dict[str, object]:
     base_style_dict = dict(plt.style.library.get('seaborn-v0_8-darkgrid', {}))
@@ -94,18 +111,20 @@ def build_plot_color_dict(colors=None) -> dict[str, object]:
 
 
 def apply_signature_axis_style(axis_obj, vertical_line_iterable: Iterable[object] = ()) -> None:
+    signature_palette_dict = SIGNATURE_PALETTE_DICT
+
     for side_name_str in ('top', 'right', 'left', 'bottom'):
         axis_obj.spines[side_name_str].set_visible(True)
-        axis_obj.spines[side_name_str].set_color(SIGNATURE_PALETTE_DICT['axes_border'])
+        axis_obj.spines[side_name_str].set_color(signature_palette_dict['axes_border'])
         axis_obj.spines[side_name_str].set_linewidth(1.0)
 
-    axis_obj.tick_params(axis='x', labelsize=8, colors=SIGNATURE_PALETTE_DICT['ink'])
-    axis_obj.tick_params(axis='y', labelsize=8, colors=SIGNATURE_PALETTE_DICT['ink'])
+    axis_obj.tick_params(axis='x', labelsize=8, colors=signature_palette_dict['ink'])
+    axis_obj.tick_params(axis='y', labelsize=8, colors=signature_palette_dict['ink'])
     axis_obj.grid(
         which='major',
         linestyle='-',
         linewidth=1.0,
-        color=SIGNATURE_PALETTE_DICT['grid'],
+        color=signature_palette_dict['grid'],
         alpha=1.0,
     )
     axis_obj.set_axisbelow(True)
@@ -115,7 +134,7 @@ def apply_signature_axis_style(axis_obj, vertical_line_iterable: Iterable[object
     for vertical_line_obj in vertical_line_iterable:
         axis_obj.axvline(
             vertical_line_obj,
-            color=SIGNATURE_PALETTE_DICT['vertical_line'],
+            color=signature_palette_dict['vertical_line'],
             linestyle='--',
             linewidth=0.9,
             alpha=0.9,
@@ -144,20 +163,21 @@ def blend_hex_color_str(
 
 
 def build_report_css() -> str:
+    signature_palette_dict = SIGNATURE_PALETTE_DICT
     return f'''
 :root {{
-    --color-ink: {SIGNATURE_PALETTE_DICT["ink"]};
-    --color-page: {SIGNATURE_PALETTE_DICT["page"]};
-    --color-panel: {SIGNATURE_PALETTE_DICT["panel"]};
-    --color-neutral: {SIGNATURE_PALETTE_DICT["neutral"]};
-    --color-grid: {SIGNATURE_PALETTE_DICT["grid"]};
-    --color-border: {SIGNATURE_PALETTE_DICT["border"]};
-    --color-muted: {SIGNATURE_PALETTE_DICT["muted"]};
-    --color-strategy: {SIGNATURE_PALETTE_DICT["strategy"]};
-    --color-strategy-dark: {SIGNATURE_PALETTE_DICT["strategy_dark"]};
-    --color-benchmark: {SIGNATURE_PALETTE_DICT["benchmark"]};
-    --color-benchmark-dark: {SIGNATURE_PALETTE_DICT["benchmark_dark"]};
-    --color-shadow: {SIGNATURE_PALETTE_DICT["shadow_rgba"]};
+    --color-ink: {signature_palette_dict["ink"]};
+    --color-page: {signature_palette_dict["page"]};
+    --color-panel: {signature_palette_dict["panel"]};
+    --color-neutral: {signature_palette_dict["neutral"]};
+    --color-grid: {signature_palette_dict["grid"]};
+    --color-border: {signature_palette_dict["border"]};
+    --color-muted: {signature_palette_dict["muted"]};
+    --color-strategy: {signature_palette_dict["strategy"]};
+    --color-strategy-dark: {signature_palette_dict["strategy_dark"]};
+    --color-benchmark: {signature_palette_dict["benchmark"]};
+    --color-benchmark-dark: {signature_palette_dict["benchmark_dark"]};
+    --color-shadow: {signature_palette_dict["shadow_rgba"]};
 }}
 body {{
     font-family: "Segoe UI", Arial, sans-serif;
@@ -168,6 +188,7 @@ body {{
     line-height: 1.4;
 }}
 h1, h2, h3 {{
+    font-family: "Segoe UI", Arial, sans-serif;
     color: var(--color-ink);
 }}
 h1 {{

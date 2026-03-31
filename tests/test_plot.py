@@ -240,9 +240,10 @@ class PlotTests(unittest.TestCase):
         ]
 
         self.assertEqual(len(overlay_line_list), 2)
-        self.assertTrue(all(line.get_alpha() <= 0.5 for line in overlay_line_list))
+        self.assertTrue(all(line.get_alpha() <= 0.25 for line in overlay_line_list))
         self.assertIn('strategy_total_return_label', {text.get_gid() for text in equity_ax.texts})
 
 
 if __name__ == '__main__':
     unittest.main()
+

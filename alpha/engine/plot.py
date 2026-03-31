@@ -186,7 +186,10 @@ def plot(
         equity_ax.yaxis.set_minor_formatter(FuncFormatter(percentage_minor_formatter))
         equity_ax.tick_params(axis='x', labelbottom=False)
         equity_ax.margins(x=_PLOT_X_MARGIN_FLOAT)
-        equity_ax.legend(loc='upper left', frameon=True)
+        equity_ax.legend(
+            loc='upper left',
+            frameon=True,
+        )
 
         if len(ylims) > 0:
             equity_ax.set_ylim(ylims)

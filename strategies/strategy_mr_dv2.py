@@ -104,7 +104,7 @@ class DVO2Strategy(Strategy):
         df = df[
             (df['dv2'] < 10) &
             (df['Close'] > df['sma_200']) &
-            (df['p126d_return'] > 0)
+            (df['p126d_return'] > 0.05)
         ].sort_values('natr', ascending=False)
 
         # get the list of stocks in the universe on the previous trading day

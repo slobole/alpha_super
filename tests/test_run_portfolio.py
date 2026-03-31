@@ -3,6 +3,7 @@ import importlib.util
 import json
 import pickle
 import shutil
+import sys
 import unittest
 import uuid
 from pathlib import Path
@@ -170,3 +171,98 @@ class RunPortfolioTests(unittest.TestCase):
             self.assertAlmostEqual(portfolio.pod_info_list[0]['allocated_capital'], 40000.0)
             self.assertAlmostEqual(portfolio.pod_info_list[1]['allocated_capital'], 60000.0)
 
+    def test_load_strategy_pickle_supports_legacy_main_helper_symbols(self):
+        with temporary_test_dir() as temp_dir:
+            module_path = temp_dir / 'legacy_strategy_module.py'
+            module_path.write_text(
+                '\n'.join([
+                    'from collections import defaultdict',
+                    'import pandas as pd',
+                    'from alpha.engine.strategy import Strategy',
+                    '',
+                    'def default_trade_id_int():',
+                    '    return -1',
+                    '',
+                    'class LegacyHelperStrategy(Strategy):',
+                    '    def __init__(self, name, benchmarks, capital_base=100.0, slippage=0.0, commission_per_share=0.0, commission_minimum=0.0):',
+                    '        super().__init__(name=name, benchmarks=benchmarks, capital_base=capital_base, slippage=slippage, commission_per_share=commission_per_share, commission_minimum=commission_minimum)',
+                    '        self.current_trade_map = defaultdict(default_trade_id_int)',
+                    '',
+                    '    def compute_signals(self, pricing_data: pd.DataFrame) -> pd.DataFrame:',
+                    '        return pricing_data',
+                    '',
+                    '    def iterate(self, data: pd.DataFrame, close: pd.DataFrame, open_prices: pd.Series):',
+                    '        return None',
+                ]),
+                encoding='utf-8',
+            )
+
+            spec = importlib.util.spec_from_file_location('legacy_strategy_module', module_path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules['legacy_strategy_module'] = module
+            spec.loader.exec_module(module)
+
+            module.LegacyHelperStrategy.__module__ = '__main__'
+            module.default_trade_id_int.__module__ = '__main__'
+
+            main_module = sys.modules['__main__']
+            previous_class = getattr(main_module, 'LegacyHelperStrategy', None)
+            previous_helper = getattr(main_module, 'default_trade_id_int', None)
+            setattr(main_module, 'LegacyHelperStrategy', module.LegacyHelperStrategy)
+            setattr(main_module, 'default_trade_id_int', module.default_trade_id_int)
+
+            try:
+                strategy = module.LegacyHelperStrategy(
+                    name='LegacyStrategy',
+                    benchmarks=[],
+                    capital_base=100.0,
+                    slippage=0.0,
+                    commission_per_share=0.0,
+                    commission_minimum=0.0,
+                )
+                dates_index = pd.to_datetime(['2024-01-30', '2024-01-31', '2024-02-03'])
+                daily_returns_ser = pd.Series([0.0, 0.01, -0.01], index=dates_index, dtype=float)
+                total_value_ser = 100.0 * (1.0 + daily_returns_ser).cumprod()
+                strategy.results = pd.DataFrame({
+                    'daily_returns': daily_returns_ser,
+                    'total_value': total_value_ser,
+                    'portfolio_value': total_value_ser,
+                }, index=dates_index)
+                strategy.summary = pd.DataFrame()
+                strategy.summary_trades = pd.DataFrame()
+
+                run_dir = temp_dir / strategy.name / '2026-03-09_000000'
+                run_dir.mkdir(parents=True, exist_ok=True)
+                pickle_path = run_dir / f'{strategy.name}.pkl'
+                with pickle_path.open('wb') as file_obj:
+                    pickle.dump(strategy, file_obj)
+
+                metadata_dict = {
+                    'artifact_type': 'strategy',
+                    'strategy_name': strategy.name,
+                    'class_name': 'LegacyHelperStrategy',
+                    'class_module': '__main__',
+                    'class_file': str(module_path.resolve()),
+                    'capital_base': float(strategy._capital_base),
+                    'pickle_path': str(pickle_path.resolve()),
+                    'saved_at': '2026-03-09T00:00:00',
+                }
+                (run_dir / 'metadata.json').write_text(json.dumps(metadata_dict, indent=2), encoding='utf-8')
+
+                loaded_strategy, metadata = self.run_portfolio.load_strategy_pickle(
+                    pickle_path,
+                    expected_strategy_name='LegacyStrategy',
+                )
+
+                self.assertEqual(metadata['strategy_name'], 'LegacyStrategy')
+                self.assertEqual(loaded_strategy.current_trade_map['missing'], -1)
+            finally:
+                if previous_class is None:
+                    delattr(main_module, 'LegacyHelperStrategy')
+                else:
+                    setattr(main_module, 'LegacyHelperStrategy', previous_class)
+
+                if previous_helper is None:
+                    delattr(main_module, 'default_trade_id_int')
+                else:
+                    setattr(main_module, 'default_trade_id_int', previous_helper)
