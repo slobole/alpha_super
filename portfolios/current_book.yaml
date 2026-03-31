@@ -1,0 +1,19 @@
+name: CurrentBook
+capital: 50000
+
+pods:
+  - strategy: strategy_taa_df_upro_btal
+    weight: 0.45
+
+  - strategy: strategy_mr_qpi_ibs_rsi_exit
+    weight: 0.15
+
+  - strategy: strategy_mr_dv2
+    weight: 0.15
+
+  - strategy: strategy_mo_atr_normalized_ndx
+    weight: 0.15
+
+  - strategy: strategy_seasonality
+    weight: 0.1
+

@@ -1,8 +1,21 @@
-import pandas as pd
+from __future__ import annotations
+
 import numpy as np
-import matplotlib.pyplot as plt
+import pandas as pd
 import matplotlib.gridspec as gridspec
+import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
+
+from alpha.engine.theme import (
+    SIGNATURE_PALETTE_DICT,
+    apply_signature_axis_style,
+    build_plot_color_dict,
+    build_signature_rcparams,
+)
+
+
+_PLOT_X_MARGIN_FLOAT = 0.008
+_END_LABEL_X_OFFSET_POINTS_INT = -4
 
 
 def plot(
@@ -24,252 +37,448 @@ def plot(
         use_log_scale=True
 ):
     """
-    plots strategy and benchmark performance, drawdowns, and annual returns.
+    Plot strategy and benchmark performance, drawdowns, and annual returns.
 
-    parameters:
-    - strategy_total_value: Series representing the strategy's cumulative returns.
-    - strategy_drawdown: Series representing the strategy's drawdowns (optional).
-    - benchmark_total_value: Series representing the benchmark's cumulative returns (optional).
-    - benchmark_drawdown: Series representing the benchmark's drawdowns (optional).
-    - benchmark_label: Label for the benchmark in the plot.
-    - strategy_label: Label for the strategy in the plot.
-    - additional_returns: DataFrame of additional return series to plot (optional).
-    - additional_drawdowns: DataFrame of additional drawdown series to plot (optional).
-    - save_to: File path to save the plot (optional).
-    - to_web: Whether to optimize the image for web display (default: True).
-    - dpi: Resolution of the saved image (default: 150).
-    - alpha_additional: Transparency level for additional return lines (default: 0.2).
-    - colors: Tuple of two colors for strategy and benchmark plots (optional).
-    - vertical_lines: List of timestamps for vertical lines (optional).
-    - ylims: Custom y-axis limits for the total return plot (optional).
-    - use_log_scale: Whether to use a logarithmic scale for total returns (default: True).
+    Formulas preserved by this visualization layer:
+
+    normalized_equity_ser_t = total_value_t / total_value_0
+
+    total_return_float = total_value_T / total_value_0 - 1
+
+    drawdown_ser_t = total_value_t / max(total_value_1, ..., total_value_t) - 1
     """
+    strategy_total_value_ser = pd.Series(strategy_total_value, copy=False).astype(float)
+    benchmark_total_value_ser = (
+        pd.Series(benchmark_total_value, copy=False).astype(float)
+        if benchmark_total_value is not None else None
+    )
+    additional_returns_df = additional_returns.copy() if additional_returns is not None else None
+    additional_drawdowns_df = additional_drawdowns.copy() if additional_drawdowns is not None else None
 
-    # Set global plot styles
-    plt.rcParams['font.size'] = 10
-    plt.rcParams['axes.linewidth'] = 0.5
-    plt.rcParams['xtick.major.width'] = 0.5
-    plt.rcParams['ytick.major.width'] = 0.5
+    plot_style_dict = build_signature_rcparams(to_web_bool=to_web)
+    plot_color_dict = build_plot_color_dict(colors)
+    benchmark_color_str = plot_color_dict['benchmark']
+    strategy_color_str = plot_color_dict['strategy']
+    additional_color_map: dict[str, str] = {}
 
-    # Define colors for strategy and benchmark
-    if colors is None:
-        color1 = '#6833C9'  # Default strategy color
-        color2 = '#FFA870'
-        color2 = "#000000"  # Default benchmark color
+    strategy_equity_ser = strategy_total_value_ser / strategy_total_value_ser.iloc[0]
+    strategy_peak_equity_ser = strategy_equity_ser.cummax()
+    strategy_yearly_return_ser = generate_yearly_returns(strategy_total_value_ser)
+
+    benchmark_equity_ser = None
+    benchmark_peak_equity_ser = None
+    benchmark_yearly_return_ser = None
+    if benchmark_total_value_ser is not None:
+        benchmark_equity_ser = benchmark_total_value_ser / benchmark_total_value_ser.iloc[0]
+        benchmark_peak_equity_ser = benchmark_equity_ser.cummax()
+        benchmark_yearly_return_ser = generate_yearly_returns(benchmark_total_value_ser)
+
+    if strategy_drawdown is None:
+        strategy_drawdown_ser = compute_drawdown(strategy_total_value_ser)
     else:
-        color1, color2 = colors
+        strategy_drawdown_ser = pd.Series(strategy_drawdown, copy=False).astype(float)
 
-    # Create the figure layout with three subplots
-    fig = plt.figure(figsize=(12, 12))
-    outer_gs = gridspec.GridSpec(2, 1, height_ratios=[3, 1], hspace=0.15)
-    inner_gs = gridspec.GridSpecFromSubplotSpec(
-        2, 1, height_ratios=[2, 1],subplot_spec=outer_gs[0], hspace=0.05
+    if benchmark_drawdown is None and benchmark_total_value_ser is not None:
+        benchmark_drawdown_ser = compute_drawdown(benchmark_total_value_ser)
+    elif benchmark_drawdown is not None:
+        benchmark_drawdown_ser = pd.Series(benchmark_drawdown, copy=False).astype(float)
+    else:
+        benchmark_drawdown_ser = None
+
+    if benchmark_yearly_return_ser is not None:
+        annual_return_df = pd.concat(
+            [
+                strategy_yearly_return_ser.rename(strategy_label),
+                benchmark_yearly_return_ser.rename(benchmark_label),
+            ],
+            axis=1,
+        )
+        strategy_yearly_return_ser = annual_return_df[strategy_label]
+        benchmark_yearly_return_ser = annual_return_df[benchmark_label]
+
+    with plt.rc_context(plot_style_dict):
+        figure_obj = plt.figure(figsize=(12, 11.2))
+        outer_gs = gridspec.GridSpec(2, 1, height_ratios=[3, 1], hspace=0.16)
+        inner_gs = gridspec.GridSpecFromSubplotSpec(
+            2, 1, height_ratios=[2, 1], subplot_spec=outer_gs[0], hspace=0.07
+        )
+
+        equity_ax = figure_obj.add_subplot(inner_gs[0])
+        drawdown_ax = figure_obj.add_subplot(inner_gs[1])
+        annual_ax = figure_obj.add_subplot(outer_gs[1])
+
+        benchmark_equity_line_obj = None
+        if benchmark_equity_ser is not None:
+            benchmark_equity_line_obj, = equity_ax.plot(
+                benchmark_equity_ser.index,
+                benchmark_equity_ser,
+                color=benchmark_color_str,
+                linestyle='-',
+                linewidth=0.95,
+                alpha=0.98,
+                label=benchmark_label,
+                zorder=4,
+            )
+            benchmark_equity_line_obj.set_gid('benchmark_equity_line')
+            equity_ax.fill_between(
+                benchmark_equity_ser.index,
+                benchmark_peak_equity_ser,
+                benchmark_equity_ser,
+                where=benchmark_peak_equity_ser > benchmark_equity_ser,
+                color=benchmark_color_str,
+                alpha=0.08,
+                zorder=1,
+            )
+
+        strategy_equity_line_obj, = equity_ax.plot(
+            strategy_equity_ser.index,
+            strategy_equity_ser,
+            color=strategy_color_str,
+            linewidth=1.15,
+            alpha=1.0,
+            label=strategy_label,
+            zorder=5,
+        )
+        strategy_equity_line_obj.set_gid('strategy_equity_line')
+        equity_ax.fill_between(
+            strategy_equity_ser.index,
+            strategy_peak_equity_ser,
+            strategy_equity_ser,
+            where=strategy_peak_equity_ser > strategy_equity_ser,
+            color=strategy_color_str,
+            alpha=0.11,
+            zorder=2,
+        )
+
+        equity_max_float = float(strategy_equity_ser.max())
+        if benchmark_equity_ser is not None:
+            equity_max_float = max(equity_max_float, float(benchmark_equity_ser.max()))
+
+        if additional_returns_df is not None:
+            for column_idx_int, column_name_str in enumerate(additional_returns_df.columns):
+                additional_total_value_ser = pd.Series(
+                    additional_returns_df[column_name_str], copy=False
+                ).astype(float)
+                additional_equity_ser = additional_total_value_ser / additional_total_value_ser.iloc[0]
+                additional_color_str = plot_color_dict['additional_cycle'][
+                    column_idx_int % len(plot_color_dict['additional_cycle'])
+                ]
+
+                additional_equity_line_obj, = equity_ax.plot(
+                    additional_equity_ser.index,
+                    additional_equity_ser,
+                    color=additional_color_str,
+                    linewidth=0.65,
+                    alpha=alpha_additional,
+                    zorder=3,
+                    label='_nolegend_',
+                )
+                additional_equity_line_obj.set_gid(f'additional_equity_line:{column_name_str}')
+                additional_color_map[column_name_str] = additional_color_str
+                equity_max_float = max(equity_max_float, float(additional_equity_ser.max()))
+
+        if use_log_scale:
+            equity_ax.set_yscale('log')
+            _set_equity_ticks(equity_ax, equity_max_float)
+
+        equity_ax.set_ylabel('Total Return (log scale)' if use_log_scale else 'Total Return')
+        equity_ax.yaxis.set_major_formatter(FuncFormatter(percentage_major_formatter))
+        equity_ax.yaxis.set_minor_formatter(FuncFormatter(percentage_minor_formatter))
+        equity_ax.tick_params(axis='x', labelbottom=False)
+        equity_ax.margins(x=_PLOT_X_MARGIN_FLOAT)
+        equity_ax.legend(
+            loc='upper left',
+            frameon=True,
+        )
+
+        if len(ylims) > 0:
+            equity_ax.set_ylim(ylims)
+
+        if benchmark_drawdown_ser is not None:
+            benchmark_drawdown_line_obj, = drawdown_ax.plot(
+                benchmark_drawdown_ser.index,
+                benchmark_drawdown_ser,
+                color=benchmark_color_str,
+                linestyle='-',
+                linewidth=0.8,
+                alpha=0.98,
+                zorder=4,
+            )
+            benchmark_drawdown_line_obj.set_gid('benchmark_drawdown_line')
+            drawdown_ax.fill_between(
+                benchmark_drawdown_ser.index,
+                0.0,
+                benchmark_drawdown_ser,
+                color=benchmark_color_str,
+                alpha=0.10,
+                zorder=1,
+            )
+
+        strategy_drawdown_line_obj, = drawdown_ax.plot(
+            strategy_drawdown_ser.index,
+            strategy_drawdown_ser,
+            color=strategy_color_str,
+            linewidth=0.9,
+            alpha=1.0,
+            zorder=5,
+        )
+        strategy_drawdown_line_obj.set_gid('strategy_drawdown_line')
+        drawdown_ax.fill_between(
+            strategy_drawdown_ser.index,
+            0.0,
+            strategy_drawdown_ser,
+            color=strategy_color_str,
+            alpha=0.13,
+            zorder=2,
+        )
+
+        if additional_drawdowns_df is not None:
+            for column_idx_int, column_name_str in enumerate(additional_drawdowns_df.columns):
+                additional_drawdown_ser = pd.Series(
+                    additional_drawdowns_df[column_name_str], copy=False
+                ).astype(float)
+                additional_drawdown_line_obj, = drawdown_ax.plot(
+                    additional_drawdown_ser.index,
+                    additional_drawdown_ser,
+                    color=additional_color_map.get(
+                        column_name_str,
+                        plot_color_dict['additional_cycle'][
+                            column_idx_int % len(plot_color_dict['additional_cycle'])
+                        ],
+                    ),
+                    linewidth=0.6,
+                    alpha=max(0.12, alpha_additional * 0.8),
+                    zorder=3,
+                )
+                additional_drawdown_line_obj.set_gid(f'additional_drawdown_line:{column_name_str}')
+
+        drawdown_ax.set_ylabel('Drawdown')
+        drawdown_ax.yaxis.set_major_formatter(FuncFormatter(percentage_major_formatter_2))
+        drawdown_ax.tick_params(axis='x', labelbottom=False)
+        drawdown_ax.margins(x=_PLOT_X_MARGIN_FLOAT)
+
+        annual_position_vec = np.arange(len(strategy_yearly_return_ser), dtype=float)
+        has_benchmark_bool = benchmark_yearly_return_ser is not None
+        bar_width_float = 0.34 if has_benchmark_bool else 0.56
+        bar_edge_color_str = SIGNATURE_PALETTE_DICT['bar_edge']
+
+        if has_benchmark_bool:
+            strategy_bar_center_vec = annual_position_vec - bar_width_float / 2.0
+            benchmark_bar_center_vec = annual_position_vec + bar_width_float / 2.0
+        else:
+            strategy_bar_center_vec = annual_position_vec
+            benchmark_bar_center_vec = None
+
+        strategy_bar_container = annual_ax.bar(
+            strategy_bar_center_vec,
+            strategy_yearly_return_ser.to_numpy(),
+            bar_width_float,
+            label=strategy_label,
+            color=strategy_color_str,
+            alpha=0.88,
+            edgecolor=bar_edge_color_str,
+            linewidth=0.55,
+            zorder=3,
+        )
+        for bar_patch in strategy_bar_container.patches:
+            bar_patch.set_gid('strategy_annual_bar')
+
+        if has_benchmark_bool:
+            benchmark_bar_container = annual_ax.bar(
+                benchmark_bar_center_vec,
+                benchmark_yearly_return_ser.to_numpy(),
+                bar_width_float,
+                label=benchmark_label,
+                color=benchmark_color_str,
+                alpha=0.80,
+                edgecolor=bar_edge_color_str,
+                linewidth=0.55,
+                zorder=2,
+            )
+            for bar_patch in benchmark_bar_container.patches:
+                bar_patch.set_gid('benchmark_annual_bar')
+
+        annual_ax.set_ylabel('Annual Return (%)')
+        annual_ax.set_xticks(annual_position_vec)
+        annual_ax.set_xticklabels(strategy_yearly_return_ser.index.year, rotation=90)
+        annual_ax.set_xlim(-0.6, len(strategy_yearly_return_ser) - 0.4)
+        annual_ax.yaxis.set_major_formatter(FuncFormatter(percentage_major_formatter_2))
+
+        for separator_float in np.arange(-0.5, len(strategy_yearly_return_ser) + 0.5, 1.0):
+            annual_ax.axvline(
+                x=separator_float,
+                color=SIGNATURE_PALETTE_DICT['grid'],
+                linewidth=0.7,
+                alpha=0.55,
+                zorder=0,
+            )
+
+        for axis_obj in (equity_ax, drawdown_ax, annual_ax):
+            apply_signature_axis_style(axis_obj, vertical_lines)
+
+        strategy_total_return_float = strategy_total_value_ser.iloc[-1] / strategy_total_value_ser.iloc[0] - 1.0
+        label_offset_dict = _resolve_end_label_offset_dict(
+            strategy_end_value_float=float(strategy_equity_ser.iloc[-1]),
+            benchmark_end_value_float=(
+                float(benchmark_equity_ser.iloc[-1]) if benchmark_equity_ser is not None else None
+            ),
+        )
+        add_label(
+            equity_ax,
+            strategy_equity_line_obj,
+            f'{strategy_total_return_float:+,.0%}',
+            border_color_str=strategy_color_str,
+            label_id_str='strategy_total_return_label',
+            x_offset_points_int=_END_LABEL_X_OFFSET_POINTS_INT,
+            horizontal_alignment_str='right',
+            y_offset_points_int=label_offset_dict['strategy'],
+            zorder=10,
+        )
+
+        if benchmark_equity_line_obj is not None and benchmark_total_value_ser is not None:
+            benchmark_total_return_float = (
+                benchmark_total_value_ser.iloc[-1] / benchmark_total_value_ser.iloc[0] - 1.0
+            )
+            add_label(
+                equity_ax,
+                benchmark_equity_line_obj,
+                f'{benchmark_total_return_float:+,.0%}',
+                border_color_str=benchmark_color_str,
+                label_id_str='benchmark_total_return_label',
+                x_offset_points_int=_END_LABEL_X_OFFSET_POINTS_INT,
+                horizontal_alignment_str='right',
+                y_offset_points_int=label_offset_dict['benchmark'],
+                zorder=9,
+            )
+
+        figure_obj.align_ylabels((equity_ax, drawdown_ax, annual_ax))
+
+        if save_to:
+            figure_obj.savefig(save_to, dpi=dpi, bbox_inches='tight')
+
+        plt.show()
+
+
+def _set_equity_ticks(axis_obj, equity_max_float: float) -> None:
+    upper_tick_float = max(1.0, float(equity_max_float))
+    major_tick_list = [0.5, 1.0]
+    candidate_tick_list = [1.25, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0]
+    major_tick_list.extend(
+        tick_float for tick_float in candidate_tick_list if tick_float <= upper_tick_float * 1.02
     )
 
-    ax1 = fig.add_subplot(inner_gs[0])  # Total return plot
-    ax2 = fig.add_subplot(inner_gs[1])  # Drawdown plot
-    ax3 = fig.add_subplot(outer_gs[1])  # Annual return bar chart
+    if upper_tick_float > 10.0:
+        extended_tick_arr = np.arange(12.0, np.ceil(upper_tick_float) + 2.0, 2.0)
+        major_tick_list.extend(extended_tick_arr.tolist())
 
-    # Normalize strategy and benchmark returns
-    s_ret = strategy_total_value / strategy_total_value.iloc[0]
-    peak_s_ret = s_ret.cummax()
-    sy = generate_yearly_returns(strategy_total_value)
+    axis_obj.set_yticks(sorted(set(major_tick_list)))
 
-    if benchmark_total_value is not None:
-        b_ret = benchmark_total_value / benchmark_total_value.iloc[0]
-        by = generate_yearly_returns(benchmark_total_value)
-        peak_b_ret = b_ret.cummax()
 
-    # --- Total Return Plot (ax1) ---
-    if benchmark_total_value is not None:
-        ax1.plot(b_ret.index, b_ret, label=benchmark_label, color=color2, zorder=10)
-        ax1.fill_between(b_ret.index, peak_b_ret, b_ret, where=(peak_b_ret > b_ret), color='red', alpha=0.5, zorder=6)
+def _resolve_end_label_offset_dict(
+        strategy_end_value_float: float,
+        benchmark_end_value_float: float | None,
+) -> dict[str, int]:
+    """
+    Offset end labels away from each other using the final normalized equity values.
 
-    ax1.plot(s_ret.index, s_ret, label=strategy_label, color=color1, zorder=10)
-    ax1.fill_between(s_ret.index, peak_s_ret, s_ret, where=(peak_s_ret > s_ret), color='red', alpha=0.5, zorder=6)
+    If benchmark_end_value_float > strategy_end_value_float, then:
 
-    # Plot additional return series if provided
-    max_vals = []
-    if additional_returns is not None:
-        for column in additional_returns.columns:
-            line = additional_returns[column]
-            ax1.plot(line.index, line / line.iloc[0], alpha=alpha_additional, linewidth=0.5, zorder=5)
-            max_vals.append((line / line.iloc[0]).max())
+    strategy_label_offset_int < 0
+    benchmark_label_offset_int > 0
+    """
+    if benchmark_end_value_float is None:
+        return {'strategy': 0, 'benchmark': 0}
 
-    # Configure log scale if enabled
-    if use_log_scale:
-        ax1.set_yscale('log')
+    offset_magnitude_int = 12
+    if benchmark_end_value_float >= strategy_end_value_float:
+        return {'strategy': -offset_magnitude_int, 'benchmark': offset_magnitude_int}
 
-    ax1.set_xlim(min(s_ret.index), max(s_ret.index))
-    ax1.set_xticklabels([])
-    ax1.set_ylabel('Total Return (log scale)' if use_log_scale else 'Total Return')
-    ax1.legend()
-
-    # Format y-axis labels
-    ax1.yaxis.set_major_formatter(FuncFormatter(percentage_major_formatter))
-    ax1.yaxis.set_minor_formatter(FuncFormatter(percentage_minor_formatter))
-
-    # Adjust tick marks based on returns
-    major_ticks = [0.5] + np.arange(1, 7).tolist()
-    minor_ticks = np.arange(1, int(max(s_ret.max(), b_ret.max())) + 1)
-    if max_vals:
-        minor_ticks = np.arange(1, int(max(max(max_vals), max(s_ret.max(), b_ret.max()))) + 1)
-
-    ax1.set_yticks(major_ticks)
-    ax1.set_yticks(minor_ticks, minor=True)
-    ax1.grid(which='major', linestyle='-', linewidth='0.5', color='#e6e6e6')
-    ax1.grid(which='minor', linestyle='-', linewidth='0.5', color='#e6e6e6')
-
-    if len(ylims) > 0:
-        ax1.set_ylim(ylims)
-
-    # --- Drawdown Plot (ax2) ---
-    if strategy_drawdown is None:
-        cumulative_max = strategy_total_value.cummax()
-        strategy_drawdown = (strategy_total_value - cumulative_max) / cumulative_max
-    if benchmark_drawdown is None and benchmark_total_value is not None:
-        cumulative_max = benchmark_total_value.cummax()
-        benchmark_drawdown = (benchmark_total_value - cumulative_max) / cumulative_max
-
-    if benchmark_drawdown is not None:
-        ax2.fill_between(benchmark_drawdown.index, 0, benchmark_drawdown, color=color2, alpha=0.1, zorder=1)
-        ax2.plot(benchmark_drawdown.index, benchmark_drawdown, color=color2, zorder=10, linewidth=0.5)
-
-    if strategy_drawdown is not None:
-        ax2.fill_between(strategy_drawdown.index, 0, strategy_drawdown, color=color1, alpha=0.1, zorder=2)
-        ax2.plot(strategy_drawdown.index, strategy_drawdown, color=color1, zorder=10, linewidth=0.5)
-
-    if additional_drawdowns is not None:
-        for column in additional_drawdowns.columns:
-            line = additional_drawdowns[column]
-            ax2.plot(line.index, line, alpha=0.2, linewidth=0.5, zorder=5)
-
-    ax2.set_xlim(min(strategy_total_value.index), max(strategy_total_value.index))
-    ax2.set_ylabel('Drawdown')
-    ax2.grid(which='major', linestyle='-', linewidth='0.5', color='#e6e6e6')
-    ax2.yaxis.set_major_formatter(FuncFormatter(percentage_major_formatter_2))
-
-    # --- Annual Return Bar Chart (ax3) ---
-    bar_width = 0.35
-    index = np.arange(len(sy))
-
-    bar1 = ax3.bar(index, sy, bar_width, label=strategy_label, color=color1, zorder=10)
-    if benchmark_total_value is not None:
-        bar2 = ax3.bar(index + bar_width, by, bar_width, label=benchmark_label, color=color2, zorder=10)
-
-    ax3.set_ylabel('Annual Return (%)')
-    ax3.set_xticks(index + bar_width / 2)
-    ax3.set_xticklabels(sy.index.year, rotation=90)
-    ax3.set_xlim(-bar_width, len(sy) - bar_width)
-    ax3.yaxis.set_major_formatter(FuncFormatter(percentage_major_formatter_2))
-    ax3.grid(which='major', linestyle='-', linewidth='0.5', color='#e6e6e6', axis='y', zorder=0)
-    
-
-    # --- Set the style ---
-    positions = np.arange(len(sy))
-    grid_positions = np.append(positions, positions[-1] + 1)
-    for pos in grid_positions:
-        ax3.axvline(x=pos - bar_width, color='#e6e6e6', linestyle='-', linewidth=0.5, zorder=0)
-
-    for ax in [ax1, ax2, ax3]:
-        for spine in ax.spines.values():
-            spine.set_edgecolor('#E6E6E6')
-            spine.set_linewidth(0.5)
-
-        ax.tick_params(axis='x', colors='#666666')
-        ax.tick_params(axis='y', colors='#666666')
-        ax.tick_params(axis='y', which='both', color='#e6e6e6', labelsize=6)
-        ax.tick_params(axis='x', which='both', color='#e6e6e6')
-        if ax == ax3:
-            ax.tick_params(axis='x', which='both', color='#e6e6e6', labelsize=8)
-
-        ax.yaxis.tick_right()
-        ax.yaxis.set_label_position('left')
-
-        # Plot the vertical lines
-        for line in vertical_lines:
-            ax.axvline(line, color='red', linestyle='--', linewidth=1)
-
-    # Add the labels
-    s_tot_ret = strategy_total_value.iloc[-1] / strategy_total_value.iloc[0] - 1
-    strategy_line_label = f"+{s_tot_ret:,.0%}"
-    add_label(ax1, ax1.lines[1], strategy_line_label, color1, 'white', zorder=20)
-
-    if benchmark_total_value is not None:
-        b_tot_ret = benchmark_total_value.iloc[-1] / benchmark_total_value.iloc[0] - 1
-        benchmark_line_label = f"+{b_tot_ret:,.0%}"
-        add_label(ax1, ax1.lines[0], benchmark_line_label, color2, 'white')
-
-    # --- Save or Show the Plot ---
-    if save_to:
-        plt.savefig(save_to, dpi=dpi, bbox_inches='tight')
-
-    plt.show()
+    return {'strategy': offset_magnitude_int, 'benchmark': -offset_magnitude_int}
 
 
 def generate_yearly_returns(series):
-    """Computes annual returns based on the last value of each year.
+    """Compute annual returns from year-end total values."""
+    total_value_ser = pd.Series(series, copy=False).astype(float)
+    year_end_total_value_ser = total_value_ser.resample('YE').last()
 
-    Parameters:
-    - series: Series representing total portfolio value over time.
+    if year_end_total_value_ser.index[0] != total_value_ser.index[0]:
+        start_anchor_ts = pd.Timestamp(
+            year=year_end_total_value_ser.index[0].year - 1,
+            month=year_end_total_value_ser.index[0].month,
+            day=year_end_total_value_ser.index[0].day,
+        )
+        year_end_total_value_ser.loc[start_anchor_ts] = total_value_ser.iloc[0]
+        year_end_total_value_ser = year_end_total_value_ser.sort_index()
 
-    Returns:
-    - A Series with annual percentage returns.
+    yearly_return_ser = year_end_total_value_ser.pct_change(fill_method=None).dropna()
+    return yearly_return_ser
+
+
+def compute_drawdown(total_value_ser: pd.Series) -> pd.Series:
     """
-    sy = series.resample('YE').last()  # Get the last value of each year
+    Compute drawdown with:
 
-    # Ensure the first year includes the initial value
-    if sy.index[0] != series.index[0]:
-        date0 = pd.Timestamp(year=sy.index[0].year - 1, month=sy.index[0].month, day=sy.index[0].day)
-        sy.loc[date0] = series.iloc[0]
-        sy = sy.sort_index()
-
-    return sy.pct_change(fill_method=None).dropna()  # Compute percentage change and drop NaN values
-
-
-def add_label(ax, line, label, bg_color, font_color='black', zorder=5):
-    """Adds a label with an arrow at the end of a line plot.
-
-    Parameters:
-    - ax: The axis on which to annotate.
-    - line: The line to be labeled.
-    - label: The text to display.
-    - bg_color: Background color of the label.
-    - font_color: Color of the text (default: black).
-    - zorder: Layer order for overlapping elements (default: 5).
+    drawdown_ser_t = total_value_t / max(total_value_1, ..., total_value_t) - 1
     """
-    x_data, y_data = line.get_data()  # Extract x and y coordinates of the line
+    total_value_ser = pd.Series(total_value_ser, copy=False).astype(float)
+    running_peak_ser = total_value_ser.cummax()
+    drawdown_ser = total_value_ser / running_peak_ser - 1.0
+    return drawdown_ser
 
-    ax.annotate(
-        label,
-        xy=(x_data[-1], y_data[-1]),  # Position label at the last point of the line
-        xytext=(3, 0),  # Offset label slightly to the right
+
+def add_label(
+        axis_obj,
+        line_obj,
+        label_str: str,
+        border_color_str: str,
+        label_id_str: str,
+        font_color_str: str | None = None,
+        x_offset_points_int: int = _END_LABEL_X_OFFSET_POINTS_INT,
+        horizontal_alignment_str: str = 'right',
+        y_offset_points_int: int = 0,
+        zorder: int = 5,
+):
+    """Add a compact end-of-line label for the final total return."""
+    x_data, y_data = line_obj.get_data()
+    font_color_str = SIGNATURE_PALETTE_DICT['ink'] if font_color_str is None else font_color_str
+
+    annotation_obj = axis_obj.annotate(
+        label_str,
+        xy=(x_data[-1], y_data[-1]),
+        xytext=(x_offset_points_int, y_offset_points_int),
         textcoords='offset points',
-        ha='left',
+        ha=horizontal_alignment_str,
         va='center',
-        fontsize=8,
-        color=font_color,
-        bbox=dict(boxstyle="round,pad=0.4", edgecolor='none', facecolor=bg_color),
-        arrowprops=dict(arrowstyle="->", connectionstyle="arc3", color=bg_color, lw=2),
-        zorder=zorder
+        fontsize=7.5,
+        color=font_color_str,
+        bbox=dict(
+            boxstyle='round,pad=0.22,rounding_size=0.18',
+            edgecolor=border_color_str,
+            facecolor=SIGNATURE_PALETTE_DICT['label_face'],
+            linewidth=1.0,
+        ),
+        zorder=zorder,
     )
+    annotation_obj.set_gid(label_id_str)
+    return annotation_obj
 
 
 def percentage_major_formatter(x, pos):
-    """Formats major y-axis ticks for total return plots as percentages.
+    """Format equity-axis values with:
+
+    displayed_return_pct = (x - 1) * 100
     """
     return f'{(x - 1) * 100:.0f}%'
 
 
 def percentage_major_formatter_2(x, pos):
-    """Formats major y-axis ticks for drawdown and annual return plots
-    as percentages.
+    """Format drawdown and annual-return values with:
+
+    displayed_return_pct = x * 100
     """
     return f'{x * 100:.0f}%'
 
 
 def percentage_minor_formatter(x, pos):
-    """Formats minor y-axis ticks. Returns an empty string to keep
-    the minor ticks clean.
-    """
+    """Keep minor tick labels empty for a cleaner look."""
     return ''
