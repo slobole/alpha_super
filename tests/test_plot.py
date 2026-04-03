@@ -5,6 +5,7 @@ from unittest import mock
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.colors as mcolors
+import matplotlib.axes._axes as maxes
 import matplotlib.pyplot as plt
 import pandas as pd
 
@@ -55,6 +56,14 @@ def make_strategy(
     return strategy
 
 
+def _major_tick_by_label_gid(axis_obj, label_id_str: str):
+    return next(
+        major_tick_obj
+        for major_tick_obj in axis_obj.yaxis.get_major_ticks()
+        if major_tick_obj.label2.get_gid() == label_id_str
+    )
+
+
 class PlotTests(unittest.TestCase):
     def tearDown(self):
         plt.close('all')
@@ -72,13 +81,33 @@ class PlotTests(unittest.TestCase):
         equity_ax = figure_obj.axes[0]
 
         strategy_line_obj = next(line for line in equity_ax.lines if line.get_gid() == 'strategy_equity_line')
+        strategy_fill_collection_obj = next(
+            collection_obj
+            for collection_obj in equity_ax.collections
+            if collection_obj.get_gid() == 'strategy_equity_fill'
+        )
+        legend_obj = equity_ax.get_legend()
+        figure_obj.canvas.draw()
+        strategy_major_tick_obj = _major_tick_by_label_gid(equity_ax, 'strategy_growth_of_1_label')
+        strategy_label_obj = strategy_major_tick_obj.label2
+        strategy_axis_tick_obj = strategy_major_tick_obj.tick2line
         self.assertEqual(strategy_line_obj.get_linestyle(), '-')
-        self.assertEqual(strategy_line_obj.get_color(), SEABORN_DEEP_COLOR_LIST[2])
+        self.assertEqual(strategy_line_obj.get_color(), SIGNATURE_PALETTE_DICT['strategy'])
+        self.assertEqual(mcolors.to_hex(strategy_axis_tick_obj.get_color()), SIGNATURE_PALETTE_DICT['strategy'])
+        self.assertEqual(
+            mcolors.to_hex(strategy_fill_collection_obj.get_facecolor()[0]),
+            SIGNATURE_PALETTE_DICT['strategy'],
+        )
+        self.assertAlmostEqual(float(strategy_fill_collection_obj.get_facecolor()[0][3]), 0.24, places=2)
+        self.assertAlmostEqual(float(strategy_major_tick_obj.get_loc()), 1.12)
         self.assertEqual(mcolors.to_hex(equity_ax.get_facecolor()), SIGNATURE_PALETTE_DICT['panel'])
-        self.assertEqual({text.get_gid() for text in equity_ax.texts}, {'strategy_total_return_label'})
-        strategy_label_obj = next(text for text in equity_ax.texts if text.get_gid() == 'strategy_total_return_label')
-        self.assertLess(strategy_label_obj.xyann[0], 0)
-        self.assertEqual(strategy_label_obj.get_ha(), 'right')
+        self.assertEqual(mcolors.to_hex(legend_obj.get_frame().get_facecolor()), SIGNATURE_PALETTE_DICT['legend_face'])
+        self.assertEqual(mcolors.to_hex(legend_obj.get_frame().get_edgecolor()), SIGNATURE_PALETTE_DICT['legend_edge'])
+        self.assertEqual(equity_ax.get_ylabel(), 'Growth of $1 (log scale)')
+        self.assertEqual(strategy_label_obj.get_text(), '$1.12')
+        self.assertEqual(len(equity_ax.texts), 0)
+        self.assertEqual(equity_ax.yaxis.get_major_formatter()(1.5, 0), '$1.50')
+        self.assertEqual(equity_ax.yaxis.get_minor_formatter()(1.5, 0), '')
 
     def test_plot_with_benchmark_uses_solid_benchmark_and_two_labels(self):
         dates_index = pd.to_datetime(['2024-01-02', '2024-01-03', '2024-01-04', '2024-01-05'])
@@ -96,15 +125,65 @@ class PlotTests(unittest.TestCase):
         equity_ax = figure_obj.axes[0]
         strategy_line_obj = next(line for line in equity_ax.lines if line.get_gid() == 'strategy_equity_line')
         benchmark_line_obj = next(line for line in equity_ax.lines if line.get_gid() == 'benchmark_equity_line')
+        figure_obj.canvas.draw()
+        strategy_axis_tick_obj = _major_tick_by_label_gid(equity_ax, 'strategy_growth_of_1_label').tick2line
+        benchmark_axis_tick_obj = _major_tick_by_label_gid(equity_ax, 'benchmark_growth_of_1_label').tick2line
 
         self.assertEqual(strategy_line_obj.get_linestyle(), '-')
         self.assertEqual(benchmark_line_obj.get_linestyle(), '-')
-        self.assertEqual(strategy_line_obj.get_color(), SEABORN_DEEP_COLOR_LIST[2])
-        self.assertEqual(benchmark_line_obj.get_color(), SEABORN_DEEP_COLOR_LIST[3])
+        self.assertEqual(strategy_line_obj.get_color(), SIGNATURE_PALETTE_DICT['strategy'])
+        self.assertEqual(benchmark_line_obj.get_color(), SIGNATURE_PALETTE_DICT['benchmark'])
+        self.assertEqual(mcolors.to_hex(strategy_axis_tick_obj.get_color()), SIGNATURE_PALETTE_DICT['strategy'])
+        self.assertEqual(mcolors.to_hex(benchmark_axis_tick_obj.get_color()), SIGNATURE_PALETTE_DICT['benchmark'])
         self.assertEqual(
-            {text.get_gid() for text in equity_ax.texts},
-            {'strategy_total_return_label', 'benchmark_total_return_label'},
+            {
+                major_tick_obj.label2.get_gid()
+                for major_tick_obj in equity_ax.yaxis.get_major_ticks()
+                if major_tick_obj.label2.get_gid() is not None
+            },
+            {'strategy_growth_of_1_label', 'benchmark_growth_of_1_label'},
         )
+
+    def test_plot_fills_only_strategy_outperformance_above_benchmark(self):
+        dates_index = pd.to_datetime(['2024-01-02', '2024-01-03', '2024-01-04', '2024-01-05'])
+        strategy_total_value_ser = pd.Series([100.0, 103.0, 101.0, 110.0], index=dates_index)
+        benchmark_total_value_ser = pd.Series([100.0, 102.0, 104.0, 107.0], index=dates_index)
+
+        with mock.patch('matplotlib.pyplot.show'):
+            with mock.patch(
+                'matplotlib.axes._axes.Axes.fill_between',
+                autospec=True,
+                wraps=maxes.Axes.fill_between,
+            ) as fill_between_mock_obj:
+                plot(
+                    strategy_total_value=strategy_total_value_ser,
+                    benchmark_total_value=benchmark_total_value_ser,
+                    save_to=io.BytesIO(),
+                )
+
+        equity_fill_call_obj = fill_between_mock_obj.call_args_list[0]
+        benchmark_growth_of_1_ser = benchmark_total_value_ser / benchmark_total_value_ser.iloc[0]
+        strategy_growth_of_1_ser = strategy_total_value_ser / strategy_total_value_ser.iloc[0]
+        expected_outperformance_mask_vec = (
+            strategy_growth_of_1_ser.gt(benchmark_growth_of_1_ser).to_numpy()
+        )
+
+        pd.testing.assert_index_equal(equity_fill_call_obj.args[1], strategy_growth_of_1_ser.index)
+        pd.testing.assert_series_equal(
+            equity_fill_call_obj.args[2],
+            benchmark_growth_of_1_ser,
+            check_names=False,
+        )
+        pd.testing.assert_series_equal(
+            equity_fill_call_obj.args[3],
+            strategy_growth_of_1_ser,
+            check_names=False,
+        )
+        self.assertListEqual(
+            equity_fill_call_obj.kwargs['where'].tolist(),
+            expected_outperformance_mask_vec.tolist(),
+        )
+        self.assertTrue(equity_fill_call_obj.kwargs['interpolate'])
 
     def test_plot_colors_parameter_preserves_strategy_then_benchmark_order(self):
         dates_index = pd.to_datetime(['2024-01-02', '2024-01-03', '2024-01-04', '2024-01-05'])
@@ -140,16 +219,23 @@ class PlotTests(unittest.TestCase):
         visible_grid_line_list = [
             grid_line_obj for grid_line_obj in equity_ax.get_ygridlines() if grid_line_obj.get_visible()
         ]
+        visible_x_grid_line_list = [
+            grid_line_obj for grid_line_obj in equity_ax.get_xgridlines() if grid_line_obj.get_visible()
+        ]
 
         self.assertGreater(len(visible_grid_line_list), 0)
+        self.assertEqual(len(visible_x_grid_line_list), 0)
         self.assertTrue(
             all(
                 mcolors.to_hex(grid_line_obj.get_color()) == SIGNATURE_PALETTE_DICT['grid']
                 for grid_line_obj in visible_grid_line_list
             )
         )
+        self.assertFalse(equity_ax.spines['top'].get_visible())
+        self.assertEqual(mcolors.to_hex(equity_ax.spines['bottom'].get_edgecolor()), SIGNATURE_PALETTE_DICT['axes_border'])
+        self.assertEqual(mcolors.to_hex(equity_ax.spines['right'].get_edgecolor()), SIGNATURE_PALETTE_DICT['axes_border'])
 
-    def test_plot_offsets_end_labels_away_from_higher_finishing_line(self):
+    def test_plot_aligns_axis_labels_with_final_growth_values(self):
         dates_index = pd.to_datetime(['2024-01-02', '2024-01-03', '2024-01-04', '2024-01-05'])
         strategy_total_value_ser = pd.Series([100.0, 110.0, 120.0, 130.0], index=dates_index)
         benchmark_total_value_ser = pd.Series([100.0, 130.0, 150.0, 160.0], index=dates_index)
@@ -163,13 +249,14 @@ class PlotTests(unittest.TestCase):
 
         figure_obj = plt.gcf()
         equity_ax = figure_obj.axes[0]
-        strategy_label_obj = next(text for text in equity_ax.texts if text.get_gid() == 'strategy_total_return_label')
-        benchmark_label_obj = next(text for text in equity_ax.texts if text.get_gid() == 'benchmark_total_return_label')
+        figure_obj.canvas.draw()
+        strategy_major_tick_obj = _major_tick_by_label_gid(equity_ax, 'strategy_growth_of_1_label')
+        benchmark_major_tick_obj = _major_tick_by_label_gid(equity_ax, 'benchmark_growth_of_1_label')
 
-        self.assertLess(strategy_label_obj.xyann[1], 0)
-        self.assertGreater(benchmark_label_obj.xyann[1], 0)
+        self.assertAlmostEqual(float(strategy_major_tick_obj.get_loc()), 1.30)
+        self.assertAlmostEqual(float(benchmark_major_tick_obj.get_loc()), 1.60)
 
-    def test_plot_keeps_end_label_inside_axes_and_left_of_endpoint(self):
+    def test_plot_promoted_tick_label_aligns_with_native_right_axis_ticks(self):
         dates_index = pd.to_datetime(['2024-01-02', '2024-01-03', '2024-01-04', '2024-01-05'])
         strategy_total_value_ser = pd.Series([100.0, 170.0, 260.0, 420.0], index=dates_index)
 
@@ -178,22 +265,21 @@ class PlotTests(unittest.TestCase):
 
         figure_obj = plt.gcf()
         equity_ax = figure_obj.axes[0]
-        strategy_line_obj = next(line for line in equity_ax.lines if line.get_gid() == 'strategy_equity_line')
-        strategy_label_obj = next(text for text in equity_ax.texts if text.get_gid() == 'strategy_total_return_label')
-
         figure_obj.canvas.draw()
         renderer_obj = figure_obj.canvas.get_renderer()
+        strategy_major_tick_obj = _major_tick_by_label_gid(equity_ax, 'strategy_growth_of_1_label')
+        strategy_label_obj = strategy_major_tick_obj.label2
         label_bbox_obj = strategy_label_obj.get_window_extent(renderer=renderer_obj)
-        axes_bbox_obj = equity_ax.get_window_extent(renderer=renderer_obj)
-        end_point_display_arr = equity_ax.transData.transform(
-            (
-                strategy_line_obj.get_xdata(orig=False)[-1],
-                strategy_line_obj.get_ydata(orig=False)[-1],
-            )
+        reference_label_obj = next(
+            major_tick_obj.label2
+            for major_tick_obj in equity_ax.yaxis.get_major_ticks()
+            if major_tick_obj.label2.get_gid() is None and major_tick_obj.label2.get_text() != ''
         )
+        reference_bbox_obj = reference_label_obj.get_window_extent(renderer=renderer_obj)
 
-        self.assertLessEqual(label_bbox_obj.x1, axes_bbox_obj.x1 + 0.5)
-        self.assertLess(label_bbox_obj.x1, end_point_display_arr[0])
+        self.assertAlmostEqual(float(strategy_major_tick_obj.get_loc()), 4.20)
+        self.assertAlmostEqual(label_bbox_obj.x0, reference_bbox_obj.x0, delta=1.0)
+        self.assertEqual(len(equity_ax.texts), 0)
 
     def test_generate_yearly_returns_preserves_return_formula(self):
         total_value_ser = pd.Series(
@@ -241,7 +327,11 @@ class PlotTests(unittest.TestCase):
 
         self.assertEqual(len(overlay_line_list), 2)
         self.assertTrue(all(line.get_alpha() <= 0.25 for line in overlay_line_list))
-        self.assertIn('strategy_total_return_label', {text.get_gid() for text in equity_ax.texts})
+        figure_obj.canvas.draw()
+        self.assertIn(
+            'strategy_growth_of_1_label',
+            {major_tick_obj.label2.get_gid() for major_tick_obj in equity_ax.yaxis.get_major_ticks()},
+        )
 
 
 if __name__ == '__main__':

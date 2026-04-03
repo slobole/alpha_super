@@ -16,11 +16,14 @@ from alpha.engine.report import (
     _build_portfolio_html,
     _corr_color,
     _daily_return_histogram_b64,
+    _drawdown_color,
     _format_summary,
+    _format_trades,
     _prepare_daily_return_distribution_dict,
     _prepare_trade_distribution_dict,
     _ret_color,
     _trade_return_histogram_b64,
+    _weight_color_for_asset,
     save_results,
 )
 from alpha.engine.portfolio import Portfolio
@@ -40,10 +43,12 @@ def make_strategy(daily_returns_list: list[float]) -> DummyStrategy:
     date_index = pd.date_range('2024-01-02', periods=len(daily_returns_list), freq='D')
     daily_return_ser = pd.Series(daily_returns_list, index=date_index, dtype=float)
     total_value_ser = 100_000.0 * (1.0 + daily_return_ser).cumprod()
+    benchmark_daily_return_ser = daily_return_ser.mul(0.60)
+    benchmark_total_value_ser = 100_000.0 * (1.0 + benchmark_daily_return_ser).cumprod()
 
     strategy = DummyStrategy(
         name='ReportStrategy',
-        benchmarks=[],
+        benchmarks=['$SPX'],
         capital_base=100_000.0,
         slippage=0.0,
         commission_per_share=0.0,
@@ -54,6 +59,7 @@ def make_strategy(daily_returns_list: list[float]) -> DummyStrategy:
             'daily_returns': daily_return_ser,
             'total_value': total_value_ser,
             'portfolio_value': total_value_ser,
+            '$SPX': benchmark_total_value_ser,
         },
         index=date_index,
     )
@@ -64,10 +70,24 @@ def make_strategy(daily_returns_list: list[float]) -> DummyStrategy:
                 pd.Timestamp(date_index[-1]),
                 100_000.0,
                 float(total_value_ser.iloc[-1]),
+                7.42,
+                6.11,
+                11.58,
                 1.23,
+                -8.40,
             ]
         },
-        index=['Start', 'End', 'Start [$]', 'Final [$]', 'Sharpe Ratio'],
+        index=[
+            'Start',
+            'End',
+            'Start [$]',
+            'Final [$]',
+            'Return [%]',
+            'Return (Ann.) [%]',
+            'Volatility (Ann.) [%]',
+            'Sharpe Ratio',
+            'Max. Drawdown [%]',
+        ],
     )
     strategy.monthly_returns = pd.DataFrame(
         {'Annual Return': [0.12], 'Sharpe Ratio': [1.23], 'Max Drawdown': [-0.08]},
@@ -104,7 +124,7 @@ def make_portfolio() -> Portfolio:
 
 
 class ReportFormattingTests(unittest.TestCase):
-    def test_format_summary_marks_sharpe_ratio_row(self):
+    def test_format_summary_keeps_sharpe_ratio_row_neutral(self):
         summary_df = pd.DataFrame(
             {
                 'Strategy': [0.12, 1.34],
@@ -115,9 +135,20 @@ class ReportFormattingTests(unittest.TestCase):
 
         summary_html_str = _format_summary(summary_df)
 
-        self.assertIn('summary-row-sharpe', summary_html_str)
-        self.assertIn('metric-sharpe', summary_html_str)
+        self.assertNotIn('summary-row-sharpe', summary_html_str)
+        self.assertNotIn('metric-sharpe', summary_html_str)
         self.assertIn('Sharpe Ratio', summary_html_str)
+
+    def test_format_summary_keeps_drawdown_cells_neutral(self):
+        summary_df = pd.DataFrame(
+            {'Strategy': [-8.4]},
+            index=['Max. Drawdown [%]'],
+        )
+
+        summary_html_str = _format_summary(summary_df)
+
+        self.assertNotIn('class="drawdown"', summary_html_str)
+        self.assertIn('<td>-8.40%</td>', summary_html_str)
 
     def test_prepare_daily_return_distribution_excludes_bootstrap_and_preserves_formulas(self):
         strategy = make_strategy([0.0, 0.01, -0.02, 0.0, 0.03])
@@ -145,8 +176,20 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertIn('<h2>Daily Return Distribution</h2>', report_html_str)
         self.assertIn('alt="Daily Return Distribution"', report_html_str)
         self.assertIn('Mean</th><th>Std. Dev.</th><th>Skew</th><th>Negative Days</th>', report_html_str)
+        self.assertIn('class="kpi-grid"', report_html_str)
+        self.assertIn('Final Value', report_html_str)
+        self.assertIn('Total Return', report_html_str)
+        self.assertIn('Volatility', report_html_str)
+        self.assertIn('11.58%', report_html_str)
+        self.assertIn('class="kpi-value pos">+7.42%</div>', report_html_str)
+        self.assertIn('class="kpi-value pos">+6.11%</div>', report_html_str)
         self.assertIn('<h2>Performance Summary</h2>', report_html_str)
         self.assertIn('<h2>Monthly Returns</h2>', report_html_str)
+        self.assertIn('class="card card-monthly-returns"', report_html_str)
+        self.assertIn('SPX Ann Ret', report_html_str)
+        self.assertIn('SPX Max DD', report_html_str)
+        self.assertIn('SPX Sharpe', report_html_str)
+        self.assertIn('class="divider-left"', report_html_str)
         self.assertIn('<h2>Trade Statistics</h2>', report_html_str)
         self.assertIn('<h2>Closed Trades</h2>', report_html_str)
         self.assertNotIn('<h2>All Transactions</h2>', report_html_str)
@@ -160,8 +203,16 @@ class ReportFormattingTests(unittest.TestCase):
 
         self.assertIn(f'--color-strategy: {SIGNATURE_PALETTE_DICT["strategy"]};', report_html_str)
         self.assertIn(f'--color-page: {SIGNATURE_PALETTE_DICT["page"]};', report_html_str)
-        self.assertIn('font-family: "Segoe UI", Arial, sans-serif;', report_html_str)
+        self.assertIn('font-family: "Atlassian Sans", "Segoe UI", Arial, "DejaVu Sans", sans-serif;', report_html_str)
+        self.assertIn('https://ds-cdn.prod-east.frontend.public.atl-paas.net/assets/font-rules/v5/atlassian-fonts.css', report_html_str)
+        self.assertIn('.kpi-value.pos {', report_html_str)
+        self.assertIn('color: var(--color-profit-dark);', report_html_str)
         self.assertIn('box-shadow: none;', report_html_str)
+        self.assertIn('td.metric {', report_html_str)
+        self.assertNotIn('td.drawdown {', report_html_str)
+        self.assertNotIn('tr:nth-child(even) td', report_html_str)
+        self.assertIn('class="report-shell"', report_html_str)
+        self.assertIn('class="card-grid"', report_html_str)
 
     def test_save_results_writes_transactions_csv(self):
         strategy = make_strategy([0.0, 0.01, -0.02, 0.0, 0.03, -0.01])
@@ -262,12 +313,12 @@ class ReportFormattingTests(unittest.TestCase):
 
         expected_positive_color_str = blend_hex_color_str(
             SIGNATURE_PALETTE_DICT['page'],
-            SIGNATURE_PALETTE_DICT['strategy'],
+            SIGNATURE_PALETTE_DICT['profit'],
             0.12 + 0.45 * min(abs(0.15) / 0.30, 1.0),
         )
         expected_negative_color_str = blend_hex_color_str(
             SIGNATURE_PALETTE_DICT['page'],
-            SIGNATURE_PALETTE_DICT['benchmark'],
+            SIGNATURE_PALETTE_DICT['loss'],
             0.12 + 0.45 * min(abs(-0.15) / 0.30, 1.0),
         )
         expected_low_corr_color_str = blend_hex_color_str(
@@ -285,6 +336,44 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertIn(expected_negative_color_str, negative_style_str)
         self.assertIn(expected_low_corr_color_str, low_corr_style_str)
         self.assertIn(expected_high_corr_color_str, high_corr_style_str)
+
+    def test_drawdown_color_uses_light_red_palette(self):
+        drawdown_style_str = _drawdown_color(-0.12)
+        expected_drawdown_color_str = blend_hex_color_str(
+            SIGNATURE_PALETTE_DICT['page'],
+            SIGNATURE_PALETTE_DICT['loss'],
+            0.18 + 0.28 * min(abs(-0.12) / 0.30, 1.0),
+        )
+
+        self.assertIn(expected_drawdown_color_str, drawdown_style_str)
+        self.assertIn(SIGNATURE_PALETTE_DICT['loss_dark'], drawdown_style_str)
+
+    def test_weight_color_helper_maps_fallback_to_benchmark_orange(self):
+        self.assertEqual(_weight_color_for_asset('SPY'), SIGNATURE_PALETTE_DICT['benchmark'])
+        self.assertEqual(_weight_color_for_asset('TQQQ'), SIGNATURE_PALETTE_DICT['benchmark'])
+        self.assertEqual(_weight_color_for_asset('GLD'), '#d9a441')
+        self.assertEqual(_weight_color_for_asset('BTAL'), '#c251c0')
+
+    def test_format_trades_uses_green_red_sign_classes_for_profit_and_return(self):
+        trade_df = pd.DataFrame(
+            {
+                'start': [pd.Timestamp('2024-01-02'), pd.Timestamp('2024-01-05'), pd.Timestamp('2024-01-07')],
+                'end': [pd.Timestamp('2024-01-03'), pd.Timestamp('2024-01-06'), pd.Timestamp('2024-01-08')],
+                'capital': [1_000.0, 1_000.0, 1_000.0],
+                'profit': [25.0, -10.0, 0.0],
+                'return': [0.025, -0.010, 0.0],
+            },
+            index=pd.Index([11, 12, 13], name='trade_id'),
+        )
+
+        trades_html_str = _format_trades(trade_df)
+
+        self.assertIn('<td class="pos">$25.00</td>', trades_html_str)
+        self.assertIn('<td class="neg">$-10.00</td>', trades_html_str)
+        self.assertIn('<td>$0.00</td>', trades_html_str)
+        self.assertIn('<td class="pos">2.50%</td>', trades_html_str)
+        self.assertIn('<td class="neg">-1.00%</td>', trades_html_str)
+        self.assertIn('<td>0.00%</td>', trades_html_str)
 
     def test_daily_return_distribution_falls_back_when_variation_is_degenerate(self):
         strategy = make_strategy([0.0, 0.0, 0.0])
@@ -305,6 +394,10 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertIn('Sleeve Equity Contributions', report_html_str)
         self.assertIn('Rolling 63-Day Pairwise Correlations', report_html_str)
         self.assertIn('Rolling 63-Day Diversification Ratio', report_html_str)
+        self.assertIn('class="kpi-grid"', report_html_str)
+        self.assertIn('class="card-grid"', report_html_str)
+        self.assertIn('https://ds-cdn.prod-east.frontend.public.atl-paas.net/assets/font-rules/v5/atlassian-fonts.css', report_html_str)
+        self.assertIn('SPX Ann Ret', report_html_str)
         self.assertIn('<h2>Pooled Pod Trade Statistics</h2>', report_html_str)
         self.assertIn('Allocated Sleeve Summary', report_html_str)
         self.assertIn('Standalone Pod Summary', report_html_str)

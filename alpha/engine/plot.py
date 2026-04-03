@@ -15,7 +15,7 @@ from alpha.engine.theme import (
 
 
 _PLOT_X_MARGIN_FLOAT = 0.008
-_END_LABEL_X_OFFSET_POINTS_INT = -4
+_PROMOTED_TICK_MIN_VERTICAL_GAP_PIXELS_FLOAT = 18.0
 
 
 def plot(
@@ -41,11 +41,15 @@ def plot(
 
     Formulas preserved by this visualization layer:
 
-    normalized_equity_ser_t = total_value_t / total_value_0
+    growth_of_1_ser_t = total_value_t / total_value_0
 
-    total_return_float = total_value_T / total_value_0 - 1
+    cumulative_return_float = total_value_T / total_value_0 - 1
+
+    displayed_growth_dollar_float = 1.0 * growth_of_1_float
 
     drawdown_ser_t = total_value_t / max(total_value_1, ..., total_value_t) - 1
+
+    relative_outperformance_ser_t = strategy_growth_of_1_ser_t - benchmark_growth_of_1_ser_t
     """
     strategy_total_value_ser = pd.Series(strategy_total_value, copy=False).astype(float)
     benchmark_total_value_ser = (
@@ -61,16 +65,13 @@ def plot(
     strategy_color_str = plot_color_dict['strategy']
     additional_color_map: dict[str, str] = {}
 
-    strategy_equity_ser = strategy_total_value_ser / strategy_total_value_ser.iloc[0]
-    strategy_peak_equity_ser = strategy_equity_ser.cummax()
+    strategy_growth_of_1_ser = strategy_total_value_ser / strategy_total_value_ser.iloc[0]
     strategy_yearly_return_ser = generate_yearly_returns(strategy_total_value_ser)
 
-    benchmark_equity_ser = None
-    benchmark_peak_equity_ser = None
+    benchmark_growth_of_1_ser = None
     benchmark_yearly_return_ser = None
     if benchmark_total_value_ser is not None:
-        benchmark_equity_ser = benchmark_total_value_ser / benchmark_total_value_ser.iloc[0]
-        benchmark_peak_equity_ser = benchmark_equity_ser.cummax()
+        benchmark_growth_of_1_ser = benchmark_total_value_ser / benchmark_total_value_ser.iloc[0]
         benchmark_yearly_return_ser = generate_yearly_returns(benchmark_total_value_ser)
 
     if strategy_drawdown is None:
@@ -106,90 +107,111 @@ def plot(
         equity_ax = figure_obj.add_subplot(inner_gs[0])
         drawdown_ax = figure_obj.add_subplot(inner_gs[1])
         annual_ax = figure_obj.add_subplot(outer_gs[1])
+        equity_baseline_growth_of_1_float = 1.0
 
-        benchmark_equity_line_obj = None
-        if benchmark_equity_ser is not None:
-            benchmark_equity_line_obj, = equity_ax.plot(
-                benchmark_equity_ser.index,
-                benchmark_equity_ser,
+        benchmark_growth_line_obj = None
+        if benchmark_growth_of_1_ser is not None:
+            benchmark_growth_line_obj, = equity_ax.plot(
+                benchmark_growth_of_1_ser.index,
+                benchmark_growth_of_1_ser,
                 color=benchmark_color_str,
                 linestyle='-',
-                linewidth=0.95,
-                alpha=0.98,
+                linewidth=1.0,
+                alpha=0.92,
                 label=benchmark_label,
                 zorder=4,
             )
-            benchmark_equity_line_obj.set_gid('benchmark_equity_line')
-            equity_ax.fill_between(
-                benchmark_equity_ser.index,
-                benchmark_peak_equity_ser,
-                benchmark_equity_ser,
-                where=benchmark_peak_equity_ser > benchmark_equity_ser,
-                color=benchmark_color_str,
-                alpha=0.08,
-                zorder=1,
-            )
+            benchmark_growth_line_obj.set_gid('benchmark_equity_line')
 
-        strategy_equity_line_obj, = equity_ax.plot(
-            strategy_equity_ser.index,
-            strategy_equity_ser,
+        strategy_growth_line_obj, = equity_ax.plot(
+            strategy_growth_of_1_ser.index,
+            strategy_growth_of_1_ser,
             color=strategy_color_str,
-            linewidth=1.15,
+            linewidth=1.35,
             alpha=1.0,
             label=strategy_label,
             zorder=5,
         )
-        strategy_equity_line_obj.set_gid('strategy_equity_line')
-        equity_ax.fill_between(
-            strategy_equity_ser.index,
-            strategy_peak_equity_ser,
-            strategy_equity_ser,
-            where=strategy_peak_equity_ser > strategy_equity_ser,
-            color=strategy_color_str,
-            alpha=0.11,
-            zorder=2,
-        )
+        strategy_growth_line_obj.set_gid('strategy_equity_line')
+        if benchmark_growth_of_1_ser is not None:
+            benchmark_fill_base_ser = benchmark_growth_of_1_ser.reindex(strategy_growth_of_1_ser.index)
+            outperformance_mask_ser = strategy_growth_of_1_ser.gt(benchmark_fill_base_ser).fillna(False)
+            strategy_equity_fill_collection_obj = equity_ax.fill_between(
+                strategy_growth_of_1_ser.index,
+                benchmark_fill_base_ser,
+                strategy_growth_of_1_ser,
+                where=outperformance_mask_ser.to_numpy(),
+                interpolate=True,
+                color=strategy_color_str,
+                alpha=0.24,
+                zorder=2,
+            )
+        else:
+            strategy_equity_fill_collection_obj = equity_ax.fill_between(
+                strategy_growth_of_1_ser.index,
+                equity_baseline_growth_of_1_float,
+                strategy_growth_of_1_ser,
+                color=strategy_color_str,
+                alpha=0.24,
+                zorder=2,
+            )
+        strategy_equity_fill_collection_obj.set_gid('strategy_equity_fill')
 
-        equity_max_float = float(strategy_equity_ser.max())
-        if benchmark_equity_ser is not None:
-            equity_max_float = max(equity_max_float, float(benchmark_equity_ser.max()))
+        growth_of_1_max_float = float(strategy_growth_of_1_ser.max())
+        if benchmark_growth_of_1_ser is not None:
+            growth_of_1_max_float = max(
+                growth_of_1_max_float,
+                float(benchmark_growth_of_1_ser.max()),
+            )
 
         if additional_returns_df is not None:
             for column_idx_int, column_name_str in enumerate(additional_returns_df.columns):
                 additional_total_value_ser = pd.Series(
                     additional_returns_df[column_name_str], copy=False
                 ).astype(float)
-                additional_equity_ser = additional_total_value_ser / additional_total_value_ser.iloc[0]
+                additional_growth_of_1_ser = (
+                    additional_total_value_ser / additional_total_value_ser.iloc[0]
+                )
                 additional_color_str = plot_color_dict['additional_cycle'][
                     column_idx_int % len(plot_color_dict['additional_cycle'])
                 ]
 
-                additional_equity_line_obj, = equity_ax.plot(
-                    additional_equity_ser.index,
-                    additional_equity_ser,
+                additional_growth_line_obj, = equity_ax.plot(
+                    additional_growth_of_1_ser.index,
+                    additional_growth_of_1_ser,
                     color=additional_color_str,
-                    linewidth=0.65,
-                    alpha=alpha_additional,
+                    linewidth=0.7,
+                    alpha=max(0.12, alpha_additional * 0.85),
                     zorder=3,
                     label='_nolegend_',
                 )
-                additional_equity_line_obj.set_gid(f'additional_equity_line:{column_name_str}')
+                additional_growth_line_obj.set_gid(f'additional_equity_line:{column_name_str}')
                 additional_color_map[column_name_str] = additional_color_str
-                equity_max_float = max(equity_max_float, float(additional_equity_ser.max()))
+                growth_of_1_max_float = max(
+                    growth_of_1_max_float,
+                    float(additional_growth_of_1_ser.max()),
+                )
 
         if use_log_scale:
             equity_ax.set_yscale('log')
-            _set_equity_ticks(equity_ax, equity_max_float)
+            _set_growth_of_1_ticks(equity_ax, growth_of_1_max_float)
 
-        equity_ax.set_ylabel('Total Return (log scale)' if use_log_scale else 'Total Return')
-        equity_ax.yaxis.set_major_formatter(FuncFormatter(percentage_major_formatter))
-        equity_ax.yaxis.set_minor_formatter(FuncFormatter(percentage_minor_formatter))
+        equity_ax.set_ylabel('Growth of $1 (log scale)' if use_log_scale else 'Growth of $1')
+        equity_ax.yaxis.set_major_formatter(FuncFormatter(growth_of_1_major_formatter))
+        equity_ax.yaxis.set_minor_formatter(FuncFormatter(blank_minor_formatter))
         equity_ax.tick_params(axis='x', labelbottom=False)
         equity_ax.margins(x=_PLOT_X_MARGIN_FLOAT)
-        equity_ax.legend(
+        equity_legend_obj = equity_ax.legend(
             loc='upper left',
             frameon=True,
+            fancybox=True,
+            borderpad=0.55,
+            labelspacing=0.4,
+            handlelength=2.2,
         )
+        equity_legend_obj.get_frame().set_linewidth(0.9)
+        equity_legend_obj.get_frame().set_edgecolor(SIGNATURE_PALETTE_DICT['legend_edge'])
+        equity_legend_obj.get_frame().set_facecolor(SIGNATURE_PALETTE_DICT['legend_face'])
 
         if len(ylims) > 0:
             equity_ax.set_ylim(ylims)
@@ -228,7 +250,7 @@ def plot(
             0.0,
             strategy_drawdown_ser,
             color=strategy_color_str,
-            alpha=0.13,
+            alpha=0.07,
             zorder=2,
         )
 
@@ -246,14 +268,14 @@ def plot(
                             column_idx_int % len(plot_color_dict['additional_cycle'])
                         ],
                     ),
-                    linewidth=0.6,
-                    alpha=max(0.12, alpha_additional * 0.8),
+                    linewidth=0.65,
+                    alpha=max(0.10, alpha_additional * 0.65),
                     zorder=3,
                 )
                 additional_drawdown_line_obj.set_gid(f'additional_drawdown_line:{column_name_str}')
 
         drawdown_ax.set_ylabel('Drawdown')
-        drawdown_ax.yaxis.set_major_formatter(FuncFormatter(percentage_major_formatter_2))
+        drawdown_ax.yaxis.set_major_formatter(FuncFormatter(fraction_major_formatter))
         drawdown_ax.tick_params(axis='x', labelbottom=False)
         drawdown_ax.margins(x=_PLOT_X_MARGIN_FLOAT)
 
@@ -275,9 +297,9 @@ def plot(
             bar_width_float,
             label=strategy_label,
             color=strategy_color_str,
-            alpha=0.88,
+            alpha=0.78,
             edgecolor=bar_edge_color_str,
-            linewidth=0.55,
+            linewidth=0.75,
             zorder=3,
         )
         for bar_patch in strategy_bar_container.patches:
@@ -290,9 +312,9 @@ def plot(
                 bar_width_float,
                 label=benchmark_label,
                 color=benchmark_color_str,
-                alpha=0.80,
+                alpha=0.72,
                 edgecolor=bar_edge_color_str,
-                linewidth=0.55,
+                linewidth=0.75,
                 zorder=2,
             )
             for bar_patch in benchmark_bar_container.patches:
@@ -302,7 +324,7 @@ def plot(
         annual_ax.set_xticks(annual_position_vec)
         annual_ax.set_xticklabels(strategy_yearly_return_ser.index.year, rotation=90)
         annual_ax.set_xlim(-0.6, len(strategy_yearly_return_ser) - 0.4)
-        annual_ax.yaxis.set_major_formatter(FuncFormatter(percentage_major_formatter_2))
+        annual_ax.yaxis.set_major_formatter(FuncFormatter(fraction_major_formatter))
 
         for separator_float in np.arange(-0.5, len(strategy_yearly_return_ser) + 0.5, 1.0):
             annual_ax.axvline(
@@ -316,40 +338,31 @@ def plot(
         for axis_obj in (equity_ax, drawdown_ax, annual_ax):
             apply_signature_axis_style(axis_obj, vertical_lines)
 
-        strategy_total_return_float = strategy_total_value_ser.iloc[-1] / strategy_total_value_ser.iloc[0] - 1.0
-        label_offset_dict = _resolve_end_label_offset_dict(
-            strategy_end_value_float=float(strategy_equity_ser.iloc[-1]),
-            benchmark_end_value_float=(
-                float(benchmark_equity_ser.iloc[-1]) if benchmark_equity_ser is not None else None
-            ),
-        )
-        add_label(
-            equity_ax,
-            strategy_equity_line_obj,
-            f'{strategy_total_return_float:+,.0%}',
-            border_color_str=strategy_color_str,
-            label_id_str='strategy_total_return_label',
-            x_offset_points_int=_END_LABEL_X_OFFSET_POINTS_INT,
-            horizontal_alignment_str='right',
-            y_offset_points_int=label_offset_dict['strategy'],
-            zorder=10,
-        )
+        promoted_growth_tick_spec_list = [
+            {
+                'growth_of_1_float': float(strategy_total_value_ser.iloc[-1] / strategy_total_value_ser.iloc[0]),
+                'color_str': strategy_color_str,
+                'label_id_str': 'strategy_growth_of_1_label',
+                'axis_tick_id_str': 'strategy_growth_of_1_axis_tick',
+            }
+        ]
 
-        if benchmark_equity_line_obj is not None and benchmark_total_value_ser is not None:
-            benchmark_total_return_float = (
-                benchmark_total_value_ser.iloc[-1] / benchmark_total_value_ser.iloc[0] - 1.0
+        if benchmark_growth_line_obj is not None and benchmark_total_value_ser is not None:
+            promoted_growth_tick_spec_list.append(
+                {
+                    'growth_of_1_float': float(
+                        benchmark_total_value_ser.iloc[-1] / benchmark_total_value_ser.iloc[0]
+                    ),
+                    'color_str': benchmark_color_str,
+                    'label_id_str': 'benchmark_growth_of_1_label',
+                    'axis_tick_id_str': 'benchmark_growth_of_1_axis_tick',
+                }
             )
-            add_label(
-                equity_ax,
-                benchmark_equity_line_obj,
-                f'{benchmark_total_return_float:+,.0%}',
-                border_color_str=benchmark_color_str,
-                label_id_str='benchmark_total_return_label',
-                x_offset_points_int=_END_LABEL_X_OFFSET_POINTS_INT,
-                horizontal_alignment_str='right',
-                y_offset_points_int=label_offset_dict['benchmark'],
-                zorder=9,
-            )
+
+        promote_right_axis_growth_ticks(
+            equity_ax,
+            promoted_growth_tick_spec_list=promoted_growth_tick_spec_list,
+        )
 
         figure_obj.align_ylabels((equity_ax, drawdown_ax, annual_ax))
 
@@ -359,8 +372,8 @@ def plot(
         plt.show()
 
 
-def _set_equity_ticks(axis_obj, equity_max_float: float) -> None:
-    upper_tick_float = max(1.0, float(equity_max_float))
+def _set_growth_of_1_ticks(axis_obj, growth_of_1_max_float: float) -> None:
+    upper_tick_float = max(1.0, float(growth_of_1_max_float))
     major_tick_list = [0.5, 1.0]
     candidate_tick_list = [1.25, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0]
     major_tick_list.extend(
@@ -372,28 +385,6 @@ def _set_equity_ticks(axis_obj, equity_max_float: float) -> None:
         major_tick_list.extend(extended_tick_arr.tolist())
 
     axis_obj.set_yticks(sorted(set(major_tick_list)))
-
-
-def _resolve_end_label_offset_dict(
-        strategy_end_value_float: float,
-        benchmark_end_value_float: float | None,
-) -> dict[str, int]:
-    """
-    Offset end labels away from each other using the final normalized equity values.
-
-    If benchmark_end_value_float > strategy_end_value_float, then:
-
-    strategy_label_offset_int < 0
-    benchmark_label_offset_int > 0
-    """
-    if benchmark_end_value_float is None:
-        return {'strategy': 0, 'benchmark': 0}
-
-    offset_magnitude_int = 12
-    if benchmark_end_value_float >= strategy_end_value_float:
-        return {'strategy': -offset_magnitude_int, 'benchmark': offset_magnitude_int}
-
-    return {'strategy': offset_magnitude_int, 'benchmark': -offset_magnitude_int}
 
 
 def generate_yearly_returns(series):
@@ -426,52 +417,97 @@ def compute_drawdown(total_value_ser: pd.Series) -> pd.Series:
     return drawdown_ser
 
 
-def add_label(
+def promote_right_axis_growth_ticks(
         axis_obj,
-        line_obj,
-        label_str: str,
-        border_color_str: str,
-        label_id_str: str,
-        font_color_str: str | None = None,
-        x_offset_points_int: int = _END_LABEL_X_OFFSET_POINTS_INT,
-        horizontal_alignment_str: str = 'right',
-        y_offset_points_int: int = 0,
-        zorder: int = 5,
-):
-    """Add a compact end-of-line label for the final total return."""
-    x_data, y_data = line_obj.get_data()
-    font_color_str = SIGNATURE_PALETTE_DICT['ink'] if font_color_str is None else font_color_str
+        promoted_growth_tick_spec_list: list[dict[str, object]],
+) -> None:
+    """Promote final Growth of $1 values into native right-axis ticks.
 
-    annotation_obj = axis_obj.annotate(
-        label_str,
-        xy=(x_data[-1], y_data[-1]),
-        xytext=(x_offset_points_int, y_offset_points_int),
-        textcoords='offset points',
-        ha=horizontal_alignment_str,
-        va='center',
-        fontsize=7.5,
-        color=font_color_str,
-        bbox=dict(
-            boxstyle='round,pad=0.22,rounding_size=0.18',
-            edgecolor=border_color_str,
-            facecolor=SIGNATURE_PALETTE_DICT['label_face'],
-            linewidth=1.0,
-        ),
-        zorder=zorder,
-    )
-    annotation_obj.set_gid(label_id_str)
-    return annotation_obj
+    The promoted tick values are:
 
+    G_T = V_T / V_0
 
-def percentage_major_formatter(x, pos):
-    """Format equity-axis values with:
-
-    displayed_return_pct = (x - 1) * 100
+    The promoted tick labels are part of the y-axis tick system itself rather
+    than offset annotations, which keeps spacing aligned with the native axis
+    labels and avoids covering nearby tick values.
     """
-    return f'{(x - 1) * 100:.0f}%'
+    if len(promoted_growth_tick_spec_list) == 0:
+        return
+
+    base_growth_tick_list = [
+        float(tick_value_obj)
+        for tick_value_obj in axis_obj.get_yticks()
+        if np.isfinite(tick_value_obj) and float(tick_value_obj) > 0.0
+    ]
+    promoted_growth_value_list = [
+        float(spec_dict['growth_of_1_float'])
+        for spec_dict in promoted_growth_tick_spec_list
+        if np.isfinite(spec_dict['growth_of_1_float']) and float(spec_dict['growth_of_1_float']) > 0.0
+    ]
+    combined_growth_tick_list = sorted(set(base_growth_tick_list + promoted_growth_value_list))
+
+    promoted_growth_pixel_list = [
+        float(axis_obj.transData.transform((0.0, promoted_growth_float))[1])
+        for promoted_growth_float in promoted_growth_value_list
+    ]
+
+    pruned_growth_tick_list: list[float] = []
+    for tick_value_float in combined_growth_tick_list:
+        tick_is_promoted_bool = any(
+            np.isclose(tick_value_float, promoted_growth_float, atol=1e-9, rtol=0.0)
+            for promoted_growth_float in promoted_growth_value_list
+        )
+        if tick_is_promoted_bool:
+            pruned_growth_tick_list.append(tick_value_float)
+            continue
+
+        tick_pixel_float = float(axis_obj.transData.transform((0.0, tick_value_float))[1])
+        crowded_by_promoted_bool = any(
+            abs(tick_pixel_float - promoted_pixel_float) < _PROMOTED_TICK_MIN_VERTICAL_GAP_PIXELS_FLOAT
+            for promoted_pixel_float in promoted_growth_pixel_list
+        )
+        if not crowded_by_promoted_bool:
+            pruned_growth_tick_list.append(tick_value_float)
+
+    axis_obj.set_yticks(pruned_growth_tick_list)
+    axis_obj.figure.canvas.draw()
+
+    for major_tick_obj in axis_obj.yaxis.get_major_ticks():
+        tick_value_float = float(major_tick_obj.get_loc())
+        major_tick_obj.tick1line.set_visible(False)
+        major_tick_obj.tick2line.set_color(SIGNATURE_PALETTE_DICT['ink'])
+        major_tick_obj.tick2line.set_markeredgewidth(0.8)
+        major_tick_obj.tick2line.set_markersize(3.5)
+        major_tick_obj.label2.set_color(SIGNATURE_PALETTE_DICT['ink'])
+        major_tick_obj.label2.set_fontweight('normal')
+        major_tick_obj.label2.set_gid(None)
+        major_tick_obj.tick2line.set_gid(None)
+
+        for promoted_tick_spec_dict in promoted_growth_tick_spec_list:
+            promoted_growth_float = float(promoted_tick_spec_dict['growth_of_1_float'])
+            if not np.isclose(tick_value_float, promoted_growth_float, atol=1e-9, rtol=0.0):
+                continue
+
+            promoted_color_str = str(promoted_tick_spec_dict['color_str'])
+            major_tick_obj.tick2line.set_color(promoted_color_str)
+            major_tick_obj.tick2line.set_markeredgewidth(1.2)
+            major_tick_obj.tick2line.set_markersize(5.0)
+            major_tick_obj.tick2line.set_gid(str(promoted_tick_spec_dict['axis_tick_id_str']))
+            major_tick_obj.label2.set_color(promoted_color_str)
+            major_tick_obj.label2.set_fontweight('semibold')
+            major_tick_obj.label2.set_gid(str(promoted_tick_spec_dict['label_id_str']))
+            break
 
 
-def percentage_major_formatter_2(x, pos):
+def growth_of_1_major_formatter(x, pos):
+    """Format Growth of $1 axis values with:
+
+    displayed_growth_dollar_float = 1.0 * growth_of_1_float
+    """
+    return f'${x:,.2f}'
+
+
+def fraction_major_formatter(x, pos):
     """Format drawdown and annual-return values with:
 
     displayed_return_pct = x * 100
@@ -479,6 +515,6 @@ def percentage_major_formatter_2(x, pos):
     return f'{x * 100:.0f}%'
 
 
-def percentage_minor_formatter(x, pos):
+def blank_minor_formatter(x, pos):
     """Keep minor tick labels empty for a cleaner look."""
     return ''

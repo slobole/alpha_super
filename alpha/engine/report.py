@@ -10,11 +10,14 @@ import numpy as np
 from pathlib import Path
 from datetime import datetime
 
+from alpha.engine.metrics import generate_monthly_returns
 from alpha.engine.theme import (
     SEABORN_DEEP_COLOR_LIST,
+    SIGNATURE_ASSET_COLOR_DICT,
     SIGNATURE_PALETTE_DICT,
     blend_hex_color_str,
     build_report_css,
+    build_report_font_head_html,
     build_signature_rcparams,
 )
 
@@ -25,6 +28,9 @@ _METADATA_FILENAME = 'metadata.json'
 _TRANSACTION_CSV_FILENAME = 'transactions.csv'
 _DAILY_RETURN_HISTOGRAM_BIN_COUNT_INT = 60
 _TRADE_RETURN_HISTOGRAM_BIN_COUNT_INT = 60
+_FALLBACK_ASSET_SET = frozenset({'SPY', 'SSO', 'QQQ', 'QLD', 'TQQQ', 'UPRO'})
+_WEIGHT_STACK_EDGE_COLOR_STR = '#101418'
+_FONT_HEAD_HTML_STR = build_report_font_head_html()
 
 
 def _json_default(value):
@@ -33,6 +39,16 @@ def _json_default(value):
     if isinstance(value, pd.Timestamp):
         return value.isoformat()
     return value
+
+
+def _weight_color_for_asset(asset_name_str: str) -> str:
+    normalized_asset_name_str = str(asset_name_str).upper()
+    if normalized_asset_name_str in _FALLBACK_ASSET_SET:
+        return SIGNATURE_PALETTE_DICT['benchmark']
+    return SIGNATURE_ASSET_COLOR_DICT.get(
+        normalized_asset_name_str,
+        SIGNATURE_ASSET_COLOR_DICT['DEFAULT'],
+    )
 
 
 def _write_metadata(metadata_path: Path, metadata_dict: dict):
@@ -137,6 +153,124 @@ def _fmt_num(val, decimals=2):
         return f'{float(val):,.{decimals}f}'
     except (TypeError, ValueError):
         return str(val)
+
+
+def _safe_summary_metric_value(summary_df: pd.DataFrame | None, column_name_str: str, metric_name_str: str):
+    """Return a summary-table value when the metric exists; otherwise None."""
+    if summary_df is None:
+        return None
+    if column_name_str not in summary_df.columns or metric_name_str not in summary_df.index:
+        return None
+
+    metric_value_obj = summary_df.loc[metric_name_str, column_name_str]
+    if metric_value_obj == '' or (isinstance(metric_value_obj, float) and np.isnan(metric_value_obj)):
+        return None
+    return metric_value_obj
+
+
+def _fmt_signed_pct(metric_value_obj) -> str:
+    try:
+        return f'{float(metric_value_obj):+,.2f}%'
+    except (TypeError, ValueError):
+        return 'N/A'
+
+
+def _format_kpi_value_str(metric_name_str: str, metric_value_obj) -> str:
+    """Format KPI values using the summary-table metric conventions."""
+    if metric_value_obj is None:
+        return 'N/A'
+    if metric_name_str in {'Return [%]', 'Return (Ann.) [%]', 'Max. Drawdown [%]'}:
+        return _fmt_signed_pct(metric_value_obj)
+    if metric_name_str == 'Volatility (Ann.) [%]':
+        return _fmt_pct(metric_value_obj)
+    if '[$]' in metric_name_str:
+        return _fmt_dollar(metric_value_obj)
+    if metric_name_str == 'Sharpe Ratio':
+        return _fmt_num(metric_value_obj, 2)
+    return str(metric_value_obj)
+
+
+def _kpi_value_class_str(metric_name_str: str, metric_value_obj) -> str:
+    if metric_value_obj is None:
+        return ''
+    if metric_name_str in {'Return [%]', 'Return (Ann.) [%]'}:
+        return _signed_value_class_str(metric_value_obj)
+    return ''
+
+
+def _build_kpi_card_html(
+    title_str: str,
+    value_str: str,
+    note_str: str,
+    value_class_str: str = '',
+) -> str:
+    value_class_attr_str = f'kpi-value {value_class_str}'.strip()
+    return (
+        '<div class="kpi-card">'
+        f'<div class="kpi-label">{title_str}</div>'
+        f'<div class="{value_class_attr_str}">{value_str}</div>'
+        f'<div class="kpi-note">{note_str}</div>'
+        '</div>'
+    )
+
+
+def _build_kpi_grid_html(summary_df: pd.DataFrame | None, column_name_str: str) -> str:
+    """Build the KPI summary row shown beneath the report header."""
+    kpi_spec_list = [
+        ('Final [$]', 'Final Value', 'Ending equity'),
+        ('Return [%]', 'Total Return', 'Full sample'),
+        ('Return (Ann.) [%]', 'Annualized Return', '252-day convention'),
+        ('Volatility (Ann.) [%]', 'Volatility', 'Annualized sigma'),
+        ('Sharpe Ratio', 'Sharpe Ratio', 'Risk-free rate = 0'),
+        ('Max. Drawdown [%]', 'Max Drawdown', 'Peak to trough'),
+    ]
+    kpi_card_html_list: list[str] = []
+    for metric_name_str, title_str, note_str in kpi_spec_list:
+        metric_value_obj = _safe_summary_metric_value(summary_df, column_name_str, metric_name_str)
+        kpi_card_html_list.append(
+            _build_kpi_card_html(
+                title_str=title_str,
+                value_str=_format_kpi_value_str(metric_name_str, metric_value_obj),
+                note_str=note_str,
+                value_class_str=_kpi_value_class_str(metric_name_str, metric_value_obj),
+            )
+        )
+    return f'<div class="kpi-grid">{"".join(kpi_card_html_list)}</div>'
+
+
+def _wrap_card_html(card_body_html_str: str, card_class_str: str = '') -> str:
+    card_class_attr_str = 'card'
+    if card_class_str:
+        card_class_attr_str += f' {card_class_str}'
+    return f'<section class="{card_class_attr_str}">{card_body_html_str}</section>'
+
+
+def _build_card_grid_html(card_html_list: list[str]) -> str:
+    active_card_html_list = [card_html_str for card_html_str in card_html_list if card_html_str]
+    if len(active_card_html_list) == 0:
+        return ''
+    return f'<div class="card-grid">{"".join(active_card_html_list)}</div>'
+
+
+def _build_report_header_html(
+    report_kind_str: str,
+    report_name_str: str,
+    run_date_str: str,
+    start_str: str,
+    end_str: str,
+    capital_base_obj,
+    final_value_obj,
+) -> str:
+    return (
+        '<header class="report-header">'
+        f'<div class="report-eyebrow">{report_kind_str}</div>'
+        f'<h1>{report_name_str}</h1>'
+        '<div class="meta">'
+        f'Run: {run_date_str} &nbsp;|&nbsp; Period: {start_str} &rarr; {end_str} &nbsp;|&nbsp; '
+        f'Capital: {_fmt_dollar(capital_base_obj)} &rarr; {_fmt_dollar(final_value_obj)}'
+        '</div>'
+        '</header>'
+    )
 
 
 def _prepare_daily_return_distribution_dict(strategy) -> dict[str, object]:
@@ -668,17 +802,38 @@ def _fmt_cell(metric, val):
     return _fmt_num(val, 2)
 
 
+def _summary_metric_cell_class_str(metric_name_str: str, metric_value_obj) -> str:
+    return ''
+
+
+def _signed_value_class_str(value_obj) -> str:
+    """Map a numeric sign to a shared positive/negative table class."""
+    try:
+        value_float = float(value_obj)
+    except (TypeError, ValueError):
+        return ''
+
+    if np.isnan(value_float):
+        return ''
+    if value_float > 0.0:
+        return 'pos'
+    if value_float < 0.0:
+        return 'neg'
+    return ''
+
+
 def _format_summary(df: pd.DataFrame) -> str:
     """Render strategy summary DataFrame as an HTML table."""
     headers = '<th>Metric</th>' + ''.join(f'<th>{c}</th>' for c in df.columns)
     rows = []
     for metric in df.index:
-        row_class_str = ' class="summary-row-sharpe"' if metric == 'Sharpe Ratio' else ''
-        metric_class_str = 'metric metric-sharpe' if metric == 'Sharpe Ratio' else 'metric'
-        cells = [f'<td class="{metric_class_str}">{metric}</td>']
+        cells = [f'<td class="metric">{metric}</td>']
         for col in df.columns:
-            cells.append(f'<td>{_fmt_cell(metric, df.loc[metric, col])}</td>')
-        rows.append(f'<tr{row_class_str}>' + ''.join(cells) + '</tr>')
+            metric_value_obj = df.loc[metric, col]
+            cell_class_str = _summary_metric_cell_class_str(metric, metric_value_obj)
+            class_attr_str = f' class="{cell_class_str}"' if cell_class_str else ''
+            cells.append(f'<td{class_attr_str}>{_fmt_cell(metric, metric_value_obj)}</td>')
+        rows.append('<tr>' + ''.join(cells) + '</tr>')
     return f'<table><thead><tr>{headers}</tr></thead><tbody>{"".join(rows)}</tbody></table>'
 
 
@@ -719,11 +874,13 @@ def _format_trades(df: pd.DataFrame) -> str:
             elif col == 'capital':
                 cells.append(f'<td>{_fmt_dollar(val)}</td>')
             elif col == 'profit':
-                cls = 'pos' if val >= 0 else 'neg'
-                cells.append(f'<td class="{cls}">{_fmt_dollar(val)}</td>')
+                cell_class_str = _signed_value_class_str(val)
+                class_attr_str = f' class="{cell_class_str}"' if cell_class_str else ''
+                cells.append(f'<td{class_attr_str}>{_fmt_dollar(val)}</td>')
             elif col == 'return':
-                cls = 'pos' if val >= 0 else 'neg'
-                cells.append(f'<td class="{cls}">{_fmt_pct(val * 100)}</td>')
+                cell_class_str = _signed_value_class_str(val)
+                class_attr_str = f' class="{cell_class_str}"' if cell_class_str else ''
+                cells.append(f'<td{class_attr_str}>{_fmt_pct(val * 100)}</td>')
             else:
                 cells.append(f'<td>{val}</td>')
         rows.append('<tr>' + ''.join(cells) + '</tr>')
@@ -775,35 +932,133 @@ def _ret_color(val) -> str:
     if value_float >= 0.0:
         background_color_str = blend_hex_color_str(
             SIGNATURE_PALETTE_DICT['page'],
-            SIGNATURE_PALETTE_DICT['strategy'],
+            SIGNATURE_PALETTE_DICT['profit'],
             fill_weight_float,
         )
         font_color_str = (
-            SIGNATURE_PALETTE_DICT['strategy_dark']
+            SIGNATURE_PALETTE_DICT['profit_dark']
             if intensity_float < 0.65 else SIGNATURE_PALETTE_DICT['page']
         )
     else:
         background_color_str = blend_hex_color_str(
             SIGNATURE_PALETTE_DICT['page'],
-            SIGNATURE_PALETTE_DICT['benchmark'],
+            SIGNATURE_PALETTE_DICT['loss'],
             fill_weight_float,
         )
         font_color_str = (
-            SIGNATURE_PALETTE_DICT['benchmark_dark']
+            SIGNATURE_PALETTE_DICT['loss_dark']
             if intensity_float < 0.65 else SIGNATURE_PALETTE_DICT['page']
         )
 
     return f'background-color: {background_color_str}; color: {font_color_str};'
 
 
-def _monthly_returns_html(mr: pd.DataFrame) -> str:
+def _monthly_benchmark_label(benchmark_name_str: str) -> str:
+    """Return a compact display label for benchmark metric columns."""
+    return str(benchmark_name_str).lstrip('$')
+
+
+def _strategy_monthly_benchmark_metric_bundle(strategy) -> tuple[pd.DataFrame | None, str | None]:
+    """Build annual benchmark metrics from the stored benchmark equity curve.
+
+    The comparison block uses the benchmark wealth series already stored in
+    `strategy.results`, preserving the annual formulas
+
+        R_ann_y = V_year_end_y / V_year_end_(y-1) - 1
+
+    and
+
+        DD_t = V_t / max(V_1, ..., V_t) - 1.
+    """
+    benchmark_name_list = list(getattr(strategy, '_benchmarks', []))
+    if len(benchmark_name_list) == 0:
+        return None, None
+
+    benchmark_name_str = benchmark_name_list[0]
+    if benchmark_name_str not in strategy.results.columns:
+        return None, None
+
+    benchmark_value_ser = strategy.results[benchmark_name_str].astype(float).copy()
+    benchmark_monthly_metric_df = generate_monthly_returns(
+        benchmark_value_ser,
+        add_sharpe_ratios=True,
+        add_max_drawdowns=True,
+    )
+    return benchmark_monthly_metric_df, _monthly_benchmark_label(benchmark_name_str)
+
+
+def _monthly_extra_cell_html(
+    column_name_str: str,
+    value_obj,
+    divider_left_bool: bool = False,
+) -> str:
+    class_attr_str = ' class="divider-left"' if divider_left_bool else ''
+    if pd.isna(value_obj) or value_obj == '':
+        return f'<td{class_attr_str}></td>'
+    if column_name_str == 'Annual Return':
+        return f'<td{class_attr_str} style="{_ret_color(value_obj)}">{value_obj:.1%}</td>'
+    if column_name_str == 'Sharpe Ratio':
+        return f'<td{class_attr_str}>{float(value_obj):.2f}</td>'
+    if column_name_str == 'Max Drawdown':
+        return f'<td{class_attr_str} style="{_drawdown_color(value_obj)}">{value_obj:.1%}</td>'
+    return f'<td{class_attr_str}>{value_obj}</td>'
+
+
+def _drawdown_color(val) -> str:
+    """Map a drawdown ratio to a light red inline CSS background."""
+    try:
+        value_float = float(val)
+    except (TypeError, ValueError):
+        return (
+            f'background-color: {SIGNATURE_PALETTE_DICT["neutral"]}; '
+            f'color: {SIGNATURE_PALETTE_DICT["ink"]};'
+        )
+    if np.isnan(value_float):
+        return (
+            f'background-color: {SIGNATURE_PALETTE_DICT["neutral"]}; '
+            f'color: {SIGNATURE_PALETTE_DICT["ink"]};'
+        )
+
+    intensity_float = min(abs(value_float) / 0.30, 1.0)
+    fill_weight_float = 0.18 + 0.28 * intensity_float
+    background_color_str = blend_hex_color_str(
+        SIGNATURE_PALETTE_DICT['page'],
+        SIGNATURE_PALETTE_DICT['loss'],
+        fill_weight_float,
+    )
+    font_color_str = (
+        SIGNATURE_PALETTE_DICT['loss_dark']
+        if intensity_float < 0.72 else SIGNATURE_PALETTE_DICT['page']
+    )
+    return f'background-color: {background_color_str}; color: {font_color_str};'
+
+
+def _monthly_returns_html(
+    mr: pd.DataFrame,
+    benchmark_mr: pd.DataFrame | None = None,
+    benchmark_label_str: str | None = None,
+) -> str:
     """Build the monthly returns heatmap as a raw HTML string."""
     month_cols = [m for m in range(1, 13) if m in mr.columns]
     extra_cols = [c for c in mr.columns if c not in range(1, 13)]
+    benchmark_metric_spec_list: list[tuple[str, str]] = []
+    if benchmark_mr is not None and benchmark_label_str:
+        benchmark_metric_spec_list = [
+            ('Annual Return', f'{benchmark_label_str} Ann Ret'),
+            ('Max Drawdown', f'{benchmark_label_str} Max DD'),
+            ('Sharpe Ratio', f'{benchmark_label_str} Sharpe'),
+        ]
 
     month_headers = ''.join(f'<th>{_MONTH_NAMES[m - 1]}</th>' for m in month_cols)
     extra_headers = ''.join(f'<th>{c}</th>' for c in extra_cols)
-    header = f'<tr><th>Year</th>{month_headers}{extra_headers}</tr>'
+    benchmark_headers = ''.join(
+        (
+            f'<th class="divider-left">{display_name_str}</th>'
+            if metric_idx_int == 0 else f'<th>{display_name_str}</th>'
+        )
+        for metric_idx_int, (_, display_name_str) in enumerate(benchmark_metric_spec_list)
+    )
+    header = f'<tr><th>Year</th>{month_headers}{extra_headers}{benchmark_headers}</tr>'
 
     rows = []
     for year in mr.index:
@@ -818,16 +1073,20 @@ def _monthly_returns_html(mr: pd.DataFrame) -> str:
                 cells.append(f'<td style="{_ret_color(val)}">{val:.1%}</td>')
         for c in extra_cols:
             val = mr.loc[year, c]
-            if pd.isna(val) or val == '':
-                cells.append('<td></td>')
-            elif c == 'Annual Return':
-                cells.append(f'<td style="{_ret_color(val)}">{val:.1%}</td>')
-            elif c == 'Sharpe Ratio':
-                cells.append(f'<td>{float(val):.2f}</td>')
-            elif c == 'Max Drawdown':
-                cells.append(f'<td>{val:.1%}</td>')
-            else:
-                cells.append(f'<td>{val}</td>')
+            cells.append(_monthly_extra_cell_html(c, val))
+        if benchmark_mr is not None:
+            for metric_idx_int, (metric_name_str, _) in enumerate(benchmark_metric_spec_list):
+                if year in benchmark_mr.index and metric_name_str in benchmark_mr.columns:
+                    benchmark_value_obj = benchmark_mr.loc[year, metric_name_str]
+                else:
+                    benchmark_value_obj = np.nan
+                cells.append(
+                    _monthly_extra_cell_html(
+                        metric_name_str,
+                        benchmark_value_obj,
+                        divider_left_bool=(metric_idx_int == 0),
+                    )
+                )
         rows.append('<tr>' + ''.join(cells) + '</tr>')
 
     return (f'<table class="heatmap"><thead>{header}</thead>'
@@ -1021,10 +1280,7 @@ def _weights_chart_b64(
     if not active_cols:
         return None
 
-    color_list = [
-        SEABORN_DEEP_COLOR_LIST[column_idx_int % len(SEABORN_DEEP_COLOR_LIST)]
-        for column_idx_int, _ in enumerate(active_cols)
-    ]
+    weight_color_list = [_weight_color_for_asset(column_name_str) for column_name_str in active_cols]
 
     with plt.rc_context(build_signature_rcparams(to_web_bool=True)):
         fig, ax = plt.subplots(figsize=(12, 4.8))
@@ -1032,19 +1288,21 @@ def _weights_chart_b64(
             weights.index,
             [weights[col].fillna(0).to_numpy() for col in active_cols],
             labels=active_cols,
-            colors=color_list,
-            alpha=0.82,
-            edgecolor=SIGNATURE_PALETTE_DICT['page'],
-            linewidth=0.6,
+            colors=weight_color_list,
+            alpha=0.88,
+            edgecolor=_WEIGHT_STACK_EDGE_COLOR_STR,
+            linewidth=0.95,
         )
         ax.set_title(title)
         ax.set_ylabel('Weight')
         ax.set_xlabel('Date')
         ax.set_ylim(0, 1.05)
         ax.yaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(xmax=1.0, decimals=0))
-        ax.grid(True)
+        ax.grid(axis='y', alpha=1.0)
         _add_vertical_line_markers(ax, vertical_line_index)
-        ax.legend(loc='upper left', ncol=min(3, len(active_cols)), fontsize=8)
+        legend_obj = ax.legend(loc='upper left', ncol=min(3, len(active_cols)), fontsize=8, frameon=True)
+        legend_obj.get_frame().set_edgecolor(SIGNATURE_PALETTE_DICT['legend_edge'])
+        legend_obj.get_frame().set_facecolor(SIGNATURE_PALETTE_DICT['legend_face'])
         fig.autofmt_xdate()
         fig.tight_layout()
 
@@ -1301,7 +1559,11 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
 
         pod_monthly = ''
         if hasattr(s, 'monthly_returns') and s.monthly_returns is not None:
-            pod_monthly = f'<h3>Monthly Returns</h3><div class="scroll">{_monthly_returns_html(s.monthly_returns)}</div>'
+            pod_benchmark_monthly_metric_df, pod_benchmark_label_str = _strategy_monthly_benchmark_metric_bundle(s)
+            pod_monthly = (
+                '<h3>Monthly Returns</h3>'
+                f'<div class="scroll">{_monthly_returns_html(s.monthly_returns, pod_benchmark_monthly_metric_df, pod_benchmark_label_str)}</div>'
+            )
 
         pod_trade_stats = ''
         if hasattr(s, 'summary_trades') and s.summary_trades is not None and len(s.summary_trades) > 0:
@@ -1325,46 +1587,81 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
                 f'<div class="scroll">{_format_summary(s.summary)}</div>'
             )
 
-        pod_sections += f'''
+        pod_sections += _wrap_card_html(
+            f'''
 <h2>{pod_name}</h2>
 {allocated_summary_html}
 {standalone_summary_html}
 {pod_monthly}
 {pod_trade_stats}
-'''
+''',
+            card_class_str='card-pod',
+        )
 
-    body = f'''<h1>{portfolio.name}</h1>
-<div class="meta">
-  Run: {run_date} &nbsp;|&nbsp; Period: {start_str} &rarr; {end_str} &nbsp;|&nbsp;
-  Capital: {_fmt_dollar(capital_base)} &rarr; {_fmt_dollar(final_val)}
-</div>
-
-<h2>Weight Allocation</h2>
-{weight_table}
-
+    header_html_str = _build_report_header_html(
+        report_kind_str='Portfolio Report',
+        report_name_str=portfolio.name,
+        run_date_str=run_date,
+        start_str=start_str,
+        end_str=end_str,
+        capital_base_obj=capital_base,
+        final_value_obj=final_val,
+    )
+    kpi_grid_html_str = _build_kpi_grid_html(summ, portfolio.name)
+    equity_card_html_str = _wrap_card_html(
+        f'''
 <h2>Equity Curve</h2>
 <div class="chart-wrap">
   <img src="data:image/png;base64,{chart_b64}" alt="Portfolio Equity Curve">
 </div>
-
+''',
+        card_class_str='card-primary',
+    )
+    weight_allocation_card_html_str = _wrap_card_html(
+        f'''
+<h2>Weight Allocation</h2>
+{weight_table}
+''',
+    )
+    provenance_card_html_str = _wrap_card_html(_build_provenance_html(portfolio))
+    performance_summary_card_html_str = _wrap_card_html(
+        f'''
 <h2>Portfolio Performance Summary</h2>
 <div class="scroll">{_format_summary(summ)}</div>
-
-{_build_provenance_html(portfolio)}
-
-{_build_diagnostics_html(portfolio)}
-
-{_portfolio_pod_drift_html(portfolio)}
-
+''',
+    )
+    monthly_returns_card_html_str = _wrap_card_html(
+        f'''
 <h2>Portfolio Monthly Returns</h2>
 <div class="scroll">{_monthly_returns_html(portfolio.monthly_returns)}</div>
-
+''',
+        card_class_str='card-monthly-returns',
+    )
+    diagnostics_card_html_str = _wrap_card_html(_build_diagnostics_html(portfolio))
+    pod_drift_card_html_str = _wrap_card_html(_portfolio_pod_drift_html(portfolio))
+    pooled_trade_stats_card_html_str = _wrap_card_html(
+        f'''
 <h2>Pooled Pod Trade Statistics</h2>
 <div class="scroll">{_format_summary_trades(portfolio.summary_trades) if portfolio.summary_trades is not None and len(portfolio.summary_trades) > 0 else '<p>No trades.</p>'}</div>
+''',
+    )
+    pooled_trade_distribution_card_html_str = _wrap_card_html(
+        _build_trade_distribution_html(portfolio._trades, 'Pooled Pod Trade Distribution')
+    )
 
-{_build_trade_distribution_html(portfolio._trades, 'Pooled Pod Trade Distribution')}
-
-{pod_sections}'''
+    body = f'''<div class="report-shell">
+{header_html_str}
+{kpi_grid_html_str}
+{equity_card_html_str}
+{_build_card_grid_html([weight_allocation_card_html_str, provenance_card_html_str])}
+{performance_summary_card_html_str}
+{monthly_returns_card_html_str}
+{diagnostics_card_html_str}
+{pod_drift_card_html_str}
+{pooled_trade_stats_card_html_str}
+{pooled_trade_distribution_card_html_str}
+<div class="section-stack">{pod_sections}</div>
+</div>'''
 
     return f'''<!DOCTYPE html>
 <html lang="en">
@@ -1372,6 +1669,7 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{portfolio.name} \u2014 Portfolio Report</title>
+{_FONT_HEAD_HTML_STR}
 <style>{_CSS}</style>
 </head>
 <body>
@@ -1389,35 +1687,71 @@ def _build_html(strategy, chart_b64: str) -> str:
     capital_base = summ.loc['Start [$]', 'Strategy']
     final_val = summ.loc['Final [$]', 'Strategy']
     run_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-    body = f'''<h1>{strategy.name}</h1>
-<div class="meta">
-  Run: {run_date} &nbsp;|&nbsp; Period: {start_str} &rarr; {end_str} &nbsp;|&nbsp;
-  Capital: {_fmt_dollar(capital_base)} &rarr; {_fmt_dollar(final_val)}
-</div>
-
+    header_html_str = _build_report_header_html(
+        report_kind_str='Strategy Report',
+        report_name_str=strategy.name,
+        run_date_str=run_date,
+        start_str=start_str,
+        end_str=end_str,
+        capital_base_obj=capital_base,
+        final_value_obj=final_val,
+    )
+    kpi_grid_html_str = _build_kpi_grid_html(summ, 'Strategy')
+    equity_card_html_str = _wrap_card_html(
+        f'''
 <h2>Equity Curve</h2>
 <div class="chart-wrap">
   <img src="data:image/png;base64,{chart_b64}" alt="Equity Curve">
 </div>
-
- {_portfolio_weights_html(strategy)}
-
+''',
+        card_class_str='card-primary',
+    )
+    weights_html_str = _portfolio_weights_html(strategy)
+    weights_card_html_str = _wrap_card_html(weights_html_str) if weights_html_str else ''
+    performance_summary_card_html_str = _wrap_card_html(
+        f'''
 <h2>Performance Summary</h2>
 <div class="scroll">{_format_summary(summ)}</div>
-
+''',
+    )
+    benchmark_monthly_metric_df, benchmark_label_str = _strategy_monthly_benchmark_metric_bundle(strategy)
+    monthly_returns_card_html_str = _wrap_card_html(
+        f'''
 <h2>Monthly Returns</h2>
-<div class="scroll">{_monthly_returns_html(strategy.monthly_returns)}</div>
-
+<div class="scroll">{_monthly_returns_html(strategy.monthly_returns, benchmark_monthly_metric_df, benchmark_label_str)}</div>
+''',
+        card_class_str='card-monthly-returns',
+    )
+    trade_statistics_card_html_str = _wrap_card_html(
+        f'''
 <h2>Trade Statistics</h2>
 <div class="scroll">{_format_summary_trades(strategy.summary_trades)}</div>
-
-{_build_trade_distribution_html(strategy._trades, 'Trade Return Distribution')}
-
-{_build_daily_return_distribution_html(strategy)}
-
+''',
+    )
+    trade_distribution_card_html_str = _wrap_card_html(
+        _build_trade_distribution_html(strategy._trades, 'Trade Return Distribution')
+    )
+    daily_distribution_card_html_str = _wrap_card_html(
+        _build_daily_return_distribution_html(strategy)
+    )
+    closed_trades_card_html_str = _wrap_card_html(
+        f'''
 <h2>Closed Trades</h2>
-<div class="scroll">{_format_trades(strategy._trades)}</div>'''
+<div class="scroll">{_format_trades(strategy._trades)}</div>
+''',
+    )
+
+    body = f'''<div class="report-shell">
+{header_html_str}
+{kpi_grid_html_str}
+{equity_card_html_str}
+{weights_card_html_str}
+{_build_card_grid_html([performance_summary_card_html_str, trade_statistics_card_html_str])}
+{monthly_returns_card_html_str}
+{trade_distribution_card_html_str}
+{daily_distribution_card_html_str}
+{closed_trades_card_html_str}
+</div>'''
 
     return f'''<!DOCTYPE html>
 <html lang="en">
@@ -1425,6 +1759,7 @@ def _build_html(strategy, chart_b64: str) -> str:
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{strategy.name} \u2014 Strategy Report</title>
+{_FONT_HEAD_HTML_STR}
 <style>{_CSS}</style>
 </head>
 <body>
