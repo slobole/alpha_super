@@ -1,0 +1,19 @@
+name: multipod_monthly
+capital: 50000
+
+pods:
+  - strategy: strategy_taa_df_btal_fallback_tqqq_vix_cash
+    weight: 0.3
+
+  - strategy: strategy_mo_atr_normalized_ndx
+    weight: 0.3
+
+  - strategy: strategy_eom_tlt_spy_sso_variant_research
+    weight: 0.3
+
+  - strategy: strategy_seasonality
+    weight: 0.1
+
+
+  # - strategy: JNKSHYStrategy  # uncomment when pkl is available
+  #   weight: 0.10

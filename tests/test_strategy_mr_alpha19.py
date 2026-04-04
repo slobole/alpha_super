@@ -10,7 +10,7 @@ TEST_NORGATEDATA_ROOT.mkdir(exist_ok=True)
 os.environ.setdefault("NORGATEDATA_ROOT", str(TEST_NORGATEDATA_ROOT))
 
 from alpha.engine.order import MarketOrder
-from strategies.strategy_mr_alpha19 import Alpha19PullbackStrategy
+from strategies.alpha19.strategy_mr_alpha19 import Alpha19PullbackStrategy
 
 
 class Alpha19PullbackStrategyTests(unittest.TestCase):

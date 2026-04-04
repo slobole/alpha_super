@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from strategies.strategy_eom_tlt_spy_upro_vix_size_variant import (
+from strategies.eom_tlt_vs_spy.strategy_eom_tlt_spy_upro_vix_size_variant import (
     DEFAULT_CONFIG,
     build_month_signal_df,
     build_trade_leg_plan_df,

@@ -48,14 +48,19 @@ class Order(ABC):
         self.trade_id = trade_id  # optional trade ID for tracking trades
         self.target = target  # whether the order is a target position
 
-    def amount_in_shares(self, price, portfolio_value, current_position):
+    def amount_in_shares(
+        self,
+        sizing_price_float,
+        portfolio_value_float,
+        current_position_float,
+    ):
         """
         converts the order amount into the number of shares to be bought/sold.
 
         parameters:
-        - price: The current market price of the asset.
-        - portfolio_value: The total portfolio value.
-        - current_position: The number of shares currently held.
+        - sizing_price_float: The price used to convert value/percent orders into shares.
+        - portfolio_value_float: The total portfolio value used for percent sizing.
+        - current_position_float: The number of shares currently held.
 
         returns:
         - the number of shares to be executed based on the order's unit.
@@ -67,25 +72,25 @@ class Order(ABC):
             if not self.target:
                 return self.amount
             else:
-                return self.amount - current_position
+                return self.amount - current_position_float
 
         elif self.unit == 'value':
             # convert order value into shares by dividing by price.
             # if the order is NOT a target, return the computed shares.
             # if it is a target, adjust to reach the target position.
             if not self.target:
-                return int(self.amount / price)
+                return int(self.amount / sizing_price_float)
             else:
-                return int(self.amount / price) - current_position
+                return int(self.amount / sizing_price_float) - current_position_float
 
         elif self.unit == 'percent':
             # convert portfolio percentage into shares.
             # if the order is NOT a target, return the computed shares.
             # if it is a target, adjust to reach the target position.
             if not self.target:
-                return int(portfolio_value * self.amount / price)
+                return int(portfolio_value_float * self.amount / sizing_price_float)
             else:
-                return int(portfolio_value * self.amount / price) - current_position
+                return int(portfolio_value_float * self.amount / sizing_price_float) - current_position_float
 
         else:
             # raise an error for invalid unit types

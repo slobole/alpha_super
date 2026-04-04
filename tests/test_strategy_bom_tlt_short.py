@@ -9,7 +9,7 @@ TEST_NORGATEDATA_ROOT.mkdir(exist_ok=True)
 os.environ.setdefault("NORGATEDATA_ROOT", str(TEST_NORGATEDATA_ROOT))
 
 from alpha.engine.order import MarketOrder
-from strategies.strategy_bom_tlt_short import (
+from strategies.bom_tlt.strategy_bom_tlt_short import (
     BomTltShortStrategy,
     build_bom_target_weight_ser,
 )

@@ -12,7 +12,7 @@ os.environ.setdefault("NORGATEDATA_ROOT", str(TEST_NORGATEDATA_ROOT))
 
 from alpha.engine.backtest import run_daily
 from alpha.engine.order import MarketOrder
-from strategies.strategy_mr_vix1d_vixy_long import (
+from strategies.vix_stuff.strategy_mr_vix1d_vixy_long import (
     Vix1dVixyLongStrategy,
     compute_vix1d_vixy_long_signal_df,
 )

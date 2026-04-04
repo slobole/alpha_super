@@ -5,8 +5,10 @@ from unittest import mock
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.colors as mcolors
+import matplotlib.dates as mdates
 import matplotlib.axes._axes as maxes
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 from alpha.engine.plot import generate_yearly_returns, plot
@@ -234,6 +236,31 @@ class PlotTests(unittest.TestCase):
         self.assertFalse(equity_ax.spines['top'].get_visible())
         self.assertEqual(mcolors.to_hex(equity_ax.spines['bottom'].get_edgecolor()), SIGNATURE_PALETTE_DICT['axes_border'])
         self.assertEqual(mcolors.to_hex(equity_ax.spines['right'].get_edgecolor()), SIGNATURE_PALETTE_DICT['axes_border'])
+
+    def test_plot_shows_year_labels_on_drawdown_x_axis(self):
+        dates_index = pd.date_range('2022-01-31', periods=36, freq='ME')
+        strategy_total_value_ser = pd.Series(
+            np.linspace(100.0, 160.0, len(dates_index)),
+            index=dates_index,
+        )
+
+        with mock.patch('matplotlib.pyplot.show'):
+            plot(strategy_total_value=strategy_total_value_ser, save_to=io.BytesIO(), use_log_scale=False)
+
+        figure_obj = plt.gcf()
+        drawdown_ax = figure_obj.axes[1]
+        figure_obj.canvas.draw()
+        drawdown_tick_label_list = [
+            tick_label_obj.get_text()
+            for tick_label_obj in drawdown_ax.get_xticklabels()
+            if tick_label_obj.get_visible() and tick_label_obj.get_text() != ''
+        ]
+
+        self.assertIsInstance(drawdown_ax.xaxis.get_major_locator(), mdates.YearLocator)
+        self.assertIsInstance(drawdown_ax.xaxis.get_major_formatter(), mdates.DateFormatter)
+        self.assertEqual(drawdown_ax.xaxis.get_major_formatter().fmt, '%Y')
+        self.assertGreater(len(drawdown_tick_label_list), 0)
+        self.assertTrue(all(len(tick_label_str) == 4 and tick_label_str.isdigit() for tick_label_str in drawdown_tick_label_list))
 
     def test_plot_aligns_axis_labels_with_final_growth_values(self):
         dates_index = pd.to_datetime(['2024-01-02', '2024-01-03', '2024-01-04', '2024-01-05'])

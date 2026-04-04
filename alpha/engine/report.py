@@ -887,6 +887,44 @@ def _format_trades(df: pd.DataFrame) -> str:
     return f'<table><thead><tr>{headers}</tr></thead><tbody>{"".join(rows)}</tbody></table>'
 
 
+def _format_open_trades(df: pd.DataFrame) -> str:
+    """Render marked open trades as an HTML table."""
+    if df is None or len(df) == 0:
+        return '<p>No open trades.</p>'
+
+    headers = '<th>trade_id</th>' + ''.join(f'<th>{c}</th>' for c in df.columns)
+    rows = []
+    for trade_id, row in df.iterrows():
+        cells = [f'<td>{trade_id}</td>']
+        for col in df.columns:
+            val = row[col]
+            if col in ('start', 'mark'):
+                cells.append(f'<td>{str(val.date()) if hasattr(val, "date") else val}</td>')
+            elif col in ('capital', 'market_value', 'commission'):
+                if pd.isna(val):
+                    cells.append('<td>N/A</td>')
+                else:
+                    cells.append(f'<td>{_fmt_dollar(val)}</td>')
+            elif col == 'unrealized_pnl':
+                if pd.isna(val):
+                    cells.append('<td>N/A</td>')
+                else:
+                    cell_class_str = _signed_value_class_str(val)
+                    class_attr_str = f' class="{cell_class_str}"' if cell_class_str else ''
+                    cells.append(f'<td{class_attr_str}>{_fmt_dollar(val)}</td>')
+            elif col == 'return':
+                if pd.isna(val):
+                    cells.append('<td>N/A</td>')
+                else:
+                    cell_class_str = _signed_value_class_str(val)
+                    class_attr_str = f' class="{cell_class_str}"' if cell_class_str else ''
+                    cells.append(f'<td{class_attr_str}>{_fmt_pct(val * 100)}</td>')
+            else:
+                cells.append(f'<td>{val}</td>')
+        rows.append('<tr>' + ''.join(cells) + '</tr>')
+    return f'<table><thead><tr>{headers}</tr></thead><tbody>{"".join(rows)}</tbody></table>'
+
+
 def _format_transactions(df: pd.DataFrame) -> str:
     """Render transactions DataFrame as an HTML table."""
     if df is None or len(df) == 0:
@@ -1734,6 +1772,12 @@ def _build_html(strategy, chart_b64: str) -> str:
     daily_distribution_card_html_str = _wrap_card_html(
         _build_daily_return_distribution_html(strategy)
     )
+    open_trades_card_html_str = _wrap_card_html(
+        f'''
+<h2>Open Trades</h2>
+<div class="scroll">{_format_open_trades(strategy._open_trades)}</div>
+''',
+    )
     closed_trades_card_html_str = _wrap_card_html(
         f'''
 <h2>Closed Trades</h2>
@@ -1750,6 +1794,7 @@ def _build_html(strategy, chart_b64: str) -> str:
 {monthly_returns_card_html_str}
 {trade_distribution_card_html_str}
 {daily_distribution_card_html_str}
+{open_trades_card_html_str}
 {closed_trades_card_html_str}
 </div>'''
 

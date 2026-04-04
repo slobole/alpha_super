@@ -12,7 +12,7 @@ os.environ.setdefault("NORGATEDATA_ROOT", str(TEST_NORGATEDATA_ROOT))
 
 from alpha.engine.backtest import run_daily
 from alpha.engine.order import MarketOrder
-from strategies.strategy_taa_traditional_sma8 import (
+from strategies.taa_traditional.strategy_taa_traditional_sma8 import (
     AssetSignalSpec,
     TraditionalSma8TrendStrategy,
     compute_month_end_trend_weight_df,
@@ -112,10 +112,10 @@ class TraditionalSma8TrendStrategyTests(unittest.TestCase):
         )
 
         with patch(
-            "strategies.strategy_taa_traditional_sma8.load_available_signal_symbol_set",
+            "strategies.taa_traditional.strategy_taa_traditional_sma8.load_available_signal_symbol_set",
             return_value={"VEA"},
         ), patch(
-            "strategies.strategy_taa_traditional_sma8.norgatedata.price_timeseries",
+            "strategies.taa_traditional.strategy_taa_traditional_sma8.norgatedata.price_timeseries",
             side_effect=mocked_price_timeseries,
         ):
             signal_close_df, selected_signal_symbol_map = load_signal_close_df(

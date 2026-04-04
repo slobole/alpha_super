@@ -8,7 +8,7 @@ The goal is not to pretend the backtest is identical to live trading. The goal i
 
 | ID | Area | Backtest Assumption / Current Behavior | Live Gap / Risk | Impact | Current Mitigation | Desired End State | Status |
 |---|---|---|---|---|---|---|---|
-| G-001 | TAA target sizing | `strategy_taa_df` intentionally uses generic `order_target_percent()` and `order_target_value()` sizing from stored prior-bar portfolio value. | Realized rebalance weights can drift from intended weights after overnight gaps, slippage, and rounding. | Medium for the current TAA sleeve; High if a future sleeve requires exact open weights. | Treat TAA weights as intended overnight allocations, not exact open marks. | Configurable rebalance sizing modes plus broker-aware reconciliation and optional reserve cash. | Intentional approximation |
+| G-001 | TAA target sizing | `strategy_taa_df` sizes target shares from stored prior-bar portfolio value and prior closes, then fills at the next open. | Realized rebalance weights can drift from intended weights after overnight gaps, slippage, and rounding. | Medium for the current TAA sleeve; High if a future sleeve requires exact open weights. | Treat TAA weights as intended overnight allocations, not exact open marks. | Configurable rebalance sizing modes plus broker-aware reconciliation and optional reserve cash. | Intentional approximation |
 | G-002 | Slippage model | Slippage is a simple signed price penalty. | Real slippage depends on liquidity, order size, volatility, queue position, and market regime. | Medium to High. | Use conservative slippage settings and treat results skeptically. | Regime-aware or liquidity-aware execution-cost model. | Known gap |
 | G-003 | Commission model | Commission is simplified to an IBKR-like per-share rule with a minimum. | Real commissions, fees, rebates, and routing effects can differ by instrument and venue. | Medium. | Keep the model explicit and conservative. | Instrument-aware live fee model. | Known gap |
 | G-004 | Fill mechanics | Orders either fill under the model rules or do not fill; no partial fills are modeled. | Live execution can split, miss, queue, or partially fill orders. | High for larger or less liquid trades. | Keep position sizing realistic and avoid pretending large orders are frictionless. | Order-book-aware or broker-fill-aware live execution layer. | Known gap |
@@ -26,11 +26,19 @@ The current house choice for `strategy_taa_df` is an overnight OPG-style approxi
 
 \[
 \text{target\_shares}^{taa}_t
-\approx
-\left\lfloor \frac{V^{close}_{t-1} \cdot w_t}{P^{fill}_t} \right\rfloor
+\ =
+\left\lfloor \frac{V^{close}_{t-1} \cdot w_t}{P^{size}_{t-1}} \right\rfloor
 \]
 
-This is an intentional phase-1 simplification. It treats target weights as intended overnight allocations and accepts small drift in realized weights.
+with:
+
+\[
+P^{size}_{t-1} = close_{t-1}
+\]
+
+for target-share sizing, while execution still occurs at the next open. This is
+an intentional phase-1 simplification. It treats target weights as intended
+overnight allocations and accepts small drift in realized weights.
 
 A more exact open-aware rebalance would be:
 

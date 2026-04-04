@@ -24,3 +24,13 @@ Thumbs.db
 
 # Cache
 .cache/
+
+# Temporary files and folders
+tmp/
+temp/
+*.tmp
+*.temp
+.tmp_norgatedata/
+
+# Generated backtest artifacts
+results/

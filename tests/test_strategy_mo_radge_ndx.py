@@ -11,7 +11,7 @@ os.environ.setdefault("NORGATEDATA_ROOT", str(TEST_NORGATEDATA_ROOT))
 
 from alpha.engine.backtest import run_daily
 from alpha.engine.order import MarketOrder
-from strategies.strategy_mo_radge_ndx import (
+from strategies.momentum.strategy_mo_radge_ndx import (
     ATR_WINDOW_INT,
     RadgeMomentumNdxStrategy,
     compute_radge_signal_tables,

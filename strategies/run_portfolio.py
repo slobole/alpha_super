@@ -31,6 +31,21 @@ RESULTS_DIR = ROOT_DIR / 'results'
 STRATEGIES_DIR = ROOT_DIR / 'strategies'
 VALID_REBALANCE_SET = {None, 'monthly', 'quarterly', 'annually'}
 METADATA_FILENAME = 'metadata.json'
+LEGACY_STRATEGY_PACKAGE_MAP = (
+    ('strategy_taa_traditional_sma8', STRATEGIES_DIR / 'taa_traditional'),
+    ('strategy_taa_beyond_6040', STRATEGIES_DIR / 'taa_beyond_6040'),
+    ('strategy_taa_df', STRATEGIES_DIR / 'taa_df'),
+    ('strategy_mr_alpha19', STRATEGIES_DIR / 'alpha19'),
+    ('strategy_mr_dv2', STRATEGIES_DIR / 'dv2'),
+    ('strategy_mr_qpi', STRATEGIES_DIR / 'qpi'),
+    ('strategy_mr_spx_rsi2', STRATEGIES_DIR / 'vix_stuff'),
+    ('strategy_mr_vix', STRATEGIES_DIR / 'vix_stuff'),
+    ('strategy_mr_vxx', STRATEGIES_DIR / 'vix_stuff'),
+    ('strategy_bom_', STRATEGIES_DIR / 'bom_tlt'),
+    ('strategy_eom_', STRATEGIES_DIR / 'eom_tlt_vs_spy'),
+    ('strategy_mo_', STRATEGIES_DIR / 'momentum'),
+    ('strategy_seasonality', STRATEGIES_DIR / 'seasonality'),
+)
 
 _strategy_classes = {}
 _strategy_import_errors = {}
@@ -46,6 +61,49 @@ def _resolve_path(path_like, base_dir: Path) -> Path:
 
 def _metadata_path(pkl_path: Path) -> Path:
     return pkl_path.parent / METADATA_FILENAME
+
+
+def _legacy_strategy_package_dir(module_stem_str: str) -> Path | None:
+    for legacy_prefix_str, package_dir_path in LEGACY_STRATEGY_PACKAGE_MAP:
+        if module_stem_str.startswith(legacy_prefix_str):
+            return package_dir_path
+    return None
+
+
+def _module_path_to_import_str(module_path: Path) -> str:
+    relative_module_path = module_path.resolve().relative_to(ROOT_DIR)
+    return '.'.join(relative_module_path.with_suffix('').parts)
+
+
+def _remap_legacy_strategy_module_name(class_module_str: str) -> str:
+    if not class_module_str.startswith('strategies.strategy_'):
+        return class_module_str
+
+    module_stem_str = class_module_str.rsplit('.', 1)[-1]
+    package_dir_path = _legacy_strategy_package_dir(module_stem_str)
+    if package_dir_path is None:
+        return class_module_str
+
+    remapped_module_path = package_dir_path / f'{module_stem_str}.py'
+    if not remapped_module_path.exists():
+        return class_module_str
+
+    return _module_path_to_import_str(remapped_module_path)
+
+
+def _remap_legacy_strategy_file_path(module_path: Path) -> Path:
+    if module_path.exists():
+        return module_path
+
+    if module_path.parent != STRATEGIES_DIR:
+        return module_path
+
+    package_dir_path = _legacy_strategy_package_dir(module_path.stem)
+    if package_dir_path is None:
+        return module_path
+
+    remapped_module_path = package_dir_path / module_path.name
+    return remapped_module_path if remapped_module_path.exists() else module_path
 
 
 def read_result_metadata(pkl_path: Path) -> dict | None:
@@ -94,12 +152,13 @@ def _register_strategy_classes_from_metadata(metadata: dict, pkl_path: Path):
     class_module = metadata.get('class_module')
 
     if class_file:
-        module = _import_strategy_module(Path(class_file))
+        module = _import_strategy_module(_remap_legacy_strategy_file_path(Path(class_file)))
         _register_strategy_classes_from_module(module)
         return
 
     if class_module and class_module != '__main__':
-        module = importlib.import_module(class_module)
+        remapped_class_module_str = _remap_legacy_strategy_module_name(class_module)
+        module = importlib.import_module(remapped_class_module_str)
         _register_strategy_classes_from_module(module)
         return
 
@@ -111,7 +170,7 @@ def _register_strategy_classes_from_metadata(metadata: dict, pkl_path: Path):
 
 def discover_strategy_classes(search_dir: Path = STRATEGIES_DIR):
     """Import strategy files dynamically so legacy __main__ pickles can be loaded."""
-    for module_path in sorted(search_dir.glob('strategy_*.py')):
+    for module_path in sorted(search_dir.rglob('strategy_*.py')):
         if module_path.name == 'run_portfolio.py':
             continue
         if module_path in _strategy_import_errors:

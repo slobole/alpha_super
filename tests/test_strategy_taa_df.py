@@ -9,7 +9,7 @@ TEST_NORGATEDATA_ROOT.mkdir(exist_ok=True)
 os.environ.setdefault('NORGATEDATA_ROOT', str(TEST_NORGATEDATA_ROOT))
 
 from alpha.engine.order import MarketOrder
-from strategies.strategy_taa_df import DefenseFirstStrategy, map_month_end_weights_to_rebalance_open_df
+from strategies.taa_df.strategy_taa_df import DefenseFirstStrategy, map_month_end_weights_to_rebalance_open_df
 
 
 class DefenseFirstStrategyTests(unittest.TestCase):

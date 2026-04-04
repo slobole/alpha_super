@@ -11,8 +11,8 @@ os.environ.setdefault("NORGATEDATA_ROOT", str(TEST_NORGATEDATA_ROOT))
 
 from alpha.engine.backtest import run_daily
 from alpha.engine.order import MarketOrder
-from strategies.strategy_taa_beyond_6040 import get_first_actionable_rebalance_ts
-from strategies.strategy_taa_beyond_6040_inverse_vol import (
+from strategies.taa_beyond_6040.strategy_taa_beyond_6040 import get_first_actionable_rebalance_ts
+from strategies.taa_beyond_6040.strategy_taa_beyond_6040_inverse_vol import (
     Beyond6040InverseVolStrategy,
 )
 

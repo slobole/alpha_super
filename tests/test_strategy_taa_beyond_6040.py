@@ -11,7 +11,7 @@ os.environ.setdefault("NORGATEDATA_ROOT", str(TEST_NORGATEDATA_ROOT))
 
 from alpha.engine.backtest import run_daily
 from alpha.engine.order import MarketOrder
-from strategies.strategy_taa_beyond_6040 import (
+from strategies.taa_beyond_6040.strategy_taa_beyond_6040 import (
     Beyond6040Strategy,
     compute_gross_exposure_float,
     compute_month_end_inverse_vol_weight_df,

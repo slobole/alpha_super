@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import matplotlib.gridspec as gridspec
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
@@ -276,7 +277,11 @@ def plot(
 
         drawdown_ax.set_ylabel('Drawdown')
         drawdown_ax.yaxis.set_major_formatter(FuncFormatter(fraction_major_formatter))
-        drawdown_ax.tick_params(axis='x', labelbottom=False)
+        drawdown_year_locator_obj = mdates.YearLocator()
+        drawdown_year_formatter_obj = mdates.DateFormatter('%Y')
+        drawdown_ax.xaxis.set_major_locator(drawdown_year_locator_obj)
+        drawdown_ax.xaxis.set_major_formatter(drawdown_year_formatter_obj)
+        drawdown_ax.tick_params(axis='x', labelbottom=True, rotation=0)
         drawdown_ax.margins(x=_PLOT_X_MARGIN_FLOAT)
 
         annual_position_vec = np.arange(len(strategy_yearly_return_ser), dtype=float)

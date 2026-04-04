@@ -10,7 +10,7 @@ TEST_NORGATEDATA_ROOT.mkdir(exist_ok=True)
 os.environ.setdefault("NORGATEDATA_ROOT", str(TEST_NORGATEDATA_ROOT))
 
 from alpha.engine.order import MarketOrder
-from strategies.strategy_mr_qpi_long_short import QPILongShortStrategy
+from strategies.qpi.strategy_mr_qpi_long_short import QPILongShortStrategy
 
 
 class QPILongShortStrategyTests(unittest.TestCase):

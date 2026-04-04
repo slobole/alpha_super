@@ -17,6 +17,12 @@ overview:
 import numpy as np
 import pandas as pd
 
+
+def _concat_unique_asset_str(asset_ser: pd.Series) -> str:
+    """Preserve asset order while collapsing repeated asset labels."""
+    unique_asset_list = list(dict.fromkeys(asset_ser.astype(str).tolist()))
+    return ', '.join(unique_asset_list)
+
 def sharpe_ratio(daily_returns, portfolio_value=None, days_in_year=252):
     """
     computes the annualized Sharpe ratio, which measures risk-adjusted 
@@ -78,19 +84,10 @@ def generate_trades(transactions: pd.DataFrame) -> pd.DataFrame:
         | --------- | ---------- | ---------- | ------ | ------- | ------ | -------- | ------ |
         | 1         | 2024-01-02 | 2024-01-10 | AAPL   | 1000    | 100    | 8 days   | 10%    |
     """
-    def concat_str(series):
-        """
-        converts a series of asset names into a comma-separated string 
-        of unique values.
-        this ensures that multi-asset trades are represented correctly.
-        """
-        v = list(set(series.values.tolist()))  # Extract unique asset names
-        return ', '.join(v)  # Convert to comma-separated string
-
     # define aggregation functions for trade grouping
     f = {
         'bar': ['min', 'max'],  # get the start and end bars (timestamps)
-        'asset': concat_str,  # combine asset names into a single string
+        'asset': _concat_unique_asset_str,  # combine asset names into a single string
         'total_value': ['first', 'sum'],  # capture entry notional and total profit
         'amount': 'sum',  # sum the trade amount to determine if trade is closed
         'commission': 'sum'  # total commission for the trade
@@ -114,6 +111,96 @@ def generate_trades(transactions: pd.DataFrame) -> pd.DataFrame:
     # compute trade return as profit divided by initial capital
     trades['return'] = trades['profit'] / trades['capital']
     return trades
+
+
+def generate_open_trades(
+    transactions_df: pd.DataFrame,
+    latest_close_price_ser: pd.Series | None,
+    mark_bar_ts: pd.Timestamp | None,
+) -> pd.DataFrame:
+    """
+    Mark currently open trades to the latest available close.
+
+    For an open trade k:
+
+        market_value_k = sum_i q_{k,i} * Close_{i,T}
+
+        unrealized_pnl_k = -sum_j total_value_{k,j} - sum_j commission_{k,j} + market_value_k
+    """
+    open_trade_column_list = [
+        'start',
+        'mark',
+        'assets',
+        'capital',
+        'market_value',
+        'unrealized_pnl',
+        'commission',
+        'duration',
+        'return',
+    ]
+    if (
+        transactions_df is None
+        or len(transactions_df) == 0
+        or latest_close_price_ser is None
+        or mark_bar_ts is None
+        or len(latest_close_price_ser) == 0
+    ):
+        return pd.DataFrame(columns=open_trade_column_list)
+
+    latest_close_price_ser = latest_close_price_ser.astype(float)
+    open_trade_row_list: list[dict] = []
+
+    for trade_id_obj, trade_group_df in transactions_df.groupby('trade_id'):
+        open_amount_float = float(trade_group_df['amount'].sum())
+        if np.isclose(open_amount_float, 0.0):
+            continue
+
+        open_position_ser = (
+            trade_group_df.groupby('asset')['amount']
+            .sum()
+            .astype(float)
+        )
+        open_position_ser = open_position_ser[open_position_ser != 0.0]
+        if len(open_position_ser) == 0:
+            continue
+
+        mark_price_ser = latest_close_price_ser.reindex(open_position_ser.index)
+        if mark_price_ser.isna().any():
+            market_value_float = np.nan
+            unrealized_pnl_float = np.nan
+        else:
+            market_value_float = float((open_position_ser * mark_price_ser).sum())
+            unrealized_pnl_float = float(
+                -trade_group_df['total_value'].sum()
+                - trade_group_df['commission'].sum()
+                + market_value_float
+            )
+
+        capital_float = float(abs(trade_group_df['total_value'].iloc[0]))
+        return_float = np.nan
+        if capital_float > 0.0 and np.isfinite(unrealized_pnl_float):
+            return_float = float(unrealized_pnl_float / capital_float)
+
+        open_trade_row_list.append(
+            {
+                'trade_id': trade_id_obj,
+                'start': trade_group_df['bar'].min(),
+                'mark': pd.Timestamp(mark_bar_ts),
+                'assets': _concat_unique_asset_str(trade_group_df['asset']),
+                'capital': capital_float,
+                'market_value': market_value_float,
+                'unrealized_pnl': unrealized_pnl_float,
+                'commission': float(trade_group_df['commission'].sum()),
+                'duration': pd.Timestamp(mark_bar_ts) - pd.Timestamp(trade_group_df['bar'].min()),
+                'return': return_float,
+            }
+        )
+
+    if len(open_trade_row_list) == 0:
+        return pd.DataFrame(columns=open_trade_column_list)
+
+    open_trade_df = pd.DataFrame(open_trade_row_list).set_index('trade_id')
+    return open_trade_df[open_trade_column_list]
 
 def generate_drawdowns(drawdown_series: pd.Series) -> pd.DataFrame:
     """
@@ -466,14 +553,20 @@ def generate_trades_metrics(all_trades: pd.DataFrame, calendar: pd.DatetimeIndex
             avg_win_return = trades[trades['return'] > 0]['return'].mean()  # average return per winning trade
             avg_loss_return = trades[trades['return'] < 0]['return'].mean()  # average return per losing trade
             df.loc[title, 'Win Rate [%]'] = win_rate * 100
-            df.loc[title, 'Profit Factor'] = abs(gross_profit / gross_loss)  # profit-to-loss ratio
+            if gross_loss == 0:
+                df.loc[title, 'Profit Factor'] = np.nan
+            else:
+                df.loc[title, 'Profit Factor'] = abs(gross_profit / gross_loss)  # profit-to-loss ratio
             # compute win/loss ratio (avoid division by zero)
             if len(trades[trades['return'] < 0]) == 0:
                 df.loc[title, 'Win/Loss Ratio'] = np.nan
             else:
                 df.loc[title, 'Win/Loss Ratio'] = len(trades[trades['return'] > 0]) / len(trades[trades['return'] < 0])
 
-            df.loc[title, 'Payoff Ratio'] = abs(avg_win_return / avg_loss_return)  # ratio of average win to average loss
+            if pd.isna(avg_loss_return) or avg_loss_return == 0:
+                df.loc[title, 'Payoff Ratio'] = np.nan
+            else:
+                df.loc[title, 'Payoff Ratio'] = abs(avg_win_return / avg_loss_return)  # ratio of average win to average loss
             df.loc[title, 'CPC Index'] = df.loc[title, 'Profit Factor'] * win_rate * df.loc[title, 'Win/Loss Ratio']
             df.loc[title, 'Expectancy [$]'] = avg_win_value * win_rate - abs(avg_loss_value) * (1 - win_rate)
             if 'commission' in trades.columns:
@@ -490,8 +583,10 @@ def generate_trades_metrics(all_trades: pd.DataFrame, calendar: pd.DatetimeIndex
 
     # convert trade duration values to integer days if the unit is 'days'
     if unit == 'days':
-        df.loc['Avg. Trade Duration [days]'] = df.loc['Avg. Trade Duration [days]'].apply(lambda x: x.days)
-        df.loc['Max. Trade Duration [days]'] = df.loc['Max. Trade Duration [days]'].apply(lambda x: x.days)
+        if 'Avg. Trade Duration [days]' in df.index:
+            df.loc['Avg. Trade Duration [days]'] = df.loc['Avg. Trade Duration [days]'].apply(lambda x: x.days)
+        if 'Max. Trade Duration [days]' in df.index:
+            df.loc['Max. Trade Duration [days]'] = df.loc['Max. Trade Duration [days]'].apply(lambda x: x.days)
 
     return df
 

@@ -11,7 +11,7 @@ os.environ.setdefault("NORGATEDATA_ROOT", str(TEST_NORGATEDATA_ROOT))
 
 from alpha.engine.backtest import run_daily
 from alpha.engine.order import MarketOrder
-from strategies.strategy_mr_vxx_long_short import (
+from strategies.vix_stuff.strategy_mr_vxx_long_short import (
     SIGNAL_NAMESPACE_STR,
     STITCHED_TRADE_SYMBOL_STR,
     VxxLongShortStrategy,

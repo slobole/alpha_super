@@ -12,7 +12,7 @@ os.environ.setdefault("NORGATEDATA_ROOT", str(TEST_NORGATEDATA_ROOT))
 
 from alpha.engine.backtest import run_daily
 from alpha.engine.order import MarketOrder
-from strategies.strategy_mo_arp_core9 import (
+from strategies.momentum.strategy_mo_arp_core9 import (
     ArpCore9Config,
     ArpCore9Strategy,
     _compute_single_asset_trend_signal_df,

@@ -28,7 +28,15 @@ from abc import ABC, abstractmethod
 from tqdm.auto import tqdm
 from alpha.engine.plot import plot
 from alpha.engine.order import Order, MarketOrder, LimitOrder, StopOrder
-from alpha.engine.metrics import generate_drawdowns, generate_monthly_returns, generate_overall_metrics, generate_trades, generate_trades_metrics, sharpe_ratio
+from alpha.engine.metrics import (
+    generate_drawdowns,
+    generate_monthly_returns,
+    generate_open_trades,
+    generate_overall_metrics,
+    generate_trades,
+    generate_trades_metrics,
+    sharpe_ratio,
+)
 
 class Strategy(ABC):
     def __init__(self, name: str, benchmarks: list | tuple, capital_base = 10_000, slippage: float = 0.0001,
@@ -56,6 +64,7 @@ class Strategy(ABC):
 
         # trade and performance statistics
         self._trades = None  # placeholder for trade history (filled orders)
+        self._open_trades = None  # placeholder for currently open trades marked to latest close
         self._drawdowns = None  # placeholder for drawdown analysis results
         self.summary = None  # summary of overall strategy performance
         self.summary_trades = None  # summary of trade-level performance metrics
@@ -89,6 +98,7 @@ class Strategy(ABC):
         self._benchmark_max_drawdown_map: dict[str, float] = {
             benchmark: 0.0 for benchmark in self._benchmarks
         }
+        self._latest_close_price_ser = pd.Series(dtype=float)
 
 
     # ------------------------------------------ 0 - INITIALIZATION  ------------------------------------------ #
@@ -264,6 +274,24 @@ class Strategy(ABC):
         pass
 
     # process orders
+    def _get_order_sizing_price_float(
+        self,
+        prices: pd.DataFrame,
+        asset_str: str,
+        current_open_float: float,
+    ) -> float:
+        previous_close_key = (asset_str, 'Close')
+        if self.previous_bar is None or previous_close_key not in prices.columns:
+            return float(current_open_float)
+
+        # *** CRITICAL*** Value/percent orders are sized from previous_bar
+        # close so share counts are fixed before the current open is known.
+        previous_close_float = float(prices.loc[self.previous_bar, previous_close_key])
+        if np.isfinite(previous_close_float) and previous_close_float > 0.0:
+            return previous_close_float
+
+        return float(current_open_float)
+
     def process_orders(self, prices: pd.DataFrame):
         """
         executes all active orders based on current market prices and ensures that orders properly executed,
@@ -284,9 +312,14 @@ class Strategy(ABC):
         if self.current_bar not in prices.index:
             return
 
+        latest_close_price_ser = prices.loc[self.current_bar, (slice(None), 'Close')]
+        latest_close_price_ser.index = latest_close_price_ser.index.get_level_values(0)
+        self._latest_close_price_ser = latest_close_price_ser.astype(float)
+
         executed_orders = []  # list to store successfully executed orders
         total_value_sum_float = 0.0
         commission_sum_float = 0.0
+        portfolio_value_float = float(self.previous_total_value)
 
         # loop through all active orders
         for order in self.get_orders():
@@ -301,6 +334,11 @@ class Strategy(ABC):
 
             # compute the approximate order amount based on the current position and portfolio value
             position = self.get_position(order.asset)
+            sizing_price_float = self._get_order_sizing_price_float(
+                prices,
+                asset_str=order.asset,
+                current_open_float=float(current_open),
+            )
 
             # check if the asset has valid market data; if not, close the position
             if pd.isna(current_open):
@@ -308,7 +346,7 @@ class Strategy(ABC):
                 # close the position using last closing price and warn the user.
                 print(f'Asset {order.asset} not found in prices on {self.current_bar}')
                 price = prices[(order.asset, 'Close')].dropna().iloc[-1]
-                amount = order.amount_in_shares(price, self.total_value, position)
+                amount = order.amount_in_shares(price, portfolio_value_float, position)
                 commission = self._compute_commission(amount)
                 self.add_transaction(order.trade_id, self.current_bar, order.asset,
                                     amount, price, price * amount, order.id, commission)
@@ -317,7 +355,7 @@ class Strategy(ABC):
                 commission_sum_float += float(commission)
                 continue
 
-            amount_approx = order.amount_in_shares(current_open, self.total_value, position)
+            amount_approx = order.amount_in_shares(sizing_price_float, portfolio_value_float, position)
             # apply slippage (penalty) to execution price
             penalty = 1 + np.sign(amount_approx) * self._slippage  # slippage adjustment for the amount
 
@@ -326,7 +364,7 @@ class Strategy(ABC):
                 # market orders execute at the **opening price** of the current day
                 # (liquidity/cash constraints are ignored here; this can be improved)
                 price = current_open * penalty
-                amount = order.amount_in_shares(price, self.total_value, position)
+                amount = order.amount_in_shares(sizing_price_float, portfolio_value_float, position)
                 commission = self._compute_commission(amount)
                 self.add_transaction(order.trade_id, self.current_bar, order.asset, amount, price,
                                     price * amount, order.id, commission)
@@ -346,7 +384,7 @@ class Strategy(ABC):
                         price = max(order.limit_price,
                                     current_open) * penalty  # sell at the best valid price
 
-                    amount_exact = order.amount_in_shares(price, self.total_value, position)
+                    amount_exact = order.amount_in_shares(sizing_price_float, portfolio_value_float, position)
                     commission = self._compute_commission(amount_exact)
                     self.add_transaction(order.trade_id, self.current_bar, order.asset,
                                         amount_exact, price, price * amount_exact, order.id, commission)
@@ -369,7 +407,7 @@ class Strategy(ABC):
                         price = min(order.stop_price,
                                     current_open) * penalty  # sell at stop or worse
 
-                    amount_exact = order.amount_in_shares(price, self.total_value, position)
+                    amount_exact = order.amount_in_shares(sizing_price_float, portfolio_value_float, position)
                     commission = self._compute_commission(amount_exact)
                     self.add_transaction(order.trade_id, self.current_bar, order.asset,
                                         amount_exact, price, price * amount_exact, order.id, commission)
@@ -393,10 +431,8 @@ class Strategy(ABC):
         if len(active_position_ser) == 0:
             self.portfolio_value = 0  # No positions left
         else:
-            # retrieve closing prices to value the current portfolio
-            close_prices = prices.loc[self.current_bar, (slice(None), 'Close')]
-            close_prices.index = close_prices.index.get_level_values(0)
-            self.portfolio_value = (active_position_ser * close_prices).sum()
+            close_price_ser = self._latest_close_price_ser.reindex(active_position_ser.index)
+            self.portfolio_value = float((active_position_ser * close_price_ser).sum())
 
         # update the total account value (cash + portfolio holdings)
         self.total_value = self.cash + self.portfolio_value
@@ -557,6 +593,11 @@ class Strategy(ABC):
         """
         # generate trade history and drawdown metrics
         self._trades = generate_trades(self.get_transactions())
+        self._open_trades = generate_open_trades(
+            self.get_transactions(),
+            latest_close_price_ser=self._latest_close_price_ser,
+            mark_bar_ts=pd.Timestamp(self.current_bar) if self.current_bar is not None else None,
+        )
         self._drawdowns = generate_drawdowns(self.results['drawdown'])
         # compute strategy performance metrics
         self.summary = pd.DataFrame()

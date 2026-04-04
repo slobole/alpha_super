@@ -12,7 +12,7 @@ os.environ.setdefault("NORGATEDATA_ROOT", str(TEST_NORGATEDATA_ROOT))
 
 from alpha.engine.order import MarketOrder
 from alpha.engine.backtest import run_daily
-from strategies.strategy_mo_alpha23_breakout import Alpha23BreakoutStrategy
+from strategies.momentum.strategy_mo_alpha23_breakout import Alpha23BreakoutStrategy
 
 
 class Alpha23BreakoutStrategyTests(unittest.TestCase):

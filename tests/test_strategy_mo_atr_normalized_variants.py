@@ -8,16 +8,16 @@ TEST_NORGATEDATA_ROOT = Path(__file__).resolve().parents[1] / ".tmp_norgatedata"
 TEST_NORGATEDATA_ROOT.mkdir(exist_ok=True)
 os.environ.setdefault("NORGATEDATA_ROOT", str(TEST_NORGATEDATA_ROOT))
 
-from strategies.strategy_mo_radge_ndx import RadgeMomentumNdxStrategy
-from strategies.strategy_mo_atr_normalized_ndx import (
+from strategies.momentum.strategy_mo_radge_ndx import RadgeMomentumNdxStrategy
+from strategies.momentum.strategy_mo_atr_normalized_ndx import (
     AtrNormalizedNdxStrategy,
     DEFAULT_CONFIG as NDX_DEFAULT_CONFIG,
 )
-from strategies.strategy_mo_atr_normalized_sp500 import (
+from strategies.momentum.strategy_mo_atr_normalized_sp500 import (
     AtrNormalizedSp500Strategy,
     DEFAULT_CONFIG as SP500_DEFAULT_CONFIG,
 )
-from strategies.strategy_mo_atr_normalized_russell1000 import (
+from strategies.momentum.strategy_mo_atr_normalized_russell1000 import (
     AtrNormalizedRussell1000Strategy,
     DEFAULT_CONFIG as RUSSELL1000_DEFAULT_CONFIG,
 )

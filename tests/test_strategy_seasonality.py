@@ -9,7 +9,7 @@ TEST_NORGATEDATA_ROOT.mkdir(exist_ok=True)
 os.environ.setdefault("NORGATEDATA_ROOT", str(TEST_NORGATEDATA_ROOT))
 
 from alpha.engine.order import MarketOrder
-from strategies.strategy_seasonality import (
+from strategies.seasonality.strategy_seasonality import (
     DEFAULT_MONTH_TARGET_WEIGHT_MAP,
     SeasonalityStrategy,
 )

@@ -3,7 +3,7 @@ import warnings
 
 import pandas as pd
 
-from strategies.strategy_eom_trend_ibit import (
+from strategies.eom_tlt_vs_spy.strategy_eom_trend_ibit import (
     EomTrendIbitCloseResearchStrategy,
     build_daily_target_weight_ser,
     build_eom_trend_trade_plan_df,

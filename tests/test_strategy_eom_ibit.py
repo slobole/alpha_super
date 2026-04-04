@@ -3,7 +3,7 @@ import unittest
 import pandas as pd
 
 from alpha.engine.order import MarketOrder
-from strategies.strategy_eom_ibit import (
+from strategies.eom_tlt_vs_spy.strategy_eom_ibit import (
     EomIbitStrategy,
     build_eom_target_weight_ser,
 )

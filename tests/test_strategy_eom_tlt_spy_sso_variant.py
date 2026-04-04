@@ -3,7 +3,7 @@ import warnings
 
 import pandas as pd
 
-from strategies.strategy_eom_tlt_spy_sso_variant import (
+from strategies.eom_tlt_vs_spy.strategy_eom_tlt_spy_sso_variant import (
     EomTltSpySsoVariantConfig,
     EomTltSpySsoVariantResearchStrategy,
     build_daily_target_weight_df,

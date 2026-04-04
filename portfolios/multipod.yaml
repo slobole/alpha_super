@@ -1,15 +1,23 @@
-name: MultiPod
+name: multipod
 capital: 100000
 
 pods:
-  - strategy: DVO2Strategy
-    weight: 0.25
+  - strategy: strategy_taa_df_btal_fallback_tqqq_vix_cash
+    weight: 0.18
 
-  - strategy: QPIStrategy
-    weight: 0.25
+  - strategy: strategy_mr_qpi_ibs_rsi_exit
+    weight: 0.18
 
-  - strategy: DefenseFirstTAAVixTranche_Btal
-    weight: 0.5
+  - strategy: strategy_mr_dv2
+    weight: 0.18
 
-  # - strategy: JNKSHYStrategy  # uncomment when pkl is available
-  #   weight: 0.10
+  - strategy: strategy_mo_atr_normalized_ndx
+    weight: 0.18
+
+  - strategy: strategy_seasonality
+    weight: 0.1
+
+  - strategy: strategy_eom_tlt_spy_sso_variant_research
+    weight: 0.18
+
+
