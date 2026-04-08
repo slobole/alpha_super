@@ -10,8 +10,9 @@ import matplotlib.axes._axes as maxes
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.ticker import FixedLocator
 
-from alpha.engine.plot import generate_yearly_returns, plot
+from alpha.engine.plot import generate_period_returns, generate_yearly_returns, plot
 from alpha.engine.portfolio import Portfolio
 from alpha.engine.strategy import Strategy
 from alpha.engine.theme import SEABORN_DEEP_COLOR_LIST, SIGNATURE_PALETTE_DICT
@@ -238,7 +239,7 @@ class PlotTests(unittest.TestCase):
         self.assertEqual(mcolors.to_hex(equity_ax.spines['right'].get_edgecolor()), SIGNATURE_PALETTE_DICT['axes_border'])
 
     def test_plot_shows_year_labels_on_drawdown_x_axis(self):
-        dates_index = pd.date_range('2022-01-31', periods=36, freq='ME')
+        dates_index = pd.date_range('2018-01-31', periods=72, freq='ME')
         strategy_total_value_ser = pd.Series(
             np.linspace(100.0, 160.0, len(dates_index)),
             index=dates_index,
@@ -261,6 +262,36 @@ class PlotTests(unittest.TestCase):
         self.assertEqual(drawdown_ax.xaxis.get_major_formatter().fmt, '%Y')
         self.assertGreater(len(drawdown_tick_label_list), 0)
         self.assertTrue(all(len(tick_label_str) == 4 and tick_label_str.isdigit() for tick_label_str in drawdown_tick_label_list))
+
+    def test_plot_uses_more_real_date_ticks_for_short_windows(self):
+        dates_index = pd.bdate_range('2020-02-20', periods=28)
+        strategy_total_value_ser = pd.Series(
+            np.linspace(100.0, 114.0, len(dates_index)),
+            index=dates_index,
+        )
+
+        with mock.patch('matplotlib.pyplot.show'):
+            plot(strategy_total_value=strategy_total_value_ser, save_to=io.BytesIO(), use_log_scale=False)
+
+        figure_obj = plt.gcf()
+        drawdown_ax = figure_obj.axes[1]
+        figure_obj.canvas.draw()
+        drawdown_tick_label_list = [
+            tick_label_obj.get_text()
+            for tick_label_obj in drawdown_ax.get_xticklabels()
+            if tick_label_obj.get_visible() and tick_label_obj.get_text() != ''
+        ]
+
+        expected_tick_date_set = {
+            timestamp_obj.strftime('%Y-%m-%d')
+            for timestamp_obj in dates_index
+        }
+
+        self.assertIsInstance(drawdown_ax.xaxis.get_major_locator(), FixedLocator)
+        self.assertIsInstance(drawdown_ax.xaxis.get_major_formatter(), mdates.DateFormatter)
+        self.assertEqual(drawdown_ax.xaxis.get_major_formatter().fmt, '%Y-%m-%d')
+        self.assertGreaterEqual(len(drawdown_tick_label_list), 4)
+        self.assertTrue(all(tick_label_str in expected_tick_date_set for tick_label_str in drawdown_tick_label_list))
 
     def test_plot_aligns_axis_labels_with_final_growth_values(self):
         dates_index = pd.to_datetime(['2024-01-02', '2024-01-03', '2024-01-04', '2024-01-05'])
@@ -321,6 +352,48 @@ class PlotTests(unittest.TestCase):
             index=pd.to_datetime(['2024-12-31', '2025-12-31']),
         )
         pd.testing.assert_series_equal(yearly_return_ser, expected_yearly_return_ser, check_freq=False)
+
+    def test_generate_monthly_period_returns_preserve_partial_month_formula(self):
+        total_value_ser = pd.Series(
+            [100.0, 110.0, 121.0, 133.1],
+            index=pd.to_datetime(['2024-01-15', '2024-01-31', '2024-02-29', '2024-03-31']),
+        )
+
+        monthly_return_ser = generate_period_returns(
+            total_value_ser,
+            return_bar_frequency_str='monthly',
+        )
+
+        expected_monthly_return_ser = pd.Series(
+            [0.10, 0.10, 0.10],
+            index=pd.to_datetime(['2024-01-31', '2024-02-29', '2024-03-31']),
+        )
+        pd.testing.assert_series_equal(monthly_return_ser, expected_monthly_return_ser, check_freq=False)
+
+    def test_plot_can_render_monthly_return_panel(self):
+        dates_index = pd.to_datetime(
+            ['2024-01-15', '2024-01-31', '2024-02-29', '2024-03-31']
+        )
+        strategy_total_value_ser = pd.Series([100.0, 110.0, 121.0, 133.1], index=dates_index)
+
+        with mock.patch('matplotlib.pyplot.show'):
+            plot(
+                strategy_total_value=strategy_total_value_ser,
+                save_to=io.BytesIO(),
+                return_bar_frequency_str='monthly',
+            )
+
+        figure_obj = plt.gcf()
+        return_ax = figure_obj.axes[2]
+        figure_obj.canvas.draw()
+        return_tick_label_list = [
+            tick_label_obj.get_text()
+            for tick_label_obj in return_ax.get_xticklabels()
+            if tick_label_obj.get_visible() and tick_label_obj.get_text() != ''
+        ]
+
+        self.assertEqual(return_ax.get_ylabel(), 'Monthly Return (%)')
+        self.assertListEqual(return_tick_label_list, ['2024-01', '2024-02', '2024-03'])
 
     def test_portfolio_plot_keeps_overlay_lines_subordinate(self):
         dates_index = pd.to_datetime(['2024-01-02', '2024-01-03', '2024-01-04', '2024-01-05'])

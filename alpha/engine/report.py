@@ -2,6 +2,7 @@ import io
 import base64
 import inspect
 import json
+import warnings
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -11,6 +12,7 @@ from pathlib import Path
 from datetime import datetime
 
 from alpha.engine.metrics import generate_monthly_returns
+from alpha.engine.plot import plot as render_strategy_plot
 from alpha.engine.theme import (
     SEABORN_DEEP_COLOR_LIST,
     SIGNATURE_ASSET_COLOR_DICT,
@@ -26,6 +28,8 @@ _MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 _METADATA_FILENAME = 'metadata.json'
 _TRANSACTION_CSV_FILENAME = 'transactions.csv'
+_CRISIS_METRICS_CSV_FILENAME = 'crisis_metrics.csv'
+_CRISIS_PATHS_CSV_FILENAME = 'crisis_paths.csv'
 _DAILY_RETURN_HISTOGRAM_BIN_COUNT_INT = 60
 _TRADE_RETURN_HISTOGRAM_BIN_COUNT_INT = 60
 _FALLBACK_ASSET_SET = frozenset({'SPY', 'SSO', 'QQQ', 'QLD', 'TQQQ', 'UPRO'})
@@ -99,6 +103,26 @@ def _portfolio_metadata_dict(portfolio, pickle_path: Path) -> dict:
     }
 
 
+def _crisis_replay_metadata_dict(crisis_replay_result) -> dict:
+    return {
+        'artifact_type': 'crisis_replay',
+        'saved_at': datetime.now().isoformat(timespec='seconds'),
+        'strategy_key': crisis_replay_result.strategy_key_str,
+        'strategy_name': crisis_replay_result.strategy_name_str,
+        'capital_base': float(crisis_replay_result.capital_base_float),
+        'configured_crisis_count': int(len(crisis_replay_result.crisis_period_config_list)),
+        'evaluated_crisis_count': int(crisis_replay_result.crisis_metric_df.shape[0]),
+        'crisis_periods': [
+            {
+                'crisis_name_str': crisis_period_config.crisis_name_str,
+                'start_date_str': crisis_period_config.start_date_str,
+                'end_date_str': crisis_period_config.end_date_str,
+            }
+            for crisis_period_config in crisis_replay_result.crisis_period_config_list
+        ],
+    }
+
+
 def save_results(strategy, output_dir='results') -> Path:
     """Save strategy results to a structured folder and generate an HTML report.
 
@@ -133,6 +157,31 @@ def save_results(strategy, output_dir='results') -> Path:
 
 
 # ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ formatting helpers ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+
+def save_crisis_replay_results(crisis_replay_result, output_dir='results') -> Path:
+    """Save crisis replay artifacts and generate an HTML report."""
+    timestamp = datetime.now().strftime('%Y-%m-%d_%H%M%S')
+    out = Path(output_dir) / 'crisis_replay' / crisis_replay_result.strategy_key_str / timestamp
+    out.mkdir(parents=True, exist_ok=True)
+
+    _write_metadata(out / _METADATA_FILENAME, _crisis_replay_metadata_dict(crisis_replay_result))
+    crisis_replay_result.crisis_metric_df.to_csv(
+        out / _CRISIS_METRICS_CSV_FILENAME,
+        index=False,
+        date_format='%Y-%m-%d',
+    )
+    crisis_replay_result.crisis_path_df.to_csv(
+        out / _CRISIS_PATHS_CSV_FILENAME,
+        index=False,
+        date_format='%Y-%m-%d',
+    )
+
+    html = _build_crisis_replay_html(crisis_replay_result)
+    (out / 'report.html').write_text(html, encoding='utf-8')
+
+    print(f'Results saved to: {out.resolve()}')
+    return out
+
 
 def _fmt_pct(val):
     try:
@@ -1804,6 +1853,189 @@ def _build_html(strategy, chart_b64: str) -> str:
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{strategy.name} \u2014 Strategy Report</title>
+{_FONT_HEAD_HTML_STR}
+<style>{_CSS}</style>
+</head>
+<body>
+{body}
+</body>
+</html>'''
+
+
+def _format_crisis_metric_table_html(crisis_metric_df: pd.DataFrame) -> str:
+    if crisis_metric_df is None or len(crisis_metric_df) == 0:
+        return '<p>No crisis periods were evaluated.</p>'
+
+    display_column_spec_list = [
+        ('crisis_name_str', 'Crisis'),
+        ('effective_start_ts', 'Start'),
+        ('effective_end_ts', 'End'),
+        ('strategy_return_pct_float', 'Strategy Return'),
+        ('benchmark_return_pct_float', 'Benchmark Return'),
+        ('relative_return_pct_float', 'Relative Return'),
+        ('max_drawdown_pct_float', 'Max Drawdown'),
+        ('volatility_ann_pct_float', 'Volatility (Ann.)'),
+        ('sharpe_ratio_float', 'Sharpe'),
+        ('trade_count_int', 'Trades'),
+    ]
+    header_html_str = ''.join(
+        f'<th>{header_label_str}</th>'
+        for _, header_label_str in display_column_spec_list
+    )
+    row_html_list: list[str] = []
+
+    for _, row_ser in crisis_metric_df[[column_name_str for column_name_str, _ in display_column_spec_list]].iterrows():
+        cell_html_list: list[str] = []
+        for column_name_str, _header_label_str in display_column_spec_list:
+            cell_value_obj = row_ser[column_name_str]
+            cell_class_str = ''
+            if column_name_str.endswith('_ts'):
+                cell_text_str = (
+                    ''
+                    if pd.isna(cell_value_obj)
+                    else str(pd.Timestamp(cell_value_obj).date())
+                )
+            elif column_name_str.endswith('_pct_float'):
+                cell_text_str = (
+                    ''
+                    if pd.isna(cell_value_obj)
+                    else f'{float(cell_value_obj):+,.2f}%'
+                )
+                if column_name_str == 'relative_return_pct_float' and not pd.isna(cell_value_obj):
+                    cell_class_str = 'pos' if float(cell_value_obj) >= 0.0 else 'neg'
+            elif column_name_str == 'sharpe_ratio_float':
+                cell_text_str = '' if pd.isna(cell_value_obj) else f'{float(cell_value_obj):,.2f}'
+            elif column_name_str == 'trade_count_int':
+                cell_text_str = '' if pd.isna(cell_value_obj) else str(int(cell_value_obj))
+            else:
+                cell_text_str = '' if pd.isna(cell_value_obj) else str(cell_value_obj)
+            class_attr_str = f' class="{cell_class_str}"' if cell_class_str else ''
+            cell_html_list.append(f'<td{class_attr_str}>{cell_text_str}</td>')
+        row_html_list.append('<tr>' + ''.join(cell_html_list) + '</tr>')
+
+    return (
+        f'<table><thead><tr>{header_html_str}</tr></thead>'
+        f'<tbody>{"".join(row_html_list)}</tbody></table>'
+    )
+
+
+def _crisis_path_chart_b64(
+    strategy_obj,
+    crisis_name_str: str,
+    effective_start_ts: pd.Timestamp,
+    effective_end_ts: pd.Timestamp,
+) -> str | None:
+    if strategy_obj is None or strategy_obj.results is None or len(strategy_obj.results) == 0:
+        return None
+
+    benchmark_name_str = None
+    benchmark_drawdown_column_name_str = None
+    if hasattr(strategy_obj, '_benchmarks') and len(strategy_obj._benchmarks) > 0:
+        candidate_benchmark_name_str = str(strategy_obj._benchmarks[0])
+        candidate_drawdown_column_name_str = f'{candidate_benchmark_name_str}_drawdown'
+        if (
+            candidate_benchmark_name_str in strategy_obj.results.columns
+            and candidate_drawdown_column_name_str in strategy_obj.results.columns
+        ):
+            benchmark_name_str = candidate_benchmark_name_str
+            benchmark_drawdown_column_name_str = candidate_drawdown_column_name_str
+
+    buffer_obj = io.BytesIO()
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            'ignore',
+            message='FigureCanvasAgg is non-interactive, and thus cannot be shown',
+            category=UserWarning,
+        )
+        render_strategy_plot(
+            strategy_total_value=strategy_obj.results['total_value'],
+            strategy_drawdown=strategy_obj.results['drawdown'],
+            benchmark_total_value=(
+                strategy_obj.results[benchmark_name_str]
+                if benchmark_name_str is not None
+                else None
+            ),
+            benchmark_drawdown=(
+                strategy_obj.results[benchmark_drawdown_column_name_str]
+                if benchmark_drawdown_column_name_str is not None
+                else None
+            ),
+            benchmark_label=benchmark_name_str or 'Benchmark',
+            strategy_label='Strategy',
+            save_to=buffer_obj,
+            to_web=True,
+            dpi=160,
+            return_bar_frequency_str='monthly',
+        )
+    plt.close('all')
+    buffer_obj.seek(0)
+    return base64.b64encode(buffer_obj.read()).decode('ascii')
+
+
+def _build_crisis_chart_cards_html(crisis_replay_result) -> str:
+    card_html_list: list[str] = []
+    for _, metric_row_ser in crisis_replay_result.crisis_metric_df.iterrows():
+        crisis_name_str = str(metric_row_ser['crisis_name_str'])
+        strategy_obj = crisis_replay_result.crisis_strategy_map.get(crisis_name_str)
+        chart_b64 = _crisis_path_chart_b64(
+            strategy_obj=strategy_obj,
+            crisis_name_str=crisis_name_str,
+            effective_start_ts=pd.Timestamp(metric_row_ser['effective_start_ts']),
+            effective_end_ts=pd.Timestamp(metric_row_ser['effective_end_ts']),
+        )
+        if chart_b64 is None:
+            continue
+
+        card_html_list.append(
+            _wrap_card_html(
+                f'''
+<h2>{crisis_name_str}</h2>
+<div class="meta">
+  {pd.Timestamp(metric_row_ser['effective_start_ts']).date()} &rarr; {pd.Timestamp(metric_row_ser['effective_end_ts']).date()}
+</div>
+<div class="chart-wrap">
+  <img src="data:image/png;base64,{chart_b64}" alt="{crisis_name_str} crisis path">
+</div>
+''',
+                card_class_str='card-primary',
+            )
+        )
+
+    if len(card_html_list) == 0:
+        return ''
+    return f'<div class="crisis-chart-grid">{"".join(card_html_list)}</div>'
+
+
+def _build_crisis_replay_html(crisis_replay_result) -> str:
+    run_date_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    summary_card_html_str = _wrap_card_html(
+        f'''
+<h2>Crisis Summary</h2>
+<div class="scroll">{_format_crisis_metric_table_html(crisis_replay_result.crisis_metric_df)}</div>
+''',
+    )
+    chart_cards_html_str = _build_crisis_chart_cards_html(crisis_replay_result)
+
+    body = f'''<div class="report-shell">
+<header class="report-header">
+  <div class="report-eyebrow">Crisis Replay Report</div>
+  <h1>{crisis_replay_result.strategy_name_str}</h1>
+  <div class="meta">
+    Run: {run_date_str} &nbsp;|&nbsp;
+    Strategy Key: {crisis_replay_result.strategy_key_str} &nbsp;|&nbsp;
+    Capital: {_fmt_dollar(crisis_replay_result.capital_base_float)}
+  </div>
+</header>
+{summary_card_html_str}
+{chart_cards_html_str}
+</div>'''
+
+    return f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{crisis_replay_result.strategy_name_str} - Crisis Replay Report</title>
 {_FONT_HEAD_HTML_STR}
 <style>{_CSS}</style>
 </head>

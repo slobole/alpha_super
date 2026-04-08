@@ -4,6 +4,8 @@ This file is the truth source for the current realism limits, modeling assumptio
 
 The goal is not to pretend the backtest is identical to live trading. The goal is to state clearly where it differs and what still needs to improve.
 
+This file is part of the live-first control system. Recording a gap does not make it acceptable. It prevents silent self-deception and makes the remaining distance to the intended live workflow explicit.
+
 ## Register
 
 | ID | Area | Backtest Assumption / Current Behavior | Live Gap / Risk | Impact | Current Mitigation | Desired End State | Status |
@@ -19,6 +21,7 @@ The goal is not to pretend the backtest is identical to live trading. The goal i
 | G-009 | Point-in-time safety | Current engine structure helps prevent leakage, but future strategies can still be written incorrectly. | A new strategy can misuse `compute_signals()`, `shift()`, rolling windows, or data joins and still create leakage if written carelessly. | High. | Signal audit exists for derived columns and the repo enforces explicit reviews of time-series logic. | Broader invariant testing and continued doctrine enforcement. | Ongoing control |
 | G-010 | Data dependence | Point-in-time correctness depends on the data source and how a strategy uses it. | A strategy may still be wrong if the underlying data or joins are not point-in-time correct. | High. | Prefer Norgate point-in-time datasets and explicit feature construction. | Fully documented point-in-time data contracts per strategy family. | Known gap |
 | G-011 | Stress realism | Historical backtests mainly replay the realized path. | Live trading can fail under regimes or shocks not represented well in the historical sample. | Medium to High. | Use backtests as filters, not proof. | Scenario testing, stress testing, and walk-forward style evaluation. | Planned gap |
+| G-012 | Capacity and tradability | Research can still look acceptable without an explicit check that order size, turnover, and liquidity are practical at the intended capital scale. | A strategy may look tradable in the simulator but be operationally difficult or impossible to run live. | High. | Favor liquid universes, conservative sizing, and explicit liquidity filters. | Strategy-level capacity and tradability checks tied to intended capital scale and workflow. | Ongoing control |
 
 ## Detailed Note: Phase-1 TAA Target Sizing
 
@@ -60,5 +63,5 @@ That more exact formulation is not the chosen default for the current TAA sleeve
 
 ## Interpretation Rule
 
-If a result looks attractive only because one of the known gaps is favorable to the backtest, the result should be treated as overstated until the gap is closed or explicitly bounded.
+If a result looks attractive only because one of the known gaps is favorable to the backtest, or because the strategy would be materially harder to trade live than the simulation implies, the result should be treated as overstated until the gap is closed or explicitly bounded.
 

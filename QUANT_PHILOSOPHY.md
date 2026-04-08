@@ -54,6 +54,21 @@ E^{portfolio}_t = \sum_{i=1}^{N} E^{pod_i}_t
 
 not a hidden daily-rebalanced weighted return shortcut unless daily rebalancing is explicitly the model.
 
+## Live-First Simulation
+
+The simulator exists to approximate the live trading problem as closely as the current data and engine allow. It is not here to manufacture optimistic research results under assumptions we would reject in production.
+
+\[
+\text{usable edge} = \text{raw edge} - \text{costs} - \text{slippage} - \text{liquidity friction} - \text{operational constraints}
+\]
+
+A backtest is interesting only if the edge survives that conversion under assumptions that are plausible for the intended live deployment.
+
+- Treat tradability as part of the strategy, not as a post-hoc implementation detail.
+- Judge tradability at the intended capital scale and operational workflow, not with vague claims that something is "easy to trade."
+- If an assumption is unrealistic but temporarily unavoidable, record it explicitly in `ASSUMPTIONS_AND_GAPS.md` with its likely consequence.
+- If a result depends mainly on unrealistic execution, impossible liquidity, or undocumented simplifications, treat it as non-actionable until that gap is closed or explicitly bounded.
+
 ## What Good Quant Work Looks Like
 
 ### Simplicity and readability are quantitative controls
@@ -61,15 +76,26 @@ not a hidden daily-rebalanced weighted return shortcut unless daily rebalancing 
 Simple code is not just style. It is a defense against hidden assumptions and hidden bugs.
 
 - Prefer direct implementations over clever abstractions.
-- Prefer explicit formulas over verbal shortcuts.
+- Prefer plain explanations for orchestration, control flow, and glue code.
+- Prefer explicit formulas when they materially improve auditability of a quantitative calculation.
 - Prefer readable intermediate variables over compressed one-liners.
 - Prefer a strategy with a small number of justified rules over a parameter-heavy ruleset.
 
 If a reader cannot explain the logic quickly, the implementation is too complicated.
 
-### Mathematical clarity is required
+### Mathematical clarity is required where the math matters
 
-Whenever logic is non-trivial, write the formula first and then implement it.
+Write the formula when the code implements a non-trivial quantitative transformation that a reviewer must audit.
+
+That includes:
+
+- indicators
+- returns, compounding, and drawdown math
+- portfolio aggregation math
+- sizing logic
+- sensitive time-series transforms
+
+Do not add formula ceremony to trivial plumbing, orchestration, or obvious control flow. In those areas, a plain explanation and direct code are the clearer choice.
 
 Examples:
 
@@ -123,6 +149,7 @@ Useful backtest questions:
 
 - Does the implementation obey causality?
 - Does the strategy collapse under realistic costs?
+- Could this actually be traded at the intended capital scale and operational workflow?
 - Is turnover operationally acceptable?
 - Does the idea survive simple perturbations?
 - Does the pod behave coherently inside a portfolio?
@@ -199,6 +226,14 @@ Shorting is not simply the long trade with a minus sign.
 - recalls matter
 - squeezes and gap risk are asymmetric
 
+### 8. Live-trading fantasy
+
+Do not assume frictionless liquidity, effortless execution, or operational simplicity that the intended deployment does not have.
+
+- Capacity is strategy logic, not an afterthought.
+- Execution difficulty is part of the expected return distribution.
+- If the live workflow would be materially harder than the simulation implies, the result is overstated.
+
 ## Engine Order Is Part Of The Model
 
 The engine lifecycle is a quantitative contract:
@@ -261,7 +296,7 @@ Do not silently change semantics by renaming variables, moving code blocks, or c
 
 If a change touches any sensitive time-series or execution path, add or preserve:
 
-- formulas
+- formulas for non-trivial quantitative logic when they materially improve auditability
 - tests
 - `*** CRITICAL***` comments
 
@@ -269,4 +304,4 @@ If a change touches any sensitive time-series or execution path, add or preserve
 
 This repository should help us reject bad research, preserve good causal logic, and move toward a live institutional stack with as little self-deception as possible.
 
-If a proposed change improves aesthetics but weakens causality, realism, auditability, or simplicity, reject the change.
+If a proposed change improves aesthetics but weakens causality, realism, live tradability, auditability, or simplicity, reject the change.

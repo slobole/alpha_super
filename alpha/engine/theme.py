@@ -338,6 +338,22 @@ p {{
 .card-grid > .card {{
     margin-bottom: 0;
 }}
+.crisis-chart-grid {{
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 12px;
+    align-items: start;
+}}
+.crisis-chart-grid > .card {{
+    margin-bottom: 0;
+}}
+.crisis-chart-grid .card {{
+    padding: 12px 14px;
+}}
+.crisis-chart-grid .chart-wrap {{
+    margin-top: 6px;
+}}
 .section-stack {{
     display: flex;
     flex-direction: column;
@@ -447,6 +463,9 @@ strong {{
         padding: 16px;
     }}
     .card-grid {{
+        grid-template-columns: 1fr;
+    }}
+    .crisis-chart-grid {{
         grid-template-columns: 1fr;
     }}
 }}

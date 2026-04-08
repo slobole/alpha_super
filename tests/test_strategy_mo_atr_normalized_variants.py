@@ -23,7 +23,7 @@ from strategies.momentum.strategy_mo_atr_normalized_russell1000 import (
 )
 
 
-class AtrNormalizedVariantWrapperTests(unittest.TestCase):
+class AtrNormalizedVariantConstructionTests(unittest.TestCase):
     def make_rebalance_schedule_df(self) -> pd.DataFrame:
         rebalance_schedule_df = pd.DataFrame(
             {"decision_date_ts": [pd.Timestamp("2024-03-28")]},
@@ -47,7 +47,7 @@ class AtrNormalizedVariantWrapperTests(unittest.TestCase):
         self.assertEqual(RUSSELL1000_DEFAULT_CONFIG.regime_symbol_str, "SPY")
         self.assertEqual(RUSSELL1000_DEFAULT_CONFIG.max_positions_int, 10)
 
-    def test_ndx_wrapper_strategy_can_be_built(self):
+    def test_ndx_strategy_can_be_built_without_radge_wrapper_inheritance(self):
         strategy = AtrNormalizedNdxStrategy(
             name="AtrNormalizedNdxTest",
             benchmarks=[NDX_DEFAULT_CONFIG.regime_symbol_str],
@@ -63,7 +63,8 @@ class AtrNormalizedVariantWrapperTests(unittest.TestCase):
             max_positions_int=NDX_DEFAULT_CONFIG.max_positions_int,
         )
 
-        self.assertIsInstance(strategy, RadgeMomentumNdxStrategy)
+        self.assertIsInstance(strategy, AtrNormalizedNdxStrategy)
+        self.assertNotIsInstance(strategy, RadgeMomentumNdxStrategy)
         self.assertEqual(strategy.max_positions_int, 10)
 
     def test_sp500_wrapper_strategy_can_be_built(self):

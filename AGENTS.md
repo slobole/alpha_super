@@ -18,6 +18,8 @@ Supplementary current-strategy behavior reference: CURRENT_STRATEGIES.md.
 
 This codebase is held to a strict standard of quantitative rigor. Every piece of code â€” strategies, indicators, metrics, data handling â€” must be bullet-proof against common quant pitfalls. **Simplicity is a virtue**: prefer the clearest, most direct implementation over clever abstractions.
 
+The simulator is live-first. Prefer logic and assumptions that could be traded operationally at the intended capital scale, and record any unrealistic simplification in `ASSUMPTIONS_AND_GAPS.md`.
+
 ### Non-negotiable rules
 
 **Lookahead bias** â€” The most critical failure mode. Signals, features, and any derived data must only use information available *before* the decision point. `compute_signals()` runs on the full dataset deliberately â€” any feature computed there must use only past data (e.g. rolling windows, `shift()`). `iterate()` receives only data up to `previous_bar`; never index into future bars.

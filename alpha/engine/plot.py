@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import numpy as np
 import pandas as pd
 import matplotlib.gridspec as gridspec
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
-from matplotlib.ticker import FuncFormatter
+from matplotlib.ticker import FixedLocator, FuncFormatter
 
 from alpha.engine.theme import (
     SIGNATURE_PALETTE_DICT,
@@ -17,6 +19,10 @@ from alpha.engine.theme import (
 
 _PLOT_X_MARGIN_FLOAT = 0.008
 _PROMOTED_TICK_MIN_VERTICAL_GAP_PIXELS_FLOAT = 18.0
+_SHORT_WINDOW_MAX_DAY_COUNT_INT = 62
+_MEDIUM_WINDOW_MAX_DAY_COUNT_INT = 366
+_INTERMEDIATE_WINDOW_MAX_DAY_COUNT_INT = 3 * 366
+_SHORT_WINDOW_MAX_TICK_COUNT_INT = 8
 
 
 def plot(
@@ -35,10 +41,11 @@ def plot(
         colors=None,
         vertical_lines=(),
         ylims=(),
-        use_log_scale=True
+        use_log_scale=True,
+        return_bar_frequency_str: str = 'annual',
 ):
     """
-    Plot strategy and benchmark performance, drawdowns, and annual returns.
+    Plot strategy and benchmark performance, drawdowns, and period returns.
 
     Formulas preserved by this visualization layer:
 
@@ -51,8 +58,17 @@ def plot(
     drawdown_ser_t = total_value_t / max(total_value_1, ..., total_value_t) - 1
 
     relative_outperformance_ser_t = strategy_growth_of_1_ser_t - benchmark_growth_of_1_ser_t
+
+    For the bottom return panel:
+
+    R_period_k = V_period_end_k / V_period_end_(k-1) - 1
+
+    with the first partial displayed period anchored to the plotted window:
+
+    R_first = V_first_period_end / V_0 - 1
     """
     strategy_total_value_ser = pd.Series(strategy_total_value, copy=False).astype(float)
+    bar_date_idx = pd.DatetimeIndex(strategy_total_value_ser.index)
     benchmark_total_value_ser = (
         pd.Series(benchmark_total_value, copy=False).astype(float)
         if benchmark_total_value is not None else None
@@ -67,13 +83,22 @@ def plot(
     additional_color_map: dict[str, str] = {}
 
     strategy_growth_of_1_ser = strategy_total_value_ser / strategy_total_value_ser.iloc[0]
-    strategy_yearly_return_ser = generate_yearly_returns(strategy_total_value_ser)
+    strategy_period_return_ser = generate_period_returns(
+        strategy_total_value_ser,
+        return_bar_frequency_str=return_bar_frequency_str,
+    )
+    return_panel_ylabel_str, return_period_label_formatter_fn = (
+        _resolve_return_panel_spec(return_bar_frequency_str)
+    )
 
     benchmark_growth_of_1_ser = None
-    benchmark_yearly_return_ser = None
+    benchmark_period_return_ser = None
     if benchmark_total_value_ser is not None:
         benchmark_growth_of_1_ser = benchmark_total_value_ser / benchmark_total_value_ser.iloc[0]
-        benchmark_yearly_return_ser = generate_yearly_returns(benchmark_total_value_ser)
+        benchmark_period_return_ser = generate_period_returns(
+            benchmark_total_value_ser,
+            return_bar_frequency_str=return_bar_frequency_str,
+        )
 
     if strategy_drawdown is None:
         strategy_drawdown_ser = compute_drawdown(strategy_total_value_ser)
@@ -87,16 +112,16 @@ def plot(
     else:
         benchmark_drawdown_ser = None
 
-    if benchmark_yearly_return_ser is not None:
-        annual_return_df = pd.concat(
+    if benchmark_period_return_ser is not None:
+        period_return_df = pd.concat(
             [
-                strategy_yearly_return_ser.rename(strategy_label),
-                benchmark_yearly_return_ser.rename(benchmark_label),
+                strategy_period_return_ser.rename(strategy_label),
+                benchmark_period_return_ser.rename(benchmark_label),
             ],
             axis=1,
         )
-        strategy_yearly_return_ser = annual_return_df[strategy_label]
-        benchmark_yearly_return_ser = annual_return_df[benchmark_label]
+        strategy_period_return_ser = period_return_df[strategy_label]
+        benchmark_period_return_ser = period_return_df[benchmark_label]
 
     with plt.rc_context(plot_style_dict):
         figure_obj = plt.figure(figsize=(12, 11.2))
@@ -277,28 +302,29 @@ def plot(
 
         drawdown_ax.set_ylabel('Drawdown')
         drawdown_ax.yaxis.set_major_formatter(FuncFormatter(fraction_major_formatter))
-        drawdown_year_locator_obj = mdates.YearLocator()
-        drawdown_year_formatter_obj = mdates.DateFormatter('%Y')
-        drawdown_ax.xaxis.set_major_locator(drawdown_year_locator_obj)
-        drawdown_ax.xaxis.set_major_formatter(drawdown_year_formatter_obj)
-        drawdown_ax.tick_params(axis='x', labelbottom=True, rotation=0)
+        drawdown_locator_obj, drawdown_formatter_obj, drawdown_rotation_float = (
+            _build_time_axis_locator_formatter_tuple(bar_date_idx)
+        )
+        drawdown_ax.xaxis.set_major_locator(drawdown_locator_obj)
+        drawdown_ax.xaxis.set_major_formatter(drawdown_formatter_obj)
+        drawdown_ax.tick_params(axis='x', labelbottom=True, rotation=drawdown_rotation_float)
         drawdown_ax.margins(x=_PLOT_X_MARGIN_FLOAT)
 
-        annual_position_vec = np.arange(len(strategy_yearly_return_ser), dtype=float)
-        has_benchmark_bool = benchmark_yearly_return_ser is not None
+        return_position_vec = np.arange(len(strategy_period_return_ser), dtype=float)
+        has_benchmark_bool = benchmark_period_return_ser is not None
         bar_width_float = 0.34 if has_benchmark_bool else 0.56
         bar_edge_color_str = SIGNATURE_PALETTE_DICT['bar_edge']
 
         if has_benchmark_bool:
-            strategy_bar_center_vec = annual_position_vec - bar_width_float / 2.0
-            benchmark_bar_center_vec = annual_position_vec + bar_width_float / 2.0
+            strategy_bar_center_vec = return_position_vec - bar_width_float / 2.0
+            benchmark_bar_center_vec = return_position_vec + bar_width_float / 2.0
         else:
-            strategy_bar_center_vec = annual_position_vec
+            strategy_bar_center_vec = return_position_vec
             benchmark_bar_center_vec = None
 
         strategy_bar_container = annual_ax.bar(
             strategy_bar_center_vec,
-            strategy_yearly_return_ser.to_numpy(),
+            strategy_period_return_ser.to_numpy(),
             bar_width_float,
             label=strategy_label,
             color=strategy_color_str,
@@ -308,12 +334,12 @@ def plot(
             zorder=3,
         )
         for bar_patch in strategy_bar_container.patches:
-            bar_patch.set_gid('strategy_annual_bar')
+            bar_patch.set_gid('strategy_period_return_bar')
 
         if has_benchmark_bool:
             benchmark_bar_container = annual_ax.bar(
                 benchmark_bar_center_vec,
-                benchmark_yearly_return_ser.to_numpy(),
+                benchmark_period_return_ser.to_numpy(),
                 bar_width_float,
                 label=benchmark_label,
                 color=benchmark_color_str,
@@ -323,15 +349,19 @@ def plot(
                 zorder=2,
             )
             for bar_patch in benchmark_bar_container.patches:
-                bar_patch.set_gid('benchmark_annual_bar')
+                bar_patch.set_gid('benchmark_period_return_bar')
 
-        annual_ax.set_ylabel('Annual Return (%)')
-        annual_ax.set_xticks(annual_position_vec)
-        annual_ax.set_xticklabels(strategy_yearly_return_ser.index.year, rotation=90)
-        annual_ax.set_xlim(-0.6, len(strategy_yearly_return_ser) - 0.4)
+        return_label_list = [
+            return_period_label_formatter_fn(period_end_ts)
+            for period_end_ts in pd.DatetimeIndex(strategy_period_return_ser.index)
+        ]
+        annual_ax.set_ylabel(return_panel_ylabel_str)
+        annual_ax.set_xticks(return_position_vec)
+        annual_ax.set_xticklabels(return_label_list, rotation=90)
+        annual_ax.set_xlim(-0.6, len(strategy_period_return_ser) - 0.4)
         annual_ax.yaxis.set_major_formatter(FuncFormatter(fraction_major_formatter))
 
-        for separator_float in np.arange(-0.5, len(strategy_yearly_return_ser) + 0.5, 1.0):
+        for separator_float in np.arange(-0.5, len(strategy_period_return_ser) + 0.5, 1.0):
             annual_ax.axvline(
                 x=separator_float,
                 color=SIGNATURE_PALETTE_DICT['grid'],
@@ -377,6 +407,60 @@ def plot(
         plt.show()
 
 
+def _build_time_axis_locator_formatter_tuple(
+    bar_date_idx: pd.DatetimeIndex,
+) -> tuple[object, object, float]:
+    """
+    Build an adaptive date axis for the lower panel.
+
+    For short windows, the tick dates are sampled from the actual observed bars:
+
+        i_k = round(k * (N - 1) / (K - 1))
+
+        tick_date_k = T[i_k]
+
+    where:
+
+        T = observed bar-date index
+        N = len(T)
+        K = requested tick count
+    """
+    normalized_bar_date_idx = pd.DatetimeIndex(bar_date_idx).sort_values().unique()
+    if len(normalized_bar_date_idx) == 0:
+        return mdates.YearLocator(), mdates.DateFormatter('%Y'), 0.0
+
+    if len(normalized_bar_date_idx) == 1:
+        single_tick_float = float(mdates.date2num(normalized_bar_date_idx[0].to_pydatetime()))
+        return FixedLocator([single_tick_float]), mdates.DateFormatter('%Y-%m-%d'), 35.0
+
+    span_day_count_int = int(
+        (normalized_bar_date_idx[-1] - normalized_bar_date_idx[0]).days
+    )
+
+    if span_day_count_int <= _SHORT_WINDOW_MAX_DAY_COUNT_INT:
+        tick_count_int = min(_SHORT_WINDOW_MAX_TICK_COUNT_INT, len(normalized_bar_date_idx))
+        tick_position_vec = np.linspace(
+            0.0,
+            float(len(normalized_bar_date_idx) - 1),
+            tick_count_int,
+        )
+        tick_index_vec = np.unique(np.round(tick_position_vec).astype(int))
+        # *** CRITICAL*** Sample short-window tick labels from the actual
+        # observed bar dates so crisis plots show real tradable dates rather
+        # than synthetic calendar interpolation.
+        tick_date_idx = normalized_bar_date_idx[tick_index_vec]
+        tick_location_vec = mdates.date2num(tick_date_idx.to_pydatetime())
+        return FixedLocator(tick_location_vec), mdates.DateFormatter('%Y-%m-%d'), 35.0
+
+    if span_day_count_int <= _MEDIUM_WINDOW_MAX_DAY_COUNT_INT:
+        return mdates.MonthLocator(interval=1), mdates.DateFormatter('%Y-%m'), 25.0
+
+    if span_day_count_int <= _INTERMEDIATE_WINDOW_MAX_DAY_COUNT_INT:
+        return mdates.MonthLocator(interval=3), mdates.DateFormatter('%Y-%m'), 0.0
+
+    return mdates.YearLocator(), mdates.DateFormatter('%Y'), 0.0
+
+
 def _set_growth_of_1_ticks(axis_obj, growth_of_1_max_float: float) -> None:
     upper_tick_float = max(1.0, float(growth_of_1_max_float))
     major_tick_list = [0.5, 1.0]
@@ -392,22 +476,71 @@ def _set_growth_of_1_ticks(axis_obj, growth_of_1_max_float: float) -> None:
     axis_obj.set_yticks(sorted(set(major_tick_list)))
 
 
+def _resolve_return_panel_spec(
+    return_bar_frequency_str: str,
+) -> tuple[str, Callable[[pd.Timestamp], str]]:
+    normalized_frequency_str = str(return_bar_frequency_str).strip().lower()
+    if normalized_frequency_str == 'annual':
+        return 'Annual Return (%)', lambda period_end_ts: f'{pd.Timestamp(period_end_ts).year}'
+    if normalized_frequency_str == 'monthly':
+        return 'Monthly Return (%)', lambda period_end_ts: pd.Timestamp(period_end_ts).strftime('%Y-%m')
+    raise ValueError(
+        f'Unsupported return_bar_frequency_str={return_bar_frequency_str!r}. '
+        "Expected 'annual' or 'monthly'."
+    )
+
+
+def generate_period_returns(
+    series,
+    return_bar_frequency_str: str = 'annual',
+):
+    """
+    Compute displayed period returns from realized total value.
+
+    For each displayed period k:
+
+        R_period_k = V_period_end_k / V_period_end_(k-1) - 1
+
+    The first plotted period is anchored to the plotted start:
+
+        R_first = V_first_period_end / V_0 - 1
+    """
+    total_value_ser = pd.Series(series, copy=False).astype(float)
+    if len(total_value_ser) == 0:
+        return pd.Series(dtype=float)
+
+    normalized_frequency_str = str(return_bar_frequency_str).strip().lower()
+    if normalized_frequency_str == 'annual':
+        resample_rule_str = 'YE'
+        period_offset_obj = pd.offsets.YearEnd(1)
+    elif normalized_frequency_str == 'monthly':
+        resample_rule_str = 'ME'
+        period_offset_obj = pd.offsets.MonthEnd(1)
+    else:
+        raise ValueError(
+            f'Unsupported return_bar_frequency_str={return_bar_frequency_str!r}. '
+            "Expected 'annual' or 'monthly'."
+        )
+
+    period_end_total_value_ser = total_value_ser.resample(resample_rule_str).last()
+    if len(period_end_total_value_ser) == 0:
+        return pd.Series(dtype=float)
+
+    if period_end_total_value_ser.index[0] != total_value_ser.index[0]:
+        # *** CRITICAL*** Anchor the first displayed return period to the
+        # realized window start so a partial first month/year is measured as
+        # V_first_period_end / V_0 - 1 rather than being dropped.
+        start_anchor_ts = pd.Timestamp(period_end_total_value_ser.index[0]) - period_offset_obj
+        period_end_total_value_ser.loc[start_anchor_ts] = total_value_ser.iloc[0]
+        period_end_total_value_ser = period_end_total_value_ser.sort_index()
+
+    period_return_ser = period_end_total_value_ser.pct_change(fill_method=None).dropna()
+    return period_return_ser
+
+
 def generate_yearly_returns(series):
     """Compute annual returns from year-end total values."""
-    total_value_ser = pd.Series(series, copy=False).astype(float)
-    year_end_total_value_ser = total_value_ser.resample('YE').last()
-
-    if year_end_total_value_ser.index[0] != total_value_ser.index[0]:
-        start_anchor_ts = pd.Timestamp(
-            year=year_end_total_value_ser.index[0].year - 1,
-            month=year_end_total_value_ser.index[0].month,
-            day=year_end_total_value_ser.index[0].day,
-        )
-        year_end_total_value_ser.loc[start_anchor_ts] = total_value_ser.iloc[0]
-        year_end_total_value_ser = year_end_total_value_ser.sort_index()
-
-    yearly_return_ser = year_end_total_value_ser.pct_change(fill_method=None).dropna()
-    return yearly_return_ser
+    return generate_period_returns(series, return_bar_frequency_str='annual')
 
 
 def compute_drawdown(total_value_ser: pd.Series) -> pd.Series:
