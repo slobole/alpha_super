@@ -1,6 +1,6 @@
 identity:
-  release_id: user_001.pod_qpi.daily_moo.v1
-  user_id: user_001
+  release_id: excelence_trade_paper_001.pod_qpi.daily_moo.v1
+  user_id: excelence_trade_paper_001
   pod_id: pod_qpi_01
 
 deployment:
