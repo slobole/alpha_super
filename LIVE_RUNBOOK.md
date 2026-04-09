@@ -1,54 +1,122 @@
-# Live Runbook
+﻿# Live Runbook
 
-TL;DR: in live mode you do **not** run strategy files directly. You create one YAML manifest per pod, then run the generic live runner.
+TL;DR: in live v2 you do **not** freeze final share quantities after the close. You freeze a `DecisionPlan` after the approved snapshot is ready, then you build a pre-submit `VPlan` from **broker truth** near the execution window.
 
-The simple live flow is:
+If you want the shortest operator version first, read:
+- [LIVE_START_HERE.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_START_HERE.md)
 
-1. Put one YAML file per pod under `alpha/live/releases/`.
-2. Run the generic live runner.
-3. The runner waits until data is ready.
-4. The runner builds a frozen plan.
-5. The runner submits orders and stores fills.
+The core contract is:
+
+```text
+DecisionPlan_t = f(approved_snapshot_t, strategy_memory_t)
+VPlan_submit = f(DecisionPlan_t, BrokerSnapshot_submit, live_quote_snapshot)
+```
+
+That means:
+
+1. the strategy decides **what it wants**
+2. the execution layer decides **how many shares to send**
+3. final share sizing uses live `NetLiq`, live broker positions, and live quote prices
 
 ## What This Is
 
 This file is the simple operator guide for the live layer under `alpha/live/`.
 
 Use it for:
-- where to put configs
+- where the YAML files live
 - what each config section means
-- which commands to run
-- how to check if things are okay
-
-Do **not** think of this as a separate strategy codebase.
+- what commands to run
+- how to inspect the live `VPlan`
 
 The research strategies stay in:
 - `strategies/`
 
-The live layer just hosts them.
+The live layer only hosts them.
 
-## Main Idea
+## Main Objects
 
-One pod is:
+### `DecisionPlan`
+
+Built after the approved signal snapshot is ready.
+
+Contains:
+- an explicit decision-book type
+- either:
+  - incremental entry weights + exits + entry priority
+  - or a full target-weight book
+- strategy memory
+- signal / submit / target execution timestamps
+
+It does **not** contain final overnight share quantities.
+
+Current strategy-family mapping:
+- `incremental_entry_exit_book`
+  - `strategies.dv2.strategy_mr_dv2:DVO2Strategy`
+  - `strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy`
+- `full_target_weight_book`
+  - `strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash`
+  - `strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy`
+
+### `BrokerSnapshot`
+
+Read near the submit window from the broker.
+
+Contains:
+- current broker positions
+- cash
+- `NetLiq`
+- `AvailableFunds`
+- `ExcessLiquidity`
+
+### `VPlan`
+
+Built near the submit window from:
+- `DecisionPlan`
+- `BrokerSnapshot`
+- live quote snapshot
+
+Contains:
+- current shares
+- target shares
+- delta shares
+- live reference price
+- estimated target notional
+
+This is the execution artifact for both:
+- manual review
+- automatic submit
+
+## Core Formula
+
+Each pod uses a fixed fraction of broker `NetLiq`:
 
 ```text
-one strategy
-+ one user
-+ one broker account
-+ one market calendar
+PodBudget = NetLiq_broker * pod_budget_fraction
+TargetDollar_i = target_weight_i * PodBudget
+TargetShares_i = floor(TargetDollar_i / LivePrice_i)
+OrderDelta_i = TargetShares_i - BrokerShares_i
 ```
 
-One manifest file = one live pod.
+That is the sizing logic used inside the `VPlan`.
 
-Examples:
-- DV2 pod
-- TAA pod
-- monthly momentum pod
+## High-Level Flow
+
+The simple live flow is:
+
+1. put one YAML file per pod under `alpha/live/releases/`
+2. run the generic live runner
+3. the runner waits until the snapshot is ready
+4. the runner builds a `DecisionPlan`
+5. near submit time the runner reads broker truth
+6. the runner builds a `VPlan`
+7. you either review the `VPlan` manually or auto-submit it
+8. fills are stored and broker-backed pod state is updated
 
 ## Where The Config Files Live
 
 Current examples:
 - [pod_dv2_01.yaml](C:/Users/User/Documents/workspace/alpha_super/alpha/live/releases/user_001/pod_dv2_01.yaml)
+- [pod_qpi_01.yaml](C:/Users/User/Documents/workspace/alpha_super/alpha/live/releases/user_001/pod_qpi_01.yaml)
 - [pod_taa_01.yaml](C:/Users/User/Documents/workspace/alpha_super/alpha/live/releases/user_001/pod_taa_01.yaml)
 - [pod_ndx_mo_01.yaml](C:/Users/User/Documents/workspace/alpha_super/alpha/live/releases/user_001/pod_ndx_mo_01.yaml)
 
@@ -58,7 +126,7 @@ General location:
 alpha/live/releases/<user_id>/*.yaml
 ```
 
-## Recommended Daily Command
+## Recommended Main Command
 
 This is the main command:
 
@@ -78,9 +146,11 @@ It does:
 1. load enabled manifests
 2. check market session timing
 3. check if Norgate data is ready
-4. build frozen plans if due
-5. submit frozen plans if due
-6. reconcile completed submissions
+4. build `DecisionPlan` objects if due
+5. expire missed windows
+6. build `VPlan` objects from broker truth if due
+7. auto-submit ready `VPlan` objects only when `auto_submit_enabled_bool = true`
+8. reconcile submitted fills
 
 Recommended scheduler setup:
 - Windows Task Scheduler
@@ -98,47 +168,137 @@ uv run python -m alpha.live.runner status --mode paper
 ```
 
 This shows:
-- active pods
-- latest plan status
+- enabled pods
+- latest `DecisionPlan` status
+- latest `VPlan` status
 - next action
-- reason code
+- latest broker snapshot timestamp
 - latest fill timestamp
 
-If you want the raw machine output instead:
+Raw machine output:
 
 ```bash
 uv run python -m alpha.live.runner status --mode paper --json
 ```
 
-### 2. Execution Report
+### 2. Build Decision Plans
+
+```bash
+uv run python -m alpha.live.runner build_decision_plans --mode paper
+```
+
+This builds overnight `DecisionPlan` objects from approved snapshot data.
+
+### 3. Build VPlan
+
+```bash
+uv run python -m alpha.live.runner build_vplan --mode paper
+```
+
+This reads broker truth and live prices, then builds pre-submit `VPlan` objects.
+
+If you use a real IBKR session, you can pass broker connection args:
+
+```bash
+uv run python -m alpha.live.runner build_vplan --mode paper --broker-host 127.0.0.1 --broker-port 7497 --broker-client-id 31
+```
+
+### 4. Show VPlan
+
+```bash
+uv run python -m alpha.live.runner show_vplan --mode paper
+```
+
+This is the main manual-review command.
+
+It shows:
+- decision-base shares
+- current shares
+- drift shares
+- target shares
+- delta shares
+- live reference price
+- estimated target notional
+- warning flag
+
+### 5. Submit VPlan
+
+```bash
+uv run python -m alpha.live.runner submit_vplan --mode paper --vplan-id 1
+```
+
+This explicitly submits one ready `VPlan`.
+
+Use this in:
+- manual review mode
+- debugging
+- controlled paper testing
+
+### 6. Post-Execution Reconcile
+
+```bash
+uv run python -m alpha.live.runner post_execution_reconcile --mode paper
+```
+
+This reads fills and updates broker-backed pod state.
+
+### 7. Execution Report
 
 ```bash
 uv run python -m alpha.live.runner execution_report --mode paper
 ```
 
-This shows raw broker fills:
+This shows raw fills:
 - symbol
 - fill amount
 - fill price
 - fill timestamp
 
-### 3. Manual phase commands
+## Manual Mode vs Auto Mode
 
-Usually you should use `tick`, but for debugging you can run:
+Default behavior:
 
-```bash
-uv run python -m alpha.live.runner build_order_plans --mode paper
-uv run python -m alpha.live.runner execute_order_plans --mode paper
-uv run python -m alpha.live.runner post_execution_reconcile --mode paper
+```yaml
+execution:
+  auto_submit_enabled_bool: true
 ```
 
-Default CLI output is human-readable.
+### Manual mode
 
-Use `--json` only if you want the low-level debug fields.
+Set:
 
-## Simple Flow
+```yaml
+execution:
+  auto_submit_enabled_bool: false
+```
 
-![alt text](image.png)
+Flow:
+1. `tick` builds a `DecisionPlan`
+2. `tick` builds a `VPlan`
+3. you inspect it with `show_vplan`
+4. you call `submit_vplan` manually if desired
+
+### Auto mode
+
+Use:
+
+```yaml
+execution:
+  auto_submit_enabled_bool: true
+```
+
+Flow:
+1. `tick` builds a `DecisionPlan`
+2. `tick` builds a `VPlan`
+3. if all gates pass, `tick` submits that exact `VPlan`
+4. later `tick` calls `post_execution_reconcile` after the target execution time
+
+The same `VPlan` is used for:
+- manual review
+- auto-submit
+
+There is no separate "hidden auto order list".
+
 ## Manifest Structure
 
 Example:
@@ -154,7 +314,7 @@ deployment:
   enabled_bool: true
 
 broker:
-  account_route: DU1234567
+  account_route: DUK322077
 
 strategy:
   strategy_import_str: strategies.dv2.strategy_mr_dv2:DVO2Strategy
@@ -168,6 +328,10 @@ market:
 schedule:
   signal_clock_str: eod_snapshot_ready
   execution_policy_str: next_open_moo
+
+execution:
+  pod_budget_fraction_float: 0.03
+  auto_submit_enabled_bool: true
 
 bootstrap:
   initial_cash_float: 100000.0
@@ -195,18 +359,14 @@ If you make a new version of the same pod, usually change `release_id` and keep 
 - `mode`
   - allowed: `paper`, `live`
 - `enabled_bool`
-  - `true` means the runner will load it
+  - `true` means the runner loads it
   - `false` means the runner ignores it
-
-Important:
-- `paper` manifests are expected to use a paper-style IBKR route like `DU...`
-- `live` manifests must not use the paper prefix
 
 ### `broker`
 
 - `account_route`
   - broker account id
-  - example: `DU1234567`
+  - example: `DUK322077`
 
 ### `strategy`
 
@@ -215,10 +375,11 @@ Important:
 - `data_profile_str`
   - which data contract the pod expects
 - `params`
-  - actual strategy parameters
+  - strategy parameters
 
 Currently supported `strategy_import_str` values:
 - `strategies.dv2.strategy_mr_dv2:DVO2Strategy`
+- `strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy`
 - `strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash`
 - `strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy`
 
@@ -231,317 +392,153 @@ Currently supported `data_profile_str` values:
 ### `market`
 
 - `session_calendar_id_str`
-  - which exchange calendar controls this pod
+  - exchange calendar controlling:
+    - holidays
+    - weekends
+    - early closes
+    - next session
+    - month-end boundaries
 
-Currently supported values:
+Supported values:
 - `XNYS`
 - `XTSE`
 - `XASX`
 
-This controls:
-- holidays
-- weekends
-- early closes
-- next session
-- month-end session boundaries
-
 ### `schedule`
 
-This has 2 different jobs:
+This controls:
+- when the strategy may decide
+- when the execution policy may trade
 
-#### `signal_clock_str`
-
-This means:
-
-> when the strategy is allowed to make the decision
-
-Supported values:
+`signal_clock_str` supported values:
 - `eod_snapshot_ready`
 - `month_end_snapshot_ready`
 - `pre_close_15m`
 
-Examples:
-- `eod_snapshot_ready`
-  - wait until Norgate daily snapshot is actually ready
-- `month_end_snapshot_ready`
-  - wait until Norgate snapshot is ready **and** today is the real last trading session of the month
-- `pre_close_15m`
-  - decision time is 15 minutes before the real session close
-
-#### `execution_policy_str`
-
-This means:
-
-> when and how the frozen plan should be submitted
-
-Supported values:
+`execution_policy_str` supported values:
 - `next_open_moo`
 - `same_day_moc`
 - `next_month_first_open`
 
-Examples:
-- `next_open_moo`
-  - submit before next session open
-- `same_day_moc`
-  - submit before same-day close
-- `next_month_first_open`
-  - submit before first trading session of next month
+### `execution`
+
+- `pod_budget_fraction_float`
+  - fraction of broker `NetLiq` allocated to this pod
+  - must satisfy:
+
+```text
+0 < pod_budget_fraction <= 1
+```
+
+- `auto_submit_enabled_bool`
+  - `false` = manual-first mode
+  - `true` = `tick` may auto-submit a ready `VPlan`
 
 ### `bootstrap`
 
 - `initial_cash_float`
-  - used only if the pod has no saved state yet
-
-Very simply:
-- first run with no state -> use this cash
-- later runs -> use saved pod state / broker state
+  - used only as the fallback for a brand-new pod before real broker-backed state exists
 
 ### `risk`
 
 - `risk_profile_str`
-  - currently a routing/label field
-  - not a full separate risk engine yet
+  - simple policy label / future risk hook
 
-## Supported Timing Combos
+## Important Operational Rules
 
-### Daily next-open pod
-
-Example:
-
-```yaml
-schedule:
-  signal_clock_str: eod_snapshot_ready
-  execution_policy_str: next_open_moo
-```
-
-Meaning:
-- wait for daily snapshot
-- build plan
-- submit next open
-
-### Monthly month-end pod
-
-Example:
-
-```yaml
-schedule:
-  signal_clock_str: month_end_snapshot_ready
-  execution_policy_str: next_month_first_open
-```
-
-Meaning:
-- wait for true month-end trading session
-- build plan
-- submit on first next-month session
-
-### Future close-entry pod
-
-Example:
-
-```yaml
-schedule:
-  signal_clock_str: pre_close_15m
-  execution_policy_str: same_day_moc
-```
-
-Meaning:
-- decide 15 minutes before close
-- submit for same-day close
-
-Important:
-- the release plumbing exists
-- real intraday signal hosting is still deferred
-
-## What The System Uses For Timing
-
-Two different sources:
-
-### 1. Norgate
-
-Used for:
-- daily snapshot readiness
-- month-end snapshot readiness
-
-Simple meaning:
+### 1. Broker truth wins for positions
 
 ```text
-Norgate says: data is ready, you may think now.
+LiveShares = BrokerShares
 ```
 
-### 2. Exchange calendar
+If the broker says your current positions differ from the `DecisionPlan` base positions, the system records a warning and still sizes from broker truth.
 
-Used for:
-- weekend / holiday checks
-- early closes
-- next session
-- first session of next month
-- submission windows
+### 2. Cash does not block v2 preflight
 
-Simple meaning:
+Cash is stored for audit and monitoring, and share drift is also warning-only in v2.
+
+### 3. `next_open_moo` is basket mode
+
+For v2, `next_open_moo` means:
 
 ```text
-Exchange calendar says: the market is really open now, you may trade now.
+one opening basket
 ```
 
-## What Happens Internally
-
-The state machine is simple:
+Not:
 
 ```text
-NoPlan -> Frozen -> Submitting -> Submitted -> Completed
+sell first, then buy
 ```
 
-Possible safety stops:
+### 4. Missed window means expire
+
+If the submit window is missed:
 
 ```text
-Blocked
-Failed
+DecisionPlan -> expired
 ```
 
-That state is stored in SQLite.
+and a stale `VPlan` is not reused later.
 
-So each `tick` asks:
-- do I already have a plan?
-- if yes, what status is it in?
-- is data ready?
-- is it time to submit?
-- did I already submit?
+## Where State Lives
 
-That is how the system avoids duplicate orders.
-
-## Where State Is Stored
-
-Default SQLite file:
+Live state is stored in:
 - [live_state.sqlite3](C:/Users/User/Documents/workspace/alpha_super/alpha/live/live_state.sqlite3)
 
-The live layer stores:
-- releases
-- pod state
-- frozen plans
-- order intents
-- broker orders
-- fills
-- reconciliation snapshots
-- job runs
+Important v2 objects stored there:
+- `decision_plan`
+- `vplan`
+- `vplan_row`
+- `broker_snapshot_cache`
+- `vplan_reconciliation_snapshot`
+- `vplan_broker_order`
+- `vplan_fill`
 
-## Where Logs Go
+## Recommended Daily Workflow
 
-Structured JSONL log:
-- [live_events.jsonl](C:/Users/User/Documents/workspace/alpha_super/alpha/live/logs/live_events.jsonl)
-
-Useful event names:
-- `build_plan_created`
-- `build_plan_skipped`
-- `submit_plan_completed`
-- `submit_plan_blocked`
-- `post_execution_reconcile_completed`
-- `tick_completed`
-
-## What `execution_report` Means
-
-This report is intentionally simple.
-
-It shows raw broker truth:
-- `fill_amount_float`
-- `fill_price_float`
-- `fill_timestamp_str`
-
-So:
-
-\[
-P^{fill} = \text{actual broker fill price}
-\]
-
-We are intentionally **not** forcing a final slippage benchmark convention here yet.
-
-That analysis can be added later from the raw fills.
-
-## How To Add A New Pod
-
-1. Copy one of the existing YAML files.
-2. Change:
-   - `identity.release_id`
-   - `identity.pod_id`
-   - `broker.account_route`
-   - `strategy.strategy_import_str`
-   - `strategy.data_profile_str`
-   - `strategy.params`
-   - `market.session_calendar_id_str`
-   - `schedule.*`
-3. Keep `deployment.enabled_bool: true`
-4. Run:
+### Manual review workflow
 
 ```bash
-uv run python -m alpha.live.runner status --mode paper
+uv run python -m alpha.live.runner tick --mode paper
+uv run python -m alpha.live.runner show_vplan --mode paper
+uv run python -m alpha.live.runner submit_vplan --mode paper --vplan-id 1
+uv run python -m alpha.live.runner post_execution_reconcile --mode paper
 ```
 
-5. Then run:
+### Automatic workflow
 
 ```bash
 uv run python -m alpha.live.runner tick --mode paper
 ```
 
-## How To Run Multiple Strategies
+With:
 
-Just add multiple manifest files under `alpha/live/releases/<user_id>/`.
-
-Example:
-- DV2 pod
-- TAA pod
-- monthly momentum pod
-
-The same `tick` command will load all enabled pods.
-
-You do **not** run each strategy file manually in live mode.
-
-## Recommended First Workflow
-
-### Step 1. Check manifests
-
-```bash
-uv run python -m alpha.live.runner status --mode paper
+```yaml
+execution:
+  auto_submit_enabled_bool: true
 ```
 
-### Step 2. Run the live loop manually
+## Short Mental Model
 
-```bash
-uv run python -m alpha.live.runner tick --mode paper
+Night:
+
+```text
+approved snapshot -> DecisionPlan
 ```
 
-### Step 3. Inspect raw fills
+Pre-submit:
 
-```bash
-uv run python -m alpha.live.runner execution_report --mode paper
+```text
+DecisionPlan + BrokerSnapshot + live quote snapshot -> VPlan
 ```
 
-### Step 4. When comfortable, schedule `tick`
+Execution:
 
-Use:
-- Windows Task Scheduler
-- every 1 minute
+```text
+VPlan -> broker orders -> fills
+```
 
-## Important Notes
+That is the v2 live system.
 
-- `tick` is the main command. Start there.
-- Keep one manifest per pod.
-- Keep `pod_id` stable for the same sleeve.
-- Use `status` for health checks.
-- Use `execution_report` for raw fills.
-- Use `paper` first.
-- Do not run live strategy files directly.
-
-## Current Limitations
-
-- The real IBKR adapter is still a thin boundary in v1.
-- `same_day_moc` scheduling exists, but real intraday signal hosting is still deferred.
-- `risk_profile_str` is currently more of a label than a full risk engine input.
-
-## Short Summary
-
-If you forget everything else, remember this:
-
-1. create one YAML per pod
-2. run `status`
-3. run `tick`
-4. inspect `execution_report`
-5. later schedule `tick` every minute

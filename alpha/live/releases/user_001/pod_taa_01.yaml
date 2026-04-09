@@ -22,6 +22,10 @@ schedule:
   signal_clock_str: month_end_snapshot_ready # allowed: eod_snapshot_ready, month_end_snapshot_ready, pre_close_15m
   execution_policy_str: next_month_first_open # allowed: next_open_moo, same_day_moc, next_month_first_open
 
+execution:
+  pod_budget_fraction_float: 0.03
+  auto_submit_enabled_bool: true
+
 bootstrap:
   initial_cash_float: 100000.0
 

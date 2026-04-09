@@ -34,3 +34,9 @@ temp/
 
 # Generated backtest artifacts
 results/
+
+# Live runtime artifacts
+alpha/live/live_state.sqlite3
+alpha/live/live_state.sqlite3-shm
+alpha/live/live_state.sqlite3-wal
+alpha/live/logs/

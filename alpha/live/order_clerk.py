@@ -6,12 +6,14 @@ from datetime import UTC, datetime
 from typing import Iterable
 import uuid
 
+from alpha.live.ibkr_socket_client import IBKRSocketClient
 from alpha.live.models import (
     BrokerOrderFill,
     BrokerOrderRecord,
     BrokerOrderRequest,
-    BrokerPositionSnapshot,
+    BrokerSnapshot,
     FrozenOrderIntent,
+    LivePriceSnapshot,
 )
 
 
@@ -132,7 +134,15 @@ class BrokerAdapter(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_account_snapshot(self, account_route_str: str) -> BrokerPositionSnapshot:
+    def get_account_snapshot(self, account_route_str: str) -> BrokerSnapshot:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_live_price_snapshot(
+        self,
+        account_route_str: str,
+        asset_str_list: list[str],
+    ) -> LivePriceSnapshot:
         raise NotImplementedError
 
     @abstractmethod
@@ -154,20 +164,47 @@ class BrokerAdapter(ABC):
 
 
 class IBKRGatewayBrokerAdapter(BrokerAdapter):
+    def __init__(
+        self,
+        host_str: str = "127.0.0.1",
+        port_int: int = 7497,
+        client_id_int: int = 31,
+        timeout_seconds_float: float = 4.0,
+    ):
+        self.socket_client_obj = IBKRSocketClient(
+            host_str=host_str,
+            port_int=port_int,
+            client_id_int=client_id_int,
+            timeout_seconds_float=timeout_seconds_float,
+        )
+
     def get_visible_account_route_set(self) -> set[str] | None:
-        return None
+        try:
+            return self.socket_client_obj.get_visible_account_route_set()
+        except Exception:
+            return None
 
     def get_session_mode_str(self, account_route_str: str) -> str | None:
+        visible_account_route_set = self.get_visible_account_route_set()
+        if visible_account_route_set is not None and account_route_str in visible_account_route_set:
+            return infer_ibkr_account_mode_str(account_route_str)
         return None
 
     def is_session_ready(self, account_route_str: str) -> bool:
-        return False
+        visible_account_route_set = self.get_visible_account_route_set()
+        if visible_account_route_set is None:
+            return False
+        return account_route_str in visible_account_route_set
 
-    def get_account_snapshot(self, account_route_str: str) -> BrokerPositionSnapshot:
-        raise RuntimeError(
-            "IBKR broker adapter is a thin boundary only in v1. "
-            "Ensure IBC + IB Gateway/TWS are running and wire a concrete adapter before live submission."
-        )
+    def get_account_snapshot(self, account_route_str: str) -> BrokerSnapshot:
+        return self.socket_client_obj.get_account_snapshot(account_route_str)
+
+    def get_live_price_snapshot(
+        self,
+        account_route_str: str,
+        asset_str_list: list[str],
+    ) -> LivePriceSnapshot:
+        return self.socket_client_obj.get_live_price_snapshot(account_route_str, asset_str_list)
 
     def submit_order_request_list(
         self,
@@ -175,9 +212,10 @@ class IBKRGatewayBrokerAdapter(BrokerAdapter):
         broker_order_request_list: list[BrokerOrderRequest],
         submitted_timestamp_ts: datetime,
     ) -> tuple[list[BrokerOrderRecord], list[BrokerOrderFill]]:
-        raise RuntimeError(
-            "IBKR broker adapter submission is not implemented in v1. "
-            "Use the stub adapter in tests or provide a concrete broker integration."
+        return self.socket_client_obj.submit_order_request_list(
+            account_route_str=account_route_str,
+            broker_order_request_list=broker_order_request_list,
+            submitted_timestamp_ts=submitted_timestamp_ts,
         )
 
     def get_recent_fill_list(
@@ -185,17 +223,19 @@ class IBKRGatewayBrokerAdapter(BrokerAdapter):
         account_route_str: str,
         since_timestamp_ts: datetime,
     ) -> list[BrokerOrderFill]:
-        raise RuntimeError(
-            "IBKR broker adapter recent-fill lookup is not implemented in v1."
+        return self.socket_client_obj.get_recent_fill_list(
+            account_route_str=account_route_str,
+            since_timestamp_ts=since_timestamp_ts,
         )
 
 
 class StubBrokerAdapter(BrokerAdapter):
     def __init__(self):
-        self._snapshot_map: dict[str, BrokerPositionSnapshot] = {}
+        self._snapshot_map: dict[str, BrokerSnapshot] = {}
         self._fill_map: dict[str, list[BrokerOrderFill]] = defaultdict(list)
         self._session_mode_map: dict[str, str] = {}
         self._fill_price_multiplier_map: dict[str, float] = {}
+        self._live_price_snapshot_map: dict[str, LivePriceSnapshot] = {}
         self.submitted_order_request_list: list[BrokerOrderRequest] = []
 
     def seed_account_snapshot(
@@ -206,20 +246,51 @@ class StubBrokerAdapter(BrokerAdapter):
         position_amount_map: dict[str, float] | None = None,
         snapshot_timestamp_ts: datetime | None = None,
         session_mode_str: str | None = None,
+        net_liq_float: float | None = None,
+        available_funds_float: float | None = None,
+        excess_liquidity_float: float | None = None,
+        cushion_float: float | None = None,
     ) -> None:
         if snapshot_timestamp_ts is None:
             snapshot_timestamp_ts = datetime.now(UTC)
         if session_mode_str is None:
             session_mode_str = infer_ibkr_account_mode_str(account_route_str)
-        self._snapshot_map[account_route_str] = BrokerPositionSnapshot(
+        self._snapshot_map[account_route_str] = BrokerSnapshot(
             account_route_str=account_route_str,
             snapshot_timestamp_ts=snapshot_timestamp_ts,
             cash_float=float(cash_float),
             total_value_float=float(total_value_float),
+            net_liq_float=float(total_value_float if net_liq_float is None else net_liq_float),
+            available_funds_float=(
+                float(total_value_float if available_funds_float is None else available_funds_float)
+            ),
+            excess_liquidity_float=(
+                float(total_value_float if excess_liquidity_float is None else excess_liquidity_float)
+            ),
+            cushion_float=float(1.0 if cushion_float is None else cushion_float),
             position_amount_map=dict(position_amount_map or {}),
             open_order_id_list=[],
         )
         self._session_mode_map[account_route_str] = str(session_mode_str)
+
+    def seed_live_price_snapshot(
+        self,
+        account_route_str: str,
+        asset_reference_price_map: dict[str, float],
+        snapshot_timestamp_ts: datetime | None = None,
+        price_source_str: str = "stub",
+    ) -> None:
+        if snapshot_timestamp_ts is None:
+            snapshot_timestamp_ts = datetime.now(UTC)
+        self._live_price_snapshot_map[account_route_str] = LivePriceSnapshot(
+            account_route_str=account_route_str,
+            snapshot_timestamp_ts=snapshot_timestamp_ts,
+            price_source_str=price_source_str,
+            asset_reference_price_map={
+                asset_str: float(price_float)
+                for asset_str, price_float in asset_reference_price_map.items()
+            },
+        )
 
     def set_fill_price_multiplier(
         self,
@@ -237,10 +308,30 @@ class StubBrokerAdapter(BrokerAdapter):
     def is_session_ready(self, account_route_str: str) -> bool:
         return account_route_str in self._snapshot_map
 
-    def get_account_snapshot(self, account_route_str: str) -> BrokerPositionSnapshot:
+    def get_account_snapshot(self, account_route_str: str) -> BrokerSnapshot:
         if account_route_str not in self._snapshot_map:
             raise RuntimeError(f"No stub account snapshot seeded for {account_route_str}.")
         return self._snapshot_map[account_route_str]
+
+    def get_live_price_snapshot(
+        self,
+        account_route_str: str,
+        asset_str_list: list[str],
+    ) -> LivePriceSnapshot:
+        if account_route_str not in self._live_price_snapshot_map:
+            raise RuntimeError(f"No stub live price snapshot seeded for {account_route_str}.")
+        live_price_snapshot_obj = self._live_price_snapshot_map[account_route_str]
+        asset_reference_price_map = {
+            asset_str: float(live_price_snapshot_obj.asset_reference_price_map[asset_str])
+            for asset_str in asset_str_list
+            if asset_str in live_price_snapshot_obj.asset_reference_price_map
+        }
+        return LivePriceSnapshot(
+            account_route_str=account_route_str,
+            snapshot_timestamp_ts=live_price_snapshot_obj.snapshot_timestamp_ts,
+            price_source_str=live_price_snapshot_obj.price_source_str,
+            asset_reference_price_map=asset_reference_price_map,
+        )
 
     def submit_order_request_list(
         self,
@@ -290,6 +381,8 @@ class StubBrokerAdapter(BrokerAdapter):
                     broker_order_id_str=broker_order_id_str,
                     order_plan_id_int=broker_order_request_obj.order_plan_id_int,
                     order_intent_id_int=broker_order_request_obj.order_intent_id_int,
+                    decision_plan_id_int=broker_order_request_obj.decision_plan_id_int,
+                    vplan_id_int=broker_order_request_obj.vplan_id_int,
                     account_route_str=account_route_str,
                     asset_str=broker_order_request_obj.asset_str,
                     broker_order_type_str=broker_order_request_obj.broker_order_type_str,
@@ -308,6 +401,8 @@ class StubBrokerAdapter(BrokerAdapter):
             broker_order_fill_obj = BrokerOrderFill(
                 broker_order_id_str=broker_order_id_str,
                 order_plan_id_int=broker_order_request_obj.order_plan_id_int,
+                decision_plan_id_int=broker_order_request_obj.decision_plan_id_int,
+                vplan_id_int=broker_order_request_obj.vplan_id_int,
                 account_route_str=account_route_str,
                 asset_str=broker_order_request_obj.asset_str,
                 fill_amount_float=filled_amount_float,
@@ -320,21 +415,29 @@ class StubBrokerAdapter(BrokerAdapter):
             broker_order_fill_list.append(broker_order_fill_obj)
             self._fill_map[account_route_str].append(broker_order_fill_obj)
 
-        position_value_float = 0.0
-        for broker_order_request_obj in broker_order_request_list:
-            position_value_float += (
-                updated_position_map.get(broker_order_request_obj.asset_str, 0.0)
-                * (
-                    broker_order_request_obj.sizing_reference_price_float
-                    * self._fill_price_multiplier_map.get(broker_order_request_obj.asset_str, 1.0)
-                )
+        asset_reference_price_map: dict[str, float] = {}
+        if account_route_str in self._live_price_snapshot_map:
+            asset_reference_price_map.update(
+                self._live_price_snapshot_map[account_route_str].asset_reference_price_map
             )
+        for broker_order_request_obj in broker_order_request_list:
+            asset_reference_price_map[broker_order_request_obj.asset_str] = (
+                broker_order_request_obj.sizing_reference_price_float
+                * self._fill_price_multiplier_map.get(broker_order_request_obj.asset_str, 1.0)
+            )
+        position_value_float = 0.0
+        for asset_str, position_amount_float in updated_position_map.items():
+            position_value_float += float(position_amount_float) * float(asset_reference_price_map.get(asset_str, 0.0))
         total_value_float = cash_float + position_value_float
-        self._snapshot_map[account_route_str] = BrokerPositionSnapshot(
+        self._snapshot_map[account_route_str] = BrokerSnapshot(
             account_route_str=account_route_str,
             snapshot_timestamp_ts=submitted_timestamp_ts,
             cash_float=cash_float,
             total_value_float=total_value_float,
+            net_liq_float=total_value_float,
+            available_funds_float=total_value_float,
+            excess_liquidity_float=total_value_float,
+            cushion_float=1.0,
             position_amount_map=updated_position_map,
             open_order_id_list=[],
         )

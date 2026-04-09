@@ -13,6 +13,7 @@ from alpha.live.order_clerk import validate_account_route_matches_mode
 
 SUPPORTED_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = (
     "strategies.dv2.strategy_mr_dv2:DVO2Strategy",
+    "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy",
     "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash",
     "strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy",
 )
@@ -76,7 +77,6 @@ def parse_release_manifest(manifest_path_str: str) -> LiveRelease:
 
     strategy_dict = _get_optional_mapping(raw_payload_dict, "strategy")
     bootstrap_dict = _get_optional_mapping(raw_payload_dict, "bootstrap")
-
     params_dict = raw_payload_dict.get("params", strategy_dict.get("params", {}))
     if params_dict is None:
         params_dict = {}
@@ -126,6 +126,26 @@ def parse_release_manifest(manifest_path_str: str) -> LiveRelease:
             _resolve_manifest_value(raw_payload_dict, "enabled_bool", "deployment", "enabled_bool")
         ),
         source_path_str=str(manifest_path_obj),
+        pod_budget_fraction_float=float(
+            _resolve_manifest_value(
+                raw_payload_dict,
+                "pod_budget_fraction_float",
+                "execution",
+                "pod_budget_fraction_float",
+                required_bool=False,
+                default_value_obj=0.03,
+            )
+        ),
+        auto_submit_enabled_bool=bool(
+            _resolve_manifest_value(
+                raw_payload_dict,
+                "auto_submit_enabled_bool",
+                "execution",
+                "auto_submit_enabled_bool",
+                required_bool=False,
+                default_value_obj=True,
+            )
+        ),
     )
     validate_release_manifest(release_obj)
     return release_obj
@@ -165,6 +185,11 @@ def validate_release_manifest(release_obj: LiveRelease) -> None:
         mode_str=release_obj.mode_str,
         account_route_str=release_obj.account_route_str,
     )
+    if not (0.0 < float(release_obj.pod_budget_fraction_float) <= 1.0):
+        raise ValueError(
+            "Manifest field 'pod_budget_fraction_float' must satisfy "
+            "0 < pod_budget_fraction_float <= 1."
+        )
     for field_name_str, field_value_obj in asdict(release_obj).items():
         if field_name_str == "params_dict":
             continue

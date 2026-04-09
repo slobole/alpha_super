@@ -1,4 +1,10 @@
-TL;DR: Keep `research` and `live` separate. Research strategies in `strategies/` remain the source of truth. Live trading is a thin generic layer that loads an approved strategy release, runs it automatically at the correct time, reconciles broker state, and sends orders through an order clerk. This is the simplest architecture that still preserves quantitative correctness.
+TL;DR: live v2 keeps the good local-first control plane from v1, but changes the sizing contract. The system now freezes the **decision** after the approved snapshot is ready, and freezes the **final share quantities** only near submit time from broker truth.
+
+```text
+DecisionPlan_t = f(approved_snapshot_t, strategy_memory_t)
+BrokerSnapshot_submit = f(broker_account_at_submit)
+VPlan_submit = f(DecisionPlan_t, BrokerSnapshot_submit, live_quote_snapshot)
+```
 
 # Live Trading Architecture
 
@@ -6,569 +12,334 @@ TL;DR: Keep `research` and `live` separate. Research strategies in `strategies/`
 
 The design goal is:
 
-- keep the strategy logic deterministic and close to the backtest
-- keep the live system generic across many strategies, pods, and users
-- keep timing explicit so look-ahead mistakes are hard to express
-- keep deployment portable so local-first can later move to cloud
-
-The core live identity is:
-
-```text
-target_position = strategy(research_logic, approved_snapshot, current_state)
-order_delta = target_position - broker_position
-```
-
-Minimal timing formulas:
-
-```text
-signal_t = f(I_cutoff_t)
-execution_t >= cutoff_t
-```
-
-For next-open systems:
-
-```text
-decision_t = close_t
-execution_t = open_t+1
-```
-
-For same-day close systems:
-
-```text
-decision_t = pre_close_t
-execution_t = close_t
-```
+- keep the research strategy deterministic and close to the backtest
+- keep broker truth authoritative for live positions
+- size from live account state near the execution window
+- keep the operator flow simple enough for manual review
+- keep the system local-first and Windows-friendly
 
 ## Core Principle
 
-The strategy decides.
+The strategy decides **what it wants**.
 
-The live system hosts the strategy.
+The execution layer decides **how many shares to send**.
 
 That means:
 
-- strategy code does not know about `IBKR`, `IBC`, `Docker`, `AWS`, `VPN`, or schedulers
-- the live runner does not contain strategy logic
-- the order clerk does not decide what to trade
+- research strategy code does not know about `IBKR`, sockets, schedulers, or session automation
+- the decision engine does not use broker `NetLiq` to decide the signal
+- the execution engine does not decide the signal
+- the broker adapter does not decide weights or rankings
+
+## V2 Contract
+
+### Stage 1. Decision
+
+After the approved snapshot is ready, the strategy builds a `DecisionPlan`.
+
+This contains:
+- an explicit decision-book type
+- either incremental entry/exit instructions or a full target-weight book
+- strategy memory
+- signal / submit / target execution timestamps
+
+It does **not** contain final overnight share quantities.
+
+Supported decision-book types:
+- `incremental_entry_exit_book`
+  - DV2 / QPI-style equal-slot entry systems
+  - semantics:
+
+```text
+enter new names at slot weight
+exit selected names to zero
+leave untouched names alone
+```
+
+- `full_target_weight_book`
+  - TAA / full rebalance momentum systems
+  - semantics:
+
+```text
+target_weight_i is defined for the whole target book
+```
+
+### Stage 2. Execution Sizing
+
+Near the submit window, the execution engine reads:
+- broker positions
+- broker `NetLiq`
+- broker `AvailableFunds`
+- broker `ExcessLiquidity`
+- live quote snapshot
+
+Then it builds a `VPlan`.
+
+The core formulas are:
+
+```text
+PodBudget = NetLiq_broker * pod_budget_fraction
+TargetDollar_i = target_weight_i * PodBudget
+TargetShares_i = floor(TargetDollar_i / LivePrice_i)
+OrderDelta_i = TargetShares_i - BrokerShares_i
+```
+
+This makes the sizing deterministic at submit time and aligned with broker truth.
 
 ## High-Level Structure
 
 ```mermaid
 flowchart LR
-    A["Research Strategy<br/>strategies/..."] --> B["Approved Live Release<br/>YAML / manifest"]
-    B --> C["Live Runner"]
-    C --> D["Risk Gate"]
-    D --> E["Order Clerk"]
-    E --> F["IBKR API"]
-    G["IBC<br/>session automation"] --> F
-    F --> H["Broker Fills / Cash / Positions"]
-    H --> I["Reconciliation + State Store"]
-    I --> C
+    A["Research Strategy<br/>strategies/..."] --> B["Approved Snapshot"]
+    B --> C["Decision Engine"]
+    C --> D["DecisionPlan"]
+    E["Broker Adapter"] --> F["BrokerSnapshot"]
+    E --> G["Live Quote Snapshot"]
+    D --> H["Execution Engine"]
+    F --> H
+    G --> H
+    H --> I["VPlan"]
+    I --> J["Manual Review or Auto Submit"]
+    J --> K["Broker Orders / Fills"]
+    K --> L["Broker-Backed Pod State"]
+    L --> C
 ```
 
 ## Main Components
 
 ### 1. Research Strategy
 
-This is the backtested strategy in `strategies/...`.
+This remains the source of signal truth in `strategies/...`.
 
 Examples:
-
 - `strategies/dv2/strategy_mr_dv2.py`
 - `strategies/taa_df/strategy_taa_df_btal_fallback_tqqq_vix_cash.py`
 - `strategies/momentum/strategy_mo_atr_normalized_ndx.py`
 
-This remains the source of truth.
+### 2. Manifest / Live Release
 
-### 2. Approved Live Release
-
-This is a small manifest that says:
-
+The manifest says:
 - which strategy is approved
 - for which user
 - for which pod
-- for which account route
-- at what signal time it runs
-- how it executes
-- with which parameters
+- for which account
+- which market calendar controls timing
+- which execution policy is used
+- what fraction of broker `NetLiq` belongs to the pod
+- whether auto-submit is enabled
 
-Example:
+Important execution fields:
 
 ```yaml
-identity:
-  release_id: user_001.pod_dv2.daily_moo.v1
-  user_id: user_001
-  pod_id: pod_dv2_01
-
-deployment:
-  mode: paper
-  enabled_bool: true
-
-broker:
-  account_route: DU1234567
-
-strategy:
-  strategy_import_str: strategies.dv2.strategy_mr_dv2:DVO2Strategy
-  data_profile_str: norgate_eod_sp500_pit
-  params:
-    max_positions_int: 10
-
-market:
-  session_calendar_id_str: XNYS
-
-schedule:
-  signal_clock_str: eod_snapshot_ready
-  execution_policy_str: next_open_moo
-
-bootstrap:
-  initial_cash_float: 100000.0
-
-risk:
-  risk_profile_str: standard_equity_mr
+execution:
+  pod_budget_fraction_float: 0.03
+  auto_submit_enabled_bool: true
 ```
 
-### Manifest Reference
+So:
 
-The grouped manifest keeps research parameters separate from live deployment metadata.
+```text
+PodBudget_i = NetLiq_broker * pod_budget_fraction_i
+```
 
-- `identity.release_id`
-  - unique identifier for this exact live deployment
-  - accepted value: any non-empty unique string
-- `identity.user_id`
-  - logical owner of the pod
-  - accepted value: any non-empty string
-- `identity.pod_id`
-  - stateful live deployment unit
-  - accepted value: any non-empty string; only one enabled release per pod in v1
-- `deployment.mode`
-  - execution environment gate checked by the runner before submission
-  - accepted values: `paper`, `live`
-  - v1 manifest validation also checks the IBKR account-route heuristic:
-    - `paper` expects a `DU...` account-style route
-    - `live` rejects `DU...` routes
-- `deployment.enabled_bool`
-  - operational kill switch
-  - accepted values: `true`, `false`
-- `broker.account_route`
-  - broker account routing target
-  - accepted value: non-empty IBKR account identifier string
-  - v1 heuristic:
-    - `DU...` is treated as paper
-    - non-`DU...` is treated as live
-- `strategy.strategy_import_str`
-  - research strategy reference loaded by the live host
-  - accepted values in v1:
-    - `strategies.dv2.strategy_mr_dv2:DVO2Strategy`
-    - `strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash`
-    - `strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy`
-- `strategy.data_profile_str`
-  - approved data contract for the release
-  - accepted values in v1:
-    - `norgate_eod_sp500_pit`
-    - `norgate_eod_etf_plus_vix_helper`
-    - `norgate_eod_ndx_pit`
-    - `intraday_1m_plus_daily_pit`
-- `strategy.params`
-  - strategy-specific parameters only
-  - accepted values depend on the referenced strategy
-- `market.session_calendar_id_str`
-  - exchange session calendar used for holidays, short days, and submission/execution windows
-  - accepted values in v1:
-    - `XNYS`
-    - `XTSE`
-    - `XASX`
-- `schedule.signal_clock_str`
-  - semantic decision cutoff
-  - accepted values:
-    - `eod_snapshot_ready`
-    - `month_end_snapshot_ready`
-    - `pre_close_15m`
-- `schedule.execution_policy_str`
-  - broker execution policy and execution window
-  - accepted values:
-    - `next_open_moo`
-    - `same_day_moc`
-    - `next_month_first_open`
-- `bootstrap.initial_cash_float`
-  - only a bootstrap fallback for a new pod before real broker-backed state exists
-  - accepted value: positive float
-- `risk.risk_profile_str`
-  - v1 risk label reserved for generic risk policy routing
-  - accepted value in v1: any non-empty string
+### 3. Decision Engine
 
-`*** CRITICAL***` `signal_clock_str` is intentionally a semantic market-session alias, not a raw UTC timestamp. For exchange-driven systems, aliases like `eod_snapshot_ready` and `pre_close_15m` are safer than naked UTC wall times because the trading session is defined by the pod's exchange calendar and must stay correct through DST, holidays, and early closes.
-
-`*** CRITICAL***` `deployment.mode` is validated twice:
-
-- statically from the manifest via the IBKR account-route heuristic
-- at execution time from the broker adapter when session-mode metadata is available
-
-### 3. Live Runner
-
-The live runner is generic.
-
-Its job is:
-
-- load active releases
-- wait for the configured decision time
-- build the allowed market snapshot
+Responsibilities:
+- check snapshot readiness
 - run the approved strategy
-- freeze an order plan
-- reconcile broker state
-- call the order clerk
+- build `DecisionPlan`
+- persist strategy memory
 
-### 4. Order Clerk
+It does **not**:
+- read live broker truth for sizing
+- compute final share quantities
+- submit orders
 
-The order clerk does not decide.
+### 4. Execution Engine
 
-It only:
+Responsibilities:
+- read broker truth near submit time
+- read live quote snapshot
+- reconcile decision-base positions against broker positions
+- compute `VPlan`
+- expose `VPlan` for manual review
+- optionally submit the exact same `VPlan`
 
-- converts target positions into broker orders
-- submits / modifies / cancels orders
-- records order ids and fills
-- reports failures
+This is intentionally close in spirit to:
+- RealTest + OrderClerk
 
-### 5. IBC
+### 5. Broker Adapter
 
-`IBC` is only session/process automation for `TWS` / `IB Gateway`.
+Responsibilities:
+- read visible accounts
+- read broker account summary
+- read positions
+- read live prices
+- submit broker orders
+- read fills
 
-It is responsible for:
+The app only knows:
+- host
+- port
+- client id
 
-- login automation
-- restart automation
-- keeping the broker session available
+It does not care whether the socket endpoint is:
+- `TWS`
+- `IB Gateway`
+- `IBC`-managed Gateway
 
-It is not:
+### 6. State Store
 
-- a strategy engine
-- a scheduler
-- a portfolio engine
-
-### 6. Reconciliation
-
-Before sending any live orders, compare model state against broker truth.
-
-```text
-recon_error = model_position - broker_position
-```
-
-If the mismatch is material, stop normal trading and reconcile first.
-
-This is one of the most important live controls.
-
-## Daily Automation Flow
-
-For a standard daily next-open pod:
-
-```mermaid
-flowchart TD
-    A["16:10 ET<br/>Build approved EOD snapshot"] --> B["Run strategy on approved data"]
-    B --> C["Freeze order plan for next open"]
-    C --> D["09:20 ET<br/>Load broker cash / positions / open orders"]
-    D --> E["Reconcile model vs broker"]
-    E --> F["Order clerk sends MOO / OPG orders"]
-    F --> G["Open fills arrive"]
-    G --> H["Post-open reconcile + persist state"]
-```
-
-This is how live trading happens automatically every day:
-
-- `IBC` keeps the broker session alive
-- a scheduler triggers the live runner at fixed times
-- the runner loads active releases and produces the order plan
-- the order clerk sends the orders
-
-The scheduler can be simple at first:
-
-- local Windows Task Scheduler
-- a Python scheduler process
-
-Later, the same runner can move to cloud:
-
-- Docker container
-- ECS / Kubernetes / VM scheduler
-
-## Timing Rules
-
-Timing must be part of the live release, not an implicit detail.
-
-Examples:
-
-- `next_open_moo`
-- `same_day_moc`
-- `next_month_first_open`
-
-`*** CRITICAL***` If the decision cutoff changes, the strategy has changed.
-
-Examples:
-
-- `close -> next open` is one tested strategy contract
-- `15:45 -> same-day close` is a different tested strategy contract
-
-Do not silently switch between them.
-
-## Pods, Users, and Accounts
-
-Use a simple definition:
-
-```text
-Pod = one live deployment unit
-```
-
-A pod is usually:
-
-- one strategy
-- one user
-- one account route
-- one execution schedule
-- one risk profile
-
-Good phase-1 choice:
-
-```text
-pod = linked account
-```
+The local SQLite database stores:
+- `decision_plan`
+- `vplan`
+- `vplan_row`
+- `broker_snapshot_cache`
+- broker order records
+- fills
+- pod state
 
 This gives:
+- auditability
+- operator visibility
+- deterministic restart behavior
 
-- clean isolation
-- clean P&L
-- simple reconciliation
-- easy paper-to-live rollout
+## Hard Operational Rules
 
-One user can run several pods:
-
-- `pod_dv2_01`
-- `pod_taa_01`
-- `pod_ndx_mo_01`
-
-## Cloud-Ready Without Over-Engineering
-
-The system should be local-first but cloud-portable.
-
-Do this:
-
-- keep config external
-- keep state outside the process
-- keep strategy code independent of machine/runtime
-- keep the runner generic
-
-Do not do this:
-
-- hard-code local file paths into live orchestration
-- mix broker login logic into strategy code
-- tie architecture to Docker itself
-
-`Docker` is packaging.
-
-It is useful later for:
-
-- the live runner
-- the order clerk
-- deployment portability
-
-It is not the strategy architecture.
-
-## Examples
-
-### Example 1. `strategy_mr_dv2`
-
-Source:
-
-- `strategies/dv2/strategy_mr_dv2.py`
-
-Current research contract:
+### 1. Broker truth wins for positions
 
 ```text
-signal at daily close
-execution at next open
+LiveShares = BrokerShares
 ```
 
-Live flow:
+If the `DecisionPlan` base positions do not match current broker positions, record the drift and still size from broker truth.
 
-1. After the close, build the approved EOD snapshot plus PIT universe.
-2. Run the DV2 strategy.
-3. Freeze tomorrow's order plan.
-4. Before the open, reconcile broker state.
-5. Send `MOO / OPG` orders.
+### 2. Position reconcile is advisory, cash reconcile is soft
 
-Example order plan:
-
-```json
-[
-  {"symbol_str":"MSFT","order_value_float":10000.0,"order_type_str":"MOO"},
-  {"symbol_str":"AMZN","order_value_float":10000.0,"order_type_str":"MOO"},
-  {"symbol_str":"AAPL","target_value_float":0.0,"order_type_str":"MOO"}
-]
-```
-
-### Example 2. `DV2` Same-Day `MOC`
-
-This is not just an execution toggle.
-
-It is a separate tested strategy contract:
+Pre-submit position comparison is:
 
 ```text
-signal at pre_close_t
-execution at close_t
+warning if DecisionBaseShares_i != BrokerShares_i for any asset
 ```
 
-Live flow:
+This follows the RealTest / OrderClerk-style principle that the system should keep trading from current broker truth instead of freezing on share drift from events like splits or missed prior sessions.
 
-1. Maintain intraday data.
-2. At the approved pre-close time, build the intraday snapshot.
-3. Run the pre-close DV2 variant.
-4. Freeze the same-day close order plan.
-5. Send `MOC` orders before the operational cutoff.
+Cash is stored and monitored, but it does not block v2 preflight.
 
-`*** CRITICAL***` This must be backtested with the same intraday information set. It is not quant-correct to reuse the pure daily close strategy and pretend it is the same thing.
+### 3. `next_open_moo` means basket mode
 
-### Example 3. `strategy_taa_df_btal_fallback_tqqq_vix_cash`
-
-Source:
-
-- `strategies/taa_df/strategy_taa_df_btal_fallback_tqqq_vix_cash.py`
-
-Current research contract:
+For v2:
 
 ```text
-month-end decision
-next-month first open execution
-fallback asset = TQQQ
-VRP gate can zero the fallback sleeve and leave residual cash
+MOO = one opening basket
 ```
 
-Live flow:
-
-1. On the last tradable close of the month, compute month-end weights.
-2. Apply the `rv20 vs VIX` fallback cash gate.
-3. Freeze the rebalance plan.
-4. On the first tradable open of the next month, reconcile broker state.
-5. Send ETF rebalance orders.
-
-Example target map:
-
-```json
-{
-  "GLD": 0.3333333333,
-  "UUP": 0.2666666667,
-  "TLT": 0.2000000000,
-  "BTAL": 0.1333333333,
-  "TQQQ": 0.0000000000,
-  "cash_weight_float": 0.0666666667
-}
-```
-
-### Example 4. `strategy_mo_atr_normalized_ndx`
-
-Source:
-
-- `strategies/momentum/strategy_mo_atr_normalized_ndx.py`
-
-Current research contract:
+Not:
 
 ```text
-month-end decision on PIT Nasdaq 100 universe
-regime filter on SPY
-top N names by ATR-adjusted momentum
-next tradable open execution
+sell first, then buy
 ```
 
-Live flow:
+This matches the margin-account operating assumption.
 
-1. At month-end, build the approved PIT universe and monthly decision snapshot.
-2. Compute the ATR-adjusted momentum ranking.
-3. Freeze the selected names and target equal weights.
-4. On the next tradable open, reconcile broker state.
-5. Submit the rebalance.
+### 4. Missed window means expire
 
-Example target map:
-
-```json
-{
-  "MSFT": 0.10,
-  "NVDA": 0.10,
-  "META": 0.10,
-  "AMZN": 0.10,
-  "AVGO": 0.10,
-  "NFLX": 0.10,
-  "COST": 0.10,
-  "AMD": 0.10,
-  "ADBE": 0.10,
-  "CSCO": 0.10
-}
-```
-
-## Minimal Recommended Repo Shape
+If the system misses the valid submit window:
 
 ```text
-strategies/                 # research truth
-alpha/live/
-  runner.py
-  order_clerk.py
-  reconcile.py
-  logs/
-  releases/
-    user_001/
-      pod_dv2_01.yaml
-      pod_taa_01.yaml
-      pod_ndx_mo_01.yaml
+DecisionPlan -> expired
 ```
 
-## Minimal Operations
+and the stale `VPlan` is not reused later.
 
-Recommended Windows scheduler command:
+### 5. Manual and auto use the same execution artifact
 
-```bash
-uv run python -m alpha.live.runner tick --mode paper
-```
-
-Useful inspection command:
-
-```bash
-uv run python -m alpha.live.runner status --mode paper
-```
-
-Simple execution-quality report:
-
-```bash
-uv run python -m alpha.live.runner execution_report --mode paper
-```
-
-Structured live events are appended to:
+Manual path:
 
 ```text
-alpha/live/logs/live_events.jsonl
+DecisionPlan -> VPlan -> operator review -> submit
 ```
 
-Each event records the pod, release, timestamps, and a short `reason_code_str` such as:
+Auto path:
 
-- `snapshot_ready`
-- `active_plan_exists`
-- `ready_to_build`
-- `waiting_for_submission_window`
-- `broker_not_ready`
-- `reconciliation_failed`
-- `submitted`
-- `completed`
+```text
+DecisionPlan -> VPlan -> submit
+```
 
-The execution report is intentionally simple in v1:
+The submitted object is the same `VPlan` in both cases.
 
-- raw fill price
-- fill amount
-- fill timestamp
+The manual review surface should show, per asset:
+- decision-base shares
+- current broker shares
+- drift shares
+- target shares
+- order delta shares
+- live reference price
+- warning flag
 
-This keeps the live layer anchored to broker truth. More detailed slippage decomposition can be added later once the correct benchmark price convention is finalized.
+## Why This Architecture
 
-## Final Recommendation
+This design is intentionally chosen for:
 
-Keep the system strict:
+- determinism
+  - same decision inputs produce the same `DecisionPlan`
+- precision
+  - final shares use live `NetLiq`, live positions, and live prices
+- robustness
+  - stale plans expire instead of drifting
+- simplicity
+  - clear separation between signal generation and execution sizing
 
-- research strategies stay in `strategies/`
-- live trading uses approved release manifests
-- the runner is generic
-- the order clerk is generic
-- timing is explicit
-- reconciliation is mandatory
+The old v1 idea was:
 
-This is the simplest architecture that remains realistic, scalable, and quant-correct.
+```text
+freeze signal + freeze shares overnight
+```
+
+The v2 idea is:
+
+```text
+freeze signal overnight + freeze shares near submit
+```
+
+That is the key architectural change.
+
+## CLI Shape
+
+The public runner workflow is:
+
+- `tick`
+- `build_decision_plans`
+- `build_vplan`
+- `show_vplan`
+- `submit_vplan`
+- `post_execution_reconcile`
+- `status`
+- `execution_report`
+
+Recommended operating style:
+
+- manual-first for early rollout
+- auto-submit only after paper validation
+
+## Short Mental Model
+
+Night:
+
+```text
+approved snapshot -> DecisionPlan
+```
+
+Pre-submit:
+
+```text
+DecisionPlan + BrokerSnapshot + live quote snapshot -> VPlan
+```
+
+Execution:
+
+```text
+VPlan -> broker orders -> fills -> broker-backed pod state
+```
+
+That is the live v2 architecture.

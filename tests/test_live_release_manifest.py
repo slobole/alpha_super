@@ -19,6 +19,20 @@ def test_parse_release_manifest_reads_example_release():
     assert release_obj.enabled_bool is True
     assert release_obj.session_calendar_id_str == "XNYS"
     assert release_obj.params_dict["capital_base_float"] == 100000.0
+    assert release_obj.pod_budget_fraction_float == 0.03
+    assert release_obj.auto_submit_enabled_bool is True
+
+
+def test_parse_release_manifest_reads_qpi_example_release():
+    manifest_path_str = str(
+        Path("alpha/live/releases/user_001/pod_qpi_01.yaml").resolve()
+    )
+
+    release_obj = parse_release_manifest(manifest_path_str)
+
+    assert release_obj.release_id_str == "user_001.pod_qpi.daily_moo.v1"
+    assert release_obj.strategy_import_str == "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy"
+    assert release_obj.enabled_bool is False
 
 
 def test_parse_release_manifest_rejects_bad_execution_policy(tmp_path: Path):
@@ -198,3 +212,42 @@ def test_parse_release_manifest_normalizes_legacy_signal_clock_alias(tmp_path: P
     release_obj = parse_release_manifest(str(manifest_path_obj))
 
     assert release_obj.signal_clock_str == "eod_snapshot_ready"
+
+
+def test_parse_release_manifest_reads_execution_section(tmp_path: Path):
+    manifest_path_obj = tmp_path / "execution.yaml"
+    manifest_path_obj.write_text(
+        "\n".join(
+            [
+                "identity:",
+                "  release_id: exec_release",
+                "  user_id: user_001",
+                "  pod_id: pod_exec",
+                "broker:",
+                "  account_route: DU100",
+                "strategy:",
+                "  strategy_import_str: strategies.dv2.strategy_mr_dv2:DVO2Strategy",
+                "  data_profile_str: norgate_eod_sp500_pit",
+                "  params: {}",
+                "market:",
+                "  session_calendar_id_str: XNYS",
+                "schedule:",
+                "  signal_clock_str: eod_snapshot_ready",
+                "  execution_policy_str: next_open_moo",
+                "execution:",
+                "  pod_budget_fraction_float: 0.05",
+                "  auto_submit_enabled_bool: true",
+                "risk:",
+                "  risk_profile_str: standard_equity_mr",
+                "deployment:",
+                "  mode: paper",
+                "  enabled_bool: true",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    release_obj = parse_release_manifest(str(manifest_path_obj))
+
+    assert release_obj.pod_budget_fraction_float == 0.05
+    assert release_obj.auto_submit_enabled_bool is True

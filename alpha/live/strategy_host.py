@@ -66,7 +66,7 @@ import pandas as pd
 from alpha.engine.order import LimitOrder, MarketOrder, StopOrder
 from alpha.engine.strategy import Strategy
 from alpha.live import scheduler_utils
-from alpha.live.models import FrozenOrderIntent, FrozenOrderPlan, LiveRelease, PodState
+from alpha.live.models import DecisionPlan, FrozenOrderIntent, FrozenOrderPlan, LiveRelease, PodState
 
 
 def _seed_strategy_state(strategy_obj: Strategy, pod_state_obj: PodState | None) -> None:
@@ -202,6 +202,127 @@ def _build_frozen_order_plan(
     )
 
 
+def _build_decision_plan_from_orders(
+    release_obj: LiveRelease,
+    signal_date_ts: datetime,
+    strategy_obj: Strategy,
+    snapshot_metadata_dict: dict[str, Any] | None = None,
+) -> DecisionPlan:
+    signal_timestamp_ts = scheduler_utils.build_signal_timestamp_ts(
+        signal_date_ts=signal_date_ts,
+        release_obj=release_obj,
+    )
+    submission_timestamp_ts = scheduler_utils.build_submission_timestamp_ts(
+        signal_date_ts=signal_date_ts,
+        release_obj=release_obj,
+    )
+    target_execution_timestamp_ts = scheduler_utils.build_target_execution_timestamp_ts(
+        signal_date_ts=signal_date_ts,
+        release_obj=release_obj,
+    )
+
+    decision_base_position_map = {
+        str(asset_str): float(amount_float)
+        for asset_str, amount_float in strategy_obj.get_positions().items()
+        if abs(float(amount_float)) > 1e-9
+    }
+    previous_total_value_float = float(strategy_obj.previous_total_value)
+    entry_target_weight_map_dict: dict[str, float] = {}
+    exit_asset_set: set[str] = set()
+    entry_priority_list: list[str] = []
+
+    for order_obj in strategy_obj.get_orders():
+        if bool(order_obj.target) and str(order_obj.unit) == "value" and abs(float(order_obj.amount)) <= 1e-9:
+            exit_asset_set.add(str(order_obj.asset))
+            continue
+        if (not bool(order_obj.target)) and str(order_obj.unit) == "value" and float(order_obj.amount) > 0.0:
+            entry_target_weight_map_dict[str(order_obj.asset)] = (
+                float(order_obj.amount) / previous_total_value_float
+            )
+            entry_priority_list.append(str(order_obj.asset))
+            continue
+        raise NotImplementedError(
+            "incremental_entry_exit_book currently supports only value entries "
+            "and target-zero exits."
+        )
+
+    return DecisionPlan(
+        release_id_str=release_obj.release_id_str,
+        user_id_str=release_obj.user_id_str,
+        pod_id_str=release_obj.pod_id_str,
+        account_route_str=release_obj.account_route_str,
+        signal_timestamp_ts=signal_timestamp_ts,
+        submission_timestamp_ts=submission_timestamp_ts,
+        target_execution_timestamp_ts=target_execution_timestamp_ts,
+        execution_policy_str=release_obj.execution_policy_str,
+        decision_base_position_map=decision_base_position_map,
+        snapshot_metadata_dict=snapshot_metadata_dict or {},
+        strategy_state_dict=_extract_strategy_state_dict(strategy_obj),
+        decision_book_type_str="incremental_entry_exit_book",
+        entry_target_weight_map_dict=entry_target_weight_map_dict,
+        target_weight_map=entry_target_weight_map_dict,
+        exit_asset_set=exit_asset_set,
+        entry_priority_list=entry_priority_list,
+        cash_reserve_weight_float=0.0,
+        preserve_untouched_positions_bool=True,
+    )
+
+
+def _build_full_target_weight_decision_plan(
+    release_obj: LiveRelease,
+    signal_date_ts: datetime,
+    decision_base_position_map_dict: dict[str, float],
+    full_target_weight_map_dict: dict[str, float],
+    cash_reserve_weight_float: float,
+    strategy_state_dict: dict[str, Any],
+    snapshot_metadata_dict: dict[str, Any] | None = None,
+) -> DecisionPlan:
+    signal_timestamp_ts = scheduler_utils.build_signal_timestamp_ts(
+        signal_date_ts=signal_date_ts,
+        release_obj=release_obj,
+    )
+    submission_timestamp_ts = scheduler_utils.build_submission_timestamp_ts(
+        signal_date_ts=signal_date_ts,
+        release_obj=release_obj,
+    )
+    target_execution_timestamp_ts = scheduler_utils.build_target_execution_timestamp_ts(
+        signal_date_ts=signal_date_ts,
+        release_obj=release_obj,
+    )
+
+    full_target_weight_map_dict = {
+        str(asset_str): float(target_weight_float)
+        for asset_str, target_weight_float in full_target_weight_map_dict.items()
+        if abs(float(target_weight_float)) > 1e-12
+    }
+    total_target_weight_float = sum(full_target_weight_map_dict.values())
+    if total_target_weight_float + float(cash_reserve_weight_float) > 1.0 + 1e-9:
+        raise ValueError(
+            "full_target_weight_book weights plus cash reserve must satisfy "
+            "sum(weights) + cash_reserve <= 1."
+        )
+
+    return DecisionPlan(
+        release_id_str=release_obj.release_id_str,
+        user_id_str=release_obj.user_id_str,
+        pod_id_str=release_obj.pod_id_str,
+        account_route_str=release_obj.account_route_str,
+        signal_timestamp_ts=signal_timestamp_ts,
+        submission_timestamp_ts=submission_timestamp_ts,
+        target_execution_timestamp_ts=target_execution_timestamp_ts,
+        execution_policy_str=release_obj.execution_policy_str,
+        decision_base_position_map=decision_base_position_map_dict,
+        snapshot_metadata_dict=snapshot_metadata_dict or {},
+        strategy_state_dict=strategy_state_dict,
+        decision_book_type_str="full_target_weight_book",
+        full_target_weight_map_dict=full_target_weight_map_dict,
+        target_weight_map=full_target_weight_map_dict,
+        cash_reserve_weight_float=float(cash_reserve_weight_float),
+        preserve_untouched_positions_bool=False,
+        rebalance_omitted_assets_to_zero_bool=True,
+    )
+
+
 def _build_dv2_order_plan(
     release_obj: LiveRelease,
     as_of_ts: datetime,
@@ -260,6 +381,345 @@ def _build_dv2_order_plan(
         close_row_ser=close_row_ser,
         strategy_obj=strategy_obj,
         snapshot_metadata_dict={"strategy_family_str": "dv2"},
+    )
+
+
+def _build_dv2_decision_plan(
+    release_obj: LiveRelease,
+    as_of_ts: datetime,
+    pod_state_obj: PodState | None,
+) -> DecisionPlan:
+    dv2_module = import_module("strategies.dv2.strategy_mr_dv2")
+    benchmark_list = release_obj.params_dict.get("benchmark_list_str", ["$SPX"])
+    start_date_str = str(release_obj.params_dict.get("start_date_str", "1998-01-01"))
+    indexname_str = str(release_obj.params_dict.get("indexname_str", "S&P 500"))
+
+    _, universe_df = dv2_module.build_index_constituent_matrix(indexname=indexname_str)
+    pricing_data_df = dv2_module.get_prices(
+        universe_df.columns.tolist(),
+        benchmark_list,
+        start_date=start_date_str,
+        end_date=pd.Timestamp(as_of_ts).strftime("%Y-%m-%d"),
+    )
+    if len(pricing_data_df.index) == 0:
+        raise RuntimeError("DV2 live host loaded no pricing data.")
+
+    strategy_obj = dv2_module.DVO2Strategy(
+        name=release_obj.pod_id_str,
+        benchmarks=list(benchmark_list),
+        capital_base=float(release_obj.params_dict.get("capital_base_float", 100_000.0)),
+        slippage=float(release_obj.params_dict.get("slippage_float", 0.0001)),
+        commission_per_share=float(release_obj.params_dict.get("commission_per_share_float", 0.005)),
+        commission_minimum=float(release_obj.params_dict.get("commission_minimum_float", 1.0)),
+    )
+    strategy_obj.max_positions = int(release_obj.params_dict.get("max_positions_int", 10))
+    strategy_obj.trade_id = 0
+    strategy_obj.current_trade = defaultdict(lambda: -1)
+    strategy_obj.universe_df = universe_df.loc[universe_df.index.isin(pricing_data_df.index)].copy()
+    _seed_strategy_state(strategy_obj, pod_state_obj)
+
+    full_signal_df = strategy_obj.compute_signals(pricing_data_df.copy())
+    signal_date_ts = pd.Timestamp(pricing_data_df.index[-1]).to_pydatetime()
+    strategy_obj.previous_bar = pd.Timestamp(signal_date_ts)
+    # *** CRITICAL*** The live host must map the signal session to the true next tradable session on the pod calendar.
+    strategy_obj.current_bar = pd.Timestamp(
+        scheduler_utils.next_business_day_timestamp_ts(
+            signal_date_ts,
+            session_calendar_id_str=release_obj.session_calendar_id_str,
+        ).date()
+    )
+    close_row_ser = full_signal_df.loc[pd.Timestamp(signal_date_ts)]
+    current_data_df = full_signal_df.loc[: pd.Timestamp(signal_date_ts)]
+    strategy_obj.iterate(
+        current_data_df,
+        close_row_ser,
+        pd.Series(dtype=float),
+    )
+
+    return _build_decision_plan_from_orders(
+        release_obj=release_obj,
+        signal_date_ts=signal_date_ts,
+        strategy_obj=strategy_obj,
+        snapshot_metadata_dict={"strategy_family_str": "dv2"},
+    )
+
+
+def _build_qpi_ibs_rsi_exit_decision_plan(
+    release_obj: LiveRelease,
+    as_of_ts: datetime,
+    pod_state_obj: PodState | None,
+) -> DecisionPlan:
+    qpi_module = import_module("strategies.qpi.strategy_mr_qpi_ibs_rsi_exit")
+    benchmark_list = release_obj.params_dict.get("benchmark_list_str", ["$SPX"])
+    start_date_str = str(release_obj.params_dict.get("start_date_str", "1998-01-01"))
+    indexname_str = str(release_obj.params_dict.get("indexname_str", "S&P 500"))
+
+    _, universe_df = qpi_module.build_index_constituent_matrix(indexname=indexname_str)
+    pricing_data_df = qpi_module.get_prices(
+        universe_df.columns.tolist(),
+        benchmark_list,
+        start_date_str=start_date_str,
+        end_date_str=pd.Timestamp(as_of_ts).strftime("%Y-%m-%d"),
+    )
+    if len(pricing_data_df.index) == 0:
+        raise RuntimeError("QPI IBS RSI exit live host loaded no pricing data.")
+
+    strategy_obj = qpi_module.QPIIbsRsiExitStrategy(
+        name=release_obj.pod_id_str,
+        benchmarks=list(benchmark_list),
+        capital_base=float(release_obj.params_dict.get("capital_base_float", 100_000.0)),
+        slippage=float(release_obj.params_dict.get("slippage_float", 0.0001)),
+        commission_per_share=float(release_obj.params_dict.get("commission_per_share_float", 0.005)),
+        commission_minimum=float(release_obj.params_dict.get("commission_minimum_float", 1.0)),
+        max_positions_int=int(release_obj.params_dict.get("max_positions_int", 10)),
+        qpi_threshold_float=float(release_obj.params_dict.get("qpi_threshold_float", 30.0)),
+        sma_window_int=int(release_obj.params_dict.get("sma_window_int", 200)),
+        qpi_window_int=int(release_obj.params_dict.get("qpi_window_int", 3)),
+        qpi_lookback_years_int=int(release_obj.params_dict.get("qpi_lookback_years_int", 5)),
+        return_lookback_days_int=int(release_obj.params_dict.get("return_lookback_days_int", 3)),
+        max_entry_ibs_float=float(release_obj.params_dict.get("max_entry_ibs_float", 0.1)),
+        exit_ibs_threshold_float=float(release_obj.params_dict.get("exit_ibs_threshold_float", 0.90)),
+        rsi_window_int=int(release_obj.params_dict.get("rsi_window_int", 2)),
+        exit_rsi2_threshold_float=float(release_obj.params_dict.get("exit_rsi2_threshold_float", 90.0)),
+    )
+    strategy_obj.universe_df = universe_df.loc[universe_df.index.isin(pricing_data_df.index)].copy()
+    _seed_strategy_state(strategy_obj, pod_state_obj)
+
+    full_signal_df = strategy_obj.compute_signals(pricing_data_df.copy())
+    signal_date_ts = pd.Timestamp(pricing_data_df.index[-1]).to_pydatetime()
+    strategy_obj.previous_bar = pd.Timestamp(signal_date_ts)
+    # *** CRITICAL*** The live host must map the signal session to the true next tradable session on the pod calendar.
+    strategy_obj.current_bar = pd.Timestamp(
+        scheduler_utils.next_business_day_timestamp_ts(
+            signal_date_ts,
+            session_calendar_id_str=release_obj.session_calendar_id_str,
+        ).date()
+    )
+    close_row_ser = full_signal_df.loc[pd.Timestamp(signal_date_ts)]
+    current_data_df = full_signal_df.loc[: pd.Timestamp(signal_date_ts)]
+    strategy_obj.iterate(
+        current_data_df,
+        close_row_ser,
+        pd.Series(dtype=float),
+    )
+
+    return _build_decision_plan_from_orders(
+        release_obj=release_obj,
+        signal_date_ts=signal_date_ts,
+        strategy_obj=strategy_obj,
+        snapshot_metadata_dict={"strategy_family_str": "qpi_ibs_rsi_exit"},
+    )
+
+
+def _build_taa_btal_tqqq_vix_cash_decision_plan(
+    release_obj: LiveRelease,
+    as_of_ts: datetime,
+    pod_state_obj: PodState | None,
+) -> DecisionPlan:
+    base_taa_module = import_module("strategies.taa_df.strategy_taa_df")
+    variant_module = import_module("strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash")
+    vix_overlay_module = import_module("strategies.taa_df.strategy_taa_df_fallback_vix_cash_variant_utils")
+
+    config_obj = replace(
+        variant_module.DEFAULT_CONFIG,
+        end_date_str=pd.Timestamp(as_of_ts).strftime("%Y-%m-%d"),
+    )
+    execution_price_df, _, base_month_end_weight_df, _ = base_taa_module.get_defense_first_data(config_obj)
+    _, month_end_vrp_signal_df = vix_overlay_module._load_vrp_overlay_signal_frames(config_obj)
+    month_end_weight_df, month_end_vrp_diagnostic_df = (
+        vix_overlay_module.apply_vrp_cash_gate_to_month_end_weight_df(
+            base_month_end_weight_df=base_month_end_weight_df,
+            month_end_vrp_signal_df=month_end_vrp_signal_df,
+            config=config_obj,
+        )
+    )
+    if len(month_end_weight_df.index) == 0:
+        raise RuntimeError("TAA live host produced no month-end weights.")
+
+    signal_date_ts = pd.Timestamp(month_end_weight_df.index[-1]).to_pydatetime()
+    # *** CRITICAL*** Month-end rebalance dates must snap to the true first tradable session of the next month.
+    execution_date_ts = scheduler_utils.first_business_day_of_next_month_timestamp_ts(
+        signal_date_ts,
+        session_calendar_id_str=release_obj.session_calendar_id_str,
+    )
+    rebalance_weight_df = pd.DataFrame(
+        [month_end_weight_df.loc[pd.Timestamp(signal_date_ts)].copy()],
+        index=pd.DatetimeIndex([pd.Timestamp(execution_date_ts.date())], name="rebalance_date"),
+    )
+
+    strategy_obj = base_taa_module.DefenseFirstStrategy(
+        name=release_obj.pod_id_str,
+        benchmarks=config_obj.benchmark_list,
+        rebalance_weight_df=rebalance_weight_df,
+        tradeable_asset_list=config_obj.tradeable_asset_list,
+        capital_base=float(release_obj.params_dict.get("capital_base_float", 100_000.0)),
+        slippage=float(release_obj.params_dict.get("slippage_float", 0.0001)),
+        commission_per_share=float(release_obj.params_dict.get("commission_per_share_float", 0.005)),
+        commission_minimum=float(release_obj.params_dict.get("commission_minimum_float", 1.0)),
+    )
+    _seed_strategy_state(strategy_obj, pod_state_obj)
+
+    close_row_ser = execution_price_df.loc[pd.Timestamp(signal_date_ts)]
+    strategy_obj.previous_bar = pd.Timestamp(signal_date_ts)
+    strategy_obj.current_bar = pd.Timestamp(execution_date_ts.date())
+    strategy_obj.iterate(
+        execution_price_df.loc[: pd.Timestamp(signal_date_ts)],
+        close_row_ser,
+        pd.Series(dtype=float),
+    )
+
+    full_target_weight_map_dict = {
+        str(asset_str): float(target_weight_float)
+        for asset_str, target_weight_float in rebalance_weight_df.loc[pd.Timestamp(execution_date_ts.date())].items()
+        if abs(float(target_weight_float)) > 1e-12
+    }
+    cash_reserve_weight_float = max(0.0, 1.0 - sum(full_target_weight_map_dict.values()))
+    latest_diagnostic_ser = month_end_vrp_diagnostic_df.loc[pd.Timestamp(signal_date_ts)]
+    decision_base_position_map_dict = {
+        str(asset_str): float(amount_float)
+        for asset_str, amount_float in strategy_obj.get_positions().items()
+        if abs(float(amount_float)) > 1e-9
+    }
+    return _build_full_target_weight_decision_plan(
+        release_obj=release_obj,
+        signal_date_ts=signal_date_ts,
+        decision_base_position_map_dict=decision_base_position_map_dict,
+        full_target_weight_map_dict=full_target_weight_map_dict,
+        cash_reserve_weight_float=cash_reserve_weight_float,
+        strategy_state_dict=_extract_strategy_state_dict(strategy_obj),
+        snapshot_metadata_dict={
+            "strategy_family_str": "taa_df_btal_fallback_tqqq_vix_cash",
+            "cash_weight_float": float(latest_diagnostic_ser["cash_weight"]),
+        },
+    )
+
+
+def _build_atr_normalized_ndx_decision_plan(
+    release_obj: LiveRelease,
+    as_of_ts: datetime,
+    pod_state_obj: PodState | None,
+) -> DecisionPlan:
+    atr_module = import_module("strategies.momentum.strategy_mo_atr_normalized_ndx")
+    config_obj = replace(
+        atr_module.DEFAULT_CONFIG,
+        end_date_str=pd.Timestamp(as_of_ts).strftime("%Y-%m-%d"),
+        max_positions_int=int(
+            release_obj.params_dict.get("max_positions_int", atr_module.DEFAULT_CONFIG.max_positions_int)
+        ),
+    )
+    pricing_data_df, universe_df, _ = atr_module.get_atr_normalized_ndx_data(config_obj)
+    tradeable_symbol_list = [
+        symbol_str
+        for symbol_str in pricing_data_df.columns.get_level_values(0).unique()
+        if symbol_str != config_obj.regime_symbol_str
+    ]
+    price_close_df = pd.DataFrame(
+        {
+            symbol_str: pricing_data_df[(symbol_str, "Close")]
+            for symbol_str in tradeable_symbol_list
+        },
+        index=pricing_data_df.index,
+    ).astype(float)
+    price_high_df = pd.DataFrame(
+        {
+            symbol_str: pricing_data_df[(symbol_str, "High")]
+            for symbol_str in tradeable_symbol_list
+        },
+        index=pricing_data_df.index,
+    ).astype(float)
+    price_low_df = pd.DataFrame(
+        {
+            symbol_str: pricing_data_df[(symbol_str, "Low")]
+            for symbol_str in tradeable_symbol_list
+        },
+        index=pricing_data_df.index,
+    ).astype(float)
+    regime_close_ser = pricing_data_df[(config_obj.regime_symbol_str, "Close")].astype(float)
+
+    (
+        monthly_decision_close_df,
+        _monthly_roc_df,
+        _atr_decision_df,
+        _stock_trend_pass_df,
+        _regime_sma_ser,
+        _regime_pass_ser,
+        _risk_adj_score_df,
+    ) = atr_module.compute_atr_normalized_signal_tables(
+        price_close_df=price_close_df,
+        price_high_df=price_high_df,
+        price_low_df=price_low_df,
+        regime_close_ser=regime_close_ser,
+        config=config_obj,
+    )
+    if len(monthly_decision_close_df.index) == 0:
+        raise RuntimeError("ATR-normalized NDX live host produced no valid monthly decision dates.")
+
+    signal_date_ts = pd.Timestamp(monthly_decision_close_df.index[-1]).to_pydatetime()
+    # *** CRITICAL*** The monthly decision date must map to the true next tradable session on the release calendar.
+    execution_date_ts = scheduler_utils.next_business_day_timestamp_ts(
+        signal_date_ts,
+        session_calendar_id_str=release_obj.session_calendar_id_str,
+    )
+    rebalance_schedule_df = pd.DataFrame(
+        {"decision_date_ts": [pd.Timestamp(signal_date_ts)]},
+        index=pd.DatetimeIndex([pd.Timestamp(execution_date_ts.date())], name="execution_date_ts"),
+    )
+
+    strategy_obj = atr_module.AtrNormalizedNdxStrategy(
+        name=release_obj.pod_id_str,
+        benchmarks=[config_obj.regime_symbol_str],
+        rebalance_schedule_df=rebalance_schedule_df,
+        regime_symbol_str=config_obj.regime_symbol_str,
+        capital_base=float(release_obj.params_dict.get("capital_base_float", config_obj.capital_base_float)),
+        slippage=float(release_obj.params_dict.get("slippage_float", config_obj.slippage_float)),
+        commission_per_share=float(
+            release_obj.params_dict.get("commission_per_share_float", config_obj.commission_per_share_float)
+        ),
+        commission_minimum=float(
+            release_obj.params_dict.get("commission_minimum_float", config_obj.commission_minimum_float)
+        ),
+        lookback_month_int=int(release_obj.params_dict.get("lookback_month_int", config_obj.lookback_month_int)),
+        index_trend_window_int=int(
+            release_obj.params_dict.get("index_trend_window_int", config_obj.index_trend_window_int)
+        ),
+        stock_trend_window_int=int(
+            release_obj.params_dict.get("stock_trend_window_int", config_obj.stock_trend_window_int)
+        ),
+        max_positions_int=int(release_obj.params_dict.get("max_positions_int", config_obj.max_positions_int)),
+    )
+    strategy_obj.universe_df = universe_df
+    _seed_strategy_state(strategy_obj, pod_state_obj)
+
+    full_signal_df = strategy_obj.compute_signals(pricing_data_df.copy())
+    close_row_ser = full_signal_df.loc[pd.Timestamp(signal_date_ts)]
+    target_weight_ser = strategy_obj.get_target_weight_ser(close_row_ser=close_row_ser)
+    strategy_obj.previous_bar = pd.Timestamp(signal_date_ts)
+    strategy_obj.current_bar = pd.Timestamp(execution_date_ts.date())
+    strategy_obj.iterate(
+        full_signal_df.loc[: pd.Timestamp(signal_date_ts)],
+        close_row_ser,
+        pd.Series(dtype=float),
+    )
+
+    full_target_weight_map_dict = {
+        str(asset_str): float(target_weight_float)
+        for asset_str, target_weight_float in target_weight_ser.items()
+        if abs(float(target_weight_float)) > 1e-12
+    }
+    cash_reserve_weight_float = max(0.0, 1.0 - sum(full_target_weight_map_dict.values()))
+    decision_base_position_map_dict = {
+        str(asset_str): float(amount_float)
+        for asset_str, amount_float in strategy_obj.get_positions().items()
+        if abs(float(amount_float)) > 1e-9
+    }
+    return _build_full_target_weight_decision_plan(
+        release_obj=release_obj,
+        signal_date_ts=signal_date_ts,
+        decision_base_position_map_dict=decision_base_position_map_dict,
+        full_target_weight_map_dict=full_target_weight_map_dict,
+        cash_reserve_weight_float=cash_reserve_weight_float,
+        strategy_state_dict=_extract_strategy_state_dict(strategy_obj),
+        snapshot_metadata_dict={"strategy_family_str": "atr_normalized_ndx"},
     )
 
 
@@ -468,4 +928,23 @@ def build_order_plan_for_release(
 
     raise ValueError(
         f"Unsupported strategy_import_str '{release_obj.strategy_import_str}' for v1 live hosting."
+    )
+
+
+def build_decision_plan_for_release(
+    release_obj: LiveRelease,
+    as_of_ts: datetime,
+    pod_state_obj: PodState | None,
+) -> DecisionPlan:
+    if release_obj.strategy_import_str == "strategies.dv2.strategy_mr_dv2:DVO2Strategy":
+        return _build_dv2_decision_plan(release_obj, as_of_ts, pod_state_obj)
+    if release_obj.strategy_import_str == "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy":
+        return _build_qpi_ibs_rsi_exit_decision_plan(release_obj, as_of_ts, pod_state_obj)
+    if release_obj.strategy_import_str == "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash":
+        return _build_taa_btal_tqqq_vix_cash_decision_plan(release_obj, as_of_ts, pod_state_obj)
+    if release_obj.strategy_import_str == "strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy":
+        return _build_atr_normalized_ndx_decision_plan(release_obj, as_of_ts, pod_state_obj)
+    raise NotImplementedError(
+        "V2 broker-truth execution currently supports the configured decision-book families only. "
+        f"Unsupported strategy_import_str '{release_obj.strategy_import_str}'."
     )

@@ -8,18 +8,17 @@ from pathlib import Path
 import uuid
 
 from alpha.live import scheduler_utils, strategy_host
-from alpha.live.execution_quality import build_execution_quality_snapshot
-from alpha.live.logging_utils import DEFAULT_LOG_PATH_STR, log_event
-from alpha.live.models import LiveRelease, PodState
-from alpha.live.order_clerk import (
-    BrokerAdapter,
-    IBKRGatewayBrokerAdapter,
-    build_broker_order_request_list,
-    validate_order_intent_list,
+from alpha.live.execution_engine import (
+    build_broker_order_request_list_from_vplan,
+    build_vplan,
+    get_touched_asset_list_for_decision_plan,
 )
+from alpha.live.logging_utils import DEFAULT_LOG_PATH_STR, log_event
+from alpha.live.models import DecisionPlan, LiveRelease, PodState, VPlan
+from alpha.live.order_clerk import BrokerAdapter, IBKRGatewayBrokerAdapter
 from alpha.live.reconcile import reconcile_account_state
 from alpha.live.release_manifest import load_release_list
-from alpha.live.state_store import LiveStateStore
+from alpha.live.state_store_v2 import LiveStateStore
 
 
 DEFAULT_RELEASES_ROOT_PATH_STR = str(Path(__file__).resolve().parent / "releases")
@@ -32,161 +31,6 @@ def _pluralize_label_str(count_int: int, singular_label_str: str, plural_label_s
     if plural_label_str is not None:
         return plural_label_str
     return f"{singular_label_str}s"
-
-
-def _render_tick_detail_str(detail_dict: dict[str, object]) -> str:
-    if not bool(detail_dict.get("lease_acquired_bool", False)):
-        return "\n".join(
-            [
-                "Tick Result",
-                "- Another tick is already running.",
-                "- Nothing was done in this run.",
-                "",
-                "Raw Fields",
-                "- lease_acquired_bool: false",
-            ]
-        )
-
-    created_plan_count_int = int(detail_dict.get("created_plan_count_int", 0))
-    skipped_plan_count_int = int(detail_dict.get("skipped_plan_count_int", 0))
-    submitted_plan_count_int = int(detail_dict.get("submitted_plan_count_int", 0))
-    blocked_plan_count_int = int(detail_dict.get("blocked_plan_count_int", 0))
-    completed_plan_count_int = int(detail_dict.get("completed_plan_count_int", 0))
-    reason_count_map_dict = dict(detail_dict.get("reason_count_map_dict", {}))
-
-    summary_line_list: list[str] = ["Tick Result"]
-    action_line_list: list[str] = []
-    next_step_line_str = "- Nothing is due right now."
-
-    if created_plan_count_int > 0:
-        action_line_list.append(
-            f"- Built {created_plan_count_int} new {_pluralize_label_str(created_plan_count_int, 'plan')}."
-        )
-    if skipped_plan_count_int > 0:
-        action_line_list.append(
-            f"- Skipped {skipped_plan_count_int} existing active {_pluralize_label_str(skipped_plan_count_int, 'plan')}."
-        )
-    if submitted_plan_count_int > 0:
-        action_line_list.append(
-            f"- Submitted {submitted_plan_count_int} {_pluralize_label_str(submitted_plan_count_int, 'plan')} to the broker."
-        )
-    if completed_plan_count_int > 0:
-        action_line_list.append(
-            f"- Completed post-trade reconcile for {completed_plan_count_int} {_pluralize_label_str(completed_plan_count_int, 'plan')}."
-        )
-    if blocked_plan_count_int > 0:
-        action_line_list.append(
-            f"- Blocked {blocked_plan_count_int} {_pluralize_label_str(blocked_plan_count_int, 'plan')} for safety."
-        )
-        if "broker_not_ready" in reason_count_map_dict:
-            next_step_line_str = "- Next step: start or connect the broker session, then run tick again."
-        elif "reconciliation_failed" in reason_count_map_dict:
-            next_step_line_str = "- Next step: inspect reconciliation and fix the broker/model mismatch before retrying."
-        elif "account_not_visible" in reason_count_map_dict:
-            next_step_line_str = "- Next step: verify the routed account is visible in the current broker session."
-        elif "env_mode_mismatch" in reason_count_map_dict:
-            next_step_line_str = "- Next step: use the correct --mode or fix the manifest mode."
-        else:
-            next_step_line_str = "- Next step: inspect the reason list below and fix the blocker."
-
-    if len(action_line_list) == 0:
-        action_line_list.append("- No new action was needed in this run.")
-
-    summary_line_list.extend(action_line_list)
-
-    if len(reason_count_map_dict) > 0:
-        summary_line_list.append("- Reasons:")
-        for reason_code_str, count_obj in sorted(reason_count_map_dict.items()):
-            reason_count_int = int(count_obj)
-            summary_line_list.append(
-                f"  - {reason_code_str}: {reason_count_int}"
-            )
-
-    summary_line_list.append(next_step_line_str)
-    summary_line_list.extend(
-        [
-            "",
-            "Raw Fields",
-            f"- lease_acquired_bool: {str(bool(detail_dict.get('lease_acquired_bool', False))).lower()}",
-            f"- created_plan_count_int: {created_plan_count_int}",
-            f"- skipped_plan_count_int: {skipped_plan_count_int}",
-            f"- submitted_plan_count_int: {submitted_plan_count_int}",
-            f"- blocked_plan_count_int: {blocked_plan_count_int}",
-            f"- completed_plan_count_int: {completed_plan_count_int}",
-            f"- reason_count_map_dict: {json.dumps(reason_count_map_dict, sort_keys=True)}",
-        ]
-    )
-    return "\n".join(summary_line_list)
-
-
-def _render_status_detail_str(detail_dict: dict[str, object]) -> str:
-    pod_status_dict_list = list(detail_dict.get("pod_status_dict_list", []))
-    line_list = [
-        "Status",
-        f"- Enabled pods: {int(detail_dict.get('enabled_pod_count_int', 0))}",
-    ]
-
-    if len(pod_status_dict_list) == 0:
-        line_list.append("- No enabled pods were found.")
-        return "\n".join(line_list)
-
-    for pod_status_dict in pod_status_dict_list:
-        line_list.extend(
-            [
-                "",
-                f"Pod: {pod_status_dict['pod_id_str']}",
-                f"- Release: {pod_status_dict['release_id_str']}",
-                f"- Account: {pod_status_dict['account_route_str']}",
-                f"- Plan status: {pod_status_dict['latest_order_plan_status_str'] or 'none'}",
-                f"- Next action: {pod_status_dict['next_action_str']}",
-                f"- Why: {pod_status_dict['reason_code_str']}",
-                f"- Latest signal time: {pod_status_dict['latest_signal_timestamp_str'] or 'none'}",
-                f"- Planned submit time: {pod_status_dict['latest_submission_timestamp_str'] or 'none'}",
-                f"- Latest fill time: {pod_status_dict['latest_fill_timestamp_str'] or 'none'}",
-            ]
-        )
-
-    return "\n".join(line_list)
-
-
-def _render_execution_report_detail_str(detail_dict: dict[str, object]) -> str:
-    execution_report_dict_list = list(detail_dict.get("execution_report_dict_list", []))
-    line_list = ["Execution Report"]
-
-    if len(execution_report_dict_list) == 0:
-        line_list.append("- No fills were found yet.")
-        return "\n".join(line_list)
-
-    for execution_report_dict in execution_report_dict_list:
-        line_list.extend(
-            [
-                "",
-                f"Pod: {execution_report_dict['pod_id_str']}",
-                f"- Release: {execution_report_dict['release_id_str']}",
-                f"- Latest order plan id: {execution_report_dict['latest_order_plan_id_int']}",
-                f"- Fill count: {execution_report_dict['fill_count_int']}",
-            ]
-        )
-        for fill_row_dict in execution_report_dict["fill_row_dict_list"]:
-            line_list.append(
-                "- Fill: "
-                f"{fill_row_dict['asset_str']} | "
-                f"amount={fill_row_dict['fill_amount_float']} | "
-                f"price={fill_row_dict['fill_price_float']} | "
-                f"time={fill_row_dict['fill_timestamp_str']}"
-            )
-
-    return "\n".join(line_list)
-
-
-def _render_command_output_str(command_name_str: str, detail_dict: dict[str, object]) -> str:
-    if command_name_str == "tick":
-        return _render_tick_detail_str(detail_dict)
-    if command_name_str == "status":
-        return _render_status_detail_str(detail_dict)
-    if command_name_str == "execution_report":
-        return _render_execution_report_detail_str(detail_dict)
-    return json.dumps(detail_dict, indent=2, sort_keys=True)
 
 
 def _parse_as_of_timestamp_ts(as_of_timestamp_str: str | None) -> datetime:
@@ -239,16 +83,17 @@ def _build_release_log_payload_dict(
         "session_calendar_id_str": release_obj.session_calendar_id_str,
         "signal_clock_str": release_obj.signal_clock_str,
         "execution_policy_str": release_obj.execution_policy_str,
-        "data_profile_str": release_obj.data_profile_str,
+        "pod_budget_fraction_float": float(release_obj.pod_budget_fraction_float),
+        "auto_submit_enabled_bool": bool(release_obj.auto_submit_enabled_bool),
     }
     if extra_payload_dict is not None:
         payload_dict.update(extra_payload_dict)
     return payload_dict
 
 
-def _build_order_plan_log_payload_dict(
+def _build_decision_plan_log_payload_dict(
     release_obj: LiveRelease,
-    order_plan_obj,
+    decision_plan_obj: DecisionPlan,
     as_of_ts: datetime,
     extra_payload_dict: dict | None = None,
 ) -> dict:
@@ -256,11 +101,11 @@ def _build_order_plan_log_payload_dict(
         release_obj,
         as_of_ts,
         {
-            "order_plan_id_int": int(order_plan_obj.order_plan_id_int or 0),
-            "plan_status_str": order_plan_obj.status_str,
-            "signal_timestamp_str": order_plan_obj.signal_timestamp_ts.isoformat(),
-            "submission_timestamp_str": order_plan_obj.submission_timestamp_ts.isoformat(),
-            "target_execution_timestamp_str": order_plan_obj.target_execution_timestamp_ts.isoformat(),
+            "decision_plan_id_int": int(decision_plan_obj.decision_plan_id_int or 0),
+            "decision_plan_status_str": decision_plan_obj.status_str,
+            "signal_timestamp_str": decision_plan_obj.signal_timestamp_ts.isoformat(),
+            "submission_timestamp_str": decision_plan_obj.submission_timestamp_ts.isoformat(),
+            "target_execution_timestamp_str": decision_plan_obj.target_execution_timestamp_ts.isoformat(),
         },
     )
     if extra_payload_dict is not None:
@@ -268,230 +113,540 @@ def _build_order_plan_log_payload_dict(
     return payload_dict
 
 
-def build_order_plans(
+def _build_vplan_log_payload_dict(
+    release_obj: LiveRelease,
+    vplan_obj: VPlan,
+    as_of_ts: datetime,
+    extra_payload_dict: dict | None = None,
+) -> dict:
+    payload_dict = _build_release_log_payload_dict(
+        release_obj,
+        as_of_ts,
+        {
+            "vplan_id_int": int(vplan_obj.vplan_id_int or 0),
+            "decision_plan_id_int": int(vplan_obj.decision_plan_id_int),
+            "vplan_status_str": vplan_obj.status_str,
+            "signal_timestamp_str": vplan_obj.signal_timestamp_ts.isoformat(),
+            "submission_timestamp_str": vplan_obj.submission_timestamp_ts.isoformat(),
+            "target_execution_timestamp_str": vplan_obj.target_execution_timestamp_ts.isoformat(),
+        },
+    )
+    if extra_payload_dict is not None:
+        payload_dict.update(extra_payload_dict)
+    return payload_dict
+
+
+def _render_tick_detail_str(detail_dict: dict[str, object]) -> str:
+    if not bool(detail_dict.get("lease_acquired_bool", False)):
+        return "\n".join(
+            [
+                "Tick Result",
+                "- Another tick is already running.",
+                "- Nothing was done in this run.",
+                "",
+                "Raw Fields",
+                "- lease_acquired_bool: false",
+            ]
+        )
+
+    created_decision_plan_count_int = int(detail_dict.get("created_decision_plan_count_int", 0))
+    skipped_decision_plan_count_int = int(detail_dict.get("skipped_decision_plan_count_int", 0))
+    expired_decision_plan_count_int = int(detail_dict.get("expired_decision_plan_count_int", 0))
+    created_vplan_count_int = int(detail_dict.get("created_vplan_count_int", 0))
+    submitted_vplan_count_int = int(detail_dict.get("submitted_vplan_count_int", 0))
+    blocked_action_count_int = int(detail_dict.get("blocked_action_count_int", 0))
+    completed_vplan_count_int = int(detail_dict.get("completed_vplan_count_int", 0))
+    warning_count_map_dict = dict(detail_dict.get("warning_count_map_dict", {}))
+    warning_action_count_int = sum(int(warning_count_int) for warning_count_int in warning_count_map_dict.values())
+    reason_count_map_dict = dict(detail_dict.get("reason_count_map_dict", {}))
+
+    line_list = ["Tick Result"]
+    if created_decision_plan_count_int > 0:
+        line_list.append(
+            f"- Built {created_decision_plan_count_int} new "
+            f"{_pluralize_label_str(created_decision_plan_count_int, 'DecisionPlan')}."
+        )
+    if skipped_decision_plan_count_int > 0:
+        line_list.append(
+            f"- Skipped {skipped_decision_plan_count_int} duplicate "
+            f"{_pluralize_label_str(skipped_decision_plan_count_int, 'DecisionPlan')}."
+        )
+    if expired_decision_plan_count_int > 0:
+        line_list.append(
+            f"- Expired {expired_decision_plan_count_int} stale "
+            f"{_pluralize_label_str(expired_decision_plan_count_int, 'DecisionPlan')}."
+        )
+    if created_vplan_count_int > 0:
+        line_list.append(
+            f"- Built {created_vplan_count_int} "
+            f"{_pluralize_label_str(created_vplan_count_int, 'VPlan')} from broker truth."
+        )
+    if submitted_vplan_count_int > 0:
+        line_list.append(
+            f"- Submitted {submitted_vplan_count_int} "
+            f"{_pluralize_label_str(submitted_vplan_count_int, 'VPlan')}."
+        )
+    if completed_vplan_count_int > 0:
+        line_list.append(
+            f"- Completed reconcile for {completed_vplan_count_int} "
+            f"{_pluralize_label_str(completed_vplan_count_int, 'VPlan')}."
+        )
+    if blocked_action_count_int > 0:
+        line_list.append(
+            f"- Blocked {blocked_action_count_int} "
+            f"{_pluralize_label_str(blocked_action_count_int, 'action')} for safety."
+        )
+    if warning_action_count_int > 0:
+        line_list.append(
+            f"- Recorded {warning_action_count_int} non-blocking "
+            f"{_pluralize_label_str(warning_action_count_int, 'warning')}."
+        )
+    if len(line_list) == 1:
+        line_list.append("- No new action was needed in this run.")
+
+    if len(reason_count_map_dict) > 0:
+        line_list.append("- Reasons:")
+        for reason_code_str, reason_count_int in sorted(reason_count_map_dict.items()):
+            line_list.append(f"  - {reason_code_str}: {int(reason_count_int)}")
+    if len(warning_count_map_dict) > 0:
+        line_list.append("- Warnings:")
+        for warning_code_str, warning_count_int in sorted(warning_count_map_dict.items()):
+            line_list.append(f"  - {warning_code_str}: {int(warning_count_int)}")
+
+    line_list.extend(
+        [
+            "",
+            "Raw Fields",
+            f"- lease_acquired_bool: {str(bool(detail_dict.get('lease_acquired_bool', False))).lower()}",
+            f"- created_decision_plan_count_int: {created_decision_plan_count_int}",
+            f"- skipped_decision_plan_count_int: {skipped_decision_plan_count_int}",
+            f"- expired_decision_plan_count_int: {expired_decision_plan_count_int}",
+            f"- created_vplan_count_int: {created_vplan_count_int}",
+            f"- submitted_vplan_count_int: {submitted_vplan_count_int}",
+            f"- blocked_action_count_int: {blocked_action_count_int}",
+            f"- completed_vplan_count_int: {completed_vplan_count_int}",
+            f"- warning_count_map_dict: {json.dumps(warning_count_map_dict, sort_keys=True)}",
+            f"- reason_count_map_dict: {json.dumps(reason_count_map_dict, sort_keys=True)}",
+        ]
+    )
+    return "\n".join(line_list)
+
+
+def _render_status_detail_str(detail_dict: dict[str, object]) -> str:
+    pod_status_dict_list = list(detail_dict.get("pod_status_dict_list", []))
+    line_list = [
+        "Status",
+        f"- Enabled pods: {int(detail_dict.get('enabled_pod_count_int', 0))}",
+    ]
+    if len(pod_status_dict_list) == 0:
+        line_list.append("- No enabled pods were found.")
+        return "\n".join(line_list)
+
+    for pod_status_dict in pod_status_dict_list:
+        line_list.extend(
+            [
+                "",
+                f"Pod: {pod_status_dict['pod_id_str']}",
+                f"- Release: {pod_status_dict['release_id_str']}",
+                f"- Account: {pod_status_dict['account_route_str']}",
+                f"- DecisionPlan status: {pod_status_dict['latest_decision_plan_status_str'] or 'none'}",
+                f"- VPlan status: {pod_status_dict['latest_vplan_status_str'] or 'none'}",
+                f"- Next action: {pod_status_dict['next_action_str']}",
+                f"- Why: {pod_status_dict['reason_code_str']}",
+                f"- Latest signal time: {pod_status_dict['latest_signal_timestamp_str'] or 'none'}",
+                f"- Planned submit time: {pod_status_dict['latest_submission_timestamp_str'] or 'none'}",
+                f"- Latest broker snapshot: {pod_status_dict['latest_broker_snapshot_timestamp_str'] or 'none'}",
+                f"- Latest fill time: {pod_status_dict['latest_fill_timestamp_str'] or 'none'}",
+            ]
+        )
+    return "\n".join(line_list)
+
+
+def _render_vplan_detail_str(detail_dict: dict[str, object]) -> str:
+    vplan_dict_list = list(detail_dict.get("vplan_dict_list", []))
+    line_list = ["VPlan"]
+    if len(vplan_dict_list) == 0:
+        line_list.append("- No VPlan was found.")
+        return "\n".join(line_list)
+
+    for vplan_dict in vplan_dict_list:
+        line_list.extend(
+            [
+                "",
+                f"Pod: {vplan_dict['pod_id_str']}",
+                f"- VPlan id: {vplan_dict['vplan_id_int']}",
+                f"- DecisionPlan id: {vplan_dict['decision_plan_id_int']}",
+                f"- Status: {vplan_dict['status_str']}",
+                f"- NetLiq: {vplan_dict['net_liq_float']}",
+                f"- Pod budget: {vplan_dict['pod_budget_float']}",
+                f"- Price source: {vplan_dict['live_price_source_str']}",
+            ]
+        )
+        warning_row_dict_list = list(vplan_dict.get("warning_row_dict_list", []))
+        if len(warning_row_dict_list) > 0:
+            line_list.append(f"- Position warnings: {len(warning_row_dict_list)}")
+        for vplan_row_dict in vplan_dict["vplan_row_dict_list"]:
+            line_list.append(
+                "- Row: "
+                f"{vplan_row_dict['asset_str']} | "
+                f"decision_base={vplan_row_dict['decision_base_share_float']} | "
+                f"current={vplan_row_dict['current_share_float']} | "
+                f"drift={vplan_row_dict['drift_share_float']} | "
+                f"target={vplan_row_dict['target_share_float']} | "
+                f"delta={vplan_row_dict['order_delta_share_float']} | "
+                f"price={vplan_row_dict['live_reference_price_float']} | "
+                f"notional={vplan_row_dict['estimated_target_notional_float']} | "
+                f"warning={'yes' if vplan_row_dict['warning_bool'] else 'no'}"
+            )
+        for warning_row_dict in warning_row_dict_list:
+            line_list.append(
+                "- Warning: "
+                f"{warning_row_dict['asset_str']} | "
+                f"decision_base={warning_row_dict['decision_base_share_float']} | "
+                f"current={warning_row_dict['current_share_float']} | "
+                f"drift={warning_row_dict['drift_share_float']}"
+            )
+    return "\n".join(line_list)
+
+
+def _render_execution_report_detail_str(detail_dict: dict[str, object]) -> str:
+    execution_report_dict_list = list(detail_dict.get("execution_report_dict_list", []))
+    line_list = ["Execution Report"]
+    if len(execution_report_dict_list) == 0:
+        line_list.append("- No fills were found yet.")
+        return "\n".join(line_list)
+
+    for execution_report_dict in execution_report_dict_list:
+        line_list.extend(
+            [
+                "",
+                f"Pod: {execution_report_dict['pod_id_str']}",
+                f"- VPlan id: {execution_report_dict['latest_vplan_id_int']}",
+                f"- Fill count: {execution_report_dict['fill_count_int']}",
+            ]
+        )
+        for fill_row_dict in execution_report_dict["fill_row_dict_list"]:
+            line_list.append(
+                "- Fill: "
+                f"{fill_row_dict['asset_str']} | "
+                f"amount={fill_row_dict['fill_amount_float']} | "
+                f"price={fill_row_dict['fill_price_float']} | "
+                f"time={fill_row_dict['fill_timestamp_str']}"
+            )
+    return "\n".join(line_list)
+
+
+def _render_command_output_str(command_name_str: str, detail_dict: dict[str, object]) -> str:
+    if command_name_str == "tick":
+        return _render_tick_detail_str(detail_dict)
+    if command_name_str == "status":
+        return _render_status_detail_str(detail_dict)
+    if command_name_str == "show_vplan":
+        return _render_vplan_detail_str(detail_dict)
+    if command_name_str == "execution_report":
+        return _render_execution_report_detail_str(detail_dict)
+    return json.dumps(detail_dict, indent=2, sort_keys=True)
+
+
+def expire_stale_decision_plans(
     state_store_obj: LiveStateStore,
     as_of_ts: datetime,
     releases_root_path_str: str,
     log_path_str: str = DEFAULT_LOG_PATH_STR,
 ) -> dict[str, object]:
-    """Build and freeze any due strategy decisions into order plans."""
+    del releases_root_path_str
+    expired_decision_plan_count_int = 0
+    reason_counter_obj: Counter[str] = Counter()
+    for decision_plan_obj in state_store_obj.get_expirable_decision_plan_list(as_of_ts):
+        release_obj = state_store_obj.get_release_by_id(decision_plan_obj.release_id_str)
+        state_store_obj.mark_decision_plan_status(int(decision_plan_obj.decision_plan_id_int or 0), "expired")
+        latest_vplan_obj = state_store_obj.get_latest_vplan_for_decision(int(decision_plan_obj.decision_plan_id_int or 0))
+        if latest_vplan_obj is not None and latest_vplan_obj.status_str == "ready":
+            state_store_obj.mark_vplan_status(int(latest_vplan_obj.vplan_id_int or 0), "expired")
+        expired_decision_plan_count_int += 1
+        reason_counter_obj["submission_window_expired"] += 1
+        log_event(
+            "decision_plan_expired",
+            _build_decision_plan_log_payload_dict(
+                release_obj,
+                decision_plan_obj,
+                as_of_ts,
+                {"reason_code_str": "submission_window_expired"},
+            ),
+            log_path_str=log_path_str,
+        )
+    return {
+        "expired_decision_plan_count_int": expired_decision_plan_count_int,
+        "reason_count_map_dict": dict(reason_counter_obj),
+    }
+
+
+def build_decision_plans(
+    state_store_obj: LiveStateStore,
+    as_of_ts: datetime,
+    releases_root_path_str: str,
+    log_path_str: str = DEFAULT_LOG_PATH_STR,
+) -> dict[str, object]:
     release_list = _load_release_list_and_sync(releases_root_path_str, state_store_obj)
     due_release_list = scheduler_utils.select_due_release_list(release_list, as_of_ts)
-    created_plan_count_int = 0
-    skipped_plan_count_int = 0
+    created_decision_plan_count_int = 0
+    skipped_decision_plan_count_int = 0
     reason_counter_obj: Counter[str] = Counter()
 
     for release_obj in due_release_list:
         pod_state_obj = _get_model_state_or_default(release_obj, state_store_obj, as_of_ts)
-        order_plan_obj = strategy_host.build_order_plan_for_release(
+        decision_plan_obj = strategy_host.build_decision_plan_for_release(
             release_obj=release_obj,
             as_of_ts=as_of_ts,
             pod_state_obj=pod_state_obj,
         )
-        if state_store_obj.has_active_order_plan(
+        if state_store_obj.has_active_decision_plan(
             pod_id_str=release_obj.pod_id_str,
-            signal_timestamp_ts=order_plan_obj.signal_timestamp_ts,
-            execution_policy_str=order_plan_obj.execution_policy_str,
+            signal_timestamp_ts=decision_plan_obj.signal_timestamp_ts,
+            execution_policy_str=decision_plan_obj.execution_policy_str,
         ):
-            skipped_plan_count_int += 1
-            reason_counter_obj["active_plan_exists"] += 1
-            log_event(
-                "build_plan_skipped",
-                _build_release_log_payload_dict(
-                    release_obj,
-                    as_of_ts,
-                    {"reason_code_str": "active_plan_exists"},
-                ),
-                log_path_str=log_path_str,
-            )
+            skipped_decision_plan_count_int += 1
+            reason_counter_obj["active_decision_plan_exists"] += 1
             continue
 
-        validate_order_intent_list(order_plan_obj.order_intent_list)
-        inserted_order_plan_obj = state_store_obj.insert_order_plan(order_plan_obj)
-        created_plan_count_int += 1
+        inserted_decision_plan_obj = state_store_obj.insert_decision_plan(decision_plan_obj)
+        created_decision_plan_count_int += 1
         log_event(
-            "build_plan_created",
-            _build_order_plan_log_payload_dict(
+            "build_decision_plan_created",
+            _build_decision_plan_log_payload_dict(
                 release_obj,
-                inserted_order_plan_obj,
+                inserted_decision_plan_obj,
                 as_of_ts,
-                {
-                    "reason_code_str": "snapshot_ready",
-                    "order_intent_count_int": len(inserted_order_plan_obj.order_intent_list),
-                },
+                {"reason_code_str": "snapshot_ready"},
             ),
             log_path_str=log_path_str,
         )
 
     return {
-        "created_plan_count_int": created_plan_count_int,
-        "skipped_plan_count_int": skipped_plan_count_int,
+        "created_decision_plan_count_int": created_decision_plan_count_int,
+        "skipped_decision_plan_count_int": skipped_decision_plan_count_int,
         "reason_count_map_dict": dict(reason_counter_obj),
     }
 
 
-def execute_order_plans(
+def build_vplans(
     state_store_obj: LiveStateStore,
     broker_adapter_obj: BrokerAdapter,
     as_of_ts: datetime,
     env_mode_str: str,
     log_path_str: str = DEFAULT_LOG_PATH_STR,
 ) -> dict[str, object]:
-    """Submit due frozen plans after broker/session/reconciliation checks pass."""
-    submittable_plan_list = state_store_obj.get_submittable_order_plan_list(as_of_ts)
-    submitted_plan_count_int = 0
-    blocked_plan_count_int = 0
+    created_vplan_count_int = 0
+    blocked_action_count_int = 0
+    warning_counter_obj: Counter[str] = Counter()
     reason_counter_obj: Counter[str] = Counter()
     visible_account_route_set = broker_adapter_obj.get_visible_account_route_set()
 
-    for order_plan_obj in submittable_plan_list:
-        order_plan_id_int = int(order_plan_obj.order_plan_id_int or 0)
-        release_obj = state_store_obj.get_release_by_id(order_plan_obj.release_id_str)
-
-        reason_code_str: str | None = None
-        next_status_str: str | None = None
-
-        if not release_obj.enabled_bool:
-            reason_code_str = "release_disabled"
-            next_status_str = "blocked"
-        elif release_obj.mode_str != env_mode_str:
-            reason_code_str = "env_mode_mismatch"
-            next_status_str = "blocked"
-        elif (
-            state_store_obj.count_active_order_plans_for_window(
-                pod_id_str=order_plan_obj.pod_id_str,
-                submission_timestamp_ts=order_plan_obj.submission_timestamp_ts,
-            )
-            != 1
-        ):
-            reason_code_str = "submission_window_collision"
-            next_status_str = "failed"
-        elif state_store_obj.count_broker_orders_for_plan(order_plan_id_int) > 0:
-            reason_code_str = "duplicate_submission_guard"
-            next_status_str = "blocked"
-        elif not state_store_obj.claim_order_plan_for_submission(order_plan_id_int):
-            reason_code_str = "submission_claim_failed"
-            next_status_str = None
-        elif not broker_adapter_obj.is_session_ready(order_plan_obj.account_route_str):
-            reason_code_str = "broker_not_ready"
-            next_status_str = "frozen"
-        elif (
+    for decision_plan_obj in state_store_obj.get_due_decision_plan_list(as_of_ts):
+        release_obj = state_store_obj.get_release_by_id(decision_plan_obj.release_id_str)
+        latest_vplan_obj = state_store_obj.get_latest_vplan_for_decision(int(decision_plan_obj.decision_plan_id_int or 0))
+        if latest_vplan_obj is not None and latest_vplan_obj.status_str in ("ready", "submitted", "completed"):
+            continue
+        if release_obj.mode_str != env_mode_str:
+            blocked_action_count_int += 1
+            reason_counter_obj["env_mode_mismatch"] += 1
+            state_store_obj.mark_decision_plan_status(int(decision_plan_obj.decision_plan_id_int or 0), "blocked")
+            continue
+        if decision_plan_obj.target_execution_timestamp_ts <= as_of_ts:
+            blocked_action_count_int += 1
+            reason_counter_obj["submission_window_expired"] += 1
+            state_store_obj.mark_decision_plan_status(int(decision_plan_obj.decision_plan_id_int or 0), "expired")
+            continue
+        if not broker_adapter_obj.is_session_ready(decision_plan_obj.account_route_str):
+            blocked_action_count_int += 1
+            reason_counter_obj["broker_not_ready"] += 1
+            continue
+        if (
             visible_account_route_set is not None
-            and order_plan_obj.account_route_str not in visible_account_route_set
+            and decision_plan_obj.account_route_str not in visible_account_route_set
         ):
-            reason_code_str = "account_not_visible"
-            next_status_str = "blocked"
-        else:
-            session_mode_str = broker_adapter_obj.get_session_mode_str(order_plan_obj.account_route_str)
-            if session_mode_str is not None and session_mode_str != release_obj.mode_str:
-                reason_code_str = "session_mode_mismatch"
-                next_status_str = "blocked"
-
-        if reason_code_str is not None:
-            if next_status_str is not None:
-                state_store_obj.mark_order_plan_status(order_plan_id_int, next_status_str)
-            blocked_plan_count_int += 1
-            reason_counter_obj[reason_code_str] += 1
-            log_event(
-                "submit_plan_blocked",
-                _build_order_plan_log_payload_dict(
-                    release_obj,
-                    order_plan_obj,
-                    as_of_ts,
-                    {"reason_code_str": reason_code_str},
-                ),
-                log_path_str=log_path_str,
-            )
+            blocked_action_count_int += 1
+            reason_counter_obj["account_not_visible"] += 1
+            state_store_obj.mark_decision_plan_status(int(decision_plan_obj.decision_plan_id_int or 0), "blocked")
+            continue
+        session_mode_str = broker_adapter_obj.get_session_mode_str(decision_plan_obj.account_route_str)
+        if session_mode_str is not None and session_mode_str != release_obj.mode_str:
+            blocked_action_count_int += 1
+            reason_counter_obj["session_mode_mismatch"] += 1
+            state_store_obj.mark_decision_plan_status(int(decision_plan_obj.decision_plan_id_int or 0), "blocked")
             continue
 
-        pod_state_obj = _get_model_state_or_default(release_obj, state_store_obj, as_of_ts)
-        broker_snapshot_obj = broker_adapter_obj.get_account_snapshot(order_plan_obj.account_route_str)
+        broker_snapshot_obj = broker_adapter_obj.get_account_snapshot(decision_plan_obj.account_route_str)
+        state_store_obj.upsert_broker_snapshot_cache(broker_snapshot_obj)
         reconciliation_result_obj = reconcile_account_state(
-            model_position_map=pod_state_obj.position_amount_map,
-            model_cash_float=pod_state_obj.cash_float,
+            model_position_map=decision_plan_obj.decision_base_position_map,
+            model_cash_float=0.0,
             broker_snapshot_obj=broker_snapshot_obj,
         )
-        state_store_obj.insert_reconciliation_snapshot(
-            pod_id_str=order_plan_obj.pod_id_str,
-            order_plan_id_int=order_plan_obj.order_plan_id_int,
-            stage_str="pre_submit",
+        state_store_obj.insert_vplan_reconciliation_snapshot(
+            pod_id_str=decision_plan_obj.pod_id_str,
+            decision_plan_id_int=decision_plan_obj.decision_plan_id_int,
+            vplan_id_int=None,
+            stage_str="pre_vplan",
             reconciliation_result_obj=reconciliation_result_obj,
         )
         if not reconciliation_result_obj.passed_bool:
-            state_store_obj.mark_order_plan_status(order_plan_id_int, "blocked")
-            blocked_plan_count_int += 1
-            reason_counter_obj["reconciliation_failed"] += 1
+            warning_counter_obj["position_reconciliation_warning"] += 1
             log_event(
-                "submit_plan_blocked",
-                _build_order_plan_log_payload_dict(
+                "build_vplan_position_warning",
+                _build_decision_plan_log_payload_dict(
                     release_obj,
-                    order_plan_obj,
+                    decision_plan_obj,
                     as_of_ts,
                     {
-                        "reason_code_str": "reconciliation_failed",
+                        "warning_code_str": "position_reconciliation_warning",
                         "mismatch_dict": reconciliation_result_obj.mismatch_dict,
                     },
                 ),
                 log_path_str=log_path_str,
             )
+        if broker_snapshot_obj.net_liq_float <= 0.0:
+            blocked_action_count_int += 1
+            reason_counter_obj["non_positive_net_liq"] += 1
+            state_store_obj.mark_decision_plan_status(int(decision_plan_obj.decision_plan_id_int or 0), "blocked")
             continue
 
-        order_intent_row_list = state_store_obj.get_order_intent_row_list(order_plan_id_int)
-        order_intent_id_list = [int(row_obj["order_intent_id_int"]) for row_obj in order_intent_row_list]
-        validate_order_intent_list(order_plan_obj.order_intent_list)
-        broker_order_request_list = build_broker_order_request_list(
-            order_plan_id_int=order_plan_id_int,
-            release_id_str=order_plan_obj.release_id_str,
-            pod_id_str=order_plan_obj.pod_id_str,
-            account_route_str=order_plan_obj.account_route_str,
-            submission_key_str=str(order_plan_obj.submission_key_str or f"order_plan:{order_plan_id_int}"),
-            order_intent_list=order_plan_obj.order_intent_list,
-            order_intent_id_list=order_intent_id_list,
+        touched_asset_list = get_touched_asset_list_for_decision_plan(
+            decision_plan_obj,
+            broker_position_map_dict=broker_snapshot_obj.position_amount_map,
         )
-        try:
-            broker_order_record_list, broker_order_fill_list = broker_adapter_obj.submit_order_request_list(
-                account_route_str=order_plan_obj.account_route_str,
-                broker_order_request_list=broker_order_request_list,
-                submitted_timestamp_ts=as_of_ts,
-            )
-            state_store_obj.insert_broker_order_record_list(broker_order_record_list)
-            state_store_obj.insert_fill_list(broker_order_fill_list)
-            state_store_obj.mark_order_plan_status(order_plan_id_int, "submitted")
-            submitted_plan_count_int += 1
+        live_price_snapshot_obj = broker_adapter_obj.get_live_price_snapshot(
+            decision_plan_obj.account_route_str,
+            touched_asset_list,
+        )
+        missing_asset_list = sorted(
+            asset_str
+            for asset_str in touched_asset_list
+            if asset_str not in live_price_snapshot_obj.asset_reference_price_map
+        )
+        if len(missing_asset_list) > 0:
+            blocked_action_count_int += 1
+            reason_counter_obj["missing_live_price"] += 1
+            state_store_obj.mark_decision_plan_status(int(decision_plan_obj.decision_plan_id_int or 0), "blocked")
             log_event(
-                "submit_plan_completed",
-                _build_order_plan_log_payload_dict(
+                "build_vplan_blocked",
+                _build_decision_plan_log_payload_dict(
                     release_obj,
-                    order_plan_obj,
+                    decision_plan_obj,
                     as_of_ts,
                     {
-                        "reason_code_str": "submitted",
-                        "broker_order_count_int": len(broker_order_record_list),
-                        "fill_count_int": len(broker_order_fill_list),
+                        "reason_code_str": "missing_live_price",
+                        "missing_asset_list": missing_asset_list,
                     },
                 ),
                 log_path_str=log_path_str,
             )
-        except Exception as exc:
-            state_store_obj.mark_order_plan_status(order_plan_id_int, "blocked")
-            log_event(
-                "submit_plan_failed",
-                _build_order_plan_log_payload_dict(
-                    release_obj,
-                    order_plan_obj,
-                    as_of_ts,
-                    {
-                        "reason_code_str": "broker_submission_exception",
-                        "error_str": str(exc),
-                    },
-                ),
-                log_path_str=log_path_str,
-            )
-            raise
+            continue
+
+        vplan_obj = build_vplan(
+            release_obj=release_obj,
+            decision_plan_obj=decision_plan_obj,
+            broker_snapshot_obj=broker_snapshot_obj,
+            live_price_snapshot_obj=live_price_snapshot_obj,
+        )
+        inserted_vplan_obj = state_store_obj.insert_vplan(vplan_obj)
+        state_store_obj.mark_decision_plan_status(int(decision_plan_obj.decision_plan_id_int or 0), "vplan_ready")
+        created_vplan_count_int += 1
+        log_event(
+            "build_vplan_created",
+            _build_vplan_log_payload_dict(
+                release_obj,
+                inserted_vplan_obj,
+                as_of_ts,
+                {"reason_code_str": "vplan_ready"},
+            ),
+            log_path_str=log_path_str,
+        )
 
     return {
-        "submitted_plan_count_int": submitted_plan_count_int,
-        "blocked_plan_count_int": blocked_plan_count_int,
+        "created_vplan_count_int": created_vplan_count_int,
+        "blocked_action_count_int": blocked_action_count_int,
+        "warning_count_map_dict": dict(warning_counter_obj),
+        "reason_count_map_dict": dict(reason_counter_obj),
+    }
+
+
+def submit_ready_vplans(
+    state_store_obj: LiveStateStore,
+    broker_adapter_obj: BrokerAdapter,
+    as_of_ts: datetime,
+    env_mode_str: str,
+    manual_only_bool: bool,
+    vplan_id_int: int | None = None,
+    log_path_str: str = DEFAULT_LOG_PATH_STR,
+) -> dict[str, object]:
+    submitted_vplan_count_int = 0
+    blocked_action_count_int = 0
+    reason_counter_obj: Counter[str] = Counter()
+    if vplan_id_int is None:
+        candidate_vplan_list = []
+        for release_obj in state_store_obj.get_enabled_release_list():
+            latest_vplan_obj = state_store_obj.get_latest_vplan_for_pod(release_obj.pod_id_str)
+            if latest_vplan_obj is None or latest_vplan_obj.status_str != "ready":
+                continue
+            if manual_only_bool:
+                continue
+            if not release_obj.auto_submit_enabled_bool:
+                continue
+            candidate_vplan_list.append(latest_vplan_obj)
+    else:
+        candidate_vplan_list = [state_store_obj.get_vplan_by_id(vplan_id_int)]
+
+    for vplan_obj in candidate_vplan_list:
+        release_obj = state_store_obj.get_release_by_id(vplan_obj.release_id_str)
+        if release_obj.mode_str != env_mode_str:
+            blocked_action_count_int += 1
+            reason_counter_obj["env_mode_mismatch"] += 1
+            continue
+        if vplan_obj.target_execution_timestamp_ts <= as_of_ts:
+            blocked_action_count_int += 1
+            reason_counter_obj["submission_window_expired"] += 1
+            state_store_obj.mark_vplan_status(int(vplan_obj.vplan_id_int or 0), "expired")
+            state_store_obj.mark_decision_plan_status(int(vplan_obj.decision_plan_id_int), "expired")
+            continue
+        if state_store_obj.count_broker_orders_for_vplan(int(vplan_obj.vplan_id_int or 0)) > 0:
+            blocked_action_count_int += 1
+            reason_counter_obj["duplicate_submission_guard"] += 1
+            continue
+        if not state_store_obj.claim_vplan_for_submission(int(vplan_obj.vplan_id_int or 0)):
+            blocked_action_count_int += 1
+            reason_counter_obj["submission_claim_failed"] += 1
+            continue
+
+        broker_order_request_list = build_broker_order_request_list_from_vplan(vplan_obj)
+        broker_order_record_list, broker_order_fill_list = broker_adapter_obj.submit_order_request_list(
+            account_route_str=vplan_obj.account_route_str,
+            broker_order_request_list=broker_order_request_list,
+            submitted_timestamp_ts=as_of_ts,
+        )
+        state_store_obj.insert_vplan_broker_order_record_list(broker_order_record_list)
+        state_store_obj.insert_vplan_fill_list(broker_order_fill_list)
+        state_store_obj.mark_vplan_status(int(vplan_obj.vplan_id_int or 0), "submitted")
+        state_store_obj.mark_decision_plan_status(int(vplan_obj.decision_plan_id_int), "submitted")
+        submitted_vplan_count_int += 1
+        log_event(
+            "submit_vplan_completed",
+            _build_vplan_log_payload_dict(
+                release_obj,
+                vplan_obj,
+                as_of_ts,
+                {
+                    "reason_code_str": "submitted",
+                    "broker_order_count_int": len(broker_order_record_list),
+                    "fill_count_int": len(broker_order_fill_list),
+                },
+            ),
+            log_path_str=log_path_str,
+        )
+
+    return {
+        "submitted_vplan_count_int": submitted_vplan_count_int,
+        "blocked_action_count_int": blocked_action_count_int,
         "reason_count_map_dict": dict(reason_counter_obj),
     }
 
@@ -502,67 +657,79 @@ def post_execution_reconcile(
     as_of_ts: datetime,
     log_path_str: str = DEFAULT_LOG_PATH_STR,
 ) -> dict[str, object]:
-    """Pull broker fills, update pod state, and complete submitted plans."""
-    submitted_plan_list = state_store_obj.get_submitted_order_plan_list()
-    completed_plan_count_int = 0
-
-    for order_plan_obj in submitted_plan_list:
-        release_obj = state_store_obj.get_release_by_id(order_plan_obj.release_id_str)
-        broker_snapshot_obj = broker_adapter_obj.get_account_snapshot(order_plan_obj.account_route_str)
+    completed_vplan_count_int = 0
+    for vplan_obj in state_store_obj.get_submitted_vplan_list():
+        if as_of_ts < vplan_obj.target_execution_timestamp_ts:
+            continue
+        release_obj = state_store_obj.get_release_by_id(vplan_obj.release_id_str)
+        decision_plan_obj = state_store_obj.get_decision_plan_by_id(int(vplan_obj.decision_plan_id_int))
+        broker_snapshot_obj = broker_adapter_obj.get_account_snapshot(vplan_obj.account_route_str)
+        state_store_obj.upsert_broker_snapshot_cache(broker_snapshot_obj)
         broker_fill_list = broker_adapter_obj.get_recent_fill_list(
-            account_route_str=order_plan_obj.account_route_str,
-            since_timestamp_ts=order_plan_obj.submission_timestamp_ts,
+            account_route_str=vplan_obj.account_route_str,
+            since_timestamp_ts=vplan_obj.submission_timestamp_ts,
         )
-        state_store_obj.insert_fill_list(broker_fill_list)
-        execution_fill_input_row_list = state_store_obj.get_execution_fill_input_row_list(
-            int(order_plan_obj.order_plan_id_int or 0)
-        )
-        execution_quality_snapshot_obj = build_execution_quality_snapshot(
-            order_plan_id_int=int(order_plan_obj.order_plan_id_int or 0),
-            pod_id_str=order_plan_obj.pod_id_str,
-            execution_fill_input_row_list=execution_fill_input_row_list,
-        )
-        state_store_obj.upsert_execution_quality_snapshot(execution_quality_snapshot_obj)
-        post_reconciliation_result_obj = reconcile_account_state(
-            model_position_map=broker_snapshot_obj.position_amount_map,
-            model_cash_float=broker_snapshot_obj.cash_float,
-            broker_snapshot_obj=broker_snapshot_obj,
-        )
-        state_store_obj.insert_reconciliation_snapshot(
-            pod_id_str=order_plan_obj.pod_id_str,
-            order_plan_id_int=order_plan_obj.order_plan_id_int,
+        normalized_fill_list = [
+            fill_obj.__class__(
+                **{
+                    **fill_obj.__dict__,
+                    "decision_plan_id_int": int(vplan_obj.decision_plan_id_int),
+                    "vplan_id_int": int(vplan_obj.vplan_id_int or 0),
+                }
+            )
+            for fill_obj in broker_fill_list
+        ]
+        compared_asset_set = set(vplan_obj.current_broker_position_map) | set(broker_snapshot_obj.position_amount_map)
+        execution_evidence_bool = len(normalized_fill_list) > 0
+        if not execution_evidence_bool:
+            for asset_str in compared_asset_set:
+                if abs(
+                    float(vplan_obj.current_broker_position_map.get(asset_str, 0.0))
+                    - float(broker_snapshot_obj.position_amount_map.get(asset_str, 0.0))
+                ) > 1e-9:
+                    execution_evidence_bool = True
+                    break
+        if not execution_evidence_bool:
+            continue
+        state_store_obj.insert_vplan_fill_list(normalized_fill_list)
+        state_store_obj.insert_vplan_reconciliation_snapshot(
+            pod_id_str=vplan_obj.pod_id_str,
+            decision_plan_id_int=int(vplan_obj.decision_plan_id_int),
+            vplan_id_int=int(vplan_obj.vplan_id_int or 0),
             stage_str="post_execution",
-            reconciliation_result_obj=post_reconciliation_result_obj,
+            reconciliation_result_obj=reconcile_account_state(
+                model_position_map=broker_snapshot_obj.position_amount_map,
+                model_cash_float=broker_snapshot_obj.cash_float,
+                broker_snapshot_obj=broker_snapshot_obj,
+            ),
         )
+        strategy_state_dict = {} if decision_plan_obj is None else dict(decision_plan_obj.strategy_state_dict)
         state_store_obj.upsert_pod_state(
             PodState(
-                pod_id_str=order_plan_obj.pod_id_str,
+                pod_id_str=vplan_obj.pod_id_str,
                 user_id_str=release_obj.user_id_str,
-                account_route_str=order_plan_obj.account_route_str,
+                account_route_str=vplan_obj.account_route_str,
                 position_amount_map=broker_snapshot_obj.position_amount_map,
                 cash_float=broker_snapshot_obj.cash_float,
-                total_value_float=broker_snapshot_obj.total_value_float,
-                strategy_state_dict=order_plan_obj.strategy_state_dict,
+                total_value_float=broker_snapshot_obj.net_liq_float,
+                strategy_state_dict=strategy_state_dict,
                 updated_timestamp_ts=as_of_ts,
             )
         )
-        state_store_obj.mark_order_plan_status(int(order_plan_obj.order_plan_id_int or 0), "completed")
-        completed_plan_count_int += 1
+        state_store_obj.mark_vplan_status(int(vplan_obj.vplan_id_int or 0), "completed")
+        state_store_obj.mark_decision_plan_status(int(vplan_obj.decision_plan_id_int), "completed")
+        completed_vplan_count_int += 1
         log_event(
             "post_execution_reconcile_completed",
-            _build_order_plan_log_payload_dict(
+            _build_vplan_log_payload_dict(
                 release_obj,
-                order_plan_obj,
+                vplan_obj,
                 as_of_ts,
-                {
-                    "reason_code_str": "completed",
-                    "fill_count_int": len(broker_fill_list),
-                },
+                {"reason_code_str": "completed"},
             ),
             log_path_str=log_path_str,
         )
-
-    return {"completed_plan_count_int": completed_plan_count_int}
+    return {"completed_vplan_count_int": completed_vplan_count_int}
 
 
 def get_status_summary(
@@ -570,71 +737,70 @@ def get_status_summary(
     as_of_ts: datetime,
     releases_root_path_str: str,
 ) -> dict[str, object]:
-    """Return a human-oriented snapshot of each enabled pod."""
     release_list = _load_release_list_and_sync(releases_root_path_str, state_store_obj)
     enabled_release_list = [release_obj for release_obj in release_list if release_obj.enabled_bool]
     pod_status_dict_list: list[dict[str, object]] = []
 
     for release_obj in enabled_release_list:
-        latest_order_plan_obj = state_store_obj.get_latest_order_plan_for_pod(release_obj.pod_id_str)
-        pod_state_obj = state_store_obj.get_pod_state(release_obj.pod_id_str)
+        latest_decision_plan_obj = state_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str)
+        latest_vplan_obj = state_store_obj.get_latest_vplan_for_pod(release_obj.pod_id_str)
+        latest_broker_snapshot_obj = state_store_obj.get_latest_broker_snapshot_for_account(release_obj.account_route_str)
         latest_fill_timestamp_str = None
-        if latest_order_plan_obj is not None and latest_order_plan_obj.order_plan_id_int is not None:
-            fill_row_dict_list = state_store_obj.get_fill_row_dict_list(latest_order_plan_obj.order_plan_id_int)
+        if latest_vplan_obj is not None and latest_vplan_obj.vplan_id_int is not None:
+            fill_row_dict_list = state_store_obj.get_fill_row_dict_list_for_vplan(int(latest_vplan_obj.vplan_id_int))
             if len(fill_row_dict_list) > 0:
                 latest_fill_timestamp_str = str(fill_row_dict_list[-1]["fill_timestamp_str"])
         build_gate_dict = scheduler_utils.evaluate_build_gate_dict(release_obj, as_of_ts)
 
         next_action_str = "wait"
         reason_code_str = str(build_gate_dict["reason_code_str"])
-
-        if latest_order_plan_obj is None:
+        if latest_decision_plan_obj is None:
             if bool(build_gate_dict["due_bool"]):
-                next_action_str = "build_order_plan"
-                reason_code_str = "ready_to_build"
-        elif latest_order_plan_obj.status_str == "frozen":
-            execution_window_dict = scheduler_utils.evaluate_execution_window_dict(
-                latest_order_plan_obj.submission_timestamp_ts,
-                as_of_ts,
-            )
-            if bool(execution_window_dict["due_bool"]):
-                next_action_str = "execute_order_plan"
-                reason_code_str = "ready_to_submit"
+                next_action_str = "build_decision_plan"
+                reason_code_str = "ready_to_build_decision_plan"
+        elif latest_decision_plan_obj.status_str == "planned":
+            if latest_decision_plan_obj.target_execution_timestamp_ts <= as_of_ts:
+                reason_code_str = "submission_window_expired"
+            elif latest_decision_plan_obj.submission_timestamp_ts <= as_of_ts:
+                next_action_str = "build_vplan"
+                reason_code_str = "ready_to_build_vplan"
             else:
-                reason_code_str = str(execution_window_dict["reason_code_str"])
-        elif latest_order_plan_obj.status_str == "submitting":
-            reason_code_str = "submission_in_progress"
-        elif latest_order_plan_obj.status_str == "submitted":
+                reason_code_str = "waiting_for_submission_window"
+        elif latest_vplan_obj is not None and latest_vplan_obj.status_str == "ready":
+            next_action_str = "submit_vplan" if release_obj.auto_submit_enabled_bool else "review_vplan"
+            reason_code_str = "vplan_ready"
+        elif latest_vplan_obj is not None and latest_vplan_obj.status_str == "submitted":
             next_action_str = "post_execution_reconcile"
             reason_code_str = "waiting_for_post_execution_reconcile"
-        elif latest_order_plan_obj.status_str in ("completed", "failed", "blocked"):
+        elif latest_decision_plan_obj.status_str in ("completed", "expired", "blocked"):
             if bool(build_gate_dict["due_bool"]):
-                next_action_str = "build_order_plan"
-                reason_code_str = "ready_to_build"
-            else:
-                next_action_str = "wait"
+                next_action_str = "build_decision_plan"
+                reason_code_str = "ready_to_build_decision_plan"
 
         pod_status_dict_list.append(
             {
                 "release_id_str": release_obj.release_id_str,
                 "pod_id_str": release_obj.pod_id_str,
                 "account_route_str": release_obj.account_route_str,
-                "session_calendar_id_str": release_obj.session_calendar_id_str,
-                "signal_clock_str": release_obj.signal_clock_str,
-                "execution_policy_str": release_obj.execution_policy_str,
-                "latest_heartbeat_session_date_str": build_gate_dict["latest_heartbeat_session_date_str"],
-                "latest_order_plan_status_str": None if latest_order_plan_obj is None else latest_order_plan_obj.status_str,
+                "latest_decision_plan_status_str": (
+                    None if latest_decision_plan_obj is None else latest_decision_plan_obj.status_str
+                ),
+                "latest_vplan_status_str": None if latest_vplan_obj is None else latest_vplan_obj.status_str,
                 "latest_signal_timestamp_str": (
-                    None if latest_order_plan_obj is None else latest_order_plan_obj.signal_timestamp_ts.isoformat()
+                    None if latest_decision_plan_obj is None else latest_decision_plan_obj.signal_timestamp_ts.isoformat()
                 ),
                 "latest_submission_timestamp_str": (
-                    None if latest_order_plan_obj is None else latest_order_plan_obj.submission_timestamp_ts.isoformat()
+                    None
+                    if latest_decision_plan_obj is None
+                    else latest_decision_plan_obj.submission_timestamp_ts.isoformat()
+                ),
+                "latest_broker_snapshot_timestamp_str": (
+                    None
+                    if latest_broker_snapshot_obj is None
+                    else latest_broker_snapshot_obj.snapshot_timestamp_ts.isoformat()
                 ),
                 "next_action_str": next_action_str,
                 "reason_code_str": reason_code_str,
-                "pod_state_updated_timestamp_str": (
-                    None if pod_state_obj is None else pod_state_obj.updated_timestamp_ts.isoformat()
-                ),
                 "latest_fill_timestamp_str": latest_fill_timestamp_str,
             }
         )
@@ -646,36 +812,120 @@ def get_status_summary(
     }
 
 
+def show_vplan_summary(
+    state_store_obj: LiveStateStore,
+    as_of_ts: datetime,
+    releases_root_path_str: str,
+    vplan_id_int: int | None = None,
+    pod_id_str: str | None = None,
+) -> dict[str, object]:
+    _load_release_list_and_sync(releases_root_path_str, state_store_obj)
+    if vplan_id_int is not None:
+        vplan_obj_list = [state_store_obj.get_vplan_by_id(vplan_id_int)]
+    elif pod_id_str is not None:
+        latest_vplan_obj = state_store_obj.get_latest_vplan_for_pod(pod_id_str)
+        vplan_obj_list = [] if latest_vplan_obj is None else [latest_vplan_obj]
+    else:
+        vplan_obj_list = []
+        for release_obj in state_store_obj.get_enabled_release_list():
+            latest_vplan_obj = state_store_obj.get_latest_vplan_for_pod(release_obj.pod_id_str)
+            if latest_vplan_obj is not None:
+                vplan_obj_list.append(latest_vplan_obj)
+
+    def _build_position_warning_row_dict_list(
+        decision_base_position_map: dict[str, float],
+        current_broker_position_map: dict[str, float],
+        tolerance_float: float = 1e-9,
+    ) -> list[dict[str, object]]:
+        compared_asset_set = set(decision_base_position_map) | set(current_broker_position_map)
+        warning_row_dict_list: list[dict[str, object]] = []
+        for asset_str in sorted(compared_asset_set):
+            decision_base_share_float = float(decision_base_position_map.get(asset_str, 0.0))
+            current_share_float = float(current_broker_position_map.get(asset_str, 0.0))
+            drift_share_float = current_share_float - decision_base_share_float
+            if abs(drift_share_float) <= tolerance_float:
+                continue
+            warning_row_dict_list.append(
+                {
+                    "asset_str": asset_str,
+                    "decision_base_share_float": decision_base_share_float,
+                    "current_share_float": current_share_float,
+                    "drift_share_float": drift_share_float,
+                }
+            )
+        return warning_row_dict_list
+
+    def _build_vplan_dict(vplan_obj: VPlan) -> dict[str, object]:
+        decision_plan_obj = state_store_obj.get_decision_plan_by_id(int(vplan_obj.decision_plan_id_int))
+        decision_base_position_map = decision_plan_obj.decision_base_position_map
+        warning_row_dict_list = _build_position_warning_row_dict_list(
+            decision_base_position_map,
+            vplan_obj.current_broker_position_map,
+        )
+        return {
+            "vplan_id_int": vplan_obj.vplan_id_int,
+            "decision_plan_id_int": vplan_obj.decision_plan_id_int,
+            "pod_id_str": vplan_obj.pod_id_str,
+            "status_str": vplan_obj.status_str,
+            "net_liq_float": vplan_obj.net_liq_float,
+            "pod_budget_float": vplan_obj.pod_budget_float,
+            "live_price_source_str": vplan_obj.live_price_source_str,
+            "warning_row_dict_list": warning_row_dict_list,
+            "vplan_row_dict_list": [
+                {
+                    "asset_str": vplan_row_obj.asset_str,
+                    "decision_base_share_float": float(
+                        decision_base_position_map.get(vplan_row_obj.asset_str, 0.0)
+                    ),
+                    "current_share_float": vplan_row_obj.current_share_float,
+                    "drift_share_float": float(
+                        vplan_row_obj.current_share_float
+                        - decision_base_position_map.get(vplan_row_obj.asset_str, 0.0)
+                    ),
+                    "target_share_float": vplan_row_obj.target_share_float,
+                    "order_delta_share_float": vplan_row_obj.order_delta_share_float,
+                    "live_reference_price_float": vplan_row_obj.live_reference_price_float,
+                    "estimated_target_notional_float": vplan_row_obj.estimated_target_notional_float,
+                    "warning_bool": bool(
+                        abs(
+                            vplan_row_obj.current_share_float
+                            - decision_base_position_map.get(vplan_row_obj.asset_str, 0.0)
+                        )
+                        > 1e-9
+                    ),
+                }
+                for vplan_row_obj in vplan_obj.vplan_row_list
+            ],
+        }
+
+    return {
+        "as_of_timestamp_str": as_of_ts.isoformat(),
+        "vplan_dict_list": [_build_vplan_dict(vplan_obj) for vplan_obj in vplan_obj_list],
+    }
+
+
 def get_execution_report_summary(
     state_store_obj: LiveStateStore,
     as_of_ts: datetime,
     releases_root_path_str: str,
 ) -> dict[str, object]:
-    """Return raw fill data for the latest completed plan of each enabled pod."""
-    release_list = _load_release_list_and_sync(releases_root_path_str, state_store_obj)
+    _load_release_list_and_sync(releases_root_path_str, state_store_obj)
     execution_report_dict_list: list[dict[str, object]] = []
-
-    for release_obj in release_list:
-        if not release_obj.enabled_bool:
+    for release_obj in state_store_obj.get_enabled_release_list():
+        latest_vplan_obj = state_store_obj.get_latest_vplan_for_pod(release_obj.pod_id_str)
+        if latest_vplan_obj is None or latest_vplan_obj.vplan_id_int is None:
             continue
-        latest_order_plan_obj = state_store_obj.get_latest_order_plan_for_pod(release_obj.pod_id_str)
-        if latest_order_plan_obj is None or latest_order_plan_obj.order_plan_id_int is None:
-            continue
-        fill_row_dict_list = state_store_obj.get_fill_row_dict_list(latest_order_plan_obj.order_plan_id_int)
+        fill_row_dict_list = state_store_obj.get_fill_row_dict_list_for_vplan(int(latest_vplan_obj.vplan_id_int))
         if len(fill_row_dict_list) == 0:
             continue
-
         execution_report_dict_list.append(
             {
-                "release_id_str": release_obj.release_id_str,
                 "pod_id_str": release_obj.pod_id_str,
-                "latest_order_plan_id_int": latest_order_plan_obj.order_plan_id_int,
-                "latest_signal_timestamp_str": latest_order_plan_obj.signal_timestamp_ts.isoformat(),
+                "latest_vplan_id_int": latest_vplan_obj.vplan_id_int,
                 "fill_count_int": len(fill_row_dict_list),
                 "fill_row_dict_list": fill_row_dict_list,
             }
         )
-
     return {
         "as_of_timestamp_str": as_of_ts.isoformat(),
         "execution_report_dict_list": execution_report_dict_list,
@@ -690,7 +940,6 @@ def tick(
     env_mode_str: str,
     log_path_str: str = DEFAULT_LOG_PATH_STR,
 ) -> dict[str, object]:
-    """Run one scheduler cycle: build due plans, submit due plans, then reconcile."""
     lease_owner_token_str = uuid.uuid4().hex
     lease_acquired_bool = state_store_obj.acquire_scheduler_lease(
         lease_name_str="tick",
@@ -698,37 +947,44 @@ def tick(
         expires_timestamp_ts=scheduler_utils.utc_now_ts() + timedelta(minutes=5),
     )
     if not lease_acquired_bool:
-        detail_dict = {
+        return {
             "lease_acquired_bool": False,
-            "reason_code_str": "scheduler_lease_busy",
-            "created_plan_count_int": 0,
-            "skipped_plan_count_int": 0,
-            "submitted_plan_count_int": 0,
-            "blocked_plan_count_int": 0,
-            "completed_plan_count_int": 0,
+            "created_decision_plan_count_int": 0,
+            "skipped_decision_plan_count_int": 0,
+            "expired_decision_plan_count_int": 0,
+            "created_vplan_count_int": 0,
+            "submitted_vplan_count_int": 0,
+            "blocked_action_count_int": 0,
+            "completed_vplan_count_int": 0,
+            "warning_count_map_dict": {},
         }
-        log_event(
-            "tick_skipped",
-            {
-                "as_of_timestamp_str": as_of_ts.isoformat(),
-                "reason_code_str": "scheduler_lease_busy",
-            },
-            log_path_str=log_path_str,
-        )
-        return detail_dict
 
     try:
-        build_detail_dict = build_order_plans(
+        build_detail_dict = build_decision_plans(
             state_store_obj=state_store_obj,
             as_of_ts=as_of_ts,
             releases_root_path_str=releases_root_path_str,
             log_path_str=log_path_str,
         )
-        execute_detail_dict = execute_order_plans(
+        expire_detail_dict = expire_stale_decision_plans(
+            state_store_obj=state_store_obj,
+            as_of_ts=as_of_ts,
+            releases_root_path_str=releases_root_path_str,
+            log_path_str=log_path_str,
+        )
+        vplan_detail_dict = build_vplans(
             state_store_obj=state_store_obj,
             broker_adapter_obj=broker_adapter_obj,
             as_of_ts=as_of_ts,
             env_mode_str=env_mode_str,
+            log_path_str=log_path_str,
+        )
+        submit_detail_dict = submit_ready_vplans(
+            state_store_obj=state_store_obj,
+            broker_adapter_obj=broker_adapter_obj,
+            as_of_ts=as_of_ts,
+            env_mode_str=env_mode_str,
+            manual_only_bool=False,
             log_path_str=log_path_str,
         )
         reconcile_detail_dict = post_execution_reconcile(
@@ -737,21 +993,24 @@ def tick(
             as_of_ts=as_of_ts,
             log_path_str=log_path_str,
         )
-        detail_dict = {
+        warning_counter_obj: Counter[str] = Counter()
+        reason_counter_obj: Counter[str] = Counter()
+        for detail_piece_dict in (build_detail_dict, expire_detail_dict, vplan_detail_dict, submit_detail_dict):
+            warning_counter_obj.update(detail_piece_dict.get("warning_count_map_dict", {}))
+            reason_counter_obj.update(detail_piece_dict.get("reason_count_map_dict", {}))
+        return {
             "lease_acquired_bool": True,
-            **build_detail_dict,
-            **execute_detail_dict,
-            **reconcile_detail_dict,
+            "created_decision_plan_count_int": int(build_detail_dict.get("created_decision_plan_count_int", 0)),
+            "skipped_decision_plan_count_int": int(build_detail_dict.get("skipped_decision_plan_count_int", 0)),
+            "expired_decision_plan_count_int": int(expire_detail_dict.get("expired_decision_plan_count_int", 0)),
+            "created_vplan_count_int": int(vplan_detail_dict.get("created_vplan_count_int", 0)),
+            "submitted_vplan_count_int": int(submit_detail_dict.get("submitted_vplan_count_int", 0)),
+            "blocked_action_count_int": int(vplan_detail_dict.get("blocked_action_count_int", 0))
+            + int(submit_detail_dict.get("blocked_action_count_int", 0)),
+            "completed_vplan_count_int": int(reconcile_detail_dict.get("completed_vplan_count_int", 0)),
+            "warning_count_map_dict": dict(warning_counter_obj),
+            "reason_count_map_dict": dict(reason_counter_obj),
         }
-        log_event(
-            "tick_completed",
-            {
-                "as_of_timestamp_str": as_of_ts.isoformat(),
-                **detail_dict,
-            },
-            log_path_str=log_path_str,
-        )
-        return detail_dict
     finally:
         state_store_obj.release_scheduler_lease(
             lease_name_str="tick",
@@ -764,8 +1023,10 @@ def main(argv_list: list[str] | None = None) -> int:
     parser_obj.add_argument(
         "command_name_str",
         choices=(
-            "build_order_plans",
-            "execute_order_plans",
+            "build_decision_plans",
+            "build_vplan",
+            "show_vplan",
+            "submit_vplan",
             "post_execution_reconcile",
             "tick",
             "status",
@@ -778,43 +1039,73 @@ def main(argv_list: list[str] | None = None) -> int:
     parser_obj.add_argument("--mode", dest="env_mode_str", default="paper")
     parser_obj.add_argument("--log-path", dest="log_path_str", default=DEFAULT_LOG_PATH_STR)
     parser_obj.add_argument("--json", dest="json_output_bool", action="store_true")
+    parser_obj.add_argument("--vplan-id", dest="vplan_id_int", type=int, default=None)
+    parser_obj.add_argument("--pod-id", dest="pod_id_str", default=None)
+    parser_obj.add_argument("--broker-host", dest="broker_host_str", default="127.0.0.1")
+    parser_obj.add_argument("--broker-port", dest="broker_port_int", type=int, default=7497)
+    parser_obj.add_argument("--broker-client-id", dest="broker_client_id_int", type=int, default=31)
+    parser_obj.add_argument("--broker-timeout-seconds", dest="broker_timeout_seconds_float", type=float, default=4.0)
     parsed_args_obj = parser_obj.parse_args(argv_list)
 
     state_store_obj = LiveStateStore(parsed_args_obj.db_path_str)
     job_run_id_int = state_store_obj.record_job_start(parsed_args_obj.command_name_str)
     as_of_ts = _parse_as_of_timestamp_ts(parsed_args_obj.as_of_timestamp_str)
+    broker_adapter_obj = IBKRGatewayBrokerAdapter(
+        host_str=parsed_args_obj.broker_host_str,
+        port_int=parsed_args_obj.broker_port_int,
+        client_id_int=parsed_args_obj.broker_client_id_int,
+        timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
+    )
 
     try:
-        if parsed_args_obj.command_name_str == "build_order_plans":
-            detail_dict = build_order_plans(
+        if parsed_args_obj.command_name_str == "build_decision_plans":
+            detail_dict = build_decision_plans(
                 state_store_obj=state_store_obj,
                 as_of_ts=as_of_ts,
                 releases_root_path_str=parsed_args_obj.releases_root_path_str,
                 log_path_str=parsed_args_obj.log_path_str,
             )
-        elif parsed_args_obj.command_name_str == "execute_order_plans":
-            detail_dict = execute_order_plans(
+        elif parsed_args_obj.command_name_str == "build_vplan":
+            detail_dict = build_vplans(
                 state_store_obj=state_store_obj,
-                broker_adapter_obj=IBKRGatewayBrokerAdapter(),
+                broker_adapter_obj=broker_adapter_obj,
                 as_of_ts=as_of_ts,
                 env_mode_str=parsed_args_obj.env_mode_str,
+                log_path_str=parsed_args_obj.log_path_str,
+            )
+        elif parsed_args_obj.command_name_str == "submit_vplan":
+            detail_dict = submit_ready_vplans(
+                state_store_obj=state_store_obj,
+                broker_adapter_obj=broker_adapter_obj,
+                as_of_ts=as_of_ts,
+                env_mode_str=parsed_args_obj.env_mode_str,
+                manual_only_bool=False,
+                vplan_id_int=parsed_args_obj.vplan_id_int,
                 log_path_str=parsed_args_obj.log_path_str,
             )
         elif parsed_args_obj.command_name_str == "post_execution_reconcile":
             detail_dict = post_execution_reconcile(
                 state_store_obj=state_store_obj,
-                broker_adapter_obj=IBKRGatewayBrokerAdapter(),
+                broker_adapter_obj=broker_adapter_obj,
                 as_of_ts=as_of_ts,
                 log_path_str=parsed_args_obj.log_path_str,
             )
         elif parsed_args_obj.command_name_str == "tick":
             detail_dict = tick(
                 state_store_obj=state_store_obj,
-                broker_adapter_obj=IBKRGatewayBrokerAdapter(),
+                broker_adapter_obj=broker_adapter_obj,
                 as_of_ts=as_of_ts,
                 releases_root_path_str=parsed_args_obj.releases_root_path_str,
                 env_mode_str=parsed_args_obj.env_mode_str,
                 log_path_str=parsed_args_obj.log_path_str,
+            )
+        elif parsed_args_obj.command_name_str == "show_vplan":
+            detail_dict = show_vplan_summary(
+                state_store_obj=state_store_obj,
+                as_of_ts=as_of_ts,
+                releases_root_path_str=parsed_args_obj.releases_root_path_str,
+                vplan_id_int=parsed_args_obj.vplan_id_int,
+                pod_id_str=parsed_args_obj.pod_id_str,
             )
         elif parsed_args_obj.command_name_str == "execution_report":
             detail_dict = get_execution_report_summary(
@@ -836,11 +1127,7 @@ def main(argv_list: list[str] | None = None) -> int:
             print(_render_command_output_str(parsed_args_obj.command_name_str, detail_dict))
     except Exception as exc:  # pragma: no cover - CLI safety
         error_detail_dict = {"error_str": str(exc)}
-        state_store_obj.record_job_finish(
-            job_run_id_int,
-            "failed",
-            error_detail_dict,
-        )
+        state_store_obj.record_job_finish(job_run_id_int, "failed", error_detail_dict)
         log_event(
             "runner_failed",
             {

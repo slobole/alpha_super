@@ -9,6 +9,7 @@ def reconcile_account_state(
     broker_snapshot_obj: BrokerPositionSnapshot,
     tolerance_float: float = 1e-9,
 ) -> ReconciliationResult:
+    """Compare model and broker state, using positions as the blocking gate in v1."""
     compared_symbol_set = set(model_position_map) | set(broker_snapshot_obj.position_amount_map)
     mismatch_dict: dict[str, dict[str, float]] = {}
 
@@ -21,12 +22,15 @@ def reconcile_account_state(
                 "broker_amount_float": broker_amount_float,
             }
 
-    cash_mismatch_float = float(model_cash_float) - float(broker_snapshot_obj.cash_float)
-    if abs(cash_mismatch_float) > tolerance_float:
-        mismatch_dict["__cash__"] = {
-            "model_cash_float": float(model_cash_float),
-            "broker_cash_float": float(broker_snapshot_obj.cash_float),
-        }
+    # v1 choice: do not block on cash mismatch.
+    #
+    # The current backtest engine does not enforce a strict broker-style
+    # sell-first cash workflow at the open, so using:
+    #
+    # cash^{model} \stackrel{?}{=} cash^{broker}
+    #
+    # as a hard gate would be stricter than the current simulation contract.
+    # We still carry both cash values in the reconciliation snapshot for audit.
 
     passed_bool = len(mismatch_dict) == 0
     return ReconciliationResult(
