@@ -204,6 +204,22 @@ This gives:
 - operator visibility
 - deterministic restart behavior
 
+### 7. Optional Scheduler Service
+
+The live daemon is optional and sits above the runner:
+
+```text
+tick = atomic execution primitive
+scheduler_service = timing wrapper around tick
+```
+
+It is responsible only for:
+- deciding when work is due
+- sleeping until the next due UTC wake-up
+- calling `tick`
+
+It does not implement a second execution path.
+
 ## Hard Operational Rules
 
 ### 1. Broker truth wins for positions

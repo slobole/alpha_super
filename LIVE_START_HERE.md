@@ -97,6 +97,15 @@ uv run python -m alpha.live.runner status --mode paper
 uv run python -m alpha.live.runner tick --mode paper
 ```
 
+### Optional scheduler service
+
+```bash
+uv run python -m alpha.live.scheduler_service serve --mode paper
+```
+
+This is only a timing wrapper around `tick`.
+It does not replace `tick`.
+
 ### Build only the overnight decision
 
 ```bash
@@ -164,6 +173,28 @@ The normal automatic path is:
 
 ```text
 tick builds DecisionPlan -> tick builds VPlan -> tick submits -> later tick reconciles after execution time
+```
+
+## Optional Long-Running Service
+
+If you do not want an every-minute shell loop, you can run:
+
+```bash
+uv run python -m alpha.live.scheduler_service serve --mode paper
+```
+
+Useful helper commands:
+
+```bash
+uv run python -m alpha.live.scheduler_service next_due --mode paper
+uv run python -m alpha.live.scheduler_service run_once --mode paper
+```
+
+Mental model:
+
+```text
+scheduler_service decides when to call tick
+tick still does all real work
 ```
 
 ## One-Line Mental Model

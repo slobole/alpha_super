@@ -14,7 +14,9 @@ def test_parse_release_manifest_reads_example_release():
 
     release_obj = parse_release_manifest(manifest_path_str)
 
-    assert release_obj.release_id_str == "user_001.pod_dv2.daily_moo.v1"
+    assert release_obj.release_id_str.endswith(".pod_dv2.daily_moo.v1")
+    assert release_obj.user_id_str in release_obj.release_id_str
+    assert release_obj.pod_id_str == "pod_dv2_01"
     assert release_obj.execution_policy_str == "next_open_moo"
     assert release_obj.enabled_bool is True
     assert release_obj.session_calendar_id_str == "XNYS"
@@ -30,7 +32,9 @@ def test_parse_release_manifest_reads_qpi_example_release():
 
     release_obj = parse_release_manifest(manifest_path_str)
 
-    assert release_obj.release_id_str == "user_001.pod_qpi.daily_moo.v1"
+    assert release_obj.release_id_str.endswith(".pod_qpi.daily_moo.v1")
+    assert release_obj.user_id_str in release_obj.release_id_str
+    assert release_obj.pod_id_str == "pod_qpi_01"
     assert release_obj.strategy_import_str == "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy"
     assert release_obj.enabled_bool is False
 

@@ -159,6 +159,36 @@ Recommended scheduler setup:
 The scheduler stays dumb.
 The Python runner decides whether anything is actually due.
 
+## Optional Scheduler Service
+
+If you want a portable long-running process instead of an every-minute shell loop, use:
+
+```bash
+uv run python -m alpha.live.scheduler_service serve --mode paper
+```
+
+Important rule:
+
+```text
+tick = atomic execution primitive
+scheduler_service = timing wrapper around tick
+```
+
+So:
+- manual `tick` still works
+- Task Scheduler / shell loops still work
+- the daemon is optional
+
+Useful scheduler commands:
+
+```bash
+uv run python -m alpha.live.scheduler_service next_due --mode paper
+uv run python -m alpha.live.scheduler_service run_once --mode paper
+```
+
+The scheduler service is UTC-native.
+It does not depend on the host machine local timezone.
+
 ## Useful Manual Commands
 
 ### 1. Status
