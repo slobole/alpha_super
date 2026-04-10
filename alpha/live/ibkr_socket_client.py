@@ -100,7 +100,6 @@ class IBKRSocketClient:
         account_route_str: str,
         asset_str_list: list[str],
     ) -> LivePriceSnapshot:
-        del account_route_str
         with self.connect() as ib_obj:
             contract_map = self._build_stock_contract_map(ib_obj, asset_str_list)
             ticker_list = ib_obj.reqTickers(*contract_map.values())

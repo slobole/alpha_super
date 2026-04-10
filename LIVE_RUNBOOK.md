@@ -115,10 +115,10 @@ The simple live flow is:
 ## Where The Config Files Live
 
 Current examples:
-- [pod_dv2_01.yaml](C:/Users/User/Documents/workspace/alpha_super/alpha/live/releases/user_001/pod_dv2_01.yaml)
-- [pod_qpi_01.yaml](C:/Users/User/Documents/workspace/alpha_super/alpha/live/releases/user_001/pod_qpi_01.yaml)
-- [pod_taa_01.yaml](C:/Users/User/Documents/workspace/alpha_super/alpha/live/releases/user_001/pod_taa_01.yaml)
-- [pod_ndx_mo_01.yaml](C:/Users/User/Documents/workspace/alpha_super/alpha/live/releases/user_001/pod_ndx_mo_01.yaml)
+- [pod_dv2_01.yaml](C:/Users/User/Documents/workspace/alpha_super/alpha/live/releases/excelence_trade_paper_001/pod_dv2_01.yaml)
+- [pod_qpi_01.yaml](C:/Users/User/Documents/workspace/alpha_super/alpha/live/releases/excelence_trade_paper_001/pod_qpi_01.yaml)
+- [pod_taa_01.yaml](C:/Users/User/Documents/workspace/alpha_super/alpha/live/releases/excelence_trade_paper_001/pod_taa_01.yaml)
+- [pod_ndx_mo_01.yaml](C:/Users/User/Documents/workspace/alpha_super/alpha/live/releases/excelence_trade_paper_001/pod_ndx_mo_01.yaml)
 
 General location:
 
@@ -188,6 +188,355 @@ uv run python -m alpha.live.scheduler_service run_once --mode paper
 
 The scheduler service is UTC-native.
 It does not depend on the host machine local timezone.
+
+## Full CLI Reference
+
+There are 2 public CLIs:
+- `alpha.live.runner`
+- `alpha.live.scheduler_service`
+
+The relationship is:
+
+```text
+tick = atomic execution primitive
+scheduler_service = timing wrapper around tick
+```
+
+### Runner commands
+
+Base form:
+
+```bash
+uv run python -m alpha.live.runner <command> [flags...]
+```
+
+Available commands:
+- `tick`
+  - one full live pass
+  - may build `DecisionPlan`
+  - may expire stale plans
+  - may build `VPlan`
+  - may auto-submit
+  - may reconcile fills
+- `build_decision_plans`
+  - builds only overnight `DecisionPlan` objects
+- `build_vplan`
+  - builds only pre-submit `VPlan` objects from broker truth
+- `show_vplan`
+  - prints the latest `VPlan` summary or a selected `VPlan`
+- `submit_vplan`
+  - manually submits one ready `VPlan`
+- `post_execution_reconcile`
+  - reads fills and updates broker-backed pod state
+- `status`
+  - prints current pod-level live status
+- `execution_report`
+  - prints fill-level execution details
+
+### Runner shared flags
+
+These flags are accepted by every runner command:
+
+- `--db-path`
+  - SQLite path
+  - default: `alpha/live/live_state.sqlite3`
+- `--releases-root`
+  - release manifest root
+  - default: `alpha/live/releases`
+- `--as-of-ts`
+  - override current time with an ISO 8601 timestamp
+  - useful for replay and debugging
+- `--mode`
+  - release mode filter
+  - default: `paper`
+- `--log-path`
+  - JSONL event log path
+- `--json`
+  - print raw machine-readable JSON instead of text
+- `--broker-host`
+  - broker API host
+  - default: `127.0.0.1`
+- `--broker-port`
+  - broker API port
+  - default: `7497`
+- `--broker-client-id`
+  - broker API client id
+  - default: `31`
+- `--broker-timeout-seconds`
+  - broker request timeout
+  - default: `4.0`
+
+### Runner command-specific flags
+
+- `show_vplan`
+  - `--vplan-id`
+    - show one specific `VPlan`
+  - `--pod-id`
+    - restrict output to one pod
+- `submit_vplan`
+  - `--vplan-id`
+    - submit one specific ready `VPlan`
+
+### Runner examples
+
+Current status:
+
+```bash
+uv run python -m alpha.live.runner status --mode paper
+```
+
+Current status as JSON:
+
+```bash
+uv run python -m alpha.live.runner status --mode paper --json
+```
+
+Overnight decision build only:
+
+```bash
+uv run python -m alpha.live.runner build_decision_plans --mode paper
+```
+
+Build `VPlan` objects against paper TWS:
+
+```bash
+uv run python -m alpha.live.runner build_vplan --mode paper --broker-host 127.0.0.1 --broker-port 7497 --broker-client-id 31
+```
+
+Show the latest `VPlan` for one pod:
+
+```bash
+uv run python -m alpha.live.runner show_vplan --mode paper --pod-id pod_dv2_01
+```
+
+Show one exact `VPlan`:
+
+```bash
+uv run python -m alpha.live.runner show_vplan --mode paper --vplan-id 1
+```
+
+Submit one exact `VPlan` manually:
+
+```bash
+uv run python -m alpha.live.runner submit_vplan --mode paper --vplan-id 1
+```
+
+Run one full live pass:
+
+```bash
+uv run python -m alpha.live.runner tick --mode paper
+```
+
+Replay one fixed timestamp:
+
+```bash
+uv run python -m alpha.live.runner tick --mode paper --as-of-ts 2026-04-10T13:20:00+00:00
+```
+
+### Scheduler commands
+
+Base form:
+
+```bash
+uv run python -m alpha.live.scheduler_service <command> [flags...]
+```
+
+Available commands:
+- `serve`
+  - long-running UTC-native daemon
+  - decides when to call `tick`
+- `next_due`
+  - inspect-only
+  - prints the next scheduler phase and next wake-up
+- `run_once`
+  - one scheduler-aware pass
+  - if work is due, calls `tick` once
+
+### Scheduler shared flags
+
+These flags are accepted by every scheduler command:
+
+- `--db-path`
+  - SQLite path
+- `--releases-root`
+  - release manifest root
+- `--as-of-ts`
+  - override current time
+  - mainly useful for `next_due` and `run_once`
+- `--mode`
+  - release mode filter
+  - default: `paper`
+- `--log-path`
+  - JSONL event log path
+- `--json`
+  - print raw machine-readable JSON instead of text
+- `--broker-host`
+  - broker API host
+  - default: `127.0.0.1`
+- `--broker-port`
+  - broker API port
+  - default: `7497`
+- `--broker-client-id`
+  - broker API client id
+  - default: `31`
+- `--broker-timeout-seconds`
+  - broker request timeout
+  - default: `4.0`
+
+### Scheduler tuning flags
+
+These are specific to `scheduler_service`:
+
+- `--active-poll-seconds`
+  - how often the daemon rechecks while work is active
+  - default: `30`
+- `--idle-max-sleep-seconds`
+  - maximum idle sleep before checking again
+  - default: `900`
+- `--reconcile-grace-seconds`
+  - delay after target execution before reconcile becomes due
+  - default: `300`
+- `--error-retry-seconds`
+  - sleep after an exception before retrying in `serve`
+  - default: `60`
+
+### Scheduler examples
+
+Inspect the next due phase:
+
+```bash
+uv run python -m alpha.live.scheduler_service next_due --mode paper
+```
+
+Inspect the next due phase as JSON:
+
+```bash
+uv run python -m alpha.live.scheduler_service next_due --mode paper --json
+```
+
+Run one scheduler-aware pass:
+
+```bash
+uv run python -m alpha.live.scheduler_service run_once --mode paper
+```
+
+Run one scheduler-aware pass at a fixed timestamp:
+
+```bash
+uv run python -m alpha.live.scheduler_service run_once --mode paper --as-of-ts 2026-04-10T13:20:00+00:00
+```
+
+Run the daemon with defaults:
+
+```bash
+uv run python -m alpha.live.scheduler_service serve --mode paper
+```
+
+Run the daemon with a faster active loop:
+
+```bash
+uv run python -m alpha.live.scheduler_service serve --mode paper --active-poll-seconds 15 --idle-max-sleep-seconds 300
+```
+
+Run the daemon against paper IB Gateway:
+
+```bash
+uv run python -m alpha.live.scheduler_service serve --mode paper --broker-port 4002
+```
+
+## Copy-Paste Connection Commands
+
+These are the practical connection presets for the current live CLI.
+
+Connection mapping:
+
+```text
+paper TWS      -> port 7497
+paper Gateway  -> port 4002
+live TWS       -> port 7496
+```
+
+Recommended safe rule:
+
+```text
+inspect first = status / next_due
+mutate later  = tick / serve
+```
+
+### Paper TWS
+
+Safe inspect commands:
+
+```bash
+uv run python -m alpha.live.runner status --mode paper --broker-host 127.0.0.1 --broker-port 7497 --broker-client-id 31
+uv run python -m alpha.live.scheduler_service next_due --mode paper --broker-host 127.0.0.1 --broker-port 7497 --broker-client-id 31
+```
+
+One manual live pass:
+
+```bash
+uv run python -m alpha.live.runner tick --mode paper --broker-host 127.0.0.1 --broker-port 7497 --broker-client-id 31
+```
+
+Long-running daemon:
+
+```bash
+uv run python -m alpha.live.scheduler_service serve --mode paper --broker-host 127.0.0.1 --broker-port 7497 --broker-client-id 31
+```
+
+### Paper IB Gateway
+
+Safe inspect commands:
+
+```bash
+uv run python -m alpha.live.runner status --mode paper --broker-host 127.0.0.1 --broker-port 4002 --broker-client-id 31
+uv run python -m alpha.live.scheduler_service next_due --mode paper --broker-host 127.0.0.1 --broker-port 4002 --broker-client-id 31
+```
+
+One manual live pass:
+
+```bash
+uv run python -m alpha.live.runner tick --mode paper --broker-host 127.0.0.1 --broker-port 4002 --broker-client-id 31
+```
+
+Long-running daemon:
+
+```bash
+uv run python -m alpha.live.scheduler_service serve --mode paper --broker-host 127.0.0.1 --broker-port 4002 --broker-client-id 31
+```
+
+### Live TWS
+
+Use this only when:
+- TWS is logged into the live account
+- your manifest uses `mode: live`
+- you are ready for real orders
+
+Safe inspect commands:
+
+```bash
+uv run python -m alpha.live.runner status --mode live --broker-host 127.0.0.1 --broker-port 7496 --broker-client-id 31
+uv run python -m alpha.live.scheduler_service next_due --mode live --broker-host 127.0.0.1 --broker-port 7496 --broker-client-id 31
+```
+
+One manual live pass:
+
+```bash
+uv run python -m alpha.live.runner tick --mode live --broker-host 127.0.0.1 --broker-port 7496 --broker-client-id 31
+```
+
+Long-running daemon:
+
+```bash
+uv run python -m alpha.live.scheduler_service serve --mode live --broker-host 127.0.0.1 --broker-port 7496 --broker-client-id 31
+```
+
+Important live rule:
+
+```text
+if auto_submit_enabled_bool = true
+then tick or serve may submit real live orders
+```
 
 ## Useful Manual Commands
 

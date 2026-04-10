@@ -77,7 +77,7 @@ It shows:
 ## The Main Files
 
 - manifests:
-  - [pod_dv2_01.yaml](C:/Users/User/Documents/workspace/alpha_super/alpha/live/releases/user_001/pod_dv2_01.yaml)
+  - [pod_dv2_01.yaml](C:/Users/User/Documents/workspace/alpha_super/alpha/live/releases/excelence_trade_paper_001/pod_dv2_01.yaml)
 - operator guide:
   - [LIVE_RUNBOOK.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_RUNBOOK.md)
 - architecture:
@@ -196,6 +196,17 @@ Mental model:
 scheduler_service decides when to call tick
 tick still does all real work
 ```
+
+For the full CLI reference, including:
+- all commands
+- all shared flags
+- command-specific flags
+- scheduler tuning flags
+- copy-paste connection commands for paper TWS / paper Gateway / live TWS
+- examples
+
+read:
+- [LIVE_RUNBOOK.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_RUNBOOK.md)
 
 ## One-Line Mental Model
 
