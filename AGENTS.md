@@ -147,4 +147,3 @@ pods:
 
 Completed strategy runs can be saved/loaded with `strategy.to_pickle(path)` / `Strategy.read_pickle(path)`. Portfolios can be saved/loaded with `portfolio.to_pickle(path)` / `Portfolio.read_pickle(path)`.
 
-

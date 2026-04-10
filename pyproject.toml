@@ -27,3 +27,6 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 include = ["alpha*", "data*"]
+
+[dependency-groups]
+dev = []

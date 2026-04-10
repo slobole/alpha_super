@@ -131,6 +131,9 @@ requires-dist = [
     { name = "yfinance", specifier = ">=0.2.59" },
 ]
 
+[package.metadata.requires-dev]
+dev = []
+
 [[package]]
 name = "anyio"
 version = "4.9.0"
