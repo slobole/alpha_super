@@ -59,20 +59,59 @@ def test_stub_broker_adapter_updates_positions_from_vplan_requests():
         )
     ]
 
-    broker_order_record_list, broker_fill_list = broker_adapter_obj.submit_order_request_list(
+    broker_order_record_list, broker_order_event_list, broker_fill_list = broker_adapter_obj.submit_order_request_list(
         account_route_str="DU1",
         broker_order_request_list=broker_order_request_list,
         submitted_timestamp_ts=datetime.now(UTC),
     )
+    refreshed_broker_order_record_list, refreshed_broker_order_event_list, refreshed_broker_fill_list = (
+        broker_adapter_obj.get_recent_order_state_snapshot(
+            account_route_str="DU1",
+            since_timestamp_ts=datetime.min.replace(tzinfo=UTC),
+        )
+    )
     broker_snapshot_obj = broker_adapter_obj.get_account_snapshot("DU1")
 
     assert len(broker_order_record_list) == 1
+    assert len(broker_order_event_list) == 1
+    assert broker_order_event_list[0].status_str == "PendingSubmit"
     assert broker_order_record_list[0].decision_plan_id_int == 7
     assert broker_order_record_list[0].vplan_id_int == 9
-    assert len(broker_fill_list) == 1
-    assert broker_fill_list[0].decision_plan_id_int == 7
-    assert broker_fill_list[0].vplan_id_int == 9
+    assert broker_fill_list == []
+    assert len(refreshed_broker_order_record_list) == 1
+    assert refreshed_broker_order_record_list[0].status_str == "Filled"
+    assert len(refreshed_broker_order_event_list) == 2
+    assert len(refreshed_broker_fill_list) == 1
+    assert refreshed_broker_fill_list[0].decision_plan_id_int == 7
+    assert refreshed_broker_fill_list[0].vplan_id_int == 9
     assert broker_snapshot_obj.position_amount_map["AAPL"] == 10.0
+
+
+def test_stub_broker_adapter_session_open_price_roundtrip():
+    broker_adapter_obj = StubBrokerAdapter()
+    broker_adapter_obj.seed_account_snapshot(
+        account_route_str="DU1",
+        cash_float=10000.0,
+        total_value_float=10000.0,
+        position_amount_map={},
+    )
+    broker_adapter_obj.seed_session_open_price(
+        account_route_str="DU1",
+        session_date_str="2024-02-01",
+        asset_str="AAPL",
+        official_open_price_float=101.25,
+    )
+
+    session_open_price_list = broker_adapter_obj.get_session_open_price_list(
+        account_route_str="DU1",
+        asset_str_list=["AAPL"],
+        session_open_timestamp_ts=datetime(2024, 2, 1, 9, 30, tzinfo=UTC),
+        session_calendar_id_str="XNYS",
+    )
+
+    assert len(session_open_price_list) == 1
+    assert session_open_price_list[0].official_open_price_float == 101.25
+    assert session_open_price_list[0].open_price_source_str == "stub.seeded_open"
 
 
 def test_infer_ibkr_account_mode_str_uses_du_prefix_for_paper():

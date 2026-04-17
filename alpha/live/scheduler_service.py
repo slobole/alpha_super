@@ -322,6 +322,397 @@ def _build_sleep_seconds_float(
     return min(float(idle_max_sleep_seconds_int), delta_seconds_float or float(idle_max_sleep_seconds_int))
 
 
+def _build_related_pod_status_dict_list(
+    state_store_obj: LiveStateStore,
+    as_of_ts: datetime,
+    releases_root_path_str: str,
+    related_pod_id_list: list[str],
+) -> list[dict[str, object]]:
+    if len(related_pod_id_list) == 0:
+        return []
+    status_summary_dict = runner.get_status_summary(
+        state_store_obj=state_store_obj,
+        as_of_ts=as_of_ts,
+        releases_root_path_str=releases_root_path_str,
+    )
+    related_pod_id_set = set(related_pod_id_list)
+    return [
+        dict(pod_status_dict)
+        for pod_status_dict in status_summary_dict["pod_status_dict_list"]
+        if str(pod_status_dict["pod_id_str"]) in related_pod_id_set
+    ]
+
+
+def _build_related_execution_report_dict_list(
+    state_store_obj: LiveStateStore,
+    as_of_ts: datetime,
+    releases_root_path_str: str,
+    related_pod_id_list: list[str],
+) -> list[dict[str, object]]:
+    if len(related_pod_id_list) == 0:
+        return []
+    execution_report_summary_dict = runner.get_execution_report_summary(
+        state_store_obj=state_store_obj,
+        as_of_ts=as_of_ts,
+        releases_root_path_str=releases_root_path_str,
+    )
+    related_pod_id_set = set(related_pod_id_list)
+    deduped_execution_report_dict_list: list[dict[str, object]] = []
+    seen_execution_key_set: set[tuple[str, int]] = set()
+    for execution_report_dict in execution_report_summary_dict["execution_report_dict_list"]:
+        if str(execution_report_dict["pod_id_str"]) not in related_pod_id_set:
+            continue
+        execution_key_tup = (
+            str(execution_report_dict["pod_id_str"]),
+            int(execution_report_dict["latest_vplan_id_int"]),
+        )
+        if execution_key_tup in seen_execution_key_set:
+            continue
+        seen_execution_key_set.add(execution_key_tup)
+        deduped_execution_report_dict_list.append(dict(execution_report_dict))
+    return deduped_execution_report_dict_list
+
+
+def _build_related_vplan_dict_list(
+    state_store_obj: LiveStateStore,
+    as_of_ts: datetime,
+    releases_root_path_str: str,
+    related_pod_id_list: list[str],
+) -> list[dict[str, object]]:
+    if len(related_pod_id_list) == 0:
+        return []
+    related_pod_id_set = set(related_pod_id_list)
+    vplan_summary_dict = runner.show_vplan_summary(
+        state_store_obj=state_store_obj,
+        as_of_ts=as_of_ts,
+        releases_root_path_str=releases_root_path_str,
+    )
+    deduped_vplan_dict_list: list[dict[str, object]] = []
+    seen_vplan_key_set: set[tuple[str, int]] = set()
+    for vplan_dict in vplan_summary_dict["vplan_dict_list"]:
+        if str(vplan_dict["pod_id_str"]) not in related_pod_id_set:
+            continue
+        vplan_id_int = int(vplan_dict["vplan_id_int"])
+        vplan_key_tup = (str(vplan_dict["pod_id_str"]), vplan_id_int)
+        if vplan_key_tup in seen_vplan_key_set:
+            continue
+        seen_vplan_key_set.add(vplan_key_tup)
+        deduped_vplan_dict_list.append(dict(vplan_dict))
+    return deduped_vplan_dict_list
+
+
+def _build_related_broker_order_snapshot_dict_list(
+    state_store_obj: LiveStateStore,
+    related_pod_id_list: list[str],
+) -> list[dict[str, object]]:
+    broker_order_snapshot_dict_list: list[dict[str, object]] = []
+    for pod_id_str in related_pod_id_list:
+        latest_vplan_obj = state_store_obj.get_latest_vplan_for_pod(pod_id_str)
+        if latest_vplan_obj is None or latest_vplan_obj.vplan_id_int is None:
+            continue
+        broker_order_row_dict_list = state_store_obj.get_broker_order_row_dict_list_for_vplan(
+            int(latest_vplan_obj.vplan_id_int)
+        )
+        if len(broker_order_row_dict_list) == 0:
+            continue
+        broker_order_snapshot_dict_list.append(
+            {
+                "pod_id_str": str(pod_id_str),
+                "latest_vplan_id_int": int(latest_vplan_obj.vplan_id_int),
+                "broker_order_count_int": len(broker_order_row_dict_list),
+                "broker_order_row_dict_list": broker_order_row_dict_list,
+            }
+        )
+    return broker_order_snapshot_dict_list
+
+
+def _emit_scheduler_event(
+    event_name_str: str,
+    event_payload_dict: dict[str, object],
+    log_path_str: str,
+    print_events_bool: bool,
+) -> None:
+    log_event(
+        event_name_str,
+        event_payload_dict,
+        log_path_str=log_path_str,
+    )
+    if print_events_bool:
+        print(
+            _render_scheduler_event_output_str(
+                event_name_str=event_name_str,
+                event_payload_dict=event_payload_dict,
+            ),
+            flush=True,
+        )
+
+
+def _format_float_str(value_obj: object, decimals_int: int = 2) -> str:
+    if value_obj is None:
+        return "none"
+    return f"{float(value_obj):.{decimals_int}f}"
+
+
+def _format_signed_float_str(value_obj: object, decimals_int: int = 2) -> str:
+    if value_obj is None:
+        return "none"
+    return f"{float(value_obj):+.{decimals_int}f}"
+
+
+def _format_count_map_str(count_map_dict: dict[str, object]) -> str:
+    if len(count_map_dict) == 0:
+        return "none"
+    return ", ".join(
+        f"{key_str}={int(count_map_dict[key_str])}"
+        for key_str in sorted(count_map_dict)
+    )
+
+
+def _render_pod_status_line_list(pod_status_dict_list: list[dict[str, object]]) -> list[str]:
+    line_list: list[str] = []
+    for pod_status_dict in pod_status_dict_list:
+        line_list.append(
+            "  pod "
+            f"{pod_status_dict['pod_id_str']}: "
+            f"decision={pod_status_dict['latest_decision_plan_status_str'] or 'none'} "
+            f"vplan={pod_status_dict['latest_vplan_status_str'] or 'none'} "
+            f"next={pod_status_dict['next_action_str']} "
+            f"reason={pod_status_dict['reason_code_str']} "
+            f"latest_fill={pod_status_dict['latest_fill_timestamp_str'] or 'none'}"
+        )
+    return line_list
+
+
+def _render_vplan_line_list(vplan_dict_list: list[dict[str, object]]) -> list[str]:
+    line_list: list[str] = []
+    for vplan_dict in vplan_dict_list:
+        warning_row_count_int = len(vplan_dict.get("warning_row_dict_list", []))
+        line_list.append(
+            "  vplan "
+            f"pod={vplan_dict['pod_id_str']} "
+            f"id={vplan_dict['vplan_id_int']} "
+            f"status={vplan_dict['status_str']} "
+            f"net_liq={_format_float_str(vplan_dict['net_liq_float'])} "
+            f"budget={_format_float_str(vplan_dict['pod_budget_float'])} "
+            f"price_source={vplan_dict['live_price_source_str']} "
+            f"warnings={warning_row_count_int}"
+        )
+        for vplan_row_dict in vplan_dict.get("vplan_row_dict_list", []):
+            line_list.append(
+                "    row "
+                f"{vplan_row_dict['asset_str']}: "
+                f"current={_format_float_str(vplan_row_dict['current_share_float'])} "
+                f"target={_format_float_str(vplan_row_dict['target_share_float'])} "
+                f"delta={_format_signed_float_str(vplan_row_dict['order_delta_share_float'])} "
+                f"px={_format_float_str(vplan_row_dict['live_reference_price_float'])} "
+                f"notional={_format_float_str(vplan_row_dict['estimated_target_notional_float'])} "
+                f"warn={'yes' if bool(vplan_row_dict['warning_bool']) else 'no'}"
+            )
+    return line_list
+
+
+def _render_broker_order_line_list(
+    broker_order_snapshot_dict_list: list[dict[str, object]],
+) -> list[str]:
+    line_list: list[str] = []
+    for broker_order_snapshot_dict in broker_order_snapshot_dict_list:
+        line_list.append(
+            "  orders "
+            f"pod={broker_order_snapshot_dict['pod_id_str']} "
+            f"vplan={broker_order_snapshot_dict['latest_vplan_id_int']} "
+            f"count={broker_order_snapshot_dict['broker_order_count_int']}"
+        )
+        for broker_order_row_dict in broker_order_snapshot_dict.get("broker_order_row_dict_list", []):
+            line_list.append(
+                "    order "
+                f"{broker_order_row_dict['asset_str']}: "
+                f"type={broker_order_row_dict['broker_order_type_str']} "
+                f"qty={_format_signed_float_str(broker_order_row_dict['amount_float'])} "
+                f"filled={_format_float_str(broker_order_row_dict['filled_amount_float'])} "
+                f"remaining={_format_float_str(broker_order_row_dict['remaining_amount_float'])} "
+                f"status={broker_order_row_dict['status_str']} "
+                f"last_status={broker_order_row_dict['last_status_timestamp_str'] or broker_order_row_dict['submitted_timestamp_str']}"
+            )
+    return line_list
+
+
+def _render_fill_line_list(execution_report_dict_list: list[dict[str, object]]) -> list[str]:
+    line_list: list[str] = []
+    for execution_report_dict in execution_report_dict_list:
+        line_list.append(
+            "  fills "
+            f"pod={execution_report_dict['pod_id_str']} "
+            f"vplan={execution_report_dict['latest_vplan_id_int']} "
+            f"count={execution_report_dict['fill_count_int']}"
+        )
+        for fill_row_dict in execution_report_dict.get("fill_row_dict_list", []):
+            line_list.append(
+                "    fill "
+                f"{fill_row_dict['asset_str']}: "
+                f"qty={_format_signed_float_str(fill_row_dict['fill_amount_float'])} "
+                f"px={_format_float_str(fill_row_dict['fill_price_float'])} "
+                f"open={_format_float_str(fill_row_dict['official_open_price_float'])} "
+                f"open_source={fill_row_dict['open_price_source_str'] or 'none'} "
+                f"ts={fill_row_dict['fill_timestamp_str']}"
+            )
+    return line_list
+
+
+def _render_scheduler_event_output_str(
+    event_name_str: str,
+    event_payload_dict: dict[str, object],
+) -> str:
+    event_timestamp_str = str(
+        event_payload_dict.get("as_of_timestamp_str")
+        or event_payload_dict.get("scheduled_wake_timestamp_str")
+        or "now"
+    )
+    header_fragment_list: list[str] = [f"[{event_timestamp_str}] {event_name_str}"]
+    if "env_mode_str" in event_payload_dict:
+        header_fragment_list.append(f"mode={event_payload_dict['env_mode_str']}")
+    if "next_phase_str" in event_payload_dict:
+        header_fragment_list.append(f"phase={event_payload_dict['next_phase_str']}")
+    if "reason_code_str" in event_payload_dict:
+        header_fragment_list.append(f"reason={event_payload_dict['reason_code_str']}")
+    line_list = [" | ".join(header_fragment_list)]
+
+    related_pod_id_list = list(event_payload_dict.get("related_pod_id_list", []))
+    if len(related_pod_id_list) > 0:
+        line_list.append(f"  pods={', '.join(related_pod_id_list)}")
+    if "next_due_timestamp_str" in event_payload_dict:
+        next_due_timestamp_str = str(event_payload_dict["next_due_timestamp_str"])
+        if "sleep_seconds_float" in event_payload_dict:
+            line_list.append(
+                f"  next_due={next_due_timestamp_str} sleep={_format_float_str(event_payload_dict['sleep_seconds_float'])}s"
+            )
+        else:
+            line_list.append(f"  next_due={next_due_timestamp_str}")
+    if event_name_str == "scheduler_started":
+        line_list.append(
+            "  config "
+            f"active_poll={int(event_payload_dict['active_poll_seconds_int'])}s "
+            f"idle_max_sleep={int(event_payload_dict['idle_max_sleep_seconds_int'])}s "
+            f"reconcile_grace={int(event_payload_dict['reconcile_grace_seconds_int'])}s"
+        )
+    tick_detail_dict = event_payload_dict.get("tick_detail_dict")
+    if isinstance(tick_detail_dict, dict):
+        line_list.append(
+            "  tick "
+            f"created_decision={int(tick_detail_dict.get('created_decision_plan_count_int', 0))} "
+            f"created_vplan={int(tick_detail_dict.get('created_vplan_count_int', 0))} "
+            f"submitted={int(tick_detail_dict.get('submitted_vplan_count_int', 0))} "
+            f"completed={int(tick_detail_dict.get('completed_vplan_count_int', 0))} "
+            f"blocked={int(tick_detail_dict.get('blocked_action_count_int', 0))}"
+        )
+        warning_count_map_dict = dict(tick_detail_dict.get("warning_count_map_dict", {}))
+        reason_count_map_dict = dict(tick_detail_dict.get("reason_count_map_dict", {}))
+        line_list.append(f"  warnings={_format_count_map_str(warning_count_map_dict)}")
+        line_list.append(f"  reasons={_format_count_map_str(reason_count_map_dict)}")
+    pod_status_dict_list = event_payload_dict.get("post_tick_pod_status_dict_list")
+    if isinstance(pod_status_dict_list, list):
+        line_list.extend(_render_pod_status_line_list(pod_status_dict_list))
+    pod_status_dict_list = event_payload_dict.get("pod_status_dict_list")
+    if isinstance(pod_status_dict_list, list):
+        line_list.extend(_render_pod_status_line_list(pod_status_dict_list))
+    vplan_dict_list = event_payload_dict.get("post_tick_vplan_dict_list")
+    if isinstance(vplan_dict_list, list):
+        line_list.extend(_render_vplan_line_list(vplan_dict_list))
+    broker_order_snapshot_dict_list = event_payload_dict.get("post_tick_broker_order_snapshot_dict_list")
+    if isinstance(broker_order_snapshot_dict_list, list):
+        line_list.extend(_render_broker_order_line_list(broker_order_snapshot_dict_list))
+    broker_order_snapshot_dict_list = event_payload_dict.get("broker_order_snapshot_dict_list")
+    if isinstance(broker_order_snapshot_dict_list, list):
+        line_list.extend(_render_broker_order_line_list(broker_order_snapshot_dict_list))
+    execution_report_dict_list = event_payload_dict.get("post_tick_execution_report_dict_list")
+    if isinstance(execution_report_dict_list, list):
+        line_list.extend(_render_fill_line_list(execution_report_dict_list))
+    execution_report_dict_list = event_payload_dict.get("execution_report_dict_list")
+    if isinstance(execution_report_dict_list, list):
+        line_list.extend(_render_fill_line_list(execution_report_dict_list))
+    if event_name_str == "scheduler_error_retry":
+        line_list.append(
+            f"  error={event_payload_dict['error_str']} retry={int(event_payload_dict['error_retry_seconds_int'])}s"
+        )
+    return "\n".join(line_list)
+
+
+def _build_pod_status_signature_tup(
+    pod_status_dict_list: list[dict[str, object]],
+) -> tuple[tuple[str, str, str, str, str, str], ...]:
+    return tuple(
+        (
+            str(pod_status_dict["pod_id_str"]),
+            str(pod_status_dict.get("latest_decision_plan_status_str")),
+            str(pod_status_dict.get("latest_vplan_status_str")),
+            str(pod_status_dict.get("next_action_str")),
+            str(pod_status_dict.get("reason_code_str")),
+            str(pod_status_dict.get("latest_fill_timestamp_str")),
+        )
+        for pod_status_dict in pod_status_dict_list
+    )
+
+
+def _build_execution_report_signature_tup(
+    execution_report_dict_list: list[dict[str, object]],
+) -> tuple[tuple[str, int, int, str], ...]:
+    signature_row_list: list[tuple[str, int, int, str]] = []
+    for execution_report_dict in execution_report_dict_list:
+        fill_row_dict_list = list(execution_report_dict.get("fill_row_dict_list", []))
+        latest_fill_timestamp_str = (
+            "none" if len(fill_row_dict_list) == 0 else str(fill_row_dict_list[-1]["fill_timestamp_str"])
+        )
+        signature_row_list.append(
+            (
+                str(execution_report_dict["pod_id_str"]),
+                int(execution_report_dict["latest_vplan_id_int"]),
+                int(execution_report_dict["fill_count_int"]),
+                latest_fill_timestamp_str,
+            )
+        )
+    return tuple(signature_row_list)
+
+
+def _build_broker_order_signature_tup(
+    broker_order_snapshot_dict_list: list[dict[str, object]],
+) -> tuple[tuple[str, int, str, float, float, str, str], ...]:
+    signature_row_list: list[tuple[str, int, str, float, float, str, str]] = []
+    for broker_order_snapshot_dict in broker_order_snapshot_dict_list:
+        latest_vplan_id_int = int(broker_order_snapshot_dict["latest_vplan_id_int"])
+        for broker_order_row_dict in broker_order_snapshot_dict.get("broker_order_row_dict_list", []):
+            signature_row_list.append(
+                (
+                    str(broker_order_snapshot_dict["pod_id_str"]),
+                    latest_vplan_id_int,
+                    str(broker_order_row_dict["asset_str"]),
+                    float(broker_order_row_dict["amount_float"]),
+                    float(broker_order_row_dict["filled_amount_float"]),
+                    str(broker_order_row_dict["status_str"]),
+                    str(
+                        broker_order_row_dict.get("last_status_timestamp_str")
+                        or broker_order_row_dict["submitted_timestamp_str"]
+                    ),
+                )
+            )
+    return tuple(signature_row_list)
+
+
+def _build_scheduler_sleep_signature_tup(
+    event_payload_dict: dict[str, object],
+) -> tuple[object, ...]:
+    pod_status_dict_list = list(event_payload_dict.get("pod_status_dict_list", []))
+    execution_report_dict_list = list(event_payload_dict.get("execution_report_dict_list", []))
+    broker_order_snapshot_dict_list = list(event_payload_dict.get("broker_order_snapshot_dict_list", []))
+    return (
+        str(event_payload_dict.get("env_mode_str")),
+        str(event_payload_dict.get("next_phase_str")),
+        str(event_payload_dict.get("reason_code_str")),
+        tuple(str(pod_id_str) for pod_id_str in event_payload_dict.get("related_pod_id_list", [])),
+        _build_pod_status_signature_tup(pod_status_dict_list),
+        _build_execution_report_signature_tup(execution_report_dict_list),
+        _build_broker_order_signature_tup(broker_order_snapshot_dict_list),
+    )
+
+
 def _render_scheduler_output_str(detail_dict: dict[str, object]) -> str:
     line_list = [
         "Scheduler",
@@ -345,6 +736,33 @@ def _render_scheduler_output_str(detail_dict: dict[str, object]) -> str:
             f"submitted_vplan_count_int={int(tick_detail_dict.get('submitted_vplan_count_int', 0))}, "
             f"completed_vplan_count_int={int(tick_detail_dict.get('completed_vplan_count_int', 0))}"
         )
+    if "post_tick_pod_status_dict_list" in detail_dict:
+        for pod_status_dict in detail_dict["post_tick_pod_status_dict_list"]:
+            line_list.append(
+                "- Pod status: "
+                f"pod_id_str={pod_status_dict['pod_id_str']}, "
+                f"decision={pod_status_dict['latest_decision_plan_status_str']}, "
+                f"vplan={pod_status_dict['latest_vplan_status_str']}, "
+                f"next_action={pod_status_dict['next_action_str']}, "
+                f"reason={pod_status_dict['reason_code_str']}, "
+                f"latest_fill={pod_status_dict['latest_fill_timestamp_str']}"
+            )
+    if "post_tick_broker_order_snapshot_dict_list" in detail_dict:
+        for broker_order_snapshot_dict in detail_dict["post_tick_broker_order_snapshot_dict_list"]:
+            line_list.append(
+                "- Broker orders: "
+                f"pod_id_str={broker_order_snapshot_dict['pod_id_str']}, "
+                f"latest_vplan_id_int={broker_order_snapshot_dict['latest_vplan_id_int']}, "
+                f"broker_order_count_int={broker_order_snapshot_dict['broker_order_count_int']}"
+            )
+    if "post_tick_execution_report_dict_list" in detail_dict:
+        for execution_report_dict in detail_dict["post_tick_execution_report_dict_list"]:
+            line_list.append(
+                "- Fills: "
+                f"pod_id_str={execution_report_dict['pod_id_str']}, "
+                f"latest_vplan_id_int={execution_report_dict['latest_vplan_id_int']}, "
+                f"fill_count_int={execution_report_dict['fill_count_int']}"
+            )
     return "\n".join(line_list)
 
 
@@ -376,6 +794,7 @@ def run_once(
     reconcile_grace_seconds_int: int = DEFAULT_RECONCILE_GRACE_SECONDS_INT,
     idle_max_sleep_seconds_int: int = DEFAULT_IDLE_MAX_SLEEP_SECONDS_INT,
     log_path_str: str = DEFAULT_LOG_PATH_STR,
+    debug_snapshots_bool: bool = False,
 ) -> dict[str, object]:
     scheduler_decision_obj = get_scheduler_decision(
         state_store_obj=state_store_obj,
@@ -389,7 +808,7 @@ def run_once(
     detail_dict["tick_invoked_bool"] = False
 
     if scheduler_decision_obj.due_now_bool:
-        log_event(
+        _emit_scheduler_event(
             "scheduler_tick_invoked",
             {
                 "as_of_timestamp_str": as_of_ts.isoformat(),
@@ -399,6 +818,7 @@ def run_once(
                 "related_pod_id_list": scheduler_decision_obj.related_pod_id_list,
             },
             log_path_str=log_path_str,
+            print_events_bool=False,
         )
         tick_detail_dict = runner.tick(
             state_store_obj=state_store_obj,
@@ -410,6 +830,31 @@ def run_once(
         )
         detail_dict["tick_invoked_bool"] = True
         detail_dict["tick_detail_dict"] = tick_detail_dict
+        detail_dict["post_tick_pod_status_dict_list"] = _build_related_pod_status_dict_list(
+            state_store_obj=state_store_obj,
+            as_of_ts=as_of_ts,
+            releases_root_path_str=releases_root_path_str,
+            related_pod_id_list=scheduler_decision_obj.related_pod_id_list,
+        )
+        detail_dict["post_tick_execution_report_dict_list"] = _build_related_execution_report_dict_list(
+            state_store_obj=state_store_obj,
+            as_of_ts=as_of_ts,
+            releases_root_path_str=releases_root_path_str,
+            related_pod_id_list=scheduler_decision_obj.related_pod_id_list,
+        )
+        if debug_snapshots_bool:
+            detail_dict["post_tick_vplan_dict_list"] = _build_related_vplan_dict_list(
+                state_store_obj=state_store_obj,
+                as_of_ts=as_of_ts,
+                releases_root_path_str=releases_root_path_str,
+                related_pod_id_list=scheduler_decision_obj.related_pod_id_list,
+            )
+            detail_dict["post_tick_broker_order_snapshot_dict_list"] = (
+                _build_related_broker_order_snapshot_dict_list(
+                    state_store_obj=state_store_obj,
+                    related_pod_id_list=scheduler_decision_obj.related_pod_id_list,
+                )
+            )
     return detail_dict
 
 
@@ -424,7 +869,8 @@ def serve(
     error_retry_seconds_int: int = DEFAULT_ERROR_RETRY_SECONDS_INT,
     log_path_str: str = DEFAULT_LOG_PATH_STR,
 ) -> None:
-    log_event(
+    last_printed_sleep_signature_tup: tuple[object, ...] | None = None
+    _emit_scheduler_event(
         "scheduler_started",
         {
             "env_mode_str": env_mode_str,
@@ -433,6 +879,7 @@ def serve(
             "reconcile_grace_seconds_int": int(reconcile_grace_seconds_int),
         },
         log_path_str=log_path_str,
+        print_events_bool=True,
     )
 
     while True:
@@ -447,7 +894,7 @@ def serve(
                 idle_max_sleep_seconds_int=idle_max_sleep_seconds_int,
             )
             if scheduler_decision_obj.due_now_bool:
-                log_event(
+                _emit_scheduler_event(
                     "scheduler_due_now",
                     {
                         "as_of_timestamp_str": as_of_ts.isoformat(),
@@ -457,7 +904,9 @@ def serve(
                         "related_pod_id_list": scheduler_decision_obj.related_pod_id_list,
                     },
                     log_path_str=log_path_str,
+                    print_events_bool=True,
                 )
+                last_printed_sleep_signature_tup = None
                 tick_detail_dict = runner.tick(
                     state_store_obj=state_store_obj,
                     broker_adapter_obj=broker_adapter_obj,
@@ -466,16 +915,40 @@ def serve(
                     env_mode_str=env_mode_str,
                     log_path_str=log_path_str,
                 )
-                log_event(
+                _emit_scheduler_event(
                     "scheduler_phase_idle",
                     {
                         "as_of_timestamp_str": as_of_ts.isoformat(),
                         "env_mode_str": env_mode_str,
                         "next_phase_str": scheduler_decision_obj.next_phase_str,
                         "tick_detail_dict": tick_detail_dict,
+                        "post_tick_pod_status_dict_list": _build_related_pod_status_dict_list(
+                            state_store_obj=state_store_obj,
+                            as_of_ts=as_of_ts,
+                            releases_root_path_str=releases_root_path_str,
+                            related_pod_id_list=scheduler_decision_obj.related_pod_id_list,
+                        ),
+                        "post_tick_execution_report_dict_list": _build_related_execution_report_dict_list(
+                            state_store_obj=state_store_obj,
+                            as_of_ts=as_of_ts,
+                            releases_root_path_str=releases_root_path_str,
+                            related_pod_id_list=scheduler_decision_obj.related_pod_id_list,
+                        ),
+                        "post_tick_vplan_dict_list": _build_related_vplan_dict_list(
+                            state_store_obj=state_store_obj,
+                            as_of_ts=as_of_ts,
+                            releases_root_path_str=releases_root_path_str,
+                            related_pod_id_list=scheduler_decision_obj.related_pod_id_list,
+                        ),
+                        "post_tick_broker_order_snapshot_dict_list": _build_related_broker_order_snapshot_dict_list(
+                            state_store_obj=state_store_obj,
+                            related_pod_id_list=scheduler_decision_obj.related_pod_id_list,
+                        ),
                     },
                     log_path_str=log_path_str,
+                    print_events_bool=True,
                 )
+                last_printed_sleep_signature_tup = None
                 continue
 
             sleep_seconds_float = _build_sleep_seconds_float(
@@ -484,30 +957,52 @@ def serve(
                 active_poll_seconds_int=active_poll_seconds_int,
                 idle_max_sleep_seconds_int=idle_max_sleep_seconds_int,
             )
-            log_event(
+            sleep_event_payload_dict = {
+                "as_of_timestamp_str": as_of_ts.isoformat(),
+                "env_mode_str": env_mode_str,
+                "next_phase_str": scheduler_decision_obj.next_phase_str,
+                "reason_code_str": scheduler_decision_obj.reason_code_str,
+                "next_due_timestamp_str": scheduler_decision_obj.next_due_timestamp_ts.isoformat(),
+                "sleep_seconds_float": sleep_seconds_float,
+                "related_pod_id_list": scheduler_decision_obj.related_pod_id_list,
+                "pod_status_dict_list": _build_related_pod_status_dict_list(
+                    state_store_obj=state_store_obj,
+                    as_of_ts=as_of_ts,
+                    releases_root_path_str=releases_root_path_str,
+                    related_pod_id_list=scheduler_decision_obj.related_pod_id_list,
+                ),
+                "execution_report_dict_list": _build_related_execution_report_dict_list(
+                    state_store_obj=state_store_obj,
+                    as_of_ts=as_of_ts,
+                    releases_root_path_str=releases_root_path_str,
+                    related_pod_id_list=scheduler_decision_obj.related_pod_id_list,
+                ),
+                "broker_order_snapshot_dict_list": _build_related_broker_order_snapshot_dict_list(
+                    state_store_obj=state_store_obj,
+                    related_pod_id_list=scheduler_decision_obj.related_pod_id_list,
+                ),
+            }
+            sleep_signature_tup = _build_scheduler_sleep_signature_tup(sleep_event_payload_dict)
+            print_sleep_event_bool = sleep_signature_tup != last_printed_sleep_signature_tup
+            _emit_scheduler_event(
                 "scheduler_sleeping",
-                {
-                    "as_of_timestamp_str": as_of_ts.isoformat(),
-                    "env_mode_str": env_mode_str,
-                    "next_phase_str": scheduler_decision_obj.next_phase_str,
-                    "reason_code_str": scheduler_decision_obj.reason_code_str,
-                    "next_due_timestamp_str": scheduler_decision_obj.next_due_timestamp_ts.isoformat(),
-                    "sleep_seconds_float": sleep_seconds_float,
-                    "related_pod_id_list": scheduler_decision_obj.related_pod_id_list,
-                },
+                sleep_event_payload_dict,
                 log_path_str=log_path_str,
+                print_events_bool=print_sleep_event_bool,
             )
+            last_printed_sleep_signature_tup = sleep_signature_tup
             time.sleep(sleep_seconds_float)
-            log_event(
+            _emit_scheduler_event(
                 "scheduler_woke",
                 {
                     "env_mode_str": env_mode_str,
                     "scheduled_wake_timestamp_str": datetime.now(tz=UTC).isoformat(),
                 },
                 log_path_str=log_path_str,
+                print_events_bool=False,
             )
         except Exception as exc:  # pragma: no cover - daemon safety
-            log_event(
+            _emit_scheduler_event(
                 "scheduler_error_retry",
                 {
                     "as_of_timestamp_str": as_of_ts.isoformat(),
@@ -516,7 +1011,9 @@ def serve(
                     "error_retry_seconds_int": int(error_retry_seconds_int),
                 },
                 log_path_str=log_path_str,
+                print_events_bool=True,
             )
+            last_printed_sleep_signature_tup = None
             time.sleep(float(error_retry_seconds_int))
 
 

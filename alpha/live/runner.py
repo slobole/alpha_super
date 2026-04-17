@@ -14,15 +14,24 @@ from alpha.live.execution_engine import (
     get_touched_asset_list_for_decision_plan,
 )
 from alpha.live.logging_utils import DEFAULT_LOG_PATH_STR, log_event
-from alpha.live.models import DecisionPlan, LiveRelease, PodState, VPlan
+from alpha.live.models import BrokerOrderEvent, DecisionPlan, LiveRelease, PodState, VPlan
 from alpha.live.order_clerk import BrokerAdapter, IBKRGatewayBrokerAdapter
 from alpha.live.reconcile import reconcile_account_state
 from alpha.live.release_manifest import load_release_list
+from alpha.live.state_store import V1_EXECUTION_TABLE_NAME_TUPLE
 from alpha.live.state_store_v2 import LiveStateStore
 
 
 DEFAULT_RELEASES_ROOT_PATH_STR = str(Path(__file__).resolve().parent / "releases")
 DEFAULT_DB_PATH_STR = str(Path(__file__).resolve().parent / "live_state.sqlite3")
+TERMINAL_ORDER_STATUS_SET: set[str] = {
+    "Filled",
+    "Cancelled",
+    "ApiCancelled",
+    "Rejected",
+    "Expired",
+    "Inactive",
+}
 
 
 def _pluralize_label_str(count_int: int, singular_label_str: str, plural_label_str: str | None = None) -> str:
@@ -37,6 +46,21 @@ def _parse_as_of_timestamp_ts(as_of_timestamp_str: str | None) -> datetime:
     if as_of_timestamp_str is None:
         return datetime.now(tz=UTC)
     return datetime.fromisoformat(as_of_timestamp_str)
+
+
+def _build_v1_cutover_archive_dir_path_obj(
+    db_path_str: str,
+    as_of_ts: datetime,
+    archive_root_path_str: str | None,
+) -> Path:
+    archive_root_path_obj = (
+        Path(archive_root_path_str).resolve()
+        if archive_root_path_str is not None
+        else Path(db_path_str).resolve().parent / "schema_archives"
+    )
+    timestamp_label_str = as_of_ts.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+    db_stem_str = Path(db_path_str).resolve().stem
+    return archive_root_path_obj / f"{db_stem_str}_v1_cutover_{timestamp_label_str}"
 
 
 def _load_release_list_and_sync(
@@ -134,6 +158,150 @@ def _build_vplan_log_payload_dict(
     if extra_payload_dict is not None:
         payload_dict.update(extra_payload_dict)
     return payload_dict
+
+
+def _is_terminal_order_status_bool(status_str: str) -> bool:
+    return str(status_str) in TERMINAL_ORDER_STATUS_SET
+
+
+def _session_open_context_dict(
+    release_obj: LiveRelease,
+    reference_timestamp_ts: datetime,
+) -> dict[str, object]:
+    session_label_ts = scheduler_utils.session_label_from_timestamp_ts(
+        reference_timestamp_ts,
+        release_obj.session_calendar_id_str,
+    )
+    if session_label_ts is None:
+        raise ValueError(
+            f"No market session found for timestamp '{reference_timestamp_ts.isoformat()}'."
+        )
+    session_open_timestamp_ts = scheduler_utils.get_session_open_timestamp_ts(
+        session_label_ts,
+        release_obj.session_calendar_id_str,
+    )
+    return {
+        "session_date_str": session_label_ts.date().isoformat(),
+        "session_open_timestamp_ts": session_open_timestamp_ts,
+    }
+
+
+def _annotate_fill_list_with_session_open_price(
+    fill_list,
+    session_open_price_map_dict,
+) -> list:
+    annotated_fill_list = []
+    for fill_obj in fill_list:
+        session_open_price_obj = session_open_price_map_dict.get(fill_obj.asset_str)
+        annotated_fill_list.append(
+            fill_obj.__class__(
+                **{
+                    **fill_obj.__dict__,
+                    "official_open_price_float": (
+                        None
+                        if session_open_price_obj is None
+                        else session_open_price_obj.official_open_price_float
+                    ),
+                    "open_price_source_str": (
+                        None
+                        if session_open_price_obj is None
+                        else session_open_price_obj.open_price_source_str
+                    ),
+                }
+            )
+        )
+    return annotated_fill_list
+
+
+def _synthesize_terminal_filled_event_list(
+    broker_order_record_list,
+    broker_order_event_list,
+    broker_order_fill_list,
+):
+    broker_order_event_list = list(broker_order_event_list)
+    broker_order_event_by_order_map = {}
+    for broker_order_event_obj in broker_order_event_list:
+        broker_order_event_by_order_map.setdefault(
+            broker_order_event_obj.broker_order_id_str,
+            [],
+        ).append(broker_order_event_obj)
+
+    broker_order_fill_by_order_map = {}
+    for broker_order_fill_obj in broker_order_fill_list:
+        broker_order_fill_by_order_map.setdefault(
+            broker_order_fill_obj.broker_order_id_str,
+            [],
+        ).append(broker_order_fill_obj)
+
+    synthesized_event_list = []
+    normalized_record_list = []
+    for broker_order_record_obj in broker_order_record_list:
+        broker_order_fill_row_list = broker_order_fill_by_order_map.get(
+            broker_order_record_obj.broker_order_id_str,
+            [],
+        )
+        cumulative_filled_amount_float = sum(
+            abs(float(broker_order_fill_obj.fill_amount_float))
+            for broker_order_fill_obj in broker_order_fill_row_list
+        )
+        requested_amount_float = abs(float(broker_order_record_obj.amount_float))
+        existing_terminal_filled_bool = any(
+            str(broker_order_event_obj.status_str) == "Filled"
+            for broker_order_event_obj in broker_order_event_by_order_map.get(
+                broker_order_record_obj.broker_order_id_str,
+                [],
+            )
+        )
+        if (
+            requested_amount_float > 0.0
+            and abs(cumulative_filled_amount_float - requested_amount_float) <= 1e-9
+            and not existing_terminal_filled_bool
+            and len(broker_order_fill_row_list) > 0
+        ):
+            last_fill_timestamp_ts = max(
+                broker_order_fill_obj.fill_timestamp_ts
+                for broker_order_fill_obj in broker_order_fill_row_list
+            )
+            weighted_notional_float = sum(
+                abs(float(broker_order_fill_obj.fill_amount_float))
+                * float(broker_order_fill_obj.fill_price_float)
+                for broker_order_fill_obj in broker_order_fill_row_list
+            )
+            avg_fill_price_float = (
+                weighted_notional_float / cumulative_filled_amount_float
+                if cumulative_filled_amount_float > 0.0
+                else None
+            )
+            synthesized_event_list.append(
+                BrokerOrderEvent(
+                    broker_order_id_str=broker_order_record_obj.broker_order_id_str,
+                    decision_plan_id_int=broker_order_record_obj.decision_plan_id_int,
+                    vplan_id_int=broker_order_record_obj.vplan_id_int,
+                    account_route_str=broker_order_record_obj.account_route_str,
+                    asset_str=broker_order_record_obj.asset_str,
+                    status_str="Filled",
+                    filled_amount_float=cumulative_filled_amount_float,
+                    remaining_amount_float=0.0,
+                    avg_fill_price_float=avg_fill_price_float,
+                    event_timestamp_ts=last_fill_timestamp_ts,
+                    event_source_str="synthetic.fill_closeout",
+                    message_str="fills imply filled closeout",
+                    raw_payload_dict={},
+                )
+            )
+            broker_order_record_obj = broker_order_record_obj.__class__(
+                **{
+                    **broker_order_record_obj.__dict__,
+                    "filled_amount_float": cumulative_filled_amount_float,
+                    "remaining_amount_float": 0.0,
+                    "avg_fill_price_float": avg_fill_price_float,
+                    "status_str": "Filled",
+                    "last_status_timestamp_ts": last_fill_timestamp_ts,
+                }
+            )
+        normalized_record_list.append(broker_order_record_obj)
+
+    return normalized_record_list, broker_order_event_list + synthesized_event_list
 
 
 def _render_tick_detail_str(detail_dict: dict[str, object]) -> str:
@@ -259,6 +427,15 @@ def _render_status_detail_str(detail_dict: dict[str, object]) -> str:
                 f"- Latest fill time: {pod_status_dict['latest_fill_timestamp_str'] or 'none'}",
             ]
         )
+        for broker_order_row_dict in pod_status_dict.get("latest_broker_order_row_dict_list", []):
+            line_list.append(
+                "- Order: "
+                f"{broker_order_row_dict['asset_str']} | "
+                f"requested_qty={broker_order_row_dict['amount_float']} | "
+                f"filled_qty={broker_order_row_dict['filled_amount_float']} | "
+                f"status={broker_order_row_dict['status_str']} | "
+                f"last_status_time={broker_order_row_dict['last_status_timestamp_str'] or broker_order_row_dict['submitted_timestamp_str']}"
+            )
     return "\n".join(line_list)
 
 
@@ -306,6 +483,16 @@ def _render_vplan_detail_str(detail_dict: dict[str, object]) -> str:
                 f"current={warning_row_dict['current_share_float']} | "
                 f"drift={warning_row_dict['drift_share_float']}"
             )
+        for broker_order_row_dict in vplan_dict.get("broker_order_row_dict_list", []):
+            line_list.append(
+                "- Order status: "
+                f"{broker_order_row_dict['asset_str']} | "
+                f"qty={broker_order_row_dict['amount_float']} | "
+                f"filled={broker_order_row_dict['filled_amount_float']} | "
+                f"remaining={broker_order_row_dict['remaining_amount_float']} | "
+                f"status={broker_order_row_dict['status_str']} | "
+                f"last_status_time={broker_order_row_dict['last_status_timestamp_str'] or broker_order_row_dict['submitted_timestamp_str']}"
+            )
     return "\n".join(line_list)
 
 
@@ -331,8 +518,88 @@ def _render_execution_report_detail_str(detail_dict: dict[str, object]) -> str:
                 f"{fill_row_dict['asset_str']} | "
                 f"amount={fill_row_dict['fill_amount_float']} | "
                 f"price={fill_row_dict['fill_price_float']} | "
+                f"official_open={fill_row_dict['official_open_price_float']} | "
+                f"open_source={fill_row_dict['open_price_source_str'] or 'none'} | "
                 f"time={fill_row_dict['fill_timestamp_str']}"
             )
+    return "\n".join(line_list)
+
+
+def _render_preflight_contract_detail_str(detail_dict: dict[str, object]) -> str:
+    contract_report_dict_list = list(detail_dict.get("contract_report_dict_list", []))
+    line_list = [
+        "Preflight Contract",
+        f"- Enabled releases: {int(detail_dict.get('enabled_release_count_int', 0))}",
+        f"- Passed: {int(detail_dict.get('passed_release_count_int', 0))}",
+        f"- Failed: {int(detail_dict.get('failed_release_count_int', 0))}",
+    ]
+    if len(contract_report_dict_list) == 0:
+        line_list.append("- No enabled releases were found.")
+        return "\n".join(line_list)
+
+    for contract_report_dict in contract_report_dict_list:
+        line_list.extend(
+            [
+                "",
+                f"Release: {contract_report_dict['release_id_str']}",
+                f"- Pod: {contract_report_dict['pod_id_str']}",
+                f"- Strategy: {contract_report_dict['strategy_import_str']}",
+                f"- Decision book: {contract_report_dict['decision_book_type_str']}",
+                f"- Contract status: {contract_report_dict['contract_status_str']}",
+                f"- Accepted shapes: {int(contract_report_dict['accepted_shape_count_int'])}",
+                f"- Unsupported shapes: {int(contract_report_dict['unsupported_shape_count_int'])}",
+            ]
+        )
+        unsupported_shape_example_dict_list = list(
+            contract_report_dict.get("unsupported_shape_example_dict_list", [])
+        )
+        if len(unsupported_shape_example_dict_list) > 0:
+            line_list.append("- Unsupported shape examples:")
+            for unsupported_shape_dict in unsupported_shape_example_dict_list:
+                line_list.append(
+                    "  - "
+                    f"asset={unsupported_shape_dict['asset_str']} | "
+                    f"class={unsupported_shape_dict['order_class_str']} | "
+                    f"unit={unsupported_shape_dict['unit_str']} | "
+                    f"target={unsupported_shape_dict['target_bool']} | "
+                    f"amount={unsupported_shape_dict['amount_float']} | "
+                    f"trade_id={unsupported_shape_dict['trade_id_int']}"
+                )
+        if contract_report_dict.get("error_str") is not None:
+            line_list.append(f"- Error: {contract_report_dict['error_str']}")
+
+    return "\n".join(line_list)
+
+
+def _render_v1_cutover_detail_str(detail_dict: dict[str, object]) -> str:
+    table_export_dict_list = list(detail_dict.get("table_export_dict_list", []))
+    line_list = [
+        "V1 Schema Cutover",
+        f"- DB path: {detail_dict['db_path_str']}",
+        f"- Archive path: {detail_dict['archive_dir_path_str']}",
+        f"- Exported tables: {int(detail_dict.get('exported_table_count_int', 0))}",
+        f"- Dropped tables: {int(detail_dict.get('dropped_table_count_int', 0))}",
+    ]
+    remaining_v1_table_name_list = list(detail_dict.get("remaining_v1_table_name_list", []))
+    if len(remaining_v1_table_name_list) > 0:
+        line_list.append(f"- Remaining v1 tables: {', '.join(remaining_v1_table_name_list)}")
+    else:
+        line_list.append("- Remaining v1 tables: none")
+    if len(table_export_dict_list) == 0:
+        line_list.append("- No v1 tables were present.")
+        return "\n".join(line_list)
+
+    for table_export_dict in table_export_dict_list:
+        line_list.extend(
+            [
+                "",
+                f"Table: {table_export_dict['table_name_str']}",
+                f"- Source rows: {int(table_export_dict['source_row_count_int'])}",
+                f"- Exported rows: {int(table_export_dict['exported_row_count_int'])}",
+                f"- Archive file: {table_export_dict['archive_file_path_str']}",
+            ]
+        )
+
     return "\n".join(line_list)
 
 
@@ -345,6 +612,10 @@ def _render_command_output_str(command_name_str: str, detail_dict: dict[str, obj
         return _render_vplan_detail_str(detail_dict)
     if command_name_str == "execution_report":
         return _render_execution_report_detail_str(detail_dict)
+    if command_name_str == "preflight_contract":
+        return _render_preflight_contract_detail_str(detail_dict)
+    if command_name_str == "cutover_v1_schema":
+        return _render_v1_cutover_detail_str(detail_dict)
     return json.dumps(detail_dict, indent=2, sort_keys=True)
 
 
@@ -619,13 +890,14 @@ def submit_ready_vplans(
             continue
 
         broker_order_request_list = build_broker_order_request_list_from_vplan(vplan_obj)
-        broker_order_record_list, broker_order_fill_list = broker_adapter_obj.submit_order_request_list(
+        broker_order_record_list, broker_order_event_list, broker_order_fill_list = broker_adapter_obj.submit_order_request_list(
             account_route_str=vplan_obj.account_route_str,
             broker_order_request_list=broker_order_request_list,
             submitted_timestamp_ts=as_of_ts,
         )
-        state_store_obj.insert_vplan_broker_order_record_list(broker_order_record_list)
-        state_store_obj.insert_vplan_fill_list(broker_order_fill_list)
+        state_store_obj.upsert_vplan_broker_order_record_list(broker_order_record_list)
+        state_store_obj.insert_vplan_broker_order_event_list(broker_order_event_list)
+        state_store_obj.upsert_vplan_fill_list(broker_order_fill_list)
         state_store_obj.mark_vplan_status(int(vplan_obj.vplan_id_int or 0), "submitted")
         state_store_obj.mark_decision_plan_status(int(vplan_obj.decision_plan_id_int), "submitted")
         submitted_vplan_count_int += 1
@@ -638,6 +910,7 @@ def submit_ready_vplans(
                 {
                     "reason_code_str": "submitted",
                     "broker_order_count_int": len(broker_order_record_list),
+                    "broker_order_event_count_int": len(broker_order_event_list),
                     "fill_count_int": len(broker_order_fill_list),
                 },
             ),
@@ -665,10 +938,53 @@ def post_execution_reconcile(
         decision_plan_obj = state_store_obj.get_decision_plan_by_id(int(vplan_obj.decision_plan_id_int))
         broker_snapshot_obj = broker_adapter_obj.get_account_snapshot(vplan_obj.account_route_str)
         state_store_obj.upsert_broker_snapshot_cache(broker_snapshot_obj)
-        broker_fill_list = broker_adapter_obj.get_recent_fill_list(
-            account_route_str=vplan_obj.account_route_str,
-            since_timestamp_ts=vplan_obj.submission_timestamp_ts,
+        broker_order_record_list, broker_order_event_list, broker_fill_list = (
+            broker_adapter_obj.get_recent_order_state_snapshot(
+                account_route_str=vplan_obj.account_route_str,
+                since_timestamp_ts=vplan_obj.submission_timestamp_ts,
+            )
         )
+        session_open_context_dict = _session_open_context_dict(
+            release_obj=release_obj,
+            reference_timestamp_ts=vplan_obj.target_execution_timestamp_ts,
+        )
+        open_universe_asset_set = set(broker_snapshot_obj.position_amount_map) | set(
+            get_touched_asset_list_for_decision_plan(
+                decision_plan_obj,
+                broker_position_map_dict=broker_snapshot_obj.position_amount_map,
+            )
+        )
+        session_open_price_list = broker_adapter_obj.get_session_open_price_list(
+            account_route_str=vplan_obj.account_route_str,
+            asset_str_list=sorted(open_universe_asset_set),
+            session_open_timestamp_ts=session_open_context_dict["session_open_timestamp_ts"],
+            session_calendar_id_str=release_obj.session_calendar_id_str,
+        )
+        state_store_obj.upsert_session_open_price_list(session_open_price_list)
+        session_open_price_map_dict = state_store_obj.get_session_open_price_map_dict(
+            account_route_str=vplan_obj.account_route_str,
+            session_date_str=str(session_open_context_dict["session_date_str"]),
+        )
+        normalized_broker_order_record_list = [
+            broker_order_record_obj.__class__(
+                **{
+                    **broker_order_record_obj.__dict__,
+                    "decision_plan_id_int": int(vplan_obj.decision_plan_id_int),
+                    "vplan_id_int": int(vplan_obj.vplan_id_int or 0),
+                }
+            )
+            for broker_order_record_obj in broker_order_record_list
+        ]
+        normalized_broker_order_event_list = [
+            broker_order_event_obj.__class__(
+                **{
+                    **broker_order_event_obj.__dict__,
+                    "decision_plan_id_int": int(vplan_obj.decision_plan_id_int),
+                    "vplan_id_int": int(vplan_obj.vplan_id_int or 0),
+                }
+            )
+            for broker_order_event_obj in broker_order_event_list
+        ]
         normalized_fill_list = [
             fill_obj.__class__(
                 **{
@@ -679,8 +995,29 @@ def post_execution_reconcile(
             )
             for fill_obj in broker_fill_list
         ]
+        normalized_fill_list = _annotate_fill_list_with_session_open_price(
+            fill_list=normalized_fill_list,
+            session_open_price_map_dict=session_open_price_map_dict,
+        )
+        normalized_broker_order_record_list, normalized_broker_order_event_list = (
+            _synthesize_terminal_filled_event_list(
+                broker_order_record_list=normalized_broker_order_record_list,
+                broker_order_event_list=normalized_broker_order_event_list,
+                broker_order_fill_list=normalized_fill_list,
+            )
+        )
+        state_store_obj.upsert_vplan_broker_order_record_list(normalized_broker_order_record_list)
+        state_store_obj.insert_vplan_broker_order_event_list(normalized_broker_order_event_list)
+        state_store_obj.upsert_vplan_fill_list(normalized_fill_list)
         compared_asset_set = set(vplan_obj.current_broker_position_map) | set(broker_snapshot_obj.position_amount_map)
         execution_evidence_bool = len(normalized_fill_list) > 0
+        all_orders_terminal_bool = (
+            len(normalized_broker_order_record_list) > 0
+            and all(
+                _is_terminal_order_status_bool(broker_order_record_obj.status_str)
+                for broker_order_record_obj in normalized_broker_order_record_list
+            )
+        )
         if not execution_evidence_bool:
             for asset_str in compared_asset_set:
                 if abs(
@@ -689,9 +1026,10 @@ def post_execution_reconcile(
                 ) > 1e-9:
                     execution_evidence_bool = True
                     break
+        if not execution_evidence_bool and all_orders_terminal_bool:
+            execution_evidence_bool = True
         if not execution_evidence_bool:
             continue
-        state_store_obj.insert_vplan_fill_list(normalized_fill_list)
         state_store_obj.insert_vplan_reconciliation_snapshot(
             pod_id_str=vplan_obj.pod_id_str,
             decision_plan_id_int=int(vplan_obj.decision_plan_id_int),
@@ -725,7 +1063,13 @@ def post_execution_reconcile(
                 release_obj,
                 vplan_obj,
                 as_of_ts,
-                {"reason_code_str": "completed"},
+                {
+                    "reason_code_str": "completed",
+                    "broker_order_count_int": len(normalized_broker_order_record_list),
+                    "broker_order_event_count_int": len(normalized_broker_order_event_list),
+                    "fill_count_int": len(normalized_fill_list),
+                    "session_open_price_count_int": len(session_open_price_list),
+                },
             ),
             log_path_str=log_path_str,
         )
@@ -746,10 +1090,14 @@ def get_status_summary(
         latest_vplan_obj = state_store_obj.get_latest_vplan_for_pod(release_obj.pod_id_str)
         latest_broker_snapshot_obj = state_store_obj.get_latest_broker_snapshot_for_account(release_obj.account_route_str)
         latest_fill_timestamp_str = None
+        latest_broker_order_row_dict_list: list[dict[str, object]] = []
         if latest_vplan_obj is not None and latest_vplan_obj.vplan_id_int is not None:
             fill_row_dict_list = state_store_obj.get_fill_row_dict_list_for_vplan(int(latest_vplan_obj.vplan_id_int))
             if len(fill_row_dict_list) > 0:
                 latest_fill_timestamp_str = str(fill_row_dict_list[-1]["fill_timestamp_str"])
+            latest_broker_order_row_dict_list = state_store_obj.get_broker_order_row_dict_list_for_vplan(
+                int(latest_vplan_obj.vplan_id_int)
+            )
         build_gate_dict = scheduler_utils.evaluate_build_gate_dict(release_obj, as_of_ts)
 
         next_action_str = "wait"
@@ -802,6 +1150,7 @@ def get_status_summary(
                 "next_action_str": next_action_str,
                 "reason_code_str": reason_code_str,
                 "latest_fill_timestamp_str": latest_fill_timestamp_str,
+                "latest_broker_order_row_dict_list": latest_broker_order_row_dict_list,
             }
         )
 
@@ -862,6 +1211,9 @@ def show_vplan_summary(
             decision_base_position_map,
             vplan_obj.current_broker_position_map,
         )
+        broker_order_row_dict_list = state_store_obj.get_broker_order_row_dict_list_for_vplan(
+            int(vplan_obj.vplan_id_int or 0)
+        )
         return {
             "vplan_id_int": vplan_obj.vplan_id_int,
             "decision_plan_id_int": vplan_obj.decision_plan_id_int,
@@ -870,6 +1222,7 @@ def show_vplan_summary(
             "net_liq_float": vplan_obj.net_liq_float,
             "pod_budget_float": vplan_obj.pod_budget_float,
             "live_price_source_str": vplan_obj.live_price_source_str,
+            "broker_order_row_dict_list": broker_order_row_dict_list,
             "warning_row_dict_list": warning_row_dict_list,
             "vplan_row_dict_list": [
                 {
@@ -929,6 +1282,132 @@ def get_execution_report_summary(
     return {
         "as_of_timestamp_str": as_of_ts.isoformat(),
         "execution_report_dict_list": execution_report_dict_list,
+    }
+
+
+def preflight_contract_summary(
+    state_store_obj: LiveStateStore,
+    as_of_ts: datetime,
+    releases_root_path_str: str,
+) -> dict[str, object]:
+    release_list = _load_release_list_and_sync(releases_root_path_str, state_store_obj)
+    enabled_release_list = [release_obj for release_obj in release_list if release_obj.enabled_bool]
+    contract_report_dict_list: list[dict[str, object]] = []
+    passed_release_count_int = 0
+    failed_release_count_int = 0
+
+    for release_obj in enabled_release_list:
+        pod_state_obj = _get_model_state_or_default(release_obj, state_store_obj, as_of_ts)
+        contract_report_dict = strategy_host.preflight_decision_contract_for_release(
+            release_obj=release_obj,
+            as_of_ts=as_of_ts,
+            pod_state_obj=pod_state_obj,
+        )
+        contract_report_dict_list.append(contract_report_dict)
+        if contract_report_dict["contract_status_str"] == "pass":
+            passed_release_count_int += 1
+        else:
+            failed_release_count_int += 1
+
+    return {
+        "as_of_timestamp_str": as_of_ts.isoformat(),
+        "enabled_release_count_int": len(enabled_release_list),
+        "passed_release_count_int": passed_release_count_int,
+        "failed_release_count_int": failed_release_count_int,
+        "contract_report_dict_list": contract_report_dict_list,
+    }
+
+
+def cutover_v1_schema(
+    state_store_obj: LiveStateStore,
+    as_of_ts: datetime,
+    db_path_str: str,
+    archive_root_path_str: str | None = None,
+) -> dict[str, object]:
+    archive_dir_path_obj = _build_v1_cutover_archive_dir_path_obj(
+        db_path_str=db_path_str,
+        as_of_ts=as_of_ts,
+        archive_root_path_str=archive_root_path_str,
+    )
+    archive_dir_path_obj.mkdir(parents=True, exist_ok=True)
+    timestamp_label_str = as_of_ts.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+    existing_table_name_set = set(state_store_obj.get_existing_table_name_list())
+
+    table_export_dict_list: list[dict[str, object]] = []
+    existing_v1_table_name_list = [
+        table_name_str
+        for table_name_str in V1_EXECUTION_TABLE_NAME_TUPLE
+        if table_name_str in existing_table_name_set
+    ]
+    for table_name_str in existing_v1_table_name_list:
+        source_row_count_int = state_store_obj.get_table_row_count_int(table_name_str)
+        row_dict_list = state_store_obj.get_table_row_dict_list(table_name_str)
+        exported_row_count_int = len(row_dict_list)
+        if source_row_count_int != exported_row_count_int:
+            raise RuntimeError(
+                "V1 archive row-count mismatch: "
+                f"table_name_str={table_name_str} "
+                f"source_row_count_int={source_row_count_int} "
+                f"exported_row_count_int={exported_row_count_int}"
+            )
+        archive_file_path_obj = archive_dir_path_obj / f"{timestamp_label_str}_{table_name_str}.json"
+        archive_file_path_obj.write_text(
+            json.dumps(row_dict_list, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        table_export_dict_list.append(
+            {
+                "table_name_str": table_name_str,
+                "source_row_count_int": source_row_count_int,
+                "exported_row_count_int": exported_row_count_int,
+                "archive_file_path_str": str(archive_file_path_obj),
+            }
+        )
+
+    manifest_dict = {
+        "as_of_timestamp_str": as_of_ts.isoformat(),
+        "db_path_str": str(Path(db_path_str).resolve()),
+        "existing_v1_table_name_list": existing_v1_table_name_list,
+        "table_export_dict_list": table_export_dict_list,
+    }
+    manifest_path_obj = archive_dir_path_obj / f"{timestamp_label_str}_manifest.json"
+    manifest_path_obj.write_text(
+        json.dumps(manifest_dict, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    dropped_table_name_list: list[str] = []
+    for table_name_str in V1_EXECUTION_TABLE_NAME_TUPLE:
+        if table_name_str not in existing_table_name_set:
+            continue
+        state_store_obj.drop_table_if_exists(table_name_str)
+        dropped_table_name_list.append(table_name_str)
+
+    remaining_table_name_list = state_store_obj.get_existing_table_name_list()
+    remaining_table_name_set = set(remaining_table_name_list)
+    remaining_v1_table_name_list = [
+        table_name_str
+        for table_name_str in V1_EXECUTION_TABLE_NAME_TUPLE
+        if table_name_str in remaining_table_name_set
+    ]
+    if len(remaining_v1_table_name_list) > 0:
+        raise RuntimeError(
+            "V1 cutover left tables behind: "
+            + ", ".join(remaining_v1_table_name_list)
+        )
+
+    return {
+        "as_of_timestamp_str": as_of_ts.isoformat(),
+        "db_path_str": str(Path(db_path_str).resolve()),
+        "archive_dir_path_str": str(archive_dir_path_obj),
+        "manifest_path_str": str(manifest_path_obj),
+        "existing_v1_table_name_list": existing_v1_table_name_list,
+        "exported_table_count_int": len(table_export_dict_list),
+        "dropped_table_count_int": len(dropped_table_name_list),
+        "table_export_dict_list": table_export_dict_list,
+        "dropped_table_name_list": dropped_table_name_list,
+        "remaining_table_name_list": remaining_table_name_list,
+        "remaining_v1_table_name_list": remaining_v1_table_name_list,
     }
 
 
@@ -1031,6 +1510,8 @@ def main(argv_list: list[str] | None = None) -> int:
             "tick",
             "status",
             "execution_report",
+            "preflight_contract",
+            "cutover_v1_schema",
         ),
     )
     parser_obj.add_argument("--db-path", dest="db_path_str", default=DEFAULT_DB_PATH_STR)
@@ -1038,6 +1519,7 @@ def main(argv_list: list[str] | None = None) -> int:
     parser_obj.add_argument("--as-of-ts", dest="as_of_timestamp_str", default=None)
     parser_obj.add_argument("--mode", dest="env_mode_str", default="paper")
     parser_obj.add_argument("--log-path", dest="log_path_str", default=DEFAULT_LOG_PATH_STR)
+    parser_obj.add_argument("--archive-root", dest="archive_root_path_str", default=None)
     parser_obj.add_argument("--json", dest="json_output_bool", action="store_true")
     parser_obj.add_argument("--vplan-id", dest="vplan_id_int", type=int, default=None)
     parser_obj.add_argument("--pod-id", dest="pod_id_str", default=None)
@@ -1050,12 +1532,20 @@ def main(argv_list: list[str] | None = None) -> int:
     state_store_obj = LiveStateStore(parsed_args_obj.db_path_str)
     job_run_id_int = state_store_obj.record_job_start(parsed_args_obj.command_name_str)
     as_of_ts = _parse_as_of_timestamp_ts(parsed_args_obj.as_of_timestamp_str)
-    broker_adapter_obj = IBKRGatewayBrokerAdapter(
-        host_str=parsed_args_obj.broker_host_str,
-        port_int=parsed_args_obj.broker_port_int,
-        client_id_int=parsed_args_obj.broker_client_id_int,
-        timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
-    )
+    broker_command_name_set = {
+        "build_vplan",
+        "submit_vplan",
+        "post_execution_reconcile",
+        "tick",
+    }
+    broker_adapter_obj = None
+    if parsed_args_obj.command_name_str in broker_command_name_set:
+        broker_adapter_obj = IBKRGatewayBrokerAdapter(
+            host_str=parsed_args_obj.broker_host_str,
+            port_int=parsed_args_obj.broker_port_int,
+            client_id_int=parsed_args_obj.broker_client_id_int,
+            timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
+        )
 
     try:
         if parsed_args_obj.command_name_str == "build_decision_plans":
@@ -1099,6 +1589,13 @@ def main(argv_list: list[str] | None = None) -> int:
                 env_mode_str=parsed_args_obj.env_mode_str,
                 log_path_str=parsed_args_obj.log_path_str,
             )
+        elif parsed_args_obj.command_name_str == "cutover_v1_schema":
+            detail_dict = cutover_v1_schema(
+                state_store_obj=state_store_obj,
+                as_of_ts=as_of_ts,
+                db_path_str=parsed_args_obj.db_path_str,
+                archive_root_path_str=parsed_args_obj.archive_root_path_str,
+            )
         elif parsed_args_obj.command_name_str == "show_vplan":
             detail_dict = show_vplan_summary(
                 state_store_obj=state_store_obj,
@@ -1109,6 +1606,12 @@ def main(argv_list: list[str] | None = None) -> int:
             )
         elif parsed_args_obj.command_name_str == "execution_report":
             detail_dict = get_execution_report_summary(
+                state_store_obj=state_store_obj,
+                as_of_ts=as_of_ts,
+                releases_root_path_str=parsed_args_obj.releases_root_path_str,
+            )
+        elif parsed_args_obj.command_name_str == "preflight_contract":
+            detail_dict = preflight_contract_summary(
                 state_store_obj=state_store_obj,
                 as_of_ts=as_of_ts,
                 releases_root_path_str=parsed_args_obj.releases_root_path_str,

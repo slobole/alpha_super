@@ -32,6 +32,7 @@ from alpha.live.models import LiveRelease
 
 
 DEFAULT_SUBMISSION_BUFFER_MINUTES_INT = 10
+DEFAULT_OPEN_SUBMISSION_LEAD_SECONDS_INT = (6 * 60) + 30
 PRE_CLOSE_SIGNAL_BUFFER_MINUTES_INT = 15
 SUPPORTED_SESSION_CALENDAR_ID_TUPLE: tuple[str, ...] = ("XNYS", "XTSE", "XASX")
 SUPPORTED_SIGNAL_CLOCK_TUPLE: tuple[str, ...] = (
@@ -242,7 +243,9 @@ def build_submission_timestamp_ts(
             next_session_label_ts,
             release_obj.session_calendar_id_str,
         )
-        return next_session_open_timestamp_ts - timedelta(minutes=DEFAULT_SUBMISSION_BUFFER_MINUTES_INT)
+        return next_session_open_timestamp_ts - timedelta(
+            seconds=DEFAULT_OPEN_SUBMISSION_LEAD_SECONDS_INT
+        )
 
     if release_obj.execution_policy_str == "same_day_moc":
         session_close_timestamp_ts = get_session_close_timestamp_ts(
@@ -260,7 +263,9 @@ def build_submission_timestamp_ts(
             first_next_month_session_label_ts,
             release_obj.session_calendar_id_str,
         )
-        return first_next_month_open_timestamp_ts - timedelta(minutes=DEFAULT_SUBMISSION_BUFFER_MINUTES_INT)
+        return first_next_month_open_timestamp_ts - timedelta(
+            seconds=DEFAULT_OPEN_SUBMISSION_LEAD_SECONDS_INT
+        )
 
     raise ValueError(f"Unsupported execution_policy_str '{release_obj.execution_policy_str}'.")
 

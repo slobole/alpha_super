@@ -6,23 +6,24 @@ from typing import Iterable
 
 from alpha.live.models import (
     BrokerOrderFill,
+    BrokerOrderEvent,
     BrokerOrderRecord,
     BrokerSnapshot,
     DecisionPlan,
     LiveRelease,
     ReconciliationResult,
+    SessionOpenPrice,
     VPlan,
     VPlanRow,
 )
 from alpha.live.state_store import (
-    LiveStateStore as V1LiveStateStore,
+    LiveStateStore as CoreLiveStateStore,
     _deserialize_timestamp_ts,
     _serialize_timestamp_str,
     _utc_now_ts,
 )
 
-
-class LiveStateStore(V1LiveStateStore):
+class LiveStateStore(CoreLiveStateStore):
     def __init__(self, db_path_str: str):
         super().__init__(db_path_str)
         self._initialize_v2_schema()
@@ -141,8 +142,28 @@ class LiveStateStore(V1LiveStateStore):
                     unit_str TEXT NOT NULL,
                     amount_float REAL NOT NULL,
                     filled_amount_float REAL NOT NULL,
+                    remaining_amount_float REAL,
+                    avg_fill_price_float REAL,
                     status_str TEXT NOT NULL,
+                    last_status_timestamp_str TEXT,
                     submitted_timestamp_str TEXT NOT NULL,
+                    raw_payload_json_str TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS vplan_broker_order_event (
+                    broker_order_event_id_int INTEGER PRIMARY KEY AUTOINCREMENT,
+                    broker_order_id_str TEXT NOT NULL,
+                    decision_plan_id_int INTEGER,
+                    vplan_id_int INTEGER NOT NULL,
+                    account_route_str TEXT NOT NULL,
+                    asset_str TEXT NOT NULL,
+                    status_str TEXT NOT NULL,
+                    filled_amount_float REAL NOT NULL,
+                    remaining_amount_float REAL,
+                    avg_fill_price_float REAL,
+                    event_timestamp_str TEXT NOT NULL,
+                    event_source_str TEXT NOT NULL,
+                    message_str TEXT NOT NULL,
                     raw_payload_json_str TEXT NOT NULL
                 );
 
@@ -155,19 +176,64 @@ class LiveStateStore(V1LiveStateStore):
                     asset_str TEXT NOT NULL,
                     fill_amount_float REAL NOT NULL,
                     fill_price_float REAL NOT NULL,
+                    official_open_price_float REAL,
+                    open_price_source_str TEXT,
                     fill_timestamp_str TEXT NOT NULL,
                     raw_payload_json_str TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS session_open_price (
+                    session_open_price_id_int INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_date_str TEXT NOT NULL,
+                    account_route_str TEXT NOT NULL,
+                    asset_str TEXT NOT NULL,
+                    official_open_price_float REAL,
+                    open_price_source_str TEXT,
+                    snapshot_timestamp_str TEXT NOT NULL,
+                    raw_payload_json_str TEXT NOT NULL
+                );
+                """
+            )
+            connection_obj.execute("DROP INDEX IF EXISTS vplan_broker_order_unique_order_idx")
+            connection_obj.execute("DROP INDEX IF EXISTS vplan_broker_order_event_unique_idx")
+            connection_obj.execute("DROP INDEX IF EXISTS vplan_fill_unique_event_idx")
+            connection_obj.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS vplan_broker_order_unique_order_idx
+                ON vplan_broker_order (vplan_id_int, broker_order_id_str)
+                """
+            )
+            connection_obj.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS vplan_broker_order_event_unique_idx
+                ON vplan_broker_order_event (
+                    vplan_id_int,
+                    broker_order_id_str,
+                    status_str,
+                    event_timestamp_str,
+                    message_str
+                )
                 """
             )
             connection_obj.execute(
                 """
                 CREATE UNIQUE INDEX IF NOT EXISTS vplan_fill_unique_event_idx
                 ON vplan_fill (
+                    vplan_id_int,
                     broker_order_id_str,
                     fill_timestamp_str,
                     fill_amount_float,
                     fill_price_float
+                )
+                """
+            )
+            connection_obj.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS session_open_price_unique_idx
+                ON session_open_price (
+                    session_date_str,
+                    account_route_str,
+                    asset_str
                 )
                 """
             )
@@ -221,6 +287,51 @@ class LiveStateStore(V1LiveStateStore):
                     """
                     ALTER TABLE decision_plan
                     ADD COLUMN rebalance_omitted_assets_to_zero_bool INTEGER NOT NULL DEFAULT 0
+                    """
+                )
+
+            vplan_broker_order_column_name_list = [
+                row_obj["name"]
+                for row_obj in connection_obj.execute("PRAGMA table_info(vplan_broker_order)").fetchall()
+            ]
+            if "remaining_amount_float" not in vplan_broker_order_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE vplan_broker_order
+                    ADD COLUMN remaining_amount_float REAL
+                    """
+                )
+            if "avg_fill_price_float" not in vplan_broker_order_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE vplan_broker_order
+                    ADD COLUMN avg_fill_price_float REAL
+                    """
+                )
+            if "last_status_timestamp_str" not in vplan_broker_order_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE vplan_broker_order
+                    ADD COLUMN last_status_timestamp_str TEXT
+                    """
+                )
+
+            vplan_fill_column_name_list = [
+                row_obj["name"]
+                for row_obj in connection_obj.execute("PRAGMA table_info(vplan_fill)").fetchall()
+            ]
+            if "official_open_price_float" not in vplan_fill_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE vplan_fill
+                    ADD COLUMN official_open_price_float REAL
+                    """
+                )
+            if "open_price_source_str" not in vplan_fill_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE vplan_fill
+                    ADD COLUMN open_price_source_str TEXT
                     """
                 )
 
@@ -793,7 +904,7 @@ class LiveStateStore(V1LiveStateStore):
                 ),
             )
 
-    def insert_vplan_broker_order_record_list(
+    def upsert_vplan_broker_order_record_list(
         self,
         broker_order_record_list: Iterable[BrokerOrderRecord],
     ) -> None:
@@ -811,10 +922,28 @@ class LiveStateStore(V1LiveStateStore):
                         unit_str,
                         amount_float,
                         filled_amount_float,
+                        remaining_amount_float,
+                        avg_fill_price_float,
                         status_str,
+                        last_status_timestamp_str,
                         submitted_timestamp_str,
                         raw_payload_json_str
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(vplan_id_int, broker_order_id_str) DO UPDATE SET
+                        decision_plan_id_int = excluded.decision_plan_id_int,
+                        vplan_id_int = excluded.vplan_id_int,
+                        account_route_str = excluded.account_route_str,
+                        asset_str = excluded.asset_str,
+                        broker_order_type_str = excluded.broker_order_type_str,
+                        unit_str = excluded.unit_str,
+                        amount_float = excluded.amount_float,
+                        filled_amount_float = excluded.filled_amount_float,
+                        remaining_amount_float = excluded.remaining_amount_float,
+                        avg_fill_price_float = excluded.avg_fill_price_float,
+                        status_str = excluded.status_str,
+                        last_status_timestamp_str = excluded.last_status_timestamp_str,
+                        submitted_timestamp_str = excluded.submitted_timestamp_str,
+                        raw_payload_json_str = excluded.raw_payload_json_str
                     """,
                     (
                         broker_order_record_obj.broker_order_id_str,
@@ -826,18 +955,113 @@ class LiveStateStore(V1LiveStateStore):
                         broker_order_record_obj.unit_str,
                         float(broker_order_record_obj.amount_float),
                         float(broker_order_record_obj.filled_amount_float),
+                        None
+                        if broker_order_record_obj.remaining_amount_float is None
+                        else float(broker_order_record_obj.remaining_amount_float),
+                        None
+                        if broker_order_record_obj.avg_fill_price_float is None
+                        else float(broker_order_record_obj.avg_fill_price_float),
                         broker_order_record_obj.status_str,
+                        None
+                        if broker_order_record_obj.last_status_timestamp_ts is None
+                        else _serialize_timestamp_str(broker_order_record_obj.last_status_timestamp_ts),
                         _serialize_timestamp_str(broker_order_record_obj.submitted_timestamp_ts),
                         json.dumps(broker_order_record_obj.raw_payload_dict, sort_keys=True),
                     ),
                 )
 
-    def insert_vplan_fill_list(self, fill_list: Iterable[BrokerOrderFill]) -> None:
+    def insert_vplan_broker_order_event_list(
+        self,
+        broker_order_event_list: Iterable[BrokerOrderEvent],
+    ) -> None:
+        with self._connect() as connection_obj:
+            for broker_order_event_obj in broker_order_event_list:
+                event_timestamp_ts = (
+                    broker_order_event_obj.event_timestamp_ts
+                    if broker_order_event_obj.event_timestamp_ts is not None
+                    else _utc_now_ts()
+                )
+                connection_obj.execute(
+                    """
+                    INSERT OR IGNORE INTO vplan_broker_order_event (
+                        broker_order_id_str,
+                        decision_plan_id_int,
+                        vplan_id_int,
+                        account_route_str,
+                        asset_str,
+                        status_str,
+                        filled_amount_float,
+                        remaining_amount_float,
+                        avg_fill_price_float,
+                        event_timestamp_str,
+                        event_source_str,
+                        message_str,
+                        raw_payload_json_str
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        broker_order_event_obj.broker_order_id_str,
+                        broker_order_event_obj.decision_plan_id_int,
+                        broker_order_event_obj.vplan_id_int,
+                        broker_order_event_obj.account_route_str,
+                        broker_order_event_obj.asset_str,
+                        broker_order_event_obj.status_str,
+                        float(broker_order_event_obj.filled_amount_float),
+                        None
+                        if broker_order_event_obj.remaining_amount_float is None
+                        else float(broker_order_event_obj.remaining_amount_float),
+                        None
+                        if broker_order_event_obj.avg_fill_price_float is None
+                        else float(broker_order_event_obj.avg_fill_price_float),
+                        _serialize_timestamp_str(event_timestamp_ts),
+                        broker_order_event_obj.event_source_str,
+                        broker_order_event_obj.message_str,
+                        json.dumps(broker_order_event_obj.raw_payload_dict, sort_keys=True),
+                    ),
+                )
+
+    def upsert_session_open_price_list(
+        self,
+        session_open_price_list: Iterable[SessionOpenPrice],
+    ) -> None:
+        with self._connect() as connection_obj:
+            for session_open_price_obj in session_open_price_list:
+                connection_obj.execute(
+                    """
+                    INSERT INTO session_open_price (
+                        session_date_str,
+                        account_route_str,
+                        asset_str,
+                        official_open_price_float,
+                        open_price_source_str,
+                        snapshot_timestamp_str,
+                        raw_payload_json_str
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(session_date_str, account_route_str, asset_str) DO UPDATE SET
+                        official_open_price_float = excluded.official_open_price_float,
+                        open_price_source_str = excluded.open_price_source_str,
+                        snapshot_timestamp_str = excluded.snapshot_timestamp_str,
+                        raw_payload_json_str = excluded.raw_payload_json_str
+                    """,
+                    (
+                        session_open_price_obj.session_date_str,
+                        session_open_price_obj.account_route_str,
+                        session_open_price_obj.asset_str,
+                        None
+                        if session_open_price_obj.official_open_price_float is None
+                        else float(session_open_price_obj.official_open_price_float),
+                        session_open_price_obj.open_price_source_str,
+                        _serialize_timestamp_str(session_open_price_obj.snapshot_timestamp_ts),
+                        json.dumps(session_open_price_obj.raw_payload_dict, sort_keys=True),
+                    ),
+                )
+
+    def upsert_vplan_fill_list(self, fill_list: Iterable[BrokerOrderFill]) -> None:
         with self._connect() as connection_obj:
             for fill_obj in fill_list:
                 connection_obj.execute(
                     """
-                    INSERT OR IGNORE INTO vplan_fill (
+                    INSERT INTO vplan_fill (
                         broker_order_id_str,
                         decision_plan_id_int,
                         vplan_id_int,
@@ -845,9 +1069,31 @@ class LiveStateStore(V1LiveStateStore):
                         asset_str,
                         fill_amount_float,
                         fill_price_float,
+                        official_open_price_float,
+                        open_price_source_str,
                         fill_timestamp_str,
                         raw_payload_json_str
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(
+                        vplan_id_int,
+                        broker_order_id_str,
+                        fill_timestamp_str,
+                        fill_amount_float,
+                        fill_price_float
+                    ) DO UPDATE SET
+                        decision_plan_id_int = excluded.decision_plan_id_int,
+                        vplan_id_int = excluded.vplan_id_int,
+                        account_route_str = excluded.account_route_str,
+                        asset_str = excluded.asset_str,
+                        official_open_price_float = COALESCE(
+                            excluded.official_open_price_float,
+                            vplan_fill.official_open_price_float
+                        ),
+                        open_price_source_str = COALESCE(
+                            excluded.open_price_source_str,
+                            vplan_fill.open_price_source_str
+                        ),
+                        raw_payload_json_str = excluded.raw_payload_json_str
                     """,
                     (
                         fill_obj.broker_order_id_str,
@@ -857,6 +1103,10 @@ class LiveStateStore(V1LiveStateStore):
                         fill_obj.asset_str,
                         float(fill_obj.fill_amount_float),
                         float(fill_obj.fill_price_float),
+                        None
+                        if fill_obj.official_open_price_float is None
+                        else float(fill_obj.official_open_price_float),
+                        fill_obj.open_price_source_str,
                         _serialize_timestamp_str(fill_obj.fill_timestamp_ts),
                         json.dumps(fill_obj.raw_payload_dict, sort_keys=True),
                     ),
@@ -870,6 +1120,8 @@ class LiveStateStore(V1LiveStateStore):
                     asset_str,
                     fill_amount_float,
                     fill_price_float,
+                    official_open_price_float,
+                    open_price_source_str,
                     fill_timestamp_str
                 FROM vplan_fill
                 WHERE vplan_id_int = ?
@@ -882,10 +1134,88 @@ class LiveStateStore(V1LiveStateStore):
                 "asset_str": row_obj["asset_str"],
                 "fill_amount_float": float(row_obj["fill_amount_float"]),
                 "fill_price_float": float(row_obj["fill_price_float"]),
+                "official_open_price_float": None
+                if row_obj["official_open_price_float"] is None
+                else float(row_obj["official_open_price_float"]),
+                "open_price_source_str": row_obj["open_price_source_str"],
                 "fill_timestamp_str": row_obj["fill_timestamp_str"],
             }
             for row_obj in row_list
         ]
+
+    def get_broker_order_row_dict_list_for_vplan(self, vplan_id_int: int) -> list[dict]:
+        with self._connect() as connection_obj:
+            row_list = connection_obj.execute(
+                """
+                SELECT
+                    broker_order_id_str,
+                    asset_str,
+                    broker_order_type_str,
+                    unit_str,
+                    amount_float,
+                    filled_amount_float,
+                    remaining_amount_float,
+                    avg_fill_price_float,
+                    status_str,
+                    last_status_timestamp_str,
+                    submitted_timestamp_str
+                FROM vplan_broker_order
+                WHERE vplan_id_int = ?
+                ORDER BY broker_order_record_id_int ASC
+                """,
+                (int(vplan_id_int),),
+            ).fetchall()
+        return [
+            {
+                "broker_order_id_str": str(row_obj["broker_order_id_str"]),
+                "asset_str": str(row_obj["asset_str"]),
+                "broker_order_type_str": str(row_obj["broker_order_type_str"]),
+                "unit_str": str(row_obj["unit_str"]),
+                "amount_float": float(row_obj["amount_float"]),
+                "filled_amount_float": float(row_obj["filled_amount_float"]),
+                "remaining_amount_float": None
+                if row_obj["remaining_amount_float"] is None
+                else float(row_obj["remaining_amount_float"]),
+                "avg_fill_price_float": None
+                if row_obj["avg_fill_price_float"] is None
+                else float(row_obj["avg_fill_price_float"]),
+                "status_str": str(row_obj["status_str"]),
+                "last_status_timestamp_str": row_obj["last_status_timestamp_str"],
+                "submitted_timestamp_str": str(row_obj["submitted_timestamp_str"]),
+            }
+            for row_obj in row_list
+        ]
+
+    def get_session_open_price_map_dict(
+        self,
+        account_route_str: str,
+        session_date_str: str,
+    ) -> dict[str, SessionOpenPrice]:
+        with self._connect() as connection_obj:
+            row_list = connection_obj.execute(
+                """
+                SELECT *
+                FROM session_open_price
+                WHERE account_route_str = ?
+                  AND session_date_str = ?
+                ORDER BY asset_str ASC
+                """,
+                (account_route_str, session_date_str),
+            ).fetchall()
+        return {
+            str(row_obj["asset_str"]): SessionOpenPrice(
+                session_date_str=str(row_obj["session_date_str"]),
+                account_route_str=str(row_obj["account_route_str"]),
+                asset_str=str(row_obj["asset_str"]),
+                official_open_price_float=None
+                if row_obj["official_open_price_float"] is None
+                else float(row_obj["official_open_price_float"]),
+                open_price_source_str=row_obj["open_price_source_str"],
+                snapshot_timestamp_ts=_deserialize_timestamp_ts(row_obj["snapshot_timestamp_str"]),
+                raw_payload_dict=json.loads(row_obj["raw_payload_json_str"]),
+            )
+            for row_obj in row_list
+        }
 
     def _row_to_decision_plan(self, row_obj: sqlite3.Row) -> DecisionPlan:
         return DecisionPlan(

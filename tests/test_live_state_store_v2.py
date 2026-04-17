@@ -4,10 +4,21 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from alpha.live.models import DecisionPlan, LiveRelease, VPlan, VPlanRow
+from alpha.live.models import BrokerOrderEvent, BrokerOrderFill, BrokerOrderRecord, SessionOpenPrice
+from alpha.live.state_store import V1_EXECUTION_TABLE_NAME_TUPLE
 from alpha.live.state_store_v2 import LiveStateStore
 
 
 MARKET_TIMEZONE_OBJ = ZoneInfo("America/New_York")
+
+
+def test_state_store_v2_does_not_bootstrap_v1_execution_tables(tmp_path):
+    db_path_str = str((tmp_path / "live.sqlite3").resolve())
+    state_store_obj = LiveStateStore(db_path_str)
+
+    existing_table_name_set = set(state_store_obj.get_existing_table_name_list())
+
+    assert set(V1_EXECUTION_TABLE_NAME_TUPLE).isdisjoint(existing_table_name_set)
 
 
 def test_state_store_v2_roundtrips_decision_plan_and_vplan(tmp_path):
@@ -135,3 +146,134 @@ def test_state_store_v2_roundtrips_full_target_weight_decision_plan(tmp_path):
     assert roundtrip_decision_plan_obj.full_target_weight_map_dict == {"AAPL": 0.6, "TLT": 0.3}
     assert roundtrip_decision_plan_obj.target_weight_map == {"AAPL": 0.6, "TLT": 0.3}
     assert roundtrip_decision_plan_obj.rebalance_omitted_assets_to_zero_bool is True
+
+
+def test_state_store_v2_roundtrips_order_events_session_open_and_fill_enrichment(tmp_path):
+    db_path_str = str((tmp_path / "live_events.sqlite3").resolve())
+    state_store_obj = LiveStateStore(db_path_str)
+
+    state_store_obj.upsert_vplan_broker_order_record_list(
+        [
+            BrokerOrderRecord(
+                broker_order_id_str="broker_001",
+                decision_plan_id_int=11,
+                vplan_id_int=13,
+                account_route_str="DU1",
+                asset_str="AAPL",
+                broker_order_type_str="MOO",
+                unit_str="shares",
+                amount_float=10.0,
+                filled_amount_float=0.0,
+                remaining_amount_float=10.0,
+                avg_fill_price_float=None,
+                status_str="PendingSubmit",
+                last_status_timestamp_ts=datetime(2024, 2, 1, 9, 20, tzinfo=MARKET_TIMEZONE_OBJ),
+                submitted_timestamp_ts=datetime(2024, 2, 1, 9, 20, tzinfo=MARKET_TIMEZONE_OBJ),
+                raw_payload_dict={},
+            )
+        ]
+    )
+    state_store_obj.insert_vplan_broker_order_event_list(
+        [
+            BrokerOrderEvent(
+                broker_order_id_str="broker_001",
+                decision_plan_id_int=11,
+                vplan_id_int=13,
+                account_route_str="DU1",
+                asset_str="AAPL",
+                status_str="PendingSubmit",
+                filled_amount_float=0.0,
+                remaining_amount_float=10.0,
+                avg_fill_price_float=None,
+                event_timestamp_ts=datetime(2024, 2, 1, 9, 20, tzinfo=MARKET_TIMEZONE_OBJ),
+                event_source_str="test",
+                message_str="submitted",
+                raw_payload_dict={},
+            ),
+            BrokerOrderEvent(
+                broker_order_id_str="broker_001",
+                decision_plan_id_int=11,
+                vplan_id_int=13,
+                account_route_str="DU1",
+                asset_str="AAPL",
+                status_str="PendingSubmit",
+                filled_amount_float=0.0,
+                remaining_amount_float=10.0,
+                avg_fill_price_float=None,
+                event_timestamp_ts=datetime(2024, 2, 1, 9, 20, tzinfo=MARKET_TIMEZONE_OBJ),
+                event_source_str="test",
+                message_str="submitted",
+                raw_payload_dict={},
+            ),
+        ]
+    )
+    state_store_obj.upsert_session_open_price_list(
+        [
+            SessionOpenPrice(
+                session_date_str="2024-02-01",
+                account_route_str="DU1",
+                asset_str="AAPL",
+                official_open_price_float=101.0,
+                open_price_source_str="ibkr.tick_open",
+                snapshot_timestamp_ts=datetime(2024, 2, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ),
+                raw_payload_dict={},
+            )
+        ]
+    )
+    state_store_obj.upsert_vplan_fill_list(
+        [
+            BrokerOrderFill(
+                broker_order_id_str="broker_001",
+                decision_plan_id_int=11,
+                vplan_id_int=13,
+                account_route_str="DU1",
+                asset_str="AAPL",
+                fill_amount_float=10.0,
+                fill_price_float=101.5,
+                official_open_price_float=101.0,
+                open_price_source_str="ibkr.tick_open",
+                fill_timestamp_ts=datetime(2024, 2, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ),
+                raw_payload_dict={},
+            )
+        ]
+    )
+
+    broker_order_row_dict_list = state_store_obj.get_broker_order_row_dict_list_for_vplan(13)
+    fill_row_dict_list = state_store_obj.get_fill_row_dict_list_for_vplan(13)
+    session_open_price_map_dict = state_store_obj.get_session_open_price_map_dict("DU1", "2024-02-01")
+
+    assert broker_order_row_dict_list == [
+        {
+            "broker_order_id_str": "broker_001",
+            "asset_str": "AAPL",
+            "broker_order_type_str": "MOO",
+            "unit_str": "shares",
+            "amount_float": 10.0,
+            "filled_amount_float": 0.0,
+            "remaining_amount_float": 10.0,
+            "avg_fill_price_float": None,
+            "status_str": "PendingSubmit",
+            "last_status_timestamp_str": "2024-02-01T09:20:00-05:00",
+            "submitted_timestamp_str": "2024-02-01T09:20:00-05:00",
+        }
+    ]
+    assert fill_row_dict_list == [
+        {
+            "asset_str": "AAPL",
+            "fill_amount_float": 10.0,
+            "fill_price_float": 101.5,
+            "official_open_price_float": 101.0,
+            "open_price_source_str": "ibkr.tick_open",
+            "fill_timestamp_str": "2024-02-01T09:30:00-05:00",
+        }
+    ]
+    assert session_open_price_map_dict["AAPL"].official_open_price_float == 101.0
+
+    with state_store_obj._connect() as connection_obj:
+        row_count_int = int(
+            connection_obj.execute(
+                "SELECT COUNT(1) AS row_count_int FROM vplan_broker_order_event"
+            ).fetchone()["row_count_int"]
+        )
+
+    assert row_count_int == 1

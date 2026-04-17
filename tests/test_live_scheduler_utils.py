@@ -70,7 +70,8 @@ def test_scheduler_uses_real_next_session_after_long_weekend():
 
     assert submission_timestamp_ts.date().isoformat() == "2024-04-01"
     assert submission_timestamp_ts.hour == 9
-    assert submission_timestamp_ts.minute == 20
+    assert submission_timestamp_ts.minute == 23
+    assert submission_timestamp_ts.second == 30
     assert target_execution_timestamp_ts.date().isoformat() == "2024-04-01"
     assert target_execution_timestamp_ts.hour == 9
     assert target_execution_timestamp_ts.minute == 30

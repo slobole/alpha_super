@@ -7,13 +7,15 @@ from typing import Iterable
 import uuid
 
 from alpha.live.ibkr_socket_client import IBKRSocketClient
+from alpha.live import scheduler_utils
 from alpha.live.models import (
     BrokerOrderFill,
+    BrokerOrderEvent,
     BrokerOrderRecord,
     BrokerOrderRequest,
     BrokerSnapshot,
-    FrozenOrderIntent,
     LivePriceSnapshot,
+    SessionOpenPrice,
 )
 
 
@@ -49,75 +51,27 @@ def validate_account_route_matches_mode(
 
 
 def _amount_in_shares_float(
-    intent_obj: FrozenOrderIntent,
+    unit_str: str,
+    amount_float: float,
+    target_bool: bool,
+    sizing_reference_price_float: float,
+    portfolio_value_float: float,
     current_position_float: float,
 ) -> float:
-    if intent_obj.unit_str == "shares":
-        intended_amount_float = float(intent_obj.amount_float)
-    elif intent_obj.unit_str == "value":
-        intended_amount_float = float(int(intent_obj.amount_float / intent_obj.sizing_reference_price_float))
-    elif intent_obj.unit_str == "percent":
+    if unit_str == "shares":
+        intended_amount_float = float(amount_float)
+    elif unit_str == "value":
+        intended_amount_float = float(int(amount_float / sizing_reference_price_float))
+    elif unit_str == "percent":
         intended_amount_float = float(
-            int(intent_obj.portfolio_value_float * intent_obj.amount_float / intent_obj.sizing_reference_price_float)
+            int(portfolio_value_float * amount_float / sizing_reference_price_float)
         )
     else:
-        raise ValueError(f"Unsupported unit_str '{intent_obj.unit_str}'.")
+        raise ValueError(f"Unsupported unit_str '{unit_str}'.")
 
-    if intent_obj.target_bool:
+    if target_bool:
         return intended_amount_float - float(current_position_float)
     return intended_amount_float
-
-
-def validate_order_intent_list(
-    order_intent_list: Iterable[FrozenOrderIntent],
-    allowed_symbol_set: set[str] | None = None,
-) -> None:
-    for order_intent_obj in order_intent_list:
-        if len(order_intent_obj.asset_str.strip()) == 0:
-            raise ValueError("Order intent asset_str must not be empty.")
-        if allowed_symbol_set is not None and order_intent_obj.asset_str not in allowed_symbol_set:
-            raise ValueError(
-                f"Order intent asset_str '{order_intent_obj.asset_str}' is outside the allowed symbol set."
-            )
-        if order_intent_obj.sizing_reference_price_float <= 0.0:
-            raise ValueError(
-                f"Order intent sizing_reference_price_float must be positive for {order_intent_obj.asset_str}."
-            )
-
-
-def build_broker_order_request_list(
-    order_plan_id_int: int,
-    release_id_str: str,
-    pod_id_str: str,
-    account_route_str: str,
-    submission_key_str: str,
-    order_intent_list: list[FrozenOrderIntent],
-    order_intent_id_list: list[int],
-) -> list[BrokerOrderRequest]:
-    broker_order_request_list: list[BrokerOrderRequest] = []
-
-    for order_intent_id_int, order_intent_obj in zip(order_intent_id_list, order_intent_list, strict=True):
-        broker_order_request_list.append(
-            BrokerOrderRequest(
-                order_plan_id_int=order_plan_id_int,
-                order_intent_id_int=int(order_intent_id_int),
-                release_id_str=release_id_str,
-                pod_id_str=pod_id_str,
-                account_route_str=account_route_str,
-                submission_key_str=submission_key_str,
-                asset_str=order_intent_obj.asset_str,
-                broker_order_type_str=order_intent_obj.broker_order_type_str,
-                order_class_str=order_intent_obj.order_class_str,
-                unit_str=order_intent_obj.unit_str,
-                amount_float=float(order_intent_obj.amount_float),
-                target_bool=bool(order_intent_obj.target_bool),
-                trade_id_int=order_intent_obj.trade_id_int,
-                sizing_reference_price_float=float(order_intent_obj.sizing_reference_price_float),
-                portfolio_value_float=float(order_intent_obj.portfolio_value_float),
-            )
-        )
-
-    return broker_order_request_list
 
 
 class BrokerAdapter(ABC):
@@ -151,7 +105,7 @@ class BrokerAdapter(ABC):
         account_route_str: str,
         broker_order_request_list: list[BrokerOrderRequest],
         submitted_timestamp_ts: datetime,
-    ) -> tuple[list[BrokerOrderRecord], list[BrokerOrderFill]]:
+    ) -> tuple[list[BrokerOrderRecord], list[BrokerOrderEvent], list[BrokerOrderFill]]:
         raise NotImplementedError
 
     @abstractmethod
@@ -160,6 +114,24 @@ class BrokerAdapter(ABC):
         account_route_str: str,
         since_timestamp_ts: datetime,
     ) -> list[BrokerOrderFill]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_recent_order_state_snapshot(
+        self,
+        account_route_str: str,
+        since_timestamp_ts: datetime,
+    ) -> tuple[list[BrokerOrderRecord], list[BrokerOrderEvent], list[BrokerOrderFill]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_session_open_price_list(
+        self,
+        account_route_str: str,
+        asset_str_list: list[str],
+        session_open_timestamp_ts: datetime,
+        session_calendar_id_str: str,
+    ) -> list[SessionOpenPrice]:
         raise NotImplementedError
 
 
@@ -211,7 +183,7 @@ class IBKRGatewayBrokerAdapter(BrokerAdapter):
         account_route_str: str,
         broker_order_request_list: list[BrokerOrderRequest],
         submitted_timestamp_ts: datetime,
-    ) -> tuple[list[BrokerOrderRecord], list[BrokerOrderFill]]:
+    ) -> tuple[list[BrokerOrderRecord], list[BrokerOrderEvent], list[BrokerOrderFill]]:
         return self.socket_client_obj.submit_order_request_list(
             account_route_str=account_route_str,
             broker_order_request_list=broker_order_request_list,
@@ -228,11 +200,38 @@ class IBKRGatewayBrokerAdapter(BrokerAdapter):
             since_timestamp_ts=since_timestamp_ts,
         )
 
+    def get_recent_order_state_snapshot(
+        self,
+        account_route_str: str,
+        since_timestamp_ts: datetime,
+    ) -> tuple[list[BrokerOrderRecord], list[BrokerOrderEvent], list[BrokerOrderFill]]:
+        return self.socket_client_obj.get_recent_order_state_snapshot(
+            account_route_str=account_route_str,
+            since_timestamp_ts=since_timestamp_ts,
+        )
+
+    def get_session_open_price_list(
+        self,
+        account_route_str: str,
+        asset_str_list: list[str],
+        session_open_timestamp_ts: datetime,
+        session_calendar_id_str: str,
+    ) -> list[SessionOpenPrice]:
+        return self.socket_client_obj.get_session_open_price_list(
+            account_route_str=account_route_str,
+            asset_str_list=asset_str_list,
+            session_open_timestamp_ts=session_open_timestamp_ts,
+            session_calendar_id_str=session_calendar_id_str,
+        )
+
 
 class StubBrokerAdapter(BrokerAdapter):
     def __init__(self):
         self._snapshot_map: dict[str, BrokerSnapshot] = {}
         self._fill_map: dict[str, list[BrokerOrderFill]] = defaultdict(list)
+        self._broker_order_record_map: dict[str, dict[str, BrokerOrderRecord]] = defaultdict(dict)
+        self._broker_order_event_map: dict[str, list[BrokerOrderEvent]] = defaultdict(list)
+        self._session_open_price_map: dict[tuple[str, str, str], SessionOpenPrice] = {}
         self._session_mode_map: dict[str, str] = {}
         self._fill_price_multiplier_map: dict[str, float] = {}
         self._live_price_snapshot_map: dict[str, LivePriceSnapshot] = {}
@@ -299,6 +298,28 @@ class StubBrokerAdapter(BrokerAdapter):
     ) -> None:
         self._fill_price_multiplier_map[str(asset_str)] = float(fill_price_multiplier_float)
 
+    def seed_session_open_price(
+        self,
+        account_route_str: str,
+        session_date_str: str,
+        asset_str: str,
+        official_open_price_float: float | None,
+        open_price_source_str: str = "stub.seeded_open",
+        snapshot_timestamp_ts: datetime | None = None,
+    ) -> None:
+        if snapshot_timestamp_ts is None:
+            snapshot_timestamp_ts = datetime.now(UTC)
+        self._session_open_price_map[(account_route_str, session_date_str, asset_str)] = SessionOpenPrice(
+            session_date_str=str(session_date_str),
+            account_route_str=str(account_route_str),
+            asset_str=str(asset_str),
+            official_open_price_float=(
+                None if official_open_price_float is None else float(official_open_price_float)
+            ),
+            open_price_source_str=str(open_price_source_str),
+            snapshot_timestamp_ts=snapshot_timestamp_ts,
+        )
+
     def get_session_mode_str(self, account_route_str: str) -> str | None:
         return self._session_mode_map.get(account_route_str)
 
@@ -338,29 +359,23 @@ class StubBrokerAdapter(BrokerAdapter):
         account_route_str: str,
         broker_order_request_list: list[BrokerOrderRequest],
         submitted_timestamp_ts: datetime,
-    ) -> tuple[list[BrokerOrderRecord], list[BrokerOrderFill]]:
+    ) -> tuple[list[BrokerOrderRecord], list[BrokerOrderEvent], list[BrokerOrderFill]]:
         snapshot_obj = self.get_account_snapshot(account_route_str)
         updated_position_map = dict(snapshot_obj.position_amount_map)
         cash_float = float(snapshot_obj.cash_float)
         broker_order_record_list: list[BrokerOrderRecord] = []
+        broker_order_event_list: list[BrokerOrderEvent] = []
         broker_order_fill_list: list[BrokerOrderFill] = []
 
         for broker_order_request_obj in broker_order_request_list:
             self.submitted_order_request_list.append(broker_order_request_obj)
             current_position_float = float(updated_position_map.get(broker_order_request_obj.asset_str, 0.0))
-            intent_obj = FrozenOrderIntent(
-                asset_str=broker_order_request_obj.asset_str,
-                order_class_str=broker_order_request_obj.order_class_str,
+            filled_amount_float = _amount_in_shares_float(
                 unit_str=broker_order_request_obj.unit_str,
                 amount_float=broker_order_request_obj.amount_float,
                 target_bool=broker_order_request_obj.target_bool,
-                trade_id_int=broker_order_request_obj.trade_id_int,
-                broker_order_type_str=broker_order_request_obj.broker_order_type_str,
                 sizing_reference_price_float=broker_order_request_obj.sizing_reference_price_float,
                 portfolio_value_float=broker_order_request_obj.portfolio_value_float,
-            )
-            filled_amount_float = _amount_in_shares_float(
-                intent_obj=intent_obj,
                 current_position_float=current_position_float,
             )
             updated_position_map[broker_order_request_obj.asset_str] = (
@@ -376,11 +391,10 @@ class StubBrokerAdapter(BrokerAdapter):
             cash_float -= filled_amount_float * fill_price_float
 
             broker_order_id_str = uuid.uuid4().hex
+            requested_quantity_float = abs(float(broker_order_request_obj.amount_float))
             broker_order_record_list.append(
                 BrokerOrderRecord(
                     broker_order_id_str=broker_order_id_str,
-                    order_plan_id_int=broker_order_request_obj.order_plan_id_int,
-                    order_intent_id_int=broker_order_request_obj.order_intent_id_int,
                     decision_plan_id_int=broker_order_request_obj.decision_plan_id_int,
                     vplan_id_int=broker_order_request_obj.vplan_id_int,
                     account_route_str=account_route_str,
@@ -388,8 +402,11 @@ class StubBrokerAdapter(BrokerAdapter):
                     broker_order_type_str=broker_order_request_obj.broker_order_type_str,
                     unit_str=broker_order_request_obj.unit_str,
                     amount_float=broker_order_request_obj.amount_float,
-                    filled_amount_float=filled_amount_float,
-                    status_str="filled",
+                    filled_amount_float=0.0,
+                    remaining_amount_float=requested_quantity_float,
+                    avg_fill_price_float=None,
+                    status_str="PendingSubmit",
+                    last_status_timestamp_ts=submitted_timestamp_ts,
                     submitted_timestamp_ts=submitted_timestamp_ts,
                     raw_payload_dict={
                         "trade_id_int": broker_order_request_obj.trade_id_int,
@@ -398,9 +415,43 @@ class StubBrokerAdapter(BrokerAdapter):
                     },
                 )
             )
+            pending_event_obj = BrokerOrderEvent(
+                broker_order_id_str=broker_order_id_str,
+                decision_plan_id_int=broker_order_request_obj.decision_plan_id_int,
+                vplan_id_int=broker_order_request_obj.vplan_id_int,
+                account_route_str=account_route_str,
+                asset_str=broker_order_request_obj.asset_str,
+                status_str="PendingSubmit",
+                filled_amount_float=0.0,
+                remaining_amount_float=requested_quantity_float,
+                avg_fill_price_float=None,
+                event_timestamp_ts=submitted_timestamp_ts,
+                event_source_str="stub.submit",
+                message_str="submitted",
+                raw_payload_dict={
+                    "submission_key_str": broker_order_request_obj.submission_key_str,
+                },
+            )
+            filled_event_obj = BrokerOrderEvent(
+                broker_order_id_str=broker_order_id_str,
+                decision_plan_id_int=broker_order_request_obj.decision_plan_id_int,
+                vplan_id_int=broker_order_request_obj.vplan_id_int,
+                account_route_str=account_route_str,
+                asset_str=broker_order_request_obj.asset_str,
+                status_str="Filled",
+                filled_amount_float=filled_amount_float,
+                remaining_amount_float=0.0,
+                avg_fill_price_float=fill_price_float,
+                event_timestamp_ts=submitted_timestamp_ts,
+                event_source_str="stub.fill",
+                message_str="fill complete",
+                raw_payload_dict={
+                    "trade_id_int": broker_order_request_obj.trade_id_int,
+                },
+            )
+            broker_order_event_list.append(pending_event_obj)
             broker_order_fill_obj = BrokerOrderFill(
                 broker_order_id_str=broker_order_id_str,
-                order_plan_id_int=broker_order_request_obj.order_plan_id_int,
                 decision_plan_id_int=broker_order_request_obj.decision_plan_id_int,
                 vplan_id_int=broker_order_request_obj.vplan_id_int,
                 account_route_str=account_route_str,
@@ -414,6 +465,30 @@ class StubBrokerAdapter(BrokerAdapter):
             )
             broker_order_fill_list.append(broker_order_fill_obj)
             self._fill_map[account_route_str].append(broker_order_fill_obj)
+            self._broker_order_event_map[account_route_str].extend(
+                [pending_event_obj, filled_event_obj]
+            )
+            self._broker_order_record_map[account_route_str][broker_order_id_str] = BrokerOrderRecord(
+                broker_order_id_str=broker_order_id_str,
+                decision_plan_id_int=broker_order_request_obj.decision_plan_id_int,
+                vplan_id_int=broker_order_request_obj.vplan_id_int,
+                account_route_str=account_route_str,
+                asset_str=broker_order_request_obj.asset_str,
+                broker_order_type_str=broker_order_request_obj.broker_order_type_str,
+                unit_str=broker_order_request_obj.unit_str,
+                amount_float=broker_order_request_obj.amount_float,
+                filled_amount_float=filled_amount_float,
+                remaining_amount_float=0.0,
+                avg_fill_price_float=fill_price_float,
+                status_str="Filled",
+                last_status_timestamp_ts=submitted_timestamp_ts,
+                submitted_timestamp_ts=submitted_timestamp_ts,
+                raw_payload_dict={
+                    "trade_id_int": broker_order_request_obj.trade_id_int,
+                    "target_bool": broker_order_request_obj.target_bool,
+                    "submission_key_str": broker_order_request_obj.submission_key_str,
+                },
+            )
 
         asset_reference_price_map: dict[str, float] = {}
         if account_route_str in self._live_price_snapshot_map:
@@ -442,7 +517,7 @@ class StubBrokerAdapter(BrokerAdapter):
             open_order_id_list=[],
         )
 
-        return broker_order_record_list, broker_order_fill_list
+        return broker_order_record_list, broker_order_event_list, []
 
     def get_recent_fill_list(
         self,
@@ -455,3 +530,65 @@ class StubBrokerAdapter(BrokerAdapter):
             for fill_obj in fill_list
             if fill_obj.fill_timestamp_ts >= since_timestamp_ts
         ]
+
+    def get_recent_order_state_snapshot(
+        self,
+        account_route_str: str,
+        since_timestamp_ts: datetime,
+    ) -> tuple[list[BrokerOrderRecord], list[BrokerOrderEvent], list[BrokerOrderFill]]:
+        broker_order_record_list = list(self._broker_order_record_map.get(account_route_str, {}).values())
+        broker_order_event_list = [
+            broker_order_event_obj
+            for broker_order_event_obj in self._broker_order_event_map.get(account_route_str, [])
+            if (
+                broker_order_event_obj.event_timestamp_ts is not None
+                and broker_order_event_obj.event_timestamp_ts >= since_timestamp_ts
+            )
+        ]
+        broker_order_fill_list = self.get_recent_fill_list(
+            account_route_str=account_route_str,
+            since_timestamp_ts=since_timestamp_ts,
+        )
+        return broker_order_record_list, broker_order_event_list, broker_order_fill_list
+
+    def get_session_open_price_list(
+        self,
+        account_route_str: str,
+        asset_str_list: list[str],
+        session_open_timestamp_ts: datetime,
+        session_calendar_id_str: str,
+    ) -> list[SessionOpenPrice]:
+        market_open_timestamp_ts = scheduler_utils.to_market_timestamp_ts(
+            session_open_timestamp_ts,
+            session_calendar_id_str,
+        )
+        session_date_str = market_open_timestamp_ts.date().isoformat()
+        session_open_price_list: list[SessionOpenPrice] = []
+        live_price_snapshot_obj = self._live_price_snapshot_map.get(account_route_str)
+        for asset_str in asset_str_list:
+            seeded_session_open_price_obj = self._session_open_price_map.get(
+                (account_route_str, session_date_str, asset_str)
+            )
+            if seeded_session_open_price_obj is not None:
+                session_open_price_list.append(seeded_session_open_price_obj)
+                continue
+            official_open_price_float = None
+            open_price_source_str = None
+            if (
+                live_price_snapshot_obj is not None
+                and asset_str in live_price_snapshot_obj.asset_reference_price_map
+            ):
+                official_open_price_float = float(live_price_snapshot_obj.asset_reference_price_map[asset_str])
+                open_price_source_str = "stub.live_price"
+            session_open_price_list.append(
+                SessionOpenPrice(
+                    session_date_str=session_date_str,
+                    account_route_str=account_route_str,
+                    asset_str=asset_str,
+                    official_open_price_float=official_open_price_float,
+                    open_price_source_str=open_price_source_str,
+                    snapshot_timestamp_ts=market_open_timestamp_ts,
+                    raw_payload_dict={},
+                )
+            )
+        return session_open_price_list

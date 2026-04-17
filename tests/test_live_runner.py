@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+import sqlite3
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -11,7 +12,9 @@ from alpha.live.order_clerk import StubBrokerAdapter
 from alpha.live.runner import (
     build_decision_plans,
     build_vplans,
+    cutover_v1_schema,
     get_execution_report_summary,
+    preflight_contract_summary,
     get_status_summary,
     post_execution_reconcile,
     show_vplan_summary,
@@ -346,7 +349,31 @@ def test_live_runner_auto_tick_builds_submits_and_reconciles(tmp_path: Path, mon
     assert third_tick_detail_dict["completed_vplan_count_int"] == 1
     assert status_summary_dict["pod_status_dict_list"][0]["latest_decision_plan_status_str"] == "completed"
     assert status_summary_dict["pod_status_dict_list"][0]["latest_vplan_status_str"] == "completed"
-    assert execution_report_summary_dict["execution_report_dict_list"][0]["fill_row_dict_list"][0]["asset_str"] == "AAPL"
+    assert status_summary_dict["pod_status_dict_list"][0]["latest_broker_order_row_dict_list"] == [
+        {
+            "broker_order_id_str": status_summary_dict["pod_status_dict_list"][0]["latest_broker_order_row_dict_list"][0]["broker_order_id_str"],
+            "asset_str": "AAPL",
+            "broker_order_type_str": "MOO",
+            "unit_str": "shares",
+            "amount_float": 10.0,
+            "filled_amount_float": 10.0,
+            "remaining_amount_float": 0.0,
+            "avg_fill_price_float": 100.0,
+            "status_str": "Filled",
+            "last_status_timestamp_str": "2024-02-01T09:22:00-05:00",
+            "submitted_timestamp_str": "2024-02-01T09:22:00-05:00",
+        }
+    ]
+    assert execution_report_summary_dict["execution_report_dict_list"][0]["fill_row_dict_list"] == [
+        {
+            "asset_str": "AAPL",
+            "fill_amount_float": 10.0,
+            "fill_price_float": 100.0,
+            "official_open_price_float": 100.0,
+            "open_price_source_str": "stub.live_price",
+            "fill_timestamp_str": "2024-02-01T09:22:00-05:00",
+        }
+    ]
 
 
 def test_submit_vplan_explicit_manual_path(tmp_path: Path, monkeypatch):
@@ -537,3 +564,187 @@ def test_build_vplan_full_target_weight_book_rebalances_omitted_holdings(tmp_pat
             "warning_bool": False,
         },
     ]
+
+
+def test_preflight_contract_summary_reports_pass(tmp_path: Path, monkeypatch):
+    db_path_str = str((tmp_path / "live.sqlite3").resolve())
+    _write_manifest(tmp_path, auto_submit_enabled_bool=False)
+
+    monkeypatch.setattr(
+        "alpha.live.strategy_host.preflight_decision_contract_for_release",
+        lambda release_obj, as_of_ts, pod_state_obj: {
+            "release_id_str": release_obj.release_id_str,
+            "pod_id_str": release_obj.pod_id_str,
+            "strategy_import_str": release_obj.strategy_import_str,
+            "decision_book_type_str": "incremental_entry_exit_book",
+            "contract_status_str": "pass",
+            "accepted_shape_count_int": 1,
+            "unsupported_shape_count_int": 0,
+            "unsupported_shape_example_dict_list": [],
+            "error_str": None,
+        },
+    )
+
+    state_store_obj = LiveStateStore(db_path_str)
+    detail_dict = preflight_contract_summary(
+        state_store_obj=state_store_obj,
+        as_of_ts=datetime(2024, 2, 1, 9, 22, tzinfo=MARKET_TIMEZONE_OBJ),
+        releases_root_path_str=str(tmp_path / "releases"),
+    )
+
+    assert detail_dict["enabled_release_count_int"] == 1
+    assert detail_dict["passed_release_count_int"] == 1
+    assert detail_dict["failed_release_count_int"] == 0
+    assert detail_dict["contract_report_dict_list"][0]["contract_status_str"] == "pass"
+
+
+def test_preflight_contract_summary_reports_failure(tmp_path: Path, monkeypatch):
+    db_path_str = str((tmp_path / "live.sqlite3").resolve())
+    _write_manifest(tmp_path, auto_submit_enabled_bool=False)
+
+    monkeypatch.setattr(
+        "alpha.live.strategy_host.preflight_decision_contract_for_release",
+        lambda release_obj, as_of_ts, pod_state_obj: {
+            "release_id_str": release_obj.release_id_str,
+            "pod_id_str": release_obj.pod_id_str,
+            "strategy_import_str": release_obj.strategy_import_str,
+            "decision_book_type_str": "incremental_entry_exit_book",
+            "contract_status_str": "fail",
+            "accepted_shape_count_int": 0,
+            "unsupported_shape_count_int": 1,
+            "unsupported_shape_example_dict_list": [
+                {
+                    "asset_str": "AAPL",
+                    "order_class_str": "LimitOrder",
+                    "unit_str": "value",
+                    "target_bool": False,
+                    "amount_float": 1000.0,
+                    "trade_id_int": 1,
+                }
+            ],
+            "error_str": "Unsupported incremental research order shape.",
+        },
+    )
+
+    state_store_obj = LiveStateStore(db_path_str)
+    detail_dict = preflight_contract_summary(
+        state_store_obj=state_store_obj,
+        as_of_ts=datetime(2024, 2, 1, 9, 22, tzinfo=MARKET_TIMEZONE_OBJ),
+        releases_root_path_str=str(tmp_path / "releases"),
+    )
+
+    assert detail_dict["enabled_release_count_int"] == 1
+    assert detail_dict["passed_release_count_int"] == 0
+    assert detail_dict["failed_release_count_int"] == 1
+    assert detail_dict["contract_report_dict_list"][0]["contract_status_str"] == "fail"
+    assert detail_dict["contract_report_dict_list"][0]["unsupported_shape_count_int"] == 1
+
+
+def test_cutover_v1_schema_exports_and_drops_legacy_tables(tmp_path: Path):
+    db_path_str = str((tmp_path / "live.sqlite3").resolve())
+    state_store_obj = LiveStateStore(db_path_str)
+
+    with sqlite3.connect(db_path_str) as connection_obj:
+        connection_obj.executescript(
+            """
+            CREATE TABLE order_plan (
+                order_plan_id_int INTEGER PRIMARY KEY,
+                status_str TEXT NOT NULL
+            );
+            CREATE TABLE order_intent (
+                order_intent_id_int INTEGER PRIMARY KEY,
+                order_plan_id_int INTEGER NOT NULL,
+                asset_str TEXT NOT NULL
+            );
+            CREATE TABLE broker_order (
+                broker_order_id_str TEXT PRIMARY KEY,
+                order_plan_id_int INTEGER NOT NULL,
+                status_str TEXT NOT NULL
+            );
+            CREATE TABLE fill (
+                fill_id_int INTEGER PRIMARY KEY,
+                order_plan_id_int INTEGER NOT NULL,
+                asset_str TEXT NOT NULL
+            );
+            CREATE TABLE reconciliation_snapshot (
+                reconciliation_snapshot_id_int INTEGER PRIMARY KEY,
+                order_plan_id_int INTEGER NOT NULL,
+                status_str TEXT NOT NULL
+            );
+            CREATE TABLE execution_quality_snapshot (
+                execution_quality_snapshot_id_int INTEGER PRIMARY KEY,
+                order_plan_id_int INTEGER NOT NULL,
+                metric_float REAL NOT NULL
+            );
+            """
+        )
+        connection_obj.execute(
+            "INSERT INTO order_plan(order_plan_id_int, status_str) VALUES (?, ?)",
+            (1, "ready"),
+        )
+        connection_obj.execute(
+            "INSERT INTO order_intent(order_intent_id_int, order_plan_id_int, asset_str) VALUES (?, ?, ?)",
+            (1, 1, "AAPL"),
+        )
+        connection_obj.execute(
+            "INSERT INTO broker_order(broker_order_id_str, order_plan_id_int, status_str) VALUES (?, ?, ?)",
+            ("broker_001", 1, "submitted"),
+        )
+        connection_obj.execute(
+            "INSERT INTO fill(fill_id_int, order_plan_id_int, asset_str) VALUES (?, ?, ?)",
+            (1, 1, "AAPL"),
+        )
+        connection_obj.execute(
+            "INSERT INTO reconciliation_snapshot(reconciliation_snapshot_id_int, order_plan_id_int, status_str) VALUES (?, ?, ?)",
+            (1, 1, "pass"),
+        )
+        connection_obj.execute(
+            "INSERT INTO execution_quality_snapshot(execution_quality_snapshot_id_int, order_plan_id_int, metric_float) VALUES (?, ?, ?)",
+            (1, 1, 0.25),
+        )
+
+    detail_dict = cutover_v1_schema(
+        state_store_obj=state_store_obj,
+        as_of_ts=datetime(2024, 2, 1, 9, 22, tzinfo=MARKET_TIMEZONE_OBJ),
+        db_path_str=db_path_str,
+        archive_root_path_str=str(tmp_path / "schema_archives"),
+    )
+
+    assert detail_dict["exported_table_count_int"] == 6
+    assert detail_dict["dropped_table_count_int"] == 6
+    assert detail_dict["remaining_v1_table_name_list"] == []
+    assert Path(detail_dict["manifest_path_str"]).exists()
+
+    exported_table_name_set = {
+        table_export_dict["table_name_str"] for table_export_dict in detail_dict["table_export_dict_list"]
+    }
+    assert exported_table_name_set == {
+        "order_intent",
+        "broker_order",
+        "fill",
+        "reconciliation_snapshot",
+        "execution_quality_snapshot",
+        "order_plan",
+    }
+    for table_export_dict in detail_dict["table_export_dict_list"]:
+        archive_file_path_obj = Path(table_export_dict["archive_file_path_str"])
+        assert archive_file_path_obj.exists()
+        assert table_export_dict["source_row_count_int"] == 1
+        assert table_export_dict["exported_row_count_int"] == 1
+
+    with sqlite3.connect(db_path_str) as connection_obj:
+        remaining_table_name_set = {
+            row_obj[0]
+            for row_obj in connection_obj.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+
+    assert "order_plan" not in remaining_table_name_set
+    assert "order_intent" not in remaining_table_name_set
+    assert "broker_order" not in remaining_table_name_set
+    assert "fill" not in remaining_table_name_set
+    assert "reconciliation_snapshot" not in remaining_table_name_set
+    assert "execution_quality_snapshot" not in remaining_table_name_set
+    assert "decision_plan" in remaining_table_name_set
+    assert "vplan" in remaining_table_name_set

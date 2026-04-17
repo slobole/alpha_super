@@ -62,7 +62,7 @@ def _build_decision_plan_stub(release_obj, as_of_ts, pod_state_obj):
         pod_id_str=release_obj.pod_id_str,
         account_route_str=release_obj.account_route_str,
         signal_timestamp_ts=datetime(2024, 1, 31, 16, 0, tzinfo=MARKET_TIMEZONE_OBJ),
-        submission_timestamp_ts=datetime(2024, 2, 1, 9, 20, tzinfo=MARKET_TIMEZONE_OBJ),
+        submission_timestamp_ts=datetime(2024, 2, 1, 9, 23, 30, tzinfo=MARKET_TIMEZONE_OBJ),
         target_execution_timestamp_ts=datetime(2024, 2, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ),
         execution_policy_str="next_open_moo",
         decision_base_position_map={},
@@ -88,7 +88,7 @@ def _insert_planned_decision_plan(
             pod_id_str="pod_test_01",
             account_route_str="DU1",
             signal_timestamp_ts=datetime(2024, 1, 31, 16, 0, tzinfo=MARKET_TIMEZONE_OBJ),
-            submission_timestamp_ts=datetime(2024, 2, 1, 9, 20, tzinfo=MARKET_TIMEZONE_OBJ),
+            submission_timestamp_ts=datetime(2024, 2, 1, 9, 23, 30, tzinfo=MARKET_TIMEZONE_OBJ),
             target_execution_timestamp_ts=datetime(2024, 2, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ),
             execution_policy_str="next_open_moo",
             decision_base_position_map={},
@@ -188,7 +188,7 @@ def test_scheduler_decision_uses_submission_timestamp_in_utc(tmp_path: Path, mon
     assert scheduler_decision_obj.due_now_bool is False
     assert scheduler_decision_obj.next_phase_str == "build_vplan"
     assert scheduler_decision_obj.reason_code_str == "waiting_for_submission_window"
-    assert scheduler_decision_obj.next_due_timestamp_ts == datetime(2024, 2, 1, 14, 20, tzinfo=UTC)
+    assert scheduler_decision_obj.next_due_timestamp_ts == datetime(2024, 2, 1, 14, 23, 30, tzinfo=UTC)
 
 
 def test_scheduler_decision_active_polls_for_submitted_vplan_before_reconcile(tmp_path: Path, monkeypatch):
@@ -273,6 +273,23 @@ def test_scheduler_run_once_invokes_tick_for_startup_catchup(tmp_path: Path, mon
 
     assert detail_dict["tick_invoked_bool"] is True
     assert detail_dict["tick_detail_dict"]["created_decision_plan_count_int"] == 1
+    assert detail_dict["post_tick_pod_status_dict_list"] == [
+        {
+            "release_id_str": "user_001.pod_test.daily.v2",
+            "pod_id_str": "pod_test_01",
+            "account_route_str": "DU1",
+            "latest_decision_plan_status_str": "planned",
+            "latest_vplan_status_str": None,
+            "latest_signal_timestamp_str": "2024-01-31T16:00:00-05:00",
+            "latest_submission_timestamp_str": "2024-02-01T09:23:30-05:00",
+            "latest_broker_snapshot_timestamp_str": None,
+            "next_action_str": "wait",
+            "reason_code_str": "waiting_for_submission_window",
+            "latest_fill_timestamp_str": None,
+            "latest_broker_order_row_dict_list": [],
+        }
+    ]
+    assert detail_dict["post_tick_execution_report_dict_list"] == []
 
 
 def test_scheduler_run_once_cleans_up_stale_cycle(tmp_path: Path, monkeypatch):
@@ -291,7 +308,7 @@ def test_scheduler_run_once_cleans_up_stale_cycle(tmp_path: Path, monkeypatch):
             pod_id_str="pod_test_01",
             account_route_str="DU1",
             signal_timestamp_ts=datetime(2024, 1, 31, 16, 0, tzinfo=MARKET_TIMEZONE_OBJ),
-            submission_timestamp_ts=datetime(2024, 2, 1, 9, 20, tzinfo=MARKET_TIMEZONE_OBJ),
+            submission_timestamp_ts=datetime(2024, 2, 1, 9, 23, 30, tzinfo=MARKET_TIMEZONE_OBJ),
             target_execution_timestamp_ts=datetime(2024, 2, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ),
             execution_policy_str="next_open_moo",
             decision_base_position_map={},

@@ -1,7 +1,5 @@
 """
 LiveRelease = what to run
-FrozenOrderIntent = one planned trade
-FrozenOrderPlan = the full saved decision
 DecisionPlan = frozen strategy decision without final shares
 VPlan = pre-submit execution plan with final shares
 BrokerSnapshot = what the broker currently has
@@ -11,7 +9,6 @@ BrokerOrderRecord = what we sent
 BrokerOrderFill = what got filled
 ReconciliationResult = did model and broker match?
 PodState = saved live memory of the pod
-ExecutionQualitySnapshot = derived execution analysis
 """
 
 from __future__ import annotations
@@ -44,37 +41,6 @@ class LiveRelease:
     source_path_str: str  # YAML manifest path on disk.
     pod_budget_fraction_float: float = 0.03  # Fraction of broker NetLiq reserved for this pod.
     auto_submit_enabled_bool: bool = True  # True if tick may auto-submit the VPlan.
-
-
-@dataclass(frozen=True)
-class FrozenOrderIntent:
-    asset_str: str  # Symbol to trade.
-    order_class_str: str  # MarketOrder / LimitOrder / StopOrder.
-    unit_str: str  # shares / value / percent.
-    amount_float: float  # Signed order amount in the given unit.
-    target_bool: bool  # True if amount is a target, not a delta.
-    trade_id_int: int | None  # Strategy trade id, if used.
-    broker_order_type_str: str  # Broker-facing order type, e.g. MOO.
-    sizing_reference_price_float: float  # Price used for sizing math.
-    portfolio_value_float: float  # Portfolio value used when the intent was frozen.
-
-
-@dataclass(frozen=True)
-class FrozenOrderPlan:
-    release_id_str: str  # Release that produced this plan.
-    user_id_str: str  # Owning user.
-    pod_id_str: str  # Pod that owns the plan.
-    account_route_str: str  # Broker account that should receive the orders.
-    signal_timestamp_ts: datetime  # Decision timestamp.
-    submission_timestamp_ts: datetime  # Earliest allowed submit time.
-    target_execution_timestamp_ts: datetime  # Expected market execution time.
-    execution_policy_str: str  # next_open_moo / same_day_moc / next_month_first_open.
-    snapshot_metadata_dict: dict[str, Any]  # Audit metadata about the signal snapshot.
-    strategy_state_dict: dict[str, Any]  # Strategy memory carried to the next run.
-    order_intent_list: list[FrozenOrderIntent]  # Planned trades inside this plan.
-    submission_key_str: str | None = None  # Stable id used to guard duplicate submits.
-    status_str: str = "frozen"  # frozen / submitting / submitted / completed / blocked / failed.
-    order_plan_id_int: int | None = None  # Database primary key.
 
 
 @dataclass(frozen=True)
@@ -254,8 +220,6 @@ class BrokerOrderRequest:
     trade_id_int: int | None  # Strategy trade id, if used.
     sizing_reference_price_float: float  # Reference price used in sizing.
     portfolio_value_float: float  # Portfolio value used in sizing.
-    order_plan_id_int: int | None = None  # Parent frozen plan id in v1 flows.
-    order_intent_id_int: int | None = None  # Parent intent id in v1 flows.
     decision_plan_id_int: int | None = None  # Parent decision plan id in v2 flows.
     vplan_id_int: int | None = None  # Parent VPlan id in v2 flows.
 
@@ -263,8 +227,6 @@ class BrokerOrderRequest:
 @dataclass(frozen=True)
 class BrokerOrderRecord:
     broker_order_id_str: str  # Broker order id.
-    order_plan_id_int: int | None  # Parent frozen plan id in v1 flows.
-    order_intent_id_int: int | None  # Parent intent id in v1 flows.
     decision_plan_id_int: int | None  # Parent decision plan id in v2 flows.
     vplan_id_int: int | None  # Parent VPlan id in v2 flows.
     account_route_str: str  # Routed account.
@@ -275,13 +237,43 @@ class BrokerOrderRecord:
     filled_amount_float: float  # Filled quantity reported by broker.
     status_str: str  # Broker order status.
     submitted_timestamp_ts: datetime  # Submit timestamp.
-    raw_payload_dict: dict[str, Any]  # Extra broker payload for audit.
+    raw_payload_dict: dict[str, Any] = field(default_factory=dict)  # Extra broker payload for audit.
+    remaining_amount_float: float | None = None  # Remaining quantity reported by broker.
+    avg_fill_price_float: float | None = None  # Average fill price reported by broker.
+    last_status_timestamp_ts: datetime | None = None  # Timestamp of the latest known broker status.
+
+
+@dataclass(frozen=True)
+class BrokerOrderEvent:
+    broker_order_id_str: str  # Broker order id.
+    decision_plan_id_int: int | None  # Parent decision plan id in v2 flows.
+    vplan_id_int: int | None  # Parent VPlan id in v2 flows.
+    account_route_str: str  # Routed account.
+    asset_str: str  # Symbol traded.
+    status_str: str  # Broker order status observed at this event.
+    filled_amount_float: float  # Filled quantity reported at this event.
+    remaining_amount_float: float | None = None  # Remaining quantity reported at this event.
+    avg_fill_price_float: float | None = None  # Average fill price reported at this event.
+    event_timestamp_ts: datetime | None = None  # Timestamp of the event.
+    event_source_str: str = ""  # Source of the event, e.g. ibkr.trade_log.
+    message_str: str = ""  # Human-readable broker message.
+    raw_payload_dict: dict[str, Any] = field(default_factory=dict)  # Extra broker payload for audit.
+
+
+@dataclass(frozen=True)
+class SessionOpenPrice:
+    session_date_str: str  # Market-session date in YYYY-MM-DD form.
+    account_route_str: str  # Routed account.
+    asset_str: str  # Symbol for this session-open reference.
+    official_open_price_float: float | None  # Official session-open price if available.
+    open_price_source_str: str | None  # Source label for the open price.
+    snapshot_timestamp_ts: datetime  # When the open reference was sampled.
+    raw_payload_dict: dict[str, Any] = field(default_factory=dict)  # Extra broker payload for audit.
 
 
 @dataclass(frozen=True)
 class BrokerOrderFill:
     broker_order_id_str: str  # Broker order id that produced the fill.
-    order_plan_id_int: int | None  # Parent frozen plan id in v1 flows.
     decision_plan_id_int: int | None  # Parent decision plan id in v2 flows.
     vplan_id_int: int | None  # Parent VPlan id in v2 flows.
     account_route_str: str  # Routed account.
@@ -289,7 +281,9 @@ class BrokerOrderFill:
     fill_amount_float: float  # Signed filled quantity.
     fill_price_float: float  # Actual broker fill price.
     fill_timestamp_ts: datetime  # Fill timestamp.
-    raw_payload_dict: dict[str, Any]  # Extra broker fill payload.
+    raw_payload_dict: dict[str, Any] = field(default_factory=dict)  # Extra broker fill payload.
+    official_open_price_float: float | None = None  # Official session-open price for slippage checks.
+    open_price_source_str: str | None = None  # Source label for the official session-open price.
 
 
 @dataclass(frozen=True)
@@ -313,15 +307,3 @@ class PodState:
     total_value_float: float  # Saved total portfolio value.
     strategy_state_dict: dict[str, Any]  # Saved strategy memory.
     updated_timestamp_ts: datetime  # Last pod-state update timestamp.
-
-
-@dataclass(frozen=True)
-class ExecutionQualitySnapshot:
-    order_plan_id_int: int  # Parent frozen plan id.
-    pod_id_str: str  # Pod id.
-    reference_notional_float: float  # Model reference notional.
-    actual_notional_float: float  # Realized fill notional.
-    slippage_cash_float: float  # Cash slippage versus the current reference convention.
-    slippage_bps_float: float  # Slippage in basis points.
-    fill_count_int: int  # Number of fills used in the calculation.
-    computed_timestamp_ts: datetime  # When the snapshot was computed.
