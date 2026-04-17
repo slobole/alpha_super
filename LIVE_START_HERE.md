@@ -11,15 +11,28 @@ So:
 - night = freeze the decision
 - pre-submit = size the final shares from broker truth
 
+## Document Role
+
+Use this file for:
+- the shortest onboarding path
+- the mental model
+- the safest first commands
+
+Do not use this file as the implementation reference.
+
+For implementation truth, read:
+- [LIVE_TECHNICAL_REFERENCE.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_TECHNICAL_REFERENCE.md)
+
 ## What To Read First
 
 If you only want the short operator path, read this file first.
 
 If you want more detail after that:
+- [LIVE_TECHNICAL_REFERENCE.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_TECHNICAL_REFERENCE.md)
 - [LIVE_RUNBOOK.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_RUNBOOK.md)
 - [LIVE_TRADING_ARCHITECTURE.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_TRADING_ARCHITECTURE.md)
 
-## The 4 Things To Remember
+## The 5 Things To Remember
 
 ### 1. The strategy does not freeze shares overnight
 
@@ -73,6 +86,11 @@ It shows:
 - delta shares
 - live reference price
 - warning flag
+
+### 5. tick() does the following:
+![alt text](image-2.png)
+
+
 
 ## The Main Files
 
@@ -183,6 +201,15 @@ If you do not want an every-minute shell loop, you can run:
 uv run python -m alpha.live.scheduler_service serve --mode paper
 ```
 
+`serve` now prints scheduler events automatically.
+That output includes the current phase, related pod status, fills, and after active phases the current `VPlan` plus broker-order snapshot.
+
+If you want to tail the persisted event log from a second terminal:
+
+```bash
+Get-Content alpha/live/logs/live_events.jsonl -Wait
+```
+
 Useful helper commands:
 
 ```bash
@@ -196,6 +223,9 @@ Mental model:
 scheduler_service decides when to call tick
 tick still does all real work
 ```
+
+![alt text](image-1.png)
+
 
 For the full CLI reference, including:
 - all commands

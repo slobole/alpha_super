@@ -1,0 +1,50 @@
+{
+  "as_of_timestamp_str": "2026-04-17T07:56:24.370717+00:00",
+  "db_path_str": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\alpha\\live\\live_state.sqlite3",
+  "existing_v1_table_name_list": [
+    "order_intent",
+    "broker_order",
+    "fill",
+    "reconciliation_snapshot",
+    "execution_quality_snapshot",
+    "order_plan"
+  ],
+  "table_export_dict_list": [
+    {
+      "archive_file_path_str": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\alpha\\live\\schema_archives\\live_state_v1_cutover_20260417T075624Z\\20260417T075624Z_order_intent.json",
+      "exported_row_count_int": 1,
+      "source_row_count_int": 1,
+      "table_name_str": "order_intent"
+    },
+    {
+      "archive_file_path_str": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\alpha\\live\\schema_archives\\live_state_v1_cutover_20260417T075624Z\\20260417T075624Z_broker_order.json",
+      "exported_row_count_int": 0,
+      "source_row_count_int": 0,
+      "table_name_str": "broker_order"
+    },
+    {
+      "archive_file_path_str": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\alpha\\live\\schema_archives\\live_state_v1_cutover_20260417T075624Z\\20260417T075624Z_fill.json",
+      "exported_row_count_int": 0,
+      "source_row_count_int": 0,
+      "table_name_str": "fill"
+    },
+    {
+      "archive_file_path_str": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\alpha\\live\\schema_archives\\live_state_v1_cutover_20260417T075624Z\\20260417T075624Z_reconciliation_snapshot.json",
+      "exported_row_count_int": 0,
+      "source_row_count_int": 0,
+      "table_name_str": "reconciliation_snapshot"
+    },
+    {
+      "archive_file_path_str": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\alpha\\live\\schema_archives\\live_state_v1_cutover_20260417T075624Z\\20260417T075624Z_execution_quality_snapshot.json",
+      "exported_row_count_int": 0,
+      "source_row_count_int": 0,
+      "table_name_str": "execution_quality_snapshot"
+    },
+    {
+      "archive_file_path_str": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\alpha\\live\\schema_archives\\live_state_v1_cutover_20260417T075624Z\\20260417T075624Z_order_plan.json",
+      "exported_row_count_int": 1,
+      "source_row_count_int": 1,
+      "table_name_str": "order_plan"
+    }
+  ]
+}

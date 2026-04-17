@@ -6,6 +6,18 @@ BrokerSnapshot_submit = f(broker_account_at_submit)
 VPlan_submit = f(DecisionPlan_t, BrokerSnapshot_submit, live_quote_snapshot)
 ```
 
+## Document Role
+
+Use this file for:
+- high-level design
+- system rationale
+- the conceptual split between decision and execution
+
+Do not use this file as the canonical code-level reference.
+
+For implementation truth, read:
+- [LIVE_TECHNICAL_REFERENCE.md](LIVE_TECHNICAL_REFERENCE.md)
+
 # Live Trading Architecture
 
 ## Design Goal

@@ -5,6 +5,9 @@ TL;DR: in live v2 you do **not** freeze final share quantities after the close. 
 If you want the shortest operator version first, read:
 - [LIVE_START_HERE.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_START_HERE.md)
 
+If you want the implementation reference, read:
+- [LIVE_TECHNICAL_REFERENCE.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_TECHNICAL_REFERENCE.md)
+
 The core contract is:
 
 ```text
@@ -27,6 +30,10 @@ Use it for:
 - what each config section means
 - what commands to run
 - how to inspect the live `VPlan`
+
+Do not use this file as the canonical code-level reference.
+That role now belongs to:
+- [LIVE_TECHNICAL_REFERENCE.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_TECHNICAL_REFERENCE.md)
 
 The research strategies stay in:
 - `strategies/`
@@ -430,6 +437,15 @@ Run the daemon with defaults:
 
 ```bash
 uv run python -m alpha.live.scheduler_service serve --mode paper
+```
+
+`serve` always mirrors scheduler events to stdout and the JSONL log.
+It also includes the related pod status, current fills, and after active phases the current `VPlan` plus broker-order snapshot.
+
+Use the JSONL log for tailing if you want a second terminal view:
+
+```bash
+Get-Content alpha/live/logs/live_events.jsonl -Wait
 ```
 
 Run the daemon with a faster active loop:

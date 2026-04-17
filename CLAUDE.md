@@ -8,17 +8,24 @@ Before changing code, read these doctrine documents in this exact order:
 
 1. `QUANT_PHILOSOPHY.md`
 2. `ASSUMPTIONS_AND_GAPS.md`
-3. `FEATURE_ROADMAP.md`
+3. `CURRENT_STRATEGIES.md`
+4. `FEATURE_ROADMAP.md` if present
 
 These documents are authoritative for house philosophy, realism assumptions, and future direction. This file remains the operational entrypoint for repo-specific coding behavior.
-
-Supplementary current-strategy behavior reference: CURRENT_STRATEGIES.md.
 
 ## Quantitative Correctness Standards
 
 This codebase is held to a strict standard of quantitative rigor. Every piece of code â€” strategies, indicators, metrics, data handling â€” must be bullet-proof against common quant pitfalls. **Simplicity is a virtue**: prefer the clearest, most direct implementation over clever abstractions.
 
 The simulator is live-first. Prefer logic and assumptions that could be traded operationally at the intended capital scale, and record any unrealistic simplification in `ASSUMPTIONS_AND_GAPS.md`.
+
+Backtests must aim to be as credible, conservative, and robust as the current data and engine allow. Optimize for auditability and realism, not cosmetic performance.
+
+Live trading must preserve backtest semantics up to irreducible market frictions. If the live implementation changes strategy meaning, then it is not the same strategy.
+
+For live deployment, prefer a deterministic order-clerk model: the strategy creates explicit order intent from prior-available information, and the execution layer transmits, tracks, reconciles, and reports that intent without adding opaque intelligence.
+
+Any dangerous operation, realism gap, hidden assumption, operational ambiguity, or potentially misleading simplification must fail loud: raise the flag, document it, and discuss its likely impact instead of leaving it implicit.
 
 ### Non-negotiable rules
 
@@ -35,6 +42,16 @@ The simulator is live-first. Prefer logic and assumptions that could be traded o
 **Statistical honesty** â€” Report metrics on the full out-of-sample period. Do not cherry-pick start/end dates or exclude drawdown periods. Sharpe ratio is computed with 0 risk-free rate (clearly documented).
 
 **Simplicity over complexity** â€” A strategy with 3 rules that works is better than one with 10. When adding logic, ask whether it is genuinely necessary or whether it is curve-fitting noise.
+
+**Explicit semantics** â€” If you change signal timing, order timing, execution assumptions, rebalance mapping, portfolio aggregation math, or cost modeling, state the old behavior, the new behavior, and the quantitative consequence.
+
+**Domain naming** â€” Use strict `Domain_Type` naming in quantitative logic, for example `price_vec`, `return_ser`, `signal_df`, `target_weight_ser`.
+
+**Sensitive time-series auditability** â€” Add a `*** CRITICAL***` comment next to sensitive time-series operations such as `shift()`, rolling windows, forward returns, and rebalance-date mapping.
+
+**Human-readable explanations** â€” Keep the logic rigorous, but explain it in simple, precise language. Default to: plain-language intuition, then the exact rule, and use formulas only when they materially improve correctness, auditability, or remove ambiguity.
+
+**Uncertainty handling** â€” When uncertain, do not silently choose the prettier implementation. Choose the more explicit implementation and state the uncertainty.
 
 ---
 

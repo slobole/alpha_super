@@ -121,7 +121,7 @@ if __name__ == "__main__":
     index_symbols, universe_df = build_index_constituent_matrix(indexname='S&P 500')
     pricing_data = get_prices(index_symbols, benchmarks, start_date='1998-01-01', end_date=None)
     ...
-    sa = DVO2Strategy(name='strategy_mr_dv2', benchmarks=benchmarks, capital_base=100_000, slippage=0.0001,
+    sa = DVO2Strategy(name='strategy_mr_dv2', benchmarks=benchmarks, capital_base=100_000, slippage=0.00025,
                       commission_per_share=0.005, commission_minimum=1.0)
     sa.universe_df = universe_df
     calendar = pricing_data.index

@@ -39,7 +39,7 @@ from alpha.engine.metrics import (
 )
 
 class Strategy(ABC):
-    def __init__(self, name: str, benchmarks: list | tuple, capital_base = 10_000, slippage: float = 0.0001,
+    def __init__(self, name: str, benchmarks: list | tuple, capital_base = 10_000, slippage: float = 0.00025,
                  commission_per_share: float = 0.005, commission_minimum: float = 1.0):
         # strategy metadata
         self.name = name  # name of the strategy for identification

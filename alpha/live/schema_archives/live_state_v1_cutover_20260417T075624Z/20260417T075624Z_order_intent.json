@@ -1,0 +1,15 @@
+[
+  {
+    "amount_float": 10000.0,
+    "asset_str": "CF",
+    "broker_order_type_str": "MOO",
+    "order_class_str": "MarketOrder",
+    "order_intent_id_int": 1,
+    "order_plan_id_int": 1,
+    "portfolio_value_float": 100000.0,
+    "sizing_reference_price_float": 133.77999877929688,
+    "target_bool": 0,
+    "trade_id_int": 1,
+    "unit_str": "value"
+  }
+]

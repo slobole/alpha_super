@@ -355,7 +355,7 @@ def _build_qpi_ibs_rsi_exit_strategy_obj(context_dict: dict[str, object]) -> Str
         name=str(context_dict["strategy_name_str"]),
         benchmarks=list(context_dict["benchmark_list"]),
         capital_base=float(context_dict["capital_base_float"]),
-        slippage=0.0001,
+        slippage=0.00025,
         commission_per_share=0.005,
         commission_minimum=1.0,
     )
@@ -393,7 +393,7 @@ def _build_dv2_strategy_obj(context_dict: dict[str, object]) -> Strategy:
         name=str(context_dict["strategy_name_str"]),
         benchmarks=list(context_dict["benchmark_list"]),
         capital_base=float(context_dict["capital_base_float"]),
-        slippage=0.0001,
+        slippage=0.00025,
         commission_per_share=0.005,
         commission_minimum=1.0,
     )
@@ -435,7 +435,7 @@ def _build_dv2_price_adv_ibs_rsi_exit_strategy_obj(
         name=str(context_dict["strategy_name_str"]),
         benchmarks=list(context_dict["benchmark_list"]),
         capital_base=float(context_dict["capital_base_float"]),
-        slippage=0.0001,
+        slippage=0.00025,
         commission_per_share=0.005,
         commission_minimum=1.0,
     )

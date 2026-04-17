@@ -1,0 +1,19 @@
+[
+  {
+    "account_route_str": "DU1234567",
+    "created_timestamp_str": "2026-04-08T13:05:30.347063+00:00",
+    "execution_policy_str": "next_open_moo",
+    "order_plan_id_int": 1,
+    "pod_id_str": "pod_dv2_01",
+    "release_id_str": "user_001.pod_dv2.daily_moo.v1",
+    "signal_timestamp_str": "2026-04-07T16:00:00-04:00",
+    "snapshot_metadata_json_str": "{\"strategy_family_str\": \"dv2\"}",
+    "status_str": "frozen",
+    "strategy_state_json_str": "{\"current_trade_map\": {\"CF\": 1}, \"trade_id_int\": 1}",
+    "submission_key_str": "order_plan:1",
+    "submission_timestamp_str": "2026-04-08T09:20:00-04:00",
+    "target_execution_timestamp_str": "2026-04-08T09:30:00-04:00",
+    "updated_timestamp_str": "2026-04-08T15:59:13.817330+00:00",
+    "user_id_str": "user_001"
+  }
+]

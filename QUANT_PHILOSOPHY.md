@@ -34,6 +34,22 @@ Observed performance is a mixture of truth and distortion:
 
 The first duty of the engine is to reduce the last three terms as aggressively as possible.
 
+Backtest quality is judged by credibility and robustness, not by cosmetic performance:
+
+\[
+\text{Backtest credibility}
+=
+\text{causality}
++
+\text{execution realism}
++
+\text{robustness}
++
+\text{auditability}
+-
+\text{hidden assumptions}
+\]
+
 Signals must be causal:
 
 \[
@@ -45,6 +61,22 @@ not
 \[
 \text{signal}_t = f(\mathcal{I}_{t}, \mathcal{I}_{t+1}, \dots)
 \]
+
+Live trading should preserve backtest semantics up to unavoidable market frictions:
+
+\[
+\text{live behavior}_t \approx \text{backtest behavior}_t + \epsilon^{friction}_t
+\]
+
+where \(\epsilon^{friction}_t\) is limited to irreducible effects such as slippage, partial fills, latency, broker constraints, and rounding.
+
+Live order intent must be deterministic:
+
+\[
+\text{order intent}_t = g(\mathcal{I}_{t-1}, \text{state}_{t-1}, \text{config})
+\]
+
+The same information, state, and configuration should produce the same intended orders.
 
 Portfolio equity in the pod model is the sum of independently compounded pod equities:
 
@@ -62,12 +94,31 @@ The simulator exists to approximate the live trading problem as closely as the c
 \text{usable edge} = \text{raw edge} - \text{costs} - \text{slippage} - \text{liquidity friction} - \text{operational constraints}
 \]
 
-A backtest is interesting only if the edge survives that conversion under assumptions that are plausible for the intended live deployment.
+A backtest is interesting only if the edge survives that conversion under assumptions that are plausible for the intended live deployment. The backtest should be as credible, conservative, and robust as the current data and engine allow.
 
 - Treat tradability as part of the strategy, not as a post-hoc implementation detail.
 - Judge tradability at the intended capital scale and operational workflow, not with vague claims that something is "easy to trade."
+- Prefer assumptions that understate readiness rather than overstate it when uncertainty cannot yet be resolved.
 - If an assumption is unrealistic but temporarily unavoidable, record it explicitly in `ASSUMPTIONS_AND_GAPS.md` with its likely consequence.
 - If a result depends mainly on unrealistic execution, impossible liquidity, or undocumented simplifications, treat it as non-actionable until that gap is closed or explicitly bounded.
+
+## Live Must Preserve Backtest Semantics
+
+Live trading is not a place to "improve" a strategy with discretionary overrides, hidden execution intelligence, or ad hoc rule changes after seeing the backtest.
+
+- The live system should trade the same strategy semantics that were tested.
+- Differences between backtest and live should come from irreducible real-world frictions, not from silent logic drift.
+- If live execution requires a semantic change, the change must be treated as a strategy change and documented as such.
+- If the live implementation cannot preserve the tested semantics, then the live strategy and the backtest are not the same strategy.
+
+## Deterministic Order-Clerk Execution
+
+For live deployment, prefer a deterministic order-clerk model: simple, explicit, and auditable.
+
+- The strategy generates clear order intent from prior-available information.
+- The execution layer transmits, tracks, reconciles, and reports that intent.
+- The execution layer should not add opaque optimization logic that changes strategy meaning.
+- When the same inputs arrive, the intended order set should be the same unless an explicitly modeled external constraint prevents it.
 
 ## What Good Quant Work Looks Like
 
@@ -83,7 +134,15 @@ Simple code is not just style. It is a defense against hidden assumptions and hi
 
 If a reader cannot explain the logic quickly, the implementation is too complicated.
 
-### Mathematical clarity is required where the math matters
+### Mathematical clarity where it matters, human clarity by default
+
+Keep the logic rigorous, but keep the explanation simple, precise, and easy for a human to follow quickly.
+
+Default explanation order:
+
+- plain-language intuition
+- exact rule
+- formula only if it materially improves correctness, auditability, or semantic precision
 
 Write the formula when the code implements a non-trivial quantitative transformation that a reviewer must audit.
 
@@ -96,6 +155,8 @@ That includes:
 - sensitive time-series transforms
 
 Do not add formula ceremony to trivial plumbing, orchestration, or obvious control flow. In those areas, a plain explanation and direct code are the clearer choice.
+
+Do not confuse explanation complexity with quantitative rigor. The goal is to preserve correctness while making decisions, assumptions, and tradeoffs easy for a human operator to understand.
 
 Examples:
 
@@ -140,6 +201,21 @@ Examples:
 - feature sampling at month-end or quarter-end
 
 The purpose of the comment is to force a second audit pass by future readers and AI agents.
+
+### Dangerous assumptions must fail loud
+
+Any dangerous action, realism gap, hidden assumption, operational ambiguity, or result-distorting simplification that could mislead us must be surfaced explicitly and discussed.
+
+Do not leave potentially misleading behavior implicit.
+
+When a risk is identified, document at minimum:
+
+- `issue_description_str`
+- `expected_bias_direction_str`
+- `impact_level_str`
+- `mitigation_str`
+
+If the impact cannot yet be quantified exactly, bound it qualitatively and say so plainly. When uncertain, do not silently choose the prettier implementation. Choose the more explicit implementation and state the uncertainty.
 
 ## What Backtests Are For
 
@@ -293,6 +369,8 @@ If you change any of the following, you must explicitly state the old behavior, 
 - cost modeling
 
 Do not silently change semantics by renaming variables, moving code blocks, or cleaning up "duplicate" logic that is actually enforcing timing correctness.
+
+If you encounter a dangerous assumption, ambiguous semantic choice, or realism gap that could mislead future research or live deployment, raise the flag explicitly instead of smoothing it over.
 
 If a change touches any sensitive time-series or execution path, add or preserve:
 

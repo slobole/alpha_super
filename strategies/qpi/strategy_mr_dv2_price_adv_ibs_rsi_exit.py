@@ -107,7 +107,7 @@ class DV2PriceAdvIbsRsiExitStrategy(Strategy):
         name: str,
         benchmarks: list[str] | tuple[str, ...],
         capital_base: float = 100_000,
-        slippage: float = 0.0001,
+        slippage: float = 0.00025,
         commission_per_share: float = 0.005,
         commission_minimum: float = 1.0,
         max_positions_int: int = 10,
@@ -389,7 +389,7 @@ if __name__ == "__main__":
         name="strategy_mr_dv2_price_adv_ibs_rsi_exit",
         benchmarks=benchmark_list,
         capital_base=100_000,
-        slippage=0.0001,
+        slippage=0.00025,
         commission_per_share=0.005,
         commission_minimum=1.0,
     )
