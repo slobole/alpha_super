@@ -30,6 +30,20 @@ def get_touched_asset_list_for_decision_plan(
     )
 
 
+def _build_live_reference_source_map_dict(
+    live_price_snapshot_obj: LivePriceSnapshot,
+) -> dict[str, str]:
+    if len(live_price_snapshot_obj.asset_reference_source_map_dict) > 0:
+        return {
+            str(asset_str): str(source_str)
+            for asset_str, source_str in live_price_snapshot_obj.asset_reference_source_map_dict.items()
+        }
+    return {
+        str(asset_str): str(live_price_snapshot_obj.price_source_str)
+        for asset_str in live_price_snapshot_obj.asset_reference_price_map
+    }
+
+
 def _build_incremental_entry_exit_vplan(
     release_obj: LiveRelease,
     decision_plan_obj: DecisionPlan,
@@ -52,11 +66,18 @@ def _build_incremental_entry_exit_vplan(
     target_share_map: dict[str, float] = {}
     order_delta_map: dict[str, float] = {}
     vplan_row_list: list[VPlanRow] = []
+    live_reference_source_map_dict = _build_live_reference_source_map_dict(live_price_snapshot_obj)
     broker_order_type_str = _broker_order_type_from_execution_policy_str(decision_plan_obj.execution_policy_str)
 
     for asset_str in touched_asset_list:
         current_share_float = float(broker_snapshot_obj.position_amount_map.get(asset_str, 0.0))
         live_reference_price_float = float(live_price_snapshot_obj.asset_reference_price_map[asset_str])
+        live_reference_source_str = str(
+            live_reference_source_map_dict.get(
+                asset_str,
+                live_price_snapshot_obj.price_source_str,
+            )
+        )
         if live_reference_price_float <= 0.0:
             raise ValueError(
                 f"Live reference price must be positive for asset '{asset_str}'."
@@ -85,6 +106,7 @@ def _build_incremental_entry_exit_vplan(
                 live_reference_price_float=live_reference_price_float,
                 estimated_target_notional_float=estimated_target_notional_float,
                 broker_order_type_str=broker_order_type_str,
+                live_reference_source_str=live_reference_source_str,
             )
         )
 
@@ -117,6 +139,7 @@ def _build_incremental_entry_exit_vplan(
         target_share_map=target_share_map,
         order_delta_map=order_delta_map,
         vplan_row_list=vplan_row_list,
+        live_reference_source_map_dict=live_reference_source_map_dict,
         submission_key_str=f"vplan:{decision_plan_obj.decision_plan_id_int}",
     )
 
@@ -146,11 +169,18 @@ def _build_full_target_weight_vplan(
     target_share_map: dict[str, float] = {}
     order_delta_map: dict[str, float] = {}
     vplan_row_list: list[VPlanRow] = []
+    live_reference_source_map_dict = _build_live_reference_source_map_dict(live_price_snapshot_obj)
     broker_order_type_str = _broker_order_type_from_execution_policy_str(decision_plan_obj.execution_policy_str)
 
     for asset_str in touched_asset_list:
         current_share_float = float(broker_snapshot_obj.position_amount_map.get(asset_str, 0.0))
         live_reference_price_float = float(live_price_snapshot_obj.asset_reference_price_map[asset_str])
+        live_reference_source_str = str(
+            live_reference_source_map_dict.get(
+                asset_str,
+                live_price_snapshot_obj.price_source_str,
+            )
+        )
         if live_reference_price_float <= 0.0:
             raise ValueError(
                 f"Live reference price must be positive for asset '{asset_str}'."
@@ -175,6 +205,7 @@ def _build_full_target_weight_vplan(
                 live_reference_price_float=live_reference_price_float,
                 estimated_target_notional_float=estimated_target_notional_float,
                 broker_order_type_str=broker_order_type_str,
+                live_reference_source_str=live_reference_source_str,
             )
         )
 
@@ -207,6 +238,7 @@ def _build_full_target_weight_vplan(
         target_share_map=target_share_map,
         order_delta_map=order_delta_map,
         vplan_row_list=vplan_row_list,
+        live_reference_source_map_dict=live_reference_source_map_dict,
         submission_key_str=f"vplan:{decision_plan_obj.decision_plan_id_int}",
     )
 
@@ -238,9 +270,15 @@ def build_vplan(
 
 def build_broker_order_request_list_from_vplan(vplan_obj: VPlan) -> list[BrokerOrderRequest]:
     broker_order_request_list: list[BrokerOrderRequest] = []
-    for vplan_row_obj in vplan_obj.vplan_row_list:
+    submit_batch_key_str = str(
+        vplan_obj.submission_key_str or f"vplan:{vplan_obj.decision_plan_id_int}"
+    )
+    for request_idx_int, vplan_row_obj in enumerate(vplan_obj.vplan_row_list, start=1):
         if abs(vplan_row_obj.order_delta_share_float) <= 1e-9:
             continue
+        order_request_key_str = (
+            f"{submit_batch_key_str}:{vplan_row_obj.asset_str}:{request_idx_int}"
+        )
         broker_order_request_list.append(
             BrokerOrderRequest(
                 decision_plan_id_int=int(vplan_obj.decision_plan_id_int),
@@ -248,7 +286,8 @@ def build_broker_order_request_list_from_vplan(vplan_obj: VPlan) -> list[BrokerO
                 release_id_str=vplan_obj.release_id_str,
                 pod_id_str=vplan_obj.pod_id_str,
                 account_route_str=vplan_obj.account_route_str,
-                submission_key_str=str(vplan_obj.submission_key_str or f"vplan:{vplan_obj.decision_plan_id_int}"),
+                submission_key_str=submit_batch_key_str,
+                order_request_key_str=order_request_key_str,
                 asset_str=vplan_row_obj.asset_str,
                 broker_order_type_str=vplan_row_obj.broker_order_type_str,
                 order_class_str="MarketOrder",

@@ -538,6 +538,22 @@ def _build_qpi_ibs_rsi_exit_decision_plan(
     )
 
 
+def _build_dtb3_snapshot_metadata_dict(
+    dtb3_snapshot_obj,
+) -> dict[str, Any]:
+    return {
+        "dtb3_source_name_str": str(dtb3_snapshot_obj.source_name_str),
+        "dtb3_series_id_str": str(dtb3_snapshot_obj.series_id_str),
+        "dtb3_latest_observation_date_str": pd.Timestamp(
+            dtb3_snapshot_obj.latest_observation_date_ts
+        ).date().isoformat(),
+        "dtb3_download_attempt_timestamp_str": dtb3_snapshot_obj.download_attempt_timestamp_ts.isoformat(),
+        "dtb3_download_status_str": str(dtb3_snapshot_obj.download_status_str),
+        "dtb3_used_cache_bool": bool(dtb3_snapshot_obj.used_cache_bool),
+        "dtb3_freshness_business_days_int": int(dtb3_snapshot_obj.freshness_business_days_int),
+    }
+
+
 def _build_taa_btal_tqqq_vix_cash_decision_plan(
     release_obj: LiveRelease,
     as_of_ts: datetime,
@@ -550,8 +566,12 @@ def _build_taa_btal_tqqq_vix_cash_decision_plan(
     config_obj = replace(
         variant_module.DEFAULT_CONFIG,
         end_date_str=pd.Timestamp(as_of_ts).strftime("%Y-%m-%d"),
+        dtb3_mode_str="live",
+        dtb3_as_of_timestamp_ts=as_of_ts,
     )
-    execution_price_df, _, base_month_end_weight_df, _ = base_taa_module.get_defense_first_data(config_obj)
+    execution_price_df, _, base_month_end_weight_df, _, dtb3_snapshot_obj = (
+        base_taa_module.get_defense_first_data_with_snapshot(config_obj)
+    )
     _, month_end_vrp_signal_df = vix_overlay_module._load_vrp_overlay_signal_frames(config_obj)
     month_end_weight_df, month_end_vrp_diagnostic_df = (
         vix_overlay_module.apply_vrp_cash_gate_to_month_end_weight_df(
@@ -580,9 +600,12 @@ def _build_taa_btal_tqqq_vix_cash_decision_plan(
         rebalance_weight_df=rebalance_weight_df,
         tradeable_asset_list=config_obj.tradeable_asset_list,
         capital_base=float(release_obj.params_dict.get("capital_base_float", 100_000.0)),
-        slippage=float(release_obj.params_dict.get("slippage_float", 0.0001)),
-        commission_per_share=float(release_obj.params_dict.get("commission_per_share_float", 0.005)),
-        commission_minimum=float(release_obj.params_dict.get("commission_minimum_float", 1.0)),
+        # *** CRITICAL*** Live TAA decision generation must stop at order intent
+        # and target-weight construction. It must not depend on backtest fill
+        # cost assumptions because the live host never calls process_orders().
+        slippage=0.0,
+        commission_per_share=0.0,
+        commission_minimum=0.0,
     )
     _seed_strategy_state(strategy_obj, pod_state_obj)
 
@@ -617,6 +640,7 @@ def _build_taa_btal_tqqq_vix_cash_decision_plan(
         snapshot_metadata_dict={
             "strategy_family_str": "taa_df_btal_fallback_tqqq_vix_cash",
             "cash_weight_float": float(latest_diagnostic_ser["cash_weight"]),
+            **_build_dtb3_snapshot_metadata_dict(dtb3_snapshot_obj),
         },
     )
 

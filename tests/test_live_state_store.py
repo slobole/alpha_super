@@ -24,6 +24,10 @@ def test_state_store_bootstraps_shared_core_tables_and_release_roundtrip(tmp_pat
         risk_profile_str="standard",
         enabled_bool=True,
         source_path_str="manifest.yaml",
+        broker_host_str="127.0.0.1",
+        broker_port_int=7496,
+        broker_client_id_int=31,
+        broker_timeout_seconds_float=6.0,
         pod_budget_fraction_float=0.15,
         auto_submit_enabled_bool=False,
     )
@@ -34,6 +38,8 @@ def test_state_store_bootstraps_shared_core_tables_and_release_roundtrip(tmp_pat
 
     assert roundtrip_release_obj.release_id_str == release_obj.release_id_str
     assert roundtrip_release_obj.params_dict == {"max_positions_int": 10}
+    assert roundtrip_release_obj.broker_port_int == 7496
+    assert roundtrip_release_obj.broker_timeout_seconds_float == 6.0
     assert roundtrip_release_obj.pod_budget_fraction_float == 0.15
     assert roundtrip_release_obj.auto_submit_enabled_bool is False
     assert set(SHARED_CORE_TABLE_NAME_TUPLE).issubset(existing_table_name_set)

@@ -78,14 +78,15 @@ the system records a warning and still sizes from broker truth.
 
 ### 4. `show_vplan` is the main manual review screen
 
-It shows:
-- decision-base shares
-- current broker shares
-- drift shares
+Before submit it shows the planned basket.
+
+After submit it becomes an exceptions-first execution view:
 - target shares
-- delta shares
-- live reference price
-- warning flag
+- actual broker shares
+- residual shares
+- what filled
+- latest broker order status
+- failed exit flags if any
 
 ### 5. tick() does the following:
 ![alt text](image-2.png)
@@ -153,6 +154,17 @@ uv run python -m alpha.live.runner submit_vplan --mode paper --vplan-id 1
 ```bash
 uv run python -m alpha.live.runner post_execution_reconcile --mode paper
 ```
+
+This does not blindly mark the `VPlan` as complete.
+
+The rule is:
+
+```text
+residual_share_float = target_share_float - broker_share_float
+```
+
+If residuals remain, the `VPlan` stays `submitted`.
+If an exit target is `0` but the broker still holds shares, the system logs a `critical` exit residual event.
 
 ## The Simplest Daily Manual Workflow
 

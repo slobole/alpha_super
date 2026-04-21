@@ -117,7 +117,7 @@ class EomTltSpySsoVariantConfig:
     start_date_str: str = "2006-07-01"
     end_date_str: str | None = None
     capital_base_float: float = 100_000.0
-    slippage_float: float = 0.0001
+    slippage_float: float = 0.00025
     commission_per_share_float: float = 0.005
     commission_minimum_float: float = 1.0
 

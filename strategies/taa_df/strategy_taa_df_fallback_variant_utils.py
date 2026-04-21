@@ -96,7 +96,7 @@ def _build_defense_first_strategy(
         rebalance_weight_df=rebalance_weight_df,
         tradeable_asset_list=config.tradeable_asset_list,
         capital_base=100_000,
-        slippage=0.0001,
+        slippage=0.00025,
         commission_per_share=0.005,
         commission_minimum=1.0,
     )

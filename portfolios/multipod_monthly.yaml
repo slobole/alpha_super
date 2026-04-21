@@ -1,8 +1,8 @@
 name: multipod_monthly
-capital: 50000
+capital: 1000
 
 pods:
-  - strategy: strategy_taa_df_btal_fallback_tqqq_vix_cash
+  - strategy: strategy_taa_df_btal_1n_fallback_tqqq_vix_cash
     weight: 0.3
 
   - strategy: strategy_mo_atr_normalized_ndx

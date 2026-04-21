@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from alpha.data import FredSeriesSnapshot
 from alpha.live.models import LiveRelease, PodState
 from alpha.live.strategy_host import build_decision_plan_for_release, preflight_decision_contract_for_release
 
@@ -299,11 +300,25 @@ def test_strategy_host_builds_full_target_taa_decision_plan(monkeypatch):
         [{"cash_weight": 0.3}],
         index=pd.DatetimeIndex([pd.Timestamp("2024-01-31")]),
     )
+    dtb3_snapshot_obj = FredSeriesSnapshot(
+        value_ser=pd.Series(
+            [5.20],
+            index=pd.DatetimeIndex([pd.Timestamp("2024-01-31")]),
+            name="DTB3",
+        ),
+        source_name_str="FRED",
+        series_id_str="DTB3",
+        download_attempt_timestamp_ts=datetime(2024, 1, 31, 16, 5, tzinfo=MARKET_TIMEZONE_OBJ),
+        download_status_str="download_success",
+        latest_observation_date_ts=pd.Timestamp("2024-01-31"),
+        used_cache_bool=False,
+        freshness_business_days_int=0,
+    )
 
     monkeypatch.setattr(
         base_taa_module,
-        "get_defense_first_data",
-        lambda config_obj: (execution_price_df, None, month_end_weight_df, None),
+        "get_defense_first_data_with_snapshot",
+        lambda config_obj: (execution_price_df, None, month_end_weight_df, None, dtb3_snapshot_obj),
     )
     monkeypatch.setattr(
         vix_overlay_module,
@@ -345,10 +360,116 @@ def test_strategy_host_builds_full_target_taa_decision_plan(monkeypatch):
 
     assert decision_plan_obj.decision_book_type_str == "full_target_weight_book"
     assert decision_plan_obj.full_target_weight_map_dict == {"BTAL": 0.4, "TLT": 0.3}
-    assert decision_plan_obj.cash_reserve_weight_float == 0.3
+    assert decision_plan_obj.cash_reserve_weight_float == pytest.approx(0.3)
     assert decision_plan_obj.decision_base_position_map == {"SPY": 5.0}
     assert decision_plan_obj.preserve_untouched_positions_bool is False
     assert decision_plan_obj.rebalance_omitted_assets_to_zero_bool is True
+    assert decision_plan_obj.snapshot_metadata_dict == {
+        "strategy_family_str": "taa_df_btal_fallback_tqqq_vix_cash",
+        "cash_weight_float": 0.3,
+        "dtb3_source_name_str": "FRED",
+        "dtb3_series_id_str": "DTB3",
+        "dtb3_latest_observation_date_str": "2024-01-31",
+        "dtb3_download_attempt_timestamp_str": "2024-01-31T16:05:00-05:00",
+        "dtb3_download_status_str": "download_success",
+        "dtb3_used_cache_bool": False,
+        "dtb3_freshness_business_days_int": 0,
+    }
+
+
+def test_strategy_host_taa_live_path_does_not_use_backtest_fill_costs(monkeypatch):
+    import strategies.taa_df.strategy_taa_df as base_taa_module
+    import strategies.taa_df.strategy_taa_df_fallback_vix_cash_variant_utils as vix_overlay_module
+
+    date_index = pd.DatetimeIndex(
+        [
+            pd.Timestamp("2024-01-30"),
+            pd.Timestamp("2024-01-31"),
+        ]
+    )
+    execution_price_df = make_price_df(["BTAL", "TLT", "SPY"], date_index)
+    month_end_weight_df = pd.DataFrame(
+        [{"BTAL": 0.4, "TLT": 0.3}],
+        index=pd.DatetimeIndex([pd.Timestamp("2024-01-31")]),
+    )
+    diagnostic_df = pd.DataFrame(
+        [{"cash_weight": 0.3}],
+        index=pd.DatetimeIndex([pd.Timestamp("2024-01-31")]),
+    )
+    dtb3_snapshot_obj = FredSeriesSnapshot(
+        value_ser=pd.Series(
+            [5.20],
+            index=pd.DatetimeIndex([pd.Timestamp("2024-01-31")]),
+            name="DTB3",
+        ),
+        source_name_str="FRED",
+        series_id_str="DTB3",
+        download_attempt_timestamp_ts=datetime(2024, 1, 31, 16, 5, tzinfo=MARKET_TIMEZONE_OBJ),
+        download_status_str="download_success",
+        latest_observation_date_ts=pd.Timestamp("2024-01-31"),
+        used_cache_bool=False,
+        freshness_business_days_int=0,
+    )
+
+    monkeypatch.setattr(
+        base_taa_module,
+        "get_defense_first_data_with_snapshot",
+        lambda config_obj: (execution_price_df, None, month_end_weight_df, None, dtb3_snapshot_obj),
+    )
+    monkeypatch.setattr(
+        vix_overlay_module,
+        "_load_vrp_overlay_signal_frames",
+        lambda config_obj: (None, pd.DataFrame(index=month_end_weight_df.index)),
+    )
+    monkeypatch.setattr(
+        vix_overlay_module,
+        "apply_vrp_cash_gate_to_month_end_weight_df",
+        lambda base_month_end_weight_df, month_end_vrp_signal_df, config: (
+            month_end_weight_df,
+            diagnostic_df,
+        ),
+    )
+
+    def process_orders_should_not_run(self, pricing_data_df):
+        raise AssertionError("Live TAA DecisionPlan generation must not call process_orders().")
+
+    monkeypatch.setattr(
+        base_taa_module.DefenseFirstStrategy,
+        "process_orders",
+        process_orders_should_not_run,
+    )
+
+    release_obj = make_release(
+        strategy_import_str="strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash",
+        data_profile_str="norgate_eod_etf_plus_vix_helper",
+        execution_policy_str="next_month_first_open",
+        params_dict={
+            "capital_base_float": 100000.0,
+            "slippage_float": 0.50,
+            "commission_per_share_float": 99.0,
+            "commission_minimum_float": 99.0,
+        },
+    )
+    pod_state_obj = PodState(
+        pod_id_str=release_obj.pod_id_str,
+        user_id_str=release_obj.user_id_str,
+        account_route_str=release_obj.account_route_str,
+        position_amount_map={"SPY": 5.0},
+        cash_float=1000.0,
+        total_value_float=100000.0,
+        strategy_state_dict={},
+        updated_timestamp_ts=datetime(2024, 1, 31, 16, 0, tzinfo=MARKET_TIMEZONE_OBJ),
+    )
+
+    decision_plan_obj = build_decision_plan_for_release(
+        release_obj=release_obj,
+        as_of_ts=datetime(2024, 1, 31, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
+        pod_state_obj=pod_state_obj,
+    )
+
+    assert decision_plan_obj.full_target_weight_map_dict == {"BTAL": 0.4, "TLT": 0.3}
+    assert decision_plan_obj.cash_reserve_weight_float == pytest.approx(0.3)
+    assert decision_plan_obj.decision_base_position_map == {"SPY": 5.0}
 
 
 def test_strategy_host_builds_full_target_atr_decision_plan(monkeypatch):

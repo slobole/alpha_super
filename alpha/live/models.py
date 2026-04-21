@@ -39,6 +39,10 @@ class LiveRelease:
     risk_profile_str: str  # Risk label / policy hook.
     enabled_bool: bool  # Operational kill switch.
     source_path_str: str  # YAML manifest path on disk.
+    broker_host_str: str = "127.0.0.1"  # Broker API host for this release.
+    broker_port_int: int = 7497  # Broker API port for this release.
+    broker_client_id_int: int = 31  # Broker API client id for this release.
+    broker_timeout_seconds_float: float = 4.0  # Broker API timeout for this release.
     pod_budget_fraction_float: float = 0.03  # Fraction of broker NetLiq reserved for this pod.
     auto_submit_enabled_bool: bool = True  # True if tick may auto-submit the VPlan.
 
@@ -149,6 +153,7 @@ class VPlanRow:
     live_reference_price_float: float  # Live quote snapshot price used for sizing.
     estimated_target_notional_float: float  # Target share count multiplied by the live reference price.
     broker_order_type_str: str  # Broker order type, e.g. MOO / MOC.
+    live_reference_source_str: str = ""  # Per-asset provenance for the live reference price.
 
 
 @dataclass(frozen=True)
@@ -175,8 +180,13 @@ class VPlan:
     target_share_map: dict[str, float]  # Final target shares after sizing.
     order_delta_map: dict[str, float]  # Shares to send after subtracting broker positions.
     vplan_row_list: list[VPlanRow]  # Human-readable execution rows.
+    live_reference_source_map_dict: dict[str, str] = field(default_factory=dict)  # Per-asset provenance for live reference prices.
     submission_key_str: str | None = None  # Stable id used to guard duplicate submits.
     status_str: str = "ready"  # ready / submitted / completed / expired / blocked.
+    submit_ack_status_str: str = "not_checked"  # not_checked / complete / missing_critical.
+    ack_coverage_ratio_float: float | None = None  # broker_ack_count / request_count.
+    missing_ack_count_int: int = 0  # Number of outbound requests with no broker-correlated response.
+    submit_ack_checked_timestamp_ts: datetime | None = None  # Timestamp of the bounded post-submit ACK poll.
     vplan_id_int: int | None = None  # Database primary key.
 
 
@@ -203,6 +213,7 @@ class LivePriceSnapshot:
     snapshot_timestamp_ts: datetime  # When the live quote snapshot was sampled.
     price_source_str: str  # Human-readable source label for the prices.
     asset_reference_price_map: dict[str, float]  # Symbol-to-price map used for VPlan sizing.
+    asset_reference_source_map_dict: dict[str, str] = field(default_factory=dict)  # Per-asset provenance for each reference price.
 
 
 @dataclass(frozen=True)
@@ -211,6 +222,7 @@ class BrokerOrderRequest:
     pod_id_str: str  # Pod that owns the request.
     account_route_str: str  # Broker account to route to.
     submission_key_str: str  # Duplicate-submit guard key.
+    order_request_key_str: str  # Per-order correlation key sent as broker orderRef.
     asset_str: str  # Symbol to trade.
     broker_order_type_str: str  # Broker order type.
     order_class_str: str  # Original engine order class.
@@ -231,6 +243,7 @@ class BrokerOrderRecord:
     vplan_id_int: int | None  # Parent VPlan id in v2 flows.
     account_route_str: str  # Routed account.
     asset_str: str  # Symbol traded.
+    order_request_key_str: str | None  # Per-order correlation key / broker orderRef when available.
     broker_order_type_str: str  # Submitted broker order type.
     unit_str: str  # shares / value / percent.
     amount_float: float  # Requested order amount.
@@ -241,6 +254,7 @@ class BrokerOrderRecord:
     remaining_amount_float: float | None = None  # Remaining quantity reported by broker.
     avg_fill_price_float: float | None = None  # Average fill price reported by broker.
     last_status_timestamp_ts: datetime | None = None  # Timestamp of the latest known broker status.
+    submission_key_str: str | None = None  # Stable vplan submission key / broker orderRef when available.
 
 
 @dataclass(frozen=True)
@@ -250,6 +264,7 @@ class BrokerOrderEvent:
     vplan_id_int: int | None  # Parent VPlan id in v2 flows.
     account_route_str: str  # Routed account.
     asset_str: str  # Symbol traded.
+    order_request_key_str: str | None  # Per-order correlation key / broker orderRef when available.
     status_str: str  # Broker order status observed at this event.
     filled_amount_float: float  # Filled quantity reported at this event.
     remaining_amount_float: float | None = None  # Remaining quantity reported at this event.
@@ -258,6 +273,36 @@ class BrokerOrderEvent:
     event_source_str: str = ""  # Source of the event, e.g. ibkr.trade_log.
     message_str: str = ""  # Human-readable broker message.
     raw_payload_dict: dict[str, Any] = field(default_factory=dict)  # Extra broker payload for audit.
+    submission_key_str: str | None = None  # Stable vplan submission key / broker orderRef when available.
+
+
+@dataclass(frozen=True)
+class BrokerOrderAck:
+    decision_plan_id_int: int | None  # Parent decision plan id in v2 flows.
+    vplan_id_int: int | None  # Parent VPlan id in v2 flows.
+    account_route_str: str  # Routed account.
+    order_request_key_str: str  # Per-order request correlation key.
+    asset_str: str  # Symbol traded.
+    broker_order_type_str: str  # Submitted broker order type.
+    local_submit_ack_bool: bool  # True if the client-side placeOrder call returned.
+    broker_response_ack_bool: bool  # True if a broker-correlated response was observed in the ACK window.
+    ack_status_str: str  # broker_acked / missing_critical.
+    ack_source_str: str  # open_order / completed_order / event / fill / missing.
+    broker_order_id_str: str | None = None  # Broker order id if known.
+    perm_id_int: int | None = None  # Broker permanent id if known.
+    response_timestamp_ts: datetime | None = None  # Timestamp of the broker response used as the ACK witness.
+    raw_payload_dict: dict[str, Any] = field(default_factory=dict)  # Extra ACK audit payload.
+
+
+@dataclass(frozen=True)
+class SubmitBatchResult:
+    broker_order_record_list: list[BrokerOrderRecord] = field(default_factory=list)  # Submitted order rows persisted immediately after submit.
+    broker_order_event_list: list[BrokerOrderEvent] = field(default_factory=list)  # Order events observed during submit + ACK poll.
+    broker_order_fill_list: list[BrokerOrderFill] = field(default_factory=list)  # Fills observed during submit + ACK poll.
+    broker_order_ack_list: list[BrokerOrderAck] = field(default_factory=list)  # Explicit local-vs-broker ACK rows.
+    ack_coverage_ratio_float: float = 0.0  # broker_ack_count / request_count.
+    missing_ack_asset_list: list[str] = field(default_factory=list)  # Assets with no broker-correlated ACK in the bounded window.
+    submit_ack_status_str: str = "not_checked"  # complete / missing_critical / not_checked.
 
 
 @dataclass(frozen=True)

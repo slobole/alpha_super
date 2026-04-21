@@ -5,6 +5,7 @@ import sqlite3
 from typing import Iterable
 
 from alpha.live.models import (
+    BrokerOrderAck,
     BrokerOrderFill,
     BrokerOrderEvent,
     BrokerOrderRecord,
@@ -81,10 +82,15 @@ class LiveStateStore(CoreLiveStateStore):
                     pod_budget_float REAL NOT NULL,
                     current_broker_position_json_str TEXT NOT NULL,
                     live_reference_price_json_str TEXT NOT NULL,
+                    live_reference_source_json_str TEXT NOT NULL DEFAULT '{}',
                     target_share_json_str TEXT NOT NULL,
                     order_delta_json_str TEXT NOT NULL,
                     submission_key_str TEXT,
                     status_str TEXT NOT NULL,
+                    submit_ack_status_str TEXT NOT NULL DEFAULT 'not_checked',
+                    ack_coverage_ratio_float REAL,
+                    missing_ack_count_int INTEGER NOT NULL DEFAULT 0,
+                    submit_ack_checked_timestamp_str TEXT,
                     created_timestamp_str TEXT NOT NULL,
                     updated_timestamp_str TEXT NOT NULL
                 );
@@ -99,6 +105,7 @@ class LiveStateStore(CoreLiveStateStore):
                     live_reference_price_float REAL NOT NULL,
                     estimated_target_notional_float REAL NOT NULL,
                     broker_order_type_str TEXT NOT NULL,
+                    live_reference_source_str TEXT NOT NULL DEFAULT '',
                     FOREIGN KEY(vplan_id_int) REFERENCES vplan(vplan_id_int)
                 );
 
@@ -147,6 +154,8 @@ class LiveStateStore(CoreLiveStateStore):
                     status_str TEXT NOT NULL,
                     last_status_timestamp_str TEXT,
                     submitted_timestamp_str TEXT NOT NULL,
+                    submission_key_str TEXT,
+                    order_request_key_str TEXT,
                     raw_payload_json_str TEXT NOT NULL
                 );
 
@@ -164,6 +173,26 @@ class LiveStateStore(CoreLiveStateStore):
                     event_timestamp_str TEXT NOT NULL,
                     event_source_str TEXT NOT NULL,
                     message_str TEXT NOT NULL,
+                    submission_key_str TEXT,
+                    order_request_key_str TEXT,
+                    raw_payload_json_str TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS vplan_broker_ack (
+                    broker_order_ack_id_int INTEGER PRIMARY KEY AUTOINCREMENT,
+                    decision_plan_id_int INTEGER,
+                    vplan_id_int INTEGER NOT NULL,
+                    account_route_str TEXT NOT NULL,
+                    order_request_key_str TEXT NOT NULL,
+                    asset_str TEXT NOT NULL,
+                    broker_order_type_str TEXT NOT NULL,
+                    local_submit_ack_bool INTEGER NOT NULL,
+                    broker_response_ack_bool INTEGER NOT NULL,
+                    ack_status_str TEXT NOT NULL,
+                    ack_source_str TEXT NOT NULL,
+                    broker_order_id_str TEXT,
+                    perm_id_int INTEGER,
+                    response_timestamp_str TEXT,
                     raw_payload_json_str TEXT NOT NULL
                 );
 
@@ -197,6 +226,7 @@ class LiveStateStore(CoreLiveStateStore):
             connection_obj.execute("DROP INDEX IF EXISTS vplan_broker_order_unique_order_idx")
             connection_obj.execute("DROP INDEX IF EXISTS vplan_broker_order_event_unique_idx")
             connection_obj.execute("DROP INDEX IF EXISTS vplan_fill_unique_event_idx")
+            connection_obj.execute("DROP INDEX IF EXISTS vplan_broker_ack_unique_idx")
             connection_obj.execute(
                 """
                 CREATE UNIQUE INDEX IF NOT EXISTS vplan_broker_order_unique_order_idx
@@ -229,6 +259,15 @@ class LiveStateStore(CoreLiveStateStore):
             )
             connection_obj.execute(
                 """
+                CREATE UNIQUE INDEX IF NOT EXISTS vplan_broker_ack_unique_idx
+                ON vplan_broker_ack (
+                    vplan_id_int,
+                    order_request_key_str
+                )
+                """
+            )
+            connection_obj.execute(
+                """
                 CREATE UNIQUE INDEX IF NOT EXISTS session_open_price_unique_idx
                 ON session_open_price (
                     session_date_str,
@@ -254,6 +293,34 @@ class LiveStateStore(CoreLiveStateStore):
                     """
                     ALTER TABLE live_release
                     ADD COLUMN auto_submit_enabled_bool INTEGER NOT NULL DEFAULT 0
+                    """
+                )
+            if "broker_host_str" not in live_release_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE live_release
+                    ADD COLUMN broker_host_str TEXT NOT NULL DEFAULT '127.0.0.1'
+                    """
+                )
+            if "broker_port_int" not in live_release_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE live_release
+                    ADD COLUMN broker_port_int INTEGER NOT NULL DEFAULT 7497
+                    """
+                )
+            if "broker_client_id_int" not in live_release_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE live_release
+                    ADD COLUMN broker_client_id_int INTEGER NOT NULL DEFAULT 31
+                    """
+                )
+            if "broker_timeout_seconds_float" not in live_release_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE live_release
+                    ADD COLUMN broker_timeout_seconds_float REAL NOT NULL DEFAULT 4.0
                     """
                 )
 
@@ -290,6 +357,58 @@ class LiveStateStore(CoreLiveStateStore):
                     """
                 )
 
+            vplan_column_name_list = [
+                row_obj["name"]
+                for row_obj in connection_obj.execute("PRAGMA table_info(vplan)").fetchall()
+            ]
+            if "live_reference_source_json_str" not in vplan_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE vplan
+                    ADD COLUMN live_reference_source_json_str TEXT NOT NULL DEFAULT '{}'
+                    """
+                )
+            if "submit_ack_status_str" not in vplan_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE vplan
+                    ADD COLUMN submit_ack_status_str TEXT NOT NULL DEFAULT 'not_checked'
+                    """
+                )
+            if "ack_coverage_ratio_float" not in vplan_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE vplan
+                    ADD COLUMN ack_coverage_ratio_float REAL
+                    """
+                )
+            if "missing_ack_count_int" not in vplan_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE vplan
+                    ADD COLUMN missing_ack_count_int INTEGER NOT NULL DEFAULT 0
+                    """
+                )
+            if "submit_ack_checked_timestamp_str" not in vplan_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE vplan
+                    ADD COLUMN submit_ack_checked_timestamp_str TEXT
+                    """
+                )
+
+            vplan_row_column_name_list = [
+                row_obj["name"]
+                for row_obj in connection_obj.execute("PRAGMA table_info(vplan_row)").fetchall()
+            ]
+            if "live_reference_source_str" not in vplan_row_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE vplan_row
+                    ADD COLUMN live_reference_source_str TEXT NOT NULL DEFAULT ''
+                    """
+                )
+
             vplan_broker_order_column_name_list = [
                 row_obj["name"]
                 for row_obj in connection_obj.execute("PRAGMA table_info(vplan_broker_order)").fetchall()
@@ -313,6 +432,41 @@ class LiveStateStore(CoreLiveStateStore):
                     """
                     ALTER TABLE vplan_broker_order
                     ADD COLUMN last_status_timestamp_str TEXT
+                    """
+                )
+            if "submission_key_str" not in vplan_broker_order_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE vplan_broker_order
+                    ADD COLUMN submission_key_str TEXT
+                    """
+                )
+            if "order_request_key_str" not in vplan_broker_order_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE vplan_broker_order
+                    ADD COLUMN order_request_key_str TEXT
+                    """
+                )
+
+            vplan_broker_order_event_column_name_list = [
+                row_obj["name"]
+                for row_obj in connection_obj.execute(
+                    "PRAGMA table_info(vplan_broker_order_event)"
+                ).fetchall()
+            ]
+            if "submission_key_str" not in vplan_broker_order_event_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE vplan_broker_order_event
+                    ADD COLUMN submission_key_str TEXT
+                    """
+                )
+            if "order_request_key_str" not in vplan_broker_order_event_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE vplan_broker_order_event
+                    ADD COLUMN order_request_key_str TEXT
                     """
                 )
 
@@ -344,6 +498,10 @@ class LiveStateStore(CoreLiveStateStore):
                     pod_id_str,
                     user_id_str,
                     account_route_str,
+                    broker_host_str,
+                    broker_port_int,
+                    broker_client_id_int,
+                    broker_timeout_seconds_float,
                     source_path_str,
                     strategy_import_str,
                     mode_str,
@@ -357,11 +515,15 @@ class LiveStateStore(CoreLiveStateStore):
                     pod_budget_fraction_float,
                     auto_submit_enabled_bool,
                     updated_timestamp_str
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(release_id_str) DO UPDATE SET
                     pod_id_str = excluded.pod_id_str,
                     user_id_str = excluded.user_id_str,
                     account_route_str = excluded.account_route_str,
+                    broker_host_str = excluded.broker_host_str,
+                    broker_port_int = excluded.broker_port_int,
+                    broker_client_id_int = excluded.broker_client_id_int,
+                    broker_timeout_seconds_float = excluded.broker_timeout_seconds_float,
                     source_path_str = excluded.source_path_str,
                     strategy_import_str = excluded.strategy_import_str,
                     mode_str = excluded.mode_str,
@@ -381,6 +543,10 @@ class LiveStateStore(CoreLiveStateStore):
                     release_obj.pod_id_str,
                     release_obj.user_id_str,
                     release_obj.account_route_str,
+                    release_obj.broker_host_str,
+                    int(release_obj.broker_port_int),
+                    int(release_obj.broker_client_id_int),
+                    float(release_obj.broker_timeout_seconds_float),
                     release_obj.source_path_str,
                     release_obj.strategy_import_str,
                     release_obj.mode_str,
@@ -403,6 +569,10 @@ class LiveStateStore(CoreLiveStateStore):
             user_id_str=row_obj["user_id_str"],
             pod_id_str=row_obj["pod_id_str"],
             account_route_str=row_obj["account_route_str"],
+            broker_host_str=row_obj["broker_host_str"],
+            broker_port_int=int(row_obj["broker_port_int"]),
+            broker_client_id_int=int(row_obj["broker_client_id_int"]),
+            broker_timeout_seconds_float=float(row_obj["broker_timeout_seconds_float"]),
             strategy_import_str=row_obj["strategy_import_str"],
             mode_str=row_obj["mode_str"],
             session_calendar_id_str=row_obj["session_calendar_id_str"],
@@ -605,6 +775,25 @@ class LiveStateStore(CoreLiveStateStore):
 
     def insert_vplan(self, vplan_obj: VPlan) -> VPlan:
         created_timestamp_str = _serialize_timestamp_str(_utc_now_ts())
+        live_reference_source_map_dict = (
+            {
+                str(asset_str): str(source_str)
+                for asset_str, source_str in vplan_obj.live_reference_source_map_dict.items()
+                if str(source_str) != ""
+            }
+            if len(vplan_obj.live_reference_source_map_dict) > 0
+            else {
+                str(vplan_row_obj.asset_str): str(
+                    vplan_row_obj.live_reference_source_str or vplan_obj.live_price_source_str
+                )
+                for vplan_row_obj in vplan_obj.vplan_row_list
+            }
+        )
+        if len(live_reference_source_map_dict) == 0:
+            live_reference_source_map_dict = {
+                str(asset_str): str(vplan_obj.live_price_source_str)
+                for asset_str in vplan_obj.live_reference_price_map
+            }
         with self._connect() as connection_obj:
             cursor_obj = connection_obj.execute(
                 """
@@ -628,13 +817,18 @@ class LiveStateStore(CoreLiveStateStore):
                     pod_budget_float,
                     current_broker_position_json_str,
                     live_reference_price_json_str,
+                    live_reference_source_json_str,
                     target_share_json_str,
                     order_delta_json_str,
                     submission_key_str,
                     status_str,
+                    submit_ack_status_str,
+                    ack_coverage_ratio_float,
+                    missing_ack_count_int,
+                    submit_ack_checked_timestamp_str,
                     created_timestamp_str,
                     updated_timestamp_str
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     vplan_obj.release_id_str,
@@ -656,10 +850,19 @@ class LiveStateStore(CoreLiveStateStore):
                     float(vplan_obj.pod_budget_float),
                     json.dumps(vplan_obj.current_broker_position_map, sort_keys=True),
                     json.dumps(vplan_obj.live_reference_price_map, sort_keys=True),
+                    json.dumps(live_reference_source_map_dict, sort_keys=True),
                     json.dumps(vplan_obj.target_share_map, sort_keys=True),
                     json.dumps(vplan_obj.order_delta_map, sort_keys=True),
                     vplan_obj.submission_key_str,
                     vplan_obj.status_str,
+                    vplan_obj.submit_ack_status_str,
+                    None
+                    if vplan_obj.ack_coverage_ratio_float is None
+                    else float(vplan_obj.ack_coverage_ratio_float),
+                    int(vplan_obj.missing_ack_count_int),
+                    None
+                    if vplan_obj.submit_ack_checked_timestamp_ts is None
+                    else _serialize_timestamp_str(vplan_obj.submit_ack_checked_timestamp_ts),
                     created_timestamp_str,
                     created_timestamp_str,
                 ),
@@ -676,8 +879,9 @@ class LiveStateStore(CoreLiveStateStore):
                         order_delta_share_float,
                         live_reference_price_float,
                         estimated_target_notional_float,
-                        broker_order_type_str
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        broker_order_type_str,
+                        live_reference_source_str
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         vplan_id_int,
@@ -688,6 +892,7 @@ class LiveStateStore(CoreLiveStateStore):
                         float(vplan_row_obj.live_reference_price_float),
                         float(vplan_row_obj.estimated_target_notional_float),
                         vplan_row_obj.broker_order_type_str,
+                        str(vplan_row_obj.live_reference_source_str or vplan_obj.live_price_source_str),
                     ),
                 )
         return VPlan(
@@ -777,6 +982,40 @@ class LiveStateStore(CoreLiveStateStore):
                 WHERE vplan_id_int = ?
                 """,
                 (status_str, _serialize_timestamp_str(_utc_now_ts()), int(vplan_id_int)),
+            )
+
+    def update_vplan_submit_ack_summary(
+        self,
+        vplan_id_int: int,
+        submit_ack_status_str: str,
+        ack_coverage_ratio_float: float | None,
+        missing_ack_count_int: int,
+        submit_ack_checked_timestamp_ts,
+    ) -> None:
+        with self._connect() as connection_obj:
+            connection_obj.execute(
+                """
+                UPDATE vplan
+                SET
+                    submit_ack_status_str = ?,
+                    ack_coverage_ratio_float = ?,
+                    missing_ack_count_int = ?,
+                    submit_ack_checked_timestamp_str = ?,
+                    updated_timestamp_str = ?
+                WHERE vplan_id_int = ?
+                """,
+                (
+                    str(submit_ack_status_str),
+                    None
+                    if ack_coverage_ratio_float is None
+                    else float(ack_coverage_ratio_float),
+                    int(missing_ack_count_int),
+                    None
+                    if submit_ack_checked_timestamp_ts is None
+                    else _serialize_timestamp_str(submit_ack_checked_timestamp_ts),
+                    _serialize_timestamp_str(_utc_now_ts()),
+                    int(vplan_id_int),
+                ),
             )
 
     def get_submitted_vplan_list(self) -> list[VPlan]:
@@ -904,12 +1143,139 @@ class LiveStateStore(CoreLiveStateStore):
                 ),
             )
 
+    def has_post_execution_reconciliation_snapshot(self, vplan_id_int: int) -> bool:
+        with self._connect() as connection_obj:
+            row_obj = connection_obj.execute(
+                """
+                SELECT 1
+                FROM vplan_reconciliation_snapshot
+                WHERE vplan_id_int = ?
+                  AND stage_str = 'post_execution'
+                LIMIT 1
+                """,
+                (int(vplan_id_int),),
+            ).fetchone()
+        return row_obj is not None
+
     def upsert_vplan_broker_order_record_list(
         self,
         broker_order_record_list: Iterable[BrokerOrderRecord],
     ) -> None:
         with self._connect() as connection_obj:
             for broker_order_record_obj in broker_order_record_list:
+                submission_key_str = (
+                    broker_order_record_obj.submission_key_str
+                    if broker_order_record_obj.submission_key_str is not None
+                    else broker_order_record_obj.raw_payload_dict.get("submission_key_str")
+                )
+                order_request_key_str = (
+                    broker_order_record_obj.order_request_key_str
+                    if broker_order_record_obj.order_request_key_str is not None
+                    else broker_order_record_obj.raw_payload_dict.get("order_request_key_str")
+                )
+                if order_request_key_str is not None:
+                    existing_row_obj = connection_obj.execute(
+                        """
+                        SELECT broker_order_record_id_int
+                        FROM vplan_broker_order
+                        WHERE vplan_id_int = ?
+                          AND order_request_key_str = ?
+                        ORDER BY broker_order_record_id_int DESC
+                        LIMIT 1
+                        """,
+                        (
+                            broker_order_record_obj.vplan_id_int,
+                            str(order_request_key_str),
+                        ),
+                    ).fetchone()
+                elif submission_key_str is not None:
+                    existing_row_obj = connection_obj.execute(
+                        """
+                        SELECT
+                            broker_order_record_id_int,
+                            broker_order_id_str
+                        FROM vplan_broker_order
+                        WHERE vplan_id_int = ?
+                          AND submission_key_str = ?
+                          AND asset_str = ?
+                        ORDER BY broker_order_record_id_int DESC
+                        LIMIT 1
+                        """,
+                        (
+                            broker_order_record_obj.vplan_id_int,
+                            str(submission_key_str),
+                            broker_order_record_obj.asset_str,
+                        ),
+                    ).fetchone()
+                else:
+                    existing_row_obj = None
+                if existing_row_obj is not None:
+                    connection_obj.execute(
+                        """
+                        DELETE FROM vplan_broker_order
+                        WHERE vplan_id_int = ?
+                          AND broker_order_id_str = ?
+                          AND broker_order_record_id_int != ?
+                        """,
+                        (
+                            broker_order_record_obj.vplan_id_int,
+                            broker_order_record_obj.broker_order_id_str,
+                            existing_row_obj["broker_order_record_id_int"],
+                        ),
+                    )
+                    connection_obj.execute(
+                        """
+                        UPDATE vplan_broker_order
+                        SET
+                            broker_order_id_str = ?,
+                            decision_plan_id_int = ?,
+                            vplan_id_int = ?,
+                            account_route_str = ?,
+                            asset_str = ?,
+                            broker_order_type_str = ?,
+                            unit_str = ?,
+                            amount_float = ?,
+                            filled_amount_float = ?,
+                            remaining_amount_float = ?,
+                            avg_fill_price_float = ?,
+                            status_str = ?,
+                            last_status_timestamp_str = ?,
+                            submitted_timestamp_str = ?,
+                            submission_key_str = ?,
+                            order_request_key_str = ?,
+                            raw_payload_json_str = ?
+                        WHERE broker_order_record_id_int = ?
+                        """,
+                        (
+                            broker_order_record_obj.broker_order_id_str,
+                            broker_order_record_obj.decision_plan_id_int,
+                            broker_order_record_obj.vplan_id_int,
+                            broker_order_record_obj.account_route_str,
+                            broker_order_record_obj.asset_str,
+                            broker_order_record_obj.broker_order_type_str,
+                            broker_order_record_obj.unit_str,
+                            float(broker_order_record_obj.amount_float),
+                            float(broker_order_record_obj.filled_amount_float),
+                            None
+                            if broker_order_record_obj.remaining_amount_float is None
+                            else float(broker_order_record_obj.remaining_amount_float),
+                            None
+                            if broker_order_record_obj.avg_fill_price_float is None
+                            else float(broker_order_record_obj.avg_fill_price_float),
+                            broker_order_record_obj.status_str,
+                            None
+                            if broker_order_record_obj.last_status_timestamp_ts is None
+                            else _serialize_timestamp_str(
+                                broker_order_record_obj.last_status_timestamp_ts
+                            ),
+                            _serialize_timestamp_str(broker_order_record_obj.submitted_timestamp_ts),
+                            None if submission_key_str is None else str(submission_key_str),
+                            None if order_request_key_str is None else str(order_request_key_str),
+                            json.dumps(broker_order_record_obj.raw_payload_dict, sort_keys=True),
+                            existing_row_obj["broker_order_record_id_int"],
+                        ),
+                    )
+                    continue
                 connection_obj.execute(
                     """
                     INSERT INTO vplan_broker_order (
@@ -927,8 +1293,10 @@ class LiveStateStore(CoreLiveStateStore):
                         status_str,
                         last_status_timestamp_str,
                         submitted_timestamp_str,
+                        submission_key_str,
+                        order_request_key_str,
                         raw_payload_json_str
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(vplan_id_int, broker_order_id_str) DO UPDATE SET
                         decision_plan_id_int = excluded.decision_plan_id_int,
                         vplan_id_int = excluded.vplan_id_int,
@@ -943,6 +1311,8 @@ class LiveStateStore(CoreLiveStateStore):
                         status_str = excluded.status_str,
                         last_status_timestamp_str = excluded.last_status_timestamp_str,
                         submitted_timestamp_str = excluded.submitted_timestamp_str,
+                        submission_key_str = excluded.submission_key_str,
+                        order_request_key_str = excluded.order_request_key_str,
                         raw_payload_json_str = excluded.raw_payload_json_str
                     """,
                     (
@@ -966,6 +1336,8 @@ class LiveStateStore(CoreLiveStateStore):
                         if broker_order_record_obj.last_status_timestamp_ts is None
                         else _serialize_timestamp_str(broker_order_record_obj.last_status_timestamp_ts),
                         _serialize_timestamp_str(broker_order_record_obj.submitted_timestamp_ts),
+                        None if submission_key_str is None else str(submission_key_str),
+                        None if order_request_key_str is None else str(order_request_key_str),
                         json.dumps(broker_order_record_obj.raw_payload_dict, sort_keys=True),
                     ),
                 )
@@ -996,8 +1368,10 @@ class LiveStateStore(CoreLiveStateStore):
                         event_timestamp_str,
                         event_source_str,
                         message_str,
+                        submission_key_str,
+                        order_request_key_str,
                         raw_payload_json_str
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         broker_order_event_obj.broker_order_id_str,
@@ -1016,7 +1390,67 @@ class LiveStateStore(CoreLiveStateStore):
                         _serialize_timestamp_str(event_timestamp_ts),
                         broker_order_event_obj.event_source_str,
                         broker_order_event_obj.message_str,
+                        broker_order_event_obj.submission_key_str,
+                        broker_order_event_obj.order_request_key_str,
                         json.dumps(broker_order_event_obj.raw_payload_dict, sort_keys=True),
+                    ),
+                )
+
+    def upsert_vplan_broker_ack_list(
+        self,
+        broker_order_ack_list: Iterable[BrokerOrderAck],
+    ) -> None:
+        with self._connect() as connection_obj:
+            for broker_order_ack_obj in broker_order_ack_list:
+                connection_obj.execute(
+                    """
+                    INSERT INTO vplan_broker_ack (
+                        decision_plan_id_int,
+                        vplan_id_int,
+                        account_route_str,
+                        order_request_key_str,
+                        asset_str,
+                        broker_order_type_str,
+                        local_submit_ack_bool,
+                        broker_response_ack_bool,
+                        ack_status_str,
+                        ack_source_str,
+                        broker_order_id_str,
+                        perm_id_int,
+                        response_timestamp_str,
+                        raw_payload_json_str
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(vplan_id_int, order_request_key_str) DO UPDATE SET
+                        decision_plan_id_int = excluded.decision_plan_id_int,
+                        account_route_str = excluded.account_route_str,
+                        asset_str = excluded.asset_str,
+                        broker_order_type_str = excluded.broker_order_type_str,
+                        local_submit_ack_bool = excluded.local_submit_ack_bool,
+                        broker_response_ack_bool = excluded.broker_response_ack_bool,
+                        ack_status_str = excluded.ack_status_str,
+                        ack_source_str = excluded.ack_source_str,
+                        broker_order_id_str = excluded.broker_order_id_str,
+                        perm_id_int = excluded.perm_id_int,
+                        response_timestamp_str = excluded.response_timestamp_str,
+                        raw_payload_json_str = excluded.raw_payload_json_str
+                    """,
+                    (
+                        broker_order_ack_obj.decision_plan_id_int,
+                        broker_order_ack_obj.vplan_id_int,
+                        broker_order_ack_obj.account_route_str,
+                        broker_order_ack_obj.order_request_key_str,
+                        broker_order_ack_obj.asset_str,
+                        broker_order_ack_obj.broker_order_type_str,
+                        int(broker_order_ack_obj.local_submit_ack_bool),
+                        int(broker_order_ack_obj.broker_response_ack_bool),
+                        broker_order_ack_obj.ack_status_str,
+                        broker_order_ack_obj.ack_source_str,
+                        broker_order_ack_obj.broker_order_id_str,
+                        broker_order_ack_obj.perm_id_int,
+                        None
+                        if broker_order_ack_obj.response_timestamp_ts is None
+                        else _serialize_timestamp_str(broker_order_ack_obj.response_timestamp_ts),
+                        json.dumps(broker_order_ack_obj.raw_payload_dict, sort_keys=True),
                     ),
                 )
 
@@ -1150,6 +1584,7 @@ class LiveStateStore(CoreLiveStateStore):
                 SELECT
                     broker_order_id_str,
                     asset_str,
+                    order_request_key_str,
                     broker_order_type_str,
                     unit_str,
                     amount_float,
@@ -1158,7 +1593,8 @@ class LiveStateStore(CoreLiveStateStore):
                     avg_fill_price_float,
                     status_str,
                     last_status_timestamp_str,
-                    submitted_timestamp_str
+                    submitted_timestamp_str,
+                    submission_key_str
                 FROM vplan_broker_order
                 WHERE vplan_id_int = ?
                 ORDER BY broker_order_record_id_int ASC
@@ -1169,6 +1605,7 @@ class LiveStateStore(CoreLiveStateStore):
             {
                 "broker_order_id_str": str(row_obj["broker_order_id_str"]),
                 "asset_str": str(row_obj["asset_str"]),
+                "order_request_key_str": row_obj["order_request_key_str"],
                 "broker_order_type_str": str(row_obj["broker_order_type_str"]),
                 "unit_str": str(row_obj["unit_str"]),
                 "amount_float": float(row_obj["amount_float"]),
@@ -1182,6 +1619,46 @@ class LiveStateStore(CoreLiveStateStore):
                 "status_str": str(row_obj["status_str"]),
                 "last_status_timestamp_str": row_obj["last_status_timestamp_str"],
                 "submitted_timestamp_str": str(row_obj["submitted_timestamp_str"]),
+                "submission_key_str": row_obj["submission_key_str"],
+            }
+            for row_obj in row_list
+        ]
+
+    def get_broker_ack_row_dict_list_for_vplan(self, vplan_id_int: int) -> list[dict]:
+        with self._connect() as connection_obj:
+            row_list = connection_obj.execute(
+                """
+                SELECT
+                    order_request_key_str,
+                    asset_str,
+                    broker_order_type_str,
+                    local_submit_ack_bool,
+                    broker_response_ack_bool,
+                    ack_status_str,
+                    ack_source_str,
+                    broker_order_id_str,
+                    perm_id_int,
+                    response_timestamp_str
+                FROM vplan_broker_ack
+                WHERE vplan_id_int = ?
+                ORDER BY asset_str ASC, order_request_key_str ASC
+                """,
+                (int(vplan_id_int),),
+            ).fetchall()
+        return [
+            {
+                "order_request_key_str": str(row_obj["order_request_key_str"]),
+                "asset_str": str(row_obj["asset_str"]),
+                "broker_order_type_str": str(row_obj["broker_order_type_str"]),
+                "local_submit_ack_bool": bool(row_obj["local_submit_ack_bool"]),
+                "broker_response_ack_bool": bool(row_obj["broker_response_ack_bool"]),
+                "ack_status_str": str(row_obj["ack_status_str"]),
+                "ack_source_str": str(row_obj["ack_source_str"]),
+                "broker_order_id_str": row_obj["broker_order_id_str"],
+                "perm_id_int": None
+                if row_obj["perm_id_int"] is None
+                else int(row_obj["perm_id_int"]),
+                "response_timestamp_str": row_obj["response_timestamp_str"],
             }
             for row_obj in row_list
         ]
@@ -1279,9 +1756,28 @@ class LiveStateStore(CoreLiveStateStore):
                 live_reference_price_float=float(vplan_row_obj["live_reference_price_float"]),
                 estimated_target_notional_float=float(vplan_row_obj["estimated_target_notional_float"]),
                 broker_order_type_str=vplan_row_obj["broker_order_type_str"],
+                live_reference_source_str=str(
+                    vplan_row_obj["live_reference_source_str"] or row_obj["live_price_source_str"]
+                ),
             )
             for vplan_row_obj in vplan_row_row_list
         ]
+        live_reference_source_map_dict = (
+            {}
+            if row_obj["live_reference_source_json_str"] is None
+            else json.loads(row_obj["live_reference_source_json_str"])
+        )
+        if len(live_reference_source_map_dict) == 0:
+            live_reference_source_map_dict = {
+                str(vplan_row_obj.asset_str): str(vplan_row_obj.live_reference_source_str)
+                for vplan_row_obj in vplan_row_list
+                if str(vplan_row_obj.live_reference_source_str) != ""
+            }
+        if len(live_reference_source_map_dict) == 0:
+            live_reference_source_map_dict = {
+                str(asset_str): str(row_obj["live_price_source_str"])
+                for asset_str in json.loads(row_obj["live_reference_price_json_str"])
+            }
         return VPlan(
             release_id_str=row_obj["release_id_str"],
             user_id_str=row_obj["user_id_str"],
@@ -1311,7 +1807,30 @@ class LiveStateStore(CoreLiveStateStore):
             target_share_map=json.loads(row_obj["target_share_json_str"]),
             order_delta_map=json.loads(row_obj["order_delta_json_str"]),
             vplan_row_list=vplan_row_list,
+            live_reference_source_map_dict=live_reference_source_map_dict,
             submission_key_str=row_obj["submission_key_str"],
             status_str=row_obj["status_str"],
+            submit_ack_status_str=(
+                str(row_obj["submit_ack_status_str"])
+                if "submit_ack_status_str" in row_obj.keys()
+                else "not_checked"
+            ),
+            ack_coverage_ratio_float=(
+                None
+                if "ack_coverage_ratio_float" not in row_obj.keys()
+                or row_obj["ack_coverage_ratio_float"] is None
+                else float(row_obj["ack_coverage_ratio_float"])
+            ),
+            missing_ack_count_int=(
+                0
+                if "missing_ack_count_int" not in row_obj.keys()
+                else int(row_obj["missing_ack_count_int"])
+            ),
+            submit_ack_checked_timestamp_ts=(
+                None
+                if "submit_ack_checked_timestamp_str" not in row_obj.keys()
+                or row_obj["submit_ack_checked_timestamp_str"] is None
+                else _deserialize_timestamp_ts(row_obj["submit_ack_checked_timestamp_str"])
+            ),
             vplan_id_int=int(row_obj["vplan_id_int"]),
         )

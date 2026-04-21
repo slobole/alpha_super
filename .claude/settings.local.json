@@ -5,7 +5,12 @@
       "Bash(uv lock:*)",
       "Bash(grep:*)",
       "Bash(uv run:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "WebSearch",
+      "WebFetch(domain:ib-insync.readthedocs.io)",
+      "WebFetch(domain:www.nyse.com)",
+      "WebFetch(domain:gilboafunds.com)",
+      "Bash(dot -V)"
     ]
   }
 }

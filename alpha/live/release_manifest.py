@@ -95,6 +95,46 @@ def parse_release_manifest(manifest_path_str: str) -> LiveRelease:
         account_route_str=str(
             _resolve_manifest_value(raw_payload_dict, "account_route", "broker", "account_route")
         ),
+        broker_host_str=str(
+            _resolve_manifest_value(
+                raw_payload_dict,
+                "broker_host_str",
+                "broker",
+                "host_str",
+                required_bool=False,
+                default_value_obj="127.0.0.1",
+            )
+        ),
+        broker_port_int=int(
+            _resolve_manifest_value(
+                raw_payload_dict,
+                "broker_port_int",
+                "broker",
+                "port_int",
+                required_bool=False,
+                default_value_obj=7497,
+            )
+        ),
+        broker_client_id_int=int(
+            _resolve_manifest_value(
+                raw_payload_dict,
+                "broker_client_id_int",
+                "broker",
+                "client_id_int",
+                required_bool=False,
+                default_value_obj=31,
+            )
+        ),
+        broker_timeout_seconds_float=float(
+            _resolve_manifest_value(
+                raw_payload_dict,
+                "broker_timeout_seconds_float",
+                "broker",
+                "timeout_seconds_float",
+                required_bool=False,
+                default_value_obj=4.0,
+            )
+        ),
         strategy_import_str=str(
             _resolve_manifest_value(raw_payload_dict, "strategy_import_str", "strategy", "strategy_import_str")
         ),
@@ -185,6 +225,12 @@ def validate_release_manifest(release_obj: LiveRelease) -> None:
         mode_str=release_obj.mode_str,
         account_route_str=release_obj.account_route_str,
     )
+    if int(release_obj.broker_port_int) <= 0:
+        raise ValueError("Manifest field 'broker_port_int' must be positive.")
+    if int(release_obj.broker_client_id_int) < 0:
+        raise ValueError("Manifest field 'broker_client_id_int' must be non-negative.")
+    if float(release_obj.broker_timeout_seconds_float) <= 0.0:
+        raise ValueError("Manifest field 'broker_timeout_seconds_float' must be positive.")
     if not (0.0 < float(release_obj.pod_budget_fraction_float) <= 1.0):
         raise ValueError(
             "Manifest field 'pod_budget_fraction_float' must satisfy "

@@ -13,6 +13,19 @@ Before changing code, read these doctrine documents in this exact order:
 
 These documents are authoritative for house philosophy, realism assumptions, and future direction. This file remains the operational entrypoint for repo-specific coding behavior.
 
+After the doctrine documents above, also read `docs/ai/KARPATHY_GUIDELINES.md`. This project keeps a self-contained local adaptation of `forrestchang/andrej-karpathy-skills` so the guidance is available here without requiring external plugin files, `.cursor` rules, or `.claude-plugin` metadata.
+
+## Karpathy-Derived Engineering Guardrails
+
+These guardrails are additive to the quant doctrine:
+
+- **Think before coding** - state assumptions explicitly, surface ambiguity, and do not silently choose semantics when they matter.
+- **Simplicity first** - prefer the minimum code that solves the actual problem; avoid speculative flexibility and unnecessary abstractions.
+- **Surgical changes** - change only what the task requires and avoid drive-by cleanup in unrelated areas.
+- **Goal-driven execution** - define a verifiable success condition, implement against it, and verify before declaring completion.
+
+Use the local reference file for the full text and attribution details.
+
 ## Quantitative Correctness Standards
 
 This codebase is held to a strict standard of quantitative rigor. Every piece of code â€” strategies, indicators, metrics, data handling â€” must be bullet-proof against common quant pitfalls. **Simplicity is a virtue**: prefer the clearest, most direct implementation over clever abstractions.

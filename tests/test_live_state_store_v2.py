@@ -39,6 +39,10 @@ def test_state_store_v2_roundtrips_decision_plan_and_vplan(tmp_path):
         risk_profile_str="standard",
         enabled_bool=True,
         source_path_str="manifest.yaml",
+        broker_host_str="127.0.0.1",
+        broker_port_int=7496,
+        broker_client_id_int=31,
+        broker_timeout_seconds_float=6.0,
         pod_budget_fraction_float=0.25,
         auto_submit_enabled_bool=False,
     )
@@ -113,6 +117,101 @@ def test_state_store_v2_roundtrips_decision_plan_and_vplan(tmp_path):
     assert latest_vplan_obj.vplan_row_list[0].asset_str == "AAPL"
 
 
+def test_state_store_v2_roundtrips_mixed_live_reference_sources(tmp_path):
+    db_path_str = str((tmp_path / "live_mixed_sources.sqlite3").resolve())
+    state_store_obj = LiveStateStore(db_path_str)
+
+    decision_plan_obj = state_store_obj.insert_decision_plan(
+        DecisionPlan(
+            release_id_str="release_mixed_001",
+            user_id_str="user_001",
+            pod_id_str="pod_mixed_001",
+            account_route_str="DU1",
+            signal_timestamp_ts=datetime(2024, 1, 31, 16, 0, tzinfo=MARKET_TIMEZONE_OBJ),
+            submission_timestamp_ts=datetime(2024, 2, 1, 9, 20, tzinfo=MARKET_TIMEZONE_OBJ),
+            target_execution_timestamp_ts=datetime(2024, 2, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ),
+            execution_policy_str="next_open_moo",
+            decision_base_position_map={},
+            snapshot_metadata_dict={"strategy_family_str": "stub"},
+            strategy_state_dict={},
+            decision_book_type_str="full_target_weight_book",
+            full_target_weight_map_dict={"AAPL": 0.5, "TLT": 0.5},
+            target_weight_map={"AAPL": 0.5, "TLT": 0.5},
+            cash_reserve_weight_float=0.0,
+            preserve_untouched_positions_bool=False,
+            rebalance_omitted_assets_to_zero_bool=False,
+        )
+    )
+
+    state_store_obj.insert_vplan(
+        VPlan(
+            release_id_str="release_mixed_001",
+            user_id_str="user_001",
+            pod_id_str="pod_mixed_001",
+            account_route_str="DU1",
+            decision_plan_id_int=int(decision_plan_obj.decision_plan_id_int or 0),
+            signal_timestamp_ts=decision_plan_obj.signal_timestamp_ts,
+            submission_timestamp_ts=decision_plan_obj.submission_timestamp_ts,
+            target_execution_timestamp_ts=decision_plan_obj.target_execution_timestamp_ts,
+            execution_policy_str="next_open_moo",
+            broker_snapshot_timestamp_ts=datetime(2024, 2, 1, 9, 22, tzinfo=MARKET_TIMEZONE_OBJ),
+            live_reference_snapshot_timestamp_ts=datetime(2024, 2, 1, 9, 22, tzinfo=MARKET_TIMEZONE_OBJ),
+            live_price_source_str="mixed",
+            net_liq_float=10000.0,
+            available_funds_float=9000.0,
+            excess_liquidity_float=9000.0,
+            pod_budget_fraction_float=0.5,
+            pod_budget_float=5000.0,
+            current_broker_position_map={},
+            live_reference_price_map={"AAPL": 100.0, "TLT": 50.0},
+            target_share_map={"AAPL": 25.0, "TLT": 50.0},
+            order_delta_map={"AAPL": 25.0, "TLT": 50.0},
+            live_reference_source_map_dict={
+                "AAPL": "ib_async.reqMktData.225.auctionPrice",
+                "TLT": "ib_async.reqTickers.marketPrice.fallback",
+            },
+            vplan_row_list=[
+                VPlanRow(
+                    asset_str="AAPL",
+                    current_share_float=0.0,
+                    target_share_float=25.0,
+                    order_delta_share_float=25.0,
+                    live_reference_price_float=100.0,
+                    estimated_target_notional_float=2500.0,
+                    broker_order_type_str="MOO",
+                    live_reference_source_str="ib_async.reqMktData.225.auctionPrice",
+                ),
+                VPlanRow(
+                    asset_str="TLT",
+                    current_share_float=0.0,
+                    target_share_float=50.0,
+                    order_delta_share_float=50.0,
+                    live_reference_price_float=50.0,
+                    estimated_target_notional_float=2500.0,
+                    broker_order_type_str="MOO",
+                    live_reference_source_str="ib_async.reqTickers.marketPrice.fallback",
+                ),
+            ],
+        )
+    )
+
+    latest_vplan_obj = state_store_obj.get_latest_vplan_for_pod("pod_mixed_001")
+
+    assert latest_vplan_obj is not None
+    assert latest_vplan_obj.live_price_source_str == "mixed"
+    assert latest_vplan_obj.live_reference_source_map_dict == {
+        "AAPL": "ib_async.reqMktData.225.auctionPrice",
+        "TLT": "ib_async.reqTickers.marketPrice.fallback",
+    }
+    assert [
+        (vplan_row_obj.asset_str, vplan_row_obj.live_reference_source_str)
+        for vplan_row_obj in latest_vplan_obj.vplan_row_list
+    ] == [
+        ("AAPL", "ib_async.reqMktData.225.auctionPrice"),
+        ("TLT", "ib_async.reqTickers.marketPrice.fallback"),
+    ]
+
+
 def test_state_store_v2_roundtrips_full_target_weight_decision_plan(tmp_path):
     db_path_str = str((tmp_path / "live_full_target.sqlite3").resolve())
     state_store_obj = LiveStateStore(db_path_str)
@@ -160,6 +259,7 @@ def test_state_store_v2_roundtrips_order_events_session_open_and_fill_enrichment
                 vplan_id_int=13,
                 account_route_str="DU1",
                 asset_str="AAPL",
+                order_request_key_str="vplan:13:AAPL:1",
                 broker_order_type_str="MOO",
                 unit_str="shares",
                 amount_float=10.0,
@@ -181,6 +281,7 @@ def test_state_store_v2_roundtrips_order_events_session_open_and_fill_enrichment
                 vplan_id_int=13,
                 account_route_str="DU1",
                 asset_str="AAPL",
+                order_request_key_str="vplan:13:AAPL:1",
                 status_str="PendingSubmit",
                 filled_amount_float=0.0,
                 remaining_amount_float=10.0,
@@ -196,6 +297,7 @@ def test_state_store_v2_roundtrips_order_events_session_open_and_fill_enrichment
                 vplan_id_int=13,
                 account_route_str="DU1",
                 asset_str="AAPL",
+                order_request_key_str="vplan:13:AAPL:1",
                 status_str="PendingSubmit",
                 filled_amount_float=0.0,
                 remaining_amount_float=10.0,
@@ -246,6 +348,7 @@ def test_state_store_v2_roundtrips_order_events_session_open_and_fill_enrichment
         {
             "broker_order_id_str": "broker_001",
             "asset_str": "AAPL",
+            "order_request_key_str": "vplan:13:AAPL:1",
             "broker_order_type_str": "MOO",
             "unit_str": "shares",
             "amount_float": 10.0,
@@ -255,6 +358,7 @@ def test_state_store_v2_roundtrips_order_events_session_open_and_fill_enrichment
             "status_str": "PendingSubmit",
             "last_status_timestamp_str": "2024-02-01T09:20:00-05:00",
             "submitted_timestamp_str": "2024-02-01T09:20:00-05:00",
+            "submission_key_str": None,
         }
     ]
     assert fill_row_dict_list == [

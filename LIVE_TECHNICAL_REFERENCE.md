@@ -366,7 +366,7 @@ Narrative order:
 5. `build_vplan()` converts decision semantics into concrete target shares and deltas.
 6. `build_broker_order_request_list_from_vplan()` derives tradable broker orders from non-zero deltas.
 7. `submit_ready_vplans()` submits those orders if the path is manual-ready or auto-submit-ready.
-8. `post_execution_reconcile()` waits until after the target execution time, reads broker state and fills, and writes a new `PodState`.
+8. `post_execution_reconcile()` waits until after the target execution time, reads broker truth, stores fills and broker order states, writes a new `PodState`, and only marks the plan complete if broker positions match target shares.
 
 ## Module And Function Reference
 
@@ -516,14 +516,14 @@ Responsibility:
 - one-shot live mutation primitive
 
 Key public functions:
-- `build_decision_plans(...)` at line 384
-- `build_vplans(...)` at line 432
-- `submit_ready_vplans(...)` at line 574
-- `post_execution_reconcile(...)` at line 654
-- `get_status_summary(...)` at line 735
-- `show_vplan_summary(...)` at line 815
-- `get_execution_report_summary(...)` at line 907
-- `tick(...)` at line 935
+- `build_decision_plans(...)`
+- `build_vplans(...)`
+- `submit_ready_vplans(...)`
+- `post_execution_reconcile(...)`
+- `get_status_summary(...)`
+- `show_vplan_summary(...)`
+- `get_execution_report_summary(...)`
+- `tick(...)`
 
 Important invariant:
 
@@ -1191,9 +1191,17 @@ tick at or after 09:35 ET -> post_execution_reconcile
 After fills are confirmed, `post_execution_reconcile()` writes:
 
 ```text
-VPlan.status_str = completed
-DecisionPlan.status_str = completed
+residual_share_float = target_share_float - broker_share_float
+
+if all(abs(residual_share_float) <= tolerance_float):
+    VPlan.status_str = completed
+    DecisionPlan.status_str = completed
+else:
+    VPlan.status_str = submitted
+
 PodState = broker-backed state for next cycle
 ```
+
+If an exit target is `0` but broker shares remain, reconcile also writes a `critical` exit residual log.
 
 That is the current DV2 live v2 path in production terms.

@@ -292,6 +292,141 @@ class Strategy(ABC):
 
         return float(current_open_float)
 
+    def _get_last_available_close_before_current_bar(
+        self,
+        prices: pd.DataFrame,
+        asset_str: str,
+    ) -> tuple[pd.Timestamp, float]:
+        close_key = (asset_str, 'Close')
+        if close_key not in prices.columns:
+            raise RuntimeError(f"Missing close history for {asset_str}.")
+        if self.previous_bar is None:
+            raise RuntimeError(
+                f"Cannot liquidate missing-price asset {asset_str} without previous_bar."
+            )
+
+        # *** CRITICAL*** Missing-price liquidation must use the latest
+        # available close no later than previous_bar. Using any later close
+        # would leak future information into the forced exit price.
+        close_history_ser = prices.loc[:self.previous_bar, close_key].dropna()
+        if len(close_history_ser) == 0:
+            raise RuntimeError(
+                f"No prior close is available to liquidate missing-price asset {asset_str}."
+            )
+
+        liquidation_bar_ts = pd.Timestamp(close_history_ser.index[-1])
+        liquidation_price_float = float(close_history_ser.iloc[-1])
+        return liquidation_bar_ts, liquidation_price_float
+
+    def _get_open_trade_amount_ser(
+        self,
+        asset_str: str,
+    ) -> pd.Series:
+        asset_transaction_df = self._transactions[self._transactions['asset'] == asset_str]
+        if len(asset_transaction_df) == 0:
+            return pd.Series(dtype=float, name='open_trade_amount_ser')
+
+        open_trade_amount_ser = (
+            asset_transaction_df
+            .groupby('trade_id', dropna=False)['amount']
+            .sum()
+            .astype(float)
+        )
+        open_trade_mask_vec = ~np.isclose(
+            open_trade_amount_ser.to_numpy(dtype=float),
+            0.0,
+            atol=1e-12,
+        )
+        open_trade_amount_ser = open_trade_amount_ser.loc[open_trade_mask_vec]
+        open_trade_amount_ser.name = 'open_trade_amount_ser'
+        return open_trade_amount_ser
+
+    def _liquidate_missing_price_positions(
+        self,
+        prices: pd.DataFrame,
+    ) -> tuple[float, float]:
+        """
+        Force-close held positions that have lost current-bar price data.
+
+        For asset i and open trade k on liquidation date t:
+
+            q_open_{k,i,t}
+                = sum_j amount_{k,i,j}
+
+            delta_q_liquidate_{k,i,t}
+                = -q_open_{k,i,t}
+
+            cash_flow_liquidate_{k,i,t}
+                = delta_q_liquidate_{k,i,t} * Close_{i,t-1*}
+
+        where Close_{i,t-1*} is the last available close observed no later than
+        `previous_bar`.
+        """
+        transaction_value_sum_float = 0.0
+        commission_sum_float = 0.0
+
+        position_amount_ser = self.get_positions()
+        active_position_ser = position_amount_ser[position_amount_ser != 0]
+        if len(active_position_ser) == 0:
+            return transaction_value_sum_float, commission_sum_float
+
+        for asset_obj in active_position_ser.index:
+            asset_str = str(asset_obj)
+            current_open_key = (asset_str, 'Open')
+            current_close_key = (asset_str, 'Close')
+
+            current_open_float = np.nan
+            if current_open_key in prices.columns:
+                current_open_value = prices.loc[self.current_bar, current_open_key]
+                if pd.notna(current_open_value):
+                    current_open_float = float(current_open_value)
+
+            current_close_float = np.nan
+            if current_close_key in prices.columns:
+                current_close_value = prices.loc[self.current_bar, current_close_key]
+                if pd.notna(current_close_value):
+                    current_close_float = float(current_close_value)
+
+            if np.isfinite(current_open_float) and np.isfinite(current_close_float):
+                continue
+
+            liquidation_bar_ts, liquidation_price_float = (
+                self._get_last_available_close_before_current_bar(
+                    prices=prices,
+                    asset_str=asset_str,
+                )
+            )
+            open_trade_amount_ser = self._get_open_trade_amount_ser(asset_str=asset_str)
+            if len(open_trade_amount_ser) == 0:
+                raise RuntimeError(
+                    f"Found a live position in {asset_str} without any open trade amounts."
+                )
+
+            print(
+                f"Asset {asset_str} has missing current-bar prices on {self.current_bar}; "
+                f"liquidating at last available close from {liquidation_bar_ts.date()}."
+            )
+            self.clear_orders(asset=asset_str)
+
+            for trade_id_obj, open_amount_float in open_trade_amount_ser.items():
+                liquidation_amount_float = -float(open_amount_float)
+                commission_float = float(self._compute_commission(liquidation_amount_float))
+                liquidation_value_float = float(liquidation_amount_float * liquidation_price_float)
+                self.add_transaction(
+                    trade_id_obj,
+                    self.current_bar,
+                    asset_str,
+                    liquidation_amount_float,
+                    liquidation_price_float,
+                    liquidation_value_float,
+                    order_id=-1,
+                    commission=commission_float,
+                )
+                transaction_value_sum_float += liquidation_value_float
+                commission_sum_float += commission_float
+
+        return transaction_value_sum_float, commission_sum_float
+
     def process_orders(self, prices: pd.DataFrame):
         """
         executes all active orders based on current market prices and ensures that orders properly executed,
@@ -321,8 +456,14 @@ class Strategy(ABC):
         commission_sum_float = 0.0
         portfolio_value_float = float(self.previous_total_value)
 
+        stale_transaction_value_float, stale_commission_float = (
+            self._liquidate_missing_price_positions(prices=prices)
+        )
+        total_value_sum_float += stale_transaction_value_float
+        commission_sum_float += stale_commission_float
+
         # loop through all active orders
-        for order in self.get_orders():
+        for order in list(self.get_orders()):
             # retrieve current market prices for the asset
             if order.asset in prices.columns.get_level_values(0):
                 current_open = prices.loc[self.current_bar, (order.asset, 'Open')]
@@ -342,17 +483,16 @@ class Strategy(ABC):
 
             # check if the asset has valid market data; if not, close the position
             if pd.isna(current_open):
-                # this sometimes happens when an asset is delisted. in that case, we
-                # close the position using last closing price and warn the user.
-                print(f'Asset {order.asset} not found in prices on {self.current_bar}')
-                price = prices[(order.asset, 'Close')].dropna().iloc[-1]
-                amount = order.amount_in_shares(price, portfolio_value_float, position)
-                commission = self._compute_commission(amount)
-                self.add_transaction(order.trade_id, self.current_bar, order.asset,
-                                    amount, price, price * amount, order.id, commission)
-                executed_orders.append(order)
-                total_value_sum_float += float(price * amount)
-                commission_sum_float += float(commission)
+                if not np.isclose(float(position), 0.0):
+                    raise RuntimeError(
+                        f"Asset {order.asset} still has an open position after missing-price "
+                        "liquidation. Engine state is inconsistent."
+                    )
+                print(
+                    f"Asset {order.asset} has no tradable open on {self.current_bar}; "
+                    f"canceling order {order.id}."
+                )
+                self.remove_order(order)
                 continue
 
             amount_approx = order.amount_in_shares(sizing_price_float, portfolio_value_float, position)
@@ -432,6 +572,12 @@ class Strategy(ABC):
             self.portfolio_value = 0  # No positions left
         else:
             close_price_ser = self._latest_close_price_ser.reindex(active_position_ser.index)
+            if close_price_ser.isna().any():
+                missing_asset_list = close_price_ser[close_price_ser.isna()].index.astype(str).tolist()
+                raise RuntimeError(
+                    "Active positions still contain missing close prices after missing-price liquidation. "
+                    f"Assets: {missing_asset_list}"
+                )
             self.portfolio_value = float((active_position_ser * close_price_ser).sum())
 
         # update the total account value (cash + portfolio holdings)

@@ -234,11 +234,11 @@ Available commands:
 - `submit_vplan`
   - manually submits one ready `VPlan`
 - `post_execution_reconcile`
-  - reads fills and updates broker-backed pod state
+  - reads broker truth, updates fills/orders, and only completes a `VPlan` if broker positions match target shares
 - `status`
-  - prints current pod-level live status
+  - prints current pod-level live status with unresolved exceptions first
 - `execution_report`
-  - prints fill-level execution details
+  - prints fill-level execution details including official open and slippage when available
 
 ### Runner shared flags
 
@@ -635,7 +635,15 @@ Use this in:
 uv run python -m alpha.live.runner post_execution_reconcile --mode paper
 ```
 
-This reads fills and updates broker-backed pod state.
+This reads broker truth after the execution window and computes:
+
+```text
+residual_share_float = target_share_float - broker_share_float
+```
+
+If all touched assets are within tolerance, the `VPlan` becomes `completed`.
+If not, it stays `submitted`.
+If an intended exit still leaves broker shares open, the system writes a `critical` exit residual log.
 
 ### 7. Execution Report
 
@@ -643,10 +651,13 @@ This reads fills and updates broker-backed pod state.
 uv run python -m alpha.live.runner execution_report --mode paper
 ```
 
-This shows raw fills:
+This shows fill-level execution quality:
 - symbol
 - fill amount
 - fill price
+- official open price when available
+- slippage per share
+- slippage notional
 - fill timestamp
 
 ## Manual Mode vs Auto Mode

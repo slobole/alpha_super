@@ -338,7 +338,7 @@ if __name__ == "__main__":
         name="strategy_mr_qpi_ibs_rsi_exit",
         benchmarks=benchmark_list,
         capital_base=100_000,
-        slippage=0.00025,
+        slippage=0.00025,  # 0.00025
         commission_per_share=0.005,
         commission_minimum=1.0,
     )

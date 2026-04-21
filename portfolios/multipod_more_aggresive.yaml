@@ -1,0 +1,23 @@
+name: multipod_more_aggresive
+capital: 30000
+
+pods:
+  - strategy: strategy_taa_df_btal_1n_fallback_tqqq_vix_cash
+    weight: 0.21
+
+  - strategy: strategy_mr_qpi_ibs_rsi_exit
+    weight: 0.139
+
+  - strategy: strategy_mr_dv2
+    weight: 0.111
+
+  - strategy: strategy_mo_atr_normalized_ndx
+    weight: 0.22
+
+  - strategy: strategy_seasonality
+    weight: 0.1
+
+  - strategy: strategy_eom_tlt_spy_sso_variant_research
+    weight: 0.22
+
+

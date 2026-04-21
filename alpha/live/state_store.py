@@ -62,6 +62,10 @@ class LiveStateStore:
                     pod_id_str TEXT NOT NULL,
                     user_id_str TEXT NOT NULL,
                     account_route_str TEXT NOT NULL,
+                    broker_host_str TEXT NOT NULL DEFAULT '127.0.0.1',
+                    broker_port_int INTEGER NOT NULL DEFAULT 7497,
+                    broker_client_id_int INTEGER NOT NULL DEFAULT 31,
+                    broker_timeout_seconds_float REAL NOT NULL DEFAULT 4.0,
                     source_path_str TEXT NOT NULL,
                     strategy_import_str TEXT NOT NULL,
                     mode_str TEXT NOT NULL,
@@ -126,6 +130,34 @@ class LiveStateStore:
                     """
                     ALTER TABLE live_release
                     ADD COLUMN auto_submit_enabled_bool INTEGER NOT NULL DEFAULT 0
+                    """
+                )
+            if "broker_host_str" not in live_release_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE live_release
+                    ADD COLUMN broker_host_str TEXT NOT NULL DEFAULT '127.0.0.1'
+                    """
+                )
+            if "broker_port_int" not in live_release_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE live_release
+                    ADD COLUMN broker_port_int INTEGER NOT NULL DEFAULT 7497
+                    """
+                )
+            if "broker_client_id_int" not in live_release_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE live_release
+                    ADD COLUMN broker_client_id_int INTEGER NOT NULL DEFAULT 31
+                    """
+                )
+            if "broker_timeout_seconds_float" not in live_release_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE live_release
+                    ADD COLUMN broker_timeout_seconds_float REAL NOT NULL DEFAULT 4.0
                     """
                 )
 
@@ -240,6 +272,10 @@ class LiveStateStore:
                     pod_id_str,
                     user_id_str,
                     account_route_str,
+                    broker_host_str,
+                    broker_port_int,
+                    broker_client_id_int,
+                    broker_timeout_seconds_float,
                     source_path_str,
                     strategy_import_str,
                     mode_str,
@@ -253,11 +289,15 @@ class LiveStateStore:
                     pod_budget_fraction_float,
                     auto_submit_enabled_bool,
                     updated_timestamp_str
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(release_id_str) DO UPDATE SET
                     pod_id_str = excluded.pod_id_str,
                     user_id_str = excluded.user_id_str,
                     account_route_str = excluded.account_route_str,
+                    broker_host_str = excluded.broker_host_str,
+                    broker_port_int = excluded.broker_port_int,
+                    broker_client_id_int = excluded.broker_client_id_int,
+                    broker_timeout_seconds_float = excluded.broker_timeout_seconds_float,
                     source_path_str = excluded.source_path_str,
                     strategy_import_str = excluded.strategy_import_str,
                     mode_str = excluded.mode_str,
@@ -277,6 +317,10 @@ class LiveStateStore:
                     release_obj.pod_id_str,
                     release_obj.user_id_str,
                     release_obj.account_route_str,
+                    release_obj.broker_host_str,
+                    int(release_obj.broker_port_int),
+                    int(release_obj.broker_client_id_int),
+                    float(release_obj.broker_timeout_seconds_float),
                     release_obj.source_path_str,
                     release_obj.strategy_import_str,
                     release_obj.mode_str,
@@ -303,6 +347,10 @@ class LiveStateStore:
             user_id_str=row_obj["user_id_str"],
             pod_id_str=row_obj["pod_id_str"],
             account_route_str=row_obj["account_route_str"],
+            broker_host_str=row_obj["broker_host_str"],
+            broker_port_int=int(row_obj["broker_port_int"]),
+            broker_client_id_int=int(row_obj["broker_client_id_int"]),
+            broker_timeout_seconds_float=float(row_obj["broker_timeout_seconds_float"]),
             strategy_import_str=row_obj["strategy_import_str"],
             mode_str=row_obj["mode_str"],
             session_calendar_id_str=row_obj["session_calendar_id_str"],

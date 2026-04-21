@@ -534,7 +534,7 @@ def generate_trades_metrics(all_trades: pd.DataFrame, calendar: pd.DatetimeIndex
         df.loc[title, 'Avg. return / trade [%]'] = trades['return'].mean() * 100  # average trade return
         # record the best or worst trade based on the trade category
         if title == 'All Trades':
-            df.loc[title, 'Best / worst trade [%]'] = ''
+            df.loc[title, 'Best / worst trade [%]'] = np.nan
         elif title == 'Winning Trades':
             df.loc[title, 'Best / worst trade [%]'] = trades['return'].max() * 100
         else:

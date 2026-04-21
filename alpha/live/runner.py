@@ -5,8 +5,10 @@ import json
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Callable
 import uuid
 
+from alpha.data import FredSeriesLoadError
 from alpha.live import scheduler_utils, strategy_host
 from alpha.live.execution_engine import (
     build_broker_order_request_list_from_vplan,
@@ -24,6 +26,10 @@ from alpha.live.state_store_v2 import LiveStateStore
 
 DEFAULT_RELEASES_ROOT_PATH_STR = str(Path(__file__).resolve().parent / "releases")
 DEFAULT_DB_PATH_STR = str(Path(__file__).resolve().parent / "live_state.sqlite3")
+DEFAULT_BROKER_HOST_STR = "127.0.0.1"
+DEFAULT_BROKER_PORT_INT = 7497
+DEFAULT_BROKER_CLIENT_ID_INT = 31
+DEFAULT_BROKER_TIMEOUT_SECONDS_FLOAT = 4.0
 TERMINAL_ORDER_STATUS_SET: set[str] = {
     "Filled",
     "Cancelled",
@@ -32,6 +38,107 @@ TERMINAL_ORDER_STATUS_SET: set[str] = {
     "Expired",
     "Inactive",
 }
+PARKED_TERMINAL_ORDER_STATUS_SET: set[str] = {
+    "Cancelled",
+    "ApiCancelled",
+    "Rejected",
+    "Expired",
+    "Inactive",
+}
+
+BrokerAdapterKey_Tuple = tuple[str, int, int, float]
+
+
+class BrokerAdapterResolver:
+    def __init__(
+        self,
+        *,
+        broker_adapter_obj: BrokerAdapter | None = None,
+        broker_host_str: str | None = None,
+        broker_port_int: int | None = None,
+        broker_client_id_int: int | None = None,
+        broker_timeout_seconds_float: float | None = None,
+        adapter_factory_func: Callable[[str, int, int, float], BrokerAdapter] | None = None,
+    ) -> None:
+        self._broker_adapter_obj = broker_adapter_obj
+        self._broker_host_str = broker_host_str
+        self._broker_port_int = broker_port_int
+        self._broker_client_id_int = broker_client_id_int
+        self._broker_timeout_seconds_float = broker_timeout_seconds_float
+        self._adapter_factory_func = (
+            adapter_factory_func if adapter_factory_func is not None else _build_ibkr_gateway_broker_adapter
+        )
+        self._adapter_by_key_tup_dict: dict[BrokerAdapterKey_Tuple, BrokerAdapter] = {}
+
+    def _build_effective_broker_adapter_key_tup(
+        self,
+        release_obj: LiveRelease,
+    ) -> BrokerAdapterKey_Tuple:
+        return (
+            str(
+                release_obj.broker_host_str
+                if self._broker_host_str is None
+                else self._broker_host_str
+            ),
+            int(
+                release_obj.broker_port_int
+                if self._broker_port_int is None
+                else self._broker_port_int
+            ),
+            int(
+                release_obj.broker_client_id_int
+                if self._broker_client_id_int is None
+                else self._broker_client_id_int
+            ),
+            float(
+                release_obj.broker_timeout_seconds_float
+                if self._broker_timeout_seconds_float is None
+                else self._broker_timeout_seconds_float
+            ),
+        )
+
+    def get_connection_field_map_dict(
+        self,
+        release_obj: LiveRelease,
+    ) -> dict[str, object]:
+        broker_adapter_key_tup = self._build_effective_broker_adapter_key_tup(release_obj)
+        return {
+            "broker_host_str": broker_adapter_key_tup[0],
+            "broker_port_int": int(broker_adapter_key_tup[1]),
+            "broker_client_id_int": int(broker_adapter_key_tup[2]),
+            "broker_timeout_seconds_float": float(broker_adapter_key_tup[3]),
+        }
+
+    def get_adapter(
+        self,
+        release_obj: LiveRelease,
+    ) -> BrokerAdapter:
+        if self._broker_adapter_obj is not None:
+            return self._broker_adapter_obj
+
+        broker_adapter_key_tup = self._build_effective_broker_adapter_key_tup(release_obj)
+        if broker_adapter_key_tup not in self._adapter_by_key_tup_dict:
+            self._adapter_by_key_tup_dict[broker_adapter_key_tup] = self._adapter_factory_func(
+                str(broker_adapter_key_tup[0]),
+                int(broker_adapter_key_tup[1]),
+                int(broker_adapter_key_tup[2]),
+                float(broker_adapter_key_tup[3]),
+            )
+        return self._adapter_by_key_tup_dict[broker_adapter_key_tup]
+
+
+def _build_ibkr_gateway_broker_adapter(
+    host_str: str,
+    port_int: int,
+    client_id_int: int,
+    timeout_seconds_float: float,
+) -> BrokerAdapter:
+    return IBKRGatewayBrokerAdapter(
+        host_str=host_str,
+        port_int=port_int,
+        client_id_int=client_id_int,
+        timeout_seconds_float=timeout_seconds_float,
+    )
 
 
 def _pluralize_label_str(count_int: int, singular_label_str: str, plural_label_str: str | None = None) -> str:
@@ -70,6 +177,28 @@ def _load_release_list_and_sync(
     release_list = load_release_list(releases_root_path_str)
     state_store_obj.upsert_release_list(release_list)
     return release_list
+
+
+def _coerce_broker_adapter_resolver_obj(
+    *,
+    broker_adapter_obj: BrokerAdapter | None,
+    broker_adapter_resolver_obj: BrokerAdapterResolver | None,
+    broker_host_str: str | None,
+    broker_port_int: int | None,
+    broker_client_id_int: int | None,
+    broker_timeout_seconds_float: float | None,
+    adapter_factory_func: Callable[[str, int, int, float], BrokerAdapter] | None = None,
+) -> BrokerAdapterResolver:
+    if broker_adapter_resolver_obj is not None:
+        return broker_adapter_resolver_obj
+    return BrokerAdapterResolver(
+        broker_adapter_obj=broker_adapter_obj,
+        broker_host_str=broker_host_str,
+        broker_port_int=broker_port_int,
+        broker_client_id_int=broker_client_id_int,
+        broker_timeout_seconds_float=broker_timeout_seconds_float,
+        adapter_factory_func=adapter_factory_func,
+    )
 
 
 def _get_model_state_or_default(
@@ -113,6 +242,40 @@ def _build_release_log_payload_dict(
     if extra_payload_dict is not None:
         payload_dict.update(extra_payload_dict)
     return payload_dict
+
+
+def _build_fred_series_error_log_payload_dict(
+    release_obj: LiveRelease,
+    as_of_ts: datetime,
+    exception_obj: FredSeriesLoadError,
+) -> dict:
+    extra_payload_dict: dict[str, object] = {
+        "reason_code_str": str(exception_obj.reason_code_str),
+        "error_str": str(exception_obj),
+        "series_id_str": str(exception_obj.series_id_str),
+    }
+    if exception_obj.series_snapshot_obj is not None:
+        extra_payload_dict.update(
+            {
+                "source_name_str": str(exception_obj.series_snapshot_obj.source_name_str),
+                "latest_observation_date_str": (
+                    exception_obj.series_snapshot_obj.latest_observation_date_ts.date().isoformat()
+                ),
+                "download_attempt_timestamp_str": (
+                    exception_obj.series_snapshot_obj.download_attempt_timestamp_ts.isoformat()
+                ),
+                "download_status_str": str(exception_obj.series_snapshot_obj.download_status_str),
+                "used_cache_bool": bool(exception_obj.series_snapshot_obj.used_cache_bool),
+                "freshness_business_days_int": int(
+                    exception_obj.series_snapshot_obj.freshness_business_days_int
+                ),
+            }
+        )
+    return _build_release_log_payload_dict(
+        release_obj=release_obj,
+        as_of_ts=as_of_ts,
+        extra_payload_dict=extra_payload_dict,
+    )
 
 
 def _build_decision_plan_log_payload_dict(
@@ -279,6 +442,7 @@ def _synthesize_terminal_filled_event_list(
                     vplan_id_int=broker_order_record_obj.vplan_id_int,
                     account_route_str=broker_order_record_obj.account_route_str,
                     asset_str=broker_order_record_obj.asset_str,
+                    order_request_key_str=broker_order_record_obj.order_request_key_str,
                     status_str="Filled",
                     filled_amount_float=cumulative_filled_amount_float,
                     remaining_amount_float=0.0,
@@ -286,6 +450,7 @@ def _synthesize_terminal_filled_event_list(
                     event_timestamp_ts=last_fill_timestamp_ts,
                     event_source_str="synthetic.fill_closeout",
                     message_str="fills imply filled closeout",
+                    submission_key_str=broker_order_record_obj.submission_key_str,
                     raw_payload_dict={},
                 )
             )
@@ -302,6 +467,408 @@ def _synthesize_terminal_filled_event_list(
         normalized_record_list.append(broker_order_record_obj)
 
     return normalized_record_list, broker_order_event_list + synthesized_event_list
+
+
+def _normalize_position_map_dict(
+    position_map_dict: dict[str, float],
+    tolerance_float: float = 1e-9,
+) -> dict[str, float]:
+    normalized_position_map_dict: dict[str, float] = {}
+    for asset_str, share_float in position_map_dict.items():
+        normalized_share_float = float(share_float)
+        if abs(normalized_share_float) <= tolerance_float:
+            continue
+        normalized_position_map_dict[str(asset_str)] = normalized_share_float
+    return normalized_position_map_dict
+
+
+def _build_expected_broker_position_map_dict(
+    vplan_obj: VPlan,
+    tolerance_float: float = 1e-9,
+) -> dict[str, float]:
+    expected_broker_position_map_dict = _normalize_position_map_dict(
+        vplan_obj.current_broker_position_map,
+        tolerance_float=tolerance_float,
+    )
+    for asset_str, target_share_float in vplan_obj.target_share_map.items():
+        normalized_target_share_float = float(target_share_float)
+        if abs(normalized_target_share_float) <= tolerance_float:
+            expected_broker_position_map_dict.pop(str(asset_str), None)
+            continue
+        expected_broker_position_map_dict[str(asset_str)] = normalized_target_share_float
+    return expected_broker_position_map_dict
+
+
+def _build_latest_broker_order_row_by_asset_map_dict(
+    broker_order_row_dict_list: list[dict[str, object]],
+) -> dict[str, dict[str, object]]:
+    latest_broker_order_row_by_asset_map_dict: dict[str, dict[str, object]] = {}
+    for broker_order_row_dict in broker_order_row_dict_list:
+        asset_str = str(broker_order_row_dict["asset_str"])
+        candidate_timestamp_str = str(
+            broker_order_row_dict.get("last_status_timestamp_str")
+            or broker_order_row_dict.get("submitted_timestamp_str")
+            or ""
+        )
+        existing_broker_order_row_dict = latest_broker_order_row_by_asset_map_dict.get(asset_str)
+        existing_timestamp_str = ""
+        if existing_broker_order_row_dict is not None:
+            existing_timestamp_str = str(
+                existing_broker_order_row_dict.get("last_status_timestamp_str")
+                or existing_broker_order_row_dict.get("submitted_timestamp_str")
+                or ""
+            )
+        if existing_broker_order_row_dict is None or candidate_timestamp_str >= existing_timestamp_str:
+            latest_broker_order_row_by_asset_map_dict[asset_str] = broker_order_row_dict
+    return latest_broker_order_row_by_asset_map_dict
+
+
+def _build_missing_ack_row_dict_list(
+    broker_ack_row_dict_list: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    return [
+        broker_ack_row_dict
+        for broker_ack_row_dict in broker_ack_row_dict_list
+        if not bool(broker_ack_row_dict.get("broker_response_ack_bool", False))
+    ]
+
+
+def _signed_execution_direction_float_from_amount(
+    amount_float: float | None,
+) -> float | None:
+    if amount_float is None:
+        return None
+    normalized_amount_float = float(amount_float)
+    if normalized_amount_float > 0.0:
+        return 1.0
+    if normalized_amount_float < 0.0:
+        return -1.0
+    return None
+
+
+def _compute_execution_cost_bps_float(
+    execution_price_float: float,
+    official_open_price_float: float,
+    signed_execution_direction_float: float | None,
+) -> float | None:
+    if signed_execution_direction_float is None:
+        return None
+    if official_open_price_float <= 0.0:
+        return None
+    execution_cost_bps_float = 10000.0 * float(signed_execution_direction_float) * (
+        (float(execution_price_float) / float(official_open_price_float)) - 1.0
+    )
+    return round(execution_cost_bps_float, 10)
+
+
+def _enrich_fill_row_dict_list(
+    fill_row_dict_list: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    enriched_fill_row_dict_list: list[dict[str, object]] = []
+    for fill_row_dict in fill_row_dict_list:
+        fill_amount_float = float(fill_row_dict["fill_amount_float"])
+        fill_price_float = float(fill_row_dict["fill_price_float"])
+        official_open_price_float = fill_row_dict.get("official_open_price_float")
+        signed_fill_direction_float = 1.0 if fill_amount_float >= 0.0 else -1.0
+        slippage_share_float = None
+        slippage_notional_float = None
+        fill_slippage_bps_float = None
+        if official_open_price_float is not None:
+            slippage_share_float = signed_fill_direction_float * (
+                fill_price_float - float(official_open_price_float)
+            )
+            slippage_notional_float = abs(fill_amount_float) * float(slippage_share_float)
+            fill_slippage_bps_float = _compute_execution_cost_bps_float(
+                execution_price_float=fill_price_float,
+                official_open_price_float=float(official_open_price_float),
+                signed_execution_direction_float=signed_fill_direction_float,
+            )
+        enriched_fill_row_dict_list.append(
+            {
+                **fill_row_dict,
+                "signed_fill_direction_float": signed_fill_direction_float,
+                "slippage_share_float": slippage_share_float,
+                "slippage_notional_float": slippage_notional_float,
+                "fill_slippage_bps_float": fill_slippage_bps_float,
+            }
+        )
+    return enriched_fill_row_dict_list
+
+
+def _build_fill_stat_by_asset_map_dict(
+    fill_row_dict_list: list[dict[str, object]],
+) -> dict[str, dict[str, object]]:
+    fill_stat_by_asset_map_dict: dict[str, dict[str, object]] = {}
+    for fill_row_dict in fill_row_dict_list:
+        asset_str = str(fill_row_dict["asset_str"])
+        fill_stat_row_dict = fill_stat_by_asset_map_dict.setdefault(
+            asset_str,
+            {
+                "filled_share_float": 0.0,
+                "absolute_fill_share_float": 0.0,
+                "weighted_fill_notional_float": 0.0,
+                "weighted_avg_fill_price_float": None,
+                "official_open_price_float": None,
+                "latest_fill_timestamp_str": None,
+                "latest_fill_price_float": None,
+                "latest_fill_slippage_bps_float": None,
+            },
+        )
+        fill_amount_float = float(fill_row_dict["fill_amount_float"])
+        fill_price_float = float(fill_row_dict["fill_price_float"])
+        absolute_fill_share_float = abs(fill_amount_float)
+        fill_stat_row_dict["filled_share_float"] = float(fill_stat_row_dict["filled_share_float"]) + fill_amount_float
+        fill_stat_row_dict["absolute_fill_share_float"] = float(
+            fill_stat_row_dict["absolute_fill_share_float"]
+        ) + absolute_fill_share_float
+        fill_stat_row_dict["weighted_fill_notional_float"] = float(
+            fill_stat_row_dict["weighted_fill_notional_float"]
+        ) + (absolute_fill_share_float * fill_price_float)
+        if float(fill_stat_row_dict["absolute_fill_share_float"]) > 0.0:
+            fill_stat_row_dict["weighted_avg_fill_price_float"] = float(
+                fill_stat_row_dict["weighted_fill_notional_float"]
+            ) / float(fill_stat_row_dict["absolute_fill_share_float"])
+        if (
+            fill_stat_row_dict["official_open_price_float"] is None
+            and fill_row_dict.get("official_open_price_float") is not None
+        ):
+            fill_stat_row_dict["official_open_price_float"] = float(
+                fill_row_dict["official_open_price_float"]
+            )
+        latest_fill_timestamp_str = fill_stat_row_dict["latest_fill_timestamp_str"]
+        candidate_fill_timestamp_str = fill_row_dict.get("fill_timestamp_str")
+        if latest_fill_timestamp_str is None or str(candidate_fill_timestamp_str) >= str(latest_fill_timestamp_str):
+            fill_stat_row_dict["latest_fill_timestamp_str"] = candidate_fill_timestamp_str
+            fill_stat_row_dict["latest_fill_price_float"] = fill_price_float
+            fill_stat_row_dict["latest_fill_slippage_bps_float"] = fill_row_dict.get("fill_slippage_bps_float")
+    return fill_stat_by_asset_map_dict
+
+
+def _resolve_avg_execution_quality_dict(
+    broker_order_row_dict: dict[str, object] | None,
+    fill_stat_row_dict: dict[str, object] | None,
+    fallback_direction_amount_float: float | None = None,
+) -> dict[str, object]:
+    avg_fill_price_float = None
+    official_open_price_float = None
+    signed_execution_direction_float = None
+    if broker_order_row_dict is not None:
+        raw_avg_fill_price_float = broker_order_row_dict.get("avg_fill_price_float")
+        if raw_avg_fill_price_float is not None:
+            avg_fill_price_float = float(raw_avg_fill_price_float)
+        signed_execution_direction_float = _signed_execution_direction_float_from_amount(
+            broker_order_row_dict.get("amount_float")
+        )
+    if fill_stat_row_dict is not None:
+        if avg_fill_price_float is None and fill_stat_row_dict.get("weighted_avg_fill_price_float") is not None:
+            avg_fill_price_float = float(fill_stat_row_dict["weighted_avg_fill_price_float"])
+        if fill_stat_row_dict.get("official_open_price_float") is not None:
+            official_open_price_float = float(fill_stat_row_dict["official_open_price_float"])
+        if signed_execution_direction_float is None:
+            signed_execution_direction_float = _signed_execution_direction_float_from_amount(
+                fill_stat_row_dict.get("filled_share_float")
+            )
+    if signed_execution_direction_float is None:
+        signed_execution_direction_float = _signed_execution_direction_float_from_amount(
+            fallback_direction_amount_float
+        )
+    avg_slippage_bps_float = None
+    if avg_fill_price_float is not None and official_open_price_float is not None:
+        avg_slippage_bps_float = _compute_execution_cost_bps_float(
+            execution_price_float=avg_fill_price_float,
+            official_open_price_float=official_open_price_float,
+            signed_execution_direction_float=signed_execution_direction_float,
+        )
+    return {
+        "avg_fill_price_float": avg_fill_price_float,
+        "official_open_price_float": official_open_price_float,
+        "avg_slippage_bps_float": avg_slippage_bps_float,
+    }
+
+
+def _enrich_broker_order_row_dict_list_for_display(
+    broker_order_row_dict_list: list[dict[str, object]],
+    fill_row_dict_list: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    fill_stat_by_asset_map_dict = _build_fill_stat_by_asset_map_dict(fill_row_dict_list)
+    enriched_broker_order_row_dict_list: list[dict[str, object]] = []
+    for broker_order_row_dict in broker_order_row_dict_list:
+        execution_quality_dict = _resolve_avg_execution_quality_dict(
+            broker_order_row_dict=broker_order_row_dict,
+            fill_stat_row_dict=fill_stat_by_asset_map_dict.get(str(broker_order_row_dict["asset_str"])),
+        )
+        enriched_broker_order_row_dict_list.append(
+            {
+                **broker_order_row_dict,
+                **execution_quality_dict,
+            }
+        )
+    return enriched_broker_order_row_dict_list
+
+
+def _build_execution_row_dict_list(
+    vplan_obj: VPlan,
+    broker_position_map_dict: dict[str, float],
+    broker_order_row_dict_list: list[dict[str, object]],
+    fill_row_dict_list: list[dict[str, object]],
+    tolerance_float: float = 1e-9,
+) -> list[dict[str, object]]:
+    latest_broker_order_row_by_asset_map_dict = _build_latest_broker_order_row_by_asset_map_dict(
+        broker_order_row_dict_list
+    )
+    fill_stat_by_asset_map_dict = _build_fill_stat_by_asset_map_dict(fill_row_dict_list)
+    asset_str_set = {
+        str(vplan_row_obj.asset_str)
+        for vplan_row_obj in vplan_obj.vplan_row_list
+    }
+    asset_str_set.update(str(asset_str) for asset_str in vplan_obj.target_share_map)
+    asset_str_set.update(str(asset_str) for asset_str in latest_broker_order_row_by_asset_map_dict)
+    asset_str_set.update(str(asset_str) for asset_str in fill_stat_by_asset_map_dict)
+
+    execution_row_dict_list: list[dict[str, object]] = []
+    for asset_str in sorted(asset_str_set):
+        current_share_float = float(vplan_obj.current_broker_position_map.get(asset_str, 0.0))
+        target_share_float = float(vplan_obj.target_share_map.get(asset_str, current_share_float))
+        broker_share_float = float(broker_position_map_dict.get(asset_str, current_share_float))
+        residual_share_float = target_share_float - broker_share_float
+        live_reference_price_float = float(vplan_obj.live_reference_price_map.get(asset_str, 0.0))
+        residual_notional_float = abs(residual_share_float) * live_reference_price_float
+        latest_broker_order_row_dict = latest_broker_order_row_by_asset_map_dict.get(asset_str)
+        fill_stat_row_dict = fill_stat_by_asset_map_dict.get(
+            asset_str,
+            {
+                "filled_share_float": 0.0,
+                "absolute_fill_share_float": 0.0,
+                "weighted_fill_notional_float": 0.0,
+                "weighted_avg_fill_price_float": None,
+                "official_open_price_float": None,
+                "latest_fill_timestamp_str": None,
+                "latest_fill_price_float": None,
+                "latest_fill_slippage_bps_float": None,
+            },
+        )
+        unresolved_bool = abs(residual_share_float) > tolerance_float
+        exit_breach_bool = abs(target_share_float) <= tolerance_float and unresolved_bool
+        direction_reference_amount_float = float(vplan_obj.order_delta_map.get(asset_str, 0.0))
+        if abs(direction_reference_amount_float) <= tolerance_float:
+            direction_reference_amount_float = float(fill_stat_row_dict.get("filled_share_float", 0.0))
+        execution_quality_dict = _resolve_avg_execution_quality_dict(
+            broker_order_row_dict=latest_broker_order_row_dict,
+            fill_stat_row_dict=fill_stat_row_dict,
+            fallback_direction_amount_float=direction_reference_amount_float,
+        )
+        execution_row_dict_list.append(
+            {
+                "asset_str": asset_str,
+                "current_share_float": current_share_float,
+                "target_share_float": target_share_float,
+                "broker_share_float": broker_share_float,
+                "residual_share_float": residual_share_float,
+                "residual_notional_float": residual_notional_float,
+                "open_share_float": abs(residual_share_float),
+                "planned_order_delta_share_float": float(vplan_obj.order_delta_map.get(asset_str, 0.0)),
+                "filled_share_float": float(fill_stat_row_dict["filled_share_float"]),
+                "latest_fill_timestamp_str": fill_stat_row_dict["latest_fill_timestamp_str"],
+                "latest_fill_price_float": fill_stat_row_dict["latest_fill_price_float"],
+                "latest_fill_slippage_bps_float": fill_stat_row_dict["latest_fill_slippage_bps_float"],
+                "latest_broker_order_status_str": (
+                    None
+                    if latest_broker_order_row_dict is None
+                    else latest_broker_order_row_dict["status_str"]
+                ),
+                "latest_broker_order_timestamp_str": (
+                    None
+                    if latest_broker_order_row_dict is None
+                    else (
+                        latest_broker_order_row_dict.get("last_status_timestamp_str")
+                        or latest_broker_order_row_dict.get("submitted_timestamp_str")
+                    )
+                ),
+                "live_reference_price_float": live_reference_price_float,
+                "unresolved_bool": unresolved_bool,
+                "exit_breach_bool": exit_breach_bool,
+                "problem_bool": unresolved_bool,
+                **execution_quality_dict,
+            }
+        )
+    execution_row_dict_list.sort(
+        key=lambda execution_row_dict: (
+            0 if bool(execution_row_dict["exit_breach_bool"]) else 1,
+            0 if bool(execution_row_dict["problem_bool"]) else 1,
+            str(execution_row_dict["asset_str"]),
+        )
+    )
+    return execution_row_dict_list
+
+
+def _build_exception_row_dict_list(
+    execution_row_dict_list: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    return [
+        execution_row_dict
+        for execution_row_dict in execution_row_dict_list
+        if bool(execution_row_dict["problem_bool"])
+    ]
+
+
+def _build_terminal_unresolved_row_dict_list(
+    execution_row_dict_list: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    terminal_unresolved_row_dict_list: list[dict[str, object]] = []
+    for execution_row_dict in execution_row_dict_list:
+        if not bool(execution_row_dict["unresolved_bool"]):
+            continue
+        latest_broker_order_status_str = execution_row_dict["latest_broker_order_status_str"]
+        if latest_broker_order_status_str not in PARKED_TERMINAL_ORDER_STATUS_SET:
+            continue
+        terminal_unresolved_row_dict_list.append(execution_row_dict)
+    return terminal_unresolved_row_dict_list
+
+
+def is_vplan_execution_exception_parked(
+    state_store_obj: LiveStateStore,
+    vplan_obj: VPlan,
+    tolerance_float: float = 1e-9,
+) -> bool:
+    if vplan_obj.vplan_id_int is None:
+        return False
+    if not state_store_obj.has_post_execution_reconciliation_snapshot(int(vplan_obj.vplan_id_int)):
+        return False
+    latest_broker_snapshot_obj = state_store_obj.get_latest_broker_snapshot_for_account(
+        vplan_obj.account_route_str
+    )
+    broker_position_map_dict = (
+        vplan_obj.current_broker_position_map
+        if latest_broker_snapshot_obj is None
+        else latest_broker_snapshot_obj.position_amount_map
+    )
+    broker_order_row_dict_list = state_store_obj.get_broker_order_row_dict_list_for_vplan(
+        int(vplan_obj.vplan_id_int)
+    )
+    fill_row_dict_list = _enrich_fill_row_dict_list(
+        state_store_obj.get_fill_row_dict_list_for_vplan(int(vplan_obj.vplan_id_int))
+    )
+    execution_row_dict_list = _build_execution_row_dict_list(
+        vplan_obj=vplan_obj,
+        broker_position_map_dict=broker_position_map_dict,
+        broker_order_row_dict_list=broker_order_row_dict_list,
+        fill_row_dict_list=fill_row_dict_list,
+        tolerance_float=tolerance_float,
+    )
+    terminal_unresolved_row_dict_list = _build_terminal_unresolved_row_dict_list(execution_row_dict_list)
+    return len(terminal_unresolved_row_dict_list) > 0
+
+
+def _format_optional_float_str(value_obj: object, precision_int: int = 4) -> str:
+    if value_obj is None:
+        return "unavailable"
+    return f"{float(value_obj):.{precision_int}f}"
+
+
+def _format_bps_str(value_obj: object, precision_int: int = 1) -> str:
+    if value_obj is None:
+        return "unavailable"
+    return f"{float(value_obj):.{precision_int}f} bps"
 
 
 def _render_tick_detail_str(detail_dict: dict[str, object]) -> str:
@@ -411,30 +978,51 @@ def _render_status_detail_str(detail_dict: dict[str, object]) -> str:
         return "\n".join(line_list)
 
     for pod_status_dict in pod_status_dict_list:
+        exception_row_dict_list = list(pod_status_dict.get("exception_row_dict_list", []))
         line_list.extend(
             [
                 "",
                 f"Pod: {pod_status_dict['pod_id_str']}",
                 f"- Release: {pod_status_dict['release_id_str']}",
                 f"- Account: {pod_status_dict['account_route_str']}",
-                f"- DecisionPlan status: {pod_status_dict['latest_decision_plan_status_str'] or 'none'}",
-                f"- VPlan status: {pod_status_dict['latest_vplan_status_str'] or 'none'}",
-                f"- Next action: {pod_status_dict['next_action_str']}",
-                f"- Why: {pod_status_dict['reason_code_str']}",
+                "- State: "
+                f"decision={pod_status_dict['latest_decision_plan_status_str'] or 'none'} | "
+                f"vplan={pod_status_dict['latest_vplan_status_str'] or 'none'}",
+                f"- Next: {pod_status_dict['next_action_str']} | reason={pod_status_dict['reason_code_str']}",
                 f"- Latest signal time: {pod_status_dict['latest_signal_timestamp_str'] or 'none'}",
                 f"- Planned submit time: {pod_status_dict['latest_submission_timestamp_str'] or 'none'}",
                 f"- Latest broker snapshot: {pod_status_dict['latest_broker_snapshot_timestamp_str'] or 'none'}",
                 f"- Latest fill time: {pod_status_dict['latest_fill_timestamp_str'] or 'none'}",
+                "- Submit ACK: "
+                f"status={pod_status_dict.get('submit_ack_status_str') or 'none'} | "
+                f"coverage={_format_optional_float_str(pod_status_dict.get('ack_coverage_ratio_float'))} | "
+                f"missing={int(pod_status_dict.get('missing_ack_count_int', 0))}",
+                f"- Exceptions: {len(exception_row_dict_list)}",
             ]
         )
-        for broker_order_row_dict in pod_status_dict.get("latest_broker_order_row_dict_list", []):
+        missing_ack_row_dict_list = list(pod_status_dict.get("missing_ack_row_dict_list", []))
+        for missing_ack_row_dict in missing_ack_row_dict_list:
             line_list.append(
-                "- Order: "
-                f"{broker_order_row_dict['asset_str']} | "
-                f"requested_qty={broker_order_row_dict['amount_float']} | "
-                f"filled_qty={broker_order_row_dict['filled_amount_float']} | "
-                f"status={broker_order_row_dict['status_str']} | "
-                f"last_status_time={broker_order_row_dict['last_status_timestamp_str'] or broker_order_row_dict['submitted_timestamp_str']}"
+                "- CRITICAL ACK: "
+                f"{missing_ack_row_dict['asset_str']} | "
+                f"request={missing_ack_row_dict['order_request_key_str']} | "
+                f"source={missing_ack_row_dict['ack_source_str']}"
+            )
+        if len(exception_row_dict_list) == 0:
+            line_list.append(
+                "- OK: no unresolved broker-vs-target residuals."
+            )
+        for exception_row_dict in exception_row_dict_list:
+            label_str = "CRITICAL EXIT" if bool(exception_row_dict["exit_breach_bool"]) else "Issue"
+            line_list.append(
+                f"- {label_str}: "
+                f"{exception_row_dict['asset_str']} | "
+                f"target={_format_optional_float_str(exception_row_dict['target_share_float'])} | "
+                f"broker={_format_optional_float_str(exception_row_dict['broker_share_float'])} | "
+                f"residual={_format_optional_float_str(exception_row_dict['residual_share_float'])} | "
+                f"filled={_format_optional_float_str(exception_row_dict['filled_share_float'])} | "
+                f"latest_order={exception_row_dict['latest_broker_order_status_str'] or 'none'} | "
+                f"open={_format_optional_float_str(exception_row_dict['open_share_float'])}"
             )
     return "\n".join(line_list)
 
@@ -454,44 +1042,103 @@ def _render_vplan_detail_str(detail_dict: dict[str, object]) -> str:
                 f"- VPlan id: {vplan_dict['vplan_id_int']}",
                 f"- DecisionPlan id: {vplan_dict['decision_plan_id_int']}",
                 f"- Status: {vplan_dict['status_str']}",
+                "- Submit ACK: "
+                f"status={vplan_dict.get('submit_ack_status_str') or 'none'} | "
+                f"coverage={_format_optional_float_str(vplan_dict.get('ack_coverage_ratio_float'))} | "
+                f"missing={int(vplan_dict.get('missing_ack_count_int', 0))}",
                 f"- NetLiq: {vplan_dict['net_liq_float']}",
                 f"- Pod budget: {vplan_dict['pod_budget_float']}",
                 f"- Price source: {vplan_dict['live_price_source_str']}",
             ]
         )
-        warning_row_dict_list = list(vplan_dict.get("warning_row_dict_list", []))
-        if len(warning_row_dict_list) > 0:
-            line_list.append(f"- Position warnings: {len(warning_row_dict_list)}")
-        for vplan_row_dict in vplan_dict["vplan_row_dict_list"]:
+        if str(vplan_dict.get("display_mode_str", "planned")) == "planned":
+            warning_row_dict_list = list(vplan_dict.get("warning_row_dict_list", []))
+            if len(warning_row_dict_list) > 0:
+                line_list.append(f"- Position warnings: {len(warning_row_dict_list)}")
+            for vplan_row_dict in vplan_dict["vplan_row_dict_list"]:
+                line_list.append(
+                    "- Plan: "
+                    f"{vplan_row_dict['asset_str']} | "
+                    f"current={_format_optional_float_str(vplan_row_dict['current_share_float'])} | "
+                    f"target={_format_optional_float_str(vplan_row_dict['target_share_float'])} | "
+                    f"delta={_format_optional_float_str(vplan_row_dict['order_delta_share_float'])} | "
+                    f"ref_price={_format_optional_float_str(vplan_row_dict['live_reference_price_float'])} | "
+                    f"ref_source={vplan_row_dict['live_reference_source_str']} | "
+                    f"est_notional={_format_optional_float_str(vplan_row_dict['estimated_target_notional_float'])}"
+                )
+            for warning_row_dict in warning_row_dict_list:
+                line_list.append(
+                    "- Warning: "
+                    f"{warning_row_dict['asset_str']} | "
+                    f"decision_base={_format_optional_float_str(warning_row_dict['decision_base_share_float'])} | "
+                    f"current={_format_optional_float_str(warning_row_dict['current_share_float'])} | "
+                    f"drift={_format_optional_float_str(warning_row_dict['drift_share_float'])}"
+                )
+            continue
+
+        exception_row_dict_list = list(vplan_dict.get("exception_row_dict_list", []))
+        missing_ack_row_dict_list = list(vplan_dict.get("missing_ack_row_dict_list", []))
+        execution_row_dict_list = list(vplan_dict.get("execution_row_dict_list", []))
+        fill_row_dict_list = list(vplan_dict.get("fill_row_dict_list", []))
+        for missing_ack_row_dict in missing_ack_row_dict_list:
+            line_list.append(
+                "- CRITICAL ACK: "
+                f"{missing_ack_row_dict['asset_str']} | "
+                f"request={missing_ack_row_dict['order_request_key_str']} | "
+                f"source={missing_ack_row_dict['ack_source_str']}"
+            )
+        line_list.append(f"- Exceptions: {len(exception_row_dict_list)}")
+        if len(exception_row_dict_list) == 0:
+            line_list.append("- OK: no unresolved broker-vs-target residuals.")
+        for exception_row_dict in exception_row_dict_list:
+            label_str = "CRITICAL EXIT" if bool(exception_row_dict["exit_breach_bool"]) else "Issue"
+            line_list.append(
+                f"- {label_str}: "
+                f"{exception_row_dict['asset_str']} | "
+                f"target={_format_optional_float_str(exception_row_dict['target_share_float'])} | "
+                f"broker={_format_optional_float_str(exception_row_dict['broker_share_float'])} | "
+                f"residual={_format_optional_float_str(exception_row_dict['residual_share_float'])} | "
+                f"filled={_format_optional_float_str(exception_row_dict['filled_share_float'])} | "
+                f"latest_order={exception_row_dict['latest_broker_order_status_str'] or 'none'} | "
+                f"open={_format_optional_float_str(exception_row_dict['open_share_float'])}"
+            )
+        for execution_row_dict in execution_row_dict_list:
             line_list.append(
                 "- Row: "
-                f"{vplan_row_dict['asset_str']} | "
-                f"decision_base={vplan_row_dict['decision_base_share_float']} | "
-                f"current={vplan_row_dict['current_share_float']} | "
-                f"drift={vplan_row_dict['drift_share_float']} | "
-                f"target={vplan_row_dict['target_share_float']} | "
-                f"delta={vplan_row_dict['order_delta_share_float']} | "
-                f"price={vplan_row_dict['live_reference_price_float']} | "
-                f"notional={vplan_row_dict['estimated_target_notional_float']} | "
-                f"warning={'yes' if vplan_row_dict['warning_bool'] else 'no'}"
-            )
-        for warning_row_dict in warning_row_dict_list:
-            line_list.append(
-                "- Warning: "
-                f"{warning_row_dict['asset_str']} | "
-                f"decision_base={warning_row_dict['decision_base_share_float']} | "
-                f"current={warning_row_dict['current_share_float']} | "
-                f"drift={warning_row_dict['drift_share_float']}"
+                f"{execution_row_dict['asset_str']} | "
+                f"target={_format_optional_float_str(execution_row_dict['target_share_float'])} | "
+                f"broker={_format_optional_float_str(execution_row_dict['broker_share_float'])} | "
+                f"residual={_format_optional_float_str(execution_row_dict['residual_share_float'])} | "
+                f"filled={_format_optional_float_str(execution_row_dict['filled_share_float'])} | "
+                f"avg_fill={_format_optional_float_str(execution_row_dict['avg_fill_price_float'])} | "
+                f"open={_format_optional_float_str(execution_row_dict['official_open_price_float'])} | "
+                f"avg_bps={_format_bps_str(execution_row_dict['avg_slippage_bps_float'])} | "
+                f"latest_order={execution_row_dict['latest_broker_order_status_str'] or 'none'}"
             )
         for broker_order_row_dict in vplan_dict.get("broker_order_row_dict_list", []):
             line_list.append(
-                "- Order status: "
+                "- Order: "
                 f"{broker_order_row_dict['asset_str']} | "
-                f"qty={broker_order_row_dict['amount_float']} | "
-                f"filled={broker_order_row_dict['filled_amount_float']} | "
-                f"remaining={broker_order_row_dict['remaining_amount_float']} | "
+                f"requested={_format_optional_float_str(broker_order_row_dict['amount_float'])} | "
+                f"filled={_format_optional_float_str(broker_order_row_dict['filled_amount_float'])} | "
+                f"remaining={_format_optional_float_str(broker_order_row_dict['remaining_amount_float'])} | "
+                f"avg_fill={_format_optional_float_str(broker_order_row_dict['avg_fill_price_float'])} | "
+                f"open={_format_optional_float_str(broker_order_row_dict['official_open_price_float'])} | "
+                f"avg_bps={_format_bps_str(broker_order_row_dict['avg_slippage_bps_float'])} | "
                 f"status={broker_order_row_dict['status_str']} | "
-                f"last_status_time={broker_order_row_dict['last_status_timestamp_str'] or broker_order_row_dict['submitted_timestamp_str']}"
+                f"time={broker_order_row_dict['last_status_timestamp_str'] or broker_order_row_dict['submitted_timestamp_str']}"
+            )
+        for fill_row_dict in fill_row_dict_list:
+            line_list.append(
+                "- Fill: "
+                f"{fill_row_dict['asset_str']} | "
+                f"shares={_format_optional_float_str(fill_row_dict['fill_amount_float'])} | "
+                f"fill={_format_optional_float_str(fill_row_dict['fill_price_float'])} | "
+                f"official_open={_format_optional_float_str(fill_row_dict['official_open_price_float'])} | "
+                f"slippage_bps={_format_bps_str(fill_row_dict['fill_slippage_bps_float'])} | "
+                f"slippage/share={_format_optional_float_str(fill_row_dict['slippage_share_float'])} | "
+                f"slippage_notional={_format_optional_float_str(fill_row_dict['slippage_notional_float'])} | "
+                f"time={fill_row_dict['fill_timestamp_str']}"
             )
     return "\n".join(line_list)
 
@@ -510,16 +1157,21 @@ def _render_execution_report_detail_str(detail_dict: dict[str, object]) -> str:
                 f"Pod: {execution_report_dict['pod_id_str']}",
                 f"- VPlan id: {execution_report_dict['latest_vplan_id_int']}",
                 f"- Fill count: {execution_report_dict['fill_count_int']}",
+                f"- Fills with official open: {execution_report_dict['fill_with_open_count_int']}",
+                f"- Aggregate slippage notional: {_format_optional_float_str(execution_report_dict['aggregate_slippage_notional_float'])}",
             ]
         )
         for fill_row_dict in execution_report_dict["fill_row_dict_list"]:
             line_list.append(
                 "- Fill: "
                 f"{fill_row_dict['asset_str']} | "
-                f"amount={fill_row_dict['fill_amount_float']} | "
-                f"price={fill_row_dict['fill_price_float']} | "
-                f"official_open={fill_row_dict['official_open_price_float']} | "
-                f"open_source={fill_row_dict['open_price_source_str'] or 'none'} | "
+                f"shares={_format_optional_float_str(fill_row_dict['fill_amount_float'])} | "
+                f"fill={_format_optional_float_str(fill_row_dict['fill_price_float'])} | "
+                f"official_open={_format_optional_float_str(fill_row_dict['official_open_price_float'])} | "
+                f"slippage_bps={_format_bps_str(fill_row_dict['fill_slippage_bps_float'])} | "
+                f"slippage/share={_format_optional_float_str(fill_row_dict['slippage_share_float'])} | "
+                f"slippage_notional={_format_optional_float_str(fill_row_dict['slippage_notional_float'])} | "
+                f"open_source={fill_row_dict['open_price_source_str'] or 'unavailable'} | "
                 f"time={fill_row_dict['fill_timestamp_str']}"
             )
     return "\n".join(line_list)
@@ -666,11 +1318,26 @@ def build_decision_plans(
 
     for release_obj in due_release_list:
         pod_state_obj = _get_model_state_or_default(release_obj, state_store_obj, as_of_ts)
-        decision_plan_obj = strategy_host.build_decision_plan_for_release(
-            release_obj=release_obj,
-            as_of_ts=as_of_ts,
-            pod_state_obj=pod_state_obj,
-        )
+        try:
+            decision_plan_obj = strategy_host.build_decision_plan_for_release(
+                release_obj=release_obj,
+                as_of_ts=as_of_ts,
+                pod_state_obj=pod_state_obj,
+            )
+        except FredSeriesLoadError as exception_obj:
+            skipped_decision_plan_count_int += 1
+            reason_counter_obj[str(exception_obj.reason_code_str)] += 1
+            log_event(
+                "build_decision_plan_data_dependency_error",
+                _build_fred_series_error_log_payload_dict(
+                    release_obj=release_obj,
+                    as_of_ts=as_of_ts,
+                    exception_obj=exception_obj,
+                ),
+                log_path_str=log_path_str,
+            )
+            continue
+
         if state_store_obj.has_active_decision_plan(
             pod_id_str=release_obj.pod_id_str,
             signal_timestamp_ts=decision_plan_obj.signal_timestamp_ts,
@@ -702,19 +1369,35 @@ def build_decision_plans(
 
 def build_vplans(
     state_store_obj: LiveStateStore,
-    broker_adapter_obj: BrokerAdapter,
+    broker_adapter_obj: BrokerAdapter | None,
     as_of_ts: datetime,
     env_mode_str: str,
     log_path_str: str = DEFAULT_LOG_PATH_STR,
+    broker_adapter_resolver_obj: BrokerAdapterResolver | None = None,
+    broker_host_str: str | None = None,
+    broker_port_int: int | None = None,
+    broker_client_id_int: int | None = None,
+    broker_timeout_seconds_float: float | None = None,
+    adapter_factory_func: Callable[[str, int, int, float], BrokerAdapter] | None = None,
 ) -> dict[str, object]:
     created_vplan_count_int = 0
     blocked_action_count_int = 0
     warning_counter_obj: Counter[str] = Counter()
     reason_counter_obj: Counter[str] = Counter()
-    visible_account_route_set = broker_adapter_obj.get_visible_account_route_set()
+    broker_adapter_resolver_obj = _coerce_broker_adapter_resolver_obj(
+        broker_adapter_obj=broker_adapter_obj,
+        broker_adapter_resolver_obj=broker_adapter_resolver_obj,
+        broker_host_str=broker_host_str,
+        broker_port_int=broker_port_int,
+        broker_client_id_int=broker_client_id_int,
+        broker_timeout_seconds_float=broker_timeout_seconds_float,
+        adapter_factory_func=adapter_factory_func,
+    )
 
     for decision_plan_obj in state_store_obj.get_due_decision_plan_list(as_of_ts):
         release_obj = state_store_obj.get_release_by_id(decision_plan_obj.release_id_str)
+        broker_adapter_obj = broker_adapter_resolver_obj.get_adapter(release_obj)
+        visible_account_route_set = broker_adapter_obj.get_visible_account_route_set()
         latest_vplan_obj = state_store_obj.get_latest_vplan_for_decision(int(decision_plan_obj.decision_plan_id_int or 0))
         if latest_vplan_obj is not None and latest_vplan_obj.status_str in ("ready", "submitted", "completed"):
             continue
@@ -789,7 +1472,37 @@ def build_vplans(
         live_price_snapshot_obj = broker_adapter_obj.get_live_price_snapshot(
             decision_plan_obj.account_route_str,
             touched_asset_list,
+            execution_policy_str=decision_plan_obj.execution_policy_str,
         )
+        live_reference_source_map_dict = {
+            str(asset_str): str(source_str)
+            for asset_str, source_str in live_price_snapshot_obj.asset_reference_source_map_dict.items()
+        }
+        for asset_str, live_reference_source_str in sorted(live_reference_source_map_dict.items()):
+            if live_reference_source_str not in (
+                "ib_async.reqMktData.marketPrice.fallback",
+                "ib_async.reqTickers.marketPrice.fallback",
+            ):
+                continue
+            log_event(
+                "build_vplan_live_reference_fallback_warning",
+                _build_decision_plan_log_payload_dict(
+                    release_obj,
+                    decision_plan_obj,
+                    as_of_ts,
+                    {
+                        "severity_str": "warning",
+                        "reason_code_str": "live_reference_fallback",
+                        "asset_str": asset_str,
+                        "primary_source_str": "ib_async.reqMktData.225.auctionPrice",
+                        "fallback_source_str": live_reference_source_str,
+                        "live_reference_snapshot_timestamp_str": (
+                            live_price_snapshot_obj.snapshot_timestamp_ts.isoformat()
+                        ),
+                    },
+                ),
+                log_path_str=log_path_str,
+            )
         missing_asset_list = sorted(
             asset_str
             for asset_str in touched_asset_list
@@ -844,16 +1557,32 @@ def build_vplans(
 
 def submit_ready_vplans(
     state_store_obj: LiveStateStore,
-    broker_adapter_obj: BrokerAdapter,
+    broker_adapter_obj: BrokerAdapter | None,
     as_of_ts: datetime,
     env_mode_str: str,
     manual_only_bool: bool,
     vplan_id_int: int | None = None,
     log_path_str: str = DEFAULT_LOG_PATH_STR,
+    broker_adapter_resolver_obj: BrokerAdapterResolver | None = None,
+    broker_host_str: str | None = None,
+    broker_port_int: int | None = None,
+    broker_client_id_int: int | None = None,
+    broker_timeout_seconds_float: float | None = None,
+    adapter_factory_func: Callable[[str, int, int, float], BrokerAdapter] | None = None,
 ) -> dict[str, object]:
     submitted_vplan_count_int = 0
     blocked_action_count_int = 0
+    warning_counter_obj: Counter[str] = Counter()
     reason_counter_obj: Counter[str] = Counter()
+    broker_adapter_resolver_obj = _coerce_broker_adapter_resolver_obj(
+        broker_adapter_obj=broker_adapter_obj,
+        broker_adapter_resolver_obj=broker_adapter_resolver_obj,
+        broker_host_str=broker_host_str,
+        broker_port_int=broker_port_int,
+        broker_client_id_int=broker_client_id_int,
+        broker_timeout_seconds_float=broker_timeout_seconds_float,
+        adapter_factory_func=adapter_factory_func,
+    )
     if vplan_id_int is None:
         candidate_vplan_list = []
         for release_obj in state_store_obj.get_enabled_release_list():
@@ -870,6 +1599,7 @@ def submit_ready_vplans(
 
     for vplan_obj in candidate_vplan_list:
         release_obj = state_store_obj.get_release_by_id(vplan_obj.release_id_str)
+        broker_adapter_obj = broker_adapter_resolver_obj.get_adapter(release_obj)
         if release_obj.mode_str != env_mode_str:
             blocked_action_count_int += 1
             reason_counter_obj["env_mode_mismatch"] += 1
@@ -890,17 +1620,60 @@ def submit_ready_vplans(
             continue
 
         broker_order_request_list = build_broker_order_request_list_from_vplan(vplan_obj)
-        broker_order_record_list, broker_order_event_list, broker_order_fill_list = broker_adapter_obj.submit_order_request_list(
+        submit_batch_result_obj = broker_adapter_obj.submit_order_request_list(
             account_route_str=vplan_obj.account_route_str,
             broker_order_request_list=broker_order_request_list,
             submitted_timestamp_ts=as_of_ts,
         )
-        state_store_obj.upsert_vplan_broker_order_record_list(broker_order_record_list)
-        state_store_obj.insert_vplan_broker_order_event_list(broker_order_event_list)
-        state_store_obj.upsert_vplan_fill_list(broker_order_fill_list)
+        state_store_obj.upsert_vplan_broker_order_record_list(
+            submit_batch_result_obj.broker_order_record_list
+        )
+        state_store_obj.insert_vplan_broker_order_event_list(
+            submit_batch_result_obj.broker_order_event_list
+        )
+        state_store_obj.upsert_vplan_fill_list(
+            submit_batch_result_obj.broker_order_fill_list
+        )
+        state_store_obj.upsert_vplan_broker_ack_list(
+            submit_batch_result_obj.broker_order_ack_list
+        )
+        state_store_obj.update_vplan_submit_ack_summary(
+            vplan_id_int=int(vplan_obj.vplan_id_int or 0),
+            submit_ack_status_str=submit_batch_result_obj.submit_ack_status_str,
+            ack_coverage_ratio_float=submit_batch_result_obj.ack_coverage_ratio_float,
+            missing_ack_count_int=len(submit_batch_result_obj.missing_ack_asset_list),
+            submit_ack_checked_timestamp_ts=as_of_ts,
+        )
         state_store_obj.mark_vplan_status(int(vplan_obj.vplan_id_int or 0), "submitted")
         state_store_obj.mark_decision_plan_status(int(vplan_obj.decision_plan_id_int), "submitted")
         submitted_vplan_count_int += 1
+        if len(submit_batch_result_obj.missing_ack_asset_list) > 0:
+            warning_counter_obj["missing_broker_response_ack"] += len(
+                submit_batch_result_obj.missing_ack_asset_list
+            )
+            log_event(
+                "submit_vplan_missing_broker_ack",
+                _build_vplan_log_payload_dict(
+                    release_obj,
+                    vplan_obj,
+                    as_of_ts,
+                    {
+                        "severity_str": "critical",
+                        "reason_code_str": "missing_broker_response_ack",
+                        "request_count_int": len(broker_order_request_list),
+                        "ack_coverage_ratio_float": float(
+                            submit_batch_result_obj.ack_coverage_ratio_float
+                        ),
+                        "missing_ack_count_int": len(
+                            submit_batch_result_obj.missing_ack_asset_list
+                        ),
+                        "missing_ack_asset_list": list(
+                            submit_batch_result_obj.missing_ack_asset_list
+                        ),
+                    },
+                ),
+                log_path_str=log_path_str,
+            )
         log_event(
             "submit_vplan_completed",
             _build_vplan_log_payload_dict(
@@ -909,9 +1682,15 @@ def submit_ready_vplans(
                 as_of_ts,
                 {
                     "reason_code_str": "submitted",
-                    "broker_order_count_int": len(broker_order_record_list),
-                    "broker_order_event_count_int": len(broker_order_event_list),
-                    "fill_count_int": len(broker_order_fill_list),
+                    "broker_order_count_int": len(submit_batch_result_obj.broker_order_record_list),
+                    "broker_order_event_count_int": len(submit_batch_result_obj.broker_order_event_list),
+                    "fill_count_int": len(submit_batch_result_obj.broker_order_fill_list),
+                    "broker_order_ack_count_int": len(submit_batch_result_obj.broker_order_ack_list),
+                    "submit_ack_status_str": submit_batch_result_obj.submit_ack_status_str,
+                    "ack_coverage_ratio_float": float(
+                        submit_batch_result_obj.ack_coverage_ratio_float
+                    ),
+                    "missing_ack_count_int": len(submit_batch_result_obj.missing_ack_asset_list),
                 },
             ),
             log_path_str=log_path_str,
@@ -920,28 +1699,65 @@ def submit_ready_vplans(
     return {
         "submitted_vplan_count_int": submitted_vplan_count_int,
         "blocked_action_count_int": blocked_action_count_int,
+        "warning_count_map_dict": dict(warning_counter_obj),
         "reason_count_map_dict": dict(reason_counter_obj),
     }
 
 
 def post_execution_reconcile(
     state_store_obj: LiveStateStore,
-    broker_adapter_obj: BrokerAdapter,
+    broker_adapter_obj: BrokerAdapter | None,
     as_of_ts: datetime,
     log_path_str: str = DEFAULT_LOG_PATH_STR,
+    broker_adapter_resolver_obj: BrokerAdapterResolver | None = None,
+    broker_host_str: str | None = None,
+    broker_port_int: int | None = None,
+    broker_client_id_int: int | None = None,
+    broker_timeout_seconds_float: float | None = None,
+    adapter_factory_func: Callable[[str, int, int, float], BrokerAdapter] | None = None,
 ) -> dict[str, object]:
+    log_path_obj = Path(log_path_str)
+    log_path_obj.parent.mkdir(parents=True, exist_ok=True)
+    log_path_obj.touch(exist_ok=True)
     completed_vplan_count_int = 0
+    tolerance_float = 1e-9
+    broker_adapter_resolver_obj = _coerce_broker_adapter_resolver_obj(
+        broker_adapter_obj=broker_adapter_obj,
+        broker_adapter_resolver_obj=broker_adapter_resolver_obj,
+        broker_host_str=broker_host_str,
+        broker_port_int=broker_port_int,
+        broker_client_id_int=broker_client_id_int,
+        broker_timeout_seconds_float=broker_timeout_seconds_float,
+        adapter_factory_func=adapter_factory_func,
+    )
     for vplan_obj in state_store_obj.get_submitted_vplan_list():
         if as_of_ts < vplan_obj.target_execution_timestamp_ts:
             continue
+        post_execution_snapshot_exists_bool = state_store_obj.has_post_execution_reconciliation_snapshot(
+            int(vplan_obj.vplan_id_int or 0)
+        )
         release_obj = state_store_obj.get_release_by_id(vplan_obj.release_id_str)
+        broker_adapter_obj = broker_adapter_resolver_obj.get_adapter(release_obj)
         decision_plan_obj = state_store_obj.get_decision_plan_by_id(int(vplan_obj.decision_plan_id_int))
         broker_snapshot_obj = broker_adapter_obj.get_account_snapshot(vplan_obj.account_route_str)
         state_store_obj.upsert_broker_snapshot_cache(broker_snapshot_obj)
+        existing_broker_order_row_dict_list = state_store_obj.get_broker_order_row_dict_list_for_vplan(
+            int(vplan_obj.vplan_id_int or 0)
+        )
+        known_broker_order_id_set = {
+            str(broker_order_row_dict["broker_order_id_str"])
+            for broker_order_row_dict in existing_broker_order_row_dict_list
+        }
         broker_order_record_list, broker_order_event_list, broker_fill_list = (
             broker_adapter_obj.get_recent_order_state_snapshot(
                 account_route_str=vplan_obj.account_route_str,
                 since_timestamp_ts=vplan_obj.submission_timestamp_ts,
+                submission_key_str=(
+                    str(vplan_obj.submission_key_str)
+                    if vplan_obj.submission_key_str is not None
+                    else f"vplan:{vplan_obj.decision_plan_id_int}"
+                ),
+                allowed_broker_order_id_set=known_broker_order_id_set,
             )
         )
         session_open_context_dict = _session_open_context_dict(
@@ -954,6 +1770,8 @@ def post_execution_reconcile(
                 broker_position_map_dict=broker_snapshot_obj.position_amount_map,
             )
         )
+        # *** CRITICAL*** Session-open lookup must be anchored to the target execution session,
+        # never a later timestamp, or fill-vs-open slippage would leak future session context.
         session_open_price_list = broker_adapter_obj.get_session_open_price_list(
             account_route_str=vplan_obj.account_route_str,
             asset_str_list=sorted(open_universe_asset_set),
@@ -971,6 +1789,11 @@ def post_execution_reconcile(
                     **broker_order_record_obj.__dict__,
                     "decision_plan_id_int": int(vplan_obj.decision_plan_id_int),
                     "vplan_id_int": int(vplan_obj.vplan_id_int or 0),
+                    "submission_key_str": (
+                        broker_order_record_obj.submission_key_str
+                        if broker_order_record_obj.submission_key_str is not None
+                        else vplan_obj.submission_key_str
+                    ),
                 }
             )
             for broker_order_record_obj in broker_order_record_list
@@ -981,6 +1804,11 @@ def post_execution_reconcile(
                     **broker_order_event_obj.__dict__,
                     "decision_plan_id_int": int(vplan_obj.decision_plan_id_int),
                     "vplan_id_int": int(vplan_obj.vplan_id_int or 0),
+                    "submission_key_str": (
+                        broker_order_event_obj.submission_key_str
+                        if broker_order_event_obj.submission_key_str is not None
+                        else vplan_obj.submission_key_str
+                    ),
                 }
             )
             for broker_order_event_obj in broker_order_event_list
@@ -1009,37 +1837,22 @@ def post_execution_reconcile(
         state_store_obj.upsert_vplan_broker_order_record_list(normalized_broker_order_record_list)
         state_store_obj.insert_vplan_broker_order_event_list(normalized_broker_order_event_list)
         state_store_obj.upsert_vplan_fill_list(normalized_fill_list)
-        compared_asset_set = set(vplan_obj.current_broker_position_map) | set(broker_snapshot_obj.position_amount_map)
-        execution_evidence_bool = len(normalized_fill_list) > 0
-        all_orders_terminal_bool = (
-            len(normalized_broker_order_record_list) > 0
-            and all(
-                _is_terminal_order_status_bool(broker_order_record_obj.status_str)
-                for broker_order_record_obj in normalized_broker_order_record_list
-            )
+        expected_broker_position_map_dict = _build_expected_broker_position_map_dict(
+            vplan_obj,
+            tolerance_float=tolerance_float,
         )
-        if not execution_evidence_bool:
-            for asset_str in compared_asset_set:
-                if abs(
-                    float(vplan_obj.current_broker_position_map.get(asset_str, 0.0))
-                    - float(broker_snapshot_obj.position_amount_map.get(asset_str, 0.0))
-                ) > 1e-9:
-                    execution_evidence_bool = True
-                    break
-        if not execution_evidence_bool and all_orders_terminal_bool:
-            execution_evidence_bool = True
-        if not execution_evidence_bool:
-            continue
+        reconciliation_result_obj = reconcile_account_state(
+            model_position_map=expected_broker_position_map_dict,
+            model_cash_float=broker_snapshot_obj.cash_float,
+            broker_snapshot_obj=broker_snapshot_obj,
+            tolerance_float=tolerance_float,
+        )
         state_store_obj.insert_vplan_reconciliation_snapshot(
             pod_id_str=vplan_obj.pod_id_str,
             decision_plan_id_int=int(vplan_obj.decision_plan_id_int),
             vplan_id_int=int(vplan_obj.vplan_id_int or 0),
             stage_str="post_execution",
-            reconciliation_result_obj=reconcile_account_state(
-                model_position_map=broker_snapshot_obj.position_amount_map,
-                model_cash_float=broker_snapshot_obj.cash_float,
-                broker_snapshot_obj=broker_snapshot_obj,
-            ),
+            reconciliation_result_obj=reconciliation_result_obj,
         )
         strategy_state_dict = {} if decision_plan_obj is None else dict(decision_plan_obj.strategy_state_dict)
         state_store_obj.upsert_pod_state(
@@ -1054,25 +1867,96 @@ def post_execution_reconcile(
                 updated_timestamp_ts=as_of_ts,
             )
         )
-        state_store_obj.mark_vplan_status(int(vplan_obj.vplan_id_int or 0), "completed")
-        state_store_obj.mark_decision_plan_status(int(vplan_obj.decision_plan_id_int), "completed")
-        completed_vplan_count_int += 1
-        log_event(
-            "post_execution_reconcile_completed",
-            _build_vplan_log_payload_dict(
-                release_obj,
-                vplan_obj,
-                as_of_ts,
-                {
-                    "reason_code_str": "completed",
-                    "broker_order_count_int": len(normalized_broker_order_record_list),
-                    "broker_order_event_count_int": len(normalized_broker_order_event_list),
-                    "fill_count_int": len(normalized_fill_list),
-                    "session_open_price_count_int": len(session_open_price_list),
-                },
-            ),
-            log_path_str=log_path_str,
+        persisted_broker_order_row_dict_list = state_store_obj.get_broker_order_row_dict_list_for_vplan(
+            int(vplan_obj.vplan_id_int or 0)
         )
+        persisted_fill_row_dict_list = _enrich_fill_row_dict_list(
+            state_store_obj.get_fill_row_dict_list_for_vplan(int(vplan_obj.vplan_id_int or 0))
+        )
+        execution_row_dict_list = _build_execution_row_dict_list(
+            vplan_obj=vplan_obj,
+            broker_position_map_dict=broker_snapshot_obj.position_amount_map,
+            broker_order_row_dict_list=persisted_broker_order_row_dict_list,
+            fill_row_dict_list=persisted_fill_row_dict_list,
+            tolerance_float=tolerance_float,
+        )
+        exit_breach_row_dict_list = [
+            execution_row_dict
+            for execution_row_dict in execution_row_dict_list
+            if bool(execution_row_dict["exit_breach_bool"])
+        ]
+        terminal_unresolved_row_dict_list = _build_terminal_unresolved_row_dict_list(execution_row_dict_list)
+        for exit_breach_row_dict in exit_breach_row_dict_list:
+            log_event(
+                "exit_residual_detected",
+                _build_vplan_log_payload_dict(
+                    release_obj,
+                    vplan_obj,
+                    as_of_ts,
+                    {
+                        "severity_str": "critical",
+                        "reason_code_str": "exit_residual_detected",
+                        "asset_str": exit_breach_row_dict["asset_str"],
+                        "target_share_float": float(exit_breach_row_dict["target_share_float"]),
+                        "broker_share_float": float(exit_breach_row_dict["broker_share_float"]),
+                        "residual_share_float": float(exit_breach_row_dict["residual_share_float"]),
+                        "latest_broker_order_status_str": exit_breach_row_dict["latest_broker_order_status_str"],
+                    },
+                ),
+                log_path_str=log_path_str,
+            )
+        if len(terminal_unresolved_row_dict_list) > 0 and not post_execution_snapshot_exists_bool:
+            log_event(
+                "execution_exception_parked",
+                _build_vplan_log_payload_dict(
+                    release_obj,
+                    vplan_obj,
+                    as_of_ts,
+                    {
+                        "severity_str": "critical",
+                        "reason_code_str": "execution_exception_parked",
+                        "terminal_unresolved_count_int": len(terminal_unresolved_row_dict_list),
+                        "terminal_unresolved_asset_list": [
+                            str(terminal_unresolved_row_dict["asset_str"])
+                            for terminal_unresolved_row_dict in terminal_unresolved_row_dict_list
+                        ],
+                        "terminal_unresolved_status_map_dict": {
+                            str(terminal_unresolved_row_dict["asset_str"]): terminal_unresolved_row_dict[
+                                "latest_broker_order_status_str"
+                            ]
+                            for terminal_unresolved_row_dict in terminal_unresolved_row_dict_list
+                        },
+                        "terminal_unresolved_residual_share_map_dict": {
+                            str(terminal_unresolved_row_dict["asset_str"]): float(
+                                terminal_unresolved_row_dict["residual_share_float"]
+                            )
+                            for terminal_unresolved_row_dict in terminal_unresolved_row_dict_list
+                        },
+                    },
+                ),
+                log_path_str=log_path_str,
+            )
+        completed_bool = bool(reconciliation_result_obj.passed_bool)
+        if completed_bool:
+            state_store_obj.mark_vplan_status(int(vplan_obj.vplan_id_int or 0), "completed")
+            state_store_obj.mark_decision_plan_status(int(vplan_obj.decision_plan_id_int), "completed")
+            completed_vplan_count_int += 1
+            log_event(
+                "post_execution_reconcile_completed",
+                _build_vplan_log_payload_dict(
+                    release_obj,
+                    vplan_obj,
+                    as_of_ts,
+                    {
+                        "reason_code_str": "completed",
+                        "broker_order_count_int": len(normalized_broker_order_record_list),
+                        "broker_order_event_count_int": len(normalized_broker_order_event_list),
+                        "fill_count_int": len(normalized_fill_list),
+                        "session_open_price_count_int": len(session_open_price_list),
+                    },
+                ),
+                log_path_str=log_path_str,
+            )
     return {"completed_vplan_count_int": completed_vplan_count_int}
 
 
@@ -1091,13 +1975,48 @@ def get_status_summary(
         latest_broker_snapshot_obj = state_store_obj.get_latest_broker_snapshot_for_account(release_obj.account_route_str)
         latest_fill_timestamp_str = None
         latest_broker_order_row_dict_list: list[dict[str, object]] = []
+        broker_ack_row_dict_list: list[dict[str, object]] = []
+        missing_ack_row_dict_list: list[dict[str, object]] = []
+        exception_row_dict_list: list[dict[str, object]] = []
+        parked_execution_exception_bool = False
         if latest_vplan_obj is not None and latest_vplan_obj.vplan_id_int is not None:
-            fill_row_dict_list = state_store_obj.get_fill_row_dict_list_for_vplan(int(latest_vplan_obj.vplan_id_int))
+            fill_row_dict_list = _enrich_fill_row_dict_list(
+                state_store_obj.get_fill_row_dict_list_for_vplan(int(latest_vplan_obj.vplan_id_int))
+            )
             if len(fill_row_dict_list) > 0:
                 latest_fill_timestamp_str = str(fill_row_dict_list[-1]["fill_timestamp_str"])
             latest_broker_order_row_dict_list = state_store_obj.get_broker_order_row_dict_list_for_vplan(
                 int(latest_vplan_obj.vplan_id_int)
             )
+            broker_ack_row_dict_list = state_store_obj.get_broker_ack_row_dict_list_for_vplan(
+                int(latest_vplan_obj.vplan_id_int)
+            )
+            missing_ack_row_dict_list = _build_missing_ack_row_dict_list(broker_ack_row_dict_list)
+            if latest_vplan_obj.status_str in ("submitted", "completed") or len(
+                latest_broker_order_row_dict_list
+            ) > 0 or len(fill_row_dict_list) > 0:
+                broker_position_map_dict = (
+                    latest_vplan_obj.current_broker_position_map
+                    if latest_broker_snapshot_obj is None
+                    else latest_broker_snapshot_obj.position_amount_map
+                )
+                execution_row_dict_list = _build_execution_row_dict_list(
+                    vplan_obj=latest_vplan_obj,
+                    broker_position_map_dict=broker_position_map_dict,
+                    broker_order_row_dict_list=latest_broker_order_row_dict_list,
+                    fill_row_dict_list=fill_row_dict_list,
+                )
+                exception_row_dict_list = _build_exception_row_dict_list(execution_row_dict_list)
+                terminal_unresolved_row_dict_list = _build_terminal_unresolved_row_dict_list(
+                    execution_row_dict_list
+                )
+                parked_execution_exception_bool = bool(
+                    latest_vplan_obj.status_str == "submitted"
+                    and state_store_obj.has_post_execution_reconciliation_snapshot(
+                        int(latest_vplan_obj.vplan_id_int)
+                    )
+                    and len(terminal_unresolved_row_dict_list) > 0
+                )
         build_gate_dict = scheduler_utils.evaluate_build_gate_dict(release_obj, as_of_ts)
 
         next_action_str = "wait"
@@ -1118,8 +2037,12 @@ def get_status_summary(
             next_action_str = "submit_vplan" if release_obj.auto_submit_enabled_bool else "review_vplan"
             reason_code_str = "vplan_ready"
         elif latest_vplan_obj is not None and latest_vplan_obj.status_str == "submitted":
-            next_action_str = "post_execution_reconcile"
-            reason_code_str = "waiting_for_post_execution_reconcile"
+            if parked_execution_exception_bool:
+                next_action_str = "manual_review"
+                reason_code_str = "execution_exception_parked"
+            else:
+                next_action_str = "post_execution_reconcile"
+                reason_code_str = "waiting_for_post_execution_reconcile"
         elif latest_decision_plan_obj.status_str in ("completed", "expired", "blocked"):
             if bool(build_gate_dict["due_bool"]):
                 next_action_str = "build_decision_plan"
@@ -1150,7 +2073,20 @@ def get_status_summary(
                 "next_action_str": next_action_str,
                 "reason_code_str": reason_code_str,
                 "latest_fill_timestamp_str": latest_fill_timestamp_str,
+                "submit_ack_status_str": (
+                    None if latest_vplan_obj is None else latest_vplan_obj.submit_ack_status_str
+                ),
+                "ack_coverage_ratio_float": (
+                    None if latest_vplan_obj is None else latest_vplan_obj.ack_coverage_ratio_float
+                ),
+                "missing_ack_count_int": (
+                    0 if latest_vplan_obj is None else int(latest_vplan_obj.missing_ack_count_int)
+                ),
+                "missing_ack_row_dict_list": missing_ack_row_dict_list,
                 "latest_broker_order_row_dict_list": latest_broker_order_row_dict_list,
+                "broker_ack_row_dict_list": broker_ack_row_dict_list,
+                "exception_row_dict_list": exception_row_dict_list,
+                "exception_count_int": len(exception_row_dict_list),
             }
         )
 
@@ -1214,15 +2150,65 @@ def show_vplan_summary(
         broker_order_row_dict_list = state_store_obj.get_broker_order_row_dict_list_for_vplan(
             int(vplan_obj.vplan_id_int or 0)
         )
+        broker_ack_row_dict_list = state_store_obj.get_broker_ack_row_dict_list_for_vplan(
+            int(vplan_obj.vplan_id_int or 0)
+        )
+        missing_ack_row_dict_list = _build_missing_ack_row_dict_list(broker_ack_row_dict_list)
+        fill_row_dict_list = _enrich_fill_row_dict_list(
+            state_store_obj.get_fill_row_dict_list_for_vplan(int(vplan_obj.vplan_id_int or 0))
+        )
+        broker_order_row_dict_list = _enrich_broker_order_row_dict_list_for_display(
+            broker_order_row_dict_list=broker_order_row_dict_list,
+            fill_row_dict_list=fill_row_dict_list,
+        )
+        latest_broker_snapshot_obj = state_store_obj.get_latest_broker_snapshot_for_account(vplan_obj.account_route_str)
+        display_mode_str = (
+            "planned"
+            if len(broker_order_row_dict_list) == 0 and len(fill_row_dict_list) == 0 and vplan_obj.status_str == "ready"
+            else "execution"
+        )
+        execution_row_dict_list: list[dict[str, object]] = []
+        exception_row_dict_list: list[dict[str, object]] = []
+        if display_mode_str == "execution":
+            broker_position_map_dict = (
+                vplan_obj.current_broker_position_map
+                if latest_broker_snapshot_obj is None
+                else latest_broker_snapshot_obj.position_amount_map
+            )
+            execution_row_dict_list = _build_execution_row_dict_list(
+                vplan_obj=vplan_obj,
+                broker_position_map_dict=broker_position_map_dict,
+                broker_order_row_dict_list=broker_order_row_dict_list,
+                fill_row_dict_list=fill_row_dict_list,
+            )
+            exception_row_dict_list = _build_exception_row_dict_list(execution_row_dict_list)
         return {
             "vplan_id_int": vplan_obj.vplan_id_int,
             "decision_plan_id_int": vplan_obj.decision_plan_id_int,
             "pod_id_str": vplan_obj.pod_id_str,
             "status_str": vplan_obj.status_str,
+            "submit_ack_status_str": vplan_obj.submit_ack_status_str,
+            "ack_coverage_ratio_float": vplan_obj.ack_coverage_ratio_float,
+            "missing_ack_count_int": int(vplan_obj.missing_ack_count_int),
             "net_liq_float": vplan_obj.net_liq_float,
             "pod_budget_float": vplan_obj.pod_budget_float,
             "live_price_source_str": vplan_obj.live_price_source_str,
+            "live_reference_source_map_dict": {
+                asset_str: source_str
+                for asset_str, source_str in vplan_obj.live_reference_source_map_dict.items()
+            },
+            "display_mode_str": display_mode_str,
+            "latest_broker_snapshot_timestamp_str": (
+                None
+                if latest_broker_snapshot_obj is None
+                else latest_broker_snapshot_obj.snapshot_timestamp_ts.isoformat()
+            ),
             "broker_order_row_dict_list": broker_order_row_dict_list,
+            "broker_ack_row_dict_list": broker_ack_row_dict_list,
+            "missing_ack_row_dict_list": missing_ack_row_dict_list,
+            "fill_row_dict_list": fill_row_dict_list,
+            "execution_row_dict_list": execution_row_dict_list,
+            "exception_row_dict_list": exception_row_dict_list,
             "warning_row_dict_list": warning_row_dict_list,
             "vplan_row_dict_list": [
                 {
@@ -1238,6 +2224,7 @@ def show_vplan_summary(
                     "target_share_float": vplan_row_obj.target_share_float,
                     "order_delta_share_float": vplan_row_obj.order_delta_share_float,
                     "live_reference_price_float": vplan_row_obj.live_reference_price_float,
+                    "live_reference_source_str": vplan_row_obj.live_reference_source_str,
                     "estimated_target_notional_float": vplan_row_obj.estimated_target_notional_float,
                     "warning_bool": bool(
                         abs(
@@ -1268,14 +2255,29 @@ def get_execution_report_summary(
         latest_vplan_obj = state_store_obj.get_latest_vplan_for_pod(release_obj.pod_id_str)
         if latest_vplan_obj is None or latest_vplan_obj.vplan_id_int is None:
             continue
-        fill_row_dict_list = state_store_obj.get_fill_row_dict_list_for_vplan(int(latest_vplan_obj.vplan_id_int))
+        fill_row_dict_list = _enrich_fill_row_dict_list(
+            state_store_obj.get_fill_row_dict_list_for_vplan(int(latest_vplan_obj.vplan_id_int))
+        )
         if len(fill_row_dict_list) == 0:
             continue
+        slippage_notional_float_list = [
+            float(fill_row_dict["slippage_notional_float"])
+            for fill_row_dict in fill_row_dict_list
+            if fill_row_dict.get("slippage_notional_float") is not None
+        ]
         execution_report_dict_list.append(
             {
                 "pod_id_str": release_obj.pod_id_str,
                 "latest_vplan_id_int": latest_vplan_obj.vplan_id_int,
                 "fill_count_int": len(fill_row_dict_list),
+                "fill_with_open_count_int": sum(
+                    1 for fill_row_dict in fill_row_dict_list if fill_row_dict["official_open_price_float"] is not None
+                ),
+                "aggregate_slippage_notional_float": (
+                    None
+                    if len(slippage_notional_float_list) == 0
+                    else sum(slippage_notional_float_list)
+                ),
                 "fill_row_dict_list": fill_row_dict_list,
             }
         )
@@ -1413,11 +2415,17 @@ def cutover_v1_schema(
 
 def tick(
     state_store_obj: LiveStateStore,
-    broker_adapter_obj: BrokerAdapter,
+    broker_adapter_obj: BrokerAdapter | None,
     as_of_ts: datetime,
     releases_root_path_str: str,
     env_mode_str: str,
     log_path_str: str = DEFAULT_LOG_PATH_STR,
+    broker_adapter_resolver_obj: BrokerAdapterResolver | None = None,
+    broker_host_str: str | None = None,
+    broker_port_int: int | None = None,
+    broker_client_id_int: int | None = None,
+    broker_timeout_seconds_float: float | None = None,
+    adapter_factory_func: Callable[[str, int, int, float], BrokerAdapter] | None = None,
 ) -> dict[str, object]:
     lease_owner_token_str = uuid.uuid4().hex
     lease_acquired_bool = state_store_obj.acquire_scheduler_lease(
@@ -1439,6 +2447,15 @@ def tick(
         }
 
     try:
+        broker_adapter_resolver_obj = _coerce_broker_adapter_resolver_obj(
+            broker_adapter_obj=broker_adapter_obj,
+            broker_adapter_resolver_obj=broker_adapter_resolver_obj,
+            broker_host_str=broker_host_str,
+            broker_port_int=broker_port_int,
+            broker_client_id_int=broker_client_id_int,
+            broker_timeout_seconds_float=broker_timeout_seconds_float,
+            adapter_factory_func=adapter_factory_func,
+        )
         build_detail_dict = build_decision_plans(
             state_store_obj=state_store_obj,
             as_of_ts=as_of_ts,
@@ -1457,6 +2474,7 @@ def tick(
             as_of_ts=as_of_ts,
             env_mode_str=env_mode_str,
             log_path_str=log_path_str,
+            broker_adapter_resolver_obj=broker_adapter_resolver_obj,
         )
         submit_detail_dict = submit_ready_vplans(
             state_store_obj=state_store_obj,
@@ -1465,12 +2483,14 @@ def tick(
             env_mode_str=env_mode_str,
             manual_only_bool=False,
             log_path_str=log_path_str,
+            broker_adapter_resolver_obj=broker_adapter_resolver_obj,
         )
         reconcile_detail_dict = post_execution_reconcile(
             state_store_obj=state_store_obj,
             broker_adapter_obj=broker_adapter_obj,
             as_of_ts=as_of_ts,
             log_path_str=log_path_str,
+            broker_adapter_resolver_obj=broker_adapter_resolver_obj,
         )
         warning_counter_obj: Counter[str] = Counter()
         reason_counter_obj: Counter[str] = Counter()
@@ -1523,29 +2543,16 @@ def main(argv_list: list[str] | None = None) -> int:
     parser_obj.add_argument("--json", dest="json_output_bool", action="store_true")
     parser_obj.add_argument("--vplan-id", dest="vplan_id_int", type=int, default=None)
     parser_obj.add_argument("--pod-id", dest="pod_id_str", default=None)
-    parser_obj.add_argument("--broker-host", dest="broker_host_str", default="127.0.0.1")
-    parser_obj.add_argument("--broker-port", dest="broker_port_int", type=int, default=7497)
-    parser_obj.add_argument("--broker-client-id", dest="broker_client_id_int", type=int, default=31)
-    parser_obj.add_argument("--broker-timeout-seconds", dest="broker_timeout_seconds_float", type=float, default=4.0)
+    parser_obj.add_argument("--broker-host", dest="broker_host_str", default=None)
+    parser_obj.add_argument("--broker-port", dest="broker_port_int", type=int, default=None)
+    parser_obj.add_argument("--broker-client-id", dest="broker_client_id_int", type=int, default=None)
+    parser_obj.add_argument("--broker-timeout-seconds", dest="broker_timeout_seconds_float", type=float, default=None)
     parsed_args_obj = parser_obj.parse_args(argv_list)
 
     state_store_obj = LiveStateStore(parsed_args_obj.db_path_str)
     job_run_id_int = state_store_obj.record_job_start(parsed_args_obj.command_name_str)
     as_of_ts = _parse_as_of_timestamp_ts(parsed_args_obj.as_of_timestamp_str)
-    broker_command_name_set = {
-        "build_vplan",
-        "submit_vplan",
-        "post_execution_reconcile",
-        "tick",
-    }
     broker_adapter_obj = None
-    if parsed_args_obj.command_name_str in broker_command_name_set:
-        broker_adapter_obj = IBKRGatewayBrokerAdapter(
-            host_str=parsed_args_obj.broker_host_str,
-            port_int=parsed_args_obj.broker_port_int,
-            client_id_int=parsed_args_obj.broker_client_id_int,
-            timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
-        )
 
     try:
         if parsed_args_obj.command_name_str == "build_decision_plans":
@@ -1562,6 +2569,10 @@ def main(argv_list: list[str] | None = None) -> int:
                 as_of_ts=as_of_ts,
                 env_mode_str=parsed_args_obj.env_mode_str,
                 log_path_str=parsed_args_obj.log_path_str,
+                broker_host_str=parsed_args_obj.broker_host_str,
+                broker_port_int=parsed_args_obj.broker_port_int,
+                broker_client_id_int=parsed_args_obj.broker_client_id_int,
+                broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
             )
         elif parsed_args_obj.command_name_str == "submit_vplan":
             detail_dict = submit_ready_vplans(
@@ -1572,6 +2583,10 @@ def main(argv_list: list[str] | None = None) -> int:
                 manual_only_bool=False,
                 vplan_id_int=parsed_args_obj.vplan_id_int,
                 log_path_str=parsed_args_obj.log_path_str,
+                broker_host_str=parsed_args_obj.broker_host_str,
+                broker_port_int=parsed_args_obj.broker_port_int,
+                broker_client_id_int=parsed_args_obj.broker_client_id_int,
+                broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
             )
         elif parsed_args_obj.command_name_str == "post_execution_reconcile":
             detail_dict = post_execution_reconcile(
@@ -1579,6 +2594,10 @@ def main(argv_list: list[str] | None = None) -> int:
                 broker_adapter_obj=broker_adapter_obj,
                 as_of_ts=as_of_ts,
                 log_path_str=parsed_args_obj.log_path_str,
+                broker_host_str=parsed_args_obj.broker_host_str,
+                broker_port_int=parsed_args_obj.broker_port_int,
+                broker_client_id_int=parsed_args_obj.broker_client_id_int,
+                broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
             )
         elif parsed_args_obj.command_name_str == "tick":
             detail_dict = tick(
@@ -1588,6 +2607,10 @@ def main(argv_list: list[str] | None = None) -> int:
                 releases_root_path_str=parsed_args_obj.releases_root_path_str,
                 env_mode_str=parsed_args_obj.env_mode_str,
                 log_path_str=parsed_args_obj.log_path_str,
+                broker_host_str=parsed_args_obj.broker_host_str,
+                broker_port_int=parsed_args_obj.broker_port_int,
+                broker_client_id_int=parsed_args_obj.broker_client_id_int,
+                broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
             )
         elif parsed_args_obj.command_name_str == "cutover_v1_schema":
             detail_dict = cutover_v1_schema(

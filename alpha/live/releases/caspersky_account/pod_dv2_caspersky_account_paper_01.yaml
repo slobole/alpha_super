@@ -1,14 +1,19 @@
 identity:
-  release_id: caspersky_account.pod_dv2.daily_moo.v1
+  release_id: caspersky_account.pod_dv2_caspersky_account_paper_01
   user_id: caspersky_account
-  pod_id: pod_dv2_01
+  pod_id: pod_dv2_caspersky_account_paper_01
 
 deployment:
   mode: paper # allowed: paper, live
-  enabled_bool: true
+  enabled_bool: true  # set to false for safety; change to true when ready to run the pod
 
 broker:
   account_route: DUN178957
+  host_str: 127.0.0.1
+  port_int: 7497  # default TWS port for live trading (7497 is for paper trading)
+  client_id_int: 31
+  timeout_seconds_float: 4.0
+
 
 strategy:
   strategy_import_str: strategies.dv2.strategy_mr_dv2:DVO2Strategy
@@ -24,8 +29,8 @@ schedule:
   execution_policy_str: next_open_moo # allowed: next_open_moo, same_day_moc, next_month_first_open
 
 execution:
-  pod_budget_fraction_float: 0.03
-  auto_submit_enabled_bool: true
+  pod_budget_fraction_float: 0.95
+  auto_submit_enabled_bool: true  # important for automation
 
 bootstrap:
   initial_cash_float: 1000000.0

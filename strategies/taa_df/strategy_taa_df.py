@@ -49,6 +49,7 @@ total-return execution prices.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
@@ -66,6 +67,11 @@ repo_root_str = str(repo_root_path)
 if repo_root_str not in sys.path:
     sys.path.insert(0, repo_root_str)
 
+workspace_root_path = repo_root_path.parent
+default_macro_data_dir_path = workspace_root_path / "1_data"
+default_dtb3_csv_path = default_macro_data_dir_path / "DTB3.csv"
+
+from alpha.data import FredSeriesSnapshot, load_daily_fred_series_snapshot
 from alpha.engine.backtest import run_daily
 from alpha.engine.report import save_results
 from alpha.engine.strategy import Strategy
@@ -80,7 +86,10 @@ class DefenseFirstConfig:
     momentum_lookback_month_vec: tuple[int, ...] = (1, 3, 6, 12)
     start_date_str: str = "2012-01-01"
     end_date_str: str | None = None
-    dtb3_csv_path_str: str = r"C:\Users\User\Documents\workspace\1_data\DTB3.csv"
+    dtb3_csv_path_str: str = str(default_dtb3_csv_path)
+    dtb3_series_id_str: str = "DTB3"
+    dtb3_mode_str: str = "backtest"
+    dtb3_as_of_timestamp_ts: datetime | None = None
 
     def __post_init__(self):
         if len(self.rank_weight_vec) != len(self.defensive_asset_list):
@@ -99,12 +108,44 @@ class DefenseFirstConfig:
 
 DEFAULT_CONFIG = DefenseFirstConfig()
 
+
 def default_trade_id_int() -> int:
     return -1
 
 
+def _resolve_dtb3_as_of_timestamp_ts(config: DefenseFirstConfig) -> datetime:
+    if config.dtb3_as_of_timestamp_ts is not None:
+        return config.dtb3_as_of_timestamp_ts
+    if config.end_date_str is not None:
+        return pd.Timestamp(config.end_date_str).to_pydatetime()
+    return datetime.now(tz=UTC)
 
-def load_cash_return_ser(dtb3_csv_path_str: str) -> pd.Series:
+
+def load_dtb3_snapshot(config: DefenseFirstConfig) -> FredSeriesSnapshot:
+    """
+    Load the DTB3 daily FRED series with audit metadata and freshness checks.
+
+    Daily series semantics:
+
+        y_t = DTB3_t / 100
+
+    where `DTB3_t` is the annualized 3-month T-bill yield in percent.
+    """
+    dtb3_as_of_timestamp_ts = _resolve_dtb3_as_of_timestamp_ts(config)
+    return load_daily_fred_series_snapshot(
+        series_id_str=config.dtb3_series_id_str,
+        cache_csv_path_str=config.dtb3_csv_path_str,
+        as_of_ts=dtb3_as_of_timestamp_ts,
+        mode_str=config.dtb3_mode_str,
+    )
+
+
+def load_cash_return_ser(
+    dtb3_csv_path_str: str,
+    dtb3_series_id_str: str = "DTB3",
+    as_of_ts: datetime | None = None,
+    mode_str: str = "backtest",
+) -> pd.Series:
     """
     Load 3M T-bill annualized yield and convert it to an approximate 1-month
     cash return threshold.
@@ -113,17 +154,26 @@ def load_cash_return_ser(dtb3_csv_path_str: str) -> pd.Series:
 
         cash_return_t = (1 + y_t)^(1/12) - 1
     """
-    cash_df = pd.read_csv(dtb3_csv_path_str)
+    dtb3_snapshot_obj = load_daily_fred_series_snapshot(
+        series_id_str=dtb3_series_id_str,
+        cache_csv_path_str=dtb3_csv_path_str,
+        as_of_ts=as_of_ts,
+        mode_str=mode_str,
+    )
+    dtb3_value_ser = dtb3_snapshot_obj.value_ser.astype(float)
+    cash_return_ser = (1.0 + dtb3_value_ser / 100.0) ** (1.0 / 12.0) - 1.0
+    cash_return_ser.name = "cash_return"
+    return cash_return_ser.sort_index()
 
-    date_col = next(col for col in cash_df.columns if "date" in col.lower() or col == "DATE")
-    value_col = next(col for col in cash_df.columns if col != date_col)
 
-    cash_ser = cash_df.set_index(date_col)[value_col]
-    cash_ser.index = pd.to_datetime(cash_ser.index)
-    cash_ser = pd.to_numeric(cash_ser, errors="coerce")
-    cash_ser = (1.0 + cash_ser / 100.0) ** (1.0 / 12.0) - 1.0
-    cash_ser.name = "cash_return"
-    return cash_ser.sort_index()
+def load_cash_return_ser_and_snapshot(
+    config: DefenseFirstConfig,
+) -> tuple[pd.Series, FredSeriesSnapshot]:
+    dtb3_snapshot_obj = load_dtb3_snapshot(config)
+    dtb3_value_ser = dtb3_snapshot_obj.value_ser.astype(float)
+    cash_return_ser = (1.0 + dtb3_value_ser / 100.0) ** (1.0 / 12.0) - 1.0
+    cash_return_ser.name = "cash_return"
+    return cash_return_ser.sort_index(), dtb3_snapshot_obj
 
 
 def load_signal_close_df(
@@ -218,6 +268,9 @@ def compute_month_end_weight_df(
     # *** CRITICAL*** Signals are formed from month-end closes only. The
     # resulting decision at month-end t is not traded until the next month.
     monthly_close_df = signal_close_df.resample("ME").last()
+    # *** CRITICAL*** The daily published DTB3 hurdle is sampled at the last
+    # available observation within each month. This preserves the causal
+    # "latest published value by decision time" rule.
     monthly_cash_return_ser = cash_return_ser.resample("ME").last()
 
     momentum_component_list: list[pd.DataFrame] = []
@@ -285,11 +338,12 @@ def map_month_end_weights_to_rebalance_open_df(
     return rebalance_weight_df
 
 
-def get_defense_first_data(
+def get_defense_first_data_with_snapshot(
     config: DefenseFirstConfig = DEFAULT_CONFIG,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, FredSeriesSnapshot]:
     """
-    Load signal data, execution data, momentum scores, and rebalance weights.
+    Load signal data, execution data, momentum scores, rebalance weights, and
+    DTB3 snapshot metadata.
     """
     signal_close_df = load_signal_close_df(
         symbol_list=config.defensive_asset_list,
@@ -302,10 +356,22 @@ def get_defense_first_data(
         start_date_str=config.start_date_str,
         end_date_str=config.end_date_str,
     )
-    cash_return_ser = load_cash_return_ser(config.dtb3_csv_path_str)
+    cash_return_ser, dtb3_snapshot_obj = load_cash_return_ser_and_snapshot(config)
     momentum_score_df, month_end_weight_df = compute_month_end_weight_df(signal_close_df, cash_return_ser, config)
     rebalance_weight_df = map_month_end_weights_to_rebalance_open_df(month_end_weight_df, execution_price_df.index)
 
+    return execution_price_df, momentum_score_df, month_end_weight_df, rebalance_weight_df, dtb3_snapshot_obj
+
+
+def get_defense_first_data(
+    config: DefenseFirstConfig = DEFAULT_CONFIG,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Load signal data, execution data, momentum scores, and rebalance weights.
+    """
+    execution_price_df, momentum_score_df, month_end_weight_df, rebalance_weight_df, _ = (
+        get_defense_first_data_with_snapshot(config)
+    )
     return execution_price_df, momentum_score_df, month_end_weight_df, rebalance_weight_df
 
 
@@ -334,7 +400,7 @@ class DefenseFirstStrategy(Strategy):
         rebalance_weight_df: pd.DataFrame,
         tradeable_asset_list: Sequence[str],
         capital_base: float = 100_000,
-        slippage: float = 0.0001,
+        slippage: float = 0.00025,
         commission_per_share: float = 0.005,
         commission_minimum: float = 1.0,
     ):
@@ -409,7 +475,7 @@ if __name__ == "__main__":
         rebalance_weight_df=rebalance_weight_df,
         tradeable_asset_list=config.tradeable_asset_list,
         capital_base=100_000,
-        slippage=0.0001,
+        slippage=0.00025,
         commission_per_share=0.005,
         commission_minimum=1.0,
     )

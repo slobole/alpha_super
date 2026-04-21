@@ -2,6 +2,7 @@ import contextlib
 import io
 import unittest
 
+import numpy as np
 import pandas as pd
 
 from alpha.engine.backtest import run_daily
@@ -18,6 +19,18 @@ def make_pricing_data() -> pd.DataFrame:
         [11.0, 11.4, 10.8, 11.2],
         [11.4, 11.9, 11.1, 11.7],
         [11.8, 12.2, 11.5, 12.0],
+    ]
+    return pd.DataFrame(value_list, index=date_index, columns=columns)
+
+
+def make_missing_price_pricing_data() -> pd.DataFrame:
+    date_index = pd.date_range("2024-01-01", periods=4, freq="D")
+    columns = pd.MultiIndex.from_product([["TEST"], ["Open", "High", "Low", "Close"]])
+    value_list = [
+        [10.0, 10.5, 9.5, 10.0],
+        [10.5, 10.8, 10.3, 10.6],
+        [np.nan, np.nan, np.nan, np.nan],
+        [np.nan, np.nan, np.nan, np.nan],
     ]
     return pd.DataFrame(value_list, index=date_index, columns=columns)
 
@@ -75,6 +88,20 @@ class ProgressSmokeStrategy(Strategy):
         return None
 
 
+class MissingPriceLiquidationStrategy(Strategy):
+    def compute_signals(self, pricing_data: pd.DataFrame) -> pd.DataFrame:
+        return pricing_data.copy()
+
+    def iterate(self, data: pd.DataFrame, close: pd.DataFrame, open_prices: pd.Series):
+        if close is None:
+            return
+        if self.get_position("TEST") == 0:
+            self.order("TEST", 10, trade_id=1)
+
+    def finalize(self, current_data: pd.DataFrame):
+        return None
+
+
 class RunDailyRuntimeControlTests(unittest.TestCase):
     def make_audit_strategy(self) -> AuditTrackingStrategy:
         return AuditTrackingStrategy(
@@ -89,6 +116,16 @@ class RunDailyRuntimeControlTests(unittest.TestCase):
     def make_progress_strategy(self) -> ProgressSmokeStrategy:
         return ProgressSmokeStrategy(
             name="ProgressSmoke",
+            benchmarks=[],
+            capital_base=1000.0,
+            slippage=0.0,
+            commission_per_share=0.0,
+            commission_minimum=0.0,
+        )
+
+    def make_missing_price_strategy(self) -> MissingPriceLiquidationStrategy:
+        return MissingPriceLiquidationStrategy(
+            name="MissingPriceLiquidation",
             benchmarks=[],
             capital_base=1000.0,
             slippage=0.0,
@@ -170,6 +207,31 @@ class RunDailyRuntimeControlTests(unittest.TestCase):
             strategy_with_progress.summary_trades,
             check_like=True,
         )
+
+    def test_run_daily_force_closes_positions_when_current_bar_prices_disappear(self):
+        pricing_data = make_missing_price_pricing_data()
+        strategy = self.make_missing_price_strategy()
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            run_daily(
+                strategy,
+                pricing_data,
+                show_progress=False,
+                show_signal_progress_bool=False,
+                audit_override_bool=False,
+            )
+
+        transaction_df = strategy.get_transactions().copy()
+        self.assertEqual(len(transaction_df), 2)
+        self.assertEqual(float(strategy.get_position("TEST")), 0.0)
+        self.assertAlmostEqual(float(strategy.total_value), 1001.0)
+        self.assertEqual(len(strategy._open_trades), 0)
+
+        closing_trade_ser = transaction_df.iloc[-1]
+        self.assertEqual(pd.Timestamp(closing_trade_ser["bar"]), pd.Timestamp("2024-01-03"))
+        self.assertEqual(int(closing_trade_ser["trade_id"]), 1)
+        self.assertEqual(float(closing_trade_ser["amount"]), -10.0)
+        self.assertAlmostEqual(float(closing_trade_ser["price"]), 10.6)
 
 
 if __name__ == "__main__":
