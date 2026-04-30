@@ -512,7 +512,8 @@ class Beyond6040Strategy(Strategy):
         self._trades = generate_trades(self.get_transactions())
         self._drawdowns = generate_drawdowns(self.results["drawdown"])
         self.summary = pd.DataFrame()
-        total_commissions_float = float(self.get_transactions()["commission"].sum())
+        transaction_df = self.get_transactions()
+        total_commissions_float = float(transaction_df["commission"].sum())
         self.summary["Strategy"] = generate_overall_metrics(
             self.results["total_value"].astype(float),
             self._trades,
@@ -520,6 +521,8 @@ class Beyond6040Strategy(Strategy):
             self.results["daily_returns"],
             capital_base=self._capital_base,
             total_commissions=total_commissions_float,
+            transactions_df=transaction_df,
+            slippage_float=self._slippage,
         )
 
         if include_benchmarks:

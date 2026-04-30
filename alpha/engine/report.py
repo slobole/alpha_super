@@ -1,5 +1,6 @@
 import io
 import base64
+import html
 import inspect
 import json
 import warnings
@@ -1524,6 +1525,143 @@ def _chart_block_from_b64(chart_b64: str | None, title: str, subtitle: str) -> s
     )
 
 
+def _format_weight_ratio_str(weight_obj) -> str:
+    if pd.isna(weight_obj):
+        return ''
+    try:
+        return f'{float(weight_obj):.2%}'
+    except (TypeError, ValueError):
+        return str(weight_obj)
+
+
+def _recent_taa_weight_comparison_df(strategy) -> pd.DataFrame:
+    """
+    Build the recent TAA target-vs-realized comparison table.
+
+    For asset i on rebalance date t:
+
+        target_cash_weight_t = 1 - sum_i target_weight_{i,t}
+
+        drift_weight_{i,t} = realized_weight_{i,t} - target_weight_{i,t}
+    """
+    target_weight_df = getattr(strategy, 'rebalance_weight_df', None)
+    if target_weight_df is None or len(target_weight_df) == 0:
+        return pd.DataFrame(columns=['date', 'asset', 'target_weight', 'realized_weight', 'drift_weight'])
+
+    realized_weight_df = getattr(strategy, 'realized_weight_df', pd.DataFrame())
+    target_weight_df = target_weight_df.copy().sort_index()
+    target_weight_df.index = pd.to_datetime(target_weight_df.index).normalize()
+    target_weight_df.columns = [str(column_obj) for column_obj in target_weight_df.columns]
+    target_weight_df = target_weight_df.apply(pd.to_numeric, errors='coerce').fillna(0.0)
+    target_weight_df = target_weight_df.groupby(target_weight_df.index).last()
+
+    recent_target_weight_df = target_weight_df.tail(3).copy()
+    if len(recent_target_weight_df) == 0:
+        return pd.DataFrame(columns=['date', 'asset', 'target_weight', 'realized_weight', 'drift_weight'])
+
+    target_cash_weight_ser = 1.0 - recent_target_weight_df.sum(axis=1)
+    target_cash_weight_ser = target_cash_weight_ser.mask(
+        np.isclose(target_cash_weight_ser.to_numpy(dtype=float), 0.0, atol=1e-12),
+        0.0,
+    )
+    recent_target_weight_df['Cash'] = target_cash_weight_ser
+
+    if realized_weight_df is None or len(realized_weight_df) == 0:
+        realized_weight_df = pd.DataFrame()
+    else:
+        realized_weight_df = realized_weight_df.copy()
+        realized_weight_df.index = pd.to_datetime(realized_weight_df.index).normalize()
+        realized_weight_df.columns = [str(column_obj) for column_obj in realized_weight_df.columns]
+        realized_weight_df = realized_weight_df.apply(pd.to_numeric, errors='coerce')
+        realized_weight_df = realized_weight_df.groupby(realized_weight_df.index).last()
+
+    target_asset_name_list = [
+        column_str for column_str in recent_target_weight_df.columns
+        if column_str != 'Cash'
+    ]
+    asset_name_set = set(target_asset_name_list)
+    realized_extra_asset_name_list: list[str] = []
+    if len(realized_weight_df) > 0:
+        recent_realized_weight_df = realized_weight_df.reindex(recent_target_weight_df.index)
+        for column_str in recent_realized_weight_df.columns:
+            if column_str in asset_name_set or column_str == 'Cash':
+                continue
+            realized_asset_weight_ser = recent_realized_weight_df[column_str].dropna()
+            if len(realized_asset_weight_ser) > 0 and not np.allclose(
+                realized_asset_weight_ser.to_numpy(dtype=float),
+                0.0,
+                atol=1e-12,
+            ):
+                realized_extra_asset_name_list.append(column_str)
+
+    asset_name_list = target_asset_name_list + realized_extra_asset_name_list + ['Cash']
+    realized_date_set = set(realized_weight_df.index) if len(realized_weight_df) > 0 else set()
+    row_dict_list: list[dict[str, object]] = []
+
+    for rebalance_date_ts, target_weight_ser in recent_target_weight_df.iterrows():
+        if rebalance_date_ts in realized_date_set:
+            realized_weight_ser = realized_weight_df.loc[rebalance_date_ts].reindex(asset_name_list).fillna(0.0)
+        else:
+            realized_weight_ser = pd.Series(np.nan, index=asset_name_list, dtype=float)
+
+        for asset_name_str in asset_name_list:
+            target_weight_float = float(target_weight_ser.get(asset_name_str, 0.0))
+            realized_weight_obj = realized_weight_ser.get(asset_name_str, np.nan)
+            realized_weight_float = float(realized_weight_obj) if pd.notna(realized_weight_obj) else np.nan
+            drift_weight_float = (
+                np.nan
+                if pd.isna(realized_weight_float)
+                else realized_weight_float - target_weight_float
+            )
+            row_dict_list.append(
+                {
+                    'date': rebalance_date_ts.date(),
+                    'asset': asset_name_str,
+                    'target_weight': target_weight_float,
+                    'realized_weight': realized_weight_float,
+                    'drift_weight': drift_weight_float,
+                }
+            )
+
+    return pd.DataFrame(row_dict_list, columns=['date', 'asset', 'target_weight', 'realized_weight', 'drift_weight'])
+
+
+def _recent_taa_weight_comparison_html(strategy) -> str:
+    recent_weight_df = _recent_taa_weight_comparison_df(strategy)
+    if len(recent_weight_df) == 0:
+        return ''
+
+    header_html_str = (
+        '<th>date</th>'
+        '<th>asset</th>'
+        '<th>target_weight</th>'
+        '<th>realized_weight</th>'
+        '<th>drift_weight</th>'
+    )
+    row_html_list: list[str] = []
+    for _, weight_row_ser in recent_weight_df.iterrows():
+        drift_weight_obj = weight_row_ser['drift_weight']
+        drift_class_str = _signed_value_class_str(drift_weight_obj)
+        drift_class_attr_str = f' class="{drift_class_str}"' if drift_class_str else ''
+        row_html_list.append(
+            '<tr>'
+            f'<td>{weight_row_ser["date"]}</td>'
+            f'<td>{html.escape(str(weight_row_ser["asset"]))}</td>'
+            f'<td>{_format_weight_ratio_str(weight_row_ser["target_weight"])}</td>'
+            f'<td>{_format_weight_ratio_str(weight_row_ser["realized_weight"])}</td>'
+            f'<td{drift_class_attr_str}>{_format_weight_ratio_str(drift_weight_obj)}</td>'
+            '</tr>'
+        )
+
+    return (
+        '<h3>Recent TAA Weights - Last 3 Rebalances</h3>'
+        '<p>Close-marked realized weights after execution and valuation; drift = realized_weight - target_weight.</p>'
+        '<div class="scroll">'
+        f'<table><thead><tr>{header_html_str}</tr></thead><tbody>{"".join(row_html_list)}</tbody></table>'
+        '</div>'
+    )
+
+
 def _portfolio_weights_html(strategy) -> str:
     weights = getattr(strategy, 'daily_target_weights', None)
     if not getattr(strategy, 'show_taa_weights_report', False) or weights is None or len(weights) == 0:
@@ -1541,6 +1679,7 @@ def _portfolio_weights_html(strategy) -> str:
     trailing_weights = weights.loc[weights.index >= trailing_start]
 
     parts = ['<h2>Portfolio Weights</h2>']
+    parts.append(_recent_taa_weight_comparison_html(strategy))
     parts.append(
         _weights_chart_block(
             bear_weights,

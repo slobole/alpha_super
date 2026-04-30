@@ -343,6 +343,8 @@ def run_standard_fallback_vix_cash_variant(
     show_display_bool: bool = True,
     save_results_bool: bool = True,
     output_dir_str: str = "results",
+    backtest_start_date_str: str | None = None,
+    capital_base_float: float = 100_000.0,
 ):
     """
     Run a standard fallback variant with the VIX cash overlay.
@@ -363,6 +365,7 @@ def run_standard_fallback_vix_cash_variant(
         strategy_name_str=strategy_name_str,
         config=config,
         rebalance_weight_df=rebalance_weight_df,
+        capital_base_float=capital_base_float,
     )
     strategy.daily_vrp_signal_df = daily_vrp_signal_df.copy()
     strategy.month_end_vrp_diagnostic_df = month_end_vrp_diagnostic_df.copy()
@@ -371,6 +374,7 @@ def run_standard_fallback_vix_cash_variant(
         strategy=strategy,
         execution_price_df=execution_price_df,
         rebalance_weight_df=rebalance_weight_df,
+        backtest_start_date_str=backtest_start_date_str,
     )
 
     if show_display_bool:

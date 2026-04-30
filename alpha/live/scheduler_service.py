@@ -14,19 +14,21 @@ from alpha.live.logging_utils import (
     log_operator_message,
 )
 from alpha.live.models import DecisionPlan, LiveRelease, VPlan
-from alpha.live.release_manifest import load_release_list
+from alpha.live.release_manifest import load_release_list, validate_enabled_deployment_for_mode
 from alpha.live.state_store_v2 import LiveStateStore
 
 
 DEFAULT_ACTIVE_POLL_SECONDS_INT = 30
-DEFAULT_IDLE_MAX_SLEEP_SECONDS_INT = 900
+DEFAULT_IDLE_MAX_SLEEP_SECONDS_INT = 3600
 DEFAULT_RECONCILE_GRACE_SECONDS_INT = 300
 DEFAULT_ERROR_RETRY_SECONDS_INT = 60
-DEFAULT_OPERATOR_HEARTBEAT_SECONDS_INT = 300
+DEFAULT_OPERATOR_HEARTBEAT_SECONDS_INT = 900
 DEFAULT_ACTIVE_OPERATOR_HEARTBEAT_SECONDS_INT = 30
 DEFAULT_SUBMIT_STUCK_SECONDS_INT = 60
+DEFAULT_EOD_SNAPSHOT_BUFFER_MINUTES_INT = runner.DEFAULT_EOD_SNAPSHOT_BUFFER_MINUTES_INT
 DEFAULT_RELEASES_ROOT_PATH_STR = str(Path(__file__).resolve().parent / "releases")
-DEFAULT_DB_PATH_STR = str(Path(__file__).resolve().parent / "live_state.sqlite3")
+DEFAULT_DB_PATH_STR = runner.DEFAULT_DB_PATH_STR
+DEFAULT_INCUBATION_DB_PATH_STR = runner.DEFAULT_INCUBATION_DB_PATH_STR
 
 
 @dataclass(frozen=True)
@@ -59,6 +61,16 @@ def _parse_as_of_timestamp_ts(as_of_timestamp_str: str | None) -> datetime:
     return datetime.fromisoformat(as_of_timestamp_str)
 
 
+def _resolve_db_path_for_mode_str(
+    db_path_str: str | None,
+    env_mode_str: str,
+) -> str:
+    return runner._resolve_db_path_for_mode_str(
+        db_path_str=db_path_str,
+        env_mode_str=env_mode_str,
+    )
+
+
 def _load_release_list_and_sync(
     releases_root_path_str: str,
     state_store_obj: LiveStateStore,
@@ -66,6 +78,14 @@ def _load_release_list_and_sync(
     release_list = load_release_list(releases_root_path_str)
     state_store_obj.upsert_release_list(release_list)
     return release_list
+
+
+def _validate_release_root_for_mutation(
+    releases_root_path_str: str,
+    env_mode_str: str,
+) -> None:
+    release_list = load_release_list(releases_root_path_str)
+    validate_enabled_deployment_for_mode(release_list, env_mode_str)
 
 
 def _get_current_cycle_vplan_obj(
@@ -121,6 +141,53 @@ def get_scheduler_decision(
         latest_decision_plan_obj = state_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str)
         current_vplan_obj = _get_current_cycle_vplan_obj(state_store_obj, latest_decision_plan_obj)
         build_gate_dict = scheduler_utils.evaluate_build_gate_dict(release_obj, as_of_ts)
+        eod_due_timestamp_ts = runner._eod_snapshot_due_timestamp_ts(
+            release_obj=release_obj,
+            as_of_ts=as_of_ts,
+            eod_snapshot_buffer_minutes_int=DEFAULT_EOD_SNAPSHOT_BUFFER_MINUTES_INT,
+        )
+        if eod_due_timestamp_ts is not None:
+            eod_market_date_str = runner._eod_snapshot_market_date_str(
+                release_obj=release_obj,
+                as_of_ts=as_of_ts,
+            )
+            eod_snapshot_exists_bool = runner._pod_has_stage_snapshot_for_market_date_bool(
+                state_store_obj=state_store_obj,
+                release_obj=release_obj,
+                snapshot_stage_str="eod",
+                market_date_str=eod_market_date_str,
+            )
+            active_vplan_blocks_eod_bool = current_vplan_obj is not None and current_vplan_obj.status_str in (
+                "ready",
+                "submitted",
+                "submitting",
+            )
+            # *** CRITICAL*** EOD snapshot is never scheduled ahead of an
+            # active order plan. Submit/reconcile/manual review must settle
+            # first so close-state sampling cannot overwrite operational truth.
+            if not eod_snapshot_exists_bool and not active_vplan_blocks_eod_bool:
+                if eod_due_timestamp_ts <= as_of_ts:
+                    immediate_candidate_list.append(
+                        _build_candidate_dict(
+                            priority_int=5,
+                            due_timestamp_ts=as_of_ts,
+                            next_phase_str="eod_snapshot",
+                            reason_code_str="eod_snapshot_due",
+                            pod_id_str=release_obj.pod_id_str,
+                            active_poll_bool=False,
+                        )
+                    )
+                else:
+                    future_candidate_list.append(
+                        _build_candidate_dict(
+                            priority_int=5,
+                            due_timestamp_ts=eod_due_timestamp_ts,
+                            next_phase_str="eod_snapshot",
+                            reason_code_str="waiting_for_eod_snapshot",
+                            pod_id_str=release_obj.pod_id_str,
+                            active_poll_bool=False,
+                        )
+                    )
 
         if latest_decision_plan_obj is None:
             if bool(build_gate_dict["due_bool"]):
@@ -140,7 +207,11 @@ def get_scheduler_decision(
 
         if (
             latest_decision_plan_obj.status_str in ("planned", "vplan_ready")
-            and latest_decision_plan_obj.target_execution_timestamp_ts <= as_of_ts
+            and scheduler_utils.is_execution_window_expired_bool(
+                latest_decision_plan_obj.execution_policy_str,
+                latest_decision_plan_obj.target_execution_timestamp_ts,
+                as_of_ts,
+            )
         ):
             immediate_candidate_list.append(
                 _build_candidate_dict(
@@ -154,7 +225,7 @@ def get_scheduler_decision(
             )
             continue
 
-        if current_vplan_obj is not None and current_vplan_obj.status_str == "submitted":
+        if current_vplan_obj is not None and current_vplan_obj.status_str in ("submitted", "submitting"):
             if runner.is_vplan_execution_exception_parked(state_store_obj, current_vplan_obj):
                 parked_manual_review_pod_id_list.append(release_obj.pod_id_str)
                 continue
@@ -348,6 +419,7 @@ def _build_related_pod_status_dict_list(
     state_store_obj: LiveStateStore,
     as_of_ts: datetime,
     releases_root_path_str: str,
+    env_mode_str: str,
     related_pod_id_list: list[str],
 ) -> list[dict[str, object]]:
     if len(related_pod_id_list) == 0:
@@ -356,6 +428,7 @@ def _build_related_pod_status_dict_list(
         state_store_obj=state_store_obj,
         as_of_ts=as_of_ts,
         releases_root_path_str=releases_root_path_str,
+        env_mode_str=env_mode_str,
     )
     related_pod_id_set = set(related_pod_id_list)
     return [
@@ -606,6 +679,9 @@ def _humanize_reason_code_str(reason_code_str: str | None) -> str:
         "completed": "cycle completed",
         "dtb3_stale": "macro data is stale and decision creation was skipped",
         "duplicate_submission_guard": "submission skipped because broker orders already exist for this VPlan",
+        "eod_snapshot_completed": "EOD broker snapshot recorded",
+        "eod_snapshot_due": "EOD broker snapshot is due",
+        "eod_snapshot_already_exists": "EOD snapshot already exists for this market date",
         "env_mode_mismatch": "release mode does not match the current runtime mode",
         "execution_exception_parked": "execution exception is parked for manual review",
         "live_reference_fallback": "using fallback market prices instead of auction prices",
@@ -625,7 +701,9 @@ def _humanize_reason_code_str(reason_code_str: str | None) -> str:
         "submission_claim_failed": "submit claim failed because the VPlan is no longer ready",
         "submission_window_expired": "submit window already passed for this session",
         "submitted": "orders submitted to the broker",
+        "unresolved_execution": "submitted execution is not reconciled yet",
         "vplan_ready": "execution plan is ready to submit",
+        "waiting_for_eod_snapshot": "waiting for the EOD broker snapshot window",
         "waiting_for_post_execution_reconcile": "waiting for the reconcile grace window",
         "waiting_for_submission_window": "waiting for the submission window to open",
     }
@@ -733,7 +811,7 @@ def _build_wait_operator_message_spec_list(
             latest_vplan_id_int = int(execution_report_dict["latest_vplan_id_int"])
         active_reconcile_wait_bool = bool(scheduler_decision_obj.active_poll_bool) and (
             str(pod_status_dict.get("next_action_str")) == "post_execution_reconcile"
-            or str(pod_status_dict.get("latest_vplan_status_str")) == "submitted"
+            or str(pod_status_dict.get("latest_vplan_status_str")) in ("submitted", "submitting")
         )
         if active_reconcile_wait_bool:
             fill_progress_operator_message_spec_dict = _build_fill_progress_operator_message_spec_dict(
@@ -850,6 +928,7 @@ def _build_phase_start_operator_message_spec_list(
         if scheduler_decision_obj.next_phase_str in (
             "build_vplan",
             "submit_vplan",
+            "eod_snapshot",
             "post_execution_reconcile",
         ):
             broker_connection_field_map_dict = broker_adapter_resolver_obj.get_connection_field_map_dict(
@@ -960,6 +1039,33 @@ def _build_phase_result_operator_message_spec_list(
                     },
                 )
             )
+
+        if scheduler_decision_obj.next_phase_str == "eod_snapshot":
+            if int(tick_detail_dict.get("eod_snapshot_count_int", 0)) > 0:
+                operator_message_spec_dict_list.append(
+                    _build_operator_message_spec_dict(
+                        level_str="INFO",
+                        phase_action_str="eod_snapshot.ok",
+                        timestamp_obj=scheduler_decision_obj.as_of_timestamp_ts,
+                        field_map_dict={
+                            **base_field_map_dict,
+                            "snapshots": int(tick_detail_dict.get("eod_snapshot_count_int", 0)),
+                        },
+                    )
+                )
+            elif int(tick_detail_dict.get("blocked_action_count_int", 0)) > 0:
+                operator_message_spec_dict_list.append(
+                    _build_operator_message_spec_dict(
+                        level_str="ERROR",
+                        phase_action_str="eod_snapshot.fail",
+                        timestamp_obj=scheduler_decision_obj.as_of_timestamp_ts,
+                        field_map_dict={
+                            **base_field_map_dict,
+                            "reason": _humanize_reason_code_str(first_reason_code_str),
+                        },
+                    )
+                )
+            continue
 
         if scheduler_decision_obj.next_phase_str == "build_decision_plan":
             if int(tick_detail_dict.get("created_decision_plan_count_int", 0)) > 0 and latest_decision_plan_obj is not None:
@@ -1223,6 +1329,7 @@ def _build_phase_failure_operator_message_spec_list(
         if broker_connection_failure_bool and scheduler_decision_obj.next_phase_str in (
             "build_vplan",
             "submit_vplan",
+            "eod_snapshot",
             "post_execution_reconcile",
         ):
             broker_connection_field_map_dict = broker_adapter_resolver_obj.get_connection_field_map_dict(
@@ -1512,6 +1619,7 @@ def _render_scheduler_event_output_str(
     if isinstance(tick_detail_dict, dict):
         line_list.append(
             "  tick "
+            f"eod={int(tick_detail_dict.get('eod_snapshot_count_int', 0))} "
             f"created_decision={int(tick_detail_dict.get('created_decision_plan_count_int', 0))} "
             f"created_vplan={int(tick_detail_dict.get('created_vplan_count_int', 0))} "
             f"submitted={int(tick_detail_dict.get('submitted_vplan_count_int', 0))} "
@@ -1645,6 +1753,7 @@ def _render_scheduler_output_str(detail_dict: dict[str, object]) -> str:
         tick_detail_dict = dict(detail_dict["tick_detail_dict"])
         line_list.append(
             "- Tick summary: "
+            f"eod_snapshot_count_int={int(tick_detail_dict.get('eod_snapshot_count_int', 0))}, "
             f"created_decision_plan_count_int={int(tick_detail_dict.get('created_decision_plan_count_int', 0))}, "
             f"created_vplan_count_int={int(tick_detail_dict.get('created_vplan_count_int', 0))}, "
             f"submitted_vplan_count_int={int(tick_detail_dict.get('submitted_vplan_count_int', 0))}, "
@@ -1678,6 +1787,10 @@ def _render_scheduler_output_str(detail_dict: dict[str, object]) -> str:
                 f"fill_count_int={execution_report_dict['fill_count_int']}"
             )
     return "\n".join(line_list)
+
+
+def _render_serve_tick_summary_str(tick_detail_dict: dict[str, object]) -> str:
+    return runner._render_tick_detail_str(tick_detail_dict)
 
 
 def next_due(
@@ -1714,12 +1827,15 @@ def run_once(
     broker_client_id_int: int | None = None,
     broker_timeout_seconds_float: float | None = None,
 ) -> dict[str, object]:
+    _validate_release_root_for_mutation(releases_root_path_str, env_mode_str)
     broker_adapter_resolver_obj = runner.BrokerAdapterResolver(
         broker_adapter_obj=broker_adapter_obj,
         broker_host_str=broker_host_str,
         broker_port_int=broker_port_int,
         broker_client_id_int=broker_client_id_int,
         broker_timeout_seconds_float=broker_timeout_seconds_float,
+        state_store_obj=state_store_obj,
+        as_of_ts=as_of_ts,
     )
     scheduler_decision_obj = get_scheduler_decision(
         state_store_obj=state_store_obj,
@@ -1745,21 +1861,34 @@ def run_once(
             log_path_str=log_path_str,
             print_events_bool=False,
         )
-        tick_detail_dict = runner.tick(
-            state_store_obj=state_store_obj,
-            broker_adapter_obj=broker_adapter_obj,
-            as_of_ts=as_of_ts,
-            releases_root_path_str=releases_root_path_str,
-            env_mode_str=env_mode_str,
-            log_path_str=log_path_str,
-            broker_adapter_resolver_obj=broker_adapter_resolver_obj,
-        )
+        if scheduler_decision_obj.next_phase_str == "eod_snapshot":
+            tick_detail_dict = runner.eod_snapshot(
+                state_store_obj=state_store_obj,
+                broker_adapter_obj=broker_adapter_obj,
+                as_of_ts=as_of_ts,
+                env_mode_str=env_mode_str,
+                releases_root_path_str=releases_root_path_str,
+                log_path_str=log_path_str,
+                broker_adapter_resolver_obj=broker_adapter_resolver_obj,
+                require_due_bool=True,
+            )
+        else:
+            tick_detail_dict = runner.tick(
+                state_store_obj=state_store_obj,
+                broker_adapter_obj=broker_adapter_obj,
+                as_of_ts=as_of_ts,
+                releases_root_path_str=releases_root_path_str,
+                env_mode_str=env_mode_str,
+                log_path_str=log_path_str,
+                broker_adapter_resolver_obj=broker_adapter_resolver_obj,
+            )
         detail_dict["tick_invoked_bool"] = True
         detail_dict["tick_detail_dict"] = tick_detail_dict
         detail_dict["post_tick_pod_status_dict_list"] = _build_related_pod_status_dict_list(
             state_store_obj=state_store_obj,
             as_of_ts=as_of_ts,
             releases_root_path_str=releases_root_path_str,
+            env_mode_str=env_mode_str,
             related_pod_id_list=scheduler_decision_obj.related_pod_id_list,
         )
         detail_dict["post_tick_execution_report_dict_list"] = _build_related_execution_report_dict_list(
@@ -1799,6 +1928,7 @@ def serve(
     log_path_str: str = DEFAULT_LOG_PATH_STR,
     broker_timeout_seconds_float: float | None = None,
 ) -> None:
+    _validate_release_root_for_mutation(releases_root_path_str, env_mode_str)
     last_printed_sleep_signature_tup: tuple[object, ...] | None = None
     last_printed_sleep_timestamp_ts: datetime | None = None
     current_scheduler_decision_obj: SchedulerDecision | None = None
@@ -1840,6 +1970,10 @@ def serve(
 
     while True:
         as_of_ts = datetime.now(tz=UTC)
+        broker_adapter_resolver_obj.set_incubation_context(
+            state_store_obj=state_store_obj,
+            as_of_ts=as_of_ts,
+        )
         try:
             current_scheduler_decision_obj = get_scheduler_decision(
                 state_store_obj=state_store_obj,
@@ -1873,19 +2007,32 @@ def serve(
                 )
                 last_printed_sleep_signature_tup = None
                 last_printed_sleep_timestamp_ts = None
-                tick_detail_dict = runner.tick(
-                    state_store_obj=state_store_obj,
-                    broker_adapter_obj=broker_adapter_obj,
-                    as_of_ts=as_of_ts,
-                    releases_root_path_str=releases_root_path_str,
-                    env_mode_str=env_mode_str,
-                    log_path_str=log_path_str,
-                    broker_adapter_resolver_obj=broker_adapter_resolver_obj,
-                )
+                if current_scheduler_decision_obj.next_phase_str == "eod_snapshot":
+                    tick_detail_dict = runner.eod_snapshot(
+                        state_store_obj=state_store_obj,
+                        broker_adapter_obj=broker_adapter_obj,
+                        as_of_ts=as_of_ts,
+                        env_mode_str=env_mode_str,
+                        releases_root_path_str=releases_root_path_str,
+                        log_path_str=log_path_str,
+                        broker_adapter_resolver_obj=broker_adapter_resolver_obj,
+                        require_due_bool=True,
+                    )
+                else:
+                    tick_detail_dict = runner.tick(
+                        state_store_obj=state_store_obj,
+                        broker_adapter_obj=broker_adapter_obj,
+                        as_of_ts=as_of_ts,
+                        releases_root_path_str=releases_root_path_str,
+                        env_mode_str=env_mode_str,
+                        log_path_str=log_path_str,
+                        broker_adapter_resolver_obj=broker_adapter_resolver_obj,
+                    )
                 post_tick_pod_status_dict_list = _build_related_pod_status_dict_list(
                     state_store_obj=state_store_obj,
                     as_of_ts=as_of_ts,
                     releases_root_path_str=releases_root_path_str,
+                    env_mode_str=env_mode_str,
                     related_pod_id_list=current_scheduler_decision_obj.related_pod_id_list,
                 )
                 post_tick_execution_report_dict_list = _build_related_execution_report_dict_list(
@@ -1931,6 +2078,7 @@ def serve(
                     log_path_str=log_path_str,
                     print_message_bool=True,
                 )
+                print(_render_serve_tick_summary_str(tick_detail_dict), flush=True)
                 last_printed_sleep_signature_tup = None
                 last_printed_sleep_timestamp_ts = None
                 continue
@@ -1953,6 +2101,7 @@ def serve(
                     state_store_obj=state_store_obj,
                     as_of_ts=as_of_ts,
                     releases_root_path_str=releases_root_path_str,
+                    env_mode_str=env_mode_str,
                     related_pod_id_list=current_scheduler_decision_obj.related_pod_id_list,
                 ),
                 "execution_report_dict_list": _build_related_execution_report_dict_list(
@@ -2050,9 +2199,9 @@ def main(argv_list: list[str] | None = None) -> int:
     parser_obj = argparse.ArgumentParser(description="alpha.live scheduler service")
     parser_obj.add_argument(
         "command_name_str",
-        choices=("serve", "next_due", "run_once"),
+        choices=("serve", "next_due", "run_once", "compare_reference", "eod_snapshot"),
     )
-    parser_obj.add_argument("--db-path", dest="db_path_str", default=DEFAULT_DB_PATH_STR)
+    parser_obj.add_argument("--db-path", dest="db_path_str", default=None)
     parser_obj.add_argument("--releases-root", dest="releases_root_path_str", default=DEFAULT_RELEASES_ROOT_PATH_STR)
     parser_obj.add_argument("--as-of-ts", dest="as_of_timestamp_str", default=None)
     parser_obj.add_argument("--mode", dest="env_mode_str", default="paper")
@@ -2062,6 +2211,10 @@ def main(argv_list: list[str] | None = None) -> int:
     parser_obj.add_argument("--broker-port", dest="broker_port_int", type=int, default=None)
     parser_obj.add_argument("--broker-client-id", dest="broker_client_id_int", type=int, default=None)
     parser_obj.add_argument("--broker-timeout-seconds", dest="broker_timeout_seconds_float", type=float, default=None)
+    parser_obj.add_argument("--pod-id", dest="pod_id_str", default=None)
+    parser_obj.add_argument("--reference-strategy-pickle", dest="reference_strategy_pickle_path_str", default=None)
+    parser_obj.add_argument("--html", dest="html_output_bool", action="store_true")
+    parser_obj.add_argument("--output-dir", dest="output_dir_str", default="results")
     parser_obj.add_argument(
         "--active-poll-seconds",
         dest="active_poll_seconds_int",
@@ -2088,7 +2241,11 @@ def main(argv_list: list[str] | None = None) -> int:
     )
     parsed_args_obj = parser_obj.parse_args(argv_list)
 
-    state_store_obj = LiveStateStore(parsed_args_obj.db_path_str)
+    db_path_str = _resolve_db_path_for_mode_str(
+        db_path_str=parsed_args_obj.db_path_str,
+        env_mode_str=parsed_args_obj.env_mode_str,
+    )
+    state_store_obj = LiveStateStore(db_path_str)
     broker_adapter_obj = None
     as_of_ts = _parse_as_of_timestamp_ts(parsed_args_obj.as_of_timestamp_str)
 
@@ -2125,6 +2282,30 @@ def main(argv_list: list[str] | None = None) -> int:
             broker_client_id_int=parsed_args_obj.broker_client_id_int,
             broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
         )
+    elif parsed_args_obj.command_name_str == "compare_reference":
+        detail_dict = runner.get_compare_reference_summary(
+            state_store_obj=state_store_obj,
+            as_of_ts=as_of_ts,
+            releases_root_path_str=parsed_args_obj.releases_root_path_str,
+            env_mode_str=parsed_args_obj.env_mode_str,
+            pod_id_str=parsed_args_obj.pod_id_str,
+            reference_strategy_pickle_path_str=parsed_args_obj.reference_strategy_pickle_path_str,
+            html_output_bool=parsed_args_obj.html_output_bool,
+            output_dir_str=parsed_args_obj.output_dir_str,
+        )
+    elif parsed_args_obj.command_name_str == "eod_snapshot":
+        detail_dict = runner.eod_snapshot(
+            state_store_obj=state_store_obj,
+            broker_adapter_obj=broker_adapter_obj,
+            as_of_ts=as_of_ts,
+            env_mode_str=parsed_args_obj.env_mode_str,
+            releases_root_path_str=parsed_args_obj.releases_root_path_str,
+            log_path_str=parsed_args_obj.log_path_str,
+            broker_host_str=parsed_args_obj.broker_host_str,
+            broker_port_int=parsed_args_obj.broker_port_int,
+            broker_client_id_int=parsed_args_obj.broker_client_id_int,
+            broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
+        )
     else:
         detail_dict = next_due(
             state_store_obj=state_store_obj,
@@ -2137,6 +2318,8 @@ def main(argv_list: list[str] | None = None) -> int:
 
     if parsed_args_obj.json_output_bool:
         print(json.dumps(detail_dict, indent=2, sort_keys=True))
+    elif parsed_args_obj.command_name_str in ("compare_reference", "eod_snapshot"):
+        print(runner._render_command_output_str(parsed_args_obj.command_name_str, detail_dict))
     else:
         print(_render_scheduler_output_str(detail_dict))
     return 0

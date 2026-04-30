@@ -81,6 +81,8 @@ class Strategy(ABC):
         self._daily_return_history_list: list[float] = []
         self._portfolio_value_history_list: list[float] = []
         self._total_value_history_list: list[float] = []
+        self.realized_weight_df = pd.DataFrame(dtype=float)
+        self._realized_weight_snapshot_row_dict_list: list[dict[str, object]] = []
         self._benchmark_value_history_map: dict[str, list[float]] = {
             benchmark: [] for benchmark in self._benchmarks
         }
@@ -256,6 +258,67 @@ class Strategy(ABC):
         if count_int < 2:
             return np.nan
         return float(np.sqrt(m2_float / (count_int - 1)))
+
+    def _record_realized_weight_snapshot(self, price_df: pd.DataFrame):
+        """
+        Record close-marked realized portfolio weights for reporting.
+
+        For asset i on date t:
+
+            position_value_{i,t} = shares_{i,t} * close_price_{i,t}
+
+            realized_weight_{i,t} = position_value_{i,t} / total_value_t
+
+            cash_weight_t = cash_t / total_value_t
+        """
+        if self.current_bar is None:
+            return
+
+        total_value_float = float(self.total_value)
+        if not np.isfinite(total_value_float) or np.isclose(total_value_float, 0.0, atol=1e-12):
+            return
+
+        current_date_ts = pd.Timestamp(self.current_bar).normalize()
+        realized_weight_ser = pd.Series(dtype=float, name=current_date_ts)
+
+        position_share_ser = self.get_positions()
+        active_position_share_ser = position_share_ser[position_share_ser != 0]
+        if len(active_position_share_ser) > 0:
+            # *** CRITICAL*** This close-marked snapshot is a post-valuation report
+            # diagnostic only. It must not feed same-day signal or order logic.
+            close_price_ser = price_df.loc[self.current_bar, (slice(None), 'Close')]
+            close_price_ser.index = close_price_ser.index.get_level_values(0)
+            active_close_price_ser = close_price_ser.reindex(active_position_share_ser.index).astype(float)
+            if active_close_price_ser.isna().any():
+                missing_asset_list = active_close_price_ser[active_close_price_ser.isna()].index.tolist()
+                raise RuntimeError(
+                    f"Cannot compute realized weights on {current_date_ts.date()}; "
+                    f"missing close prices for {missing_asset_list}."
+                )
+
+            position_value_ser = active_position_share_ser.astype(float) * active_close_price_ser
+            realized_weight_ser = position_value_ser / total_value_float
+
+        cash_weight_float = float(self.cash) / total_value_float
+        realized_weight_ser.loc['Cash'] = cash_weight_float
+
+        realized_weight_row_dict = {
+            str(asset_obj): float(realized_weight_float)
+            for asset_obj, realized_weight_float in realized_weight_ser.items()
+        }
+        realized_weight_row_dict['snapshot_date_ts'] = current_date_ts
+        self._realized_weight_snapshot_row_dict_list.append(realized_weight_row_dict)
+
+    def _materialize_realized_weight_df(self) -> None:
+        if len(self._realized_weight_snapshot_row_dict_list) == 0:
+            return
+
+        realized_weight_df = pd.DataFrame.from_records(self._realized_weight_snapshot_row_dict_list)
+        realized_weight_df = realized_weight_df.set_index('snapshot_date_ts')
+        realized_weight_df.index = pd.to_datetime(realized_weight_df.index).normalize()
+        realized_weight_df.columns = [str(column_obj) for column_obj in realized_weight_df.columns]
+        realized_weight_df = realized_weight_df.apply(pd.to_numeric, errors='coerce')
+        self.realized_weight_df = realized_weight_df.groupby(realized_weight_df.index).last()
     
     # trade logic -> should be implemented in the subclass
     @abstractmethod
@@ -699,6 +762,7 @@ class Strategy(ABC):
         self._daily_return_history_list.append(float(daily_return_float))
         self._portfolio_value_history_list.append(float(self.portfolio_value))
         self._total_value_history_list.append(float(self.total_value))
+        self._record_realized_weight_snapshot(prices)
 
         # store the computed metrics for the current day in the results DataFrame
         self.results.loc[tdy] = [
@@ -737,6 +801,8 @@ class Strategy(ABC):
         - self.summary: A DataFrame containing key performance metrics.
         - self.summary_trades: A DataFrame summarizing trade statistics.
         """
+        self._materialize_realized_weight_df()
+
         # generate trade history and drawdown metrics
         self._trades = generate_trades(self.get_transactions())
         self._open_trades = generate_open_trades(
@@ -747,14 +813,17 @@ class Strategy(ABC):
         self._drawdowns = generate_drawdowns(self.results['drawdown'])
         # compute strategy performance metrics
         self.summary = pd.DataFrame()
-        total_commissions = self.get_transactions()['commission'].sum()
+        transaction_df = self.get_transactions()
+        total_commissions = transaction_df['commission'].sum()
         self.summary['Strategy'] = generate_overall_metrics(
             self.results['total_value'].astype(float),
             self._trades,
             self.results['portfolio_value'],
             self.results['daily_returns'],
             capital_base=self._capital_base,
-            total_commissions=total_commissions
+            total_commissions=total_commissions,
+            transactions_df=transaction_df,
+            slippage_float=self._slippage,
         )
         # compute benchmark performance metrics if enabled
         if include_benchmarks:

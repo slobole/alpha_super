@@ -1,0 +1,38 @@
+identity:
+  release_id: incubation_user.pod_ndx_mo.incubation.v1
+  user_id: incubation_user
+  pod_id: pod_ndx_mo_01
+
+deployment:
+  mode: incubation
+  enabled_bool: true
+
+broker:
+  account_route: SIM_pod_ndx_mo_01
+  host_str: 127.0.0.1
+  port_int: 7497
+  client_id_int: 91
+  timeout_seconds_float: 4.0
+
+strategy:
+  strategy_import_str: strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy
+  data_profile_str: norgate_eod_ndx_pit
+  params:
+    max_positions_int: 10
+
+market:
+  session_calendar_id_str: XNYS
+
+schedule:
+  signal_clock_str: month_end_snapshot_ready
+  execution_policy_str: next_month_first_open
+
+execution:
+  pod_budget_fraction_float: 1.0
+  auto_submit_enabled_bool: true
+
+bootstrap:
+  initial_cash_float: 100000.0
+
+risk:
+  risk_profile_str: standard_monthly_momentum

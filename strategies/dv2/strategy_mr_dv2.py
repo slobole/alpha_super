@@ -6,6 +6,7 @@ from collections import defaultdict
 from typing import List
 from alpha.engine.strategy import Strategy
 from alpha.engine.backtest import run_daily
+from alpha.engine.report import save_results
 from alpha.indicators import dv2_indicator
 from data.norgate_loader import build_index_constituent_matrix, load_raw_prices
 
@@ -14,10 +15,35 @@ def get_prices(symbols: List[str], benchmarks: List[str], start_date: str = '199
     return load_raw_prices(symbols, benchmarks, start_date, end_date)
 
 
+def default_trade_id_int() -> int:
+    return -1
+
+
+def get_asof_universe_symbol_list(
+    universe_df: pd.DataFrame | None,
+    decision_date_ts: pd.Timestamp,
+) -> list[str]:
+    if universe_df is None or len(universe_df) == 0:
+        return []
+
+    sorted_universe_df = universe_df.sort_index()
+    # *** CRITICAL*** PIT universe membership may lag the newest price date.
+    # Use only the latest universe row available on or before decision_t; never
+    # use a later row, because that would leak future index membership.
+    universe_row_int = int(
+        sorted_universe_df.index.searchsorted(pd.Timestamp(decision_date_ts), side="right")
+    ) - 1
+    if universe_row_int < 0:
+        return []
+
+    universe_membership_ser = sorted_universe_df.iloc[universe_row_int]
+    return universe_membership_ser[universe_membership_ser == 1].index.astype(str).tolist()
+
+
 class DVO2Strategy(Strategy):
     max_positions = 10  # maximum number of positions to hold
     trade_id = 0  # intiliazing trade_id to 0
-    current_trade = defaultdict(lambda: -1)  # initializing current_trade as a defaultdict of lists with default value -1
+    current_trade = defaultdict(default_trade_id_int)  # initializing current_trade as a defaultdict with default value -1
     universe_df = None  # df storing the universe of stocks
 
     def compute_signals(self, pricing_data: pd.DataFrame) -> pd.DataFrame:
@@ -33,6 +59,9 @@ class DVO2Strategy(Strategy):
             high = signal_data[(symbol, 'High')]
             low = signal_data[(symbol, 'Low')]
 
+            # *** CRITICAL*** All feature calculations below must be causal:
+            # decision_t may use historical closes/rolling windows only through
+            # previous_bar, and the engine fills resulting orders at Open_t.
             feature_cols[(symbol, 'p126d_return')] = close / close.shift(126) - 1
             feature_cols[(symbol, 'natr')] = talib.NATR(high, low, close, 14)
             feature_cols[(symbol, 'dv2')] = dv2_indicator(close, high, low, length_int=126)
@@ -108,33 +137,63 @@ class DVO2Strategy(Strategy):
         ].sort_values('natr', ascending=False)
 
         # get the list of stocks in the universe on the previous trading day
-        u = self.universe_df.loc[self.previous_bar]
-        u = u[u == 1].index.tolist()
+        u = get_asof_universe_symbol_list(self.universe_df, pd.Timestamp(self.previous_bar))
 
         # return the filtered list of opportunity tickers that are also in the universe
         return df[df.index.isin(u)].index.tolist()
 
 
-
-if __name__ == "__main__":
+def run_variant(
+    show_display_bool: bool = True,
+    save_results_bool: bool = True,
+    output_dir_str: str = "results",
+    backtest_start_date_str: str = "2004-01-01",
+    capital_base_float: float = 100_000.0,
+    end_date_str: str | None = None,
+):
     benchmarks = ['$SPX']
     index_symbols, universe_df = build_index_constituent_matrix(indexname='S&P 500')
-    pricing_data = get_prices(index_symbols, benchmarks, start_date='1998-01-01', end_date=None)
-    ...
-    sa = DVO2Strategy(name='strategy_mr_dv2', benchmarks=benchmarks, capital_base=100_000, slippage=0.00025,
-                      commission_per_share=0.005, commission_minimum=1.0)
-    sa.universe_df = universe_df
-    calendar = pricing_data.index
-    calendar = calendar[calendar.year >= 2004]
+    pricing_data = get_prices(index_symbols, benchmarks, start_date='1998-01-01', end_date=end_date_str)
 
-    run_daily(sa, pricing_data, calendar)
+    strategy = DVO2Strategy(
+        name='strategy_mr_dv2',
+        benchmarks=benchmarks,
+        capital_base=capital_base_float,
+        slippage=0.00025,
+        commission_per_share=0.005,
+        commission_minimum=1.0,
+    )
+    strategy.universe_df = universe_df
+    strategy.trade_id = 0
+    strategy.current_trade = defaultdict(default_trade_id_int)
 
-    sa.universe_df = None
+    # *** CRITICAL*** Deployment-reference backtests keep full pre-start
+    # history for indicators, but the executable calendar starts at the first
+    # deployment fill session.
+    calendar = pricing_data.index[pricing_data.index >= pd.Timestamp(backtest_start_date_str)]
+    run_daily(
+        strategy,
+        pricing_data,
+        calendar,
+        show_progress=show_display_bool,
+        show_signal_progress_bool=show_display_bool,
+    )
 
-    pd.set_option('display.max_columns', None)
-    pd.set_option('display.width', 1000)
-    display(sa.summary)
-    display(sa.summary_trades)
-    from alpha.engine.report import save_results
-    save_results(sa)
+    strategy.universe_df = None
+
+    if show_display_bool:
+        pd.set_option('display.max_columns', None)
+        pd.set_option('display.width', 1000)
+        display(strategy.summary)
+        display(strategy.summary_trades)
+
+    if save_results_bool:
+        save_results(strategy, output_dir=output_dir_str)
+
+    return strategy
+
+
+
+if __name__ == "__main__":
+    run_variant()
 

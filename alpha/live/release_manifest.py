@@ -19,10 +19,11 @@ SUPPORTED_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = (
 )
 SUPPORTED_EXECUTION_POLICY_TUPLE: tuple[str, ...] = (
     "next_open_moo",
+    "next_open_market",
     "same_day_moc",
     "next_month_first_open",
 )
-SUPPORTED_MODE_TUPLE: tuple[str, ...] = ("paper", "live")
+SUPPORTED_MODE_TUPLE: tuple[str, ...] = ("incubation", "paper", "live")
 SUPPORTED_SIGNAL_CLOCK_TUPLE: tuple[str, ...] = scheduler_utils.SUPPORTED_SIGNAL_CLOCK_TUPLE
 SUPPORTED_DATA_PROFILE_TUPLE: tuple[str, ...] = (
     "norgate_eod_sp500_pit",
@@ -31,6 +32,15 @@ SUPPORTED_DATA_PROFILE_TUPLE: tuple[str, ...] = (
     "intraday_1m_plus_daily_pit",
 )
 SUPPORTED_SESSION_CALENDAR_ID_TUPLE: tuple[str, ...] = scheduler_utils.SUPPORTED_SESSION_CALENDAR_ID_TUPLE
+PLACEHOLDER_ACCOUNT_ROUTE_TOKEN_TUPLE: tuple[str, ...] = (
+    "YOUR",
+    "EXAMPLE",
+    "PLACEHOLDER",
+    "TBD",
+    "TODO",
+    "NONE",
+    "NULL",
+)
 
 
 def _get_optional_mapping(raw_payload_dict: dict[str, Any], field_name_str: str) -> dict[str, Any]:
@@ -88,6 +98,9 @@ def parse_release_manifest(manifest_path_str: str) -> LiveRelease:
     if initial_cash_float is not None and "capital_base_float" not in params_dict:
         params_dict["capital_base_float"] = float(initial_cash_float)
 
+    mode_str = str(_resolve_manifest_value(raw_payload_dict, "mode", "deployment", "mode"))
+    default_broker_client_id_int = 91 if mode_str == "incubation" else 31
+
     release_obj = LiveRelease(
         release_id_str=str(_resolve_manifest_value(raw_payload_dict, "release_id", "identity", "release_id")),
         user_id_str=str(_resolve_manifest_value(raw_payload_dict, "user_id", "identity", "user_id")),
@@ -122,7 +135,7 @@ def parse_release_manifest(manifest_path_str: str) -> LiveRelease:
                 "broker",
                 "client_id_int",
                 required_bool=False,
-                default_value_obj=31,
+                default_value_obj=default_broker_client_id_int,
             )
         ),
         broker_timeout_seconds_float=float(
@@ -138,7 +151,7 @@ def parse_release_manifest(manifest_path_str: str) -> LiveRelease:
         strategy_import_str=str(
             _resolve_manifest_value(raw_payload_dict, "strategy_import_str", "strategy", "strategy_import_str")
         ),
-        mode_str=str(_resolve_manifest_value(raw_payload_dict, "mode", "deployment", "mode")),
+        mode_str=mode_str,
         session_calendar_id_str=str(
             _resolve_manifest_value(
                 raw_payload_dict,
@@ -254,6 +267,83 @@ def load_release_list(releases_root_path_str: str) -> list[LiveRelease]:
 
     validate_release_list(release_list)
     return release_list
+
+
+def select_enabled_release_list_for_mode(
+    release_list: list[LiveRelease],
+    env_mode_str: str,
+) -> list[LiveRelease]:
+    return [
+        release_obj
+        for release_obj in release_list
+        if release_obj.enabled_bool and release_obj.mode_str == env_mode_str
+    ]
+
+
+def account_route_placeholder_bool(account_route_str: str) -> bool:
+    normalized_account_route_str = str(account_route_str or "").strip().upper()
+    if len(normalized_account_route_str) == 0:
+        return True
+    return any(
+        placeholder_token_str in normalized_account_route_str
+        for placeholder_token_str in PLACEHOLDER_ACCOUNT_ROUTE_TOKEN_TUPLE
+    )
+
+
+def validate_enabled_deployment_for_mode(
+    release_list: list[LiveRelease],
+    env_mode_str: str,
+) -> None:
+    selected_release_list = select_enabled_release_list_for_mode(
+        release_list=release_list,
+        env_mode_str=env_mode_str,
+    )
+    selected_user_id_list = sorted(
+        {str(release_obj.user_id_str).strip() for release_obj in selected_release_list}
+    )
+    invalid_account_release_list = [
+        release_obj
+        for release_obj in selected_release_list
+        if account_route_placeholder_bool(release_obj.account_route_str)
+    ]
+
+    error_line_list: list[str] = []
+    if len(selected_user_id_list) > 1:
+        error_line_list.append(
+            "This deployment has enabled releases for multiple client identities "
+            f"in mode '{env_mode_str}': {', '.join(selected_user_id_list)}."
+        )
+    if len(invalid_account_release_list) > 0:
+        if env_mode_str == "incubation":
+            error_line_list.append(
+                "Every enabled incubation sleeve must map to a virtual SIM_ account route."
+            )
+        else:
+            error_line_list.append(
+                "Every enabled sleeve must map to a real IBKR account/subaccount route."
+            )
+        for release_obj in invalid_account_release_list:
+            error_line_list.append(
+                "- "
+                f"pod_id={release_obj.pod_id_str} "
+                f"release_id={release_obj.release_id_str} "
+                f"account_route={release_obj.account_route_str!r} "
+                f"path={release_obj.source_path_str}"
+            )
+
+    if len(error_line_list) == 0:
+        return
+
+    raise ValueError(
+        "\n".join(
+            [
+                "LIVE CONFIG ERROR: selected enabled deployment is invalid.",
+                "Current model is one client per VPS/deployment.",
+                "Only releases with enabled_bool=true and mode matching the selected --mode are checked.",
+                *error_line_list,
+            ]
+        )
+    )
 
 
 def validate_release_list(release_list: list[LiveRelease]) -> None:

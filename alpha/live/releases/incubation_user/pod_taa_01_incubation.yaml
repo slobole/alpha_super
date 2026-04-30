@@ -1,0 +1,37 @@
+identity:
+  release_id: incubation_user.pod_taa.incubation.v1
+  user_id: incubation_user
+  pod_id: pod_taa_01
+
+deployment:
+  mode: incubation
+  enabled_bool: true
+
+broker:
+  account_route: SIM_pod_taa_01
+  host_str: 127.0.0.1
+  port_int: 7497
+  client_id_int: 91
+  timeout_seconds_float: 4.0
+
+strategy:
+  strategy_import_str: strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash
+  data_profile_str: norgate_eod_etf_plus_vix_helper
+  params: {}
+
+market:
+  session_calendar_id_str: XNYS
+
+schedule:
+  signal_clock_str: month_end_snapshot_ready
+  execution_policy_str: next_month_first_open
+
+execution:
+  pod_budget_fraction_float: 1.0
+  auto_submit_enabled_bool: true
+
+bootstrap:
+  initial_cash_float: 100000.0
+
+risk:
+  risk_profile_str: standard_taa

@@ -2,10 +2,19 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
-from alpha.live.execution_engine import build_broker_order_request_list_from_vplan
+from alpha.live.execution_engine import build_broker_order_request_list_from_vplan, build_vplan
 from alpha.live.ibkr_socket_client import IBKRSocketClient
-from alpha.live.models import BrokerOrderRequest, VPlan, VPlanRow
+from alpha.live.models import (
+    BrokerOrderRequest,
+    BrokerSnapshot,
+    DecisionPlan,
+    LivePriceSnapshot,
+    LiveRelease,
+    VPlan,
+    VPlanRow,
+)
 from alpha.live.order_clerk import StubBrokerAdapter, infer_ibkr_account_mode_str
 
 
@@ -451,6 +460,69 @@ def test_build_broker_order_request_list_from_vplan_assigns_unique_order_request
     ) == 2
 
 
+def test_next_open_market_vplan_uses_plain_mkt_broker_order_type():
+    timestamp_ts = datetime(2024, 2, 1, 9, 30)
+    release_obj = LiveRelease(
+        release_id_str="release_market_001",
+        user_id_str="user_001",
+        pod_id_str="pod_market",
+        account_route_str="DU1",
+        strategy_import_str="strategies.dv2.strategy_mr_dv2:DVO2Strategy",
+        mode_str="paper",
+        session_calendar_id_str="XNYS",
+        signal_clock_str="eod_snapshot_ready",
+        execution_policy_str="next_open_market",
+        data_profile_str="norgate_eod_sp500_pit",
+        params_dict={},
+        risk_profile_str="standard",
+        enabled_bool=True,
+        source_path_str="manifest.yaml",
+        pod_budget_fraction_float=0.5,
+    )
+    decision_plan_obj = DecisionPlan(
+        release_id_str=release_obj.release_id_str,
+        user_id_str=release_obj.user_id_str,
+        pod_id_str=release_obj.pod_id_str,
+        account_route_str=release_obj.account_route_str,
+        signal_timestamp_ts=timestamp_ts,
+        submission_timestamp_ts=timestamp_ts,
+        target_execution_timestamp_ts=timestamp_ts,
+        execution_policy_str="next_open_market",
+        decision_base_position_map={},
+        snapshot_metadata_dict={},
+        strategy_state_dict={},
+        decision_book_type_str="incremental_entry_exit_book",
+        entry_target_weight_map_dict={"AAPL": 0.2},
+        entry_priority_list=["AAPL"],
+        decision_plan_id_int=7,
+    )
+    broker_snapshot_obj = BrokerSnapshot(
+        account_route_str="DU1",
+        snapshot_timestamp_ts=timestamp_ts,
+        cash_float=10000.0,
+        total_value_float=10000.0,
+        net_liq_float=10000.0,
+        position_amount_map={},
+    )
+    live_price_snapshot_obj = LivePriceSnapshot(
+        account_route_str="DU1",
+        snapshot_timestamp_ts=timestamp_ts,
+        price_source_str="stub",
+        asset_reference_price_map={"AAPL": 100.0},
+    )
+
+    vplan_obj = build_vplan(
+        release_obj=release_obj,
+        decision_plan_obj=decision_plan_obj,
+        broker_snapshot_obj=broker_snapshot_obj,
+        live_price_snapshot_obj=live_price_snapshot_obj,
+    )
+    broker_order_request_list = build_broker_order_request_list_from_vplan(vplan_obj)
+
+    assert vplan_obj.vplan_row_list[0].broker_order_type_str == "MKT"
+    assert broker_order_request_list[0].broker_order_type_str == "MKT"
+
+
 def test_ibkr_socket_client_submit_ack_builder_requires_broker_correlated_response():
     broker_order_request_obj = BrokerOrderRequest(
         decision_plan_id_int=7,
@@ -594,3 +666,95 @@ def test_stub_broker_adapter_submit_ack_is_order_type_agnostic():
         broker_order_ack_obj.broker_order_type_str
         for broker_order_ack_obj in submit_batch_result_obj.broker_order_ack_list
     } == {"MOO", "MOC", "MKT", "LOO"}
+
+
+def test_ibkr_socket_client_submits_plain_mkt_without_opg_tif(monkeypatch):
+    class DummyContract:
+        def __init__(self, symbol_str: str):
+            self.symbol = symbol_str
+
+    class DummyTrade:
+        def __init__(self, contract_obj, order_obj):
+            self.contract = contract_obj
+            self.order = order_obj
+            self.orderStatus = SimpleNamespace(
+                orderId=int(order_obj.orderId),
+                permId=0,
+                status="Submitted",
+                filled=0.0,
+                remaining=float(order_obj.totalQuantity),
+                avgFillPrice=0.0,
+            )
+            self.log = []
+            self.fills = []
+
+    class DummyIB:
+        def __init__(self):
+            self.trade_list = []
+            self.placed_order_list = []
+
+        def placeOrder(self, contract_obj, order_obj):
+            order_obj.orderId = len(self.trade_list) + 1
+            order_obj.permId = 0
+            trade_obj = DummyTrade(contract_obj, order_obj)
+            self.trade_list.append(trade_obj)
+            self.placed_order_list.append(order_obj)
+            return trade_obj
+
+        def reqOpenOrders(self):
+            return list(self.trade_list)
+
+        def reqCompletedOrders(self, apiOnly: bool = False):
+            del apiOnly
+            return []
+
+        def reqExecutions(self, filter_obj):
+            del filter_obj
+            return []
+
+        def sleep(self, seconds_float: float):
+            del seconds_float
+            return True
+
+    dummy_ib_obj = DummyIB()
+    ibkr_socket_client_obj = IBKRSocketClient()
+
+    @contextmanager
+    def fake_connect():
+        yield dummy_ib_obj
+
+    monkeypatch.setattr(ibkr_socket_client_obj, "connect", fake_connect)
+    monkeypatch.setattr(
+        ibkr_socket_client_obj,
+        "_build_stock_contract_map",
+        lambda ib_obj, asset_str_list: {asset_str: DummyContract(asset_str) for asset_str in asset_str_list},
+    )
+    broker_order_request_obj = BrokerOrderRequest(
+        decision_plan_id_int=7,
+        vplan_id_int=9,
+        release_id_str="release_001",
+        pod_id_str="pod_001",
+        account_route_str="DU1",
+        submission_key_str="vplan:9",
+        order_request_key_str="vplan:9:AAPL:1",
+        asset_str="AAPL",
+        broker_order_type_str="MKT",
+        order_class_str="MarketOrder",
+        unit_str="shares",
+        amount_float=1.0,
+        target_bool=False,
+        trade_id_int=None,
+        sizing_reference_price_float=100.0,
+        portfolio_value_float=5000.0,
+    )
+
+    submit_batch_result_obj = ibkr_socket_client_obj.submit_order_request_list(
+        account_route_str="DU1",
+        broker_order_request_list=[broker_order_request_obj],
+        submitted_timestamp_ts=datetime.now(UTC),
+    )
+
+    submitted_order_obj = dummy_ib_obj.placed_order_list[0]
+    assert submit_batch_result_obj.submit_ack_status_str == "complete"
+    assert submitted_order_obj.orderType == "MKT"
+    assert str(getattr(submitted_order_obj, "tif", "")).upper() != "OPG"

@@ -10,6 +10,7 @@ from alpha.live.models import (
     BrokerOrderEvent,
     BrokerOrderRecord,
     BrokerSnapshot,
+    CashLedgerEntry,
     DecisionPlan,
     LiveRelease,
     ReconciliationResult,
@@ -221,6 +222,19 @@ class LiveStateStore(CoreLiveStateStore):
                     snapshot_timestamp_str TEXT NOT NULL,
                     raw_payload_json_str TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS cash_ledger_entry (
+                    cash_ledger_entry_id_int INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pod_id_str TEXT NOT NULL,
+                    account_route_str TEXT NOT NULL,
+                    vplan_id_int INTEGER NOT NULL,
+                    broker_order_id_str TEXT NOT NULL,
+                    asset_str TEXT NOT NULL,
+                    entry_type_str TEXT NOT NULL,
+                    cash_delta_float REAL NOT NULL,
+                    entry_timestamp_str TEXT NOT NULL,
+                    raw_payload_json_str TEXT NOT NULL
+                );
                 """
             )
             connection_obj.execute("DROP INDEX IF EXISTS vplan_broker_order_unique_order_idx")
@@ -273,6 +287,16 @@ class LiveStateStore(CoreLiveStateStore):
                     session_date_str,
                     account_route_str,
                     asset_str
+                )
+                """
+            )
+            connection_obj.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS cash_ledger_entry_unique_idx
+                ON cash_ledger_entry (
+                    vplan_id_int,
+                    broker_order_id_str,
+                    entry_type_str
                 )
                 """
             )
@@ -725,6 +749,22 @@ class LiveStateStore(CoreLiveStateStore):
             return None
         return self._row_to_decision_plan(row_obj)
 
+    def get_first_vplan_for_pod(self, pod_id_str: str) -> VPlan | None:
+        with self._connect() as connection_obj:
+            row_obj = connection_obj.execute(
+                """
+                SELECT *
+                FROM vplan
+                WHERE pod_id_str = ?
+                ORDER BY target_execution_timestamp_str ASC, vplan_id_int ASC
+                LIMIT 1
+                """,
+                (pod_id_str,),
+            ).fetchone()
+        if row_obj is None:
+            return None
+        return self._row_to_vplan(row_obj)
+
     def get_decision_plan_by_id(self, decision_plan_id_int: int) -> DecisionPlan:
         with self._connect() as connection_obj:
             row_obj = connection_obj.execute(
@@ -1024,7 +1064,7 @@ class LiveStateStore(CoreLiveStateStore):
                 """
                 SELECT *
                 FROM vplan
-                WHERE status_str = 'submitted'
+                WHERE status_str IN ('submitted', 'submitting')
                 ORDER BY submission_timestamp_str ASC
                 """
             ).fetchall()
@@ -1546,6 +1586,86 @@ class LiveStateStore(CoreLiveStateStore):
                     ),
                 )
 
+    def insert_cash_ledger_entry_list(
+        self,
+        cash_ledger_entry_list: Iterable[CashLedgerEntry],
+    ) -> None:
+        with self._connect() as connection_obj:
+            for cash_ledger_entry_obj in cash_ledger_entry_list:
+                connection_obj.execute(
+                    """
+                    INSERT OR IGNORE INTO cash_ledger_entry (
+                        pod_id_str,
+                        account_route_str,
+                        vplan_id_int,
+                        broker_order_id_str,
+                        asset_str,
+                        entry_type_str,
+                        cash_delta_float,
+                        entry_timestamp_str,
+                        raw_payload_json_str
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        cash_ledger_entry_obj.pod_id_str,
+                        cash_ledger_entry_obj.account_route_str,
+                        int(cash_ledger_entry_obj.vplan_id_int),
+                        cash_ledger_entry_obj.broker_order_id_str,
+                        cash_ledger_entry_obj.asset_str,
+                        cash_ledger_entry_obj.entry_type_str,
+                        float(cash_ledger_entry_obj.cash_delta_float),
+                        _serialize_timestamp_str(cash_ledger_entry_obj.entry_timestamp_ts),
+                        json.dumps(cash_ledger_entry_obj.raw_payload_dict, sort_keys=True),
+                    ),
+                )
+
+    def get_cash_ledger_row_dict_list_for_vplan(self, vplan_id_int: int) -> list[dict]:
+        with self._connect() as connection_obj:
+            row_list = connection_obj.execute(
+                """
+                SELECT
+                    pod_id_str,
+                    account_route_str,
+                    vplan_id_int,
+                    broker_order_id_str,
+                    asset_str,
+                    entry_type_str,
+                    cash_delta_float,
+                    entry_timestamp_str,
+                    raw_payload_json_str
+                FROM cash_ledger_entry
+                WHERE vplan_id_int = ?
+                ORDER BY cash_ledger_entry_id_int ASC
+                """,
+                (int(vplan_id_int),),
+            ).fetchall()
+        return [
+            {
+                "pod_id_str": str(row_obj["pod_id_str"]),
+                "account_route_str": str(row_obj["account_route_str"]),
+                "vplan_id_int": int(row_obj["vplan_id_int"]),
+                "broker_order_id_str": str(row_obj["broker_order_id_str"]),
+                "asset_str": str(row_obj["asset_str"]),
+                "entry_type_str": str(row_obj["entry_type_str"]),
+                "cash_delta_float": float(row_obj["cash_delta_float"]),
+                "entry_timestamp_str": str(row_obj["entry_timestamp_str"]),
+                "raw_payload_dict": json.loads(row_obj["raw_payload_json_str"]),
+            }
+            for row_obj in row_list
+        ]
+
+    def get_cash_ledger_delta_sum_float_for_pod(self, pod_id_str: str) -> float:
+        with self._connect() as connection_obj:
+            row_obj = connection_obj.execute(
+                """
+                SELECT COALESCE(SUM(cash_delta_float), 0.0) AS cash_delta_sum_float
+                FROM cash_ledger_entry
+                WHERE pod_id_str = ?
+                """,
+                (str(pod_id_str),),
+            ).fetchone()
+        return float(row_obj["cash_delta_sum_float"])
+
     def get_fill_row_dict_list_for_vplan(self, vplan_id_int: int) -> list[dict]:
         with self._connect() as connection_obj:
             row_list = connection_obj.execute(
@@ -1619,6 +1739,49 @@ class LiveStateStore(CoreLiveStateStore):
                 "status_str": str(row_obj["status_str"]),
                 "last_status_timestamp_str": row_obj["last_status_timestamp_str"],
                 "submitted_timestamp_str": str(row_obj["submitted_timestamp_str"]),
+                "submission_key_str": row_obj["submission_key_str"],
+            }
+            for row_obj in row_list
+        ]
+
+    def get_broker_order_event_row_dict_list_for_vplan(self, vplan_id_int: int) -> list[dict]:
+        with self._connect() as connection_obj:
+            row_list = connection_obj.execute(
+                """
+                SELECT
+                    broker_order_id_str,
+                    asset_str,
+                    order_request_key_str,
+                    status_str,
+                    filled_amount_float,
+                    remaining_amount_float,
+                    avg_fill_price_float,
+                    event_timestamp_str,
+                    event_source_str,
+                    message_str,
+                    submission_key_str
+                FROM vplan_broker_order_event
+                WHERE vplan_id_int = ?
+                ORDER BY broker_order_event_id_int ASC
+                """,
+                (int(vplan_id_int),),
+            ).fetchall()
+        return [
+            {
+                "broker_order_id_str": str(row_obj["broker_order_id_str"]),
+                "asset_str": str(row_obj["asset_str"]),
+                "order_request_key_str": row_obj["order_request_key_str"],
+                "status_str": str(row_obj["status_str"]),
+                "filled_amount_float": float(row_obj["filled_amount_float"]),
+                "remaining_amount_float": None
+                if row_obj["remaining_amount_float"] is None
+                else float(row_obj["remaining_amount_float"]),
+                "avg_fill_price_float": None
+                if row_obj["avg_fill_price_float"] is None
+                else float(row_obj["avg_fill_price_float"]),
+                "event_timestamp_str": str(row_obj["event_timestamp_str"]),
+                "event_source_str": str(row_obj["event_source_str"]),
+                "message_str": row_obj["message_str"],
                 "submission_key_str": row_obj["submission_key_str"],
             }
             for row_obj in row_list

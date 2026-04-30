@@ -30,7 +30,7 @@ class LiveRelease:
     pod_id_str: str  # Stable live sleeve id.
     account_route_str: str  # Broker account route.
     strategy_import_str: str  # Research strategy import path.
-    mode_str: str  # paper or live.
+    mode_str: str  # incubation, paper, or live.
     session_calendar_id_str: str  # Exchange calendar id, e.g. XNYS.
     signal_clock_str: str  # When the strategy may decide.
     execution_policy_str: str  # How and when orders should be sent.
@@ -56,7 +56,7 @@ class DecisionPlan:
     signal_timestamp_ts: datetime  # Timestamp of the approved signal snapshot.
     submission_timestamp_ts: datetime  # Earliest allowed submit time for the derived VPlan.
     target_execution_timestamp_ts: datetime  # Expected execution timestamp.
-    execution_policy_str: str  # next_open_moo / same_day_moc / next_month_first_open.
+    execution_policy_str: str  # next_open_moo / next_open_market / same_day_moc / next_month_first_open.
     decision_base_position_map: dict[str, float]  # Position snapshot used by the strategy when the decision was built.
     snapshot_metadata_dict: dict[str, Any]  # Audit metadata about the signal snapshot.
     strategy_state_dict: dict[str, Any]  # Strategy memory carried to the next cycle.
@@ -332,6 +332,19 @@ class BrokerOrderFill:
 
 
 @dataclass(frozen=True)
+class CashLedgerEntry:
+    pod_id_str: str  # Pod that owns the cash movement.
+    account_route_str: str  # Broker or virtual account route.
+    vplan_id_int: int  # Parent VPlan id.
+    broker_order_id_str: str  # Broker order id tied to this cash movement.
+    asset_str: str  # Asset traded, or CASH for non-asset rows.
+    entry_type_str: str  # trade_notional / commission.
+    cash_delta_float: float  # Signed cash movement.
+    entry_timestamp_ts: datetime  # Timestamp of the economic event.
+    raw_payload_dict: dict[str, Any] = field(default_factory=dict)  # Audit payload.
+
+
+@dataclass(frozen=True)
 class ReconciliationResult:
     passed_bool: bool  # True if model and broker match well enough.
     status_str: str  # pass / fail style status label.
@@ -352,3 +365,5 @@ class PodState:
     total_value_float: float  # Saved total portfolio value.
     strategy_state_dict: dict[str, Any]  # Saved strategy memory.
     updated_timestamp_ts: datetime  # Last pod-state update timestamp.
+    snapshot_stage_str: str = "unknown"  # Latest trusted state stage: post_execution / eod / unknown.
+    snapshot_source_str: str = "pod_state"  # Latest trusted state source: broker / virtual_broker / pod_state.

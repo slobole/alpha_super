@@ -1,0 +1,37 @@
+identity:
+  release_id: your_user.pod_taa_btal_fallback_tqqq_vix_cash.paper_manual.v1
+  user_id: your_user
+  pod_id: pod_taa_btal_fallback_tqqq_vix_cash_01
+
+deployment:
+  mode: paper # allowed: paper, live
+  enabled_bool: false # enable only one manifest for this pod at a time
+
+broker:
+  account_route: DU_YOUR_PAPER_ACCOUNT
+  host_str: 127.0.0.1
+  port_int: 7497
+  client_id_int: 31
+  timeout_seconds_float: 4.0
+
+strategy:
+  strategy_import_str: strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash
+  data_profile_str: norgate_eod_etf_plus_vix_helper
+  params: {}
+
+market:
+  session_calendar_id_str: XNYS
+
+schedule:
+  signal_clock_str: month_end_snapshot_ready
+  execution_policy_str: next_month_first_open
+
+execution:
+  pod_budget_fraction_float: 0.03
+  auto_submit_enabled_bool: false # manual-first monthly TAA workflow
+
+bootstrap:
+  initial_cash_float: 100000.0
+
+risk:
+  risk_profile_str: standard_taa

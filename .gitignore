@@ -24,12 +24,20 @@ Thumbs.db
 
 # Cache
 .cache/
+.pytest_cache/
 
 # Temporary files and folders
 tmp/
 temp/
 *.tmp
 *.temp
+.codex_tmp/
+.codex_tmp_*/
+.pytest_tmp*/
+pytest_tmp*/
+tmp_pytest_root/
+tmpnu*/
+.norgatedata/
 .tmp_norgatedata/
 
 # Generated backtest artifacts
@@ -39,4 +47,9 @@ results/
 alpha/live/live_state.sqlite3
 alpha/live/live_state.sqlite3-shm
 alpha/live/live_state.sqlite3-wal
+alpha/live/live_state.backup_*.sqlite3
+alpha/live/live_state.pre_reset_*.sqlite3
+alpha/live/incubation_state.sqlite3
+alpha/live/incubation_state.sqlite3-shm
+alpha/live/incubation_state.sqlite3-wal
 alpha/live/logs/

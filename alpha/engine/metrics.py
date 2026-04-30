@@ -273,9 +273,68 @@ def generate_drawdowns(drawdown_series: pd.Series) -> pd.DataFrame:
 
     return drawdowns
 
+
+def _estimate_slippage_cost(
+    transactions_df: pd.DataFrame | None,
+    slippage_float: float | None,
+) -> float:
+    """
+    Estimate the dollar cost already embedded in slipped execution prices.
+
+    The engine fills each transaction j with:
+
+        P_exec,j = P_ref,j * (1 + sign(q_j) * slippage)
+
+    so the diagnostic slippage cost is:
+
+        slippage_cost_j
+            = |q_j| * P_ref,j * slippage
+            = |notional_exec,j| * slippage / (1 + sign(q_j) * slippage)
+
+    This is a reporting attribution only. It does not subtract any additional
+    cost from the backtest because the slipped fill price has already affected
+    cash and equity.
+    """
+    if transactions_df is None or len(transactions_df) == 0:
+        return 0.0
+    if slippage_float is None or slippage_float <= 0.0:
+        return 0.0
+    if slippage_float >= 1.0:
+        raise ValueError(f"slippage_float must be below 1.0, got {slippage_float}.")
+
+    required_column_set = {"amount", "total_value"}
+    missing_column_set = required_column_set.difference(transactions_df.columns)
+    if len(missing_column_set) > 0:
+        raise ValueError(
+            f"transactions_df is missing required columns: {sorted(missing_column_set)}"
+        )
+
+    amount_ser = transactions_df["amount"].astype(float)
+    notional_abs_ser = transactions_df["total_value"].astype(float).abs()
+    penalty_denominator_ser = 1.0 + np.sign(amount_ser) * float(slippage_float)
+    slippage_cost_ser = notional_abs_ser * float(slippage_float) / penalty_denominator_ser
+    return float(slippage_cost_ser.sum())
+
+
+def _gross_trade_notional(
+    transactions_df: pd.DataFrame | None,
+) -> float:
+    """
+    Compute gross traded notional:
+
+        gross_trade_notional = sum_j |notional_exec,j|
+    """
+    if transactions_df is None or len(transactions_df) == 0:
+        return 0.0
+    if "total_value" not in transactions_df.columns:
+        raise ValueError("transactions_df is missing required column: total_value")
+    return float(transactions_df["total_value"].astype(float).abs().sum())
+
+
 def generate_overall_metrics(total_value: pd.Series, trades: pd.DataFrame = None, portfolio_value: pd.Series = None,
                              series_to_correlate: pd.Series = None, capital_base: float = None, days_in_year: int = 252,
-                             total_commissions: float = None) -> pd.Series:
+                             total_commissions: float = None, transactions_df: pd.DataFrame = None,
+                             slippage_float: float = None) -> pd.Series:
     """
     computes overall performance metrics for a trading strategy.
 
@@ -291,16 +350,34 @@ def generate_overall_metrics(total_value: pd.Series, trades: pd.DataFrame = None
 
     returns:
     - a Series containing key performance metrics.
+
+    added diagnostics:
+
+        MAR = annualized_return / |max_drawdown|
+
+        AAR = (1 / N) * sum_t |r_t|
+
+        downside_l1 = (1 / N) * sum_t max(-r_t, 0)
+
+        avg_loss_day = mean(-r_t | r_t < 0)
+
+        time_under_water = (1 / N) * sum_t 1[drawdown_t < 0]
+
+        turnover_ann = (sum_j |notional_exec,j| / mean(V_t)) * (days_in_year / N)
+
+        cost_drag_ann = ((commissions + estimated_slippage) / mean(V_t)) * (days_in_year / N)
     """
     s = pd.Series()  # initialize the results series
+    total_value_ser = total_value.astype(float)
     # store simulation start and end dates
-    s.loc['Start'] = total_value.index[0]
-    s.loc['End'] = total_value.index[-1]
-    s.loc['Duration [days]'] = len(total_value)
+    s.loc['Start'] = total_value_ser.index[0]
+    s.loc['End'] = total_value_ser.index[-1]
+    duration_day_count_int = len(total_value_ser)
+    s.loc['Duration [days]'] = duration_day_count_int
     # compute exposure time (percentage of time the portfolio was active)
     if trades is not None:
         num_days = 0
-        calendar = pd.to_datetime(total_value.index)
+        calendar = pd.to_datetime(total_value_ser.index)
         for date in calendar:
             if ((date >= trades['start']) & (date <= trades['end'])).any():
                 num_days += 1
@@ -311,23 +388,40 @@ def generate_overall_metrics(total_value: pd.Series, trades: pd.DataFrame = None
     s.loc['Exposure Time [%]'] = exposure_time * 100  # convert to percentage
     # determine initial capital base if not provided
     if capital_base is None:
-        capital_base = total_value.iloc[0]
+        capital_base = total_value_ser.iloc[0]
 
     # store key portfolio values
     s.loc['Start [$]'] = capital_base
-    s.loc['Final [$]'] = total_value.iloc[-1]
+    s.loc['Final [$]'] = total_value_ser.iloc[-1]
+    if (
+        total_commissions is None
+        and transactions_df is not None
+        and len(transactions_df) > 0
+        and "commission" in transactions_df.columns
+    ):
+        total_commissions = float(transactions_df["commission"].astype(float).sum())
     if total_commissions is not None:
         s.loc['Total Commissions [$]'] = total_commissions
-    s.loc['Peak [$]'] = total_value.max()
+    s.loc['Peak [$]'] = total_value_ser.max()
     # compute total and annualized returns
-    s.loc['Return [%]'] = (total_value.iloc[-1] / capital_base - 1) * 100
-    num_days = len(total_value)
-    s.loc['Return (Ann.) [%]'] = ((total_value.iloc[-1] / capital_base) ** (days_in_year / num_days) - 1) * 100
+    s.loc['Return [%]'] = (total_value_ser.iloc[-1] / capital_base - 1) * 100
+    s.loc['Return (Ann.) [%]'] = ((total_value_ser.iloc[-1] / capital_base) ** (days_in_year / duration_day_count_int) - 1) * 100
     # compute annualized volatility
-    daily_rets = total_value.pct_change(fill_method=None)
-    s.loc['Volatility (Ann.) [%]'] = daily_rets.std() * np.sqrt(days_in_year) * 100
+    # *** CRITICAL*** Summary returns are post-run diagnostics from realized
+    # equity only. They must never feed same-day signal or order logic.
+    daily_return_ser = total_value_ser.pct_change(fill_method=None)
+    realized_daily_return_ser = daily_return_ser.dropna()
+    s.loc['Volatility (Ann.) [%]'] = daily_return_ser.std() * np.sqrt(days_in_year) * 100
+    s.loc['AAR [%]'] = realized_daily_return_ser.abs().mean() * 100
+    downside_l1_ser = np.maximum(-realized_daily_return_ser, 0.0)
+    s.loc['Downside L1 [%]'] = downside_l1_ser.mean() * 100
+    negative_daily_return_ser = realized_daily_return_ser[realized_daily_return_ser < 0.0]
+    if len(negative_daily_return_ser) > 0:
+        s.loc['Avg. Loss Day [%]'] = (-negative_daily_return_ser).mean() * 100
+    else:
+        s.loc['Avg. Loss Day [%]'] = np.nan
     # compute Sharpe ratio
-    s.loc['Sharpe Ratio'] = sharpe_ratio(daily_rets, portfolio_value, days_in_year=days_in_year)
+    s.loc['Sharpe Ratio'] = sharpe_ratio(daily_return_ser, portfolio_value, days_in_year=days_in_year)
     # compute exposure-adjusted return (only if exposure time is nonzero)
     if exposure_time == 0:
         s.loc['Exposure-Adjusted Return (Ann.) [%]'] = 0
@@ -336,26 +430,57 @@ def generate_overall_metrics(total_value: pd.Series, trades: pd.DataFrame = None
 
     # compute correlation with a benchmark series (if provided)
     if series_to_correlate is not None:
-        pct = daily_rets.dropna()
+        pct = daily_return_ser.dropna()
         idx = pct.index.intersection(series_to_correlate.index)  # align indices
         s.loc['Correlation'] = pct[idx].corr(series_to_correlate[idx])
     else:
         s.loc['Correlation'] = 1  # Default correlation value if no benchmark is given
 
     # compute drawdown metrics
-    running_max = total_value.cummax()
-    drawdown = total_value / running_max - 1
-    s.loc['Max. Drawdown [%]'] = drawdown.min() * 100
+    # *** CRITICAL*** Drawdown uses only the running historical equity peak:
+    # drawdown_t = V_t / max(V_1, ..., V_t) - 1.
+    running_max_ser = total_value_ser.cummax()
+    drawdown_ser = total_value_ser / running_max_ser - 1
+    max_drawdown_pct_float = float(drawdown_ser.min() * 100)
+    s.loc['Max. Drawdown [%]'] = max_drawdown_pct_float
+    if max_drawdown_pct_float < 0.0:
+        s.loc['MAR Ratio'] = s.loc['Return (Ann.) [%]'] / abs(max_drawdown_pct_float)
+    else:
+        s.loc['MAR Ratio'] = np.nan
+    s.loc['Time Under Water [%]'] = (drawdown_ser < 0.0).mean() * 100
     # generate drawdown statistics
-    drawdowns = generate_drawdowns(drawdown)
+    drawdowns = generate_drawdowns(drawdown_ser)
     s.loc['Avg. Drawdown [%]'] = drawdowns['value'].mean() * 100
     # compute drawdown durations
-    u = pd.Timedelta(total_value.index[-1] - total_value.index[0]).resolution_string
+    u = pd.Timedelta(total_value_ser.index[-1] - total_value_ser.index[0]).resolution_string
     s.loc['Max. Drawdown Duration [days]'] = pd.Timedelta(drawdowns['duration'].max(), unit=u).days
     s.loc['Avg. Drawdown Duration [days]'] = pd.Timedelta(np.ceil(drawdowns['duration'].mean()), unit=u).days
     # count drawdown occurrences
     s.loc['# Drawdowns'] = len(drawdowns)
     s.loc['# Drawdowns / year'] = int(len(drawdowns) / (s.loc['Duration [days]'] / 365))
+
+    if transactions_df is not None and len(transactions_df) > 0:
+        average_equity_float = float(total_value_ser.mean())
+        if np.isfinite(average_equity_float) and average_equity_float > 0.0:
+            gross_trade_notional_float = _gross_trade_notional(transactions_df)
+            turnover_ann_float = (
+                gross_trade_notional_float
+                / average_equity_float
+                * (days_in_year / duration_day_count_int)
+            )
+            estimated_slippage_float = _estimate_slippage_cost(transactions_df, slippage_float)
+            commission_cost_float = float(total_commissions) if total_commissions is not None else 0.0
+            total_trading_cost_float = commission_cost_float + estimated_slippage_float
+            cost_drag_ann_float = (
+                total_trading_cost_float
+                / average_equity_float
+                * (days_in_year / duration_day_count_int)
+            )
+
+            s.loc['Turnover (Ann.) [%]'] = turnover_ann_float * 100
+            s.loc['Estimated Slippage [$]'] = estimated_slippage_float
+            s.loc['Total Trading Costs [$]'] = total_trading_cost_float
+            s.loc['Cost Drag (Ann.) [%]'] = cost_drag_ann_float * 100
     # return the computed metrics
     return s
 

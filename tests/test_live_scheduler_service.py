@@ -5,6 +5,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import pytest
 
 from alpha.live.models import (
     BrokerOrderAck,
@@ -25,9 +26,13 @@ from alpha.live.scheduler_service import (
     _build_phase_result_operator_message_spec_list,
     _build_stuck_operator_message_spec_list,
     _build_wait_operator_message_spec_list,
+    _render_serve_tick_summary_str,
+    _resolve_db_path_for_mode_str,
     _should_emit_wait_operator_message,
     get_scheduler_decision,
+    main,
     run_once,
+    serve,
 )
 from alpha.live import runner
 from alpha.live.state_store_v2 import LiveStateStore
@@ -85,6 +90,56 @@ def _write_manifest(
     )
 
 
+def _write_guardrail_manifest(
+    root_path_obj: Path,
+    *,
+    user_id_str: str,
+    pod_id_str: str,
+    release_id_str: str,
+    mode_str: str,
+    enabled_bool: bool,
+    account_route_str: str,
+) -> None:
+    releases_root_path_obj = root_path_obj / "releases" / user_id_str
+    releases_root_path_obj.mkdir(parents=True, exist_ok=True)
+    (releases_root_path_obj / f"{pod_id_str}.yaml").write_text(
+        "\n".join(
+            [
+                "identity:",
+                f"  release_id: {release_id_str}",
+                f"  user_id: {user_id_str}",
+                f"  pod_id: {pod_id_str}",
+                "deployment:",
+                f"  mode: {mode_str}",
+                f"  enabled_bool: {'true' if enabled_bool else 'false'}",
+                "broker:",
+                f"  account_route: {account_route_str}",
+                "  host_str: 127.0.0.1",
+                "  port_int: 7497",
+                "  client_id_int: 31",
+                "  timeout_seconds_float: 4.0",
+                "strategy:",
+                "  strategy_import_str: strategies.dv2.strategy_mr_dv2:DVO2Strategy",
+                "  data_profile_str: norgate_eod_sp500_pit",
+                "  params: {}",
+                "market:",
+                "  session_calendar_id_str: XNYS",
+                "schedule:",
+                "  signal_clock_str: eod_snapshot_ready",
+                "  execution_policy_str: next_open_moo",
+                "execution:",
+                "  pod_budget_fraction_float: 0.5",
+                "  auto_submit_enabled_bool: true",
+                "bootstrap:",
+                "  initial_cash_float: 10000.0",
+                "risk:",
+                "  risk_profile_str: standard",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
 def _build_decision_plan_stub(release_obj, as_of_ts, pod_state_obj):
     return DecisionPlan(
         release_id_str=release_obj.release_id_str,
@@ -106,6 +161,191 @@ def _build_decision_plan_stub(release_obj, as_of_ts, pod_state_obj):
         cash_reserve_weight_float=0.0,
         preserve_untouched_positions_bool=True,
     )
+
+
+def test_run_once_rejects_invalid_deployment_before_invoking_tick(tmp_path: Path, monkeypatch):
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="user_001",
+        pod_id_str="pod_a",
+        release_id_str="user_001.pod_a.paper",
+        mode_str="paper",
+        enabled_bool=True,
+        account_route_str="DU1",
+    )
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="user_002",
+        pod_id_str="pod_b",
+        release_id_str="user_002.pod_b.paper",
+        mode_str="paper",
+        enabled_bool=True,
+        account_route_str="DU2",
+    )
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("tick should not run for invalid deployment")
+
+    monkeypatch.setattr(runner, "tick", _fail_if_called)
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+
+    with pytest.raises(ValueError, match="one client per VPS/deployment"):
+        run_once(
+            state_store_obj=state_store_obj,
+            broker_adapter_obj=StubBrokerAdapter(),
+            as_of_ts=datetime(2024, 1, 31, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
+            releases_root_path_str=str(tmp_path / "releases"),
+            env_mode_str="paper",
+        )
+
+
+def test_serve_rejects_invalid_deployment_before_starting_loop(tmp_path: Path):
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="user_001",
+        pod_id_str="pod_a",
+        release_id_str="user_001.pod_a.paper",
+        mode_str="paper",
+        enabled_bool=True,
+        account_route_str="DU1",
+    )
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="user_002",
+        pod_id_str="pod_b",
+        release_id_str="user_002.pod_b.paper",
+        mode_str="paper",
+        enabled_bool=True,
+        account_route_str="DU2",
+    )
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+
+    with pytest.raises(ValueError, match="one client per VPS/deployment"):
+        serve(
+            state_store_obj=state_store_obj,
+            broker_adapter_obj=StubBrokerAdapter(),
+            releases_root_path_str=str(tmp_path / "releases"),
+            env_mode_str="paper",
+            broker_host_str=None,
+            broker_port_int=None,
+            broker_client_id_int=None,
+        )
+
+
+def test_scheduler_service_uses_incubation_default_db_path():
+    resolved_db_path_str = _resolve_db_path_for_mode_str(
+        db_path_str=None,
+        env_mode_str="incubation",
+    )
+
+    assert Path(resolved_db_path_str).name == "incubation_state.sqlite3"
+
+
+def test_scheduler_service_rejects_incubation_on_live_default_db_path():
+    with pytest.raises(ValueError, match="Incubation must not use the paper/live default DB"):
+        _resolve_db_path_for_mode_str(
+            db_path_str=runner.DEFAULT_DB_PATH_STR,
+            env_mode_str="incubation",
+        )
+
+
+def test_scheduler_eod_snapshot_command_accepts_all_modes(tmp_path: Path, monkeypatch, capsys):
+    captured_mode_list: list[str] = []
+
+    def _fake_eod_snapshot(**kwargs):
+        captured_mode_list.append(str(kwargs["env_mode_str"]))
+        return {
+            "lease_acquired_bool": True,
+            "eod_snapshot_count_int": 0,
+            "skipped_snapshot_count_int": 0,
+            "blocked_action_count_int": 0,
+            "reason_count_map_dict": {},
+        }
+
+    monkeypatch.setattr(runner, "eod_snapshot", _fake_eod_snapshot)
+    releases_root_path_obj = tmp_path / "releases"
+    releases_root_path_obj.mkdir()
+
+    for mode_str in ("incubation", "paper", "live"):
+        main(
+            [
+                "eod_snapshot",
+                "--mode",
+                mode_str,
+                "--db-path",
+                str(tmp_path / f"{mode_str}.sqlite3"),
+                "--releases-root",
+                str(releases_root_path_obj),
+            ]
+        )
+
+    capsys.readouterr()
+    assert captured_mode_list == ["incubation", "paper", "live"]
+
+
+def test_scheduler_run_once_passes_incubation_context_to_resolver(tmp_path: Path, monkeypatch):
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="incubation_user",
+        pod_id_str="pod_incubation_test",
+        release_id_str="incubation_user.pod_incubation_test.incubation.v1",
+        mode_str="incubation",
+        enabled_bool=True,
+        account_route_str="SIM_pod_incubation_test",
+    )
+    state_store_obj = LiveStateStore(str((tmp_path / "incubation.sqlite3").resolve()))
+    decision_plan_obj = DecisionPlan(
+        release_id_str="incubation_user.pod_incubation_test.incubation.v1",
+        user_id_str="incubation_user",
+        pod_id_str="pod_incubation_test",
+        account_route_str="SIM_pod_incubation_test",
+        signal_timestamp_ts=datetime(2024, 1, 31, 16, 0, tzinfo=MARKET_TIMEZONE_OBJ),
+        submission_timestamp_ts=datetime(2024, 2, 1, 9, 23, 30, tzinfo=MARKET_TIMEZONE_OBJ),
+        target_execution_timestamp_ts=datetime(2024, 2, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ),
+        execution_policy_str="next_open_moo",
+        decision_base_position_map={},
+        snapshot_metadata_dict={},
+        strategy_state_dict={},
+        decision_book_type_str="incremental_entry_exit_book",
+        entry_target_weight_map_dict={"AAPL": 0.2},
+        target_weight_map={"AAPL": 0.2},
+        exit_asset_set=set(),
+        entry_priority_list=["AAPL"],
+        cash_reserve_weight_float=0.0,
+    )
+    state_store_obj.insert_decision_plan(decision_plan_obj)
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda data_profile_str: pd.Timestamp("2024-01-31"),
+    )
+
+    def _fake_tick(*, broker_adapter_resolver_obj, releases_root_path_str, **kwargs):
+        release_obj = load_release_list(releases_root_path_str)[0]
+        broker_adapter_obj = broker_adapter_resolver_obj.get_adapter(release_obj)
+        assert broker_adapter_obj.get_session_mode_str("SIM_pod_incubation_test") == "incubation"
+        return {
+            "created_decision_plan_count_int": 0,
+            "skipped_decision_plan_count_int": 0,
+            "created_vplan_count_int": 0,
+            "submitted_vplan_count_int": 0,
+            "completed_vplan_count_int": 0,
+            "blocked_action_count_int": 0,
+            "expired_decision_plan_count_int": 0,
+            "warning_count_map_dict": {},
+            "reason_count_map_dict": {},
+        }
+
+    monkeypatch.setattr(runner, "tick", _fake_tick)
+
+    detail_dict = run_once(
+        state_store_obj=state_store_obj,
+        broker_adapter_obj=None,
+        as_of_ts=datetime(2024, 2, 1, 14, 24, tzinfo=UTC),
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="incubation",
+    )
+
+    assert detail_dict["tick_invoked_bool"] is True
 
 
 def _insert_planned_decision_plan(
@@ -176,6 +416,15 @@ def _insert_submitted_vplan(
             status_str="submitted",
         )
     )
+
+
+def _insert_submitting_vplan(
+    state_store_obj: LiveStateStore,
+) -> VPlan:
+    latest_vplan_obj = _insert_submitted_vplan(state_store_obj)
+    state_store_obj.mark_vplan_status(int(latest_vplan_obj.vplan_id_int or 0), "submitting")
+    state_store_obj.mark_decision_plan_status(int(latest_vplan_obj.decision_plan_id_int), "expired")
+    return state_store_obj.get_vplan_by_id(int(latest_vplan_obj.vplan_id_int or 0))
 
 
 def _insert_ready_vplan(
@@ -386,6 +635,48 @@ def test_scheduler_decision_selects_build_now(tmp_path: Path, monkeypatch):
     assert scheduler_decision_obj.related_pod_id_list == ["pod_test_01"]
 
 
+def test_scheduler_decision_selects_eod_after_close_when_idle(tmp_path: Path, monkeypatch):
+    _write_manifest(tmp_path)
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda data_profile_str: pd.Timestamp("2024-01-30"),
+    )
+
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+    scheduler_decision_obj = get_scheduler_decision(
+        state_store_obj=state_store_obj,
+        as_of_ts=datetime(2024, 2, 1, 21, 15, tzinfo=UTC),
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="paper",
+    )
+
+    assert scheduler_decision_obj.due_now_bool is True
+    assert scheduler_decision_obj.next_phase_str == "eod_snapshot"
+    assert scheduler_decision_obj.reason_code_str == "eod_snapshot_due"
+    assert scheduler_decision_obj.related_pod_id_list == ["pod_test_01"]
+
+
+def test_scheduler_decision_keeps_reconcile_priority_over_eod(tmp_path: Path, monkeypatch):
+    _write_manifest(tmp_path)
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda data_profile_str: pd.Timestamp("2024-01-30"),
+    )
+
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+    _insert_submitted_vplan(state_store_obj)
+    scheduler_decision_obj = get_scheduler_decision(
+        state_store_obj=state_store_obj,
+        as_of_ts=datetime(2024, 2, 1, 21, 15, tzinfo=UTC),
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="paper",
+    )
+
+    assert scheduler_decision_obj.due_now_bool is True
+    assert scheduler_decision_obj.next_phase_str == "post_execution_reconcile"
+    assert scheduler_decision_obj.reason_code_str == "ready_to_reconcile"
+
+
 def test_scheduler_decision_uses_submission_timestamp_in_utc(tmp_path: Path, monkeypatch):
     _write_manifest(tmp_path)
     monkeypatch.setattr(
@@ -440,6 +731,31 @@ def test_scheduler_decision_reconcile_due_now_after_grace(tmp_path: Path, monkey
 
     state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
     _insert_submitted_vplan(state_store_obj)
+    scheduler_decision_obj = get_scheduler_decision(
+        state_store_obj=state_store_obj,
+        as_of_ts=datetime(2024, 2, 1, 14, 36, tzinfo=UTC),
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="paper",
+    )
+
+    assert scheduler_decision_obj.due_now_bool is True
+    assert scheduler_decision_obj.next_phase_str == "post_execution_reconcile"
+    assert scheduler_decision_obj.reason_code_str == "ready_to_reconcile"
+
+
+def test_scheduler_decision_reconciles_stale_submitting_vplan_after_grace(
+    tmp_path: Path,
+    monkeypatch,
+):
+    _write_manifest(tmp_path)
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda data_profile_str: pd.Timestamp("2024-01-31"),
+    )
+
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+    _insert_submitting_vplan(state_store_obj)
+
     scheduler_decision_obj = get_scheduler_decision(
         state_store_obj=state_store_obj,
         as_of_ts=datetime(2024, 2, 1, 14, 36, tzinfo=UTC),
@@ -556,8 +872,11 @@ def test_scheduler_run_once_invokes_tick_for_startup_catchup(tmp_path: Path, mon
     assert detail_dict["post_tick_pod_status_dict_list"] == [
         {
             "release_id_str": "user_001.pod_test.daily.v2",
+            "user_id_str": "user_001",
             "pod_id_str": "pod_test_01",
+            "mode_str": "paper",
             "account_route_str": "DU1",
+            "auto_submit_enabled_bool": True,
             "latest_decision_plan_status_str": "planned",
             "latest_vplan_status_str": None,
             "latest_signal_timestamp_str": "2024-01-31T16:00:00-05:00",
@@ -634,7 +953,7 @@ def test_scheduler_run_once_cleans_up_stale_cycle(tmp_path: Path, monkeypatch):
     assert roundtrip_decision_plan_obj.status_str == "expired"
 
 
-def test_wait_operator_message_emits_on_state_change_and_five_minute_heartbeat():
+def test_wait_operator_message_emits_on_state_change_and_fifteen_minute_heartbeat():
     as_of_ts = datetime(2024, 2, 1, 14, 0, tzinfo=UTC)
     current_signature_tup = ("paper", "build_vplan", "waiting_for_submission_window")
 
@@ -654,13 +973,13 @@ def test_wait_operator_message_emits_on_state_change_and_five_minute_heartbeat()
         last_printed_signature_tup=current_signature_tup,
         current_signature_tup=current_signature_tup,
         last_printed_timestamp_ts=as_of_ts,
-        as_of_ts=as_of_ts + timedelta(minutes=4, seconds=59),
+        as_of_ts=as_of_ts + timedelta(minutes=14, seconds=59),
     )
     assert _should_emit_wait_operator_message(
         last_printed_signature_tup=current_signature_tup,
         current_signature_tup=current_signature_tup,
         last_printed_timestamp_ts=as_of_ts,
-        as_of_ts=as_of_ts + timedelta(minutes=5),
+        as_of_ts=as_of_ts + timedelta(minutes=15),
     )
     assert not _should_emit_wait_operator_message(
         last_printed_signature_tup=current_signature_tup,
@@ -731,6 +1050,35 @@ def test_phase_result_operator_messages_include_submit_ack_and_fill_progress(tmp
         "submit_ack.ok",
         "fill.none",
     ]
+
+
+def test_serve_tick_summary_uses_human_tick_renderer():
+    output_str = _render_serve_tick_summary_str(
+        {
+            "lease_acquired_bool": True,
+            "created_decision_plan_count_int": 1,
+            "skipped_decision_plan_count_int": 0,
+            "expired_decision_plan_count_int": 0,
+            "created_vplan_count_int": 1,
+            "submitted_vplan_count_int": 0,
+            "completed_vplan_count_int": 0,
+            "blocked_action_count_int": 1,
+            "warning_count_map_dict": {"missing_live_price": 1},
+            "reason_count_map_dict": {"vplan_ready": 1},
+        }
+    )
+
+    assert "Tick Result" in output_str
+    assert "- Built 1 decision plan." in output_str
+    assert "- Built 1 order plan." in output_str
+    assert "- Submitted 0 order plans." in output_str
+    assert "- Completed 0 reconciliations." in output_str
+    assert "- Blocked actions: 1" in output_str
+    assert "- Warnings: 1" in output_str
+    assert "execution plan is ready to submit" in output_str
+    assert "missing live reference price for at least one asset" in output_str
+    assert "Next" in output_str
+    assert "Raw Fields" not in output_str
 
 
 def test_phase_start_operator_messages_use_release_broker_tuple(tmp_path: Path):

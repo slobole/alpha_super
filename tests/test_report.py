@@ -196,6 +196,100 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertLess(trade_statistics_idx_int, daily_distribution_idx_int)
         self.assertLess(daily_distribution_idx_int, closed_trades_idx_int)
 
+    def test_strategy_records_realized_weight_snapshot_after_valuation(self):
+        strategy = DummyStrategy(
+            name='RealizedWeightStrategy',
+            benchmarks=['$SPX'],
+            capital_base=100.0,
+            slippage=0.0,
+            commission_per_share=0.0,
+            commission_minimum=0.0,
+        )
+        current_bar_ts = pd.Timestamp('2024-02-01')
+        strategy.current_bar = current_bar_ts
+        strategy.cash = 20.0
+        strategy.portfolio_value = 80.0
+        strategy.total_value = 100.0
+        strategy._position_amount_map = {'AAA': 2.0}
+
+        price_col_index = pd.MultiIndex.from_tuples(
+            [
+                ('AAA', 'Close'),
+                ('$SPX', 'Close'),
+            ]
+        )
+        price_df = pd.DataFrame(
+            [[40.0, 100.0]],
+            index=pd.DatetimeIndex([current_bar_ts]),
+            columns=price_col_index,
+        )
+
+        strategy.update_metrics(price_df, current_bar_ts)
+        strategy._materialize_realized_weight_df()
+
+        self.assertAlmostEqual(float(strategy.realized_weight_df.loc[current_bar_ts, 'AAA']), 0.80)
+        self.assertAlmostEqual(float(strategy.realized_weight_df.loc[current_bar_ts, 'Cash']), 0.20)
+
+    def test_build_html_includes_recent_taa_target_realized_and_drift_weights(self):
+        strategy = make_strategy([0.0, 0.01, -0.02, 0.0, 0.03, -0.01])
+        rebalance_date_index = pd.to_datetime(
+            [
+                '2024-01-31',
+                '2024-02-29',
+                '2024-03-29',
+                '2024-04-30',
+            ]
+        )
+        strategy.show_taa_weights_report = True
+        strategy.rebalance_weight_df = pd.DataFrame(
+            {
+                'AAPL': [1.00, 0.60, 0.20, 0.00],
+                'TLT': [0.00, 0.30, 0.50, 0.70],
+            },
+            index=rebalance_date_index,
+        )
+        strategy.daily_target_weights = strategy.rebalance_weight_df.copy()
+        strategy.realized_weight_df = pd.DataFrame(
+            {
+                'AAPL': [0.58, 0.22, 0.00],
+                'TLT': [0.31, 0.47, 0.69],
+                'Cash': [0.11, 0.31, 0.31],
+            },
+            index=rebalance_date_index[1:],
+        )
+
+        report_html_str = _build_html(strategy, chart_b64='equity-chart-b64')
+
+        self.assertIn('Recent TAA Weights - Last 3 Rebalances', report_html_str)
+        self.assertNotIn('2024-01-31', report_html_str)
+        self.assertIn('2024-02-29', report_html_str)
+        self.assertIn('2024-03-29', report_html_str)
+        self.assertIn('2024-04-30', report_html_str)
+        self.assertIn(
+            '<td>2024-02-29</td><td>AAPL</td><td>60.00%</td><td>58.00%</td><td class="neg">-2.00%</td>',
+            report_html_str,
+        )
+        self.assertIn(
+            '<td>2024-02-29</td><td>Cash</td><td>10.00%</td><td>11.00%</td><td class="pos">1.00%</td>',
+            report_html_str,
+        )
+
+    def test_build_html_does_not_show_recent_taa_weights_for_non_taa_strategy(self):
+        strategy = make_strategy([0.0, 0.01, -0.02, 0.0, 0.03, -0.01])
+        strategy.rebalance_weight_df = pd.DataFrame(
+            {'AAPL': [1.0]},
+            index=pd.DatetimeIndex([pd.Timestamp('2024-02-29')]),
+        )
+        strategy.daily_target_weights = strategy.rebalance_weight_df.copy()
+        strategy.realized_weight_df = pd.DataFrame(
+            {'AAPL': [1.0], 'Cash': [0.0]},
+            index=pd.DatetimeIndex([pd.Timestamp('2024-02-29')]),
+        )
+
+        report_html_str = _build_html(strategy, chart_b64='equity-chart-b64')
+
+        self.assertNotIn('Recent TAA Weights - Last 3 Rebalances', report_html_str)
+
     def test_build_html_embeds_signature_css(self):
         strategy = make_strategy([0.0, 0.01, -0.02, 0.0, 0.03, -0.01])
 

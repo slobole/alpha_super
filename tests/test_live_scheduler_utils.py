@@ -8,6 +8,7 @@ from alpha.live.models import LiveRelease
 from alpha.live.scheduler_utils import (
     build_submission_timestamp_ts,
     build_target_execution_timestamp_ts,
+    is_execution_window_expired_bool,
     is_release_due_for_build,
     select_due_release_list,
 )
@@ -75,6 +76,39 @@ def test_scheduler_uses_real_next_session_after_long_weekend():
     assert target_execution_timestamp_ts.date().isoformat() == "2024-04-01"
     assert target_execution_timestamp_ts.hour == 9
     assert target_execution_timestamp_ts.minute == 30
+
+
+def test_scheduler_maps_next_open_market_to_open_submit_and_target_with_grace():
+    release_obj = make_release("eod_snapshot_ready", "next_open_market")
+    signal_date_ts = datetime(2024, 3, 28, 16, 0)
+
+    submission_timestamp_ts = build_submission_timestamp_ts(signal_date_ts, release_obj)
+    target_execution_timestamp_ts = build_target_execution_timestamp_ts(signal_date_ts, release_obj)
+
+    assert submission_timestamp_ts == target_execution_timestamp_ts
+    assert submission_timestamp_ts.date().isoformat() == "2024-04-01"
+    assert submission_timestamp_ts.hour == 9
+    assert submission_timestamp_ts.minute == 30
+    assert not is_execution_window_expired_bool(
+        "next_open_market",
+        target_execution_timestamp_ts,
+        target_execution_timestamp_ts,
+    )
+    assert not is_execution_window_expired_bool(
+        "next_open_market",
+        target_execution_timestamp_ts,
+        target_execution_timestamp_ts + pd.Timedelta(seconds=30),
+    )
+    assert is_execution_window_expired_bool(
+        "next_open_market",
+        target_execution_timestamp_ts,
+        target_execution_timestamp_ts + pd.Timedelta(seconds=61),
+    )
+    assert is_execution_window_expired_bool(
+        "next_open_moo",
+        target_execution_timestamp_ts,
+        target_execution_timestamp_ts,
+    )
 
 
 def test_scheduler_does_not_build_on_weekend_even_with_stale_snapshot(monkeypatch):

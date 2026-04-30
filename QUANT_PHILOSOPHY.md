@@ -134,6 +134,10 @@ Simple code is not just style. It is a defense against hidden assumptions and hi
 
 If a reader cannot explain the logic quickly, the implementation is too complicated.
 
+Code is accepted only if a human owner can read it later without needing the
+agent or engineer who wrote it. Prefer code that looks like the obvious next
+step a careful human would have written.
+
 ### Mathematical clarity where it matters, human clarity by default
 
 Keep the logic rigorous, but keep the explanation simple, precise, and easy for a human to follow quickly.
@@ -343,6 +347,35 @@ A pod is:
 - its own state machine
 - its own positions, logic, and results
 - a building block for the firm-level portfolio
+
+For live trading, keep the pod idea concrete and human:
+
+```text
+one pod = one independent strategy sleeve
+```
+
+The intended production pattern is:
+
+```text
+one pod -> one real broker account/subaccount/sleeve
+```
+
+That broker account must have its own cash, positions, and account value that
+can be read and reconciled independently.
+
+The portfolio math stays simple:
+
+\[
+\text{client equity}_t = \sum_i \text{pod equity}_{i,t}
+\]
+
+A pod must not be just a label inside one shared raw broker account. That only
+works if the system later has a real pod ledger that assigns orders, fills,
+positions, cash, and corporate actions to each pod.
+
+In an IBKR Family Account, Friends and Family Advisor, Family Office, or Advisor
+setup, this means one strategy sleeve should map to one real subaccount/account
+route by default.
 
 The portfolio is not a bag of signals. It is a combination of independently compounded pods.
 

@@ -26,7 +26,7 @@ market:
 
 schedule:
   signal_clock_str: eod_snapshot_ready # allowed: eod_snapshot_ready, month_end_snapshot_ready, pre_close_15m
-  execution_policy_str: next_open_moo # allowed: next_open_moo, same_day_moc, next_month_first_open
+  execution_policy_str: next_open_market # allowed: next_open_moo, same_day_moc, next_month_first_open, next_open_market
 
 execution:
   pod_budget_fraction_float: 0.95

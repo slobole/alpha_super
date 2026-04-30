@@ -1,271 +1,230 @@
 # Live Start Here
 
-TL;DR: the live v2 system works in 2 stages:
+TL;DR: think in deployments and sleeves. One live deployment is for one client. That client has one or more independent strategy sleeves/pods. Each sleeve runs one strategy, trades one real IBKR account/subaccount, and keeps its own positions and state.
 
 ```text
-DecisionPlan_t = f(approved_snapshot_t, strategy_memory_t)
-VPlan_submit = f(DecisionPlan_t, BrokerSnapshot_submit, live_quote_snapshot)
+deployment/VPS -> client -> sleeve/pod -> IBKR account/subaccount -> strategy
 ```
 
-So:
-- night = freeze the decision
-- pre-submit = size the final shares from broker truth
+Example:
 
-## Document Role
+```text
+Edy deployment
+  one VPS / repo clone / IBC session
+  DV2 sleeve -> IBKR subaccount A -> DV2 strategy
+  QPI sleeve -> IBKR subaccount B -> QPI strategy
+  TAA sleeve -> IBKR subaccount C -> TAA strategy
+```
 
-Use this file for:
-- the shortest onboarding path
-- the mental model
-- the safest first commands
+Each sleeve should be independent. It does not need to know what the other sleeves hold or trade.
 
-Do not use this file as the implementation reference.
+## Deployment Boundary
 
-For implementation truth, read:
-- [LIVE_TECHNICAL_REFERENCE.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_TECHNICAL_REFERENCE.md)
+For now, one deployment means one client.
 
-## What To Read First
+In practice:
 
-If you only want the short operator path, read this file first.
+```text
+one client -> one VPS -> one repo clone -> one IBC/TWS session -> many sleeves/pods
+```
 
-If you want more detail after that:
-- [LIVE_TECHNICAL_REFERENCE.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_TECHNICAL_REFERENCE.md)
+Do not run unrelated clients from the same live deployment unless the system is intentionally redesigned for that later.
+
+`user_id` still belongs in release files and logs because it tells us whose deployment this is. It is not the main runtime selector right now. Commands such as `status`, `tick`, and `serve` operate on all enabled sleeves in this deployment.
+
+## What This System Does
+
+The live system wakes up, checks which enabled sleeves in this client deployment are due, builds the next order plan, submits it if allowed, and reconciles after execution.
+
+Plain flow:
+
+```text
+latest data -> strategy decision -> order plan -> broker orders -> fills -> updated sleeve state
+```
+
+Internal names:
+
+- `DecisionPlan` = what the strategy decided.
+- `VPlan` = the exact order plan built near submit time from current broker truth.
+
+You do not need to think in those names for normal operation, but they appear in commands and status output.
+
+## Read This First
+
+Use this file for the short operator path.
+
+Use these when you need more detail:
+
 - [LIVE_RUNBOOK.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_RUNBOOK.md)
+- [LIVE_TECHNICAL_REFERENCE.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_TECHNICAL_REFERENCE.md)
 - [LIVE_TRADING_ARCHITECTURE.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_TRADING_ARCHITECTURE.md)
 
 ## The 5 Things To Remember
 
-### 1. The strategy does not freeze shares overnight
+### 1. A Sleeve/Pod Is Real
 
-The overnight artifact is a `DecisionPlan`.
+A live sleeve should map to a real IBKR account, subaccount, or broker-recognized sleeve.
 
-It stores:
-- a typed decision book
-- target weights or entry/exit instructions
-- strategy memory
+Do not treat a pod as just a label inside one shared account unless a later ledger system explicitly supports that.
 
-It does **not** store final overnight share counts.
+### 2. The Strategy Decides, The Broker State Sizes
 
-There are now two decision-book types:
-- `incremental_entry_exit_book`
-  - used by DV2 and QPI-style equal-slot entry / exit-to-zero systems
-- `full_target_weight_book`
-  - used by TAA and full rebalance momentum systems
+The strategy decides what it wants based on approved data.
 
-### 2. Final shares are computed near submit time
+Near execution time, the system reads the broker account and live prices, then prepares the exact orders. This avoids freezing stale share quantities overnight.
 
-The execution layer reads:
-- broker positions
-- broker `NetLiq`
-- live prices
+### 3. `tick` Is One Live Pass
 
-Then it computes:
+Run:
 
-```text
-PodBudget = NetLiq_broker * pod_budget_fraction
-TargetShares_i = floor(target_weight_i * PodBudget / LivePrice_i)
-OrderDelta_i = TargetShares_i - BrokerShares_i
+```bash
+uv run python -m alpha.live.runner tick --mode paper
 ```
 
-### 3. Share drift is a warning, not a block
+`tick` only does work that is actually due. It may build decisions, build order plans, submit auto-enabled plans, or reconcile submitted plans.
 
-If:
+### 4. `serve` Is Just The Loop
 
-```text
-DecisionBaseShares_i != BrokerShares_i
+Run:
+
+```bash
+uv run python -m alpha.live.scheduler_service serve --mode paper
 ```
 
-the system records a warning and still sizes from broker truth.
+`serve` does not create a second trading path. It waits, calls `tick` when work is due, then waits again.
 
-### 4. `show_vplan` is the main manual review screen
+### 5. Paper Tests Flow, Not Real Auction Quality
 
-Before submit it shows the planned basket.
+Paper is useful for checking logic, scheduling, submit flow, and reconciliation.
 
-After submit it becomes an exceptions-first execution view:
-- target shares
-- actual broker shares
-- residual shares
-- what filled
-- latest broker order status
-- failed exit flags if any
+Do not assume IBKR paper fills prove real MOO/MOC execution quality. Validate real execution with very small live size before scaling.
 
-### 5. tick() does the following:
-![alt text](image-2.png)
+## Safe First Commands
 
-
-
-## The Main Files
-
-- manifests:
-  - [pod_dv2_01.yaml](C:/Users/User/Documents/workspace/alpha_super/alpha/live/releases/excelence_trade_paper_001/pod_dv2_01.yaml)
-- operator guide:
-  - [LIVE_RUNBOOK.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_RUNBOOK.md)
-- architecture:
-  - [LIVE_TRADING_ARCHITECTURE.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_TRADING_ARCHITECTURE.md)
-
-## The Main Commands
-
-### Status
+Inspect status:
 
 ```bash
 uv run python -m alpha.live.runner status --mode paper
 ```
 
-### Main loop
-
-```bash
-uv run python -m alpha.live.runner tick --mode paper
-```
-
-### Optional scheduler service
-
-```bash
-uv run python -m alpha.live.scheduler_service serve --mode paper
-```
-
-This is only a timing wrapper around `tick`.
-It does not replace `tick`.
-
-### Build only the overnight decision
-
-```bash
-uv run python -m alpha.live.runner build_decision_plans --mode paper
-```
-
-### Build the pre-submit execution plan
-
-```bash
-uv run python -m alpha.live.runner build_vplan --mode paper
-```
-
-### Show the execution plan
-
-```bash
-uv run python -m alpha.live.runner show_vplan --mode paper
-```
-
-### Submit one VPlan manually
-
-```bash
-uv run python -m alpha.live.runner submit_vplan --mode paper --vplan-id 1
-```
-
-### Reconcile after execution
-
-```bash
-uv run python -m alpha.live.runner post_execution_reconcile --mode paper
-```
-
-This does not blindly mark the `VPlan` as complete.
-
-The rule is:
-
-```text
-residual_share_float = target_share_float - broker_share_float
-```
-
-If residuals remain, the `VPlan` stays `submitted`.
-If an exit target is `0` but the broker still holds shares, the system logs a `critical` exit residual event.
-
-## The Simplest Daily Manual Workflow
-
-Use this only if you explicitly set:
-
-```yaml
-execution:
-  auto_submit_enabled_bool: false
-```
-
-```bash
-uv run python -m alpha.live.runner tick --mode paper
-uv run python -m alpha.live.runner show_vplan --mode paper
-uv run python -m alpha.live.runner submit_vplan --mode paper --vplan-id 1
-uv run python -m alpha.live.runner post_execution_reconcile --mode paper
-```
-
-## The Simplest Auto Workflow
-
-Auto-submit is now the default manifest behavior.
-
-Use:
-
-```yaml
-execution:
-  auto_submit_enabled_bool: true
-```
-
-Then run:
-
-```bash
-uv run python -m alpha.live.runner tick --mode paper
-```
-
-The normal automatic path is:
-
-```text
-tick builds DecisionPlan -> tick builds VPlan -> tick submits -> later tick reconciles after execution time
-```
-
-## Optional Long-Running Service
-
-If you do not want an every-minute shell loop, you can run:
-
-```bash
-uv run python -m alpha.live.scheduler_service serve --mode paper
-```
-
-`serve` now prints scheduler events automatically.
-That output includes the current phase, related pod status, fills, and after active phases the current `VPlan` plus broker-order snapshot.
-
-If you want to tail the persisted event log from a second terminal:
-
-```bash
-Get-Content alpha/live/logs/live_events.jsonl -Wait
-```
-
-Useful helper commands:
+Inspect the next scheduler action:
 
 ```bash
 uv run python -m alpha.live.scheduler_service next_due --mode paper
-uv run python -m alpha.live.scheduler_service run_once --mode paper
 ```
 
-Mental model:
+Run one live pass:
+
+```bash
+uv run python -m alpha.live.runner tick --mode paper
+```
+
+Run the long-running service:
+
+```bash
+uv run python -m alpha.live.scheduler_service serve --mode paper
+```
+
+## Manual Review Flow
+
+Use this when auto-submit is disabled in the release file.
+
+```bash
+uv run python -m alpha.live.runner tick --mode paper
+uv run python -m alpha.live.runner show_vplan --mode paper
+uv run python -m alpha.live.runner submit_vplan --mode paper --vplan-id 1
+uv run python -m alpha.live.runner post_execution_reconcile --mode paper
+```
+
+Meaning:
 
 ```text
-scheduler_service decides when to call tick
-tick still does all real work
+build what is due -> review order plan -> submit it -> reconcile broker truth
 ```
 
-![alt text](image-1.png)
+## Automatic Flow
 
+Use this when the release file allows auto-submit.
 
-For the full CLI reference, including:
-- all commands
-- all shared flags
-- command-specific flags
-- scheduler tuning flags
-- copy-paste connection commands for paper TWS / paper Gateway / live TWS
-- examples
+```bash
+uv run python -m alpha.live.runner tick --mode paper
+```
 
-read:
+Normal automatic path:
+
+```text
+tick builds decision -> tick builds order plan -> tick submits -> later tick reconciles
+```
+
+Important live rule:
+
+```text
+if auto-submit is enabled and mode is live, tick or serve may submit real live orders
+```
+
+## EOD Account Snapshot
+
+After the market close, record a clean broker-backed account snapshot:
+
+```bash
+uv run python -m alpha.live.scheduler_service eod_snapshot --mode paper
+```
+
+`serve` also schedules this after the session close plus a short buffer when no higher-priority execution/reconcile work is due.
+
+Meaning:
+
+```text
+post_execution_reconcile = proves fills and target positions after trading
+eod_snapshot = records clean end-of-day cash, positions, and NetLiq
+pod_state = latest trusted broker-backed sleeve state
+broker_snapshot_cache = latest raw broker snapshot for the account
+```
+
+`pod_state.snapshot_stage_str` and `pod_state.snapshot_source_str` show whether the latest trusted state came from `post_execution` or `eod`, and from `broker` or `virtual_broker`.
+
+Sizing is unchanged. The final order plan still reads fresh broker truth near execution:
+
+```text
+PodBudget = BrokerNetLiq_at_VPlan * pod_budget_fraction
+TargetShares_i = floor(TargetWeight_i * PodBudget / LiveReferencePrice_i)
+```
+
+EOD state is mainly for the next decision's starting state and for cleaner backtest-reference comparison:
+
+```text
+equity_error_t = actual_eod_net_liq_t / reference_close_equity_t - 1
+```
+
+## Where Release Files Live
+
+Current release files live under:
+
+```text
+alpha/live/releases/<user_id>/*.yaml
+```
+
+In the current one-client deployment model, this path should normally contain releases for one client identity only.
+
+They say:
+
+- who owns the sleeve;
+- which pod/sleeve it is;
+- which IBKR account it trades;
+- which strategy runs there;
+- when it decides;
+- how it executes;
+- whether it is enabled;
+- whether auto-submit is allowed.
+
+## Useful Files
+
 - [LIVE_RUNBOOK.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_RUNBOOK.md)
+- [LIVE_TECHNICAL_REFERENCE.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_TECHNICAL_REFERENCE.md)
+- [alpha/live/releases](C:/Users/User/Documents/workspace/alpha_super/alpha/live/releases)
 
 ## One-Line Mental Model
 
-Night:
-
 ```text
-snapshot -> DecisionPlan
-```
-
-Pre-submit:
-
-```text
-DecisionPlan + broker truth + live prices -> VPlan
-```
-
-Execution:
-
-```text
-VPlan -> orders -> fills -> new pod state
+One client per deployment. Each sleeve decides independently, trades its own IBKR account, and reconciles from broker truth.
 ```

@@ -56,6 +56,27 @@ def default_trade_id_int() -> int:
     return -1
 
 
+def get_asof_universe_symbol_list(
+    universe_df: pd.DataFrame | None,
+    decision_date_ts: pd.Timestamp,
+) -> list[str]:
+    if universe_df is None or len(universe_df) == 0:
+        return []
+
+    sorted_universe_df = universe_df.sort_index()
+    # *** CRITICAL*** PIT universe membership may lag the newest price date.
+    # Use only the latest universe row available on or before decision_t; never
+    # use a later row, because that would leak future index membership.
+    universe_row_int = int(
+        sorted_universe_df.index.searchsorted(pd.Timestamp(decision_date_ts), side="right")
+    ) - 1
+    if universe_row_int < 0:
+        return []
+
+    universe_membership_ser = sorted_universe_df.iloc[universe_row_int]
+    return universe_membership_ser[universe_membership_ser == 1].index.astype(str).tolist()
+
+
 def get_prices(
     symbol_list: List[str],
     benchmark_list: List[str],
@@ -63,6 +84,57 @@ def get_prices(
     end_date_str: str | None = None,
 ) -> pd.DataFrame:
     return load_raw_prices(symbol_list, benchmark_list, start_date_str, end_date_str)
+
+
+def build_execution_timing_analysis_inputs() -> dict[str, object]:
+    """
+    Build inputs for ExecutionTimingAnalysis.
+
+    Formula:
+
+        signal_t = daily QPI / IBS / RSI signal known after T close
+
+        entry_fill = signal_t + entry_lag at entry_price_field
+        exit_fill  = signal_t + exit_lag  at exit_price_field
+    """
+    benchmark_list = ["$SPX"]
+    symbol_list, universe_df = build_index_constituent_matrix(indexname="S&P 500")
+    pricing_data_df = get_prices(
+        symbol_list,
+        benchmark_list,
+        start_date_str="1998-01-01",
+        end_date_str=None,
+    )
+
+    # *** CRITICAL*** Keep the same post-warmup calendar used by the Vanilla
+    # strategy script. Changing this sample changes all annualized metrics.
+    calendar_idx = pricing_data_df.index[pricing_data_df.index.year >= 2004]
+
+    def strategy_factory_fn():
+        strategy_obj = QPIIbsRsiExitStrategy(
+            name="strategy_mr_qpi_ibs_rsi_exit",
+            benchmarks=benchmark_list,
+            capital_base=100_000,
+            slippage=0.00025,
+            commission_per_share=0.005,
+            commission_minimum=1.0,
+        )
+        strategy_obj.universe_df = universe_df
+        strategy_obj.trade_id_int = 0
+        strategy_obj.current_trade_map = defaultdict(default_trade_id_int)
+        return strategy_obj
+
+    return {
+        "strategy_factory_fn": strategy_factory_fn,
+        "pricing_data_df": pricing_data_df,
+        "calendar_idx": pd.DatetimeIndex(calendar_idx),
+        "order_generation_mode_str": "signal_bar",
+        "risk_model_str": "daily_ohlc_signal",
+        "entry_timing_str_tuple": ("same_close_moc", "next_open", "next_close"),
+        "exit_timing_str_tuple": ("same_close_moc", "next_open", "next_close"),
+        "default_entry_timing_str": "next_open",
+        "default_exit_timing_str": "next_open",
+    }
 
 
 class QPIIbsRsiExitStrategy(Strategy):
@@ -310,9 +382,11 @@ class QPIIbsRsiExitStrategy(Strategy):
             candidate_df["ibs_value_ser"].astype(float) < self.max_entry_ibs_float
         ]
 
-        if self.universe_df is not None and self.previous_bar in self.universe_df.index:
-            universe_membership_ser = self.universe_df.loc[self.previous_bar]
-            universe_symbol_list = universe_membership_ser[universe_membership_ser == 1].index.tolist()
+        if self.universe_df is not None:
+            universe_symbol_list = get_asof_universe_symbol_list(
+                self.universe_df,
+                pd.Timestamp(self.previous_bar),
+            )
             candidate_df = candidate_df[candidate_df.index.isin(universe_symbol_list)]
 
         candidate_df = candidate_df.assign(symbol_str=candidate_df.index.astype(str))
@@ -324,33 +398,60 @@ class QPIIbsRsiExitStrategy(Strategy):
         return candidate_df.index.tolist()
 
 
-if __name__ == "__main__":
+def run_variant(
+    show_display_bool: bool = True,
+    save_results_bool: bool = True,
+    output_dir_str: str = "results",
+    backtest_start_date_str: str = "2004-01-01",
+    capital_base_float: float = 100_000.0,
+    end_date_str: str | None = None,
+):
     benchmark_list = ["$SPX"]
     symbol_list, universe_df = build_index_constituent_matrix(indexname="S&P 500")
     pricing_data_df = get_prices(
         symbol_list,
         benchmark_list,
         start_date_str="1998-01-01",
-        end_date_str=None,
+        end_date_str=end_date_str,
     )
 
     strategy = QPIIbsRsiExitStrategy(
         name="strategy_mr_qpi_ibs_rsi_exit",
         benchmarks=benchmark_list,
-        capital_base=100_000,
+        capital_base=capital_base_float,
         slippage=0.00025,  # 0.00025
         commission_per_share=0.005,
         commission_minimum=1.0,
     )
     strategy.universe_df = universe_df
+    strategy.trade_id_int = 0
+    strategy.current_trade_map = defaultdict(default_trade_id_int)
 
-    calendar_idx = pricing_data_df.index[pricing_data_df.index.year >= 2004]
-    run_daily(strategy, pricing_data_df, calendar_idx)
+    # *** CRITICAL*** Deployment-reference backtests keep full pre-start
+    # history for QPI/IBS/RSI features, but the executable calendar starts at
+    # the first deployment fill session.
+    calendar_idx = pricing_data_df.index[pricing_data_df.index >= pd.Timestamp(backtest_start_date_str)]
+    run_daily(
+        strategy,
+        pricing_data_df,
+        calendar_idx,
+        show_progress=show_display_bool,
+        show_signal_progress_bool=show_display_bool,
+    )
 
     strategy.universe_df = None
 
-    pd.set_option("display.max_columns", None)
-    pd.set_option("display.width", 1000)
-    display(strategy.summary)
-    display(strategy.summary_trades)
-    save_results(strategy)
+    if show_display_bool:
+        pd.set_option("display.max_columns", None)
+        pd.set_option("display.width", 1000)
+        display(strategy.summary)
+        display(strategy.summary_trades)
+
+    if save_results_bool:
+        save_results(strategy, output_dir=output_dir_str)
+
+    return strategy
+
+
+if __name__ == "__main__":
+    run_variant()

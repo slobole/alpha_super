@@ -318,15 +318,48 @@ Purpose:
 
 Created by:
 - `post_execution_reconcile()`
+- `eod_snapshot()`
 
 Consumed by:
 - `build_decision_plan_for_release()`
+- `compare_reference`
 
 Important fields:
 - `position_amount_map`
 - `cash_float`
 - `total_value_float`
 - `strategy_state_dict`
+
+Stage history:
+
+```text
+pod_state.snapshot_stage_str = post_execution | eod | unknown
+pod_state.snapshot_source_str = broker | virtual_broker | pod_state
+pod_state_history.snapshot_stage_str = post_execution | eod | unknown
+pod_state_history.snapshot_source_str = broker | virtual_broker | pod_state
+```
+
+`pod_state` is the latest trusted broker-backed state and carries the stage/source of that latest update. `pod_state_history` is append-only evidence for charts and audits.
+
+The two broker-state stages have different jobs:
+
+```text
+post_execution_reconcile = fill and position proof after the order plan executes
+eod_snapshot = clean end-of-day cash, positions, and NetLiq
+```
+
+The final order budget still comes from the fresh broker snapshot used to build the VPlan:
+
+```text
+PodBudget_t = BrokerNetLiq_at_VPlan_t * pod_budget_fraction
+TargetShares_i,t = floor(TargetWeight_i,t * PodBudget_t / LiveReferencePrice_i,t)
+```
+
+Backtest-reference equity comparison should use the EOD broker state when available:
+
+```text
+equity_error_t = actual_eod_net_liq_t / reference_close_equity_t - 1
+```
 
 ## End-to-End Flow
 

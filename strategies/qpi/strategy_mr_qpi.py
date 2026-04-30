@@ -14,6 +14,53 @@ def get_prices(symbols: List[str], benchmarks: List[str], start_date: str = '199
     return load_raw_prices(symbols, benchmarks, start_date, end_date)
 
 
+def build_execution_timing_analysis_inputs() -> dict[str, object]:
+    """
+    Build inputs for ExecutionTimingAnalysis.
+
+    Formula:
+
+        signal_t = daily QPI signal known after T close
+
+        entry_fill = signal_t + entry_lag at entry_price_field
+        exit_fill  = signal_t + exit_lag  at exit_price_field
+    """
+    benchmarks = ['$SPX']
+    index_symbols, universe_df = build_index_constituent_matrix(indexname='S&P 500')
+    pricing_data = get_prices(index_symbols, benchmarks, start_date='1998-01-01', end_date=None)
+
+    # *** CRITICAL*** Keep the same post-warmup calendar used by the Vanilla
+    # strategy script. Changing this sample changes all annualized metrics.
+    calendar = pricing_data.index
+    calendar = calendar[calendar.year >= 2004]
+
+    def strategy_factory_fn():
+        strategy_obj = QPIStrategy(
+            name='strategy_mr_qpi',
+            benchmarks=benchmarks,
+            capital_base=100_000,
+            slippage=0.00025,
+            commission_per_share=0.005,
+            commission_minimum=1.0,
+        )
+        strategy_obj.universe_df = universe_df
+        strategy_obj.trade_id = 0
+        strategy_obj.current_trade = defaultdict(lambda: -1)
+        return strategy_obj
+
+    return {
+        "strategy_factory_fn": strategy_factory_fn,
+        "pricing_data_df": pricing_data,
+        "calendar_idx": pd.DatetimeIndex(calendar),
+        "order_generation_mode_str": "signal_bar",
+        "risk_model_str": "daily_ohlc_signal",
+        "entry_timing_str_tuple": ("same_close_moc", "next_open", "next_close"),
+        "exit_timing_str_tuple": ("same_close_moc", "next_open", "next_close"),
+        "default_entry_timing_str": "next_open",
+        "default_exit_timing_str": "next_open",
+    }
+
+
 class QPIStrategy(Strategy):
     max_positions = 4  # maximum number of positions to hold
     trade_id = 0  # intiliazing trade_id to 0
@@ -138,4 +185,3 @@ if __name__ == "__main__":
     display(sa.summary_trades)
     from alpha.engine.report import save_results
     save_results(sa)
-

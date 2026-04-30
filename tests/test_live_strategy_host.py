@@ -472,6 +472,84 @@ def test_strategy_host_taa_live_path_does_not_use_backtest_fill_costs(monkeypatc
     assert decision_plan_obj.decision_base_position_map == {"SPY": 5.0}
 
 
+def test_strategy_host_taa_ignores_unavailable_partial_month_end(monkeypatch):
+    import strategies.taa_df.strategy_taa_df as base_taa_module
+    import strategies.taa_df.strategy_taa_df_fallback_vix_cash_variant_utils as vix_overlay_module
+
+    date_index = pd.DatetimeIndex(
+        [
+            pd.Timestamp("2024-01-31"),
+            pd.Timestamp("2024-02-15"),
+        ]
+    )
+    execution_price_df = make_price_df(["BTAL", "TLT", "SPY"], date_index)
+    month_end_weight_df = pd.DataFrame(
+        [
+            {"BTAL": 0.4, "TLT": 0.3},
+            {"BTAL": 0.0, "TLT": 1.0},
+        ],
+        index=pd.DatetimeIndex([pd.Timestamp("2024-01-31"), pd.Timestamp("2024-02-29")]),
+    )
+    diagnostic_df = pd.DataFrame(
+        [
+            {"cash_weight": 0.3},
+            {"cash_weight": 0.0},
+        ],
+        index=month_end_weight_df.index,
+    )
+    dtb3_snapshot_obj = FredSeriesSnapshot(
+        value_ser=pd.Series(
+            [5.20],
+            index=pd.DatetimeIndex([pd.Timestamp("2024-01-31")]),
+            name="DTB3",
+        ),
+        source_name_str="FRED",
+        series_id_str="DTB3",
+        download_attempt_timestamp_ts=datetime(2024, 2, 15, 16, 5, tzinfo=MARKET_TIMEZONE_OBJ),
+        download_status_str="download_success",
+        latest_observation_date_ts=pd.Timestamp("2024-02-15"),
+        used_cache_bool=False,
+        freshness_business_days_int=0,
+    )
+
+    monkeypatch.setattr(
+        base_taa_module,
+        "get_defense_first_data_with_snapshot",
+        lambda config_obj: (execution_price_df, None, month_end_weight_df, None, dtb3_snapshot_obj),
+    )
+    monkeypatch.setattr(
+        vix_overlay_module,
+        "_load_vrp_overlay_signal_frames",
+        lambda config_obj: (None, pd.DataFrame(index=month_end_weight_df.index)),
+    )
+    monkeypatch.setattr(
+        vix_overlay_module,
+        "apply_vrp_cash_gate_to_month_end_weight_df",
+        lambda base_month_end_weight_df, month_end_vrp_signal_df, config: (
+            month_end_weight_df,
+            diagnostic_df,
+        ),
+    )
+    monkeypatch.setattr(base_taa_module.DefenseFirstStrategy, "iterate", lambda self, data_df, close_row_ser, open_price_ser: None)
+
+    release_obj = make_release(
+        strategy_import_str="strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash",
+        data_profile_str="norgate_eod_etf_plus_vix_helper",
+        execution_policy_str="next_month_first_open",
+        params_dict={"capital_base_float": 100000.0},
+    )
+
+    decision_plan_obj = build_decision_plan_for_release(
+        release_obj=release_obj,
+        as_of_ts=datetime(2024, 2, 15, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
+        pod_state_obj=None,
+    )
+
+    assert decision_plan_obj.signal_timestamp_ts == datetime(2024, 1, 31, 16, 0, tzinfo=MARKET_TIMEZONE_OBJ)
+    assert decision_plan_obj.target_execution_timestamp_ts == datetime(2024, 2, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ)
+    assert decision_plan_obj.full_target_weight_map_dict == {"BTAL": 0.4, "TLT": 0.3}
+
+
 def test_strategy_host_builds_full_target_atr_decision_plan(monkeypatch):
     import strategies.momentum.strategy_mo_atr_normalized_ndx as atr_module
 
@@ -507,10 +585,16 @@ def test_strategy_host_builds_full_target_atr_decision_plan(monkeypatch):
         ),
     )
     monkeypatch.setattr(atr_module.AtrNormalizedNdxStrategy, "compute_signals", lambda self, pricing_data_df: pricing_data_df)
+
+    def get_target_weight_with_timing_assertion_ser(self, close_row_ser):
+        assert self.previous_bar == pd.Timestamp("2024-01-31")
+        assert self.current_bar == pd.Timestamp("2024-02-01")
+        return pd.Series({"AAPL": 0.5, "MSFT": 0.5})
+
     monkeypatch.setattr(
         atr_module.AtrNormalizedNdxStrategy,
         "get_target_weight_ser",
-        lambda self, close_row_ser: pd.Series({"AAPL": 0.5, "MSFT": 0.5}),
+        get_target_weight_with_timing_assertion_ser,
     )
     monkeypatch.setattr(atr_module.AtrNormalizedNdxStrategy, "iterate", lambda self, data_df, close_row_ser, open_price_ser: None)
 

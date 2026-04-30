@@ -56,6 +56,9 @@ AUCTION_REFERENCE_SOURCE_STR = "ib_async.reqMktData.225.auctionPrice"
 REQ_MKTDATA_MARKET_PRICE_FALLBACK_SOURCE_STR = "ib_async.reqMktData.marketPrice.fallback"
 REQ_TICKERS_MARKET_PRICE_FALLBACK_SOURCE_STR = "ib_async.reqTickers.marketPrice.fallback"
 LEGACY_REQ_TICKERS_MARKET_PRICE_SOURCE_STR = "ib_async.reqTickers.marketPrice"
+IBKR_TICK_OPEN_SOURCE_STR = "ibkr.tick_open"
+LOOPBACK_HOST_ALIAS_TUPLE: tuple[str, ...] = ("127.0.0.1", "localhost", "::1")
+CONNECTION_REFUSED_WINERROR_INT_SET: set[int] = {1225, 10061}
 
 
 class IBKRSocketClient:
@@ -73,18 +76,64 @@ class IBKRSocketClient:
 
     @contextmanager
     def connect(self):
-        ib_obj = IB()
-        ib_obj.connect(
-            self.host_str,
-            self.port_int,
-            clientId=self.client_id_int,
-            timeout=self.timeout_seconds_float,
-        )
-        try:
-            yield ib_obj
-        finally:
-            if ib_obj.isConnected():
-                ib_obj.disconnect()
+        last_exception_obj: Exception | None = None
+        for host_str in self._build_connect_host_str_list():
+            ib_obj = IB()
+            try:
+                ib_obj.connect(
+                    host_str,
+                    self.port_int,
+                    clientId=self.client_id_int,
+                    timeout=self.timeout_seconds_float,
+                )
+                try:
+                    yield ib_obj
+                finally:
+                    if ib_obj.isConnected():
+                        ib_obj.disconnect()
+                return
+            except Exception as exception_obj:
+                last_exception_obj = exception_obj
+                if ib_obj.isConnected():
+                    ib_obj.disconnect()
+                if not self._can_retry_connect_with_alternate_loopback_host(
+                    attempted_host_str=host_str,
+                    exception_obj=exception_obj,
+                ):
+                    raise
+        if last_exception_obj is not None:
+            raise last_exception_obj
+        raise RuntimeError("IBKRSocketClient.connect() exhausted all hosts without an exception.")
+
+    def _build_connect_host_str_list(self) -> list[str]:
+        normalized_host_str = str(self.host_str).strip()
+        if normalized_host_str not in LOOPBACK_HOST_ALIAS_TUPLE:
+            return [normalized_host_str]
+        return [
+            normalized_host_str,
+            *[
+                candidate_host_str
+                for candidate_host_str in LOOPBACK_HOST_ALIAS_TUPLE
+                if candidate_host_str != normalized_host_str
+            ],
+        ]
+
+    def _can_retry_connect_with_alternate_loopback_host(
+        self,
+        *,
+        attempted_host_str: str,
+        exception_obj: Exception,
+    ) -> bool:
+        normalized_host_str = str(self.host_str).strip()
+        if normalized_host_str not in LOOPBACK_HOST_ALIAS_TUPLE:
+            return False
+        if attempted_host_str == LOOPBACK_HOST_ALIAS_TUPLE[-1]:
+            return False
+        if isinstance(exception_obj, TimeoutError):
+            return True
+        if isinstance(exception_obj, ConnectionRefusedError):
+            return True
+        return int(getattr(exception_obj, "winerror", 0) or 0) in CONNECTION_REFUSED_WINERROR_INT_SET
 
     @staticmethod
     def _as_utc_timestamp_ts(raw_timestamp_obj) -> datetime:
@@ -1258,4 +1307,61 @@ class IBKRSocketClient:
                     )
                 )
 
+        return session_open_price_list
+
+    def get_tick_open_price_list(
+        self,
+        account_route_str: str,
+        asset_str_list: list[str],
+        session_open_timestamp_ts: datetime,
+        session_calendar_id_str: str,
+    ) -> list[SessionOpenPrice]:
+        if len(asset_str_list) == 0:
+            return []
+
+        # *** CRITICAL*** Resolve the target execution timestamp into the exchange
+        # session before labeling the open price; using local/current dates here
+        # would silently settle the wrong trading session.
+        market_open_timestamp_ts = scheduler_utils.to_market_timestamp_ts(
+            session_open_timestamp_ts,
+            session_calendar_id_str,
+        )
+        session_date_str = market_open_timestamp_ts.date().isoformat()
+        normalized_asset_str_list = sorted({str(asset_str) for asset_str in asset_str_list})
+        with self.connect() as ib_obj:
+            contract_map_dict = self._build_stock_contract_map(ib_obj, normalized_asset_str_list)
+            # *** CRITICAL*** Option A intentionally reads only ticker.open.
+            # No historical one-minute fallback is allowed for incubation open fills.
+            ticker_list = ib_obj.reqTickers(*contract_map_dict.values())
+            ticker_open_map_dict: dict[str, float] = {}
+            for ticker_obj in ticker_list:
+                official_open_price_float = self._safe_positive_price_float(
+                    getattr(ticker_obj, "open", None)
+                )
+                if official_open_price_float is None:
+                    continue
+                ticker_open_map_dict[str(ticker_obj.contract.symbol)] = official_open_price_float
+
+        session_open_price_list: list[SessionOpenPrice] = []
+        for asset_str in normalized_asset_str_list:
+            official_open_price_float = ticker_open_map_dict.get(asset_str)
+            session_open_price_list.append(
+                SessionOpenPrice(
+                    session_date_str=session_date_str,
+                    account_route_str=account_route_str,
+                    asset_str=asset_str,
+                    official_open_price_float=official_open_price_float,
+                    open_price_source_str=(
+                        IBKR_TICK_OPEN_SOURCE_STR
+                        if official_open_price_float is not None
+                        else None
+                    ),
+                    snapshot_timestamp_ts=datetime.now(tz=UTC),
+                    raw_payload_dict=(
+                        {"ticker_open_float": official_open_price_float}
+                        if official_open_price_float is not None
+                        else {}
+                    ),
+                )
+            )
         return session_open_price_list

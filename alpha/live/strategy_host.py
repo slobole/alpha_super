@@ -583,7 +583,19 @@ def _build_taa_btal_tqqq_vix_cash_decision_plan(
     if len(month_end_weight_df.index) == 0:
         raise RuntimeError("TAA live host produced no month-end weights.")
 
-    signal_date_ts = pd.Timestamp(month_end_weight_df.index[-1]).to_pydatetime()
+    available_price_date_index = pd.DatetimeIndex(execution_price_df.index).normalize()
+    candidate_signal_date_index = pd.DatetimeIndex(month_end_weight_df.index).normalize()
+    as_of_date_ts = pd.Timestamp(as_of_ts).tz_localize(None).normalize()
+    # *** CRITICAL*** A partial current month can resample to a future month-end label.
+    # Only use a month-end signal after that exact decision date has execution-price data.
+    valid_signal_date_index = candidate_signal_date_index[
+        candidate_signal_date_index.isin(available_price_date_index)
+        & (candidate_signal_date_index <= as_of_date_ts)
+    ]
+    if len(valid_signal_date_index) == 0:
+        raise RuntimeError("TAA live host produced no month-end weights with available decision-date prices.")
+
+    signal_date_ts = pd.Timestamp(valid_signal_date_index[-1]).to_pydatetime()
     # *** CRITICAL*** Month-end rebalance dates must snap to the true first tradable session of the next month.
     execution_date_ts = scheduler_utils.first_business_day_of_next_month_timestamp_ts(
         signal_date_ts,
@@ -743,9 +755,11 @@ def _build_atr_normalized_ndx_decision_plan(
 
     full_signal_df = strategy_obj.compute_signals(pricing_data_df.copy())
     close_row_ser = full_signal_df.loc[pd.Timestamp(signal_date_ts)]
-    target_weight_ser = strategy_obj.get_target_weight_ser(close_row_ser=close_row_ser)
+    # *** CRITICAL*** Use the completed signal session as previous_bar before target selection.
+    # The PIT NDX universe lookup is keyed by the decision date, while execution remains next-open.
     strategy_obj.previous_bar = pd.Timestamp(signal_date_ts)
     strategy_obj.current_bar = pd.Timestamp(execution_date_ts.date())
+    target_weight_ser = strategy_obj.get_target_weight_ser(close_row_ser=close_row_ser)
     strategy_obj.iterate(
         full_signal_df.loc[: pd.Timestamp(signal_date_ts)],
         close_row_ser,

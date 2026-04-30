@@ -33,6 +33,7 @@ from alpha.live.models import LiveRelease
 
 DEFAULT_SUBMISSION_BUFFER_MINUTES_INT = 10
 DEFAULT_OPEN_SUBMISSION_LEAD_SECONDS_INT = (6 * 60) + 30
+DEFAULT_OPEN_MARKET_EXPIRY_GRACE_SECONDS_INT = 60
 PRE_CLOSE_SIGNAL_BUFFER_MINUTES_INT = 15
 SUPPORTED_SESSION_CALENDAR_ID_TUPLE: tuple[str, ...] = ("XNYS", "XTSE", "XASX")
 SUPPORTED_SIGNAL_CLOCK_TUPLE: tuple[str, ...] = (
@@ -237,6 +238,13 @@ def build_submission_timestamp_ts(
 ) -> datetime:
     session_label_ts = _coerce_session_label_ts(signal_date_ts, release_obj.session_calendar_id_str)
 
+    if release_obj.execution_policy_str == "next_open_market":
+        next_session_label_ts = get_next_session_label_ts(session_label_ts, release_obj.session_calendar_id_str)
+        return get_session_open_timestamp_ts(
+            next_session_label_ts,
+            release_obj.session_calendar_id_str,
+        )
+
     if release_obj.execution_policy_str == "next_open_moo":
         next_session_label_ts = get_next_session_label_ts(session_label_ts, release_obj.session_calendar_id_str)
         next_session_open_timestamp_ts = get_session_open_timestamp_ts(
@@ -276,7 +284,7 @@ def build_target_execution_timestamp_ts(
 ) -> datetime:
     session_label_ts = _coerce_session_label_ts(signal_date_ts, release_obj.session_calendar_id_str)
 
-    if release_obj.execution_policy_str == "next_open_moo":
+    if release_obj.execution_policy_str in ("next_open_moo", "next_open_market"):
         next_session_label_ts = get_next_session_label_ts(session_label_ts, release_obj.session_calendar_id_str)
         return get_session_open_timestamp_ts(next_session_label_ts, release_obj.session_calendar_id_str)
 
@@ -294,6 +302,24 @@ def build_target_execution_timestamp_ts(
         )
 
     raise ValueError(f"Unsupported execution_policy_str '{release_obj.execution_policy_str}'.")
+
+
+def is_execution_window_expired_bool(
+    execution_policy_str: str,
+    target_execution_timestamp_ts: datetime,
+    as_of_ts: datetime,
+) -> bool:
+    if execution_policy_str == "next_open_market":
+        # *** CRITICAL*** next_open_market is a plain continuous-market MKT
+        # order submitted at the open, not an auction MOO order. The grace
+        # window only prevents scheduler polling latency from expiring the
+        # plan at the exact open; it must not move submission before the open.
+        expiry_timestamp_ts = target_execution_timestamp_ts + timedelta(
+            seconds=DEFAULT_OPEN_MARKET_EXPIRY_GRACE_SECONDS_INT
+        )
+        return as_of_ts > expiry_timestamp_ts
+
+    return target_execution_timestamp_ts <= as_of_ts
 
 
 def next_business_day_timestamp_ts(

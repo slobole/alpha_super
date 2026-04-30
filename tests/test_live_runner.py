@@ -7,6 +7,7 @@ import sqlite3
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import pytest
 
 from alpha.data import FredSeriesSnapshot, FredSeriesStaleError
 import alpha.live.logging_utils as logging_utils
@@ -15,8 +16,10 @@ from alpha.live.models import (
     BrokerOrderEvent,
     BrokerOrderFill,
     BrokerOrderRecord,
+    BrokerSnapshot,
     DecisionPlan,
     LiveRelease,
+    PodState,
     SubmitBatchResult,
     VPlan,
     VPlanRow,
@@ -30,9 +33,11 @@ from alpha.live.runner import (
     _enrich_fill_row_dict_list,
     _render_command_output_str,
     _render_status_detail_str,
+    _render_tick_detail_str,
     build_decision_plans,
     build_vplans,
     cutover_v1_schema,
+    eod_snapshot,
     get_execution_report_summary,
     preflight_contract_summary,
     get_status_summary,
@@ -127,6 +132,56 @@ def _write_manifest(
     )
 
 
+def _write_guardrail_manifest(
+    root_path_obj: Path,
+    *,
+    user_id_str: str,
+    pod_id_str: str,
+    release_id_str: str,
+    mode_str: str,
+    enabled_bool: bool,
+    account_route_str: str,
+) -> None:
+    releases_root_path_obj = root_path_obj / "releases" / user_id_str
+    releases_root_path_obj.mkdir(parents=True, exist_ok=True)
+    (releases_root_path_obj / f"{pod_id_str}.yaml").write_text(
+        "\n".join(
+            [
+                "identity:",
+                f"  release_id: {release_id_str}",
+                f"  user_id: {user_id_str}",
+                f"  pod_id: {pod_id_str}",
+                "deployment:",
+                f"  mode: {mode_str}",
+                f"  enabled_bool: {'true' if enabled_bool else 'false'}",
+                "broker:",
+                f"  account_route: {account_route_str}",
+                "  host_str: 127.0.0.1",
+                "  port_int: 7497",
+                "  client_id_int: 31",
+                "  timeout_seconds_float: 4.0",
+                "strategy:",
+                "  strategy_import_str: strategies.dv2.strategy_mr_dv2:DVO2Strategy",
+                "  data_profile_str: norgate_eod_sp500_pit",
+                "  params: {}",
+                "market:",
+                "  session_calendar_id_str: XNYS",
+                "schedule:",
+                "  signal_clock_str: eod_snapshot_ready",
+                "  execution_policy_str: next_open_moo",
+                "execution:",
+                "  pod_budget_fraction_float: 0.5",
+                "  auto_submit_enabled_bool: true",
+                "bootstrap:",
+                "  initial_cash_float: 10000.0",
+                "risk:",
+                "  risk_profile_str: standard",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
 def _build_decision_plan_stub(release_obj, as_of_ts, pod_state_obj):
     return DecisionPlan(
         release_id_str=release_obj.release_id_str,
@@ -148,6 +203,390 @@ def _build_decision_plan_stub(release_obj, as_of_ts, pod_state_obj):
         cash_reserve_weight_float=0.0,
         preserve_untouched_positions_bool=True,
     )
+
+
+def test_render_tick_detail_no_work_is_human_and_short():
+    detail_dict = {
+        "lease_acquired_bool": True,
+        "created_decision_plan_count_int": 0,
+        "skipped_decision_plan_count_int": 0,
+        "expired_decision_plan_count_int": 0,
+        "created_vplan_count_int": 0,
+        "submitted_vplan_count_int": 0,
+        "blocked_action_count_int": 0,
+        "completed_vplan_count_int": 0,
+        "warning_count_map_dict": {},
+        "reason_count_map_dict": {},
+    }
+
+    output_str = _render_tick_detail_str(detail_dict)
+
+    assert "- No sleeve needed action in this run." in output_str
+    assert "- Built 0 decision plans." in output_str
+    assert "- Built 0 order plans." in output_str
+    assert "- Submitted 0 order plans." in output_str
+    assert "- Completed 0 reconciliations." in output_str
+    assert "- Blocked actions: 0" in output_str
+    assert "- Warnings: 0" in output_str
+    assert "- Run status to see the current sleeve state." in output_str
+    assert "Raw Fields" not in output_str
+
+
+def test_render_tick_detail_humanizes_work_and_warnings():
+    detail_dict = {
+        "lease_acquired_bool": True,
+        "created_decision_plan_count_int": 1,
+        "skipped_decision_plan_count_int": 0,
+        "expired_decision_plan_count_int": 0,
+        "created_vplan_count_int": 1,
+        "submitted_vplan_count_int": 1,
+        "blocked_action_count_int": 1,
+        "completed_vplan_count_int": 0,
+        "warning_count_map_dict": {"missing_live_price": 1},
+        "reason_count_map_dict": {"vplan_ready": 1},
+    }
+
+    output_str = _render_tick_detail_str(detail_dict)
+
+    assert "- Built 1 decision plan." in output_str
+    assert "- Built 1 order plan." in output_str
+    assert "- Submitted 1 order plan." in output_str
+    assert "- Blocked actions: 1" in output_str
+    assert "- Warnings: 1" in output_str
+    assert "- execution plan is ready to submit: 1" in output_str
+    assert "- missing live reference price for at least one asset: 1" in output_str
+    assert "- Run status for details before trusting the deployment." in output_str
+    assert "Raw Fields" not in output_str
+    assert "VPlan" not in output_str
+    assert "DecisionPlan" not in output_str
+
+
+def test_render_tick_detail_order_plan_waits_for_review():
+    detail_dict = {
+        "lease_acquired_bool": True,
+        "created_decision_plan_count_int": 0,
+        "skipped_decision_plan_count_int": 0,
+        "expired_decision_plan_count_int": 0,
+        "created_vplan_count_int": 1,
+        "submitted_vplan_count_int": 0,
+        "blocked_action_count_int": 0,
+        "completed_vplan_count_int": 0,
+        "warning_count_map_dict": {},
+        "reason_count_map_dict": {"ready_to_build_vplan": 1},
+    }
+
+    output_str = _render_tick_detail_str(detail_dict)
+
+    assert "- Built 1 order plan." in output_str
+    assert "- Submitted 0 order plans." in output_str
+    assert "- Run show_vplan or status before submitting." in output_str
+    assert "Raw Fields" not in output_str
+
+
+def test_eod_snapshot_updates_cache_pod_state_and_history(tmp_path: Path):
+    _write_manifest(tmp_path, auto_submit_enabled_bool=True)
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+    broker_adapter_obj = StubBrokerAdapter()
+    as_of_ts = datetime(2024, 2, 1, 16, 15, tzinfo=MARKET_TIMEZONE_OBJ)
+    broker_adapter_obj.seed_account_snapshot(
+        account_route_str="DU1",
+        cash_float=9200.0,
+        total_value_float=10125.0,
+        net_liq_float=10125.0,
+        position_amount_map={"AAPL": 9.0},
+        snapshot_timestamp_ts=as_of_ts,
+        session_mode_str="paper",
+    )
+
+    detail_dict = eod_snapshot(
+        state_store_obj=state_store_obj,
+        broker_adapter_obj=broker_adapter_obj,
+        as_of_ts=as_of_ts,
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="paper",
+    )
+
+    pod_state_obj = state_store_obj.get_pod_state("pod_test_01")
+    broker_snapshot_obj = state_store_obj.get_latest_broker_snapshot_for_account("DU1")
+    history_row_dict_list = state_store_obj.get_pod_state_history_row_dict_list("pod_test_01")
+
+    assert detail_dict["eod_snapshot_count_int"] == 1
+    assert broker_snapshot_obj is not None
+    assert broker_snapshot_obj.net_liq_float == 10125.0
+    assert pod_state_obj is not None
+    assert pod_state_obj.total_value_float == 10125.0
+    assert pod_state_obj.position_amount_map == {"AAPL": 9.0}
+    assert pod_state_obj.snapshot_stage_str == "eod"
+    assert pod_state_obj.snapshot_source_str == "broker"
+    assert history_row_dict_list[-1]["snapshot_stage_str"] == "eod"
+    assert history_row_dict_list[-1]["snapshot_source_str"] == "broker"
+
+    second_detail_dict = eod_snapshot(
+        state_store_obj=state_store_obj,
+        broker_adapter_obj=broker_adapter_obj,
+        as_of_ts=as_of_ts,
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="paper",
+    )
+    assert second_detail_dict["eod_snapshot_count_int"] == 0
+    assert second_detail_dict["reason_count_map_dict"]["eod_snapshot_already_exists"] == 1
+
+
+def test_eod_snapshot_does_not_overwrite_unresolved_submitted_vplan(tmp_path: Path):
+    _write_manifest(tmp_path, auto_submit_enabled_bool=True)
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+    state_store_obj.upsert_release(load_release_list(str(tmp_path / "releases"))[0])
+    decision_plan_obj = state_store_obj.insert_decision_plan(
+        _build_decision_plan_stub(
+            release_obj=state_store_obj.get_release_by_id("user_001.pod_test.daily.v2"),
+            as_of_ts=datetime(2024, 2, 1, 16, 15, tzinfo=MARKET_TIMEZONE_OBJ),
+            pod_state_obj=None,
+        )
+    )
+    state_store_obj.insert_vplan(
+        VPlan(
+            release_id_str=decision_plan_obj.release_id_str,
+            user_id_str=decision_plan_obj.user_id_str,
+            pod_id_str=decision_plan_obj.pod_id_str,
+            account_route_str=decision_plan_obj.account_route_str,
+            decision_plan_id_int=int(decision_plan_obj.decision_plan_id_int or 0),
+            signal_timestamp_ts=decision_plan_obj.signal_timestamp_ts,
+            submission_timestamp_ts=decision_plan_obj.submission_timestamp_ts,
+            target_execution_timestamp_ts=decision_plan_obj.target_execution_timestamp_ts,
+            execution_policy_str=decision_plan_obj.execution_policy_str,
+            broker_snapshot_timestamp_ts=datetime(2024, 2, 1, 9, 20, tzinfo=MARKET_TIMEZONE_OBJ),
+            live_reference_snapshot_timestamp_ts=datetime(2024, 2, 1, 9, 20, tzinfo=MARKET_TIMEZONE_OBJ),
+            live_price_source_str="stub",
+            net_liq_float=10000.0,
+            available_funds_float=10000.0,
+            excess_liquidity_float=10000.0,
+            pod_budget_fraction_float=0.5,
+            pod_budget_float=5000.0,
+            current_broker_position_map={},
+            live_reference_price_map={"AAPL": 100.0},
+            target_share_map={"AAPL": 10.0},
+            order_delta_map={"AAPL": 10.0},
+            vplan_row_list=[
+                VPlanRow(
+                    asset_str="AAPL",
+                    current_share_float=0.0,
+                    target_share_float=10.0,
+                    order_delta_share_float=10.0,
+                    live_reference_price_float=100.0,
+                    estimated_target_notional_float=1000.0,
+                    broker_order_type_str="MOO",
+                )
+            ],
+            status_str="submitted",
+        )
+    )
+    state_store_obj.upsert_pod_state(
+        PodState(
+            pod_id_str="pod_test_01",
+            user_id_str="user_001",
+            account_route_str="DU1",
+            position_amount_map={},
+            cash_float=10000.0,
+            total_value_float=10000.0,
+            strategy_state_dict={},
+            updated_timestamp_ts=datetime(2024, 2, 1, 9, 35, tzinfo=MARKET_TIMEZONE_OBJ),
+        ),
+        snapshot_stage_str="post_execution",
+        snapshot_source_str="broker",
+    )
+    broker_adapter_obj = StubBrokerAdapter()
+    broker_adapter_obj.seed_account_snapshot(
+        account_route_str="DU1",
+        cash_float=9000.0,
+        total_value_float=11000.0,
+        net_liq_float=11000.0,
+        position_amount_map={"AAPL": 10.0},
+        snapshot_timestamp_ts=datetime(2024, 2, 1, 16, 15, tzinfo=MARKET_TIMEZONE_OBJ),
+        session_mode_str="paper",
+    )
+
+    detail_dict = eod_snapshot(
+        state_store_obj=state_store_obj,
+        broker_adapter_obj=broker_adapter_obj,
+        as_of_ts=datetime(2024, 2, 1, 16, 15, tzinfo=MARKET_TIMEZONE_OBJ),
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="paper",
+    )
+
+    pod_state_obj = state_store_obj.get_pod_state("pod_test_01")
+    history_row_dict_list = state_store_obj.get_pod_state_history_row_dict_list("pod_test_01")
+
+    assert detail_dict["eod_snapshot_count_int"] == 0
+    assert detail_dict["skipped_snapshot_count_int"] == 1
+    assert detail_dict["reason_count_map_dict"]["unresolved_execution"] == 1
+    assert pod_state_obj is not None
+    assert pod_state_obj.total_value_float == 10000.0
+    assert pod_state_obj.snapshot_stage_str == "post_execution"
+    assert pod_state_obj.snapshot_source_str == "broker"
+    assert all(row_dict["snapshot_stage_str"] != "eod" for row_dict in history_row_dict_list)
+
+
+def test_tick_rejects_mixed_enabled_users_before_building_work(tmp_path: Path, monkeypatch):
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="user_001",
+        pod_id_str="pod_a",
+        release_id_str="user_001.pod_a.paper",
+        mode_str="paper",
+        enabled_bool=True,
+        account_route_str="DU1",
+    )
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="user_002",
+        pod_id_str="pod_b",
+        release_id_str="user_002.pod_b.paper",
+        mode_str="paper",
+        enabled_bool=True,
+        account_route_str="DU2",
+    )
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("strategy build should not run for invalid deployment")
+
+    monkeypatch.setattr("alpha.live.strategy_host.build_decision_plan_for_release", _fail_if_called)
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+
+    with pytest.raises(ValueError, match="one client per VPS/deployment"):
+        tick(
+            state_store_obj=state_store_obj,
+            broker_adapter_obj=StubBrokerAdapter(),
+            as_of_ts=datetime(2024, 1, 31, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
+            releases_root_path_str=str(tmp_path / "releases"),
+            env_mode_str="paper",
+        )
+
+
+def test_tick_ignores_other_mode_enabled_release_for_deployment_guardrail(tmp_path: Path, monkeypatch):
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="paper_user",
+        pod_id_str="pod_paper",
+        release_id_str="paper_user.pod_paper.paper",
+        mode_str="paper",
+        enabled_bool=True,
+        account_route_str="DU1",
+    )
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="live_user",
+        pod_id_str="pod_live",
+        release_id_str="live_user.pod_live.live",
+        mode_str="live",
+        enabled_bool=True,
+        account_route_str="U1",
+    )
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda data_profile_str: None,
+    )
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+
+    detail_dict = tick(
+        state_store_obj=state_store_obj,
+        broker_adapter_obj=StubBrokerAdapter(),
+        as_of_ts=datetime(2024, 1, 31, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="paper",
+    )
+
+    assert detail_dict["lease_acquired_bool"] is True
+    assert detail_dict["created_decision_plan_count_int"] == 0
+
+
+def test_status_does_not_hard_fail_on_invalid_deployment_guardrail(tmp_path: Path, monkeypatch):
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="user_001",
+        pod_id_str="pod_a",
+        release_id_str="user_001.pod_a.paper",
+        mode_str="paper",
+        enabled_bool=True,
+        account_route_str="DU1",
+    )
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="user_002",
+        pod_id_str="pod_b",
+        release_id_str="user_002.pod_b.paper",
+        mode_str="paper",
+        enabled_bool=True,
+        account_route_str="DU2",
+    )
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda data_profile_str: None,
+    )
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+
+    detail_dict = get_status_summary(
+        state_store_obj=state_store_obj,
+        as_of_ts=datetime(2024, 1, 31, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="paper",
+    )
+    status_output_str = _render_status_detail_str(detail_dict)
+
+    assert detail_dict["enabled_pod_count_int"] == 2
+    assert detail_dict["client_user_id_str"] == "mixed"
+    assert "multiple client identities" in str(detail_dict["deployment_warning_str"])
+    assert "- Client: mixed" in status_output_str
+    assert "- Warning: selected enabled sleeves contain multiple client identities: user_001, user_002" in status_output_str
+
+
+def test_status_filters_enabled_sleeves_by_selected_mode(tmp_path: Path, monkeypatch):
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="paper_user",
+        pod_id_str="pod_paper",
+        release_id_str="paper_user.pod_paper.paper",
+        mode_str="paper",
+        enabled_bool=True,
+        account_route_str="DU1",
+    )
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="live_user",
+        pod_id_str="pod_live",
+        release_id_str="live_user.pod_live.live",
+        mode_str="live",
+        enabled_bool=True,
+        account_route_str="U1",
+    )
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda data_profile_str: None,
+    )
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+
+    paper_detail_dict = get_status_summary(
+        state_store_obj=state_store_obj,
+        as_of_ts=datetime(2024, 1, 31, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="paper",
+    )
+    live_detail_dict = get_status_summary(
+        state_store_obj=state_store_obj,
+        as_of_ts=datetime(2024, 1, 31, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="live",
+    )
+
+    assert paper_detail_dict["mode_str"] == "paper"
+    assert paper_detail_dict["client_user_id_str"] == "paper_user"
+    assert [pod_status_dict["pod_id_str"] for pod_status_dict in paper_detail_dict["pod_status_dict_list"]] == [
+        "pod_paper"
+    ]
+    assert live_detail_dict["mode_str"] == "live"
+    assert live_detail_dict["client_user_id_str"] == "live_user"
+    assert [pod_status_dict["pod_id_str"] for pod_status_dict in live_detail_dict["pod_status_dict_list"]] == [
+        "pod_live"
+    ]
 
 
 def _build_decision_plan_with_position_drift_stub(release_obj, as_of_ts, pod_state_obj):
@@ -825,6 +1264,64 @@ def test_execution_quality_falls_back_to_weighted_fill_average_when_broker_avg_m
     assert execution_row_dict_list[0]["avg_slippage_bps_float"] == 250.0
 
 
+def test_execution_rows_treat_missing_broker_position_as_zero_after_sell_to_zero():
+    vplan_obj = VPlan(
+        release_id_str="release_001",
+        user_id_str="user_001",
+        pod_id_str="pod_001",
+        account_route_str="DU1",
+        decision_plan_id_int=7,
+        signal_timestamp_ts=datetime(2024, 2, 1, 16, 0, tzinfo=MARKET_TIMEZONE_OBJ),
+        submission_timestamp_ts=datetime(2024, 2, 2, 9, 20, tzinfo=MARKET_TIMEZONE_OBJ),
+        target_execution_timestamp_ts=datetime(2024, 2, 2, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ),
+        execution_policy_str="next_open_moo",
+        broker_snapshot_timestamp_ts=datetime(2024, 2, 2, 9, 15, tzinfo=MARKET_TIMEZONE_OBJ),
+        live_reference_snapshot_timestamp_ts=datetime(2024, 2, 2, 9, 20, tzinfo=MARKET_TIMEZONE_OBJ),
+        live_price_source_str="stub",
+        net_liq_float=10000.0,
+        available_funds_float=9000.0,
+        excess_liquidity_float=9000.0,
+        pod_budget_fraction_float=1.0,
+        pod_budget_float=10000.0,
+        current_broker_position_map={"HIG": 726.0},
+        live_reference_price_map={"HIG": 138.13},
+        target_share_map={"HIG": 0.0},
+        order_delta_map={"HIG": -726.0},
+        vplan_row_list=[
+            VPlanRow(
+                asset_str="HIG",
+                current_share_float=726.0,
+                target_share_float=0.0,
+                order_delta_share_float=-726.0,
+                live_reference_price_float=138.13,
+                estimated_target_notional_float=0.0,
+                broker_order_type_str="MKT",
+            )
+        ],
+        vplan_id_int=10,
+    )
+
+    execution_row_dict_list = _build_execution_row_dict_list(
+        vplan_obj=vplan_obj,
+        broker_position_map_dict={},
+        broker_order_row_dict_list=[],
+        fill_row_dict_list=[
+            {
+                "asset_str": "HIG",
+                "fill_amount_float": -726.0,
+                "fill_price_float": 137.55,
+                "official_open_price_float": 138.13,
+                "open_price_source_str": "test",
+                "fill_timestamp_str": "2024-02-02T09:30:00-05:00",
+            }
+        ],
+    )
+
+    assert execution_row_dict_list[0]["broker_share_float"] == 0.0
+    assert execution_row_dict_list[0]["residual_share_float"] == 0.0
+    assert execution_row_dict_list[0]["problem_bool"] is False
+
+
 def test_live_runner_manual_vplan_flow(tmp_path: Path, monkeypatch):
     db_path_str = str((tmp_path / "live.sqlite3").resolve())
     _write_manifest(tmp_path, auto_submit_enabled_bool=False)
@@ -875,6 +1372,7 @@ def test_live_runner_manual_vplan_flow(tmp_path: Path, monkeypatch):
         as_of_ts=datetime(2024, 2, 1, 9, 22, tzinfo=MARKET_TIMEZONE_OBJ),
         releases_root_path_str=str(tmp_path / "releases"),
     )
+    status_output_str = _render_status_detail_str(status_summary_dict)
 
     assert build_detail_dict["created_decision_plan_count_int"] == 1
     assert vplan_detail_dict["created_vplan_count_int"] == 1
@@ -893,8 +1391,22 @@ def test_live_runner_manual_vplan_flow(tmp_path: Path, monkeypatch):
         }
     ]
     assert show_vplan_detail_dict["vplan_dict_list"][0]["warning_row_dict_list"] == []
+    assert status_summary_dict["mode_str"] == "paper"
+    assert status_summary_dict["client_user_id_str"] == "user_001"
+    assert "enabled_pod_count_int" in status_summary_dict
+    assert "pod_status_dict_list" in status_summary_dict
+    assert status_summary_dict["pod_status_dict_list"][0]["auto_submit_enabled_bool"] is False
     assert status_summary_dict["pod_status_dict_list"][0]["next_action_str"] == "review_vplan"
     assert status_summary_dict["pod_status_dict_list"][0]["reason_code_str"] == "vplan_ready"
+    assert "- Deployment: paper" in status_output_str
+    assert "- Client: user_001" in status_output_str
+    assert "- Enabled sleeves: 1" in status_output_str
+    assert "pod_test_01 sleeve" in status_output_str
+    assert "- Account: DU1" in status_output_str
+    assert "- Auto-submit: off" in status_output_str
+    assert "- State: order plan ready" in status_output_str
+    assert "- Next: review orders manually" in status_output_str
+    assert "- Reason: execution plan is ready to submit" in status_output_str
 
 
 def test_submit_ready_vplans_persists_missing_broker_ack_and_surfaces_in_status(
@@ -1008,6 +1520,196 @@ def test_submit_ready_vplans_persists_missing_broker_ack_and_surfaces_in_status(
         if line_str.strip() != ""
     ]
     assert "submit_vplan_missing_broker_ack" in critical_event_name_str_list
+
+
+def test_submit_ready_vplans_normalizes_snapshot_rows_without_ids_before_persistence(
+    tmp_path: Path,
+    monkeypatch,
+):
+    db_path_str = str((tmp_path / "live_snapshot_ids.sqlite3").resolve())
+    _write_manifest(tmp_path, auto_submit_enabled_bool=False)
+    monkeypatch.setattr("alpha.live.strategy_host.build_decision_plan_for_release", _build_decision_plan_stub)
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda data_profile_str: pd.Timestamp("2024-01-31"),
+    )
+
+    state_store_obj = LiveStateStore(db_path_str)
+    broker_adapter_obj = StubBrokerAdapter()
+    broker_adapter_obj.seed_account_snapshot(
+        account_route_str="DU1",
+        cash_float=10000.0,
+        total_value_float=10000.0,
+        net_liq_float=10000.0,
+        available_funds_float=8000.0,
+        excess_liquidity_float=7000.0,
+        position_amount_map={},
+        snapshot_timestamp_ts=datetime(2024, 2, 1, 9, 0, tzinfo=MARKET_TIMEZONE_OBJ),
+        session_mode_str="paper",
+    )
+    broker_adapter_obj.seed_live_price_snapshot(
+        account_route_str="DU1",
+        asset_reference_price_map={"AAPL": 100.0},
+        snapshot_timestamp_ts=datetime(2024, 2, 1, 9, 22, tzinfo=MARKET_TIMEZONE_OBJ),
+    )
+
+    def _submit_order_request_list(account_route_str, broker_order_request_list, submitted_timestamp_ts):
+        broker_order_record_list: list[BrokerOrderRecord] = []
+        broker_order_event_list: list[BrokerOrderEvent] = []
+        broker_order_fill_list: list[BrokerOrderFill] = []
+        broker_order_ack_list: list[BrokerOrderAck] = []
+        for idx_int, broker_order_request_obj in enumerate(broker_order_request_list, start=1):
+            broker_order_id_str = f"snapshot_fix_order_{idx_int}"
+            requested_share_float = abs(float(broker_order_request_obj.amount_float))
+            broker_order_record_list.extend(
+                [
+                    BrokerOrderRecord(
+                        broker_order_id_str=broker_order_id_str,
+                        decision_plan_id_int=broker_order_request_obj.decision_plan_id_int,
+                        vplan_id_int=broker_order_request_obj.vplan_id_int,
+                        account_route_str=account_route_str,
+                        asset_str=broker_order_request_obj.asset_str,
+                        order_request_key_str=broker_order_request_obj.order_request_key_str,
+                        broker_order_type_str=broker_order_request_obj.broker_order_type_str,
+                        unit_str=broker_order_request_obj.unit_str,
+                        amount_float=float(broker_order_request_obj.amount_float),
+                        filled_amount_float=0.0,
+                        remaining_amount_float=requested_share_float,
+                        avg_fill_price_float=None,
+                        status_str="PendingSubmit",
+                        submitted_timestamp_ts=submitted_timestamp_ts,
+                        last_status_timestamp_ts=submitted_timestamp_ts,
+                        submission_key_str=broker_order_request_obj.submission_key_str,
+                        raw_payload_dict={"source_str": "local_submit"},
+                    ),
+                    BrokerOrderRecord(
+                        broker_order_id_str=broker_order_id_str,
+                        decision_plan_id_int=None,
+                        vplan_id_int=None,
+                        account_route_str=account_route_str,
+                        asset_str=broker_order_request_obj.asset_str,
+                        order_request_key_str=broker_order_request_obj.order_request_key_str,
+                        broker_order_type_str=broker_order_request_obj.broker_order_type_str,
+                        unit_str=broker_order_request_obj.unit_str,
+                        amount_float=float(broker_order_request_obj.amount_float),
+                        filled_amount_float=requested_share_float,
+                        remaining_amount_float=0.0,
+                        avg_fill_price_float=101.0,
+                        status_str="Filled",
+                        submitted_timestamp_ts=submitted_timestamp_ts,
+                        last_status_timestamp_ts=submitted_timestamp_ts,
+                        submission_key_str=broker_order_request_obj.submission_key_str,
+                        raw_payload_dict={"source_str": "snapshot_submit"},
+                    ),
+                ]
+            )
+            broker_order_event_list.append(
+                BrokerOrderEvent(
+                    broker_order_id_str=broker_order_id_str,
+                    decision_plan_id_int=None,
+                    vplan_id_int=None,
+                    account_route_str=account_route_str,
+                    asset_str=broker_order_request_obj.asset_str,
+                    order_request_key_str=broker_order_request_obj.order_request_key_str,
+                    status_str="Filled",
+                    filled_amount_float=requested_share_float,
+                    remaining_amount_float=0.0,
+                    avg_fill_price_float=101.0,
+                    event_timestamp_ts=submitted_timestamp_ts,
+                    event_source_str="snapshot.event",
+                    message_str="filled",
+                    submission_key_str=broker_order_request_obj.submission_key_str,
+                    raw_payload_dict={"source_str": "snapshot_submit"},
+                )
+            )
+            broker_order_fill_list.append(
+                BrokerOrderFill(
+                    broker_order_id_str=broker_order_id_str,
+                    decision_plan_id_int=None,
+                    vplan_id_int=None,
+                    account_route_str=account_route_str,
+                    asset_str=broker_order_request_obj.asset_str,
+                    fill_amount_float=float(broker_order_request_obj.amount_float),
+                    fill_price_float=101.0,
+                    fill_timestamp_ts=submitted_timestamp_ts,
+                    raw_payload_dict={"source_str": "snapshot_submit"},
+                )
+            )
+            broker_order_ack_list.append(
+                BrokerOrderAck(
+                    decision_plan_id_int=broker_order_request_obj.decision_plan_id_int,
+                    vplan_id_int=broker_order_request_obj.vplan_id_int,
+                    account_route_str=account_route_str,
+                    order_request_key_str=broker_order_request_obj.order_request_key_str,
+                    asset_str=broker_order_request_obj.asset_str,
+                    broker_order_type_str=broker_order_request_obj.broker_order_type_str,
+                    local_submit_ack_bool=True,
+                    broker_response_ack_bool=True,
+                    ack_status_str="broker_acked",
+                    ack_source_str="snapshot.submit",
+                    broker_order_id_str=broker_order_id_str,
+                    response_timestamp_ts=submitted_timestamp_ts,
+                    raw_payload_dict={},
+                )
+            )
+        return SubmitBatchResult(
+            broker_order_record_list=broker_order_record_list,
+            broker_order_event_list=broker_order_event_list,
+            broker_order_fill_list=broker_order_fill_list,
+            broker_order_ack_list=broker_order_ack_list,
+            ack_coverage_ratio_float=1.0,
+            missing_ack_asset_list=[],
+            submit_ack_status_str="complete",
+        )
+
+    broker_adapter_obj.submit_order_request_list = _submit_order_request_list
+
+    build_decision_plans(
+        state_store_obj=state_store_obj,
+        as_of_ts=datetime(2024, 1, 31, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
+        releases_root_path_str=str(tmp_path / "releases"),
+    )
+    build_vplans(
+        state_store_obj=state_store_obj,
+        broker_adapter_obj=broker_adapter_obj,
+        as_of_ts=datetime(2024, 2, 1, 9, 22, tzinfo=MARKET_TIMEZONE_OBJ),
+        env_mode_str="paper",
+    )
+    latest_vplan_obj = state_store_obj.get_latest_vplan_for_pod("pod_test_01")
+    assert latest_vplan_obj is not None
+
+    submit_detail_dict = submit_ready_vplans(
+        state_store_obj=state_store_obj,
+        broker_adapter_obj=broker_adapter_obj,
+        as_of_ts=datetime(2024, 2, 1, 9, 22, tzinfo=MARKET_TIMEZONE_OBJ),
+        env_mode_str="paper",
+        manual_only_bool=False,
+        vplan_id_int=int(latest_vplan_obj.vplan_id_int or 0),
+    )
+    latest_vplan_obj = state_store_obj.get_latest_vplan_for_pod("pod_test_01")
+    assert latest_vplan_obj is not None
+
+    broker_order_row_dict_list = state_store_obj.get_broker_order_row_dict_list_for_vplan(
+        int(latest_vplan_obj.vplan_id_int or 0)
+    )
+    broker_order_event_row_dict_list = state_store_obj.get_broker_order_event_row_dict_list_for_vplan(
+        int(latest_vplan_obj.vplan_id_int or 0)
+    )
+    fill_row_dict_list = state_store_obj.get_fill_row_dict_list_for_vplan(
+        int(latest_vplan_obj.vplan_id_int or 0)
+    )
+
+    assert submit_detail_dict["submitted_vplan_count_int"] == 1
+    assert latest_vplan_obj.status_str == "submitted"
+    assert len(broker_order_row_dict_list) == 1
+    assert broker_order_row_dict_list[0]["asset_str"] == "AAPL"
+    assert broker_order_row_dict_list[0]["status_str"] == "Filled"
+    assert len(broker_order_event_row_dict_list) == 1
+    assert broker_order_event_row_dict_list[0]["asset_str"] == "AAPL"
+    assert broker_order_event_row_dict_list[0]["status_str"] == "Filled"
+    assert len(fill_row_dict_list) == 1
+    assert fill_row_dict_list[0]["asset_str"] == "AAPL"
+    assert fill_row_dict_list[0]["fill_price_float"] == 101.0
 
 
 def test_build_decision_plans_skips_pod_local_dtb3_stale_failure_and_continues(tmp_path: Path, monkeypatch):
@@ -1270,6 +1972,92 @@ def test_live_runner_auto_tick_builds_submits_and_reconciles(tmp_path: Path, mon
     assert execution_report_summary_dict["execution_report_dict_list"][0]["aggregate_slippage_notional_float"] == 0.0
 
 
+def test_next_open_market_builds_and_submits_at_open_with_grace(tmp_path: Path):
+    db_path_str = str((tmp_path / "live_next_open_market.sqlite3").resolve())
+    open_timestamp_ts = datetime(2024, 2, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ)
+    state_store_obj = LiveStateStore(db_path_str)
+    release_obj = LiveRelease(
+        release_id_str="user_001.pod_market.daily.v1",
+        user_id_str="user_001",
+        pod_id_str="pod_market_01",
+        account_route_str="DU1",
+        strategy_import_str="strategies.dv2.strategy_mr_dv2:DVO2Strategy",
+        mode_str="paper",
+        session_calendar_id_str="XNYS",
+        signal_clock_str="eod_snapshot_ready",
+        execution_policy_str="next_open_market",
+        data_profile_str="norgate_eod_sp500_pit",
+        params_dict={},
+        risk_profile_str="standard_equity_mr",
+        enabled_bool=True,
+        source_path_str="manifest.yaml",
+        pod_budget_fraction_float=0.5,
+        auto_submit_enabled_bool=True,
+    )
+    state_store_obj.upsert_release(release_obj)
+    state_store_obj.insert_decision_plan(
+        DecisionPlan(
+            release_id_str=release_obj.release_id_str,
+            user_id_str=release_obj.user_id_str,
+            pod_id_str=release_obj.pod_id_str,
+            account_route_str=release_obj.account_route_str,
+            signal_timestamp_ts=datetime(2024, 1, 31, 16, 0, tzinfo=MARKET_TIMEZONE_OBJ),
+            submission_timestamp_ts=open_timestamp_ts,
+            target_execution_timestamp_ts=open_timestamp_ts,
+            execution_policy_str="next_open_market",
+            decision_base_position_map={},
+            snapshot_metadata_dict={"strategy_family_str": "stub"},
+            strategy_state_dict={"trade_id_int": 1},
+            decision_book_type_str="incremental_entry_exit_book",
+            entry_target_weight_map_dict={"AAPL": 0.2},
+            target_weight_map={"AAPL": 0.2},
+            exit_asset_set=set(),
+            entry_priority_list=["AAPL"],
+            cash_reserve_weight_float=0.0,
+            preserve_untouched_positions_bool=True,
+        )
+    )
+    broker_adapter_obj = StubBrokerAdapter()
+    broker_adapter_obj.seed_account_snapshot(
+        account_route_str="DU1",
+        cash_float=10000.0,
+        total_value_float=10000.0,
+        net_liq_float=10000.0,
+        available_funds_float=8000.0,
+        excess_liquidity_float=7000.0,
+        position_amount_map={},
+        snapshot_timestamp_ts=open_timestamp_ts,
+        session_mode_str="paper",
+    )
+    broker_adapter_obj.seed_live_price_snapshot(
+        account_route_str="DU1",
+        asset_reference_price_map={"AAPL": 100.0},
+        snapshot_timestamp_ts=open_timestamp_ts,
+    )
+
+    build_detail_dict = build_vplans(
+        state_store_obj=state_store_obj,
+        broker_adapter_obj=broker_adapter_obj,
+        as_of_ts=open_timestamp_ts,
+        env_mode_str="paper",
+    )
+    latest_vplan_obj = state_store_obj.get_latest_vplan_for_pod("pod_market_01")
+    assert latest_vplan_obj is not None
+    submit_detail_dict = submit_ready_vplans(
+        state_store_obj=state_store_obj,
+        broker_adapter_obj=broker_adapter_obj,
+        as_of_ts=open_timestamp_ts + pd.Timedelta(seconds=30),
+        env_mode_str="paper",
+        manual_only_bool=False,
+        vplan_id_int=int(latest_vplan_obj.vplan_id_int or 0),
+    )
+
+    assert build_detail_dict["created_vplan_count_int"] == 1
+    assert latest_vplan_obj.vplan_row_list[0].broker_order_type_str == "MKT"
+    assert submit_detail_dict["submitted_vplan_count_int"] == 1
+    assert broker_adapter_obj.submitted_order_request_list[0].broker_order_type_str == "MKT"
+
+
 def test_submit_vplan_explicit_manual_path(tmp_path: Path, monkeypatch):
     db_path_str = str((tmp_path / "live.sqlite3").resolve())
     _write_manifest(tmp_path, auto_submit_enabled_bool=False)
@@ -1328,6 +2116,129 @@ def test_submit_vplan_explicit_manual_path(tmp_path: Path, monkeypatch):
 
     assert submit_detail_dict["submitted_vplan_count_int"] == 1
     assert reconcile_detail_dict["completed_vplan_count_int"] == 1
+
+
+def test_post_execution_reconcile_recovers_stale_submitting_vplan_from_broker_truth(
+    tmp_path: Path,
+    monkeypatch,
+):
+    db_path_str = str((tmp_path / "live_recover.sqlite3").resolve())
+    _write_manifest(tmp_path, auto_submit_enabled_bool=False)
+    monkeypatch.setattr("alpha.live.strategy_host.build_decision_plan_for_release", _build_decision_plan_stub)
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda data_profile_str: pd.Timestamp("2024-01-31"),
+    )
+
+    state_store_obj = LiveStateStore(db_path_str)
+    broker_adapter_obj = StubBrokerAdapter()
+    broker_adapter_obj.seed_account_snapshot(
+        account_route_str="DU1",
+        cash_float=10000.0,
+        total_value_float=10000.0,
+        net_liq_float=10000.0,
+        available_funds_float=8000.0,
+        excess_liquidity_float=7000.0,
+        position_amount_map={},
+        snapshot_timestamp_ts=datetime(2024, 2, 1, 9, 0, tzinfo=MARKET_TIMEZONE_OBJ),
+        session_mode_str="paper",
+    )
+    broker_adapter_obj.seed_live_price_snapshot(
+        account_route_str="DU1",
+        asset_reference_price_map={"AAPL": 100.0},
+        snapshot_timestamp_ts=datetime(2024, 2, 1, 9, 22, tzinfo=MARKET_TIMEZONE_OBJ),
+    )
+
+    build_decision_plans(
+        state_store_obj=state_store_obj,
+        as_of_ts=datetime(2024, 1, 31, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
+        releases_root_path_str=str(tmp_path / "releases"),
+    )
+    build_vplans(
+        state_store_obj=state_store_obj,
+        broker_adapter_obj=broker_adapter_obj,
+        as_of_ts=datetime(2024, 2, 1, 9, 22, tzinfo=MARKET_TIMEZONE_OBJ),
+        env_mode_str="paper",
+    )
+    latest_vplan_obj = state_store_obj.get_latest_vplan_for_pod("pod_test_01")
+    assert latest_vplan_obj is not None
+
+    state_store_obj.mark_vplan_status(int(latest_vplan_obj.vplan_id_int or 0), "submitting")
+    state_store_obj.mark_decision_plan_status(int(latest_vplan_obj.decision_plan_id_int), "expired")
+    decision_plan_id_int = int(latest_vplan_obj.decision_plan_id_int)
+    submission_key_str = str(latest_vplan_obj.submission_key_str or f"vplan:{decision_plan_id_int}")
+    order_delta_share_float = float(latest_vplan_obj.order_delta_map["AAPL"])
+    target_share_float = float(latest_vplan_obj.target_share_map["AAPL"])
+
+    broker_adapter_obj.seed_broker_order_state(
+        BrokerOrderRecord(
+            broker_order_id_str="stub_order_1",
+            decision_plan_id_int=None,
+            vplan_id_int=None,
+            account_route_str="DU1",
+            asset_str="AAPL",
+            order_request_key_str=f"{submission_key_str}:AAPL:1",
+            broker_order_type_str="MOO",
+            unit_str="shares",
+            amount_float=order_delta_share_float,
+            filled_amount_float=order_delta_share_float,
+            remaining_amount_float=0.0,
+            avg_fill_price_float=100.0,
+            status_str="Filled",
+            submitted_timestamp_ts=datetime(2024, 2, 1, 9, 22, tzinfo=MARKET_TIMEZONE_OBJ),
+            last_status_timestamp_ts=datetime(2024, 2, 1, 9, 22, tzinfo=MARKET_TIMEZONE_OBJ),
+            submission_key_str=submission_key_str,
+            raw_payload_dict={},
+        ),
+        broker_order_event_list=[],
+        broker_order_fill_list=[
+            BrokerOrderFill(
+                broker_order_id_str="stub_order_1",
+                decision_plan_id_int=None,
+                vplan_id_int=None,
+                account_route_str="DU1",
+                asset_str="AAPL",
+                fill_amount_float=order_delta_share_float,
+                fill_price_float=100.0,
+                fill_timestamp_ts=datetime(2024, 2, 1, 9, 22, tzinfo=MARKET_TIMEZONE_OBJ),
+                raw_payload_dict={},
+            )
+        ],
+    )
+    broker_adapter_obj.seed_account_snapshot(
+        account_route_str="DU1",
+        cash_float=9000.0,
+        total_value_float=10000.0,
+        net_liq_float=10000.0,
+        available_funds_float=9000.0,
+        excess_liquidity_float=8000.0,
+        position_amount_map={"AAPL": target_share_float},
+        snapshot_timestamp_ts=datetime(2024, 2, 1, 9, 35, tzinfo=MARKET_TIMEZONE_OBJ),
+        session_mode_str="paper",
+    )
+
+    reconcile_detail_dict = post_execution_reconcile(
+        state_store_obj=state_store_obj,
+        broker_adapter_obj=broker_adapter_obj,
+        as_of_ts=datetime(2024, 2, 1, 9, 35, tzinfo=MARKET_TIMEZONE_OBJ),
+    )
+    latest_vplan_obj = state_store_obj.get_latest_vplan_for_pod("pod_test_01")
+    latest_decision_plan_obj = state_store_obj.get_latest_decision_plan_for_pod("pod_test_01")
+
+    assert reconcile_detail_dict["completed_vplan_count_int"] == 1
+    assert latest_vplan_obj is not None
+    assert latest_vplan_obj.status_str == "completed"
+    assert latest_decision_plan_obj is not None
+    assert latest_decision_plan_obj.status_str == "completed"
+    assert state_store_obj.count_broker_orders_for_vplan(int(latest_vplan_obj.vplan_id_int or 0)) == 1
+    assert len(state_store_obj.get_fill_row_dict_list_for_vplan(int(latest_vplan_obj.vplan_id_int or 0))) == 1
+    pod_state_obj = state_store_obj.get_pod_state("pod_test_01")
+    history_row_dict_list = state_store_obj.get_pod_state_history_row_dict_list("pod_test_01")
+    assert pod_state_obj is not None
+    assert pod_state_obj.snapshot_stage_str == "post_execution"
+    assert pod_state_obj.snapshot_source_str == "broker"
+    assert history_row_dict_list[-1]["snapshot_stage_str"] == "post_execution"
+    assert history_row_dict_list[-1]["snapshot_source_str"] == "broker"
 
 
 def test_post_execution_reconcile_keeps_partial_entry_unresolved_and_reports_human_readably(
@@ -2222,6 +3133,91 @@ def test_preflight_contract_summary_reports_pass(tmp_path: Path, monkeypatch):
     assert detail_dict["passed_release_count_int"] == 1
     assert detail_dict["failed_release_count_int"] == 0
     assert detail_dict["contract_report_dict_list"][0]["contract_status_str"] == "pass"
+
+
+def test_preflight_contract_summary_filters_by_mode(tmp_path: Path, monkeypatch):
+    releases_root_path_obj = tmp_path / "releases" / "user_001"
+    releases_root_path_obj.mkdir(parents=True, exist_ok=True)
+    (releases_root_path_obj / "paper.yaml").write_text(
+        "\n".join(
+            [
+                "identity:",
+                "  release_id: user_001.pod_paper.daily.v1",
+                "  user_id: user_001",
+                "  pod_id: pod_paper",
+                "deployment:",
+                "  mode: paper",
+                "  enabled_bool: true",
+                "broker:",
+                "  account_route: DU1",
+                "strategy:",
+                "  strategy_import_str: strategies.dv2.strategy_mr_dv2:DVO2Strategy",
+                "  data_profile_str: norgate_eod_sp500_pit",
+                "  params: {}",
+                "market:",
+                "  session_calendar_id_str: XNYS",
+                "schedule:",
+                "  signal_clock_str: eod_snapshot_ready",
+                "  execution_policy_str: next_open_moo",
+                "risk:",
+                "  risk_profile_str: standard",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (releases_root_path_obj / "incubation.yaml").write_text(
+        "\n".join(
+            [
+                "identity:",
+                "  release_id: user_001.pod_inc.incubation.v1",
+                "  user_id: user_001",
+                "  pod_id: pod_inc",
+                "deployment:",
+                "  mode: incubation",
+                "  enabled_bool: true",
+                "broker:",
+                "  account_route: SIM_pod_inc",
+                "strategy:",
+                "  strategy_import_str: strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy",
+                "  data_profile_str: norgate_eod_sp500_pit",
+                "  params: {}",
+                "market:",
+                "  session_calendar_id_str: XNYS",
+                "schedule:",
+                "  signal_clock_str: eod_snapshot_ready",
+                "  execution_policy_str: next_open_moo",
+                "risk:",
+                "  risk_profile_str: standard_equity_mr",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "alpha.live.strategy_host.preflight_decision_contract_for_release",
+        lambda release_obj, as_of_ts, pod_state_obj: {
+            "release_id_str": release_obj.release_id_str,
+            "pod_id_str": release_obj.pod_id_str,
+            "strategy_import_str": release_obj.strategy_import_str,
+            "decision_book_type_str": "incremental_entry_exit_book",
+            "contract_status_str": "pass",
+            "accepted_shape_count_int": 1,
+            "unsupported_shape_count_int": 0,
+            "unsupported_shape_example_dict_list": [],
+            "error_str": None,
+        },
+    )
+
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+    detail_dict = preflight_contract_summary(
+        state_store_obj=state_store_obj,
+        as_of_ts=datetime(2024, 2, 1, 9, 22, tzinfo=MARKET_TIMEZONE_OBJ),
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="incubation",
+    )
+
+    assert detail_dict["enabled_release_count_int"] == 1
+    assert detail_dict["mode_str"] == "incubation"
+    assert detail_dict["contract_report_dict_list"][0]["pod_id_str"] == "pod_inc"
 
 
 def test_preflight_contract_summary_reports_failure(tmp_path: Path, monkeypatch):

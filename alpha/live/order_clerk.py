@@ -22,6 +22,12 @@ from alpha.live.models import (
 
 
 PAPER_ACCOUNT_PREFIX_TUPLE: tuple[str, ...] = ("DU",)
+INCUBATION_ACCOUNT_PREFIX_TUPLE: tuple[str, ...] = ("SIM_",)
+
+
+def account_route_looks_like_incubation_bool(account_route_str: str) -> bool:
+    normalized_account_route_str = str(account_route_str).strip().upper()
+    return normalized_account_route_str.startswith(INCUBATION_ACCOUNT_PREFIX_TUPLE)
 
 
 def account_route_looks_like_paper_bool(account_route_str: str) -> bool:
@@ -30,6 +36,8 @@ def account_route_looks_like_paper_bool(account_route_str: str) -> bool:
 
 
 def infer_ibkr_account_mode_str(account_route_str: str) -> str:
+    if account_route_looks_like_incubation_bool(account_route_str):
+        return "incubation"
     if account_route_looks_like_paper_bool(account_route_str):
         return "paper"
     return "live"
@@ -40,6 +48,17 @@ def validate_account_route_matches_mode(
     account_route_str: str,
 ) -> None:
     inferred_mode_str = infer_ibkr_account_mode_str(account_route_str)
+    if mode_str == "incubation" and inferred_mode_str != "incubation":
+        raise ValueError(
+            f"Manifest mode_str '{mode_str}' expects a virtual incubation account_route_str, "
+            f"but received '{account_route_str}'. Incubation accounts must use a "
+            f"{INCUBATION_ACCOUNT_PREFIX_TUPLE} prefix."
+        )
+    if mode_str in ("paper", "live") and inferred_mode_str == "incubation":
+        raise ValueError(
+            f"Manifest mode_str '{mode_str}' expects an IBKR account_route_str, "
+            f"but received virtual incubation route '{account_route_str}'."
+        )
     if mode_str == "paper" and inferred_mode_str != "paper":
         raise ValueError(
             f"Manifest mode_str '{mode_str}' expects a paper-style IBKR account_route_str, "

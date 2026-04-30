@@ -24,6 +24,18 @@ These guardrails are additive to the quant doctrine:
 - **Surgical changes** - change only what the task requires and avoid drive-by cleanup in unrelated areas.
 - **Goal-driven execution** - define a verifiable success condition, implement against it, and verify before declaring completion.
 
+### Human-Readable Code Rule
+
+Code is accepted only if a human owner can read it later without needing the agent who wrote it.
+
+Before meaningful code changes:
+
+- state the smallest change needed;
+- name the behavior that must stay the same;
+- avoid new abstractions unless they remove more complexity than they add.
+
+Prefer plain functions, explicit steps, and familiar names. Do not write "agent architecture" that only another agent can comfortably understand.
+
 Use the local reference file for the full text and attribution details.
 
 ## Quantitative Correctness Standards
@@ -57,6 +69,8 @@ Any dangerous operation, realism gap, hidden assumption, operational ambiguity, 
 **Simplicity over complexity** â€” A strategy with 3 rules that works is better than one with 10. When adding logic, ask whether it is genuinely necessary or whether it is curve-fitting noise.
 
 **Explicit semantics** â€” If you change signal timing, order timing, execution assumptions, rebalance mapping, portfolio aggregation math, or cost modeling, state the old behavior, the new behavior, and the quantitative consequence.
+
+**Live pod-account mapping** â€” For live trading, a pod means one independent strategy sleeve. By default, that sleeve must map to a real isolated broker account, subaccount, or broker-recognized sleeve with its own cash, positions, and account value. Do not treat a pod as a soft label inside one shared raw broker account unless a first-class pod ledger exists.
 
 **Domain naming** â€” Use strict `Domain_Type` naming in quantitative logic, for example `price_vec`, `return_ser`, `signal_df`, `target_weight_ser`.
 
@@ -141,6 +155,8 @@ Concrete `Strategy` subclasses. The DV2 mean-reversion strategy (`strategy_mr_dv
 The `Portfolio` class combines multiple completed strategy runs ("pods") into a unified portfolio. This models how a real IBKR multi-pod account works: each pod receives a capital allocation and compounds independently.
 
 **Pod model** â€” Each strategy is a self-contained pod. Pods run independently through `run_daily()` with their own capital, universe, and logic. The `Portfolio` aggregator is read-only: it takes completed pod results and reconstructs a combined equity curve over their common date range.
+
+**Live pod-account invariant** â€” In live deployment, the intended production model is one independent strategy sleeve per real broker account/subaccount/sleeve. If multiple pods share one raw broker account, the system needs an explicit pod ledger before overlapping symbols or pod-level reconciliation can be trusted.
 
 **Buy-and-hold math (default)** â€” Each pod gets `capital * weight` and compounds its own daily returns independently. Portfolio equity = sum of pod equities. Weights drift with performance, matching real-world behavior where you don't rebalance between strategies daily.
 

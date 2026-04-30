@@ -210,11 +210,35 @@ The local SQLite database stores:
 - broker order records
 - fills
 - pod state
+- append-only pod state history
 
 This gives:
 - auditability
 - operator visibility
 - deterministic restart behavior
+
+`broker_snapshot_cache` remains one latest raw broker snapshot per account. It may be refreshed by pre-VPlan sizing, post-execution reconcile, or EOD sampling.
+
+`pod_state` is one latest trusted sleeve state. It is updated by:
+
+```text
+post_execution_reconcile -> after fills/positions are checked
+eod_snapshot              -> after market close for clean account state
+```
+
+`pod_state` stores the latest stage/source directly, and `pod_state_history` records every stage sample:
+
+```text
+snapshot_stage_str = post_execution | eod
+snapshot_source_str = broker | virtual_broker
+```
+
+The sizing contract is unchanged:
+
+```text
+PodBudget = fresh BrokerNetLiq at VPlan build * pod_budget_fraction
+TargetShares_i = floor(TargetWeight_i * PodBudget / LiveReferencePrice_i)
+```
 
 ### 7. Optional Scheduler Service
 
@@ -229,6 +253,7 @@ It is responsible only for:
 - deciding when work is due
 - sleeping until the next due UTC wake-up
 - calling `tick`
+- calling `eod_snapshot` after the close when that phase is due
 
 It does not implement a second execution path.
 

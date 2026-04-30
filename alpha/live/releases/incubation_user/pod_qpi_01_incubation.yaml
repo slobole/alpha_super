@@ -1,0 +1,38 @@
+identity:
+  release_id: incubation_user.pod_qpi.incubation.v1
+  user_id: incubation_user
+  pod_id: pod_qpi_01
+
+deployment:
+  mode: incubation
+  enabled_bool: true
+
+broker:
+  account_route: SIM_pod_qpi_01
+  host_str: 127.0.0.1
+  port_int: 7497
+  client_id_int: 91
+  timeout_seconds_float: 4.0
+
+strategy:
+  strategy_import_str: strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy
+  data_profile_str: norgate_eod_sp500_pit
+  params:
+    max_positions_int: 10
+
+market:
+  session_calendar_id_str: XNYS
+
+schedule:
+  signal_clock_str: eod_snapshot_ready
+  execution_policy_str: next_open_moo
+
+execution:
+  pod_budget_fraction_float: 1.0
+  auto_submit_enabled_bool: true
+
+bootstrap:
+  initial_cash_float: 100000.0
+
+risk:
+  risk_profile_str: standard_equity_mr

@@ -89,13 +89,14 @@ def _build_defense_first_strategy(
     strategy_name_str: str,
     config: DefenseFirstConfig,
     rebalance_weight_df: pd.DataFrame,
+    capital_base_float: float = 100_000.0,
 ) -> DefenseFirstStrategy:
     strategy = DefenseFirstStrategy(
         name=strategy_name_str,
         benchmarks=config.benchmark_list,
         rebalance_weight_df=rebalance_weight_df,
         tradeable_asset_list=config.tradeable_asset_list,
-        capital_base=100_000,
+        capital_base=capital_base_float,
         slippage=0.00025,
         commission_per_share=0.005,
         commission_minimum=1.0,
@@ -107,6 +108,8 @@ def _run_strategy_from_weight_df(
     strategy: DefenseFirstStrategy,
     execution_price_df: pd.DataFrame,
     rebalance_weight_df: pd.DataFrame,
+    backtest_start_date_str: str | None = None,
+    show_progress_bool: bool = False,
 ) -> None:
     strategy.show_taa_weights_report = True
 
@@ -115,13 +118,19 @@ def _run_strategy_from_weight_df(
     # `rebalance_weight_df` inside `iterate()`.
     strategy.daily_target_weights = rebalance_weight_df.reindex(execution_price_df.index).ffill().dropna()
 
-    calendar_idx = execution_price_df.index[execution_price_df.index >= rebalance_weight_df.index[0]]
+    calendar_start_ts = pd.Timestamp(rebalance_weight_df.index[0])
+    if backtest_start_date_str is not None:
+        calendar_start_ts = max(calendar_start_ts, pd.Timestamp(backtest_start_date_str))
+    # *** CRITICAL*** Deployment-reference runs keep full pre-start data for
+    # month-end signal formation, but the executable calendar starts at the
+    # first deployment fill session.
+    calendar_idx = execution_price_df.index[execution_price_df.index >= calendar_start_ts]
     run_daily(
         strategy,
         execution_price_df,
         calendar_idx,
-        show_progress=False,
-        show_signal_progress_bool=False,
+        show_progress=show_progress_bool,
+        show_signal_progress_bool=show_progress_bool,
     )
 
 
@@ -132,6 +141,8 @@ def run_standard_fallback_variant(
     show_display_bool: bool = True,
     save_results_bool: bool = True,
     output_dir_str: str = "results",
+    backtest_start_date_str: str | None = None,
+    capital_base_float: float = 100_000.0,
 ) -> DefenseFirstStrategy:
     """
     Run a standard return-momentum Defense First fallback variant.
@@ -142,11 +153,13 @@ def run_standard_fallback_variant(
         strategy_name_str=strategy_name_str,
         config=config,
         rebalance_weight_df=rebalance_weight_df,
+        capital_base_float=capital_base_float,
     )
     _run_strategy_from_weight_df(
         strategy=strategy,
         execution_price_df=execution_price_df,
         rebalance_weight_df=rebalance_weight_df,
+        backtest_start_date_str=backtest_start_date_str,
     )
 
     if show_display_bool:

@@ -54,7 +54,7 @@ Execution mapping:
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Sequence
 
 import numpy as np
@@ -72,6 +72,25 @@ ATR_WINDOW_INT = 20
 
 def default_trade_id_int() -> int:
     return -1
+
+
+def get_asof_universe_membership_ser(
+    universe_df: pd.DataFrame,
+    decision_date_ts: pd.Timestamp,
+) -> pd.Series:
+    if len(universe_df) == 0:
+        raise RuntimeError("universe_df is empty.")
+
+    sorted_universe_df = universe_df.sort_index()
+    # *** CRITICAL*** PIT universe membership may lag the newest price date.
+    # Use only the latest universe row available on or before decision_t; never
+    # use a later row, because that would leak future index membership.
+    universe_row_int = int(
+        sorted_universe_df.index.searchsorted(pd.Timestamp(decision_date_ts), side="right")
+    ) - 1
+    if universe_row_int < 0:
+        raise RuntimeError(f"universe_df has no row on or before decision date {decision_date_ts}.")
+    return sorted_universe_df.iloc[universe_row_int]
 
 
 @dataclass(frozen=True)
@@ -123,10 +142,12 @@ __all__ = [
     "AtrNormalizedNdxStrategy",
     "DEFAULT_CONFIG",
     "audit_pit_universe_df",
+    "build_execution_timing_analysis_inputs",
     "compute_atr_normalized_signal_tables",
     "get_atr_normalized_ndx_data",
     "get_monthly_decision_close_df",
     "map_month_end_decision_dates_to_rebalance_schedule_df",
+    "run_variant",
 ]
 
 
@@ -146,8 +167,11 @@ def audit_pit_universe_df(
     if len(aligned_symbol_list) == 0:
         raise RuntimeError("No tradeable symbols overlap between pricing data and universe_df.")
 
-    aligned_universe_df = universe_df.loc[universe_df.index.isin(execution_index), aligned_symbol_list].copy()
-    missing_execution_index = execution_index.difference(aligned_universe_df.index)
+    # *** CRITICAL*** Align PIT membership to every price date by causal
+    # forward-fill only. This supports Norgate universe matrices that lag the
+    # latest price date while preserving member_{i,t} = member_{i,max(s <= t)}.
+    aligned_universe_df = universe_df.loc[:, aligned_symbol_list].reindex(execution_index).ffill()
+    missing_execution_index = aligned_universe_df.index[aligned_universe_df.isna().any(axis=1)]
     if len(missing_execution_index) > 0:
         missing_date_preview_list = [pd.Timestamp(date_ts).strftime("%Y-%m-%d") for date_ts in missing_execution_index[:5]]
         raise RuntimeError(
@@ -395,6 +419,87 @@ def get_atr_normalized_ndx_data(
     return pricing_data_df, audited_universe_df, rebalance_schedule_df
 
 
+def _map_rebalance_schedule_to_decision_close_schedule_df(
+    rebalance_schedule_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Convert next-open rebalance schedule to decision-close order-intent dates.
+    """
+    decision_schedule_map: dict[pd.Timestamp, pd.Timestamp] = {}
+    for _execution_date_ts, schedule_row_ser in rebalance_schedule_df.iterrows():
+        decision_date_ts = pd.Timestamp(schedule_row_ser["decision_date_ts"])
+        # *** CRITICAL*** ExecutionTimingAnalysis emits order intent on the
+        # actual month-end decision close, then the matrix applies T close,
+        # T+1 open, or T+1 close fills. Keeping the original execution-date
+        # schedule here would hide the biased T close diagnostic.
+        decision_schedule_map[decision_date_ts] = decision_date_ts
+
+    if len(decision_schedule_map) == 0:
+        raise RuntimeError("No decision-close dates were available for execution timing analysis.")
+
+    decision_close_schedule_df = pd.DataFrame.from_dict(
+        decision_schedule_map,
+        orient="index",
+        columns=["decision_date_ts"],
+    ).sort_index()
+    decision_close_schedule_df.index.name = "decision_close_date_ts"
+    return decision_close_schedule_df
+
+
+def build_execution_timing_analysis_inputs() -> dict[str, object]:
+    """
+    Build inputs for ExecutionTimingAnalysis.
+
+    Formula:
+
+        decision_t = monthly ATR-normalized signal known after T close
+
+        entry_fill = decision_t + entry_lag at entry_price_field
+        exit_fill  = decision_t + exit_lag  at exit_price_field
+    """
+    config = DEFAULT_CONFIG
+    pricing_data_df, universe_df, rebalance_schedule_df = get_atr_normalized_ndx_data(config)
+    decision_close_schedule_df = _map_rebalance_schedule_to_decision_close_schedule_df(
+        rebalance_schedule_df=rebalance_schedule_df,
+    )
+
+    def strategy_factory_fn():
+        strategy_obj = AtrNormalizedNdxStrategy(
+            name="strategy_mo_atr_normalized_ndx",
+            benchmarks=[config.regime_symbol_str],
+            rebalance_schedule_df=decision_close_schedule_df,
+            regime_symbol_str=config.regime_symbol_str,
+            capital_base=config.capital_base_float,
+            slippage=config.slippage_float,
+            commission_per_share=config.commission_per_share_float,
+            commission_minimum=config.commission_minimum_float,
+            lookback_month_int=config.lookback_month_int,
+            index_trend_window_int=config.index_trend_window_int,
+            stock_trend_window_int=config.stock_trend_window_int,
+            max_positions_int=config.max_positions_int,
+        )
+        strategy_obj.universe_df = universe_df
+        strategy_obj.trade_id_int = 0
+        strategy_obj.current_trade_map = defaultdict(default_trade_id_int)
+        return strategy_obj
+
+    calendar_idx = pricing_data_df.index[
+        pricing_data_df.index >= pd.Timestamp(config.backtest_start_date_str)
+    ]
+
+    return {
+        "strategy_factory_fn": strategy_factory_fn,
+        "pricing_data_df": pricing_data_df,
+        "calendar_idx": pd.DatetimeIndex(calendar_idx),
+        "order_generation_mode_str": "signal_bar",
+        "risk_model_str": "taa_rebalance",
+        "entry_timing_str_tuple": ("same_close_moc", "next_open", "next_close"),
+        "exit_timing_str_tuple": ("same_close_moc", "next_open", "next_close"),
+        "default_entry_timing_str": "next_open",
+        "default_exit_timing_str": "next_open",
+    }
+
+
 class AtrNormalizedNdxStrategy(Strategy):
     """
     Long-only monthly Nasdaq-100 momentum rotation with fixed slot sizing.
@@ -547,9 +652,6 @@ class AtrNormalizedNdxStrategy(Strategy):
     def get_target_weight_ser(self, close_row_ser: pd.Series) -> pd.Series:
         if self.universe_df is None:
             raise RuntimeError("universe_df must be set before monthly rebalances.")
-        if self.previous_bar not in self.universe_df.index:
-            raise RuntimeError(f"universe_df is missing decision date {self.previous_bar}.")
-
         candidate_feature_df = close_row_ser.unstack()
         if self.regime_symbol_str not in candidate_feature_df.index:
             raise RuntimeError(f"Missing regime feature row for {self.regime_symbol_str}.")
@@ -562,7 +664,10 @@ class AtrNormalizedNdxStrategy(Strategy):
         if any(field_str not in candidate_feature_df.columns for field_str in required_field_list):
             return pd.Series(dtype=float)
 
-        universe_member_ser = self.universe_df.loc[self.previous_bar]
+        universe_member_ser = get_asof_universe_membership_ser(
+            self.universe_df,
+            pd.Timestamp(self.previous_bar),
+        )
         active_symbol_list = universe_member_ser[universe_member_ser == 1].index.astype(str).tolist()
         candidate_feature_df = candidate_feature_df[candidate_feature_df.index.isin(active_symbol_list)].copy()
         if len(candidate_feature_df) == 0:
@@ -674,31 +779,78 @@ class AtrNormalizedNdxStrategy(Strategy):
             )
 
 
-if __name__ == "__main__":
-    config = DEFAULT_CONFIG
-    pricing_data_df, universe_df, rebalance_schedule_df = get_atr_normalized_ndx_data(config)
+def run_variant(
+    show_display_bool: bool = True,
+    save_results_bool: bool = True,
+    output_dir_str: str = "results",
+    backtest_start_date_str: str | None = None,
+    capital_base_float: float | None = None,
+    end_date_str: str | None = None,
+) -> AtrNormalizedNdxStrategy:
+    config_obj = DEFAULT_CONFIG
+    if (
+        backtest_start_date_str is not None
+        or capital_base_float is not None
+        or end_date_str is not None
+    ):
+        config_obj = replace(
+            DEFAULT_CONFIG,
+            backtest_start_date_str=(
+                DEFAULT_CONFIG.backtest_start_date_str
+                if backtest_start_date_str is None
+                else backtest_start_date_str
+            ),
+            capital_base_float=(
+                DEFAULT_CONFIG.capital_base_float
+                if capital_base_float is None
+                else float(capital_base_float)
+            ),
+            end_date_str=end_date_str,
+        )
+    pricing_data_df, universe_df, rebalance_schedule_df = get_atr_normalized_ndx_data(config_obj)
 
-    strategy = AtrNormalizedNdxStrategy(
+    strategy_obj = AtrNormalizedNdxStrategy(
         name="strategy_mo_atr_normalized_ndx",
-        benchmarks=[config.regime_symbol_str],
+        benchmarks=[config_obj.regime_symbol_str],
         rebalance_schedule_df=rebalance_schedule_df,
-        regime_symbol_str=config.regime_symbol_str,
-        capital_base=config.capital_base_float,
-        slippage=config.slippage_float,
-        commission_per_share=config.commission_per_share_float,
-        commission_minimum=config.commission_minimum_float,
-        lookback_month_int=config.lookback_month_int,
-        index_trend_window_int=config.index_trend_window_int,
-        stock_trend_window_int=config.stock_trend_window_int,
-        max_positions_int=config.max_positions_int,
+        regime_symbol_str=config_obj.regime_symbol_str,
+        capital_base=config_obj.capital_base_float,
+        slippage=config_obj.slippage_float,
+        commission_per_share=config_obj.commission_per_share_float,
+        commission_minimum=config_obj.commission_minimum_float,
+        lookback_month_int=config_obj.lookback_month_int,
+        index_trend_window_int=config_obj.index_trend_window_int,
+        stock_trend_window_int=config_obj.stock_trend_window_int,
+        max_positions_int=config_obj.max_positions_int,
     )
-    strategy.universe_df = universe_df
+    strategy_obj.universe_df = universe_df
 
-    calendar_idx = pricing_data_df.index[pricing_data_df.index >= pd.Timestamp(config.backtest_start_date_str)]
-    run_daily(strategy, pricing_data_df, calendar=calendar_idx, audit_override_bool=None)
+    # *** CRITICAL*** Deployment-reference backtests keep full pre-start
+    # history for monthly ATR and trend features, but the executable calendar
+    # starts at the first deployment fill session.
+    calendar_idx = pricing_data_df.index[
+        pricing_data_df.index >= pd.Timestamp(config_obj.backtest_start_date_str)
+    ]
+    run_daily(
+        strategy_obj,
+        pricing_data_df,
+        calendar=calendar_idx,
+        show_progress=show_display_bool,
+        show_signal_progress_bool=show_display_bool,
+        audit_override_bool=None,
+    )
 
-    pd.set_option("display.max_columns", None)
-    pd.set_option("display.width", 1000)
-    display(strategy.summary)
-    display(strategy.summary_trades)
-    save_results(strategy)
+    if show_display_bool:
+        pd.set_option("display.max_columns", None)
+        pd.set_option("display.width", 1000)
+        display(strategy_obj.summary)
+        display(strategy_obj.summary_trades)
+
+    if save_results_bool:
+        save_results(strategy_obj, output_dir=output_dir_str)
+
+    return strategy_obj
+
+
+if __name__ == "__main__":
+    run_variant()

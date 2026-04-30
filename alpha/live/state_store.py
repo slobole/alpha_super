@@ -12,6 +12,7 @@ from alpha.live.models import LiveRelease, PodState
 SHARED_CORE_TABLE_NAME_TUPLE: tuple[str, ...] = (
     "live_release",
     "pod_state",
+    "pod_state_history",
     "job_run",
     "scheduler_lease",
 )
@@ -89,7 +90,24 @@ class LiveStateStore:
                     cash_float REAL NOT NULL,
                     total_value_float REAL NOT NULL,
                     strategy_state_json_str TEXT NOT NULL,
+                    snapshot_stage_str TEXT NOT NULL DEFAULT 'unknown',
+                    snapshot_source_str TEXT NOT NULL DEFAULT 'pod_state',
                     updated_timestamp_str TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS pod_state_history (
+                    pod_state_history_id_int INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pod_id_str TEXT NOT NULL,
+                    user_id_str TEXT NOT NULL,
+                    account_route_str TEXT NOT NULL,
+                    position_json_str TEXT NOT NULL,
+                    cash_float REAL NOT NULL,
+                    total_value_float REAL NOT NULL,
+                    strategy_state_json_str TEXT NOT NULL,
+                    snapshot_stage_str TEXT NOT NULL DEFAULT 'unknown',
+                    snapshot_source_str TEXT NOT NULL DEFAULT 'pod_state',
+                    updated_timestamp_str TEXT NOT NULL,
+                    recorded_timestamp_str TEXT NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS job_run (
@@ -158,6 +176,44 @@ class LiveStateStore:
                     """
                     ALTER TABLE live_release
                     ADD COLUMN broker_timeout_seconds_float REAL NOT NULL DEFAULT 4.0
+                    """
+                )
+
+            pod_state_column_name_list = [
+                row_obj["name"]
+                for row_obj in connection_obj.execute("PRAGMA table_info(pod_state)").fetchall()
+            ]
+            if "snapshot_stage_str" not in pod_state_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE pod_state
+                    ADD COLUMN snapshot_stage_str TEXT NOT NULL DEFAULT 'unknown'
+                    """
+                )
+            if "snapshot_source_str" not in pod_state_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE pod_state
+                    ADD COLUMN snapshot_source_str TEXT NOT NULL DEFAULT 'pod_state'
+                    """
+                )
+
+            pod_state_history_column_name_list = [
+                row_obj["name"]
+                for row_obj in connection_obj.execute("PRAGMA table_info(pod_state_history)").fetchall()
+            ]
+            if "snapshot_stage_str" not in pod_state_history_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE pod_state_history
+                    ADD COLUMN snapshot_stage_str TEXT NOT NULL DEFAULT 'unknown'
+                    """
+                )
+            if "snapshot_source_str" not in pod_state_history_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE pod_state_history
+                    ADD COLUMN snapshot_source_str TEXT NOT NULL DEFAULT 'pod_state'
                     """
                 )
 
@@ -404,10 +460,26 @@ class LiveStateStore:
             total_value_float=float(row_obj["total_value_float"]),
             strategy_state_dict=json.loads(row_obj["strategy_state_json_str"]),
             updated_timestamp_ts=_deserialize_timestamp_ts(row_obj["updated_timestamp_str"]),
+            snapshot_stage_str=str(row_obj["snapshot_stage_str"]),
+            snapshot_source_str=str(row_obj["snapshot_source_str"]),
         )
 
-    def upsert_pod_state(self, pod_state_obj: PodState) -> None:
+    def upsert_pod_state(
+        self,
+        pod_state_obj: PodState,
+        snapshot_stage_str: str | None = None,
+        snapshot_source_str: str | None = None,
+    ) -> None:
         with self._connect() as connection_obj:
+            position_json_str = json.dumps(pod_state_obj.position_amount_map, sort_keys=True)
+            strategy_state_json_str = json.dumps(pod_state_obj.strategy_state_dict, sort_keys=True)
+            updated_timestamp_str = _serialize_timestamp_str(pod_state_obj.updated_timestamp_ts)
+            effective_snapshot_stage_str = (
+                pod_state_obj.snapshot_stage_str if snapshot_stage_str is None else str(snapshot_stage_str)
+            )
+            effective_snapshot_source_str = (
+                pod_state_obj.snapshot_source_str if snapshot_source_str is None else str(snapshot_source_str)
+            )
             connection_obj.execute(
                 """
                 INSERT INTO pod_state (
@@ -418,8 +490,10 @@ class LiveStateStore:
                     cash_float,
                     total_value_float,
                     strategy_state_json_str,
+                    snapshot_stage_str,
+                    snapshot_source_str,
                     updated_timestamp_str
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(pod_id_str) DO UPDATE SET
                     user_id_str = excluded.user_id_str,
                     account_route_str = excluded.account_route_str,
@@ -427,19 +501,94 @@ class LiveStateStore:
                     cash_float = excluded.cash_float,
                     total_value_float = excluded.total_value_float,
                     strategy_state_json_str = excluded.strategy_state_json_str,
+                    snapshot_stage_str = excluded.snapshot_stage_str,
+                    snapshot_source_str = excluded.snapshot_source_str,
                     updated_timestamp_str = excluded.updated_timestamp_str
                 """,
                 (
                     pod_state_obj.pod_id_str,
                     pod_state_obj.user_id_str,
                     pod_state_obj.account_route_str,
-                    json.dumps(pod_state_obj.position_amount_map, sort_keys=True),
+                    position_json_str,
                     float(pod_state_obj.cash_float),
                     float(pod_state_obj.total_value_float),
-                    json.dumps(pod_state_obj.strategy_state_dict, sort_keys=True),
-                    _serialize_timestamp_str(pod_state_obj.updated_timestamp_ts),
+                    strategy_state_json_str,
+                    effective_snapshot_stage_str,
+                    effective_snapshot_source_str,
+                    updated_timestamp_str,
                 ),
             )
+            connection_obj.execute(
+                """
+                INSERT INTO pod_state_history (
+                    pod_id_str,
+                    user_id_str,
+                    account_route_str,
+                    position_json_str,
+                    cash_float,
+                    total_value_float,
+                    strategy_state_json_str,
+                    snapshot_stage_str,
+                    snapshot_source_str,
+                    updated_timestamp_str,
+                    recorded_timestamp_str
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    pod_state_obj.pod_id_str,
+                    pod_state_obj.user_id_str,
+                    pod_state_obj.account_route_str,
+                    position_json_str,
+                    float(pod_state_obj.cash_float),
+                    float(pod_state_obj.total_value_float),
+                    strategy_state_json_str,
+                    effective_snapshot_stage_str,
+                    effective_snapshot_source_str,
+                    updated_timestamp_str,
+                    _serialize_timestamp_str(_utc_now_ts()),
+                ),
+            )
+
+    def get_pod_state_history_row_dict_list(self, pod_id_str: str) -> list[dict[str, object]]:
+        with self._connect() as connection_obj:
+            row_list = connection_obj.execute(
+                """
+                SELECT
+                    pod_state_history_id_int,
+                    pod_id_str,
+                    user_id_str,
+                    account_route_str,
+                    position_json_str,
+                    cash_float,
+                    total_value_float,
+                    strategy_state_json_str,
+                    snapshot_stage_str,
+                    snapshot_source_str,
+                    updated_timestamp_str,
+                    recorded_timestamp_str
+                FROM pod_state_history
+                WHERE pod_id_str = ?
+                ORDER BY updated_timestamp_str ASC, pod_state_history_id_int ASC
+                """,
+                (pod_id_str,),
+            ).fetchall()
+        return [
+            {
+                "pod_state_history_id_int": int(row_obj["pod_state_history_id_int"]),
+                "pod_id_str": str(row_obj["pod_id_str"]),
+                "user_id_str": str(row_obj["user_id_str"]),
+                "account_route_str": str(row_obj["account_route_str"]),
+                "position_amount_map": json.loads(row_obj["position_json_str"]),
+                "cash_float": float(row_obj["cash_float"]),
+                "total_value_float": float(row_obj["total_value_float"]),
+                "strategy_state_dict": json.loads(row_obj["strategy_state_json_str"]),
+                "snapshot_stage_str": str(row_obj["snapshot_stage_str"]),
+                "snapshot_source_str": str(row_obj["snapshot_source_str"]),
+                "updated_timestamp_str": str(row_obj["updated_timestamp_str"]),
+                "recorded_timestamp_str": str(row_obj["recorded_timestamp_str"]),
+            }
+            for row_obj in row_list
+        ]
 
     def get_existing_table_name_list(self) -> list[str]:
         with self._connect() as connection_obj:

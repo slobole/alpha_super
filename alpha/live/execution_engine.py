@@ -16,6 +16,8 @@ from alpha.live.models import (
 def _broker_order_type_from_execution_policy_str(execution_policy_str: str) -> str:
     if execution_policy_str in ("next_open_moo", "next_month_first_open"):
         return "MOO"
+    if execution_policy_str == "next_open_market":
+        return "MKT"
     if execution_policy_str == "same_day_moc":
         return "MOC"
     raise ValueError(f"Unsupported execution_policy_str '{execution_policy_str}'.")
