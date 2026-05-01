@@ -13,6 +13,7 @@ import pandas as pd
 
 FRED_SOURCE_NAME_STR = "FRED"
 DEFAULT_FRED_TIMEOUT_INT = 30
+MAX_LIVE_FRED_FRESHNESS_BUSINESS_DAYS_INT = 2
 SUPPORTED_FRED_MODE_TUPLE: tuple[str, ...] = ("backtest", "live")
 
 
@@ -194,7 +195,7 @@ def load_daily_fred_series_snapshot(
         freshness_business_days_int=freshness_business_days_int,
     )
 
-    if mode_str == "live" and freshness_business_days_int > 1:
+    if mode_str == "live" and freshness_business_days_int > MAX_LIVE_FRED_FRESHNESS_BUSINESS_DAYS_INT:
         raise FredSeriesStaleError(
             message_str=(
                 f"FRED series '{series_id_str}' is too stale for live use. "
@@ -215,6 +216,7 @@ __all__ = [
     "FredSeriesStaleError",
     "FredSeriesUnavailableError",
     "FRED_SOURCE_NAME_STR",
+    "MAX_LIVE_FRED_FRESHNESS_BUSINESS_DAYS_INT",
     "build_fred_csv_url",
     "load_daily_fred_series_snapshot",
 ]

@@ -1047,6 +1047,10 @@ def _format_bps_str(value_obj: object, precision_int: int = 1) -> str:
     return f"{float(value_obj):.{precision_int}f} bps"
 
 
+def _format_compact_json_str(value_obj: object) -> str:
+    return json.dumps(value_obj, sort_keys=True, separators=(",", ":"))
+
+
 def _humanize_reason_code_str(reason_code_str: str | None) -> str:
     reason_map_dict = {
         "active_decision_plan_exists": "active decision plan already exists",
@@ -1440,6 +1444,76 @@ def _render_vplan_detail_str(detail_dict: dict[str, object]) -> str:
     return "\n".join(line_list)
 
 
+def _render_decision_plan_detail_str(detail_dict: dict[str, object]) -> str:
+    decision_plan_dict_list = list(detail_dict.get("decision_plan_dict_list", []))
+    line_list = ["DecisionPlan"]
+    if len(decision_plan_dict_list) == 0:
+        line_list.append("- No DecisionPlan was found.")
+        return "\n".join(line_list)
+
+    for decision_plan_dict in decision_plan_dict_list:
+        latest_vplan_id_obj = decision_plan_dict.get("latest_vplan_id_int")
+        latest_vplan_status_obj = decision_plan_dict.get("latest_vplan_status_str")
+        target_weight_map_dict = dict(decision_plan_dict.get("target_weight_map_dict", {}))
+        exit_asset_list = list(decision_plan_dict.get("exit_asset_list", []))
+        decision_base_position_map_dict = dict(
+            decision_plan_dict.get("decision_base_position_map_dict", {})
+        )
+        snapshot_metadata_dict = dict(decision_plan_dict.get("snapshot_metadata_dict", {}))
+        strategy_state_dict = dict(decision_plan_dict.get("strategy_state_dict", {}))
+        line_list.extend(
+            [
+                "",
+                f"Pod: {decision_plan_dict['pod_id_str']}",
+                f"- DecisionPlan id: {decision_plan_dict['decision_plan_id_int']}",
+                f"- Status: {decision_plan_dict['status_str']}",
+                f"- Book: {decision_plan_dict['decision_book_type_str']}",
+                f"- Account: {decision_plan_dict['account_route_str']}",
+                f"- Signal: {decision_plan_dict['signal_timestamp_str']}",
+                f"- Submit window: {decision_plan_dict['submission_timestamp_str']}",
+                f"- Target execution: {decision_plan_dict['target_execution_timestamp_str']}",
+                f"- Execution policy: {decision_plan_dict['execution_policy_str']}",
+                "- Latest VPlan: "
+                f"{'none' if latest_vplan_id_obj is None else '#' + str(latest_vplan_id_obj)}"
+                f" status={latest_vplan_status_obj or 'none'}",
+                "- Flags: "
+                f"preserve_untouched_positions={bool(decision_plan_dict['preserve_untouched_positions_bool'])} | "
+                f"rebalance_omitted_assets_to_zero={bool(decision_plan_dict['rebalance_omitted_assets_to_zero_bool'])} | "
+                f"cash_reserve_weight={_format_optional_float_str(decision_plan_dict['cash_reserve_weight_float'])}",
+            ]
+        )
+
+        if len(target_weight_map_dict) == 0:
+            line_list.append("- Targets: none")
+        else:
+            for asset_str, target_weight_float in sorted(target_weight_map_dict.items()):
+                line_list.append(
+                    "- Target: "
+                    f"{asset_str} | weight={_format_optional_float_str(target_weight_float, precision_int=6)}"
+                )
+
+        if len(exit_asset_list) == 0:
+            line_list.append("- Exits: none")
+        else:
+            line_list.append(f"- Exits: {', '.join(str(asset_str) for asset_str in exit_asset_list)}")
+
+        if len(decision_base_position_map_dict) == 0:
+            line_list.append("- Decision base positions: none")
+        else:
+            for asset_str, share_float in sorted(decision_base_position_map_dict.items()):
+                line_list.append(
+                    "- Decision base: "
+                    f"{asset_str} | shares={_format_optional_float_str(share_float)}"
+                )
+
+        if len(snapshot_metadata_dict) > 0:
+            line_list.append(f"- Metadata: {_format_compact_json_str(snapshot_metadata_dict)}")
+        if len(strategy_state_dict) > 0:
+            line_list.append(f"- Strategy state: {_format_compact_json_str(strategy_state_dict)}")
+
+    return "\n".join(line_list)
+
+
 def _render_execution_report_detail_str(detail_dict: dict[str, object]) -> str:
     execution_report_dict_list = list(detail_dict.get("execution_report_dict_list", []))
     line_list = ["Execution Report"]
@@ -1611,6 +1685,8 @@ def _render_command_output_str(command_name_str: str, detail_dict: dict[str, obj
         return _render_tick_detail_str(detail_dict)
     if command_name_str == "status":
         return _render_status_detail_str(detail_dict)
+    if command_name_str == "show_decision_plan":
+        return _render_decision_plan_detail_str(detail_dict)
     if command_name_str == "show_vplan":
         return _render_vplan_detail_str(detail_dict)
     if command_name_str == "execution_report":
@@ -2786,6 +2862,90 @@ def get_status_summary(
     }
 
 
+def show_decision_plan_summary(
+    state_store_obj: LiveStateStore,
+    as_of_ts: datetime,
+    releases_root_path_str: str,
+    decision_plan_id_int: int | None = None,
+    pod_id_str: str | None = None,
+) -> dict[str, object]:
+    _load_release_list_and_sync(
+        releases_root_path_str,
+        state_store_obj,
+        pod_id_str=pod_id_str,
+    )
+    if decision_plan_id_int is not None:
+        decision_plan_obj_list = [state_store_obj.get_decision_plan_by_id(decision_plan_id_int)]
+    elif pod_id_str is not None:
+        latest_decision_plan_obj = state_store_obj.get_latest_decision_plan_for_pod(pod_id_str)
+        decision_plan_obj_list = [] if latest_decision_plan_obj is None else [latest_decision_plan_obj]
+    else:
+        decision_plan_obj_list = []
+        for release_obj in state_store_obj.get_enabled_release_list():
+            latest_decision_plan_obj = state_store_obj.get_latest_decision_plan_for_pod(
+                release_obj.pod_id_str
+            )
+            if latest_decision_plan_obj is not None:
+                decision_plan_obj_list.append(latest_decision_plan_obj)
+
+    def _sorted_float_map_dict(raw_map_dict: dict[str, float]) -> dict[str, float]:
+        return {
+            str(asset_str): float(raw_map_dict[asset_str])
+            for asset_str in sorted(raw_map_dict)
+        }
+
+    def _build_decision_plan_dict(decision_plan_obj: DecisionPlan) -> dict[str, object]:
+        latest_vplan_obj = state_store_obj.get_latest_vplan_for_decision(
+            int(decision_plan_obj.decision_plan_id_int or 0)
+        )
+        return {
+            "decision_plan_id_int": decision_plan_obj.decision_plan_id_int,
+            "release_id_str": decision_plan_obj.release_id_str,
+            "user_id_str": decision_plan_obj.user_id_str,
+            "pod_id_str": decision_plan_obj.pod_id_str,
+            "account_route_str": decision_plan_obj.account_route_str,
+            "status_str": decision_plan_obj.status_str,
+            "decision_book_type_str": decision_plan_obj.decision_book_type_str,
+            "signal_timestamp_str": decision_plan_obj.signal_timestamp_ts.isoformat(),
+            "submission_timestamp_str": decision_plan_obj.submission_timestamp_ts.isoformat(),
+            "target_execution_timestamp_str": (
+                decision_plan_obj.target_execution_timestamp_ts.isoformat()
+            ),
+            "execution_policy_str": decision_plan_obj.execution_policy_str,
+            "entry_target_weight_map_dict": _sorted_float_map_dict(
+                decision_plan_obj.entry_target_weight_map_dict
+            ),
+            "full_target_weight_map_dict": _sorted_float_map_dict(
+                decision_plan_obj.full_target_weight_map_dict
+            ),
+            "target_weight_map_dict": _sorted_float_map_dict(decision_plan_obj.target_weight_map),
+            "exit_asset_list": sorted(str(asset_str) for asset_str in decision_plan_obj.exit_asset_set),
+            "entry_priority_list": [str(asset_str) for asset_str in decision_plan_obj.entry_priority_list],
+            "decision_base_position_map_dict": _sorted_float_map_dict(
+                decision_plan_obj.decision_base_position_map
+            ),
+            "snapshot_metadata_dict": dict(decision_plan_obj.snapshot_metadata_dict),
+            "strategy_state_dict": dict(decision_plan_obj.strategy_state_dict),
+            "cash_reserve_weight_float": float(decision_plan_obj.cash_reserve_weight_float),
+            "preserve_untouched_positions_bool": bool(
+                decision_plan_obj.preserve_untouched_positions_bool
+            ),
+            "rebalance_omitted_assets_to_zero_bool": bool(
+                decision_plan_obj.rebalance_omitted_assets_to_zero_bool
+            ),
+            "latest_vplan_id_int": None if latest_vplan_obj is None else latest_vplan_obj.vplan_id_int,
+            "latest_vplan_status_str": None if latest_vplan_obj is None else latest_vplan_obj.status_str,
+        }
+
+    return {
+        "as_of_timestamp_str": as_of_ts.isoformat(),
+        "decision_plan_dict_list": [
+            _build_decision_plan_dict(decision_plan_obj)
+            for decision_plan_obj in decision_plan_obj_list
+        ],
+    }
+
+
 def show_vplan_summary(
     state_store_obj: LiveStateStore,
     as_of_ts: datetime,
@@ -3697,6 +3857,7 @@ def main(argv_list: list[str] | None = None) -> int:
         choices=(
             "build_decision_plans",
             "build_vplan",
+            "show_decision_plan",
             "show_vplan",
             "submit_vplan",
             "post_execution_reconcile",
@@ -3716,6 +3877,7 @@ def main(argv_list: list[str] | None = None) -> int:
     parser_obj.add_argument("--log-path", dest="log_path_str", default=DEFAULT_LOG_PATH_STR)
     parser_obj.add_argument("--archive-root", dest="archive_root_path_str", default=None)
     parser_obj.add_argument("--json", dest="json_output_bool", action="store_true")
+    parser_obj.add_argument("--decision-plan-id", dest="decision_plan_id_int", type=int, default=None)
     parser_obj.add_argument("--vplan-id", dest="vplan_id_int", type=int, default=None)
     parser_obj.add_argument("--pod-id", dest="pod_id_str", default=None)
     parser_obj.add_argument("--broker-host", dest="broker_host_str", default=None)
@@ -3832,6 +3994,14 @@ def main(argv_list: list[str] | None = None) -> int:
                 as_of_ts=as_of_ts,
                 releases_root_path_str=parsed_args_obj.releases_root_path_str,
                 vplan_id_int=parsed_args_obj.vplan_id_int,
+                pod_id_str=parsed_args_obj.pod_id_str,
+            )
+        elif parsed_args_obj.command_name_str == "show_decision_plan":
+            detail_dict = show_decision_plan_summary(
+                state_store_obj=state_store_obj,
+                as_of_ts=as_of_ts,
+                releases_root_path_str=parsed_args_obj.releases_root_path_str,
+                decision_plan_id_int=parsed_args_obj.decision_plan_id_int,
                 pod_id_str=parsed_args_obj.pod_id_str,
             )
         elif parsed_args_obj.command_name_str == "execution_report":

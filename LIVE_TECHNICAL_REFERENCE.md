@@ -420,7 +420,7 @@ Inputs and outputs:
 - output: validated `LiveRelease`
 
 Important invariants:
-- `mode_str` must be `paper` or `live`
+- `mode_str` must be `incubation`, `paper`, or `live`
 - `account_route_str` must match the chosen mode
 - `0 < pod_budget_fraction_float <= 1`
 - only one enabled release per `pod_id_str`
@@ -556,6 +556,7 @@ Key public functions:
 - `submit_ready_vplans(...)`
 - `post_execution_reconcile(...)`
 - `get_status_summary(...)`
+- `show_decision_plan_summary(...)`
 - `show_vplan_summary(...)`
 - `get_execution_report_summary(...)`
 - `tick(...)`
@@ -575,6 +576,52 @@ expire_stale_decision_plans
 build_vplans
 submit_ready_vplans
 post_execution_reconcile
+```
+
+### `alpha/live/dashboard.py`
+
+Responsibility:
+- local read-only POD operations dashboard
+
+Run command:
+
+```bash
+uv run python -m alpha.live.dashboard serve --host 127.0.0.1 --port 8765
+```
+
+Key behavior:
+- discovers enabled releases from `alpha/live/releases`
+- resolves each POD state DB from `alpha/live/dashboard_config.yaml` or defaults
+- serves one plain HTML/CSS/JS page with compact POD rows and detail sections
+- polls `/api/pods` from the browser every few seconds
+- serves saved Reference DIFF artifacts from `results/live_reference_compare/...`
+
+Endpoint shape:
+- `GET /`
+- `GET /api/pods`
+- `GET /api/pods/<pod_id>`
+- `GET /api/pods/<pod_id>/events`
+- `GET /api/pods/<pod_id>/diff/latest`
+- `POST /api/pods/<pod_id>/diff/run`
+- `GET /api/jobs/<job_id>`
+
+Important invariants:
+- dashboard binds to `127.0.0.1` by default
+- GET endpoints read DB/log/artifact state and do not talk to IBKR
+- V1 exposes no trading controls: no `tick`, no `submit_vplan`, no reconcile button
+- the explicit DIFF button may run `runner.get_compare_reference_summary(...)` and write analysis artifacts
+
+Default dashboard DB resolution:
+
+```text
+paper/live POD, no override -> alpha/live/state/<mode>/<pod_id>.sqlite3
+incubation, no override     -> alpha/live/incubation_state.sqlite3
+```
+
+Current transition override:
+
+```text
+pod_dv2_caspersky_account_paper_01 -> alpha/live/live_state.sqlite3
 ```
 
 ### `alpha/live/scheduler_service.py`
@@ -904,6 +951,9 @@ The live layer exposes 2 public CLIs:
 - CLI name is singular, but the underlying function is `build_vplans(...)`
 - builds due `VPlan` objects across all applicable pods, or one POD when `--pod-id` is supplied
 
+`show_decision_plan`
+- read-only inspection command for the latest `DecisionPlan` by POD, or one exact plan with `--decision-plan-id`
+
 `submit_vplan`
 - submit one ready `VPlan` manually by id
 
@@ -964,6 +1014,8 @@ Explicit --db-path always overrides both defaults.
 Operational transition rule: if a POD already has broker positions and its `pod_state` / `strategy_state` live in `alpha/live/live_state.sqlite3`, keep passing that DB path until the POD is migrated into its dedicated DB.
 
 That rule applies to read commands and mutation commands. Otherwise `status` and `next_due` will inspect the new POD DB, while the running strategy history is still in the old DB.
+
+The dashboard follows the same transition rule through `alpha/live/dashboard_config.yaml`. Keep a DB override there for any POD that is still intentionally reading the old shared DB.
 
 ## Failure Modes And Troubleshooting
 

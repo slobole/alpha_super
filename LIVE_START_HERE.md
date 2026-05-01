@@ -111,7 +111,7 @@ If a POD already has open broker positions and was previously running from the o
 uv run python -m alpha.live.scheduler_service serve --mode paper --pod-id <pod_id> --db-path alpha/live/live_state.sqlite3
 ```
 
-Use the same `--db-path` on `status`, `next_due`, `tick`, `show_vplan`, and reconcile commands while the POD is still on the old DB.
+Use the same `--db-path` on `status`, `next_due`, `tick`, `show_decision_plan`, `show_vplan`, and reconcile commands while the POD is still on the old DB.
 
 Do not start an already-trading POD from a fresh empty POD DB. The broker may have positions, but the strategy memory in the DB would be empty.
 
@@ -127,6 +127,12 @@ Inspect status:
 
 ```bash
 uv run python -m alpha.live.runner status --mode paper --pod-id pod_dv2_01
+```
+
+Inspect the latest strategy decision:
+
+```bash
+uv run python -m alpha.live.runner show_decision_plan --mode paper --pod-id pod_dv2_01
 ```
 
 Inspect the next scheduler action:
@@ -147,12 +153,27 @@ Run the long-running service:
 uv run python -m alpha.live.scheduler_service serve --mode paper --pod-id pod_dv2_01
 ```
 
+Open the local dashboard:
+
+```bash
+uv run python -m alpha.live.dashboard serve --host 127.0.0.1 --port 8765
+```
+
+Then browse to:
+
+```text
+http://127.0.0.1:8765
+```
+
+The dashboard aggregates enabled PODs across `incubation`, `paper`, and `live`. It does not submit orders or reconcile. It reads DB/log/artifact state, and only runs Reference DIFF when you press the DIFF button.
+
 ## Manual Review Flow
 
 Use this when auto-submit is disabled in the release file.
 
 ```bash
 uv run python -m alpha.live.runner tick --mode paper --pod-id pod_dv2_01
+uv run python -m alpha.live.runner show_decision_plan --mode paper --pod-id pod_dv2_01
 uv run python -m alpha.live.runner show_vplan --mode paper --pod-id pod_dv2_01
 uv run python -m alpha.live.runner submit_vplan --mode paper --pod-id pod_dv2_01 --vplan-id 1
 uv run python -m alpha.live.runner post_execution_reconcile --mode paper --pod-id pod_dv2_01

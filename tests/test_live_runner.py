@@ -41,7 +41,9 @@ from alpha.live.runner import (
     get_execution_report_summary,
     preflight_contract_summary,
     get_status_summary,
+    main,
     post_execution_reconcile,
+    show_decision_plan_summary,
     show_vplan_summary,
     submit_ready_vplans,
     tick,
@@ -673,6 +675,74 @@ def _build_full_target_weight_decision_plan_stub(release_obj, as_of_ts, pod_stat
         preserve_untouched_positions_bool=False,
         rebalance_omitted_assets_to_zero_bool=True,
     )
+
+
+def test_show_decision_plan_summary_returns_latest_plan(tmp_path: Path):
+    _write_manifest(tmp_path, auto_submit_enabled_bool=False)
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+    release_obj = load_release_list(str(tmp_path / "releases"))[0]
+    state_store_obj.upsert_release(release_obj)
+    inserted_decision_plan_obj = state_store_obj.insert_decision_plan(
+        _build_full_target_weight_decision_plan_stub(
+            release_obj,
+            datetime(2024, 2, 1, 9, 0, tzinfo=MARKET_TIMEZONE_OBJ),
+            None,
+        )
+    )
+
+    detail_dict = show_decision_plan_summary(
+        state_store_obj=state_store_obj,
+        as_of_ts=datetime(2024, 2, 1, 9, 10, tzinfo=MARKET_TIMEZONE_OBJ),
+        releases_root_path_str=str(tmp_path / "releases"),
+        pod_id_str="pod_test_01",
+    )
+    output_str = _render_command_output_str("show_decision_plan", detail_dict)
+
+    decision_plan_dict = detail_dict["decision_plan_dict_list"][0]
+    assert decision_plan_dict["decision_plan_id_int"] == inserted_decision_plan_obj.decision_plan_id_int
+    assert decision_plan_dict["decision_book_type_str"] == "full_target_weight_book"
+    assert decision_plan_dict["target_weight_map_dict"] == {"AAPL": 0.3, "TLT": 0.2}
+    assert decision_plan_dict["decision_base_position_map_dict"] == {"AAPL": 4.0}
+    assert decision_plan_dict["latest_vplan_id_int"] is None
+    assert "DecisionPlan" in output_str
+    assert "- Target: AAPL | weight=0.300000" in output_str
+    assert "- Latest VPlan: none status=none" in output_str
+    assert "cash_reserve_weight=0.5000" in output_str
+
+
+def test_show_decision_plan_cli_outputs_latest_plan(tmp_path: Path, capsys):
+    db_path_str = str((tmp_path / "live.sqlite3").resolve())
+    _write_manifest(tmp_path, auto_submit_enabled_bool=False)
+    state_store_obj = LiveStateStore(db_path_str)
+    release_obj = load_release_list(str(tmp_path / "releases"))[0]
+    state_store_obj.upsert_release(release_obj)
+    state_store_obj.insert_decision_plan(
+        _build_decision_plan_stub(
+            release_obj,
+            datetime(2024, 2, 1, 9, 0, tzinfo=MARKET_TIMEZONE_OBJ),
+            None,
+        )
+    )
+
+    result_int = main(
+        [
+            "show_decision_plan",
+            "--mode",
+            "paper",
+            "--pod-id",
+            "pod_test_01",
+            "--db-path",
+            db_path_str,
+            "--releases-root",
+            str(tmp_path / "releases"),
+        ]
+    )
+
+    output_str = capsys.readouterr().out
+    assert result_int == 0
+    assert "DecisionPlan" in output_str
+    assert "Pod: pod_test_01" in output_str
+    assert "- Target: AAPL | weight=0.200000" in output_str
 
 
 def _build_two_asset_decision_plan_stub(release_obj, as_of_ts, pod_state_obj):

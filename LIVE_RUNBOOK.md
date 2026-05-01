@@ -57,6 +57,7 @@ Safe inspect commands:
 
 ```bash
 uv run python -m alpha.live.runner status --mode paper --pod-id pod_dv2_01
+uv run python -m alpha.live.runner show_decision_plan --mode paper --pod-id pod_dv2_01
 uv run python -m alpha.live.scheduler_service next_due --mode paper --pod-id pod_dv2_01
 ```
 
@@ -89,7 +90,56 @@ Current PAPER transition example:
 uv run python -m alpha.live.scheduler_service serve --mode paper --pod-id pod_dv2_caspersky_account_paper_01 --db-path alpha/live/live_state.sqlite3
 ```
 
-Use the same `--db-path` on `status`, `next_due`, `tick`, `show_vplan`, `submit_vplan`, `post_execution_reconcile`, and `eod_snapshot` while this PAPER POD is still on the old DB.
+Use the same `--db-path` on `status`, `next_due`, `tick`, `show_decision_plan`, `show_vplan`, `submit_vplan`, `post_execution_reconcile`, and `eod_snapshot` while this PAPER POD is still on the old DB.
+
+## Local POD Dashboard
+
+Start the local dashboard:
+
+```bash
+uv run python -m alpha.live.dashboard serve --host 127.0.0.1 --port 8765
+```
+
+Open:
+
+```text
+http://127.0.0.1:8765
+```
+
+The dashboard is one local web page for all enabled PODs in this deployment. It groups/filter views by mode and shows one compact row per POD:
+
+```text
+POD -> mode -> account -> health -> next action -> latest DecisionPlan/VPlan -> equity/cash -> warnings -> latest DIFF
+```
+
+V1 has no trading controls. It does not run `tick`, `submit_vplan`, or `post_execution_reconcile`. It reads SQLite DBs, the live JSONL event log, and existing Reference DIFF artifacts.
+
+Reference DIFF is the one explicit background action in the dashboard. Pressing `Run DIFF` starts `compare_reference` for that POD and writes analysis artifacts under:
+
+```text
+results/live_reference_compare/<mode>/<pod_id>/<timestamp>/
+```
+
+Dashboard DB routing is configured in:
+
+```text
+alpha/live/dashboard_config.yaml
+```
+
+Default DB paths:
+
+```text
+paper/live POD, no override -> alpha/live/state/<mode>/<pod_id>.sqlite3
+incubation, no override     -> alpha/live/incubation_state.sqlite3
+```
+
+Current PAPER transition override:
+
+```text
+pod_dv2_caspersky_account_paper_01 -> alpha/live/live_state.sqlite3
+```
+
+Keep that override until the current PAPER POD state is migrated out of the old shared DB. If you move a POD to its dedicated DB, update this config at the same time.
 
 ## Main Commands
 
@@ -142,6 +192,20 @@ uv run python -m alpha.live.scheduler_service next_due --mode paper --pod-id pod
 ```
 
 Use this to inspect what the service would do next.
+
+### Show Strategy Decision
+
+```bash
+uv run python -m alpha.live.runner show_decision_plan --mode paper --pod-id pod_dv2_01
+```
+
+This is read-only. It shows the latest strategy decision before broker sizing: signal time, submit window, target execution time, target weights, exits, metadata, and the linked VPlan status if one exists.
+
+Show one exact decision:
+
+```bash
+uv run python -m alpha.live.runner show_decision_plan --mode paper --decision-plan-id 1
+```
 
 ### Show Order Plan
 
@@ -429,6 +493,7 @@ Live state:
 ```text
 alpha/live/live_state.sqlite3                          # default without --pod-id
 alpha/live/state/<mode>/<pod_id>.sqlite3               # default with --pod-id
+alpha/live/dashboard_config.yaml                       # dashboard DB override map
 ```
 
 Explicit `--db-path` always wins. This is useful during transition from the old shared DB to a POD-specific DB.
@@ -451,6 +516,12 @@ Operator log:
 
 ```text
 alpha/live/logs/live_operator.log
+```
+
+Reference DIFF dashboard artifacts:
+
+```text
+results/live_reference_compare/<mode>/<pod_id>/<timestamp>/
 ```
 
 ## Short Mental Model

@@ -52,4 +52,5 @@ alpha/live/live_state.pre_reset_*.sqlite3
 alpha/live/incubation_state.sqlite3
 alpha/live/incubation_state.sqlite3-shm
 alpha/live/incubation_state.sqlite3-wal
+alpha/live/state/
 alpha/live/logs/

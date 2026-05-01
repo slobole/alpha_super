@@ -100,7 +100,7 @@ class FredLoaderTests(unittest.TestCase):
 
         self.assertEqual(exception_context.exception.reason_code_str, "dtb3_unavailable")
 
-    def test_load_daily_fred_series_snapshot_live_accepts_one_business_day_lag(self):
+    def test_load_daily_fred_series_snapshot_live_accepts_two_business_day_lag(self):
         with tempfile.TemporaryDirectory() as tmp_dir_str:
             cache_csv_path = Path(tmp_dir_str) / "DTB3.csv"
             cache_csv_path.write_text(
@@ -115,15 +115,15 @@ class FredLoaderTests(unittest.TestCase):
                 snapshot_obj = load_daily_fred_series_snapshot(
                     series_id_str="DTB3",
                     cache_csv_path_str=str(cache_csv_path),
-                    as_of_ts=datetime(2024, 2, 5, tzinfo=UTC),
+                    as_of_ts=datetime(2024, 2, 6, tzinfo=UTC),
                     mode_str="live",
                 )
 
-        self.assertEqual(snapshot_obj.freshness_business_days_int, 1)
+        self.assertEqual(snapshot_obj.freshness_business_days_int, 2)
         self.assertTrue(snapshot_obj.used_cache_bool)
         self.assertEqual(snapshot_obj.download_status_str, "cache_fallback_after_download_error")
 
-    def test_load_daily_fred_series_snapshot_live_rejects_more_than_one_business_day_staleness(self):
+    def test_load_daily_fred_series_snapshot_live_rejects_more_than_two_business_day_staleness(self):
         with tempfile.TemporaryDirectory() as tmp_dir_str:
             cache_csv_path = Path(tmp_dir_str) / "DTB3.csv"
             cache_csv_path.write_text(
@@ -139,7 +139,7 @@ class FredLoaderTests(unittest.TestCase):
                     load_daily_fred_series_snapshot(
                         series_id_str="DTB3",
                         cache_csv_path_str=str(cache_csv_path),
-                        as_of_ts=datetime(2024, 2, 6, tzinfo=UTC),
+                        as_of_ts=datetime(2024, 2, 7, tzinfo=UTC),
                         mode_str="live",
                     )
 
@@ -147,7 +147,7 @@ class FredLoaderTests(unittest.TestCase):
         self.assertIsNotNone(exception_context.exception.series_snapshot_obj)
         self.assertEqual(
             exception_context.exception.series_snapshot_obj.freshness_business_days_int,
-            2,
+            3,
         )
 
 

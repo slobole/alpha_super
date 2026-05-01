@@ -366,6 +366,7 @@ The public runner workflow is:
 - `tick`
 - `build_decision_plans`
 - `build_vplan`
+- `show_decision_plan`
 - `show_vplan`
 - `submit_vplan`
 - `post_execution_reconcile`
