@@ -357,7 +357,7 @@ one pod = one independent strategy sleeve
 The intended production pattern is:
 
 ```text
-one pod -> one real broker account/subaccount/sleeve
+one live pod = one strategy = one linked IBKR account/subaccount route = one ledger
 ```
 
 That broker account must have its own cash, positions, and account value that

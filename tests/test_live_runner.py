@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 import json
 from pathlib import Path
 import sqlite3
@@ -497,6 +497,47 @@ def test_tick_ignores_other_mode_enabled_release_for_deployment_guardrail(tmp_pa
 
     assert detail_dict["lease_acquired_bool"] is True
     assert detail_dict["created_decision_plan_count_int"] == 0
+
+
+def test_tick_with_pod_id_builds_only_requested_pod(tmp_path: Path, monkeypatch):
+    _write_manifest_file(
+        root_path_obj=tmp_path,
+        file_name_str="pod_a.yaml",
+        pod_id_str="pod_a",
+        release_id_str="user_001.pod_a.paper",
+        strategy_import_str="strategies.dv2.strategy_mr_dv2:DVO2Strategy",
+        auto_submit_enabled_bool=True,
+        account_route_str="DU1",
+    )
+    _write_manifest_file(
+        root_path_obj=tmp_path,
+        file_name_str="pod_b.yaml",
+        pod_id_str="pod_b",
+        release_id_str="user_001.pod_b.paper",
+        strategy_import_str="strategies.dv2.strategy_mr_dv2:DVO2Strategy",
+        auto_submit_enabled_bool=True,
+        account_route_str="DU2",
+    )
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda data_profile_str: pd.Timestamp("2024-01-31"),
+    )
+    monkeypatch.setattr("alpha.live.strategy_host.build_decision_plan_for_release", _build_decision_plan_stub)
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+
+    detail_dict = tick(
+        state_store_obj=state_store_obj,
+        broker_adapter_obj=StubBrokerAdapter(),
+        as_of_ts=datetime(2024, 1, 31, 22, 10, tzinfo=UTC),
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="paper",
+        pod_id_str="pod_b",
+    )
+
+    assert detail_dict["created_decision_plan_count_int"] == 1
+    assert state_store_obj.get_latest_decision_plan_for_pod("pod_a") is None
+    assert state_store_obj.get_latest_decision_plan_for_pod("pod_b") is not None
+    assert [release_obj.pod_id_str for release_obj in state_store_obj.get_enabled_release_list()] == ["pod_b"]
 
 
 def test_status_does_not_hard_fail_on_invalid_deployment_guardrail(tmp_path: Path, monkeypatch):

@@ -14,7 +14,6 @@ from alpha.live.logging_utils import (
     log_operator_message,
 )
 from alpha.live.models import DecisionPlan, LiveRelease, VPlan
-from alpha.live.release_manifest import load_release_list, validate_enabled_deployment_for_mode
 from alpha.live.state_store_v2 import LiveStateStore
 
 
@@ -64,28 +63,37 @@ def _parse_as_of_timestamp_ts(as_of_timestamp_str: str | None) -> datetime:
 def _resolve_db_path_for_mode_str(
     db_path_str: str | None,
     env_mode_str: str,
+    pod_id_str: str | None = None,
 ) -> str:
     return runner._resolve_db_path_for_mode_str(
         db_path_str=db_path_str,
         env_mode_str=env_mode_str,
+        pod_id_str=pod_id_str,
     )
 
 
 def _load_release_list_and_sync(
     releases_root_path_str: str,
     state_store_obj: LiveStateStore,
+    pod_id_str: str | None = None,
 ) -> list[LiveRelease]:
-    release_list = load_release_list(releases_root_path_str)
-    state_store_obj.upsert_release_list(release_list)
-    return release_list
+    return runner._load_release_list_and_sync(
+        releases_root_path_str,
+        state_store_obj,
+        pod_id_str=pod_id_str,
+    )
 
 
 def _validate_release_root_for_mutation(
     releases_root_path_str: str,
     env_mode_str: str,
+    pod_id_str: str | None = None,
 ) -> None:
-    release_list = load_release_list(releases_root_path_str)
-    validate_enabled_deployment_for_mode(release_list, env_mode_str)
+    runner._validate_release_root_for_mutation(
+        releases_root_path_str,
+        env_mode_str,
+        pod_id_str=pod_id_str,
+    )
 
 
 def _get_current_cycle_vplan_obj(
@@ -123,8 +131,13 @@ def get_scheduler_decision(
     env_mode_str: str,
     reconcile_grace_seconds_int: int = DEFAULT_RECONCILE_GRACE_SECONDS_INT,
     idle_max_sleep_seconds_int: int = DEFAULT_IDLE_MAX_SLEEP_SECONDS_INT,
+    pod_id_str: str | None = None,
 ) -> SchedulerDecision:
-    release_list = _load_release_list_and_sync(releases_root_path_str, state_store_obj)
+    release_list = _load_release_list_and_sync(
+        releases_root_path_str,
+        state_store_obj,
+        pod_id_str=pod_id_str,
+    )
     enabled_release_list = [
         release_obj
         for release_obj in release_list
@@ -424,11 +437,13 @@ def _build_related_pod_status_dict_list(
 ) -> list[dict[str, object]]:
     if len(related_pod_id_list) == 0:
         return []
+    pod_filter_str = related_pod_id_list[0] if len(related_pod_id_list) == 1 else None
     status_summary_dict = runner.get_status_summary(
         state_store_obj=state_store_obj,
         as_of_ts=as_of_ts,
         releases_root_path_str=releases_root_path_str,
         env_mode_str=env_mode_str,
+        pod_id_str=pod_filter_str,
     )
     related_pod_id_set = set(related_pod_id_list)
     return [
@@ -446,10 +461,12 @@ def _build_related_execution_report_dict_list(
 ) -> list[dict[str, object]]:
     if len(related_pod_id_list) == 0:
         return []
+    pod_filter_str = related_pod_id_list[0] if len(related_pod_id_list) == 1 else None
     execution_report_summary_dict = runner.get_execution_report_summary(
         state_store_obj=state_store_obj,
         as_of_ts=as_of_ts,
         releases_root_path_str=releases_root_path_str,
+        pod_id_str=pod_filter_str,
     )
     related_pod_id_set = set(related_pod_id_list)
     deduped_execution_report_dict_list: list[dict[str, object]] = []
@@ -477,10 +494,12 @@ def _build_related_vplan_dict_list(
     if len(related_pod_id_list) == 0:
         return []
     related_pod_id_set = set(related_pod_id_list)
+    pod_filter_str = related_pod_id_list[0] if len(related_pod_id_list) == 1 else None
     vplan_summary_dict = runner.show_vplan_summary(
         state_store_obj=state_store_obj,
         as_of_ts=as_of_ts,
         releases_root_path_str=releases_root_path_str,
+        pod_id_str=pod_filter_str,
     )
     deduped_vplan_dict_list: list[dict[str, object]] = []
     seen_vplan_key_set: set[tuple[str, int]] = set()
@@ -1800,6 +1819,7 @@ def next_due(
     env_mode_str: str,
     reconcile_grace_seconds_int: int = DEFAULT_RECONCILE_GRACE_SECONDS_INT,
     idle_max_sleep_seconds_int: int = DEFAULT_IDLE_MAX_SLEEP_SECONDS_INT,
+    pod_id_str: str | None = None,
 ) -> dict[str, object]:
     scheduler_decision_obj = get_scheduler_decision(
         state_store_obj=state_store_obj,
@@ -1808,6 +1828,7 @@ def next_due(
         env_mode_str=env_mode_str,
         reconcile_grace_seconds_int=reconcile_grace_seconds_int,
         idle_max_sleep_seconds_int=idle_max_sleep_seconds_int,
+        pod_id_str=pod_id_str,
     )
     return scheduler_decision_obj.to_dict()
 
@@ -1826,8 +1847,9 @@ def run_once(
     broker_port_int: int | None = None,
     broker_client_id_int: int | None = None,
     broker_timeout_seconds_float: float | None = None,
+    pod_id_str: str | None = None,
 ) -> dict[str, object]:
-    _validate_release_root_for_mutation(releases_root_path_str, env_mode_str)
+    _validate_release_root_for_mutation(releases_root_path_str, env_mode_str, pod_id_str=pod_id_str)
     broker_adapter_resolver_obj = runner.BrokerAdapterResolver(
         broker_adapter_obj=broker_adapter_obj,
         broker_host_str=broker_host_str,
@@ -1844,6 +1866,7 @@ def run_once(
         env_mode_str=env_mode_str,
         reconcile_grace_seconds_int=reconcile_grace_seconds_int,
         idle_max_sleep_seconds_int=idle_max_sleep_seconds_int,
+        pod_id_str=pod_id_str,
     )
     detail_dict = scheduler_decision_obj.to_dict()
     detail_dict["tick_invoked_bool"] = False
@@ -1871,6 +1894,7 @@ def run_once(
                 log_path_str=log_path_str,
                 broker_adapter_resolver_obj=broker_adapter_resolver_obj,
                 require_due_bool=True,
+                pod_id_str=pod_id_str,
             )
         else:
             tick_detail_dict = runner.tick(
@@ -1881,6 +1905,7 @@ def run_once(
                 env_mode_str=env_mode_str,
                 log_path_str=log_path_str,
                 broker_adapter_resolver_obj=broker_adapter_resolver_obj,
+                pod_id_str=pod_id_str,
             )
         detail_dict["tick_invoked_bool"] = True
         detail_dict["tick_detail_dict"] = tick_detail_dict
@@ -1927,8 +1952,9 @@ def serve(
     error_retry_seconds_int: int = DEFAULT_ERROR_RETRY_SECONDS_INT,
     log_path_str: str = DEFAULT_LOG_PATH_STR,
     broker_timeout_seconds_float: float | None = None,
+    pod_id_str: str | None = None,
 ) -> None:
-    _validate_release_root_for_mutation(releases_root_path_str, env_mode_str)
+    _validate_release_root_for_mutation(releases_root_path_str, env_mode_str, pod_id_str=pod_id_str)
     last_printed_sleep_signature_tup: tuple[object, ...] | None = None
     last_printed_sleep_timestamp_ts: datetime | None = None
     current_scheduler_decision_obj: SchedulerDecision | None = None
@@ -1958,6 +1984,7 @@ def serve(
                 timestamp_obj=datetime.now(tz=UTC),
                 field_map_dict={
                     "mode": env_mode_str,
+                    "pod": pod_id_str or "all",
                     "active_poll": f"{int(active_poll_seconds_int)}s",
                     "idle_sleep": f"{int(idle_max_sleep_seconds_int)}s",
                     "reconcile_grace": f"{int(reconcile_grace_seconds_int)}s",
@@ -1982,6 +2009,7 @@ def serve(
                 env_mode_str=env_mode_str,
                 reconcile_grace_seconds_int=reconcile_grace_seconds_int,
                 idle_max_sleep_seconds_int=idle_max_sleep_seconds_int,
+                pod_id_str=pod_id_str,
             )
             if current_scheduler_decision_obj.due_now_bool:
                 _emit_scheduler_event(
@@ -2017,6 +2045,7 @@ def serve(
                         log_path_str=log_path_str,
                         broker_adapter_resolver_obj=broker_adapter_resolver_obj,
                         require_due_bool=True,
+                        pod_id_str=pod_id_str,
                     )
                 else:
                     tick_detail_dict = runner.tick(
@@ -2027,6 +2056,7 @@ def serve(
                         env_mode_str=env_mode_str,
                         log_path_str=log_path_str,
                         broker_adapter_resolver_obj=broker_adapter_resolver_obj,
+                        pod_id_str=pod_id_str,
                     )
                 post_tick_pod_status_dict_list = _build_related_pod_status_dict_list(
                     state_store_obj=state_store_obj,
@@ -2244,6 +2274,7 @@ def main(argv_list: list[str] | None = None) -> int:
     db_path_str = _resolve_db_path_for_mode_str(
         db_path_str=parsed_args_obj.db_path_str,
         env_mode_str=parsed_args_obj.env_mode_str,
+        pod_id_str=parsed_args_obj.pod_id_str,
     )
     state_store_obj = LiveStateStore(db_path_str)
     broker_adapter_obj = None
@@ -2264,6 +2295,7 @@ def main(argv_list: list[str] | None = None) -> int:
             error_retry_seconds_int=parsed_args_obj.error_retry_seconds_int,
             log_path_str=parsed_args_obj.log_path_str,
             broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
+            pod_id_str=parsed_args_obj.pod_id_str,
         )
         return 0
 
@@ -2281,6 +2313,7 @@ def main(argv_list: list[str] | None = None) -> int:
             broker_port_int=parsed_args_obj.broker_port_int,
             broker_client_id_int=parsed_args_obj.broker_client_id_int,
             broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
+            pod_id_str=parsed_args_obj.pod_id_str,
         )
     elif parsed_args_obj.command_name_str == "compare_reference":
         detail_dict = runner.get_compare_reference_summary(
@@ -2305,6 +2338,7 @@ def main(argv_list: list[str] | None = None) -> int:
             broker_port_int=parsed_args_obj.broker_port_int,
             broker_client_id_int=parsed_args_obj.broker_client_id_int,
             broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
+            pod_id_str=parsed_args_obj.pod_id_str,
         )
     else:
         detail_dict = next_due(
@@ -2314,6 +2348,7 @@ def main(argv_list: list[str] | None = None) -> int:
             env_mode_str=parsed_args_obj.env_mode_str,
             reconcile_grace_seconds_int=parsed_args_obj.reconcile_grace_seconds_int,
             idle_max_sleep_seconds_int=parsed_args_obj.idle_max_sleep_seconds_int,
+            pod_id_str=parsed_args_obj.pod_id_str,
         )
 
     if parsed_args_obj.json_output_bool:

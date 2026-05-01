@@ -48,7 +48,7 @@ Backtests must aim to be as credible, conservative, and robust as the current da
 
 Live trading must preserve backtest semantics up to irreducible market frictions. If the live implementation changes strategy meaning, then it is not the same strategy.
 
-For live deployment, prefer a deterministic order-clerk model: the strategy creates explicit order intent from prior-available information, and the execution layer transmits, tracks, reconciles, and reports that intent without adding opaque intelligence.
+For live deployment, prefer a deterministic per-pod order-clerk model: the strategy creates explicit order intent from prior-available information, and that pod's execution layer transmits, tracks, reconciles, and reports that intent without adding opaque intelligence.
 
 Any dangerous operation, realism gap, hidden assumption, operational ambiguity, or potentially misleading simplification must fail loud: raise the flag, document it, and discuss its likely impact instead of leaving it implicit.
 
@@ -70,7 +70,7 @@ Any dangerous operation, realism gap, hidden assumption, operational ambiguity, 
 
 **Explicit semantics** â€” If you change signal timing, order timing, execution assumptions, rebalance mapping, portfolio aggregation math, or cost modeling, state the old behavior, the new behavior, and the quantitative consequence.
 
-**Live pod-account mapping** â€” For live trading, a pod means one independent strategy sleeve. By default, that sleeve must map to a real isolated broker account, subaccount, or broker-recognized sleeve with its own cash, positions, and account value. Do not treat a pod as a soft label inside one shared raw broker account unless a first-class pod ledger exists.
+**Live pod-account mapping** â€” For live trading, a pod means one independent strategy sleeve: one live pod = one strategy = one linked IBKR account/subaccount route = one ledger. By default, that sleeve must map to a real isolated broker account, subaccount, or broker-recognized sleeve with its own cash, positions, and account value. Do not assign two different live strategies to the same account route. Do not treat a pod as a soft label inside one shared raw broker account unless a first-class pod ledger exists.
 
 **Domain naming** â€” Use strict `Domain_Type` naming in quantitative logic, for example `price_vec`, `return_ser`, `signal_df`, `target_weight_ser`.
 
@@ -152,11 +152,11 @@ Concrete `Strategy` subclasses. The DV2 mean-reversion strategy (`strategy_mr_dv
 
 ### Multi-Strategy Portfolios (`alpha/engine/portfolio.py`)
 
-The `Portfolio` class combines multiple completed strategy runs ("pods") into a unified portfolio. This models how a real IBKR multi-pod account works: each pod receives a capital allocation and compounds independently.
+The `Portfolio` class combines multiple completed strategy runs ("pods") into a unified portfolio. This models how a real multi-pod client book works: each pod receives a capital allocation and compounds independently.
 
 **Pod model** â€” Each strategy is a self-contained pod. Pods run independently through `run_daily()` with their own capital, universe, and logic. The `Portfolio` aggregator is read-only: it takes completed pod results and reconstructs a combined equity curve over their common date range.
 
-**Live pod-account invariant** â€” In live deployment, the intended production model is one independent strategy sleeve per real broker account/subaccount/sleeve. If multiple pods share one raw broker account, the system needs an explicit pod ledger before overlapping symbols or pod-level reconciliation can be trusted.
+**Live pod-account invariant** â€” In live deployment, the intended production model is one live pod = one strategy = one linked IBKR account/subaccount route = one ledger. If multiple pods share one raw broker account, the system needs an explicit pod ledger before overlapping symbols or pod-level reconciliation can be trusted.
 
 **Buy-and-hold math (default)** â€” Each pod gets `capital * weight` and compounds its own daily returns independently. Portfolio equity = sum of pod equities. Weights drift with performance, matching real-world behavior where you don't rebalance between strategies daily.
 

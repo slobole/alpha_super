@@ -56,29 +56,47 @@ Inspect first. Mutate later.
 Safe inspect commands:
 
 ```bash
-uv run python -m alpha.live.runner status --mode paper
-uv run python -m alpha.live.scheduler_service next_due --mode paper
+uv run python -m alpha.live.runner status --mode paper --pod-id pod_dv2_01
+uv run python -m alpha.live.scheduler_service next_due --mode paper --pod-id pod_dv2_01
 ```
 
 Commands that may change live state:
 
 ```bash
-uv run python -m alpha.live.runner tick --mode paper
-uv run python -m alpha.live.scheduler_service serve --mode paper
-uv run python -m alpha.live.runner submit_vplan --mode paper --vplan-id 1
-uv run python -m alpha.live.runner post_execution_reconcile --mode paper
+uv run python -m alpha.live.runner tick --mode paper --pod-id pod_dv2_01
+uv run python -m alpha.live.scheduler_service serve --mode paper --pod-id pod_dv2_01
+uv run python -m alpha.live.runner submit_vplan --mode paper --pod-id pod_dv2_01 --vplan-id 1
+uv run python -m alpha.live.runner post_execution_reconcile --mode paper --pod-id pod_dv2_01
 ```
 
 In live mode, mutation commands can submit real orders if the release allows auto-submit.
 
-These commands operate on all enabled sleeves in this deployment. If a second client is added later, use a separate deployment rather than relying on client filtering inside this one.
+These commands operate on all enabled sleeves in this deployment by default. Pass `--pod-id` to isolate one POD. If a second client is added later, use a separate deployment rather than relying on client filtering inside this one.
+
+State DB rule:
+
+```text
+no --pod-id                     -> alpha/live/live_state.sqlite3
+--pod-id pod_x, no --db-path     -> alpha/live/state/<mode>/pod_x.sqlite3
+--db-path custom.sqlite3         -> custom.sqlite3
+```
+
+For a new isolated POD, the POD-specific DB is the clean default. For an existing POD that already has open broker positions and old strategy state in `alpha/live/live_state.sqlite3`, keep `--db-path alpha/live/live_state.sqlite3` until that POD is migrated.
+
+Current PAPER transition example:
+
+```bash
+uv run python -m alpha.live.scheduler_service serve --mode paper --pod-id pod_dv2_caspersky_account_paper_01 --db-path alpha/live/live_state.sqlite3
+```
+
+Use the same `--db-path` on `status`, `next_due`, `tick`, `show_vplan`, `submit_vplan`, `post_execution_reconcile`, and `eod_snapshot` while this PAPER POD is still on the old DB.
 
 ## Main Commands
 
 ### Status
 
 ```bash
-uv run python -m alpha.live.runner status --mode paper
+uv run python -m alpha.live.runner status --mode paper --pod-id pod_dv2_01
 ```
 
 Shows enabled sleeves for this deployment, latest plan state, latest broker evidence, and next action.
@@ -86,16 +104,16 @@ Shows enabled sleeves for this deployment, latest plan state, latest broker evid
 Machine-readable output:
 
 ```bash
-uv run python -m alpha.live.runner status --mode paper --json
+uv run python -m alpha.live.runner status --mode paper --pod-id pod_dv2_01 --json
 ```
 
 ### One Live Pass
 
 ```bash
-uv run python -m alpha.live.runner tick --mode paper
+uv run python -m alpha.live.runner tick --mode paper --pod-id pod_dv2_01
 ```
 
-`tick` checks what is due in this deployment and runs only valid work. It may:
+`tick` checks what is due and runs only valid work. With `--pod-id`, it mutates only that POD. It may:
 
 - build a strategy decision;
 - build an order plan;
@@ -105,13 +123,14 @@ uv run python -m alpha.live.runner tick --mode paper
 ### Long-Running Service
 
 ```bash
-uv run python -m alpha.live.scheduler_service serve --mode paper
+uv run python -m alpha.live.scheduler_service serve --mode paper --pod-id pod_dv2_01
 ```
 
-`serve` is a timing loop around `tick` for this deployment.
+`serve` is a timing loop around `tick`. With `--pod-id`, it uses the POD-specific default DB path unless `--db-path` is supplied.
 
 ```text
 serve waits -> calls tick when due -> waits again
+default POD DB = alpha/live/state/<mode>/<pod_id>.sqlite3
 ```
 
 It does not implement another trading path.
@@ -119,7 +138,7 @@ It does not implement another trading path.
 ### Next Due
 
 ```bash
-uv run python -m alpha.live.scheduler_service next_due --mode paper
+uv run python -m alpha.live.scheduler_service next_due --mode paper --pod-id pod_dv2_01
 ```
 
 Use this to inspect what the service would do next.
@@ -145,7 +164,7 @@ uv run python -m alpha.live.runner show_vplan --mode paper --vplan-id 1
 ### Submit Manually
 
 ```bash
-uv run python -m alpha.live.runner submit_vplan --mode paper --vplan-id 1
+uv run python -m alpha.live.runner submit_vplan --mode paper --pod-id pod_dv2_01 --vplan-id 1
 ```
 
 Use this only after reviewing the order plan.
@@ -153,7 +172,7 @@ Use this only after reviewing the order plan.
 ### Reconcile After Execution
 
 ```bash
-uv run python -m alpha.live.runner post_execution_reconcile --mode paper
+uv run python -m alpha.live.runner post_execution_reconcile --mode paper --pod-id pod_dv2_01
 ```
 
 This reads broker truth after the expected execution time. If the broker still has residual shares where the order plan expected none, the plan stays unresolved and the system reports it.
@@ -161,7 +180,7 @@ This reads broker truth after the expected execution time. If the broker still h
 ### Record EOD Account State
 
 ```bash
-uv run python -m alpha.live.scheduler_service eod_snapshot --mode paper
+uv run python -m alpha.live.scheduler_service eod_snapshot --mode paper --pod-id pod_dv2_01
 ```
 
 This samples broker cash, positions, and NetLiq after the market close. It updates `broker_snapshot_cache`, writes the latest `pod_state`, and appends a `pod_state_history` row tagged:
@@ -198,10 +217,10 @@ Use manual mode when the release file has auto-submit disabled.
 Workflow:
 
 ```bash
-uv run python -m alpha.live.runner tick --mode paper
-uv run python -m alpha.live.runner show_vplan --mode paper
-uv run python -m alpha.live.runner submit_vplan --mode paper --vplan-id 1
-uv run python -m alpha.live.runner post_execution_reconcile --mode paper
+uv run python -m alpha.live.runner tick --mode paper --pod-id pod_dv2_01
+uv run python -m alpha.live.runner show_vplan --mode paper --pod-id pod_dv2_01
+uv run python -m alpha.live.runner submit_vplan --mode paper --pod-id pod_dv2_01 --vplan-id 1
+uv run python -m alpha.live.runner post_execution_reconcile --mode paper --pod-id pod_dv2_01
 ```
 
 Plain meaning:
@@ -213,7 +232,7 @@ build -> review -> submit -> reconcile
 Optional after close:
 
 ```bash
-uv run python -m alpha.live.scheduler_service eod_snapshot --mode paper
+uv run python -m alpha.live.scheduler_service eod_snapshot --mode paper --pod-id pod_dv2_01
 ```
 
 ### Automatic Mode
@@ -221,13 +240,13 @@ uv run python -m alpha.live.scheduler_service eod_snapshot --mode paper
 Use automatic mode only when you trust the sleeve in the selected environment.
 
 ```bash
-uv run python -m alpha.live.runner tick --mode paper
+uv run python -m alpha.live.runner tick --mode paper --pod-id pod_dv2_01
 ```
 
 or:
 
 ```bash
-uv run python -m alpha.live.scheduler_service serve --mode paper
+uv run python -m alpha.live.scheduler_service serve --mode paper --pod-id pod_dv2_01
 ```
 
 If auto-submit is enabled, the same order plan you would review manually is the one the system submits automatically.
@@ -248,16 +267,16 @@ live TWS        -> port 7496
 
 ```bash
 uv run python -m alpha.live.runner status --mode paper --broker-host 127.0.0.1 --broker-port 7497 --broker-client-id 31
-uv run python -m alpha.live.runner tick --mode paper --broker-host 127.0.0.1 --broker-port 7497 --broker-client-id 31
-uv run python -m alpha.live.scheduler_service serve --mode paper --broker-host 127.0.0.1 --broker-port 7497 --broker-client-id 31
+uv run python -m alpha.live.runner tick --mode paper --pod-id pod_dv2_01 --broker-host 127.0.0.1 --broker-port 7497 --broker-client-id 31
+uv run python -m alpha.live.scheduler_service serve --mode paper --pod-id pod_dv2_01 --broker-host 127.0.0.1 --broker-port 7497 --broker-client-id 31
 ```
 
 ### Paper IB Gateway
 
 ```bash
 uv run python -m alpha.live.runner status --mode paper --broker-host 127.0.0.1 --broker-port 4002 --broker-client-id 31
-uv run python -m alpha.live.runner tick --mode paper --broker-host 127.0.0.1 --broker-port 4002 --broker-client-id 31
-uv run python -m alpha.live.scheduler_service serve --mode paper --broker-host 127.0.0.1 --broker-port 4002 --broker-client-id 31
+uv run python -m alpha.live.runner tick --mode paper --pod-id pod_dv2_01 --broker-host 127.0.0.1 --broker-port 4002 --broker-client-id 31
+uv run python -m alpha.live.scheduler_service serve --mode paper --pod-id pod_dv2_01 --broker-host 127.0.0.1 --broker-port 4002 --broker-client-id 31
 ```
 
 ### Live TWS
@@ -266,8 +285,8 @@ Use this only when TWS is logged into the live account, the release uses `mode: 
 
 ```bash
 uv run python -m alpha.live.runner status --mode live --broker-host 127.0.0.1 --broker-port 7496 --broker-client-id 31
-uv run python -m alpha.live.runner tick --mode live --broker-host 127.0.0.1 --broker-port 7496 --broker-client-id 31
-uv run python -m alpha.live.scheduler_service serve --mode live --broker-host 127.0.0.1 --broker-port 7496 --broker-client-id 31
+uv run python -m alpha.live.runner tick --mode live --pod-id pod_dv2_01 --broker-host 127.0.0.1 --broker-port 7496 --broker-client-id 31
+uv run python -m alpha.live.scheduler_service serve --mode live --pod-id pod_dv2_01 --broker-host 127.0.0.1 --broker-port 7496 --broker-client-id 31
 ```
 
 Important:
@@ -408,8 +427,13 @@ uv run python -m alpha.live.runner post_execution_reconcile --mode live --broker
 Live state:
 
 ```text
-alpha/live/live_state.sqlite3
+alpha/live/live_state.sqlite3                          # default without --pod-id
+alpha/live/state/<mode>/<pod_id>.sqlite3               # default with --pod-id
 ```
+
+Explicit `--db-path` always wins. This is useful during transition from the old shared DB to a POD-specific DB.
+
+Important: do not run an already-trading POD from a fresh empty POD DB. `build_vplan` reads broker positions before sizing orders, but `build_decision_plan` seeds the strategy from `pod_state` and `strategy_state` in the DB. If those are empty while the broker holds positions, the decision semantics can be wrong.
 
 Event log:
 

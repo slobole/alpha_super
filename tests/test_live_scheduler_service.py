@@ -241,6 +241,18 @@ def test_scheduler_service_uses_incubation_default_db_path():
     assert Path(resolved_db_path_str).name == "incubation_state.sqlite3"
 
 
+def test_scheduler_service_uses_pod_scoped_default_db_path():
+    resolved_db_path_str = _resolve_db_path_for_mode_str(
+        db_path_str=None,
+        env_mode_str="paper",
+        pod_id_str="pod_dv2_01",
+    )
+
+    resolved_db_path_obj = Path(resolved_db_path_str)
+    assert resolved_db_path_obj.name == "pod_dv2_01.sqlite3"
+    assert resolved_db_path_obj.parent.name == "paper"
+
+
 def test_scheduler_service_rejects_incubation_on_live_default_db_path():
     with pytest.raises(ValueError, match="Incubation must not use the paper/live default DB"):
         _resolve_db_path_for_mode_str(
@@ -633,6 +645,45 @@ def test_scheduler_decision_selects_build_now(tmp_path: Path, monkeypatch):
     assert scheduler_decision_obj.next_phase_str == "build_decision_plan"
     assert scheduler_decision_obj.reason_code_str == "ready_to_build_decision_plan"
     assert scheduler_decision_obj.related_pod_id_list == ["pod_test_01"]
+
+
+def test_scheduler_decision_filters_to_requested_pod(tmp_path: Path, monkeypatch):
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="user_001",
+        pod_id_str="pod_a",
+        release_id_str="user_001.pod_a.paper",
+        mode_str="paper",
+        enabled_bool=True,
+        account_route_str="DU1",
+    )
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="user_001",
+        pod_id_str="pod_b",
+        release_id_str="user_001.pod_b.paper",
+        mode_str="paper",
+        enabled_bool=True,
+        account_route_str="DU2",
+    )
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda data_profile_str: pd.Timestamp("2024-01-31"),
+    )
+
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+    scheduler_decision_obj = get_scheduler_decision(
+        state_store_obj=state_store_obj,
+        as_of_ts=datetime(2024, 1, 31, 22, 10, tzinfo=UTC),
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="paper",
+        pod_id_str="pod_b",
+    )
+
+    assert scheduler_decision_obj.due_now_bool is True
+    assert scheduler_decision_obj.next_phase_str == "build_decision_plan"
+    assert scheduler_decision_obj.related_pod_id_list == ["pod_b"]
+    assert [release_obj.pod_id_str for release_obj in state_store_obj.get_enabled_release_list()] == ["pod_b"]
 
 
 def test_scheduler_decision_selects_eod_after_close_when_idle(tmp_path: Path, monkeypatch):

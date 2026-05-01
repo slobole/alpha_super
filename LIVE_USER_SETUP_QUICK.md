@@ -1,22 +1,22 @@
-TL;DR: to add another strategy under the same linked user, keep `user_id` and usually keep `account_route`, but create a new YAML with a new `release_id` and a new `pod_id`. To add a new user with two strategies, create a new folder under `alpha/live/releases/<user_id>/` and put two YAML files there, each with its own `release_id` and `pod_id`.
+TL;DR: one live POD is one strategy running against one linked IBKR account/subaccount route. To add another strategy for the same client deployment, keep the client `user_id`, but create a new YAML with a new `release_id`, new `pod_id`, and a different `account_route`.
 
 Simple rule:
 
 ```text
-new_live_release = (user_id + account_route) + (new_release_id + new_pod_id)
+new_strategy_pod = same client user_id + new release_id + new pod_id + different account_route
 ```
 
-## 1. Add one more strategy under the same user
+## 1. Add one more strategy under the same client
 
-This is the usual "same linked user" case.
+This is the usual same-client deployment case. `user_id` is the client or deployment identity. It is not permission to run multiple strategies inside the same linked broker account.
 
 Keep:
 - same `user_id`
-- same `account_route` if the strategy should trade in the same linked broker account
 
 Change:
 - new `release_id`
 - new `pod_id`
+- different `account_route`
 - new `strategy_import_str`
 - strategy-specific `params`
 
@@ -34,6 +34,8 @@ alpha/live/releases/excelence_trade_paper_001/
   pod_taa_01.yaml
   pod_ndx_mo_01.yaml
 ```
+
+Each file above should point at a different linked IBKR account/subaccount route.
 
 Minimal example:
 
@@ -60,6 +62,7 @@ strategy:
 Notes:
 - `release_id` must be unique.
 - `pod_id` must be unique among enabled pods.
+- `account_route` should be unique per live strategy POD unless the system later adds an explicit shared-account pod ledger.
 - No manual SQL work is needed. The runner loads YAMLs and upserts them into `live_release`.
 
 ## 2. Add a new user with two strategies
@@ -102,13 +105,13 @@ identity:
   pod_id: pod_taa_01
 ```
 
-Keep consistent per user:
+Keep consistent per client:
 - same `user_id`
-- same `account_route` if both pods trade in the same linked account
 
 Different per strategy:
 - `release_id`
 - `pod_id`
+- `account_route`
 - `strategy_import_str`
 - `params`
 - schedule fields if needed
@@ -118,6 +121,7 @@ Different per strategy:
 - Start new YAMLs with `enabled_bool: false`.
 - For a new version of the same pod: usually change `release_id`, keep `pod_id`.
 - For a new pod: change both `release_id` and `pod_id`.
+- For a new strategy: use a different linked IBKR account/subaccount route.
 - If you want the cleanest isolation, use a separate DB path for a new live rollout.
 
 ## Quick check command

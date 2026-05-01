@@ -58,6 +58,8 @@ TargetShares_i = floor(TargetDollar_i / LivePrice_i)
 OrderDelta_i = TargetShares_i - BrokerShares_i
 ```
 
+Interpretation: in the normal live model, `NetLiq_broker` is the NetLiq of the pod's own linked IBKR account/subaccount route. `pod_budget_fraction` is a sizing cap or risk throttle for that one pod, not a mechanism for running multiple strategies inside one raw account.
+
 Execution truth rules:
 
 ```text
@@ -900,7 +902,7 @@ The live layer exposes 2 public CLIs:
 
 `build_vplan`
 - CLI name is singular, but the underlying function is `build_vplans(...)`
-- builds due `VPlan` objects across all applicable pods
+- builds due `VPlan` objects across all applicable pods, or one POD when `--pod-id` is supplied
 
 `submit_vplan`
 - submit one ready `VPlan` manually by id
@@ -911,12 +913,14 @@ The live layer exposes 2 public CLIs:
 `tick`
 - umbrella one-shot command
 - runs the lower-level stages only when each stage is due
+- accepts `--pod-id` to restrict every mutation phase to one POD
 
 Operationally:
 
 ```text
 tick does not force every stage every time
 tick checks due conditions and runs only the valid stages
+tick --pod-id pod_x checks and mutates only pod_x
 ```
 
 ### Scheduler semantics
@@ -925,22 +929,41 @@ tick checks due conditions and runs only the valid stages
 - inspect-only
 - does not mutate live state
 - prints the next scheduler phase and next UTC wake-up
+- accepts `--pod-id` to inspect one POD's next scheduler action
 
 `run_once`
 - one scheduler decision pass
-- if work is due now, it calls `tick` once
+- if work is due now, it calls `tick` once, preserving any `--pod-id` filter
 
 `serve`
 - long-running daemon loop
 - repeatedly decides whether work is due
-- calls `tick` when due
+- calls `tick` when due, preserving any `--pod-id` filter
 - otherwise sleeps
 
 Current scheduler model:
 
 ```text
 serve = decide -> tick -> sleep -> repeat
+serve --pod-id pod_x = decide pod_x -> tick pod_x -> sleep -> repeat
 ```
+
+When `--pod-id` is supplied and `--db-path` is omitted, the default state DB is:
+
+```text
+alpha/live/state/<mode>/<pod_id>.sqlite3
+```
+
+Compatibility rule:
+
+```text
+No --pod-id keeps the historical default: alpha/live/live_state.sqlite3
+Explicit --db-path always overrides both defaults.
+```
+
+Operational transition rule: if a POD already has broker positions and its `pod_state` / `strategy_state` live in `alpha/live/live_state.sqlite3`, keep passing that DB path until the POD is migrated into its dedicated DB.
+
+That rule applies to read commands and mutation commands. Otherwise `status` and `next_due` will inspect the new POD DB, while the running strategy history is still in the old DB.
 
 ## Failure Modes And Troubleshooting
 
@@ -1058,15 +1081,35 @@ DecisionBaseShares_i != BrokerShares_i -> warning only
 
 This is intentionally RealTest-like, but it means the system will continue from broker truth even if the drift was unexpected.
 
+### Fresh POD DB while broker already has positions
+
+Symptoms:
+- `--pod-id` is supplied without `--db-path`;
+- `alpha/live/state/<mode>/<pod_id>.sqlite3` is new or empty;
+- the linked IBKR account already holds positions.
+
+Meaning:
+- `build_decision_plan` seeds the strategy from DB `pod_state` and `strategy_state`;
+- a fresh DB makes the strategy think it has no carried positions or trade memory;
+- `build_vplan` later reads broker positions for sizing, but the strategy decision may already have the wrong exits or entries.
+
+Correct action:
+
+```bash
+uv run python -m alpha.live.scheduler_service serve --mode paper --pod-id <pod_id> --db-path alpha/live/live_state.sqlite3
+```
+
+Use the old DB until the existing POD state is migrated. A fresh POD DB is safe for a new POD that has no existing broker positions.
+
 ### 3. One pod should map to one clean account or sleeve
 
 The sizing and reconcile model is cleanest when:
 
 ```text
-one pod = one broker account or one operational sleeve
+one pod = one strategy = one linked IBKR account/subaccount route = one ledger
 ```
 
-If multiple pods share one raw account without a higher-level sleeve boundary, broker-truth deltas become harder to interpret.
+Do not assign two different live strategies to the same `account_route`. If multiple pods share one raw account without a higher-level sleeve boundary, broker-truth deltas become harder to interpret and the setup is unsupported unless a first-class pod ledger exists.
 
 ### 4. `submitting` is real even though the dataclass comment is shorter
 

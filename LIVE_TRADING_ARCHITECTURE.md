@@ -137,7 +137,7 @@ The manifest says:
 - for which account
 - which market calendar controls timing
 - which execution policy is used
-- what fraction of broker `NetLiq` belongs to the pod
+- what fraction of that pod's own broker `NetLiq` is used for sizing
 - whether auto-submit is enabled
 
 Important execution fields:
@@ -153,6 +153,8 @@ So:
 ```text
 PodBudget_i = NetLiq_broker * pod_budget_fraction_i
 ```
+
+In the intended live setup, this is not a way to split one raw broker account across several strategies. A live pod should have its own linked IBKR account/subaccount route and its own ledger. Values below `1.0` are a per-pod sizing cap or risk throttle inside that account.
 
 ### 3. Decision Engine
 

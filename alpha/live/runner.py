@@ -32,6 +32,7 @@ from alpha.live.state_store_v2 import LiveStateStore
 DEFAULT_RELEASES_ROOT_PATH_STR = str(Path(__file__).resolve().parent / "releases")
 DEFAULT_DB_PATH_STR = str(Path(__file__).resolve().parent / "live_state.sqlite3")
 DEFAULT_INCUBATION_DB_PATH_STR = str(Path(__file__).resolve().parent / "incubation_state.sqlite3")
+DEFAULT_POD_STATE_ROOT_PATH_STR = str(Path(__file__).resolve().parent / "state")
 DEFAULT_BROKER_HOST_STR = "127.0.0.1"
 DEFAULT_BROKER_PORT_INT = 7497
 DEFAULT_BROKER_CLIENT_ID_INT = 31
@@ -209,11 +210,26 @@ def _same_resolved_path_bool(left_path_str: str, right_path_str: str) -> bool:
     return Path(left_path_str).resolve() == Path(right_path_str).resolve()
 
 
+def _validate_pod_id_for_path(pod_id_str: str) -> None:
+    if len(str(pod_id_str).strip()) == 0:
+        raise ValueError("pod_id_str must not be empty.")
+    if any(separator_str in str(pod_id_str) for separator_str in ("/", "\\", ":")):
+        raise ValueError("pod_id_str must not contain path separators.")
+
+
+def _build_default_pod_db_path_str(env_mode_str: str, pod_id_str: str) -> str:
+    _validate_pod_id_for_path(pod_id_str)
+    return str(Path(DEFAULT_POD_STATE_ROOT_PATH_STR) / env_mode_str / f"{pod_id_str}.sqlite3")
+
+
 def _resolve_db_path_for_mode_str(
     db_path_str: str | None,
     env_mode_str: str,
+    pod_id_str: str | None = None,
 ) -> str:
     if db_path_str is None:
+        if pod_id_str is not None:
+            return _build_default_pod_db_path_str(env_mode_str, pod_id_str)
         if env_mode_str == "incubation":
             return DEFAULT_INCUBATION_DB_PATH_STR
         return DEFAULT_DB_PATH_STR
@@ -252,39 +268,83 @@ def _build_v1_cutover_archive_dir_path_obj(
 def _load_release_list_and_sync(
     releases_root_path_str: str,
     state_store_obj: LiveStateStore,
+    pod_id_str: str | None = None,
 ) -> list[LiveRelease]:
     release_list = load_release_list(releases_root_path_str)
-    state_store_obj.upsert_release_list(release_list)
-    return release_list
+    selected_release_list = _filter_release_list_for_pod(release_list, pod_id_str)
+    state_store_obj.upsert_release_list(selected_release_list)
+    return selected_release_list
 
 
 def _load_release_list_validate_and_sync(
     releases_root_path_str: str,
     state_store_obj: LiveStateStore,
     env_mode_str: str,
+    pod_id_str: str | None = None,
 ) -> list[LiveRelease]:
     release_list = load_release_list(releases_root_path_str)
     validate_enabled_deployment_for_mode(release_list, env_mode_str)
-    state_store_obj.upsert_release_list(release_list)
-    return release_list
+    selected_release_list = _filter_release_list_for_pod(release_list, pod_id_str)
+    _validate_selected_pod_enabled_for_mode(selected_release_list, env_mode_str, pod_id_str)
+    state_store_obj.upsert_release_list(selected_release_list)
+    return selected_release_list
+
+
+def _filter_release_list_for_pod(
+    release_list: list[LiveRelease],
+    pod_id_str: str | None,
+) -> list[LiveRelease]:
+    if pod_id_str is None:
+        return release_list
+    if len(release_list) == 0:
+        return []
+    selected_release_list = [
+        release_obj
+        for release_obj in release_list
+        if release_obj.pod_id_str == pod_id_str
+    ]
+    if len(selected_release_list) == 0:
+        raise ValueError(f"No release found for pod_id_str '{pod_id_str}'.")
+    return selected_release_list
+
+
+def _validate_selected_pod_enabled_for_mode(
+    release_list: list[LiveRelease],
+    env_mode_str: str,
+    pod_id_str: str | None,
+) -> None:
+    if pod_id_str is None:
+        return
+    enabled_release_list = select_enabled_release_list_for_mode(
+        release_list=release_list,
+        env_mode_str=env_mode_str,
+    )
+    if len(enabled_release_list) == 0:
+        raise ValueError(
+            f"No enabled release found for pod_id_str '{pod_id_str}' in mode '{env_mode_str}'."
+        )
 
 
 def _validate_release_root_for_mutation(
     releases_root_path_str: str,
     env_mode_str: str,
+    pod_id_str: str | None = None,
 ) -> None:
     release_list = load_release_list(releases_root_path_str)
     validate_enabled_deployment_for_mode(release_list, env_mode_str)
+    selected_release_list = _filter_release_list_for_pod(release_list, pod_id_str)
+    _validate_selected_pod_enabled_for_mode(selected_release_list, env_mode_str, pod_id_str)
 
 
 def _validate_state_store_releases_for_mutation(
     state_store_obj: LiveStateStore,
     env_mode_str: str,
+    pod_id_str: str | None = None,
 ) -> None:
-    validate_enabled_deployment_for_mode(
-        state_store_obj.get_enabled_release_list(),
-        env_mode_str,
-    )
+    release_list = state_store_obj.get_enabled_release_list()
+    validate_enabled_deployment_for_mode(release_list, env_mode_str)
+    selected_release_list = _filter_release_list_for_pod(release_list, pod_id_str)
+    _validate_selected_pod_enabled_for_mode(selected_release_list, env_mode_str, pod_id_str)
 
 
 def _coerce_broker_adapter_resolver_obj(
@@ -1572,11 +1632,14 @@ def expire_stale_decision_plans(
     releases_root_path_str: str,
     env_mode_str: str | None = None,
     log_path_str: str = DEFAULT_LOG_PATH_STR,
+    pod_id_str: str | None = None,
 ) -> dict[str, object]:
     del releases_root_path_str
     expired_decision_plan_count_int = 0
     reason_counter_obj: Counter[str] = Counter()
     for decision_plan_obj in state_store_obj.get_expirable_decision_plan_list(as_of_ts):
+        if pod_id_str is not None and decision_plan_obj.pod_id_str != pod_id_str:
+            continue
         release_obj = state_store_obj.get_release_by_id(decision_plan_obj.release_id_str)
         if env_mode_str is not None and release_obj.mode_str != env_mode_str:
             continue
@@ -1614,11 +1677,13 @@ def build_decision_plans(
     releases_root_path_str: str,
     env_mode_str: str = "paper",
     log_path_str: str = DEFAULT_LOG_PATH_STR,
+    pod_id_str: str | None = None,
 ) -> dict[str, object]:
     release_list = _load_release_list_validate_and_sync(
         releases_root_path_str,
         state_store_obj,
         env_mode_str,
+        pod_id_str=pod_id_str,
     )
     selected_release_list = select_enabled_release_list_for_mode(release_list, env_mode_str)
     due_release_list = scheduler_utils.select_due_release_list(selected_release_list, as_of_ts)
@@ -1690,18 +1755,20 @@ def build_vplans(
     broker_client_id_int: int | None = None,
     broker_timeout_seconds_float: float | None = None,
     adapter_factory_func: Callable[[str, int, int, float], BrokerAdapter] | None = None,
+    pod_id_str: str | None = None,
 ) -> dict[str, object]:
     created_vplan_count_int = 0
     blocked_action_count_int = 0
     warning_counter_obj: Counter[str] = Counter()
     reason_counter_obj: Counter[str] = Counter()
     if releases_root_path_str is None:
-        _validate_state_store_releases_for_mutation(state_store_obj, env_mode_str)
+        _validate_state_store_releases_for_mutation(state_store_obj, env_mode_str, pod_id_str=pod_id_str)
     else:
         _load_release_list_validate_and_sync(
             releases_root_path_str,
             state_store_obj,
             env_mode_str,
+            pod_id_str=pod_id_str,
         )
     broker_adapter_resolver_obj = _coerce_broker_adapter_resolver_obj(
         broker_adapter_obj=broker_adapter_obj,
@@ -1716,6 +1783,8 @@ def build_vplans(
     )
 
     for decision_plan_obj in state_store_obj.get_due_decision_plan_list(as_of_ts):
+        if pod_id_str is not None and decision_plan_obj.pod_id_str != pod_id_str:
+            continue
         release_obj = state_store_obj.get_release_by_id(decision_plan_obj.release_id_str)
         latest_vplan_obj = state_store_obj.get_latest_vplan_for_decision(int(decision_plan_obj.decision_plan_id_int or 0))
         if latest_vplan_obj is not None and latest_vplan_obj.status_str in ("ready", "submitted", "completed"):
@@ -1912,18 +1981,20 @@ def submit_ready_vplans(
     broker_client_id_int: int | None = None,
     broker_timeout_seconds_float: float | None = None,
     adapter_factory_func: Callable[[str, int, int, float], BrokerAdapter] | None = None,
+    pod_id_str: str | None = None,
 ) -> dict[str, object]:
     submitted_vplan_count_int = 0
     blocked_action_count_int = 0
     warning_counter_obj: Counter[str] = Counter()
     reason_counter_obj: Counter[str] = Counter()
     if releases_root_path_str is None:
-        _validate_state_store_releases_for_mutation(state_store_obj, env_mode_str)
+        _validate_state_store_releases_for_mutation(state_store_obj, env_mode_str, pod_id_str=pod_id_str)
     else:
         _load_release_list_validate_and_sync(
             releases_root_path_str,
             state_store_obj,
             env_mode_str,
+            pod_id_str=pod_id_str,
         )
     broker_adapter_resolver_obj = _coerce_broker_adapter_resolver_obj(
         broker_adapter_obj=broker_adapter_obj,
@@ -1939,6 +2010,8 @@ def submit_ready_vplans(
     if vplan_id_int is None:
         candidate_vplan_list = []
         for release_obj in state_store_obj.get_enabled_release_list():
+            if pod_id_str is not None and release_obj.pod_id_str != pod_id_str:
+                continue
             if release_obj.mode_str != env_mode_str:
                 continue
             latest_vplan_obj = state_store_obj.get_latest_vplan_for_pod(release_obj.pod_id_str)
@@ -1953,6 +2026,9 @@ def submit_ready_vplans(
         candidate_vplan_list = [state_store_obj.get_vplan_by_id(vplan_id_int)]
 
     for vplan_obj in candidate_vplan_list:
+        if pod_id_str is not None and vplan_obj.pod_id_str != pod_id_str:
+            reason_counter_obj["pod_id_mismatch"] += 1
+            continue
         release_obj = state_store_obj.get_release_by_id(vplan_obj.release_id_str)
         if release_obj.mode_str != env_mode_str:
             blocked_action_count_int += 1
@@ -2128,14 +2204,16 @@ def eod_snapshot(
     adapter_factory_func: Callable[[str, int, int, float], BrokerAdapter] | None = None,
     require_due_bool: bool = False,
     eod_snapshot_buffer_minutes_int: int = DEFAULT_EOD_SNAPSHOT_BUFFER_MINUTES_INT,
+    pod_id_str: str | None = None,
 ) -> dict[str, object]:
     if releases_root_path_str is None:
-        _validate_state_store_releases_for_mutation(state_store_obj, env_mode_str)
+        _validate_state_store_releases_for_mutation(state_store_obj, env_mode_str, pod_id_str=pod_id_str)
     else:
         _load_release_list_validate_and_sync(
             releases_root_path_str,
             state_store_obj,
             env_mode_str,
+            pod_id_str=pod_id_str,
         )
 
     broker_adapter_resolver_obj = _coerce_broker_adapter_resolver_obj(
@@ -2157,6 +2235,8 @@ def eod_snapshot(
     reason_counter_obj: Counter[str] = Counter()
 
     for release_obj in state_store_obj.get_enabled_release_list():
+        if pod_id_str is not None and release_obj.pod_id_str != pod_id_str:
+            continue
         if release_obj.mode_str != env_mode_str:
             continue
 
@@ -2272,14 +2352,16 @@ def post_execution_reconcile(
     broker_client_id_int: int | None = None,
     broker_timeout_seconds_float: float | None = None,
     adapter_factory_func: Callable[[str, int, int, float], BrokerAdapter] | None = None,
+    pod_id_str: str | None = None,
 ) -> dict[str, object]:
     if releases_root_path_str is None:
-        _validate_state_store_releases_for_mutation(state_store_obj, env_mode_str)
+        _validate_state_store_releases_for_mutation(state_store_obj, env_mode_str, pod_id_str=pod_id_str)
     else:
         _load_release_list_validate_and_sync(
             releases_root_path_str,
             state_store_obj,
             env_mode_str,
+            pod_id_str=pod_id_str,
         )
     log_path_obj = Path(log_path_str)
     log_path_obj.parent.mkdir(parents=True, exist_ok=True)
@@ -2298,6 +2380,8 @@ def post_execution_reconcile(
         adapter_factory_func=adapter_factory_func,
     )
     for vplan_obj in state_store_obj.get_submitted_vplan_list():
+        if pod_id_str is not None and vplan_obj.pod_id_str != pod_id_str:
+            continue
         if as_of_ts < vplan_obj.target_execution_timestamp_ts:
             continue
         post_execution_snapshot_exists_bool = state_store_obj.has_post_execution_reconciliation_snapshot(
@@ -2536,8 +2620,13 @@ def get_status_summary(
     as_of_ts: datetime,
     releases_root_path_str: str,
     env_mode_str: str = "paper",
+    pod_id_str: str | None = None,
 ) -> dict[str, object]:
-    release_list = _load_release_list_and_sync(releases_root_path_str, state_store_obj)
+    release_list = _load_release_list_and_sync(
+        releases_root_path_str,
+        state_store_obj,
+        pod_id_str=pod_id_str,
+    )
     enabled_release_list = select_enabled_release_list_for_mode(
         release_list=release_list,
         env_mode_str=env_mode_str,
@@ -2704,7 +2793,11 @@ def show_vplan_summary(
     vplan_id_int: int | None = None,
     pod_id_str: str | None = None,
 ) -> dict[str, object]:
-    _load_release_list_and_sync(releases_root_path_str, state_store_obj)
+    _load_release_list_and_sync(
+        releases_root_path_str,
+        state_store_obj,
+        pod_id_str=pod_id_str,
+    )
     if vplan_id_int is not None:
         vplan_obj_list = [state_store_obj.get_vplan_by_id(vplan_id_int)]
     elif pod_id_str is not None:
@@ -2849,10 +2942,13 @@ def get_execution_report_summary(
     as_of_ts: datetime,
     releases_root_path_str: str,
     env_mode_str: str | None = None,
+    pod_id_str: str | None = None,
 ) -> dict[str, object]:
-    _load_release_list_and_sync(releases_root_path_str, state_store_obj)
+    _load_release_list_and_sync(releases_root_path_str, state_store_obj, pod_id_str=pod_id_str)
     execution_report_dict_list: list[dict[str, object]] = []
     for release_obj in state_store_obj.get_enabled_release_list():
+        if pod_id_str is not None and release_obj.pod_id_str != pod_id_str:
+            continue
         if env_mode_str is not None and release_obj.mode_str != env_mode_str:
             continue
         latest_vplan_obj = state_store_obj.get_latest_vplan_for_pod(release_obj.pod_id_str)
@@ -3077,7 +3173,11 @@ def get_compare_reference_summary(
     html_output_bool: bool = False,
     output_dir_str: str = "results",
 ) -> dict[str, object]:
-    _load_release_list_and_sync(releases_root_path_str, state_store_obj)
+    _load_release_list_and_sync(
+        releases_root_path_str,
+        state_store_obj,
+        pod_id_str=pod_id_str,
+    )
     compare_report_dict_list: list[dict[str, object]] = []
     for release_obj in state_store_obj.get_enabled_release_list():
         if release_obj.mode_str != env_mode_str:
@@ -3329,8 +3429,13 @@ def preflight_contract_summary(
     as_of_ts: datetime,
     releases_root_path_str: str,
     env_mode_str: str | None = None,
+    pod_id_str: str | None = None,
 ) -> dict[str, object]:
-    release_list = _load_release_list_and_sync(releases_root_path_str, state_store_obj)
+    release_list = _load_release_list_and_sync(
+        releases_root_path_str,
+        state_store_obj,
+        pod_id_str=pod_id_str,
+    )
     enabled_release_list = [
         release_obj
         for release_obj in release_list
@@ -3470,8 +3575,9 @@ def tick(
     broker_client_id_int: int | None = None,
     broker_timeout_seconds_float: float | None = None,
     adapter_factory_func: Callable[[str, int, int, float], BrokerAdapter] | None = None,
+    pod_id_str: str | None = None,
 ) -> dict[str, object]:
-    _validate_release_root_for_mutation(releases_root_path_str, env_mode_str)
+    _validate_release_root_for_mutation(releases_root_path_str, env_mode_str, pod_id_str=pod_id_str)
     lease_owner_token_str = uuid.uuid4().hex
     lease_acquired_bool = state_store_obj.acquire_scheduler_lease(
         lease_name_str="tick",
@@ -3511,6 +3617,7 @@ def tick(
             releases_root_path_str=releases_root_path_str,
             env_mode_str=env_mode_str,
             log_path_str=log_path_str,
+            pod_id_str=pod_id_str,
         )
         expire_detail_dict = expire_stale_decision_plans(
             state_store_obj=state_store_obj,
@@ -3518,6 +3625,7 @@ def tick(
             releases_root_path_str=releases_root_path_str,
             env_mode_str=env_mode_str,
             log_path_str=log_path_str,
+            pod_id_str=pod_id_str,
         )
         vplan_detail_dict = build_vplans(
             state_store_obj=state_store_obj,
@@ -3527,6 +3635,7 @@ def tick(
             releases_root_path_str=releases_root_path_str,
             log_path_str=log_path_str,
             broker_adapter_resolver_obj=broker_adapter_resolver_obj,
+            pod_id_str=pod_id_str,
         )
         submit_detail_dict = submit_ready_vplans(
             state_store_obj=state_store_obj,
@@ -3537,6 +3646,7 @@ def tick(
             releases_root_path_str=releases_root_path_str,
             log_path_str=log_path_str,
             broker_adapter_resolver_obj=broker_adapter_resolver_obj,
+            pod_id_str=pod_id_str,
         )
         reconcile_detail_dict = post_execution_reconcile(
             state_store_obj=state_store_obj,
@@ -3546,6 +3656,7 @@ def tick(
             releases_root_path_str=releases_root_path_str,
             log_path_str=log_path_str,
             broker_adapter_resolver_obj=broker_adapter_resolver_obj,
+            pod_id_str=pod_id_str,
         )
         warning_counter_obj: Counter[str] = Counter()
         reason_counter_obj: Counter[str] = Counter()
@@ -3619,6 +3730,7 @@ def main(argv_list: list[str] | None = None) -> int:
     db_path_str = _resolve_db_path_for_mode_str(
         db_path_str=parsed_args_obj.db_path_str,
         env_mode_str=parsed_args_obj.env_mode_str,
+        pod_id_str=parsed_args_obj.pod_id_str,
     )
     state_store_obj = LiveStateStore(db_path_str)
     job_run_id_int = state_store_obj.record_job_start(parsed_args_obj.command_name_str)
@@ -3633,6 +3745,7 @@ def main(argv_list: list[str] | None = None) -> int:
                 releases_root_path_str=parsed_args_obj.releases_root_path_str,
                 env_mode_str=parsed_args_obj.env_mode_str,
                 log_path_str=parsed_args_obj.log_path_str,
+                pod_id_str=parsed_args_obj.pod_id_str,
             )
         elif parsed_args_obj.command_name_str == "build_vplan":
             detail_dict = build_vplans(
@@ -3646,6 +3759,7 @@ def main(argv_list: list[str] | None = None) -> int:
                 broker_port_int=parsed_args_obj.broker_port_int,
                 broker_client_id_int=parsed_args_obj.broker_client_id_int,
                 broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
+                pod_id_str=parsed_args_obj.pod_id_str,
             )
         elif parsed_args_obj.command_name_str == "submit_vplan":
             detail_dict = submit_ready_vplans(
@@ -3661,6 +3775,7 @@ def main(argv_list: list[str] | None = None) -> int:
                 broker_port_int=parsed_args_obj.broker_port_int,
                 broker_client_id_int=parsed_args_obj.broker_client_id_int,
                 broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
+                pod_id_str=parsed_args_obj.pod_id_str,
             )
         elif parsed_args_obj.command_name_str == "post_execution_reconcile":
             detail_dict = post_execution_reconcile(
@@ -3674,6 +3789,7 @@ def main(argv_list: list[str] | None = None) -> int:
                 broker_port_int=parsed_args_obj.broker_port_int,
                 broker_client_id_int=parsed_args_obj.broker_client_id_int,
                 broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
+                pod_id_str=parsed_args_obj.pod_id_str,
             )
         elif parsed_args_obj.command_name_str == "eod_snapshot":
             detail_dict = eod_snapshot(
@@ -3687,6 +3803,7 @@ def main(argv_list: list[str] | None = None) -> int:
                 broker_port_int=parsed_args_obj.broker_port_int,
                 broker_client_id_int=parsed_args_obj.broker_client_id_int,
                 broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
+                pod_id_str=parsed_args_obj.pod_id_str,
             )
         elif parsed_args_obj.command_name_str == "tick":
             detail_dict = tick(
@@ -3700,6 +3817,7 @@ def main(argv_list: list[str] | None = None) -> int:
                 broker_port_int=parsed_args_obj.broker_port_int,
                 broker_client_id_int=parsed_args_obj.broker_client_id_int,
                 broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
+                pod_id_str=parsed_args_obj.pod_id_str,
             )
         elif parsed_args_obj.command_name_str == "cutover_v1_schema":
             detail_dict = cutover_v1_schema(
@@ -3722,6 +3840,7 @@ def main(argv_list: list[str] | None = None) -> int:
                 as_of_ts=as_of_ts,
                 releases_root_path_str=parsed_args_obj.releases_root_path_str,
                 env_mode_str=parsed_args_obj.env_mode_str,
+                pod_id_str=parsed_args_obj.pod_id_str,
             )
         elif parsed_args_obj.command_name_str == "compare_reference":
             detail_dict = get_compare_reference_summary(
@@ -3740,6 +3859,7 @@ def main(argv_list: list[str] | None = None) -> int:
                 as_of_ts=as_of_ts,
                 releases_root_path_str=parsed_args_obj.releases_root_path_str,
                 env_mode_str=parsed_args_obj.env_mode_str,
+                pod_id_str=parsed_args_obj.pod_id_str,
             )
         else:
             detail_dict = get_status_summary(
@@ -3747,6 +3867,7 @@ def main(argv_list: list[str] | None = None) -> int:
                 as_of_ts=as_of_ts,
                 releases_root_path_str=parsed_args_obj.releases_root_path_str,
                 env_mode_str=parsed_args_obj.env_mode_str,
+                pod_id_str=parsed_args_obj.pod_id_str,
             )
 
         state_store_obj.record_job_finish(job_run_id_int, "completed", detail_dict)

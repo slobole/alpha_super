@@ -30,7 +30,7 @@ one client -> one VPS -> one repo clone -> one IBC/TWS session -> many sleeves/p
 
 Do not run unrelated clients from the same live deployment unless the system is intentionally redesigned for that later.
 
-`user_id` still belongs in release files and logs because it tells us whose deployment this is. It is not the main runtime selector right now. Commands such as `status`, `tick`, and `serve` operate on all enabled sleeves in this deployment.
+`user_id` still belongs in release files and logs because it tells us whose deployment this is. It is not the main runtime selector right now. Commands such as `status`, `tick`, and `serve` operate on all enabled sleeves in this deployment by default. Pass `--pod-id` to operate on one isolated sleeve.
 
 ## What This System Does
 
@@ -67,6 +67,14 @@ A live sleeve should map to a real IBKR account, subaccount, or broker-recognize
 
 Do not treat a pod as just a label inside one shared account unless a later ledger system explicitly supports that.
 
+Operational invariant:
+
+```text
+one live pod = one strategy = one linked IBKR account/subaccount route = one ledger
+```
+
+Do not assign two different live strategies to the same `account_route`.
+
 ### 2. The Strategy Decides, The Broker State Sizes
 
 The strategy decides what it wants based on approved data.
@@ -78,20 +86,34 @@ Near execution time, the system reads the broker account and live prices, then p
 Run:
 
 ```bash
-uv run python -m alpha.live.runner tick --mode paper
+uv run python -m alpha.live.runner tick --mode paper --pod-id pod_dv2_01
 ```
 
-`tick` only does work that is actually due. It may build decisions, build order plans, submit auto-enabled plans, or reconcile submitted plans.
+`tick` only does work that is actually due. With `--pod-id`, it only checks and mutates that POD. Without `--pod-id`, it scans all enabled PODs for the selected mode.
 
 ### 4. `serve` Is Just The Loop
 
 Run:
 
 ```bash
-uv run python -m alpha.live.scheduler_service serve --mode paper
+uv run python -m alpha.live.scheduler_service serve --mode paper --pod-id pod_dv2_01
 ```
 
-`serve` does not create a second trading path. It waits, calls `tick` when work is due, then waits again.
+`serve` does not create a second trading path. It waits, calls `tick` when work is due, then waits again. With `--pod-id`, its default DB path is POD-specific:
+
+```text
+alpha/live/state/<mode>/<pod_id>.sqlite3
+```
+
+If a POD already has open broker positions and was previously running from the old shared DB, keep using that DB explicitly until its state is migrated:
+
+```bash
+uv run python -m alpha.live.scheduler_service serve --mode paper --pod-id <pod_id> --db-path alpha/live/live_state.sqlite3
+```
+
+Use the same `--db-path` on `status`, `next_due`, `tick`, `show_vplan`, and reconcile commands while the POD is still on the old DB.
+
+Do not start an already-trading POD from a fresh empty POD DB. The broker may have positions, but the strategy memory in the DB would be empty.
 
 ### 5. Paper Tests Flow, Not Real Auction Quality
 
@@ -104,25 +126,25 @@ Do not assume IBKR paper fills prove real MOO/MOC execution quality. Validate re
 Inspect status:
 
 ```bash
-uv run python -m alpha.live.runner status --mode paper
+uv run python -m alpha.live.runner status --mode paper --pod-id pod_dv2_01
 ```
 
 Inspect the next scheduler action:
 
 ```bash
-uv run python -m alpha.live.scheduler_service next_due --mode paper
+uv run python -m alpha.live.scheduler_service next_due --mode paper --pod-id pod_dv2_01
 ```
 
 Run one live pass:
 
 ```bash
-uv run python -m alpha.live.runner tick --mode paper
+uv run python -m alpha.live.runner tick --mode paper --pod-id pod_dv2_01
 ```
 
 Run the long-running service:
 
 ```bash
-uv run python -m alpha.live.scheduler_service serve --mode paper
+uv run python -m alpha.live.scheduler_service serve --mode paper --pod-id pod_dv2_01
 ```
 
 ## Manual Review Flow
@@ -130,10 +152,10 @@ uv run python -m alpha.live.scheduler_service serve --mode paper
 Use this when auto-submit is disabled in the release file.
 
 ```bash
-uv run python -m alpha.live.runner tick --mode paper
-uv run python -m alpha.live.runner show_vplan --mode paper
-uv run python -m alpha.live.runner submit_vplan --mode paper --vplan-id 1
-uv run python -m alpha.live.runner post_execution_reconcile --mode paper
+uv run python -m alpha.live.runner tick --mode paper --pod-id pod_dv2_01
+uv run python -m alpha.live.runner show_vplan --mode paper --pod-id pod_dv2_01
+uv run python -m alpha.live.runner submit_vplan --mode paper --pod-id pod_dv2_01 --vplan-id 1
+uv run python -m alpha.live.runner post_execution_reconcile --mode paper --pod-id pod_dv2_01
 ```
 
 Meaning:
@@ -147,7 +169,7 @@ build what is due -> review order plan -> submit it -> reconcile broker truth
 Use this when the release file allows auto-submit.
 
 ```bash
-uv run python -m alpha.live.runner tick --mode paper
+uv run python -m alpha.live.runner tick --mode paper --pod-id pod_dv2_01
 ```
 
 Normal automatic path:
@@ -167,7 +189,7 @@ if auto-submit is enabled and mode is live, tick or serve may submit real live o
 After the market close, record a clean broker-backed account snapshot:
 
 ```bash
-uv run python -m alpha.live.scheduler_service eod_snapshot --mode paper
+uv run python -m alpha.live.scheduler_service eod_snapshot --mode paper --pod-id pod_dv2_01
 ```
 
 `serve` also schedules this after the session close plus a short buffer when no higher-priority execution/reconcile work is due.
@@ -189,6 +211,8 @@ Sizing is unchanged. The final order plan still reads fresh broker truth near ex
 PodBudget = BrokerNetLiq_at_VPlan * pod_budget_fraction
 TargetShares_i = floor(TargetWeight_i * PodBudget / LiveReferencePrice_i)
 ```
+
+For the normal isolated-account route, `pod_budget_fraction` is a per-pod sizing cap or risk throttle on that pod's own linked account. It is not a shared-account allocation mechanism for multiple strategies.
 
 EOD state is mainly for the next decision's starting state and for cleaner backtest-reference comparison:
 
