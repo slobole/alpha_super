@@ -15,7 +15,10 @@ SUPPORTED_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = (
     "strategies.dv2.strategy_mr_dv2:DVO2Strategy",
     "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy",
     "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash",
+    "strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash",
+    "strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash",
     "strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy",
+    "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy",
 )
 SUPPORTED_EXECUTION_POLICY_TUPLE: tuple[str, ...] = (
     "next_open_moo",
@@ -29,6 +32,7 @@ SUPPORTED_DATA_PROFILE_TUPLE: tuple[str, ...] = (
     "norgate_eod_sp500_pit",
     "norgate_eod_etf_plus_vix_helper",
     "norgate_eod_ndx_pit",
+    "norgate_eod_ndx_pit_plus_vxn_helper",
     "intraday_1m_plus_daily_pit",
 )
 SUPPORTED_SESSION_CALENDAR_ID_TUPLE: tuple[str, ...] = scheduler_utils.SUPPORTED_SESSION_CALENDAR_ID_TUPLE

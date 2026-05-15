@@ -20,6 +20,7 @@ from alpha.engine.metrics import (
     generate_monthly_returns,
     cross_correlation_matrix,
     diversification_ratio,
+    generate_tail_risk_diagnostics,
     rolling_diversification_ratio,
     rolling_pairwise_correlation,
 )
@@ -28,6 +29,8 @@ from alpha.engine.metrics import (
 class Portfolio:
     _VALID_REBALANCE = {None, 'monthly', 'quarterly', 'annually'}
     _DIAGNOSTIC_WINDOW_INT = 63
+    _TAIL_FRACTION_FLOAT = 0.05
+    _MIN_TAIL_DAYS_INT = 1
 
     def __init__(self, strategies: list, weights: list[float] = None,
                  name: str = 'Portfolio', capital_base: float = None,
@@ -95,6 +98,11 @@ class Portfolio:
         self.average_rolling_diversification_ratio = None
         self.rolling_pairwise_correlation_df = None
         self.rolling_diversification_ratio_ser = None
+        self.tail_event_date_index = pd.DatetimeIndex([])
+        self.tail_return_df = pd.DataFrame()
+        self.tail_correlation_matrix = pd.DataFrame()
+        self.tail_contribution_df = pd.DataFrame()
+        self.tail_summary_df = pd.DataFrame()
 
         self._build()
 
@@ -381,6 +389,19 @@ class Portfolio:
                 name='rolling_diversification_ratio_ser',
             )
             self.average_rolling_diversification_ratio = np.nan
+
+        tail_diagnostic_dict = generate_tail_risk_diagnostics(
+            pod_daily_return_df=self._daily_rets,
+            portfolio_daily_return_ser=self.results['daily_returns'],
+            pod_equity_df=self._pod_equities,
+            tail_fraction_float=self._TAIL_FRACTION_FLOAT,
+            min_tail_days_int=self._MIN_TAIL_DAYS_INT,
+        )
+        self.tail_event_date_index = tail_diagnostic_dict['tail_event_date_index']
+        self.tail_return_df = tail_diagnostic_dict['tail_return_df']
+        self.tail_correlation_matrix = tail_diagnostic_dict['tail_correlation_matrix']
+        self.tail_contribution_df = tail_diagnostic_dict['tail_contribution_df']
+        self.tail_summary_df = tail_diagnostic_dict['tail_summary_df']
 
     def plot(self, save_to=None):
         """Plot combined equity curve with per-pod overlays and benchmark."""

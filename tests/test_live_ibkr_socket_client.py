@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 from alpha.live.ibkr_socket_client import IBKRSocketClient, IBKR_TICK_OPEN_SOURCE_STR
 
 
@@ -83,9 +85,27 @@ def test_ibkr_socket_client_retries_alternate_loopback_hosts_on_timeout(monkeypa
     assert _FakeIBTimeoutOnLocalhost.attempted_host_str_list == ["localhost", "127.0.0.1"]
 
 
+class _FakeIBUnqualifiedContract:
+    def qualifyContracts(self, *contract_list):
+        return [contract_obj if contract_obj.symbol != "CTRA" else None for contract_obj in contract_list]
+
+
 class _FakeContract:
     def __init__(self, symbol: str):
         self.symbol = str(symbol)
+
+
+def test_ibkr_socket_client_contract_map_reports_unqualified_symbols(monkeypatch):
+    monkeypatch.setattr(
+        "alpha.live.ibkr_socket_client.Stock",
+        lambda symbol_str, exchange_str, currency_str: _FakeContract(symbol_str),
+    )
+
+    with pytest.raises(ValueError, match="IBKR contract qualification failed for assets: CTRA"):
+        IBKRSocketClient._build_stock_contract_map(
+            _FakeIBUnqualifiedContract(),
+            ["AAPL", "CTRA"],
+        )
 
 
 class _FakeTicker:

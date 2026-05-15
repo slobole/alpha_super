@@ -249,7 +249,7 @@ def test_ibkr_socket_client_live_price_snapshot_keeps_account_route(monkeypatch)
     assert live_price_snapshot_obj.price_source_str == "ib_async.reqTickers.marketPrice"
 
 
-def test_ibkr_socket_client_live_price_snapshot_uses_auction_first_for_next_open_moo(monkeypatch):
+def test_ibkr_socket_client_live_price_snapshot_uses_auction_first_for_moo_policies(monkeypatch):
     class DummyContract:
         def __init__(self, symbol_str: str):
             self.symbol = symbol_str
@@ -319,6 +319,20 @@ def test_ibkr_socket_client_live_price_snapshot_uses_auction_first_for_next_open
     assert dummy_ib_obj.req_tickers_call_count_int == 0
     assert dummy_ib_obj.cancelled_symbol_list == ["AAPL"]
     assert dummy_ib_obj.sleep_seconds_float == 2.0
+
+    monthly_live_price_snapshot_obj = ibkr_socket_client_obj.get_live_price_snapshot(
+        "DU1",
+        ["AAPL"],
+        execution_policy_str="next_month_first_open",
+    )
+
+    assert monthly_live_price_snapshot_obj.asset_reference_price_map == {"AAPL": 101.25}
+    assert monthly_live_price_snapshot_obj.asset_reference_source_map_dict == {
+        "AAPL": "ib_async.reqMktData.225.auctionPrice"
+    }
+    assert monthly_live_price_snapshot_obj.price_source_str == "auction_225"
+    assert dummy_ib_obj.req_tickers_call_count_int == 0
+    assert dummy_ib_obj.cancelled_symbol_list == ["AAPL", "AAPL"]
 
 
 def test_ibkr_socket_client_live_price_snapshot_uses_req_tickers_fallback_for_unresolved_assets(monkeypatch):

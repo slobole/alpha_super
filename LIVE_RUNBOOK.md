@@ -1,6 +1,6 @@
 # Live Runbook
 
-TL;DR: this is the operator guide for one-client live deployments. A deployment means one VPS/repo clone/IBC session for one client. Inside it, each sleeve/pod is one independent strategy running against one real IBKR account/subaccount.
+TL;DR: this is the operator guide for one-client deployments. A deployment means one VPS/repo clone/IBC session for one client. Inside it, each sleeve/pod is one independent strategy. Incubation/rehearsal uses a SIM ledger; paper probes broker plumbing; live uses real IBKR accounts/subaccounts.
 
 For implementation details, use [LIVE_TECHNICAL_REFERENCE.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_TECHNICAL_REFERENCE.md).
 
@@ -41,6 +41,14 @@ The simple operating flow is:
 ```text
 latest approved data -> strategy decision -> order plan -> broker orders -> fills -> updated sleeve state
 ```
+
+For promotion, use one simple ladder:
+
+```text
+incubation/rehearsal -> paper probe -> small live account -> bigger account
+```
+
+In incubation, the SIM ledger is the official rehearsal accounting truth. IBKR is used for price/reference plumbing, especially open-price evidence for MOO-style flows. Paper remains a separate broker probe; paper positions and fills are not incubation P&L.
 
 Internal names you will see:
 
@@ -130,8 +138,10 @@ Default DB paths:
 
 ```text
 paper/live POD, no override -> alpha/live/state/<mode>/<pod_id>.sqlite3
-incubation, no override     -> alpha/live/incubation_state.sqlite3
+incubation POD, no override -> alpha/live/state/incubation/<pod_id>.sqlite3
 ```
+
+For incubation, a command without `--pod-id` and without explicit `--db-path` fans out across all enabled incubation PODs and aggregates the result. The old `alpha/live/incubation_state.sqlite3` file is legacy/manual only; pass it explicitly with `--db-path` if you need to inspect old shared rehearsal state.
 
 Current PAPER transition override:
 
@@ -176,7 +186,7 @@ uv run python -m alpha.live.runner tick --mode paper --pod-id pod_dv2_01
 uv run python -m alpha.live.scheduler_service serve --mode paper --pod-id pod_dv2_01
 ```
 
-`serve` is a timing loop around `tick`. With `--pod-id`, it uses the POD-specific default DB path unless `--db-path` is supplied.
+`serve` is a timing loop around `tick`. With `--pod-id`, it uses the POD-specific default DB path unless `--db-path` is supplied. In incubation, no `--pod-id` means the service fans out across enabled incubation POD DBs and the dashboard aggregates those PODs.
 
 ```text
 serve waits -> calls tick when due -> waits again
@@ -393,23 +403,51 @@ Auto-submit: allowed only after the sleeve is trusted
 
 Keep the exact YAML fields used by the current release examples. This section explains the human meaning; [LIVE_TECHNICAL_REFERENCE.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_TECHNICAL_REFERENCE.md) is the implementation reference.
 
-## Paper Vs Live
+## Incubation / Paper / Live
 
-Paper is for checking:
+Incubation is for checking:
+
+- strategy hosting through the live stack;
+- clean pod-separated SIM cash, positions, and P&L;
+- DecisionPlan/VPlan creation;
+- SIM submit and reconcile flow;
+- IBKR reference/open-price availability for MOO flows;
+- multi-strategy rehearsal without blended paper-account positions.
+
+Paper is probe-only. It is for checking:
 
 - strategy hosting;
 - scheduling;
 - order-plan creation;
 - submit plumbing;
-- reconciliation behavior.
+- reconciliation behavior;
+- IBC/TWS connection;
+- account visibility;
+- contract qualification;
+- market data permissions;
+- optional test-order acceptance/reject behavior.
 
-Paper is not proof of real auction execution quality.
+Paper is not proof of real auction execution quality, and paper fills are not incubation accounting truth.
 
 For MOO/MOC sleeves:
 
 ```text
-backtest -> paper flow test -> tiny live test -> scale slowly
+backtest -> incubation rehearsal -> paper probe -> tiny live test -> scale slowly
 ```
+
+For MOO rehearsal:
+
+```text
+signal from approved prior data -> VPlan -> IBKR open/reference price read -> SIM ledger fill -> reconcile/report
+```
+
+The VPlan sizing reference uses the same IBKR path as paper/live:
+
+```text
+auctionPrice (generic tick 225) -> reqMktData fallback -> reqTickers fallback
+```
+
+The SIM fill is still separate: open-policy rehearsal settles against the target-session IBKR `ticker.open` evidence. Paper fills are not imported into incubation accounting.
 
 For same-day MOC logic:
 
@@ -494,6 +532,7 @@ Live state:
 alpha/live/live_state.sqlite3                          # default without --pod-id
 alpha/live/state/<mode>/<pod_id>.sqlite3               # default with --pod-id
 alpha/live/dashboard_config.yaml                       # dashboard DB override map
+alpha/live/incubation_state.sqlite3                    # legacy/manual shared incubation DB only
 ```
 
 Explicit `--db-path` always wins. This is useful during transition from the old shared DB to a POD-specific DB.

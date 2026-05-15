@@ -74,7 +74,10 @@ INCREMENTAL_DECISION_STRATEGY_IMPORT_SET: set[str] = {
 }
 FULL_TARGET_DECISION_STRATEGY_IMPORT_SET: set[str] = {
     "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash",
+    "strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash",
+    "strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash",
     "strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy",
+    "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy",
 }
 
 
@@ -537,7 +540,6 @@ def _build_qpi_ibs_rsi_exit_decision_plan(
         snapshot_metadata_dict={"strategy_family_str": "qpi_ibs_rsi_exit"},
     )
 
-
 def _build_dtb3_snapshot_metadata_dict(
     dtb3_snapshot_obj,
 ) -> dict[str, Any]:
@@ -580,6 +582,115 @@ def _build_taa_btal_tqqq_vix_cash_decision_plan(
             config=config_obj,
         )
     )
+    return _build_taa_vix_cash_full_target_decision_plan(
+        release_obj=release_obj,
+        as_of_ts=as_of_ts,
+        pod_state_obj=pod_state_obj,
+        base_taa_module=base_taa_module,
+        config_obj=config_obj,
+        execution_price_df=execution_price_df,
+        month_end_weight_df=month_end_weight_df,
+        month_end_vrp_diagnostic_df=month_end_vrp_diagnostic_df,
+        strategy_family_str="taa_df_btal_fallback_tqqq_vix_cash",
+        snapshot_metadata_extra_dict=_build_dtb3_snapshot_metadata_dict(dtb3_snapshot_obj),
+    )
+
+
+def _build_taa_btal_1n_tqqq_vix_cash_decision_plan(
+    release_obj: LiveRelease,
+    as_of_ts: datetime,
+    pod_state_obj: PodState | None,
+) -> DecisionPlan:
+    base_taa_module = import_module("strategies.taa_df.strategy_taa_df")
+    variant_module = import_module("strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash")
+    vix_overlay_module = import_module("strategies.taa_df.strategy_taa_df_fallback_vix_cash_variant_utils")
+
+    config_obj = replace(
+        variant_module.DEFAULT_CONFIG,
+        end_date_str=pd.Timestamp(as_of_ts).strftime("%Y-%m-%d"),
+        dtb3_mode_str="live",
+        dtb3_as_of_timestamp_ts=as_of_ts,
+    )
+    execution_price_df, _, base_month_end_weight_df, _, dtb3_snapshot_obj = (
+        base_taa_module.get_defense_first_data_with_snapshot(config_obj)
+    )
+    _, month_end_vrp_signal_df = vix_overlay_module._load_vrp_overlay_signal_frames(config_obj)
+    month_end_weight_df, month_end_vrp_diagnostic_df = (
+        vix_overlay_module.apply_vrp_cash_gate_to_month_end_weight_df(
+            base_month_end_weight_df=base_month_end_weight_df,
+            month_end_vrp_signal_df=month_end_vrp_signal_df,
+            config=config_obj,
+        )
+    )
+    return _build_taa_vix_cash_full_target_decision_plan(
+        release_obj=release_obj,
+        as_of_ts=as_of_ts,
+        pod_state_obj=pod_state_obj,
+        base_taa_module=base_taa_module,
+        config_obj=config_obj,
+        execution_price_df=execution_price_df,
+        month_end_weight_df=month_end_weight_df,
+        month_end_vrp_diagnostic_df=month_end_vrp_diagnostic_df,
+        strategy_family_str="taa_df_btal_1n_fallback_tqqq_vix_cash",
+        snapshot_metadata_extra_dict=_build_dtb3_snapshot_metadata_dict(dtb3_snapshot_obj),
+    )
+
+
+def _build_taa_btal_linearity_1n_qqq_vix_cash_decision_plan(
+    release_obj: LiveRelease,
+    as_of_ts: datetime,
+    pod_state_obj: PodState | None,
+) -> DecisionPlan:
+    base_taa_module = import_module("strategies.taa_df.strategy_taa_df")
+    variant_module = import_module(
+        "strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash"
+    )
+    vix_overlay_module = import_module("strategies.taa_df.strategy_taa_df_fallback_vix_cash_variant_utils")
+
+    config_obj = replace(
+        variant_module.DEFAULT_CONFIG,
+        end_date_str=pd.Timestamp(as_of_ts).strftime("%Y-%m-%d"),
+    )
+    (
+        execution_price_df,
+        _daily_linearity_score_df,
+        _month_end_score_df,
+        base_month_end_weight_df,
+        _rebalance_weight_df,
+    ) = variant_module.get_defense_first_linearity_1n_data(config_obj)
+    _, month_end_vrp_signal_df = vix_overlay_module._load_vrp_overlay_signal_frames(config_obj)
+    month_end_weight_df, month_end_vrp_diagnostic_df = (
+        vix_overlay_module.apply_vrp_cash_gate_to_month_end_weight_df(
+            base_month_end_weight_df=base_month_end_weight_df,
+            month_end_vrp_signal_df=month_end_vrp_signal_df,
+            config=config_obj,
+        )
+    )
+    return _build_taa_vix_cash_full_target_decision_plan(
+        release_obj=release_obj,
+        as_of_ts=as_of_ts,
+        pod_state_obj=pod_state_obj,
+        base_taa_module=base_taa_module,
+        config_obj=config_obj,
+        execution_price_df=execution_price_df,
+        month_end_weight_df=month_end_weight_df,
+        month_end_vrp_diagnostic_df=month_end_vrp_diagnostic_df,
+        strategy_family_str="taa_df_btal_linearity_1n_fallback_qqq_vix_cash",
+    )
+
+
+def _build_taa_vix_cash_full_target_decision_plan(
+    release_obj: LiveRelease,
+    as_of_ts: datetime,
+    pod_state_obj: PodState | None,
+    base_taa_module,
+    config_obj,
+    execution_price_df: pd.DataFrame,
+    month_end_weight_df: pd.DataFrame,
+    month_end_vrp_diagnostic_df: pd.DataFrame,
+    strategy_family_str: str,
+    snapshot_metadata_extra_dict: dict[str, Any] | None = None,
+) -> DecisionPlan:
     if len(month_end_weight_df.index) == 0:
         raise RuntimeError("TAA live host produced no month-end weights.")
 
@@ -642,6 +753,12 @@ def _build_taa_btal_tqqq_vix_cash_decision_plan(
         for asset_str, amount_float in strategy_obj.get_positions().items()
         if abs(float(amount_float)) > 1e-9
     }
+    snapshot_metadata_dict = {
+        "strategy_family_str": strategy_family_str,
+        "cash_weight_float": float(latest_diagnostic_ser["cash_weight"]),
+    }
+    if snapshot_metadata_extra_dict is not None:
+        snapshot_metadata_dict.update(snapshot_metadata_extra_dict)
     return _build_full_target_weight_decision_plan(
         release_obj=release_obj,
         signal_date_ts=signal_date_ts,
@@ -649,11 +766,7 @@ def _build_taa_btal_tqqq_vix_cash_decision_plan(
         full_target_weight_map_dict=full_target_weight_map_dict,
         cash_reserve_weight_float=cash_reserve_weight_float,
         strategy_state_dict=_extract_strategy_state_dict(strategy_obj),
-        snapshot_metadata_dict={
-            "strategy_family_str": "taa_df_btal_fallback_tqqq_vix_cash",
-            "cash_weight_float": float(latest_diagnostic_ser["cash_weight"]),
-            **_build_dtb3_snapshot_metadata_dict(dtb3_snapshot_obj),
-        },
+        snapshot_metadata_dict=snapshot_metadata_dict,
     )
 
 
@@ -661,16 +774,49 @@ def _build_atr_normalized_ndx_decision_plan(
     release_obj: LiveRelease,
     as_of_ts: datetime,
     pod_state_obj: PodState | None,
+    *,
+    module_import_str: str = "strategies.momentum.strategy_mo_atr_normalized_ndx",
+    strategy_class_name_str: str = "AtrNormalizedNdxStrategy",
+    data_loader_name_str: str = "get_atr_normalized_ndx_data",
+    strategy_family_str: str = "atr_normalized_ndx",
 ) -> DecisionPlan:
-    atr_module = import_module("strategies.momentum.strategy_mo_atr_normalized_ndx")
-    config_obj = replace(
-        atr_module.DEFAULT_CONFIG,
-        end_date_str=pd.Timestamp(as_of_ts).strftime("%Y-%m-%d"),
-        max_positions_int=int(
+    atr_module = import_module(module_import_str)
+    config_update_dict: dict[str, Any] = {
+        "end_date_str": pd.Timestamp(as_of_ts).strftime("%Y-%m-%d"),
+        "max_positions_int": int(
             release_obj.params_dict.get("max_positions_int", atr_module.DEFAULT_CONFIG.max_positions_int)
         ),
-    )
-    pricing_data_df, universe_df, _ = atr_module.get_atr_normalized_ndx_data(config_obj)
+    }
+    for parameter_name_str in (
+        "lookback_month_int",
+        "index_trend_window_int",
+        "stock_trend_window_int",
+        "regime_symbol_str",
+        "vxn_symbol_str",
+        "target_vxn_pct_float",
+        "min_exposure_scale_float",
+        "max_exposure_scale_float",
+    ):
+        if parameter_name_str not in release_obj.params_dict:
+            continue
+        if not hasattr(atr_module.DEFAULT_CONFIG, parameter_name_str):
+            continue
+
+        parameter_value_obj = release_obj.params_dict[parameter_name_str]
+        default_value_obj = getattr(atr_module.DEFAULT_CONFIG, parameter_name_str)
+        if isinstance(default_value_obj, int) and not isinstance(default_value_obj, bool):
+            config_update_dict[parameter_name_str] = int(parameter_value_obj)
+        elif isinstance(default_value_obj, float):
+            config_update_dict[parameter_name_str] = float(parameter_value_obj)
+        else:
+            config_update_dict[parameter_name_str] = str(parameter_value_obj)
+
+    config_obj = replace(atr_module.DEFAULT_CONFIG, **config_update_dict)
+    data_loader_fn = getattr(atr_module, data_loader_name_str)
+    data_result_tuple = data_loader_fn(config_obj)
+    pricing_data_df = data_result_tuple[0]
+    universe_df = data_result_tuple[1]
+    vxn_scale_signal_df = data_result_tuple[3] if len(data_result_tuple) >= 4 else None
     tradeable_symbol_list = [
         symbol_str
         for symbol_str in pricing_data_df.columns.get_level_values(0).unique()
@@ -728,28 +874,33 @@ def _build_atr_normalized_ndx_decision_plan(
         index=pd.DatetimeIndex([pd.Timestamp(execution_date_ts.date())], name="execution_date_ts"),
     )
 
-    strategy_obj = atr_module.AtrNormalizedNdxStrategy(
-        name=release_obj.pod_id_str,
-        benchmarks=[config_obj.regime_symbol_str],
-        rebalance_schedule_df=rebalance_schedule_df,
-        regime_symbol_str=config_obj.regime_symbol_str,
-        capital_base=float(release_obj.params_dict.get("capital_base_float", config_obj.capital_base_float)),
-        slippage=float(release_obj.params_dict.get("slippage_float", config_obj.slippage_float)),
-        commission_per_share=float(
+    strategy_class_obj = getattr(atr_module, strategy_class_name_str)
+    strategy_kwargs_dict: dict[str, Any] = {
+        "name": release_obj.pod_id_str,
+        "benchmarks": [config_obj.regime_symbol_str],
+        "rebalance_schedule_df": rebalance_schedule_df,
+        "regime_symbol_str": config_obj.regime_symbol_str,
+        "capital_base": float(release_obj.params_dict.get("capital_base_float", config_obj.capital_base_float)),
+        "slippage": float(release_obj.params_dict.get("slippage_float", config_obj.slippage_float)),
+        "commission_per_share": float(
             release_obj.params_dict.get("commission_per_share_float", config_obj.commission_per_share_float)
         ),
-        commission_minimum=float(
+        "commission_minimum": float(
             release_obj.params_dict.get("commission_minimum_float", config_obj.commission_minimum_float)
         ),
-        lookback_month_int=int(release_obj.params_dict.get("lookback_month_int", config_obj.lookback_month_int)),
-        index_trend_window_int=int(
+        "lookback_month_int": int(release_obj.params_dict.get("lookback_month_int", config_obj.lookback_month_int)),
+        "index_trend_window_int": int(
             release_obj.params_dict.get("index_trend_window_int", config_obj.index_trend_window_int)
         ),
-        stock_trend_window_int=int(
+        "stock_trend_window_int": int(
             release_obj.params_dict.get("stock_trend_window_int", config_obj.stock_trend_window_int)
         ),
-        max_positions_int=int(release_obj.params_dict.get("max_positions_int", config_obj.max_positions_int)),
-    )
+        "max_positions_int": int(release_obj.params_dict.get("max_positions_int", config_obj.max_positions_int)),
+    }
+    if vxn_scale_signal_df is not None:
+        strategy_kwargs_dict["vxn_scale_signal_df"] = vxn_scale_signal_df
+
+    strategy_obj = strategy_class_obj(**strategy_kwargs_dict)
     strategy_obj.universe_df = universe_df
     _seed_strategy_state(strategy_obj, pod_state_obj)
 
@@ -777,6 +928,31 @@ def _build_atr_normalized_ndx_decision_plan(
         for asset_str, amount_float in strategy_obj.get_positions().items()
         if abs(float(amount_float)) > 1e-9
     }
+    snapshot_metadata_dict: dict[str, Any] = {"strategy_family_str": strategy_family_str}
+    if vxn_scale_signal_df is not None:
+        sorted_vxn_scale_signal_df = vxn_scale_signal_df.sort_index()
+        # *** CRITICAL*** This metadata lookup is as-of the stock decision date.
+        # It may report the same-day or prior VXN close, never a later helper row.
+        vxn_row_int = int(
+            sorted_vxn_scale_signal_df.index.searchsorted(pd.Timestamp(signal_date_ts), side="right")
+        ) - 1
+        if vxn_row_int < 0:
+            raise RuntimeError(f"No VXN scale exists on or before decision date {signal_date_ts}.")
+        vxn_row_ser = sorted_vxn_scale_signal_df.iloc[vxn_row_int]
+        vxn_reference_date_ts = pd.Timestamp(sorted_vxn_scale_signal_df.index[vxn_row_int])
+        snapshot_metadata_dict.update(
+            {
+                "vxn_symbol_str": str(getattr(config_obj, "vxn_symbol_str", "$VXN")),
+                "vxn_reference_date_str": vxn_reference_date_ts.strftime("%Y-%m-%d"),
+                "vxn_exposure_scale_float": float(vxn_row_ser["vxn_exposure_scale_float"]),
+                "target_vxn_pct_float": float(getattr(config_obj, "target_vxn_pct_float")),
+                "min_exposure_scale_float": float(getattr(config_obj, "min_exposure_scale_float")),
+                "max_exposure_scale_float": float(getattr(config_obj, "max_exposure_scale_float")),
+            }
+        )
+        if "vxn_close" in vxn_row_ser.index:
+            snapshot_metadata_dict["vxn_close_float"] = float(vxn_row_ser["vxn_close"])
+
     return _build_full_target_weight_decision_plan(
         release_obj=release_obj,
         signal_date_ts=signal_date_ts,
@@ -784,7 +960,7 @@ def _build_atr_normalized_ndx_decision_plan(
         full_target_weight_map_dict=full_target_weight_map_dict,
         cash_reserve_weight_float=cash_reserve_weight_float,
         strategy_state_dict=_extract_strategy_state_dict(strategy_obj),
-        snapshot_metadata_dict={"strategy_family_str": "atr_normalized_ndx"},
+        snapshot_metadata_dict=snapshot_metadata_dict,
     )
 
 
@@ -799,92 +975,30 @@ def build_decision_plan_for_release(
         return _build_qpi_ibs_rsi_exit_decision_plan(release_obj, as_of_ts, pod_state_obj)
     if release_obj.strategy_import_str == "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash":
         return _build_taa_btal_tqqq_vix_cash_decision_plan(release_obj, as_of_ts, pod_state_obj)
+    if release_obj.strategy_import_str == "strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash":
+        return _build_taa_btal_1n_tqqq_vix_cash_decision_plan(release_obj, as_of_ts, pod_state_obj)
+    if release_obj.strategy_import_str == "strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash":
+        return _build_taa_btal_linearity_1n_qqq_vix_cash_decision_plan(
+            release_obj,
+            as_of_ts,
+            pod_state_obj,
+        )
     if release_obj.strategy_import_str == "strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy":
         return _build_atr_normalized_ndx_decision_plan(release_obj, as_of_ts, pod_state_obj)
+    if (
+        release_obj.strategy_import_str
+        == "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy"
+    ):
+        return _build_atr_normalized_ndx_decision_plan(
+            release_obj,
+            as_of_ts,
+            pod_state_obj,
+            module_import_str="strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled",
+            strategy_class_name_str="VxnScaledAtrNormalizedNdxStrategy",
+            data_loader_name_str="get_vxn_scaled_atr_normalized_ndx_data",
+            strategy_family_str="atr_normalized_ndx_vxn_scaled",
+        )
     raise NotImplementedError(
         "V2 broker-truth execution currently supports the configured decision-book families only. "
         f"Unsupported strategy_import_str '{release_obj.strategy_import_str}'."
     )
-
-
-def preflight_decision_contract_for_release(
-    release_obj: LiveRelease,
-    as_of_ts: datetime,
-    pod_state_obj: PodState | None,
-) -> dict[str, Any]:
-    preflight_detail_dict = {
-        "release_id_str": release_obj.release_id_str,
-        "pod_id_str": release_obj.pod_id_str,
-        "strategy_import_str": release_obj.strategy_import_str,
-        "decision_book_type_str": "unknown",
-        "contract_status_str": "pass",
-        "accepted_shape_count_int": 0,
-        "unsupported_shape_count_int": 0,
-        "unsupported_shape_example_dict_list": [],
-        "error_str": None,
-    }
-
-    try:
-        decision_book_type_str = _get_expected_decision_book_type_str(release_obj.strategy_import_str)
-        preflight_detail_dict["decision_book_type_str"] = decision_book_type_str
-        if release_obj.strategy_import_str == "strategies.dv2.strategy_mr_dv2:DVO2Strategy":
-            _, strategy_obj = _run_dv2_strategy_for_live_decision(
-                release_obj=release_obj,
-                as_of_ts=as_of_ts,
-                pod_state_obj=pod_state_obj,
-            )
-            contract_audit_dict = _audit_incremental_order_shape_list(
-                release_obj=release_obj,
-                strategy_obj=strategy_obj,
-            )
-            preflight_detail_dict["accepted_shape_count_int"] = int(contract_audit_dict["accepted_shape_count_int"])
-            preflight_detail_dict["unsupported_shape_count_int"] = int(
-                contract_audit_dict["unsupported_shape_count_int"]
-            )
-            preflight_detail_dict["unsupported_shape_example_dict_list"] = list(
-                contract_audit_dict["unsupported_shape_dict_list"]
-            )
-        elif release_obj.strategy_import_str == "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy":
-            _, strategy_obj = _run_qpi_ibs_rsi_exit_strategy_for_live_decision(
-                release_obj=release_obj,
-                as_of_ts=as_of_ts,
-                pod_state_obj=pod_state_obj,
-            )
-            contract_audit_dict = _audit_incremental_order_shape_list(
-                release_obj=release_obj,
-                strategy_obj=strategy_obj,
-            )
-            preflight_detail_dict["accepted_shape_count_int"] = int(contract_audit_dict["accepted_shape_count_int"])
-            preflight_detail_dict["unsupported_shape_count_int"] = int(
-                contract_audit_dict["unsupported_shape_count_int"]
-            )
-            preflight_detail_dict["unsupported_shape_example_dict_list"] = list(
-                contract_audit_dict["unsupported_shape_dict_list"]
-            )
-        else:
-            decision_plan_obj = build_decision_plan_for_release(
-                release_obj=release_obj,
-                as_of_ts=as_of_ts,
-                pod_state_obj=pod_state_obj,
-            )
-            if decision_book_type_str == "full_target_weight_book":
-                preflight_detail_dict["accepted_shape_count_int"] = len(
-                    decision_plan_obj.full_target_weight_map_dict
-                )
-            else:
-                preflight_detail_dict["accepted_shape_count_int"] = (
-                    len(decision_plan_obj.entry_target_weight_map_dict)
-                    + len(decision_plan_obj.exit_asset_set)
-                )
-    except Exception as exc:
-        preflight_detail_dict["contract_status_str"] = "fail"
-        preflight_detail_dict["error_str"] = str(exc)
-        return preflight_detail_dict
-
-    if int(preflight_detail_dict["unsupported_shape_count_int"]) > 0:
-        preflight_detail_dict["contract_status_str"] = "fail"
-        preflight_detail_dict["error_str"] = _build_unsupported_incremental_contract_error_str(
-            release_obj=release_obj,
-            unsupported_shape_dict_list=list(preflight_detail_dict["unsupported_shape_example_dict_list"]),
-        )
-    return preflight_detail_dict

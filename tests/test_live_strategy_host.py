@@ -10,7 +10,7 @@ import pytest
 
 from alpha.data import FredSeriesSnapshot
 from alpha.live.models import LiveRelease, PodState
-from alpha.live.strategy_host import build_decision_plan_for_release, preflight_decision_contract_for_release
+from alpha.live.strategy_host import build_decision_plan_for_release
 
 
 MARKET_TIMEZONE_OBJ = ZoneInfo("America/New_York")
@@ -89,31 +89,6 @@ def test_strategy_host_builds_dv2_decision_plan(monkeypatch):
     assert decision_plan_obj.entry_target_weight_map_dict == {"TEST": 1.0}
     assert decision_plan_obj.target_weight_map == {"TEST": 1.0}
     assert decision_plan_obj.preserve_untouched_positions_bool is True
-
-
-def test_strategy_host_preflight_reports_dv2_contract_pass(monkeypatch):
-    import strategies.dv2.strategy_mr_dv2 as dv2_module
-
-    date_index = pd.bdate_range("2023-01-02", periods=260)
-    pricing_data_df = make_price_df(["TEST", "$SPX"], date_index)
-    universe_df = pd.DataFrame(1, index=date_index, columns=["TEST"])
-
-    monkeypatch.setattr(dv2_module, "build_index_constituent_matrix", lambda indexname: (["TEST"], universe_df))
-    monkeypatch.setattr(dv2_module, "get_prices", lambda symbols, benchmarks, start_date, end_date: pricing_data_df)
-    monkeypatch.setattr(dv2_module.DVO2Strategy, "compute_signals", lambda self, pricing_data: pricing_data)
-    monkeypatch.setattr(dv2_module.DVO2Strategy, "get_opportunities", lambda self, close: ["TEST"])
-
-    preflight_detail_dict = preflight_decision_contract_for_release(
-        release_obj=make_release(),
-        as_of_ts=datetime(2024, 1, 31, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
-        pod_state_obj=None,
-    )
-
-    assert preflight_detail_dict["decision_book_type_str"] == "incremental_entry_exit_book"
-    assert preflight_detail_dict["contract_status_str"] == "pass"
-    assert preflight_detail_dict["accepted_shape_count_int"] == 1
-    assert preflight_detail_dict["unsupported_shape_count_int"] == 0
-    assert preflight_detail_dict["unsupported_shape_example_dict_list"] == []
 
 
 def test_strategy_host_accepts_zero_share_target_exit_for_dv2(monkeypatch):
@@ -244,43 +219,6 @@ def test_strategy_host_rejects_unsupported_incremental_limit_order_shape(monkeyp
     assert "asset_str='TEST'" in error_str
 
 
-def test_strategy_host_preflight_reports_dv2_contract_failure(monkeypatch):
-    import strategies.dv2.strategy_mr_dv2 as dv2_module
-
-    date_index = pd.bdate_range("2023-01-02", periods=260)
-    pricing_data_df = make_price_df(["TEST", "$SPX"], date_index)
-    universe_df = pd.DataFrame(1, index=date_index, columns=["TEST"])
-
-    def iterate_limit_order_stub(self, data_df, close_row_ser, open_price_ser):
-        self.order_value("TEST", 1000.0, limit_price=99.0, trade_id=1)
-
-    monkeypatch.setattr(dv2_module, "build_index_constituent_matrix", lambda indexname: (["TEST"], universe_df))
-    monkeypatch.setattr(dv2_module, "get_prices", lambda symbols, benchmarks, start_date, end_date: pricing_data_df)
-    monkeypatch.setattr(dv2_module.DVO2Strategy, "compute_signals", lambda self, pricing_data: pricing_data)
-    monkeypatch.setattr(dv2_module.DVO2Strategy, "iterate", iterate_limit_order_stub)
-
-    preflight_detail_dict = preflight_decision_contract_for_release(
-        release_obj=make_release(),
-        as_of_ts=datetime(2024, 1, 31, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
-        pod_state_obj=None,
-    )
-
-    assert preflight_detail_dict["decision_book_type_str"] == "incremental_entry_exit_book"
-    assert preflight_detail_dict["contract_status_str"] == "fail"
-    assert preflight_detail_dict["accepted_shape_count_int"] == 0
-    assert preflight_detail_dict["unsupported_shape_count_int"] == 1
-    assert preflight_detail_dict["unsupported_shape_example_dict_list"] == [
-        {
-            "asset_str": "TEST",
-            "order_class_str": "LimitOrder",
-            "unit_str": "value",
-            "target_bool": False,
-            "amount_float": 1000.0,
-            "trade_id_int": 1,
-        }
-    ]
-
-
 def test_strategy_host_builds_full_target_taa_decision_plan(monkeypatch):
     import strategies.taa_df.strategy_taa_df as base_taa_module
     import strategies.taa_df.strategy_taa_df_fallback_vix_cash_variant_utils as vix_overlay_module
@@ -367,6 +305,169 @@ def test_strategy_host_builds_full_target_taa_decision_plan(monkeypatch):
     assert decision_plan_obj.snapshot_metadata_dict == {
         "strategy_family_str": "taa_df_btal_fallback_tqqq_vix_cash",
         "cash_weight_float": 0.3,
+        "dtb3_source_name_str": "FRED",
+        "dtb3_series_id_str": "DTB3",
+        "dtb3_latest_observation_date_str": "2024-01-31",
+        "dtb3_download_attempt_timestamp_str": "2024-01-31T16:05:00-05:00",
+        "dtb3_download_status_str": "download_success",
+        "dtb3_used_cache_bool": False,
+        "dtb3_freshness_business_days_int": 0,
+    }
+
+
+def test_strategy_host_builds_full_target_linearity_qqq_vix_cash_taa_decision_plan(monkeypatch):
+    import strategies.taa_df.strategy_taa_df as base_taa_module
+    import strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash as variant_module
+    import strategies.taa_df.strategy_taa_df_fallback_vix_cash_variant_utils as vix_overlay_module
+
+    date_index = pd.DatetimeIndex(
+        [
+            pd.Timestamp("2024-01-30"),
+            pd.Timestamp("2024-01-31"),
+        ]
+    )
+    execution_price_df = make_price_df(["BTAL", "TLT", "QQQ"], date_index)
+    month_end_weight_df = pd.DataFrame(
+        [{"BTAL": 0.4, "QQQ": 0.3}],
+        index=pd.DatetimeIndex([pd.Timestamp("2024-01-31")]),
+    )
+    diagnostic_df = pd.DataFrame(
+        [{"cash_weight": 0.3}],
+        index=pd.DatetimeIndex([pd.Timestamp("2024-01-31")]),
+    )
+
+    monkeypatch.setattr(
+        variant_module,
+        "get_defense_first_linearity_1n_data",
+        lambda config_obj: (execution_price_df, None, None, month_end_weight_df, None),
+    )
+    monkeypatch.setattr(
+        vix_overlay_module,
+        "_load_vrp_overlay_signal_frames",
+        lambda config_obj: (None, pd.DataFrame(index=month_end_weight_df.index)),
+    )
+    monkeypatch.setattr(
+        vix_overlay_module,
+        "apply_vrp_cash_gate_to_month_end_weight_df",
+        lambda base_month_end_weight_df, month_end_vrp_signal_df, config: (
+            month_end_weight_df,
+            diagnostic_df,
+        ),
+    )
+    monkeypatch.setattr(base_taa_module.DefenseFirstStrategy, "iterate", lambda self, data_df, close_row_ser, open_price_ser: None)
+
+    release_obj = make_release(
+        strategy_import_str="strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash",
+        data_profile_str="norgate_eod_etf_plus_vix_helper",
+        execution_policy_str="next_month_first_open",
+        params_dict={"capital_base_float": 100000.0},
+    )
+    pod_state_obj = PodState(
+        pod_id_str=release_obj.pod_id_str,
+        user_id_str=release_obj.user_id_str,
+        account_route_str=release_obj.account_route_str,
+        position_amount_map={"QQQ": 5.0},
+        cash_float=1000.0,
+        total_value_float=100000.0,
+        strategy_state_dict={},
+        updated_timestamp_ts=datetime(2024, 1, 31, 16, 0, tzinfo=MARKET_TIMEZONE_OBJ),
+    )
+
+    decision_plan_obj = build_decision_plan_for_release(
+        release_obj=release_obj,
+        as_of_ts=datetime(2024, 1, 31, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
+        pod_state_obj=pod_state_obj,
+    )
+
+    assert decision_plan_obj.decision_book_type_str == "full_target_weight_book"
+    assert decision_plan_obj.execution_policy_str == "next_month_first_open"
+    assert decision_plan_obj.full_target_weight_map_dict == {"BTAL": 0.4, "QQQ": 0.3}
+    assert decision_plan_obj.cash_reserve_weight_float == pytest.approx(0.3)
+    assert decision_plan_obj.decision_base_position_map == {"QQQ": 5.0}
+    assert decision_plan_obj.snapshot_metadata_dict == {
+        "strategy_family_str": "taa_df_btal_linearity_1n_fallback_qqq_vix_cash",
+        "cash_weight_float": 0.3,
+    }
+
+
+def test_strategy_host_builds_full_target_btal_1n_tqqq_vix_cash_taa_decision_plan(monkeypatch):
+    import strategies.taa_df.strategy_taa_df as base_taa_module
+    import strategies.taa_df.strategy_taa_df_fallback_vix_cash_variant_utils as vix_overlay_module
+
+    date_index = pd.DatetimeIndex(
+        [
+            pd.Timestamp("2024-01-30"),
+            pd.Timestamp("2024-01-31"),
+        ]
+    )
+    execution_price_df = make_price_df(["BTAL", "TLT", "TQQQ"], date_index)
+    month_end_weight_df = pd.DataFrame(
+        [{"BTAL": 0.2, "TLT": 0.2, "TQQQ": 0.4}],
+        index=pd.DatetimeIndex([pd.Timestamp("2024-01-31")]),
+    )
+    diagnostic_df = pd.DataFrame(
+        [{"cash_weight": 0.2}],
+        index=pd.DatetimeIndex([pd.Timestamp("2024-01-31")]),
+    )
+    dtb3_snapshot_obj = FredSeriesSnapshot(
+        value_ser=pd.Series(
+            [5.20],
+            index=pd.DatetimeIndex([pd.Timestamp("2024-01-31")]),
+            name="DTB3",
+        ),
+        source_name_str="FRED",
+        series_id_str="DTB3",
+        download_attempt_timestamp_ts=datetime(2024, 1, 31, 16, 5, tzinfo=MARKET_TIMEZONE_OBJ),
+        download_status_str="download_success",
+        latest_observation_date_ts=pd.Timestamp("2024-01-31"),
+        used_cache_bool=False,
+        freshness_business_days_int=0,
+    )
+
+    monkeypatch.setattr(
+        base_taa_module,
+        "get_defense_first_data_with_snapshot",
+        lambda config_obj: (execution_price_df, None, month_end_weight_df, None, dtb3_snapshot_obj),
+    )
+    monkeypatch.setattr(
+        vix_overlay_module,
+        "_load_vrp_overlay_signal_frames",
+        lambda config_obj: (None, pd.DataFrame(index=month_end_weight_df.index)),
+    )
+    monkeypatch.setattr(
+        vix_overlay_module,
+        "apply_vrp_cash_gate_to_month_end_weight_df",
+        lambda base_month_end_weight_df, month_end_vrp_signal_df, config: (
+            month_end_weight_df,
+            diagnostic_df,
+        ),
+    )
+    monkeypatch.setattr(base_taa_module.DefenseFirstStrategy, "iterate", lambda self, data_df, close_row_ser, open_price_ser: None)
+
+    release_obj = make_release(
+        strategy_import_str="strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash",
+        data_profile_str="norgate_eod_etf_plus_vix_helper",
+        execution_policy_str="next_month_first_open",
+        params_dict={"capital_base_float": 100000.0},
+    )
+
+    decision_plan_obj = build_decision_plan_for_release(
+        release_obj=release_obj,
+        as_of_ts=datetime(2024, 1, 31, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
+        pod_state_obj=None,
+    )
+
+    assert decision_plan_obj.decision_book_type_str == "full_target_weight_book"
+    assert decision_plan_obj.execution_policy_str == "next_month_first_open"
+    assert decision_plan_obj.full_target_weight_map_dict == {
+        "BTAL": 0.2,
+        "TLT": 0.2,
+        "TQQQ": 0.4,
+    }
+    assert decision_plan_obj.cash_reserve_weight_float == pytest.approx(0.2)
+    assert decision_plan_obj.snapshot_metadata_dict == {
+        "strategy_family_str": "taa_df_btal_1n_fallback_tqqq_vix_cash",
+        "cash_weight_float": 0.2,
         "dtb3_source_name_str": "FRED",
         "dtb3_series_id_str": "DTB3",
         "dtb3_latest_observation_date_str": "2024-01-31",
@@ -627,3 +728,112 @@ def test_strategy_host_builds_full_target_atr_decision_plan(monkeypatch):
     assert decision_plan_obj.decision_base_position_map == {"QQQ": 3.0}
     assert decision_plan_obj.preserve_untouched_positions_bool is False
     assert decision_plan_obj.rebalance_omitted_assets_to_zero_bool is True
+
+
+def test_strategy_host_builds_full_target_vxn_scaled_atr_decision_plan(monkeypatch):
+    import strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled as vxn_module
+
+    date_index = pd.DatetimeIndex(
+        [
+            pd.Timestamp("2024-01-30"),
+            pd.Timestamp("2024-01-31"),
+        ]
+    )
+    pricing_data_df = make_price_df(["AAPL", "MSFT", "SPY"], date_index)
+    universe_df = pd.DataFrame(1, index=date_index, columns=["AAPL", "MSFT"])
+    monthly_decision_close_df = pd.DataFrame(
+        {"AAPL": [100.0], "MSFT": [200.0]},
+        index=pd.DatetimeIndex([pd.Timestamp("2024-01-31")]),
+    )
+    vxn_scale_signal_df = pd.DataFrame(
+        {
+            "vxn_close": [40.0],
+            "vxn_exposure_scale_float": [0.5],
+        },
+        index=pd.DatetimeIndex([pd.Timestamp("2024-01-31")]),
+    )
+
+    def get_vxn_scaled_data_stub(config_obj):
+        assert config_obj.vxn_symbol_str == "$VXN"
+        assert config_obj.target_vxn_pct_float == pytest.approx(20.0)
+        assert config_obj.min_exposure_scale_float == pytest.approx(0.25)
+        assert config_obj.max_exposure_scale_float == pytest.approx(1.0)
+        return pricing_data_df, universe_df, None, vxn_scale_signal_df
+
+    def compute_signals_stub(self, pricing_data_df):
+        feature_df = pd.DataFrame(
+            {
+                ("AAPL", "stock_trend_pass_bool"): [True, True],
+                ("AAPL", "risk_adj_score_ser"): [1.0, 2.0],
+                ("MSFT", "stock_trend_pass_bool"): [True, True],
+                ("MSFT", "risk_adj_score_ser"): [1.0, 1.5],
+                ("SPY", "regime_pass_bool"): [True, True],
+            },
+            index=date_index,
+        )
+        feature_df.columns = pd.MultiIndex.from_tuples(feature_df.columns)
+        return pd.concat([pricing_data_df, feature_df], axis=1)
+
+    monkeypatch.setattr(
+        vxn_module,
+        "get_vxn_scaled_atr_normalized_ndx_data",
+        get_vxn_scaled_data_stub,
+    )
+    monkeypatch.setattr(
+        vxn_module,
+        "compute_atr_normalized_signal_tables",
+        lambda price_close_df, price_high_df, price_low_df, regime_close_ser, config: (
+            monthly_decision_close_df,
+            monthly_decision_close_df.copy(),
+            monthly_decision_close_df.copy(),
+            monthly_decision_close_df.notna(),
+            pd.Series([True], index=monthly_decision_close_df.index),
+            pd.Series([True], index=monthly_decision_close_df.index),
+            monthly_decision_close_df.copy(),
+        ),
+    )
+    monkeypatch.setattr(vxn_module.VxnScaledAtrNormalizedNdxStrategy, "compute_signals", compute_signals_stub)
+    monkeypatch.setattr(
+        vxn_module.VxnScaledAtrNormalizedNdxStrategy,
+        "iterate",
+        lambda self, data_df, close_row_ser, open_price_ser: None,
+    )
+
+    release_obj = make_release(
+        strategy_import_str=(
+            "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:"
+            "VxnScaledAtrNormalizedNdxStrategy"
+        ),
+        data_profile_str="norgate_eod_ndx_pit_plus_vxn_helper",
+        execution_policy_str="next_month_first_open",
+        params_dict={
+            "capital_base_float": 100000.0,
+            "max_positions_int": 2,
+            "vxn_symbol_str": "$VXN",
+            "target_vxn_pct_float": 20.0,
+            "min_exposure_scale_float": 0.25,
+            "max_exposure_scale_float": 1.0,
+        },
+    )
+
+    decision_plan_obj = build_decision_plan_for_release(
+        release_obj=release_obj,
+        as_of_ts=datetime(2024, 1, 31, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
+        pod_state_obj=None,
+    )
+
+    assert decision_plan_obj.decision_book_type_str == "full_target_weight_book"
+    assert decision_plan_obj.full_target_weight_map_dict == {"AAPL": 0.25, "MSFT": 0.25}
+    assert decision_plan_obj.cash_reserve_weight_float == pytest.approx(0.5)
+    assert decision_plan_obj.preserve_untouched_positions_bool is False
+    assert decision_plan_obj.rebalance_omitted_assets_to_zero_bool is True
+    assert decision_plan_obj.snapshot_metadata_dict == {
+        "strategy_family_str": "atr_normalized_ndx_vxn_scaled",
+        "vxn_symbol_str": "$VXN",
+        "vxn_reference_date_str": "2024-01-31",
+        "vxn_exposure_scale_float": 0.5,
+        "target_vxn_pct_float": 20.0,
+        "min_exposure_scale_float": 0.25,
+        "max_exposure_scale_float": 1.0,
+        "vxn_close_float": 40.0,
+    }

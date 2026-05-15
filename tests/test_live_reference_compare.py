@@ -16,6 +16,19 @@ from alpha.live.state_store_v2 import LiveStateStore
 MARKET_TZ = ZoneInfo("America/New_York")
 
 
+def test_reference_output_dir_path_stays_outside_research_tree(tmp_path):
+    output_path = reference_compare.build_reference_output_dir_path(
+        output_dir_str=str(tmp_path / "results"),
+        env_mode_str="paper",
+        pod_id_str="pod_qpi_01",
+        as_of_ts=datetime(2024, 2, 2, 12, 0, tzinfo=MARKET_TZ),
+    )
+
+    relative_path = output_path.relative_to(tmp_path / "results")
+    assert relative_path.parts[0] == "live_reference_compare"
+    assert "research" not in relative_path.parts
+
+
 class FakeReferenceStrategy:
     def __init__(self) -> None:
         self.results = pd.DataFrame(
@@ -426,7 +439,13 @@ def test_html_report_writes_expected_artifacts(tmp_path):
                 "reference_position_diff_float": 0.0,
                 "avg_fill_price_float": 100.0,
                 "reference_price_float": 100.0,
+                "official_open_price_float": 100.0,
+                "vplan_reference_price_float": 99.5,
                 "fill_slippage_bps_float": 0.0,
+                "official_open_slippage_bps_float": 0.0,
+                "official_open_slippage_notional_float": 0.0,
+                "vplan_reference_slippage_bps_float": 50.2512562814,
+                "vplan_reference_slippage_notional_float": 5.0,
                 "backtest_quantity_diff_float": 0.0,
                 "backtest_fill_price_diff_float": 0.0,
             }
@@ -445,6 +464,14 @@ def test_html_report_writes_expected_artifacts(tmp_path):
     assert Path(artifact_path_dict["html_path_str"]).exists()
     assert Path(artifact_path_dict["summary_json_path_str"]).exists()
     assert Path(artifact_path_dict["fill_compare_csv_path_str"]).read_text(encoding="utf-8").strip()
+    html_text_str = Path(artifact_path_dict["html_path_str"]).read_text(encoding="utf-8")
+    assert "Verdict" in html_text_str
+    assert "Execution Quality" in html_text_str
+    assert "Position Parity" in html_text_str
+    assert "Raw Detail Tables" in html_text_str
+    assert "Official open" in html_text_str
+    assert "VPlan reference" in html_text_str
+    assert "<th>reference_price_float</th>" not in html_text_str
 
 
 def test_dv2_uses_latest_prior_pit_universe_row_for_lagged_universe_date():

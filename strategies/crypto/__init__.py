@@ -1,0 +1,1 @@
+"""Crypto research strategy modules."""

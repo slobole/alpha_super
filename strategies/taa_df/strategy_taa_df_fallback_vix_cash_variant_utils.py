@@ -56,6 +56,7 @@ except ModuleNotFoundError:
     )
 
 from alpha.engine.report import save_results
+from alpha.engine.friction_analysis import FrictionAnalysis
 
 
 spy_realized_vol_symbol_str = "SPY"
@@ -405,6 +406,80 @@ def run_standard_fallback_vix_cash_variant(
     return strategy
 
 
+def build_standard_fallback_vix_cash_friction_analysis_inputs(
+    strategy_name_str: str,
+    config: DefenseFirstConfig,
+    base_data_loader_fn: Callable[[DefenseFirstConfig], tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]],
+    show_display_bool: bool = False,
+    backtest_start_date_str: str | None = None,
+    capital_base_float: float = 100_000.0,
+) -> dict[str, object]:
+    (
+        execution_price_df,
+        _,
+        daily_vrp_signal_df,
+        _,
+        rebalance_weight_df,
+        month_end_vrp_diagnostic_df,
+    ) = get_standard_fallback_vix_cash_data(
+        config=config,
+        base_data_loader_fn=base_data_loader_fn,
+    )
+
+    strategy_obj = _build_defense_first_strategy(
+        strategy_name_str=strategy_name_str,
+        config=config,
+        rebalance_weight_df=rebalance_weight_df,
+        capital_base_float=capital_base_float,
+    )
+    strategy_obj.daily_vrp_signal_df = daily_vrp_signal_df.copy()
+    strategy_obj.month_end_vrp_diagnostic_df = month_end_vrp_diagnostic_df.copy()
+
+    # *** CRITICAL *** FrictionAnalysis must reuse the deployment-reference TAA
+    # next-open completed ledger. The month-end signal maps to the next
+    # tradable open before auction capacity is assessed.
+    _run_strategy_from_weight_df(
+        strategy=strategy_obj,
+        execution_price_df=execution_price_df,
+        rebalance_weight_df=rebalance_weight_df,
+        backtest_start_date_str=backtest_start_date_str,
+    )
+
+    return {
+        "strategy_obj": strategy_obj,
+        "pricing_data_df": execution_price_df,
+        "execution_policy_str": "MOO",
+    }
+
+
+def run_standard_fallback_vix_cash_friction_analysis(
+    strategy_name_str: str,
+    config: DefenseFirstConfig,
+    base_data_loader_fn: Callable[[DefenseFirstConfig], tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]],
+    save_results_bool: bool = True,
+    output_dir_str: str = "results",
+    show_display_bool: bool = False,
+    backtest_start_date_str: str | None = None,
+    capital_base_float: float = 100_000.0,
+):
+    friction_input_dict = build_standard_fallback_vix_cash_friction_analysis_inputs(
+        strategy_name_str=strategy_name_str,
+        config=config,
+        base_data_loader_fn=base_data_loader_fn,
+        show_display_bool=show_display_bool,
+        backtest_start_date_str=backtest_start_date_str,
+        capital_base_float=capital_base_float,
+    )
+    friction_analysis_obj = FrictionAnalysis(
+        strategy_obj=friction_input_dict["strategy_obj"],
+        pricing_data_df=friction_input_dict["pricing_data_df"],
+        execution_policy_str=friction_input_dict["execution_policy_str"],
+        output_dir_str=output_dir_str,
+        save_output_bool=save_results_bool,
+    )
+    return friction_analysis_obj.run()
+
+
 def run_linearity_1n_fallback_vix_cash_variant(
     strategy_name_str: str,
     config: DefenseFirstConfig,
@@ -412,6 +487,8 @@ def run_linearity_1n_fallback_vix_cash_variant(
     show_display_bool: bool = True,
     save_results_bool: bool = True,
     output_dir_str: str = "results",
+    backtest_start_date_str: str | None = None,
+    capital_base_float: float = 100_000.0,
 ):
     """
     Run a linearity 1/n fallback variant with the VIX cash overlay.
@@ -433,6 +510,7 @@ def run_linearity_1n_fallback_vix_cash_variant(
         strategy_name_str=strategy_name_str,
         config=config,
         rebalance_weight_df=rebalance_weight_df,
+        capital_base_float=capital_base_float,
     )
     strategy.daily_vrp_signal_df = daily_vrp_signal_df.copy()
     strategy.month_end_vrp_diagnostic_df = month_end_vrp_diagnostic_df.copy()
@@ -441,6 +519,7 @@ def run_linearity_1n_fallback_vix_cash_variant(
         strategy=strategy,
         execution_price_df=execution_price_df,
         rebalance_weight_df=rebalance_weight_df,
+        backtest_start_date_str=backtest_start_date_str,
     )
 
     if show_display_bool:
@@ -472,3 +551,78 @@ def run_linearity_1n_fallback_vix_cash_variant(
         save_results(strategy, output_dir=output_dir_str)
 
     return strategy
+
+
+def build_linearity_1n_fallback_vix_cash_friction_analysis_inputs(
+    strategy_name_str: str,
+    config: DefenseFirstConfig,
+    base_data_loader_fn: Callable[[DefenseFirstConfig], tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]],
+    show_display_bool: bool = False,
+    backtest_start_date_str: str | None = None,
+    capital_base_float: float = 100_000.0,
+) -> dict[str, object]:
+    (
+        execution_price_df,
+        _,
+        _,
+        daily_vrp_signal_df,
+        _,
+        rebalance_weight_df,
+        month_end_vrp_diagnostic_df,
+    ) = get_linearity_1n_fallback_vix_cash_data(
+        config=config,
+        base_data_loader_fn=base_data_loader_fn,
+    )
+
+    strategy_obj = _build_defense_first_strategy(
+        strategy_name_str=strategy_name_str,
+        config=config,
+        rebalance_weight_df=rebalance_weight_df,
+        capital_base_float=capital_base_float,
+    )
+    strategy_obj.daily_vrp_signal_df = daily_vrp_signal_df.copy()
+    strategy_obj.month_end_vrp_diagnostic_df = month_end_vrp_diagnostic_df.copy()
+
+    # *** CRITICAL *** FrictionAnalysis must reuse the deployment-reference TAA
+    # next-open completed ledger. The month-end signal maps to the next
+    # tradable open before auction capacity is assessed.
+    _run_strategy_from_weight_df(
+        strategy=strategy_obj,
+        execution_price_df=execution_price_df,
+        rebalance_weight_df=rebalance_weight_df,
+        backtest_start_date_str=backtest_start_date_str,
+    )
+
+    return {
+        "strategy_obj": strategy_obj,
+        "pricing_data_df": execution_price_df,
+        "execution_policy_str": "MOO",
+    }
+
+
+def run_linearity_1n_fallback_vix_cash_friction_analysis(
+    strategy_name_str: str,
+    config: DefenseFirstConfig,
+    base_data_loader_fn: Callable[[DefenseFirstConfig], tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]],
+    save_results_bool: bool = True,
+    output_dir_str: str = "results",
+    show_display_bool: bool = False,
+    backtest_start_date_str: str | None = None,
+    capital_base_float: float = 100_000.0,
+):
+    friction_input_dict = build_linearity_1n_fallback_vix_cash_friction_analysis_inputs(
+        strategy_name_str=strategy_name_str,
+        config=config,
+        base_data_loader_fn=base_data_loader_fn,
+        show_display_bool=show_display_bool,
+        backtest_start_date_str=backtest_start_date_str,
+        capital_base_float=capital_base_float,
+    )
+    friction_analysis_obj = FrictionAnalysis(
+        strategy_obj=friction_input_dict["strategy_obj"],
+        pricing_data_df=friction_input_dict["pricing_data_df"],
+        execution_policy_str=friction_input_dict["execution_policy_str"],
+        output_dir_str=output_dir_str,
+        save_output_bool=save_results_bool,
+    )
+    return friction_analysis_obj.run()

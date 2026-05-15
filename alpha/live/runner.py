@@ -231,7 +231,10 @@ def _resolve_db_path_for_mode_str(
         if pod_id_str is not None:
             return _build_default_pod_db_path_str(env_mode_str, pod_id_str)
         if env_mode_str == "incubation":
-            return DEFAULT_INCUBATION_DB_PATH_STR
+            raise ValueError(
+                "Incubation default DB routing is pod-scoped. "
+                "Pass --pod-id for a pod DB, or pass --db-path for explicit legacy/manual DB access."
+            )
         return DEFAULT_DB_PATH_STR
 
     if env_mode_str == "incubation" and _same_resolved_path_bool(db_path_str, DEFAULT_DB_PATH_STR):
@@ -345,6 +348,35 @@ def _validate_state_store_releases_for_mutation(
     validate_enabled_deployment_for_mode(release_list, env_mode_str)
     selected_release_list = _filter_release_list_for_pod(release_list, pod_id_str)
     _validate_selected_pod_enabled_for_mode(selected_release_list, env_mode_str, pod_id_str)
+
+
+def _load_enabled_release_list_for_mode(
+    releases_root_path_str: str,
+    env_mode_str: str,
+) -> list[LiveRelease]:
+    release_list = load_release_list(releases_root_path_str)
+    validate_enabled_deployment_for_mode(release_list, env_mode_str)
+    return select_enabled_release_list_for_mode(
+        release_list=release_list,
+        env_mode_str=env_mode_str,
+    )
+
+
+def _clone_parsed_args_for_pod_obj(
+    parsed_args_obj: argparse.Namespace,
+    pod_id_str: str,
+) -> argparse.Namespace:
+    cloned_args_obj = argparse.Namespace(**vars(parsed_args_obj))
+    cloned_args_obj.pod_id_str = pod_id_str
+    return cloned_args_obj
+
+
+def _validate_incubation_fanout_args(parsed_args_obj: argparse.Namespace) -> None:
+    if parsed_args_obj.decision_plan_id_int is not None or parsed_args_obj.vplan_id_int is not None:
+        raise ValueError(
+            "Incubation fan-out cannot use local decision/vplan IDs without --pod-id. "
+            "Pass --pod-id for an ID-scoped command, or omit the ID to fan out across pods."
+        )
 
 
 def _coerce_broker_adapter_resolver_obj(
@@ -501,6 +533,149 @@ def _build_vplan_log_payload_dict(
 
 def _is_terminal_order_status_bool(status_str: str) -> bool:
     return str(status_str) in TERMINAL_ORDER_STATUS_SET
+
+
+def _build_rehearsal_policy_dict(env_mode_str: str) -> dict[str, object]:
+    if env_mode_str != "incubation":
+        return {
+            "status_str": "not_applicable",
+            "ladder_str": "incubation/rehearsal -> paper probe -> small live -> bigger account",
+            "official_accounting_source_str": "broker",
+            "paper_probe_accounting_truth_bool": False,
+            "promotion_gate_model_str": "not_applicable",
+            "detail_str": "Rehearsal policy applies to mode=incubation.",
+        }
+    return {
+        "status_str": "active",
+        "ladder_str": "incubation/rehearsal -> paper probe -> small live -> bigger account",
+        "official_accounting_source_str": "incubation_sim_ledger",
+        "paper_probe_accounting_truth_bool": False,
+        "promotion_gate_model_str": "cycle_based",
+        "detail_str": (
+            "SIM ledger owns rehearsal cash, positions, and P&L. "
+            "IBKR paper is probe-only evidence and is not imported into SIM accounting."
+        ),
+    }
+
+
+def _compact_source_label_str(source_str_list: list[str]) -> str | None:
+    normalized_source_list = sorted(
+        {
+            str(source_str)
+            for source_str in source_str_list
+            if source_str is not None and str(source_str).strip() != ""
+        }
+    )
+    if len(normalized_source_list) == 0:
+        return None
+    if len(normalized_source_list) == 1:
+        return normalized_source_list[0]
+    return ", ".join(normalized_source_list)
+
+
+def _live_reference_source_label_str(vplan_obj: VPlan | None) -> str | None:
+    if vplan_obj is None:
+        return None
+    source_str_list = list(vplan_obj.live_reference_source_map_dict.values())
+    if len(source_str_list) == 0:
+        source_str_list = [vplan_obj.live_price_source_str]
+    return _compact_source_label_str(source_str_list)
+
+
+def _open_price_source_label_str(fill_row_dict_list: list[dict[str, object]]) -> str | None:
+    return _compact_source_label_str(
+        [
+            str(fill_row_dict.get("open_price_source_str"))
+            for fill_row_dict in fill_row_dict_list
+            if fill_row_dict.get("open_price_source_str") is not None
+        ]
+    )
+
+
+def _rehearsal_cycle_status_str(
+    *,
+    latest_decision_plan_obj: DecisionPlan | None,
+    latest_vplan_obj: VPlan | None,
+    fill_row_dict_list: list[dict[str, object]],
+    exception_row_dict_list: list[dict[str, object]],
+) -> str:
+    if latest_decision_plan_obj is None:
+        return "no_decision"
+    if latest_vplan_obj is None:
+        return "decision_only"
+    if latest_vplan_obj.status_str == "blocked":
+        return "blocked"
+    if len(fill_row_dict_list) == 0:
+        if latest_vplan_obj.status_str in {"submitted", "submitting"}:
+            return "awaiting_sim_settlement"
+        return "awaiting_vplan_submit"
+    if len(exception_row_dict_list) > 0:
+        return "manual_review"
+    if latest_vplan_obj.status_str == "completed":
+        return "cycle_complete"
+    return "awaiting_reconcile"
+
+
+def _rehearsal_promotion_gate_status_str(cycle_status_str: str) -> str:
+    if cycle_status_str == "cycle_complete":
+        return "complete_one_cycle"
+    if cycle_status_str in {"blocked", "manual_review"}:
+        return "blocked"
+    return "incomplete"
+
+
+def _build_rehearsal_status_dict(
+    *,
+    release_obj: LiveRelease,
+    latest_decision_plan_obj: DecisionPlan | None,
+    latest_vplan_obj: VPlan | None,
+    fill_row_dict_list: list[dict[str, object]],
+    exception_row_dict_list: list[dict[str, object]],
+    latest_pod_state_obj: PodState | None,
+) -> dict[str, object]:
+    if release_obj.mode_str != "incubation":
+        return {
+            "status_str": "not_applicable",
+            "promotion_gate_status_str": "not_applicable",
+            "detail_str": "Rehearsal status applies only to mode=incubation.",
+        }
+
+    cycle_status_str = _rehearsal_cycle_status_str(
+        latest_decision_plan_obj=latest_decision_plan_obj,
+        latest_vplan_obj=latest_vplan_obj,
+        fill_row_dict_list=fill_row_dict_list,
+        exception_row_dict_list=exception_row_dict_list,
+    )
+    open_price_source_str = _open_price_source_label_str(fill_row_dict_list)
+    completed_cycle_count_int = (
+        1
+        if cycle_status_str == "cycle_complete"
+        and latest_vplan_obj is not None
+        and len(fill_row_dict_list) > 0
+        else 0
+    )
+    return {
+        "status_str": "active",
+        "sim_ledger_status_str": "available" if latest_pod_state_obj is not None else "not_started",
+        "sim_ledger_source_str": (
+            None if latest_pod_state_obj is None else latest_pod_state_obj.snapshot_source_str
+        ),
+        "last_cycle_status_str": cycle_status_str,
+        "promotion_gate_status_str": _rehearsal_promotion_gate_status_str(cycle_status_str),
+        "promotion_gate_model_str": "cycle_based",
+        "completed_cycle_count_int": completed_cycle_count_int,
+        "ibkr_reference_status_str": "available" if latest_vplan_obj is not None else "missing",
+        "ibkr_reference_source_str": _live_reference_source_label_str(latest_vplan_obj),
+        "ibkr_open_price_status_str": "recorded" if open_price_source_str is not None else "missing",
+        "ibkr_open_price_source_str": open_price_source_str,
+        "paper_probe_status_str": "separate_probe_required",
+        "paper_probe_accounting_truth_bool": False,
+        "official_accounting_source_str": "incubation_sim_ledger",
+        "detail_str": (
+            "SIM ledger is the official rehearsal state. "
+            "IBKR price/open sources are evidence; paper fills are probe-only."
+        ),
+    }
 
 
 def _session_open_context_dict(
@@ -1259,6 +1434,16 @@ def _render_status_detail_str(detail_dict: dict[str, object]) -> str:
     deployment_warning_str = str(detail_dict.get("deployment_warning_str") or "")
     if deployment_warning_str != "":
         line_list.append(f"- Warning: {deployment_warning_str}")
+    rehearsal_policy_dict = dict(detail_dict.get("rehearsal_policy_dict") or {})
+    if rehearsal_policy_dict.get("status_str") == "active":
+        line_list.extend(
+            [
+                "- Rehearsal ladder: "
+                f"{rehearsal_policy_dict.get('ladder_str')}",
+                "- Rehearsal accounting truth: SIM ledger; IBKR paper is probe-only evidence.",
+                "- Promotion gate: cycle-based.",
+            ]
+        )
     if len(pod_status_dict_list) == 0:
         line_list.append("- No enabled sleeves were found for this deployment.")
         return "\n".join(line_list)
@@ -1294,6 +1479,20 @@ def _render_status_detail_str(detail_dict: dict[str, object]) -> str:
             )
         if pod_status_dict.get("latest_fill_timestamp_str") is not None:
             line_list.append(f"- Latest fill: {pod_status_dict['latest_fill_timestamp_str']}")
+        rehearsal_status_dict = dict(pod_status_dict.get("rehearsal_status_dict") or {})
+        if rehearsal_status_dict.get("status_str") == "active":
+            line_list.append(
+                "- Rehearsal: "
+                f"gate={rehearsal_status_dict.get('promotion_gate_status_str')} | "
+                f"cycle={rehearsal_status_dict.get('last_cycle_status_str')} | "
+                f"sim={rehearsal_status_dict.get('sim_ledger_status_str')} | "
+                f"ibkr_reference={rehearsal_status_dict.get('ibkr_reference_status_str')} | "
+                f"ibkr_open={rehearsal_status_dict.get('ibkr_open_price_status_str')} | "
+                f"completed_cycles={rehearsal_status_dict.get('completed_cycle_count_int')}"
+            )
+            line_list.append(
+                "- Paper probe: separate broker evidence only; paper fills are not SIM P&L."
+            )
         if (
             submit_ack_status_str not in (None, "not_checked", "complete")
             or missing_ack_count_int > 0
@@ -1517,6 +1716,11 @@ def _render_decision_plan_detail_str(detail_dict: dict[str, object]) -> str:
 def _render_execution_report_detail_str(detail_dict: dict[str, object]) -> str:
     execution_report_dict_list = list(detail_dict.get("execution_report_dict_list", []))
     line_list = ["Execution Report"]
+    rehearsal_policy_dict = dict(detail_dict.get("rehearsal_policy_dict") or {})
+    if rehearsal_policy_dict.get("status_str") == "active":
+        line_list.append(
+            "- Rehearsal accounting truth: SIM ledger; paper fills are probe-only and excluded from P&L."
+        )
     if len(execution_report_dict_list) == 0:
         line_list.append("- No fills were found yet.")
         return "\n".join(line_list)
@@ -1526,6 +1730,7 @@ def _render_execution_report_detail_str(detail_dict: dict[str, object]) -> str:
             [
                 "",
                 f"Pod: {execution_report_dict['pod_id_str']}",
+                f"- Accounting source: {execution_report_dict.get('official_accounting_source_str', 'unknown')}",
                 f"- VPlan id: {execution_report_dict['latest_vplan_id_int']}",
                 f"- Fill count: {execution_report_dict['fill_count_int']}",
                 f"- Fills with official open: {execution_report_dict['fill_with_open_count_int']}",
@@ -1594,57 +1799,13 @@ def _render_compare_reference_detail_str(detail_dict: dict[str, object]) -> str:
                 f"position_diff={_format_optional_float_str(compare_row_dict['position_diff_float'])} | "
                 f"ref_position_diff={_format_optional_float_str(compare_row_dict.get('reference_position_diff_float'))} | "
                 f"avg_fill={_format_optional_float_str(compare_row_dict['avg_fill_price_float'])} | "
-                f"reference={_format_optional_float_str(compare_row_dict['reference_price_float'])} | "
-                f"slippage_bps={_format_bps_str(compare_row_dict['fill_slippage_bps_float'])} | "
+                f"official_open={_format_optional_float_str(compare_row_dict.get('official_open_price_float'))} | "
+                f"vplan_ref={_format_optional_float_str(compare_row_dict.get('vplan_reference_price_float'))} | "
+                f"open_slippage_bps={_format_bps_str(compare_row_dict.get('official_open_slippage_bps_float'))} | "
+                f"ref_slippage_bps={_format_bps_str(compare_row_dict.get('vplan_reference_slippage_bps_float'))} | "
                 f"bt_qty_diff={_format_optional_float_str(compare_row_dict.get('backtest_quantity_diff_float'))} | "
                 f"bt_px_diff={_format_optional_float_str(compare_row_dict.get('backtest_fill_price_diff_float'))}"
             )
-    return "\n".join(line_list)
-
-
-def _render_preflight_contract_detail_str(detail_dict: dict[str, object]) -> str:
-    contract_report_dict_list = list(detail_dict.get("contract_report_dict_list", []))
-    line_list = [
-        "Preflight Contract",
-        f"- Enabled releases: {int(detail_dict.get('enabled_release_count_int', 0))}",
-        f"- Passed: {int(detail_dict.get('passed_release_count_int', 0))}",
-        f"- Failed: {int(detail_dict.get('failed_release_count_int', 0))}",
-    ]
-    if len(contract_report_dict_list) == 0:
-        line_list.append("- No enabled releases were found.")
-        return "\n".join(line_list)
-
-    for contract_report_dict in contract_report_dict_list:
-        line_list.extend(
-            [
-                "",
-                f"Release: {contract_report_dict['release_id_str']}",
-                f"- Pod: {contract_report_dict['pod_id_str']}",
-                f"- Strategy: {contract_report_dict['strategy_import_str']}",
-                f"- Decision book: {contract_report_dict['decision_book_type_str']}",
-                f"- Contract status: {contract_report_dict['contract_status_str']}",
-                f"- Accepted shapes: {int(contract_report_dict['accepted_shape_count_int'])}",
-                f"- Unsupported shapes: {int(contract_report_dict['unsupported_shape_count_int'])}",
-            ]
-        )
-        unsupported_shape_example_dict_list = list(
-            contract_report_dict.get("unsupported_shape_example_dict_list", [])
-        )
-        if len(unsupported_shape_example_dict_list) > 0:
-            line_list.append("- Unsupported shape examples:")
-            for unsupported_shape_dict in unsupported_shape_example_dict_list:
-                line_list.append(
-                    "  - "
-                    f"asset={unsupported_shape_dict['asset_str']} | "
-                    f"class={unsupported_shape_dict['order_class_str']} | "
-                    f"unit={unsupported_shape_dict['unit_str']} | "
-                    f"target={unsupported_shape_dict['target_bool']} | "
-                    f"amount={unsupported_shape_dict['amount_float']} | "
-                    f"trade_id={unsupported_shape_dict['trade_id_int']}"
-                )
-        if contract_report_dict.get("error_str") is not None:
-            line_list.append(f"- Error: {contract_report_dict['error_str']}")
-
     return "\n".join(line_list)
 
 
@@ -1680,7 +1841,50 @@ def _render_v1_cutover_detail_str(detail_dict: dict[str, object]) -> str:
     return "\n".join(line_list)
 
 
+def _render_incubation_fanout_detail_str(detail_dict: dict[str, object]) -> str:
+    pod_result_dict_list = list(detail_dict.get("pod_result_dict_list", []))
+    line_list = [
+        "Incubation Fan-out",
+        f"- Command: {detail_dict.get('command_name_str')}",
+        f"- Pods: {int(detail_dict.get('completed_count_int', 0))} completed, "
+        f"{int(detail_dict.get('failed_count_int', 0))} failed",
+    ]
+    if len(pod_result_dict_list) == 0:
+        line_list.append("- No enabled incubation pods found.")
+        return "\n".join(line_list)
+
+    for pod_result_dict in pod_result_dict_list:
+        line_list.extend(
+            [
+                "",
+                f"Pod: {pod_result_dict['pod_id_str']}",
+                f"- DB path: {pod_result_dict['db_path_str']}",
+                f"- Status: {pod_result_dict['status_str']}",
+            ]
+        )
+        if pod_result_dict.get("status_str") == "failed":
+            line_list.append(f"- Error: {pod_result_dict.get('error_str')}")
+            continue
+        detail_payload_dict = dict(pod_result_dict.get("detail_dict") or {})
+        next_action_obj = detail_payload_dict.get("next_action_str")
+        if next_action_obj is not None:
+            line_list.append(f"- Next action: {next_action_obj}")
+        pod_status_dict_list = list(detail_payload_dict.get("pod_status_dict_list", []))
+        if len(pod_status_dict_list) > 0:
+            pod_status_dict = dict(pod_status_dict_list[0])
+            line_list.append(
+                "- State: "
+                f"decision={pod_status_dict.get('latest_decision_plan_status_str') or 'none'} | "
+                f"vplan={pod_status_dict.get('latest_vplan_status_str') or 'none'} | "
+                f"next={pod_status_dict.get('next_action_str') or 'none'}"
+            )
+
+    return "\n".join(line_list)
+
+
 def _render_command_output_str(command_name_str: str, detail_dict: dict[str, object]) -> str:
+    if bool(detail_dict.get("fanout_bool")):
+        return _render_incubation_fanout_detail_str(detail_dict)
     if command_name_str == "tick":
         return _render_tick_detail_str(detail_dict)
     if command_name_str == "status":
@@ -1695,8 +1899,6 @@ def _render_command_output_str(command_name_str: str, detail_dict: dict[str, obj
         return _render_compare_reference_detail_str(detail_dict)
     if command_name_str == "eod_snapshot":
         return _render_eod_snapshot_detail_str(detail_dict)
-    if command_name_str == "preflight_contract":
-        return _render_preflight_contract_detail_str(detail_dict)
     if command_name_str == "cutover_v1_schema":
         return _render_v1_cutover_detail_str(detail_dict)
     return json.dumps(detail_dict, indent=2, sort_keys=True)
@@ -2728,7 +2930,9 @@ def get_status_summary(
         latest_decision_plan_obj = state_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str)
         latest_vplan_obj = state_store_obj.get_latest_vplan_for_pod(release_obj.pod_id_str)
         latest_broker_snapshot_obj = state_store_obj.get_latest_broker_snapshot_for_account(release_obj.account_route_str)
+        latest_pod_state_obj = state_store_obj.get_pod_state(release_obj.pod_id_str)
         latest_fill_timestamp_str = None
+        fill_row_dict_list: list[dict[str, object]] = []
         latest_broker_order_row_dict_list: list[dict[str, object]] = []
         broker_ack_row_dict_list: list[dict[str, object]] = []
         missing_ack_row_dict_list: list[dict[str, object]] = []
@@ -2750,11 +2954,12 @@ def get_status_summary(
             if latest_vplan_obj.status_str in ("submitted", "completed") or len(
                 latest_broker_order_row_dict_list
             ) > 0 or len(fill_row_dict_list) > 0:
-                broker_position_map_dict = (
-                    latest_vplan_obj.current_broker_position_map
-                    if latest_broker_snapshot_obj is None
-                    else latest_broker_snapshot_obj.position_amount_map
-                )
+                if latest_broker_snapshot_obj is not None:
+                    broker_position_map_dict = latest_broker_snapshot_obj.position_amount_map
+                elif release_obj.mode_str == "incubation" and latest_pod_state_obj is not None:
+                    broker_position_map_dict = latest_pod_state_obj.position_amount_map
+                else:
+                    broker_position_map_dict = latest_vplan_obj.current_broker_position_map
                 execution_row_dict_list = _build_execution_row_dict_list(
                     vplan_obj=latest_vplan_obj,
                     broker_position_map_dict=broker_position_map_dict,
@@ -2849,6 +3054,14 @@ def get_status_summary(
                 "broker_ack_row_dict_list": broker_ack_row_dict_list,
                 "exception_row_dict_list": exception_row_dict_list,
                 "exception_count_int": len(exception_row_dict_list),
+                "rehearsal_status_dict": _build_rehearsal_status_dict(
+                    release_obj=release_obj,
+                    latest_decision_plan_obj=latest_decision_plan_obj,
+                    latest_vplan_obj=latest_vplan_obj,
+                    fill_row_dict_list=fill_row_dict_list,
+                    exception_row_dict_list=exception_row_dict_list,
+                    latest_pod_state_obj=latest_pod_state_obj,
+                ),
             }
         )
 
@@ -2857,6 +3070,7 @@ def get_status_summary(
         "mode_str": env_mode_str,
         "client_user_id_str": client_user_id_str,
         "deployment_warning_str": deployment_warning_str,
+        "rehearsal_policy_dict": _build_rehearsal_policy_dict(env_mode_str),
         "enabled_pod_count_int": len(enabled_release_list),
         "pod_status_dict_list": pod_status_dict_list,
     }
@@ -3127,7 +3341,14 @@ def get_execution_report_summary(
         execution_report_dict_list.append(
             {
                 "pod_id_str": release_obj.pod_id_str,
+                "mode_str": release_obj.mode_str,
                 "latest_vplan_id_int": latest_vplan_obj.vplan_id_int,
+                "official_accounting_source_str": (
+                    "incubation_sim_ledger"
+                    if release_obj.mode_str == "incubation"
+                    else "broker"
+                ),
+                "paper_probe_accounting_truth_bool": False,
                 "fill_count_int": len(fill_row_dict_list),
                 "fill_with_open_count_int": sum(
                     1 for fill_row_dict in fill_row_dict_list if fill_row_dict["official_open_price_float"] is not None
@@ -3142,6 +3363,7 @@ def get_execution_report_summary(
         )
     return {
         "as_of_timestamp_str": as_of_ts.isoformat(),
+        "rehearsal_policy_dict": _build_rehearsal_policy_dict(str(env_mode_str or "")),
         "execution_report_dict_list": execution_report_dict_list,
     }
 
@@ -3473,19 +3695,53 @@ def get_compare_reference_summary(
             target_position_float = float(execution_row_dict["target_share_float"])
             actual_position_float = float(execution_row_dict["broker_share_float"])
             avg_fill_price_float = execution_row_dict.get("avg_fill_price_float")
-            reference_price_float = execution_row_dict.get("official_open_price_float")
+            official_open_price_float = execution_row_dict.get("official_open_price_float")
+            vplan_reference_price_float = execution_row_dict.get("live_reference_price_float")
+            if official_open_price_float is not None:
+                official_open_price_float = float(official_open_price_float)
+                if official_open_price_float <= 0.0:
+                    official_open_price_float = None
+            if vplan_reference_price_float is not None:
+                vplan_reference_price_float = float(vplan_reference_price_float)
+                if vplan_reference_price_float <= 0.0:
+                    vplan_reference_price_float = None
+            reference_price_float = official_open_price_float
             if reference_price_float is None:
-                reference_price_float = execution_row_dict.get("live_reference_price_float")
+                reference_price_float = vplan_reference_price_float
             side_float = _signed_execution_direction_float_from_amount(
                 planned_order_delta_share_float
             )
             fill_slippage_bps_float = None
+            official_open_slippage_bps_float = None
+            official_open_slippage_notional_float = None
+            vplan_reference_slippage_bps_float = None
+            vplan_reference_slippage_notional_float = None
             if avg_fill_price_float is not None and reference_price_float is not None:
                 fill_slippage_bps_float = _compute_execution_cost_bps_float(
                     execution_price_float=float(avg_fill_price_float),
                     official_open_price_float=float(reference_price_float),
                     signed_execution_direction_float=side_float,
                 )
+            if avg_fill_price_float is not None and official_open_price_float is not None:
+                official_open_slippage_bps_float = _compute_execution_cost_bps_float(
+                    execution_price_float=float(avg_fill_price_float),
+                    official_open_price_float=float(official_open_price_float),
+                    signed_execution_direction_float=side_float,
+                )
+                if side_float is not None:
+                    official_open_slippage_notional_float = abs(filled_share_float) * side_float * (
+                        float(avg_fill_price_float) - float(official_open_price_float)
+                    )
+            if avg_fill_price_float is not None and vplan_reference_price_float is not None:
+                vplan_reference_slippage_bps_float = _compute_execution_cost_bps_float(
+                    execution_price_float=float(avg_fill_price_float),
+                    official_open_price_float=float(vplan_reference_price_float),
+                    signed_execution_direction_float=side_float,
+                )
+                if side_float is not None:
+                    vplan_reference_slippage_notional_float = abs(filled_share_float) * side_float * (
+                        float(avg_fill_price_float) - float(vplan_reference_price_float)
+                    )
 
             reference_transaction_dict = transaction_map_dict.get(
                 (target_session_date_str, asset_str),
@@ -3527,7 +3783,13 @@ def get_compare_reference_summary(
                     "reference_position_diff_float": reference_position_diff_float,
                     "avg_fill_price_float": avg_fill_price_float,
                     "reference_price_float": reference_price_float,
+                    "official_open_price_float": official_open_price_float,
+                    "vplan_reference_price_float": vplan_reference_price_float,
                     "fill_slippage_bps_float": fill_slippage_bps_float,
+                    "official_open_slippage_bps_float": official_open_slippage_bps_float,
+                    "official_open_slippage_notional_float": official_open_slippage_notional_float,
+                    "vplan_reference_slippage_bps_float": vplan_reference_slippage_bps_float,
+                    "vplan_reference_slippage_notional_float": vplan_reference_slippage_notional_float,
                     "backtest_quantity_diff_float": backtest_quantity_diff_float,
                     "backtest_fill_price_diff_float": backtest_fill_price_diff_float,
                 }
@@ -3581,51 +3843,6 @@ def get_compare_reference_summary(
         "html_output_bool": bool(html_output_bool),
         "output_dir_str": output_dir_str,
         "compare_report_dict_list": compare_report_dict_list,
-    }
-
-
-def preflight_contract_summary(
-    state_store_obj: LiveStateStore,
-    as_of_ts: datetime,
-    releases_root_path_str: str,
-    env_mode_str: str | None = None,
-    pod_id_str: str | None = None,
-) -> dict[str, object]:
-    release_list = _load_release_list_and_sync(
-        releases_root_path_str,
-        state_store_obj,
-        pod_id_str=pod_id_str,
-    )
-    enabled_release_list = [
-        release_obj
-        for release_obj in release_list
-        if release_obj.enabled_bool
-        and (env_mode_str is None or release_obj.mode_str == env_mode_str)
-    ]
-    contract_report_dict_list: list[dict[str, object]] = []
-    passed_release_count_int = 0
-    failed_release_count_int = 0
-
-    for release_obj in enabled_release_list:
-        pod_state_obj = _get_model_state_or_default(release_obj, state_store_obj, as_of_ts)
-        contract_report_dict = strategy_host.preflight_decision_contract_for_release(
-            release_obj=release_obj,
-            as_of_ts=as_of_ts,
-            pod_state_obj=pod_state_obj,
-        )
-        contract_report_dict_list.append(contract_report_dict)
-        if contract_report_dict["contract_status_str"] == "pass":
-            passed_release_count_int += 1
-        else:
-            failed_release_count_int += 1
-
-    return {
-        "as_of_timestamp_str": as_of_ts.isoformat(),
-        "mode_str": env_mode_str,
-        "enabled_release_count_int": len(enabled_release_list),
-        "passed_release_count_int": passed_release_count_int,
-        "failed_release_count_int": failed_release_count_int,
-        "contract_report_dict_list": contract_report_dict_list,
     }
 
 
@@ -3850,6 +4067,230 @@ def tick(
         )
 
 
+def _execute_runner_command_detail_dict(
+    parsed_args_obj: argparse.Namespace,
+    state_store_obj: LiveStateStore,
+    as_of_ts: datetime,
+    db_path_str: str,
+) -> dict[str, object]:
+    broker_adapter_obj = None
+
+    if parsed_args_obj.command_name_str == "build_decision_plans":
+        return build_decision_plans(
+            state_store_obj=state_store_obj,
+            as_of_ts=as_of_ts,
+            releases_root_path_str=parsed_args_obj.releases_root_path_str,
+            env_mode_str=parsed_args_obj.env_mode_str,
+            log_path_str=parsed_args_obj.log_path_str,
+            pod_id_str=parsed_args_obj.pod_id_str,
+        )
+    if parsed_args_obj.command_name_str == "build_vplan":
+        return build_vplans(
+            state_store_obj=state_store_obj,
+            broker_adapter_obj=broker_adapter_obj,
+            as_of_ts=as_of_ts,
+            env_mode_str=parsed_args_obj.env_mode_str,
+            releases_root_path_str=parsed_args_obj.releases_root_path_str,
+            log_path_str=parsed_args_obj.log_path_str,
+            broker_host_str=parsed_args_obj.broker_host_str,
+            broker_port_int=parsed_args_obj.broker_port_int,
+            broker_client_id_int=parsed_args_obj.broker_client_id_int,
+            broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
+            pod_id_str=parsed_args_obj.pod_id_str,
+        )
+    if parsed_args_obj.command_name_str == "submit_vplan":
+        return submit_ready_vplans(
+            state_store_obj=state_store_obj,
+            broker_adapter_obj=broker_adapter_obj,
+            as_of_ts=as_of_ts,
+            env_mode_str=parsed_args_obj.env_mode_str,
+            manual_only_bool=False,
+            vplan_id_int=parsed_args_obj.vplan_id_int,
+            releases_root_path_str=parsed_args_obj.releases_root_path_str,
+            log_path_str=parsed_args_obj.log_path_str,
+            broker_host_str=parsed_args_obj.broker_host_str,
+            broker_port_int=parsed_args_obj.broker_port_int,
+            broker_client_id_int=parsed_args_obj.broker_client_id_int,
+            broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
+            pod_id_str=parsed_args_obj.pod_id_str,
+        )
+    if parsed_args_obj.command_name_str == "post_execution_reconcile":
+        return post_execution_reconcile(
+            state_store_obj=state_store_obj,
+            broker_adapter_obj=broker_adapter_obj,
+            as_of_ts=as_of_ts,
+            env_mode_str=parsed_args_obj.env_mode_str,
+            releases_root_path_str=parsed_args_obj.releases_root_path_str,
+            log_path_str=parsed_args_obj.log_path_str,
+            broker_host_str=parsed_args_obj.broker_host_str,
+            broker_port_int=parsed_args_obj.broker_port_int,
+            broker_client_id_int=parsed_args_obj.broker_client_id_int,
+            broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
+            pod_id_str=parsed_args_obj.pod_id_str,
+        )
+    if parsed_args_obj.command_name_str == "eod_snapshot":
+        return eod_snapshot(
+            state_store_obj=state_store_obj,
+            broker_adapter_obj=broker_adapter_obj,
+            as_of_ts=as_of_ts,
+            env_mode_str=parsed_args_obj.env_mode_str,
+            releases_root_path_str=parsed_args_obj.releases_root_path_str,
+            log_path_str=parsed_args_obj.log_path_str,
+            broker_host_str=parsed_args_obj.broker_host_str,
+            broker_port_int=parsed_args_obj.broker_port_int,
+            broker_client_id_int=parsed_args_obj.broker_client_id_int,
+            broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
+            pod_id_str=parsed_args_obj.pod_id_str,
+        )
+    if parsed_args_obj.command_name_str == "tick":
+        return tick(
+            state_store_obj=state_store_obj,
+            broker_adapter_obj=broker_adapter_obj,
+            as_of_ts=as_of_ts,
+            releases_root_path_str=parsed_args_obj.releases_root_path_str,
+            env_mode_str=parsed_args_obj.env_mode_str,
+            log_path_str=parsed_args_obj.log_path_str,
+            broker_host_str=parsed_args_obj.broker_host_str,
+            broker_port_int=parsed_args_obj.broker_port_int,
+            broker_client_id_int=parsed_args_obj.broker_client_id_int,
+            broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
+            pod_id_str=parsed_args_obj.pod_id_str,
+        )
+    if parsed_args_obj.command_name_str == "cutover_v1_schema":
+        return cutover_v1_schema(
+            state_store_obj=state_store_obj,
+            as_of_ts=as_of_ts,
+            db_path_str=db_path_str,
+            archive_root_path_str=parsed_args_obj.archive_root_path_str,
+        )
+    if parsed_args_obj.command_name_str == "show_vplan":
+        return show_vplan_summary(
+            state_store_obj=state_store_obj,
+            as_of_ts=as_of_ts,
+            releases_root_path_str=parsed_args_obj.releases_root_path_str,
+            vplan_id_int=parsed_args_obj.vplan_id_int,
+            pod_id_str=parsed_args_obj.pod_id_str,
+        )
+    if parsed_args_obj.command_name_str == "show_decision_plan":
+        return show_decision_plan_summary(
+            state_store_obj=state_store_obj,
+            as_of_ts=as_of_ts,
+            releases_root_path_str=parsed_args_obj.releases_root_path_str,
+            decision_plan_id_int=parsed_args_obj.decision_plan_id_int,
+            pod_id_str=parsed_args_obj.pod_id_str,
+        )
+    if parsed_args_obj.command_name_str == "execution_report":
+        return get_execution_report_summary(
+            state_store_obj=state_store_obj,
+            as_of_ts=as_of_ts,
+            releases_root_path_str=parsed_args_obj.releases_root_path_str,
+            env_mode_str=parsed_args_obj.env_mode_str,
+            pod_id_str=parsed_args_obj.pod_id_str,
+        )
+    if parsed_args_obj.command_name_str == "compare_reference":
+        return get_compare_reference_summary(
+            state_store_obj=state_store_obj,
+            as_of_ts=as_of_ts,
+            releases_root_path_str=parsed_args_obj.releases_root_path_str,
+            env_mode_str=parsed_args_obj.env_mode_str,
+            pod_id_str=parsed_args_obj.pod_id_str,
+            reference_strategy_pickle_path_str=parsed_args_obj.reference_strategy_pickle_path_str,
+            html_output_bool=parsed_args_obj.html_output_bool,
+            output_dir_str=parsed_args_obj.output_dir_str,
+        )
+    return get_status_summary(
+        state_store_obj=state_store_obj,
+        as_of_ts=as_of_ts,
+        releases_root_path_str=parsed_args_obj.releases_root_path_str,
+        env_mode_str=parsed_args_obj.env_mode_str,
+        pod_id_str=parsed_args_obj.pod_id_str,
+    )
+
+
+def _should_run_incubation_fanout_bool(parsed_args_obj: argparse.Namespace) -> bool:
+    return (
+        parsed_args_obj.env_mode_str == "incubation"
+        and parsed_args_obj.db_path_str is None
+        and parsed_args_obj.pod_id_str is None
+    )
+
+
+def _run_incubation_fanout_detail_dict(
+    parsed_args_obj: argparse.Namespace,
+    as_of_ts: datetime,
+) -> dict[str, object]:
+    _validate_incubation_fanout_args(parsed_args_obj)
+    enabled_release_list = _load_enabled_release_list_for_mode(
+        releases_root_path_str=parsed_args_obj.releases_root_path_str,
+        env_mode_str="incubation",
+    )
+    pod_result_dict_list: list[dict[str, object]] = []
+
+    for release_obj in enabled_release_list:
+        pod_args_obj = _clone_parsed_args_for_pod_obj(parsed_args_obj, release_obj.pod_id_str)
+        pod_db_path_str = _resolve_db_path_for_mode_str(
+            db_path_str=None,
+            env_mode_str="incubation",
+            pod_id_str=release_obj.pod_id_str,
+        )
+        state_store_obj: LiveStateStore | None = None
+        job_run_id_int: int | None = None
+        try:
+            state_store_obj = LiveStateStore(pod_db_path_str)
+            job_run_id_int = state_store_obj.record_job_start(parsed_args_obj.command_name_str)
+            detail_dict = _execute_runner_command_detail_dict(
+                parsed_args_obj=pod_args_obj,
+                state_store_obj=state_store_obj,
+                as_of_ts=as_of_ts,
+                db_path_str=pod_db_path_str,
+            )
+            state_store_obj.record_job_finish(job_run_id_int, "completed", detail_dict)
+            pod_result_dict_list.append(
+                {
+                    "pod_id_str": release_obj.pod_id_str,
+                    "db_path_str": pod_db_path_str,
+                    "status_str": "completed",
+                    "detail_dict": detail_dict,
+                }
+            )
+        except Exception as exc:  # pragma: no cover - exercised through CLI safety tests.
+            error_detail_dict = {"error_str": str(exc)}
+            if state_store_obj is not None and job_run_id_int is not None:
+                state_store_obj.record_job_finish(job_run_id_int, "failed", error_detail_dict)
+            log_event(
+                "runner_incubation_fanout_pod_failed",
+                {
+                    "command_name_str": parsed_args_obj.command_name_str,
+                    "pod_id_str": release_obj.pod_id_str,
+                    "db_path_str": pod_db_path_str,
+                    "as_of_timestamp_str": as_of_ts.isoformat(),
+                    "error_str": str(exc),
+                },
+                log_path_str=parsed_args_obj.log_path_str,
+            )
+            pod_result_dict_list.append(
+                {
+                    "pod_id_str": release_obj.pod_id_str,
+                    "db_path_str": pod_db_path_str,
+                    "status_str": "failed",
+                    "error_str": str(exc),
+                }
+            )
+
+    failed_count_int = sum(1 for result_dict in pod_result_dict_list if result_dict["status_str"] == "failed")
+    completed_count_int = len(pod_result_dict_list) - failed_count_int
+    return {
+        "fanout_bool": True,
+        "command_name_str": parsed_args_obj.command_name_str,
+        "mode_str": "incubation",
+        "as_of_timestamp_str": as_of_ts.isoformat(),
+        "pod_count_int": len(pod_result_dict_list),
+        "completed_count_int": completed_count_int,
+        "failed_count_int": failed_count_int,
+        "pod_result_dict_list": pod_result_dict_list,
+    }
+
+
 def main(argv_list: list[str] | None = None) -> int:
     parser_obj = argparse.ArgumentParser(description="alpha.live runner")
     parser_obj.add_argument(
@@ -3866,7 +4307,6 @@ def main(argv_list: list[str] | None = None) -> int:
             "status",
             "execution_report",
             "compare_reference",
-            "preflight_contract",
             "cutover_v1_schema",
         ),
     )
@@ -3888,6 +4328,15 @@ def main(argv_list: list[str] | None = None) -> int:
     parser_obj.add_argument("--html", dest="html_output_bool", action="store_true")
     parser_obj.add_argument("--output-dir", dest="output_dir_str", default="results")
     parsed_args_obj = parser_obj.parse_args(argv_list)
+    as_of_ts = _parse_as_of_timestamp_ts(parsed_args_obj.as_of_timestamp_str)
+
+    if _should_run_incubation_fanout_bool(parsed_args_obj):
+        detail_dict = _run_incubation_fanout_detail_dict(parsed_args_obj, as_of_ts)
+        if parsed_args_obj.json_output_bool:
+            print(json.dumps(detail_dict, indent=2, sort_keys=True))
+        else:
+            print(_render_command_output_str(parsed_args_obj.command_name_str, detail_dict))
+        return 0
 
     db_path_str = _resolve_db_path_for_mode_str(
         db_path_str=parsed_args_obj.db_path_str,
@@ -3896,149 +4345,14 @@ def main(argv_list: list[str] | None = None) -> int:
     )
     state_store_obj = LiveStateStore(db_path_str)
     job_run_id_int = state_store_obj.record_job_start(parsed_args_obj.command_name_str)
-    as_of_ts = _parse_as_of_timestamp_ts(parsed_args_obj.as_of_timestamp_str)
-    broker_adapter_obj = None
 
     try:
-        if parsed_args_obj.command_name_str == "build_decision_plans":
-            detail_dict = build_decision_plans(
-                state_store_obj=state_store_obj,
-                as_of_ts=as_of_ts,
-                releases_root_path_str=parsed_args_obj.releases_root_path_str,
-                env_mode_str=parsed_args_obj.env_mode_str,
-                log_path_str=parsed_args_obj.log_path_str,
-                pod_id_str=parsed_args_obj.pod_id_str,
-            )
-        elif parsed_args_obj.command_name_str == "build_vplan":
-            detail_dict = build_vplans(
-                state_store_obj=state_store_obj,
-                broker_adapter_obj=broker_adapter_obj,
-                as_of_ts=as_of_ts,
-                env_mode_str=parsed_args_obj.env_mode_str,
-                releases_root_path_str=parsed_args_obj.releases_root_path_str,
-                log_path_str=parsed_args_obj.log_path_str,
-                broker_host_str=parsed_args_obj.broker_host_str,
-                broker_port_int=parsed_args_obj.broker_port_int,
-                broker_client_id_int=parsed_args_obj.broker_client_id_int,
-                broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
-                pod_id_str=parsed_args_obj.pod_id_str,
-            )
-        elif parsed_args_obj.command_name_str == "submit_vplan":
-            detail_dict = submit_ready_vplans(
-                state_store_obj=state_store_obj,
-                broker_adapter_obj=broker_adapter_obj,
-                as_of_ts=as_of_ts,
-                env_mode_str=parsed_args_obj.env_mode_str,
-                manual_only_bool=False,
-                vplan_id_int=parsed_args_obj.vplan_id_int,
-                releases_root_path_str=parsed_args_obj.releases_root_path_str,
-                log_path_str=parsed_args_obj.log_path_str,
-                broker_host_str=parsed_args_obj.broker_host_str,
-                broker_port_int=parsed_args_obj.broker_port_int,
-                broker_client_id_int=parsed_args_obj.broker_client_id_int,
-                broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
-                pod_id_str=parsed_args_obj.pod_id_str,
-            )
-        elif parsed_args_obj.command_name_str == "post_execution_reconcile":
-            detail_dict = post_execution_reconcile(
-                state_store_obj=state_store_obj,
-                broker_adapter_obj=broker_adapter_obj,
-                as_of_ts=as_of_ts,
-                env_mode_str=parsed_args_obj.env_mode_str,
-                releases_root_path_str=parsed_args_obj.releases_root_path_str,
-                log_path_str=parsed_args_obj.log_path_str,
-                broker_host_str=parsed_args_obj.broker_host_str,
-                broker_port_int=parsed_args_obj.broker_port_int,
-                broker_client_id_int=parsed_args_obj.broker_client_id_int,
-                broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
-                pod_id_str=parsed_args_obj.pod_id_str,
-            )
-        elif parsed_args_obj.command_name_str == "eod_snapshot":
-            detail_dict = eod_snapshot(
-                state_store_obj=state_store_obj,
-                broker_adapter_obj=broker_adapter_obj,
-                as_of_ts=as_of_ts,
-                env_mode_str=parsed_args_obj.env_mode_str,
-                releases_root_path_str=parsed_args_obj.releases_root_path_str,
-                log_path_str=parsed_args_obj.log_path_str,
-                broker_host_str=parsed_args_obj.broker_host_str,
-                broker_port_int=parsed_args_obj.broker_port_int,
-                broker_client_id_int=parsed_args_obj.broker_client_id_int,
-                broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
-                pod_id_str=parsed_args_obj.pod_id_str,
-            )
-        elif parsed_args_obj.command_name_str == "tick":
-            detail_dict = tick(
-                state_store_obj=state_store_obj,
-                broker_adapter_obj=broker_adapter_obj,
-                as_of_ts=as_of_ts,
-                releases_root_path_str=parsed_args_obj.releases_root_path_str,
-                env_mode_str=parsed_args_obj.env_mode_str,
-                log_path_str=parsed_args_obj.log_path_str,
-                broker_host_str=parsed_args_obj.broker_host_str,
-                broker_port_int=parsed_args_obj.broker_port_int,
-                broker_client_id_int=parsed_args_obj.broker_client_id_int,
-                broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
-                pod_id_str=parsed_args_obj.pod_id_str,
-            )
-        elif parsed_args_obj.command_name_str == "cutover_v1_schema":
-            detail_dict = cutover_v1_schema(
-                state_store_obj=state_store_obj,
-                as_of_ts=as_of_ts,
-                db_path_str=db_path_str,
-                archive_root_path_str=parsed_args_obj.archive_root_path_str,
-            )
-        elif parsed_args_obj.command_name_str == "show_vplan":
-            detail_dict = show_vplan_summary(
-                state_store_obj=state_store_obj,
-                as_of_ts=as_of_ts,
-                releases_root_path_str=parsed_args_obj.releases_root_path_str,
-                vplan_id_int=parsed_args_obj.vplan_id_int,
-                pod_id_str=parsed_args_obj.pod_id_str,
-            )
-        elif parsed_args_obj.command_name_str == "show_decision_plan":
-            detail_dict = show_decision_plan_summary(
-                state_store_obj=state_store_obj,
-                as_of_ts=as_of_ts,
-                releases_root_path_str=parsed_args_obj.releases_root_path_str,
-                decision_plan_id_int=parsed_args_obj.decision_plan_id_int,
-                pod_id_str=parsed_args_obj.pod_id_str,
-            )
-        elif parsed_args_obj.command_name_str == "execution_report":
-            detail_dict = get_execution_report_summary(
-                state_store_obj=state_store_obj,
-                as_of_ts=as_of_ts,
-                releases_root_path_str=parsed_args_obj.releases_root_path_str,
-                env_mode_str=parsed_args_obj.env_mode_str,
-                pod_id_str=parsed_args_obj.pod_id_str,
-            )
-        elif parsed_args_obj.command_name_str == "compare_reference":
-            detail_dict = get_compare_reference_summary(
-                state_store_obj=state_store_obj,
-                as_of_ts=as_of_ts,
-                releases_root_path_str=parsed_args_obj.releases_root_path_str,
-                env_mode_str=parsed_args_obj.env_mode_str,
-                pod_id_str=parsed_args_obj.pod_id_str,
-                reference_strategy_pickle_path_str=parsed_args_obj.reference_strategy_pickle_path_str,
-                html_output_bool=parsed_args_obj.html_output_bool,
-                output_dir_str=parsed_args_obj.output_dir_str,
-            )
-        elif parsed_args_obj.command_name_str == "preflight_contract":
-            detail_dict = preflight_contract_summary(
-                state_store_obj=state_store_obj,
-                as_of_ts=as_of_ts,
-                releases_root_path_str=parsed_args_obj.releases_root_path_str,
-                env_mode_str=parsed_args_obj.env_mode_str,
-                pod_id_str=parsed_args_obj.pod_id_str,
-            )
-        else:
-            detail_dict = get_status_summary(
-                state_store_obj=state_store_obj,
-                as_of_ts=as_of_ts,
-                releases_root_path_str=parsed_args_obj.releases_root_path_str,
-                env_mode_str=parsed_args_obj.env_mode_str,
-                pod_id_str=parsed_args_obj.pod_id_str,
-            )
+        detail_dict = _execute_runner_command_detail_dict(
+            parsed_args_obj=parsed_args_obj,
+            state_store_obj=state_store_obj,
+            as_of_ts=as_of_ts,
+            db_path_str=db_path_str,
+        )
 
         state_store_obj.record_job_finish(job_run_id_int, "completed", detail_dict)
         if parsed_args_obj.json_output_bool:

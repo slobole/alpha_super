@@ -1,5 +1,6 @@
 import contextlib
 import io
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +12,7 @@ import pandas as pd
 from alpha.engine.backtest import run_daily
 from alpha.engine.execution_timing import (
     ExecutionTimingAnalysis,
+    ExecutionTimingAnalyzer,
     compute_cvar_5_pct_float,
 )
 from alpha.engine.strategy import Strategy
@@ -336,7 +338,7 @@ class ExecutionTimingAnalysisTests(unittest.TestCase):
         pricing_data_df = make_timing_pricing_data_df()
 
         with tempfile.TemporaryDirectory() as temp_dir_str:
-            timing_result_obj = ExecutionTimingAnalysis(
+            timing_result_obj = ExecutionTimingAnalyzer(
                 strategy_factory_fn=self.make_timing_strategy,
                 pricing_data_df=pricing_data_df,
                 calendar_idx=pricing_data_df.index,
@@ -347,13 +349,38 @@ class ExecutionTimingAnalysisTests(unittest.TestCase):
             ).run()
 
             output_path = Path(timing_result_obj.output_dir_path)
+            relative_output_path = output_path.relative_to(Path(temp_dir_str))
+            self.assertEqual(
+                relative_output_path.parts[:4],
+                (
+                    "research",
+                    "strategy",
+                    timing_result_obj.strategy_name_str,
+                    "execution_timing_analyzer",
+                ),
+            )
             self.assertTrue((output_path / "execution_timing_metrics.csv").exists())
             self.assertTrue((output_path / "ann_return_matrix.csv").exists())
             self.assertTrue((output_path / "cvar_5_matrix.csv").exists())
             self.assertTrue((output_path / "sharpe_matrix.csv").exists())
             self.assertTrue((output_path / "max_drawdown_matrix.csv").exists())
             self.assertTrue((output_path / "metadata.json").exists())
+            self.assertTrue((output_path / "run_info.json").exists())
+            self.assertTrue((output_path / "summary.json").exists())
             self.assertTrue((output_path / "report.html").exists())
+
+            run_info_dict = json.loads((output_path / "run_info.json").read_text(encoding="utf-8"))
+            summary_dict = json.loads((output_path / "summary.json").read_text(encoding="utf-8"))
+            report_html_str = (output_path / "report.html").read_text(encoding="utf-8")
+
+            self.assertEqual(run_info_dict["entity_type"], "strategy")
+            self.assertEqual(run_info_dict["entity_id"], "TimingToy")
+            self.assertEqual(run_info_dict["analysis_type"], "execution_timing_analyzer")
+            self.assertIn("sharpe", summary_dict)
+            self.assertIn("Execution Timing Analyzer", report_html_str)
+
+    def test_execution_timing_analyzer_keeps_old_analysis_compatibility(self):
+        self.assertTrue(issubclass(ExecutionTimingAnalyzer, ExecutionTimingAnalysis))
 
     def test_vanilla_current_bar_same_open_cell_matches_vanilla_rebalance_strategy(self):
         pricing_data_df = make_timing_pricing_data_df()

@@ -300,12 +300,85 @@ class DefenseFirstFallbackVixCashVariantTests(unittest.TestCase):
             lineary_bool=False,
         )
 
+    def test_btal_1n_tqqq_vix_cash_variant_smoke(self):
+        self._run_smoke_variant(
+            module_name_str="strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash",
+            loader_attr_str="get_defense_first_data",
+            lineary_bool=False,
+        )
+
+    def test_btal_1n_tqqq_vix_cash_variant_honors_manager_run_contract(self):
+        variant_module = importlib.import_module(
+            "strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash"
+        )
+        captured_config_list: list[DefenseFirstConfig] = []
+
+        def _standard_loader(config: DefenseFirstConfig):
+            captured_config_list.append(config)
+            return make_standard_loader_output(config)
+
+        execution_price_df = make_standard_loader_output(variant_module.DEFAULT_CONFIG)[0]
+        with patch.object(
+            variant_module,
+            "get_defense_first_data",
+            side_effect=_standard_loader,
+        ):
+            with patch.object(
+                shared_vix_helper,
+                "load_helper_close_ser",
+                side_effect=make_helper_close_ser_side_effect(execution_price_df.index),
+            ):
+                strategy = variant_module.run_variant(
+                    show_display_bool=False,
+                    save_results_bool=False,
+                    backtest_start_date_str="2020-03-02",
+                    capital_base_float=12345.0,
+                    end_date_str="2020-03-31",
+                )
+
+        self.assertEqual(captured_config_list[0].end_date_str, "2020-03-31")
+        self.assertAlmostEqual(strategy._capital_base, 12345.0)
+        self.assertGreaterEqual(strategy.results.index.min(), pd.Timestamp("2020-03-02"))
+
     def test_btal_linearity_1n_vix_cash_variant_smoke(self):
         self._run_smoke_variant(
             module_name_str="strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash",
             loader_attr_str="get_defense_first_linearity_1n_data",
             lineary_bool=True,
         )
+
+    def test_btal_linearity_1n_vix_cash_variant_honors_manager_run_contract(self):
+        variant_module = importlib.import_module(
+            "strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash"
+        )
+        captured_config_list: list[DefenseFirstConfig] = []
+
+        def _linearity_loader(config: DefenseFirstConfig):
+            captured_config_list.append(config)
+            return make_linearity_loader_output(config)
+
+        execution_price_df = make_linearity_loader_output(variant_module.DEFAULT_CONFIG)[0]
+        with patch.object(
+            variant_module,
+            "get_defense_first_linearity_1n_data",
+            side_effect=_linearity_loader,
+        ):
+            with patch.object(
+                shared_vix_helper,
+                "load_helper_close_ser",
+                side_effect=make_helper_close_ser_side_effect(execution_price_df.index),
+            ):
+                strategy = variant_module.run_variant(
+                    show_display_bool=False,
+                    save_results_bool=False,
+                    backtest_start_date_str="2020-03-02",
+                    capital_base_float=12345.0,
+                    end_date_str="2020-03-31",
+                )
+
+        self.assertEqual(captured_config_list[0].end_date_str, "2020-03-31")
+        self.assertAlmostEqual(strategy._capital_base, 12345.0)
+        self.assertGreaterEqual(strategy.results.index.min(), pd.Timestamp("2020-03-02"))
 
 
 if __name__ == "__main__":

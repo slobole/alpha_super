@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from alpha.data import FredSeriesSnapshot, FredSeriesStaleError
+import alpha.live.runner as runner_module
 import alpha.live.logging_utils as logging_utils
 from alpha.live.models import (
     BrokerOrderAck,
@@ -39,7 +40,6 @@ from alpha.live.runner import (
     cutover_v1_schema,
     eod_snapshot,
     get_execution_report_summary,
-    preflight_contract_summary,
     get_status_summary,
     main,
     post_execution_reconcile,
@@ -632,6 +632,132 @@ def test_status_filters_enabled_sleeves_by_selected_mode(tmp_path: Path, monkeyp
     ]
 
 
+def test_incubation_status_and_execution_report_show_rehearsal_truth(tmp_path: Path, monkeypatch):
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="incubation_user",
+        pod_id_str="pod_inc",
+        release_id_str="incubation_user.pod_inc.incubation",
+        mode_str="incubation",
+        enabled_bool=True,
+        account_route_str="SIM_pod_inc",
+    )
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda data_profile_str: None,
+    )
+    state_store_obj = LiveStateStore(str((tmp_path / "incubation.sqlite3").resolve()))
+    release_obj = load_release_list(str(tmp_path / "releases"))[0]
+    state_store_obj.upsert_release(release_obj)
+    decision_plan_obj = state_store_obj.insert_decision_plan(
+        _build_decision_plan_stub(
+            release_obj=release_obj,
+            as_of_ts=datetime(2024, 2, 1, 9, 35, tzinfo=MARKET_TIMEZONE_OBJ),
+            pod_state_obj=None,
+        )
+    )
+    vplan_obj = state_store_obj.insert_vplan(
+        VPlan(
+            release_id_str=decision_plan_obj.release_id_str,
+            user_id_str=decision_plan_obj.user_id_str,
+            pod_id_str=decision_plan_obj.pod_id_str,
+            account_route_str=decision_plan_obj.account_route_str,
+            decision_plan_id_int=int(decision_plan_obj.decision_plan_id_int or 0),
+            signal_timestamp_ts=decision_plan_obj.signal_timestamp_ts,
+            submission_timestamp_ts=decision_plan_obj.submission_timestamp_ts,
+            target_execution_timestamp_ts=decision_plan_obj.target_execution_timestamp_ts,
+            execution_policy_str=decision_plan_obj.execution_policy_str,
+            broker_snapshot_timestamp_ts=datetime(2024, 2, 1, 9, 20, tzinfo=MARKET_TIMEZONE_OBJ),
+            live_reference_snapshot_timestamp_ts=datetime(2024, 2, 1, 9, 20, tzinfo=MARKET_TIMEZONE_OBJ),
+            live_price_source_str="incubation.norgate.official_close.2024-01-31",
+            net_liq_float=10000.0,
+            available_funds_float=10000.0,
+            excess_liquidity_float=10000.0,
+            pod_budget_fraction_float=0.5,
+            pod_budget_float=5000.0,
+            current_broker_position_map={},
+            live_reference_price_map={"AAPL": 100.0},
+            target_share_map={"AAPL": 10.0},
+            order_delta_map={"AAPL": 10.0},
+            vplan_row_list=[
+                VPlanRow(
+                    asset_str="AAPL",
+                    current_share_float=0.0,
+                    target_share_float=10.0,
+                    order_delta_share_float=10.0,
+                    live_reference_price_float=100.0,
+                    estimated_target_notional_float=1000.0,
+                    broker_order_type_str="MOO",
+                    live_reference_source_str="incubation.norgate.official_close.2024-01-31",
+                )
+            ],
+            live_reference_source_map_dict={"AAPL": "incubation.norgate.official_close.2024-01-31"},
+            status_str="completed",
+        )
+    )
+    state_store_obj.upsert_vplan_fill_list(
+        [
+            BrokerOrderFill(
+                broker_order_id_str="incubation:vplan:1:AAPL:1",
+                decision_plan_id_int=decision_plan_obj.decision_plan_id_int,
+                vplan_id_int=vplan_obj.vplan_id_int,
+                account_route_str=release_obj.account_route_str,
+                asset_str="AAPL",
+                fill_amount_float=10.0,
+                fill_price_float=101.0,
+                fill_timestamp_ts=datetime(2024, 2, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ),
+                raw_payload_dict={},
+                official_open_price_float=101.0,
+                open_price_source_str="ibkr.tick_open",
+            )
+        ]
+    )
+    state_store_obj.upsert_pod_state(
+        PodState(
+            pod_id_str=release_obj.pod_id_str,
+            user_id_str=release_obj.user_id_str,
+            account_route_str=release_obj.account_route_str,
+            position_amount_map={"AAPL": 10.0},
+            cash_float=8989.0,
+            total_value_float=9999.0,
+            strategy_state_dict={},
+            updated_timestamp_ts=datetime(2024, 2, 1, 9, 31, tzinfo=MARKET_TIMEZONE_OBJ),
+        ),
+        snapshot_stage_str="post_execution",
+        snapshot_source_str="virtual_broker",
+    )
+
+    status_summary_dict = get_status_summary(
+        state_store_obj=state_store_obj,
+        as_of_ts=datetime(2024, 2, 1, 9, 35, tzinfo=MARKET_TIMEZONE_OBJ),
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="incubation",
+    )
+    status_output_str = _render_status_detail_str(status_summary_dict)
+    pod_status_dict = status_summary_dict["pod_status_dict_list"][0]
+
+    assert status_summary_dict["rehearsal_policy_dict"]["official_accounting_source_str"] == "incubation_sim_ledger"
+    assert pod_status_dict["rehearsal_status_dict"]["promotion_gate_status_str"] == "complete_one_cycle"
+    assert pod_status_dict["rehearsal_status_dict"]["ibkr_open_price_source_str"] == "ibkr.tick_open"
+    assert pod_status_dict["rehearsal_status_dict"]["paper_probe_accounting_truth_bool"] is False
+    assert "Rehearsal accounting truth: SIM ledger" in status_output_str
+    assert "paper fills are not SIM P&L" in status_output_str
+
+    execution_report_summary_dict = get_execution_report_summary(
+        state_store_obj=state_store_obj,
+        as_of_ts=datetime(2024, 2, 1, 9, 35, tzinfo=MARKET_TIMEZONE_OBJ),
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="incubation",
+    )
+    execution_report_dict = execution_report_summary_dict["execution_report_dict_list"][0]
+    assert execution_report_dict["official_accounting_source_str"] == "incubation_sim_ledger"
+    assert execution_report_dict["paper_probe_accounting_truth_bool"] is False
+    assert "paper fills are probe-only" in _render_command_output_str(
+        "execution_report",
+        execution_report_summary_dict,
+    )
+
+
 def _build_decision_plan_with_position_drift_stub(release_obj, as_of_ts, pod_state_obj):
     return DecisionPlan(
         release_id_str=release_obj.release_id_str,
@@ -743,6 +869,162 @@ def test_show_decision_plan_cli_outputs_latest_plan(tmp_path: Path, capsys):
     assert "DecisionPlan" in output_str
     assert "Pod: pod_test_01" in output_str
     assert "- Target: AAPL | weight=0.200000" in output_str
+
+
+def test_incubation_status_cli_fans_out_to_pod_scoped_dbs(tmp_path: Path, capsys):
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="incubation_user",
+        pod_id_str="pod_inc_a",
+        release_id_str="incubation_user.pod_inc_a.incubation",
+        mode_str="incubation",
+        enabled_bool=True,
+        account_route_str="SIM_pod_inc_a",
+    )
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="incubation_user",
+        pod_id_str="pod_inc_b",
+        release_id_str="incubation_user.pod_inc_b.incubation",
+        mode_str="incubation",
+        enabled_bool=True,
+        account_route_str="SIM_pod_inc_b",
+    )
+
+    result_int = main(
+        [
+            "status",
+            "--mode",
+            "incubation",
+            "--releases-root",
+            str(tmp_path / "releases"),
+            "--json",
+        ]
+    )
+
+    detail_dict = json.loads(capsys.readouterr().out)
+    result_by_pod_id_dict = {
+        row_dict["pod_id_str"]: row_dict
+        for row_dict in detail_dict["pod_result_dict_list"]
+    }
+
+    assert result_int == 0
+    assert detail_dict["fanout_bool"] is True
+    assert detail_dict["pod_count_int"] == 2
+    assert detail_dict["completed_count_int"] == 2
+    assert detail_dict["failed_count_int"] == 0
+    assert set(result_by_pod_id_dict) == {"pod_inc_a", "pod_inc_b"}
+    for pod_id_str, result_dict in result_by_pod_id_dict.items():
+        db_path_obj = Path(result_dict["db_path_str"])
+        assert db_path_obj.name == f"{pod_id_str}.sqlite3"
+        assert db_path_obj.parent.name == "incubation"
+        assert db_path_obj.exists()
+
+
+def test_incubation_fanout_reports_one_pod_failure_without_hiding_success(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+):
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="incubation_user",
+        pod_id_str="pod_good",
+        release_id_str="incubation_user.pod_good.incubation",
+        mode_str="incubation",
+        enabled_bool=True,
+        account_route_str="SIM_pod_good",
+    )
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="incubation_user",
+        pod_id_str="pod_bad",
+        release_id_str="incubation_user.pod_bad.incubation",
+        mode_str="incubation",
+        enabled_bool=True,
+        account_route_str="SIM_pod_bad",
+    )
+
+    def _fake_execute_runner_command_detail_dict(**kwargs):
+        parsed_args_obj = kwargs["parsed_args_obj"]
+        if parsed_args_obj.pod_id_str == "pod_bad":
+            raise RuntimeError("pod boom")
+        return {"pod_status_dict_list": [], "next_action_str": "ok"}
+
+    monkeypatch.setattr(
+        runner_module,
+        "_execute_runner_command_detail_dict",
+        _fake_execute_runner_command_detail_dict,
+    )
+
+    result_int = runner_module.main(
+        [
+            "status",
+            "--mode",
+            "incubation",
+            "--releases-root",
+            str(tmp_path / "releases"),
+            "--json",
+        ]
+    )
+
+    detail_dict = json.loads(capsys.readouterr().out)
+    result_by_pod_id_dict = {
+        row_dict["pod_id_str"]: row_dict
+        for row_dict in detail_dict["pod_result_dict_list"]
+    }
+
+    assert result_int == 0
+    assert detail_dict["completed_count_int"] == 1
+    assert detail_dict["failed_count_int"] == 1
+    assert result_by_pod_id_dict["pod_good"]["status_str"] == "completed"
+    assert result_by_pod_id_dict["pod_bad"]["status_str"] == "failed"
+    assert result_by_pod_id_dict["pod_bad"]["error_str"] == "pod boom"
+
+
+def test_incubation_explicit_db_path_keeps_legacy_single_db_behavior(tmp_path: Path, capsys):
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="incubation_user",
+        pod_id_str="pod_inc_a",
+        release_id_str="incubation_user.pod_inc_a.incubation",
+        mode_str="incubation",
+        enabled_bool=True,
+        account_route_str="SIM_pod_inc_a",
+    )
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="incubation_user",
+        pod_id_str="pod_inc_b",
+        release_id_str="incubation_user.pod_inc_b.incubation",
+        mode_str="incubation",
+        enabled_bool=True,
+        account_route_str="SIM_pod_inc_b",
+    )
+    shared_db_path_str = str(tmp_path / "legacy" / "incubation_state.sqlite3")
+
+    result_int = main(
+        [
+            "status",
+            "--mode",
+            "incubation",
+            "--db-path",
+            shared_db_path_str,
+            "--releases-root",
+            str(tmp_path / "releases"),
+            "--json",
+        ]
+    )
+
+    detail_dict = json.loads(capsys.readouterr().out)
+
+    assert result_int == 0
+    assert "fanout_bool" not in detail_dict
+    assert Path(shared_db_path_str).exists()
+    assert {
+        row_dict["pod_id_str"]
+        for row_dict in detail_dict["pod_status_dict_list"]
+    } == {"pod_inc_a", "pod_inc_b"}
 
 
 def _build_two_asset_decision_plan_stub(release_obj, as_of_ts, pod_state_obj):
@@ -3212,165 +3494,6 @@ def test_build_vplan_full_target_weight_book_rebalances_omitted_holdings(tmp_pat
             "warning_bool": False,
         },
     ]
-
-
-def test_preflight_contract_summary_reports_pass(tmp_path: Path, monkeypatch):
-    db_path_str = str((tmp_path / "live.sqlite3").resolve())
-    _write_manifest(tmp_path, auto_submit_enabled_bool=False)
-
-    monkeypatch.setattr(
-        "alpha.live.strategy_host.preflight_decision_contract_for_release",
-        lambda release_obj, as_of_ts, pod_state_obj: {
-            "release_id_str": release_obj.release_id_str,
-            "pod_id_str": release_obj.pod_id_str,
-            "strategy_import_str": release_obj.strategy_import_str,
-            "decision_book_type_str": "incremental_entry_exit_book",
-            "contract_status_str": "pass",
-            "accepted_shape_count_int": 1,
-            "unsupported_shape_count_int": 0,
-            "unsupported_shape_example_dict_list": [],
-            "error_str": None,
-        },
-    )
-
-    state_store_obj = LiveStateStore(db_path_str)
-    detail_dict = preflight_contract_summary(
-        state_store_obj=state_store_obj,
-        as_of_ts=datetime(2024, 2, 1, 9, 22, tzinfo=MARKET_TIMEZONE_OBJ),
-        releases_root_path_str=str(tmp_path / "releases"),
-    )
-
-    assert detail_dict["enabled_release_count_int"] == 1
-    assert detail_dict["passed_release_count_int"] == 1
-    assert detail_dict["failed_release_count_int"] == 0
-    assert detail_dict["contract_report_dict_list"][0]["contract_status_str"] == "pass"
-
-
-def test_preflight_contract_summary_filters_by_mode(tmp_path: Path, monkeypatch):
-    releases_root_path_obj = tmp_path / "releases" / "user_001"
-    releases_root_path_obj.mkdir(parents=True, exist_ok=True)
-    (releases_root_path_obj / "paper.yaml").write_text(
-        "\n".join(
-            [
-                "identity:",
-                "  release_id: user_001.pod_paper.daily.v1",
-                "  user_id: user_001",
-                "  pod_id: pod_paper",
-                "deployment:",
-                "  mode: paper",
-                "  enabled_bool: true",
-                "broker:",
-                "  account_route: DU1",
-                "strategy:",
-                "  strategy_import_str: strategies.dv2.strategy_mr_dv2:DVO2Strategy",
-                "  data_profile_str: norgate_eod_sp500_pit",
-                "  params: {}",
-                "market:",
-                "  session_calendar_id_str: XNYS",
-                "schedule:",
-                "  signal_clock_str: eod_snapshot_ready",
-                "  execution_policy_str: next_open_moo",
-                "risk:",
-                "  risk_profile_str: standard",
-            ]
-        ),
-        encoding="utf-8",
-    )
-    (releases_root_path_obj / "incubation.yaml").write_text(
-        "\n".join(
-            [
-                "identity:",
-                "  release_id: user_001.pod_inc.incubation.v1",
-                "  user_id: user_001",
-                "  pod_id: pod_inc",
-                "deployment:",
-                "  mode: incubation",
-                "  enabled_bool: true",
-                "broker:",
-                "  account_route: SIM_pod_inc",
-                "strategy:",
-                "  strategy_import_str: strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy",
-                "  data_profile_str: norgate_eod_sp500_pit",
-                "  params: {}",
-                "market:",
-                "  session_calendar_id_str: XNYS",
-                "schedule:",
-                "  signal_clock_str: eod_snapshot_ready",
-                "  execution_policy_str: next_open_moo",
-                "risk:",
-                "  risk_profile_str: standard_equity_mr",
-            ]
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(
-        "alpha.live.strategy_host.preflight_decision_contract_for_release",
-        lambda release_obj, as_of_ts, pod_state_obj: {
-            "release_id_str": release_obj.release_id_str,
-            "pod_id_str": release_obj.pod_id_str,
-            "strategy_import_str": release_obj.strategy_import_str,
-            "decision_book_type_str": "incremental_entry_exit_book",
-            "contract_status_str": "pass",
-            "accepted_shape_count_int": 1,
-            "unsupported_shape_count_int": 0,
-            "unsupported_shape_example_dict_list": [],
-            "error_str": None,
-        },
-    )
-
-    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
-    detail_dict = preflight_contract_summary(
-        state_store_obj=state_store_obj,
-        as_of_ts=datetime(2024, 2, 1, 9, 22, tzinfo=MARKET_TIMEZONE_OBJ),
-        releases_root_path_str=str(tmp_path / "releases"),
-        env_mode_str="incubation",
-    )
-
-    assert detail_dict["enabled_release_count_int"] == 1
-    assert detail_dict["mode_str"] == "incubation"
-    assert detail_dict["contract_report_dict_list"][0]["pod_id_str"] == "pod_inc"
-
-
-def test_preflight_contract_summary_reports_failure(tmp_path: Path, monkeypatch):
-    db_path_str = str((tmp_path / "live.sqlite3").resolve())
-    _write_manifest(tmp_path, auto_submit_enabled_bool=False)
-
-    monkeypatch.setattr(
-        "alpha.live.strategy_host.preflight_decision_contract_for_release",
-        lambda release_obj, as_of_ts, pod_state_obj: {
-            "release_id_str": release_obj.release_id_str,
-            "pod_id_str": release_obj.pod_id_str,
-            "strategy_import_str": release_obj.strategy_import_str,
-            "decision_book_type_str": "incremental_entry_exit_book",
-            "contract_status_str": "fail",
-            "accepted_shape_count_int": 0,
-            "unsupported_shape_count_int": 1,
-            "unsupported_shape_example_dict_list": [
-                {
-                    "asset_str": "AAPL",
-                    "order_class_str": "LimitOrder",
-                    "unit_str": "value",
-                    "target_bool": False,
-                    "amount_float": 1000.0,
-                    "trade_id_int": 1,
-                }
-            ],
-            "error_str": "Unsupported incremental research order shape.",
-        },
-    )
-
-    state_store_obj = LiveStateStore(db_path_str)
-    detail_dict = preflight_contract_summary(
-        state_store_obj=state_store_obj,
-        as_of_ts=datetime(2024, 2, 1, 9, 22, tzinfo=MARKET_TIMEZONE_OBJ),
-        releases_root_path_str=str(tmp_path / "releases"),
-    )
-
-    assert detail_dict["enabled_release_count_int"] == 1
-    assert detail_dict["passed_release_count_int"] == 0
-    assert detail_dict["failed_release_count_int"] == 1
-    assert detail_dict["contract_report_dict_list"][0]["contract_status_str"] == "fail"
-    assert detail_dict["contract_report_dict_list"][0]["unsupported_shape_count_int"] == 1
 
 
 def test_cutover_v1_schema_exports_and_drops_legacy_tables(tmp_path: Path):

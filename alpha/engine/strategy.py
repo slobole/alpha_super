@@ -680,6 +680,15 @@ class Strategy(ABC):
             # compute annualized return, avoiding division by zero
             if self.num_days == 0:
                 annualized_return_float = np.nan
+            elif self.total_value <= 0.0:
+                raise RuntimeError(
+                    "Strategy equity is non-positive; annualized return is undefined. "
+                    f"strategy_name='{self.name}', current_bar='{self.current_bar}', "
+                    f"cash={float(self.cash):.2f}, "
+                    f"portfolio_value={float(self.portfolio_value):.2f}, "
+                    f"total_value={float(self.total_value):.2f}, "
+                    f"capital_base={float(self._capital_base):.2f}."
+                )
             else:
                 annualized_return_float = float((1 + total_return_float) ** (252 / self.num_days) - 1)
 

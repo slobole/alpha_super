@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from alpha.live.incubation import IncubationBrokerAdapter
-from alpha.live.models import DecisionPlan, SessionOpenPrice
+from alpha.live.models import DecisionPlan, LivePriceSnapshot, SessionOpenPrice
 from alpha.live.release_manifest import load_release_list
 from alpha.live.runner import (
     DEFAULT_DB_PATH_STR,
@@ -112,6 +112,32 @@ def _ibkr_tick_open_lookup_func(
     ]
 
 
+def _ibkr_live_price_lookup_func(
+    account_route_str: str,
+    asset_str_list: list[str],
+    execution_policy_str: str | None,
+) -> LivePriceSnapshot:
+    assert account_route_str == "SIM_pod_inc"
+    assert execution_policy_str == "next_open_moo"
+    price_map_dict = {"AAPL": 99.0}
+    source_str = "ib_async.reqMktData.225.auctionPrice"
+    return LivePriceSnapshot(
+        account_route_str=account_route_str,
+        snapshot_timestamp_ts=datetime(2024, 1, 3, 9, 25, tzinfo=MARKET_TZ),
+        price_source_str=source_str,
+        asset_reference_price_map={
+            str(asset_str): price_map_dict[str(asset_str)]
+            for asset_str in asset_str_list
+            if str(asset_str) in price_map_dict
+        },
+        asset_reference_source_map_dict={
+            str(asset_str): source_str
+            for asset_str in asset_str_list
+            if str(asset_str) in price_map_dict
+        },
+    )
+
+
 def _insert_open_decision_plan(state_store_obj: LiveStateStore, root_path_obj: Path) -> None:
     release_obj = load_release_list(str(root_path_obj / "releases"))[0]
     state_store_obj.upsert_release(release_obj)
@@ -154,7 +180,15 @@ def test_incubation_manifest_accepts_sim_account_only_in_incubation(tmp_path: Pa
 
 
 def test_incubation_uses_separate_default_db_path():
-    assert _resolve_db_path_for_mode_str(None, "incubation") == DEFAULT_INCUBATION_DB_PATH_STR
+    with pytest.raises(ValueError, match="pod-scoped"):
+        _resolve_db_path_for_mode_str(None, "incubation")
+    incubation_pod_db_path_str = _resolve_db_path_for_mode_str(
+        None,
+        "incubation",
+        pod_id_str="pod_inc",
+    )
+    assert Path(incubation_pod_db_path_str).name == "pod_inc.sqlite3"
+    assert Path(incubation_pod_db_path_str).parent.name == "incubation"
     assert _resolve_db_path_for_mode_str(None, "paper") == DEFAULT_DB_PATH_STR
     assert _resolve_db_path_for_mode_str(None, "live") == DEFAULT_DB_PATH_STR
 
@@ -174,6 +208,7 @@ def test_incubation_settles_open_order_with_official_open_and_cash_ledger(tmp_pa
         state_store_obj=state_store_obj,
         as_of_ts=build_as_of_ts,
         official_price_lookup_func=_official_price_lookup_func,
+        ibkr_live_price_lookup_func=_ibkr_live_price_lookup_func,
     )
     build_detail_dict = build_vplans(
         state_store_obj=state_store_obj,
@@ -185,8 +220,11 @@ def test_incubation_settles_open_order_with_official_open_and_cash_ledger(tmp_pa
 
     latest_vplan_obj = state_store_obj.get_latest_vplan_for_pod("pod_inc")
     assert latest_vplan_obj is not None
-    assert latest_vplan_obj.live_reference_price_map == {"AAPL": 100.0}
-    assert latest_vplan_obj.order_delta_map == {"AAPL": 500.0}
+    assert latest_vplan_obj.live_reference_price_map == {"AAPL": 99.0}
+    assert latest_vplan_obj.live_reference_source_map_dict == {
+        "AAPL": "ib_async.reqMktData.225.auctionPrice"
+    }
+    assert latest_vplan_obj.order_delta_map == {"AAPL": 505.0}
 
     submit_as_of_ts = datetime(2024, 1, 3, 9, 26, tzinfo=MARKET_TZ)
     submit_adapter_obj = IncubationBrokerAdapter(
@@ -238,7 +276,7 @@ def test_incubation_settles_open_order_with_official_open_and_cash_ledger(tmp_pa
 
     fill_row_dict_list = state_store_obj.get_fill_row_dict_list_for_vplan(int(latest_vplan_obj.vplan_id_int or 0))
     assert len(fill_row_dict_list) == 1
-    assert fill_row_dict_list[0]["fill_amount_float"] == 500.0
+    assert fill_row_dict_list[0]["fill_amount_float"] == 505.0
     assert fill_row_dict_list[0]["fill_price_float"] == 101.0
     assert fill_row_dict_list[0]["official_open_price_float"] == 101.0
     assert fill_row_dict_list[0]["open_price_source_str"] == "ibkr.tick_open"
@@ -257,12 +295,14 @@ def test_incubation_settles_open_order_with_official_open_and_cash_ledger(tmp_pa
         "trade_notional",
         "commission",
     ]
-    assert sum(row_dict["cash_delta_float"] for row_dict in cash_ledger_row_dict_list) == -50502.5
+    assert sum(row_dict["cash_delta_float"] for row_dict in cash_ledger_row_dict_list) == pytest.approx(
+        -51007.525
+    )
 
     pod_state_obj = state_store_obj.get_pod_state("pod_inc")
     assert pod_state_obj is not None
-    assert pod_state_obj.position_amount_map == {"AAPL": 500.0}
-    assert pod_state_obj.cash_float == 49497.5
+    assert pod_state_obj.position_amount_map == {"AAPL": 505.0}
+    assert pod_state_obj.cash_float == pytest.approx(48992.475)
 
     second_reconcile_adapter_obj = IncubationBrokerAdapter(
         state_store_obj=state_store_obj,
@@ -291,6 +331,9 @@ def test_incubation_settles_open_order_with_official_open_and_cash_ledger(tmp_pa
     assert compare_row_dict["quantity_diff_float"] == 0.0
     assert compare_row_dict["position_diff_float"] == 0.0
     assert compare_row_dict["fill_slippage_bps_float"] == 0.0
+    assert compare_row_dict["vplan_reference_slippage_bps_float"] == pytest.approx(
+        (101.0 - 99.0) / 99.0 * 10000.0
+    )
 
 
 def test_incubation_missing_ibkr_tick_open_writes_no_accounting(tmp_path: Path):
@@ -303,6 +346,7 @@ def test_incubation_missing_ibkr_tick_open_writes_no_accounting(tmp_path: Path):
         state_store_obj=state_store_obj,
         as_of_ts=build_as_of_ts,
         official_price_lookup_func=_official_price_lookup_func,
+        ibkr_live_price_lookup_func=_ibkr_live_price_lookup_func,
     )
     build_vplans(
         state_store_obj=state_store_obj,
@@ -365,6 +409,46 @@ def test_incubation_missing_ibkr_tick_open_writes_no_accounting(tmp_path: Path):
     assert state_store_obj.get_fill_row_dict_list_for_vplan(int(latest_vplan_obj.vplan_id_int or 0)) == []
     assert state_store_obj.get_cash_ledger_row_dict_list_for_vplan(int(latest_vplan_obj.vplan_id_int or 0)) == []
     assert state_store_obj.get_pod_state("pod_inc") is None
+
+
+def test_incubation_missing_ibkr_reference_blocks_vplan(tmp_path: Path):
+    _write_incubation_release(tmp_path)
+    state_store_obj = LiveStateStore(str(tmp_path / "live.sqlite3"))
+    _insert_open_decision_plan(state_store_obj, tmp_path)
+
+    def _missing_ibkr_live_price_lookup_func(
+        account_route_str: str,
+        asset_str_list: list[str],
+        execution_policy_str: str | None,
+    ) -> LivePriceSnapshot:
+        del asset_str_list, execution_policy_str
+        return LivePriceSnapshot(
+            account_route_str=account_route_str,
+            snapshot_timestamp_ts=datetime(2024, 1, 3, 9, 25, tzinfo=MARKET_TZ),
+            price_source_str="ib_async.reqMktData.225.auctionPrice",
+            asset_reference_price_map={},
+            asset_reference_source_map_dict={},
+        )
+
+    build_as_of_ts = datetime(2024, 1, 3, 9, 25, tzinfo=MARKET_TZ)
+    build_adapter_obj = IncubationBrokerAdapter(
+        state_store_obj=state_store_obj,
+        as_of_ts=build_as_of_ts,
+        official_price_lookup_func=_official_price_lookup_func,
+        ibkr_live_price_lookup_func=_missing_ibkr_live_price_lookup_func,
+    )
+    detail_dict = build_vplans(
+        state_store_obj=state_store_obj,
+        broker_adapter_obj=build_adapter_obj,
+        as_of_ts=build_as_of_ts,
+        env_mode_str="incubation",
+    )
+
+    assert detail_dict["created_vplan_count_int"] == 0
+    assert detail_dict["blocked_action_count_int"] == 1
+    assert detail_dict["reason_count_map_dict"] == {"live_price_snapshot_error": 1}
+    assert state_store_obj.get_latest_decision_plan_for_pod("pod_inc").status_str == "blocked"
+    assert state_store_obj.get_latest_vplan_for_pod("pod_inc") is None
 
 
 def test_incubation_moc_blocks_without_preclose_snapshot(tmp_path: Path):

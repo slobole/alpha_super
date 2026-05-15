@@ -1,7 +1,9 @@
 import unittest
 
+import numpy as np
 import pandas as pd
 
+from alpha.engine.metrics import select_tail_event_date_index
 from alpha.engine.portfolio import Portfolio
 from alpha.engine.strategy import Strategy
 
@@ -180,3 +182,83 @@ class PortfolioTests(unittest.TestCase):
                 weights=[0.6, 0.3],
                 capital_base=100.0,
             )
+
+    def test_tail_event_selection_excludes_bootstrap_and_uses_ceiling_count(self):
+        dates_index = pd.date_range('2024-01-01', periods=41, freq='B')
+        portfolio_daily_return_ser = pd.Series(
+            [-0.99] + [0.01] * 38 + [-0.02, -0.03],
+            index=dates_index,
+            dtype=float,
+        )
+
+        tail_event_date_index = select_tail_event_date_index(
+            portfolio_daily_return_ser,
+            tail_fraction_float=0.05,
+            min_tail_days_int=1,
+        )
+
+        self.assertEqual(len(tail_event_date_index), 2)
+        self.assertNotIn(dates_index[0], tail_event_date_index)
+        self.assertEqual(set(tail_event_date_index), set(dates_index[-2:]))
+
+    def test_tail_contributions_sum_to_portfolio_return_using_previous_weights(self):
+        dates_index = pd.to_datetime(['2024-01-01', '2024-01-02', '2024-01-03'])
+        strategy_a = make_strategy('StrategyA', dates_index, [0.0, 1.0, -0.5], capital_base=100.0)
+        strategy_b = make_strategy('StrategyB', dates_index, [0.0, 0.0, 0.0], capital_base=100.0)
+
+        portfolio = Portfolio(
+            strategies=[strategy_a, strategy_b],
+            weights=[0.5, 0.5],
+            capital_base=100.0,
+        )
+
+        tail_date_ts = pd.Timestamp('2024-01-03')
+        self.assertEqual(list(portfolio.tail_event_date_index), [tail_date_ts])
+        self.assertAlmostEqual(
+            float(portfolio.tail_contribution_df.loc[tail_date_ts].sum()),
+            float(portfolio.results.loc[tail_date_ts, 'daily_returns']),
+        )
+        self.assertAlmostEqual(
+            float(portfolio.tail_contribution_df.loc[tail_date_ts, 'StrategyA']),
+            -1.0 / 3.0,
+        )
+        self.assertNotAlmostEqual(
+            float(portfolio.tail_contribution_df.loc[tail_date_ts, 'StrategyA']),
+            -0.25,
+        )
+
+    def test_portfolio_exposes_tail_diagnostics_and_tail_corr_differs_from_full_sample(self):
+        dates_index = pd.date_range('2024-01-01', periods=41, freq='B')
+        strategy_a_return_list = [0.0]
+        strategy_b_return_list = [0.0]
+        for day_idx_int in range(40):
+            if day_idx_int == 10:
+                strategy_a_return_list.append(-0.05)
+                strategy_b_return_list.append(-0.05)
+            elif day_idx_int == 30:
+                strategy_a_return_list.append(-0.04)
+                strategy_b_return_list.append(-0.04)
+            elif day_idx_int % 2 == 0:
+                strategy_a_return_list.append(0.01)
+                strategy_b_return_list.append(-0.005)
+            else:
+                strategy_a_return_list.append(-0.005)
+                strategy_b_return_list.append(0.01)
+
+        strategy_a = make_strategy('StrategyA', dates_index, strategy_a_return_list, capital_base=100.0)
+        strategy_b = make_strategy('StrategyB', dates_index, strategy_b_return_list, capital_base=100.0)
+
+        portfolio = Portfolio(
+            strategies=[strategy_a, strategy_b],
+            weights=[0.5, 0.5],
+            capital_base=100.0,
+        )
+
+        self.assertEqual(len(portfolio.tail_event_date_index), 2)
+        self.assertListEqual(list(portfolio.tail_return_df.columns), ['StrategyA', 'StrategyB'])
+        self.assertListEqual(list(portfolio.tail_contribution_df.columns), ['StrategyA', 'StrategyB'])
+        self.assertIn('average_loss_contribution_share_float', portfolio.tail_summary_df.columns)
+        tail_corr_float = float(portfolio.tail_correlation_matrix.loc['StrategyA', 'StrategyB'])
+        full_corr_float = float(portfolio.correlation_matrix.loc['StrategyA', 'StrategyB'])
+        self.assertTrue(np.isfinite(tail_corr_float))
+        self.assertNotAlmostEqual(tail_corr_float, full_corr_float)

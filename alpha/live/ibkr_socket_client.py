@@ -145,12 +145,22 @@ class IBKRSocketClient:
 
     @staticmethod
     def _build_stock_contract_map(ib_obj: IB, asset_str_list: list[str]) -> dict[str, object]:
-        contract_list = [Stock(asset_str, "SMART", "USD") for asset_str in asset_str_list]
+        requested_asset_str_list = [str(asset_str) for asset_str in asset_str_list]
+        contract_list = [Stock(asset_str, "SMART", "USD") for asset_str in requested_asset_str_list]
         qualified_contract_list = ib_obj.qualifyContracts(*contract_list)
-        return {
-            contract_obj.symbol: contract_obj
-            for contract_obj in qualified_contract_list
-        }
+        contract_map_dict: dict[str, object] = {}
+        for contract_obj in qualified_contract_list:
+            contract_symbol_str = str(getattr(contract_obj, "symbol", "") or "").strip()
+            if contract_symbol_str == "":
+                continue
+            contract_map_dict[contract_symbol_str] = contract_obj
+        missing_asset_str_list = sorted(
+            {asset_str for asset_str in requested_asset_str_list if asset_str not in contract_map_dict}
+        )
+        if len(missing_asset_str_list) > 0:
+            missing_asset_csv_str = ", ".join(missing_asset_str_list)
+            raise ValueError(f"IBKR contract qualification failed for assets: {missing_asset_csv_str}")
+        return contract_map_dict
 
     @staticmethod
     def _build_broker_order_id_str(order_obj, order_status_obj) -> str:
@@ -429,7 +439,10 @@ class IBKRSocketClient:
     ) -> LivePriceSnapshot:
         with self.connect() as ib_obj:
             contract_map = self._build_stock_contract_map(ib_obj, asset_str_list)
-            if str(execution_policy_str or "") != "next_open_moo":
+            open_auction_reference_policy_set = {"next_open_moo", "next_month_first_open"}
+            # *** CRITICAL*** MOO-style execution policies must size from the
+            # same auction/open reference path they will execute against.
+            if str(execution_policy_str or "") not in open_auction_reference_policy_set:
                 asset_reference_price_map, asset_reference_source_map_dict = (
                     self._build_req_tickers_price_map_dict(
                         ib_obj=ib_obj,

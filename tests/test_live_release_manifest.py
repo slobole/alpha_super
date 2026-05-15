@@ -164,6 +164,70 @@ def test_parse_release_manifest_reads_manual_taa_live_template():
     assert release_obj.enabled_bool is False
 
 
+def test_parse_release_manifest_reads_disabled_linearity_qqq_vix_cash_live_template():
+    manifest_path_str = str(
+        Path(
+            "alpha/live/releases/your_user/pod_taa_btal_linearity_1n_fallback_qqq_vix_cash_live_manual.yaml"
+        ).resolve()
+    )
+
+    release_obj = parse_release_manifest(manifest_path_str)
+
+    assert release_obj.mode_str == "live"
+    assert release_obj.account_route_str == "U_YOUR_LIVE_ACCOUNT"
+    assert release_obj.strategy_import_str == (
+        "strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash"
+    )
+    assert release_obj.signal_clock_str == "month_end_snapshot_ready"
+    assert release_obj.execution_policy_str == "next_month_first_open"
+    assert release_obj.auto_submit_enabled_bool is False
+    assert release_obj.enabled_bool is False
+
+
+def test_parse_release_manifest_reads_disabled_btal_1n_tqqq_vix_cash_live_template():
+    manifest_path_str = str(
+        Path(
+            "alpha/live/releases/your_user/pod_taa_btal_1n_fallback_tqqq_vix_cash_live_manual.yaml"
+        ).resolve()
+    )
+
+    release_obj = parse_release_manifest(manifest_path_str)
+
+    assert release_obj.mode_str == "live"
+    assert release_obj.account_route_str == "U_YOUR_LIVE_ACCOUNT"
+    assert release_obj.strategy_import_str == (
+        "strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash"
+    )
+    assert release_obj.signal_clock_str == "month_end_snapshot_ready"
+    assert release_obj.execution_policy_str == "next_month_first_open"
+    assert release_obj.auto_submit_enabled_bool is False
+    assert release_obj.enabled_bool is False
+
+
+def test_parse_release_manifest_reads_disabled_ndx_vxn_scaled_live_template():
+    manifest_path_str = str(
+        Path("alpha/live/releases/your_user/pod_ndx_mo_vxn_scaled_live_manual.yaml").resolve()
+    )
+
+    release_obj = parse_release_manifest(manifest_path_str)
+
+    assert release_obj.mode_str == "live"
+    assert release_obj.account_route_str == "U_YOUR_LIVE_ACCOUNT"
+    assert release_obj.strategy_import_str == (
+        "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:"
+        "VxnScaledAtrNormalizedNdxStrategy"
+    )
+    assert release_obj.data_profile_str == "norgate_eod_ndx_pit_plus_vxn_helper"
+    assert release_obj.signal_clock_str == "month_end_snapshot_ready"
+    assert release_obj.execution_policy_str == "next_month_first_open"
+    assert release_obj.params_dict["vxn_symbol_str"] == "$VXN"
+    assert release_obj.params_dict["target_vxn_pct_float"] == 22.0
+    assert release_obj.params_dict["min_exposure_scale_float"] == 0.25
+    assert release_obj.params_dict["max_exposure_scale_float"] == 1.0
+    assert release_obj.auto_submit_enabled_bool is False
+    assert release_obj.enabled_bool is False
+
+
 def test_parse_release_manifest_accepts_next_open_market(tmp_path: Path):
     manifest_path_obj = tmp_path / "next_open_market.yaml"
     manifest_path_obj.write_text(

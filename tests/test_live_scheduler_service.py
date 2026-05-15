@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import json
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pytest
 
+import alpha.live.scheduler_service as scheduler_service_module
 from alpha.live.models import (
     BrokerOrderAck,
     BrokerOrderFill,
@@ -232,13 +234,22 @@ def test_serve_rejects_invalid_deployment_before_starting_loop(tmp_path: Path):
         )
 
 
-def test_scheduler_service_uses_incubation_default_db_path():
+def test_scheduler_service_requires_pod_for_incubation_default_db_path():
+    with pytest.raises(ValueError, match="pod-scoped"):
+        _resolve_db_path_for_mode_str(
+            db_path_str=None,
+            env_mode_str="incubation",
+        )
+
     resolved_db_path_str = _resolve_db_path_for_mode_str(
         db_path_str=None,
         env_mode_str="incubation",
+        pod_id_str="pod_dv2_01",
     )
 
-    assert Path(resolved_db_path_str).name == "incubation_state.sqlite3"
+    resolved_db_path_obj = Path(resolved_db_path_str)
+    assert resolved_db_path_obj.name == "pod_dv2_01.sqlite3"
+    assert resolved_db_path_obj.parent.name == "incubation"
 
 
 def test_scheduler_service_uses_pod_scoped_default_db_path():
@@ -251,6 +262,168 @@ def test_scheduler_service_uses_pod_scoped_default_db_path():
     resolved_db_path_obj = Path(resolved_db_path_str)
     assert resolved_db_path_obj.name == "pod_dv2_01.sqlite3"
     assert resolved_db_path_obj.parent.name == "paper"
+
+
+def test_scheduler_run_once_incubation_fans_out_to_pod_scoped_dbs(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+):
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="incubation_user",
+        pod_id_str="pod_inc_a",
+        release_id_str="incubation_user.pod_inc_a.incubation",
+        mode_str="incubation",
+        enabled_bool=True,
+        account_route_str="SIM_pod_inc_a",
+    )
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="incubation_user",
+        pod_id_str="pod_inc_b",
+        release_id_str="incubation_user.pod_inc_b.incubation",
+        mode_str="incubation",
+        enabled_bool=True,
+        account_route_str="SIM_pod_inc_b",
+    )
+    captured_db_path_list: list[str] = []
+
+    def _fake_run_once(**kwargs):
+        captured_db_path_list.append(kwargs["state_store_obj"].db_path_str)
+        return {
+            "due_now_bool": False,
+            "active_poll_bool": False,
+            "next_phase_str": "wait",
+            "reason_code_str": "test_idle",
+            "next_due_timestamp_str": datetime(2024, 1, 2, tzinfo=UTC).isoformat(),
+            "tick_invoked_bool": False,
+        }
+
+    monkeypatch.setattr(scheduler_service_module, "run_once", _fake_run_once)
+
+    result_int = main(
+        [
+            "run_once",
+            "--mode",
+            "incubation",
+            "--releases-root",
+            str(tmp_path / "releases"),
+            "--as-of-ts",
+            datetime(2024, 1, 1, tzinfo=UTC).isoformat(),
+            "--json",
+        ]
+    )
+
+    detail_dict = json.loads(capsys.readouterr().out)
+
+    assert result_int == 0
+    assert detail_dict["fanout_bool"] is True
+    assert detail_dict["pod_count_int"] == 2
+    assert detail_dict["completed_count_int"] == 2
+    assert {Path(path_str).name for path_str in captured_db_path_list} == {
+        "pod_inc_a.sqlite3",
+        "pod_inc_b.sqlite3",
+    }
+    assert {Path(path_str).parent.name for path_str in captured_db_path_list} == {"incubation"}
+
+
+def test_scheduler_run_once_incubation_pod_id_touches_only_one_pod_db(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+):
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="incubation_user",
+        pod_id_str="pod_inc_a",
+        release_id_str="incubation_user.pod_inc_a.incubation",
+        mode_str="incubation",
+        enabled_bool=True,
+        account_route_str="SIM_pod_inc_a",
+    )
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="incubation_user",
+        pod_id_str="pod_inc_b",
+        release_id_str="incubation_user.pod_inc_b.incubation",
+        mode_str="incubation",
+        enabled_bool=True,
+        account_route_str="SIM_pod_inc_b",
+    )
+    captured_db_path_list: list[str] = []
+
+    def _fake_run_once(**kwargs):
+        captured_db_path_list.append(kwargs["state_store_obj"].db_path_str)
+        return {
+            "due_now_bool": False,
+            "active_poll_bool": False,
+            "next_phase_str": "wait",
+            "reason_code_str": "test_idle",
+            "next_due_timestamp_str": datetime(2024, 1, 2, tzinfo=UTC).isoformat(),
+            "tick_invoked_bool": False,
+        }
+
+    monkeypatch.setattr(scheduler_service_module, "run_once", _fake_run_once)
+
+    result_int = main(
+        [
+            "run_once",
+            "--mode",
+            "incubation",
+            "--pod-id",
+            "pod_inc_a",
+            "--releases-root",
+            str(tmp_path / "releases"),
+            "--as-of-ts",
+            datetime(2024, 1, 1, tzinfo=UTC).isoformat(),
+            "--json",
+        ]
+    )
+
+    detail_dict = json.loads(capsys.readouterr().out)
+
+    assert result_int == 0
+    assert "fanout_bool" not in detail_dict
+    assert len(captured_db_path_list) == 1
+    assert Path(captured_db_path_list[0]).name == "pod_inc_a.sqlite3"
+    assert Path(captured_db_path_list[0]).parent.name == "incubation"
+
+
+def test_scheduler_serve_incubation_without_pod_uses_fanout(tmp_path: Path, monkeypatch):
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="incubation_user",
+        pod_id_str="pod_inc_a",
+        release_id_str="incubation_user.pod_inc_a.incubation",
+        mode_str="incubation",
+        enabled_bool=True,
+        account_route_str="SIM_pod_inc_a",
+    )
+    captured_args_dict: dict[str, object] = {}
+
+    def _fake_serve_incubation_fanout(parsed_args_obj):
+        captured_args_dict["mode_str"] = parsed_args_obj.env_mode_str
+        captured_args_dict["pod_id_str"] = parsed_args_obj.pod_id_str
+
+    monkeypatch.setattr(
+        scheduler_service_module,
+        "serve_incubation_fanout",
+        _fake_serve_incubation_fanout,
+    )
+
+    result_int = main(
+        [
+            "serve",
+            "--mode",
+            "incubation",
+            "--releases-root",
+            str(tmp_path / "releases"),
+        ]
+    )
+
+    assert result_int == 0
+    assert captured_args_dict == {"mode_str": "incubation", "pod_id_str": None}
 
 
 def test_scheduler_service_rejects_incubation_on_live_default_db_path():
@@ -944,6 +1117,11 @@ def test_scheduler_run_once_invokes_tick_for_startup_catchup(tmp_path: Path, mon
             "broker_ack_row_dict_list": [],
             "exception_row_dict_list": [],
             "exception_count_int": 0,
+            "rehearsal_status_dict": {
+                "status_str": "not_applicable",
+                "promotion_gate_status_str": "not_applicable",
+                "detail_str": "Rehearsal status applies only to mode=incubation.",
+            },
         }
     ]
     assert detail_dict["post_tick_execution_report_dict_list"] == []

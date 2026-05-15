@@ -1,5 +1,7 @@
 import tempfile
 import unittest
+import json
+from pathlib import Path
 
 import pandas as pd
 
@@ -291,11 +293,28 @@ class CrisisReplayTests(unittest.TestCase):
                 crisis_replay_result,
                 output_dir=temp_dir_str,
             )
+            relative_output_path = output_path.relative_to(Path(temp_dir_str))
 
+            self.assertEqual(relative_output_path.parts[:4], (
+                'research',
+                'strategy',
+                'toy_buy_hold',
+                'stress_analysis',
+            ))
             self.assertTrue((output_path / 'crisis_metrics.csv').exists())
             self.assertTrue((output_path / 'crisis_paths.csv').exists())
             self.assertTrue((output_path / 'metadata.json').exists())
+            self.assertTrue((output_path / 'run_info.json').exists())
+            self.assertTrue((output_path / 'summary.json').exists())
             self.assertTrue((output_path / 'report.html').exists())
+            run_info_dict = json.loads((output_path / 'run_info.json').read_text(encoding='utf-8'))
+            summary_dict = json.loads((output_path / 'summary.json').read_text(encoding='utf-8'))
+            self.assertEqual(run_info_dict['entity_type'], 'strategy')
+            self.assertEqual(run_info_dict['entity_id'], 'toy_buy_hold')
+            self.assertEqual(run_info_dict['analysis_type'], 'stress_analysis')
+            self.assertEqual(run_info_dict['parameters']['stress_type'], 'crisis_replay')
+            self.assertEqual(run_info_dict['parameters']['crisis_windows'][0]['name'], 'toy_crisis')
+            self.assertEqual(summary_dict['crisis_count'], 1)
             report_html_str = (output_path / 'report.html').read_text(encoding='utf-8')
             self.assertIn('<h2>Crisis Summary</h2>', report_html_str)
             self.assertIn('toy_crisis', report_html_str)

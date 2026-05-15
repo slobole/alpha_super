@@ -5,10 +5,10 @@ identity:
 
 deployment:
   mode: live
-  enabled_bool: true
+  enabled_bool: false
 
 broker:
-  account_route: U25384771
+  account_route: U21192795
   host_str: 127.0.0.1
   port_int: 7496  # default TWS port for live trading (7497 is for paper trading)
   client_id_int: 31

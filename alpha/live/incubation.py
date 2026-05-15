@@ -31,6 +31,7 @@ from alpha.live.state_store_v2 import LiveStateStore
 OfficialPriceLookup_Func = Callable[[list[str], str, str], dict[str, float]]
 PreClosePriceLookup_Func = Callable[[list[str], str], dict[str, float]]
 IBKRTickOpenLookup_Func = Callable[[str, list[str], datetime, str], list[SessionOpenPrice]]
+IBKRLivePriceLookup_Func = Callable[[str, list[str], str | None], LivePriceSnapshot]
 
 
 OPEN_EXECUTION_POLICY_SET: set[str] = {
@@ -91,6 +92,7 @@ class IncubationBrokerAdapter(BrokerAdapter):
         official_price_lookup_func: OfficialPriceLookup_Func | None = None,
         preclose_price_lookup_func: PreClosePriceLookup_Func | None = None,
         ibkr_tick_open_lookup_func: IBKRTickOpenLookup_Func | None = None,
+        ibkr_live_price_lookup_func: IBKRLivePriceLookup_Func | None = None,
         ibkr_host_str: str = "127.0.0.1",
         ibkr_port_int: int = 7497,
         ibkr_client_id_int: int = 91,
@@ -105,6 +107,7 @@ class IncubationBrokerAdapter(BrokerAdapter):
         )
         self.preclose_price_lookup_func = preclose_price_lookup_func
         self.ibkr_tick_open_lookup_func = ibkr_tick_open_lookup_func
+        self.ibkr_live_price_lookup_func = ibkr_live_price_lookup_func
         self.ibkr_socket_client_obj = IBKRSocketClient(
             host_str=ibkr_host_str,
             port_int=ibkr_port_int,
@@ -172,16 +175,31 @@ class IncubationBrokerAdapter(BrokerAdapter):
         normalized_asset_str_list = sorted({str(asset_str) for asset_str in asset_str_list})
 
         if execution_policy_str in OPEN_EXECUTION_POLICY_SET:
-            # *** CRITICAL*** Open-policy incubation sizing uses the previous
-            # completed session close. Using target-session open would leak the
-            # execution price into pre-open share sizing.
-            reference_date_str = self._previous_session_date_str(release_obj)
-            price_map_dict = self.official_price_lookup_func(
-                normalized_asset_str_list,
-                reference_date_str,
-                "Close",
-            )
-            price_source_str = f"incubation.norgate.official_close.{reference_date_str}"
+            # *** CRITICAL*** Open-policy incubation sizing uses the same
+            # pre-submit IBKR reference-price path as paper/live. It must not
+            # use the target-session ticker.open settlement price because that
+            # is only known after the open.
+            if self.ibkr_live_price_lookup_func is not None:
+                live_price_snapshot_obj = self.ibkr_live_price_lookup_func(
+                    account_route_str,
+                    normalized_asset_str_list,
+                    execution_policy_str,
+                )
+            else:
+                live_price_snapshot_obj = self.ibkr_socket_client_obj.get_live_price_snapshot(
+                    account_route_str,
+                    normalized_asset_str_list,
+                    execution_policy_str=execution_policy_str,
+                )
+            price_map_dict = {
+                str(asset_str): float(price_float)
+                for asset_str, price_float in live_price_snapshot_obj.asset_reference_price_map.items()
+            }
+            source_map_dict = {
+                str(asset_str): str(source_str)
+                for asset_str, source_str in live_price_snapshot_obj.asset_reference_source_map_dict.items()
+            }
+            price_source_str = str(live_price_snapshot_obj.price_source_str)
         elif execution_policy_str == "same_day_moc":
             if self.preclose_price_lookup_func is None:
                 raise RuntimeError(
@@ -196,6 +214,9 @@ class IncubationBrokerAdapter(BrokerAdapter):
                 reference_date_str,
             )
             price_source_str = f"incubation.preclose_snapshot.{reference_date_str}"
+            source_map_dict = {
+                asset_str: price_source_str for asset_str in normalized_asset_str_list
+            }
         else:
             raise ValueError(f"Unsupported execution_policy_str '{execution_policy_str}'.")
 
@@ -207,6 +228,19 @@ class IncubationBrokerAdapter(BrokerAdapter):
                 "Missing incubation sizing reference prices for assets: "
                 f"{missing_asset_list}."
             )
+        invalid_asset_list = sorted(
+            asset_str
+            for asset_str in normalized_asset_str_list
+            if (
+                not math.isfinite(float(price_map_dict[asset_str]))
+                or float(price_map_dict[asset_str]) <= 0.0
+            )
+        )
+        if len(invalid_asset_list) > 0:
+            raise RuntimeError(
+                "Invalid incubation sizing reference prices for assets: "
+                f"{invalid_asset_list}."
+            )
         return LivePriceSnapshot(
             account_route_str=account_route_str,
             snapshot_timestamp_ts=self.as_of_ts,
@@ -216,7 +250,8 @@ class IncubationBrokerAdapter(BrokerAdapter):
                 for asset_str in normalized_asset_str_list
             },
             asset_reference_source_map_dict={
-                asset_str: price_source_str for asset_str in normalized_asset_str_list
+                asset_str: source_map_dict.get(asset_str, price_source_str)
+                for asset_str in normalized_asset_str_list
             },
         )
 

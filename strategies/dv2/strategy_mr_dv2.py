@@ -6,6 +6,7 @@ from collections import defaultdict
 from typing import List
 from alpha.engine.strategy import Strategy
 from alpha.engine.backtest import run_daily
+from alpha.engine.friction_analysis import FrictionAnalysis
 from alpha.engine.report import save_results
 from alpha.indicators import dv2_indicator
 from data.norgate_loader import build_index_constituent_matrix, load_raw_prices
@@ -13,6 +14,57 @@ from data.norgate_loader import build_index_constituent_matrix, load_raw_prices
 
 def get_prices(symbols: List[str], benchmarks: List[str], start_date: str = '1998-01-01', end_date: str = None) -> pd.DataFrame:
     return load_raw_prices(symbols, benchmarks, start_date, end_date)
+
+
+def build_execution_timing_analysis_inputs() -> dict[str, object]:
+    """
+    Build inputs for ExecutionTimingAnalysis.
+
+    Formula:
+
+        signal_t = daily DV2 signal known after T close
+
+        entry_fill = signal_t + entry_lag at entry_price_field
+        exit_fill  = signal_t + exit_lag  at exit_price_field
+    """
+    benchmark_list = ['$SPX']
+    symbol_list, universe_df = build_index_constituent_matrix(indexname='S&P 500')
+    pricing_data_df = get_prices(
+        symbol_list,
+        benchmark_list,
+        start_date='1998-01-01',
+        end_date=None,
+    )
+
+    # *** CRITICAL*** Keep the same post-warmup calendar used by the Vanilla
+    # strategy script. Changing this sample changes all annualized metrics.
+    calendar_idx = pricing_data_df.index[pricing_data_df.index.year >= 2004]
+
+    def strategy_factory_fn():
+        strategy_obj = DVO2Strategy(
+            name='strategy_mr_dv2',
+            benchmarks=benchmark_list,
+            capital_base=100_000,
+            slippage=0.00025,
+            commission_per_share=0.005,
+            commission_minimum=1.0,
+        )
+        strategy_obj.universe_df = universe_df
+        strategy_obj.trade_id = 0
+        strategy_obj.current_trade = defaultdict(default_trade_id_int)
+        return strategy_obj
+
+    return {
+        "strategy_factory_fn": strategy_factory_fn,
+        "pricing_data_df": pricing_data_df,
+        "calendar_idx": pd.DatetimeIndex(calendar_idx),
+        "order_generation_mode_str": "signal_bar",
+        "risk_model_str": "daily_ohlc_signal",
+        "entry_timing_str_tuple": ("same_close_moc", "next_open", "next_close"),
+        "exit_timing_str_tuple": ("same_close_moc", "next_open", "next_close"),
+        "default_entry_timing_str": "next_open",
+        "default_exit_timing_str": "next_open",
+    }
 
 
 def default_trade_id_int() -> int:
@@ -38,6 +90,66 @@ def get_asof_universe_symbol_list(
 
     universe_membership_ser = sorted_universe_df.iloc[universe_row_int]
     return universe_membership_ser[universe_membership_ser == 1].index.astype(str).tolist()
+
+
+def build_friction_analysis_inputs(
+    show_display_bool: bool = False,
+    backtest_start_date_str: str = "2004-01-01",
+    capital_base_float: float = 100_000.0,
+    end_date_str: str | None = None,
+) -> dict[str, object]:
+    """
+    Build the completed DV2 run needed by FrictionAnalysis.
+
+    Formula:
+
+        auction_proxy_dollar_t = lagged_20d_median_dollar_adv_t * auction_fraction
+        participation_t = abs(order_dollar_t) / auction_proxy_dollar_t
+
+    The actual auction proxy is computed inside alpha.engine.friction_analysis.
+    This hook only preserves the existing DV2 data-loading and run path.
+    """
+    benchmark_list = ['$SPX']
+    symbol_list, universe_df = build_index_constituent_matrix(indexname='S&P 500')
+    pricing_data_df = get_prices(
+        symbol_list,
+        benchmark_list,
+        start_date='1998-01-01',
+        end_date=end_date_str,
+    )
+
+    strategy_obj = DVO2Strategy(
+        name='strategy_mr_dv2',
+        benchmarks=benchmark_list,
+        capital_base=capital_base_float,
+        slippage=0.00025,
+        commission_per_share=0.005,
+        commission_minimum=1.0,
+    )
+    strategy_obj.universe_df = universe_df
+    strategy_obj.trade_id = 0
+    strategy_obj.current_trade = defaultdict(default_trade_id_int)
+
+    # *** CRITICAL*** FrictionAnalysis must assess the same completed order
+    # ledger as the deployment-reference DV2 backtest. Keep pre-start history
+    # for indicators, but execute only on the configured backtest calendar.
+    calendar_idx = pricing_data_df.index[
+        pricing_data_df.index >= pd.Timestamp(backtest_start_date_str)
+    ]
+    run_daily(
+        strategy_obj,
+        pricing_data_df,
+        calendar_idx,
+        show_progress=show_display_bool,
+        show_signal_progress_bool=show_display_bool,
+    )
+
+    strategy_obj.universe_df = None
+    return {
+        "strategy_obj": strategy_obj,
+        "pricing_data_df": pricing_data_df,
+        "execution_policy_str": "MOO",
+    }
 
 
 class DVO2Strategy(Strategy):
@@ -191,6 +303,30 @@ def run_variant(
         save_results(strategy, output_dir=output_dir_str)
 
     return strategy
+
+
+def run_friction_analysis(
+    save_results_bool: bool = True,
+    output_dir_str: str = "results",
+    show_display_bool: bool = False,
+    backtest_start_date_str: str = "2004-01-01",
+    capital_base_float: float = 100_000.0,
+    end_date_str: str | None = None,
+):
+    friction_input_dict = build_friction_analysis_inputs(
+        show_display_bool=show_display_bool,
+        backtest_start_date_str=backtest_start_date_str,
+        capital_base_float=capital_base_float,
+        end_date_str=end_date_str,
+    )
+    friction_analysis_obj = FrictionAnalysis(
+        strategy_obj=friction_input_dict["strategy_obj"],
+        pricing_data_df=friction_input_dict["pricing_data_df"],
+        execution_policy_str=friction_input_dict["execution_policy_str"],
+        output_dir_str=output_dir_str,
+        save_output_bool=save_results_bool,
+    )
+    return friction_analysis_obj.run()
 
 
 

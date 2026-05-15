@@ -556,24 +556,56 @@ def _write_html_report(
         "red": "#b42318",
     }
     status_color_str = status_color_dict.get(status_str, "#475467")
-    fill_table_html_str = _df_to_html_table_str(fill_compare_df)
-    position_table_html_str = _df_to_html_table_str(position_compare_df)
-    summary_card_html_str = "\n".join(
-        f"<div class=\"card\"><span>{html.escape(str(key_str))}</span><strong>{html.escape(str(value_obj))}</strong></div>"
-        for key_str, value_obj in summary_dict.items()
-        if key_str
-        in {
-            "deployment_start_date_str",
-            "deployment_initial_cash_float",
-            "actual_equity_float",
-            "actual_equity_source_str",
-            "actual_equity_basis_str",
-            "backtest_equity_float",
-            "equity_tracking_error_float",
-            "cash_diff_float",
-            "open_issue_count_int",
-        }
+    verdict_card_html_str = _card_grid_html_str(
+        [
+            ("Status", str(status_str).upper()),
+            ("Open issues", summary_dict.get("open_issue_count_int")),
+            ("Target session", summary_dict.get("target_session_date_str")),
+            ("Deployment start", summary_dict.get("deployment_start_date_str")),
+        ]
     )
+    equity_card_html_str = _card_grid_html_str(
+        [
+            ("Actual equity", summary_dict.get("actual_equity_float")),
+            ("Reference equity", summary_dict.get("backtest_equity_float")),
+            ("Equity tracking error", summary_dict.get("equity_tracking_error_float")),
+            ("Actual equity source", summary_dict.get("actual_equity_source_str")),
+            ("Actual equity basis", summary_dict.get("actual_equity_basis_str")),
+            ("Cash diff", summary_dict.get("cash_diff_float")),
+        ]
+    )
+    execution_table_html_str = _df_to_labeled_html_table_str(
+        fill_compare_df,
+        {
+            "asset_str": "Asset",
+            "planned_order_delta_share_float": "Planned shares",
+            "filled_share_float": "Filled shares",
+            "quantity_diff_float": "Live quantity diff",
+            "avg_fill_price_float": "Avg fill",
+            "official_open_price_float": "Official open",
+            "official_open_slippage_bps_float": "Open slippage bps",
+            "official_open_slippage_notional_float": "Open slippage $",
+            "vplan_reference_price_float": "VPlan reference",
+            "vplan_reference_slippage_bps_float": "Reference slippage bps",
+            "vplan_reference_slippage_notional_float": "Reference slippage $",
+            "backtest_quantity_diff_float": "Backtest quantity diff",
+            "backtest_fill_price_diff_float": "Backtest fill price diff",
+        },
+    )
+    position_table_html_str = _df_to_labeled_html_table_str(
+        position_compare_df,
+        {
+            "asset_str": "Asset",
+            "target_position_float": "Target position",
+            "actual_position_float": "Actual position",
+            "reference_position_float": "Reference position",
+            "position_diff_float": "Live target diff",
+            "reference_position_diff_float": "Reference position diff",
+        },
+    )
+    raw_fill_compare_df = fill_compare_df.drop(columns=["reference_price_float"], errors="ignore")
+    raw_fill_table_html_str = _df_to_html_table_str(raw_fill_compare_df)
+    raw_position_table_html_str = _df_to_html_table_str(position_compare_df)
 
     html_text_str = f"""<!doctype html>
 <html lang="en">
@@ -588,6 +620,9 @@ def _write_html_report(
     .card {{ border: 1px solid #d0d5dd; border-radius: 6px; padding: 10px; background: #fff; }}
     .card span {{ display: block; color: #667085; font-size: 12px; }}
     .card strong {{ display: block; margin-top: 4px; font-size: 14px; }}
+    section {{ margin: 22px 0 30px; }}
+    details {{ margin-top: 14px; }}
+    summary {{ cursor: pointer; font-weight: 700; }}
     img {{ max-width: 100%; border: 1px solid #d0d5dd; border-radius: 6px; margin: 8px 0 18px; }}
     table {{ border-collapse: collapse; width: 100%; font-size: 12px; margin-bottom: 24px; }}
     th, td {{ border: 1px solid #d0d5dd; padding: 6px 8px; text-align: right; }}
@@ -599,21 +634,68 @@ def _write_html_report(
   <h1>{html.escape(release_obj.pod_id_str)} Reference Compare</h1>
   <div class="status">{html.escape(status_str.upper())}</div>
   <p>Release: {html.escape(release_obj.release_id_str)}</p>
-  <div class="cards">
-    {summary_card_html_str}
-  </div>
-  <h2>Equity</h2>
-  <img src="{html.escape(equity_png_path_obj.name)}" alt="Equity comparison chart">
-  <h2>Tracking Error</h2>
-  <img src="{html.escape(tracking_png_path_obj.name)}" alt="Tracking error chart">
-  <h2>Latest Fills</h2>
-  {fill_table_html_str}
-  <h2>Latest Positions</h2>
-  {position_table_html_str}
+  <section>
+    <h2>Verdict</h2>
+    {verdict_card_html_str}
+  </section>
+  <section>
+    <h2>Equity Tracking</h2>
+    {equity_card_html_str}
+    <img src="{html.escape(equity_png_path_obj.name)}" alt="Equity comparison chart">
+    <img src="{html.escape(tracking_png_path_obj.name)}" alt="Tracking error chart">
+  </section>
+  <section>
+    <h2>Execution Quality</h2>
+    {execution_table_html_str}
+  </section>
+  <section>
+    <h2>Position Parity</h2>
+    {position_table_html_str}
+  </section>
+  <section>
+    <h2>Raw Detail Tables</h2>
+    <details>
+      <summary>Fill compare rows</summary>
+      {raw_fill_table_html_str}
+    </details>
+    <details>
+      <summary>Position compare rows</summary>
+      {raw_position_table_html_str}
+    </details>
+  </section>
 </body>
 </html>
 """
     html_path_obj.write_text(html_text_str, encoding="utf-8")
+
+
+def _card_grid_html_str(item_list: list[tuple[str, object]]) -> str:
+    card_html_list = [
+        (
+            f"<div class=\"card\"><span>{html.escape(str(label_str))}</span>"
+            f"<strong>{html.escape(str('unavailable' if value_obj is None else value_obj))}</strong></div>"
+        )
+        for label_str, value_obj in item_list
+    ]
+    return f"<div class=\"cards\">{''.join(card_html_list)}</div>"
+
+
+def _df_to_labeled_html_table_str(
+    data_df: pd.DataFrame,
+    column_label_map_dict: dict[str, str],
+) -> str:
+    if data_df is None or len(data_df) == 0:
+        return "<p>No rows.</p>"
+    column_name_list = [
+        column_name_str
+        for column_name_str in column_label_map_dict
+        if column_name_str in data_df.columns
+    ]
+    if len(column_name_list) == 0:
+        return "<p>No rows.</p>"
+    display_df = data_df[column_name_list].copy()
+    display_df = display_df.rename(columns=column_label_map_dict)
+    return display_df.to_html(index=False, escape=True)
 
 
 def _df_to_html_table_str(data_df: pd.DataFrame) -> str:

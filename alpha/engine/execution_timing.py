@@ -36,8 +36,13 @@ import numpy as np
 import pandas as pd
 
 from alpha.engine.order import MarketOrder, Order
+from alpha.engine.report import build_research_output_path
 from alpha.engine.strategy import Strategy
 
+
+EXECUTION_TIMING_ANALYZER_ANALYSIS_TYPE_STR = "execution_timing_analyzer"
+_RUN_INFO_FILENAME_STR = "run_info.json"
+_SUMMARY_FILENAME_STR = "summary.json"
 
 SUPPORTED_TIMING_MODE_TUPLE: tuple[str, ...] = (
     "same_open",
@@ -103,6 +108,9 @@ class ExecutionTimingAnalysisResult:
     default_entry_timing_str: str = "next_open"
     default_exit_timing_str: str = "next_open"
     output_dir_path: Path | None = None
+
+
+ExecutionTimingAnalyzerResult = ExecutionTimingAnalysisResult
 
 
 def get_execution_timing_rule(timing_str: str) -> ExecutionTimingRule:
@@ -724,16 +732,95 @@ def _format_metric_table_html(metric_df: pd.DataFrame) -> str:
     return f"<table><thead><tr>{header_html_str}</tr></thead><tbody>{''.join(row_html_list)}</tbody></table>"
 
 
+def _json_float(value_obj) -> float | None:
+    try:
+        value_float = float(value_obj)
+    except (TypeError, ValueError):
+        return None
+    if pd.isna(value_float):
+        return None
+    return value_float
+
+
+def _compact_dict(input_dict: dict) -> dict:
+    return {key_str: value_obj for key_str, value_obj in input_dict.items() if value_obj is not None}
+
+
+def _metric_label_list(index_obj) -> list[str]:
+    label_list: list[str] = []
+    for value_obj in index_obj:
+        if pd.isna(value_obj):
+            continue
+        label_list.append(str(value_obj))
+    return label_list
+
+
+def _default_metric_row_ser(metric_df: pd.DataFrame) -> pd.Series | None:
+    if metric_df is None or len(metric_df) == 0:
+        return None
+    default_metric_df = metric_df[metric_df["Scenario"].astype(str) == "Default"]
+    if len(default_metric_df) > 0:
+        return default_metric_df.iloc[0]
+    return metric_df.iloc[0]
+
+
+def _execution_timing_run_info_dict(
+    execution_timing_result_obj: ExecutionTimingAnalysisResult,
+) -> dict:
+    return {
+        "entity_type": "strategy",
+        "entity_id": execution_timing_result_obj.strategy_name_str,
+        "analysis_type": EXECUTION_TIMING_ANALYZER_ANALYSIS_TYPE_STR,
+        "parameters": {
+            "order_generation_mode": execution_timing_result_obj.order_generation_mode_str,
+            "risk_model": execution_timing_result_obj.risk_model_str,
+            "default_entry_timing": execution_timing_result_obj.default_entry_timing_str,
+            "default_exit_timing": execution_timing_result_obj.default_exit_timing_str,
+            "entry_timing_labels": _metric_label_list(
+                execution_timing_result_obj.ann_return_matrix_df.index
+            ),
+            "exit_timing_labels": _metric_label_list(
+                execution_timing_result_obj.ann_return_matrix_df.columns
+            ),
+        },
+    }
+
+
+def _execution_timing_summary_dict(
+    execution_timing_result_obj: ExecutionTimingAnalysisResult,
+) -> dict:
+    default_metric_ser = _default_metric_row_ser(execution_timing_result_obj.metric_df)
+    if default_metric_ser is None:
+        return {}
+    return _compact_dict(
+        {
+            "ann_return_pct": _json_float(default_metric_ser.get("Ann. Return [%]")),
+            "sharpe": _json_float(default_metric_ser.get("Sharpe")),
+            "max_drawdown_pct": _json_float(default_metric_ser.get("Max Drawdown [%]")),
+            "cvar_5_pct": _json_float(default_metric_ser.get("CVaR 5% [%]")),
+            "risk_label": str(default_metric_ser.get("Risk Label"))
+            if pd.notna(default_metric_ser.get("Risk Label"))
+            else None,
+        }
+    )
+
+
+def _write_json_file(output_path: Path, payload_dict: dict) -> None:
+    output_path.write_text(
+        json.dumps(payload_dict, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+
 def save_execution_timing_results(
     execution_timing_result_obj: ExecutionTimingAnalysisResult,
     output_dir_str: str = "results",
 ) -> Path:
-    timestamp_str = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    output_path = (
-        Path(output_dir_str)
-        / "execution_timing"
-        / execution_timing_result_obj.strategy_name_str
-        / timestamp_str
+    output_path = build_research_output_path(
+        output_dir_str,
+        "strategy",
+        execution_timing_result_obj.strategy_name_str,
+        EXECUTION_TIMING_ANALYZER_ANALYSIS_TYPE_STR,
     )
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -744,7 +831,7 @@ def save_execution_timing_results(
     execution_timing_result_obj.max_drawdown_matrix_df.to_csv(output_path / "max_drawdown_matrix.csv")
 
     metadata_dict = {
-        "artifact_type": "execution_timing_analysis",
+        "artifact_type": EXECUTION_TIMING_ANALYZER_ANALYSIS_TYPE_STR,
         "saved_at": datetime.now().isoformat(timespec="seconds"),
         "strategy_name_str": execution_timing_result_obj.strategy_name_str,
         "order_generation_mode_str": execution_timing_result_obj.order_generation_mode_str,
@@ -758,9 +845,14 @@ def save_execution_timing_results(
             execution_timing_result_obj.order_generation_mode_str,
         ),
     }
-    (output_path / "metadata.json").write_text(
-        json.dumps(metadata_dict, indent=2),
-        encoding="utf-8",
+    _write_json_file(output_path / "metadata.json", metadata_dict)
+    _write_json_file(
+        output_path / _RUN_INFO_FILENAME_STR,
+        _execution_timing_run_info_dict(execution_timing_result_obj),
+    )
+    _write_json_file(
+        output_path / _SUMMARY_FILENAME_STR,
+        _execution_timing_summary_dict(execution_timing_result_obj),
     )
 
     html_str = f"""<!DOCTYPE html>
@@ -768,7 +860,7 @@ def save_execution_timing_results(
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{html.escape(execution_timing_result_obj.strategy_name_str)} Execution Timing Analysis</title>
+<title>{html.escape(execution_timing_result_obj.strategy_name_str)} Execution Timing Analyzer</title>
 <style>
 body {{ font-family: Arial, sans-serif; margin: 32px; color: #17202a; }}
 table {{ border-collapse: collapse; width: 100%; font-size: 13px; }}
@@ -785,7 +877,7 @@ th {{ background: #f3f6fa; }}
 </style>
 </head>
 <body>
-<h1>{html.escape(execution_timing_result_obj.strategy_name_str)} Execution Timing Analysis</h1>
+<h1>{html.escape(execution_timing_result_obj.strategy_name_str)} Execution Timing Analyzer</h1>
 <p class="note">
 This report is a research diagnostic. The default execution path is highlighted. MOC and funding labels mark cells
 that need explicit live execution handling before they should be treated as live-clean.
@@ -797,7 +889,7 @@ that need explicit live execution handling before they should be treated as live
     return output_path
 
 
-class ExecutionTimingAnalysis:
+class ExecutionTimingAnalyzer:
     """
     Run an entry/exit fill timing matrix for a strategy factory.
 
@@ -1217,7 +1309,7 @@ class ExecutionTimingAnalysis:
         for sequence_int, order_obj in enumerate(order_list):
             if not isinstance(order_obj, MarketOrder):
                 raise ValueError(
-                    "ExecutionTimingAnalysis v1 supports market orders only. "
+                    "ExecutionTimingAnalyzer v1 supports market orders only. "
                     f"Found {order_obj.__class__.__name__} for {order_obj.asset}."
                 )
 
@@ -1286,9 +1378,15 @@ class ExecutionTimingAnalysis:
         )
 
 
+ExecutionTimingAnalysis = ExecutionTimingAnalyzer
+
+
 __all__ = [
     "ExecutionTimingAnalysis",
+    "ExecutionTimingAnalyzer",
     "ExecutionTimingAnalysisResult",
+    "ExecutionTimingAnalyzerResult",
+    "EXECUTION_TIMING_ANALYZER_ANALYSIS_TYPE_STR",
     "DEFAULT_SIGNAL_CLOSE_TIMING_MODE_TUPLE",
     "DEFAULT_TAA_REBALANCE_TIMING_MODE_TUPLE",
     "SUPPORTED_ORDER_GENERATION_MODE_TUPLE",

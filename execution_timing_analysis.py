@@ -1,5 +1,5 @@
 """
-CLI runner for ExecutionTimingAnalysis.
+CLI runner for ExecutionTimingAnalyzer.
 
 Formula
 -------
@@ -28,7 +28,7 @@ from typing import Any
 
 import pandas as pd
 
-from alpha.engine.execution_timing import ExecutionTimingAnalysis, SUPPORTED_TIMING_MODE_TUPLE
+from alpha.engine.execution_timing import ExecutionTimingAnalyzer, SUPPORTED_TIMING_MODE_TUPLE
 
 
 def _timing_mode_tuple(
@@ -140,7 +140,7 @@ def main() -> None:
 
     strategy_input_dict = _load_strategy_input_dict(args.strategy_module_str)
 
-    timing_result_obj = ExecutionTimingAnalysis(
+    timing_result_obj = ExecutionTimingAnalyzer(
         strategy_factory_fn=strategy_input_dict["strategy_factory_fn"],
         pricing_data_df=strategy_input_dict["pricing_data_df"],
         calendar_idx=strategy_input_dict["calendar_idx"],

@@ -1812,6 +1812,241 @@ def _render_serve_tick_summary_str(tick_detail_dict: dict[str, object]) -> str:
     return runner._render_tick_detail_str(tick_detail_dict)
 
 
+def _clone_parsed_args_for_pod_obj(
+    parsed_args_obj: argparse.Namespace,
+    pod_id_str: str,
+    command_name_str: str | None = None,
+) -> argparse.Namespace:
+    cloned_args_obj = argparse.Namespace(**vars(parsed_args_obj))
+    cloned_args_obj.pod_id_str = pod_id_str
+    if command_name_str is not None:
+        cloned_args_obj.command_name_str = command_name_str
+    return cloned_args_obj
+
+
+def _should_run_incubation_fanout_bool(parsed_args_obj: argparse.Namespace) -> bool:
+    return (
+        parsed_args_obj.env_mode_str == "incubation"
+        and parsed_args_obj.db_path_str is None
+        and parsed_args_obj.pod_id_str is None
+    )
+
+
+def _execute_scheduler_command_detail_dict(
+    parsed_args_obj: argparse.Namespace,
+    state_store_obj: LiveStateStore,
+    as_of_ts: datetime,
+) -> dict[str, object]:
+    broker_adapter_obj = None
+    if parsed_args_obj.command_name_str == "run_once":
+        return run_once(
+            state_store_obj=state_store_obj,
+            broker_adapter_obj=broker_adapter_obj,
+            as_of_ts=as_of_ts,
+            releases_root_path_str=parsed_args_obj.releases_root_path_str,
+            env_mode_str=parsed_args_obj.env_mode_str,
+            reconcile_grace_seconds_int=parsed_args_obj.reconcile_grace_seconds_int,
+            idle_max_sleep_seconds_int=parsed_args_obj.idle_max_sleep_seconds_int,
+            log_path_str=parsed_args_obj.log_path_str,
+            broker_host_str=parsed_args_obj.broker_host_str,
+            broker_port_int=parsed_args_obj.broker_port_int,
+            broker_client_id_int=parsed_args_obj.broker_client_id_int,
+            broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
+            pod_id_str=parsed_args_obj.pod_id_str,
+        )
+    if parsed_args_obj.command_name_str == "compare_reference":
+        return runner.get_compare_reference_summary(
+            state_store_obj=state_store_obj,
+            as_of_ts=as_of_ts,
+            releases_root_path_str=parsed_args_obj.releases_root_path_str,
+            env_mode_str=parsed_args_obj.env_mode_str,
+            pod_id_str=parsed_args_obj.pod_id_str,
+            reference_strategy_pickle_path_str=parsed_args_obj.reference_strategy_pickle_path_str,
+            html_output_bool=parsed_args_obj.html_output_bool,
+            output_dir_str=parsed_args_obj.output_dir_str,
+        )
+    if parsed_args_obj.command_name_str == "eod_snapshot":
+        return runner.eod_snapshot(
+            state_store_obj=state_store_obj,
+            broker_adapter_obj=broker_adapter_obj,
+            as_of_ts=as_of_ts,
+            env_mode_str=parsed_args_obj.env_mode_str,
+            releases_root_path_str=parsed_args_obj.releases_root_path_str,
+            log_path_str=parsed_args_obj.log_path_str,
+            broker_host_str=parsed_args_obj.broker_host_str,
+            broker_port_int=parsed_args_obj.broker_port_int,
+            broker_client_id_int=parsed_args_obj.broker_client_id_int,
+            broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
+            pod_id_str=parsed_args_obj.pod_id_str,
+        )
+    return next_due(
+        state_store_obj=state_store_obj,
+        as_of_ts=as_of_ts,
+        releases_root_path_str=parsed_args_obj.releases_root_path_str,
+        env_mode_str=parsed_args_obj.env_mode_str,
+        reconcile_grace_seconds_int=parsed_args_obj.reconcile_grace_seconds_int,
+        idle_max_sleep_seconds_int=parsed_args_obj.idle_max_sleep_seconds_int,
+        pod_id_str=parsed_args_obj.pod_id_str,
+    )
+
+
+def _run_incubation_scheduler_fanout_detail_dict(
+    parsed_args_obj: argparse.Namespace,
+    as_of_ts: datetime,
+    command_name_str: str | None = None,
+) -> dict[str, object]:
+    effective_command_name_str = command_name_str or parsed_args_obj.command_name_str
+    enabled_release_list = runner._load_enabled_release_list_for_mode(
+        releases_root_path_str=parsed_args_obj.releases_root_path_str,
+        env_mode_str="incubation",
+    )
+    pod_result_dict_list: list[dict[str, object]] = []
+
+    for release_obj in enabled_release_list:
+        pod_args_obj = _clone_parsed_args_for_pod_obj(
+            parsed_args_obj,
+            release_obj.pod_id_str,
+            command_name_str=effective_command_name_str,
+        )
+        pod_db_path_str = runner._resolve_db_path_for_mode_str(
+            db_path_str=None,
+            env_mode_str="incubation",
+            pod_id_str=release_obj.pod_id_str,
+        )
+        try:
+            state_store_obj = LiveStateStore(pod_db_path_str)
+            detail_dict = _execute_scheduler_command_detail_dict(
+                parsed_args_obj=pod_args_obj,
+                state_store_obj=state_store_obj,
+                as_of_ts=as_of_ts,
+            )
+            pod_result_dict_list.append(
+                {
+                    "pod_id_str": release_obj.pod_id_str,
+                    "db_path_str": pod_db_path_str,
+                    "status_str": "completed",
+                    "detail_dict": detail_dict,
+                }
+            )
+        except Exception as exc:  # pragma: no cover - CLI safety.
+            log_event(
+                "scheduler_incubation_fanout_pod_failed",
+                {
+                    "command_name_str": effective_command_name_str,
+                    "pod_id_str": release_obj.pod_id_str,
+                    "db_path_str": pod_db_path_str,
+                    "as_of_timestamp_str": as_of_ts.isoformat(),
+                    "error_str": str(exc),
+                },
+                log_path_str=parsed_args_obj.log_path_str,
+            )
+            pod_result_dict_list.append(
+                {
+                    "pod_id_str": release_obj.pod_id_str,
+                    "db_path_str": pod_db_path_str,
+                    "status_str": "failed",
+                    "error_str": str(exc),
+                }
+            )
+
+    failed_count_int = sum(1 for result_dict in pod_result_dict_list if result_dict["status_str"] == "failed")
+    completed_count_int = len(pod_result_dict_list) - failed_count_int
+    return {
+        "fanout_bool": True,
+        "command_name_str": effective_command_name_str,
+        "mode_str": "incubation",
+        "as_of_timestamp_str": as_of_ts.isoformat(),
+        "pod_count_int": len(pod_result_dict_list),
+        "completed_count_int": completed_count_int,
+        "failed_count_int": failed_count_int,
+        "pod_result_dict_list": pod_result_dict_list,
+    }
+
+
+def _render_scheduler_fanout_output_str(detail_dict: dict[str, object]) -> str:
+    pod_result_dict_list = list(detail_dict.get("pod_result_dict_list", []))
+    line_list = [
+        "Incubation Scheduler Fan-out",
+        f"- Command: {detail_dict.get('command_name_str')}",
+        f"- Pods: {int(detail_dict.get('completed_count_int', 0))} completed, "
+        f"{int(detail_dict.get('failed_count_int', 0))} failed",
+    ]
+    if len(pod_result_dict_list) == 0:
+        line_list.append("- No enabled incubation pods found.")
+        return "\n".join(line_list)
+    for pod_result_dict in pod_result_dict_list:
+        line_list.extend(
+            [
+                "",
+                f"Pod: {pod_result_dict['pod_id_str']}",
+                f"- DB path: {pod_result_dict['db_path_str']}",
+                f"- Status: {pod_result_dict['status_str']}",
+            ]
+        )
+        if pod_result_dict.get("status_str") == "failed":
+            line_list.append(f"- Error: {pod_result_dict.get('error_str')}")
+            continue
+        detail_payload_dict = dict(pod_result_dict.get("detail_dict") or {})
+        line_list.append(
+            "- Decision: "
+            f"due_now={bool(detail_payload_dict.get('due_now_bool'))} | "
+            f"phase={detail_payload_dict.get('next_phase_str') or 'none'} | "
+            f"reason={detail_payload_dict.get('reason_code_str') or 'none'}"
+        )
+    return "\n".join(line_list)
+
+
+def _build_scheduler_fanout_sleep_seconds_float(
+    detail_dict: dict[str, object],
+    as_of_ts: datetime,
+    active_poll_seconds_int: int,
+    idle_max_sleep_seconds_int: int,
+    error_retry_seconds_int: int,
+) -> float:
+    if int(detail_dict.get("failed_count_int", 0)) > 0:
+        return float(error_retry_seconds_int)
+    next_due_timestamp_list: list[datetime] = []
+    for pod_result_dict in list(detail_dict.get("pod_result_dict_list", [])):
+        detail_payload_dict = dict(pod_result_dict.get("detail_dict") or {})
+        if bool(detail_payload_dict.get("tick_invoked_bool")) or bool(detail_payload_dict.get("active_poll_bool")):
+            return float(active_poll_seconds_int)
+        next_due_timestamp_str = detail_payload_dict.get("next_due_timestamp_str")
+        if next_due_timestamp_str is not None:
+            next_due_timestamp_list.append(datetime.fromisoformat(str(next_due_timestamp_str)))
+    if len(next_due_timestamp_list) == 0:
+        return float(idle_max_sleep_seconds_int)
+    next_due_ts = min(next_due_timestamp_list)
+    return max(0.0, min(float(idle_max_sleep_seconds_int), (next_due_ts - as_of_ts).total_seconds()))
+
+
+def serve_incubation_fanout(parsed_args_obj: argparse.Namespace) -> None:
+    runner._load_enabled_release_list_for_mode(
+        releases_root_path_str=parsed_args_obj.releases_root_path_str,
+        env_mode_str="incubation",
+    )
+    print(
+        "Incubation scheduler fan-out started "
+        f"(mode=incubation, pod=all, active_poll={int(parsed_args_obj.active_poll_seconds_int)}s).",
+        flush=True,
+    )
+    while True:
+        as_of_ts = datetime.now(tz=UTC)
+        detail_dict = _run_incubation_scheduler_fanout_detail_dict(
+            parsed_args_obj=parsed_args_obj,
+            as_of_ts=as_of_ts,
+            command_name_str="run_once",
+        )
+        print(_render_scheduler_fanout_output_str(detail_dict), flush=True)
+        sleep_seconds_float = _build_scheduler_fanout_sleep_seconds_float(
+            detail_dict=detail_dict,
+            as_of_ts=as_of_ts,
+            active_poll_seconds_int=parsed_args_obj.active_poll_seconds_int,
+            idle_max_sleep_seconds_int=parsed_args_obj.idle_max_sleep_seconds_int,
+            error_retry_seconds_int=parsed_args_obj.error_retry_seconds_int,
+        )
+        time.sleep(sleep_seconds_float)
+
+
 def next_due(
     state_store_obj: LiveStateStore,
     as_of_ts: datetime,
@@ -2270,6 +2505,21 @@ def main(argv_list: list[str] | None = None) -> int:
         default=DEFAULT_ERROR_RETRY_SECONDS_INT,
     )
     parsed_args_obj = parser_obj.parse_args(argv_list)
+    as_of_ts = _parse_as_of_timestamp_ts(parsed_args_obj.as_of_timestamp_str)
+
+    if _should_run_incubation_fanout_bool(parsed_args_obj):
+        if parsed_args_obj.command_name_str == "serve":
+            serve_incubation_fanout(parsed_args_obj)
+            return 0
+        detail_dict = _run_incubation_scheduler_fanout_detail_dict(
+            parsed_args_obj=parsed_args_obj,
+            as_of_ts=as_of_ts,
+        )
+        if parsed_args_obj.json_output_bool:
+            print(json.dumps(detail_dict, indent=2, sort_keys=True))
+        else:
+            print(_render_scheduler_fanout_output_str(detail_dict))
+        return 0
 
     db_path_str = _resolve_db_path_for_mode_str(
         db_path_str=parsed_args_obj.db_path_str,
@@ -2278,7 +2528,6 @@ def main(argv_list: list[str] | None = None) -> int:
     )
     state_store_obj = LiveStateStore(db_path_str)
     broker_adapter_obj = None
-    as_of_ts = _parse_as_of_timestamp_ts(parsed_args_obj.as_of_timestamp_str)
 
     if parsed_args_obj.command_name_str == "serve":
         serve(
@@ -2299,57 +2548,11 @@ def main(argv_list: list[str] | None = None) -> int:
         )
         return 0
 
-    if parsed_args_obj.command_name_str == "run_once":
-        detail_dict = run_once(
-            state_store_obj=state_store_obj,
-            broker_adapter_obj=broker_adapter_obj,
-            as_of_ts=as_of_ts,
-            releases_root_path_str=parsed_args_obj.releases_root_path_str,
-            env_mode_str=parsed_args_obj.env_mode_str,
-            reconcile_grace_seconds_int=parsed_args_obj.reconcile_grace_seconds_int,
-            idle_max_sleep_seconds_int=parsed_args_obj.idle_max_sleep_seconds_int,
-            log_path_str=parsed_args_obj.log_path_str,
-            broker_host_str=parsed_args_obj.broker_host_str,
-            broker_port_int=parsed_args_obj.broker_port_int,
-            broker_client_id_int=parsed_args_obj.broker_client_id_int,
-            broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
-            pod_id_str=parsed_args_obj.pod_id_str,
-        )
-    elif parsed_args_obj.command_name_str == "compare_reference":
-        detail_dict = runner.get_compare_reference_summary(
-            state_store_obj=state_store_obj,
-            as_of_ts=as_of_ts,
-            releases_root_path_str=parsed_args_obj.releases_root_path_str,
-            env_mode_str=parsed_args_obj.env_mode_str,
-            pod_id_str=parsed_args_obj.pod_id_str,
-            reference_strategy_pickle_path_str=parsed_args_obj.reference_strategy_pickle_path_str,
-            html_output_bool=parsed_args_obj.html_output_bool,
-            output_dir_str=parsed_args_obj.output_dir_str,
-        )
-    elif parsed_args_obj.command_name_str == "eod_snapshot":
-        detail_dict = runner.eod_snapshot(
-            state_store_obj=state_store_obj,
-            broker_adapter_obj=broker_adapter_obj,
-            as_of_ts=as_of_ts,
-            env_mode_str=parsed_args_obj.env_mode_str,
-            releases_root_path_str=parsed_args_obj.releases_root_path_str,
-            log_path_str=parsed_args_obj.log_path_str,
-            broker_host_str=parsed_args_obj.broker_host_str,
-            broker_port_int=parsed_args_obj.broker_port_int,
-            broker_client_id_int=parsed_args_obj.broker_client_id_int,
-            broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
-            pod_id_str=parsed_args_obj.pod_id_str,
-        )
-    else:
-        detail_dict = next_due(
-            state_store_obj=state_store_obj,
-            as_of_ts=as_of_ts,
-            releases_root_path_str=parsed_args_obj.releases_root_path_str,
-            env_mode_str=parsed_args_obj.env_mode_str,
-            reconcile_grace_seconds_int=parsed_args_obj.reconcile_grace_seconds_int,
-            idle_max_sleep_seconds_int=parsed_args_obj.idle_max_sleep_seconds_int,
-            pod_id_str=parsed_args_obj.pod_id_str,
-        )
+    detail_dict = _execute_scheduler_command_detail_dict(
+        parsed_args_obj=parsed_args_obj,
+        state_store_obj=state_store_obj,
+        as_of_ts=as_of_ts,
+    )
 
     if parsed_args_obj.json_output_bool:
         print(json.dumps(detail_dict, indent=2, sort_keys=True))

@@ -62,6 +62,7 @@ import pandas as pd
 from IPython.display import display
 
 from alpha.engine.backtest import run_daily
+from alpha.engine.friction_analysis import FrictionAnalysis
 from alpha.engine.report import save_results
 from alpha.engine.strategy import Strategy
 from data.norgate_loader import build_index_constituent_matrix, load_raw_prices
@@ -850,6 +851,97 @@ def run_variant(
         save_results(strategy_obj, output_dir=output_dir_str)
 
     return strategy_obj
+
+
+def build_friction_analysis_inputs(
+    show_display_bool: bool = False,
+    backtest_start_date_str: str | None = None,
+    capital_base_float: float | None = None,
+    end_date_str: str | None = None,
+) -> dict[str, object]:
+    config_obj = DEFAULT_CONFIG
+    if (
+        backtest_start_date_str is not None
+        or capital_base_float is not None
+        or end_date_str is not None
+    ):
+        config_obj = replace(
+            DEFAULT_CONFIG,
+            backtest_start_date_str=(
+                DEFAULT_CONFIG.backtest_start_date_str
+                if backtest_start_date_str is None
+                else backtest_start_date_str
+            ),
+            capital_base_float=(
+                DEFAULT_CONFIG.capital_base_float
+                if capital_base_float is None
+                else float(capital_base_float)
+            ),
+            end_date_str=end_date_str,
+        )
+    pricing_data_df, universe_df, rebalance_schedule_df = get_atr_normalized_ndx_data(config_obj)
+
+    strategy_obj = AtrNormalizedNdxStrategy(
+        name="strategy_mo_atr_normalized_ndx",
+        benchmarks=[config_obj.regime_symbol_str],
+        rebalance_schedule_df=rebalance_schedule_df,
+        regime_symbol_str=config_obj.regime_symbol_str,
+        capital_base=config_obj.capital_base_float,
+        slippage=config_obj.slippage_float,
+        commission_per_share=config_obj.commission_per_share_float,
+        commission_minimum=config_obj.commission_minimum_float,
+        lookback_month_int=config_obj.lookback_month_int,
+        index_trend_window_int=config_obj.index_trend_window_int,
+        stock_trend_window_int=config_obj.stock_trend_window_int,
+        max_positions_int=config_obj.max_positions_int,
+    )
+    strategy_obj.universe_df = universe_df
+
+    # *** CRITICAL *** FrictionAnalysis must assess the same completed order
+    # ledger as the deployment-reference NDX momentum backtest. Keep pre-start
+    # history for monthly features, but execute only on the configured calendar.
+    calendar_idx = pricing_data_df.index[
+        pricing_data_df.index >= pd.Timestamp(config_obj.backtest_start_date_str)
+    ]
+    run_daily(
+        strategy_obj,
+        pricing_data_df,
+        calendar=calendar_idx,
+        show_progress=show_display_bool,
+        show_signal_progress_bool=show_display_bool,
+        audit_override_bool=None,
+    )
+
+    strategy_obj.universe_df = None
+    return {
+        "strategy_obj": strategy_obj,
+        "pricing_data_df": pricing_data_df,
+        "execution_policy_str": "MOO",
+    }
+
+
+def run_friction_analysis(
+    save_results_bool: bool = True,
+    output_dir_str: str = "results",
+    show_display_bool: bool = False,
+    backtest_start_date_str: str | None = None,
+    capital_base_float: float | None = None,
+    end_date_str: str | None = None,
+):
+    friction_input_dict = build_friction_analysis_inputs(
+        show_display_bool=show_display_bool,
+        backtest_start_date_str=backtest_start_date_str,
+        capital_base_float=capital_base_float,
+        end_date_str=end_date_str,
+    )
+    friction_analysis_obj = FrictionAnalysis(
+        strategy_obj=friction_input_dict["strategy_obj"],
+        pricing_data_df=friction_input_dict["pricing_data_df"],
+        execution_policy_str=friction_input_dict["execution_policy_str"],
+        output_dir_str=output_dir_str,
+        save_output_bool=save_results_bool,
+    )
+    return friction_analysis_obj.run()
 
 
 if __name__ == "__main__":

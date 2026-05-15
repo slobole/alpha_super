@@ -1,0 +1,25 @@
+name_str: CurrentBookFresh
+capital_base_float: 10000.0
+backtest_start_date_str: "2004-01-01"
+end_date_str: null
+allocation_policy_str: fixed
+max_workers_int: null
+rebalance: null
+save_pod_artifacts_bool: true
+
+pods:
+  - pod_id_str: pod_dv2
+    strategy_import_str: strategies.dv2.strategy_mr_dv2:DVO2Strategy
+    weight_float: 0.25
+
+  - pod_id_str: pod_qpi
+    strategy_import_str: strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy
+    weight_float: 0.25
+
+  - pod_id_str: pod_taa
+    strategy_import_str: strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash
+    weight_float: 0.25
+
+  - pod_id_str: pod_ndx_mo
+    strategy_import_str: strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy
+    weight_float: 0.25

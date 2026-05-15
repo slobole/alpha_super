@@ -28,9 +28,14 @@ from alpha.engine.theme import (
 _MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 _METADATA_FILENAME = 'metadata.json'
+_RUN_INFO_FILENAME = 'run_info.json'
+_SUMMARY_FILENAME = 'summary.json'
 _TRANSACTION_CSV_FILENAME = 'transactions.csv'
 _CRISIS_METRICS_CSV_FILENAME = 'crisis_metrics.csv'
 _CRISIS_PATHS_CSV_FILENAME = 'crisis_paths.csv'
+_TAIL_SUMMARY_CSV_FILENAME = 'tail_summary.csv'
+_TAIL_CONTRIBUTION_CSV_FILENAME = 'tail_contribution.csv'
+_TAIL_RETURNS_CSV_FILENAME = 'tail_returns.csv'
 _DAILY_RETURN_HISTOGRAM_BIN_COUNT_INT = 60
 _TRADE_RETURN_HISTOGRAM_BIN_COUNT_INT = 60
 _FALLBACK_ASSET_SET = frozenset({'SPY', 'SSO', 'QQQ', 'QLD', 'TQQQ', 'UPRO'})
@@ -38,11 +43,34 @@ _WEIGHT_STACK_EDGE_COLOR_STR = '#101418'
 _FONT_HEAD_HTML_STR = build_report_font_head_html()
 
 
+def build_research_output_path(
+    output_dir: str | Path,
+    entity_type_str: str,
+    entity_id_str: str,
+    analysis_type_str: str,
+    timestamp_str: str | None = None,
+) -> Path:
+    if timestamp_str is None:
+        timestamp_str = datetime.now().strftime('%Y-%m-%d_%H%M%S')
+    return (
+        Path(output_dir)
+        / 'research'
+        / str(entity_type_str)
+        / str(entity_id_str)
+        / str(analysis_type_str)
+        / str(timestamp_str)
+    )
+
+
 def _json_default(value):
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, pd.Timestamp):
         return value.isoformat()
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
     return value
 
 
@@ -63,11 +91,214 @@ def _write_metadata(metadata_path: Path, metadata_dict: dict):
     )
 
 
+def _compact_dict(raw_dict: dict) -> dict:
+    return {
+        key_str: value_obj
+        for key_str, value_obj in raw_dict.items()
+        if value_obj is not None
+    }
+
+
+def _json_float(value_obj):
+    if value_obj is None:
+        return None
+    try:
+        value_float = float(value_obj)
+    except (TypeError, ValueError):
+        return None
+    if np.isnan(value_float):
+        return None
+    return value_float
+
+
+def _json_date_str(value_obj) -> str | None:
+    if value_obj is None:
+        return None
+    try:
+        timestamp_obj = pd.Timestamp(value_obj)
+    except (TypeError, ValueError):
+        return None
+    if pd.isna(timestamp_obj):
+        return None
+    return timestamp_obj.date().isoformat()
+
+
+def _first_summary_value(summary_df: pd.DataFrame | None, metric_name_list: list[str]):
+    if summary_df is None:
+        return None
+    if len(summary_df) == 0:
+        return None
+    for metric_name_str in metric_name_list:
+        if metric_name_str not in summary_df.index:
+            continue
+        value_obj = summary_df.loc[metric_name_str]
+        if isinstance(value_obj, pd.Series):
+            for candidate_obj in value_obj:
+                if pd.notna(candidate_obj):
+                    return candidate_obj
+            continue
+        if pd.notna(value_obj):
+            return value_obj
+    return None
+
+
+def _trade_count_int(summary_trades_df: pd.DataFrame | None, fallback_trade_df: pd.DataFrame | None = None):
+    if summary_trades_df is not None and '# Trades' in summary_trades_df.index:
+        value_obj = _first_summary_value(summary_trades_df, ['# Trades'])
+        value_float = _json_float(value_obj)
+        if value_float is not None:
+            return int(value_float)
+    if fallback_trade_df is not None:
+        return int(len(fallback_trade_df))
+    return None
+
+
+def _result_window_dict(result_df: pd.DataFrame | None) -> dict:
+    if result_df is None or len(result_df) == 0:
+        return {}
+    return {
+        'start_date': _json_date_str(result_df.index.min()),
+        'end_date': _json_date_str(result_df.index.max()),
+    }
+
+
+def _summary_metrics_dict(result_obj) -> dict:
+    summary_df = getattr(result_obj, 'summary', None)
+    result_df = getattr(result_obj, 'results', None)
+    final_equity_float = _json_float(_first_summary_value(summary_df, ['Final [$]']))
+    if final_equity_float is None and result_df is not None and 'total_value' in result_df.columns and len(result_df) > 0:
+        final_equity_float = _json_float(result_df['total_value'].iloc[-1])
+
+    return _compact_dict(
+        {
+            'final_equity': final_equity_float,
+            'ann_return_pct': _json_float(_first_summary_value(summary_df, ['Return (Ann.) [%]'])),
+            'sharpe': _json_float(_first_summary_value(summary_df, ['Sharpe Ratio'])),
+            'max_drawdown_pct': _json_float(_first_summary_value(summary_df, ['Max. Drawdown [%]'])),
+            'trade_count': _trade_count_int(
+                getattr(result_obj, 'summary_trades', None),
+                getattr(result_obj, '_trades', None),
+            ),
+        }
+    )
+
+
+def _strategy_run_info_dict(strategy) -> dict:
+    result_df = getattr(strategy, 'results', None)
+    summary_df = getattr(strategy, 'summary', None)
+    window_dict = {
+        'start_date': _json_date_str(_first_summary_value(summary_df, ['Start'])),
+        'end_date': _json_date_str(_first_summary_value(summary_df, ['End'])),
+    }
+    window_dict.update({
+        key_str: value_obj
+        for key_str, value_obj in _result_window_dict(result_df).items()
+        if window_dict.get(key_str) is None
+    })
+    return {
+        'entity_type': 'strategy',
+        'entity_id': strategy.name,
+        'analysis_type': 'vanilla_backtest',
+        'parameters': _compact_dict(
+            {
+                'capital': _json_float(getattr(strategy, '_capital_base', None)),
+                **window_dict,
+            }
+        ),
+    }
+
+
+def _portfolio_run_info_dict(portfolio) -> dict:
+    pod_info_list = []
+    weight_list = list(getattr(portfolio, '_weights', []))
+    for position_int, pod_info_dict in enumerate(getattr(portfolio, 'pod_info_list', []) or []):
+        weight_float = pod_info_dict.get('weight_float')
+        if weight_float is None and position_int < len(weight_list):
+            weight_float = weight_list[position_int]
+        pod_info_list.append(
+            _compact_dict(
+                {
+                    'pod_id': pod_info_dict.get('pod_id_str'),
+                    'strategy': pod_info_dict.get('strategy_name'),
+                    'weight': _json_float(weight_float),
+                }
+            )
+        )
+
+    return {
+        'entity_type': 'portfolio',
+        'entity_id': portfolio.name,
+        'analysis_type': 'vanilla_backtest',
+        'parameters': _compact_dict(
+            {
+                'capital': _json_float(getattr(portfolio, '_capital_base', None)),
+                'start_date': _json_date_str(getattr(portfolio, '_common_start', None)),
+                'end_date': _json_date_str(getattr(portfolio, '_common_end', None)),
+                'config_path': getattr(portfolio, 'source_config_path', None),
+                'pods': pod_info_list if len(pod_info_list) > 0 else None,
+            }
+        ),
+    }
+
+
+def _crisis_run_info_dict(crisis_replay_result) -> dict:
+    return {
+        'entity_type': 'strategy',
+        'entity_id': crisis_replay_result.strategy_key_str,
+        'analysis_type': 'stress_analysis',
+        'parameters': _compact_dict(
+            {
+                'stress_type': 'crisis_replay',
+                'capital': _json_float(crisis_replay_result.capital_base_float),
+                'crisis_windows': [
+                    {
+                        'name': crisis_period_config.crisis_name_str,
+                        'start_date': crisis_period_config.start_date_str,
+                        'end_date': crisis_period_config.end_date_str,
+                    }
+                    for crisis_period_config in crisis_replay_result.crisis_period_config_list
+                ],
+            }
+        ),
+    }
+
+
+def _crisis_summary_dict(crisis_replay_result) -> dict:
+    metric_df = getattr(crisis_replay_result, 'crisis_metric_df', pd.DataFrame())
+    summary_dict = {'crisis_count': int(len(metric_df))}
+    if metric_df is not None and len(metric_df) > 0:
+        if 'strategy_return_pct_float' in metric_df.columns:
+            summary_dict['worst_strategy_return_pct'] = _json_float(
+                metric_df['strategy_return_pct_float'].min()
+            )
+        if 'relative_return_pct_float' in metric_df.columns:
+            summary_dict['worst_relative_return_pct'] = _json_float(
+                metric_df['relative_return_pct_float'].min()
+            )
+    return _compact_dict(summary_dict)
+
+
 def _write_transaction_csv(transaction_df: pd.DataFrame | None, transaction_csv_path: Path):
     if transaction_df is None:
         transaction_df = pd.DataFrame()
     transaction_export_df = transaction_df.copy()
     transaction_export_df.to_csv(transaction_csv_path, index=False, date_format='%Y-%m-%d')
+
+
+def _write_portfolio_tail_csvs(portfolio, output_path: Path):
+    tail_summary_df = getattr(portfolio, 'tail_summary_df', pd.DataFrame())
+    tail_contribution_df = getattr(portfolio, 'tail_contribution_df', pd.DataFrame())
+    tail_return_df = getattr(portfolio, 'tail_return_df', pd.DataFrame())
+    if tail_summary_df is None:
+        tail_summary_df = pd.DataFrame()
+    if tail_contribution_df is None:
+        tail_contribution_df = pd.DataFrame()
+    if tail_return_df is None:
+        tail_return_df = pd.DataFrame()
+
+    tail_summary_df.to_csv(output_path / _TAIL_SUMMARY_CSV_FILENAME)
+    tail_contribution_df.to_csv(output_path / _TAIL_CONTRIBUTION_CSV_FILENAME, date_format='%Y-%m-%d')
+    tail_return_df.to_csv(output_path / _TAIL_RETURNS_CSV_FILENAME, date_format='%Y-%m-%d')
 
 
 def _strategy_metadata_dict(strategy, pickle_path: Path) -> dict:
@@ -124,24 +355,29 @@ def _crisis_replay_metadata_dict(crisis_replay_result) -> dict:
     }
 
 
-def save_results(strategy, output_dir='results') -> Path:
+def save_results(strategy, output_dir='results', output_path: str | Path | None = None) -> Path:
     """Save strategy results to a structured folder and generate an HTML report.
 
     Creates:
-        {output_dir}/{strategy.name}/{YYYY-MM-DD_HHMMSS}/
+        {output_dir}/research/strategy/{strategy.name}/vanilla_backtest/{YYYY-MM-DD_HHMMSS}/
             {strategy.name}.pkl
             report.html
             transactions.csv
 
     Returns the output directory path.
     """
-    timestamp = datetime.now().strftime('%Y-%m-%d_%H%M%S')
-    out = Path(output_dir) / strategy.name / timestamp
+    out = (
+        Path(output_path)
+        if output_path is not None
+        else build_research_output_path(output_dir, 'strategy', strategy.name, 'vanilla_backtest')
+    )
     out.mkdir(parents=True, exist_ok=True)
 
     pickle_path = out / f'{strategy.name}.pkl'
     strategy.to_pickle(pickle_path)
     _write_metadata(out / _METADATA_FILENAME, _strategy_metadata_dict(strategy, pickle_path))
+    _write_metadata(out / _RUN_INFO_FILENAME, _strategy_run_info_dict(strategy))
+    _write_metadata(out / _SUMMARY_FILENAME, _summary_metrics_dict(strategy))
 
     buf = io.BytesIO()
     strategy.plot(save_to=buf)
@@ -161,11 +397,17 @@ def save_results(strategy, output_dir='results') -> Path:
 
 def save_crisis_replay_results(crisis_replay_result, output_dir='results') -> Path:
     """Save crisis replay artifacts and generate an HTML report."""
-    timestamp = datetime.now().strftime('%Y-%m-%d_%H%M%S')
-    out = Path(output_dir) / 'crisis_replay' / crisis_replay_result.strategy_key_str / timestamp
+    out = build_research_output_path(
+        output_dir,
+        'strategy',
+        crisis_replay_result.strategy_key_str,
+        'stress_analysis',
+    )
     out.mkdir(parents=True, exist_ok=True)
 
     _write_metadata(out / _METADATA_FILENAME, _crisis_replay_metadata_dict(crisis_replay_result))
+    _write_metadata(out / _RUN_INFO_FILENAME, _crisis_run_info_dict(crisis_replay_result))
+    _write_metadata(out / _SUMMARY_FILENAME, _crisis_summary_dict(crisis_replay_result))
     crisis_replay_result.crisis_metric_df.to_csv(
         out / _CRISIS_METRICS_CSV_FILENAME,
         index=False,
@@ -1186,23 +1428,28 @@ def _monthly_returns_html(
 _CSS = build_report_css()
 
 
-def save_portfolio_results(portfolio, output_dir='results') -> Path:
+def save_portfolio_results(portfolio, output_dir='results', output_path: str | Path | None = None) -> Path:
     """Save portfolio results to a structured folder and generate an HTML report.
 
     Creates:
-        {output_dir}/{portfolio.name}/{YYYY-MM-DD_HHMMSS}/
+        {output_dir}/research/portfolio/{portfolio.name}/vanilla_backtest/{YYYY-MM-DD_HHMMSS}/
             {portfolio.name}.pkl
             report.html
 
     Returns the output directory path.
     """
-    timestamp = datetime.now().strftime('%Y-%m-%d_%H%M%S')
-    out = Path(output_dir) / portfolio.name / timestamp
+    out = (
+        Path(output_path)
+        if output_path is not None
+        else build_research_output_path(output_dir, 'portfolio', portfolio.name, 'vanilla_backtest')
+    )
     out.mkdir(parents=True, exist_ok=True)
 
     pickle_path = out / f'{portfolio.name}.pkl'
     portfolio.to_pickle(pickle_path)
     _write_metadata(out / _METADATA_FILENAME, _portfolio_metadata_dict(portfolio, pickle_path))
+    _write_metadata(out / _RUN_INFO_FILENAME, _portfolio_run_info_dict(portfolio))
+    _write_metadata(out / _SUMMARY_FILENAME, _summary_metrics_dict(portfolio))
 
     buf = io.BytesIO()
     portfolio.plot(save_to=buf)
@@ -1212,6 +1459,7 @@ def save_portfolio_results(portfolio, output_dir='results') -> Path:
 
     html = _build_portfolio_html(portfolio, chart_b64)
     (out / 'report.html').write_text(html, encoding='utf-8')
+    _write_portfolio_tail_csvs(portfolio, out)
 
     print(f'Results saved to: {out.resolve()}')
     return out
@@ -1265,6 +1513,120 @@ def _format_correlation_matrix(corr: 'pd.DataFrame') -> str:
             cells.append(f'<td style="{style} text-align:center;">{val:.3f}</td>')
         rows.append('<tr>' + ''.join(cells) + '</tr>')
     return f'<table><thead><tr>{headers}</tr></thead><tbody>{"".join(rows)}</tbody></table>'
+
+
+def _fmt_decimal_pct(value_obj, signed_bool: bool = False) -> str:
+    try:
+        value_float = float(value_obj)
+    except (TypeError, ValueError):
+        return ''
+    if np.isnan(value_float):
+        return ''
+    if signed_bool:
+        return f'{value_float * 100:+.2f}%'
+    return f'{value_float * 100:.2f}%'
+
+
+def _tail_summary_html(tail_summary_df: pd.DataFrame) -> str:
+    if tail_summary_df is None or len(tail_summary_df) == 0:
+        return '<p>No tail summary data available.</p>'
+
+    column_spec_list = [
+        ('average_tail_return_float', 'Avg Tail Ret', True),
+        ('worst_tail_return_float', 'Worst Tail Ret', True),
+        ('negative_tail_day_rate_float', 'Neg Tail Days', False),
+        ('average_tail_contribution_float', 'Avg Contribution', True),
+        ('worst_tail_contribution_float', 'Worst Contribution', True),
+        ('average_loss_contribution_share_float', 'Avg Loss Share', True),
+    ]
+    header_html_str = '<th>Pod</th>' + ''.join(
+        f'<th>{header_str}</th>' for _, header_str, _ in column_spec_list
+    )
+    row_html_list: list[str] = []
+    for pod_name_str, tail_summary_ser in tail_summary_df.iterrows():
+        cell_html_list = [f'<td class="metric">{html.escape(str(pod_name_str))}</td>']
+        for column_name_str, _, signed_bool in column_spec_list:
+            value_obj = tail_summary_ser.get(column_name_str, np.nan)
+            if column_name_str == 'average_loss_contribution_share_float':
+                class_str = _signed_value_class_str(-float(value_obj)) if pd.notna(value_obj) else ''
+            elif column_name_str != 'negative_tail_day_rate_float':
+                class_str = _signed_value_class_str(value_obj)
+            else:
+                class_str = ''
+            class_attr_str = f' class="{class_str}"' if class_str else ''
+            cell_html_list.append(
+                f'<td{class_attr_str}>{_fmt_decimal_pct(value_obj, signed_bool=signed_bool)}</td>'
+            )
+        row_html_list.append('<tr>' + ''.join(cell_html_list) + '</tr>')
+
+    return f'<table><thead><tr>{header_html_str}</tr></thead><tbody>{"".join(row_html_list)}</tbody></table>'
+
+
+def _tail_event_contribution_html(portfolio) -> str:
+    tail_contribution_df = getattr(portfolio, 'tail_contribution_df', pd.DataFrame())
+    if tail_contribution_df is None or len(tail_contribution_df) == 0:
+        return '<p>No tail contribution data available.</p>'
+
+    portfolio_tail_return_ser = portfolio.results.loc[
+        tail_contribution_df.index,
+        'daily_returns',
+    ].astype(float)
+    worst_tail_date_index = portfolio_tail_return_ser.sort_values(kind='mergesort').head(10).index
+
+    header_html_str = '<th>Date</th><th>Portfolio Return</th>' + ''.join(
+        f'<th>{html.escape(str(column_str))}</th>' for column_str in tail_contribution_df.columns
+    )
+    row_html_list: list[str] = []
+    for tail_date_ts in worst_tail_date_index:
+        portfolio_return_float = float(portfolio_tail_return_ser.loc[tail_date_ts])
+        portfolio_class_str = _signed_value_class_str(portfolio_return_float)
+        portfolio_class_attr_str = f' class="{portfolio_class_str}"' if portfolio_class_str else ''
+        cell_html_list = [
+            f'<td>{pd.Timestamp(tail_date_ts).date()}</td>',
+            f'<td{portfolio_class_attr_str}>{_fmt_decimal_pct(portfolio_return_float, signed_bool=True)}</td>',
+        ]
+        for column_str in tail_contribution_df.columns:
+            contribution_float = float(tail_contribution_df.loc[tail_date_ts, column_str])
+            contribution_class_str = _signed_value_class_str(contribution_float)
+            contribution_class_attr_str = f' class="{contribution_class_str}"' if contribution_class_str else ''
+            cell_html_list.append(
+                f'<td{contribution_class_attr_str}>{_fmt_decimal_pct(contribution_float, signed_bool=True)}</td>'
+            )
+        row_html_list.append('<tr>' + ''.join(cell_html_list) + '</tr>')
+
+    return f'<table><thead><tr>{header_html_str}</tr></thead><tbody>{"".join(row_html_list)}</tbody></table>'
+
+
+def _build_tail_risk_html(portfolio) -> str:
+    """Build the portfolio tail-risk diagnostics HTML section."""
+    parts = ['<h2>Tail Risk Diagnostics</h2>']
+    tail_event_date_index = getattr(portfolio, 'tail_event_date_index', pd.DatetimeIndex([]))
+    if len(tail_event_date_index) == 0:
+        parts.append('<p>No realized tail days are available for this portfolio.</p>')
+        return '\n'.join(parts)
+
+    portfolio_tail_return_ser = portfolio.results.loc[tail_event_date_index, 'daily_returns'].astype(float)
+    worst_tail_date_ts = portfolio_tail_return_ser.idxmin()
+    worst_tail_return_float = float(portfolio_tail_return_ser.loc[worst_tail_date_ts])
+    parts.append(
+        '<p>'
+        f'<strong>Tail Days:</strong> {len(tail_event_date_index)} '
+        f'({portfolio._TAIL_FRACTION_FLOAT:.0%} worst realized portfolio-return days). '
+        f'<strong>Worst Tail Date:</strong> {pd.Timestamp(worst_tail_date_ts).date()} '
+        f'({_fmt_decimal_pct(worst_tail_return_float, signed_bool=True)}).'
+        '</p>'
+    )
+
+    tail_correlation_matrix = getattr(portfolio, 'tail_correlation_matrix', pd.DataFrame())
+    if tail_correlation_matrix is not None and len(tail_correlation_matrix) > 0:
+        parts.append('<h3>Tail Correlation Matrix</h3>')
+        parts.append(f'<div class="scroll">{_format_correlation_matrix(tail_correlation_matrix)}</div>')
+
+    parts.append('<h3>Tail Summary By Pod</h3>')
+    parts.append(f'<div class="scroll">{_tail_summary_html(getattr(portfolio, "tail_summary_df", pd.DataFrame()))}</div>')
+    parts.append('<h3>Worst Portfolio Days - Pod Contributions</h3>')
+    parts.append(f'<div class="scroll">{_tail_event_contribution_html(portfolio)}</div>')
+    return '\n'.join(parts)
 
 
 def _build_diagnostics_html(portfolio) -> str:
@@ -1864,6 +2226,7 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
         card_class_str='card-monthly-returns',
     )
     diagnostics_card_html_str = _wrap_card_html(_build_diagnostics_html(portfolio))
+    tail_risk_card_html_str = _wrap_card_html(_build_tail_risk_html(portfolio))
     pod_drift_card_html_str = _wrap_card_html(_portfolio_pod_drift_html(portfolio))
     pooled_trade_stats_card_html_str = _wrap_card_html(
         f'''
@@ -1883,6 +2246,7 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
 {performance_summary_card_html_str}
 {monthly_returns_card_html_str}
 {diagnostics_card_html_str}
+{tail_risk_card_html_str}
 {pod_drift_card_html_str}
 {pooled_trade_stats_card_html_str}
 {pooled_trade_distribution_card_html_str}

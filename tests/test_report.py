@@ -1,5 +1,6 @@
 import unittest
 import tempfile
+import json
 from unittest import mock
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from alpha.engine.report import (
     _ret_color,
     _trade_return_histogram_b64,
     _weight_color_for_asset,
+    save_portfolio_results,
     save_results,
 )
 from alpha.engine.portfolio import Portfolio
@@ -346,13 +348,33 @@ class ReportFormattingTests(unittest.TestCase):
 
             transaction_csv_path = output_path / 'transactions.csv'
             report_html_path = output_path / 'report.html'
+            run_info_path = output_path / 'run_info.json'
+            summary_json_path = output_path / 'summary.json'
+            relative_output_path = output_path.relative_to(Path(temp_dir_str))
+
+            self.assertEqual(relative_output_path.parts[:4], (
+                'research',
+                'strategy',
+                'ReportStrategy',
+                'vanilla_backtest',
+            ))
 
             self.assertTrue(transaction_csv_path.exists())
+            self.assertTrue(run_info_path.exists())
+            self.assertTrue(summary_json_path.exists())
             transaction_df = pd.read_csv(transaction_csv_path)
             self.assertEqual(len(transaction_df), 2)
             self.assertListEqual(list(transaction_df.columns), list(strategy._transactions.columns))
             self.assertEqual(transaction_df.loc[0, 'asset'], 'AAA')
             self.assertEqual(int(transaction_df.loc[1, 'amount']), -5)
+            run_info_dict = json.loads(run_info_path.read_text(encoding='utf-8'))
+            summary_dict = json.loads(summary_json_path.read_text(encoding='utf-8'))
+            self.assertEqual(run_info_dict['entity_type'], 'strategy')
+            self.assertEqual(run_info_dict['entity_id'], 'ReportStrategy')
+            self.assertEqual(run_info_dict['analysis_type'], 'vanilla_backtest')
+            self.assertEqual(run_info_dict['parameters']['capital'], 100_000.0)
+            self.assertEqual(summary_dict['final_equity'], float(strategy.results['total_value'].iloc[-1]))
+            self.assertEqual(summary_dict['trade_count'], 4)
 
             report_html_str = report_html_path.read_text(encoding='utf-8')
             self.assertNotIn('<h2>All Transactions</h2>', report_html_str)
@@ -496,6 +518,64 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertIn('Allocated Sleeve Summary', report_html_str)
         self.assertIn('Standalone Pod Summary', report_html_str)
         self.assertIn('Common Overlap Window', report_html_str)
+
+    def test_build_portfolio_html_includes_tail_risk_diagnostics(self):
+        portfolio = make_portfolio()
+
+        report_html_str = _build_portfolio_html(portfolio, chart_b64='portfolio-chart-b64')
+
+        self.assertIn('<h2>Tail Risk Diagnostics</h2>', report_html_str)
+        self.assertIn('Tail Correlation Matrix', report_html_str)
+        self.assertIn('Tail Summary By Pod', report_html_str)
+        self.assertIn('Worst Portfolio Days - Pod Contributions', report_html_str)
+
+    def test_save_portfolio_results_writes_tail_csv_artifacts(self):
+        portfolio = make_portfolio()
+
+        def write_fake_chart(*, save_to):
+            save_to.write(b'fake-portfolio-chart-bytes')
+
+        portfolio.plot = mock.Mock(side_effect=write_fake_chart)
+        portfolio.to_pickle = mock.Mock(side_effect=lambda path: Path(path).write_bytes(b'portfolio-pickle-bytes'))
+
+        with tempfile.TemporaryDirectory() as temp_dir_str:
+            output_path = save_portfolio_results(portfolio, output_dir=temp_dir_str)
+
+            tail_summary_csv_path = output_path / 'tail_summary.csv'
+            tail_contribution_csv_path = output_path / 'tail_contribution.csv'
+            tail_returns_csv_path = output_path / 'tail_returns.csv'
+            run_info_path = output_path / 'run_info.json'
+            summary_json_path = output_path / 'summary.json'
+            relative_output_path = output_path.relative_to(Path(temp_dir_str))
+
+            self.assertEqual(relative_output_path.parts[:4], (
+                'research',
+                'portfolio',
+                'Portfolio',
+                'vanilla_backtest',
+            ))
+
+            self.assertTrue(tail_summary_csv_path.exists())
+            self.assertTrue(tail_contribution_csv_path.exists())
+            self.assertTrue(tail_returns_csv_path.exists())
+            self.assertTrue(run_info_path.exists())
+            self.assertTrue(summary_json_path.exists())
+
+            tail_summary_df = pd.read_csv(tail_summary_csv_path)
+            tail_contribution_df = pd.read_csv(tail_contribution_csv_path)
+            tail_returns_df = pd.read_csv(tail_returns_csv_path)
+            run_info_dict = json.loads(run_info_path.read_text(encoding='utf-8'))
+            summary_dict = json.loads(summary_json_path.read_text(encoding='utf-8'))
+
+            self.assertIn('average_tail_return_float', tail_summary_df.columns)
+            self.assertIn('PodA', tail_contribution_df.columns)
+            self.assertIn('PodB', tail_returns_df.columns)
+            self.assertEqual(run_info_dict['entity_type'], 'portfolio')
+            self.assertEqual(run_info_dict['entity_id'], 'Portfolio')
+            self.assertEqual(run_info_dict['analysis_type'], 'vanilla_backtest')
+            self.assertEqual(run_info_dict['parameters']['capital'], 100_000.0)
+            self.assertEqual(len(run_info_dict['parameters']['pods']), 2)
+            self.assertIn('final_equity', summary_dict)
 
 
 if __name__ == '__main__':
