@@ -31,6 +31,7 @@ DEFAULT_RESULTS_ROOT_PATH_STR = "results"
 DEFAULT_EVENT_LOG_PATH_STR = str(Path(__file__).resolve().parent / "logs" / "live_events.jsonl")
 DEFAULT_EVENT_LIMIT_INT = 80
 ALERT_SEVERITY_RANK_DICT = {"red": 0, "yellow": 1, "gray": 2, "green": 3}
+COMBINED_BOOK_MODE_ORDER_LIST = ["live", "paper", "incubation"]
 SAFE_INSPECT_COMMAND_NAME_LIST = [
     "status",
     "next_due",
@@ -238,6 +239,7 @@ def resolve_db_path_for_release_str(
 def build_dashboard_summary_dict(app_obj: DashboardApp, as_of_ts: datetime | None = None) -> dict[str, Any]:
     if as_of_ts is None:
         as_of_ts = datetime.now(UTC)
+    target_list = app_obj.get_target_list()
     pod_row_dict_list = [
         build_pod_row_dict(
             pod_target_obj=target_obj,
@@ -245,7 +247,7 @@ def build_dashboard_summary_dict(app_obj: DashboardApp, as_of_ts: datetime | Non
             results_root_path_str=app_obj.results_root_path_str,
             event_log_path_str=app_obj.event_log_path_str,
         )
-        for target_obj in app_obj.get_target_list()
+        for target_obj in target_list
     ]
     alert_dict_list = _build_alert_dict_list(pod_row_dict_list)
     return {
@@ -254,6 +256,10 @@ def build_dashboard_summary_dict(app_obj: DashboardApp, as_of_ts: datetime | Non
         "alert_dict_list": alert_dict_list,
         "alert_summary_dict": _build_alert_summary_dict(alert_dict_list),
         "mode_list": sorted({str(row_dict["mode_str"]) for row_dict in pod_row_dict_list}),
+        "combined_book_dict": build_combined_book_dict(
+            pod_target_list=target_list,
+            as_of_ts=as_of_ts,
+        ),
     }
 
 
@@ -1216,6 +1222,538 @@ def _build_pod_pnl_dict(
         "since_start_pnl_pct_float": latest_point_dict["since_start_pnl_pct_float"],
         "equity_point_dict_list": equity_point_dict_list,
     }
+
+
+def build_combined_book_dict(
+    pod_target_list: list[DashboardPodTarget],
+    as_of_ts: datetime,
+) -> dict[str, Any]:
+    target_list_by_mode_dict: dict[str, list[DashboardPodTarget]] = {}
+    for pod_target_obj in pod_target_list:
+        mode_str = str(pod_target_obj.release_obj.mode_str)
+        target_list_by_mode_dict.setdefault(mode_str, []).append(pod_target_obj)
+    mode_str_list = sorted(
+        set(COMBINED_BOOK_MODE_ORDER_LIST) | set(target_list_by_mode_dict),
+        key=_combined_book_mode_sort_tuple,
+    )
+    return {
+        "as_of_timestamp_str": as_of_ts.isoformat(),
+        "environment_dict_list": [
+            _build_combined_book_environment_dict(
+                mode_str=mode_str,
+                pod_target_list=target_list_by_mode_dict.get(mode_str, []),
+            )
+            for mode_str in mode_str_list
+        ],
+    }
+
+
+def _combined_book_mode_sort_tuple(mode_str: str) -> tuple[int, str]:
+    if mode_str in COMBINED_BOOK_MODE_ORDER_LIST:
+        return (COMBINED_BOOK_MODE_ORDER_LIST.index(mode_str), mode_str)
+    return (len(COMBINED_BOOK_MODE_ORDER_LIST), mode_str)
+
+
+def _build_combined_book_environment_dict(
+    mode_str: str,
+    pod_target_list: list[DashboardPodTarget],
+) -> dict[str, Any]:
+    pod_book_dict_list = [
+        _load_combined_book_pod_dict(pod_target_obj)
+        for pod_target_obj in pod_target_list
+    ]
+    strict_equity_point_dict_list = _build_combined_strict_point_dict_list(
+        pod_book_dict_list
+    )
+    carry_forward_equity_point_dict_list = _build_combined_carry_forward_point_dict_list(
+        pod_book_dict_list
+    )
+    warning_dict_list = _build_combined_book_warning_dict_list(
+        mode_str=mode_str,
+        pod_book_dict_list=pod_book_dict_list,
+        latest_operational_market_date_str=(
+            None
+            if not carry_forward_equity_point_dict_list
+            else carry_forward_equity_point_dict_list[-1]["market_date_str"]
+        ),
+    )
+    contribution_dict_list = _build_combined_contribution_dict_list(
+        pod_book_dict_list=pod_book_dict_list,
+        strict_equity_point_dict_list=strict_equity_point_dict_list,
+        carry_forward_equity_point_dict_list=carry_forward_equity_point_dict_list,
+    )
+    latest_strict_point_dict = (
+        None if not strict_equity_point_dict_list else strict_equity_point_dict_list[-1]
+    )
+    latest_carry_point_dict = (
+        None
+        if not carry_forward_equity_point_dict_list
+        else carry_forward_equity_point_dict_list[-1]
+    )
+    return {
+        "mode_str": mode_str,
+        "status_str": _combined_book_status_str(
+            pod_count_int=len(pod_book_dict_list),
+            strict_point_count_int=len(strict_equity_point_dict_list),
+            carry_forward_point_count_int=len(carry_forward_equity_point_dict_list),
+            warning_dict_list=warning_dict_list,
+        ),
+        "pod_count_int": len(pod_book_dict_list),
+        "strict_point_count_int": len(strict_equity_point_dict_list),
+        "carry_forward_point_count_int": len(carry_forward_equity_point_dict_list),
+        "latest_common_market_date_str": (
+            None if latest_strict_point_dict is None else latest_strict_point_dict["market_date_str"]
+        ),
+        "latest_operational_market_date_str": (
+            None if latest_carry_point_dict is None else latest_carry_point_dict["market_date_str"]
+        ),
+        "strict_latest_equity_float": (
+            None if latest_strict_point_dict is None else latest_strict_point_dict["equity_float"]
+        ),
+        "strict_daily_pnl_float": (
+            None if latest_strict_point_dict is None else latest_strict_point_dict["daily_pnl_float"]
+        ),
+        "strict_daily_pnl_pct_float": (
+            None if latest_strict_point_dict is None else latest_strict_point_dict["daily_pnl_pct_float"]
+        ),
+        "carry_forward_latest_equity_float": (
+            None if latest_carry_point_dict is None else latest_carry_point_dict["equity_float"]
+        ),
+        "warning_count_int": len(warning_dict_list),
+        "warning_dict_list": warning_dict_list,
+        "contribution_dict_list": contribution_dict_list,
+        "strict_equity_point_dict_list": strict_equity_point_dict_list,
+        "carry_forward_equity_point_dict_list": carry_forward_equity_point_dict_list,
+    }
+
+
+def _load_combined_book_pod_dict(
+    pod_target_obj: DashboardPodTarget,
+) -> dict[str, Any]:
+    release_obj = pod_target_obj.release_obj
+    base_dict: dict[str, Any] = {
+        "pod_id_str": release_obj.pod_id_str,
+        "mode_str": release_obj.mode_str,
+        "strategy_import_str": release_obj.strategy_import_str,
+        "account_route_str": release_obj.account_route_str,
+        "db_path_str": pod_target_obj.db_path_str,
+        "db_status_str": "missing",
+        "error_str": None,
+        "pod_pnl_dict": _empty_pod_pnl_dict(),
+        "point_by_market_date_dict": {},
+    }
+    db_path_obj = Path(pod_target_obj.db_path_str)
+    if not db_path_obj.exists():
+        return base_dict
+    try:
+        with _connect_readonly_existing_db(db_path_obj) as connection_obj:
+            if not _table_exists_bool(connection_obj, "pod_state_history"):
+                base_dict["db_status_str"] = "empty"
+                return base_dict
+            pod_pnl_dict = _build_pod_pnl_dict(
+                connection_obj=connection_obj,
+                release_obj=release_obj,
+            )
+    except sqlite3.DatabaseError as exception_obj:
+        base_dict["db_status_str"] = "error"
+        base_dict["error_str"] = str(exception_obj)
+        return base_dict
+    base_dict["db_status_str"] = "ok"
+    base_dict["pod_pnl_dict"] = pod_pnl_dict
+    base_dict["point_by_market_date_dict"] = {
+        point_dict["market_date_str"]: point_dict
+        for point_dict in pod_pnl_dict.get("equity_point_dict_list", [])
+    }
+    return base_dict
+
+
+def _build_combined_strict_point_dict_list(
+    pod_book_dict_list: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if len(pod_book_dict_list) == 0:
+        return []
+    common_market_date_set: set[str] | None = None
+    for pod_book_dict in pod_book_dict_list:
+        market_date_set = set(pod_book_dict["point_by_market_date_dict"])
+        common_market_date_set = (
+            market_date_set
+            if common_market_date_set is None
+            else common_market_date_set & market_date_set
+        )
+    if not common_market_date_set:
+        return []
+    previous_equity_float: float | None = None
+    point_dict_list: list[dict[str, Any]] = []
+    # *** CRITICAL*** Combined Book strict PnL uses only market-date
+    # aligned EOD snapshots. Do not mix intraday, post-execution, or
+    # carry-forward values into this strict accounting series.
+    for market_date_str in sorted(common_market_date_set):
+        equity_float = sum(
+            float(pod_book_dict["point_by_market_date_dict"][market_date_str]["equity_float"])
+            for pod_book_dict in pod_book_dict_list
+        )
+        daily_pnl_float = (
+            None
+            if previous_equity_float is None
+            else equity_float - previous_equity_float
+        )
+        daily_pnl_pct_float = (
+            None
+            if previous_equity_float is None or previous_equity_float == 0.0
+            else (equity_float / previous_equity_float) - 1.0
+        )
+        point_dict_list.append(
+            {
+                "market_date_str": market_date_str,
+                "equity_float": equity_float,
+                "daily_pnl_float": daily_pnl_float,
+                "daily_pnl_pct_float": daily_pnl_pct_float,
+                "included_pod_count_int": len(pod_book_dict_list),
+                "stale_pod_count_int": 0,
+                "missing_pod_count_int": 0,
+                "basis_str": "strict_common_eod",
+            }
+        )
+        previous_equity_float = equity_float
+    return point_dict_list
+
+
+def _build_combined_carry_forward_point_dict_list(
+    pod_book_dict_list: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    market_date_str_list = sorted(
+        {
+            market_date_str
+            for pod_book_dict in pod_book_dict_list
+            for market_date_str in pod_book_dict["point_by_market_date_dict"]
+        }
+    )
+    previous_total_equity_float: float | None = None
+    last_point_by_pod_id_dict: dict[str, dict[str, Any]] = {}
+    point_dict_list: list[dict[str, Any]] = []
+    # *** CRITICAL*** Carry-forward is an operational continuity curve,
+    # not the strict accounting headline. It may reuse an older POD EOD
+    # mark only when the point is visibly labeled as stale.
+    for market_date_str in market_date_str_list:
+        total_equity_float = 0.0
+        included_pod_count_int = 0
+        stale_pod_id_list: list[str] = []
+        missing_pod_id_list: list[str] = []
+        for pod_book_dict in pod_book_dict_list:
+            pod_id_str = str(pod_book_dict["pod_id_str"])
+            current_point_dict = pod_book_dict["point_by_market_date_dict"].get(
+                market_date_str
+            )
+            if current_point_dict is not None:
+                last_point_by_pod_id_dict[pod_id_str] = current_point_dict
+                point_dict = current_point_dict
+            else:
+                point_dict = last_point_by_pod_id_dict.get(pod_id_str)
+                if point_dict is None:
+                    missing_pod_id_list.append(pod_id_str)
+                    continue
+                stale_pod_id_list.append(pod_id_str)
+            total_equity_float += float(point_dict["equity_float"])
+            included_pod_count_int += 1
+        if included_pod_count_int == 0:
+            continue
+        daily_pnl_float = (
+            None
+            if previous_total_equity_float is None
+            else total_equity_float - previous_total_equity_float
+        )
+        daily_pnl_pct_float = (
+            None
+            if previous_total_equity_float is None or previous_total_equity_float == 0.0
+            else (total_equity_float / previous_total_equity_float) - 1.0
+        )
+        point_dict_list.append(
+            {
+                "market_date_str": market_date_str,
+                "equity_float": total_equity_float,
+                "daily_pnl_float": daily_pnl_float,
+                "daily_pnl_pct_float": daily_pnl_pct_float,
+                "included_pod_count_int": included_pod_count_int,
+                "stale_pod_count_int": len(stale_pod_id_list),
+                "missing_pod_count_int": len(missing_pod_id_list),
+                "stale_pod_id_list": stale_pod_id_list,
+                "missing_pod_id_list": missing_pod_id_list,
+                "basis_str": "carry_forward_eod",
+            }
+        )
+        previous_total_equity_float = total_equity_float
+    return point_dict_list
+
+
+def _build_combined_book_warning_dict_list(
+    mode_str: str,
+    pod_book_dict_list: list[dict[str, Any]],
+    latest_operational_market_date_str: str | None,
+) -> list[dict[str, Any]]:
+    warning_dict_list: list[dict[str, Any]] = []
+    route_to_pod_id_list_dict: dict[str, list[str]] = {}
+    for pod_book_dict in pod_book_dict_list:
+        pod_id_str = str(pod_book_dict["pod_id_str"])
+        route_to_pod_id_list_dict.setdefault(
+            str(pod_book_dict["account_route_str"]),
+            [],
+        ).append(pod_id_str)
+        db_status_str = str(pod_book_dict["db_status_str"])
+        if db_status_str == "missing":
+            warning_dict_list.append(
+                _combined_book_warning_dict(
+                    "missing_db",
+                    "gray",
+                    "POD DB missing",
+                    f"{pod_id_str} has no readable state DB yet.",
+                    pod_id_str,
+                )
+            )
+        elif db_status_str == "empty":
+            warning_dict_list.append(
+                _combined_book_warning_dict(
+                    "empty_db",
+                    "gray",
+                    "POD DB empty",
+                    f"{pod_id_str} has no EOD state history table yet.",
+                    pod_id_str,
+                )
+            )
+        elif db_status_str == "error":
+            warning_dict_list.append(
+                _combined_book_warning_dict(
+                    "db_error",
+                    "red",
+                    "POD DB read error",
+                    f"{pod_id_str}: {pod_book_dict.get('error_str') or 'read failed'}",
+                    pod_id_str,
+                )
+            )
+        elif len(pod_book_dict["point_by_market_date_dict"]) == 0:
+            warning_dict_list.append(
+                _combined_book_warning_dict(
+                    "missing_eod",
+                    "gray",
+                    "No EOD snapshots",
+                    f"{pod_id_str} has no EOD equity snapshots yet.",
+                    pod_id_str,
+                )
+            )
+        if latest_operational_market_date_str is not None:
+            latest_market_date_str = _latest_pod_market_date_str(pod_book_dict)
+            if (
+                latest_market_date_str is not None
+                and latest_market_date_str < latest_operational_market_date_str
+            ):
+                warning_dict_list.append(
+                    _combined_book_warning_dict(
+                        "stale_eod",
+                        "yellow",
+                        "Stale EOD snapshot",
+                        (
+                            f"{pod_id_str} latest EOD is {latest_market_date_str}; "
+                            f"operational book date is {latest_operational_market_date_str}."
+                        ),
+                        pod_id_str,
+                    )
+                )
+    for account_route_str, pod_id_str_list in sorted(route_to_pod_id_list_dict.items()):
+        if len(pod_id_str_list) <= 1:
+            continue
+        warning_dict_list.append(
+            _combined_book_warning_dict(
+                "duplicate_account_route",
+                "red",
+                "Duplicate account route",
+                (
+                    f"{mode_str} account route {account_route_str} is shared by "
+                    f"{', '.join(sorted(pod_id_str_list))}."
+                ),
+                None,
+            )
+        )
+    return warning_dict_list
+
+
+def _combined_book_warning_dict(
+    warning_type_str: str,
+    severity_str: str,
+    label_str: str,
+    detail_str: str,
+    pod_id_str: str | None,
+) -> dict[str, Any]:
+    return {
+        "warning_type_str": warning_type_str,
+        "severity_str": severity_str,
+        "label_str": label_str,
+        "detail_str": detail_str,
+        "pod_id_str": pod_id_str,
+    }
+
+
+def _build_combined_contribution_dict_list(
+    pod_book_dict_list: list[dict[str, Any]],
+    strict_equity_point_dict_list: list[dict[str, Any]],
+    carry_forward_equity_point_dict_list: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    latest_strict_market_date_str = (
+        None
+        if not strict_equity_point_dict_list
+        else strict_equity_point_dict_list[-1]["market_date_str"]
+    )
+    previous_strict_market_date_str = (
+        None
+        if len(strict_equity_point_dict_list) < 2
+        else strict_equity_point_dict_list[-2]["market_date_str"]
+    )
+    latest_operational_market_date_str = (
+        None
+        if not carry_forward_equity_point_dict_list
+        else carry_forward_equity_point_dict_list[-1]["market_date_str"]
+    )
+    contribution_dict_list = [
+        _combined_pod_contribution_dict(
+            pod_book_dict=pod_book_dict,
+            latest_strict_market_date_str=latest_strict_market_date_str,
+            previous_strict_market_date_str=previous_strict_market_date_str,
+            latest_operational_market_date_str=latest_operational_market_date_str,
+        )
+        for pod_book_dict in pod_book_dict_list
+    ]
+    return sorted(
+        contribution_dict_list,
+        key=lambda contribution_dict: (
+            -abs(float(contribution_dict.get("sort_pnl_float") or 0.0)),
+            str(contribution_dict["pod_id_str"]),
+        ),
+    )
+
+
+def _combined_pod_contribution_dict(
+    pod_book_dict: dict[str, Any],
+    latest_strict_market_date_str: str | None,
+    previous_strict_market_date_str: str | None,
+    latest_operational_market_date_str: str | None,
+) -> dict[str, Any]:
+    point_by_market_date_dict = pod_book_dict["point_by_market_date_dict"]
+    latest_market_date_str = _latest_pod_market_date_str(pod_book_dict)
+    latest_point_dict = (
+        None
+        if latest_market_date_str is None
+        else point_by_market_date_dict[latest_market_date_str]
+    )
+    strict_daily_pnl_float = _strict_pod_daily_pnl_float(
+        point_by_market_date_dict=point_by_market_date_dict,
+        latest_strict_market_date_str=latest_strict_market_date_str,
+        previous_strict_market_date_str=previous_strict_market_date_str,
+    )
+    latest_daily_pnl_float = pod_book_dict["pod_pnl_dict"].get("daily_pnl_float")
+    freshness_warning_str = _combined_pod_freshness_warning_str(
+        pod_book_dict=pod_book_dict,
+        latest_operational_market_date_str=latest_operational_market_date_str,
+    )
+    sort_pnl_float = (
+        strict_daily_pnl_float
+        if strict_daily_pnl_float is not None
+        else latest_daily_pnl_float
+    )
+    return {
+        "pod_id_str": pod_book_dict["pod_id_str"],
+        "mode_str": pod_book_dict["mode_str"],
+        "strategy_import_str": pod_book_dict["strategy_import_str"],
+        "account_route_str": pod_book_dict["account_route_str"],
+        "db_status_str": pod_book_dict["db_status_str"],
+        "latest_market_date_str": latest_market_date_str,
+        "latest_equity_float": None if latest_point_dict is None else latest_point_dict["equity_float"],
+        "latest_daily_pnl_float": latest_daily_pnl_float,
+        "strict_daily_pnl_float": strict_daily_pnl_float,
+        "carry_forward_status_str": _combined_pod_carry_forward_status_str(
+            pod_book_dict=pod_book_dict,
+            latest_operational_market_date_str=latest_operational_market_date_str,
+        ),
+        "freshness_warning_str": freshness_warning_str,
+        "source_str": pod_book_dict["pod_pnl_dict"].get("source_str"),
+        "equity_point_dict_list": pod_book_dict["pod_pnl_dict"].get(
+            "equity_point_dict_list",
+            [],
+        ),
+        "sort_pnl_float": sort_pnl_float,
+    }
+
+
+def _strict_pod_daily_pnl_float(
+    point_by_market_date_dict: dict[str, dict[str, Any]],
+    latest_strict_market_date_str: str | None,
+    previous_strict_market_date_str: str | None,
+) -> float | None:
+    if latest_strict_market_date_str is None or previous_strict_market_date_str is None:
+        return None
+    latest_point_dict = point_by_market_date_dict.get(latest_strict_market_date_str)
+    previous_point_dict = point_by_market_date_dict.get(previous_strict_market_date_str)
+    if latest_point_dict is None or previous_point_dict is None:
+        return None
+    return float(latest_point_dict["equity_float"]) - float(previous_point_dict["equity_float"])
+
+
+def _latest_pod_market_date_str(pod_book_dict: dict[str, Any]) -> str | None:
+    market_date_str_list = sorted(pod_book_dict["point_by_market_date_dict"])
+    return None if not market_date_str_list else market_date_str_list[-1]
+
+
+def _combined_pod_carry_forward_status_str(
+    pod_book_dict: dict[str, Any],
+    latest_operational_market_date_str: str | None,
+) -> str:
+    if latest_operational_market_date_str is None:
+        return "missing"
+    latest_market_date_str = _latest_pod_market_date_str(pod_book_dict)
+    if latest_market_date_str is None:
+        return "missing"
+    if latest_market_date_str == latest_operational_market_date_str:
+        return "current"
+    return "carried_forward"
+
+
+def _combined_pod_freshness_warning_str(
+    pod_book_dict: dict[str, Any],
+    latest_operational_market_date_str: str | None,
+) -> str:
+    db_status_str = str(pod_book_dict["db_status_str"])
+    if db_status_str == "missing":
+        return "DB missing"
+    if db_status_str == "empty":
+        return "DB empty"
+    if db_status_str == "error":
+        return "DB read error"
+    latest_market_date_str = _latest_pod_market_date_str(pod_book_dict)
+    if latest_market_date_str is None:
+        return "No EOD snapshots"
+    if (
+        latest_operational_market_date_str is not None
+        and latest_market_date_str < latest_operational_market_date_str
+    ):
+        return f"Carried from {latest_market_date_str}"
+    return ""
+
+
+def _combined_book_status_str(
+    pod_count_int: int,
+    strict_point_count_int: int,
+    carry_forward_point_count_int: int,
+    warning_dict_list: list[dict[str, Any]],
+) -> str:
+    if pod_count_int == 0:
+        return "no_pods"
+    if strict_point_count_int > 0:
+        if any(
+            warning_dict["severity_str"] in {"red", "yellow"}
+            for warning_dict in warning_dict_list
+        ):
+            return "available_with_warnings"
+        return "available"
+    if carry_forward_point_count_int > 0:
+        return "operational_only"
+    return "unavailable"
 
 
 def _market_date_from_history_row_str(
@@ -3747,6 +4285,142 @@ DASHBOARD_HTML_STR = """<!doctype html>
       font-weight: 800;
       overflow-wrap: anywhere;
     }
+    .combined-book-section {
+      --section-accent: var(--blue);
+      --section-header-bg: #eff6ff;
+    }
+    .combined-book-env-list {
+      display: grid;
+      gap: 12px;
+    }
+    .combined-book-env {
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--gray);
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+    }
+    .combined-book-env.green { border-left-color: var(--green); }
+    .combined-book-env.yellow { border-left-color: var(--yellow); }
+    .combined-book-env.red { border-left-color: var(--red); }
+    .combined-book-env.gray { border-left-color: var(--gray); }
+    .combined-book-env-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfe;
+    }
+    .combined-book-title {
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+    .combined-book-subtitle {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 2px;
+      overflow-wrap: anywhere;
+    }
+    .combined-book-body {
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+    }
+    .combined-book-selector-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .combined-book-selector-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      padding: 6px 8px;
+      min-height: 34px;
+      max-width: 100%;
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .combined-book-selector-item input {
+      margin: 0;
+      flex: 0 0 auto;
+    }
+    .combined-book-selector-label {
+      overflow-wrap: anywhere;
+    }
+    .combined-book-warning-list {
+      display: grid;
+      gap: 6px;
+    }
+    .combined-book-warning {
+      display: grid;
+      grid-template-columns: 88px minmax(0, 1fr);
+      gap: 8px;
+      align-items: start;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 7px 8px;
+      background: #fff;
+    }
+    .combined-book-warning-label {
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+    .combined-book-warning-detail {
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    .combined-book-chart-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+      gap: 12px;
+      align-items: start;
+    }
+    .combined-book-chart-block {
+      min-width: 0;
+    }
+    .combined-book-chart-block .pnl-curve {
+      max-width: none;
+      margin-top: 0;
+    }
+    .combined-book-table .num {
+      text-align: right;
+      white-space: nowrap;
+    }
+    .combined-book-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px 12px;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .combined-book-legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+    .combined-book-legend-swatch {
+      width: 18px;
+      height: 3px;
+      border-radius: 999px;
+      flex: 0 0 auto;
+    }
+    .combined-book-legend-label {
+      overflow-wrap: anywhere;
+    }
+    .combined-book-legend-item.combined {
+      color: var(--text);
+      font-weight: 800;
+    }
     .attention-panel {
       background: var(--panel);
     }
@@ -4561,6 +5235,18 @@ DASHBOARD_HTML_STR = """<!doctype html>
         <div class="muted">Select a POD row to inspect details.</div>
       </div>
     </section>
+    <section class="dashboard-section combined-book-section" id="combined-book-panel">
+      <div class="dashboard-section-header">
+        <div>
+          <h2>Combined Book</h2>
+          <div class="dashboard-section-subtitle">Environment-separated EOD equity, strict accounting headline, and carry-forward operational view.</div>
+        </div>
+        <span class="section-status">read-only / EOD snapshots</span>
+      </div>
+      <div class="dashboard-section-body" id="combined-book-body">
+        <div class="empty-note">Combined Book is loading.</div>
+      </div>
+    </section>
   </main>
   <div class="logger-backdrop" id="logger-backdrop" hidden>
     <aside class="logger-drawer" aria-label="POD logger">
@@ -4607,6 +5293,8 @@ DASHBOARD_HTML_STR = """<!doctype html>
       pods: [],
       alerts: [],
       alertSummary: {},
+      combinedBook: {},
+      combinedBookPodSelectedDict: {},
       podChangeDict: {},
       selectedPod: initialUiState.podId,
       selectedDetail: null,
@@ -4637,6 +5325,7 @@ DASHBOARD_HTML_STR = """<!doctype html>
     const consoleWaitingValue = document.getElementById('console-waiting-value');
     const consoleLastRefreshValue = document.getElementById('console-last-refresh-value');
     const consoleSelectedPodValue = document.getElementById('console-selected-pod-value');
+    const combinedBookBody = document.getElementById('combined-book-body');
     const loggerBackdrop = document.getElementById('logger-backdrop');
     const loggerBody = document.getElementById('logger-body');
     const loggerTitle = document.getElementById('logger-title');
@@ -4667,6 +5356,7 @@ DASHBOARD_HTML_STR = """<!doctype html>
       renderAlertInbox();
       renderAttentionQueue();
       renderConsoleStatusStrip();
+      renderCombinedBook();
     });
 
     function readUiState() {
@@ -4860,6 +5550,7 @@ DASHBOARD_HTML_STR = """<!doctype html>
         state.pods = nextPodRows;
         state.alerts = payload.alert_dict_list || [];
         state.alertSummary = payload.alert_summary_dict || {};
+        state.combinedBook = payload.combined_book_dict || {};
         state.lastRefreshDisplayStr = formatTimestamp(new Date().toISOString());
         lastRefresh.textContent = 'Last refresh: ' + state.lastRefreshDisplayStr;
         syncModeFilter(payload.mode_list || []);
@@ -4873,6 +5564,7 @@ DASHBOARD_HTML_STR = """<!doctype html>
         renderAlertInbox();
         renderAttentionQueue();
         renderConsoleStatusStrip();
+        renderCombinedBook();
         if (state.selectedPod && !state.selectedDetail) {
           loadDetail(state.selectedPod);
         }
@@ -5007,6 +5699,520 @@ DASHBOARD_HTML_STR = """<!doctype html>
       consoleWaitingValue.textContent = String(waitingCount);
       consoleLastRefreshValue.textContent = state.lastRefreshDisplayStr || 'loading';
       consoleSelectedPodValue.textContent = state.selectedPod || 'none';
+    }
+
+    function renderCombinedBook() {
+      const allEnvironmentList = (state.combinedBook || {}).environment_dict_list || [];
+      if (!allEnvironmentList.length) {
+        combinedBookBody.innerHTML = '<div class="empty-note">No Combined Book data was returned.</div>';
+        return;
+      }
+      const environmentList = selectedCombinedBookEnvironmentList(allEnvironmentList);
+      if (!environmentList.length) {
+        combinedBookBody.innerHTML = `<div class="empty-note">No Combined Book data for ${esc(environmentLabel(selectedEnvironmentMode()))}.</div>`;
+        return;
+      }
+      syncCombinedBookSelectionState(environmentList);
+      combinedBookBody.innerHTML = `
+        <div class="combined-book-env-list">
+          ${environmentList.map(renderCombinedBookEnvironment).join('')}
+        </div>`;
+      combinedBookBody.querySelectorAll('[data-combined-pod]').forEach(el => {
+        el.addEventListener('click', () => {
+          selectPod(el.dataset.combinedPod, el.dataset.combinedMode);
+        });
+      });
+      combinedBookBody.querySelectorAll('[data-combined-toggle-pod]').forEach(input => {
+        input.addEventListener('change', event => {
+          const checkbox = event.target;
+          state.combinedBookPodSelectedDict[checkbox.dataset.combinedTogglePod] = !!checkbox.checked;
+          renderCombinedBook();
+        });
+      });
+    }
+
+    function selectedEnvironmentMode() {
+      return state.requestedMode || modeFilter.value || 'all';
+    }
+
+    function selectedCombinedBookEnvironmentList(environmentList) {
+      const selectedMode = selectedEnvironmentMode();
+      if (selectedMode === 'all') return environmentList;
+      return (environmentList || []).filter(environment => environment.mode_str === selectedMode);
+    }
+
+    function renderCombinedBookEnvironment(environment) {
+      const severity = combinedBookStatusSeverity(environment.status_str);
+      const contributionList = environment.contribution_dict_list || [];
+      if (!Number(environment.pod_count_int || 0)) {
+        return `
+          <div class="combined-book-env ${severity}">
+            <div class="combined-book-env-header">
+              <div>
+                <div class="combined-book-title">${esc(environmentLabel(environment.mode_str))}</div>
+                <div class="combined-book-subtitle">No enabled ${esc(environment.mode_str)} PODs.</div>
+              </div>
+              ${pill(environment.status_str || 'no_pods', severity)}
+            </div>
+          </div>`;
+      }
+      const selectedContributionList = contributionList.filter(contribution => combinedBookPodSelected(contribution.pod_id_str));
+      const displayEnvironment = combinedBookDisplayEnvironment(environment, selectedContributionList);
+      const displaySeverity = combinedBookStatusSeverity(displayEnvironment.status_str);
+      return `
+        <div class="combined-book-env ${displaySeverity}">
+          <div class="combined-book-env-header">
+            <div>
+              <div class="combined-book-title">${esc(environmentLabel(environment.mode_str))}</div>
+              <div class="combined-book-subtitle">${esc(displayEnvironment.pod_count_int || 0)} selected of ${esc(environment.pod_count_int || 0)} enabled ${esc(environmentLabel(environment.mode_str))} PODs / combined date ${esc(displayEnvironment.latest_common_market_date_str || '-')}</div>
+            </div>
+            ${pill(displayEnvironment.status_str || 'unknown', displaySeverity)}
+          </div>
+          <div class="combined-book-body">
+            ${renderCombinedBookSelectors(contributionList)}
+            <div class="metric-grid">
+              ${metric('Combined equity', fmt(displayEnvironment.strict_latest_equity_float))}
+              ${metricSigned('Daily PnL $', displayEnvironment.strict_daily_pnl_float, fmtUnavailable)}
+              ${metricSigned('Daily PnL %', displayEnvironment.strict_daily_pnl_pct_float, fmtPct)}
+              ${metric('Combined EOD date', displayEnvironment.latest_common_market_date_str || '-')}
+              ${metric('Warnings', displayEnvironment.warning_count_int || 0)}
+              ${metric('PODs', displayEnvironment.pod_count_int || 0)}
+            </div>
+            ${renderCombinedBookWarnings(displayEnvironment.warning_dict_list || [])}
+            <div class="combined-book-chart-grid">
+              <div class="combined-book-chart-block">
+                ${renderCombinedBookAbsoluteCurve(displayEnvironment)}
+              </div>
+              <div class="combined-book-chart-block">
+                ${renderCombinedBookIndexedCurve(displayEnvironment)}
+              </div>
+            </div>
+            ${renderCombinedContributionTable(displayEnvironment.contribution_dict_list || [])}
+          </div>
+        </div>`;
+    }
+
+    function syncCombinedBookSelectionState(environmentList) {
+      (environmentList || []).forEach(environment => {
+        (environment.contribution_dict_list || []).forEach(contribution => {
+          const podId = contribution.pod_id_str;
+          if (!Object.prototype.hasOwnProperty.call(state.combinedBookPodSelectedDict, podId)) {
+            state.combinedBookPodSelectedDict[podId] = true;
+          }
+        });
+      });
+    }
+
+    function combinedBookPodSelected(podId) {
+      if (!Object.prototype.hasOwnProperty.call(state.combinedBookPodSelectedDict, podId)) return true;
+      return !!state.combinedBookPodSelectedDict[podId];
+    }
+
+    function renderCombinedBookSelectors(contributionList) {
+      if (!contributionList.length) return '';
+      return `
+        <div class="combined-book-selector-list">
+          ${contributionList.map(contribution => `
+            <label class="combined-book-selector-item">
+              <input type="checkbox" data-combined-toggle-pod="${esc(contribution.pod_id_str)}" ${combinedBookPodSelected(contribution.pod_id_str) ? 'checked' : ''}>
+              <span class="combined-book-selector-label">${esc(contribution.pod_id_str)}</span>
+            </label>`).join('')}
+        </div>`;
+    }
+
+    function combinedBookDisplayEnvironment(environment, contributionList) {
+      const strictPointList = buildClientStrictPointList(contributionList);
+      const carryForwardPointList = buildClientCarryForwardPointList(contributionList);
+      const warningList = filterCombinedBookWarningList(environment.warning_dict_list || [], contributionList);
+      const decoratedContributionList = decorateCombinedContributionList(contributionList, strictPointList, carryForwardPointList);
+      const latestStrictPoint = strictPointList.length ? strictPointList[strictPointList.length - 1] : null;
+      const latestCarryPoint = carryForwardPointList.length ? carryForwardPointList[carryForwardPointList.length - 1] : null;
+      return {
+        ...environment,
+        status_str: combinedBookClientStatus(contributionList.length, strictPointList.length, carryForwardPointList.length, warningList),
+        pod_count_int: contributionList.length,
+        strict_point_count_int: strictPointList.length,
+        carry_forward_point_count_int: carryForwardPointList.length,
+        latest_common_market_date_str: latestStrictPoint ? latestStrictPoint.market_date_str : null,
+        latest_operational_market_date_str: latestCarryPoint ? latestCarryPoint.market_date_str : null,
+        strict_latest_equity_float: latestStrictPoint ? latestStrictPoint.equity_float : null,
+        strict_daily_pnl_float: latestStrictPoint ? latestStrictPoint.daily_pnl_float : null,
+        strict_daily_pnl_pct_float: latestStrictPoint ? latestStrictPoint.daily_pnl_pct_float : null,
+        carry_forward_latest_equity_float: latestCarryPoint ? latestCarryPoint.equity_float : null,
+        warning_count_int: warningList.length,
+        warning_dict_list: warningList,
+        contribution_dict_list: decoratedContributionList,
+        strict_equity_point_dict_list: strictPointList,
+        carry_forward_equity_point_dict_list: carryForwardPointList,
+      };
+    }
+
+    function filterCombinedBookWarningList(warningList, contributionList) {
+      const selectedPodSet = new Set(contributionList.map(contribution => contribution.pod_id_str));
+      return (warningList || []).filter(warning => !warning.pod_id_str || selectedPodSet.has(warning.pod_id_str));
+    }
+
+    function combinedBookClientStatus(podCount, strictPointCount, carryForwardPointCount, warningList) {
+      if (!podCount) return 'no_pods_selected';
+      if (strictPointCount > 0) {
+        return warningList.some(warning => ['red', 'yellow'].includes(warning.severity_str))
+          ? 'available_with_warnings'
+          : 'available';
+      }
+      if (carryForwardPointCount > 0) return 'operational_only';
+      return 'unavailable';
+    }
+
+    function combinedBookStatusSeverity(status) {
+      if (status === 'available') return 'green';
+      if (status === 'available_with_warnings' || status === 'operational_only') return 'yellow';
+      if (status === 'unavailable') return 'gray';
+      return 'gray';
+    }
+
+    function contributionPointList(contribution) {
+      return (contribution.equity_point_dict_list || [])
+        .map(point => ({
+          market_date_str: point.market_date_str,
+          equity_float: Number(point.equity_float),
+          cash_float: point.cash_float,
+          snapshot_source_str: point.snapshot_source_str,
+          updated_timestamp_str: point.updated_timestamp_str,
+        }))
+        .filter(point => point.market_date_str && Number.isFinite(point.equity_float))
+        .sort((left, right) => String(left.market_date_str).localeCompare(String(right.market_date_str)));
+    }
+
+    function buildPointByDateDict(pointList) {
+      const pointByDateDict = {};
+      (pointList || []).forEach(point => {
+        pointByDateDict[point.market_date_str] = point;
+      });
+      return pointByDateDict;
+    }
+
+    function buildClientStrictPointList(contributionList) {
+      if (!contributionList.length) return [];
+      const pointByDateByPodDict = {};
+      let commonDateSet = null;
+      contributionList.forEach(contribution => {
+        const pointList = contributionPointList(contribution);
+        const dateSet = new Set(pointList.map(point => point.market_date_str));
+        pointByDateByPodDict[contribution.pod_id_str] = buildPointByDateDict(pointList);
+        commonDateSet = commonDateSet === null
+          ? dateSet
+          : new Set([...commonDateSet].filter(dateStr => dateSet.has(dateStr)));
+      });
+      const commonDateList = [...(commonDateSet || [])].sort();
+      let previousEquity = null;
+      return commonDateList.map(marketDate => {
+        const equity = contributionList.reduce((total, contribution) => (
+          total + pointByDateByPodDict[contribution.pod_id_str][marketDate].equity_float
+        ), 0);
+        const dailyPnl = previousEquity === null ? null : equity - previousEquity;
+        const dailyPnlPct = previousEquity === null || previousEquity === 0 ? null : (equity / previousEquity) - 1;
+        previousEquity = equity;
+        return {
+          market_date_str: marketDate,
+          equity_float: equity,
+          daily_pnl_float: dailyPnl,
+          daily_pnl_pct_float: dailyPnlPct,
+          included_pod_count_int: contributionList.length,
+          stale_pod_count_int: 0,
+          missing_pod_count_int: 0,
+          basis_str: 'strict_common_eod',
+        };
+      });
+    }
+
+    function buildClientCarryForwardPointList(contributionList) {
+      const dateList = [...new Set(contributionList.flatMap(contribution => (
+        contributionPointList(contribution).map(point => point.market_date_str)
+      )))].sort();
+      const pointByDateByPodDict = {};
+      contributionList.forEach(contribution => {
+        pointByDateByPodDict[contribution.pod_id_str] = buildPointByDateDict(contributionPointList(contribution));
+      });
+      const lastPointByPodDict = {};
+      let previousEquity = null;
+      const carryPointList = [];
+      dateList.forEach(marketDate => {
+        let equity = 0;
+        let includedCount = 0;
+        const stalePodIdList = [];
+        const missingPodIdList = [];
+        contributionList.forEach(contribution => {
+          const podId = contribution.pod_id_str;
+          const currentPoint = pointByDateByPodDict[podId][marketDate];
+          let point = currentPoint;
+          if (currentPoint) {
+            lastPointByPodDict[podId] = currentPoint;
+          } else {
+            point = lastPointByPodDict[podId];
+            if (!point) {
+              missingPodIdList.push(podId);
+              return;
+            }
+            stalePodIdList.push(podId);
+          }
+          equity += point.equity_float;
+          includedCount += 1;
+        });
+        if (!includedCount) return;
+        const dailyPnl = previousEquity === null ? null : equity - previousEquity;
+        const dailyPnlPct = previousEquity === null || previousEquity === 0 ? null : (equity / previousEquity) - 1;
+        previousEquity = equity;
+        carryPointList.push({
+          market_date_str: marketDate,
+          equity_float: equity,
+          daily_pnl_float: dailyPnl,
+          daily_pnl_pct_float: dailyPnlPct,
+          included_pod_count_int: includedCount,
+          stale_pod_count_int: stalePodIdList.length,
+          missing_pod_count_int: missingPodIdList.length,
+          stale_pod_id_list: stalePodIdList,
+          missing_pod_id_list: missingPodIdList,
+          basis_str: 'carry_forward_eod',
+        });
+      });
+      return carryPointList;
+    }
+
+    function decorateCombinedContributionList(contributionList, strictPointList, carryForwardPointList) {
+      const latestStrictDate = strictPointList.length ? strictPointList[strictPointList.length - 1].market_date_str : null;
+      const previousStrictDate = strictPointList.length >= 2 ? strictPointList[strictPointList.length - 2].market_date_str : null;
+      const latestOperationalDate = carryForwardPointList.length ? carryForwardPointList[carryForwardPointList.length - 1].market_date_str : null;
+      return contributionList.map(contribution => {
+        const pointList = contributionPointList(contribution);
+        const pointByDateDict = buildPointByDateDict(pointList);
+        const latestDate = pointList.length ? pointList[pointList.length - 1].market_date_str : null;
+        const latestPoint = latestDate ? pointByDateDict[latestDate] : null;
+        const strictPnl = latestStrictDate && previousStrictDate && pointByDateDict[latestStrictDate] && pointByDateDict[previousStrictDate]
+          ? pointByDateDict[latestStrictDate].equity_float - pointByDateDict[previousStrictDate].equity_float
+          : null;
+        const carryStatus = !latestOperationalDate || !latestDate
+          ? 'missing'
+          : latestDate === latestOperationalDate
+            ? 'current'
+            : 'carried_forward';
+        const freshness = freshnessWarningForSelectedContribution(contribution, latestDate, latestOperationalDate);
+        return {
+          ...contribution,
+          latest_market_date_str: latestDate,
+          latest_equity_float: latestPoint ? latestPoint.equity_float : null,
+          strict_daily_pnl_float: strictPnl,
+          carry_forward_status_str: carryStatus,
+          freshness_warning_str: freshness,
+        };
+      }).sort((left, right) => {
+        const leftPnl = Number(left.strict_daily_pnl_float || left.latest_daily_pnl_float || 0);
+        const rightPnl = Number(right.strict_daily_pnl_float || right.latest_daily_pnl_float || 0);
+        const pnlDelta = Math.abs(rightPnl) - Math.abs(leftPnl);
+        if (pnlDelta !== 0) return pnlDelta;
+        return String(left.pod_id_str).localeCompare(String(right.pod_id_str));
+      });
+    }
+
+    function freshnessWarningForSelectedContribution(contribution, latestDate, latestOperationalDate) {
+      if (contribution.db_status_str === 'missing') return 'DB missing';
+      if (contribution.db_status_str === 'empty') return 'DB empty';
+      if (contribution.db_status_str === 'error') return 'DB read error';
+      if (!latestDate) return 'No EOD snapshots';
+      if (latestOperationalDate && latestDate < latestOperationalDate) return 'Carried from ' + latestDate;
+      return '';
+    }
+
+    function renderCombinedBookWarnings(warningList) {
+      if (!warningList.length) {
+        return '<div class="empty-note">No Combined Book warnings for this environment.</div>';
+      }
+      return `
+        <div class="combined-book-warning-list">
+          ${warningList.map(warning => {
+            const severity = healthClass(warning.severity_str);
+            return `
+              <div class="combined-book-warning">
+                ${pill(warning.severity_str || severity, severity)}
+                <div>
+                  <div class="combined-book-warning-label">${esc(warning.label_str || warning.warning_type_str || 'Warning')}</div>
+                  <div class="combined-book-warning-detail">${esc(warning.detail_str || '-')}</div>
+                </div>
+              </div>`;
+          }).join('')}
+        </div>`;
+    }
+
+    function renderCombinedBookAbsoluteCurve(environment) {
+      const combinedLine = combinedBookCombinedLine(environment.strict_equity_point_dict_list || []);
+      return renderMultiLineEquityCurve(
+        'Combined book equity ($)',
+        combinedLine.point_dict_list.length ? [combinedLine] : [],
+        'No common-date combined EOD points yet.',
+        'absolute dollars'
+      );
+    }
+
+    function renderCombinedBookIndexedCurve(environment) {
+      const contributionLineList = (environment.contribution_dict_list || [])
+        .map((contribution, index) => ({
+          label_str: contribution.pod_id_str,
+          color_str: combinedBookLineColor(index),
+          class_name_str: '',
+          stroke_width_float: 2,
+          point_dict_list: contributionPointList(contribution),
+        }))
+        .filter(line => line.point_dict_list.length > 0);
+      const combinedLine = combinedBookCombinedLine(environment.strict_equity_point_dict_list || []);
+      const lineList = combinedLine.point_dict_list.length
+        ? [...contributionLineList, combinedLine]
+        : contributionLineList;
+      const indexedLineList = lineList.map(indexLineToBase100).filter(line => line !== null);
+      return renderMultiLineEquityCurve(
+        'Strategy comparison (indexed to 100)',
+        indexedLineList,
+        'No selected POD EOD curves can be indexed yet.',
+        'each line starts at 100 / bold line is Combined'
+      );
+    }
+
+    function combinedBookCombinedLine(pointList) {
+      return {
+        label_str: 'Combined',
+        color_str: '#111827',
+        class_name_str: 'combined',
+        stroke_width_float: 4,
+        point_dict_list: pointList || [],
+      };
+    }
+
+    function indexLineToBase100(line) {
+      const pointList = (line.point_dict_list || [])
+        .filter(point => Number.isFinite(Number(point.equity_float)));
+      if (!pointList.length) return null;
+      const startEquity = Number(pointList[0].equity_float);
+      if (!Number.isFinite(startEquity) || startEquity === 0) return null;
+      return {
+        ...line,
+        point_dict_list: pointList.map(point => ({
+          ...point,
+          raw_equity_float: point.equity_float,
+          equity_float: 100 * Number(point.equity_float) / startEquity,
+        })),
+      };
+    }
+
+    function combinedBookLineColor(index) {
+      const colorList = ['#175cd3', '#247a52', '#b42318', '#b54708', '#7f56d9', '#0e7490', '#be185d', '#475467'];
+      return colorList[index % colorList.length];
+    }
+
+    function renderMultiLineEquityCurve(title, lineList, emptyText, subtitleNoteStr) {
+      const dateList = [...new Set((lineList || []).flatMap(line => (
+        line.point_dict_list.map(point => point.market_date_str)
+      )))].sort();
+      const allPointList = (lineList || []).flatMap(line => line.point_dict_list);
+      if (!dateList.length || !allPointList.length) {
+        return `<div class="empty-note">${esc(emptyText)}</div>`;
+      }
+      const width = 1000;
+      const height = 260;
+      const padLeft = 24;
+      const padRight = 24;
+      const padTop = 18;
+      const padBottom = 28;
+      const minEquity = Math.min(...allPointList.map(point => point.equity_float));
+      const maxEquity = Math.max(...allPointList.map(point => point.equity_float));
+      const rawEquityRange = maxEquity - minEquity;
+      const equityPadding = rawEquityRange === 0 ? Math.max(Math.abs(maxEquity) * 0.01, 1) : rawEquityRange * 0.12;
+      const yMin = minEquity - equityPadding;
+      const yMax = maxEquity + equityPadding;
+      const equityRange = yMax === yMin ? 1 : yMax - yMin;
+      const xStep = dateList.length <= 1 ? 0 : (width - padLeft - padRight) / (dateList.length - 1);
+      const dateIndexDict = {};
+      dateList.forEach((dateStr, index) => { dateIndexDict[dateStr] = index; });
+      const linePathHtml = lineList.map(line => {
+        const chartPointList = line.point_dict_list.map(point => {
+          const dateIndex = dateIndexDict[point.market_date_str];
+          const x = dateList.length <= 1 ? width / 2 : padLeft + dateIndex * xStep;
+          const y = padTop + (1 - ((point.equity_float - yMin) / equityRange)) * (height - padTop - padBottom);
+          return { ...point, x, y };
+        });
+        const pathStr = chartPointList.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' ');
+        const strokeWidth = Number.isFinite(Number(line.stroke_width_float)) ? Number(line.stroke_width_float) : 2.2;
+        return `<path class="pnl-line ${esc(line.class_name_str || '')}" d="${pathStr}" style="stroke: ${esc(line.color_str)}; stroke-width: ${esc(strokeWidth)};" aria-label="${esc(line.label_str)}" />`;
+      }).join('');
+      const legendHtml = `
+        <div class="combined-book-legend">
+          ${lineList.map(line => `
+            <span class="combined-book-legend-item ${esc(line.class_name_str || '')}">
+              <span class="combined-book-legend-swatch" style="background: ${esc(line.color_str)};"></span>
+              <span class="combined-book-legend-label">${esc(line.label_str)}</span>
+            </span>`).join('')}
+        </div>`;
+      const midY = padTop + (height - padTop - padBottom) / 2;
+      return `
+        <div class="pnl-curve">
+          <div class="pnl-chart-header">
+            <div>
+              <div class="pnl-chart-title">${esc(title)}</div>
+              <div class="pnl-chart-subtitle">${esc(dateList[0])} to ${esc(dateList[dateList.length - 1])} / ${esc(lineList.length)} lines${subtitleNoteStr ? ' / ' + esc(subtitleNoteStr) : ''}</div>
+            </div>
+            <div class="pnl-chart-range">
+              <span>Axis range</span>
+              <strong>${esc(fmt(yMin))} - ${esc(fmt(yMax))}</strong>
+            </div>
+          </div>
+          <div class="pnl-curve-plot">
+            <div class="pnl-y-axis" aria-hidden="true">
+              <span>${esc(fmt(yMax))}</span>
+              <span>${esc(fmt((yMax + yMin) / 2))}</span>
+              <span>${esc(fmt(yMin))}</span>
+            </div>
+            <div class="pnl-chart-area">
+              <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(title)}">
+                <line class="pnl-grid-line" x1="${padLeft}" y1="${padTop}" x2="${width - padRight}" y2="${padTop}" />
+                <line class="pnl-grid-line" x1="${padLeft}" y1="${midY}" x2="${width - padRight}" y2="${midY}" />
+                <line class="pnl-axis-line" x1="${padLeft}" y1="${height - padBottom}" x2="${width - padRight}" y2="${height - padBottom}" />
+                ${linePathHtml}
+              </svg>
+            </div>
+          </div>
+          <div class="pnl-x-axis" aria-hidden="true">
+            <span>${esc(dateList[0])}</span>
+            <span>${esc(dateList[dateList.length - 1])}</span>
+          </div>
+          ${legendHtml}
+        </div>`;
+    }
+
+    function renderCombinedContributionTable(contributionList) {
+      if (!contributionList.length) {
+        return '<div class="empty-note">No POD contributors were found for this environment.</div>';
+      }
+      return `
+        <table class="mini-table combined-book-table">
+          <thead>
+            <tr>
+              <th>POD</th>
+              <th>Equity</th>
+              <th>Daily PnL $</th>
+              <th>Latest EOD</th>
+              <th>EOD status</th>
+              <th>Freshness</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${contributionList.map(contribution => `
+              <tr>
+                <td><span class="pod-link" data-combined-pod="${esc(contribution.pod_id_str)}" data-combined-mode="${esc(contribution.mode_str)}">${esc(contribution.pod_id_str)}</span><br><span class="muted strategy-text">${esc(contribution.strategy_import_str || '-')}</span></td>
+                <td class="num">${esc(fmt(contribution.latest_equity_float))}</td>
+                <td class="num">${signedValueHtml(contribution.strict_daily_pnl_float, fmtUnavailable)}</td>
+                <td>${esc(contribution.latest_market_date_str || '-')}</td>
+                <td>${esc(contribution.carry_forward_status_str || '-')}</td>
+                <td>${esc(contribution.freshness_warning_str || 'current')}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`;
     }
 
     function renderPods() {
@@ -5841,7 +7047,7 @@ DASHBOARD_HTML_STR = """<!doctype html>
         </section>`;
     }
 
-    function renderPnlCurve(pointList) {
+    function renderPnlCurve(pointList, titleText, ariaLabelText) {
       const equityPointList = (pointList || [])
         .map((point, index) => ({
           index,
@@ -5885,11 +7091,13 @@ DASHBOARD_HTML_STR = """<!doctype html>
       const singlePointNoteHtml = equityPointList.length === 1
         ? '<div class="empty-note">Only one EOD equity point is available, so the chart shows a single mark.</div>'
         : '';
+      const chartTitleText = titleText || 'EOD equity curve';
+      const chartAriaLabelText = ariaLabelText || 'POD EOD equity curve';
       return `
         <div class="pnl-curve">
           <div class="pnl-chart-header">
             <div>
-              <div class="pnl-chart-title">EOD equity curve</div>
+              <div class="pnl-chart-title">${esc(chartTitleText)}</div>
               <div class="pnl-chart-subtitle">${esc(firstPoint.marketDate)} to ${esc(latestPoint.marketDate)} / ${esc(equityPointList.length)} points</div>
             </div>
             <div class="pnl-chart-range">
@@ -5904,7 +7112,7 @@ DASHBOARD_HTML_STR = """<!doctype html>
               <span>${esc(fmt(yMin))}</span>
             </div>
             <div class="pnl-chart-area">
-              <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="POD EOD equity curve">
+              <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(chartAriaLabelText)}">
                 <line class="pnl-grid-line" x1="${padLeft}" y1="${padTop}" x2="${width - padRight}" y2="${padTop}" />
                 <line class="pnl-grid-line" x1="${padLeft}" y1="${midY}" x2="${width - padRight}" y2="${midY}" />
                 <line class="pnl-axis-line" x1="${padLeft}" y1="${height - padBottom}" x2="${width - padRight}" y2="${height - padBottom}" />

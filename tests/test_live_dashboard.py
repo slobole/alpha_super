@@ -400,6 +400,26 @@ def _row_by_pod_id(summary_dict: dict, pod_id_str: str) -> dict:
     return row_list[0]
 
 
+def _combined_env_by_mode(summary_dict: dict, mode_str: str) -> dict:
+    environment_list = [
+        environment_dict
+        for environment_dict in summary_dict["combined_book_dict"]["environment_dict_list"]
+        if environment_dict["mode_str"] == mode_str
+    ]
+    assert len(environment_list) == 1
+    return environment_list[0]
+
+
+def _combined_contribution_by_pod(environment_dict: dict, pod_id_str: str) -> dict:
+    contribution_list = [
+        contribution_dict
+        for contribution_dict in environment_dict["contribution_dict_list"]
+        if contribution_dict["pod_id_str"] == pod_id_str
+    ]
+    assert len(contribution_list) == 1
+    return contribution_list[0]
+
+
 def _wait_for_job_status(
     manager_obj: DiffJobManager,
     job_id_str: str,
@@ -1262,6 +1282,220 @@ def test_dashboard_detail_pod_pnl_uses_eod_history_and_latest_same_day_snapshot(
     assert point_by_market_date_dict["2024-01-02"]["since_start_pnl_float"] == 0.0
 
 
+def test_dashboard_combined_book_uses_strict_and_carry_forward_eod_series(tmp_path: Path):
+    releases_root_path_obj = tmp_path / "releases"
+    for pod_id_str in ("pod_alpha", "pod_beta"):
+        _write_release_manifest(
+            releases_root_path_obj,
+            user_id_str="paper_user",
+            pod_id_str=pod_id_str,
+            mode_str="paper",
+        )
+    release_map_dict = {
+        release_obj.pod_id_str: release_obj
+        for release_obj in load_release_list(str(releases_root_path_obj))
+    }
+    alpha_db_path_obj = tmp_path / "state" / "pod_alpha.sqlite3"
+    beta_db_path_obj = tmp_path / "state" / "pod_beta.sqlite3"
+    _seed_eod_pod_state(
+        alpha_db_path_obj,
+        release_map_dict["pod_alpha"],
+        total_value_float=10000.0,
+        updated_timestamp_ts=datetime(2024, 1, 2, 21, 30, tzinfo=UTC),
+    )
+    _seed_eod_pod_state(
+        alpha_db_path_obj,
+        release_map_dict["pod_alpha"],
+        total_value_float=10050.0,
+        updated_timestamp_ts=datetime(2024, 1, 3, 21, 30, tzinfo=UTC),
+    )
+    _seed_eod_pod_state(
+        alpha_db_path_obj,
+        release_map_dict["pod_alpha"],
+        total_value_float=10075.0,
+        updated_timestamp_ts=datetime(2024, 1, 3, 21, 35, tzinfo=UTC),
+    )
+    _seed_eod_pod_state(
+        alpha_db_path_obj,
+        release_map_dict["pod_alpha"],
+        total_value_float=10150.0,
+        updated_timestamp_ts=datetime(2024, 1, 4, 21, 30, tzinfo=UTC),
+    )
+    _seed_eod_pod_state(
+        beta_db_path_obj,
+        release_map_dict["pod_beta"],
+        total_value_float=20000.0,
+        updated_timestamp_ts=datetime(2024, 1, 2, 21, 30, tzinfo=UTC),
+    )
+    _seed_eod_pod_state(
+        beta_db_path_obj,
+        release_map_dict["pod_beta"],
+        total_value_float=20100.0,
+        updated_timestamp_ts=datetime(2024, 1, 3, 21, 30, tzinfo=UTC),
+    )
+    config_path_obj = tmp_path / "dashboard_config.yaml"
+    _write_config(
+        config_path_obj,
+        {
+            "pod_alpha": str(alpha_db_path_obj),
+            "pod_beta": str(beta_db_path_obj),
+        },
+    )
+    app_obj = DashboardApp(
+        releases_root_path_str=str(releases_root_path_obj),
+        config_path_str=str(config_path_obj),
+        results_root_path_str=str(tmp_path / "results"),
+    )
+
+    summary_dict = build_dashboard_summary_dict(
+        app_obj,
+        as_of_ts=datetime(2024, 1, 4, 22, 0, tzinfo=UTC),
+    )
+    paper_env_dict = _combined_env_by_mode(summary_dict, "paper")
+    alpha_contribution_dict = _combined_contribution_by_pod(
+        paper_env_dict,
+        "pod_alpha",
+    )
+    beta_contribution_dict = _combined_contribution_by_pod(
+        paper_env_dict,
+        "pod_beta",
+    )
+
+    assert paper_env_dict["pod_count_int"] == 2
+    assert paper_env_dict["status_str"] == "available_with_warnings"
+    assert paper_env_dict["latest_common_market_date_str"] == "2024-01-03"
+    assert paper_env_dict["strict_point_count_int"] == 2
+    assert paper_env_dict["strict_latest_equity_float"] == 30175.0
+    assert paper_env_dict["strict_daily_pnl_float"] == 175.0
+    assert abs(paper_env_dict["strict_daily_pnl_pct_float"] - (175.0 / 30000.0)) < 1e-12
+    assert paper_env_dict["latest_operational_market_date_str"] == "2024-01-04"
+    assert paper_env_dict["carry_forward_latest_equity_float"] == 30250.0
+    assert paper_env_dict["carry_forward_point_count_int"] == 3
+    assert paper_env_dict["carry_forward_equity_point_dict_list"][-1]["stale_pod_count_int"] == 1
+    assert paper_env_dict["carry_forward_equity_point_dict_list"][-1]["stale_pod_id_list"] == ["pod_beta"]
+    assert {warning_dict["warning_type_str"] for warning_dict in paper_env_dict["warning_dict_list"]} >= {
+        "stale_eod"
+    }
+    assert alpha_contribution_dict["latest_market_date_str"] == "2024-01-04"
+    assert alpha_contribution_dict["strict_daily_pnl_float"] == 75.0
+    assert alpha_contribution_dict["carry_forward_status_str"] == "current"
+    assert len(alpha_contribution_dict["equity_point_dict_list"]) == 3
+    assert beta_contribution_dict["latest_market_date_str"] == "2024-01-03"
+    assert beta_contribution_dict["strict_daily_pnl_float"] == 100.0
+    assert beta_contribution_dict["carry_forward_status_str"] == "carried_forward"
+    assert beta_contribution_dict["freshness_warning_str"] == "Carried from 2024-01-03"
+    assert len(beta_contribution_dict["equity_point_dict_list"]) == 2
+
+
+def test_dashboard_combined_book_separates_modes_and_warns_without_failing(
+    tmp_path: Path,
+):
+    releases_root_path_obj = tmp_path / "releases"
+    _write_release_manifest(
+        releases_root_path_obj,
+        user_id_str="live_user",
+        pod_id_str="pod_live",
+        mode_str="live",
+        account_route_str="U_LIVE_TEST",
+    )
+    _write_release_manifest(
+        releases_root_path_obj,
+        user_id_str="paper_user",
+        pod_id_str="pod_paper_a",
+        mode_str="paper",
+        account_route_str="DU_SHARED",
+    )
+    _write_release_manifest(
+        releases_root_path_obj,
+        user_id_str="paper_user",
+        pod_id_str="pod_paper_b",
+        mode_str="paper",
+        account_route_str="DU_SHARED",
+    )
+    _write_release_manifest(
+        releases_root_path_obj,
+        user_id_str="paper_user",
+        pod_id_str="pod_paper_missing",
+        mode_str="paper",
+    )
+    _write_release_manifest(
+        releases_root_path_obj,
+        user_id_str="incubation_user",
+        pod_id_str="pod_inc",
+        mode_str="incubation",
+    )
+    release_map_dict = {
+        release_obj.pod_id_str: release_obj
+        for release_obj in load_release_list(str(releases_root_path_obj))
+    }
+    live_db_path_obj = tmp_path / "state" / "pod_live.sqlite3"
+    paper_a_db_path_obj = tmp_path / "state" / "pod_paper_a.sqlite3"
+    paper_b_db_path_obj = tmp_path / "state" / "pod_paper_b.sqlite3"
+    inc_db_path_obj = tmp_path / "state" / "pod_inc.sqlite3"
+    paper_b_db_path_obj.parent.mkdir(parents=True, exist_ok=True)
+    sqlite3.connect(str(paper_b_db_path_obj)).close()
+    _seed_eod_pod_state(
+        live_db_path_obj,
+        release_map_dict["pod_live"],
+        total_value_float=50000.0,
+        updated_timestamp_ts=datetime(2024, 1, 3, 21, 30, tzinfo=UTC),
+    )
+    _seed_eod_pod_state(
+        paper_a_db_path_obj,
+        release_map_dict["pod_paper_a"],
+        total_value_float=10000.0,
+        updated_timestamp_ts=datetime(2024, 1, 3, 21, 30, tzinfo=UTC),
+    )
+    _seed_eod_pod_state(
+        inc_db_path_obj,
+        release_map_dict["pod_inc"],
+        total_value_float=75000.0,
+        updated_timestamp_ts=datetime(2024, 1, 3, 21, 30, tzinfo=UTC),
+        snapshot_source_str="virtual_broker",
+    )
+    config_path_obj = tmp_path / "dashboard_config.yaml"
+    _write_config(
+        config_path_obj,
+        {
+            "pod_live": str(live_db_path_obj),
+            "pod_paper_a": str(paper_a_db_path_obj),
+            "pod_paper_b": str(paper_b_db_path_obj),
+            "pod_paper_missing": str(tmp_path / "state" / "pod_paper_missing.sqlite3"),
+            "pod_inc": str(inc_db_path_obj),
+        },
+    )
+    app_obj = DashboardApp(
+        releases_root_path_str=str(releases_root_path_obj),
+        config_path_str=str(config_path_obj),
+        results_root_path_str=str(tmp_path / "results"),
+    )
+
+    summary_dict = build_dashboard_summary_dict(app_obj, as_of_ts=AS_OF_TS)
+    live_env_dict = _combined_env_by_mode(summary_dict, "live")
+    paper_env_dict = _combined_env_by_mode(summary_dict, "paper")
+    incubation_env_dict = _combined_env_by_mode(summary_dict, "incubation")
+
+    assert live_env_dict["pod_count_int"] == 1
+    assert live_env_dict["strict_latest_equity_float"] == 50000.0
+    assert paper_env_dict["pod_count_int"] == 3
+    assert paper_env_dict["strict_point_count_int"] == 0
+    assert paper_env_dict["carry_forward_latest_equity_float"] == 10000.0
+    assert incubation_env_dict["pod_count_int"] == 1
+    assert incubation_env_dict["strict_latest_equity_float"] == 75000.0
+    assert {
+        warning_dict["warning_type_str"]
+        for warning_dict in paper_env_dict["warning_dict_list"]
+    } >= {"duplicate_account_route", "empty_db", "missing_db"}
+    assert _combined_contribution_by_pod(
+        paper_env_dict,
+        "pod_paper_b",
+    )["freshness_warning_str"] == "DB empty"
+    assert _combined_contribution_by_pod(
+        paper_env_dict,
+        "pod_paper_missing",
+    )["freshness_warning_str"] == "DB missing"
+
+
 def test_dashboard_detail_parses_decision_plan_and_preserves_execution_rows(tmp_path: Path):
     releases_root_path_obj = tmp_path / "releases"
     _write_release_manifest(
@@ -1511,6 +1745,18 @@ def test_dashboard_html_uses_structured_operator_sections():
     assert ".detail-workspace {" in DASHBOARD_HTML_STR
     assert "Console Status" in DASHBOARD_HTML_STR
     assert "Alert Box" in DASHBOARD_HTML_STR
+    assert "Combined Book" in DASHBOARD_HTML_STR
+    assert "selectedCombinedBookEnvironmentList" in DASHBOARD_HTML_STR
+    assert "renderCombinedBookAbsoluteCurve" in DASHBOARD_HTML_STR
+    assert "renderCombinedBookIndexedCurve" in DASHBOARD_HTML_STR
+    assert "Combined book equity ($)" in DASHBOARD_HTML_STR
+    assert "Strategy comparison (indexed to 100)" in DASHBOARD_HTML_STR
+    assert "bold line is Combined" in DASHBOARD_HTML_STR
+    assert "indexLineToBase100" in DASHBOARD_HTML_STR
+    assert 'data-combined-toggle-pod' in DASHBOARD_HTML_STR
+    assert "Strict common-date equity" not in DASHBOARD_HTML_STR
+    assert "Carry-forward operational equity" not in DASHBOARD_HTML_STR
+    assert "Selected POD equity curves" not in DASHBOARD_HTML_STR
     assert "POD List" in DASHBOARD_HTML_STR
     assert "Selected POD / What We Learned" in DASHBOARD_HTML_STR
     assert "read-only / copy-only" in DASHBOARD_HTML_STR

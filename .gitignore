@@ -35,6 +35,7 @@ temp/
 .codex_tmp/
 .codex_tmp_*/
 .codex/
+.claude/worktrees/
 scratch/
 .pytest_tmp*/
 pytest_tmp*/
