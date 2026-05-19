@@ -142,7 +142,8 @@ def test_server_doctor_passes_with_fake_norgate_api_and_report_json(tmp_path, mo
 
     status_dict = _check_status_dict(report_obj)
     report_dict = json.loads(report_path_obj.read_text(encoding="utf-8"))
-    client_dir_path_obj = service_root_path_obj / "clients" / CLIENT_ID_STR
+    client_dir_path_obj = service_root_path_obj / CLIENT_ID_STR
+    snapshot_dir_path_obj = client_dir_path_obj / "snapshots" / PROFILE_STR / SNAPSHOT_DATE_STR
 
     assert report_obj.result_str == "PASS"
     assert status_dict["norgatedata import"] == "PASS"
@@ -158,6 +159,7 @@ def test_server_doctor_passes_with_fake_norgate_api_and_report_json(tmp_path, mo
     assert (client_dir_path_obj / "accepted_profiles.txt").exists()
     assert (client_dir_path_obj / "export_status.json").exists()
     assert (client_dir_path_obj / "export.log").exists()
+    assert snapshot_dir_path_obj.exists()
 
 
 def test_server_doctor_fails_when_token_missing(tmp_path, monkeypatch):

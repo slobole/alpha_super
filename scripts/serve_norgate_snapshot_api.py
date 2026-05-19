@@ -109,8 +109,6 @@ class NorgateSnapshotApiService:
         start_date_str: str = "1990-01-01",
     ) -> None:
         self.service_root_path_obj = service_root_path_obj.expanduser()
-        self.client_root_path_obj = self.service_root_path_obj / "clients"
-        self.snapshot_root_path_obj = self.service_root_path_obj / "snapshots"
         self.token_str = str(token_str)
         self.exporter_fn = exporter_fn
         self.start_date_str = str(start_date_str)
@@ -122,7 +120,10 @@ class NorgateSnapshotApiService:
 
     def client_dir_path_obj(self, client_id_str: str) -> Path:
         safe_client_id_str = _validate_path_component_str(client_id_str, "client_id_str")
-        return self.client_root_path_obj / safe_client_id_str
+        return self.service_root_path_obj / safe_client_id_str
+
+    def client_snapshot_root_path_obj(self, client_id_str: str) -> Path:
+        return self.client_dir_path_obj(client_id_str) / "snapshots"
 
     def _status_path_obj(self, client_id_str: str) -> Path:
         return self.client_dir_path_obj(client_id_str) / "export_status.json"
@@ -236,8 +237,9 @@ class NorgateSnapshotApiService:
         snapshot_file_list: list[dict[str, Any]] = []
         try:
             for profile_str in requested_profile_list:
+                client_snapshot_root_path_obj = self.client_snapshot_root_path_obj(safe_client_id_str)
                 snapshot_dir_path_obj = self.exporter_fn(
-                    snapshot_root_str=str(self.snapshot_root_path_obj),
+                    snapshot_root_str=str(client_snapshot_root_path_obj),
                     profile_str=profile_str,
                     snapshot_date_str=None,
                     start_date_str=self.start_date_str,
@@ -316,7 +318,7 @@ class NorgateSnapshotApiService:
             raise NorgateApiError(403, f"Client {safe_client_id_str} has not accepted profile {safe_profile_str}.")
 
         snapshot_file_path_obj = (
-            self.snapshot_root_path_obj
+            self.client_snapshot_root_path_obj(safe_client_id_str)
             / safe_profile_str
             / safe_snapshot_date_str
             / safe_file_name_str

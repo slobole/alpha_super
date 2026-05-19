@@ -175,7 +175,7 @@ def test_api_rejects_unsupported_profile_and_writes_failure_status(tmp_path):
                 profile_list=["intraday_1m_plus_daily_pit"],
             )
 
-    client_dir_path_obj = tmp_path / "norgate_service" / "clients" / CLIENT_ID_STR
+    client_dir_path_obj = tmp_path / "norgate_service" / CLIENT_ID_STR
     status_dict = json.loads((client_dir_path_obj / "export_status.json").read_text(encoding="utf-8"))
     assert status_dict["status_str"] == "failed"
     assert "intraday_1m_plus_daily_pit" in (client_dir_path_obj / "required_profiles.txt").read_text(
@@ -207,12 +207,15 @@ def test_api_writes_audit_files_and_serves_only_snapshot_artifacts(tmp_path):
         with pytest.raises(HTTPError) as exc_info:
             urlopen(bad_file_request_obj, timeout=5)
 
-    client_dir_path_obj = tmp_path / "norgate_service" / "clients" / CLIENT_ID_STR
+    client_dir_path_obj = tmp_path / "norgate_service" / CLIENT_ID_STR
+    snapshot_dir_path_obj = client_dir_path_obj / "snapshots" / PROFILE_STR / SNAPSHOT_DATE_STR
     assert response_dict["status_str"] == "ready"
     assert manifest_dict["profile"] == PROFILE_STR
     assert (client_dir_path_obj / "required_profiles.txt").exists()
     assert (client_dir_path_obj / "accepted_profiles.txt").exists()
     assert (client_dir_path_obj / "export_status.json").exists()
+    assert (snapshot_dir_path_obj / MANIFEST_FILE_NAME_STR).exists()
+    assert (snapshot_dir_path_obj / PRICE_FILE_NAME_STR).exists()
     assert exc_info.value.code == 404
 
 

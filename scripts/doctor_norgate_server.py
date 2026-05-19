@@ -454,7 +454,7 @@ def _check_audit_files(
     client_id_str: str,
     printer_fn: PrinterFn,
 ) -> None:
-    client_dir_path_obj = service_root_path_obj / "clients" / client_id_str
+    client_dir_path_obj = service_root_path_obj / client_id_str
     required_file_list = [
         "required_profiles.txt",
         "accepted_profiles.txt",
@@ -524,15 +524,17 @@ def _run_local_export_check(
     check_list: list[DoctorCheckResult],
     *,
     service_root_path_obj: Path,
+    client_id_str: str,
     profile_str: str,
     start_date_str: str,
     exporter_fn: ExporterFn,
     manifest_loader_fn: ManifestLoaderFn,
     printer_fn: PrinterFn,
 ) -> None:
+    snapshot_root_path_obj = service_root_path_obj / client_id_str / "snapshots"
     try:
         snapshot_dir_path_obj = exporter_fn(
-            snapshot_root_str=str(service_root_path_obj / "snapshots"),
+            snapshot_root_str=str(snapshot_root_path_obj),
             profile_str=profile_str,
             snapshot_date_str=None,
             start_date_str=start_date_str,
@@ -559,7 +561,7 @@ def _run_local_export_check(
     )
     _validate_snapshot(
         check_list,
-        snapshot_root_path_obj=service_root_path_obj / "snapshots",
+        snapshot_root_path_obj=snapshot_root_path_obj,
         profile_str=profile_str,
         snapshot_date_str=snapshot_date_str,
         manifest_loader_fn=manifest_loader_fn,
@@ -632,7 +634,7 @@ def _run_api_export_check(
     )
     _validate_snapshot(
         check_list,
-        snapshot_root_path_obj=service_root_path_obj / "snapshots",
+        snapshot_root_path_obj=service_root_path_obj / client_id_str / "snapshots",
         profile_str=profile_str,
         snapshot_date_str=snapshot_date_str,
         manifest_loader_fn=manifest_loader_fn,
@@ -742,6 +744,7 @@ def run_norgate_server_doctor(
             _run_local_export_check(
                 check_list,
                 service_root_path_obj=service_root_path_obj,
+                client_id_str=client_id_str,
                 profile_str=current_profile_str,
                 start_date_str=start_date_str,
                 exporter_fn=exporter_fn,
