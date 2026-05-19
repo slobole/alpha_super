@@ -5,7 +5,7 @@ Start the private Norgate artifact API in a visible debug window, wait for
 
 [CmdletBinding()]
 param(
-    [string]$ConfigPath = (Join-Path (Split-Path -Parent $PSScriptRoot) "config.env"),
+    [string]$ConfigPath = "",
     [string]$ServiceRoot,
     [string]$ApiHost,
     [int]$ApiPort = 0,
@@ -83,6 +83,9 @@ $script_dir_path_str = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repo_root_path_str = (Resolve-Path -LiteralPath (Join-Path $script_dir_path_str "..")).Path
 Set-Location -LiteralPath $repo_root_path_str
 
+if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
+    $ConfigPath = Join-Path $repo_root_path_str "config.env"
+}
 Load-ConfigEnv -ConfigPathStr $ConfigPath
 
 if (-not [string]::IsNullOrWhiteSpace($ApiToken)) { $env:NORGATE_API_TOKEN = $ApiToken }
