@@ -29,6 +29,15 @@ from scripts.serve_norgate_snapshot_api import (
     NORGATE_API_TOKEN_ENV_STR,
     NORGATE_API_TOKEN_HEADER_STR,
 )
+from scripts.norgate_config_env import (
+    NORGATE_CLIENT_ID_ENV_STR,
+    NORGATE_LOCAL_SNAPSHOT_ROOT_ENV_STR,
+    NORGATE_RELEASES_ROOT_ENV_STR,
+    NORGATE_SYNC_MODE_ENV_STR,
+    env_str,
+    load_config_env_file,
+    norgate_api_url_from_env_str,
+)
 
 
 ALLOWED_DOWNLOAD_FILE_SET = {
@@ -304,18 +313,56 @@ def sync_required_snapshots(
 
 
 def main() -> int:
+    load_config_env_file()
+
     parser_obj = argparse.ArgumentParser(description="Sync Norgate artifact snapshots from the private API.")
-    parser_obj.add_argument("--api-url", required=True, help="Base API URL, for example http://norgate-node:8787.")
-    parser_obj.add_argument("--client-id", required=True, help="Client identifier used by the Norgate API.")
-    parser_obj.add_argument("--releases-root", required=True, help="Local release manifest root.")
-    parser_obj.add_argument("--mode", required=True, help="Release mode to sync, for example live or paper.")
-    parser_obj.add_argument("--local-root", required=True, help="Local NORGATE_SNAPSHOT_ROOT path.")
+    parser_obj.add_argument(
+        "--api-url",
+        default=norgate_api_url_from_env_str(),
+        help="Base API URL, for example http://norgate-node:8787.",
+    )
+    parser_obj.add_argument(
+        "--client-id",
+        default=env_str(NORGATE_CLIENT_ID_ENV_STR),
+        help="Client identifier used by the Norgate API.",
+    )
+    parser_obj.add_argument(
+        "--releases-root",
+        default=env_str(NORGATE_RELEASES_ROOT_ENV_STR),
+        help="Local release manifest root.",
+    )
+    parser_obj.add_argument(
+        "--mode",
+        default=env_str(NORGATE_SYNC_MODE_ENV_STR),
+        help="Release mode to sync, for example live or paper.",
+    )
+    parser_obj.add_argument(
+        "--local-root",
+        default=env_str(
+            NORGATE_LOCAL_SNAPSHOT_ROOT_ENV_STR,
+            env_str(NORGATE_SNAPSHOT_ROOT_ENV_STR),
+        ),
+        help="Local NORGATE_SNAPSHOT_ROOT path.",
+    )
     parser_obj.add_argument("--overwrite", action="store_true", help="Replace existing local snapshot folders.")
     args_obj = parser_obj.parse_args()
 
     token_str = os.getenv(NORGATE_API_TOKEN_ENV_STR, "").strip()
     if not token_str:
         raise RuntimeError(f"{NORGATE_API_TOKEN_ENV_STR} must be set before syncing snapshots.")
+    required_arg_name_tuple = ("api_url", "client_id", "releases_root", "mode", "local_root")
+    for arg_name_str in required_arg_name_tuple:
+        if not getattr(args_obj, arg_name_str):
+            env_name_str = {
+                "api_url": "NORGATE_API_URL or NORGATE_API_HOST/NORGATE_API_PORT",
+                "client_id": NORGATE_CLIENT_ID_ENV_STR,
+                "releases_root": NORGATE_RELEASES_ROOT_ENV_STR,
+                "mode": NORGATE_SYNC_MODE_ENV_STR,
+                "local_root": f"{NORGATE_LOCAL_SNAPSHOT_ROOT_ENV_STR} or {NORGATE_SNAPSHOT_ROOT_ENV_STR}",
+            }[arg_name_str]
+            raise RuntimeError(
+                f"--{arg_name_str.replace('_', '-')} or {env_name_str} must be set before syncing snapshots."
+            )
 
     promoted_path_list = sync_required_snapshots(
         api_url_str=str(args_obj.api_url),

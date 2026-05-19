@@ -25,6 +25,14 @@ from scripts.export_norgate_snapshot import (
     SUPPORTED_EOD_PROFILE_TUPLE,
     export_profile_snapshot,
 )
+from scripts.norgate_config_env import (
+    NORGATE_API_HOST_ENV_STR,
+    NORGATE_API_PORT_ENV_STR,
+    NORGATE_SERVICE_ROOT_ENV_STR,
+    env_int,
+    env_str,
+    load_config_env_file,
+)
 
 
 NORGATE_API_TOKEN_ENV_STR = "NORGATE_API_TOKEN"
@@ -414,16 +422,37 @@ def make_handler_class(service_obj: NorgateSnapshotApiService):
 
 
 def main() -> int:
+    load_config_env_file()
+
     parser_obj = argparse.ArgumentParser(description="Serve private Norgate snapshot artifacts over HTTP.")
-    parser_obj.add_argument("--service-root", required=True, help="Norgate service root directory.")
-    parser_obj.add_argument("--host", default="127.0.0.1", help="Bind host. Use a Tailscale IP/host for remote clients.")
-    parser_obj.add_argument("--port", type=int, default=8787, help="Bind port.")
-    parser_obj.add_argument("--start-date", default="1990-01-01", help="First historical date to export.")
+    parser_obj.add_argument(
+        "--service-root",
+        default=env_str(NORGATE_SERVICE_ROOT_ENV_STR),
+        help="Norgate service root directory.",
+    )
+    parser_obj.add_argument(
+        "--host",
+        default=env_str(NORGATE_API_HOST_ENV_STR, "127.0.0.1"),
+        help="Bind host. Use a Tailscale IP/host for remote clients.",
+    )
+    parser_obj.add_argument(
+        "--port",
+        type=int,
+        default=env_int(NORGATE_API_PORT_ENV_STR, 8787),
+        help="Bind port.",
+    )
+    parser_obj.add_argument(
+        "--start-date",
+        default=env_str("NORGATE_EXPORT_START_DATE", "1990-01-01"),
+        help="First historical date to export.",
+    )
     args_obj = parser_obj.parse_args()
 
     token_str = os.getenv(NORGATE_API_TOKEN_ENV_STR, "").strip()
     if not token_str:
         raise RuntimeError(f"{NORGATE_API_TOKEN_ENV_STR} must be set before starting the API.")
+    if not args_obj.service_root:
+        raise RuntimeError(f"--service-root or {NORGATE_SERVICE_ROOT_ENV_STR} must be set before starting the API.")
 
     service_obj = NorgateSnapshotApiService(
         service_root_path_obj=Path(args_obj.service_root),

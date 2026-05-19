@@ -31,6 +31,15 @@ from scripts.serve_norgate_snapshot_api import (
     NORGATE_API_TOKEN_ENV_STR,
     NORGATE_API_TOKEN_HEADER_STR,
 )
+from scripts.norgate_config_env import (
+    NORGATE_CLIENT_ID_ENV_STR,
+    NORGATE_DOCTOR_REPORT_JSON_ENV_STR,
+    NORGATE_SERVICE_ROOT_ENV_STR,
+    env_float,
+    env_str,
+    load_config_env_file,
+    norgate_api_url_from_env_str,
+)
 
 
 DEFAULT_CLIENT_ID_STR = "doctor_server"
@@ -761,17 +770,54 @@ def run_norgate_server_doctor(
 
 
 def main() -> int:
+    load_config_env_file()
+
     parser_obj = argparse.ArgumentParser(description="Check whether the Norgate artifact server is ready.")
-    parser_obj.add_argument("--service-root", required=True, help="Norgate service root directory.")
-    parser_obj.add_argument("--api-url", default=None, help="Base API URL, for example http://100.123.13.69:8787.")
-    parser_obj.add_argument("--profile", default=DEFAULT_PROFILE_STR, help="Small EOD profile to request/export.")
-    parser_obj.add_argument("--heavy-profile", default=None, help="Optional heavy profile to request/export.")
-    parser_obj.add_argument("--client-id", default=DEFAULT_CLIENT_ID_STR, help="Doctor client id.")
-    parser_obj.add_argument("--start-date", default="1990-01-01", help="First historical date for local exports.")
-    parser_obj.add_argument("--min-free-gb", type=float, default=DEFAULT_MIN_FREE_GB_FLOAT)
+    parser_obj.add_argument(
+        "--service-root",
+        default=env_str(NORGATE_SERVICE_ROOT_ENV_STR),
+        help="Norgate service root directory.",
+    )
+    parser_obj.add_argument(
+        "--api-url",
+        default=norgate_api_url_from_env_str(),
+        help="Base API URL, for example http://100.123.13.69:8787.",
+    )
+    parser_obj.add_argument(
+        "--profile",
+        default=env_str("NORGATE_DOCTOR_PROFILE", DEFAULT_PROFILE_STR),
+        help="Small EOD profile to request/export.",
+    )
+    parser_obj.add_argument(
+        "--heavy-profile",
+        default=env_str("NORGATE_HEAVY_PROFILE"),
+        help="Optional heavy profile to request/export.",
+    )
+    parser_obj.add_argument(
+        "--client-id",
+        default=env_str(NORGATE_CLIENT_ID_ENV_STR, DEFAULT_CLIENT_ID_STR),
+        help="Doctor client id.",
+    )
+    parser_obj.add_argument(
+        "--start-date",
+        default=env_str("NORGATE_EXPORT_START_DATE", "1990-01-01"),
+        help="First historical date for local exports.",
+    )
+    parser_obj.add_argument(
+        "--min-free-gb",
+        type=float,
+        default=env_float("NORGATE_MIN_FREE_GB", DEFAULT_MIN_FREE_GB_FLOAT),
+    )
     parser_obj.add_argument("--timeout-seconds", type=float, default=120.0)
-    parser_obj.add_argument("--report-json", default=None, help="Optional JSON report output path.")
+    parser_obj.add_argument(
+        "--report-json",
+        default=env_str(NORGATE_DOCTOR_REPORT_JSON_ENV_STR),
+        help="Optional JSON report output path.",
+    )
     args_obj = parser_obj.parse_args()
+
+    if not args_obj.service_root:
+        raise RuntimeError(f"--service-root or {NORGATE_SERVICE_ROOT_ENV_STR} must be set before running the doctor.")
 
     report_obj = run_norgate_server_doctor(
         service_root_path_str=str(args_obj.service_root),
