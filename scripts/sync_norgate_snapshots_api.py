@@ -31,7 +31,6 @@ from scripts.serve_norgate_snapshot_api import (
 )
 from scripts.norgate_config_env import (
     NORGATE_CLIENT_ID_ENV_STR,
-    NORGATE_LOCAL_SNAPSHOT_ROOT_ENV_STR,
     NORGATE_RELEASES_ROOT_ENV_STR,
     NORGATE_SYNC_MODE_ENV_STR,
     env_str,
@@ -338,10 +337,7 @@ def main() -> int:
     )
     parser_obj.add_argument(
         "--local-root",
-        default=env_str(
-            NORGATE_LOCAL_SNAPSHOT_ROOT_ENV_STR,
-            env_str(NORGATE_SNAPSHOT_ROOT_ENV_STR),
-        ),
+        default=env_str(NORGATE_SNAPSHOT_ROOT_ENV_STR),
         help="Local NORGATE_SNAPSHOT_ROOT path.",
     )
     parser_obj.add_argument("--overwrite", action="store_true", help="Replace existing local snapshot folders.")
@@ -358,7 +354,7 @@ def main() -> int:
                 "client_id": NORGATE_CLIENT_ID_ENV_STR,
                 "releases_root": NORGATE_RELEASES_ROOT_ENV_STR,
                 "mode": NORGATE_SYNC_MODE_ENV_STR,
-                "local_root": f"{NORGATE_LOCAL_SNAPSHOT_ROOT_ENV_STR} or {NORGATE_SNAPSHOT_ROOT_ENV_STR}",
+                "local_root": NORGATE_SNAPSHOT_ROOT_ENV_STR,
             }[arg_name_str]
             raise RuntimeError(
                 f"--{arg_name_str.replace('_', '-')} or {env_name_str} must be set before syncing snapshots."

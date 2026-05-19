@@ -33,9 +33,7 @@ from scripts.serve_norgate_snapshot_api import (
 )
 from scripts.norgate_config_env import (
     NORGATE_CLIENT_ID_ENV_STR,
-    NORGATE_DOCTOR_REPORT_JSON_ENV_STR,
     NORGATE_SERVICE_ROOT_ENV_STR,
-    env_float,
     env_str,
     load_config_env_file,
     norgate_api_url_from_env_str,
@@ -785,12 +783,12 @@ def main() -> int:
     )
     parser_obj.add_argument(
         "--profile",
-        default=env_str("NORGATE_DOCTOR_PROFILE", DEFAULT_PROFILE_STR),
+        default=DEFAULT_PROFILE_STR,
         help="Small EOD profile to request/export.",
     )
     parser_obj.add_argument(
         "--heavy-profile",
-        default=env_str("NORGATE_HEAVY_PROFILE"),
+        default=None,
         help="Optional heavy profile to request/export.",
     )
     parser_obj.add_argument(
@@ -800,18 +798,18 @@ def main() -> int:
     )
     parser_obj.add_argument(
         "--start-date",
-        default=env_str("NORGATE_EXPORT_START_DATE", "1990-01-01"),
+        default="1990-01-01",
         help="First historical date for local exports.",
     )
     parser_obj.add_argument(
         "--min-free-gb",
         type=float,
-        default=env_float("NORGATE_MIN_FREE_GB", DEFAULT_MIN_FREE_GB_FLOAT),
+        default=DEFAULT_MIN_FREE_GB_FLOAT,
     )
     parser_obj.add_argument("--timeout-seconds", type=float, default=120.0)
     parser_obj.add_argument(
         "--report-json",
-        default=env_str(NORGATE_DOCTOR_REPORT_JSON_ENV_STR),
+        default=None,
         help="Optional JSON report output path.",
     )
     args_obj = parser_obj.parse_args()

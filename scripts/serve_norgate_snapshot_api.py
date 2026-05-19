@@ -443,7 +443,7 @@ def main() -> int:
     )
     parser_obj.add_argument(
         "--start-date",
-        default=env_str("NORGATE_EXPORT_START_DATE", "1990-01-01"),
+        default="1990-01-01",
         help="First historical date to export.",
     )
     args_obj = parser_obj.parse_args()

@@ -19,8 +19,6 @@ NORGATE_API_URL_ENV_STR = "NORGATE_API_URL"
 NORGATE_CLIENT_ID_ENV_STR = "NORGATE_CLIENT_ID"
 NORGATE_RELEASES_ROOT_ENV_STR = "NORGATE_RELEASES_ROOT"
 NORGATE_SYNC_MODE_ENV_STR = "NORGATE_SYNC_MODE"
-NORGATE_LOCAL_SNAPSHOT_ROOT_ENV_STR = "NORGATE_LOCAL_SNAPSHOT_ROOT"
-NORGATE_DOCTOR_REPORT_JSON_ENV_STR = "NORGATE_DOCTOR_REPORT_JSON"
 
 
 def default_config_env_path_obj() -> Path:
@@ -65,13 +63,6 @@ def env_str(name_str: str, default_str: str | None = None) -> str | None:
     if value_str:
         return value_str
     return default_str
-
-
-def env_float(name_str: str, default_float: float) -> float:
-    value_str = os.getenv(name_str, "").strip()
-    if not value_str:
-        return default_float
-    return float(value_str)
 
 
 def env_int(name_str: str, default_int: int) -> int:
