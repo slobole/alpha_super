@@ -94,6 +94,10 @@ def _corrupting_exporter_fn(**kwargs) -> Path:
     return snapshot_dir_path_obj
 
 
+def _raising_exporter_fn(**_kwargs) -> Path:
+    raise RuntimeError("export boom")
+
+
 @contextmanager
 def _api_server(tmp_path: Path, exporter_fn=_fake_exporter_fn):
     service_obj = NorgateSnapshotApiService(
@@ -217,6 +221,64 @@ def test_api_writes_audit_files_and_serves_only_snapshot_artifacts(tmp_path):
     assert (snapshot_dir_path_obj / MANIFEST_FILE_NAME_STR).exists()
     assert (snapshot_dir_path_obj / PRICE_FILE_NAME_STR).exists()
     assert exc_info.value.code == 404
+
+
+def test_api_retention_keeps_current_snapshot_and_removes_other_date_dirs(tmp_path):
+    service_root_path_obj = tmp_path / "norgate_service"
+    profile_root_path_obj = service_root_path_obj / CLIENT_ID_STR / "snapshots" / PROFILE_STR
+    old_snapshot_dir_path_obj = profile_root_path_obj / "2024-01-01"
+    non_date_dir_path_obj = profile_root_path_obj / "notes"
+    other_profile_dir_path_obj = (
+        service_root_path_obj / CLIENT_ID_STR / "snapshots" / "norgate_eod_sp500_pit" / "2024-01-01"
+    )
+    other_client_dir_path_obj = service_root_path_obj / "client_other" / "snapshots" / PROFILE_STR / "2024-01-01"
+    for path_obj in [
+        old_snapshot_dir_path_obj,
+        non_date_dir_path_obj,
+        other_profile_dir_path_obj,
+        other_client_dir_path_obj,
+    ]:
+        path_obj.mkdir(parents=True)
+        (path_obj / "marker.txt").write_text("keep?", encoding="utf-8")
+
+    with _api_server(tmp_path) as (api_url_str, _service_obj):
+        post_requirements_dict(
+            api_url_str=api_url_str,
+            token_str=TOKEN_STR,
+            client_id_str=CLIENT_ID_STR,
+            profile_list=[PROFILE_STR],
+        )
+
+    current_snapshot_dir_path_obj = profile_root_path_obj / SNAPSHOT_DATE_STR
+    export_log_str = (service_root_path_obj / CLIENT_ID_STR / "export.log").read_text(encoding="utf-8")
+    assert current_snapshot_dir_path_obj.exists()
+    assert not old_snapshot_dir_path_obj.exists()
+    assert non_date_dir_path_obj.exists()
+    assert other_profile_dir_path_obj.exists()
+    assert other_client_dir_path_obj.exists()
+    assert "retention removed profile=norgate_eod_etf_plus_vix_helper dates=2024-01-01" in export_log_str
+
+
+def test_api_retention_does_not_delete_old_snapshot_when_export_fails(tmp_path):
+    service_root_path_obj = tmp_path / "norgate_service"
+    old_snapshot_dir_path_obj = service_root_path_obj / CLIENT_ID_STR / "snapshots" / PROFILE_STR / "2024-01-01"
+    old_snapshot_dir_path_obj.mkdir(parents=True)
+    (old_snapshot_dir_path_obj / "marker.txt").write_text("keep", encoding="utf-8")
+
+    with _api_server(tmp_path, exporter_fn=_raising_exporter_fn) as (api_url_str, _service_obj):
+        with pytest.raises(RuntimeError, match="export boom"):
+            post_requirements_dict(
+                api_url_str=api_url_str,
+                token_str=TOKEN_STR,
+                client_id_str=CLIENT_ID_STR,
+                profile_list=[PROFILE_STR],
+            )
+
+    status_dict = json.loads(
+        (service_root_path_obj / CLIENT_ID_STR / "export_status.json").read_text(encoding="utf-8")
+    )
+    assert old_snapshot_dir_path_obj.exists()
+    assert status_dict["status_str"] == "failed"
 
 
 def test_client_sync_derives_profiles_and_promotes_valid_snapshot(tmp_path, monkeypatch):

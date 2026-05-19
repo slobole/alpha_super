@@ -4,8 +4,9 @@ import argparse
 import hmac
 import json
 import os
+import shutil
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
@@ -99,6 +100,13 @@ def _read_json_dict(path_obj: Path) -> dict[str, Any]:
     return payload_obj
 
 
+def _valid_snapshot_date_name_bool(value_str: str) -> bool:
+    try:
+        return date.fromisoformat(value_str).isoformat() == value_str
+    except ValueError:
+        return False
+
+
 class NorgateSnapshotApiService:
     def __init__(
         self,
@@ -153,6 +161,35 @@ class NorgateSnapshotApiService:
 
     def _write_status(self, client_id_str: str, status_dict: dict[str, Any]) -> None:
         _write_json_atomic(self._status_path_obj(client_id_str), status_dict)
+
+    def _cleanup_old_snapshot_dirs(
+        self,
+        *,
+        client_id_str: str,
+        profile_str: str,
+        keep_snapshot_date_str: str,
+    ) -> list[str]:
+        safe_client_id_str = _validate_path_component_str(client_id_str, "client_id_str")
+        safe_profile_str = _validate_path_component_str(profile_str, "profile_str")
+        if not _valid_snapshot_date_name_bool(keep_snapshot_date_str):
+            raise NorgateApiError(500, f"Invalid snapshot date for retention cleanup: {keep_snapshot_date_str!r}")
+
+        profile_root_path_obj = self.client_snapshot_root_path_obj(safe_client_id_str) / safe_profile_str
+        if not profile_root_path_obj.exists():
+            return []
+
+        removed_date_list: list[str] = []
+        for snapshot_dir_path_obj in sorted(profile_root_path_obj.iterdir()):
+            snapshot_date_str = snapshot_dir_path_obj.name
+            if not snapshot_dir_path_obj.is_dir():
+                continue
+            if not _valid_snapshot_date_name_bool(snapshot_date_str):
+                continue
+            if snapshot_date_str == keep_snapshot_date_str:
+                continue
+            shutil.rmtree(snapshot_dir_path_obj)
+            removed_date_list.append(snapshot_date_str)
+        return removed_date_list
 
     def _build_snapshot_file_dict(self, client_id_str: str, profile_str: str, snapshot_dir_path_obj: Path) -> dict[str, Any]:
         manifest_path_obj = snapshot_dir_path_obj / MANIFEST_FILE_NAME_STR
@@ -289,6 +326,24 @@ class NorgateSnapshotApiService:
             safe_client_id_str,
             f"ready profiles={','.join(requested_profile_list)} snapshot_date={snapshot_date_str}",
         )
+        for snapshot_file_dict in snapshot_file_list:
+            try:
+                removed_date_list = self._cleanup_old_snapshot_dirs(
+                    client_id_str=safe_client_id_str,
+                    profile_str=str(snapshot_file_dict["profile_str"]),
+                    keep_snapshot_date_str=str(snapshot_file_dict["snapshot_date_str"]),
+                )
+            except Exception as exc:
+                self._append_log(safe_client_id_str, f"retention cleanup failed: {exc}")
+                continue
+            if removed_date_list:
+                self._append_log(
+                    safe_client_id_str,
+                    (
+                        f"retention removed profile={snapshot_file_dict['profile_str']} "
+                        f"dates={','.join(removed_date_list)}"
+                    ),
+                )
         return status_dict
 
     def load_status_dict(self, client_id_str: str) -> dict[str, Any]:
