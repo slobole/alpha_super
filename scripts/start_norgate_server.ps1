@@ -61,9 +61,7 @@ function Load-ConfigEnv {
                 $value_str = $value_str.Substring(1, $value_str.Length - 2)
             }
         }
-        if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($key_str, "Process"))) {
-            [Environment]::SetEnvironmentVariable($key_str, $value_str, "Process")
-        }
+        [Environment]::SetEnvironmentVariable($key_str, $value_str, "Process")
     }
     Write-Step "INFO" "loaded config.env: $ConfigPathStr"
 }
