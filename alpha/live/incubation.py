@@ -26,6 +26,11 @@ from alpha.live.models import (
 )
 from alpha.live.order_clerk import BrokerAdapter
 from alpha.live.state_store_v2 import LiveStateStore
+from data.norgate_loader import (
+    CAPITALSPECIAL_ADJUSTMENT_STR,
+    load_price_timeseries,
+    use_norgate_data_profile,
+)
 
 
 OfficialPriceLookup_Func = Callable[[list[str], str, str], dict[str, float]]
@@ -46,22 +51,13 @@ def load_official_price_map_from_norgate(
     session_date_str: str,
     price_field_str: str,
 ) -> dict[str, float]:
-    try:
-        import norgatedata
-    except ModuleNotFoundError as exc:  # pragma: no cover - dependency boundary
-        raise RuntimeError(
-            "Incubation official-price settlement requires the norgatedata package."
-        ) from exc
-
     official_price_map_dict: dict[str, float] = {}
     for asset_str in sorted({str(asset_str) for asset_str in asset_str_list}):
-        price_df = norgatedata.price_timeseries(
+        price_df = load_price_timeseries(
             asset_str,
-            stock_price_adjustment_setting=norgatedata.StockPriceAdjustmentType.CAPITALSPECIAL,
-            padding_setting=norgatedata.PaddingType.ALLMARKETDAYS,
-            start_date=session_date_str,
-            end_date=session_date_str,
-            timeseriesformat="pandas-dataframe",
+            adjustment_str=CAPITALSPECIAL_ADJUSTMENT_STR,
+            start_date_str=session_date_str,
+            end_date_str=session_date_str,
         )
         if price_df is None or len(price_df.index) == 0 or price_field_str not in price_df.columns:
             raise RuntimeError(
@@ -406,11 +402,13 @@ class IncubationBrokerAdapter(BrokerAdapter):
                 session_calendar_id_str=session_calendar_id_str,
             )
 
-        official_price_map_dict = self.official_price_lookup_func(
-            sorted({str(asset_str) for asset_str in asset_str_list}),
-            session_date_str,
-            price_field_str,
-        )
+        release_obj = self._get_release_for_account_route(account_route_str)
+        with use_norgate_data_profile(None if release_obj is None else release_obj.data_profile_str):
+            official_price_map_dict = self.official_price_lookup_func(
+                sorted({str(asset_str) for asset_str in asset_str_list}),
+                session_date_str,
+                price_field_str,
+            )
         source_str = (
             "incubation.norgate.official_close"
             if price_field_str == "Close"
@@ -625,11 +623,12 @@ class IncubationBrokerAdapter(BrokerAdapter):
             # account equity cannot depend on not-yet-observed open prices.
             session_date_str = self._previous_session_date_str(release_obj)
             price_field_str = "Close"
-        return self.official_price_lookup_func(
-            normalized_asset_str_list,
-            session_date_str,
-            price_field_str,
-        )
+        with use_norgate_data_profile(release_obj.data_profile_str):
+            return self.official_price_lookup_func(
+                normalized_asset_str_list,
+                session_date_str,
+                price_field_str,
+            )
 
     def _settle_due_vplan_list_for_account(self, account_route_str: str) -> None:
         for vplan_obj in self.state_store_obj.get_submitted_vplan_list():
@@ -685,11 +684,12 @@ class IncubationBrokerAdapter(BrokerAdapter):
                 }
             )
         else:
-            official_fill_price_map_dict = self.official_price_lookup_func(
-                settlement_asset_str_list,
-                target_session_date_str,
-                fill_price_field_str,
-            )
+            with use_norgate_data_profile(release_obj.data_profile_str):
+                official_fill_price_map_dict = self.official_price_lookup_func(
+                    settlement_asset_str_list,
+                    target_session_date_str,
+                    fill_price_field_str,
+                )
             fill_price_source_map_dict = {
                 asset_str: "incubation.norgate.official_close"
                 for asset_str in settlement_asset_str_list
@@ -863,11 +863,12 @@ class IncubationBrokerAdapter(BrokerAdapter):
                         }
                     )
             else:
-                settlement_mark_price_map_dict = self.official_price_lookup_func(
-                    sorted(updated_position_map_dict),
-                    target_session_date_str,
-                    fill_price_field_str,
-                )
+                with use_norgate_data_profile(release_obj.data_profile_str):
+                    settlement_mark_price_map_dict = self.official_price_lookup_func(
+                        sorted(updated_position_map_dict),
+                        target_session_date_str,
+                        fill_price_field_str,
+                    )
         position_value_float = sum(
             float(share_float) * float(settlement_mark_price_map_dict[asset_str])
             for asset_str, share_float in updated_position_map_dict.items()

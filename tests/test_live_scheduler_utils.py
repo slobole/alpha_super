@@ -8,6 +8,7 @@ from alpha.live.models import LiveRelease
 from alpha.live.scheduler_utils import (
     build_submission_timestamp_ts,
     build_target_execution_timestamp_ts,
+    evaluate_build_gate_dict,
     is_execution_window_expired_bool,
     is_release_due_for_build,
     select_due_release_list,
@@ -122,6 +123,52 @@ def test_scheduler_does_not_build_on_weekend_even_with_stale_snapshot(monkeypatc
         release_obj,
         datetime(2024, 2, 3, 14, 0, tzinfo=UTC),
     ) is False
+
+
+def test_scheduler_snapshot_mode_keeps_retrying_when_manifest_is_not_ready(tmp_path, monkeypatch):
+    release_obj = make_release("eod_snapshot_ready", "next_open_moo")
+    monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "true")
+    monkeypatch.setenv("NORGATE_SNAPSHOT_ROOT", str(tmp_path))
+
+    gate_dict = evaluate_build_gate_dict(
+        release_obj,
+        datetime(2024, 1, 31, 22, 5, tzinfo=UTC),
+    )
+
+    assert gate_dict["due_bool"] is False
+    assert gate_dict["reason_code_str"] == "snapshot_not_ready"
+
+
+def test_scheduler_allows_carry_forward_snapshot_before_submission_cutoff(monkeypatch):
+    release_obj = make_release("eod_snapshot_ready", "next_open_moo")
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda data_profile_str: pd.Timestamp("2024-01-30"),
+    )
+
+    gate_dict = evaluate_build_gate_dict(
+        release_obj,
+        datetime(2024, 1, 31, 14, 20, tzinfo=UTC),
+    )
+
+    assert gate_dict["due_bool"] is True
+    assert gate_dict["reason_code_str"] == "carry_forward_snapshot_ready"
+
+
+def test_scheduler_blocks_late_carry_forward_snapshot_after_submission_cutoff(monkeypatch):
+    release_obj = make_release("eod_snapshot_ready", "next_open_moo")
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda data_profile_str: pd.Timestamp("2024-01-30"),
+    )
+
+    gate_dict = evaluate_build_gate_dict(
+        release_obj,
+        datetime(2024, 1, 31, 15, 0, tzinfo=UTC),
+    )
+
+    assert gate_dict["due_bool"] is False
+    assert gate_dict["reason_code_str"] == "snapshot_window_expired"
 
 
 def test_scheduler_uses_real_early_close_for_pre_close_and_moc():

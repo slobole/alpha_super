@@ -66,6 +66,7 @@ import pandas as pd
 from alpha.engine.strategy import Strategy
 from alpha.live import scheduler_utils
 from alpha.live.models import DecisionPlan, LiveRelease, PodState
+from data.norgate_loader import build_data_source_metadata_dict, use_norgate_data_profile
 
 
 INCREMENTAL_DECISION_STRATEGY_IMPORT_SET: set[str] = {
@@ -252,6 +253,15 @@ def _get_expected_decision_book_type_str(strategy_import_str: str) -> str:
     )
 
 
+def _merge_data_source_snapshot_metadata_dict(
+    release_obj: LiveRelease,
+    snapshot_metadata_dict: dict[str, Any] | None,
+) -> dict[str, Any]:
+    merged_metadata_dict = build_data_source_metadata_dict(release_obj.data_profile_str)
+    merged_metadata_dict.update(snapshot_metadata_dict or {})
+    return merged_metadata_dict
+
+
 def _build_decision_plan_from_orders(
     release_obj: LiveRelease,
     signal_date_ts: datetime,
@@ -319,7 +329,10 @@ def _build_decision_plan_from_orders(
         target_execution_timestamp_ts=target_execution_timestamp_ts,
         execution_policy_str=release_obj.execution_policy_str,
         decision_base_position_map=decision_base_position_map,
-        snapshot_metadata_dict=snapshot_metadata_dict or {},
+        snapshot_metadata_dict=_merge_data_source_snapshot_metadata_dict(
+            release_obj,
+            snapshot_metadata_dict,
+        ),
         strategy_state_dict=_extract_strategy_state_dict(strategy_obj),
         decision_book_type_str="incremental_entry_exit_book",
         entry_target_weight_map_dict=entry_target_weight_map_dict,
@@ -375,7 +388,10 @@ def _build_full_target_weight_decision_plan(
         target_execution_timestamp_ts=target_execution_timestamp_ts,
         execution_policy_str=release_obj.execution_policy_str,
         decision_base_position_map=decision_base_position_map_dict,
-        snapshot_metadata_dict=snapshot_metadata_dict or {},
+        snapshot_metadata_dict=_merge_data_source_snapshot_metadata_dict(
+            release_obj,
+            snapshot_metadata_dict,
+        ),
         strategy_state_dict=strategy_state_dict,
         decision_book_type_str="full_target_weight_book",
         full_target_weight_map_dict=full_target_weight_map_dict,
@@ -969,35 +985,36 @@ def build_decision_plan_for_release(
     as_of_ts: datetime,
     pod_state_obj: PodState | None,
 ) -> DecisionPlan:
-    if release_obj.strategy_import_str == "strategies.dv2.strategy_mr_dv2:DVO2Strategy":
-        return _build_dv2_decision_plan(release_obj, as_of_ts, pod_state_obj)
-    if release_obj.strategy_import_str == "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy":
-        return _build_qpi_ibs_rsi_exit_decision_plan(release_obj, as_of_ts, pod_state_obj)
-    if release_obj.strategy_import_str == "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash":
-        return _build_taa_btal_tqqq_vix_cash_decision_plan(release_obj, as_of_ts, pod_state_obj)
-    if release_obj.strategy_import_str == "strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash":
-        return _build_taa_btal_1n_tqqq_vix_cash_decision_plan(release_obj, as_of_ts, pod_state_obj)
-    if release_obj.strategy_import_str == "strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash":
-        return _build_taa_btal_linearity_1n_qqq_vix_cash_decision_plan(
-            release_obj,
-            as_of_ts,
-            pod_state_obj,
-        )
-    if release_obj.strategy_import_str == "strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy":
-        return _build_atr_normalized_ndx_decision_plan(release_obj, as_of_ts, pod_state_obj)
-    if (
-        release_obj.strategy_import_str
-        == "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy"
-    ):
-        return _build_atr_normalized_ndx_decision_plan(
-            release_obj,
-            as_of_ts,
-            pod_state_obj,
-            module_import_str="strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled",
-            strategy_class_name_str="VxnScaledAtrNormalizedNdxStrategy",
-            data_loader_name_str="get_vxn_scaled_atr_normalized_ndx_data",
-            strategy_family_str="atr_normalized_ndx_vxn_scaled",
-        )
+    with use_norgate_data_profile(release_obj.data_profile_str):
+        if release_obj.strategy_import_str == "strategies.dv2.strategy_mr_dv2:DVO2Strategy":
+            return _build_dv2_decision_plan(release_obj, as_of_ts, pod_state_obj)
+        if release_obj.strategy_import_str == "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy":
+            return _build_qpi_ibs_rsi_exit_decision_plan(release_obj, as_of_ts, pod_state_obj)
+        if release_obj.strategy_import_str == "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash":
+            return _build_taa_btal_tqqq_vix_cash_decision_plan(release_obj, as_of_ts, pod_state_obj)
+        if release_obj.strategy_import_str == "strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash":
+            return _build_taa_btal_1n_tqqq_vix_cash_decision_plan(release_obj, as_of_ts, pod_state_obj)
+        if release_obj.strategy_import_str == "strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash":
+            return _build_taa_btal_linearity_1n_qqq_vix_cash_decision_plan(
+                release_obj,
+                as_of_ts,
+                pod_state_obj,
+            )
+        if release_obj.strategy_import_str == "strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy":
+            return _build_atr_normalized_ndx_decision_plan(release_obj, as_of_ts, pod_state_obj)
+        if (
+            release_obj.strategy_import_str
+            == "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy"
+        ):
+            return _build_atr_normalized_ndx_decision_plan(
+                release_obj,
+                as_of_ts,
+                pod_state_obj,
+                module_import_str="strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled",
+                strategy_class_name_str="VxnScaledAtrNormalizedNdxStrategy",
+                data_loader_name_str="get_vxn_scaled_atr_normalized_ndx_data",
+                strategy_family_str="atr_normalized_ndx_vxn_scaled",
+            )
     raise NotImplementedError(
         "V2 broker-truth execution currently supports the configured decision-book families only. "
         f"Unsupported strategy_import_str '{release_obj.strategy_import_str}'."

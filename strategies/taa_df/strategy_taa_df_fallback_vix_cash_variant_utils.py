@@ -28,7 +28,6 @@ import sys
 
 import numpy as np
 import pandas as pd
-import norgatedata
 from IPython.display import display
 
 repo_root_path = Path(__file__).resolve().parents[2]
@@ -57,6 +56,7 @@ except ModuleNotFoundError:
 
 from alpha.engine.report import save_results
 from alpha.engine.friction_analysis import FrictionAnalysis
+from data.norgate_loader import CAPITALSPECIAL_ADJUSTMENT_STR, load_price_timeseries
 
 
 spy_realized_vol_symbol_str = "SPY"
@@ -95,13 +95,11 @@ def load_helper_close_ser(
     """
     Load helper close data for the VIX cash gate.
     """
-    helper_price_df = norgatedata.price_timeseries(
+    helper_price_df = load_price_timeseries(
         symbol_str,
-        stock_price_adjustment_setting=norgatedata.StockPriceAdjustmentType.CAPITALSPECIAL,
-        padding_setting=norgatedata.PaddingType.ALLMARKETDAYS,
-        start_date=start_date_str,
-        end_date=end_date_str,
-        timeseriesformat="pandas-dataframe",
+        adjustment_str=CAPITALSPECIAL_ADJUSTMENT_STR,
+        start_date_str=start_date_str,
+        end_date_str=end_date_str,
     )
     if len(helper_price_df) == 0:
         raise RuntimeError(f"{symbol_str} returned no helper close data.")

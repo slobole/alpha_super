@@ -33,7 +33,6 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Sequence
 
-import norgatedata
 import numpy as np
 import pandas as pd
 from IPython.display import display
@@ -41,6 +40,7 @@ from IPython.display import display
 from alpha.engine.backtest import run_daily
 from alpha.engine.friction_analysis import FrictionAnalysis
 from alpha.engine.report import save_results
+from data.norgate_loader import CAPITALSPECIAL_ADJUSTMENT_STR, load_price_timeseries
 from strategies.momentum.strategy_mo_atr_normalized_ndx import (
     ATR_WINDOW_INT,
     AtrNormalizedNdxConfig,
@@ -103,13 +103,11 @@ def load_vxn_close_ser(
     """
     Load the VXN close series from Norgate.
     """
-    vxn_price_df = norgatedata.price_timeseries(
+    vxn_price_df = load_price_timeseries(
         symbol_str,
-        stock_price_adjustment_setting=norgatedata.StockPriceAdjustmentType.CAPITALSPECIAL,
-        padding_setting=norgatedata.PaddingType.ALLMARKETDAYS,
-        start_date=start_date_str,
-        end_date=end_date_str,
-        timeseriesformat="pandas-dataframe",
+        adjustment_str=CAPITALSPECIAL_ADJUSTMENT_STR,
+        start_date_str=start_date_str,
+        end_date_str=end_date_str,
     )
     if len(vxn_price_df) == 0:
         raise RuntimeError(f"{symbol_str} returned no VXN helper data.")

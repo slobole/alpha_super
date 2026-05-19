@@ -29,6 +29,7 @@ import exchange_calendars as xcals
 import pandas as pd
 
 from alpha.live.models import LiveRelease
+from data.norgate_loader import is_snapshot_mode_enabled_bool, load_latest_snapshot_session_label_ts
 
 
 DEFAULT_SUBMISSION_BUFFER_MINUTES_INT = 10
@@ -50,6 +51,7 @@ DATA_PROFILE_HEARTBEAT_SYMBOL_MAP: dict[str, str] = {
     "norgate_eod_sp500_pit": "$SPX",
     "norgate_eod_etf_plus_vix_helper": "$SPX",
     "norgate_eod_ndx_pit": "$SPX",
+    "norgate_eod_ndx_pit_plus_vxn_helper": "$SPX",
 }
 
 
@@ -197,6 +199,9 @@ def load_latest_norgate_heartbeat_session_label_ts(
 ) -> pd.Timestamp | None:
     if data_profile_str not in DATA_PROFILE_HEARTBEAT_SYMBOL_MAP:
         return None
+
+    if is_snapshot_mode_enabled_bool():
+        return load_latest_snapshot_session_label_ts(data_profile_str)
 
     try:
         import norgatedata

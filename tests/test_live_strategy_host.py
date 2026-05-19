@@ -303,6 +303,8 @@ def test_strategy_host_builds_full_target_taa_decision_plan(monkeypatch):
     assert decision_plan_obj.preserve_untouched_positions_bool is False
     assert decision_plan_obj.rebalance_omitted_assets_to_zero_bool is True
     assert decision_plan_obj.snapshot_metadata_dict == {
+        "norgate_data_source_mode_str": "direct",
+        "norgate_data_profile_str": "norgate_eod_etf_plus_vix_helper",
         "strategy_family_str": "taa_df_btal_fallback_tqqq_vix_cash",
         "cash_weight_float": 0.3,
         "dtb3_source_name_str": "FRED",
@@ -385,6 +387,8 @@ def test_strategy_host_builds_full_target_linearity_qqq_vix_cash_taa_decision_pl
     assert decision_plan_obj.cash_reserve_weight_float == pytest.approx(0.3)
     assert decision_plan_obj.decision_base_position_map == {"QQQ": 5.0}
     assert decision_plan_obj.snapshot_metadata_dict == {
+        "norgate_data_source_mode_str": "direct",
+        "norgate_data_profile_str": "norgate_eod_etf_plus_vix_helper",
         "strategy_family_str": "taa_df_btal_linearity_1n_fallback_qqq_vix_cash",
         "cash_weight_float": 0.3,
     }
@@ -466,6 +470,8 @@ def test_strategy_host_builds_full_target_btal_1n_tqqq_vix_cash_taa_decision_pla
     }
     assert decision_plan_obj.cash_reserve_weight_float == pytest.approx(0.2)
     assert decision_plan_obj.snapshot_metadata_dict == {
+        "norgate_data_source_mode_str": "direct",
+        "norgate_data_profile_str": "norgate_eod_etf_plus_vix_helper",
         "strategy_family_str": "taa_df_btal_1n_fallback_tqqq_vix_cash",
         "cash_weight_float": 0.2,
         "dtb3_source_name_str": "FRED",
@@ -828,6 +834,8 @@ def test_strategy_host_builds_full_target_vxn_scaled_atr_decision_plan(monkeypat
     assert decision_plan_obj.preserve_untouched_positions_bool is False
     assert decision_plan_obj.rebalance_omitted_assets_to_zero_bool is True
     assert decision_plan_obj.snapshot_metadata_dict == {
+        "norgate_data_source_mode_str": "direct",
+        "norgate_data_profile_str": "norgate_eod_ndx_pit_plus_vxn_helper",
         "strategy_family_str": "atr_normalized_ndx_vxn_scaled",
         "vxn_symbol_str": "$VXN",
         "vxn_reference_date_str": "2024-01-31",

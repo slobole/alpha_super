@@ -12,6 +12,7 @@ import pandas as pd
 
 from alpha.engine.strategy import Strategy
 from alpha.live.models import LiveRelease
+from data.norgate_loader import use_norgate_data_profile
 
 
 REFERENCE_RUN_VARIANT_PARAMETER_NAME_LIST: list[str] = [
@@ -105,7 +106,8 @@ def run_auto_reference_strategy(
     if "output_dir_str" in signature_obj.parameters:
         run_kwarg_dict["output_dir_str"] = str(output_dir_path_obj)
 
-    strategy_obj = run_variant_fn(**run_kwarg_dict)
+    with use_norgate_data_profile(release_obj.data_profile_str):
+        strategy_obj = run_variant_fn(**run_kwarg_dict)
     if not isinstance(strategy_obj, Strategy):
         raise TypeError(
             f"Strategy module '{module_import_str}' run_variant(...) returned "

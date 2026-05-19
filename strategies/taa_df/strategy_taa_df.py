@@ -58,7 +58,6 @@ from typing import Sequence
 
 import numpy as np
 import pandas as pd
-import norgatedata
 from IPython.display import display
 from tqdm.auto import tqdm
 
@@ -75,6 +74,11 @@ from alpha.data import FredSeriesSnapshot, load_daily_fred_series_snapshot
 from alpha.engine.backtest import run_daily
 from alpha.engine.report import save_results
 from alpha.engine.strategy import Strategy
+from data.norgate_loader import (
+    CAPITALSPECIAL_ADJUSTMENT_STR,
+    TOTALRETURN_ADJUSTMENT_STR,
+    load_price_timeseries,
+)
 
 
 @dataclass(frozen=True)
@@ -187,13 +191,11 @@ def load_signal_close_df(
     signal_close_map: dict[str, pd.Series] = {}
 
     for symbol_str in tqdm(symbol_list, desc="loading signal closes"):
-        price_df = norgatedata.price_timeseries(
+        price_df = load_price_timeseries(
             symbol_str,
-            stock_price_adjustment_setting=norgatedata.StockPriceAdjustmentType.TOTALRETURN,
-            padding_setting=norgatedata.PaddingType.ALLMARKETDAYS,
-            start_date=start_date_str,
-            end_date=end_date_str,
-            timeseriesformat="pandas-dataframe",
+            adjustment_str=TOTALRETURN_ADJUSTMENT_STR,
+            start_date_str=start_date_str,
+            end_date_str=end_date_str,
         )
         if len(price_df) == 0:
             continue
@@ -227,17 +229,15 @@ def load_execution_price_df(
 
     for symbol_str in tqdm(symbol_list, desc="loading execution prices"):
         if symbol_str in benchmark_list:
-            adjustment_type = norgatedata.StockPriceAdjustmentType.TOTALRETURN
+            adjustment_str = TOTALRETURN_ADJUSTMENT_STR
         else:
-            adjustment_type = norgatedata.StockPriceAdjustmentType.CAPITALSPECIAL
+            adjustment_str = CAPITALSPECIAL_ADJUSTMENT_STR
 
-        price_df = norgatedata.price_timeseries(
+        price_df = load_price_timeseries(
             symbol_str,
-            stock_price_adjustment_setting=adjustment_type,
-            padding_setting=norgatedata.PaddingType.ALLMARKETDAYS,
-            start_date=start_date_str,
-            end_date=end_date_str,
-            timeseriesformat="pandas-dataframe",
+            adjustment_str=adjustment_str,
+            start_date_str=start_date_str,
+            end_date_str=end_date_str,
         )
         if len(price_df) == 0:
             continue
