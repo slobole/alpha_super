@@ -17,7 +17,7 @@ repo_root_str = str(repo_root_path)
 if repo_root_str not in sys.path:
     sys.path.insert(0, repo_root_str)
 
-from alpha.live.release_manifest import load_release_list, select_enabled_release_list_for_mode
+from alpha.live.release_manifest import load_release_list
 from data.norgate_snapshot_store import (
     MANIFEST_FILE_NAME_STR,
     NORGATE_SNAPSHOT_ROOT_ENV_STR,
@@ -32,7 +32,6 @@ from scripts.serve_norgate_snapshot_api import (
 from scripts.norgate_config_env import (
     NORGATE_CLIENT_ID_ENV_STR,
     NORGATE_RELEASES_ROOT_ENV_STR,
-    NORGATE_SYNC_MODE_ENV_STR,
     env_str,
     load_config_env_file,
     norgate_api_url_from_env_str,
@@ -71,17 +70,18 @@ def _temporary_snapshot_root_env(snapshot_root_path_obj: Path) -> Iterator[None]
             os.environ[NORGATE_SNAPSHOT_ROOT_ENV_STR] = old_snapshot_root_str
 
 
-def derive_required_profile_list(releases_root_path_str: str, mode_str: str) -> list[str]:
+def derive_required_profile_list(releases_root_path_str: str, mode_str: str | None = None) -> list[str]:
     release_list = load_release_list(releases_root_path_str)
-    selected_release_list = select_enabled_release_list_for_mode(
-        release_list=release_list,
-        env_mode_str=str(mode_str),
-    )
+    selected_release_list = [
+        release_obj
+        for release_obj in release_list
+        if release_obj.enabled_bool and (mode_str is None or release_obj.mode_str == mode_str)
+    ]
     profile_list = sorted({release_obj.data_profile_str for release_obj in selected_release_list})
     if len(profile_list) == 0:
-        raise RuntimeError(
-            f"No enabled {mode_str} releases were found under {releases_root_path_str}."
-        )
+        if mode_str is None:
+            raise RuntimeError(f"No enabled releases were found under {releases_root_path_str}.")
+        raise RuntimeError(f"No enabled {mode_str} releases were found under {releases_root_path_str}.")
     return profile_list
 
 
@@ -262,8 +262,8 @@ def sync_required_snapshots(
     token_str: str,
     client_id_str: str,
     releases_root_path_str: str,
-    mode_str: str,
     local_root_path_str: str,
+    mode_str: str | None = None,
     overwrite_bool: bool = False,
 ) -> list[Path]:
     profile_list = derive_required_profile_list(
@@ -332,8 +332,8 @@ def main() -> int:
     )
     parser_obj.add_argument(
         "--mode",
-        default=env_str(NORGATE_SYNC_MODE_ENV_STR),
-        help="Release mode to sync, for example live or paper.",
+        default=None,
+        help="Optional release-mode filter. Omit to sync all enabled manifests.",
     )
     parser_obj.add_argument(
         "--local-root",
@@ -346,14 +346,13 @@ def main() -> int:
     token_str = os.getenv(NORGATE_API_TOKEN_ENV_STR, "").strip()
     if not token_str:
         raise RuntimeError(f"{NORGATE_API_TOKEN_ENV_STR} must be set before syncing snapshots.")
-    required_arg_name_tuple = ("api_url", "client_id", "releases_root", "mode", "local_root")
+    required_arg_name_tuple = ("api_url", "client_id", "releases_root", "local_root")
     for arg_name_str in required_arg_name_tuple:
         if not getattr(args_obj, arg_name_str):
             env_name_str = {
                 "api_url": "NORGATE_API_URL or NORGATE_API_HOST/NORGATE_API_PORT",
                 "client_id": NORGATE_CLIENT_ID_ENV_STR,
                 "releases_root": NORGATE_RELEASES_ROOT_ENV_STR,
-                "mode": NORGATE_SYNC_MODE_ENV_STR,
                 "local_root": NORGATE_SNAPSHOT_ROOT_ENV_STR,
             }[arg_name_str]
             raise RuntimeError(
@@ -365,8 +364,8 @@ def main() -> int:
         token_str=token_str,
         client_id_str=str(args_obj.client_id),
         releases_root_path_str=str(args_obj.releases_root),
-        mode_str=str(args_obj.mode),
         local_root_path_str=str(args_obj.local_root),
+        mode_str=None if args_obj.mode is None else str(args_obj.mode),
         overwrite_bool=bool(args_obj.overwrite),
     )
     for promoted_path_obj in promoted_path_list:

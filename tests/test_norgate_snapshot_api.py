@@ -121,8 +121,10 @@ def _write_release_manifest(
     release_id_str: str,
     pod_id_str: str,
     profile_str: str,
+    mode_str: str = "paper",
     enabled_bool: bool = True,
 ) -> None:
+    account_route_str = "U123456" if mode_str == "live" else "DU123456"
     releases_root_path_obj.mkdir(parents=True, exist_ok=True)
     (releases_root_path_obj / file_name_str).write_text(
         "\n".join(
@@ -132,7 +134,7 @@ def _write_release_manifest(
                 "  user_id: test_user",
                 f"  pod_id: {pod_id_str}",
                 "broker:",
-                "  account_route: DU123456",
+                f"  account_route: {account_route_str}",
                 "strategy:",
                 "  strategy_import_str: strategies.dv2.strategy_mr_dv2:DVO2Strategy",
                 f"  data_profile_str: {profile_str}",
@@ -145,7 +147,7 @@ def _write_release_manifest(
                 "risk:",
                 "  risk_profile_str: standard",
                 "deployment:",
-                "  mode: paper",
+                f"  mode: {mode_str}",
                 f"  enabled_bool: {'true' if enabled_bool else 'false'}",
             ]
         ),
@@ -225,6 +227,14 @@ def test_client_sync_derives_profiles_and_promotes_valid_snapshot(tmp_path, monk
     )
     _write_release_manifest(
         releases_root_path_obj,
+        file_name_str="enabled_live.yaml",
+        release_id_str="release.enabled_live",
+        pod_id_str="pod_enabled_live",
+        profile_str="norgate_eod_sp500_pit",
+        mode_str="live",
+    )
+    _write_release_manifest(
+        releases_root_path_obj,
         file_name_str="disabled.yaml",
         release_id_str="release.disabled",
         pod_id_str="pod_disabled",
@@ -232,6 +242,10 @@ def test_client_sync_derives_profiles_and_promotes_valid_snapshot(tmp_path, monk
         enabled_bool=False,
     )
 
+    assert derive_required_profile_list(str(releases_root_path_obj)) == [
+        PROFILE_STR,
+        "norgate_eod_sp500_pit",
+    ]
     assert derive_required_profile_list(str(releases_root_path_obj), "paper") == [PROFILE_STR]
 
     local_root_path_obj = tmp_path / "local_snapshots"
@@ -242,13 +256,16 @@ def test_client_sync_derives_profiles_and_promotes_valid_snapshot(tmp_path, monk
             token_str=TOKEN_STR,
             client_id_str=CLIENT_ID_STR,
             releases_root_path_str=str(releases_root_path_obj),
-            mode_str="paper",
             local_root_path_str=str(local_root_path_obj),
         )
 
-    assert promoted_path_list == [local_root_path_obj / PROFILE_STR / SNAPSHOT_DATE_STR]
-    assert (promoted_path_list[0] / MANIFEST_FILE_NAME_STR).exists()
-    assert (promoted_path_list[0] / PRICE_FILE_NAME_STR).exists()
+    assert promoted_path_list == [
+        local_root_path_obj / PROFILE_STR / SNAPSHOT_DATE_STR,
+        local_root_path_obj / "norgate_eod_sp500_pit" / SNAPSHOT_DATE_STR,
+    ]
+    for promoted_path_obj in promoted_path_list:
+        assert (promoted_path_obj / MANIFEST_FILE_NAME_STR).exists()
+        assert (promoted_path_obj / PRICE_FILE_NAME_STR).exists()
 
 
 def test_client_sync_refuses_hash_mismatch_and_does_not_promote(tmp_path):
@@ -269,7 +286,6 @@ def test_client_sync_refuses_hash_mismatch_and_does_not_promote(tmp_path):
                 token_str=TOKEN_STR,
                 client_id_str=CLIENT_ID_STR,
                 releases_root_path_str=str(releases_root_path_obj),
-                mode_str="paper",
                 local_root_path_str=str(local_root_path_obj),
             )
 
