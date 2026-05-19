@@ -47,6 +47,12 @@ tmpnu*/
 # Generated backtest artifacts
 results/
 
+# Generated Norgate snapshot/API artifacts
+norgate_service/
+norgate_snapshots/
+**/norgate_service/
+**/norgate_snapshots/
+
 # Live runtime artifacts
 alpha/live/live_state.sqlite3
 alpha/live/live_state.sqlite3-shm
