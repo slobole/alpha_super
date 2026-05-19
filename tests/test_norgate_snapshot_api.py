@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import threading
 from contextlib import contextmanager
 from http.server import ThreadingHTTPServer
@@ -17,6 +18,7 @@ from data.norgate_snapshot_store import (
     PRICE_FILE_NAME_STR,
     write_snapshot_files,
 )
+from scripts import norgate_config_env
 from scripts.serve_norgate_snapshot_api import (
     NORGATE_API_TOKEN_HEADER_STR,
     NorgateSnapshotApiService,
@@ -24,6 +26,7 @@ from scripts.serve_norgate_snapshot_api import (
 )
 from scripts.sync_norgate_snapshots_api import (
     derive_required_profile_list,
+    main as sync_main,
     post_requirements_dict,
     sync_required_snapshots,
 )
@@ -355,3 +358,43 @@ def test_client_sync_refuses_hash_mismatch_and_does_not_promote(tmp_path):
             )
 
     assert not (local_root_path_obj / PROFILE_STR / SNAPSHOT_DATE_STR).exists()
+
+
+def test_client_sync_main_uses_config_env_over_stale_shell_env(tmp_path, monkeypatch):
+    releases_root_path_obj = tmp_path / "releases"
+    local_root_path_obj = tmp_path / "local_snapshots"
+    stale_root_path_obj = tmp_path / "stale_snapshots"
+    _write_release_manifest(
+        releases_root_path_obj,
+        file_name_str="enabled.yaml",
+        release_id_str="release.enabled",
+        pod_id_str="pod_enabled",
+        profile_str=PROFILE_STR,
+    )
+
+    with _api_server(tmp_path) as (api_url_str, _service_obj):
+        config_path_obj = tmp_path / "config.env"
+        config_path_obj.write_text(
+            "\n".join(
+                [
+                    f"NORGATE_API_TOKEN={TOKEN_STR}",
+                    f"NORGATE_API_URL={api_url_str}",
+                    f"NORGATE_CLIENT_ID={CLIENT_ID_STR}",
+                    f"NORGATE_RELEASES_ROOT={releases_root_path_obj}",
+                    f"NORGATE_SNAPSHOT_ROOT={local_root_path_obj}",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("NORGATE_API_TOKEN", "wrong-token")
+        monkeypatch.setenv("NORGATE_API_URL", "http://127.0.0.1:9")
+        monkeypatch.setenv("NORGATE_CLIENT_ID", "wrong-client")
+        monkeypatch.setenv("NORGATE_RELEASES_ROOT", str(tmp_path / "missing_releases"))
+        monkeypatch.setenv("NORGATE_SNAPSHOT_ROOT", str(stale_root_path_obj))
+        monkeypatch.setattr(norgate_config_env, "default_config_env_path_obj", lambda: config_path_obj)
+        monkeypatch.setattr(sys, "argv", ["sync_norgate_snapshots_api.py"])
+
+        assert sync_main() == 0
+
+    assert (local_root_path_obj / PROFILE_STR / SNAPSHOT_DATE_STR / MANIFEST_FILE_NAME_STR).exists()
+    assert not (stale_root_path_obj / PROFILE_STR / SNAPSHOT_DATE_STR).exists()

@@ -312,7 +312,7 @@ def sync_required_snapshots(
 
 
 def main() -> int:
-    load_config_env_file()
+    load_config_env_file(override_existing_bool=True)
 
     parser_obj = argparse.ArgumentParser(description="Sync Norgate artifact snapshots from the private API.")
     parser_obj.add_argument(

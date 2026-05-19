@@ -50,6 +50,17 @@ def test_load_config_env_file_does_not_override_existing_env(tmp_path, monkeypat
     assert os.environ["NORGATE_API_TOKEN"] == "real-env-token"
 
 
+def test_load_config_env_file_can_override_existing_env(tmp_path, monkeypatch):
+    config_path_obj = tmp_path / "config.env"
+    config_path_obj.write_text("NORGATE_API_TOKEN=file-token\n", encoding="utf-8")
+    monkeypatch.setenv("NORGATE_API_TOKEN", "stale-env-token")
+
+    loaded_env_dict = load_config_env_file(config_path_obj, override_existing_bool=True)
+
+    assert loaded_env_dict["NORGATE_API_TOKEN"] == "file-token"
+    assert os.environ["NORGATE_API_TOKEN"] == "file-token"
+
+
 def test_load_config_env_file_rejects_malformed_line(tmp_path):
     config_path_obj = tmp_path / "config.env"
     config_path_obj.write_text("BAD_LINE_WITHOUT_EQUALS\n", encoding="utf-8")

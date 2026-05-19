@@ -31,7 +31,11 @@ def _normalize_env_value_str(raw_value_str: str) -> str:
     return value_str
 
 
-def load_config_env_file(config_env_path_obj: Path | None = None) -> dict[str, str]:
+def load_config_env_file(
+    config_env_path_obj: Path | None = None,
+    *,
+    override_existing_bool: bool = False,
+) -> dict[str, str]:
     path_obj = (config_env_path_obj or default_config_env_path_obj()).expanduser()
     loaded_env_dict: dict[str, str] = {}
     if not path_obj.exists():
@@ -52,7 +56,8 @@ def load_config_env_file(config_env_path_obj: Path | None = None) -> dict[str, s
             raise ValueError(f"Invalid config.env line {line_number_int}: empty key.")
         value_str = _normalize_env_value_str(raw_value_str)
         loaded_env_dict[key_str] = value_str
-        os.environ.setdefault(key_str, value_str)
+        if override_existing_bool or not os.getenv(key_str, "").strip():
+            os.environ[key_str] = value_str
 
     return loaded_env_dict
 
