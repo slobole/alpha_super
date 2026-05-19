@@ -57,6 +57,51 @@ Internal names you will see:
 
 Normal operators should think in sleeves and order plans. The internal names are there for commands, logs, and debugging.
 
+## Norgate Artifact Server
+
+Use this only on the Windows Norgate node. It serves validated Parquet snapshots over Tailscale; it does not connect to IBKR or submit orders.
+
+Generate a real token once:
+
+```powershell
+$bytes = New-Object byte[] 32
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$rng.GetBytes($bytes)
+$rng.Dispose()
+[Convert]::ToBase64String($bytes)
+```
+
+Put the token and server settings in ignored `config.env`:
+
+```env
+NORGATE_API_TOKEN=<paste_generated_token>
+NORGATE_SERVICE_ROOT=C:\alpha\norgate_service
+NORGATE_API_HOST=100.123.13.69
+NORGATE_API_PORT=8787
+```
+
+Use the Norgate node Tailscale IP for `NORGATE_API_HOST`. Client machines must use the same token when syncing snapshots.
+
+Start the server and run the doctor:
+
+```powershell
+cd C:\Users\Administrator\Documents\workspace\alpha_super
+git checkout codex/norgate-snapshots-v1
+git pull
+.\scripts\start_norgate_server.cmd
+```
+
+Expected behavior:
+- a visible `Norgate API debug` window stays open with API stdout/stderr;
+- the launcher waits for `/healthz`;
+- `doctor_norgate_server.py` runs and should end with `RESULT: PASS`.
+
+The server writes per-client artifacts under:
+
+```text
+C:\alpha\norgate_service\<client_id>\snapshots\<profile>\<YYYY-MM-DD>\
+```
+
 ## Safe Operating Rule
 
 Inspect first. Mutate later.

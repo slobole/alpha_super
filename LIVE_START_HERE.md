@@ -59,6 +59,14 @@ Use these when you need more detail:
 - [LIVE_TECHNICAL_REFERENCE.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_TECHNICAL_REFERENCE.md)
 - [LIVE_TRADING_ARCHITECTURE.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_TRADING_ARCHITECTURE.md)
 
+If this deployment uses the private Norgate artifact server, start it from the Norgate Windows node before client snapshot sync:
+
+```powershell
+.\scripts\start_norgate_server.cmd
+```
+
+That launcher opens the API in a visible debug window, waits for `/healthz`, then runs the Norgate server doctor. Full short setup is in [LIVE_RUNBOOK.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_RUNBOOK.md#norgate-artifact-server).
+
 ## The 5 Things To Remember
 
 ### 1. A Sleeve/Pod Is Real
