@@ -102,6 +102,63 @@ The server writes per-client artifacts under:
 C:\alpha\norgate_service\<client_id>\snapshots\<profile>\<YYYY-MM-DD>\
 ```
 
+## Client Norgate Snapshot Check
+
+Use this on each client VPS or dev machine that should trade from Norgate snapshots.
+
+The client does not call Norgate directly. It asks the private Norgate API for the profiles used by enabled release YAMLs, downloads Parquet snapshot files, validates hashes locally, then the live scheduler reads only the local snapshot folder.
+
+```text
+enabled release YAMLs -> Norgate API -> local snapshots -> scheduler gate -> DecisionPlan
+```
+
+Required ignored `config.env` values on the client:
+
+```env
+ALPHA_USE_NORGATE_SNAPSHOT_BOOL=true
+NORGATE_API_TOKEN=<same_token_as_server>
+NORGATE_API_HOST=<norgate_node_tailscale_ip>
+NORGATE_API_PORT=8787
+NORGATE_CLIENT_ID=client_caspersky
+NORGATE_RELEASES_ROOT=alpha/live/releases/caspersky_account
+NORGATE_SNAPSHOT_ROOT=C:\alpha\norgate_snapshots
+```
+
+You can use `NORGATE_API_URL=http://<norgate_node_tailscale_ip>:8787` instead of `NORGATE_API_HOST` and `NORGATE_API_PORT`.
+
+Set `NORGATE_CLIENT_ID` and `NORGATE_RELEASES_ROOT` to the real client folder you are deploying. The values above are examples.
+
+Run the client doctor before starting a scheduler on a new client VPS:
+
+```powershell
+cd C:\Users\Administrator\Documents\workspace\alpha_super
+git checkout codex/norgate-snapshots-v1
+git pull
+uv run python scripts\doctor_norgate_client.py
+```
+
+Expected ending:
+
+```text
+[PASS] enabled release profiles: ...
+[PASS] api healthz
+[PASS] api token auth
+[PASS] sync snapshots
+[PASS] manifest hash validation
+[PASS] scheduler snapshot heartbeat
+RESULT: PASS
+```
+
+If the result is `FAIL`, do not start `serve` yet. Fix the printed failing line first. Common causes are a wrong token, wrong Tailscale IP, no enabled release YAMLs, an unsupported `data_profile_str`, or a missing/invalid local snapshot.
+
+Use `--overwrite` only when you intentionally want to replace an existing same-date local snapshot:
+
+```powershell
+uv run python scripts\doctor_norgate_client.py --overwrite
+```
+
+This doctor may create or replace files under `NORGATE_SNAPSHOT_ROOT`. It does not touch IBKR, POD DBs, orders, fills, reconciliation, or live state.
+
 ## Safe Operating Rule
 
 Inspect first. Mutate later.

@@ -65,7 +65,15 @@ If this deployment uses the private Norgate artifact server, start it from the N
 .\scripts\start_norgate_server.cmd
 ```
 
-That launcher opens the API in a visible debug window, waits for `/healthz`, then runs the Norgate server doctor. Full short setup is in [LIVE_RUNBOOK.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_RUNBOOK.md#norgate-artifact-server).
+That launcher opens the API in a visible debug window, waits for `/healthz`, then runs the Norgate server doctor.
+
+On each client VPS that uses snapshots, run this before starting `serve`:
+
+```powershell
+uv run python scripts\doctor_norgate_client.py
+```
+
+The client doctor checks `config.env`, enabled release YAMLs, API auth, local snapshot download, manifest hashes, and the scheduler snapshot gate. Full short setup is in [LIVE_RUNBOOK.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_RUNBOOK.md#client-norgate-snapshot-check).
 
 ## The 5 Things To Remember
 
