@@ -114,7 +114,7 @@ if ([string]::IsNullOrWhiteSpace($api_host_str)) {
 
 $api_port_int = [int]$api_port_str
 $api_url_str = "http://$api_host_str`:$api_port_int"
-New-Item -ItemType Directory -Force -LiteralPath $service_root_path_str | Out-Null
+New-Item -ItemType Directory -Force -Path $service_root_path_str | Out-Null
 
 if ($null -eq (Get-Command uv -ErrorAction SilentlyContinue)) {
     throw "uv was not found on PATH. Run this from a shell where uv is available."
