@@ -31,6 +31,7 @@ from alpha.live.scheduler_service import (
     _render_serve_tick_summary_str,
     _resolve_db_path_for_mode_str,
     _should_emit_wait_operator_message,
+    _tick_detail_blocks_new_trade_on_norgate_sync_bool,
     get_scheduler_decision,
     main,
     run_once,
@@ -1125,6 +1126,193 @@ def test_scheduler_run_once_invokes_tick_for_startup_catchup(tmp_path: Path, mon
         }
     ]
     assert detail_dict["post_tick_execution_report_dict_list"] == []
+
+
+def test_scheduler_run_once_active_polls_when_norgate_sync_waits(tmp_path: Path, monkeypatch):
+    _write_manifest(tmp_path, auto_submit_enabled_bool=True)
+    monkeypatch.setattr(
+        "alpha.live.scheduler_service.ensure_norgate_snapshots_for_live_tick",
+        lambda **_kwargs: {
+            "status_str": "waiting",
+            "reason_code_str": "api_config_missing",
+            "error_str": "Missing Norgate API config.",
+        },
+    )
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda data_profile_str: None,
+    )
+
+    detail_dict = run_once(
+        state_store_obj=LiveStateStore(str((tmp_path / "live.sqlite3").resolve())),
+        broker_adapter_obj=StubBrokerAdapter(),
+        as_of_ts=datetime(2024, 1, 31, 15, 0, tzinfo=UTC),
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="paper",
+    )
+
+    assert detail_dict["tick_invoked_bool"] is False
+    assert detail_dict["active_poll_bool"] is True
+    assert detail_dict["pre_decision_norgate_snapshot_sync_detail_dict"]["reason_code_str"] == "api_config_missing"
+
+
+def test_scheduler_run_once_does_not_submit_ready_vplan_when_norgate_sync_waits(
+    tmp_path: Path,
+    monkeypatch,
+):
+    _write_manifest(tmp_path, auto_submit_enabled_bool=True)
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+    _insert_ready_vplan(state_store_obj)
+    broker_adapter_obj = StubBrokerAdapter()
+    monkeypatch.setattr(
+        "alpha.live.scheduler_service.ensure_norgate_snapshots_for_live_tick",
+        lambda **_kwargs: {
+            "status_str": "waiting",
+            "reason_code_str": "api_config_missing",
+            "error_str": "Missing Norgate API config.",
+        },
+    )
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda data_profile_str: pd.Timestamp("2024-01-31"),
+    )
+
+    detail_dict = run_once(
+        state_store_obj=state_store_obj,
+        broker_adapter_obj=broker_adapter_obj,
+        as_of_ts=datetime(2024, 2, 1, 14, 24, tzinfo=UTC),
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="paper",
+    )
+
+    assert detail_dict["tick_invoked_bool"] is True
+    assert detail_dict["active_poll_bool"] is True
+    assert detail_dict["next_phase_str"] == "submit_vplan"
+    assert detail_dict["tick_detail_dict"]["submitted_vplan_count_int"] == 0
+    assert detail_dict["tick_detail_dict"]["created_vplan_count_int"] == 0
+    assert detail_dict["tick_detail_dict"]["blocked_action_count_int"] == 2
+    assert detail_dict["tick_detail_dict"]["reason_count_map_dict"] == {"api_config_missing": 1}
+    assert broker_adapter_obj.submitted_order_request_list == []
+
+
+def test_tick_detail_blocks_new_trade_on_norgate_sync_helper():
+    assert _tick_detail_blocks_new_trade_on_norgate_sync_bool(
+        {"norgate_snapshot_sync_detail_dict": {"status_str": "waiting"}}
+    )
+    assert _tick_detail_blocks_new_trade_on_norgate_sync_bool(
+        {"norgate_snapshot_sync_detail_dict": {"status_str": "failed"}}
+    )
+    assert _tick_detail_blocks_new_trade_on_norgate_sync_bool(
+        {"norgate_snapshot_sync_detail_dict": {"status_str": "local_snapshot_only"}}
+    )
+    assert not _tick_detail_blocks_new_trade_on_norgate_sync_bool(
+        {"norgate_snapshot_sync_detail_dict": {"status_str": "ready"}}
+    )
+
+
+def test_scheduler_serve_sleeps_after_due_tick_blocked_by_norgate_sync(
+    tmp_path: Path,
+    monkeypatch,
+):
+    class StopServe(BaseException):
+        pass
+
+    _write_manifest(tmp_path, auto_submit_enabled_bool=True)
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+    sleep_call_dict = {}
+
+    monkeypatch.setattr(scheduler_service_module, "_emit_scheduler_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        scheduler_service_module,
+        "_emit_operator_message_spec_list",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        scheduler_service_module,
+        "_build_related_pod_status_dict_list",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        scheduler_service_module,
+        "_build_related_execution_report_dict_list",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        scheduler_service_module,
+        "_build_related_vplan_dict_list",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        scheduler_service_module,
+        "_build_related_broker_order_snapshot_dict_list",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "alpha.live.scheduler_service.ensure_norgate_snapshots_for_live_tick",
+        lambda **_kwargs: {
+            "status_str": "waiting",
+            "reason_code_str": "api_config_missing",
+            "error_str": "Missing Norgate API config.",
+        },
+    )
+    monkeypatch.setattr(
+        "alpha.live.scheduler_service.get_scheduler_decision",
+        lambda **kwargs: SchedulerDecision(
+            as_of_timestamp_ts=kwargs["as_of_ts"],
+            env_mode_str=kwargs["env_mode_str"],
+            due_now_bool=True,
+            active_poll_bool=False,
+            next_phase_str="submit_vplan",
+            reason_code_str="vplan_ready",
+            next_due_timestamp_ts=kwargs["as_of_ts"],
+            related_pod_id_list=["pod_test_01"],
+        ),
+    )
+
+    tick_call_count_dict = {"count_int": 0}
+
+    def _fake_tick(**_kwargs):
+        tick_call_count_dict["count_int"] += 1
+        if tick_call_count_dict["count_int"] > 1:
+            raise AssertionError("serve tight-looped instead of sleeping after Norgate block")
+        return {
+            "lease_acquired_bool": True,
+            "norgate_snapshot_sync_detail_dict": {
+                "status_str": "waiting",
+                "reason_code_str": "api_config_missing",
+            },
+            "created_decision_plan_count_int": 0,
+            "created_vplan_count_int": 0,
+            "submitted_vplan_count_int": 0,
+            "blocked_action_count_int": 2,
+            "completed_vplan_count_int": 0,
+            "warning_count_map_dict": {},
+            "reason_count_map_dict": {"api_config_missing": 1},
+        }
+
+    def _fake_sleep(seconds_float):
+        sleep_call_dict["seconds_float"] = float(seconds_float)
+        raise StopServe()
+
+    monkeypatch.setattr(runner, "tick", _fake_tick)
+    monkeypatch.setattr(scheduler_service_module.time, "sleep", _fake_sleep)
+
+    with pytest.raises(StopServe):
+        serve(
+            state_store_obj=state_store_obj,
+            broker_adapter_obj=StubBrokerAdapter(),
+            releases_root_path_str=str(tmp_path / "releases"),
+            env_mode_str="paper",
+            broker_host_str=None,
+            broker_port_int=None,
+            broker_client_id_int=None,
+            active_poll_seconds_int=7,
+            idle_max_sleep_seconds_int=3600,
+            log_path_str=str(tmp_path / "events.jsonl"),
+        )
+
+    assert tick_call_count_dict["count_int"] == 1
+    assert sleep_call_dict["seconds_float"] == 7.0
 
 
 def test_scheduler_run_once_cleans_up_stale_cycle(tmp_path: Path, monkeypatch):

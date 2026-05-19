@@ -207,6 +207,60 @@ def _build_decision_plan_stub(release_obj, as_of_ts, pod_state_obj):
     )
 
 
+def _insert_ready_vplan_for_release(
+    state_store_obj: LiveStateStore,
+    release_obj: LiveRelease,
+) -> VPlan:
+    decision_plan_obj = state_store_obj.insert_decision_plan(
+        _build_decision_plan_stub(
+            release_obj=release_obj,
+            as_of_ts=datetime(2024, 2, 1, 9, 24, tzinfo=MARKET_TIMEZONE_OBJ),
+            pod_state_obj=None,
+        )
+    )
+    state_store_obj.mark_decision_plan_status(
+        int(decision_plan_obj.decision_plan_id_int or 0),
+        "vplan_ready",
+    )
+    return state_store_obj.insert_vplan(
+        VPlan(
+            release_id_str=decision_plan_obj.release_id_str,
+            user_id_str=decision_plan_obj.user_id_str,
+            pod_id_str=decision_plan_obj.pod_id_str,
+            account_route_str=decision_plan_obj.account_route_str,
+            decision_plan_id_int=int(decision_plan_obj.decision_plan_id_int or 0),
+            signal_timestamp_ts=decision_plan_obj.signal_timestamp_ts,
+            submission_timestamp_ts=decision_plan_obj.submission_timestamp_ts,
+            target_execution_timestamp_ts=decision_plan_obj.target_execution_timestamp_ts,
+            execution_policy_str=decision_plan_obj.execution_policy_str,
+            broker_snapshot_timestamp_ts=datetime(2024, 2, 1, 9, 20, tzinfo=MARKET_TIMEZONE_OBJ),
+            live_reference_snapshot_timestamp_ts=datetime(2024, 2, 1, 9, 20, tzinfo=MARKET_TIMEZONE_OBJ),
+            live_price_source_str="stub",
+            net_liq_float=10000.0,
+            available_funds_float=10000.0,
+            excess_liquidity_float=10000.0,
+            pod_budget_fraction_float=0.5,
+            pod_budget_float=5000.0,
+            current_broker_position_map={},
+            live_reference_price_map={"AAPL": 100.0},
+            target_share_map={"AAPL": 10.0},
+            order_delta_map={"AAPL": 10.0},
+            vplan_row_list=[
+                VPlanRow(
+                    asset_str="AAPL",
+                    current_share_float=0.0,
+                    target_share_float=10.0,
+                    order_delta_share_float=10.0,
+                    live_reference_price_float=100.0,
+                    estimated_target_notional_float=1000.0,
+                    broker_order_type_str="MOO",
+                )
+            ],
+            status_str="ready",
+        )
+    )
+
+
 def test_render_tick_detail_no_work_is_human_and_short():
     detail_dict = {
         "lease_acquired_bool": True,
@@ -540,6 +594,120 @@ def test_tick_with_pod_id_builds_only_requested_pod(tmp_path: Path, monkeypatch)
     assert state_store_obj.get_latest_decision_plan_for_pod("pod_a") is None
     assert state_store_obj.get_latest_decision_plan_for_pod("pod_b") is not None
     assert [release_obj.pod_id_str for release_obj in state_store_obj.get_enabled_release_list()] == ["pod_b"]
+
+
+def test_tick_does_not_build_decision_plan_when_snapshot_sync_waits(tmp_path: Path, monkeypatch):
+    _write_manifest_file(
+        root_path_obj=tmp_path,
+        file_name_str="pod_a.yaml",
+        pod_id_str="pod_a",
+        release_id_str="user_001.pod_a.paper",
+        strategy_import_str="strategies.dv2.strategy_mr_dv2:DVO2Strategy",
+        auto_submit_enabled_bool=True,
+        account_route_str="DU1",
+    )
+    monkeypatch.setattr(
+        "alpha.live.runner.ensure_norgate_snapshots_for_live_tick",
+        lambda **_kwargs: {
+            "status_str": "waiting",
+            "reason_code_str": "api_config_missing",
+            "error_str": "Missing Norgate API config.",
+        },
+    )
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda data_profile_str: pd.Timestamp("2024-01-31"),
+    )
+
+    def _fail_if_called(*_args, **_kwargs):
+        raise AssertionError("DecisionPlan build should wait for Norgate snapshots")
+
+    monkeypatch.setattr("alpha.live.strategy_host.build_decision_plan_for_release", _fail_if_called)
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+
+    detail_dict = tick(
+        state_store_obj=state_store_obj,
+        broker_adapter_obj=StubBrokerAdapter(),
+        as_of_ts=datetime(2024, 1, 31, 22, 10, tzinfo=UTC),
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="paper",
+    )
+
+    assert detail_dict["created_decision_plan_count_int"] == 0
+    assert detail_dict["reason_count_map_dict"] == {"api_config_missing": 1}
+    assert state_store_obj.get_latest_decision_plan_for_pod("pod_a") is None
+
+
+@pytest.mark.parametrize(
+    ("sync_status_str", "reason_code_str"),
+    [
+        ("waiting", "api_config_missing"),
+        ("failed", "token_auth_failed"),
+    ],
+)
+def test_tick_blocks_new_trade_intent_when_snapshot_sync_not_ready(
+    tmp_path: Path,
+    monkeypatch,
+    sync_status_str: str,
+    reason_code_str: str,
+):
+    _write_manifest(tmp_path, auto_submit_enabled_bool=True)
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+    release_obj = load_release_list(str(tmp_path / "releases"))[0]
+    state_store_obj.upsert_release(release_obj)
+    ready_vplan_obj = _insert_ready_vplan_for_release(state_store_obj, release_obj)
+    broker_adapter_obj = StubBrokerAdapter()
+
+    monkeypatch.setattr(
+        "alpha.live.runner.ensure_norgate_snapshots_for_live_tick",
+        lambda **_kwargs: {
+            "status_str": sync_status_str,
+            "reason_code_str": reason_code_str,
+            "error_str": "Norgate snapshot sync is not ready.",
+        },
+    )
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda data_profile_str: pd.Timestamp("2024-01-31"),
+    )
+
+    def _fail_build_decision_plan(*_args, **_kwargs):
+        raise AssertionError("DecisionPlan build should wait for Norgate snapshots")
+
+    def _fail_build_vplans(*_args, **_kwargs):
+        raise AssertionError("VPlan build should wait for Norgate snapshots")
+
+    def _fail_submit_ready_vplans(*_args, **_kwargs):
+        raise AssertionError("VPlan submission should wait for Norgate snapshots")
+
+    reconcile_called_dict = {"called_bool": False}
+
+    def _fake_post_execution_reconcile(**_kwargs):
+        reconcile_called_dict["called_bool"] = True
+        return {"completed_vplan_count_int": 1}
+
+    monkeypatch.setattr("alpha.live.strategy_host.build_decision_plan_for_release", _fail_build_decision_plan)
+    monkeypatch.setattr(runner_module, "build_vplans", _fail_build_vplans)
+    monkeypatch.setattr(runner_module, "submit_ready_vplans", _fail_submit_ready_vplans)
+    monkeypatch.setattr(runner_module, "post_execution_reconcile", _fake_post_execution_reconcile)
+
+    detail_dict = tick(
+        state_store_obj=state_store_obj,
+        broker_adapter_obj=broker_adapter_obj,
+        as_of_ts=datetime(2024, 2, 1, 14, 24, tzinfo=UTC),
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="paper",
+    )
+
+    assert detail_dict["created_decision_plan_count_int"] == 0
+    assert detail_dict["created_vplan_count_int"] == 0
+    assert detail_dict["submitted_vplan_count_int"] == 0
+    assert detail_dict["blocked_action_count_int"] == 2
+    assert detail_dict["completed_vplan_count_int"] == 1
+    assert detail_dict["reason_count_map_dict"] == {reason_code_str: 1}
+    assert reconcile_called_dict["called_bool"] is True
+    assert broker_adapter_obj.submitted_order_request_list == []
+    assert state_store_obj.get_vplan_by_id(int(ready_vplan_obj.vplan_id_int or 0)).status_str == "ready"
 
 
 def test_status_does_not_hard_fail_on_invalid_deployment_guardrail(tmp_path: Path, monkeypatch):

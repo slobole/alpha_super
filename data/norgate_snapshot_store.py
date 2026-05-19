@@ -297,10 +297,14 @@ def load_valid_snapshot_manifest(
     )
 
 
+def clear_snapshot_manifest_cache() -> None:
+    _load_valid_snapshot_manifest_cached.cache_clear()
+
+
 def load_latest_snapshot_session_label_ts(profile_str: str) -> pd.Timestamp | None:
     try:
         snapshot_manifest_obj = load_valid_snapshot_manifest(profile_str)
-    except NorgateSnapshotNotReadyError:
+    except (NorgateSnapshotNotReadyError, NorgateSnapshotValidationError):
         return None
     return snapshot_manifest_obj.snapshot_date_ts
 

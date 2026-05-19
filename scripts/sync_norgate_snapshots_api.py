@@ -70,18 +70,25 @@ def _temporary_snapshot_root_env(snapshot_root_path_obj: Path) -> Iterator[None]
             os.environ[NORGATE_SNAPSHOT_ROOT_ENV_STR] = old_snapshot_root_str
 
 
-def derive_required_profile_list(releases_root_path_str: str, mode_str: str | None = None) -> list[str]:
+def derive_required_profile_list(
+    releases_root_path_str: str,
+    mode_str: str | None = None,
+    pod_id_str: str | None = None,
+) -> list[str]:
     release_list = load_release_list(releases_root_path_str)
     selected_release_list = [
         release_obj
         for release_obj in release_list
-        if release_obj.enabled_bool and (mode_str is None or release_obj.mode_str == mode_str)
+        if release_obj.enabled_bool
+        and (mode_str is None or release_obj.mode_str == mode_str)
+        and (pod_id_str is None or release_obj.pod_id_str == pod_id_str)
     ]
     profile_list = sorted({release_obj.data_profile_str for release_obj in selected_release_list})
     if len(profile_list) == 0:
+        pod_filter_str = f" for pod {pod_id_str}" if pod_id_str is not None else ""
         if mode_str is None:
-            raise RuntimeError(f"No enabled releases were found under {releases_root_path_str}.")
-        raise RuntimeError(f"No enabled {mode_str} releases were found under {releases_root_path_str}.")
+            raise RuntimeError(f"No enabled releases{pod_filter_str} were found under {releases_root_path_str}.")
+        raise RuntimeError(f"No enabled {mode_str} releases{pod_filter_str} were found under {releases_root_path_str}.")
     return profile_list
 
 
@@ -264,11 +271,13 @@ def sync_required_snapshots(
     releases_root_path_str: str,
     local_root_path_str: str,
     mode_str: str | None = None,
+    pod_id_str: str | None = None,
     overwrite_bool: bool = False,
 ) -> list[Path]:
     profile_list = derive_required_profile_list(
         releases_root_path_str=releases_root_path_str,
         mode_str=mode_str,
+        pod_id_str=pod_id_str,
     )
     response_dict = post_requirements_dict(
         api_url_str=api_url_str,
@@ -336,6 +345,11 @@ def main() -> int:
         help="Optional release-mode filter. Omit to sync all enabled manifests.",
     )
     parser_obj.add_argument(
+        "--pod-id",
+        default=None,
+        help="Optional POD filter. Omit to sync all enabled PODs in the selected mode.",
+    )
+    parser_obj.add_argument(
         "--local-root",
         default=env_str(NORGATE_SNAPSHOT_ROOT_ENV_STR),
         help="Local NORGATE_SNAPSHOT_ROOT path.",
@@ -366,6 +380,7 @@ def main() -> int:
         releases_root_path_str=str(args_obj.releases_root),
         local_root_path_str=str(args_obj.local_root),
         mode_str=None if args_obj.mode is None else str(args_obj.mode),
+        pod_id_str=None if args_obj.pod_id is None else str(args_obj.pod_id),
         overwrite_bool=bool(args_obj.overwrite),
     )
     for promoted_path_obj in promoted_path_list:

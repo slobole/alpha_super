@@ -19,8 +19,10 @@ import yaml
 
 from alpha.live import runner, scheduler_utils
 from alpha.live.models import LiveRelease
+from alpha.live.norgate_snapshot_sync import build_norgate_snapshot_status_dict
 from alpha.live.release_manifest import load_release_list
 from alpha.live.state_store_v2 import LiveStateStore
+from scripts.norgate_config_env import load_config_env_file
 
 
 DEFAULT_DASHBOARD_HOST_STR = "127.0.0.1"
@@ -409,6 +411,7 @@ def build_pod_row_dict(
         event_log_path_str,
         release_obj.pod_id_str,
     )
+    norgate_snapshot_status_dict = build_norgate_snapshot_status_dict(release_obj, as_of_ts)
     base_row_dict = {
         "release_id_str": release_obj.release_id_str,
         "user_id_str": release_obj.user_id_str,
@@ -464,6 +467,7 @@ def build_pod_row_dict(
         "dtb3_freshness_business_days_int": None,
         "dtb3_source_name_str": None,
         "dtb3_used_cache_bool": None,
+        "norgate_snapshot_status_dict": norgate_snapshot_status_dict,
         "eod_snapshot_dict": _empty_eod_snapshot_dict(),
         "health_str": "gray",
     }
@@ -2392,7 +2396,25 @@ def _status_to_severity_str(
 
 def _build_data_freshness_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
     eod_snapshot_dict = row_dict.get("eod_snapshot_dict") or _empty_eod_snapshot_dict()
+    norgate_snapshot_status_dict = row_dict.get("norgate_snapshot_status_dict") or {}
+    norgate_detail_fragment_list = [
+        f"source={norgate_snapshot_status_dict.get('data_source_mode_str')}",
+        f"status={norgate_snapshot_status_dict.get('status_str')}",
+    ]
+    if norgate_snapshot_status_dict.get("build_gate_reason_code_str"):
+        norgate_detail_fragment_list.append(
+            f"gate={norgate_snapshot_status_dict.get('build_gate_reason_code_str')}"
+        )
+    if norgate_snapshot_status_dict.get("last_error_str"):
+        norgate_detail_fragment_list.append(f"error={norgate_snapshot_status_dict.get('last_error_str')}")
     item_dict_list = [
+        _freshness_item_dict(
+            "Norgate",
+            norgate_snapshot_status_dict.get("snapshot_date_str")
+            or norgate_snapshot_status_dict.get("last_sync_utc_str"),
+            str(norgate_snapshot_status_dict.get("severity_str") or "gray"),
+            ", ".join(norgate_detail_fragment_list),
+        ),
         _freshness_item_dict(
             "Pod state",
             row_dict.get("latest_pod_state_timestamp_str"),
@@ -2448,6 +2470,14 @@ def _build_data_freshness_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
         ),
         "latest_event_timestamp_str": row_dict.get("latest_event_timestamp_str"),
         "diff_artifact_timestamp_str": row_dict.get("latest_diff_timestamp_str"),
+        "norgate_snapshot_status_dict": norgate_snapshot_status_dict,
+        "norgate_data_source_mode_str": norgate_snapshot_status_dict.get("data_source_mode_str"),
+        "norgate_status_str": norgate_snapshot_status_dict.get("status_str"),
+        "norgate_profile_str": norgate_snapshot_status_dict.get("profile_str"),
+        "norgate_snapshot_date_str": norgate_snapshot_status_dict.get("snapshot_date_str"),
+        "norgate_last_sync_utc_str": norgate_snapshot_status_dict.get("last_sync_utc_str"),
+        "norgate_last_error_str": norgate_snapshot_status_dict.get("last_error_str"),
+        "norgate_build_gate_reason_code_str": norgate_snapshot_status_dict.get("build_gate_reason_code_str"),
         "dtb3_download_status_str": row_dict.get("dtb3_download_status_str"),
         "dtb3_latest_observation_date_str": row_dict.get("dtb3_latest_observation_date_str"),
         "dtb3_freshness_business_days_int": row_dict.get("dtb3_freshness_business_days_int"),
@@ -7175,6 +7205,13 @@ DASHBOARD_HTML_STR = """<!doctype html>
           <div class="panel-body">
             ${renderTable(['Source', 'State', 'Latest', 'Detail'], rows, 'No freshness data was found.')}
             ${keyValueGrid([
+              ['Norgate data source', freshness.norgate_data_source_mode_str],
+              ['Norgate status', freshness.norgate_status_str],
+              ['Norgate profile', freshness.norgate_profile_str],
+              ['Norgate snapshot date', freshness.norgate_snapshot_date_str],
+              ['Norgate last sync', freshness.norgate_last_sync_utc_str],
+              ['Norgate last error', freshness.norgate_last_error_str],
+              ['Norgate build gate', freshness.norgate_build_gate_reason_code_str],
               ['DTB3 status', freshness.dtb3_download_status_str],
               ['DTB3 observation', freshness.dtb3_latest_observation_date_str],
               ['DTB3 freshness days', freshness.dtb3_freshness_business_days_int],
@@ -7627,6 +7664,7 @@ DASHBOARD_HTML_STR = """<!doctype html>
 
 
 def main(argv_list: list[str] | None = None) -> int:
+    load_config_env_file(override_existing_bool=True)
     parser_obj = argparse.ArgumentParser(description="Local read-only live POD dashboard.")
     subparser_obj = parser_obj.add_subparsers(dest="command_name_str", required=True)
     serve_parser_obj = subparser_obj.add_parser("serve")

@@ -18,6 +18,7 @@ from alpha.live.execution_engine import (
 from alpha.live.incubation import IncubationBrokerAdapter
 from alpha.live.logging_utils import DEFAULT_LOG_PATH_STR, log_event
 from alpha.live.models import BrokerOrderEvent, DecisionPlan, LiveRelease, PodState, VPlan
+from alpha.live.norgate_snapshot_sync import ensure_norgate_snapshots_for_live_tick
 from alpha.live.order_clerk import BrokerAdapter, IBKRGatewayBrokerAdapter
 from alpha.live.reconcile import reconcile_account_state
 from alpha.live.release_manifest import (
@@ -27,6 +28,7 @@ from alpha.live.release_manifest import (
 )
 from alpha.live.state_store import V1_EXECUTION_TABLE_NAME_TUPLE
 from alpha.live.state_store_v2 import LiveStateStore
+from scripts.norgate_config_env import load_config_env_file
 
 
 DEFAULT_RELEASES_ROOT_PATH_STR = str(Path(__file__).resolve().parent / "releases")
@@ -38,6 +40,11 @@ DEFAULT_BROKER_PORT_INT = 7497
 DEFAULT_BROKER_CLIENT_ID_INT = 31
 DEFAULT_BROKER_TIMEOUT_SECONDS_FLOAT = 4.0
 DEFAULT_EOD_SNAPSHOT_BUFFER_MINUTES_INT = 10
+NORGATE_SNAPSHOT_SYNC_BLOCK_NEW_TRADE_STATUS_SET: set[str] = {
+    "failed",
+    "waiting",
+    "local_snapshot_only",
+}
 TERMINAL_ORDER_STATUS_SET: set[str] = {
     "Filled",
     "Cancelled",
@@ -46,6 +53,27 @@ TERMINAL_ORDER_STATUS_SET: set[str] = {
     "Expired",
     "Inactive",
 }
+
+
+def norgate_snapshot_sync_blocks_new_trade_bool(
+    norgate_snapshot_sync_detail_dict: dict[str, object] | None,
+) -> bool:
+    if norgate_snapshot_sync_detail_dict is None:
+        return False
+    sync_status_str = str(norgate_snapshot_sync_detail_dict.get("status_str") or "")
+    return sync_status_str in NORGATE_SNAPSHOT_SYNC_BLOCK_NEW_TRADE_STATUS_SET
+
+
+def _norgate_snapshot_sync_block_reason_code_str(
+    norgate_snapshot_sync_detail_dict: dict[str, object] | None,
+) -> str:
+    sync_status_str = str((norgate_snapshot_sync_detail_dict or {}).get("status_str") or "")
+    reason_code_str = str((norgate_snapshot_sync_detail_dict or {}).get("reason_code_str") or "")
+    if reason_code_str:
+        return reason_code_str
+    if sync_status_str:
+        return f"norgate_snapshot_sync_{sync_status_str}"
+    return "norgate_snapshot_sync_not_ready"
 PARKED_TERMINAL_ORDER_STATUS_SET: set[str] = {
     "Cancelled",
     "ApiCancelled",
@@ -1956,6 +1984,7 @@ def build_decision_plans(
     env_mode_str: str = "paper",
     log_path_str: str = DEFAULT_LOG_PATH_STR,
     pod_id_str: str | None = None,
+    auto_sync_norgate_snapshots_bool: bool = True,
 ) -> dict[str, object]:
     release_list = _load_release_list_validate_and_sync(
         releases_root_path_str,
@@ -1963,6 +1992,28 @@ def build_decision_plans(
         env_mode_str,
         pod_id_str=pod_id_str,
     )
+    norgate_snapshot_sync_detail_dict: dict[str, object] | None = None
+    if auto_sync_norgate_snapshots_bool:
+        norgate_snapshot_sync_detail_dict = ensure_norgate_snapshots_for_live_tick(
+            releases_root_path_str=releases_root_path_str,
+            env_mode_str=env_mode_str,
+            as_of_ts=as_of_ts,
+            log_path_str=log_path_str,
+            pod_id_str=pod_id_str,
+            print_operator_bool=False,
+        )
+        sync_status_str = str(norgate_snapshot_sync_detail_dict.get("status_str") or "")
+        if sync_status_str in {"failed", "waiting", "local_snapshot_only"}:
+            reason_code_str = str(
+                norgate_snapshot_sync_detail_dict.get("reason_code_str")
+                or f"norgate_snapshot_sync_{sync_status_str}"
+            )
+            return {
+                "created_decision_plan_count_int": 0,
+                "skipped_decision_plan_count_int": 0,
+                "reason_count_map_dict": {reason_code_str: 1},
+                "norgate_snapshot_sync_detail_dict": norgate_snapshot_sync_detail_dict,
+            }
     selected_release_list = select_enabled_release_list_for_mode(release_list, env_mode_str)
     due_release_list = scheduler_utils.select_due_release_list(selected_release_list, as_of_ts)
     created_decision_plan_count_int = 0
@@ -2017,6 +2068,7 @@ def build_decision_plans(
         "created_decision_plan_count_int": created_decision_plan_count_int,
         "skipped_decision_plan_count_int": skipped_decision_plan_count_int,
         "reason_count_map_dict": dict(reason_counter_obj),
+        "norgate_snapshot_sync_detail_dict": norgate_snapshot_sync_detail_dict,
     }
 
 
@@ -3953,6 +4005,8 @@ def tick(
     broker_timeout_seconds_float: float | None = None,
     adapter_factory_func: Callable[[str, int, int, float], BrokerAdapter] | None = None,
     pod_id_str: str | None = None,
+    auto_sync_norgate_snapshots_bool: bool = True,
+    prechecked_norgate_snapshot_sync_detail_dict: dict[str, object] | None = None,
 ) -> dict[str, object]:
     _validate_release_root_for_mutation(releases_root_path_str, env_mode_str, pod_id_str=pod_id_str)
     lease_owner_token_str = uuid.uuid4().hex
@@ -3964,6 +4018,7 @@ def tick(
     if not lease_acquired_bool:
         return {
             "lease_acquired_bool": False,
+            "norgate_snapshot_sync_detail_dict": None,
             "eod_snapshot_count_int": 0,
             "skipped_snapshot_count_int": 0,
             "created_decision_plan_count_int": 0,
@@ -3988,14 +4043,41 @@ def tick(
             as_of_ts=as_of_ts,
             adapter_factory_func=adapter_factory_func,
         )
-        build_detail_dict = build_decision_plans(
-            state_store_obj=state_store_obj,
-            as_of_ts=as_of_ts,
-            releases_root_path_str=releases_root_path_str,
-            env_mode_str=env_mode_str,
-            log_path_str=log_path_str,
-            pod_id_str=pod_id_str,
+        norgate_snapshot_sync_detail_dict: dict[str, object] | None = (
+            prechecked_norgate_snapshot_sync_detail_dict
         )
+        if norgate_snapshot_sync_detail_dict is None and auto_sync_norgate_snapshots_bool:
+            norgate_snapshot_sync_detail_dict = ensure_norgate_snapshots_for_live_tick(
+                releases_root_path_str=releases_root_path_str,
+                env_mode_str=env_mode_str,
+                as_of_ts=as_of_ts,
+                log_path_str=log_path_str,
+                pod_id_str=pod_id_str,
+                print_operator_bool=False,
+            )
+        new_trade_blocked_bool = norgate_snapshot_sync_blocks_new_trade_bool(
+            norgate_snapshot_sync_detail_dict
+        )
+        if new_trade_blocked_bool:
+            reason_code_str = _norgate_snapshot_sync_block_reason_code_str(
+                norgate_snapshot_sync_detail_dict
+            )
+            build_detail_dict = {
+                "created_decision_plan_count_int": 0,
+                "skipped_decision_plan_count_int": 0,
+                "reason_count_map_dict": {reason_code_str: 1},
+                "norgate_snapshot_sync_detail_dict": norgate_snapshot_sync_detail_dict,
+            }
+        else:
+            build_detail_dict = build_decision_plans(
+                state_store_obj=state_store_obj,
+                as_of_ts=as_of_ts,
+                releases_root_path_str=releases_root_path_str,
+                env_mode_str=env_mode_str,
+                log_path_str=log_path_str,
+                pod_id_str=pod_id_str,
+                auto_sync_norgate_snapshots_bool=False,
+            )
         expire_detail_dict = expire_stale_decision_plans(
             state_store_obj=state_store_obj,
             as_of_ts=as_of_ts,
@@ -4004,27 +4086,41 @@ def tick(
             log_path_str=log_path_str,
             pod_id_str=pod_id_str,
         )
-        vplan_detail_dict = build_vplans(
-            state_store_obj=state_store_obj,
-            broker_adapter_obj=broker_adapter_obj,
-            as_of_ts=as_of_ts,
-            env_mode_str=env_mode_str,
-            releases_root_path_str=releases_root_path_str,
-            log_path_str=log_path_str,
-            broker_adapter_resolver_obj=broker_adapter_resolver_obj,
-            pod_id_str=pod_id_str,
-        )
-        submit_detail_dict = submit_ready_vplans(
-            state_store_obj=state_store_obj,
-            broker_adapter_obj=broker_adapter_obj,
-            as_of_ts=as_of_ts,
-            env_mode_str=env_mode_str,
-            manual_only_bool=False,
-            releases_root_path_str=releases_root_path_str,
-            log_path_str=log_path_str,
-            broker_adapter_resolver_obj=broker_adapter_resolver_obj,
-            pod_id_str=pod_id_str,
-        )
+        if new_trade_blocked_bool:
+            vplan_detail_dict = {
+                "created_vplan_count_int": 0,
+                "blocked_action_count_int": 1,
+                "warning_count_map_dict": {},
+                "reason_count_map_dict": {},
+            }
+            submit_detail_dict = {
+                "submitted_vplan_count_int": 0,
+                "blocked_action_count_int": 1,
+                "warning_count_map_dict": {},
+                "reason_count_map_dict": {},
+            }
+        else:
+            vplan_detail_dict = build_vplans(
+                state_store_obj=state_store_obj,
+                broker_adapter_obj=broker_adapter_obj,
+                as_of_ts=as_of_ts,
+                env_mode_str=env_mode_str,
+                releases_root_path_str=releases_root_path_str,
+                log_path_str=log_path_str,
+                broker_adapter_resolver_obj=broker_adapter_resolver_obj,
+                pod_id_str=pod_id_str,
+            )
+            submit_detail_dict = submit_ready_vplans(
+                state_store_obj=state_store_obj,
+                broker_adapter_obj=broker_adapter_obj,
+                as_of_ts=as_of_ts,
+                env_mode_str=env_mode_str,
+                manual_only_bool=False,
+                releases_root_path_str=releases_root_path_str,
+                log_path_str=log_path_str,
+                broker_adapter_resolver_obj=broker_adapter_resolver_obj,
+                pod_id_str=pod_id_str,
+            )
         reconcile_detail_dict = post_execution_reconcile(
             state_store_obj=state_store_obj,
             broker_adapter_obj=broker_adapter_obj,
@@ -4047,6 +4143,7 @@ def tick(
             reason_counter_obj.update(detail_piece_dict.get("reason_count_map_dict", {}))
         return {
             "lease_acquired_bool": True,
+            "norgate_snapshot_sync_detail_dict": norgate_snapshot_sync_detail_dict,
             "eod_snapshot_count_int": 0,
             "skipped_snapshot_count_int": 0,
             "created_decision_plan_count_int": int(build_detail_dict.get("created_decision_plan_count_int", 0)),
@@ -4083,6 +4180,7 @@ def _execute_runner_command_detail_dict(
             env_mode_str=parsed_args_obj.env_mode_str,
             log_path_str=parsed_args_obj.log_path_str,
             pod_id_str=parsed_args_obj.pod_id_str,
+            auto_sync_norgate_snapshots_bool=True,
         )
     if parsed_args_obj.command_name_str == "build_vplan":
         return build_vplans(
@@ -4292,6 +4390,7 @@ def _run_incubation_fanout_detail_dict(
 
 
 def main(argv_list: list[str] | None = None) -> int:
+    load_config_env_file(override_existing_bool=True)
     parser_obj = argparse.ArgumentParser(description="alpha.live runner")
     parser_obj.add_argument(
         "command_name_str",

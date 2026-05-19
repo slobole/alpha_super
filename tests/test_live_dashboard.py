@@ -9,6 +9,7 @@ import threading
 import time
 from urllib.request import urlopen
 
+import alpha.live.dashboard as dashboard_module
 import alpha.live.runner as runner_module
 from alpha.live.dashboard import (
     DASHBOARD_HTML_STR,
@@ -1017,7 +1018,8 @@ def test_dashboard_incubation_missing_per_pod_db_renders_safe_debug_output(
     assert detail_dict["debug_story_dict"]["verdict_dict"]["next_inspect_command_name_str"] == "status"
 
 
-def test_dashboard_summary_handles_missing_empty_shared_and_pod_db(tmp_path: Path):
+def test_dashboard_summary_handles_missing_empty_shared_and_pod_db(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "false")
     releases_root_path_obj = tmp_path / "releases"
     for pod_id_str in ("pod_missing", "pod_empty", "pod_shared", "pod_specific"):
         _write_release_manifest(
@@ -1065,6 +1067,13 @@ def test_dashboard_summary_handles_missing_empty_shared_and_pod_db(tmp_path: Pat
     assert _row_by_pod_id(summary_dict, "pod_shared")["equity_float"] == 12345.0
     assert _row_by_pod_id(summary_dict, "pod_shared")["position_count_int"] == 1
     assert "data_freshness_dict" in _row_by_pod_id(summary_dict, "pod_shared")
+    norgate_item_dict = next(
+        item_dict
+        for item_dict in _row_by_pod_id(summary_dict, "pod_shared")["data_freshness_dict"]["item_dict_list"]
+        if item_dict["label_str"] == "Norgate"
+    )
+    assert norgate_item_dict["severity_str"] == "green"
+    assert _row_by_pod_id(summary_dict, "pod_shared")["data_freshness_dict"]["norgate_status_str"] == "direct"
     assert _row_by_pod_id(summary_dict, "pod_shared")["eod_snapshot_dict"]["status_str"] == "waiting"
     assert _row_by_pod_id(summary_dict, "pod_specific")["db_status_str"] == "ok"
     assert _row_by_pod_id(summary_dict, "pod_specific")["equity_float"] == 67890.0
@@ -1078,6 +1087,41 @@ def test_dashboard_summary_handles_missing_empty_shared_and_pod_db(tmp_path: Pat
         ("pod_missing", "db", "gray"),
         ("pod_empty", "db", "gray"),
     }
+
+
+def test_dashboard_main_loads_config_env_before_serving(monkeypatch, tmp_path: Path):
+    call_dict = {}
+
+    def _fake_load_config_env_file(*, override_existing_bool: bool):
+        call_dict["override_existing_bool"] = override_existing_bool
+
+    def _fake_serve_dashboard(**kwargs):
+        call_dict["serve_kwargs"] = kwargs
+
+    monkeypatch.setattr(dashboard_module, "load_config_env_file", _fake_load_config_env_file)
+    monkeypatch.setattr(dashboard_module, "serve_dashboard", _fake_serve_dashboard)
+
+    result_int = dashboard_module.main(
+        [
+            "serve",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "8999",
+            "--releases-root",
+            str(tmp_path / "releases"),
+            "--config",
+            str(tmp_path / "dashboard.yaml"),
+            "--results-root",
+            str(tmp_path / "results"),
+            "--event-log",
+            str(tmp_path / "events.jsonl"),
+        ]
+    )
+
+    assert result_int == 0
+    assert call_dict["override_existing_bool"] is True
+    assert call_dict["serve_kwargs"]["port_int"] == 8999
 
 
 def test_dashboard_summary_does_not_use_diff_status_for_overall_health(tmp_path: Path):

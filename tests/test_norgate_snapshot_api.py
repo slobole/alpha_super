@@ -315,6 +315,9 @@ def test_client_sync_derives_profiles_and_promotes_valid_snapshot(tmp_path, monk
         "norgate_eod_sp500_pit",
     ]
     assert derive_required_profile_list(str(releases_root_path_obj), "paper") == [PROFILE_STR]
+    assert derive_required_profile_list(str(releases_root_path_obj), "live", "pod_enabled_live") == [
+        "norgate_eod_sp500_pit"
+    ]
 
     local_root_path_obj = tmp_path / "local_snapshots"
     monkeypatch.setenv("NORGATE_API_TOKEN", TOKEN_STR)
