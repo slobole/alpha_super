@@ -8,7 +8,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import mimetypes
 from pathlib import Path
+import secrets
 import sqlite3
+import subprocess
+import sys
 import threading
 import traceback
 from typing import Any, Callable
@@ -33,6 +36,8 @@ DEFAULT_RESULTS_ROOT_PATH_STR = "results"
 DEFAULT_EVENT_LOG_PATH_STR = str(Path(__file__).resolve().parent / "logs" / "live_events.jsonl")
 DEFAULT_EVENT_LIMIT_INT = 80
 DEFAULT_EVENT_LOG_BACKUP_SCAN_COUNT_INT = 10
+DEFAULT_DASHBOARD_V2_DIST_PATH_STR = str(Path(__file__).resolve().parent / "dashboard_v2" / "dist")
+REPO_ROOT_PATH = Path(__file__).resolve().parents[2]
 ALERT_SEVERITY_RANK_DICT = {"red": 0, "yellow": 1, "gray": 2, "green": 3}
 COMBINED_BOOK_MODE_ORDER_LIST = ["live", "paper", "incubation"]
 SAFE_INSPECT_COMMAND_NAME_LIST = [
@@ -42,6 +47,13 @@ SAFE_INSPECT_COMMAND_NAME_LIST = [
     "show_vplan",
     "compare_reference",
 ]
+SAFE_ACTION_NAME_LIST = [
+    "tick",
+    "submit_vplan",
+    "post_execution_reconcile",
+    "eod_snapshot",
+]
+ACTION_TOKEN_HEADER_STR = "X-Alpha-Action-Token"
 
 
 @dataclass(frozen=True)
@@ -63,6 +75,7 @@ class DashboardJob:
     mode_str: str
     status_str: str
     created_timestamp_str: str
+    action_name_str: str | None = None
     started_timestamp_str: str | None = None
     completed_timestamp_str: str | None = None
     result_dict: dict[str, Any] | None = None
@@ -76,6 +89,7 @@ class DashboardJob:
             "mode_str": self.mode_str,
             "status_str": self.status_str,
             "created_timestamp_str": self.created_timestamp_str,
+            "action_name_str": self.action_name_str,
             "started_timestamp_str": self.started_timestamp_str,
             "completed_timestamp_str": self.completed_timestamp_str,
             "result_dict": self.result_dict,
@@ -88,9 +102,13 @@ class DiffJobManager:
     def __init__(
         self,
         diff_runner_fn: Callable[[DashboardPodTarget, str, str, datetime], dict[str, Any]],
+        pod_job_gate_obj: "DashboardPodJobGate | None" = None,
+        max_job_count_int: int = 200,
     ):
         self._diff_runner_fn = diff_runner_fn
         self._job_map_dict: dict[str, DashboardJob] = {}
+        self._pod_job_gate_obj = pod_job_gate_obj or DashboardPodJobGate()
+        self._max_job_count_int = max_job_count_int
         self._lock_obj = threading.Lock()
 
     def start_job(
@@ -100,32 +118,52 @@ class DiffJobManager:
         results_root_path_str: str,
     ) -> DashboardJob:
         now_ts = datetime.now(UTC)
+        pod_id_str = pod_target_obj.release_obj.pod_id_str
         job_obj = DashboardJob(
             job_id_str=uuid.uuid4().hex,
-            pod_id_str=pod_target_obj.release_obj.pod_id_str,
+            pod_id_str=pod_id_str,
             mode_str=pod_target_obj.release_obj.mode_str,
             status_str="queued",
             created_timestamp_str=now_ts.isoformat(),
+            action_name_str="compare_reference",
         )
+        self._pod_job_gate_obj.acquire(pod_id_str)
         with self._lock_obj:
+            self._prune_completed_jobs_locked()
             self._job_map_dict[job_obj.job_id_str] = job_obj
-        thread_obj = threading.Thread(
-            target=self._run_job,
-            args=(
-                job_obj.job_id_str,
-                pod_target_obj,
-                releases_root_path_str,
-                results_root_path_str,
-            ),
-            daemon=True,
-        )
-        thread_obj.start()
+        try:
+            thread_obj = threading.Thread(
+                target=self._run_job,
+                args=(
+                    job_obj.job_id_str,
+                    pod_target_obj,
+                    releases_root_path_str,
+                    results_root_path_str,
+                ),
+                daemon=True,
+            )
+            thread_obj.start()
+        except Exception:
+            self._pod_job_gate_obj.release(pod_id_str)
+            raise
         return job_obj
 
     def get_job_dict(self, job_id_str: str) -> dict[str, Any] | None:
         with self._lock_obj:
             job_obj = self._job_map_dict.get(job_id_str)
             return None if job_obj is None else job_obj.to_dict()
+
+    def _prune_completed_jobs_locked(self) -> None:
+        if len(self._job_map_dict) <= self._max_job_count_int:
+            return
+        removable_job_id_list = [
+            job_id_str
+            for job_id_str, job_obj in self._job_map_dict.items()
+            if job_obj.status_str not in {"queued", "running"}
+        ]
+        overflow_count_int = len(self._job_map_dict) - self._max_job_count_int
+        for job_id_str in removable_job_id_list[:overflow_count_int]:
+            self._job_map_dict.pop(job_id_str, None)
 
     def _run_job(
         self,
@@ -153,11 +191,149 @@ class DiffJobManager:
                 job_obj.error_str = str(exception_obj)
                 job_obj.traceback_str = traceback.format_exc()
             return
+        else:
+            with self._lock_obj:
+                job_obj = self._job_map_dict[job_id_str]
+                job_obj.status_str = "succeeded"
+                job_obj.completed_timestamp_str = datetime.now(UTC).isoformat()
+                job_obj.result_dict = result_dict
+        finally:
+            self._pod_job_gate_obj.release(pod_target_obj.release_obj.pod_id_str)
+
+
+class DashboardActionJobManager:
+    def __init__(
+        self,
+        action_runner_fn: Callable[[DashboardPodTarget, str, str, str, str, datetime], dict[str, Any]],
+        pod_job_gate_obj: "DashboardPodJobGate | None" = None,
+        max_job_count_int: int = 200,
+    ):
+        self._action_runner_fn = action_runner_fn
+        self._job_map_dict: dict[str, DashboardJob] = {}
+        self._pod_job_gate_obj = pod_job_gate_obj or DashboardPodJobGate()
+        self._max_job_count_int = max_job_count_int
+        self._lock_obj = threading.Lock()
+
+    def start_job(
+        self,
+        action_name_str: str,
+        pod_target_obj: DashboardPodTarget,
+        releases_root_path_str: str,
+        results_root_path_str: str,
+        event_log_path_str: str,
+    ) -> DashboardJob:
+        if action_name_str not in SAFE_ACTION_NAME_LIST:
+            raise ValueError(f"Unsupported dashboard action '{action_name_str}'.")
+        now_ts = datetime.now(UTC)
+        pod_id_str = pod_target_obj.release_obj.pod_id_str
+        job_obj = DashboardJob(
+            job_id_str=uuid.uuid4().hex,
+            pod_id_str=pod_id_str,
+            mode_str=pod_target_obj.release_obj.mode_str,
+            status_str="queued",
+            created_timestamp_str=now_ts.isoformat(),
+            action_name_str=action_name_str,
+        )
+        self._pod_job_gate_obj.acquire(pod_id_str)
+        with self._lock_obj:
+            self._prune_completed_jobs_locked()
+            self._job_map_dict[job_obj.job_id_str] = job_obj
+        try:
+            thread_obj = threading.Thread(
+                target=self._run_job,
+                args=(
+                    job_obj.job_id_str,
+                    action_name_str,
+                    pod_target_obj,
+                    releases_root_path_str,
+                    results_root_path_str,
+                    event_log_path_str,
+                ),
+                daemon=True,
+            )
+            thread_obj.start()
+        except Exception:
+            self._pod_job_gate_obj.release(pod_id_str)
+            raise
+        return job_obj
+
+    def get_job_dict(self, job_id_str: str) -> dict[str, Any] | None:
+        with self._lock_obj:
+            job_obj = self._job_map_dict.get(job_id_str)
+            return None if job_obj is None else job_obj.to_dict()
+
+    def _prune_completed_jobs_locked(self) -> None:
+        if len(self._job_map_dict) <= self._max_job_count_int:
+            return
+        removable_job_id_list = [
+            job_id_str
+            for job_id_str, job_obj in self._job_map_dict.items()
+            if job_obj.status_str not in {"queued", "running"}
+        ]
+        overflow_count_int = len(self._job_map_dict) - self._max_job_count_int
+        for job_id_str in removable_job_id_list[:overflow_count_int]:
+            self._job_map_dict.pop(job_id_str, None)
+
+    def _run_job(
+        self,
+        job_id_str: str,
+        action_name_str: str,
+        pod_target_obj: DashboardPodTarget,
+        releases_root_path_str: str,
+        results_root_path_str: str,
+        event_log_path_str: str,
+    ) -> None:
         with self._lock_obj:
             job_obj = self._job_map_dict[job_id_str]
-            job_obj.status_str = "succeeded"
-            job_obj.completed_timestamp_str = datetime.now(UTC).isoformat()
-            job_obj.result_dict = result_dict
+            job_obj.status_str = "running"
+            job_obj.started_timestamp_str = datetime.now(UTC).isoformat()
+        try:
+            result_dict = self._action_runner_fn(
+                pod_target_obj,
+                action_name_str,
+                releases_root_path_str,
+                results_root_path_str,
+                event_log_path_str,
+                datetime.now(UTC),
+            )
+        except Exception as exception_obj:  # pragma: no cover - traceback text is environment-specific.
+            with self._lock_obj:
+                job_obj = self._job_map_dict[job_id_str]
+                job_obj.status_str = "failed"
+                job_obj.completed_timestamp_str = datetime.now(UTC).isoformat()
+                job_obj.error_str = str(exception_obj)
+                job_obj.traceback_str = traceback.format_exc()
+            return
+        else:
+            with self._lock_obj:
+                job_obj = self._job_map_dict[job_id_str]
+                job_obj.status_str = "succeeded"
+                job_obj.completed_timestamp_str = datetime.now(UTC).isoformat()
+                job_obj.result_dict = result_dict
+        finally:
+            self._pod_job_gate_obj.release(pod_target_obj.release_obj.pod_id_str)
+
+
+class DashboardActionInFlightError(RuntimeError):
+    pass
+
+
+class DashboardPodJobGate:
+    def __init__(self):
+        self._active_pod_id_set: set[str] = set()
+        self._lock_obj = threading.Lock()
+
+    def acquire(self, pod_id_str: str) -> None:
+        with self._lock_obj:
+            if pod_id_str in self._active_pod_id_set:
+                raise DashboardActionInFlightError(
+                    f"Dashboard job already running for pod_id_str '{pod_id_str}'."
+                )
+            self._active_pod_id_set.add(pod_id_str)
+
+    def release(self, pod_id_str: str) -> None:
+        with self._lock_obj:
+            self._active_pod_id_set.discard(pod_id_str)
 
 
 @dataclass
@@ -166,11 +342,22 @@ class DashboardApp:
     config_path_str: str = DEFAULT_CONFIG_PATH_STR
     results_root_path_str: str = DEFAULT_RESULTS_ROOT_PATH_STR
     event_log_path_str: str = DEFAULT_EVENT_LOG_PATH_STR
+    dashboard_v2_dist_path_str: str = DEFAULT_DASHBOARD_V2_DIST_PATH_STR
+    action_token_str: str = field(default_factory=lambda: secrets.token_urlsafe(32))
+    pod_job_gate_obj: DashboardPodJobGate | None = None
     diff_job_manager_obj: DiffJobManager | None = None
+    action_job_manager_obj: DashboardActionJobManager | None = None
 
     def __post_init__(self) -> None:
+        if self.pod_job_gate_obj is None:
+            self.pod_job_gate_obj = DashboardPodJobGate()
         if self.diff_job_manager_obj is None:
-            self.diff_job_manager_obj = DiffJobManager(_run_reference_diff_for_pod)
+            self.diff_job_manager_obj = DiffJobManager(_run_reference_diff_for_pod, self.pod_job_gate_obj)
+        if self.action_job_manager_obj is None:
+            self.action_job_manager_obj = DashboardActionJobManager(
+                _run_dashboard_action_for_pod,
+                pod_job_gate_obj=self.pod_job_gate_obj,
+            )
 
     def load_config_obj(self) -> DashboardConfig:
         return load_dashboard_config(self.config_path_str)
@@ -795,6 +982,51 @@ def _run_reference_diff_for_pod(
     )
 
 
+def _run_dashboard_action_for_pod(
+    pod_target_obj: DashboardPodTarget,
+    action_name_str: str,
+    releases_root_path_str: str,
+    results_root_path_str: str,
+    event_log_path_str: str,
+    as_of_ts: datetime,
+) -> dict[str, Any]:
+    if action_name_str not in SAFE_ACTION_NAME_LIST:
+        raise ValueError(f"Unsupported dashboard action '{action_name_str}'.")
+    state_store_obj = LiveStateStore(pod_target_obj.db_path_str)
+    job_run_id_int = state_store_obj.record_job_start(f"dashboard_{action_name_str}")
+    parsed_args_obj = argparse.Namespace(
+        command_name_str=action_name_str,
+        releases_root_path_str=releases_root_path_str,
+        env_mode_str=pod_target_obj.release_obj.mode_str,
+        log_path_str=event_log_path_str,
+        archive_root_path_str=None,
+        json_output_bool=True,
+        decision_plan_id_int=None,
+        vplan_id_int=None,
+        pod_id_str=pod_target_obj.release_obj.pod_id_str,
+        broker_host_str=None,
+        broker_port_int=None,
+        broker_client_id_int=None,
+        broker_timeout_seconds_float=None,
+        reference_strategy_pickle_path_str=None,
+        html_output_bool=False,
+        output_dir_str=results_root_path_str,
+    )
+    try:
+        result_dict = runner._execute_runner_command_detail_dict(
+            parsed_args_obj=parsed_args_obj,
+            state_store_obj=state_store_obj,
+            as_of_ts=as_of_ts,
+            db_path_str=pod_target_obj.db_path_str,
+        )
+        state_store_obj.record_job_finish(job_run_id_int, "completed", result_dict)
+        return result_dict
+    except Exception as exception_obj:
+        error_detail_dict = {"error_str": str(exception_obj)}
+        state_store_obj.record_job_finish(job_run_id_int, "failed", error_detail_dict)
+        raise
+
+
 def make_dashboard_handler_class(app_obj: DashboardApp):
     class DashboardRequestHandler(BaseHTTPRequestHandler):
         server_version = "AlphaLiveDashboard/1.0"
@@ -813,10 +1045,13 @@ def make_dashboard_handler_class(app_obj: DashboardApp):
             path_str = unquote(parsed_url_obj.path)
             try:
                 if method_str == "GET" and path_str == "/":
-                    self._send_html(DASHBOARD_HTML_STR)
+                    self._send_dashboard_v2_index()
                     return
                 if method_str == "GET" and path_str == "/api/pods":
                     self._send_json(build_dashboard_summary_dict(app_obj))
+                    return
+                if method_str == "GET" and path_str == "/api/action-token":
+                    self._send_json({"action_token_str": app_obj.action_token_str})
                     return
                 if method_str == "GET" and path_str.startswith("/api/pods/"):
                     self._handle_pod_get(path_str)
@@ -829,6 +1064,12 @@ def make_dashboard_handler_class(app_obj: DashboardApp):
                     return
                 if method_str == "GET" and path_str.startswith("/artifacts/"):
                     self._handle_artifact_get(path_str)
+                    return
+                if method_str == "GET" and path_str.startswith("/assets/"):
+                    self._handle_dashboard_v2_asset_get(path_str)
+                    return
+                if method_str == "GET" and path_str in {"/incubation"}:
+                    self._send_dashboard_v2_index()
                     return
                 self._send_error_json(404, "not_found", f"Unknown route: {path_str}")
             except KeyError as exception_obj:
@@ -870,18 +1111,110 @@ def make_dashboard_handler_class(app_obj: DashboardApp):
         def _handle_pod_post(self, path_str: str) -> None:
             part_list = [part_str for part_str in path_str.split("/") if part_str]
             if len(part_list) == 5 and part_list[3] == "diff" and part_list[4] == "run":
+                request_dict = self._read_json_body_dict()
+                if not self._action_post_is_same_origin_bool():
+                    self._send_error_json(
+                        403,
+                        "origin_rejected",
+                        "Dashboard actions require a same-origin request.",
+                    )
+                    return
+                if not self._action_token_is_valid_bool():
+                    self._send_error_json(
+                        403,
+                        "action_token_required",
+                        "Dashboard actions require a server-issued action token.",
+                    )
+                    return
+                if request_dict.get("confirmed_bool") is not True:
+                    self._send_error_json(
+                        400,
+                        "confirmation_required",
+                        "Dashboard actions require confirmed_bool=true.",
+                    )
+                    return
                 target_obj = app_obj.get_target_for_pod(part_list[2])
                 if target_obj is None:
                     raise KeyError(f"Unknown enabled pod_id_str '{part_list[2]}'.")
                 assert app_obj.diff_job_manager_obj is not None
-                job_obj = app_obj.diff_job_manager_obj.start_job(
-                    pod_target_obj=target_obj,
-                    releases_root_path_str=app_obj.releases_root_path_str,
-                    results_root_path_str=app_obj.results_root_path_str,
-                )
+                try:
+                    job_obj = app_obj.diff_job_manager_obj.start_job(
+                        pod_target_obj=target_obj,
+                        releases_root_path_str=app_obj.releases_root_path_str,
+                        results_root_path_str=app_obj.results_root_path_str,
+                    )
+                except DashboardActionInFlightError as exception_obj:
+                    self._send_error_json(409, "action_in_flight", str(exception_obj))
+                    return
+                self._send_json(job_obj.to_dict(), status_int=202)
+                return
+            if len(part_list) == 5 and part_list[3] == "actions":
+                action_name_str = part_list[4]
+                if action_name_str not in SAFE_ACTION_NAME_LIST:
+                    self._send_error_json(
+                        400,
+                        "unsupported_action",
+                        f"Unsupported dashboard action: {action_name_str}",
+                    )
+                    return
+                request_dict = self._read_json_body_dict()
+                if not self._action_post_is_same_origin_bool():
+                    self._send_error_json(
+                        403,
+                        "origin_rejected",
+                        "Dashboard actions require a same-origin request.",
+                    )
+                    return
+                if not self._action_token_is_valid_bool():
+                    self._send_error_json(
+                        403,
+                        "action_token_required",
+                        "Dashboard actions require a server-issued action token.",
+                    )
+                    return
+                if request_dict.get("confirmed_bool") is not True:
+                    self._send_error_json(
+                        400,
+                        "confirmation_required",
+                        "Dashboard actions require confirmed_bool=true.",
+                    )
+                    return
+                target_obj = app_obj.get_target_for_pod(part_list[2])
+                if target_obj is None:
+                    raise KeyError(f"Unknown enabled pod_id_str '{part_list[2]}'.")
+                assert app_obj.action_job_manager_obj is not None
+                try:
+                    job_obj = app_obj.action_job_manager_obj.start_job(
+                        action_name_str=action_name_str,
+                        pod_target_obj=target_obj,
+                        releases_root_path_str=app_obj.releases_root_path_str,
+                        results_root_path_str=app_obj.results_root_path_str,
+                        event_log_path_str=app_obj.event_log_path_str,
+                    )
+                except DashboardActionInFlightError as exception_obj:
+                    self._send_error_json(409, "action_in_flight", str(exception_obj))
+                    return
                 self._send_json(job_obj.to_dict(), status_int=202)
                 return
             self._send_error_json(404, "not_found", f"Unknown POD POST route: {path_str}")
+
+        def _action_post_is_same_origin_bool(self) -> bool:
+            content_type_str = self.headers.get("Content-Type", "").split(";")[0].strip().lower()
+            if content_type_str != "application/json":
+                return False
+            host_str = self.headers.get("Host", "")
+            origin_seen_bool = False
+            for header_name_str in ("Origin", "Referer"):
+                header_value_str = self.headers.get(header_name_str)
+                if header_value_str:
+                    origin_seen_bool = True
+                    if not _request_header_matches_host_bool(header_value_str, host_str):
+                        return False
+            return origin_seen_bool
+
+        def _action_token_is_valid_bool(self) -> bool:
+            request_token_str = self.headers.get(ACTION_TOKEN_HEADER_STR, "")
+            return secrets.compare_digest(str(request_token_str), app_obj.action_token_str)
 
         def _handle_job_get(self, path_str: str) -> None:
             part_list = [part_str for part_str in path_str.split("/") if part_str]
@@ -890,10 +1223,25 @@ def make_dashboard_handler_class(app_obj: DashboardApp):
                 return
             assert app_obj.diff_job_manager_obj is not None
             job_dict = app_obj.diff_job_manager_obj.get_job_dict(part_list[2])
+            if job_dict is None and app_obj.action_job_manager_obj is not None:
+                job_dict = app_obj.action_job_manager_obj.get_job_dict(part_list[2])
             if job_dict is None:
                 self._send_error_json(404, "unknown_job", f"Unknown job_id_str '{part_list[2]}'.")
                 return
             self._send_json(job_dict)
+
+        def _handle_dashboard_v2_asset_get(self, path_str: str) -> None:
+            relative_path_str = path_str.removeprefix("/")
+            asset_path_obj = (Path(app_obj.dashboard_v2_dist_path_str) / relative_path_str).resolve()
+            dist_root_path_obj = Path(app_obj.dashboard_v2_dist_path_str).resolve()
+            if not _is_relative_to_bool(asset_path_obj, dist_root_path_obj):
+                self._send_error_json(403, "forbidden", "Dashboard asset path escapes dist root.")
+                return
+            if not asset_path_obj.exists() or not asset_path_obj.is_file():
+                self._send_error_json(404, "not_found", "Dashboard asset not found.")
+                return
+            content_type_str = mimetypes.guess_type(str(asset_path_obj))[0] or "application/octet-stream"
+            self._send_file(asset_path_obj, content_type_str)
 
         def _handle_artifact_get(self, path_str: str) -> None:
             relative_path_str = path_str.removeprefix("/artifacts/")
@@ -906,11 +1254,54 @@ def make_dashboard_handler_class(app_obj: DashboardApp):
                 self._send_error_json(404, "not_found", "Artifact not found.")
                 return
             content_type_str = mimetypes.guess_type(str(artifact_path_obj))[0] or "application/octet-stream"
+            self._send_file(
+                artifact_path_obj,
+                content_type_str,
+                header_dict={
+                    "Content-Security-Policy": (
+                        "sandbox; default-src 'none'; img-src 'self' data:; "
+                        "style-src 'self' 'unsafe-inline'"
+                    ),
+                    "X-Content-Type-Options": "nosniff",
+                },
+            )
+
+        def _send_dashboard_v2_index(self) -> None:
+            index_path_obj = Path(app_obj.dashboard_v2_dist_path_str) / "index.html"
+            if not index_path_obj.exists():
+                self._send_html(
+                    "<!doctype html><html><head><title>Dashboard V2 build missing</title></head>"
+                    "<body><h1>Dashboard V2 build missing</h1>"
+                    "<p>Run: uv run python scripts/build_dashboard_v2.py</p></body></html>"
+                )
+                return
+            self._send_file(index_path_obj, "text/html; charset=utf-8")
+
+        def _send_file(
+            self,
+            path_obj: Path,
+            content_type_str: str,
+            header_dict: dict[str, str] | None = None,
+        ) -> None:
             self.send_response(200)
             self.send_header("Content-Type", content_type_str)
-            self.send_header("Content-Length", str(artifact_path_obj.stat().st_size))
+            for header_name_str, header_value_str in (header_dict or {}).items():
+                self.send_header(header_name_str, header_value_str)
+            self.send_header("Content-Length", str(path_obj.stat().st_size))
             self.end_headers()
-            self.wfile.write(artifact_path_obj.read_bytes())
+            self.wfile.write(path_obj.read_bytes())
+
+        def _read_json_body_dict(self) -> dict[str, Any]:
+            content_length_int = int(self.headers.get("Content-Length") or 0)
+            if content_length_int <= 0:
+                return {}
+            body_bytes = self.rfile.read(content_length_int)
+            if len(body_bytes) == 0:
+                return {}
+            payload_obj = json.loads(body_bytes.decode("utf-8"))
+            if not isinstance(payload_obj, dict):
+                raise ValueError("JSON body must be an object.")
+            return payload_obj
 
         def _send_html(self, html_text_str: str) -> None:
             payload_bytes = html_text_str.encode("utf-8")
@@ -953,17 +1344,37 @@ def serve_dashboard(
     config_path_str: str = DEFAULT_CONFIG_PATH_STR,
     results_root_path_str: str = DEFAULT_RESULTS_ROOT_PATH_STR,
     event_log_path_str: str = DEFAULT_EVENT_LOG_PATH_STR,
+    dashboard_v2_dist_path_str: str = DEFAULT_DASHBOARD_V2_DIST_PATH_STR,
+    auto_build_dashboard_v2_bool: bool = True,
 ) -> None:
+    if auto_build_dashboard_v2_bool:
+        _ensure_dashboard_v2_dist(dashboard_v2_dist_path_str)
     app_obj = DashboardApp(
         releases_root_path_str=releases_root_path_str,
         config_path_str=config_path_str,
         results_root_path_str=results_root_path_str,
         event_log_path_str=event_log_path_str,
+        dashboard_v2_dist_path_str=dashboard_v2_dist_path_str,
     )
     handler_cls = make_dashboard_handler_class(app_obj)
     server_obj = ThreadingHTTPServer((host_str, int(port_int)), handler_cls)
     print(f"Live POD dashboard listening on http://{host_str}:{int(port_int)}")
     server_obj.serve_forever()
+
+
+def _ensure_dashboard_v2_dist(dashboard_v2_dist_path_str: str) -> None:
+    index_path_obj = Path(dashboard_v2_dist_path_str) / "index.html"
+    if index_path_obj.exists():
+        return
+    build_script_path_obj = REPO_ROOT_PATH / "scripts" / "build_dashboard_v2.py"
+    try:
+        subprocess.run(
+            [sys.executable, str(build_script_path_obj)],
+            cwd=REPO_ROOT_PATH,
+            check=True,
+        )
+    except Exception as exception_obj:  # pragma: no cover - startup warning text is environment-specific.
+        print(f"WARNING: Dashboard V2 build failed: {exception_obj}")
 
 
 def _derive_next_action_dict(
@@ -3970,6 +4381,13 @@ def _is_relative_to_bool(path_obj: Path, parent_path_obj: Path) -> bool:
     return True
 
 
+def _request_header_matches_host_bool(header_value_str: str, host_str: str) -> bool:
+    if host_str == "":
+        return False
+    parsed_header_obj = urlparse(header_value_str)
+    return parsed_header_obj.netloc.lower() == host_str.lower()
+
+
 def _jsonable_obj(value_obj: Any) -> Any:
     if isinstance(value_obj, dict):
         return {str(key_obj): _jsonable_obj(item_obj) for key_obj, item_obj in value_obj.items()}
@@ -3984,3821 +4402,6 @@ def _jsonable_obj(value_obj: Any) -> Any:
     return value_obj
 
 
-DASHBOARD_HTML_STR = """<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Live POD Dashboard</title>
-  <style>
-    :root {
-      color-scheme: light;
-      --bg: #f7f8fa;
-      --panel: #ffffff;
-      --line: #e2e7ef;
-      --line-strong: #cbd5e1;
-      --text: #111827;
-      --muted: #667085;
-      --green: #247a52;
-      --yellow: #936316;
-      --red: #b42318;
-      --gray: #6b7280;
-      --blue: #175cd3;
-      --blue-soft: #f3f7ff;
-      --green-soft: #ecfdf3;
-      --yellow-soft: #fffaeb;
-      --red-soft: #fef3f2;
-      --gray-soft: #f2f4f7;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font: 14px/1.5 Arial, Helvetica, sans-serif;
-    }
-    header {
-      height: 56px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 18px;
-      border-bottom: 1px solid var(--line);
-      background: var(--panel);
-    }
-    h1 { font-size: 18px; margin: 0; }
-    main {
-      max-width: 1540px;
-      margin: 0 auto;
-      padding: 14px 18px 28px;
-    }
-    .toolbar {
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      margin-bottom: 12px;
-      flex-wrap: wrap;
-    }
-    .dashboard-section {
-      --section-accent: var(--line-strong);
-      --section-header-bg: #fbfcfe;
-      min-width: 0;
-      margin-bottom: 16px;
-      border: 1px solid var(--line-strong);
-      border-left: 5px solid var(--section-accent);
-      border-radius: 10px;
-      background: var(--panel);
-      overflow: hidden;
-      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
-    }
-    .console-section {
-      --section-accent: var(--blue);
-      --section-header-bg: #f3f7ff;
-    }
-    .alert-panel {
-      --section-accent: var(--yellow);
-      --section-header-bg: #fffbeb;
-    }
-    .attention-panel {
-      --section-accent: var(--red);
-      --section-header-bg: #fff7ed;
-    }
-    .table-panel {
-      --section-accent: var(--gray);
-      --section-header-bg: #f8fafc;
-    }
-    .detail-workspace {
-      --section-accent: var(--green);
-      --section-header-bg: #f0fdf4;
-    }
-    .dashboard-section-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      padding: 12px 14px;
-      border-bottom: 1px solid var(--line-strong);
-      background: var(--section-header-bg);
-    }
-    .dashboard-section-header h2 {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin: 0;
-      font-size: 14px;
-      line-height: 1.25;
-    }
-    .dashboard-section-header h2::before {
-      content: "";
-      display: inline-block;
-      width: 8px;
-      height: 8px;
-      border-radius: 999px;
-      background: var(--section-accent);
-      box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.9);
-      flex: 0 0 auto;
-    }
-    .dashboard-section-subtitle {
-      margin-top: 2px;
-      color: var(--muted);
-      font-size: 12px;
-    }
-    .dashboard-section-body {
-      padding: 14px;
-      background: #fff;
-    }
-    .dashboard-section-body.flush {
-      padding: 0;
-    }
-    .section-status {
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 700;
-      white-space: nowrap;
-    }
-    select, button {
-      min-height: 34px;
-      border: 1px solid var(--line);
-      background: var(--panel);
-      color: var(--text);
-      padding: 0 10px;
-      border-radius: 7px;
-    }
-    button { cursor: pointer; }
-    button.primary { background: var(--blue); color: white; border-color: var(--blue); }
-    button.secondary { background: #f9fafb; }
-    button:disabled { opacity: 0.55; cursor: not-allowed; }
-    .muted { color: var(--muted); }
-    .mono { font-family: Consolas, Menlo, monospace; }
-    .num { text-align: right; font-variant-numeric: tabular-nums; }
-    table {
-      width: 100%;
-      min-width: 980px;
-      border-collapse: collapse;
-      background: var(--panel);
-      border: 0;
-    }
-    .pod-table {
-      table-layout: fixed;
-      min-width: 1120px;
-    }
-    .pod-table th:nth-child(1),
-    .pod-table td:nth-child(1) { width: 92px; }
-    .pod-table th:nth-child(2),
-    .pod-table td:nth-child(2) { width: 280px; }
-    .pod-table th:nth-child(3),
-    .pod-table td:nth-child(3) { width: 92px; }
-    .pod-table th:nth-child(4),
-    .pod-table td:nth-child(4) { width: 190px; }
-    .pod-table th:nth-child(5),
-    .pod-table td:nth-child(5) { width: 280px; }
-    .pod-table th:nth-child(6),
-    .pod-table td:nth-child(6) { width: 220px; }
-    .pod-table th:nth-child(7),
-    .pod-table td:nth-child(7) { width: 150px; }
-    th, td {
-      border-bottom: 1px solid var(--line);
-      padding: 7px 10px;
-      text-align: left;
-      vertical-align: top;
-      white-space: nowrap;
-    }
-    th {
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 700;
-      background: #fbfcfe;
-      position: sticky;
-      top: 0;
-      z-index: 2;
-    }
-    tr:hover td { background: #fbfcfe; }
-    tr.selected td { background: var(--blue-soft); }
-    tr.selected td:first-child { box-shadow: inset 3px 0 var(--blue); }
-    tr.changed td { box-shadow: inset 0 -2px #bfdbfe; }
-    .pod-link { color: var(--blue); cursor: pointer; font-weight: 700; }
-    .strategy-text {
-      display: inline-block;
-      max-width: 420px;
-      white-space: normal;
-      overflow-wrap: anywhere;
-    }
-    .debug-cell,
-    .action-cell {
-      min-width: 260px;
-      max-width: 300px;
-      white-space: normal;
-      overflow-wrap: anywhere;
-    }
-    .debug-verdict {
-      display: grid;
-      grid-template-columns: auto minmax(0, 1fr);
-      gap: 7px;
-      align-items: start;
-    }
-    .debug-verdict-label {
-      font-weight: 800;
-      line-height: 1.25;
-      overflow-wrap: anywhere;
-    }
-    .debug-verdict-reason,
-    .debug-verdict-evidence {
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.25;
-      overflow-wrap: anywhere;
-    }
-    .summary-action {
-      display: grid;
-      grid-template-columns: auto minmax(0, 1fr);
-      gap: 7px;
-      align-items: start;
-      min-width: 0;
-    }
-    .summary-action-main { min-width: 0; }
-    .summary-action-label {
-      font-weight: 800;
-      line-height: 1.25;
-      overflow-wrap: anywhere;
-    }
-    .summary-action-reason,
-    .summary-action-inspect {
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.25;
-      overflow-wrap: anywhere;
-    }
-    .summary-action .pill {
-      margin-top: 1px;
-    }
-    .pill {
-      display: inline-block;
-      min-width: 48px;
-      text-align: center;
-      padding: 2px 7px;
-      border-radius: 999px;
-      border: 1px solid transparent;
-      font-size: 12px;
-      font-weight: 700;
-      white-space: nowrap;
-      overflow-wrap: normal;
-    }
-    .pill.green { color: var(--green); background: var(--green-soft); border-color: #bbf7d0; }
-    .pill.yellow { color: var(--yellow); background: var(--yellow-soft); border-color: #fedf89; }
-    .pill.red { color: var(--red); background: var(--red-soft); border-color: #fecdca; }
-    .pill.gray { color: var(--gray); background: var(--gray-soft); border-color: #e5e7eb; }
-    .green { background: var(--green); }
-    .yellow { background: var(--yellow); }
-    .red { background: var(--red); }
-    .gray { background: var(--gray); }
-    .state-cell,
-    .eod-cell,
-    .diff-cell,
-    .updated-cell,
-    .operator-cell {
-      white-space: normal;
-      overflow-wrap: anywhere;
-    }
-    .severity-cell {
-      white-space: normal;
-    }
-    .operator-state {
-      font-weight: 800;
-      line-height: 1.25;
-      overflow-wrap: anywhere;
-    }
-    .operator-reason,
-    .operator-evidence {
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.3;
-      margin-top: 2px;
-      overflow-wrap: anywhere;
-    }
-    .operator-changed {
-      display: inline-block;
-      margin-top: 5px;
-      color: var(--blue);
-      font-size: 11px;
-      font-weight: 800;
-    }
-    .operator-command-cell {
-      white-space: normal;
-    }
-    .operator-command-cell button {
-      width: 100%;
-      min-height: 30px;
-    }
-    .state-main { font-weight: 700; }
-    .state-sub,
-    .cell-sub {
-      color: var(--muted);
-      font-size: 12px;
-      margin-top: 2px;
-    }
-    .table-panel { min-width: 0; }
-    .table-panel .table-scroll {
-      border: 0;
-      border-radius: 0;
-    }
-    .table-scroll {
-      width: 100%;
-      overflow: auto;
-      max-height: 52vh;
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-    }
-    .alert-counts {
-      display: flex;
-      gap: 6px;
-      align-items: center;
-      margin-left: auto;
-      flex-wrap: wrap;
-    }
-    .count-pill {
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      padding: 3px 8px;
-      font-size: 12px;
-      color: var(--muted);
-      background: var(--panel);
-    }
-    .count-pill.red { color: var(--red); background: var(--red-soft); }
-    .count-pill.yellow { color: var(--yellow); background: var(--yellow-soft); }
-    .count-pill.gray { color: var(--gray); background: var(--gray-soft); }
-    .alert-panel {
-      background: var(--panel);
-    }
-    .alert-panel.collapsed .alert-header {
-      border-bottom: 0;
-    }
-    .alert-panel.collapsed .alert-list {
-      display: none;
-    }
-    .alert-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--line);
-      background: #fbfcfe;
-    }
-    .alert-header h2 { margin: 0; font-size: 14px; }
-    .alert-header-actions {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-    }
-    .alert-list {
-      display: grid;
-      gap: 0;
-      background: var(--panel);
-    }
-    .alert-row {
-      display: grid;
-      grid-template-columns: 108px minmax(0, 1fr);
-      gap: 10px;
-      text-align: left;
-      min-height: 56px;
-      padding: 9px 12px;
-      border: 0;
-      border-top: 1px solid var(--line);
-      border-radius: 0;
-      background: var(--panel);
-    }
-    .alert-row:hover { background: #fbfcfe; }
-    .alert-row.red { box-shadow: inset 3px 0 var(--red); }
-    .alert-row.yellow { box-shadow: inset 3px 0 var(--yellow); }
-    .alert-row.gray { box-shadow: inset 3px 0 var(--gray); }
-    .alert-type {
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      overflow-wrap: anywhere;
-    }
-    .alert-main { min-width: 0; }
-    .alert-label { font-weight: 800; overflow-wrap: anywhere; }
-    .alert-meta,
-    .alert-reason {
-      color: var(--muted);
-      font-size: 12px;
-      overflow-wrap: anywhere;
-    }
-    .console-status-strip {
-      display: grid;
-      grid-template-columns: repeat(6, minmax(120px, 1fr));
-      gap: 8px;
-    }
-    .console-status-item {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--panel);
-      padding: 8px 10px;
-      min-width: 0;
-    }
-    .console-status-label {
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 800;
-      text-transform: uppercase;
-    }
-    .console-status-value {
-      margin-top: 2px;
-      font-weight: 800;
-      overflow-wrap: anywhere;
-    }
-    .combined-book-section {
-      --section-accent: var(--blue);
-      --section-header-bg: #eff6ff;
-    }
-    .combined-book-env-list {
-      display: grid;
-      gap: 12px;
-    }
-    .combined-book-env {
-      border: 1px solid var(--line);
-      border-left: 4px solid var(--gray);
-      border-radius: 8px;
-      background: #fff;
-      overflow: hidden;
-    }
-    .combined-book-env.green { border-left-color: var(--green); }
-    .combined-book-env.yellow { border-left-color: var(--yellow); }
-    .combined-book-env.red { border-left-color: var(--red); }
-    .combined-book-env.gray { border-left-color: var(--gray); }
-    .combined-book-env-header {
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      align-items: flex-start;
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--line);
-      background: #fbfcfe;
-    }
-    .combined-book-title {
-      font-weight: 800;
-      overflow-wrap: anywhere;
-    }
-    .combined-book-subtitle {
-      color: var(--muted);
-      font-size: 12px;
-      margin-top: 2px;
-      overflow-wrap: anywhere;
-    }
-    .combined-book-body {
-      display: grid;
-      gap: 10px;
-      padding: 12px;
-    }
-    .combined-book-selector-list {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-    .combined-book-selector-item {
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #fff;
-      padding: 6px 8px;
-      min-height: 34px;
-      max-width: 100%;
-      color: var(--text);
-      font-size: 12px;
-      font-weight: 700;
-    }
-    .combined-book-selector-item input {
-      margin: 0;
-      flex: 0 0 auto;
-    }
-    .combined-book-selector-label {
-      overflow-wrap: anywhere;
-    }
-    .combined-book-warning-list {
-      display: grid;
-      gap: 6px;
-    }
-    .combined-book-warning {
-      display: grid;
-      grid-template-columns: 88px minmax(0, 1fr);
-      gap: 8px;
-      align-items: start;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      padding: 7px 8px;
-      background: #fff;
-    }
-    .combined-book-warning-label {
-      font-weight: 800;
-      overflow-wrap: anywhere;
-    }
-    .combined-book-warning-detail {
-      color: var(--muted);
-      font-size: 12px;
-      overflow-wrap: anywhere;
-    }
-    .combined-book-chart-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
-      gap: 12px;
-      align-items: start;
-    }
-    .combined-book-chart-block {
-      min-width: 0;
-    }
-    .combined-book-chart-block .pnl-curve {
-      max-width: none;
-      margin-top: 0;
-    }
-    .combined-book-table .num {
-      text-align: right;
-      white-space: nowrap;
-    }
-    .combined-book-legend {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 7px 12px;
-      margin-top: 8px;
-      color: var(--muted);
-      font-size: 12px;
-    }
-    .combined-book-legend-item {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      min-width: 0;
-    }
-    .combined-book-legend-swatch {
-      width: 18px;
-      height: 3px;
-      border-radius: 999px;
-      flex: 0 0 auto;
-    }
-    .combined-book-legend-label {
-      overflow-wrap: anywhere;
-    }
-    .combined-book-legend-item.combined {
-      color: var(--text);
-      font-weight: 800;
-    }
-    .attention-panel {
-      background: var(--panel);
-    }
-    .attention-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--line);
-      background: #fbfcfe;
-    }
-    .attention-header h2 { margin: 0; font-size: 14px; }
-    .attention-list { display: grid; background: var(--panel); }
-    .attention-group-title {
-      padding: 7px 12px;
-      border-top: 1px solid var(--line);
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 800;
-      text-transform: uppercase;
-      background: #fbfcfe;
-    }
-    .attention-row {
-      display: grid;
-      grid-template-columns: 92px minmax(0, 1fr) 144px;
-      gap: 10px;
-      align-items: start;
-      padding: 8px 12px;
-      border-top: 1px solid var(--line);
-      cursor: pointer;
-      background: #fff;
-      color: var(--text);
-    }
-    .attention-row:hover { background: #fbfcfe; }
-    .attention-row.red {
-      border-left: 4px solid var(--red);
-      background: #fff8f7;
-      color: var(--text);
-    }
-    .attention-row.yellow {
-      border-left: 4px solid var(--yellow);
-      background: #fffdf5;
-      color: var(--text);
-    }
-    .attention-row.green {
-      border-left: 4px solid var(--green);
-      background: #f8fffb;
-      color: var(--text);
-    }
-    .attention-row.gray {
-      border-left: 4px solid var(--gray);
-      background: #fbfcfe;
-      color: var(--text);
-    }
-    .attention-main { min-width: 0; }
-    .attention-title { font-weight: 800; overflow-wrap: anywhere; }
-    .attention-meta,
-    .attention-reason,
-    .attention-evidence {
-      color: var(--muted);
-      font-size: 12px;
-      overflow-wrap: anywhere;
-    }
-    .attention-command button { width: 100%; }
-    .detail-workspace {
-      margin-top: 14px;
-    }
-    .empty-state {
-      min-height: 0;
-    }
-    .empty-state .dashboard-section-body {
-      min-height: 160px;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: flex-start;
-    }
-    .detail-shell-body {
-      padding: 14px 16px 16px;
-    }
-    .detail-header {
-      display: flex;
-      justify-content: space-between;
-      gap: 14px;
-      align-items: flex-start;
-      border-bottom: 1px solid var(--line);
-      padding-bottom: 12px;
-      margin-bottom: 14px;
-      position: sticky;
-      top: 0;
-      z-index: 5;
-      background: var(--panel);
-    }
-    .detail-title h2 { margin: 0 0 6px; font-size: 18px; overflow-wrap: anywhere; }
-    .detail-subtitle { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    .inspect-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-    .action-banner {
-      border: 1px solid var(--line);
-      border-left-width: 4px;
-      padding: 10px;
-      margin-bottom: 14px;
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      align-items: flex-start;
-      flex-wrap: wrap;
-      background: #fff;
-      border-radius: 7px;
-    }
-    .action-banner.green { border-left-color: var(--green); background: #f0fdf4; color: var(--text); }
-    .action-banner.yellow { border-left-color: var(--yellow); background: #fffbeb; color: var(--text); }
-    .action-banner.red { border-left-color: var(--red); background: #fff7ed; color: var(--text); }
-    .action-banner.gray { border-left-color: var(--gray); background: #f9fafb; color: var(--text); }
-    .action-main { min-width: 280px; flex: 1 1 520px; }
-    .action-title { font-weight: 800; margin-bottom: 3px; }
-    .action-context-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-      gap: 6px 12px;
-      margin-top: 9px;
-    }
-    .action-context-item {
-      border: 1px solid var(--line);
-      border-left: 3px solid #d0d5dd;
-      border-radius: 6px;
-      padding: 7px 8px;
-      min-width: 0;
-      background: rgba(255, 255, 255, 0.72);
-    }
-    .action-context-label {
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 800;
-      text-transform: uppercase;
-    }
-    .action-context-value {
-      margin-top: 2px;
-      font-size: 12px;
-      font-weight: 700;
-      overflow-wrap: anywhere;
-    }
-    .action-context-detail {
-      margin-top: 1px;
-      color: var(--muted);
-      font-size: 11px;
-      overflow-wrap: anywhere;
-    }
-    .action-context-item.green,
-    .action-context-item.yellow,
-    .action-context-item.red,
-    .action-context-item.gray {
-      background: rgba(255, 255, 255, 0.72);
-    }
-    .action-context-item.green { border-left-color: #16a34a; }
-    .action-context-item.yellow { border-left-color: #d97706; }
-    .action-context-item.red { border-left-color: #dc2626; }
-    .action-context-item.gray { border-left-color: #98a2b3; }
-    .action-context-item .action-context-value { color: var(--text); }
-    .action-command { white-space: nowrap; }
-    .lifecycle-progress {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-    .lifecycle-current-summary {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      border: 1px solid var(--line);
-      background: #fbfcfe;
-      border-radius: 8px;
-      padding: 8px 10px;
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 700;
-    }
-    .lifecycle-rail-scroll {
-      overflow-x: auto;
-      padding-bottom: 3px;
-    }
-    .lifecycle-rail {
-      display: flex;
-      align-items: stretch;
-      gap: 0;
-      min-width: max-content;
-    }
-    .lifecycle-step-card {
-      width: 128px;
-      min-height: 96px;
-      border: 1px solid var(--line);
-      border-left: 4px solid var(--gray);
-      background: #fff;
-      border-radius: 8px;
-      padding: 8px;
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-    }
-    .lifecycle-step-card.green { border-left-color: var(--green); background: #f8fffb; }
-    .lifecycle-step-card.yellow { border-left-color: var(--yellow); background: #fffdf5; }
-    .lifecycle-step-card.red { border-left-color: var(--red); background: #fff8f6; }
-    .lifecycle-step-card.gray { border-left-color: var(--gray); background: #fbfcfe; }
-    .lifecycle-step-card.current {
-      border-color: var(--blue);
-      border-left-color: var(--blue);
-      box-shadow: 0 0 0 2px rgba(23, 92, 211, 0.12);
-      background: var(--blue-soft);
-    }
-    .lifecycle-step-top {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 6px;
-    }
-    .lifecycle-step-label {
-      color: var(--text);
-      font-size: 12px;
-      font-weight: 800;
-    }
-    .lifecycle-current-badge {
-      border: 1px solid #bfdbfe;
-      background: #fff;
-      color: var(--blue);
-      border-radius: 999px;
-      padding: 1px 6px;
-      font-size: 10px;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: 0;
-      white-space: nowrap;
-    }
-    .lifecycle-step-status {
-      color: var(--text);
-      font-size: 11px;
-      font-weight: 700;
-      overflow-wrap: anywhere;
-    }
-    .lifecycle-step-sentence,
-    .lifecycle-step-detail {
-      color: var(--muted);
-      font-size: 11px;
-      line-height: 1.35;
-      overflow-wrap: anywhere;
-    }
-    .lifecycle-arrow {
-      width: 26px;
-      min-width: 26px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: var(--muted);
-      font-weight: 800;
-      font-size: 18px;
-    }
-    .lifecycle-reference-check {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      border: 1px solid var(--line);
-      border-left: 4px solid var(--gray);
-      background: #fbfcfe;
-      border-radius: 8px;
-      padding: 8px 10px;
-      min-height: 44px;
-    }
-    .lifecycle-reference-check.green { border-left-color: var(--green); background: #f8fffb; }
-    .lifecycle-reference-check.yellow { border-left-color: var(--yellow); background: #fffdf5; }
-    .lifecycle-reference-check.red { border-left-color: var(--red); background: #fff8f6; }
-    .lifecycle-reference-check.gray { border-left-color: var(--gray); background: #fbfcfe; }
-    .lifecycle-reference-title {
-      color: var(--text);
-      font-size: 12px;
-      font-weight: 800;
-    }
-    .lifecycle-reference-detail {
-      color: var(--muted);
-      font-size: 11px;
-      margin-top: 2px;
-      overflow-wrap: anywhere;
-    }
-    .detail-tabs {
-      display: flex;
-      gap: 4px;
-      border-bottom: 1px solid var(--line);
-      margin: 12px 0 14px;
-      overflow-x: auto;
-      padding-bottom: 0;
-    }
-    .tab-button {
-      border: 0;
-      border-bottom: 2px solid transparent;
-      border-radius: 0;
-      background: transparent;
-      color: var(--muted);
-      min-height: 38px;
-      padding: 0 12px;
-      font-weight: 700;
-      white-space: nowrap;
-    }
-    .tab-button.active {
-      color: var(--text);
-      border-bottom-color: var(--blue);
-    }
-    .tab-body {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px;
-    }
-    .panel {
-      border: 1px solid var(--line);
-      background: #fff;
-      min-width: 0;
-      border-radius: 8px;
-      overflow: hidden;
-    }
-    .panel.full { grid-column: 1 / -1; }
-    .panel h3 {
-      margin: 0;
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--line);
-      font-size: 14px;
-      background: #fbfcfe;
-    }
-    .panel-body { padding: 12px; }
-    .metric-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(120px, 1fr));
-      gap: 8px;
-    }
-    .metric {
-      border: 1px solid var(--line);
-      padding: 8px;
-      min-width: 0;
-      border-radius: 7px;
-      background: #fff;
-    }
-    .metric-label { color: var(--muted); font-size: 12px; }
-    .metric-value { margin-top: 3px; font-weight: 700; overflow-wrap: anywhere; }
-    .signed-value {
-      font-weight: 800;
-      font-variant-numeric: tabular-nums;
-    }
-    .signed-value.positive { color: var(--green); }
-    .signed-value.negative { color: var(--red); }
-    .signed-value.neutral { color: var(--text); }
-    .kv-grid {
-      display: grid;
-      grid-template-columns: 180px minmax(0, 1fr);
-      border-top: 1px solid var(--line);
-      border-left: 1px solid var(--line);
-    }
-    .kv-grid div {
-      padding: 7px 8px;
-      border-right: 1px solid var(--line);
-      border-bottom: 1px solid var(--line);
-      overflow-wrap: anywhere;
-    }
-    .kv-key { color: var(--muted); background: #f9fafb; }
-    .mini-table {
-      width: 100%;
-      min-width: 0;
-      border: 1px solid var(--line);
-      margin-top: 8px;
-    }
-    .mini-table th,
-    .mini-table td {
-      white-space: normal;
-      overflow-wrap: anywhere;
-      padding: 7px 8px;
-    }
-    .mini-table .nowrap { white-space: nowrap; }
-    .pnl-curve {
-      width: 100%;
-      max-width: 1120px;
-      margin-top: 10px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fff;
-      padding: 10px 12px 10px;
-    }
-    .pnl-chart-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 12px;
-      margin-bottom: 8px;
-    }
-    .pnl-chart-title {
-      font-weight: 800;
-      line-height: 1.2;
-    }
-    .pnl-chart-subtitle,
-    .pnl-chart-range {
-      color: var(--muted);
-      font-size: 12px;
-    }
-    .pnl-chart-range {
-      text-align: right;
-      font-variant-numeric: tabular-nums;
-    }
-    .pnl-chart-range strong {
-      display: block;
-      color: var(--text);
-      font-size: 12px;
-    }
-    .pnl-curve-plot {
-      position: relative;
-      display: grid;
-      grid-template-columns: 96px minmax(0, 980px);
-      gap: 10px;
-      align-items: stretch;
-    }
-    .pnl-y-axis {
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      padding: 3px 0 24px;
-      color: var(--muted);
-      font-size: 12px;
-      font-variant-numeric: tabular-nums;
-      text-align: right;
-    }
-    .pnl-chart-area {
-      position: relative;
-      min-width: 0;
-      width: 100%;
-      max-width: 980px;
-      aspect-ratio: 1000 / 260;
-      min-height: 210px;
-    }
-    .pnl-chart-area svg,
-    .pnl-point-layer {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-    }
-    .pnl-chart-area svg {
-      display: block;
-      overflow: visible;
-    }
-    .pnl-point-layer {
-      pointer-events: none;
-    }
-    .pnl-x-axis {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      color: var(--muted);
-      font-size: 12px;
-      font-variant-numeric: tabular-nums;
-      margin: 5px 0 0 106px;
-      max-width: 980px;
-    }
-    .pnl-x-axis span {
-      max-width: 46%;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .pnl-curve path.pnl-line {
-      stroke: var(--blue);
-      stroke-width: 2.2;
-      fill: none;
-      vector-effect: non-scaling-stroke;
-    }
-    .pnl-curve path.pnl-line.positive { stroke: var(--green); }
-    .pnl-curve path.pnl-line.negative { stroke: var(--red); }
-    .pnl-point {
-      position: absolute;
-      width: 10px;
-      height: 10px;
-      transform: translate(-50%, -50%);
-      border: 2px solid #fff;
-      border-radius: 999px;
-      background: var(--blue);
-      box-shadow: 0 0 0 1px rgba(23, 92, 211, 0.28);
-    }
-    .pnl-point.positive {
-      background: var(--green);
-      box-shadow: 0 0 0 1px rgba(36, 122, 82, 0.28);
-    }
-    .pnl-point.negative {
-      background: var(--red);
-      box-shadow: 0 0 0 1px rgba(180, 35, 24, 0.28);
-    }
-    .pnl-table .num {
-      text-align: right;
-      white-space: nowrap;
-    }
-    .pnl-curve circle {
-      fill: var(--blue);
-      stroke: #fff;
-      stroke-width: 2;
-      vector-effect: non-scaling-stroke;
-    }
-    .pnl-grid-line,
-    .pnl-axis-line {
-      stroke: #d0d5dd;
-      vector-effect: non-scaling-stroke;
-    }
-    .pnl-grid-line {
-      opacity: 0.58;
-      stroke-dasharray: 3 5;
-    }
-    .empty-note {
-      color: var(--muted);
-      border: 1px dashed var(--line);
-      padding: 10px;
-      background: #fbfdff;
-      border-radius: 7px;
-    }
-    .link-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
-    .job-status {
-      margin-top: 8px;
-      color: var(--muted);
-      border: 1px solid var(--line);
-      padding: 8px;
-      min-height: 34px;
-      border-radius: 7px;
-    }
-    .command-list {
-      display: grid;
-      gap: 6px;
-    }
-    .command-drawer {
-      margin-top: 12px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      overflow: hidden;
-    }
-    .command-drawer summary {
-      cursor: pointer;
-      padding: 10px 12px;
-      font-weight: 700;
-      background: #fbfcfe;
-      border-bottom: 1px solid var(--line);
-    }
-    .command-drawer:not([open]) summary { border-bottom: 0; }
-    .command-drawer-body { padding: 10px; }
-    .command-row {
-      display: grid;
-      grid-template-columns: 150px minmax(0, 1fr) auto;
-      gap: 8px;
-      align-items: center;
-      border: 1px solid var(--line);
-      padding: 7px 8px;
-      background: #fff;
-      border-radius: 7px;
-    }
-    .command-name { font-weight: 700; }
-    .command-text {
-      color: var(--muted);
-      overflow-wrap: anywhere;
-      white-space: normal;
-    }
-    .debug-root {
-      border: 1px solid var(--line);
-      border-left: 4px solid var(--gray);
-      border-radius: 8px;
-      padding: 14px;
-      background: #fff;
-    }
-    .debug-root.green { border-left-color: var(--green); background: #f8fffb; }
-    .debug-root.yellow { border-left-color: var(--yellow); background: #fffdf5; }
-    .debug-root.red { border-left-color: var(--red); background: #fff8f6; }
-    .debug-root-title {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-      font-weight: 800;
-      margin-bottom: 4px;
-    }
-    .debug-root-sentence {
-      font-size: 16px;
-      font-weight: 800;
-      margin-bottom: 4px;
-      overflow-wrap: anywhere;
-    }
-    .debug-guide-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 8px;
-      margin-top: 10px;
-    }
-    .debug-guide-item {
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      padding: 8px;
-      background: rgba(255, 255, 255, 0.72);
-      min-width: 0;
-    }
-    .debug-guide-label {
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 800;
-      text-transform: uppercase;
-    }
-    .debug-guide-value {
-      margin-top: 2px;
-      font-weight: 700;
-      overflow-wrap: anywhere;
-    }
-    .audit-detail-drawer {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fff;
-      overflow: hidden;
-    }
-    .audit-detail-drawer summary {
-      cursor: pointer;
-      padding: 9px 10px;
-      font-weight: 800;
-      background: #fbfcfe;
-      border-bottom: 1px solid var(--line);
-    }
-    .audit-detail-drawer:not([open]) summary {
-      border-bottom: 0;
-    }
-    .audit-detail-body {
-      padding: 10px;
-    }
-    .logger-backdrop {
-      position: fixed;
-      inset: 0;
-      z-index: 20;
-      background: rgba(15, 23, 42, 0.22);
-      display: none;
-    }
-    .logger-backdrop.open { display: block; }
-    .logger-drawer {
-      position: absolute;
-      right: 0;
-      top: 0;
-      width: min(780px, 100vw);
-      height: 100%;
-      background: var(--panel);
-      border-left: 1px solid var(--line-strong);
-      box-shadow: -12px 0 30px rgba(15, 23, 42, 0.12);
-      display: flex;
-      flex-direction: column;
-    }
-    .logger-header {
-      padding: 14px 16px;
-      border-bottom: 1px solid var(--line);
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 12px;
-    }
-    .logger-title { font-weight: 800; font-size: 16px; overflow-wrap: anywhere; }
-    .logger-controls {
-      padding: 10px 16px;
-      border-bottom: 1px solid var(--line);
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-    .logger-filters { display: flex; gap: 6px; flex-wrap: wrap; }
-    .logger-filter.active {
-      color: var(--blue);
-      border-color: var(--blue);
-      background: var(--blue-soft);
-    }
-    .logger-body {
-      padding: 12px 16px 16px;
-      overflow: auto;
-      flex: 1;
-    }
-    .logger-table-wrap { overflow: auto; }
-    .logger-table {
-      min-width: 680px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      overflow: hidden;
-    }
-    a { color: var(--blue); }
-    @media (max-width: 1180px) {
-      th, td { white-space: normal; }
-      table { min-width: 0; }
-      .console-status-strip { grid-template-columns: repeat(3, minmax(120px, 1fr)); }
-      .detail-header { display: block; }
-      .inspect-actions { justify-content: flex-start; margin-top: 10px; }
-      .tab-body { grid-template-columns: 1fr; }
-      .metric-grid { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
-      .command-row { grid-template-columns: 1fr; }
-    }
-    @media (max-width: 680px) {
-      main { padding: 10px; }
-      header { padding: 0 10px; }
-      .toolbar { flex-wrap: wrap; }
-      .console-status-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .attention-row { grid-template-columns: 1fr; }
-      .metric-grid { grid-template-columns: 1fr; }
-      .kv-grid { grid-template-columns: 1fr; }
-    }
-  </style>
-</head>
-<body>
-  <header>
-    <h1>Live POD Dashboard</h1>
-    <div class="muted" id="last-refresh">loading</div>
-  </header>
-  <main>
-    <div class="toolbar">
-      <label>Environment <select id="mode-filter"><option value="all">All</option></select></label>
-      <button id="refresh-button">Refresh</button>
-    </div>
-    <section class="dashboard-section console-section" aria-label="Console status">
-      <div class="dashboard-section-header">
-        <div>
-          <h2>Console Status</h2>
-          <div class="dashboard-section-subtitle">Current view, queue pressure, refresh time, and selected POD.</div>
-        </div>
-        <span class="section-status">read-only / copy-only</span>
-      </div>
-      <div class="dashboard-section-body">
-        <div class="console-status-strip" id="console-status-strip">
-          <div class="console-status-item">
-            <div class="console-status-label">Environment</div>
-            <div class="console-status-value" id="console-mode-value">all</div>
-          </div>
-          <div class="console-status-item">
-            <div class="console-status-label">Visible PODs</div>
-            <div class="console-status-value" id="console-visible-pods-value">0</div>
-          </div>
-          <div class="console-status-item">
-            <div class="console-status-label">Needs Action</div>
-            <div class="console-status-value" id="console-needs-action-value">0</div>
-          </div>
-          <div class="console-status-item">
-            <div class="console-status-label">Waiting</div>
-            <div class="console-status-value" id="console-waiting-value">0</div>
-          </div>
-          <div class="console-status-item">
-            <div class="console-status-label">Last Refresh</div>
-            <div class="console-status-value" id="console-last-refresh-value">loading</div>
-          </div>
-          <div class="console-status-item">
-            <div class="console-status-label">Selected POD</div>
-            <div class="console-status-value" id="console-selected-pod-value">none</div>
-          </div>
-        </div>
-      </div>
-    </section>
-    <section class="dashboard-section alert-panel" id="alert-panel">
-      <div class="dashboard-section-header alert-header">
-        <div>
-          <h2>Alert Box</h2>
-          <div class="dashboard-section-subtitle">Alert Inbox audit detail, collapsed by default.</div>
-        </div>
-        <div class="alert-header-actions">
-          <div class="alert-counts" id="alert-counts"></div>
-          <span class="muted" id="alert-subtitle">loading</span>
-          <button class="secondary" id="alert-toggle-button">Show all</button>
-        </div>
-      </div>
-      <div class="alert-list" id="alert-list"></div>
-    </section>
-    <section class="dashboard-section attention-panel" id="attention-panel">
-      <div class="dashboard-section-header attention-header">
-        <div>
-          <h2>Attention Queue</h2>
-          <div class="dashboard-section-subtitle">Primary triage: what is broken, waiting, healthy, or stale.</div>
-        </div>
-        <span class="section-status" id="attention-subtitle">loading</span>
-      </div>
-      <div class="attention-list" id="attention-queue-list"></div>
-    </section>
-    <section class="dashboard-section table-panel">
-      <div class="dashboard-section-header">
-        <div>
-          <h2>POD List</h2>
-          <div class="dashboard-section-subtitle">Dense scan table with readable state, reason, evidence, and safe inspect command.</div>
-        </div>
-        <span class="section-status">safe commands only</span>
-      </div>
-      <div class="dashboard-section-body flush">
-        <div class="table-scroll">
-        <table class="pod-table">
-          <thead>
-            <tr>
-              <th>Severity</th>
-              <th>POD</th>
-              <th>Mode</th>
-              <th>Current State</th>
-              <th>Why</th>
-              <th>Latest Evidence</th>
-              <th>Next Inspect</th>
-            </tr>
-          </thead>
-          <tbody id="pod-table-body"></tbody>
-        </table>
-        </div>
-      </div>
-    </section>
-    <section id="detail-panel" class="dashboard-section detail-workspace empty-state">
-      <div class="dashboard-section-header">
-        <div>
-          <h2>Selected POD / What We Learned</h2>
-          <div class="dashboard-section-subtitle">Root cause, blocker chain, evidence, broker/model comparison, and safe commands.</div>
-        </div>
-        <span class="section-status">none selected</span>
-      </div>
-      <div class="dashboard-section-body">
-        <h2>No POD selected</h2>
-        <div class="muted">Select a POD row to inspect details.</div>
-      </div>
-    </section>
-    <section class="dashboard-section combined-book-section" id="combined-book-panel">
-      <div class="dashboard-section-header">
-        <div>
-          <h2>Combined Book</h2>
-          <div class="dashboard-section-subtitle">Environment-separated EOD equity, strict accounting headline, and carry-forward operational view.</div>
-        </div>
-        <span class="section-status">read-only / EOD snapshots</span>
-      </div>
-      <div class="dashboard-section-body" id="combined-book-body">
-        <div class="empty-note">Combined Book is loading.</div>
-      </div>
-    </section>
-  </main>
-  <div class="logger-backdrop" id="logger-backdrop" hidden>
-    <aside class="logger-drawer" aria-label="POD logger">
-      <div class="logger-header">
-        <div>
-          <div class="logger-title" id="logger-title">Logger</div>
-          <div class="muted" id="logger-subtitle">No POD selected</div>
-        </div>
-        <button class="secondary" id="logger-close-button">Close</button>
-      </div>
-      <div class="logger-controls">
-        <div class="logger-filters">
-          <button class="secondary logger-filter active" data-logger-filter="all">All</button>
-          <button class="secondary logger-filter" data-logger-filter="warnings">Warnings</button>
-          <button class="secondary logger-filter" data-logger-filter="errors">Errors</button>
-        </div>
-        <button class="secondary" id="logger-refresh-button">Refresh Logger</button>
-      </div>
-      <div class="logger-body" id="logger-body">
-        <div class="empty-note">Open a POD logger to inspect recent events.</div>
-      </div>
-    </aside>
-  </div>
-  <script>
-    const detailTabNameList = ['debug', 'overview', 'pnl', 'decision', 'vplan', 'execution', 'broker', 'diff', 'freshness'];
-    const detailTabLabelDict = {
-      debug: 'Debug',
-      overview: 'Overview',
-      pnl: 'PnL',
-      decision: 'Decision',
-      vplan: 'VPlan',
-      execution: 'Execution',
-      broker: 'Broker',
-      diff: 'DIFF',
-      freshness: 'Freshness'
-    };
-    const DASHBOARD_TIME_ZONE_STR = 'America/New_York';
-    const DASHBOARD_TIME_ZONE_LABEL_STR = 'NYC';
-    const DASHBOARD_TIMESTAMP_PATTERN = /\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})?/g;
-    const DASHBOARD_COMPACT_TIMESTAMP_PATTERN = /\\b\\d{8}T\\d{6}Z\\b/g;
-    const safeInspectCommandNameList = ['status', 'next_due', 'show_decision_plan', 'show_vplan', 'compare_reference'];
-    const initialUiState = readUiState();
-    const state = {
-      pods: [],
-      alerts: [],
-      alertSummary: {},
-      combinedBook: {},
-      combinedBookPodSelectedDict: {},
-      podChangeDict: {},
-      selectedPod: initialUiState.podId,
-      selectedDetail: null,
-      jobs: {},
-      requestedMode: initialUiState.mode || 'all',
-      lastRefreshDisplayStr: 'loading',
-      selectedTab: null,
-      alertExpanded: false,
-      loggerPodId: null,
-      loggerEvents: [],
-      loggerFilter: 'all',
-      loggerLoading: false
-    };
-    const tbody = document.getElementById('pod-table-body');
-    const modeFilter = document.getElementById('mode-filter');
-    const detailPanel = document.getElementById('detail-panel');
-    const lastRefresh = document.getElementById('last-refresh');
-    const alertCounts = document.getElementById('alert-counts');
-    const alertList = document.getElementById('alert-list');
-    const alertSubtitle = document.getElementById('alert-subtitle');
-    const alertToggleButton = document.getElementById('alert-toggle-button');
-    const alertPanel = document.getElementById('alert-panel');
-    const attentionQueueList = document.getElementById('attention-queue-list');
-    const attentionSubtitle = document.getElementById('attention-subtitle');
-    const consoleModeValue = document.getElementById('console-mode-value');
-    const consoleVisiblePodsValue = document.getElementById('console-visible-pods-value');
-    const consoleNeedsActionValue = document.getElementById('console-needs-action-value');
-    const consoleWaitingValue = document.getElementById('console-waiting-value');
-    const consoleLastRefreshValue = document.getElementById('console-last-refresh-value');
-    const consoleSelectedPodValue = document.getElementById('console-selected-pod-value');
-    const combinedBookBody = document.getElementById('combined-book-body');
-    const loggerBackdrop = document.getElementById('logger-backdrop');
-    const loggerBody = document.getElementById('logger-body');
-    const loggerTitle = document.getElementById('logger-title');
-    const loggerSubtitle = document.getElementById('logger-subtitle');
-    document.getElementById('refresh-button').addEventListener('click', refreshPods);
-    alertToggleButton.addEventListener('click', () => {
-      state.alertExpanded = !state.alertExpanded;
-      renderAlertInbox();
-    });
-    document.getElementById('logger-close-button').addEventListener('click', closeLogger);
-    document.getElementById('logger-refresh-button').addEventListener('click', refreshLoggerEvents);
-    loggerBackdrop.addEventListener('click', event => {
-      if (event.target === loggerBackdrop) closeLogger();
-    });
-    document.querySelectorAll('[data-logger-filter]').forEach(button => {
-      button.addEventListener('click', () => {
-        state.loggerFilter = button.dataset.loggerFilter || 'all';
-        renderLoggerDrawer();
-      });
-    });
-    modeFilter.addEventListener('change', () => {
-      state.requestedMode = modeFilter.value;
-      const selectedClearedBool = clearSelectedPodIfHidden();
-      persistUiState();
-      syncUrlState();
-      if (selectedClearedBool) renderNoPodSelectedDetail();
-      renderPods();
-      renderAlertInbox();
-      renderAttentionQueue();
-      renderConsoleStatusStrip();
-      renderCombinedBook();
-    });
-
-    function readUiState() {
-      const params = new URLSearchParams(window.location.search);
-      const modeFromUrl = params.get('mode');
-      window.localStorage.removeItem('dashboard.pod');
-      return {
-        mode: modeFromUrl || window.localStorage.getItem('dashboard.mode') || 'all',
-        podId: null
-      };
-    }
-
-    function persistUiState() {
-      window.localStorage.setItem('dashboard.mode', state.requestedMode || 'all');
-      window.localStorage.removeItem('dashboard.pod');
-    }
-
-    function syncUrlState() {
-      const url = new URL(window.location.href);
-      if (state.requestedMode && state.requestedMode !== 'all') {
-        url.searchParams.set('mode', state.requestedMode);
-      } else {
-        url.searchParams.delete('mode');
-      }
-      url.searchParams.delete('pod');
-      window.history.replaceState({}, '', url.toString());
-    }
-
-    function getStoredDetailTab(podId) {
-      if (!podId) return 'debug';
-      const storedTab = window.localStorage.getItem('dashboard.tab.' + podId);
-      return detailTabNameList.includes(storedTab) ? storedTab : 'debug';
-    }
-
-    function setActiveDetailTab(podId, tabName) {
-      const cleanTabName = detailTabNameList.includes(tabName) ? tabName : 'debug';
-      state.selectedTab = cleanTabName;
-      if (podId) {
-        window.localStorage.setItem('dashboard.tab.' + podId, cleanTabName);
-      }
-      if (state.selectedDetail) {
-        renderDetail(state.selectedDetail);
-      }
-    }
-
-    function activeDetailTab(podId) {
-      const cleanTabName = detailTabNameList.includes(state.selectedTab) ? state.selectedTab : getStoredDetailTab(podId);
-      return detailTabNameList.includes(cleanTabName) ? cleanTabName : 'debug';
-    }
-
-    function fmt(value) {
-      if (value === null || value === undefined || value === '') return '-';
-      if (typeof value === 'number') {
-        if (Math.abs(value) >= 1000) return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
-        return value.toLocaleString(undefined, { maximumFractionDigits: 4 });
-      }
-      if (typeof value === 'string') return formatTimestampText(value);
-      return String(value);
-    }
-
-    function formatTimestamp(value) {
-      if (value === null || value === undefined || value === '') return '-';
-      const rawTimestampStr = String(value);
-      const normalizedTimestampStr = /(?:Z|[+-]\\d{2}:\\d{2})$/.test(rawTimestampStr)
-        ? rawTimestampStr
-        : rawTimestampStr + 'Z';
-      const timestampDate = new Date(normalizedTimestampStr);
-      if (Number.isNaN(timestampDate.getTime())) return rawTimestampStr;
-      const partDict = {};
-      new Intl.DateTimeFormat('en-CA', {
-        timeZone: DASHBOARD_TIME_ZONE_STR,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hourCycle: 'h23',
-      }).formatToParts(timestampDate).forEach(part => {
-        partDict[part.type] = part.value;
-      });
-      return `${partDict.year}-${partDict.month}-${partDict.day} ${partDict.hour}:${partDict.minute}:${partDict.second} ${DASHBOARD_TIME_ZONE_LABEL_STR}`;
-    }
-
-    function formatCompactTimestamp(value) {
-      const rawTimestampStr = String(value);
-      const isoTimestampStr = `${rawTimestampStr.slice(0, 4)}-${rawTimestampStr.slice(4, 6)}-${rawTimestampStr.slice(6, 8)}T${rawTimestampStr.slice(9, 11)}:${rawTimestampStr.slice(11, 13)}:${rawTimestampStr.slice(13, 15)}Z`;
-      return formatTimestamp(isoTimestampStr);
-    }
-
-    function formatTimestampText(value) {
-      const rawTextStr = String(value);
-      return rawTextStr
-        .replace(DASHBOARD_COMPACT_TIMESTAMP_PATTERN, timestampStr => formatCompactTimestamp(timestampStr))
-        .replace(DASHBOARD_TIMESTAMP_PATTERN, timestampStr => formatTimestamp(timestampStr));
-    }
-
-    function fmtPct(value) {
-      if (value === null || value === undefined || value === '') return '-';
-      return (Number(value) * 100).toLocaleString(undefined, { maximumFractionDigits: 4 }) + '%';
-    }
-
-    function fmtBool(value) {
-      if (value === null || value === undefined) return '-';
-      return value ? 'yes' : 'no';
-    }
-
-    function fmtUnavailable(value) {
-      if (value === null || value === undefined || value === '') return 'unavailable';
-      return fmt(value);
-    }
-
-    function formatValue(value) {
-      if (value === null || value === undefined || value === '') return '-';
-      if (typeof value === 'number') return fmt(value);
-      if (typeof value === 'boolean') return fmtBool(value);
-      if (Array.isArray(value)) return value.length ? value.map(formatValue).join(', ') : '-';
-      if (typeof value === 'object') {
-        const entries = Object.entries(value);
-        if (!entries.length) return '-';
-        return entries.map(([key, item]) => key + '=' + formatValue(item)).join(' | ');
-      }
-      return formatTimestampText(value);
-    }
-
-    function esc(value) {
-      return formatValue(value)
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#39;');
-    }
-
-    function pill(label, cls) {
-      const cleanCls = ['green', 'yellow', 'red', 'gray'].includes(cls) ? cls : 'gray';
-      return `<span class="pill ${cleanCls}">${esc(label || cleanCls)}</span>`;
-    }
-
-    function healthClass(status) {
-      if (status === 'red') return 'red';
-      if (status === 'yellow') return 'yellow';
-      if (status === 'green') return 'green';
-      return 'gray';
-    }
-
-    function renderNoPodSelectedDetail() {
-      detailPanel.className = 'dashboard-section detail-workspace empty-state';
-      detailPanel.innerHTML = `
-        <div class="dashboard-section-header">
-          <div>
-            <h2>Selected POD / What We Learned</h2>
-            <div class="dashboard-section-subtitle">Root cause, blocker chain, evidence, broker/model comparison, and safe commands.</div>
-          </div>
-          <span class="section-status">none selected</span>
-        </div>
-        <div class="dashboard-section-body">
-          <h2>No POD selected</h2>
-          <div class="muted">Select a POD row to inspect details.</div>
-        </div>`;
-    }
-
-    function renderDetailError(podId, message) {
-      detailPanel.className = 'dashboard-section detail-workspace';
-      detailPanel.innerHTML = `
-        <div class="dashboard-section-header">
-          <div>
-            <h2>Selected POD / What We Learned</h2>
-            <div class="dashboard-section-subtitle">${esc(podId)}</div>
-          </div>
-          <span class="section-status">detail load failed</span>
-        </div>
-        <div class="dashboard-section-body">
-          <div class="red pill">error</div>
-          <div class="job-status">${esc(message)}</div>
-        </div>`;
-    }
-
-    async function fetchJson(url, options) {
-      const response = await fetch(url, options || {});
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.message_str || response.statusText);
-      return payload;
-    }
-
-    async function refreshPods() {
-      try {
-        const payload = await fetchJson('/api/pods');
-        const nextPodRows = payload.pod_row_dict_list || [];
-        state.podChangeDict = buildPodChangeDict(state.pods || [], nextPodRows);
-        state.pods = nextPodRows;
-        state.alerts = payload.alert_dict_list || [];
-        state.alertSummary = payload.alert_summary_dict || {};
-        state.combinedBook = payload.combined_book_dict || {};
-        state.lastRefreshDisplayStr = formatTimestamp(new Date().toISOString());
-        lastRefresh.textContent = 'Last refresh: ' + state.lastRefreshDisplayStr;
-        syncModeFilter(payload.mode_list || []);
-        syncUrlState();
-        if (clearSelectedPodIfHidden()) {
-          persistUiState();
-          syncUrlState();
-          renderNoPodSelectedDetail();
-        }
-        renderPods();
-        renderAlertInbox();
-        renderAttentionQueue();
-        renderConsoleStatusStrip();
-        renderCombinedBook();
-        if (state.selectedPod && !state.selectedDetail) {
-          loadDetail(state.selectedPod);
-        }
-      } catch (error) {
-        lastRefresh.textContent = 'Refresh failed: ' + error.message;
-      }
-    }
-
-    function syncModeFilter(modeList) {
-      const environmentList = Array.from(new Set([...(modeList || []), 'live', 'paper', 'incubation'])).sort();
-      modeFilter.innerHTML = '<option value="all">All</option>' + environmentList.map(mode => `<option value="${esc(mode)}">${esc(environmentLabel(mode))}</option>`).join('');
-      modeFilter.value = environmentList.includes(state.requestedMode) ? state.requestedMode : 'all';
-      state.requestedMode = modeFilter.value;
-    }
-
-    function environmentLabel(mode) {
-      if (mode === 'live') return 'Live';
-      if (mode === 'paper') return 'Paper';
-      if (mode === 'incubation') return 'Incubation';
-      return mode;
-    }
-
-    function buildPodChangeDict(previousPodRows, nextPodRows) {
-      const previousSignatureDict = {};
-      (previousPodRows || []).forEach(row => {
-        previousSignatureDict[row.pod_id_str] = podSignature(row);
-      });
-      const changeDict = {};
-      (nextPodRows || []).forEach(row => {
-        if (Object.prototype.hasOwnProperty.call(previousSignatureDict, row.pod_id_str)) {
-          changeDict[row.pod_id_str] = previousSignatureDict[row.pod_id_str] !== podSignature(row);
-        }
-      });
-      return changeDict;
-    }
-
-    function podSignature(row) {
-      const debugSummary = row.debug_summary_dict || {};
-      return [
-        debugSummary.severity_str || '',
-        debugSummary.verdict_label_str || '',
-        debugSummary.primary_reason_str || '',
-        debugSummary.primary_evidence_str || '',
-        debugSummary.latest_evidence_timestamp_str || '',
-        row.health_str || '',
-        row.next_action_str || '',
-        row.reason_code_str || '',
-        row.latest_reconciliation_status_str || '',
-        (row.eod_snapshot_dict || {}).status_str || '',
-        row.latest_diff_status_str || '',
-        row.latest_event_timestamp_str || '',
-      ].join('||');
-    }
-
-    function hasPodChangedSinceLastRefresh(row) {
-      return !!state.podChangeDict[row.pod_id_str];
-    }
-
-    function safeInspectCommandName(commandName) {
-      return safeInspectCommandNameList.includes(commandName) ? commandName : 'status';
-    }
-
-    function operatorQueueGroup(row) {
-      const debugSummary = row.debug_summary_dict || {};
-      const verdictLabel = String(debugSummary.verdict_label_str || '');
-      const verdictLower = verdictLabel.toLowerCase();
-      const dbStatus = String(row.db_status_str || '');
-      const severity = healthClass(debugSummary.severity_str || row.health_str);
-      if (dbStatus && dbStatus !== 'ok') return 'Missing / Stale Data';
-      if (verdictLower.includes('db ') || verdictLower.includes('stale') || verdictLower.includes('freshness')) return 'Missing / Stale Data';
-      if (verdictLower.includes('waiting') || verdictLower.includes('parked') || row.next_action_str === 'wait') return 'Waiting / Parked';
-      if (severity === 'green') return 'Healthy';
-      if (severity === 'red' || severity === 'yellow') return 'Needs Action';
-      return 'Missing / Stale Data';
-    }
-
-    function operatorQueuePriority(groupName) {
-      const priorityDict = {
-        'Needs Action': 0,
-        'Waiting / Parked': 1,
-        'Missing / Stale Data': 2,
-        Healthy: 3,
-      };
-      return priorityDict[groupName] === undefined ? 9 : priorityDict[groupName];
-    }
-
-    function severityPriority(row) {
-      const severity = healthClass((row.debug_summary_dict || {}).severity_str || row.health_str);
-      if (severity === 'red') return 0;
-      if (severity === 'yellow') return 1;
-      if (severity === 'gray') return 2;
-      return 3;
-    }
-
-    function buildAttentionQueueRows(podRows) {
-      return (podRows || [])
-        .map(row => ({
-          row,
-          group_name_str: operatorQueueGroup(row),
-          state_sentence_str: operatorStateSentence(row),
-          reason_sentence_str: operatorReasonSentence(row),
-          evidence_sentence_str: operatorEvidenceSentence(row),
-          command_name_str: safeInspectCommandName((row.debug_summary_dict || {}).next_inspect_command_name_str),
-        }))
-        .sort((left, right) => {
-          const groupDelta = operatorQueuePriority(left.group_name_str) - operatorQueuePriority(right.group_name_str);
-          if (groupDelta !== 0) return groupDelta;
-          const severityDelta = severityPriority(left.row) - severityPriority(right.row);
-          if (severityDelta !== 0) return severityDelta;
-          return String(right.row.latest_event_timestamp_str || '').localeCompare(String(left.row.latest_event_timestamp_str || ''));
-        });
-    }
-
-    function visibleOperatorRows() {
-      const selectedMode = state.requestedMode || modeFilter.value || 'all';
-      if (selectedMode === 'all') return state.pods;
-      return state.pods.filter(row => rowMatchesSelectedEnvironment(row));
-    }
-
-    function rowMatchesSelectedEnvironment(row) {
-      const selectedMode = state.requestedMode || modeFilter.value || 'all';
-      return selectedMode === 'all' || row.mode_str === selectedMode;
-    }
-
-    function renderConsoleStatusStrip() {
-      const visibleRows = visibleOperatorRows();
-      const needsActionCount = visibleRows.filter(row => operatorQueueGroup(row) === 'Needs Action').length;
-      const waitingCount = visibleRows.filter(row => operatorQueueGroup(row) === 'Waiting / Parked').length;
-      consoleModeValue.textContent = environmentLabel(state.requestedMode || modeFilter.value || 'all');
-      consoleVisiblePodsValue.textContent = String(visibleRows.length);
-      consoleNeedsActionValue.textContent = String(needsActionCount);
-      consoleWaitingValue.textContent = String(waitingCount);
-      consoleLastRefreshValue.textContent = state.lastRefreshDisplayStr || 'loading';
-      consoleSelectedPodValue.textContent = state.selectedPod || 'none';
-    }
-
-    function renderCombinedBook() {
-      const allEnvironmentList = (state.combinedBook || {}).environment_dict_list || [];
-      if (!allEnvironmentList.length) {
-        combinedBookBody.innerHTML = '<div class="empty-note">No Combined Book data was returned.</div>';
-        return;
-      }
-      const environmentList = selectedCombinedBookEnvironmentList(allEnvironmentList);
-      if (!environmentList.length) {
-        combinedBookBody.innerHTML = `<div class="empty-note">No Combined Book data for ${esc(environmentLabel(selectedEnvironmentMode()))}.</div>`;
-        return;
-      }
-      syncCombinedBookSelectionState(environmentList);
-      combinedBookBody.innerHTML = `
-        <div class="combined-book-env-list">
-          ${environmentList.map(renderCombinedBookEnvironment).join('')}
-        </div>`;
-      combinedBookBody.querySelectorAll('[data-combined-pod]').forEach(el => {
-        el.addEventListener('click', () => {
-          selectPod(el.dataset.combinedPod, el.dataset.combinedMode);
-        });
-      });
-      combinedBookBody.querySelectorAll('[data-combined-toggle-pod]').forEach(input => {
-        input.addEventListener('change', event => {
-          const checkbox = event.target;
-          state.combinedBookPodSelectedDict[checkbox.dataset.combinedTogglePod] = !!checkbox.checked;
-          renderCombinedBook();
-        });
-      });
-    }
-
-    function selectedEnvironmentMode() {
-      return state.requestedMode || modeFilter.value || 'all';
-    }
-
-    function selectedCombinedBookEnvironmentList(environmentList) {
-      const selectedMode = selectedEnvironmentMode();
-      if (selectedMode === 'all') return environmentList;
-      return (environmentList || []).filter(environment => environment.mode_str === selectedMode);
-    }
-
-    function renderCombinedBookEnvironment(environment) {
-      const severity = combinedBookStatusSeverity(environment.status_str);
-      const contributionList = environment.contribution_dict_list || [];
-      if (!Number(environment.pod_count_int || 0)) {
-        return `
-          <div class="combined-book-env ${severity}">
-            <div class="combined-book-env-header">
-              <div>
-                <div class="combined-book-title">${esc(environmentLabel(environment.mode_str))}</div>
-                <div class="combined-book-subtitle">No enabled ${esc(environment.mode_str)} PODs.</div>
-              </div>
-              ${pill(environment.status_str || 'no_pods', severity)}
-            </div>
-          </div>`;
-      }
-      const selectedContributionList = contributionList.filter(contribution => combinedBookPodSelected(contribution.pod_id_str));
-      const displayEnvironment = combinedBookDisplayEnvironment(environment, selectedContributionList);
-      const displaySeverity = combinedBookStatusSeverity(displayEnvironment.status_str);
-      return `
-        <div class="combined-book-env ${displaySeverity}">
-          <div class="combined-book-env-header">
-            <div>
-              <div class="combined-book-title">${esc(environmentLabel(environment.mode_str))}</div>
-              <div class="combined-book-subtitle">${esc(displayEnvironment.pod_count_int || 0)} selected of ${esc(environment.pod_count_int || 0)} enabled ${esc(environmentLabel(environment.mode_str))} PODs / combined date ${esc(displayEnvironment.latest_common_market_date_str || '-')}</div>
-            </div>
-            ${pill(displayEnvironment.status_str || 'unknown', displaySeverity)}
-          </div>
-          <div class="combined-book-body">
-            ${renderCombinedBookSelectors(contributionList)}
-            <div class="metric-grid">
-              ${metric('Combined equity', fmt(displayEnvironment.strict_latest_equity_float))}
-              ${metricSigned('Daily PnL $', displayEnvironment.strict_daily_pnl_float, fmtUnavailable)}
-              ${metricSigned('Daily PnL %', displayEnvironment.strict_daily_pnl_pct_float, fmtPct)}
-              ${metric('Combined EOD date', displayEnvironment.latest_common_market_date_str || '-')}
-              ${metric('Warnings', displayEnvironment.warning_count_int || 0)}
-              ${metric('PODs', displayEnvironment.pod_count_int || 0)}
-            </div>
-            ${renderCombinedBookWarnings(displayEnvironment.warning_dict_list || [])}
-            <div class="combined-book-chart-grid">
-              <div class="combined-book-chart-block">
-                ${renderCombinedBookAbsoluteCurve(displayEnvironment)}
-              </div>
-              <div class="combined-book-chart-block">
-                ${renderCombinedBookIndexedCurve(displayEnvironment)}
-              </div>
-            </div>
-            ${renderCombinedContributionTable(displayEnvironment.contribution_dict_list || [])}
-          </div>
-        </div>`;
-    }
-
-    function syncCombinedBookSelectionState(environmentList) {
-      (environmentList || []).forEach(environment => {
-        (environment.contribution_dict_list || []).forEach(contribution => {
-          const podId = contribution.pod_id_str;
-          if (!Object.prototype.hasOwnProperty.call(state.combinedBookPodSelectedDict, podId)) {
-            state.combinedBookPodSelectedDict[podId] = true;
-          }
-        });
-      });
-    }
-
-    function combinedBookPodSelected(podId) {
-      if (!Object.prototype.hasOwnProperty.call(state.combinedBookPodSelectedDict, podId)) return true;
-      return !!state.combinedBookPodSelectedDict[podId];
-    }
-
-    function renderCombinedBookSelectors(contributionList) {
-      if (!contributionList.length) return '';
-      return `
-        <div class="combined-book-selector-list">
-          ${contributionList.map(contribution => `
-            <label class="combined-book-selector-item">
-              <input type="checkbox" data-combined-toggle-pod="${esc(contribution.pod_id_str)}" ${combinedBookPodSelected(contribution.pod_id_str) ? 'checked' : ''}>
-              <span class="combined-book-selector-label">${esc(contribution.pod_id_str)}</span>
-            </label>`).join('')}
-        </div>`;
-    }
-
-    function combinedBookDisplayEnvironment(environment, contributionList) {
-      const strictPointList = buildClientStrictPointList(contributionList);
-      const carryForwardPointList = buildClientCarryForwardPointList(contributionList);
-      const warningList = filterCombinedBookWarningList(environment.warning_dict_list || [], contributionList);
-      const decoratedContributionList = decorateCombinedContributionList(contributionList, strictPointList, carryForwardPointList);
-      const latestStrictPoint = strictPointList.length ? strictPointList[strictPointList.length - 1] : null;
-      const latestCarryPoint = carryForwardPointList.length ? carryForwardPointList[carryForwardPointList.length - 1] : null;
-      return {
-        ...environment,
-        status_str: combinedBookClientStatus(contributionList.length, strictPointList.length, carryForwardPointList.length, warningList),
-        pod_count_int: contributionList.length,
-        strict_point_count_int: strictPointList.length,
-        carry_forward_point_count_int: carryForwardPointList.length,
-        latest_common_market_date_str: latestStrictPoint ? latestStrictPoint.market_date_str : null,
-        latest_operational_market_date_str: latestCarryPoint ? latestCarryPoint.market_date_str : null,
-        strict_latest_equity_float: latestStrictPoint ? latestStrictPoint.equity_float : null,
-        strict_daily_pnl_float: latestStrictPoint ? latestStrictPoint.daily_pnl_float : null,
-        strict_daily_pnl_pct_float: latestStrictPoint ? latestStrictPoint.daily_pnl_pct_float : null,
-        carry_forward_latest_equity_float: latestCarryPoint ? latestCarryPoint.equity_float : null,
-        warning_count_int: warningList.length,
-        warning_dict_list: warningList,
-        contribution_dict_list: decoratedContributionList,
-        strict_equity_point_dict_list: strictPointList,
-        carry_forward_equity_point_dict_list: carryForwardPointList,
-      };
-    }
-
-    function filterCombinedBookWarningList(warningList, contributionList) {
-      const selectedPodSet = new Set(contributionList.map(contribution => contribution.pod_id_str));
-      return (warningList || []).filter(warning => !warning.pod_id_str || selectedPodSet.has(warning.pod_id_str));
-    }
-
-    function combinedBookClientStatus(podCount, strictPointCount, carryForwardPointCount, warningList) {
-      if (!podCount) return 'no_pods_selected';
-      if (strictPointCount > 0) {
-        return warningList.some(warning => ['red', 'yellow'].includes(warning.severity_str))
-          ? 'available_with_warnings'
-          : 'available';
-      }
-      if (carryForwardPointCount > 0) return 'operational_only';
-      return 'unavailable';
-    }
-
-    function combinedBookStatusSeverity(status) {
-      if (status === 'available') return 'green';
-      if (status === 'available_with_warnings' || status === 'operational_only') return 'yellow';
-      if (status === 'unavailable') return 'gray';
-      return 'gray';
-    }
-
-    function contributionPointList(contribution) {
-      return (contribution.equity_point_dict_list || [])
-        .map(point => ({
-          market_date_str: point.market_date_str,
-          equity_float: Number(point.equity_float),
-          cash_float: point.cash_float,
-          snapshot_source_str: point.snapshot_source_str,
-          updated_timestamp_str: point.updated_timestamp_str,
-        }))
-        .filter(point => point.market_date_str && Number.isFinite(point.equity_float))
-        .sort((left, right) => String(left.market_date_str).localeCompare(String(right.market_date_str)));
-    }
-
-    function buildPointByDateDict(pointList) {
-      const pointByDateDict = {};
-      (pointList || []).forEach(point => {
-        pointByDateDict[point.market_date_str] = point;
-      });
-      return pointByDateDict;
-    }
-
-    function buildClientStrictPointList(contributionList) {
-      if (!contributionList.length) return [];
-      const pointByDateByPodDict = {};
-      let commonDateSet = null;
-      contributionList.forEach(contribution => {
-        const pointList = contributionPointList(contribution);
-        const dateSet = new Set(pointList.map(point => point.market_date_str));
-        pointByDateByPodDict[contribution.pod_id_str] = buildPointByDateDict(pointList);
-        commonDateSet = commonDateSet === null
-          ? dateSet
-          : new Set([...commonDateSet].filter(dateStr => dateSet.has(dateStr)));
-      });
-      const commonDateList = [...(commonDateSet || [])].sort();
-      let previousEquity = null;
-      return commonDateList.map(marketDate => {
-        const equity = contributionList.reduce((total, contribution) => (
-          total + pointByDateByPodDict[contribution.pod_id_str][marketDate].equity_float
-        ), 0);
-        const dailyPnl = previousEquity === null ? null : equity - previousEquity;
-        const dailyPnlPct = previousEquity === null || previousEquity === 0 ? null : (equity / previousEquity) - 1;
-        previousEquity = equity;
-        return {
-          market_date_str: marketDate,
-          equity_float: equity,
-          daily_pnl_float: dailyPnl,
-          daily_pnl_pct_float: dailyPnlPct,
-          included_pod_count_int: contributionList.length,
-          stale_pod_count_int: 0,
-          missing_pod_count_int: 0,
-          basis_str: 'strict_common_eod',
-        };
-      });
-    }
-
-    function buildClientCarryForwardPointList(contributionList) {
-      const dateList = [...new Set(contributionList.flatMap(contribution => (
-        contributionPointList(contribution).map(point => point.market_date_str)
-      )))].sort();
-      const pointByDateByPodDict = {};
-      contributionList.forEach(contribution => {
-        pointByDateByPodDict[contribution.pod_id_str] = buildPointByDateDict(contributionPointList(contribution));
-      });
-      const lastPointByPodDict = {};
-      let previousEquity = null;
-      const carryPointList = [];
-      dateList.forEach(marketDate => {
-        let equity = 0;
-        let includedCount = 0;
-        const stalePodIdList = [];
-        const missingPodIdList = [];
-        contributionList.forEach(contribution => {
-          const podId = contribution.pod_id_str;
-          const currentPoint = pointByDateByPodDict[podId][marketDate];
-          let point = currentPoint;
-          if (currentPoint) {
-            lastPointByPodDict[podId] = currentPoint;
-          } else {
-            point = lastPointByPodDict[podId];
-            if (!point) {
-              missingPodIdList.push(podId);
-              return;
-            }
-            stalePodIdList.push(podId);
-          }
-          equity += point.equity_float;
-          includedCount += 1;
-        });
-        if (!includedCount) return;
-        const dailyPnl = previousEquity === null ? null : equity - previousEquity;
-        const dailyPnlPct = previousEquity === null || previousEquity === 0 ? null : (equity / previousEquity) - 1;
-        previousEquity = equity;
-        carryPointList.push({
-          market_date_str: marketDate,
-          equity_float: equity,
-          daily_pnl_float: dailyPnl,
-          daily_pnl_pct_float: dailyPnlPct,
-          included_pod_count_int: includedCount,
-          stale_pod_count_int: stalePodIdList.length,
-          missing_pod_count_int: missingPodIdList.length,
-          stale_pod_id_list: stalePodIdList,
-          missing_pod_id_list: missingPodIdList,
-          basis_str: 'carry_forward_eod',
-        });
-      });
-      return carryPointList;
-    }
-
-    function decorateCombinedContributionList(contributionList, strictPointList, carryForwardPointList) {
-      const latestStrictDate = strictPointList.length ? strictPointList[strictPointList.length - 1].market_date_str : null;
-      const previousStrictDate = strictPointList.length >= 2 ? strictPointList[strictPointList.length - 2].market_date_str : null;
-      const latestOperationalDate = carryForwardPointList.length ? carryForwardPointList[carryForwardPointList.length - 1].market_date_str : null;
-      return contributionList.map(contribution => {
-        const pointList = contributionPointList(contribution);
-        const pointByDateDict = buildPointByDateDict(pointList);
-        const latestDate = pointList.length ? pointList[pointList.length - 1].market_date_str : null;
-        const latestPoint = latestDate ? pointByDateDict[latestDate] : null;
-        const strictPnl = latestStrictDate && previousStrictDate && pointByDateDict[latestStrictDate] && pointByDateDict[previousStrictDate]
-          ? pointByDateDict[latestStrictDate].equity_float - pointByDateDict[previousStrictDate].equity_float
-          : null;
-        const carryStatus = !latestOperationalDate || !latestDate
-          ? 'missing'
-          : latestDate === latestOperationalDate
-            ? 'current'
-            : 'carried_forward';
-        const freshness = freshnessWarningForSelectedContribution(contribution, latestDate, latestOperationalDate);
-        return {
-          ...contribution,
-          latest_market_date_str: latestDate,
-          latest_equity_float: latestPoint ? latestPoint.equity_float : null,
-          strict_daily_pnl_float: strictPnl,
-          carry_forward_status_str: carryStatus,
-          freshness_warning_str: freshness,
-        };
-      }).sort((left, right) => {
-        const leftPnl = Number(left.strict_daily_pnl_float || left.latest_daily_pnl_float || 0);
-        const rightPnl = Number(right.strict_daily_pnl_float || right.latest_daily_pnl_float || 0);
-        const pnlDelta = Math.abs(rightPnl) - Math.abs(leftPnl);
-        if (pnlDelta !== 0) return pnlDelta;
-        return String(left.pod_id_str).localeCompare(String(right.pod_id_str));
-      });
-    }
-
-    function freshnessWarningForSelectedContribution(contribution, latestDate, latestOperationalDate) {
-      if (contribution.db_status_str === 'missing') return 'DB missing';
-      if (contribution.db_status_str === 'empty') return 'DB empty';
-      if (contribution.db_status_str === 'error') return 'DB read error';
-      if (!latestDate) return 'No EOD snapshots';
-      if (latestOperationalDate && latestDate < latestOperationalDate) return 'Carried from ' + latestDate;
-      return '';
-    }
-
-    function renderCombinedBookWarnings(warningList) {
-      if (!warningList.length) {
-        return '<div class="empty-note">No Combined Book warnings for this environment.</div>';
-      }
-      return `
-        <div class="combined-book-warning-list">
-          ${warningList.map(warning => {
-            const severity = healthClass(warning.severity_str);
-            return `
-              <div class="combined-book-warning">
-                ${pill(warning.severity_str || severity, severity)}
-                <div>
-                  <div class="combined-book-warning-label">${esc(warning.label_str || warning.warning_type_str || 'Warning')}</div>
-                  <div class="combined-book-warning-detail">${esc(warning.detail_str || '-')}</div>
-                </div>
-              </div>`;
-          }).join('')}
-        </div>`;
-    }
-
-    function renderCombinedBookAbsoluteCurve(environment) {
-      const combinedLine = combinedBookCombinedLine(environment.strict_equity_point_dict_list || []);
-      return renderMultiLineEquityCurve(
-        'Combined book equity ($)',
-        combinedLine.point_dict_list.length ? [combinedLine] : [],
-        'No common-date combined EOD points yet.',
-        'absolute dollars'
-      );
-    }
-
-    function renderCombinedBookIndexedCurve(environment) {
-      const contributionLineList = (environment.contribution_dict_list || [])
-        .map((contribution, index) => ({
-          label_str: contribution.pod_id_str,
-          color_str: combinedBookLineColor(index),
-          class_name_str: '',
-          stroke_width_float: 2,
-          point_dict_list: contributionPointList(contribution),
-        }))
-        .filter(line => line.point_dict_list.length > 0);
-      const combinedLine = combinedBookCombinedLine(environment.strict_equity_point_dict_list || []);
-      const lineList = combinedLine.point_dict_list.length
-        ? [...contributionLineList, combinedLine]
-        : contributionLineList;
-      const indexedLineList = lineList.map(indexLineToBase100).filter(line => line !== null);
-      return renderMultiLineEquityCurve(
-        'Strategy comparison (indexed to 100)',
-        indexedLineList,
-        'No selected POD EOD curves can be indexed yet.',
-        'each line starts at 100 / bold line is Combined'
-      );
-    }
-
-    function combinedBookCombinedLine(pointList) {
-      return {
-        label_str: 'Combined',
-        color_str: '#111827',
-        class_name_str: 'combined',
-        stroke_width_float: 4,
-        point_dict_list: pointList || [],
-      };
-    }
-
-    function indexLineToBase100(line) {
-      const pointList = (line.point_dict_list || [])
-        .filter(point => Number.isFinite(Number(point.equity_float)));
-      if (!pointList.length) return null;
-      const startEquity = Number(pointList[0].equity_float);
-      if (!Number.isFinite(startEquity) || startEquity === 0) return null;
-      return {
-        ...line,
-        point_dict_list: pointList.map(point => ({
-          ...point,
-          raw_equity_float: point.equity_float,
-          equity_float: 100 * Number(point.equity_float) / startEquity,
-        })),
-      };
-    }
-
-    function combinedBookLineColor(index) {
-      const colorList = ['#175cd3', '#247a52', '#b42318', '#b54708', '#7f56d9', '#0e7490', '#be185d', '#475467'];
-      return colorList[index % colorList.length];
-    }
-
-    function renderMultiLineEquityCurve(title, lineList, emptyText, subtitleNoteStr) {
-      const dateList = [...new Set((lineList || []).flatMap(line => (
-        line.point_dict_list.map(point => point.market_date_str)
-      )))].sort();
-      const allPointList = (lineList || []).flatMap(line => line.point_dict_list);
-      if (!dateList.length || !allPointList.length) {
-        return `<div class="empty-note">${esc(emptyText)}</div>`;
-      }
-      const width = 1000;
-      const height = 260;
-      const padLeft = 24;
-      const padRight = 24;
-      const padTop = 18;
-      const padBottom = 28;
-      const minEquity = Math.min(...allPointList.map(point => point.equity_float));
-      const maxEquity = Math.max(...allPointList.map(point => point.equity_float));
-      const rawEquityRange = maxEquity - minEquity;
-      const equityPadding = rawEquityRange === 0 ? Math.max(Math.abs(maxEquity) * 0.01, 1) : rawEquityRange * 0.12;
-      const yMin = minEquity - equityPadding;
-      const yMax = maxEquity + equityPadding;
-      const equityRange = yMax === yMin ? 1 : yMax - yMin;
-      const xStep = dateList.length <= 1 ? 0 : (width - padLeft - padRight) / (dateList.length - 1);
-      const dateIndexDict = {};
-      dateList.forEach((dateStr, index) => { dateIndexDict[dateStr] = index; });
-      const linePathHtml = lineList.map(line => {
-        const chartPointList = line.point_dict_list.map(point => {
-          const dateIndex = dateIndexDict[point.market_date_str];
-          const x = dateList.length <= 1 ? width / 2 : padLeft + dateIndex * xStep;
-          const y = padTop + (1 - ((point.equity_float - yMin) / equityRange)) * (height - padTop - padBottom);
-          return { ...point, x, y };
-        });
-        const pathStr = chartPointList.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' ');
-        const strokeWidth = Number.isFinite(Number(line.stroke_width_float)) ? Number(line.stroke_width_float) : 2.2;
-        return `<path class="pnl-line ${esc(line.class_name_str || '')}" d="${pathStr}" style="stroke: ${esc(line.color_str)}; stroke-width: ${esc(strokeWidth)};" aria-label="${esc(line.label_str)}" />`;
-      }).join('');
-      const legendHtml = `
-        <div class="combined-book-legend">
-          ${lineList.map(line => `
-            <span class="combined-book-legend-item ${esc(line.class_name_str || '')}">
-              <span class="combined-book-legend-swatch" style="background: ${esc(line.color_str)};"></span>
-              <span class="combined-book-legend-label">${esc(line.label_str)}</span>
-            </span>`).join('')}
-        </div>`;
-      const midY = padTop + (height - padTop - padBottom) / 2;
-      return `
-        <div class="pnl-curve">
-          <div class="pnl-chart-header">
-            <div>
-              <div class="pnl-chart-title">${esc(title)}</div>
-              <div class="pnl-chart-subtitle">${esc(dateList[0])} to ${esc(dateList[dateList.length - 1])} / ${esc(lineList.length)} lines${subtitleNoteStr ? ' / ' + esc(subtitleNoteStr) : ''}</div>
-            </div>
-            <div class="pnl-chart-range">
-              <span>Axis range</span>
-              <strong>${esc(fmt(yMin))} - ${esc(fmt(yMax))}</strong>
-            </div>
-          </div>
-          <div class="pnl-curve-plot">
-            <div class="pnl-y-axis" aria-hidden="true">
-              <span>${esc(fmt(yMax))}</span>
-              <span>${esc(fmt((yMax + yMin) / 2))}</span>
-              <span>${esc(fmt(yMin))}</span>
-            </div>
-            <div class="pnl-chart-area">
-              <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(title)}">
-                <line class="pnl-grid-line" x1="${padLeft}" y1="${padTop}" x2="${width - padRight}" y2="${padTop}" />
-                <line class="pnl-grid-line" x1="${padLeft}" y1="${midY}" x2="${width - padRight}" y2="${midY}" />
-                <line class="pnl-axis-line" x1="${padLeft}" y1="${height - padBottom}" x2="${width - padRight}" y2="${height - padBottom}" />
-                ${linePathHtml}
-              </svg>
-            </div>
-          </div>
-          <div class="pnl-x-axis" aria-hidden="true">
-            <span>${esc(dateList[0])}</span>
-            <span>${esc(dateList[dateList.length - 1])}</span>
-          </div>
-          ${legendHtml}
-        </div>`;
-    }
-
-    function renderCombinedContributionTable(contributionList) {
-      if (!contributionList.length) {
-        return '<div class="empty-note">No POD contributors were found for this environment.</div>';
-      }
-      return `
-        <table class="mini-table combined-book-table">
-          <thead>
-            <tr>
-              <th>POD</th>
-              <th>Equity</th>
-              <th>Daily PnL $</th>
-              <th>Latest EOD</th>
-              <th>EOD status</th>
-              <th>Freshness</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${contributionList.map(contribution => `
-              <tr>
-                <td><span class="pod-link" data-combined-pod="${esc(contribution.pod_id_str)}" data-combined-mode="${esc(contribution.mode_str)}">${esc(contribution.pod_id_str)}</span><br><span class="muted strategy-text">${esc(contribution.strategy_import_str || '-')}</span></td>
-                <td class="num">${esc(fmt(contribution.latest_equity_float))}</td>
-                <td class="num">${signedValueHtml(contribution.strict_daily_pnl_float, fmtUnavailable)}</td>
-                <td>${esc(contribution.latest_market_date_str || '-')}</td>
-                <td>${esc(contribution.carry_forward_status_str || '-')}</td>
-                <td>${esc(contribution.freshness_warning_str || 'current')}</td>
-              </tr>`).join('')}
-          </tbody>
-        </table>`;
-    }
-
-    function renderPods() {
-      const rows = visibleOperatorRows();
-      if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="7"><div class="empty-note">${esc(emptyOperatorStateMessage())}</div></td></tr>`;
-        return;
-      }
-      tbody.innerHTML = rows.map(row => `
-        <tr data-pod="${esc(row.pod_id_str)}" data-mode="${esc(row.mode_str)}" class="${row.pod_id_str === state.selectedPod ? 'selected' : ''} ${hasPodChangedSinceLastRefresh(row) ? 'changed' : ''}">
-          <td class="severity-cell">${renderOperatorSeverityCell(row)}</td>
-          <td><span class="pod-link">${esc(row.pod_id_str)}</span><br><span class="muted strategy-text">${esc(row.strategy_import_str)}</span></td>
-          <td>${esc(row.mode_str)}</td>
-          <td class="operator-cell">${renderOperatorStateCell(row)}</td>
-          <td class="operator-cell">${esc(operatorReasonSentence(row))}</td>
-          <td class="operator-cell">${esc(operatorEvidenceSentence(row))}</td>
-          <td class="operator-command-cell">${renderOperatorCommandCell(row)}</td>
-        </tr>`).join('');
-      tbody.querySelectorAll('tr[data-pod]').forEach(el => {
-        el.addEventListener('click', event => {
-          if (event.target.closest('button')) return;
-          selectPod(el.dataset.pod, el.dataset.mode);
-        });
-      });
-      tbody.querySelectorAll('[data-copy-command]').forEach(button => {
-        button.addEventListener('click', event => {
-          event.stopPropagation();
-          const podId = button.dataset.copyPod;
-          const row = state.pods.find(item => item.pod_id_str === podId);
-          if (row) copyCommand(row, button.dataset.copyCommand, button);
-        });
-      });
-    }
-
-    function renderAlertInbox() {
-      const summary = state.alertSummary || {};
-      const alertRows = state.alerts || [];
-      alertCounts.innerHTML = `
-        <span class="count-pill red">Red ${esc(summary.red_count_int || 0)}</span>
-        <span class="count-pill yellow">Yellow ${esc(summary.yellow_count_int || 0)}</span>
-        <span class="count-pill gray">Gray ${esc(summary.gray_count_int || 0)}</span>`;
-      alertPanel.classList.toggle('collapsed', !state.alertExpanded);
-      alertSubtitle.textContent = state.alertExpanded
-        ? (summary.total_count_int || 0) + ' audit alerts shown'
-        : (summary.total_count_int || 0) + ' audit alerts collapsed';
-      alertToggleButton.textContent = state.alertExpanded ? 'Hide audit alerts' : 'Show audit alerts';
-      alertToggleButton.disabled = !alertRows.length;
-      if (!state.alertExpanded) {
-        alertList.hidden = true;
-        alertList.innerHTML = '';
-        return;
-      }
-      alertList.hidden = false;
-      if (!alertRows.length) {
-        alertList.innerHTML = '<div class="empty-note">No red, yellow, or setup alerts.</div>';
-        return;
-      }
-      alertList.innerHTML = alertRows.map(alert => `
-        <button class="alert-row ${healthClass(alert.severity_str)}" data-alert-pod="${esc(alert.pod_id_str)}" data-alert-mode="${esc(alert.mode_str)}">
-          <div>
-            ${pill(alert.severity_str, healthClass(alert.severity_str))}
-            <div class="alert-type">${esc(alert.alert_type_str)}</div>
-          </div>
-          <div class="alert-main">
-            <div class="alert-label">${esc(alert.label_str)}</div>
-            <div class="alert-meta">${esc(alert.mode_str)} / ${esc(alert.pod_id_str)} / ${esc(alert.account_route_str)}</div>
-            <div class="alert-reason">${esc(alert.reason_str)}${alert.inspect_command_name_str ? ' | inspect: ' + esc(alert.inspect_command_name_str) : ''}</div>
-          </div>
-        </button>`).join('');
-      alertList.querySelectorAll('[data-alert-pod]').forEach(el => {
-        el.addEventListener('click', () => selectPod(el.dataset.alertPod, el.dataset.alertMode));
-      });
-    }
-
-    function renderAttentionQueue() {
-      const visibleRows = visibleOperatorRows();
-      const queueRows = buildAttentionQueueRows(visibleRows);
-      attentionSubtitle.textContent = queueRows.length + ' PODs grouped by operator state';
-      if (!queueRows.length) {
-        attentionQueueList.innerHTML = `<div class="empty-note">${esc(emptyOperatorStateMessage())}</div>`;
-        return;
-      }
-      let currentGroupName = null;
-      const htmlList = [];
-      queueRows.forEach(queueRow => {
-        if (queueRow.group_name_str !== currentGroupName) {
-          currentGroupName = queueRow.group_name_str;
-          htmlList.push(`<div class="attention-group-title">${esc(currentGroupName)}</div>`);
-        }
-        htmlList.push(renderAttentionQueueRow(queueRow));
-      });
-      attentionQueueList.innerHTML = htmlList.join('');
-      attentionQueueList.querySelectorAll('[data-attention-pod]').forEach(el => {
-        el.addEventListener('click', event => {
-          if (event.target.closest('button')) return;
-          selectPod(el.dataset.attentionPod, el.dataset.attentionMode);
-        });
-      });
-      attentionQueueList.querySelectorAll('[data-copy-command]').forEach(button => {
-        button.addEventListener('click', event => {
-          event.stopPropagation();
-          const podId = button.dataset.copyPod;
-          const row = state.pods.find(item => item.pod_id_str === podId);
-          if (row) copyCommand(row, button.dataset.copyCommand, button);
-        });
-      });
-    }
-
-    function renderAttentionQueueRow(queueRow) {
-      const row = queueRow.row;
-      const debugSummary = row.debug_summary_dict || {};
-      const severity = healthClass(debugSummary.severity_str || row.health_str);
-      const changedHtml = hasPodChangedSinceLastRefresh(row) ? '<div class="operator-changed">Changed since last refresh</div>' : '';
-      return `
-        <div class="attention-row ${severity}" data-attention-pod="${esc(row.pod_id_str)}" data-attention-mode="${esc(row.mode_str)}">
-          <div>${pill(debugSummary.severity_str || severity, severity)}</div>
-          <div class="attention-main">
-            <div class="attention-title">${esc(row.pod_id_str)} - ${esc(queueRow.state_sentence_str)}</div>
-            <div class="attention-meta">${esc(row.mode_str)} / ${esc(row.account_route_str)}</div>
-            <div class="attention-reason">${esc(queueRow.reason_sentence_str)}</div>
-            <div class="attention-evidence">${esc(queueRow.evidence_sentence_str)}</div>
-            ${changedHtml}
-          </div>
-          <div class="attention-command">
-            <button class="secondary" data-copy-pod="${esc(row.pod_id_str)}" data-copy-command="${esc(queueRow.command_name_str)}">Copy ${esc(queueRow.command_name_str)}</button>
-          </div>
-        </div>`;
-    }
-
-    function emptyOperatorStateMessage() {
-      const selectedMode = state.requestedMode || modeFilter.value || 'all';
-      if (selectedMode === 'incubation') {
-        return 'No incubation PODs are currently enabled. Dashboard reads per-POD incubation state under alpha/live/state/incubation/{pod_id}.sqlite3.';
-      }
-      if (selectedMode === 'live') return 'No live PODs are currently enabled.';
-      if (selectedMode === 'paper') return 'No paper PODs are currently enabled.';
-      return 'No PODs are currently enabled. The dashboard is read-only; use status if you need to inspect config and state paths.';
-    }
-
-    function clearSelectedPodState() {
-      state.selectedPod = null;
-      state.selectedDetail = null;
-      state.selectedTab = null;
-    }
-
-    function clearSelectedPod() {
-      clearSelectedPodState();
-      persistUiState();
-      syncUrlState();
-      renderPods();
-      renderAttentionQueue();
-      renderConsoleStatusStrip();
-      renderNoPodSelectedDetail();
-    }
-
-    function clearSelectedPodIfHidden() {
-      if (!state.selectedPod) return false;
-      const selectedRow = state.pods.find(row => row.pod_id_str === state.selectedPod);
-      if (selectedRow && rowMatchesSelectedEnvironment(selectedRow)) return false;
-      clearSelectedPodState();
-      return true;
-    }
-
-    function selectPod(podId, mode) {
-      const previousPodId = state.selectedPod;
-      state.selectedPod = podId;
-      state.selectedDetail = null;
-      if (previousPodId !== podId) {
-        state.selectedTab = getStoredDetailTab(podId);
-      }
-      if (mode) {
-        state.requestedMode = mode;
-        modeFilter.value = mode;
-      }
-      persistUiState();
-      syncUrlState();
-      renderPods();
-      renderConsoleStatusStrip();
-      loadDetail(podId);
-    }
-
-    function operatorStateSentence(row) {
-      const debugSummary = row.debug_summary_dict || {};
-      const verdictLabel = String(debugSummary.verdict_label_str || '');
-      const verdictLower = verdictLabel.toLowerCase();
-      const eodStatus = String((row.eod_snapshot_dict || {}).status_str || '');
-      const rehearsal = row.rehearsal_status_dict || {};
-      const gateStatus = String(rehearsal.promotion_gate_status_str || '');
-      if (row.mode_str === 'incubation' && row.db_status_str === 'missing') return 'Incubation SIM ledger DB has not been created yet.';
-      if (row.mode_str === 'incubation' && row.db_status_str === 'empty') return 'Incubation DB exists, but no rehearsal cycle has been recorded yet.';
-      if (row.mode_str === 'incubation' && gateStatus === 'complete_one_cycle') return 'Incubation completed at least one SIM ledger rehearsal cycle.';
-      if (row.mode_str === 'incubation' && gateStatus === 'incomplete') return 'Incubation is waiting for one complete SIM ledger rehearsal cycle.';
-      if (verdictLower.includes('reconcile blocked')) return 'Reconcile is blocked.';
-      if (verdictLower.includes('waiting reconcile')) return 'Reconcile is waiting for broker truth.';
-      if (verdictLower.includes('diff red')) return 'Reference DIFF is red.';
-      if (verdictLower.includes('db missing')) return 'State DB is missing.';
-      if (verdictLower.includes('db empty')) return 'State DB is empty.';
-      if (eodStatus === 'blocked_by_execution') return 'EOD is blocked because execution is unresolved.';
-      if (verdictLabel) return verdictLabel.endsWith('.') ? verdictLabel : verdictLabel + '.';
-      if (row.next_action_str) return 'Next action is ' + row.next_action_str + '.';
-      return 'State is unknown.';
-    }
-
-    function operatorReasonSentence(row) {
-      const debugSummary = row.debug_summary_dict || {};
-      const eodStatus = String((row.eod_snapshot_dict || {}).status_str || '');
-      const rehearsal = row.rehearsal_status_dict || {};
-      const gateStatus = String(rehearsal.promotion_gate_status_str || '');
-      if (row.mode_str === 'incubation' && gateStatus === 'complete_one_cycle') return 'Incubation completed at least one SIM ledger rehearsal cycle.';
-      if (row.mode_str === 'incubation' && gateStatus === 'incomplete') return 'Incubation is waiting for one complete SIM ledger rehearsal cycle.';
-      if (eodStatus === 'blocked_by_execution') return 'EOD is blocked because execution is unresolved.';
-      if (debugSummary.primary_reason_str) return debugSummary.primary_reason_str;
-      if (row.reason_code_str) return row.reason_code_str;
-      return 'No operator reason was reported.';
-    }
-
-    function operatorEvidenceSentence(row) {
-      const debugSummary = row.debug_summary_dict || {};
-      const timestampStr = debugSummary.latest_evidence_timestamp_str || row.latest_event_timestamp_str || row.latest_pod_state_timestamp_str || '-';
-      const evidenceStr = debugSummary.primary_evidence_str || row.latest_reconciliation_status_str || row.latest_diff_status_str || row.db_status_str || '-';
-      return 'Latest Evidence: ' + formatTimestampText(timestampStr) + ' / ' + evidenceStr;
-    }
-
-    function renderOperatorSeverityCell(row) {
-      const debugSummary = row.debug_summary_dict || {};
-      const severity = healthClass(debugSummary.severity_str || row.health_str);
-      return `${pill(debugSummary.severity_str || severity, severity)}${hasPodChangedSinceLastRefresh(row) ? '<div class="operator-changed">Changed since last refresh</div>' : ''}`;
-    }
-
-    function renderOperatorStateCell(row) {
-      return `
-        <div class="operator-state">${esc(operatorStateSentence(row))}</div>
-        <div class="operator-reason">${esc((row.debug_summary_dict || {}).verdict_label_str || '-')}</div>`;
-    }
-
-    function renderOperatorCommandCell(row) {
-      const commandName = safeInspectCommandName((row.debug_summary_dict || {}).next_inspect_command_name_str);
-      return `<button class="secondary" data-copy-pod="${esc(row.pod_id_str)}" data-copy-command="${esc(commandName)}">Copy ${esc(commandName)}</button>`;
-    }
-
-    function renderRequiredActionCell(action) {
-      const severity = healthClass(action.severity_str);
-      const inspectHtml = action.inspect_command_name_str
-        ? `<div class="summary-action-inspect">inspect: ${esc(action.inspect_command_name_str)}</div>`
-        : '';
-      return `
-        <div class="summary-action">
-          ${pill(action.severity_str || severity, severity)}
-          <div class="summary-action-main">
-            <div class="summary-action-label">${esc(action.label_str || 'Unknown')}</div>
-            <div class="summary-action-reason">${esc(action.reason_str)}</div>
-            ${inspectHtml}
-          </div>
-        </div>`;
-    }
-
-    function renderDebugVerdictCell(debugSummary) {
-      const severity = healthClass(debugSummary.severity_str);
-      return `
-        <div class="debug-verdict">
-          ${pill(debugSummary.severity_str || severity, severity)}
-          <div>
-            <div class="debug-verdict-label">${esc(debugSummary.verdict_label_str || 'Unknown')}</div>
-            <div class="debug-verdict-reason">${esc(debugSummary.primary_reason_str || '-')}</div>
-            <div class="debug-verdict-evidence">${esc(debugSummary.primary_evidence_str || '-')}</div>
-            <div class="debug-verdict-evidence">evidence: ${esc(debugSummary.latest_evidence_timestamp_str || '-')}</div>
-          </div>
-        </div>`;
-    }
-
-    const lifecycleExecutionStepKeyList = ['db', 'decision', 'vplan', 'ack', 'fill', 'reconcile', 'eod'];
-    const lifecycleActionStepKeyByLabel = {
-      'Setup DB': 'db',
-      'No state yet': 'db',
-      'Build DecisionPlan': 'decision',
-      'Build VPlan': 'vplan',
-      'Wait submission window': 'vplan',
-      'VPlan ready': 'vplan',
-      'Review VPlan': 'vplan',
-      'Review broker ACK': 'ack',
-      'Waiting reconcile': 'reconcile',
-      'Review reconcile': 'reconcile',
-      'Expire stale plan': 'vplan',
-    };
-    const lifecycleActionStepKeyByCommand = {
-      next_due: 'decision',
-      show_decision_plan: 'vplan',
-      show_vplan: 'vplan',
-      status: 'db',
-    };
-
-    function lifecycleExecutionStepList(stepList) {
-      const stepByKey = new Map((stepList || []).map(step => [step.step_key_str, step]));
-      return lifecycleExecutionStepKeyList
-        .map(stepKey => stepByKey.get(stepKey))
-        .filter(Boolean);
-    }
-
-    function isLifecycleActiveWaitingStep(step) {
-      const stepKey = step.step_key_str || '';
-      const status = String(step.status_str || '').toLowerCase();
-      const severity = healthClass(step.severity_str);
-      if (severity !== 'gray') return false;
-      if (stepKey === 'eod') return ['waiting', 'blocked_by_execution'].includes(status);
-      return false;
-    }
-
-    function deriveCurrentLifecycleStepKey(stepList, action) {
-      const executionStepList = lifecycleExecutionStepList(stepList || []);
-      const firstRedStep = executionStepList.find(step => healthClass(step.severity_str) === 'red');
-      if (firstRedStep) return firstRedStep.step_key_str;
-      const firstYellowStep = executionStepList.find(step => healthClass(step.severity_str) === 'yellow');
-      if (firstYellowStep) return firstYellowStep.step_key_str;
-      if (action && healthClass(action.severity_str) !== 'green') {
-        const actionStepKey = lifecycleActionStepKeyByLabel[action.label_str]
-          || lifecycleActionStepKeyByCommand[action.inspect_command_name_str];
-        if (actionStepKey && executionStepList.some(step => step.step_key_str === actionStepKey)) {
-          return actionStepKey;
-        }
-      }
-      const firstActiveWaitingStep = executionStepList.find(isLifecycleActiveWaitingStep);
-      if (firstActiveWaitingStep) return firstActiveWaitingStep.step_key_str;
-      return '';
-    }
-
-    function operatorLifecycleSentence(step, isCurrent) {
-      if (!step) return 'Idle / no blocking lifecycle step.';
-      const label = step.label_str || step.step_key_str || 'Lifecycle';
-      const severity = healthClass(step.severity_str);
-      if (isCurrent) {
-        if (severity === 'red') return `${label} is the current blocker.`;
-        if (severity === 'yellow') return `${label} is the current waiting or inspect step.`;
-        if (severity === 'gray') return `${label} is the current not-yet-started step.`;
-        return `${label} is current and passed.`;
-      }
-      if (severity === 'green') return `${label} completed or passed.`;
-      if (severity === 'yellow') return `${label} is waiting or needs inspection.`;
-      if (severity === 'red') return `${label} is blocked or failed.`;
-      return `${label} is not reached or not applicable.`;
-    }
-
-    function renderLifecycleArrow() {
-      return '<div class="lifecycle-arrow" aria-hidden="true">&rarr;</div>';
-    }
-
-    function renderLifecycleStepCard(step, isCurrent) {
-      const severity = healthClass(step.severity_str);
-      const currentBadgeHtml = isCurrent ? '<span class="lifecycle-current-badge">Current</span>' : '';
-      const timestampHtml = step.timestamp_str ? `<div class="lifecycle-step-detail">Evidence: ${esc(step.timestamp_str)}</div>` : '';
-      return `
-        <div class="lifecycle-step-card ${severity} ${isCurrent ? 'current' : ''}">
-          <div class="lifecycle-step-top">
-            <div class="lifecycle-step-label">${esc(step.label_str)}</div>
-            ${currentBadgeHtml}
-          </div>
-          <div class="lifecycle-step-status">${esc(step.status_str || '-')}</div>
-          <div class="lifecycle-step-sentence">${esc(operatorLifecycleSentence(step, isCurrent))}</div>
-          <div class="lifecycle-step-detail">${esc(step.detail_str || '-')}</div>
-          ${timestampHtml}
-        </div>`;
-    }
-
-    function renderReferenceCheckStep(diffStep) {
-      if (!diffStep) {
-        return `
-          <div class="lifecycle-reference-check gray">
-            <div>
-              <div class="lifecycle-reference-title">Reference Check</div>
-              <div class="lifecycle-reference-detail">No DIFF evidence is available.</div>
-            </div>
-            ${pill('not_run', 'gray')}
-          </div>`;
-      }
-      const severity = healthClass(diffStep.severity_str);
-      const timestampHtml = diffStep.timestamp_str ? ` / ${esc(diffStep.timestamp_str)}` : '';
-      return `
-        <div class="lifecycle-reference-check ${severity}">
-          <div>
-            <div class="lifecycle-reference-title">Reference Check</div>
-            <div class="lifecycle-reference-detail">${esc(diffStep.detail_str || '-')}${timestampHtml}</div>
-          </div>
-          ${pill(diffStep.status_str || severity, severity)}
-        </div>`;
-    }
-
-    function renderLifecycleRail(stepList, action) {
-      const executionStepList = lifecycleExecutionStepList(stepList || []);
-      const diffStep = (stepList || []).find(step => step.step_key_str === 'diff');
-      const currentStepKey = deriveCurrentLifecycleStepKey(stepList || [], action || {});
-      const currentStep = executionStepList.find(step => step.step_key_str === currentStepKey);
-      const currentSummary = currentStep
-        ? `Current: ${currentStep.label_str} / ${currentStep.status_str || '-'}`
-        : 'Idle / no blocking lifecycle step';
-      if (!executionStepList.length) {
-        return `
-          <div class="lifecycle-progress">
-            <div class="lifecycle-current-summary">
-              <span>Idle / no blocking lifecycle step</span>
-              <span class="muted">No lifecycle evidence yet.</span>
-            </div>
-            ${renderReferenceCheckStep(diffStep)}
-          </div>`;
-      }
-      const railHtml = executionStepList.map((step, index) => {
-        const stepHtml = renderLifecycleStepCard(step, step.step_key_str === currentStepKey);
-        return index === executionStepList.length - 1 ? stepHtml : stepHtml + renderLifecycleArrow();
-      }).join('');
-      return `
-        <div class="lifecycle-progress">
-          <div class="lifecycle-current-summary">
-            <span>${esc(currentSummary)}</span>
-            <span>${esc(currentStep ? operatorLifecycleSentence(currentStep, true) : 'Idle / no blocking lifecycle step.')}</span>
-          </div>
-          <div class="lifecycle-rail-scroll">
-            <div class="lifecycle-rail">${railHtml}</div>
-          </div>
-          ${renderReferenceCheckStep(diffStep)}
-        </div>`;
-    }
-
-    function renderDiffCell(row) {
-      const status = row.latest_diff_status_str || 'not_run';
-      const cls = status === 'red' ? 'red' : status === 'yellow' ? 'yellow' : status === 'green' ? 'green' : 'gray';
-      const issueText = row.latest_diff_open_issue_count_int === null || row.latest_diff_open_issue_count_int === undefined
-        ? 'issues -'
-        : 'issues ' + row.latest_diff_open_issue_count_int;
-      return `${pill(status, cls)}<div class="cell-sub">${esc(issueText)}</div>`;
-    }
-
-    function renderStateCell(row) {
-      return `
-        <div class="state-main">${pill(row.health_str, healthClass(row.health_str))}</div>
-        <div class="state-sub">${esc(row.next_action_str || '-')}</div>`;
-    }
-
-    function renderEodCell(eod) {
-      const status = eod.status_str || 'not_applicable';
-      const severity = healthClass(eod.severity_str);
-      const marketDate = eod.expected_market_date_str || eod.latest_market_date_str || '-';
-      return `${pill(status, severity)}<div class="cell-sub">${esc(marketDate)}</div>`;
-    }
-
-    function renderUpdatedCell(row) {
-      return `
-        <div>${esc(row.latest_pod_state_timestamp_str || '-')}</div>
-        <div class="cell-sub">event ${esc(row.latest_event_timestamp_str || '-')}</div>`;
-    }
-
-    async function loadDetail(podId) {
-      const requestedPodId = podId;
-      state.selectedPod = podId;
-      renderPods();
-      detailPanel.className = 'detail-workspace';
-      detailPanel.innerHTML = '<h2>' + esc(podId) + '</h2><div class="muted">Loading...</div>';
-      try {
-        const payload = await fetchJson('/api/pods/' + encodeURIComponent(podId));
-        if (state.selectedPod !== requestedPodId) return;
-        state.selectedDetail = payload;
-        renderDetail(payload);
-      } catch (error) {
-        if (state.selectedPod !== requestedPodId) return;
-        renderDetailError(podId, error.message);
-      }
-    }
-
-    function renderDetail(payload) {
-      const row = payload.pod_row_dict || {};
-      const decision = payload.latest_decision_plan_dict || null;
-      const vplan = payload.latest_vplan_dict || {};
-      const report = payload.latest_execution_report_dict || {};
-      const diff = payload.latest_diff_dict || {};
-      const action = payload.required_action_dict || row.required_action_dict || {};
-      const lifecycle = payload.lifecycle_step_dict_list || row.lifecycle_step_dict_list || [];
-      const freshness = payload.data_freshness_dict || row.data_freshness_dict || {};
-      const eod = payload.eod_snapshot_dict || row.eod_snapshot_dict || {};
-      const rehearsal = payload.rehearsal_status_dict || row.rehearsal_status_dict || {};
-      const pnl = payload.pod_pnl_dict || {};
-      const debugStory = payload.debug_story_dict || {};
-      const tabName = activeDetailTab(row.pod_id_str);
-      const artifactButton = diff.html_url_str ? `<a class="button-link" href="${esc(diff.html_url_str)}" target="_blank"><button class="secondary">Open artifact</button></a>` : '';
-      detailPanel.className = 'dashboard-section detail-workspace';
-      detailPanel.innerHTML = `
-        <div class="dashboard-section-header">
-          <div>
-            <h2>Selected POD / What We Learned</h2>
-            <div class="dashboard-section-subtitle">Root cause, blocker chain, evidence, broker/model comparison, and safe commands.</div>
-          </div>
-          <span class="section-status">${esc(row.mode_str || '-')} / read-only</span>
-        </div>
-        <div class="dashboard-section-body detail-shell-body">
-          <div class="detail-header">
-            <div class="detail-title">
-              <h2>${esc(row.pod_id_str)}</h2>
-              <div class="detail-subtitle">
-                ${pill(row.health_str, healthClass(row.health_str))}
-                <span>${esc(row.mode_str)}</span>
-                <span>${esc(row.account_route_str)}</span>
-                <span class="muted">${esc(row.strategy_import_str)}</span>
-              </div>
-            </div>
-            <div class="inspect-actions">
-              <button class="secondary" id="refresh-detail-button">Refresh POD</button>
-              <button class="secondary" id="open-logger-button">Open Logger</button>
-              <button class="secondary" id="clear-selection-button">Clear selection</button>
-              ${artifactButton}
-            </div>
-          </div>
-          ${renderActionBanner(action)}
-          ${renderLifecycleSection(lifecycle, action)}
-          ${renderDetailTabs(row.pod_id_str, tabName)}
-          ${renderDetailTabBody(tabName, { row, decision, vplan, report, diff, freshness, eod, rehearsal, pnl, debugStory })}
-        </div>`;
-      document.getElementById('refresh-detail-button').addEventListener('click', () => loadDetail(row.pod_id_str));
-      document.getElementById('open-logger-button').addEventListener('click', () => openLogger(row.pod_id_str));
-      document.getElementById('clear-selection-button').addEventListener('click', clearSelectedPod);
-      detailPanel.querySelectorAll('[data-detail-tab]').forEach(button => {
-        button.addEventListener('click', () => setActiveDetailTab(row.pod_id_str, button.dataset.detailTab));
-      });
-      detailPanel.querySelectorAll('[data-copy-command]').forEach(button => {
-        button.addEventListener('click', () => copyCommand(row, button.dataset.copyCommand, button));
-      });
-      const runDiffButton = document.getElementById('run-diff-button');
-      if (runDiffButton) {
-        runDiffButton.addEventListener('click', () => runDiff(row.pod_id_str));
-      }
-    }
-
-    function renderActionBanner(action) {
-      const severity = healthClass(action.severity_str);
-      const commandName = action.inspect_command_name_str;
-      const commandHtml = commandName ? `<span class="muted">Suggested: ${esc(commandName)}</span>` : '';
-      const contextHtml = renderActionContextItems(action.context_item_dict_list || []);
-      return `
-        <div class="action-banner ${severity}">
-          <div class="action-main">
-            <div class="action-title">${esc(action.label_str || 'Unknown action')}</div>
-            <div>${esc(action.reason_str)}</div>
-            ${contextHtml}
-          </div>
-          <div class="action-command">${commandHtml}</div>
-        </div>`;
-    }
-
-    function renderActionContextItems(contextItems) {
-      if (!contextItems.length) return '';
-      return `
-        <div class="action-context-grid">
-          ${contextItems.map(item => {
-            const severity = healthClass(item.severity_str);
-            const detailHtml = item.detail_str ? `<div class="action-context-detail">${esc(item.detail_str)}</div>` : '';
-            return `
-              <div class="action-context-item ${severity}">
-                <div class="action-context-label">${esc(item.label_str)}</div>
-                <div class="action-context-value">${esc(item.value_str)}</div>
-                ${detailHtml}
-              </div>`;
-          }).join('')}
-        </div>`;
-    }
-
-    function renderLifecycleSection(stepList, action) {
-      return `
-        <section class="panel full">
-          <h3>Lifecycle Progress</h3>
-          <div class="panel-body">${renderLifecycleRail(stepList || [], action || {})}</div>
-        </section>`;
-    }
-
-    function renderDetailTabs(podId, activeTabName) {
-      return `<nav class="detail-tabs" aria-label="POD detail sections">
-        ${detailTabNameList.map(tabName => `
-          <button class="tab-button ${tabName === activeTabName ? 'active' : ''}" data-detail-tab="${esc(tabName)}">
-            ${esc(detailTabLabelDict[tabName])}
-          </button>`).join('')}
-      </nav>`;
-    }
-
-    function renderDetailTabBody(tabName, context) {
-      if (tabName === 'debug') {
-        return `<div class="tab-body">${renderDebugSection(context.debugStory, context.report, context.row, context.rehearsal)}</div>`;
-      }
-      if (tabName === 'decision') {
-        return `<div class="tab-body">${renderDecisionSection(context.decision)}</div>`;
-      }
-      if (tabName === 'pnl') {
-        return `<div class="tab-body">${renderPnlSection(context.pnl)}</div>`;
-      }
-      if (tabName === 'vplan') {
-        return `<div class="tab-body">${renderVPlanSection(context.vplan)}</div>`;
-      }
-      if (tabName === 'execution') {
-        return `<div class="tab-body">${renderExecutionSection(context.vplan, context.report, context.row)}</div>`;
-      }
-      if (tabName === 'broker') {
-        return `<div class="tab-body">${renderBrokerSection(context.vplan, context.report, context.row)}</div>`;
-      }
-      if (tabName === 'diff') {
-        return `<div class="tab-body">${renderDiffSection(context.diff)}</div>`;
-      }
-      if (tabName === 'freshness') {
-        return `<div class="tab-body">
-          ${renderNorgateSyncSection(context.freshness)}
-          ${renderDataFreshnessSection(context.freshness)}
-          ${renderEodSnapshotSection(context.eod)}
-        </div>`;
-      }
-      return `<div class="tab-body">
-        ${renderRehearsalSection(context.rehearsal)}
-        ${renderOverviewSection(context.row)}
-        ${renderCommandSection(context.row)}
-      </div>`;
-    }
-
-    function renderDebugSection(story, report, row, rehearsal) {
-      const verdict = story.verdict_dict || row.debug_summary_dict || {};
-      const severity = healthClass(verdict.severity_str);
-      const rehearsalHtml = renderRehearsalSection(rehearsal);
-      const blockerRows = (story.blocker_dict_list || []).map(blocker => [
-        blocker.severity_str,
-        blocker.label_str,
-        blocker.reason_str,
-        blocker.evidence_str,
-        blocker.inspect_command_name_str || '-'
-      ]);
-      const timelineRows = (story.timeline_event_dict_list || []).map(event => [
-        event.timestamp_str || '-',
-        event.source_str,
-        event.severity_str,
-        event.label_str,
-        event.status_str || '-',
-        event.detail_str || '-'
-      ]);
-      const evidenceRows = (story.evidence_item_dict_list || []).map(item => [
-        item.label_str,
-        item.severity_str,
-        item.value_str,
-        item.detail_str
-      ]);
-      const executionRows = (report.execution_row_dict_list || []).map(execution => [
-        execution.asset_str,
-        fmt(execution.planned_order_delta_share_float),
-        fmt(execution.filled_share_float),
-        fmt(execution.target_share_float),
-        fmt(execution.broker_share_float),
-        fmt(execution.residual_share_float),
-        execution.latest_broker_order_status_str || '-'
-      ]);
-      return `
-        <section class="panel full">
-          <h3>Root Cause</h3>
-          <div class="panel-body">
-            <div class="debug-root ${severity}">
-              <div class="debug-root-title">${pill(verdict.severity_str || severity, severity)} ${esc(verdict.verdict_label_str || 'Unknown')}</div>
-              <div class="debug-root-sentence">${esc(operatorStateSentence(row))}</div>
-              <div>${esc(operatorReasonSentence(row))}</div>
-              <div class="muted">${esc(operatorEvidenceSentence(row))}</div>
-              <div class="debug-guide-grid">
-                <div class="debug-guide-item">
-                  <div class="debug-guide-label">Next inspect</div>
-                  <div class="debug-guide-value">${esc(safeInspectCommandName(verdict.next_inspect_command_name_str))}</div>
-                </div>
-                <div class="debug-guide-item">
-                  <div class="debug-guide-label">Latest evidence</div>
-                  <div class="debug-guide-value">${esc(formatTimestampText(verdict.latest_evidence_timestamp_str || '-'))}</div>
-                </div>
-                <div class="debug-guide-item">
-                  <div class="debug-guide-label">Changed</div>
-                  <div class="debug-guide-value">${hasPodChangedSinceLastRefresh(row) ? 'Changed since last refresh' : 'No change since last refresh'}</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-        ${rehearsalHtml}
-        <section class="panel full">
-          <h3>Blocker Chain</h3>
-          <div class="panel-body">${renderTable(['Severity', 'Blocker', 'Reason', 'Evidence', 'Inspect'], blockerRows, 'No blockers were found.')}</div>
-        </section>
-        <section class="panel full">
-          <h3>Model vs Broker Snapshot</h3>
-          <div class="panel-body">
-            <div class="metric-grid">
-              ${metric('Residual rows', report.residual_count_int || 0)}
-              ${metric('Fills', report.fill_count_int || 0)}
-              ${metric('Broker orders', report.broker_order_count_int || 0)}
-              ${metric('Broker ACK rows', report.broker_ack_count_int || 0)}
-            </div>
-            ${renderTable(['Asset', 'Planned', 'Filled', 'Target', 'Broker', 'Residual', 'Order status'], executionRows, 'No model-vs-broker rows yet.')}
-          </div>
-        </section>
-        <section class="panel full">
-          <h3>Evidence Timeline</h3>
-          <div class="panel-body">
-            <details class="audit-detail-drawer">
-              <summary>Show audit evidence timeline</summary>
-              <div class="audit-detail-body">
-                ${renderTable(['Time', 'Source', 'Severity', 'Label', 'Status', 'Detail'], timelineRows, 'No evidence timeline was found.')}
-                ${renderTable(['Evidence', 'Severity', 'Value', 'Detail'], evidenceRows, 'No debug evidence items were found.')}
-              </div>
-            </details>
-          </div>
-        </section>
-        ${renderSuggestedCommandSection(story, row)}`;
-    }
-
-    function renderSuggestedCommandSection(story, row) {
-      const commandRows = (story.recommended_command_dict_list || []).map(command => [
-        command.command_name_str,
-        command.reason_str,
-        `<button class="secondary" data-copy-command="${esc(command.command_name_str)}">Copy</button>`
-      ]);
-      if (!commandRows.length) {
-        commandRows.push(['status', 'Inspect current POD state and blocker reason.', '<button class="secondary" data-copy-command="status">Copy</button>']);
-      }
-      const rowHtml = commandRows.map(rowCells => `
-        <tr>
-          <td>${esc(rowCells[0])}</td>
-          <td>${esc(rowCells[1])}</td>
-          <td>${rowCells[2]}</td>
-        </tr>`).join('');
-      return `
-        <section class="panel full">
-          <h3>Suggested Copy Commands</h3>
-          <div class="panel-body">
-            <table class="mini-table">
-              <thead><tr><th>Command</th><th>Why</th><th>Copy</th></tr></thead>
-              <tbody>${rowHtml}</tbody>
-            </table>
-          </div>
-        </section>`;
-    }
-
-    function renderCommandSection(row) {
-      const commandNameList = ['status', 'next_due', 'show_decision_plan', 'show_vplan', 'compare_reference'];
-      const rows = commandNameList.map(commandName => `
-        <div class="command-row">
-          <div class="command-name">${esc(commandName)}</div>
-          <div class="command-text mono">${esc(buildCommand(row, commandName))}</div>
-          <button class="secondary" data-copy-command="${esc(commandName)}">Copy</button>
-        </div>`).join('');
-      return `
-        <section class="panel full">
-          <h3>Commands</h3>
-          <div class="panel-body">
-            <details class="command-drawer">
-              <summary>Commands</summary>
-              <div class="command-drawer-body">
-                <div class="command-list">${rows}</div>
-              </div>
-            </details>
-          </div>
-        </section>`;
-    }
-
-    function renderRehearsalSection(rehearsal) {
-      if (!rehearsal || rehearsal.status_str !== 'active') return '';
-      return `
-        <section class="panel full">
-          <h3>Unified Rehearsal</h3>
-          <div class="panel-body">
-            <div class="metric-grid">
-              ${metric('Promotion gate', rehearsal.promotion_gate_status_str)}
-              ${metric('Last cycle', rehearsal.last_cycle_status_str)}
-              ${metric('Completed cycles', rehearsal.completed_cycle_count_int || 0)}
-              ${metric('SIM ledger', rehearsal.sim_ledger_status_str)}
-              ${metric('IBKR reference', rehearsal.ibkr_reference_status_str)}
-              ${metric('IBKR open', rehearsal.ibkr_open_price_status_str)}
-            </div>
-            ${keyValueGrid([
-              ['Official accounting source', rehearsal.official_accounting_source_str],
-              ['Dashboard state source', 'Dashboard reads per-POD incubation state.'],
-              ['SIM ledger source', rehearsal.sim_ledger_source_str],
-              ['IBKR reference source', rehearsal.ibkr_reference_source_str],
-              ['IBKR open source', rehearsal.ibkr_open_price_source_str],
-              ['Paper probe status', rehearsal.paper_probe_status_str],
-              ['Paper probe evidence', 'Paper probe is evidence only; it does not count as SIM ledger P&L.'],
-              ['Paper fills count as SIM P&L', fmtBool(rehearsal.paper_probe_accounting_truth_bool)],
-              ['Detail', rehearsal.detail_str]
-            ])}
-          </div>
-        </section>`;
-    }
-
-    function renderOverviewSection(row) {
-      return `
-        <section class="panel">
-          <h3>Overview</h3>
-          <div class="panel-body">
-            <div class="metric-grid">
-              ${metric('Next', row.next_action_str)}
-              ${metric('Reason', row.reason_code_str)}
-              ${metric('Decision', row.latest_decision_plan_status_str)}
-              ${metric('VPlan', row.latest_vplan_status_str ? row.latest_vplan_status_str + (row.latest_vplan_id_int ? ' #' + row.latest_vplan_id_int : '') : '-')}
-              ${metric('Equity', row.equity_float)}
-              ${metric('Cash', row.cash_float)}
-              ${metric('Positions', row.position_count_int)}
-              ${metric('Warnings', row.warning_count_int)}
-            </div>
-            ${keyValueGrid([
-              ['DB status', row.db_status_str],
-              ['DB override', fmtBool(row.db_override_bool)],
-              ['DB path', row.db_path_str],
-              ['Pod state updated', row.latest_pod_state_timestamp_str],
-              ['Broker snapshot', row.latest_broker_snapshot_timestamp_str],
-              ['Reconcile', row.latest_reconciliation_status_str]
-            ])}
-          </div>
-        </section>`;
-    }
-
-    function renderPnlSection(pnl) {
-      const pointList = pnl.equity_point_dict_list || [];
-      if (!pointList.length) {
-        return panel('PnL', '<div class="empty-note">No EOD equity snapshots were found for this POD.</div>', true);
-      }
-      return `
-        <section class="panel full">
-          <h3>PnL</h3>
-          <div class="panel-body">
-            <div class="metric-grid">
-              ${metric('Latest EOD date', pnl.latest_market_date_str)}
-              ${metric('Latest equity', pnl.latest_equity_float)}
-              ${metric('Previous EOD equity', pnl.previous_equity_float)}
-              ${metricSigned('Daily PnL $', pnl.daily_pnl_float, fmtUnavailable)}
-              ${metricSigned('Daily PnL %', pnl.daily_pnl_pct_float, fmtPct)}
-              ${metricSigned('Since-start PnL $', pnl.since_start_pnl_float, fmtUnavailable)}
-              ${metricSigned('Since-start PnL %', pnl.since_start_pnl_pct_float, fmtPct)}
-              ${metric('EOD points', pnl.point_count_int || 0)}
-            </div>
-            ${renderPnlCurve(pointList)}
-            ${renderPnlTable(pointList)}
-          </div>
-        </section>`;
-    }
-
-    function renderPnlCurve(pointList, titleText, ariaLabelText) {
-      const equityPointList = (pointList || [])
-        .map((point, index) => ({
-          index,
-          marketDate: point.market_date_str,
-          equity: Number(point.equity_float)
-        }))
-        .filter(point => Number.isFinite(point.equity));
-      if (!equityPointList.length) {
-        return '<div class="empty-note">No numeric equity points were found.</div>';
-      }
-      const width = 1000;
-      const height = 260;
-      const padLeft = 24;
-      const padRight = 24;
-      const padTop = 18;
-      const padBottom = 28;
-      const minEquity = Math.min(...equityPointList.map(point => point.equity));
-      const maxEquity = Math.max(...equityPointList.map(point => point.equity));
-      const rawEquityRange = maxEquity - minEquity;
-      const equityPadding = rawEquityRange === 0 ? Math.max(Math.abs(maxEquity) * 0.01, 1) : rawEquityRange * 0.12;
-      const yMin = minEquity - equityPadding;
-      const yMax = maxEquity + equityPadding;
-      const equityRange = yMax === yMin ? 1 : yMax - yMin;
-      const xStep = equityPointList.length <= 1 ? 0 : (width - padLeft - padRight) / (equityPointList.length - 1);
-      const chartPointList = equityPointList.map((point, index) => {
-        const x = equityPointList.length <= 1 ? width / 2 : padLeft + index * xStep;
-        const y = padTop + (1 - ((point.equity - yMin) / equityRange)) * (height - padTop - padBottom);
-        const xPct = (x / width) * 100;
-        const yPct = (y / height) * 100;
-        return { ...point, x, y, xPct, yPct };
-      });
-      const pathStr = chartPointList.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' ');
-      const firstPoint = chartPointList[0];
-      const latestPoint = chartPointList[chartPointList.length - 1];
-      const curveSignedClass = signedValueClass(latestPoint.equity - firstPoint.equity);
-      const pointHtml = chartPointList.map(point => {
-        const labelStr = `${point.marketDate} ${fmt(point.equity)}`;
-        return `<span class="pnl-point ${curveSignedClass}" style="left: ${point.xPct.toFixed(3)}%; top: ${point.yPct.toFixed(3)}%;" title="${esc(labelStr)}" aria-label="${esc(labelStr)}"></span>`;
-      }).join('');
-      const midY = padTop + (height - padTop - padBottom) / 2;
-      const singlePointNoteHtml = equityPointList.length === 1
-        ? '<div class="empty-note">Only one EOD equity point is available, so the chart shows a single mark.</div>'
-        : '';
-      const chartTitleText = titleText || 'EOD equity curve';
-      const chartAriaLabelText = ariaLabelText || 'POD EOD equity curve';
-      return `
-        <div class="pnl-curve">
-          <div class="pnl-chart-header">
-            <div>
-              <div class="pnl-chart-title">${esc(chartTitleText)}</div>
-              <div class="pnl-chart-subtitle">${esc(firstPoint.marketDate)} to ${esc(latestPoint.marketDate)} / ${esc(equityPointList.length)} points</div>
-            </div>
-            <div class="pnl-chart-range">
-              <span>Axis range</span>
-              <strong>${esc(fmt(yMin))} - ${esc(fmt(yMax))}</strong>
-            </div>
-          </div>
-          <div class="pnl-curve-plot">
-            <div class="pnl-y-axis" aria-hidden="true">
-              <span>${esc(fmt(yMax))}</span>
-              <span>${esc(fmt((yMax + yMin) / 2))}</span>
-              <span>${esc(fmt(yMin))}</span>
-            </div>
-            <div class="pnl-chart-area">
-              <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(chartAriaLabelText)}">
-                <line class="pnl-grid-line" x1="${padLeft}" y1="${padTop}" x2="${width - padRight}" y2="${padTop}" />
-                <line class="pnl-grid-line" x1="${padLeft}" y1="${midY}" x2="${width - padRight}" y2="${midY}" />
-                <line class="pnl-axis-line" x1="${padLeft}" y1="${height - padBottom}" x2="${width - padRight}" y2="${height - padBottom}" />
-                <path class="pnl-line ${curveSignedClass}" d="${pathStr}" />
-              </svg>
-              <div class="pnl-point-layer">${pointHtml}</div>
-            </div>
-          </div>
-          <div class="pnl-x-axis" aria-hidden="true">
-            <span>${esc(firstPoint.marketDate)}</span>
-            <span>${esc(latestPoint.marketDate)}</span>
-          </div>
-          ${singlePointNoteHtml}
-        </div>`;
-    }
-
-    function renderPnlTable(pointList) {
-      const rowList = (pointList || []).slice().reverse();
-      if (!rowList.length) {
-        return '<div class="empty-note">No EOD equity points yet.</div>';
-      }
-      return `
-        <table class="mini-table pnl-table">
-          <thead>
-            <tr>
-              <th>Market date</th>
-              <th>Equity</th>
-              <th>Cash</th>
-              <th>Daily PnL $</th>
-              <th>Daily PnL %</th>
-              <th>Source</th>
-              <th>Updated</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rowList.map(point => `
-              <tr>
-                <td>${esc(point.market_date_str)}</td>
-                <td class="num">${esc(fmt(point.equity_float))}</td>
-                <td class="num">${esc(fmt(point.cash_float))}</td>
-                <td class="num">${signedValueHtml(point.daily_pnl_float, fmtUnavailable)}</td>
-                <td class="num">${signedValueHtml(point.daily_pnl_pct_float, fmtPct)}</td>
-                <td>${esc(point.snapshot_source_str || '-')}</td>
-                <td>${esc(point.updated_timestamp_str || '-')}</td>
-              </tr>`).join('')}
-          </tbody>
-        </table>`;
-    }
-
-    function renderDataFreshnessSection(freshness) {
-      const rows = (freshness.item_dict_list || []).map(item => [
-        item.label_str,
-        item.severity_str,
-        item.value_str,
-        item.detail_str
-      ]);
-      return `
-        <section class="panel">
-          <h3>Data Freshness</h3>
-          <div class="panel-body">
-            ${renderTable(['Source', 'State', 'Latest', 'Detail'], rows, 'No freshness data was found.')}
-            ${keyValueGrid([
-              ['Norgate data source', freshness.norgate_data_source_mode_str],
-              ['Norgate status', freshness.norgate_status_str],
-              ['Norgate profile', freshness.norgate_profile_str],
-              ['Norgate snapshot date', freshness.norgate_snapshot_date_str],
-              ['Norgate last sync', freshness.norgate_last_sync_utc_str],
-              ['Norgate last error', freshness.norgate_last_error_str],
-              ['Norgate build gate', freshness.norgate_build_gate_reason_code_str],
-              ['DTB3 status', freshness.dtb3_download_status_str],
-              ['DTB3 observation', freshness.dtb3_latest_observation_date_str],
-              ['DTB3 freshness days', freshness.dtb3_freshness_business_days_int],
-              ['DTB3 source', freshness.dtb3_source_name_str],
-              ['Used cache', freshness.dtb3_used_cache_bool]
-            ])}
-          </div>
-        </section>`;
-    }
-
-    function renderNorgateSyncSection(freshness) {
-      const norgate = freshness.norgate_snapshot_status_dict || {};
-      const profileRows = (norgate.profile_status_dict_list || []).map(profile => [
-        profile.profile_str,
-        profile.snapshot_date_str || '-',
-        profile.manifest_hash_prefix_str || '-',
-        profile.error_str || '-'
-      ]);
-      const gateRows = (norgate.release_gate_status_dict_list || []).map(gate => [
-        gate.release_id_str,
-        gate.pod_id_str || '-',
-        gate.gate_reason_code_str || '-'
-      ]);
-      return `
-        <section class="panel">
-          <h3>Norgate Sync</h3>
-          <div class="panel-body">
-            <div class="metric-grid">
-              ${metric('Data source', norgate.data_source_mode_str)}
-              ${metric('Status', norgate.status_str)}
-              ${metric('Stage', norgate.sync_stage_label_str)}
-              ${metric('Profile', norgate.profile_str)}
-              ${metric('Snapshot date', norgate.snapshot_date_str)}
-              ${metric('Build gate', norgate.build_gate_reason_code_str)}
-            </div>
-            ${renderTable(['Profile', 'Snapshot date', 'Manifest hash', 'Error'], profileRows, 'No required Norgate profiles were found.')}
-            ${renderTable(['Release', 'POD', 'Gate reason'], gateRows, 'No release gate rows were found.')}
-            ${keyValueGrid([
-              ['Reason code', norgate.reason_code_str],
-              ['Last attempt', norgate.last_attempt_utc_str],
-              ['Last success', norgate.last_sync_utc_str],
-              ['Status file', norgate.status_file_path_str],
-              ['Snapshot env', norgate.snapshot_mode_env_str],
-              ['Last error', norgate.last_error_str]
-            ])}
-          </div>
-        </section>`;
-    }
-
-    function renderEodSnapshotSection(eod) {
-      if (!eod || !eod.status_str) {
-        return panel('EOD Snapshot', '<div class="empty-note">No EOD snapshot data was found.</div>');
-      }
-      return `
-        <section class="panel">
-          <h3>EOD Snapshot</h3>
-          <div class="panel-body">
-            <div class="metric-grid">
-              ${metric('Status', eod.status_str)}
-              ${metric('Expected market date', eod.expected_market_date_str)}
-              ${metric('Expected due', eod.expected_due_timestamp_str)}
-              ${metric('Latest market date', eod.latest_market_date_str)}
-              ${metric('Latest timestamp', eod.latest_timestamp_str)}
-              ${metric('Recorded', eod.recorded_timestamp_str)}
-              ${metric('Source', eod.source_str)}
-              ${metric('Positions', eod.position_count_int)}
-            </div>
-            ${keyValueGrid([
-              ['Equity', eod.equity_float],
-              ['Cash', eod.cash_float],
-              ['Same session', fmtBool(eod.same_session_bool)],
-              ['Blocked by execution', fmtBool(eod.unresolved_execution_bool)],
-              ['Detail', eod.detail_str]
-            ])}
-          </div>
-        </section>`;
-    }
-
-    function renderDecisionSection(decision) {
-      if (!decision) {
-        return panel('Decision', '<div class="empty-note">No DecisionPlan was found for this POD.</div>');
-      }
-      const targetRows = Object.entries(decision.display_target_weight_map_dict || {})
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([asset, weight]) => [asset, fmtPct(weight)]);
-      const exitRows = (decision.exit_asset_list || []).map(asset => [asset]);
-      const baseRows = Object.entries(decision.decision_base_position_map_dict || {})
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([asset, shares]) => [asset, fmt(shares)]);
-      const metadata = decision.snapshot_metadata_dict || {};
-      return `
-        <section class="panel">
-          <h3>Decision</h3>
-          <div class="panel-body">
-            <div class="metric-grid">
-              ${metric('Status', decision.status_str)}
-              ${metric('Book', decision.decision_book_type_str)}
-              ${metric('Signal', decision.signal_timestamp_str)}
-              ${metric('Submit', decision.submission_timestamp_str)}
-              ${metric('Execute', decision.target_execution_timestamp_str)}
-              ${metric('Policy', decision.execution_policy_str)}
-              ${metric('Linked VPlan', decision.latest_vplan_id_int ? '#' + decision.latest_vplan_id_int + ' ' + (decision.latest_vplan_status_str || '') : 'none')}
-              ${metric('Cash reserve', fmtPct(decision.cash_reserve_weight_float || 0))}
-            </div>
-            ${renderTable(['Asset', 'Target weight'], targetRows, 'No target weights.')}
-            ${renderTable(['Exit asset'], exitRows, 'No exit assets.')}
-            ${renderTable(['Base asset', 'Base shares'], baseRows, 'No decision-base positions.')}
-            ${keyValueGrid([
-              ['Strategy family', metadata.strategy_family_str],
-              ['DTB3 status', metadata.dtb3_download_status_str],
-              ['DTB3 observation', metadata.dtb3_latest_observation_date_str],
-              ['DTB3 freshness days', metadata.dtb3_freshness_business_days_int],
-              ['DTB3 source', metadata.dtb3_source_name_str],
-              ['Used cache', metadata.dtb3_used_cache_bool]
-            ])}
-          </div>
-        </section>`;
-    }
-
-    function renderVPlanSection(vplan) {
-      if (!vplan || !vplan.vplan_id_int) {
-        return panel('VPlan', '<div class="empty-note">No VPlan was found yet.</div>');
-      }
-      const rows = (vplan.vplan_row_dict_list || []).map(row => [
-        row.asset_str,
-        fmt(row.current_share_float),
-        fmt(row.target_share_float),
-        fmt(row.order_delta_share_float),
-        fmt(row.live_reference_price_float),
-        row.live_reference_source_str,
-        fmt(row.estimated_target_notional_float)
-      ]);
-      return `
-        <section class="panel full">
-          <h3>VPlan</h3>
-          <div class="panel-body">
-            <div class="metric-grid">
-              ${metric('VPlan id', '#' + vplan.vplan_id_int)}
-              ${metric('Status', vplan.status_str)}
-              ${metric('Submit ACK', vplan.submit_ack_status_str)}
-              ${metric('ACK coverage', vplan.ack_coverage_ratio_float)}
-              ${metric('NetLiq', vplan.net_liq_float)}
-              ${metric('Pod budget', vplan.pod_budget_float)}
-              ${metric('Price source', vplan.live_price_source_str)}
-              ${metric('Missing ACK', vplan.missing_ack_count_int)}
-            </div>
-            ${renderTable(['Asset', 'Current', 'Target', 'Delta', 'Ref price', 'Ref source', 'Est notional'], rows, 'No VPlan rows.')}
-          </div>
-        </section>`;
-    }
-
-    function renderExecutionSection(vplan, report, row) {
-      if (!vplan || !vplan.vplan_id_int) {
-        return panel('Execution', '<div class="empty-note">No VPlan execution evidence was found yet.</div>', true);
-      }
-      const executionRows = (report.execution_row_dict_list || []).map(execution => [
-        execution.asset_str,
-        execution.side_str,
-        fmt(execution.planned_order_delta_share_float),
-        fmt(execution.filled_share_float),
-        fmt(execution.target_share_float),
-        fmt(execution.broker_share_float),
-        fmt(execution.residual_share_float),
-        fmtUnavailable(execution.fill_price_float),
-        fmtUnavailable(execution.official_open_price_float),
-        fmtUnavailable(execution.vplan_reference_price_float),
-        fmtUnavailable(execution.official_open_slippage_bps_float) + ' / ' + fmtUnavailable(execution.official_open_slippage_notional_float),
-        fmtUnavailable(execution.vplan_reference_slippage_bps_float) + ' / ' + fmtUnavailable(execution.vplan_reference_slippage_notional_float),
-        execution.latest_broker_order_status_str || '-'
-      ]);
-      return `
-        <section class="panel full">
-          <h3>Execution</h3>
-          <div class="panel-body">
-            <div class="metric-grid">
-              ${metric('VPlan status', vplan.status_str)}
-              ${metric('Reconcile', row.latest_reconciliation_status_str)}
-              ${metric('Residual rows', report.residual_count_int || 0)}
-              ${metric('Fills', report.fill_count_int || 0)}
-              ${metric('Official open coverage', (report.fill_with_official_open_count_int || 0) + ' / ' + (report.fill_count_int || 0))}
-              ${metric('Open slippage bps', fmtUnavailable(report.official_open_slippage_bps_float))}
-              ${metric('Open slippage $', fmtUnavailable(report.official_open_slippage_notional_float))}
-              ${metric('Reference slippage bps', fmtUnavailable(report.vplan_reference_slippage_bps_float))}
-              ${metric('Reference slippage $', fmtUnavailable(report.vplan_reference_slippage_notional_float))}
-            </div>
-            ${renderTable(
-              ['Asset', 'Side', 'Planned', 'Filled', 'Target', 'Broker', 'Residual', 'Fill price', 'Official open', 'VPlan ref', 'Open slippage bps / $', 'Reference slippage bps / $', 'Order status'],
-              executionRows,
-              'No execution rows yet.'
-            )}
-          </div>
-        </section>`;
-    }
-
-    function renderBrokerSection(vplan, report, row) {
-      const orderRows = (vplan.broker_order_row_dict_list || []).map(order => [
-        order.asset_str,
-        order.broker_order_type_str,
-        fmt(order.amount_float),
-        fmt(order.filled_amount_float),
-        fmt(order.remaining_amount_float),
-        order.status_str,
-        order.last_status_timestamp_str || order.submitted_timestamp_str
-      ]);
-      const fillRows = (vplan.fill_row_dict_list || []).map(fill => [
-        fill.asset_str,
-        fmt(fill.fill_amount_float),
-        fmt(fill.fill_price_float),
-        fmt(fill.official_open_price_float),
-        fill.open_price_source_str,
-        fill.fill_timestamp_str
-      ]);
-      const ackRows = (vplan.broker_ack_row_dict_list || []).map(ack => [
-        ack.asset_str,
-        ack.ack_status_str,
-        ack.ack_source_str,
-        ack.broker_order_id_str || '-'
-      ]);
-      return `
-        <section class="panel full">
-          <h3>Broker</h3>
-          <div class="panel-body">
-            <div class="metric-grid">
-              ${metric('Orders', report.broker_order_count_int || 0)}
-              ${metric('Fills', report.fill_count_int || 0)}
-              ${metric('ACK rows', report.broker_ack_count_int || 0)}
-              ${metric('Reconcile', row.latest_reconciliation_status_str)}
-            </div>
-            ${renderTable(['Asset', 'Type', 'Requested', 'Filled', 'Remaining', 'Status', 'Time'], orderRows, 'No broker orders yet.')}
-            ${renderTable(['Asset', 'Shares', 'Fill price', 'Official open', 'Open source', 'Time'], fillRows, 'No fills yet.')}
-            ${renderTable(['Asset', 'ACK status', 'Source', 'Broker order'], ackRows, 'No ACK rows yet.')}
-          </div>
-        </section>`;
-    }
-
-    function renderDiffSection(diff) {
-      const status = diff.status_str || 'not_run';
-      const links = [
-        ['Full artifact', diff.html_url_str],
-        ['Summary JSON', diff.summary_url_str],
-        ['Equity PNG', diff.equity_png_url_str],
-        ['Tracking PNG', diff.tracking_png_url_str]
-      ].filter(([, href]) => !!href);
-      return `
-        <section class="panel">
-          <h3>DIFF</h3>
-          <div class="panel-body">
-            <div class="metric-grid">
-              ${metric('Status', status)}
-              ${metric('Artifact time', diff.artifact_timestamp_str)}
-              ${metric('Equity tracking error', diff.equity_tracking_error_float)}
-              ${metric('Open issues', diff.open_issue_count_int)}
-            </div>
-            <div class="link-row">
-              ${links.length ? links.map(([label, href]) => `<a href="${esc(href)}" target="_blank">${esc(label)}</a>`).join('') : '<span class="muted">No artifact links yet.</span>'}
-            </div>
-            <div class="link-row">
-              <button class="primary" id="run-diff-button">Run DIFF</button>
-            </div>
-            <div class="job-status" id="diff-job-output">No DIFF job running.</div>
-          </div>
-        </section>`;
-    }
-
-    function renderEventsSection(events) {
-      const rows = events.map(event => [
-        event.timestamp_str || event.event_timestamp_str || event.as_of_timestamp_str || event.created_timestamp_str,
-        event.severity_str || event.level_str || '-',
-        event.event_name_str || event.command_name_str || '-',
-        event.reason_code_str || event.message_str || event.error_str || event.status_str || '-'
-      ]);
-      return panel(
-        'Events',
-        renderTable(['Time', 'Severity', 'Event', 'Reason / message'], rows, 'No recent events for this POD.'),
-        true
-      );
-    }
-
-    async function openLogger(podId) {
-      state.loggerPodId = podId;
-      state.loggerFilter = 'all';
-      state.loggerEvents = [];
-      loggerBackdrop.hidden = false;
-      loggerBackdrop.classList.add('open');
-      await refreshLoggerEvents();
-    }
-
-    function closeLogger() {
-      loggerBackdrop.classList.remove('open');
-      loggerBackdrop.hidden = true;
-    }
-
-    async function refreshLoggerEvents() {
-      if (!state.loggerPodId) return;
-      state.loggerLoading = true;
-      renderLoggerDrawer();
-      try {
-        const payload = await fetchJson('/api/pods/' + encodeURIComponent(state.loggerPodId) + '/events');
-        state.loggerEvents = payload.event_dict_list || [];
-      } catch (error) {
-        state.loggerEvents = [{
-          timestamp_str: new Date().toISOString(),
-          severity_str: 'ERROR',
-          event_name_str: 'logger.fetch_failed',
-          message_str: error.message
-        }];
-      } finally {
-        state.loggerLoading = false;
-        renderLoggerDrawer();
-      }
-    }
-
-    function renderLoggerDrawer() {
-      const podId = state.loggerPodId || '-';
-      loggerTitle.textContent = 'Logger';
-      loggerSubtitle.textContent = podId;
-      document.querySelectorAll('[data-logger-filter]').forEach(button => {
-        button.classList.toggle('active', button.dataset.loggerFilter === state.loggerFilter);
-      });
-      if (state.loggerLoading) {
-        loggerBody.innerHTML = '<div class="empty-note">Loading recent POD events...</div>';
-        return;
-      }
-      const filteredEvents = filterLoggerEvents(state.loggerEvents || [], state.loggerFilter);
-      if (!filteredEvents.length) {
-        loggerBody.innerHTML = '<div class="empty-note">No matching recent events for this POD.</div>';
-        return;
-      }
-      const rows = filteredEvents.map(event => [
-        event.timestamp_str || event.event_timestamp_str || event.as_of_timestamp_str || event.created_timestamp_str,
-        event.severity_str || event.level_str || '-',
-        event.event_name_str || event.command_name_str || '-',
-        event.reason_code_str || event.message_str || event.error_str || event.status_str || '-'
-      ]);
-      loggerBody.innerHTML = `
-        <div class="logger-table-wrap">
-          ${renderTable(['Time', 'Level', 'Event', 'Reason / Message'], rows, 'No matching recent events for this POD.').replace('mini-table', 'mini-table logger-table')}
-        </div>`;
-    }
-
-    function filterLoggerEvents(events, filterName) {
-      if (filterName === 'errors') {
-        return events.filter(event => loggerEventSeverity(event) === 'error');
-      }
-      if (filterName === 'warnings') {
-        return events.filter(event => ['warning', 'error'].includes(loggerEventSeverity(event)));
-      }
-      return events;
-    }
-
-    function loggerEventSeverity(event) {
-      const levelText = String(event.severity_str || event.level_str || event.status_str || '').toLowerCase();
-      if (levelText.includes('error') || levelText.includes('fail') || levelText.includes('critical')) {
-        return 'error';
-      }
-      if (levelText.includes('warn') || levelText.includes('blocked')) {
-        return 'warning';
-      }
-      return 'info';
-    }
-
-    function panel(title, body, full) {
-      return `<section class="panel ${full ? 'full' : ''}"><h3>${esc(title)}</h3><div class="panel-body">${body}</div></section>`;
-    }
-
-    function metric(label, value) {
-      return `<div class="metric"><div class="metric-label">${esc(label)}</div><div class="metric-value">${esc(value)}</div></div>`;
-    }
-
-    function metricSigned(label, value, formatterFn) {
-      return `<div class="metric"><div class="metric-label">${esc(label)}</div><div class="metric-value">${signedValueHtml(value, formatterFn)}</div></div>`;
-    }
-
-    function signedValueClass(value) {
-      const numericValue = Number(value);
-      if (!Number.isFinite(numericValue) || numericValue === 0) return 'neutral';
-      return numericValue > 0 ? 'positive' : 'negative';
-    }
-
-    function signedValueHtml(value, formatterFn) {
-      const displayValue = formatterFn ? formatterFn(value) : fmtUnavailable(value);
-      return `<span class="signed-value ${signedValueClass(value)}">${esc(displayValue)}</span>`;
-    }
-
-    function keyValueGrid(rows) {
-      const filtered = rows.filter(([, value]) => value !== null && value !== undefined && value !== '');
-      if (!filtered.length) return '';
-      return `<div class="kv-grid">${filtered.map(([key, value]) => `<div class="kv-key">${esc(key)}</div><div>${esc(value)}</div>`).join('')}</div>`;
-    }
-
-    function renderTable(headers, rows, emptyText) {
-      if (!rows || !rows.length) {
-        return `<div class="empty-note">${esc(emptyText)}</div>`;
-      }
-      return `
-        <table class="mini-table">
-          <thead><tr>${headers.map(header => `<th>${esc(header)}</th>`).join('')}</tr></thead>
-          <tbody>
-            ${rows.map(row => `<tr>${row.map(cell => `<td>${esc(cell)}</td>`).join('')}</tr>`).join('')}
-          </tbody>
-        </table>`;
-    }
-
-    function quoteArg(value) {
-      const text = String(value || '');
-      if (!text.includes(' ') && !text.includes('"')) return text;
-      return '"' + text.replaceAll('"', '`"') + '"';
-    }
-
-    function buildCommand(row, commandName) {
-      const cleanCommandName = safeInspectCommandName(commandName);
-      const moduleName = cleanCommandName === 'next_due' ? 'alpha.live.scheduler_service' : 'alpha.live.runner';
-      const parts = ['uv run python -m ' + moduleName, cleanCommandName, '--mode', row.mode_str, '--pod-id', row.pod_id_str];
-      if (row.db_override_bool && row.db_path_str) {
-        parts.push('--db-path', quoteArg(row.db_path_str));
-      }
-      return parts.join(' ');
-    }
-
-    async function copyCommand(row, commandName, button) {
-      const command = buildCommand(row, commandName);
-      try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          await navigator.clipboard.writeText(command);
-        } else {
-          const textarea = document.createElement('textarea');
-          textarea.value = command;
-          document.body.appendChild(textarea);
-          textarea.select();
-          document.execCommand('copy');
-          document.body.removeChild(textarea);
-        }
-        const oldText = button.textContent;
-        button.textContent = 'Copied';
-        setTimeout(() => { button.textContent = oldText; }, 1200);
-      } catch (error) {
-        const oldText = button.textContent;
-        button.textContent = 'Copy failed';
-        setTimeout(() => { button.textContent = oldText; }, 1500);
-      }
-    }
-
-    function renderJobStatus(job) {
-      if (!job) return 'No DIFF job running.';
-      const parts = [
-        'status=' + formatValue(job.status_str),
-        'created=' + formatValue(job.created_timestamp_str),
-        'started=' + formatValue(job.started_timestamp_str),
-        'completed=' + formatValue(job.completed_timestamp_str)
-      ];
-      if (job.error_str) parts.push('error=' + formatValue(job.error_str));
-      if (job.result_dict && job.result_dict.status_str) parts.push('result=' + formatValue(job.result_dict.status_str));
-      return parts.join(' | ');
-    }
-
-    async function runDiff(podId) {
-      const output = document.getElementById('diff-job-output');
-      output.textContent = 'Starting DIFF...';
-      try {
-        const job = await fetchJson('/api/pods/' + encodeURIComponent(podId) + '/diff/run', { method: 'POST' });
-        pollJob(job.job_id_str, podId);
-      } catch (error) {
-        output.textContent = 'DIFF failed to start: ' + error.message;
-      }
-    }
-
-    async function pollJob(jobId, podId) {
-      const output = document.getElementById('diff-job-output');
-      try {
-        const job = await fetchJson('/api/jobs/' + encodeURIComponent(jobId));
-        output.textContent = renderJobStatus(job);
-        if (job.status_str === 'queued' || job.status_str === 'running') {
-          setTimeout(() => pollJob(jobId, podId), 1500);
-        } else {
-          refreshPods();
-          loadDetail(podId);
-        }
-      } catch (error) {
-        output.textContent = 'DIFF job poll failed: ' + error.message;
-      }
-    }
-
-    refreshPods();
-    setInterval(refreshPods, 4000);
-  </script>
-</body>
-</html>
-"""
-
 
 def main(argv_list: list[str] | None = None) -> int:
     load_config_env_file(override_existing_bool=True)
@@ -7811,6 +4414,18 @@ def main(argv_list: list[str] | None = None) -> int:
     serve_parser_obj.add_argument("--config", dest="config_path_str", default=DEFAULT_CONFIG_PATH_STR)
     serve_parser_obj.add_argument("--results-root", dest="results_root_path_str", default=DEFAULT_RESULTS_ROOT_PATH_STR)
     serve_parser_obj.add_argument("--event-log", dest="event_log_path_str", default=DEFAULT_EVENT_LOG_PATH_STR)
+    serve_parser_obj.add_argument(
+        "--dashboard-v2-dist",
+        dest="dashboard_v2_dist_path_str",
+        default=DEFAULT_DASHBOARD_V2_DIST_PATH_STR,
+    )
+    serve_parser_obj.add_argument(
+        "--no-dashboard-v2-build",
+        dest="auto_build_dashboard_v2_bool",
+        action="store_false",
+        default=True,
+        help="Do not auto-build Dashboard V2 when dist/index.html is missing.",
+    )
     parsed_args_obj = parser_obj.parse_args(argv_list)
     if parsed_args_obj.command_name_str == "serve":
         serve_dashboard(
@@ -7820,6 +4435,8 @@ def main(argv_list: list[str] | None = None) -> int:
             config_path_str=parsed_args_obj.config_path_str,
             results_root_path_str=parsed_args_obj.results_root_path_str,
             event_log_path_str=parsed_args_obj.event_log_path_str,
+            dashboard_v2_dist_path_str=parsed_args_obj.dashboard_v2_dist_path_str,
+            auto_build_dashboard_v2_bool=parsed_args_obj.auto_build_dashboard_v2_bool,
         )
         return 0
     raise ValueError(f"Unsupported command_name_str '{parsed_args_obj.command_name_str}'.")

@@ -214,19 +214,29 @@ Start the local dashboard:
 uv run python -m alpha.live.dashboard serve --host 127.0.0.1 --port 8765
 ```
 
-Open:
+On startup, the server auto-builds Dashboard V2 if `alpha/live/dashboard_v2/dist/index.html` is missing. To build it explicitly before starting:
+
+```bash
+uv run python scripts/build_dashboard_v2.py
+```
+
+Open the V2 operator console:
 
 ```text
 http://127.0.0.1:8765
 ```
 
-The dashboard is one local web page for all enabled PODs in this deployment. It groups/filter views by mode and shows one compact row per POD:
+Dashboard V2 is one local web page for all enabled PODs in this deployment. It shows live/paper PODs first, keeps incubation on `/incubation`, and opens logs/details behind POD-level buttons:
 
 ```text
 POD -> mode -> account -> health -> next action -> latest DecisionPlan/VPlan -> equity/cash -> warnings -> latest DIFF
 ```
 
-V1 has no trading controls. It does not run `tick`, `submit_vplan`, or `post_execution_reconcile`. It reads SQLite DBs, the live JSONL event log, and existing Reference DIFF artifacts.
+V2 has ops-core controls for `tick`, `submit_vplan`, `post_execution_reconcile`, and `eod_snapshot`. These buttons use the existing runner semantics for the selected enabled POD; they do not expose service restart, arbitrary CLI commands, direct SQLite edits, sizing edits, reference-price edits, or strategy changes.
+
+Each V2 mutating action requires a browser confirmation, a same-origin JSON POST, and a server-issued action token. The server also serializes action jobs per POD so repeated clicks cannot start overlapping runner commands for the same POD.
+
+The old V1 dashboard route is intentionally removed. The local dashboard is now the V2 operator console only.
 
 Reference DIFF is the one explicit background action in the dashboard. Pressing `Run DIFF` starts `compare_reference` for that POD and writes analysis artifacts under:
 

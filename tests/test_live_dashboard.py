@@ -8,16 +8,19 @@ import sqlite3
 import threading
 import time
 from types import SimpleNamespace
-from urllib.request import urlopen
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 import alpha.live.dashboard as dashboard_module
 import alpha.live.norgate_snapshot_sync as norgate_sync_module
 import alpha.live.runner as runner_module
 from alpha.live.dashboard import (
-    DASHBOARD_HTML_STR,
     DashboardApp,
+    DashboardActionInFlightError,
+    DashboardActionJobManager,
     DashboardConfig,
     DashboardPodTarget,
+    DashboardPodJobGate,
     DiffJobManager,
     _build_alert_dict_list,
     _build_execution_report_from_vplan_dict,
@@ -1478,11 +1481,6 @@ def test_dashboard_event_loader_reads_rotated_jsonl_backups(tmp_path: Path):
     ]
 
 
-def test_dashboard_html_contains_norgate_sync_panel():
-    assert "Norgate Sync" in DASHBOARD_HTML_STR
-    assert "renderNorgateSyncSection" in DASHBOARD_HTML_STR
-
-
 def test_dashboard_main_loads_config_env_before_serving(monkeypatch, tmp_path: Path):
     call_dict = {}
 
@@ -2172,198 +2170,6 @@ def test_dashboard_detail_missing_db_returns_safe_empty_sections(tmp_path: Path)
     assert detail_dict["debug_story_dict"]["recommended_command_dict_list"][0]["command_name_str"] == "status"
 
 
-def test_dashboard_html_uses_structured_operator_sections():
-    assert "dashboard-section" in DASHBOARD_HTML_STR
-    assert "dashboard-section-header" in DASHBOARD_HTML_STR
-    assert "--section-accent" in DASHBOARD_HTML_STR
-    assert "border-left: 5px solid var(--section-accent)" in DASHBOARD_HTML_STR
-    assert ".dashboard-section-header h2::before" in DASHBOARD_HTML_STR
-    assert ".console-section {" in DASHBOARD_HTML_STR
-    assert ".attention-panel {" in DASHBOARD_HTML_STR
-    assert ".detail-workspace {" in DASHBOARD_HTML_STR
-    assert "Console Status" in DASHBOARD_HTML_STR
-    assert "Alert Box" in DASHBOARD_HTML_STR
-    assert "Combined Book" in DASHBOARD_HTML_STR
-    assert "selectedCombinedBookEnvironmentList" in DASHBOARD_HTML_STR
-    assert "renderCombinedBookAbsoluteCurve" in DASHBOARD_HTML_STR
-    assert "renderCombinedBookIndexedCurve" in DASHBOARD_HTML_STR
-    assert "Combined book equity ($)" in DASHBOARD_HTML_STR
-    assert "Strategy comparison (indexed to 100)" in DASHBOARD_HTML_STR
-    assert "bold line is Combined" in DASHBOARD_HTML_STR
-    assert "indexLineToBase100" in DASHBOARD_HTML_STR
-    assert 'data-combined-toggle-pod' in DASHBOARD_HTML_STR
-    assert "Strict common-date equity" not in DASHBOARD_HTML_STR
-    assert "Carry-forward operational equity" not in DASHBOARD_HTML_STR
-    assert "Selected POD equity curves" not in DASHBOARD_HTML_STR
-    assert "POD List" in DASHBOARD_HTML_STR
-    assert "Selected POD / What We Learned" in DASHBOARD_HTML_STR
-    assert "read-only / copy-only" in DASHBOARD_HTML_STR
-    assert "detail-workspace" in DASHBOARD_HTML_STR
-    assert "renderDecisionSection" in DASHBOARD_HTML_STR
-    assert "Alert Inbox" in DASHBOARD_HTML_STR
-    assert "alert-counts" in DASHBOARD_HTML_STR
-    assert "alert-toggle-button" in DASHBOARD_HTML_STR
-    assert "console-status-strip" in DASHBOARD_HTML_STR
-    assert "Environment" in DASHBOARD_HTML_STR
-    assert "Visible PODs" in DASHBOARD_HTML_STR
-    assert "Needs Action" in DASHBOARD_HTML_STR
-    assert "Last Refresh" in DASHBOARD_HTML_STR
-    assert "Selected POD" in DASHBOARD_HTML_STR
-    assert "renderConsoleStatusStrip" in DASHBOARD_HTML_STR
-    assert "visibleOperatorRows" in DASHBOARD_HTML_STR
-    assert "alertExpanded: false" in DASHBOARD_HTML_STR
-    assert "Show audit alerts" in DASHBOARD_HTML_STR
-    assert "Hide audit alerts" in DASHBOARD_HTML_STR
-    assert "alertPanel.classList.toggle('collapsed'" in DASHBOARD_HTML_STR
-    assert "position: sticky" in DASHBOARD_HTML_STR
-    assert "renderAlertInbox" in DASHBOARD_HTML_STR
-    assert "URLSearchParams" in DASHBOARD_HTML_STR
-    assert "localStorage" in DASHBOARD_HTML_STR
-    assert "Clear selection" in DASHBOARD_HTML_STR
-    assert "clearSelectedPod" in DASHBOARD_HTML_STR
-    assert "clearSelectedPodIfHidden" in DASHBOARD_HTML_STR
-    assert "rowMatchesSelectedEnvironment" in DASHBOARD_HTML_STR
-    assert "podId: null" in DASHBOARD_HTML_STR
-    assert "window.localStorage.removeItem('dashboard.pod')" in DASHBOARD_HTML_STR
-    assert "window.localStorage.setItem('dashboard.pod'" not in DASHBOARD_HTML_STR
-    assert "window.localStorage.getItem('dashboard.pod')" not in DASHBOARD_HTML_STR
-    assert "url.searchParams.delete('pod')" in DASHBOARD_HTML_STR
-    assert "url.searchParams.set('pod'" not in DASHBOARD_HTML_STR
-    assert "dashboard.tab." in DASHBOARD_HTML_STR
-    assert "detail-tabs" in DASHBOARD_HTML_STR
-    assert "data-detail-tab" in DASHBOARD_HTML_STR
-    assert "Debug" in DASHBOARD_HTML_STR
-    assert "renderDebugSection" in DASHBOARD_HTML_STR
-    assert "Root Cause" in DASHBOARD_HTML_STR
-    assert "Blocker Chain" in DASHBOARD_HTML_STR
-    assert "Evidence Timeline" in DASHBOARD_HTML_STR
-    assert "Model vs Broker Snapshot" in DASHBOARD_HTML_STR
-    assert "Suggested Copy Commands" in DASHBOARD_HTML_STR
-    assert "Attention Queue" in DASHBOARD_HTML_STR
-    assert "Needs Action" in DASHBOARD_HTML_STR
-    assert "Waiting / Parked" in DASHBOARD_HTML_STR
-    assert "Missing / Stale Data" in DASHBOARD_HTML_STR
-    assert "Current State" in DASHBOARD_HTML_STR
-    assert "Latest Evidence" in DASHBOARD_HTML_STR
-    assert "Next Inspect" in DASHBOARD_HTML_STR
-    assert "Changed since last refresh" in DASHBOARD_HTML_STR
-    assert ".attention-row.red {\n      border-left: 4px solid var(--red);" in DASHBOARD_HTML_STR
-    assert ".attention-row.red { box-shadow" not in DASHBOARD_HTML_STR
-    assert "buildAttentionQueueRows" in DASHBOARD_HTML_STR
-    assert "operatorStateSentence" in DASHBOARD_HTML_STR
-    assert "operatorReasonSentence" in DASHBOARD_HTML_STR
-    assert "operatorEvidenceSentence" in DASHBOARD_HTML_STR
-    assert "hasPodChangedSinceLastRefresh" in DASHBOARD_HTML_STR
-    assert "operator-filter-chips" not in DASHBOARD_HTML_STR
-    assert "data-operator-filter" not in DASHBOARD_HTML_STR
-    assert "filter-chip" not in DASHBOARD_HTML_STR
-    assert "operatorFilter" not in DASHBOARD_HTML_STR
-    assert "environmentLabel" in DASHBOARD_HTML_STR
-    assert "Incubation" in DASHBOARD_HTML_STR
-    assert "No incubation PODs are currently enabled." in DASHBOARD_HTML_STR
-    assert "Incubation SIM ledger DB has not been created yet." in DASHBOARD_HTML_STR
-    assert "Incubation DB exists, but no rehearsal cycle has been recorded yet." in DASHBOARD_HTML_STR
-    assert "Incubation is waiting for one complete SIM ledger rehearsal cycle." in DASHBOARD_HTML_STR
-    assert "Incubation completed at least one SIM ledger rehearsal cycle." in DASHBOARD_HTML_STR
-    assert "Paper probe is evidence only; it does not count as SIM ledger P&L." in DASHBOARD_HTML_STR
-    assert "Dashboard reads per-POD incubation state." in DASHBOARD_HTML_STR
-    assert "Reconcile is blocked." in DASHBOARD_HTML_STR
-    assert "EOD is blocked because execution is unresolved." in DASHBOARD_HTML_STR
-    assert "Reference DIFF is red." in DASHBOARD_HTML_STR
-    assert "State DB is missing." in DASHBOARD_HTML_STR
-    assert "Reconcile is waiting for broker truth." in DASHBOARD_HTML_STR
-    assert "safeInspectCommandNameList" in DASHBOARD_HTML_STR
-    assert "audit-detail-drawer" in DASHBOARD_HTML_STR
-    assert "Show audit evidence timeline" in DASHBOARD_HTML_STR
-    assert "Overview" in DASHBOARD_HTML_STR
-    assert "PnL" in DASHBOARD_HTML_STR
-    assert "renderPnlSection" in DASHBOARD_HTML_STR
-    assert "renderPnlCurve" in DASHBOARD_HTML_STR
-    assert "Daily PnL $" in DASHBOARD_HTML_STR
-    assert "Since-start PnL %" in DASHBOARD_HTML_STR
-    assert "Market date" in DASHBOARD_HTML_STR
-    assert "pnl-curve" in DASHBOARD_HTML_STR
-    assert "pnl-curve-plot" in DASHBOARD_HTML_STR
-    assert "pnl-y-axis" in DASHBOARD_HTML_STR
-    assert "pnl-x-axis" in DASHBOARD_HTML_STR
-    assert "pnl-grid-line" in DASHBOARD_HTML_STR
-    assert "pnl-point-layer" in DASHBOARD_HTML_STR
-    assert "renderPnlTable" in DASHBOARD_HTML_STR
-    assert "metricSigned" in DASHBOARD_HTML_STR
-    assert "signedValueClass" in DASHBOARD_HTML_STR
-    assert "Unified Rehearsal" in DASHBOARD_HTML_STR
-    assert "renderRehearsalSection" in DASHBOARD_HTML_STR
-    assert "Paper fills count as SIM P&L" in DASHBOARD_HTML_STR
-    assert "Paper probe status" in DASHBOARD_HTML_STR
-    assert ".signed-value.positive" in DASHBOARD_HTML_STR
-    assert ".signed-value.negative" in DASHBOARD_HTML_STR
-    assert "vector-effect: non-scaling-stroke" in DASHBOARD_HTML_STR
-    assert "preserveAspectRatio=\"xMidYMid meet\"" in DASHBOARD_HTML_STR
-    assert "preserveAspectRatio=\"none\"" not in DASHBOARD_HTML_STR
-    assert "Only one EOD equity point is available" in DASHBOARD_HTML_STR
-    assert "Decision" in DASHBOARD_HTML_STR
-    assert "Execution" in DASHBOARD_HTML_STR
-    assert "renderExecutionSection" in DASHBOARD_HTML_STR
-    assert "Open slippage bps / $" in DASHBOARD_HTML_STR
-    assert "Reference slippage bps / $" in DASHBOARD_HTML_STR
-    assert "Open slippage bps" in DASHBOARD_HTML_STR
-    assert "Reference slippage bps" in DASHBOARD_HTML_STR
-    assert "fmtUnavailable" in DASHBOARD_HTML_STR
-    assert "Freshness" in DASHBOARD_HTML_STR
-    assert "Open Logger" in DASHBOARD_HTML_STR
-    assert "logger-drawer" in DASHBOARD_HTML_STR
-    assert "logger-filter" in DASHBOARD_HTML_STR
-    assert "/events" in DASHBOARD_HTML_STR
-    assert "<h3>Commands</h3>" in DASHBOARD_HTML_STR
-    assert "command-drawer" in DASHBOARD_HTML_STR
-    assert "show_decision_plan" in DASHBOARD_HTML_STR
-    assert "compare_reference" in DASHBOARD_HTML_STR
-    assert "renderLifecycleSection" in DASHBOARD_HTML_STR
-    assert "Lifecycle Progress" in DASHBOARD_HTML_STR
-    assert "Current" in DASHBOARD_HTML_STR
-    assert "deriveCurrentLifecycleStepKey" in DASHBOARD_HTML_STR
-    assert "isLifecycleActiveWaitingStep" in DASHBOARD_HTML_STR
-    assert "['waiting', 'blocked_by_execution'].includes(status)" in DASHBOARD_HTML_STR
-    assert "firstActiveWaitingStep" in DASHBOARD_HTML_STR
-    assert "operatorLifecycleSentence" in DASHBOARD_HTML_STR
-    assert "renderLifecycleRail" in DASHBOARD_HTML_STR
-    assert "renderLifecycleArrow" in DASHBOARD_HTML_STR
-    assert "renderReferenceCheckStep" in DASHBOARD_HTML_STR
-    assert "lifecycle-step-card" in DASHBOARD_HTML_STR
-    assert "lifecycle-arrow" in DASHBOARD_HTML_STR
-    assert "lifecycle-reference-check" in DASHBOARD_HTML_STR
-    assert "Reference Check" in DASHBOARD_HTML_STR
-    assert "firstRedStep" in DASHBOARD_HTML_STR
-    assert "firstYellowStep" in DASHBOARD_HTML_STR
-    assert "Idle / no blocking lifecycle step" in DASHBOARD_HTML_STR
-    assert "renderActionContextItems" in DASHBOARD_HTML_STR
-    assert "action-context-grid" in DASHBOARD_HTML_STR
-    assert "action-context-value" in DASHBOARD_HTML_STR
-    assert ".action-context-item.green," in DASHBOARD_HTML_STR
-    assert ".action-context-item .action-context-value { color: var(--text); }" in DASHBOARD_HTML_STR
-    assert "America/New_York" in DASHBOARD_HTML_STR
-    assert "DASHBOARD_TIME_ZONE_LABEL_STR = 'NYC'" in DASHBOARD_HTML_STR
-    assert "DASHBOARD_COMPACT_TIMESTAMP_PATTERN" in DASHBOARD_HTML_STR
-    assert "function formatTimestamp" in DASHBOARD_HTML_STR
-    assert "function formatCompactTimestamp" in DASHBOARD_HTML_STR
-    assert "formatTimestamp(new Date().toISOString())" in DASHBOARD_HTML_STR
-    assert "new Date().toLocaleTimeString()" not in DASHBOARD_HTML_STR
-    assert "summary-action" in DASHBOARD_HTML_STR
-    assert "summary-action-label" in DASHBOARD_HTML_STR
-    assert '<table class="pod-table">' in DASHBOARD_HTML_STR
-    assert "renderEodSnapshotSection" in DASHBOARD_HTML_STR
-    assert "<h3>EOD Snapshot</h3>" in DASHBOARD_HTML_STR
-    assert "<h3>Data Freshness</h3>" in DASHBOARD_HTML_STR
-    assert "<h3>Overview</h3>" in DASHBOARD_HTML_STR
-    assert "<h3>Broker</h3>" in DASHBOARD_HTML_STR
-    assert 'data-copy-command="eod_snapshot"' not in DASHBOARD_HTML_STR
-    assert 'data-copy-command="tick"' not in DASHBOARD_HTML_STR
-    assert 'data-copy-command="submit_vplan"' not in DASHBOARD_HTML_STR
-    assert 'data-copy-command="post_execution_reconcile"' not in DASHBOARD_HTML_STR
-    assert "<pre" not in DASHBOARD_HTML_STR
-    assert "JSON.stringify" not in DASHBOARD_HTML_STR
-
-
 def test_latest_diff_artifact_discovery_uses_newest_timestamp(tmp_path: Path):
     artifact_root_path_obj = tmp_path / "results" / "live_reference_compare" / "paper" / "pod_diff"
     old_dir_path_obj = artifact_root_path_obj / "20240101T000000Z"
@@ -2431,6 +2237,15 @@ def test_diff_job_manager_reports_running_succeeded_and_failed(tmp_path: Path):
     assert started_event_obj.wait(timeout=2.0)
     running_job_dict = _wait_for_job_status(manager_obj, job_obj.job_id_str, "running")
     assert running_job_dict["result_dict"] is None
+    try:
+        manager_obj.start_job(
+            target_obj,
+            releases_root_path_str="releases-root",
+            results_root_path_str="results-root",
+        )
+        raise AssertionError("overlapping DIFF for same POD should fail")
+    except DashboardActionInFlightError:
+        pass
     finish_event_obj.set()
     succeeded_job_dict = _wait_for_job_status(manager_obj, job_obj.job_id_str, "succeeded")
     assert succeeded_job_dict["result_dict"]["status_str"] == "green"
@@ -2453,6 +2268,128 @@ def test_diff_job_manager_reports_running_succeeded_and_failed(tmp_path: Path):
     assert failed_job_dict["error_str"] == "diff exploded"
 
 
+def test_dashboard_shared_pod_job_gate_blocks_diff_action_overlap(tmp_path: Path):
+    diff_started_event_obj = threading.Event()
+    diff_finish_event_obj = threading.Event()
+    release_obj = _build_release_obj()
+    target_obj = DashboardPodTarget(
+        release_obj=release_obj,
+        db_path_str=str(tmp_path / "pod.sqlite3"),
+        db_override_bool=True,
+    )
+
+    def fake_diff_runner(
+        pod_target_obj: DashboardPodTarget,
+        releases_root_path_str: str,
+        results_root_path_str: str,
+        as_of_ts: datetime,
+    ) -> dict:
+        diff_started_event_obj.set()
+        diff_finish_event_obj.wait(timeout=2.0)
+        return {"status_str": "green"}
+
+    def fake_action_runner(
+        pod_target_obj: DashboardPodTarget,
+        action_name_str: str,
+        releases_root_path_str: str,
+        results_root_path_str: str,
+        event_log_path_str: str,
+        as_of_ts: datetime,
+    ) -> dict:
+        return {"status_str": "ok"}
+
+    pod_job_gate_obj = DashboardPodJobGate()
+    diff_manager_obj = DiffJobManager(fake_diff_runner, pod_job_gate_obj=pod_job_gate_obj)
+    action_manager_obj = DashboardActionJobManager(fake_action_runner, pod_job_gate_obj=pod_job_gate_obj)
+    diff_job_obj = diff_manager_obj.start_job(
+        target_obj,
+        releases_root_path_str="releases-root",
+        results_root_path_str="results-root",
+    )
+
+    assert diff_started_event_obj.wait(timeout=2.0)
+    try:
+        action_manager_obj.start_job(
+            action_name_str="tick",
+            pod_target_obj=target_obj,
+            releases_root_path_str="releases-root",
+            results_root_path_str="results-root",
+            event_log_path_str="events.jsonl",
+        )
+        raise AssertionError("overlapping action while DIFF is running should fail")
+    except DashboardActionInFlightError:
+        pass
+
+    diff_finish_event_obj.set()
+    _wait_for_job_status(diff_manager_obj, diff_job_obj.job_id_str, "succeeded")
+    action_job_obj = action_manager_obj.start_job(
+        action_name_str="tick",
+        pod_target_obj=target_obj,
+        releases_root_path_str="releases-root",
+        results_root_path_str="results-root",
+        event_log_path_str="events.jsonl",
+    )
+    assert _wait_for_job_status(action_manager_obj, action_job_obj.job_id_str, "succeeded")["result_dict"][
+        "status_str"
+    ] == "ok"
+
+
+def test_dashboard_action_job_manager_reports_action_name(tmp_path: Path):
+    started_event_obj = threading.Event()
+    finish_event_obj = threading.Event()
+    release_obj = _build_release_obj()
+    target_obj = DashboardPodTarget(
+        release_obj=release_obj,
+        db_path_str=str(tmp_path / "pod.sqlite3"),
+        db_override_bool=True,
+    )
+
+    def fake_action_runner(
+        pod_target_obj: DashboardPodTarget,
+        action_name_str: str,
+        releases_root_path_str: str,
+        results_root_path_str: str,
+        event_log_path_str: str,
+        as_of_ts: datetime,
+    ) -> dict:
+        started_event_obj.set()
+        assert pod_target_obj.release_obj.pod_id_str == "pod_job"
+        assert action_name_str == "tick"
+        assert releases_root_path_str == "releases-root"
+        assert results_root_path_str == "results-root"
+        assert event_log_path_str == "events.jsonl"
+        finish_event_obj.wait(timeout=2.0)
+        return {"status_str": "ok", "as_of_timestamp_str": as_of_ts.isoformat()}
+
+    manager_obj = DashboardActionJobManager(fake_action_runner)
+    job_obj = manager_obj.start_job(
+        action_name_str="tick",
+        pod_target_obj=target_obj,
+        releases_root_path_str="releases-root",
+        results_root_path_str="results-root",
+        event_log_path_str="events.jsonl",
+    )
+
+    assert job_obj.to_dict()["action_name_str"] == "tick"
+    assert started_event_obj.wait(timeout=2.0)
+    running_job_dict = _wait_for_job_status(manager_obj, job_obj.job_id_str, "running")
+    assert running_job_dict["action_name_str"] == "tick"
+    try:
+        manager_obj.start_job(
+            action_name_str="eod_snapshot",
+            pod_target_obj=target_obj,
+            releases_root_path_str="releases-root",
+            results_root_path_str="results-root",
+            event_log_path_str="events.jsonl",
+        )
+        raise AssertionError("overlapping action for same POD should fail")
+    except DashboardActionInFlightError:
+        pass
+    finish_event_obj.set()
+    succeeded_job_dict = _wait_for_job_status(manager_obj, job_obj.job_id_str, "succeeded")
+    assert succeeded_job_dict["result_dict"]["status_str"] == "ok"
+
+
 def test_dashboard_http_get_pods_smoke(tmp_path: Path):
     releases_root_path_obj = tmp_path / "releases"
     _write_release_manifest(
@@ -2466,28 +2403,114 @@ def test_dashboard_http_get_pods_smoke(tmp_path: Path):
     _seed_pod_state(db_path_obj, release_obj, 43210.0)
     config_path_obj = tmp_path / "dashboard_config.yaml"
     _write_config(config_path_obj, {"pod_http": str(db_path_obj)})
+    results_root_path_obj = tmp_path / "results"
+    (results_root_path_obj / "report.html").parent.mkdir(parents=True)
+    (results_root_path_obj / "report.html").write_text(
+        "<!doctype html><script>window.bad=true</script><h1>report</h1>",
+        encoding="utf-8",
+    )
+
+    def fake_diff_runner(
+        pod_target_obj: DashboardPodTarget,
+        releases_root_path_str: str,
+        results_root_path_str: str,
+        as_of_ts: datetime,
+    ) -> dict:
+        return {
+            "pod_id_str": pod_target_obj.release_obj.pod_id_str,
+            "status_str": "ok",
+        }
+
     app_obj = DashboardApp(
         releases_root_path_str=str(releases_root_path_obj),
         config_path_str=str(config_path_obj),
-        results_root_path_str=str(tmp_path / "results"),
+        results_root_path_str=str(results_root_path_obj),
+        dashboard_v2_dist_path_str=str(tmp_path / "dashboard_v2_dist"),
+        diff_job_manager_obj=DiffJobManager(fake_diff_runner),
     )
+    v2_dist_path_obj = Path(app_obj.dashboard_v2_dist_path_str)
+    (v2_dist_path_obj / "assets").mkdir(parents=True)
+    (v2_dist_path_obj / "index.html").write_text(
+        '<!doctype html><div id="root">Dashboard V2</div><script src="/assets/app.js"></script>',
+        encoding="utf-8",
+    )
+    (v2_dist_path_obj / "assets" / "app.js").write_text("console.log('v2')", encoding="utf-8")
     server_obj = ThreadingHTTPServer(("127.0.0.1", 0), make_dashboard_handler_class(app_obj))
     thread_obj = threading.Thread(target=server_obj.serve_forever, daemon=True)
     thread_obj.start()
     try:
         host_str, port_int = server_obj.server_address
         request_timeout_float = 6.0
+        with urlopen(f"http://{host_str}:{port_int}/", timeout=request_timeout_float) as response_obj:
+            root_html_str = response_obj.read().decode("utf-8")
+        with urlopen(f"http://{host_str}:{port_int}/incubation", timeout=request_timeout_float) as response_obj:
+            incubation_html_str = response_obj.read().decode("utf-8")
+        try:
+            urlopen(f"http://{host_str}:{port_int}/legacy", timeout=request_timeout_float)
+            raise AssertionError("legacy route should not exist")
+        except HTTPError as exception_obj:
+            assert exception_obj.code == 404
+        with urlopen(f"http://{host_str}:{port_int}/assets/app.js", timeout=request_timeout_float) as response_obj:
+            asset_text_str = response_obj.read().decode("utf-8")
+        with urlopen(f"http://{host_str}:{port_int}/artifacts/report.html", timeout=request_timeout_float) as response_obj:
+            artifact_html_str = response_obj.read().decode("utf-8")
+            artifact_csp_str = response_obj.headers.get("Content-Security-Policy")
+        try:
+            urlopen(f"http://{host_str}:{port_int}/assets/missing.js", timeout=request_timeout_float)
+            raise AssertionError("missing V2 asset should raise")
+        except HTTPError as exception_obj:
+            assert exception_obj.code == 404
+        try:
+            urlopen(
+                f"http://{host_str}:{port_int}/assets/%2e%2e/%2e%2e/secret.txt",
+                timeout=request_timeout_float,
+            )
+            raise AssertionError("escaped V2 asset path should raise")
+        except HTTPError as exception_obj:
+            assert exception_obj.code == 403
         with urlopen(f"http://{host_str}:{port_int}/api/pods", timeout=request_timeout_float) as response_obj:
             payload_dict = json.loads(response_obj.read().decode("utf-8"))
         with urlopen(f"http://{host_str}:{port_int}/api/pods/pod_http", timeout=request_timeout_float) as response_obj:
             detail_payload_dict = json.loads(response_obj.read().decode("utf-8"))
         with urlopen(f"http://{host_str}:{port_int}/api/pods/pod_http/events", timeout=request_timeout_float) as response_obj:
             event_payload_dict = json.loads(response_obj.read().decode("utf-8"))
+        base_url_str = f"http://{host_str}:{port_int}"
+        with urlopen(f"{base_url_str}/api/action-token", timeout=request_timeout_float) as response_obj:
+            token_payload_dict = json.loads(response_obj.read().decode("utf-8"))
+        diff_without_token_request_obj = Request(
+            f"{base_url_str}/api/pods/pod_http/diff/run",
+            data=json.dumps({"confirmed_bool": True}).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Origin": base_url_str},
+            method="POST",
+        )
+        try:
+            urlopen(diff_without_token_request_obj, timeout=request_timeout_float)
+            raise AssertionError("DIFF without token should raise")
+        except HTTPError as exception_obj:
+            assert exception_obj.code == 403
+        diff_request_obj = Request(
+            f"{base_url_str}/api/pods/pod_http/diff/run",
+            data=json.dumps({"confirmed_bool": True}).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Origin": base_url_str,
+                "X-Alpha-Action-Token": token_payload_dict["action_token_str"],
+            },
+            method="POST",
+        )
+        with urlopen(diff_request_obj, timeout=request_timeout_float) as response_obj:
+            diff_job_dict = json.loads(response_obj.read().decode("utf-8"))
     finally:
         server_obj.shutdown()
         server_obj.server_close()
         thread_obj.join(timeout=2.0)
 
+    assert "Dashboard V2" in root_html_str
+    assert "Dashboard V2" in incubation_html_str
+    assert "console.log('v2')" in asset_text_str
+    assert "window.bad=true" in artifact_html_str
+    assert artifact_csp_str is not None
+    assert "sandbox" in artifact_csp_str
     row_dict = _row_by_pod_id(payload_dict, "pod_http")
     assert "alert_dict_list" in payload_dict
     assert "alert_summary_dict" in payload_dict
@@ -2515,3 +2538,319 @@ def test_dashboard_http_get_pods_smoke(tmp_path: Path):
     assert detail_payload_dict["latest_decision_plan_dict"] is None
     assert event_payload_dict["pod_id_str"] == "pod_http"
     assert event_payload_dict["event_dict_list"] == []
+    assert diff_job_dict["action_name_str"] == "compare_reference"
+
+
+def test_dashboard_http_missing_v2_build_reports_build_command_without_legacy(tmp_path: Path):
+    app_obj = DashboardApp(
+        releases_root_path_str=str(tmp_path / "releases"),
+        config_path_str=str(tmp_path / "dashboard_config.yaml"),
+        results_root_path_str=str(tmp_path / "results"),
+        dashboard_v2_dist_path_str=str(tmp_path / "missing_dashboard_v2_dist"),
+    )
+    server_obj = ThreadingHTTPServer(("127.0.0.1", 0), make_dashboard_handler_class(app_obj))
+    thread_obj = threading.Thread(target=server_obj.serve_forever, daemon=True)
+    thread_obj.start()
+    try:
+        host_str, port_int = server_obj.server_address
+        request_timeout_float = 6.0
+        with urlopen(f"http://{host_str}:{port_int}/", timeout=request_timeout_float) as response_obj:
+            root_html_str = response_obj.read().decode("utf-8")
+        try:
+            urlopen(f"http://{host_str}:{port_int}/legacy", timeout=request_timeout_float)
+            raise AssertionError("legacy route should not exist")
+        except HTTPError as exception_obj:
+            assert exception_obj.code == 404
+    finally:
+        server_obj.shutdown()
+        server_obj.server_close()
+        thread_obj.join(timeout=2.0)
+
+    assert "Dashboard V2 build missing" in root_html_str
+    assert "uv run python scripts/build_dashboard_v2.py" in root_html_str
+    assert "/legacy" not in root_html_str
+
+
+def test_dashboard_serve_auto_builds_missing_v2_dist(monkeypatch, tmp_path: Path):
+    dist_path_obj = tmp_path / "dashboard_v2_dist"
+    call_dict: dict[str, object] = {}
+
+    def fake_subprocess_run(command_list, *, cwd, check):
+        call_dict["command_list"] = command_list
+        call_dict["cwd"] = cwd
+        call_dict["check"] = check
+        (dist_path_obj / "assets").mkdir(parents=True, exist_ok=True)
+        (dist_path_obj / "index.html").write_text("<!doctype html>built", encoding="utf-8")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(dashboard_module.subprocess, "run", fake_subprocess_run)
+
+    dashboard_module._ensure_dashboard_v2_dist(str(dist_path_obj))
+
+    assert call_dict["check"] is True
+    assert str(call_dict["command_list"][1]).endswith("scripts\\build_dashboard_v2.py") or str(
+        call_dict["command_list"][1]
+    ).endswith("scripts/build_dashboard_v2.py")
+    assert (dist_path_obj / "index.html").exists()
+
+
+def test_dashboard_v2_source_has_stage_map_and_no_legacy_nav():
+    dashboard_v2_root_path_obj = Path("alpha/live/dashboard_v2")
+    main_tsx_str = (dashboard_v2_root_path_obj / "src" / "main.tsx").read_text(encoding="utf-8")
+    styles_str = (dashboard_v2_root_path_obj / "src" / "styles.css").read_text(encoding="utf-8")
+
+    assert "StageMap" in main_tsx_str
+    assert "MiniStageRail" in main_tsx_str
+    assert "POD lifecycle stage map" in main_tsx_str
+    assert "currentStageKey" in main_tsx_str
+    assert "Enable controls" in main_tsx_str
+    assert "onPointerDown={startDrag}" in main_tsx_str
+    assert "drawer-resize-handle" in main_tsx_str
+    assert "disabled={!controlsEnabled}" in main_tsx_str
+    pod_row_card_str = main_tsx_str.split("function PodRowCard", 1)[1].split("function MiniStageRail", 1)[0]
+    assert "compare_reference" not in pod_row_card_str
+    assert "OPS_ACTION_LIST.map" not in pod_row_card_str
+    assert "stage-map" in styles_str
+    assert "mini-stage-rail" in styles_str
+    assert "drawer-control-gate" in styles_str
+    assert "drawer-resize-handle" in styles_str
+    assert "legacy-link" not in styles_str
+    assert "/legacy" not in main_tsx_str
+    assert "Legacy" not in main_tsx_str
+
+
+def test_dashboard_http_action_endpoint_requires_confirmation_and_allowlist(tmp_path: Path):
+    releases_root_path_obj = tmp_path / "releases"
+    _write_release_manifest(
+        releases_root_path_obj,
+        user_id_str="paper_user",
+        pod_id_str="pod_action",
+        mode_str="paper",
+    )
+    release_obj = load_release_list(str(releases_root_path_obj))[0]
+    db_path_obj = tmp_path / "state" / "pod_action.sqlite3"
+    _seed_pod_state(db_path_obj, release_obj, 43210.0)
+    config_path_obj = tmp_path / "dashboard_config.yaml"
+    _write_config(config_path_obj, {"pod_action": str(db_path_obj)})
+
+    def fake_action_runner(
+        pod_target_obj: DashboardPodTarget,
+        action_name_str: str,
+        releases_root_path_str: str,
+        results_root_path_str: str,
+        event_log_path_str: str,
+        as_of_ts: datetime,
+    ) -> dict:
+        if action_name_str == "eod_snapshot":
+            raise RuntimeError("synthetic action failure")
+        return {
+            "pod_id_str": pod_target_obj.release_obj.pod_id_str,
+            "action_name_str": action_name_str,
+            "status_str": "ok",
+        }
+
+    app_obj = DashboardApp(
+        releases_root_path_str=str(releases_root_path_obj),
+        config_path_str=str(config_path_obj),
+        results_root_path_str=str(tmp_path / "results"),
+        action_job_manager_obj=DashboardActionJobManager(fake_action_runner),
+    )
+    server_obj = ThreadingHTTPServer(("127.0.0.1", 0), make_dashboard_handler_class(app_obj))
+    thread_obj = threading.Thread(target=server_obj.serve_forever, daemon=True)
+    thread_obj.start()
+    try:
+        host_str, port_int = server_obj.server_address
+        request_timeout_float = 6.0
+        base_url_str = f"http://{host_str}:{port_int}"
+        with urlopen(f"{base_url_str}/api/action-token", timeout=request_timeout_float) as response_obj:
+            token_payload_dict = json.loads(response_obj.read().decode("utf-8"))
+        action_token_str = token_payload_dict["action_token_str"]
+
+        missing_token_request_obj = Request(
+            f"{base_url_str}/api/pods/pod_action/actions/tick",
+            data=json.dumps({"confirmed_bool": True}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            urlopen(missing_token_request_obj, timeout=request_timeout_float)
+            raise AssertionError("missing action token should raise")
+        except HTTPError as exception_obj:
+            assert exception_obj.code == 403
+
+        bad_origin_request_obj = Request(
+            f"{base_url_str}/api/pods/pod_action/actions/tick",
+            data=json.dumps({"confirmed_bool": True}).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Origin": "http://example.invalid",
+                "X-Alpha-Action-Token": action_token_str,
+            },
+            method="POST",
+        )
+        try:
+            urlopen(bad_origin_request_obj, timeout=request_timeout_float)
+            raise AssertionError("cross-origin action should raise")
+        except HTTPError as exception_obj:
+            assert exception_obj.code == 403
+
+        missing_origin_request_obj = Request(
+            f"{base_url_str}/api/pods/pod_action/actions/tick",
+            data=json.dumps({"confirmed_bool": True}).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "X-Alpha-Action-Token": action_token_str,
+            },
+            method="POST",
+        )
+        try:
+            urlopen(missing_origin_request_obj, timeout=request_timeout_float)
+            raise AssertionError("missing same-origin evidence should raise")
+        except HTTPError as exception_obj:
+            assert exception_obj.code == 403
+
+        missing_confirm_request_obj = Request(
+            f"{base_url_str}/api/pods/pod_action/actions/tick",
+            data=json.dumps({"confirmed_bool": False}).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Origin": base_url_str,
+                "X-Alpha-Action-Token": action_token_str,
+            },
+            method="POST",
+        )
+        try:
+            urlopen(missing_confirm_request_obj, timeout=request_timeout_float)
+            raise AssertionError("confirmation failure should raise")
+        except HTTPError as exception_obj:
+            assert exception_obj.code == 400
+
+        bad_action_request_obj = Request(
+            f"{base_url_str}/api/pods/pod_action/actions/restart_service",
+            data=json.dumps({"confirmed_bool": True}).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Origin": base_url_str,
+                "X-Alpha-Action-Token": action_token_str,
+            },
+            method="POST",
+        )
+        try:
+            urlopen(bad_action_request_obj, timeout=request_timeout_float)
+            raise AssertionError("unsupported action should raise")
+        except HTTPError as exception_obj:
+            assert exception_obj.code == 400
+
+        good_request_obj = Request(
+            f"{base_url_str}/api/pods/pod_action/actions/tick",
+            data=json.dumps({"confirmed_bool": True}).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Origin": base_url_str,
+                "X-Alpha-Action-Token": action_token_str,
+            },
+            method="POST",
+        )
+        with urlopen(good_request_obj, timeout=request_timeout_float) as response_obj:
+            job_dict = json.loads(response_obj.read().decode("utf-8"))
+        assert job_dict["action_name_str"] == "tick"
+        succeeded_job_dict = _wait_for_job_status(
+            app_obj.action_job_manager_obj,
+            job_dict["job_id_str"],
+            "succeeded",
+        )
+        with urlopen(f"{base_url_str}/api/jobs/{job_dict['job_id_str']}", timeout=request_timeout_float) as response_obj:
+            http_job_dict = json.loads(response_obj.read().decode("utf-8"))
+
+        failing_request_obj = Request(
+            f"{base_url_str}/api/pods/pod_action/actions/eod_snapshot",
+            data=json.dumps({"confirmed_bool": True}).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Origin": base_url_str,
+                "X-Alpha-Action-Token": action_token_str,
+            },
+            method="POST",
+        )
+        with urlopen(failing_request_obj, timeout=request_timeout_float) as response_obj:
+            failed_job_dict = json.loads(response_obj.read().decode("utf-8"))
+        failed_status_dict = _wait_for_job_status(
+            app_obj.action_job_manager_obj,
+            failed_job_dict["job_id_str"],
+            "failed",
+        )
+        with urlopen(
+            f"{base_url_str}/api/jobs/{failed_job_dict['job_id_str']}",
+            timeout=request_timeout_float,
+        ) as response_obj:
+            failed_http_job_dict = json.loads(response_obj.read().decode("utf-8"))
+    finally:
+        server_obj.shutdown()
+        server_obj.server_close()
+        thread_obj.join(timeout=2.0)
+
+    assert succeeded_job_dict["result_dict"]["pod_id_str"] == "pod_action"
+    assert succeeded_job_dict["result_dict"]["action_name_str"] == "tick"
+    assert http_job_dict["status_str"] == "succeeded"
+    assert http_job_dict["result_dict"]["action_name_str"] == "tick"
+    assert failed_status_dict["error_str"] == "synthetic action failure"
+    assert failed_http_job_dict["status_str"] == "failed"
+    assert failed_http_job_dict["error_str"] == "synthetic action failure"
+
+
+def test_dashboard_action_runner_delegates_to_live_runner_with_pod_scope(
+    tmp_path: Path,
+    monkeypatch,
+):
+    release_obj = _build_release_obj("pod_runner_action")
+    db_path_obj = tmp_path / "state" / "pod_runner_action.sqlite3"
+    _seed_pod_state(db_path_obj, release_obj, 10000.0)
+    target_obj = DashboardPodTarget(
+        release_obj=release_obj,
+        db_path_str=str(db_path_obj),
+        db_override_bool=True,
+    )
+    captured_dict: dict[str, object] = {}
+
+    def fake_execute_runner_command_detail_dict(
+        *,
+        parsed_args_obj,
+        state_store_obj,
+        as_of_ts,
+        db_path_str,
+    ):
+        captured_dict["command_name_str"] = parsed_args_obj.command_name_str
+        captured_dict["env_mode_str"] = parsed_args_obj.env_mode_str
+        captured_dict["pod_id_str"] = parsed_args_obj.pod_id_str
+        captured_dict["log_path_str"] = parsed_args_obj.log_path_str
+        captured_dict["output_dir_str"] = parsed_args_obj.output_dir_str
+        captured_dict["db_path_str"] = db_path_str
+        captured_dict["as_of_timestamp_str"] = as_of_ts.isoformat()
+        assert state_store_obj.db_path_str == str(db_path_obj)
+        return {"status_str": "ok", "delegated_bool": True}
+
+    monkeypatch.setattr(
+        runner_module,
+        "_execute_runner_command_detail_dict",
+        fake_execute_runner_command_detail_dict,
+    )
+
+    result_dict = dashboard_module._run_dashboard_action_for_pod(
+        pod_target_obj=target_obj,
+        action_name_str="post_execution_reconcile",
+        releases_root_path_str="releases-root",
+        results_root_path_str="results-root",
+        event_log_path_str="events.jsonl",
+        as_of_ts=AS_OF_TS,
+    )
+
+    assert result_dict == {"status_str": "ok", "delegated_bool": True}
+    assert captured_dict == {
+        "command_name_str": "post_execution_reconcile",
+        "env_mode_str": "paper",
+        "pod_id_str": "pod_runner_action",
+        "log_path_str": "events.jsonl",
+        "output_dir_str": "results-root",
+        "db_path_str": str(db_path_obj),
+        "as_of_timestamp_str": AS_OF_TS.isoformat(),
+    }
