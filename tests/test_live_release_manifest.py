@@ -89,21 +89,21 @@ def test_parse_release_manifest_reads_qpi_example_release():
 
 def test_parse_release_manifest_reads_qpi_incubation_release():
     manifest_path_str = str(
-        Path("alpha/live/releases/incubation_user/pod_qpi_01_incubation.yaml").resolve()
+        Path("alpha/live/releases/incubation_user/pod_qpi_02_incubation.yaml").resolve()
     )
 
     release_obj = parse_release_manifest(manifest_path_str)
 
-    assert release_obj.release_id_str == "incubation_user.pod_qpi.incubation.v1"
+    assert release_obj.release_id_str == "incubation_user.pod_qpi.incubation.v2"
     assert release_obj.user_id_str == "incubation_user"
-    assert release_obj.pod_id_str == "pod_qpi_01"
+    assert release_obj.pod_id_str == "pod_qpi_02"
     assert release_obj.mode_str == "incubation"
-    assert release_obj.account_route_str == "SIM_pod_qpi_01"
+    assert release_obj.account_route_str == "SIM_pod_qpi_02"
     assert release_obj.strategy_import_str == "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy"
     assert release_obj.execution_policy_str == "next_open_moo"
     assert release_obj.params_dict["capital_base_float"] == 100000.0
     assert release_obj.params_dict["max_positions_int"] == 10
-    assert release_obj.pod_budget_fraction_float == 1.0
+    assert release_obj.pod_budget_fraction_float == 0.95
     assert release_obj.auto_submit_enabled_bool is True
     assert release_obj.enabled_bool is True
     assert release_obj.broker_client_id_int == 91
