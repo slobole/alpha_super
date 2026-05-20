@@ -20,8 +20,10 @@ from alpha.live.dashboard import (
     DashboardPodTarget,
     DiffJobManager,
     _build_alert_dict_list,
+    _build_data_freshness_dict,
     _build_execution_report_from_vplan_dict,
     _build_lifecycle_step_dict_list,
+    _build_operator_phase_dict,
     _build_required_action_dict,
     build_dashboard_summary_dict,
     build_pod_detail_dict,
@@ -460,6 +462,7 @@ def _base_operator_row_dict(**override_dict) -> dict:
         "broker_order_count_int": 1,
         "broker_ack_count_int": 1,
         "fill_count_int": 1,
+        "ack_coverage_ratio_float": 1.0,
         "next_action_str": "wait",
         "reason_code_str": "no_due_work",
         "missing_ack_count_int": 0,
@@ -577,6 +580,104 @@ def test_dashboard_required_action_mapping_covers_operator_states():
         action_dict = _build_required_action_dict(_base_operator_row_dict(**override_dict))
         assert action_dict["label_str"] == expected_label_str
         assert action_dict["severity_str"] == expected_severity_str
+
+
+def test_dashboard_operator_phase_distinguishes_execution_from_build_gates():
+    waiting_reconcile_phase_dict = _build_operator_phase_dict(
+        _base_operator_row_dict(
+            latest_decision_plan_status_str="submitted",
+            latest_vplan_status_str="submitted",
+            fill_count_int=0,
+            latest_reconciliation_status_str=None,
+            latest_reconciliation_timestamp_str=None,
+            next_action_str="post_execution_reconcile",
+            reason_code_str="waiting_for_post_execution_reconcile",
+        )
+    )
+    assert waiting_reconcile_phase_dict["operator_phase_key_str"] == "waiting_reconcile"
+    assert waiting_reconcile_phase_dict["operator_phase_label_str"] == "Waiting for reconcile"
+    assert waiting_reconcile_phase_dict["operator_phase_severity_str"] == "yellow"
+
+    waiting_fills_phase_dict = _build_operator_phase_dict(
+        _base_operator_row_dict(
+            latest_decision_plan_status_str="submitted",
+            latest_vplan_status_str="submitted",
+            fill_count_int=0,
+            latest_reconciliation_status_str=None,
+            latest_reconciliation_timestamp_str=None,
+            next_action_str="wait",
+            reason_code_str="broker_ack_complete",
+        )
+    )
+    assert waiting_fills_phase_dict["operator_phase_key_str"] == "orders_waiting_fills"
+    assert waiting_fills_phase_dict["operator_phase_label_str"] == "Orders submitted, waiting for fills"
+
+    execution_complete_phase_dict = _build_operator_phase_dict(_base_operator_row_dict())
+    assert execution_complete_phase_dict["operator_phase_key_str"] == "execution_complete"
+    assert execution_complete_phase_dict["operator_phase_severity_str"] == "green"
+
+    waiting_eod_phase_dict = _build_operator_phase_dict(
+        _base_operator_row_dict(
+            eod_snapshot_dict={
+                "status_str": "waiting",
+                "severity_str": "gray",
+                "detail_str": "EOD snapshot is not due yet.",
+            },
+        )
+    )
+    assert waiting_eod_phase_dict["operator_phase_key_str"] == "done_waiting_eod"
+    assert waiting_eod_phase_dict["operator_phase_label_str"] == "Done for today / waiting EOD"
+
+
+def test_dashboard_norgate_window_expired_is_neutral_after_execution_started():
+    raw_norgate_status_dict = {
+        "data_source_mode_str": "snapshot",
+        "status_str": "ready",
+        "severity_str": "red",
+        "sync_stage_label_str": "Snapshot window expired",
+        "build_gate_reason_code_str": "snapshot_window_expired",
+        "snapshot_date_str": "2026-05-19",
+    }
+    execution_row_dict = _base_operator_row_dict(
+        norgate_snapshot_status_dict=raw_norgate_status_dict,
+        latest_vplan_status_str="submitted",
+        broker_order_count_int=10,
+    )
+
+    display_status_dict = dashboard_module._build_dashboard_norgate_status_dict(execution_row_dict)
+    freshness_dict = _build_data_freshness_dict(
+        {
+            **execution_row_dict,
+            "norgate_snapshot_status_dict": display_status_dict,
+        }
+    )
+    norgate_item_dict = next(
+        item_dict
+        for item_dict in freshness_dict["item_dict_list"]
+        if item_dict["label_str"] == "Norgate"
+    )
+
+    assert display_status_dict["severity_str"] == "gray"
+    assert display_status_dict["sync_stage_label_str"] == "New builds closed"
+    assert "only blocks new DecisionPlan/VPlan builds" in display_status_dict["operator_detail_str"]
+    assert norgate_item_dict["severity_str"] == "gray"
+    assert "New builds closed" in norgate_item_dict["detail_str"]
+
+    build_needed_row_dict = _base_operator_row_dict(
+        norgate_snapshot_status_dict=raw_norgate_status_dict,
+        latest_vplan_status_str=None,
+        latest_vplan_id_int=None,
+        broker_order_count_int=0,
+        broker_ack_count_int=0,
+        fill_count_int=0,
+        latest_reconciliation_status_str=None,
+        latest_reconciliation_timestamp_str=None,
+    )
+    still_blocking_status_dict = dashboard_module._build_dashboard_norgate_status_dict(
+        build_needed_row_dict
+    )
+    assert still_blocking_status_dict["severity_str"] == "red"
+    assert still_blocking_status_dict["sync_stage_label_str"] == "Snapshot window expired"
 
 
 def test_dashboard_required_action_context_items_are_informational():
@@ -1995,6 +2096,9 @@ def test_dashboard_detail_parses_decision_plan_and_preserves_execution_rows(tmp_
     assert execution_row_dict["official_open_slippage_bps_float"] == 49.7512437811
     assert execution_row_dict["vplan_reference_slippage_bps_float"] == 100.0
     assert detail_dict["required_action_dict"]["label_str"] == "Waiting reconcile"
+    assert detail_dict["pod_row_dict"]["operator_phase_key_str"] == "waiting_reconcile"
+    assert detail_dict["pod_row_dict"]["operator_phase_label_str"] == "Waiting for reconcile"
+    assert detail_dict["pod_row_dict"]["operator_phase_severity_str"] == "yellow"
     required_context_by_label_dict = {
         context_item_dict["label_str"]: context_item_dict
         for context_item_dict in detail_dict["required_action_dict"]["context_item_dict_list"]
@@ -2303,6 +2407,9 @@ def test_dashboard_html_uses_structured_operator_sections():
     assert "Only one EOD equity point is available" in DASHBOARD_HTML_STR
     assert "Decision" in DASHBOARD_HTML_STR
     assert "Execution" in DASHBOARD_HTML_STR
+    assert "Execution Truth" in DASHBOARD_HTML_STR
+    assert "renderExecutionTruthSection" in DASHBOARD_HTML_STR
+    assert "Operator phase" in DASHBOARD_HTML_STR
     assert "renderExecutionSection" in DASHBOARD_HTML_STR
     assert "Open slippage bps / $" in DASHBOARD_HTML_STR
     assert "Reference slippage bps / $" in DASHBOARD_HTML_STR
@@ -2335,6 +2442,7 @@ def test_dashboard_html_uses_structured_operator_sections():
     assert "Reference Check" in DASHBOARD_HTML_STR
     assert "firstRedStep" in DASHBOARD_HTML_STR
     assert "firstYellowStep" in DASHBOARD_HTML_STR
+    assert DASHBOARD_HTML_STR.index("return actionStepKey;") < DASHBOARD_HTML_STR.index("if (firstRedStep) return")
     assert "Idle / no blocking lifecycle step" in DASHBOARD_HTML_STR
     assert "renderActionContextItems" in DASHBOARD_HTML_STR
     assert "action-context-grid" in DASHBOARD_HTML_STR

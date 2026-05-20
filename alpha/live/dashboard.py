@@ -447,6 +447,7 @@ def build_pod_row_dict(
         "broker_order_count_int": 0,
         "broker_ack_count_int": 0,
         "fill_count_int": 0,
+        "ack_coverage_ratio_float": None,
         "completed_rehearsal_cycle_count_int": 0,
         "next_action_str": "no_db",
         "reason_code_str": "db_missing",
@@ -581,6 +582,9 @@ def build_pod_row_dict(
         )
         base_row_dict["latest_submit_ack_status_str"] = latest_vplan_row_dict.get(
             "submit_ack_status_str"
+        )
+        base_row_dict["ack_coverage_ratio_float"] = latest_vplan_row_dict.get(
+            "ack_coverage_ratio_float"
         )
         base_row_dict["latest_live_reference_snapshot_timestamp_str"] = (
             latest_vplan_row_dict.get("live_reference_snapshot_timestamp_str")
@@ -1966,6 +1970,13 @@ def _build_rehearsal_status_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
 def _finalize_operator_fields_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
     row_dict["rehearsal_status_dict"] = _build_rehearsal_status_dict(row_dict)
     row_dict["required_action_dict"] = _build_required_action_dict(row_dict)
+    row_dict["norgate_snapshot_status_dict"] = _build_dashboard_norgate_status_dict(row_dict)
+    operator_phase_dict = _build_operator_phase_dict(row_dict)
+    row_dict["operator_phase_dict"] = operator_phase_dict
+    row_dict["operator_phase_key_str"] = operator_phase_dict["operator_phase_key_str"]
+    row_dict["operator_phase_label_str"] = operator_phase_dict["operator_phase_label_str"]
+    row_dict["operator_phase_severity_str"] = operator_phase_dict["operator_phase_severity_str"]
+    row_dict["operator_phase_reason_str"] = operator_phase_dict["operator_phase_reason_str"]
     row_dict["lifecycle_step_dict_list"] = _build_lifecycle_step_dict_list(row_dict)
     row_dict["data_freshness_dict"] = _build_data_freshness_dict(row_dict)
     row_dict["debug_summary_dict"] = _build_debug_summary_dict(row_dict)
@@ -2231,6 +2242,187 @@ def _required_action_dict(
     }
 
 
+def _operator_phase_dict(
+    key_str: str,
+    label_str: str,
+    severity_str: str,
+    reason_str: str,
+) -> dict[str, str]:
+    return {
+        "operator_phase_key_str": key_str,
+        "operator_phase_label_str": label_str,
+        "operator_phase_severity_str": severity_str if severity_str in {"green", "yellow", "red", "gray"} else "gray",
+        "operator_phase_reason_str": reason_str,
+    }
+
+
+def _execution_submitted_or_later_bool(row_dict: dict[str, Any]) -> bool:
+    vplan_status_str = str(row_dict.get("latest_vplan_status_str") or "")
+    if vplan_status_str in {"submitting", "submitted", "completed"}:
+        return True
+    if int(row_dict.get("broker_order_count_int") or 0) > 0:
+        return True
+    if int(row_dict.get("broker_ack_count_int") or 0) > 0:
+        return True
+    if int(row_dict.get("fill_count_int") or 0) > 0:
+        return True
+    return row_dict.get("latest_reconciliation_status_str") is not None
+
+
+def _build_operator_phase_dict(row_dict: dict[str, Any]) -> dict[str, str]:
+    db_status_str = str(row_dict.get("db_status_str") or "")
+    if db_status_str == "missing":
+        return _operator_phase_dict(
+            "db_missing",
+            "Setup DB",
+            "gray",
+            "State DB does not exist yet.",
+        )
+    if db_status_str == "empty":
+        return _operator_phase_dict(
+            "db_empty",
+            "No state yet",
+            "gray",
+            "State DB exists but has no live schema rows yet.",
+        )
+    if db_status_str == "error":
+        return _operator_phase_dict(
+            "db_error",
+            "Manual review required",
+            "red",
+            str(row_dict.get("error_str") or "State DB could not be read."),
+        )
+    if row_dict.get("latest_decision_plan_status_str") == "blocked":
+        return _operator_phase_dict(
+            "decision_blocked",
+            "Manual review required",
+            "red",
+            "DecisionPlan is blocked.",
+        )
+    if row_dict.get("latest_vplan_status_str") == "blocked":
+        return _operator_phase_dict(
+            "vplan_blocked",
+            "Manual review required",
+            "red",
+            "VPlan is blocked.",
+        )
+    if int(row_dict.get("missing_ack_count_int") or 0) > 0:
+        return _operator_phase_dict(
+            "broker_ack_missing",
+            "Manual review required",
+            "red",
+            f"Missing broker ACK rows: {int(row_dict.get('missing_ack_count_int') or 0)}.",
+        )
+    if int(row_dict.get("exception_count_int") or 0) > 0:
+        return _operator_phase_dict(
+            "reconcile_exception",
+            "Manual review required",
+            "red",
+            "Latest reconciliation is not passed.",
+        )
+
+    next_action_str = str(row_dict.get("next_action_str") or "")
+    reason_code_str = str(row_dict.get("reason_code_str") or "")
+    latest_vplan_status_str = str(row_dict.get("latest_vplan_status_str") or "")
+    latest_decision_status_str = str(row_dict.get("latest_decision_plan_status_str") or "")
+    latest_reconcile_status_str = str(row_dict.get("latest_reconciliation_status_str") or "")
+
+    if next_action_str == "post_execution_reconcile":
+        return _operator_phase_dict(
+            "waiting_reconcile",
+            "Waiting for reconcile",
+            "yellow",
+            reason_code_str or "Waiting for post-execution broker reconciliation.",
+        )
+    if (
+        latest_vplan_status_str in {"submitting", "submitted"}
+        and int(row_dict.get("missing_ack_count_int") or 0) == 0
+        and int(row_dict.get("broker_ack_count_int") or 0) > 0
+        and int(row_dict.get("fill_count_int") or 0) == 0
+    ):
+        return _operator_phase_dict(
+            "orders_waiting_fills",
+            "Orders submitted, waiting for fills",
+            "yellow",
+            "Broker ACK exists, but no fill rows have been recorded yet.",
+        )
+    if (
+        latest_reconcile_status_str == "passed"
+        and latest_vplan_status_str == "completed"
+        and latest_decision_status_str == "completed"
+    ):
+        eod_snapshot_dict = row_dict.get("eod_snapshot_dict") or {}
+        if str(eod_snapshot_dict.get("status_str") or "") == "waiting":
+            return _operator_phase_dict(
+                "done_waiting_eod",
+                "Done for today / waiting EOD",
+                "gray",
+                str(eod_snapshot_dict.get("detail_str") or "Post-execution reconcile passed; EOD snapshot is not due yet."),
+            )
+        return _operator_phase_dict(
+            "execution_complete",
+            "Execution complete",
+            "green",
+            "DecisionPlan, VPlan, and post-execution reconcile are complete.",
+        )
+    if next_action_str == "build_decision_plan":
+        return _operator_phase_dict(
+            "ready_to_build_decision_plan",
+            "Ready to build DecisionPlan",
+            "yellow",
+            reason_code_str,
+        )
+    if next_action_str == "build_vplan":
+        return _operator_phase_dict(
+            "ready_to_build_vplan",
+            "Ready to build VPlan",
+            "yellow",
+            reason_code_str,
+        )
+    if reason_code_str == "waiting_for_submission_window":
+        return _operator_phase_dict(
+            "waiting_submission_window",
+            "Waiting submission window",
+            "yellow",
+            reason_code_str,
+        )
+    if next_action_str == "submit_vplan":
+        return _operator_phase_dict(
+            "ready_to_submit_vplan",
+            "VPlan ready",
+            "yellow",
+            "Auto-submit is enabled; inspect before the service submits.",
+        )
+    if next_action_str == "review_vplan":
+        return _operator_phase_dict(
+            "review_vplan",
+            "Review VPlan",
+            "yellow",
+            "Auto-submit is disabled; inspect the VPlan.",
+        )
+    return _operator_phase_dict(
+        "idle",
+        "Idle / no action",
+        "green",
+        reason_code_str or "No blocking dashboard condition was found.",
+    )
+
+
+def _build_dashboard_norgate_status_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
+    norgate_snapshot_status_dict = dict(row_dict.get("norgate_snapshot_status_dict") or {})
+    if (
+        norgate_snapshot_status_dict.get("build_gate_reason_code_str") == "snapshot_window_expired"
+        and _execution_submitted_or_later_bool(row_dict)
+    ):
+        norgate_snapshot_status_dict["severity_str"] = "gray"
+        norgate_snapshot_status_dict["sync_stage_label_str"] = "New builds closed"
+        norgate_snapshot_status_dict["operator_detail_str"] = (
+            "Snapshot window expired only blocks new DecisionPlan/VPlan builds; "
+            "submitted execution state is tracked separately."
+        )
+    return norgate_snapshot_status_dict
+
+
 def _build_lifecycle_step_dict_list(row_dict: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         _build_db_step_dict(row_dict),
@@ -2426,6 +2618,8 @@ def _build_data_freshness_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
         norgate_detail_fragment_list.append(
             f"gate={norgate_snapshot_status_dict.get('build_gate_reason_code_str')}"
         )
+    if norgate_snapshot_status_dict.get("operator_detail_str"):
+        norgate_detail_fragment_list.append(str(norgate_snapshot_status_dict.get("operator_detail_str")))
     if norgate_snapshot_status_dict.get("last_error_str"):
         norgate_detail_fragment_list.append(f"error={norgate_snapshot_status_dict.get('last_error_str')}")
     item_dict_list = [
@@ -5731,6 +5925,9 @@ DASHBOARD_HTML_STR = """<!doctype html>
     function podSignature(row) {
       const debugSummary = row.debug_summary_dict || {};
       return [
+        row.operator_phase_key_str || '',
+        row.operator_phase_label_str || '',
+        row.operator_phase_severity_str || '',
         debugSummary.severity_str || '',
         debugSummary.verdict_label_str || '',
         debugSummary.primary_reason_str || '',
@@ -6523,6 +6720,7 @@ DASHBOARD_HTML_STR = """<!doctype html>
 
     function operatorStateSentence(row) {
       const debugSummary = row.debug_summary_dict || {};
+      const operatorPhaseLabel = String(row.operator_phase_label_str || '');
       const verdictLabel = String(debugSummary.verdict_label_str || '');
       const verdictLower = verdictLabel.toLowerCase();
       const eodStatus = String((row.eod_snapshot_dict || {}).status_str || '');
@@ -6538,6 +6736,7 @@ DASHBOARD_HTML_STR = """<!doctype html>
       if (verdictLower.includes('db missing')) return 'State DB is missing.';
       if (verdictLower.includes('db empty')) return 'State DB is empty.';
       if (eodStatus === 'blocked_by_execution') return 'EOD is blocked because execution is unresolved.';
+      if (operatorPhaseLabel) return operatorPhaseLabel.endsWith('.') ? operatorPhaseLabel : operatorPhaseLabel + '.';
       if (verdictLabel) return verdictLabel.endsWith('.') ? verdictLabel : verdictLabel + '.';
       if (row.next_action_str) return 'Next action is ' + row.next_action_str + '.';
       return 'State is unknown.';
@@ -6551,6 +6750,7 @@ DASHBOARD_HTML_STR = """<!doctype html>
       if (row.mode_str === 'incubation' && gateStatus === 'complete_one_cycle') return 'Incubation completed at least one SIM ledger rehearsal cycle.';
       if (row.mode_str === 'incubation' && gateStatus === 'incomplete') return 'Incubation is waiting for one complete SIM ledger rehearsal cycle.';
       if (eodStatus === 'blocked_by_execution') return 'EOD is blocked because execution is unresolved.';
+      if (row.operator_phase_reason_str) return row.operator_phase_reason_str;
       if (debugSummary.primary_reason_str) return debugSummary.primary_reason_str;
       if (row.reason_code_str) return row.reason_code_str;
       return 'No operator reason was reported.';
@@ -6565,14 +6765,14 @@ DASHBOARD_HTML_STR = """<!doctype html>
 
     function renderOperatorSeverityCell(row) {
       const debugSummary = row.debug_summary_dict || {};
-      const severity = healthClass(debugSummary.severity_str || row.health_str);
-      return `${pill(debugSummary.severity_str || severity, severity)}${hasPodChangedSinceLastRefresh(row) ? '<div class="operator-changed">Changed since last refresh</div>' : ''}`;
+      const severity = healthClass(debugSummary.severity_str || row.operator_phase_severity_str || row.health_str);
+      return `${pill(debugSummary.severity_str || row.operator_phase_severity_str || severity, severity)}${hasPodChangedSinceLastRefresh(row) ? '<div class="operator-changed">Changed since last refresh</div>' : ''}`;
     }
 
     function renderOperatorStateCell(row) {
       return `
         <div class="operator-state">${esc(operatorStateSentence(row))}</div>
-        <div class="operator-reason">${esc((row.debug_summary_dict || {}).verdict_label_str || '-')}</div>`;
+        <div class="operator-reason">${esc(row.operator_phase_key_str || (row.debug_summary_dict || {}).verdict_label_str || '-')}</div>`;
     }
 
     function renderOperatorCommandCell(row) {
@@ -6650,9 +6850,6 @@ DASHBOARD_HTML_STR = """<!doctype html>
     function deriveCurrentLifecycleStepKey(stepList, action) {
       const executionStepList = lifecycleExecutionStepList(stepList || []);
       const firstRedStep = executionStepList.find(step => healthClass(step.severity_str) === 'red');
-      if (firstRedStep) return firstRedStep.step_key_str;
-      const firstYellowStep = executionStepList.find(step => healthClass(step.severity_str) === 'yellow');
-      if (firstYellowStep) return firstYellowStep.step_key_str;
       if (action && healthClass(action.severity_str) !== 'green') {
         const actionStepKey = lifecycleActionStepKeyByLabel[action.label_str]
           || lifecycleActionStepKeyByCommand[action.inspect_command_name_str];
@@ -6660,6 +6857,9 @@ DASHBOARD_HTML_STR = """<!doctype html>
           return actionStepKey;
         }
       }
+      if (firstRedStep) return firstRedStep.step_key_str;
+      const firstYellowStep = executionStepList.find(step => healthClass(step.severity_str) === 'yellow');
+      if (firstYellowStep) return firstYellowStep.step_key_str;
       const firstActiveWaitingStep = executionStepList.find(isLifecycleActiveWaitingStep);
       if (firstActiveWaitingStep) return firstActiveWaitingStep.step_key_str;
       return '';
@@ -6848,6 +7048,7 @@ DASHBOARD_HTML_STR = """<!doctype html>
             </div>
           </div>
           ${renderActionBanner(action)}
+          ${renderExecutionTruthSection(row, report)}
           ${renderLifecycleSection(lifecycle, action)}
           ${renderDetailTabs(row.pod_id_str, tabName)}
           ${renderDetailTabBody(tabName, { row, decision, vplan, report, diff, freshness, eod, rehearsal, pnl, debugStory })}
@@ -6905,6 +7106,26 @@ DASHBOARD_HTML_STR = """<!doctype html>
         <section class="panel full">
           <h3>Lifecycle Progress</h3>
           <div class="panel-body">${renderLifecycleRail(stepList || [], action || {})}</div>
+        </section>`;
+    }
+
+    function renderExecutionTruthSection(row, report) {
+      return `
+        <section class="panel full">
+          <h3>Execution Truth</h3>
+          <div class="panel-body">
+            <div class="metric-grid">
+              ${metric('Operator phase', row.operator_phase_label_str)}
+              ${metric('Decision status', row.latest_decision_plan_status_str)}
+              ${metric('VPlan status', row.latest_vplan_status_str ? row.latest_vplan_status_str + (row.latest_vplan_id_int ? ' #' + row.latest_vplan_id_int : '') : '-')}
+              ${metric('ACK coverage', row.ack_coverage_ratio_float === undefined || row.ack_coverage_ratio_float === null ? '-' : fmtPct(row.ack_coverage_ratio_float))}
+              ${metric('Broker orders', report.broker_order_count_int || row.broker_order_count_int || 0)}
+              ${metric('Fills', report.fill_count_int || row.fill_count_int || 0)}
+              ${metric('Residual rows', report.residual_count_int || 0)}
+              ${metric('Reconcile', row.latest_reconciliation_status_str)}
+              ${metric('Broker snapshot', row.latest_broker_snapshot_timestamp_str)}
+            </div>
+          </div>
         </section>`;
     }
 
@@ -7353,6 +7574,7 @@ DASHBOARD_HTML_STR = """<!doctype html>
               ['Last success', norgate.last_sync_utc_str],
               ['Status file', norgate.status_file_path_str],
               ['Snapshot env', norgate.snapshot_mode_env_str],
+              ['Operator detail', norgate.operator_detail_str],
               ['Last error', norgate.last_error_str]
             ])}
           </div>
