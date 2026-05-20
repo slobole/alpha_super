@@ -14,7 +14,7 @@ Windows Norgate node
   norgate_service/<client_id>/snapshots/<profile>/<YYYY-MM-DD>/
 
 Client VPS
-  release YAMLs define data_profile_str
+  local ignored release YAMLs define data_profile_str
   alpha/live/norgate_snapshot_sync.py ensures local snapshots
   C:\alpha\norgate_snapshots\<profile>\<YYYY-MM-DD>/
   data/norgate_loader.py reads local snapshots in snapshot mode
@@ -24,7 +24,7 @@ Client VPS
 The API is an artifact control/download layer, not a DataFrame query API.
 
 ```text
-client release YAMLs
+client-local release YAMLs
   -> required profiles
   -> Norgate API over Tailscale
   -> manifest.json + prices.parquet + optional universe.parquet
@@ -72,6 +72,11 @@ NORGATE_RELEASES_ROOT=alpha/live/releases/<client_folder>
 
 If API config is missing, snapshot mode becomes local-only. Valid local
 snapshots can be used, but missing/stale snapshots block new trading intent.
+
+Release YAMLs under `alpha/live/releases/<client_folder>/` are local per VPS
+and ignored by Git. Use tracked examples from `docs/live/release_templates/`,
+copy them into the local client folder, then edit account routes, mode, budgets,
+and `enabled_bool` on that VPS only.
 
 ## Runtime Flow
 
@@ -236,4 +241,3 @@ uv run --with pytest python -m pytest `
   tests/test_live_runner.py::test_tick_does_not_build_decision_plan_when_snapshot_sync_waits `
   tests/test_live_runner.py::test_tick_blocks_new_trade_intent_when_snapshot_sync_not_ready -q
 ```
-

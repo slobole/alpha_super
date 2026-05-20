@@ -1,0 +1,55 @@
+# Template for the wired QPI + IBS + RSI exit daily mean-reversion POD.
+# Copy to alpha/live/releases/<client_id>/<pod_id>.yaml and edit the copy only.
+identity:
+  release_id: your_user.pod_qpi.daily_moo.v1 # Unique deployment version; bump when this release meaning changes.
+  user_id: your_user # Must match the client/VPS release folder and NORGATE_CLIENT_ID.
+  pod_id: pod_qpi_01 # Stable sleeve id; one strategy + one account route + one POD DB.
+
+deployment:
+  mode: paper # Use paper for DU accounts. For live, change to live and use a U... account route.
+  enabled_bool: false # Set true only after account route, Norgate, doctor, and dashboard checks pass.
+
+broker:
+  account_route: DU_YOUR_PAPER_ACCOUNT # Paper routes start with DU. Live routes must not start with DU.
+  host_str: 127.0.0.1 # TWS/Gateway host on this VPS.
+  port_int: 7497 # Paper TWS default. Use 7496 for live TWS, or your Gateway port.
+  client_id_int: 31 # IBKR API client id; keep unique per running process.
+  timeout_seconds_float: 4.0 # Raise only if TWS is healthy but slow to answer.
+
+strategy:
+  strategy_import_str: strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy # Fixed for this template.
+  data_profile_str: norgate_eod_sp500_pit # S&P 500 PIT prices + universe. Do not change unless changing strategy family.
+  params:
+    benchmark_list_str: ["$SPX"] # Benchmark metadata only for this host path.
+    start_date_str: "1998-01-01" # History load start. Change only if intentionally shortening or extending the data window.
+    indexname_str: "S&P 500" # PIT universe source. Changing this changes the strategy universe.
+    max_positions_int: 10 # Maximum concurrent names selected by QPI.
+    qpi_threshold_float: 30.0 # Entry requires QPI below this value; lower is stricter.
+    sma_window_int: 200 # Long-trend filter window; entry requires price above this SMA.
+    qpi_window_int: 3 # Short return window used by QPI.
+    qpi_lookback_years_int: 5 # Historical lookback used to rank the QPI move.
+    return_lookback_days_int: 3 # Recent return filter window.
+    max_entry_ibs_float: 0.1 # Entry requires close near the daily low; lower is stricter.
+    exit_ibs_threshold_float: 0.90 # Exit when close is near the daily high.
+    rsi_window_int: 2 # Fast RSI window used for rebound exit.
+    exit_rsi2_threshold_float: 90.0 # Exit when RSI2 is this high or higher.
+    slippage_float: 0.00025 # Research/backtest cost assumption carried into strategy object metadata.
+    commission_per_share_float: 0.005 # Research/backtest commission assumption.
+    commission_minimum_float: 1.0 # Research/backtest minimum commission assumption.
+
+market:
+  session_calendar_id_str: XNYS # Trading calendar used to map EOD signal to next tradable open.
+
+schedule:
+  signal_clock_str: eod_snapshot_ready # Build after the validated EOD Norgate snapshot is ready.
+  execution_policy_str: next_open_moo # Submit Market-on-Open at the next open. Use next_open_market only if intentionally not using MOO.
+
+execution:
+  pod_budget_fraction_float: 0.03 # Fraction of broker NetLiq allocated to this POD.
+  auto_submit_enabled_bool: false # Keep false for new VPS/client rollout until manual review is clean.
+
+bootstrap:
+  initial_cash_float: 100000.0 # Initial local strategy state before broker truth exists; broker NetLiq drives live sizing after setup.
+
+risk:
+  risk_profile_str: standard_equity_mr # Operator label for this risk style.

@@ -1,0 +1,47 @@
+# Template for the wired monthly ATR-normalized NDX momentum POD.
+# Copy to alpha/live/releases/<client_id>/<pod_id>.yaml and edit the copy only.
+identity:
+  release_id: your_user.pod_ndx_atr_normalized.monthly_open.v1 # Unique deployment version.
+  user_id: your_user # Must match the client/VPS release folder and NORGATE_CLIENT_ID.
+  pod_id: pod_ndx_atr_normalized_01 # Stable sleeve id; one strategy + one account route + one POD DB.
+
+deployment:
+  mode: paper # Use paper for DU accounts. For live, change to live and use a U... account route.
+  enabled_bool: false # Set true only after account route, Norgate, doctor, and dashboard checks pass.
+
+broker:
+  account_route: DU_YOUR_PAPER_ACCOUNT # Paper routes start with DU. Live routes must not start with DU.
+  host_str: 127.0.0.1 # TWS/Gateway host on this VPS.
+  port_int: 7497 # Paper TWS default. Use 7496 for live TWS, or your Gateway port.
+  client_id_int: 31 # IBKR API client id; keep unique per running process.
+  timeout_seconds_float: 4.0 # Raise only if TWS is healthy but slow to answer.
+
+strategy:
+  strategy_import_str: strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy # Fixed for this template.
+  data_profile_str: norgate_eod_ndx_pit # Nasdaq 100 PIT universe + SPY helper.
+  params:
+    max_positions_int: 10 # Maximum selected NDX names.
+    lookback_month_int: 12 # Monthly ROC lookback used in the momentum score.
+    index_trend_window_int: 200 # SPY regime SMA window; basket is gated by this trend filter.
+    stock_trend_window_int: 100 # Per-stock SMA trend filter window.
+    regime_symbol_str: SPY # Regime asset; keep SPY unless the data profile/export contract changes.
+    slippage_float: 0.00025 # Research/backtest cost assumption carried into strategy object metadata.
+    commission_per_share_float: 0.005 # Research/backtest commission assumption.
+    commission_minimum_float: 1.0 # Research/backtest minimum commission assumption.
+
+market:
+  session_calendar_id_str: XNYS # Trading calendar used to map month-end signal to next tradable open.
+
+schedule:
+  signal_clock_str: month_end_snapshot_ready # Build from the completed month-end EOD snapshot.
+  execution_policy_str: next_month_first_open # Rebalance at the first tradable open of the next month.
+
+execution:
+  pod_budget_fraction_float: 0.03 # Fraction of broker NetLiq allocated to this POD.
+  auto_submit_enabled_bool: false # Keep false for new VPS/client rollout until manual review is clean.
+
+bootstrap:
+  initial_cash_float: 100000.0 # Initial local strategy state before broker truth exists; broker NetLiq drives live sizing after setup.
+
+risk:
+  risk_profile_str: standard_monthly_momentum # Operator label for this risk style.

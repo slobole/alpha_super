@@ -1,4 +1,4 @@
-TL;DR: one live POD is one strategy running against one linked IBKR account/subaccount route. To add another strategy for the same client deployment, keep the client `user_id`, but create a new YAML with a new `release_id`, new `pod_id`, and a different `account_route`.
+TL;DR: one live POD is one strategy running against one linked IBKR account/subaccount route. Real release YAMLs are local per VPS/client and are ignored by Git. Start from the tracked templates in `docs/live/release_templates/`, copy one template per POD into `alpha/live/releases/<client_id>/`, then edit the local copy.
 
 Simple rule:
 
@@ -20,29 +20,37 @@ Change:
 - new `strategy_import_str`
 - strategy-specific `params`
 
-Folder pattern:
+Local folder pattern:
 
 ```text
 alpha/live/releases/<same_user_id>/
 ```
 
-Example:
+Tracked template source:
 
 ```text
-alpha/live/releases/excelence_trade_paper_001/
-  pod_qpi_01.yaml
-  pod_taa_01.yaml
-  pod_ndx_mo_01.yaml
+docs/live/release_templates/
+  pod_qpi_daily_moo.yaml.example
+  pod_taa_btal_fallback_tqqq_vix_cash_monthly_open.yaml.example
+  pod_ndx_atr_normalized_vxn_scaled_monthly_open.yaml.example
 ```
 
-Each file above should point at a different linked IBKR account/subaccount route.
+Runtime local copy example:
 
-Minimal example:
+```powershell
+New-Item -ItemType Directory -Force alpha\live\releases\client_001
+Copy-Item docs\live\release_templates\pod_qpi_daily_moo.yaml.example `
+  alpha\live\releases\client_001\pod_qpi_01.yaml
+```
+
+Each local YAML should point at a different linked IBKR account/subaccount route.
+
+Minimal local YAML shape:
 
 ```yaml
 identity:
-  release_id: excelence_trade_paper_001.pod_qpi.daily_moo.v1
-  user_id: excelence_trade_paper_001
+  release_id: client_001.pod_qpi.daily_moo.v1
+  user_id: client_001
   pod_id: pod_qpi_01
 
 deployment:
@@ -50,7 +58,7 @@ deployment:
   enabled_bool: false
 
 broker:
-  account_route: DUK322077
+  account_route: DU1234567
 
 strategy:
   strategy_import_str: strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy
@@ -64,6 +72,7 @@ Notes:
 - `pod_id` must be unique among enabled pods.
 - `account_route` should be unique per live strategy POD unless the system later adds an explicit shared-account pod ledger.
 - No manual SQL work is needed. The runner loads YAMLs and upserts them into `live_release`.
+- Do not commit the local YAML. `alpha/live/releases/**/*.yaml` and `*.yml` are ignored on purpose.
 
 ## 2. Add a new user with two strategies
 
@@ -73,7 +82,7 @@ Create a new folder:
 alpha/live/releases/<new_user_id>/
 ```
 
-Then add two YAML files, one per pod.
+Then copy two templates into that folder, one per pod.
 
 Example:
 
@@ -116,8 +125,15 @@ Different per strategy:
 - `params`
 - schedule fields if needed
 
+Template docs:
+
+```text
+docs/live/release_templates/README.md
+```
+
 ## Quick safety rules
 
+- Real client release YAMLs are local VPS files, not repo artifacts.
 - Start new YAMLs with `enabled_bool: false`.
 - For a new version of the same pod: usually change `release_id`, keep `pod_id`.
 - For a new pod: change both `release_id` and `pod_id`.

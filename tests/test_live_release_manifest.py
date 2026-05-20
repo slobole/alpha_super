@@ -5,9 +5,33 @@ from pathlib import Path
 import pytest
 
 from alpha.live.release_manifest import (
+    SUPPORTED_STRATEGY_IMPORT_TUPLE,
     load_release_list,
     parse_release_manifest,
     validate_enabled_deployment_for_mode,
+)
+
+
+RELEASE_TEMPLATE_PATH_TUPLE: tuple[Path, ...] = (
+    Path("docs/live/release_templates/pod_dv2_daily_moo.yaml.example"),
+    Path("docs/live/release_templates/pod_qpi_daily_moo.yaml.example"),
+    Path(
+        "docs/live/release_templates/"
+        "pod_taa_btal_fallback_tqqq_vix_cash_monthly_open.yaml.example"
+    ),
+    Path(
+        "docs/live/release_templates/"
+        "pod_taa_btal_1n_fallback_tqqq_vix_cash_monthly_open.yaml.example"
+    ),
+    Path(
+        "docs/live/release_templates/"
+        "pod_taa_btal_linearity_1n_fallback_qqq_vix_cash_monthly_open.yaml.example"
+    ),
+    Path("docs/live/release_templates/pod_ndx_atr_normalized_monthly_open.yaml.example"),
+    Path(
+        "docs/live/release_templates/"
+        "pod_ndx_atr_normalized_vxn_scaled_monthly_open.yaml.example"
+    ),
 )
 
 
@@ -51,168 +75,56 @@ def _write_guardrail_manifest(
     )
 
 
-def test_parse_release_manifest_reads_example_release():
-    manifest_path_str = str(
-        Path("alpha/live/releases/excelence_trade_paper_001/pod_dv2_01_example.yaml").resolve()
-    )
+def test_release_templates_cover_every_wired_strategy():
+    template_strategy_import_set = {
+        parse_release_manifest(str(template_path_obj.resolve())).strategy_import_str
+        for template_path_obj in RELEASE_TEMPLATE_PATH_TUPLE
+    }
 
-    release_obj = parse_release_manifest(manifest_path_str)
+    assert template_strategy_import_set == set(SUPPORTED_STRATEGY_IMPORT_TUPLE)
 
-    assert release_obj.release_id_str.endswith(".pod_dv2.daily_moo.v1")
-    assert release_obj.user_id_str in release_obj.release_id_str
-    assert release_obj.pod_id_str == "pod_dv2_01_example"
-    assert release_obj.execution_policy_str == "next_open_moo"
+
+@pytest.mark.parametrize("template_path_obj", RELEASE_TEMPLATE_PATH_TUPLE)
+def test_release_template_parses_and_starts_disabled(template_path_obj: Path):
+    release_obj = parse_release_manifest(str(template_path_obj.resolve()))
+
     assert release_obj.enabled_bool is False
-    assert release_obj.session_calendar_id_str == "XNYS"
-    assert release_obj.params_dict["capital_base_float"] == 100000.0
-    assert release_obj.pod_budget_fraction_float == 0.03
-    assert release_obj.auto_submit_enabled_bool is True
+    assert release_obj.auto_submit_enabled_bool is False
+    assert release_obj.user_id_str == "your_user"
+    assert release_obj.release_id_str.startswith("your_user.")
     assert release_obj.broker_host_str == "127.0.0.1"
     assert release_obj.broker_port_int == 7497
     assert release_obj.broker_client_id_int == 31
     assert release_obj.broker_timeout_seconds_float == 4.0
-
-
-def test_parse_release_manifest_reads_qpi_example_release():
-    manifest_path_str = str(
-        Path("alpha/live/releases/excelence_trade_paper_001/pod_qpi_01.yaml").resolve()
-    )
-
-    release_obj = parse_release_manifest(manifest_path_str)
-
-    assert release_obj.release_id_str.endswith(".pod_qpi.daily_moo.v1")
-    assert release_obj.user_id_str in release_obj.release_id_str
-    assert release_obj.pod_id_str == "pod_qpi_01"
-    assert release_obj.strategy_import_str == "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy"
-    assert release_obj.enabled_bool is False
-
-
-def test_parse_release_manifest_reads_qpi_incubation_release():
-    manifest_path_str = str(
-        Path("alpha/live/releases/incubation_user/pod_qpi_02_incubation.yaml").resolve()
-    )
-
-    release_obj = parse_release_manifest(manifest_path_str)
-
-    assert release_obj.release_id_str == "incubation_user.pod_qpi.incubation.v2"
-    assert release_obj.user_id_str == "incubation_user"
-    assert release_obj.pod_id_str == "pod_qpi_02"
-    assert release_obj.mode_str == "incubation"
-    assert release_obj.account_route_str == "SIM_pod_qpi_02"
-    assert release_obj.strategy_import_str == "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy"
-    assert release_obj.execution_policy_str == "next_open_moo"
+    assert release_obj.session_calendar_id_str == "XNYS"
+    assert release_obj.pod_budget_fraction_float == 0.03
     assert release_obj.params_dict["capital_base_float"] == 100000.0
-    assert release_obj.params_dict["max_positions_int"] == 10
-    assert release_obj.pod_budget_fraction_float == 0.95
-    assert release_obj.auto_submit_enabled_bool is True
-    assert release_obj.enabled_bool is True
-    assert release_obj.broker_client_id_int == 91
 
 
-def test_parse_release_manifest_reads_example_edi_live_release_with_broker_fields():
-    manifest_path_str = str(
-        Path("alpha/live/releases/example_edi/pod_dv2_example_edi_01.yaml").resolve()
+def test_release_template_qpi_exposes_strategy_knobs():
+    release_obj = parse_release_manifest(
+        str(Path("docs/live/release_templates/pod_qpi_daily_moo.yaml.example").resolve())
     )
 
-    release_obj = parse_release_manifest(manifest_path_str)
-
-    assert release_obj.user_id_str == "example_edi"
-    assert release_obj.mode_str == "live"
-    assert release_obj.account_route_str == "U_EXAMPLE_EDI_DV2"
-    assert release_obj.broker_host_str == "127.0.0.1"
-    assert release_obj.broker_port_int == 7496
-    assert release_obj.broker_client_id_int == 31
-    assert release_obj.broker_timeout_seconds_float == 4.0
-    assert release_obj.auto_submit_enabled_bool is False
+    assert release_obj.strategy_import_str == "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy"
+    assert release_obj.data_profile_str == "norgate_eod_sp500_pit"
+    assert release_obj.signal_clock_str == "eod_snapshot_ready"
+    assert release_obj.execution_policy_str == "next_open_moo"
+    assert release_obj.params_dict["qpi_threshold_float"] == 30.0
+    assert release_obj.params_dict["max_entry_ibs_float"] == 0.1
+    assert release_obj.params_dict["exit_rsi2_threshold_float"] == 90.0
 
 
-def test_parse_release_manifest_reads_manual_taa_paper_template():
-    manifest_path_str = str(
-        Path(
-            "alpha/live/releases/your_user/pod_taa_btal_fallback_tqqq_vix_cash_paper_manual.yaml"
-        ).resolve()
+def test_release_template_vxn_scaled_ndx_exposes_vxn_knobs():
+    release_obj = parse_release_manifest(
+        str(
+            Path(
+                "docs/live/release_templates/"
+                "pod_ndx_atr_normalized_vxn_scaled_monthly_open.yaml.example"
+            ).resolve()
+        )
     )
 
-    release_obj = parse_release_manifest(manifest_path_str)
-
-    assert release_obj.mode_str == "paper"
-    assert release_obj.account_route_str == "DU_YOUR_PAPER_ACCOUNT"
-    assert release_obj.strategy_import_str == "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash"
-    assert release_obj.signal_clock_str == "month_end_snapshot_ready"
-    assert release_obj.execution_policy_str == "next_month_first_open"
-    assert release_obj.auto_submit_enabled_bool is False
-    assert release_obj.pod_budget_fraction_float == 0.03
-    assert release_obj.enabled_bool is False
-
-
-def test_parse_release_manifest_reads_manual_taa_live_template():
-    manifest_path_str = str(
-        Path(
-            "alpha/live/releases/your_user/pod_taa_btal_fallback_tqqq_vix_cash_live_manual.yaml"
-        ).resolve()
-    )
-
-    release_obj = parse_release_manifest(manifest_path_str)
-
-    assert release_obj.mode_str == "live"
-    assert release_obj.account_route_str == "U_YOUR_LIVE_ACCOUNT"
-    assert release_obj.strategy_import_str == "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash"
-    assert release_obj.signal_clock_str == "month_end_snapshot_ready"
-    assert release_obj.execution_policy_str == "next_month_first_open"
-    assert release_obj.auto_submit_enabled_bool is False
-    assert release_obj.pod_budget_fraction_float == 0.03
-    assert release_obj.enabled_bool is False
-
-
-def test_parse_release_manifest_reads_disabled_linearity_qqq_vix_cash_live_template():
-    manifest_path_str = str(
-        Path(
-            "alpha/live/releases/your_user/pod_taa_btal_linearity_1n_fallback_qqq_vix_cash_live_manual.yaml"
-        ).resolve()
-    )
-
-    release_obj = parse_release_manifest(manifest_path_str)
-
-    assert release_obj.mode_str == "live"
-    assert release_obj.account_route_str == "U_YOUR_LIVE_ACCOUNT"
-    assert release_obj.strategy_import_str == (
-        "strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash"
-    )
-    assert release_obj.signal_clock_str == "month_end_snapshot_ready"
-    assert release_obj.execution_policy_str == "next_month_first_open"
-    assert release_obj.auto_submit_enabled_bool is False
-    assert release_obj.enabled_bool is False
-
-
-def test_parse_release_manifest_reads_disabled_btal_1n_tqqq_vix_cash_live_template():
-    manifest_path_str = str(
-        Path(
-            "alpha/live/releases/your_user/pod_taa_btal_1n_fallback_tqqq_vix_cash_live_manual.yaml"
-        ).resolve()
-    )
-
-    release_obj = parse_release_manifest(manifest_path_str)
-
-    assert release_obj.mode_str == "live"
-    assert release_obj.account_route_str == "U_YOUR_LIVE_ACCOUNT"
-    assert release_obj.strategy_import_str == (
-        "strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash"
-    )
-    assert release_obj.signal_clock_str == "month_end_snapshot_ready"
-    assert release_obj.execution_policy_str == "next_month_first_open"
-    assert release_obj.auto_submit_enabled_bool is False
-    assert release_obj.enabled_bool is False
-
-
-def test_parse_release_manifest_reads_disabled_ndx_vxn_scaled_live_template():
-    manifest_path_str = str(
-        Path("alpha/live/releases/your_user/pod_ndx_mo_vxn_scaled_live_manual.yaml").resolve()
-    )
-
-    release_obj = parse_release_manifest(manifest_path_str)
-
-    assert release_obj.mode_str == "live"
-    assert release_obj.account_route_str == "U_YOUR_LIVE_ACCOUNT"
     assert release_obj.strategy_import_str == (
         "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:"
         "VxnScaledAtrNormalizedNdxStrategy"
@@ -224,8 +136,6 @@ def test_parse_release_manifest_reads_disabled_ndx_vxn_scaled_live_template():
     assert release_obj.params_dict["target_vxn_pct_float"] == 22.0
     assert release_obj.params_dict["min_exposure_scale_float"] == 0.25
     assert release_obj.params_dict["max_exposure_scale_float"] == 1.0
-    assert release_obj.auto_submit_enabled_bool is False
-    assert release_obj.enabled_bool is False
 
 
 def test_parse_release_manifest_accepts_next_open_market(tmp_path: Path):

@@ -128,6 +128,10 @@ You can use `NORGATE_API_URL=http://<norgate_node_tailscale_ip>:8787` instead of
 
 Set `NORGATE_CLIENT_ID` and `NORGATE_RELEASES_ROOT` to the real client folder you are deploying. The values above are examples.
 
+Release YAMLs in `alpha/live/releases/<client_id>/` are local per VPS/client
+and are ignored by Git. Copy tracked examples from `docs/live/release_templates/`
+when creating a new POD, then edit the local YAML only.
+
 Run the client doctor before starting a scheduler on a new client VPS:
 
 ```powershell
