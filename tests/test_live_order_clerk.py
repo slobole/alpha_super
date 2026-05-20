@@ -682,7 +682,7 @@ def test_stub_broker_adapter_submit_ack_is_order_type_agnostic():
     } == {"MOO", "MOC", "MKT", "LOO"}
 
 
-def test_ibkr_socket_client_submits_plain_mkt_without_opg_tif(monkeypatch):
+def test_ibkr_socket_client_sets_expected_tif_by_order_type(monkeypatch):
     class DummyContract:
         def __init__(self, symbol_str: str):
             self.symbol = symbol_str
@@ -743,32 +743,44 @@ def test_ibkr_socket_client_submits_plain_mkt_without_opg_tif(monkeypatch):
         "_build_stock_contract_map",
         lambda ib_obj, asset_str_list: {asset_str: DummyContract(asset_str) for asset_str in asset_str_list},
     )
-    broker_order_request_obj = BrokerOrderRequest(
-        decision_plan_id_int=7,
-        vplan_id_int=9,
-        release_id_str="release_001",
-        pod_id_str="pod_001",
-        account_route_str="DU1",
-        submission_key_str="vplan:9",
-        order_request_key_str="vplan:9:AAPL:1",
-        asset_str="AAPL",
-        broker_order_type_str="MKT",
-        order_class_str="MarketOrder",
-        unit_str="shares",
-        amount_float=1.0,
-        target_bool=False,
-        trade_id_int=None,
-        sizing_reference_price_float=100.0,
-        portfolio_value_float=5000.0,
-    )
+    broker_order_request_list = [
+        BrokerOrderRequest(
+            decision_plan_id_int=7,
+            vplan_id_int=9,
+            release_id_str="release_001",
+            pod_id_str="pod_001",
+            account_route_str="DU1",
+            submission_key_str="vplan:9",
+            order_request_key_str=f"vplan:9:{asset_str}:1",
+            asset_str=asset_str,
+            broker_order_type_str=broker_order_type_str,
+            order_class_str="MarketOrder",
+            unit_str="shares",
+            amount_float=1.0,
+            target_bool=False,
+            trade_id_int=None,
+            sizing_reference_price_float=100.0,
+            portfolio_value_float=5000.0,
+        )
+        for asset_str, broker_order_type_str in [
+            ("MOO_ASSET", "MOO"),
+            ("MOC_ASSET", "MOC"),
+            ("MKT_ASSET", "MKT"),
+        ]
+    ]
 
     submit_batch_result_obj = ibkr_socket_client_obj.submit_order_request_list(
         account_route_str="DU1",
-        broker_order_request_list=[broker_order_request_obj],
+        broker_order_request_list=broker_order_request_list,
         submitted_timestamp_ts=datetime.now(UTC),
     )
 
-    submitted_order_obj = dummy_ib_obj.placed_order_list[0]
     assert submit_batch_result_obj.submit_ack_status_str == "complete"
-    assert submitted_order_obj.orderType == "MKT"
-    assert str(getattr(submitted_order_obj, "tif", "")).upper() != "OPG"
+    assert [
+        (submitted_order_obj.orderType, str(getattr(submitted_order_obj, "tif", "")).upper())
+        for submitted_order_obj in dummy_ib_obj.placed_order_list
+    ] == [
+        ("MKT", "OPG"),
+        ("MOC", "DAY"),
+        ("MKT", "DAY"),
+    ]

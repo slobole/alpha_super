@@ -8,7 +8,7 @@ from time import monotonic
 try:
     from ib_async import IB, Stock
     from ib_async.objects import ExecutionFilter
-    from ib_async.order import MarketOrder, Order
+    from ib_async.order import Order
 except ModuleNotFoundError:  # pragma: no cover - exercised only in lightweight test envs.
     class IB:  # type: ignore[no-redef]
         def connect(self, *args, **kwargs):
@@ -24,10 +24,6 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only in lightweight 
         raise ModuleNotFoundError("ib_async is required for live IBKR connectivity.")
 
     class ExecutionFilter:  # type: ignore[no-redef]
-        def __init__(self, *args, **kwargs):
-            raise ModuleNotFoundError("ib_async is required for live IBKR connectivity.")
-
-    class MarketOrder:  # type: ignore[no-redef]
         def __init__(self, *args, **kwargs):
             raise ModuleNotFoundError("ib_async is required for live IBKR connectivity.")
 
@@ -559,9 +555,11 @@ class IBKRSocketClient:
                         orderRef=broker_order_request_obj.order_request_key_str,
                     )
                 elif broker_order_request_obj.broker_order_type_str == "MKT":
-                    broker_order_obj = MarketOrder(
+                    broker_order_obj = Order(
                         action=order_action_str,
                         totalQuantity=total_quantity_float,
+                        orderType="MKT",
+                        tif="DAY",
                         account=account_route_str,
                         orderRef=broker_order_request_obj.order_request_key_str,
                     )
