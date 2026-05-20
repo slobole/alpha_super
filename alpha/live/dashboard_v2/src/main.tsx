@@ -9,7 +9,6 @@ import {
   Gauge,
   ListChecks,
   Loader2,
-  Move,
   PauseCircle,
   RefreshCcw,
   Search,
@@ -20,9 +19,12 @@ import "./styles.css";
 import type {
   ActionToken,
   BrokerAckRow,
+  CombinedBook,
+  CombinedBookEnvironment,
   DashboardJob,
   DashboardSummary,
   DebugTimelineEvent,
+  EquityPoint,
   EventRow,
   ExecutionReport,
   ExecutionRow,
@@ -40,14 +42,7 @@ const OPS_ACTION_LIST = ["tick", "submit_vplan", "post_execution_reconcile", "eo
 const REFRESH_MS = 4000;
 
 type ViewName = "ops" | "incubation";
-type DetailTab = "stage" | "timeline" | "logs" | "raw";
-
-interface PanelRect {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-}
+type DetailTab = "stage" | "execution" | "equity" | "timeline" | "logs" | "raw";
 
 export function App() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
@@ -121,9 +116,9 @@ export function App() {
     }
   }
 
-  function selectPod(row: PodRow, stageKey?: string) {
+  function selectPod(row: PodRow, stageKey?: string, tabName?: DetailTab) {
     setSelectedDetail(null);
-    setDetailTab("stage");
+    setDetailTab(tabName || tabForStage(stageKey));
     setSelectedStageKey(stageKey || currentStageKey(row.lifecycle_step_dict_list || [], row) || "summary");
     setSelectedPodId(row.pod_id_str);
   }
@@ -185,6 +180,8 @@ export function App() {
 
   const podRows = summary?.pod_row_dict_list || [];
   const opsRows = useMemo(() => podRows.filter((row) => row.mode_str === "live" || row.mode_str === "paper"), [podRows]);
+  const liveRows = useMemo(() => podRows.filter((row) => row.mode_str === "live"), [podRows]);
+  const paperRows = useMemo(() => podRows.filter((row) => row.mode_str === "paper"), [podRows]);
   const incubationRows = useMemo(() => podRows.filter((row) => row.mode_str === "incubation"), [podRows]);
   const visibleRows = viewName === "incubation" ? incubationRows : opsRows;
   const attentionRows = useMemo(() => buildAttentionRows(visibleRows), [visibleRows]);
@@ -239,10 +236,27 @@ export function App() {
 
         {viewName === "ops" ? (
           <OpsHome
-            rows={opsRows}
+            liveRows={liveRows}
+            paperRows={paperRows}
             attentionRows={attentionRows}
+            combinedBook={summary?.combined_book_dict}
             jobMap={jobMap}
             onSelect={selectPod}
+            expandedPodId={selectedPodId}
+            selectedDetail={selectedDetail}
+            detailLoading={detailLoading}
+            detailTab={detailTab}
+            selectedStageKey={selectedStageKey}
+            onTab={setDetailTab}
+            onStageSelect={(stageKey) => {
+              setSelectedStageKey(stageKey);
+              setDetailTab(tabForStage(stageKey));
+            }}
+            onCloseDetail={() => {
+              setSelectedPodId(null);
+              setSelectedDetail(null);
+            }}
+            onAction={startAction}
           />
         ) : (
           <IncubationHome
@@ -250,79 +264,115 @@ export function App() {
             attentionRows={attentionRows}
             jobMap={jobMap}
             onSelect={selectPod}
+            expandedPodId={selectedPodId}
+            selectedDetail={selectedDetail}
+            detailLoading={detailLoading}
+            detailTab={detailTab}
+            selectedStageKey={selectedStageKey}
+            onTab={setDetailTab}
+            onStageSelect={(stageKey) => {
+              setSelectedStageKey(stageKey);
+              setDetailTab(tabForStage(stageKey));
+            }}
+            onCloseDetail={() => {
+              setSelectedPodId(null);
+              setSelectedDetail(null);
+            }}
+            onAction={startAction}
           />
         )}
       </main>
-
-      {selectedPodId && (
-        <DetailDrawer
-          detail={selectedDetail}
-          loading={detailLoading}
-          tab={detailTab}
-          onTab={setDetailTab}
-          onClose={() => {
-            setSelectedPodId(null);
-            setSelectedDetail(null);
-          }}
-          selectedStageKey={selectedStageKey}
-          onStageSelect={(stageKey) => {
-            setSelectedStageKey(stageKey);
-            setDetailTab("stage");
-          }}
-          onAction={startAction}
-        />
-      )}
     </div>
   );
 }
 
 function OpsHome({
-  rows,
+  liveRows,
+  paperRows,
   attentionRows,
+  combinedBook,
   jobMap,
-  onSelect
+  onSelect,
+  expandedPodId,
+  selectedDetail,
+  detailLoading,
+  detailTab,
+  selectedStageKey,
+  onTab,
+  onStageSelect,
+  onCloseDetail,
+  onAction
 }: {
-  rows: PodRow[];
+  liveRows: PodRow[];
+  paperRows: PodRow[];
   attentionRows: AttentionRow[];
+  combinedBook?: CombinedBook;
   jobMap: Record<string, DashboardJob>;
-  onSelect: (row: PodRow, stageKey?: string) => void;
+  onSelect: (row: PodRow, stageKey?: string, tabName?: DetailTab) => void;
+  expandedPodId: string | null;
+  selectedDetail: PodDetail | null;
+  detailLoading: boolean;
+  detailTab: DetailTab;
+  selectedStageKey: string;
+  onTab: (tab: DetailTab) => void;
+  onStageSelect: (stageKey: string) => void;
+  onCloseDetail: () => void;
+  onAction: (row: PodRow, actionName: string) => void;
 }) {
   return (
-    <div className="content-grid">
+    <div className="ops-stack">
       <section className="surface attention-surface">
         <SectionTitle icon={<ListChecks size={18} />} title="Attention Queue" aside={`${attentionRows.length} items`} />
         {attentionRows.length === 0 ? (
-          <EmptyState text="No live or paper PODs are enabled." />
+          <EmptyState text="No live or paper POD needs attention." />
         ) : (
           <div className="attention-list">
             {attentionRows.map((item) => (
-              <button
+              <AttentionQueueItem
                 key={item.row.pod_id_str}
-                className={`attention-item ${severityClass(item.severity)}`}
-                onClick={() => onSelect(item.row)}
-              >
-                <StatusDot severity={item.severity} />
-                <div>
-                  <strong>{item.row.pod_id_str}</strong>
-                  <span>{item.state}</span>
-                </div>
-                <small>{item.reason}</small>
-                <ArrowRight size={16} />
-              </button>
+                item={item}
+                onInspect={() => onSelect(item.row, item.stageKey, tabForStage(item.stageKey))}
+              />
             ))}
           </div>
         )}
       </section>
 
-      <section className="surface pods-surface">
-        <SectionTitle icon={<Activity size={18} />} title="Live / Paper PODs" aside={`${rows.length} pods`} />
-        <div className="pod-table">
-          {rows.map((row) => (
-            <PodRowCard key={row.pod_id_str} row={row} job={podBadgeJob(jobMap, row.pod_id_str)} onSelect={() => onSelect(row)} onStageSelect={(stageKey) => onSelect(row, stageKey)} />
-          ))}
-          {!rows.length && <EmptyState text="No live or paper PODs are enabled." />}
-        </div>
-      </section>
+      <PodSection
+        title="LIVE PODs"
+        rows={liveRows}
+        emptyText="No LIVE PODs are enabled."
+        modeSummary={modeEnvironment(combinedBook, "live")}
+        jobMap={jobMap}
+        expandedPodId={expandedPodId}
+        selectedDetail={selectedDetail}
+        detailLoading={detailLoading}
+        detailTab={detailTab}
+        selectedStageKey={selectedStageKey}
+        onSelect={onSelect}
+        onTab={onTab}
+        onStageSelect={onStageSelect}
+        onCloseDetail={onCloseDetail}
+        onAction={onAction}
+      />
+
+      <PodSection
+        title="PAPER PODs"
+        rows={paperRows}
+        emptyText="No PAPER PODs are enabled."
+        modeSummary={modeEnvironment(combinedBook, "paper")}
+        jobMap={jobMap}
+        expandedPodId={expandedPodId}
+        selectedDetail={selectedDetail}
+        detailLoading={detailLoading}
+        detailTab={detailTab}
+        selectedStageKey={selectedStageKey}
+        onSelect={onSelect}
+        onTab={onTab}
+        onStageSelect={onStageSelect}
+        onCloseDetail={onCloseDetail}
+        onAction={onAction}
+      />
     </div>
   );
 }
@@ -331,41 +381,156 @@ function IncubationHome({
   rows,
   attentionRows,
   jobMap,
-  onSelect
+  onSelect,
+  expandedPodId,
+  selectedDetail,
+  detailLoading,
+  detailTab,
+  selectedStageKey,
+  onTab,
+  onStageSelect,
+  onCloseDetail,
+  onAction
 }: {
   rows: PodRow[];
   attentionRows: AttentionRow[];
   jobMap: Record<string, DashboardJob>;
-  onSelect: (row: PodRow, stageKey?: string) => void;
+  onSelect: (row: PodRow, stageKey?: string, tabName?: DetailTab) => void;
+  expandedPodId: string | null;
+  selectedDetail: PodDetail | null;
+  detailLoading: boolean;
+  detailTab: DetailTab;
+  selectedStageKey: string;
+  onTab: (tab: DetailTab) => void;
+  onStageSelect: (stageKey: string) => void;
+  onCloseDetail: () => void;
+  onAction: (row: PodRow, actionName: string) => void;
 }) {
   return (
-    <div className="content-grid incubation-grid">
-      <section className="surface pods-surface wide">
-        <SectionTitle icon={<ClipboardList size={18} />} title="Incubation Rehearsal" aside={`${rows.length} pods`} />
-        <div className="pod-table">
-          {rows.map((row) => (
-            <PodRowCard key={row.pod_id_str} row={row} job={podBadgeJob(jobMap, row.pod_id_str)} onSelect={() => onSelect(row)} onStageSelect={(stageKey) => onSelect(row, stageKey)} incubation />
-          ))}
-          {!rows.length && <EmptyState text="No incubation PODs are enabled." />}
-        </div>
-      </section>
+    <div className="ops-stack">
       <section className="surface">
         <SectionTitle icon={<ListChecks size={18} />} title="Promotion Queue" aside={`${attentionRows.length} items`} />
         <div className="attention-list">
           {attentionRows.map((item) => (
-            <button key={item.row.pod_id_str} className="attention-item gray" onClick={() => onSelect(item.row)}>
-              <StatusDot severity={item.severity} />
-              <div>
-                <strong>{item.row.pod_id_str}</strong>
-                <span>{rehearsalLabel(item.row)}</span>
-              </div>
-              <small>{item.reason}</small>
-            </button>
+            <AttentionQueueItem key={item.row.pod_id_str} item={item} onInspect={() => onSelect(item.row, item.stageKey)} />
           ))}
           {!attentionRows.length && <EmptyState text="No rehearsal state to review." />}
         </div>
       </section>
+      <PodSection
+        title="Incubation Rehearsal"
+        rows={rows}
+        emptyText="No incubation PODs are enabled."
+        jobMap={jobMap}
+        expandedPodId={expandedPodId}
+        selectedDetail={selectedDetail}
+        detailLoading={detailLoading}
+        detailTab={detailTab}
+        selectedStageKey={selectedStageKey}
+        onSelect={onSelect}
+        onTab={onTab}
+        onStageSelect={onStageSelect}
+        onCloseDetail={onCloseDetail}
+        onAction={onAction}
+        incubation
+      />
     </div>
+  );
+}
+
+function AttentionQueueItem({ item, onInspect }: { item: AttentionRow; onInspect: () => void }) {
+  return (
+    <button className={`attention-item ${severityClass(item.severity)}`} onClick={onInspect}>
+      <StatusDot severity={item.severity} />
+      <div className="attention-pod">
+        <strong>{item.row.pod_id_str}</strong>
+        <span>{item.row.mode_str} / {item.stageLabel}</span>
+      </div>
+      <div className="attention-reason">
+        <strong>{item.state}</strong>
+        <span>{item.reason}</span>
+      </div>
+      <div className="attention-evidence">
+        <small>{item.evidence}</small>
+        <small>{item.timing}</small>
+      </div>
+      <div className="attention-age">
+        <small>{item.freshness}</small>
+        <strong>Inspect</strong>
+      </div>
+      <ArrowRight size={16} />
+    </button>
+  );
+}
+
+function PodSection({
+  title,
+  rows,
+  emptyText,
+  modeSummary,
+  jobMap,
+  expandedPodId,
+  selectedDetail,
+  detailLoading,
+  detailTab,
+  selectedStageKey,
+  onSelect,
+  onTab,
+  onStageSelect,
+  onCloseDetail,
+  onAction,
+  incubation
+}: {
+  title: string;
+  rows: PodRow[];
+  emptyText: string;
+  modeSummary?: CombinedBookEnvironment;
+  jobMap: Record<string, DashboardJob>;
+  expandedPodId: string | null;
+  selectedDetail: PodDetail | null;
+  detailLoading: boolean;
+  detailTab: DetailTab;
+  selectedStageKey: string;
+  onSelect: (row: PodRow, stageKey?: string, tabName?: DetailTab) => void;
+  onTab: (tab: DetailTab) => void;
+  onStageSelect: (stageKey: string) => void;
+  onCloseDetail: () => void;
+  onAction: (row: PodRow, actionName: string) => void;
+  incubation?: boolean;
+}) {
+  return (
+    <section className="surface mode-section">
+      <SectionTitle icon={incubation ? <ClipboardList size={18} /> : <Activity size={18} />} title={title} aside={`${rows.length} pods`} />
+      {modeSummary && <ModeEquitySummary environment={modeSummary} />}
+      <div className="pod-table">
+        {rows.map((row) => (
+          <React.Fragment key={row.pod_id_str}>
+            <PodRowCard
+              row={row}
+              job={podBadgeJob(jobMap, row.pod_id_str)}
+              expanded={expandedPodId === row.pod_id_str}
+              onSelect={() => onSelect(row)}
+              onStageSelect={(stageKey) => onSelect(row, stageKey, tabForStage(stageKey))}
+              incubation={incubation}
+            />
+            {expandedPodId === row.pod_id_str && (
+              <InlinePodDetail
+                detail={selectedDetail}
+                fallbackRow={row}
+                loading={detailLoading}
+                tab={detailTab}
+                onTab={onTab}
+                onClose={onCloseDetail}
+                selectedStageKey={selectedStageKey}
+                onStageSelect={onStageSelect}
+                onAction={onAction}
+              />
+            )}
+          </React.Fragment>
+        ))}
+        {!rows.length && <EmptyState text={emptyText} />}
+      </div>
+    </section>
   );
 }
 
@@ -373,19 +538,21 @@ function PodRowCard({
   row,
   incubation,
   job,
+  expanded,
   onSelect,
   onStageSelect
 }: {
   row: PodRow;
   incubation?: boolean;
   job?: DashboardJob;
+  expanded?: boolean;
   onSelect: () => void;
   onStageSelect: (stageKey: string) => void;
 }) {
   const action = row.required_action_dict || {};
   const severity = effectiveSeverity(row);
   return (
-    <div className={`pod-row-card ${severityClass(severity)}`}>
+    <div className={`pod-row-card ${severityClass(severity)} ${expanded ? "expanded" : ""}`}>
       <button className="pod-row-main" onClick={onSelect}>
         <StatusDot severity={severity} />
         <div className="pod-identity">
@@ -435,8 +602,9 @@ function MiniStageRail({ row, steps, onStageSelect }: { row: PodRow; steps: Life
   );
 }
 
-function DetailDrawer({
+function InlinePodDetail({
   detail,
+  fallbackRow,
   loading,
   tab,
   onTab,
@@ -446,6 +614,7 @@ function DetailDrawer({
   onAction
 }: {
   detail: PodDetail | null;
+  fallbackRow: PodRow;
   loading: boolean;
   tab: DetailTab;
   onTab: (tab: DetailTab) => void;
@@ -454,128 +623,192 @@ function DetailDrawer({
   onStageSelect: (stageKey: string) => void;
   onAction: (row: PodRow, actionName: string) => void;
 }) {
-  const row = detail?.pod_row_dict;
+  const row = detail?.pod_row_dict || fallbackRow;
   const [controlsEnabled, setControlsEnabled] = useState(false);
-  const [panelRect, setPanelRect] = useState<PanelRect>(() => initialPanelRect());
 
   useEffect(() => {
     setControlsEnabled(false);
-    setPanelRect(initialPanelRect());
   }, [row?.pod_id_str]);
 
-  function startDrag(event: React.PointerEvent<HTMLElement>) {
-    if ((event.target as HTMLElement).closest("button, input")) return;
-    event.preventDefault();
-    const startX = event.clientX;
-    const startY = event.clientY;
-    const startRect = panelRect;
-    const onMove = (moveEvent: PointerEvent) => {
-      setPanelRect(
-        clampPanelRect({
-          ...startRect,
-          left: startRect.left + moveEvent.clientX - startX,
-          top: startRect.top + moveEvent.clientY - startY
-        })
-      );
-    };
-    const onUp = () => {
-      document.removeEventListener("pointermove", onMove);
-      document.removeEventListener("pointerup", onUp);
-    };
-    document.addEventListener("pointermove", onMove);
-    document.addEventListener("pointerup", onUp);
-  }
-
-  function startResize(event: React.PointerEvent<HTMLDivElement>) {
-    event.preventDefault();
-    event.stopPropagation();
-    const startX = event.clientX;
-    const startY = event.clientY;
-    const startRect = panelRect;
-    const onMove = (moveEvent: PointerEvent) => {
-      setPanelRect(
-        clampPanelRect({
-          ...startRect,
-          width: startRect.width + moveEvent.clientX - startX,
-          height: startRect.height + moveEvent.clientY - startY
-        })
-      );
-    };
-    const onUp = () => {
-      document.removeEventListener("pointermove", onMove);
-      document.removeEventListener("pointerup", onUp);
-    };
-    document.addEventListener("pointermove", onMove);
-    document.addEventListener("pointerup", onUp);
-  }
-
   return (
-    <div className="drawer-backdrop">
-      <aside
-        className="detail-drawer"
-        aria-label="POD detail"
-        style={{
-          left: panelRect.left,
-          top: panelRect.top,
-          width: panelRect.width,
-          height: panelRect.height
-        }}
-      >
-        <div className="drawer-header" onPointerDown={startDrag}>
-          <div className="drawer-title">
-            <Move size={16} />
-            <div className="eyebrow">POD Detail</div>
-            <h2>{row?.pod_id_str || "Loading"}</h2>
-          </div>
-          <button className="icon-button" onClick={onClose} title="Close">
-            <X size={18} />
-          </button>
+    <section className="pod-inline-detail" aria-label="Inline POD detail">
+      <div className="inline-detail-header">
+        <div className="inline-detail-title">
+          <div className="eyebrow">POD Detail</div>
+          <h2>{row.pod_id_str}</h2>
+          <span>{row.mode_str} / {row.account_route_str || "-"}</span>
         </div>
-        {loading && (
-          <div className="drawer-loading">
-            <Loader2 className="spin" size={18} /> Loading latest state
-          </div>
-        )}
-        {row && (
-          <>
-            <div className="drawer-control-gate">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={controlsEnabled}
-                  onChange={(event) => setControlsEnabled(event.currentTarget.checked)}
-                />
-                Enable controls
-              </label>
-              <span>Actions stay disabled until enabled for this POD.</span>
-            </div>
-            <div className={`drawer-actions ${controlsEnabled ? "" : "disabled"}`}>
-              <button disabled={!controlsEnabled} onClick={() => onAction(row, "compare_reference")}>
-                Run DIFF
-              </button>
-              {OPS_ACTION_LIST.map((actionName) => (
-                <button key={actionName} disabled={!controlsEnabled} onClick={() => onAction(row, actionName)}>
-                  {actionLabel(actionName)}
-                </button>
-              ))}
-            </div>
-            <div className="drawer-tabs">
-              {(["stage", "timeline", "logs", "raw"] as DetailTab[]).map((tabName) => (
-                <button key={tabName} className={tab === tabName ? "active" : ""} onClick={() => onTab(tabName)}>
-                  {tabName === "stage" ? "Stage Inspector" : tabName}
-                </button>
-              ))}
-            </div>
-            <div className="drawer-body">
-              {tab === "stage" && <StageInspector detail={detail} selectedStageKey={selectedStageKey} onStageSelect={onStageSelect} />}
-              {tab === "timeline" && <TimelineTab events={detail?.debug_story_dict?.timeline_event_dict_list || []} />}
-              {tab === "logs" && <LogsTab events={detail?.event_dict_list || []} />}
-              {tab === "raw" && <RawTab detail={detail} />}
-            </div>
-          </>
-        )}
-        <div className="drawer-resize-handle" onPointerDown={startResize} title="Resize POD detail" />
-      </aside>
+        <button className="icon-button" onClick={onClose} title="Collapse">
+          <X size={18} />
+        </button>
+      </div>
+      {loading && (
+        <div className="inline-loading">
+          <Loader2 className="spin" size={18} /> Loading latest state
+        </div>
+      )}
+      <div className="inline-control-gate">
+        <label>
+          <input
+            type="checkbox"
+            checked={controlsEnabled}
+            onChange={(event) => setControlsEnabled(event.currentTarget.checked)}
+          />
+          Enable controls
+        </label>
+        <span>Actions stay disabled until enabled for this POD.</span>
+      </div>
+      <div className={`inline-actions ${controlsEnabled ? "" : "disabled"}`}>
+        <button disabled={!controlsEnabled} onClick={() => onAction(row, "compare_reference")}>
+          Run DIFF
+        </button>
+        {OPS_ACTION_LIST.map((actionName) => (
+          <button key={actionName} disabled={!controlsEnabled} onClick={() => onAction(row, actionName)}>
+            {actionLabel(actionName)}
+          </button>
+        ))}
+      </div>
+      <div className="inline-detail-tabs">
+        {(["stage", "execution", "equity", "timeline", "logs", "raw"] as DetailTab[]).map((tabName) => (
+          <button key={tabName} className={tab === tabName ? "active" : ""} onClick={() => onTab(tabName)}>
+            {tabName === "stage" ? "Stage" : tabName}
+          </button>
+        ))}
+      </div>
+      <div className="inline-detail-body">
+        {tab === "stage" && <StageInspector detail={detail || { pod_row_dict: row }} selectedStageKey={selectedStageKey} onStageSelect={onStageSelect} />}
+        {tab === "execution" && <ExecutionReceipt detail={detail} />}
+        {tab === "equity" && <EquityPanel detail={detail} />}
+        {tab === "timeline" && <TimelineTab events={detail?.debug_story_dict?.timeline_event_dict_list || []} />}
+        {tab === "logs" && <LogsTab events={detail?.event_dict_list || []} />}
+        {tab === "raw" && <RawTab detail={detail || { pod_row_dict: row }} />}
+      </div>
+    </section>
+  );
+}
+
+function ExecutionReceipt({ detail }: { detail: PodDetail | null }) {
+  const report = detail?.latest_execution_report_dict;
+  const rowList = report?.execution_row_dict_list || [];
+  if (!report) return <EmptyState text="No execution report was returned for this POD yet." />;
+  return (
+    <div className="detail-stack execution-receipt" aria-label="Execution receipt">
+      <div className="stage-evidence-grid">
+        <Metric label="Fills" value={report.fill_count_int ?? 0} />
+        <Metric label="ACK Coverage" value={`${report.broker_ack_count_int ?? 0} / ${report.broker_order_count_int ?? 0}`} />
+        <Metric label="Residuals" value={report.residual_count_int ?? 0} tone={(report.residual_count_int || 0) > 0 ? "red" : undefined} />
+        <Metric label="Open Coverage" value={`${report.fill_with_official_open_count_int ?? 0} / ${report.fill_count_int ?? 0}`} />
+        <Metric label="BPS vs Ref" value={formatBps(report.vplan_reference_slippage_bps_float)} tone={costTone(report.vplan_reference_slippage_bps_float)} />
+        <Metric label="BPS vs Open" value={formatBps(report.official_open_slippage_bps_float)} tone={costTone(report.official_open_slippage_bps_float)} />
+        <Metric label="$ vs Ref" value={formatMoney(report.vplan_reference_slippage_notional_float)} tone={costTone(report.vplan_reference_slippage_notional_float)} />
+        <Metric label="$ vs Open" value={formatMoney(report.official_open_slippage_notional_float)} tone={costTone(report.official_open_slippage_notional_float)} />
+      </div>
+      <div className="subtle-box">
+        <strong>Cost convention</strong>
+        <span>Positive BPS means worse execution cost; negative BPS means price improvement.</span>
+      </div>
+      <EvidenceTable
+        title="Asset receipt"
+        rows={rowList}
+        emptyText="No per-asset execution rows were returned."
+        columns={[
+          ["Asset", (item: ExecutionRow) => item.asset_str || "-"],
+          ["Side", (item: ExecutionRow) => item.side_str || "-"],
+          ["Planned", (item: ExecutionRow) => formatNumber(item.planned_order_delta_share_float)],
+          ["Filled", (item: ExecutionRow) => formatNumber(item.filled_share_float)],
+          ["Fill Px", (item: ExecutionRow) => formatNumber(item.fill_price_float)],
+          ["Ref Px", (item: ExecutionRow) => formatNumber(item.vplan_reference_price_float)],
+          ["Open Px", (item: ExecutionRow) => formatNumber(item.official_open_price_float)],
+          ["BPS Ref", (item: ExecutionRow) => <span className={costTone(item.vplan_reference_slippage_bps_float)}>{formatBps(item.vplan_reference_slippage_bps_float)}</span>],
+          ["BPS Open", (item: ExecutionRow) => <span className={costTone(item.official_open_slippage_bps_float)}>{formatBps(item.official_open_slippage_bps_float)}</span>],
+          ["$ Ref", (item: ExecutionRow) => <span className={costTone(item.vplan_reference_slippage_notional_float)}>{formatMoney(item.vplan_reference_slippage_notional_float)}</span>],
+          ["$ Open", (item: ExecutionRow) => <span className={costTone(item.official_open_slippage_notional_float)}>{formatMoney(item.official_open_slippage_notional_float)}</span>],
+          ["Order", (item: ExecutionRow) => item.latest_broker_order_status_str || "-"]
+        ]}
+      />
+    </div>
+  );
+}
+
+function EquityPanel({ detail }: { detail: PodDetail | null }) {
+  const pnl = detail?.pod_pnl_dict;
+  const pointList = pnl?.equity_point_dict_list || [];
+  const pointCount = pointList.length;
+  if (!pnl || pointCount === 0) {
+    return (
+      <div className="equity-panel" aria-label="Equity panel">
+        <EmptyState text="No EOD equity samples yet. The equity curve appears after the first EOD snapshot is written." />
+      </div>
+    );
+  }
+  return (
+    <div className="detail-stack equity-panel" aria-label="Equity panel">
+      <div className="stage-evidence-grid">
+        <Metric label="EOD Points" value={pnl.point_count_int ?? pointCount} />
+        <Metric label="Latest Equity" value={formatMoney(pnl.latest_equity_float)} />
+        <Metric label="Daily PnL" value={formatPnl(pnl.daily_pnl_float, pnl.daily_pnl_pct_float)} tone={pnlTone(pnl.daily_pnl_float)} />
+        <Metric label="Since Start" value={formatPnl(pnl.since_start_pnl_float, pnl.since_start_pnl_pct_float)} tone={pnlTone(pnl.since_start_pnl_float)} />
+      </div>
+      {pointCount === 1 ? (
+        <div className="subtle-box">
+          <strong>One EOD sample</strong>
+          <span>Curve starts after the next EOD sample. Latest date: {pointList[0]?.market_date_str || "-"}</span>
+        </div>
+      ) : (
+        <Sparkline pointList={pointList} />
+      )}
+      <EvidenceTable
+        title="EOD equity samples"
+        rows={pointList.slice(-8)}
+        emptyText="No EOD points were returned."
+        columns={[
+          ["Date", (item: EquityPoint) => item.market_date_str || "-"],
+          ["Equity", (item: EquityPoint) => formatMoney(item.equity_float)],
+          ["Cash", (item: EquityPoint) => formatMoney(item.cash_float)],
+          ["Daily", (item: EquityPoint) => formatPnl(item.daily_pnl_float, item.daily_pnl_pct_float)],
+          ["Since Start", (item: EquityPoint) => formatPnl(item.since_start_pnl_float, item.since_start_pnl_pct_float)]
+        ]}
+      />
+    </div>
+  );
+}
+
+function ModeEquitySummary({ environment }: { environment: CombinedBookEnvironment }) {
+  const pointCount = environment.carry_forward_point_count_int ?? environment.strict_point_count_int ?? environment.equity_point_dict_list?.length ?? 0;
+  return (
+    <div className="mode-summary">
+      <Metric label="Book Equity" value={formatMoney(environment.latest_equity_float)} />
+      <Metric label="Daily PnL" value={formatPnl(environment.daily_pnl_float, environment.daily_pnl_pct_float)} tone={pnlTone(environment.daily_pnl_float)} />
+      <Metric label="Since Start" value={formatPnl(environment.since_start_pnl_float, environment.since_start_pnl_pct_float)} tone={pnlTone(environment.since_start_pnl_float)} />
+      <Metric label="EOD Points" value={pointCount} />
+    </div>
+  );
+}
+
+function Sparkline({ pointList }: { pointList: EquityPoint[] }) {
+  const valueList = pointList
+    .map((point) => point.equity_float)
+    .filter((value): value is number => typeof value === "number" && !Number.isNaN(value));
+  if (valueList.length < 2) return <EmptyState text="Need at least two valid equity points for a curve." />;
+  const minValue = Math.min(...valueList);
+  const maxValue = Math.max(...valueList);
+  const range = maxValue - minValue || 1;
+  const pathStr = valueList
+    .map((value, index) => {
+      const x = (index / Math.max(1, valueList.length - 1)) * 100;
+      const y = 46 - ((value - minValue) / range) * 40;
+      return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+    })
+    .join(" ");
+  return (
+    <div className="sparkline-wrap" aria-label="POD equity curve">
+      <svg viewBox="0 0 100 52" role="img">
+        <path d={pathStr} />
+      </svg>
+      <div>
+        <strong>{formatMoney(valueList[valueList.length - 1])}</strong>
+        <span>{pointList[0]?.market_date_str || "-"} to {pointList[pointList.length - 1]?.market_date_str || "-"}</span>
+      </div>
     </div>
   );
 }
@@ -711,8 +944,8 @@ function StageMap({
 function renderStageEvidence(stageKey: string, detail: PodDetail | null) {
   const row = detail?.pod_row_dict;
   if (!row) return null;
-  const report = detail?.latest_execution_report_dict || {};
-  const vplan = detail?.latest_vplan_dict || {};
+  const report: ExecutionReport = detail?.latest_execution_report_dict || {};
+  const vplan: VPlanDetail = detail?.latest_vplan_dict || {};
   const decision = detail?.latest_decision_plan_dict || {};
   const eod = row.eod_snapshot_dict || {};
   const diff = detail?.latest_diff_dict || {};
@@ -737,7 +970,9 @@ function renderStageEvidence(stageKey: string, detail: PodDetail | null) {
           <Metric label="Target Exec" value={formatTime(row.latest_decision_plan_target_execution_timestamp_str || stringField(decision, "target_execution_timestamp_str"))} />
           <Metric label="Book" value={stringField(decision, "decision_book_type_str") || "-"} />
         </div>
-        <KeyValuePanel title="Target weights" value={decision.display_target_weight_map_dict} />
+        <ListPanel title="Assets to exit" values={decision.exit_asset_list || []} emptyText="No exit assets were returned." />
+        <KeyValuePanel title="Entry targets" value={decision.entry_target_weight_map_dict} />
+        <KeyValuePanel title="Full targets" value={decision.full_target_weight_map_dict || decision.display_target_weight_map_dict} />
       </div>
     );
   }
@@ -905,6 +1140,15 @@ function KeyValuePanel({ title, value }: { title: string; value: unknown }) {
   );
 }
 
+function ListPanel({ title, values, emptyText }: { title: string; values: string[]; emptyText: string }) {
+  return (
+    <div className="key-value-panel">
+      <strong>{title}</strong>
+      {values.length ? values.map((value) => <div key={value}><span>Asset</span><strong>{value}</strong></div>) : <span>{emptyText}</span>}
+    </div>
+  );
+}
+
 function RawTab({ detail }: { detail: PodDetail | null }) {
   if (!detail) return null;
   return (
@@ -1011,17 +1255,30 @@ interface AttentionRow {
   severity: Severity;
   state: string;
   reason: string;
+  stageKey: string;
+  stageLabel: string;
+  evidence: string;
+  timing: string;
+  freshness: string;
 }
 
 function buildAttentionRows(rows: PodRow[]): AttentionRow[] {
   return rows
-    .map((row) => ({
-      row,
-      group: queueGroup(row),
-      severity: effectiveSeverity(row),
-      state: stateSentence(row),
-      reason: shortReason(row)
-    }))
+    .map((row) => {
+      const stageKey = currentStageKey(row.lifecycle_step_dict_list || [], row) || "summary";
+      return {
+        row,
+        group: queueGroup(row),
+        severity: effectiveSeverity(row),
+        state: stateSentence(row),
+        reason: shortReason(row),
+        stageKey,
+        stageLabel: stageLabel(stageKey),
+        evidence: attentionEvidence(row),
+        timing: attentionTiming(row),
+        freshness: attentionFreshness(row)
+      };
+    })
     .filter((item) => item.group !== "Healthy")
     .sort((left, right) => {
       const groupDelta = groupRank(left.group) - groupRank(right.group);
@@ -1053,6 +1310,28 @@ function queueGroup(row: PodRow) {
 
 function countByGroup(rows: PodRow[], group: string) {
   return rows.filter((row) => queueGroup(row) === group).length;
+}
+
+function attentionEvidence(row: PodRow) {
+  const ack = row.missing_ack_count_int ? `ACK missing ${row.missing_ack_count_int}` : `ACK ${row.broker_ack_count_int || 0}`;
+  const fills = `Fill ${row.fill_count_int || 0}`;
+  const issues = row.latest_diff_open_issue_count_int ? `DIFF ${row.latest_diff_open_issue_count_int}` : "DIFF ok";
+  return `${ack} / ${fills} / ${issues}`;
+}
+
+function attentionTiming(row: PodRow) {
+  const target = row.latest_vplan_target_execution_timestamp_str || row.latest_decision_plan_target_execution_timestamp_str;
+  if (target) return `Target ${formatTime(target)}`;
+  if (row.latest_event_timestamp_str) return `Event ${formatTime(row.latest_event_timestamp_str)}`;
+  return "Target -";
+}
+
+function attentionFreshness(row: PodRow) {
+  const eod = row.eod_snapshot_dict || {};
+  const freshness = row.data_freshness_dict || {};
+  const eodStatus = stringField(eod, "status_str");
+  const podTime = freshness.pod_state_updated_timestamp_str || row.latest_pod_state_timestamp_str || row.latest_event_timestamp_str;
+  return eodStatus ? `EOD ${eodStatus}` : `State ${formatTime(podTime)}`;
 }
 
 function groupRank(group: string) {
@@ -1101,6 +1380,12 @@ function stageLabel(stageKey: string) {
   return labelMap[normalizeStageKey(stageKey)] || stageKey;
 }
 
+function tabForStage(stageKey?: string): DetailTab {
+  const stage = normalizeStageKey(stageKey);
+  if (stage === "ack" || stage === "fill") return "execution";
+  return "stage";
+}
+
 function stageChipStatus(step: LifecycleStep | undefined, row: PodRow) {
   const key = normalizeStageKey(step?.step_key_str);
   if (key === "ack") {
@@ -1123,31 +1408,6 @@ function stageChipStatus(step: LifecycleStep | undefined, row: PodRow) {
   if (key === "eod" && row.eod_snapshot_dict?.status_str) return String(row.eod_snapshot_dict.status_str);
   if (key === "diff" && row.latest_diff_status_str) return row.latest_diff_status_str;
   return step?.status_str || "-";
-}
-
-function initialPanelRect(): PanelRect {
-  if (typeof window === "undefined") return { left: 24, top: 76, width: 760, height: 720 };
-  const maxWidth = Math.max(300, window.innerWidth - 24);
-  const maxHeight = Math.max(320, window.innerHeight - 24);
-  return clampPanelRect({
-    left: Math.max(12, window.innerWidth - Math.min(860, maxWidth) - 24),
-    top: 76,
-    width: Math.min(860, Math.max(430, window.innerWidth - 48), maxWidth),
-    height: Math.min(820, Math.max(420, window.innerHeight - 110), maxHeight)
-  });
-}
-
-function clampPanelRect(rect: PanelRect): PanelRect {
-  if (typeof window === "undefined") return rect;
-  const maxWidth = Math.max(300, window.innerWidth - 24);
-  const maxHeight = Math.max(320, window.innerHeight - 24);
-  const minWidth = Math.min(430, maxWidth);
-  const minHeight = Math.min(360, maxHeight);
-  const width = Math.min(Math.max(rect.width, minWidth), maxWidth);
-  const height = Math.min(Math.max(rect.height, minHeight), maxHeight);
-  const left = Math.min(Math.max(rect.left, 12), Math.max(12, window.innerWidth - width - 12));
-  const top = Math.min(Math.max(rect.top, 12), Math.max(12, window.innerHeight - height - 12));
-  return { left, top, width, height };
 }
 
 function currentStageKey(steps: LifecycleStep[], row?: PodRow): string | undefined {
@@ -1220,6 +1480,10 @@ function rowByPodId(rows: PodRow[], podId: string) {
   return rows.find((row) => row.pod_id_str === podId);
 }
 
+function modeEnvironment(combinedBook: CombinedBook | undefined, mode: string) {
+  return combinedBook?.environment_dict_list?.find((environment) => environment.mode_str === mode);
+}
+
 function formatMoney(value?: number | null) {
   if (typeof value !== "number" || Number.isNaN(value)) return "-";
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
@@ -1238,6 +1502,22 @@ function formatBps(value?: number | null) {
 function formatPercent(value?: number | null) {
   if (typeof value !== "number" || Number.isNaN(value)) return "-";
   return `${formatNumber(value * 100)}%`;
+}
+
+function formatPnl(value?: number | null, pct?: number | null) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "-";
+  const pctText = typeof pct === "number" && !Number.isNaN(pct) ? ` (${formatPercent(pct)})` : "";
+  return `${formatMoney(value)}${pctText}`;
+}
+
+function costTone(value?: number | null) {
+  if (typeof value !== "number" || Number.isNaN(value) || value === 0) return undefined;
+  return value > 0 ? "red" : "green";
+}
+
+function pnlTone(value?: number | null) {
+  if (typeof value !== "number" || Number.isNaN(value) || value === 0) return undefined;
+  return value > 0 ? "green" : "red";
 }
 
 function stringField(value: unknown, key: string) {

@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./main";
 import type { DashboardSummary, PodDetail, PodRow } from "./types";
@@ -15,14 +15,14 @@ const lifecycleStepList = [
   { step_key_str: "diff", label_str: "DIFF", status_str: "not_run", severity_str: "gray" }
 ];
 
-const podRow: PodRow = {
+const livePodRow: PodRow = {
   pod_id_str: "pod_live_01",
   mode_str: "live",
   account_route_str: "U123",
   strategy_import_str: "strategies.example",
-  health_str: "green",
-  next_action_str: "No action",
-  reason_code_str: "ok",
+  health_str: "yellow",
+  next_action_str: "post_execution_reconcile",
+  reason_code_str: "waiting_for_post_execution_reconcile",
   equity_float: 100000,
   cash_float: 50000,
   position_count_int: 2,
@@ -33,14 +33,38 @@ const podRow: PodRow = {
   latest_vplan_status_str: "submitted",
   latest_vplan_id_int: 7,
   latest_vplan_submission_timestamp_str: "2026-05-20T12:00:00Z",
+  latest_vplan_target_execution_timestamp_str: "2026-05-21T13:30:00Z",
   latest_submit_ack_status_str: "complete",
   latest_reconciliation_status_str: "pending",
   latest_reconciliation_timestamp_str: "2026-05-20T12:05:00Z",
+  latest_diff_status_str: "green",
+  latest_diff_open_issue_count_int: 0,
   broker_ack_count_int: 1,
   broker_order_count_int: 1,
   fill_count_int: 1,
   missing_ack_count_int: 0,
+  eod_snapshot_dict: { status_str: "waiting", severity_str: "gray" },
   lifecycle_step_dict_list: lifecycleStepList,
+  required_action_dict: {
+    label_str: "Waiting reconcile",
+    severity_str: "yellow",
+    detail_str: "Broker fills exist; reconcile is pending."
+  },
+  debug_summary_dict: {
+    severity_str: "yellow",
+    verdict_label_str: "Waiting reconcile",
+    primary_reason_str: "Broker fills exist; reconcile is pending."
+  }
+};
+
+const paperPodRow: PodRow = {
+  ...livePodRow,
+  pod_id_str: "pod_paper_01",
+  mode_str: "paper",
+  account_route_str: "PAPER",
+  health_str: "green",
+  next_action_str: "No action",
+  reason_code_str: "ok",
   required_action_dict: {
     label_str: "No action",
     severity_str: "green",
@@ -55,17 +79,55 @@ const podRow: PodRow = {
 
 const summaryPayload: DashboardSummary = {
   as_of_timestamp_str: "2026-05-20T12:00:00Z",
-  pod_row_dict_list: [podRow],
+  pod_row_dict_list: [livePodRow, paperPodRow],
   alert_dict_list: [],
   alert_summary_dict: { total_count_int: 0 },
-  mode_list: ["live"]
+  mode_list: ["live", "paper"],
+  combined_book_dict: {
+    environment_dict_list: [
+      {
+        mode_str: "live",
+        latest_equity_float: 100750,
+        daily_pnl_float: 250,
+        daily_pnl_pct_float: 0.00249,
+        since_start_pnl_float: 750,
+        since_start_pnl_pct_float: 0.0075,
+        carry_forward_point_count_int: 3
+      },
+      {
+        mode_str: "paper",
+        latest_equity_float: 50750,
+        daily_pnl_float: -50,
+        daily_pnl_pct_float: -0.00098,
+        since_start_pnl_float: 750,
+        since_start_pnl_pct_float: 0.015,
+        carry_forward_point_count_int: 1
+      }
+    ]
+  }
 };
 
 const detailPayload: PodDetail = {
-  pod_row_dict: podRow,
-  required_action_dict: podRow.required_action_dict,
+  pod_row_dict: livePodRow,
+  required_action_dict: livePodRow.required_action_dict,
   lifecycle_step_dict_list: lifecycleStepList,
   event_dict_list: [],
+  pod_pnl_dict: {
+    status_str: "available",
+    source_str: "pod_state_history.eod",
+    point_count_int: 3,
+    latest_market_date_str: "2026-05-20",
+    latest_equity_float: 100750,
+    daily_pnl_float: 250,
+    daily_pnl_pct_float: 0.00249,
+    since_start_pnl_float: 750,
+    since_start_pnl_pct_float: 0.0075,
+    equity_point_dict_list: [
+      { market_date_str: "2026-05-18", equity_float: 100000, cash_float: 50000, since_start_pnl_float: 0 },
+      { market_date_str: "2026-05-19", equity_float: 100500, cash_float: 50200, daily_pnl_float: 500, since_start_pnl_float: 500 },
+      { market_date_str: "2026-05-20", equity_float: 100750, cash_float: 50350, daily_pnl_float: 250, since_start_pnl_float: 750 }
+    ]
+  },
   debug_story_dict: {
     timeline_event_dict_list: [
       {
@@ -82,7 +144,9 @@ const detailPayload: PodDetail = {
     status_str: "complete",
     decision_book_type_str: "full_target_weight_book",
     target_execution_timestamp_str: "2026-05-21T13:30:00Z",
-    display_target_weight_map_dict: { AAPL: 0.6 }
+    exit_asset_list: ["MSFT"],
+    entry_target_weight_map_dict: { AAPL: 0.6 },
+    full_target_weight_map_dict: { AAPL: 0.6, MSFT: 0 }
   },
   latest_vplan_dict: {
     vplan_id_int: 7,
@@ -123,28 +187,31 @@ const detailPayload: PodDetail = {
     broker_order_count_int: 1,
     broker_ack_count_int: 1,
     residual_count_int: 1,
-    official_open_slippage_bps_float: 49.75,
+    official_open_slippage_bps_float: 49.7512,
+    official_open_slippage_notional_float: 14,
     vplan_reference_slippage_bps_float: 100,
-    fill_row_dict_list: [
-      {
-        asset_str: "AAPL",
-        fill_amount_float: 28,
-        fill_price_float: 101,
-        fill_timestamp_str: "2026-05-20T12:03:00Z",
-        official_open_price_float: 100.5
-      }
-    ],
+    vplan_reference_slippage_notional_float: 28,
     execution_row_dict_list: [
       {
         asset_str: "AAPL",
+        side_str: "buy",
+        planned_order_delta_share_float: 28,
+        filled_share_float: 28,
+        fill_price_float: 101,
+        official_open_price_float: 100.5,
+        vplan_reference_price_float: 100,
         target_share_float: 30,
         broker_share_float: 29,
         residual_share_float: 1,
+        official_open_slippage_bps_float: 49.7512,
+        official_open_slippage_notional_float: 14,
+        vplan_reference_slippage_bps_float: 100,
+        vplan_reference_slippage_notional_float: 28,
         latest_broker_order_status_str: "Filled"
       }
     ]
   },
-  latest_diff_dict: { status_str: "not_run" }
+  latest_diff_dict: { status_str: "green", open_issue_count_int: 0 }
 };
 
 function jsonResponse(payload: unknown, init?: ResponseInit) {
@@ -157,11 +224,12 @@ function jsonResponse(payload: unknown, init?: ResponseInit) {
   );
 }
 
-function installFetchMock() {
+function installFetchMock(summary: DashboardSummary = summaryPayload, detail: PodDetail = detailPayload) {
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (url === "/api/pods") return jsonResponse(summaryPayload);
-    if (url === "/api/pods/pod_live_01") return jsonResponse(detailPayload);
+    if (url === "/api/pods") return jsonResponse(summary);
+    if (url === "/api/pods/pod_live_01") return jsonResponse(detail);
+    if (url === "/api/pods/pod_paper_01") return jsonResponse({ ...detail, pod_row_dict: paperPodRow });
     if (url === "/api/action-token") return jsonResponse({ action_token_str: "test-token" });
     if (url === "/api/pods/pod_live_01/actions/tick" && init?.method === "POST") {
       return jsonResponse({
@@ -190,22 +258,27 @@ function installFetchMock() {
   return fetchMock;
 }
 
-function firePointer(target: Document | Element, typeStr: string, clientX: number, clientY: number) {
-  const event = new Event(typeStr, { bubbles: true });
-  Object.defineProperty(event, "clientX", { value: clientX });
-  Object.defineProperty(event, "clientY", { value: clientY });
-  fireEvent(target, event);
-}
-
-async function openDetailPanel() {
+async function openInlineDetail() {
   render(<App />);
-  const inspectButton = await screen.findByRole("button", { name: "Inspect" });
-  fireEvent.click(inspectButton);
+  const card = await livePodCard();
+  fireEvent.click(within(card).getByRole("button", { name: "Inspect" }));
   await screen.findByText("Enable controls");
-  return screen.getByLabelText("POD detail");
+  return screen.getByLabelText("Inline POD detail");
 }
 
-describe("Dashboard V2 operator controls", () => {
+async function livePodCard() {
+  const livePodLabelList = await screen.findAllByText("pod_live_01");
+  const card = livePodLabelList.map((label) => label.closest(".pod-row-card")).find(Boolean) as HTMLElement | undefined;
+  if (!card) throw new Error("live POD row was not rendered");
+  return card;
+}
+
+async function clickLiveStage(stageNamePattern: RegExp) {
+  const card = await livePodCard();
+  fireEvent.click(within(card).getByRole("button", { name: stageNamePattern }));
+}
+
+describe("Dashboard V2 operator cockpit", () => {
   beforeEach(() => {
     installFetchMock();
   });
@@ -215,132 +288,112 @@ describe("Dashboard V2 operator controls", () => {
     vi.restoreAllMocks();
   });
 
-  it("keeps row actions inspect-only and gates detail actions", async () => {
+  it("renders Attention above separate LIVE and PAPER sections", async () => {
     render(<App />);
 
-    const inspectButton = await screen.findByRole("button", { name: "Inspect" });
+    const attentionHeading = await screen.findByRole("heading", { name: "Attention Queue" });
+    const liveHeading = screen.getByRole("heading", { name: "LIVE PODs" });
+    expect(screen.getByRole("heading", { name: "PAPER PODs" })).toBeInTheDocument();
+    expect(screen.queryByText("Live / Paper PODs")).not.toBeInTheDocument();
+    expect(attentionHeading.compareDocumentPosition(liveHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    const attention = attentionHeading.closest("section") as HTMLElement;
+    expect(within(attention).getByText("pod_live_01")).toBeInTheDocument();
+    expect(within(attention).getByText("live / Reconcile")).toBeInTheDocument();
+    expect(within(attention).getByText("ACK 1 / Fill 1 / DIFF ok")).toBeInTheDocument();
+    expect(within(attention).getByText(/Target/)).toBeInTheDocument();
+  });
+
+  it("keeps dangerous controls inside inline detail and disabled until enabled", async () => {
+    render(<App />);
+
     expect(screen.queryByText("Recent Actions")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Action status")).not.toBeInTheDocument();
+    const card = await livePodCard();
+    fireEvent.click(within(card).getByRole("button", { name: "Inspect" }));
 
-    const rowActions = inspectButton.closest(".row-actions");
-    expect(rowActions).not.toBeNull();
-    expect(within(rowActions as HTMLElement).getAllByRole("button")).toHaveLength(1);
-    expect(within(rowActions as HTMLElement).queryByText("DIFF")).not.toBeInTheDocument();
-    expect(within(rowActions as HTMLElement).queryByText("Tick")).not.toBeInTheDocument();
-    expect(within(rowActions as HTMLElement).queryByText("Reconcile")).not.toBeInTheDocument();
-
-    fireEvent.click(inspectButton);
-    const drawer = await screen.findByLabelText("POD detail");
-    await screen.findByText("Enable controls");
+    const detail = await screen.findByLabelText("Inline POD detail");
+    expect(screen.queryByLabelText("POD detail")).not.toBeInTheDocument();
     const actionLabelList = ["Run DIFF", "Tick", "Submit", "Reconcile", "EOD"];
 
     for (const labelStr of actionLabelList) {
-      expect(within(drawer).getByRole("button", { name: labelStr })).toBeDisabled();
+      expect(within(detail).getByRole("button", { name: labelStr })).toBeDisabled();
     }
 
-    fireEvent.click(within(drawer).getByLabelText("Enable controls"));
+    fireEvent.click(within(detail).getByLabelText("Enable controls"));
 
     for (const labelStr of actionLabelList) {
-      expect(within(drawer).getByRole("button", { name: labelStr })).toBeEnabled();
+      expect(within(detail).getByRole("button", { name: labelStr })).toBeEnabled();
     }
   });
 
-  it("opens Fill evidence from one stage chip click", async () => {
+  it("opens Fill stage directly into the execution receipt with BPS and dollar impact", async () => {
     render(<App />);
 
-    const fillChip = await screen.findByRole("button", { name: /Fill 1 fill/i });
-    fireEvent.click(fillChip);
+    await clickLiveStage(/Fill 1 fill/i);
+    const detail = await screen.findByLabelText("Inline POD detail");
 
-    const drawer = await screen.findByLabelText("POD detail");
-    expect(within(drawer).getByLabelText("Stage Inspector evidence")).toBeInTheDocument();
-    expect(within(drawer).getByRole("heading", { name: "Fill" })).toBeInTheDocument();
-    expect(within(drawer).getAllByText("Fills").length).toBeGreaterThan(0);
-    expect(within(drawer).getByText("Open Coverage")).toBeInTheDocument();
-    expect(within(drawer).getByText("AAPL")).toBeInTheDocument();
-    expect(within(drawer).getByText("101")).toBeInTheDocument();
+    expect(within(detail).getByLabelText("Execution receipt")).toBeInTheDocument();
+    expect(within(detail).getByText("BPS vs Ref")).toBeInTheDocument();
+    expect(within(detail).getByText("BPS vs Open")).toBeInTheDocument();
+    expect(within(detail).getByText("$ vs Ref")).toBeInTheDocument();
+    expect(within(detail).getByText("$ vs Open")).toBeInTheDocument();
+    expect(within(detail).getByText("Positive BPS means worse execution cost; negative BPS means price improvement.")).toBeInTheDocument();
+    expect(within(detail).getByText("AAPL")).toBeInTheDocument();
+    expect(within(detail).getAllByText("100 bps").length).toBeGreaterThan(0);
+    expect(within(detail).getAllByText("49.7512 bps").length).toBeGreaterThan(0);
+    expect(within(detail).getAllByText("$28").length).toBeGreaterThan(0);
   });
 
-  it("opens ACK evidence and missing ACK state from one stage chip click", async () => {
-    const ackMissingRow: PodRow = {
-      ...podRow,
-      latest_submit_ack_status_str: "missing_ack",
-      missing_ack_count_int: 1,
-      lifecycle_step_dict_list: lifecycleStepList.map((step) =>
-        step.step_key_str === "ack" ? { ...step, status_str: "missing_ack", severity_str: "red" } : step
-      )
-    };
-    const ackMissingDetail: PodDetail = {
+  it("shows assets to exit in the Decision stage", async () => {
+    render(<App />);
+
+    await clickLiveStage(/Decision complete/i);
+    const detail = await screen.findByLabelText("Inline POD detail");
+
+    expect(within(detail).getByText("Assets to exit")).toBeInTheDocument();
+    expect(within(detail).getAllByText("MSFT").length).toBeGreaterThan(0);
+    expect(within(detail).getByText("Entry targets")).toBeInTheDocument();
+    expect(within(detail).getByText("Full targets")).toBeInTheDocument();
+  });
+
+  it("handles empty, single-point, and multi-point equity states", async () => {
+    installFetchMock(summaryPayload, { ...detailPayload, pod_pnl_dict: { status_str: "unavailable", equity_point_dict_list: [] } });
+    const emptyDetail = await openInlineDetail();
+    fireEvent.click(within(emptyDetail).getByRole("button", { name: "equity" }));
+    expect(within(emptyDetail).getByText("No EOD equity samples yet. The equity curve appears after the first EOD snapshot is written.")).toBeInTheDocument();
+
+    cleanup();
+    installFetchMock(summaryPayload, {
       ...detailPayload,
-      pod_row_dict: ackMissingRow,
-      lifecycle_step_dict_list: ackMissingRow.lifecycle_step_dict_list
-    };
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/pods") return jsonResponse({ ...summaryPayload, pod_row_dict_list: [ackMissingRow] });
-      if (url === "/api/pods/pod_live_01") return jsonResponse(ackMissingDetail);
-      return jsonResponse({ message_str: `unexpected ${url}` }, { status: 404 });
+      pod_pnl_dict: {
+        status_str: "available",
+        point_count_int: 1,
+        latest_equity_float: 100000,
+        equity_point_dict_list: [{ market_date_str: "2026-05-20", equity_float: 100000 }]
+      }
     });
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const singleDetail = await openInlineDetail();
+    fireEvent.click(within(singleDetail).getByRole("button", { name: "equity" }));
+    expect(within(singleDetail).getByText("One EOD sample")).toBeInTheDocument();
 
-    render(<App />);
-
-    fireEvent.click(await screen.findByRole("button", { name: /ACK missing 1/i }));
-    const drawer = await screen.findByLabelText("POD detail");
-
-    expect(within(drawer).getByRole("heading", { name: "ACK" })).toBeInTheDocument();
-    expect(within(drawer).getByText("Broker ACK evidence")).toBeInTheDocument();
-    expect(within(drawer).getByText("Missing")).toBeInTheDocument();
-    expect(within(drawer).getByText("broker_acked")).toBeInTheDocument();
-  });
-
-  it("opens Reconcile evidence from one stage chip click", async () => {
-    render(<App />);
-
-    fireEvent.click(await screen.findByRole("button", { name: /Reconcile pending/i }));
-    const drawer = await screen.findByLabelText("POD detail");
-
-    expect(within(drawer).getByRole("heading", { name: "Reconcile" })).toBeInTheDocument();
-    expect(within(drawer).getByText("Model vs broker")).toBeInTheDocument();
-    expect(within(drawer).getByText("Residual")).toBeInTheDocument();
-    expect(within(drawer).getByText("Filled")).toBeInTheDocument();
+    cleanup();
+    installFetchMock();
+    const curveDetail = await openInlineDetail();
+    fireEvent.click(within(curveDetail).getByRole("button", { name: "equity" }));
+    expect(within(curveDetail).getByLabelText("POD equity curve")).toBeInTheDocument();
   });
 
   it("shows a compact action status strip after a session action starts", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
-    render(<App />);
+    const detail = await openInlineDetail();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Inspect" }));
-    const drawer = await screen.findByLabelText("POD detail");
-    fireEvent.click(within(drawer).getByLabelText("Enable controls"));
-    fireEvent.click(within(drawer).getByRole("button", { name: "Tick" }));
+    fireEvent.click(within(detail).getByLabelText("Enable controls"));
+    fireEvent.click(within(detail).getByRole("button", { name: "Tick" }));
 
     const strip = await screen.findByLabelText("Action status");
     expect(within(strip).getByText("Tick")).toBeInTheDocument();
     expect(within(strip).getByText("pod_live_01")).toBeInTheDocument();
     expect(within(strip).queryByText("Recent Actions")).not.toBeInTheDocument();
-  });
-
-  it("moves and resizes the POD detail panel", async () => {
-    const drawer = await openDetailPanel();
-    const header = drawer.querySelector(".drawer-header") as HTMLElement;
-    const resizeHandle = drawer.querySelector(".drawer-resize-handle") as HTMLElement;
-
-    const startLeftStr = (drawer as HTMLElement).style.left;
-    const startTopStr = (drawer as HTMLElement).style.top;
-    firePointer(header, "pointerdown", 120, 120);
-    firePointer(document, "pointermove", 170, 155);
-    firePointer(document, "pointerup", 170, 155);
-
-    await waitFor(() => expect((drawer as HTMLElement).style.left).not.toBe(startLeftStr));
-    expect((drawer as HTMLElement).style.top).not.toBe(startTopStr);
-
-    const startWidthStr = (drawer as HTMLElement).style.width;
-    const startHeightStr = (drawer as HTMLElement).style.height;
-    firePointer(resizeHandle, "pointerdown", 500, 500);
-    firePointer(document, "pointermove", 560, 545);
-    firePointer(document, "pointerup", 560, 545);
-
-    await waitFor(() => expect((drawer as HTMLElement).style.width).not.toBe(startWidthStr));
-    expect((drawer as HTMLElement).style.height).not.toBe(startHeightStr);
   });
 });

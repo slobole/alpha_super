@@ -2602,14 +2602,21 @@ def test_dashboard_v2_source_has_stage_map_and_no_legacy_nav():
     assert "StageMap" in main_tsx_str
     assert "MiniStageRail" in main_tsx_str
     assert "StageInspector" in main_tsx_str
+    assert "InlinePodDetail" in main_tsx_str
+    assert "ExecutionReceipt" in main_tsx_str
+    assert "EquityPanel" in main_tsx_str
     assert "ActionStatusStrip" in main_tsx_str
+    assert "LIVE PODs" in main_tsx_str
+    assert "PAPER PODs" in main_tsx_str
+    assert "Assets to exit" in main_tsx_str
+    assert "BPS vs Ref" in main_tsx_str
+    assert "BPS vs Open" in main_tsx_str
     assert "POD lifecycle stage map" in main_tsx_str
     assert "currentStageKey" in main_tsx_str
     assert "selectedStageKey" in main_tsx_str
+    assert "expandedPodId" in main_tsx_str
     assert "debug_story_dict?.timeline_event_dict_list" in main_tsx_str
     assert "Enable controls" in main_tsx_str
-    assert "onPointerDown={startDrag}" in main_tsx_str
-    assert "drawer-resize-handle" in main_tsx_str
     assert "disabled={!controlsEnabled}" in main_tsx_str
     pod_row_card_str = main_tsx_str.split("function PodRowCard", 1)[1].split("function MiniStageRail", 1)[0]
     assert "compare_reference" not in pod_row_card_str
@@ -2617,11 +2624,15 @@ def test_dashboard_v2_source_has_stage_map_and_no_legacy_nav():
     assert "stage-map" in styles_str
     assert "mini-stage-rail" in styles_str
     assert "stage-inspector" in styles_str
+    assert "pod-inline-detail" in styles_str
+    assert "inline-detail-tabs" in styles_str
+    assert "mode-summary" in styles_str
     assert "action-status-strip" in styles_str
-    assert "drawer-control-gate" in styles_str
-    assert "drawer-resize-handle" in styles_str
+    assert "detail-drawer" not in styles_str
+    assert "drawer-resize-handle" not in styles_str
     assert "jobs-surface" not in styles_str
     assert "Recent Actions" not in main_tsx_str
+    assert "Live / Paper PODs" not in main_tsx_str
     assert "legacy-link" not in styles_str
     assert "/legacy" not in main_tsx_str
     assert "Legacy" not in main_tsx_str

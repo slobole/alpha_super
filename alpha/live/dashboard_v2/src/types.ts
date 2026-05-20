@@ -6,7 +6,7 @@ export interface DashboardSummary {
   alert_dict_list: DashboardAlert[];
   alert_summary_dict: Record<string, number>;
   mode_list: string[];
-  combined_book_dict?: Record<string, unknown>;
+  combined_book_dict?: CombinedBook;
 }
 
 export interface ActionToken {
@@ -122,7 +122,9 @@ export interface ExecutionRow {
   official_open_price_float?: number | null;
   vplan_reference_price_float?: number | null;
   official_open_slippage_bps_float?: number | null;
+  official_open_slippage_notional_float?: number | null;
   vplan_reference_slippage_bps_float?: number | null;
+  vplan_reference_slippage_notional_float?: number | null;
   latest_broker_order_status_str?: string | null;
 }
 
@@ -137,8 +139,22 @@ export interface ExecutionReport {
   official_open_slippage_notional_float?: number | null;
   vplan_reference_slippage_bps_float?: number | null;
   vplan_reference_slippage_notional_float?: number | null;
+  aggregate_official_open_slippage_notional_float?: number | null;
+  aggregate_vplan_reference_slippage_notional_float?: number | null;
   fill_row_dict_list?: FillRow[];
   execution_row_dict_list?: ExecutionRow[];
+}
+
+export interface DecisionPlanDetail {
+  status_str?: string;
+  decision_book_type_str?: string;
+  submission_timestamp_str?: string | null;
+  target_execution_timestamp_str?: string | null;
+  display_target_weight_map_dict?: Record<string, number | string | null>;
+  entry_target_weight_map_dict?: Record<string, number | string | null>;
+  full_target_weight_map_dict?: Record<string, number | string | null>;
+  exit_asset_list?: string[];
+  entry_priority_list?: string[];
 }
 
 export interface VPlanDetail {
@@ -182,6 +198,63 @@ export interface RehearsalStatus {
   ibkr_reference_status_str?: string;
   ibkr_open_price_status_str?: string;
   detail_str?: string;
+}
+
+export interface EquityPoint {
+  market_date_str?: string;
+  equity_float?: number | null;
+  cash_float?: number | null;
+  position_count_int?: number | null;
+  daily_pnl_float?: number | null;
+  daily_pnl_pct_float?: number | null;
+  since_start_pnl_float?: number | null;
+  since_start_pnl_pct_float?: number | null;
+  freshness_warning_str?: string | null;
+}
+
+export interface PodPnl {
+  status_str?: string;
+  source_str?: string;
+  point_count_int?: number;
+  latest_market_date_str?: string | null;
+  latest_equity_float?: number | null;
+  previous_market_date_str?: string | null;
+  previous_equity_float?: number | null;
+  daily_pnl_float?: number | null;
+  daily_pnl_pct_float?: number | null;
+  since_start_pnl_float?: number | null;
+  since_start_pnl_pct_float?: number | null;
+  equity_point_dict_list?: EquityPoint[];
+}
+
+export interface CombinedBookContribution {
+  pod_id_str?: string;
+  mode_str?: string;
+  latest_equity_float?: number | null;
+  daily_pnl_float?: number | null;
+  since_start_pnl_float?: number | null;
+  freshness_warning_str?: string | null;
+  equity_point_dict_list?: EquityPoint[];
+}
+
+export interface CombinedBookEnvironment {
+  mode_str?: string;
+  strict_point_count_int?: number;
+  carry_forward_point_count_int?: number;
+  latest_market_date_str?: string | null;
+  latest_equity_float?: number | null;
+  daily_pnl_float?: number | null;
+  daily_pnl_pct_float?: number | null;
+  since_start_pnl_float?: number | null;
+  since_start_pnl_pct_float?: number | null;
+  equity_point_dict_list?: EquityPoint[];
+  carry_forward_equity_point_dict_list?: EquityPoint[];
+  contribution_dict_list?: CombinedBookContribution[];
+  warning_dict_list?: Array<Record<string, unknown>>;
+}
+
+export interface CombinedBook {
+  environment_dict_list?: CombinedBookEnvironment[];
 }
 
 export interface PodRow {
@@ -237,8 +310,8 @@ export interface PodDetail {
   eod_snapshot_dict?: Record<string, unknown>;
   rehearsal_status_dict?: RehearsalStatus;
   debug_story_dict?: DebugStory;
-  pod_pnl_dict?: Record<string, unknown>;
-  latest_decision_plan_dict?: Record<string, unknown> | null;
+  pod_pnl_dict?: PodPnl;
+  latest_decision_plan_dict?: DecisionPlanDetail | null;
   latest_vplan_dict?: VPlanDetail | null;
   latest_execution_report_dict?: ExecutionReport | null;
   event_dict_list?: EventRow[];
