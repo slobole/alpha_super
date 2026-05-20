@@ -32,6 +32,7 @@ DEFAULT_CONFIG_PATH_STR = str(Path(__file__).resolve().parent / "dashboard_confi
 DEFAULT_RESULTS_ROOT_PATH_STR = "results"
 DEFAULT_EVENT_LOG_PATH_STR = str(Path(__file__).resolve().parent / "logs" / "live_events.jsonl")
 DEFAULT_EVENT_LIMIT_INT = 80
+DEFAULT_EVENT_LOG_BACKUP_SCAN_COUNT_INT = 10
 ALERT_SEVERITY_RANK_DICT = {"red": 0, "yellow": 1, "gray": 2, "green": 3}
 COMBINED_BOOK_MODE_ORDER_LIST = ["live", "paper", "incubation"]
 SAFE_INSPECT_COMMAND_NAME_LIST = [
@@ -708,18 +709,29 @@ def load_recent_event_dict_list(
     if not log_path_obj.exists():
         return []
     event_deque: deque[dict[str, Any]] = deque(maxlen=int(limit_int))
-    with log_path_obj.open("r", encoding="utf-8") as file_obj:
-        for line_str in file_obj:
-            line_str = line_str.strip()
-            if len(line_str) == 0:
-                continue
-            try:
-                event_dict = json.loads(line_str)
-            except json.JSONDecodeError:
-                continue
-            if _event_matches_pod_bool(event_dict, pod_id_str):
-                event_deque.append(event_dict)
+    for candidate_log_path_obj in _event_log_path_obj_list(log_path_obj):
+        with candidate_log_path_obj.open("r", encoding="utf-8") as file_obj:
+            for line_str in file_obj:
+                line_str = line_str.strip()
+                if len(line_str) == 0:
+                    continue
+                try:
+                    event_dict = json.loads(line_str)
+                except json.JSONDecodeError:
+                    continue
+                if _event_matches_pod_bool(event_dict, pod_id_str):
+                    event_deque.append(event_dict)
     return list(event_deque)
+
+
+def _event_log_path_obj_list(log_path_obj: Path) -> list[Path]:
+    candidate_log_path_obj_list: list[Path] = []
+    for backup_index_int in range(DEFAULT_EVENT_LOG_BACKUP_SCAN_COUNT_INT, 0, -1):
+        backup_log_path_obj = log_path_obj.with_name(f"{log_path_obj.name}.{backup_index_int}")
+        if backup_log_path_obj.exists():
+            candidate_log_path_obj_list.append(backup_log_path_obj)
+    candidate_log_path_obj_list.append(log_path_obj)
+    return candidate_log_path_obj_list
 
 
 def _latest_event_timestamp_str(log_path_str: str | None, pod_id_str: str) -> str | None:

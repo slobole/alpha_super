@@ -42,6 +42,102 @@ Prefer plain functions, explicit steps, and familiar names. Do not write "agent 
 
 Use the local reference file for the full text and attribution details.
 
+## Post-Change Verification
+
+After every meaningful code change, classify the diff by blast radius before
+the final response. The user should not need to run this manually; agents must
+use the local helper and then apply the matching review depth.
+
+Run:
+
+```bash
+uv run python scripts/review/triage.py
+```
+
+By default the helper reads `git diff --name-only` and also includes untracked
+non-ignored files, so brand-new scripts and tests are not missed.
+
+To classify a proposed or explicit path set:
+
+```bash
+uv run python scripts/review/triage.py --name-only alpha/live/runner.py
+uv run python scripts/review/triage.py --base HEAD
+```
+
+Tests are the hard gate. Agents are a soft review gate. If a review agent finds
+a real issue that tests missed, prefer adding or tightening a regression test.
+The main agent patches; review agents are read-only unless the user explicitly
+requests otherwise.
+
+### Tiers
+
+**Tier 0 - docs, comments, isolated tooling**
+
+- Scope: docs, comments, presentation artifacts, isolated tooling.
+- Required verification: relevant tests/checks only.
+- Required agents: none.
+- Escalate live runbooks, operator docs, or docs that change live behavior to
+  Tier 3.
+
+**Tier 1 - research and backtest-only work**
+
+- Scope: `strategies/**`, notebooks, research scripts, backtest-only
+  experiments.
+- Required verification: tests plus one quant-pitfalls agent.
+
+**Tier 2 - engine, shared utilities, indicators, metrics**
+
+- Scope: `alpha/engine/**`, shared data utilities, indicators, metrics,
+  portfolio utilities, and execution-sensitive shared helpers.
+- Required verification: tests plus quant-pitfalls, parity, and coverage
+  agents.
+
+**Tier 3 - live execution, orders, sizing, reconcile, released configs**
+
+- Scope: `alpha/live/**`, `alpha/live/releases/**`, live runner/scheduler,
+  order, reconcile, reference-price, sizing, dashboard/logging consumed by
+  live, and released pod YAML/config/state contract changes.
+- Required verification: tests, mandatory live-impact checklist, and parity,
+  failure-modes, and coverage agents.
+- Add a quant-pitfalls agent too when the live change also touches strategy,
+  backtest, sizing math, reference-price semantics, or quantitative behavior.
+
+If multiple tiers match, choose the highest tier and say which lower-tier
+surfaces were also touched.
+
+### Quant-Pitfalls Agent
+
+This is a full quant review, not just a lookahead check. It must explicitly
+check lookahead, survivorship, data mining, multiple comparisons, in-sample
+contamination, target leakage, regime dependence, sample size, corporate
+actions, adjustment type, cost/slippage realism, and live/backtest divergence.
+
+### Live-Impact Checklist
+
+For Tier 3 changes, explicitly answer:
+
+- Order timing semantics unchanged, especially next-open execution.
+- Sizing math unchanged, including `amount`, `target=True`, percent versus
+  value semantics.
+- Reference price source unchanged, with no silent close/open substitution.
+- State files, pickle files, SQLite schemas, and config formats backward
+  compatible unless intentionally migrated.
+- Logging fields consumed by dashboards or runbooks still present.
+- No new Windows VPS failure mode around paths, encodings, file locks,
+  idempotency, or process restarts.
+- Released pod YAMLs still parse and produce the same intended route/intent
+  unless the change explicitly targets those semantics.
+
+### Required Final Response Fields
+
+After code changes, the final response must state:
+
+- tier
+- agents used
+- findings fixed
+- tests run
+- residual risk
+
 ## Quantitative Correctness Standards
 
 This codebase is held to a strict standard of quantitative rigor. Every piece of code â€” strategies, indicators, metrics, data handling â€” must be bullet-proof against common quant pitfalls. **Simplicity is a virtue**: prefer the clearest, most direct implementation over clever abstractions.

@@ -26,6 +26,7 @@ import pickle
 
 from abc import ABC, abstractmethod
 from tqdm.auto import tqdm
+from alpha.live.logging_utils import log_event, log_trace_event
 from alpha.engine.plot import plot
 from alpha.engine.order import Order, MarketOrder, LimitOrder, StopOrder
 from alpha.engine.metrics import (
@@ -101,6 +102,13 @@ class Strategy(ABC):
             benchmark: 0.0 for benchmark in self._benchmarks
         }
         self._latest_close_price_ser = pd.Series(dtype=float)
+        self._structured_run_id_str: str | None = None
+        self._structured_audit_log_path_str: str | None = None
+        self._structured_trace_enabled_bool = False
+        self._structured_trace_log_path_str: str | None = None
+        self._structured_trace_log_root_path_str: str | None = None
+        self._structured_logging_error_count_int = 0
+        self._structured_last_logging_error_str: str | None = None
 
 
     # ------------------------------------------ 0 - INITIALIZATION  ------------------------------------------ #
@@ -108,6 +116,108 @@ class Strategy(ABC):
     @staticmethod
     def initialize_transactions() -> pd.DataFrame:
         return pd.DataFrame(columns=['trade_id', 'bar', 'asset', 'amount', 'price', 'total_value', 'order_id', 'commission'])
+
+    def configure_structured_logging(
+        self,
+        *,
+        run_id_str: str | None = None,
+        audit_log_path_str: str | None = None,
+        trace_enabled_bool: bool = False,
+        trace_log_path_str: str | None = None,
+        trace_log_root_path_str: str | None = None,
+    ) -> None:
+        self._structured_run_id_str = run_id_str
+        self._structured_audit_log_path_str = audit_log_path_str
+        self._structured_trace_enabled_bool = bool(trace_enabled_bool)
+        self._structured_trace_log_path_str = trace_log_path_str
+        self._structured_trace_log_root_path_str = trace_log_root_path_str
+
+    def _record_structured_logging_failure(self, exception_obj: Exception) -> None:
+        self._structured_logging_error_count_int += 1
+        self._structured_last_logging_error_str = str(exception_obj)
+
+    def _build_structured_log_payload_dict(
+        self,
+        payload_dict: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        structured_payload_dict: dict[str, object] = {
+            "mode_str": "backtest",
+            "pod_id_str": str(self.name),
+            "strategy_name_str": str(self.name),
+        }
+        if self._structured_run_id_str is not None:
+            structured_payload_dict["run_id_str"] = str(self._structured_run_id_str)
+        if self.current_bar is not None:
+            structured_payload_dict["bar_timestamp_str"] = pd.Timestamp(self.current_bar).isoformat()
+        if self.previous_bar is not None:
+            structured_payload_dict["previous_bar_timestamp_str"] = pd.Timestamp(self.previous_bar).isoformat()
+        if payload_dict is not None:
+            structured_payload_dict.update(payload_dict)
+        return structured_payload_dict
+
+    def log_audit_event(
+        self,
+        event_name_str: str,
+        payload_dict: dict[str, object] | None = None,
+    ) -> None:
+        if self._structured_audit_log_path_str is None:
+            return
+        try:
+            log_event(
+                event_name_str,
+                self._build_structured_log_payload_dict(payload_dict),
+                log_path_str=self._structured_audit_log_path_str,
+            )
+        except Exception as exception_obj:
+            self._record_structured_logging_failure(exception_obj)
+
+    def log_trace_event(
+        self,
+        event_name_str: str,
+        payload_dict: dict[str, object] | None = None,
+    ) -> str | None:
+        trace_log_root_path_str = self._structured_trace_log_root_path_str
+        try:
+            if trace_log_root_path_str is None:
+                return log_trace_event(
+                    event_name_str,
+                    self._build_structured_log_payload_dict(payload_dict),
+                    trace_enabled_bool=self._structured_trace_enabled_bool,
+                    trace_log_path_str=self._structured_trace_log_path_str,
+                )
+            return log_trace_event(
+                event_name_str,
+                self._build_structured_log_payload_dict(payload_dict),
+                trace_enabled_bool=self._structured_trace_enabled_bool,
+                trace_log_path_str=self._structured_trace_log_path_str,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
+        except Exception as exception_obj:
+            self._record_structured_logging_failure(exception_obj)
+            return None
+
+    def _build_order_log_payload_dict(
+        self,
+        order: Order,
+        extra_payload_dict: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        payload_dict: dict[str, object] = {
+            "asset_str": str(order.asset),
+            "order_id_int": int(order.id),
+            "order_type_str": order.__class__.__name__,
+            "order_unit_str": str(order.unit),
+            "order_amount_float": float(order.amount),
+            "target_bool": bool(order.target),
+        }
+        if order.trade_id is not None:
+            payload_dict["trade_id"] = order.trade_id
+        if isinstance(order, LimitOrder):
+            payload_dict["limit_price_float"] = float(order.limit_price)
+        if isinstance(order, StopOrder):
+            payload_dict["stop_price_float"] = float(order.stop_price)
+        if extra_payload_dict is not None:
+            payload_dict.update(extra_payload_dict)
+        return payload_dict
 
     def _compute_commission(self, shares):
         """IBKR-style: max(minimum, per_share * |shares|). Override for custom models."""
@@ -469,6 +579,15 @@ class Strategy(ABC):
                 f"Asset {asset_str} has missing current-bar prices on {self.current_bar}; "
                 f"liquidating at last available close from {liquidation_bar_ts.date()}."
             )
+            self.log_audit_event(
+                "engine.missing_price_position_liquidated",
+                {
+                    "asset_str": asset_str,
+                    "liquidation_bar_timestamp_str": liquidation_bar_ts.isoformat(),
+                    "liquidation_price_float": float(liquidation_price_float),
+                    "open_trade_count_int": int(len(open_trade_amount_ser)),
+                },
+            )
             self.clear_orders(asset=asset_str)
 
             for trade_id_obj, open_amount_float in open_trade_amount_ser.items():
@@ -555,6 +674,13 @@ class Strategy(ABC):
                     f"Asset {order.asset} has no tradable open on {self.current_bar}; "
                     f"canceling order {order.id}."
                 )
+                self.log_audit_event(
+                    "engine.order.canceled",
+                    self._build_order_log_payload_dict(
+                        order,
+                        {"reason_code_str": "missing_current_open"},
+                    ),
+                )
                 self.remove_order(order)
                 continue
 
@@ -596,6 +722,13 @@ class Strategy(ABC):
                     commission_sum_float += float(commission)
                 else:
                     # if the order is not triggered, remove it
+                    self.log_audit_event(
+                        "engine.order.canceled",
+                        self._build_order_log_payload_dict(
+                            order,
+                            {"reason_code_str": "limit_not_triggered"},
+                        ),
+                    )
                     self.remove_order(order)
 
             elif isinstance(order, StopOrder):
@@ -969,10 +1102,19 @@ class Strategy(ABC):
             (default: None, clears all orders).
         """
         if asset is None:
+            removed_order_count_int = len(self._orders)
             self._orders = []  # clear all orders
         else:
             # remove only orders for the given asset
-            self._orders = [o for o in self._orders if o.asset != asset]  
+            removed_order_count_int = len([o for o in self._orders if o.asset == asset])
+            self._orders = [o for o in self._orders if o.asset != asset]
+        self.log_audit_event(
+            "engine.orders.cleared",
+            {
+                "asset_str": str(asset) if asset is not None else None,
+                "removed_order_count_int": int(removed_order_count_int),
+            },
+        )
 
     def remove_order(self, order: Order):
         """
@@ -990,7 +1132,11 @@ class Strategy(ABC):
         parameters:
         - order: the order instance to be added.
         """
-        self._orders.append(order)    
+        self._orders.append(order)
+        self.log_audit_event(
+            "engine.order.submitted",
+            self._build_order_log_payload_dict(order),
+        )
     # ------------------------------------------ 3 - TRANSACTIONS & POSITIONS INTERFACE ------------------------------------------ #
     # transaction management
     def add_transaction(self, trade_id, bar, asset, amount, price, total_value, order_id, commission=0.0):
@@ -1012,6 +1158,20 @@ class Strategy(ABC):
         ]
         position_amount_float = float(self._position_amount_map.get(asset, 0.0)) + float(amount)
         self._position_amount_map[asset] = position_amount_float
+        self.log_audit_event(
+            "engine.order.executed",
+            {
+                "asset_str": str(asset),
+                "trade_id": trade_id,
+                "order_id_int": int(order_id),
+                "execution_bar_timestamp_str": pd.Timestamp(bar).isoformat(),
+                "amount_float": float(amount),
+                "price_float": float(price),
+                "total_value_float": float(total_value),
+                "commission_float": float(commission),
+                "position_after_float": float(position_amount_float),
+            },
+        )
 
     def get_transactions(self, bar=None):
         """

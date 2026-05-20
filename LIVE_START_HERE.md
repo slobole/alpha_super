@@ -55,9 +55,9 @@ Use this file for the short operator path.
 
 Use these when you need more detail:
 
-- [LIVE_RUNBOOK.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_RUNBOOK.md)
-- [LIVE_TECHNICAL_REFERENCE.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_TECHNICAL_REFERENCE.md)
-- [LIVE_TRADING_ARCHITECTURE.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_TRADING_ARCHITECTURE.md)
+- [LIVE_RUNBOOK.md](docs/live/LIVE_RUNBOOK.md)
+- [LIVE_TECHNICAL_REFERENCE.md](docs/live/LIVE_TECHNICAL_REFERENCE.md)
+- [LIVE_TRADING_ARCHITECTURE.md](docs/live/LIVE_TRADING_ARCHITECTURE.md)
 
 If this deployment uses the private Norgate artifact server, start it from the Norgate Windows node before client snapshot sync:
 
@@ -73,7 +73,7 @@ On each client VPS that uses snapshots, run this before starting `serve`:
 uv run python scripts\doctor_norgate_client.py
 ```
 
-The client doctor checks `config.env`, enabled release YAMLs, API auth, local snapshot download, manifest hashes, and the scheduler snapshot gate. Full short setup is in [LIVE_RUNBOOK.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_RUNBOOK.md#client-norgate-snapshot-check).
+The client doctor checks `config.env`, enabled release YAMLs, API auth, local snapshot download, manifest hashes, and the scheduler snapshot gate. Full short setup is in [LIVE_RUNBOOK.md](docs/live/LIVE_RUNBOOK.md#client-norgate-snapshot-check).
 
 ## The 5 Things To Remember
 
@@ -280,9 +280,9 @@ They say:
 
 ## Useful Files
 
-- [LIVE_RUNBOOK.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_RUNBOOK.md)
-- [LIVE_TECHNICAL_REFERENCE.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_TECHNICAL_REFERENCE.md)
-- [alpha/live/releases](C:/Users/User/Documents/workspace/alpha_super/alpha/live/releases)
+- [LIVE_RUNBOOK.md](docs/live/LIVE_RUNBOOK.md)
+- [LIVE_TECHNICAL_REFERENCE.md](docs/live/LIVE_TECHNICAL_REFERENCE.md)
+- [alpha/live/releases](alpha/live/releases)
 
 ## One-Line Mental Model
 

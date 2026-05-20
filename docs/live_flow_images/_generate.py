@@ -1,4 +1,4 @@
-"""Generate PNG diagrams for LIVE_FLOW_SQL_SIMPLIFICATION_REVIEW.md."""
+"""Generate PNG diagrams for docs/reviews/live/LIVE_FLOW_SQL_SIMPLIFICATION_REVIEW.md."""
 from __future__ import annotations
 
 from pathlib import Path

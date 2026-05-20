@@ -23,10 +23,15 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import sys
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
+REPO_ROOT_PATH = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT_PATH) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT_PATH))
 
 from alpha.engine.execution_timing import ExecutionTimingAnalyzer, SUPPORTED_TIMING_MODE_TUPLE
 
@@ -69,12 +74,11 @@ def _strategy_module_name_str(raw_strategy_ref_str: str) -> str:
     if strategy_path.suffix != ".py":
         raise ValueError(f"Strategy file path must end with .py: {raw_strategy_ref_str}")
 
-    repo_root_path = Path(__file__).resolve().parent
     try:
-        relative_strategy_path = strategy_path.relative_to(repo_root_path)
+        relative_strategy_path = strategy_path.relative_to(REPO_ROOT_PATH)
     except ValueError as exc:
         raise ValueError(
-            f"Strategy path must be inside repo root {repo_root_path}: {strategy_path}"
+            f"Strategy path must be inside repo root {REPO_ROOT_PATH}: {strategy_path}"
         ) from exc
 
     return ".".join(relative_strategy_path.with_suffix("").parts)

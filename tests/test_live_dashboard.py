@@ -1441,6 +1441,43 @@ def test_dashboard_event_loader_matches_norgate_sync_pod_id_list(tmp_path: Path)
     ]
 
 
+def test_dashboard_event_loader_reads_rotated_jsonl_backups(tmp_path: Path):
+    log_path_obj = tmp_path / "events.jsonl"
+    rotated_log_path_obj = tmp_path / "events.jsonl.1"
+    rotated_log_path_obj.write_text(
+        json.dumps(
+            {
+                "event_name_str": "submit_vplan_completed",
+                "event_timestamp_str": "2026-05-20T07:19:04+00:00",
+                "pod_id_str": "pod_test",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    log_path_obj.write_text(
+        json.dumps(
+            {
+                "event_name_str": "post_execution_reconcile_completed",
+                "event_timestamp_str": "2026-05-20T07:20:04+00:00",
+                "pod_id_str": "pod_test",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    event_dict_list = dashboard_module.load_recent_event_dict_list(
+        log_path_str=str(log_path_obj),
+        pod_id_str="pod_test",
+    )
+
+    assert [event_dict["event_name_str"] for event_dict in event_dict_list] == [
+        "submit_vplan_completed",
+        "post_execution_reconcile_completed",
+    ]
+
+
 def test_dashboard_html_contains_norgate_sync_panel():
     assert "Norgate Sync" in DASHBOARD_HTML_STR
     assert "renderNorgateSyncSection" in DASHBOARD_HTML_STR

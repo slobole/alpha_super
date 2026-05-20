@@ -14,6 +14,11 @@ def run_daily(
     show_signal_progress_bool: bool = True,
     audit_override_bool: bool | None = False,
     audit_sample_size_int: int | None = None,
+    run_id_str: str | None = None,
+    audit_log_path_str: str | None = None,
+    trace_enabled_bool: bool = False,
+    trace_log_path_str: str | None = None,
+    trace_log_root_path_str: str | None = None,
 ):
     vanilla_backtester = VanillaBacktester()
     return vanilla_backtester.run(
@@ -24,4 +29,9 @@ def run_daily(
         show_signal_progress_bool=show_signal_progress_bool,
         audit_override_bool=audit_override_bool,
         audit_sample_size_int=audit_sample_size_int,
+        run_id_str=run_id_str,
+        audit_log_path_str=audit_log_path_str,
+        trace_enabled_bool=trace_enabled_bool,
+        trace_log_path_str=trace_log_path_str,
+        trace_log_root_path_str=trace_log_root_path_str,
     )

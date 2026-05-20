@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 from collections import Counter
 from datetime import UTC, datetime, timedelta
@@ -468,6 +470,7 @@ def _build_release_log_payload_dict(
         "as_of_timestamp_str": as_of_ts.isoformat(),
         "pod_id_str": release_obj.pod_id_str,
         "release_id_str": release_obj.release_id_str,
+        "mode_str": release_obj.mode_str,
         "account_route_str": release_obj.account_route_str,
         "session_calendar_id_str": release_obj.session_calendar_id_str,
         "signal_clock_str": release_obj.signal_clock_str,
@@ -4430,7 +4433,11 @@ def main(argv_list: list[str] | None = None) -> int:
     as_of_ts = _parse_as_of_timestamp_ts(parsed_args_obj.as_of_timestamp_str)
 
     if _should_run_incubation_fanout_bool(parsed_args_obj):
-        detail_dict = _run_incubation_fanout_detail_dict(parsed_args_obj, as_of_ts)
+        if parsed_args_obj.json_output_bool:
+            with contextlib.redirect_stdout(io.StringIO()):
+                detail_dict = _run_incubation_fanout_detail_dict(parsed_args_obj, as_of_ts)
+        else:
+            detail_dict = _run_incubation_fanout_detail_dict(parsed_args_obj, as_of_ts)
         if parsed_args_obj.json_output_bool:
             print(json.dumps(detail_dict, indent=2, sort_keys=True))
         else:
@@ -4446,12 +4453,21 @@ def main(argv_list: list[str] | None = None) -> int:
     job_run_id_int = state_store_obj.record_job_start(parsed_args_obj.command_name_str)
 
     try:
-        detail_dict = _execute_runner_command_detail_dict(
-            parsed_args_obj=parsed_args_obj,
-            state_store_obj=state_store_obj,
-            as_of_ts=as_of_ts,
-            db_path_str=db_path_str,
-        )
+        if parsed_args_obj.json_output_bool:
+            with contextlib.redirect_stdout(io.StringIO()):
+                detail_dict = _execute_runner_command_detail_dict(
+                    parsed_args_obj=parsed_args_obj,
+                    state_store_obj=state_store_obj,
+                    as_of_ts=as_of_ts,
+                    db_path_str=db_path_str,
+                )
+        else:
+            detail_dict = _execute_runner_command_detail_dict(
+                parsed_args_obj=parsed_args_obj,
+                state_store_obj=state_store_obj,
+                as_of_ts=as_of_ts,
+                db_path_str=db_path_str,
+            )
 
         state_store_obj.record_job_finish(job_run_id_int, "completed", detail_dict)
         if parsed_args_obj.json_output_bool:

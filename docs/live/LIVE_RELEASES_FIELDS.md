@@ -49,8 +49,8 @@ Why it exists:
 So this is the exact deployment version, not just “DV2”.
 
 Used by:
-- manifest validation and storage in [release_manifest.py](C:/Users/User/Documents/workspace/alpha_super/alpha/live/release_manifest.py)
-- plan storage in [runner.py](C:/Users/User/Documents/workspace/alpha_super/alpha/live/runner.py)
+- manifest validation and storage in [release_manifest.py](../../alpha/live/release_manifest.py)
+- plan storage in [runner.py](../../alpha/live/runner.py)
 
 ---
 
@@ -68,8 +68,8 @@ Why it exists:
 - keeps releases grouped under one owner
 
 Used by:
-- release model and state persistence in [models.py](C:/Users/User/Documents/workspace/alpha_super/alpha/live/models.py)
-- order plans and pod state in [runner.py](C:/Users/User/Documents/workspace/alpha_super/alpha/live/runner.py)
+- release model and state persistence in [models.py](../../alpha/live/models.py)
+- order plans and pod state in [runner.py](../../alpha/live/runner.py)
 
 ---
 
@@ -100,8 +100,8 @@ In v1 effectively:
 - `1 pod = 1 strategy + 1 account + 1 release`
 
 Used by:
-- pod state lookup in [runner.py](C:/Users/User/Documents/workspace/alpha_super/alpha/live/runner.py)
-- uniqueness rule in [release_manifest.py](C:/Users/User/Documents/workspace/alpha_super/alpha/live/release_manifest.py)
+- pod state lookup in [runner.py](../../alpha/live/runner.py)
+- uniqueness rule in [release_manifest.py](../../alpha/live/release_manifest.py)
 
 ## 2. Routing field
 
@@ -119,7 +119,7 @@ Why it exists:
 - routing belongs to live infra, not research logic
 
 Used by:
-- broker session checks and snapshots in [runner.py](C:/Users/User/Documents/workspace/alpha_super/alpha/live/runner.py)
+- broker session checks and snapshots in [runner.py](../../alpha/live/runner.py)
 
 ## 3. Strategy reference
 
@@ -143,7 +143,7 @@ So the live target is:
 \]
 
 Used by:
-- strategy selection in [strategy_host.py](C:/Users/User/Documents/workspace/alpha_super/alpha/live/strategy_host.py)
+- strategy selection in [strategy_host.py](../../alpha/live/strategy_host.py)
 
 ## 4. Environment field
 
@@ -161,7 +161,7 @@ Why it exists:
 - runner should block execution if environment does not match
 
 Used by:
-- mode check in [runner.py](C:/Users/User/Documents/workspace/alpha_super/alpha/live/runner.py)
+- mode check in [runner.py](../../alpha/live/runner.py)
 
 ## 5. Timing fields
 
@@ -182,7 +182,7 @@ For this release it means:
 - build the decision snapshot after the daily close, with a small buffer
 
 Used by:
-- scheduling logic in [scheduler_utils.py](C:/Users/User/Documents/workspace/alpha_super/alpha/live/scheduler_utils.py)
+- scheduling logic in [scheduler_utils.py](../../alpha/live/scheduler_utils.py)
 
 ---
 
@@ -204,8 +204,8 @@ For this release:
 - broker order type becomes `MOO`
 
 Used by:
-- scheduling in [scheduler_utils.py](C:/Users/User/Documents/workspace/alpha_super/alpha/live/scheduler_utils.py)
-- broker order type mapping in [strategy_host.py](C:/Users/User/Documents/workspace/alpha_super/alpha/live/strategy_host.py)
+- scheduling in [scheduler_utils.py](../../alpha/live/scheduler_utils.py)
+- broker order type mapping in [strategy_host.py](../../alpha/live/strategy_host.py)
 
 ## 6. Data contract field
 
@@ -232,7 +232,7 @@ Right now in v1:
 
 Used by:
 - validation and future data routing
-- intraday guard in [strategy_host.py](C:/Users/User/Documents/workspace/alpha_super/alpha/live/strategy_host.py)
+- intraday guard in [strategy_host.py](../../alpha/live/strategy_host.py)
 
 ## 7. Actual strategy parameters
 
@@ -254,7 +254,7 @@ Why it exists:
 - it directly affects DV2 sizing and slot logic
 
 Used by:
-- DV2 host in [strategy_host.py](C:/Users/User/Documents/workspace/alpha_super/alpha/live/strategy_host.py)
+- DV2 host in [strategy_host.py](../../alpha/live/strategy_host.py)
 
 ---
 
@@ -267,8 +267,8 @@ Why it exists:
 - later, real broker state / pod state takes over
 
 Used by:
-- default pod initialization in [runner.py](C:/Users/User/Documents/workspace/alpha_super/alpha/live/runner.py)
-- strategy instantiation in [strategy_host.py](C:/Users/User/Documents/workspace/alpha_super/alpha/live/strategy_host.py)
+- default pod initialization in [runner.py](../../alpha/live/runner.py)
+- strategy instantiation in [strategy_host.py](../../alpha/live/strategy_host.py)
 
 So for your DV2 manifest, the true strategy params are only:
 
@@ -314,7 +314,7 @@ Why it exists:
 - lets you keep the manifest without deleting it
 
 Used by:
-- due-release selection and execution filtering in [release_manifest.py](C:/Users/User/Documents/workspace/alpha_super/alpha/live/release_manifest.py) and [runner.py](C:/Users/User/Documents/workspace/alpha_super/alpha/live/runner.py)
+- due-release selection and execution filtering in [release_manifest.py](../../alpha/live/release_manifest.py) and [runner.py](../../alpha/live/runner.py)
 
 ## Why there are “so many” fields
 

@@ -17,6 +17,7 @@ try:
     from strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq import DEFAULT_CONFIG as BASE_CONFIG
     from strategies.taa_df.strategy_taa_df_fallback_vix_cash_variant_utils import (
         build_vix_cash_variant_config,
+        build_linearity_1n_fallback_vix_cash_execution_timing_analysis_inputs,
         build_linearity_1n_fallback_vix_cash_friction_analysis_inputs,
         run_linearity_1n_fallback_vix_cash_friction_analysis,
         run_linearity_1n_fallback_vix_cash_variant,
@@ -26,6 +27,7 @@ except ModuleNotFoundError:
     from strategy_taa_df_btal_linearity_1n_fallback_qqq import DEFAULT_CONFIG as BASE_CONFIG
     from strategy_taa_df_fallback_vix_cash_variant_utils import (
         build_vix_cash_variant_config,
+        build_linearity_1n_fallback_vix_cash_execution_timing_analysis_inputs,
         build_linearity_1n_fallback_vix_cash_friction_analysis_inputs,
         run_linearity_1n_fallback_vix_cash_friction_analysis,
         run_linearity_1n_fallback_vix_cash_variant,
@@ -70,6 +72,14 @@ def build_friction_analysis_inputs(
         show_display_bool=show_display_bool,
         backtest_start_date_str=backtest_start_date_str,
         capital_base_float=capital_base_float,
+    )
+
+
+def build_execution_timing_analysis_inputs() -> dict[str, object]:
+    return build_linearity_1n_fallback_vix_cash_execution_timing_analysis_inputs(
+        strategy_name_str="strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash",
+        config=DEFAULT_CONFIG,
+        base_data_loader_fn=get_defense_first_linearity_1n_data,
     )
 
 

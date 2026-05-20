@@ -340,6 +340,31 @@ class DefenseFirstFallbackVixCashVariantTests(unittest.TestCase):
         self.assertAlmostEqual(strategy._capital_base, 12345.0)
         self.assertGreaterEqual(strategy.results.index.min(), pd.Timestamp("2020-03-02"))
 
+    def test_btal_1n_tqqq_vix_cash_exposes_execution_timing_hook(self):
+        variant_module = importlib.import_module(
+            "strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash"
+        )
+        base_loader_output = make_standard_loader_output(variant_module.DEFAULT_CONFIG)
+        execution_price_df = base_loader_output[0]
+
+        with patch.object(variant_module, "get_defense_first_data", return_value=base_loader_output):
+            with patch.object(
+                shared_vix_helper,
+                "load_helper_close_ser",
+                side_effect=make_helper_close_ser_side_effect(execution_price_df.index),
+            ):
+                strategy_input_dict = variant_module.build_execution_timing_analysis_inputs()
+
+        self.assertEqual(strategy_input_dict["order_generation_mode_str"], "signal_bar")
+        self.assertEqual(strategy_input_dict["risk_model_str"], "taa_rebalance")
+        self.assertEqual(strategy_input_dict["entry_timing_str_tuple"], ("same_close_moc", "next_open", "next_close"))
+        self.assertEqual(strategy_input_dict["default_entry_timing_str"], "next_open")
+
+        strategy_obj = strategy_input_dict["strategy_factory_fn"]()
+        self.assertEqual(strategy_obj.name, "strategy_taa_df_btal_1n_fallback_tqqq_vix_cash")
+        self.assertIn(pd.Timestamp("2020-01-31"), strategy_obj.rebalance_weight_df.index)
+        self.assertTrue(hasattr(strategy_obj, "daily_target_weights"))
+
     def test_btal_linearity_1n_vix_cash_variant_smoke(self):
         self._run_smoke_variant(
             module_name_str="strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash",
@@ -379,6 +404,35 @@ class DefenseFirstFallbackVixCashVariantTests(unittest.TestCase):
         self.assertEqual(captured_config_list[0].end_date_str, "2020-03-31")
         self.assertAlmostEqual(strategy._capital_base, 12345.0)
         self.assertGreaterEqual(strategy.results.index.min(), pd.Timestamp("2020-03-02"))
+
+    def test_btal_linearity_1n_qqq_vix_cash_exposes_execution_timing_hook(self):
+        variant_module = importlib.import_module(
+            "strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash"
+        )
+        base_loader_output = make_linearity_loader_output(variant_module.DEFAULT_CONFIG)
+        execution_price_df = base_loader_output[0]
+
+        with patch.object(
+            variant_module,
+            "get_defense_first_linearity_1n_data",
+            return_value=base_loader_output,
+        ):
+            with patch.object(
+                shared_vix_helper,
+                "load_helper_close_ser",
+                side_effect=make_helper_close_ser_side_effect(execution_price_df.index),
+            ):
+                strategy_input_dict = variant_module.build_execution_timing_analysis_inputs()
+
+        self.assertEqual(strategy_input_dict["order_generation_mode_str"], "signal_bar")
+        self.assertEqual(strategy_input_dict["risk_model_str"], "taa_rebalance")
+        self.assertEqual(strategy_input_dict["entry_timing_str_tuple"], ("same_close_moc", "next_open", "next_close"))
+        self.assertEqual(strategy_input_dict["default_entry_timing_str"], "next_open")
+
+        strategy_obj = strategy_input_dict["strategy_factory_fn"]()
+        self.assertEqual(strategy_obj.name, "strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash")
+        self.assertIn(pd.Timestamp("2020-01-31"), strategy_obj.rebalance_weight_df.index)
+        self.assertTrue(hasattr(strategy_obj, "daily_target_weights"))
 
 
 if __name__ == "__main__":

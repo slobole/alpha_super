@@ -30,6 +30,7 @@ Execution mapping is unchanged:
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, replace
 from typing import Sequence
 
@@ -47,9 +48,11 @@ from strategies.momentum.strategy_mo_atr_normalized_ndx import (
     AtrNormalizedNdxStrategy,
     audit_pit_universe_df,
     compute_atr_normalized_signal_tables,
+    default_trade_id_int,
     get_atr_normalized_ndx_data,
     get_monthly_decision_close_df,
     map_month_end_decision_dates_to_rebalance_schedule_df,
+    _map_rebalance_schedule_to_decision_close_schedule_df,
 )
 
 
@@ -91,6 +94,7 @@ __all__ = [
     "get_vxn_scaled_atr_normalized_ndx_data",
     "load_vxn_close_ser",
     "map_month_end_decision_dates_to_rebalance_schedule_df",
+    "build_execution_timing_analysis_inputs",
     "run_variant",
 ]
 
@@ -406,6 +410,63 @@ def build_friction_analysis_inputs(
         "strategy_obj": strategy_obj,
         "pricing_data_df": pricing_data_df,
         "execution_policy_str": "MOO",
+    }
+
+
+def build_execution_timing_analysis_inputs() -> dict[str, object]:
+    """
+    Build inputs for ExecutionTimingAnalyzer.
+
+    Formula:
+
+        decision_t = monthly ATR-normalized signal and VXN scale known after T close
+
+        entry_fill = decision_t + entry_lag at entry_price_field
+        exit_fill  = decision_t + exit_lag  at exit_price_field
+    """
+    config_obj = DEFAULT_CONFIG
+    pricing_data_df, universe_df, rebalance_schedule_df, vxn_scale_signal_df = (
+        get_vxn_scaled_atr_normalized_ndx_data(config_obj)
+    )
+    decision_close_schedule_df = _map_rebalance_schedule_to_decision_close_schedule_df(
+        rebalance_schedule_df=rebalance_schedule_df,
+    )
+
+    def strategy_factory_fn():
+        strategy_obj = VxnScaledAtrNormalizedNdxStrategy(
+            name="strategy_mo_atr_normalized_ndx_vxn_scaled",
+            benchmarks=[config_obj.regime_symbol_str],
+            rebalance_schedule_df=decision_close_schedule_df,
+            vxn_scale_signal_df=vxn_scale_signal_df,
+            regime_symbol_str=config_obj.regime_symbol_str,
+            capital_base=config_obj.capital_base_float,
+            slippage=config_obj.slippage_float,
+            commission_per_share=config_obj.commission_per_share_float,
+            commission_minimum=config_obj.commission_minimum_float,
+            lookback_month_int=config_obj.lookback_month_int,
+            index_trend_window_int=config_obj.index_trend_window_int,
+            stock_trend_window_int=config_obj.stock_trend_window_int,
+            max_positions_int=config_obj.max_positions_int,
+        )
+        strategy_obj.universe_df = universe_df
+        strategy_obj.trade_id_int = 0
+        strategy_obj.current_trade_map = defaultdict(default_trade_id_int)
+        return strategy_obj
+
+    calendar_idx = pricing_data_df.index[
+        pricing_data_df.index >= pd.Timestamp(config_obj.backtest_start_date_str)
+    ]
+
+    return {
+        "strategy_factory_fn": strategy_factory_fn,
+        "pricing_data_df": pricing_data_df,
+        "calendar_idx": pd.DatetimeIndex(calendar_idx),
+        "order_generation_mode_str": "signal_bar",
+        "risk_model_str": "taa_rebalance",
+        "entry_timing_str_tuple": ("same_close_moc", "next_open", "next_close"),
+        "exit_timing_str_tuple": ("same_close_moc", "next_open", "next_close"),
+        "default_entry_timing_str": "next_open",
+        "default_exit_timing_str": "next_open",
     }
 
 

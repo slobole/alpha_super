@@ -2,7 +2,7 @@
 
 TL;DR: this is the operator guide for one-client deployments. A deployment means one VPS/repo clone/IBC session for one client. Inside it, each sleeve/pod is one independent strategy. Incubation/rehearsal uses a SIM ledger; paper probes broker plumbing; live uses real IBKR accounts/subaccounts.
 
-For implementation details, use [LIVE_TECHNICAL_REFERENCE.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_TECHNICAL_REFERENCE.md).
+For implementation details, use [LIVE_TECHNICAL_REFERENCE.md](LIVE_TECHNICAL_REFERENCE.md).
 
 ## What This System Is
 
@@ -503,7 +503,7 @@ Schedule: decide after approved daily data, trade next open
 Auto-submit: allowed only after the sleeve is trusted
 ```
 
-Keep the exact YAML fields used by the current release examples. This section explains the human meaning; [LIVE_TECHNICAL_REFERENCE.md](C:/Users/User/Documents/workspace/alpha_super/LIVE_TECHNICAL_REFERENCE.md) is the implementation reference.
+Keep the exact YAML fields used by the current release examples. This section explains the human meaning; [LIVE_TECHNICAL_REFERENCE.md](LIVE_TECHNICAL_REFERENCE.md) is the implementation reference.
 
 ## Incubation / Paper / Live
 

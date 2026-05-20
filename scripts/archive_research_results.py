@@ -15,7 +15,7 @@ EXCLUDED_RESULT_DIR_NAME_SET = frozenset(
 
 
 def _is_legacy_dir_name(dir_name_str: str) -> bool:
-    return dir_name_str.startswith('_legacy_')
+    return dir_name_str.startswith('_legacy_') or dir_name_str.startswith('_archive_')
 
 
 def discover_archive_candidate_path_list(results_root_path: Path) -> list[Path]:

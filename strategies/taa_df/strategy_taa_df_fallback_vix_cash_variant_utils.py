@@ -254,6 +254,139 @@ def build_vrp_cash_overlay_weight_frames(
     return month_end_weight_df, rebalance_weight_df, month_end_vrp_diagnostic_df
 
 
+def _map_month_end_weight_to_decision_close_df(
+    month_end_weight_df: pd.DataFrame,
+    execution_index: pd.DatetimeIndex,
+) -> pd.DataFrame:
+    decision_weight_map_dict: dict[pd.Timestamp, pd.Series] = {}
+
+    for month_end_ts, target_weight_ser in month_end_weight_df.iterrows():
+        month_period_obj = pd.Timestamp(month_end_ts).to_period("M")
+        trading_day_idx = execution_index[execution_index.to_period("M") == month_period_obj]
+        if len(trading_day_idx) == 0:
+            continue
+
+        # *** CRITICAL*** Calendar month-end can fall on a non-trading day.
+        # T Close means the last tradable close in that signal month, not the
+        # calendar timestamp stored by resample("ME").
+        decision_close_ts = pd.Timestamp(trading_day_idx[-1])
+        decision_weight_map_dict[decision_close_ts] = target_weight_ser.copy()
+
+    if len(decision_weight_map_dict) == 0:
+        raise RuntimeError("No tradable decision-close dates were generated for execution timing analysis.")
+
+    decision_close_weight_df = pd.DataFrame.from_dict(
+        decision_weight_map_dict,
+        orient="index",
+    ).sort_index()
+    decision_close_weight_df.index.name = "decision_close_date"
+    return decision_close_weight_df
+
+
+def _execution_timing_input_dict(
+    strategy_name_str: str,
+    config: DefenseFirstConfig,
+    execution_price_df: pd.DataFrame,
+    daily_vrp_signal_df: pd.DataFrame,
+    month_end_weight_df: pd.DataFrame,
+    rebalance_weight_df: pd.DataFrame,
+    month_end_vrp_diagnostic_df: pd.DataFrame,
+) -> dict[str, object]:
+    decision_close_weight_df = _map_month_end_weight_to_decision_close_df(
+        month_end_weight_df=month_end_weight_df,
+        execution_index=pd.DatetimeIndex(execution_price_df.index),
+    )
+
+    def strategy_factory_fn():
+        strategy_obj = _build_defense_first_strategy(
+            strategy_name_str=strategy_name_str,
+            config=config,
+            rebalance_weight_df=decision_close_weight_df,
+        )
+        strategy_obj.daily_vrp_signal_df = daily_vrp_signal_df.copy()
+        strategy_obj.month_end_vrp_diagnostic_df = month_end_vrp_diagnostic_df.copy()
+        strategy_obj.show_taa_weights_report = True
+
+        # *** CRITICAL*** This forward fill is for post-run weight diagnostics
+        # only. ExecutionTimingAnalysis uses month-end decision dates for order
+        # intent and then applies the tested fill timing to those orders.
+        strategy_obj.daily_target_weights = (
+            rebalance_weight_df.reindex(execution_price_df.index).ffill().dropna()
+        )
+        return strategy_obj
+
+    calendar_idx = execution_price_df.index[
+        execution_price_df.index >= rebalance_weight_df.index[0]
+    ]
+
+    return {
+        "strategy_factory_fn": strategy_factory_fn,
+        "pricing_data_df": execution_price_df,
+        "calendar_idx": pd.DatetimeIndex(calendar_idx),
+        "order_generation_mode_str": "signal_bar",
+        "risk_model_str": "taa_rebalance",
+        "entry_timing_str_tuple": ("same_close_moc", "next_open", "next_close"),
+        "exit_timing_str_tuple": ("same_close_moc", "next_open", "next_close"),
+        "default_entry_timing_str": "next_open",
+        "default_exit_timing_str": "next_open",
+    }
+
+
+def build_standard_fallback_vix_cash_execution_timing_analysis_inputs(
+    strategy_name_str: str,
+    config: DefenseFirstConfig,
+    base_data_loader_fn: Callable[[DefenseFirstConfig], tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]],
+) -> dict[str, object]:
+    (
+        execution_price_df,
+        _momentum_score_df,
+        daily_vrp_signal_df,
+        month_end_weight_df,
+        rebalance_weight_df,
+        month_end_vrp_diagnostic_df,
+    ) = get_standard_fallback_vix_cash_data(
+        config=config,
+        base_data_loader_fn=base_data_loader_fn,
+    )
+    return _execution_timing_input_dict(
+        strategy_name_str=strategy_name_str,
+        config=config,
+        execution_price_df=execution_price_df,
+        daily_vrp_signal_df=daily_vrp_signal_df,
+        month_end_weight_df=month_end_weight_df,
+        rebalance_weight_df=rebalance_weight_df,
+        month_end_vrp_diagnostic_df=month_end_vrp_diagnostic_df,
+    )
+
+
+def build_linearity_1n_fallback_vix_cash_execution_timing_analysis_inputs(
+    strategy_name_str: str,
+    config: DefenseFirstConfig,
+    base_data_loader_fn: Callable[[DefenseFirstConfig], tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]],
+) -> dict[str, object]:
+    (
+        execution_price_df,
+        _daily_linearity_score_df,
+        _month_end_score_df,
+        daily_vrp_signal_df,
+        month_end_weight_df,
+        rebalance_weight_df,
+        month_end_vrp_diagnostic_df,
+    ) = get_linearity_1n_fallback_vix_cash_data(
+        config=config,
+        base_data_loader_fn=base_data_loader_fn,
+    )
+    return _execution_timing_input_dict(
+        strategy_name_str=strategy_name_str,
+        config=config,
+        execution_price_df=execution_price_df,
+        daily_vrp_signal_df=daily_vrp_signal_df,
+        month_end_weight_df=month_end_weight_df,
+        rebalance_weight_df=rebalance_weight_df,
+        month_end_vrp_diagnostic_df=month_end_vrp_diagnostic_df,
+    )
+
+
 def _load_vrp_overlay_signal_frames(
     config: DefenseFirstConfig,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:

@@ -16,7 +16,7 @@ from alpha.engine.execution_timing import (
     compute_cvar_5_pct_float,
 )
 from alpha.engine.strategy import Strategy
-from execution_timing_analysis import _strategy_module_name_str
+from scripts.research.execution_timing_analyzer import _strategy_module_name_str
 
 
 def make_timing_pricing_data_df() -> pd.DataFrame:
@@ -560,6 +560,47 @@ class ExecutionTimingAnalysisTests(unittest.TestCase):
         strategy_obj = strategy_input_dict["strategy_factory_fn"]()
         self.assertEqual(strategy_obj.name, "strategy_mo_atr_normalized_ndx")
         self.assertIs(strategy_obj.universe_df, universe_df)
+        self.assertIn(pd.Timestamp("2024-01-03"), strategy_obj.rebalance_schedule_df.index)
+        self.assertEqual(
+            pd.Timestamp(strategy_obj.rebalance_schedule_df.loc[pd.Timestamp("2024-01-03"), "decision_date_ts"]),
+            pd.Timestamp("2024-01-03"),
+        )
+
+    def test_vxn_scaled_atr_normalized_ndx_module_exposes_decision_close_timing_hook(self):
+        import strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled as vxn_module
+
+        pricing_data_df = make_timing_pricing_data_with_spy_df()
+        universe_df = pd.DataFrame(
+            1,
+            index=pricing_data_df.index,
+            columns=["AAA", "BBB"],
+            dtype=int,
+        )
+        rebalance_schedule_df = pd.DataFrame(
+            {"decision_date_ts": [pd.Timestamp("2024-01-03")]},
+            index=pd.DatetimeIndex([pd.Timestamp("2024-01-04")], name="execution_date_ts"),
+        )
+        vxn_scale_signal_df = pd.DataFrame(
+            {"vxn_exposure_scale_float": [0.75]},
+            index=pd.DatetimeIndex([pd.Timestamp("2024-01-03")]),
+        )
+
+        with patch.object(
+            vxn_module,
+            "get_vxn_scaled_atr_normalized_ndx_data",
+            return_value=(pricing_data_df, universe_df, rebalance_schedule_df, vxn_scale_signal_df),
+        ):
+            strategy_input_dict = vxn_module.build_execution_timing_analysis_inputs()
+
+        self.assertEqual(strategy_input_dict["order_generation_mode_str"], "signal_bar")
+        self.assertEqual(strategy_input_dict["risk_model_str"], "taa_rebalance")
+        self.assertEqual(strategy_input_dict["entry_timing_str_tuple"], ("same_close_moc", "next_open", "next_close"))
+        self.assertEqual(strategy_input_dict["default_entry_timing_str"], "next_open")
+
+        strategy_obj = strategy_input_dict["strategy_factory_fn"]()
+        self.assertEqual(strategy_obj.name, "strategy_mo_atr_normalized_ndx_vxn_scaled")
+        self.assertIs(strategy_obj.universe_df, universe_df)
+        self.assertTrue(strategy_obj.vxn_scale_signal_df.index.equals(vxn_scale_signal_df.index))
         self.assertIn(pd.Timestamp("2024-01-03"), strategy_obj.rebalance_schedule_df.index)
         self.assertEqual(
             pd.Timestamp(strategy_obj.rebalance_schedule_df.loc[pd.Timestamp("2024-01-03"), "decision_date_ts"]),

@@ -5,7 +5,7 @@ identity:
 
 deployment:
   mode: paper # allowed: paper, live
-  enabled_bool: true  # set to false for safety; change to true when ready to run the pod
+  enabled_bool: false  # set to false for safety; change to true when ready to run the pod
 
 broker:
   account_route: DUN178957

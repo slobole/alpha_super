@@ -383,7 +383,7 @@ function inventorySlide() {
             "Execution Timing",
             C.amber,
             "Replays intent under alternate fill timing.",
-            "execution_timing_analyzer.py",
+            "scripts/research/execution_timing_analyzer.py",
             "Question: is the edge timing fragile?",
           ),
           featureCard(
@@ -548,7 +548,7 @@ function timingSlide() {
         [
           column({ width: fill, height: hug, gap: 24 }, [
             command(
-              "uv run python execution_timing_analyzer.py strategies/dv2/strategy_mr_dv2.py",
+              "uv run python scripts/research/execution_timing_analyzer.py strategies/dv2/strategy_mr_dv2.py",
               "The strategy must expose build_execution_timing_analysis_inputs().",
               C.black,
             ),
@@ -591,7 +591,7 @@ function timingSlide() {
         ],
       ),
     ],
-    { accent: C.amber, footer: "Code: alpha/engine/execution_timing.py, execution_timing_analyzer.py" },
+    { accent: C.amber, footer: "Code: alpha/engine/execution_timing.py, scripts/research/execution_timing_analyzer.py" },
   );
 }
 

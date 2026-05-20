@@ -1,6 +1,10 @@
 import contextlib
 import io
+import json
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pandas as pd
@@ -232,6 +236,111 @@ class RunDailyRuntimeControlTests(unittest.TestCase):
         self.assertEqual(int(closing_trade_ser["trade_id"]), 1)
         self.assertEqual(float(closing_trade_ser["amount"]), -10.0)
         self.assertAlmostEqual(float(closing_trade_ser["price"]), 10.6)
+
+    def test_run_daily_structured_logging_is_opt_in_and_preserves_results(self):
+        pricing_data = make_pricing_data()
+        baseline_strategy = self.make_progress_strategy()
+        logged_strategy = self.make_progress_strategy()
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            run_daily(
+                baseline_strategy,
+                pricing_data,
+                show_progress=False,
+                show_signal_progress_bool=False,
+                audit_override_bool=False,
+            )
+
+        with tempfile.TemporaryDirectory() as temp_dir_str:
+            temp_dir_path_obj = Path(temp_dir_str)
+            audit_log_path_obj = temp_dir_path_obj / "engine_events.jsonl"
+            trace_root_path_obj = temp_dir_path_obj / "pods"
+            with contextlib.redirect_stdout(io.StringIO()):
+                run_daily(
+                    logged_strategy,
+                    pricing_data,
+                    show_progress=False,
+                    show_signal_progress_bool=False,
+                    audit_override_bool=False,
+                    run_id_str="run_001",
+                    audit_log_path_str=str(audit_log_path_obj),
+                    trace_enabled_bool=True,
+                    trace_log_root_path_str=str(trace_root_path_obj),
+                )
+
+            pd.testing.assert_frame_equal(
+                baseline_strategy.results,
+                logged_strategy.results,
+                check_like=True,
+            )
+            pd.testing.assert_frame_equal(
+                baseline_strategy.get_transactions().drop(columns=["order_id"]).reset_index(drop=True),
+                logged_strategy.get_transactions().drop(columns=["order_id"]).reset_index(drop=True),
+                check_like=True,
+            )
+
+            audit_event_name_list = [
+                json.loads(line_str)["event_name_str"]
+                for line_str in audit_log_path_obj.read_text(encoding="utf-8").splitlines()
+                if line_str.strip() != ""
+            ]
+            self.assertIn("engine.signal_precompute.started", audit_event_name_list)
+            self.assertIn("engine.signal_precompute.completed", audit_event_name_list)
+            self.assertIn("engine.signal_audit.skipped", audit_event_name_list)
+            self.assertIn("engine.backtest_loop.started", audit_event_name_list)
+            self.assertIn("engine.backtest_loop.completed", audit_event_name_list)
+            self.assertIn("engine.order.submitted", audit_event_name_list)
+            self.assertIn("engine.order.executed", audit_event_name_list)
+
+            trace_log_path_obj = trace_root_path_obj / "ProgressSmoke" / "run_001" / "trace_events.jsonl"
+            trace_event_name_list = [
+                json.loads(line_str)["event_name_str"]
+                for line_str in trace_log_path_obj.read_text(encoding="utf-8").splitlines()
+                if line_str.strip() != ""
+            ]
+            self.assertIn("engine.bar.completed", trace_event_name_list)
+
+    def test_run_daily_structured_logging_failure_does_not_change_results(self):
+        pricing_data = make_pricing_data()
+        baseline_strategy = self.make_progress_strategy()
+        logged_strategy = self.make_progress_strategy()
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            run_daily(
+                baseline_strategy,
+                pricing_data,
+                show_progress=False,
+                show_signal_progress_bool=False,
+                audit_override_bool=False,
+            )
+
+        with (
+            mock.patch("alpha.engine.strategy.log_event", side_effect=OSError("audit log unavailable")),
+            mock.patch("alpha.engine.strategy.log_trace_event", side_effect=OSError("trace log unavailable")),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            run_daily(
+                logged_strategy,
+                pricing_data,
+                show_progress=False,
+                show_signal_progress_bool=False,
+                audit_override_bool=False,
+                run_id_str="run_001",
+                audit_log_path_str="unused.jsonl",
+                trace_enabled_bool=True,
+            )
+
+        pd.testing.assert_frame_equal(
+            baseline_strategy.results,
+            logged_strategy.results,
+            check_like=True,
+        )
+        pd.testing.assert_frame_equal(
+            baseline_strategy.get_transactions().drop(columns=["order_id"]).reset_index(drop=True),
+            logged_strategy.get_transactions().drop(columns=["order_id"]).reset_index(drop=True),
+            check_like=True,
+        )
+        self.assertGreater(logged_strategy._structured_logging_error_count_int, 0)
 
 
 if __name__ == "__main__":

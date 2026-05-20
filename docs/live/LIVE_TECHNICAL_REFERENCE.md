@@ -16,7 +16,7 @@ It does not try to be:
 - a roadmap
 
 Related docs:
-- quick start: [LIVE_START_HERE.md](LIVE_START_HERE.md)
+- quick start: [LIVE_START_HERE.md](../../LIVE_START_HERE.md)
 - operator workflow and CLI inventory: [LIVE_RUNBOOK.md](LIVE_RUNBOOK.md)
 - high-level design rationale: [LIVE_TRADING_ARCHITECTURE.md](LIVE_TRADING_ARCHITECTURE.md)
 

@@ -16,7 +16,7 @@
 | Can we simplify? | **Yes**, but in the right order (see roadmap) |
 | What must never be simplified? | Broker-truth sizing, timing semantics, post-trade reconcile |
 
-![Keep / Remove verdict pie chart](docs/live_flow_images/01_pie_verdict.png)
+![Keep / Remove verdict pie chart](../../live_flow_images/01_pie_verdict.png)
 
 ---
 
@@ -32,7 +32,7 @@ order_delta_share_float(asset)= target_share_float(asset)     - broker_share_flo
 residual_share_float(asset)   = target_share_float(asset)     - broker_share_float_post_execution(asset)
 ```
 
-![Core formulas flow](docs/live_flow_images/02_core_formulas.png)
+![Core formulas flow](../../live_flow_images/02_core_formulas.png)
 
 ---
 
@@ -143,11 +143,11 @@ LiveRelease → DecisionPlan → BrokerSnapshot + LivePriceSnapshot
 
 ### Detailed flow
 
-![End-to-end flow](docs/live_flow_images/03_end_to_end_flow.png)
+![End-to-end flow](../../live_flow_images/03_end_to_end_flow.png)
 
 ### Sequence view (who calls whom)
 
-![Sequence diagram](docs/live_flow_images/10_sequence.png)
+![Sequence diagram](../../live_flow_images/10_sequence.png)
 
 ### Stage by stage
 
@@ -208,7 +208,7 @@ Enables the strategy to continue from **live reality** after restart.
 
 ## 🚨 What Changes If X Happens
 
-![Decision tree](docs/live_flow_images/04_decision_tree.png)
+![Decision tree](../../live_flow_images/04_decision_tree.png)
 
 ### Reference — condition → result table
 
@@ -252,11 +252,11 @@ scheduler                    →   stops hot-loop reconcile revisits
 
 ### `DecisionPlan.status_str`
 
-![DecisionPlan state machine](docs/live_flow_images/05_state_decision_plan.png)
+![DecisionPlan state machine](../../live_flow_images/05_state_decision_plan.png)
 
 ### `VPlan.status_str`
 
-![VPlan state machine](docs/live_flow_images/06_state_vplan.png)
+![VPlan state machine](../../live_flow_images/06_state_vplan.png)
 
 ---
 
@@ -300,7 +300,7 @@ do NOT treat the checked-in sqlite file as the schema contract
 
 ### Table relationships (ER diagram)
 
-![ER diagram of live tables](docs/live_flow_images/07_er_diagram.png)
+![ER diagram of live tables](../../live_flow_images/07_er_diagram.png)
 
 ### All current tables
 
@@ -675,13 +675,13 @@ These answer the core live questions:
 
 > *What was supposed to happen? What did the broker account look like? What did we send? What filled? Did we end up at target? What state should the strategy continue from?*
 
-![Core questions mapped to tables](docs/live_flow_images/08_core_questions.png)
+![Core questions mapped to tables](../../live_flow_images/08_core_questions.png)
 
 ---
 
 ## 🧹 Safe Simplification Roadmap
 
-![Simplification roadmap](docs/live_flow_images/09_roadmap.png)
+![Simplification roadmap](../../live_flow_images/09_roadmap.png)
 
 ### Phase 1 — No-semantics-change cleanup
 

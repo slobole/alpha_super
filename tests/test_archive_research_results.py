@@ -9,6 +9,7 @@ def test_archive_research_results_dry_run_excludes_live_and_existing_structural_
     (results_root_path / "CurrentBook").mkdir()
     (results_root_path / "research").mkdir()
     (results_root_path / "live_reference_compare").mkdir()
+    (results_root_path / "_archive_07-05-2026").mkdir()
     (results_root_path / "_legacy_research_2026-05-01_120000").mkdir()
 
     result_dict = archive_research_results(

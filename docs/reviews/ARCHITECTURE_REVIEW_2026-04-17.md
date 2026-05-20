@@ -367,7 +367,7 @@ Fewer than 10 items. Each: what, why, where, effort estimate.
 
 - **What:** If tick crashes mid-lease, what happens at minute +5? Test by killing tick during a VPlan submit and observing recovery.
 - **Why:** §5.7. A stuck lease blocks all trading for its duration.
-- **Where:** [alpha/live/runner.py:1941-2024](alpha/live/runner.py:1941) — verify try/finally release; [LIVE_RUNBOOK.md](LIVE_RUNBOOK.md) — add recovery steps.
+- **Where:** [alpha/live/runner.py:1941-2024](../../alpha/live/runner.py:1941) — verify try/finally release; [LIVE_RUNBOOK.md](../live/LIVE_RUNBOOK.md) — add recovery steps.
 - **Effort:** 1 day.
 
 ### 7.8 IBKR reconnect policy
