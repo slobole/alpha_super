@@ -559,6 +559,10 @@ def norgate_snapshot_sync_active_wait_bool(status_dict: dict[str, Any] | None) -
 def _status_severity_str(status_str: str, build_gate_reason_code_str: str | None) -> str:
     if status_str == "failed":
         return "red"
+    if status_str == "ready" and build_gate_reason_code_str == "snapshot_window_expired":
+        return "red"
+    if status_str == "ready" and build_gate_reason_code_str in SNAPSHOT_STALE_GATE_REASON_SET:
+        return "yellow"
     if status_str in {"waiting", "local_snapshot_only"}:
         if build_gate_reason_code_str in {"snapshot_ready", "carry_forward_snapshot_ready"}:
             return "green"
@@ -566,6 +570,117 @@ def _status_severity_str(status_str: str, build_gate_reason_code_str: str | None
     if status_str in {"direct", "ready"}:
         return "green"
     return "gray"
+
+
+def _sync_stage_label_str(
+    *,
+    data_source_mode_str: str,
+    status_str: str,
+    reason_code_str: str | None,
+    build_gate_reason_code_str: str | None = None,
+) -> str:
+    if data_source_mode_str == "direct":
+        return "Direct Norgate"
+    if status_str == "ready" and build_gate_reason_code_str == "snapshot_window_expired":
+        return "Snapshot window expired"
+    if status_str == "ready" and build_gate_reason_code_str in SNAPSHOT_STALE_GATE_REASON_SET:
+        return "Build gate waiting"
+    reason_label_map_dict = {
+        "api_config_missing": "API config missing",
+        "direct_norgate_mode": "Direct Norgate",
+        "local_snapshot_ready": "Local snapshot ready",
+        "no_enabled_releases": "No enabled releases",
+        "snapshot_root_missing": "Snapshot root missing",
+        "sync_failed": "Sync failed",
+        "sync_failure_cooldown": "Cooldown after failure",
+        "sync_lock_busy": "Sync lock busy",
+        "sync_ready": "Sync completed",
+        "sync_started": "Sync running",
+    }
+    reason_label_str = reason_label_map_dict.get(str(reason_code_str or ""))
+    if reason_label_str is not None:
+        return reason_label_str
+    status_label_map_dict = {
+        "failed": "Sync failed",
+        "local_snapshot_only": "Local snapshot only",
+        "ready": "Snapshot ready",
+        "waiting": "Waiting for snapshot",
+    }
+    return status_label_map_dict.get(status_str, "Snapshot status unknown")
+
+
+def _string_list_from_status_file(
+    status_file_dict: dict[str, Any],
+    key_str: str,
+    fallback_list: list[str] | None = None,
+) -> list[str]:
+    raw_value_obj = status_file_dict.get(key_str)
+    if isinstance(raw_value_obj, list):
+        return [str(item_obj) for item_obj in raw_value_obj]
+    return list(fallback_list or [])
+
+
+def _string_dict_from_status_file(
+    status_file_dict: dict[str, Any],
+    key_str: str,
+) -> dict[str, str]:
+    raw_value_obj = status_file_dict.get(key_str)
+    if not isinstance(raw_value_obj, dict):
+        return {}
+    return {
+        str(key_obj): str(value_obj)
+        for key_obj, value_obj in raw_value_obj.items()
+        if value_obj is not None
+    }
+
+
+def _profile_status_dict_list(
+    *,
+    profile_list: list[str],
+    snapshot_date_by_profile_dict: dict[str, str],
+    manifest_hash_by_profile_dict: dict[str, str],
+    error_by_profile_dict: dict[str, str],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "profile_str": profile_str,
+            "snapshot_date_str": snapshot_date_by_profile_dict.get(profile_str),
+            "manifest_hash_str": manifest_hash_by_profile_dict.get(profile_str),
+            "manifest_hash_prefix_str": str(manifest_hash_by_profile_dict.get(profile_str) or "")[:12] or None,
+            "error_str": error_by_profile_dict.get(profile_str),
+        }
+        for profile_str in profile_list
+    ]
+
+
+def _release_gate_status_dict_list(
+    *,
+    release_id_list: list[str],
+    pod_id_list: list[str],
+    gate_reason_by_release_id_dict: dict[str, str],
+    fallback_release_obj: LiveRelease,
+    fallback_gate_reason_code_str: str | None,
+) -> list[dict[str, Any]]:
+    if len(release_id_list) == 0:
+        release_id_list = [fallback_release_obj.release_id_str]
+        pod_id_list = [fallback_release_obj.pod_id_str]
+        if fallback_gate_reason_code_str is not None:
+            gate_reason_by_release_id_dict = {
+                fallback_release_obj.release_id_str: fallback_gate_reason_code_str
+            }
+    return [
+        {
+            "release_id_str": release_id_str,
+            "pod_id_str": pod_id_list[index_int] if index_int < len(pod_id_list) else None,
+            "gate_reason_code_str": gate_reason_by_release_id_dict.get(release_id_str)
+            or (
+                fallback_gate_reason_code_str
+                if release_id_str == fallback_release_obj.release_id_str
+                else None
+            ),
+        }
+        for index_int, release_id_str in enumerate(release_id_list)
+    ]
 
 
 def build_norgate_snapshot_status_dict(
@@ -577,11 +692,23 @@ def build_norgate_snapshot_status_dict(
             "data_source_mode_str": "direct",
             "status_str": "direct",
             "severity_str": "green",
+            "sync_stage_label_str": "Direct Norgate",
             "profile_str": release_obj.data_profile_str,
             "snapshot_date_str": None,
+            "reason_code_str": "direct_norgate_mode",
+            "required_profile_list": [],
+            "snapshot_date_by_profile_dict": {},
+            "manifest_hash_by_profile_dict": {},
+            "error_by_profile_dict": {},
+            "gate_reason_by_release_id_dict": {},
+            "profile_status_dict_list": [],
+            "release_gate_status_dict_list": [],
             "last_sync_utc_str": None,
+            "last_attempt_utc_str": None,
             "last_error_str": None,
             "build_gate_reason_code_str": None,
+            "status_file_path_str": None,
+            "snapshot_mode_env_str": os.getenv(ALPHA_USE_NORGATE_SNAPSHOT_ENV_STR, ""),
         }
 
     root_path_obj = _snapshot_root_path_obj_or_none()
@@ -618,14 +745,69 @@ def build_norgate_snapshot_status_dict(
                 local_error_str = str(exc)
 
     status_str = str(status_file_dict.get("status_str") or ("ready" if snapshot_date_str else "waiting"))
+    reason_code_str = str(status_file_dict.get("reason_code_str") or "") or None
     last_error_str = str(status_file_dict.get("error_str") or local_error_str or "") or None
+    profile_list = _string_list_from_status_file(
+        status_file_dict,
+        "required_profile_list",
+        fallback_list=[release_obj.data_profile_str],
+    )
+    if release_obj.data_profile_str not in profile_list:
+        profile_list.append(release_obj.data_profile_str)
+    snapshot_date_by_profile_dict = _string_dict_from_status_file(
+        status_file_dict,
+        "snapshot_date_by_profile_dict",
+    )
+    manifest_hash_by_profile_dict = _string_dict_from_status_file(
+        status_file_dict,
+        "manifest_hash_by_profile_dict",
+    )
+    error_by_profile_dict = _string_dict_from_status_file(
+        status_file_dict,
+        "error_by_profile_dict",
+    )
+    if snapshot_date_str is not None:
+        snapshot_date_by_profile_dict.setdefault(release_obj.data_profile_str, snapshot_date_str)
+    if manifest_hash_str is not None:
+        manifest_hash_by_profile_dict.setdefault(release_obj.data_profile_str, manifest_hash_str)
+    if local_error_str is not None and release_obj.data_profile_str not in error_by_profile_dict:
+        error_by_profile_dict[release_obj.data_profile_str] = local_error_str
+    gate_reason_by_release_id_dict = _string_dict_from_status_file(
+        status_file_dict,
+        "gate_reason_by_release_id_dict",
+    )
     return {
         "data_source_mode_str": "snapshot",
         "status_str": status_str,
         "severity_str": _status_severity_str(status_str, build_gate_reason_code_str),
+        "sync_stage_label_str": _sync_stage_label_str(
+            data_source_mode_str="snapshot",
+            status_str=status_str,
+            reason_code_str=reason_code_str,
+            build_gate_reason_code_str=build_gate_reason_code_str,
+        ),
         "profile_str": release_obj.data_profile_str,
         "snapshot_date_str": snapshot_date_str,
         "manifest_hash_str": manifest_hash_str,
+        "reason_code_str": reason_code_str,
+        "required_profile_list": profile_list,
+        "snapshot_date_by_profile_dict": snapshot_date_by_profile_dict,
+        "manifest_hash_by_profile_dict": manifest_hash_by_profile_dict,
+        "error_by_profile_dict": error_by_profile_dict,
+        "gate_reason_by_release_id_dict": gate_reason_by_release_id_dict,
+        "profile_status_dict_list": _profile_status_dict_list(
+            profile_list=profile_list,
+            snapshot_date_by_profile_dict=snapshot_date_by_profile_dict,
+            manifest_hash_by_profile_dict=manifest_hash_by_profile_dict,
+            error_by_profile_dict=error_by_profile_dict,
+        ),
+        "release_gate_status_dict_list": _release_gate_status_dict_list(
+            release_id_list=[release_obj.release_id_str],
+            pod_id_list=[release_obj.pod_id_str],
+            gate_reason_by_release_id_dict=gate_reason_by_release_id_dict,
+            fallback_release_obj=release_obj,
+            fallback_gate_reason_code_str=build_gate_reason_code_str,
+        ),
         "last_sync_utc_str": status_file_dict.get("last_success_utc_str"),
         "last_attempt_utc_str": status_file_dict.get("last_attempt_utc_str"),
         "last_error_str": last_error_str,

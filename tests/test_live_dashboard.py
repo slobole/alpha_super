@@ -7,9 +7,11 @@ from pathlib import Path
 import sqlite3
 import threading
 import time
+from types import SimpleNamespace
 from urllib.request import urlopen
 
 import alpha.live.dashboard as dashboard_module
+import alpha.live.norgate_snapshot_sync as norgate_sync_module
 import alpha.live.runner as runner_module
 from alpha.live.dashboard import (
     DASHBOARD_HTML_STR,
@@ -1087,6 +1089,361 @@ def test_dashboard_summary_handles_missing_empty_shared_and_pod_db(tmp_path: Pat
         ("pod_missing", "db", "gray"),
         ("pod_empty", "db", "gray"),
     }
+
+
+def test_dashboard_norgate_snapshot_status_includes_sync_debug_payload(tmp_path: Path, monkeypatch):
+    release_obj = _build_release_obj("pod_sync")
+    snapshot_root_path_obj = tmp_path / "snapshots"
+    snapshot_root_path_obj.mkdir(parents=True)
+    status_path_obj = snapshot_root_path_obj / ".client_sync_status.json"
+    status_path_obj.write_text(
+        json.dumps(
+            {
+                "status_str": "ready",
+                "reason_code_str": "local_snapshot_ready",
+                "required_profile_list": ["norgate_eod_sp500_pit"],
+                "snapshot_date_by_profile_dict": {"norgate_eod_sp500_pit": "2026-05-19"},
+                "manifest_hash_by_profile_dict": {"norgate_eod_sp500_pit": "abcdef1234567890"},
+                "error_by_profile_dict": {},
+                "gate_reason_by_release_id_dict": {
+                    release_obj.release_id_str: "carry_forward_snapshot_ready"
+                },
+                "release_id_list": [release_obj.release_id_str],
+                "pod_id_list": [release_obj.pod_id_str],
+                "last_attempt_utc_str": None,
+                "last_success_utc_str": "2026-05-20T07:19:04+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "true")
+    monkeypatch.setenv("NORGATE_SNAPSHOT_ROOT", str(snapshot_root_path_obj))
+    monkeypatch.setattr(
+        norgate_sync_module,
+        "load_valid_snapshot_manifest",
+        lambda profile_str: SimpleNamespace(
+            snapshot_date_ts=datetime(2026, 5, 19, tzinfo=UTC),
+            manifest_hash_str="abcdef1234567890",
+        ),
+    )
+    monkeypatch.setattr(
+        norgate_sync_module.scheduler_utils,
+        "evaluate_build_gate_dict",
+        lambda release_obj, as_of_ts: {"reason_code_str": "carry_forward_snapshot_ready"},
+    )
+
+    status_dict = norgate_sync_module.build_norgate_snapshot_status_dict(release_obj, AS_OF_TS)
+
+    assert status_dict["sync_stage_label_str"] == "Local snapshot ready"
+    assert status_dict["reason_code_str"] == "local_snapshot_ready"
+    assert status_dict["profile_status_dict_list"] == [
+        {
+            "profile_str": "norgate_eod_sp500_pit",
+            "snapshot_date_str": "2026-05-19",
+            "manifest_hash_str": "abcdef1234567890",
+            "manifest_hash_prefix_str": "abcdef123456",
+            "error_str": None,
+        }
+    ]
+    assert status_dict["release_gate_status_dict_list"] == [
+        {
+            "release_id_str": release_obj.release_id_str,
+            "pod_id_str": release_obj.pod_id_str,
+            "gate_reason_code_str": "carry_forward_snapshot_ready",
+        }
+    ]
+
+
+def test_dashboard_norgate_release_gate_rows_are_scoped_to_selected_pod(tmp_path: Path, monkeypatch):
+    release_obj = _build_release_obj("pod_selected")
+    other_release_id_str = "user_001.pod_other.paper.v1"
+    snapshot_root_path_obj = tmp_path / "snapshots"
+    snapshot_root_path_obj.mkdir(parents=True)
+    (snapshot_root_path_obj / ".client_sync_status.json").write_text(
+        json.dumps(
+            {
+                "status_str": "ready",
+                "reason_code_str": "local_snapshot_ready",
+                "required_profile_list": ["norgate_eod_sp500_pit"],
+                "snapshot_date_by_profile_dict": {"norgate_eod_sp500_pit": "2026-05-19"},
+                "manifest_hash_by_profile_dict": {"norgate_eod_sp500_pit": "abcdef1234567890"},
+                "gate_reason_by_release_id_dict": {
+                    other_release_id_str: "carry_forward_snapshot_ready"
+                },
+                "release_id_list": [other_release_id_str],
+                "pod_id_list": ["pod_other"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "true")
+    monkeypatch.setenv("NORGATE_SNAPSHOT_ROOT", str(snapshot_root_path_obj))
+    monkeypatch.setattr(
+        norgate_sync_module,
+        "load_valid_snapshot_manifest",
+        lambda profile_str: SimpleNamespace(
+            snapshot_date_ts=datetime(2026, 5, 19, tzinfo=UTC),
+            manifest_hash_str="abcdef1234567890",
+        ),
+    )
+    monkeypatch.setattr(
+        norgate_sync_module.scheduler_utils,
+        "evaluate_build_gate_dict",
+        lambda release_obj, as_of_ts: {"reason_code_str": "carry_forward_snapshot_ready"},
+    )
+
+    status_dict = norgate_sync_module.build_norgate_snapshot_status_dict(release_obj, AS_OF_TS)
+
+    assert status_dict["release_gate_status_dict_list"] == [
+        {
+            "release_id_str": release_obj.release_id_str,
+            "pod_id_str": release_obj.pod_id_str,
+            "gate_reason_code_str": "carry_forward_snapshot_ready",
+        }
+    ]
+
+
+def test_dashboard_norgate_ready_status_respects_stale_build_gate(tmp_path: Path, monkeypatch):
+    release_obj = _build_release_obj("pod_sync")
+    snapshot_root_path_obj = tmp_path / "snapshots"
+    snapshot_root_path_obj.mkdir(parents=True)
+    (snapshot_root_path_obj / ".client_sync_status.json").write_text(
+        json.dumps(
+            {
+                "status_str": "ready",
+                "reason_code_str": "local_snapshot_ready",
+                "required_profile_list": ["norgate_eod_sp500_pit"],
+                "snapshot_date_by_profile_dict": {"norgate_eod_sp500_pit": "2026-05-19"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "true")
+    monkeypatch.setenv("NORGATE_SNAPSHOT_ROOT", str(snapshot_root_path_obj))
+    monkeypatch.setattr(
+        norgate_sync_module,
+        "load_valid_snapshot_manifest",
+        lambda profile_str: SimpleNamespace(
+            snapshot_date_ts=datetime(2026, 5, 19, tzinfo=UTC),
+            manifest_hash_str="abcdef1234567890",
+        ),
+    )
+    monkeypatch.setattr(
+        norgate_sync_module.scheduler_utils,
+        "evaluate_build_gate_dict",
+        lambda release_obj, as_of_ts: {"reason_code_str": "snapshot_window_expired"},
+    )
+
+    status_dict = norgate_sync_module.build_norgate_snapshot_status_dict(release_obj, AS_OF_TS)
+
+    assert status_dict["status_str"] == "ready"
+    assert status_dict["severity_str"] == "red"
+    assert status_dict["sync_stage_label_str"] == "Snapshot window expired"
+    assert status_dict["release_gate_status_dict_list"][0]["gate_reason_code_str"] == "snapshot_window_expired"
+
+
+def test_dashboard_norgate_status_labels_waiting_and_failed_stages(tmp_path: Path, monkeypatch):
+    release_obj = _build_release_obj("pod_sync")
+    snapshot_root_path_obj = tmp_path / "snapshots"
+    snapshot_root_path_obj.mkdir(parents=True)
+    monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "true")
+    monkeypatch.setenv("NORGATE_SNAPSHOT_ROOT", str(snapshot_root_path_obj))
+    monkeypatch.setattr(
+        norgate_sync_module,
+        "load_valid_snapshot_manifest",
+        lambda profile_str: (_ for _ in ()).throw(RuntimeError("manifest missing")),
+    )
+
+    (snapshot_root_path_obj / ".client_sync_status.json").write_text(
+        json.dumps(
+            {
+                "status_str": "waiting",
+                "reason_code_str": "api_config_missing",
+                "required_profile_list": ["norgate_eod_sp500_pit"],
+                "error_str": "Missing Norgate API config: NORGATE_API_URL.",
+            }
+        ),
+        encoding="utf-8",
+    )
+    waiting_status_dict = norgate_sync_module.build_norgate_snapshot_status_dict(
+        release_obj,
+        AS_OF_TS,
+    )
+    assert waiting_status_dict["sync_stage_label_str"] == "API config missing"
+    assert waiting_status_dict["last_error_str"] == "Missing Norgate API config: NORGATE_API_URL."
+
+    (snapshot_root_path_obj / ".client_sync_status.json").write_text(
+        json.dumps(
+            {
+                "status_str": "failed",
+                "reason_code_str": "sync_failed",
+                "required_profile_list": ["norgate_eod_sp500_pit"],
+                "error_str": "HTTP 401",
+            }
+        ),
+        encoding="utf-8",
+    )
+    failed_status_dict = norgate_sync_module.build_norgate_snapshot_status_dict(
+        release_obj,
+        AS_OF_TS,
+    )
+    assert failed_status_dict["sync_stage_label_str"] == "Sync failed"
+    assert failed_status_dict["severity_str"] == "red"
+    assert failed_status_dict["last_error_str"] == "HTTP 401"
+
+
+def test_dashboard_norgate_direct_mode_has_compact_debug_payload(monkeypatch):
+    release_obj = _build_release_obj("pod_direct")
+    monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "false")
+
+    status_dict = norgate_sync_module.build_norgate_snapshot_status_dict(release_obj, AS_OF_TS)
+
+    assert status_dict["sync_stage_label_str"] == "Direct Norgate"
+    assert status_dict["profile_status_dict_list"] == []
+    assert status_dict["release_gate_status_dict_list"] == []
+
+
+def test_dashboard_norgate_debug_story_marks_post_sync_data_load_failure():
+    detail_dict = {
+        "pod_row_dict": {
+            "db_status_str": "ok",
+            "norgate_snapshot_status_dict": {
+                "data_source_mode_str": "snapshot",
+                "status_str": "ready",
+                "severity_str": "green",
+                "sync_stage_label_str": "Local snapshot ready",
+                "reason_code_str": "local_snapshot_ready",
+                "build_gate_reason_code_str": "carry_forward_snapshot_ready",
+                "last_sync_utc_str": "2026-05-20T07:19:04+00:00",
+            },
+            "eod_snapshot_dict": {"status_str": "not_applicable", "severity_str": "gray"},
+        },
+        "event_dict_list": [
+            {
+                "event_name_str": "scheduler_error_retry",
+                "next_phase_str": "build_decision_plan",
+                "event_timestamp_str": "2026-05-20T07:20:18+00:00",
+                "error_str": "Snapshot has no rows for requested date range.",
+            }
+        ],
+    }
+
+    story_dict = dashboard_module._build_debug_story_dict(detail_dict)
+
+    assert any(
+        event_dict["label_str"] == "Post-sync data load failed"
+        for event_dict in story_dict["timeline_event_dict_list"]
+    )
+    norgate_evidence_dict = next(
+        item_dict
+        for item_dict in story_dict["evidence_item_dict_list"]
+        if item_dict["label_str"] == "Norgate sync"
+    )
+    assert norgate_evidence_dict["value_str"] == "ready"
+    assert "stage=Local snapshot ready" in norgate_evidence_dict["detail_str"]
+
+
+def test_dashboard_norgate_debug_story_ignores_pre_sync_data_load_failure():
+    detail_dict = {
+        "pod_row_dict": {
+            "db_status_str": "ok",
+            "norgate_snapshot_status_dict": {
+                "data_source_mode_str": "snapshot",
+                "status_str": "ready",
+                "severity_str": "green",
+                "sync_stage_label_str": "Local snapshot ready",
+                "reason_code_str": "local_snapshot_ready",
+                "build_gate_reason_code_str": "carry_forward_snapshot_ready",
+                "last_sync_utc_str": "2026-05-20T07:19:04+00:00",
+            },
+            "eod_snapshot_dict": {"status_str": "not_applicable", "severity_str": "gray"},
+        },
+        "event_dict_list": [
+            {
+                "event_name_str": "scheduler_error_retry",
+                "next_phase_str": "build_decision_plan",
+                "event_timestamp_str": "2026-05-20T07:18:18+00:00",
+                "error_str": "Old snapshot data-load error.",
+            }
+        ],
+    }
+
+    story_dict = dashboard_module._build_debug_story_dict(detail_dict)
+
+    assert not any(
+        event_dict["label_str"] == "Post-sync data load failed"
+        for event_dict in story_dict["timeline_event_dict_list"]
+    )
+
+
+def test_dashboard_norgate_debug_story_uses_fresh_post_sync_data_load_failure():
+    detail_dict = {
+        "pod_row_dict": {
+            "db_status_str": "ok",
+            "norgate_snapshot_status_dict": {
+                "data_source_mode_str": "snapshot",
+                "status_str": "ready",
+                "severity_str": "green",
+                "sync_stage_label_str": "Local snapshot ready",
+                "reason_code_str": "local_snapshot_ready",
+                "build_gate_reason_code_str": "carry_forward_snapshot_ready",
+                "last_sync_utc_str": "2026-05-20T07:19:04+00:00",
+            },
+            "eod_snapshot_dict": {"status_str": "not_applicable", "severity_str": "gray"},
+        },
+        "event_dict_list": [
+            {
+                "event_name_str": "scheduler_error_retry",
+                "next_phase_str": "build_decision_plan",
+                "event_timestamp_str": "2026-05-20T07:18:18+00:00",
+                "error_str": "Old snapshot data-load error.",
+            },
+            {
+                "event_name_str": "scheduler_error_retry",
+                "next_phase_str": "build_decision_plan",
+                "event_timestamp_str": "2026-05-20T07:20:18+00:00",
+                "error_str": "Fresh snapshot data-load error.",
+            },
+        ],
+    }
+
+    story_dict = dashboard_module._build_debug_story_dict(detail_dict)
+    failure_event_dict = next(
+        event_dict
+        for event_dict in story_dict["timeline_event_dict_list"]
+        if event_dict["label_str"] == "Post-sync data load failed"
+    )
+
+    assert failure_event_dict["detail_str"] == "Fresh snapshot data-load error."
+
+
+def test_dashboard_event_loader_matches_norgate_sync_pod_id_list(tmp_path: Path):
+    log_path_obj = tmp_path / "events.jsonl"
+    log_path_obj.write_text(
+        json.dumps(
+            {
+                "event_name_str": "norgate_snapshot_sync_ready",
+                "event_timestamp_str": "2026-05-20T07:19:04+00:00",
+                "pod_id_list": ["pod_sync"],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    event_dict_list = dashboard_module.load_recent_event_dict_list(
+        log_path_str=str(log_path_obj),
+        pod_id_str="pod_sync",
+    )
+
+    assert [event_dict["event_name_str"] for event_dict in event_dict_list] == [
+        "norgate_snapshot_sync_ready"
+    ]
+
+
+def test_dashboard_html_contains_norgate_sync_panel():
+    assert "Norgate Sync" in DASHBOARD_HTML_STR
+    assert "renderNorgateSyncSection" in DASHBOARD_HTML_STR
 
 
 def test_dashboard_main_loads_config_env_before_serving(monkeypatch, tmp_path: Path):

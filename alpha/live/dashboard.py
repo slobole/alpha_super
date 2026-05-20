@@ -752,8 +752,13 @@ def _event_matches_pod_bool(event_dict: dict[str, Any], pod_id_str: str) -> bool
     if str(event_dict.get("pod_id_str")) == pod_id_str:
         return True
     related_pod_id_list = event_dict.get("related_pod_id_list", [])
-    return isinstance(related_pod_id_list, list) and pod_id_str in {
+    if isinstance(related_pod_id_list, list) and pod_id_str in {
         str(item_obj) for item_obj in related_pod_id_list
+    }:
+        return True
+    pod_id_list = event_dict.get("pod_id_list", [])
+    return isinstance(pod_id_list, list) and pod_id_str in {
+        str(item_obj) for item_obj in pod_id_list
     }
 
 
@@ -2401,6 +2406,10 @@ def _build_data_freshness_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
         f"source={norgate_snapshot_status_dict.get('data_source_mode_str')}",
         f"status={norgate_snapshot_status_dict.get('status_str')}",
     ]
+    if norgate_snapshot_status_dict.get("sync_stage_label_str"):
+        norgate_detail_fragment_list.append(
+            f"stage={norgate_snapshot_status_dict.get('sync_stage_label_str')}"
+        )
     if norgate_snapshot_status_dict.get("build_gate_reason_code_str"):
         norgate_detail_fragment_list.append(
             f"gate={norgate_snapshot_status_dict.get('build_gate_reason_code_str')}"
@@ -2473,11 +2482,15 @@ def _build_data_freshness_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
         "norgate_snapshot_status_dict": norgate_snapshot_status_dict,
         "norgate_data_source_mode_str": norgate_snapshot_status_dict.get("data_source_mode_str"),
         "norgate_status_str": norgate_snapshot_status_dict.get("status_str"),
+        "norgate_sync_stage_label_str": norgate_snapshot_status_dict.get("sync_stage_label_str"),
+        "norgate_reason_code_str": norgate_snapshot_status_dict.get("reason_code_str"),
         "norgate_profile_str": norgate_snapshot_status_dict.get("profile_str"),
         "norgate_snapshot_date_str": norgate_snapshot_status_dict.get("snapshot_date_str"),
         "norgate_last_sync_utc_str": norgate_snapshot_status_dict.get("last_sync_utc_str"),
+        "norgate_last_attempt_utc_str": norgate_snapshot_status_dict.get("last_attempt_utc_str"),
         "norgate_last_error_str": norgate_snapshot_status_dict.get("last_error_str"),
         "norgate_build_gate_reason_code_str": norgate_snapshot_status_dict.get("build_gate_reason_code_str"),
+        "norgate_status_file_path_str": norgate_snapshot_status_dict.get("status_file_path_str"),
         "dtb3_download_status_str": row_dict.get("dtb3_download_status_str"),
         "dtb3_latest_observation_date_str": row_dict.get("dtb3_latest_observation_date_str"),
         "dtb3_freshness_business_days_int": row_dict.get("dtb3_freshness_business_days_int"),
@@ -2485,6 +2498,29 @@ def _build_data_freshness_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
         "dtb3_used_cache_bool": row_dict.get("dtb3_used_cache_bool"),
         "item_dict_list": item_dict_list,
     }
+
+
+def _post_sync_data_load_failure_event_dict(
+    event_dict_list: list[dict[str, Any]],
+    sync_ready_timestamp_str: str | None,
+) -> dict[str, Any] | None:
+    sync_ready_sort_key_tuple = _debug_timestamp_sort_key_tuple(sync_ready_timestamp_str)
+    if sync_ready_sort_key_tuple[0] == 0:
+        return None
+    for event_dict in reversed(event_dict_list):
+        event_name_str = str(event_dict.get("event_name_str") or "")
+        phase_str = str(event_dict.get("next_phase_str") or event_dict.get("phase_str") or "")
+        error_str = str(event_dict.get("error_str") or event_dict.get("message_str") or "")
+        if not error_str:
+            continue
+        event_sort_key_tuple = _debug_timestamp_sort_key_tuple(_event_timestamp_str(event_dict))
+        if event_sort_key_tuple[0] == 0 or event_sort_key_tuple < sync_ready_sort_key_tuple:
+            continue
+        if event_name_str == "build_decision_plan_data_dependency_error":
+            return event_dict
+        if "build_decision_plan" in event_name_str or phase_str == "build_decision_plan":
+            return event_dict
+    return None
 
 
 def _build_alert_dict_list(pod_row_dict_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2993,6 +3029,45 @@ def _build_debug_timeline_event_dict_list(detail_dict: dict[str, Any]) -> list[d
         row_dict.get("latest_broker_snapshot_timestamp_str"),
         "Latest broker account snapshot.",
     )
+    norgate_snapshot_status_dict = row_dict.get("norgate_snapshot_status_dict") or {}
+    norgate_timestamp_obj = (
+        norgate_snapshot_status_dict.get("last_attempt_utc_str")
+        or norgate_snapshot_status_dict.get("last_sync_utc_str")
+        or norgate_snapshot_status_dict.get("snapshot_date_str")
+    )
+    norgate_detail_str = (
+        f"stage={norgate_snapshot_status_dict.get('sync_stage_label_str') or '-'}, "
+        f"reason={norgate_snapshot_status_dict.get('reason_code_str') or '-'}, "
+        f"gate={norgate_snapshot_status_dict.get('build_gate_reason_code_str') or '-'}"
+    )
+    add_event(
+        "Norgate",
+        "Norgate sync",
+        norgate_snapshot_status_dict.get("status_str"),
+        str(norgate_snapshot_status_dict.get("severity_str") or "gray"),
+        norgate_timestamp_obj,
+        norgate_detail_str,
+    )
+    post_sync_failure_event_dict = _post_sync_data_load_failure_event_dict(
+        list(detail_dict.get("event_dict_list") or []),
+        str(
+            norgate_snapshot_status_dict.get("last_sync_utc_str")
+            or norgate_snapshot_status_dict.get("last_attempt_utc_str")
+            or ""
+        ),
+    )
+    if (
+        str(norgate_snapshot_status_dict.get("status_str") or "") == "ready"
+        and post_sync_failure_event_dict is not None
+    ):
+        add_event(
+            "DecisionPlan",
+            "Post-sync data load failed",
+            "failed",
+            "red",
+            _event_timestamp_str(post_sync_failure_event_dict),
+            str(post_sync_failure_event_dict.get("error_str") or post_sync_failure_event_dict.get("message_str") or ""),
+        )
     rehearsal_status_dict = row_dict.get("rehearsal_status_dict") or {}
     if rehearsal_status_dict.get("status_str") == "active":
         add_event(
@@ -3156,9 +3231,19 @@ def _build_debug_evidence_item_dict_list(detail_dict: dict[str, Any]) -> list[di
     row_dict = detail_dict.get("pod_row_dict") or {}
     eod_snapshot_dict = row_dict.get("eod_snapshot_dict") or {}
     rehearsal_status_dict = row_dict.get("rehearsal_status_dict") or {}
+    norgate_snapshot_status_dict = row_dict.get("norgate_snapshot_status_dict") or {}
     report_dict = detail_dict.get("latest_execution_report_dict") or {}
     item_dict_list = [
         _debug_evidence_item_dict("DB", row_dict.get("db_status_str"), _status_to_severity_str(str(row_dict.get("db_status_str") or ""), {"ok"}, {"empty"}), str(row_dict.get("db_path_str") or "")),
+        _debug_evidence_item_dict(
+            "Norgate sync",
+            norgate_snapshot_status_dict.get("status_str"),
+            str(norgate_snapshot_status_dict.get("severity_str") or "gray"),
+            (
+                f"stage={norgate_snapshot_status_dict.get('sync_stage_label_str') or '-'}, "
+                f"gate={norgate_snapshot_status_dict.get('build_gate_reason_code_str') or '-'}"
+            ),
+        ),
         _debug_evidence_item_dict("Pod state", row_dict.get("latest_pod_state_timestamp_str"), "green" if row_dict.get("latest_pod_state_timestamp_str") else "gray", "Latest persisted sleeve state."),
         _debug_evidence_item_dict("Broker snapshot", row_dict.get("latest_broker_snapshot_timestamp_str"), "green" if row_dict.get("latest_broker_snapshot_timestamp_str") else "gray", "Broker truth source for account cash and positions."),
         _debug_evidence_item_dict("Live reference", row_dict.get("latest_live_reference_snapshot_timestamp_str"), "green" if row_dict.get("latest_live_reference_snapshot_timestamp_str") else "gray", "Quote snapshot used for VPlan sizing."),
@@ -6844,6 +6929,7 @@ DASHBOARD_HTML_STR = """<!doctype html>
       }
       if (tabName === 'freshness') {
         return `<div class="tab-body">
+          ${renderNorgateSyncSection(context.freshness)}
           ${renderDataFreshnessSection(context.freshness)}
           ${renderEodSnapshotSection(context.eod)}
         </div>`;
@@ -7217,6 +7303,45 @@ DASHBOARD_HTML_STR = """<!doctype html>
               ['DTB3 freshness days', freshness.dtb3_freshness_business_days_int],
               ['DTB3 source', freshness.dtb3_source_name_str],
               ['Used cache', freshness.dtb3_used_cache_bool]
+            ])}
+          </div>
+        </section>`;
+    }
+
+    function renderNorgateSyncSection(freshness) {
+      const norgate = freshness.norgate_snapshot_status_dict || {};
+      const profileRows = (norgate.profile_status_dict_list || []).map(profile => [
+        profile.profile_str,
+        profile.snapshot_date_str || '-',
+        profile.manifest_hash_prefix_str || '-',
+        profile.error_str || '-'
+      ]);
+      const gateRows = (norgate.release_gate_status_dict_list || []).map(gate => [
+        gate.release_id_str,
+        gate.pod_id_str || '-',
+        gate.gate_reason_code_str || '-'
+      ]);
+      return `
+        <section class="panel">
+          <h3>Norgate Sync</h3>
+          <div class="panel-body">
+            <div class="metric-grid">
+              ${metric('Data source', norgate.data_source_mode_str)}
+              ${metric('Status', norgate.status_str)}
+              ${metric('Stage', norgate.sync_stage_label_str)}
+              ${metric('Profile', norgate.profile_str)}
+              ${metric('Snapshot date', norgate.snapshot_date_str)}
+              ${metric('Build gate', norgate.build_gate_reason_code_str)}
+            </div>
+            ${renderTable(['Profile', 'Snapshot date', 'Manifest hash', 'Error'], profileRows, 'No required Norgate profiles were found.')}
+            ${renderTable(['Release', 'POD', 'Gate reason'], gateRows, 'No release gate rows were found.')}
+            ${keyValueGrid([
+              ['Reason code', norgate.reason_code_str],
+              ['Last attempt', norgate.last_attempt_utc_str],
+              ['Last success', norgate.last_sync_utc_str],
+              ['Status file', norgate.status_file_path_str],
+              ['Snapshot env', norgate.snapshot_mode_env_str],
+              ['Last error', norgate.last_error_str]
             ])}
           </div>
         </section>`;
