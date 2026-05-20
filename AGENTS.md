@@ -15,6 +15,10 @@ These documents are authoritative for house philosophy, realism assumptions, and
 
 After the doctrine documents above, also read `docs/ai/KARPATHY_GUIDELINES.md`. This project keeps a self-contained local adaptation of `forrestchang/andrej-karpathy-skills` so the guidance is available here without requiring external plugin files, `.cursor` rules, or `.claude-plugin` metadata.
 
+For Norgate snapshot/API/client-VPS work, also read
+`docs/live/NORGATE_SNAPSHOT_V1.md` before changing live data-source,
+scheduler, or dashboard behavior.
+
 ## Karpathy-Derived Engineering Guardrails
 
 These guardrails are additive to the quant doctrine:
