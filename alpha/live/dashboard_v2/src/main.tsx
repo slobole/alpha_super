@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   ClipboardList,
   Gauge,
-  History,
   ListChecks,
   Loader2,
   Move,
@@ -20,22 +19,28 @@ import {
 import "./styles.css";
 import type {
   ActionToken,
+  BrokerAckRow,
   DashboardJob,
   DashboardSummary,
-  DataFreshness,
+  DebugTimelineEvent,
   EventRow,
+  ExecutionReport,
+  ExecutionRow,
+  FillRow,
   LifecycleStep,
   PodDetail,
   PodRow,
   RequiredAction,
-  Severity
+  Severity,
+  VPlanDetail,
+  VPlanRow
 } from "./types";
 
 const OPS_ACTION_LIST = ["tick", "submit_vplan", "post_execution_reconcile", "eod_snapshot"] as const;
 const REFRESH_MS = 4000;
 
 type ViewName = "ops" | "incubation";
-type DetailTab = "summary" | "logs" | "lifecycle" | "broker" | "freshness" | "raw";
+type DetailTab = "stage" | "timeline" | "logs" | "raw";
 
 interface PanelRect {
   left: number;
@@ -51,7 +56,8 @@ export function App() {
   const [viewName, setViewName] = useState<ViewName>(currentViewName());
   const [selectedPodId, setSelectedPodId] = useState<string | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<PodDetail | null>(null);
-  const [detailTab, setDetailTab] = useState<DetailTab>("summary");
+  const [detailTab, setDetailTab] = useState<DetailTab>("stage");
+  const [selectedStageKey, setSelectedStageKey] = useState<string>("summary");
   const [detailLoading, setDetailLoading] = useState(false);
   const [jobMap, setJobMap] = useState<Record<string, DashboardJob>>({});
 
@@ -115,9 +121,10 @@ export function App() {
     }
   }
 
-  function selectPod(row: PodRow) {
+  function selectPod(row: PodRow, stageKey?: string) {
     setSelectedDetail(null);
-    setDetailTab("summary");
+    setDetailTab("stage");
+    setSelectedStageKey(stageKey || currentStageKey(row.lifecycle_step_dict_list || [], row) || "summary");
     setSelectedPodId(row.pod_id_str);
   }
 
@@ -222,6 +229,14 @@ export function App() {
 
         {loadError && <div className="inline-alert red">Refresh failed: {loadError}</div>}
 
+        <ActionStatusStrip
+          jobMap={jobMap}
+          onSelectPod={(podId) => {
+            const row = rowByPodId(podRows, podId);
+            if (row) selectPod(row);
+          }}
+        />
+
         {viewName === "ops" ? (
           <OpsHome
             rows={opsRows}
@@ -233,6 +248,7 @@ export function App() {
           <IncubationHome
             rows={incubationRows}
             attentionRows={attentionRows}
+            jobMap={jobMap}
             onSelect={selectPod}
           />
         )}
@@ -247,6 +263,11 @@ export function App() {
           onClose={() => {
             setSelectedPodId(null);
             setSelectedDetail(null);
+          }}
+          selectedStageKey={selectedStageKey}
+          onStageSelect={(stageKey) => {
+            setSelectedStageKey(stageKey);
+            setDetailTab("stage");
           }}
           onAction={startAction}
         />
@@ -264,7 +285,7 @@ function OpsHome({
   rows: PodRow[];
   attentionRows: AttentionRow[];
   jobMap: Record<string, DashboardJob>;
-  onSelect: (row: PodRow) => void;
+  onSelect: (row: PodRow, stageKey?: string) => void;
 }) {
   return (
     <div className="content-grid">
@@ -297,15 +318,10 @@ function OpsHome({
         <SectionTitle icon={<Activity size={18} />} title="Live / Paper PODs" aside={`${rows.length} pods`} />
         <div className="pod-table">
           {rows.map((row) => (
-            <PodRowCard key={row.pod_id_str} row={row} onSelect={() => onSelect(row)} />
+            <PodRowCard key={row.pod_id_str} row={row} job={podBadgeJob(jobMap, row.pod_id_str)} onSelect={() => onSelect(row)} onStageSelect={(stageKey) => onSelect(row, stageKey)} />
           ))}
           {!rows.length && <EmptyState text="No live or paper PODs are enabled." />}
         </div>
-      </section>
-
-      <section className="surface jobs-surface">
-        <SectionTitle icon={<History size={18} />} title="Recent Actions" aside="this session" />
-        <JobList jobMap={jobMap} />
       </section>
     </div>
   );
@@ -314,11 +330,13 @@ function OpsHome({
 function IncubationHome({
   rows,
   attentionRows,
+  jobMap,
   onSelect
 }: {
   rows: PodRow[];
   attentionRows: AttentionRow[];
-  onSelect: (row: PodRow) => void;
+  jobMap: Record<string, DashboardJob>;
+  onSelect: (row: PodRow, stageKey?: string) => void;
 }) {
   return (
     <div className="content-grid incubation-grid">
@@ -326,7 +344,7 @@ function IncubationHome({
         <SectionTitle icon={<ClipboardList size={18} />} title="Incubation Rehearsal" aside={`${rows.length} pods`} />
         <div className="pod-table">
           {rows.map((row) => (
-            <PodRowCard key={row.pod_id_str} row={row} onSelect={() => onSelect(row)} incubation />
+            <PodRowCard key={row.pod_id_str} row={row} job={podBadgeJob(jobMap, row.pod_id_str)} onSelect={() => onSelect(row)} onStageSelect={(stageKey) => onSelect(row, stageKey)} incubation />
           ))}
           {!rows.length && <EmptyState text="No incubation PODs are enabled." />}
         </div>
@@ -354,11 +372,15 @@ function IncubationHome({
 function PodRowCard({
   row,
   incubation,
-  onSelect
+  job,
+  onSelect,
+  onStageSelect
 }: {
   row: PodRow;
   incubation?: boolean;
+  job?: DashboardJob;
   onSelect: () => void;
+  onStageSelect: (stageKey: string) => void;
 }) {
   const action = row.required_action_dict || {};
   const severity = effectiveSeverity(row);
@@ -378,9 +400,10 @@ function PodRowCard({
         <div className="pod-numbers">
           <span>{formatMoney(row.equity_float)}</span>
           <small>{row.position_count_int ?? 0} pos</small>
+          {job && <JobBadge job={job} />}
         </div>
       </button>
-      <MiniStageRail steps={row.lifecycle_step_dict_list || []} />
+      <MiniStageRail row={row} steps={row.lifecycle_step_dict_list || []} onStageSelect={onStageSelect} />
       <div className="row-actions">
         <button className="quiet-button" onClick={onSelect}>
           <Search size={15} /> Inspect
@@ -390,20 +413,23 @@ function PodRowCard({
   );
 }
 
-function MiniStageRail({ steps }: { steps: LifecycleStep[] }) {
-  const executionSteps = steps.filter((step) => step.step_key_str !== "diff");
+function MiniStageRail({ row, steps, onStageSelect }: { row: PodRow; steps: LifecycleStep[]; onStageSelect: (stageKey: string) => void }) {
+  const executionSteps = compactStageStepList(steps);
   if (!executionSteps.length) return null;
-  const currentKey = currentStageKey(executionSteps);
+  const currentKey = currentStageKey(executionSteps, row);
   return (
     <div className="mini-stage-rail" aria-label="POD current lifecycle stages">
       {executionSteps.map((step) => (
-        <div
+        <button
+          type="button"
           className={`mini-stage ${severityClass(step.severity_str || step.status_str || "gray")} ${step.step_key_str === currentKey ? "current" : ""}`}
           key={step.step_key_str || step.label_str}
           title={`${step.label_str || step.step_key_str}: ${step.status_str || "-"}`}
+          onClick={() => step.step_key_str && onStageSelect(step.step_key_str)}
         >
           <span>{step.label_str || step.step_key_str}</span>
-        </div>
+          <strong>{stageChipStatus(step, row)}</strong>
+        </button>
       ))}
     </div>
   );
@@ -415,6 +441,8 @@ function DetailDrawer({
   tab,
   onTab,
   onClose,
+  selectedStageKey,
+  onStageSelect,
   onAction
 }: {
   detail: PodDetail | null;
@@ -422,6 +450,8 @@ function DetailDrawer({
   tab: DetailTab;
   onTab: (tab: DetailTab) => void;
   onClose: () => void;
+  selectedStageKey: string;
+  onStageSelect: (stageKey: string) => void;
   onAction: (row: PodRow, actionName: string) => void;
 }) {
   const row = detail?.pod_row_dict;
@@ -530,18 +560,16 @@ function DetailDrawer({
               ))}
             </div>
             <div className="drawer-tabs">
-              {(["summary", "logs", "lifecycle", "broker", "freshness", "raw"] as DetailTab[]).map((tabName) => (
+              {(["stage", "timeline", "logs", "raw"] as DetailTab[]).map((tabName) => (
                 <button key={tabName} className={tab === tabName ? "active" : ""} onClick={() => onTab(tabName)}>
-                  {tabName}
+                  {tabName === "stage" ? "Stage Inspector" : tabName}
                 </button>
               ))}
             </div>
             <div className="drawer-body">
-              {tab === "summary" && <SummaryTab detail={detail} />}
+              {tab === "stage" && <StageInspector detail={detail} selectedStageKey={selectedStageKey} onStageSelect={onStageSelect} />}
+              {tab === "timeline" && <TimelineTab events={detail?.debug_story_dict?.timeline_event_dict_list || []} />}
               {tab === "logs" && <LogsTab events={detail?.event_dict_list || []} />}
-              {tab === "lifecycle" && <LifecycleTab steps={detail?.lifecycle_step_dict_list || []} />}
-              {tab === "broker" && <BrokerTab detail={detail} />}
-              {tab === "freshness" && <FreshnessTab freshness={detail?.data_freshness_dict} />}
               {tab === "raw" && <RawTab detail={detail} />}
             </div>
           </>
@@ -552,10 +580,22 @@ function DetailDrawer({
   );
 }
 
-function SummaryTab({ detail }: { detail: PodDetail | null }) {
+function StageInspector({
+  detail,
+  selectedStageKey,
+  onStageSelect
+}: {
+  detail: PodDetail | null;
+  selectedStageKey: string;
+  onStageSelect: (stageKey: string) => void;
+}) {
   const row = detail?.pod_row_dict;
   if (!row) return null;
   const action = detail?.required_action_dict || row.required_action_dict || {};
+  const stepList = detail?.lifecycle_step_dict_list || row.lifecycle_step_dict_list || [];
+  const currentKey = currentStageKey(compactStageStepList(stepList), row);
+  const activeStageKey = normalizeStageKey(selectedStageKey) || currentKey || stepList[0]?.step_key_str || "summary";
+  const activeStep = stepList.find((step) => step.step_key_str === activeStageKey);
   return (
     <div className="detail-stack">
       <div className="summary-line">
@@ -565,23 +605,34 @@ function SummaryTab({ detail }: { detail: PodDetail | null }) {
           <span>{action.detail_str || shortReason(row)}</span>
         </div>
       </div>
-      <div className="metric-grid">
-        <Metric label="Mode" value={row.mode_str} />
-        <Metric label="Account" value={row.account_route_str} />
-        <Metric label="Equity" value={formatMoney(row.equity_float)} />
-        <Metric label="Cash" value={formatMoney(row.cash_float)} />
-        <Metric label="Decision" value={row.latest_decision_plan_status_str || "-"} />
-        <Metric label="VPlan" value={row.latest_vplan_status_str || "-"} />
-        <Metric label="Reconcile" value={row.latest_reconciliation_status_str || "-"} />
-        <Metric label="Latest Event" value={formatTime(row.latest_event_timestamp_str)} />
-      </div>
-      {detail?.latest_diff_dict && (
-        <div className="subtle-box">
-          <strong>Reference DIFF</strong>
-          <span>{String(detail.latest_diff_dict.status_str || "not_run")}</span>
+      <section className="stage-inspector" aria-label="Stage Inspector evidence">
+        <div className="stage-inspector-header">
+          <div>
+            <div className="eyebrow">Stage Inspector</div>
+            <h2>{activeStep?.label_str || stageLabel(activeStageKey)}</h2>
+          </div>
+          <Pill>{activeStep?.status_str || stageChipStatus(activeStep, row)}</Pill>
         </div>
-      )}
-      <StageMap steps={detail?.lifecycle_step_dict_list || row.lifecycle_step_dict_list || []} />
+        {renderStageEvidence(activeStageKey, detail)}
+      </section>
+      <StageMap row={row} steps={stepList} selectedStageKey={activeStageKey} onStageSelect={onStageSelect} />
+    </div>
+  );
+}
+
+function TimelineTab({ events }: { events: DebugTimelineEvent[] }) {
+  if (!events.length) return <EmptyState text="No debug timeline was returned." />;
+  return (
+    <div className="timeline-list">
+      {events.map((event, index) => (
+        <div className={`timeline-row ${severityClass(event.severity_str || event.status_str || "gray")}`} key={`${event.source_str}-${event.label_str}-${index}`}>
+          <StatusDot severity={event.severity_str || event.status_str || "gray"} />
+          <span>{formatTime(event.timestamp_str)}</span>
+          <strong>{event.source_str || "Event"} / {event.label_str || "-"}</strong>
+          <small>{event.status_str || "-"}</small>
+          <em>{event.detail_str || "-"}</em>
+        </div>
+      ))}
     </div>
   );
 }
@@ -601,98 +652,255 @@ function LogsTab({ events }: { events: EventRow[] }) {
   );
 }
 
-function LifecycleTab({ steps }: { steps: LifecycleStep[] }) {
-  if (!steps.length) return <EmptyState text="No lifecycle steps were returned." />;
-  return (
-    <div className="detail-stack">
-      <StageMap steps={steps} />
-      <div className="lifecycle-list">
-        {steps.map((step) => (
-          <div className={`lifecycle-row ${severityClass(step.severity_str || step.status_str || "gray")}`} key={step.step_key_str || step.label_str}>
-            <StatusDot severity={step.severity_str || step.status_str || "gray"} />
-            <div>
-              <strong>{step.label_str || step.step_key_str}</strong>
-              <span>{step.detail_str || step.evidence_str || step.status_str}</span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function StageMap({ steps }: { steps: LifecycleStep[] }) {
-  const executionSteps = steps.filter((step) => step.step_key_str !== "diff");
+function StageMap({
+  row,
+  steps,
+  selectedStageKey,
+  onStageSelect
+}: {
+  row: PodRow;
+  steps: LifecycleStep[];
+  selectedStageKey: string;
+  onStageSelect: (stageKey: string) => void;
+}) {
+  const executionSteps = compactStageStepList(steps);
   const diffStep = steps.find((step) => step.step_key_str === "diff");
   if (!executionSteps.length) return <EmptyState text="No stage map was returned." />;
-  const currentKey = currentStageKey(executionSteps);
+  const currentKey = currentStageKey(executionSteps, row);
   return (
     <div className="stage-map" aria-label="POD lifecycle stage map">
       <div className="stage-map-header">
         <strong>Stage Map</strong>
-        <span>{stageSummary(executionSteps, currentKey)}</span>
+        <span>{stageSummary(executionSteps, currentKey, row)}</span>
       </div>
       <div className="stage-rail">
         {executionSteps.map((step, index) => {
           const current = step.step_key_str === currentKey;
+          const selected = step.step_key_str === selectedStageKey;
           return (
             <React.Fragment key={step.step_key_str || step.label_str}>
-              <div className={`stage-node ${severityClass(step.severity_str || step.status_str || "gray")} ${current ? "current" : ""}`}>
+              <button
+                type="button"
+                className={`stage-node ${severityClass(step.severity_str || step.status_str || "gray")} ${current ? "current" : ""} ${selected ? "selected" : ""}`}
+                onClick={() => step.step_key_str && onStageSelect(step.step_key_str)}
+              >
                 <span>{step.label_str || step.step_key_str}</span>
-                <strong>{step.status_str || "-"}</strong>
+                <strong>{stageChipStatus(step, row)}</strong>
                 {current && <small>current</small>}
-              </div>
+              </button>
               {index < executionSteps.length - 1 && <ArrowRight className="stage-arrow" size={15} />}
             </React.Fragment>
           );
         })}
       </div>
       {diffStep && (
-        <div className={`stage-reference ${severityClass(diffStep.severity_str || diffStep.status_str || "gray")}`}>
+        <button
+          type="button"
+          className={`stage-reference ${severityClass(diffStep.severity_str || diffStep.status_str || "gray")} ${selectedStageKey === "diff" ? "selected" : ""}`}
+          onClick={() => onStageSelect("diff")}
+        >
           <span>DIFF</span>
-          <strong>{diffStep.status_str || "-"}</strong>
+          <strong>{stageChipStatus(diffStep, row)}</strong>
           <small>{diffStep.detail_str || diffStep.evidence_str || "-"}</small>
-        </div>
+        </button>
       )}
     </div>
   );
 }
 
-function BrokerTab({ detail }: { detail: PodDetail | null }) {
+function renderStageEvidence(stageKey: string, detail: PodDetail | null) {
   const row = detail?.pod_row_dict;
+  if (!row) return null;
+  const report = detail?.latest_execution_report_dict || {};
+  const vplan = detail?.latest_vplan_dict || {};
+  const decision = detail?.latest_decision_plan_dict || {};
+  const eod = row.eod_snapshot_dict || {};
+  const diff = detail?.latest_diff_dict || {};
+  const stage = normalizeStageKey(stageKey);
+  if (stage === "db") {
+    return (
+      <div className="stage-evidence-grid">
+        <Metric label="DB" value={row.db_status_str || "-"} />
+        <Metric label="State Time" value={formatTime(row.latest_pod_state_timestamp_str)} />
+        <Metric label="Source" value={row.latest_pod_state_source_str || "-"} />
+        <Metric label="Stage" value={row.latest_pod_state_stage_str || "-"} />
+        <div className="evidence-box wide"><strong>DB path</strong><span>{row.db_path_str || "-"}</span></div>
+      </div>
+    );
+  }
+  if (stage === "decision") {
+    return (
+      <div className="detail-stack">
+        <div className="stage-evidence-grid">
+          <Metric label="Decision" value={row.latest_decision_plan_status_str || stringField(decision, "status_str")} />
+          <Metric label="Submitted" value={formatTime(row.latest_decision_plan_submission_timestamp_str || stringField(decision, "submission_timestamp_str"))} />
+          <Metric label="Target Exec" value={formatTime(row.latest_decision_plan_target_execution_timestamp_str || stringField(decision, "target_execution_timestamp_str"))} />
+          <Metric label="Book" value={stringField(decision, "decision_book_type_str") || "-"} />
+        </div>
+        <KeyValuePanel title="Target weights" value={decision.display_target_weight_map_dict} />
+      </div>
+    );
+  }
+  if (stage === "vplan") {
+    return (
+      <div className="detail-stack">
+        <div className="stage-evidence-grid">
+          <Metric label="VPlan" value={row.latest_vplan_status_str || vplan.status_str || "-"} />
+          <Metric label="VPlan ID" value={row.latest_vplan_id_int ?? vplan.vplan_id_int ?? "-"} />
+          <Metric label="Submitted" value={formatTime(row.latest_vplan_submission_timestamp_str || vplan.submission_timestamp_str)} />
+          <Metric label="Target Exec" value={formatTime(row.latest_vplan_target_execution_timestamp_str || vplan.target_execution_timestamp_str)} />
+        </div>
+        <EvidenceTable
+          title="Order deltas"
+          rows={vplan.vplan_row_dict_list || []}
+          emptyText="No VPlan rows were returned."
+          columns={[
+            ["Asset", (item: VPlanRow) => item.asset_str || "-"],
+            ["Current", (item: VPlanRow) => formatNumber(item.current_share_float)],
+            ["Target", (item: VPlanRow) => formatNumber(item.target_share_float)],
+            ["Delta", (item: VPlanRow) => formatNumber(item.order_delta_share_float)],
+            ["Ref", (item: VPlanRow) => formatNumber(item.live_reference_price_float)]
+          ]}
+        />
+      </div>
+    );
+  }
+  if (stage === "ack") {
+    return (
+      <div className="detail-stack">
+        <div className="stage-evidence-grid">
+          <Metric label="ACK Status" value={row.latest_submit_ack_status_str || vplan.submit_ack_status_str || "-"} />
+          <Metric label="ACK Rows" value={row.broker_ack_count_int ?? report.broker_ack_count_int ?? 0} />
+          <Metric label="Missing" value={row.missing_ack_count_int ?? vplan.missing_ack_count_int ?? 0} tone={(row.missing_ack_count_int || vplan.missing_ack_count_int || 0) > 0 ? "red" : undefined} />
+          <Metric label="Coverage" value={formatPercent(vplan.ack_coverage_ratio_float)} />
+        </div>
+        <EvidenceTable
+          title="Broker ACK evidence"
+          rows={vplan.broker_ack_row_dict_list || []}
+          emptyText="No broker ACK rows were returned."
+          columns={[
+            ["Asset", (item: BrokerAckRow) => item.asset_str || "-"],
+            ["Status", (item: BrokerAckRow) => item.ack_status_str || "-"],
+            ["Source", (item: BrokerAckRow) => item.ack_source_str || "-"],
+            ["Broker", (item: BrokerAckRow) => (item.broker_response_ack_bool ? "acked" : "missing")],
+            ["Time", (item: BrokerAckRow) => formatTime(item.response_timestamp_str)]
+          ]}
+        />
+      </div>
+    );
+  }
+  if (stage === "fill") {
+    return (
+      <div className="detail-stack">
+        <div className="stage-evidence-grid">
+          <Metric label="Fills" value={report.fill_count_int ?? row.fill_count_int ?? 0} />
+          <Metric label="Open Coverage" value={`${report.fill_with_official_open_count_int ?? 0} / ${report.fill_count_int ?? row.fill_count_int ?? 0}`} />
+          <Metric label="Open Slippage" value={formatBps(report.official_open_slippage_bps_float)} />
+          <Metric label="Ref Slippage" value={formatBps(report.vplan_reference_slippage_bps_float)} />
+        </div>
+        <EvidenceTable
+          title="Fills"
+          rows={report.fill_row_dict_list || vplan.fill_row_dict_list || []}
+          emptyText="No fills were returned for this VPlan."
+          columns={[
+            ["Asset", (item: FillRow) => item.asset_str || "-"],
+            ["Shares", (item: FillRow) => formatNumber(item.fill_amount_float)],
+            ["Fill", (item: FillRow) => formatNumber(item.fill_price_float)],
+            ["Open", (item: FillRow) => formatNumber(item.official_open_price_float)],
+            ["Time", (item: FillRow) => formatTime(item.fill_timestamp_str)]
+          ]}
+        />
+      </div>
+    );
+  }
+  if (stage === "reconcile") {
+    return (
+      <div className="detail-stack">
+        <div className="stage-evidence-grid">
+          <Metric label="Reconcile" value={row.latest_reconciliation_status_str || "-"} tone={severityClass(row.latest_reconciliation_status_str || "gray")} />
+          <Metric label="Time" value={formatTime(row.latest_reconciliation_timestamp_str)} />
+          <Metric label="Residuals" value={report.residual_count_int ?? 0} tone={(report.residual_count_int || 0) > 0 ? "red" : undefined} />
+          <Metric label="Reason" value={row.reason_code_str || "-"} />
+        </div>
+        <EvidenceTable
+          title="Model vs broker"
+          rows={report.execution_row_dict_list || []}
+          emptyText="No execution rows were returned."
+          columns={[
+            ["Asset", (item: ExecutionRow) => item.asset_str || "-"],
+            ["Target", (item: ExecutionRow) => formatNumber(item.target_share_float)],
+            ["Broker", (item: ExecutionRow) => formatNumber(item.broker_share_float)],
+            ["Residual", (item: ExecutionRow) => formatNumber(item.residual_share_float)],
+            ["Order", (item: ExecutionRow) => item.latest_broker_order_status_str || "-"]
+          ]}
+        />
+      </div>
+    );
+  }
+  if (stage === "eod") {
+    return (
+      <div className="stage-evidence-grid">
+        <Metric label="EOD" value={String(eod.status_str || "-")} tone={severityClass(String(eod.severity_str || eod.status_str || "gray"))} />
+        <Metric label="Market Date" value={String(eod.latest_market_date_str || eod.expected_market_date_str || "-")} />
+        <Metric label="Equity" value={formatMoney(numberField(eod, "equity_float"))} />
+        <Metric label="Cash" value={formatMoney(numberField(eod, "cash_float"))} />
+        <div className="evidence-box wide"><strong>Detail</strong><span>{String(eod.detail_str || "-")}</span></div>
+      </div>
+    );
+  }
+  if (stage === "diff") {
+    const htmlUrl = stringField(diff, "html_url_str") || row.latest_diff_artifact_url_str || "";
+    return (
+      <div className="stage-evidence-grid">
+        <Metric label="DIFF" value={String(diff.status_str || row.latest_diff_status_str || "not_run")} />
+        <Metric label="Issues" value={numberField(diff, "open_issue_count_int") ?? row.latest_diff_open_issue_count_int ?? "-"} />
+        <Metric label="Tracking Error" value={formatNumber(numberField(diff, "equity_tracking_error_float"))} />
+        <Metric label="Timestamp" value={formatTime(stringField(diff, "timestamp_str"))} />
+        <div className="evidence-box wide">
+          <strong>Artifact</strong>
+          {htmlUrl ? <a href={htmlUrl} target="_blank" rel="noreferrer">Open DIFF artifact</a> : <span>No artifact yet.</span>}
+        </div>
+      </div>
+    );
+  }
+  return <EmptyState text="No evidence renderer exists for this stage." />;
+}
+
+function EvidenceTable<T>({
+  title,
+  rows,
+  columns,
+  emptyText
+}: {
+  title: string;
+  rows: T[];
+  columns: Array<[string, (row: T) => React.ReactNode]>;
+  emptyText: string;
+}) {
+  if (!rows.length) return <EmptyState text={emptyText} />;
   return (
-    <div className="metric-grid">
-      <Metric label="Account route" value={row?.account_route_str || "-"} />
-      <Metric label="Positions" value={row?.position_count_int ?? 0} />
-      <Metric label="Warnings" value={row?.warning_count_int ?? 0} />
-      <Metric label="Latest state" value={formatTime(row?.latest_pod_state_timestamp_str)} />
-      <Metric label="EOD status" value={String(row?.eod_snapshot_dict?.status_str || "-")} />
-      <Metric label="DB status" value={row?.db_status_str || "-"} />
+    <div className="evidence-table-wrap">
+      <strong>{title}</strong>
+      <div className="evidence-table" style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(92px, 1fr))` }}>
+        {columns.map(([label]) => <span className="evidence-heading" key={label}>{label}</span>)}
+        {rows.map((row, rowIndex) => (
+          <React.Fragment key={rowIndex}>
+            {columns.map(([label, renderFn]) => <span key={`${rowIndex}-${label}`}>{renderFn(row)}</span>)}
+          </React.Fragment>
+        ))}
+      </div>
     </div>
   );
 }
 
-function FreshnessTab({ freshness }: { freshness?: DataFreshness }) {
-  const itemList = freshness?.item_dict_list || [];
-  if (!freshness && !itemList.length) return <EmptyState text="No freshness data was returned." />;
+function KeyValuePanel({ title, value }: { title: string; value: unknown }) {
+  if (!value || typeof value !== "object") return <EmptyState text={`${title} were not returned.`} />;
   return (
-    <div className="detail-stack">
-      <div className="summary-line">
-        <StatusDot severity={freshness?.severity_str || freshness?.status_str || "gray"} />
-        <div>
-          <strong>{freshness?.status_str || "unknown"}</strong>
-          <span>Norgate: {freshness?.norgate_status_str || "-"}</span>
-        </div>
-      </div>
-      <div className="freshness-list">
-        {itemList.map((item) => (
-          <div className={`freshness-row ${severityClass(item.severity_str || item.status_str || "gray")}`} key={item.label_str}>
-            <strong>{item.label_str}</strong>
-            <span>{item.status_str}</span>
-            <small>{item.detail_str || formatTime(item.timestamp_str)}</small>
-          </div>
-        ))}
-      </div>
+    <div className="key-value-panel">
+      <strong>{title}</strong>
+      {Object.entries(value as Record<string, unknown>).map(([key, entry]) => (
+        <div key={key}><span>{key}</span><strong>{String(entry)}</strong></div>
+      ))}
     </div>
   );
 }
@@ -711,22 +919,55 @@ function RawTab({ detail }: { detail: PodDetail | null }) {
   );
 }
 
-function JobList({ jobMap }: { jobMap: Record<string, DashboardJob> }) {
-  const jobs = Object.values(jobMap).sort((left, right) => right.created_timestamp_str.localeCompare(left.created_timestamp_str));
-  if (!jobs.length) return <EmptyState text="No actions started from this browser session." />;
+function ActionStatusStrip({ jobMap, onSelectPod }: { jobMap: Record<string, DashboardJob>; onSelectPod: (podId: string) => void }) {
+  const jobList = visibleJobList(jobMap);
+  if (!jobList.length) return null;
+  const runningCount = jobList.filter((job) => ["queued", "running"].includes(job.status_str)).length;
+  const failedCount = jobList.filter((job) => job.status_str === "failed").length;
   return (
-    <div className="job-list">
-      {jobs.slice(0, 8).map((job) => (
-        <div className={`job-row ${severityClass(job.status_str === "failed" ? "red" : job.status_str === "succeeded" ? "green" : "yellow")}`} key={job.job_id_str}>
-          <TerminalSquare size={16} />
-          <div>
-            <strong>{job.action_name_str || "job"} / {job.pod_id_str}</strong>
-            <span>{job.status_str}{job.error_str ? `: ${job.error_str}` : ""}</span>
-          </div>
-        </div>
-      ))}
-    </div>
+    <section className="action-status-strip" aria-label="Action status">
+      <div>
+        <TerminalSquare size={16} />
+        <strong>Action Status</strong>
+        <span>{runningCount} running / {failedCount} failed</span>
+      </div>
+      <div className="action-status-list">
+        {jobList.map((job) => (
+          <button key={job.job_id_str} className={`job-chip ${jobTone(job)}`} onClick={() => onSelectPod(job.pod_id_str)}>
+            <span>{actionLabel(job.action_name_str || "job")}</span>
+            <strong>{job.pod_id_str}</strong>
+            <small>{job.status_str}</small>
+          </button>
+        ))}
+      </div>
+    </section>
   );
+}
+
+function JobBadge({ job }: { job: DashboardJob }) {
+  return <small className={`job-badge ${jobTone(job)}`}>{job.status_str}</small>;
+}
+
+function visibleJobList(jobMap: Record<string, DashboardJob>) {
+  const jobs = Object.values(jobMap).sort((left, right) => right.created_timestamp_str.localeCompare(left.created_timestamp_str));
+  if (!jobs.length) return [];
+  const importantJobList = jobs.filter((job) => ["queued", "running", "failed"].includes(job.status_str));
+  const mergedJobList = [...importantJobList];
+  if (!mergedJobList.some((job) => job.job_id_str === jobs[0].job_id_str)) mergedJobList.push(jobs[0]);
+  return mergedJobList.slice(0, 5);
+}
+
+function podBadgeJob(jobMap: Record<string, DashboardJob>, podId: string) {
+  return Object.values(jobMap)
+    .filter((job) => job.pod_id_str === podId && ["queued", "running", "failed"].includes(job.status_str))
+    .sort((left, right) => right.created_timestamp_str.localeCompare(left.created_timestamp_str))[0];
+}
+
+function jobTone(job: DashboardJob) {
+  if (job.status_str === "failed") return "red";
+  if (job.status_str === "succeeded") return "green";
+  if (["queued", "running"].includes(job.status_str)) return "yellow";
+  return "gray";
 }
 
 function SectionTitle({ icon, title, aside }: { icon: React.ReactNode; title: string; aside?: string }) {
@@ -833,6 +1074,57 @@ function effectiveSeverity(row: PodRow): Severity {
   return row.debug_summary_dict?.severity_str || row.required_action_dict?.severity_str || row.health_str || "gray";
 }
 
+function compactStageStepList(steps: LifecycleStep[]) {
+  return steps.filter((step) => step.step_key_str !== "diff");
+}
+
+function normalizeStageKey(stageKey?: string | null) {
+  const clean = String(stageKey || "").toLowerCase();
+  if (clean === "broker_order") return "vplan";
+  if (clean === "broker_ack") return "ack";
+  if (clean === "fills") return "fill";
+  if (clean === "reconciliation") return "reconcile";
+  return clean;
+}
+
+function stageLabel(stageKey: string) {
+  const labelMap: Record<string, string> = {
+    db: "DB",
+    decision: "Decision",
+    vplan: "VPlan",
+    ack: "ACK",
+    fill: "Fill",
+    reconcile: "Reconcile",
+    eod: "EOD",
+    diff: "DIFF"
+  };
+  return labelMap[normalizeStageKey(stageKey)] || stageKey;
+}
+
+function stageChipStatus(step: LifecycleStep | undefined, row: PodRow) {
+  const key = normalizeStageKey(step?.step_key_str);
+  if (key === "ack") {
+    const missing = row.missing_ack_count_int || 0;
+    if (missing > 0) return `missing ${missing}`;
+    if ((row.broker_ack_count_int || 0) > 0) return `${row.broker_ack_count_int} ack`;
+  }
+  if (key === "fill") {
+    return `${row.fill_count_int || 0} fill`;
+  }
+  if (key === "vplan" && row.latest_vplan_status_str) return row.latest_vplan_status_str;
+  if (key === "decision" && row.latest_decision_plan_status_str) return row.latest_decision_plan_status_str;
+  if (key === "reconcile") {
+    const reconcileStatus = row.latest_reconciliation_status_str || step?.status_str;
+    if (!reconcileStatus || reconcileStatus === "none") {
+      return row.next_action_str === "post_execution_reconcile" ? "pending" : "none";
+    }
+    return reconcileStatus;
+  }
+  if (key === "eod" && row.eod_snapshot_dict?.status_str) return String(row.eod_snapshot_dict.status_str);
+  if (key === "diff" && row.latest_diff_status_str) return row.latest_diff_status_str;
+  return step?.status_str || "-";
+}
+
 function initialPanelRect(): PanelRect {
   if (typeof window === "undefined") return { left: 24, top: 76, width: 760, height: 720 };
   const maxWidth = Math.max(300, window.innerWidth - 24);
@@ -858,9 +1150,13 @@ function clampPanelRect(rect: PanelRect): PanelRect {
   return { left, top, width, height };
 }
 
-function currentStageKey(steps: LifecycleStep[]): string | undefined {
+function currentStageKey(steps: LifecycleStep[], row?: PodRow): string | undefined {
   const redStep = steps.find((step) => severityClass(step.severity_str || step.status_str || "gray") === "red");
   if (redStep?.step_key_str) return redStep.step_key_str;
+  const nextActionStage = currentStageFromNextAction(row?.next_action_str);
+  if (nextActionStage && steps.some((step) => normalizeStageKey(step.step_key_str) === nextActionStage)) {
+    return nextActionStage;
+  }
   const yellowStep = steps.find((step) => severityClass(step.severity_str || step.status_str || "gray") === "yellow");
   if (yellowStep?.step_key_str) return yellowStep.step_key_str;
   const waitingStep = steps.find((step) => ["waiting", "blocked_by_execution"].includes(String(step.status_str || "")));
@@ -869,10 +1165,22 @@ function currentStageKey(steps: LifecycleStep[]): string | undefined {
   return activeStep?.step_key_str || steps[0]?.step_key_str;
 }
 
-function stageSummary(steps: LifecycleStep[], currentKey?: string) {
+function currentStageFromNextAction(nextAction?: string | null) {
+  const actionStageMap: Record<string, string> = {
+    build_decision_plan: "decision",
+    build_vplan: "vplan",
+    review_vplan: "vplan",
+    submit_vplan: "vplan",
+    post_execution_reconcile: "reconcile",
+    eod_snapshot: "eod"
+  };
+  return actionStageMap[String(nextAction || "")];
+}
+
+function stageSummary(steps: LifecycleStep[], currentKey?: string, row?: PodRow) {
   const currentStep = steps.find((step) => step.step_key_str === currentKey);
   if (!currentStep) return "no current stage";
-  return `${currentStep.label_str || currentStep.step_key_str}: ${currentStep.status_str || "-"}`;
+  return `${currentStep.label_str || currentStep.step_key_str}: ${row ? stageChipStatus(currentStep, row) : currentStep.status_str || "-"}`;
 }
 
 function severityClass(severity?: Severity) {
@@ -898,6 +1206,8 @@ function rehearsalLabel(row: PodRow) {
 
 function actionLabel(actionName: string) {
   const labelMap: Record<string, string> = {
+    compare_reference: "DIFF",
+    job: "Job",
     tick: "Tick",
     submit_vplan: "Submit",
     post_execution_reconcile: "Reconcile",
@@ -913,6 +1223,31 @@ function rowByPodId(rows: PodRow[], podId: string) {
 function formatMoney(value?: number | null) {
   if (typeof value !== "number" || Number.isNaN(value)) return "-";
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+}
+
+function formatNumber(value?: number | null) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "-";
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 4 }).format(value);
+}
+
+function formatBps(value?: number | null) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "-";
+  return `${formatNumber(value)} bps`;
+}
+
+function formatPercent(value?: number | null) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "-";
+  return `${formatNumber(value * 100)}%`;
+}
+
+function stringField(value: unknown, key: string) {
+  const item = value && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined;
+  return item == null || item === "" ? undefined : String(item);
+}
+
+function numberField(value: unknown, key: string) {
+  const item = value && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined;
+  return typeof item === "number" && !Number.isNaN(item) ? item : undefined;
 }
 
 function formatTime(value?: string | null) {

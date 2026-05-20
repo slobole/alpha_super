@@ -2601,8 +2601,12 @@ def test_dashboard_v2_source_has_stage_map_and_no_legacy_nav():
 
     assert "StageMap" in main_tsx_str
     assert "MiniStageRail" in main_tsx_str
+    assert "StageInspector" in main_tsx_str
+    assert "ActionStatusStrip" in main_tsx_str
     assert "POD lifecycle stage map" in main_tsx_str
     assert "currentStageKey" in main_tsx_str
+    assert "selectedStageKey" in main_tsx_str
+    assert "debug_story_dict?.timeline_event_dict_list" in main_tsx_str
     assert "Enable controls" in main_tsx_str
     assert "onPointerDown={startDrag}" in main_tsx_str
     assert "drawer-resize-handle" in main_tsx_str
@@ -2612,8 +2616,12 @@ def test_dashboard_v2_source_has_stage_map_and_no_legacy_nav():
     assert "OPS_ACTION_LIST.map" not in pod_row_card_str
     assert "stage-map" in styles_str
     assert "mini-stage-rail" in styles_str
+    assert "stage-inspector" in styles_str
+    assert "action-status-strip" in styles_str
     assert "drawer-control-gate" in styles_str
     assert "drawer-resize-handle" in styles_str
+    assert "jobs-surface" not in styles_str
+    assert "Recent Actions" not in main_tsx_str
     assert "legacy-link" not in styles_str
     assert "/legacy" not in main_tsx_str
     assert "Legacy" not in main_tsx_str

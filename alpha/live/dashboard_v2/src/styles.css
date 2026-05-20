@@ -200,9 +200,72 @@ h2 {
   min-width: 0;
 }
 
-.jobs-surface {
-  grid-column: 1 / -1;
+.action-status-strip {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  box-shadow: var(--shadow);
 }
+
+.action-status-strip > div:first-child,
+.action-status-list,
+.job-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.action-status-strip > div:first-child span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.action-status-list {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.job-chip,
+.job-badge {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--gray);
+  border-radius: 7px;
+  background: var(--surface-soft);
+}
+
+.job-chip {
+  min-height: 30px;
+  padding: 0 8px;
+}
+
+.job-chip span,
+.job-chip small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.job-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 20px;
+  margin-top: 3px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+.job-chip.green,
+.job-badge.green { border-left-color: var(--green); background: var(--green-soft); }
+.job-chip.yellow,
+.job-badge.yellow { border-left-color: var(--yellow); background: var(--yellow-soft); }
+.job-chip.red,
+.job-badge.red { border-left-color: var(--red); background: var(--red-soft); }
 
 .section-title {
   min-height: 48px;
@@ -333,11 +396,19 @@ h2 {
   white-space: nowrap;
 }
 
+.mini-stage strong {
+  margin-left: 4px;
+  color: var(--text);
+  font-size: 10px;
+}
+
 .mini-stage.green { border-left-color: var(--green); background: var(--green-soft); color: #11563a; }
 .mini-stage.yellow { border-left-color: var(--yellow); background: var(--yellow-soft); color: #6f480b; }
 .mini-stage.red { border-left-color: var(--red); background: var(--red-soft); color: #8a1d14; }
 
-.mini-stage.current {
+.mini-stage.current,
+.stage-node.selected,
+.stage-reference.selected {
   outline: 2px solid #b9c7df;
   color: var(--text);
 }
@@ -414,11 +485,11 @@ h2 {
   padding: 12px;
 }
 
-.job-row,
 .summary-line,
 .lifecycle-row,
 .freshness-row,
-.log-row {
+.log-row,
+.timeline-row {
   border: 1px solid var(--line-soft);
   border-radius: 7px;
   background: var(--surface);
@@ -429,14 +500,11 @@ h2 {
   min-width: 0;
 }
 
-.job-row div,
 .summary-line div,
 .lifecycle-row div {
   min-width: 0;
 }
 
-.job-row strong,
-.job-row span,
 .summary-line strong,
 .summary-line span,
 .lifecycle-row strong,
@@ -445,7 +513,6 @@ h2 {
   overflow-wrap: anywhere;
 }
 
-.job-row span,
 .summary-line span,
 .lifecycle-row span {
   color: var(--muted);
@@ -456,6 +523,7 @@ h2 {
   border-radius: 8px;
   background: var(--surface-soft);
   padding: 12px;
+  min-width: 0;
 }
 
 .stage-map-header {
@@ -485,6 +553,7 @@ h2 {
   border-radius: 7px;
   background: var(--surface);
   padding: 8px;
+  text-align: left;
 }
 
 .stage-node.green,
@@ -549,6 +618,8 @@ h2 {
   border-radius: 7px;
   background: var(--surface);
   padding: 8px;
+  text-align: left;
+  width: 100%;
 }
 
 .drawer-backdrop {
@@ -689,7 +760,8 @@ h2 {
 .drawer-body {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 12px;
   display: grid;
   gap: 10px;
@@ -698,6 +770,108 @@ h2 {
 .detail-stack {
   display: grid;
   gap: 10px;
+  min-width: 0;
+}
+
+.stage-inspector {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.stage-inspector-header {
+  min-height: 54px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--surface-soft);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.stage-evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px;
+}
+
+.evidence-box,
+.key-value-panel,
+.evidence-table-wrap {
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--surface-soft);
+  padding: 10px;
+}
+
+.evidence-box.wide {
+  grid-column: 1 / -1;
+}
+
+.evidence-box strong,
+.evidence-box span,
+.evidence-box a {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.evidence-box span,
+.evidence-box a {
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.evidence-table-wrap {
+  margin: 0 12px 12px;
+  overflow-x: auto;
+}
+
+.evidence-table-wrap > strong,
+.key-value-panel > strong {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.evidence-table {
+  display: grid;
+  min-width: 620px;
+  border-top: 1px solid var(--line-soft);
+  border-left: 1px solid var(--line-soft);
+}
+
+.evidence-table span {
+  min-height: 30px;
+  border-right: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+  padding: 6px 8px;
+  overflow-wrap: anywhere;
+}
+
+.evidence-heading {
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.key-value-panel {
+  display: grid;
+  gap: 6px;
+}
+
+.key-value-panel div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.key-value-panel span {
+  color: var(--muted);
 }
 
 .drawer-resize-handle {
@@ -733,7 +907,8 @@ h2 {
 .log-list,
 .lifecycle-list,
 .freshness-list,
-.raw-view {
+.raw-view,
+.timeline-list {
   display: grid;
   gap: 8px;
 }
@@ -747,6 +922,19 @@ h2 {
 .log-row small {
   color: var(--muted);
   overflow-wrap: anywhere;
+}
+
+.timeline-row {
+  display: grid;
+  grid-template-columns: 10px 88px minmax(120px, 0.9fr) minmax(70px, 0.5fr) minmax(180px, 1.2fr);
+}
+
+.timeline-row span,
+.timeline-row small,
+.timeline-row em {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  font-style: normal;
 }
 
 .freshness-row {
@@ -795,8 +983,11 @@ h2 {
 
   .status-hero,
   .content-grid,
-  .incubation-grid {
+  .incubation-grid,
+  .action-status-strip {
     grid-template-columns: 1fr;
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .hero-metrics,
@@ -807,8 +998,13 @@ h2 {
   .pod-row-main,
   .attention-item,
   .log-row,
-  .freshness-row {
+  .freshness-row,
+  .timeline-row {
     grid-template-columns: 1fr;
+  }
+
+  .stage-evidence-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .pod-numbers {
