@@ -10,9 +10,11 @@ from data.norgate_snapshot_store import (
     CAPITALSPECIAL_ADJUSTMENT_STR,
     NorgateSnapshotNotReadyError,
     NorgateSnapshotValidationError,
+    TOTALRETURN_ADJUSTMENT_STR,
     build_data_source_metadata_dict,
     load_index_constituent_matrix_df,
     load_price_timeseries_df,
+    load_raw_prices_df,
     load_valid_snapshot_manifest,
     write_snapshot_files,
 )
@@ -95,6 +97,50 @@ def test_loader_snapshot_mode_preserves_raw_price_multiindex_shape(tmp_path, mon
     assert isinstance(pricing_data_df.columns, pd.MultiIndex)
     assert ("SPY", "Close") in pricing_data_df.columns
     assert float(pricing_data_df.loc[pd.Timestamp("2024-01-02"), ("SPY", "Close")]) == 100.5
+
+
+def test_snapshot_raw_prices_skips_pit_symbols_outside_requested_date_range(tmp_path, monkeypatch):
+    profile_str = "norgate_eod_sp500_pit"
+    monkeypatch.setenv("NORGATE_SNAPSHOT_ROOT", str(tmp_path))
+    price_df = pd.DataFrame(
+        [
+            {
+                "date": "1997-01-02",
+                "symbol_str": "AAL-199702",
+                "adjustment_str": CAPITALSPECIAL_ADJUSTMENT_STR,
+                "Open": 10.0,
+                "High": 11.0,
+                "Low": 9.0,
+                "Close": 10.5,
+            },
+            {
+                "date": "2024-01-02",
+                "symbol_str": "$SPX",
+                "adjustment_str": TOTALRETURN_ADJUSTMENT_STR,
+                "Open": 100.0,
+                "High": 101.0,
+                "Low": 99.0,
+                "Close": 100.5,
+            },
+        ]
+    )
+    write_snapshot_files(
+        snapshot_root_str=str(tmp_path),
+        profile_str=profile_str,
+        snapshot_date_str="2024-01-02",
+        price_df=price_df,
+    )
+
+    pricing_data_df = load_raw_prices_df(
+        symbols=["AAL-199702"],
+        benchmarks=["$SPX"],
+        start_date_str="1998-01-01",
+        end_date_str="2024-01-02",
+        data_profile_str=profile_str,
+    )
+
+    assert ("AAL-199702", "Close") not in pricing_data_df.columns
+    assert ("$SPX", "Close") in pricing_data_df.columns
 
 
 def test_snapshot_metadata_includes_manifest_hash(tmp_path, monkeypatch):

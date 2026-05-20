@@ -411,13 +411,21 @@ def load_raw_prices_df(
             if symbol_str in benchmark_set
             else CAPITALSPECIAL_ADJUSTMENT_STR
         )
-        symbol_price_df = load_price_timeseries_df(
-            symbol_str,
-            adjustment_str,
-            start_date_str=start_date_str,
-            end_date_str=end_date_str,
-            data_profile_str=data_profile_str,
-        )
+        try:
+            symbol_price_df = load_price_timeseries_df(
+                symbol_str,
+                adjustment_str,
+                start_date_str=start_date_str,
+                end_date_str=end_date_str,
+                data_profile_str=data_profile_str,
+            )
+        except NorgateSnapshotValidationError as exc:
+            if (
+                symbol_str not in benchmark_set
+                and str(exc).startswith("Snapshot has no rows for requested date range:")
+            ):
+                continue
+            raise
         symbol_price_df.columns = pd.MultiIndex.from_tuples(
             [(symbol_str, field_str) for field_str in symbol_price_df.columns]
         )
