@@ -1,0 +1,59 @@
+{# One collapsed pod row. Clicking the header lazy-loads the detail fragment. #}
+{% set sev_str = row_dict | effective_severity %}
+{% set border_class_str = {
+    'red': 'border-bad/40',
+    'yellow': 'border-warn/40',
+    'green': 'border-ok/40',
+    'gray': 'border-ink-100',
+  }[sev_str] %}
+<article id="pod-{{ row_dict.pod_id_str }}"
+         class="rounded-md border {{ border_class_str }} bg-white shadow-sm">
+
+  <button
+    class="w-full px-4 py-3 flex items-center gap-4 text-left hover:bg-ink-50/60"
+    hx-get="/fragments/pod-detail/{{ row_dict.pod_id_str }}"
+    hx-target="#detail-{{ row_dict.pod_id_str }}"
+    hx-swap="innerHTML"
+    hx-on:click="this.nextElementSibling.classList.toggle('hidden'); this.querySelector('.toggle-chev').textContent = this.nextElementSibling.classList.contains('hidden') ? '▸' : '▾';">
+
+    <span class="inline-block w-2.5 h-2.5 rounded-full
+                 {% if sev_str == 'red' %}bg-bad{% elif sev_str == 'yellow' %}bg-warn
+                 {% elif sev_str == 'green' %}bg-ok{% else %}bg-mute{% endif %}"></span>
+
+    <div class="flex-1 min-w-0">
+      <div class="font-semibold truncate">{{ row_dict.pod_id_str }}</div>
+      <div class="text-xs text-ink-500 truncate">
+        {{ row_dict.strategy_import_str or '—' }}
+      </div>
+    </div>
+
+    <div class="hidden md:block w-44 text-sm">
+      <div class="font-medium truncate">
+        {{ row_dict.required_action_dict.label_str
+           or row_dict.next_action_str or 'No action' }}
+      </div>
+      <div class="text-xs text-ink-500 truncate">
+        {{ row_dict.debug_summary_dict.primary_reason_str
+           or row_dict.required_action_dict.reason_str
+           or row_dict.reason_code_str or '—' }}
+      </div>
+    </div>
+
+    {% include "_stage_chip_strip.html" %}
+
+    <div class="w-32 text-right text-sm tabular-nums">
+      <div class="font-semibold">
+        {{ row_dict.equity_float | money }}
+      </div>
+      <div class="text-xs text-ink-500">
+        {{ row_dict.position_count_int or 0 }} pos
+      </div>
+    </div>
+
+    <span class="toggle-chev text-ink-500 text-lg w-4 text-right">▸</span>
+  </button>
+
+  <div id="detail-{{ row_dict.pod_id_str }}" class="hidden border-t border-ink-100 bg-ink-50/40">
+    {# Filled by HTMX when the row is clicked. #}
+  </div>
+</article>

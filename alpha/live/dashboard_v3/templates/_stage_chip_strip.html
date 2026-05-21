@@ -1,0 +1,16 @@
+{# Compact horizontal strip of lifecycle stage chips for the collapsed row. #}
+<div class="hidden lg:flex items-stretch gap-1 text-[10px] font-bold uppercase tracking-wide">
+  {% for step_dict in (row_dict.lifecycle_step_dict_list or []) %}
+    {% if step_dict.step_key_str != 'diff' %}
+      {% set step_sev_str = step_dict | step_severity %}
+      <span class="px-2 py-1 rounded border
+                   {% if step_sev_str == 'red' %}bg-bad-soft border-bad/40 text-bad
+                   {% elif step_sev_str == 'yellow' %}bg-warn-soft border-warn/40 text-warn
+                   {% elif step_sev_str == 'green' %}bg-ok-soft border-ok/40 text-ok
+                   {% else %}bg-ink-100 border-ink-100 text-ink-500{% endif %}"
+            title="{{ step_dict.label_str }}: {{ step_dict.status_str or '—' }}">
+        {{ step_dict.label_str or step_dict.step_key_str }}
+      </span>
+    {% endif %}
+  {% endfor %}
+</div>

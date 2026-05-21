@@ -1,0 +1,25 @@
+{# Top bar: sticky, polled every 5 seconds via HTMX to refresh the verdict. #}
+<header class="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-ink-100">
+  <div class="max-w-[1480px] mx-auto px-6 h-16 flex items-center justify-between gap-4">
+    <div class="flex items-center gap-6">
+      <a href="/" class="font-bold tracking-tight text-lg">ALPHA OPS</a>
+      <nav class="flex gap-1 text-sm">
+        {% for nav_item in [('live', 'Live'), ('paper', 'Paper'), ('incubation', 'Incubation')] %}
+          {% set is_active = (mode_str or '') == nav_item[0] %}
+          <a href="/{{ nav_item[0] }}"
+             class="px-3 py-1.5 rounded-md
+                    {% if is_active %}bg-ink-900 text-white{% else %}text-ink-700 hover:bg-ink-100{% endif %}">
+            {{ nav_item[1] }}
+          </a>
+        {% endfor %}
+      </nav>
+    </div>
+
+    <div id="top-bar-verdict"
+         hx-get="/fragments/top-bar"
+         hx-trigger="load, every 5s"
+         hx-swap="innerHTML">
+      {% include "_top_bar_verdict.html" %}
+    </div>
+  </div>
+</header>

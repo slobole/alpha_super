@@ -1,0 +1,22 @@
+{# Polled events tail. Newest at the top. #}
+{% if not event_dict_list %}
+  <div class="text-xs text-ink-500 italic">No recent events for this pod.</div>
+{% else %}
+  <ol class="space-y-1 text-xs font-mono tabular-nums">
+    {% for event_dict in event_dict_list | reverse %}
+      {% set ev_sev_str = (event_dict.level_str or event_dict.severity_str or 'gray') | normalize_severity %}
+      <li class="px-2 py-1 rounded border
+                 {% if ev_sev_str == 'red' %}bg-bad-soft border-bad/30 text-bad
+                 {% elif ev_sev_str == 'yellow' %}bg-warn-soft border-warn/30 text-warn
+                 {% elif ev_sev_str == 'green' %}bg-ok-soft border-ok/30 text-ok
+                 {% else %}bg-white border-ink-100 text-ink-700{% endif %}
+                 flex gap-3">
+        <span class="text-ink-500 shrink-0">
+          {{ (event_dict.timestamp_str or event_dict.event_timestamp_str or event_dict.created_timestamp_str) | clock }}
+        </span>
+        <strong class="shrink-0">{{ event_dict.event_name_str or 'event' }}</strong>
+        <span class="truncate">{{ event_dict.reason_str or event_dict.message_str or event_dict.error_str or '' }}</span>
+      </li>
+    {% endfor %}
+  </ol>
+{% endif %}

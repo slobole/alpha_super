@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=1440, initial-scale=1">
+  <title>Alpha Ops · {% block title %}Dashboard{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="{{ url_for('static', filename='htmx.min.js') }}"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='custom.css') }}">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            ink: { 900: '#0b0d10', 700: '#1f2937', 500: '#6b7280', 300: '#d1d5db', 100: '#f3f4f6', 50: '#f9fafb' },
+            ok:   { DEFAULT: '#15803d', soft: '#dcfce7' },
+            warn: { DEFAULT: '#a16207', soft: '#fef9c3' },
+            bad:  { DEFAULT: '#b91c1c', soft: '#fee2e2' },
+            mute: { DEFAULT: '#6b7280', soft: '#f3f4f6' },
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-ink-50 text-ink-900 min-h-screen font-[ui-sans-serif,system-ui]">
+  {% include "_top_bar.html" %}
+
+  <main class="max-w-[1480px] mx-auto px-6 pb-12 pt-4">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="text-xs text-ink-500 text-center py-4 border-t border-ink-100">
+    dashboard_v3 · {{ version_str }} · server time {{ server_time_str }}
+  </footer>
+</body>
+</html>

@@ -1,0 +1,17 @@
+/* Dashboard V3 — small tweaks on top of Tailwind. Keep this file tiny;
+   prefer Tailwind utility classes in templates. */
+
+html { color-scheme: light; }
+
+/* Tabular columns inside <table> tags wrap by default; pin numeric columns. */
+table th, table td { padding: 2px 4px; }
+
+/* Slightly nicer focus ring than the default for a quant ops console. */
+:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+
+/* Subtle stripes for evidence tables. */
+table tbody tr:nth-child(even) td { background: #fafafa; }
+
+/* Smooth swap-in for HTMX-targeted regions. */
+.htmx-swapping { opacity: 0.5; transition: opacity 100ms ease; }
+.htmx-settling { opacity: 1.0; transition: opacity 100ms ease; }

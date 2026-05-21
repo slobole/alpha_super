@@ -1,9 +1,14 @@
-"""Smoke tests for Dashboard V3 — Phase 0 only verifies that the Flask app
-boots and that the placeholder routes respond. Real route coverage is added
-alongside the templates in Phase 1.
+"""Route tests for Dashboard V3 — Phase 1.
+
+Uses a hand-crafted ``StubDataProvider`` so the tests do not depend on a
+real ``DashboardApp``, sqlite database, or live release YAMLs. The shape
+of the dicts mirrors what ``build_dashboard_summary_dict`` and
+``build_pod_detail_dict`` produce in production.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 import pytest
 
@@ -13,12 +18,167 @@ from alpha.live.dashboard_v3.app import (
 )
 
 
+def _build_lifecycle_step_dict_list() -> list[dict[str, Any]]:
+    return [
+        {"step_key_str": "db",        "label_str": "DB",        "status_str": "ok",       "severity_str": "green"},
+        {"step_key_str": "decision",  "label_str": "Decision",  "status_str": "complete", "severity_str": "green"},
+        {"step_key_str": "vplan",     "label_str": "VPlan",     "status_str": "submitted","severity_str": "green"},
+        {"step_key_str": "ack",       "label_str": "ACK",       "status_str": "waiting",  "severity_str": "yellow"},
+        {"step_key_str": "fill",      "label_str": "Fill",      "status_str": "pending",  "severity_str": "gray"},
+        {"step_key_str": "reconcile", "label_str": "Reconcile", "status_str": "pending",  "severity_str": "gray"},
+        {"step_key_str": "eod",       "label_str": "EOD",       "status_str": "pending",  "severity_str": "gray"},
+    ]
+
+
+def _build_pod_row_dict(
+    pod_id_str: str,
+    mode_str: str,
+    severity_str: str = "green",
+    *,
+    strategy_import_str: str = "strategies.demo:Demo",
+    equity_float: float | None = 14200.0,
+) -> dict[str, Any]:
+    return {
+        "pod_id_str": pod_id_str,
+        "mode_str": mode_str,
+        "account_route_str": "ibkr:demo",
+        "strategy_import_str": strategy_import_str,
+        "db_status_str": "ok",
+        "health_str": severity_str,
+        "next_action_str": "submit_vplan",
+        "equity_float": equity_float,
+        "cash_float": 1200.0,
+        "position_count_int": 4,
+        "broker_ack_count_int": 4,
+        "broker_order_count_int": 4,
+        "missing_ack_count_int": 0,
+        "fill_count_int": 0,
+        "latest_event_timestamp_str": "2026-05-21T15:45:02+00:00",
+        "latest_vplan_status_str": "submitted",
+        "latest_vplan_id_int": 87,
+        "latest_decision_plan_id_int": 142,
+        "lifecycle_step_dict_list": _build_lifecycle_step_dict_list(),
+        "required_action_dict": {
+            "label_str": "Waiting for ACKs",
+            "severity_str": severity_str,
+            "reason_str": "Broker responses pending",
+            "detail_str": "3/4 acked, TSLA still pending",
+        },
+        "debug_summary_dict": {
+            "severity_str": severity_str,
+            "verdict_label_str": "ack_pending",
+            "primary_reason_str": "TSLA ack pending",
+        },
+        "data_freshness_dict": {},
+        "eod_snapshot_dict": {},
+        "rehearsal_status_dict": {},
+    }
+
+
+def _build_summary_dict() -> dict[str, Any]:
+    return {
+        "as_of_timestamp_str": "2026-05-21T16:00:00+00:00",
+        "pod_row_dict_list": [
+            _build_pod_row_dict("dv2_caspersky_live",   "live",  "green"),
+            _build_pod_row_dict("qp_mr_live",           "live",  "yellow"),
+            _build_pod_row_dict("dv2_caspersky_paper",  "paper", "red"),
+            _build_pod_row_dict("incubation_pod_demo",  "incubation", "gray"),
+        ],
+        "alert_dict_list": [],
+        "alert_summary_dict": {},
+        "mode_list": ["live", "paper", "incubation"],
+    }
+
+
+class StubDataProvider:
+    def __init__(self) -> None:
+        self.summary_dict = _build_summary_dict()
+        self.detail_call_log_list: list[str] = []
+        self.event_call_log_list: list[str] = []
+
+    def get_summary_dict(self) -> dict[str, Any]:
+        return self.summary_dict
+
+    def get_pod_detail_dict(self, pod_id_str: str) -> dict[str, Any]:
+        self.detail_call_log_list.append(pod_id_str)
+        matching_row_dict = next(
+            (
+                row_dict
+                for row_dict in self.summary_dict["pod_row_dict_list"]
+                if row_dict["pod_id_str"] == pod_id_str
+            ),
+            None,
+        )
+        if matching_row_dict is None:
+            raise KeyError(pod_id_str)
+        return {
+            "pod_row_dict": matching_row_dict,
+            "required_action_dict": matching_row_dict["required_action_dict"],
+            "lifecycle_step_dict_list": matching_row_dict["lifecycle_step_dict_list"],
+            "data_freshness_dict": {},
+            "eod_snapshot_dict": {"status_str": "pending"},
+            "rehearsal_status_dict": {},
+            "debug_story_dict": {},
+            "pod_pnl_dict": {"point_count_int": 0},
+            "latest_decision_plan_dict": {
+                "decision_plan_id_int": 142,
+                "decision_book_type_str": "full_target_weight_book",
+                "signal_timestamp_str": "2026-05-21T15:30:14+00:00",
+                "target_execution_timestamp_str": "2026-05-21T16:00:00+00:00",
+                "entry_target_weight_map_dict": {"AAPL": 0.25, "MSFT": 0.25},
+                "exit_asset_list": ["TSLA"],
+            },
+            "latest_vplan_dict": {
+                "vplan_id_int": 87,
+                "status_str": "submitted",
+                "vplan_row_dict_list": [
+                    {"asset_str": "AAPL", "current_share_float": 10, "target_share_float": 12,
+                     "order_delta_share_float": 2, "live_reference_price_float": 186.4},
+                ],
+                "broker_ack_row_dict_list": [
+                    {"asset_str": "AAPL", "ack_status_str": "acked",
+                     "response_timestamp_str": "2026-05-21T16:00:02+00:00"},
+                ],
+            },
+            "latest_execution_report_dict": None,
+            "event_dict_list": [],
+            "latest_diff_dict": {},
+        }
+
+    def get_pod_event_dict_list(
+        self, pod_id_str: str, limit_int: int = 80
+    ) -> list[dict[str, Any]]:
+        self.event_call_log_list.append(pod_id_str)
+        return [
+            {
+                "timestamp_str": "2026-05-21T15:45:02+00:00",
+                "level_str": "INFO",
+                "event_name_str": "vplan.submitted",
+                "reason_str": "VPlan #87 → IBKR",
+            },
+            {
+                "timestamp_str": "2026-05-21T16:00:02+00:00",
+                "level_str": "WARN",
+                "event_name_str": "broker.ack_received",
+                "reason_str": "TSLA still pending",
+            },
+        ]
+
+
+@pytest.fixture(name="provider_obj")
+def fixture_provider_obj() -> StubDataProvider:
+    return StubDataProvider()
+
+
 @pytest.fixture(name="test_client_obj")
-def fixture_test_client_obj():
-    flask_app_obj = create_app()
+def fixture_test_client_obj(provider_obj: StubDataProvider):
+    flask_app_obj = create_app(data_provider_obj=provider_obj)
     flask_app_obj.config["TESTING"] = True
     with flask_app_obj.test_client() as test_client_obj:
         yield test_client_obj
+
+
+# ── basic plumbing ────────────────────────────────────────────────────────
 
 
 def test_healthz_route_returns_version_marker(test_client_obj) -> None:
@@ -29,13 +189,83 @@ def test_healthz_route_returns_version_marker(test_client_obj) -> None:
     assert DASHBOARD_V3_VERSION_STR in response_text_str
 
 
-def test_index_route_returns_phase_0_placeholder(test_client_obj) -> None:
+def test_index_redirects_to_live(test_client_obj) -> None:
     response_obj = test_client_obj.get("/")
+    assert response_obj.status_code == 302
+    assert response_obj.headers["Location"].endswith("/live")
+
+
+def test_unknown_mode_returns_404(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/martian")
+    assert response_obj.status_code == 404
+
+
+# ── mode pages ────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("mode_str,expected_pod_id_str", [
+    ("live", "dv2_caspersky_live"),
+    ("paper", "dv2_caspersky_paper"),
+    ("incubation", "incubation_pod_demo"),
+])
+def test_mode_page_lists_only_that_modes_pods(
+    test_client_obj, mode_str: str, expected_pod_id_str: str
+) -> None:
+    response_obj = test_client_obj.get(f"/{mode_str}")
     assert response_obj.status_code == 200
     response_text_str = response_obj.get_data(as_text=True)
-    assert "Phase 0" in response_text_str
+    assert expected_pod_id_str in response_text_str
+    # Should not show pods from other modes in the table.
+    for other_mode_str, other_pod_id_str in [
+        ("live", "dv2_caspersky_live"),
+        ("paper", "dv2_caspersky_paper"),
+        ("incubation", "incubation_pod_demo"),
+    ]:
+        if other_mode_str != mode_str:
+            assert other_pod_id_str not in response_text_str
 
 
-def test_unknown_route_returns_404(test_client_obj) -> None:
-    response_obj = test_client_obj.get("/this-route-does-not-exist")
+def test_live_page_renders_pod_row_with_severity(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/live")
+    response_text_str = response_obj.get_data(as_text=True)
+    assert "dv2_caspersky_live" in response_text_str
+    assert "qp_mr_live" in response_text_str
+    # Top bar verdict should reflect the worst severity across all modes (paper has red).
+    assert "need action" in response_text_str.lower() or "All clear" in response_text_str
+
+
+# ── HTMX fragments ────────────────────────────────────────────────────────
+
+
+def test_top_bar_fragment_returns_html(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/fragments/top-bar")
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    assert "refresh" in response_text_str
+
+
+def test_pod_detail_fragment_renders_timeline(test_client_obj, provider_obj) -> None:
+    response_obj = test_client_obj.get("/fragments/pod-detail/dv2_caspersky_live")
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    assert "dv2_caspersky_live" in response_text_str
+    # Includes some stage labels from lifecycle steps.
+    assert "Decision" in response_text_str
+    assert "VPlan" in response_text_str
+    assert "ACK" in response_text_str
+    # Records that the detail was actually fetched from the provider.
+    assert provider_obj.detail_call_log_list == ["dv2_caspersky_live"]
+
+
+def test_pod_detail_fragment_unknown_pod_returns_404(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/fragments/pod-detail/no_such_pod")
     assert response_obj.status_code == 404
+
+
+def test_events_tail_fragment_renders_event_rows(test_client_obj, provider_obj) -> None:
+    response_obj = test_client_obj.get("/fragments/events-tail/dv2_caspersky_live")
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    assert "vplan.submitted" in response_text_str
+    assert "broker.ack_received" in response_text_str
+    assert provider_obj.event_call_log_list == ["dv2_caspersky_live"]

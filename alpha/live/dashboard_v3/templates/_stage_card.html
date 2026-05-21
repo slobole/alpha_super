@@ -1,0 +1,239 @@
+{# One vertical step of the cycle timeline. Status icon + label + brief
+   evidence per stage type. Bulkier evidence (target weight maps, ack rows,
+   fill tables) lives inside <details> so the timeline reads quickly. #}
+{% set step_sev_str = step_dict | step_severity %}
+{% set key_str = step_dict.step_key_str | lower %}
+{% set icon_str = {
+    'red':    '✗',
+    'yellow': '●',
+    'green':  '✓',
+    'gray':   '○',
+  }[step_sev_str] %}
+
+<li class="rounded-md border bg-white
+           {% if step_sev_str == 'red' %}border-bad/40
+           {% elif step_sev_str == 'yellow' %}border-warn/40
+           {% elif step_sev_str == 'green' %}border-ok/40
+           {% else %}border-ink-100{% endif %} p-3">
+
+  <header class="flex items-baseline justify-between gap-3">
+    <div class="flex items-baseline gap-2 min-w-0">
+      <span class="text-base
+                   {% if step_sev_str == 'red' %}text-bad
+                   {% elif step_sev_str == 'yellow' %}text-warn
+                   {% elif step_sev_str == 'green' %}text-ok
+                   {% else %}text-ink-300{% endif %}">{{ icon_str }}</span>
+      <strong class="text-sm">{{ step_dict.label_str or step_dict.step_key_str }}</strong>
+      <span class="text-xs text-ink-500">{{ step_dict.status_str or '—' }}</span>
+    </div>
+    <span class="text-xs text-ink-500 tabular-nums">
+      {{ step_dict.evidence_str or '' }}
+    </span>
+  </header>
+
+  {% if step_dict.detail_str %}
+    <div class="text-xs text-ink-700 mt-1">{{ step_dict.detail_str }}</div>
+  {% endif %}
+
+  {# Per-stage rich evidence — DB / Decision / VPlan / ACK / Fill / Reconcile / EOD. #}
+  {% if key_str == 'decision' and detail_dict.latest_decision_plan_dict %}
+    {% set decision_dict = detail_dict.latest_decision_plan_dict %}
+    <dl class="grid grid-cols-4 gap-2 mt-2 text-xs">
+      <div><dt class="text-ink-500">ID</dt><dd>{{ decision_dict.decision_plan_id_int or '—' }}</dd></div>
+      <div><dt class="text-ink-500">Book</dt><dd class="truncate">{{ decision_dict.decision_book_type_str or '—' }}</dd></div>
+      <div><dt class="text-ink-500">Signal</dt><dd>{{ decision_dict.signal_timestamp_str | clock or '—' }}</dd></div>
+      <div><dt class="text-ink-500">Target exec</dt><dd>{{ decision_dict.target_execution_timestamp_str | clock or '—' }}</dd></div>
+    </dl>
+    {% set exit_list = decision_dict.exit_asset_list or [] %}
+    {% set target_map_dict = decision_dict.entry_target_weight_map_dict
+                              or decision_dict.full_target_weight_map_dict
+                              or decision_dict.display_target_weight_map_dict
+                              or {} %}
+    {% if exit_list or target_map_dict %}
+      <details class="mt-2 text-xs">
+        <summary class="cursor-pointer text-ink-500 hover:text-ink-900">
+          targets ({{ target_map_dict | length }}) · exits ({{ exit_list | length }})
+        </summary>
+        <div class="mt-2 grid grid-cols-2 gap-3">
+          {% if target_map_dict %}
+            <div>
+              <div class="text-ink-500 mb-1">Target weights</div>
+              <ul class="space-y-0.5 tabular-nums">
+                {% for asset_str, weight_obj in target_map_dict.items() %}
+                  <li class="flex justify-between"><span>{{ asset_str }}</span><strong>{{ weight_obj | weight }}</strong></li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+          {% if exit_list %}
+            <div>
+              <div class="text-ink-500 mb-1">Exits</div>
+              <ul class="space-y-0.5">
+                {% for asset_str in exit_list %}<li>{{ asset_str }}</li>{% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+        </div>
+      </details>
+    {% endif %}
+
+  {% elif key_str == 'vplan' and detail_dict.latest_vplan_dict %}
+    {% set vplan_dict = detail_dict.latest_vplan_dict %}
+    {% set vplan_row_list = vplan_dict.vplan_row_dict_list or [] %}
+    <dl class="grid grid-cols-4 gap-2 mt-2 text-xs">
+      <div><dt class="text-ink-500">VPlan</dt><dd>{{ vplan_dict.vplan_id_int or '—' }}</dd></div>
+      <div><dt class="text-ink-500">Status</dt><dd>{{ vplan_dict.status_str or '—' }}</dd></div>
+      <div><dt class="text-ink-500">Submitted</dt><dd>{{ vplan_dict.submission_timestamp_str | clock or '—' }}</dd></div>
+      <div><dt class="text-ink-500">Target exec</dt><dd>{{ vplan_dict.target_execution_timestamp_str | clock or '—' }}</dd></div>
+    </dl>
+    {% if vplan_row_list %}
+      <details class="mt-2 text-xs">
+        <summary class="cursor-pointer text-ink-500 hover:text-ink-900">
+          orders ({{ vplan_row_list | length }})
+        </summary>
+        <table class="mt-2 w-full text-xs tabular-nums">
+          <thead class="text-ink-500"><tr>
+            <th class="text-left">Asset</th><th class="text-right">Cur</th>
+            <th class="text-right">Tgt</th><th class="text-right">Δ</th>
+            <th class="text-right">Ref</th>
+          </tr></thead>
+          <tbody>
+            {% for vplan_row_dict in vplan_row_list %}
+              <tr class="border-t border-ink-100">
+                <td>{{ vplan_row_dict.asset_str }}</td>
+                <td class="text-right">{{ vplan_row_dict.current_share_float | number }}</td>
+                <td class="text-right">{{ vplan_row_dict.target_share_float | number }}</td>
+                <td class="text-right">{{ vplan_row_dict.order_delta_share_float | number }}</td>
+                <td class="text-right">{{ vplan_row_dict.live_reference_price_float | number }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </details>
+    {% endif %}
+
+  {% elif key_str == 'ack' and detail_dict.latest_vplan_dict %}
+    {% set vplan_dict = detail_dict.latest_vplan_dict %}
+    {% set ack_list = vplan_dict.broker_ack_row_dict_list or [] %}
+    <dl class="grid grid-cols-4 gap-2 mt-2 text-xs">
+      <div><dt class="text-ink-500">Acks</dt><dd>{{ row_dict.broker_ack_count_int or 0 }}</dd></div>
+      <div><dt class="text-ink-500">Missing</dt><dd>{{ row_dict.missing_ack_count_int or 0 }}</dd></div>
+      <div><dt class="text-ink-500">Orders</dt><dd>{{ row_dict.broker_order_count_int or 0 }}</dd></div>
+      <div><dt class="text-ink-500">Coverage</dt><dd>{{ vplan_dict.ack_coverage_ratio_float | percent }}</dd></div>
+    </dl>
+    {% if ack_list %}
+      <details class="mt-2 text-xs">
+        <summary class="cursor-pointer text-ink-500 hover:text-ink-900">
+          ack rows ({{ ack_list | length }})
+        </summary>
+        <table class="mt-2 w-full text-xs">
+          <thead class="text-ink-500"><tr>
+            <th class="text-left">Asset</th><th class="text-left">Status</th>
+            <th class="text-left">Source</th><th class="text-right">Time</th>
+          </tr></thead>
+          <tbody>
+            {% for ack_row_dict in ack_list %}
+              <tr class="border-t border-ink-100">
+                <td>{{ ack_row_dict.asset_str }}</td>
+                <td>{{ ack_row_dict.ack_status_str or '—' }}</td>
+                <td>{{ ack_row_dict.ack_source_str or '—' }}</td>
+                <td class="text-right">{{ ack_row_dict.response_timestamp_str | clock or '—' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </details>
+    {% endif %}
+
+  {% elif key_str == 'fill' and detail_dict.latest_execution_report_dict %}
+    {% set report_dict = detail_dict.latest_execution_report_dict %}
+    {% set fill_list = report_dict.fill_row_dict_list or [] %}
+    <dl class="grid grid-cols-4 gap-2 mt-2 text-xs">
+      <div><dt class="text-ink-500">Fills</dt><dd>{{ report_dict.fill_count_int or 0 }}</dd></div>
+      <div><dt class="text-ink-500">Open cov</dt>
+        <dd>{{ report_dict.fill_with_official_open_count_int or 0 }}/{{ report_dict.fill_count_int or 0 }}</dd></div>
+      <div><dt class="text-ink-500">BPS ref</dt><dd>{{ report_dict.vplan_reference_slippage_bps_float | bps }}</dd></div>
+      <div><dt class="text-ink-500">BPS open</dt><dd>{{ report_dict.official_open_slippage_bps_float | bps }}</dd></div>
+    </dl>
+    {% if fill_list %}
+      <details class="mt-2 text-xs">
+        <summary class="cursor-pointer text-ink-500 hover:text-ink-900">
+          fills ({{ fill_list | length }})
+        </summary>
+        <table class="mt-2 w-full text-xs tabular-nums">
+          <thead class="text-ink-500"><tr>
+            <th class="text-left">Asset</th><th class="text-right">Shares</th>
+            <th class="text-right">Fill px</th><th class="text-right">Open px</th>
+            <th class="text-right">Time</th>
+          </tr></thead>
+          <tbody>
+            {% for fill_row_dict in fill_list %}
+              <tr class="border-t border-ink-100">
+                <td>{{ fill_row_dict.asset_str }}</td>
+                <td class="text-right">{{ fill_row_dict.fill_amount_float | number }}</td>
+                <td class="text-right">{{ fill_row_dict.fill_price_float | number }}</td>
+                <td class="text-right">{{ fill_row_dict.official_open_price_float | number }}</td>
+                <td class="text-right">{{ fill_row_dict.fill_timestamp_str | clock or '—' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </details>
+    {% endif %}
+
+  {% elif key_str == 'reconcile' and detail_dict.latest_execution_report_dict %}
+    {% set report_dict = detail_dict.latest_execution_report_dict %}
+    {% set exec_list = report_dict.execution_row_dict_list or [] %}
+    <dl class="grid grid-cols-3 gap-2 mt-2 text-xs">
+      <div><dt class="text-ink-500">Reconcile</dt><dd>{{ row_dict.latest_reconciliation_status_str or '—' }}</dd></div>
+      <div><dt class="text-ink-500">Time</dt><dd>{{ row_dict.latest_reconciliation_timestamp_str | clock or '—' }}</dd></div>
+      <div><dt class="text-ink-500">Residuals</dt><dd>{{ report_dict.residual_count_int or 0 }}</dd></div>
+    </dl>
+    {% set residual_list = exec_list | selectattr('residual_share_float') | list %}
+    {% if residual_list %}
+      <details class="mt-2 text-xs" open>
+        <summary class="cursor-pointer text-ink-500 hover:text-ink-900">
+          residuals ({{ residual_list | length }})
+        </summary>
+        <table class="mt-2 w-full text-xs tabular-nums">
+          <thead class="text-ink-500"><tr>
+            <th class="text-left">Asset</th><th class="text-right">Target</th>
+            <th class="text-right">Broker</th><th class="text-right">Residual</th>
+          </tr></thead>
+          <tbody>
+            {% for exec_row_dict in residual_list %}
+              <tr class="border-t border-ink-100">
+                <td>{{ exec_row_dict.asset_str }}</td>
+                <td class="text-right">{{ exec_row_dict.target_share_float | number }}</td>
+                <td class="text-right">{{ exec_row_dict.broker_share_float | number }}</td>
+                <td class="text-right">{{ exec_row_dict.residual_share_float | number }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </details>
+    {% endif %}
+
+  {% elif key_str == 'eod' %}
+    {% set eod_dict = detail_dict.eod_snapshot_dict or {} %}
+    {% set pnl_dict = detail_dict.pod_pnl_dict or {} %}
+    <dl class="grid grid-cols-4 gap-2 mt-2 text-xs">
+      <div><dt class="text-ink-500">Status</dt><dd>{{ eod_dict.status_str or '—' }}</dd></div>
+      <div><dt class="text-ink-500">Market date</dt><dd>{{ eod_dict.latest_market_date_str or eod_dict.expected_market_date_str or '—' }}</dd></div>
+      <div><dt class="text-ink-500">Daily PnL</dt><dd>{{ pnl_dict.daily_pnl_float | money }} ({{ pnl_dict.daily_pnl_pct_float | percent }})</dd></div>
+      <div><dt class="text-ink-500">Since start</dt><dd>{{ pnl_dict.since_start_pnl_float | money }} ({{ pnl_dict.since_start_pnl_pct_float | percent }})</dd></div>
+    </dl>
+    <div class="mt-2 text-xs text-ink-500 italic">
+      Equity chart appears in Phase 3 ({{ pnl_dict.point_count_int or 0 }} EOD samples available).
+    </div>
+
+  {% elif key_str == 'db' %}
+    <dl class="grid grid-cols-4 gap-2 mt-2 text-xs">
+      <div><dt class="text-ink-500">DB</dt><dd>{{ row_dict.db_status_str or '—' }}</dd></div>
+      <div><dt class="text-ink-500">State time</dt><dd>{{ row_dict.latest_pod_state_timestamp_str | clock or '—' }}</dd></div>
+      <div><dt class="text-ink-500">Source</dt><dd>{{ row_dict.latest_pod_state_source_str or '—' }}</dd></div>
+      <div><dt class="text-ink-500">Stage</dt><dd>{{ row_dict.latest_pod_state_stage_str or '—' }}</dd></div>
+    </dl>
+  {% endif %}
+
+</li>

@@ -1,0 +1,16 @@
+{# Inner content of the top-bar verdict region. Polled fragment. #}
+<div class="flex items-center gap-4 text-sm">
+  {% set vc = verdict_dict %}
+  <div class="flex items-center gap-2">
+    <span class="inline-block w-2.5 h-2.5 rounded-full
+                 {% if vc.severity_str == 'red' %}bg-bad
+                 {% elif vc.severity_str == 'yellow' %}bg-warn
+                 {% elif vc.severity_str == 'green' %}bg-ok
+                 {% else %}bg-mute{% endif %}"></span>
+    <strong>{{ vc.title_str }}</strong>
+    <span class="text-ink-500">{{ vc.subtitle_str }}</span>
+  </div>
+  <div class="text-ink-500 tabular-nums">
+    refresh {{ as_of_clock_str }}
+  </div>
+</div>
