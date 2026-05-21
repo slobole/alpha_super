@@ -2,6 +2,13 @@
 
 Binds to localhost by default; Tailscale-side exposure is handled by
 ``tailscale serve <port>`` on the VPS, not by binding to 0.0.0.0.
+
+The launcher loads ``config.env`` at startup so the same environment
+variables the live runner uses — most importantly
+``ALPHA_USE_NORGATE_SNAPSHOT_BOOL=true`` on VPS hosts that have no
+local Norgate Data Updater — are visible to the data builders the
+dashboard calls into. Without this load, the dashboard would burn ~20 s
+per refresh retrying NDU even when the operator opted into snapshots.
 """
 
 from __future__ import annotations
@@ -9,6 +16,7 @@ from __future__ import annotations
 import argparse
 
 from alpha.live.dashboard_v3.app import create_app
+from scripts.norgate_config_env import load_config_env_file
 
 
 DEFAULT_HOST_STR = "127.0.0.1"
@@ -27,7 +35,15 @@ def main() -> int:
         action="store_true",
         help="Enable Flask debug reloader (development only).",
     )
+    arg_parser_obj.add_argument(
+        "--skip-env-file",
+        action="store_true",
+        help="Do not auto-load config.env at startup (use only when the host already exports the required vars).",
+    )
     parsed_args_obj = arg_parser_obj.parse_args()
+
+    if not parsed_args_obj.skip_env_file:
+        load_config_env_file(override_existing_bool=True)
 
     flask_app_obj = create_app()
     flask_app_obj.run(

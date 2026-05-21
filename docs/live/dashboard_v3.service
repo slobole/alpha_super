@@ -22,6 +22,12 @@ ExecStart=/srv/alpha/.venv/bin/python -m alpha.live.dashboard_v3 \
     --host 127.0.0.1 \
     --port 8080
 
+# The dashboard auto-loads config.env from WorkingDirectory at startup, so
+# ALPHA_USE_NORGATE_SNAPSHOT_BOOL and similar vars come from there. If you'd
+# rather set them inline, uncomment the lines below and add --skip-env-file
+# to ExecStart.
+# Environment=ALPHA_USE_NORGATE_SNAPSHOT_BOOL=true
+
 # Discord red-alert webhook (leave unset to silence notifications).
 # Environment=ALPHA_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 

@@ -26,6 +26,23 @@ http://<vps-hostname>:8080/
 If Tailscale's MagicDNS is on you can use the hostname directly; otherwise use
 the Tailscale IP from `tailscale ip -4` on the VPS.
 
+### config.env is loaded automatically
+
+On startup the dashboard reads `config.env` from the repo root and exports
+every `KEY=value` line into the process environment — same loader the live
+runner uses. This is critical on a VPS that does **not** have the local Norgate
+Data Updater installed: set
+
+```ini
+ALPHA_USE_NORGATE_SNAPSHOT_BOOL=true
+```
+
+in `config.env` and the dashboard's data builders will use local snapshots
+instead of retrying NDU ten times per refresh.
+
+Pass `--skip-env-file` only when the host already exports the required
+environment variables (e.g. when the systemd unit sets them inline).
+
 ## Make it permanent (systemd)
 
 Copy `docs/live/dashboard_v3.service` to `/etc/systemd/system/dashboard_v3.service`,

@@ -419,6 +419,59 @@ def test_pod_detail_includes_data_freshness_panel(test_client_obj) -> None:
     assert "source=norgate_only" in response_text_str
 
 
+def test_main_module_loads_config_env_before_serving(monkeypatch, tmp_path) -> None:
+    """Regression for the VPS hang: ``python -m alpha.live.dashboard_v3`` must
+    pre-load ``config.env`` so ``ALPHA_USE_NORGATE_SNAPSHOT_BOOL=true`` (and
+    friends) are visible to the data builders before the first request lands.
+    """
+    from alpha.live.dashboard_v3 import __main__ as dashboard_main_module
+    from scripts import norgate_config_env
+
+    config_env_path_obj = tmp_path / "config.env"
+    config_env_path_obj.write_text(
+        "ALPHA_USE_NORGATE_SNAPSHOT_BOOL=true\nFOO_FOR_TEST=bar\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(norgate_config_env, "default_config_env_path_obj", lambda: config_env_path_obj)
+    monkeypatch.delenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", raising=False)
+    monkeypatch.delenv("FOO_FOR_TEST", raising=False)
+
+    captured_args_list: list[dict] = []
+
+    def _fake_run_fn(self, **kwargs):
+        captured_args_list.append(kwargs)
+
+    # Stop the test from actually starting an HTTP server.
+    import flask
+    monkeypatch.setattr(flask.Flask, "run", _fake_run_fn)
+    monkeypatch.setattr("sys.argv", ["python -m alpha.live.dashboard_v3", "--port", "9999"])
+
+    assert dashboard_main_module.main() == 0
+    import os
+    assert os.environ.get("ALPHA_USE_NORGATE_SNAPSHOT_BOOL") == "true"
+    assert os.environ.get("FOO_FOR_TEST") == "bar"
+    assert captured_args_list and captured_args_list[0].get("port") == 9999
+
+
+def test_main_module_skip_env_file_flag_leaves_env_untouched(monkeypatch, tmp_path) -> None:
+    from alpha.live.dashboard_v3 import __main__ as dashboard_main_module
+    from scripts import norgate_config_env
+
+    config_env_path_obj = tmp_path / "config.env"
+    config_env_path_obj.write_text("FOO_FOR_TEST=value_from_file\n", encoding="utf-8")
+    monkeypatch.setattr(norgate_config_env, "default_config_env_path_obj", lambda: config_env_path_obj)
+    monkeypatch.delenv("FOO_FOR_TEST", raising=False)
+
+    import flask
+    monkeypatch.setattr(flask.Flask, "run", lambda self, **kwargs: None)
+    monkeypatch.setattr("sys.argv", ["python -m alpha.live.dashboard_v3", "--skip-env-file"])
+
+    assert dashboard_main_module.main() == 0
+    import os
+    assert "FOO_FOR_TEST" not in os.environ
+
+
 def test_decision_stage_card_shows_norgate_snapshot_meta(test_client_obj) -> None:
     response_obj = test_client_obj.get("/fragments/pod-detail/dv2_caspersky_live")
     response_text_str = response_obj.get_data(as_text=True)
