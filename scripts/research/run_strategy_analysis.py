@@ -87,6 +87,7 @@ def _analysis_command_tuple(
     show_display_bool: bool,
     show_signal_progress_bool: bool,
     performance_warnings_as_errors_bool: bool,
+    strategy_kwarg_tuple: tuple[str, ...] = (),
 ) -> tuple[str, ...]:
     if analysis_str == ANALYSIS_VANILLA_STR:
         command_list = [
@@ -102,6 +103,8 @@ def _analysis_command_tuple(
             command_list.append("--show-display")
         if performance_warnings_as_errors_bool:
             command_list.append("--performance-warnings-as-errors")
+        for strategy_kwarg_str in strategy_kwarg_tuple:
+            command_list.extend(["--strategy-kwarg", strategy_kwarg_str])
         return tuple(command_list)
 
     if analysis_str == ANALYSIS_FRICTION_STR:
@@ -172,6 +175,7 @@ def run_strategy_analysis(
     show_signal_progress_bool: bool = False,
     performance_warnings_as_errors_bool: bool = False,
     keep_going_bool: bool = False,
+    strategy_kwarg_tuple: tuple[str, ...] = (),
 ) -> tuple[int, list[AnalysisRunResult]]:
     module_import_str, strategy_module_obj = _load_strategy_module(strategy_ref_str)
     result_list: list[AnalysisRunResult] = []
@@ -202,6 +206,7 @@ def run_strategy_analysis(
             show_display_bool=show_display_bool,
             show_signal_progress_bool=show_signal_progress_bool,
             performance_warnings_as_errors_bool=performance_warnings_as_errors_bool,
+            strategy_kwarg_tuple=strategy_kwarg_tuple,
         )
         print(f"Command: {_format_command_str(command_tuple)}")
         result_obj = _run_command_result(command_tuple, analysis_str)
@@ -282,6 +287,16 @@ def main() -> None:
         action="store_true",
         help="Continue later analyses after a failed command.",
     )
+    parser.add_argument(
+        "--strategy-kwarg",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help=(
+            "Extra run_variant kwarg forwarded to the Vanilla run. Repeat as needed. "
+            "Useful for research-only data inputs such as market_cap_csv_path_str=..."
+        ),
+    )
     arg_namespace = parser.parse_args()
 
     return_code_int, _result_list = run_strategy_analysis(
@@ -293,6 +308,7 @@ def main() -> None:
         show_signal_progress_bool=arg_namespace.show_signal_progress,
         performance_warnings_as_errors_bool=arg_namespace.performance_warnings_as_errors,
         keep_going_bool=arg_namespace.keep_going,
+        strategy_kwarg_tuple=tuple(arg_namespace.strategy_kwarg),
     )
     raise SystemExit(return_code_int)
 

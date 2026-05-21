@@ -1,0 +1,761 @@
+date,snapshot_year_int,rank_int,symbol,company_name,market_cap,market_cap_text,source_url
+1989-12-31,1989,1,XOM,Exxon Mobil,62590000000.0,62.59B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+1989-12-31,1989,2,IBM,IBM,52030000000.0,52.03B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+1989-12-31,1989,3,GE,General Electric,35780000000.0,35.78B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+1989-12-31,1989,4,BMY,Bristol-Myers Squibb,28000000000.0,28.00B,https://www.finhacker.cz/en/stocks/bristol-myers-squibb-market-cap/
+1989-12-31,1989,5,MRK,Merck,27580000000.0,27.58B,https://www.finhacker.cz/en/stocks/merck-market-cap/
+1989-12-31,1989,6,KO,Coca-Cola,26370000000.0,26.37B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+1989-12-31,1989,7,WMT,Walmart,25390000000.0,25.39B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+1989-12-31,1989,8,PG,Procter & Gamble,22990000000.0,22.99B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+1989-12-31,1989,9,VZ,Verizon Communications,21990000000.0,21.99B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+1989-12-31,1989,10,JNJ,Johnson & Johnson,19770000000.0,19.77B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+1989-12-31,1989,11,LLY,Eli Lilly,19060000000.0,19.06B,https://www.finhacker.cz/en/stocks/eli-lilly-market-cap/
+1989-12-31,1989,12,PEP,PepsiCo,16860000000.0,16.86B,https://www.finhacker.cz/en/stocks/pepsico-market-cap/
+1989-12-31,1989,13,DIS,Walt Disney,15170000000.0,15.17B,https://www.finhacker.cz/en/stocks/walt-disney-market-cap/
+1989-12-31,1989,14,T,AT&T,14370000000.0,14.37B,https://www.finhacker.cz/en/stocks/att-market-cap/
+1989-12-31,1989,15,MMM,3M,14360000000.0,14.36B,https://www.finhacker.cz/en/stocks/3m-market-cap/
+1989-12-31,1989,16,AIG,AIG,14010000000.0,14.01B,https://www.finhacker.cz/en/stocks/american-international-group-market-cap/
+1989-12-31,1989,17,BA,Boeing,13680000000.0,13.68B,https://www.finhacker.cz/en/stocks/boeing-market-cap/
+1989-12-31,1989,18,MCD,McDonald’s,12770000000.0,12.77B,https://www.finhacker.cz/en/stocks/mcdonalds-market-cap/
+1989-12-31,1989,19,PFE,Pfizer,10900000000.0,10.90B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+1989-12-31,1989,20,SLB,Schlumberger,10370000000.0,10.37B,https://www.finhacker.cz/en/stocks/schlumberger-market-cap/
+1990-12-31,1990,1,XOM,Exxon Mobil,64430000000.00001,64.43B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+1990-12-31,1990,2,IBM,IBM,61680000000.0,61.68B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+1990-12-31,1990,3,WMT,Walmart,34229999999.999996,34.23B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+1990-12-31,1990,4,BMY,Bristol-Myers Squibb,33400000000.0,33.40B,https://www.finhacker.cz/en/stocks/bristol-myers-squibb-market-cap/
+1990-12-31,1990,5,MRK,Merck,31310000000.0,31.31B,https://www.finhacker.cz/en/stocks/merck-market-cap/
+1990-12-31,1990,6,KO,Coca-Cola,31070000000.0,31.07B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+1990-12-31,1990,7,GE,General Electric,30000000000.0,30.00B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+1990-12-31,1990,8,PG,Procter & Gamble,29790000000.0,29.79B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+1990-12-31,1990,9,JNJ,Johnson & Johnson,23900000000.0,23.90B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+1990-12-31,1990,10,VZ,Verizon Communications,21080000000.0,21.08B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+1990-12-31,1990,11,PEP,PepsiCo,20500000000.0,20.50B,https://www.finhacker.cz/en/stocks/pepsico-market-cap/
+1990-12-31,1990,12,LLY,Eli Lilly,19580000000.0,19.58B,https://www.finhacker.cz/en/stocks/eli-lilly-market-cap/
+1990-12-31,1990,13,BA,Boeing,15590000000.0,15.59B,https://www.finhacker.cz/en/stocks/boeing-market-cap/
+1990-12-31,1990,14,MMM,3M,15170000000.0,15.17B,https://www.finhacker.cz/en/stocks/3m-market-cap/
+1990-12-31,1990,15,DIS,Walt Disney,13510000000.0,13.51B,https://www.finhacker.cz/en/stocks/walt-disney-market-cap/
+1990-12-31,1990,16,AIG,AIG,13490000000.0,13.49B,https://www.finhacker.cz/en/stocks/american-international-group-market-cap/
+1990-12-31,1990,17,PFE,Pfizer,12670000000.0,12.67B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+1990-12-31,1990,18,T,AT&T,12580000000.0,12.58B,https://www.finhacker.cz/en/stocks/att-market-cap/
+1990-12-31,1990,19,SLB,Schlumberger,12240000000.0,12.24B,https://www.finhacker.cz/en/stocks/schlumberger-market-cap/
+1990-12-31,1990,20,MO,Altria Group,11270000000.0,11.27B,https://www.finhacker.cz/en/stocks/altria-group-market-cap/
+1991-12-31,1991,1,XOM,Exxon Mobil,75610000000.0,75.61B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+1991-12-31,1991,2,WMT,Walmart,67610000000.0,67.61B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+1991-12-31,1991,3,MRK,Merck,57940000000.0,57.94B,https://www.finhacker.cz/en/stocks/merck-market-cap/
+1991-12-31,1991,4,KO,Coca-Cola,53330000000.0,53.33B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+1991-12-31,1991,5,IBM,IBM,48540000000.0,48.54B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+1991-12-31,1991,6,BMY,Bristol-Myers Squibb,43640000000.0,43.64B,https://www.finhacker.cz/en/stocks/bristol-myers-squibb-market-cap/
+1991-12-31,1991,7,GE,General Electric,39570000000.0,39.57B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+1991-12-31,1991,8,JNJ,Johnson & Johnson,38140000000.0,38.14B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+1991-12-31,1991,9,PG,Procter & Gamble,31520000000.0,31.52B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+1991-12-31,1991,10,PEP,PepsiCo,26730000000.0,26.73B,https://www.finhacker.cz/en/stocks/pepsico-market-cap/
+1991-12-31,1991,11,PFE,Pfizer,26270000000.0,26.27B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+1991-12-31,1991,12,LLY,Eli Lilly,24420000000.0,24.42B,https://www.finhacker.cz/en/stocks/eli-lilly-market-cap/
+1991-12-31,1991,13,VZ,Verizon Communications,19110000000.0,19.11B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+1991-12-31,1991,14,FNMA,Fannie Mae,18760000000.0,18.76B,https://www.finhacker.cz/en/stocks/fannie-mae-market-cap/
+1991-12-31,1991,15,MO,Altria Group,17350000000.0,17.35B,https://www.finhacker.cz/en/stocks/altria-group-market-cap/
+1991-12-31,1991,16,AIG,AIG,17280000000.0,17.28B,https://www.finhacker.cz/en/stocks/american-international-group-market-cap/
+1991-12-31,1991,17,MMM,3M,16800000000.0,16.80B,https://www.finhacker.cz/en/stocks/3m-market-cap/
+1991-12-31,1991,18,BA,Boeing,16300000000.0,16.30B,https://www.finhacker.cz/en/stocks/boeing-market-cap/
+1991-12-31,1991,19,DIS,Walt Disney,14970000000.0,14.97B,https://www.finhacker.cz/en/stocks/walt-disney-market-cap/
+1991-12-31,1991,20,K-202512,Kellogg Company,14750000000.0,14.75B,https://www.finhacker.cz/en/stocks/kellanova-market-cap/
+1992-12-31,1992,1,XOM,Exxon Mobil,75920000000.0,75.92B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+1992-12-31,1992,2,WMT,Walmart,73550000000.0,73.55B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+1992-12-31,1992,3,KO,Coca-Cola,54720000000.0,54.72B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+1992-12-31,1992,4,MRK,Merck,44660000000.0,44.66B,https://www.finhacker.cz/en/stocks/merck-market-cap/
+1992-12-31,1992,5,GE,General Electric,43780000000.0,43.78B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+1992-12-31,1992,6,PG,Procter & Gamble,36210000000.0,36.21B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+1992-12-31,1992,7,BMY,Bristol-Myers Squibb,33280000000.0,33.28B,https://www.finhacker.cz/en/stocks/bristol-myers-squibb-market-cap/
+1992-12-31,1992,8,PEP,PepsiCo,33159999999.999996,33.16B,https://www.finhacker.cz/en/stocks/pepsico-market-cap/
+1992-12-31,1992,9,JNJ,Johnson & Johnson,33100000000.0,33.10B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+1992-12-31,1992,10,IBM,IBM,27500000000.0,27.50B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+1992-12-31,1992,11,DIS,Walt Disney,23030000000.0,23.03B,https://www.finhacker.cz/en/stocks/walt-disney-market-cap/
+1992-12-31,1992,12,PFE,Pfizer,22360000000.0,22.36B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+1992-12-31,1992,13,HD,Home Depot,22320000000.0,22.32B,https://www.finhacker.cz/en/stocks/home-depot-market-cap/
+1992-12-31,1992,14,VZ,Verizon Communications,22240000000.0,22.24B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+1992-12-31,1992,15,FNMA,Fannie Mae,20790000000.0,20.79B,https://www.finhacker.cz/en/stocks/fannie-mae-market-cap/
+1992-12-31,1992,16,AIG,AIG,20310000000.0,20.31B,https://www.finhacker.cz/en/stocks/american-international-group-market-cap/
+1992-12-31,1992,17,INTC,Intel,18210000000.0,18.21B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+1992-12-31,1992,18,LLY,Eli Lilly,17780000000.0,17.78B,https://www.finhacker.cz/en/stocks/eli-lilly-market-cap/
+1992-12-31,1992,19,MMM,3M,17740000000.0,17.74B,https://www.finhacker.cz/en/stocks/3m-market-cap/
+1992-12-31,1992,20,MCD,McDonald’s,17720000000.0,17.72B,https://www.finhacker.cz/en/stocks/mcdonalds-market-cap/
+1993-12-31,1993,1,XOM,Exxon Mobil,78400000000.0,78.40B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+1993-12-31,1993,2,KO,Coca-Cola,57900000000.0,57.90B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+1993-12-31,1993,3,WMT,Walmart,57460000000.0,57.46B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+1993-12-31,1993,4,GE,General Electric,53710000000.0,53.71B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+1993-12-31,1993,5,MRK,Merck,38780000000.0,38.78B,https://www.finhacker.cz/en/stocks/merck-market-cap/
+1993-12-31,1993,6,PG,Procter & Gamble,38610000000.0,38.61B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+1993-12-31,1993,7,PEP,PepsiCo,32659999999.999996,32.66B,https://www.finhacker.cz/en/stocks/pepsico-market-cap/
+1993-12-31,1993,8,IBM,IBM,31380000000.0,31.38B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+1993-12-31,1993,9,JNJ,Johnson & Johnson,28860000000.0,28.86B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+1993-12-31,1993,10,BMY,Bristol-Myers Squibb,28390000000.0,28.39B,https://www.finhacker.cz/en/stocks/bristol-myers-squibb-market-cap/
+1993-12-31,1993,11,CVX,Chevron,28380000000.0,28.38B,https://www.finhacker.cz/en/stocks/chevron-market-cap/
+1993-12-31,1993,12,INTC,Intel,25920000000.0,25.92B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+1993-12-31,1993,13,VZ,Verizon Communications,25850000000.0,25.85B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+1993-12-31,1993,14,AIG,AIG,23070000000.0,23.07B,https://www.finhacker.cz/en/stocks/american-international-group-market-cap/
+1993-12-31,1993,15,DIS,Walt Disney,22920000000.0,22.92B,https://www.finhacker.cz/en/stocks/walt-disney-market-cap/
+1993-12-31,1993,16,FNMA,Fannie Mae,21310000000.0,21.31B,https://www.finhacker.cz/en/stocks/fannie-mae-market-cap/
+1993-12-31,1993,17,PFE,Pfizer,21000000000.0,21.00B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+1993-12-31,1993,18,MCD,McDonald’s,20160000000.0,20.16B,https://www.finhacker.cz/en/stocks/mcdonalds-market-cap/
+1993-12-31,1993,19,MMM,3M,18800000000.0,18.80B,https://www.finhacker.cz/en/stocks/3m-market-cap/
+1993-12-31,1993,20,T,AT&T,18660000000.0,18.66B,https://www.finhacker.cz/en/stocks/att-market-cap/
+1994-12-31,1994,1,XOM,Exxon Mobil,75420000000.0,75.42B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+1994-12-31,1994,2,KO,Coca-Cola,66319999999.99999,66.32B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+1994-12-31,1994,3,GE,General Electric,52230000000.0,52.23B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+1994-12-31,1994,4,WMT,Walmart,48840000000.0,48.84B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+1994-12-31,1994,5,MRK,Merck,43250000000.0,43.25B,https://www.finhacker.cz/en/stocks/merck-market-cap/
+1994-12-31,1994,6,PG,Procter & Gamble,42140000000.0,42.14B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+1994-12-31,1994,7,IBM,IBM,41230000000.0,41.23B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+1994-12-31,1994,8,MSFT,Microsoft,35480000000.0,35.48B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+1994-12-31,1994,9,JNJ,Johnson & Johnson,35200000000.0,35.20B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+1994-12-31,1994,10,CVX,Chevron,29070000000.0,29.07B,https://www.finhacker.cz/en/stocks/chevron-market-cap/
+1994-12-31,1994,11,PEP,PepsiCo,28730000000.0,28.73B,https://www.finhacker.cz/en/stocks/pepsico-market-cap/
+1994-12-31,1994,12,BMY,Bristol-Myers Squibb,28130000000.0,28.13B,https://www.finhacker.cz/en/stocks/bristol-myers-squibb-market-cap/
+1994-12-31,1994,13,INTC,Intel,26470000000.0,26.47B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+1994-12-31,1994,14,AIG,AIG,25640000000.0,25.64B,https://www.finhacker.cz/en/stocks/american-international-group-market-cap/
+1994-12-31,1994,15,DIS,Walt Disney,24140000000.0,24.14B,https://www.finhacker.cz/en/stocks/walt-disney-market-cap/
+1994-12-31,1994,16,PFE,Pfizer,23070000000.0,23.07B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+1994-12-31,1994,17,VZ,Verizon Communications,21700000000.0,21.70B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+1994-12-31,1994,18,HD,Home Depot,20780000000.0,20.78B,https://www.finhacker.cz/en/stocks/home-depot-market-cap/
+1994-12-31,1994,19,MCD,McDonald’s,20430000000.0,20.43B,https://www.finhacker.cz/en/stocks/mcdonalds-market-cap/
+1994-12-31,1994,20,FNMA,Fannie Mae,19840000000.0,19.84B,https://www.finhacker.cz/en/stocks/fannie-mae-market-cap/
+1995-12-31,1995,1,XOM,Exxon Mobil,100740000000.0,100.74B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+1995-12-31,1995,2,KO,Coca-Cola,93200000000.0,93.20B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+1995-12-31,1995,3,GE,General Electric,73570000000.0,73.57B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+1995-12-31,1995,4,MRK,Merck,72730000000.0,72.73B,https://www.finhacker.cz/en/stocks/merck-market-cap/
+1995-12-31,1995,5,PG,Procter & Gamble,56510000000.0,56.51B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+1995-12-31,1995,6,JNJ,Johnson & Johnson,55380000000.0,55.38B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+1995-12-31,1995,7,MSFT,Microsoft,51980000000.0,51.98B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+1995-12-31,1995,8,WMT,Walmart,51060000000.0,51.06B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+1995-12-31,1995,9,IBM,IBM,48720000000.0,48.72B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+1995-12-31,1995,10,INTC,Intel,47050000000.0,47.05B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+1995-12-31,1995,11,PEP,PepsiCo,43950000000.0,43.95B,https://www.finhacker.cz/en/stocks/pepsico-market-cap/
+1995-12-31,1995,12,BMY,Bristol-Myers Squibb,41240000000.0,41.24B,https://www.finhacker.cz/en/stocks/bristol-myers-squibb-market-cap/
+1995-12-31,1995,13,PFE,Pfizer,37980000000.0,37.98B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+1995-12-31,1995,14,AIG,AIG,36350000000.0,36.35B,https://www.finhacker.cz/en/stocks/american-international-group-market-cap/
+1995-12-31,1995,15,CVX,Chevron,34150000000.0,34.15B,https://www.finhacker.cz/en/stocks/chevron-market-cap/
+1995-12-31,1995,16,FNMA,Fannie Mae,33650000000.0,33.65B,https://www.finhacker.cz/en/stocks/fannie-mae-market-cap/
+1995-12-31,1995,17,MCD,McDonald’s,31430000000.0,31.43B,https://www.finhacker.cz/en/stocks/mcdonalds-market-cap/
+1995-12-31,1995,18,LLY,Eli Lilly,31020000000.0,31.02B,https://www.finhacker.cz/en/stocks/eli-lilly-market-cap/
+1995-12-31,1995,19,DIS,Walt Disney,30910000000.0,30.91B,https://www.finhacker.cz/en/stocks/walt-disney-market-cap/
+1995-12-31,1995,20,VZ,Verizon Communications,29250000000.0,29.25B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+1996-12-31,1996,1,KO,Coca-Cola,130560000000.0,130.56B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+1996-12-31,1996,2,XOM,Exxon Mobil,121720000000.0,121.72B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+1996-12-31,1996,3,INTC,Intel,107550000000.0,107.55B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+1996-12-31,1996,4,MSFT,Microsoft,99410000000.0,99.41B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+1996-12-31,1996,5,GE,General Electric,97400000000.0,97.40B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+1996-12-31,1996,6,MRK,Merck,86420000000.0,86.42B,https://www.finhacker.cz/en/stocks/merck-market-cap/
+1996-12-31,1996,7,IBM,IBM,73510000000.0,73.51B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+1996-12-31,1996,8,PG,Procter & Gamble,72530000000.0,72.53B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+1996-12-31,1996,9,JNJ,Johnson & Johnson,66290000000.00001,66.29B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+1996-12-31,1996,10,WMT,Walmart,52170000000.0,52.17B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+1996-12-31,1996,11,BMY,Bristol-Myers Squibb,51900000000.0,51.90B,https://www.finhacker.cz/en/stocks/bristol-myers-squibb-market-cap/
+1996-12-31,1996,12,PFE,Pfizer,50730000000.0,50.73B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+1996-12-31,1996,13,DIS,Walt Disney,47080000000.0,47.08B,https://www.finhacker.cz/en/stocks/walt-disney-market-cap/
+1996-12-31,1996,14,PEP,PepsiCo,45630000000.0,45.63B,https://www.finhacker.cz/en/stocks/pepsico-market-cap/
+1996-12-31,1996,15,CVX,Chevron,42450000000.0,42.45B,https://www.finhacker.cz/en/stocks/chevron-market-cap/
+1996-12-31,1996,16,AIG,AIG,42150000000.0,42.15B,https://www.finhacker.cz/en/stocks/american-international-group-market-cap/
+1996-12-31,1996,17,CSCO,Cisco Systems,41720000000.0,41.72B,https://www.finhacker.cz/en/stocks/cisco-systems-market-cap/
+1996-12-31,1996,18,LLY,Eli Lilly,40370000000.0,40.37B,https://www.finhacker.cz/en/stocks/eli-lilly-market-cap/
+1996-12-31,1996,19,FNMA,Fannie Mae,39760000000.0,39.76B,https://www.finhacker.cz/en/stocks/fannie-mae-market-cap/
+1996-12-31,1996,20,JPM,JPMorgan Chase,38490000000.0,38.49B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+1997-12-31,1997,1,KO,Coca-Cola,164750000000.0,164.75B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+1997-12-31,1997,2,MSFT,Microsoft,157360000000.0,157.36B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+1997-12-31,1997,3,XOM,Exxon Mobil,150340000000.0,150.34B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+1997-12-31,1997,4,GE,General Electric,143390000000.0,143.39B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+1997-12-31,1997,5,INTC,Intel,114370000000.0,114.37B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+1997-12-31,1997,6,MRK,Merck,113800000000.0,113.80B,https://www.finhacker.cz/en/stocks/merck-market-cap/
+1997-12-31,1997,7,PG,Procter & Gamble,106230000000.0,106.23B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+1997-12-31,1997,8,IBM,IBM,95740000000.0,95.74B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+1997-12-31,1997,9,PFE,Pfizer,91440000000.0,91.44B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+1997-12-31,1997,10,BMY,Bristol-Myers Squibb,89430000000.0,89.43B,https://www.finhacker.cz/en/stocks/bristol-myers-squibb-market-cap/
+1997-12-31,1997,11,WMT,Walmart,88600000000.0,88.60B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+1997-12-31,1997,12,JNJ,Johnson & Johnson,88600000000.0,88.60B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+1997-12-31,1997,13,LLY,Eli Lilly,77350000000.0,77.35B,https://www.finhacker.cz/en/stocks/eli-lilly-market-cap/
+1997-12-31,1997,14,VZ,Verizon Communications,70660000000.0,70.66B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+1997-12-31,1997,15,DIS,Walt Disney,67019999999.99999,67.02B,https://www.finhacker.cz/en/stocks/walt-disney-market-cap/
+1997-12-31,1997,16,AIG,AIG,63100000000.0,63.10B,https://www.finhacker.cz/en/stocks/american-international-group-market-cap/
+1997-12-31,1997,17,C,Citigroup,61690000000.0,61.69B,https://www.finhacker.cz/en/stocks/citigroup-market-cap/
+1997-12-31,1997,18,FNMA,Fannie Mae,58940000000.0,58.94B,https://www.finhacker.cz/en/stocks/fannie-mae-market-cap/
+1997-12-31,1997,19,CSCO,Cisco Systems,56040000000.0,56.04B,https://www.finhacker.cz/en/stocks/cisco-systems-market-cap/
+1997-12-31,1997,20,PEP,PepsiCo,54450000000.0,54.45B,https://www.finhacker.cz/en/stocks/pepsico-market-cap/
+1998-12-31,1998,1,MSFT,Microsoft,348110000000.0,348.11B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+1998-12-31,1998,2,GE,General Electric,199820000000.0,199.82B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+1998-12-31,1998,3,INTC,Intel,196520000000.0,196.52B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+1998-12-31,1998,4,WMT,Walmart,181060000000.0,181.06B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+1998-12-31,1998,5,XOM,Exxon Mobil,177550000000.0,177.55B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+1998-12-31,1998,6,KO,Coca-Cola,165190000000.0,165.19B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+1998-12-31,1998,7,IBM,IBM,161320000000.0,161.32B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+1998-12-31,1998,8,MRK,Merck,156560000000.0,156.56B,https://www.finhacker.cz/en/stocks/merck-market-cap/
+1998-12-31,1998,9,PFE,Pfizer,153290000000.0,153.29B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+1998-12-31,1998,10,CSCO,Cisco Systems,145990000000.0,145.99B,https://www.finhacker.cz/en/stocks/cisco-systems-market-cap/
+1998-12-31,1998,11,BMY,Bristol-Myers Squibb,126660000000.0,126.66B,https://www.finhacker.cz/en/stocks/bristol-myers-squibb-market-cap/
+1998-12-31,1998,12,PG,Procter & Gamble,120130000000.0,120.13B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+1998-12-31,1998,13,C,Citigroup,119280000000.0,119.28B,https://www.finhacker.cz/en/stocks/citigroup-market-cap/
+1998-12-31,1998,14,JNJ,Johnson & Johnson,112730000000.0,112.73B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+1998-12-31,1998,15,BAC,Bank of America,103690000000.0,103.69B,https://www.finhacker.cz/en/stocks/bank-of-america-market-cap/
+1998-12-31,1998,16,LLY,Eli Lilly,97410000000.0,97.41B,https://www.finhacker.cz/en/stocks/eli-lilly-market-cap/
+1998-12-31,1998,17,VZ,Verizon Communications,85100000000.0,85.10B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+1998-12-31,1998,18,HD,Home Depot,84230000000.0,84.23B,https://www.finhacker.cz/en/stocks/home-depot-market-cap/
+1998-12-31,1998,19,AIG,AIG,84130000000.0,84.13B,https://www.finhacker.cz/en/stocks/american-international-group-market-cap/
+1998-12-31,1998,20,T,AT&T,78710000000.0,78.71B,https://www.finhacker.cz/en/stocks/att-market-cap/
+1999-12-31,1999,1,MSFT,Microsoft,604180000000.0,604.18B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+1999-12-31,1999,2,CSCO,Cisco Systems,355120000000.0,355.12B,https://www.finhacker.cz/en/stocks/cisco-systems-market-cap/
+1999-12-31,1999,3,WMT,Walmart,307840000000.0,307.84B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+1999-12-31,1999,4,GE,General Electric,305130000000.0,305.13B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+1999-12-31,1999,5,XOM,Exxon Mobil,280120000000.0,280.12B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+1999-12-31,1999,6,INTC,Intel,274430000000.0,274.43B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+1999-12-31,1999,7,C,Citigroup,201160000000.0,201.16B,https://www.finhacker.cz/en/stocks/citigroup-market-cap/
+1999-12-31,1999,8,IBM,IBM,183820000000.0,183.82B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+1999-12-31,1999,9,HD,Home Depot,158330000000.0,158.33B,https://www.finhacker.cz/en/stocks/home-depot-market-cap/
+1999-12-31,1999,10,ORCL,Oracle,158090000000.0,158.09B,https://www.finhacker.cz/en/stocks/oracle-market-cap/
+1999-12-31,1999,11,KO,Coca-Cola,143970000000.0,143.97B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+1999-12-31,1999,12,PG,Procter & Gamble,142950000000.0,142.95B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+1999-12-31,1999,13,MRK,Merck,140760000000.0,140.76B,https://www.finhacker.cz/en/stocks/merck-market-cap/
+1999-12-31,1999,14,AIG,AIG,138930000000.0,138.93B,https://www.finhacker.cz/en/stocks/american-international-group-market-cap/
+1999-12-31,1999,15,JNJ,Johnson & Johnson,129570000000.0,129.57B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+1999-12-31,1999,16,QCOM,Qualcomm,124700000000.0,124.70B,https://www.finhacker.cz/en/stocks/qualcomm-market-cap/
+1999-12-31,1999,17,BMY,Bristol-Myers Squibb,121020000000.0,121.02B,https://www.finhacker.cz/en/stocks/bristol-myers-squibb-market-cap/
+1999-12-31,1999,18,PFE,Pfizer,118260000000.0,118.26B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+1999-12-31,1999,19,T,AT&T,116700000000.0,116.70B,https://www.finhacker.cz/en/stocks/att-market-cap/
+1999-12-31,1999,20,VZ,Verizon Communications,95610000000.0,95.61B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+2000-12-31,2000,1,XOM,Exxon Mobil,302200000000.0,302.20B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2000-12-31,2000,2,GE,General Electric,284250000000.0,284.25B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+2000-12-31,2000,3,CSCO,Cisco Systems,275290000000.0,275.29B,https://www.finhacker.cz/en/stocks/cisco-systems-market-cap/
+2000-12-31,2000,4,PFE,Pfizer,275030000000.0,275.03B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+2000-12-31,2000,5,WMT,Walmart,237290000000.0,237.29B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2000-12-31,2000,6,MSFT,Microsoft,231190000000.0,231.19B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2000-12-31,2000,7,C,Citigroup,229400000000.0,229.40B,https://www.finhacker.cz/en/stocks/citigroup-market-cap/
+2000-12-31,2000,8,INTC,Intel,202320000000.0,202.32B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+2000-12-31,2000,9,MRK,Merck,194210000000.0,194.21B,https://www.finhacker.cz/en/stocks/merck-market-cap/
+2000-12-31,2000,10,AIG,AIG,189310000000.0,189.31B,https://www.finhacker.cz/en/stocks/american-international-group-market-cap/
+2000-12-31,2000,11,ORCL,Oracle,162200000000.0,162.20B,https://www.finhacker.cz/en/stocks/oracle-market-cap/
+2000-12-31,2000,12,KO,Coca-Cola,151130000000.0,151.13B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+2000-12-31,2000,13,JNJ,Johnson & Johnson,146040000000.0,146.04B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2000-12-31,2000,14,IBM,IBM,142410000000.0,142.41B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+2000-12-31,2000,15,BMY,Bristol-Myers Squibb,137580000000.0,137.58B,https://www.finhacker.cz/en/stocks/bristol-myers-squibb-market-cap/
+2000-12-31,2000,16,VZ,Verizon Communications,135289999999.99998,135.29B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+2000-12-31,2000,17,T,AT&T,121100000000.0,121.10B,https://www.finhacker.cz/en/stocks/att-market-cap/
+2000-12-31,2000,18,HD,Home Depot,106040000000.0,106.04B,https://www.finhacker.cz/en/stocks/home-depot-market-cap/
+2000-12-31,2000,19,LLY,Eli Lilly,104880000000.0,104.88B,https://www.finhacker.cz/en/stocks/eli-lilly-market-cap/
+2000-12-31,2000,20,PG,Procter & Gamble,101450000000.0,101.45B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2001-12-31,2001,1,MSFT,Microsoft,358080000000.0,358.08B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2001-12-31,2001,2,XOM,Exxon Mobil,267589999999.99997,267.59B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2001-12-31,2001,3,C,Citigroup,259910000000.00003,259.91B,https://www.finhacker.cz/en/stocks/citigroup-market-cap/
+2001-12-31,2001,4,WMT,Walmart,256480000000.00003,256.48B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2001-12-31,2001,5,GE,General Electric,238240000000.0,238.24B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+2001-12-31,2001,6,PFE,Pfizer,237050000000.0,237.05B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+2001-12-31,2001,7,INTC,Intel,210400000000.0,210.40B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+2001-12-31,2001,8,IBM,IBM,199070000000.0,199.07B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+2001-12-31,2001,9,JNJ,Johnson & Johnson,180080000000.0,180.08B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2001-12-31,2001,10,AIG,AIG,172250000000.0,172.25B,https://www.finhacker.cz/en/stocks/american-international-group-market-cap/
+2001-12-31,2001,11,CSCO,Cisco Systems,132840000000.0,132.84B,https://www.finhacker.cz/en/stocks/cisco-systems-market-cap/
+2001-12-31,2001,12,VZ,Verizon Communications,128949999999.99998,128.95B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+2001-12-31,2001,13,MRK,Merck,120230000000.0,120.23B,https://www.finhacker.cz/en/stocks/merck-market-cap/
+2001-12-31,2001,14,HD,Home Depot,119520000000.0,119.52B,https://www.finhacker.cz/en/stocks/home-depot-market-cap/
+2001-12-31,2001,15,KO,Coca-Cola,117220000000.0,117.22B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+2001-12-31,2001,16,PG,Procter & Gamble,101710000000.0,101.71B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2001-12-31,2001,17,BMY,Bristol-Myers Squibb,98740000000.0,98.74B,https://www.finhacker.cz/en/stocks/bristol-myers-squibb-market-cap/
+2001-12-31,2001,18,T,AT&T,98430000000.0,98.43B,https://www.finhacker.cz/en/stocks/att-market-cap/
+2001-12-31,2001,19,BAC,Bank of America,98170000000.0,98.17B,https://www.finhacker.cz/en/stocks/bank-of-america-market-cap/
+2001-12-31,2001,20,CVX,Chevron,95610000000.0,95.61B,https://www.finhacker.cz/en/stocks/chevron-market-cap/
+2002-12-31,2002,1,MSFT,Microsoft,276600000000.0,276.60B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2002-12-31,2002,2,XOM,Exxon Mobil,234100000000.0,234.10B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2002-12-31,2002,3,WMT,Walmart,222920000000.0,222.92B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2002-12-31,2002,4,C,Citigroup,180900000000.0,180.90B,https://www.finhacker.cz/en/stocks/citigroup-market-cap/
+2002-12-31,2002,5,PFE,Pfizer,178520000000.0,178.52B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+2002-12-31,2002,6,JNJ,Johnson & Johnson,159410000000.0,159.41B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2002-12-31,2002,7,GE,General Electric,145550000000.0,145.55B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+2002-12-31,2002,8,IBM,IBM,127470000000.0,127.47B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+2002-12-31,2002,9,AIG,AIG,125220000000.0,125.22B,https://www.finhacker.cz/en/stocks/american-international-group-market-cap/
+2002-12-31,2002,10,MRK,Merck,114320000000.0,114.32B,https://www.finhacker.cz/en/stocks/merck-market-cap/
+2002-12-31,2002,11,PG,Procter & Gamble,111120000000.0,111.12B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2002-12-31,2002,12,KO,Coca-Cola,108330000000.0,108.33B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+2002-12-31,2002,13,VZ,Verizon Communications,106410000000.0,106.41B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+2002-12-31,2002,14,BAC,Bank of America,104390000000.0,104.39B,https://www.finhacker.cz/en/stocks/bank-of-america-market-cap/
+2002-12-31,2002,15,INTC,Intel,102370000000.0,102.37B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+2002-12-31,2002,16,CSCO,Cisco Systems,94650000000.0,94.65B,https://www.finhacker.cz/en/stocks/cisco-systems-market-cap/
+2002-12-31,2002,17,WFC,Wells Fargo,79020000000.0,79.02B,https://www.finhacker.cz/en/stocks/wells-fargo-market-cap/
+2002-12-31,2002,18,PEP,PepsiCo,72700000000.0,72.70B,https://www.finhacker.cz/en/stocks/pepsico-market-cap/
+2002-12-31,2002,19,LLY,Eli Lilly,71250000000.0,71.25B,https://www.finhacker.cz/en/stocks/eli-lilly-market-cap/
+2002-12-31,2002,20,CVX,Chevron,71000000000.0,71.00B,https://www.finhacker.cz/en/stocks/chevron-market-cap/
+2003-12-31,2003,1,MSFT,Microsoft,295320000000.0,295.32B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2003-12-31,2003,2,XOM,Exxon Mobil,269290000000.00003,269.29B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2003-12-31,2003,3,PFE,Pfizer,255430000000.0,255.43B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+2003-12-31,2003,4,C,Citigroup,250320000000.0,250.32B,https://www.finhacker.cz/en/stocks/citigroup-market-cap/
+2003-12-31,2003,5,WMT,Walmart,229530000000.0,229.53B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2003-12-31,2003,6,INTC,Intel,207910000000.0,207.91B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+2003-12-31,2003,7,GE,General Electric,186810000000.0,186.81B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+2003-12-31,2003,8,CSCO,Cisco Systems,167260000000.0,167.26B,https://www.finhacker.cz/en/stocks/cisco-systems-market-cap/
+2003-12-31,2003,9,JNJ,Johnson & Johnson,153330000000.0,153.33B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2003-12-31,2003,10,IBM,IBM,150050000000.0,150.05B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+2003-12-31,2003,11,AIG,AIG,143400000000.0,143.40B,https://www.finhacker.cz/en/stocks/american-international-group-market-cap/
+2003-12-31,2003,12,PG,Procter & Gamble,129100000000.0,129.10B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2003-12-31,2003,13,KO,Coca-Cola,123910000000.0,123.91B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+2003-12-31,2003,14,BAC,Bank of America,115900000000.0,115.90B,https://www.finhacker.cz/en/stocks/bank-of-america-market-cap/
+2003-12-31,2003,15,WFC,Wells Fargo,100000000000.0,100.00B,https://www.finhacker.cz/en/stocks/wells-fargo-market-cap/
+2003-12-31,2003,16,MRK,Merck,97890000000.0,97.89B,https://www.finhacker.cz/en/stocks/merck-market-cap/
+2003-12-31,2003,17,VZ,Verizon Communications,97100000000.0,97.10B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+2003-12-31,2003,18,CVX,Chevron,92350000000.0,92.35B,https://www.finhacker.cz/en/stocks/chevron-market-cap/
+2003-12-31,2003,19,UPS,United Parcel Service,84170000000.0,84.17B,https://www.finhacker.cz/en/stocks/united-parcel-service-market-cap/
+2003-12-31,2003,20,HD,Home Depot,80740000000.0,80.74B,https://www.finhacker.cz/en/stocks/home-depot-market-cap/
+2004-12-31,2004,1,XOM,Exxon Mobil,328120000000.0,328.12B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2004-12-31,2004,2,MSFT,Microsoft,290710000000.0,290.71B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2004-12-31,2004,3,C,Citigroup,250280000000.0,250.28B,https://www.finhacker.cz/en/stocks/citigroup-market-cap/
+2004-12-31,2004,4,GE,General Electric,231450000000.0,231.45B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+2004-12-31,2004,5,WMT,Walmart,223600000000.0,223.60B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2004-12-31,2004,6,BAC,Bank of America,190500000000.0,190.50B,https://www.finhacker.cz/en/stocks/bank-of-america-market-cap/
+2004-12-31,2004,7,PFE,Pfizer,190440000000.0,190.44B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+2004-12-31,2004,8,JNJ,Johnson & Johnson,188420000000.0,188.42B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2004-12-31,2004,9,IBM,IBM,154990000000.0,154.99B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+2004-12-31,2004,10,INTC,Intel,146260000000.0,146.26B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+2004-12-31,2004,11,AIG,AIG,141430000000.0,141.43B,https://www.finhacker.cz/en/stocks/american-international-group-market-cap/
+2004-12-31,2004,12,PG,Procter & Gamble,138970000000.0,138.97B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2004-12-31,2004,13,JPM,JPMorgan Chase,138720000000.0,138.72B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+2004-12-31,2004,14,CSCO,Cisco Systems,127220000000.0,127.22B,https://www.finhacker.cz/en/stocks/cisco-systems-market-cap/
+2004-12-31,2004,15,VZ,Verizon Communications,112210000000.0,112.21B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+2004-12-31,2004,16,CVX,Chevron,110640000000.0,110.64B,https://www.finhacker.cz/en/stocks/chevron-market-cap/
+2004-12-31,2004,17,WFC,Wells Fargo,105310000000.0,105.31B,https://www.finhacker.cz/en/stocks/wells-fargo-market-cap/
+2004-12-31,2004,18,KO,Coca-Cola,100330000000.0,100.33B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+2004-12-31,2004,19,UPS,United Parcel Service,96230000000.0,96.23B,https://www.finhacker.cz/en/stocks/united-parcel-service-market-cap/
+2004-12-31,2004,20,HD,Home Depot,93860000000.0,93.86B,https://www.finhacker.cz/en/stocks/home-depot-market-cap/
+2005-12-31,2005,1,XOM,Exxon Mobil,349490000000.0,349.49B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2005-12-31,2005,2,MSFT,Microsoft,278240000000.0,278.24B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2005-12-31,2005,3,C,Citigroup,245510000000.0,245.51B,https://www.finhacker.cz/en/stocks/citigroup-market-cap/
+2005-12-31,2005,4,GE,General Electric,221590000000.0,221.59B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+2005-12-31,2005,5,WMT,Walmart,194840000000.0,194.84B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2005-12-31,2005,6,BAC,Bank of America,185340000000.0,185.34B,https://www.finhacker.cz/en/stocks/bank-of-america-market-cap/
+2005-12-31,2005,7,JNJ,Johnson & Johnson,178800000000.0,178.80B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2005-12-31,2005,8,PFE,Pfizer,162900000000.0,162.90B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+2005-12-31,2005,9,INTC,Intel,150480000000.0,150.48B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+2005-12-31,2005,10,AIG,AIG,146900000000.0,146.90B,https://www.finhacker.cz/en/stocks/american-international-group-market-cap/
+2005-12-31,2005,11,JPM,JPMorgan Chase,138880000000.0,138.88B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+2005-12-31,2005,12,PG,Procter & Gamble,137640000000.0,137.64B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2005-12-31,2005,13,CVX,Chevron,127450000000.0,127.45B,https://www.finhacker.cz/en/stocks/chevron-market-cap/
+2005-12-31,2005,14,IBM,IBM,124050000000.0,124.05B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+2005-12-31,2005,15,CSCO,Cisco Systems,105170000000.0,105.17B,https://www.finhacker.cz/en/stocks/cisco-systems-market-cap/
+2005-12-31,2005,16,WFC,Wells Fargo,105050000000.0,105.05B,https://www.finhacker.cz/en/stocks/wells-fargo-market-cap/
+2005-12-31,2005,17,PEP,PepsiCo,98130000000.0,98.13B,https://www.finhacker.cz/en/stocks/pepsico-market-cap/
+2005-12-31,2005,18,AMGN,Amgen,97310000000.0,97.31B,https://www.finhacker.cz/en/stocks/amgen-market-cap/
+2005-12-31,2005,19,KO,Coca-Cola,95900000000.0,95.90B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+2005-12-31,2005,20,HD,Home Depot,85980000000.0,85.98B,https://www.finhacker.cz/en/stocks/home-depot-market-cap/
+2006-12-31,2006,1,XOM,Exxon Mobil,446910000000.0,446.91B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2006-12-31,2006,2,MSFT,Microsoft,293520000000.0,293.52B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2006-12-31,2006,3,C,Citigroup,273690000000.0,273.69B,https://www.finhacker.cz/en/stocks/citigroup-market-cap/
+2006-12-31,2006,4,BAC,Bank of America,239770000000.0,239.77B,https://www.finhacker.cz/en/stocks/bank-of-america-market-cap/
+2006-12-31,2006,5,GE,General Electric,229550000000.0,229.55B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+2006-12-31,2006,6,PG,Procter & Gamble,203670000000.0,203.67B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2006-12-31,2006,7,WMT,Walmart,192420000000.0,192.42B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2006-12-31,2006,8,JNJ,Johnson & Johnson,191390000000.0,191.39B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2006-12-31,2006,9,PFE,Pfizer,176970000000.0,176.97B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+2006-12-31,2006,10,JPM,JPMorgan Chase,167550000000.0,167.55B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+2006-12-31,2006,11,CSCO,Cisco Systems,165980000000.0,165.98B,https://www.finhacker.cz/en/stocks/cisco-systems-market-cap/
+2006-12-31,2006,12,CVX,Chevron,160300000000.0,160.30B,https://www.finhacker.cz/en/stocks/chevron-market-cap/
+2006-12-31,2006,13,AIG,AIG,154530000000.0,154.53B,https://www.finhacker.cz/en/stocks/american-international-group-market-cap/
+2006-12-31,2006,14,GOOGL,Alphabet,140930000000.0,140.93B,https://www.finhacker.cz/en/stocks/alphabet-market-cap/
+2006-12-31,2006,15,IBM,IBM,139750000000.0,139.75B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+2006-12-31,2006,16,WFC,Wells Fargo,120050000000.0,120.05B,https://www.finhacker.cz/en/stocks/wells-fargo-market-cap/
+2006-12-31,2006,17,INTC,Intel,116760000000.0,116.76B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+2006-12-31,2006,18,KO,Coca-Cola,113100000000.0,113.10B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+2006-12-31,2006,19,VZ,Verizon Communications,108740000000.0,108.74B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+2006-12-31,2006,20,T,AT&T,104020000000.0,104.02B,https://www.finhacker.cz/en/stocks/att-market-cap/
+2007-12-31,2007,1,XOM,Exxon Mobil,504240000000.0,504.24B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2007-12-31,2007,2,MSFT,Microsoft,332110000000.0,332.11B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2007-12-31,2007,3,PG,Procter & Gamble,225910000000.0,225.91B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2007-12-31,2007,4,GE,General Electric,221410000000.0,221.41B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+2007-12-31,2007,5,GOOGL,Alphabet,216300000000.0,216.30B,https://www.finhacker.cz/en/stocks/alphabet-market-cap/
+2007-12-31,2007,6,CVX,Chevron,195060000000.0,195.06B,https://www.finhacker.cz/en/stocks/chevron-market-cap/
+2007-12-31,2007,7,WMT,Walmart,190280000000.0,190.28B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2007-12-31,2007,8,T,AT&T,190180000000.0,190.18B,https://www.finhacker.cz/en/stocks/att-market-cap/
+2007-12-31,2007,9,JNJ,Johnson & Johnson,189430000000.0,189.43B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2007-12-31,2007,10,BAC,Bank of America,183280000000.0,183.28B,https://www.finhacker.cz/en/stocks/bank-of-america-market-cap/
+2007-12-31,2007,11,AAPL,Apple,174030000000.0,174.03B,https://www.finhacker.cz/en/stocks/apple-market-cap/
+2007-12-31,2007,12,CSCO,Cisco Systems,164230000000.0,164.23B,https://www.finhacker.cz/en/stocks/cisco-systems-market-cap/
+2007-12-31,2007,13,C,Citigroup,161250000000.0,161.25B,https://www.finhacker.cz/en/stocks/citigroup-market-cap/
+2007-12-31,2007,14,INTC,Intel,154310000000.0,154.31B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+2007-12-31,2007,15,JPM,JPMorgan Chase,146970000000.0,146.97B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+2007-12-31,2007,16,PFE,Pfizer,145640000000.0,145.64B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+2007-12-31,2007,17,IBM,IBM,142900000000.0,142.90B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+2007-12-31,2007,18,KO,Coca-Cola,142260000000.0,142.26B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+2007-12-31,2007,19,VZ,Verizon Communications,125700000000.0,125.70B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+2007-12-31,2007,20,AIG,AIG,122330000000.0,122.33B,https://www.finhacker.cz/en/stocks/american-international-group-market-cap/
+2008-12-31,2008,1,XOM,Exxon Mobil,406100000000.0,406.10B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2008-12-31,2008,2,WMT,Walmart,219940000000.0,219.94B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2008-12-31,2008,3,PG,Procter & Gamble,181190000000.0,181.19B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2008-12-31,2008,4,MSFT,Microsoft,172940000000.0,172.94B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2008-12-31,2008,5,JNJ,Johnson & Johnson,166030000000.0,166.03B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2008-12-31,2008,6,CVX,Chevron,148230000000.0,148.23B,https://www.finhacker.cz/en/stocks/chevron-market-cap/
+2008-12-31,2008,7,T,AT&T,127160000000.0,127.16B,https://www.finhacker.cz/en/stocks/att-market-cap/
+2008-12-31,2008,8,JPM,JPMorgan Chase,117670000000.0,117.67B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+2008-12-31,2008,9,PFE,Pfizer,113170000000.0,113.17B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+2008-12-31,2008,10,IBM,IBM,107640000000.0,107.64B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+2008-12-31,2008,11,KO,Coca-Cola,104730000000.0,104.73B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+2008-12-31,2008,12,VZ,Verizon Communications,100620000000.0,100.62B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+2008-12-31,2008,13,WFC,Wells Fargo,98020000000.0,98.02B,https://www.finhacker.cz/en/stocks/wells-fargo-market-cap/
+2008-12-31,2008,14,GOOGL,Alphabet,96850000000.0,96.85B,https://www.finhacker.cz/en/stocks/alphabet-market-cap/
+2008-12-31,2008,15,GE,General Electric,96450000000.0,96.45B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+2008-12-31,2008,16,CSCO,Cisco Systems,95440000000.0,95.44B,https://www.finhacker.cz/en/stocks/cisco-systems-market-cap/
+2008-12-31,2008,17,ORCL,Oracle,89470000000.0,89.47B,https://www.finhacker.cz/en/stocks/oracle-market-cap/
+2008-12-31,2008,18,PM,Philip Morris International,88020000000.0,88.02B,https://www.finhacker.cz/en/stocks/philip-morris-international-market-cap/
+2008-12-31,2008,19,PEP,PepsiCo,85060000000.0,85.06B,https://www.finhacker.cz/en/stocks/pepsico-market-cap/
+2008-12-31,2008,20,INTC,Intel,81540000000.0,81.54B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+2009-12-31,2009,1,XOM,Exxon Mobil,322330000000.0,322.33B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2009-12-31,2009,2,MSFT,Microsoft,268560000000.0,268.56B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2009-12-31,2009,3,WMT,Walmart,203640000000.0,203.64B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2009-12-31,2009,4,GOOGL,Alphabet,197030000000.0,197.03B,https://www.finhacker.cz/en/stocks/alphabet-market-cap/
+2009-12-31,2009,5,AAPL,Apple,191010000000.0,191.01B,https://www.finhacker.cz/en/stocks/apple-market-cap/
+2009-12-31,2009,6,JNJ,Johnson & Johnson,177710000000.0,177.71B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2009-12-31,2009,7,PG,Procter & Gamble,176130000000.0,176.13B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2009-12-31,2009,8,JPM,JPMorgan Chase,164260000000.0,164.26B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+2009-12-31,2009,9,IBM,IBM,163170000000.0,163.17B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+2009-12-31,2009,10,CVX,Chevron,154600000000.0,154.60B,https://www.finhacker.cz/en/stocks/chevron-market-cap/
+2009-12-31,2009,11,WFC,Wells Fargo,139780000000.0,139.78B,https://www.finhacker.cz/en/stocks/wells-fargo-market-cap/
+2009-12-31,2009,12,PFE,Pfizer,139110000000.0,139.11B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+2009-12-31,2009,13,CSCO,Cisco Systems,137730000000.0,137.73B,https://www.finhacker.cz/en/stocks/cisco-systems-market-cap/
+2009-12-31,2009,14,KO,Coca-Cola,131270000000.00002,131.27B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+2009-12-31,2009,15,BAC,Bank of America,130270000000.00002,130.27B,https://www.finhacker.cz/en/stocks/bank-of-america-market-cap/
+2009-12-31,2009,16,T,AT&T,125250000000.0,125.25B,https://www.finhacker.cz/en/stocks/att-market-cap/
+2009-12-31,2009,17,ORCL,Oracle,122920000000.0,122.92B,https://www.finhacker.cz/en/stocks/oracle-market-cap/
+2009-12-31,2009,18,INTC,Intel,112670000000.0,112.67B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+2009-12-31,2009,19,MRK,Merck,108290000000.0,108.29B,https://www.finhacker.cz/en/stocks/merck-market-cap/
+2009-12-31,2009,20,VZ,Verizon Communications,98330000000.0,98.33B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+2010-12-31,2010,1,XOM,Exxon Mobil,364060000000.0,364.06B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2010-12-31,2010,2,AAPL,Apple,297100000000.0,297.10B,https://www.finhacker.cz/en/stocks/apple-market-cap/
+2010-12-31,2010,3,MSFT,Microsoft,234530000000.0,234.53B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2010-12-31,2010,4,BRK.B,Berkshire Hathaway,198030000000.0,198.03B,https://www.finhacker.cz/en/stocks/berkshire-hathaway-market-cap/
+2010-12-31,2010,5,WMT,Walmart,192170000000.0,192.17B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2010-12-31,2010,6,GOOGL,Alphabet,190850000000.0,190.85B,https://www.finhacker.cz/en/stocks/alphabet-market-cap/
+2010-12-31,2010,7,CVX,Chevron,183140000000.0,183.14B,https://www.finhacker.cz/en/stocks/chevron-market-cap/
+2010-12-31,2010,8,PG,Procter & Gamble,180190000000.0,180.19B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2010-12-31,2010,9,IBM,IBM,172140000000.0,172.14B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+2010-12-31,2010,10,JNJ,Johnson & Johnson,169840000000.0,169.84B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2010-12-31,2010,11,JPM,JPMorgan Chase,165860000000.0,165.86B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+2010-12-31,2010,12,WFC,Wells Fargo,163070000000.0,163.07B,https://www.finhacker.cz/en/stocks/wells-fargo-market-cap/
+2010-12-31,2010,13,ORCL,Oracle,158130000000.0,158.13B,https://www.finhacker.cz/en/stocks/oracle-market-cap/
+2010-12-31,2010,14,KO,Coca-Cola,150740000000.0,150.74B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+2010-12-31,2010,15,C,Citigroup,137450000000.0,137.45B,https://www.finhacker.cz/en/stocks/citigroup-market-cap/
+2010-12-31,2010,16,BAC,Bank of America,134600000000.0,134.60B,https://www.finhacker.cz/en/stocks/bank-of-america-market-cap/
+2010-12-31,2010,17,PFE,Pfizer,132949999999.99998,132.95B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+2010-12-31,2010,18,T,AT&T,131479999999.99998,131.48B,https://www.finhacker.cz/en/stocks/att-market-cap/
+2010-12-31,2010,19,GE,General Electric,116160000000.0,116.16B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+2010-12-31,2010,20,INTC,Intel,115900000000.0,115.90B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+2011-12-31,2011,1,XOM,Exxon Mobil,406250000000.0,406.25B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2011-12-31,2011,2,AAPL,Apple,377520000000.0,377.52B,https://www.finhacker.cz/en/stocks/apple-market-cap/
+2011-12-31,2011,3,MSFT,Microsoft,218380000000.0,218.38B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2011-12-31,2011,4,CVX,Chevron,211840000000.0,211.84B,https://www.finhacker.cz/en/stocks/chevron-market-cap/
+2011-12-31,2011,5,GOOGL,Alphabet,209150000000.0,209.15B,https://www.finhacker.cz/en/stocks/alphabet-market-cap/
+2011-12-31,2011,6,IBM,IBM,207070000000.0,207.07B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+2011-12-31,2011,7,WMT,Walmart,204580000000.0,204.58B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2011-12-31,2011,8,BRK.B,Berkshire Hathaway,188920000000.0,188.92B,https://www.finhacker.cz/en/stocks/berkshire-hathaway-market-cap/
+2011-12-31,2011,9,PG,Procter & Gamble,183520000000.0,183.52B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2011-12-31,2011,10,JNJ,Johnson & Johnson,179100000000.0,179.10B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2011-12-31,2011,11,KO,Coca-Cola,158900000000.0,158.90B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+2011-12-31,2011,12,PFE,Pfizer,157640000000.0,157.64B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+2011-12-31,2011,13,WFC,Wells Fargo,145350000000.0,145.35B,https://www.finhacker.cz/en/stocks/wells-fargo-market-cap/
+2011-12-31,2011,14,PM,Philip Morris International,136320000000.0,136.32B,https://www.finhacker.cz/en/stocks/philip-morris-international-market-cap/
+2011-12-31,2011,15,T,AT&T,135680000000.0,135.68B,https://www.finhacker.cz/en/stocks/att-market-cap/
+2011-12-31,2011,16,ORCL,Oracle,128919999999.99998,128.92B,https://www.finhacker.cz/en/stocks/oracle-market-cap/
+2011-12-31,2011,17,JPM,JPMorgan Chase,126350000000.0,126.35B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+2011-12-31,2011,18,INTC,Intel,123480000000.0,123.48B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+2011-12-31,2011,19,VZ,Verizon Communications,113580000000.0,113.58B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+2011-12-31,2011,20,GE,General Electric,113140000000.0,113.14B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+2012-12-31,2012,1,AAPL,Apple,499670000000.0,499.67B,https://www.finhacker.cz/en/stocks/apple-market-cap/
+2012-12-31,2012,2,XOM,Exxon Mobil,389650000000.0,389.65B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2012-12-31,2012,3,GOOGL,Alphabet,233480000000.0,233.48B,https://www.finhacker.cz/en/stocks/alphabet-market-cap/
+2012-12-31,2012,4,WMT,Walmart,228340000000.0,228.34B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2012-12-31,2012,5,MSFT,Microsoft,223670000000.0,223.67B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2012-12-31,2012,6,BRK.B,Berkshire Hathaway,221020000000.0,221.02B,https://www.finhacker.cz/en/stocks/berkshire-hathaway-market-cap/
+2012-12-31,2012,7,CVX,Chevron,210550000000.0,210.55B,https://www.finhacker.cz/en/stocks/chevron-market-cap/
+2012-12-31,2012,8,IBM,IBM,204370000000.0,204.37B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+2012-12-31,2012,9,JNJ,Johnson & Johnson,194740000000.0,194.74B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2012-12-31,2012,10,PG,Procter & Gamble,185480000000.0,185.48B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2012-12-31,2012,11,WFC,Wells Fargo,179990000000.0,179.99B,https://www.finhacker.cz/en/stocks/wells-fargo-market-cap/
+2012-12-31,2012,12,PFE,Pfizer,172930000000.0,172.93B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+2012-12-31,2012,13,JPM,JPMorgan Chase,167260000000.0,167.26B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+2012-12-31,2012,14,KO,Coca-Cola,162000000000.0,162.00B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+2012-12-31,2012,15,ORCL,Oracle,157740000000.0,157.74B,https://www.finhacker.cz/en/stocks/oracle-market-cap/
+2012-12-31,2012,16,T,AT&T,142440000000.0,142.44B,https://www.finhacker.cz/en/stocks/att-market-cap/
+2012-12-31,2012,17,PM,Philip Morris International,138340000000.0,138.34B,https://www.finhacker.cz/en/stocks/philip-morris-international-market-cap/
+2012-12-31,2012,18,GE,General Electric,130690000000.0,130.69B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+2012-12-31,2012,19,BAC,Bank of America,125160000000.0,125.16B,https://www.finhacker.cz/en/stocks/bank-of-america-market-cap/
+2012-12-31,2012,20,VZ,Verizon Communications,123710000000.0,123.71B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+2013-12-31,2013,1,AAPL,Apple,500710000000.0,500.71B,https://www.finhacker.cz/en/stocks/apple-market-cap/
+2013-12-31,2013,2,XOM,Exxon Mobil,438700000000.0,438.70B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2013-12-31,2013,3,GOOGL,Alphabet,376360000000.0,376.36B,https://www.finhacker.cz/en/stocks/alphabet-market-cap/
+2013-12-31,2013,4,MSFT,Microsoft,310500000000.0,310.50B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2013-12-31,2013,5,BRK.B,Berkshire Hathaway,292370000000.0,292.37B,https://www.finhacker.cz/en/stocks/berkshire-hathaway-market-cap/
+2013-12-31,2013,6,JNJ,Johnson & Johnson,258380000000.0,258.38B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2013-12-31,2013,7,WMT,Walmart,254610000000.0,254.61B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2013-12-31,2013,8,CVX,Chevron,239080000000.0,239.08B,https://www.finhacker.cz/en/stocks/chevron-market-cap/
+2013-12-31,2013,9,WFC,Wells Fargo,238670000000.0,238.67B,https://www.finhacker.cz/en/stocks/wells-fargo-market-cap/
+2013-12-31,2013,10,PG,Procter & Gamble,220700000000.0,220.70B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2013-12-31,2013,11,JPM,JPMorgan Chase,219650000000.0,219.65B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+2013-12-31,2013,12,IBM,IBM,188830000000.0,188.83B,https://www.finhacker.cz/en/stocks/international-business-machines-market-cap/
+2013-12-31,2013,13,PFE,Pfizer,185750000000.0,185.75B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+2013-12-31,2013,14,AMZN,Amazon,183040000000.0,183.04B,https://www.finhacker.cz/en/stocks/amazon-market-cap/
+2013-12-31,2013,15,KO,Coca-Cola,181850000000.0,181.85B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+2013-12-31,2013,16,ORCL,Oracle,172060000000.0,172.06B,https://www.finhacker.cz/en/stocks/oracle-market-cap/
+2013-12-31,2013,17,GE,General Electric,168760000000.0,168.76B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+2013-12-31,2013,18,BAC,Bank of America,164890000000.0,164.89B,https://www.finhacker.cz/en/stocks/bank-of-america-market-cap/
+2013-12-31,2013,19,C,Citigroup,157840000000.0,157.84B,https://www.finhacker.cz/en/stocks/citigroup-market-cap/
+2013-12-31,2013,20,VZ,Verizon Communications,140640000000.0,140.64B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+2014-12-31,2014,1,AAPL,Apple,643240000000.0,643.24B,https://www.finhacker.cz/en/stocks/apple-market-cap/
+2014-12-31,2014,2,XOM,Exxon Mobil,388380000000.0,388.38B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2014-12-31,2014,3,MSFT,Microsoft,381730000000.0,381.73B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2014-12-31,2014,4,BRK.B,Berkshire Hathaway,369970000000.0,369.97B,https://www.finhacker.cz/en/stocks/berkshire-hathaway-market-cap/
+2014-12-31,2014,5,GOOGL,Alphabet,361380000000.0,361.38B,https://www.finhacker.cz/en/stocks/alphabet-market-cap/
+2014-12-31,2014,6,JNJ,Johnson & Johnson,291020000000.0,291.02B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2014-12-31,2014,7,WFC,Wells Fargo,283420000000.0,283.42B,https://www.finhacker.cz/en/stocks/wells-fargo-market-cap/
+2014-12-31,2014,8,WMT,Walmart,276820000000.0,276.82B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2014-12-31,2014,9,PG,Procter & Gamble,246030000000.0,246.03B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2014-12-31,2014,10,JPM,JPMorgan Chase,232480000000.0,232.48B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+2014-12-31,2014,11,META,Facebook,216740000000.0,216.74B,https://www.finhacker.cz/en/stocks/meta-platforms-market-cap/
+2014-12-31,2014,12,CVX,Chevron,210900000000.0,210.90B,https://www.finhacker.cz/en/stocks/chevron-market-cap/
+2014-12-31,2014,13,ORCL,Oracle,197460000000.0,197.46B,https://www.finhacker.cz/en/stocks/oracle-market-cap/
+2014-12-31,2014,14,VZ,Verizon Communications,194370000000.0,194.37B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+2014-12-31,2014,15,BAC,Bank of America,188200000000.0,188.20B,https://www.finhacker.cz/en/stocks/bank-of-america-market-cap/
+2014-12-31,2014,16,PFE,Pfizer,185710000000.0,185.71B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+2014-12-31,2014,17,KO,Coca-Cola,184330000000.0,184.33B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+2014-12-31,2014,18,INTC,Intel,172300000000.0,172.30B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+2014-12-31,2014,19,C,Citigroup,163630000000.0,163.63B,https://www.finhacker.cz/en/stocks/citigroup-market-cap/
+2014-12-31,2014,20,DIS,Walt Disney,160120000000.0,160.12B,https://www.finhacker.cz/en/stocks/walt-disney-market-cap/
+2015-12-31,2015,1,AAPL,Apple,583670000000.0,583.67B,https://www.finhacker.cz/en/stocks/apple-market-cap/
+2015-12-31,2015,2,GOOGL,Alphabet,534880000000.0,534.88B,https://www.finhacker.cz/en/stocks/alphabet-market-cap/
+2015-12-31,2015,3,MSFT,Microsoft,439680000000.0,439.68B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2015-12-31,2015,4,BRK.B,Berkshire Hathaway,325480000000.0,325.48B,https://www.finhacker.cz/en/stocks/berkshire-hathaway-market-cap/
+2015-12-31,2015,5,XOM,Exxon Mobil,323960000000.0,323.96B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2015-12-31,2015,6,AMZN,Amazon,318340000000.0,318.34B,https://www.finhacker.cz/en/stocks/amazon-market-cap/
+2015-12-31,2015,7,META,Facebook,296610000000.0,296.61B,https://www.finhacker.cz/en/stocks/meta-platforms-market-cap/
+2015-12-31,2015,8,JNJ,Johnson & Johnson,284230000000.0,284.23B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2015-12-31,2015,9,WFC,Wells Fargo,276800000000.0,276.80B,https://www.finhacker.cz/en/stocks/wells-fargo-market-cap/
+2015-12-31,2015,10,JPM,JPMorgan Chase,241870000000.0,241.87B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+2015-12-31,2015,11,PG,Procter & Gamble,214800000000.0,214.80B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2015-12-31,2015,12,WMT,Walmart,196280000000.0,196.28B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2015-12-31,2015,13,PFE,Pfizer,188900000000.0,188.90B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+2015-12-31,2015,14,VZ,Verizon Communications,188250000000.0,188.25B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+2015-12-31,2015,15,KO,Coca-Cola,185760000000.0,185.76B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+2015-12-31,2015,16,V,Visa,184880000000.0,184.88B,https://www.finhacker.cz/en/stocks/visa-market-cap/
+2015-12-31,2015,17,GE,General Electric,174720000000.0,174.72B,https://www.finhacker.cz/en/stocks/ge-aerospace-market-cap/
+2015-12-31,2015,18,BAC,Bank of America,174700000000.0,174.70B,https://www.finhacker.cz/en/stocks/bank-of-america-market-cap/
+2015-12-31,2015,19,DIS,Walt Disney,173700000000.0,173.70B,https://www.finhacker.cz/en/stocks/walt-disney-market-cap/
+2015-12-31,2015,20,CVX,Chevron,169390000000.0,169.39B,https://www.finhacker.cz/en/stocks/chevron-market-cap/
+2016-12-31,2016,1,AAPL,Apple,608920000000.0,608.92B,https://www.finhacker.cz/en/stocks/apple-market-cap/
+2016-12-31,2016,2,GOOGL,Alphabet,546000000000.0,546.00B,https://www.finhacker.cz/en/stocks/alphabet-market-cap/
+2016-12-31,2016,3,MSFT,Microsoft,483140000000.0,483.14B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2016-12-31,2016,4,BRK.B,Berkshire Hathaway,401910000000.0,401.91B,https://www.finhacker.cz/en/stocks/berkshire-hathaway-market-cap/
+2016-12-31,2016,5,XOM,Exxon Mobil,374310000000.0,374.31B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2016-12-31,2016,6,AMZN,Amazon,356300000000.0,356.30B,https://www.finhacker.cz/en/stocks/amazon-market-cap/
+2016-12-31,2016,7,META,Facebook,331570000000.0,331.57B,https://www.finhacker.cz/en/stocks/meta-platforms-market-cap/
+2016-12-31,2016,8,JNJ,Johnson & Johnson,313490000000.0,313.49B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2016-12-31,2016,9,JPM,JPMorgan Chase,308750000000.0,308.75B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+2016-12-31,2016,10,WFC,Wells Fargo,276760000000.0,276.76B,https://www.finhacker.cz/en/stocks/wells-fargo-market-cap/
+2016-12-31,2016,11,PG,Procter & Gamble,225000000000.0,225.00B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2016-12-31,2016,12,BAC,Bank of America,223430000000.0,223.43B,https://www.finhacker.cz/en/stocks/bank-of-america-market-cap/
+2016-12-31,2016,13,CVX,Chevron,222220000000.0,222.22B,https://www.finhacker.cz/en/stocks/chevron-market-cap/
+2016-12-31,2016,14,VZ,Verizon Communications,217630000000.0,217.63B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+2016-12-31,2016,15,WMT,Walmart,212430000000.0,212.43B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2016-12-31,2016,16,T,AT&T,197740000000.0,197.74B,https://www.finhacker.cz/en/stocks/att-market-cap/
+2016-12-31,2016,17,PFE,Pfizer,186780000000.0,186.78B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+2016-12-31,2016,18,V,Visa,180460000000.0,180.46B,https://www.finhacker.cz/en/stocks/visa-market-cap/
+2016-12-31,2016,19,KO,Coca-Cola,178820000000.0,178.82B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+2016-12-31,2016,20,INTC,Intel,171880000000.0,171.88B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+2017-12-31,2017,1,AAPL,Apple,860960000000.0,860.96B,https://www.finhacker.cz/en/stocks/apple-market-cap/
+2017-12-31,2017,2,GOOGL,Alphabet,732110000000.0,732.11B,https://www.finhacker.cz/en/stocks/alphabet-market-cap/
+2017-12-31,2017,3,MSFT,Microsoft,659940000000.0,659.94B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2017-12-31,2017,4,AMZN,Amazon,563510000000.0,563.51B,https://www.finhacker.cz/en/stocks/amazon-market-cap/
+2017-12-31,2017,5,META,Facebook,512789999999.99994,512.79B,https://www.finhacker.cz/en/stocks/meta-platforms-market-cap/
+2017-12-31,2017,6,BRK.B,Berkshire Hathaway,489010000000.0,489.01B,https://www.finhacker.cz/en/stocks/berkshire-hathaway-market-cap/
+2017-12-31,2017,7,JNJ,Johnson & Johnson,375430000000.0,375.43B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2017-12-31,2017,8,JPM,JPMorgan Chase,371080000000.0,371.08B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+2017-12-31,2017,9,XOM,Exxon Mobil,354380000000.0,354.38B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2017-12-31,2017,10,BAC,Bank of America,307890000000.0,307.89B,https://www.finhacker.cz/en/stocks/bank-of-america-market-cap/
+2017-12-31,2017,11,WFC,Wells Fargo,298740000000.0,298.74B,https://www.finhacker.cz/en/stocks/wells-fargo-market-cap/
+2017-12-31,2017,12,WMT,Walmart,292530000000.0,292.53B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2017-12-31,2017,13,V,Visa,256769999999.99997,256.77B,https://www.finhacker.cz/en/stocks/visa-market-cap/
+2017-12-31,2017,14,CVX,Chevron,237740000000.0,237.74B,https://www.finhacker.cz/en/stocks/chevron-market-cap/
+2017-12-31,2017,15,PG,Procter & Gamble,233100000000.0,233.10B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2017-12-31,2017,16,HD,Home Depot,221370000000.0,221.37B,https://www.finhacker.cz/en/stocks/home-depot-market-cap/
+2017-12-31,2017,17,INTC,Intel,216030000000.0,216.03B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+2017-12-31,2017,18,VZ,Verizon Communications,215900000000.0,215.90B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+2017-12-31,2017,19,UNH,UnitedHealth Group,213640000000.0,213.64B,https://www.finhacker.cz/en/stocks/unitedhealth-group-market-cap/
+2017-12-31,2017,20,PFE,Pfizer,204610000000.0,204.61B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+2018-12-31,2018,1,MSFT,Microsoft,780360000000.0,780.36B,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2018-12-31,2018,2,AAPL,Apple,746110000000.0,746.11B,https://www.finhacker.cz/en/stocks/apple-market-cap/
+2018-12-31,2018,3,AMZN,Amazon,737470000000.0,737.47B,https://www.finhacker.cz/en/stocks/amazon-market-cap/
+2018-12-31,2018,4,GOOGL,Alphabet,726770000000.0,726.77B,https://www.finhacker.cz/en/stocks/alphabet-market-cap/
+2018-12-31,2018,5,BRK.B,Berkshire Hathaway,502490000000.0,502.49B,https://www.finhacker.cz/en/stocks/berkshire-hathaway-market-cap/
+2018-12-31,2018,6,META,Facebook,374130000000.0,374.13B,https://www.finhacker.cz/en/stocks/meta-platforms-market-cap/
+2018-12-31,2018,7,JNJ,Johnson & Johnson,343530000000.0,343.53B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2018-12-31,2018,8,JPM,JPMorgan Chase,319800000000.0,319.80B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+2018-12-31,2018,9,V,Visa,289210000000.0,289.21B,https://www.finhacker.cz/en/stocks/visa-market-cap/
+2018-12-31,2018,10,XOM,Exxon Mobil,288920000000.0,288.92B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2018-12-31,2018,11,WMT,Walmart,270630000000.0,270.63B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2018-12-31,2018,12,UNH,UnitedHealth Group,239160000000.0,239.16B,https://www.finhacker.cz/en/stocks/unitedhealth-group-market-cap/
+2018-12-31,2018,13,BAC,Bank of America,238240000000.0,238.24B,https://www.finhacker.cz/en/stocks/bank-of-america-market-cap/
+2018-12-31,2018,14,PFE,Pfizer,236490000000.0,236.49B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+2018-12-31,2018,15,VZ,Verizon Communications,232300000000.0,232.30B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+2018-12-31,2018,16,PG,Procter & Gamble,229980000000.0,229.98B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2018-12-31,2018,17,INTC,Intel,211940000000.0,211.94B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+2018-12-31,2018,18,WFC,Wells Fargo,211090000000.0,211.09B,https://www.finhacker.cz/en/stocks/wells-fargo-market-cap/
+2018-12-31,2018,19,CVX,Chevron,207030000000.0,207.03B,https://www.finhacker.cz/en/stocks/chevron-market-cap/
+2018-12-31,2018,20,KO,Coca-Cola,202090000000.0,202.09B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+2019-12-31,2019,1,AAPL,Apple,1288000000000.0,1.288T,https://www.finhacker.cz/en/stocks/apple-market-cap/
+2019-12-31,2019,2,MSFT,Microsoft,1200000000000.0,1.200T,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2019-12-31,2019,3,GOOGL,Alphabet,922170000000.0,922.17B,https://www.finhacker.cz/en/stocks/alphabet-market-cap/
+2019-12-31,2019,4,AMZN,Amazon,920220000000.0,920.22B,https://www.finhacker.cz/en/stocks/amazon-market-cap/
+2019-12-31,2019,5,META,Facebook,585370000000.0,585.37B,https://www.finhacker.cz/en/stocks/meta-platforms-market-cap/
+2019-12-31,2019,6,BRK.B,Berkshire Hathaway,551980000000.0,551.98B,https://www.finhacker.cz/en/stocks/berkshire-hathaway-market-cap/
+2019-12-31,2019,7,JPM,JPMorgan Chase,429910000000.0,429.91B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+2019-12-31,2019,8,V,Visa,402670000000.0,402.67B,https://www.finhacker.cz/en/stocks/visa-market-cap/
+2019-12-31,2019,9,JNJ,Johnson & Johnson,384080000000.0,384.08B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2019-12-31,2019,10,WMT,Walmart,337190000000.0,337.19B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2019-12-31,2019,11,BAC,Bank of America,311200000000.0,311.20B,https://www.finhacker.cz/en/stocks/bank-of-america-market-cap/
+2019-12-31,2019,12,PG,Procter & Gamble,308380000000.0,308.38B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2019-12-31,2019,13,MA,Mastercard,300680000000.0,300.68B,https://www.finhacker.cz/en/stocks/mastercard-market-cap/
+2019-12-31,2019,14,XOM,Exxon Mobil,295450000000.0,295.45B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2019-12-31,2019,15,UNH,UnitedHealth Group,278690000000.0,278.69B,https://www.finhacker.cz/en/stocks/unitedhealth-group-market-cap/
+2019-12-31,2019,16,DIS,Walt Disney,257589999999.99997,257.59B,https://www.finhacker.cz/en/stocks/walt-disney-market-cap/
+2019-12-31,2019,17,INTC,Intel,256760000000.0,256.76B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+2019-12-31,2019,18,VZ,Verizon Communications,253950000000.0,253.95B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+2019-12-31,2019,19,HD,Home Depot,238250000000.0,238.25B,https://www.finhacker.cz/en/stocks/home-depot-market-cap/
+2019-12-31,2019,20,KO,Coca-Cola,236900000000.0,236.90B,https://www.finhacker.cz/en/stocks/coca-cola-market-cap/
+2020-12-31,2020,1,AAPL,Apple,2232000000000.0,2.232T,https://www.finhacker.cz/en/stocks/apple-market-cap/
+2020-12-31,2020,2,MSFT,Microsoft,1678000000000.0,1.678T,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2020-12-31,2020,3,AMZN,Amazon,1638000000000.0,1.638T,https://www.finhacker.cz/en/stocks/amazon-market-cap/
+2020-12-31,2020,4,GOOGL,Alphabet,1183000000000.0,1.183T,https://www.finhacker.cz/en/stocks/alphabet-market-cap/
+2020-12-31,2020,5,META,Facebook,778230000000.0,778.23B,https://www.finhacker.cz/en/stocks/meta-platforms-market-cap/
+2020-12-31,2020,6,TSLA,Tesla,677440000000.0,677.44B,https://www.finhacker.cz/en/stocks/tesla-market-cap/
+2020-12-31,2020,7,BRK.B,Berkshire Hathaway,537010000000.0,537.01B,https://www.finhacker.cz/en/stocks/berkshire-hathaway-market-cap/
+2020-12-31,2020,8,V,Visa,465890000000.0,465.89B,https://www.finhacker.cz/en/stocks/visa-market-cap/
+2020-12-31,2020,9,JNJ,Johnson & Johnson,414380000000.0,414.38B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2020-12-31,2020,10,WMT,Walmart,407850000000.0,407.85B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2020-12-31,2020,11,JPM,JPMorgan Chase,387440000000.0,387.44B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+2020-12-31,2020,12,MA,Mastercard,355320000000.0,355.32B,https://www.finhacker.cz/en/stocks/mastercard-market-cap/
+2020-12-31,2020,13,PG,Procter & Gamble,342560000000.0,342.56B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2020-12-31,2020,14,UNH,UnitedHealth Group,331740000000.0,331.74B,https://www.finhacker.cz/en/stocks/unitedhealth-group-market-cap/
+2020-12-31,2020,15,NVDA,NVIDIA,323240000000.0,323.24B,https://www.finhacker.cz/en/stocks/nvidia-market-cap/
+2020-12-31,2020,16,DIS,Walt Disney,322680000000.0,322.68B,https://www.finhacker.cz/en/stocks/walt-disney-market-cap/
+2020-12-31,2020,17,HD,Home Depot,286070000000.0,286.07B,https://www.finhacker.cz/en/stocks/home-depot-market-cap/
+2020-12-31,2020,18,PYPL,PayPal Holdings,274480000000.00003,274.48B,https://www.finhacker.cz/en/stocks/paypal-holdings-market-cap/
+2020-12-31,2020,19,BAC,Bank of America,262209999999.99997,262.21B,https://www.finhacker.cz/en/stocks/bank-of-america-market-cap/
+2020-12-31,2020,20,VZ,Verizon Communications,243110000000.0,243.11B,https://www.finhacker.cz/en/stocks/verizon-communications-market-cap/
+2021-12-31,2021,1,AAPL,Apple,2902000000000.0,2.902T,https://www.finhacker.cz/en/stocks/apple-market-cap/
+2021-12-31,2021,2,MSFT,Microsoft,2522000000000.0,2.522T,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2021-12-31,2021,3,GOOGL,Alphabet,1918000000000.0,1.918T,https://www.finhacker.cz/en/stocks/alphabet-market-cap/
+2021-12-31,2021,4,AMZN,Amazon,1697000000000.0,1.697T,https://www.finhacker.cz/en/stocks/amazon-market-cap/
+2021-12-31,2021,5,TSLA,Tesla,1092000000000.0001,1.092T,https://www.finhacker.cz/en/stocks/tesla-market-cap/
+2021-12-31,2021,6,META,Meta Platforms,921940000000.0,921.94B,https://www.finhacker.cz/en/stocks/meta-platforms-market-cap/
+2021-12-31,2021,7,NVDA,NVIDIA,735270000000.0,735.27B,https://www.finhacker.cz/en/stocks/nvidia-market-cap/
+2021-12-31,2021,8,BRK.B,Berkshire Hathaway,662580000000.0,662.58B,https://www.finhacker.cz/en/stocks/berkshire-hathaway-market-cap/
+2021-12-31,2021,9,UNH,UnitedHealth Group,472510000000.0,472.51B,https://www.finhacker.cz/en/stocks/unitedhealth-group-market-cap/
+2021-12-31,2021,10,JPM,JPMorgan Chase,466180000000.0,466.18B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+2021-12-31,2021,11,V,Visa,453140000000.0,453.14B,https://www.finhacker.cz/en/stocks/visa-market-cap/
+2021-12-31,2021,12,JNJ,Johnson & Johnson,450430000000.0,450.43B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2021-12-31,2021,13,HD,Home Depot,433270000000.0,433.27B,https://www.finhacker.cz/en/stocks/home-depot-market-cap/
+2021-12-31,2021,14,WMT,Walmart,401370000000.0,401.37B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2021-12-31,2021,15,PG,Procter & Gamble,392100000000.0,392.10B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2021-12-31,2021,16,BAC,Bank of America,359390000000.0,359.39B,https://www.finhacker.cz/en/stocks/bank-of-america-market-cap/
+2021-12-31,2021,17,MA,Mastercard,352130000000.0,352.13B,https://www.finhacker.cz/en/stocks/mastercard-market-cap/
+2021-12-31,2021,18,PFE,Pfizer,331860000000.0,331.86B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+2021-12-31,2021,19,DIS,Walt Disney,281590000000.0,281.59B,https://www.finhacker.cz/en/stocks/walt-disney-market-cap/
+2021-12-31,2021,20,AVGO,Broadcom,274750000000.0,274.75B,https://www.finhacker.cz/en/stocks/broadcom-market-cap/
+2022-12-31,2022,1,AAPL,Apple,2067000000000.0002,2.067T,https://www.finhacker.cz/en/stocks/apple-market-cap/
+2022-12-31,2022,2,MSFT,Microsoft,1788000000000.0,1.788T,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2022-12-31,2022,3,GOOGL,Alphabet,1148000000000.0,1.148T,https://www.finhacker.cz/en/stocks/alphabet-market-cap/
+2022-12-31,2022,4,AMZN,Amazon,856800000000.0,856.8B,https://www.finhacker.cz/en/stocks/amazon-market-cap/
+2022-12-31,2022,5,BRK.B,Berkshire Hathaway,678650000000.0,678.65B,https://www.finhacker.cz/en/stocks/berkshire-hathaway-market-cap/
+2022-12-31,2022,6,UNH,UnitedHealth Group,495370000000.0,495.37B,https://www.finhacker.cz/en/stocks/unitedhealth-group-market-cap/
+2022-12-31,2022,7,JNJ,Johnson & Johnson,461760000000.0,461.76B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2022-12-31,2022,8,XOM,Exxon Mobil,454220000000.0,454.22B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2022-12-31,2022,9,V,Visa,432350000000.0,432.35B,https://www.finhacker.cz/en/stocks/visa-market-cap/
+2022-12-31,2022,10,JPM,JPMorgan Chase,393320000000.0,393.32B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+2022-12-31,2022,11,TSLA,Tesla,389000000000.0,389.0B,https://www.finhacker.cz/en/stocks/tesla-market-cap/
+2022-12-31,2022,12,WMT,Walmart,382360000000.0,382.36B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2022-12-31,2022,13,NVDA,NVIDIA,359500000000.0,359.50B,https://www.finhacker.cz/en/stocks/nvidia-market-cap/
+2022-12-31,2022,14,PG,Procter & Gamble,359200000000.0,359.2B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2022-12-31,2022,15,LLY,Eli Lilly,347610000000.0,347.61B,https://www.finhacker.cz/en/stocks/eli-lilly-market-cap/
+2022-12-31,2022,16,CVX,Chevron,344440000000.0,344.44B,https://www.finhacker.cz/en/stocks/chevron-market-cap/
+2022-12-31,2022,17,MA,Mastercard,334330000000.0,334.33B,https://www.finhacker.cz/en/stocks/mastercard-market-cap/
+2022-12-31,2022,18,HD,Home Depot,321860000000.0,321.86B,https://www.finhacker.cz/en/stocks/home-depot-market-cap/
+2022-12-31,2022,19,META,Meta Platforms,315530000000.0,315.53B,https://www.finhacker.cz/en/stocks/meta-platforms-market-cap/
+2022-12-31,2022,20,PFE,Pfizer,287610000000.0,287.61B,https://www.finhacker.cz/en/stocks/pfizer-market-cap/
+2023-12-31,2023,1,AAPL,Apple,2994000000000.0,2.994T,https://www.finhacker.cz/en/stocks/apple-market-cap/
+2023-12-31,2023,2,MSFT,Microsoft,2795000000000.0,2.795T,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2023-12-31,2023,3,GOOGL,Alphabet,1764000000000.0,1.764T,https://www.finhacker.cz/en/stocks/alphabet-market-cap/
+2023-12-31,2023,4,AMZN,Amazon,1570000000000.0,1.570T,https://www.finhacker.cz/en/stocks/amazon-market-cap/
+2023-12-31,2023,5,NVDA,NVIDIA,1223000000000.0,1.223T,https://www.finhacker.cz/en/stocks/nvidia-market-cap/
+2023-12-31,2023,6,META,Meta Platforms,909680000000.0,909.68B,https://www.finhacker.cz/en/stocks/meta-platforms-market-cap/
+2023-12-31,2023,7,TSLA,Tesla,789920000000.0,789.92B,https://www.finhacker.cz/en/stocks/tesla-market-cap/
+2023-12-31,2023,8,BRK.B,Berkshire Hathaway,772530000000.0,772.53B,https://www.finhacker.cz/en/stocks/berkshire-hathaway-market-cap/
+2023-12-31,2023,9,LLY,Eli Lilly,553370000000.0,553.37B,https://www.finhacker.cz/en/stocks/eli-lilly-market-cap/
+2023-12-31,2023,10,V,Visa,525650000000.0,525.65B,https://www.finhacker.cz/en/stocks/visa-market-cap/
+2023-12-31,2023,11,AVGO,Broadcom,522520000000.0,522.52B,https://www.finhacker.cz/en/stocks/broadcom-market-cap/
+2023-12-31,2023,12,JPM,JPMorgan Chase,491760000000.0,491.76B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+2023-12-31,2023,13,UNH,UnitedHealth Group,486950000000.0,486.95B,https://www.finhacker.cz/en/stocks/unitedhealth-group-market-cap/
+2023-12-31,2023,14,WMT,Walmart,424450000000.0,424.45B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2023-12-31,2023,15,MA,Mastercard,400130000000.0,400.13B,https://www.finhacker.cz/en/stocks/mastercard-market-cap/
+2023-12-31,2023,16,XOM,Exxon Mobil,399620000000.0,399.62B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2023-12-31,2023,17,JNJ,Johnson & Johnson,377270000000.0,377.27B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2023-12-31,2023,18,PG,Procter & Gamble,345390000000.0,345.39B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2023-12-31,2023,19,HD,Home Depot,344910000000.0,344.91B,https://www.finhacker.cz/en/stocks/home-depot-market-cap/
+2023-12-31,2023,20,COST,Costco Wholesale,292900000000.0,292.90B,https://www.finhacker.cz/en/stocks/costco-wholesale-market-cap/
+2024-12-31,2024,1,AAPL,Apple,3766000000000.0,3.766T,https://www.finhacker.cz/en/stocks/apple-market-cap/
+2024-12-31,2024,2,NVDA,NVIDIA,3289000000000.0,3.289T,https://www.finhacker.cz/en/stocks/nvidia-market-cap/
+2024-12-31,2024,3,MSFT,Microsoft,3134000000000.0,3.134T,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2024-12-31,2024,4,GOOGL,Alphabet,2325000000000.0,2.325T,https://www.finhacker.cz/en/stocks/alphabet-market-cap/
+2024-12-31,2024,5,AMZN,Amazon,2323000000000.0,2.323T,https://www.finhacker.cz/en/stocks/amazon-market-cap/
+2024-12-31,2024,6,META,Meta Platforms,1484000000000.0,1.484T,https://www.finhacker.cz/en/stocks/meta-platforms-market-cap/
+2024-12-31,2024,7,TSLA,Tesla,1299000000000.0,1.299T,https://www.finhacker.cz/en/stocks/tesla-market-cap/
+2024-12-31,2024,8,AVGO,Broadcom,1087000000000.0,1.087T,https://www.finhacker.cz/en/stocks/broadcom-market-cap/
+2024-12-31,2024,9,BRK.B,Berkshire Hathaway,977720000000.0,977.72B,https://www.finhacker.cz/en/stocks/berkshire-hathaway-market-cap/
+2024-12-31,2024,10,WMT,Walmart,725780000000.0,725.78B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2024-12-31,2024,11,LLY,Eli Lilly,692900000000.0,692.90B,https://www.finhacker.cz/en/stocks/eli-lilly-market-cap/
+2024-12-31,2024,12,JPM,JPMorgan Chase,670710000000.0,670.71B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+2024-12-31,2024,13,V,Visa,622600000000.0,622.60B,https://www.finhacker.cz/en/stocks/visa-market-cap/
+2024-12-31,2024,14,MA,Mastercard,480970000000.0,480.97B,https://www.finhacker.cz/en/stocks/mastercard-market-cap/
+2024-12-31,2024,15,XOM,Exxon Mobil,468250000000.0,468.25B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2024-12-31,2024,16,ORCL,Oracle,466090000000.0,466.09B,https://www.finhacker.cz/en/stocks/oracle-market-cap/
+2024-12-31,2024,17,UNH,UnitedHealth Group,462860000000.0,462.86B,https://www.finhacker.cz/en/stocks/unitedhealth-group-market-cap/
+2024-12-31,2024,18,COST,Costco Wholesale,406730000000.0,406.73B,https://www.finhacker.cz/en/stocks/costco-wholesale-market-cap/
+2024-12-31,2024,19,PG,Procter & Gamble,393140000000.0,393.14B,https://www.finhacker.cz/en/stocks/procter-gamble-market-cap/
+2024-12-31,2024,20,HD,Home Depot,386410000000.0,386.41B,https://www.finhacker.cz/en/stocks/home-depot-market-cap/
+2025-12-31,2025,1,NVDA,NVIDIA,4533000000000.0,4.533T,https://www.finhacker.cz/en/stocks/nvidia-market-cap/
+2025-12-31,2025,2,AAPL,Apple,4017000000000.0005,4.017T,https://www.finhacker.cz/en/stocks/apple-market-cap/
+2025-12-31,2025,3,GOOGL,Alphabet,3777000000000.0,3.777T,https://www.finhacker.cz/en/stocks/alphabet-market-cap/
+2025-12-31,2025,4,MSFT,Microsoft,3594000000000.0,3.594T,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2025-12-31,2025,5,AMZN,Amazon,2468000000000.0,2.468T,https://www.finhacker.cz/en/stocks/amazon-market-cap/
+2025-12-31,2025,6,META,Meta Platforms,1664000000000.0,1.664T,https://www.finhacker.cz/en/stocks/meta-platforms-market-cap/
+2025-12-31,2025,7,AVGO,Broadcom,1641000000000.0,1.641T,https://www.finhacker.cz/en/stocks/broadcom-market-cap/
+2025-12-31,2025,8,TSLA,Tesla,1496000000000.0,1.496T,https://www.finhacker.cz/en/stocks/tesla-market-cap/
+2025-12-31,2025,9,BRK.B,Berkshire Hathaway,1084000000000.0001,1.084T,https://www.finhacker.cz/en/stocks/berkshire-hathaway-market-cap/
+2025-12-31,2025,10,LLY,Eli Lilly,961860000000.0,961.86B,https://www.finhacker.cz/en/stocks/eli-lilly-market-cap/
+2025-12-31,2025,11,WMT,Walmart,887960000000.0,887.96B,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2025-12-31,2025,12,JPM,JPMorgan Chase,877170000000.0,877.17B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+2025-12-31,2025,13,V,Visa,676180000000.0,676.18B,https://www.finhacker.cz/en/stocks/visa-market-cap/
+2025-12-31,2025,14,ORCL,Oracle,560000000000.0,560.00B,https://www.finhacker.cz/en/stocks/oracle-market-cap/
+2025-12-31,2025,15,MA,Mastercard,512650000000.0,512.65B,https://www.finhacker.cz/en/stocks/mastercard-market-cap/
+2025-12-31,2025,16,XOM,Exxon Mobil,507490000000.0,507.49B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2025-12-31,2025,17,JNJ,Johnson & Johnson,498600000000.0,498.60B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2025-12-31,2025,18,PLTR,Palantir Technologies,423660000000.0,423.66B,https://www.finhacker.cz/en/stocks/palantir-technologies-market-cap/
+2025-12-31,2025,19,ABBV,AbbVie,403830000000.0,403.83B,https://www.finhacker.cz/en/stocks/abbvie-market-cap/
+2025-12-31,2025,20,BAC,Bank of America,401640000000.0,401.64B,https://www.finhacker.cz/en/stocks/bank-of-america-market-cap/
+2026-05-20,2026,1,NVDA,NVIDIA,5433000000000.0,5.433T,https://www.finhacker.cz/en/stocks/nvidia-market-cap/
+2026-05-20,2026,2,GOOGL,Alphabet,4712000000000.0,4.712T,https://www.finhacker.cz/en/stocks/alphabet-market-cap/
+2026-05-20,2026,3,AAPL,Apple,4440000000000.0,4.440T,https://www.finhacker.cz/en/stocks/apple-market-cap/
+2026-05-20,2026,4,MSFT,Microsoft,3128000000000.0,3.128T,https://www.finhacker.cz/en/stocks/microsoft-market-cap/
+2026-05-20,2026,5,AMZN,Amazon,2852000000000.0,2.852T,https://www.finhacker.cz/en/stocks/amazon-market-cap/
+2026-05-20,2026,6,AVGO,Broadcom,1977000000000.0,1.977T,https://www.finhacker.cz/en/stocks/broadcom-market-cap/
+2026-05-20,2026,7,TSLA,Tesla,1566000000000.0,1.566T,https://www.finhacker.cz/en/stocks/tesla-market-cap/
+2026-05-20,2026,8,META,Meta Platforms,1536000000000.0,1.536T,https://www.finhacker.cz/en/stocks/meta-platforms-market-cap/
+2026-05-20,2026,9,WMT,Walmart,1044000000000.0,1.044T,https://www.finhacker.cz/en/stocks/walmart-market-cap/
+2026-05-20,2026,10,BRK.B,Berkshire Hathaway,1036999999999.9999,1.037T,https://www.finhacker.cz/en/stocks/berkshire-hathaway-market-cap/
+2026-05-20,2026,11,LLY,Eli Lilly,908680000000.0,908.68B,https://www.finhacker.cz/en/stocks/eli-lilly-market-cap/
+2026-05-20,2026,12,MU,Micron Technology,823420000000.0,823.42B,https://www.finhacker.cz/en/stocks/micron-technology-market-cap/
+2026-05-20,2026,13,JPM,JPMorgan Chase,809240000000.0,809.24B,https://www.finhacker.cz/en/stocks/jpmorgan-chase-market-cap/
+2026-05-20,2026,14,AMD,Advanced Micro Devices,728980000000.0,728.98B,https://www.finhacker.cz/en/stocks/advanced-micro-devices-market-cap/
+2026-05-20,2026,15,XOM,Exxon Mobil,648560000000.0,648.56B,https://www.finhacker.cz/en/stocks/exxon-mobil-market-cap/
+2026-05-20,2026,16,V,Visa,629080000000.0,629.08B,https://www.finhacker.cz/en/stocks/visa-market-cap/
+2026-05-20,2026,17,INTC,Intel,597940000000.0,597.94B,https://www.finhacker.cz/en/stocks/intel-market-cap/
+2026-05-20,2026,18,JNJ,Johnson & Johnson,551900000000.0,551.90B,https://www.finhacker.cz/en/stocks/johnson-johnson-market-cap/
+2026-05-20,2026,19,ORCL,Oracle,539630000000.0,539.63B,https://www.finhacker.cz/en/stocks/oracle-market-cap/
+2026-05-20,2026,20,COST,Costco Wholesale,476470000000.0,476.47B,https://www.finhacker.cz/en/stocks/costco-wholesale-market-cap/

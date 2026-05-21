@@ -111,6 +111,34 @@ def test_strategy_analysis_runs_timing_when_hook_exists(monkeypatch):
     assert "--show-signal-progress" in command_list[0]
 
 
+def test_strategy_analysis_forwards_strategy_kwargs_to_vanilla_only(monkeypatch):
+    module_name_str = "test_fake_strategy_kwarg_strategy"
+    _install_fake_strategy_module(
+        monkeypatch,
+        module_name_str,
+        ("run_variant", "run_friction_analysis"),
+    )
+    command_list = []
+
+    def run_stub(command, cwd, check):
+        command_list.append(tuple(command))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(analysis_runner.subprocess, "run", run_stub)
+
+    return_code_int, result_list = analysis_runner.run_strategy_analysis(
+        strategy_ref_str="fake.py",
+        analysis_tuple=("vanilla", "friction"),
+        strategy_kwarg_tuple=("market_cap_csv_path_str=C:\\data\\pit_market_cap.csv",),
+    )
+
+    assert return_code_int == 0
+    assert [result_obj.status_str for result_obj in result_list] == ["PASS", "PASS"]
+    assert "--strategy-kwarg" in command_list[0]
+    assert "market_cap_csv_path_str=C:\\data\\pit_market_cap.csv" in command_list[0]
+    assert "--strategy-kwarg" not in command_list[1]
+
+
 def test_strategy_analysis_stops_after_failure_without_keep_going(monkeypatch):
     module_name_str = "test_fake_failing_analysis_strategy"
     _install_fake_strategy_module(

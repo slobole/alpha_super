@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import inspect
+import json
 import sys
 import warnings
 from pathlib import Path
@@ -91,12 +92,36 @@ def _resolve_strategy_module_import_str(strategy_name_str: str) -> str:
     return _module_path_to_import_str(matching_module_path_list[0])
 
 
+def _parse_run_kwarg_value(raw_value_str: str):
+    try:
+        return json.loads(raw_value_str)
+    except json.JSONDecodeError:
+        return raw_value_str
+
+
+def _parse_run_kwarg_tuple(raw_run_kwarg_tuple: tuple[str, ...] | list[str] | None) -> dict[str, object]:
+    if raw_run_kwarg_tuple is None:
+        return {}
+
+    run_kwarg_dict: dict[str, object] = {}
+    for raw_item_str in raw_run_kwarg_tuple:
+        if "=" not in raw_item_str:
+            raise ValueError(f"Strategy kwarg must use key=value form: {raw_item_str!r}")
+        key_str, raw_value_str = raw_item_str.split("=", maxsplit=1)
+        key_str = key_str.strip()
+        if not key_str:
+            raise ValueError(f"Strategy kwarg key must not be empty: {raw_item_str!r}")
+        run_kwarg_dict[key_str] = _parse_run_kwarg_value(raw_value_str)
+    return run_kwarg_dict
+
+
 def _run_strategy_module(
     strategy_name_str: str,
     show_display_bool: bool,
     save_results_bool: bool,
     output_dir_str: str,
     dry_run_bool: bool,
+    strategy_kwarg_dict: dict[str, object] | None = None,
 ):
     module_import_str = _resolve_strategy_module_import_str(strategy_name_str)
     strategy_module = importlib.import_module(module_import_str)
@@ -113,13 +138,31 @@ def _run_strategy_module(
         )
 
     signature_obj = inspect.signature(run_variant_fn)
+    accepts_var_keyword_bool = any(
+        parameter_obj.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter_obj in signature_obj.parameters.values()
+    )
     run_kwarg_dict = {}
-    if "show_display_bool" in signature_obj.parameters:
+    if "show_display_bool" in signature_obj.parameters or accepts_var_keyword_bool:
         run_kwarg_dict["show_display_bool"] = show_display_bool
-    if "save_results_bool" in signature_obj.parameters:
+    if "save_results_bool" in signature_obj.parameters or accepts_var_keyword_bool:
         run_kwarg_dict["save_results_bool"] = save_results_bool
-    if "output_dir_str" in signature_obj.parameters:
+    if "output_dir_str" in signature_obj.parameters or accepts_var_keyword_bool:
         run_kwarg_dict["output_dir_str"] = output_dir_str
+
+    extra_kwarg_dict = {} if strategy_kwarg_dict is None else dict(strategy_kwarg_dict)
+    unsupported_kwarg_list = [
+        key_str
+        for key_str in extra_kwarg_dict
+        if not accepts_var_keyword_bool and key_str not in signature_obj.parameters
+    ]
+    if len(unsupported_kwarg_list) > 0:
+        unsupported_kwarg_str = ", ".join(sorted(unsupported_kwarg_list))
+        raise ValueError(
+            f"Module '{module_import_str}' run_variant(...) does not support strategy kwargs: "
+            f"{unsupported_kwarg_str}"
+        )
+    run_kwarg_dict.update(extra_kwarg_dict)
 
     strategy_obj = run_variant_fn(**run_kwarg_dict)
     print(f"Ran strategy module: {module_import_str}")
@@ -172,6 +215,16 @@ def main() -> None:
         action="store_true",
         help="Fail the run on pandas PerformanceWarning.",
     )
+    parser.add_argument(
+        "--strategy-kwarg",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help=(
+            "Extra run_variant kwarg. Repeat as needed. Values are parsed as JSON "
+            "when possible, otherwise passed as strings."
+        ),
+    )
     arg_namespace = parser.parse_args()
 
     if arg_namespace.performance_warnings_as_errors:
@@ -183,6 +236,7 @@ def main() -> None:
         save_results_bool=not arg_namespace.no_save,
         output_dir_str=arg_namespace.output_dir,
         dry_run_bool=arg_namespace.dry_run,
+        strategy_kwarg_dict=_parse_run_kwarg_tuple(arg_namespace.strategy_kwarg),
     )
 
 
