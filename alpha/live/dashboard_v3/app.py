@@ -198,6 +198,19 @@ def create_app(
             as_of_clock_str=_now_clock_str(),
         )
 
+    @flask_app_obj.route("/fragments/pod-detail-header/<pod_id_str>")
+    def pod_detail_header_fragment_route_fn(pod_id_str: str):
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        summary_dict = provider_obj.get_summary_dict()
+        row_dict = get_pod_row_dict_by_id(summary_dict, pod_id_str)
+        if row_dict is None:
+            abort(404)
+        return render_template(
+            "_pod_detail_header.html",
+            row_dict=row_dict,
+            as_of_clock_str=_now_clock_str(),
+        )
+
     @flask_app_obj.route("/fragments/events-tail/<pod_id_str>")
     def events_tail_fragment_route_fn(pod_id_str: str):
         provider_obj = flask_app_obj.config["data_provider_obj"]

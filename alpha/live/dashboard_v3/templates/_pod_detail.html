@@ -1,39 +1,28 @@
-{# Expanded pod detail. Loaded lazily on row click, then polled every 5s
-   to refresh the timeline. Operator Tools surface in Phase 4. #}
+{# Expanded pod detail. Loaded lazily on row click. The static heavy parts
+   — stage timeline (with <details> toggles), Operator Tools — do NOT
+   auto-refresh; only the small header sub-fragment polls every 10 s and the
+   events tail polls every 5 s. The operator can click ↻ to re-fetch the
+   whole panel on demand. This keeps any opened <details> blocks open
+   between polls. #}
 {% set row_dict = detail_dict.pod_row_dict %}
-{% set sev_str = row_dict | effective_severity %}
 
-<div id="pod-detail-body-{{ row_dict.pod_id_str }}"
-     hx-get="/fragments/pod-detail/{{ row_dict.pod_id_str }}"
-     hx-trigger="every 5s"
-     hx-target="this"
-     hx-swap="outerHTML"
-     class="p-5 space-y-4">
+<div id="pod-detail-body-{{ row_dict.pod_id_str }}" class="p-5 space-y-4">
 
-  <header class="flex items-start justify-between gap-4">
-    <div class="min-w-0">
-      <div class="text-xs uppercase tracking-wide text-ink-500">Current Cycle Workbench</div>
-      <h2 class="text-lg font-bold">{{ row_dict.pod_id_str }}</h2>
-      <div class="text-xs text-ink-500">
-        {{ row_dict.mode_str }} · {{ row_dict.account_route_str or '—' }} ·
-        <code class="text-[11px]">{{ row_dict.strategy_import_str or '—' }}</code>
-      </div>
+  <div class="flex items-start gap-3">
+    <div class="flex-1 min-w-0">
+      {% include "_pod_detail_header.html" %}
     </div>
-    <div class="text-right text-sm">
-      <div class="font-semibold text-base">
-        {{ row_dict.required_action_dict.label_str
-           or row_dict.next_action_str or 'No action' }}
-      </div>
-      <div class="text-xs text-ink-500">
-        {{ row_dict.required_action_dict.detail_str
-           or row_dict.required_action_dict.reason_str
-           or row_dict.debug_summary_dict.primary_reason_str
-           or '—' }}
-      </div>
-    </div>
-  </header>
+    <button type="button"
+            title="Refresh this panel"
+            hx-get="/fragments/pod-detail/{{ row_dict.pod_id_str }}"
+            hx-target="#pod-detail-body-{{ row_dict.pod_id_str }}"
+            hx-swap="outerHTML"
+            class="text-xs text-ink-500 hover:text-ink-900 border border-ink-100 rounded-md px-2 py-1">
+      ↻ refresh
+    </button>
+  </div>
 
-  {# ── Stage timeline ─────────────────────────────────────────────────── #}
+  {# ── Stage timeline ─ STATIC after initial load (preserves <details>). ── #}
   <section class="space-y-2">
     <div class="text-xs uppercase tracking-wide text-ink-500">Today's Cycle</div>
     <ol class="space-y-2">
@@ -45,7 +34,7 @@
     </ol>
   </section>
 
-  {# ── Events tail ────────────────────────────────────────────────────── #}
+  {# ── Events tail (polled 5 s, isolated region). ─────────────────────── #}
   <section>
     <div class="flex items-baseline justify-between mb-2">
       <div class="text-xs uppercase tracking-wide text-ink-500">Events (last 50)</div>
@@ -63,6 +52,6 @@
     </div>
   </section>
 
-  {# ── Operator Tools — collapsed by default. #}
+  {# ── Operator Tools — collapsed by default; no polling. #}
   {% include "_operator_tools.html" %}
 </div>

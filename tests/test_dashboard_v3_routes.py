@@ -360,6 +360,34 @@ def test_pod_detail_fragment_renders_timeline(test_client_obj, provider_obj) -> 
     assert provider_obj.detail_call_log_list == ["dv2_caspersky_live"]
 
 
+def test_pod_detail_panel_does_not_auto_poll_itself(test_client_obj) -> None:
+    """Polish fix: the heavy panel (with <details> toggles) must NOT have
+    its own auto-refresh; only the small header fragment + events tail do."""
+    response_obj = test_client_obj.get("/fragments/pod-detail/dv2_caspersky_live")
+    response_text_str = response_obj.get_data(as_text=True)
+    # The outer body div should not carry an every-N-seconds polling trigger.
+    body_open_index_int = response_text_str.find('id="pod-detail-body-dv2_caspersky_live"')
+    body_close_index_int = response_text_str.find(">", body_open_index_int)
+    body_tag_str = response_text_str[body_open_index_int:body_close_index_int]
+    assert "every" not in body_tag_str, f"detail body still polls: {body_tag_str!r}"
+
+
+def test_pod_detail_header_fragment_polls_itself(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/fragments/pod-detail-header/dv2_caspersky_live")
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    # Header fragment carries its own short polling cadence.
+    assert "every 10s" in response_text_str
+    # Includes the pod id and a freshness clock label.
+    assert "dv2_caspersky_live" in response_text_str
+    assert "refreshed" in response_text_str
+
+
+def test_pod_detail_header_fragment_unknown_pod_returns_404(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/fragments/pod-detail-header/no_such_pod")
+    assert response_obj.status_code == 404
+
+
 def test_pod_detail_fragment_unknown_pod_returns_404(test_client_obj) -> None:
     response_obj = test_client_obj.get("/fragments/pod-detail/no_such_pod")
     assert response_obj.status_code == 404

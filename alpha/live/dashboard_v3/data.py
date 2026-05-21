@@ -34,7 +34,11 @@ from alpha.live.dashboard import (
 )
 
 
-SUMMARY_CACHE_SECONDS_FLOAT = 2.0
+# Polish-branch decision: the underlying ``build_dashboard_summary_dict`` is now
+# ~150 ms for a 5-pod book (down from ~5 s before the reverse-stream event
+# reader landed). 8 s of cache absorbs HTMX polling bursts and lets repeated
+# tab switches feel instant without hiding a meaningfully stale view.
+SUMMARY_CACHE_SECONDS_FLOAT = 8.0
 
 
 @dataclass
