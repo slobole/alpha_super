@@ -87,6 +87,22 @@ def _build_summary_dict() -> dict[str, Any]:
         "alert_dict_list": [],
         "alert_summary_dict": {},
         "mode_list": ["live", "paper", "incubation"],
+        "combined_book_dict": {
+            "environment_dict_list": [
+                {
+                    "mode_str": "live",
+                    "latest_market_date_str": "2026-05-21",
+                    "latest_equity_float": 28400.0,
+                    "daily_pnl_float": 184.0,
+                    "since_start_pnl_float": -420.0,
+                    "equity_point_dict_list": [
+                        {"market_date_str": "2026-05-19", "equity_float": 28220.0, "daily_pnl_float": 100.0},
+                        {"market_date_str": "2026-05-20", "equity_float": 28216.0, "daily_pnl_float": -4.0},
+                        {"market_date_str": "2026-05-21", "equity_float": 28400.0, "daily_pnl_float": 184.0},
+                    ],
+                },
+            ],
+        },
     }
 
 
@@ -119,7 +135,14 @@ class StubDataProvider:
             "eod_snapshot_dict": {"status_str": "pending"},
             "rehearsal_status_dict": {},
             "debug_story_dict": {},
-            "pod_pnl_dict": {"point_count_int": 0},
+            "pod_pnl_dict": {
+                "point_count_int": 3,
+                "equity_point_dict_list": [
+                    {"market_date_str": "2026-05-19", "equity_float": 14000.0, "daily_pnl_float": 50.0},
+                    {"market_date_str": "2026-05-20", "equity_float": 14100.0, "daily_pnl_float": 100.0},
+                    {"market_date_str": "2026-05-21", "equity_float": 14200.0, "daily_pnl_float": 100.0},
+                ],
+            },
             "latest_decision_plan_dict": {
                 "decision_plan_id_int": 142,
                 "decision_book_type_str": "full_target_weight_book",
@@ -297,3 +320,43 @@ def test_pod_row_carries_data_pod_id_attribute(test_client_obj) -> None:
     response_text_str = response_obj.get_data(as_text=True)
     assert 'data-pod-id="dv2_caspersky_live"' in response_text_str
     assert "new_event_badge.js" in response_text_str
+
+
+# ── Phase 3: equity chart fragment ────────────────────────────────────────
+
+
+def test_equity_chart_fragment_renders_svg(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/fragments/equity-chart/dv2_caspersky_live?window=all")
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    assert "<svg" in response_text_str
+    assert "viewBox" in response_text_str
+    # Window selector buttons should be present and "all" should be marked active.
+    assert "window=30d" in response_text_str
+    assert "window=90d" in response_text_str
+
+
+def test_equity_chart_fragment_unknown_pod_404s(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/fragments/equity-chart/no_such_pod")
+    assert response_obj.status_code == 404
+
+
+def test_equity_chart_fragment_clamps_unknown_window_to_all(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/fragments/equity-chart/dv2_caspersky_live?window=bogus")
+    assert response_obj.status_code == 200
+
+
+def test_live_page_embeds_combined_book_chart(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/live")
+    response_text_str = response_obj.get_data(as_text=True)
+    assert "combined book" in response_text_str.lower()
+    # Combined-book equity curve renders as an SVG path inside the mode page itself.
+    assert "<svg" in response_text_str
+
+
+def test_incubation_page_omits_combined_book_chart_when_no_data(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/incubation")
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    # Only the live mode has combined_book data in the stub — incubation should not show the section.
+    assert "combined book" not in response_text_str.lower()

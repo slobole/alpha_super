@@ -2,6 +2,29 @@
 {% block title %}{{ mode_label_str }}{% endblock %}
 {% block content %}
 
+{% if combined_book_chart_dict %}
+  <section class="mb-4 rounded-md border border-ink-100 bg-white shadow-sm p-4">
+    <header class="flex items-baseline justify-between mb-1">
+      <div class="text-xs uppercase tracking-wide text-ink-500">
+        {{ mode_label_str }} combined book
+      </div>
+      <div class="text-xs tabular-nums">
+        <span class="text-ink-500">daily</span>
+        <strong class="{% if (combined_book_summary_dict.daily_pnl_float or 0) >= 0 %}text-ok{% else %}text-bad{% endif %}">
+          {{ combined_book_summary_dict.daily_pnl_float | money }}
+        </strong>
+        <span class="text-ink-500 ml-3">since start</span>
+        <strong class="{% if (combined_book_summary_dict.since_start_pnl_float or 0) >= 0 %}text-ok{% else %}text-bad{% endif %}">
+          {{ combined_book_summary_dict.since_start_pnl_float | money }}
+        </strong>
+      </div>
+    </header>
+    {% set chart_dict = combined_book_chart_dict %}
+    {% set window_selector_pod_id_str = '' %}
+    {% include "_equity_chart.html" %}
+  </section>
+{% endif %}
+
 <section class="mb-6">
   <div class="flex items-baseline justify-between mb-2">
     <h1 class="text-2xl font-bold tracking-tight">{{ mode_label_str }} PODs</h1>

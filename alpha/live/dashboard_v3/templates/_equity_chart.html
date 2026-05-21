@@ -1,0 +1,73 @@
+{# Equity chart partial. Pure SVG, no JS dependencies.
+   Top region: equity curve + drawdown shading.
+   Bottom region: daily PnL bars (green positive, red negative). #}
+<figure class="equity-chart-figure">
+  {% if not chart_dict.has_curve_bool %}
+    <div class="text-xs text-ink-500 italic">
+      {% if chart_dict.point_count_int == 0 %}
+        No EOD samples yet. The curve appears after the first EOD snapshot is written.
+      {% else %}
+        One EOD sample at {{ chart_dict.latest_market_date_str or '—' }}
+        ({{ chart_dict.latest_equity_float | money }}) — need at least two for a curve.
+      {% endif %}
+    </div>
+  {% else %}
+    <div class="flex items-baseline justify-between text-xs text-ink-500 mb-1">
+      <span>{{ chart_dict.earliest_market_date_str or '—' }}</span>
+      <span class="tabular-nums">
+        latest <strong class="text-ink-900">{{ chart_dict.latest_equity_float | money }}</strong>
+        on {{ chart_dict.latest_market_date_str or '—' }}
+      </span>
+      <span>{{ chart_dict.point_count_int }} pts</span>
+    </div>
+    <svg viewBox="0 0 {{ chart_dict.width_int }} {{ chart_dict.height_int }}"
+         preserveAspectRatio="none"
+         class="w-full block"
+         style="height:{{ chart_dict.height_int }}px;"
+         role="img" aria-label="Equity curve">
+      {% if chart_dict.drawdown_d_str %}
+        <path d="{{ chart_dict.drawdown_d_str }}" fill="#fee2e2" opacity="0.6"></path>
+      {% endif %}
+      <path d="{{ chart_dict.path_d_str }}" fill="none" stroke="#15803d" stroke-width="1.5"></path>
+    </svg>
+    {% if chart_dict.pnl_bar_dict_list %}
+      <svg viewBox="0 0 {{ chart_dict.width_int }} {{ chart_dict.bar_height_int }}"
+           preserveAspectRatio="none"
+           class="w-full block mt-1"
+           style="height:{{ chart_dict.bar_height_int }}px;"
+           role="img" aria-label="Daily PnL bars">
+        <line x1="0" x2="{{ chart_dict.width_int }}"
+              y1="{{ chart_dict.bar_height_int / 2 }}" y2="{{ chart_dict.bar_height_int / 2 }}"
+              stroke="#e5e7eb" stroke-width="0.5"></line>
+        {% for bar_dict in chart_dict.pnl_bar_dict_list %}
+          <rect x="{{ bar_dict.x_float }}" y="{{ bar_dict.y_float }}"
+                width="{{ bar_dict.width_float }}" height="{{ bar_dict.height_float }}"
+                fill="{% if bar_dict.is_positive_bool %}#15803d{% else %}#b91c1c{% endif %}"></rect>
+        {% endfor %}
+      </svg>
+    {% endif %}
+    <div class="flex items-baseline justify-between text-[10px] text-ink-500 mt-1 tabular-nums">
+      <span>min {{ chart_dict.range_min_label_str }}</span>
+      <span>max {{ chart_dict.range_max_label_str }}</span>
+    </div>
+  {% endif %}
+
+  {% if window_selector_pod_id_str %}
+    <div class="flex gap-1 mt-2 text-[10px]">
+      {% for window_option_str in ['30d', '90d', 'all'] %}
+        <button type="button"
+                hx-get="/fragments/equity-chart/{{ window_selector_pod_id_str }}?window={{ window_option_str }}"
+                hx-target="closest .equity-chart-figure"
+                hx-swap="outerHTML"
+                class="px-2 py-0.5 rounded border
+                       {% if chart_dict.window_str == window_option_str %}
+                         bg-ink-900 text-white border-ink-900
+                       {% else %}
+                         bg-white text-ink-500 border-ink-100 hover:bg-ink-50
+                       {% endif %}">
+          {{ window_option_str }}
+        </button>
+      {% endfor %}
+    </div>
+  {% endif %}
+</figure>

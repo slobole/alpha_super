@@ -16,6 +16,10 @@ from typing import Any, Protocol
 
 from flask import Flask, Response, abort, redirect, render_template, url_for
 
+from alpha.live.dashboard_v3.charts import (
+    SUPPORTED_WINDOW_STR_LIST,
+    build_equity_chart_dict,
+)
 from alpha.live.dashboard_v3.data import (
     DashboardDataProvider,
     get_pod_row_dict_list_for_mode,
@@ -26,7 +30,7 @@ from alpha.live.dashboard_v3.schedule import build_schedule_entry_list
 from alpha.live.dashboard_v3.verdict import resolve_top_bar_verdict
 
 
-DASHBOARD_V3_VERSION_STR = "0.2.0-phase-2"
+DASHBOARD_V3_VERSION_STR = "0.3.0-phase-3"
 SUPPORTED_MODE_STR_LIST = ["live", "paper", "incubation"]
 MODE_LABEL_DICT = {"live": "Live", "paper": "Paper", "incubation": "Incubation"}
 
@@ -78,6 +82,16 @@ def create_app(data_provider_obj: DataProviderProtocol | None = None) -> Flask:
             if _is_attention_row_bool(row_dict)
         ]
         verdict_obj = resolve_top_bar_verdict(summary_dict)
+        combined_book_env_dict = _find_combined_book_environment_dict(summary_dict, mode_str)
+        combined_book_chart_dict = None
+        if combined_book_env_dict is not None:
+            chart_obj = build_equity_chart_dict(
+                combined_book_env_dict.get("equity_point_dict_list")
+                or combined_book_env_dict.get("carry_forward_equity_point_dict_list"),
+                window_str="all",
+            )
+            if chart_obj.point_count_int > 0:
+                combined_book_chart_dict = chart_obj.as_dict()
         return render_template(
             "mode_page.html",
             mode_str=mode_str,
@@ -86,6 +100,8 @@ def create_app(data_provider_obj: DataProviderProtocol | None = None) -> Flask:
             attention_row_list=attention_row_list,
             verdict_dict=verdict_obj.as_dict(),
             as_of_clock_str=_now_clock_str(),
+            combined_book_chart_dict=combined_book_chart_dict,
+            combined_book_summary_dict=combined_book_env_dict or {},
         )
 
     # ── HTMX fragments ───────────────────────────────────────────────────
@@ -144,6 +160,29 @@ def create_app(data_provider_obj: DataProviderProtocol | None = None) -> Flask:
             schedule_entry_dict_list=[entry_obj.as_dict() for entry_obj in schedule_entry_obj_list],
         )
 
+    @flask_app_obj.route("/fragments/equity-chart/<pod_id_str>")
+    def equity_chart_fragment_route_fn(pod_id_str: str):
+        from flask import request
+
+        window_str = request.args.get("window", "all")
+        if window_str not in SUPPORTED_WINDOW_STR_LIST:
+            window_str = "all"
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        try:
+            detail_dict = provider_obj.get_pod_detail_dict(pod_id_str)
+        except KeyError:
+            abort(404)
+        pnl_dict = detail_dict.get("pod_pnl_dict") or {}
+        chart_obj = build_equity_chart_dict(
+            pnl_dict.get("equity_point_dict_list"),
+            window_str=window_str,
+        )
+        return render_template(
+            "_equity_chart.html",
+            chart_dict=chart_obj.as_dict(),
+            window_selector_pod_id_str=pod_id_str,
+        )
+
     return flask_app_obj
 
 
@@ -158,3 +197,13 @@ def _is_attention_row_bool(row_dict: dict[str, Any]) -> bool:
     from alpha.live.dashboard_v3.data import _effective_severity_str
 
     return _effective_severity_str(row_dict) in ("red", "yellow")
+
+
+def _find_combined_book_environment_dict(
+    summary_dict: dict[str, Any], mode_str: str
+) -> dict[str, Any] | None:
+    combined_book_dict = summary_dict.get("combined_book_dict") or {}
+    for environment_dict in combined_book_dict.get("environment_dict_list") or []:
+        if environment_dict.get("mode_str") == mode_str:
+            return environment_dict
+    return None
