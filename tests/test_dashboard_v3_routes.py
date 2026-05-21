@@ -106,14 +106,81 @@ def _build_summary_dict() -> dict[str, Any]:
     }
 
 
+class StubTarget:
+    def __init__(self, pod_id_str: str, mode_str: str) -> None:
+        # Mirrors the shape used by alpha.live.dashboard.DashboardPodTarget enough
+        # for tests; production code only reads release_obj.pod_id_str/mode_str.
+        class _ReleaseShim:
+            pass
+        self.release_obj = _ReleaseShim()
+        self.release_obj.pod_id_str = pod_id_str
+        self.release_obj.mode_str = mode_str
+
+
 class StubDataProvider:
+    ACTION_TOKEN_STR = "stub-token"
+
     def __init__(self) -> None:
         self.summary_dict = _build_summary_dict()
         self.detail_call_log_list: list[str] = []
         self.event_call_log_list: list[str] = []
+        self.action_job_dict_list: list[dict[str, Any]] = []
+        self._next_job_seq_int = 0
 
     def get_summary_dict(self) -> dict[str, Any]:
         return self.summary_dict
+
+    def get_action_token_str(self) -> str:
+        return self.ACTION_TOKEN_STR
+
+    def get_target_for_pod(self, pod_id_str: str) -> StubTarget | None:
+        matching_row_dict = next(
+            (
+                row_dict
+                for row_dict in self.summary_dict["pod_row_dict_list"]
+                if row_dict["pod_id_str"] == pod_id_str
+            ),
+            None,
+        )
+        if matching_row_dict is None:
+            return None
+        return StubTarget(matching_row_dict["pod_id_str"], matching_row_dict["mode_str"])
+
+    def _next_job_id_str(self) -> str:
+        self._next_job_seq_int += 1
+        return f"stub-job-{self._next_job_seq_int:04d}"
+
+    def start_diff_job(self, target_obj: StubTarget) -> dict[str, Any]:
+        job_dict = {
+            "job_id_str": self._next_job_id_str(),
+            "pod_id_str": target_obj.release_obj.pod_id_str,
+            "mode_str": target_obj.release_obj.mode_str,
+            "action_name_str": "compare_reference",
+            "status_str": "queued",
+            "created_timestamp_str": "2026-05-21T16:00:00+00:00",
+        }
+        self.action_job_dict_list.append(job_dict)
+        return job_dict
+
+    def start_action_job(
+        self, action_name_str: str, target_obj: StubTarget
+    ) -> dict[str, Any]:
+        job_dict = {
+            "job_id_str": self._next_job_id_str(),
+            "pod_id_str": target_obj.release_obj.pod_id_str,
+            "mode_str": target_obj.release_obj.mode_str,
+            "action_name_str": action_name_str,
+            "status_str": "queued",
+            "created_timestamp_str": "2026-05-21T16:00:00+00:00",
+        }
+        self.action_job_dict_list.append(job_dict)
+        return job_dict
+
+    def get_job_dict(self, job_id_str: str) -> dict[str, Any] | None:
+        for job_dict in self.action_job_dict_list:
+            if job_dict["job_id_str"] == job_id_str:
+                return job_dict
+        return None
 
     def get_pod_detail_dict(self, pod_id_str: str) -> dict[str, Any]:
         self.detail_call_log_list.append(pod_id_str)
@@ -193,12 +260,25 @@ def fixture_provider_obj() -> StubDataProvider:
     return StubDataProvider()
 
 
+@pytest.fixture(name="journal_path_str")
+def fixture_journal_path_str(tmp_path) -> str:
+    return str(tmp_path / "operator_journal.jsonl")
+
+
 @pytest.fixture(name="test_client_obj")
-def fixture_test_client_obj(provider_obj: StubDataProvider):
-    flask_app_obj = create_app(data_provider_obj=provider_obj)
+def fixture_test_client_obj(provider_obj: StubDataProvider, journal_path_str: str):
+    flask_app_obj = create_app(data_provider_obj=provider_obj, journal_path_str=journal_path_str)
     flask_app_obj.config["TESTING"] = True
     with flask_app_obj.test_client() as test_client_obj:
         yield test_client_obj
+
+
+ACTION_HEADERS_DICT = {
+    "Host": "localhost",
+    "Origin": "http://localhost",
+    "Content-Type": "application/json",
+    "X-Alpha-Action-Token": StubDataProvider.ACTION_TOKEN_STR,
+}
 
 
 # ── basic plumbing ────────────────────────────────────────────────────────
@@ -360,3 +440,164 @@ def test_incubation_page_omits_combined_book_chart_when_no_data(test_client_obj)
     response_text_str = response_obj.get_data(as_text=True)
     # Only the live mode has combined_book data in the stub — incubation should not show the section.
     assert "combined book" not in response_text_str.lower()
+
+
+# ── Phase 4: operator tools, actions, journal ────────────────────────────
+
+
+def test_action_token_endpoint_returns_provider_token(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/api/action-token")
+    assert response_obj.status_code == 200
+    payload_dict = response_obj.get_json()
+    assert payload_dict["action_token_str"] == StubDataProvider.ACTION_TOKEN_STR
+
+
+def test_action_preview_fragment_renders_confirm_button(test_client_obj) -> None:
+    response_obj = test_client_obj.get(
+        "/fragments/action-preview/dv2_caspersky_live/submit_vplan"
+    )
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    assert "Confirm and run" in response_text_str
+    assert "submit_vplan" in response_text_str
+    # Confirm button POSTs to the matching action endpoint.
+    assert "/api/pods/dv2_caspersky_live/actions/submit_vplan" in response_text_str
+
+
+def test_action_preview_unknown_action_returns_404(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/fragments/action-preview/dv2_caspersky_live/no_such_action")
+    assert response_obj.status_code == 404
+
+
+def test_action_post_requires_origin_header(test_client_obj) -> None:
+    response_obj = test_client_obj.post(
+        "/api/pods/dv2_caspersky_live/actions/submit_vplan",
+        json={"confirmed_bool": True},
+        headers={
+            "Host": "localhost",
+            "X-Alpha-Action-Token": StubDataProvider.ACTION_TOKEN_STR,
+        },
+    )
+    assert response_obj.status_code == 403
+    payload_dict = response_obj.get_json()
+    assert payload_dict["error_code_str"] == "origin_rejected"
+
+
+def test_action_post_requires_action_token(test_client_obj) -> None:
+    headers_dict = dict(ACTION_HEADERS_DICT)
+    headers_dict["X-Alpha-Action-Token"] = "wrong-token"
+    response_obj = test_client_obj.post(
+        "/api/pods/dv2_caspersky_live/actions/submit_vplan",
+        data='{"confirmed_bool": true}',
+        headers=headers_dict,
+    )
+    assert response_obj.status_code == 403
+    assert response_obj.get_json()["error_code_str"] == "action_token_required"
+
+
+def test_action_post_requires_explicit_confirmation(test_client_obj) -> None:
+    response_obj = test_client_obj.post(
+        "/api/pods/dv2_caspersky_live/actions/submit_vplan",
+        data='{"confirmed_bool": false}',
+        headers=ACTION_HEADERS_DICT,
+    )
+    assert response_obj.status_code == 400
+    assert response_obj.get_json()["error_code_str"] == "confirmation_required"
+
+
+def test_action_post_starts_job_and_appends_journal_entry(
+    test_client_obj, provider_obj, journal_path_str
+) -> None:
+    response_obj = test_client_obj.post(
+        "/api/pods/dv2_caspersky_live/actions/submit_vplan",
+        data='{"confirmed_bool": true}',
+        headers=ACTION_HEADERS_DICT,
+    )
+    assert response_obj.status_code == 202
+    job_dict = response_obj.get_json()
+    assert job_dict["status_str"] == "queued"
+    assert job_dict["action_name_str"] == "submit_vplan"
+
+    # Provider sees a new job.
+    assert len(provider_obj.action_job_dict_list) == 1
+
+    # Journal file got one entry.
+    from pathlib import Path
+    journal_lines = Path(journal_path_str).read_text(encoding="utf-8").splitlines()
+    assert len(journal_lines) == 1
+    import json
+    entry_dict = json.loads(journal_lines[0])
+    assert entry_dict["action_name_str"] == "submit_vplan"
+    assert entry_dict["pod_id_str"] == "dv2_caspersky_live"
+    assert entry_dict["job_id_str"] == job_dict["job_id_str"]
+
+
+def test_action_post_for_unknown_pod_404s(test_client_obj) -> None:
+    response_obj = test_client_obj.post(
+        "/api/pods/no_such_pod/actions/submit_vplan",
+        data='{"confirmed_bool": true}',
+        headers=ACTION_HEADERS_DICT,
+    )
+    assert response_obj.status_code == 404
+    assert response_obj.get_json()["error_code_str"] == "unknown_pod"
+
+
+def test_diff_run_post_starts_diff_job(test_client_obj, provider_obj) -> None:
+    response_obj = test_client_obj.post(
+        "/api/pods/dv2_caspersky_live/diff/run",
+        data='{"confirmed_bool": true}',
+        headers=ACTION_HEADERS_DICT,
+    )
+    assert response_obj.status_code == 202
+    job_dict = response_obj.get_json()
+    assert job_dict["action_name_str"] == "compare_reference"
+
+
+def test_job_status_endpoint_returns_json_for_unknown_caller(
+    test_client_obj, provider_obj
+) -> None:
+    test_client_obj.post(
+        "/api/pods/dv2_caspersky_live/actions/submit_vplan",
+        data='{"confirmed_bool": true}',
+        headers=ACTION_HEADERS_DICT,
+    )
+    job_id_str = provider_obj.action_job_dict_list[0]["job_id_str"]
+    response_obj = test_client_obj.get(f"/api/jobs/{job_id_str}")
+    assert response_obj.status_code == 200
+    payload_dict = response_obj.get_json()
+    assert payload_dict["job_id_str"] == job_id_str
+
+
+def test_job_status_endpoint_returns_html_for_htmx_caller(
+    test_client_obj, provider_obj
+) -> None:
+    test_client_obj.post(
+        "/api/pods/dv2_caspersky_live/actions/submit_vplan",
+        data='{"confirmed_bool": true}',
+        headers=ACTION_HEADERS_DICT,
+    )
+    job_id_str = provider_obj.action_job_dict_list[0]["job_id_str"]
+    response_obj = test_client_obj.get(
+        f"/api/jobs/{job_id_str}",
+        headers={"HX-Request": "true"},
+    )
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    assert "job_id=" in response_text_str
+    assert "queued" in response_text_str
+
+
+def test_journal_page_lists_entries_after_action(
+    test_client_obj, journal_path_str
+) -> None:
+    test_client_obj.post(
+        "/api/pods/dv2_caspersky_live/actions/submit_vplan",
+        data='{"confirmed_bool": true}',
+        headers=ACTION_HEADERS_DICT,
+    )
+    response_obj = test_client_obj.get("/journal")
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    assert "Operator Journal" in response_text_str
+    assert "submit_vplan" in response_text_str
+    assert "dv2_caspersky_live" in response_text_str

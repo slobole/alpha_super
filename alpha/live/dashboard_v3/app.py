@@ -14,23 +14,42 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
-from flask import Flask, Response, abort, redirect, render_template, url_for
+from flask import Flask, Response, abort, jsonify, redirect, render_template, request, url_for
 
+from alpha.live.dashboard_v3.actions import (
+    SUPPORTED_ACTION_NAME_LIST,
+    validate_action_request,
+)
 from alpha.live.dashboard_v3.charts import (
     SUPPORTED_WINDOW_STR_LIST,
     build_equity_chart_dict,
 )
 from alpha.live.dashboard_v3.data import (
+    DashboardActionInFlightError,
     DashboardDataProvider,
+    get_pod_row_dict_by_id,
     get_pod_row_dict_list_for_mode,
 )
 from alpha.live.dashboard_v3.filters import FILTER_MAP_DICT
 from alpha.live.dashboard_v3.health import build_health_rollup
+from alpha.live.dashboard_v3.journal import (
+    DEFAULT_JOURNAL_PATH_STR,
+    append_journal_entry,
+    read_journal_entry_dict_list,
+)
 from alpha.live.dashboard_v3.schedule import build_schedule_entry_list
 from alpha.live.dashboard_v3.verdict import resolve_top_bar_verdict
 
 
-DASHBOARD_V3_VERSION_STR = "0.3.0-phase-3"
+DASHBOARD_V3_VERSION_STR = "0.4.0-phase-4"
+ALL_ACTION_NAME_LIST = ["compare_reference"] + list(SUPPORTED_ACTION_NAME_LIST)
+ACTION_LABEL_DICT = {
+    "compare_reference": "DIFF compare",
+    "tick": "Tick scheduler",
+    "submit_vplan": "Submit VPlan",
+    "post_execution_reconcile": "Post-execution reconcile",
+    "eod_snapshot": "EOD snapshot",
+}
 SUPPORTED_MODE_STR_LIST = ["live", "paper", "incubation"]
 MODE_LABEL_DICT = {"live": "Live", "paper": "Paper", "incubation": "Incubation"}
 
@@ -43,11 +62,16 @@ class DataProviderProtocol(Protocol):
     ) -> list[dict[str, Any]]: ...
 
 
-def create_app(data_provider_obj: DataProviderProtocol | None = None) -> Flask:
+def create_app(
+    data_provider_obj: DataProviderProtocol | None = None,
+    *,
+    journal_path_str: str = DEFAULT_JOURNAL_PATH_STR,
+) -> Flask:
     flask_app_obj = Flask(__name__)
     flask_app_obj.config["data_provider_obj"] = (
         data_provider_obj if data_provider_obj is not None else DashboardDataProvider()
     )
+    flask_app_obj.config["journal_path_str"] = journal_path_str
 
     for filter_name_str, filter_fn in FILTER_MAP_DICT.items():
         flask_app_obj.jinja_env.filters[filter_name_str] = filter_fn
@@ -162,8 +186,6 @@ def create_app(data_provider_obj: DataProviderProtocol | None = None) -> Flask:
 
     @flask_app_obj.route("/fragments/equity-chart/<pod_id_str>")
     def equity_chart_fragment_route_fn(pod_id_str: str):
-        from flask import request
-
         window_str = request.args.get("window", "all")
         if window_str not in SUPPORTED_WINDOW_STR_LIST:
             window_str = "all"
@@ -182,6 +204,121 @@ def create_app(data_provider_obj: DataProviderProtocol | None = None) -> Flask:
             chart_dict=chart_obj.as_dict(),
             window_selector_pod_id_str=pod_id_str,
         )
+
+    # ── Phase 4: action preview + execution + journal ─────────────────
+
+    @flask_app_obj.route("/api/action-token")
+    def action_token_route_fn():
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        return jsonify({"action_token_str": provider_obj.get_action_token_str()})
+
+    @flask_app_obj.route("/fragments/action-preview/<pod_id_str>/<action_name_str>")
+    def action_preview_fragment_route_fn(pod_id_str: str, action_name_str: str):
+        if action_name_str not in ALL_ACTION_NAME_LIST:
+            abort(404)
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        summary_dict = provider_obj.get_summary_dict()
+        row_dict = get_pod_row_dict_by_id(summary_dict, pod_id_str)
+        if row_dict is None:
+            abort(404)
+        preview_line_str_list = _build_action_preview_line_str_list(
+            action_name_str, row_dict
+        )
+        post_url_str = (
+            f"/api/pods/{pod_id_str}/diff/run"
+            if action_name_str == "compare_reference"
+            else f"/api/pods/{pod_id_str}/actions/{action_name_str}"
+        )
+        return render_template(
+            "_action_preview.html",
+            row_dict=row_dict,
+            action_name_str=action_name_str,
+            action_label_str=ACTION_LABEL_DICT.get(action_name_str, action_name_str),
+            preview_line_str_list=preview_line_str_list,
+            post_url_str=post_url_str,
+            action_token_str=provider_obj.get_action_token_str(),
+        )
+
+    @flask_app_obj.route("/fragments/action-preview-cancel/<pod_id_str>")
+    def action_preview_cancel_route_fn(pod_id_str: str):
+        return (
+            '<div class="text-xs text-ink-500 italic">'
+            "Click an action above to see a preview before confirming."
+            "</div>"
+        )
+
+    @flask_app_obj.route("/api/pods/<pod_id_str>/diff/run", methods=["POST"])
+    def diff_run_route_fn(pod_id_str: str):
+        return _handle_action_post(pod_id_str, "compare_reference")
+
+    @flask_app_obj.route(
+        "/api/pods/<pod_id_str>/actions/<action_name_str>", methods=["POST"]
+    )
+    def action_run_route_fn(pod_id_str: str, action_name_str: str):
+        return _handle_action_post(pod_id_str, action_name_str)
+
+    @flask_app_obj.route("/api/jobs/<job_id_str>")
+    def job_status_route_fn(job_id_str: str):
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        job_dict = provider_obj.get_job_dict(job_id_str)
+        if job_dict is None:
+            abort(404)
+        # Detect whether this is an HTMX poll (wants HTML) or a JSON consumer.
+        if request.headers.get("HX-Request"):
+            return render_template("_job_badge.html", job_dict=job_dict)
+        return jsonify(job_dict)
+
+    @flask_app_obj.route("/journal")
+    def journal_page_route_fn():
+        journal_entry_dict_list = read_journal_entry_dict_list(
+            journal_path_str=flask_app_obj.config["journal_path_str"],
+        )
+        return render_template(
+            "journal.html",
+            mode_str="journal",
+            mode_label_str="Operator Journal",
+            journal_entry_dict_list=journal_entry_dict_list,
+            verdict_dict=resolve_top_bar_verdict(
+                flask_app_obj.config["data_provider_obj"].get_summary_dict()
+            ).as_dict(),
+            as_of_clock_str=_now_clock_str(),
+        )
+
+    # ── helper that several action routes share ──────────────────────
+
+    def _handle_action_post(pod_id_str: str, action_name_str: str):
+        if action_name_str not in ALL_ACTION_NAME_LIST:
+            return _json_error_fn(400, "unsupported_action", f"Unknown action {action_name_str!r}.")
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        rejection_obj = validate_action_request(
+            request.headers,
+            request.get_json(silent=True),
+            provider_obj.get_action_token_str(),
+        )
+        if rejection_obj is not None:
+            status_int, error_code_str, message_str = rejection_obj
+            return _json_error_fn(status_int, error_code_str, message_str)
+        target_obj = provider_obj.get_target_for_pod(pod_id_str)
+        if target_obj is None:
+            return _json_error_fn(404, "unknown_pod", f"Unknown enabled pod_id_str {pod_id_str!r}.")
+        try:
+            if action_name_str == "compare_reference":
+                job_dict = provider_obj.start_diff_job(target_obj)
+            else:
+                job_dict = provider_obj.start_action_job(action_name_str, target_obj)
+        except DashboardActionInFlightError as exception_obj:
+            return _json_error_fn(409, "action_in_flight", str(exception_obj))
+        append_journal_entry(
+            pod_id_str=str(job_dict.get("pod_id_str") or pod_id_str),
+            mode_str=str(job_dict.get("mode_str") or "?"),
+            action_name_str=str(job_dict.get("action_name_str") or action_name_str),
+            job_id_str=str(job_dict.get("job_id_str") or ""),
+            initial_status_str=str(job_dict.get("status_str") or "queued"),
+            journal_path_str=flask_app_obj.config["journal_path_str"],
+        )
+        if request.headers.get("HX-Request"):
+            return render_template("_job_badge.html", job_dict=job_dict)
+        return jsonify(job_dict), 202
 
     return flask_app_obj
 
@@ -207,3 +344,42 @@ def _find_combined_book_environment_dict(
         if environment_dict.get("mode_str") == mode_str:
             return environment_dict
     return None
+
+
+def _build_action_preview_line_str_list(
+    action_name_str: str, row_dict: dict[str, Any]
+) -> list[str]:
+    if action_name_str == "compare_reference":
+        return [
+            "Re-runs the offline reference DIFF against the latest live state.",
+            "Read-only relative to live trading — no orders are sent.",
+        ]
+    if action_name_str == "tick":
+        return [
+            f"Manually advances the {row_dict.get('mode_str')}/{row_dict.get('pod_id_str')} pod scheduler.",
+            "May build a new DecisionPlan if the data gate allows.",
+        ]
+    if action_name_str == "submit_vplan":
+        latest_vplan_id = row_dict.get("latest_vplan_id_int") or "—"
+        return [
+            f"Submits VPlan #{latest_vplan_id} to the broker.",
+            "Sends real orders against the configured IBKR account if the pod is LIVE.",
+            "Reference orders only on PAPER/INCUBATION pods.",
+        ]
+    if action_name_str == "post_execution_reconcile":
+        return [
+            "Reconciles model positions against the broker after fills.",
+            "Updates residuals + writes a reconciliation record to sqlite.",
+        ]
+    if action_name_str == "eod_snapshot":
+        return [
+            "Writes the EOD equity/cash/position snapshot for this pod.",
+            "Used by the equity curve and combined-book rollup.",
+        ]
+    return [f"Action: {action_name_str}"]
+
+
+def _json_error_fn(status_int: int, error_code_str: str, message_str: str):
+    response_obj = jsonify({"error_code_str": error_code_str, "message_str": message_str})
+    response_obj.status_code = status_int
+    return response_obj

@@ -20,7 +20,9 @@ from typing import Any
 
 from alpha.live import dashboard as dashboard_module
 from alpha.live.dashboard import (
+    DashboardActionInFlightError,
     DashboardApp,
+    DashboardPodTarget,
     DEFAULT_CONFIG_PATH_STR,
     DEFAULT_EVENT_LOG_PATH_STR,
     DEFAULT_EVENT_LIMIT_INT,
@@ -90,6 +92,43 @@ class DashboardDataProvider:
 
     def get_action_token_str(self) -> str:
         return self.app_obj().action_token_str
+
+    def get_target_for_pod(self, pod_id_str: str) -> DashboardPodTarget | None:
+        return self.app_obj().get_target_for_pod(pod_id_str)
+
+    def start_diff_job(self, target_obj: DashboardPodTarget) -> dict[str, Any]:
+        app_obj = self.app_obj()
+        assert app_obj.diff_job_manager_obj is not None
+        job_obj = app_obj.diff_job_manager_obj.start_job(
+            pod_target_obj=target_obj,
+            releases_root_path_str=app_obj.releases_root_path_str,
+            results_root_path_str=app_obj.results_root_path_str,
+        )
+        return job_obj.to_dict()
+
+    def start_action_job(
+        self, action_name_str: str, target_obj: DashboardPodTarget
+    ) -> dict[str, Any]:
+        app_obj = self.app_obj()
+        assert app_obj.action_job_manager_obj is not None
+        job_obj = app_obj.action_job_manager_obj.start_job(
+            action_name_str=action_name_str,
+            pod_target_obj=target_obj,
+            releases_root_path_str=app_obj.releases_root_path_str,
+            results_root_path_str=app_obj.results_root_path_str,
+            event_log_path_str=app_obj.event_log_path_str,
+        )
+        return job_obj.to_dict()
+
+    def get_job_dict(self, job_id_str: str) -> dict[str, Any] | None:
+        app_obj = self.app_obj()
+        if app_obj.diff_job_manager_obj is not None:
+            job_dict = app_obj.diff_job_manager_obj.get_job_dict(job_id_str)
+            if job_dict is not None:
+                return job_dict
+        if app_obj.action_job_manager_obj is not None:
+            return app_obj.action_job_manager_obj.get_job_dict(job_id_str)
+        return None
 
 
 def get_pod_row_dict_list_for_mode(

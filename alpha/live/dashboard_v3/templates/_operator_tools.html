@@ -1,0 +1,37 @@
+{# Operator Tools panel — collapsed by default. Action buttons GET an
+   action-preview fragment; preview's Confirm button POSTs through HTMX
+   with the action token, and the response swaps in a polled job badge. #}
+<details class="operator-tools border-t border-ink-100 pt-3 group">
+  <summary class="cursor-pointer text-xs uppercase tracking-wide text-ink-500 select-none flex items-center gap-2">
+    Operator Tools
+    <span class="group-open:hidden text-ink-300">▸</span>
+    <span class="hidden group-open:inline text-ink-300">▾</span>
+    <span class="ml-auto text-[10px] text-ink-300 italic">actions are real and irreversible</span>
+  </summary>
+
+  <div class="mt-3 grid gap-2 sm:grid-cols-3 lg:grid-cols-5 text-sm">
+    {% set action_button_list = [
+      ('compare_reference', 'Run DIFF'),
+      ('tick', 'Tick'),
+      ('submit_vplan', 'Submit VPlan'),
+      ('post_execution_reconcile', 'Reconcile'),
+      ('eod_snapshot', 'EOD Snapshot'),
+    ] %}
+    {% for action_name_str, action_label_str in action_button_list %}
+      <button type="button"
+              hx-get="/fragments/action-preview/{{ row_dict.pod_id_str }}/{{ action_name_str }}"
+              hx-target="#operator-tools-preview-{{ row_dict.pod_id_str }}"
+              hx-swap="innerHTML"
+              class="px-3 py-2 rounded-md border border-ink-100 bg-white hover:bg-ink-50 text-left">
+        <div class="font-semibold">{{ action_label_str }}</div>
+        <div class="text-[11px] text-ink-500">{{ action_name_str }}</div>
+      </button>
+    {% endfor %}
+  </div>
+
+  <div id="operator-tools-preview-{{ row_dict.pod_id_str }}" class="mt-3">
+    <div class="text-xs text-ink-500 italic">
+      Click an action above to see a preview before confirming.
+    </div>
+  </div>
+</details>

@@ -1,0 +1,36 @@
+{# Preview shown after the operator clicks an action button. The Confirm
+   button is the ONLY thing that actually triggers a POST. Cancel just
+   replaces the preview region with placeholder text. #}
+<div class="rounded-md border border-warn/40 bg-warn-soft/40 p-3 text-sm space-y-2">
+  <div class="font-semibold">
+    Confirm: <span class="font-mono">{{ action_name_str }}</span>
+    for {{ row_dict.mode_str }}/<span class="font-mono">{{ row_dict.pod_id_str }}</span>
+  </div>
+  <ul class="text-xs text-ink-700 space-y-0.5 list-disc list-inside">
+    {% for preview_line_str in preview_line_str_list %}
+      <li>{{ preview_line_str }}</li>
+    {% endfor %}
+  </ul>
+  <div class="flex items-center gap-2 pt-1">
+    <button type="button"
+            hx-post="{{ post_url_str }}"
+            hx-headers='{"X-Alpha-Action-Token": "{{ action_token_str }}", "Content-Type": "application/json"}'
+            hx-vals='{"confirmed_bool": true}'
+            hx-ext="json-enc"
+            hx-target="#operator-tools-preview-{{ row_dict.pod_id_str }}"
+            hx-swap="innerHTML"
+            class="px-3 py-1.5 rounded-md bg-bad text-white text-sm font-semibold">
+      Confirm and run
+    </button>
+    <button type="button"
+            hx-get="/fragments/action-preview-cancel/{{ row_dict.pod_id_str }}"
+            hx-target="#operator-tools-preview-{{ row_dict.pod_id_str }}"
+            hx-swap="innerHTML"
+            class="px-3 py-1.5 rounded-md border border-ink-100 bg-white text-sm">
+      Cancel
+    </button>
+  </div>
+  <div class="text-[10px] text-ink-500 italic">
+    Submits a server-side job; the dashboard will show its status badge after Confirm.
+  </div>
+</div>

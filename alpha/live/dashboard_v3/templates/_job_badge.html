@@ -1,0 +1,26 @@
+{# Job status badge. Polls itself while the job is queued/running, then
+   stops polling once it reaches a terminal state. #}
+{% set job_status_str = job_dict.status_str or 'queued' %}
+{% set is_terminal_bool = job_status_str in ('succeeded', 'failed') %}
+<div id="job-badge-{{ job_dict.job_id_str }}"
+     {% if not is_terminal_bool %}
+       hx-get="/api/jobs/{{ job_dict.job_id_str }}"
+       hx-trigger="every 1500ms"
+       hx-target="this"
+       hx-swap="outerHTML"
+     {% endif %}
+     class="rounded-md border p-3 text-sm flex flex-col gap-1
+            {% if job_status_str == 'succeeded' %}border-ok/40 bg-ok-soft text-ok
+            {% elif job_status_str == 'failed' %}border-bad/40 bg-bad-soft text-bad
+            {% else %}border-warn/40 bg-warn-soft text-warn{% endif %}">
+  <div class="flex items-baseline justify-between gap-2">
+    <strong>{{ job_dict.action_name_str or 'job' }}</strong>
+    <span class="font-mono text-xs">{{ job_status_str }}</span>
+  </div>
+  <div class="text-[11px] opacity-80 font-mono break-all">
+    job_id={{ job_dict.job_id_str }}
+  </div>
+  {% if job_dict.error_str %}
+    <pre class="text-[11px] whitespace-pre-wrap mt-1">{{ job_dict.error_str }}</pre>
+  {% endif %}
+</div>
