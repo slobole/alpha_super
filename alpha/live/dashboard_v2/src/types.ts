@@ -35,6 +35,7 @@ export interface DebugSummary {
 export interface RequiredAction {
   label_str?: string;
   severity_str?: Severity;
+  reason_str?: string;
   detail_str?: string;
   inspect_command_name_str?: string;
   context_item_dict_list?: Array<Record<string, string>>;
@@ -56,6 +57,9 @@ export interface DebugTimelineEvent {
   severity_str?: Severity;
   timestamp_str?: string | null;
   detail_str?: string;
+  decision_plan_id_int?: number | null;
+  vplan_id_int?: number | null;
+  cycle_role_str?: string | null;
 }
 
 export interface DebugStory {
@@ -146,19 +150,29 @@ export interface ExecutionReport {
 }
 
 export interface DecisionPlanDetail {
+  decision_plan_id_int?: number | null;
   status_str?: string;
   decision_book_type_str?: string;
+  signal_timestamp_str?: string | null;
   submission_timestamp_str?: string | null;
   target_execution_timestamp_str?: string | null;
+  execution_policy_str?: string | null;
+  target_weight_map_dict?: Record<string, number | string | null>;
   display_target_weight_map_dict?: Record<string, number | string | null>;
   entry_target_weight_map_dict?: Record<string, number | string | null>;
   full_target_weight_map_dict?: Record<string, number | string | null>;
   exit_asset_list?: string[];
   entry_priority_list?: string[];
+  decision_base_position_map_dict?: Record<string, number | string | null>;
+  snapshot_metadata_dict?: Record<string, unknown>;
+  strategy_state_dict?: Record<string, unknown>;
+  latest_vplan_id_int?: number | null;
+  latest_vplan_status_str?: string | null;
 }
 
 export interface VPlanDetail {
   vplan_id_int?: number | null;
+  decision_plan_id_int?: number | null;
   status_str?: string;
   pod_id_str?: string;
   account_route_str?: string;
@@ -275,11 +289,17 @@ export interface PodRow {
   latest_pod_state_source_str?: string | null;
   latest_pod_state_stage_str?: string | null;
   latest_broker_snapshot_timestamp_str?: string | null;
+  latest_decision_plan_id_int?: number | null;
+  latest_decision_norgate_profile_str?: string | null;
+  latest_decision_norgate_snapshot_date_str?: string | null;
   latest_decision_plan_status_str?: string | null;
   latest_decision_plan_submission_timestamp_str?: string | null;
   latest_decision_plan_target_execution_timestamp_str?: string | null;
   latest_vplan_status_str?: string | null;
   latest_vplan_id_int?: number | null;
+  latest_vplan_decision_plan_id_int?: number | null;
+  latest_vplan_is_for_latest_decision_bool?: boolean | null;
+  latest_vplan_cycle_role_str?: string | null;
   latest_vplan_submission_timestamp_str?: string | null;
   latest_vplan_target_execution_timestamp_str?: string | null;
   latest_submit_ack_status_str?: string | null;

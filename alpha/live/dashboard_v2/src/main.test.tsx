@@ -357,6 +357,135 @@ describe("Dashboard V2 operator cockpit", () => {
     expect(within(detail).getByText("Full targets")).toBeInTheDocument();
   });
 
+  it("separates a current planned DecisionPlan from previous execution evidence", async () => {
+    const mixedRow: PodRow = {
+      ...livePodRow,
+      next_action_str: "wait",
+      reason_code_str: "waiting_for_submission_window",
+      latest_decision_plan_id_int: 2,
+      latest_decision_plan_status_str: "planned",
+      latest_vplan_id_int: 1,
+      latest_vplan_decision_plan_id_int: 1,
+      latest_vplan_is_for_latest_decision_bool: false,
+      latest_vplan_cycle_role_str: "previous",
+      latest_vplan_status_str: "completed",
+      latest_reconciliation_status_str: "passed",
+      required_action_dict: {
+        label_str: "Wait submission window",
+        severity_str: "yellow",
+        detail_str: "waiting_for_submission_window"
+      },
+      debug_summary_dict: {
+        severity_str: "yellow",
+        verdict_label_str: "Wait submission window",
+        primary_reason_str: "waiting_for_submission_window"
+      },
+      lifecycle_step_dict_list: [
+        { step_key_str: "db", label_str: "DB", status_str: "ok", severity_str: "green" },
+        { step_key_str: "decision", label_str: "Decision", status_str: "planned", severity_str: "yellow" },
+        { step_key_str: "vplan", label_str: "VPlan", status_str: "completed", severity_str: "green", detail_str: "previous cycle #1" },
+        { step_key_str: "ack", label_str: "ACK", status_str: "complete", severity_str: "green", detail_str: "previous cycle, rows=10" },
+        { step_key_str: "fill", label_str: "Fill", status_str: "recorded", severity_str: "green", detail_str: "previous cycle, fill_records=16" },
+        { step_key_str: "reconcile", label_str: "Reconcile", status_str: "passed", severity_str: "green" },
+        { step_key_str: "eod", label_str: "EOD", status_str: "waiting", severity_str: "gray" }
+      ]
+    };
+    const mixedSummary: DashboardSummary = {
+      ...summaryPayload,
+      pod_row_dict_list: [mixedRow],
+      alert_summary_dict: { total_count_int: 1, red_count_int: 0, yellow_count_int: 1, gray_count_int: 0 },
+      combined_book_dict: { environment_dict_list: [] }
+    };
+    const mixedDetail: PodDetail = {
+      ...detailPayload,
+      pod_row_dict: mixedRow,
+      required_action_dict: mixedRow.required_action_dict,
+      lifecycle_step_dict_list: mixedRow.lifecycle_step_dict_list,
+      latest_decision_plan_dict: {
+        decision_plan_id_int: 2,
+        status_str: "planned",
+        signal_timestamp_str: "2026-05-20T20:00:00Z",
+        submission_timestamp_str: "2026-05-21T13:30:00Z",
+        target_execution_timestamp_str: "2026-05-21T13:30:00Z",
+        execution_policy_str: "next_open_market",
+        decision_book_type_str: "incremental_entry_exit_book",
+        exit_asset_list: ["CDNS", "GL"],
+        entry_target_weight_map_dict: { NEE: 0.1, VRT: 0.1 },
+        display_target_weight_map_dict: { NEE: 0.1, VRT: 0.1 },
+        decision_base_position_map_dict: { CDNS: 28, GL: 63 },
+        snapshot_metadata_dict: {
+          norgate_data_profile_str: "norgate_eod_sp500_pit",
+          norgate_snapshot_date_str: "2026-05-20"
+        }
+      },
+      latest_vplan_dict: {
+        ...detailPayload.latest_vplan_dict,
+        vplan_id_int: 1,
+        decision_plan_id_int: 1,
+        status_str: "completed"
+      },
+      debug_story_dict: {
+        verdict_dict: {
+          severity_str: "yellow",
+          verdict_label_str: "Wait submission window",
+          primary_reason_str: "waiting_for_submission_window"
+        },
+        timeline_event_dict_list: [
+          {
+            source_str: "DecisionPlan",
+            label_str: "DecisionPlan",
+            status_str: "planned",
+            severity_str: "yellow",
+            timestamp_str: "2026-05-20T20:00:00Z",
+            detail_str: "execute=2026-05-21T13:30:00Z",
+            decision_plan_id_int: 2,
+            cycle_role_str: "current"
+          },
+          {
+            source_str: "VPlan",
+            label_str: "VPlan",
+            status_str: "completed",
+            severity_str: "green",
+            timestamp_str: "2026-05-20T13:30:00Z",
+            detail_str: "vplan_id=1",
+            decision_plan_id_int: 1,
+            vplan_id_int: 1,
+            cycle_role_str: "previous"
+          },
+          {
+            source_str: "Norgate",
+            label_str: "Sync",
+            status_str: "ready",
+            severity_str: "green",
+            timestamp_str: null,
+            detail_str: "<script>alert(1)</script>",
+            decision_plan_id_int: null,
+            vplan_id_int: null,
+            cycle_role_str: null
+          }
+        ]
+      }
+    };
+    installFetchMock(mixedSummary, mixedDetail);
+
+    const detail = await openInlineDetail();
+
+    expect(within(detail).getByText("Current planned cycle")).toBeInTheDocument();
+    expect(within(detail).getByText("Wait submission window")).toBeInTheDocument();
+    expect(within(detail).getAllByText("CDNS").length).toBeGreaterThan(0);
+    expect(within(detail).getAllByText("GL").length).toBeGreaterThan(0);
+    expect(within(detail).getAllByText("NEE").length).toBeGreaterThan(0);
+    expect(within(detail).getAllByText("VRT").length).toBeGreaterThan(0);
+    expect(within(detail).getByText(/Previous execution cycle/)).toBeInTheDocument();
+    expect(within(detail).getAllByText(/prev completed/).length).toBeGreaterThan(0);
+
+    fireEvent.click(within(detail).getByRole("button", { name: "Operator Log" }));
+    expect(within(detail).getByLabelText("Operator Log")).toBeInTheDocument();
+    expect(within(detail).getByText("plan=2 / current")).toBeInTheDocument();
+    expect(within(detail).getByText("plan=1 / vplan=1 / previous")).toBeInTheDocument();
+    expect(within(detail).getByText("<script>alert(1)</script>")).toBeInTheDocument();
+  });
+
   it("handles empty, single-point, and multi-point equity states", async () => {
     installFetchMock(summaryPayload, { ...detailPayload, pod_pnl_dict: { status_str: "unavailable", equity_point_dict_list: [] } });
     const emptyDetail = await openInlineDetail();

@@ -613,10 +613,16 @@ def build_pod_row_dict(
         "db_override_bool": pod_target_obj.db_override_bool,
         "db_status_str": "ok" if db_path_obj.exists() else "missing",
         "latest_decision_plan_status_str": None,
+        "latest_decision_plan_id_int": None,
+        "latest_decision_norgate_profile_str": None,
+        "latest_decision_norgate_snapshot_date_str": None,
         "latest_decision_plan_submission_timestamp_str": None,
         "latest_decision_plan_target_execution_timestamp_str": None,
         "latest_vplan_status_str": None,
         "latest_vplan_id_int": None,
+        "latest_vplan_decision_plan_id_int": None,
+        "latest_vplan_is_for_latest_decision_bool": None,
+        "latest_vplan_cycle_role_str": "none",
         "latest_vplan_submission_timestamp_str": None,
         "latest_vplan_target_execution_timestamp_str": None,
         "latest_submit_ack_status_str": None,
@@ -733,6 +739,9 @@ def build_pod_row_dict(
         return _finalize_operator_fields_dict(base_row_dict)
 
     if latest_decision_plan_row_dict is not None:
+        base_row_dict["latest_decision_plan_id_int"] = latest_decision_plan_row_dict.get(
+            "decision_plan_id_int"
+        )
         base_row_dict["latest_decision_plan_status_str"] = latest_decision_plan_row_dict.get(
             "status_str"
         )
@@ -744,6 +753,14 @@ def build_pod_row_dict(
         )
         metadata_dict = _json_map_dict(
             latest_decision_plan_row_dict.get("snapshot_metadata_json_str")
+        )
+        base_row_dict["latest_decision_norgate_profile_str"] = (
+            metadata_dict.get("norgate_data_profile_str")
+            or metadata_dict.get("data_profile_str")
+        )
+        base_row_dict["latest_decision_norgate_snapshot_date_str"] = (
+            metadata_dict.get("norgate_snapshot_date_str")
+            or metadata_dict.get("snapshot_date_str")
         )
         base_row_dict["strategy_family_str"] = metadata_dict.get("strategy_family_str")
         base_row_dict["dtb3_download_status_str"] = metadata_dict.get(
@@ -760,6 +777,9 @@ def build_pod_row_dict(
     if latest_vplan_row_dict is not None:
         base_row_dict["latest_vplan_status_str"] = latest_vplan_row_dict.get("status_str")
         base_row_dict["latest_vplan_id_int"] = latest_vplan_row_dict.get("vplan_id_int")
+        base_row_dict["latest_vplan_decision_plan_id_int"] = latest_vplan_row_dict.get(
+            "decision_plan_id_int"
+        )
         base_row_dict["latest_vplan_submission_timestamp_str"] = latest_vplan_row_dict.get(
             "submission_timestamp_str"
         )
@@ -2375,6 +2395,10 @@ def _build_rehearsal_status_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
 
 
 def _finalize_operator_fields_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
+    row_dict["latest_vplan_is_for_latest_decision_bool"] = (
+        _latest_vplan_is_for_latest_decision_bool(row_dict)
+    )
+    row_dict["latest_vplan_cycle_role_str"] = _latest_vplan_cycle_role_str(row_dict)
     row_dict["rehearsal_status_dict"] = _build_rehearsal_status_dict(row_dict)
     row_dict["required_action_dict"] = _build_required_action_dict(row_dict)
     row_dict["lifecycle_step_dict_list"] = _build_lifecycle_step_dict_list(row_dict)
@@ -2386,6 +2410,27 @@ def _finalize_operator_fields_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
 def _finalize_pod_detail_debug_story_dict(detail_dict: dict[str, Any]) -> dict[str, Any]:
     detail_dict["debug_story_dict"] = _build_debug_story_dict(detail_dict)
     return detail_dict
+
+
+def _latest_vplan_is_for_latest_decision_bool(row_dict: dict[str, Any]) -> bool | None:
+    if row_dict.get("latest_vplan_id_int") is None:
+        return None
+    latest_decision_plan_id_obj = row_dict.get("latest_decision_plan_id_int")
+    latest_vplan_decision_plan_id_obj = row_dict.get("latest_vplan_decision_plan_id_int")
+    if latest_decision_plan_id_obj is None or latest_vplan_decision_plan_id_obj is None:
+        return None
+    return int(latest_decision_plan_id_obj) == int(latest_vplan_decision_plan_id_obj)
+
+
+def _latest_vplan_cycle_role_str(row_dict: dict[str, Any]) -> str:
+    if row_dict.get("latest_vplan_id_int") is None:
+        return "none"
+    match_bool = _latest_vplan_is_for_latest_decision_bool(row_dict)
+    if match_bool is False:
+        return "previous"
+    if match_bool is True:
+        return "current"
+    return "unknown"
 
 
 def _build_required_action_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
@@ -2424,8 +2469,22 @@ def _build_required_action_base_dict(row_dict: dict[str, Any]) -> dict[str, Any]
     if row_dict.get("latest_decision_plan_status_str") == "blocked":
         return _required_action_dict("Manual review", "red", "DecisionPlan is blocked.", "status")
     if row_dict.get("latest_vplan_status_str") == "blocked":
+        if row_dict.get("latest_vplan_cycle_role_str") == "previous":
+            return _required_action_dict(
+                "Review previous VPlan",
+                "red",
+                "Previous execution cycle VPlan is blocked.",
+                "show_vplan",
+            )
         return _required_action_dict("Manual review", "red", "VPlan is blocked.", "show_vplan")
     if int(row_dict.get("missing_ack_count_int") or 0) > 0:
+        if row_dict.get("latest_vplan_cycle_role_str") == "previous":
+            return _required_action_dict(
+                "Review previous ACK",
+                "red",
+                f"Previous execution cycle missing ACK count: {int(row_dict.get('missing_ack_count_int') or 0)}.",
+                "show_vplan",
+            )
         return _required_action_dict(
             "Review broker ACK",
             "red",
@@ -2715,6 +2774,8 @@ def _build_vplan_step_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
     detail_str = ""
     if row_dict.get("latest_vplan_id_int") is not None:
         detail_str = f"#{row_dict['latest_vplan_id_int']}"
+        if row_dict.get("latest_vplan_cycle_role_str") == "previous":
+            detail_str = f"previous cycle {detail_str}"
     return _lifecycle_step_dict("vplan", "VPlan", status_str, severity_str, detail_str)
 
 
@@ -2732,12 +2793,15 @@ def _build_ack_step_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
             f"missing={missing_ack_count_int}",
         )
     if status_str == "complete":
+        detail_str = f"rows={int(row_dict.get('broker_ack_count_int') or 0)}"
+        if row_dict.get("latest_vplan_cycle_role_str") == "previous":
+            detail_str = f"previous cycle, {detail_str}"
         return _lifecycle_step_dict(
             "ack",
             "ACK",
             status_str,
             "green",
-            f"rows={int(row_dict.get('broker_ack_count_int') or 0)}",
+            detail_str,
         )
     severity_str = "yellow" if row_dict.get("latest_vplan_status_str") in ("submitted", "submitting") else "gray"
     return _lifecycle_step_dict("ack", "ACK", status_str, severity_str, "Awaiting ACK evidence.")
@@ -2748,7 +2812,10 @@ def _build_fill_step_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
         return _lifecycle_step_dict("fill", "Fill", "none", "gray", "No VPlan.")
     fill_count_int = int(row_dict.get("fill_count_int") or 0)
     if fill_count_int > 0:
-        return _lifecycle_step_dict("fill", "Fill", "recorded", "green", f"fills={fill_count_int}")
+        detail_str = f"fill_records={fill_count_int}"
+        if row_dict.get("latest_vplan_cycle_role_str") == "previous":
+            detail_str = f"previous cycle, {detail_str}"
+        return _lifecycle_step_dict("fill", "Fill", "recorded", "green", detail_str)
     severity_str = "yellow" if row_dict.get("latest_vplan_status_str") in ("submitted", "submitting") else "gray"
     return _lifecycle_step_dict("fill", "Fill", "none", severity_str, "No fills recorded.")
 
@@ -2825,6 +2892,7 @@ def _status_to_severity_str(
 def _build_data_freshness_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
     eod_snapshot_dict = row_dict.get("eod_snapshot_dict") or _empty_eod_snapshot_dict()
     norgate_snapshot_status_dict = row_dict.get("norgate_snapshot_status_dict") or {}
+    norgate_item_severity_str = str(norgate_snapshot_status_dict.get("severity_str") or "gray")
     norgate_detail_fragment_list = [
         f"source={norgate_snapshot_status_dict.get('data_source_mode_str')}",
         f"status={norgate_snapshot_status_dict.get('status_str')}",
@@ -2839,12 +2907,24 @@ def _build_data_freshness_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
         )
     if norgate_snapshot_status_dict.get("last_error_str"):
         norgate_detail_fragment_list.append(f"error={norgate_snapshot_status_dict.get('last_error_str')}")
+    if _norgate_ready_for_existing_trade_intent_bool(row_dict):
+        norgate_item_severity_str = "green"
+        snapshot_date_str = str(norgate_snapshot_status_dict.get("snapshot_date_str") or "-")
+        norgate_detail_fragment_list = [
+            f"Current plan data: ready, snapshot date {snapshot_date_str}",
+            (
+                "Current session snapshot: not due yet"
+                if norgate_snapshot_status_dict.get("build_gate_reason_code_str")
+                == "snapshot_not_ready_for_session"
+                else "New-build data gate is not needed for the active planned/executed cycle"
+            ),
+        ]
     item_dict_list = [
         _freshness_item_dict(
             "Norgate",
             norgate_snapshot_status_dict.get("snapshot_date_str")
             or norgate_snapshot_status_dict.get("last_sync_utc_str"),
-            str(norgate_snapshot_status_dict.get("severity_str") or "gray"),
+            norgate_item_severity_str,
             ", ".join(norgate_detail_fragment_list),
         ),
         _freshness_item_dict(
@@ -2921,6 +3001,37 @@ def _build_data_freshness_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
         "dtb3_used_cache_bool": row_dict.get("dtb3_used_cache_bool"),
         "item_dict_list": item_dict_list,
     }
+
+
+def _norgate_ready_for_existing_trade_intent_bool(row_dict: dict[str, Any]) -> bool:
+    norgate_snapshot_status_dict = row_dict.get("norgate_snapshot_status_dict") or {}
+    if str(norgate_snapshot_status_dict.get("status_str") or "") != "ready":
+        return False
+    if norgate_snapshot_status_dict.get("last_error_str"):
+        return False
+    build_gate_reason_code_str = str(
+        norgate_snapshot_status_dict.get("build_gate_reason_code_str") or ""
+    )
+    if build_gate_reason_code_str and build_gate_reason_code_str != "snapshot_not_ready_for_session":
+        return False
+    if str(norgate_snapshot_status_dict.get("severity_str") or "green") == "red":
+        return False
+    profile_str = str(norgate_snapshot_status_dict.get("profile_str") or "")
+    snapshot_date_str = str(norgate_snapshot_status_dict.get("snapshot_date_str") or "")
+    decision_profile_str = str(row_dict.get("latest_decision_norgate_profile_str") or "")
+    decision_snapshot_date_str = str(
+        row_dict.get("latest_decision_norgate_snapshot_date_str") or ""
+    )
+    if not decision_profile_str or not decision_snapshot_date_str:
+        return False
+    if profile_str != decision_profile_str or snapshot_date_str != decision_snapshot_date_str:
+        return False
+    decision_status_str = str(row_dict.get("latest_decision_plan_status_str") or "")
+    if decision_status_str not in {"planned", "vplan_ready", "submitted", "completed"}:
+        return False
+    if str(row_dict.get("next_action_str") or "") in {"build_decision_plan", "expire_stale"}:
+        return False
+    return True
 
 
 def _post_sync_data_load_failure_event_dict(
@@ -3072,6 +3183,8 @@ def _freshness_alert_dict(
     severity_str = str(item_dict.get("severity_str") or "gray")
     value_obj = item_dict.get("value_str")
     if label_str == "DIFF artifact":
+        return None
+    if label_str == "Norgate" and _norgate_ready_for_existing_trade_intent_bool(row_dict):
         return None
     if severity_str in {"red", "yellow"}:
         return _alert_dict(
@@ -3244,26 +3357,36 @@ def _build_debug_candidate_dict_list(row_dict: dict[str, Any]) -> list[dict[str,
             )
         )
     if row_dict.get("latest_vplan_status_str") == "blocked":
+        label_str = "VPlan blocked"
+        reason_str = "The latest VPlan is blocked."
+        if row_dict.get("latest_vplan_cycle_role_str") == "previous":
+            label_str = "Previous VPlan blocked"
+            reason_str = "The previous execution cycle VPlan is blocked."
         candidate_dict_list.append(
             _debug_candidate_dict(
                 priority_int=21,
                 severity_str="red",
-                label_str="VPlan blocked",
-                reason_str="The latest VPlan is blocked.",
-                evidence_str=f"vplan_status={row_dict.get('latest_vplan_status_str')}, vplan_id={row_dict.get('latest_vplan_id_int')}",
+                label_str=label_str,
+                reason_str=reason_str,
+                evidence_str=f"vplan_status={row_dict.get('latest_vplan_status_str')}, vplan_id={row_dict.get('latest_vplan_id_int')}, vplan_cycle={row_dict.get('latest_vplan_cycle_role_str')}",
                 inspect_command_name_str="show_vplan",
                 timestamp_str=row_dict.get("latest_vplan_submission_timestamp_str"),
             )
         )
     missing_ack_count_int = int(row_dict.get("missing_ack_count_int") or 0)
     if missing_ack_count_int > 0:
+        label_str = "Broker ACK missing"
+        reason_str = "Broker did not acknowledge all submitted orders."
+        if row_dict.get("latest_vplan_cycle_role_str") == "previous":
+            label_str = "Previous broker ACK missing"
+            reason_str = "Broker ACK is missing for the previous execution cycle."
         candidate_dict_list.append(
             _debug_candidate_dict(
                 priority_int=30,
                 severity_str="red",
-                label_str="Broker ACK missing",
-                reason_str="Broker did not acknowledge all submitted orders.",
-                evidence_str=f"missing_ack_count={missing_ack_count_int}, submit_ack_status={row_dict.get('latest_submit_ack_status_str')}",
+                label_str=label_str,
+                reason_str=reason_str,
+                evidence_str=f"missing_ack_count={missing_ack_count_int}, submit_ack_status={row_dict.get('latest_submit_ack_status_str')}, vplan_cycle={row_dict.get('latest_vplan_cycle_role_str')}",
                 inspect_command_name_str="show_vplan",
                 timestamp_str=row_dict.get("latest_vplan_submission_timestamp_str"),
             )
@@ -3318,6 +3441,11 @@ def _build_debug_candidate_dict_list(row_dict: dict[str, Any]) -> list[dict[str,
         item_severity_str = str(freshness_item_dict.get("severity_str") or "gray")
         item_label_str = str(freshness_item_dict.get("label_str") or "")
         if item_label_str == "DIFF artifact":
+            continue
+        if (
+            item_label_str == "Norgate"
+            and _norgate_ready_for_existing_trade_intent_bool(row_dict)
+        ):
             continue
         if item_severity_str in {"red", "yellow"}:
             candidate_dict_list.append(
@@ -3422,6 +3550,9 @@ def _build_debug_timeline_event_dict_list(detail_dict: dict[str, Any]) -> list[d
         severity_str: str,
         timestamp_obj: object,
         detail_str: str,
+        decision_plan_id_obj: object = None,
+        vplan_id_obj: object = None,
+        cycle_role_str: str | None = None,
     ) -> None:
         if status_str is None and timestamp_obj is None and detail_str == "":
             return
@@ -3433,6 +3564,9 @@ def _build_debug_timeline_event_dict_list(detail_dict: dict[str, Any]) -> list[d
                 "severity_str": severity_str if severity_str in {"green", "yellow", "red", "gray"} else "gray",
                 "timestamp_str": None if timestamp_obj in (None, "") else str(timestamp_obj),
                 "detail_str": detail_str,
+                "decision_plan_id_int": decision_plan_id_obj,
+                "vplan_id_int": vplan_id_obj,
+                "cycle_role_str": cycle_role_str,
             }
         )
 
@@ -3526,10 +3660,14 @@ def _build_debug_timeline_event_dict_list(detail_dict: dict[str, Any]) -> list[d
             ),
             decision_dict.get("submission_timestamp_str") or decision_dict.get("signal_timestamp_str"),
             f"book={decision_dict.get('decision_book_type_str')}, execute={decision_dict.get('target_execution_timestamp_str')}",
+            decision_dict.get("decision_plan_id_int"),
+            decision_dict.get("latest_vplan_id_int"),
+            "current",
         )
 
     vplan_dict = detail_dict.get("latest_vplan_dict") or {}
     if vplan_dict:
+        vplan_cycle_role_str = str(row_dict.get("latest_vplan_cycle_role_str") or "unknown")
         add_event(
             "VPlan",
             "VPlan",
@@ -3541,6 +3679,9 @@ def _build_debug_timeline_event_dict_list(detail_dict: dict[str, Any]) -> list[d
             ),
             vplan_dict.get("submission_timestamp_str"),
             f"vplan_id={vplan_dict.get('vplan_id_int')}, ack={vplan_dict.get('submit_ack_status_str')}",
+            vplan_dict.get("decision_plan_id_int"),
+            vplan_dict.get("vplan_id_int"),
+            vplan_cycle_role_str,
         )
         for ack_row_dict in vplan_dict.get("broker_ack_row_dict_list", []):
             ack_status_str = str(ack_row_dict.get("ack_status_str") or "")
@@ -3551,6 +3692,9 @@ def _build_debug_timeline_event_dict_list(detail_dict: dict[str, Any]) -> list[d
                 "green" if bool(ack_row_dict.get("broker_response_ack_bool")) else "red",
                 ack_row_dict.get("response_timestamp_str"),
                 f"request={ack_row_dict.get('order_request_key_str')}, source={ack_row_dict.get('ack_source_str')}",
+                ack_row_dict.get("decision_plan_id_int") or vplan_dict.get("decision_plan_id_int"),
+                ack_row_dict.get("vplan_id_int") or vplan_dict.get("vplan_id_int"),
+                vplan_cycle_role_str,
             )
         for order_row_dict in vplan_dict.get("broker_order_row_dict_list", []):
             add_event(
@@ -3564,6 +3708,9 @@ def _build_debug_timeline_event_dict_list(detail_dict: dict[str, Any]) -> list[d
                 ),
                 order_row_dict.get("last_status_timestamp_str") or order_row_dict.get("submitted_timestamp_str"),
                 f"type={order_row_dict.get('broker_order_type_str')}, requested={order_row_dict.get('amount_float')}, filled={order_row_dict.get('filled_amount_float')}",
+                order_row_dict.get("decision_plan_id_int") or vplan_dict.get("decision_plan_id_int"),
+                order_row_dict.get("vplan_id_int") or vplan_dict.get("vplan_id_int"),
+                vplan_cycle_role_str,
             )
         for fill_row_dict in vplan_dict.get("fill_row_dict_list", []):
             add_event(
@@ -3573,6 +3720,9 @@ def _build_debug_timeline_event_dict_list(detail_dict: dict[str, Any]) -> list[d
                 "green",
                 fill_row_dict.get("fill_timestamp_str"),
                 f"shares={fill_row_dict.get('fill_amount_float')}, price={fill_row_dict.get('fill_price_float')}, open={fill_row_dict.get('official_open_price_float')}",
+                fill_row_dict.get("decision_plan_id_int") or vplan_dict.get("decision_plan_id_int"),
+                fill_row_dict.get("vplan_id_int") or vplan_dict.get("vplan_id_int"),
+                vplan_cycle_role_str,
             )
 
     add_event(

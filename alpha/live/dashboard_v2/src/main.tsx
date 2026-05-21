@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Activity,
@@ -23,6 +23,7 @@ import type {
   CombinedBookEnvironment,
   DashboardJob,
   DashboardSummary,
+  DecisionPlanDetail,
   DebugTimelineEvent,
   EquityPoint,
   EventRow,
@@ -55,12 +56,18 @@ export function App() {
   const [selectedStageKey, setSelectedStageKey] = useState<string>("summary");
   const [detailLoading, setDetailLoading] = useState(false);
   const [jobMap, setJobMap] = useState<Record<string, DashboardJob>>({});
+  const summaryRef = useRef<DashboardSummary | null>(null);
+  const detailRequestSeqRef = useRef(0);
 
   useEffect(() => {
     void refreshSummary();
     const intervalId = window.setInterval(() => void refreshSummary(), REFRESH_MS);
     return () => window.clearInterval(intervalId);
   }, []);
+
+  useEffect(() => {
+    summaryRef.current = summary;
+  }, [summary]);
 
   useEffect(() => {
     const onPopState = () => setViewName(currentViewName());
@@ -71,9 +78,14 @@ export function App() {
   useEffect(() => {
     if (!selectedPodId) return;
     let activeBool = true;
-    void loadPodDetail(selectedPodId, () => activeBool);
+    void loadPodDetail(selectedPodId, () => activeBool, true);
+    const intervalId = window.setInterval(
+      () => void loadPodDetail(selectedPodId, () => activeBool, false),
+      REFRESH_MS
+    );
     return () => {
       activeBool = false;
+      window.clearInterval(intervalId);
     };
   }, [selectedPodId]);
 
@@ -88,20 +100,30 @@ export function App() {
     }
   }
 
-  async function loadPodDetail(podId: string, shouldApplyFn: () => boolean = () => true) {
-    setDetailLoading(true);
+  async function loadPodDetail(
+    podId: string,
+    shouldApplyFn: () => boolean = () => true,
+    showLoadingBool = true
+  ) {
+    const requestSeqInt = detailRequestSeqRef.current + 1;
+    detailRequestSeqRef.current = requestSeqInt;
+    const shouldApplyResponse = () => (
+      shouldApplyFn() && requestSeqInt === detailRequestSeqRef.current
+    );
+    if (showLoadingBool) setDetailLoading(true);
     try {
       const payload = await fetchJson<PodDetail>(`/api/pods/${encodeURIComponent(podId)}`);
-      if (shouldApplyFn()) setSelectedDetail(payload);
+      if (shouldApplyResponse()) setSelectedDetail(payload);
     } catch (error) {
-      if (shouldApplyFn()) {
-        setSelectedDetail({
-          pod_row_dict: rowByPodId(summary?.pod_row_dict_list || [], podId) || {
+      if (shouldApplyResponse()) {
+        const fallbackRow = rowByPodId(summaryRef.current?.pod_row_dict_list || [], podId) || {
             pod_id_str: podId,
             mode_str: "unknown",
             account_route_str: "-",
             strategy_import_str: "-"
-          },
+        };
+        setSelectedDetail((existingDetail) => existingDetail || {
+          pod_row_dict: fallbackRow,
           event_dict_list: [
             {
               level_str: "error",
@@ -112,12 +134,13 @@ export function App() {
         });
       }
     } finally {
-      if (shouldApplyFn()) setDetailLoading(false);
+      if (showLoadingBool && shouldApplyResponse()) setDetailLoading(false);
     }
   }
 
   function selectPod(row: PodRow, stageKey?: string, tabName?: DetailTab) {
     setSelectedDetail(null);
+    detailRequestSeqRef.current += 1;
     setDetailTab(tabName || tabForStage(stageKey));
     setSelectedStageKey(stageKey || currentStageKey(row.lifecycle_step_dict_list || [], row) || "summary");
     setSelectedPodId(row.pod_id_str);
@@ -671,7 +694,7 @@ function InlinePodDetail({
       <div className="inline-detail-tabs">
         {(["stage", "execution", "equity", "timeline", "logs", "raw"] as DetailTab[]).map((tabName) => (
           <button key={tabName} className={tab === tabName ? "active" : ""} onClick={() => onTab(tabName)}>
-            {tabName === "stage" ? "Stage" : tabName}
+            {tabName === "stage" ? "Stage" : tabName === "timeline" ? "Operator Log" : tabName}
           </button>
         ))}
       </div>
@@ -679,7 +702,7 @@ function InlinePodDetail({
         {tab === "stage" && <StageInspector detail={detail || { pod_row_dict: row }} selectedStageKey={selectedStageKey} onStageSelect={onStageSelect} />}
         {tab === "execution" && <ExecutionReceipt detail={detail} />}
         {tab === "equity" && <EquityPanel detail={detail} />}
-        {tab === "timeline" && <TimelineTab events={detail?.debug_story_dict?.timeline_event_dict_list || []} />}
+        {tab === "timeline" && <OperatorLogTab events={detail?.debug_story_dict?.timeline_event_dict_list || []} />}
         {tab === "logs" && <LogsTab events={detail?.event_dict_list || []} />}
         {tab === "raw" && <RawTab detail={detail || { pod_row_dict: row }} />}
       </div>
@@ -835,7 +858,7 @@ function StageInspector({
         <StatusDot severity={effectiveSeverity(row)} />
         <div>
           <strong>{action.label_str || row.next_action_str || "No action"}</strong>
-          <span>{action.detail_str || shortReason(row)}</span>
+          <span>{action.detail_str || action.reason_str || shortReason(row)}</span>
         </div>
       </div>
       <section className="stage-inspector" aria-label="Stage Inspector evidence">
@@ -853,21 +876,38 @@ function StageInspector({
   );
 }
 
-function TimelineTab({ events }: { events: DebugTimelineEvent[] }) {
-  if (!events.length) return <EmptyState text="No debug timeline was returned." />;
+function OperatorLogTab({ events }: { events: DebugTimelineEvent[] }) {
+  if (!events.length) return <EmptyState text="No operator log timeline was returned." />;
   return (
-    <div className="timeline-list">
-      {events.map((event, index) => (
-        <div className={`timeline-row ${severityClass(event.severity_str || event.status_str || "gray")}`} key={`${event.source_str}-${event.label_str}-${index}`}>
-          <StatusDot severity={event.severity_str || event.status_str || "gray"} />
-          <span>{formatTime(event.timestamp_str)}</span>
-          <strong>{event.source_str || "Event"} / {event.label_str || "-"}</strong>
-          <small>{event.status_str || "-"}</small>
-          <em>{event.detail_str || "-"}</em>
-        </div>
-      ))}
+    <div className="detail-stack" aria-label="Operator Log">
+      <div className="subtle-box">
+        <strong>Read-only operator log</strong>
+        <span>Timeline is rebuilt from local dashboard evidence and JSONL events. It does not call Norgate or mutate live state.</span>
+      </div>
+      <EvidenceTable
+        title="Operator timeline"
+        rows={events}
+        emptyText="No operator events were returned."
+        columns={[
+          ["Time", (event: DebugTimelineEvent) => formatTime(event.timestamp_str)],
+          ["Phase", (event: DebugTimelineEvent) => `${event.source_str || "Event"} / ${event.label_str || "-"}`],
+          ["Status", (event: DebugTimelineEvent) => <span className={severityClass(event.severity_str || event.status_str || "gray")}>{event.status_str || "-"}</span>],
+          ["Cycle", (event: DebugTimelineEvent) => cycleLabel(event)],
+          ["Reason", (event: DebugTimelineEvent) => event.detail_str || "-"]
+        ]}
+      />
     </div>
   );
+}
+
+function cycleLabel(event: DebugTimelineEvent) {
+  const decision = event.decision_plan_id_int ?? null;
+  const vplan = event.vplan_id_int ?? null;
+  const partList = [];
+  if (decision !== null) partList.push(`plan=${decision}`);
+  if (vplan !== null) partList.push(`vplan=${vplan}`);
+  if (event.cycle_role_str) partList.push(String(event.cycle_role_str));
+  return partList.length ? partList.join(" / ") : "-";
 }
 
 function LogsTab({ events }: { events: EventRow[] }) {
@@ -964,24 +1004,37 @@ function renderStageEvidence(stageKey: string, detail: PodDetail | null) {
   if (stage === "decision") {
     return (
       <div className="detail-stack">
+        <div className="subtle-box">
+          <strong>Current planned cycle</strong>
+          <span>{currentDecisionCycleText(row, decision)}</span>
+        </div>
+        {previousExecutionNotice(row)}
         <div className="stage-evidence-grid">
+          <Metric label="Decision ID" value={decision.decision_plan_id_int ?? row.latest_decision_plan_id_int ?? "-"} />
           <Metric label="Decision" value={row.latest_decision_plan_status_str || stringField(decision, "status_str")} />
+          <Metric label="Signal" value={formatTime(stringField(decision, "signal_timestamp_str"))} />
           <Metric label="Submitted" value={formatTime(row.latest_decision_plan_submission_timestamp_str || stringField(decision, "submission_timestamp_str"))} />
           <Metric label="Target Exec" value={formatTime(row.latest_decision_plan_target_execution_timestamp_str || stringField(decision, "target_execution_timestamp_str"))} />
           <Metric label="Book" value={stringField(decision, "decision_book_type_str") || "-"} />
+          <Metric label="Policy" value={stringField(decision, "execution_policy_str") || "-"} />
+          <Metric label="Snapshot" value={snapshotLabel(decision)} />
         </div>
         <ListPanel title="Assets to exit" values={decision.exit_asset_list || []} emptyText="No exit assets were returned." />
         <KeyValuePanel title="Entry targets" value={decision.entry_target_weight_map_dict} />
         <KeyValuePanel title="Full targets" value={decision.full_target_weight_map_dict || decision.display_target_weight_map_dict} />
+        <KeyValuePanel title="Decision base positions" value={decision.decision_base_position_map_dict} />
+        <KeyValuePanel title="Snapshot metadata" value={decision.snapshot_metadata_dict} />
       </div>
     );
   }
   if (stage === "vplan") {
     return (
       <div className="detail-stack">
+        {previousExecutionNotice(row)}
         <div className="stage-evidence-grid">
           <Metric label="VPlan" value={row.latest_vplan_status_str || vplan.status_str || "-"} />
           <Metric label="VPlan ID" value={row.latest_vplan_id_int ?? vplan.vplan_id_int ?? "-"} />
+          <Metric label="Decision ID" value={row.latest_vplan_decision_plan_id_int ?? vplan.decision_plan_id_int ?? "-"} />
           <Metric label="Submitted" value={formatTime(row.latest_vplan_submission_timestamp_str || vplan.submission_timestamp_str)} />
           <Metric label="Target Exec" value={formatTime(row.latest_vplan_target_execution_timestamp_str || vplan.target_execution_timestamp_str)} />
         </div>
@@ -1003,6 +1056,7 @@ function renderStageEvidence(stageKey: string, detail: PodDetail | null) {
   if (stage === "ack") {
     return (
       <div className="detail-stack">
+        {previousExecutionNotice(row)}
         <div className="stage-evidence-grid">
           <Metric label="ACK Status" value={row.latest_submit_ack_status_str || vplan.submit_ack_status_str || "-"} />
           <Metric label="ACK Rows" value={row.broker_ack_count_int ?? report.broker_ack_count_int ?? 0} />
@@ -1027,8 +1081,9 @@ function renderStageEvidence(stageKey: string, detail: PodDetail | null) {
   if (stage === "fill") {
     return (
       <div className="detail-stack">
+        {previousExecutionNotice(row)}
         <div className="stage-evidence-grid">
-          <Metric label="Fills" value={report.fill_count_int ?? row.fill_count_int ?? 0} />
+          <Metric label="Fill records" value={report.fill_count_int ?? row.fill_count_int ?? 0} />
           <Metric label="Open Coverage" value={`${report.fill_with_official_open_count_int ?? 0} / ${report.fill_count_int ?? row.fill_count_int ?? 0}`} />
           <Metric label="Open Slippage" value={formatBps(report.official_open_slippage_bps_float)} />
           <Metric label="Ref Slippage" value={formatBps(report.vplan_reference_slippage_bps_float)} />
@@ -1051,6 +1106,7 @@ function renderStageEvidence(stageKey: string, detail: PodDetail | null) {
   if (stage === "reconcile") {
     return (
       <div className="detail-stack">
+        {previousExecutionNotice(row)}
         <div className="stage-evidence-grid">
           <Metric label="Reconcile" value={row.latest_reconciliation_status_str || "-"} tone={severityClass(row.latest_reconciliation_status_str || "gray")} />
           <Metric label="Time" value={formatTime(row.latest_reconciliation_timestamp_str)} />
@@ -1084,7 +1140,7 @@ function renderStageEvidence(stageKey: string, detail: PodDetail | null) {
     );
   }
   if (stage === "diff") {
-    const htmlUrl = stringField(diff, "html_url_str") || row.latest_diff_artifact_url_str || "";
+    const htmlUrl = safeDashboardHref(stringField(diff, "html_url_str") || row.latest_diff_artifact_url_str || "");
     return (
       <div className="stage-evidence-grid">
         <Metric label="DIFF" value={String(diff.status_str || row.latest_diff_status_str || "not_run")} />
@@ -1099,6 +1155,50 @@ function renderStageEvidence(stageKey: string, detail: PodDetail | null) {
     );
   }
   return <EmptyState text="No evidence renderer exists for this stage." />;
+}
+
+function currentDecisionCycleText(row: PodRow, decision: DecisionPlanDetail) {
+  const planId = decision.decision_plan_id_int ?? row.latest_decision_plan_id_int ?? "-";
+  const status = row.latest_decision_plan_status_str || decision.status_str || "-";
+  const target = formatTime(row.latest_decision_plan_target_execution_timestamp_str || decision.target_execution_timestamp_str);
+  if (row.latest_vplan_cycle_role_str === "previous") {
+    return `DecisionPlan ${planId} is ${status} for ${target}. Execution evidence below is from an older VPlan cycle.`;
+  }
+  return `DecisionPlan ${planId} is ${status} for ${target}.`;
+}
+
+function snapshotLabel(decision: DecisionPlanDetail) {
+  const metadata = decision.snapshot_metadata_dict || {};
+  const date = stringField(metadata, "norgate_snapshot_date_str") || stringField(metadata, "snapshot_date_str");
+  const profile = stringField(metadata, "norgate_data_profile_str") || stringField(metadata, "data_profile_str");
+  if (date && profile) return `${profile} / ${date}`;
+  return date || profile || "-";
+}
+
+function previousExecutionNotice(row: PodRow) {
+  if (row.latest_vplan_cycle_role_str !== "previous") return null;
+  const planId = row.latest_decision_plan_id_int ?? "-";
+  const vplanId = row.latest_vplan_id_int ?? "-";
+  const previousPlanId = row.latest_vplan_decision_plan_id_int ?? "-";
+  return (
+    <div className="subtle-box">
+      <strong>Previous execution cycle</strong>
+      <span>VPlan {vplanId} belongs to DecisionPlan {previousPlanId}. The current planned DecisionPlan is {planId}, so this is historical execution evidence, not today&apos;s active VPlan.</span>
+    </div>
+  );
+}
+
+function safeDashboardHref(rawHref?: string | null) {
+  const href = String(rawHref || "").trim();
+  if (!href) return "";
+  if (href.startsWith("/") && !href.startsWith("//")) return href;
+  try {
+    const url = new URL(href, window.location.origin);
+    if (url.protocol === "http:" || url.protocol === "https:") return url.href;
+  } catch {
+    return "";
+  }
+  return "";
 }
 
 function EvidenceTable<T>({
@@ -1388,22 +1488,23 @@ function tabForStage(stageKey?: string): DetailTab {
 
 function stageChipStatus(step: LifecycleStep | undefined, row: PodRow) {
   const key = normalizeStageKey(step?.step_key_str);
+  const previousPrefix = row.latest_vplan_cycle_role_str === "previous" ? "prev " : "";
   if (key === "ack") {
     const missing = row.missing_ack_count_int || 0;
-    if (missing > 0) return `missing ${missing}`;
-    if ((row.broker_ack_count_int || 0) > 0) return `${row.broker_ack_count_int} ack`;
+    if (missing > 0) return `${previousPrefix}missing ${missing}`;
+    if ((row.broker_ack_count_int || 0) > 0) return `${previousPrefix}${row.broker_ack_count_int} ack`;
   }
   if (key === "fill") {
-    return `${row.fill_count_int || 0} fill`;
+    return `${previousPrefix}${row.fill_count_int || 0} fill records`;
   }
-  if (key === "vplan" && row.latest_vplan_status_str) return row.latest_vplan_status_str;
+  if (key === "vplan" && row.latest_vplan_status_str) return `${previousPrefix}${row.latest_vplan_status_str}`;
   if (key === "decision" && row.latest_decision_plan_status_str) return row.latest_decision_plan_status_str;
   if (key === "reconcile") {
     const reconcileStatus = row.latest_reconciliation_status_str || step?.status_str;
     if (!reconcileStatus || reconcileStatus === "none") {
       return row.next_action_str === "post_execution_reconcile" ? "pending" : "none";
     }
-    return reconcileStatus;
+    return `${previousPrefix}${reconcileStatus}`;
   }
   if (key === "eod" && row.eod_snapshot_dict?.status_str) return String(row.eod_snapshot_dict.status_str);
   if (key === "diff" && row.latest_diff_status_str) return row.latest_diff_status_str;
@@ -1456,7 +1557,7 @@ function stateSentence(row: PodRow) {
 }
 
 function shortReason(row: PodRow) {
-  return row.debug_summary_dict?.primary_reason_str || row.required_action_dict?.detail_str || row.reason_code_str || "-";
+  return row.debug_summary_dict?.primary_reason_str || row.required_action_dict?.detail_str || row.required_action_dict?.reason_str || row.reason_code_str || "-";
 }
 
 function rehearsalLabel(row: PodRow) {

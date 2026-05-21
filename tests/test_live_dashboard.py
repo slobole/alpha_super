@@ -359,6 +359,47 @@ def _mark_latest_vplan_completed_and_reconciled(db_path_obj: Path, release_obj: 
     )
 
 
+def _seed_current_planned_decision_after_completed_execution(
+    db_path_obj: Path,
+    release_obj: LiveRelease,
+) -> None:
+    _seed_decision_vplan_and_broker_rows(db_path_obj, release_obj)
+    _mark_latest_vplan_completed_and_reconciled(db_path_obj, release_obj)
+    _seed_eod_pod_state(
+        db_path_obj,
+        release_obj,
+        total_value_float=10250.0,
+        cash_float=4500.0,
+        updated_timestamp_ts=datetime(2024, 1, 2, 21, 30, tzinfo=UTC),
+    )
+    store_obj = LiveStateStore(str(db_path_obj))
+    store_obj.insert_decision_plan(
+        DecisionPlan(
+            release_id_str=release_obj.release_id_str,
+            user_id_str=release_obj.user_id_str,
+            pod_id_str=release_obj.pod_id_str,
+            account_route_str=release_obj.account_route_str,
+            signal_timestamp_ts=datetime(2024, 1, 2, 21, 0, tzinfo=UTC),
+            submission_timestamp_ts=datetime(2024, 1, 3, 14, 30, tzinfo=UTC),
+            target_execution_timestamp_ts=datetime(2024, 1, 3, 14, 30, tzinfo=UTC),
+            execution_policy_str=release_obj.execution_policy_str,
+            decision_base_position_map={"CDNS": 28.0, "GL": 63.0},
+            snapshot_metadata_dict={
+                "norgate_data_profile_str": "norgate_eod_sp500_pit",
+                "norgate_snapshot_date_str": "2024-01-02",
+            },
+            strategy_state_dict={"trade_id_int": 10},
+            decision_book_type_str="incremental_entry_exit_book",
+            entry_target_weight_map_dict={"NEE": 0.1, "VRT": 0.1},
+            target_weight_map={"NEE": 0.1, "VRT": 0.1},
+            exit_asset_set={"CDNS", "GL"},
+            entry_priority_list=["NEE", "VRT"],
+            preserve_untouched_positions_bool=True,
+            rebalance_omitted_assets_to_zero_bool=False,
+        )
+    )
+
+
 def _seed_incubation_decision_only(db_path_obj: Path, release_obj: LiveRelease) -> None:
     db_path_obj.parent.mkdir(parents=True, exist_ok=True)
     store_obj = LiveStateStore(str(db_path_obj))
@@ -1245,6 +1286,125 @@ def test_dashboard_norgate_ready_status_respects_stale_build_gate(tmp_path: Path
     assert status_dict["release_gate_status_dict_list"][0]["gate_reason_code_str"] == "snapshot_window_expired"
 
 
+def test_dashboard_norgate_ready_snapshot_does_not_override_waiting_submission_window(
+    tmp_path: Path,
+    monkeypatch,
+):
+    releases_root_path_obj = tmp_path / "releases"
+    _write_release_manifest(
+        releases_root_path_obj,
+        user_id_str="paper_user",
+        pod_id_str="pod_waiting_plan",
+        mode_str="paper",
+    )
+    release_obj = load_release_list(str(releases_root_path_obj))[0]
+    db_path_obj = tmp_path / "state" / "pod_waiting_plan.sqlite3"
+    _seed_current_planned_decision_after_completed_execution(db_path_obj, release_obj)
+    config_path_obj = tmp_path / "dashboard_config.yaml"
+    _write_config(config_path_obj, {"pod_waiting_plan": str(db_path_obj)})
+    snapshot_root_path_obj = tmp_path / "snapshots"
+    snapshot_root_path_obj.mkdir(parents=True)
+    monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "true")
+    monkeypatch.setenv("NORGATE_SNAPSHOT_ROOT", str(snapshot_root_path_obj))
+    monkeypatch.setattr(
+        norgate_sync_module,
+        "load_valid_snapshot_manifest",
+        lambda profile_str: SimpleNamespace(
+            snapshot_date_ts=datetime(2024, 1, 2, tzinfo=UTC),
+            manifest_hash_str="abcdef1234567890",
+        ),
+    )
+    monkeypatch.setattr(
+        norgate_sync_module.scheduler_utils,
+        "evaluate_build_gate_dict",
+        lambda release_obj, as_of_ts: {"reason_code_str": "snapshot_not_ready_for_session"},
+    )
+    app_obj = DashboardApp(
+        releases_root_path_str=str(releases_root_path_obj),
+        config_path_str=str(config_path_obj),
+        results_root_path_str=str(tmp_path / "results"),
+    )
+
+    summary_dict = build_dashboard_summary_dict(
+        app_obj,
+        as_of_ts=datetime(2024, 1, 3, 12, 0, tzinfo=UTC),
+    )
+    row_dict = _row_by_pod_id(summary_dict, "pod_waiting_plan")
+    norgate_item_dict = next(
+        item_dict
+        for item_dict in row_dict["data_freshness_dict"]["item_dict_list"]
+        if item_dict["label_str"] == "Norgate"
+    )
+
+    assert row_dict["required_action_dict"]["label_str"] == "Wait submission window"
+    assert row_dict["debug_summary_dict"]["verdict_label_str"] == "Wait submission window"
+    assert norgate_item_dict["severity_str"] == "green"
+    assert "Current plan data: ready" in norgate_item_dict["detail_str"]
+    assert all(
+        alert_dict["label_str"] != "Norgate freshness"
+        for alert_dict in summary_dict["alert_dict_list"]
+    )
+
+
+def test_dashboard_expired_norgate_snapshot_still_alerts_during_waiting_submission_window(
+    tmp_path: Path,
+    monkeypatch,
+):
+    releases_root_path_obj = tmp_path / "releases"
+    _write_release_manifest(
+        releases_root_path_obj,
+        user_id_str="paper_user",
+        pod_id_str="pod_expired_snapshot",
+        mode_str="paper",
+    )
+    release_obj = load_release_list(str(releases_root_path_obj))[0]
+    db_path_obj = tmp_path / "state" / "pod_expired_snapshot.sqlite3"
+    _seed_current_planned_decision_after_completed_execution(db_path_obj, release_obj)
+    config_path_obj = tmp_path / "dashboard_config.yaml"
+    _write_config(config_path_obj, {"pod_expired_snapshot": str(db_path_obj)})
+    snapshot_root_path_obj = tmp_path / "snapshots"
+    snapshot_root_path_obj.mkdir(parents=True)
+    monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "true")
+    monkeypatch.setenv("NORGATE_SNAPSHOT_ROOT", str(snapshot_root_path_obj))
+    monkeypatch.setattr(
+        norgate_sync_module,
+        "load_valid_snapshot_manifest",
+        lambda profile_str: SimpleNamespace(
+            snapshot_date_ts=datetime(2024, 1, 2, tzinfo=UTC),
+            manifest_hash_str="abcdef1234567890",
+        ),
+    )
+    monkeypatch.setattr(
+        norgate_sync_module.scheduler_utils,
+        "evaluate_build_gate_dict",
+        lambda release_obj, as_of_ts: {"reason_code_str": "snapshot_window_expired"},
+    )
+    app_obj = DashboardApp(
+        releases_root_path_str=str(releases_root_path_obj),
+        config_path_str=str(config_path_obj),
+        results_root_path_str=str(tmp_path / "results"),
+    )
+
+    summary_dict = build_dashboard_summary_dict(
+        app_obj,
+        as_of_ts=datetime(2024, 1, 3, 20, 0, tzinfo=UTC),
+    )
+    row_dict = _row_by_pod_id(summary_dict, "pod_expired_snapshot")
+    norgate_item_dict = next(
+        item_dict
+        for item_dict in row_dict["data_freshness_dict"]["item_dict_list"]
+        if item_dict["label_str"] == "Norgate"
+    )
+
+    assert row_dict["required_action_dict"]["label_str"] == "Expire stale plan"
+    assert norgate_item_dict["severity_str"] == "red"
+    assert "snapshot_window_expired" in norgate_item_dict["detail_str"]
+    assert any(
+        alert_dict["label_str"] == "Norgate freshness"
+        for alert_dict in summary_dict["alert_dict_list"]
+    )
+
+
 def test_dashboard_norgate_status_labels_waiting_and_failed_stages(tmp_path: Path, monkeypatch):
     release_obj = _build_release_obj("pod_sync")
     snapshot_root_path_obj = tmp_path / "snapshots"
@@ -2038,6 +2198,61 @@ def test_dashboard_detail_parses_decision_plan_and_preserves_execution_rows(tmp_
         command_dict["command_name_str"]
         for command_dict in debug_story_dict["recommended_command_dict_list"]
     ] == ["show_vplan", "status", "show_decision_plan"]
+
+
+def test_dashboard_detail_separates_current_decision_from_previous_execution_cycle(tmp_path: Path):
+    releases_root_path_obj = tmp_path / "releases"
+    _write_release_manifest(
+        releases_root_path_obj,
+        user_id_str="paper_user",
+        pod_id_str="pod_mixed_cycle",
+        mode_str="paper",
+    )
+    release_obj = load_release_list(str(releases_root_path_obj))[0]
+    db_path_obj = tmp_path / "state" / "pod_mixed_cycle.sqlite3"
+    _seed_current_planned_decision_after_completed_execution(db_path_obj, release_obj)
+    config_path_obj = tmp_path / "dashboard_config.yaml"
+    _write_config(config_path_obj, {"pod_mixed_cycle": str(db_path_obj)})
+    app_obj = DashboardApp(
+        releases_root_path_str=str(releases_root_path_obj),
+        config_path_str=str(config_path_obj),
+        results_root_path_str=str(tmp_path / "results"),
+    )
+
+    detail_dict = build_pod_detail_dict(
+        app_obj,
+        "pod_mixed_cycle",
+        as_of_ts=datetime(2024, 1, 3, 12, 0, tzinfo=UTC),
+    )
+    row_dict = detail_dict["pod_row_dict"]
+    decision_dict = detail_dict["latest_decision_plan_dict"]
+
+    assert row_dict["next_action_str"] == "wait"
+    assert row_dict["reason_code_str"] == "waiting_for_submission_window"
+    assert row_dict["latest_decision_plan_id_int"] == 2
+    assert row_dict["latest_vplan_decision_plan_id_int"] == 1
+    assert row_dict["latest_decision_plan_id_int"] != row_dict["latest_vplan_decision_plan_id_int"]
+    assert row_dict["latest_vplan_cycle_role_str"] == "previous"
+    assert row_dict["latest_vplan_is_for_latest_decision_bool"] is False
+    assert row_dict["required_action_dict"]["label_str"] == "Wait submission window"
+    assert decision_dict["status_str"] == "planned"
+    assert decision_dict["exit_asset_list"] == ["CDNS", "GL"]
+    assert decision_dict["entry_target_weight_map_dict"] == {"NEE": 0.1, "VRT": 0.1}
+    assert decision_dict["decision_base_position_map_dict"] == {"CDNS": 28.0, "GL": 63.0}
+    assert detail_dict["latest_vplan_dict"]["status_str"] == "completed"
+    assert detail_dict["pod_pnl_dict"]["point_count_int"] == 1
+    assert detail_dict["pod_pnl_dict"]["latest_equity_float"] == 10250.0
+    vplan_step_dict = next(
+        step_dict
+        for step_dict in row_dict["lifecycle_step_dict_list"]
+        if step_dict["step_key_str"] == "vplan"
+    )
+    assert vplan_step_dict["detail_str"].startswith("previous cycle")
+    assert any(
+        timeline_event_dict["cycle_role_str"] == "previous"
+        and timeline_event_dict["vplan_id_int"] == row_dict["latest_vplan_id_int"]
+        for timeline_event_dict in detail_dict["debug_story_dict"]["timeline_event_dict_list"]
+    )
 
 
 def test_dashboard_summary_flags_missing_ack_and_reconcile_failure_actions(tmp_path: Path):
