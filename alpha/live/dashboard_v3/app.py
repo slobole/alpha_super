@@ -42,11 +42,18 @@ from alpha.live.dashboard_v3.journal import (
     append_journal_entry,
     read_journal_entry_dict_list,
 )
+from alpha.live.dashboard_v3.notifications import (
+    DEFAULT_NOTIFICATION_STATE_PATH_STR,
+    NotificationStateStore,
+    check_and_notify_for_red_transitions,
+    discord_webhook_url_from_env_str,
+    post_discord_webhook_bool,
+)
 from alpha.live.dashboard_v3.schedule import build_schedule_entry_list
 from alpha.live.dashboard_v3.verdict import resolve_top_bar_verdict
 
 
-DASHBOARD_V3_VERSION_STR = "0.5.0-phase-5"
+DASHBOARD_V3_VERSION_STR = "0.6.0-phase-6"
 ALL_ACTION_NAME_LIST = ["compare_reference"] + list(SUPPORTED_ACTION_NAME_LIST)
 ACTION_LABEL_DICT = {
     "compare_reference": "DIFF compare",
@@ -72,6 +79,9 @@ def create_app(
     *,
     journal_path_str: str = DEFAULT_JOURNAL_PATH_STR,
     expected_pnl_path_str: str = DEFAULT_EXPECTED_PNL_PATH_STR,
+    notification_state_path_str: str = DEFAULT_NOTIFICATION_STATE_PATH_STR,
+    notification_webhook_url_str: str | None = None,
+    notification_webhook_poster_fn=None,
 ) -> Flask:
     flask_app_obj = Flask(__name__)
     flask_app_obj.config["data_provider_obj"] = (
@@ -79,6 +89,17 @@ def create_app(
     )
     flask_app_obj.config["journal_path_str"] = journal_path_str
     flask_app_obj.config["expected_pnl_path_str"] = expected_pnl_path_str
+    flask_app_obj.config["notification_state_store_obj"] = NotificationStateStore(
+        state_path_str=notification_state_path_str
+    )
+    flask_app_obj.config["notification_webhook_url_str"] = (
+        notification_webhook_url_str
+        if notification_webhook_url_str is not None
+        else discord_webhook_url_from_env_str()
+    )
+    flask_app_obj.config["notification_webhook_poster_fn"] = (
+        notification_webhook_poster_fn or post_discord_webhook_bool
+    )
 
     for filter_name_str, filter_fn in FILTER_MAP_DICT.items():
         flask_app_obj.jinja_env.filters[filter_name_str] = filter_fn
@@ -142,6 +163,12 @@ def create_app(
         provider_obj = flask_app_obj.config["data_provider_obj"]
         summary_dict = provider_obj.get_summary_dict()
         verdict_obj = resolve_top_bar_verdict(summary_dict)
+        check_and_notify_for_red_transitions(
+            summary_dict,
+            state_store_obj=flask_app_obj.config["notification_state_store_obj"],
+            webhook_url_str=flask_app_obj.config["notification_webhook_url_str"],
+            webhook_poster_fn=flask_app_obj.config["notification_webhook_poster_fn"],
+        )
         return render_template(
             "_top_bar_verdict.html",
             verdict_dict=verdict_obj.as_dict(),
