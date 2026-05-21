@@ -1,0 +1,39 @@
+# Systemd unit for Dashboard V3 — copy to /etc/systemd/system/dashboard_v3.service
+# and adjust User / WorkingDirectory / Environment to match your install.
+#
+# After:        sudo systemctl daemon-reload
+# Enable:       sudo systemctl enable --now dashboard_v3
+# Logs:         journalctl -u dashboard_v3 -f
+# Exposure:     bind is localhost only; expose via `tailscale serve` if needed.
+
+[Unit]
+Description=Alpha Dashboard V3 (Flask + HTMX operator console)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=alpha
+Group=alpha
+WorkingDirectory=/srv/alpha
+
+# Bind to localhost only; Tailscale handles the tailnet exposure.
+ExecStart=/srv/alpha/.venv/bin/python -m alpha.live.dashboard_v3 \
+    --host 127.0.0.1 \
+    --port 8080
+
+# Discord red-alert webhook (leave unset to silence notifications).
+# Environment=ALPHA_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+
+Restart=on-failure
+RestartSec=5s
+
+# Modest hardening.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+
+[Install]
+WantedBy=multi-user.target

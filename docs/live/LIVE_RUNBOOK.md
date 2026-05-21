@@ -208,35 +208,29 @@ Use the same `--db-path` on `status`, `next_due`, `tick`, `show_decision_plan`, 
 
 ## Local POD Dashboard
 
-Start the local dashboard:
+Start Dashboard V3 (Flask + Jinja + HTMX — no Node, no build step):
 
 ```bash
-uv run python -m alpha.live.dashboard serve --host 127.0.0.1 --port 8765
+uv run python -m alpha.live.dashboard_v3 --host 127.0.0.1 --port 8080
 ```
 
-On startup, the server auto-builds Dashboard V2 if `alpha/live/dashboard_v2/dist/index.html` is missing. To build it explicitly before starting:
-
-```bash
-uv run python scripts/build_dashboard_v2.py
-```
-
-Open the V2 operator console:
+Open the operator console:
 
 ```text
-http://127.0.0.1:8765
+http://127.0.0.1:8080
 ```
 
-Dashboard V2 is one local web page for all enabled PODs in this deployment. It shows live/paper PODs first, keeps incubation on `/incubation`, and opens logs/details behind POD-level buttons:
+V3 is one local web page for all enabled PODs in this deployment. Three mode pages (`/live`, `/paper`, `/incubation`) each get the full window — no tabs, no mixed-mode tables fighting for space. Above them sits a polled health strip (Norgate freshness, EOD coverage, disk), a polled cross-pod "what's next" schedule, and a top-bar verdict.
 
-```text
-POD -> mode -> account -> health -> next action -> latest DecisionPlan/VPlan -> equity/cash -> warnings -> latest DIFF
-```
+Expanding a pod shows today's cycle as a vertical timeline (DB → Decision → VPlan → ACK → Fill → Reconcile → EOD), each step with its evidence inline and bulkier sub-tables behind `<details>` so the narrative reads quickly. The EOD card embeds an SVG equity curve with drawdown shading and daily-PnL bars, and an optional live-vs-backtest band check sourced from `alpha/live/expected_pnl.yaml`.
 
-V2 has ops-core controls for `tick`, `submit_vplan`, `post_execution_reconcile`, and `eod_snapshot`. These buttons use the existing runner semantics for the selected enabled POD; they do not expose service restart, arbitrary CLI commands, direct SQLite edits, sizing edits, reference-price edits, or strategy changes.
+Operator Tools sits collapsed at the bottom of every expanded pod. Five buttons: Run DIFF / Tick / Submit VPlan / Reconcile / EOD Snapshot. Clicking shows a preview before the single Confirm. Every confirmed action goes through the same security ceremony as before — JSON POST + same-origin + server-issued action token + explicit `confirmed_bool=true` — and is logged to `alpha/live/logs/operator_journal.jsonl`. View the log at `/journal`.
 
-Each V2 mutating action requires a browser confirmation, a same-origin JSON POST, and a server-issued action token. The server also serializes action jobs per POD so repeated clicks cannot start overlapping runner commands for the same POD.
+Set `ALPHA_DISCORD_WEBHOOK_URL` in the environment to receive a Discord ping the first time any pod transitions to red. State persists in `alpha/live/logs/notification_state.json`, so a recovered pod that turns red again fires a fresh alert; missing env var = silent.
 
-The old V1 dashboard route is intentionally removed. The local dashboard is now the V2 operator console only.
+See `docs/live/DASHBOARD_V3_RUNBOOK.md` for the one-page systemd + Tailscale deploy recipe.
+
+The V2 React console (`alpha/live/dashboard_v2/`) and the V1 HTTP handler (`alpha.live.dashboard.serve_dashboard`) have been removed. `alpha/live/dashboard.py` is now a pure data-builder library used by `alpha.live.dashboard_v3.*`.
 
 Reference DIFF is the one explicit background action in the dashboard. Pressing `Run DIFF` starts `compare_reference` for that POD and writes analysis artifacts under:
 

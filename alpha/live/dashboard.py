@@ -4,18 +4,14 @@ import argparse
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
-import mimetypes
 from pathlib import Path
 import secrets
 import sqlite3
-import subprocess
-import sys
 import threading
 import traceback
 from typing import Any, Callable
-from urllib.parse import quote, unquote, urlparse
+from urllib.parse import quote
 import uuid
 
 import yaml
@@ -25,7 +21,7 @@ from alpha.live.models import LiveRelease
 from alpha.live.norgate_snapshot_sync import build_norgate_snapshot_status_dict
 from alpha.live.release_manifest import load_release_list
 from alpha.live.state_store_v2 import LiveStateStore
-from scripts.norgate_config_env import load_config_env_file
+from scripts.norgate_config_env import load_config_env_file  # noqa: F401 - kept for backwards compatibility with tests/imports.
 
 
 DEFAULT_DASHBOARD_HOST_STR = "127.0.0.1"
@@ -36,8 +32,6 @@ DEFAULT_RESULTS_ROOT_PATH_STR = "results"
 DEFAULT_EVENT_LOG_PATH_STR = str(Path(__file__).resolve().parent / "logs" / "live_events.jsonl")
 DEFAULT_EVENT_LIMIT_INT = 80
 DEFAULT_EVENT_LOG_BACKUP_SCAN_COUNT_INT = 10
-DEFAULT_DASHBOARD_V2_DIST_PATH_STR = str(Path(__file__).resolve().parent / "dashboard_v2" / "dist")
-REPO_ROOT_PATH = Path(__file__).resolve().parents[2]
 ALERT_SEVERITY_RANK_DICT = {"red": 0, "yellow": 1, "gray": 2, "green": 3}
 COMBINED_BOOK_MODE_ORDER_LIST = ["live", "paper", "incubation"]
 SAFE_INSPECT_COMMAND_NAME_LIST = [
@@ -342,7 +336,6 @@ class DashboardApp:
     config_path_str: str = DEFAULT_CONFIG_PATH_STR
     results_root_path_str: str = DEFAULT_RESULTS_ROOT_PATH_STR
     event_log_path_str: str = DEFAULT_EVENT_LOG_PATH_STR
-    dashboard_v2_dist_path_str: str = DEFAULT_DASHBOARD_V2_DIST_PATH_STR
     action_token_str: str = field(default_factory=lambda: secrets.token_urlsafe(32))
     pod_job_gate_obj: DashboardPodJobGate | None = None
     diff_job_manager_obj: DiffJobManager | None = None
@@ -1045,356 +1038,6 @@ def _run_dashboard_action_for_pod(
         error_detail_dict = {"error_str": str(exception_obj)}
         state_store_obj.record_job_finish(job_run_id_int, "failed", error_detail_dict)
         raise
-
-
-def make_dashboard_handler_class(app_obj: DashboardApp):
-    class DashboardRequestHandler(BaseHTTPRequestHandler):
-        server_version = "AlphaLiveDashboard/1.0"
-
-        def do_GET(self) -> None:  # noqa: N802 - stdlib handler API.
-            self._handle_request("GET")
-
-        def do_POST(self) -> None:  # noqa: N802 - stdlib handler API.
-            self._handle_request("POST")
-
-        def log_message(self, format_str: str, *args_obj: object) -> None:
-            return
-
-        def _handle_request(self, method_str: str) -> None:
-            parsed_url_obj = urlparse(self.path)
-            path_str = unquote(parsed_url_obj.path)
-            try:
-                if method_str == "GET" and path_str == "/":
-                    self._send_dashboard_v2_index()
-                    return
-                if method_str == "GET" and path_str == "/api/pods":
-                    self._send_json(build_dashboard_summary_dict(app_obj))
-                    return
-                if method_str == "GET" and path_str == "/api/action-token":
-                    self._send_json({"action_token_str": app_obj.action_token_str})
-                    return
-                if method_str == "GET" and path_str.startswith("/api/pods/"):
-                    self._handle_pod_get(path_str)
-                    return
-                if method_str == "POST" and path_str.startswith("/api/pods/"):
-                    self._handle_pod_post(path_str)
-                    return
-                if method_str == "GET" and path_str.startswith("/api/jobs/"):
-                    self._handle_job_get(path_str)
-                    return
-                if method_str == "GET" and path_str.startswith("/artifacts/"):
-                    self._handle_artifact_get(path_str)
-                    return
-                if method_str == "GET" and path_str.startswith("/assets/"):
-                    self._handle_dashboard_v2_asset_get(path_str)
-                    return
-                if method_str == "GET" and path_str in {"/incubation"}:
-                    self._send_dashboard_v2_index()
-                    return
-                self._send_error_json(404, "not_found", f"Unknown route: {path_str}")
-            except KeyError as exception_obj:
-                self._send_error_json(404, "unknown_pod", str(exception_obj))
-            except Exception as exception_obj:  # pragma: no cover - server safety net.
-                self._send_error_json(500, "internal_error", str(exception_obj))
-
-        def _handle_pod_get(self, path_str: str) -> None:
-            part_list = [part_str for part_str in path_str.split("/") if part_str]
-            if len(part_list) == 3:
-                self._send_json(build_pod_detail_dict(app_obj, part_list[2]))
-                return
-            if len(part_list) == 4 and part_list[3] == "events":
-                self._send_json(
-                    {
-                        "pod_id_str": part_list[2],
-                        "event_dict_list": load_recent_event_dict_list(
-                            log_path_str=app_obj.event_log_path_str,
-                            pod_id_str=part_list[2],
-                            limit_int=DEFAULT_EVENT_LIMIT_INT,
-                        ),
-                    }
-                )
-                return
-            if len(part_list) == 5 and part_list[3] == "diff" and part_list[4] == "latest":
-                target_obj = app_obj.get_target_for_pod(part_list[2])
-                if target_obj is None:
-                    raise KeyError(f"Unknown enabled pod_id_str '{part_list[2]}'.")
-                self._send_json(
-                    find_latest_diff_artifact_dict(
-                        results_root_path_str=app_obj.results_root_path_str,
-                        mode_str=target_obj.release_obj.mode_str,
-                        pod_id_str=part_list[2],
-                    )
-                )
-                return
-            self._send_error_json(404, "not_found", f"Unknown POD route: {path_str}")
-
-        def _handle_pod_post(self, path_str: str) -> None:
-            part_list = [part_str for part_str in path_str.split("/") if part_str]
-            if len(part_list) == 5 and part_list[3] == "diff" and part_list[4] == "run":
-                request_dict = self._read_json_body_dict()
-                if not self._action_post_is_same_origin_bool():
-                    self._send_error_json(
-                        403,
-                        "origin_rejected",
-                        "Dashboard actions require a same-origin request.",
-                    )
-                    return
-                if not self._action_token_is_valid_bool():
-                    self._send_error_json(
-                        403,
-                        "action_token_required",
-                        "Dashboard actions require a server-issued action token.",
-                    )
-                    return
-                if request_dict.get("confirmed_bool") is not True:
-                    self._send_error_json(
-                        400,
-                        "confirmation_required",
-                        "Dashboard actions require confirmed_bool=true.",
-                    )
-                    return
-                target_obj = app_obj.get_target_for_pod(part_list[2])
-                if target_obj is None:
-                    raise KeyError(f"Unknown enabled pod_id_str '{part_list[2]}'.")
-                assert app_obj.diff_job_manager_obj is not None
-                try:
-                    job_obj = app_obj.diff_job_manager_obj.start_job(
-                        pod_target_obj=target_obj,
-                        releases_root_path_str=app_obj.releases_root_path_str,
-                        results_root_path_str=app_obj.results_root_path_str,
-                    )
-                except DashboardActionInFlightError as exception_obj:
-                    self._send_error_json(409, "action_in_flight", str(exception_obj))
-                    return
-                self._send_json(job_obj.to_dict(), status_int=202)
-                return
-            if len(part_list) == 5 and part_list[3] == "actions":
-                action_name_str = part_list[4]
-                if action_name_str not in SAFE_ACTION_NAME_LIST:
-                    self._send_error_json(
-                        400,
-                        "unsupported_action",
-                        f"Unsupported dashboard action: {action_name_str}",
-                    )
-                    return
-                request_dict = self._read_json_body_dict()
-                if not self._action_post_is_same_origin_bool():
-                    self._send_error_json(
-                        403,
-                        "origin_rejected",
-                        "Dashboard actions require a same-origin request.",
-                    )
-                    return
-                if not self._action_token_is_valid_bool():
-                    self._send_error_json(
-                        403,
-                        "action_token_required",
-                        "Dashboard actions require a server-issued action token.",
-                    )
-                    return
-                if request_dict.get("confirmed_bool") is not True:
-                    self._send_error_json(
-                        400,
-                        "confirmation_required",
-                        "Dashboard actions require confirmed_bool=true.",
-                    )
-                    return
-                target_obj = app_obj.get_target_for_pod(part_list[2])
-                if target_obj is None:
-                    raise KeyError(f"Unknown enabled pod_id_str '{part_list[2]}'.")
-                assert app_obj.action_job_manager_obj is not None
-                try:
-                    job_obj = app_obj.action_job_manager_obj.start_job(
-                        action_name_str=action_name_str,
-                        pod_target_obj=target_obj,
-                        releases_root_path_str=app_obj.releases_root_path_str,
-                        results_root_path_str=app_obj.results_root_path_str,
-                        event_log_path_str=app_obj.event_log_path_str,
-                    )
-                except DashboardActionInFlightError as exception_obj:
-                    self._send_error_json(409, "action_in_flight", str(exception_obj))
-                    return
-                self._send_json(job_obj.to_dict(), status_int=202)
-                return
-            self._send_error_json(404, "not_found", f"Unknown POD POST route: {path_str}")
-
-        def _action_post_is_same_origin_bool(self) -> bool:
-            content_type_str = self.headers.get("Content-Type", "").split(";")[0].strip().lower()
-            if content_type_str != "application/json":
-                return False
-            host_str = self.headers.get("Host", "")
-            origin_seen_bool = False
-            for header_name_str in ("Origin", "Referer"):
-                header_value_str = self.headers.get(header_name_str)
-                if header_value_str:
-                    origin_seen_bool = True
-                    if not _request_header_matches_host_bool(header_value_str, host_str):
-                        return False
-            return origin_seen_bool
-
-        def _action_token_is_valid_bool(self) -> bool:
-            request_token_str = self.headers.get(ACTION_TOKEN_HEADER_STR, "")
-            return secrets.compare_digest(str(request_token_str), app_obj.action_token_str)
-
-        def _handle_job_get(self, path_str: str) -> None:
-            part_list = [part_str for part_str in path_str.split("/") if part_str]
-            if len(part_list) != 3:
-                self._send_error_json(404, "not_found", f"Unknown job route: {path_str}")
-                return
-            assert app_obj.diff_job_manager_obj is not None
-            job_dict = app_obj.diff_job_manager_obj.get_job_dict(part_list[2])
-            if job_dict is None and app_obj.action_job_manager_obj is not None:
-                job_dict = app_obj.action_job_manager_obj.get_job_dict(part_list[2])
-            if job_dict is None:
-                self._send_error_json(404, "unknown_job", f"Unknown job_id_str '{part_list[2]}'.")
-                return
-            self._send_json(job_dict)
-
-        def _handle_dashboard_v2_asset_get(self, path_str: str) -> None:
-            relative_path_str = path_str.removeprefix("/")
-            asset_path_obj = (Path(app_obj.dashboard_v2_dist_path_str) / relative_path_str).resolve()
-            dist_root_path_obj = Path(app_obj.dashboard_v2_dist_path_str).resolve()
-            if not _is_relative_to_bool(asset_path_obj, dist_root_path_obj):
-                self._send_error_json(403, "forbidden", "Dashboard asset path escapes dist root.")
-                return
-            if not asset_path_obj.exists() or not asset_path_obj.is_file():
-                self._send_error_json(404, "not_found", "Dashboard asset not found.")
-                return
-            content_type_str = mimetypes.guess_type(str(asset_path_obj))[0] or "application/octet-stream"
-            self._send_file(asset_path_obj, content_type_str)
-
-        def _handle_artifact_get(self, path_str: str) -> None:
-            relative_path_str = path_str.removeprefix("/artifacts/")
-            artifact_path_obj = (Path(app_obj.results_root_path_str) / relative_path_str).resolve()
-            results_root_path_obj = Path(app_obj.results_root_path_str).resolve()
-            if not _is_relative_to_bool(artifact_path_obj, results_root_path_obj):
-                self._send_error_json(403, "forbidden", "Artifact path escapes results root.")
-                return
-            if not artifact_path_obj.exists() or not artifact_path_obj.is_file():
-                self._send_error_json(404, "not_found", "Artifact not found.")
-                return
-            content_type_str = mimetypes.guess_type(str(artifact_path_obj))[0] or "application/octet-stream"
-            self._send_file(
-                artifact_path_obj,
-                content_type_str,
-                header_dict={
-                    "Content-Security-Policy": (
-                        "sandbox; default-src 'none'; img-src 'self' data:; "
-                        "style-src 'self' 'unsafe-inline'"
-                    ),
-                    "X-Content-Type-Options": "nosniff",
-                },
-            )
-
-        def _send_dashboard_v2_index(self) -> None:
-            index_path_obj = Path(app_obj.dashboard_v2_dist_path_str) / "index.html"
-            if not index_path_obj.exists():
-                self._send_html(
-                    "<!doctype html><html><head><title>Dashboard V2 build missing</title></head>"
-                    "<body><h1>Dashboard V2 build missing</h1>"
-                    "<p>Run: uv run python scripts/build_dashboard_v2.py</p></body></html>"
-                )
-                return
-            self._send_file(index_path_obj, "text/html; charset=utf-8")
-
-        def _send_file(
-            self,
-            path_obj: Path,
-            content_type_str: str,
-            header_dict: dict[str, str] | None = None,
-        ) -> None:
-            self.send_response(200)
-            self.send_header("Content-Type", content_type_str)
-            for header_name_str, header_value_str in (header_dict or {}).items():
-                self.send_header(header_name_str, header_value_str)
-            self.send_header("Content-Length", str(path_obj.stat().st_size))
-            self.end_headers()
-            self.wfile.write(path_obj.read_bytes())
-
-        def _read_json_body_dict(self) -> dict[str, Any]:
-            content_length_int = int(self.headers.get("Content-Length") or 0)
-            if content_length_int <= 0:
-                return {}
-            body_bytes = self.rfile.read(content_length_int)
-            if len(body_bytes) == 0:
-                return {}
-            payload_obj = json.loads(body_bytes.decode("utf-8"))
-            if not isinstance(payload_obj, dict):
-                raise ValueError("JSON body must be an object.")
-            return payload_obj
-
-        def _send_html(self, html_text_str: str) -> None:
-            payload_bytes = html_text_str.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(payload_bytes)))
-            self.end_headers()
-            self.wfile.write(payload_bytes)
-
-        def _send_json(self, payload_obj: Any, status_int: int = 200) -> None:
-            payload_bytes = json.dumps(_jsonable_obj(payload_obj), indent=2, sort_keys=True).encode("utf-8")
-            self.send_response(status_int)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", str(len(payload_bytes)))
-            self.end_headers()
-            self.wfile.write(payload_bytes)
-
-        def _send_error_json(
-            self,
-            status_int: int,
-            error_code_str: str,
-            message_str: str,
-        ) -> None:
-            self._send_json(
-                {
-                    "error_code_str": error_code_str,
-                    "message_str": message_str,
-                },
-                status_int=status_int,
-            )
-
-    return DashboardRequestHandler
-
-
-def serve_dashboard(
-    host_str: str = DEFAULT_DASHBOARD_HOST_STR,
-    port_int: int = DEFAULT_DASHBOARD_PORT_INT,
-    releases_root_path_str: str = DEFAULT_RELEASES_ROOT_PATH_STR,
-    config_path_str: str = DEFAULT_CONFIG_PATH_STR,
-    results_root_path_str: str = DEFAULT_RESULTS_ROOT_PATH_STR,
-    event_log_path_str: str = DEFAULT_EVENT_LOG_PATH_STR,
-    dashboard_v2_dist_path_str: str = DEFAULT_DASHBOARD_V2_DIST_PATH_STR,
-    auto_build_dashboard_v2_bool: bool = True,
-) -> None:
-    if auto_build_dashboard_v2_bool:
-        _ensure_dashboard_v2_dist(dashboard_v2_dist_path_str)
-    app_obj = DashboardApp(
-        releases_root_path_str=releases_root_path_str,
-        config_path_str=config_path_str,
-        results_root_path_str=results_root_path_str,
-        event_log_path_str=event_log_path_str,
-        dashboard_v2_dist_path_str=dashboard_v2_dist_path_str,
-    )
-    handler_cls = make_dashboard_handler_class(app_obj)
-    server_obj = ThreadingHTTPServer((host_str, int(port_int)), handler_cls)
-    print(f"Live POD dashboard listening on http://{host_str}:{int(port_int)}")
-    server_obj.serve_forever()
-
-
-def _ensure_dashboard_v2_dist(dashboard_v2_dist_path_str: str) -> None:
-    index_path_obj = Path(dashboard_v2_dist_path_str) / "index.html"
-    if index_path_obj.exists():
-        return
-    build_script_path_obj = REPO_ROOT_PATH / "scripts" / "build_dashboard_v2.py"
-    try:
-        subprocess.run(
-            [sys.executable, str(build_script_path_obj)],
-            cwd=REPO_ROOT_PATH,
-            check=True,
-        )
-    except Exception as exception_obj:  # pragma: no cover - startup warning text is environment-specific.
-        print(f"WARNING: Dashboard V2 build failed: {exception_obj}")
 
 
 def _derive_next_action_dict(
@@ -4531,11 +4174,6 @@ def _is_relative_to_bool(path_obj: Path, parent_path_obj: Path) -> bool:
     return True
 
 
-def _request_header_matches_host_bool(header_value_str: str, host_str: str) -> bool:
-    if host_str == "":
-        return False
-    parsed_header_obj = urlparse(header_value_str)
-    return parsed_header_obj.netloc.lower() == host_str.lower()
 
 
 def _jsonable_obj(value_obj: Any) -> Any:
@@ -4550,47 +4188,3 @@ def _jsonable_obj(value_obj: Any) -> Any:
     if isinstance(value_obj, Path):
         return str(value_obj)
     return value_obj
-
-
-
-def main(argv_list: list[str] | None = None) -> int:
-    load_config_env_file(override_existing_bool=True)
-    parser_obj = argparse.ArgumentParser(description="Local read-only live POD dashboard.")
-    subparser_obj = parser_obj.add_subparsers(dest="command_name_str", required=True)
-    serve_parser_obj = subparser_obj.add_parser("serve")
-    serve_parser_obj.add_argument("--host", dest="host_str", default=DEFAULT_DASHBOARD_HOST_STR)
-    serve_parser_obj.add_argument("--port", dest="port_int", type=int, default=DEFAULT_DASHBOARD_PORT_INT)
-    serve_parser_obj.add_argument("--releases-root", dest="releases_root_path_str", default=DEFAULT_RELEASES_ROOT_PATH_STR)
-    serve_parser_obj.add_argument("--config", dest="config_path_str", default=DEFAULT_CONFIG_PATH_STR)
-    serve_parser_obj.add_argument("--results-root", dest="results_root_path_str", default=DEFAULT_RESULTS_ROOT_PATH_STR)
-    serve_parser_obj.add_argument("--event-log", dest="event_log_path_str", default=DEFAULT_EVENT_LOG_PATH_STR)
-    serve_parser_obj.add_argument(
-        "--dashboard-v2-dist",
-        dest="dashboard_v2_dist_path_str",
-        default=DEFAULT_DASHBOARD_V2_DIST_PATH_STR,
-    )
-    serve_parser_obj.add_argument(
-        "--no-dashboard-v2-build",
-        dest="auto_build_dashboard_v2_bool",
-        action="store_false",
-        default=True,
-        help="Do not auto-build Dashboard V2 when dist/index.html is missing.",
-    )
-    parsed_args_obj = parser_obj.parse_args(argv_list)
-    if parsed_args_obj.command_name_str == "serve":
-        serve_dashboard(
-            host_str=parsed_args_obj.host_str,
-            port_int=parsed_args_obj.port_int,
-            releases_root_path_str=parsed_args_obj.releases_root_path_str,
-            config_path_str=parsed_args_obj.config_path_str,
-            results_root_path_str=parsed_args_obj.results_root_path_str,
-            event_log_path_str=parsed_args_obj.event_log_path_str,
-            dashboard_v2_dist_path_str=parsed_args_obj.dashboard_v2_dist_path_str,
-            auto_build_dashboard_v2_bool=parsed_args_obj.auto_build_dashboard_v2_bool,
-        )
-        return 0
-    raise ValueError(f"Unsupported command_name_str '{parsed_args_obj.command_name_str}'.")
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
