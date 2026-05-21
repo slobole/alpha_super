@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "./main";
+import { App, mergeStablePodDetailPayload } from "./main";
 import type { DashboardSummary, PodDetail, PodRow } from "./types";
 
 const lifecycleStepList = [
@@ -261,9 +261,15 @@ function installFetchMock(summary: DashboardSummary = summaryPayload, detail: Po
 async function openInlineDetail() {
   render(<App />);
   const card = await livePodCard();
-  fireEvent.click(within(card).getByRole("button", { name: "Inspect" }));
+  clickPodMain(card);
   await screen.findByText("Enable controls");
   return screen.getByLabelText("Inline POD detail");
+}
+
+function clickPodMain(card: HTMLElement) {
+  const button = card.querySelector(".pod-row-main") as HTMLElement | null;
+  if (!button) throw new Error("pod row main button was not rendered");
+  fireEvent.click(button);
 }
 
 async function livePodCard() {
@@ -288,6 +294,57 @@ describe("Dashboard V2 operator cockpit", () => {
     vi.restoreAllMocks();
   });
 
+  it("keeps same-cycle decision evidence when a detail refresh is thin", () => {
+    const currentRow: PodRow = {
+      ...livePodRow,
+      latest_decision_plan_id_int: 42,
+      latest_decision_plan_status_str: "planned",
+      latest_vplan_id_int: 7
+    };
+    const fullDetail: PodDetail = {
+      ...detailPayload,
+      pod_row_dict: currentRow,
+      latest_decision_plan_dict: {
+        decision_plan_id_int: 42,
+        status_str: "planned",
+        decision_book_type_str: "incremental_entry_exit_book",
+        exit_asset_list: ["CDNS", "GL"],
+        entry_target_weight_map_dict: { NEE: 0.1, VRT: 0.1 },
+        display_target_weight_map_dict: { NEE: 0.1, VRT: 0.1 },
+        decision_base_position_map_dict: { CDNS: 12, GL: 4 },
+        snapshot_metadata_dict: { norgate_snapshot_date_str: "2026-05-20" }
+      }
+    };
+    const thinRefreshDetail: PodDetail = {
+      ...fullDetail,
+      latest_decision_plan_dict: {
+        decision_plan_id_int: 42,
+        status_str: "planned",
+        decision_book_type_str: "incremental_entry_exit_book"
+      },
+      latest_vplan_dict: null,
+      latest_execution_report_dict: null
+    };
+
+    const mergedDetail = mergeStablePodDetailPayload(thinRefreshDetail, fullDetail);
+
+    expect(mergedDetail.latest_decision_plan_dict?.entry_target_weight_map_dict).toEqual({ NEE: 0.1, VRT: 0.1 });
+    expect(mergedDetail.latest_decision_plan_dict?.exit_asset_list).toEqual(["CDNS", "GL"]);
+    expect(mergedDetail.latest_decision_plan_dict?.snapshot_metadata_dict).toEqual({ norgate_snapshot_date_str: "2026-05-20" });
+    expect(mergedDetail.latest_vplan_dict?.vplan_id_int).toBe(7);
+    expect(mergedDetail.latest_execution_report_dict?.fill_count_int).toBe(1);
+
+    const nextCycleDetail = mergeStablePodDetailPayload(
+      {
+        ...thinRefreshDetail,
+        pod_row_dict: { ...currentRow, latest_decision_plan_id_int: 43 },
+        latest_decision_plan_dict: null
+      },
+      fullDetail
+    );
+    expect(nextCycleDetail.latest_decision_plan_dict).toBeNull();
+  });
+
   it("renders Attention above separate LIVE and PAPER sections", async () => {
     render(<App />);
 
@@ -310,7 +367,8 @@ describe("Dashboard V2 operator cockpit", () => {
     expect(screen.queryByText("Recent Actions")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Action status")).not.toBeInTheDocument();
     const card = await livePodCard();
-    fireEvent.click(within(card).getByRole("button", { name: "Inspect" }));
+    expect(within(card).queryByRole("button", { name: "Inspect" })).not.toBeInTheDocument();
+    clickPodMain(card);
 
     const detail = await screen.findByLabelText("Inline POD detail");
     expect(screen.queryByLabelText("POD detail")).not.toBeInTheDocument();
@@ -353,8 +411,11 @@ describe("Dashboard V2 operator cockpit", () => {
 
     expect(within(detail).getByText("Assets to exit")).toBeInTheDocument();
     expect(within(detail).getAllByText("MSFT").length).toBeGreaterThan(0);
-    expect(within(detail).getByText("Entry targets")).toBeInTheDocument();
-    expect(within(detail).getByText("Full targets")).toBeInTheDocument();
+    expect(within(detail).getByLabelText("Decision Intent")).toBeInTheDocument();
+    expect(within(detail).getByText("Full target book")).toBeInTheDocument();
+    expect(within(detail).queryByText("Entry targets")).not.toBeInTheDocument();
+    expect(within(detail).queryByText("Full targets")).not.toBeInTheDocument();
+    expect(within(detail).getAllByText("60.00%").length).toBeGreaterThan(0);
   });
 
   it("separates a current planned DecisionPlan from previous execution evidence", async () => {
@@ -470,14 +531,21 @@ describe("Dashboard V2 operator cockpit", () => {
 
     const detail = await openInlineDetail();
 
+    expect(within(detail).getByText("Current Cycle")).toBeInTheDocument();
     expect(within(detail).getByText("Current planned cycle")).toBeInTheDocument();
     expect(within(detail).getByText("Wait submission window")).toBeInTheDocument();
     expect(within(detail).getAllByText("CDNS").length).toBeGreaterThan(0);
     expect(within(detail).getAllByText("GL").length).toBeGreaterThan(0);
     expect(within(detail).getAllByText("NEE").length).toBeGreaterThan(0);
     expect(within(detail).getAllByText("VRT").length).toBeGreaterThan(0);
-    expect(within(detail).getByText(/Previous execution cycle/)).toBeInTheDocument();
-    expect(within(detail).getAllByText(/prev completed/).length).toBeGreaterThan(0);
+    expect(within(detail).getByLabelText("Previous Cycle Receipt")).toBeInTheDocument();
+    expect(within(detail).getAllByText("not built").length).toBeGreaterThan(0);
+    expect(within(detail).queryByText(/prev completed/)).not.toBeInTheDocument();
+
+    const card = await livePodCard();
+    clickPodMain(card);
+    expect(within(detail).getAllByText("NEE").length).toBeGreaterThan(0);
+    expect(within(detail).getAllByText("VRT").length).toBeGreaterThan(0);
 
     fireEvent.click(within(detail).getByRole("button", { name: "Operator Log" }));
     expect(within(detail).getByLabelText("Operator Log")).toBeInTheDocument();

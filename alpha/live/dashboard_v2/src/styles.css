@@ -359,6 +359,22 @@ h2 {
   padding: 10px;
 }
 
+.pod-workbench {
+  min-width: 0;
+}
+
+.pod-workbench.has-detail {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.82fr) minmax(560px, 1.18fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px;
+}
+
+.pod-workbench.has-detail .pod-table {
+  padding: 0;
+}
+
 .pod-row-card {
   border: 1px solid var(--line-soft);
   border-left: 4px solid var(--gray);
@@ -443,7 +459,6 @@ h2 {
   color: var(--text);
 }
 
-.row-actions,
 .inline-actions {
   border-top: 1px solid var(--line-soft);
   background: var(--surface-soft);
@@ -453,7 +468,6 @@ h2 {
   padding: 8px 10px;
 }
 
-.quiet-button,
 .inline-actions button {
   min-height: 32px;
   border: 1px solid var(--line);
@@ -869,6 +883,110 @@ h2 {
   color: var(--muted);
 }
 
+.decision-intent-panel,
+.previous-cycle-receipt {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+  margin: 0 12px 12px;
+}
+
+.decision-intent-header,
+.previous-cycle-header {
+  min-height: 52px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--surface-soft);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.intent-section {
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.intent-section:first-of-type {
+  border-top: 0;
+}
+
+.intent-section > strong {
+  display: block;
+}
+
+.asset-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.asset-chip {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 10px;
+  font-weight: 800;
+}
+
+.asset-chip.exit {
+  border-color: #f0b8b2;
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.intent-target-table {
+  display: grid;
+  gap: 6px;
+}
+
+.intent-target-row {
+  min-height: 34px;
+  border: 1px solid var(--line-soft);
+  border-left: 4px solid var(--green);
+  border-radius: 7px;
+  background: var(--green-soft);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+}
+
+.intent-target-row span,
+.intent-target-row strong {
+  overflow-wrap: anywhere;
+}
+
+.intent-target-row span {
+  color: #11563a;
+  font-weight: 800;
+}
+
+.previous-cycle-receipt {
+  margin: 0;
+}
+
+.previous-cycle-note {
+  color: var(--muted);
+  padding: 10px 12px 0;
+  overflow-wrap: anywhere;
+}
+
+.previous-cycle-grid {
+  padding-top: 10px;
+}
+
+.current-cycle-empty {
+  margin: 12px;
+}
+
 .execution-receipt .subtle-box span,
 .equity-panel .subtle-box span {
   color: var(--muted);
@@ -1014,6 +1132,7 @@ h2 {
   }
 
   .pod-row-main,
+  .pod-workbench.has-detail,
   .attention-item,
   .log-row,
   .freshness-row,

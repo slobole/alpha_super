@@ -11,7 +11,6 @@ import {
   Loader2,
   PauseCircle,
   RefreshCcw,
-  Search,
   TerminalSquare,
   X
 } from "lucide-react";
@@ -44,6 +43,37 @@ const REFRESH_MS = 4000;
 
 type ViewName = "ops" | "incubation";
 type DetailTab = "stage" | "execution" | "equity" | "timeline" | "logs" | "raw";
+type KeyValueKind = "plain" | "weight";
+
+export function mergeStablePodDetailPayload(
+  incomingDetail: PodDetail,
+  existingDetail: PodDetail | null
+): PodDetail {
+  if (!existingDetail) return incomingDetail;
+  const mergedDetail = { ...incomingDetail };
+  if (sameDecisionPlanBool(incomingDetail, existingDetail)) {
+    const existingDecision = existingDetail.latest_decision_plan_dict || null;
+    const incomingDecision = incomingDetail.latest_decision_plan_dict || null;
+    if (existingDecision && incomingDecision) {
+      mergedDetail.latest_decision_plan_dict = mergeDecisionPlanDetail(
+        incomingDecision,
+        existingDecision
+      );
+    } else if (existingDecision && !incomingDecision) {
+      mergedDetail.latest_decision_plan_dict = existingDecision;
+    }
+  }
+  if (sameVPlanBool(incomingDetail, existingDetail) && !incomingDetail.latest_vplan_dict) {
+    mergedDetail.latest_vplan_dict = existingDetail.latest_vplan_dict;
+  }
+  if (
+    sameExecutionReportBool(incomingDetail, existingDetail)
+    && !incomingDetail.latest_execution_report_dict
+  ) {
+    mergedDetail.latest_execution_report_dict = existingDetail.latest_execution_report_dict;
+  }
+  return mergedDetail;
+}
 
 export function App() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
@@ -113,7 +143,9 @@ export function App() {
     if (showLoadingBool) setDetailLoading(true);
     try {
       const payload = await fetchJson<PodDetail>(`/api/pods/${encodeURIComponent(podId)}`);
-      if (shouldApplyResponse()) setSelectedDetail(payload);
+      if (shouldApplyResponse()) {
+        setSelectedDetail((existingDetail) => mergeStablePodDetailPayload(payload, existingDetail));
+      }
     } catch (error) {
       if (shouldApplyResponse()) {
         const fallbackRow = rowByPodId(summaryRef.current?.pod_row_dict_list || [], podId) || {
@@ -139,10 +171,15 @@ export function App() {
   }
 
   function selectPod(row: PodRow, stageKey?: string, tabName?: DetailTab) {
-    setSelectedDetail(null);
-    detailRequestSeqRef.current += 1;
+    const samePodBool = selectedPodId === row.pod_id_str;
+    if (!samePodBool) {
+      setSelectedDetail(null);
+      detailRequestSeqRef.current += 1;
+    } else if (!selectedDetail) {
+      void loadPodDetail(row.pod_id_str);
+    }
     setDetailTab(tabName || tabForStage(stageKey));
-    setSelectedStageKey(stageKey || currentStageKey(row.lifecycle_step_dict_list || [], row) || "summary");
+    setSelectedStageKey(stageKey || currentStageKey(currentCycleStepList(row, row.lifecycle_step_dict_list || []), row) || "summary");
     setSelectedPodId(row.pod_id_str);
   }
 
@@ -354,7 +391,7 @@ function OpsHome({
               <AttentionQueueItem
                 key={item.row.pod_id_str}
                 item={item}
-                onInspect={() => onSelect(item.row, item.stageKey, tabForStage(item.stageKey))}
+                onOpen={() => onSelect(item.row, item.stageKey, tabForStage(item.stageKey))}
               />
             ))}
           </div>
@@ -435,7 +472,7 @@ function IncubationHome({
         <SectionTitle icon={<ListChecks size={18} />} title="Promotion Queue" aside={`${attentionRows.length} items`} />
         <div className="attention-list">
           {attentionRows.map((item) => (
-            <AttentionQueueItem key={item.row.pod_id_str} item={item} onInspect={() => onSelect(item.row, item.stageKey)} />
+            <AttentionQueueItem key={item.row.pod_id_str} item={item} onOpen={() => onSelect(item.row, item.stageKey)} />
           ))}
           {!attentionRows.length && <EmptyState text="No rehearsal state to review." />}
         </div>
@@ -461,9 +498,9 @@ function IncubationHome({
   );
 }
 
-function AttentionQueueItem({ item, onInspect }: { item: AttentionRow; onInspect: () => void }) {
+function AttentionQueueItem({ item, onOpen }: { item: AttentionRow; onOpen: () => void }) {
   return (
-    <button className={`attention-item ${severityClass(item.severity)}`} onClick={onInspect}>
+    <button className={`attention-item ${severityClass(item.severity)}`} onClick={onOpen}>
       <StatusDot severity={item.severity} />
       <div className="attention-pod">
         <strong>{item.row.pod_id_str}</strong>
@@ -479,7 +516,7 @@ function AttentionQueueItem({ item, onInspect }: { item: AttentionRow; onInspect
       </div>
       <div className="attention-age">
         <small>{item.freshness}</small>
-        <strong>Inspect</strong>
+        <strong>Open</strong>
       </div>
       <ArrowRight size={16} />
     </button>
@@ -521,14 +558,16 @@ function PodSection({
   onAction: (row: PodRow, actionName: string) => void;
   incubation?: boolean;
 }) {
+  const selectedRow = rows.find((row) => row.pod_id_str === expandedPodId);
   return (
     <section className="surface mode-section">
       <SectionTitle icon={incubation ? <ClipboardList size={18} /> : <Activity size={18} />} title={title} aside={`${rows.length} pods`} />
       {modeSummary && <ModeEquitySummary environment={modeSummary} />}
-      <div className="pod-table">
-        {rows.map((row) => (
-          <React.Fragment key={row.pod_id_str}>
+      <div className={`pod-workbench ${selectedRow ? "has-detail" : ""}`}>
+        <div className="pod-table">
+          {rows.map((row) => (
             <PodRowCard
+              key={row.pod_id_str}
               row={row}
               job={podBadgeJob(jobMap, row.pod_id_str)}
               expanded={expandedPodId === row.pod_id_str}
@@ -536,22 +575,22 @@ function PodSection({
               onStageSelect={(stageKey) => onSelect(row, stageKey, tabForStage(stageKey))}
               incubation={incubation}
             />
-            {expandedPodId === row.pod_id_str && (
-              <InlinePodDetail
-                detail={selectedDetail}
-                fallbackRow={row}
-                loading={detailLoading}
-                tab={detailTab}
-                onTab={onTab}
-                onClose={onCloseDetail}
-                selectedStageKey={selectedStageKey}
-                onStageSelect={onStageSelect}
-                onAction={onAction}
-              />
-            )}
-          </React.Fragment>
-        ))}
-        {!rows.length && <EmptyState text={emptyText} />}
+          ))}
+          {!rows.length && <EmptyState text={emptyText} />}
+        </div>
+        {selectedRow && (
+          <InlinePodDetail
+            detail={selectedDetail}
+            fallbackRow={selectedRow}
+            loading={detailLoading}
+            tab={detailTab}
+            onTab={onTab}
+            onClose={onCloseDetail}
+            selectedStageKey={selectedStageKey}
+            onStageSelect={onStageSelect}
+            onAction={onAction}
+          />
+        )}
       </div>
     </section>
   );
@@ -594,17 +633,12 @@ function PodRowCard({
         </div>
       </button>
       <MiniStageRail row={row} steps={row.lifecycle_step_dict_list || []} onStageSelect={onStageSelect} />
-      <div className="row-actions">
-        <button className="quiet-button" onClick={onSelect}>
-          <Search size={15} /> Inspect
-        </button>
-      </div>
     </div>
   );
 }
 
 function MiniStageRail({ row, steps, onStageSelect }: { row: PodRow; steps: LifecycleStep[]; onStageSelect: (stageKey: string) => void }) {
-  const executionSteps = compactStageStepList(steps);
+  const executionSteps = compactStageStepList(currentCycleStepList(row, steps));
   if (!executionSteps.length) return null;
   const currentKey = currentStageKey(executionSteps, row);
   return (
@@ -657,7 +691,7 @@ function InlinePodDetail({
     <section className="pod-inline-detail" aria-label="Inline POD detail">
       <div className="inline-detail-header">
         <div className="inline-detail-title">
-          <div className="eyebrow">POD Detail</div>
+          <div className="eyebrow">Current Cycle Workbench</div>
           <h2>{row.pod_id_str}</h2>
           <span>{row.mode_str} / {row.account_route_str || "-"}</span>
         </div>
@@ -848,7 +882,8 @@ function StageInspector({
   const row = detail?.pod_row_dict;
   if (!row) return null;
   const action = detail?.required_action_dict || row.required_action_dict || {};
-  const stepList = detail?.lifecycle_step_dict_list || row.lifecycle_step_dict_list || [];
+  const rawStepList = detail?.lifecycle_step_dict_list || row.lifecycle_step_dict_list || [];
+  const stepList = currentCycleStepList(row, rawStepList);
   const currentKey = currentStageKey(compactStageStepList(stepList), row);
   const activeStageKey = normalizeStageKey(selectedStageKey) || currentKey || stepList[0]?.step_key_str || "summary";
   const activeStep = stepList.find((step) => step.step_key_str === activeStageKey);
@@ -872,6 +907,7 @@ function StageInspector({
         {renderStageEvidence(activeStageKey, detail)}
       </section>
       <StageMap row={row} steps={stepList} selectedStageKey={activeStageKey} onStageSelect={onStageSelect} />
+      <PreviousCycleReceipt detail={detail} />
     </div>
   );
 }
@@ -943,7 +979,10 @@ function StageMap({
   return (
     <div className="stage-map" aria-label="POD lifecycle stage map">
       <div className="stage-map-header">
-        <strong>Stage Map</strong>
+        <div>
+          <div className="eyebrow">Stage Map</div>
+          <strong>Current Cycle</strong>
+        </div>
         <span>{stageSummary(executionSteps, currentKey, row)}</span>
       </div>
       <div className="stage-rail">
@@ -990,6 +1029,9 @@ function renderStageEvidence(stageKey: string, detail: PodDetail | null) {
   const eod = row.eod_snapshot_dict || {};
   const diff = detail?.latest_diff_dict || {};
   const stage = normalizeStageKey(stageKey);
+  if (previousCycleBool(row) && ["vplan", "ack", "fill", "reconcile"].includes(stage)) {
+    return <CurrentCycleEmptyEvidence stageKey={stage} row={row} />;
+  }
   if (stage === "db") {
     return (
       <div className="stage-evidence-grid">
@@ -1008,7 +1050,6 @@ function renderStageEvidence(stageKey: string, detail: PodDetail | null) {
           <strong>Current planned cycle</strong>
           <span>{currentDecisionCycleText(row, decision)}</span>
         </div>
-        {previousExecutionNotice(row)}
         <div className="stage-evidence-grid">
           <Metric label="Decision ID" value={decision.decision_plan_id_int ?? row.latest_decision_plan_id_int ?? "-"} />
           <Metric label="Decision" value={row.latest_decision_plan_status_str || stringField(decision, "status_str")} />
@@ -1019,9 +1060,7 @@ function renderStageEvidence(stageKey: string, detail: PodDetail | null) {
           <Metric label="Policy" value={stringField(decision, "execution_policy_str") || "-"} />
           <Metric label="Snapshot" value={snapshotLabel(decision)} />
         </div>
-        <ListPanel title="Assets to exit" values={decision.exit_asset_list || []} emptyText="No exit assets were returned." />
-        <KeyValuePanel title="Entry targets" value={decision.entry_target_weight_map_dict} />
-        <KeyValuePanel title="Full targets" value={decision.full_target_weight_map_dict || decision.display_target_weight_map_dict} />
+        <DecisionIntentPanel decision={decision} />
         <KeyValuePanel title="Decision base positions" value={decision.decision_base_position_map_dict} />
         <KeyValuePanel title="Snapshot metadata" value={decision.snapshot_metadata_dict} />
       </div>
@@ -1030,7 +1069,6 @@ function renderStageEvidence(stageKey: string, detail: PodDetail | null) {
   if (stage === "vplan") {
     return (
       <div className="detail-stack">
-        {previousExecutionNotice(row)}
         <div className="stage-evidence-grid">
           <Metric label="VPlan" value={row.latest_vplan_status_str || vplan.status_str || "-"} />
           <Metric label="VPlan ID" value={row.latest_vplan_id_int ?? vplan.vplan_id_int ?? "-"} />
@@ -1056,7 +1094,6 @@ function renderStageEvidence(stageKey: string, detail: PodDetail | null) {
   if (stage === "ack") {
     return (
       <div className="detail-stack">
-        {previousExecutionNotice(row)}
         <div className="stage-evidence-grid">
           <Metric label="ACK Status" value={row.latest_submit_ack_status_str || vplan.submit_ack_status_str || "-"} />
           <Metric label="ACK Rows" value={row.broker_ack_count_int ?? report.broker_ack_count_int ?? 0} />
@@ -1081,7 +1118,6 @@ function renderStageEvidence(stageKey: string, detail: PodDetail | null) {
   if (stage === "fill") {
     return (
       <div className="detail-stack">
-        {previousExecutionNotice(row)}
         <div className="stage-evidence-grid">
           <Metric label="Fill records" value={report.fill_count_int ?? row.fill_count_int ?? 0} />
           <Metric label="Open Coverage" value={`${report.fill_with_official_open_count_int ?? 0} / ${report.fill_count_int ?? row.fill_count_int ?? 0}`} />
@@ -1106,7 +1142,6 @@ function renderStageEvidence(stageKey: string, detail: PodDetail | null) {
   if (stage === "reconcile") {
     return (
       <div className="detail-stack">
-        {previousExecutionNotice(row)}
         <div className="stage-evidence-grid">
           <Metric label="Reconcile" value={row.latest_reconciliation_status_str || "-"} tone={severityClass(row.latest_reconciliation_status_str || "gray")} />
           <Metric label="Time" value={formatTime(row.latest_reconciliation_timestamp_str)} />
@@ -1161,8 +1196,8 @@ function currentDecisionCycleText(row: PodRow, decision: DecisionPlanDetail) {
   const planId = decision.decision_plan_id_int ?? row.latest_decision_plan_id_int ?? "-";
   const status = row.latest_decision_plan_status_str || decision.status_str || "-";
   const target = formatTime(row.latest_decision_plan_target_execution_timestamp_str || decision.target_execution_timestamp_str);
-  if (row.latest_vplan_cycle_role_str === "previous") {
-    return `DecisionPlan ${planId} is ${status} for ${target}. Execution evidence below is from an older VPlan cycle.`;
+  if (previousCycleBool(row)) {
+    return `DecisionPlan ${planId} is ${status} for ${target}. No VPlan for this current cycle has been built yet.`;
   }
   return `DecisionPlan ${planId} is ${status} for ${target}.`;
 }
@@ -1175,17 +1210,112 @@ function snapshotLabel(decision: DecisionPlanDetail) {
   return date || profile || "-";
 }
 
-function previousExecutionNotice(row: PodRow) {
-  if (row.latest_vplan_cycle_role_str !== "previous") return null;
+function CurrentCycleEmptyEvidence({ stageKey, row }: { stageKey: string; row: PodRow }) {
+  const planId = row.latest_decision_plan_id_int ?? "-";
+  const previousPlanId = row.latest_vplan_decision_plan_id_int ?? "-";
+  return (
+    <div className="subtle-box current-cycle-empty">
+      <strong>No current-cycle {stageLabel(stageKey)} yet</strong>
+      <span>Current DecisionPlan is {planId}. The latest VPlan evidence belongs to previous DecisionPlan {previousPlanId}, so it is shown below as audit history.</span>
+    </div>
+  );
+}
+
+function PreviousCycleReceipt({ detail }: { detail: PodDetail | null }) {
+  const row = detail?.pod_row_dict;
+  if (!row || !previousCycleBool(row)) return null;
   const planId = row.latest_decision_plan_id_int ?? "-";
   const vplanId = row.latest_vplan_id_int ?? "-";
   const previousPlanId = row.latest_vplan_decision_plan_id_int ?? "-";
+  const report = detail?.latest_execution_report_dict || {};
   return (
-    <div className="subtle-box">
-      <strong>Previous execution cycle</strong>
-      <span>VPlan {vplanId} belongs to DecisionPlan {previousPlanId}. The current planned DecisionPlan is {planId}, so this is historical execution evidence, not today&apos;s active VPlan.</span>
-    </div>
+    <section className="previous-cycle-receipt" aria-label="Previous Cycle Receipt">
+      <div className="previous-cycle-header">
+        <div>
+          <div className="eyebrow">Previous Cycle Receipt</div>
+          <h2>Historical execution evidence</h2>
+        </div>
+        <Pill>not current</Pill>
+      </div>
+      <div className="previous-cycle-note">
+        VPlan {vplanId} belongs to DecisionPlan {previousPlanId}. Current DecisionPlan is {planId}, so these fills and ACKs are audit history, not today&apos;s progress.
+      </div>
+      <div className="stage-evidence-grid previous-cycle-grid">
+        <Metric label="Prev Decision" value={previousPlanId} />
+        <Metric label="Prev VPlan" value={vplanId} />
+        <Metric label="VPlan" value={row.latest_vplan_status_str || "-"} />
+        <Metric label="Target Exec" value={formatTime(row.latest_vplan_target_execution_timestamp_str)} />
+        <Metric label="ACK" value={`${row.broker_ack_count_int ?? report.broker_ack_count_int ?? 0} / ${row.broker_order_count_int ?? report.broker_order_count_int ?? 0}`} />
+        <Metric label="Fills" value={report.fill_count_int ?? row.fill_count_int ?? 0} />
+        <Metric label="Reconcile" value={row.latest_reconciliation_status_str || "-"} />
+        <Metric label="Residuals" value={report.residual_count_int ?? 0} tone={(report.residual_count_int || 0) > 0 ? "red" : undefined} />
+      </div>
+    </section>
   );
+}
+
+function sameDecisionPlanBool(incomingDetail: PodDetail, existingDetail: PodDetail) {
+  const incomingPlanId = incomingDetail.latest_decision_plan_dict?.decision_plan_id_int
+    ?? incomingDetail.pod_row_dict.latest_decision_plan_id_int;
+  const existingPlanId = existingDetail.latest_decision_plan_dict?.decision_plan_id_int
+    ?? existingDetail.pod_row_dict.latest_decision_plan_id_int;
+  return sameStableIdBool(incomingPlanId, existingPlanId);
+}
+
+function sameVPlanBool(incomingDetail: PodDetail, existingDetail: PodDetail) {
+  const incomingVPlanId = incomingDetail.latest_vplan_dict?.vplan_id_int
+    ?? incomingDetail.pod_row_dict.latest_vplan_id_int;
+  const existingVPlanId = existingDetail.latest_vplan_dict?.vplan_id_int
+    ?? existingDetail.pod_row_dict.latest_vplan_id_int;
+  return sameStableIdBool(incomingVPlanId, existingVPlanId);
+}
+
+function sameExecutionReportBool(incomingDetail: PodDetail, existingDetail: PodDetail) {
+  const incomingVPlanId = incomingDetail.latest_execution_report_dict?.latest_vplan_id_int
+    ?? incomingDetail.pod_row_dict.latest_vplan_id_int;
+  const existingVPlanId = existingDetail.latest_execution_report_dict?.latest_vplan_id_int
+    ?? existingDetail.pod_row_dict.latest_vplan_id_int;
+  return sameStableIdBool(incomingVPlanId, existingVPlanId);
+}
+
+function sameStableIdBool(left: unknown, right: unknown) {
+  if (left === null || left === undefined || right === null || right === undefined) return false;
+  return String(left) === String(right);
+}
+
+function mergeDecisionPlanDetail(
+  incomingDecision: DecisionPlanDetail,
+  existingDecision: DecisionPlanDetail
+): DecisionPlanDetail {
+  const mergedDecision = { ...existingDecision, ...incomingDecision };
+  if (!hasRecordEntriesBool(incomingDecision.target_weight_map_dict)) {
+    mergedDecision.target_weight_map_dict = existingDecision.target_weight_map_dict;
+  }
+  if (!hasRecordEntriesBool(incomingDecision.entry_target_weight_map_dict)) {
+    mergedDecision.entry_target_weight_map_dict = existingDecision.entry_target_weight_map_dict;
+  }
+  if (!hasRecordEntriesBool(incomingDecision.full_target_weight_map_dict)) {
+    mergedDecision.full_target_weight_map_dict = existingDecision.full_target_weight_map_dict;
+  }
+  if (!hasRecordEntriesBool(incomingDecision.display_target_weight_map_dict)) {
+    mergedDecision.display_target_weight_map_dict = existingDecision.display_target_weight_map_dict;
+  }
+  if (!hasRecordEntriesBool(incomingDecision.decision_base_position_map_dict)) {
+    mergedDecision.decision_base_position_map_dict = existingDecision.decision_base_position_map_dict;
+  }
+  if (!hasRecordEntriesBool(incomingDecision.snapshot_metadata_dict)) {
+    mergedDecision.snapshot_metadata_dict = existingDecision.snapshot_metadata_dict;
+  }
+  if (!hasRecordEntriesBool(incomingDecision.strategy_state_dict)) {
+    mergedDecision.strategy_state_dict = existingDecision.strategy_state_dict;
+  }
+  if (!incomingDecision.exit_asset_list?.length) {
+    mergedDecision.exit_asset_list = existingDecision.exit_asset_list;
+  }
+  if (!incomingDecision.entry_priority_list?.length) {
+    mergedDecision.entry_priority_list = existingDecision.entry_priority_list;
+  }
+  return mergedDecision;
 }
 
 function safeDashboardHref(rawHref?: string | null) {
@@ -1228,25 +1358,131 @@ function EvidenceTable<T>({
   );
 }
 
-function KeyValuePanel({ title, value }: { title: string; value: unknown }) {
-  if (!value || typeof value !== "object") return <EmptyState text={`${title} were not returned.`} />;
+function DecisionIntentPanel({ decision }: { decision: DecisionPlanDetail }) {
+  const bookType = decision.decision_book_type_str || "-";
+  const exitAssetList = decision.exit_asset_list || [];
+  const entryTargetEntryList = recordEntryList(preferredEntryTargetMap(decision));
+  const fullTargetEntryList = recordEntryList(preferredFullTargetMap(decision));
+  const showFullTargetBool = bookType === "full_target_weight_book" || fullTargetEntryList.length > 0;
+  const primaryTargetEntryList = bookType === "full_target_weight_book" ? fullTargetEntryList : entryTargetEntryList;
+  const primaryTargetTitle = bookType === "full_target_weight_book" ? "Full target book" : "Entry targets";
+  const emptyBool = !exitAssetList.length && !primaryTargetEntryList.length && !(showFullTargetBool && fullTargetEntryList.length);
+  return (
+    <section className="decision-intent-panel" aria-label="Decision Intent">
+      <div className="decision-intent-header">
+        <div>
+          <div className="eyebrow">Decision Intent</div>
+          <h2>{bookType}</h2>
+        </div>
+        <Pill>{exitAssetList.length} exits / {primaryTargetEntryList.length} targets</Pill>
+      </div>
+      {exitAssetList.length > 0 && (
+        <div className="intent-section">
+          <strong>Assets to exit</strong>
+          <div className="asset-chip-list">
+            {exitAssetList.map((asset) => <span className="asset-chip exit" key={asset}>{asset}</span>)}
+          </div>
+        </div>
+      )}
+      {primaryTargetEntryList.length > 0 && (
+        <IntentTargetTable title={primaryTargetTitle} entryList={primaryTargetEntryList} />
+      )}
+      {bookType !== "full_target_weight_book" && fullTargetEntryList.length > 0 && (
+        <IntentTargetTable title="Full targets" entryList={fullTargetEntryList} />
+      )}
+      {emptyBool && <EmptyState text="No decision intent assets were returned for this current cycle." />}
+    </section>
+  );
+}
+
+function IntentTargetTable({
+  title,
+  entryList
+}: {
+  title: string;
+  entryList: Array<[string, unknown]>;
+}) {
+  return (
+    <div className="intent-section">
+      <strong>{title}</strong>
+      <div className="intent-target-table">
+        {entryList.map(([asset, weight]) => (
+          <div className="intent-target-row" key={asset}>
+            <span>{asset}</span>
+            <strong>{formatWeightPercent(numericValueOrNull(weight))}</strong>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function preferredEntryTargetMap(decision: DecisionPlanDetail) {
+  if (hasRecordEntriesBool(decision.entry_target_weight_map_dict)) {
+    return decision.entry_target_weight_map_dict;
+  }
+  if (decision.decision_book_type_str !== "full_target_weight_book") {
+    return decision.display_target_weight_map_dict;
+  }
+  return undefined;
+}
+
+function preferredFullTargetMap(decision: DecisionPlanDetail) {
+  if (hasRecordEntriesBool(decision.full_target_weight_map_dict)) {
+    return decision.full_target_weight_map_dict;
+  }
+  if (decision.decision_book_type_str === "full_target_weight_book") {
+    return decision.display_target_weight_map_dict;
+  }
+  return undefined;
+}
+
+function KeyValuePanel({
+  title,
+  value,
+  valueKind = "plain"
+}: {
+  title: string;
+  value: unknown;
+  valueKind?: KeyValueKind;
+}) {
+  const entryList = recordEntryList(value);
+  if (!entryList.length) return <EmptyState text={`${title} were not returned.`} />;
   return (
     <div className="key-value-panel">
       <strong>{title}</strong>
-      {Object.entries(value as Record<string, unknown>).map(([key, entry]) => (
-        <div key={key}><span>{key}</span><strong>{String(entry)}</strong></div>
+      {entryList.map(([key, entry]) => (
+        <div key={key}><span>{key}</span><strong>{formatKeyValueEntry(entry, valueKind)}</strong></div>
       ))}
     </div>
   );
 }
 
-function ListPanel({ title, values, emptyText }: { title: string; values: string[]; emptyText: string }) {
-  return (
-    <div className="key-value-panel">
-      <strong>{title}</strong>
-      {values.length ? values.map((value) => <div key={value}><span>Asset</span><strong>{value}</strong></div>) : <span>{emptyText}</span>}
-    </div>
-  );
+function hasRecordEntriesBool(value: unknown) {
+  return recordEntryList(value).length > 0;
+}
+
+function recordEntryList(value: unknown): Array<[string, unknown]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  return Object.entries(value as Record<string, unknown>);
+}
+
+function formatKeyValueEntry(value: unknown, valueKind: KeyValueKind) {
+  const numericValue = numericValueOrNull(value);
+  if (valueKind === "weight" && numericValue !== null) return formatPercent(numericValue);
+  if (typeof value === "number") return formatNumber(value);
+  if (value === null || value === undefined || value === "") return "-";
+  if (typeof value === "object") return compactJson(value);
+  return String(value);
+}
+
+function numericValueOrNull(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const numericValue = Number(value);
+    if (Number.isFinite(numericValue)) return numericValue;
+  }
+  return null;
 }
 
 function RawTab({ detail }: { detail: PodDetail | null }) {
@@ -1453,6 +1689,34 @@ function effectiveSeverity(row: PodRow): Severity {
   return row.debug_summary_dict?.severity_str || row.required_action_dict?.severity_str || row.health_str || "gray";
 }
 
+function currentCycleStepList(row: PodRow, steps: LifecycleStep[]) {
+  if (!previousCycleBool(row)) return steps;
+  return steps.map((step) => {
+    const key = normalizeStageKey(step.step_key_str);
+    if (key === "vplan") {
+      return {
+        ...step,
+        status_str: "not_built",
+        severity_str: "gray",
+        detail_str: "No VPlan has been built for the current DecisionPlan yet."
+      };
+    }
+    if (["ack", "fill", "reconcile"].includes(key)) {
+      return {
+        ...step,
+        status_str: "none",
+        severity_str: "gray",
+        detail_str: "Latest evidence belongs to a previous cycle."
+      };
+    }
+    return step;
+  });
+}
+
+function previousCycleBool(row: PodRow) {
+  return row.latest_vplan_cycle_role_str === "previous";
+}
+
 function compactStageStepList(steps: LifecycleStep[]) {
   return steps.filter((step) => step.step_key_str !== "diff");
 }
@@ -1488,6 +1752,13 @@ function tabForStage(stageKey?: string): DetailTab {
 
 function stageChipStatus(step: LifecycleStep | undefined, row: PodRow) {
   const key = normalizeStageKey(step?.step_key_str);
+  if (
+    previousCycleBool(row)
+    && ["vplan", "ack", "fill", "reconcile"].includes(key)
+    && ["not_built", "none"].includes(String(step?.status_str || ""))
+  ) {
+    return step?.status_str === "not_built" ? "not built" : "none";
+  }
   const previousPrefix = row.latest_vplan_cycle_role_str === "previous" ? "prev " : "";
   if (key === "ack") {
     const missing = row.missing_ack_count_int || 0;
@@ -1603,6 +1874,14 @@ function formatBps(value?: number | null) {
 function formatPercent(value?: number | null) {
   if (typeof value !== "number" || Number.isNaN(value)) return "-";
   return `${formatNumber(value * 100)}%`;
+}
+
+function formatWeightPercent(value?: number | null) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "-";
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(value * 100) + "%";
 }
 
 function formatPnl(value?: number | null, pct?: number | null) {
