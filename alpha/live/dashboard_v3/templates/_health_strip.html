@@ -1,0 +1,23 @@
+{# Health roll-up strip. Polled every 15s. Worst-severity wins. #}
+<section class="rounded-md border bg-white shadow-sm overflow-hidden
+                {% if health_dict.severity_str == 'red' %}border-bad/30
+                {% elif health_dict.severity_str == 'yellow' %}border-warn/30
+                {% elif health_dict.severity_str == 'green' %}border-ok/30
+                {% else %}border-ink-100{% endif %}">
+  <div class="grid grid-cols-2 lg:grid-cols-4 divide-x divide-ink-100 text-sm">
+    {% for cell_dict in health_dict.cell_dict_list %}
+      <div class="px-4 py-2 flex items-baseline gap-2 min-w-0"
+           title="{{ cell_dict.detail_str }}">
+        <span class="text-[10px] uppercase tracking-wide font-bold text-ink-500 shrink-0">
+          {{ cell_dict.label_str }}
+        </span>
+        <span class="inline-block w-2 h-2 rounded-full shrink-0
+                     {% if cell_dict.severity_str == 'red' %}bg-bad
+                     {% elif cell_dict.severity_str == 'yellow' %}bg-warn
+                     {% elif cell_dict.severity_str == 'green' %}bg-ok
+                     {% else %}bg-mute{% endif %}"></span>
+        <strong class="truncate">{{ cell_dict.value_str }}</strong>
+      </div>
+    {% endfor %}
+  </div>
+</section>

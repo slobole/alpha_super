@@ -7,6 +7,8 @@
     'gray': 'border-ink-100',
   }[sev_str] %}
 <article id="pod-{{ row_dict.pod_id_str }}"
+         data-pod-id="{{ row_dict.pod_id_str }}"
+         data-latest-event-timestamp="{{ row_dict.latest_event_timestamp_str or '' }}"
          class="rounded-md border {{ border_class_str }} bg-white shadow-sm">
 
   <button
@@ -21,7 +23,15 @@
                  {% elif sev_str == 'green' %}bg-ok{% else %}bg-mute{% endif %}"></span>
 
     <div class="flex-1 min-w-0">
-      <div class="font-semibold truncate">{{ row_dict.pod_id_str }}</div>
+      <div class="font-semibold truncate flex items-center gap-2">
+        {{ row_dict.pod_id_str }}
+        <span data-new-event-badge style="display:none"
+              class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full
+                     text-[10px] font-bold uppercase tracking-wide
+                     bg-bad-soft text-bad border border-bad/30">
+          ● new
+        </span>
+      </div>
       <div class="text-xs text-ink-500 truncate">
         {{ row_dict.strategy_import_str or '—' }}
       </div>

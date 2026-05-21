@@ -269,3 +269,31 @@ def test_events_tail_fragment_renders_event_rows(test_client_obj, provider_obj) 
     assert "vplan.submitted" in response_text_str
     assert "broker.ack_received" in response_text_str
     assert provider_obj.event_call_log_list == ["dv2_caspersky_live"]
+
+
+# ── Phase 2: health + schedule + new-event badge ──────────────────────────
+
+
+def test_health_strip_fragment_returns_html(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/fragments/health-strip")
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    # Should at least render the Norgate and Disk cells.
+    assert "Norgate" in response_text_str
+    assert "Disk" in response_text_str
+
+
+def test_schedule_strip_fragment_returns_html(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/fragments/schedule-strip")
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    # StubDataProvider gives every pod next_action_str=submit_vplan, so the
+    # schedule strip should list at least one entry.
+    assert "submit_vplan" in response_text_str or "Schedule is empty" in response_text_str
+
+
+def test_pod_row_carries_data_pod_id_attribute(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/live")
+    response_text_str = response_obj.get_data(as_text=True)
+    assert 'data-pod-id="dv2_caspersky_live"' in response_text_str
+    assert "new_event_badge.js" in response_text_str

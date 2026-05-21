@@ -21,10 +21,12 @@ from alpha.live.dashboard_v3.data import (
     get_pod_row_dict_list_for_mode,
 )
 from alpha.live.dashboard_v3.filters import FILTER_MAP_DICT
+from alpha.live.dashboard_v3.health import build_health_rollup
+from alpha.live.dashboard_v3.schedule import build_schedule_entry_list
 from alpha.live.dashboard_v3.verdict import resolve_top_bar_verdict
 
 
-DASHBOARD_V3_VERSION_STR = "0.1.0-phase-1"
+DASHBOARD_V3_VERSION_STR = "0.2.0-phase-2"
 SUPPORTED_MODE_STR_LIST = ["live", "paper", "incubation"]
 MODE_LABEL_DICT = {"live": "Live", "paper": "Paper", "incubation": "Incubation"}
 
@@ -120,6 +122,26 @@ def create_app(data_provider_obj: DataProviderProtocol | None = None) -> Flask:
             "_events_tail.html",
             event_dict_list=event_dict_list,
             pod_id_str=pod_id_str,
+        )
+
+    @flask_app_obj.route("/fragments/health-strip")
+    def health_strip_fragment_route_fn():
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        summary_dict = provider_obj.get_summary_dict()
+        health_obj = build_health_rollup(summary_dict)
+        return render_template(
+            "_health_strip.html",
+            health_dict=health_obj.as_dict(),
+        )
+
+    @flask_app_obj.route("/fragments/schedule-strip")
+    def schedule_strip_fragment_route_fn():
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        summary_dict = provider_obj.get_summary_dict()
+        schedule_entry_obj_list = build_schedule_entry_list(summary_dict)
+        return render_template(
+            "_schedule_strip.html",
+            schedule_entry_dict_list=[entry_obj.as_dict() for entry_obj in schedule_entry_obj_list],
         )
 
     return flask_app_obj

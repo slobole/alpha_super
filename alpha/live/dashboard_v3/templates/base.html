@@ -26,9 +26,27 @@
 <body class="bg-ink-50 text-ink-900 min-h-screen font-[ui-sans-serif,system-ui]">
   {% include "_top_bar.html" %}
 
+  <div class="max-w-[1480px] mx-auto px-6 pt-3 grid gap-3"
+       id="status-strip">
+    <div id="health-strip"
+         hx-get="/fragments/health-strip"
+         hx-trigger="load, every 15s"
+         hx-swap="innerHTML">
+      <div class="h-10 rounded-md border border-ink-100 bg-white"></div>
+    </div>
+    <div id="schedule-strip"
+         hx-get="/fragments/schedule-strip"
+         hx-trigger="load, every 30s"
+         hx-swap="innerHTML">
+      <div class="h-10 rounded-md border border-ink-100 bg-white"></div>
+    </div>
+  </div>
+
   <main class="max-w-[1480px] mx-auto px-6 pb-12 pt-4">
     {% block content %}{% endblock %}
   </main>
+
+  <script src="{{ url_for('static', filename='new_event_badge.js') }}" defer></script>
 
   <footer class="text-xs text-ink-500 text-center py-4 border-t border-ink-100">
     dashboard_v3 · {{ version_str }} · server time {{ server_time_str }}
