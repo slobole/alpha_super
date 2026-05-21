@@ -44,6 +44,23 @@
       <div><dt class="text-ink-500">Signal</dt><dd>{{ decision_dict.signal_timestamp_str | clock or '—' }}</dd></div>
       <div><dt class="text-ink-500">Target exec</dt><dd>{{ decision_dict.target_execution_timestamp_str | clock or '—' }}</dd></div>
     </dl>
+    {# Norgate snapshot lineage: which Norgate data feed this DecisionPlan
+       was built against. If signals look wrong, the operator wants to see
+       these two values inline, not buried in snapshot_metadata. #}
+    {% set snapshot_meta_dict = decision_dict.snapshot_metadata_dict or {} %}
+    {% set norgate_profile_str = row_dict.latest_decision_norgate_profile_str
+                                 or snapshot_meta_dict.get('norgate_data_profile_str') %}
+    {% set norgate_snapshot_date_str = row_dict.latest_decision_norgate_snapshot_date_str
+                                       or snapshot_meta_dict.get('norgate_snapshot_date_str') %}
+    {% if norgate_profile_str or norgate_snapshot_date_str %}
+      <div class="mt-2 text-xs rounded-md border border-ink-100 bg-ink-50 px-2 py-1.5
+                  flex items-center justify-between gap-3">
+        <span class="text-ink-500 uppercase tracking-wide text-[10px] font-bold">Norgate snapshot</span>
+        <span class="font-mono tabular-nums">
+          {{ norgate_profile_str or '—' }} · {{ norgate_snapshot_date_str or '—' }}
+        </span>
+      </div>
+    {% endif %}
     {% set exit_list = decision_dict.exit_asset_list or [] %}
     {% set target_map_dict = decision_dict.entry_target_weight_map_dict
                               or decision_dict.full_target_weight_map_dict

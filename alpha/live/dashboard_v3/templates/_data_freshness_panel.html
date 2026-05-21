@@ -1,0 +1,45 @@
+{# Per-pod data freshness panel.
+
+   Renders the items from ``data_freshness_dict.item_dict_list`` produced
+   by ``alpha.live.dashboard._build_data_freshness_dict``. Always-visible
+   between the detail header and the stage timeline so the operator can
+   answer "is this pod's input data healthy?" without leaving the panel.
+
+   Norgate sync status is the first item by design — if it's stale or
+   failed, every signal this pod produces is suspect, and the operator
+   should see that immediately.
+#}
+{% set freshness_dict = detail_dict.data_freshness_dict or {} %}
+{% set item_dict_list = freshness_dict.item_dict_list or [] %}
+
+{% if item_dict_list %}
+  <section class="rounded-md border border-ink-100 bg-white">
+    <header class="px-3 py-2 flex items-baseline justify-between text-xs uppercase tracking-wide text-ink-500 border-b border-ink-100">
+      <span>Data Freshness</span>
+      <span>{{ item_dict_list | length }} sources</span>
+    </header>
+    <ul class="divide-y divide-ink-100 text-sm">
+      {% for item_dict in item_dict_list %}
+        {% set item_sev_str = item_dict.severity_str | normalize_severity %}
+        <li class="px-3 py-1.5 grid grid-cols-12 gap-2 items-baseline">
+          <div class="col-span-3 flex items-center gap-2 min-w-0">
+            <span class="inline-block w-2 h-2 rounded-full shrink-0
+                         {% if item_sev_str == 'red' %}bg-bad
+                         {% elif item_sev_str == 'yellow' %}bg-warn
+                         {% elif item_sev_str == 'green' %}bg-ok
+                         {% else %}bg-mute{% endif %}"></span>
+            <strong class="truncate">{{ item_dict.label_str or '—' }}</strong>
+          </div>
+          <div class="col-span-3 text-xs text-ink-700 tabular-nums truncate"
+               title="{{ item_dict.value_str or '' }}">
+            {{ item_dict.value_str or '—' }}
+          </div>
+          <div class="col-span-6 text-xs text-ink-500 truncate"
+               title="{{ item_dict.detail_str or '' }}">
+            {{ item_dict.detail_str or '' }}
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  </section>
+{% endif %}

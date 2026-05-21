@@ -198,7 +198,16 @@ class StubDataProvider:
             "pod_row_dict": matching_row_dict,
             "required_action_dict": matching_row_dict["required_action_dict"],
             "lifecycle_step_dict_list": matching_row_dict["lifecycle_step_dict_list"],
-            "data_freshness_dict": {},
+            "data_freshness_dict": {
+                "item_dict_list": [
+                    {"label_str": "Norgate", "value_str": "2026-05-21",
+                     "severity_str": "green", "detail_str": "source=norgate_only · snapshot ready"},
+                    {"label_str": "Pod state", "value_str": "2026-05-21T16:14:32+00:00",
+                     "severity_str": "green", "detail_str": "latest persisted state"},
+                    {"label_str": "DIFF artifact", "value_str": None,
+                     "severity_str": "gray", "detail_str": "not_run"},
+                ],
+            },
             "eod_snapshot_dict": {"status_str": "pending"},
             "rehearsal_status_dict": {},
             "debug_story_dict": {},
@@ -217,6 +226,10 @@ class StubDataProvider:
                 "target_execution_timestamp_str": "2026-05-21T16:00:00+00:00",
                 "entry_target_weight_map_dict": {"AAPL": 0.25, "MSFT": 0.25},
                 "exit_asset_list": ["TSLA"],
+                "snapshot_metadata_dict": {
+                    "norgate_data_profile_str": "norgate_only",
+                    "norgate_snapshot_date_str": "2026-05-20",
+                },
             },
             "latest_vplan_dict": {
                 "vplan_id_int": 87,
@@ -386,6 +399,33 @@ def test_pod_detail_header_fragment_polls_itself(test_client_obj) -> None:
 def test_pod_detail_header_fragment_unknown_pod_returns_404(test_client_obj) -> None:
     response_obj = test_client_obj.get("/fragments/pod-detail-header/no_such_pod")
     assert response_obj.status_code == 404
+
+
+# ── Norgate freshness branch ──────────────────────────────────────────────
+
+
+def test_pod_detail_includes_data_freshness_panel(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/fragments/pod-detail/dv2_caspersky_live")
+    response_text_str = response_obj.get_data(as_text=True)
+    # Panel header is present.
+    assert "Data Freshness" in response_text_str
+    # All three stub freshness items render with their labels.
+    assert "Norgate" in response_text_str
+    assert "Pod state" in response_text_str
+    assert "DIFF artifact" in response_text_str
+    # Norgate's value (snapshot date) appears.
+    assert "2026-05-21" in response_text_str
+    # Detail text appears for at least one item.
+    assert "source=norgate_only" in response_text_str
+
+
+def test_decision_stage_card_shows_norgate_snapshot_meta(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/fragments/pod-detail/dv2_caspersky_live")
+    response_text_str = response_obj.get_data(as_text=True)
+    # Snapshot lineage line surfaces the profile + snapshot date.
+    assert "Norgate snapshot" in response_text_str
+    assert "norgate_only" in response_text_str
+    assert "2026-05-20" in response_text_str
 
 
 def test_pod_detail_fragment_unknown_pod_returns_404(test_client_obj) -> None:
