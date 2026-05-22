@@ -1337,7 +1337,82 @@ def test_dashboard_norgate_ready_snapshot_does_not_override_waiting_submission_w
     assert row_dict["required_action_dict"]["label_str"] == "Wait submission window"
     assert row_dict["debug_summary_dict"]["verdict_label_str"] == "Wait submission window"
     assert norgate_item_dict["severity_str"] == "green"
-    assert "Current plan data: ready" in norgate_item_dict["detail_str"]
+    assert "Not required for current cycle" in norgate_item_dict["detail_str"]
+    assert "Valid current DecisionPlan exists" in norgate_item_dict["detail_str"]
+    assert all(
+        alert_dict["label_str"] != "Norgate freshness"
+        for alert_dict in summary_dict["alert_dict_list"]
+    )
+
+
+def test_dashboard_failed_norgate_sync_does_not_alert_during_valid_current_plan(
+    tmp_path: Path,
+    monkeypatch,
+):
+    releases_root_path_obj = tmp_path / "releases"
+    _write_release_manifest(
+        releases_root_path_obj,
+        user_id_str="paper_user",
+        pod_id_str="pod_waiting_plan_failed_sync",
+        mode_str="paper",
+    )
+    release_obj = load_release_list(str(releases_root_path_obj))[0]
+    db_path_obj = tmp_path / "state" / "pod_waiting_plan_failed_sync.sqlite3"
+    _seed_current_planned_decision_after_completed_execution(db_path_obj, release_obj)
+    config_path_obj = tmp_path / "dashboard_config.yaml"
+    _write_config(config_path_obj, {"pod_waiting_plan_failed_sync": str(db_path_obj)})
+    snapshot_root_path_obj = tmp_path / "snapshots"
+    snapshot_root_path_obj.mkdir(parents=True)
+    (snapshot_root_path_obj / ".client_sync_status.json").write_text(
+        json.dumps(
+            {
+                "status_str": "failed",
+                "reason_code_str": "sync_failed",
+                "required_profile_list": ["norgate_eod_sp500_pit"],
+                "error_str": "HTTP 401",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "true")
+    monkeypatch.setenv("NORGATE_SNAPSHOT_ROOT", str(snapshot_root_path_obj))
+    monkeypatch.setattr(
+        norgate_sync_module,
+        "load_valid_snapshot_manifest",
+        lambda profile_str: (_ for _ in ()).throw(RuntimeError("manifest missing")),
+    )
+    monkeypatch.setattr(
+        norgate_sync_module.scheduler_utils,
+        "evaluate_build_gate_dict",
+        lambda release_obj, as_of_ts: {"reason_code_str": "snapshot_not_ready_for_session"},
+    )
+    app_obj = DashboardApp(
+        releases_root_path_str=str(releases_root_path_obj),
+        config_path_str=str(config_path_obj),
+        results_root_path_str=str(tmp_path / "results"),
+    )
+
+    summary_dict = build_dashboard_summary_dict(
+        app_obj,
+        as_of_ts=datetime(2024, 1, 3, 12, 0, tzinfo=UTC),
+    )
+    row_dict = _row_by_pod_id(summary_dict, "pod_waiting_plan_failed_sync")
+    freshness_dict = row_dict["data_freshness_dict"]
+    norgate_item_dict = next(
+        item_dict
+        for item_dict in freshness_dict["item_dict_list"]
+        if item_dict["label_str"] == "Norgate"
+    )
+    gate_dict = freshness_dict["norgate_current_cycle_gate_dict"]
+
+    assert row_dict["required_action_dict"]["label_str"] == "Wait submission window"
+    assert freshness_dict["norgate_status_str"] == "failed"
+    assert gate_dict["gate_required_bool"] is False
+    assert gate_dict["current_cycle_continuation_allowed_bool"] is True
+    assert gate_dict["blocked_stage_str"] == "none"
+    assert norgate_item_dict["severity_str"] == "green"
+    assert "Valid current DecisionPlan exists" in norgate_item_dict["detail_str"]
+    assert "Next DecisionPlan raw sync status=failed" in norgate_item_dict["detail_str"]
     assert all(
         alert_dict["label_str"] != "Norgate freshness"
         for alert_dict in summary_dict["alert_dict_list"]
@@ -1395,12 +1470,147 @@ def test_dashboard_expired_norgate_snapshot_still_alerts_during_waiting_submissi
     )
 
     assert row_dict["required_action_dict"]["label_str"] == "Expire stale plan"
+    gate_dict = row_dict["data_freshness_dict"]["norgate_current_cycle_gate_dict"]
+    assert gate_dict["status_label_str"] == "Stale plan needs expiry"
+    assert gate_dict["gate_required_bool"] is False
+    assert gate_dict["blocked_stage_str"] == "decision_plan"
     assert norgate_item_dict["severity_str"] == "red"
     assert "snapshot_window_expired" in norgate_item_dict["detail_str"]
     assert any(
         alert_dict["label_str"] == "Norgate freshness"
         for alert_dict in summary_dict["alert_dict_list"]
     )
+
+
+def test_dashboard_norgate_gate_rejects_foreign_decision_plan(
+    tmp_path: Path,
+    monkeypatch,
+):
+    releases_root_path_obj = tmp_path / "releases"
+    _write_release_manifest(
+        releases_root_path_obj,
+        user_id_str="paper_user",
+        pod_id_str="pod_foreign_plan",
+        mode_str="paper",
+    )
+    release_obj = load_release_list(str(releases_root_path_obj))[0]
+    db_path_obj = tmp_path / "state" / "pod_foreign_plan.sqlite3"
+    _seed_current_planned_decision_after_completed_execution(db_path_obj, release_obj)
+    with sqlite3.connect(db_path_obj) as connection_obj:
+        connection_obj.execute(
+            """
+            UPDATE decision_plan
+            SET release_id_str = ?
+            WHERE decision_plan_id_int = (
+                SELECT MAX(decision_plan_id_int) FROM decision_plan
+            )
+            """,
+            ("paper_user.old_release.paper.v1",),
+        )
+    config_path_obj = tmp_path / "dashboard_config.yaml"
+    _write_config(config_path_obj, {"pod_foreign_plan": str(db_path_obj)})
+    snapshot_root_path_obj = tmp_path / "snapshots"
+    snapshot_root_path_obj.mkdir(parents=True)
+    monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "true")
+    monkeypatch.setenv("NORGATE_SNAPSHOT_ROOT", str(snapshot_root_path_obj))
+    monkeypatch.setattr(
+        norgate_sync_module,
+        "load_valid_snapshot_manifest",
+        lambda profile_str: SimpleNamespace(
+            snapshot_date_ts=datetime(2024, 1, 2, tzinfo=UTC),
+            manifest_hash_str="abcdef1234567890",
+        ),
+    )
+    monkeypatch.setattr(
+        norgate_sync_module.scheduler_utils,
+        "evaluate_build_gate_dict",
+        lambda release_obj, as_of_ts: {"reason_code_str": "snapshot_not_ready_for_session"},
+    )
+    app_obj = DashboardApp(
+        releases_root_path_str=str(releases_root_path_obj),
+        config_path_str=str(config_path_obj),
+        results_root_path_str=str(tmp_path / "results"),
+    )
+
+    summary_dict = build_dashboard_summary_dict(
+        app_obj,
+        as_of_ts=datetime(2024, 1, 3, 15, 0, tzinfo=UTC),
+    )
+    row_dict = _row_by_pod_id(summary_dict, "pod_foreign_plan")
+    gate_dict = row_dict["data_freshness_dict"]["norgate_current_cycle_gate_dict"]
+
+    assert row_dict["required_action_dict"]["label_str"] == "Review DecisionPlan gate"
+    assert gate_dict["severity_str"] == "red"
+    assert gate_dict["decision_plan_provenance_status_str"] == "release_mismatch"
+    assert gate_dict["current_cycle_continuation_allowed_bool"] is False
+    assert any(
+        alert_dict["label_str"] == "Review DecisionPlan gate"
+        for alert_dict in summary_dict["alert_dict_list"]
+    )
+
+
+def test_dashboard_norgate_gate_rejects_missing_decision_profile(
+    tmp_path: Path,
+    monkeypatch,
+):
+    releases_root_path_obj = tmp_path / "releases"
+    _write_release_manifest(
+        releases_root_path_obj,
+        user_id_str="paper_user",
+        pod_id_str="pod_missing_profile",
+        mode_str="paper",
+    )
+    release_obj = load_release_list(str(releases_root_path_obj))[0]
+    db_path_obj = tmp_path / "state" / "pod_missing_profile.sqlite3"
+    _seed_current_planned_decision_after_completed_execution(db_path_obj, release_obj)
+    with sqlite3.connect(db_path_obj) as connection_obj:
+        connection_obj.execute(
+            """
+            UPDATE decision_plan
+            SET snapshot_metadata_json_str = ?
+            WHERE decision_plan_id_int = (
+                SELECT MAX(decision_plan_id_int) FROM decision_plan
+            )
+            """,
+            ("{}",),
+        )
+    config_path_obj = tmp_path / "dashboard_config.yaml"
+    _write_config(config_path_obj, {"pod_missing_profile": str(db_path_obj)})
+    snapshot_root_path_obj = tmp_path / "snapshots"
+    snapshot_root_path_obj.mkdir(parents=True)
+    monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "true")
+    monkeypatch.setenv("NORGATE_SNAPSHOT_ROOT", str(snapshot_root_path_obj))
+    monkeypatch.setattr(
+        norgate_sync_module,
+        "load_valid_snapshot_manifest",
+        lambda profile_str: SimpleNamespace(
+            snapshot_date_ts=datetime(2024, 1, 2, tzinfo=UTC),
+            manifest_hash_str="abcdef1234567890",
+        ),
+    )
+    monkeypatch.setattr(
+        norgate_sync_module.scheduler_utils,
+        "evaluate_build_gate_dict",
+        lambda release_obj, as_of_ts: {"reason_code_str": "snapshot_not_ready_for_session"},
+    )
+    app_obj = DashboardApp(
+        releases_root_path_str=str(releases_root_path_obj),
+        config_path_str=str(config_path_obj),
+        results_root_path_str=str(tmp_path / "results"),
+    )
+
+    detail_dict = build_pod_detail_dict(
+        app_obj,
+        "pod_missing_profile",
+        as_of_ts=datetime(2024, 1, 3, 15, 0, tzinfo=UTC),
+    )
+    gate_dict = detail_dict["data_freshness_dict"]["norgate_current_cycle_gate_dict"]
+    blocker_dict = detail_dict["debug_story_dict"]["blocker_dict_list"][0]
+
+    assert detail_dict["required_action_dict"]["label_str"] == "Review DecisionPlan gate"
+    assert gate_dict["severity_str"] == "red"
+    assert gate_dict["decision_plan_provenance_status_str"] == "missing_profile"
+    assert blocker_dict["label_str"] == "DecisionPlan gate blocked"
 
 
 def test_dashboard_norgate_status_labels_waiting_and_failed_stages(tmp_path: Path, monkeypatch):

@@ -5,12 +5,13 @@
    between the detail header and the stage timeline so the operator can
    answer "is this pod's input data healthy?" without leaving the panel.
 
-   Norgate sync status is the first item by design — if it's stale or
-   failed, every signal this pod produces is suspect, and the operator
-   should see that immediately.
+   Norgate status is split into the current-cycle DecisionPlan gate and
+   the raw snapshot/source status. A failed raw sync can matter for the
+   next DecisionPlan without blocking an already-frozen current plan.
 #}
 {% set freshness_dict = detail_dict.data_freshness_dict or {} %}
 {% set item_dict_list = freshness_dict.item_dict_list or [] %}
+{% set norgate_gate_dict = freshness_dict.norgate_current_cycle_gate_dict or {} %}
 
 {% if item_dict_list %}
   <section class="rounded-md border border-ink-100 bg-white">
@@ -18,6 +19,25 @@
       <span>Data Freshness</span>
       <span>{{ item_dict_list | length }} sources</span>
     </header>
+    {% if norgate_gate_dict.gate_enabled_bool %}
+      {% set gate_sev_str = norgate_gate_dict.severity_str | normalize_severity %}
+      <div class="px-3 py-2 border-b border-ink-100 bg-ink-50 grid grid-cols-12 gap-2 items-start text-xs">
+        <div class="col-span-3 flex items-center gap-2 min-w-0">
+          <span class="inline-block w-2 h-2 rounded-full shrink-0
+                       {% if gate_sev_str == 'red' %}bg-bad
+                       {% elif gate_sev_str == 'yellow' %}bg-warn
+                       {% elif gate_sev_str == 'green' %}bg-ok
+                       {% else %}bg-mute{% endif %}"></span>
+          <strong class="truncate">DecisionPlan gate</strong>
+        </div>
+        <div class="col-span-3 text-ink-700 font-medium">
+          {{ norgate_gate_dict.status_label_str or 'unknown' }}
+        </div>
+        <div class="col-span-6 text-ink-500 break-words">
+          {{ norgate_gate_dict.detail_str or '' }}
+        </div>
+      </div>
+    {% endif %}
     <ul class="divide-y divide-ink-100 text-sm">
       {% for item_dict in item_dict_list %}
         {% set item_sev_str = item_dict.severity_str | normalize_severity %}

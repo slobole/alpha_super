@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
 import secrets
@@ -48,6 +48,8 @@ SAFE_ACTION_NAME_LIST = [
     "eod_snapshot",
 ]
 ACTION_TOKEN_HEADER_STR = "X-Alpha-Action-Token"
+NORGATE_SNAPSHOT_GATED_SIGNAL_CLOCK_SET = {"eod_snapshot_ready", "month_end_snapshot_ready"}
+NORGATE_CURRENT_DECISION_STATUS_SET = {"planned", "vplan_ready", "submitted"}
 
 
 @dataclass(frozen=True)
@@ -600,6 +602,11 @@ def build_pod_row_dict(
         "mode_str": release_obj.mode_str,
         "account_route_str": release_obj.account_route_str,
         "strategy_import_str": release_obj.strategy_import_str,
+        "signal_clock_str": release_obj.signal_clock_str,
+        "session_calendar_id_str": release_obj.session_calendar_id_str,
+        "execution_policy_str": release_obj.execution_policy_str,
+        "data_profile_str": release_obj.data_profile_str,
+        "as_of_timestamp_str": as_of_ts.isoformat(),
         "auto_submit_enabled_bool": bool(release_obj.auto_submit_enabled_bool),
         "db_path_str": pod_target_obj.db_path_str,
         "db_exists_bool": db_path_obj.exists(),
@@ -607,6 +614,9 @@ def build_pod_row_dict(
         "db_status_str": "ok" if db_path_obj.exists() else "missing",
         "latest_decision_plan_status_str": None,
         "latest_decision_plan_id_int": None,
+        "latest_decision_release_id_str": None,
+        "latest_decision_execution_policy_str": None,
+        "latest_decision_signal_timestamp_str": None,
         "latest_decision_norgate_profile_str": None,
         "latest_decision_norgate_snapshot_date_str": None,
         "latest_decision_plan_submission_timestamp_str": None,
@@ -737,6 +747,15 @@ def build_pod_row_dict(
         )
         base_row_dict["latest_decision_plan_status_str"] = latest_decision_plan_row_dict.get(
             "status_str"
+        )
+        base_row_dict["latest_decision_release_id_str"] = latest_decision_plan_row_dict.get(
+            "release_id_str"
+        )
+        base_row_dict["latest_decision_execution_policy_str"] = (
+            latest_decision_plan_row_dict.get("execution_policy_str")
+        )
+        base_row_dict["latest_decision_signal_timestamp_str"] = (
+            latest_decision_plan_row_dict.get("signal_timestamp_str")
         )
         base_row_dict["latest_decision_plan_submission_timestamp_str"] = (
             latest_decision_plan_row_dict.get("submission_timestamp_str")
@@ -2185,6 +2204,14 @@ def _build_required_action_base_dict(row_dict: dict[str, Any]) -> dict[str, Any]
             "Latest reconciliation is not passed.",
             "status",
         )
+    norgate_gate_dict = _build_norgate_current_cycle_gate_dict(row_dict)
+    if str(norgate_gate_dict.get("severity_str") or "") == "red":
+        return _required_action_dict(
+            "Review DecisionPlan gate",
+            "red",
+            str(norgate_gate_dict.get("detail_str") or "Norgate DecisionPlan gate needs review."),
+            "show_decision_plan",
+        )
     if next_action_str == "build_decision_plan":
         return _required_action_dict(
             "Build DecisionPlan",
@@ -2579,6 +2606,7 @@ def _status_to_severity_str(
 def _build_data_freshness_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
     eod_snapshot_dict = row_dict.get("eod_snapshot_dict") or _empty_eod_snapshot_dict()
     norgate_snapshot_status_dict = row_dict.get("norgate_snapshot_status_dict") or {}
+    norgate_current_cycle_gate_dict = _build_norgate_current_cycle_gate_dict(row_dict)
     norgate_item_severity_str = str(norgate_snapshot_status_dict.get("severity_str") or "gray")
     norgate_detail_fragment_list = [
         f"source={norgate_snapshot_status_dict.get('data_source_mode_str')}",
@@ -2594,18 +2622,22 @@ def _build_data_freshness_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
         )
     if norgate_snapshot_status_dict.get("last_error_str"):
         norgate_detail_fragment_list.append(f"error={norgate_snapshot_status_dict.get('last_error_str')}")
-    if _norgate_ready_for_existing_trade_intent_bool(row_dict):
+    if _norgate_not_blocking_current_cycle_bool(row_dict):
         norgate_item_severity_str = "green"
-        snapshot_date_str = str(norgate_snapshot_status_dict.get("snapshot_date_str") or "-")
         norgate_detail_fragment_list = [
-            f"Current plan data: ready, snapshot date {snapshot_date_str}",
-            (
-                "Current session snapshot: not due yet"
-                if norgate_snapshot_status_dict.get("build_gate_reason_code_str")
-                == "snapshot_not_ready_for_session"
-                else "New-build data gate is not needed for the active planned/executed cycle"
-            ),
+            str(norgate_current_cycle_gate_dict.get("status_label_str") or ""),
+            str(norgate_current_cycle_gate_dict.get("detail_str") or ""),
         ]
+        raw_status_str = str(norgate_snapshot_status_dict.get("status_str") or "")
+        if raw_status_str and raw_status_str not in {"ready", "direct"}:
+            raw_detail_str = f"Next DecisionPlan raw sync status={raw_status_str}"
+            raw_reason_str = str(norgate_snapshot_status_dict.get("reason_code_str") or "")
+            if raw_reason_str:
+                raw_detail_str += f", reason={raw_reason_str}"
+            raw_error_str = str(norgate_snapshot_status_dict.get("last_error_str") or "")
+            if raw_error_str:
+                raw_detail_str += f", error={raw_error_str}"
+            norgate_detail_fragment_list.append(raw_detail_str)
     item_dict_list = [
         _freshness_item_dict(
             "Norgate",
@@ -2670,6 +2702,7 @@ def _build_data_freshness_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
         "latest_event_timestamp_str": row_dict.get("latest_event_timestamp_str"),
         "diff_artifact_timestamp_str": row_dict.get("latest_diff_timestamp_str"),
         "norgate_snapshot_status_dict": norgate_snapshot_status_dict,
+        "norgate_current_cycle_gate_dict": norgate_current_cycle_gate_dict,
         "norgate_data_source_mode_str": norgate_snapshot_status_dict.get("data_source_mode_str"),
         "norgate_status_str": norgate_snapshot_status_dict.get("status_str"),
         "norgate_sync_stage_label_str": norgate_snapshot_status_dict.get("sync_stage_label_str"),
@@ -2690,35 +2723,185 @@ def _build_data_freshness_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _norgate_ready_for_existing_trade_intent_bool(row_dict: dict[str, Any]) -> bool:
-    norgate_snapshot_status_dict = row_dict.get("norgate_snapshot_status_dict") or {}
-    if str(norgate_snapshot_status_dict.get("status_str") or "") != "ready":
-        return False
-    if norgate_snapshot_status_dict.get("last_error_str"):
-        return False
-    build_gate_reason_code_str = str(
-        norgate_snapshot_status_dict.get("build_gate_reason_code_str") or ""
+def _build_norgate_current_cycle_gate_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
+    signal_clock_str = scheduler_utils.normalize_signal_clock_str(
+        str(row_dict.get("signal_clock_str") or "")
     )
-    if build_gate_reason_code_str and build_gate_reason_code_str != "snapshot_not_ready_for_session":
-        return False
-    if str(norgate_snapshot_status_dict.get("severity_str") or "green") == "red":
-        return False
-    profile_str = str(norgate_snapshot_status_dict.get("profile_str") or "")
-    snapshot_date_str = str(norgate_snapshot_status_dict.get("snapshot_date_str") or "")
+    gate_enabled_bool = signal_clock_str in NORGATE_SNAPSHOT_GATED_SIGNAL_CLOCK_SET
+    decision_status_str = str(row_dict.get("latest_decision_plan_status_str") or "")
+    next_action_str = str(row_dict.get("next_action_str") or "")
+    provenance_status_str = _decision_plan_norgate_provenance_status_str(row_dict)
+    continuation_allowed_bool = _norgate_not_blocking_current_cycle_bool(row_dict)
+
+    if not gate_enabled_bool:
+        status_label_str = "Not Norgate-gated"
+        detail_str = "This pod does not use the Norgate snapshot DecisionPlan gate."
+        gate_required_bool = False
+        blocked_stage_str = "none"
+        severity_str = "gray"
+    elif continuation_allowed_bool:
+        status_label_str = "Not required for current cycle"
+        detail_str = (
+            "Valid current DecisionPlan exists; VPlan / submit / reconcile continue "
+            "without Norgate sync."
+        )
+        gate_required_bool = False
+        blocked_stage_str = "none"
+        severity_str = "green"
+    elif provenance_status_str in {
+        "release_mismatch",
+        "execution_policy_mismatch",
+        "missing_profile",
+        "profile_mismatch",
+    }:
+        vplan_exists_bool = row_dict.get("latest_vplan_is_for_latest_decision_bool") is True
+        status_label_str = "DecisionPlan provenance invalid"
+        gate_required_bool = not vplan_exists_bool
+        blocked_stage_str = "none" if vplan_exists_bool else "vplan"
+        if vplan_exists_bool:
+            detail_str = (
+                "DecisionPlan provenance is not valid, but a VPlan already exists; "
+                "submit/reconcile status remains the active operator truth."
+            )
+            severity_str = "gray"
+        else:
+            detail_str = (
+                "The latest DecisionPlan does not match the active release/provenance; "
+                "VPlan build should stay blocked."
+            )
+            severity_str = "red"
+    elif next_action_str == "build_decision_plan":
+        status_label_str = "Required for next DecisionPlan"
+        detail_str = "Norgate readiness gates only new DecisionPlan creation."
+        gate_required_bool = True
+        blocked_stage_str = "decision_plan"
+        severity_str = "yellow"
+    elif next_action_str == "expire_stale":
+        status_label_str = "Stale plan needs expiry"
+        detail_str = "The current plan is stale; expire it before building new intent."
+        gate_required_bool = False
+        blocked_stage_str = "decision_plan"
+        severity_str = "yellow"
+    elif decision_status_str:
+        status_label_str = "Waiting for next DecisionPlan gate"
+        detail_str = "Norgate will be checked again only when a new DecisionPlan is due."
+        gate_required_bool = False
+        blocked_stage_str = "none"
+        severity_str = "gray"
+    else:
+        status_label_str = "Waiting for signal window"
+        detail_str = "No DecisionPlan exists yet; Norgate will be checked before one is built."
+        gate_required_bool = False
+        blocked_stage_str = "none"
+        severity_str = "gray"
+
+    return {
+        "gate_enabled_bool": gate_enabled_bool,
+        "gate_required_bool": gate_required_bool,
+        "current_cycle_continuation_allowed_bool": continuation_allowed_bool,
+        "blocked_stage_str": blocked_stage_str,
+        "severity_str": severity_str,
+        "status_label_str": status_label_str,
+        "detail_str": detail_str,
+        "signal_clock_str": signal_clock_str,
+        "decision_plan_status_str": decision_status_str,
+        "decision_plan_provenance_status_str": provenance_status_str,
+        "expected_profile_str": str(row_dict.get("data_profile_str") or ""),
+        "decision_profile_str": str(row_dict.get("latest_decision_norgate_profile_str") or ""),
+        "decision_snapshot_date_str": str(
+            row_dict.get("latest_decision_norgate_snapshot_date_str") or ""
+        ),
+    }
+
+
+def _decision_plan_norgate_provenance_status_str(row_dict: dict[str, Any]) -> str:
+    signal_clock_str = scheduler_utils.normalize_signal_clock_str(
+        str(row_dict.get("signal_clock_str") or "")
+    )
+    if signal_clock_str not in NORGATE_SNAPSHOT_GATED_SIGNAL_CLOCK_SET:
+        return "not_applicable"
+    if row_dict.get("latest_decision_plan_id_int") is None:
+        return "missing_decision_plan"
+    expected_release_id_str = str(row_dict.get("release_id_str") or "")
+    decision_release_id_str = str(row_dict.get("latest_decision_release_id_str") or "")
+    if expected_release_id_str and decision_release_id_str != expected_release_id_str:
+        return "release_mismatch"
+    expected_execution_policy_str = str(row_dict.get("execution_policy_str") or "")
+    decision_execution_policy_str = str(
+        row_dict.get("latest_decision_execution_policy_str") or ""
+    )
+    if (
+        expected_execution_policy_str
+        and decision_execution_policy_str != expected_execution_policy_str
+    ):
+        return "execution_policy_mismatch"
+    expected_profile_str = str(row_dict.get("data_profile_str") or "")
     decision_profile_str = str(row_dict.get("latest_decision_norgate_profile_str") or "")
-    decision_snapshot_date_str = str(
-        row_dict.get("latest_decision_norgate_snapshot_date_str") or ""
-    )
-    if not decision_profile_str or not decision_snapshot_date_str:
-        return False
-    if profile_str != decision_profile_str or snapshot_date_str != decision_snapshot_date_str:
+    if not decision_profile_str:
+        return "missing_profile"
+    if expected_profile_str and decision_profile_str != expected_profile_str:
+        return "profile_mismatch"
+    return "matched"
+
+
+def _norgate_not_blocking_current_cycle_bool(row_dict: dict[str, Any]) -> bool:
+    if _decision_plan_norgate_provenance_status_str(row_dict) != "matched":
         return False
     decision_status_str = str(row_dict.get("latest_decision_plan_status_str") or "")
-    if decision_status_str not in {"planned", "vplan_ready", "submitted", "completed"}:
+    if decision_status_str in NORGATE_CURRENT_DECISION_STATUS_SET:
+        return str(row_dict.get("next_action_str") or "") != "expire_stale"
+    if decision_status_str == "completed":
+        return _completed_decision_plan_covers_norgate_signal_cycle_bool(row_dict)
+    return False
+
+
+def _completed_decision_plan_covers_norgate_signal_cycle_bool(row_dict: dict[str, Any]) -> bool:
+    try:
+        signal_timestamp_ts = _parse_timestamp_ts(
+            str(row_dict.get("latest_decision_signal_timestamp_str") or "")
+        )
+        as_of_ts = _parse_timestamp_ts(str(row_dict.get("as_of_timestamp_str") or ""))
+    except ValueError:
         return False
-    if str(row_dict.get("next_action_str") or "") in {"build_decision_plan", "expire_stale"}:
+    calendar_id_str = str(row_dict.get("session_calendar_id_str") or "")
+    signal_clock_str = scheduler_utils.normalize_signal_clock_str(
+        str(row_dict.get("signal_clock_str") or "")
+    )
+    try:
+        signal_session_label_ts = scheduler_utils.session_label_from_timestamp_ts(
+            signal_timestamp_ts,
+            calendar_id_str,
+        )
+    except ValueError:
         return False
-    return True
+    if signal_session_label_ts is None:
+        return False
+    if signal_clock_str == "eod_snapshot_ready":
+        next_signal_session_label_ts = scheduler_utils.get_next_session_label_ts(
+            signal_session_label_ts,
+            calendar_id_str,
+        )
+    elif signal_clock_str == "month_end_snapshot_ready":
+        next_signal_session_label_ts = scheduler_utils.get_next_session_label_ts(
+            signal_session_label_ts,
+            calendar_id_str,
+        )
+        while not scheduler_utils.is_last_session_of_month_bool(
+            next_signal_session_label_ts,
+            calendar_id_str,
+        ):
+            next_signal_session_label_ts = scheduler_utils.get_next_session_label_ts(
+                next_signal_session_label_ts,
+                calendar_id_str,
+            )
+    else:
+        return True
+    next_ready_timestamp_ts = scheduler_utils.get_session_close_timestamp_ts(
+        next_signal_session_label_ts,
+        calendar_id_str,
+    ) + timedelta(minutes=runner.DEFAULT_EOD_SNAPSHOT_BUFFER_MINUTES_INT)
+    market_as_of_ts = scheduler_utils.to_market_timestamp_ts(as_of_ts, calendar_id_str)
+    return market_as_of_ts < next_ready_timestamp_ts
 
 
 def _post_sync_data_load_failure_event_dict(
@@ -2871,7 +3054,7 @@ def _freshness_alert_dict(
     value_obj = item_dict.get("value_str")
     if label_str == "DIFF artifact":
         return None
-    if label_str == "Norgate" and _norgate_ready_for_existing_trade_intent_bool(row_dict):
+    if label_str == "Norgate" and _norgate_not_blocking_current_cycle_bool(row_dict):
         return None
     if severity_str in {"red", "yellow"}:
         return _alert_dict(
@@ -3090,6 +3273,23 @@ def _build_debug_candidate_dict_list(row_dict: dict[str, Any]) -> list[dict[str,
                 timestamp_str=row_dict.get("latest_reconciliation_timestamp_str"),
             )
         )
+    norgate_gate_dict = _build_norgate_current_cycle_gate_dict(row_dict)
+    if str(norgate_gate_dict.get("severity_str") or "") == "red":
+        candidate_dict_list.append(
+            _debug_candidate_dict(
+                priority_int=45,
+                severity_str="red",
+                label_str="DecisionPlan gate blocked",
+                reason_str=str(norgate_gate_dict.get("detail_str") or ""),
+                evidence_str=(
+                    f"provenance={norgate_gate_dict.get('decision_plan_provenance_status_str')}, "
+                    f"expected_profile={norgate_gate_dict.get('expected_profile_str')}, "
+                    f"decision_profile={norgate_gate_dict.get('decision_profile_str')}"
+                ),
+                inspect_command_name_str="show_decision_plan",
+                timestamp_str=row_dict.get("latest_decision_plan_submission_timestamp_str"),
+            )
+        )
 
     diff_status_str = str(row_dict.get("latest_diff_status_str") or "not_run")
     if diff_status_str in {"red", "yellow"}:
@@ -3131,7 +3331,7 @@ def _build_debug_candidate_dict_list(row_dict: dict[str, Any]) -> list[dict[str,
             continue
         if (
             item_label_str == "Norgate"
-            and _norgate_ready_for_existing_trade_intent_bool(row_dict)
+            and _norgate_not_blocking_current_cycle_bool(row_dict)
         ):
             continue
         if item_severity_str in {"red", "yellow"}:
