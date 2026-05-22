@@ -1337,12 +1337,59 @@ def test_dashboard_norgate_ready_snapshot_does_not_override_waiting_submission_w
     assert row_dict["required_action_dict"]["label_str"] == "Wait submission window"
     assert row_dict["debug_summary_dict"]["verdict_label_str"] == "Wait submission window"
     assert norgate_item_dict["severity_str"] == "green"
+    # Primary detail line: the gate verdict.
     assert "Not required for current cycle" in norgate_item_dict["detail_str"]
-    assert "Valid current DecisionPlan exists" in norgate_item_dict["detail_str"]
+    # Supporting facts live in the structured sub-detail list.
+    sub_detail_str_list = norgate_item_dict["sub_detail_str_list"]
+    assert any("Valid current DecisionPlan exists" in sub_str for sub_str in sub_detail_str_list)
     assert all(
         alert_dict["label_str"] != "Norgate freshness"
         for alert_dict in summary_dict["alert_dict_list"]
     )
+
+
+def test_freshness_item_dict_defaults_to_empty_sub_detail_str_list():
+    """Every freshness item carries the structured ``sub_detail_str_list``
+    field. Items that don't need bullets still expose it as ``[]`` so consumers
+    never have to check ``key in item_dict`` — they can iterate unconditionally.
+    """
+    from alpha.live.dashboard import _freshness_item_dict
+
+    item_dict = _freshness_item_dict("Disk", "47% used", "green", "23 GB free")
+    assert item_dict["detail_str"] == "23 GB free"
+    assert item_dict["sub_detail_str_list"] == []
+
+
+def test_freshness_item_full_detail_str_composes_primary_and_sub_details():
+    """The flat-text helper used by alert / debug-candidate consumers joins
+    the primary line with each sub-detail using ' · ' so single-line surfaces
+    still surface every supporting fact.
+    """
+    from alpha.live.dashboard import _freshness_item_dict, _freshness_item_full_detail_str
+
+    primary_only_item = _freshness_item_dict("Disk", "ok", "green", "23 GB free")
+    assert _freshness_item_full_detail_str(primary_only_item) == "23 GB free"
+
+    with_subs_item = _freshness_item_dict(
+        "Norgate",
+        "2026-05-21",
+        "green",
+        "Not required for current cycle",
+        sub_detail_str_list=[
+            "Valid current DecisionPlan exists.",
+            "Next DecisionPlan raw sync: status=failed",
+        ],
+    )
+    composed_str = _freshness_item_full_detail_str(with_subs_item)
+    assert "Not required for current cycle" in composed_str
+    assert "Valid current DecisionPlan exists." in composed_str
+    assert "status=failed" in composed_str
+    assert composed_str.count(" · ") == 2
+
+    empty_primary_item = _freshness_item_dict(
+        "Pod state", "", "gray", "", sub_detail_str_list=["only sub detail"]
+    )
+    assert _freshness_item_full_detail_str(empty_primary_item) == "only sub detail"
 
 
 def test_dashboard_failed_norgate_sync_does_not_alert_during_valid_current_plan(
@@ -1411,8 +1458,16 @@ def test_dashboard_failed_norgate_sync_does_not_alert_during_valid_current_plan(
     assert gate_dict["current_cycle_continuation_allowed_bool"] is True
     assert gate_dict["blocked_stage_str"] == "none"
     assert norgate_item_dict["severity_str"] == "green"
-    assert "Valid current DecisionPlan exists" in norgate_item_dict["detail_str"]
-    assert "Next DecisionPlan raw sync status=failed" in norgate_item_dict["detail_str"]
+    # Primary detail = gate verdict; supporting facts (gate explanation +
+    # failing raw sync) move into the structured sub-detail list so the
+    # operator can scan "now: ok" before "future risk: fix Norgate auth".
+    assert "Not required for current cycle" in norgate_item_dict["detail_str"]
+    sub_detail_str_list = norgate_item_dict["sub_detail_str_list"]
+    assert any("Valid current DecisionPlan exists" in sub_str for sub_str in sub_detail_str_list)
+    assert any(
+        "Next DecisionPlan raw sync" in sub_str and "status=failed" in sub_str
+        for sub_str in sub_detail_str_list
+    )
     assert all(
         alert_dict["label_str"] != "Norgate freshness"
         for alert_dict in summary_dict["alert_dict_list"]

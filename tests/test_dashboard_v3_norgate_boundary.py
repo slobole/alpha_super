@@ -66,10 +66,14 @@ def _data_freshness_dict() -> dict[str, Any]:
                 "label_str": "Norgate",
                 "value_str": "2026-05-21",
                 "severity_str": "green",
-                "detail_str": (
-                    "Not required for current cycle, Valid current DecisionPlan exists; "
-                    "VPlan / submit / reconcile continue without Norgate sync."
-                ),
+                "detail_str": "Not required for current cycle",
+                "sub_detail_str_list": [
+                    (
+                        "Valid current DecisionPlan exists; VPlan / submit / reconcile "
+                        "continue without Norgate sync."
+                    ),
+                    "Next DecisionPlan raw sync: status=failed, reason=sync_failed, error=HTTP 401",
+                ],
             }
         ],
     }
@@ -138,5 +142,9 @@ def test_pod_detail_shows_norgate_current_cycle_gate(tmp_path) -> None:
     response_text_str = response_obj.get_data(as_text=True)
     assert "DecisionPlan gate" in response_text_str
     assert "Norgate gate" in response_text_str
+    # Primary detail line (the gate verdict) renders as the main detail text.
     assert "Not required for current cycle" in response_text_str
+    # Each sub-detail bullet renders below the primary line with a ↳ marker.
     assert "VPlan / submit / reconcile continue without Norgate sync" in response_text_str
+    assert "Next DecisionPlan raw sync: status=failed" in response_text_str
+    assert response_text_str.count("↳") >= 2

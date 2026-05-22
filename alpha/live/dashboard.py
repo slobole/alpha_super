@@ -2608,43 +2608,59 @@ def _build_data_freshness_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
     norgate_snapshot_status_dict = row_dict.get("norgate_snapshot_status_dict") or {}
     norgate_current_cycle_gate_dict = _build_norgate_current_cycle_gate_dict(row_dict)
     norgate_item_severity_str = str(norgate_snapshot_status_dict.get("severity_str") or "gray")
-    norgate_detail_fragment_list = [
+
+    # Default-path Norgate detail (raw sync surface). When the current cycle
+    # gate is *not* allowing continuation, this is what the operator sees:
+    # the raw source/status/stage/error fragments that explain the sync state.
+    raw_detail_fragment_list = [
         f"source={norgate_snapshot_status_dict.get('data_source_mode_str')}",
         f"status={norgate_snapshot_status_dict.get('status_str')}",
     ]
     if norgate_snapshot_status_dict.get("sync_stage_label_str"):
-        norgate_detail_fragment_list.append(
+        raw_detail_fragment_list.append(
             f"stage={norgate_snapshot_status_dict.get('sync_stage_label_str')}"
         )
     if norgate_snapshot_status_dict.get("build_gate_reason_code_str"):
-        norgate_detail_fragment_list.append(
+        raw_detail_fragment_list.append(
             f"gate={norgate_snapshot_status_dict.get('build_gate_reason_code_str')}"
         )
     if norgate_snapshot_status_dict.get("last_error_str"):
-        norgate_detail_fragment_list.append(f"error={norgate_snapshot_status_dict.get('last_error_str')}")
+        raw_detail_fragment_list.append(
+            f"error={norgate_snapshot_status_dict.get('last_error_str')}"
+        )
+    norgate_primary_detail_str = ", ".join(raw_detail_fragment_list)
+    norgate_sub_detail_str_list: list[str] = []
+
+    # Current-cycle continuation path: promote the gate verdict to the primary
+    # line, demote the gate explanation + any future-risk raw sync info to
+    # sub-detail bullets so the operator sees "what does this mean for me
+    # right now?" before "what should I plan to fix later?".
     if _norgate_not_blocking_current_cycle_bool(row_dict):
         norgate_item_severity_str = "green"
-        norgate_detail_fragment_list = [
-            str(norgate_current_cycle_gate_dict.get("status_label_str") or ""),
-            str(norgate_current_cycle_gate_dict.get("detail_str") or ""),
-        ]
+        gate_status_label_str = str(norgate_current_cycle_gate_dict.get("status_label_str") or "")
+        gate_detail_str = str(norgate_current_cycle_gate_dict.get("detail_str") or "")
+        norgate_primary_detail_str = gate_status_label_str or gate_detail_str
+        if gate_detail_str and gate_detail_str != gate_status_label_str:
+            norgate_sub_detail_str_list.append(gate_detail_str)
         raw_status_str = str(norgate_snapshot_status_dict.get("status_str") or "")
         if raw_status_str and raw_status_str not in {"ready", "direct"}:
-            raw_detail_str = f"Next DecisionPlan raw sync status={raw_status_str}"
+            raw_future_fragment_list = [f"Next DecisionPlan raw sync: status={raw_status_str}"]
             raw_reason_str = str(norgate_snapshot_status_dict.get("reason_code_str") or "")
             if raw_reason_str:
-                raw_detail_str += f", reason={raw_reason_str}"
+                raw_future_fragment_list.append(f"reason={raw_reason_str}")
             raw_error_str = str(norgate_snapshot_status_dict.get("last_error_str") or "")
             if raw_error_str:
-                raw_detail_str += f", error={raw_error_str}"
-            norgate_detail_fragment_list.append(raw_detail_str)
+                raw_future_fragment_list.append(f"error={raw_error_str}")
+            norgate_sub_detail_str_list.append(", ".join(raw_future_fragment_list))
+
     item_dict_list = [
         _freshness_item_dict(
             "Norgate",
             norgate_snapshot_status_dict.get("snapshot_date_str")
             or norgate_snapshot_status_dict.get("last_sync_utc_str"),
             norgate_item_severity_str,
-            ", ".join(norgate_detail_fragment_list),
+            norgate_primary_detail_str,
+            sub_detail_str_list=norgate_sub_detail_str_list,
         ),
         _freshness_item_dict(
             "Pod state",
@@ -3062,7 +3078,7 @@ def _freshness_alert_dict(
             "freshness",
             severity_str,
             f"{label_str} freshness",
-            str(item_dict.get("detail_str") or ""),
+            _freshness_item_full_detail_str(item_dict),
             "status",
         )
     if severity_str != "gray" or value_obj not in (None, ""):
@@ -3075,7 +3091,7 @@ def _freshness_alert_dict(
             "freshness",
             "gray",
             f"{label_str} missing",
-            str(item_dict.get("detail_str") or ""),
+            _freshness_item_full_detail_str(item_dict),
             "show_vplan",
         )
     return None
@@ -3106,13 +3122,40 @@ def _freshness_item_dict(
     value_str: object,
     severity_str: str,
     detail_str: str,
+    sub_detail_str_list: list[str] | None = None,
 ) -> dict[str, Any]:
+    """Freshness item shape.
+
+    ``detail_str`` holds the **primary** one-line summary an operator scans
+    first (e.g. the gate verdict). ``sub_detail_str_list`` holds optional
+    supporting bullet lines (e.g. the gate explanation, plus side facts like
+    a failed raw sync status that matters for a future cycle). Callers that
+    want the flat composed string for an alert message or debug story should
+    use :func:`_freshness_item_full_detail_str` so primary and sub-details
+    stay readable together.
+    """
     return {
         "label_str": label_str,
         "value_str": value_str,
         "severity_str": severity_str,
         "detail_str": detail_str,
+        "sub_detail_str_list": [str(item_obj) for item_obj in (sub_detail_str_list or [])],
     }
+
+
+def _freshness_item_full_detail_str(item_dict: dict[str, Any]) -> str:
+    """Flatten the structured freshness item back into a single human string.
+
+    Used by consumers (alert builder, debug-candidate builder, CLI status
+    renderer) that surface freshness items in single-line contexts where the
+    structured split would be lost anyway.
+    """
+    detail_str = str(item_dict.get("detail_str") or "")
+    sub_detail_str_list = [
+        str(item_obj) for item_obj in (item_dict.get("sub_detail_str_list") or [])
+    ]
+    fragment_str_list = [fragment_str for fragment_str in [detail_str, *sub_detail_str_list] if fragment_str]
+    return " · ".join(fragment_str_list)
 
 
 def _build_debug_summary_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
@@ -3340,7 +3383,7 @@ def _build_debug_candidate_dict_list(row_dict: dict[str, Any]) -> list[dict[str,
                     priority_int=90,
                     severity_str=item_severity_str,
                     label_str=f"{item_label_str} freshness",
-                    reason_str=str(freshness_item_dict.get("detail_str") or ""),
+                    reason_str=_freshness_item_full_detail_str(freshness_item_dict),
                     evidence_str=f"latest={freshness_item_dict.get('value_str')}",
                     inspect_command_name_str="status",
                     timestamp_str=freshness_item_dict.get("value_str"),

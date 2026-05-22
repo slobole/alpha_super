@@ -41,7 +41,8 @@
     <ul class="divide-y divide-ink-100 text-sm">
       {% for item_dict in item_dict_list %}
         {% set item_sev_str = item_dict.severity_str | normalize_severity %}
-        <li class="px-3 py-1.5 grid grid-cols-12 gap-2 items-baseline">
+        {% set item_sub_detail_list = item_dict.sub_detail_str_list or [] %}
+        <li class="px-3 py-1.5 grid grid-cols-12 gap-2 items-start">
           <div class="col-span-3 flex items-center gap-2 min-w-0">
             <span class="inline-block w-2 h-2 rounded-full shrink-0
                          {% if item_sev_str == 'red' %}bg-bad
@@ -54,9 +55,16 @@
                title="{{ item_dict.value_str or '' }}">
             {{ item_dict.value_str or '—' }}
           </div>
-          <div class="col-span-6 text-xs text-ink-500 truncate"
-               title="{{ item_dict.detail_str or '' }}">
-            {{ item_dict.detail_str or '' }}
+          <div class="col-span-6 text-xs min-w-0">
+            <div class="text-ink-500 break-words" title="{{ item_dict.detail_str or '' }}">
+              {{ item_dict.detail_str or '' }}
+            </div>
+            {% for sub_detail_str in item_sub_detail_list %}
+              <div class="text-ink-300 break-words mt-0.5 pl-2 border-l border-ink-100"
+                   title="{{ sub_detail_str }}">
+                ↳ {{ sub_detail_str }}
+              </div>
+            {% endfor %}
           </div>
         </li>
       {% endfor %}
