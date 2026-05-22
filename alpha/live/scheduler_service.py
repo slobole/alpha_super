@@ -110,6 +110,22 @@ def _get_current_cycle_vplan_obj(
     return state_store_obj.get_latest_vplan_for_decision(int(decision_plan_obj.decision_plan_id_int))
 
 
+def _norgate_snapshot_sync_required_for_decision_plan_bool(
+    state_store_obj: LiveStateStore,
+    as_of_ts: datetime,
+    releases_root_path_str: str,
+    env_mode_str: str,
+    pod_id_str: str | None = None,
+) -> bool:
+    return runner.norgate_snapshot_sync_required_for_decision_plan_bool(
+        state_store_obj=state_store_obj,
+        as_of_ts=as_of_ts,
+        releases_root_path_str=releases_root_path_str,
+        env_mode_str=env_mode_str,
+        pod_id_str=pod_id_str,
+    )
+
+
 def _build_candidate_dict(
     *,
     priority_int: int,
@@ -433,11 +449,33 @@ def _build_sleep_seconds_float(
     return min(float(idle_max_sleep_seconds_int), delta_seconds_float or float(idle_max_sleep_seconds_int))
 
 
-def _tick_detail_blocks_new_trade_on_norgate_sync_bool(tick_detail_dict: dict[str, object]) -> bool:
+def _tick_detail_blocks_decision_plan_on_norgate_sync_bool(tick_detail_dict: dict[str, object]) -> bool:
     sync_detail_obj = tick_detail_dict.get("norgate_snapshot_sync_detail_dict")
     if not isinstance(sync_detail_obj, dict):
         return False
-    return runner.norgate_snapshot_sync_blocks_new_trade_bool(sync_detail_obj)
+    return runner.norgate_snapshot_sync_blocks_decision_plan_build_bool(sync_detail_obj)
+
+
+def _tick_detail_blocks_new_trade_on_norgate_sync_bool(tick_detail_dict: dict[str, object]) -> bool:
+    return _tick_detail_blocks_decision_plan_on_norgate_sync_bool(tick_detail_dict)
+
+
+def _tick_detail_made_progress_bool(tick_detail_dict: dict[str, object]) -> bool:
+    progress_field_str_tuple = (
+        "eod_snapshot_count_int",
+        "created_decision_plan_count_int",
+        "expired_decision_plan_count_int",
+        "created_vplan_count_int",
+        "submitted_vplan_count_int",
+        "completed_vplan_count_int",
+    )
+    return any(int(tick_detail_dict.get(field_str, 0) or 0) > 0 for field_str in progress_field_str_tuple)
+
+
+def _tick_detail_blocked_action_bool(tick_detail_dict: dict[str, object] | None) -> bool:
+    if tick_detail_dict is None:
+        return False
+    return int(tick_detail_dict.get("blocked_action_count_int", 0) or 0) > 0
 
 
 def _build_related_pod_status_dict_list(
@@ -2106,14 +2144,23 @@ def run_once(
         state_store_obj=state_store_obj,
         as_of_ts=as_of_ts,
     )
-    norgate_snapshot_sync_detail_dict = ensure_norgate_snapshots_for_live_tick(
+    norgate_snapshot_sync_required_bool = _norgate_snapshot_sync_required_for_decision_plan_bool(
+        state_store_obj=state_store_obj,
+        as_of_ts=as_of_ts,
         releases_root_path_str=releases_root_path_str,
         env_mode_str=env_mode_str,
-        as_of_ts=as_of_ts,
-        log_path_str=log_path_str,
         pod_id_str=pod_id_str,
-        print_operator_bool=False,
     )
+    norgate_snapshot_sync_detail_dict = None
+    if norgate_snapshot_sync_required_bool:
+        norgate_snapshot_sync_detail_dict = ensure_norgate_snapshots_for_live_tick(
+            releases_root_path_str=releases_root_path_str,
+            env_mode_str=env_mode_str,
+            as_of_ts=as_of_ts,
+            log_path_str=log_path_str,
+            pod_id_str=pod_id_str,
+            print_operator_bool=False,
+        )
     scheduler_decision_obj = get_scheduler_decision(
         state_store_obj=state_store_obj,
         as_of_ts=as_of_ts,
@@ -2125,8 +2172,13 @@ def run_once(
     )
     detail_dict = scheduler_decision_obj.to_dict()
     detail_dict["tick_invoked_bool"] = False
+    detail_dict["norgate_snapshot_sync_required_for_decision_plan_bool"] = (
+        norgate_snapshot_sync_required_bool
+    )
     detail_dict["pre_decision_norgate_snapshot_sync_detail_dict"] = norgate_snapshot_sync_detail_dict
-    if norgate_snapshot_sync_active_wait_bool(norgate_snapshot_sync_detail_dict):
+    if norgate_snapshot_sync_required_bool and norgate_snapshot_sync_active_wait_bool(
+        norgate_snapshot_sync_detail_dict
+    ):
         detail_dict["active_poll_bool"] = True
 
     if scheduler_decision_obj.due_now_bool:
@@ -2257,19 +2309,29 @@ def serve(
 
     while True:
         as_of_ts = datetime.now(tz=UTC)
+        tick_detail_dict: dict[str, object] | None = None
         broker_adapter_resolver_obj.set_incubation_context(
             state_store_obj=state_store_obj,
             as_of_ts=as_of_ts,
         )
         try:
-            norgate_snapshot_sync_detail_dict = ensure_norgate_snapshots_for_live_tick(
+            norgate_snapshot_sync_required_bool = _norgate_snapshot_sync_required_for_decision_plan_bool(
+                state_store_obj=state_store_obj,
+                as_of_ts=as_of_ts,
                 releases_root_path_str=releases_root_path_str,
                 env_mode_str=env_mode_str,
-                as_of_ts=as_of_ts,
-                log_path_str=log_path_str,
                 pod_id_str=pod_id_str,
-                print_operator_bool=True,
             )
+            norgate_snapshot_sync_detail_dict = None
+            if norgate_snapshot_sync_required_bool:
+                norgate_snapshot_sync_detail_dict = ensure_norgate_snapshots_for_live_tick(
+                    releases_root_path_str=releases_root_path_str,
+                    env_mode_str=env_mode_str,
+                    as_of_ts=as_of_ts,
+                    log_path_str=log_path_str,
+                    pod_id_str=pod_id_str,
+                    print_operator_bool=True,
+                )
             current_scheduler_decision_obj = get_scheduler_decision(
                 state_store_obj=state_store_obj,
                 as_of_ts=as_of_ts,
@@ -2381,7 +2443,7 @@ def serve(
                 print(_render_serve_tick_summary_str(tick_detail_dict), flush=True)
                 last_printed_sleep_signature_tup = None
                 last_printed_sleep_timestamp_ts = None
-                if not _tick_detail_blocks_new_trade_on_norgate_sync_bool(tick_detail_dict):
+                if _tick_detail_made_progress_bool(tick_detail_dict):
                     continue
 
             sleep_seconds_float = _build_sleep_seconds_float(
@@ -2393,10 +2455,13 @@ def serve(
             norgate_sync_active_wait_bool = norgate_snapshot_sync_active_wait_bool(
                 norgate_snapshot_sync_detail_dict
             )
-            norgate_sync_blocks_new_trade_bool = runner.norgate_snapshot_sync_blocks_new_trade_bool(
+            norgate_sync_blocks_decision_plan_bool = runner.norgate_snapshot_sync_blocks_decision_plan_build_bool(
                 norgate_snapshot_sync_detail_dict
             )
-            if norgate_sync_active_wait_bool or norgate_sync_blocks_new_trade_bool:
+            if norgate_sync_active_wait_bool or norgate_sync_blocks_decision_plan_bool:
+                sleep_seconds_float = min(sleep_seconds_float, float(active_poll_seconds_int))
+            tick_blocked_action_bool = _tick_detail_blocked_action_bool(tick_detail_dict)
+            if tick_blocked_action_bool:
                 sleep_seconds_float = min(sleep_seconds_float, float(active_poll_seconds_int))
             sleep_event_payload_dict = {
                 "as_of_timestamp_str": as_of_ts.isoformat(),
@@ -2405,8 +2470,11 @@ def serve(
                 "reason_code_str": current_scheduler_decision_obj.reason_code_str,
                 "next_due_timestamp_str": current_scheduler_decision_obj.next_due_timestamp_ts.isoformat(),
                 "sleep_seconds_float": sleep_seconds_float,
+                "norgate_snapshot_sync_required_for_decision_plan_bool": norgate_snapshot_sync_required_bool,
                 "norgate_snapshot_sync_active_wait_bool": norgate_sync_active_wait_bool,
-                "norgate_snapshot_sync_blocks_new_trade_bool": norgate_sync_blocks_new_trade_bool,
+                "norgate_snapshot_sync_blocks_decision_plan_bool": norgate_sync_blocks_decision_plan_bool,
+                "norgate_snapshot_sync_blocks_new_trade_bool": norgate_sync_blocks_decision_plan_bool,
+                "tick_blocked_action_bool": tick_blocked_action_bool,
                 "norgate_snapshot_sync_detail_dict": norgate_snapshot_sync_detail_dict,
                 "related_pod_id_list": current_scheduler_decision_obj.related_pod_id_list,
                 "pod_status_dict_list": _build_related_pod_status_dict_list(
@@ -2438,7 +2506,8 @@ def serve(
                     if (
                         current_scheduler_decision_obj.active_poll_bool
                         or norgate_sync_active_wait_bool
-                        or norgate_sync_blocks_new_trade_bool
+                        or norgate_sync_blocks_decision_plan_bool
+                        or tick_blocked_action_bool
                     )
                     else DEFAULT_OPERATOR_HEARTBEAT_SECONDS_INT
                 ),

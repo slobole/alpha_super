@@ -82,15 +82,35 @@ and `enabled_bool` on that VPS only.
 
 ```text
 scheduler_service serve / runner tick
-  -> ensure_norgate_snapshots_for_live_tick
+  -> inspect current pod cycle state
+  -> ensure_norgate_snapshots_for_live_tick only when a new DecisionPlan may be needed
   -> read enabled release YAMLs for mode and optional pod_id
   -> derive required data_profile_str values
   -> validate local manifest and SHA256 hashes
   -> if needed, download/promote snapshots through the API
   -> if ready/direct: build DecisionPlan
-  -> if waiting/failed/local-only missing: block new DecisionPlan, VPlan, submit
-  -> post-execution reconcile may still run for already-submitted VPlans
+  -> if waiting/failed/local-only missing: block only new DecisionPlan creation
+  -> existing DecisionPlan/VPlan submit and post-execution reconcile continue from persisted state
 ```
+
+Norgate is a pre-decision data dependency. Once a DecisionPlan exists for the
+current signal cycle, the system treats that plan as the frozen trading intent
+artifact for that cycle. Later VPlan build, order submission, and reconciliation
+use the persisted DecisionPlan, live broker/reference-price reads, and broker
+state. They do not re-run snapshot sync or strategy data loading. The scheduler
+may still evaluate its local build gate/readiness view so it can decide when the
+next signal cycle becomes eligible.
+
+After a DecisionPlan reaches `completed`, the scheduler does not re-sync
+Norgate again until the next signal cycle is actually eligible to form a new
+DecisionPlan. For a daily EOD pod, that means after the next market session's
+close plus the EOD snapshot buffer. For a month-end pod, that means after the
+next month-end session close plus the same buffer.
+
+A Norgate-gated DecisionPlan suppresses sync only when its persisted
+`snapshot_metadata_dict.norgate_data_profile_str` matches the release
+`data_profile_str`. Legacy or manually inserted DecisionPlans without that
+profile proof do not advance to VPlan.
 
 The auto-sync writes:
 
@@ -113,23 +133,26 @@ Bad or missing market data blocks new trading intent.
 ```text
 API unavailable
   -> sync status waiting/failed
-  -> no new DecisionPlan, no VPlan, no orders
+  -> no new DecisionPlan
+  -> existing DecisionPlan/VPlan submit/reconcile may continue
 
 bad token
   -> sync failed
-  -> no new DecisionPlan, no VPlan, no orders
+  -> no new DecisionPlan
+  -> existing DecisionPlan/VPlan submit/reconcile may continue
 
 missing/hash-invalid snapshot
   -> no promotion
-  -> no new DecisionPlan, no VPlan, no orders
+  -> no new DecisionPlan
+  -> existing DecisionPlan/VPlan submit/reconcile may continue
 
 snapshot arrives after cutoff
   -> scheduler gate snapshot_window_expired
   -> no late trade
 
-already-submitted VPlan exists
-  -> post-execution reconcile may continue
-  -> no new trading intent is created while Norgate is blocked
+ready/submitted VPlan exists
+  -> submit/reconcile may continue
+  -> no additional DecisionPlan is created while Norgate is blocked
 ```
 
 Local snapshot `ready` means the manifest and hashes are valid. A DecisionPlan
@@ -239,5 +262,5 @@ Runner safety checks:
 ```powershell
 uv run --with pytest python -m pytest `
   tests/test_live_runner.py::test_tick_does_not_build_decision_plan_when_snapshot_sync_waits `
-  tests/test_live_runner.py::test_tick_blocks_new_trade_intent_when_snapshot_sync_not_ready -q
+  tests/test_live_runner.py::test_tick_blocks_only_decision_plan_build_when_snapshot_sync_not_ready -q
 ```

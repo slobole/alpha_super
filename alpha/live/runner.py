@@ -57,13 +57,21 @@ TERMINAL_ORDER_STATUS_SET: set[str] = {
 }
 
 
-def norgate_snapshot_sync_blocks_new_trade_bool(
+def norgate_snapshot_sync_blocks_decision_plan_build_bool(
     norgate_snapshot_sync_detail_dict: dict[str, object] | None,
 ) -> bool:
     if norgate_snapshot_sync_detail_dict is None:
         return False
     sync_status_str = str(norgate_snapshot_sync_detail_dict.get("status_str") or "")
     return sync_status_str in NORGATE_SNAPSHOT_SYNC_BLOCK_NEW_TRADE_STATUS_SET
+
+
+def norgate_snapshot_sync_blocks_new_trade_bool(
+    norgate_snapshot_sync_detail_dict: dict[str, object] | None,
+) -> bool:
+    return norgate_snapshot_sync_blocks_decision_plan_build_bool(
+        norgate_snapshot_sync_detail_dict
+    )
 
 
 def _norgate_snapshot_sync_block_reason_code_str(
@@ -76,6 +84,145 @@ def _norgate_snapshot_sync_block_reason_code_str(
     if sync_status_str:
         return f"norgate_snapshot_sync_{sync_status_str}"
     return "norgate_snapshot_sync_not_ready"
+
+
+def _release_uses_norgate_snapshot_gate_bool(release_obj: LiveRelease) -> bool:
+    normalized_signal_clock_str = scheduler_utils.normalize_signal_clock_str(
+        release_obj.signal_clock_str
+    )
+    return normalized_signal_clock_str in ("eod_snapshot_ready", "month_end_snapshot_ready")
+
+
+def _decision_plan_norgate_provenance_block_reason_str(
+    release_obj: LiveRelease,
+    decision_plan_obj: DecisionPlan,
+) -> str | None:
+    if not _release_uses_norgate_snapshot_gate_bool(release_obj):
+        return None
+    snapshot_metadata_dict = decision_plan_obj.snapshot_metadata_dict or {}
+    snapshot_profile_str = str(snapshot_metadata_dict.get("norgate_data_profile_str") or "")
+    if not snapshot_profile_str:
+        return "decision_plan_norgate_provenance_missing"
+    if snapshot_profile_str != release_obj.data_profile_str:
+        return "decision_plan_norgate_profile_mismatch"
+    return None
+
+
+def _next_norgate_signal_ready_timestamp_ts(
+    release_obj: LiveRelease,
+    signal_session_label_ts,
+) -> datetime | None:
+    normalized_signal_clock_str = scheduler_utils.normalize_signal_clock_str(
+        release_obj.signal_clock_str
+    )
+    if normalized_signal_clock_str == "eod_snapshot_ready":
+        next_signal_session_label_ts = scheduler_utils.get_next_session_label_ts(
+            signal_session_label_ts,
+            release_obj.session_calendar_id_str,
+        )
+    elif normalized_signal_clock_str == "month_end_snapshot_ready":
+        next_signal_session_label_ts = scheduler_utils.get_next_session_label_ts(
+            signal_session_label_ts,
+            release_obj.session_calendar_id_str,
+        )
+        while not scheduler_utils.is_last_session_of_month_bool(
+            next_signal_session_label_ts,
+            release_obj.session_calendar_id_str,
+        ):
+            next_signal_session_label_ts = scheduler_utils.get_next_session_label_ts(
+                next_signal_session_label_ts,
+                release_obj.session_calendar_id_str,
+            )
+    else:
+        return None
+
+    session_close_timestamp_ts = scheduler_utils.get_session_close_timestamp_ts(
+        next_signal_session_label_ts,
+        release_obj.session_calendar_id_str,
+    )
+    return session_close_timestamp_ts + timedelta(
+        minutes=DEFAULT_EOD_SNAPSHOT_BUFFER_MINUTES_INT
+    )
+
+
+def _decision_plan_covers_norgate_signal_cycle_bool(
+    release_obj: LiveRelease,
+    decision_plan_obj: DecisionPlan | None,
+    as_of_ts: datetime,
+) -> bool:
+    if decision_plan_obj is None:
+        return False
+    if decision_plan_obj.release_id_str != release_obj.release_id_str:
+        return False
+    if decision_plan_obj.execution_policy_str != release_obj.execution_policy_str:
+        return False
+
+    if _decision_plan_norgate_provenance_block_reason_str(release_obj, decision_plan_obj) is not None:
+        return False
+
+    if decision_plan_obj.status_str in ("planned", "vplan_ready", "submitted"):
+        return True
+    if decision_plan_obj.status_str != "completed":
+        return False
+
+    try:
+        signal_session_label_ts = scheduler_utils.session_label_from_timestamp_ts(
+            decision_plan_obj.signal_timestamp_ts,
+            release_obj.session_calendar_id_str,
+        )
+    except ValueError:
+        return False
+    if signal_session_label_ts is None:
+        return False
+
+    next_signal_ready_timestamp_ts = _next_norgate_signal_ready_timestamp_ts(
+        release_obj,
+        signal_session_label_ts,
+    )
+    if next_signal_ready_timestamp_ts is None:
+        return True
+
+    market_as_of_ts = scheduler_utils.to_market_timestamp_ts(
+        as_of_ts,
+        release_obj.session_calendar_id_str,
+    )
+    return market_as_of_ts < next_signal_ready_timestamp_ts
+
+
+def norgate_snapshot_sync_required_for_decision_plan_bool(
+    state_store_obj: LiveStateStore,
+    as_of_ts: datetime,
+    releases_root_path_str: str,
+    env_mode_str: str,
+    pod_id_str: str | None = None,
+) -> bool:
+    release_list = _load_release_list_and_sync(
+        releases_root_path_str,
+        state_store_obj,
+        pod_id_str=pod_id_str,
+    )
+    enabled_release_list = [
+        release_obj
+        for release_obj in release_list
+        if release_obj.enabled_bool and release_obj.mode_str == env_mode_str
+    ]
+
+    for release_obj in enabled_release_list:
+        if not _release_uses_norgate_snapshot_gate_bool(release_obj):
+            continue
+        latest_decision_plan_obj = state_store_obj.get_latest_decision_plan_for_pod(
+            release_obj.pod_id_str
+        )
+        if _decision_plan_covers_norgate_signal_cycle_bool(
+            release_obj=release_obj,
+            decision_plan_obj=latest_decision_plan_obj,
+            as_of_ts=as_of_ts,
+        ):
+            continue
+        return True
+    return False
+
+
 PARKED_TERMINAL_ORDER_STATUS_SET: set[str] = {
     "Cancelled",
     "ApiCancelled",
@@ -2125,6 +2272,33 @@ def build_vplans(
         if release_obj.mode_str != env_mode_str:
             reason_counter_obj["env_mode_mismatch"] += 1
             continue
+        provenance_block_reason_str = _decision_plan_norgate_provenance_block_reason_str(
+            release_obj,
+            decision_plan_obj,
+        )
+        if provenance_block_reason_str is not None:
+            blocked_action_count_int += 1
+            reason_counter_obj[provenance_block_reason_str] += 1
+            log_event(
+                "build_vplan_blocked",
+                _build_decision_plan_log_payload_dict(
+                    release_obj,
+                    decision_plan_obj,
+                    as_of_ts,
+                    {
+                        "reason_code_str": provenance_block_reason_str,
+                        "expected_data_profile_str": release_obj.data_profile_str,
+                        "decision_plan_data_profile_str": str(
+                            (decision_plan_obj.snapshot_metadata_dict or {}).get(
+                                "norgate_data_profile_str"
+                            )
+                            or ""
+                        ),
+                    },
+                ),
+                log_path_str=log_path_str,
+            )
+            continue
         broker_adapter_obj = broker_adapter_resolver_obj.get_adapter(release_obj)
         visible_account_route_set = broker_adapter_obj.get_visible_account_route_set()
         if scheduler_utils.is_execution_window_expired_bool(
@@ -4049,7 +4223,18 @@ def tick(
         norgate_snapshot_sync_detail_dict: dict[str, object] | None = (
             prechecked_norgate_snapshot_sync_detail_dict
         )
-        if norgate_snapshot_sync_detail_dict is None and auto_sync_norgate_snapshots_bool:
+        norgate_snapshot_sync_required_bool = norgate_snapshot_sync_required_for_decision_plan_bool(
+            state_store_obj=state_store_obj,
+            as_of_ts=as_of_ts,
+            releases_root_path_str=releases_root_path_str,
+            env_mode_str=env_mode_str,
+            pod_id_str=pod_id_str,
+        )
+        if (
+            norgate_snapshot_sync_detail_dict is None
+            and auto_sync_norgate_snapshots_bool
+            and norgate_snapshot_sync_required_bool
+        ):
             norgate_snapshot_sync_detail_dict = ensure_norgate_snapshots_for_live_tick(
                 releases_root_path_str=releases_root_path_str,
                 env_mode_str=env_mode_str,
@@ -4058,10 +4243,10 @@ def tick(
                 pod_id_str=pod_id_str,
                 print_operator_bool=False,
             )
-        new_trade_blocked_bool = norgate_snapshot_sync_blocks_new_trade_bool(
+        decision_plan_build_blocked_bool = norgate_snapshot_sync_blocks_decision_plan_build_bool(
             norgate_snapshot_sync_detail_dict
         )
-        if new_trade_blocked_bool:
+        if decision_plan_build_blocked_bool:
             reason_code_str = _norgate_snapshot_sync_block_reason_code_str(
                 norgate_snapshot_sync_detail_dict
             )
@@ -4089,41 +4274,27 @@ def tick(
             log_path_str=log_path_str,
             pod_id_str=pod_id_str,
         )
-        if new_trade_blocked_bool:
-            vplan_detail_dict = {
-                "created_vplan_count_int": 0,
-                "blocked_action_count_int": 1,
-                "warning_count_map_dict": {},
-                "reason_count_map_dict": {},
-            }
-            submit_detail_dict = {
-                "submitted_vplan_count_int": 0,
-                "blocked_action_count_int": 1,
-                "warning_count_map_dict": {},
-                "reason_count_map_dict": {},
-            }
-        else:
-            vplan_detail_dict = build_vplans(
-                state_store_obj=state_store_obj,
-                broker_adapter_obj=broker_adapter_obj,
-                as_of_ts=as_of_ts,
-                env_mode_str=env_mode_str,
-                releases_root_path_str=releases_root_path_str,
-                log_path_str=log_path_str,
-                broker_adapter_resolver_obj=broker_adapter_resolver_obj,
-                pod_id_str=pod_id_str,
-            )
-            submit_detail_dict = submit_ready_vplans(
-                state_store_obj=state_store_obj,
-                broker_adapter_obj=broker_adapter_obj,
-                as_of_ts=as_of_ts,
-                env_mode_str=env_mode_str,
-                manual_only_bool=False,
-                releases_root_path_str=releases_root_path_str,
-                log_path_str=log_path_str,
-                broker_adapter_resolver_obj=broker_adapter_resolver_obj,
-                pod_id_str=pod_id_str,
-            )
+        vplan_detail_dict = build_vplans(
+            state_store_obj=state_store_obj,
+            broker_adapter_obj=broker_adapter_obj,
+            as_of_ts=as_of_ts,
+            env_mode_str=env_mode_str,
+            releases_root_path_str=releases_root_path_str,
+            log_path_str=log_path_str,
+            broker_adapter_resolver_obj=broker_adapter_resolver_obj,
+            pod_id_str=pod_id_str,
+        )
+        submit_detail_dict = submit_ready_vplans(
+            state_store_obj=state_store_obj,
+            broker_adapter_obj=broker_adapter_obj,
+            as_of_ts=as_of_ts,
+            env_mode_str=env_mode_str,
+            manual_only_bool=False,
+            releases_root_path_str=releases_root_path_str,
+            log_path_str=log_path_str,
+            broker_adapter_resolver_obj=broker_adapter_resolver_obj,
+            pod_id_str=pod_id_str,
+        )
         reconcile_detail_dict = post_execution_reconcile(
             state_store_obj=state_store_obj,
             broker_adapter_obj=broker_adapter_obj,
@@ -4146,6 +4317,7 @@ def tick(
             reason_counter_obj.update(detail_piece_dict.get("reason_count_map_dict", {}))
         return {
             "lease_acquired_bool": True,
+            "norgate_snapshot_sync_required_for_decision_plan_bool": norgate_snapshot_sync_required_bool,
             "norgate_snapshot_sync_detail_dict": norgate_snapshot_sync_detail_dict,
             "eod_snapshot_count_int": 0,
             "skipped_snapshot_count_int": 0,

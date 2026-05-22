@@ -195,7 +195,10 @@ def _build_decision_plan_stub(release_obj, as_of_ts, pod_state_obj):
         target_execution_timestamp_ts=datetime(2024, 2, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ),
         execution_policy_str="next_open_moo",
         decision_base_position_map={},
-        snapshot_metadata_dict={"strategy_family_str": "stub"},
+        snapshot_metadata_dict={
+            "strategy_family_str": "stub",
+            "norgate_data_profile_str": release_obj.data_profile_str,
+        },
         strategy_state_dict={"trade_id_int": 1},
         decision_book_type_str="incremental_entry_exit_book",
         entry_target_weight_map_dict={"AAPL": 0.2},
@@ -643,9 +646,10 @@ def test_tick_does_not_build_decision_plan_when_snapshot_sync_waits(tmp_path: Pa
     [
         ("waiting", "api_config_missing"),
         ("failed", "token_auth_failed"),
+        ("local_snapshot_only", "local_snapshot_missing"),
     ],
 )
-def test_tick_blocks_new_trade_intent_when_snapshot_sync_not_ready(
+def test_tick_blocks_only_decision_plan_build_when_snapshot_sync_not_ready(
     tmp_path: Path,
     monkeypatch,
     sync_status_str: str,
@@ -657,14 +661,17 @@ def test_tick_blocks_new_trade_intent_when_snapshot_sync_not_ready(
     state_store_obj.upsert_release(release_obj)
     ready_vplan_obj = _insert_ready_vplan_for_release(state_store_obj, release_obj)
     broker_adapter_obj = StubBrokerAdapter()
+    broker_adapter_obj.seed_account_snapshot(
+        account_route_str=release_obj.account_route_str,
+        cash_float=10000.0,
+        total_value_float=10000.0,
+        position_amount_map={},
+        snapshot_timestamp_ts=datetime(2024, 2, 1, 9, 20, tzinfo=MARKET_TIMEZONE_OBJ),
+    )
 
     monkeypatch.setattr(
         "alpha.live.runner.ensure_norgate_snapshots_for_live_tick",
-        lambda **_kwargs: {
-            "status_str": sync_status_str,
-            "reason_code_str": reason_code_str,
-            "error_str": "Norgate snapshot sync is not ready.",
-        },
+        lambda **_kwargs: pytest.fail("Ready VPlan tick should not re-sync Norgate"),
     )
     monkeypatch.setattr(
         "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
@@ -674,12 +681,6 @@ def test_tick_blocks_new_trade_intent_when_snapshot_sync_not_ready(
     def _fail_build_decision_plan(*_args, **_kwargs):
         raise AssertionError("DecisionPlan build should wait for Norgate snapshots")
 
-    def _fail_build_vplans(*_args, **_kwargs):
-        raise AssertionError("VPlan build should wait for Norgate snapshots")
-
-    def _fail_submit_ready_vplans(*_args, **_kwargs):
-        raise AssertionError("VPlan submission should wait for Norgate snapshots")
-
     reconcile_called_dict = {"called_bool": False}
 
     def _fake_post_execution_reconcile(**_kwargs):
@@ -687,9 +688,57 @@ def test_tick_blocks_new_trade_intent_when_snapshot_sync_not_ready(
         return {"completed_vplan_count_int": 1}
 
     monkeypatch.setattr("alpha.live.strategy_host.build_decision_plan_for_release", _fail_build_decision_plan)
-    monkeypatch.setattr(runner_module, "build_vplans", _fail_build_vplans)
-    monkeypatch.setattr(runner_module, "submit_ready_vplans", _fail_submit_ready_vplans)
     monkeypatch.setattr(runner_module, "post_execution_reconcile", _fake_post_execution_reconcile)
+
+    detail_dict = tick(
+        state_store_obj=state_store_obj,
+        broker_adapter_obj=broker_adapter_obj,
+        as_of_ts=datetime(2024, 2, 1, 14, 24, tzinfo=UTC),
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="paper",
+        prechecked_norgate_snapshot_sync_detail_dict={
+            "status_str": sync_status_str,
+            "reason_code_str": reason_code_str,
+            "error_str": "Norgate snapshot sync is not ready.",
+        },
+    )
+
+    assert detail_dict["created_decision_plan_count_int"] == 0
+    assert detail_dict["created_vplan_count_int"] == 0
+    assert detail_dict["submitted_vplan_count_int"] == 1
+    assert detail_dict["blocked_action_count_int"] == 0
+    assert detail_dict["completed_vplan_count_int"] == 1
+    assert detail_dict["reason_count_map_dict"] == {reason_code_str: 1}
+    assert reconcile_called_dict["called_bool"] is True
+    assert len(broker_adapter_obj.submitted_order_request_list) == 1
+    assert state_store_obj.get_vplan_by_id(int(ready_vplan_obj.vplan_id_int or 0)).status_str == "submitted"
+
+
+def test_tick_with_ready_vplan_does_not_autosync_norgate(
+    tmp_path: Path,
+    monkeypatch,
+):
+    _write_manifest(tmp_path, auto_submit_enabled_bool=True)
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+    release_obj = load_release_list(str(tmp_path / "releases"))[0]
+    state_store_obj.upsert_release(release_obj)
+    _insert_ready_vplan_for_release(state_store_obj, release_obj)
+    broker_adapter_obj = StubBrokerAdapter()
+    broker_adapter_obj.seed_account_snapshot(
+        account_route_str=release_obj.account_route_str,
+        cash_float=10000.0,
+        total_value_float=10000.0,
+        position_amount_map={},
+        snapshot_timestamp_ts=datetime(2024, 2, 1, 9, 20, tzinfo=MARKET_TIMEZONE_OBJ),
+    )
+    monkeypatch.setattr(
+        "alpha.live.runner.ensure_norgate_snapshots_for_live_tick",
+        lambda **_kwargs: pytest.fail("Ready VPlan tick should not auto-sync Norgate"),
+    )
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda data_profile_str: pd.Timestamp("2024-01-31"),
+    )
 
     detail_dict = tick(
         state_store_obj=state_store_obj,
@@ -699,15 +748,10 @@ def test_tick_blocks_new_trade_intent_when_snapshot_sync_not_ready(
         env_mode_str="paper",
     )
 
-    assert detail_dict["created_decision_plan_count_int"] == 0
-    assert detail_dict["created_vplan_count_int"] == 0
-    assert detail_dict["submitted_vplan_count_int"] == 0
-    assert detail_dict["blocked_action_count_int"] == 2
-    assert detail_dict["completed_vplan_count_int"] == 1
-    assert detail_dict["reason_count_map_dict"] == {reason_code_str: 1}
-    assert reconcile_called_dict["called_bool"] is True
-    assert broker_adapter_obj.submitted_order_request_list == []
-    assert state_store_obj.get_vplan_by_id(int(ready_vplan_obj.vplan_id_int or 0)).status_str == "ready"
+    assert detail_dict["norgate_snapshot_sync_required_for_decision_plan_bool"] is False
+    assert detail_dict["norgate_snapshot_sync_detail_dict"] is None
+    assert detail_dict["submitted_vplan_count_int"] == 1
+    assert len(broker_adapter_obj.submitted_order_request_list) == 1
 
 
 def test_status_does_not_hard_fail_on_invalid_deployment_guardrail(tmp_path: Path, monkeypatch):
@@ -937,7 +981,10 @@ def _build_decision_plan_with_position_drift_stub(release_obj, as_of_ts, pod_sta
         target_execution_timestamp_ts=datetime(2024, 2, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ),
         execution_policy_str="next_open_moo",
         decision_base_position_map={"AAPL": 5.0},
-        snapshot_metadata_dict={"strategy_family_str": "stub"},
+        snapshot_metadata_dict={
+            "strategy_family_str": "stub",
+            "norgate_data_profile_str": release_obj.data_profile_str,
+        },
         strategy_state_dict={"trade_id_int": 1},
         decision_book_type_str="incremental_entry_exit_book",
         entry_target_weight_map_dict={"AAPL": 0.2},
@@ -960,7 +1007,10 @@ def _build_full_target_weight_decision_plan_stub(release_obj, as_of_ts, pod_stat
         target_execution_timestamp_ts=datetime(2024, 2, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ),
         execution_policy_str="next_open_moo",
         decision_base_position_map={"AAPL": 4.0},
-        snapshot_metadata_dict={"strategy_family_str": "full_target_stub"},
+        snapshot_metadata_dict={
+            "strategy_family_str": "full_target_stub",
+            "norgate_data_profile_str": release_obj.data_profile_str,
+        },
         strategy_state_dict={},
         decision_book_type_str="full_target_weight_book",
         full_target_weight_map_dict={"AAPL": 0.3, "TLT": 0.2},
@@ -1206,7 +1256,10 @@ def _build_two_asset_decision_plan_stub(release_obj, as_of_ts, pod_state_obj):
         target_execution_timestamp_ts=datetime(2024, 2, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ),
         execution_policy_str="next_open_moo",
         decision_base_position_map={},
-        snapshot_metadata_dict={"strategy_family_str": "two_asset_stub"},
+        snapshot_metadata_dict={
+            "strategy_family_str": "two_asset_stub",
+            "norgate_data_profile_str": release_obj.data_profile_str,
+        },
         strategy_state_dict={"trade_id_int": 1},
         decision_book_type_str="incremental_entry_exit_book",
         entry_target_weight_map_dict={"AAPL": 0.2, "MSFT": 0.2},
@@ -1229,7 +1282,10 @@ def _build_three_asset_decision_plan_stub(release_obj, as_of_ts, pod_state_obj):
         target_execution_timestamp_ts=datetime(2024, 2, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ),
         execution_policy_str="next_open_moo",
         decision_base_position_map={},
-        snapshot_metadata_dict={"strategy_family_str": "three_asset_stub"},
+        snapshot_metadata_dict={
+            "strategy_family_str": "three_asset_stub",
+            "norgate_data_profile_str": release_obj.data_profile_str,
+        },
         strategy_state_dict={"trade_id_int": 1},
         decision_book_type_str="incremental_entry_exit_book",
         entry_target_weight_map_dict={"AAPL": 0.2, "MSFT": 0.2, "NVDA": 0.2},
@@ -1252,7 +1308,10 @@ def _build_exit_only_decision_plan_stub(release_obj, as_of_ts, pod_state_obj):
         target_execution_timestamp_ts=datetime(2024, 2, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ),
         execution_policy_str="next_open_moo",
         decision_base_position_map={"AAPL": 5.0},
-        snapshot_metadata_dict={"strategy_family_str": "exit_only_stub"},
+        snapshot_metadata_dict={
+            "strategy_family_str": "exit_only_stub",
+            "norgate_data_profile_str": release_obj.data_profile_str,
+        },
         strategy_state_dict={"trade_id_int": 2},
         decision_book_type_str="incremental_entry_exit_book",
         entry_target_weight_map_dict={},
@@ -2567,7 +2626,10 @@ def test_next_open_market_builds_and_submits_at_open_with_grace(tmp_path: Path):
             target_execution_timestamp_ts=open_timestamp_ts,
             execution_policy_str="next_open_market",
             decision_base_position_map={},
-            snapshot_metadata_dict={"strategy_family_str": "stub"},
+            snapshot_metadata_dict={
+                "strategy_family_str": "stub",
+                "norgate_data_profile_str": release_obj.data_profile_str,
+            },
             strategy_state_dict={"trade_id_int": 1},
             decision_book_type_str="incremental_entry_exit_book",
             entry_target_weight_map_dict={"AAPL": 0.2},

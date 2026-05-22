@@ -31,7 +31,8 @@ from alpha.live.scheduler_service import (
     _render_serve_tick_summary_str,
     _resolve_db_path_for_mode_str,
     _should_emit_wait_operator_message,
-    _tick_detail_blocks_new_trade_on_norgate_sync_bool,
+    _norgate_snapshot_sync_required_for_decision_plan_bool,
+    _tick_detail_blocks_decision_plan_on_norgate_sync_bool,
     get_scheduler_decision,
     main,
     run_once,
@@ -154,7 +155,10 @@ def _build_decision_plan_stub(release_obj, as_of_ts, pod_state_obj):
         target_execution_timestamp_ts=datetime(2024, 2, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ),
         execution_policy_str="next_open_moo",
         decision_base_position_map={},
-        snapshot_metadata_dict={"strategy_family_str": "stub"},
+        snapshot_metadata_dict={
+            "strategy_family_str": "stub",
+            "norgate_data_profile_str": release_obj.data_profile_str,
+        },
         strategy_state_dict={"trade_id_int": 1},
         decision_book_type_str="incremental_entry_exit_book",
         entry_target_weight_map_dict={"AAPL": 0.2},
@@ -490,7 +494,7 @@ def test_scheduler_run_once_passes_incubation_context_to_resolver(tmp_path: Path
         target_execution_timestamp_ts=datetime(2024, 2, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ),
         execution_policy_str="next_open_moo",
         decision_base_position_map={},
-        snapshot_metadata_dict={},
+        snapshot_metadata_dict={"norgate_data_profile_str": "norgate_eod_sp500_pit"},
         strategy_state_dict={},
         decision_book_type_str="incremental_entry_exit_book",
         entry_target_weight_map_dict={"AAPL": 0.2},
@@ -548,7 +552,10 @@ def _insert_planned_decision_plan(
             target_execution_timestamp_ts=datetime(2024, 2, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ),
             execution_policy_str="next_open_moo",
             decision_base_position_map={},
-            snapshot_metadata_dict={"strategy_family_str": "stub"},
+            snapshot_metadata_dict={
+                "strategy_family_str": "stub",
+                "norgate_data_profile_str": "norgate_eod_sp500_pit",
+            },
             strategy_state_dict={},
             decision_book_type_str="incremental_entry_exit_book",
             entry_target_weight_map_dict={"AAPL": 0.2},
@@ -1156,21 +1163,166 @@ def test_scheduler_run_once_active_polls_when_norgate_sync_waits(tmp_path: Path,
     assert detail_dict["pre_decision_norgate_snapshot_sync_detail_dict"]["reason_code_str"] == "api_config_missing"
 
 
-def test_scheduler_run_once_does_not_submit_ready_vplan_when_norgate_sync_waits(
+def test_norgate_sync_requirement_resumes_only_after_completed_cycle_goes_stale(
     tmp_path: Path,
-    monkeypatch,
 ):
     _write_manifest(tmp_path, auto_submit_enabled_bool=True)
     state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
-    _insert_ready_vplan(state_store_obj)
+    decision_plan_obj = _insert_planned_decision_plan(state_store_obj)
+    state_store_obj.mark_decision_plan_status(
+        int(decision_plan_obj.decision_plan_id_int or 0),
+        "completed",
+    )
+
+    assert (
+        _norgate_snapshot_sync_required_for_decision_plan_bool(
+            state_store_obj=state_store_obj,
+            as_of_ts=datetime(2024, 2, 1, 14, 36, tzinfo=UTC),
+            releases_root_path_str=str(tmp_path / "releases"),
+            env_mode_str="paper",
+        )
+        is False
+    )
+    assert (
+        _norgate_snapshot_sync_required_for_decision_plan_bool(
+            state_store_obj=state_store_obj,
+            as_of_ts=datetime(2024, 2, 1, 21, 20, tzinfo=UTC),
+            releases_root_path_str=str(tmp_path / "releases"),
+            env_mode_str="paper",
+        )
+        is True
+    )
+
+
+def test_norgate_sync_requirement_respects_pod_filter_and_requires_provenance(
+    tmp_path: Path,
+):
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="user_001",
+        pod_id_str="pod_a",
+        release_id_str="user_001.pod_a.paper",
+        mode_str="paper",
+        enabled_bool=True,
+        account_route_str="DU1",
+    )
+    _write_guardrail_manifest(
+        tmp_path,
+        user_id_str="user_001",
+        pod_id_str="pod_b",
+        release_id_str="user_001.pod_b.paper",
+        mode_str="paper",
+        enabled_bool=True,
+        account_route_str="DU2",
+    )
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+    state_store_obj.insert_decision_plan(
+        DecisionPlan(
+            release_id_str="user_001.pod_a.paper",
+            user_id_str="user_001",
+            pod_id_str="pod_a",
+            account_route_str="DU1",
+            signal_timestamp_ts=datetime(2024, 1, 31, 16, 0, tzinfo=MARKET_TIMEZONE_OBJ),
+            submission_timestamp_ts=datetime(2024, 2, 1, 9, 23, 30, tzinfo=MARKET_TIMEZONE_OBJ),
+            target_execution_timestamp_ts=datetime(2024, 2, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ),
+            execution_policy_str="next_open_moo",
+            decision_base_position_map={},
+            snapshot_metadata_dict={
+                "strategy_family_str": "stub",
+                "norgate_data_profile_str": "norgate_eod_sp500_pit",
+            },
+            strategy_state_dict={},
+            decision_book_type_str="incremental_entry_exit_book",
+            entry_target_weight_map_dict={"AAPL": 0.2},
+            target_weight_map={"AAPL": 0.2},
+            exit_asset_set=set(),
+            entry_priority_list=["AAPL"],
+            cash_reserve_weight_float=0.0,
+        )
+    )
+
+    assert (
+        _norgate_snapshot_sync_required_for_decision_plan_bool(
+            state_store_obj=state_store_obj,
+            as_of_ts=datetime(2024, 2, 1, 14, 36, tzinfo=UTC),
+            releases_root_path_str=str(tmp_path / "releases"),
+            env_mode_str="paper",
+            pod_id_str="pod_a",
+        )
+        is False
+    )
+    assert (
+        _norgate_snapshot_sync_required_for_decision_plan_bool(
+            state_store_obj=state_store_obj,
+            as_of_ts=datetime(2024, 2, 1, 14, 36, tzinfo=UTC),
+            releases_root_path_str=str(tmp_path / "releases"),
+            env_mode_str="paper",
+            pod_id_str="pod_b",
+        )
+        is True
+    )
+
+    missing_provenance_state_store_obj = LiveStateStore(str((tmp_path / "missing_provenance.sqlite3").resolve()))
+    missing_provenance_state_store_obj.insert_decision_plan(
+        DecisionPlan(
+            release_id_str="user_001.pod_a.paper",
+            user_id_str="user_001",
+            pod_id_str="pod_a",
+            account_route_str="DU1",
+            signal_timestamp_ts=datetime(2024, 1, 31, 16, 0, tzinfo=MARKET_TIMEZONE_OBJ),
+            submission_timestamp_ts=datetime(2024, 2, 1, 9, 23, 30, tzinfo=MARKET_TIMEZONE_OBJ),
+            target_execution_timestamp_ts=datetime(2024, 2, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ),
+            execution_policy_str="next_open_moo",
+            decision_base_position_map={},
+            snapshot_metadata_dict={"strategy_family_str": "legacy_stub"},
+            strategy_state_dict={},
+            decision_book_type_str="incremental_entry_exit_book",
+            entry_target_weight_map_dict={"AAPL": 0.2},
+            target_weight_map={"AAPL": 0.2},
+            exit_asset_set=set(),
+            entry_priority_list=["AAPL"],
+            cash_reserve_weight_float=0.0,
+        )
+    )
+    assert (
+        _norgate_snapshot_sync_required_for_decision_plan_bool(
+            state_store_obj=missing_provenance_state_store_obj,
+            as_of_ts=datetime(2024, 2, 1, 14, 36, tzinfo=UTC),
+            releases_root_path_str=str(tmp_path / "releases"),
+            env_mode_str="paper",
+            pod_id_str="pod_a",
+        )
+        is True
+    )
+
+
+def test_scheduler_run_once_builds_vplan_without_norgate_resync(
+    tmp_path: Path,
+    monkeypatch,
+):
+    _write_manifest(tmp_path, auto_submit_enabled_bool=False)
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+    decision_plan_obj = _insert_planned_decision_plan(state_store_obj)
     broker_adapter_obj = StubBrokerAdapter()
+    broker_adapter_obj.seed_account_snapshot(
+        account_route_str="DU1",
+        cash_float=10000.0,
+        total_value_float=10000.0,
+        net_liq_float=10000.0,
+        available_funds_float=8000.0,
+        excess_liquidity_float=7000.0,
+        position_amount_map={},
+        snapshot_timestamp_ts=datetime(2024, 2, 1, 9, 20, tzinfo=MARKET_TIMEZONE_OBJ),
+        session_mode_str="paper",
+    )
+    broker_adapter_obj.seed_live_price_snapshot(
+        account_route_str="DU1",
+        asset_reference_price_map={"AAPL": 100.0},
+        snapshot_timestamp_ts=datetime(2024, 2, 1, 9, 20, tzinfo=MARKET_TIMEZONE_OBJ),
+    )
     monkeypatch.setattr(
         "alpha.live.scheduler_service.ensure_norgate_snapshots_for_live_tick",
-        lambda **_kwargs: {
-            "status_str": "waiting",
-            "reason_code_str": "api_config_missing",
-            "error_str": "Missing Norgate API config.",
-        },
+        lambda **_kwargs: pytest.fail("Existing planned DecisionPlan should not re-sync Norgate"),
     )
     monkeypatch.setattr(
         "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
@@ -1186,26 +1338,188 @@ def test_scheduler_run_once_does_not_submit_ready_vplan_when_norgate_sync_waits(
     )
 
     assert detail_dict["tick_invoked_bool"] is True
-    assert detail_dict["active_poll_bool"] is True
-    assert detail_dict["next_phase_str"] == "submit_vplan"
-    assert detail_dict["tick_detail_dict"]["submitted_vplan_count_int"] == 0
+    assert detail_dict["next_phase_str"] == "build_vplan"
+    assert detail_dict["norgate_snapshot_sync_required_for_decision_plan_bool"] is False
+    assert detail_dict["pre_decision_norgate_snapshot_sync_detail_dict"] is None
+    assert detail_dict["tick_detail_dict"]["created_vplan_count_int"] == 1
+    assert state_store_obj.get_decision_plan_by_id(
+        int(decision_plan_obj.decision_plan_id_int or 0)
+    ).status_str == "vplan_ready"
+
+
+@pytest.mark.parametrize(
+    ("snapshot_metadata_dict", "expected_reason_code_str"),
+    [
+        (
+            {"strategy_family_str": "legacy_stub"},
+            "decision_plan_norgate_provenance_missing",
+        ),
+        (
+            {
+                "strategy_family_str": "legacy_stub",
+                "norgate_data_profile_str": "norgate_eod_ndx_pit",
+            },
+            "decision_plan_norgate_profile_mismatch",
+        ),
+    ],
+)
+def test_scheduler_run_once_blocks_vplan_when_decision_plan_has_invalid_norgate_provenance(
+    tmp_path: Path,
+    monkeypatch,
+    snapshot_metadata_dict: dict[str, object],
+    expected_reason_code_str: str,
+):
+    _write_manifest(tmp_path, auto_submit_enabled_bool=False)
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+    state_store_obj.insert_decision_plan(
+        DecisionPlan(
+            release_id_str="user_001.pod_test.daily.v2",
+            user_id_str="user_001",
+            pod_id_str="pod_test_01",
+            account_route_str="DU1",
+            signal_timestamp_ts=datetime(2024, 1, 31, 16, 0, tzinfo=MARKET_TIMEZONE_OBJ),
+            submission_timestamp_ts=datetime(2024, 2, 1, 9, 23, 30, tzinfo=MARKET_TIMEZONE_OBJ),
+            target_execution_timestamp_ts=datetime(2024, 2, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ),
+            execution_policy_str="next_open_moo",
+            decision_base_position_map={},
+            snapshot_metadata_dict=snapshot_metadata_dict,
+            strategy_state_dict={},
+            decision_book_type_str="incremental_entry_exit_book",
+            entry_target_weight_map_dict={"AAPL": 0.2},
+            target_weight_map={"AAPL": 0.2},
+            exit_asset_set=set(),
+            entry_priority_list=["AAPL"],
+            cash_reserve_weight_float=0.0,
+        )
+    )
+    monkeypatch.setattr(
+        "alpha.live.scheduler_service.ensure_norgate_snapshots_for_live_tick",
+        lambda **_kwargs: {
+            "status_str": "waiting",
+            "reason_code_str": "api_config_missing",
+            "error_str": "Missing Norgate API config.",
+        },
+    )
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda data_profile_str: pd.Timestamp("2024-01-31"),
+    )
+
+    detail_dict = run_once(
+        state_store_obj=state_store_obj,
+        broker_adapter_obj=StubBrokerAdapter(),
+        as_of_ts=datetime(2024, 2, 1, 14, 24, tzinfo=UTC),
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="paper",
+    )
+
+    assert detail_dict["tick_invoked_bool"] is True
+    assert detail_dict["next_phase_str"] == "build_vplan"
+    assert detail_dict["norgate_snapshot_sync_required_for_decision_plan_bool"] is True
+    assert detail_dict["pre_decision_norgate_snapshot_sync_detail_dict"]["status_str"] == "waiting"
     assert detail_dict["tick_detail_dict"]["created_vplan_count_int"] == 0
-    assert detail_dict["tick_detail_dict"]["blocked_action_count_int"] == 2
-    assert detail_dict["tick_detail_dict"]["reason_count_map_dict"] == {"api_config_missing": 1}
-    assert broker_adapter_obj.submitted_order_request_list == []
+    assert detail_dict["tick_detail_dict"]["blocked_action_count_int"] == 1
+    assert detail_dict["tick_detail_dict"]["reason_count_map_dict"] == {
+        "api_config_missing": 1,
+        expected_reason_code_str: 1,
+    }
+    assert state_store_obj.get_latest_vplan_for_pod("pod_test_01") is None
 
 
-def test_tick_detail_blocks_new_trade_on_norgate_sync_helper():
-    assert _tick_detail_blocks_new_trade_on_norgate_sync_bool(
+def test_scheduler_run_once_submits_ready_vplan_without_norgate_resync(
+    tmp_path: Path,
+    monkeypatch,
+):
+    _write_manifest(tmp_path, auto_submit_enabled_bool=True)
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+    _insert_ready_vplan(state_store_obj)
+    broker_adapter_obj = StubBrokerAdapter()
+    broker_adapter_obj.seed_account_snapshot(
+        account_route_str="DU1",
+        cash_float=10000.0,
+        total_value_float=10000.0,
+        position_amount_map={},
+        snapshot_timestamp_ts=datetime(2024, 2, 1, 9, 20, tzinfo=MARKET_TIMEZONE_OBJ),
+    )
+    monkeypatch.setattr(
+        "alpha.live.scheduler_service.ensure_norgate_snapshots_for_live_tick",
+        lambda **_kwargs: pytest.fail("Ready VPlan submission should not re-sync Norgate"),
+    )
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda data_profile_str: pd.Timestamp("2024-01-31"),
+    )
+
+    detail_dict = run_once(
+        state_store_obj=state_store_obj,
+        broker_adapter_obj=broker_adapter_obj,
+        as_of_ts=datetime(2024, 2, 1, 14, 24, tzinfo=UTC),
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="paper",
+    )
+
+    assert detail_dict["tick_invoked_bool"] is True
+    assert detail_dict["active_poll_bool"] is False
+    assert detail_dict["next_phase_str"] == "submit_vplan"
+    assert detail_dict["norgate_snapshot_sync_required_for_decision_plan_bool"] is False
+    assert detail_dict["pre_decision_norgate_snapshot_sync_detail_dict"] is None
+    assert detail_dict["tick_detail_dict"]["submitted_vplan_count_int"] == 1
+    assert detail_dict["tick_detail_dict"]["created_vplan_count_int"] == 0
+    assert detail_dict["tick_detail_dict"]["blocked_action_count_int"] == 0
+    assert detail_dict["tick_detail_dict"]["reason_count_map_dict"] == {}
+    assert len(broker_adapter_obj.submitted_order_request_list) == 1
+
+
+def test_scheduler_run_once_reconciles_submitted_vplan_without_norgate_resync(
+    tmp_path: Path,
+    monkeypatch,
+):
+    _write_manifest(tmp_path, auto_submit_enabled_bool=True)
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+    _insert_submitted_vplan(state_store_obj)
+    reconcile_called_dict = {"called_bool": False}
+    monkeypatch.setattr(
+        "alpha.live.scheduler_service.ensure_norgate_snapshots_for_live_tick",
+        lambda **_kwargs: pytest.fail("Submitted VPlan reconcile should not re-sync Norgate"),
+    )
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda data_profile_str: pd.Timestamp("2024-01-31"),
+    )
+
+    def _fake_post_execution_reconcile(**_kwargs):
+        reconcile_called_dict["called_bool"] = True
+        return {"completed_vplan_count_int": 1}
+
+    monkeypatch.setattr(runner, "post_execution_reconcile", _fake_post_execution_reconcile)
+
+    detail_dict = run_once(
+        state_store_obj=state_store_obj,
+        broker_adapter_obj=StubBrokerAdapter(),
+        as_of_ts=datetime(2024, 2, 1, 14, 40, tzinfo=UTC),
+        releases_root_path_str=str(tmp_path / "releases"),
+        env_mode_str="paper",
+    )
+
+    assert detail_dict["tick_invoked_bool"] is True
+    assert detail_dict["next_phase_str"] == "post_execution_reconcile"
+    assert detail_dict["norgate_snapshot_sync_required_for_decision_plan_bool"] is False
+    assert detail_dict["pre_decision_norgate_snapshot_sync_detail_dict"] is None
+    assert detail_dict["tick_detail_dict"]["completed_vplan_count_int"] == 1
+    assert reconcile_called_dict["called_bool"] is True
+
+
+def test_tick_detail_blocks_decision_plan_on_norgate_sync_helper():
+    assert _tick_detail_blocks_decision_plan_on_norgate_sync_bool(
         {"norgate_snapshot_sync_detail_dict": {"status_str": "waiting"}}
     )
-    assert _tick_detail_blocks_new_trade_on_norgate_sync_bool(
+    assert _tick_detail_blocks_decision_plan_on_norgate_sync_bool(
         {"norgate_snapshot_sync_detail_dict": {"status_str": "failed"}}
     )
-    assert _tick_detail_blocks_new_trade_on_norgate_sync_bool(
+    assert _tick_detail_blocks_decision_plan_on_norgate_sync_bool(
         {"norgate_snapshot_sync_detail_dict": {"status_str": "local_snapshot_only"}}
     )
-    assert not _tick_detail_blocks_new_trade_on_norgate_sync_bool(
+    assert not _tick_detail_blocks_decision_plan_on_norgate_sync_bool(
         {"norgate_snapshot_sync_detail_dict": {"status_str": "ready"}}
     )
 
@@ -1262,8 +1576,8 @@ def test_scheduler_serve_sleeps_after_due_tick_blocked_by_norgate_sync(
             env_mode_str=kwargs["env_mode_str"],
             due_now_bool=True,
             active_poll_bool=False,
-            next_phase_str="submit_vplan",
-            reason_code_str="vplan_ready",
+            next_phase_str="build_decision_plan",
+            reason_code_str="ready_to_build_decision_plan",
             next_due_timestamp_ts=kwargs["as_of_ts"],
             related_pod_id_list=["pod_test_01"],
         ),
@@ -1284,10 +1598,110 @@ def test_scheduler_serve_sleeps_after_due_tick_blocked_by_norgate_sync(
             "created_decision_plan_count_int": 0,
             "created_vplan_count_int": 0,
             "submitted_vplan_count_int": 0,
-            "blocked_action_count_int": 2,
+            "blocked_action_count_int": 0,
             "completed_vplan_count_int": 0,
             "warning_count_map_dict": {},
             "reason_count_map_dict": {"api_config_missing": 1},
+        }
+
+    def _fake_sleep(seconds_float):
+        sleep_call_dict["seconds_float"] = float(seconds_float)
+        raise StopServe()
+
+    monkeypatch.setattr(runner, "tick", _fake_tick)
+    monkeypatch.setattr(scheduler_service_module.time, "sleep", _fake_sleep)
+
+    with pytest.raises(StopServe):
+        serve(
+            state_store_obj=state_store_obj,
+            broker_adapter_obj=StubBrokerAdapter(),
+            releases_root_path_str=str(tmp_path / "releases"),
+            env_mode_str="paper",
+            broker_host_str=None,
+            broker_port_int=None,
+            broker_client_id_int=None,
+            active_poll_seconds_int=7,
+            idle_max_sleep_seconds_int=3600,
+            log_path_str=str(tmp_path / "events.jsonl"),
+        )
+
+    assert tick_call_count_dict["count_int"] == 1
+    assert sleep_call_dict["seconds_float"] == 7.0
+
+
+def test_scheduler_serve_sleeps_after_due_tick_blocked_without_norgate_sync(
+    tmp_path: Path,
+    monkeypatch,
+):
+    class StopServe(BaseException):
+        pass
+
+    _write_manifest(tmp_path, auto_submit_enabled_bool=True)
+    state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))
+    _insert_ready_vplan(state_store_obj)
+    sleep_call_dict = {}
+
+    monkeypatch.setattr(scheduler_service_module, "_emit_scheduler_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        scheduler_service_module,
+        "_emit_operator_message_spec_list",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        scheduler_service_module,
+        "_build_related_pod_status_dict_list",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        scheduler_service_module,
+        "_build_related_execution_report_dict_list",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        scheduler_service_module,
+        "_build_related_vplan_dict_list",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        scheduler_service_module,
+        "_build_related_broker_order_snapshot_dict_list",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "alpha.live.scheduler_service.ensure_norgate_snapshots_for_live_tick",
+        lambda **_kwargs: pytest.fail("Ready VPlan blocked submit should not re-sync Norgate"),
+    )
+    monkeypatch.setattr(
+        "alpha.live.scheduler_service.get_scheduler_decision",
+        lambda **kwargs: SchedulerDecision(
+            as_of_timestamp_ts=kwargs["as_of_ts"],
+            env_mode_str=kwargs["env_mode_str"],
+            due_now_bool=True,
+            active_poll_bool=False,
+            next_phase_str="submit_vplan",
+            reason_code_str="vplan_ready",
+            next_due_timestamp_ts=kwargs["as_of_ts"],
+            related_pod_id_list=["pod_test_01"],
+        ),
+    )
+
+    tick_call_count_dict = {"count_int": 0}
+
+    def _fake_tick(**_kwargs):
+        tick_call_count_dict["count_int"] += 1
+        if tick_call_count_dict["count_int"] > 1:
+            raise AssertionError("serve tight-looped instead of sleeping after blocked submit")
+        return {
+            "lease_acquired_bool": True,
+            "norgate_snapshot_sync_required_for_decision_plan_bool": False,
+            "norgate_snapshot_sync_detail_dict": None,
+            "created_decision_plan_count_int": 0,
+            "created_vplan_count_int": 0,
+            "submitted_vplan_count_int": 0,
+            "blocked_action_count_int": 1,
+            "completed_vplan_count_int": 0,
+            "warning_count_map_dict": {},
+            "reason_count_map_dict": {"broker_not_ready": 1},
         }
 
     def _fake_sleep(seconds_float):
@@ -1335,7 +1749,10 @@ def test_scheduler_run_once_cleans_up_stale_cycle(tmp_path: Path, monkeypatch):
             target_execution_timestamp_ts=datetime(2024, 2, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ),
             execution_policy_str="next_open_moo",
             decision_base_position_map={},
-            snapshot_metadata_dict={"strategy_family_str": "stale_stub"},
+            snapshot_metadata_dict={
+                "strategy_family_str": "stale_stub",
+                "norgate_data_profile_str": "norgate_eod_sp500_pit",
+            },
             strategy_state_dict={},
             decision_book_type_str="incremental_entry_exit_book",
             entry_target_weight_map_dict={"AAPL": 0.2},
