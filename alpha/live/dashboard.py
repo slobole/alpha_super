@@ -16,6 +16,7 @@ import uuid
 
 import yaml
 
+from alpha.data import LIVE_FRED_STALE_WARNING_BUSINESS_DAYS_INT
 from alpha.live import runner, scheduler_utils
 from alpha.live.models import LiveRelease
 from alpha.live.norgate_snapshot_sync import build_norgate_snapshot_status_dict
@@ -664,6 +665,9 @@ def build_pod_row_dict(
         "dtb3_freshness_business_days_int": None,
         "dtb3_source_name_str": None,
         "dtb3_used_cache_bool": None,
+        "dtb3_policy_status_str": None,
+        "dtb3_warning_bool": None,
+        "dtb3_warn_after_business_days_int": None,
         "norgate_snapshot_status_dict": norgate_snapshot_status_dict,
         "eod_snapshot_dict": _empty_eod_snapshot_dict(),
         "health_str": "gray",
@@ -786,6 +790,11 @@ def build_pod_row_dict(
         )
         base_row_dict["dtb3_source_name_str"] = metadata_dict.get("dtb3_source_name_str")
         base_row_dict["dtb3_used_cache_bool"] = metadata_dict.get("dtb3_used_cache_bool")
+        base_row_dict["dtb3_policy_status_str"] = metadata_dict.get("dtb3_policy_status_str")
+        base_row_dict["dtb3_warning_bool"] = metadata_dict.get("dtb3_warning_bool")
+        base_row_dict["dtb3_warn_after_business_days_int"] = metadata_dict.get(
+            "dtb3_warn_after_business_days_int"
+        )
     if latest_vplan_row_dict is not None:
         base_row_dict["latest_vplan_status_str"] = latest_vplan_row_dict.get("status_str")
         base_row_dict["latest_vplan_id_int"] = latest_vplan_row_dict.get("vplan_id_int")
@@ -2705,7 +2714,12 @@ def _build_data_freshness_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
                 "DTB3/FRED",
                 row_dict.get("dtb3_latest_observation_date_str"),
                 _dtb3_freshness_severity_str(row_dict),
-                f"status={row_dict.get('dtb3_download_status_str')}, days={row_dict.get('dtb3_freshness_business_days_int')}",
+                (
+                    f"policy={row_dict.get('dtb3_policy_status_str') or 'legacy'}, "
+                    f"status={row_dict.get('dtb3_download_status_str')}, "
+                    f"days={row_dict.get('dtb3_freshness_business_days_int')}, "
+                    f"cache={row_dict.get('dtb3_used_cache_bool')}"
+                ),
             )
         )
     return {
@@ -2735,6 +2749,9 @@ def _build_data_freshness_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
         "dtb3_freshness_business_days_int": row_dict.get("dtb3_freshness_business_days_int"),
         "dtb3_source_name_str": row_dict.get("dtb3_source_name_str"),
         "dtb3_used_cache_bool": row_dict.get("dtb3_used_cache_bool"),
+        "dtb3_policy_status_str": row_dict.get("dtb3_policy_status_str"),
+        "dtb3_warning_bool": row_dict.get("dtb3_warning_bool"),
+        "dtb3_warn_after_business_days_int": row_dict.get("dtb3_warn_after_business_days_int"),
         "item_dict_list": item_dict_list,
     }
 
@@ -3703,7 +3720,12 @@ def _build_debug_timeline_event_dict_list(detail_dict: dict[str, Any]) -> list[d
             row_dict.get("dtb3_download_status_str"),
             _dtb3_freshness_severity_str(row_dict),
             row_dict.get("dtb3_latest_observation_date_str"),
-            f"freshness_days={row_dict.get('dtb3_freshness_business_days_int')}, source={row_dict.get('dtb3_source_name_str')}",
+            (
+                f"policy={row_dict.get('dtb3_policy_status_str') or 'legacy'}, "
+                f"freshness_days={row_dict.get('dtb3_freshness_business_days_int')}, "
+                f"source={row_dict.get('dtb3_source_name_str')}, "
+                f"cache={row_dict.get('dtb3_used_cache_bool')}"
+            ),
         )
 
     for event_dict in list(detail_dict.get("event_dict_list") or [])[-8:]:
@@ -3779,7 +3801,12 @@ def _build_debug_evidence_item_dict_list(detail_dict: dict[str, Any]) -> list[di
                 "DTB3/FRED",
                 row_dict.get("dtb3_download_status_str"),
                 _dtb3_freshness_severity_str(row_dict),
-                f"observation={row_dict.get('dtb3_latest_observation_date_str')}, days={row_dict.get('dtb3_freshness_business_days_int')}",
+                (
+                    f"policy={row_dict.get('dtb3_policy_status_str') or 'legacy'}, "
+                    f"observation={row_dict.get('dtb3_latest_observation_date_str')}, "
+                    f"days={row_dict.get('dtb3_freshness_business_days_int')}, "
+                    f"cache={row_dict.get('dtb3_used_cache_bool')}"
+                ),
             )
         )
     if report_dict:
@@ -3954,12 +3981,32 @@ def _diff_freshness_severity_str(row_dict: dict[str, Any]) -> str:
 
 
 def _dtb3_freshness_severity_str(row_dict: dict[str, Any]) -> str:
+    policy_status_str = str(row_dict.get("dtb3_policy_status_str") or "")
+    warning_obj = row_dict.get("dtb3_warning_bool")
+    warning_bool = warning_obj is True or str(warning_obj).lower() == "true"
+    used_cache_obj = row_dict.get("dtb3_used_cache_bool")
+    used_cache_bool = used_cache_obj is True or str(used_cache_obj).lower() == "true"
+    download_status_str = str(row_dict.get("dtb3_download_status_str") or "")
+    if policy_status_str in {"stale_warning", "cache_warning", "cache_write_warning"} or warning_bool:
+        return "yellow"
+    if download_status_str == "download_success_cache_write_failed":
+        return "yellow"
+    if used_cache_bool or download_status_str.startswith("cache_"):
+        return "yellow"
+
     freshness_obj = row_dict.get("dtb3_freshness_business_days_int")
     try:
         freshness_days_int = int(freshness_obj)
     except (TypeError, ValueError):
         return "gray"
-    return "green" if freshness_days_int <= 2 else "red"
+    try:
+        warn_after_business_days_int = int(
+            row_dict.get("dtb3_warn_after_business_days_int")
+            or LIVE_FRED_STALE_WARNING_BUSINESS_DAYS_INT
+        )
+    except (TypeError, ValueError):
+        warn_after_business_days_int = LIVE_FRED_STALE_WARNING_BUSINESS_DAYS_INT
+    return "green" if freshness_days_int <= warn_after_business_days_int else "yellow"
 
 
 def _build_execution_report_from_vplan_dict(

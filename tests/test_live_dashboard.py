@@ -199,6 +199,9 @@ def _seed_decision_vplan_and_broker_rows(db_path_obj: Path, release_obj: LiveRel
                 "dtb3_freshness_business_days_int": 1,
                 "dtb3_source_name_str": "FRED",
                 "dtb3_used_cache_bool": False,
+                "dtb3_policy_status_str": "fresh",
+                "dtb3_warning_bool": False,
+                "dtb3_warn_after_business_days_int": 3,
             },
             strategy_state_dict={"trade_id_int": 9},
             decision_book_type_str="full_target_weight_book",
@@ -532,6 +535,9 @@ def _base_operator_row_dict(**override_dict) -> dict:
         "dtb3_freshness_business_days_int": 1,
         "dtb3_source_name_str": "FRED",
         "dtb3_used_cache_bool": False,
+        "dtb3_policy_status_str": "fresh",
+        "dtb3_warning_bool": False,
+        "dtb3_warn_after_business_days_int": 3,
     }
     row_dict.update(override_dict)
     return row_dict
@@ -729,6 +735,42 @@ def test_dashboard_alert_builder_sorts_and_suppresses_green_noise():
         "pod_gray",
     ]
     assert "pod_ok" not in {alert_dict["pod_id_str"] for alert_dict in alert_dict_list}
+
+
+def test_dashboard_dtb3_freshness_policy_severity():
+    green_row_dict = _base_operator_row_dict(
+        dtb3_freshness_business_days_int=3,
+        dtb3_policy_status_str="fresh",
+        dtb3_warning_bool=False,
+        dtb3_used_cache_bool=False,
+        dtb3_download_status_str="download_success",
+    )
+    stale_row_dict = _base_operator_row_dict(
+        dtb3_freshness_business_days_int=4,
+        dtb3_policy_status_str="stale_warning",
+        dtb3_warning_bool=True,
+        dtb3_used_cache_bool=False,
+        dtb3_download_status_str="download_success",
+    )
+    cache_row_dict = _base_operator_row_dict(
+        dtb3_freshness_business_days_int=1,
+        dtb3_policy_status_str="cache_warning",
+        dtb3_warning_bool=True,
+        dtb3_used_cache_bool=True,
+        dtb3_download_status_str="cache_fallback_after_download_error",
+    )
+    cache_write_row_dict = _base_operator_row_dict(
+        dtb3_freshness_business_days_int=1,
+        dtb3_policy_status_str="cache_write_warning",
+        dtb3_warning_bool=True,
+        dtb3_used_cache_bool=False,
+        dtb3_download_status_str="download_success_cache_write_failed",
+    )
+
+    assert dashboard_module._dtb3_freshness_severity_str(green_row_dict) == "green"
+    assert dashboard_module._dtb3_freshness_severity_str(stale_row_dict) == "yellow"
+    assert dashboard_module._dtb3_freshness_severity_str(cache_row_dict) == "yellow"
+    assert dashboard_module._dtb3_freshness_severity_str(cache_write_row_dict) == "yellow"
 
 
 def test_dashboard_execution_report_separates_open_and_reference_slippage():

@@ -9,7 +9,8 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import pytest
 
-from alpha.data import FredSeriesSnapshot, FredSeriesStaleError
+from alpha.data import FredSeriesUnavailableError
+import alpha.live.scheduler_service as scheduler_service_module
 import alpha.live.runner as runner_module
 import alpha.live.logging_utils as logging_utils
 from alpha.live.models import (
@@ -2332,9 +2333,9 @@ def test_submit_ready_vplans_normalizes_snapshot_rows_without_ids_before_persist
     assert fill_row_dict_list[0]["fill_price_float"] == 101.0
 
 
-def test_build_decision_plans_skips_pod_local_dtb3_stale_failure_and_continues(tmp_path: Path, monkeypatch):
-    db_path_str = str((tmp_path / "live_dtb3_stale.sqlite3").resolve())
-    log_path_obj = tmp_path / "dtb3_stale_events.jsonl"
+def test_build_decision_plans_creates_pod_with_stale_dtb3_warning_and_continues(tmp_path: Path, monkeypatch):
+    db_path_str = str((tmp_path / "live_dtb3_stale_warning.sqlite3").resolve())
+    log_path_obj = tmp_path / "dtb3_stale_warning_events.jsonl"
     _write_manifest(tmp_path, auto_submit_enabled_bool=False)
     _write_manifest_file(
         root_path_obj=tmp_path,
@@ -2350,31 +2351,76 @@ def test_build_decision_plans_skips_pod_local_dtb3_stale_failure_and_continues(t
         lambda data_profile_str: pd.Timestamp("2024-01-31"),
     )
 
-    stale_snapshot_obj = FredSeriesSnapshot(
-        value_ser=pd.Series(
-            [5.20],
-            index=pd.DatetimeIndex([pd.Timestamp("2024-01-29")]),
-            name="DTB3",
-        ),
-        source_name_str="FRED",
-        series_id_str="DTB3",
-        download_attempt_timestamp_ts=datetime(2024, 1, 31, 16, 5, tzinfo=MARKET_TIMEZONE_OBJ),
-        download_status_str="cache_fallback_after_download_error",
-        latest_observation_date_ts=pd.Timestamp("2024-01-29"),
-        used_cache_bool=True,
-        freshness_business_days_int=2,
+    def _build_decision_plan_with_stale_dtb3_warning(release_obj, as_of_ts, pod_state_obj):
+        decision_plan_obj = _build_decision_plan_stub(release_obj, as_of_ts, pod_state_obj)
+        if release_obj.pod_id_str == "pod_test_01":
+            decision_plan_obj.snapshot_metadata_dict.update(
+                {
+                    "dtb3_download_status_str": "download_success",
+                    "dtb3_latest_observation_date_str": "2024-01-25",
+                    "dtb3_freshness_business_days_int": 4,
+                    "dtb3_source_name_str": "FRED",
+                    "dtb3_used_cache_bool": False,
+                    "dtb3_policy_status_str": "stale_warning",
+                    "dtb3_warning_bool": True,
+                    "dtb3_warn_after_business_days_int": 3,
+                }
+            )
+        return decision_plan_obj
+
+    monkeypatch.setattr(
+        "alpha.live.strategy_host.build_decision_plan_for_release",
+        _build_decision_plan_with_stale_dtb3_warning,
+    )
+
+    state_store_obj = LiveStateStore(db_path_str)
+    build_detail_dict = build_decision_plans(
+        state_store_obj=state_store_obj,
+        as_of_ts=datetime(2024, 1, 31, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
+        releases_root_path_str=str(tmp_path / "releases"),
+        log_path_str=str(log_path_obj),
+    )
+
+    stale_warning_decision_plan_obj = state_store_obj.get_latest_decision_plan_for_pod("pod_test_01")
+    created_decision_plan_obj = state_store_obj.get_latest_decision_plan_for_pod("pod_ok_02")
+
+    assert build_detail_dict["created_decision_plan_count_int"] == 2
+    assert build_detail_dict["skipped_decision_plan_count_int"] == 0
+    assert build_detail_dict["reason_count_map_dict"] == {}
+    assert stale_warning_decision_plan_obj is not None
+    assert created_decision_plan_obj is not None
+    assert stale_warning_decision_plan_obj.snapshot_metadata_dict["dtb3_policy_status_str"] == "stale_warning"
+    assert stale_warning_decision_plan_obj.snapshot_metadata_dict["dtb3_warning_bool"] is True
+    assert stale_warning_decision_plan_obj.snapshot_metadata_dict["dtb3_warn_after_business_days_int"] == 3
+
+
+def test_build_decision_plans_skips_pod_local_dtb3_unavailable_failure_and_continues(tmp_path: Path, monkeypatch):
+    db_path_str = str((tmp_path / "live_dtb3_unavailable.sqlite3").resolve())
+    log_path_obj = tmp_path / "dtb3_unavailable_events.jsonl"
+    _write_manifest(tmp_path, auto_submit_enabled_bool=False)
+    _write_manifest_file(
+        root_path_obj=tmp_path,
+        file_name_str="pod_ok.yaml",
+        pod_id_str="pod_ok_02",
+        release_id_str="user_001.pod_ok.daily.v2",
+        strategy_import_str="strategies.dv2.strategy_mr_dv2:DVO2Strategy",
+        auto_submit_enabled_bool=False,
+        pod_budget_fraction_float=0.5,
+    )
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
+        lambda data_profile_str: pd.Timestamp("2024-01-31"),
     )
 
     def _build_decision_plan_or_raise(release_obj, as_of_ts, pod_state_obj):
         if release_obj.pod_id_str == "pod_test_01":
-            raise FredSeriesStaleError(
+            raise FredSeriesUnavailableError(
                 message_str=(
-                    "FRED series 'DTB3' is too stale for live use. "
-                    "latest_observation_date=2024-01-29 freshness_business_days_int=2."
+                    "Failed to load FRED series 'DTB3'. "
+                    "The refresh attempt failed and no local cache file exists."
                 ),
                 series_id_str="DTB3",
-                reason_code_str="dtb3_stale",
-                series_snapshot_obj=stale_snapshot_obj,
+                reason_code_str="dtb3_unavailable",
             )
         return _build_decision_plan_stub(release_obj, as_of_ts, pod_state_obj)
 
@@ -2401,16 +2447,27 @@ def test_build_decision_plans_skips_pod_local_dtb3_stale_failure_and_continues(t
 
     assert build_detail_dict["created_decision_plan_count_int"] == 1
     assert build_detail_dict["skipped_decision_plan_count_int"] == 1
-    assert build_detail_dict["reason_count_map_dict"] == {"dtb3_stale": 1}
+    assert build_detail_dict["reason_count_map_dict"] == {"dtb3_unavailable": 1}
     assert skipped_decision_plan_obj is None
     assert created_decision_plan_obj is not None
     assert created_decision_plan_obj.pod_id_str == "pod_ok_02"
     assert any(
         log_record_dict["event_name_str"] == "build_decision_plan_data_dependency_error"
         and log_record_dict["pod_id_str"] == "pod_test_01"
-        and log_record_dict["reason_code_str"] == "dtb3_stale"
+        and log_record_dict["reason_code_str"] == "dtb3_unavailable"
         for log_record_dict in log_record_dict_list
     )
+
+
+def test_dtb3_stale_operator_wording_no_longer_says_decision_skipped():
+    runner_reason_str = runner_module._humanize_reason_code_str("dtb3_stale")
+    scheduler_reason_str = scheduler_service_module._humanize_reason_code_str("dtb3_stale")
+
+    expected_reason_str = (
+        "legacy stale-DTB3 data dependency event; older cycles skipped DecisionPlan creation"
+    )
+    assert runner_reason_str == expected_reason_str
+    assert scheduler_reason_str == expected_reason_str
 
 
 def test_build_vplan_warns_on_position_mismatch_but_continues(tmp_path: Path, monkeypatch):

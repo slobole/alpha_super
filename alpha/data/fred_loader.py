@@ -13,7 +13,10 @@ import pandas as pd
 
 FRED_SOURCE_NAME_STR = "FRED"
 DEFAULT_FRED_TIMEOUT_INT = 30
-MAX_LIVE_FRED_FRESHNESS_BUSINESS_DAYS_INT = 2
+LIVE_FRED_STALE_WARNING_BUSINESS_DAYS_INT = 3
+# Backward-compatible alias for older imports. This is now a warning
+# threshold, not a live hard cap.
+MAX_LIVE_FRED_FRESHNESS_BUSINESS_DAYS_INT = LIVE_FRED_STALE_WARNING_BUSINESS_DAYS_INT
 SUPPORTED_FRED_MODE_TUPLE: tuple[str, ...] = ("backtest", "live")
 
 
@@ -134,9 +137,13 @@ def load_daily_fred_series_snapshot(
         with urlopen(csv_url_str, timeout=DEFAULT_FRED_TIMEOUT_INT) as response_obj:
             downloaded_csv_text_str = response_obj.read().decode("utf-8")
         series_df = _load_csv_df_from_text(downloaded_csv_text_str)
-        cache_csv_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_csv_path.write_text(downloaded_csv_text_str, encoding="utf-8")
-        download_status_str = "download_success"
+        raw_value_ser = _extract_value_ser(series_df, series_id_str)
+        try:
+            cache_csv_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_csv_path.write_text(downloaded_csv_text_str, encoding="utf-8")
+            download_status_str = "download_success"
+        except OSError:
+            download_status_str = "download_success_cache_write_failed"
         used_cache_bool = False
     except (HTTPError, URLError, TimeoutError, OSError, UnicodeDecodeError, ValueError, pd.errors.ParserError) as download_exception_obj:
         if not cache_csv_path.exists():
@@ -151,6 +158,7 @@ def load_daily_fred_series_snapshot(
 
         try:
             series_df = _load_csv_df_from_path(cache_csv_path)
+            raw_value_ser = _extract_value_ser(series_df, series_id_str)
         except (OSError, ValueError, pd.errors.ParserError) as cache_exception_obj:
             raise FredSeriesUnavailableError(
                 message_str=(
@@ -164,7 +172,6 @@ def load_daily_fred_series_snapshot(
         download_status_str = "cache_fallback_after_download_error"
         used_cache_bool = True
 
-    raw_value_ser = _extract_value_ser(series_df, series_id_str)
     # *** CRITICAL*** Only observations published on or before `as_of_date_ts`
     # may enter the returned series. Allowing later observations here would
     # leak future macro information into backtests or live decision builds.
@@ -195,18 +202,6 @@ def load_daily_fred_series_snapshot(
         freshness_business_days_int=freshness_business_days_int,
     )
 
-    if mode_str == "live" and freshness_business_days_int > MAX_LIVE_FRED_FRESHNESS_BUSINESS_DAYS_INT:
-        raise FredSeriesStaleError(
-            message_str=(
-                f"FRED series '{series_id_str}' is too stale for live use. "
-                f"latest_observation_date={latest_observation_date_ts.date().isoformat()} "
-                f"freshness_business_days_int={freshness_business_days_int}."
-            ),
-            series_id_str=series_id_str,
-            reason_code_str=f"{str(series_id_str).lower()}_stale",
-            series_snapshot_obj=series_snapshot_obj,
-        )
-
     return series_snapshot_obj
 
 
@@ -216,6 +211,7 @@ __all__ = [
     "FredSeriesStaleError",
     "FredSeriesUnavailableError",
     "FRED_SOURCE_NAME_STR",
+    "LIVE_FRED_STALE_WARNING_BUSINESS_DAYS_INT",
     "MAX_LIVE_FRED_FRESHNESS_BUSINESS_DAYS_INT",
     "build_fred_csv_url",
     "load_daily_fred_series_snapshot",

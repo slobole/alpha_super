@@ -314,6 +314,9 @@ def test_strategy_host_builds_full_target_taa_decision_plan(monkeypatch):
         "dtb3_download_status_str": "download_success",
         "dtb3_used_cache_bool": False,
         "dtb3_freshness_business_days_int": 0,
+        "dtb3_policy_status_str": "fresh",
+        "dtb3_warning_bool": False,
+        "dtb3_warn_after_business_days_int": 3,
     }
 
 
@@ -481,6 +484,9 @@ def test_strategy_host_builds_full_target_btal_1n_tqqq_vix_cash_taa_decision_pla
         "dtb3_download_status_str": "download_success",
         "dtb3_used_cache_bool": False,
         "dtb3_freshness_business_days_int": 0,
+        "dtb3_policy_status_str": "fresh",
+        "dtb3_warning_bool": False,
+        "dtb3_warn_after_business_days_int": 3,
     }
 
 
@@ -506,16 +512,16 @@ def test_strategy_host_taa_live_path_does_not_use_backtest_fill_costs(monkeypatc
     dtb3_snapshot_obj = FredSeriesSnapshot(
         value_ser=pd.Series(
             [5.20],
-            index=pd.DatetimeIndex([pd.Timestamp("2024-01-31")]),
+            index=pd.DatetimeIndex([pd.Timestamp("2024-01-25")]),
             name="DTB3",
         ),
         source_name_str="FRED",
         series_id_str="DTB3",
         download_attempt_timestamp_ts=datetime(2024, 1, 31, 16, 5, tzinfo=MARKET_TIMEZONE_OBJ),
         download_status_str="download_success",
-        latest_observation_date_ts=pd.Timestamp("2024-01-31"),
+        latest_observation_date_ts=pd.Timestamp("2024-01-25"),
         used_cache_bool=False,
-        freshness_business_days_int=0,
+        freshness_business_days_int=4,
     )
 
     monkeypatch.setattr(
@@ -577,6 +583,156 @@ def test_strategy_host_taa_live_path_does_not_use_backtest_fill_costs(monkeypatc
     assert decision_plan_obj.full_target_weight_map_dict == {"BTAL": 0.4, "TLT": 0.3}
     assert decision_plan_obj.cash_reserve_weight_float == pytest.approx(0.3)
     assert decision_plan_obj.decision_base_position_map == {"SPY": 5.0}
+    assert decision_plan_obj.snapshot_metadata_dict["dtb3_policy_status_str"] == "stale_warning"
+    assert decision_plan_obj.snapshot_metadata_dict["dtb3_warning_bool"] is True
+    assert decision_plan_obj.snapshot_metadata_dict["dtb3_warn_after_business_days_int"] == 3
+    assert decision_plan_obj.snapshot_metadata_dict["dtb3_freshness_business_days_int"] == 4
+
+
+def test_strategy_host_taa_marks_cache_fallback_dtb3_policy_warning(monkeypatch):
+    import strategies.taa_df.strategy_taa_df as base_taa_module
+    import strategies.taa_df.strategy_taa_df_fallback_vix_cash_variant_utils as vix_overlay_module
+
+    date_index = pd.DatetimeIndex(
+        [
+            pd.Timestamp("2024-01-30"),
+            pd.Timestamp("2024-01-31"),
+        ]
+    )
+    execution_price_df = make_price_df(["BTAL", "TLT", "SPY"], date_index)
+    month_end_weight_df = pd.DataFrame(
+        [{"BTAL": 0.4, "TLT": 0.3}],
+        index=pd.DatetimeIndex([pd.Timestamp("2024-01-31")]),
+    )
+    diagnostic_df = pd.DataFrame(
+        [{"cash_weight": 0.3}],
+        index=pd.DatetimeIndex([pd.Timestamp("2024-01-31")]),
+    )
+    dtb3_snapshot_obj = FredSeriesSnapshot(
+        value_ser=pd.Series(
+            [5.20],
+            index=pd.DatetimeIndex([pd.Timestamp("2024-01-31")]),
+            name="DTB3",
+        ),
+        source_name_str="FRED",
+        series_id_str="DTB3",
+        download_attempt_timestamp_ts=datetime(2024, 1, 31, 16, 5, tzinfo=MARKET_TIMEZONE_OBJ),
+        download_status_str="cache_fallback_after_download_error",
+        latest_observation_date_ts=pd.Timestamp("2024-01-31"),
+        used_cache_bool=True,
+        freshness_business_days_int=0,
+    )
+
+    monkeypatch.setattr(
+        base_taa_module,
+        "get_defense_first_data_with_snapshot",
+        lambda config_obj: (execution_price_df, None, month_end_weight_df, None, dtb3_snapshot_obj),
+    )
+    monkeypatch.setattr(
+        vix_overlay_module,
+        "_load_vrp_overlay_signal_frames",
+        lambda config_obj: (None, pd.DataFrame(index=month_end_weight_df.index)),
+    )
+    monkeypatch.setattr(
+        vix_overlay_module,
+        "apply_vrp_cash_gate_to_month_end_weight_df",
+        lambda base_month_end_weight_df, month_end_vrp_signal_df, config: (
+            month_end_weight_df,
+            diagnostic_df,
+        ),
+    )
+    monkeypatch.setattr(base_taa_module.DefenseFirstStrategy, "iterate", lambda self, data_df, close_row_ser, open_price_ser: None)
+
+    release_obj = make_release(
+        strategy_import_str="strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash",
+        data_profile_str="norgate_eod_etf_plus_vix_helper",
+        execution_policy_str="next_month_first_open",
+        params_dict={"capital_base_float": 100000.0},
+    )
+
+    decision_plan_obj = build_decision_plan_for_release(
+        release_obj=release_obj,
+        as_of_ts=datetime(2024, 1, 31, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
+        pod_state_obj=None,
+    )
+
+    assert decision_plan_obj.full_target_weight_map_dict == {"BTAL": 0.4, "TLT": 0.3}
+    assert decision_plan_obj.snapshot_metadata_dict["dtb3_policy_status_str"] == "cache_warning"
+    assert decision_plan_obj.snapshot_metadata_dict["dtb3_warning_bool"] is True
+    assert decision_plan_obj.snapshot_metadata_dict["dtb3_used_cache_bool"] is True
+
+
+def test_strategy_host_taa_marks_cache_write_dtb3_policy_warning(monkeypatch):
+    import strategies.taa_df.strategy_taa_df as base_taa_module
+    import strategies.taa_df.strategy_taa_df_fallback_vix_cash_variant_utils as vix_overlay_module
+
+    date_index = pd.DatetimeIndex(
+        [
+            pd.Timestamp("2024-01-30"),
+            pd.Timestamp("2024-01-31"),
+        ]
+    )
+    execution_price_df = make_price_df(["BTAL", "TLT", "SPY"], date_index)
+    month_end_weight_df = pd.DataFrame(
+        [{"BTAL": 0.4, "TLT": 0.3}],
+        index=pd.DatetimeIndex([pd.Timestamp("2024-01-31")]),
+    )
+    diagnostic_df = pd.DataFrame(
+        [{"cash_weight": 0.3}],
+        index=pd.DatetimeIndex([pd.Timestamp("2024-01-31")]),
+    )
+    dtb3_snapshot_obj = FredSeriesSnapshot(
+        value_ser=pd.Series(
+            [5.20],
+            index=pd.DatetimeIndex([pd.Timestamp("2024-01-31")]),
+            name="DTB3",
+        ),
+        source_name_str="FRED",
+        series_id_str="DTB3",
+        download_attempt_timestamp_ts=datetime(2024, 1, 31, 16, 5, tzinfo=MARKET_TIMEZONE_OBJ),
+        download_status_str="download_success_cache_write_failed",
+        latest_observation_date_ts=pd.Timestamp("2024-01-31"),
+        used_cache_bool=False,
+        freshness_business_days_int=0,
+    )
+
+    monkeypatch.setattr(
+        base_taa_module,
+        "get_defense_first_data_with_snapshot",
+        lambda config_obj: (execution_price_df, None, month_end_weight_df, None, dtb3_snapshot_obj),
+    )
+    monkeypatch.setattr(
+        vix_overlay_module,
+        "_load_vrp_overlay_signal_frames",
+        lambda config_obj: (None, pd.DataFrame(index=month_end_weight_df.index)),
+    )
+    monkeypatch.setattr(
+        vix_overlay_module,
+        "apply_vrp_cash_gate_to_month_end_weight_df",
+        lambda base_month_end_weight_df, month_end_vrp_signal_df, config: (
+            month_end_weight_df,
+            diagnostic_df,
+        ),
+    )
+    monkeypatch.setattr(base_taa_module.DefenseFirstStrategy, "iterate", lambda self, data_df, close_row_ser, open_price_ser: None)
+
+    release_obj = make_release(
+        strategy_import_str="strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash",
+        data_profile_str="norgate_eod_etf_plus_vix_helper",
+        execution_policy_str="next_month_first_open",
+        params_dict={"capital_base_float": 100000.0},
+    )
+
+    decision_plan_obj = build_decision_plan_for_release(
+        release_obj=release_obj,
+        as_of_ts=datetime(2024, 1, 31, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
+        pod_state_obj=None,
+    )
+
+    assert decision_plan_obj.full_target_weight_map_dict == {"BTAL": 0.4, "TLT": 0.3}
+    assert decision_plan_obj.snapshot_metadata_dict["dtb3_policy_status_str"] == "cache_write_warning"
+    assert decision_plan_obj.snapshot_metadata_dict["dtb3_warning_bool"] is True
+    assert decision_plan_obj.snapshot_metadata_dict["dtb3_used_cache_bool"] is False
 
 
 def test_strategy_host_taa_ignores_unavailable_partial_month_end(monkeypatch):

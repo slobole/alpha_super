@@ -3,6 +3,7 @@ from alpha.data.fred_loader import (
     FredSeriesSnapshot,
     FredSeriesStaleError,
     FredSeriesUnavailableError,
+    LIVE_FRED_STALE_WARNING_BUSINESS_DAYS_INT,
     load_daily_fred_series_snapshot,
 )
 from alpha.data.kenneth_french_loader import (
@@ -17,6 +18,7 @@ __all__ = [
     "FredSeriesSnapshot",
     "FredSeriesStaleError",
     "FredSeriesUnavailableError",
+    "LIVE_FRED_STALE_WARNING_BUSINESS_DAYS_INT",
     "KennethFrenchSeriesLoadError",
     "KennethFrenchSeriesSnapshot",
     "KennethFrenchSeriesUnavailableError",

@@ -63,6 +63,7 @@ from typing import Any
 
 import pandas as pd
 
+from alpha.data import LIVE_FRED_STALE_WARNING_BUSINESS_DAYS_INT
 from alpha.engine.strategy import Strategy
 from alpha.live import scheduler_utils
 from alpha.live.models import DecisionPlan, LiveRelease, PodState
@@ -559,6 +560,17 @@ def _build_qpi_ibs_rsi_exit_decision_plan(
 def _build_dtb3_snapshot_metadata_dict(
     dtb3_snapshot_obj,
 ) -> dict[str, Any]:
+    freshness_business_days_int = int(dtb3_snapshot_obj.freshness_business_days_int)
+    used_cache_bool = bool(dtb3_snapshot_obj.used_cache_bool)
+    if freshness_business_days_int > LIVE_FRED_STALE_WARNING_BUSINESS_DAYS_INT:
+        policy_status_str = "stale_warning"
+    elif used_cache_bool:
+        policy_status_str = "cache_warning"
+    elif str(dtb3_snapshot_obj.download_status_str) == "download_success_cache_write_failed":
+        policy_status_str = "cache_write_warning"
+    else:
+        policy_status_str = "fresh"
+
     return {
         "dtb3_source_name_str": str(dtb3_snapshot_obj.source_name_str),
         "dtb3_series_id_str": str(dtb3_snapshot_obj.series_id_str),
@@ -567,8 +579,11 @@ def _build_dtb3_snapshot_metadata_dict(
         ).date().isoformat(),
         "dtb3_download_attempt_timestamp_str": dtb3_snapshot_obj.download_attempt_timestamp_ts.isoformat(),
         "dtb3_download_status_str": str(dtb3_snapshot_obj.download_status_str),
-        "dtb3_used_cache_bool": bool(dtb3_snapshot_obj.used_cache_bool),
-        "dtb3_freshness_business_days_int": int(dtb3_snapshot_obj.freshness_business_days_int),
+        "dtb3_used_cache_bool": used_cache_bool,
+        "dtb3_freshness_business_days_int": freshness_business_days_int,
+        "dtb3_policy_status_str": policy_status_str,
+        "dtb3_warning_bool": policy_status_str != "fresh",
+        "dtb3_warn_after_business_days_int": LIVE_FRED_STALE_WARNING_BUSINESS_DAYS_INT,
     }
 
 
