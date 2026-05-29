@@ -139,6 +139,39 @@ def test_strategy_analysis_forwards_strategy_kwargs_to_vanilla_only(monkeypatch)
     assert "--strategy-kwarg" not in command_list[1]
 
 
+def test_strategy_analysis_runs_risk_when_run_variant_exists(monkeypatch):
+    module_name_str = "test_fake_risk_strategy"
+    _install_fake_strategy_module(
+        monkeypatch,
+        module_name_str,
+        ("run_variant",),
+    )
+    command_list = []
+
+    def run_stub(command, cwd, check):
+        command_list.append(tuple(command))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(analysis_runner.subprocess, "run", run_stub)
+
+    return_code_int, result_list = analysis_runner.run_strategy_analysis(
+        strategy_ref_str="fake.py",
+        analysis_tuple=("risk",),
+        output_dir_str="custom_results",
+        strategy_kwarg_tuple=("foo_int=3",),
+    )
+
+    assert return_code_int == 0
+    assert [result_obj.status_str for result_obj in result_list] == ["PASS"]
+    assert len(command_list) == 1
+    assert "strategies\\run_risk_analysis.py" in command_list[0][1]
+    assert command_list[0][2] == module_name_str
+    assert "--output-dir" in command_list[0]
+    assert "custom_results" in command_list[0]
+    assert "--strategy-kwarg" in command_list[0]
+    assert "foo_int=3" in command_list[0]
+
+
 def test_strategy_analysis_stops_after_failure_without_keep_going(monkeypatch):
     module_name_str = "test_fake_failing_analysis_strategy"
     _install_fake_strategy_module(
@@ -181,7 +214,8 @@ def test_unique_analysis_tuple_keeps_requested_order_without_duplicates():
         "timing",
         "vanilla",
     )
-    assert analysis_runner._unique_analysis_tuple(None) == analysis_runner.SUPPORTED_ANALYSIS_TUPLE
+    assert analysis_runner._unique_analysis_tuple(None) == analysis_runner.DEFAULT_ANALYSIS_TUPLE
+    assert "risk" in analysis_runner.SUPPORTED_ANALYSIS_TUPLE
 
 
 def test_wired_strategy_modules_expose_all_analysis_hooks():

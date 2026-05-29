@@ -120,6 +120,14 @@ current engine behavior. Until then, any result materially affected by symbol
 discontinuity should be interpreted as using a conservative approximation
 rather than exact corporate-action replay.
 
+## Detailed Note: RiskAnalysis bootstrap scope
+
+`alpha/engine/risk_analysis.py` block-bootstraps the realized strategy return series. The resulting intervals, equity fan, drawdown breach probabilities, and observed-percentile column quantify how much of the realized path was ordering luck for a history of this length. They do not simulate the strategy in regimes outside the sample, do not model regime-conditional dependence, and do not extend the horizon beyond `N` realized days. Treat RiskAnalysis as a filter and a confidence-calibrator on the realized record, not as forward stress testing. Forward stress remains under G-011.
+
+Monthly metrics in the report (Monthly VaR/CVaR, Monthly Sharpe, Worst 1m/3m/6m/12m) are built from non-overlapping 21-trading-day chunks of the daily return series, not from calendar-month-end resampling. This keeps observed and bootstrap-simulated monthly metrics directly comparable, at the cost of one trading day per real month on average. Time-underwater breach thresholds (3, 6, 12, 24 months) are likewise expressed in trading months of 21 days.
+
+The report's read-first verdict panel is a **mechanical classification of the bootstrap numbers against fixed reference bands**, provided only to speed reading. The bands are generic conservative heuristics; they are **not** calibrated to any specific account, capital base, or personal risk tolerance, and they do **not** constitute a trade recommendation. The four dimensions and their band edges (the documented source of truth, matching the constants in `alpha/engine/risk_analysis.py`) are: (1) Edge — terminal-loss probability, green at or below 10%, amber at or below 30%, else red, and capped at amber whenever the Sharpe confidence interval still includes zero; (2) Drawdown depth — magnitude of the 1-in-20 bad-case (p05) max drawdown, green at or below 20%, amber at or below 35%, else red; (3) Time underwater — probability of a 12-trading-month-or-longer underwater stretch, green at or below 20%, amber at or below 50%, else red; (4) Worst year — magnitude of the 1-in-20 bad-case (p05) worst rolling 12-month return, green at or below 15%, amber at or below 30%, else red. Any dimension with missing inputs renders as a neutral "N/A" band.
+
 ## Interpretation Rule
 
 If a result looks attractive only because one of the known gaps is favorable to the backtest, or because the strategy would be materially harder to trade live than the simulation implies, the result should be treated as overstated until the gap is closed or explicitly bounded.

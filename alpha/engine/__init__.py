@@ -30,6 +30,12 @@ from alpha.engine.portfolio_manager import (
     build_portfolio_manager_config,
     load_portfolio_manager_config,
 )
+from alpha.engine.risk_analysis import (
+    RISK_ANALYSIS_TYPE_STR,
+    RiskAnalysis,
+    RiskAnalysisResult,
+    save_risk_analysis_results,
+)
 
 __all__ = [
     "Backtester",
@@ -52,6 +58,9 @@ __all__ = [
     "PortfolioManagerRunResult",
     "PortfolioPodConfig",
     "PortfolioPodRunResult",
+    "RISK_ANALYSIS_TYPE_STR",
+    "RiskAnalysis",
+    "RiskAnalysisResult",
     "build_portfolio_manager_config",
     "compute_cvar_5_pct_float",
     "load_portfolio_manager_config",
@@ -59,4 +68,5 @@ __all__ = [
     "run_daily",
     "run_crisis_replay_suite",
     "save_execution_timing_results",
+    "save_risk_analysis_results",
 ]

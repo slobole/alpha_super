@@ -26,10 +26,17 @@ from strategies.run_strategy import _resolve_strategy_module_import_str
 ANALYSIS_VANILLA_STR = "vanilla"
 ANALYSIS_FRICTION_STR = "friction"
 ANALYSIS_TIMING_STR = "timing"
+ANALYSIS_RISK_STR = "risk"
+DEFAULT_ANALYSIS_TUPLE = (
+    ANALYSIS_VANILLA_STR,
+    ANALYSIS_FRICTION_STR,
+    ANALYSIS_TIMING_STR,
+)
 SUPPORTED_ANALYSIS_TUPLE = (
     ANALYSIS_VANILLA_STR,
     ANALYSIS_FRICTION_STR,
     ANALYSIS_TIMING_STR,
+    ANALYSIS_RISK_STR,
 )
 
 
@@ -44,7 +51,7 @@ class AnalysisRunResult:
 
 def _unique_analysis_tuple(raw_analysis_list: list[str] | None) -> tuple[str, ...]:
     if raw_analysis_list is None or len(raw_analysis_list) == 0:
-        return SUPPORTED_ANALYSIS_TUPLE
+        return DEFAULT_ANALYSIS_TUPLE
 
     seen_analysis_set: set[str] = set()
     analysis_list: list[str] = []
@@ -71,6 +78,7 @@ def _missing_hook_detail_str(strategy_module_obj, analysis_str: str) -> str | No
         ANALYSIS_VANILLA_STR: "run_variant",
         ANALYSIS_FRICTION_STR: "run_friction_analysis",
         ANALYSIS_TIMING_STR: "build_execution_timing_analysis_inputs",
+        ANALYSIS_RISK_STR: "run_variant",
     }
     hook_name_str = hook_by_analysis_dict[analysis_str]
     hook_obj = getattr(strategy_module_obj, hook_name_str, None)
@@ -135,6 +143,22 @@ def _analysis_command_tuple(
             command_list.append("--show-signal-progress")
         return tuple(command_list)
 
+    if analysis_str == ANALYSIS_RISK_STR:
+        command_list = [
+            sys.executable,
+            str(REPO_ROOT_PATH / "strategies" / "run_risk_analysis.py"),
+            module_import_str,
+            "--output-dir",
+            output_dir_str,
+        ]
+        if not save_results_bool:
+            command_list.append("--no-save")
+        if show_display_bool:
+            command_list.append("--show-display")
+        for strategy_kwarg_str in strategy_kwarg_tuple:
+            command_list.extend(["--strategy-kwarg", strategy_kwarg_str])
+        return tuple(command_list)
+
     raise ValueError(f"Unsupported analysis_str: {analysis_str}")
 
 
@@ -168,7 +192,7 @@ def _run_command_result(command_tuple: tuple[str, ...], analysis_str: str) -> An
 
 def run_strategy_analysis(
     strategy_ref_str: str,
-    analysis_tuple: tuple[str, ...] = SUPPORTED_ANALYSIS_TUPLE,
+    analysis_tuple: tuple[str, ...] = DEFAULT_ANALYSIS_TUPLE,
     output_dir_str: str = "results",
     save_results_bool: bool = True,
     show_display_bool: bool = False,
