@@ -2,8 +2,8 @@
 Run a strategy's research analyses from one command.
 
 This is an orchestration CLI only. It delegates to the existing Vanilla,
-FrictionAnalysis, and ExecutionTimingAnalyzer CLIs without changing strategy
-or execution semantics.
+FrictionAnalysis, ExecutionTimingAnalyzer, RiskAnalysis, and StressTestAnalyzer
+CLIs without changing strategy or execution semantics.
 """
 
 from __future__ import annotations
@@ -22,11 +22,13 @@ if str(REPO_ROOT_PATH) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT_PATH))
 
 from strategies.run_strategy import _resolve_strategy_module_import_str
+from alpha.engine.stress_test import supported_stress_test_strategy_key_list
 
 ANALYSIS_VANILLA_STR = "vanilla"
 ANALYSIS_FRICTION_STR = "friction"
 ANALYSIS_TIMING_STR = "timing"
 ANALYSIS_RISK_STR = "risk"
+ANALYSIS_STRESS_STR = "stress"
 DEFAULT_ANALYSIS_TUPLE = (
     ANALYSIS_VANILLA_STR,
     ANALYSIS_FRICTION_STR,
@@ -37,6 +39,7 @@ SUPPORTED_ANALYSIS_TUPLE = (
     ANALYSIS_FRICTION_STR,
     ANALYSIS_TIMING_STR,
     ANALYSIS_RISK_STR,
+    ANALYSIS_STRESS_STR,
 )
 
 
@@ -74,6 +77,12 @@ def _load_strategy_module(strategy_ref_str: str):
 
 
 def _missing_hook_detail_str(strategy_module_obj, analysis_str: str) -> str | None:
+    if analysis_str == ANALYSIS_STRESS_STR:
+        stress_key_str = _stress_strategy_key_str(strategy_module_obj.__name__)
+        if stress_key_str in supported_stress_test_strategy_key_list():
+            return None
+        return f"unsupported stress strategy key: {stress_key_str}"
+
     hook_by_analysis_dict = {
         ANALYSIS_VANILLA_STR: "run_variant",
         ANALYSIS_FRICTION_STR: "run_friction_analysis",
@@ -85,6 +94,10 @@ def _missing_hook_detail_str(strategy_module_obj, analysis_str: str) -> str | No
     if callable(hook_obj):
         return None
     return f"missing strategy hook: {hook_name_str}(...)"
+
+
+def _stress_strategy_key_str(module_import_str: str) -> str:
+    return str(module_import_str).rsplit(".", maxsplit=1)[-1]
 
 
 def _analysis_command_tuple(
@@ -157,6 +170,20 @@ def _analysis_command_tuple(
             command_list.append("--show-display")
         for strategy_kwarg_str in strategy_kwarg_tuple:
             command_list.extend(["--strategy-kwarg", strategy_kwarg_str])
+        return tuple(command_list)
+
+    if analysis_str == ANALYSIS_STRESS_STR:
+        command_list = [
+            sys.executable,
+            str(REPO_ROOT_PATH / "strategies" / "run_stress_test.py"),
+            _stress_strategy_key_str(module_import_str),
+            "--output-dir",
+            output_dir_str,
+        ]
+        if not save_results_bool:
+            command_list.append("--no-save")
+        if show_signal_progress_bool:
+            command_list.append("--show-signal-progress")
         return tuple(command_list)
 
     raise ValueError(f"Unsupported analysis_str: {analysis_str}")
@@ -299,7 +326,7 @@ def main() -> None:
     parser.add_argument(
         "--show-signal-progress",
         action="store_true",
-        help="Show signal precompute progress for ExecutionTimingAnalyzer.",
+        help="Show signal precompute progress for ExecutionTimingAnalyzer and StressTestAnalyzer.",
     )
     parser.add_argument(
         "--performance-warnings-as-errors",
