@@ -448,12 +448,16 @@ class RadgeMomentumNdxStrategyTests(unittest.TestCase):
 
         close_row_ser = self.make_close_row_ser(
             {
+                ("AAA", "Close"): 100.0,
                 ("AAA", "risk_adj_score_ser"): 1.00,
                 ("AAA", "stock_trend_pass_bool"): True,
+                ("BBB", "Close"): 100.0,
                 ("BBB", "risk_adj_score_ser"): 0.50,
                 ("BBB", "stock_trend_pass_bool"): False,
+                ("CCC", "Close"): 100.0,
                 ("CCC", "risk_adj_score_ser"): 0.90,
                 ("CCC", "stock_trend_pass_bool"): True,
+                ("DDD", "Close"): 100.0,
                 ("DDD", "risk_adj_score_ser"): 0.80,
                 ("DDD", "stock_trend_pass_bool"): True,
                 ("SPY", "regime_pass_bool"): True,
