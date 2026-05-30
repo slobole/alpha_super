@@ -434,8 +434,11 @@ def test_main_module_loads_config_env_before_serving(monkeypatch, tmp_path) -> N
     )
 
     monkeypatch.setattr(norgate_config_env, "default_config_env_path_obj", lambda: config_env_path_obj)
-    monkeypatch.delenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", raising=False)
-    monkeypatch.delenv("FOO_FOR_TEST", raising=False)
+    # load_config_env_file writes directly to os.environ.  Setting empty values
+    # first makes monkeypatch restore/delete them after the test, so this CLI
+    # smoke does not leak snapshot mode into later dashboard tests.
+    monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "")
+    monkeypatch.setenv("FOO_FOR_TEST", "")
 
     captured_args_list: list[dict] = []
 
