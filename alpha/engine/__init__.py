@@ -36,6 +36,16 @@ from alpha.engine.risk_analysis import (
     RiskAnalysisResult,
     save_risk_analysis_results,
 )
+from alpha.engine.stress_test import (
+    DEFAULT_LAUNCH_OFFSET_TUPLE,
+    STRESS_TEST_ANALYSIS_TYPE_STR,
+    StressTestAnalyzer,
+    StressTestResult,
+    resolve_stress_launch_window,
+    run_stress_test_suite,
+    save_stress_test_results,
+    supported_stress_test_strategy_key_list,
+)
 
 __all__ = [
     "Backtester",
@@ -43,6 +53,7 @@ __all__ = [
     "CrisisAnalyzer",
     "CrisisPeriodConfig",
     "CrisisReplayResult",
+    "DEFAULT_LAUNCH_OFFSET_TUPLE",
     "DEFAULT_SIGNAL_CLOSE_TIMING_MODE_TUPLE",
     "DEFAULT_TAA_REBALANCE_TIMING_MODE_TUPLE",
     "ExecutionTimingAnalysis",
@@ -61,12 +72,19 @@ __all__ = [
     "RISK_ANALYSIS_TYPE_STR",
     "RiskAnalysis",
     "RiskAnalysisResult",
+    "STRESS_TEST_ANALYSIS_TYPE_STR",
     "build_portfolio_manager_config",
     "compute_cvar_5_pct_float",
     "load_portfolio_manager_config",
     "resolve_crisis_window",
+    "resolve_stress_launch_window",
     "run_daily",
     "run_crisis_replay_suite",
+    "run_stress_test_suite",
     "save_execution_timing_results",
     "save_risk_analysis_results",
+    "save_stress_test_results",
+    "StressTestAnalyzer",
+    "StressTestResult",
+    "supported_stress_test_strategy_key_list",
 ]
