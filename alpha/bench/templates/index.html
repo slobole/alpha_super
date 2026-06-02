@@ -65,6 +65,7 @@
       </span>
       <div class="btn-row">
         <form class="inline" method="post" action="{{ url_for('run_api_fn') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
           <input type="hidden" name="module_import" value="{{ s.module_import_str }}">
           <input type="hidden" name="analysis" value="vanilla">
           <button class="btn btn-sm" {{ 'disabled' if not s.has_run_variant_bool }}>Run vanilla</button>
@@ -93,7 +94,7 @@
           <td class="num {{ 'tone-pos' if (sm.get('ann_return_pct') or 0) >= 0 else 'tone-neg' }}">{{ '%.1f%%'|format(sm.get('ann_return_pct')) if sm.get('ann_return_pct') is not none else '—' }}</td>
           <td class="num">{{ '%.2f'|format(sm.get('sharpe')) if sm.get('sharpe') is not none else '—' }}</td>
           <td class="num tone-neg">{{ '%.1f%%'|format(sm.get('max_drawdown_pct')) if sm.get('max_drawdown_pct') is not none else '—' }}</td>
-          <td class="num">{% if run.has_report_bool %}<a class="btn btn-sm btn-ghost" href="{{ url_for('artifact_fn', rel_path_str=run.report_artifact_str) }}" target="_blank">Report</a>{% endif %}</td>
+          <td class="num">{% if run.has_report_bool %}<a class="btn btn-sm btn-ghost" href="{{ url_for('artifact_fn', rel_path_str=run.report_artifact_str) }}" target="_blank" rel="noopener noreferrer">Report</a>{% endif %}</td>
         </tr>
         {% endfor %}
       </tbody>

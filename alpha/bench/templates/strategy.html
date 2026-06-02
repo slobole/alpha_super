@@ -22,6 +22,7 @@
     <span class="action-group-label">Run</span>
     {% for analysis_str in single_analysis_tuple %}
     <form class="inline" method="post" action="{{ url_for('run_api_fn') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
       <input type="hidden" name="module_import" value="{{ strategy.module_import_str }}">
       <input type="hidden" name="analysis" value="{{ analysis_str }}">
       <button class="btn btn-sm">{{ analysis_label_dict[analysis_str] }}</button>
@@ -32,11 +33,13 @@
   <div class="action-group">
     <span class="action-group-label">Presets</span>
     <form class="inline" method="post" action="{{ url_for('run_api_fn') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
       <input type="hidden" name="module_import" value="{{ strategy.module_import_str }}">
       {% for analysis_str in preset_dict['standard'] %}<input type="hidden" name="analysis" value="{{ analysis_str }}">{% endfor %}
       <button class="btn btn-sm">Standard · V+F+T</button>
     </form>
     <form class="inline" method="post" action="{{ url_for('run_api_fn') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
       <input type="hidden" name="module_import" value="{{ strategy.module_import_str }}">
       {% for analysis_str in preset_dict['full'] %}<input type="hidden" name="analysis" value="{{ analysis_str }}">{% endfor %}
       <button class="btn btn-sm btn-primary">Full analysis · all 5</button>
@@ -63,7 +66,7 @@
           <td class="num">{{ '%.2f'|format(sm.get('sharpe')) if sm.get('sharpe') is not none else '—' }}</td>
           <td class="num tone-neg">{{ '%.2f%%'|format(sm.get('max_drawdown_pct')) if sm.get('max_drawdown_pct') is not none else '—' }}</td>
           <td class="num">{{ '{:,}'.format(sm.get('trade_count')) if sm.get('trade_count') is not none else '—' }}</td>
-          <td class="num">{% if run.has_report_bool %}<a class="btn btn-sm btn-ghost" href="{{ url_for('artifact_fn', rel_path_str=run.report_artifact_str) }}" target="_blank">Report</a>{% endif %}</td>
+          <td class="num">{% if run.has_report_bool %}<a class="btn btn-sm btn-ghost" href="{{ url_for('artifact_fn', rel_path_str=run.report_artifact_str) }}" target="_blank" rel="noopener noreferrer">Report</a>{% endif %}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -78,9 +81,9 @@
 <div class="section">
   <div class="report-bar">
     <h2 class="section-title" style="margin:0;">Latest report · {{ latest_report_run.analysis_label_str }} · {{ latest_report_run.display_timestamp_str }}</h2>
-    <a class="btn btn-sm btn-ghost" href="{{ url_for('artifact_fn', rel_path_str=latest_report_run.report_artifact_str) }}" target="_blank">Open full ↗</a>
+    <a class="btn btn-sm btn-ghost" href="{{ url_for('artifact_fn', rel_path_str=latest_report_run.report_artifact_str) }}" target="_blank" rel="noopener noreferrer">Open full ↗</a>
   </div>
-  <iframe class="report-frame" src="{{ url_for('artifact_fn', rel_path_str=latest_report_run.report_artifact_str) }}"></iframe>
+  <iframe class="report-frame" sandbox referrerpolicy="no-referrer" src="{{ url_for('artifact_fn', rel_path_str=latest_report_run.report_artifact_str) }}"></iframe>
 </div>
 {% endif %}
 {% endblock %}

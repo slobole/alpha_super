@@ -6,7 +6,7 @@
 <div class="page-head">
   <div>
     <h1 class="page-title">Portfolios</h1>
-    <p class="page-sub">Multi-pod books from <span class="mono">portfolios/*.yaml</span>. Build aggregates the latest pod pickles into one equity curve.</p>
+    <p class="page-sub">Multi-pod books from <span class="mono">portfolios/*.yaml</span>. Build runs each book — <b>combine pkls</b> configs aggregate the latest saved pod pickles, <b>fresh run</b> configs re-run every pod from scratch.</p>
   </div>
   <div class="stat-row">
     <div class="stat"><div class="stat-value">{{ portfolio_view_list|length }}</div><div class="stat-label">Books</div></div>
@@ -51,9 +51,10 @@
       </span>
       <div class="btn-row">
         {% if view.latest_report_run %}
-        <a class="btn btn-sm btn-ghost" href="{{ url_for('artifact_fn', rel_path_str=view.latest_report_run.report_artifact_str) }}" target="_blank">Report</a>
+        <a class="btn btn-sm btn-ghost" href="{{ url_for('artifact_fn', rel_path_str=view.latest_report_run.report_artifact_str) }}" target="_blank" rel="noopener noreferrer">Report</a>
         {% endif %}
         <form class="inline" method="post" action="{{ url_for('run_portfolio_api_fn') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
           <input type="hidden" name="config_rel_path" value="{{ p.rel_path_str }}">
           <button class="btn btn-sm btn-primary" {{ 'disabled' if p.error_str }}>Build</button>
         </form>

@@ -14,10 +14,12 @@ fake instead of spawning real subprocesses.
 
 from __future__ import annotations
 
+import secrets
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from flask import (
     Flask,
@@ -57,6 +59,11 @@ RUN_PRESET_DICT = {
 def create_app(job_manager_obj: JobManager | None = None) -> Flask:
     flask_app_obj = Flask(__name__)
     flask_app_obj.config["job_manager_obj"] = job_manager_obj or JobManager()
+    # Per-process token gating every state-changing POST. Bench binds to
+    # localhost, but localhost is still reachable by cross-site form POSTs from
+    # any page open in the browser, so we require a token only same-origin pages
+    # can read, plus an Origin check. See _csrf_failure_response_fn.
+    flask_app_obj.config["bench_token_str"] = secrets.token_urlsafe(24)
 
     @flask_app_obj.context_processor
     def inject_globals_fn() -> dict[str, Any]:
@@ -67,7 +74,24 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             "active_job_count_int": job_manager.active_count(),
             "analysis_label_dict": ANALYSIS_LABEL_DICT,
             "single_analysis_tuple": SUPPORTED_ANALYSIS_TUPLE,
+            "csrf_token_str": flask_app_obj.config["bench_token_str"],
         }
+
+    def _csrf_failure_response_fn():
+        """Return a 403 tuple when a POST fails CSRF checks, else None.
+
+        Two independent gates: a token the cross-origin attacker cannot read
+        (same-origin policy hides the page that carries it), and an Origin host
+        match for browsers that send the header on form POSTs.
+        """
+        submitted_token_str = request.form.get("csrf_token", "")
+        expected_token_str = flask_app_obj.config["bench_token_str"]
+        if not (submitted_token_str and secrets.compare_digest(submitted_token_str, expected_token_str)):
+            return ("CSRF token missing or invalid.", 403)
+        origin_str = request.headers.get("Origin")
+        if origin_str is not None and urlparse(origin_str).netloc != request.host:
+            return ("Cross-origin request rejected.", 403)
+        return None
 
     # ── pages ────────────────────────────────────────────────────────────
 
@@ -158,6 +182,10 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
 
     @flask_app_obj.route("/api/run", methods=["POST"])
     def run_api_fn() -> Response:
+        csrf_failure_obj = _csrf_failure_response_fn()
+        if csrf_failure_obj is not None:
+            return csrf_failure_obj
+
         module_import_str = request.form.get("module_import", "")
         strategy_entry_obj = catalog.get_strategy_by_module(module_import_str)
         if strategy_entry_obj is None:
@@ -165,13 +193,14 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
         if not strategy_entry_obj.has_run_variant_bool:
             abort(400, description="Strategy has no run_variant() hook.")
 
-        analysis_list = [
-            analysis_str
-            for analysis_str in request.form.getlist("analysis")
-            if analysis_str in SUPPORTED_ANALYSIS_TUPLE
-        ]
+        # Reject the whole request if any submitted analysis is unrecognized,
+        # rather than silently dropping it and running a different subset.
+        analysis_list = request.form.getlist("analysis")
         if not analysis_list:
-            abort(400, description="No valid analysis selected.")
+            abort(400, description="No analysis selected.")
+        invalid_analysis_list = [a for a in analysis_list if a not in SUPPORTED_ANALYSIS_TUPLE]
+        if invalid_analysis_list:
+            abort(400, description=f"Unknown analysis: {', '.join(invalid_analysis_list)}")
 
         command_list = [
             sys.executable,
@@ -190,6 +219,10 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
 
     @flask_app_obj.route("/api/run-portfolio", methods=["POST"])
     def run_portfolio_api_fn() -> Response:
+        csrf_failure_obj = _csrf_failure_response_fn()
+        if csrf_failure_obj is not None:
+            return csrf_failure_obj
+
         config_rel_path_str = request.form.get("config_rel_path", "")
         portfolio_entry_obj = catalog.get_portfolio_by_rel_path(config_rel_path_str)
         if portfolio_entry_obj is None:
@@ -218,7 +251,15 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
         artifact_path = runs.resolve_artifact_path(rel_path_str)
         if artifact_path is None:
             abort(404)
-        return send_file(artifact_path)
+        response_obj = send_file(artifact_path)
+        # Reports are generated HTML. Serve them in a sandbox so that even if a
+        # report ever contained active content, it runs with an opaque origin and
+        # cannot script the control panel — whether embedded in the iframe or
+        # opened full-tab. Generated reports today are static (no scripts), so
+        # the strict "no allow-scripts" sandbox does not break rendering.
+        response_obj.headers["Content-Security-Policy"] = "sandbox; default-src 'self' data: https:"
+        response_obj.headers["X-Content-Type-Options"] = "nosniff"
+        return response_obj
 
     @flask_app_obj.route("/healthz")
     def healthz_fn() -> tuple[str, int]:

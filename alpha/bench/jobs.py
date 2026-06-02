@@ -35,7 +35,10 @@ STATUS_RUNNING_STR = "running"
 STATUS_PASSED_STR = "passed"
 STATUS_FAILED_STR = "failed"
 STATUS_ERROR_STR = "error"
-STATUS_INTERRUPTED_STR = "interrupted"
+# Used for jobs that were still active when a previous Bench process exited. We
+# cannot reattach to the child to learn its real outcome — and on Windows the
+# child can outlive the parent — so "unknown" is the honest label, not "done".
+STATUS_UNKNOWN_STR = "unknown"
 
 _ACTIVE_STATUS_SET = {STATUS_QUEUED_STR, STATUS_RUNNING_STR}
 
@@ -53,6 +56,7 @@ class Job:
     ended_at_str: str | None = None
     return_code_int: int | None = None
     log_rel_str: str = ""
+    pid_int: int | None = None  # OS pid of the child, persisted for post-restart forensics
 
     @property
     def is_active_bool(self) -> bool:
@@ -122,9 +126,12 @@ class JobManager:
                 job_obj = Job(**payload_dict)
             except (OSError, ValueError, TypeError):
                 continue
-            # The owning process is gone, so anything still "active" is stale.
+            # This is a fresh process: we have no handle on whatever the previous
+            # Bench launched. The child may have finished, or may still be running
+            # detached (common on Windows). We cannot know, so mark it "unknown"
+            # rather than claiming it was interrupted.
             if job_obj.status_str in _ACTIVE_STATUS_SET:
-                job_obj.status_str = STATUS_INTERRUPTED_STR
+                job_obj.status_str = STATUS_UNKNOWN_STR
                 job_obj.ended_at_str = job_obj.ended_at_str or _now_iso_str()
                 self._persist(job_obj)
             self._job_by_id_dict[job_obj.job_id_str] = job_obj
@@ -132,18 +139,25 @@ class JobManager:
     # ── public API ───────────────────────────────────────────────────────
 
     def submit(self, label_str: str, target_str: str, kind_str: str, command_list: list[str]) -> Job:
+        normalized_command_list = list(command_list)
         job_id_str = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:4]}"
         job_obj = Job(
             job_id_str=job_id_str,
             label_str=label_str,
             target_str=target_str,
             kind_str=kind_str,
-            command_list=list(command_list),
+            command_list=normalized_command_list,
             status_str=STATUS_QUEUED_STR,
             created_at_str=_now_iso_str(),
             log_rel_str=f"results/_bench/jobs/{job_id_str}.log",
         )
         with self._lock:
+            # Guard against double-submits (impatient double-click, refresh): if an
+            # identical command is already queued/running, return that job instead
+            # of launching a duplicate.
+            for existing_job_obj in self._job_by_id_dict.values():
+                if existing_job_obj.is_active_bool and existing_job_obj.command_list == normalized_command_list:
+                    return existing_job_obj
             self._job_by_id_dict[job_id_str] = job_obj
             self._persist(job_obj)
 
@@ -201,15 +215,16 @@ class JobManager:
                     )
                     log_file_obj.write(header_str.encode("utf-8"))
                     log_file_obj.flush()
-                    completed_process_obj = subprocess.run(
+                    process_obj = subprocess.Popen(
                         job_obj.command_list,
                         cwd=str(REPO_ROOT_PATH),
                         stdout=log_file_obj,
                         stderr=subprocess.STDOUT,
                         env=os.environ.copy(),
-                        check=False,
                     )
-                return_code_int = completed_process_obj.returncode
+                    # Record the pid before we block, so a restart mid-run has it.
+                    self._set_status(job_id_str, pid_int=process_obj.pid)
+                    return_code_int = process_obj.wait()
                 self._set_status(
                     job_id_str,
                     status_str=STATUS_PASSED_STR if return_code_int == 0 else STATUS_FAILED_STR,

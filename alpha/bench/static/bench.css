@@ -241,7 +241,7 @@ form.inline { display: inline; margin: 0; }
 .pill-passed  { background: var(--green-soft); color: var(--green); }
 .pill-failed  { background: var(--red-soft); color: var(--red); }
 .pill-error   { background: var(--red-soft); color: var(--red); }
-.pill-interrupted { background: var(--gold-soft); color: var(--gold); }
+.pill-unknown { background: var(--gold-soft); color: var(--gold); }
 .pill-running::before { animation: pulse 1.1s ease-in-out infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
 

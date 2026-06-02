@@ -40,5 +40,19 @@
   <footer class="footer">
     Bench {{ bench_version_str }} · local research console · reads <span class="mono">results/</span>, launches your existing runners
   </footer>
+
+  <script>
+    // Disable a run/build button the moment its form submits, so an impatient
+    // double-click cannot fire two jobs. The server also rejects duplicates.
+    document.addEventListener('submit', function (event) {
+      var formEl = event.target;
+      if (!formEl.matches || !formEl.matches('form.inline')) return;
+      var buttonEl = formEl.querySelector('button');
+      if (!buttonEl) return;
+      if (buttonEl.dataset.busy === '1') { event.preventDefault(); return; }
+      buttonEl.dataset.busy = '1';
+      setTimeout(function () { buttonEl.disabled = true; buttonEl.textContent = '…'; }, 0);
+    }, true);
+  </script>
 </body>
 </html>
