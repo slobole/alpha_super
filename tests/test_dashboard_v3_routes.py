@@ -730,6 +730,16 @@ def test_build_book_risk_dict_empty_returns_no_data() -> None:
     assert build_book_risk_dict(None).as_dict()["has_data_bool"] is False
 
 
+def test_mode_page_labels_equity_time_basis(test_client_obj) -> None:
+    """The allocation pie is a current per-pod snapshot while the combined book
+    and risk strip are EOD; each must label its basis so two different book
+    totals on one page never read as a discrepancy."""
+    response_text_str = test_client_obj.get("/live").get_data(as_text=True)
+    assert "current book" in response_text_str          # allocation pie basis
+    assert "combined book · EOD" in response_text_str    # equity curve basis
+    assert "Realized risk · EOD" in response_text_str    # risk strip basis
+
+
 def test_mode_page_renders_book_risk_strip(test_client_obj) -> None:
     response_obj = test_client_obj.get("/live")
     response_text_str = response_obj.get_data(as_text=True)

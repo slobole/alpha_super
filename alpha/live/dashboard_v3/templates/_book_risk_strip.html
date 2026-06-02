@@ -3,6 +3,10 @@
    peak; volatility = sample stdev of daily returns, annualized by sqrt(252). #}
 {% if book_risk_dict and book_risk_dict.has_data_bool %}
 <section class="mb-4 rounded-md border border-ink-100 bg-white shadow-sm px-4 py-3">
+  <div class="text-[11px] uppercase tracking-wide text-ink-400 mb-2"
+       title="computed from the end-of-day combined-book equity series">
+    Realized risk · EOD
+  </div>
   <div class="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
     <div>
       <div class="text-[11px] uppercase tracking-wide text-ink-500">Current DD</div>

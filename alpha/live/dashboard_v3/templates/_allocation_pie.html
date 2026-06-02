@@ -10,8 +10,8 @@
       {{ allocation_pie_dict.pod_count_int }}
       {{ 'strategy' if allocation_pie_dict.pod_count_int == 1 else 'strategies' }}
     </div>
-    <div class="text-xs tabular-nums text-ink-500">
-      book <strong class="text-ink-900">{{ allocation_pie_dict.total_equity_label_str }}</strong>
+    <div class="text-xs tabular-nums text-ink-500" title="latest per-pod equity snapshot (positions + cash) — may be intraday for live pods">
+      current book <strong class="text-ink-900">{{ allocation_pie_dict.total_equity_label_str }}</strong>
     </div>
   </header>
 
