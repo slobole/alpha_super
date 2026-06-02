@@ -21,7 +21,7 @@
     </header>
     {% if norgate_gate_dict.gate_enabled_bool %}
       {% set gate_sev_str = norgate_gate_dict.severity_str | normalize_severity %}
-      <div class="px-3 py-2 border-b border-ink-100 bg-ink-50 grid grid-cols-12 gap-2 items-start text-xs">
+      <div class="px-3 py-2 border-b border-ink-100 bg-ink-50 grid grid-cols-12 gap-2 items-start text-sm">
         <div class="col-span-3 flex items-center gap-2 min-w-0">
           <span class="inline-block w-2 h-2 rounded-full shrink-0
                        {% if gate_sev_str == 'red' %}bg-bad
@@ -30,10 +30,10 @@
                        {% else %}bg-mute{% endif %}"></span>
           <strong class="truncate">DecisionPlan gate</strong>
         </div>
-        <div class="col-span-3 text-ink-700 font-medium">
+        <div class="col-span-3 font-semibold text-ink-900">
           {{ norgate_gate_dict.status_label_str or 'unknown' }}
         </div>
-        <div class="col-span-6 text-ink-500 break-words">
+        <div class="col-span-6 text-xs text-ink-500 break-words">
           {{ norgate_gate_dict.detail_str or '' }}
         </div>
       </div>

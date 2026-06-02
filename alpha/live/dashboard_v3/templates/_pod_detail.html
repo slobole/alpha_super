@@ -55,6 +55,23 @@
     </div>
   </section>
 
+  {# ── Per-cycle Trace (structured pod trace logger) — collapsed by default.
+       Loads on open, light 10 s poll, manual refresh. Separate from the Events
+       tail above: this reads the newest cycle's trace_events.jsonl. ─────────── #}
+  <section>
+    <details>
+      <summary class="cursor-pointer text-xs uppercase tracking-wide text-ink-500 hover:text-ink-900 mb-2">
+        Trace (latest cycle)
+      </summary>
+      <div id="trace-tail-{{ row_dict.pod_id_str }}"
+           hx-get="/fragments/trace-tail/{{ row_dict.pod_id_str }}"
+           hx-trigger="load, every 10s"
+           hx-swap="innerHTML">
+        <div class="text-xs text-ink-500 italic">loading trace…</div>
+      </div>
+    </details>
+  </section>
+
   {# ── Operator Tools — collapsed by default; no polling. #}
   {% include "_operator_tools.html" %}
 </div>

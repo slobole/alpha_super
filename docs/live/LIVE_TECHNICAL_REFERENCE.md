@@ -581,35 +581,31 @@ post_execution_reconcile
 ### `alpha/live/dashboard.py`
 
 Responsibility:
-- local read-only POD operations dashboard
+- read-side **data-builder library** for Dashboard V3 (no HTTP server of its own)
 
-Run command:
+The standalone V1 HTTP handler (`serve_dashboard`) and the V2 React console were
+removed; `dashboard.py` is now consumed by `alpha.live.dashboard_v3.*` (the Flask +
+HTMX operator console). Run the dashboard with:
 
 ```bash
-uv run python -m alpha.live.dashboard serve --host 127.0.0.1 --port 8765
+uv run python -m alpha.live.dashboard_v3 --host 127.0.0.1 --port 8080
 ```
 
 Key behavior:
 - discovers enabled releases from `alpha/live/releases`
 - resolves each POD state DB from `alpha/live/dashboard_config.yaml` or defaults
-- serves one plain HTML/CSS/JS page with compact POD rows and detail sections
-- polls `/api/pods` from the browser every few seconds
-- serves saved Reference DIFF artifacts from `results/live_reference_compare/...`
+- builds the summary/detail dicts the V3 routes render
 
-Endpoint shape:
-- `GET /`
-- `GET /api/pods`
-- `GET /api/pods/<pod_id>`
-- `GET /api/pods/<pod_id>/events`
-- `GET /api/pods/<pod_id>/diff/latest`
-- `POST /api/pods/<pod_id>/diff/run`
-- `GET /api/jobs/<job_id>`
+Key public functions:
+- `build_dashboard_summary_dict(...)` — the per-mode pod rollup
+- `build_pod_detail_dict(...)` — one pod's lifecycle/decision/vplan/eod detail
+- `load_recent_event_dict_list(...)` — global `live_events.jsonl` tail per pod
+- `load_recent_trace_event_dict_list(...)` — newest cycle's structured trace from `logs/pods/<pod>/<run>/trace_events.jsonl`
 
 Important invariants:
-- dashboard binds to `127.0.0.1` by default
-- GET endpoints read DB/log/artifact state and do not talk to IBKR
-- V1 exposes no trading controls: no `tick`, no `submit_vplan`, no reconcile button
-- the explicit DIFF button may run `runner.get_compare_reference_summary(...)` and write analysis artifacts
+- all functions read DB/log/artifact state and do not talk to IBKR
+- read-only: no `tick`, no `submit_vplan`, no reconcile is performed here
+- the explicit DIFF action may run `runner.get_compare_reference_summary(...)` and write analysis artifacts
 
 Default dashboard DB resolution:
 

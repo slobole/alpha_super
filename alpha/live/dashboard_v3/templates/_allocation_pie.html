@@ -1,0 +1,64 @@
+{# Per-mode strategy allocation pie. Each slice is a running pod sized by its
+   net-liquidation equity (positions + its own cash); slices sum to the mode's
+   total book. Cash is reported separately below as a share of the book. Pure
+   SVG, no JS. #}
+{% if allocation_pie_dict and allocation_pie_dict.has_data_bool %}
+<section class="mb-4 rounded-md border border-ink-100 bg-white shadow-sm p-4">
+  <header class="flex items-baseline justify-between mb-3">
+    <div class="text-xs uppercase tracking-wide text-ink-500">
+      {{ mode_label_str }} allocation ·
+      {{ allocation_pie_dict.pod_count_int }}
+      {{ 'strategy' if allocation_pie_dict.pod_count_int == 1 else 'strategies' }}
+    </div>
+    <div class="text-xs tabular-nums text-ink-500">
+      book <strong class="text-ink-900">{{ allocation_pie_dict.total_equity_label_str }}</strong>
+    </div>
+  </header>
+
+  <div class="flex items-center gap-5">
+    <svg viewBox="0 0 {{ allocation_pie_dict.view_size_int }} {{ allocation_pie_dict.view_size_int }}"
+         class="w-36 h-36 shrink-0"
+         role="img" aria-label="{{ mode_label_str }} allocation by strategy">
+      {% for slice_dict in allocation_pie_dict.slice_dict_list %}
+        {% if slice_dict.is_full_circle_bool %}
+          <circle cx="50" cy="50" r="46" fill="{{ slice_dict.color_str }}">
+            <title>{{ slice_dict.label_str }} · {{ slice_dict.equity_label_str }} · {{ slice_dict.pct_label_str }}</title>
+          </circle>
+        {% else %}
+          <path d="{{ slice_dict.path_d_str }}" fill="{{ slice_dict.color_str }}"
+                stroke="#ffffff" stroke-width="0.75">
+            <title>{{ slice_dict.label_str }} · {{ slice_dict.equity_label_str }} · {{ slice_dict.pct_label_str }}</title>
+          </path>
+        {% endif %}
+      {% endfor %}
+    </svg>
+
+    <div class="flex-1 min-w-0">
+      <ul class="space-y-1 text-xs">
+        {% for slice_dict in allocation_pie_dict.slice_dict_list %}
+          <li class="flex items-center gap-2 tabular-nums">
+            <span class="inline-block w-2.5 h-2.5 rounded-sm shrink-0"
+                  style="background:{{ slice_dict.color_str }}"></span>
+            <span class="truncate flex-1 min-w-0"
+                  title="{{ slice_dict.sublabel_str }}">{{ slice_dict.label_str }}</span>
+            <span class="text-ink-500">{{ slice_dict.equity_label_str }}</span>
+            <strong class="w-14 text-right">{{ slice_dict.pct_label_str }}</strong>
+          </li>
+        {% endfor %}
+      </ul>
+      <div class="mt-2 pt-2 border-t border-ink-100 flex items-center justify-between text-xs tabular-nums">
+        <span class="text-ink-500">of which cash</span>
+        <span>
+          <strong class="text-ink-900">{{ allocation_pie_dict.total_cash_label_str }}</strong>
+          <span class="text-ink-500">({{ allocation_pie_dict.cash_pct_label_str }} of book)</span>
+        </span>
+      </div>
+      {% if allocation_pie_dict.excluded_pod_count_int %}
+        <div class="mt-1 text-[11px] text-ink-400 italic">
+          {{ allocation_pie_dict.excluded_pod_count_int }} pod(s) without a positive equity not shown.
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endif %}

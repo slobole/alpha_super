@@ -17,7 +17,7 @@ import uuid
 import yaml
 
 from alpha.data import LIVE_FRED_STALE_WARNING_BUSINESS_DAYS_INT
-from alpha.live import runner, scheduler_utils
+from alpha.live import logging_utils, runner, scheduler_utils
 from alpha.live.models import LiveRelease
 from alpha.live.norgate_snapshot_sync import build_norgate_snapshot_status_dict
 from alpha.live.release_manifest import load_release_list
@@ -32,6 +32,7 @@ DEFAULT_CONFIG_PATH_STR = str(Path(__file__).resolve().parent / "dashboard_confi
 DEFAULT_RESULTS_ROOT_PATH_STR = "results"
 DEFAULT_EVENT_LOG_PATH_STR = str(Path(__file__).resolve().parent / "logs" / "live_events.jsonl")
 DEFAULT_EVENT_LIMIT_INT = 80
+DEFAULT_TRACE_EVENT_LIMIT_INT = 80
 DEFAULT_EVENT_LOG_BACKUP_SCAN_COUNT_INT = 10
 ALERT_SEVERITY_RANK_DICT = {"red": 0, "yellow": 1, "gray": 2, "green": 3}
 COMBINED_BOOK_MODE_ORDER_LIST = ["live", "paper", "incubation"]
@@ -947,6 +948,50 @@ def load_recent_event_dict_list(
                 collected_dict_list.append(event_dict)
                 if len(collected_dict_list) >= int(limit_int):
                     return list(reversed(collected_dict_list))
+    return list(reversed(collected_dict_list))
+
+
+def load_recent_trace_event_dict_list(
+    pod_id_str: str,
+    limit_int: int = DEFAULT_TRACE_EVENT_LIMIT_INT,
+    trace_log_root_path_str: str = logging_utils.DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR,
+) -> list[dict[str, Any]]:
+    """Read the most recent cycle's structured trace events for one pod.
+
+    The per-cycle trace logger writes one folder per run under
+    ``<trace_root>/<pod_id>/<run_id>/trace_events.jsonl``. This locates the
+    newest cycle folder (by newest file mtime inside it), reverse-reads its
+    trace file, and returns up to ``limit_int`` events oldest-first. Read-only
+    and bounded — trace files can be multi-MB, so the reverse reader stops as
+    soon as the cap is hit instead of scanning the whole file.
+    """
+    pod_trace_dir_path_obj = (
+        Path(trace_log_root_path_str)
+        / logging_utils._sanitize_path_part_str(pod_id_str)
+    )
+    if not pod_trace_dir_path_obj.is_dir():
+        return []
+    newest_run_folder_path_obj: Path | None = None
+    newest_mtime_float = -1.0
+    for child_path_obj in pod_trace_dir_path_obj.iterdir():
+        if not child_path_obj.is_dir():
+            continue
+        run_mtime_float = logging_utils._newest_trace_run_folder_mtime_float(child_path_obj)
+        if run_mtime_float is None:
+            continue
+        if run_mtime_float > newest_mtime_float:
+            newest_mtime_float = run_mtime_float
+            newest_run_folder_path_obj = child_path_obj
+    if newest_run_folder_path_obj is None:
+        return []
+    trace_log_path_obj = newest_run_folder_path_obj / "trace_events.jsonl"
+    if not trace_log_path_obj.exists():
+        return []
+    collected_dict_list: list[dict[str, Any]] = []
+    for event_dict in _iter_event_dict_reverse(trace_log_path_obj):
+        collected_dict_list.append(event_dict)
+        if len(collected_dict_list) >= int(limit_int):
+            break
     return list(reversed(collected_dict_list))
 
 

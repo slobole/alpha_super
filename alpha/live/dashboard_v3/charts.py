@@ -14,7 +14,12 @@ operator can see "we're still under water from the May 12 peak" at a glance.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
+import statistics
 from typing import Any
+
+
+TRADING_DAYS_PER_YEAR_INT = 252
 
 
 CHART_VIEW_WIDTH_INT = 600
@@ -30,6 +35,7 @@ class EquityChartDict:
     has_curve_bool: bool = False
     path_d_str: str = ""
     drawdown_d_str: str = ""
+    point_dict_list: list[dict[str, Any]] = field(default_factory=list)
     pnl_bar_dict_list: list[dict[str, Any]] = field(default_factory=list)
     range_min_float: float = 0.0
     range_max_float: float = 0.0
@@ -46,6 +52,7 @@ class EquityChartDict:
             "has_curve_bool": self.has_curve_bool,
             "path_d_str": self.path_d_str,
             "drawdown_d_str": self.drawdown_d_str,
+            "point_dict_list": self.point_dict_list,
             "pnl_bar_dict_list": self.pnl_bar_dict_list,
             "range_min_float": self.range_min_float,
             "range_max_float": self.range_max_float,
@@ -106,7 +113,8 @@ def build_equity_chart_dict(
     inner_height_float = CHART_VIEW_HEIGHT_INT - 2 * CHART_VERTICAL_PADDING_INT
 
     point_xy_list: list[tuple[float, float]] = []
-    for index_int, (_date_str, equity_float, _pnl_float) in enumerate(equity_pairs_list):
+    point_dict_list: list[dict[str, Any]] = []
+    for index_int, (date_str, equity_float, pnl_float) in enumerate(equity_pairs_list):
         x_float = index_int * horizontal_step_float
         y_float = (
             CHART_VIEW_HEIGHT_INT
@@ -114,6 +122,13 @@ def build_equity_chart_dict(
             - ((float(equity_float) - float(range_min_float)) / value_range_float) * inner_height_float  # type: ignore[arg-type]
         )
         point_xy_list.append((x_float, y_float))
+        point_dict_list.append({
+            "x_float": round(x_float, 2),
+            "y_float": round(y_float, 2),
+            "market_date_str": date_str,
+            "equity_label_str": _format_money_str(equity_float),
+            "daily_pnl_label_str": _format_money_str(pnl_float) if pnl_float is not None else "—",
+        })
 
     path_d_str = _build_polyline_path_str(point_xy_list)
     drawdown_d_str = _build_drawdown_polygon_path_str(equity_pairs_list, point_xy_list)
@@ -124,6 +139,7 @@ def build_equity_chart_dict(
         has_curve_bool=True,
         path_d_str=path_d_str,
         drawdown_d_str=drawdown_d_str,
+        point_dict_list=point_dict_list,
         pnl_bar_dict_list=pnl_bar_dict_list,
         range_min_float=float(range_min_float),
         range_max_float=float(range_max_float),
@@ -256,11 +272,276 @@ def _format_money_str(value_obj: Any) -> str:
     return f"{sign_str}${abs(value_float):,.0f}"
 
 
+# ── allocation pie ─────────────────────────────────────────────────────────
+#
+# A point-in-time composition of one mode's book across the strategies (pods)
+# currently running. Each slice is a pod sized by its net-liquidation equity
+# (positions + its own cash), so slices sum to the mode's total book and every
+# running strategy stays visible at its true size. Cash is *not* a slice — it is
+# reported separately as a share of the book so the operator can still see how
+# much of the book is idle. Pure SVG, no JS — matches build_equity_chart_dict.
+
+PIE_VIEW_SIZE_INT = 100
+PIE_CENTER_FLOAT = 50.0
+PIE_RADIUS_FLOAT = 46.0
+
+# Distinct, light-theme-friendly slice colors, cycled if there are more pods.
+ALLOCATION_PALETTE_STR_LIST = [
+    "#2563eb", "#16a34a", "#d97706", "#9333ea", "#dc2626",
+    "#0891b2", "#db2777", "#65a30d", "#475569", "#ea580c",
+]
+
+
+@dataclass
+class AllocationPieDict:
+    has_data_bool: bool = False
+    pod_count_int: int = 0
+    slice_dict_list: list[dict[str, Any]] = field(default_factory=list)
+    total_equity_float: float = 0.0
+    total_equity_label_str: str = "—"
+    total_cash_float: float = 0.0
+    total_cash_label_str: str = "—"
+    cash_pct_label_str: str = "—"
+    excluded_pod_count_int: int = 0
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "has_data_bool": self.has_data_bool,
+            "pod_count_int": self.pod_count_int,
+            "slice_dict_list": self.slice_dict_list,
+            "total_equity_float": self.total_equity_float,
+            "total_equity_label_str": self.total_equity_label_str,
+            "total_cash_float": self.total_cash_float,
+            "total_cash_label_str": self.total_cash_label_str,
+            "cash_pct_label_str": self.cash_pct_label_str,
+            "excluded_pod_count_int": self.excluded_pod_count_int,
+            "view_size_int": PIE_VIEW_SIZE_INT,
+        }
+
+
+def build_allocation_pie_dict(
+    pod_alloc_dict_list: list[dict[str, Any]] | None,
+) -> AllocationPieDict:
+    """Build a strategy-allocation pie for one mode.
+
+    Each input dict carries ``label_str``, optional ``sublabel_str``,
+    ``equity_float`` (net liquidation) and ``cash_float``. Pods without a
+    positive equity cannot occupy a slice and are excluded (but counted), since
+    a pie can only render non-negative shares.
+    """
+    cleaned_dict_list: list[dict[str, Any]] = []
+    excluded_pod_count_int = 0
+    total_cash_float = 0.0
+    for pod_alloc_dict in pod_alloc_dict_list or []:
+        equity_float = _float_or_none(pod_alloc_dict.get("equity_float"))
+        cash_float = _float_or_none(pod_alloc_dict.get("cash_float")) or 0.0
+        if equity_float is None or equity_float <= 0:
+            excluded_pod_count_int += 1
+            continue
+        cleaned_dict_list.append({
+            "label_str": str(pod_alloc_dict.get("label_str") or "—"),
+            "sublabel_str": str(pod_alloc_dict.get("sublabel_str") or ""),
+            "equity_float": equity_float,
+            "cash_float": cash_float,
+        })
+        total_cash_float += cash_float
+
+    if not cleaned_dict_list:
+        return AllocationPieDict(excluded_pod_count_int=excluded_pod_count_int)
+
+    # Largest slice first so colors + legend order are stable and readable.
+    cleaned_dict_list.sort(key=lambda pod_dict: pod_dict["equity_float"], reverse=True)
+    total_equity_float = sum(pod_dict["equity_float"] for pod_dict in cleaned_dict_list)
+    is_single_slice_bool = len(cleaned_dict_list) == 1
+
+    slice_dict_list: list[dict[str, Any]] = []
+    cumulative_deg_float = 0.0
+    for index_int, pod_dict in enumerate(cleaned_dict_list):
+        fraction_float = pod_dict["equity_float"] / total_equity_float
+        color_str = ALLOCATION_PALETTE_STR_LIST[index_int % len(ALLOCATION_PALETTE_STR_LIST)]
+        if is_single_slice_bool:
+            path_d_str = ""
+            is_full_circle_bool = True
+        else:
+            start_deg_float = cumulative_deg_float
+            # Snap the final slice to a full 360° to absorb float drift.
+            end_deg_float = (
+                360.0
+                if index_int == len(cleaned_dict_list) - 1
+                else cumulative_deg_float + fraction_float * 360.0
+            )
+            path_d_str = _pie_slice_path_str(start_deg_float, end_deg_float)
+            is_full_circle_bool = False
+            cumulative_deg_float = end_deg_float
+        slice_dict_list.append({
+            "label_str": pod_dict["label_str"],
+            "sublabel_str": pod_dict["sublabel_str"],
+            "color_str": color_str,
+            "equity_float": pod_dict["equity_float"],
+            "equity_label_str": _format_money_str(pod_dict["equity_float"]),
+            "pct_float": fraction_float,
+            "pct_label_str": f"{fraction_float * 100:.1f}%",
+            "path_d_str": path_d_str,
+            "is_full_circle_bool": is_full_circle_bool,
+        })
+
+    cash_pct_float = total_cash_float / total_equity_float if total_equity_float else 0.0
+    return AllocationPieDict(
+        has_data_bool=True,
+        pod_count_int=len(cleaned_dict_list),
+        slice_dict_list=slice_dict_list,
+        total_equity_float=total_equity_float,
+        total_equity_label_str=_format_money_str(total_equity_float),
+        total_cash_float=total_cash_float,
+        total_cash_label_str=_format_money_str(total_cash_float),
+        cash_pct_label_str=f"{cash_pct_float * 100:.1f}%",
+        excluded_pod_count_int=excluded_pod_count_int,
+    )
+
+
+def _pie_point_xy(angle_deg_float: float) -> tuple[float, float]:
+    # 0° at the top, increasing clockwise (SVG y grows downward).
+    angle_rad_float = math.radians(angle_deg_float - 90.0)
+    return (
+        PIE_CENTER_FLOAT + PIE_RADIUS_FLOAT * math.cos(angle_rad_float),
+        PIE_CENTER_FLOAT + PIE_RADIUS_FLOAT * math.sin(angle_rad_float),
+    )
+
+
+def _pie_slice_path_str(start_deg_float: float, end_deg_float: float) -> str:
+    start_x_float, start_y_float = _pie_point_xy(start_deg_float)
+    end_x_float, end_y_float = _pie_point_xy(end_deg_float)
+    large_arc_int = 1 if (end_deg_float - start_deg_float) > 180.0 else 0
+    return (
+        f"M {PIE_CENTER_FLOAT} {PIE_CENTER_FLOAT} "
+        f"L {start_x_float:.3f} {start_y_float:.3f} "
+        f"A {PIE_RADIUS_FLOAT} {PIE_RADIUS_FLOAT} 0 {large_arc_int} 1 "
+        f"{end_x_float:.3f} {end_y_float:.3f} Z"
+    )
+
+
+# ── book risk strip ────────────────────────────────────────────────────────
+#
+# Realized risk reported straight from the combined-book EOD equity series — no
+# forecasting, no strategy logic. Drawdown is measured from the running peak;
+# volatility is the sample standard deviation of daily returns, annualized by
+# sqrt(252) to match the house convention used elsewhere in the engine.
+
+
+@dataclass
+class BookRiskDict:
+    has_data_bool: bool = False
+    point_count_int: int = 0
+    current_equity_label_str: str = "—"
+    peak_equity_label_str: str = "—"
+    peak_market_date_str: str | None = None
+    current_drawdown_pct_float: float = 0.0
+    current_drawdown_label_str: str = "—"
+    is_underwater_bool: bool = False
+    max_drawdown_label_str: str = "—"
+    days_underwater_int: int = 0
+    daily_vol_label_str: str = "—"
+    annualized_vol_label_str: str = "—"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "has_data_bool": self.has_data_bool,
+            "point_count_int": self.point_count_int,
+            "current_equity_label_str": self.current_equity_label_str,
+            "peak_equity_label_str": self.peak_equity_label_str,
+            "peak_market_date_str": self.peak_market_date_str,
+            "current_drawdown_pct_float": self.current_drawdown_pct_float,
+            "current_drawdown_label_str": self.current_drawdown_label_str,
+            "is_underwater_bool": self.is_underwater_bool,
+            "max_drawdown_label_str": self.max_drawdown_label_str,
+            "days_underwater_int": self.days_underwater_int,
+            "daily_vol_label_str": self.daily_vol_label_str,
+            "annualized_vol_label_str": self.annualized_vol_label_str,
+        }
+
+
+def build_book_risk_dict(
+    equity_point_dict_list: list[dict[str, Any]] | None,
+) -> BookRiskDict:
+    equity_pair_list = [
+        (str(point_dict.get("market_date_str") or ""), _float_or_none(point_dict.get("equity_float")))
+        for point_dict in (equity_point_dict_list or [])
+    ]
+    equity_pair_list = [pair for pair in equity_pair_list if pair[1] is not None and pair[1] > 0]
+    if not equity_pair_list:
+        return BookRiskDict()
+
+    current_date_str, current_equity_float = equity_pair_list[-1]
+
+    # Drawdown vs the running peak. *** CRITICAL*** running peak must only look
+    # at sessions up to and including each point — never ahead of it.
+    running_peak_float = equity_pair_list[0][1]
+    running_peak_date_str = equity_pair_list[0][0]
+    overall_peak_float = running_peak_float
+    overall_peak_date_str = running_peak_date_str
+    max_drawdown_pct_float = 0.0
+    last_high_index_int = 0
+    for index_int, (date_str, equity_float) in enumerate(equity_pair_list):
+        if equity_float >= running_peak_float:
+            running_peak_float = equity_float
+            running_peak_date_str = date_str
+            last_high_index_int = index_int
+        drawdown_pct_float = (running_peak_float - equity_float) / running_peak_float
+        if drawdown_pct_float > max_drawdown_pct_float:
+            max_drawdown_pct_float = drawdown_pct_float
+        if equity_float > overall_peak_float:
+            overall_peak_float = equity_float
+            overall_peak_date_str = date_str
+
+    current_drawdown_pct_float = (
+        (overall_peak_float - current_equity_float) / overall_peak_float
+        if overall_peak_float > 0
+        else 0.0
+    )
+    days_underwater_int = (len(equity_pair_list) - 1) - last_high_index_int
+
+    # Realized daily returns → sample stdev → annualized volatility.
+    daily_return_list = [
+        (equity_pair_list[index_int][1] / equity_pair_list[index_int - 1][1]) - 1.0
+        for index_int in range(1, len(equity_pair_list))
+        if equity_pair_list[index_int - 1][1]
+    ]
+    daily_vol_label_str = "—"
+    annualized_vol_label_str = "—"
+    if len(daily_return_list) >= 2:
+        daily_vol_float = statistics.stdev(daily_return_list)
+        daily_vol_label_str = f"{daily_vol_float * 100:.2f}%"
+        annualized_vol_label_str = (
+            f"{daily_vol_float * math.sqrt(TRADING_DAYS_PER_YEAR_INT) * 100:.1f}%"
+        )
+
+    return BookRiskDict(
+        has_data_bool=True,
+        point_count_int=len(equity_pair_list),
+        current_equity_label_str=_format_money_str(current_equity_float),
+        peak_equity_label_str=_format_money_str(overall_peak_float),
+        peak_market_date_str=overall_peak_date_str,
+        current_drawdown_pct_float=current_drawdown_pct_float,
+        current_drawdown_label_str=(
+            "flat" if current_drawdown_pct_float <= 0 else f"-{current_drawdown_pct_float * 100:.2f}%"
+        ),
+        is_underwater_bool=current_drawdown_pct_float > 0,
+        max_drawdown_label_str=f"-{max_drawdown_pct_float * 100:.2f}%" if max_drawdown_pct_float > 0 else "0.00%",
+        days_underwater_int=days_underwater_int,
+        daily_vol_label_str=daily_vol_label_str,
+        annualized_vol_label_str=annualized_vol_label_str,
+    )
+
+
 __all__ = [
     "CHART_VIEW_HEIGHT_INT",
     "CHART_VIEW_WIDTH_INT",
+    "AllocationPieDict",
+    "BookRiskDict",
     "EquityChartDict",
     "PNL_BAR_BLOCK_HEIGHT_INT",
     "SUPPORTED_WINDOW_STR_LIST",
+    "build_allocation_pie_dict",
+    "build_book_risk_dict",
     "build_equity_chart_dict",
 ]

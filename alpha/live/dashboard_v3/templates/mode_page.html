@@ -25,6 +25,12 @@
   </section>
 {% endif %}
 
+{# Book-level realized risk (drawdown + volatility) for this mode. #}
+{% include "_book_risk_strip.html" %}
+
+{# Strategy allocation pie for this mode (slices = running pods by equity). #}
+{% include "_allocation_pie.html" %}
+
 <section class="mb-6">
   <div class="flex items-baseline justify-between mb-2">
     <h1 class="text-2xl font-bold tracking-tight">{{ mode_label_str }} PODs</h1>

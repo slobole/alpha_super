@@ -56,6 +56,7 @@ def _build_pod_row_dict(
         "latest_event_timestamp_str": "2026-05-21T15:45:02+00:00",
         "latest_vplan_status_str": "submitted",
         "latest_vplan_id_int": 87,
+        "latest_vplan_target_execution_timestamp_str": "2026-05-21T20:00:00+00:00",
         "latest_decision_plan_id_int": 142,
         "lifecycle_step_dict_list": _build_lifecycle_step_dict_list(),
         "required_action_dict": {
@@ -124,6 +125,7 @@ class StubDataProvider:
         self.summary_dict = _build_summary_dict()
         self.detail_call_log_list: list[str] = []
         self.event_call_log_list: list[str] = []
+        self.trace_call_log_list: list[str] = []
         self.action_job_dict_list: list[dict[str, Any]] = []
         self._next_job_seq_int = 0
 
@@ -199,6 +201,12 @@ class StubDataProvider:
             "required_action_dict": matching_row_dict["required_action_dict"],
             "lifecycle_step_dict_list": matching_row_dict["lifecycle_step_dict_list"],
             "data_freshness_dict": {
+                "norgate_current_cycle_gate_dict": {
+                    "gate_enabled_bool": True,
+                    "severity_str": "green",
+                    "status_label_str": "Snapshot ready",
+                    "detail_str": "Current DecisionPlan built against the 2026-05-20 snapshot.",
+                },
                 "item_dict_list": [
                     {"label_str": "Norgate", "value_str": "2026-05-21",
                      "severity_str": "green", "detail_str": "source=norgate_only · snapshot ready"},
@@ -270,6 +278,29 @@ class StubDataProvider:
                 "level_str": "WARN",
                 "event_name_str": "broker.ack_received",
                 "reason_str": "TSLA still pending",
+            },
+        ]
+
+    def get_pod_trace_event_dict_list(
+        self, pod_id_str: str, limit_int: int = 80
+    ) -> list[dict[str, Any]]:
+        self.trace_call_log_list.append(pod_id_str)
+        return [
+            {
+                "event_timestamp_str": "2026-05-21T15:30:14.123456+00:00",
+                "level_str": "INFO",
+                "event_name_str": "decision.planned",
+                "status_str": "PASS",
+                "reason_code_str": "decision_plan_built",
+                "payload_dict": {"decision_plan_id_int": 142},
+            },
+            {
+                "event_timestamp_str": "2026-05-21T16:00:02.500000+00:00",
+                "level_str": "ERROR",
+                "event_name_str": "broker.reject",
+                "status_str": "FAIL",
+                "reason_code_str": "order_rejected",
+                "payload_dict": {"asset_str": "TSLA"},
             },
         ]
 
@@ -410,6 +441,22 @@ def test_pod_detail_header_fragment_unknown_pod_returns_404(test_client_obj) -> 
 # ── Norgate freshness branch ──────────────────────────────────────────────
 
 
+def test_pod_detail_renders_decision_gate_without_tiny_font(test_client_obj) -> None:
+    """The Norgate/DecisionPlan gate must surface its status prominently — not
+    in the accidental 10px label the operator flagged as hard to read."""
+    response_obj = test_client_obj.get("/fragments/pod-detail/dv2_caspersky_live")
+    response_text_str = response_obj.get_data(as_text=True)
+    # Both gate surfaces render: the freshness-panel row and the decision card.
+    assert "DecisionPlan gate" in response_text_str
+    assert "Norgate gate" in response_text_str
+    assert "Snapshot ready" in response_text_str
+    # The status is emphasized rather than rendered in the old text-[10px] label.
+    decision_gate_idx = response_text_str.find("Norgate gate")
+    gate_block_str = response_text_str[decision_gate_idx:decision_gate_idx + 240]
+    assert "text-[10px]" not in gate_block_str
+    assert "font-semibold" in gate_block_str
+
+
 def test_pod_detail_includes_data_freshness_panel(test_client_obj) -> None:
     response_obj = test_client_obj.get("/fragments/pod-detail/dv2_caspersky_live")
     response_text_str = response_obj.get_data(as_text=True)
@@ -498,7 +545,9 @@ def test_decision_stage_card_shows_taa_timing_resolution_meta(test_client_obj) -
     assert "2026-05-31" in response_text_str
     assert "2026-05-29" in response_text_str
     assert "last price" in response_text_str
-    assert "calendar month-end label resolved to last tradable session" in response_text_str
+    # Reason code is humanized for the operator (no raw snake_case).
+    assert "Month-end label resolved to last tradable session" in response_text_str
+    assert "calendar_month_end_label_resolved_to_last_tradable_session" not in response_text_str
 
 
 def test_decision_stage_card_hides_taa_timing_when_metadata_absent(
@@ -566,6 +615,215 @@ def test_pod_row_carries_data_pod_id_attribute(test_client_obj) -> None:
     response_text_str = response_obj.get_data(as_text=True)
     assert 'data-pod-id="dv2_caspersky_live"' in response_text_str
     assert "new_event_badge.js" in response_text_str
+
+
+# ── equity chart point markers ────────────────────────────────────────────
+
+
+def test_equity_chart_fragment_renders_point_markers(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/fragments/equity-chart/dv2_caspersky_live")
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    # The stub has 3 EOD points → a curve plus one <circle> marker per point,
+    # each carrying a hover <title> with date · equity · daily PnL.
+    assert response_text_str.count("<circle") >= 3
+    assert "<title>" in response_text_str
+
+
+# ── per-cycle trace panel ─────────────────────────────────────────────────
+
+
+def test_trace_tail_fragment_renders_trace_rows(test_client_obj, provider_obj) -> None:
+    response_obj = test_client_obj.get("/fragments/trace-tail/dv2_caspersky_live")
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    assert "decision.planned" in response_text_str
+    assert "broker.reject" in response_text_str
+    # Latest-cycle error badge is surfaced.
+    assert "1 err" in response_text_str
+    assert provider_obj.trace_call_log_list == ["dv2_caspersky_live"]
+
+
+def test_trace_tail_fragment_filters_by_level(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/fragments/trace-tail/dv2_caspersky_live?level=error")
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    assert "broker.reject" in response_text_str
+    # The INFO event must be filtered out at level=error.
+    assert "decision.planned" not in response_text_str
+
+
+def test_pod_detail_wires_in_trace_panel(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/fragments/pod-detail/dv2_caspersky_live")
+    response_text_str = response_obj.get_data(as_text=True)
+    assert "Trace (latest cycle)" in response_text_str
+    assert "/fragments/trace-tail/dv2_caspersky_live" in response_text_str
+
+
+# ── filters: market-time clock + reason humanization ──────────────────────
+
+
+def test_clock_filter_renders_market_time_without_milliseconds() -> None:
+    from alpha.live.dashboard_v3.filters import filter_clock_str, filter_clock_sec_str
+
+    # 2026-05-21T20:00:02.5Z UTC == 16:00:02 America/New_York (EDT, -4).
+    assert filter_clock_str("2026-05-21T20:00:02.500000+00:00") == "05-21 16:00 ET"
+    assert filter_clock_sec_str("2026-05-21T20:00:02.500000+00:00") == "16:00:02 ET"
+    # No millisecond fragment ever leaks through.
+    assert "." not in filter_clock_sec_str("2026-05-21T20:00:02.500000+00:00")
+
+
+def test_humanize_reason_filter_maps_known_and_unknown_codes() -> None:
+    from alpha.live.dashboard_v3.filters import filter_humanize_reason_str
+
+    assert (
+        filter_humanize_reason_str("calendar_month_end_label_resolved_to_last_tradable_session")
+        == "Month-end label resolved to last tradable session"
+    )
+    # Unknown codes degrade to a readable de-underscored form.
+    assert filter_humanize_reason_str("live_price_snapshot_error") == "Live price snapshot error"
+    assert filter_humanize_reason_str(None) == ""
+
+
+# ── charts: point_dict_list ───────────────────────────────────────────────
+
+
+def test_build_book_risk_dict_reports_drawdown_and_vol() -> None:
+    from alpha.live.dashboard_v3.charts import build_book_risk_dict
+
+    # Peak at 11,000 (day 2), then a dip to 10,450 → 5% drawdown, 2 days under.
+    risk_dict = build_book_risk_dict([
+        {"market_date_str": "2026-05-18", "equity_float": 10000.0},
+        {"market_date_str": "2026-05-19", "equity_float": 11000.0},
+        {"market_date_str": "2026-05-20", "equity_float": 10700.0},
+        {"market_date_str": "2026-05-21", "equity_float": 10450.0},
+    ]).as_dict()
+
+    assert risk_dict["has_data_bool"] is True
+    assert risk_dict["is_underwater_bool"] is True
+    assert risk_dict["current_drawdown_label_str"] == "-5.00%"  # (11000-10450)/11000
+    assert risk_dict["max_drawdown_label_str"] == "-5.00%"
+    assert risk_dict["days_underwater_int"] == 2  # two sessions since the day-2 peak
+    assert risk_dict["peak_equity_label_str"] == "$11,000"
+    assert risk_dict["peak_market_date_str"] == "2026-05-19"
+    # Vol is reported once there are >= 2 daily returns.
+    assert risk_dict["daily_vol_label_str"].endswith("%")
+    assert risk_dict["annualized_vol_label_str"].endswith("%")
+
+
+def test_build_book_risk_dict_flat_when_at_peak() -> None:
+    from alpha.live.dashboard_v3.charts import build_book_risk_dict
+
+    risk_dict = build_book_risk_dict([
+        {"market_date_str": "2026-05-20", "equity_float": 10000.0},
+        {"market_date_str": "2026-05-21", "equity_float": 10500.0},
+    ]).as_dict()
+    assert risk_dict["is_underwater_bool"] is False
+    assert risk_dict["current_drawdown_label_str"] == "flat"
+    assert risk_dict["days_underwater_int"] == 0
+
+
+def test_build_book_risk_dict_empty_returns_no_data() -> None:
+    from alpha.live.dashboard_v3.charts import build_book_risk_dict
+
+    assert build_book_risk_dict([]).as_dict()["has_data_bool"] is False
+    assert build_book_risk_dict(None).as_dict()["has_data_bool"] is False
+
+
+def test_mode_page_renders_book_risk_strip(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/live")
+    response_text_str = response_obj.get_data(as_text=True)
+    assert "Current DD" in response_text_str
+    assert "Max DD" in response_text_str
+    assert "Days underwater" in response_text_str
+    assert "Vol (annualized)" in response_text_str
+    # Live combined book ends at its peak ($28,400) → currently flat.
+    assert "flat" in response_text_str
+
+
+def test_schedule_strip_shows_et_time_and_next_marker(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/fragments/schedule-strip")
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    # Absolute target execution time is shown in ET (20:00 UTC → 16:00 ET).
+    assert "16:00 ET" in response_text_str
+    # The soonest action is flagged with the ▶ marker.
+    assert "▶" in response_text_str
+
+
+def test_build_allocation_pie_dict_slices_by_equity_with_cash_readout() -> None:
+    from alpha.live.dashboard_v3.charts import build_allocation_pie_dict
+
+    pie_dict = build_allocation_pie_dict([
+        {"label_str": "pod_a", "equity_float": 30000.0, "cash_float": 5000.0},
+        {"label_str": "pod_b", "equity_float": 10000.0, "cash_float": 10000.0},
+        {"label_str": "pod_flat", "equity_float": None, "cash_float": 0.0},
+    ]).as_dict()
+
+    assert pie_dict["has_data_bool"] is True
+    assert pie_dict["pod_count_int"] == 2
+    assert pie_dict["excluded_pod_count_int"] == 1  # pod_flat has no equity
+    # Largest slice first; shares sum to 100%.
+    assert [s["label_str"] for s in pie_dict["slice_dict_list"]] == ["pod_a", "pod_b"]
+    assert pie_dict["slice_dict_list"][0]["pct_label_str"] == "75.0%"
+    assert pie_dict["slice_dict_list"][1]["pct_label_str"] == "25.0%"
+    assert abs(sum(s["pct_float"] for s in pie_dict["slice_dict_list"]) - 1.0) < 1e-9
+    # Slices carry a drawable SVG arc path and a distinct color.
+    assert pie_dict["slice_dict_list"][0]["path_d_str"].startswith("M ")
+    assert pie_dict["slice_dict_list"][0]["color_str"] != pie_dict["slice_dict_list"][1]["color_str"]
+    # Cash readout: $15,000 of a $40,000 book == 37.5%.
+    assert pie_dict["total_equity_label_str"] == "$40,000"
+    assert pie_dict["total_cash_label_str"] == "$15,000"
+    assert pie_dict["cash_pct_label_str"] == "37.5%"
+
+
+def test_build_allocation_pie_dict_single_pod_is_full_circle() -> None:
+    from alpha.live.dashboard_v3.charts import build_allocation_pie_dict
+
+    pie_dict = build_allocation_pie_dict(
+        [{"label_str": "only_pod", "equity_float": 12000.0, "cash_float": 0.0}]
+    ).as_dict()
+    assert pie_dict["pod_count_int"] == 1
+    assert pie_dict["slice_dict_list"][0]["is_full_circle_bool"] is True
+    assert pie_dict["slice_dict_list"][0]["pct_label_str"] == "100.0%"
+
+
+def test_build_allocation_pie_dict_empty_returns_no_data() -> None:
+    from alpha.live.dashboard_v3.charts import build_allocation_pie_dict
+
+    assert build_allocation_pie_dict([]).as_dict()["has_data_bool"] is False
+
+
+def test_mode_page_renders_allocation_pie_with_cash(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/live")
+    response_text_str = response_obj.get_data(as_text=True)
+    # Section header + both running live pods appear in the legend.
+    assert "allocation" in response_text_str.lower()
+    assert "dv2_caspersky_live" in response_text_str
+    assert "qp_mr_live" in response_text_str
+    # Cash is taken into account: 2 pods × $1,200 == $2,400 of a $28,400 book.
+    assert "of which cash" in response_text_str
+    assert "$2,400" in response_text_str
+    # The pie is drawn as SVG slices.
+    assert "<path d=\"M 50" in response_text_str or "<circle" in response_text_str
+
+
+def test_build_equity_chart_dict_exposes_point_dict_list() -> None:
+    from alpha.live.dashboard_v3.charts import build_equity_chart_dict
+
+    chart_dict = build_equity_chart_dict(
+        [
+            {"market_date_str": "2026-05-19", "equity_float": 14000.0, "daily_pnl_float": 50.0},
+            {"market_date_str": "2026-05-20", "equity_float": 14100.0, "daily_pnl_float": 100.0},
+            {"market_date_str": "2026-05-21", "equity_float": 14200.0, "daily_pnl_float": 100.0},
+        ],
+        window_str="all",
+    ).as_dict()
+    point_dict_list = chart_dict["point_dict_list"]
+    assert len(point_dict_list) == 3
+    assert point_dict_list[0]["market_date_str"] == "2026-05-19"
+    assert point_dict_list[-1]["equity_label_str"] == "$14,200"
+    assert {"x_float", "y_float"} <= set(point_dict_list[0].keys())
 
 
 # ── Phase 3: equity chart fragment ────────────────────────────────────────

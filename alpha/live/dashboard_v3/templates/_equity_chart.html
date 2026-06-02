@@ -29,6 +29,13 @@
         <path d="{{ chart_dict.drawdown_d_str }}" fill="#fee2e2" opacity="0.6"></path>
       {% endif %}
       <path d="{{ chart_dict.path_d_str }}" fill="none" stroke="#15803d" stroke-width="1.5"></path>
+      {# Per-EOD point markers. <title> gives an on-hover date · equity · daily PnL. #}
+      {% for point_dict in chart_dict.point_dict_list %}
+        <circle cx="{{ point_dict.x_float }}" cy="{{ point_dict.y_float }}" r="1.5"
+                fill="#15803d" stroke="#ffffff" stroke-width="0.5">
+          <title>{{ point_dict.market_date_str }} · {{ point_dict.equity_label_str }} · {{ point_dict.daily_pnl_label_str }}</title>
+        </circle>
+      {% endfor %}
     </svg>
     {% if chart_dict.pnl_bar_dict_list %}
       <svg viewBox="0 0 {{ chart_dict.width_int }} {{ chart_dict.bar_height_int }}"

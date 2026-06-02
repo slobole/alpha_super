@@ -50,23 +50,26 @@
     {% set available_price_last_date_str = snapshot_meta_dict.get('available_price_last_date_str') %}
     {% set timing_resolution_reason_str = snapshot_meta_dict.get('timing_resolution_reason_str') %}
     {% if raw_month_end_label_str or resolved_signal_session_date_str or available_price_last_date_str %}
-      <div class="mt-2 text-xs rounded-md border border-ink-100 bg-white px-2 py-1.5">
-        <div class="flex items-center justify-between gap-3">
-          <span class="text-ink-500 uppercase tracking-wide text-[10px] font-bold">TAA timing</span>
-          <span class="font-mono tabular-nums">
-            {{ raw_month_end_label_str or 'na' }} -> {{ resolved_signal_session_date_str or 'na' }}
-          </span>
-        </div>
-        <div class="mt-1 flex items-center justify-between gap-3 text-ink-600">
-          <span>last price {{ available_price_last_date_str or 'na' }}</span>
-          {% if timing_resolution_reason_str %}
-            {% if timing_resolution_reason_str == 'calendar_month_end_label_resolved_to_last_tradable_session' %}
-              <span class="text-right">calendar month-end label resolved to last tradable session</span>
-            {% else %}
-              <span class="text-right">{{ timing_resolution_reason_str | replace('_', ' ') }}</span>
-            {% endif %}
+      {# TAA month-end timing, in plain English. Display-only: every value below
+         comes straight from the DecisionPlan's snapshot_metadata — the dashboard
+         adds no timing logic of its own. #}
+      <div class="mt-2 text-xs rounded-md border border-ink-100 bg-white px-3 py-2">
+        <div class="flex items-center justify-between gap-3 mb-1">
+          <span class="uppercase tracking-wide font-bold text-ink-600">TAA timing</span>
+          {% if decision_dict.decision_book_type_str %}
+            <span class="text-ink-500 truncate">{{ decision_dict.decision_book_type_str }}</span>
           {% endif %}
         </div>
+        <div class="text-ink-800 leading-relaxed">
+          Rebalance label
+          <strong class="font-mono tabular-nums">{{ raw_month_end_label_str or 'na' }}</strong>
+          → trades on
+          <strong class="font-mono tabular-nums">{{ resolved_signal_session_date_str or 'na' }}</strong>
+          <span class="text-ink-500">(last price {{ available_price_last_date_str or 'na' }})</span>
+        </div>
+        {% if timing_resolution_reason_str %}
+          <div class="mt-1 text-ink-500">↳ {{ timing_resolution_reason_str | humanize_reason }}</div>
+        {% endif %}
       </div>
     {% endif %}
     {# Norgate snapshot lineage: which Norgate data feed this DecisionPlan
@@ -77,20 +80,20 @@
     {% set norgate_snapshot_date_str = row_dict.latest_decision_norgate_snapshot_date_str
                                        or snapshot_meta_dict.get('norgate_snapshot_date_str') %}
     {% if norgate_profile_str or norgate_snapshot_date_str %}
-      <div class="mt-2 text-xs rounded-md border border-ink-100 bg-ink-50 px-2 py-1.5
+      <div class="mt-2 text-xs rounded-md border border-ink-100 bg-ink-50 px-3 py-2
                   flex items-center justify-between gap-3">
-        <span class="text-ink-500 uppercase tracking-wide text-[10px] font-bold">Norgate snapshot</span>
-        <span class="font-mono tabular-nums">
+        <span class="text-ink-600 uppercase tracking-wide font-bold">Norgate snapshot</span>
+        <span class="font-mono tabular-nums text-ink-800">
           {{ norgate_profile_str or '—' }} · {{ norgate_snapshot_date_str or '—' }}
         </span>
       </div>
     {% endif %}
     {% set gate_dict = (detail_dict.data_freshness_dict or {}).norgate_current_cycle_gate_dict or {} %}
     {% if gate_dict.gate_enabled_bool %}
-      <div class="mt-2 text-xs rounded-md border border-ink-100 bg-white px-2 py-1.5
+      <div class="mt-2 text-xs rounded-md border border-ink-100 bg-white px-3 py-2
                   flex items-start justify-between gap-3">
-        <span class="text-ink-500 uppercase tracking-wide text-[10px] font-bold">Norgate gate</span>
-        <span class="text-right text-ink-700">
+        <span class="text-ink-600 uppercase tracking-wide font-bold">Norgate gate</span>
+        <span class="text-right font-semibold text-ink-900">
           {{ gate_dict.status_label_str or 'unknown' }}
         </span>
       </div>

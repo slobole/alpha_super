@@ -409,3 +409,65 @@ def test_trace_retention_cleanup_throttle_is_per_root_and_day(monkeypatch, tmp_p
     assert cleanup_call_list[0]["trace_log_root_path_str"] == str(root_a_path_obj)
     assert cleanup_call_list[1]["trace_log_root_path_str"] == str(root_b_path_obj)
     assert cleanup_call_list[2]["trace_log_root_path_str"] == str(root_a_path_obj)
+
+
+def _write_trace_run_folder(
+    trace_root_path_obj: Path,
+    *,
+    pod_id_str: str,
+    run_id_str: str,
+    event_name_str_list: list[str],
+    mtime_float: float,
+) -> None:
+    trace_file_path_obj = trace_root_path_obj / pod_id_str / run_id_str / "trace_events.jsonl"
+    trace_file_path_obj.parent.mkdir(parents=True, exist_ok=True)
+    trace_file_path_obj.write_text(
+        "".join(
+            json.dumps({"event_name_str": event_name_str, "level_str": "INFO"}) + "\n"
+            for event_name_str in event_name_str_list
+        ),
+        encoding="utf-8",
+    )
+    os.utime(trace_file_path_obj, (mtime_float, mtime_float))
+
+
+def test_load_recent_trace_event_dict_list_picks_newest_run_and_honors_limit(tmp_path: Path):
+    from alpha.live.dashboard import load_recent_trace_event_dict_list
+
+    now_ts = datetime(2026, 6, 2, 12, 0, 0, tzinfo=UTC)
+    trace_root_path_obj = tmp_path / "pods"
+    # Older cycle (should be ignored once a newer one exists).
+    _write_trace_run_folder(
+        trace_root_path_obj,
+        pod_id_str="pod_x",
+        run_id_str="paper_pod_x_old",
+        event_name_str_list=["old_0", "old_1"],
+        mtime_float=(now_ts - timedelta(days=2)).timestamp(),
+    )
+    # Newest cycle.
+    _write_trace_run_folder(
+        trace_root_path_obj,
+        pod_id_str="pod_x",
+        run_id_str="paper_pod_x_new",
+        event_name_str_list=["new_0", "new_1", "new_2", "new_3", "new_4"],
+        mtime_float=now_ts.timestamp(),
+    )
+
+    result_dict_list = load_recent_trace_event_dict_list(
+        "pod_x",
+        limit_int=2,
+        trace_log_root_path_str=str(trace_root_path_obj),
+    )
+
+    # Only the newest cycle, last 2 events, oldest-first.
+    assert [event_dict["event_name_str"] for event_dict in result_dict_list] == ["new_3", "new_4"]
+    assert all("old_" not in event_dict["event_name_str"] for event_dict in result_dict_list)
+
+
+def test_load_recent_trace_event_dict_list_returns_empty_when_absent(tmp_path: Path):
+    from alpha.live.dashboard import load_recent_trace_event_dict_list
+
+    assert load_recent_trace_event_dict_list(
+        "no_such_pod",
+        trace_log_root_path_str=str(tmp_path / "pods"),
+    ) == []

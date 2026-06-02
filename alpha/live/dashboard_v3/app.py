@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Protocol
+from zoneinfo import ZoneInfo
 
 from flask import Flask, Response, abort, jsonify, redirect, render_template, request, url_for
 
@@ -22,6 +23,8 @@ from alpha.live.dashboard_v3.actions import (
 )
 from alpha.live.dashboard_v3.charts import (
     SUPPORTED_WINDOW_STR_LIST,
+    build_allocation_pie_dict,
+    build_book_risk_dict,
     build_equity_chart_dict,
 )
 from alpha.live.dashboard_v3.data import (
@@ -66,10 +69,16 @@ SUPPORTED_MODE_STR_LIST = ["live", "paper", "incubation"]
 MODE_LABEL_DICT = {"live": "Live", "paper": "Paper", "incubation": "Incubation"}
 
 
+SUPPORTED_TRACE_LEVEL_STR_LIST = ["all", "info", "warn", "error"]
+
+
 class DataProviderProtocol(Protocol):
     def get_summary_dict(self) -> dict[str, Any]: ...
     def get_pod_detail_dict(self, pod_id_str: str) -> dict[str, Any]: ...
     def get_pod_event_dict_list(
+        self, pod_id_str: str, limit_int: int = 80
+    ) -> list[dict[str, Any]]: ...
+    def get_pod_trace_event_dict_list(
         self, pod_id_str: str, limit_int: int = 80
     ) -> list[dict[str, Any]]: ...
 
@@ -134,16 +143,29 @@ def create_app(
             if _is_attention_row_bool(row_dict)
         ]
         verdict_obj = resolve_top_bar_verdict(summary_dict)
+        allocation_pie_obj = build_allocation_pie_dict([
+            {
+                "label_str": row_dict.get("pod_id_str"),
+                "sublabel_str": row_dict.get("strategy_import_str"),
+                "equity_float": row_dict.get("equity_float"),
+                "cash_float": row_dict.get("cash_float"),
+            }
+            for row_dict in pod_row_dict_list
+        ])
         combined_book_env_dict = _find_combined_book_environment_dict(summary_dict, mode_str)
+        combined_book_equity_point_dict_list = (
+            (combined_book_env_dict or {}).get("equity_point_dict_list")
+            or (combined_book_env_dict or {}).get("carry_forward_equity_point_dict_list")
+        )
         combined_book_chart_dict = None
         if combined_book_env_dict is not None:
             chart_obj = build_equity_chart_dict(
-                combined_book_env_dict.get("equity_point_dict_list")
-                or combined_book_env_dict.get("carry_forward_equity_point_dict_list"),
+                combined_book_equity_point_dict_list,
                 window_str="all",
             )
             if chart_obj.point_count_int > 0:
                 combined_book_chart_dict = chart_obj.as_dict()
+        book_risk_obj = build_book_risk_dict(combined_book_equity_point_dict_list)
         return render_template(
             "mode_page.html",
             mode_str=mode_str,
@@ -154,6 +176,8 @@ def create_app(
             as_of_clock_str=_now_clock_str(),
             combined_book_chart_dict=combined_book_chart_dict,
             combined_book_summary_dict=combined_book_env_dict or {},
+            book_risk_dict=book_risk_obj.as_dict(),
+            allocation_pie_dict=allocation_pie_obj.as_dict(),
         )
 
     # ── HTMX fragments ───────────────────────────────────────────────────
@@ -219,6 +243,22 @@ def create_app(
             "_events_tail.html",
             event_dict_list=event_dict_list,
             pod_id_str=pod_id_str,
+        )
+
+    @flask_app_obj.route("/fragments/trace-tail/<pod_id_str>")
+    def trace_tail_fragment_route_fn(pod_id_str: str):
+        level_str = request.args.get("level", "all")
+        if level_str not in SUPPORTED_TRACE_LEVEL_STR_LIST:
+            level_str = "all"
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        trace_event_dict_list = provider_obj.get_pod_trace_event_dict_list(pod_id_str)
+        return render_template(
+            "_trace_panel.html",
+            pod_id_str=pod_id_str,
+            trace_event_dict_list=_filter_trace_event_dict_list(trace_event_dict_list, level_str),
+            trace_count_dict=_build_trace_level_count_dict(trace_event_dict_list),
+            selected_level_str=level_str,
+            trace_level_str_list=SUPPORTED_TRACE_LEVEL_STR_LIST,
         )
 
     @flask_app_obj.route("/fragments/health-strip")
@@ -383,8 +423,40 @@ def create_app(
 # ── helpers ──────────────────────────────────────────────────────────────
 
 
+_MARKET_TIMEZONE_OBJ = ZoneInfo("America/New_York")
+
+
 def _now_clock_str() -> str:
-    return datetime.now(timezone.utc).astimezone().strftime("%H:%M:%S")
+    # Market time (New York), seconds precision, no milliseconds.
+    return datetime.now(timezone.utc).astimezone(_MARKET_TIMEZONE_OBJ).strftime("%H:%M:%S ET")
+
+
+def _normalize_trace_level_bucket_str(level_str_obj: Any) -> str:
+    text_str = str(level_str_obj or "").strip().upper()
+    if text_str in ("ERROR", "CRITICAL", "FATAL"):
+        return "error"
+    if text_str in ("WARN", "WARNING"):
+        return "warn"
+    return "info"
+
+
+def _filter_trace_event_dict_list(
+    event_dict_list: list[dict[str, Any]], level_str: str
+) -> list[dict[str, Any]]:
+    if level_str == "all":
+        return event_dict_list
+    return [
+        event_dict
+        for event_dict in event_dict_list
+        if _normalize_trace_level_bucket_str(event_dict.get("level_str")) == level_str
+    ]
+
+
+def _build_trace_level_count_dict(event_dict_list: list[dict[str, Any]]) -> dict[str, int]:
+    count_dict = {"total": len(event_dict_list), "info": 0, "warn": 0, "error": 0}
+    for event_dict in event_dict_list:
+        count_dict[_normalize_trace_level_bucket_str(event_dict.get("level_str"))] += 1
+    return count_dict
 
 
 def _is_attention_row_bool(row_dict: dict[str, Any]) -> bool:

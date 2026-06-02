@@ -28,9 +28,11 @@ from alpha.live.dashboard import (
     DEFAULT_EVENT_LIMIT_INT,
     DEFAULT_RELEASES_ROOT_PATH_STR,
     DEFAULT_RESULTS_ROOT_PATH_STR,
+    DEFAULT_TRACE_EVENT_LIMIT_INT,
     build_dashboard_summary_dict,
     build_pod_detail_dict,
     load_recent_event_dict_list,
+    load_recent_trace_event_dict_list,
 )
 
 
@@ -90,6 +92,17 @@ class DashboardDataProvider:
     ) -> list[dict[str, Any]]:
         return load_recent_event_dict_list(
             log_path_str=self.app_obj().event_log_path_str,
+            pod_id_str=pod_id_str,
+            limit_int=limit_int,
+        )
+
+    def get_pod_trace_event_dict_list(
+        self,
+        pod_id_str: str,
+        limit_int: int = DEFAULT_TRACE_EVENT_LIMIT_INT,
+    ) -> list[dict[str, Any]]:
+        # Newest cycle's structured trace, read from logs/pods/<pod>/<run>/.
+        return load_recent_trace_event_dict_list(
             pod_id_str=pod_id_str,
             limit_int=limit_int,
         )

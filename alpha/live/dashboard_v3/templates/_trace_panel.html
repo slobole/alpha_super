@@ -1,0 +1,67 @@
+{# Per-cycle trace panel. Reads the newest cycle's structured trace_events.jsonl
+   (written by the live pod trace logger). Newest event at the top. Read-only.
+   The whole fragment swaps itself on a level-filter click so HTMX state stays
+   self-contained. #}
+<div id="trace-panel-{{ pod_id_str }}">
+  <div class="flex items-baseline justify-between mb-2 gap-3">
+    <div class="flex items-baseline gap-2">
+      <span class="text-xs uppercase tracking-wide text-ink-500">Trace · latest cycle</span>
+      {% if trace_count_dict.error %}
+        <span class="text-[11px] rounded px-1.5 py-0.5 bg-bad-soft text-bad font-semibold">{{ trace_count_dict.error }} err</span>
+      {% endif %}
+      {% if trace_count_dict.warn %}
+        <span class="text-[11px] rounded px-1.5 py-0.5 bg-warn-soft text-warn font-semibold">{{ trace_count_dict.warn }} warn</span>
+      {% endif %}
+    </div>
+    <div class="flex items-center gap-1 text-[11px]">
+      {% for trace_level_str in trace_level_str_list %}
+        <button type="button"
+                hx-get="/fragments/trace-tail/{{ pod_id_str }}?level={{ trace_level_str }}"
+                hx-target="#trace-panel-{{ pod_id_str }}"
+                hx-swap="outerHTML"
+                class="px-2 py-0.5 rounded border
+                       {% if selected_level_str == trace_level_str %}
+                         bg-ink-900 text-white border-ink-900
+                       {% else %}
+                         bg-white text-ink-500 border-ink-100 hover:bg-ink-50
+                       {% endif %}">
+          {{ trace_level_str }}{% if trace_level_str != 'all' and trace_count_dict[trace_level_str] %} {{ trace_count_dict[trace_level_str] }}{% endif %}
+        </button>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if not trace_event_dict_list %}
+    <div class="text-xs text-ink-500 italic">
+      {% if trace_count_dict.total %}No trace events at this level.{% else %}No trace events for this pod's latest cycle.{% endif %}
+    </div>
+  {% else %}
+    <ol class="space-y-1 text-xs font-mono tabular-nums">
+      {% for event_dict in trace_event_dict_list | reverse %}
+        {% set tr_sev_str = event_dict.level_str | normalize_severity %}
+        <li class="rounded border
+                   {% if tr_sev_str == 'red' %}bg-bad-soft border-bad/30
+                   {% elif tr_sev_str == 'yellow' %}bg-warn-soft border-warn/30
+                   {% else %}bg-white border-ink-100{% endif %}">
+          <div class="px-2 py-1 flex gap-3 items-baseline">
+            <span class="text-ink-500 shrink-0">{{ (event_dict.event_timestamp_str or event_dict.ts_utc) | clock_sec }}</span>
+            <span class="shrink-0 uppercase text-[10px] font-bold
+                         {% if tr_sev_str == 'red' %}text-bad
+                         {% elif tr_sev_str == 'yellow' %}text-warn
+                         {% else %}text-ink-400{% endif %}">{{ event_dict.level_str or 'info' }}</span>
+            <strong class="shrink-0 text-ink-800">{{ event_dict.event_name_str or 'event' }}</strong>
+            <span class="truncate text-ink-600">
+              {{ event_dict.status_str or '' }}{% if event_dict.status_str and event_dict.reason_code_str %} · {% endif %}{{ event_dict.reason_code_str or '' }}
+            </span>
+          </div>
+          {% if event_dict.payload_dict %}
+            <details class="px-2 pb-1">
+              <summary class="cursor-pointer text-ink-400 hover:text-ink-700 text-[11px]">payload</summary>
+              <pre class="mt-1 text-[11px] whitespace-pre-wrap break-all text-ink-700 bg-ink-50 rounded p-2 max-h-64 overflow-auto">{{ event_dict.payload_dict | tojson(indent=2) }}</pre>
+            </details>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ol>
+  {% endif %}
+</div>
