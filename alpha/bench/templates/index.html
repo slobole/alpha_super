@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% set active_nav = "strategies" %}
+{% block title %}Strategies{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Strategies</h1>
+    <p class="page-sub">Every <span class="mono">strategy_*.py</span> in the repo. Wired = live / supported pods. Drop in a new file and it shows up here.</p>
+  </div>
+  <div class="stat-row">
+    <div class="stat"><div class="stat-value">{{ strategy_count_int }}</div><div class="stat-label">Strategies</div></div>
+    <div class="stat"><div class="stat-value" style="color:var(--gold)">{{ wired_count_int }}</div><div class="stat-label">Wired</div></div>
+  </div>
+</div>
+
+<div class="toolbar">
+  <input id="search" class="search" type="text" placeholder="Search strategies by name, family, or description…" autocomplete="off">
+  <div class="filter-bar" id="filter-bar">
+    <span class="filter-chip active" data-filter="all">All</span>
+    <span class="filter-chip wired" data-filter="wired">★ Wired</span>
+    {% for category_str, category_label_str in category_pair_list %}
+      <span class="filter-chip" data-filter="cat:{{ category_str }}">{{ category_label_str }}</span>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card-grid" id="card-grid">
+  {% for card in card_dict_list %}
+  {% set s = card.strategy %}
+  <div class="card {{ 'is-wired' if s.is_wired_bool }}"
+       data-wired="{{ '1' if s.is_wired_bool else '0' }}"
+       data-category="{{ s.category_str }}"
+       data-search="{{ (s.display_name_str ~ ' ' ~ s.stem_str ~ ' ' ~ s.summary_str ~ ' ' ~ s.category_label_str)|lower }}">
+    <div class="card-head">
+      <div>
+        <div class="card-title"><a href="{{ url_for('strategy_page_fn', module_import_str=s.module_import_str) }}">{{ s.display_name_str }}</a></div>
+        <div class="card-sub">{{ s.summary_str or s.stem_str }}</div>
+      </div>
+      {% if s.is_wired_bool %}<span class="badge badge-wired">★ Wired</span>{% endif %}
+    </div>
+
+    <div class="card-meta">
+      <span class="badge badge-cat">{{ s.category_label_str }}</span>
+      {% if not s.has_run_variant_bool %}<span class="badge badge-norun">no run_variant</span>{% endif %}
+    </div>
+
+    {% if card.headline_chip_list %}
+    <div class="chip-row">
+      {% for chip in card.headline_chip_list %}
+      <div class="chip {{ chip.tone_str }}">
+        <span class="chip-label">{{ chip.label_str }}</span>
+        <span class="chip-value">{{ chip.value_str }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="muted-2" style="font-size:12px;">No vanilla run yet — click Run to create one.</div>
+    {% endif %}
+
+    <div class="card-foot">
+      <span class="muted-2" style="font-size:12px;">
+        {% if card.latest_vanilla_run %}vanilla {{ card.latest_vanilla_run.display_timestamp_str }}{% endif %}
+        {% if card.run_count_int %} · {{ card.run_count_int }} run{{ 's' if card.run_count_int != 1 }}{% endif %}
+      </span>
+      <div class="btn-row">
+        <form class="inline" method="post" action="{{ url_for('run_api_fn') }}">
+          <input type="hidden" name="module_import" value="{{ s.module_import_str }}">
+          <input type="hidden" name="analysis" value="vanilla">
+          <button class="btn btn-sm" {{ 'disabled' if not s.has_run_variant_bool }}>Run vanilla</button>
+        </form>
+        <a class="btn btn-sm btn-primary" href="{{ url_for('strategy_page_fn', module_import_str=s.module_import_str) }}">Open</a>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+<div id="no-results" class="empty hidden">No strategies match your search.</div>
+
+{% if recent_run_list %}
+<div class="section">
+  <h2 class="section-title">Recent analyzer runs</h2>
+  <div class="panel">
+    <table class="table">
+      <thead><tr><th>Strategy</th><th>Analysis</th><th>When</th><th class="num">CAGR</th><th class="num">Sharpe</th><th class="num">Max DD</th><th></th></tr></thead>
+      <tbody>
+        {% for run in recent_run_list %}
+        <tr>
+          <td class="mono">{{ run.run_name_str }}</td>
+          <td>{{ run.analysis_label_str }}</td>
+          <td class="muted">{{ run.display_timestamp_str }}</td>
+          {% set sm = run.summary_dict %}
+          <td class="num {{ 'tone-pos' if (sm.get('ann_return_pct') or 0) >= 0 else 'tone-neg' }}">{{ '%.1f%%'|format(sm.get('ann_return_pct')) if sm.get('ann_return_pct') is not none else '—' }}</td>
+          <td class="num">{{ '%.2f'|format(sm.get('sharpe')) if sm.get('sharpe') is not none else '—' }}</td>
+          <td class="num tone-neg">{{ '%.1f%%'|format(sm.get('max_drawdown_pct')) if sm.get('max_drawdown_pct') is not none else '—' }}</td>
+          <td class="num">{% if run.has_report_bool %}<a class="btn btn-sm btn-ghost" href="{{ url_for('artifact_fn', rel_path_str=run.report_artifact_str) }}" target="_blank">Report</a>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<script>
+  (function () {
+    const searchInput = document.getElementById('search');
+    const cardList = Array.from(document.querySelectorAll('#card-grid .card'));
+    const chipList = Array.from(document.querySelectorAll('#filter-bar .filter-chip'));
+    const noResults = document.getElementById('no-results');
+    let activeFilter = 'all';
+
+    function apply() {
+      const query = searchInput.value.trim().toLowerCase();
+      let visible = 0;
+      cardList.forEach(function (card) {
+        let okFilter = true;
+        if (activeFilter === 'wired') okFilter = card.dataset.wired === '1';
+        else if (activeFilter.startsWith('cat:')) okFilter = card.dataset.category === activeFilter.slice(4);
+        const okSearch = !query || card.dataset.search.indexOf(query) !== -1;
+        const show = okFilter && okSearch;
+        card.classList.toggle('hidden', !show);
+        if (show) visible++;
+      });
+      noResults.classList.toggle('hidden', visible !== 0);
+    }
+
+    chipList.forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        chipList.forEach(function (c) { c.classList.remove('active'); });
+        chip.classList.add('active');
+        activeFilter = chip.dataset.filter;
+        apply();
+      });
+    });
+    searchInput.addEventListener('input', apply);
+  })();
+</script>
+{% endblock %}

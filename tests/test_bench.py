@@ -1,0 +1,210 @@
+"""Tests for the Bench research control panel (``alpha.bench``).
+
+These cover the parts that could silently break trading-adjacent workflows:
+the catalog/wired detection, the results reader, the run-API command wiring
+(which strategy/portfolio script each button shells out to), and the job
+runner. No real backtests are launched — the run API is exercised with a
+recording stub, and the job runner with a trivial subprocess.
+"""
+
+from __future__ import annotations
+
+import sys
+import time
+
+import pytest
+
+from alpha.bench import catalog, runs
+from alpha.bench.app import create_app
+
+
+DV2_MODULE_STR = "strategies.dv2.strategy_mr_dv2"
+
+
+class RecordingJobManager:
+    """Stub matching the JobManager surface the app/templates touch."""
+
+    def __init__(self) -> None:
+        self.call_list: list[tuple[str, str, list[str]]] = []
+
+    def submit(self, label_str, target_str, kind_str, command_list):
+        self.call_list.append((kind_str, target_str, list(command_list)))
+
+        class _Job:
+            job_id_str = "stub"
+
+        return _Job()
+
+    def active_count(self) -> int:
+        return 0
+
+    def list_jobs(self):
+        return []
+
+    def get_job(self, job_id_str):
+        return None
+
+
+@pytest.fixture()
+def recording_client():
+    recording_job_manager = RecordingJobManager()
+    app = create_app(job_manager_obj=recording_job_manager)
+    return app.test_client(), recording_job_manager
+
+
+# ── catalog ────────────────────────────────────────────────────────────────
+
+
+def test_catalog_lists_strategies_and_flags_wired():
+    strategy_entry_list = catalog.list_strategies()
+    assert len(strategy_entry_list) > 0
+
+    dv2_entry = catalog.get_strategy_by_module(DV2_MODULE_STR)
+    assert dv2_entry is not None
+    assert dv2_entry.is_wired_bool is True
+    assert dv2_entry.has_run_variant_bool is True  # guards the BOM/cp1252 decode fix
+
+
+def test_catalog_handles_non_utf8_sources_without_crashing():
+    # Every file under strategies/ must be classifiable even with odd encodings.
+    strategy_entry_list = catalog.list_strategies()
+    runnable_count = sum(1 for entry in strategy_entry_list if entry.has_run_variant_bool)
+    assert runnable_count >= 7  # at least every wired strategy is runnable
+
+
+def test_catalog_parses_both_portfolio_schemas():
+    portfolio_by_name = {entry.name_str: entry for entry in catalog.list_portfolios()}
+
+    simple_entry = portfolio_by_name["multipod"]
+    assert simple_entry.schema_str == catalog.SCHEMA_SIMPLE_STR
+    assert len(simple_entry.pod_tuple) > 0
+
+    manager_entry = portfolio_by_name["current_multipod_all"]
+    assert manager_entry.schema_str == catalog.SCHEMA_MANAGER_STR
+    assert manager_entry.capital_float == pytest.approx(200000.0)
+    assert len(manager_entry.pod_tuple) == 4
+
+
+# ── results reader ───────────────────────────────────────────────────────────
+
+
+def test_artifact_path_guard_blocks_traversal():
+    assert runs.resolve_artifact_path("../../alpha/bench/app.py") is None
+    assert runs.resolve_artifact_path("does/not/exist.html") is None
+
+
+def test_run_index_builds_without_error():
+    index_obj = runs.build_strategy_run_index()
+    assert isinstance(index_obj.runs_by_run_name_dict, dict)
+
+
+# ── run API command wiring ───────────────────────────────────────────────────
+
+
+def test_run_api_builds_single_analysis_command(recording_client):
+    client, job_manager = recording_client
+    response = client.post("/api/run", data={"module_import": DV2_MODULE_STR, "analysis": "vanilla"})
+    assert response.status_code == 302
+    _kind, _target, command_list = job_manager.call_list[-1]
+    assert command_list[-2:] == ["--analysis", "vanilla"]
+    assert command_list[1].endswith("run_strategy_analysis.py")
+
+
+def test_run_api_full_preset_passes_all_five_with_keep_going(recording_client):
+    client, job_manager = recording_client
+    response = client.post(
+        "/api/run",
+        data={"module_import": DV2_MODULE_STR, "analysis": ["vanilla", "friction", "timing", "risk", "stress"]},
+    )
+    assert response.status_code == 302
+    command_list = job_manager.call_list[-1][2]
+    assert command_list.count("--analysis") == 5
+    assert "--keep-going" in command_list
+
+
+def test_run_api_rejects_unknown_module(recording_client):
+    client, _job_manager = recording_client
+    assert client.post("/api/run", data={"module_import": "does.not.exist", "analysis": "vanilla"}).status_code == 400
+
+
+def test_run_api_rejects_empty_analysis(recording_client):
+    client, _job_manager = recording_client
+    assert client.post("/api/run", data={"module_import": DV2_MODULE_STR}).status_code == 400
+
+
+def test_portfolio_api_routes_by_schema(recording_client):
+    client, job_manager = recording_client
+
+    client.post("/api/run-portfolio", data={"config_rel_path": "portfolios/multipod.yaml"})
+    assert job_manager.call_list[-1][2][1].endswith("run_portfolio.py")
+
+    client.post("/api/run-portfolio", data={"config_rel_path": "portfolios/current_multipod_all.yaml"})
+    assert job_manager.call_list[-1][2][1].endswith("run_portfolio_manager.py")
+
+
+# ── pages render ─────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "path_str",
+    ["/", "/jobs", "/portfolios", "/healthz", f"/strategy/{DV2_MODULE_STR}"],
+)
+def test_pages_render(recording_client, path_str):
+    client, _job_manager = recording_client
+    assert client.get(path_str).status_code == 200
+
+
+# ── job runner ───────────────────────────────────────────────────────────────
+
+
+def _wait_for_terminal(job_manager, job_id_str, timeout_seconds_float=10.0):
+    deadline_float = time.monotonic() + timeout_seconds_float
+    while time.monotonic() < deadline_float:
+        job_obj = job_manager.get_job(job_id_str)
+        if job_obj is not None and not job_obj.is_active_bool:
+            return job_obj
+        time.sleep(0.05)
+    raise AssertionError("job did not finish in time")
+
+
+def test_job_runner_executes_and_records_outcome(monkeypatch, tmp_path):
+    from alpha.bench import jobs as jobs_module
+
+    monkeypatch.setattr(jobs_module, "JOBS_DIR_PATH", tmp_path)
+    job_manager = jobs_module.JobManager(max_concurrency_int=2)
+
+    ok_job = job_manager.submit(
+        "ok", "ok", "analysis", [sys.executable, "-c", "print('bench-ok'); raise SystemExit(0)"]
+    )
+    ok_done = _wait_for_terminal(job_manager, ok_job.job_id_str)
+    assert ok_done.status_str == jobs_module.STATUS_PASSED_STR
+    assert ok_done.return_code_int == 0
+    assert "bench-ok" in job_manager.read_log_text(ok_job.job_id_str)
+
+    fail_job = job_manager.submit("fail", "fail", "analysis", [sys.executable, "-c", "raise SystemExit(3)"])
+    fail_done = _wait_for_terminal(job_manager, fail_job.job_id_str)
+    assert fail_done.status_str == jobs_module.STATUS_FAILED_STR
+    assert fail_done.return_code_int == 3
+
+
+def test_job_runner_marks_stale_jobs_interrupted(monkeypatch, tmp_path):
+    from alpha.bench import jobs as jobs_module
+
+    monkeypatch.setattr(jobs_module, "JOBS_DIR_PATH", tmp_path)
+    first_manager = jobs_module.JobManager()
+    running_like_job = jobs_module.Job(
+        job_id_str="20260101-000000-abcd",
+        label_str="x",
+        target_str="x",
+        kind_str="analysis",
+        command_list=["python", "-c", "pass"],
+        status_str=jobs_module.STATUS_RUNNING_STR,
+        created_at_str="2026-01-01T00:00:00",
+    )
+    first_manager._persist(running_like_job)
+
+    # A fresh manager (simulating a restart) must not believe it is still running.
+    second_manager = jobs_module.JobManager()
+    reloaded_job = second_manager.get_job("20260101-000000-abcd")
+    assert reloaded_job is not None
+    assert reloaded_job.status_str == jobs_module.STATUS_INTERRUPTED_STR

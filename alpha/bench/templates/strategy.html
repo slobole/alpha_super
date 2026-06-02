@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% set active_nav = "strategies" %}
+{% block title %}{{ strategy.display_name_str }}{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:6px;"><a class="muted" href="{{ url_for('index_page_fn') }}">← Strategies</a></div>
+
+<div class="detail-head">
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+    <h1 class="detail-title">{{ strategy.display_name_str }}</h1>
+    {% if strategy.is_wired_bool %}<span class="badge badge-wired">★ Wired</span>{% endif %}
+    <span class="badge badge-cat">{{ strategy.category_label_str }}</span>
+    {% if not strategy.has_run_variant_bool %}<span class="badge badge-norun">no run_variant()</span>{% endif %}
+  </div>
+  {% if strategy.summary_str %}<p class="detail-doc">{{ strategy.summary_str }}</p>{% endif %}
+  <div class="detail-path mono">{{ strategy.rel_path_str }}</div>
+</div>
+
+<div class="action-bar">
+  {% if strategy.has_run_variant_bool %}
+  <div class="action-group">
+    <span class="action-group-label">Run</span>
+    {% for analysis_str in single_analysis_tuple %}
+    <form class="inline" method="post" action="{{ url_for('run_api_fn') }}">
+      <input type="hidden" name="module_import" value="{{ strategy.module_import_str }}">
+      <input type="hidden" name="analysis" value="{{ analysis_str }}">
+      <button class="btn btn-sm">{{ analysis_label_dict[analysis_str] }}</button>
+    </form>
+    {% endfor %}
+  </div>
+  <div class="action-divider"></div>
+  <div class="action-group">
+    <span class="action-group-label">Presets</span>
+    <form class="inline" method="post" action="{{ url_for('run_api_fn') }}">
+      <input type="hidden" name="module_import" value="{{ strategy.module_import_str }}">
+      {% for analysis_str in preset_dict['standard'] %}<input type="hidden" name="analysis" value="{{ analysis_str }}">{% endfor %}
+      <button class="btn btn-sm">Standard · V+F+T</button>
+    </form>
+    <form class="inline" method="post" action="{{ url_for('run_api_fn') }}">
+      <input type="hidden" name="module_import" value="{{ strategy.module_import_str }}">
+      {% for analysis_str in preset_dict['full'] %}<input type="hidden" name="analysis" value="{{ analysis_str }}">{% endfor %}
+      <button class="btn btn-sm btn-primary">Full analysis · all 5</button>
+    </form>
+  </div>
+  {% else %}
+  <span class="muted">This module has no <span class="mono">run_variant()</span> hook, so Bench cannot launch it.</span>
+  {% endif %}
+</div>
+
+<div class="section">
+  <h2 class="section-title">Runs ({{ run_entry_list|length }})</h2>
+  {% if run_entry_list %}
+  <div class="panel">
+    <table class="table">
+      <thead><tr><th>Analysis</th><th>When</th><th class="num">CAGR</th><th class="num">Sharpe</th><th class="num">Max DD</th><th class="num">Trades</th><th></th></tr></thead>
+      <tbody>
+        {% for run in run_entry_list %}
+        {% set sm = run.summary_dict %}
+        <tr>
+          <td><b>{{ run.analysis_label_str }}</b></td>
+          <td class="muted">{{ run.display_timestamp_str }}</td>
+          <td class="num {{ 'tone-pos' if (sm.get('ann_return_pct') or 0) >= 0 else 'tone-neg' }}">{{ '%.2f%%'|format(sm.get('ann_return_pct')) if sm.get('ann_return_pct') is not none else '—' }}</td>
+          <td class="num">{{ '%.2f'|format(sm.get('sharpe')) if sm.get('sharpe') is not none else '—' }}</td>
+          <td class="num tone-neg">{{ '%.2f%%'|format(sm.get('max_drawdown_pct')) if sm.get('max_drawdown_pct') is not none else '—' }}</td>
+          <td class="num">{{ '{:,}'.format(sm.get('trade_count')) if sm.get('trade_count') is not none else '—' }}</td>
+          <td class="num">{% if run.has_report_bool %}<a class="btn btn-sm btn-ghost" href="{{ url_for('artifact_fn', rel_path_str=run.report_artifact_str) }}" target="_blank">Report</a>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">No runs yet for this strategy. Hit a Run button above to create the first one.</div>
+  {% endif %}
+</div>
+
+{% if latest_report_run %}
+<div class="section">
+  <div class="report-bar">
+    <h2 class="section-title" style="margin:0;">Latest report · {{ latest_report_run.analysis_label_str }} · {{ latest_report_run.display_timestamp_str }}</h2>
+    <a class="btn btn-sm btn-ghost" href="{{ url_for('artifact_fn', rel_path_str=latest_report_run.report_artifact_str) }}" target="_blank">Open full ↗</a>
+  </div>
+  <iframe class="report-frame" src="{{ url_for('artifact_fn', rel_path_str=latest_report_run.report_artifact_str) }}"></iframe>
+</div>
+{% endif %}
+{% endblock %}

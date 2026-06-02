@@ -1,0 +1,27 @@
+{% if not job_list %}
+<div class="empty">No jobs yet. Launch one from a strategy or portfolio.</div>
+{% else %}
+<div class="panel">
+  <table class="table">
+    <thead>
+      <tr><th>Status</th><th>Job</th><th>Target</th><th>Created</th><th class="num">Elapsed</th><th class="num">Exit</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for job in job_list %}
+      <tr>
+        <td><span class="pill pill-{{ job.status_str }}">{{ job.status_str }}</span></td>
+        <td>
+          <div><b>{{ job.label_str }}</b></div>
+          <div class="mono muted-2 job-cmd">{{ job.command_display_str }}</div>
+        </td>
+        <td class="mono">{{ job.target_str }}</td>
+        <td class="muted">{{ job.created_at_str.replace('T', ' ') }}</td>
+        <td class="num">{{ job.elapsed_str }}</td>
+        <td class="num">{% if job.return_code_int is not none %}{{ job.return_code_int }}{% else %}—{% endif %}</td>
+        <td class="num"><a class="btn btn-sm btn-ghost" href="{{ url_for('job_log_page_fn', job_id_str=job.job_id_str) }}">Log</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}

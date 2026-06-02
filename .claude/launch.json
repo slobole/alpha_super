@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "bench",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "python", "-m", "alpha.bench", "--skip-env-file", "--port", "8765"],
+      "port": 8765
+    }
+  ]
+}

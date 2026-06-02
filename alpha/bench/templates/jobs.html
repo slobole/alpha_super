@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% set active_nav = "jobs" %}
+{% block title %}Jobs{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Jobs</h1>
+    <p class="page-sub">Background runs launched from Bench. Output streams to <span class="mono">results/_bench/jobs/</span>.</p>
+  </div>
+</div>
+
+<div id="jobs-table"
+     hx-get="{{ url_for('jobs_fragment_fn') }}"
+     hx-trigger="load, every 2s"
+     hx-swap="innerHTML">
+  {% include "_jobs_table.html" %}
+</div>
+{% endblock %}

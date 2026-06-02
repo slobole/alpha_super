@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% set active_nav = "jobs" %}
+{% block title %}{{ job.label_str }} · log{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:6px;"><a class="muted" href="{{ url_for('jobs_page_fn') }}">← Jobs</a></div>
+
+<div class="page-head">
+  <div>
+    <h1 class="page-title">{{ job.label_str }}</h1>
+    <p class="page-sub mono">{{ job.command_display_str }}</p>
+  </div>
+  <div class="stat-row">
+    <div class="stat"><div class="stat-value"><span class="pill pill-{{ job.status_str }}">{{ job.status_str }}</span></div><div class="stat-label">Status</div></div>
+    <div class="stat"><div class="stat-value">{{ job.elapsed_str }}</div><div class="stat-label">Elapsed</div></div>
+    <div class="stat"><div class="stat-value">{{ job.return_code_int if job.return_code_int is not none else '—' }}</div><div class="stat-label">Exit code</div></div>
+  </div>
+</div>
+
+<div id="log-body"
+     {% if job.is_active_bool %}hx-get="{{ url_for('job_log_page_fn', job_id_str=job.job_id_str) }}" hx-trigger="every 2s" hx-select="#log-body" hx-swap="outerHTML"{% endif %}>
+  <pre class="log">{{ log_text_str or '(no output yet)' }}</pre>
+</div>
+{% endblock %}

@@ -81,7 +81,20 @@ uv run python strategies/strategy_mr_dv2.py
 
 # Launch Jupyter notebooks
 uv run jupyter notebook
+
+# Launch Bench — the local research control panel (http://127.0.0.1:8765)
+uv run python -m alpha.bench
 ```
+
+### Bench (research control panel)
+
+`alpha/bench/` is a local, single-operator web UI that centralizes the research
+loop: it lists every strategy (flagging the WIRED/live ones), surfaces recent
+analyzer runs from `results/`, and exposes one-click buttons that launch the
+existing `run_strategy_analysis.py` / `run_portfolio.py` /
+`run_portfolio_manager.py` scripts as tracked background jobs. It adds **no quant
+logic** — it only discovers, reads artifacts, and shells out — so it preserves
+backtest semantics by construction. See `alpha/bench/README.md`.
 
 ## Architecture
 

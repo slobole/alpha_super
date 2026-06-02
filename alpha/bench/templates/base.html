@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bench · {% block title %}Research console{% endblock %}</title>
+  <script src="{{ url_for('static', filename='htmx.min.js') }}"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='bench.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('index_page_fn') }}">
+      <span class="brand-mark">B</span>
+      <span>
+        <div class="brand-name">Bench</div>
+        <div class="brand-tag">strategy test bench</div>
+      </span>
+    </a>
+    <nav class="nav">
+      <a href="{{ url_for('index_page_fn') }}" class="{{ 'active' if active_nav == 'strategies' }}">Strategies</a>
+      <a href="{{ url_for('portfolios_page_fn') }}" class="{{ 'active' if active_nav == 'portfolios' }}">Portfolios</a>
+      <a href="{{ url_for('jobs_page_fn') }}" class="{{ 'active' if active_nav == 'jobs' }}">
+        Jobs
+        <span id="nav-job-badge"
+              hx-get="{{ url_for('job_indicator_fragment_fn') }}"
+              hx-trigger="load, every 3s"
+              hx-swap="innerHTML">
+          {% include "_job_indicator.html" %}
+        </span>
+      </a>
+    </nav>
+    <div class="topbar-spacer"></div>
+    <div class="topbar-clock">{{ server_clock_str }}</div>
+  </header>
+
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    Bench {{ bench_version_str }} · local research console · reads <span class="mono">results/</span>, launches your existing runners
+  </footer>
+</body>
+</html>

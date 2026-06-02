@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% set active_nav = "portfolios" %}
+{% block title %}Portfolios{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Portfolios</h1>
+    <p class="page-sub">Multi-pod books from <span class="mono">portfolios/*.yaml</span>. Build aggregates the latest pod pickles into one equity curve.</p>
+  </div>
+  <div class="stat-row">
+    <div class="stat"><div class="stat-value">{{ portfolio_view_list|length }}</div><div class="stat-label">Books</div></div>
+  </div>
+</div>
+
+{% if not portfolio_view_list %}
+<div class="empty">No portfolio configs found under <span class="mono">portfolios/</span>.</div>
+{% endif %}
+
+<div class="card-grid">
+  {% for view in portfolio_view_list %}
+  {% set p = view.portfolio %}
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-title">{{ p.config_name_str }}</div>
+        <div class="card-sub mono">{{ p.rel_path_str }}</div>
+      </div>
+    </div>
+
+    {% if p.error_str %}
+      <div class="badge badge-norun">YAML error</div>
+      <div class="muted-2" style="font-size:12px;">{{ p.error_str }}</div>
+    {% else %}
+      <div class="card-meta">
+        {% if p.capital_float is not none %}<span class="badge badge-cat">${{ '{:,.0f}'.format(p.capital_float) }}</span>{% endif %}
+        <span class="badge badge-cat">{{ p.rebalance_str or 'buy & hold' }}</span>
+        <span class="badge badge-cat">{{ p.pod_tuple|length }} pods</span>
+        <span class="badge badge-cat">{{ 'fresh run' if p.schema_str == 'manager' else 'combine pkls' }}</span>
+      </div>
+      <div class="pods-line">
+        {% for pod in p.pod_tuple %}
+        <span class="pod-tag">{{ pod.strategy_str }} <b>{{ '%.0f%%'|format(pod.weight_float * 100) }}</b></span>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <div class="card-foot">
+      <span class="muted-2" style="font-size:12px;">
+        {% if view.run_entry_list %}{{ view.run_entry_list|length }} run{{ 's' if view.run_entry_list|length != 1 }}{% else %}no runs yet{% endif %}
+      </span>
+      <div class="btn-row">
+        {% if view.latest_report_run %}
+        <a class="btn btn-sm btn-ghost" href="{{ url_for('artifact_fn', rel_path_str=view.latest_report_run.report_artifact_str) }}" target="_blank">Report</a>
+        {% endif %}
+        <form class="inline" method="post" action="{{ url_for('run_portfolio_api_fn') }}">
+          <input type="hidden" name="config_rel_path" value="{{ p.rel_path_str }}">
+          <button class="btn btn-sm btn-primary" {{ 'disabled' if p.error_str }}>Build</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}
