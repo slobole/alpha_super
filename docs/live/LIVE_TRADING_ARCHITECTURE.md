@@ -279,7 +279,7 @@ warning if DecisionBaseShares_i != BrokerShares_i for any asset
 
 This follows the RealTest / OrderClerk-style principle that the system should keep trading from current broker truth instead of freezing on share drift from events like splits or missed prior sessions.
 
-Cash is stored and monitored, but it does not block v2 preflight.
+Cash is stored and monitored, but it does not block v2 doctor.
 
 ### 3. `next_open_moo` means basket mode
 

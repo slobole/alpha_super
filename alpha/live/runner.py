@@ -30,7 +30,7 @@ from alpha.live.release_manifest import (
 )
 from alpha.live.state_store import V1_EXECUTION_TABLE_NAME_TUPLE
 from alpha.live.state_store_v2 import LiveStateStore
-from scripts.norgate_config_env import load_config_env_file
+from scripts.norgate_config_env import default_config_env_path_obj, load_config_env_file
 
 
 DEFAULT_RELEASES_ROOT_PATH_STR = str(Path(__file__).resolve().parent / "releases")
@@ -2064,6 +2064,10 @@ def _render_incubation_fanout_detail_str(detail_dict: dict[str, object]) -> str:
 def _render_command_output_str(command_name_str: str, detail_dict: dict[str, object]) -> str:
     if bool(detail_dict.get("fanout_bool")):
         return _render_incubation_fanout_detail_str(detail_dict)
+    if command_name_str == "doctor":
+        from alpha.live.doctor import render_doctor_detail_str
+
+        return render_doctor_detail_str(detail_dict)
     if command_name_str == "tick":
         return _render_tick_detail_str(detail_dict)
     if command_name_str == "status":
@@ -4566,12 +4570,12 @@ def _run_incubation_fanout_detail_dict(
 
 
 def main(argv_list: list[str] | None = None) -> int:
-    load_config_env_file(override_existing_bool=True)
     parser_obj = argparse.ArgumentParser(description="alpha.live runner")
     parser_obj.add_argument(
         "command_name_str",
         choices=(
             "build_decision_plans",
+            "doctor",
             "build_vplan",
             "show_decision_plan",
             "show_vplan",
@@ -4586,7 +4590,7 @@ def main(argv_list: list[str] | None = None) -> int:
         ),
     )
     parser_obj.add_argument("--db-path", dest="db_path_str", default=None)
-    parser_obj.add_argument("--releases-root", dest="releases_root_path_str", default=DEFAULT_RELEASES_ROOT_PATH_STR)
+    parser_obj.add_argument("--releases-root", dest="releases_root_path_str", default=None)
     parser_obj.add_argument("--as-of-ts", dest="as_of_timestamp_str", default=None)
     parser_obj.add_argument("--mode", dest="env_mode_str", default="paper")
     parser_obj.add_argument("--log-path", dest="log_path_str", default=DEFAULT_LOG_PATH_STR)
@@ -4604,6 +4608,104 @@ def main(argv_list: list[str] | None = None) -> int:
     parser_obj.add_argument("--output-dir", dest="output_dir_str", default="results")
     parsed_args_obj = parser_obj.parse_args(argv_list)
     as_of_ts = _parse_as_of_timestamp_ts(parsed_args_obj.as_of_timestamp_str)
+    try:
+        config_env_path_str = str(default_config_env_path_obj().expanduser().resolve())
+        loaded_config_env_dict = load_config_env_file(override_existing_bool=True)
+    except Exception as exc:
+        if parsed_args_obj.command_name_str != "doctor":
+            raise
+        detail_dict = {
+            "feature_name_str": "doctor",
+            "command_name_str": parsed_args_obj.command_name_str,
+            "mode_str": parsed_args_obj.env_mode_str,
+            "pod_id_str": parsed_args_obj.pod_id_str,
+            "as_of_timestamp_str": as_of_ts.isoformat(),
+            "component_result_dict_list": [
+                {
+                    "component_name_str": "environment",
+                    "status_str": "BLOCK",
+                    "reason_code_str": "config_env_error",
+                    "detail_str": str(exc),
+                }
+            ],
+            "config_release_root_dict": {},
+            "manifest_qualification_dict": {},
+            "release_dict": {},
+            "scheduler_gate_dict": {},
+            "persisted_lifecycle_dict": {},
+            "norgate_snapshot_sync_detail_dict": {},
+            "decision_plan_dict": {},
+            "broker_dict": {},
+            "reconciliation_dict": {},
+            "vplan_preview_dict": {},
+            "overall_verdict_str": "BLOCK",
+        }
+        if parsed_args_obj.json_output_bool:
+            print(json.dumps(detail_dict, indent=2, sort_keys=True))
+        else:
+            print(_render_command_output_str(parsed_args_obj.command_name_str, detail_dict))
+        return 1
+
+    if parsed_args_obj.command_name_str == "doctor":
+        from alpha.live.doctor import (
+            compute_doctor_verdict,
+            load_pod_state_from_sqlite_read_only_obj,
+        )
+
+        releases_root_explicit_bool = parsed_args_obj.releases_root_path_str is not None
+        def pod_state_loader_fn(release_obj: LiveRelease, current_as_of_ts: datetime) -> PodState | None:
+            del current_as_of_ts
+            db_path_str = _resolve_db_path_for_mode_str(
+                db_path_str=parsed_args_obj.db_path_str,
+                env_mode_str=parsed_args_obj.env_mode_str,
+                pod_id_str=release_obj.pod_id_str,
+            )
+            return load_pod_state_from_sqlite_read_only_obj(
+                db_path_str=db_path_str,
+                release_obj=release_obj,
+            )
+
+        broker_adapter_resolver_obj = BrokerAdapterResolver(
+            broker_host_str=parsed_args_obj.broker_host_str,
+            broker_port_int=parsed_args_obj.broker_port_int,
+            broker_client_id_int=parsed_args_obj.broker_client_id_int,
+            broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
+        )
+        if parsed_args_obj.json_output_bool:
+            with contextlib.redirect_stdout(io.StringIO()):
+                detail_dict = compute_doctor_verdict(
+                    releases_root_path_str=parsed_args_obj.releases_root_path_str,
+                    env_mode_str=parsed_args_obj.env_mode_str,
+                    as_of_ts=as_of_ts,
+                    command_name_str=parsed_args_obj.command_name_str,
+                    pod_id_str=parsed_args_obj.pod_id_str,
+                    releases_root_explicit_bool=releases_root_explicit_bool,
+                    config_env_path_str=config_env_path_str,
+                    db_path_str=parsed_args_obj.db_path_str,
+                    pod_state_loader_fn=pod_state_loader_fn,
+                    broker_adapter_resolver_obj=broker_adapter_resolver_obj,
+                    loaded_config_env_dict=loaded_config_env_dict,
+                )
+            print(json.dumps(detail_dict, indent=2, sort_keys=True))
+        else:
+            detail_dict = compute_doctor_verdict(
+                releases_root_path_str=parsed_args_obj.releases_root_path_str,
+                env_mode_str=parsed_args_obj.env_mode_str,
+                as_of_ts=as_of_ts,
+                command_name_str=parsed_args_obj.command_name_str,
+                pod_id_str=parsed_args_obj.pod_id_str,
+                releases_root_explicit_bool=releases_root_explicit_bool,
+                config_env_path_str=config_env_path_str,
+                db_path_str=parsed_args_obj.db_path_str,
+                pod_state_loader_fn=pod_state_loader_fn,
+                broker_adapter_resolver_obj=broker_adapter_resolver_obj,
+                loaded_config_env_dict=loaded_config_env_dict,
+            )
+            print(_render_command_output_str(parsed_args_obj.command_name_str, detail_dict))
+        return 1 if str(detail_dict.get("overall_verdict_str")) == "BLOCK" else 0
+
+    if parsed_args_obj.releases_root_path_str is None:
+        parsed_args_obj.releases_root_path_str = DEFAULT_RELEASES_ROOT_PATH_STR
 
     if _should_run_incubation_fanout_bool(parsed_args_obj):
         if parsed_args_obj.json_output_bool:
