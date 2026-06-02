@@ -107,7 +107,10 @@ def test_artifact_response_is_sandboxed(monkeypatch, tmp_path):
     client = create_app(job_manager_obj=RecordingJobManager()).test_client()
     response = client.get("/artifact/anything/report.html")
     assert response.status_code == 200
-    assert "sandbox" in response.headers.get("Content-Security-Policy", "")
+    csp_str = response.headers.get("Content-Security-Policy", "")
+    assert "sandbox" in csp_str
+    assert "allow-scripts" not in csp_str  # JS stays blocked
+    assert "style-src" in csp_str and "'unsafe-inline'" in csp_str  # report styling still works
     assert response.headers.get("X-Content-Type-Options") == "nosniff"
 
 

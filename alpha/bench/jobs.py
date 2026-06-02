@@ -9,7 +9,8 @@ to a log file, and tracks its status in memory. This is the only genuinely
   * stdout+stderr stream to ``results/_bench/jobs/{job_id}.log``,
   * a ``{job_id}.json`` sidecar persists status so the Jobs page survives a
     restart (a job still "running" when Bench was last killed is marked
-    ``interrupted`` on the next start, since the OS process is gone).
+    ``unknown`` on the next start — we cannot reattach to the child to learn its
+    real outcome, and on Windows the child may even still be running).
 
 Subprocesses inherit Bench's environment and run with ``cwd`` = repo root, so
 they behave exactly like the same command typed in the terminal.

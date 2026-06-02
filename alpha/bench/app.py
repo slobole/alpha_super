@@ -252,12 +252,19 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
         if artifact_path is None:
             abort(404)
         response_obj = send_file(artifact_path)
-        # Reports are generated HTML. Serve them in a sandbox so that even if a
+        # Reports are generated HTML. Serve them sandboxed so that even if a
         # report ever contained active content, it runs with an opaque origin and
         # cannot script the control panel — whether embedded in the iframe or
-        # opened full-tab. Generated reports today are static (no scripts), so
-        # the strict "no allow-scripts" sandbox does not break rendering.
-        response_obj.headers["Content-Security-Policy"] = "sandbox; default-src 'self' data: https:"
+        # opened full-tab. The sandbox carries no allow-scripts, so JS is blocked;
+        # inline styles, images, and (CDN) fonts are explicitly allowed so the
+        # existing reports — which rely on inline <style> and style= — render
+        # with their proper styling.
+        response_obj.headers["Content-Security-Policy"] = (
+            "sandbox; default-src 'none'; "
+            "img-src 'self' data: https:; "
+            "style-src 'self' 'unsafe-inline' https:; "
+            "font-src 'self' https: data:"
+        )
         response_obj.headers["X-Content-Type-Options"] = "nosniff"
         return response_obj
 
