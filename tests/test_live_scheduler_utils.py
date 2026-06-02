@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pandas as pd
+import pytest
 
 from alpha.live.models import LiveRelease
 from alpha.live.scheduler_utils import (
@@ -11,6 +12,7 @@ from alpha.live.scheduler_utils import (
     evaluate_build_gate_dict,
     is_execution_window_expired_bool,
     is_release_due_for_build,
+    resolve_calendar_month_end_label_to_last_tradable_session,
     select_due_release_list,
 )
 
@@ -75,6 +77,56 @@ def test_scheduler_uses_real_next_session_after_long_weekend():
     assert submission_timestamp_ts.minute == 23
     assert submission_timestamp_ts.second == 30
     assert target_execution_timestamp_ts.date().isoformat() == "2024-04-01"
+    assert target_execution_timestamp_ts.hour == 9
+    assert target_execution_timestamp_ts.minute == 30
+
+
+def test_scheduler_resolves_calendar_month_end_label_to_last_tradable_session():
+    available_date_index = pd.DatetimeIndex(
+        [
+            pd.Timestamp("2026-05-28"),
+            pd.Timestamp("2026-05-29"),
+        ]
+    )
+
+    resolved_session_label_ts = resolve_calendar_month_end_label_to_last_tradable_session(
+        raw_month_end_label_ts=pd.Timestamp("2026-05-31"),
+        available_date_index=available_date_index,
+        session_calendar_id_str="XNYS",
+        as_of_ts=datetime(2026, 6, 1, 8, 0, tzinfo=UTC),
+    )
+
+    assert resolved_session_label_ts == pd.Timestamp("2026-05-29")
+
+
+def test_scheduler_rejects_month_end_label_without_final_session_price():
+    available_date_index = pd.DatetimeIndex(
+        [
+            pd.Timestamp("2026-05-28"),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="final XNYS session"):
+        resolve_calendar_month_end_label_to_last_tradable_session(
+            raw_month_end_label_ts=pd.Timestamp("2026-05-31"),
+            available_date_index=available_date_index,
+            session_calendar_id_str="XNYS",
+            as_of_ts=datetime(2026, 6, 1, 8, 0, tzinfo=UTC),
+        )
+
+
+def test_scheduler_maps_next_month_first_open_through_calendar_closure():
+    release_obj = make_release("month_end_snapshot_ready", "next_month_first_open")
+    signal_date_ts = datetime(2021, 12, 31, 16, 0)
+
+    submission_timestamp_ts = build_submission_timestamp_ts(signal_date_ts, release_obj)
+    target_execution_timestamp_ts = build_target_execution_timestamp_ts(signal_date_ts, release_obj)
+
+    assert submission_timestamp_ts.date().isoformat() == "2022-01-03"
+    assert submission_timestamp_ts.hour == 9
+    assert submission_timestamp_ts.minute == 23
+    assert submission_timestamp_ts.second == 30
+    assert target_execution_timestamp_ts.date().isoformat() == "2022-01-03"
     assert target_execution_timestamp_ts.hour == 9
     assert target_execution_timestamp_ts.minute == 30
 

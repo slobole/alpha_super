@@ -55,6 +55,10 @@ DATA_PROFILE_HEARTBEAT_SYMBOL_MAP: dict[str, str] = {
 }
 
 
+class CalendarMonthNotCompleteError(ValueError):
+    pass
+
+
 def normalize_signal_clock_str(signal_clock_str: str) -> str:
     return SIGNAL_CLOCK_ALIAS_MAP.get(signal_clock_str, signal_clock_str)
 
@@ -192,6 +196,103 @@ def is_last_session_of_month_bool(
         next_session_label_ts.year != session_label_ts.year
         or next_session_label_ts.month != session_label_ts.month
     )
+
+
+def _date_from_timestamp_obj(timestamp_obj, session_calendar_id_str: str):
+    timestamp_ts = pd.Timestamp(timestamp_obj)
+    if timestamp_ts.tzinfo is None:
+        return timestamp_ts.date()
+    return timestamp_ts.tz_convert(get_market_timezone_obj(session_calendar_id_str)).date()
+
+
+def _latest_session_on_or_before_date_ts(
+    date_obj,
+    session_calendar_id_str: str,
+) -> pd.Timestamp | None:
+    for calendar_date_ts in reversed(pd.date_range(end=pd.Timestamp(date_obj), periods=31, freq="D")):
+        session_label_ts = _session_label_from_date(calendar_date_ts.date(), session_calendar_id_str)
+        if session_label_ts is not None:
+            return session_label_ts
+    return None
+
+
+def resolve_calendar_month_end_label_to_last_tradable_session(
+    raw_month_end_label_ts,
+    available_date_index: pd.DatetimeIndex,
+    session_calendar_id_str: str,
+    as_of_ts: datetime | None = None,
+) -> pd.Timestamp:
+    raw_month_end_label_ts = pd.Timestamp(raw_month_end_label_ts)
+    month_period_obj = raw_month_end_label_ts.to_period("M")
+
+    calendar_session_label_list: list[pd.Timestamp] = []
+    for calendar_date_ts in pd.date_range(
+        month_period_obj.start_time,
+        month_period_obj.end_time.normalize(),
+        freq="D",
+    ):
+        session_label_ts = _session_label_from_date(calendar_date_ts.date(), session_calendar_id_str)
+        if session_label_ts is not None:
+            calendar_session_label_list.append(session_label_ts)
+    if len(calendar_session_label_list) == 0:
+        raise ValueError(
+            f"No {session_calendar_id_str} trading sessions exist in month '{month_period_obj}'."
+        )
+    final_calendar_session_label_ts = calendar_session_label_list[-1]
+
+    available_session_label_list: list[pd.Timestamp] = []
+    for available_ts in pd.DatetimeIndex(available_date_index):
+        available_date_obj = _date_from_timestamp_obj(available_ts, session_calendar_id_str)
+        session_label_ts = _session_label_from_date(available_date_obj, session_calendar_id_str)
+        if session_label_ts is not None:
+            available_session_label_list.append(session_label_ts)
+
+    if as_of_ts is not None:
+        as_of_date_obj = _date_from_timestamp_obj(as_of_ts, session_calendar_id_str)
+        latest_as_of_session_label_ts = _latest_session_on_or_before_date_ts(
+            as_of_date_obj,
+            session_calendar_id_str,
+        )
+        if (
+            latest_as_of_session_label_ts is None
+            or latest_as_of_session_label_ts < final_calendar_session_label_ts
+        ):
+            raise CalendarMonthNotCompleteError(
+                f"Calendar month '{month_period_obj}' is not complete as of '{as_of_date_obj}'. "
+                f"The final {session_calendar_id_str} session is "
+                f"'{final_calendar_session_label_ts.date()}'."
+            )
+        available_session_label_list = [
+            session_label_ts
+            for session_label_ts in available_session_label_list
+            if session_label_ts.date() <= as_of_date_obj
+        ]
+
+    available_month_session_label_list = sorted(
+        {
+            session_label_ts
+            for session_label_ts in available_session_label_list
+            if session_label_ts.to_period("M") == month_period_obj
+        }
+    )
+    if len(available_month_session_label_list) == 0:
+        raise ValueError(
+            f"No available {session_calendar_id_str} trading-session prices exist in month "
+            f"'{month_period_obj}' for raw_month_end_label_ts='{raw_month_end_label_ts.date()}'."
+        )
+
+    resolved_session_label_ts = available_month_session_label_list[-1]
+    # *** CRITICAL*** Calendar month-end labels from resample("ME") are month
+    # identifiers, not necessarily tradable sessions. The live DecisionPlan
+    # must use the final real exchange session for that month, or fail loud.
+    if resolved_session_label_ts != final_calendar_session_label_ts:
+        raise ValueError(
+            "Latest available trading-session price for month "
+            f"'{month_period_obj}' is '{resolved_session_label_ts.date()}', but the final "
+            f"{session_calendar_id_str} session is '{final_calendar_session_label_ts.date()}'."
+        )
+
+    return resolved_session_label_ts
 
 
 def load_latest_norgate_heartbeat_session_label_ts(

@@ -725,26 +725,44 @@ def _build_taa_vix_cash_full_target_decision_plan(
     if len(month_end_weight_df.index) == 0:
         raise RuntimeError("TAA live host produced no month-end weights.")
 
-    available_price_date_index = pd.DatetimeIndex(execution_price_df.index).normalize()
-    candidate_signal_date_index = pd.DatetimeIndex(month_end_weight_df.index).normalize()
-    as_of_date_ts = pd.Timestamp(as_of_ts).tz_localize(None).normalize()
-    # *** CRITICAL*** A partial current month can resample to a future month-end label.
-    # Only use a month-end signal after that exact decision date has execution-price data.
-    valid_signal_date_index = candidate_signal_date_index[
-        candidate_signal_date_index.isin(available_price_date_index)
-        & (candidate_signal_date_index <= as_of_date_ts)
-    ]
-    if len(valid_signal_date_index) == 0:
-        raise RuntimeError("TAA live host produced no month-end weights with available decision-date prices.")
+    available_price_date_index = pd.DatetimeIndex(execution_price_df.index).normalize().sort_values()
+    if len(available_price_date_index) == 0:
+        raise RuntimeError("TAA live host produced no execution-price dates.")
+    candidate_month_end_label_index = pd.DatetimeIndex(month_end_weight_df.index).normalize().sort_values()
 
-    signal_date_ts = pd.Timestamp(valid_signal_date_index[-1]).to_pydatetime()
+    raw_month_end_label_ts: pd.Timestamp | None = None
+    resolved_signal_session_label_ts: pd.Timestamp | None = None
+    for candidate_month_end_label_ts in reversed(candidate_month_end_label_index):
+        try:
+            resolved_signal_session_label_ts = (
+                scheduler_utils.resolve_calendar_month_end_label_to_last_tradable_session(
+                    raw_month_end_label_ts=candidate_month_end_label_ts,
+                    available_date_index=available_price_date_index,
+                    session_calendar_id_str=release_obj.session_calendar_id_str,
+                    as_of_ts=as_of_ts,
+                )
+            )
+        except scheduler_utils.CalendarMonthNotCompleteError:
+            continue
+        except ValueError as exception_obj:
+            raise RuntimeError(
+                "TAA live host could not resolve a completed month-end label to "
+                "the final tradable decision session."
+            ) from exception_obj
+        raw_month_end_label_ts = pd.Timestamp(candidate_month_end_label_ts)
+        break
+
+    if raw_month_end_label_ts is None or resolved_signal_session_label_ts is None:
+        raise RuntimeError("TAA live host produced no completed month-end weights as of the live timestamp.")
+
+    signal_date_ts = pd.Timestamp(resolved_signal_session_label_ts).to_pydatetime()
     # *** CRITICAL*** Month-end rebalance dates must snap to the true first tradable session of the next month.
     execution_date_ts = scheduler_utils.first_business_day_of_next_month_timestamp_ts(
         signal_date_ts,
         session_calendar_id_str=release_obj.session_calendar_id_str,
     )
     rebalance_weight_df = pd.DataFrame(
-        [month_end_weight_df.loc[pd.Timestamp(signal_date_ts)].copy()],
+        [month_end_weight_df.loc[raw_month_end_label_ts].copy()],
         index=pd.DatetimeIndex([pd.Timestamp(execution_date_ts.date())], name="rebalance_date"),
     )
 
@@ -778,7 +796,7 @@ def _build_taa_vix_cash_full_target_decision_plan(
         if abs(float(target_weight_float)) > 1e-12
     }
     cash_reserve_weight_float = max(0.0, 1.0 - sum(full_target_weight_map_dict.values()))
-    latest_diagnostic_ser = month_end_vrp_diagnostic_df.loc[pd.Timestamp(signal_date_ts)]
+    latest_diagnostic_ser = month_end_vrp_diagnostic_df.loc[raw_month_end_label_ts]
     decision_base_position_map_dict = {
         str(asset_str): float(amount_float)
         for asset_str, amount_float in strategy_obj.get_positions().items()
@@ -787,10 +805,14 @@ def _build_taa_vix_cash_full_target_decision_plan(
     snapshot_metadata_dict = {
         "strategy_family_str": strategy_family_str,
         "cash_weight_float": float(latest_diagnostic_ser["cash_weight"]),
+        "raw_month_end_label_str": raw_month_end_label_ts.date().isoformat(),
+        "resolved_signal_session_date_str": pd.Timestamp(resolved_signal_session_label_ts).date().isoformat(),
+        "available_price_last_date_str": pd.Timestamp(available_price_date_index[-1]).date().isoformat(),
+        "timing_resolution_reason_str": "calendar_month_end_label_resolved_to_last_tradable_session",
     }
     if snapshot_metadata_extra_dict is not None:
         snapshot_metadata_dict.update(snapshot_metadata_extra_dict)
-    return _build_full_target_weight_decision_plan(
+    decision_plan_obj = _build_full_target_weight_decision_plan(
         release_obj=release_obj,
         signal_date_ts=signal_date_ts,
         decision_base_position_map_dict=decision_base_position_map_dict,
@@ -799,6 +821,33 @@ def _build_taa_vix_cash_full_target_decision_plan(
         strategy_state_dict=_extract_strategy_state_dict(strategy_obj),
         snapshot_metadata_dict=snapshot_metadata_dict,
     )
+    norgate_snapshot_date_str = str(
+        decision_plan_obj.snapshot_metadata_dict.get("norgate_snapshot_date_str") or ""
+    )
+    if norgate_snapshot_date_str:
+        snapshot_month_period_obj = pd.Timestamp(norgate_snapshot_date_str).to_period("M")
+        signal_month_period_obj = pd.Timestamp(resolved_signal_session_label_ts).to_period("M")
+        if snapshot_month_period_obj != signal_month_period_obj:
+            raise RuntimeError(
+                "TAA live DecisionPlan timing mismatch: "
+                f"norgate_snapshot_month={snapshot_month_period_obj}, "
+                f"resolved_signal_month={signal_month_period_obj}."
+            )
+    market_as_of_ts = scheduler_utils.to_market_timestamp_ts(
+        as_of_ts,
+        release_obj.session_calendar_id_str,
+    )
+    market_target_execution_ts = scheduler_utils.to_market_timestamp_ts(
+        decision_plan_obj.target_execution_timestamp_ts,
+        release_obj.session_calendar_id_str,
+    )
+    if market_target_execution_ts <= market_as_of_ts:
+        raise RuntimeError(
+            "TAA live DecisionPlan target execution timestamp is already stale: "
+            f"target_execution_timestamp_ts={decision_plan_obj.target_execution_timestamp_ts.isoformat()}, "
+            f"as_of_ts={as_of_ts.isoformat()}."
+        )
+    return decision_plan_obj
 
 
 def _build_atr_normalized_ndx_decision_plan(

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -19,6 +19,7 @@ MARKET_TIMEZONE_OBJ = ZoneInfo("America/New_York")
 def make_release(
     strategy_import_str: str = "strategies.dv2.strategy_mr_dv2:DVO2Strategy",
     data_profile_str: str = "norgate_eod_sp500_pit",
+    signal_clock_str: str = "eod_snapshot_ready",
     execution_policy_str: str = "next_open_moo",
     params_dict: dict | None = None,
 ) -> LiveRelease:
@@ -30,7 +31,7 @@ def make_release(
         strategy_import_str=strategy_import_str,
         mode_str="paper",
         session_calendar_id_str="XNYS",
-        signal_clock_str="eod_snapshot_ready",
+        signal_clock_str=signal_clock_str,
         execution_policy_str=execution_policy_str,
         data_profile_str=data_profile_str,
         params_dict=params_dict or {"capital_base_float": 100000.0, "max_positions_int": 1},
@@ -74,6 +75,15 @@ def test_strategy_host_builds_dv2_decision_plan(monkeypatch):
     monkeypatch.setattr(dv2_module.DVO2Strategy, "compute_signals", lambda self, pricing_data: pricing_data)
     monkeypatch.setattr(dv2_module.DVO2Strategy, "get_opportunities", lambda self, close: ["TEST"])
 
+    def iterate_with_timing_assertion(self, data_df, close_row_ser, open_price_ser):
+        assert self.previous_bar == pd.Timestamp("2023-12-29")
+        assert self.current_bar == pd.Timestamp("2024-01-02")
+        assert data_df.index[-1] == pd.Timestamp("2023-12-29")
+        assert close_row_ser.name == pd.Timestamp("2023-12-29")
+        self.order_value("TEST", self.previous_total_value, trade_id=1)
+
+    monkeypatch.setattr(dv2_module.DVO2Strategy, "iterate", iterate_with_timing_assertion)
+
     release_obj = make_release()
     decision_plan_obj = build_decision_plan_for_release(
         release_obj=release_obj,
@@ -89,6 +99,9 @@ def test_strategy_host_builds_dv2_decision_plan(monkeypatch):
     assert decision_plan_obj.entry_target_weight_map_dict == {"TEST": 1.0}
     assert decision_plan_obj.target_weight_map == {"TEST": 1.0}
     assert decision_plan_obj.preserve_untouched_positions_bool is True
+    assert decision_plan_obj.signal_timestamp_ts == datetime(2023, 12, 29, 16, 0, tzinfo=MARKET_TIMEZONE_OBJ)
+    assert decision_plan_obj.submission_timestamp_ts == datetime(2024, 1, 2, 9, 23, 30, tzinfo=MARKET_TIMEZONE_OBJ)
+    assert decision_plan_obj.target_execution_timestamp_ts == datetime(2024, 1, 2, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ)
 
 
 def test_strategy_host_accepts_zero_share_target_exit_for_dv2(monkeypatch):
@@ -158,6 +171,16 @@ def test_strategy_host_builds_mixed_qpi_decision_plan(monkeypatch):
     )
     monkeypatch.setattr(qpi_module.QPIIbsRsiExitStrategy, "compute_signals", compute_signals_stub)
     monkeypatch.setattr(qpi_module.QPIIbsRsiExitStrategy, "get_opportunity_list", lambda self, close_row_ser: ["NEW"])
+    original_iterate_func = qpi_module.QPIIbsRsiExitStrategy.iterate
+
+    def iterate_with_timing_assertion(self, data_df, close_row_ser, open_price_ser):
+        assert self.previous_bar == pd.Timestamp("2023-12-29")
+        assert self.current_bar == pd.Timestamp("2024-01-02")
+        assert data_df.index[-1] == pd.Timestamp("2023-12-29")
+        assert close_row_ser.name == pd.Timestamp("2023-12-29")
+        original_iterate_func(self, data_df, close_row_ser, open_price_ser)
+
+    monkeypatch.setattr(qpi_module.QPIIbsRsiExitStrategy, "iterate", iterate_with_timing_assertion)
 
     release_obj = make_release(
         strategy_import_str="strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy",
@@ -184,6 +207,9 @@ def test_strategy_host_builds_mixed_qpi_decision_plan(monkeypatch):
     assert decision_plan_obj.exit_asset_set == {"OLD"}
     assert decision_plan_obj.entry_target_weight_map_dict == {"NEW": 1.0}
     assert decision_plan_obj.entry_priority_list == ["NEW"]
+    assert decision_plan_obj.signal_timestamp_ts == datetime(2023, 12, 29, 16, 0, tzinfo=MARKET_TIMEZONE_OBJ)
+    assert decision_plan_obj.submission_timestamp_ts == datetime(2024, 1, 2, 9, 23, 30, tzinfo=MARKET_TIMEZONE_OBJ)
+    assert decision_plan_obj.target_execution_timestamp_ts == datetime(2024, 1, 2, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ)
 
 
 def test_strategy_host_rejects_unsupported_incremental_limit_order_shape(monkeypatch):
@@ -307,6 +333,10 @@ def test_strategy_host_builds_full_target_taa_decision_plan(monkeypatch):
         "norgate_data_profile_str": "norgate_eod_etf_plus_vix_helper",
         "strategy_family_str": "taa_df_btal_fallback_tqqq_vix_cash",
         "cash_weight_float": 0.3,
+        "raw_month_end_label_str": "2024-01-31",
+        "resolved_signal_session_date_str": "2024-01-31",
+        "available_price_last_date_str": "2024-01-31",
+        "timing_resolution_reason_str": "calendar_month_end_label_resolved_to_last_tradable_session",
         "dtb3_source_name_str": "FRED",
         "dtb3_series_id_str": "DTB3",
         "dtb3_latest_observation_date_str": "2024-01-31",
@@ -318,6 +348,300 @@ def test_strategy_host_builds_full_target_taa_decision_plan(monkeypatch):
         "dtb3_warning_bool": False,
         "dtb3_warn_after_business_days_int": 3,
     }
+
+
+@pytest.mark.parametrize(
+    "as_of_ts",
+    [
+        datetime(2026, 5, 29, 20, 10, tzinfo=UTC),
+        datetime(2026, 6, 1, 4, 10, tzinfo=UTC),
+    ],
+)
+def test_strategy_host_taa_resolves_calendar_month_end_label_to_last_tradable_session(monkeypatch, as_of_ts):
+    import strategies.taa_df.strategy_taa_df as base_taa_module
+    import strategies.taa_df.strategy_taa_df_fallback_vix_cash_variant_utils as vix_overlay_module
+
+    date_index = pd.DatetimeIndex(
+        [
+            pd.Timestamp("2026-04-30"),
+            pd.Timestamp("2026-05-28"),
+            pd.Timestamp("2026-05-29"),
+        ]
+    )
+    execution_price_df = make_price_df(["BTAL", "GLD", "TQQQ", "UUP"], date_index)
+    month_end_weight_df = pd.DataFrame(
+        [
+            {"BTAL": 0.0, "GLD": 1.0, "TQQQ": 0.0, "UUP": 0.0},
+            {"BTAL": 0.3333333333333333, "GLD": 0.26666666666666666, "TQQQ": 0.2, "UUP": 0.2},
+        ],
+        index=pd.DatetimeIndex([pd.Timestamp("2026-04-30"), pd.Timestamp("2026-05-31")]),
+    )
+    diagnostic_df = pd.DataFrame(
+        [
+            {"cash_weight": 0.0},
+            {"cash_weight": 0.0},
+        ],
+        index=month_end_weight_df.index,
+    )
+    dtb3_snapshot_obj = FredSeriesSnapshot(
+        value_ser=pd.Series(
+            [4.30],
+            index=pd.DatetimeIndex([pd.Timestamp("2026-05-28")]),
+            name="DTB3",
+        ),
+        source_name_str="FRED",
+        series_id_str="DTB3",
+        download_attempt_timestamp_ts=datetime(2026, 5, 29, 16, 5, tzinfo=MARKET_TIMEZONE_OBJ),
+        download_status_str="download_success",
+        latest_observation_date_ts=pd.Timestamp("2026-05-28"),
+        used_cache_bool=False,
+        freshness_business_days_int=2,
+    )
+
+    monkeypatch.setattr(
+        base_taa_module,
+        "get_defense_first_data_with_snapshot",
+        lambda config_obj: (execution_price_df, None, month_end_weight_df, None, dtb3_snapshot_obj),
+    )
+    monkeypatch.setattr(
+        vix_overlay_module,
+        "_load_vrp_overlay_signal_frames",
+        lambda config_obj: (None, pd.DataFrame(index=month_end_weight_df.index)),
+    )
+    monkeypatch.setattr(
+        vix_overlay_module,
+        "apply_vrp_cash_gate_to_month_end_weight_df",
+        lambda base_month_end_weight_df, month_end_vrp_signal_df, config: (
+            month_end_weight_df,
+            diagnostic_df,
+        ),
+    )
+
+    def iterate_with_timing_assertion(self, data_df, close_row_ser, open_price_ser):
+        assert self.previous_bar == pd.Timestamp("2026-05-29")
+        assert self.current_bar == pd.Timestamp("2026-06-01")
+        assert data_df.index[-1] == pd.Timestamp("2026-05-29")
+        assert close_row_ser.name == pd.Timestamp("2026-05-29")
+
+    monkeypatch.setattr(base_taa_module.DefenseFirstStrategy, "iterate", iterate_with_timing_assertion)
+
+    release_obj = make_release(
+        strategy_import_str="strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash",
+        data_profile_str="norgate_eod_etf_plus_vix_helper",
+        signal_clock_str="month_end_snapshot_ready",
+        execution_policy_str="next_month_first_open",
+        params_dict={"capital_base_float": 100000.0},
+    )
+
+    decision_plan_obj = build_decision_plan_for_release(
+        release_obj=release_obj,
+        as_of_ts=as_of_ts,
+        pod_state_obj=None,
+    )
+
+    assert decision_plan_obj.signal_timestamp_ts == datetime(2026, 5, 29, 16, 0, tzinfo=MARKET_TIMEZONE_OBJ)
+    assert decision_plan_obj.submission_timestamp_ts == datetime(2026, 6, 1, 9, 23, 30, tzinfo=MARKET_TIMEZONE_OBJ)
+    assert decision_plan_obj.target_execution_timestamp_ts == datetime(2026, 6, 1, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ)
+    assert decision_plan_obj.full_target_weight_map_dict == {
+        "BTAL": 0.3333333333333333,
+        "GLD": 0.26666666666666666,
+        "TQQQ": 0.2,
+        "UUP": 0.2,
+    }
+    assert decision_plan_obj.snapshot_metadata_dict["raw_month_end_label_str"] == "2026-05-31"
+    assert decision_plan_obj.snapshot_metadata_dict["resolved_signal_session_date_str"] == "2026-05-29"
+    assert decision_plan_obj.snapshot_metadata_dict["available_price_last_date_str"] == "2026-05-29"
+
+
+def test_strategy_host_taa_fails_loud_when_completed_month_missing_final_session(monkeypatch):
+    import strategies.taa_df.strategy_taa_df as base_taa_module
+    import strategies.taa_df.strategy_taa_df_fallback_vix_cash_variant_utils as vix_overlay_module
+
+    date_index = pd.DatetimeIndex([pd.Timestamp("2026-05-28")])
+    execution_price_df = make_price_df(["BTAL", "GLD"], date_index)
+    month_end_weight_df = pd.DataFrame(
+        [{"BTAL": 0.5, "GLD": 0.5}],
+        index=pd.DatetimeIndex([pd.Timestamp("2026-05-31")]),
+    )
+    diagnostic_df = pd.DataFrame(
+        [{"cash_weight": 0.0}],
+        index=month_end_weight_df.index,
+    )
+    dtb3_snapshot_obj = FredSeriesSnapshot(
+        value_ser=pd.Series([4.30], index=pd.DatetimeIndex([pd.Timestamp("2026-05-28")]), name="DTB3"),
+        source_name_str="FRED",
+        series_id_str="DTB3",
+        download_attempt_timestamp_ts=datetime(2026, 6, 1, 0, 5, tzinfo=MARKET_TIMEZONE_OBJ),
+        download_status_str="download_success",
+        latest_observation_date_ts=pd.Timestamp("2026-05-28"),
+        used_cache_bool=False,
+        freshness_business_days_int=2,
+    )
+
+    monkeypatch.setattr(
+        base_taa_module,
+        "get_defense_first_data_with_snapshot",
+        lambda config_obj: (execution_price_df, None, month_end_weight_df, None, dtb3_snapshot_obj),
+    )
+    monkeypatch.setattr(
+        vix_overlay_module,
+        "_load_vrp_overlay_signal_frames",
+        lambda config_obj: (None, pd.DataFrame(index=month_end_weight_df.index)),
+    )
+    monkeypatch.setattr(
+        vix_overlay_module,
+        "apply_vrp_cash_gate_to_month_end_weight_df",
+        lambda base_month_end_weight_df, month_end_vrp_signal_df, config: (
+            month_end_weight_df,
+            diagnostic_df,
+        ),
+    )
+
+    release_obj = make_release(
+        strategy_import_str="strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash",
+        data_profile_str="norgate_eod_etf_plus_vix_helper",
+        signal_clock_str="month_end_snapshot_ready",
+        execution_policy_str="next_month_first_open",
+        params_dict={"capital_base_float": 100000.0},
+    )
+
+    with pytest.raises(RuntimeError, match="could not resolve a completed month-end label"):
+        build_decision_plan_for_release(
+            release_obj=release_obj,
+            as_of_ts=datetime(2026, 6, 1, 4, 10, tzinfo=UTC),
+            pod_state_obj=None,
+        )
+
+
+def test_strategy_host_taa_fails_loud_on_snapshot_month_mismatch(monkeypatch):
+    import strategies.taa_df.strategy_taa_df as base_taa_module
+    import strategies.taa_df.strategy_taa_df_fallback_vix_cash_variant_utils as vix_overlay_module
+
+    date_index = pd.DatetimeIndex([pd.Timestamp("2026-05-29")])
+    execution_price_df = make_price_df(["BTAL", "GLD"], date_index)
+    month_end_weight_df = pd.DataFrame(
+        [{"BTAL": 0.5, "GLD": 0.5}],
+        index=pd.DatetimeIndex([pd.Timestamp("2026-05-31")]),
+    )
+    diagnostic_df = pd.DataFrame(
+        [{"cash_weight": 0.0}],
+        index=month_end_weight_df.index,
+    )
+    dtb3_snapshot_obj = FredSeriesSnapshot(
+        value_ser=pd.Series([4.30], index=pd.DatetimeIndex([pd.Timestamp("2026-05-28")]), name="DTB3"),
+        source_name_str="FRED",
+        series_id_str="DTB3",
+        download_attempt_timestamp_ts=datetime(2026, 5, 29, 16, 5, tzinfo=MARKET_TIMEZONE_OBJ),
+        download_status_str="download_success",
+        latest_observation_date_ts=pd.Timestamp("2026-05-28"),
+        used_cache_bool=False,
+        freshness_business_days_int=2,
+    )
+
+    monkeypatch.setattr(
+        base_taa_module,
+        "get_defense_first_data_with_snapshot",
+        lambda config_obj: (execution_price_df, None, month_end_weight_df, None, dtb3_snapshot_obj),
+    )
+    monkeypatch.setattr(
+        vix_overlay_module,
+        "_load_vrp_overlay_signal_frames",
+        lambda config_obj: (None, pd.DataFrame(index=month_end_weight_df.index)),
+    )
+    monkeypatch.setattr(
+        vix_overlay_module,
+        "apply_vrp_cash_gate_to_month_end_weight_df",
+        lambda base_month_end_weight_df, month_end_vrp_signal_df, config: (
+            month_end_weight_df,
+            diagnostic_df,
+        ),
+    )
+    monkeypatch.setattr(base_taa_module.DefenseFirstStrategy, "iterate", lambda self, data_df, close_row_ser, open_price_ser: None)
+    monkeypatch.setattr(
+        "alpha.live.strategy_host.build_data_source_metadata_dict",
+        lambda data_profile_str: {
+            "norgate_data_source_mode_str": "snapshot",
+            "norgate_data_profile_str": data_profile_str,
+            "norgate_snapshot_date_str": "2026-04-30",
+            "norgate_manifest_hash_str": "test",
+        },
+    )
+
+    release_obj = make_release(
+        strategy_import_str="strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash",
+        data_profile_str="norgate_eod_etf_plus_vix_helper",
+        signal_clock_str="month_end_snapshot_ready",
+        execution_policy_str="next_month_first_open",
+        params_dict={"capital_base_float": 100000.0},
+    )
+
+    with pytest.raises(RuntimeError, match="DecisionPlan timing mismatch"):
+        build_decision_plan_for_release(
+            release_obj=release_obj,
+            as_of_ts=datetime(2026, 5, 29, 20, 10, tzinfo=UTC),
+            pod_state_obj=None,
+        )
+
+
+def test_strategy_host_taa_fails_loud_when_target_execution_is_stale(monkeypatch):
+    import strategies.taa_df.strategy_taa_df as base_taa_module
+    import strategies.taa_df.strategy_taa_df_fallback_vix_cash_variant_utils as vix_overlay_module
+
+    date_index = pd.DatetimeIndex([pd.Timestamp("2026-05-29")])
+    execution_price_df = make_price_df(["BTAL", "GLD"], date_index)
+    month_end_weight_df = pd.DataFrame(
+        [{"BTAL": 0.5, "GLD": 0.5}],
+        index=pd.DatetimeIndex([pd.Timestamp("2026-05-31")]),
+    )
+    diagnostic_df = pd.DataFrame(
+        [{"cash_weight": 0.0}],
+        index=month_end_weight_df.index,
+    )
+    dtb3_snapshot_obj = FredSeriesSnapshot(
+        value_ser=pd.Series([4.30], index=pd.DatetimeIndex([pd.Timestamp("2026-05-28")]), name="DTB3"),
+        source_name_str="FRED",
+        series_id_str="DTB3",
+        download_attempt_timestamp_ts=datetime(2026, 6, 1, 9, 31, tzinfo=MARKET_TIMEZONE_OBJ),
+        download_status_str="download_success",
+        latest_observation_date_ts=pd.Timestamp("2026-05-28"),
+        used_cache_bool=False,
+        freshness_business_days_int=2,
+    )
+
+    monkeypatch.setattr(
+        base_taa_module,
+        "get_defense_first_data_with_snapshot",
+        lambda config_obj: (execution_price_df, None, month_end_weight_df, None, dtb3_snapshot_obj),
+    )
+    monkeypatch.setattr(
+        vix_overlay_module,
+        "_load_vrp_overlay_signal_frames",
+        lambda config_obj: (None, pd.DataFrame(index=month_end_weight_df.index)),
+    )
+    monkeypatch.setattr(
+        vix_overlay_module,
+        "apply_vrp_cash_gate_to_month_end_weight_df",
+        lambda base_month_end_weight_df, month_end_vrp_signal_df, config: (
+            month_end_weight_df,
+            diagnostic_df,
+        ),
+    )
+    monkeypatch.setattr(base_taa_module.DefenseFirstStrategy, "iterate", lambda self, data_df, close_row_ser, open_price_ser: None)
+
+    release_obj = make_release(
+        strategy_import_str="strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash",
+        data_profile_str="norgate_eod_etf_plus_vix_helper",
+        signal_clock_str="month_end_snapshot_ready",
+        execution_policy_str="next_month_first_open",
+        params_dict={"capital_base_float": 100000.0},
+    )
+
+    with pytest.raises(RuntimeError, match="target execution timestamp is already stale"):
+        build_decision_plan_for_release(
+            release_obj=release_obj,
+            as_of_ts=datetime(2026, 6, 1, 13, 31, tzinfo=UTC),
+            pod_state_obj=None,
+        )
 
 
 def test_strategy_host_builds_full_target_linearity_qqq_vix_cash_taa_decision_plan(monkeypatch):
@@ -394,6 +718,10 @@ def test_strategy_host_builds_full_target_linearity_qqq_vix_cash_taa_decision_pl
         "norgate_data_profile_str": "norgate_eod_etf_plus_vix_helper",
         "strategy_family_str": "taa_df_btal_linearity_1n_fallback_qqq_vix_cash",
         "cash_weight_float": 0.3,
+        "raw_month_end_label_str": "2024-01-31",
+        "resolved_signal_session_date_str": "2024-01-31",
+        "available_price_last_date_str": "2024-01-31",
+        "timing_resolution_reason_str": "calendar_month_end_label_resolved_to_last_tradable_session",
     }
 
 
@@ -477,6 +805,10 @@ def test_strategy_host_builds_full_target_btal_1n_tqqq_vix_cash_taa_decision_pla
         "norgate_data_profile_str": "norgate_eod_etf_plus_vix_helper",
         "strategy_family_str": "taa_df_btal_1n_fallback_tqqq_vix_cash",
         "cash_weight_float": 0.2,
+        "raw_month_end_label_str": "2024-01-31",
+        "resolved_signal_session_date_str": "2024-01-31",
+        "available_price_last_date_str": "2024-01-31",
+        "timing_resolution_reason_str": "calendar_month_end_label_resolved_to_last_tradable_session",
         "dtb3_source_name_str": "FRED",
         "dtb3_series_id_str": "DTB3",
         "dtb3_latest_observation_date_str": "2024-01-31",
@@ -742,7 +1074,7 @@ def test_strategy_host_taa_ignores_unavailable_partial_month_end(monkeypatch):
     date_index = pd.DatetimeIndex(
         [
             pd.Timestamp("2024-01-31"),
-            pd.Timestamp("2024-02-15"),
+            pd.Timestamp("2024-02-01"),
         ]
     )
     execution_price_df = make_price_df(["BTAL", "TLT", "SPY"], date_index)
@@ -804,7 +1136,7 @@ def test_strategy_host_taa_ignores_unavailable_partial_month_end(monkeypatch):
 
     decision_plan_obj = build_decision_plan_for_release(
         release_obj=release_obj,
-        as_of_ts=datetime(2024, 2, 15, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
+        as_of_ts=datetime(2024, 2, 1, 9, 0, tzinfo=MARKET_TIMEZONE_OBJ),
         pod_state_obj=None,
     )
 

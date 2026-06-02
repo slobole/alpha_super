@@ -44,10 +44,34 @@
       <div><dt class="text-ink-500">Signal</dt><dd>{{ decision_dict.signal_timestamp_str | clock or '—' }}</dd></div>
       <div><dt class="text-ink-500">Target exec</dt><dd>{{ decision_dict.target_execution_timestamp_str | clock or '—' }}</dd></div>
     </dl>
+    {% set snapshot_meta_dict = decision_dict.snapshot_metadata_dict or {} %}
+    {% set raw_month_end_label_str = snapshot_meta_dict.get('raw_month_end_label_str') %}
+    {% set resolved_signal_session_date_str = snapshot_meta_dict.get('resolved_signal_session_date_str') %}
+    {% set available_price_last_date_str = snapshot_meta_dict.get('available_price_last_date_str') %}
+    {% set timing_resolution_reason_str = snapshot_meta_dict.get('timing_resolution_reason_str') %}
+    {% if raw_month_end_label_str or resolved_signal_session_date_str or available_price_last_date_str %}
+      <div class="mt-2 text-xs rounded-md border border-ink-100 bg-white px-2 py-1.5">
+        <div class="flex items-center justify-between gap-3">
+          <span class="text-ink-500 uppercase tracking-wide text-[10px] font-bold">TAA timing</span>
+          <span class="font-mono tabular-nums">
+            {{ raw_month_end_label_str or 'na' }} -> {{ resolved_signal_session_date_str or 'na' }}
+          </span>
+        </div>
+        <div class="mt-1 flex items-center justify-between gap-3 text-ink-600">
+          <span>last price {{ available_price_last_date_str or 'na' }}</span>
+          {% if timing_resolution_reason_str %}
+            {% if timing_resolution_reason_str == 'calendar_month_end_label_resolved_to_last_tradable_session' %}
+              <span class="text-right">calendar month-end label resolved to last tradable session</span>
+            {% else %}
+              <span class="text-right">{{ timing_resolution_reason_str | replace('_', ' ') }}</span>
+            {% endif %}
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
     {# Norgate snapshot lineage: which Norgate data feed this DecisionPlan
        was built against. If signals look wrong, the operator wants to see
        these two values inline, not buried in snapshot_metadata. #}
-    {% set snapshot_meta_dict = decision_dict.snapshot_metadata_dict or {} %}
     {% set norgate_profile_str = row_dict.latest_decision_norgate_profile_str
                                  or snapshot_meta_dict.get('norgate_data_profile_str') %}
     {% set norgate_snapshot_date_str = row_dict.latest_decision_norgate_snapshot_date_str

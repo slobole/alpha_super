@@ -229,6 +229,12 @@ class StubDataProvider:
                 "snapshot_metadata_dict": {
                     "norgate_data_profile_str": "norgate_only",
                     "norgate_snapshot_date_str": "2026-05-20",
+                    "raw_month_end_label_str": "2026-05-31",
+                    "resolved_signal_session_date_str": "2026-05-29",
+                    "available_price_last_date_str": "2026-05-29",
+                    "timing_resolution_reason_str": (
+                        "calendar_month_end_label_resolved_to_last_tradable_session"
+                    ),
                 },
             },
             "latest_vplan_dict": {
@@ -482,6 +488,42 @@ def test_decision_stage_card_shows_norgate_snapshot_meta(test_client_obj) -> Non
     assert "Norgate snapshot" in response_text_str
     assert "norgate_only" in response_text_str
     assert "2026-05-20" in response_text_str
+
+
+def test_decision_stage_card_shows_taa_timing_resolution_meta(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/fragments/pod-detail/dv2_caspersky_live")
+    response_text_str = response_obj.get_data(as_text=True)
+
+    assert "TAA timing" in response_text_str
+    assert "2026-05-31" in response_text_str
+    assert "2026-05-29" in response_text_str
+    assert "last price" in response_text_str
+    assert "calendar month-end label resolved to last tradable session" in response_text_str
+
+
+def test_decision_stage_card_hides_taa_timing_when_metadata_absent(
+    test_client_obj,
+    provider_obj,
+    monkeypatch,
+) -> None:
+    original_get_pod_detail_func = provider_obj.get_pod_detail_dict
+
+    def get_pod_detail_without_taa_timing_dict(pod_id_str: str) -> dict[str, Any]:
+        detail_dict = original_get_pod_detail_func(pod_id_str)
+        metadata_dict = detail_dict["latest_decision_plan_dict"]["snapshot_metadata_dict"]
+        metadata_dict.pop("raw_month_end_label_str", None)
+        metadata_dict.pop("resolved_signal_session_date_str", None)
+        metadata_dict.pop("available_price_last_date_str", None)
+        metadata_dict.pop("timing_resolution_reason_str", None)
+        return detail_dict
+
+    monkeypatch.setattr(provider_obj, "get_pod_detail_dict", get_pod_detail_without_taa_timing_dict)
+
+    response_obj = test_client_obj.get("/fragments/pod-detail/dv2_caspersky_live")
+    response_text_str = response_obj.get_data(as_text=True)
+
+    assert "TAA timing" not in response_text_str
+    assert "Norgate snapshot" in response_text_str
 
 
 def test_pod_detail_fragment_unknown_pod_returns_404(test_client_obj) -> None:
