@@ -14,6 +14,11 @@ from alpha.live.execution_engine import (
     build_vplan,
     get_touched_asset_list_for_decision_plan,
 )
+from alpha.live.logging_utils import (
+    DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR,
+    build_pod_trace_context_dict,
+    log_pod_trace_event,
+)
 from alpha.live.models import DecisionPlan, LiveRelease, PodState, VPlan
 from alpha.live.norgate_snapshot_sync import ensure_norgate_snapshots_for_live_tick
 from alpha.live.release_manifest import (
@@ -785,7 +790,7 @@ def _resolve_db_path_for_release_str(
     )
 
 
-def compute_doctor_verdict(
+def _compute_doctor_verdict_impl(
     *,
     releases_root_path_str: str | None,
     env_mode_str: str,
@@ -1351,6 +1356,147 @@ def compute_doctor_verdict(
     )
 
     detail_dict["overall_verdict_str"] = _overall_verdict_str(component_result_dict_list)
+    return detail_dict
+
+
+def _doctor_trace_event_name_str(component_name_str: str) -> str:
+    return "doctor." + str(component_name_str).replace(" ", "_")
+
+
+def _emit_doctor_trace_event_list(
+    *,
+    detail_dict: dict[str, object],
+    trace_enabled_bool: bool,
+    trace_log_root_path_str: str,
+) -> None:
+    if not trace_enabled_bool:
+        return
+    mode_str = str(detail_dict.get("mode_str") or "")
+    if mode_str not in {"paper", "live"}:
+        return
+    as_of_timestamp_str = str(detail_dict.get("as_of_timestamp_str") or "")
+    release_dict = dict(detail_dict.get("release_dict") or {})
+    broker_dict = dict(detail_dict.get("broker_dict") or {})
+    trace_context_dict = build_pod_trace_context_dict(
+        mode_str=mode_str,
+        pod_id_str=str(detail_dict.get("pod_id_str") or release_dict.get("pod_id_str") or "unknown"),
+        account_route_str=str(
+            release_dict.get("account_route_str")
+            or broker_dict.get("account_route_str")
+            or ""
+        ),
+        release_id_str=str(release_dict.get("release_id_str") or ""),
+        as_of_timestamp_str=as_of_timestamp_str,
+    )
+    component_result_dict_list = list(detail_dict.get("component_result_dict_list") or [])
+    for component_result_dict in component_result_dict_list:
+        component_name_str = str(component_result_dict.get("component_name_str") or "component")
+        log_pod_trace_event(
+            _doctor_trace_event_name_str(component_name_str),
+            trace_context_dict=trace_context_dict,
+            status_str=str(component_result_dict.get("status_str") or "UNKNOWN"),
+            reason_code_str=str(component_result_dict.get("reason_code_str") or "unknown"),
+            payload_dict={
+                "component_result_dict": dict(component_result_dict),
+                "config_release_root_dict": dict(
+                    detail_dict.get("config_release_root_dict") or {}
+                )
+                if component_name_str == "config_release_root"
+                else {},
+                "manifest_qualification_dict": dict(
+                    detail_dict.get("manifest_qualification_dict") or {}
+                )
+                if component_name_str == "manifest_qualification"
+                else {},
+                "scheduler_gate_dict": dict(detail_dict.get("scheduler_gate_dict") or {})
+                if component_name_str == "scheduler_gate"
+                else {},
+                "decision_plan_dict": dict(detail_dict.get("decision_plan_dict") or {})
+                if component_name_str == "decision_plan"
+                else {},
+                "broker_dict": dict(detail_dict.get("broker_dict") or {})
+                if component_name_str == "broker"
+                else {},
+                "reconciliation_dict": dict(detail_dict.get("reconciliation_dict") or {})
+                if component_name_str == "position_reconciliation"
+                else {},
+                "vplan_preview_dict": dict(detail_dict.get("vplan_preview_dict") or {})
+                if component_name_str == "vplan_preview"
+                else {},
+                "norgate_snapshot_sync_detail_dict": dict(
+                    detail_dict.get("norgate_snapshot_sync_detail_dict") or {}
+                )
+                if component_name_str == "norgate_snapshot_sync"
+                else {},
+            },
+            trace_enabled_bool=True,
+            trace_log_root_path_str=trace_log_root_path_str,
+        )
+    log_pod_trace_event(
+        "doctor.final_verdict",
+        trace_context_dict=trace_context_dict,
+        status_str=str(detail_dict.get("overall_verdict_str") or "UNKNOWN"),
+        reason_code_str=str(detail_dict.get("overall_verdict_str") or "unknown").lower(),
+        payload_dict={
+            "overall_verdict_str": detail_dict.get("overall_verdict_str"),
+            "component_result_dict_list": component_result_dict_list,
+        },
+        trace_enabled_bool=True,
+        trace_log_root_path_str=trace_log_root_path_str,
+    )
+
+
+def compute_doctor_verdict(
+    *,
+    releases_root_path_str: str | None,
+    env_mode_str: str,
+    as_of_ts: datetime,
+    command_name_str: str = DOCTOR_FEATURE_NAME_STR,
+    pod_id_str: str | None = None,
+    releases_root_explicit_bool: bool = True,
+    config_env_path_str: str | None = None,
+    db_path_str: str | None = None,
+    state_store_obj: Any | None = None,
+    pod_state_loader_fn: PodStateLoader_Fn | None = None,
+    norgate_snapshot_sync_checker_fn: NorgateSnapshotSyncChecker_Fn | None = None,
+    broker_adapter_resolver_obj: Any | None = None,
+    broker_host_str: str | None = None,
+    broker_port_int: int | None = None,
+    broker_client_id_int: int | None = None,
+    broker_timeout_seconds_float: float | None = None,
+    adapter_factory_func: Callable[[str, int, int, float], Any] | None = None,
+    loaded_config_env_dict: dict[str, str] | None = None,
+    trace_enabled_bool: bool = True,
+    trace_log_root_path_str: str = DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR,
+) -> dict[str, object]:
+    detail_dict = _compute_doctor_verdict_impl(
+        releases_root_path_str=releases_root_path_str,
+        env_mode_str=env_mode_str,
+        as_of_ts=as_of_ts,
+        command_name_str=command_name_str,
+        pod_id_str=pod_id_str,
+        releases_root_explicit_bool=releases_root_explicit_bool,
+        config_env_path_str=config_env_path_str,
+        db_path_str=db_path_str,
+        state_store_obj=state_store_obj,
+        pod_state_loader_fn=pod_state_loader_fn,
+        norgate_snapshot_sync_checker_fn=norgate_snapshot_sync_checker_fn,
+        broker_adapter_resolver_obj=broker_adapter_resolver_obj,
+        broker_host_str=broker_host_str,
+        broker_port_int=broker_port_int,
+        broker_client_id_int=broker_client_id_int,
+        broker_timeout_seconds_float=broker_timeout_seconds_float,
+        adapter_factory_func=adapter_factory_func,
+        loaded_config_env_dict=loaded_config_env_dict,
+    )
+    try:
+        _emit_doctor_trace_event_list(
+            detail_dict=detail_dict,
+            trace_enabled_bool=trace_enabled_bool,
+            trace_log_root_path_str=trace_log_root_path_str,
+        )
+    except Exception:
+        pass
     return detail_dict
 
 

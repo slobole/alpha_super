@@ -197,6 +197,14 @@ def _table_count_map(db_path_obj: Path) -> dict[str, int]:
         }
 
 
+def _read_jsonl_list(path_obj: Path) -> list[dict[str, object]]:
+    return [
+        json.loads(line_str)
+        for line_str in path_obj.read_text(encoding="utf-8").splitlines()
+        if line_str.strip()
+    ]
+
+
 def _stub_snapshot_sync_ready(**kwargs) -> dict[str, object]:
     return {
         "status_str": "ready",
@@ -423,6 +431,7 @@ def test_doctor_passes_live_taa_and_keeps_state_read_only(tmp_path: Path, monkey
         snapshot_timestamp_ts=datetime(2026, 6, 1, 13, 20, tzinfo=UTC),
     )
     resolver_obj = BrokerAdapterResolver(broker_adapter_obj=broker_adapter_obj)
+    trace_root_path_obj = tmp_path / "trace"
 
     detail_dict = doctor_module.compute_doctor_verdict(
         releases_root_path_str=str(releases_root_path_obj),
@@ -431,6 +440,7 @@ def test_doctor_passes_live_taa_and_keeps_state_read_only(tmp_path: Path, monkey
         pod_id_str="pod_taa_live_01",
         state_store_obj=state_store_obj,
         broker_adapter_resolver_obj=resolver_obj,
+        trace_log_root_path_str=str(trace_root_path_obj),
         **_doctor_config_kwargs(tmp_path, releases_root_path_obj),
     )
 
@@ -459,6 +469,24 @@ def test_doctor_passes_live_taa_and_keeps_state_read_only(tmp_path: Path, monkey
     }
     assert order_type_set == {"MOO"}
     assert _table_count_map(tmp_path / "pod.sqlite3") == before_count_map
+    trace_file_path_obj = next(trace_root_path_obj.rglob("trace_events.jsonl"))
+    trace_record_list = _read_jsonl_list(trace_file_path_obj)
+    trace_event_name_set = {str(record_dict["event_name_str"]) for record_dict in trace_record_list}
+    assert "doctor.config_release_root" in trace_event_name_set
+    assert "doctor.manifest_qualification" in trace_event_name_set
+    assert "doctor.scheduler_gate" in trace_event_name_set
+    assert "doctor.decision_plan" in trace_event_name_set
+    assert "doctor.broker" in trace_event_name_set
+    assert "doctor.position_reconciliation" in trace_event_name_set
+    assert "doctor.vplan_preview" in trace_event_name_set
+    assert "doctor.final_verdict" in trace_event_name_set
+    final_record_dict = [
+        record_dict
+        for record_dict in trace_record_list
+        if record_dict["event_name_str"] == "doctor.final_verdict"
+    ][0]
+    assert final_record_dict["status_str"] == "PASS"
+    assert final_record_dict["pod_id_str"] == "pod_taa_live_01"
 
 
 def test_doctor_blocks_unsupported_manifest_strategy(tmp_path: Path, monkeypatch):

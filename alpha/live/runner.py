@@ -18,7 +18,13 @@ from alpha.live.execution_engine import (
     get_touched_asset_list_for_decision_plan,
 )
 from alpha.live.incubation import IncubationBrokerAdapter
-from alpha.live.logging_utils import DEFAULT_LOG_PATH_STR, log_event
+from alpha.live.logging_utils import (
+    DEFAULT_LOG_PATH_STR,
+    DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR,
+    build_pod_trace_context_dict,
+    log_event,
+    log_pod_trace_event,
+)
 from alpha.live.models import BrokerOrderEvent, DecisionPlan, LiveRelease, PodState, VPlan
 from alpha.live.norgate_snapshot_sync import ensure_norgate_snapshots_for_live_tick
 from alpha.live.order_clerk import BrokerAdapter, IBKRGatewayBrokerAdapter
@@ -707,6 +713,306 @@ def _build_vplan_log_payload_dict(
     if extra_payload_dict is not None:
         payload_dict.update(extra_payload_dict)
     return payload_dict
+
+
+def _trace_enabled_for_mode_bool(env_mode_str: str, trace_enabled_bool: bool = True) -> bool:
+    return bool(trace_enabled_bool) and str(env_mode_str) in {"paper", "live"}
+
+
+def _emit_live_trace_event(
+    event_name_str: str,
+    *,
+    release_obj: LiveRelease,
+    as_of_ts: datetime,
+    status_str: str,
+    reason_code_str: str,
+    payload_dict: dict[str, object] | None = None,
+    decision_plan_obj: DecisionPlan | None = None,
+    vplan_obj: VPlan | None = None,
+    trace_enabled_bool: bool = True,
+    trace_log_root_path_str: str = DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR,
+) -> None:
+    try:
+        if not _trace_enabled_for_mode_bool(release_obj.mode_str, trace_enabled_bool):
+            return
+        cycle_id_str = None
+        if decision_plan_obj is not None:
+            cycle_id_str = "_".join(
+                [
+                    release_obj.mode_str,
+                    release_obj.pod_id_str,
+                    decision_plan_obj.signal_timestamp_ts.isoformat().replace(":", ""),
+                    decision_plan_obj.execution_policy_str,
+                ]
+            )
+        elif vplan_obj is not None:
+            cycle_id_str = "_".join(
+                [
+                    release_obj.mode_str,
+                    release_obj.pod_id_str,
+                    vplan_obj.signal_timestamp_ts.isoformat().replace(":", ""),
+                    vplan_obj.execution_policy_str,
+                ]
+            )
+        log_pod_trace_event(
+            event_name_str,
+            trace_context_dict=build_pod_trace_context_dict(
+                mode_str=release_obj.mode_str,
+                pod_id_str=release_obj.pod_id_str,
+                account_route_str=release_obj.account_route_str,
+                release_id_str=release_obj.release_id_str,
+                as_of_timestamp_str=as_of_ts.isoformat(),
+                cycle_id_str=cycle_id_str,
+                decision_plan_id_int=(
+                    int(decision_plan_obj.decision_plan_id_int or 0)
+                    if decision_plan_obj is not None
+                    else (
+                        int(vplan_obj.decision_plan_id_int)
+                        if vplan_obj is not None
+                        else None
+                    )
+                ),
+                vplan_id_int=(
+                    int(vplan_obj.vplan_id_int or 0)
+                    if vplan_obj is not None
+                    else None
+                ),
+            ),
+            status_str=status_str,
+            reason_code_str=reason_code_str,
+            payload_dict=payload_dict or {},
+            trace_enabled_bool=True,
+            trace_log_root_path_str=trace_log_root_path_str,
+        )
+    except Exception:
+        return
+
+
+def _trace_payload_error_dict(payload_name_str: str, exception_obj: Exception) -> dict[str, object]:
+    return {
+        "trace_payload_name_str": str(payload_name_str),
+        "trace_payload_error_str": str(exception_obj),
+    }
+
+
+def _decision_plan_trace_payload_dict(decision_plan_obj: DecisionPlan) -> dict[str, object]:
+    try:
+        return {
+            "decision_plan_status_str": decision_plan_obj.status_str,
+            "signal_timestamp_str": decision_plan_obj.signal_timestamp_ts.isoformat(),
+            "submission_timestamp_str": decision_plan_obj.submission_timestamp_ts.isoformat(),
+            "target_execution_timestamp_str": decision_plan_obj.target_execution_timestamp_ts.isoformat(),
+            "execution_policy_str": decision_plan_obj.execution_policy_str,
+            "decision_book_type_str": decision_plan_obj.decision_book_type_str,
+            "decision_base_position_map": dict(decision_plan_obj.decision_base_position_map),
+            "entry_target_weight_map_dict": dict(decision_plan_obj.entry_target_weight_map_dict),
+            "full_target_weight_map_dict": dict(decision_plan_obj.full_target_weight_map_dict),
+            "target_weight_map": dict(decision_plan_obj.target_weight_map),
+            "exit_asset_list": sorted(decision_plan_obj.exit_asset_set),
+            "entry_priority_list": list(decision_plan_obj.entry_priority_list),
+            "snapshot_metadata_dict": dict(decision_plan_obj.snapshot_metadata_dict),
+        }
+    except Exception as exc:
+        return _trace_payload_error_dict("decision_plan", exc)
+
+
+def _broker_snapshot_trace_payload_dict(broker_snapshot_obj) -> dict[str, object]:
+    try:
+        return {
+            "broker_snapshot_timestamp_str": broker_snapshot_obj.snapshot_timestamp_ts.isoformat(),
+            "cash_float": float(broker_snapshot_obj.cash_float),
+            "total_value_float": float(broker_snapshot_obj.total_value_float),
+            "net_liq_float": float(broker_snapshot_obj.net_liq_float),
+            "available_funds_float": broker_snapshot_obj.available_funds_float,
+            "excess_liquidity_float": broker_snapshot_obj.excess_liquidity_float,
+            "position_amount_map": dict(broker_snapshot_obj.position_amount_map),
+            "open_order_id_list": list(broker_snapshot_obj.open_order_id_list),
+        }
+    except Exception as exc:
+        return _trace_payload_error_dict("broker_snapshot", exc)
+
+
+def _live_price_snapshot_trace_payload_dict(live_price_snapshot_obj) -> dict[str, object]:
+    try:
+        return {
+            "live_reference_snapshot_timestamp_str": live_price_snapshot_obj.snapshot_timestamp_ts.isoformat(),
+            "live_price_source_str": live_price_snapshot_obj.price_source_str,
+            "live_reference_price_map": dict(live_price_snapshot_obj.asset_reference_price_map),
+            "live_reference_source_map_dict": dict(
+                live_price_snapshot_obj.asset_reference_source_map_dict
+            ),
+        }
+    except Exception as exc:
+        return _trace_payload_error_dict("live_price_snapshot", exc)
+
+
+def _vplan_order_intent_trace_payload_dict(
+    vplan_obj: VPlan,
+    broker_order_request_list: list | None = None,
+) -> dict[str, object]:
+    try:
+        broker_order_request_error_str = ""
+        if broker_order_request_list is None:
+            try:
+                broker_order_request_list = build_broker_order_request_list_from_vplan(vplan_obj)
+            except Exception as exc:
+                broker_order_request_error_str = str(exc)
+                broker_order_request_list = []
+        payload_dict = {
+            "vplan_status_str": vplan_obj.status_str,
+            "submission_key_str": str(vplan_obj.submission_key_str or ""),
+            "execution_policy_str": vplan_obj.execution_policy_str,
+            "net_liq_float": float(vplan_obj.net_liq_float),
+            "available_funds_float": vplan_obj.available_funds_float,
+            "pod_budget_fraction_float": float(vplan_obj.pod_budget_fraction_float),
+            "pod_budget_float": float(vplan_obj.pod_budget_float),
+            "target_share_map": dict(vplan_obj.target_share_map),
+            "order_delta_map": dict(vplan_obj.order_delta_map),
+            "live_reference_price_map": dict(vplan_obj.live_reference_price_map),
+            "live_reference_source_map_dict": dict(vplan_obj.live_reference_source_map_dict),
+            "vplan_row_dict_list": [
+                {
+                    "asset_str": row_obj.asset_str,
+                    "current_share_float": float(row_obj.current_share_float),
+                    "target_share_float": float(row_obj.target_share_float),
+                    "order_delta_share_float": float(row_obj.order_delta_share_float),
+                    "broker_order_type_str": row_obj.broker_order_type_str,
+                    "live_reference_price_float": float(row_obj.live_reference_price_float),
+                    "live_reference_source_str": row_obj.live_reference_source_str,
+                }
+                for row_obj in vplan_obj.vplan_row_list
+            ],
+            "broker_order_request_count_int": len(broker_order_request_list),
+            "broker_order_request_dict_list": [
+                {
+                    "asset_str": request_obj.asset_str,
+                    "broker_order_type_str": request_obj.broker_order_type_str,
+                    "unit_str": request_obj.unit_str,
+                    "amount_float": float(request_obj.amount_float),
+                    "target_bool": bool(request_obj.target_bool),
+                    "sizing_reference_price_float": float(
+                        request_obj.sizing_reference_price_float
+                    ),
+                    "portfolio_value_float": float(request_obj.portfolio_value_float),
+                    "order_request_key_str": request_obj.order_request_key_str,
+                }
+                for request_obj in broker_order_request_list
+            ],
+        }
+        if broker_order_request_error_str:
+            payload_dict["broker_order_request_error_str"] = broker_order_request_error_str
+        return payload_dict
+    except Exception as exc:
+        return _trace_payload_error_dict("vplan_order_intent", exc)
+
+
+def _submit_batch_trace_payload_dict(
+    *,
+    broker_order_request_list: list,
+    submit_batch_result_obj,
+) -> dict[str, object]:
+    try:
+        return {
+            "broker_order_request_count_int": len(broker_order_request_list),
+            "broker_order_request_dict_list": [
+                {
+                    "asset_str": request_obj.asset_str,
+                    "broker_order_type_str": request_obj.broker_order_type_str,
+                    "amount_float": float(request_obj.amount_float),
+                    "unit_str": request_obj.unit_str,
+                    "target_bool": bool(request_obj.target_bool),
+                    "order_request_key_str": request_obj.order_request_key_str,
+                }
+                for request_obj in broker_order_request_list
+            ],
+            "broker_order_record_dict_list": [
+                {
+                    "asset_str": record_obj.asset_str,
+                    "broker_order_id_str": record_obj.broker_order_id_str,
+                    "order_request_key_str": record_obj.order_request_key_str,
+                    "broker_order_type_str": record_obj.broker_order_type_str,
+                    "amount_float": float(record_obj.amount_float),
+                    "filled_amount_float": float(record_obj.filled_amount_float),
+                    "remaining_amount_float": record_obj.remaining_amount_float,
+                    "avg_fill_price_float": record_obj.avg_fill_price_float,
+                    "status_str": record_obj.status_str,
+                    "submitted_timestamp_str": record_obj.submitted_timestamp_ts.isoformat(),
+                    "last_status_timestamp_str": (
+                        None
+                        if record_obj.last_status_timestamp_ts is None
+                        else record_obj.last_status_timestamp_ts.isoformat()
+                    ),
+                }
+                for record_obj in submit_batch_result_obj.broker_order_record_list
+            ],
+            "broker_order_event_dict_list": [
+                {
+                    "asset_str": event_obj.asset_str,
+                    "broker_order_id_str": event_obj.broker_order_id_str,
+                    "order_request_key_str": event_obj.order_request_key_str,
+                    "status_str": event_obj.status_str,
+                    "filled_amount_float": float(event_obj.filled_amount_float),
+                    "remaining_amount_float": event_obj.remaining_amount_float,
+                    "avg_fill_price_float": event_obj.avg_fill_price_float,
+                    "event_timestamp_str": (
+                        None
+                        if event_obj.event_timestamp_ts is None
+                        else event_obj.event_timestamp_ts.isoformat()
+                    ),
+                    "event_source_str": event_obj.event_source_str,
+                    "message_str": event_obj.message_str,
+                }
+                for event_obj in submit_batch_result_obj.broker_order_event_list
+            ],
+            "broker_order_ack_dict_list": [
+                {
+                    "asset_str": ack_obj.asset_str,
+                    "order_request_key_str": ack_obj.order_request_key_str,
+                    "broker_order_id_str": ack_obj.broker_order_id_str,
+                    "local_submit_ack_bool": bool(ack_obj.local_submit_ack_bool),
+                    "broker_response_ack_bool": bool(ack_obj.broker_response_ack_bool),
+                    "ack_status_str": ack_obj.ack_status_str,
+                    "ack_source_str": ack_obj.ack_source_str,
+                    "perm_id_int": ack_obj.perm_id_int,
+                    "response_timestamp_str": (
+                        None
+                        if ack_obj.response_timestamp_ts is None
+                        else ack_obj.response_timestamp_ts.isoformat()
+                    ),
+                }
+                for ack_obj in submit_batch_result_obj.broker_order_ack_list
+            ],
+            "broker_order_fill_dict_list": [
+                {
+                    "asset_str": fill_obj.asset_str,
+                    "broker_order_id_str": fill_obj.broker_order_id_str,
+                    "fill_amount_float": float(fill_obj.fill_amount_float),
+                    "fill_price_float": float(fill_obj.fill_price_float),
+                    "fill_timestamp_str": fill_obj.fill_timestamp_ts.isoformat(),
+                }
+                for fill_obj in submit_batch_result_obj.broker_order_fill_list
+            ],
+            "submit_ack_status_str": submit_batch_result_obj.submit_ack_status_str,
+            "ack_coverage_ratio_float": float(submit_batch_result_obj.ack_coverage_ratio_float),
+            "missing_ack_asset_list": list(submit_batch_result_obj.missing_ack_asset_list),
+        }
+    except Exception as exc:
+        return _trace_payload_error_dict("submit_batch", exc)
+
+
+def _reconciliation_trace_payload_dict(reconciliation_result_obj) -> dict[str, object]:
+    try:
+        return {
+            "passed_bool": bool(reconciliation_result_obj.passed_bool),
+            "status_str": str(reconciliation_result_obj.status_str),
+            "mismatch_dict": dict(reconciliation_result_obj.mismatch_dict),
+            "model_position_map": dict(reconciliation_result_obj.model_position_map),
+            "broker_position_map": dict(reconciliation_result_obj.broker_position_map),
+            "model_cash_float": float(reconciliation_result_obj.model_cash_float),
+            "broker_cash_float": float(reconciliation_result_obj.broker_cash_float),
+        }
+    except Exception as exc:
+        return _trace_payload_error_dict("reconciliation", exc)
 
 
 def _is_terminal_order_status_bool(status_str: str) -> bool:
@@ -2094,6 +2400,8 @@ def expire_stale_decision_plans(
     env_mode_str: str | None = None,
     log_path_str: str = DEFAULT_LOG_PATH_STR,
     pod_id_str: str | None = None,
+    trace_enabled_bool: bool = True,
+    trace_log_root_path_str: str = DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR,
 ) -> dict[str, object]:
     del releases_root_path_str
     expired_decision_plan_count_int = 0
@@ -2126,6 +2434,17 @@ def expire_stale_decision_plans(
             ),
             log_path_str=log_path_str,
         )
+        _emit_live_trace_event(
+            "decision_plan.expired",
+            release_obj=release_obj,
+            decision_plan_obj=decision_plan_obj,
+            as_of_ts=as_of_ts,
+            status_str="BLOCK",
+            reason_code_str="submission_window_expired",
+            payload_dict=_decision_plan_trace_payload_dict(decision_plan_obj),
+            trace_enabled_bool=trace_enabled_bool,
+            trace_log_root_path_str=trace_log_root_path_str,
+        )
     return {
         "expired_decision_plan_count_int": expired_decision_plan_count_int,
         "reason_count_map_dict": dict(reason_counter_obj),
@@ -2140,6 +2459,8 @@ def build_decision_plans(
     log_path_str: str = DEFAULT_LOG_PATH_STR,
     pod_id_str: str | None = None,
     auto_sync_norgate_snapshots_bool: bool = True,
+    trace_enabled_bool: bool = True,
+    trace_log_root_path_str: str = DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR,
 ) -> dict[str, object]:
     release_list = _load_release_list_validate_and_sync(
         releases_root_path_str,
@@ -2147,6 +2468,7 @@ def build_decision_plans(
         env_mode_str,
         pod_id_str=pod_id_str,
     )
+    selected_release_list = select_enabled_release_list_for_mode(release_list, env_mode_str)
     norgate_snapshot_sync_detail_dict: dict[str, object] | None = None
     if auto_sync_norgate_snapshots_bool:
         norgate_snapshot_sync_detail_dict = ensure_norgate_snapshots_for_live_tick(
@@ -2163,13 +2485,25 @@ def build_decision_plans(
                 norgate_snapshot_sync_detail_dict.get("reason_code_str")
                 or f"norgate_snapshot_sync_{sync_status_str}"
             )
+            for release_obj in selected_release_list:
+                _emit_live_trace_event(
+                    "decision_plan.data_gate",
+                    release_obj=release_obj,
+                    as_of_ts=as_of_ts,
+                    status_str="WAIT" if sync_status_str == "waiting" else "BLOCK",
+                    reason_code_str=reason_code_str,
+                    payload_dict={
+                        "norgate_snapshot_sync_detail_dict": norgate_snapshot_sync_detail_dict,
+                    },
+                    trace_enabled_bool=trace_enabled_bool,
+                    trace_log_root_path_str=trace_log_root_path_str,
+                )
             return {
                 "created_decision_plan_count_int": 0,
                 "skipped_decision_plan_count_int": 0,
                 "reason_count_map_dict": {reason_code_str: 1},
                 "norgate_snapshot_sync_detail_dict": norgate_snapshot_sync_detail_dict,
             }
-    selected_release_list = select_enabled_release_list_for_mode(release_list, env_mode_str)
     due_release_list = scheduler_utils.select_due_release_list(selected_release_list, as_of_ts)
     created_decision_plan_count_int = 0
     skipped_decision_plan_count_int = 0
@@ -2195,6 +2529,19 @@ def build_decision_plans(
                 ),
                 log_path_str=log_path_str,
             )
+            _emit_live_trace_event(
+                "decision_plan.build",
+                release_obj=release_obj,
+                as_of_ts=as_of_ts,
+                status_str="BLOCK",
+                reason_code_str=str(exception_obj.reason_code_str),
+                payload_dict={
+                    "error_str": str(exception_obj),
+                    "series_id_str": str(exception_obj.series_id_str),
+                },
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
             continue
 
         if state_store_obj.has_active_decision_plan(
@@ -2204,6 +2551,17 @@ def build_decision_plans(
         ):
             skipped_decision_plan_count_int += 1
             reason_counter_obj["active_decision_plan_exists"] += 1
+            _emit_live_trace_event(
+                "decision_plan.build",
+                release_obj=release_obj,
+                decision_plan_obj=decision_plan_obj,
+                as_of_ts=as_of_ts,
+                status_str="SKIP",
+                reason_code_str="active_decision_plan_exists",
+                payload_dict=_decision_plan_trace_payload_dict(decision_plan_obj),
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
             continue
 
         inserted_decision_plan_obj = state_store_obj.insert_decision_plan(decision_plan_obj)
@@ -2217,6 +2575,17 @@ def build_decision_plans(
                 {"reason_code_str": "snapshot_ready"},
             ),
             log_path_str=log_path_str,
+        )
+        _emit_live_trace_event(
+            "decision_plan.build",
+            release_obj=release_obj,
+            decision_plan_obj=inserted_decision_plan_obj,
+            as_of_ts=as_of_ts,
+            status_str="PASS",
+            reason_code_str="snapshot_ready",
+            payload_dict=_decision_plan_trace_payload_dict(inserted_decision_plan_obj),
+            trace_enabled_bool=trace_enabled_bool,
+            trace_log_root_path_str=trace_log_root_path_str,
         )
 
     return {
@@ -2241,6 +2610,8 @@ def build_vplans(
     broker_timeout_seconds_float: float | None = None,
     adapter_factory_func: Callable[[str, int, int, float], BrokerAdapter] | None = None,
     pod_id_str: str | None = None,
+    trace_enabled_bool: bool = True,
+    trace_log_root_path_str: str = DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR,
 ) -> dict[str, object]:
     created_vplan_count_int = 0
     blocked_action_count_int = 0
@@ -2303,6 +2674,20 @@ def build_vplans(
                 ),
                 log_path_str=log_path_str,
             )
+            _emit_live_trace_event(
+                "vplan.build",
+                release_obj=release_obj,
+                decision_plan_obj=decision_plan_obj,
+                as_of_ts=as_of_ts,
+                status_str="BLOCK",
+                reason_code_str=provenance_block_reason_str,
+                payload_dict={
+                    **_decision_plan_trace_payload_dict(decision_plan_obj),
+                    "expected_data_profile_str": release_obj.data_profile_str,
+                },
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
             continue
         broker_adapter_obj = broker_adapter_resolver_obj.get_adapter(release_obj)
         visible_account_route_set = broker_adapter_obj.get_visible_account_route_set()
@@ -2314,10 +2699,32 @@ def build_vplans(
             blocked_action_count_int += 1
             reason_counter_obj["submission_window_expired"] += 1
             state_store_obj.mark_decision_plan_status(int(decision_plan_obj.decision_plan_id_int or 0), "expired")
+            _emit_live_trace_event(
+                "vplan.build",
+                release_obj=release_obj,
+                decision_plan_obj=decision_plan_obj,
+                as_of_ts=as_of_ts,
+                status_str="BLOCK",
+                reason_code_str="submission_window_expired",
+                payload_dict=_decision_plan_trace_payload_dict(decision_plan_obj),
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
             continue
         if not broker_adapter_obj.is_session_ready(decision_plan_obj.account_route_str):
             blocked_action_count_int += 1
             reason_counter_obj["broker_not_ready"] += 1
+            _emit_live_trace_event(
+                "vplan.build",
+                release_obj=release_obj,
+                decision_plan_obj=decision_plan_obj,
+                as_of_ts=as_of_ts,
+                status_str="BLOCK",
+                reason_code_str="broker_not_ready",
+                payload_dict=_decision_plan_trace_payload_dict(decision_plan_obj),
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
             continue
         if (
             visible_account_route_set is not None
@@ -2326,12 +2733,41 @@ def build_vplans(
             blocked_action_count_int += 1
             reason_counter_obj["account_not_visible"] += 1
             state_store_obj.mark_decision_plan_status(int(decision_plan_obj.decision_plan_id_int or 0), "blocked")
+            _emit_live_trace_event(
+                "vplan.build",
+                release_obj=release_obj,
+                decision_plan_obj=decision_plan_obj,
+                as_of_ts=as_of_ts,
+                status_str="BLOCK",
+                reason_code_str="account_not_visible",
+                payload_dict={
+                    **_decision_plan_trace_payload_dict(decision_plan_obj),
+                    "visible_account_route_list": sorted(visible_account_route_set),
+                },
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
             continue
         session_mode_str = broker_adapter_obj.get_session_mode_str(decision_plan_obj.account_route_str)
         if session_mode_str is not None and session_mode_str != release_obj.mode_str:
             blocked_action_count_int += 1
             reason_counter_obj["session_mode_mismatch"] += 1
             state_store_obj.mark_decision_plan_status(int(decision_plan_obj.decision_plan_id_int or 0), "blocked")
+            _emit_live_trace_event(
+                "vplan.build",
+                release_obj=release_obj,
+                decision_plan_obj=decision_plan_obj,
+                as_of_ts=as_of_ts,
+                status_str="BLOCK",
+                reason_code_str="session_mode_mismatch",
+                payload_dict={
+                    **_decision_plan_trace_payload_dict(decision_plan_obj),
+                    "broker_session_mode_str": session_mode_str,
+                    "release_mode_str": release_obj.mode_str,
+                },
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
             continue
 
         broker_snapshot_obj = broker_adapter_obj.get_account_snapshot(decision_plan_obj.account_route_str)
@@ -2363,10 +2799,36 @@ def build_vplans(
                 ),
                 log_path_str=log_path_str,
             )
+            _emit_live_trace_event(
+                "vplan.pre_reconcile",
+                release_obj=release_obj,
+                decision_plan_obj=decision_plan_obj,
+                as_of_ts=as_of_ts,
+                status_str="BLOCK",
+                reason_code_str="position_reconciliation_warning",
+                payload_dict=_reconciliation_trace_payload_dict(reconciliation_result_obj),
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
         if broker_snapshot_obj.net_liq_float <= 0.0:
             blocked_action_count_int += 1
             reason_counter_obj["non_positive_net_liq"] += 1
             state_store_obj.mark_decision_plan_status(int(decision_plan_obj.decision_plan_id_int or 0), "blocked")
+            _emit_live_trace_event(
+                "vplan.build",
+                release_obj=release_obj,
+                decision_plan_obj=decision_plan_obj,
+                as_of_ts=as_of_ts,
+                status_str="BLOCK",
+                reason_code_str="non_positive_net_liq",
+                payload_dict={
+                    "broker_snapshot_dict": _broker_snapshot_trace_payload_dict(
+                        broker_snapshot_obj
+                    ),
+                },
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
             continue
 
         touched_asset_list = get_touched_asset_list_for_decision_plan(
@@ -2395,6 +2857,23 @@ def build_vplans(
                     },
                 ),
                 log_path_str=log_path_str,
+            )
+            _emit_live_trace_event(
+                "vplan.live_prices",
+                release_obj=release_obj,
+                decision_plan_obj=decision_plan_obj,
+                as_of_ts=as_of_ts,
+                status_str="BLOCK",
+                reason_code_str="live_price_snapshot_error",
+                payload_dict={
+                    "error_str": str(exc),
+                    "touched_asset_list": touched_asset_list,
+                    "broker_snapshot_dict": _broker_snapshot_trace_payload_dict(
+                        broker_snapshot_obj
+                    ),
+                },
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
             )
             continue
         live_reference_source_map_dict = {
@@ -2448,8 +2927,45 @@ def build_vplans(
                 ),
                 log_path_str=log_path_str,
             )
+            _emit_live_trace_event(
+                "vplan.live_prices",
+                release_obj=release_obj,
+                decision_plan_obj=decision_plan_obj,
+                as_of_ts=as_of_ts,
+                status_str="BLOCK",
+                reason_code_str="missing_live_price",
+                payload_dict={
+                    "missing_asset_list": missing_asset_list,
+                    "touched_asset_list": touched_asset_list,
+                    "live_price_snapshot_dict": _live_price_snapshot_trace_payload_dict(
+                        live_price_snapshot_obj
+                    ),
+                },
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
             continue
 
+        _emit_live_trace_event(
+            "vplan.inputs",
+            release_obj=release_obj,
+            decision_plan_obj=decision_plan_obj,
+            as_of_ts=as_of_ts,
+            status_str="PASS",
+            reason_code_str="broker_snapshot_and_live_prices_ready",
+            payload_dict={
+                "broker_snapshot_dict": _broker_snapshot_trace_payload_dict(broker_snapshot_obj),
+                "live_price_snapshot_dict": _live_price_snapshot_trace_payload_dict(
+                    live_price_snapshot_obj
+                ),
+                "pre_vplan_reconciliation_dict": _reconciliation_trace_payload_dict(
+                    reconciliation_result_obj
+                ),
+                "touched_asset_list": touched_asset_list,
+            },
+            trace_enabled_bool=trace_enabled_bool,
+            trace_log_root_path_str=trace_log_root_path_str,
+        )
         vplan_obj = build_vplan(
             release_obj=release_obj,
             decision_plan_obj=decision_plan_obj,
@@ -2468,6 +2984,18 @@ def build_vplans(
                 {"reason_code_str": "vplan_ready"},
             ),
             log_path_str=log_path_str,
+        )
+        _emit_live_trace_event(
+            "vplan.build",
+            release_obj=release_obj,
+            decision_plan_obj=decision_plan_obj,
+            vplan_obj=inserted_vplan_obj,
+            as_of_ts=as_of_ts,
+            status_str="PASS",
+            reason_code_str="vplan_ready",
+            payload_dict=_vplan_order_intent_trace_payload_dict(inserted_vplan_obj),
+            trace_enabled_bool=trace_enabled_bool,
+            trace_log_root_path_str=trace_log_root_path_str,
         )
 
     return {
@@ -2494,6 +3022,8 @@ def submit_ready_vplans(
     broker_timeout_seconds_float: float | None = None,
     adapter_factory_func: Callable[[str, int, int, float], BrokerAdapter] | None = None,
     pod_id_str: str | None = None,
+    trace_enabled_bool: bool = True,
+    trace_log_root_path_str: str = DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR,
 ) -> dict[str, object]:
     submitted_vplan_count_int = 0
     blocked_action_count_int = 0
@@ -2545,6 +3075,17 @@ def submit_ready_vplans(
         if release_obj.mode_str != env_mode_str:
             blocked_action_count_int += 1
             reason_counter_obj["env_mode_mismatch"] += 1
+            _emit_live_trace_event(
+                "vplan.submit",
+                release_obj=release_obj,
+                vplan_obj=vplan_obj,
+                as_of_ts=as_of_ts,
+                status_str="BLOCK",
+                reason_code_str="env_mode_mismatch",
+                payload_dict=_vplan_order_intent_trace_payload_dict(vplan_obj),
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
             continue
         broker_adapter_obj = broker_adapter_resolver_obj.get_adapter(release_obj)
         if scheduler_utils.is_execution_window_expired_bool(
@@ -2556,17 +3097,64 @@ def submit_ready_vplans(
             reason_counter_obj["submission_window_expired"] += 1
             state_store_obj.mark_vplan_status(int(vplan_obj.vplan_id_int or 0), "expired")
             state_store_obj.mark_decision_plan_status(int(vplan_obj.decision_plan_id_int), "expired")
+            _emit_live_trace_event(
+                "vplan.submit",
+                release_obj=release_obj,
+                vplan_obj=vplan_obj,
+                as_of_ts=as_of_ts,
+                status_str="BLOCK",
+                reason_code_str="submission_window_expired",
+                payload_dict=_vplan_order_intent_trace_payload_dict(vplan_obj),
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
             continue
         if state_store_obj.count_broker_orders_for_vplan(int(vplan_obj.vplan_id_int or 0)) > 0:
             blocked_action_count_int += 1
             reason_counter_obj["duplicate_submission_guard"] += 1
+            _emit_live_trace_event(
+                "vplan.submit",
+                release_obj=release_obj,
+                vplan_obj=vplan_obj,
+                as_of_ts=as_of_ts,
+                status_str="BLOCK",
+                reason_code_str="duplicate_submission_guard",
+                payload_dict=_vplan_order_intent_trace_payload_dict(vplan_obj),
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
             continue
         if not state_store_obj.claim_vplan_for_submission(int(vplan_obj.vplan_id_int or 0)):
             blocked_action_count_int += 1
             reason_counter_obj["submission_claim_failed"] += 1
+            _emit_live_trace_event(
+                "vplan.submit",
+                release_obj=release_obj,
+                vplan_obj=vplan_obj,
+                as_of_ts=as_of_ts,
+                status_str="BLOCK",
+                reason_code_str="submission_claim_failed",
+                payload_dict=_vplan_order_intent_trace_payload_dict(vplan_obj),
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
             continue
 
         broker_order_request_list = build_broker_order_request_list_from_vplan(vplan_obj)
+        _emit_live_trace_event(
+            "vplan.submit_request",
+            release_obj=release_obj,
+            vplan_obj=vplan_obj,
+            as_of_ts=as_of_ts,
+            status_str="PASS",
+            reason_code_str="submitting",
+            payload_dict=_vplan_order_intent_trace_payload_dict(
+                vplan_obj,
+                broker_order_request_list=broker_order_request_list,
+            ),
+            trace_enabled_bool=trace_enabled_bool,
+            trace_log_root_path_str=trace_log_root_path_str,
+        )
         submit_batch_result_obj = broker_adapter_obj.submit_order_request_list(
             account_route_str=vplan_obj.account_route_str,
             broker_order_request_list=broker_order_request_list,
@@ -2692,6 +3280,30 @@ def submit_ready_vplans(
             ),
             log_path_str=log_path_str,
         )
+        submit_status_str = (
+            "PASS"
+            if submit_batch_result_obj.submit_ack_status_str == "complete"
+            else "BLOCK"
+        )
+        submit_reason_code_str = (
+            "submitted"
+            if submit_batch_result_obj.submit_ack_status_str == "complete"
+            else "missing_broker_response_ack"
+        )
+        _emit_live_trace_event(
+            "vplan.submit_result",
+            release_obj=release_obj,
+            vplan_obj=vplan_obj,
+            as_of_ts=as_of_ts,
+            status_str=submit_status_str,
+            reason_code_str=submit_reason_code_str,
+            payload_dict=_submit_batch_trace_payload_dict(
+                broker_order_request_list=broker_order_request_list,
+                submit_batch_result_obj=submit_batch_result_obj,
+            ),
+            trace_enabled_bool=trace_enabled_bool,
+            trace_log_root_path_str=trace_log_root_path_str,
+        )
 
     return {
         "submitted_vplan_count_int": submitted_vplan_count_int,
@@ -2717,6 +3329,8 @@ def eod_snapshot(
     require_due_bool: bool = False,
     eod_snapshot_buffer_minutes_int: int = DEFAULT_EOD_SNAPSHOT_BUFFER_MINUTES_INT,
     pod_id_str: str | None = None,
+    trace_enabled_bool: bool = True,
+    trace_log_root_path_str: str = DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR,
 ) -> dict[str, object]:
     if releases_root_path_str is None:
         _validate_state_store_releases_for_mutation(state_store_obj, env_mode_str, pod_id_str=pod_id_str)
@@ -2772,6 +3386,16 @@ def eod_snapshot(
         if _pod_has_unresolved_execution_bool(state_store_obj, release_obj.pod_id_str):
             skipped_snapshot_count_int += 1
             reason_counter_obj["unresolved_execution"] += 1
+            _emit_live_trace_event(
+                "eod_snapshot",
+                release_obj=release_obj,
+                as_of_ts=as_of_ts,
+                status_str="WAIT",
+                reason_code_str="unresolved_execution",
+                payload_dict={"eod_market_date_str": eod_market_date_str},
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
             continue
 
         if _pod_has_stage_snapshot_for_market_date_bool(
@@ -2782,6 +3406,16 @@ def eod_snapshot(
         ):
             skipped_snapshot_count_int += 1
             reason_counter_obj["eod_snapshot_already_exists"] += 1
+            _emit_live_trace_event(
+                "eod_snapshot",
+                release_obj=release_obj,
+                as_of_ts=as_of_ts,
+                status_str="SKIP",
+                reason_code_str="eod_snapshot_already_exists",
+                payload_dict={"eod_market_date_str": eod_market_date_str},
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
             continue
 
         broker_adapter_for_release_obj = broker_adapter_resolver_obj.get_adapter(release_obj)
@@ -2792,15 +3426,48 @@ def eod_snapshot(
         ):
             blocked_action_count_int += 1
             reason_counter_obj["account_not_visible"] += 1
+            _emit_live_trace_event(
+                "eod_snapshot",
+                release_obj=release_obj,
+                as_of_ts=as_of_ts,
+                status_str="BLOCK",
+                reason_code_str="account_not_visible",
+                payload_dict={"visible_account_route_list": sorted(visible_account_route_set)},
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
             continue
         if not broker_adapter_for_release_obj.is_session_ready(release_obj.account_route_str):
             blocked_action_count_int += 1
             reason_counter_obj["broker_not_ready"] += 1
+            _emit_live_trace_event(
+                "eod_snapshot",
+                release_obj=release_obj,
+                as_of_ts=as_of_ts,
+                status_str="BLOCK",
+                reason_code_str="broker_not_ready",
+                payload_dict={},
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
             continue
         session_mode_str = broker_adapter_for_release_obj.get_session_mode_str(release_obj.account_route_str)
         if session_mode_str is not None and session_mode_str != release_obj.mode_str:
             blocked_action_count_int += 1
             reason_counter_obj["session_mode_mismatch"] += 1
+            _emit_live_trace_event(
+                "eod_snapshot",
+                release_obj=release_obj,
+                as_of_ts=as_of_ts,
+                status_str="BLOCK",
+                reason_code_str="session_mode_mismatch",
+                payload_dict={
+                    "broker_session_mode_str": session_mode_str,
+                    "release_mode_str": release_obj.mode_str,
+                },
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
             continue
 
         broker_snapshot_obj = broker_adapter_for_release_obj.get_account_snapshot(release_obj.account_route_str)
@@ -2841,6 +3508,21 @@ def eod_snapshot(
             ),
             log_path_str=log_path_str,
         )
+        _emit_live_trace_event(
+            "eod_snapshot",
+            release_obj=release_obj,
+            as_of_ts=as_of_ts,
+            status_str="PASS",
+            reason_code_str="eod_snapshot_completed",
+            payload_dict={
+                "snapshot_stage_str": "eod",
+                "snapshot_source_str": snapshot_source_str,
+                "eod_market_date_str": eod_market_date_str,
+                "broker_snapshot_dict": _broker_snapshot_trace_payload_dict(broker_snapshot_obj),
+            },
+            trace_enabled_bool=trace_enabled_bool,
+            trace_log_root_path_str=trace_log_root_path_str,
+        )
 
     return {
         "lease_acquired_bool": True,
@@ -2865,6 +3547,8 @@ def post_execution_reconcile(
     broker_timeout_seconds_float: float | None = None,
     adapter_factory_func: Callable[[str, int, int, float], BrokerAdapter] | None = None,
     pod_id_str: str | None = None,
+    trace_enabled_bool: bool = True,
+    trace_log_root_path_str: str = DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR,
 ) -> dict[str, object]:
     if releases_root_path_str is None:
         _validate_state_store_releases_for_mutation(state_store_obj, env_mode_str, pod_id_str=pod_id_str)
@@ -3053,6 +3737,32 @@ def post_execution_reconcile(
             if bool(execution_row_dict["exit_breach_bool"])
         ]
         terminal_unresolved_row_dict_list = _build_terminal_unresolved_row_dict_list(execution_row_dict_list)
+        reconcile_status_str = "PASS" if reconciliation_result_obj.passed_bool else "BLOCK"
+        reconcile_reason_code_str = (
+            "completed" if reconciliation_result_obj.passed_bool else "reconciliation_mismatch"
+        )
+        _emit_live_trace_event(
+            "vplan.reconcile",
+            release_obj=release_obj,
+            vplan_obj=vplan_obj,
+            as_of_ts=as_of_ts,
+            status_str=reconcile_status_str,
+            reason_code_str=reconcile_reason_code_str,
+            payload_dict={
+                "broker_snapshot_dict": _broker_snapshot_trace_payload_dict(broker_snapshot_obj),
+                "broker_order_count_int": len(normalized_broker_order_record_list),
+                "broker_order_event_count_int": len(normalized_broker_order_event_list),
+                "fill_count_int": len(normalized_fill_list),
+                "session_open_price_count_int": len(session_open_price_list),
+                "reconciliation_dict": _reconciliation_trace_payload_dict(
+                    reconciliation_result_obj
+                ),
+                "execution_row_dict_list": execution_row_dict_list,
+                "terminal_unresolved_row_dict_list": terminal_unresolved_row_dict_list,
+            },
+            trace_enabled_bool=trace_enabled_bool,
+            trace_log_root_path_str=trace_log_root_path_str,
+        )
         for exit_breach_row_dict in exit_breach_row_dict_list:
             log_event(
                 "exit_residual_detected",
@@ -4189,6 +4899,8 @@ def tick(
     pod_id_str: str | None = None,
     auto_sync_norgate_snapshots_bool: bool = True,
     prechecked_norgate_snapshot_sync_detail_dict: dict[str, object] | None = None,
+    trace_enabled_bool: bool = True,
+    trace_log_root_path_str: str = DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR,
 ) -> dict[str, object]:
     _validate_release_root_for_mutation(releases_root_path_str, env_mode_str, pod_id_str=pod_id_str)
     lease_owner_token_str = uuid.uuid4().hex
@@ -4255,6 +4967,26 @@ def tick(
             reason_code_str = _norgate_snapshot_sync_block_reason_code_str(
                 norgate_snapshot_sync_detail_dict
             )
+            sync_status_str = str(
+                (norgate_snapshot_sync_detail_dict or {}).get("status_str") or ""
+            )
+            for release_obj in state_store_obj.get_enabled_release_list():
+                if pod_id_str is not None and release_obj.pod_id_str != pod_id_str:
+                    continue
+                if release_obj.mode_str != env_mode_str:
+                    continue
+                _emit_live_trace_event(
+                    "decision_plan.data_gate",
+                    release_obj=release_obj,
+                    as_of_ts=as_of_ts,
+                    status_str="WAIT" if sync_status_str == "waiting" else "BLOCK",
+                    reason_code_str=reason_code_str,
+                    payload_dict={
+                        "norgate_snapshot_sync_detail_dict": norgate_snapshot_sync_detail_dict,
+                    },
+                    trace_enabled_bool=trace_enabled_bool,
+                    trace_log_root_path_str=trace_log_root_path_str,
+                )
             build_detail_dict = {
                 "created_decision_plan_count_int": 0,
                 "skipped_decision_plan_count_int": 0,
@@ -4270,6 +5002,8 @@ def tick(
                 log_path_str=log_path_str,
                 pod_id_str=pod_id_str,
                 auto_sync_norgate_snapshots_bool=False,
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
             )
         expire_detail_dict = expire_stale_decision_plans(
             state_store_obj=state_store_obj,
@@ -4278,6 +5012,8 @@ def tick(
             env_mode_str=env_mode_str,
             log_path_str=log_path_str,
             pod_id_str=pod_id_str,
+            trace_enabled_bool=trace_enabled_bool,
+            trace_log_root_path_str=trace_log_root_path_str,
         )
         vplan_detail_dict = build_vplans(
             state_store_obj=state_store_obj,
@@ -4288,6 +5024,8 @@ def tick(
             log_path_str=log_path_str,
             broker_adapter_resolver_obj=broker_adapter_resolver_obj,
             pod_id_str=pod_id_str,
+            trace_enabled_bool=trace_enabled_bool,
+            trace_log_root_path_str=trace_log_root_path_str,
         )
         submit_detail_dict = submit_ready_vplans(
             state_store_obj=state_store_obj,
@@ -4299,6 +5037,8 @@ def tick(
             log_path_str=log_path_str,
             broker_adapter_resolver_obj=broker_adapter_resolver_obj,
             pod_id_str=pod_id_str,
+            trace_enabled_bool=trace_enabled_bool,
+            trace_log_root_path_str=trace_log_root_path_str,
         )
         reconcile_detail_dict = post_execution_reconcile(
             state_store_obj=state_store_obj,
@@ -4309,6 +5049,8 @@ def tick(
             log_path_str=log_path_str,
             broker_adapter_resolver_obj=broker_adapter_resolver_obj,
             pod_id_str=pod_id_str,
+            trace_enabled_bool=trace_enabled_bool,
+            trace_log_root_path_str=trace_log_root_path_str,
         )
         warning_counter_obj: Counter[str] = Counter()
         reason_counter_obj: Counter[str] = Counter()

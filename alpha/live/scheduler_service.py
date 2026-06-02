@@ -10,8 +10,11 @@ from pathlib import Path
 from alpha.live import runner, scheduler_utils
 from alpha.live.logging_utils import (
     DEFAULT_LOG_PATH_STR,
+    DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR,
+    build_pod_trace_context_dict,
     log_event,
     log_operator_message,
+    log_pod_trace_event,
 )
 from alpha.live.models import DecisionPlan, LiveRelease, VPlan
 from alpha.live.norgate_snapshot_sync import (
@@ -1531,6 +1534,56 @@ def _emit_scheduler_event(
         )
 
 
+def _emit_scheduler_trace_event(
+    event_name_str: str,
+    *,
+    scheduler_decision_obj: SchedulerDecision,
+    payload_dict: dict[str, object] | None = None,
+    status_str: str | None = None,
+    trace_enabled_bool: bool = True,
+    trace_log_root_path_str: str = DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR,
+) -> None:
+    try:
+        if not trace_enabled_bool or scheduler_decision_obj.env_mode_str not in {"paper", "live"}:
+            return
+        related_pod_id_list = list(scheduler_decision_obj.related_pod_id_list)
+        if len(related_pod_id_list) == 0:
+            related_pod_id_list = ["unknown"]
+        resolved_status_str = status_str
+        if resolved_status_str is None:
+            resolved_status_str = "PASS" if scheduler_decision_obj.due_now_bool else "WAIT"
+        base_payload_dict = {
+            "scheduler_decision_dict": scheduler_decision_obj.to_dict(),
+            **dict(payload_dict or {}),
+        }
+        for pod_id_str in related_pod_id_list:
+            scheduler_run_id_str = "_".join(
+                [
+                    scheduler_decision_obj.env_mode_str,
+                    str(pod_id_str),
+                    "scheduler",
+                    scheduler_decision_obj.next_phase_str,
+                ]
+            )
+            log_pod_trace_event(
+                event_name_str,
+                trace_context_dict=build_pod_trace_context_dict(
+                    mode_str=scheduler_decision_obj.env_mode_str,
+                    pod_id_str=pod_id_str,
+                    as_of_timestamp_str=scheduler_decision_obj.as_of_timestamp_ts.isoformat(),
+                    run_id_str=scheduler_run_id_str,
+                    cycle_id_str=scheduler_run_id_str,
+                ),
+                status_str=resolved_status_str,
+                reason_code_str=scheduler_decision_obj.reason_code_str,
+                payload_dict=base_payload_dict,
+                trace_enabled_bool=True,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
+    except Exception:
+        return
+
+
 def _format_float_str(value_obj: object, decimals_int: int = 2) -> str:
     if value_obj is None:
         return "none"
@@ -2134,6 +2187,8 @@ def run_once(
     broker_client_id_int: int | None = None,
     broker_timeout_seconds_float: float | None = None,
     pod_id_str: str | None = None,
+    trace_enabled_bool: bool = True,
+    trace_log_root_path_str: str = DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR,
 ) -> dict[str, object]:
     _validate_release_root_for_mutation(releases_root_path_str, env_mode_str, pod_id_str=pod_id_str)
     broker_adapter_resolver_obj = runner.BrokerAdapterResolver(
@@ -2171,6 +2226,16 @@ def run_once(
         idle_max_sleep_seconds_int=idle_max_sleep_seconds_int,
         pod_id_str=pod_id_str,
     )
+    _emit_scheduler_trace_event(
+        "scheduler.decision",
+        scheduler_decision_obj=scheduler_decision_obj,
+        payload_dict={
+            "norgate_snapshot_sync_required_for_decision_plan_bool": norgate_snapshot_sync_required_bool,
+            "norgate_snapshot_sync_detail_dict": norgate_snapshot_sync_detail_dict,
+        },
+        trace_enabled_bool=trace_enabled_bool,
+        trace_log_root_path_str=trace_log_root_path_str,
+    )
     detail_dict = scheduler_decision_obj.to_dict()
     detail_dict["tick_invoked_bool"] = False
     detail_dict["norgate_snapshot_sync_required_for_decision_plan_bool"] = (
@@ -2206,6 +2271,8 @@ def run_once(
                 broker_adapter_resolver_obj=broker_adapter_resolver_obj,
                 require_due_bool=True,
                 pod_id_str=pod_id_str,
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
             )
         else:
             tick_detail_dict = runner.tick(
@@ -2219,6 +2286,8 @@ def run_once(
                 pod_id_str=pod_id_str,
                 auto_sync_norgate_snapshots_bool=False,
                 prechecked_norgate_snapshot_sync_detail_dict=norgate_snapshot_sync_detail_dict,
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
             )
         detail_dict["tick_invoked_bool"] = True
         detail_dict["tick_detail_dict"] = tick_detail_dict
@@ -2248,6 +2317,24 @@ def run_once(
                     related_pod_id_list=scheduler_decision_obj.related_pod_id_list,
                 )
             )
+        _emit_scheduler_trace_event(
+            "scheduler.tick_result",
+            scheduler_decision_obj=scheduler_decision_obj,
+            payload_dict={
+                "tick_detail_dict": tick_detail_dict,
+                "post_tick_pod_status_dict_list": detail_dict.get(
+                    "post_tick_pod_status_dict_list"
+                ),
+                "post_tick_execution_report_dict_list": detail_dict.get(
+                    "post_tick_execution_report_dict_list"
+                ),
+            },
+            status_str="PASS"
+            if not _tick_detail_blocked_action_bool(tick_detail_dict)
+            else "BLOCK",
+            trace_enabled_bool=trace_enabled_bool,
+            trace_log_root_path_str=trace_log_root_path_str,
+        )
     return detail_dict
 
 
@@ -2266,6 +2353,8 @@ def serve(
     log_path_str: str = DEFAULT_LOG_PATH_STR,
     broker_timeout_seconds_float: float | None = None,
     pod_id_str: str | None = None,
+    trace_enabled_bool: bool = True,
+    trace_log_root_path_str: str = DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR,
 ) -> None:
     _validate_release_root_for_mutation(releases_root_path_str, env_mode_str, pod_id_str=pod_id_str)
     last_printed_sleep_signature_tup: tuple[object, ...] | None = None
@@ -2342,6 +2431,16 @@ def serve(
                 idle_max_sleep_seconds_int=idle_max_sleep_seconds_int,
                 pod_id_str=pod_id_str,
             )
+            _emit_scheduler_trace_event(
+                "scheduler.decision",
+                scheduler_decision_obj=current_scheduler_decision_obj,
+                payload_dict={
+                    "norgate_snapshot_sync_required_for_decision_plan_bool": norgate_snapshot_sync_required_bool,
+                    "norgate_snapshot_sync_detail_dict": norgate_snapshot_sync_detail_dict,
+                },
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
             if current_scheduler_decision_obj.due_now_bool:
                 _emit_scheduler_event(
                     "scheduler_due_now",
@@ -2377,6 +2476,8 @@ def serve(
                         broker_adapter_resolver_obj=broker_adapter_resolver_obj,
                         require_due_bool=True,
                         pod_id_str=pod_id_str,
+                        trace_enabled_bool=trace_enabled_bool,
+                        trace_log_root_path_str=trace_log_root_path_str,
                     )
                 else:
                     tick_detail_dict = runner.tick(
@@ -2390,6 +2491,8 @@ def serve(
                         pod_id_str=pod_id_str,
                         auto_sync_norgate_snapshots_bool=False,
                         prechecked_norgate_snapshot_sync_detail_dict=norgate_snapshot_sync_detail_dict,
+                        trace_enabled_bool=trace_enabled_bool,
+                        trace_log_root_path_str=trace_log_root_path_str,
                     )
                 post_tick_pod_status_dict_list = _build_related_pod_status_dict_list(
                     state_store_obj=state_store_obj,
@@ -2428,6 +2531,22 @@ def serve(
                     },
                     log_path_str=log_path_str,
                     print_events_bool=False,
+                )
+                _emit_scheduler_trace_event(
+                    "scheduler.tick_result",
+                    scheduler_decision_obj=current_scheduler_decision_obj,
+                    payload_dict={
+                        "tick_detail_dict": tick_detail_dict,
+                        "post_tick_pod_status_dict_list": post_tick_pod_status_dict_list,
+                        "post_tick_execution_report_dict_list": post_tick_execution_report_dict_list,
+                        "post_tick_vplan_dict_list": post_tick_vplan_dict_list,
+                        "post_tick_broker_order_snapshot_dict_list": post_tick_broker_order_snapshot_dict_list,
+                    },
+                    status_str="PASS"
+                    if not _tick_detail_blocked_action_bool(tick_detail_dict)
+                    else "BLOCK",
+                    trace_enabled_bool=trace_enabled_bool,
+                    trace_log_root_path_str=trace_log_root_path_str,
                 )
                 _emit_operator_message_spec_list(
                     _build_phase_result_operator_message_spec_list(
@@ -2519,6 +2638,14 @@ def serve(
                 log_path_str=log_path_str,
                 print_events_bool=False,
             )
+            _emit_scheduler_trace_event(
+                "scheduler.sleeping",
+                scheduler_decision_obj=current_scheduler_decision_obj,
+                payload_dict=sleep_event_payload_dict,
+                status_str="WAIT" if not tick_blocked_action_bool else "BLOCK",
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
             if print_sleep_event_bool:
                 _emit_operator_message_spec_list(
                     _build_wait_operator_message_spec_list(
@@ -2563,6 +2690,18 @@ def serve(
                 log_path_str=log_path_str,
                 print_events_bool=False,
             )
+            if current_scheduler_decision_obj is not None:
+                _emit_scheduler_trace_event(
+                    "scheduler.error_retry",
+                    scheduler_decision_obj=current_scheduler_decision_obj,
+                    payload_dict={
+                        "error_str": str(exc),
+                        "error_retry_seconds_int": int(error_retry_seconds_int),
+                    },
+                    status_str="BLOCK",
+                    trace_enabled_bool=trace_enabled_bool,
+                    trace_log_root_path_str=trace_log_root_path_str,
+                )
             if current_scheduler_decision_obj is not None:
                 _emit_operator_message_spec_list(
                     _build_phase_failure_operator_message_spec_list(

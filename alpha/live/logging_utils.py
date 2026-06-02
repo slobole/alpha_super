@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+import re
+import shutil
+import stat
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +19,22 @@ DEFAULT_LOG_MAX_BYTES_INT = 50 * 1024 * 1024
 DEFAULT_LOG_BACKUP_COUNT_INT = 10
 DEFAULT_TRACE_LOG_MAX_BYTES_INT = 10 * 1024 * 1024
 DEFAULT_TRACE_LOG_BACKUP_COUNT_INT = 5
+DEFAULT_POD_TRACE_RETENTION_DAYS_INT = 90
+TRACE_REDACTED_VALUE_STR = "***REDACTED***"
+TRACE_SECRET_KEY_FRAGMENT_TUPLE = (
+    "api_key",
+    "apikey",
+    "authorization",
+    "bearer",
+    "password",
+    "secret",
+    "token",
+)
+TRACE_SECRET_VALUE_PATTERN_TUPLE = (
+    re.compile(r"(?i)(token|password|secret|api[_-]?key)\s*[:=]\s*[^\s,;]+"),
+    re.compile(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]+"),
+)
+_POD_TRACE_RETENTION_CLEANUP_DATE_BY_ROOT_DICT: dict[str, str] = {}
 
 
 def _rotated_log_path_obj(log_path_obj: Path, index_int: int) -> Path:
@@ -224,6 +243,84 @@ def _sanitize_path_part_str(raw_value_obj: object) -> str:
     return sanitized_str or "unknown"
 
 
+def _trace_value_contains_secret_key_bool(key_str: str) -> bool:
+    normalized_key_str = str(key_str).lower()
+    return any(
+        secret_fragment_str in normalized_key_str
+        for secret_fragment_str in TRACE_SECRET_KEY_FRAGMENT_TUPLE
+    )
+
+
+def redact_trace_secret_value_obj(value_obj: Any, key_str: str | None = None) -> Any:
+    if key_str is not None and _trace_value_contains_secret_key_bool(key_str):
+        return TRACE_REDACTED_VALUE_STR
+    if isinstance(value_obj, str):
+        redacted_value_str = value_obj
+        for secret_pattern_obj in TRACE_SECRET_VALUE_PATTERN_TUPLE:
+            redacted_value_str = secret_pattern_obj.sub(TRACE_REDACTED_VALUE_STR, redacted_value_str)
+        return redacted_value_str
+    if isinstance(value_obj, dict):
+        return {
+            str(child_key_obj): redact_trace_secret_value_obj(
+                child_value_obj,
+                key_str=str(child_key_obj),
+            )
+            for child_key_obj, child_value_obj in value_obj.items()
+        }
+    if isinstance(value_obj, (list, tuple, set)):
+        return [
+            redact_trace_secret_value_obj(child_value_obj)
+            for child_value_obj in value_obj
+        ]
+    return value_obj
+
+
+def build_pod_trace_run_id_str(
+    *,
+    mode_str: str,
+    pod_id_str: str | None,
+    as_of_timestamp_str: str,
+) -> str:
+    return "_".join(
+        _sanitize_path_part_str(value_obj)
+        for value_obj in (
+            mode_str,
+            pod_id_str or "unknown",
+            as_of_timestamp_str.replace("+", "_").replace(":", ""),
+        )
+    )
+
+
+def build_pod_trace_context_dict(
+    *,
+    mode_str: str,
+    pod_id_str: str | None,
+    as_of_timestamp_str: str,
+    account_route_str: str | None = None,
+    release_id_str: str | None = None,
+    run_id_str: str | None = None,
+    cycle_id_str: str | None = None,
+    decision_plan_id_int: int | None = None,
+    vplan_id_int: int | None = None,
+) -> dict[str, Any]:
+    resolved_run_id_str = run_id_str or build_pod_trace_run_id_str(
+        mode_str=mode_str,
+        pod_id_str=pod_id_str,
+        as_of_timestamp_str=as_of_timestamp_str,
+    )
+    return {
+        "mode_str": str(mode_str),
+        "pod_id_str": pod_id_str,
+        "account_route_str": account_route_str,
+        "release_id_str": release_id_str,
+        "run_id_str": resolved_run_id_str,
+        "cycle_id_str": cycle_id_str or resolved_run_id_str,
+        "as_of_timestamp_str": as_of_timestamp_str,
+        "decision_plan_id_int": decision_plan_id_int,
+        "vplan_id_int": vplan_id_int,
+    }
+
+
 def resolve_pod_run_trace_log_path_str(
     *,
     pod_id_str: str,
@@ -238,6 +335,247 @@ def resolve_pod_run_trace_log_path_str(
     )
 
 
+def _safe_resolved_path_obj(path_obj: Path) -> Path | None:
+    try:
+        return path_obj.resolve()
+    except (OSError, RuntimeError):
+        return None
+
+
+def _path_under_root_bool(path_obj: Path, root_path_obj: Path) -> bool:
+    try:
+        path_obj.relative_to(root_path_obj)
+        return True
+    except ValueError:
+        return False
+
+
+def _directory_contains_symlink_bool(directory_path_obj: Path) -> bool:
+    try:
+        for child_path_obj in directory_path_obj.rglob("*"):
+            if child_path_obj.is_symlink() or _path_is_windows_reparse_point_bool(child_path_obj):
+                return True
+    except OSError:
+        return True
+    return False
+
+
+def _path_is_windows_reparse_point_bool(path_obj: Path) -> bool:
+    try:
+        reparse_flag_int = int(getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+        if reparse_flag_int == 0:
+            return False
+        return bool(int(getattr(path_obj.lstat(), "st_file_attributes", 0)) & reparse_flag_int)
+    except OSError:
+        return True
+
+
+def _trace_run_folder_has_marker_bool(run_folder_path_obj: Path) -> bool:
+    try:
+        for child_path_obj in run_folder_path_obj.iterdir():
+            if not child_path_obj.is_file():
+                continue
+            if child_path_obj.name == "trace_events.jsonl" or child_path_obj.name.startswith(
+                "trace_events.jsonl."
+            ):
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def _newest_trace_run_folder_mtime_float(run_folder_path_obj: Path) -> float | None:
+    newest_mtime_float: float | None = None
+    try:
+        for child_path_obj in run_folder_path_obj.rglob("*"):
+            if child_path_obj.is_symlink() or not child_path_obj.is_file():
+                continue
+            child_mtime_float = float(child_path_obj.stat().st_mtime)
+            if newest_mtime_float is None or child_mtime_float > newest_mtime_float:
+                newest_mtime_float = child_mtime_float
+        if newest_mtime_float is None:
+            newest_mtime_float = float(run_folder_path_obj.stat().st_mtime)
+    except OSError:
+        return None
+    return newest_mtime_float
+
+
+def cleanup_pod_trace_retention_dict(
+    *,
+    trace_log_root_path_str: str = DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR,
+    active_trace_log_path_str: str | None = None,
+    retention_days_int: int = DEFAULT_POD_TRACE_RETENTION_DAYS_INT,
+    now_ts: datetime | None = None,
+    allow_non_default_trace_root_bool: bool = False,
+) -> dict[str, Any]:
+    normalized_retention_days_int = int(retention_days_int)
+    normalized_now_ts = now_ts or datetime.now(timezone.utc)
+    if normalized_now_ts.tzinfo is None:
+        normalized_now_ts = normalized_now_ts.replace(tzinfo=timezone.utc)
+    normalized_now_ts = normalized_now_ts.astimezone(timezone.utc)
+    cutoff_ts = normalized_now_ts - timedelta(days=normalized_retention_days_int)
+    trace_root_path_obj = Path(trace_log_root_path_str)
+    resolved_trace_root_path_obj = _safe_resolved_path_obj(trace_root_path_obj)
+    active_run_folder_path_obj: Path | None = None
+    if active_trace_log_path_str is not None:
+        active_trace_log_path_obj = Path(active_trace_log_path_str)
+        resolved_active_trace_log_path_obj = _safe_resolved_path_obj(active_trace_log_path_obj)
+        if resolved_active_trace_log_path_obj is not None:
+            active_run_folder_path_obj = resolved_active_trace_log_path_obj.parent
+    cleanup_detail_dict: dict[str, Any] = {
+        "cleanup_attempted_bool": True,
+        "retention_days_int": normalized_retention_days_int,
+        "cutoff_timestamp_str": cutoff_ts.isoformat(),
+        "trace_log_root_path_str": str(trace_root_path_obj),
+        "scanned_run_folder_count_int": 0,
+        "deleted_run_folder_count_int": 0,
+        "kept_run_folder_count_int": 0,
+        "skipped_active_run_folder_count_int": 0,
+        "skipped_non_trace_folder_count_int": 0,
+        "skipped_symlink_count_int": 0,
+        "skipped_unsafe_path_count_int": 0,
+        "error_count_int": 0,
+        "error_str_list": [],
+    }
+    if normalized_retention_days_int <= 0:
+        cleanup_detail_dict["cleanup_skip_reason_str"] = "retention_disabled"
+        return cleanup_detail_dict
+    if resolved_trace_root_path_obj is None or not trace_root_path_obj.exists():
+        cleanup_detail_dict["cleanup_skip_reason_str"] = "trace_root_missing"
+        return cleanup_detail_dict
+    default_trace_root_path_obj = _safe_resolved_path_obj(Path(DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR))
+    if (
+        not allow_non_default_trace_root_bool
+        and default_trace_root_path_obj is not None
+        and resolved_trace_root_path_obj != default_trace_root_path_obj
+    ):
+        cleanup_detail_dict["cleanup_skip_reason_str"] = "non_default_trace_root"
+        cleanup_detail_dict["skipped_unsafe_path_count_int"] = 1
+        return cleanup_detail_dict
+    if trace_root_path_obj.is_symlink() or _path_is_windows_reparse_point_bool(trace_root_path_obj):
+        cleanup_detail_dict["cleanup_skip_reason_str"] = "trace_root_symlink"
+        cleanup_detail_dict["skipped_symlink_count_int"] = 1
+        return cleanup_detail_dict
+
+    try:
+        pod_folder_path_list = [
+            child_path_obj
+            for child_path_obj in trace_root_path_obj.iterdir()
+            if child_path_obj.is_dir()
+        ]
+    except OSError as exc:
+        cleanup_detail_dict["cleanup_skip_reason_str"] = "trace_root_scan_failed"
+        cleanup_detail_dict["error_count_int"] = 1
+        cleanup_detail_dict["error_str_list"] = [str(exc)]
+        return cleanup_detail_dict
+
+    for pod_folder_path_obj in pod_folder_path_list:
+        if pod_folder_path_obj.is_symlink() or _path_is_windows_reparse_point_bool(pod_folder_path_obj):
+            cleanup_detail_dict["skipped_symlink_count_int"] += 1
+            continue
+        resolved_pod_folder_path_obj = _safe_resolved_path_obj(pod_folder_path_obj)
+        if (
+            resolved_pod_folder_path_obj is None
+            or not _path_under_root_bool(resolved_pod_folder_path_obj, resolved_trace_root_path_obj)
+        ):
+            cleanup_detail_dict["skipped_unsafe_path_count_int"] += 1
+            continue
+        try:
+            run_folder_path_list = [
+                child_path_obj
+                for child_path_obj in pod_folder_path_obj.iterdir()
+                if child_path_obj.is_dir()
+            ]
+        except OSError as exc:
+            cleanup_detail_dict["error_count_int"] += 1
+            cleanup_detail_dict["error_str_list"].append(str(exc))
+            continue
+        for run_folder_path_obj in run_folder_path_list:
+            cleanup_detail_dict["scanned_run_folder_count_int"] += 1
+            if (
+                run_folder_path_obj.is_symlink()
+                or _path_is_windows_reparse_point_bool(run_folder_path_obj)
+                or _directory_contains_symlink_bool(run_folder_path_obj)
+            ):
+                cleanup_detail_dict["skipped_symlink_count_int"] += 1
+                continue
+            resolved_run_folder_path_obj = _safe_resolved_path_obj(run_folder_path_obj)
+            if (
+                resolved_run_folder_path_obj is None
+                or not _path_under_root_bool(resolved_run_folder_path_obj, resolved_trace_root_path_obj)
+            ):
+                cleanup_detail_dict["skipped_unsafe_path_count_int"] += 1
+                continue
+            if (
+                active_run_folder_path_obj is not None
+                and resolved_run_folder_path_obj == active_run_folder_path_obj
+            ):
+                cleanup_detail_dict["skipped_active_run_folder_count_int"] += 1
+                continue
+            if not _trace_run_folder_has_marker_bool(run_folder_path_obj):
+                cleanup_detail_dict["skipped_non_trace_folder_count_int"] += 1
+                continue
+            newest_mtime_float = _newest_trace_run_folder_mtime_float(run_folder_path_obj)
+            if newest_mtime_float is None:
+                cleanup_detail_dict["error_count_int"] += 1
+                cleanup_detail_dict["error_str_list"].append(
+                    f"could_not_read_mtime:{run_folder_path_obj}"
+                )
+                continue
+            if datetime.fromtimestamp(newest_mtime_float, tz=timezone.utc) >= cutoff_ts:
+                cleanup_detail_dict["kept_run_folder_count_int"] += 1
+                continue
+            try:
+                shutil.rmtree(resolved_run_folder_path_obj)
+                cleanup_detail_dict["deleted_run_folder_count_int"] += 1
+            except OSError as exc:
+                cleanup_detail_dict["error_count_int"] += 1
+                cleanup_detail_dict["error_str_list"].append(str(exc))
+    return cleanup_detail_dict
+
+
+def cleanup_pod_trace_retention_if_due_dict(
+    *,
+    trace_log_root_path_str: str = DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR,
+    active_trace_log_path_str: str | None = None,
+    retention_days_int: int = DEFAULT_POD_TRACE_RETENTION_DAYS_INT,
+    now_ts: datetime | None = None,
+    allow_non_default_trace_root_bool: bool = False,
+) -> dict[str, Any]:
+    normalized_now_ts = now_ts or datetime.now(timezone.utc)
+    if normalized_now_ts.tzinfo is None:
+        normalized_now_ts = normalized_now_ts.replace(tzinfo=timezone.utc)
+    normalized_now_ts = normalized_now_ts.astimezone(timezone.utc)
+    trace_root_path_obj = Path(trace_log_root_path_str)
+    resolved_trace_root_path_obj = _safe_resolved_path_obj(trace_root_path_obj)
+    throttle_key_str = str(resolved_trace_root_path_obj or trace_root_path_obj)
+    cleanup_date_str = normalized_now_ts.date().isoformat()
+    if _POD_TRACE_RETENTION_CLEANUP_DATE_BY_ROOT_DICT.get(throttle_key_str) == cleanup_date_str:
+        return {
+            "cleanup_attempted_bool": False,
+            "cleanup_skip_reason_str": "throttled",
+            "trace_log_root_path_str": str(trace_root_path_obj),
+        }
+    try:
+        cleanup_detail_dict = cleanup_pod_trace_retention_dict(
+            trace_log_root_path_str=trace_log_root_path_str,
+            active_trace_log_path_str=active_trace_log_path_str,
+            retention_days_int=retention_days_int,
+            now_ts=normalized_now_ts,
+            allow_non_default_trace_root_bool=allow_non_default_trace_root_bool,
+        )
+        if int(cleanup_detail_dict.get("error_count_int") or 0) == 0:
+            _POD_TRACE_RETENTION_CLEANUP_DATE_BY_ROOT_DICT[throttle_key_str] = cleanup_date_str
+        return cleanup_detail_dict
+    except Exception as exc:
+        return {
+            "cleanup_attempted_bool": False,
+            "cleanup_skip_reason_str": "cleanup_error",
+            "trace_log_root_path_str": str(trace_root_path_obj),
+            "error_str": str(exc),
+        }
+
+
 def log_trace_event(
     event_name_str: str,
     event_payload_dict: dict[str, Any],
@@ -247,10 +585,15 @@ def log_trace_event(
     trace_log_root_path_str: str = DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR,
     max_bytes_int: int | None = DEFAULT_TRACE_LOG_MAX_BYTES_INT,
     backup_count_int: int = DEFAULT_TRACE_LOG_BACKUP_COUNT_INT,
+    retention_days_int: int = DEFAULT_POD_TRACE_RETENTION_DAYS_INT,
+    allow_non_default_trace_root_bool: bool = False,
 ) -> str | None:
     if not trace_enabled_bool:
         return None
-    event_record_dict = build_structured_event_record_dict(event_name_str, event_payload_dict)
+    event_record_dict = build_structured_event_record_dict(
+        event_name_str,
+        redact_trace_secret_value_obj(event_payload_dict),
+    )
     resolved_trace_log_path_str = trace_log_path_str
     if resolved_trace_log_path_str is None:
         resolved_trace_log_path_str = resolve_pod_run_trace_log_path_str(
@@ -265,7 +608,53 @@ def log_trace_event(
         max_bytes_int=max_bytes_int,
         backup_count_int=backup_count_int,
     )
+    cleanup_pod_trace_retention_if_due_dict(
+        trace_log_root_path_str=trace_log_root_path_str,
+        active_trace_log_path_str=str(trace_log_path_obj),
+        retention_days_int=retention_days_int,
+        allow_non_default_trace_root_bool=allow_non_default_trace_root_bool,
+    )
     return str(trace_log_path_obj)
+
+
+def log_pod_trace_event(
+    event_name_str: str,
+    *,
+    trace_context_dict: dict[str, Any],
+    status_str: str,
+    reason_code_str: str,
+    payload_dict: dict[str, Any] | None = None,
+    trace_enabled_bool: bool,
+    trace_log_path_str: str | None = None,
+    trace_log_root_path_str: str = DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR,
+    max_bytes_int: int | None = DEFAULT_TRACE_LOG_MAX_BYTES_INT,
+    backup_count_int: int = DEFAULT_TRACE_LOG_BACKUP_COUNT_INT,
+    retention_days_int: int = DEFAULT_POD_TRACE_RETENTION_DAYS_INT,
+    allow_non_default_trace_root_bool: bool = False,
+) -> str | None:
+    if not trace_enabled_bool:
+        return None
+    try:
+        redacted_payload_dict = redact_trace_secret_value_obj(dict(payload_dict or {}))
+        event_payload_dict = {
+            **dict(trace_context_dict),
+            "status_str": str(status_str),
+            "reason_code_str": str(reason_code_str),
+            "payload_dict": redacted_payload_dict,
+        }
+        return log_trace_event(
+            event_name_str,
+            event_payload_dict,
+            trace_enabled_bool=True,
+            trace_log_path_str=trace_log_path_str,
+            trace_log_root_path_str=trace_log_root_path_str,
+            max_bytes_int=max_bytes_int,
+            backup_count_int=backup_count_int,
+            retention_days_int=retention_days_int,
+            allow_non_default_trace_root_bool=allow_non_default_trace_root_bool,
+        )
+    except Exception:
+        return None
 
 
 def format_operator_timestamp_str(timestamp_obj: datetime | str | None) -> str:

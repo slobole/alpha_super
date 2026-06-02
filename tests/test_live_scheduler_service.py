@@ -170,6 +170,14 @@ def _build_decision_plan_stub(release_obj, as_of_ts, pod_state_obj):
     )
 
 
+def _read_jsonl_list(path_obj: Path) -> list[dict[str, object]]:
+    return [
+        json.loads(line_str)
+        for line_str in path_obj.read_text(encoding="utf-8").splitlines()
+        if line_str.strip()
+    ]
+
+
 def test_run_once_rejects_invalid_deployment_before_invoking_tick(tmp_path: Path, monkeypatch):
     _write_guardrail_manifest(
         tmp_path,
@@ -1149,6 +1157,7 @@ def test_scheduler_run_once_active_polls_when_norgate_sync_waits(tmp_path: Path,
         "alpha.live.scheduler_utils.load_latest_norgate_heartbeat_session_label_ts",
         lambda data_profile_str: None,
     )
+    trace_root_path_obj = tmp_path / "trace"
 
     detail_dict = run_once(
         state_store_obj=LiveStateStore(str((tmp_path / "live.sqlite3").resolve())),
@@ -1156,11 +1165,26 @@ def test_scheduler_run_once_active_polls_when_norgate_sync_waits(tmp_path: Path,
         as_of_ts=datetime(2024, 1, 31, 15, 0, tzinfo=UTC),
         releases_root_path_str=str(tmp_path / "releases"),
         env_mode_str="paper",
+        trace_log_root_path_str=str(trace_root_path_obj),
     )
 
     assert detail_dict["tick_invoked_bool"] is False
     assert detail_dict["active_poll_bool"] is True
     assert detail_dict["pre_decision_norgate_snapshot_sync_detail_dict"]["reason_code_str"] == "api_config_missing"
+    trace_file_path_obj = next(trace_root_path_obj.rglob("trace_events.jsonl"))
+    trace_record_list = _read_jsonl_list(trace_file_path_obj)
+    scheduler_record_dict = [
+        record_dict
+        for record_dict in trace_record_list
+        if record_dict["event_name_str"] == "scheduler.decision"
+    ][0]
+    assert scheduler_record_dict["status_str"] == "WAIT"
+    assert scheduler_record_dict["reason_code_str"] == "waiting_for_eod_snapshot"
+    assert scheduler_record_dict["run_id_str"] == "paper_pod_test_01_scheduler_eod_snapshot"
+    assert scheduler_record_dict["payload_dict"]["payload_dict"][
+        "norgate_snapshot_sync_detail_dict"
+    ]["reason_code_str"] == "api_config_missing"
+    assert "2024" not in trace_file_path_obj.parent.name
 
 
 def test_norgate_sync_requirement_resumes_only_after_completed_cycle_goes_stale(

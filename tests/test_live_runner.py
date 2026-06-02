@@ -265,6 +265,14 @@ def _insert_ready_vplan_for_release(
     )
 
 
+def _read_jsonl_list(path_obj: Path) -> list[dict[str, object]]:
+    return [
+        json.loads(line_str)
+        for line_str in path_obj.read_text(encoding="utf-8").splitlines()
+        if line_str.strip()
+    ]
+
+
 def test_render_tick_detail_no_work_is_human_and_short():
     detail_dict = {
         "lease_acquired_bool": True,
@@ -2748,6 +2756,7 @@ def test_submit_vplan_explicit_manual_path(tmp_path: Path, monkeypatch):
     )
 
     state_store_obj = LiveStateStore(db_path_str)
+    trace_root_path_obj = tmp_path / "trace"
     broker_adapter_obj = StubBrokerAdapter()
     broker_adapter_obj.seed_account_snapshot(
         account_route_str="DU1",
@@ -2770,12 +2779,14 @@ def test_submit_vplan_explicit_manual_path(tmp_path: Path, monkeypatch):
         state_store_obj=state_store_obj,
         as_of_ts=datetime(2024, 1, 31, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
         releases_root_path_str=str(tmp_path / "releases"),
+        trace_log_root_path_str=str(trace_root_path_obj),
     )
     build_vplans(
         state_store_obj=state_store_obj,
         broker_adapter_obj=broker_adapter_obj,
         as_of_ts=datetime(2024, 2, 1, 9, 22, tzinfo=MARKET_TIMEZONE_OBJ),
         env_mode_str="paper",
+        trace_log_root_path_str=str(trace_root_path_obj),
     )
     latest_vplan_obj = state_store_obj.get_latest_vplan_for_pod("pod_test_01")
     assert latest_vplan_obj is not None
@@ -2787,15 +2798,48 @@ def test_submit_vplan_explicit_manual_path(tmp_path: Path, monkeypatch):
         env_mode_str="paper",
         manual_only_bool=False,
         vplan_id_int=int(latest_vplan_obj.vplan_id_int or 0),
+        trace_log_root_path_str=str(trace_root_path_obj),
     )
     reconcile_detail_dict = post_execution_reconcile(
         state_store_obj=state_store_obj,
         broker_adapter_obj=broker_adapter_obj,
         as_of_ts=datetime(2024, 2, 1, 9, 35, tzinfo=MARKET_TIMEZONE_OBJ),
+        trace_log_root_path_str=str(trace_root_path_obj),
     )
 
     assert submit_detail_dict["submitted_vplan_count_int"] == 1
     assert reconcile_detail_dict["completed_vplan_count_int"] == 1
+    trace_record_list = []
+    for trace_file_path_obj in trace_root_path_obj.rglob("trace_events.jsonl"):
+        trace_record_list.extend(_read_jsonl_list(trace_file_path_obj))
+    trace_event_name_set = {str(record_dict["event_name_str"]) for record_dict in trace_record_list}
+    assert "decision_plan.build" in trace_event_name_set
+    assert "vplan.inputs" in trace_event_name_set
+    assert "vplan.build" in trace_event_name_set
+    assert "vplan.submit_request" in trace_event_name_set
+    assert "vplan.submit_result" in trace_event_name_set
+    assert "vplan.reconcile" in trace_event_name_set
+    submit_result_record_dict = [
+        record_dict
+        for record_dict in trace_record_list
+        if record_dict["event_name_str"] == "vplan.submit_result"
+    ][0]
+    assert submit_result_record_dict["status_str"] == "PASS"
+    assert submit_result_record_dict["payload_dict"]["payload_dict"][
+        "broker_order_ack_dict_list"
+    ][0]["ack_status_str"] == "broker_acked"
+    cycle_id_set = {
+        str(record_dict["cycle_id_str"])
+        for record_dict in trace_record_list
+        if record_dict["event_name_str"]
+        in {
+            "decision_plan.build",
+            "vplan.build",
+            "vplan.submit_result",
+            "vplan.reconcile",
+        }
+    }
+    assert len(cycle_id_set) == 1
 
 
 def test_post_execution_reconcile_recovers_stale_submitting_vplan_from_broker_truth(
