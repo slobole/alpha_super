@@ -30,6 +30,17 @@ def _build_lifecycle_step_dict_list() -> list[dict[str, Any]]:
     ]
 
 
+def _pos(asset_str: str, share_float: float, price_float: float | None) -> dict[str, Any]:
+    is_priced_bool = price_float is not None
+    return {
+        "asset_str": asset_str,
+        "share_float": share_float,
+        "price_float": price_float if is_priced_bool else None,
+        "market_value_float": (share_float * price_float) if is_priced_bool else None,
+        "is_priced_bool": is_priced_bool,
+    }
+
+
 def _build_pod_row_dict(
     pod_id_str: str,
     mode_str: str,
@@ -37,6 +48,7 @@ def _build_pod_row_dict(
     *,
     strategy_import_str: str = "strategies.demo:Demo",
     equity_float: float | None = 14200.0,
+    position_exposure_dict_list: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "pod_id_str": pod_id_str,
@@ -49,6 +61,13 @@ def _build_pod_row_dict(
         "equity_float": equity_float,
         "cash_float": 1200.0,
         "position_count_int": 4,
+        "position_exposure_dict_list": (
+            position_exposure_dict_list
+            if position_exposure_dict_list is not None
+            else [_pos("SPY", 5, 500.0)]
+        ),
+        "latest_live_reference_snapshot_timestamp_str": "2026-05-21T20:00:00+00:00",
+        "latest_live_reference_source_str": "IB-BATS",
         "broker_ack_count_int": 4,
         "broker_order_count_int": 4,
         "missing_ack_count_int": 0,
@@ -80,8 +99,18 @@ def _build_summary_dict() -> dict[str, Any]:
     return {
         "as_of_timestamp_str": "2026-05-21T16:00:00+00:00",
         "pod_row_dict_list": [
-            _build_pod_row_dict("dv2_caspersky_live",   "live",  "green"),
-            _build_pod_row_dict("qp_mr_live",           "live",  "yellow"),
+            # Two live pods overlap on AAPL with opposite signs (offset) and one
+            # unpriced position (NVDA) to exercise the exposure aggregation.
+            _build_pod_row_dict(
+                "dv2_caspersky_live", "live", "green",
+                position_exposure_dict_list=[
+                    _pos("AAPL", 10, 186.4), _pos("NVDA", 4, None), _pos("TSLA", -3, 250.0),
+                ],
+            ),
+            _build_pod_row_dict(
+                "qp_mr_live", "live", "yellow",
+                position_exposure_dict_list=[_pos("AAPL", -4, 186.4), _pos("MSFT", 5, 400.0)],
+            ),
             _build_pod_row_dict("dv2_caspersky_paper",  "paper", "red"),
             _build_pod_row_dict("incubation_pod_demo",  "incubation", "gray"),
         ],
@@ -1035,3 +1064,104 @@ def test_journal_page_lists_entries_after_action(
     assert "Operator Journal" in response_text_str
     assert "submit_vplan" in response_text_str
     assert "dv2_caspersky_live" in response_text_str
+
+
+# ── cross-pod exposure ─────────────────────────────────────────────────────
+
+
+def test_build_position_exposure_dict_list_values_and_flags_unpriced() -> None:
+    from alpha.live.dashboard import build_position_exposure_dict_list
+
+    result_dict_list = build_position_exposure_dict_list(
+        {"AAPL": 10, "MSFT": 0.0, "NVDA": 4},   # MSFT ~0 → skipped
+        {"AAPL": 186.4, "MSFT": 400.0},          # NVDA has no price → unpriced
+    )
+    by_asset = {d["asset_str"]: d for d in result_dict_list}
+    assert set(by_asset) == {"AAPL", "NVDA"}
+    assert by_asset["AAPL"]["market_value_float"] == 1864.0
+    assert by_asset["AAPL"]["is_priced_bool"] is True
+    assert by_asset["NVDA"]["is_priced_bool"] is False
+    assert by_asset["NVDA"]["market_value_float"] is None
+    # Largest priced value first.
+    assert result_dict_list[0]["asset_str"] == "AAPL"
+
+
+def test_build_cross_pod_exposure_dict_nets_and_flags_offset() -> None:
+    from alpha.live.dashboard_v3.charts import build_cross_pod_exposure_dict
+
+    exposure_dict = build_cross_pod_exposure_dict([
+        {"pod_id_str": "p1", "equity_float": 10000.0, "position_exposure_dict_list": [
+            {"asset_str": "AAPL", "share_float": 10, "market_value_float": 1864.0, "is_priced_bool": True},
+            {"asset_str": "NVDA", "share_float": 4, "market_value_float": None, "is_priced_bool": False},
+            {"asset_str": "TSLA", "share_float": -3, "market_value_float": -750.0, "is_priced_bool": True},
+        ]},
+        {"pod_id_str": "p2", "equity_float": 10000.0, "position_exposure_dict_list": [
+            {"asset_str": "AAPL", "share_float": -4, "market_value_float": -745.6, "is_priced_bool": True},
+            {"asset_str": "MSFT", "share_float": 5, "market_value_float": 2000.0, "is_priced_bool": True},
+        ]},
+    ])
+    assert exposure_dict["has_data_bool"] is True
+    assert exposure_dict["pod_count_int"] == 2
+    assert exposure_dict["asset_count_int"] == 3
+    assert exposure_dict["unpriced_count_int"] == 1
+    rows_by_asset = {r["asset_str"]: r for r in exposure_dict["asset_row_dict_list"]}
+    # AAPL nets 1864 + (-745.6) = 1118.4, held both long and short → offset.
+    assert rows_by_asset["AAPL"]["net_value_label_str"] == "$1,118"
+    assert rows_by_asset["AAPL"]["is_offset_bool"] is True
+    assert rows_by_asset["AAPL"]["pod_count_int"] == 2
+    assert rows_by_asset["MSFT"]["is_offset_bool"] is False
+    assert rows_by_asset["TSLA"]["is_long_bool"] is False
+    # gross = 1118.4 + 2000 + 750 = 3868.4 over a 20,000 book → 0.19x.
+    assert exposure_dict["gross_value_label_str"] == "$3,868"
+    assert exposure_dict["short_value_label_str"] == "-$750"
+    assert exposure_dict["leverage_label_str"] == "0.19x"
+    # Sorted by absolute net value: MSFT (2000) first.
+    assert exposure_dict["asset_row_dict_list"][0]["asset_str"] == "MSFT"
+
+
+def test_build_cross_pod_exposure_dict_empty_has_no_data() -> None:
+    from alpha.live.dashboard_v3.charts import build_cross_pod_exposure_dict
+
+    assert build_cross_pod_exposure_dict([])["has_data_bool"] is False
+    only_unpriced = build_cross_pod_exposure_dict([
+        {"pod_id_str": "p1", "equity_float": 1000.0, "position_exposure_dict_list": [
+            {"asset_str": "X", "share_float": 1, "market_value_float": None, "is_priced_bool": False},
+        ]},
+    ])
+    assert only_unpriced["has_data_bool"] is False
+    assert only_unpriced["unpriced_count_int"] == 1
+
+
+def test_exposure_index_redirects_to_live(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/exposure")
+    assert response_obj.status_code == 302
+    assert response_obj.headers["Location"].endswith("/exposure/live")
+
+
+def test_exposure_unknown_mode_returns_404(test_client_obj) -> None:
+    assert test_client_obj.get("/exposure/martian").status_code == 404
+
+
+def test_exposure_page_nets_positions_across_pods(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/exposure/live")
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    # Summary + tickers from the two live pods.
+    assert "Gross" in response_text_str
+    assert "Leverage" in response_text_str
+    for ticker_str in ("AAPL", "MSFT", "TSLA"):
+        assert ticker_str in response_text_str
+    # AAPL is offset (long in one pod, short in another) and nets to $1,118.
+    assert "offset" in response_text_str
+    assert "$1,118" in response_text_str
+    # gross 3868.4 / book 28400 → 0.14x; NVDA unpriced is surfaced, not dropped.
+    assert "0.14x" in response_text_str
+    assert "unpriced" in response_text_str
+    # Price-basis label is explicit.
+    assert "latest reference" in response_text_str
+
+
+def test_nav_includes_exposure_link(test_client_obj) -> None:
+    response_text_str = test_client_obj.get("/live").get_data(as_text=True)
+    assert 'href="/exposure"' in response_text_str
+    assert "Exposure" in response_text_str

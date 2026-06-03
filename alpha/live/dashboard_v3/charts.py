@@ -533,6 +533,135 @@ def build_book_risk_dict(
     )
 
 
+# ── cross-pod exposure ─────────────────────────────────────────────────────
+#
+# Nets each mode's positions by ticker ACROSS all pods, so overlapping (or
+# offsetting) bets become visible. Each pod contributes valued positions
+# (asset, signed shares, market value); we sum signed market value per ticker,
+# then derive gross/net/long/short and leverage vs the book's equity. Read-only
+# reporting — no quant logic. All values USD. Pure function, like the builders
+# above; the per-pod valuation lives in
+# alpha.live.dashboard.build_position_exposure_dict_list.
+
+
+def _format_signed_share_str(share_float: float) -> str:
+    sign_str = "+" if share_float >= 0 else "-"
+    abs_share_float = abs(share_float)
+    if abs_share_float >= 1000:
+        return f"{sign_str}{abs_share_float:,.0f}"
+    body_str = f"{abs_share_float:.2f}".rstrip("0").rstrip(".") or "0"
+    return f"{sign_str}{body_str}"
+
+
+def build_cross_pod_exposure_dict(
+    pod_exposure_input_dict_list: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """Net positions by ticker across a mode's pods.
+
+    Each input dict: ``{pod_id_str, equity_float, position_exposure_dict_list}``
+    where each position carries ``asset_str``, ``share_float`` and
+    ``market_value_float`` (None when unpriced). Unpriced positions are counted
+    but cannot enter the $-netting (surfaced, never silently dropped).
+    """
+    total_equity_float = 0.0
+    unpriced_count_int = 0
+    asset_accumulator_dict: dict[str, dict[str, Any]] = {}
+    contributing_pod_id_set: set[str] = set()
+
+    for pod_input_dict in pod_exposure_input_dict_list or []:
+        pod_id_str = str(pod_input_dict.get("pod_id_str") or "?")
+        equity_float = _float_or_none(pod_input_dict.get("equity_float"))
+        if equity_float is not None and equity_float > 0:
+            total_equity_float += equity_float
+        for position_dict in pod_input_dict.get("position_exposure_dict_list") or []:
+            if not position_dict.get("is_priced_bool"):
+                unpriced_count_int += 1
+                continue
+            market_value_float = _float_or_none(position_dict.get("market_value_float"))
+            share_float = _float_or_none(position_dict.get("share_float"))
+            if market_value_float is None or share_float is None:
+                unpriced_count_int += 1
+                continue
+            asset_str = str(position_dict.get("asset_str") or "?")
+            accumulator_dict = asset_accumulator_dict.setdefault(
+                asset_str,
+                {"net_value_float": 0.0, "net_share_float": 0.0, "holder_dict_list": []},
+            )
+            accumulator_dict["net_value_float"] += market_value_float
+            accumulator_dict["net_share_float"] += share_float
+            accumulator_dict["holder_dict_list"].append(
+                {
+                    "pod_id_str": pod_id_str,
+                    "share_float": share_float,
+                    "share_label_str": _format_signed_share_str(share_float),
+                    "value_label_str": _format_money_str(market_value_float),
+                    "is_long_bool": share_float >= 0,
+                }
+            )
+            contributing_pod_id_set.add(pod_id_str)
+
+    if not asset_accumulator_dict:
+        return {
+            "has_data_bool": False,
+            "unpriced_count_int": unpriced_count_int,
+            "asset_row_dict_list": [],
+        }
+
+    asset_row_dict_list: list[dict[str, Any]] = []
+    gross_value_float = 0.0
+    net_value_float = 0.0
+    long_value_float = 0.0
+    short_value_float = 0.0
+    for asset_str, accumulator_dict in asset_accumulator_dict.items():
+        asset_net_value_float = accumulator_dict["net_value_float"]
+        gross_value_float += abs(asset_net_value_float)
+        net_value_float += asset_net_value_float
+        if asset_net_value_float >= 0:
+            long_value_float += asset_net_value_float
+        else:
+            short_value_float += asset_net_value_float
+        has_long_holder_bool = any(h["share_float"] > 0 for h in accumulator_dict["holder_dict_list"])
+        has_short_holder_bool = any(h["share_float"] < 0 for h in accumulator_dict["holder_dict_list"])
+        concentration_pct_float = (
+            abs(asset_net_value_float) / total_equity_float if total_equity_float > 0 else 0.0
+        )
+        asset_row_dict_list.append(
+            {
+                "asset_str": asset_str,
+                "net_share_float": accumulator_dict["net_share_float"],
+                "net_share_label_str": _format_signed_share_str(accumulator_dict["net_share_float"]),
+                "net_value_float": asset_net_value_float,
+                "net_value_label_str": _format_money_str(asset_net_value_float),
+                "concentration_pct_float": concentration_pct_float,
+                "concentration_label_str": f"{concentration_pct_float * 100:.1f}%",
+                "pod_count_int": len(accumulator_dict["holder_dict_list"]),
+                "is_long_bool": asset_net_value_float >= 0,
+                "is_offset_bool": has_long_holder_bool and has_short_holder_bool,
+                "holder_dict_list": accumulator_dict["holder_dict_list"],
+            }
+        )
+
+    asset_row_dict_list.sort(key=lambda row_dict: abs(row_dict["net_value_float"]), reverse=True)
+    leverage_label_str = (
+        f"{gross_value_float / total_equity_float:.2f}x" if total_equity_float > 0 else "—"
+    )
+
+    return {
+        "has_data_bool": True,
+        "pod_count_int": len(contributing_pod_id_set),
+        "asset_count_int": len(asset_row_dict_list),
+        "total_equity_float": total_equity_float,
+        "total_equity_label_str": _format_money_str(total_equity_float),
+        "gross_value_label_str": _format_money_str(gross_value_float),
+        "net_value_label_str": _format_money_str(net_value_float),
+        "long_value_label_str": _format_money_str(long_value_float),
+        "short_value_label_str": _format_money_str(short_value_float),
+        "leverage_label_str": leverage_label_str,
+        "unpriced_count_int": unpriced_count_int,
+        "asset_row_dict_list": asset_row_dict_list,
+    }
+
+
 __all__ = [
     "CHART_VIEW_HEIGHT_INT",
     "CHART_VIEW_WIDTH_INT",
@@ -543,5 +672,6 @@ __all__ = [
     "SUPPORTED_WINDOW_STR_LIST",
     "build_allocation_pie_dict",
     "build_book_risk_dict",
+    "build_cross_pod_exposure_dict",
     "build_equity_chart_dict",
 ]

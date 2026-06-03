@@ -25,6 +25,7 @@ from alpha.live.dashboard_v3.charts import (
     SUPPORTED_WINDOW_STR_LIST,
     build_allocation_pie_dict,
     build_book_risk_dict,
+    build_cross_pod_exposure_dict,
     build_equity_chart_dict,
 )
 from alpha.live.dashboard_v3.data import (
@@ -129,6 +130,43 @@ def create_app(
     @flask_app_obj.route("/")
     def index_route_fn() -> Response:
         return redirect(url_for("mode_page_route_fn", mode_str="live"))
+
+    @flask_app_obj.route("/exposure")
+    def exposure_index_route_fn() -> Response:
+        return redirect(url_for("exposure_page_route_fn", mode_str="live"))
+
+    @flask_app_obj.route("/exposure/<mode_str>")
+    def exposure_page_route_fn(mode_str: str):
+        if mode_str not in SUPPORTED_MODE_STR_LIST:
+            abort(404)
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        summary_dict = provider_obj.get_summary_dict()
+        pod_row_dict_list = get_pod_row_dict_list_for_mode(summary_dict, mode_str)
+        exposure_dict = build_cross_pod_exposure_dict([
+            {
+                "pod_id_str": row_dict.get("pod_id_str"),
+                "equity_float": row_dict.get("equity_float"),
+                "position_exposure_dict_list": row_dict.get("position_exposure_dict_list"),
+            }
+            for row_dict in pod_row_dict_list
+        ])
+        reference_timestamp_str, reference_source_str = _resolve_exposure_reference_meta(
+            pod_row_dict_list
+        )
+        verdict_obj = resolve_top_bar_verdict(summary_dict)
+        return render_template(
+            "exposure_page.html",
+            mode_str=mode_str,
+            nav_active_str="exposure",
+            mode_label_str=MODE_LABEL_DICT[mode_str],
+            supported_mode_str_list=SUPPORTED_MODE_STR_LIST,
+            mode_label_dict=MODE_LABEL_DICT,
+            exposure_dict=exposure_dict,
+            reference_timestamp_str=reference_timestamp_str,
+            reference_source_str=reference_source_str,
+            verdict_dict=verdict_obj.as_dict(),
+            as_of_clock_str=_now_clock_str(),
+        )
 
     @flask_app_obj.route("/<mode_str>")
     def mode_page_route_fn(mode_str: str):
@@ -457,6 +495,28 @@ def _build_trace_level_count_dict(event_dict_list: list[dict[str, Any]]) -> dict
     for event_dict in event_dict_list:
         count_dict[_normalize_trace_level_bucket_str(event_dict.get("level_str"))] += 1
     return count_dict
+
+
+def _resolve_exposure_reference_meta(
+    pod_row_dict_list: list[dict[str, Any]],
+) -> tuple[str | None, str | None]:
+    """Newest reference-price snapshot timestamp + a representative source label
+    across the mode's pods, for the exposure page's price-basis label. ISO
+    timestamps sort chronologically, so ``max`` is the freshest."""
+    timestamp_str_list = [
+        str(row_dict.get("latest_live_reference_snapshot_timestamp_str"))
+        for row_dict in pod_row_dict_list
+        if row_dict.get("latest_live_reference_snapshot_timestamp_str")
+    ]
+    source_str_list = [
+        str(row_dict.get("latest_live_reference_source_str"))
+        for row_dict in pod_row_dict_list
+        if row_dict.get("latest_live_reference_source_str")
+    ]
+    return (
+        max(timestamp_str_list) if timestamp_str_list else None,
+        source_str_list[0] if source_str_list else None,
+    )
 
 
 def _is_attention_row_bool(row_dict: dict[str, Any]) -> bool:

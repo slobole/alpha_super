@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Exposure · {{ mode_label_str }}{% endblock %}
+{% block content %}
+
+{# Cross-pod exposure: positions netted by ticker across all pods of this mode.
+   Read-only. Positions = current persisted snapshot; prices = latest VPlan
+   reference (basis labeled below). Unpriced positions are surfaced, not dropped. #}
+
+<section class="mb-4">
+  <div class="flex items-baseline justify-between gap-4 mb-2">
+    <h1 class="text-2xl font-bold tracking-tight">{{ mode_label_str }} exposure</h1>
+    {# Per-mode toggle (the Exposure view is mode-scoped). #}
+    <div class="flex gap-1 text-sm">
+      {% for toggle_mode_str in supported_mode_str_list %}
+        <a href="/exposure/{{ toggle_mode_str }}"
+           class="px-3 py-1.5 rounded-md
+                  {% if toggle_mode_str == mode_str %}bg-ink-900 text-white{% else %}text-ink-700 hover:bg-ink-100 border border-ink-100{% endif %}">
+          {{ mode_label_dict[toggle_mode_str] }}
+        </a>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="text-xs text-ink-500">
+    positions: current snapshot · prices: latest reference{% if reference_timestamp_str %} {{ reference_timestamp_str | clock }}{% endif %}{% if reference_source_str %} · {{ reference_source_str }}{% endif %} · USD
+  </div>
+</section>
+
+{% if not exposure_dict.has_data_bool %}
+  <div class="rounded-md border border-ink-100 bg-white p-8 text-center text-ink-500">
+    No priced positions across {{ mode_str }} pods yet.
+    {% if exposure_dict.unpriced_count_int %}
+      <div class="mt-1 text-xs">{{ exposure_dict.unpriced_count_int }} position(s) held but unpriced (no reference price).</div>
+    {% endif %}
+  </div>
+{% else %}
+
+  {# ── Summary strip: gross / net / long / short / leverage ─────────────── #}
+  <section class="mb-4 rounded-md border border-ink-100 bg-white shadow-sm px-4 py-3">
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+      <div>
+        <div class="text-[11px] uppercase tracking-wide text-ink-500">Gross</div>
+        <div class="font-semibold tabular-nums text-ink-900">{{ exposure_dict.gross_value_label_str }}</div>
+      </div>
+      <div>
+        <div class="text-[11px] uppercase tracking-wide text-ink-500">Net</div>
+        <div class="font-semibold tabular-nums text-ink-900">{{ exposure_dict.net_value_label_str }}</div>
+      </div>
+      <div>
+        <div class="text-[11px] uppercase tracking-wide text-ink-500">Long</div>
+        <div class="font-semibold tabular-nums text-ok">{{ exposure_dict.long_value_label_str }}</div>
+      </div>
+      <div>
+        <div class="text-[11px] uppercase tracking-wide text-ink-500">Short</div>
+        <div class="font-semibold tabular-nums text-bad">{{ exposure_dict.short_value_label_str }}</div>
+      </div>
+      <div>
+        <div class="text-[11px] uppercase tracking-wide text-ink-500">Leverage (gross/equity)</div>
+        <div class="font-semibold tabular-nums text-ink-900">{{ exposure_dict.leverage_label_str }}</div>
+      </div>
+    </div>
+    <div class="mt-2 pt-2 border-t border-ink-100 flex items-center justify-between text-xs text-ink-500">
+      <span>{{ exposure_dict.asset_count_int }} tickers · {{ exposure_dict.pod_count_int }} pods · book {{ exposure_dict.total_equity_label_str }}</span>
+      {% if exposure_dict.unpriced_count_int %}
+        <span class="text-warn">{{ exposure_dict.unpriced_count_int }} unpriced (not in totals)</span>
+      {% endif %}
+    </div>
+  </section>
+
+  {# ── Net exposure by ticker (largest first), expandable to per-pod holders ── #}
+  <section class="rounded-md border border-ink-100 bg-white shadow-sm overflow-hidden">
+    <div class="px-4 py-2 grid grid-cols-12 gap-2 text-[11px] uppercase tracking-wide text-ink-500 bg-ink-50 border-b border-ink-100">
+      <span class="col-span-3">Ticker</span>
+      <span class="col-span-2 text-right">Net shares</span>
+      <span class="col-span-3 text-right">Net exposure</span>
+      <span class="col-span-2 text-right">% of book</span>
+      <span class="col-span-2 text-right">Pods</span>
+    </div>
+    <ul class="text-sm">
+      {% for asset_row in exposure_dict.asset_row_dict_list %}
+        <li class="border-t border-ink-50 first:border-t-0">
+          <details>
+            <summary class="px-4 py-2 grid grid-cols-12 gap-2 items-baseline cursor-pointer hover:bg-ink-50/60">
+              <span class="col-span-3 font-semibold flex items-center gap-2">
+                {{ asset_row.asset_str }}
+                <span class="text-[10px] uppercase font-bold px-1 py-0.5 rounded
+                             {% if asset_row.is_long_bool %}bg-ok-soft text-ok{% else %}bg-bad-soft text-bad{% endif %}">
+                  {{ 'long' if asset_row.is_long_bool else 'short' }}
+                </span>
+                {% if asset_row.is_offset_bool %}
+                  <span class="text-[10px] uppercase font-bold px-1 py-0.5 rounded bg-warn-soft text-warn"
+                        title="held long in one pod and short in another">offset</span>
+                {% endif %}
+              </span>
+              <span class="col-span-2 text-right tabular-nums">{{ asset_row.net_share_label_str }}</span>
+              <span class="col-span-3 text-right tabular-nums font-medium
+                           {% if asset_row.is_long_bool %}text-ink-900{% else %}text-bad{% endif %}">
+                {{ asset_row.net_value_label_str }}
+              </span>
+              <span class="col-span-2 text-right tabular-nums">{{ asset_row.concentration_label_str }}</span>
+              <span class="col-span-2 text-right tabular-nums text-ink-500">{{ asset_row.pod_count_int }}</span>
+            </summary>
+            <div class="px-4 pb-2 pl-8 text-xs text-ink-600">
+              {% for holder_dict in asset_row.holder_dict_list %}
+                <div class="grid grid-cols-12 gap-2 py-0.5 tabular-nums">
+                  <span class="col-span-5 truncate">{{ holder_dict.pod_id_str }}</span>
+                  <span class="col-span-3 text-right">{{ holder_dict.share_label_str }} sh</span>
+                  <span class="col-span-4 text-right {% if holder_dict.is_long_bool %}text-ink-700{% else %}text-bad{% endif %}">{{ holder_dict.value_label_str }}</span>
+                </div>
+              {% endfor %}
+            </div>
+          </details>
+        </li>
+      {% endfor %}
+    </ul>
+  </section>
+{% endif %}
+
+{% endblock %}
