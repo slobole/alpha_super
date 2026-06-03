@@ -642,6 +642,8 @@ def build_pod_row_dict(
         "cash_float": None,
         "equity_float": None,
         "position_count_int": 0,
+        "position_exposure_dict_list": [],
+        "position_unpriced_count_int": 0,
         "broker_order_count_int": 0,
         "broker_ack_count_int": 0,
         "fill_count_int": 0,
@@ -825,6 +827,13 @@ def build_pod_row_dict(
         base_row_dict["missing_ack_count_int"] = int(
             latest_vplan_row_dict.get("missing_ack_count_int") or 0
         )
+    # Per-asset prices come from the latest VPlan reference snapshot; used to
+    # value current positions for the cross-pod exposure view (no extra reads).
+    latest_reference_price_map_dict = (
+        _json_map_dict(latest_vplan_row_dict.get("live_reference_price_json_str"))
+        if latest_vplan_row_dict is not None
+        else {}
+    )
     if pod_state_row_dict is not None:
         position_map_dict = _json_map_dict(pod_state_row_dict.get("position_json_str"))
         base_row_dict["position_count_int"] = len(
@@ -833,6 +842,9 @@ def build_pod_row_dict(
                 for amount_float in position_map_dict.values()
                 if abs(float(amount_float)) > 1e-9
             ]
+        )
+        _attach_position_exposure_fields(
+            base_row_dict, position_map_dict, latest_reference_price_map_dict
         )
         base_row_dict["cash_float"] = pod_state_row_dict.get("cash_float")
         base_row_dict["equity_float"] = pod_state_row_dict.get("total_value_float")
@@ -846,6 +858,19 @@ def build_pod_row_dict(
             "snapshot_source_str"
         )
     elif broker_snapshot_row_dict is not None:
+        broker_position_map_dict = _json_map_dict(
+            broker_snapshot_row_dict.get("position_json_str")
+        )
+        base_row_dict["position_count_int"] = len(
+            [
+                amount_float
+                for amount_float in broker_position_map_dict.values()
+                if abs(float(amount_float)) > 1e-9
+            ]
+        )
+        _attach_position_exposure_fields(
+            base_row_dict, broker_position_map_dict, latest_reference_price_map_dict
+        )
         base_row_dict["cash_float"] = broker_snapshot_row_dict.get("cash_float")
         base_row_dict["equity_float"] = broker_snapshot_row_dict.get("net_liq_float")
 
@@ -4204,6 +4229,57 @@ def _optional_float(value_obj: Any) -> float | None:
         return float(value_obj)
     except (TypeError, ValueError):
         return None
+
+
+def build_position_exposure_dict_list(
+    position_map_dict: dict[str, Any] | None,
+    price_map_dict: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Value a single pod's current positions for the cross-pod exposure view.
+
+    ``position_map_dict`` is ``asset_str -> shares`` (``+`` long / ``-`` short,
+    from pod_state/broker ``position_json_str``). ``price_map_dict`` is
+    ``asset_str -> price`` (latest VPlan ``live_reference_price_json_str``).
+    Zero-ish positions are skipped. An asset with shares but no usable price is
+    kept as ``is_priced_bool=False`` (surfaced as "unpriced", never dropped).
+    All values are USD. Read-only — no quant logic.
+    """
+    exposure_dict_list: list[dict[str, Any]] = []
+    for asset_obj, share_obj in (position_map_dict or {}).items():
+        share_float = _optional_float(share_obj)
+        if share_float is None or abs(share_float) <= 1e-9:
+            continue
+        price_float = _optional_float((price_map_dict or {}).get(asset_obj))
+        is_priced_bool = price_float is not None and price_float > 0
+        market_value_float = share_float * price_float if is_priced_bool else None
+        exposure_dict_list.append(
+            {
+                "asset_str": str(asset_obj),
+                "share_float": share_float,
+                "price_float": price_float if is_priced_bool else None,
+                "market_value_float": market_value_float,
+                "is_priced_bool": is_priced_bool,
+            }
+        )
+    exposure_dict_list.sort(
+        key=lambda item_dict: abs(item_dict["market_value_float"])
+        if item_dict["market_value_float"] is not None
+        else 0.0,
+        reverse=True,
+    )
+    return exposure_dict_list
+
+
+def _attach_position_exposure_fields(
+    base_row_dict: dict[str, Any],
+    position_map_dict: dict[str, Any] | None,
+    price_map_dict: dict[str, Any] | None,
+) -> None:
+    exposure_dict_list = build_position_exposure_dict_list(position_map_dict, price_map_dict)
+    base_row_dict["position_exposure_dict_list"] = exposure_dict_list
+    base_row_dict["position_unpriced_count_int"] = sum(
+        1 for item_dict in exposure_dict_list if not item_dict["is_priced_bool"]
+    )
 
 
 def _benchmark_slippage_dict(
