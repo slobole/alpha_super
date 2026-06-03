@@ -1165,3 +1165,51 @@ def test_nav_includes_exposure_link(test_client_obj) -> None:
     response_text_str = test_client_obj.get("/live").get_data(as_text=True)
     assert 'href="/exposure"' in response_text_str
     assert "Exposure" in response_text_str
+
+
+# ── daily % + monthly returns + capped PnL bars ────────────────────────────
+
+
+def test_equity_chart_exposes_daily_pct_and_latest_day() -> None:
+    from alpha.live.dashboard_v3.charts import build_equity_chart_dict
+
+    chart_dict = build_equity_chart_dict([
+        {"market_date_str": "2026-05-19", "equity_float": 14000.0, "daily_pnl_float": 0.0},
+        {"market_date_str": "2026-05-20", "equity_float": 14140.0, "daily_pnl_float": 140.0},
+        {"market_date_str": "2026-05-21", "equity_float": 13999.0, "daily_pnl_float": -141.0},
+    ]).as_dict()
+    points = chart_dict["point_dict_list"]
+    assert points[0]["daily_pct_label_str"] == "—"          # first point has no prior
+    assert points[1]["daily_pct_label_str"] == "+1.00%"      # 14140/14000 - 1
+    assert chart_dict["latest_daily_pct_label_str"] == "-1.00%"
+    assert chart_dict["latest_daily_is_positive_bool"] is False
+    assert chart_dict["latest_daily_pnl_label_str"] == "-$141"
+    # Daily-PnL bars are width-capped so they never merge into a slab.
+    assert chart_dict["pnl_bar_dict_list"]
+    for bar_dict in chart_dict["pnl_bar_dict_list"]:
+        assert bar_dict["width_float"] <= 14.0
+
+
+def test_build_monthly_return_dict_list_groups_by_month() -> None:
+    from alpha.live.dashboard_v3.charts import build_monthly_return_dict_list
+
+    months = build_monthly_return_dict_list([
+        {"market_date_str": "2026-04-30", "equity_float": 10000.0},
+        {"market_date_str": "2026-05-15", "equity_float": 10500.0},
+        {"market_date_str": "2026-05-31", "equity_float": 11000.0},
+        {"market_date_str": "2026-06-02", "equity_float": 11220.0},
+    ])
+    assert [m["month_label_str"] for m in months] == ["Apr 26", "May 26", "Jun 26"]
+    assert months[1]["return_label_str"] == "+10.00%"   # 11000/10000 - 1
+    assert months[2]["return_label_str"] == "+2.00%"    # 11220/11000 - 1
+    assert months[1]["is_positive_bool"] is True
+    assert build_monthly_return_dict_list([]) == []
+
+
+def test_mode_page_shows_daily_pct_and_monthly_returns(test_client_obj) -> None:
+    response_text_str = test_client_obj.get("/live").get_data(as_text=True)
+    assert "today" in response_text_str          # latest daily % next to equity
+    assert "Daily PnL" in response_text_str       # the bar strip is now labeled
+    assert "recent days" in response_text_str     # recent-days table
+    assert "Monthly return" in response_text_str  # monthly strip
+    assert "May 26" in response_text_str          # the live combined book is all in May 2026

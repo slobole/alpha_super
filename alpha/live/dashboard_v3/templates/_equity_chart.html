@@ -16,7 +16,10 @@
       <span>{{ chart_dict.earliest_market_date_str or '—' }}</span>
       <span class="tabular-nums">
         latest <strong class="text-ink-900">{{ chart_dict.latest_equity_float | money }}</strong>
-        on {{ chart_dict.latest_market_date_str or '—' }}
+        <span class="{% if chart_dict.latest_daily_is_positive_bool %}text-ok{% else %}text-bad{% endif %}">
+          {{ chart_dict.latest_daily_pct_label_str }} today
+        </span>
+        <span class="text-ink-400">({{ chart_dict.latest_daily_pnl_label_str }})</span>
       </span>
       <span>{{ chart_dict.point_count_int }} pts</span>
     </div>
@@ -33,23 +36,26 @@
       {% for point_dict in chart_dict.point_dict_list %}
         <circle cx="{{ point_dict.x_float }}" cy="{{ point_dict.y_float }}" r="1.5"
                 fill="#15803d" stroke="#ffffff" stroke-width="0.5">
-          <title>{{ point_dict.market_date_str }} · {{ point_dict.equity_label_str }} · {{ point_dict.daily_pnl_label_str }}</title>
+          <title>{{ point_dict.market_date_str }} · {{ point_dict.equity_label_str }} · {{ point_dict.daily_pnl_label_str }} ({{ point_dict.daily_pct_label_str }})</title>
         </circle>
       {% endfor %}
     </svg>
     {% if chart_dict.pnl_bar_dict_list %}
+      <div class="text-[10px] uppercase tracking-wide text-ink-400 mt-2">Daily PnL</div>
       <svg viewBox="0 0 {{ chart_dict.width_int }} {{ chart_dict.bar_height_int }}"
            preserveAspectRatio="none"
-           class="w-full block mt-1"
+           class="w-full block mt-0.5"
            style="height:{{ chart_dict.bar_height_int }}px;"
-           role="img" aria-label="Daily PnL bars">
+           role="img" aria-label="Daily PnL bars (green up day, red down day)">
         <line x1="0" x2="{{ chart_dict.width_int }}"
               y1="{{ chart_dict.bar_height_int / 2 }}" y2="{{ chart_dict.bar_height_int / 2 }}"
               stroke="#e5e7eb" stroke-width="0.5"></line>
         {% for bar_dict in chart_dict.pnl_bar_dict_list %}
           <rect x="{{ bar_dict.x_float }}" y="{{ bar_dict.y_float }}"
                 width="{{ bar_dict.width_float }}" height="{{ bar_dict.height_float }}"
-                fill="{% if bar_dict.is_positive_bool %}#15803d{% else %}#b91c1c{% endif %}"></rect>
+                fill="{% if bar_dict.is_positive_bool %}#15803d{% else %}#b91c1c{% endif %}">
+            <title>{{ bar_dict.market_date_str }} · {{ bar_dict.pnl_label_str }}</title>
+          </rect>
         {% endfor %}
       </svg>
     {% endif %}
@@ -57,6 +63,33 @@
       <span>min {{ chart_dict.range_min_label_str }}</span>
       <span>max {{ chart_dict.range_max_label_str }}</span>
     </div>
+
+    {# Recent days: date · equity · daily $ · daily %. Collapsed by default. #}
+    <details class="mt-1">
+      <summary class="cursor-pointer text-[11px] text-ink-500 hover:text-ink-900">recent days</summary>
+      <table class="mt-1 w-full text-xs tabular-nums">
+        <thead class="text-ink-400">
+          <tr>
+            <th class="text-left font-normal">Date</th>
+            <th class="text-right font-normal">Equity</th>
+            <th class="text-right font-normal">Daily PnL</th>
+            <th class="text-right font-normal">%</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for point_dict in chart_dict.point_dict_list[-8:] | reverse %}
+            <tr class="border-t border-ink-100">
+              <td>{{ point_dict.market_date_str }}</td>
+              <td class="text-right">{{ point_dict.equity_label_str }}</td>
+              <td class="text-right">{{ point_dict.daily_pnl_label_str }}</td>
+              <td class="text-right {% if (point_dict.daily_pct_float or 0) >= 0 %}text-ok{% else %}text-bad{% endif %}">
+                {{ point_dict.daily_pct_label_str }}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </details>
   {% endif %}
 
   {% if window_selector_pod_id_str %}
