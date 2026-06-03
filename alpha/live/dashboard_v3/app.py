@@ -26,6 +26,7 @@ from alpha.live.dashboard_v3.charts import (
     build_allocation_pie_dict,
     build_book_risk_dict,
     build_equity_chart_dict,
+    build_monthly_return_dict_list,
 )
 from alpha.live.dashboard_v3.data import (
     DashboardActionInFlightError,
@@ -166,6 +167,7 @@ def create_app(
             if chart_obj.point_count_int > 0:
                 combined_book_chart_dict = chart_obj.as_dict()
         book_risk_obj = build_book_risk_dict(combined_book_equity_point_dict_list)
+        monthly_return_dict_list = build_monthly_return_dict_list(combined_book_equity_point_dict_list)
         return render_template(
             "mode_page.html",
             mode_str=mode_str,
@@ -177,6 +179,7 @@ def create_app(
             combined_book_chart_dict=combined_book_chart_dict,
             combined_book_summary_dict=combined_book_env_dict or {},
             book_risk_dict=book_risk_obj.as_dict(),
+            monthly_return_dict_list=monthly_return_dict_list,
             allocation_pie_dict=allocation_pie_obj.as_dict(),
         )
 

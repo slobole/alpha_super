@@ -1,0 +1,19 @@
+{# Per-month return % of the combined book, computed from the EOD equity series
+   (month-end / previous month-end - 1; first month uses the series start).
+   Read-only reporting. #}
+{% if monthly_return_dict_list %}
+  <div class="mt-3 pt-3 border-t border-ink-100">
+    <div class="text-[10px] uppercase tracking-wide text-ink-400 mb-1.5">Monthly return</div>
+    <div class="flex flex-wrap gap-2">
+      {% for month_dict in monthly_return_dict_list %}
+        <div class="rounded-md border px-2 py-1 text-xs tabular-nums
+                    {% if month_dict.is_positive_bool %}border-ok/30 bg-ok-soft/50{% else %}border-bad/30 bg-bad-soft/50{% endif %}">
+          <span class="text-ink-500">{{ month_dict.month_label_str }}</span>
+          <strong class="ml-1 {% if month_dict.is_positive_bool %}text-ok{% else %}text-bad{% endif %}">
+            {{ month_dict.return_label_str }}
+          </strong>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+{% endif %}

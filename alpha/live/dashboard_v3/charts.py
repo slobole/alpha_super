@@ -26,7 +26,15 @@ CHART_VIEW_WIDTH_INT = 600
 CHART_VIEW_HEIGHT_INT = 120
 CHART_VERTICAL_PADDING_INT = 6
 PNL_BAR_BLOCK_HEIGHT_INT = 32
+# Cap the daily-PnL bar width (viewBox units) so a handful of EOD points render
+# as distinct bars instead of merging into one fat slab.
+MAX_PNL_BAR_WIDTH_FLOAT = 14.0
 SUPPORTED_WINDOW_STR_LIST = ["30d", "90d", "all"]
+
+_MONTH_ABBREVIATION_STR_LIST = [
+    "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+]
 
 
 @dataclass
@@ -44,6 +52,9 @@ class EquityChartDict:
     latest_equity_float: float | None = None
     latest_market_date_str: str | None = None
     earliest_market_date_str: str | None = None
+    latest_daily_pnl_label_str: str = "—"
+    latest_daily_pct_label_str: str = "—"
+    latest_daily_is_positive_bool: bool = True
     window_str: str = "all"
 
     def as_dict(self) -> dict[str, Any]:
@@ -61,6 +72,9 @@ class EquityChartDict:
             "latest_equity_float": self.latest_equity_float,
             "latest_market_date_str": self.latest_market_date_str,
             "earliest_market_date_str": self.earliest_market_date_str,
+            "latest_daily_pnl_label_str": self.latest_daily_pnl_label_str,
+            "latest_daily_pct_label_str": self.latest_daily_pct_label_str,
+            "latest_daily_is_positive_bool": self.latest_daily_is_positive_bool,
             "window_str": self.window_str,
             "width_int": CHART_VIEW_WIDTH_INT,
             "height_int": CHART_VIEW_HEIGHT_INT,
@@ -122,17 +136,30 @@ def build_equity_chart_dict(
             - ((float(equity_float) - float(range_min_float)) / value_range_float) * inner_height_float  # type: ignore[arg-type]
         )
         point_xy_list.append((x_float, y_float))
+        # Daily return % from the equity ratio vs the prior session (honest
+        # daily return; None for the first point, which has no prior).
+        previous_equity_float = equity_pairs_list[index_int - 1][1] if index_int > 0 else None
+        daily_pct_float = (
+            (float(equity_float) / float(previous_equity_float)) - 1.0
+            if previous_equity_float not in (None, 0)
+            else None
+        )
         point_dict_list.append({
             "x_float": round(x_float, 2),
             "y_float": round(y_float, 2),
             "market_date_str": date_str,
             "equity_label_str": _format_money_str(equity_float),
-            "daily_pnl_label_str": _format_money_str(pnl_float) if pnl_float is not None else "—",
+            "daily_pnl_label_str": _format_signed_money_str(pnl_float) if pnl_float is not None else "—",
+            "daily_pct_label_str": _format_signed_pct_str(daily_pct_float),
+            "daily_pct_float": daily_pct_float,
         })
 
     path_d_str = _build_polyline_path_str(point_xy_list)
     drawdown_d_str = _build_drawdown_polygon_path_str(equity_pairs_list, point_xy_list)
     pnl_bar_dict_list = _build_pnl_bar_dict_list(equity_pairs_list, horizontal_step_float)
+
+    latest_pnl_float = equity_pairs_list[-1][2]
+    latest_daily_pct_float = point_dict_list[-1]["daily_pct_float"]
 
     return EquityChartDict(
         point_count_int=point_count_int,
@@ -148,6 +175,9 @@ def build_equity_chart_dict(
         latest_equity_float=equity_value_list[-1],
         latest_market_date_str=equity_pairs_list[-1][0],
         earliest_market_date_str=equity_pairs_list[0][0],
+        latest_daily_pnl_label_str=_format_signed_money_str(latest_pnl_float),
+        latest_daily_pct_label_str=_format_signed_pct_str(latest_daily_pct_float),
+        latest_daily_is_positive_bool=(latest_daily_pct_float or 0.0) >= 0,
         window_str=window_str,
     )
 
@@ -239,18 +269,27 @@ def _build_pnl_bar_dict_list(
         return []
     bar_dict_list: list[dict[str, Any]] = []
     half_height_float = PNL_BAR_BLOCK_HEIGHT_INT / 2
-    for index_int, (_date_str, _equity_float, pnl_float) in enumerate(equity_pairs_list):
+    # Capped width + centered under each point so a few EOD bars read as
+    # distinct bars (with gaps) rather than one merged slab.
+    bar_width_float = max(1.0, min(horizontal_step_float * 0.6, MAX_PNL_BAR_WIDTH_FLOAT))
+    for index_int, (date_str, _equity_float, pnl_float) in enumerate(equity_pairs_list):
         if pnl_float is None:
             continue
         bar_height_float = abs(float(pnl_float)) / max_abs_float * half_height_float
         is_positive_bool = float(pnl_float) >= 0
-        bar_x_float = index_int * horizontal_step_float
+        center_x_float = index_int * horizontal_step_float
+        bar_x_float = min(
+            max(0.0, center_x_float - bar_width_float / 2.0),
+            CHART_VIEW_WIDTH_INT - bar_width_float,
+        )
         bar_dict_list.append({
             "x_float": round(bar_x_float, 2),
             "y_float": round(half_height_float - bar_height_float if is_positive_bool else half_height_float, 2),
-            "width_float": round(max(1.0, horizontal_step_float * 0.6), 2),
+            "width_float": round(bar_width_float, 2),
             "height_float": round(max(0.5, bar_height_float), 2),
             "is_positive_bool": is_positive_bool,
+            "market_date_str": date_str,
+            "pnl_label_str": _format_signed_money_str(pnl_float),
         })
     return bar_dict_list
 
@@ -270,6 +309,76 @@ def _format_money_str(value_obj: Any) -> str:
         return "—"
     sign_str = "-" if value_float < 0 else ""
     return f"{sign_str}${abs(value_float):,.0f}"
+
+
+def _format_signed_money_str(value_obj: Any) -> str:
+    value_float = _float_or_none(value_obj)
+    if value_float is None:
+        return "—"
+    sign_str = "+" if value_float >= 0 else "-"
+    return f"{sign_str}${abs(value_float):,.0f}"
+
+
+def _format_signed_pct_str(pct_float: float | None) -> str:
+    if pct_float is None:
+        return "—"
+    return f"{pct_float * 100:+.2f}%"
+
+
+def _format_month_label_str(year_month_str: str) -> str:
+    try:
+        year_str, month_str = year_month_str.split("-")[:2]
+        return f"{_MONTH_ABBREVIATION_STR_LIST[int(month_str)]} {year_str[2:]}"
+    except (ValueError, IndexError):
+        return year_month_str
+
+
+def build_monthly_return_dict_list(
+    equity_point_dict_list: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Per-calendar-month return % from the EOD equity series.
+
+    Month-end equity = the last point in each ``YYYY-MM``; a month's return is
+    ``month_end / previous_month_end - 1``. The first month uses the series'
+    first equity as its base (return since the book started, within that month).
+    Read-only reporting — no forecasting.
+    """
+    equity_pair_list = [
+        (str(point_dict.get("market_date_str") or ""), _float_or_none(point_dict.get("equity_float")))
+        for point_dict in (equity_point_dict_list or [])
+    ]
+    equity_pair_list = [
+        pair for pair in equity_pair_list
+        if pair[1] is not None and pair[1] > 0 and len(pair[0]) >= 7
+    ]
+    if not equity_pair_list:
+        return []
+
+    month_end_equity_dict: dict[str, float] = {}
+    month_key_order_list: list[str] = []
+    for date_str, equity_float in equity_pair_list:
+        month_key_str = date_str[:7]
+        if month_key_str not in month_end_equity_dict:
+            month_key_order_list.append(month_key_str)
+        month_end_equity_dict[month_key_str] = equity_float  # type: ignore[assignment]
+
+    first_equity_float = equity_pair_list[0][1]
+    monthly_return_dict_list: list[dict[str, Any]] = []
+    previous_month_end_float: float | None = None
+    for month_key_str in month_key_order_list:
+        month_end_float = month_end_equity_dict[month_key_str]
+        base_float = previous_month_end_float if previous_month_end_float is not None else first_equity_float
+        return_pct_float = (month_end_float / base_float - 1.0) if base_float else 0.0
+        monthly_return_dict_list.append(
+            {
+                "month_label_str": _format_month_label_str(month_key_str),
+                "return_pct_float": return_pct_float,
+                "return_label_str": _format_signed_pct_str(return_pct_float),
+                "is_positive_bool": return_pct_float >= 0,
+            }
+        )
+        previous_month_end_float = month_end_float
+    return monthly_return_dict_list
 
 
 # ── allocation pie ─────────────────────────────────────────────────────────
@@ -544,4 +653,5 @@ __all__ = [
     "build_allocation_pie_dict",
     "build_book_risk_dict",
     "build_equity_chart_dict",
+    "build_monthly_return_dict_list",
 ]
