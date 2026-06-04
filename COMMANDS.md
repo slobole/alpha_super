@@ -1,0 +1,178 @@
+# COMMANDS — CLI Cheat Sheet
+
+Quick reference for every shell command in this repo. All commands run from the
+repo root and use `uv` (Python 3.12). Flags shown are the useful ones — add
+`--help` to any script for the full list.
+
+**Jump to:**
+[0. Setup](#0-setup--basics) ·
+[1. Run one strategy](#1-run-one-strategy) ·
+[2. Research (all-in-one)](#2-research-orchestration--the-main-one) ·
+[3. Single analyses](#3-single-analyses-frictiontimingriskcrisisstress) ·
+[4. Variant suites](#4-variant-suites-compare-many-configs) ·
+[5. Portfolios](#5-portfolios-multi-pod) ·
+[6. Control panels (web UI)](#6-control-panels-web-ui) ·
+[7. Norgate data snapshots](#7-norgate-data-snapshots) ·
+[8. Live trading ops](#8-live-trading-ops) ·
+[9. Dev / utility](#9-dev--utility)
+
+> **Naming:** `<name>` = strategy module name (e.g. `strategy_mr_dv2`), a `.py`
+> path, or a dotted import path. `<key>` = a *supported* strategy key — run the
+> script with `--help` to list valid keys. `<yaml>` = a file under `portfolios/`.
+
+---
+
+## 0. Setup & basics
+
+| Command | What / when |
+|---|---|
+| `uv sync` | Install/refresh all dependencies. Run once after clone or after `pyproject.toml` changes. |
+| `uv run jupyter notebook` | Launch Jupyter for interactive research. |
+| `uv run pytest` | Run the test suite. Use before committing. |
+| `uv run python <path>` | Generic way to run any script below. |
+
+---
+
+## 1. Run one strategy
+
+**`strategies/run_strategy.py`** — single backtest of one strategy, saves the report.
+
+```bash
+uv run python strategies/run_strategy.py strategy_mr_dv2
+```
+Useful flags: `--no-save` (don't write artifacts), `--dry-run` (just import-check
+the module), `--output-dir results`, `--strategy-kwarg KEY=VALUE` (repeatable).
+
+---
+
+## 2. Research orchestration — *the main one*
+
+**`scripts/research/run_strategy_analysis.py`** — runs a strategy through several
+analyses in one shot. This is the command Bench's run buttons call. **Start here**
+for a full picture of a strategy.
+
+```bash
+# Default = vanilla + friction + timing
+uv run python scripts/research/run_strategy_analysis.py strategy_mr_dv2
+
+# Pick a subset (repeat --analysis)
+uv run python scripts/research/run_strategy_analysis.py strategy_mr_dv2 \
+  --analysis vanilla --analysis risk
+
+# Everything, and don't stop on a failure
+uv run python scripts/research/run_strategy_analysis.py strategy_mr_dv2 \
+  --analysis vanilla --analysis friction --analysis timing \
+  --analysis risk --analysis stress --keep-going
+```
+`--analysis` choices: `vanilla` · `friction` · `timing` · `risk` · `stress`
+(default: the first three). Other flags: `--no-save`, `--keep-going`,
+`--output-dir results`.
+
+---
+
+## 3. Single analyses (friction / timing / risk / crisis / stress)
+
+Use these when you want just one lens (or finer control than section 2 gives).
+
+| Command | What / when |
+|---|---|
+| `uv run python strategies/run_friction_analysis.py <name>` | Execution friction / slippage / auction cost for one strategy. |
+| `uv run python scripts/research/execution_timing_analyzer.py <dotted.module>` | Entry/exit timing matrix. Takes a **dotted module path**, not a bare name. Tune with `--entry-timing` / `--exit-timing` (repeatable). |
+| `uv run python strategies/run_risk_analysis.py <name>` | Stationary-bootstrap risk / confidence intervals. Flags: `--simulation-count 500`, `--block-length` (repeatable, default 21/63/126), `--confidence-level 0.95`. |
+| `uv run python strategies/run_crisis_replay.py <key>` | Replay a strategy across historical crisis windows. Flags: `--show-progress`, `--no-save`. |
+| `uv run python strategies/run_stress_test.py <key>` | Performance in the run-up *before* crises. Flag: `--launch-offset` (repeatable, default 5/21/42/63 bars). |
+
+Examples:
+```bash
+uv run python strategies/run_risk_analysis.py strategy_mr_dv2 --simulation-count 500
+uv run python scripts/research/execution_timing_analyzer.py \
+  strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash
+uv run python strategies/run_stress_test.py <key> --launch-offset 5 --launch-offset 21
+```
+
+---
+
+## 4. Variant suites (compare many configs)
+
+Pre-wired sweeps that compare a family of variants and write a comparison report.
+Most take **no required args** — just run them.
+
+| Command | Compares |
+|---|---|
+| `uv run python strategies/momentum/run_smooth_trend_variant_suite.py` | Smooth-trend variants across universes / score modes / VIX scaling. Flags: `--universes sp500,mid400`, `--capital-base`, `--include-russell`. |
+| `uv run python strategies/momentum/run_ndx_vxn_roc_variant_suite.py` | NDX momentum ROC windows + VIX scaling. Flags: `--focused-atr-grid`, `--atr-windows 20,63,126`. |
+| `uv run python strategies/taa_df/run_taa_df_fallback_variant_suite.py` | TAA "Defense First" across fallback assets (SPY/QQQ/TQQQ…). Flag: `--save-results`. |
+| `uv run python strategies/taa_df/run_taa_df_fallback_vix_cash_variant_suite.py` | …with VIX-cash defensive fallbacks. |
+| `uv run python strategies/taa_df/run_taa_df_fallback_vix_cash_multi_rv_variant_suite.py` | …with multi-lookback (regime-dependent) VIX-cash fallbacks. |
+
+There are also dedicated crisis-replay runners for specific strategies, e.g.
+`strategies/momentum/run_crisis_replay_strategy_mo_atr_normalized_ndx.py` and
+`strategies/taa_df/run_crisis_replay_taa_df_btal_fallback_tqqq_vix_cash.py`
+(flags: `--show-progress`, `--no-save`).
+
+---
+
+## 5. Portfolios (multi-pod)
+
+Two schemas, two runners. Bench's Build button routes to the right one.
+
+```bash
+# A) Combine already-computed strategy pickles into a book (fast, read-only math)
+uv run python strategies/run_portfolio.py portfolios/multipod.yaml
+uv run python strategies/run_portfolio.py portfolios/multipod.yaml --capital 200000
+
+# B) Fresh multi-pod backtest from scratch (runs each pod, can parallelize)
+uv run --python 3.12 python strategies/run_portfolio_manager.py portfolios/current_book_fresh.yaml
+```
+`run_portfolio.py` flags: `--name`, `--capital`.
+`run_portfolio_manager.py` flags: `--max-workers 1` (serial/debug), `--no-save`,
+`--show-display`.
+
+---
+
+## 6. Control panels (web UI)
+
+Local Flask consoles. Both bind to `127.0.0.1` only (single operator).
+
+| Command | What |
+|---|---|
+| `uv run python -m alpha.bench` | **Bench** research console → http://127.0.0.1:8765 . Lists strategies/portfolios, one-click runs, job logs. Flags: `--port 9000`, `--skip-env-file`. |
+| `uv run python -m alpha.live.dashboard_v3` | **Dashboard V3** live operator console → http://127.0.0.1:8080 . Flags: `--port`, `--skip-env-file`. |
+
+---
+
+## 7. Norgate data snapshots
+
+Server exports point-in-time snapshots; clients sync them. "Doctor" scripts
+diagnose setup. Most paths/IDs default from env (`config.env`).
+
+| Command | Role |
+|---|---|
+| `uv run python scripts/export_norgate_snapshot.py --snapshot-root <path> --profile <profile>` | Export a snapshot locally (on the Windows Norgate node). `--profile` is **required** (e.g. `norgate_eod_sp500_pit`). |
+| `uv run python scripts/serve_norgate_snapshot_api.py --host <ip> --port 8787` | Serve snapshots over HTTP to clients. |
+| `uv run python scripts/sync_norgate_snapshots_api.py --api-url http://<host>:8787` | Download required snapshots on a client. Flag: `--overwrite`. |
+| `uv run python scripts/doctor_norgate_server.py` | Health-check the server (disk, export, API). |
+| `uv run python scripts/doctor_norgate_client.py` | Health-check a client (env, API, sync, reads). |
+
+---
+
+## 8. Live trading ops
+
+| Command | What |
+|---|---|
+| `uv run python scripts/live_debug/ibkr_connectivity_probe.py` | Test the IBKR API connection + dump account snapshot (cash/positions/orders). Flags: `--release-manifest-path <yaml>` (auto-configures), `--port 7497`, `--json`. |
+| `uv run python -m alpha.live.dashboard_v3` | Live operator console (see [section 6](#6-control-panels-web-ui)). |
+
+> `alpha/live/runner.py` and `alpha/live/scheduler_service.py` are internal
+> backend modules — driven by the dashboard, not run by hand.
+
+---
+
+## 9. Dev / utility
+
+| Command | What / when |
+|---|---|
+| `uv run python scripts/review/triage.py --base origin/main` | Classify changed files by impact tier; suggests tests/review agents. Use before review. |
+| `uv run python scripts/archive_research_results.py --dry-run` | Move old `results/` folders into a timestamped archive. `--dry-run` previews first. |
+| `uv run python scripts/benchmark_fast_indicators.py` | Benchmark reference vs Numba indicators (DV2/QPI). No args. |
+| `uv run python scripts/research/export_finhacker_sp500_top20_market_cap.py` | Scrape S&P 500 top-20 market-cap history. Flags: `--refresh`, `--annual-only`. |
