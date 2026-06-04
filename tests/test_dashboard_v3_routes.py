@@ -790,7 +790,7 @@ def test_schedule_strip_shows_et_time_and_next_marker(test_client_obj) -> None:
     assert "▶" in response_text_str
 
 
-def test_build_allocation_pie_dict_slices_by_equity_with_cash_readout() -> None:
+def test_build_allocation_pie_dict_splits_each_pod_into_positions_and_cash() -> None:
     from alpha.live.dashboard_v3.charts import build_allocation_pie_dict
 
     pie_dict = build_allocation_pie_dict([
@@ -800,20 +800,50 @@ def test_build_allocation_pie_dict_slices_by_equity_with_cash_readout() -> None:
     ]).as_dict()
 
     assert pie_dict["has_data_bool"] is True
-    assert pie_dict["pod_count_int"] == 2
+    assert pie_dict["pod_count_int"] == 2  # counts pods, not slices
     assert pie_dict["excluded_pod_count_int"] == 1  # pod_flat has no equity
-    # Largest slice first; shares sum to 100%.
-    assert [s["label_str"] for s in pie_dict["slice_dict_list"]] == ["pod_a", "pod_b"]
-    assert pie_dict["slice_dict_list"][0]["pct_label_str"] == "75.0%"
-    assert pie_dict["slice_dict_list"][1]["pct_label_str"] == "25.0%"
-    assert abs(sum(s["pct_float"] for s in pie_dict["slice_dict_list"]) - 1.0) < 1e-9
-    # Slices carry a drawable SVG arc path and a distinct color.
-    assert pie_dict["slice_dict_list"][0]["path_d_str"].startswith("M ")
-    assert pie_dict["slice_dict_list"][0]["color_str"] != pie_dict["slice_dict_list"][1]["color_str"]
-    # Cash readout: $15,000 of a $40,000 book == 37.5%.
+    assert pie_dict["clamped_pod_count_int"] == 0
+    slice_dict_list = pie_dict["slice_dict_list"]
+    # pod_a splits into positions (25k) + cash (5k); pod_b is all cash (10k), so
+    # its positions slice is dropped. Largest pod first, positions before cash.
+    assert [(s["label_str"], s["kind_str"]) for s in slice_dict_list] == [
+        ("pod_a", "positions"),
+        ("pod_a", "cash"),
+        ("pod_b", "cash"),
+    ]
+    # Shares of the $40,000 book: 25k / 5k / 10k.
+    assert [s["pct_label_str"] for s in slice_dict_list] == ["62.5%", "12.5%", "25.0%"]
+    assert abs(sum(s["pct_float"] for s in slice_dict_list) - 1.0) < 1e-9
+    # A pod's two slices share one color; the cash slice is drawn lighter.
+    assert slice_dict_list[0]["color_str"] == slice_dict_list[1]["color_str"]
+    assert slice_dict_list[0]["fill_opacity_str"] == "1"
+    assert slice_dict_list[1]["fill_opacity_str"] == "0.4"
+    assert slice_dict_list[0]["color_str"] != slice_dict_list[2]["color_str"]
+    # Slices carry a drawable SVG arc path.
+    assert slice_dict_list[0]["path_d_str"].startswith("M ")
+    # Cash readout (footer, true cash): $15,000 of a $40,000 book == 37.5%.
     assert pie_dict["total_equity_label_str"] == "$40,000"
     assert pie_dict["total_cash_label_str"] == "$15,000"
     assert pie_dict["cash_pct_label_str"] == "37.5%"
+
+
+def test_build_allocation_pie_dict_clamps_negative_cash_and_flags_it() -> None:
+    from alpha.live.dashboard_v3.charts import build_allocation_pie_dict
+
+    # A pod on margin: cash is negative (borrowed), positions exceed equity. The
+    # pie cannot draw negative cash, so in-pie cash clamps to 0 (whole pod is one
+    # positions slice) and the pod is flagged — but the footer keeps true cash.
+    pie_dict = build_allocation_pie_dict([
+        {"label_str": "levered", "equity_float": 10000.0, "cash_float": -2000.0},
+    ]).as_dict()
+
+    assert pie_dict["pod_count_int"] == 1
+    assert pie_dict["clamped_pod_count_int"] == 1
+    assert [(s["kind_str"], s["pct_label_str"]) for s in pie_dict["slice_dict_list"]] == [
+        ("positions", "100.0%"),
+    ]
+    # Footer still reports the true (negative) cash, so leverage is not hidden.
+    assert pie_dict["total_cash_label_str"] == "-$2,000"
 
 
 def test_build_allocation_pie_dict_single_pod_is_full_circle() -> None:

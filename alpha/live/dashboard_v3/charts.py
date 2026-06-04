@@ -400,6 +400,12 @@ ALLOCATION_PALETTE_STR_LIST = [
     "#0891b2", "#db2777", "#65a30d", "#475569", "#ea580c",
 ]
 
+# Each pod is split into two slices that share its base color: the invested
+# positions slice is solid, the cash slice is the same color drawn lighter so
+# the two read as one pod at a glance.
+POSITIONS_SLICE_OPACITY_STR = "1"
+CASH_SLICE_OPACITY_STR = "0.4"
+
 
 @dataclass
 class AllocationPieDict:
@@ -412,6 +418,7 @@ class AllocationPieDict:
     total_cash_label_str: str = "—"
     cash_pct_label_str: str = "—"
     excluded_pod_count_int: int = 0
+    clamped_pod_count_int: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -424,6 +431,7 @@ class AllocationPieDict:
             "total_cash_label_str": self.total_cash_label_str,
             "cash_pct_label_str": self.cash_pct_label_str,
             "excluded_pod_count_int": self.excluded_pod_count_int,
+            "clamped_pod_count_int": self.clamped_pod_count_int,
             "view_size_int": PIE_VIEW_SIZE_INT,
         }
 
@@ -434,12 +442,18 @@ def build_allocation_pie_dict(
     """Build a strategy-allocation pie for one mode.
 
     Each input dict carries ``label_str``, optional ``sublabel_str``,
-    ``equity_float`` (net liquidation) and ``cash_float``. Pods without a
+    ``equity_float`` (net liquidation = positions + cash) and ``cash_float``.
+
+    Every pod contributes up to two slices: its invested *positions* value
+    (``equity − cash``) and its *cash*. The two always sum to the pod's equity,
+    so the pod keeps the same share of the book — we just split that share into
+    what is at work in the market versus what is sitting in cash. Pods without a
     positive equity cannot occupy a slice and are excluded (but counted), since
     a pie can only render non-negative shares.
     """
     cleaned_dict_list: list[dict[str, Any]] = []
     excluded_pod_count_int = 0
+    clamped_pod_count_int = 0
     total_cash_float = 0.0
     for pod_alloc_dict in pod_alloc_dict_list or []:
         equity_float = _float_or_none(pod_alloc_dict.get("equity_float"))
@@ -447,27 +461,62 @@ def build_allocation_pie_dict(
         if equity_float is None or equity_float <= 0:
             excluded_pod_count_int += 1
             continue
+        total_cash_float += cash_float  # true cash, may be negative on margin
+        # *** CRITICAL*** A pie slice cannot be negative, so the cash drawn
+        # inside the pie is clamped to [0, equity]; this keeps each pod's two
+        # slices non-negative and summing exactly to its equity. The footer cash
+        # readout below still uses the true (possibly negative) cash, so leverage
+        # is never silently erased — clamped pods are counted and flagged.
+        cash_in_pie_float = min(max(cash_float, 0.0), equity_float)
+        if cash_in_pie_float != cash_float:
+            clamped_pod_count_int += 1
         cleaned_dict_list.append({
             "label_str": str(pod_alloc_dict.get("label_str") or "—"),
             "sublabel_str": str(pod_alloc_dict.get("sublabel_str") or ""),
             "equity_float": equity_float,
-            "cash_float": cash_float,
+            "cash_in_pie_float": cash_in_pie_float,
+            "positions_float": equity_float - cash_in_pie_float,
         })
-        total_cash_float += cash_float
 
     if not cleaned_dict_list:
         return AllocationPieDict(excluded_pod_count_int=excluded_pod_count_int)
 
-    # Largest slice first so colors + legend order are stable and readable.
+    # Largest pod first so colors + legend order are stable and readable.
     cleaned_dict_list.sort(key=lambda pod_dict: pod_dict["equity_float"], reverse=True)
     total_equity_float = sum(pod_dict["equity_float"] for pod_dict in cleaned_dict_list)
-    is_single_slice_bool = len(cleaned_dict_list) == 1
 
+    # Expand each pod into its positions slice then its cash slice, sharing the
+    # pod's base color. Zero-value parts are dropped so we never emit an
+    # invisible zero-width arc (e.g. a fully-invested or all-cash pod).
+    part_dict_list: list[dict[str, Any]] = []
+    for pod_index_int, pod_dict in enumerate(cleaned_dict_list):
+        color_str = ALLOCATION_PALETTE_STR_LIST[pod_index_int % len(ALLOCATION_PALETTE_STR_LIST)]
+        if pod_dict["positions_float"] > 0:
+            part_dict_list.append({
+                "label_str": pod_dict["label_str"],
+                "sublabel_str": pod_dict["sublabel_str"],
+                "kind_str": "positions",
+                "color_str": color_str,
+                "fill_opacity_str": POSITIONS_SLICE_OPACITY_STR,
+                "value_float": pod_dict["positions_float"],
+            })
+        if pod_dict["cash_in_pie_float"] > 0:
+            part_dict_list.append({
+                "label_str": pod_dict["label_str"],
+                "sublabel_str": pod_dict["sublabel_str"],
+                "kind_str": "cash",
+                "color_str": color_str,
+                "fill_opacity_str": CASH_SLICE_OPACITY_STR,
+                "value_float": pod_dict["cash_in_pie_float"],
+            })
+
+    is_single_slice_bool = len(part_dict_list) == 1
     slice_dict_list: list[dict[str, Any]] = []
     cumulative_deg_float = 0.0
-    for index_int, pod_dict in enumerate(cleaned_dict_list):
-        fraction_float = pod_dict["equity_float"] / total_equity_float
-        color_str = ALLOCATION_PALETTE_STR_LIST[index_int % len(ALLOCATION_PALETTE_STR_LIST)]
+    for index_int, part_dict in enumerate(part_dict_list):
+        fraction_float = (
+            part_dict["value_float"] / total_equity_float if total_equity_float else 0.0
+        )
         if is_single_slice_bool:
             path_d_str = ""
             is_full_circle_bool = True
@@ -476,18 +525,20 @@ def build_allocation_pie_dict(
             # Snap the final slice to a full 360° to absorb float drift.
             end_deg_float = (
                 360.0
-                if index_int == len(cleaned_dict_list) - 1
+                if index_int == len(part_dict_list) - 1
                 else cumulative_deg_float + fraction_float * 360.0
             )
             path_d_str = _pie_slice_path_str(start_deg_float, end_deg_float)
             is_full_circle_bool = False
             cumulative_deg_float = end_deg_float
         slice_dict_list.append({
-            "label_str": pod_dict["label_str"],
-            "sublabel_str": pod_dict["sublabel_str"],
-            "color_str": color_str,
-            "equity_float": pod_dict["equity_float"],
-            "equity_label_str": _format_money_str(pod_dict["equity_float"]),
+            "label_str": part_dict["label_str"],
+            "sublabel_str": part_dict["sublabel_str"],
+            "kind_str": part_dict["kind_str"],
+            "color_str": part_dict["color_str"],
+            "fill_opacity_str": part_dict["fill_opacity_str"],
+            "equity_float": part_dict["value_float"],
+            "equity_label_str": _format_money_str(part_dict["value_float"]),
             "pct_float": fraction_float,
             "pct_label_str": f"{fraction_float * 100:.1f}%",
             "path_d_str": path_d_str,
@@ -505,6 +556,7 @@ def build_allocation_pie_dict(
         total_cash_label_str=_format_money_str(total_cash_float),
         cash_pct_label_str=f"{cash_pct_float * 100:.1f}%",
         excluded_pod_count_int=excluded_pod_count_int,
+        clamped_pod_count_int=clamped_pod_count_int,
     )
 
 
