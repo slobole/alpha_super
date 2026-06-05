@@ -605,7 +605,7 @@ Key public functions:
 Important invariants:
 - all functions read DB/log/artifact state and do not talk to IBKR
 - read-only: no `tick`, no `submit_vplan`, no reconcile is performed here
-- the explicit DIFF action may run `runner.get_compare_reference_summary(...)` and write analysis artifacts
+- the explicit Live vs Backtest action may run `runner.get_compare_reference_summary(...)` and write analysis artifacts
 
 Default dashboard DB resolution:
 

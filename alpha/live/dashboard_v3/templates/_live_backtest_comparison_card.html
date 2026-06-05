@@ -1,0 +1,73 @@
+{% set row_dict = detail_dict.pod_row_dict %}
+{% set comparison_state_str = row_dict.latest_comparison_state_str or 'not_run' %}
+
+<section class="rounded-md border border-ink-100 bg-white p-3">
+  <header class="flex items-baseline justify-between gap-3 mb-2">
+    <div class="text-xs uppercase tracking-wide text-ink-500">Live vs Backtest</div>
+    {% if comparison_state_str == 'available' %}
+      <span class="text-xs text-ink-500 tabular-nums">
+        {{ row_dict.latest_comparison_timestamp_str or 'latest' }}
+      </span>
+    {% endif %}
+  </header>
+
+  {% if comparison_state_str == 'available' %}
+    <dl class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+      <div>
+        <dt class="text-ink-500">Window</dt>
+        <dd class="font-mono tabular-nums">
+          {{ row_dict.latest_comparison_deployment_start_date_str or 'na' }}
+          -> {{ row_dict.latest_comparison_target_session_date_str or 'na' }}
+        </dd>
+      </div>
+      <div>
+        <dt class="text-ink-500">Trade rows</dt>
+        <dd>{{ row_dict.latest_comparison_trade_row_count_int | number }}</dd>
+      </div>
+      <div>
+        <dt class="text-ink-500">Abs share diff</dt>
+        <dd>{{ row_dict.latest_comparison_total_abs_share_diff_float | number }}</dd>
+      </div>
+      <div>
+        <dt class="text-ink-500">Abs notional diff</dt>
+        <dd>{{ row_dict.latest_comparison_total_abs_notional_diff_float | money }}</dd>
+      </div>
+      <div>
+        <dt class="text-ink-500">Price diff $</dt>
+        <dd>{{ row_dict.latest_comparison_total_price_diff_notional_float | money }}</dd>
+      </div>
+      <div>
+        <dt class="text-ink-500">Equity diff</dt>
+        <dd>{{ row_dict.latest_comparison_equity_tracking_error_float | percent }}</dd>
+      </div>
+      <div>
+        <dt class="text-ink-500">Assets</dt>
+        <dd>{{ row_dict.latest_comparison_assets_traded_count_int | number }}</dd>
+      </div>
+      <div class="flex items-end gap-3">
+        {% if row_dict.latest_comparison_artifact_url_str %}
+          <a class="text-xs font-semibold text-ink-900 hover:underline"
+             href="{{ row_dict.latest_comparison_artifact_url_str }}"
+             target="_blank" rel="noopener">Open report</a>
+        {% endif %}
+        {% if row_dict.latest_comparison_trade_fill_diff_url_str %}
+          <a class="text-xs text-ink-500 hover:underline"
+             href="{{ row_dict.latest_comparison_trade_fill_diff_url_str }}"
+             target="_blank" rel="noopener">CSV</a>
+        {% endif %}
+      </div>
+    </dl>
+  {% elif comparison_state_str == 'error' %}
+    <div class="text-xs text-ink-600">
+      Latest comparison artifact could not be read. Run the comparison again from Operator Tools.
+    </div>
+  {% elif comparison_state_str == 'legacy' %}
+    <div class="text-xs text-ink-600">
+      Latest comparison artifact uses an old format. Run Live vs Backtest again from Operator Tools.
+    </div>
+  {% else %}
+    <div class="text-xs text-ink-600">
+      No comparison has been generated yet. Run Live vs Backtest from Operator Tools.
+    </div>
+  {% endif %}
+</section>

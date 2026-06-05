@@ -277,19 +277,6 @@
       <div><dt class="text-ink-500">Daily PnL</dt><dd>{{ pnl_dict.daily_pnl_float | money }} ({{ pnl_dict.daily_pnl_pct_float | percent }})</dd></div>
       <div><dt class="text-ink-500">Since start</dt><dd>{{ pnl_dict.since_start_pnl_float | money }} ({{ pnl_dict.since_start_pnl_pct_float | percent }})</dd></div>
     </dl>
-    {% if tracking_dict and tracking_dict.has_data_bool %}
-      <div class="mt-2 rounded-md border px-3 py-2 text-xs flex items-center gap-2
-                  {% if tracking_dict.is_outside_band_bool %}
-                    bg-warn-soft border-warn/40 text-warn
-                  {% else %}
-                    bg-ok-soft border-ok/40 text-ok
-                  {% endif %}">
-        <span class="text-base leading-none">
-          {% if tracking_dict.is_outside_band_bool %}⚠{% else %}✓{% endif %}
-        </span>
-        <span>{{ tracking_dict.summary_str }}</span>
-      </div>
-    {% endif %}
     <div class="mt-3"
          hx-get="/fragments/equity-chart/{{ row_dict.pod_id_str }}?window=all"
          hx-trigger="load"

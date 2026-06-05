@@ -126,7 +126,7 @@ def _date_key_str(timestamp_obj: object) -> str:
 
 
 def build_reference_maps_dict(reference_strategy_obj: Strategy) -> dict[str, Any]:
-    transaction_map_dict: dict[tuple[str, str], dict[str, float | None]] = {}
+    transaction_map_dict: dict[tuple[str, str], dict[str, float | int | None]] = {}
     transaction_df = reference_strategy_obj.get_transactions()
     if transaction_df is not None and len(transaction_df) > 0:
         transaction_work_df = transaction_df.copy()
@@ -146,6 +146,7 @@ def build_reference_maps_dict(reference_strategy_obj: Strategy) -> dict[str, Any
                 "absolute_quantity_float": absolute_quantity_float,
                 "weighted_notional_float": weighted_notional_float,
                 "avg_price_float": avg_price_float,
+                "trade_count_int": int(len(group_df)),
             }
 
     position_history_df = _build_reference_position_history_df(transaction_df)
@@ -255,57 +256,174 @@ def get_reference_realized_weight_map_dict(
     )
 
 
-def classify_compare_status_dict(
-    compare_report_dict: dict[str, Any],
-    share_tolerance_float: float = 1e-9,
-    price_tolerance_float: float = 1e-9,
-) -> dict[str, object]:
-    red_issue_count_int = 0
-    yellow_issue_count_int = 0
-
-    cash_diff_float = compare_report_dict.get("cash_diff_float")
-    equity_tracking_error_float = compare_report_dict.get("equity_tracking_error_float")
-    if cash_diff_float is not None and abs(float(cash_diff_float)) > price_tolerance_float:
-        yellow_issue_count_int += 1
-    if equity_tracking_error_float is not None and abs(float(equity_tracking_error_float)) > 1e-9:
-        yellow_issue_count_int += 1
-
-    for compare_row_dict in compare_report_dict.get("compare_row_dict_list", []):
-        planned_order_delta_share_float = abs(float(compare_row_dict["planned_order_delta_share_float"]))
-        filled_share_float = abs(float(compare_row_dict["filled_share_float"]))
-        quantity_diff_float = float(compare_row_dict["quantity_diff_float"])
-        backtest_quantity_diff_float = compare_row_dict.get("backtest_quantity_diff_float")
-        reference_position_diff_float = compare_row_dict.get("reference_position_diff_float")
-        backtest_fill_price_diff_float = compare_row_dict.get("backtest_fill_price_diff_float")
-
-        if planned_order_delta_share_float > share_tolerance_float and filled_share_float <= share_tolerance_float:
-            red_issue_count_int += 1
-            continue
-        if abs(quantity_diff_float) > share_tolerance_float:
-            red_issue_count_int += 1
-            continue
-        if backtest_quantity_diff_float is not None and abs(float(backtest_quantity_diff_float)) > share_tolerance_float:
-            red_issue_count_int += 1
-            continue
-        if reference_position_diff_float is not None and abs(float(reference_position_diff_float)) > share_tolerance_float:
-            red_issue_count_int += 1
-            continue
-        if backtest_fill_price_diff_float is not None and abs(float(backtest_fill_price_diff_float)) > price_tolerance_float:
-            yellow_issue_count_int += 1
-
-    if red_issue_count_int > 0:
-        status_str = "red"
-    elif yellow_issue_count_int > 0:
-        status_str = "yellow"
-    else:
-        status_str = "green"
-
-    return {
-        "status_str": status_str,
-        "red_issue_count_int": int(red_issue_count_int),
-        "yellow_issue_count_int": int(yellow_issue_count_int),
-        "open_issue_count_int": int(red_issue_count_int + yellow_issue_count_int),
+def build_trade_fill_diff_row_dict_list(
+    *,
+    target_session_date_str: str,
+    vplan_id_int: int,
+    decision_plan_id_int: int,
+    execution_row_dict_list: list[dict[str, object]],
+    transaction_map_dict: dict[tuple[str, str], dict[str, float | int | None]],
+    tolerance_float: float = 1e-9,
+) -> list[dict[str, object]]:
+    execution_row_by_asset_dict = {}
+    for execution_row_dict in execution_row_dict_list:
+        live_filled_share_float = float(execution_row_dict.get("filled_share_float") or 0.0)
+        live_planned_share_float = float(execution_row_dict.get("planned_order_delta_share_float") or 0.0)
+        if (
+            abs(live_filled_share_float) > tolerance_float
+            or abs(live_planned_share_float) > tolerance_float
+        ):
+            execution_row_by_asset_dict[str(execution_row_dict["asset_str"])] = execution_row_dict
+    backtest_asset_set = {
+        asset_str
+        for date_str, asset_str in transaction_map_dict
+        if str(date_str) == str(target_session_date_str)
     }
+    row_dict_list: list[dict[str, object]] = []
+    for asset_str in sorted(set(execution_row_by_asset_dict) | backtest_asset_set):
+        execution_row_dict = execution_row_by_asset_dict.get(asset_str)
+        transaction_dict = transaction_map_dict.get((target_session_date_str, asset_str), {})
+
+        live_filled_share_float = (
+            None
+            if execution_row_dict is None
+            else float(execution_row_dict.get("filled_share_float") or 0.0)
+        )
+        live_avg_fill_price_float = (
+            None
+            if execution_row_dict is None or execution_row_dict.get("avg_fill_price_float") is None
+            else float(execution_row_dict["avg_fill_price_float"])
+        )
+        backtest_trade_share_float = (
+            None
+            if "quantity_float" not in transaction_dict
+            else float(transaction_dict["quantity_float"] or 0.0)
+        )
+        backtest_avg_fill_price_float = (
+            None
+            if transaction_dict.get("avg_price_float") is None
+            else float(transaction_dict["avg_price_float"])
+        )
+        live_planned_share_float = (
+            None
+            if execution_row_dict is None
+            else float(execution_row_dict.get("planned_order_delta_share_float") or 0.0)
+        )
+
+        share_diff_float = (live_filled_share_float or 0.0) - (backtest_trade_share_float or 0.0)
+        side_float = _side_float(backtest_trade_share_float)
+        if side_float is None:
+            side_float = _side_float(live_filled_share_float)
+        if side_float is None:
+            side_float = _side_float(live_planned_share_float)
+
+        price_diff_float = None
+        price_diff_bps_float = None
+        price_diff_notional_float = None
+        if live_avg_fill_price_float is not None and backtest_avg_fill_price_float is not None:
+            price_diff_float = live_avg_fill_price_float - backtest_avg_fill_price_float
+            if side_float is not None and backtest_avg_fill_price_float > 0.0:
+                price_diff_bps_float = 10000.0 * side_float * (
+                    (live_avg_fill_price_float / backtest_avg_fill_price_float) - 1.0
+                )
+            if side_float is not None:
+                price_diff_notional_float = (
+                    abs(live_filled_share_float or 0.0)
+                    * side_float
+                    * price_diff_float
+                )
+
+        notional_price_float = backtest_avg_fill_price_float
+        if notional_price_float is None:
+            notional_price_float = live_avg_fill_price_float
+        notional_diff_float = None
+        if notional_price_float is not None:
+            notional_diff_float = share_diff_float * notional_price_float
+
+        has_live_fill_bool = live_filled_share_float is not None and abs(live_filled_share_float) > tolerance_float
+        has_live_plan_bool = live_planned_share_float is not None and abs(live_planned_share_float) > tolerance_float
+        has_backtest_trade_bool = (
+            backtest_trade_share_float is not None and abs(backtest_trade_share_float) > tolerance_float
+        )
+        if has_live_fill_bool and has_backtest_trade_bool:
+            note_str = "matched"
+        elif has_live_fill_bool:
+            note_str = "live fill without matching backtest trade"
+        elif has_live_plan_bool and has_backtest_trade_bool:
+            note_str = "planned live order without live fill; backtest traded"
+        elif has_live_plan_bool:
+            note_str = "planned live order without live fill or matching backtest trade"
+        elif has_backtest_trade_bool:
+            note_str = "backtest trade without matching live fill"
+        else:
+            note_str = "no fill"
+
+        row_dict_list.append(
+            {
+                "execution_date_str": target_session_date_str,
+                "asset_str": asset_str,
+                "side_str": _side_label_str(side_float),
+                "live_planned_share_float": live_planned_share_float,
+                "live_filled_share_float": live_filled_share_float,
+                "backtest_trade_share_float": backtest_trade_share_float,
+                "share_diff_float": share_diff_float,
+                "live_avg_fill_price_float": live_avg_fill_price_float,
+                "backtest_avg_fill_price_float": backtest_avg_fill_price_float,
+                "price_diff_float": price_diff_float,
+                "price_diff_bps_float": None if price_diff_bps_float is None else round(price_diff_bps_float, 10),
+                "notional_diff_float": notional_diff_float,
+                "price_diff_notional_float": price_diff_notional_float,
+                "live_fill_count_int": (
+                    0
+                    if execution_row_dict is None
+                    else int(execution_row_dict.get("fill_count_int") or 0)
+                ),
+                "backtest_trade_count_int": int(transaction_dict.get("trade_count_int") or 0),
+                "vplan_id_int": int(vplan_id_int),
+                "decision_plan_id_int": int(decision_plan_id_int),
+                "note_str": note_str,
+            }
+        )
+    return row_dict_list
+
+
+def summarize_trade_fill_diff_dict(trade_fill_diff_df: pd.DataFrame) -> dict[str, object]:
+    if trade_fill_diff_df is None or len(trade_fill_diff_df) == 0:
+        return {
+            "trade_row_count_int": 0,
+            "assets_traded_count_int": 0,
+            "total_abs_share_diff_float": 0.0,
+            "total_abs_notional_diff_float": 0.0,
+            "total_price_diff_notional_float": 0.0,
+        }
+    share_diff_ser = trade_fill_diff_df.get("share_diff_float", pd.Series(dtype=float)).fillna(0.0).astype(float)
+    notional_diff_ser = trade_fill_diff_df.get("notional_diff_float", pd.Series(dtype=float)).fillna(0.0).astype(float)
+    price_diff_notional_ser = (
+        trade_fill_diff_df.get("price_diff_notional_float", pd.Series(dtype=float)).fillna(0.0).astype(float)
+    )
+    return {
+        "trade_row_count_int": int(len(trade_fill_diff_df)),
+        "assets_traded_count_int": int(trade_fill_diff_df["asset_str"].nunique()),
+        "total_abs_share_diff_float": float(share_diff_ser.abs().sum()),
+        "total_abs_notional_diff_float": float(notional_diff_ser.abs().sum()),
+        "total_price_diff_notional_float": float(price_diff_notional_ser.sum()),
+    }
+
+
+def _side_float(quantity_float: float | None) -> float | None:
+    if quantity_float is None:
+        return None
+    if float(quantity_float) > 0.0:
+        return 1.0
+    if float(quantity_float) < 0.0:
+        return -1.0
+    return None
+
+
+def _side_label_str(side_float: float | None) -> str:
+    if side_float is None:
+        return "unknown"
+    return "buy" if side_float > 0.0 else "sell"
 
 
 def write_reference_compare_artifacts(
@@ -323,12 +441,15 @@ def write_reference_compare_artifacts(
     live_equity_df = _build_live_equity_df(live_history_row_dict_list, compare_report_dict)
     tracking_error_df = _build_tracking_error_df(reference_equity_df, live_equity_df)
     fill_compare_df = pd.DataFrame(compare_report_dict.get("compare_row_dict_list", []))
+    trade_fill_diff_df = pd.DataFrame(compare_report_dict.get("trade_fill_diff_row_dict_list", []))
     position_compare_df = _build_position_compare_df(fill_compare_df)
+    trade_fill_summary_dict = summarize_trade_fill_diff_dict(trade_fill_diff_df)
 
     reference_equity_csv_path_obj = output_dir_path_obj / "reference_equity.csv"
     live_equity_csv_path_obj = output_dir_path_obj / "live_equity.csv"
     tracking_error_csv_path_obj = output_dir_path_obj / "tracking_error.csv"
     fill_compare_csv_path_obj = output_dir_path_obj / "fill_compare.csv"
+    trade_fill_diff_csv_path_obj = output_dir_path_obj / "trade_fill_diff.csv"
     position_compare_csv_path_obj = output_dir_path_obj / "position_compare.csv"
     summary_json_path_obj = output_dir_path_obj / "summary.json"
     equity_png_path_obj = output_dir_path_obj / "equity_compare.png"
@@ -339,6 +460,7 @@ def write_reference_compare_artifacts(
     live_equity_df.to_csv(live_equity_csv_path_obj, index=False)
     tracking_error_df.to_csv(tracking_error_csv_path_obj, index=False)
     fill_compare_df.to_csv(fill_compare_csv_path_obj, index=False)
+    trade_fill_diff_df.to_csv(trade_fill_diff_csv_path_obj, index=False)
     position_compare_df.to_csv(position_compare_csv_path_obj, index=False)
 
     _write_equity_chart_png(reference_equity_df, live_equity_df, equity_png_path_obj)
@@ -360,8 +482,7 @@ def write_reference_compare_artifacts(
         "actual_cash_float": compare_report_dict.get("actual_cash_float"),
         "backtest_cash_float": compare_report_dict.get("backtest_cash_float"),
         "cash_diff_float": compare_report_dict.get("cash_diff_float"),
-        "status_str": compare_report_dict.get("status_str"),
-        "open_issue_count_int": compare_report_dict.get("open_issue_count_int"),
+        **trade_fill_summary_dict,
         "reference_strategy_pickle_path_str": reference_strategy_pickle_path_str,
     }
     summary_json_path_obj.write_text(json.dumps(summary_dict, indent=2, sort_keys=True), encoding="utf-8")
@@ -373,6 +494,7 @@ def write_reference_compare_artifacts(
         summary_dict=summary_dict,
         equity_png_path_obj=equity_png_path_obj,
         tracking_png_path_obj=tracking_png_path_obj,
+        trade_fill_diff_df=trade_fill_diff_df,
         fill_compare_df=fill_compare_df,
         position_compare_df=position_compare_df,
     )
@@ -385,6 +507,7 @@ def write_reference_compare_artifacts(
         "live_equity_csv_path_str": str(live_equity_csv_path_obj),
         "tracking_error_csv_path_str": str(tracking_error_csv_path_obj),
         "fill_compare_csv_path_str": str(fill_compare_csv_path_obj),
+        "trade_fill_diff_csv_path_str": str(trade_fill_diff_csv_path_obj),
         "position_compare_csv_path_str": str(position_compare_csv_path_obj),
         "equity_png_path_str": str(equity_png_path_obj),
         "tracking_error_png_path_str": str(tracking_png_path_obj),
@@ -548,22 +671,24 @@ def _write_html_report(
     summary_dict: dict[str, Any],
     equity_png_path_obj: Path,
     tracking_png_path_obj: Path,
+    trade_fill_diff_df: pd.DataFrame,
     fill_compare_df: pd.DataFrame,
     position_compare_df: pd.DataFrame,
 ) -> None:
-    status_str = str(compare_report_dict.get("status_str", "unknown"))
-    status_color_dict = {
-        "green": "#127a3a",
-        "yellow": "#a66a00",
-        "red": "#b42318",
-    }
-    status_color_str = status_color_dict.get(status_str, "#475467")
-    verdict_card_html_str = _card_grid_html_str(
+    window_card_html_str = _card_grid_html_str(
         [
-            ("Status", str(status_str).upper()),
-            ("Open issues", summary_dict.get("open_issue_count_int")),
             ("Target session", summary_dict.get("target_session_date_str")),
             ("Deployment start", summary_dict.get("deployment_start_date_str")),
+            ("Starting capital", summary_dict.get("deployment_initial_cash_float")),
+            ("Trade rows", summary_dict.get("trade_row_count_int")),
+        ]
+    )
+    trade_card_html_str = _card_grid_html_str(
+        [
+            ("Assets traded", summary_dict.get("assets_traded_count_int")),
+            ("Abs share diff", summary_dict.get("total_abs_share_diff_float")),
+            ("Abs notional diff", summary_dict.get("total_abs_notional_diff_float")),
+            ("Price diff notional", summary_dict.get("total_price_diff_notional_float")),
         ]
     )
     equity_card_html_str = _card_grid_html_str(
@@ -576,7 +701,28 @@ def _write_html_report(
             ("Cash diff", summary_dict.get("cash_diff_float")),
         ]
     )
-    execution_table_html_str = _df_to_labeled_html_table_str(
+    trade_fill_table_html_str = _df_to_labeled_html_table_str(
+        trade_fill_diff_df,
+        {
+            "execution_date_str": "Date",
+            "asset_str": "Asset",
+            "side_str": "Side",
+            "live_planned_share_float": "Live planned shares",
+            "live_filled_share_float": "Live shares",
+            "backtest_trade_share_float": "Backtest shares",
+            "share_diff_float": "Share diff",
+            "live_avg_fill_price_float": "Live avg fill",
+            "backtest_avg_fill_price_float": "Backtest fill",
+            "price_diff_float": "Price diff",
+            "price_diff_bps_float": "Price diff bps",
+            "notional_diff_float": "Notional diff",
+            "price_diff_notional_float": "Price diff $",
+            "live_fill_count_int": "Live fill rows",
+            "backtest_trade_count_int": "Backtest rows",
+            "note_str": "Note",
+        },
+    )
+    execution_quality_table_html_str = _df_to_labeled_html_table_str(
         fill_compare_df,
         {
             "asset_str": "Asset",
@@ -613,11 +759,10 @@ def _write_html_report(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>{html.escape(release_obj.pod_id_str)} Reference Compare</title>
+  <title>{html.escape(release_obj.pod_id_str)} Live vs Backtest</title>
   <style>
     body {{ font-family: Arial, sans-serif; margin: 24px; color: #101828; }}
     h1, h2 {{ margin-bottom: 8px; }}
-    .status {{ color: white; background: {status_color_str}; display: inline-block; padding: 6px 10px; border-radius: 4px; font-weight: 700; }}
     .cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; margin: 16px 0 24px; }}
     .card {{ border: 1px solid #d0d5dd; border-radius: 6px; padding: 10px; background: #fff; }}
     .card span {{ display: block; color: #667085; font-size: 12px; }}
@@ -633,22 +778,26 @@ def _write_html_report(
   </style>
 </head>
 <body>
-  <h1>{html.escape(release_obj.pod_id_str)} Reference Compare</h1>
-  <div class="status">{html.escape(status_str.upper())}</div>
+  <h1>{html.escape(release_obj.pod_id_str)} Live vs Backtest</h1>
   <p>Release: {html.escape(release_obj.release_id_str)}</p>
   <section>
-    <h2>Verdict</h2>
-    {verdict_card_html_str}
+    <h2>Comparison Window</h2>
+    {window_card_html_str}
   </section>
   <section>
-    <h2>Equity Tracking</h2>
+    <h2>Trade Fill Difference</h2>
+    {trade_card_html_str}
+    {trade_fill_table_html_str}
+  </section>
+  <section>
+    <h2>Equity Snapshot</h2>
     {equity_card_html_str}
     <img src="{html.escape(equity_png_path_obj.name)}" alt="Equity comparison chart">
     <img src="{html.escape(tracking_png_path_obj.name)}" alt="Tracking error chart">
   </section>
   <section>
-    <h2>Execution Quality</h2>
-    {execution_table_html_str}
+    <h2>Execution Detail</h2>
+    {execution_quality_table_html_str}
   </section>
   <section>
     <h2>Position Parity</h2>

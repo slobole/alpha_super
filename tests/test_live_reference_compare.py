@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -390,24 +391,95 @@ def test_compare_reference_dispatches_for_supported_strategy_mode_matrix(tmp_pat
             assert compare_report_dict_list[0]["deployment_start_date_str"] == "2024-02-01"
 
 
-def test_compare_status_catches_fill_mismatches():
-    base_report_dict = {
-        "compare_row_dict_list": [
-            {
-                "planned_order_delta_share_float": 10.0,
-                "filled_share_float": 0.0,
-                "quantity_diff_float": -10.0,
-                "backtest_quantity_diff_float": -10.0,
-                "reference_position_diff_float": -10.0,
-                "backtest_fill_price_diff_float": None,
-            }
-        ]
+def test_trade_fill_diff_rows_compare_live_fill_to_backtest_trade():
+    transaction_map_dict = {
+        ("2024-02-02", "AAPL"): {
+            "quantity_float": 10.0,
+            "avg_price_float": 100.0,
+            "trade_count_int": 1,
+        },
+        ("2024-02-02", "MSFT"): {
+            "quantity_float": -5.0,
+            "avg_price_float": 200.0,
+            "trade_count_int": 1,
+        },
+        ("2024-02-02", "BACK_ONLY"): {
+            "quantity_float": 4.0,
+            "avg_price_float": 30.0,
+            "trade_count_int": 1,
+        },
     }
+    execution_row_dict_list = [
+        {
+            "asset_str": "AAPL",
+            "planned_order_delta_share_float": 8.0,
+            "filled_share_float": 8.0,
+            "avg_fill_price_float": 101.0,
+            "fill_count_int": 2,
+        },
+        {
+            "asset_str": "MSFT",
+            "planned_order_delta_share_float": -5.0,
+            "filled_share_float": -5.0,
+            "avg_fill_price_float": 198.0,
+            "fill_count_int": 1,
+        },
+        {
+            "asset_str": "LIVE_ONLY",
+            "planned_order_delta_share_float": 3.0,
+            "filled_share_float": 3.0,
+            "avg_fill_price_float": 50.0,
+            "fill_count_int": 1,
+        },
+        {
+            "asset_str": "PLANNED_ONLY",
+            "planned_order_delta_share_float": 7.0,
+            "filled_share_float": 0.0,
+            "avg_fill_price_float": None,
+            "fill_count_int": 0,
+        },
+    ]
 
-    status_dict = reference_compare.classify_compare_status_dict(base_report_dict)
+    row_dict_list = reference_compare.build_trade_fill_diff_row_dict_list(
+        target_session_date_str="2024-02-02",
+        vplan_id_int=7,
+        decision_plan_id_int=3,
+        execution_row_dict_list=execution_row_dict_list,
+        transaction_map_dict=transaction_map_dict,
+    )
 
-    assert status_dict["status_str"] == "red"
-    assert status_dict["open_issue_count_int"] == 1
+    row_by_asset_dict = {row_dict["asset_str"]: row_dict for row_dict in row_dict_list}
+    assert row_by_asset_dict["AAPL"]["side_str"] == "buy"
+    assert row_by_asset_dict["AAPL"]["live_planned_share_float"] == 8.0
+    assert row_by_asset_dict["AAPL"]["share_diff_float"] == -2.0
+    assert row_by_asset_dict["AAPL"]["notional_diff_float"] == -200.0
+    assert row_by_asset_dict["AAPL"]["price_diff_bps_float"] == 100.0
+    assert row_by_asset_dict["AAPL"]["price_diff_notional_float"] == 8.0
+    assert row_by_asset_dict["AAPL"]["note_str"] == "matched"
+    assert row_by_asset_dict["AAPL"]["live_fill_count_int"] == 2
+    assert row_by_asset_dict["AAPL"]["backtest_trade_count_int"] == 1
+
+    assert row_by_asset_dict["MSFT"]["side_str"] == "sell"
+    assert row_by_asset_dict["MSFT"]["share_diff_float"] == 0.0
+    assert row_by_asset_dict["MSFT"]["price_diff_bps_float"] == 100.0
+    assert row_by_asset_dict["MSFT"]["price_diff_notional_float"] == 10.0
+
+    assert row_by_asset_dict["BACK_ONLY"]["note_str"] == "backtest trade without matching live fill"
+    assert row_by_asset_dict["BACK_ONLY"]["share_diff_float"] == -4.0
+    assert row_by_asset_dict["BACK_ONLY"]["notional_diff_float"] == -120.0
+    assert row_by_asset_dict["LIVE_ONLY"]["note_str"] == "live fill without matching backtest trade"
+    assert row_by_asset_dict["LIVE_ONLY"]["notional_diff_float"] == 150.0
+    assert row_by_asset_dict["PLANNED_ONLY"]["side_str"] == "buy"
+    assert row_by_asset_dict["PLANNED_ONLY"]["note_str"] == (
+        "planned live order without live fill or matching backtest trade"
+    )
+    assert row_by_asset_dict["PLANNED_ONLY"]["share_diff_float"] == 0.0
+    summary_dict = reference_compare.summarize_trade_fill_diff_dict(pd.DataFrame(row_dict_list))
+    assert summary_dict["trade_row_count_int"] == 5
+    assert summary_dict["assets_traded_count_int"] == 5
+    assert summary_dict["total_abs_share_diff_float"] == 9.0
+    assert summary_dict["total_abs_notional_diff_float"] == 470.0
+    assert summary_dict["total_price_diff_notional_float"] == 18.0
 
 
 def test_html_report_writes_expected_artifacts(tmp_path):
@@ -424,8 +496,6 @@ def test_html_report_writes_expected_artifacts(tmp_path):
         "actual_cash_float": 4000.0,
         "backtest_cash_float": 4000.0,
         "cash_diff_float": 0.0,
-        "status_str": "green",
-        "open_issue_count_int": 0,
         "compare_row_dict_list": [
             {
                 "asset_str": "AAPL",
@@ -448,9 +518,19 @@ def test_html_report_writes_expected_artifacts(tmp_path):
                 "vplan_reference_slippage_notional_float": 5.0,
                 "backtest_quantity_diff_float": 0.0,
                 "backtest_fill_price_diff_float": 0.0,
+                "fill_count_int": 1,
             }
         ],
     }
+    compare_report_dict["trade_fill_diff_row_dict_list"] = (
+        reference_compare.build_trade_fill_diff_row_dict_list(
+            target_session_date_str="2024-02-02",
+            vplan_id_int=1,
+            decision_plan_id_int=1,
+            execution_row_dict_list=compare_report_dict["compare_row_dict_list"],
+            transaction_map_dict=reference_maps_dict["transaction_map_dict"],
+        )
+    )
 
     artifact_path_dict = reference_compare.write_reference_compare_artifacts(
         output_dir_path_obj=tmp_path / "report",
@@ -464,9 +544,21 @@ def test_html_report_writes_expected_artifacts(tmp_path):
     assert Path(artifact_path_dict["html_path_str"]).exists()
     assert Path(artifact_path_dict["summary_json_path_str"]).exists()
     assert Path(artifact_path_dict["fill_compare_csv_path_str"]).read_text(encoding="utf-8").strip()
+    assert Path(artifact_path_dict["trade_fill_diff_csv_path_str"]).read_text(encoding="utf-8").strip()
+    summary_dict = json.loads(Path(artifact_path_dict["summary_json_path_str"]).read_text(encoding="utf-8"))
+    assert summary_dict["trade_row_count_int"] == 1
+    assert summary_dict["assets_traded_count_int"] == 1
+    assert summary_dict["total_abs_share_diff_float"] == 0.0
+    assert summary_dict["total_abs_notional_diff_float"] == 0.0
+    assert summary_dict["total_price_diff_notional_float"] == 0.0
+    assert "status_str" not in summary_dict
+    assert "open_issue_count_int" not in summary_dict
     html_text_str = Path(artifact_path_dict["html_path_str"]).read_text(encoding="utf-8")
-    assert "Verdict" in html_text_str
-    assert "Execution Quality" in html_text_str
+    assert "Live vs Backtest" in html_text_str
+    assert "Verdict" not in html_text_str
+    assert "Status" not in html_text_str
+    assert "Trade Fill Difference" in html_text_str
+    assert "Execution Detail" in html_text_str
     assert "Position Parity" in html_text_str
     assert "Raw Detail Tables" in html_text_str
     assert "Official open" in html_text_str

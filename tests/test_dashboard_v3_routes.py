@@ -77,6 +77,22 @@ def _build_pod_row_dict(
         "latest_vplan_id_int": 87,
         "latest_vplan_target_execution_timestamp_str": "2026-05-21T20:00:00+00:00",
         "latest_decision_plan_id_int": 142,
+        "latest_comparison_state_str": "available",
+        "latest_comparison_timestamp_str": "20260521T160000Z",
+        "latest_comparison_target_session_date_str": "2026-05-21",
+        "latest_comparison_deployment_start_date_str": "2026-05-01",
+        "latest_comparison_trade_row_count_int": 3,
+        "latest_comparison_assets_traded_count_int": 2,
+        "latest_comparison_total_abs_share_diff_float": 1.5,
+        "latest_comparison_total_abs_notional_diff_float": 250.0,
+        "latest_comparison_total_price_diff_notional_float": 12.0,
+        "latest_comparison_equity_tracking_error_float": 0.001,
+        "latest_comparison_artifact_url_str": (
+            "/artifacts/live_reference_compare/live/dv2_caspersky_live/20260521T160000Z/index.html"
+        ),
+        "latest_comparison_trade_fill_diff_url_str": (
+            "/artifacts/live_reference_compare/live/dv2_caspersky_live/20260521T160000Z/trade_fill_diff.csv"
+        ),
         "lifecycle_step_dict_list": _build_lifecycle_step_dict_list(),
         "required_action_dict": {
             "label_str": "Waiting for ACKs",
@@ -241,8 +257,8 @@ class StubDataProvider:
                      "severity_str": "green", "detail_str": "source=norgate_only · snapshot ready"},
                     {"label_str": "Pod state", "value_str": "2026-05-21T16:14:32+00:00",
                      "severity_str": "green", "detail_str": "latest persisted state"},
-                    {"label_str": "DIFF artifact", "value_str": None,
-                     "severity_str": "gray", "detail_str": "not_run"},
+                    {"label_str": "Live vs Backtest", "value_str": "20260521T160000Z",
+                     "severity_str": "green", "detail_str": "available"},
                 ],
             },
             "eod_snapshot_dict": {"status_str": "pending"},
@@ -494,11 +510,61 @@ def test_pod_detail_includes_data_freshness_panel(test_client_obj) -> None:
     # All three stub freshness items render with their labels.
     assert "Norgate" in response_text_str
     assert "Pod state" in response_text_str
-    assert "DIFF artifact" in response_text_str
+    assert "Live vs Backtest" in response_text_str
+    assert "Open report" in response_text_str
+    assert "CSV" in response_text_str
+    assert "2026-05-01" in response_text_str
+    assert "2026-05-21" in response_text_str
+    assert "Trade rows" in response_text_str
+    assert ">3<" in response_text_str
+    assert "Abs share diff" in response_text_str
+    assert ">1.5<" in response_text_str
+    assert "Abs notional diff" in response_text_str
+    assert ">$250<" in response_text_str
+    assert "Price diff $" in response_text_str
+    assert ">$12<" in response_text_str
+    assert "Equity diff" in response_text_str
+    assert ">0.10%<" in response_text_str
+    assert "trade_fill_diff.csv" in response_text_str
+    assert ("Expected " + "PnL") not in response_text_str
+    assert "Expected ±" not in response_text_str
     # Norgate's value (snapshot date) appears.
     assert "2026-05-21" in response_text_str
     # Detail text appears for at least one item.
     assert "source=norgate_only" in response_text_str
+
+
+def test_pod_detail_live_backtest_card_handles_not_run_and_error_states(
+    test_client_obj,
+    provider_obj,
+) -> None:
+    row_dict = provider_obj.summary_dict["pod_row_dict_list"][0]
+    row_dict["latest_comparison_state_str"] = "not_run"
+    row_dict["latest_comparison_artifact_url_str"] = None
+    row_dict["latest_comparison_trade_fill_diff_url_str"] = None
+
+    response_text_str = test_client_obj.get(
+        "/fragments/pod-detail/dv2_caspersky_live"
+    ).get_data(as_text=True)
+
+    assert "No comparison has been generated yet." in response_text_str
+    assert "Open report" not in response_text_str
+
+    row_dict["latest_comparison_state_str"] = "error"
+    response_text_str = test_client_obj.get(
+        "/fragments/pod-detail/dv2_caspersky_live"
+    ).get_data(as_text=True)
+
+    assert "Latest comparison artifact could not be read." in response_text_str
+    assert "Open report" not in response_text_str
+
+    row_dict["latest_comparison_state_str"] = "legacy"
+    response_text_str = test_client_obj.get(
+        "/fragments/pod-detail/dv2_caspersky_live"
+    ).get_data(as_text=True)
+
+    assert "Latest comparison artifact uses an old format." in response_text_str
+    assert "Open report" not in response_text_str
 
 
 def test_main_module_loads_config_env_before_serving(monkeypatch, tmp_path) -> None:

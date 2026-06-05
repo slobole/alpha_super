@@ -86,20 +86,23 @@ On every pod's green/yellow/gray → red transition, the dashboard fires a singl
 message. State is persisted in `alpha/live/logs/notification_state.json`, so
 recovering and re-failing fires a fresh alert. Missing env var = silent.
 
-## Live-vs-backtest band (optional)
+## Live vs Backtest comparison
 
-Drop expected-PnL stats into `alpha/live/expected_pnl.yaml`:
+The pod detail page includes a compact Live vs Backtest card when a comparison
+artifact exists. It is read-only: it compares observed live fills and state to a
+same-condition reference backtest, and it does not send orders.
 
-```yaml
-pod_dv2_caspersky_live:
-  daily_mean_return_float: 0.00012
-  daily_volatility_float:  0.0118
-  band_sigma_float: 2.0
-  sample_count_int: 252
+Run it from Operator Tools with `Live vs Backtest`. Artifacts are written under:
+
+```text
+results/live_reference_compare/<mode>/<pod_id>/<timestamp>/
 ```
 
-Each pod's EOD card then shows "Today +X% · Expected ±Y%" with a yellow ⚠ when
-the day lands outside the band. No file or no entry = the line is just hidden.
+The dashboard card links to `index.html` and `trade_fill_diff.csv`. The CSV is
+the first table to inspect when asking how live differed from the backtest: live
+shares, backtest shares, share diff, live average fill, backtest fill, price
+diff bps, notional diff, and a plain note such as `matched` or `backtest trade
+without matching live fill`.
 
 ## Verify Tailscale-only exposure
 
@@ -132,7 +135,7 @@ If that returns HTML, fix the bind before logging off.
 | `/fragments/events-tail/<id>` | Live event log (polled 5s while open) |
 | `/fragments/equity-chart/<id>?window=30d\|90d\|all` | SVG curve |
 | `/api/action-token` | Token for action POSTs |
-| `POST /api/pods/<id>/diff/run` | Run DIFF |
+| `POST /api/pods/<id>/diff/run` | Live vs Backtest |
 | `POST /api/pods/<id>/actions/<name>` | tick / submit_vplan / reconcile / eod_snapshot |
 | `GET /api/jobs/<id>` | Job status (HTML for HTMX, JSON otherwise) |
 

@@ -655,13 +655,25 @@ def build_pod_row_dict(
         "exception_count_int": 0,
         "latest_reconciliation_status_str": None,
         "latest_reconciliation_timestamp_str": None,
-        "latest_diff_status_str": str(latest_diff_dict.get("status_str", "not_run")),
+        "latest_diff_status_str": str(latest_diff_dict.get("comparison_state_str", "not_run")),
         "latest_diff_timestamp_str": latest_diff_dict.get("artifact_timestamp_str"),
         "latest_diff_equity_tracking_error_float": latest_diff_dict.get(
             "equity_tracking_error_float"
         ),
-        "latest_diff_open_issue_count_int": latest_diff_dict.get("open_issue_count_int"),
+        "latest_diff_open_issue_count_int": None,
         "latest_diff_artifact_url_str": latest_diff_dict.get("html_url_str"),
+        "latest_comparison_state_str": str(latest_diff_dict.get("comparison_state_str", "not_run")),
+        "latest_comparison_timestamp_str": latest_diff_dict.get("artifact_timestamp_str"),
+        "latest_comparison_target_session_date_str": latest_diff_dict.get("target_session_date_str"),
+        "latest_comparison_deployment_start_date_str": latest_diff_dict.get("deployment_start_date_str"),
+        "latest_comparison_trade_row_count_int": latest_diff_dict.get("trade_row_count_int"),
+        "latest_comparison_assets_traded_count_int": latest_diff_dict.get("assets_traded_count_int"),
+        "latest_comparison_total_abs_share_diff_float": latest_diff_dict.get("total_abs_share_diff_float"),
+        "latest_comparison_total_abs_notional_diff_float": latest_diff_dict.get("total_abs_notional_diff_float"),
+        "latest_comparison_total_price_diff_notional_float": latest_diff_dict.get("total_price_diff_notional_float"),
+        "latest_comparison_equity_tracking_error_float": latest_diff_dict.get("equity_tracking_error_float"),
+        "latest_comparison_artifact_url_str": latest_diff_dict.get("html_url_str"),
+        "latest_comparison_trade_fill_diff_url_str": latest_diff_dict.get("trade_fill_diff_url_str"),
         "strategy_family_str": None,
         "dtb3_download_status_str": None,
         "dtb3_latest_observation_date_str": None,
@@ -914,22 +926,20 @@ def find_latest_diff_artifact_dict(
         / pod_id_str
     )
     if not artifact_root_path_obj.exists():
-        return {"status_str": "not_run"}
+        return {"comparison_state_str": "not_run", "status_str": "not_run"}
     candidate_summary_path_list = sorted(
         artifact_root_path_obj.glob("*/summary.json"),
-        key=lambda path_obj: (
-            path_obj.stat().st_mtime,
-            str(path_obj.parent.name),
-        ),
+        key=lambda path_obj: str(path_obj.parent.name),
         reverse=True,
     )
     if len(candidate_summary_path_list) == 0:
-        return {"status_str": "not_run"}
+        return {"comparison_state_str": "not_run", "status_str": "not_run"}
     summary_path_obj = candidate_summary_path_list[0]
     try:
         summary_dict = json.loads(summary_path_obj.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exception_obj:
         return {
+            "comparison_state_str": "error",
             "status_str": "error",
             "error_str": str(exception_obj),
             "summary_path_str": str(summary_path_obj),
@@ -939,14 +949,34 @@ def find_latest_diff_artifact_dict(
     result_dict["artifact_timestamp_str"] = artifact_dir_path_obj.name
     result_dict["artifact_dir_path_str"] = str(artifact_dir_path_obj)
     result_dict["summary_json_path_str"] = str(summary_path_obj)
+    required_summary_key_set = {
+        "trade_row_count_int",
+        "assets_traded_count_int",
+        "total_abs_share_diff_float",
+        "total_abs_notional_diff_float",
+        "total_price_diff_notional_float",
+    }
+    if not required_summary_key_set.issubset(summary_dict):
+        result_dict["comparison_state_str"] = "legacy"
+        result_dict["status_str"] = "legacy"
+        result_dict["error_str"] = "Latest artifact uses the old comparison format. Run Live vs Backtest again."
+        return result_dict
+    trade_fill_diff_path_obj = artifact_dir_path_obj / "trade_fill_diff.csv"
+    if not trade_fill_diff_path_obj.exists() or trade_fill_diff_path_obj.stat().st_size <= 0:
+        result_dict["comparison_state_str"] = "error"
+        result_dict["status_str"] = "error"
+        result_dict["error_str"] = "trade_fill_diff.csv is missing or empty. Run Live vs Backtest again."
+    else:
+        result_dict["comparison_state_str"] = "available"
     for filename_str, key_str in (
         ("index.html", "html_url_str"),
         ("summary.json", "summary_url_str"),
         ("equity_compare.png", "equity_png_url_str"),
         ("tracking_error.png", "tracking_png_url_str"),
+        ("trade_fill_diff.csv", "trade_fill_diff_url_str"),
     ):
         artifact_path_obj = artifact_dir_path_obj / filename_str
-        if artifact_path_obj.exists():
+        if artifact_path_obj.exists() and (filename_str != "trade_fill_diff.csv" or artifact_path_obj.stat().st_size > 0):
             result_dict[key_str] = _artifact_url_str(
                 results_root_path_str=results_root_path_str,
                 artifact_path_obj=artifact_path_obj,
@@ -2654,17 +2684,15 @@ def _build_eod_step_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
 
 
 def _build_diff_step_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
-    status_str = str(row_dict.get("latest_diff_status_str") or "not_run")
-    severity_str = "green" if status_str == "green" else status_str
-    if severity_str not in {"green", "yellow", "red", "gray"}:
-        severity_str = "gray" if status_str == "not_run" else "red"
+    status_str = str(row_dict.get("latest_comparison_state_str") or "not_run")
+    severity_str = "green" if status_str == "available" else "gray"
     return _lifecycle_step_dict(
         "diff",
-        "DIFF",
+        "Live vs Backtest",
         status_str,
         severity_str,
-        f"open_issues={row_dict.get('latest_diff_open_issue_count_int')}",
-        row_dict.get("latest_diff_timestamp_str"),
+        f"trade_rows={row_dict.get('latest_comparison_trade_row_count_int')}",
+        row_dict.get("latest_comparison_timestamp_str"),
     )
 
 
@@ -2772,10 +2800,10 @@ def _build_data_freshness_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
             "Latest JSONL event for this POD.",
         ),
         _freshness_item_dict(
-            "DIFF artifact",
-            row_dict.get("latest_diff_timestamp_str"),
+            "Live vs Backtest",
+            row_dict.get("latest_comparison_timestamp_str"),
             _diff_freshness_severity_str(row_dict),
-            str(row_dict.get("latest_diff_status_str") or "not_run"),
+            str(row_dict.get("latest_comparison_state_str") or "not_run"),
         ),
     ]
     if row_dict.get("dtb3_download_status_str") is not None:
@@ -2800,7 +2828,7 @@ def _build_data_freshness_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
             "latest_live_reference_snapshot_timestamp_str"
         ),
         "latest_event_timestamp_str": row_dict.get("latest_event_timestamp_str"),
-        "diff_artifact_timestamp_str": row_dict.get("latest_diff_timestamp_str"),
+        "comparison_artifact_timestamp_str": row_dict.get("latest_comparison_timestamp_str"),
         "norgate_snapshot_status_dict": norgate_snapshot_status_dict,
         "norgate_current_cycle_gate_dict": norgate_current_cycle_gate_dict,
         "norgate_data_source_mode_str": norgate_snapshot_status_dict.get("data_source_mode_str"),
@@ -3114,19 +3142,6 @@ def _build_alerts_for_row_dict(row_dict: dict[str, Any]) -> list[dict[str, Any]]
             )
         )
 
-    diff_status_str = str(row_dict.get("latest_diff_status_str") or "not_run")
-    if diff_status_str in {"red", "yellow"}:
-        alert_dict_list.append(
-            _alert_dict(
-                row_dict,
-                "diff",
-                diff_status_str,
-                "DIFF needs review",
-                f"status={diff_status_str}, open_issues={row_dict.get('latest_diff_open_issue_count_int')}",
-                "compare_reference",
-            )
-        )
-
     for item_dict in (row_dict.get("data_freshness_dict") or {}).get("item_dict_list", []):
         freshness_alert_dict = _freshness_alert_dict(row_dict, item_dict)
         if freshness_alert_dict is not None:
@@ -3155,7 +3170,7 @@ def _freshness_alert_dict(
     label_str = str(item_dict.get("label_str") or "")
     severity_str = str(item_dict.get("severity_str") or "gray")
     value_obj = item_dict.get("value_str")
-    if label_str == "DIFF artifact":
+    if label_str == "Live vs Backtest":
         return None
     if label_str == "Norgate" and _norgate_not_blocking_current_cycle_bool(row_dict):
         return None
@@ -3421,20 +3436,6 @@ def _build_debug_candidate_dict_list(row_dict: dict[str, Any]) -> list[dict[str,
             )
         )
 
-    diff_status_str = str(row_dict.get("latest_diff_status_str") or "not_run")
-    if diff_status_str in {"red", "yellow"}:
-        candidate_dict_list.append(
-            _debug_candidate_dict(
-                priority_int=70,
-                severity_str=diff_status_str,
-                label_str=f"DIFF {diff_status_str}",
-                reason_str="Reference comparison has open issues.",
-                evidence_str=f"status={diff_status_str}, open_issues={row_dict.get('latest_diff_open_issue_count_int')}",
-                inspect_command_name_str="compare_reference",
-                timestamp_str=row_dict.get("latest_diff_timestamp_str"),
-            )
-        )
-
     eod_snapshot_dict = row_dict.get("eod_snapshot_dict") or {}
     eod_status_str = str(eod_snapshot_dict.get("status_str") or "not_applicable")
     eod_severity_str = str(eod_snapshot_dict.get("severity_str") or "gray")
@@ -3457,7 +3458,7 @@ def _build_debug_candidate_dict_list(row_dict: dict[str, Any]) -> list[dict[str,
     for freshness_item_dict in (row_dict.get("data_freshness_dict") or {}).get("item_dict_list", []):
         item_severity_str = str(freshness_item_dict.get("severity_str") or "gray")
         item_label_str = str(freshness_item_dict.get("label_str") or "")
-        if item_label_str == "DIFF artifact":
+        if item_label_str == "Live vs Backtest":
             continue
         if (
             item_label_str == "Norgate"
@@ -3775,12 +3776,12 @@ def _build_debug_timeline_event_dict_list(detail_dict: dict[str, Any]) -> list[d
     )
 
     add_event(
-        "DIFF",
-        "Reference DIFF",
-        row_dict.get("latest_diff_status_str") or "not_run",
+        "Live vs Backtest",
+        "Comparison artifact",
+        row_dict.get("latest_comparison_state_str") or "not_run",
         _diff_freshness_severity_str(row_dict),
-        row_dict.get("latest_diff_timestamp_str"),
-        f"open_issues={row_dict.get('latest_diff_open_issue_count_int')}",
+        row_dict.get("latest_comparison_timestamp_str"),
+        f"trade_rows={row_dict.get('latest_comparison_trade_row_count_int')}",
     )
 
     if row_dict.get("dtb3_download_status_str") is not None:
@@ -3844,7 +3845,15 @@ def _build_debug_evidence_item_dict_list(detail_dict: dict[str, Any]) -> list[di
         _debug_evidence_item_dict("Live reference", row_dict.get("latest_live_reference_snapshot_timestamp_str"), "green" if row_dict.get("latest_live_reference_snapshot_timestamp_str") else "gray", "Quote snapshot used for VPlan sizing."),
         _debug_evidence_item_dict("Reconcile", row_dict.get("latest_reconciliation_status_str"), _status_to_severity_str(str(row_dict.get("latest_reconciliation_status_str") or ""), {"passed"}, {"pending", "recorded"}), str(row_dict.get("latest_reconciliation_timestamp_str") or "")),
         _debug_evidence_item_dict("EOD snapshot", eod_snapshot_dict.get("status_str"), str(eod_snapshot_dict.get("severity_str") or "gray"), str(eod_snapshot_dict.get("detail_str") or "")),
-        _debug_evidence_item_dict("DIFF artifact", row_dict.get("latest_diff_status_str"), _diff_freshness_severity_str(row_dict), f"timestamp={row_dict.get('latest_diff_timestamp_str')}, open_issues={row_dict.get('latest_diff_open_issue_count_int')}"),
+        _debug_evidence_item_dict(
+            "Live vs Backtest",
+            row_dict.get("latest_comparison_state_str"),
+            _diff_freshness_severity_str(row_dict),
+            (
+                f"timestamp={row_dict.get('latest_comparison_timestamp_str')}, "
+                f"trade_rows={row_dict.get('latest_comparison_trade_row_count_int')}"
+            ),
+        ),
     ]
     if rehearsal_status_dict.get("status_str") == "active":
         item_dict_list.append(
@@ -3917,7 +3926,7 @@ def _build_debug_recommended_command_dict_list(detail_dict: dict[str, Any]) -> l
         "next_due" if row_dict.get("next_action_str") in {"build_decision_plan", "build_vplan"} else None,
         "show_decision_plan" if detail_dict.get("latest_decision_plan_dict") is not None else None,
         "show_vplan" if detail_dict.get("latest_vplan_dict") is not None else None,
-        "compare_reference" if str(row_dict.get("latest_diff_status_str") or "not_run") != "not_run" else None,
+        "compare_reference" if str(row_dict.get("latest_comparison_state_str") or "not_run") != "not_run" else None,
     ):
         safe_command_str = _safe_inspect_command_name_str(command_name_str)
         if safe_command_str is not None and safe_command_str not in command_name_list:
@@ -3981,7 +3990,7 @@ def _debug_command_reason_str(command_name_str: str) -> str:
         "next_due": "Check scheduler timing without changing live state.",
         "show_decision_plan": "Inspect latest strategy decision intent.",
         "show_vplan": "Inspect VPlan, ACK, order, and fill evidence.",
-        "compare_reference": "Inspect live/reference drift artifact.",
+        "compare_reference": "Inspect the latest live-vs-backtest comparison artifact.",
     }
     return reason_map_dict.get(command_name_str, "Read-only inspect command.")
 
@@ -4042,12 +4051,10 @@ def _debug_timestamp_sort_key_tuple(value_obj: object) -> tuple[int, datetime]:
 
 
 def _diff_freshness_severity_str(row_dict: dict[str, Any]) -> str:
-    diff_status_str = str(row_dict.get("latest_diff_status_str") or "not_run")
-    if diff_status_str in {"green", "yellow", "red"}:
-        return diff_status_str
-    if diff_status_str == "not_run":
-        return "gray"
-    return "red"
+    comparison_state_str = str(row_dict.get("latest_comparison_state_str") or "not_run")
+    if comparison_state_str == "available":
+        return "green"
+    return "gray"
 
 
 def _dtb3_freshness_severity_str(row_dict: dict[str, Any]) -> str:

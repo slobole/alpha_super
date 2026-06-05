@@ -35,11 +35,6 @@ from alpha.live.dashboard_v3.data import (
     get_pod_row_dict_by_id,
     get_pod_row_dict_list_for_mode,
 )
-from alpha.live.dashboard_v3.expected_pnl import (
-    DEFAULT_EXPECTED_PNL_PATH_STR,
-    build_tracking_comparison,
-    load_expected_pnl_map,
-)
 from alpha.live.dashboard_v3.filters import FILTER_MAP_DICT
 from alpha.live.dashboard_v3.health import build_health_rollup
 from alpha.live.dashboard_v3.journal import (
@@ -61,7 +56,7 @@ from alpha.live.dashboard_v3.verdict import resolve_top_bar_verdict
 DASHBOARD_V3_VERSION_STR = "0.6.0-phase-6"
 ALL_ACTION_NAME_LIST = ["compare_reference"] + list(SUPPORTED_ACTION_NAME_LIST)
 ACTION_LABEL_DICT = {
-    "compare_reference": "DIFF compare",
+    "compare_reference": "Live vs Backtest",
     "tick": "Tick scheduler",
     "submit_vplan": "Submit VPlan",
     "post_execution_reconcile": "Post-execution reconcile",
@@ -89,7 +84,6 @@ def create_app(
     data_provider_obj: DataProviderProtocol | None = None,
     *,
     journal_path_str: str = DEFAULT_JOURNAL_PATH_STR,
-    expected_pnl_path_str: str = DEFAULT_EXPECTED_PNL_PATH_STR,
     notification_state_path_str: str = DEFAULT_NOTIFICATION_STATE_PATH_STR,
     notification_webhook_url_str: str | None = None,
     notification_webhook_poster_fn=None,
@@ -99,7 +93,6 @@ def create_app(
         data_provider_obj if data_provider_obj is not None else DashboardDataProvider()
     )
     flask_app_obj.config["journal_path_str"] = journal_path_str
-    flask_app_obj.config["expected_pnl_path_str"] = expected_pnl_path_str
     flask_app_obj.config["notification_state_store_obj"] = NotificationStateStore(
         state_path_str=notification_state_path_str
     )
@@ -247,19 +240,9 @@ def create_app(
             detail_dict = provider_obj.get_pod_detail_dict(pod_id_str)
         except KeyError:
             abort(404)
-        expected_pnl_map_dict = load_expected_pnl_map(
-            flask_app_obj.config["expected_pnl_path_str"]
-        )
-        pnl_dict = detail_dict.get("pod_pnl_dict") or {}
-        tracking_obj = build_tracking_comparison(
-            pod_id_str,
-            pnl_dict.get("daily_pnl_pct_float"),
-            expected_pnl_map_dict,
-        )
         return render_template(
             "_pod_detail.html",
             detail_dict=detail_dict,
-            tracking_dict=tracking_obj.as_dict(),
             as_of_clock_str=_now_clock_str(),
         )
 
@@ -543,8 +526,8 @@ def _build_action_preview_line_str_list(
 ) -> list[str]:
     if action_name_str == "compare_reference":
         return [
-            "Re-runs the offline reference DIFF against the latest live state.",
-            "Read-only relative to live trading — no orders are sent.",
+            "Compares live fills and state against the same-condition backtest.",
+            "Read-only relative to live trading - no orders are sent.",
         ]
     if action_name_str == "tick":
         return [

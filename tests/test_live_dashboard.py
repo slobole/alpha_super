@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import json
+import os
 from pathlib import Path
 import sqlite3
 import threading
@@ -511,9 +512,23 @@ def _base_operator_row_dict(**override_dict) -> dict:
         "exception_count_int": 0,
         "latest_reconciliation_status_str": "passed",
         "latest_reconciliation_timestamp_str": AS_OF_TS.isoformat(),
-        "latest_diff_status_str": "green",
+        "latest_diff_status_str": "available",
         "latest_diff_timestamp_str": "20240102T000000Z",
         "latest_diff_open_issue_count_int": 0,
+        "latest_comparison_state_str": "available",
+        "latest_comparison_timestamp_str": "20240102T000000Z",
+        "latest_comparison_target_session_date_str": "2024-01-02",
+        "latest_comparison_deployment_start_date_str": "2024-01-01",
+        "latest_comparison_trade_row_count_int": 1,
+        "latest_comparison_assets_traded_count_int": 1,
+        "latest_comparison_total_abs_share_diff_float": 0.0,
+        "latest_comparison_total_abs_notional_diff_float": 0.0,
+        "latest_comparison_total_price_diff_notional_float": 0.0,
+        "latest_comparison_equity_tracking_error_float": 0.0,
+        "latest_comparison_artifact_url_str": "/artifacts/live_reference_compare/paper/pod_ok/20240102T000000Z/index.html",
+        "latest_comparison_trade_fill_diff_url_str": (
+            "/artifacts/live_reference_compare/paper/pod_ok/20240102T000000Z/trade_fill_diff.csv"
+        ),
         "eod_snapshot_dict": {
             "status_str": "completed",
             "severity_str": "green",
@@ -657,8 +672,11 @@ def test_dashboard_required_action_context_items_are_informational():
     assert context_by_label_dict["EOD"]["value_str"].startswith("completed / due ")
 
 
-def test_dashboard_lifecycle_steps_cover_execution_evidence_and_diff():
-    row_dict = _base_operator_row_dict(latest_diff_status_str="red", latest_diff_open_issue_count_int=2)
+def test_dashboard_lifecycle_steps_cover_execution_evidence_and_comparison():
+    row_dict = _base_operator_row_dict(
+        latest_comparison_state_str="available",
+        latest_comparison_trade_row_count_int=2,
+    )
     step_dict_list = _build_lifecycle_step_dict_list(row_dict)
 
     step_by_key_dict = {
@@ -683,7 +701,9 @@ def test_dashboard_lifecycle_steps_cover_execution_evidence_and_diff():
     assert step_by_key_dict["fill"]["status_str"] == "recorded"
     assert step_by_key_dict["reconcile"]["status_str"] == "passed"
     assert step_by_key_dict["eod"]["status_str"] == "completed"
-    assert step_by_key_dict["diff"]["severity_str"] == "red"
+    assert step_by_key_dict["diff"]["label_str"] == "Live vs Backtest"
+    assert step_by_key_dict["diff"]["status_str"] == "available"
+    assert step_by_key_dict["diff"]["severity_str"] == "green"
 
 
 def test_dashboard_alert_builder_sorts_and_suppresses_green_noise():
@@ -1946,7 +1966,7 @@ def test_dashboard_event_loader_reads_rotated_jsonl_backups(tmp_path: Path):
     ]
 
 
-def test_dashboard_summary_does_not_use_diff_status_for_overall_health(tmp_path: Path):
+def test_dashboard_summary_keeps_comparison_artifacts_informational(tmp_path: Path):
     releases_root_path_obj = tmp_path / "releases"
     _write_release_manifest(
         releases_root_path_obj,
@@ -1968,9 +1988,20 @@ def test_dashboard_summary_does_not_use_diff_status_for_overall_health(tmp_path:
     )
     artifact_dir_path_obj.mkdir(parents=True)
     (artifact_dir_path_obj / "summary.json").write_text(
-        json.dumps({"status_str": "red", "open_issue_count_int": 3}),
+        json.dumps(
+            {
+                "status_str": "red",
+                "open_issue_count_int": 3,
+                "trade_row_count_int": 4,
+                "assets_traded_count_int": 2,
+                "total_abs_share_diff_float": 11.0,
+                "total_abs_notional_diff_float": 1200.0,
+                "total_price_diff_notional_float": 45.0,
+            }
+        ),
         encoding="utf-8",
     )
+    (artifact_dir_path_obj / "trade_fill_diff.csv").write_text("asset_str\nAAPL\n", encoding="utf-8")
 
     config_path_obj = tmp_path / "dashboard_config.yaml"
     _write_config(config_path_obj, {"pod_diff_health": str(db_path_obj)})
@@ -1983,18 +2014,19 @@ def test_dashboard_summary_does_not_use_diff_status_for_overall_health(tmp_path:
     summary_dict = build_dashboard_summary_dict(app_obj, as_of_ts=AS_OF_TS)
     row_dict = _row_by_pod_id(summary_dict, "pod_diff_health")
 
-    assert row_dict["latest_diff_status_str"] == "red"
+    assert row_dict["latest_diff_status_str"] == "available"
+    assert row_dict["latest_comparison_state_str"] == "available"
+    assert row_dict["latest_comparison_trade_row_count_int"] == 4
     assert row_dict["health_str"] != "red"
     assert row_dict["required_action_dict"]["severity_str"] != "red"
-    assert row_dict["debug_summary_dict"]["severity_str"] == "red"
-    assert row_dict["debug_summary_dict"]["verdict_label_str"] == "DIFF red"
-    assert row_dict["debug_summary_dict"]["next_inspect_command_name_str"] == "compare_reference"
+    assert row_dict["debug_summary_dict"]["severity_str"] != "red"
+    assert ("D" + "IFF") not in json.dumps(row_dict["debug_summary_dict"])
     assert row_dict["lifecycle_step_dict_list"][-1]["step_key_str"] == "diff"
-    assert row_dict["lifecycle_step_dict_list"][-1]["severity_str"] == "red"
-    assert {
+    assert row_dict["lifecycle_step_dict_list"][-1]["severity_str"] == "green"
+    assert ("diff", "red", "pod_diff_health") not in {
         (alert_dict["alert_type_str"], alert_dict["severity_str"], alert_dict["pod_id_str"])
         for alert_dict in summary_dict["alert_dict_list"]
-    } >= {("diff", "red", "pod_diff_health")}
+    }
 
 
 def test_dashboard_eod_snapshot_states_and_alerts(tmp_path: Path):
@@ -2451,7 +2483,7 @@ def test_dashboard_detail_parses_decision_plan_and_preserves_execution_rows(tmp_
         "Reconcile",
         "EOD",
         "Live reference",
-        "DIFF",
+        "Live vs Backtest",
         "DTB3/FRED",
         "Event log",
     }.issubset(source_set)
@@ -2594,9 +2626,20 @@ def test_dashboard_summary_flags_missing_ack_and_reconcile_failure_actions(tmp_p
     )
     artifact_dir_path_obj.mkdir(parents=True)
     (artifact_dir_path_obj / "summary.json").write_text(
-        json.dumps({"status_str": "red", "open_issue_count_int": 9}),
+        json.dumps(
+            {
+                "status_str": "red",
+                "open_issue_count_int": 9,
+                "trade_row_count_int": 1,
+                "assets_traded_count_int": 1,
+                "total_abs_share_diff_float": 0.0,
+                "total_abs_notional_diff_float": 0.0,
+                "total_price_diff_notional_float": 0.0,
+            }
+        ),
         encoding="utf-8",
     )
+    (artifact_dir_path_obj / "trade_fill_diff.csv").write_text("asset_str\nAAPL\n", encoding="utf-8")
 
     summary_dict = build_dashboard_summary_dict(app_obj, as_of_ts=AS_OF_TS)
     ack_row_dict = _row_by_pod_id(summary_dict, "pod_ack")
@@ -2610,7 +2653,7 @@ def test_dashboard_summary_flags_missing_ack_and_reconcile_failure_actions(tmp_p
     assert reconcile_row_dict["lifecycle_step_dict_list"][5]["severity_str"] == "red"
     assert ack_row_dict["debug_summary_dict"]["verdict_label_str"] == "Broker ACK missing"
     assert ack_row_dict["debug_summary_dict"]["severity_str"] == "red"
-    assert reconcile_row_dict["latest_diff_status_str"] == "red"
+    assert reconcile_row_dict["latest_comparison_state_str"] == "available"
     assert reconcile_row_dict["debug_summary_dict"]["verdict_label_str"] == "Reconcile blocked"
     assert reconcile_row_dict["debug_summary_dict"]["primary_evidence_str"].startswith("reconcile_status=failed")
     alert_key_list = [
@@ -2661,19 +2704,35 @@ def test_latest_diff_artifact_discovery_uses_newest_timestamp(tmp_path: Path):
     new_dir_path_obj = artifact_root_path_obj / "20240102T000000Z"
     old_dir_path_obj.mkdir(parents=True)
     new_dir_path_obj.mkdir(parents=True)
-    (old_dir_path_obj / "summary.json").write_text('{"status_str": "green"}', encoding="utf-8")
+    (old_dir_path_obj / "summary.json").write_text('{"trade_row_count_int": 1}', encoding="utf-8")
     (new_dir_path_obj / "summary.json").write_text(
         json.dumps(
             {
-                "status_str": "red",
                 "equity_tracking_error_float": 12.5,
-                "open_issue_count_int": 2,
+                "trade_row_count_int": 2,
+                "assets_traded_count_int": 2,
+                "total_abs_share_diff_float": 3.0,
+                "total_abs_notional_diff_float": 400.0,
+                "total_price_diff_notional_float": 5.5,
             }
         ),
         encoding="utf-8",
     )
     (new_dir_path_obj / "index.html").write_text("<html></html>", encoding="utf-8")
     (new_dir_path_obj / "equity_compare.png").write_bytes(b"png")
+    (new_dir_path_obj / "trade_fill_diff.csv").write_text("asset_str\nAAPL\n", encoding="utf-8")
+    old_time_float = 1_800_000_000.0
+    new_time_float = 1_700_000_000.0
+    for path_obj in (old_dir_path_obj, old_dir_path_obj / "summary.json"):
+        os.utime(path_obj, (old_time_float, old_time_float))
+    for path_obj in (
+        new_dir_path_obj,
+        new_dir_path_obj / "summary.json",
+        new_dir_path_obj / "index.html",
+        new_dir_path_obj / "equity_compare.png",
+        new_dir_path_obj / "trade_fill_diff.csv",
+    ):
+        os.utime(path_obj, (new_time_float, new_time_float))
 
     diff_dict = find_latest_diff_artifact_dict(
         results_root_path_str=str(tmp_path / "results"),
@@ -2681,12 +2740,78 @@ def test_latest_diff_artifact_discovery_uses_newest_timestamp(tmp_path: Path):
         pod_id_str="pod_diff",
     )
 
-    assert diff_dict["status_str"] == "red"
+    assert diff_dict["comparison_state_str"] == "available"
     assert diff_dict["artifact_timestamp_str"] == "20240102T000000Z"
     assert diff_dict["equity_tracking_error_float"] == 12.5
-    assert diff_dict["open_issue_count_int"] == 2
+    assert diff_dict["trade_row_count_int"] == 2
+    assert diff_dict["total_abs_notional_diff_float"] == 400.0
     assert diff_dict["html_url_str"] == "/artifacts/live_reference_compare/paper/pod_diff/20240102T000000Z/index.html"
     assert diff_dict["equity_png_url_str"] == "/artifacts/live_reference_compare/paper/pod_diff/20240102T000000Z/equity_compare.png"
+    assert diff_dict["trade_fill_diff_url_str"] == (
+        "/artifacts/live_reference_compare/paper/pod_diff/20240102T000000Z/trade_fill_diff.csv"
+    )
+
+
+def test_latest_comparison_artifact_discovery_rejects_legacy_summary(tmp_path: Path):
+    artifact_dir_path_obj = (
+        tmp_path
+        / "results"
+        / "live_reference_compare"
+        / "paper"
+        / "pod_diff"
+        / "20240102T000000Z"
+    )
+    artifact_dir_path_obj.mkdir(parents=True)
+    (artifact_dir_path_obj / "summary.json").write_text(
+        json.dumps({"status_str": "red", "open_issue_count_int": 2}),
+        encoding="utf-8",
+    )
+    (artifact_dir_path_obj / "trade_fill_diff.csv").write_text("asset_str\nAAPL\n", encoding="utf-8")
+
+    diff_dict = find_latest_diff_artifact_dict(
+        results_root_path_str=str(tmp_path / "results"),
+        mode_str="paper",
+        pod_id_str="pod_diff",
+    )
+
+    assert diff_dict["comparison_state_str"] == "legacy"
+    assert diff_dict["status_str"] == "legacy"
+    assert "old comparison format" in diff_dict["error_str"]
+
+
+def test_latest_comparison_artifact_discovery_requires_trade_fill_csv(tmp_path: Path):
+    artifact_dir_path_obj = (
+        tmp_path
+        / "results"
+        / "live_reference_compare"
+        / "paper"
+        / "pod_diff"
+        / "20240102T000000Z"
+    )
+    artifact_dir_path_obj.mkdir(parents=True)
+    (artifact_dir_path_obj / "summary.json").write_text(
+        json.dumps(
+            {
+                "trade_row_count_int": 1,
+                "assets_traded_count_int": 1,
+                "total_abs_share_diff_float": 0.0,
+                "total_abs_notional_diff_float": 0.0,
+                "total_price_diff_notional_float": 0.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (artifact_dir_path_obj / "trade_fill_diff.csv").write_text("", encoding="utf-8")
+
+    diff_dict = find_latest_diff_artifact_dict(
+        results_root_path_str=str(tmp_path / "results"),
+        mode_str="paper",
+        pod_id_str="pod_diff",
+    )
+
+    assert diff_dict["comparison_state_str"] == "error"
+    assert "trade_fill_diff.csv" in diff_dict["error_str"]
+    assert "trade_fill_diff_url_str" not in diff_dict
 
 
 def test_diff_job_manager_reports_running_succeeded_and_failed(tmp_path: Path):
@@ -2728,7 +2853,7 @@ def test_diff_job_manager_reports_running_succeeded_and_failed(tmp_path: Path):
             releases_root_path_str="releases-root",
             results_root_path_str="results-root",
         )
-        raise AssertionError("overlapping DIFF for same POD should fail")
+        raise AssertionError("overlapping comparison for same POD should fail")
     except DashboardActionInFlightError:
         pass
     finish_event_obj.set()
@@ -2801,7 +2926,7 @@ def test_dashboard_shared_pod_job_gate_blocks_diff_action_overlap(tmp_path: Path
             results_root_path_str="results-root",
             event_log_path_str="events.jsonl",
         )
-        raise AssertionError("overlapping action while DIFF is running should fail")
+        raise AssertionError("overlapping action while comparison is running should fail")
     except DashboardActionInFlightError:
         pass
 

@@ -131,7 +131,6 @@ def test_pod_detail_shows_norgate_current_cycle_gate(tmp_path) -> None:
     app_obj = create_app(
         _Provider(),
         journal_path_str=str(tmp_path / "journal.jsonl"),
-        expected_pnl_path_str=str(tmp_path / "expected.json"),
         notification_state_path_str=str(tmp_path / "notifications.json"),
     )
     client_obj = app_obj.test_client()

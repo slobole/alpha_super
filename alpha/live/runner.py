@@ -1439,6 +1439,7 @@ def _build_fill_stat_by_asset_map_dict(
         fill_stat_row_dict = fill_stat_by_asset_map_dict.setdefault(
             asset_str,
             {
+                "fill_count_int": 0,
                 "filled_share_float": 0.0,
                 "absolute_fill_share_float": 0.0,
                 "weighted_fill_notional_float": 0.0,
@@ -1452,6 +1453,7 @@ def _build_fill_stat_by_asset_map_dict(
         fill_amount_float = float(fill_row_dict["fill_amount_float"])
         fill_price_float = float(fill_row_dict["fill_price_float"])
         absolute_fill_share_float = abs(fill_amount_float)
+        fill_stat_row_dict["fill_count_int"] = int(fill_stat_row_dict["fill_count_int"]) + 1
         fill_stat_row_dict["filled_share_float"] = float(fill_stat_row_dict["filled_share_float"]) + fill_amount_float
         fill_stat_row_dict["absolute_fill_share_float"] = float(
             fill_stat_row_dict["absolute_fill_share_float"]
@@ -2240,18 +2242,18 @@ def _render_execution_report_detail_str(detail_dict: dict[str, object]) -> str:
 
 def _render_compare_reference_detail_str(detail_dict: dict[str, object]) -> str:
     compare_report_dict_list = list(detail_dict.get("compare_report_dict_list", []))
-    line_list = ["Reference Compare"]
+    line_list = ["Live vs Backtest Comparison"]
     if len(compare_report_dict_list) == 0:
         line_list.append("- No comparable VPlans were found.")
         return "\n".join(line_list)
 
     for compare_report_dict in compare_report_dict_list:
+        trade_fill_diff_row_dict_list = list(compare_report_dict.get("trade_fill_diff_row_dict_list", []))
         line_list.extend(
             [
                 "",
                 f"Pod: {compare_report_dict['pod_id_str']}",
                 f"- VPlan id: {compare_report_dict['vplan_id_int']}",
-                f"- Status: {compare_report_dict.get('status_str', 'unknown')}",
                 f"- Deployment start: {compare_report_dict.get('deployment_start_date_str')}",
                 f"- Target session: {compare_report_dict['target_session_date_str']}",
                 f"- Actual equity: {_format_optional_float_str(compare_report_dict.get('actual_equity_float'))}",
@@ -2261,6 +2263,7 @@ def _render_compare_reference_detail_str(detail_dict: dict[str, object]) -> str:
                 f"- Actual cash: {_format_optional_float_str(compare_report_dict.get('actual_cash_float'))}",
                 f"- Backtest cash: {_format_optional_float_str(compare_report_dict.get('backtest_cash_float'))}",
                 f"- Cash diff: {_format_optional_float_str(compare_report_dict.get('cash_diff_float'))}",
+                f"- Trade fill rows: {len(trade_fill_diff_row_dict_list)}",
             ]
         )
         artifact_path_dict = dict(compare_report_dict.get("artifact_path_dict", {}))
@@ -2268,6 +2271,19 @@ def _render_compare_reference_detail_str(detail_dict: dict[str, object]) -> str:
             line_list.append(f"- HTML report: {artifact_path_dict['html_path_str']}")
         if compare_report_dict.get("reference_strategy_pickle_path_str") is not None:
             line_list.append(f"- Reference pickle: {compare_report_dict['reference_strategy_pickle_path_str']}")
+        for trade_row_dict in trade_fill_diff_row_dict_list:
+            line_list.append(
+                "- Trade: "
+                f"{trade_row_dict['asset_str']} | "
+                f"side={trade_row_dict.get('side_str')} | "
+                f"live_shares={_format_optional_float_str(trade_row_dict.get('live_filled_share_float'))} | "
+                f"backtest_shares={_format_optional_float_str(trade_row_dict.get('backtest_trade_share_float'))} | "
+                f"share_diff={_format_optional_float_str(trade_row_dict.get('share_diff_float'))} | "
+                f"live_fill={_format_optional_float_str(trade_row_dict.get('live_avg_fill_price_float'))} | "
+                f"backtest_fill={_format_optional_float_str(trade_row_dict.get('backtest_avg_fill_price_float'))} | "
+                f"price_diff_bps={_format_bps_str(trade_row_dict.get('price_diff_bps_float'))} | "
+                f"note={trade_row_dict.get('note_str')}"
+            )
         for compare_row_dict in compare_report_dict["compare_row_dict_list"]:
             line_list.append(
                 "- Row: "
@@ -4588,6 +4604,10 @@ def get_compare_reference_summary(
             broker_order_row_dict_list=broker_order_row_dict_list,
             fill_row_dict_list=fill_row_dict_list,
         )
+        fill_count_by_asset_dict: dict[str, int] = {}
+        for fill_row_dict in fill_row_dict_list:
+            asset_str = str(fill_row_dict["asset_str"])
+            fill_count_by_asset_dict[asset_str] = int(fill_count_by_asset_dict.get(asset_str, 0)) + 1
 
         # *** CRITICAL*** Backtest/reference matching is anchored to the target
         # execution session, not the report timestamp, to avoid comparing fills
@@ -4691,12 +4711,17 @@ def get_compare_reference_summary(
                 (target_session_date_str, asset_str),
                 {},
             )
+            backtest_trade_share_float = None
+            backtest_avg_fill_price_float = None
             backtest_quantity_diff_float = None
             backtest_fill_price_diff_float = None
             if "quantity_float" in reference_transaction_dict:
+                backtest_trade_share_float = float(reference_transaction_dict["quantity_float"])
                 backtest_quantity_diff_float = filled_share_float - float(
                     reference_transaction_dict["quantity_float"]
                 )
+            if reference_transaction_dict.get("avg_price_float") is not None:
+                backtest_avg_fill_price_float = float(reference_transaction_dict["avg_price_float"])
             if (
                 avg_fill_price_float is not None
                 and reference_transaction_dict.get("avg_price_float") is not None
@@ -4718,8 +4743,11 @@ def get_compare_reference_summary(
                     "reference_realized_weight_float": reference_realized_weight_float,
                     "weight_diff_float": weight_diff_float,
                     "planned_order_delta_share_float": planned_order_delta_share_float,
+                    "fill_count_int": int(fill_count_by_asset_dict.get(asset_str, 0)),
                     "filled_share_float": filled_share_float,
                     "quantity_diff_float": filled_share_float - planned_order_delta_share_float,
+                    "backtest_trade_share_float": backtest_trade_share_float,
+                    "backtest_avg_fill_price_float": backtest_avg_fill_price_float,
                     "target_position_float": target_position_float,
                     "actual_position_float": actual_position_float,
                     "reference_position_float": reference_position_float,
@@ -4762,7 +4790,15 @@ def get_compare_reference_summary(
                 int(latest_vplan_obj.vplan_id_int)
             ),
         }
-        compare_report_dict.update(reference_compare.classify_compare_status_dict(compare_report_dict))
+        compare_report_dict["trade_fill_diff_row_dict_list"] = (
+            reference_compare.build_trade_fill_diff_row_dict_list(
+                target_session_date_str=target_session_date_str,
+                vplan_id_int=int(latest_vplan_obj.vplan_id_int),
+                decision_plan_id_int=int(latest_vplan_obj.decision_plan_id_int),
+                execution_row_dict_list=execution_row_dict_list,
+                transaction_map_dict=transaction_map_dict,
+            )
+        )
 
         if html_output_bool:
             live_history_row_dict_list = state_store_obj.get_pod_state_history_row_dict_list(release_obj.pod_id_str)

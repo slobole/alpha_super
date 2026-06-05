@@ -222,9 +222,9 @@ http://127.0.0.1:8080
 
 V3 is one local web page for all enabled PODs in this deployment. Three mode pages (`/live`, `/paper`, `/incubation`) each get the full window — no tabs, no mixed-mode tables fighting for space. Above them sits a polled health strip (Norgate freshness, EOD coverage, disk), a polled cross-pod "what's next" schedule, and a top-bar verdict.
 
-Expanding a pod shows today's cycle as a vertical timeline (DB → Decision → VPlan → ACK → Fill → Reconcile → EOD), each step with its evidence inline and bulkier sub-tables behind `<details>` so the narrative reads quickly. The EOD card embeds an SVG equity curve with drawdown shading and daily-PnL bars, and an optional live-vs-backtest band check sourced from `alpha/live/expected_pnl.yaml`.
+Expanding a pod shows today's cycle as a vertical timeline (DB -> Decision -> VPlan -> ACK -> Fill -> Reconcile -> EOD), each step with its evidence inline and bulkier sub-tables behind `<details>` so the narrative reads quickly. The EOD card embeds an SVG equity curve with drawdown shading and daily-PnL bars. The separate Live vs Backtest card links to the latest comparison report and `trade_fill_diff.csv` when available.
 
-Operator Tools sits collapsed at the bottom of every expanded pod. Five buttons: Run DIFF / Tick / Submit VPlan / Reconcile / EOD Snapshot. Clicking shows a preview before the single Confirm. Every confirmed action goes through the same security ceremony as before — JSON POST + same-origin + server-issued action token + explicit `confirmed_bool=true` — and is logged to `alpha/live/logs/operator_journal.jsonl`. View the log at `/journal`.
+Operator Tools sits collapsed at the bottom of every expanded pod. Five buttons: Live vs Backtest / Tick / Submit VPlan / Reconcile / EOD Snapshot. Clicking shows a preview before the single Confirm. Every confirmed action goes through the same security ceremony as before: JSON POST + same-origin + server-issued action token + explicit `confirmed_bool=true`, and is logged to `alpha/live/logs/operator_journal.jsonl`. View the log at `/journal`.
 
 Set `ALPHA_DISCORD_WEBHOOK_URL` in the environment to receive a Discord ping the first time any pod transitions to red. State persists in `alpha/live/logs/notification_state.json`, so a recovered pod that turns red again fires a fresh alert; missing env var = silent.
 
@@ -232,7 +232,7 @@ See `docs/live/DASHBOARD_V3_RUNBOOK.md` for the one-page systemd + Tailscale dep
 
 The V2 React console (`alpha/live/dashboard_v2/`) and the V1 HTTP handler (`alpha.live.dashboard.serve_dashboard`) have been removed. `alpha/live/dashboard.py` is now a pure data-builder library used by `alpha.live.dashboard_v3.*`.
 
-Reference DIFF is the one explicit background action in the dashboard. Pressing `Run DIFF` starts `compare_reference` for that POD and writes analysis artifacts under:
+Live vs Backtest is the one explicit comparison background action in the dashboard. Pressing `Live vs Backtest` starts `compare_reference` for that POD and writes analysis artifacts under:
 
 ```text
 results/live_reference_compare/<mode>/<pod_id>/<timestamp>/
@@ -667,7 +667,7 @@ Operator log:
 alpha/live/logs/live_operator.log
 ```
 
-Reference DIFF dashboard artifacts:
+Live vs Backtest dashboard artifacts:
 
 ```text
 results/live_reference_compare/<mode>/<pod_id>/<timestamp>/
