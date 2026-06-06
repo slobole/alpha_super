@@ -411,9 +411,12 @@ def create_app(
         if action_name_str not in ALL_ACTION_NAME_LIST:
             return _json_error_fn(400, "unsupported_action", f"Unknown action {action_name_str!r}.")
         provider_obj = flask_app_obj.config["data_provider_obj"]
+        request_body_dict = request.get_json(silent=True)
+        if request_body_dict is None:
+            request_body_dict = request.form.to_dict(flat=True)
         rejection_obj = validate_action_request(
             request.headers,
-            request.get_json(silent=True),
+            request_body_dict,
             provider_obj.get_action_token_str(),
         )
         if rejection_obj is not None:

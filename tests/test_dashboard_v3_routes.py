@@ -1021,6 +1021,8 @@ def test_action_preview_fragment_renders_confirm_button(test_client_obj) -> None
     assert "submit_vplan" in response_text_str
     # Confirm button POSTs to the matching action endpoint.
     assert "/api/pods/dv2_caspersky_live/actions/submit_vplan" in response_text_str
+    assert "json-enc" not in response_text_str
+    assert "Content-Type" not in response_text_str
 
 
 def test_action_preview_unknown_action_returns_404(test_client_obj) -> None:
@@ -1110,6 +1112,26 @@ def test_diff_run_post_starts_diff_job(test_client_obj, provider_obj) -> None:
     assert response_obj.status_code == 202
     job_dict = response_obj.get_json()
     assert job_dict["action_name_str"] == "compare_reference"
+
+
+def test_diff_run_htmx_form_post_returns_job_badge(test_client_obj, provider_obj) -> None:
+    response_obj = test_client_obj.post(
+        "/api/pods/dv2_caspersky_live/diff/run",
+        data={"confirmed_bool": "true"},
+        headers={
+            "Host": "localhost",
+            "Origin": "http://localhost",
+            "HX-Request": "true",
+            "X-Alpha-Action-Token": StubDataProvider.ACTION_TOKEN_STR,
+        },
+    )
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    assert "job_id=" in response_text_str
+    assert "compare_reference" in response_text_str
+    assert "queued" in response_text_str
+    assert len(provider_obj.action_job_dict_list) == 1
+    assert provider_obj.action_job_dict_list[0]["action_name_str"] == "compare_reference"
 
 
 def test_job_status_endpoint_returns_json_for_unknown_caller(

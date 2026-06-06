@@ -14,9 +14,8 @@
   <div class="flex items-center gap-2 pt-1">
     <button type="button"
             hx-post="{{ post_url_str }}"
-            hx-headers='{"X-Alpha-Action-Token": "{{ action_token_str }}", "Content-Type": "application/json"}'
+            hx-headers='{"X-Alpha-Action-Token": "{{ action_token_str }}"}'
             hx-vals='{"confirmed_bool": true}'
-            hx-ext="json-enc"
             hx-target="#operator-tools-preview-{{ row_dict.pod_id_str }}"
             hx-swap="innerHTML"
             class="px-3 py-1.5 rounded-md bg-bad text-white text-sm font-semibold">

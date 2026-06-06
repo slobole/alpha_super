@@ -1,9 +1,9 @@
 """Server-side action request validation for Dashboard V3.
 
-Same security model as V2: every action request must be JSON, originate
-from the dashboard's own host (Origin/Referer match Host), present a
-server-issued ``X-Alpha-Action-Token`` header, and explicitly contain
-``"confirmed_bool": true`` in its body. Any missing piece returns an
+Same security model as V2: every action request must originate from the
+dashboard's own host (Origin/Referer match Host), present a server-issued
+``X-Alpha-Action-Token`` header, and explicitly contain
+``confirmed_bool=true`` in its body. Any missing piece returns an
 error code; the view is the operator pressing the wrong button by
 mistake, not a CSRF attacker on the open internet (the dashboard is
 Tailscale-only) — but the belt-and-braces protections are cheap so we
@@ -17,6 +17,10 @@ from urllib.parse import urlparse
 
 
 ACTION_TOKEN_HEADER_STR = "X-Alpha-Action-Token"
+SUPPORTED_ACTION_CONTENT_TYPE_SET = {
+    "application/json",
+    "application/x-www-form-urlencoded",
+}
 SUPPORTED_ACTION_NAME_LIST = [
     "tick",
     "submit_vplan",
@@ -37,7 +41,7 @@ def action_request_origin_valid_bool(request_headers_obj) -> bool:
     raw_content_type_str = request_headers_obj.get("Content-Type", "")
     if raw_content_type_str:
         content_type_str = raw_content_type_str.split(";")[0].strip().lower()
-    if content_type_str != "application/json":
+    if content_type_str not in SUPPORTED_ACTION_CONTENT_TYPE_SET:
         return False
     host_str = request_headers_obj.get("Host", "")
     origin_seen_bool = False
@@ -55,7 +59,8 @@ def action_token_valid_bool(request_token_str: str | None, expected_token_str: s
 
 
 def confirmation_present_bool(body_dict: dict | None) -> bool:
-    return bool(body_dict and body_dict.get("confirmed_bool") is True)
+    confirmation_obj = body_dict.get("confirmed_bool") if body_dict else None
+    return confirmation_obj is True or confirmation_obj == "true"
 
 
 def validate_action_request(
@@ -66,7 +71,7 @@ def validate_action_request(
     """Returns ``(status_int, error_code_str, message_str)`` on rejection,
     or ``None`` if the request is acceptable."""
     if not action_request_origin_valid_bool(request_headers_obj):
-        return (403, "origin_rejected", "Dashboard actions require a same-origin JSON POST.")
+        return (403, "origin_rejected", "Dashboard actions require a same-origin POST.")
     request_token_str = request_headers_obj.get(ACTION_TOKEN_HEADER_STR, "")
     if not action_token_valid_bool(request_token_str, expected_token_str):
         return (403, "action_token_required", "Dashboard actions require a server-issued action token.")
