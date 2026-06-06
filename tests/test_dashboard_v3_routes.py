@@ -514,8 +514,8 @@ def test_pod_detail_includes_data_freshness_panel(test_client_obj) -> None:
     assert "Live vs Backtest" in response_text_str
     assert "View details" in response_text_str
     assert "/live-backtest/dv2_caspersky_live" in response_text_str
-    assert "Open report" in response_text_str
-    assert "Download CSV" in response_text_str
+    assert "Open report" not in response_text_str
+    assert "Download CSV" not in response_text_str
     assert "2026-05-01" in response_text_str
     assert "2026-05-21" in response_text_str
     assert "Trade rows" in response_text_str
@@ -528,7 +528,6 @@ def test_pod_detail_includes_data_freshness_panel(test_client_obj) -> None:
     assert ">$12<" in response_text_str
     assert "Equity diff" in response_text_str
     assert ">0.10%<" in response_text_str
-    assert "trade_fill_diff.csv" in response_text_str
     assert ("Expected " + "PnL") not in response_text_str
     assert "Expected ±" not in response_text_str
     # Norgate's value (snapshot date) appears.
@@ -588,8 +587,9 @@ def test_artifact_route_serves_latest_live_backtest_files(
     (artifact_dir_path_obj / "trade_fill_diff.csv").write_text(
         "asset_str,live_planned_share_float,live_filled_share_float,"
         "backtest_trade_share_float,share_diff_float,live_avg_fill_price_float,"
-        "backtest_avg_fill_price_float,price_diff_bps_float,notional_diff_float,note_str\n"
-        "AAPL,10,9,10,-1,101,100,10,-101,partial live fill\n",
+        "backtest_avg_fill_price_float,price_diff_bps_float,price_diff_notional_float,"
+        "notional_diff_float,note_str\n"
+        "AAPL,10,9,10,-1,101,100,10,1,-101,partial live fill\n",
         encoding="utf-8",
     )
 
@@ -617,23 +617,68 @@ def test_live_backtest_page_renders_minimal_trade_table(
         / "20260521T160000Z"
     )
     artifact_dir_path_obj.mkdir(parents=True)
+    (artifact_dir_path_obj / "index.html").write_text("comparison report", encoding="utf-8")
+    (artifact_dir_path_obj / "tracking_error.csv").write_text(
+        "date_str,reference_equity_float,live_equity_float,tracking_error_float\n"
+        "2026-05-20,10000,9990,-0.001\n"
+        "2026-05-21,10050,10100,0.0049751244\n",
+        encoding="utf-8",
+    )
     (artifact_dir_path_obj / "trade_fill_diff.csv").write_text(
         "asset_str,live_planned_share_float,live_filled_share_float,"
         "backtest_trade_share_float,share_diff_float,live_avg_fill_price_float,"
-        "backtest_avg_fill_price_float,price_diff_bps_float,notional_diff_float,note_str\n"
-        "AAPL,10,9,10,-1,101,100,10,-101,partial live fill\n",
+        "backtest_avg_fill_price_float,price_diff_bps_float,price_diff_notional_float,"
+        "notional_diff_float,note_str\n"
+        "AAPL,10,9,10,-1,101,100,10,1,-101,partial live fill\n"
+        "MSFT,5,7,5,2,310,300,33,20,620,live overfilled\n",
         encoding="utf-8",
     )
 
     response_obj = test_client_obj.get("/live-backtest/dv2_caspersky_live")
     assert response_obj.status_code == 200
     response_text_str = response_obj.get_data(as_text=True)
+    assert "PnL Diff" in response_text_str
+    assert "PnL diff chart" in response_text_str
+    assert "<svg" in response_text_str
+    assert "$50" in response_text_str
+    assert "Top Drivers" in response_text_str
     assert "Trade Fill Diff" in response_text_str
     assert "Open HTML report" in response_text_str
     assert "Download CSV" in response_text_str
     assert "AAPL" in response_text_str
+    assert "MSFT" in response_text_str
     assert "partial live fill" in response_text_str
+    assert "live overfilled" in response_text_str
     assert "live filled shares minus same-condition backtest transaction shares" in response_text_str
+    top_driver_block_str = response_text_str[
+        response_text_str.find("Top Drivers"):response_text_str.find("Trade Fill Diff")
+    ]
+    assert top_driver_block_str.find("MSFT") < top_driver_block_str.find("AAPL")
+
+
+def test_live_backtest_page_handles_missing_raw_artifacts(
+    test_client_obj,
+    provider_obj,
+    tmp_path,
+) -> None:
+    provider_obj.results_root_path_str = str(tmp_path)
+    artifact_dir_path_obj = (
+        tmp_path
+        / "live_reference_compare"
+        / "live"
+        / "dv2_caspersky_live"
+        / "20260521T160000Z"
+    )
+    artifact_dir_path_obj.mkdir(parents=True)
+
+    response_obj = test_client_obj.get("/live-backtest/dv2_caspersky_live")
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    assert "PnL diff chart unavailable" in response_text_str
+    assert "HTML report artifact missing" in response_text_str
+    assert "CSV artifact missing" in response_text_str
+    assert "Open HTML report" not in response_text_str
+    assert "Download CSV" not in response_text_str
 
 
 def test_main_module_loads_config_env_before_serving(monkeypatch, tmp_path) -> None:

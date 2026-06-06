@@ -79,6 +79,10 @@ ACTION_LABEL_DICT = {
 SUPPORTED_MODE_STR_LIST = ["live", "paper", "incubation"]
 MODE_LABEL_DICT = {"live": "Live", "paper": "Paper", "incubation": "Incubation"}
 MAX_TRADE_DETAIL_ROW_COUNT_INT = 250
+MAX_TOP_DRIVER_ROW_COUNT_INT = 8
+PNL_DIFF_CHART_WIDTH_INT = 600
+PNL_DIFF_CHART_HEIGHT_INT = 150
+PNL_DIFF_CHART_VERTICAL_PADDING_INT = 12
 
 
 SUPPORTED_TRACE_LEVEL_STR_LIST = ["all", "info", "warn", "error"]
@@ -252,17 +256,36 @@ def create_app(
                 row_dict.get("latest_comparison_trade_fill_diff_url_str") or ""
             ),
         )
+        artifact_dir_path_obj = _comparison_artifact_dir_path_obj(
+            provider_obj=provider_obj,
+            row_dict=row_dict,
+            trade_fill_diff_path_obj=trade_fill_diff_path_obj,
+        )
+        artifact_link_dict = _build_comparison_artifact_link_dict(
+            provider_obj=provider_obj,
+            artifact_dir_path_obj=artifact_dir_path_obj,
+        )
         trade_row_dict_list = (
             _read_trade_fill_diff_row_dict_list(trade_fill_diff_path_obj)
             if trade_fill_diff_path_obj is not None
             else []
         )
+        tracking_row_dict_list = _read_tracking_error_row_dict_list(
+            artifact_dir_path_obj / "tracking_error.csv"
+            if artifact_dir_path_obj is not None
+            else None
+        )
+        pnl_diff_chart_dict = _build_pnl_diff_chart_dict(tracking_row_dict_list)
+        top_driver_dict_list = _build_top_driver_dict_list(trade_row_dict_list)
         verdict_obj = resolve_top_bar_verdict(summary_dict)
         return render_template(
             "live_backtest_page.html",
             row_dict=row_dict,
             trade_row_dict_list=trade_row_dict_list,
             trade_row_limit_int=MAX_TRADE_DETAIL_ROW_COUNT_INT,
+            pnl_diff_chart_dict=pnl_diff_chart_dict,
+            top_driver_dict_list=top_driver_dict_list,
+            artifact_link_dict=artifact_link_dict,
             verdict_dict=verdict_obj.as_dict(),
             as_of_clock_str=_now_clock_str(),
         )
@@ -546,6 +569,68 @@ def _artifact_path_from_url_obj(provider_obj, artifact_url_str: str) -> Path | N
     return artifact_path_obj
 
 
+def _artifact_url_from_path_str(provider_obj, artifact_path_obj: Path) -> str | None:
+    results_root_path_obj = Path(_provider_results_root_path_str(provider_obj)).resolve()
+    try:
+        relative_path_obj = artifact_path_obj.resolve().relative_to(results_root_path_obj)
+    except ValueError:
+        return None
+    relative_path_str = relative_path_obj.as_posix()
+    if not _artifact_path_allowed_bool(relative_path_str):
+        return None
+    return "/artifacts/" + relative_path_str
+
+
+def _comparison_artifact_dir_path_obj(
+    *,
+    provider_obj,
+    row_dict: dict[str, Any],
+    trade_fill_diff_path_obj: Path | None,
+) -> Path | None:
+    if trade_fill_diff_path_obj is not None:
+        return trade_fill_diff_path_obj.parent
+    html_path_obj = _artifact_path_from_url_obj(
+        provider_obj=provider_obj,
+        artifact_url_str=str(row_dict.get("latest_comparison_artifact_url_str") or ""),
+    )
+    if html_path_obj is not None:
+        return html_path_obj.parent
+    return None
+
+
+def _build_comparison_artifact_link_dict(
+    *,
+    provider_obj,
+    artifact_dir_path_obj: Path | None,
+) -> dict[str, object]:
+    if artifact_dir_path_obj is None:
+        return {
+            "html_url_str": None,
+            "csv_url_str": None,
+            "html_missing_bool": True,
+            "csv_missing_bool": True,
+        }
+
+    html_path_obj = artifact_dir_path_obj / "index.html"
+    csv_path_obj = artifact_dir_path_obj / "trade_fill_diff.csv"
+    html_url_str = (
+        _artifact_url_from_path_str(provider_obj, html_path_obj)
+        if html_path_obj.exists()
+        else None
+    )
+    csv_url_str = (
+        _artifact_url_from_path_str(provider_obj, csv_path_obj)
+        if csv_path_obj.exists() and csv_path_obj.stat().st_size > 0
+        else None
+    )
+    return {
+        "html_url_str": html_url_str,
+        "csv_url_str": csv_url_str,
+        "html_missing_bool": html_url_str is None,
+        "csv_missing_bool": csv_url_str is None,
+    }
+
+
 def _read_trade_fill_diff_row_dict_list(
     trade_fill_diff_path_obj: Path,
 ) -> list[dict[str, str]]:
@@ -569,6 +654,192 @@ def _read_trade_fill_diff_row_dict_list(
     except OSError:
         return []
     return row_dict_list
+
+
+def _read_tracking_error_row_dict_list(
+    tracking_error_path_obj: Path | None,
+) -> list[dict[str, object]]:
+    if tracking_error_path_obj is None or not tracking_error_path_obj.exists():
+        return []
+    tracking_row_dict_list: list[dict[str, object]] = []
+    try:
+        with tracking_error_path_obj.open(
+            "r", encoding="utf-8", newline=""
+        ) as csv_file_obj:
+            reader_obj = csv.DictReader(csv_file_obj)
+            for row_dict in reader_obj:
+                reference_equity_float = _float_or_none_obj(
+                    row_dict.get("reference_equity_float")
+                )
+                live_equity_float = _float_or_none_obj(row_dict.get("live_equity_float"))
+                if reference_equity_float in (None, 0.0) or live_equity_float is None:
+                    continue
+                pnl_diff_float = live_equity_float - reference_equity_float
+                tracking_error_float = _float_or_none_obj(
+                    row_dict.get("tracking_error_float")
+                )
+                if tracking_error_float is None:
+                    tracking_error_float = live_equity_float / reference_equity_float - 1.0
+                tracking_row_dict_list.append(
+                    {
+                        "date_str": str(row_dict.get("date_str") or ""),
+                        "reference_equity_float": reference_equity_float,
+                        "live_equity_float": live_equity_float,
+                        "pnl_diff_float": pnl_diff_float,
+                        "tracking_error_float": tracking_error_float,
+                    }
+                )
+    except OSError:
+        return []
+    return tracking_row_dict_list
+
+
+def _build_pnl_diff_chart_dict(
+    tracking_row_dict_list: list[dict[str, object]],
+) -> dict[str, object]:
+    pnl_diff_float_list = [
+        float(row_dict["pnl_diff_float"])
+        for row_dict in tracking_row_dict_list
+        if _float_or_none_obj(row_dict.get("pnl_diff_float")) is not None
+    ]
+    if len(pnl_diff_float_list) == 0:
+        return {
+            "has_data_bool": False,
+            "point_count_int": 0,
+            "width_int": PNL_DIFF_CHART_WIDTH_INT,
+            "height_int": PNL_DIFF_CHART_HEIGHT_INT,
+            "path_d_str": "",
+            "zero_y_float": PNL_DIFF_CHART_HEIGHT_INT / 2.0,
+            "point_dict_list": [],
+            "latest_pnl_diff_float": None,
+            "latest_tracking_error_float": None,
+            "latest_date_str": None,
+            "min_pnl_diff_float": None,
+            "max_pnl_diff_float": None,
+        }
+
+    range_min_float = min(0.0, min(pnl_diff_float_list))
+    range_max_float = max(0.0, max(pnl_diff_float_list))
+    if range_min_float == range_max_float:
+        range_min_float -= 1.0
+        range_max_float += 1.0
+    value_range_float = range_max_float - range_min_float
+    inner_height_float = (
+        PNL_DIFF_CHART_HEIGHT_INT - 2 * PNL_DIFF_CHART_VERTICAL_PADDING_INT
+    )
+    point_count_int = len(pnl_diff_float_list)
+    horizontal_step_float = (
+        PNL_DIFF_CHART_WIDTH_INT / max(1, point_count_int - 1)
+        if point_count_int > 1
+        else PNL_DIFF_CHART_WIDTH_INT / 2.0
+    )
+
+    def y_for_float(value_float: float) -> float:
+        return (
+            PNL_DIFF_CHART_HEIGHT_INT
+            - PNL_DIFF_CHART_VERTICAL_PADDING_INT
+            - ((value_float - range_min_float) / value_range_float) * inner_height_float
+        )
+
+    point_xy_list: list[tuple[float, float]] = []
+    point_dict_list: list[dict[str, object]] = []
+    for index_int, row_dict in enumerate(tracking_row_dict_list):
+        pnl_diff_float = _float_or_none_obj(row_dict.get("pnl_diff_float"))
+        if pnl_diff_float is None:
+            continue
+        x_float = (
+            index_int * horizontal_step_float
+            if point_count_int > 1
+            else horizontal_step_float
+        )
+        y_float = y_for_float(pnl_diff_float)
+        point_xy_list.append((x_float, y_float))
+        point_dict_list.append(
+            {
+                "x_float": round(x_float, 2),
+                "y_float": round(y_float, 2),
+                "date_str": row_dict.get("date_str"),
+                "pnl_diff_float": pnl_diff_float,
+                "tracking_error_float": row_dict.get("tracking_error_float"),
+            }
+        )
+
+    return {
+        "has_data_bool": True,
+        "point_count_int": len(point_dict_list),
+        "width_int": PNL_DIFF_CHART_WIDTH_INT,
+        "height_int": PNL_DIFF_CHART_HEIGHT_INT,
+        "path_d_str": _build_svg_path_str(point_xy_list),
+        "zero_y_float": round(y_for_float(0.0), 2),
+        "point_dict_list": point_dict_list,
+        "latest_pnl_diff_float": point_dict_list[-1]["pnl_diff_float"],
+        "latest_tracking_error_float": point_dict_list[-1]["tracking_error_float"],
+        "latest_date_str": point_dict_list[-1]["date_str"],
+        "min_pnl_diff_float": min(pnl_diff_float_list),
+        "max_pnl_diff_float": max(pnl_diff_float_list),
+    }
+
+
+def _build_top_driver_dict_list(
+    trade_row_dict_list: list[dict[str, str]],
+) -> list[dict[str, object]]:
+    driver_by_asset_dict: dict[str, dict[str, object]] = {}
+    for trade_row_dict in trade_row_dict_list:
+        asset_str = str(trade_row_dict.get("asset_str") or "").strip()
+        if not asset_str:
+            continue
+        driver_dict = driver_by_asset_dict.setdefault(
+            asset_str,
+            {
+                "asset_str": asset_str,
+                "asset_abs_notional_diff_float": 0.0,
+                "asset_share_diff_float": 0.0,
+                "asset_price_diff_float": 0.0,
+                "note_str": "",
+            },
+        )
+        notional_diff_float = _float_or_zero_float(
+            trade_row_dict.get("notional_diff_float")
+        )
+        driver_dict["asset_abs_notional_diff_float"] = float(
+            driver_dict["asset_abs_notional_diff_float"]
+        ) + abs(notional_diff_float)
+        driver_dict["asset_share_diff_float"] = float(
+            driver_dict["asset_share_diff_float"]
+        ) + _float_or_zero_float(trade_row_dict.get("share_diff_float"))
+        driver_dict["asset_price_diff_float"] = float(
+            driver_dict["asset_price_diff_float"]
+        ) + _float_or_zero_float(trade_row_dict.get("price_diff_notional_float"))
+        if not driver_dict["note_str"] and trade_row_dict.get("note_str"):
+            driver_dict["note_str"] = str(trade_row_dict.get("note_str") or "")
+
+    return sorted(
+        driver_by_asset_dict.values(),
+        key=lambda driver_dict: float(driver_dict["asset_abs_notional_diff_float"]),
+        reverse=True,
+    )[:MAX_TOP_DRIVER_ROW_COUNT_INT]
+
+
+def _build_svg_path_str(point_xy_list: list[tuple[float, float]]) -> str:
+    path_part_list: list[str] = []
+    for index_int, (x_float, y_float) in enumerate(point_xy_list):
+        prefix_str = "M" if index_int == 0 else "L"
+        path_part_list.append(f"{prefix_str} {x_float:.2f} {y_float:.2f}")
+    return " ".join(path_part_list)
+
+
+def _float_or_none_obj(value_obj: object) -> float | None:
+    try:
+        if value_obj is None or value_obj == "":
+            return None
+        return float(value_obj)
+    except (TypeError, ValueError):
+        return None
+
+
+def _float_or_zero_float(value_obj: object) -> float:
+    value_float = _float_or_none_obj(value_obj)
+    return 0.0 if value_float is None else value_float
 
 
 def _normalize_trace_level_bucket_str(level_str_obj: Any) -> str:

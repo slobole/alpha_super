@@ -54,18 +54,111 @@
         <div class="font-semibold tabular-nums">{{ row_dict.latest_comparison_equity_tracking_error_float | percent }}</div>
       </div>
     </div>
-    <div class="mt-3 pt-3 border-t border-ink-100 flex flex-wrap items-center gap-3 text-xs">
-      {% if row_dict.latest_comparison_artifact_url_str %}
-        <a class="font-semibold text-ink-900 hover:underline"
-           href="{{ row_dict.latest_comparison_artifact_url_str }}"
-           target="_blank" rel="noopener">Open HTML report</a>
-      {% endif %}
-      {% if row_dict.latest_comparison_trade_fill_diff_url_str %}
-        <a class="text-ink-500 hover:underline"
-           href="{{ row_dict.latest_comparison_trade_fill_diff_url_str }}"
-           target="_blank" rel="noopener">Download CSV</a>
+  </section>
+
+  <section class="mb-4 rounded-md border border-ink-100 bg-white shadow-sm overflow-hidden">
+    <div class="px-4 py-2 border-b border-ink-100 flex items-baseline justify-between gap-3">
+      <div>
+        <div class="text-xs uppercase tracking-wide text-ink-500">PnL Diff</div>
+        <div class="text-xs text-ink-500">live equity minus same-condition backtest equity</div>
+      </div>
+      {% if pnl_diff_chart_dict.has_data_bool %}
+        <div class="text-xs text-ink-500 tabular-nums">
+          Latest
+          <span class="font-semibold text-ink-900">
+            {{ pnl_diff_chart_dict.latest_pnl_diff_float | money }}
+          </span>
+          {% if pnl_diff_chart_dict.latest_tracking_error_float is not none %}
+            ({{ pnl_diff_chart_dict.latest_tracking_error_float | percent }})
+          {% endif %}
+        </div>
       {% endif %}
     </div>
+    {% if pnl_diff_chart_dict.has_data_bool %}
+      <div class="px-4 py-3">
+        <svg viewBox="0 0 {{ pnl_diff_chart_dict.width_int }} {{ pnl_diff_chart_dict.height_int }}"
+             class="w-full h-44"
+             role="img"
+             aria-label="PnL diff chart">
+          <line x1="0"
+                x2="{{ pnl_diff_chart_dict.width_int }}"
+                y1="{{ pnl_diff_chart_dict.zero_y_float }}"
+                y2="{{ pnl_diff_chart_dict.zero_y_float }}"
+                stroke="#9ca3af"
+                stroke-width="1"
+                stroke-dasharray="4 4"></line>
+          {% if pnl_diff_chart_dict.path_d_str %}
+            <path d="{{ pnl_diff_chart_dict.path_d_str }}"
+                  fill="none"
+                  stroke="#334155"
+                  stroke-width="2"></path>
+          {% endif %}
+          {% for point_dict in pnl_diff_chart_dict.point_dict_list %}
+            <circle cx="{{ point_dict.x_float }}"
+                    cy="{{ point_dict.y_float }}"
+                    r="3.5"
+                    fill="#334155">
+              <title>
+                {{ point_dict.date_str }}: {{ point_dict.pnl_diff_float | money }}
+                {% if point_dict.tracking_error_float is not none %}
+                  ({{ point_dict.tracking_error_float | percent }})
+                {% endif %}
+              </title>
+            </circle>
+          {% endfor %}
+        </svg>
+        <div class="mt-2 flex justify-between text-xs text-ink-500 tabular-nums">
+          <span>Min {{ pnl_diff_chart_dict.min_pnl_diff_float | money }}</span>
+          <span>Zero baseline</span>
+          <span>Max {{ pnl_diff_chart_dict.max_pnl_diff_float | money }}</span>
+        </div>
+      </div>
+    {% else %}
+      <div class="px-4 py-6 text-sm text-ink-500">PnL diff chart unavailable.</div>
+    {% endif %}
+  </section>
+
+  <section class="mb-4 rounded-md border border-ink-100 bg-white shadow-sm overflow-hidden">
+    <div class="px-4 py-2 border-b border-ink-100">
+      <div class="text-xs uppercase tracking-wide text-ink-500">Top Drivers</div>
+      <div class="text-xs text-ink-500">largest assets by absolute notional difference</div>
+    </div>
+    {% if top_driver_dict_list %}
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-xs">
+          <thead class="bg-ink-50 text-ink-500 uppercase tracking-wide">
+            <tr>
+              <th class="text-left font-semibold px-3 py-2">Asset</th>
+              <th class="text-right font-semibold px-3 py-2">Abs notional</th>
+              <th class="text-right font-semibold px-3 py-2">Share diff</th>
+              <th class="text-right font-semibold px-3 py-2">Price diff</th>
+              <th class="text-left font-semibold px-3 py-2">Note</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-ink-100">
+            {% for driver_dict in top_driver_dict_list %}
+              <tr class="hover:bg-ink-50/60">
+                <td class="px-3 py-2 font-mono text-ink-900">{{ driver_dict.asset_str }}</td>
+                <td class="px-3 py-2 text-right tabular-nums font-semibold">
+                  {{ driver_dict.asset_abs_notional_diff_float | money }}
+                </td>
+                <td class="px-3 py-2 text-right tabular-nums">
+                  {{ driver_dict.asset_share_diff_float | number }}
+                </td>
+                <td class="px-3 py-2 text-right tabular-nums">
+                  {{ driver_dict.asset_price_diff_float | money }}
+                </td>
+                <td class="px-3 py-2 text-ink-500 max-w-[360px] truncate" title="{{ driver_dict.note_str }}">
+                  {{ driver_dict.note_str }}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="px-4 py-6 text-sm text-ink-500">No top drivers available.</div>
+    {% endif %}
   </section>
 
   <section class="rounded-md border border-ink-100 bg-white shadow-sm overflow-hidden">
@@ -122,6 +215,26 @@
         No trade-fill rows were found in the latest CSV artifact.
       </div>
     {% endif %}
+  </section>
+
+  <section class="mt-4 rounded-md border border-ink-100 bg-white shadow-sm px-4 py-3">
+    <div class="text-xs uppercase tracking-wide text-ink-500 mb-2">Raw Artifacts</div>
+    <div class="flex flex-wrap items-center gap-3 text-xs">
+      {% if artifact_link_dict.html_url_str %}
+        <a class="font-semibold text-ink-900 hover:underline"
+           href="{{ artifact_link_dict.html_url_str }}"
+           target="_blank" rel="noopener">Open HTML report</a>
+      {% else %}
+        <span class="text-ink-500">HTML report artifact missing</span>
+      {% endif %}
+      {% if artifact_link_dict.csv_url_str %}
+        <a class="text-ink-500 hover:underline"
+           href="{{ artifact_link_dict.csv_url_str }}"
+           target="_blank" rel="noopener">Download CSV</a>
+      {% else %}
+        <span class="text-ink-500">CSV artifact missing</span>
+      {% endif %}
+    </div>
   </section>
 {% elif comparison_state_str == 'error' %}
   <section class="rounded-md border border-ink-100 bg-white p-6 text-sm text-ink-600">

@@ -48,16 +48,6 @@
         <a class="text-xs font-semibold text-ink-900 hover:underline"
            href="/live-backtest/{{ row_dict.pod_id_str }}"
            target="_blank" rel="noopener">View details</a>
-        {% if row_dict.latest_comparison_artifact_url_str %}
-          <a class="text-xs text-ink-500 hover:underline"
-             href="{{ row_dict.latest_comparison_artifact_url_str }}"
-             target="_blank" rel="noopener">Open report</a>
-        {% endif %}
-        {% if row_dict.latest_comparison_trade_fill_diff_url_str %}
-          <a class="text-xs text-ink-500 hover:underline"
-             href="{{ row_dict.latest_comparison_trade_fill_diff_url_str }}"
-             target="_blank" rel="noopener">Download CSV</a>
-        {% endif %}
       </div>
     </dl>
   {% elif comparison_state_str == 'error' %}
