@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}Live vs Backtest - {{ row_dict.pod_id_str }}{% endblock %}
+{% block content %}
+
+{% set comparison_state_str = row_dict.latest_comparison_state_str or 'not_run' %}
+
+<section class="mb-4">
+  <div class="flex items-start justify-between gap-4">
+    <div>
+      <div class="text-xs uppercase tracking-wide text-ink-500">Live vs Backtest</div>
+      <h1 class="text-2xl font-bold tracking-tight">{{ row_dict.pod_id_str }}</h1>
+      <div class="mt-1 text-xs text-ink-500">
+        {{ row_dict.mode_str }} -
+        {{ row_dict.latest_comparison_deployment_start_date_str or 'na' }}
+        to
+        {{ row_dict.latest_comparison_target_session_date_str or 'na' }}
+        {% if row_dict.latest_comparison_timestamp_str %}
+          - {{ row_dict.latest_comparison_timestamp_str }}
+        {% endif %}
+      </div>
+    </div>
+    <a href="/{{ row_dict.mode_str }}"
+       class="text-xs px-3 py-1.5 rounded-md border border-ink-100 bg-white hover:bg-ink-50">
+      Back to {{ row_dict.mode_str }}
+    </a>
+  </div>
+</section>
+
+{% if comparison_state_str == 'available' %}
+  <section class="mb-4 rounded-md border border-ink-100 bg-white shadow-sm px-4 py-3">
+    <div class="grid grid-cols-2 md:grid-cols-6 gap-3 text-sm">
+      <div>
+        <div class="text-[11px] uppercase tracking-wide text-ink-500">Trade rows</div>
+        <div class="font-semibold tabular-nums">{{ row_dict.latest_comparison_trade_row_count_int | number }}</div>
+      </div>
+      <div>
+        <div class="text-[11px] uppercase tracking-wide text-ink-500">Assets</div>
+        <div class="font-semibold tabular-nums">{{ row_dict.latest_comparison_assets_traded_count_int | number }}</div>
+      </div>
+      <div>
+        <div class="text-[11px] uppercase tracking-wide text-ink-500">Abs shares</div>
+        <div class="font-semibold tabular-nums">{{ row_dict.latest_comparison_total_abs_share_diff_float | number }}</div>
+      </div>
+      <div>
+        <div class="text-[11px] uppercase tracking-wide text-ink-500">Abs notional</div>
+        <div class="font-semibold tabular-nums">{{ row_dict.latest_comparison_total_abs_notional_diff_float | money }}</div>
+      </div>
+      <div>
+        <div class="text-[11px] uppercase tracking-wide text-ink-500">Price diff</div>
+        <div class="font-semibold tabular-nums">{{ row_dict.latest_comparison_total_price_diff_notional_float | money }}</div>
+      </div>
+      <div>
+        <div class="text-[11px] uppercase tracking-wide text-ink-500">Equity diff</div>
+        <div class="font-semibold tabular-nums">{{ row_dict.latest_comparison_equity_tracking_error_float | percent }}</div>
+      </div>
+    </div>
+    <div class="mt-3 pt-3 border-t border-ink-100 flex flex-wrap items-center gap-3 text-xs">
+      {% if row_dict.latest_comparison_artifact_url_str %}
+        <a class="font-semibold text-ink-900 hover:underline"
+           href="{{ row_dict.latest_comparison_artifact_url_str }}"
+           target="_blank" rel="noopener">Open HTML report</a>
+      {% endif %}
+      {% if row_dict.latest_comparison_trade_fill_diff_url_str %}
+        <a class="text-ink-500 hover:underline"
+           href="{{ row_dict.latest_comparison_trade_fill_diff_url_str }}"
+           target="_blank" rel="noopener">Download CSV</a>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="rounded-md border border-ink-100 bg-white shadow-sm overflow-hidden">
+    <div class="px-4 py-2 border-b border-ink-100 flex items-baseline justify-between gap-3">
+      <div>
+        <div class="text-xs uppercase tracking-wide text-ink-500">Trade Fill Diff</div>
+        <div class="text-xs text-ink-500">
+          live filled shares minus same-condition backtest transaction shares
+        </div>
+      </div>
+      {% if (row_dict.latest_comparison_trade_row_count_int or 0) > trade_row_limit_int %}
+        <div class="text-xs text-ink-500">showing first {{ trade_row_limit_int }}</div>
+      {% endif %}
+    </div>
+    {% if trade_row_dict_list %}
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-xs">
+          <thead class="bg-ink-50 text-ink-500 uppercase tracking-wide">
+            <tr>
+              <th class="text-left font-semibold px-3 py-2">Asset</th>
+              <th class="text-right font-semibold px-3 py-2">Planned</th>
+              <th class="text-right font-semibold px-3 py-2">Live fill</th>
+              <th class="text-right font-semibold px-3 py-2">Backtest</th>
+              <th class="text-right font-semibold px-3 py-2">Share diff</th>
+              <th class="text-right font-semibold px-3 py-2">Live px</th>
+              <th class="text-right font-semibold px-3 py-2">Backtest px</th>
+              <th class="text-right font-semibold px-3 py-2">Price bps</th>
+              <th class="text-right font-semibold px-3 py-2">Notional diff</th>
+              <th class="text-left font-semibold px-3 py-2">Note</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-ink-100">
+            {% for trade_row_dict in trade_row_dict_list %}
+              <tr class="hover:bg-ink-50/60">
+                <td class="px-3 py-2 font-mono text-ink-900">{{ trade_row_dict.asset_str }}</td>
+                <td class="px-3 py-2 text-right tabular-nums">{{ trade_row_dict.live_planned_share_float | number }}</td>
+                <td class="px-3 py-2 text-right tabular-nums">{{ trade_row_dict.live_filled_share_float | number }}</td>
+                <td class="px-3 py-2 text-right tabular-nums">{{ trade_row_dict.backtest_trade_share_float | number }}</td>
+                <td class="px-3 py-2 text-right tabular-nums font-semibold">{{ trade_row_dict.share_diff_float | number }}</td>
+                <td class="px-3 py-2 text-right tabular-nums">{{ trade_row_dict.live_avg_fill_price_float | number }}</td>
+                <td class="px-3 py-2 text-right tabular-nums">{{ trade_row_dict.backtest_avg_fill_price_float | number }}</td>
+                <td class="px-3 py-2 text-right tabular-nums">{{ trade_row_dict.price_diff_bps_float | bps }}</td>
+                <td class="px-3 py-2 text-right tabular-nums">{{ trade_row_dict.notional_diff_float | money }}</td>
+                <td class="px-3 py-2 text-ink-500 max-w-[280px] truncate" title="{{ trade_row_dict.note_str }}">
+                  {{ trade_row_dict.note_str }}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="px-4 py-6 text-sm text-ink-500">
+        No trade-fill rows were found in the latest CSV artifact.
+      </div>
+    {% endif %}
+  </section>
+{% elif comparison_state_str == 'error' %}
+  <section class="rounded-md border border-ink-100 bg-white p-6 text-sm text-ink-600">
+    Latest comparison artifact could not be read. Run Live vs Backtest again from Operator Tools.
+  </section>
+{% elif comparison_state_str == 'legacy' %}
+  <section class="rounded-md border border-ink-100 bg-white p-6 text-sm text-ink-600">
+    Latest comparison artifact uses an old format. Run Live vs Backtest again from Operator Tools.
+  </section>
+{% else %}
+  <section class="rounded-md border border-ink-100 bg-white p-6 text-sm text-ink-600">
+    No comparison has been generated yet. Run Live vs Backtest from Operator Tools.
+  </section>
+{% endif %}
+
+{% endblock %}

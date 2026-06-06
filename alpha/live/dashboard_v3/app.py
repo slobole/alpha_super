@@ -11,11 +11,24 @@ swap in a fixture instead of touching the live ``DashboardApp``.
 
 from __future__ import annotations
 
+import csv
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import unquote
 from zoneinfo import ZoneInfo
 
-from flask import Flask, Response, abort, jsonify, redirect, render_template, request, url_for
+from flask import (
+    Flask,
+    Response,
+    abort,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_from_directory,
+    url_for,
+)
 
 from alpha.live.dashboard_v3.actions import (
     SUPPORTED_ACTION_NAME_LIST,
@@ -32,6 +45,7 @@ from alpha.live.dashboard_v3.charts import (
 from alpha.live.dashboard_v3.data import (
     DashboardActionInFlightError,
     DashboardDataProvider,
+    DEFAULT_RESULTS_ROOT_PATH_STR,
     get_pod_row_dict_by_id,
     get_pod_row_dict_list_for_mode,
 )
@@ -64,6 +78,7 @@ ACTION_LABEL_DICT = {
 }
 SUPPORTED_MODE_STR_LIST = ["live", "paper", "incubation"]
 MODE_LABEL_DICT = {"live": "Live", "paper": "Paper", "incubation": "Incubation"}
+MAX_TRADE_DETAIL_ROW_COUNT_INT = 250
 
 
 SUPPORTED_TRACE_LEVEL_STR_LIST = ["all", "info", "warn", "error"]
@@ -212,6 +227,44 @@ def create_app(
             book_risk_dict=book_risk_obj.as_dict(),
             monthly_return_dict_list=monthly_return_dict_list,
             allocation_pie_dict=allocation_pie_obj.as_dict(),
+        )
+
+    @flask_app_obj.route("/artifacts/<path:artifact_path_str>")
+    def artifact_route_fn(artifact_path_str: str):
+        if not _artifact_path_allowed_bool(artifact_path_str):
+            abort(404)
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        return send_from_directory(
+            _provider_results_root_path_str(provider_obj),
+            artifact_path_str,
+        )
+
+    @flask_app_obj.route("/live-backtest/<pod_id_str>")
+    def live_backtest_page_route_fn(pod_id_str: str):
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        summary_dict = provider_obj.get_summary_dict()
+        row_dict = get_pod_row_dict_by_id(summary_dict, pod_id_str)
+        if row_dict is None:
+            abort(404)
+        trade_fill_diff_path_obj = _artifact_path_from_url_obj(
+            provider_obj=provider_obj,
+            artifact_url_str=str(
+                row_dict.get("latest_comparison_trade_fill_diff_url_str") or ""
+            ),
+        )
+        trade_row_dict_list = (
+            _read_trade_fill_diff_row_dict_list(trade_fill_diff_path_obj)
+            if trade_fill_diff_path_obj is not None
+            else []
+        )
+        verdict_obj = resolve_top_bar_verdict(summary_dict)
+        return render_template(
+            "live_backtest_page.html",
+            row_dict=row_dict,
+            trade_row_dict_list=trade_row_dict_list,
+            trade_row_limit_int=MAX_TRADE_DETAIL_ROW_COUNT_INT,
+            verdict_dict=verdict_obj.as_dict(),
+            as_of_clock_str=_now_clock_str(),
         )
 
     # ── HTMX fragments ───────────────────────────────────────────────────
@@ -456,6 +509,66 @@ _MARKET_TIMEZONE_OBJ = ZoneInfo("America/New_York")
 def _now_clock_str() -> str:
     # Market time (New York), seconds precision, no milliseconds.
     return datetime.now(timezone.utc).astimezone(_MARKET_TIMEZONE_OBJ).strftime("%H:%M:%S ET")
+
+
+def _provider_results_root_path_str(provider_obj) -> str:
+    return str(
+        getattr(provider_obj, "results_root_path_str", DEFAULT_RESULTS_ROOT_PATH_STR)
+    )
+
+
+def _artifact_path_allowed_bool(artifact_path_str: str) -> bool:
+    relative_path_obj = Path(unquote(str(artifact_path_str or "")))
+    path_part_tuple = relative_path_obj.parts
+    return (
+        bool(path_part_tuple)
+        and not relative_path_obj.is_absolute()
+        and path_part_tuple[0] == "live_reference_compare"
+        and ".." not in path_part_tuple
+    )
+
+
+def _artifact_path_from_url_obj(provider_obj, artifact_url_str: str) -> Path | None:
+    url_path_str = str(artifact_url_str or "").split("?", 1)[0]
+    if not url_path_str.startswith("/artifacts/"):
+        return None
+    relative_path_str = url_path_str[len("/artifacts/"):]
+    if not _artifact_path_allowed_bool(relative_path_str):
+        return None
+    results_root_path_obj = Path(_provider_results_root_path_str(provider_obj)).resolve()
+    artifact_path_obj = (
+        results_root_path_obj / Path(unquote(relative_path_str))
+    ).resolve()
+    try:
+        artifact_path_obj.relative_to(results_root_path_obj)
+    except ValueError:
+        return None
+    return artifact_path_obj
+
+
+def _read_trade_fill_diff_row_dict_list(
+    trade_fill_diff_path_obj: Path,
+) -> list[dict[str, str]]:
+    if not trade_fill_diff_path_obj.exists():
+        return []
+    row_dict_list: list[dict[str, str]] = []
+    try:
+        with trade_fill_diff_path_obj.open(
+            "r", encoding="utf-8", newline=""
+        ) as csv_file_obj:
+            reader_obj = csv.DictReader(csv_file_obj)
+            for row_dict in reader_obj:
+                row_dict_list.append(
+                    {
+                        str(key_str): str(value_str or "")
+                        for key_str, value_str in row_dict.items()
+                    }
+                )
+                if len(row_dict_list) >= MAX_TRADE_DETAIL_ROW_COUNT_INT:
+                    break
+    except OSError:
+        return []
+    return row_dict_list
 
 
 def _normalize_trace_level_bucket_str(level_str_obj: Any) -> str:

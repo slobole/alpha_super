@@ -167,6 +167,7 @@ class StubDataProvider:
     ACTION_TOKEN_STR = "stub-token"
 
     def __init__(self) -> None:
+        self.results_root_path_str = "results"
         self.summary_dict = _build_summary_dict()
         self.detail_call_log_list: list[str] = []
         self.event_call_log_list: list[str] = []
@@ -511,8 +512,10 @@ def test_pod_detail_includes_data_freshness_panel(test_client_obj) -> None:
     assert "Norgate" in response_text_str
     assert "Pod state" in response_text_str
     assert "Live vs Backtest" in response_text_str
+    assert "View details" in response_text_str
+    assert "/live-backtest/dv2_caspersky_live" in response_text_str
     assert "Open report" in response_text_str
-    assert "CSV" in response_text_str
+    assert "Download CSV" in response_text_str
     assert "2026-05-01" in response_text_str
     assert "2026-05-21" in response_text_str
     assert "Trade rows" in response_text_str
@@ -565,6 +568,72 @@ def test_pod_detail_live_backtest_card_handles_not_run_and_error_states(
 
     assert "Latest comparison artifact uses an old format." in response_text_str
     assert "Open report" not in response_text_str
+
+
+def test_artifact_route_serves_latest_live_backtest_files(
+    test_client_obj,
+    provider_obj,
+    tmp_path,
+) -> None:
+    provider_obj.results_root_path_str = str(tmp_path)
+    artifact_dir_path_obj = (
+        tmp_path
+        / "live_reference_compare"
+        / "live"
+        / "dv2_caspersky_live"
+        / "20260521T160000Z"
+    )
+    artifact_dir_path_obj.mkdir(parents=True)
+    (artifact_dir_path_obj / "index.html").write_text("comparison report", encoding="utf-8")
+    (artifact_dir_path_obj / "trade_fill_diff.csv").write_text(
+        "asset_str,live_planned_share_float,live_filled_share_float,"
+        "backtest_trade_share_float,share_diff_float,live_avg_fill_price_float,"
+        "backtest_avg_fill_price_float,price_diff_bps_float,notional_diff_float,note_str\n"
+        "AAPL,10,9,10,-1,101,100,10,-101,partial live fill\n",
+        encoding="utf-8",
+    )
+
+    response_obj = test_client_obj.get(
+        "/artifacts/live_reference_compare/live/dv2_caspersky_live/20260521T160000Z/index.html"
+    )
+    assert response_obj.status_code == 200
+    assert "comparison report" in response_obj.get_data(as_text=True)
+
+    blocked_response_obj = test_client_obj.get("/artifacts/other_report/index.html")
+    assert blocked_response_obj.status_code == 404
+
+
+def test_live_backtest_page_renders_minimal_trade_table(
+    test_client_obj,
+    provider_obj,
+    tmp_path,
+) -> None:
+    provider_obj.results_root_path_str = str(tmp_path)
+    artifact_dir_path_obj = (
+        tmp_path
+        / "live_reference_compare"
+        / "live"
+        / "dv2_caspersky_live"
+        / "20260521T160000Z"
+    )
+    artifact_dir_path_obj.mkdir(parents=True)
+    (artifact_dir_path_obj / "trade_fill_diff.csv").write_text(
+        "asset_str,live_planned_share_float,live_filled_share_float,"
+        "backtest_trade_share_float,share_diff_float,live_avg_fill_price_float,"
+        "backtest_avg_fill_price_float,price_diff_bps_float,notional_diff_float,note_str\n"
+        "AAPL,10,9,10,-1,101,100,10,-101,partial live fill\n",
+        encoding="utf-8",
+    )
+
+    response_obj = test_client_obj.get("/live-backtest/dv2_caspersky_live")
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    assert "Trade Fill Diff" in response_text_str
+    assert "Open HTML report" in response_text_str
+    assert "Download CSV" in response_text_str
+    assert "AAPL" in response_text_str
+    assert "partial live fill" in response_text_str
+    assert "live filled shares minus same-condition backtest transaction shares" in response_text_str
 
 
 def test_main_module_loads_config_env_before_serving(monkeypatch, tmp_path) -> None:
