@@ -65,6 +65,12 @@ from alpha.live.dashboard_v3.notifications import (
 )
 from alpha.live.dashboard_v3.schedule import build_schedule_entry_list
 from alpha.live.dashboard_v3.verdict import resolve_top_bar_verdict
+from alpha.live.ops_report import (
+    DEFAULT_STALE_AFTER_SECONDS_INT,
+    apply_consumer_staleness_dict,
+    build_ops_report_dict,
+    parse_timestamp_ts,
+)
 
 
 DASHBOARD_V3_VERSION_STR = "0.6.0-phase-6"
@@ -166,7 +172,7 @@ def create_app(
         reference_timestamp_str, reference_source_str = _resolve_exposure_reference_meta(
             pod_row_dict_list
         )
-        verdict_obj = resolve_top_bar_verdict(summary_dict)
+        verdict_obj = resolve_top_bar_verdict(summary_dict, mode_str=mode_str)
         return render_template(
             "exposure_page.html",
             mode_str=mode_str,
@@ -193,7 +199,7 @@ def create_app(
             for row_dict in pod_row_dict_list
             if _is_attention_row_bool(row_dict)
         ]
-        verdict_obj = resolve_top_bar_verdict(summary_dict)
+        verdict_obj = resolve_top_bar_verdict(summary_dict, mode_str=mode_str)
         allocation_pie_obj = build_allocation_pie_dict([
             {
                 "label_str": row_dict.get("pod_id_str"),
@@ -225,6 +231,7 @@ def create_app(
             pod_row_dict_list=pod_row_dict_list,
             attention_row_list=attention_row_list,
             verdict_dict=verdict_obj.as_dict(),
+            inspector_report_dict=_consumer_inspector_report_dict(summary_dict, mode_str=mode_str),
             as_of_clock_str=_now_clock_str(),
             combined_book_chart_dict=combined_book_chart_dict,
             combined_book_summary_dict=combined_book_env_dict or {},
@@ -538,6 +545,30 @@ def _provider_results_root_path_str(provider_obj) -> str:
     return str(
         getattr(provider_obj, "results_root_path_str", DEFAULT_RESULTS_ROOT_PATH_STR)
     )
+
+
+def _consumer_inspector_report_dict(
+    summary_dict: dict[str, Any],
+    *,
+    mode_str: str | None = None,
+) -> dict[str, Any]:
+    inspector_report_dict = summary_dict.get("inspector_report_dict") or {}
+    if not inspector_report_dict:
+        return {}
+    if mode_str is not None and str(inspector_report_dict.get("mode_str") or "all") != mode_str:
+        inspector_report_dict = build_ops_report_dict(
+            summary_dict,
+            mode_str=mode_str,
+            generated_at_ts=parse_timestamp_ts(
+                str(inspector_report_dict.get("generated_at_utc_str") or "")
+            ),
+            stale_after_seconds_int=int(
+                inspector_report_dict.get("stale_after_seconds_int")
+                or DEFAULT_STALE_AFTER_SECONDS_INT
+            ),
+            vps_id_str=inspector_report_dict.get("vps_id_str"),
+        )
+    return apply_consumer_staleness_dict(inspector_report_dict)
 
 
 def _artifact_path_allowed_bool(artifact_path_str: str) -> bool:

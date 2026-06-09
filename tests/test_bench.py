@@ -20,6 +20,7 @@ from alpha.bench.app import create_app
 
 
 DV2_MODULE_STR = "strategies.dv2.strategy_mr_dv2"
+EOM_ZROZ_SPY_SSO_MODULE_STR = "strategies.eom_tlt_vs_spy.strategy_eom_zroz_spy_sso_variant"
 
 
 class RecordingJobManager:
@@ -65,6 +66,10 @@ def test_catalog_lists_strategies_and_flags_wired():
     assert dv2_entry is not None
     assert dv2_entry.is_wired_bool is True
     assert dv2_entry.has_run_variant_bool is True  # guards the BOM/cp1252 decode fix
+
+    eom_zroz_entry = catalog.get_strategy_by_module(EOM_ZROZ_SPY_SSO_MODULE_STR)
+    assert eom_zroz_entry is not None
+    assert eom_zroz_entry.has_run_variant_bool is True
 
 
 def test_catalog_handles_non_utf8_sources_without_crashing():

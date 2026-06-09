@@ -2386,6 +2386,8 @@ def _render_incubation_fanout_detail_str(detail_dict: dict[str, object]) -> str:
 def _render_command_output_str(command_name_str: str, detail_dict: dict[str, object]) -> str:
     if bool(detail_dict.get("fanout_bool")):
         return _render_incubation_fanout_detail_str(detail_dict)
+    if command_name_str == "ops_report":
+        return _render_ops_report_detail_str(detail_dict)
     if command_name_str == "doctor":
         from alpha.live.doctor import render_doctor_detail_str
 
@@ -2407,6 +2409,33 @@ def _render_command_output_str(command_name_str: str, detail_dict: dict[str, obj
     if command_name_str == "cutover_v1_schema":
         return _render_v1_cutover_detail_str(detail_dict)
     return json.dumps(detail_dict, indent=2, sort_keys=True)
+
+
+def _render_ops_report_detail_str(detail_dict: dict[str, object]) -> str:
+    line_list = [
+        "LIVE OPS INSPECTOR REPORT",
+        f"Mode: {detail_dict.get('mode_str')}",
+        f"VPS: {detail_dict.get('vps_id_str')}",
+        f"Generated: {detail_dict.get('generated_at_utc_str')}",
+        f"Source as-of: {detail_dict.get('source_as_of_utc_str')}",
+        f"Overall: {str(detail_dict.get('overall_severity_str') or 'gray').upper()}",
+        f"Reason: {detail_dict.get('overall_reason_str')}",
+        "",
+        "PODs:",
+    ]
+    for pod_report_dict in detail_dict.get("pod_report_dict_list") or []:
+        line_list.extend(
+            [
+                (
+                    f"- {pod_report_dict.get('pod_id_str')}: "
+                    f"{str(pod_report_dict.get('severity_str') or 'gray').upper()} "
+                    f"({pod_report_dict.get('reason_code_str')})"
+                ),
+                f"  Action: {(pod_report_dict.get('next_operator_action_dict') or {}).get('label_str')}",
+                f"  Reason: {pod_report_dict.get('reason_str')}",
+            ]
+        )
+    return "\n".join(line_list)
 
 
 def expire_stale_decision_plans(
@@ -5347,6 +5376,40 @@ def _run_incubation_fanout_detail_dict(
     }
 
 
+def _run_ops_report_detail_dict(
+    parsed_args_obj: argparse.Namespace,
+    as_of_ts: datetime,
+) -> dict[str, object]:
+    from alpha.live.dashboard import (
+        DEFAULT_CONFIG_PATH_STR,
+        DashboardApp,
+        build_dashboard_summary_dict,
+    )
+    from alpha.live.ops_report import build_ops_report_dict
+
+    dashboard_app_obj = DashboardApp(
+        releases_root_path_str=parsed_args_obj.releases_root_path_str,
+        config_path_str=parsed_args_obj.dashboard_config_path_str or DEFAULT_CONFIG_PATH_STR,
+        event_log_path_str=parsed_args_obj.log_path_str,
+    )
+    summary_dict = build_dashboard_summary_dict(dashboard_app_obj, as_of_ts=as_of_ts)
+    detail_dict = build_ops_report_dict(
+        summary_dict,
+        mode_str=parsed_args_obj.env_mode_str,
+        generated_at_ts=as_of_ts,
+        stale_after_seconds_int=parsed_args_obj.stale_after_seconds_int,
+        vps_id_str=parsed_args_obj.vps_id_str,
+    )
+    if parsed_args_obj.output_path_str:
+        output_path_obj = Path(parsed_args_obj.output_path_str)
+        output_path_obj.parent.mkdir(parents=True, exist_ok=True)
+        output_path_obj.write_text(
+            json.dumps(detail_dict, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+    return detail_dict
+
+
 def main(argv_list: list[str] | None = None) -> int:
     parser_obj = argparse.ArgumentParser(description="alpha.live runner")
     parser_obj.add_argument(
@@ -5364,6 +5427,7 @@ def main(argv_list: list[str] | None = None) -> int:
             "status",
             "execution_report",
             "compare_reference",
+            "ops_report",
             "cutover_v1_schema",
         ),
     )
@@ -5384,6 +5448,19 @@ def main(argv_list: list[str] | None = None) -> int:
     parser_obj.add_argument("--reference-strategy-pickle", dest="reference_strategy_pickle_path_str", default=None)
     parser_obj.add_argument("--html", dest="html_output_bool", action="store_true")
     parser_obj.add_argument("--output-dir", dest="output_dir_str", default="results")
+    parser_obj.add_argument("--output-path", dest="output_path_str", default=None)
+    parser_obj.add_argument(
+        "--dashboard-config",
+        dest="dashboard_config_path_str",
+        default=None,
+    )
+    parser_obj.add_argument(
+        "--stale-after-seconds",
+        dest="stale_after_seconds_int",
+        type=int,
+        default=900,
+    )
+    parser_obj.add_argument("--vps-id", dest="vps_id_str", default=None)
     parsed_args_obj = parser_obj.parse_args(argv_list)
     as_of_ts = _parse_as_of_timestamp_ts(parsed_args_obj.as_of_timestamp_str)
     try:
@@ -5484,6 +5561,18 @@ def main(argv_list: list[str] | None = None) -> int:
 
     if parsed_args_obj.releases_root_path_str is None:
         parsed_args_obj.releases_root_path_str = DEFAULT_RELEASES_ROOT_PATH_STR
+
+    if parsed_args_obj.command_name_str == "ops_report":
+        if parsed_args_obj.json_output_bool:
+            with contextlib.redirect_stdout(io.StringIO()):
+                detail_dict = _run_ops_report_detail_dict(parsed_args_obj, as_of_ts)
+        else:
+            detail_dict = _run_ops_report_detail_dict(parsed_args_obj, as_of_ts)
+        if parsed_args_obj.json_output_bool:
+            print(json.dumps(detail_dict, indent=2, sort_keys=True))
+        else:
+            print(_render_command_output_str(parsed_args_obj.command_name_str, detail_dict))
+        return 1 if str(detail_dict.get("overall_severity_str") or "") == "red" else 0
 
     if _should_run_incubation_fanout_bool(parsed_args_obj):
         if parsed_args_obj.json_output_bool:

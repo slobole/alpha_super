@@ -174,3 +174,34 @@ def test_webhook_failure_returns_delivered_false(state_store_obj) -> None:
         webhook_poster_fn=poster_obj,
     )
     assert fired_list[0].delivered_bool is False
+
+
+def test_inspector_red_transition_fires_webhook(state_store_obj) -> None:
+    state_store_obj.save_state(
+        NotificationState(pod_severity_map_dict={"__inspector__": "green"})
+    )
+    poster_obj = CapturingPoster()
+    summary_dict = {
+        "pod_row_dict_list": [_row_dict("pod_a", "green")],
+        "inspector_report_dict": {
+            "overall_severity_str": "red",
+            "overall_reason_str": "Inspector source summary is stale.",
+            "mode_str": "live",
+            "vps_id_str": "vps_01",
+        },
+    }
+
+    fired_list = check_and_notify_for_red_transitions(
+        summary_dict,
+        state_store_obj=state_store_obj,
+        webhook_url_str="https://discord.example/hook",
+        webhook_poster_fn=poster_obj,
+    )
+
+    assert len(fired_list) == 1
+    assert fired_list[0].pod_id_str == "__inspector__"
+    assert fired_list[0].previous_severity_str == "green"
+    assert len(poster_obj.calls_list) == 1
+    payload_dict = poster_obj.calls_list[0][1]
+    assert "INSPECTOR" in payload_dict["content"]
+    assert "vps_01" in payload_dict["content"]

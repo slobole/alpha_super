@@ -21,11 +21,13 @@ import urllib.error
 import urllib.request
 
 from alpha.live.dashboard_v3.data import _effective_severity_str
+from alpha.live.ops_report import apply_consumer_staleness_dict
 
 
 DEFAULT_NOTIFICATION_STATE_PATH_STR = "alpha/live/logs/notification_state.json"
 DEFAULT_WEBHOOK_TIMEOUT_FLOAT = 3.0
 DISCORD_WEBHOOK_ENV_VAR_NAME_STR = "ALPHA_DISCORD_WEBHOOK_URL"
+INSPECTOR_NOTIFICATION_KEY_STR = "__inspector__"
 
 
 @dataclass
@@ -146,6 +148,34 @@ def check_and_notify_for_red_transitions(
                     delivered_bool=delivered_bool,
                 )
             )
+    raw_inspector_report_dict = summary_dict.get("inspector_report_dict") or {}
+    inspector_report_dict = (
+        apply_consumer_staleness_dict(raw_inspector_report_dict)
+        if raw_inspector_report_dict
+        else {}
+    )
+    inspector_severity_str = str(inspector_report_dict.get("overall_severity_str") or "")
+    if inspector_severity_str:
+        new_severity_map_dict[INSPECTOR_NOTIFICATION_KEY_STR] = inspector_severity_str
+        previous_severity_str = state_obj.pod_severity_map_dict.get(
+            INSPECTOR_NOTIFICATION_KEY_STR,
+            "",
+        )
+        if inspector_severity_str == "red" and previous_severity_str != "red":
+            payload_dict = _build_inspector_payload_dict(
+                inspector_report_dict,
+                previous_severity_str,
+            )
+            delivered_bool = bool(webhook_url_str) and webhook_poster_fn(webhook_url_str, payload_dict)
+            fired_list.append(
+                NotificationFiredRecord(
+                    pod_id_str=INSPECTOR_NOTIFICATION_KEY_STR,
+                    mode_str=str(inspector_report_dict.get("mode_str") or "all"),
+                    previous_severity_str=previous_severity_str or "unknown",
+                    reason_str=str(inspector_report_dict.get("overall_reason_str") or ""),
+                    delivered_bool=delivered_bool,
+                )
+            )
     state_obj.pod_severity_map_dict = new_severity_map_dict
     state_obj.last_updated_str = str(summary_dict.get("as_of_timestamp_str") or "")
     state_store_obj.save_state(state_obj)
@@ -173,6 +203,26 @@ def _build_discord_payload_dict(
         f":rotating_light: **{mode_str.upper()} / {pod_id_str}** turned **RED** "
         f"(was `{previous_label_str}`).\n"
         f"Required: **{action_label_str}**\n"
+        f"Reason: {reason_str}"
+    )
+    return {"content": message_str}
+
+
+def _build_inspector_payload_dict(
+    inspector_report_dict: dict[str, Any],
+    previous_severity_str: str,
+) -> dict[str, Any]:
+    mode_str = str(inspector_report_dict.get("mode_str") or "all")
+    previous_label_str = previous_severity_str or "unknown"
+    reason_str = str(
+        inspector_report_dict.get("overall_reason_str")
+        or "Inspector report needs operator review."
+    )
+    vps_id_str = str(inspector_report_dict.get("vps_id_str") or "?")
+    message_str = (
+        f":rotating_light: **INSPECTOR / {mode_str.upper()} / {vps_id_str}** "
+        f"turned **RED** (was `{previous_label_str}`).\n"
+        f"Required: **Open Dashboard and inspect attention queue**\n"
         f"Reason: {reason_str}"
     )
     return {"content": message_str}

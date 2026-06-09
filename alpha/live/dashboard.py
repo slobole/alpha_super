@@ -20,6 +20,7 @@ from alpha.data import LIVE_FRED_STALE_WARNING_BUSINESS_DAYS_INT
 from alpha.live import logging_utils, runner, scheduler_utils
 from alpha.live.models import LiveRelease
 from alpha.live.norgate_snapshot_sync import build_norgate_snapshot_status_dict
+from alpha.live.ops_report import build_ops_report_dict
 from alpha.live.release_manifest import load_release_list
 from alpha.live.state_store_v2 import LiveStateStore
 from scripts.norgate_config_env import load_config_env_file  # noqa: F401 - kept for backwards compatibility with tests/imports.
@@ -437,7 +438,7 @@ def build_dashboard_summary_dict(app_obj: DashboardApp, as_of_ts: datetime | Non
         for target_obj in target_list
     ]
     alert_dict_list = _build_alert_dict_list(pod_row_dict_list)
-    return {
+    summary_dict = {
         "as_of_timestamp_str": as_of_ts.isoformat(),
         "pod_row_dict_list": pod_row_dict_list,
         "alert_dict_list": alert_dict_list,
@@ -448,6 +449,11 @@ def build_dashboard_summary_dict(app_obj: DashboardApp, as_of_ts: datetime | Non
             as_of_ts=as_of_ts,
         ),
     }
+    summary_dict["inspector_report_dict"] = build_ops_report_dict(
+        summary_dict,
+        generated_at_ts=as_of_ts,
+    )
+    return summary_dict
 
 
 def build_pod_detail_dict(
