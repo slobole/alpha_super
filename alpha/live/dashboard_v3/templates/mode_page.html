@@ -33,6 +33,31 @@
 {# Strategy allocation pie for this mode (slices = running pods by equity). #}
 {% include "_allocation_pie.html" %}
 
+{% if inspector_report_dict %}
+  {% set inspector_sev_str = inspector_report_dict.overall_severity_str or 'gray' %}
+  <section class="mb-4 rounded-md border
+                  {% if inspector_sev_str == 'red' %}border-bad/40 bg-bad-soft/30
+                  {% elif inspector_sev_str == 'yellow' %}border-warn/40 bg-warn-soft/30
+                  {% elif inspector_sev_str == 'green' %}border-ok/40 bg-ok-soft/20
+                  {% else %}border-ink-100 bg-white{% endif %}
+                  p-3">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <div class="text-xs uppercase tracking-wide text-ink-500">Inspector</div>
+        <div class="font-semibold">
+          {{ inspector_report_dict.overall_severity_str | upper }}
+          <span class="font-normal text-ink-600">
+            {{ inspector_report_dict.overall_reason_str }}
+          </span>
+        </div>
+      </div>
+      <div class="text-xs text-ink-500 tabular-nums">
+        as-of {{ inspector_report_dict.source_as_of_utc_str or 'missing' }}
+      </div>
+    </div>
+  </section>
+{% endif %}
+
 <section class="mb-6">
   <div class="flex items-baseline justify-between mb-2">
     <h1 class="text-2xl font-bold tracking-tight">{{ mode_label_str }} PODs</h1>

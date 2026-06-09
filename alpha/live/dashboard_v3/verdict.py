@@ -9,6 +9,13 @@ from alpha.live.dashboard_v3.data import (
     _effective_severity_str,
     count_pods_needing_action_int,
     count_pods_waiting_int,
+    get_pod_row_dict_list_for_mode,
+)
+from alpha.live.ops_report import (
+    DEFAULT_STALE_AFTER_SECONDS_INT,
+    apply_consumer_staleness_dict,
+    build_ops_report_dict,
+    parse_timestamp_ts,
 )
 
 
@@ -26,8 +33,32 @@ class TopBarVerdict:
         }
 
 
-def resolve_top_bar_verdict(summary_dict: dict[str, Any]) -> TopBarVerdict:
-    pod_row_dict_list = summary_dict.get("pod_row_dict_list") or []
+def resolve_top_bar_verdict(
+    summary_dict: dict[str, Any],
+    *,
+    mode_str: str | None = None,
+) -> TopBarVerdict:
+    raw_inspector_report_dict = _raw_inspector_report_dict(summary_dict, mode_str=mode_str)
+    inspector_report_dict = (
+        apply_consumer_staleness_dict(raw_inspector_report_dict)
+        if raw_inspector_report_dict
+        else {}
+    )
+    inspector_severity_str = str(inspector_report_dict.get("overall_severity_str") or "")
+    if inspector_severity_str == "red":
+        return TopBarVerdict(
+            severity_str="red",
+            title_str="Inspector flag",
+            subtitle_str=str(
+                inspector_report_dict.get("overall_reason_str")
+                or "Open the attention queue and inspect the first red item."
+            ),
+        )
+    pod_row_dict_list = (
+        get_pod_row_dict_list_for_mode(summary_dict, mode_str)
+        if mode_str is not None
+        else summary_dict.get("pod_row_dict_list") or []
+    )
     if not pod_row_dict_list:
         return TopBarVerdict(
             severity_str="gray",
@@ -63,4 +94,28 @@ def resolve_top_bar_verdict(summary_dict: dict[str, Any]) -> TopBarVerdict:
         severity_str="green",
         title_str="All clear",
         subtitle_str="Enabled pods are idle, complete, or healthy.",
+    )
+
+
+def _raw_inspector_report_dict(
+    summary_dict: dict[str, Any],
+    *,
+    mode_str: str | None,
+) -> dict[str, Any]:
+    raw_inspector_report_dict = summary_dict.get("inspector_report_dict") or {}
+    if not raw_inspector_report_dict or mode_str is None:
+        return raw_inspector_report_dict
+    if str(raw_inspector_report_dict.get("mode_str") or "all") == mode_str:
+        return raw_inspector_report_dict
+    return build_ops_report_dict(
+        summary_dict,
+        mode_str=mode_str,
+        generated_at_ts=parse_timestamp_ts(
+            str(raw_inspector_report_dict.get("generated_at_utc_str") or "")
+        ),
+        stale_after_seconds_int=int(
+            raw_inspector_report_dict.get("stale_after_seconds_int")
+            or DEFAULT_STALE_AFTER_SECONDS_INT
+        ),
+        vps_id_str=raw_inspector_report_dict.get("vps_id_str"),
     )

@@ -530,7 +530,11 @@ def run_execution_timing_analysis(
     return timing_result_obj
 
 
-if __name__ == "__main__":
+def run_variant(
+    show_display_bool: bool = False,
+    save_results_bool: bool = True,
+    output_dir_str: str = "results",
+) -> EomZrozSpySsoVariantResearchStrategy:
     config = DEFAULT_CONFIG
 
     pricing_data_df = load_pricing_data_df(config=config)
@@ -568,14 +572,22 @@ if __name__ == "__main__":
         pricing_data_df=pricing_data_df,
     )
 
-    pd.set_option("display.max_columns", None)
-    pd.set_option("display.width", 1000)
+    if show_display_bool:
+        pd.set_option("display.max_columns", None)
+        pd.set_option("display.width", 1000)
 
-    print("Month signal preview:")
-    display(month_signal_df.head())
-    print("Trade leg preview:")
-    display(trade_leg_plan_df.head())
-    display(strategy.summary)
-    display(strategy.summary_trades)
+        print("Month signal preview:")
+        display(month_signal_df.head())
+        print("Trade leg preview:")
+        display(trade_leg_plan_df.head())
+        display(strategy.summary)
+        display(strategy.summary_trades)
 
-    save_results(strategy)
+    if save_results_bool:
+        save_results(strategy, output_dir=output_dir_str)
+
+    return strategy
+
+
+if __name__ == "__main__":
+    run_variant(show_display_bool=True, save_results_bool=True)

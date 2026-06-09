@@ -8,8 +8,7 @@ Before changing code, read these doctrine documents in this exact order:
 
 1. `QUANT_PHILOSOPHY.md`
 2. `ASSUMPTIONS_AND_GAPS.md`
-3. `CURRENT_STRATEGIES.md`
-4. `FEATURE_ROADMAP.md` if present
+3. `FEATURE_ROADMAP.md` if present
 
 These documents are authoritative for house philosophy, realism assumptions, and future direction. This file remains the operational entrypoint for repo-specific coding behavior.
 

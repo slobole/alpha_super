@@ -1,7 +1,7 @@
 # COMMANDS — CLI Cheat Sheet
 
-Quick reference for every shell command in this repo. All commands run from the
-repo root and use `uv` (Python 3.12). Flags shown are the useful ones — add
+Quick reference for the main shell commands in this repo. All commands run from
+the repo root and use `uv` (Python 3.12). Flags shown are the useful ones — add
 `--help` to any script for the full list.
 
 **Jump to:**
@@ -149,6 +149,7 @@ diagnose setup. Most paths/IDs default from env (`config.env`).
 | Command | Role |
 |---|---|
 | `uv run python scripts/export_norgate_snapshot.py --snapshot-root <path> --profile <profile>` | Export a snapshot locally (on the Windows Norgate node). `--profile` is **required** (e.g. `norgate_eod_sp500_pit`). |
+| `.\scripts\start_norgate_server.cmd` | Start the private Norgate snapshot API on the Windows Norgate node and run the server doctor. |
 | `uv run python scripts/serve_norgate_snapshot_api.py --host <ip> --port 8787` | Serve snapshots over HTTP to clients. |
 | `uv run python scripts/sync_norgate_snapshots_api.py --api-url http://<host>:8787` | Download required snapshots on a client. Flag: `--overwrite`. |
 | `uv run python scripts/doctor_norgate_server.py` | Health-check the server (disk, export, API). |
@@ -162,9 +163,37 @@ diagnose setup. Most paths/IDs default from env (`config.env`).
 |---|---|
 | `uv run python scripts/live_debug/ibkr_connectivity_probe.py` | Test the IBKR API connection + dump account snapshot (cash/positions/orders). Flags: `--release-manifest-path <yaml>` (auto-configures), `--port 7497`, `--json`. |
 | `uv run python -m alpha.live.dashboard_v3` | Live operator console (see [section 6](#6-control-panels-web-ui)). |
+| `uv run python -m alpha.live.runner doctor --mode paper --pod-id <pod_id>` | **First check when something feels wrong.** Produces the live health verdict: release, config, data gate, DecisionPlan/VPlan, broker/reconcile state. Add `--json` for raw detail. |
+| `uv run python -m alpha.live.runner status --mode paper --pod-id <pod_id>` | Read current sleeve state without submitting orders. |
+| `uv run python -m alpha.live.scheduler_service next_due --mode paper --pod-id <pod_id>` | Show what the scheduler expects to do next, and when. |
+| `uv run python -m alpha.live.runner tick --mode paper --pod-id <pod_id>` | Run one live-cycle tick manually: snapshot gate -> DecisionPlan -> VPlan -> optional submit/reconcile depending on state/config. |
+| `uv run python -m alpha.live.scheduler_service run_once --mode paper --pod-id <pod_id>` | Scheduler-aware single pass. Useful when debugging due-time logic. |
+| `uv run python -m alpha.live.scheduler_service serve --mode paper --pod-id <pod_id>` | Keep one pod's scheduler running. Normal VPS service command. |
+| `uv run python -m alpha.live.runner show_decision_plan --mode paper --pod-id <pod_id>` | Inspect latest DecisionPlan before trusting the order plan. |
+| `uv run python -m alpha.live.runner show_vplan --mode paper --pod-id <pod_id>` | Inspect latest VPlan before submission. |
+| `uv run python -m alpha.live.runner submit_vplan --mode paper --pod-id <pod_id> --vplan-id <id>` | Submit a reviewed VPlan manually. Keep first live/paper cycles manual unless explicitly enabling auto-submit. |
+| `uv run python -m alpha.live.runner post_execution_reconcile --mode paper --pod-id <pod_id>` | Reconcile broker fills/positions after submission. |
+| `uv run python -m alpha.live.runner eod_snapshot --mode paper --pod-id <pod_id>` | Record end-of-day broker cash, positions, and NetLiq. |
+| `uv run python -m alpha.live.runner execution_report --mode paper --pod-id <pod_id>` | Summarize execution/fill evidence for the current sleeve. |
+| `uv run python -m alpha.live.runner compare_reference --mode paper --pod-id <pod_id>` | Compare live/paper/incubation state to a reference backtest/pickle. Flags: `--reference-strategy-pickle <path>`, `--html`, `--output-dir <dir>`. |
+| `uv run python scripts/live_ops_watchdog.py --json` | Scheduled VPS watchdog: build the Inspector report, persist `alpha/live/logs/ops_report_latest.json`, fire red-transition Discord alerts, ping the dead-man switch. Register every 5 min via `.\scripts\setup_live_ops_watchdog_task.ps1`. |
 
-> `alpha/live/runner.py` and `alpha/live/scheduler_service.py` are internal
-> backend modules — driven by the dashboard, not run by hand.
+For incubation rehearsal, replace `--mode paper` with `--mode incubation`.
+Omit `--pod-id` only when you intentionally want the all-pod fan-out supported
+by that command. If you use `--db-path`, keep the same DB path across `serve`,
+`status`, `next_due`, `tick`, `show_decision_plan`, `show_vplan`, and reconcile.
+
+Manual review flow:
+
+```bash
+uv run python -m alpha.live.runner doctor --mode paper --pod-id <pod_id>
+uv run python -m alpha.live.runner tick --mode paper --pod-id <pod_id>
+uv run python -m alpha.live.runner show_decision_plan --mode paper --pod-id <pod_id>
+uv run python -m alpha.live.runner show_vplan --mode paper --pod-id <pod_id>
+uv run python -m alpha.live.runner submit_vplan --mode paper --pod-id <pod_id> --vplan-id <id>
+uv run python -m alpha.live.runner post_execution_reconcile --mode paper --pod-id <pod_id>
+uv run python -m alpha.live.runner eod_snapshot --mode paper --pod-id <pod_id>
+```
 
 ---
 

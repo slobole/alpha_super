@@ -86,6 +86,32 @@ On every pod's green/yellow/gray → red transition, the dashboard fires a singl
 message. State is persisted in `alpha/live/logs/notification_state.json`, so
 recovering and re-failing fires a fresh alert. Missing env var = silent.
 
+The same notification path also watches the Live OPS Inspector rollup. If the
+Inspector itself turns red because the report is stale or a required proof is
+missing, it sends one red-transition message and then waits for recovery before
+firing again.
+
+## Live OPS Inspector
+
+Dashboard V3 surfaces the Inspector verdict near the top of each mode page. The
+CLI view is:
+
+```powershell
+uv run python -m alpha.live.runner ops_report --mode live --json
+```
+
+The Inspector report is read-only. It reads the existing dashboard summary and
+POD evidence, then applies the contract from
+`docs/live/INSPECTOR_CONTRACT.md`: unknown is not green, stale is not green, and
+silence is caught by a separate heartbeat.
+
+The scheduled watchdog (`scripts/live_ops_watchdog.py`, see
+`docs/live/LIVE_RUNBOOK.md`) is the supported way to run the Inspector and the
+heartbeat on a timer. It keeps its own notification state file
+(`alpha/live/logs/watchdog_notification_state.json`), so when both the dashboard
+and the watchdog have `ALPHA_DISCORD_WEBHOOK_URL` set, the same red transition
+can alert twice — harmless, accepted.
+
 ## Live vs Backtest comparison
 
 The pod detail page includes a compact Live vs Backtest card when a comparison

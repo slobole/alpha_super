@@ -228,6 +228,66 @@ Operator Tools sits collapsed at the bottom of every expanded pod. Five buttons:
 
 Set `ALPHA_DISCORD_WEBHOOK_URL` in the environment to receive a Discord ping the first time any pod transitions to red. State persists in `alpha/live/logs/notification_state.json`, so a recovered pod that turns red again fires a fresh alert; missing env var = silent.
 
+Dashboard V3 also shows the Live OPS Inspector verdict. The Inspector is a
+read-only contract: unknown is not green, stale is not green, and it never
+submits or cancels orders. Inspect the same verdict from the CLI:
+
+```powershell
+uv run python -m alpha.live.runner ops_report --mode live --json
+```
+
+### Live OPS Watchdog (scheduled)
+
+The watchdog is the "employee on shift": one scheduled job per VPS that builds
+the Inspector report, persists it, fires red-transition Discord alerts, and
+pings the external dead-man switch **last** — all in one process, so silence at
+the external watcher always means "the inspector did not complete a run".
+
+Setup, once per VPS:
+
+1. Create a check at healthchecks.io (free tier): period **5 minutes**, grace
+   **15 minutes** (tolerates one missed run or a slow build). Copy the ping URL.
+2. Add to the gitignored `config.env` at the repo root:
+
+   ```ini
+   ALPHA_INSPECTOR_HEARTBEAT_URL=https://hc-ping.com/<your-check-uuid>
+   ALPHA_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+   ```
+
+3. Register the Task Scheduler job (every 5 minutes, runs without logon):
+
+   ```powershell
+   .\scripts\setup_live_ops_watchdog_task.ps1
+   ```
+
+4. Verify:
+
+   ```powershell
+   uv run python scripts/live_ops_watchdog.py --json
+   Start-ScheduledTask -TaskName AlphaLiveOpsWatchdog
+   Get-ScheduledTaskInfo -TaskName AlphaLiveOpsWatchdog
+   ```
+
+Semantics: overall **red** pings `<url>/fail` (healthchecks alerts immediately,
+even if Discord is unreachable); a **fatal error or hang** pings nothing, so the
+external watcher alerts after the grace window. The latest report is always at
+`alpha/live/logs/ops_report_latest.json`. The watchdog keeps its own dedup state
+in `alpha/live/logs/watchdog_notification_state.json`; if the dashboard also has
+`ALPHA_DISCORD_WEBHOOK_URL` set, the same red transition can alert twice —
+harmless, accepted.
+
+The low-level building block `scripts/live_ops_heartbeat.py` still exists for
+ad-hoc pings, but the watchdog is the supported scheduled path: the heartbeat
+must be emitted by the inspector run itself, otherwise the dead-man switch
+proves the wrong thing alive.
+
+If the external service stops receiving pings on time, treat the VPS as silent
+and inspect manually even if the last dashboard page was green.
+
+When a red alert fires, follow `docs/live/DEBUGGING_RUNBOOK.md` — the
+step-by-step funnel (Discord → dashboard → doctor → logs) for diagnosing a flag
+under pressure.
+
 See `docs/live/DASHBOARD_V3_RUNBOOK.md` for the one-page systemd + Tailscale deploy recipe.
 
 The V2 React console (`alpha/live/dashboard_v2/`) and the V1 HTTP handler (`alpha.live.dashboard.serve_dashboard`) have been removed. `alpha/live/dashboard.py` is now a pure data-builder library used by `alpha.live.dashboard_v3.*`.

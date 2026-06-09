@@ -8,6 +8,7 @@ of the dicts mirrors what ``build_dashboard_summary_dict`` and
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -16,6 +17,7 @@ from alpha.live.dashboard_v3.app import (
     DASHBOARD_V3_VERSION_STR,
     create_app,
 )
+from alpha.live.ops_report import build_ops_report_dict
 
 
 def _build_lifecycle_step_dict_list() -> list[dict[str, Any]]:
@@ -429,11 +431,60 @@ def test_live_page_renders_pod_row_with_severity(test_client_obj) -> None:
     response_text_str = response_obj.get_data(as_text=True)
     assert "dv2_caspersky_live" in response_text_str
     assert "qp_mr_live" in response_text_str
-    # Top bar verdict should reflect the worst severity across all modes (paper has red).
-    assert "need action" in response_text_str.lower() or "All clear" in response_text_str
+    # Top bar verdict is scoped to the selected mode; paper red should not drive /live.
+    assert "pod(s) waiting" in response_text_str
+
+
+def test_live_page_renders_inspector_verdict(test_client_obj, provider_obj) -> None:
+    provider_obj.summary_dict["inspector_report_dict"] = {
+        "overall_severity_str": "red",
+        "overall_reason_str": "Inspector source summary is stale.",
+        "generated_at_utc_str": "2026-05-21T16:00:00+00:00",
+        "source_as_of_utc_str": "2026-05-21T15:00:00+00:00",
+        "stale_after_seconds_int": 999999999,
+        "mode_str": "live",
+    }
+
+    response_obj = test_client_obj.get("/live")
+    response_text_str = response_obj.get_data(as_text=True)
+
+    assert response_obj.status_code == 200
+    assert "Inspector" in response_text_str
+    assert "Inspector source summary is stale." in response_text_str
 
 
 # ── HTMX fragments ────────────────────────────────────────────────────────
+
+
+def test_live_page_uses_mode_scoped_inspector_report(test_client_obj, provider_obj) -> None:
+    generated_at_ts = datetime(2026, 5, 21, 16, 0, tzinfo=UTC)
+    live_row_dict = _build_pod_row_dict("live_green", "live", "green")
+    incubation_row_dict = _build_pod_row_dict("incubation_missed", "incubation", "yellow")
+    incubation_row_dict.update(
+        {
+            "next_action_str": "expire_stale",
+            "reason_code_str": "submission_window_expired",
+        }
+    )
+    provider_obj.summary_dict["as_of_timestamp_str"] = generated_at_ts.isoformat()
+    provider_obj.summary_dict["pod_row_dict_list"] = [
+        live_row_dict,
+        incubation_row_dict,
+    ]
+    provider_obj.summary_dict["inspector_report_dict"] = build_ops_report_dict(
+        provider_obj.summary_dict,
+        generated_at_ts=generated_at_ts,
+        stale_after_seconds_int=999999999,
+        vps_id_str="vps_01",
+    )
+
+    response_obj = test_client_obj.get("/live")
+    response_text_str = response_obj.get_data(as_text=True)
+
+    assert response_obj.status_code == 200
+    assert "Inspector" in response_text_str
+    assert "All enabled PODs in scope are proven fresh and green." in response_text_str
+    assert "Review missed window" not in response_text_str
 
 
 def test_top_bar_fragment_returns_html(test_client_obj) -> None:
