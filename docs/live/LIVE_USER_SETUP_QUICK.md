@@ -94,9 +94,9 @@ alpha/live/releases/user_002/
 
 Rule:
 
-\[
+$$
 \text{user with 2 strategies} = 2 \times \text{pod YAML files}
-\]
+$$
 
 Example structure:
 

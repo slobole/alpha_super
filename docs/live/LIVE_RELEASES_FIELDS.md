@@ -2,9 +2,9 @@ TL;DR: it looks like “many parameters”, but in practice only `params:` are t
 
 The clean way to think about it is:
 
-\[
+$$
 \text{Live Release} = \text{Identity} + \text{Routing} + \text{Timing} + \text{Strategy Ref} + \text{Strategy Params}
-\]
+$$
 
 So this file is not “the strategy config only”.  
 It is “one approved live deployment of a strategy”.
@@ -92,9 +92,9 @@ Why it exists:
 
 So:
 
-\[
+$$
 \text{pod} = \text{one strategy deployment unit}
-\]
+$$
 
 In v1 effectively:
 - `1 pod = 1 strategy + 1 account + 1 release`
@@ -138,9 +138,9 @@ Why it exists:
 
 So the live target is:
 
-\[
+$$
 \text{target position} = f(\text{research strategy code}, \text{params}, \text{approved snapshot})
-\]
+$$
 
 Used by:
 - strategy selection in [strategy_host.py](../../alpha/live/strategy_host.py)
@@ -272,9 +272,9 @@ Used by:
 
 So for your DV2 manifest, the true strategy params are only:
 
-\[
+$$
 \theta = \{ \text{max\_positions\_int},\ \text{capital\_base\_float} \}
-\]
+$$
 
 Everything else is deployment metadata.
 

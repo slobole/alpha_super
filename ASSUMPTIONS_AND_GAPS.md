@@ -37,17 +37,17 @@ This file is part of the live-first control system. Recording a gap does not mak
 
 The current house choice for `strategy_taa_df` is an overnight OPG-style approximation:
 
-\[
+$$
 \text{target\_shares}^{taa}_t
 \ =
 \left\lfloor \frac{V^{close}_{t-1} \cdot w_t}{P^{size}_{t-1}} \right\rfloor
-\]
+$$
 
 with:
 
-\[
+$$
 P^{size}_{t-1} = close_{t-1}
-\]
+$$
 
 for target-share sizing, while execution still occurs at the next open. This is
 an intentional phase-1 simplification. It treats target weights as intended
@@ -55,19 +55,19 @@ overnight allocations and accepts small drift in realized weights.
 
 A more exact open-aware rebalance would be:
 
-\[
+$$
 \text{target\_shares}^{open}_t
 =
 \left\lfloor \frac{V^{open}_{t} \cdot w_t}{open_t} \right\rfloor
-\]
+$$
 
 where
 
-\[
+$$
 V^{open}_{t}
 =
 cash_{t-1} + \sum_i q_{i,t-1} \cdot open_{i,t}
-\]
+$$
 
 That more exact formulation is not the chosen default for the current TAA sleeve, but it remains a useful reference if a future strategy requires exact open-weight rebalancing.
 
@@ -79,13 +79,13 @@ economic model.
 
 Today the backtest fallback is:
 
-\[
+$$
 \Delta q^{liq}_{i,t} = -q^{open}_{i,t}
-\]
+$$
 
-\[
+$$
 P^{exit}_{i,t} = P^{last\_avail}_{i,\le t-1}
-\]
+$$
 
 This prevents zombie positions, but it does not represent the true economics
 of a merger, rename, cash acquisition, spin-off, or share-ratio conversion.
@@ -93,26 +93,26 @@ of a merger, rename, cash acquisition, spin-off, or share-ratio conversion.
 The desired future state is an explicit symbol-continuity policy with separate
 semantics for research and live trading:
 
-\[
+$$
 \text{policy}^{backtest} \in \{\text{raise}, \text{liquidate\_last\_close}, \text{corporate\_action\_map}\}
-\]
+$$
 
-\[
+$$
 \text{policy}^{live} = \text{block\_and\_reconcile}
-\]
+$$
 
 Under a fuller corporate-action-aware model, the preferred state transition is
 not synthetic liquidation but explicit successor mapping:
 
-\[
+$$
 q^{succ}_{t} = q^{old}_{t-1} \cdot r
-\]
+$$
 
-\[
+$$
 cash_t = cash_{t-1} + cash^{deal}_t + cash^{fractional}_t
-\]
+$$
 
-where \(r\) is the deal share-conversion ratio and the cash terms capture cash
+where $r$ is the deal share-conversion ratio and the cash terms capture cash
 consideration and fractional-share settlement.
 
 This work should be implemented in a later phase, not folded silently into the
