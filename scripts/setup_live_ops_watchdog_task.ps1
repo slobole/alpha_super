@@ -5,15 +5,22 @@ because the design needs MultipleInstances=IgnoreNew (overlap guard) and an
 ExecutionTimeLimit, which schtasks cannot set.
 
 Usage:
-  .\scripts\setup_live_ops_watchdog_task.ps1                  # register, 5 min
+  .\scripts\setup_live_ops_watchdog_task.ps1                  # register, all modes
+  .\scripts\setup_live_ops_watchdog_task.ps1 -Mode live       # scope to live only
   .\scripts\setup_live_ops_watchdog_task.ps1 -IntervalMinutes 10
   .\scripts\setup_live_ops_watchdog_task.ps1 -Unregister      # remove
+
+Scope the task to -Mode live when incubation/paper rehearsal pods would
+otherwise keep the dead-man switch permanently red (rehearsal pods build plans
+but never submit, so their execution window always reads as missed).
 #>
 
 [CmdletBinding()]
 param(
     [string]$TaskName = "AlphaLiveOpsWatchdog",
     [int]$IntervalMinutes = 5,
+    [ValidateSet("", "live", "paper", "incubation")]
+    [string]$Mode = "",
     [switch]$Unregister
 )
 
@@ -37,8 +44,10 @@ if (-not (Test-Path -LiteralPath $wrapper_path_str)) {
     throw "Wrapper script not found: $wrapper_path_str"
 }
 
+$wrapper_argument_str = "-NoProfile -ExecutionPolicy Bypass -File `"$wrapper_path_str`""
+if ($Mode) { $wrapper_argument_str += " -Mode $Mode" }
 $action_obj = New-ScheduledTaskAction -Execute "powershell.exe" `
-    -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$wrapper_path_str`"" `
+    -Argument $wrapper_argument_str `
     -WorkingDirectory $repo_root_path_str
 
 # -Once + -RepetitionInterval without -RepetitionDuration repeats indefinitely
@@ -60,7 +69,8 @@ $principal_obj = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNA
 Register-ScheduledTask -TaskName $TaskName -Action $action_obj -Trigger $trigger_obj `
     -Settings $settings_obj -Principal $principal_obj -Force | Out-Null
 
-Write-Step "PASS" "Registered scheduled task '$TaskName' every $IntervalMinutes minute(s)."
+$mode_label_str = if ($Mode) { $Mode } else { "all modes" }
+Write-Step "PASS" "Registered scheduled task '$TaskName' every $IntervalMinutes minute(s), scope: $mode_label_str."
 Write-Step "PASS" "Wrapper: $wrapper_path_str"
 Write-Step "INFO" "Verify now:  Start-ScheduledTask -TaskName $TaskName"
 Write-Step "INFO" "Inspect:     Get-ScheduledTaskInfo -TaskName $TaskName"
