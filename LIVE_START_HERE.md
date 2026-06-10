@@ -169,16 +169,16 @@ Run the long-running service:
 uv run python -m alpha.live.scheduler_service serve --mode paper --pod-id pod_dv2_01
 ```
 
-Open the local dashboard:
+Open the local dashboard (Dashboard V3):
 
 ```bash
-uv run python -m alpha.live.dashboard serve --host 127.0.0.1 --port 8765
+uv run python -m alpha.live.dashboard_v3 --host 127.0.0.1 --port 8080
 ```
 
 Then browse to:
 
 ```text
-http://127.0.0.1:8765
+http://127.0.0.1:8080
 ```
 
 The dashboard aggregates enabled PODs across `incubation`, `paper`, and `live`. It does not submit orders or reconcile. It reads DB/log/artifact state, and only runs Reference DIFF when you press the DIFF button.
