@@ -257,8 +257,15 @@ Setup, once per VPS:
 3. Register the Task Scheduler job (every 5 minutes, runs without logon):
 
    ```powershell
-   .\scripts\setup_live_ops_watchdog_task.ps1
+   .\scripts\setup_live_ops_watchdog_task.ps1            # all modes
+   .\scripts\setup_live_ops_watchdog_task.ps1 -Mode live # live only (recommended)
    ```
+
+   Scope to `-Mode live` if you run incubation/paper rehearsal pods. Rehearsal
+   pods build plans but never submit, so their execution window always reads as
+   "missed" → the watchdog would ping `/fail` forever, leaving the dead-man check
+   permanently down and unable to distinguish "a pod is red" from "the VPS died".
+   Incubation stays fully visible on the dashboard `/incubation` page either way.
 
 4. Verify:
 

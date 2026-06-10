@@ -6,7 +6,9 @@ script loads it itself so there is exactly one parser.
 #>
 
 [CmdletBinding()]
-param()
+param(
+    [string]$Mode = ""
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -29,5 +31,10 @@ else {
     }
 }
 
-& $uv_exe_path_str run python scripts\live_ops_watchdog.py @args
+# Forward an optional mode scope (live/paper/incubation) to the watchdog.
+# Omitting -Mode keeps the all-modes default.
+$py_arg_list = @()
+if ($Mode) { $py_arg_list += @("--mode", $Mode) }
+
+& $uv_exe_path_str run python scripts\live_ops_watchdog.py @py_arg_list
 exit $LASTEXITCODE
