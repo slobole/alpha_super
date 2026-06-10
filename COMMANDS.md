@@ -205,11 +205,8 @@ healthchecks.io dead-man switch last. Full walkthrough:
 **One-time setup (per VPS)**
 
 ```powershell
-# 1. Create a Discord webhook + a healthchecks.io check (period 5m, grace 15m).
-# 2. Put both URLs in the gitignored config.env at the repo root:
-#      ALPHA_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
-#      ALPHA_INSPECTOR_HEARTBEAT_URL=https://hc-ping.com/<uuid>
-# 3. Register the task, scoped to live so rehearsal pods don't page:
+# Prereqs (Discord webhook, healthchecks.io check, config.env URLs): see the
+# runbook's "Live OPS Watchdog (scheduled)" section. Then register the task:
 .\scripts\setup_live_ops_watchdog_task.ps1 -Mode live
 ```
 
@@ -243,9 +240,8 @@ Start-ScheduledTask   -TaskName AlphaLiveOpsWatchdog
 ```
 
 Severity → behavior: `green`/`yellow`/`gray` = success ping, no page · `red` =
-Discord + `/fail` ping · silence = healthchecks alerts. Scope to `--mode live`
-so incubation/paper rehearsal pods (which never submit) don't keep the check
-permanently red and blind the dead-man switch.
+Discord + `/fail` ping · silence = healthchecks alerts. Why `-Mode live` scoping
+matters: [LIVE_RUNBOOK.md](docs/live/LIVE_RUNBOOK.md#live-ops-watchdog-scheduled).
 
 ---
 

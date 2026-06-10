@@ -451,6 +451,21 @@ snapshot_source_str = virtual_broker
 
 Do not use EOD to prove that orders filled. That remains the job of `post_execution_reconcile`.
 
+Quick glossary:
+
+```text
+post_execution_reconcile = proves fills and target positions after trading
+eod_snapshot = records clean end-of-day cash, positions, and NetLiq
+pod_state = latest trusted broker-backed sleeve state
+broker_snapshot_cache = latest raw broker snapshot for the account
+```
+
+EOD state is mainly for the next decision's starting state and for cleaner backtest-reference comparison:
+
+```text
+equity_error_t = actual_eod_net_liq_t / reference_close_equity_t - 1
+```
+
 ### Execution Report
 
 ```bash
@@ -469,6 +484,7 @@ Workflow:
 
 ```bash
 uv run python -m alpha.live.runner tick --mode paper --pod-id pod_dv2_01
+uv run python -m alpha.live.runner show_decision_plan --mode paper --pod-id pod_dv2_01
 uv run python -m alpha.live.runner show_vplan --mode paper --pod-id pod_dv2_01
 uv run python -m alpha.live.runner submit_vplan --mode paper --pod-id pod_dv2_01 --vplan-id 1
 uv run python -m alpha.live.runner post_execution_reconcile --mode paper --pod-id pod_dv2_01
@@ -477,7 +493,7 @@ uv run python -m alpha.live.runner post_execution_reconcile --mode paper --pod-i
 Plain meaning:
 
 ```text
-build -> review -> submit -> reconcile
+build -> review decision -> review order plan -> submit -> reconcile
 ```
 
 Optional after close:
