@@ -195,6 +195,58 @@ uv run python -m alpha.live.runner post_execution_reconcile --mode paper --pod-i
 uv run python -m alpha.live.runner eod_snapshot --mode paper --pod-id <pod_id>
 ```
 
+### Live OPS Watchdog (24/7 monitoring)
+
+Runs on each VPS via Windows Task Scheduler: every 5 min it builds the Inspector
+report, persists it, fires Discord on a red transition, and pings the
+healthchecks.io dead-man switch last. Full walkthrough:
+`docs/live/LIVE_RUNBOOK.md`. Debugging a red alert: `docs/live/DEBUGGING_RUNBOOK.md`.
+
+**One-time setup (per VPS)**
+
+```powershell
+# 1. Create a Discord webhook + a healthchecks.io check (period 5m, grace 15m).
+# 2. Put both URLs in the gitignored config.env at the repo root:
+#      ALPHA_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+#      ALPHA_INSPECTOR_HEARTBEAT_URL=https://hc-ping.com/<uuid>
+# 3. Register the task, scoped to live so rehearsal pods don't page:
+.\scripts\setup_live_ops_watchdog_task.ps1 -Mode live
+```
+
+**Operate & verify**
+
+```powershell
+uv run python scripts\live_ops_watchdog.py --mode live --json  # run by hand, full result
+Start-ScheduledTask   -TaskName AlphaLiveOpsWatchdog           # run the task now
+Get-ScheduledTaskInfo -TaskName AlphaLiveOpsWatchdog           # LastTaskResult: 0 ok / 1 red / 2 fatal
+Get-Content alpha\live\logs\ops_report_latest.json            # latest persisted report
+```
+
+**Dead-man drill (prove silence alerts you)**
+
+```powershell
+# Instant alert-delivery check: fail then recover (paste your real ping URL)
+Invoke-RestMethod -Uri "https://hc-ping.com/<uuid>/fail" -Method Post
+Invoke-RestMethod -Uri "https://hc-ping.com/<uuid>"      -Method Post
+# Real silence test:
+Disable-ScheduledTask -TaskName AlphaLiveOpsWatchdog          # stop pinging
+#   wait ~20 min (period 5 + grace 15) -> healthchecks alerts you
+Enable-ScheduledTask  -TaskName AlphaLiveOpsWatchdog          # MUST re-enable
+Start-ScheduledTask   -TaskName AlphaLiveOpsWatchdog
+```
+
+**Remove / re-scope**
+
+```powershell
+.\scripts\setup_live_ops_watchdog_task.ps1 -Unregister        # remove the task
+.\scripts\setup_live_ops_watchdog_task.ps1 -Mode live         # re-register (live only)
+```
+
+Severity → behavior: `green`/`yellow`/`gray` = success ping, no page · `red` =
+Discord + `/fail` ping · silence = healthchecks alerts. Scope to `--mode live`
+so incubation/paper rehearsal pods (which never submit) don't keep the check
+permanently red and blind the dead-man switch.
+
 ---
 
 ## 9. Dev / utility
