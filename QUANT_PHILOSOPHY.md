@@ -22,21 +22,21 @@ Target state:
 
 Backtest performance is not proof of edge:
 
-\[
+$$
 \text{Backtest} \neq \text{proof of edge}
-\]
+$$
 
 Observed performance is a mixture of truth and distortion:
 
-\[
+$$
 \text{Observed performance} = \text{edge} + \text{luck} + \text{bias} + \text{implementation error}
-\]
+$$
 
 The first duty of the engine is to reduce the last three terms as aggressively as possible.
 
 Backtest quality is judged by credibility and robustness, not by cosmetic performance:
 
-\[
+$$
 \text{Backtest credibility}
 =
 \text{causality}
@@ -48,41 +48,41 @@ Backtest quality is judged by credibility and robustness, not by cosmetic perfor
 \text{auditability}
 -
 \text{hidden assumptions}
-\]
+$$
 
 Signals must be causal:
 
-\[
+$$
 \text{signal}_t = f(\mathcal{I}_{t-1})
-\]
+$$
 
 not
 
-\[
+$$
 \text{signal}_t = f(\mathcal{I}_{t}, \mathcal{I}_{t+1}, \dots)
-\]
+$$
 
 Live trading should preserve backtest semantics up to unavoidable market frictions:
 
-\[
+$$
 \text{live behavior}_t \approx \text{backtest behavior}_t + \epsilon^{friction}_t
-\]
+$$
 
-where \(\epsilon^{friction}_t\) is limited to irreducible effects such as slippage, partial fills, latency, broker constraints, and rounding.
+where $\epsilon^{friction}_t$ is limited to irreducible effects such as slippage, partial fills, latency, broker constraints, and rounding.
 
 Live order intent must be deterministic:
 
-\[
+$$
 \text{order intent}_t = g(\mathcal{I}_{t-1}, \text{state}_{t-1}, \text{config})
-\]
+$$
 
 The same information, state, and configuration should produce the same intended orders.
 
 Portfolio equity in the pod model is the sum of independently compounded pod equities:
 
-\[
+$$
 E^{portfolio}_t = \sum_{i=1}^{N} E^{pod_i}_t
-\]
+$$
 
 not a hidden daily-rebalanced weighted return shortcut unless daily rebalancing is explicitly the model.
 
@@ -90,9 +90,9 @@ not a hidden daily-rebalanced weighted return shortcut unless daily rebalancing 
 
 The simulator exists to approximate the live trading problem as closely as the current data and engine allow. It is not here to manufacture optimistic research results under assumptions we would reject in production.
 
-\[
+$$
 \text{usable edge} = \text{raw edge} - \text{costs} - \text{slippage} - \text{liquidity friction} - \text{operational constraints}
-\]
+$$
 
 A backtest is interesting only if the edge survives that conversion under assumptions that are plausible for the intended live deployment. The backtest should be as credible, conservative, and robust as the current data and engine allow.
 
@@ -164,17 +164,17 @@ Do not confuse explanation complexity with quantitative rigor. The goal is to pr
 
 Examples:
 
-\[
+$$
 r_t = \frac{P_t}{P_{t-1}} - 1
-\]
+$$
 
-\[
+$$
 \text{annualized return}^{(L)}_t = \left(\frac{P_t}{P_{t-L}}\right)^{252 / L} - 1
-\]
+$$
 
-\[
+$$
 \text{drawdown}_t = \frac{E_t}{\max(E_1, \dots, E_t)} - 1
-\]
+$$
 
 The code should make the math easier to audit, not harder.
 
@@ -243,9 +243,9 @@ Dangerous backtest misuse:
 
 The correct mental model is:
 
-\[
+$$
 P(\text{false discovery}) \uparrow \text{ as } N_{\text{trials}} \uparrow
-\]
+$$
 
 If you run enough variants, some of them will look brilliant by chance.
 
@@ -256,16 +256,16 @@ If you run enough variants, some of them will look brilliant by chance.
 This is the most important failure mode.
 
 - Features must use only past information.
-- Decisions taken for bar \(t\) must not use close, high, low, or other information from after the decision point.
+- Decisions taken for bar $t$ must not use close, high, low, or other information from after the decision point.
 - Same-bar fill fantasy is forbidden unless the model explicitly supports it and the data are aligned correctly.
 
 ### 2. Survivorship bias
 
 Universe membership must be point-in-time correct.
 
-\[
+$$
 \mathcal{U}_t \neq \mathcal{U}_{today}
-\]
+$$
 
 Never backtest on a static list of current survivors when the live strategy would have traded delisted or removed names historically.
 
@@ -277,19 +277,19 @@ Do not create an economic story after the result is already known and then confu
 
 Do not keep adding filters and parameters until the historical Sharpe looks attractive.
 
-\[
+$$
 \hat{\theta} = \arg\max_{\theta \in \Theta} \text{BacktestMetric}(\theta)
-\]
+$$
 
-becomes statistically meaningless when \(\Theta\) has been searched aggressively on the same data.
+becomes statistically meaningless when $\Theta$ has been searched aggressively on the same data.
 
 ### 5. Turnover and transaction costs
 
 Gross returns are not enough.
 
-\[
+$$
 r^{net}_t = r^{gross}_t - c^{trade}_t - c^{slippage}_t - c^{borrow}_t
-\]
+$$
 
 If turnover is high, costs are part of the strategy, not a footnote.
 
@@ -365,9 +365,9 @@ can be read and reconciled independently.
 
 The portfolio math stays simple:
 
-\[
+$$
 \text{client equity}_t = \sum_i \text{pod equity}_{i,t}
-\]
+$$
 
 A pod must not be just a label inside one shared raw broker account. That only
 works if the system later has a real pod ledger that assigns orders, fills,

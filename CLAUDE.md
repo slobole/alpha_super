@@ -8,11 +8,12 @@ Before changing code, read these doctrine documents in this exact order:
 
 1. `QUANT_PHILOSOPHY.md`
 2. `ASSUMPTIONS_AND_GAPS.md`
-3. `FEATURE_ROADMAP.md` if present
 
-These documents are authoritative for house philosophy, realism assumptions, and future direction. This file remains the operational entrypoint for repo-specific coding behavior.
+These documents are authoritative for house philosophy and realism assumptions. This file remains the operational entrypoint for repo-specific coding behavior.
 
 After the doctrine documents above, also read `docs/ai/KARPATHY_GUIDELINES.md`. This project keeps a self-contained local adaptation of `forrestchang/andrej-karpathy-skills` so the guidance is available here without requiring external plugin files, `.cursor` rules, or `.claude-plugin` metadata.
+
+For Norgate snapshot/API/client-VPS work, also read `docs/live/NORGATE_SNAPSHOT_V1.md` before changing live data-source, scheduler, or dashboard behavior.
 
 ## Karpathy-Derived Engineering Guardrails
 
@@ -27,7 +28,7 @@ Use the local reference file for the full text and attribution details.
 
 ## Quantitative Correctness Standards
 
-This codebase is held to a strict standard of quantitative rigor. Every piece of code â€” strategies, indicators, metrics, data handling â€” must be bullet-proof against common quant pitfalls. **Simplicity is a virtue**: prefer the clearest, most direct implementation over clever abstractions.
+This codebase is held to a strict standard of quantitative rigor. Every piece of code — strategies, indicators, metrics, data handling — must be bullet-proof against common quant pitfalls. **Simplicity is a virtue**: prefer the clearest, most direct implementation over clever abstractions.
 
 The simulator is live-first. Prefer logic and assumptions that could be traded operationally at the intended capital scale, and record any unrealistic simplification in `ASSUMPTIONS_AND_GAPS.md`.
 
@@ -35,35 +36,37 @@ Backtests must aim to be as credible, conservative, and robust as the current da
 
 Live trading must preserve backtest semantics up to irreducible market frictions. If the live implementation changes strategy meaning, then it is not the same strategy.
 
-For live deployment, prefer a deterministic order-clerk model: the strategy creates explicit order intent from prior-available information, and the execution layer transmits, tracks, reconciles, and reports that intent without adding opaque intelligence.
+For live deployment, prefer a deterministic per-pod order-clerk model: the strategy creates explicit order intent from prior-available information, and that pod's execution layer transmits, tracks, reconciles, and reports that intent without adding opaque intelligence.
 
 Any dangerous operation, realism gap, hidden assumption, operational ambiguity, or potentially misleading simplification must fail loud: raise the flag, document it, and discuss its likely impact instead of leaving it implicit.
 
 ### Non-negotiable rules
 
-**Lookahead bias** â€” The most critical failure mode. Signals, features, and any derived data must only use information available *before* the decision point. `compute_signals()` runs on the full dataset deliberately â€” any feature computed there must use only past data (e.g. rolling windows, `shift()`). `iterate()` receives only data up to `previous_bar`; never index into future bars.
+**Lookahead bias** — The most critical failure mode. Signals, features, and any derived data must only use information available *before* the decision point. `compute_signals()` runs on the full dataset deliberately — any feature computed there must use only past data (e.g. rolling windows, `shift()`). `iterate()` receives only data up to `previous_bar`; never index into future bars.
 
-**Survivorship bias** â€” Universe construction must use point-in-time constituent membership (Norgate's `index_constituent_timeseries`), not today's index composition. Never backtest on a static list of current constituents.
+**Survivorship bias** — Universe construction must use point-in-time constituent membership (Norgate's `index_constituent_timeseries`), not today's index composition. Never backtest on a static list of current constituents.
 
-**Data-mining / overfitting** â€” Strategies should be based on a clear, explainable edge with few parameters. Do not add parameters to fit historical results. Do not optimize parameters on the full backtest period without out-of-sample validation.
+**Data-mining / overfitting** — Strategies should be based on a clear, explainable edge with few parameters. Do not add parameters to fit historical results. Do not optimize parameters on the full backtest period without out-of-sample validation.
 
-**Execution realism** â€” Orders placed in `iterate()` execute at the *next bar's open*, not the close that triggered the signal. This is already enforced by the engine. Never bypass this by using same-bar prices.
+**Execution realism** — Orders placed in `iterate()` execute at the *next bar's open*, not the close that triggered the signal. This is already enforced by the engine. Never bypass this by using same-bar prices.
 
-**Price adjustment** â€” Use `CAPITALSPECIAL` adjustment (not `TOTALRETURN`) for individual stocks to avoid forward-looking dividend bias. Use `TOTALRETURN` only for benchmark indices.
+**Price adjustment** — Use `CAPITALSPECIAL` adjustment (not `TOTALRETURN`) for individual stocks to avoid forward-looking dividend bias. Use `TOTALRETURN` only for benchmark indices.
 
-**Statistical honesty** â€” Report metrics on the full out-of-sample period. Do not cherry-pick start/end dates or exclude drawdown periods. Sharpe ratio is computed with 0 risk-free rate (clearly documented).
+**Statistical honesty** — Report metrics on the full out-of-sample period. Do not cherry-pick start/end dates or exclude drawdown periods. Sharpe ratio is computed with 0 risk-free rate (clearly documented).
 
-**Simplicity over complexity** â€” A strategy with 3 rules that works is better than one with 10. When adding logic, ask whether it is genuinely necessary or whether it is curve-fitting noise.
+**Simplicity over complexity** — A strategy with 3 rules that works is better than one with 10. When adding logic, ask whether it is genuinely necessary or whether it is curve-fitting noise.
 
-**Explicit semantics** â€” If you change signal timing, order timing, execution assumptions, rebalance mapping, portfolio aggregation math, or cost modeling, state the old behavior, the new behavior, and the quantitative consequence.
+**Explicit semantics** — If you change signal timing, order timing, execution assumptions, rebalance mapping, portfolio aggregation math, or cost modeling, state the old behavior, the new behavior, and the quantitative consequence.
 
-**Domain naming** â€” Use strict `Domain_Type` naming in quantitative logic, for example `price_vec`, `return_ser`, `signal_df`, `target_weight_ser`.
+**Live pod-account mapping** — For live trading, a pod means one independent strategy sleeve: one live pod = one strategy = one linked IBKR account/subaccount route = one ledger. By default, that sleeve must map to a real isolated broker account, subaccount, or broker-recognized sleeve with its own cash, positions, and account value. Do not assign two different live strategies to the same account route. Do not treat a pod as a soft label inside one shared raw broker account unless a first-class pod ledger exists.
 
-**Sensitive time-series auditability** â€” Add a `*** CRITICAL***` comment next to sensitive time-series operations such as `shift()`, rolling windows, forward returns, and rebalance-date mapping.
+**Domain naming** — Use strict `Domain_Type` naming in quantitative logic, for example `price_vec`, `return_ser`, `signal_df`, `target_weight_ser`.
 
-**Human-readable explanations** â€” Keep the logic rigorous, but explain it in simple, precise language. Default to: plain-language intuition, then the exact rule, and use formulas only when they materially improve correctness, auditability, or remove ambiguity.
+**Sensitive time-series auditability** — Add a `*** CRITICAL***` comment next to sensitive time-series operations such as `shift()`, rolling windows, forward returns, and rebalance-date mapping.
 
-**Uncertainty handling** â€” When uncertain, do not silently choose the prettier implementation. Choose the more explicit implementation and state the uncertainty.
+**Human-readable explanations** — Keep the logic rigorous, but explain it in simple, precise language. Default to: plain-language intuition, then the exact rule, and use formulas only when they materially improve correctness, auditability, or remove ambiguity.
+
+**Uncertainty handling** — When uncertain, do not silently choose the prettier implementation. Choose the more explicit implementation and state the uncertainty.
 
 ---
 
@@ -103,20 +106,20 @@ This is a custom event-driven backtesting framework for quantitative trading str
 
 The engine follows a strict lifecycle to prevent lookahead bias:
 
-1. **`strategy.py`** â€” Abstract base class `Strategy`. All strategies inherit from it and must implement:
-   - `compute_signals(pricing_data)` â€” Called once before the backtest; precomputes all signals on the full dataset.
-   - `iterate(data, close, open_prices)` â€” Called each trading day at market open with data restricted to the previous bar. Place orders here.
+1. **`strategy.py`** — Abstract base class `Strategy`. All strategies inherit from it and must implement:
+   - `compute_signals(pricing_data)` — Called once before the backtest; precomputes all signals on the full dataset.
+   - `iterate(data, close, open_prices)` — Called each trading day at market open with data restricted to the previous bar. Place orders here.
    - Optionally override `finalize(current_data)` for post-simulation tasks.
 
-2. **`backtest.py`** â€” `run_daily(strategy, pricing_data, calendar)` drives the simulation. Per bar it calls: `restrict_data()` â†’ `iterate()` â†’ `process_orders()` â†’ `update_metrics()`. Orders placed in `iterate()` execute at the **next bar's open** (next-open execution model).
+2. **`backtest.py`** — `run_daily(strategy, pricing_data, calendar)` drives the simulation. Per bar it calls: `restrict_data()` → `iterate()` → `process_orders()` → `update_metrics()`. Orders placed in `iterate()` execute at the **next bar's open** (next-open execution model).
 
-3. **`order.py`** â€” Order types: `MarketOrder`, `LimitOrder`, `StopOrder`, `StopLimitOrder`. Orders specify an `amount` in `'shares'`, `'value'`, or `'percent'`. Setting `target=True` makes the amount a target position rather than a delta.
+3. **`order.py`** — Order types: `MarketOrder`, `LimitOrder`, `StopOrder`, `StopLimitOrder`. Orders specify an `amount` in `'shares'`, `'value'`, or `'percent'`. Setting `target=True` makes the amount a target position rather than a delta.
 
-4. **`metrics.py`** â€” Post-run analytics: `generate_trades()`, `generate_drawdowns()`, `generate_overall_metrics()`, `generate_trades_metrics()`, `generate_monthly_returns()`, `sharpe_ratio()`. Called automatically by `strategy.summarize()`.
+4. **`metrics.py`** — Post-run analytics: `generate_trades()`, `generate_drawdowns()`, `generate_overall_metrics()`, `generate_trades_metrics()`, `generate_monthly_returns()`, `sharpe_ratio()`. Called automatically by `strategy.summarize()`.
 
-5. **`indicators.py`** â€” Custom technical indicators: `dv2_indicator()` (Varadi Oscillator) and `qp_indicator()` (quantile probability indicator).
+5. **`indicators.py`** — Custom technical indicators: `dv2_indicator()` (Varadi Oscillator) and `qp_indicator()` (quantile probability indicator).
 
-6. **`plot.py`** â€” `plot()` renders a three-panel chart: cumulative returns (log scale), drawdown, and annual return bars.
+6. **`plot.py`** — `plot()` renders a three-panel chart: cumulative returns (log scale), drawdown, and annual return bars.
 
 ### Pricing Data Format
 
@@ -124,15 +127,14 @@ The engine follows a strict lifecycle to prevent lookahead bias:
 - **Index**: `pd.DatetimeIndex` of trading dates.
 - **Columns**: `pd.MultiIndex` where level 0 is the ticker symbol and level 1 is the price field. Every symbol must include at minimum `Open`, `High`, `Low`, `Close`.
 
-### Data Loading (`data/data_loader.py`)
+### Data Loading
 
-- `YahooDataLoader` â€” wraps `yfinance` (free, public data).
-- `StooqDataLoader` â€” wraps `pandas_datareader` (free, public data).
-- Norgate Data (`norgatedata`) is used in strategies for survivorship-bias-free S&P 500 constituent history; requires a paid Norgate subscription.
+- Norgate Data (`data/norgate_loader.py`) is the production source — survivorship-bias-free constituent history and point-in-time universes; requires a paid Norgate subscription. It reads either the local `norgatedata` install directly or pre-exported snapshots (`ALPHA_USE_NORGATE_SNAPSHOT_BOOL`, see `docs/live/NORGATE_SNAPSHOT_V1.md`).
+- `alpha/data/` holds auxiliary loaders (FRED macro series, Kenneth French factors).
 
 ### Strategies (`strategies/`)
 
-Concrete `Strategy` subclasses. The DV2 mean-reversion strategy (`strategy_mr_dv2.py`) is the primary reference implementation â€” it shows the full pattern: building a survivorship-bias-free universe via `build_index_constituent_matrix()`, loading prices with pre-computed features, and running `run_daily()`.
+Concrete `Strategy` subclasses. The DV2 mean-reversion strategy (`strategy_mr_dv2.py`) is the primary reference implementation — it shows the full pattern: building a survivorship-bias-free universe via `build_index_constituent_matrix()`, loading prices with pre-computed features, and running `run_daily()`.
 
 ### Key `Strategy` Methods for Use Inside `iterate()`
 
@@ -152,18 +154,20 @@ Concrete `Strategy` subclasses. The DV2 mean-reversion strategy (`strategy_mr_dv
 
 The `Portfolio` class combines multiple completed strategy runs ("pods") into a unified portfolio. This models how a real IBKR multi-pod account works: each pod receives a capital allocation and compounds independently.
 
-**Pod model** â€” Each strategy is a self-contained pod. Pods run independently through `run_daily()` with their own capital, universe, and logic. The `Portfolio` aggregator is read-only: it takes completed pod results and reconstructs a combined equity curve over their common date range.
+**Pod model** — Each strategy is a self-contained pod. Pods run independently through `run_daily()` with their own capital, universe, and logic. The `Portfolio` aggregator is read-only: it takes completed pod results and reconstructs a combined equity curve over their common date range.
 
-**Buy-and-hold math (default)** â€” Each pod gets `capital * weight` and compounds its own daily returns independently. Portfolio equity = sum of pod equities. Weights drift with performance, matching real-world behavior where you don't rebalance between strategies daily.
+**Live pod-account invariant** — In live deployment, the intended production model is one live pod = one strategy = one linked IBKR account/subaccount route = one ledger. If multiple pods share one raw broker account, the system needs an explicit pod ledger before overlapping symbols or pod-level reconciliation can be trusted.
 
-**Periodic rebalancing** â€” Optional `rebalance` parameter (`'monthly'`, `'quarterly'`, `'annually'`). At each rebalance date, the total portfolio value is redistributed across pods at target weights, then each pod compounds forward independently until the next rebalance. Rebalance dates snap to actual trading days.
+**Buy-and-hold math (default)** — Each pod gets `capital * weight` and compounds its own daily returns independently. Portfolio equity = sum of pod equities. Weights drift with performance, matching real-world behavior where you don't rebalance between strategies daily.
+
+**Periodic rebalancing** — Optional `rebalance` parameter (`'monthly'`, `'quarterly'`, `'annually'`). At each rebalance date, the total portfolio value is redistributed across pods at target weights, then each pod compounds forward independently until the next rebalance. Rebalance dates snap to actual trading days.
 
 **Cross-strategy diagnostics:**
-- **Correlation matrix** â€” Pairwise correlation of pod daily returns. Low correlation between pods is the primary source of portfolio-level risk reduction.
-- **Diversification ratio** â€” `weighted_sum_vol / portfolio_vol`. Ratio > 1.0 means diversification benefit exists; ratio = 1.0 means perfect correlation (no benefit).
+- **Correlation matrix** — Pairwise correlation of pod daily returns. Low correlation between pods is the primary source of portfolio-level risk reduction.
+- **Diversification ratio** — `weighted_sum_vol / portfolio_vol`. Ratio > 1.0 means diversification benefit exists; ratio = 1.0 means perfect correlation (no benefit).
 
 **Quantitative correctness notes:**
-- Never use `(daily_rets * weights).sum(axis=1)` for portfolio returns â€” this is daily-rebalanced math that doesn't match real multi-pod behavior.
+- Never use `(daily_rets * weights).sum(axis=1)` for portfolio returns — this is daily-rebalanced math that doesn't match real multi-pod behavior.
 - Pod equity curves must compound independently. The portfolio equity is the *sum* of pod equities, not a weighted-return series.
 - When adding rebalancing, redistribute total portfolio value at target weights, then compound forward. Don't just reset weights on the return series.
 
