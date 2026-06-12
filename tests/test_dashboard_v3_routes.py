@@ -1496,3 +1496,50 @@ def test_mode_page_shows_daily_pct_and_monthly_returns(test_client_obj) -> None:
     assert "recent days" in response_text_str     # recent-days table
     assert "Monthly return" in response_text_str  # monthly strip
     assert "May 26" in response_text_str          # the live combined book is all in May 2026
+
+
+# ── trade-sheet download (read-only GET, no action ceremony) ─────────────
+
+
+def test_trade_sheet_route_downloads_attachment(test_client_obj, provider_obj, tmp_path) -> None:
+    sheet_path_obj = tmp_path / "trade_sheet_20260521T160000Z.xlsx"
+    sheet_path_obj.write_bytes(b"stub-xlsx-bytes")
+    provider_obj.export_trade_sheet_path_str = lambda target_obj: str(sheet_path_obj)
+
+    response_obj = test_client_obj.get("/api/pods/dv2_caspersky_live/trade-sheet")
+
+    assert response_obj.status_code == 200
+    content_disposition_str = response_obj.headers.get("Content-Disposition", "")
+    assert "attachment" in content_disposition_str
+    assert "trade_sheet_20260521T160000Z.xlsx" in content_disposition_str
+    assert response_obj.data == b"stub-xlsx-bytes"
+
+
+def test_trade_sheet_route_unknown_pod_returns_404(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/api/pods/no_such_pod/trade-sheet")
+    assert response_obj.status_code == 404
+    assert response_obj.get_json()["error_code_str"] == "unknown_pod"
+
+
+def test_trade_sheet_route_no_plan_data_returns_404(test_client_obj, provider_obj) -> None:
+    def _raise_no_plan_fn(target_obj):
+        raise ValueError("No DecisionPlan and no VPlan found for pod.")
+
+    provider_obj.export_trade_sheet_path_str = _raise_no_plan_fn
+
+    response_obj = test_client_obj.get("/api/pods/dv2_caspersky_live/trade-sheet")
+
+    assert response_obj.status_code == 404
+    assert response_obj.get_json()["error_code_str"] == "no_plan_data"
+
+
+def test_trade_sheet_route_unexpected_error_returns_503(test_client_obj, provider_obj) -> None:
+    def _raise_db_locked_fn(target_obj):
+        raise RuntimeError("database is locked")
+
+    provider_obj.export_trade_sheet_path_str = _raise_db_locked_fn
+
+    response_obj = test_client_obj.get("/api/pods/dv2_caspersky_live/trade-sheet")
+
+    assert response_obj.status_code == 503
+    assert response_obj.get_json()["error_code_str"] == "trade_sheet_failed"

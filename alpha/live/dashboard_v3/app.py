@@ -26,6 +26,7 @@ from flask import (
     redirect,
     render_template,
     request,
+    send_file,
     send_from_directory,
     url_for,
 )
@@ -449,6 +450,28 @@ def create_app(
             '<div class="text-xs text-ink-500 italic">'
             "Click an action above to see a preview before confirming."
             "</div>"
+        )
+
+    @flask_app_obj.route("/api/pods/<pod_id_str>/trade-sheet")
+    def trade_sheet_download_route_fn(pod_id_str: str):
+        # Read-only export of the persisted DecisionPlan + VPlan as xlsx.
+        # Plain GET by design: no order/state mutation, so no action token.
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        target_obj = provider_obj.get_target_for_pod(pod_id_str)
+        if target_obj is None:
+            return _json_error_fn(404, "unknown_pod", f"Unknown enabled pod_id_str {pod_id_str!r}.")
+        try:
+            output_path_str = provider_obj.export_trade_sheet_path_str(target_obj)
+        except ValueError as exception_obj:
+            return _json_error_fn(404, "no_plan_data", str(exception_obj))
+        except Exception as exception_obj:  # e.g. sqlite "database is locked"
+            return _json_error_fn(503, "trade_sheet_failed", str(exception_obj))
+        # send_file treats relative paths as CWD-relative; absolutize first.
+        output_path_obj = Path(output_path_str).resolve()
+        return send_file(
+            output_path_obj,
+            as_attachment=True,
+            download_name=output_path_obj.name,
         )
 
     @flask_app_obj.route("/api/pods/<pod_id_str>/diff/run", methods=["POST"])

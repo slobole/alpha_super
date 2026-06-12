@@ -137,6 +137,36 @@ class DashboardDataProvider:
         )
         return job_obj.to_dict()
 
+    def export_trade_sheet_path_str(self, target_obj: DashboardPodTarget) -> str:
+        """Write the pod's trade sheet xlsx under results_root and return its path.
+
+        Read-only with respect to trading: renders the already-persisted
+        DecisionPlan + VPlan from the pod's own DB. Local imports keep the
+        provider stub-friendly for route tests.
+        """
+        from datetime import UTC, datetime
+        from pathlib import Path
+
+        from alpha.live.state_store_v2 import LiveStateStore
+        from alpha.live.trade_sheet import export_trade_sheet_detail_dict
+
+        # A GET must not create files: LiveStateStore.__init__ would otherwise
+        # initialize an empty schema DB at this path if the pod never ran.
+        if not Path(target_obj.db_path_str).exists():
+            raise ValueError(
+                f"Pod DB does not exist yet at '{target_obj.db_path_str}'. "
+                "There is nothing to export: the pod has not run in this mode."
+            )
+        state_store_obj = LiveStateStore(target_obj.db_path_str)
+        detail_dict = export_trade_sheet_detail_dict(
+            state_store_obj=state_store_obj,
+            pod_id_str=target_obj.release_obj.pod_id_str,
+            env_mode_str=target_obj.release_obj.mode_str,
+            generated_at_ts=datetime.now(UTC),
+            output_dir_str=self.results_root_path_str,
+        )
+        return str(detail_dict["output_path_str"])
+
     def get_job_dict(self, job_id_str: str) -> dict[str, Any] | None:
         app_obj = self.app_obj()
         if app_obj.diff_job_manager_obj is not None:

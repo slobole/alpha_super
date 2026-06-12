@@ -2404,11 +2404,32 @@ def _render_command_output_str(command_name_str: str, detail_dict: dict[str, obj
         return _render_execution_report_detail_str(detail_dict)
     if command_name_str == "compare_reference":
         return _render_compare_reference_detail_str(detail_dict)
+    if command_name_str == "export_trade_sheet":
+        return _render_trade_sheet_detail_str(detail_dict)
     if command_name_str == "eod_snapshot":
         return _render_eod_snapshot_detail_str(detail_dict)
     if command_name_str == "cutover_v1_schema":
         return _render_v1_cutover_detail_str(detail_dict)
     return json.dumps(detail_dict, indent=2, sort_keys=True)
+
+
+def _render_trade_sheet_detail_str(detail_dict: dict[str, object]) -> str:
+    line_list = [
+        "TRADE SHEET EXPORT",
+        f"Pod: {detail_dict.get('pod_id_str')}",
+        f"Mode: {detail_dict.get('mode_str')}",
+        f"Orders: {detail_dict.get('order_count_int')}",
+    ]
+    if bool(detail_dict.get("decision_only_bool")):
+        line_list.append(
+            "Note: no VPlan yet - sheet carries decision intent only, no broker-sized orders."
+        )
+    else:
+        line_list.append(
+            f"VPlan: id={detail_dict.get('vplan_id_int')} status={detail_dict.get('vplan_status_str')}"
+        )
+    line_list.append(f"File: {detail_dict.get('output_path_str')}")
+    return "\n".join(line_list)
 
 
 def _render_ops_report_detail_str(detail_dict: dict[str, object]) -> str:
@@ -5272,6 +5293,23 @@ def _execute_runner_command_detail_dict(
             env_mode_str=parsed_args_obj.env_mode_str,
             pod_id_str=parsed_args_obj.pod_id_str,
         )
+    if parsed_args_obj.command_name_str == "export_trade_sheet":
+        from alpha.live.trade_sheet import export_trade_sheet_detail_dict
+
+        if parsed_args_obj.pod_id_str is None:
+            raise ValueError(
+                "export_trade_sheet requires --pod-id: the sheet is a per-pod "
+                "order plan and the pod determines the DB and output path."
+            )
+        return export_trade_sheet_detail_dict(
+            state_store_obj=state_store_obj,
+            pod_id_str=parsed_args_obj.pod_id_str,
+            env_mode_str=parsed_args_obj.env_mode_str,
+            generated_at_ts=as_of_ts,
+            vplan_id_int=parsed_args_obj.vplan_id_int,
+            output_path_str=parsed_args_obj.output_path_str,
+            output_dir_str=parsed_args_obj.output_dir_str,
+        )
     if parsed_args_obj.command_name_str == "compare_reference":
         return get_compare_reference_summary(
             state_store_obj=state_store_obj,
@@ -5427,6 +5465,7 @@ def main(argv_list: list[str] | None = None) -> int:
             "status",
             "execution_report",
             "compare_reference",
+            "export_trade_sheet",
             "ops_report",
             "cutover_v1_schema",
         ),
