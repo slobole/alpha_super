@@ -176,6 +176,7 @@ diagnose setup. Most paths/IDs default from env (`config.env`).
 | `uv run python -m alpha.live.runner eod_snapshot --mode paper --pod-id <pod_id>` | Record end-of-day broker cash, positions, and NetLiq. |
 | `uv run python -m alpha.live.runner execution_report --mode paper --pod-id <pod_id>` | Summarize execution/fill evidence for the current sleeve. |
 | `uv run python -m alpha.live.runner compare_reference --mode paper --pod-id <pod_id>` | Compare live/paper/incubation state to a reference backtest/pickle. Flags: `--reference-strategy-pickle <path>`, `--html`, `--output-dir <dir>`. |
+| `uv run python -m alpha.live.runner export_trade_sheet --mode paper --pod-id <pod_id>` | Export the latest DecisionPlan + VPlan as an xlsx trade sheet (Orders / Decision / Context tabs) for manual execution or pre-trade review. Read-only. Writes `results/trade_sheets/<mode>/<pod_id>/`. Flags: `--vplan-id <id>`, `--output-path <file>`. Also available as a download link in the Dashboard V3 pod panel. |
 | `uv run python scripts/live_ops_watchdog.py --json` | Scheduled VPS watchdog: build the Inspector report, persist `alpha/live/logs/ops_report_latest.json`, fire red-transition Discord alerts, ping the dead-man switch. Register every 5 min via `.\scripts\setup_live_ops_watchdog_task.ps1`. |
 
 For incubation rehearsal, replace `--mode paper` with `--mode incubation`.

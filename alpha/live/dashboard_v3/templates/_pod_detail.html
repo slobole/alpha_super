@@ -74,6 +74,15 @@
     </details>
   </section>
 
+  {# ── Trade sheet — read-only xlsx of the latest Decision + VPlan, for
+       manual-execution recovery and pre-trade review. Plain download link. #}
+  <div class="text-xs">
+    <a href="/api/pods/{{ row_dict.pod_id_str }}/trade-sheet"
+       class="text-ink-500 hover:text-ink-900 hover:underline">
+      ⬇ Trade sheet (xlsx) — latest decision + order plan
+    </a>
+  </div>
+
   {# ── Operator Tools — collapsed by default; no polling. #}
   {% include "_operator_tools.html" %}
 </div>
