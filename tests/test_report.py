@@ -20,6 +20,7 @@ from alpha.engine.report import (
     _drawdown_color,
     _format_summary,
     _format_trades,
+    _pm_allocation_snapshot_df,
     _prepare_daily_return_distribution_dict,
     _prepare_trade_distribution_dict,
     _ret_color,
@@ -518,6 +519,12 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertIn('Allocated Sleeve Summary', report_html_str)
         self.assertIn('Standalone Pod Summary', report_html_str)
         self.assertIn('Common Overlap Window', report_html_str)
+        self.assertIn('<h2>PM Allocation Overview</h2>', report_html_str)
+        self.assertIn('Construction Policy', report_html_str)
+        self.assertIn('Manual IBKR Transfer Guide', report_html_str)
+        self.assertIn('Weight Drift = actual end weight - active target weight', report_html_str)
+        self.assertIn('Manual Delta = target capital - current sleeve equity', report_html_str)
+        self.assertIn('None (buy-and-hold)', report_html_str)
 
     def test_build_portfolio_html_includes_tail_risk_diagnostics(self):
         portfolio = make_portfolio()
@@ -528,6 +535,37 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertIn('Tail Correlation Matrix', report_html_str)
         self.assertIn('Tail Summary By Pod', report_html_str)
         self.assertIn('Worst Portfolio Days - Pod Contributions', report_html_str)
+
+    def test_build_portfolio_html_includes_pm_rebalance_targets(self):
+        strategy_a = make_strategy([0.0] + [0.01, -0.005] * 20)
+        strategy_a.name = 'PodA'
+        strategy_b = make_strategy([0.0] + [-0.005, 0.01] * 20)
+        strategy_b.name = 'PodB'
+        portfolio = Portfolio(
+            strategies=[strategy_a, strategy_b],
+            weights=[0.8, 0.2],
+            capital_base=100_000.0,
+            rebalance='monthly',
+            rebalance_policy_str='equal',
+        )
+
+        report_html_str = _build_portfolio_html(portfolio, chart_b64='portfolio-chart-b64')
+        allocation_snapshot_df = _pm_allocation_snapshot_df(portfolio)
+
+        self.assertIn('Latest applied rebalance target', report_html_str)
+        self.assertIn('Recent PM Rebalances', report_html_str)
+        self.assertIn('Target Rebalance Weights', report_html_str)
+        self.assertIn('PodA 50.00%; PodB 50.00%', report_html_str)
+        self.assertIn('<td>equal</td>', report_html_str)
+        self.assertAlmostEqual(float(allocation_snapshot_df['manual_delta_float'].sum()), 0.0)
+        self.assertAlmostEqual(
+            float(
+                allocation_snapshot_df
+                .set_index('pod_name_str')
+                .loc['PodA', 'target_weight_float']
+            ),
+            0.5,
+        )
 
     def test_save_portfolio_results_writes_tail_csv_artifacts(self):
         portfolio = make_portfolio()
@@ -576,6 +614,46 @@ class ReportFormattingTests(unittest.TestCase):
             self.assertEqual(run_info_dict['parameters']['capital'], 100_000.0)
             self.assertEqual(len(run_info_dict['parameters']['pods']), 2)
             self.assertIn('final_equity', summary_dict)
+
+    def test_save_portfolio_results_writes_rebalance_csv_artifacts(self):
+        strategy_a = make_strategy([0.0] + [0.01, -0.005] * 20)
+        strategy_a.name = 'PodA'
+        strategy_b = make_strategy([0.0] + [-0.005, 0.01] * 20)
+        strategy_b.name = 'PodB'
+        portfolio = Portfolio(
+            strategies=[strategy_a, strategy_b],
+            weights=[0.8, 0.2],
+            capital_base=100_000.0,
+            rebalance='monthly',
+            rebalance_policy_str='equal',
+        )
+
+        def write_fake_chart(*, save_to):
+            save_to.write(b'fake-portfolio-chart-bytes')
+
+        portfolio.plot = mock.Mock(side_effect=write_fake_chart)
+        portfolio.to_pickle = mock.Mock(side_effect=lambda path: Path(path).write_bytes(b'portfolio-pickle-bytes'))
+
+        with tempfile.TemporaryDirectory() as temp_dir_str:
+            output_path = save_portfolio_results(portfolio, output_dir=temp_dir_str)
+
+            target_weight_csv_path = output_path / 'rebalance_target_weights.csv'
+            diagnostic_csv_path = output_path / 'rebalance_diagnostics.csv'
+            metadata_path = output_path / 'metadata.json'
+
+            self.assertTrue(target_weight_csv_path.exists())
+            self.assertTrue(diagnostic_csv_path.exists())
+
+            target_weight_df = pd.read_csv(target_weight_csv_path)
+            diagnostic_df = pd.read_csv(diagnostic_csv_path)
+            metadata_dict = json.loads(metadata_path.read_text(encoding='utf-8'))
+
+            self.assertIn('PodA', target_weight_df.columns)
+            self.assertIn('PodB', target_weight_df.columns)
+            self.assertAlmostEqual(float(target_weight_df.iloc[0]['PodA']), 0.5)
+            self.assertEqual(diagnostic_df.iloc[0]['policy_str'], 'equal')
+            self.assertEqual(metadata_dict['rebalance'], 'monthly')
+            self.assertEqual(metadata_dict['rebalance_policy'], 'equal')
 
 
 if __name__ == '__main__':

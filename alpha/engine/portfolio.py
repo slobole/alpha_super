@@ -28,13 +28,17 @@ from alpha.engine.metrics import (
 
 class Portfolio:
     _VALID_REBALANCE = {None, 'monthly', 'quarterly', 'annually'}
+    _VALID_REBALANCE_POLICY = {'fixed', 'equal', 'inverse_volatility'}
+    _DEFAULT_INVERSE_VOLATILITY_LOOKBACK_DAY_INT = 60
     _DIAGNOSTIC_WINDOW_INT = 63
     _TAIL_FRACTION_FLOAT = 0.05
     _MIN_TAIL_DAYS_INT = 1
 
     def __init__(self, strategies: list, weights: list[float] = None,
                  name: str = 'Portfolio', capital_base: float = None,
-                 rebalance: str = None, pod_info_list: list[dict] | None = None):
+                 rebalance: str = None, pod_info_list: list[dict] | None = None,
+                 rebalance_policy_str: str = 'fixed',
+                 rebalance_inverse_volatility_lookback_day_int: int = None):
         """
         parameters:
         - strategies: list of Strategy objects that have been run through run_daily().
@@ -44,6 +48,10 @@ class Portfolio:
         - capital_base: total portfolio capital. Defaults to sum of pod capital bases.
         - rebalance: periodic rebalancing frequency. None (default) = buy-and-hold,
                      'monthly', 'quarterly', or 'annually'.
+        - rebalance_policy_str: target-weight policy used on rebalance dates.
+                                'fixed' returns to configured weights, 'equal'
+                                returns to 1/N, and 'inverse_volatility' uses
+                                trailing pod-return volatility.
         """
         # validate that every strategy has results
         for s in strategies:
@@ -64,6 +72,23 @@ class Portfolio:
         if rebalance not in self._VALID_REBALANCE:
             raise ValueError(f"rebalance must be one of {self._VALID_REBALANCE}, got '{rebalance}'")
 
+        rebalance_policy_str = str(rebalance_policy_str).strip().lower()
+        if rebalance_policy_str not in self._VALID_REBALANCE_POLICY:
+            raise ValueError(
+                f"rebalance_policy_str must be one of {self._VALID_REBALANCE_POLICY}, "
+                f"got '{rebalance_policy_str}'"
+            )
+
+        if rebalance_inverse_volatility_lookback_day_int is None:
+            rebalance_inverse_volatility_lookback_day_int = (
+                self._DEFAULT_INVERSE_VOLATILITY_LOOKBACK_DAY_INT
+            )
+        rebalance_inverse_volatility_lookback_day_int = int(
+            rebalance_inverse_volatility_lookback_day_int
+        )
+        if rebalance_inverse_volatility_lookback_day_int <= 1:
+            raise ValueError("rebalance_inverse_volatility_lookback_day_int must be greater than 1.")
+
         self.strategies = strategies
         self.weights = weights
         self.name = name
@@ -71,6 +96,10 @@ class Portfolio:
             s._capital_base for s in strategies
         )
         self._rebalance = rebalance
+        self._rebalance_policy = rebalance_policy_str
+        self._rebalance_inverse_volatility_lookback_day_int = (
+            rebalance_inverse_volatility_lookback_day_int
+        )
         self.source_config_path = None
         self.pod_info_list = self._build_pod_info_list(pod_info_list)
 
@@ -90,6 +119,9 @@ class Portfolio:
         self._sleeve_portfolio_value_df = None
         self._pod_equities = None
         self._rebalance_date_index = pd.DatetimeIndex([])
+        self._scheduled_rebalance_date_index = pd.DatetimeIndex([])
+        self.rebalance_target_weight_df = pd.DataFrame()
+        self.rebalance_diagnostic_df = pd.DataFrame()
         self.drift_weight_df = None
         self.correlation_matrix = None
         self.diversification_ratio = None
@@ -213,13 +245,91 @@ class Portfolio:
 
         self._summarize()
 
+    def _rebalance_target_weight_ser(
+        self,
+        rebalance_date,
+        rebalance_position_int: int,
+        daily_return_df: pd.DataFrame,
+    ) -> tuple[pd.Series | None, dict]:
+        strategy_name_list = [strategy_obj.name for strategy_obj in self.strategies]
+        diagnostic_dict = {
+            'rebalance_date': pd.Timestamp(rebalance_date),
+            'policy_str': self._rebalance_policy,
+            'lookback_day_int': (
+                self._rebalance_inverse_volatility_lookback_day_int
+                if self._rebalance_policy == 'inverse_volatility'
+                else None
+            ),
+            'observation_count_int': None,
+            'status_str': 'applied',
+        }
+
+        if self._rebalance_policy == 'fixed':
+            target_weight_ser = pd.Series(
+                np.array(self.weights, dtype=float),
+                index=strategy_name_list,
+                dtype=float,
+            )
+            return target_weight_ser, diagnostic_dict
+
+        if self._rebalance_policy == 'equal':
+            target_weight_ser = pd.Series(
+                1.0 / float(len(strategy_name_list)),
+                index=strategy_name_list,
+                dtype=float,
+            )
+            return target_weight_ser, diagnostic_dict
+
+        lookback_day_int = int(self._rebalance_inverse_volatility_lookback_day_int)
+
+        # *** CRITICAL*** Inverse-volatility PM targets are decided before the
+        # rebalance-date return is known. The window below excludes the current
+        # rebalance row and also excludes the overlap anchor row whose return is
+        # forced to 0.0 by construction.
+        available_return_df = daily_return_df.iloc[1:rebalance_position_int]
+        window_return_df = available_return_df.tail(lookback_day_int)
+        diagnostic_dict['observation_count_int'] = int(len(window_return_df))
+        if len(window_return_df) < lookback_day_int:
+            diagnostic_dict['status_str'] = 'skipped_insufficient_history'
+            return None, diagnostic_dict
+
+        volatility_ser = window_return_df.std(ddof=0) * float(np.sqrt(252.0))
+        invalid_volatility_name_list = [
+            strategy_name_str
+            for strategy_name_str, volatility_float in volatility_ser.items()
+            if not np.isfinite(float(volatility_float)) or float(volatility_float) <= 0.0
+        ]
+        if len(invalid_volatility_name_list) > 0:
+            raise ValueError(
+                "Inverse-volatility rebalance has invalid trailing volatility on "
+                f"{pd.Timestamp(rebalance_date).date()}: "
+                + ", ".join(invalid_volatility_name_list)
+            )
+
+        inverse_volatility_ser = 1.0 / volatility_ser
+        inverse_volatility_sum_float = float(inverse_volatility_ser.sum())
+        if not np.isfinite(inverse_volatility_sum_float) or inverse_volatility_sum_float <= 0.0:
+            raise ValueError(
+                "Inverse-volatility rebalance has invalid inverse-volatility sum on "
+                f"{pd.Timestamp(rebalance_date).date()}."
+            )
+
+        target_weight_ser = inverse_volatility_ser / inverse_volatility_sum_float
+        return target_weight_ser.astype(float), diagnostic_dict
+
     def _apply_rebalancing(self, pod_equities: pd.DataFrame,
                            daily_rets: pd.DataFrame) -> pd.DataFrame:
         """Redistribute pod capital back to target weights at rebalance dates.
 
-        At each rebalance date, the total portfolio value is redistributed
-        across pods at target weights, then each pod compounds forward
-        independently until the next rebalance date.
+        At each rebalance date, the previous close-marked total portfolio value
+        is redistributed across pods at target weights, then each pod compounds
+        forward independently until the next rebalance date.
+
+        Formulas for inverse-volatility policy:
+
+            r_{i,t} = E_{i,t} / E_{i,t-1} - 1
+            sigma_{i,d} = std(r_i over the trailing L completed days before d) * sqrt(252)
+            w_{i,d} = (1 / sigma_{i,d}) / sum_j(1 / sigma_{j,d})
         """
         freq_map = {'monthly': 'MS', 'quarterly': 'QS', 'annually': 'YS'}
         freq = freq_map[self._rebalance]
@@ -234,11 +344,13 @@ class Portfolio:
         rebal_trading_days = idx[np.unique(positions)]
 
         # skip the very first day (initial allocation is already at target)
-        rebal_trading_days = rebal_trading_days[rebal_trading_days > idx[0]]
-        self._rebalance_date_index = pd.DatetimeIndex(rebal_trading_days)
+        rebal_trading_days = pd.DatetimeIndex(rebal_trading_days[rebal_trading_days > idx[0]])
+        self._scheduled_rebalance_date_index = rebal_trading_days
 
-        weights_arr = np.array(self.weights)
         result = pod_equities.copy()
+        target_weight_ser_list = []
+        diagnostic_dict_list = []
+        applied_rebalance_date_list = []
 
         for rebal_date in rebal_trading_days:
             # find position of rebalance date
@@ -246,16 +358,53 @@ class Portfolio:
             if pos == 0:
                 continue
 
+            target_weight_ser, diagnostic_dict = self._rebalance_target_weight_ser(
+                rebalance_date=rebal_date,
+                rebalance_position_int=int(pos),
+                daily_return_df=daily_rets,
+            )
+            diagnostic_dict_list.append(diagnostic_dict)
+            if target_weight_ser is None:
+                continue
+
+            target_weight_sum_float = float(target_weight_ser.sum())
+            if abs(target_weight_sum_float - 1.0) > 1e-9:
+                raise ValueError(
+                    "Rebalance target weights must sum to 1.0 on "
+                    f"{pd.Timestamp(rebal_date).date()}, got {target_weight_sum_float:.12f}."
+                )
+
+            applied_rebalance_date_list.append(rebal_date)
+            target_weight_ser.name = pd.Timestamp(rebal_date)
+            target_weight_ser_list.append(target_weight_ser.copy())
+
             # total portfolio value at end of previous day
             prev_date = idx[pos - 1]
             total_val = result.loc[prev_date].sum()
 
             # redistribute at target weights and compound forward
-            for i, s in enumerate(self.strategies):
-                new_pod_capital = total_val * weights_arr[i]
+            for strategy_obj in self.strategies:
+                new_pod_capital = total_val * float(target_weight_ser.loc[strategy_obj.name])
                 # compound from rebal_date onward using daily returns
-                future_rets = daily_rets.loc[idx[pos:], s.name]
-                result.loc[idx[pos:], s.name] = new_pod_capital * (1 + future_rets).cumprod()
+                future_rets = daily_rets.loc[idx[pos:], strategy_obj.name]
+                result.loc[idx[pos:], strategy_obj.name] = new_pod_capital * (1 + future_rets).cumprod()
+
+        self._rebalance_date_index = pd.DatetimeIndex(applied_rebalance_date_list)
+        if len(target_weight_ser_list) > 0:
+            self.rebalance_target_weight_df = pd.DataFrame(target_weight_ser_list)
+            self.rebalance_target_weight_df.index.name = 'rebalance_date'
+        else:
+            self.rebalance_target_weight_df = pd.DataFrame(columns=pod_equities.columns, dtype=float)
+            self.rebalance_target_weight_df.index.name = 'rebalance_date'
+
+        if len(diagnostic_dict_list) > 0:
+            self.rebalance_diagnostic_df = pd.DataFrame(diagnostic_dict_list).set_index('rebalance_date')
+            self.rebalance_diagnostic_df.index = pd.to_datetime(self.rebalance_diagnostic_df.index)
+        else:
+            self.rebalance_diagnostic_df = pd.DataFrame(
+                columns=['policy_str', 'lookback_day_int', 'observation_count_int', 'status_str']
+            )
+            self.rebalance_diagnostic_df.index.name = 'rebalance_date'
 
         return result
 
@@ -358,7 +507,20 @@ class Portfolio:
         realized_daily_return_df = self._daily_rets.iloc[1:].copy()
         realized_weight_df = self.drift_weight_df.loc[realized_daily_return_df.index].copy()
         self.correlation_matrix = cross_correlation_matrix(realized_daily_return_df)
-        self.target_diversification_ratio = diversification_ratio(realized_daily_return_df, self.weights)
+        target_diversification_weight_list = list(self.weights)
+        if self.rebalance_target_weight_df is not None and len(self.rebalance_target_weight_df) > 0:
+            target_diversification_weight_list = (
+                self.rebalance_target_weight_df
+                .iloc[-1]
+                .reindex(realized_daily_return_df.columns)
+                .fillna(0.0)
+                .astype(float)
+                .to_list()
+            )
+        self.target_diversification_ratio = diversification_ratio(
+            realized_daily_return_df,
+            target_diversification_weight_list,
+        )
         self.diversification_ratio = self.target_diversification_ratio
 
         if len(realized_daily_return_df) > 0:

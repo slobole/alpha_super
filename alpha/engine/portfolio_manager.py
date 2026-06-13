@@ -43,6 +43,16 @@ POD_MINIMUM_ALLOCATED_CAPITAL_FLOAT_DICT: dict[str, float] = {
     "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy": 25_000.0,
 }
 SUPPORTED_ALLOCATION_POLICY_TUPLE: tuple[str, ...] = ("fixed", "equal")
+SUPPORTED_REBALANCE_FREQUENCY_TUPLE: tuple[str, ...] = ("monthly", "quarterly", "annually")
+SUPPORTED_REBALANCE_POLICY_TUPLE: tuple[str, ...] = ("fixed", "equal", "inverse_volatility")
+DEFAULT_INVERSE_VOLATILITY_LOOKBACK_DAY_INT = 60
+REBALANCE_FIELD_SET: frozenset[str] = frozenset(
+    {
+        "frequency_str",
+        "policy_str",
+        "lookback_day_int",
+    }
+)
 TOP_LEVEL_FIELD_SET: frozenset[str] = frozenset(
     {
         "name_str",
@@ -74,6 +84,20 @@ class PortfolioPodConfig:
 
 
 @dataclass(frozen=True)
+class PortfolioRebalanceConfig:
+    frequency_str: str
+    policy_str: str
+    lookback_day_int: int | None
+
+    def to_metadata_dict(self) -> dict[str, Any]:
+        return {
+            "frequency_str": self.frequency_str,
+            "policy_str": self.policy_str,
+            "lookback_day_int": self.lookback_day_int,
+        }
+
+
+@dataclass(frozen=True)
 class PortfolioManagerConfig:
     name_str: str
     capital_base_float: float
@@ -81,7 +105,7 @@ class PortfolioManagerConfig:
     end_date_str: str | None
     allocation_policy_str: str
     max_workers_int: int | None
-    rebalance: None
+    rebalance: PortfolioRebalanceConfig | None
     save_pod_artifacts_bool: bool
     pod_config_list: list[PortfolioPodConfig]
 
@@ -164,6 +188,81 @@ def _coerce_optional_positive_int(payload_dict: dict[str, Any], field_name_str: 
     if value_int <= 0:
         raise ValueError(f"Field '{field_name_str}' must be null or a positive integer.")
     return value_int
+
+
+def _normalize_rebalance_frequency_str(value_obj: Any) -> str:
+    if not isinstance(value_obj, str) or len(value_obj.strip()) == 0:
+        raise ValueError("Field 'rebalance.frequency_str' must be a non-empty string.")
+    frequency_str = value_obj.strip().lower()
+    if frequency_str not in SUPPORTED_REBALANCE_FREQUENCY_TUPLE:
+        raise ValueError(
+            "rebalance.frequency_str must be one of "
+            f"{SUPPORTED_REBALANCE_FREQUENCY_TUPLE}, got '{frequency_str}'."
+        )
+    return frequency_str
+
+
+def _normalize_rebalance_policy_str(value_obj: Any) -> str:
+    if not isinstance(value_obj, str) or len(value_obj.strip()) == 0:
+        raise ValueError("Field 'rebalance.policy_str' must be a non-empty string.")
+    policy_str = value_obj.strip().lower()
+    policy_alias_dict = {
+        "risk_parity": "inverse_volatility",
+        "risk_parity_inverse_volatility": "inverse_volatility",
+        "inverse_vol": "inverse_volatility",
+        "equal_weight": "equal",
+        "one_over_n": "equal",
+    }
+    policy_str = policy_alias_dict.get(policy_str, policy_str)
+    if policy_str not in SUPPORTED_REBALANCE_POLICY_TUPLE:
+        raise ValueError(
+            "rebalance.policy_str must be one of "
+            f"{SUPPORTED_REBALANCE_POLICY_TUPLE}, got '{policy_str}'."
+        )
+    return policy_str
+
+
+def _coerce_rebalance_config(rebalance_obj: Any) -> PortfolioRebalanceConfig | None:
+    if rebalance_obj is None:
+        return None
+
+    if isinstance(rebalance_obj, str):
+        return PortfolioRebalanceConfig(
+            frequency_str=_normalize_rebalance_frequency_str(rebalance_obj),
+            policy_str="fixed",
+            lookback_day_int=None,
+        )
+
+    if not isinstance(rebalance_obj, dict):
+        raise ValueError("Field 'rebalance' must be null, a frequency string, or a mapping.")
+
+    _validate_no_unknown_fields(
+        rebalance_obj,
+        REBALANCE_FIELD_SET,
+        context_str="rebalance",
+    )
+    frequency_str = _normalize_rebalance_frequency_str(rebalance_obj.get("frequency_str"))
+    policy_str = _normalize_rebalance_policy_str(rebalance_obj.get("policy_str"))
+
+    lookback_day_int = None
+    if policy_str == "inverse_volatility":
+        lookback_obj = rebalance_obj.get(
+            "lookback_day_int",
+            DEFAULT_INVERSE_VOLATILITY_LOOKBACK_DAY_INT,
+        )
+        lookback_day_int = int(lookback_obj)
+        if lookback_day_int <= 1:
+            raise ValueError("Field 'rebalance.lookback_day_int' must be greater than 1.")
+    elif "lookback_day_int" in rebalance_obj:
+        raise ValueError(
+            "Field 'rebalance.lookback_day_int' is only supported for inverse_volatility policy."
+        )
+
+    return PortfolioRebalanceConfig(
+        frequency_str=frequency_str,
+        policy_str=policy_str,
+        lookback_day_int=lookback_day_int,
+    )
 
 
 def _validate_backtest_dates(
@@ -276,9 +375,7 @@ def build_portfolio_manager_config(config_dict: dict[str, Any]) -> PortfolioMana
         raise ValueError("PortfolioManager config must be a mapping.")
     _validate_no_unknown_fields(config_dict, TOP_LEVEL_FIELD_SET, context_str="PortfolioManager config")
 
-    rebalance_obj = config_dict.get("rebalance")
-    if rebalance_obj is not None:
-        raise ValueError("PortfolioManager V1 rejects non-null rebalance.")
+    rebalance_config = _coerce_rebalance_config(config_dict.get("rebalance"))
 
     name_str = _coerce_required_str(config_dict, "name_str")
     capital_base_float = _coerce_positive_float(config_dict, "capital_base_float")
@@ -315,7 +412,7 @@ def build_portfolio_manager_config(config_dict: dict[str, Any]) -> PortfolioMana
         end_date_str=end_date_str,
         allocation_policy_str=allocation_policy_str,
         max_workers_int=max_workers_int,
-        rebalance=None,
+        rebalance=rebalance_config,
         save_pod_artifacts_bool=save_pod_artifacts_obj,
         pod_config_list=pod_config_list,
     )
@@ -536,8 +633,23 @@ class PortfolioManager:
             weights=self.config.weight_list,
             name=self.config.name_str,
             capital_base=self.config.capital_base_float,
-            rebalance=None,
+            rebalance=(
+                self.config.rebalance.frequency_str
+                if self.config.rebalance is not None
+                else None
+            ),
             pod_info_list=pod_info_list,
+            rebalance_policy_str=(
+                self.config.rebalance.policy_str
+                if self.config.rebalance is not None
+                else "fixed"
+            ),
+            rebalance_inverse_volatility_lookback_day_int=(
+                self.config.rebalance.lookback_day_int
+                if self.config.rebalance is not None
+                and self.config.rebalance.lookback_day_int is not None
+                else DEFAULT_INVERSE_VOLATILITY_LOOKBACK_DAY_INT
+            ),
         )
         portfolio.source_config_path = self.source_config_path_str
 
@@ -583,7 +695,11 @@ class PortfolioManager:
             "end_date_str": self.config.end_date_str,
             "allocation_policy_str": self.config.allocation_policy_str,
             "max_workers_int": worker_count_int,
-            "rebalance": None,
+            "rebalance": (
+                self.config.rebalance.to_metadata_dict()
+                if self.config.rebalance is not None
+                else None
+            ),
             "validation_status_str": "passed",
             "portfolio_output_dir_path": str(portfolio_output_dir_path),
             "pods": [

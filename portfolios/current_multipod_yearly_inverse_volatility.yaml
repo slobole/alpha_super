@@ -1,0 +1,20 @@
+name_str: current_multipod_yearly_inverse_volatility
+capital_base_float: 30000.0
+backtest_start_date_str: "2004-01-01"
+end_date_str: null
+allocation_policy_str: fixed
+max_workers_int: null
+rebalance:
+  frequency_str: annually
+  policy_str: inverse_volatility
+  lookback_day_int: 60
+save_pod_artifacts_bool: true
+
+pods:
+  - pod_id_str: pod_taa
+    strategy_import_str: strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash
+    weight_float: 0.6
+
+  - pod_id_str: pod_ndx_mo
+    strategy_import_str: strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy
+    weight_float: 0.4

@@ -65,6 +65,71 @@ class PortfolioTests(unittest.TestCase):
 
         self.assertAlmostEqual(portfolio.results.iloc[-1]['total_value'], 225.0)
 
+    def test_equal_rebalance_policy_targets_one_over_n(self):
+        dates_index = pd.to_datetime(['2024-01-30', '2024-01-31', '2024-02-03', '2024-02-04'])
+        strategy_a = make_strategy('StrategyA', dates_index, [0.0, 1.0, 0.0, 0.0])
+        strategy_b = make_strategy('StrategyB', dates_index, [0.0, 0.0, 0.0, 1.0])
+
+        portfolio = Portfolio(
+            strategies=[strategy_a, strategy_b],
+            weights=[0.8, 0.2],
+            capital_base=100.0,
+            rebalance='monthly',
+            rebalance_policy_str='equal',
+        )
+
+        self.assertAlmostEqual(portfolio.results.iloc[-1]['total_value'], 270.0)
+        target_weight_ser = portfolio.rebalance_target_weight_df.loc[pd.Timestamp('2024-02-03')]
+        self.assertAlmostEqual(float(target_weight_ser['StrategyA']), 0.5)
+        self.assertAlmostEqual(float(target_weight_ser['StrategyB']), 0.5)
+
+    def test_inverse_volatility_rebalance_policy_prefers_lower_vol_pod(self):
+        dates_index = pd.bdate_range('2024-01-02', periods=45)
+        low_vol_return_list = [0.0] + [0.001 if idx_int % 2 == 0 else -0.001 for idx_int in range(44)]
+        high_vol_return_list = [0.0] + [0.02 if idx_int % 2 == 0 else -0.02 for idx_int in range(44)]
+        strategy_low = make_strategy('LowVol', dates_index, low_vol_return_list)
+        strategy_high = make_strategy('HighVol', dates_index, high_vol_return_list)
+
+        portfolio = Portfolio(
+            strategies=[strategy_low, strategy_high],
+            weights=[0.5, 0.5],
+            capital_base=100.0,
+            rebalance='monthly',
+            rebalance_policy_str='inverse_volatility',
+            rebalance_inverse_volatility_lookback_day_int=4,
+        )
+
+        first_target_weight_ser = portfolio.rebalance_target_weight_df.iloc[0]
+        self.assertGreater(
+            float(first_target_weight_ser['LowVol']),
+            float(first_target_weight_ser['HighVol']),
+        )
+        self.assertAlmostEqual(float(first_target_weight_ser.sum()), 1.0)
+        self.assertEqual(
+            set(portfolio.rebalance_diagnostic_df['status_str']),
+            {'applied'},
+        )
+
+    def test_inverse_volatility_rebalance_skips_dates_without_enough_history(self):
+        dates_index = pd.bdate_range('2024-01-30', periods=10)
+        strategy_a = make_strategy('StrategyA', dates_index, [0.0] + [0.01, -0.01] * 4 + [0.01])
+        strategy_b = make_strategy('StrategyB', dates_index, [0.0] + [0.02, -0.02] * 4 + [0.02])
+
+        portfolio = Portfolio(
+            strategies=[strategy_a, strategy_b],
+            weights=[0.5, 0.5],
+            capital_base=100.0,
+            rebalance='monthly',
+            rebalance_policy_str='inverse_volatility',
+            rebalance_inverse_volatility_lookback_day_int=20,
+        )
+
+        self.assertEqual(len(portfolio.rebalance_target_weight_df), 0)
+        self.assertEqual(
+            set(portfolio.rebalance_diagnostic_df['status_str']),
+            {'skipped_insufficient_history'},
+        )
+
     def test_common_date_range_uses_overlap_only(self):
         strategy_a = make_strategy(
             'StrategyA',

@@ -176,6 +176,39 @@ def test_equal_policy_assigns_one_over_n_and_rejects_explicit_weight(monkeypatch
         portfolio_manager.build_portfolio_manager_config(config_dict)
 
 
+def test_rebalance_equal_policy_config_is_accepted(monkeypatch):
+    monkeypatch.setattr(portfolio_manager, "SUPPORTED_STRATEGY_IMPORT_TUPLE", ("dummy:a", "dummy:b"))
+    config_dict = make_fixed_config_dict(["dummy:a", "dummy:b"])
+    config_dict["rebalance"] = {
+        "frequency_str": "monthly",
+        "policy_str": "equal",
+    }
+
+    config_obj = portfolio_manager.build_portfolio_manager_config(config_dict)
+
+    assert config_obj.rebalance is not None
+    assert config_obj.rebalance.frequency_str == "monthly"
+    assert config_obj.rebalance.policy_str == "equal"
+    assert config_obj.rebalance.lookback_day_int is None
+
+
+def test_rebalance_risk_parity_alias_normalizes_to_inverse_volatility(monkeypatch):
+    monkeypatch.setattr(portfolio_manager, "SUPPORTED_STRATEGY_IMPORT_TUPLE", ("dummy:a", "dummy:b"))
+    config_dict = make_fixed_config_dict(["dummy:a", "dummy:b"])
+    config_dict["rebalance"] = {
+        "frequency_str": "quarterly",
+        "policy_str": "risk_parity",
+        "lookback_day_int": 20,
+    }
+
+    config_obj = portfolio_manager.build_portfolio_manager_config(config_dict)
+
+    assert config_obj.rebalance is not None
+    assert config_obj.rebalance.frequency_str == "quarterly"
+    assert config_obj.rebalance.policy_str == "inverse_volatility"
+    assert config_obj.rebalance.lookback_day_int == 20
+
+
 def test_allocated_capital_floor_rejects_underfunded_stock_pod(monkeypatch):
     strategy_import_str = "dummy_stock:a"
     monkeypatch.setattr(
@@ -219,7 +252,7 @@ def test_allocated_capital_floor_allows_funded_stock_pod(monkeypatch):
 @pytest.mark.parametrize(
     "config_update_dict, expected_message_str",
     [
-        ({"rebalance": "monthly"}, "rejects non-null rebalance"),
+        ({"rebalance": {"frequency_str": "weekly", "policy_str": "equal"}}, "rebalance.frequency_str"),
         ({"pods": [{"pod_id_str": "pod_a", "strategy_import_str": "unsupported", "weight_float": 1.0}]}, "Unsupported strategy_import_str"),
         (
             {
@@ -314,6 +347,30 @@ def test_serial_run_uses_allocated_capital_and_builds_portfolio(monkeypatch, tmp
     assert result_obj.portfolio.results.iloc[-1]["total_value"] == pytest.approx(1025.0)
     assert result_obj.portfolio.pod_info_list[0]["source_type_str"] == "fresh_run"
     assert "source_pkl" not in result_obj.portfolio.pod_info_list[0]
+
+
+def test_serial_run_passes_rebalance_policy_to_portfolio(monkeypatch, tmp_path):
+    left_import_str = write_dummy_strategy_module(tmp_path, "dummy_pm_rebalance_a", "StrategyA", 0.10)
+    right_import_str = write_dummy_strategy_module(tmp_path, "dummy_pm_rebalance_b", "StrategyB", -0.05)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr(
+        portfolio_manager,
+        "SUPPORTED_STRATEGY_IMPORT_TUPLE",
+        (left_import_str, right_import_str),
+    )
+
+    config_dict = make_fixed_config_dict([left_import_str, right_import_str])
+    config_dict["rebalance"] = {
+        "frequency_str": "monthly",
+        "policy_str": "equal",
+    }
+    config_obj = portfolio_manager.build_portfolio_manager_config(config_dict)
+    manager_obj = portfolio_manager.PortfolioManager(config_obj)
+
+    result_obj = manager_obj.run(save_results_bool=False, show_display_bool=False)
+
+    assert result_obj.portfolio._rebalance == "monthly"
+    assert result_obj.portfolio._rebalance_policy == "equal"
 
 
 def test_parallel_run_preserves_config_order(monkeypatch, tmp_path):

@@ -36,6 +36,8 @@ _CRISIS_PATHS_CSV_FILENAME = 'crisis_paths.csv'
 _TAIL_SUMMARY_CSV_FILENAME = 'tail_summary.csv'
 _TAIL_CONTRIBUTION_CSV_FILENAME = 'tail_contribution.csv'
 _TAIL_RETURNS_CSV_FILENAME = 'tail_returns.csv'
+_REBALANCE_TARGET_WEIGHTS_CSV_FILENAME = 'rebalance_target_weights.csv'
+_REBALANCE_DIAGNOSTICS_CSV_FILENAME = 'rebalance_diagnostics.csv'
 _DAILY_RETURN_HISTOGRAM_BIN_COUNT_INT = 60
 _TRADE_RETURN_HISTOGRAM_BIN_COUNT_INT = 60
 _FALLBACK_ASSET_SET = frozenset({'SPY', 'SSO', 'QQQ', 'QLD', 'TQQQ', 'UPRO'})
@@ -301,6 +303,24 @@ def _write_portfolio_tail_csvs(portfolio, output_path: Path):
     tail_return_df.to_csv(output_path / _TAIL_RETURNS_CSV_FILENAME, date_format='%Y-%m-%d')
 
 
+def _write_portfolio_rebalance_csvs(portfolio, output_path: Path):
+    target_weight_df = getattr(portfolio, 'rebalance_target_weight_df', pd.DataFrame())
+    diagnostic_df = getattr(portfolio, 'rebalance_diagnostic_df', pd.DataFrame())
+    if target_weight_df is None:
+        target_weight_df = pd.DataFrame()
+    if diagnostic_df is None:
+        diagnostic_df = pd.DataFrame()
+
+    target_weight_df.to_csv(
+        output_path / _REBALANCE_TARGET_WEIGHTS_CSV_FILENAME,
+        date_format='%Y-%m-%d',
+    )
+    diagnostic_df.to_csv(
+        output_path / _REBALANCE_DIAGNOSTICS_CSV_FILENAME,
+        date_format='%Y-%m-%d',
+    )
+
+
 def _strategy_metadata_dict(strategy, pickle_path: Path) -> dict:
     try:
         class_file = inspect.getfile(strategy.__class__)
@@ -328,6 +348,12 @@ def _portfolio_metadata_dict(portfolio, pickle_path: Path) -> dict:
         'portfolio_name': portfolio.name,
         'capital_base': float(portfolio._capital_base),
         'rebalance': portfolio._rebalance,
+        'rebalance_policy': getattr(portfolio, '_rebalance_policy', 'fixed'),
+        'rebalance_inverse_volatility_lookback_day_int': getattr(
+            portfolio,
+            '_rebalance_inverse_volatility_lookback_day_int',
+            None,
+        ),
         'source_config_path': portfolio.source_config_path,
         'common_start': portfolio._common_start,
         'common_end': portfolio._common_end,
@@ -1460,6 +1486,7 @@ def save_portfolio_results(portfolio, output_dir='results', output_path: str | P
     html = _build_portfolio_html(portfolio, chart_b64)
     (out / 'report.html').write_text(html, encoding='utf-8')
     _write_portfolio_tail_csvs(portfolio, out)
+    _write_portfolio_rebalance_csvs(portfolio, out)
 
     print(f'Results saved to: {out.resolve()}')
     return out
@@ -1660,6 +1687,16 @@ def _build_diagnostics_html(portfolio) -> str:
 
     if portfolio._rebalance is not None:
         parts.append(f'<p><strong>Rebalance Frequency:</strong> {portfolio._rebalance}</p>')
+        parts.append(
+            f'<p><strong>Rebalance Policy:</strong> '
+            f'{getattr(portfolio, "_rebalance_policy", "fixed")}</p>'
+        )
+        if getattr(portfolio, '_rebalance_policy', 'fixed') == 'inverse_volatility':
+            parts.append(
+                f'<p><strong>Inverse-Vol Lookback:</strong> '
+                f'{getattr(portfolio, "_rebalance_inverse_volatility_lookback_day_int", "")} '
+                f'trading days</p>'
+            )
     else:
         parts.append('<p><strong>Rebalance Frequency:</strong> None (buy-and-hold)</p>')
 
@@ -1887,6 +1924,284 @@ def _chart_block_from_b64(chart_b64: str | None, title: str, subtitle: str) -> s
     )
 
 
+def _format_signed_dollar_str(value_obj) -> str:
+    try:
+        value_float = float(value_obj)
+    except (TypeError, ValueError):
+        return ''
+    if np.isnan(value_float):
+        return ''
+    if np.isclose(value_float, 0.0, atol=1e-9):
+        return '$0.00'
+    sign_str = '+' if value_float > 0.0 else '-'
+    return f'{sign_str}${abs(value_float):,.2f}'
+
+
+def _pm_pod_name_list(portfolio) -> list[str]:
+    return [str(strategy_obj.name) for strategy_obj in getattr(portfolio, 'strategies', [])]
+
+
+def _pm_initial_weight_ser(portfolio, pod_name_list: list[str] | None = None) -> pd.Series:
+    if pod_name_list is None:
+        pod_name_list = _pm_pod_name_list(portfolio)
+    weight_float_list = [float(weight_obj) for weight_obj in getattr(portfolio, 'weights', [])]
+    return pd.Series(weight_float_list, index=pod_name_list, dtype=float)
+
+
+def _pm_rebalance_target_weight_df(portfolio, pod_name_list: list[str]) -> pd.DataFrame:
+    target_weight_df = getattr(portfolio, 'rebalance_target_weight_df', pd.DataFrame())
+    if target_weight_df is None or len(target_weight_df) == 0:
+        return pd.DataFrame(columns=pod_name_list, dtype=float)
+
+    normalized_target_weight_df = target_weight_df.copy()
+    normalized_target_weight_df.index = pd.to_datetime(normalized_target_weight_df.index).normalize()
+    normalized_target_weight_df.columns = [str(column_obj) for column_obj in normalized_target_weight_df.columns]
+    normalized_target_weight_df = normalized_target_weight_df.apply(pd.to_numeric, errors='coerce')
+    normalized_target_weight_df = normalized_target_weight_df.groupby(normalized_target_weight_df.index).last()
+    return normalized_target_weight_df.reindex(columns=pod_name_list)
+
+
+def _pm_rebalance_diagnostic_df(portfolio) -> pd.DataFrame:
+    diagnostic_df = getattr(portfolio, 'rebalance_diagnostic_df', pd.DataFrame())
+    if diagnostic_df is None or len(diagnostic_df) == 0:
+        return pd.DataFrame()
+
+    normalized_diagnostic_df = diagnostic_df.copy()
+    normalized_diagnostic_df.index = pd.to_datetime(normalized_diagnostic_df.index).normalize()
+    return normalized_diagnostic_df.groupby(normalized_diagnostic_df.index).last()
+
+
+def _pm_latest_target_weight_bundle(portfolio) -> tuple[pd.Series, str]:
+    pod_name_list = _pm_pod_name_list(portfolio)
+    initial_weight_ser = _pm_initial_weight_ser(portfolio, pod_name_list=pod_name_list)
+    target_weight_df = _pm_rebalance_target_weight_df(portfolio, pod_name_list)
+    if len(target_weight_df) == 0:
+        return initial_weight_ser, 'Initial configured weights'
+
+    latest_target_date_ts = pd.Timestamp(target_weight_df.index[-1])
+    latest_target_weight_ser = target_weight_df.iloc[-1].reindex(pod_name_list).fillna(0.0).astype(float)
+    return latest_target_weight_ser, f'Latest applied rebalance target ({latest_target_date_ts.date()})'
+
+
+def _pm_common_window_str(portfolio) -> str:
+    common_start_obj = getattr(portfolio, '_common_start', None)
+    common_end_obj = getattr(portfolio, '_common_end', None)
+    if common_start_obj is None or common_end_obj is None:
+        return ''
+    return f'{pd.Timestamp(common_start_obj).date()} -> {pd.Timestamp(common_end_obj).date()}'
+
+
+def _pm_policy_summary_html(portfolio, target_source_str: str) -> str:
+    rebalance_frequency_str = getattr(portfolio, '_rebalance', None) or 'None (buy-and-hold)'
+    rebalance_policy_str = getattr(portfolio, '_rebalance_policy', 'fixed')
+    row_tuple_list = [
+        ('Source config', getattr(portfolio, 'source_config_path', '') or ''),
+        ('Common overlap window', _pm_common_window_str(portfolio)),
+        ('Rebalance frequency', rebalance_frequency_str),
+        ('Rebalance policy', rebalance_policy_str),
+        ('Active target source', target_source_str),
+    ]
+    if rebalance_policy_str == 'inverse_volatility':
+        row_tuple_list.append(
+            (
+                'Inverse-vol lookback',
+                f'{getattr(portfolio, "_rebalance_inverse_volatility_lookback_day_int", "")} completed trading days',
+            )
+        )
+    row_tuple_list.append(
+        (
+            'Live capital movement',
+            'Manual IBKR transfers between pod accounts; this report does not place orders.',
+        )
+    )
+
+    row_html_list = [
+        '<tr>'
+        f'<td class="metric">{html.escape(label_str)}</td>'
+        f'<td>{html.escape(str(value_obj))}</td>'
+        '</tr>'
+        for label_str, value_obj in row_tuple_list
+    ]
+    return (
+        '<div class="scroll">'
+        '<table><thead><tr><th>Field</th><th>Value</th></tr></thead>'
+        f'<tbody>{"".join(row_html_list)}</tbody></table>'
+        '</div>'
+    )
+
+
+def _pm_allocation_snapshot_df(portfolio) -> pd.DataFrame:
+    pod_name_list = _pm_pod_name_list(portfolio)
+    pod_equity_df = getattr(portfolio, '_pod_equities', pd.DataFrame())
+    if pod_equity_df is None or len(pod_equity_df) == 0 or len(pod_name_list) == 0:
+        return pd.DataFrame()
+
+    initial_weight_ser = _pm_initial_weight_ser(portfolio, pod_name_list=pod_name_list).reindex(pod_name_list)
+    target_weight_ser, _ = _pm_latest_target_weight_bundle(portfolio)
+    target_weight_ser = target_weight_ser.reindex(pod_name_list).fillna(0.0).astype(float)
+
+    current_equity_ser = pod_equity_df.iloc[-1].reindex(pod_name_list).astype(float)
+    total_equity_float = float(current_equity_ser.sum())
+    if not np.isfinite(total_equity_float) or total_equity_float <= 0.0:
+        return pd.DataFrame()
+
+    drift_weight_df = getattr(portfolio, 'drift_weight_df', pd.DataFrame())
+    if drift_weight_df is not None and len(drift_weight_df) > 0:
+        actual_weight_ser = drift_weight_df.iloc[-1].reindex(pod_name_list).fillna(0.0).astype(float)
+    else:
+        actual_weight_ser = current_equity_ser / total_equity_float
+
+    target_equity_ser = target_weight_ser * total_equity_float
+    transfer_amount_ser = target_equity_ser - current_equity_ser
+    drift_weight_ser = actual_weight_ser - target_weight_ser
+
+    row_dict_list: list[dict[str, object]] = []
+    for pod_name_str in pod_name_list:
+        row_dict_list.append(
+            {
+                'pod_name_str': pod_name_str,
+                'initial_weight_float': float(initial_weight_ser.loc[pod_name_str]),
+                'target_weight_float': float(target_weight_ser.loc[pod_name_str]),
+                'actual_weight_float': float(actual_weight_ser.loc[pod_name_str]),
+                'drift_weight_float': float(drift_weight_ser.loc[pod_name_str]),
+                'current_equity_float': float(current_equity_ser.loc[pod_name_str]),
+                'target_equity_float': float(target_equity_ser.loc[pod_name_str]),
+                'manual_delta_float': float(transfer_amount_ser.loc[pod_name_str]),
+            }
+        )
+
+    return pd.DataFrame(row_dict_list)
+
+
+def _pm_allocation_snapshot_html(portfolio) -> str:
+    snapshot_df = _pm_allocation_snapshot_df(portfolio)
+    if len(snapshot_df) == 0:
+        return '<p>No PM allocation snapshot is available.</p>'
+
+    pod_equity_df = getattr(portfolio, '_pod_equities', pd.DataFrame())
+    snapshot_date_str = str(pd.Timestamp(pod_equity_df.index[-1]).date())
+    header_html_str = (
+        '<th>Pod</th>'
+        '<th>Initial Target</th>'
+        '<th>Active Target</th>'
+        '<th>Actual End Weight</th>'
+        '<th>Weight Drift</th>'
+        '<th>Current Sleeve</th>'
+        '<th>Target Capital</th>'
+        '<th>Manual Delta</th>'
+    )
+    row_html_list: list[str] = []
+    for _, snapshot_row_ser in snapshot_df.iterrows():
+        drift_class_str = _signed_value_class_str(snapshot_row_ser['drift_weight_float'])
+        delta_class_str = _signed_value_class_str(snapshot_row_ser['manual_delta_float'])
+        drift_class_attr_str = f' class="{drift_class_str}"' if drift_class_str else ''
+        delta_class_attr_str = f' class="{delta_class_str}"' if delta_class_str else ''
+        row_html_list.append(
+            '<tr>'
+            f'<td class="metric">{html.escape(str(snapshot_row_ser["pod_name_str"]))}</td>'
+            f'<td>{_format_weight_ratio_str(snapshot_row_ser["initial_weight_float"])}</td>'
+            f'<td>{_format_weight_ratio_str(snapshot_row_ser["target_weight_float"])}</td>'
+            f'<td>{_format_weight_ratio_str(snapshot_row_ser["actual_weight_float"])}</td>'
+            f'<td{drift_class_attr_str}>{_format_weight_ratio_str(snapshot_row_ser["drift_weight_float"])}</td>'
+            f'<td>{_fmt_dollar(snapshot_row_ser["current_equity_float"])}</td>'
+            f'<td>{_fmt_dollar(snapshot_row_ser["target_equity_float"])}</td>'
+            f'<td{delta_class_attr_str}>{_format_signed_dollar_str(snapshot_row_ser["manual_delta_float"])}</td>'
+            '</tr>'
+        )
+
+    return (
+        '<h3>Manual IBKR Transfer Guide</h3>'
+        f'<p>Close-marked snapshot date: {snapshot_date_str}. '
+        'Weight Drift = actual end weight - active target weight. '
+        'Manual Delta = target capital - current sleeve equity; positive means add capital to that pod, '
+        'negative means remove capital from that pod.</p>'
+        '<div class="scroll">'
+        f'<table><thead><tr>{header_html_str}</tr></thead><tbody>{"".join(row_html_list)}</tbody></table>'
+        '</div>'
+    )
+
+
+def _format_pm_weight_list_str(weight_ser: pd.Series) -> str:
+    part_str_list = []
+    for pod_name_str, weight_float in weight_ser.items():
+        part_str_list.append(f'{pod_name_str} {_format_weight_ratio_str(weight_float)}')
+    return '; '.join(part_str_list)
+
+
+def _recent_pm_rebalance_html(portfolio) -> str:
+    pod_name_list = _pm_pod_name_list(portfolio)
+    target_weight_df = _pm_rebalance_target_weight_df(portfolio, pod_name_list)
+    diagnostic_df = _pm_rebalance_diagnostic_df(portfolio)
+    if len(target_weight_df) == 0 and len(diagnostic_df) == 0:
+        return ''
+
+    if len(diagnostic_df) > 0:
+        recent_date_index = diagnostic_df.tail(6).index
+    else:
+        recent_date_index = target_weight_df.tail(6).index
+
+    header_html_str = (
+        '<th>Date</th>'
+        '<th>Status</th>'
+        '<th>Policy</th>'
+        '<th>Observations</th>'
+        '<th>Target Weights</th>'
+    )
+    row_html_list: list[str] = []
+    for rebalance_date_ts in recent_date_index:
+        normalized_rebalance_date_ts = pd.Timestamp(rebalance_date_ts).normalize()
+        if normalized_rebalance_date_ts in diagnostic_df.index:
+            diagnostic_ser = diagnostic_df.loc[normalized_rebalance_date_ts]
+            status_str = str(diagnostic_ser.get('status_str', ''))
+            policy_str = str(diagnostic_ser.get('policy_str', getattr(portfolio, '_rebalance_policy', 'fixed')))
+            observation_count_obj = diagnostic_ser.get('observation_count_int', '')
+            observation_count_str = ''
+            if pd.notna(observation_count_obj):
+                observation_count_str = str(int(float(observation_count_obj)))
+        else:
+            status_str = 'applied'
+            policy_str = getattr(portfolio, '_rebalance_policy', 'fixed')
+            observation_count_str = ''
+
+        if normalized_rebalance_date_ts in target_weight_df.index:
+            target_weight_ser = target_weight_df.loc[normalized_rebalance_date_ts].reindex(pod_name_list).fillna(0.0)
+            target_weight_str = _format_pm_weight_list_str(target_weight_ser)
+        else:
+            target_weight_str = ''
+
+        row_html_list.append(
+            '<tr>'
+            f'<td>{normalized_rebalance_date_ts.date()}</td>'
+            f'<td>{html.escape(status_str)}</td>'
+            f'<td>{html.escape(policy_str)}</td>'
+            f'<td>{html.escape(observation_count_str)}</td>'
+            f'<td>{html.escape(target_weight_str)}</td>'
+            '</tr>'
+        )
+
+    return (
+        '<h3>Recent PM Rebalances</h3>'
+        '<p>Scheduled PM rebalance decisions. Skipped rows have no applied target weights.</p>'
+        '<div class="scroll">'
+        f'<table><thead><tr>{header_html_str}</tr></thead><tbody>{"".join(row_html_list)}</tbody></table>'
+        '</div>'
+    )
+
+
+def _build_pm_allocation_html(portfolio) -> str:
+    _, target_source_str = _pm_latest_target_weight_bundle(portfolio)
+    return (
+        '<h2>PM Allocation Overview</h2>'
+        '<p>This is the PM aggregation view for the selected portfolio config. '
+        'The output folder may still use the vanilla_backtest label, but the weights, '
+        'rebalance policy, and target calculations are specific to this PM run.</p>'
+        '<h3>Construction Policy</h3>'
+        f'{_pm_policy_summary_html(portfolio, target_source_str)}'
+        f'{_pm_allocation_snapshot_html(portfolio)}'
+        f'{_recent_pm_rebalance_html(portfolio)}'
+    )
+
+
 def _format_weight_ratio_str(weight_obj) -> str:
     if pd.isna(weight_obj):
         return ''
@@ -2062,6 +2377,16 @@ def _portfolio_weights_html(strategy) -> str:
 def _portfolio_pod_drift_html(portfolio) -> str:
     vertical_line_index = getattr(portfolio, '_rebalance_date_index', pd.DatetimeIndex([]))
     parts = ['<h2>Pod Drift Diagnostics</h2>']
+    rebalance_target_weight_df = getattr(portfolio, 'rebalance_target_weight_df', pd.DataFrame())
+    if rebalance_target_weight_df is not None and len(rebalance_target_weight_df) > 0:
+        parts.append(
+            _weights_chart_block(
+                rebalance_target_weight_df,
+                'Target Rebalance Weights',
+                'PM target weights applied on rebalance dates before subsequent pod drift.',
+                vertical_line_index=vertical_line_index,
+            )
+        )
     parts.append(
         _weights_chart_block(
             portfolio.drift_weight_df,
@@ -2196,6 +2521,7 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
         final_value_obj=final_val,
     )
     kpi_grid_html_str = _build_kpi_grid_html(summ, portfolio.name)
+    pm_allocation_card_html_str = _wrap_card_html(_build_pm_allocation_html(portfolio))
     equity_card_html_str = _wrap_card_html(
         f'''
 <h2>Equity Curve</h2>
@@ -2241,6 +2567,7 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
     body = f'''<div class="report-shell">
 {header_html_str}
 {kpi_grid_html_str}
+{pm_allocation_card_html_str}
 {equity_card_html_str}
 {_build_card_grid_html([weight_allocation_card_html_str, provenance_card_html_str])}
 {performance_summary_card_html_str}
