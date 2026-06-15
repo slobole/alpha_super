@@ -761,11 +761,13 @@ def test_ibkr_socket_client_sets_expected_tif_by_order_type(monkeypatch):
             trade_id_int=None,
             sizing_reference_price_float=100.0,
             portfolio_value_float=5000.0,
+            limit_price_float=123.45 if broker_order_type_str == "LMT" else None,
         )
         for asset_str, broker_order_type_str in [
             ("MOO_ASSET", "MOO"),
             ("MOC_ASSET", "MOC"),
             ("MKT_ASSET", "MKT"),
+            ("LMT_ASSET", "LMT"),
         ]
     ]
 
@@ -783,4 +785,6 @@ def test_ibkr_socket_client_sets_expected_tif_by_order_type(monkeypatch):
         ("MKT", "OPG"),
         ("MOC", "DAY"),
         ("MKT", "DAY"),
+        ("LMT", "DAY"),
     ]
+    assert float(getattr(dummy_ib_obj.placed_order_list[-1], "lmtPrice")) == 123.45

@@ -40,7 +40,7 @@ previous month-end close information:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Sequence
 
 import numpy as np
@@ -215,17 +215,34 @@ class Beyond6040InverseVolStrategy(Beyond6040Strategy):
             )
 
 
-if __name__ == "__main__":
-    config = DEFAULT_CONFIG
+def run_variant(
+    show_display_bool: bool = True,
+    save_results_bool: bool = True,
+    output_dir_str: str = "results",
+    backtest_start_date_str: str | None = None,
+    capital_base_float: float = DEFAULT_CONFIG.capital_base_float,
+    end_date_str: str | None = None,
+) -> Beyond6040InverseVolStrategy:
+    config = replace(
+        DEFAULT_CONFIG,
+        capital_base_float=capital_base_float,
+        end_date_str=end_date_str,
+    )
     pricing_data_df = get_beyond_6040_inverse_vol_data(config=config)
     relevant_start_ts = get_first_actionable_rebalance_ts(
         pricing_data_df=pricing_data_df,
         asset_list=config.asset_list,
         asset_vol_lookback_int=config.asset_vol_lookback_int,
     )
-    calendar_index = pricing_data_df.index[pricing_data_df.index >= relevant_start_ts]
+    calendar_start_ts = relevant_start_ts
+    if backtest_start_date_str is not None:
+        calendar_start_ts = max(calendar_start_ts, pd.Timestamp(backtest_start_date_str))
 
-    strategy = Beyond6040InverseVolStrategy(
+    # *** CRITICAL*** Keep full pre-start price history for inverse-volatility
+    # signal formation; only the executable fill calendar is clipped.
+    calendar_index = pricing_data_df.index[pricing_data_df.index >= calendar_start_ts]
+
+    strategy_obj = Beyond6040InverseVolStrategy(
         name="strategy_taa_beyond_6040_inverse_vol",
         benchmarks=config.benchmark_list,
         asset_list=config.asset_list,
@@ -237,14 +254,25 @@ if __name__ == "__main__":
     )
 
     run_daily(
-        strategy,
+        strategy_obj,
         pricing_data_df,
         calendar=calendar_index,
+        show_progress=show_display_bool,
+        show_signal_progress_bool=show_display_bool,
         audit_override_bool=None,
     )
 
-    pd.set_option("display.max_columns", None)
-    pd.set_option("display.width", 1000)
-    display(strategy.summary)
-    display(strategy.summary_trades)
-    save_results(strategy)
+    if show_display_bool:
+        pd.set_option("display.max_columns", None)
+        pd.set_option("display.width", 1000)
+        display(strategy_obj.summary)
+        display(strategy_obj.summary_trades)
+
+    if save_results_bool:
+        save_results(strategy_obj, output_dir=output_dir_str)
+
+    return strategy_obj
+
+
+if __name__ == "__main__":
+    run_variant()

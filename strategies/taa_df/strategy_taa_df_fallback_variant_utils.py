@@ -36,6 +36,7 @@ if repo_root_str not in sys.path:
     sys.path.insert(0, repo_root_str)
 
 from alpha.engine.backtest import run_daily
+from alpha.engine.friction_analysis import FrictionAnalysis
 from alpha.engine.report import save_results
 
 try:
@@ -134,6 +135,35 @@ def _run_strategy_from_weight_df(
     )
 
 
+def _map_month_end_weight_to_decision_close_df(
+    month_end_weight_df: pd.DataFrame,
+    execution_index: pd.DatetimeIndex,
+) -> pd.DataFrame:
+    decision_weight_map_dict: dict[pd.Timestamp, pd.Series] = {}
+
+    for month_end_ts, target_weight_ser in month_end_weight_df.iterrows():
+        month_period_obj = pd.Timestamp(month_end_ts).to_period("M")
+        trading_day_idx = execution_index[execution_index.to_period("M") == month_period_obj]
+        if len(trading_day_idx) == 0:
+            continue
+
+        # *** CRITICAL*** Calendar month-end can fall on a non-trading day.
+        # T Close means the last tradable close in that signal month, not the
+        # calendar timestamp stored by resample("ME").
+        decision_close_ts = pd.Timestamp(trading_day_idx[-1])
+        decision_weight_map_dict[decision_close_ts] = target_weight_ser.copy()
+
+    if len(decision_weight_map_dict) == 0:
+        raise RuntimeError("No tradable decision-close dates were generated for execution timing analysis.")
+
+    decision_close_weight_df = pd.DataFrame.from_dict(
+        decision_weight_map_dict,
+        orient="index",
+    ).sort_index()
+    decision_close_weight_df.index.name = "decision_close_date"
+    return decision_close_weight_df
+
+
 def run_standard_fallback_variant(
     strategy_name_str: str,
     config: DefenseFirstConfig,
@@ -182,6 +212,127 @@ def run_standard_fallback_variant(
         save_results(strategy, output_dir=output_dir_str)
 
     return strategy
+
+
+def build_standard_fallback_friction_analysis_inputs(
+    strategy_name_str: str,
+    config: DefenseFirstConfig,
+    data_loader_fn: Callable[[DefenseFirstConfig], tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]],
+    show_display_bool: bool = False,
+    backtest_start_date_str: str | None = None,
+    capital_base_float: float = 100_000.0,
+) -> dict[str, object]:
+    """
+    Build FrictionAnalysis inputs for a standard fallback variant.
+    """
+    execution_price_df, _momentum_score_df, _month_end_weight_df, rebalance_weight_df = data_loader_fn(config)
+    strategy_obj = _build_defense_first_strategy(
+        strategy_name_str=strategy_name_str,
+        config=config,
+        rebalance_weight_df=rebalance_weight_df,
+        capital_base_float=capital_base_float,
+    )
+
+    # *** CRITICAL *** FrictionAnalysis must reuse the deployment-reference TAA
+    # next-open completed ledger. The month-end signal maps to the next
+    # tradable open before auction capacity is assessed.
+    _run_strategy_from_weight_df(
+        strategy=strategy_obj,
+        execution_price_df=execution_price_df,
+        rebalance_weight_df=rebalance_weight_df,
+        backtest_start_date_str=backtest_start_date_str,
+    )
+
+    if show_display_bool:
+        display(strategy_obj.summary)
+
+    return {
+        "strategy_obj": strategy_obj,
+        "pricing_data_df": execution_price_df,
+        "execution_policy_str": "MOO",
+    }
+
+
+def run_standard_fallback_friction_analysis(
+    strategy_name_str: str,
+    config: DefenseFirstConfig,
+    data_loader_fn: Callable[[DefenseFirstConfig], tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]],
+    save_results_bool: bool = True,
+    output_dir_str: str = "results",
+    show_display_bool: bool = False,
+    backtest_start_date_str: str | None = None,
+    capital_base_float: float = 100_000.0,
+):
+    friction_input_dict = build_standard_fallback_friction_analysis_inputs(
+        strategy_name_str=strategy_name_str,
+        config=config,
+        data_loader_fn=data_loader_fn,
+        show_display_bool=show_display_bool,
+        backtest_start_date_str=backtest_start_date_str,
+        capital_base_float=capital_base_float,
+    )
+    friction_analysis_obj = FrictionAnalysis(
+        strategy_obj=friction_input_dict["strategy_obj"],
+        pricing_data_df=friction_input_dict["pricing_data_df"],
+        execution_policy_str=friction_input_dict["execution_policy_str"],
+        output_dir_str=output_dir_str,
+        save_output_bool=save_results_bool,
+    )
+    return friction_analysis_obj.run()
+
+
+def build_standard_fallback_execution_timing_analysis_inputs(
+    strategy_name_str: str,
+    config: DefenseFirstConfig,
+    data_loader_fn: Callable[[DefenseFirstConfig], tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]],
+) -> dict[str, object]:
+    """
+    Build ExecutionTimingAnalyzer inputs for a standard fallback variant.
+
+    Formula:
+
+        decision_t = month_end_close_t
+
+        entry_fill = decision_t + entry_lag at entry_price_field
+        exit_fill  = decision_t + exit_lag  at exit_price_field
+    """
+    execution_price_df, _momentum_score_df, month_end_weight_df, rebalance_weight_df = data_loader_fn(config)
+    decision_close_weight_df = _map_month_end_weight_to_decision_close_df(
+        month_end_weight_df=month_end_weight_df,
+        execution_index=pd.DatetimeIndex(execution_price_df.index),
+    )
+
+    def strategy_factory_fn():
+        strategy_obj = _build_defense_first_strategy(
+            strategy_name_str=strategy_name_str,
+            config=config,
+            rebalance_weight_df=decision_close_weight_df,
+        )
+        strategy_obj.show_taa_weights_report = True
+
+        # *** CRITICAL*** This forward fill is for post-run weight diagnostics
+        # only. ExecutionTimingAnalyzer uses month-end decision dates for order
+        # intent and then applies the tested fill timing to those orders.
+        strategy_obj.daily_target_weights = (
+            rebalance_weight_df.reindex(execution_price_df.index).ffill().dropna()
+        )
+        return strategy_obj
+
+    calendar_idx = execution_price_df.index[
+        execution_price_df.index >= rebalance_weight_df.index[0]
+    ]
+
+    return {
+        "strategy_factory_fn": strategy_factory_fn,
+        "pricing_data_df": execution_price_df,
+        "calendar_idx": pd.DatetimeIndex(calendar_idx),
+        "order_generation_mode_str": "signal_bar",
+        "risk_model_str": "taa_rebalance",
+        "entry_timing_str_tuple": ("same_close_moc", "next_open", "next_close"),
+        "exit_timing_str_tuple": ("same_close_moc", "next_open", "next_close"),
+        "default_entry_timing_str": "next_open",
+        "default_exit_timing_str": "next_open",
+    }
 
 
 def run_linearity_1n_fallback_variant(

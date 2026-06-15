@@ -137,6 +137,25 @@ class DashboardDataProvider:
         )
         return job_obj.to_dict()
 
+    def submit_manual_order_dict(
+        self,
+        target_obj: DashboardPodTarget,
+        request_body_dict: dict[str, Any],
+    ) -> dict[str, Any]:
+        from alpha.live.manual_order import submit_manual_order_ticket_dict
+
+        app_obj = self.app_obj()
+        assert app_obj.pod_job_gate_obj is not None
+        app_obj.pod_job_gate_obj.acquire(target_obj.release_obj.pod_id_str)
+        try:
+            return submit_manual_order_ticket_dict(
+                release_obj=target_obj.release_obj,
+                request_body_dict=request_body_dict,
+                log_path_str=app_obj.event_log_path_str,
+            )
+        finally:
+            app_obj.pod_job_gate_obj.release(target_obj.release_obj.pod_id_str)
+
     def export_trade_sheet_path_str(self, target_obj: DashboardPodTarget) -> str:
         """Write the pod's trade sheet xlsx under results_root and return its path.
 

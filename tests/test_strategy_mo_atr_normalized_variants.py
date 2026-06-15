@@ -36,6 +36,21 @@ from strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled_roc_variants 
     build_roc_variant_config,
     compute_monthly_roc_variant_df,
 )
+from strategies.momentum.strategy_mo_atr_normalized_ndx_weekly import (
+    DEFAULT_CONFIG as WEEKLY_NDX_DEFAULT_CONFIG,
+    WeeklyAtrNormalizedNdxConfig,
+    WeeklyAtrNormalizedNdxStrategy,
+    compute_weekly_atr_normalized_signal_tables,
+    get_weekly_decision_close_df,
+    map_week_end_decision_dates_to_rebalance_schedule_df,
+)
+from strategies.momentum.strategy_mo_atr_normalized_ndx_weekly_kama import (
+    DEFAULT_CONFIG as WEEKLY_KAMA_NDX_DEFAULT_CONFIG,
+    WeeklyKamaAtrNormalizedNdxConfig,
+    WeeklyKamaAtrNormalizedNdxStrategy,
+    compute_kama_df,
+    compute_weekly_kama_atr_normalized_signal_tables,
+)
 from strategies.momentum.strategy_mo_atr_normalized_sp500 import (
     AtrNormalizedSp500Strategy,
     DEFAULT_CONFIG as SP500_DEFAULT_CONFIG,
@@ -64,6 +79,182 @@ class AtrNormalizedVariantConstructionTests(unittest.TestCase):
         self.assertEqual(NDX_DEFAULT_CONFIG.indexname_str, "Nasdaq 100")
         self.assertEqual(NDX_DEFAULT_CONFIG.regime_symbol_str, "SPY")
         self.assertEqual(NDX_DEFAULT_CONFIG.max_positions_int, 10)
+
+    def test_weekly_ndx_default_config_points_to_nasdaq_100_with_52_week_lookback(self):
+        self.assertEqual(WEEKLY_NDX_DEFAULT_CONFIG.indexname_str, "Nasdaq 100")
+        self.assertEqual(WEEKLY_NDX_DEFAULT_CONFIG.regime_symbol_str, "SPY")
+        self.assertEqual(WEEKLY_NDX_DEFAULT_CONFIG.max_positions_int, 10)
+        self.assertEqual(WEEKLY_NDX_DEFAULT_CONFIG.lookback_week_int, 52)
+
+    def test_weekly_kama_ndx_default_config_uses_standard_kama_parameters(self):
+        self.assertEqual(WEEKLY_KAMA_NDX_DEFAULT_CONFIG.indexname_str, "Nasdaq 100")
+        self.assertEqual(WEEKLY_KAMA_NDX_DEFAULT_CONFIG.lookback_week_int, 52)
+        self.assertEqual(WEEKLY_KAMA_NDX_DEFAULT_CONFIG.kama_er_window_int, 10)
+        self.assertEqual(WEEKLY_KAMA_NDX_DEFAULT_CONFIG.kama_fast_period_int, 2)
+        self.assertEqual(WEEKLY_KAMA_NDX_DEFAULT_CONFIG.kama_slow_period_int, 30)
+
+    def test_kama_formula_uses_causal_efficiency_ratio_recursion(self):
+        price_close_df = pd.DataFrame(
+            {"AAA": [1.0, 2.0, 3.0, 4.0, 5.0]},
+            index=pd.bdate_range("2024-01-01", periods=5),
+        )
+
+        kama_df = compute_kama_df(
+            price_close_df=price_close_df,
+            er_window_int=2,
+            fast_period_int=2,
+            slow_period_int=4,
+        )
+
+        smoothing_constant_float = (2.0 / 3.0) ** 2.0
+        expected_first_float = 3.0
+        expected_second_float = expected_first_float + smoothing_constant_float * (4.0 - expected_first_float)
+        expected_third_float = expected_second_float + smoothing_constant_float * (5.0 - expected_second_float)
+
+        self.assertTrue(pd.isna(kama_df.iloc[0]["AAA"]))
+        self.assertTrue(pd.isna(kama_df.iloc[1]["AAA"]))
+        self.assertAlmostEqual(float(kama_df.iloc[2]["AAA"]), expected_first_float)
+        self.assertAlmostEqual(float(kama_df.iloc[3]["AAA"]), expected_second_float)
+        self.assertAlmostEqual(float(kama_df.iloc[4]["AAA"]), expected_third_float)
+
+    def test_weekly_decision_close_uses_completed_week_last_tradable_close(self):
+        price_close_df = pd.DataFrame(
+            {"AAA": [100.0, 101.0, 102.0, 103.0, 104.0]},
+            index=pd.to_datetime(
+                [
+                    "2024-03-25",
+                    "2024-03-26",
+                    "2024-03-27",
+                    "2024-03-28",
+                    "2024-04-01",
+                ]
+            ),
+        )
+
+        weekly_decision_close_df = get_weekly_decision_close_df(price_close_df)
+
+        self.assertEqual(weekly_decision_close_df.index.tolist(), [pd.Timestamp("2024-03-28")])
+        self.assertAlmostEqual(float(weekly_decision_close_df.loc["2024-03-28", "AAA"]), 103.0)
+
+    def test_weekly_decision_close_keeps_last_friday_close(self):
+        price_close_df = pd.DataFrame(
+            {"AAA": [100.0, 101.0, 102.0]},
+            index=pd.to_datetime(["2024-04-03", "2024-04-04", "2024-04-05"]),
+        )
+
+        weekly_decision_close_df = get_weekly_decision_close_df(price_close_df)
+
+        self.assertEqual(weekly_decision_close_df.index.tolist(), [pd.Timestamp("2024-04-05")])
+
+    def test_map_week_end_decision_dates_uses_next_tradable_open(self):
+        decision_date_index = pd.to_datetime(["2024-03-28", "2024-04-05"])
+        execution_index = pd.to_datetime(["2024-03-28", "2024-04-01", "2024-04-05", "2024-04-08"])
+
+        rebalance_schedule_df = map_week_end_decision_dates_to_rebalance_schedule_df(
+            decision_date_index=decision_date_index,
+            execution_index=execution_index,
+        )
+
+        expected_schedule_df = pd.DataFrame(
+            {"decision_date_ts": pd.to_datetime(["2024-03-28", "2024-04-05"])},
+            index=pd.to_datetime(["2024-04-01", "2024-04-08"]),
+        )
+        expected_schedule_df.index.name = "execution_date_ts"
+        pd.testing.assert_frame_equal(rebalance_schedule_df, expected_schedule_df)
+
+    def test_weekly_signal_table_uses_trailing_weekly_roc_and_daily_atr(self):
+        date_index = pd.bdate_range("2024-01-01", periods=30)
+        price_close_df = pd.DataFrame(
+            {"AAA": np.arange(100.0, 130.0)},
+            index=date_index,
+        )
+        price_high_df = price_close_df + 1.0
+        price_low_df = price_close_df - 1.0
+        regime_close_ser = pd.Series(np.arange(200.0, 230.0), index=date_index)
+        config = WeeklyAtrNormalizedNdxConfig(
+            lookback_week_int=1,
+            index_trend_window_int=2,
+            stock_trend_window_int=2,
+        )
+
+        (
+            weekly_decision_close_df,
+            weekly_roc_df,
+            atr_decision_df,
+            stock_trend_pass_df,
+            _regime_sma_ser,
+            regime_pass_ser,
+            risk_adj_score_df,
+        ) = compute_weekly_atr_normalized_signal_tables(
+            price_close_df=price_close_df,
+            price_high_df=price_high_df,
+            price_low_df=price_low_df,
+            regime_close_ser=regime_close_ser,
+            config=config,
+        )
+
+        latest_decision_ts = weekly_decision_close_df.index[-1]
+        previous_week_decision_ts = weekly_decision_close_df.index[-2]
+        expected_roc_float = (
+            float(price_close_df.loc[latest_decision_ts, "AAA"])
+            / float(price_close_df.loc[previous_week_decision_ts, "AAA"])
+        ) - 1.0
+
+        self.assertAlmostEqual(float(weekly_roc_df.loc[latest_decision_ts, "AAA"]), expected_roc_float)
+        self.assertAlmostEqual(float(atr_decision_df.loc[latest_decision_ts, "AAA"]), 2.0)
+        self.assertTrue(bool(stock_trend_pass_df.loc[latest_decision_ts, "AAA"]))
+        self.assertTrue(bool(regime_pass_ser.loc[latest_decision_ts]))
+        self.assertAlmostEqual(
+            float(risk_adj_score_df.loc[latest_decision_ts, "AAA"]),
+            expected_roc_float / 2.0,
+        )
+
+    def test_weekly_kama_signal_table_adds_close_above_kama_filter(self):
+        date_index = pd.bdate_range("2024-01-01", periods=30)
+        price_close_df = pd.DataFrame(
+            {
+                "UP": np.arange(100.0, 130.0),
+                "DOWN": np.arange(130.0, 100.0, -1.0),
+            },
+            index=date_index,
+        )
+        price_high_df = price_close_df + 1.0
+        price_low_df = price_close_df - 1.0
+        regime_close_ser = pd.Series(np.arange(200.0, 230.0), index=date_index)
+        config = WeeklyKamaAtrNormalizedNdxConfig(
+            lookback_week_int=1,
+            index_trend_window_int=2,
+            stock_trend_window_int=2,
+            kama_er_window_int=2,
+            kama_fast_period_int=2,
+            kama_slow_period_int=4,
+        )
+
+        (
+            weekly_decision_close_df,
+            _weekly_roc_df,
+            _atr_decision_df,
+            _stock_trend_pass_df,
+            kama_decision_df,
+            kama_pass_df,
+            _regime_sma_ser,
+            _regime_pass_ser,
+            _risk_adj_score_df,
+        ) = compute_weekly_kama_atr_normalized_signal_tables(
+            price_close_df=price_close_df,
+            price_high_df=price_high_df,
+            price_low_df=price_low_df,
+            regime_close_ser=regime_close_ser,
+            config=config,
+        )
+
+        latest_decision_ts = weekly_decision_close_df.index[-1]
+        self.assertGreater(
+            float(weekly_decision_close_df.loc[latest_decision_ts, "UP"]),
+            float(kama_decision_df.loc[latest_decision_ts, "UP"]),
+        )
+        self.assertTrue(bool(kama_pass_df.loc[latest_decision_ts, "UP"]))
+        self.assertFalse(bool(kama_pass_df.loc[latest_decision_ts, "DOWN"]))
 
     def test_vxn_scaled_ndx_default_config_uses_conservative_no_leverage_scaler(self):
         self.assertEqual(VXN_SCALED_NDX_DEFAULT_CONFIG.indexname_str, "Nasdaq 100")
@@ -101,6 +292,74 @@ class AtrNormalizedVariantConstructionTests(unittest.TestCase):
         self.assertIsInstance(strategy, AtrNormalizedNdxStrategy)
         self.assertNotIsInstance(strategy, RadgeMomentumNdxStrategy)
         self.assertEqual(strategy.max_positions_int, 10)
+
+    def test_weekly_ndx_strategy_can_be_built_without_changing_monthly_base(self):
+        strategy = WeeklyAtrNormalizedNdxStrategy(
+            name="WeeklyAtrNormalizedNdxTest",
+            benchmarks=[WEEKLY_NDX_DEFAULT_CONFIG.regime_symbol_str],
+            rebalance_schedule_df=self.make_rebalance_schedule_df(),
+            regime_symbol_str=WEEKLY_NDX_DEFAULT_CONFIG.regime_symbol_str,
+            capital_base=WEEKLY_NDX_DEFAULT_CONFIG.capital_base_float,
+            slippage=0.0,
+            commission_per_share=0.0,
+            commission_minimum=0.0,
+            lookback_week_int=WEEKLY_NDX_DEFAULT_CONFIG.lookback_week_int,
+            index_trend_window_int=WEEKLY_NDX_DEFAULT_CONFIG.index_trend_window_int,
+            stock_trend_window_int=WEEKLY_NDX_DEFAULT_CONFIG.stock_trend_window_int,
+            max_positions_int=WEEKLY_NDX_DEFAULT_CONFIG.max_positions_int,
+        )
+
+        self.assertIsInstance(strategy, WeeklyAtrNormalizedNdxStrategy)
+        self.assertIsInstance(strategy, AtrNormalizedNdxStrategy)
+        self.assertEqual(strategy.lookback_week_int, 52)
+        self.assertEqual(strategy.max_positions_int, 10)
+
+    def test_weekly_kama_strategy_excludes_high_score_symbol_below_kama(self):
+        strategy = WeeklyKamaAtrNormalizedNdxStrategy(
+            name="WeeklyKamaAtrNormalizedNdxTest",
+            benchmarks=[WEEKLY_KAMA_NDX_DEFAULT_CONFIG.regime_symbol_str],
+            rebalance_schedule_df=self.make_rebalance_schedule_df(),
+            regime_symbol_str=WEEKLY_KAMA_NDX_DEFAULT_CONFIG.regime_symbol_str,
+            capital_base=WEEKLY_KAMA_NDX_DEFAULT_CONFIG.capital_base_float,
+            slippage=0.0,
+            commission_per_share=0.0,
+            commission_minimum=0.0,
+            lookback_week_int=WEEKLY_KAMA_NDX_DEFAULT_CONFIG.lookback_week_int,
+            index_trend_window_int=WEEKLY_KAMA_NDX_DEFAULT_CONFIG.index_trend_window_int,
+            stock_trend_window_int=WEEKLY_KAMA_NDX_DEFAULT_CONFIG.stock_trend_window_int,
+            max_positions_int=2,
+            kama_er_window_int=WEEKLY_KAMA_NDX_DEFAULT_CONFIG.kama_er_window_int,
+            kama_fast_period_int=WEEKLY_KAMA_NDX_DEFAULT_CONFIG.kama_fast_period_int,
+            kama_slow_period_int=WEEKLY_KAMA_NDX_DEFAULT_CONFIG.kama_slow_period_int,
+        )
+        strategy.previous_bar = pd.Timestamp("2024-03-28")
+        strategy.universe_df = pd.DataFrame(
+            {
+                "AAA": [1],
+                "BBB": [1],
+                "CCC": [1],
+            },
+            index=[strategy.previous_bar],
+        )
+        close_row_ser = self.make_close_row_ser(
+            {
+                ("AAA", "risk_adj_score_ser"): 0.90,
+                ("AAA", "stock_trend_pass_bool"): True,
+                ("AAA", "kama_pass_bool"): True,
+                ("BBB", "risk_adj_score_ser"): 2.00,
+                ("BBB", "stock_trend_pass_bool"): True,
+                ("BBB", "kama_pass_bool"): False,
+                ("CCC", "risk_adj_score_ser"): 0.80,
+                ("CCC", "stock_trend_pass_bool"): True,
+                ("CCC", "kama_pass_bool"): True,
+                ("SPY", "regime_pass_bool"): True,
+            }
+        )
+
+        target_weight_ser = strategy.get_target_weight_ser(close_row_ser=close_row_ser)
+
+        self.assertEqual(target_weight_ser.index.tolist(), ["AAA", "CCC"])
+        self.assertTrue(np.allclose(target_weight_ser.to_numpy(dtype=float), 0.50))
 
     def test_vxn_scale_signal_clips_target_vxn_over_current_vxn(self):
         vxn_close_ser = pd.Series(

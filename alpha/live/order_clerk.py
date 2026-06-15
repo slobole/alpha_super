@@ -487,8 +487,13 @@ class StubBrokerAdapter(BrokerAdapter):
                 broker_order_request_obj.asset_str,
                 1.0,
             )
+            reference_price_float = (
+                float(broker_order_request_obj.limit_price_float)
+                if broker_order_request_obj.limit_price_float is not None
+                else float(broker_order_request_obj.sizing_reference_price_float)
+            )
             fill_price_float = (
-                broker_order_request_obj.sizing_reference_price_float * fill_price_multiplier_float
+                reference_price_float * fill_price_multiplier_float
             )
             cash_float -= filled_amount_float * fill_price_float
 
@@ -517,6 +522,7 @@ class StubBrokerAdapter(BrokerAdapter):
                         "target_bool": broker_order_request_obj.target_bool,
                         "submission_key_str": broker_order_request_obj.submission_key_str,
                         "order_request_key_str": broker_order_request_obj.order_request_key_str,
+                        "limit_price_float": broker_order_request_obj.limit_price_float,
                     },
                 )
             )
@@ -538,6 +544,7 @@ class StubBrokerAdapter(BrokerAdapter):
                 raw_payload_dict={
                     "submission_key_str": broker_order_request_obj.submission_key_str,
                     "order_request_key_str": broker_order_request_obj.order_request_key_str,
+                    "limit_price_float": broker_order_request_obj.limit_price_float,
                 },
             )
             filled_event_obj = BrokerOrderEvent(
@@ -558,6 +565,7 @@ class StubBrokerAdapter(BrokerAdapter):
                 raw_payload_dict={
                     "trade_id_int": broker_order_request_obj.trade_id_int,
                     "order_request_key_str": broker_order_request_obj.order_request_key_str,
+                    "limit_price_float": broker_order_request_obj.limit_price_float,
                 },
             )
             broker_order_event_list.append(pending_event_obj)
@@ -572,6 +580,7 @@ class StubBrokerAdapter(BrokerAdapter):
                 fill_timestamp_ts=submitted_timestamp_ts,
                 raw_payload_dict={
                     "unit_str": broker_order_request_obj.unit_str,
+                    "limit_price_float": broker_order_request_obj.limit_price_float,
                 },
             )
             broker_order_fill_list.append(broker_order_fill_obj)
@@ -601,6 +610,7 @@ class StubBrokerAdapter(BrokerAdapter):
                     "target_bool": broker_order_request_obj.target_bool,
                     "submission_key_str": broker_order_request_obj.submission_key_str,
                     "order_request_key_str": broker_order_request_obj.order_request_key_str,
+                    "limit_price_float": broker_order_request_obj.limit_price_float,
                 },
             )
             broker_order_ack_list.append(
@@ -620,6 +630,7 @@ class StubBrokerAdapter(BrokerAdapter):
                     raw_payload_dict={
                         "submission_key_str": broker_order_request_obj.submission_key_str,
                         "order_request_key_str": broker_order_request_obj.order_request_key_str,
+                        "limit_price_float": broker_order_request_obj.limit_price_float,
                     },
                 )
             )

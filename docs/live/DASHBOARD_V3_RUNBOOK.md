@@ -130,6 +130,27 @@ shares, backtest shares, share diff, live average fill, backtest fill, price
 diff bps, notional diff, and a plain note such as `matched` or `backtest trade
 without matching live fill`.
 
+## Manual Broker Ticket
+
+The pod detail page includes `Operator Tools -> Manual Ticket` for paper/live
+pods. This is a break-glass IBKR order ticket, not a strategy-state workflow.
+
+Supported v1 fields:
+
+- asset symbol;
+- side: `BUY` or `SELL`;
+- order type: `MKT` or `LMT`;
+- integer share quantity;
+- limit price for `LMT`;
+- operator name and reason.
+
+The ticket submits exactly the entered order as a `DAY` order through the
+configured pod broker route and writes `manual_order_submit_requested` plus
+`manual_order_submit_completed` or `manual_order_submit_failed` to the live
+event JSONL log. It does not read live quotes, read broker positions, rebuild a
+VPlan, reconcile fills, or update strategy state. Check IBKR first, then use
+the ticket as a logged alternative to typing the same order directly in IBKR.
+
 ## Verify Tailscale-only exposure
 
 From the VPS:

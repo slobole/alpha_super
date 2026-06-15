@@ -1,0 +1,45 @@
+{% if error_message_str %}
+  <div class="rounded-md border border-bad/40 bg-bad-soft/40 p-3 text-sm space-y-2">
+    <div class="font-semibold text-bad">Manual order rejected</div>
+    <div class="text-xs text-ink-700">{{ error_message_str }}</div>
+    <button type="button"
+            hx-get="/fragments/manual-order-ticket/{{ request.view_args.pod_id_str }}"
+            hx-target="#operator-tools-preview-{{ request.view_args.pod_id_str }}"
+            hx-swap="innerHTML"
+            class="px-3 py-1.5 rounded-md border border-ink-100 bg-white text-sm">
+      Back to ticket
+    </button>
+  </div>
+{% else %}
+  <div class="rounded-md border border-ok/40 bg-ok-soft/40 p-3 text-sm space-y-2">
+    <div class="font-semibold text-ok">Manual order submitted</div>
+    <dl class="grid gap-x-3 gap-y-1 text-xs md:grid-cols-[max-content_1fr]">
+      <dt class="text-ink-500">Ticket</dt>
+      <dd class="font-mono">{{ result_dict.ticket_id_str }}</dd>
+      <dt class="text-ink-500">Order</dt>
+      <dd class="font-mono">
+        {{ result_dict.side_str }}
+        {{ result_dict.quantity_int }}
+        {{ result_dict.asset_str }}
+        {{ result_dict.broker_order_type_str }}
+        {% if result_dict.limit_price_float is not none %}
+          @ {{ result_dict.limit_price_float }}
+        {% endif %}
+      </dd>
+      <dt class="text-ink-500">Account</dt>
+      <dd class="font-mono">{{ result_dict.account_route_str }}</dd>
+      <dt class="text-ink-500">ACK</dt>
+      <dd>
+        {{ result_dict.submit_ack_status_str }}
+        ({{ result_dict.broker_order_ack_count_int }} ack rows)
+      </dd>
+      <dt class="text-ink-500">Broker IDs</dt>
+      <dd class="font-mono">
+        {{ result_dict.broker_order_id_list | join(', ') if result_dict.broker_order_id_list else 'none yet' }}
+      </dd>
+    </dl>
+    <div class="text-[11px] text-ink-600">
+      Logged to the live event stream. Strategy state was not changed.
+    </div>
+  </div>
+{% endif %}

@@ -1,6 +1,7 @@
 import os
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -9,12 +10,17 @@ TEST_NORGATEDATA_ROOT = Path(__file__).resolve().parents[1] / ".tmp_norgatedata"
 TEST_NORGATEDATA_ROOT.mkdir(exist_ok=True)
 os.environ.setdefault("NORGATEDATA_ROOT", str(TEST_NORGATEDATA_ROOT))
 
+from alpha.bench import catalog
 from alpha.engine.backtest import run_daily
 from alpha.engine.order import MarketOrder
+from strategies.taa_beyond_6040 import strategy_taa_beyond_6040_inverse_vol as inverse_vol_module
 from strategies.taa_beyond_6040.strategy_taa_beyond_6040 import get_first_actionable_rebalance_ts
 from strategies.taa_beyond_6040.strategy_taa_beyond_6040_inverse_vol import (
     Beyond6040InverseVolStrategy,
 )
+
+
+MODULE_IMPORT_STR = "strategies.taa_beyond_6040.strategy_taa_beyond_6040_inverse_vol"
 
 
 class Beyond6040InverseVolStrategyTests(unittest.TestCase):
@@ -142,6 +148,36 @@ class Beyond6040InverseVolStrategyTests(unittest.TestCase):
         weight_sum_ser = strategy.daily_target_weights.sum(axis=1)
         self.assertTrue(np.allclose(weight_sum_ser.to_numpy(dtype=float), 1.0, atol=1e-12))
         self.assertTrue(np.allclose(strategy.daily_target_weights["Cash"].to_numpy(dtype=float), 0.0, atol=1e-12))
+
+    def test_run_variant_honors_bench_run_contract(self):
+        captured_config_list = []
+        pricing_data_df = self.make_pricing_data_df(num_days_int=220)
+
+        def loader_fn(config):
+            captured_config_list.append(config)
+            return pricing_data_df
+
+        with patch.object(
+            inverse_vol_module,
+            "get_beyond_6040_inverse_vol_data",
+            side_effect=loader_fn,
+        ):
+            strategy_obj = inverse_vol_module.run_variant(
+                show_display_bool=False,
+                save_results_bool=False,
+                backtest_start_date_str="2023-05-01",
+                capital_base_float=12_345.0,
+                end_date_str="2023-09-01",
+            )
+
+        strategy_entry_obj = catalog.get_strategy_by_module(MODULE_IMPORT_STR)
+        self.assertIsNotNone(strategy_entry_obj)
+        self.assertTrue(strategy_entry_obj.has_run_variant_bool)
+        self.assertEqual(captured_config_list[0].end_date_str, "2023-09-01")
+        self.assertEqual(strategy_obj.name, "strategy_taa_beyond_6040_inverse_vol")
+        self.assertEqual(strategy_obj._capital_base, 12_345.0)
+        self.assertGreater(len(strategy_obj.results), 0)
+        self.assertGreaterEqual(strategy_obj.results.index.min(), pd.Timestamp("2023-05-01"))
 
 
 if __name__ == "__main__":

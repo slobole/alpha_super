@@ -1,0 +1,115 @@
+<div class="rounded-md border border-bad/40 bg-bad-soft/30 p-3 text-sm">
+  <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+    <div>
+      <div class="font-semibold">Manual Broker Ticket</div>
+      <div class="text-xs text-ink-600">
+        {{ row_dict.mode_str }}/<span class="font-mono">{{ row_dict.pod_id_str }}</span>
+        <span class="mx-1">|</span>
+        account <span class="font-mono">{{ row_dict.account_route_str }}</span>
+      </div>
+    </div>
+    <button type="button"
+            hx-get="/fragments/action-preview-cancel/{{ row_dict.pod_id_str }}"
+            hx-target="#operator-tools-preview-{{ row_dict.pod_id_str }}"
+            hx-swap="innerHTML"
+            class="px-2 py-1 rounded-md border border-ink-100 bg-white text-xs">
+      Cancel
+    </button>
+  </div>
+
+  <form hx-post="/api/pods/{{ row_dict.pod_id_str }}/manual-order"
+        hx-headers='{"X-Alpha-Action-Token": "{{ action_token_str }}"}'
+        hx-target="#operator-tools-preview-{{ row_dict.pod_id_str }}"
+        hx-swap="innerHTML"
+        class="grid gap-3">
+    <input type="hidden" name="confirmed_bool" value="true">
+    <input type="hidden" name="time_in_force_str" value="DAY">
+
+    <div class="grid gap-2 md:grid-cols-6">
+      <label class="grid gap-1">
+        <span class="text-xs uppercase tracking-wide text-ink-500">Asset</span>
+        <input name="asset_str"
+               autocomplete="off"
+               placeholder="AAPL"
+               class="rounded-md border border-ink-100 bg-white px-2 py-1.5 font-mono uppercase"
+               required>
+      </label>
+
+      <label class="grid gap-1">
+        <span class="text-xs uppercase tracking-wide text-ink-500">Side</span>
+        <select name="side_str"
+                class="rounded-md border border-ink-100 bg-white px-2 py-1.5"
+                required>
+          <option value="BUY">BUY</option>
+          <option value="SELL">SELL</option>
+        </select>
+      </label>
+
+      <label class="grid gap-1">
+        <span class="text-xs uppercase tracking-wide text-ink-500">Type</span>
+        <select name="broker_order_type_str"
+                class="rounded-md border border-ink-100 bg-white px-2 py-1.5"
+                required>
+          <option value="MKT">MARKET</option>
+          <option value="LMT">LIMIT</option>
+        </select>
+      </label>
+
+      <label class="grid gap-1">
+        <span class="text-xs uppercase tracking-wide text-ink-500">Qty</span>
+        <input name="quantity_int"
+               inputmode="numeric"
+               pattern="[0-9]+"
+               placeholder="100"
+               class="rounded-md border border-ink-100 bg-white px-2 py-1.5 font-mono"
+               required>
+      </label>
+
+      <label class="grid gap-1">
+        <span class="text-xs uppercase tracking-wide text-ink-500">Limit</span>
+        <input name="limit_price_float"
+               inputmode="decimal"
+               placeholder="optional"
+               class="rounded-md border border-ink-100 bg-white px-2 py-1.5 font-mono">
+      </label>
+
+      <label class="grid gap-1">
+        <span class="text-xs uppercase tracking-wide text-ink-500">Operator</span>
+        <input name="operator_id_str"
+               autocomplete="off"
+               placeholder="name"
+               class="rounded-md border border-ink-100 bg-white px-2 py-1.5"
+               required>
+      </label>
+    </div>
+
+    <label class="grid gap-1">
+      <span class="text-xs uppercase tracking-wide text-ink-500">Reason</span>
+      <input name="reason_str"
+             autocomplete="off"
+             placeholder="missed trade / manual correction"
+             class="rounded-md border border-ink-100 bg-white px-2 py-1.5"
+             required>
+    </label>
+
+    <div class="grid gap-2 md:grid-cols-[1fr_auto] md:items-end">
+      <label class="grid gap-1">
+        <span class="text-xs uppercase tracking-wide text-ink-500">
+          Type {{ confirmation_text_str }}
+        </span>
+        <input name="confirmation_text_str"
+               autocomplete="off"
+               class="rounded-md border border-ink-100 bg-white px-2 py-1.5 font-mono"
+               required>
+      </label>
+      <button type="submit"
+              class="px-4 py-2 rounded-md bg-bad text-white font-semibold">
+        Submit to IBKR
+      </button>
+    </div>
+
+    <div class="text-[11px] text-ink-600">
+      DAY orders only. This ticket logs and submits; it does not update strategy state.
+    </div>
+  </form>
+</div>

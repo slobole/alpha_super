@@ -234,6 +234,7 @@ class BrokerOrderRequest:
     portfolio_value_float: float  # Portfolio value used in sizing.
     decision_plan_id_int: int | None = None  # Parent decision plan id in v2 flows.
     vplan_id_int: int | None = None  # Parent VPlan id in v2 flows.
+    limit_price_float: float | None = None  # Required only for LMT manual broker tickets.
 
 
 @dataclass(frozen=True)

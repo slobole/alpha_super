@@ -563,6 +563,21 @@ class IBKRSocketClient:
                         account=account_route_str,
                         orderRef=broker_order_request_obj.order_request_key_str,
                     )
+                elif broker_order_request_obj.broker_order_type_str == "LMT":
+                    if (
+                        broker_order_request_obj.limit_price_float is None
+                        or float(broker_order_request_obj.limit_price_float) <= 0.0
+                    ):
+                        raise ValueError("LMT orders require a positive limit_price_float.")
+                    broker_order_obj = Order(
+                        action=order_action_str,
+                        totalQuantity=total_quantity_float,
+                        orderType="LMT",
+                        tif="DAY",
+                        lmtPrice=float(broker_order_request_obj.limit_price_float),
+                        account=account_route_str,
+                        orderRef=broker_order_request_obj.order_request_key_str,
+                    )
                 else:
                     raise ValueError(
                         "Unsupported broker_order_type_str "
@@ -600,6 +615,7 @@ class IBKRSocketClient:
                                 **broker_order_record_obj.raw_payload_dict,
                                 "submission_key_str": broker_order_request_obj.submission_key_str,
                                 "order_request_key_str": broker_order_request_obj.order_request_key_str,
+                                "limit_price_float": broker_order_request_obj.limit_price_float,
                             },
                         }
                     )
@@ -616,6 +632,7 @@ class IBKRSocketClient:
                                     **broker_order_event_obj.raw_payload_dict,
                                     "submission_key_str": broker_order_request_obj.submission_key_str,
                                     "order_request_key_str": broker_order_request_obj.order_request_key_str,
+                                    "limit_price_float": broker_order_request_obj.limit_price_float,
                                 },
                             }
                         )

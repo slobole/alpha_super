@@ -72,6 +72,7 @@ from alpha.live.ops_report import (
     build_ops_report_dict,
     parse_timestamp_ts,
 )
+from alpha.live.manual_order import MANUAL_ORDER_CONFIRMATION_TEXT_STR
 
 
 DASHBOARD_V3_VERSION_STR = "0.6.0-phase-6"
@@ -104,6 +105,9 @@ class DataProviderProtocol(Protocol):
     def get_pod_trace_event_dict_list(
         self, pod_id_str: str, limit_int: int = 80
     ) -> list[dict[str, Any]]: ...
+    def submit_manual_order_dict(
+        self, target_obj: Any, request_body_dict: dict[str, Any]
+    ) -> dict[str, Any]: ...
 
 
 def create_app(
@@ -452,6 +456,20 @@ def create_app(
             "</div>"
         )
 
+    @flask_app_obj.route("/fragments/manual-order-ticket/<pod_id_str>")
+    def manual_order_ticket_fragment_route_fn(pod_id_str: str):
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        summary_dict = provider_obj.get_summary_dict()
+        row_dict = get_pod_row_dict_by_id(summary_dict, pod_id_str)
+        if row_dict is None:
+            abort(404)
+        return render_template(
+            "_manual_order_ticket.html",
+            row_dict=row_dict,
+            action_token_str=provider_obj.get_action_token_str(),
+            confirmation_text_str=MANUAL_ORDER_CONFIRMATION_TEXT_STR,
+        )
+
     @flask_app_obj.route("/api/pods/<pod_id_str>/trade-sheet")
     def trade_sheet_download_route_fn(pod_id_str: str):
         # Read-only export of the persisted DecisionPlan + VPlan as xlsx.
@@ -483,6 +501,10 @@ def create_app(
     )
     def action_run_route_fn(pod_id_str: str, action_name_str: str):
         return _handle_action_post(pod_id_str, action_name_str)
+
+    @flask_app_obj.route("/api/pods/<pod_id_str>/manual-order", methods=["POST"])
+    def manual_order_submit_route_fn(pod_id_str: str):
+        return _handle_manual_order_post(pod_id_str)
 
     @flask_app_obj.route("/api/jobs/<job_id_str>")
     def job_status_route_fn(job_id_str: str):
@@ -549,6 +571,59 @@ def create_app(
         if request.headers.get("HX-Request"):
             return render_template("_job_badge.html", job_dict=job_dict)
         return jsonify(job_dict), 202
+
+    def _handle_manual_order_post(pod_id_str: str):
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        request_body_dict = request.get_json(silent=True)
+        if request_body_dict is None:
+            request_body_dict = request.form.to_dict(flat=True)
+        rejection_obj = validate_action_request(
+            request.headers,
+            request_body_dict,
+            provider_obj.get_action_token_str(),
+        )
+        if rejection_obj is not None:
+            status_int, error_code_str, message_str = rejection_obj
+            return _json_error_fn(status_int, error_code_str, message_str)
+        target_obj = provider_obj.get_target_for_pod(pod_id_str)
+        if target_obj is None:
+            return _json_error_fn(404, "unknown_pod", f"Unknown enabled pod_id_str {pod_id_str!r}.")
+        try:
+            result_dict = provider_obj.submit_manual_order_dict(
+                target_obj,
+                request_body_dict,
+            )
+        except DashboardActionInFlightError as exception_obj:
+            return _json_error_fn(409, "action_in_flight", str(exception_obj))
+        except ValueError as exception_obj:
+            if request.headers.get("HX-Request"):
+                return (
+                    render_template(
+                        "_manual_order_result.html",
+                        result_dict=None,
+                        error_message_str=str(exception_obj),
+                    ),
+                    400,
+                )
+            return _json_error_fn(400, "manual_order_rejected", str(exception_obj))
+        except Exception as exception_obj:
+            if request.headers.get("HX-Request"):
+                return (
+                    render_template(
+                        "_manual_order_result.html",
+                        result_dict=None,
+                        error_message_str=str(exception_obj),
+                    ),
+                    503,
+                )
+            return _json_error_fn(503, "manual_order_failed", str(exception_obj))
+        if request.headers.get("HX-Request"):
+            return render_template(
+                "_manual_order_result.html",
+                result_dict=result_dict,
+                error_message_str=None,
+            )
+        return jsonify(result_dict), 202
 
     return flask_app_obj
 
