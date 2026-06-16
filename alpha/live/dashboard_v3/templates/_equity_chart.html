@@ -1,6 +1,6 @@
 {# Equity chart partial. Pure SVG, no JS dependencies.
-   Top region: cumulative EOD equity/PnL shape.
-   Bottom region: daily PnL bars (green positive, red negative). #}
+   Top region: cumulative return percent from the first visible EOD sample.
+   Bottom region: daily return bars. #}
 <figure class="equity-chart-figure">
   {% if not chart_dict.has_curve_bool %}
     <div class="text-xs text-ink-500 italic">
@@ -15,15 +15,16 @@
     {% set gradient_id_str = 'equity-area-gradient-' ~ (window_selector_pod_id_str or 'combined') %}
     <div class="flex flex-wrap items-end justify-between gap-3 mb-2">
       <div>
-        <div class="text-[10px] uppercase tracking-wide text-ink-400">EOD PnL path</div>
+        <div class="text-[10px] uppercase tracking-wide text-ink-400">Cumulative return</div>
         <div class="text-lg font-semibold tabular-nums text-ink-900">
-          {{ chart_dict.latest_equity_float | money }}
+          {{ chart_dict.latest_since_start_return_label_str }}
           <span class="ml-2 text-sm font-normal {% if chart_dict.latest_daily_is_positive_bool %}text-ok{% else %}text-bad{% endif %}">
-            {{ chart_dict.latest_daily_pnl_label_str }} today
+            {{ chart_dict.latest_daily_pct_label_str }} today
           </span>
         </div>
       </div>
       <div class="flex items-center gap-3 text-[11px] text-ink-500 tabular-nums">
+        <span>equity {{ chart_dict.latest_equity_float | money }}</span>
         <span>{{ chart_dict.earliest_market_date_str or '-' }}</span>
         <span>{{ chart_dict.point_count_int }} pts</span>
         <span class="{% if chart_dict.latest_daily_is_positive_bool %}text-ok{% else %}text-bad{% endif %}">
@@ -37,49 +38,69 @@
            preserveAspectRatio="none"
            class="w-full block"
            style="height:{{ chart_dict.height_int }}px;"
-           role="img" aria-label="Equity curve">
+           role="img" aria-label="Cumulative return curve">
         <defs>
           <linearGradient id="{{ gradient_id_str }}" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stop-color="#2563eb" stop-opacity="0.18"></stop>
-            <stop offset="100%" stop-color="#2563eb" stop-opacity="0.02"></stop>
+            <stop offset="0%" stop-color="#c06b75" stop-opacity="0.24"></stop>
+            <stop offset="100%" stop-color="#c06b75" stop-opacity="0.03"></stop>
           </linearGradient>
         </defs>
-        {% for grid_line_dict in chart_dict.grid_line_dict_list %}
-          <line x1="0" x2="{{ chart_dict.width_int }}"
-                y1="{{ grid_line_dict.y_float }}" y2="{{ grid_line_dict.y_float }}"
+        {% for tick_dict in chart_dict.y_axis_tick_dict_list %}
+          <line x1="{{ chart_dict.plot_left_int }}" x2="{{ chart_dict.plot_right_int }}"
+                y1="{{ tick_dict.y_float }}" y2="{{ tick_dict.y_float }}"
                 stroke="#e5e7eb" stroke-width="0.7"></line>
+          <text x="{{ chart_dict.plot_left_int - 8 }}" y="{{ tick_dict.y_float + 3 }}"
+                text-anchor="end" font-size="9" fill="#64748b">{{ tick_dict.label_str }}</text>
         {% endfor %}
+        <line x1="{{ chart_dict.plot_left_int }}" x2="{{ chart_dict.plot_right_int }}"
+              y1="{{ chart_dict.zero_y_float }}" y2="{{ chart_dict.zero_y_float }}"
+              stroke="#94a3b8" stroke-width="0.9"></line>
+        <line x1="{{ chart_dict.plot_left_int }}" x2="{{ chart_dict.plot_left_int }}"
+              y1="{{ chart_dict.plot_top_int }}" y2="{{ chart_dict.plot_bottom_int }}"
+              stroke="#cbd5e1" stroke-width="0.9"></line>
+        <line x1="{{ chart_dict.plot_left_int }}" x2="{{ chart_dict.plot_right_int }}"
+              y1="{{ chart_dict.plot_bottom_int }}" y2="{{ chart_dict.plot_bottom_int }}"
+              stroke="#cbd5e1" stroke-width="0.9"></line>
         {% if chart_dict.curve_area_d_str %}
           <path d="{{ chart_dict.curve_area_d_str }}" fill="url(#{{ gradient_id_str }})"></path>
         {% endif %}
-        {% if chart_dict.drawdown_d_str %}
-          <path d="{{ chart_dict.drawdown_d_str }}" fill="#fee2e2" opacity="0.45"></path>
-        {% endif %}
-        <path d="{{ chart_dict.path_d_str }}" fill="none" stroke="#1d4ed8" stroke-width="1.9"
+        <path d="{{ chart_dict.path_d_str }}" fill="none" stroke="#c06b75" stroke-width="1.7"
               stroke-linecap="round" stroke-linejoin="round"></path>
         {# Per-EOD point markers. <title> gives on-hover date, equity, and daily PnL. #}
         {% for point_dict in chart_dict.point_dict_list %}
           <circle cx="{{ point_dict.x_float }}" cy="{{ point_dict.y_float }}" r="1.7"
-                  fill="#ffffff" stroke="#1d4ed8" stroke-width="1">
-            <title>{{ point_dict.market_date_str }} | {{ point_dict.equity_label_str }} | {{ point_dict.daily_pnl_label_str }} ({{ point_dict.daily_pct_label_str }})</title>
+                  fill="#ffffff" stroke="#c06b75" stroke-width="1">
+            <title>{{ point_dict.market_date_str }} | cumulative {{ point_dict.cumulative_return_label_str }} | equity {{ point_dict.equity_label_str }} | daily {{ point_dict.daily_pct_label_str }} ({{ point_dict.daily_pnl_label_str }})</title>
           </circle>
+        {% endfor %}
+        {% for tick_dict in chart_dict.x_axis_tick_dict_list %}
+          <line x1="{{ tick_dict.x_float }}" x2="{{ tick_dict.x_float }}"
+                y1="{{ chart_dict.plot_bottom_int }}" y2="{{ chart_dict.plot_bottom_int + 3 }}"
+                stroke="#94a3b8" stroke-width="0.8"></line>
+          <text x="{{ tick_dict.x_float }}" y="{{ chart_dict.plot_bottom_int + 15 }}"
+                text-anchor="{{ tick_dict.text_anchor_str }}" font-size="9" fill="#64748b">{{ tick_dict.label_str }}</text>
         {% endfor %}
       </svg>
     </div>
 
     {% if chart_dict.pnl_bar_dict_list %}
       <div class="flex items-center justify-between text-[10px] uppercase tracking-wide text-ink-400 mt-3">
-        <span>Daily PnL</span>
+        <span>Daily return</span>
         <span class="normal-case tracking-normal text-ink-500">zero line centered</span>
       </div>
       <svg viewBox="0 0 {{ chart_dict.width_int }} {{ chart_dict.bar_height_int }}"
            preserveAspectRatio="none"
            class="w-full block mt-1 equity-pnl-bars"
            style="height:{{ chart_dict.bar_height_int }}px;"
-           role="img" aria-label="Daily PnL bars (green up day, red down day)">
-        <line x1="0" x2="{{ chart_dict.width_int }}"
+           role="img" aria-label="Daily return bars (green up day, red down day)">
+        <text x="{{ chart_dict.plot_left_int - 8 }}" y="{{ chart_dict.pnl_zero_y_float + 3 }}"
+              text-anchor="end" font-size="9" fill="#64748b">0.00%</text>
+        <line x1="{{ chart_dict.plot_left_int }}" x2="{{ chart_dict.plot_right_int }}"
               y1="{{ chart_dict.pnl_zero_y_float }}" y2="{{ chart_dict.pnl_zero_y_float }}"
               stroke="#94a3b8" stroke-width="0.8"></line>
+        <line x1="{{ chart_dict.plot_left_int }}" x2="{{ chart_dict.plot_left_int }}"
+              y1="2" y2="{{ chart_dict.bar_height_int - 2 }}"
+              stroke="#cbd5e1" stroke-width="0.8"></line>
         {% for bar_dict in chart_dict.pnl_bar_dict_list %}
           <rect x="{{ bar_dict.x_float }}" y="{{ bar_dict.y_float }}"
                 width="{{ bar_dict.width_float }}" height="{{ bar_dict.height_float }}"

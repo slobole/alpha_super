@@ -23,8 +23,11 @@ TRADING_DAYS_PER_YEAR_INT = 252
 
 
 CHART_VIEW_WIDTH_INT = 600
-CHART_VIEW_HEIGHT_INT = 140
-CHART_VERTICAL_PADDING_INT = 6
+CHART_VIEW_HEIGHT_INT = 170
+CHART_PLOT_LEFT_INT = 58
+CHART_PLOT_RIGHT_INT = 8
+CHART_PLOT_TOP_INT = 10
+CHART_PLOT_BOTTOM_INT = 24
 PNL_BAR_BLOCK_HEIGHT_INT = 44
 # Cap the daily-PnL bar width (viewBox units) so a handful of EOD points render
 # as distinct bars instead of merging into one fat slab.
@@ -44,6 +47,9 @@ class EquityChartDict:
     path_d_str: str = ""
     curve_area_d_str: str = ""
     drawdown_d_str: str = ""
+    zero_y_float: float = 0.0
+    y_axis_tick_dict_list: list[dict[str, Any]] = field(default_factory=list)
+    x_axis_tick_dict_list: list[dict[str, Any]] = field(default_factory=list)
     point_dict_list: list[dict[str, Any]] = field(default_factory=list)
     pnl_bar_dict_list: list[dict[str, Any]] = field(default_factory=list)
     range_min_float: float = 0.0
@@ -53,6 +59,8 @@ class EquityChartDict:
     latest_equity_float: float | None = None
     latest_market_date_str: str | None = None
     earliest_market_date_str: str | None = None
+    latest_since_start_pnl_label_str: str = "—"
+    latest_since_start_return_label_str: str = "—"
     latest_daily_pnl_label_str: str = "—"
     latest_daily_pct_label_str: str = "—"
     latest_daily_is_positive_bool: bool = True
@@ -65,6 +73,9 @@ class EquityChartDict:
             "path_d_str": self.path_d_str,
             "curve_area_d_str": self.curve_area_d_str,
             "drawdown_d_str": self.drawdown_d_str,
+            "zero_y_float": self.zero_y_float,
+            "y_axis_tick_dict_list": self.y_axis_tick_dict_list,
+            "x_axis_tick_dict_list": self.x_axis_tick_dict_list,
             "point_dict_list": self.point_dict_list,
             "pnl_bar_dict_list": self.pnl_bar_dict_list,
             "range_min_float": self.range_min_float,
@@ -74,14 +85,19 @@ class EquityChartDict:
             "latest_equity_float": self.latest_equity_float,
             "latest_market_date_str": self.latest_market_date_str,
             "earliest_market_date_str": self.earliest_market_date_str,
+            "latest_since_start_pnl_label_str": self.latest_since_start_pnl_label_str,
+            "latest_since_start_return_label_str": self.latest_since_start_return_label_str,
             "latest_daily_pnl_label_str": self.latest_daily_pnl_label_str,
             "latest_daily_pct_label_str": self.latest_daily_pct_label_str,
             "latest_daily_is_positive_bool": self.latest_daily_is_positive_bool,
             "window_str": self.window_str,
             "width_int": CHART_VIEW_WIDTH_INT,
             "height_int": CHART_VIEW_HEIGHT_INT,
+            "plot_left_int": CHART_PLOT_LEFT_INT,
+            "plot_right_int": CHART_VIEW_WIDTH_INT - CHART_PLOT_RIGHT_INT,
+            "plot_top_int": CHART_PLOT_TOP_INT,
+            "plot_bottom_int": CHART_VIEW_HEIGHT_INT - CHART_PLOT_BOTTOM_INT,
             "bar_height_int": PNL_BAR_BLOCK_HEIGHT_INT,
-            "grid_line_dict_list": _build_chart_grid_line_dict_list(),
             "pnl_zero_y_float": PNL_BAR_BLOCK_HEIGHT_INT / 2,
         }
 
@@ -123,21 +139,38 @@ def build_equity_chart_dict(
         )
 
     equity_value_list = [pair[1] for pair in equity_pairs_list]
-    range_min_float = min(equity_value_list)  # type: ignore[type-var]
-    range_max_float = max(equity_value_list)  # type: ignore[type-var]
+    first_equity_float = float(equity_value_list[0] or 0.0)
+    cumulative_pnl_value_list = [
+        float(equity_float or 0.0) - first_equity_float
+        for equity_float in equity_value_list
+    ]
+    cumulative_return_pct_list = [
+        (float(equity_float or 0.0) / first_equity_float) - 1.0
+        if first_equity_float
+        else 0.0
+        for equity_float in equity_value_list
+    ]
+    range_min_float = min(0.0, min(cumulative_return_pct_list))
+    range_max_float = max(0.0, max(cumulative_return_pct_list))
+    if abs(range_max_float - range_min_float) < 1e-9:
+        range_min_float -= 0.0001
+        range_max_float += 0.0001
     value_range_float = max(1e-9, float(range_max_float) - float(range_min_float))
 
-    horizontal_step_float = CHART_VIEW_WIDTH_INT / max(1, point_count_int - 1)
-    inner_height_float = CHART_VIEW_HEIGHT_INT - 2 * CHART_VERTICAL_PADDING_INT
+    plot_width_float = CHART_VIEW_WIDTH_INT - CHART_PLOT_LEFT_INT - CHART_PLOT_RIGHT_INT
+    plot_height_float = CHART_VIEW_HEIGHT_INT - CHART_PLOT_TOP_INT - CHART_PLOT_BOTTOM_INT
+    horizontal_step_float = plot_width_float / max(1, point_count_int - 1)
 
     point_xy_list: list[tuple[float, float]] = []
     point_dict_list: list[dict[str, Any]] = []
     for index_int, (date_str, equity_float, pnl_float) in enumerate(equity_pairs_list):
-        x_float = index_int * horizontal_step_float
+        cumulative_pnl_float = cumulative_pnl_value_list[index_int]
+        cumulative_return_pct_float = cumulative_return_pct_list[index_int]
+        x_float = CHART_PLOT_LEFT_INT + index_int * horizontal_step_float
         y_float = (
             CHART_VIEW_HEIGHT_INT
-            - CHART_VERTICAL_PADDING_INT
-            - ((float(equity_float) - float(range_min_float)) / value_range_float) * inner_height_float  # type: ignore[arg-type]
+            - CHART_PLOT_BOTTOM_INT
+            - ((cumulative_return_pct_float - range_min_float) / value_range_float) * plot_height_float
         )
         point_xy_list.append((x_float, y_float))
         # Daily return % from the equity ratio vs the prior session (honest
@@ -153,17 +186,23 @@ def build_equity_chart_dict(
             "y_float": round(y_float, 2),
             "market_date_str": date_str,
             "equity_label_str": _format_money_str(equity_float),
+            "cumulative_pnl_label_str": _format_signed_money_str(cumulative_pnl_float),
+            "cumulative_return_label_str": _format_signed_pct_str(cumulative_return_pct_float),
             "daily_pnl_label_str": _format_signed_money_str(pnl_float) if pnl_float is not None else "—",
             "daily_pct_label_str": _format_signed_pct_str(daily_pct_float),
             "daily_pct_float": daily_pct_float,
         })
 
     path_d_str = _build_polyline_path_str(point_xy_list)
-    curve_area_d_str = _build_curve_area_path_str(point_xy_list)
-    drawdown_d_str = _build_drawdown_polygon_path_str(equity_pairs_list, point_xy_list)
+    zero_y_float = _y_for_chart_value_float(0.0, range_min_float, value_range_float)
+    curve_area_d_str = _build_curve_area_path_str(point_xy_list, zero_y_float)
     pnl_bar_dict_list = _build_pnl_bar_dict_list(equity_pairs_list, horizontal_step_float)
+    y_axis_tick_dict_list = _build_y_axis_tick_dict_list(range_min_float, range_max_float)
+    x_axis_tick_dict_list = _build_x_axis_tick_dict_list(equity_pairs_list, point_xy_list)
 
     latest_pnl_float = equity_pairs_list[-1][2]
+    latest_since_start_pnl_float = cumulative_pnl_value_list[-1]
+    latest_since_start_return_pct_float = cumulative_return_pct_list[-1]
     latest_daily_pct_float = point_dict_list[-1]["daily_pct_float"]
 
     return EquityChartDict(
@@ -171,16 +210,21 @@ def build_equity_chart_dict(
         has_curve_bool=True,
         path_d_str=path_d_str,
         curve_area_d_str=curve_area_d_str,
-        drawdown_d_str=drawdown_d_str,
+        drawdown_d_str="",
+        zero_y_float=zero_y_float,
+        y_axis_tick_dict_list=y_axis_tick_dict_list,
+        x_axis_tick_dict_list=x_axis_tick_dict_list,
         point_dict_list=point_dict_list,
         pnl_bar_dict_list=pnl_bar_dict_list,
         range_min_float=float(range_min_float),
         range_max_float=float(range_max_float),
-        range_min_label_str=_format_money_str(range_min_float),
-        range_max_label_str=_format_money_str(range_max_float),
+        range_min_label_str=_format_signed_pct_str(range_min_float),
+        range_max_label_str=_format_signed_pct_str(range_max_float),
         latest_equity_float=equity_value_list[-1],
         latest_market_date_str=equity_pairs_list[-1][0],
         earliest_market_date_str=equity_pairs_list[0][0],
+        latest_since_start_pnl_label_str=_format_signed_money_str(latest_since_start_pnl_float),
+        latest_since_start_return_label_str=_format_signed_pct_str(latest_since_start_return_pct_float),
         latest_daily_pnl_label_str=_format_signed_money_str(latest_pnl_float),
         latest_daily_pct_label_str=_format_signed_pct_str(latest_daily_pct_float),
         latest_daily_is_positive_bool=(latest_daily_pct_float or 0.0) >= 0,
@@ -211,90 +255,103 @@ def _build_polyline_path_str(point_xy_list: list[tuple[float, float]]) -> str:
     return " ".join(parts_list)
 
 
-def _build_curve_area_path_str(point_xy_list: list[tuple[float, float]]) -> str:
+def _build_curve_area_path_str(
+    point_xy_list: list[tuple[float, float]],
+    zero_y_float: float,
+) -> str:
     if len(point_xy_list) < 2:
         return ""
-    bottom_y_float = CHART_VIEW_HEIGHT_INT - CHART_VERTICAL_PADDING_INT
     parts_list = []
     for index_int, (x_float, y_float) in enumerate(point_xy_list):
         prefix_str = "M" if index_int == 0 else "L"
         parts_list.append(f"{prefix_str} {x_float:.2f} {y_float:.2f}")
     last_x_float = point_xy_list[-1][0]
     first_x_float = point_xy_list[0][0]
-    parts_list.append(f"L {last_x_float:.2f} {bottom_y_float:.2f}")
-    parts_list.append(f"L {first_x_float:.2f} {bottom_y_float:.2f}")
+    parts_list.append(f"L {last_x_float:.2f} {zero_y_float:.2f}")
+    parts_list.append(f"L {first_x_float:.2f} {zero_y_float:.2f}")
     parts_list.append("Z")
     return " ".join(parts_list)
 
 
-def _build_chart_grid_line_dict_list() -> list[dict[str, float]]:
-    inner_height_float = CHART_VIEW_HEIGHT_INT - 2 * CHART_VERTICAL_PADDING_INT
+def _y_for_chart_value_float(
+    value_float: float,
+    range_min_float: float,
+    value_range_float: float,
+) -> float:
+    plot_height_float = CHART_VIEW_HEIGHT_INT - CHART_PLOT_TOP_INT - CHART_PLOT_BOTTOM_INT
+    return round(
+        CHART_VIEW_HEIGHT_INT
+        - CHART_PLOT_BOTTOM_INT
+        - ((value_float - range_min_float) / value_range_float) * plot_height_float,
+        2,
+    )
+
+
+def _build_y_axis_tick_dict_list(
+    range_min_float: float,
+    range_max_float: float,
+) -> list[dict[str, Any]]:
+    value_range_float = max(1e-9, range_max_float - range_min_float)
+    tick_value_list = [
+        range_max_float,
+        range_min_float + value_range_float / 2.0,
+        range_min_float,
+    ]
     return [
-        {"y_float": round(CHART_VERTICAL_PADDING_INT + inner_height_float * ratio_float, 2)}
-        for ratio_float in (0.25, 0.50, 0.75)
+        {
+            "value_float": value_float,
+            "y_float": _y_for_chart_value_float(value_float, range_min_float, value_range_float),
+            "label_str": _format_signed_pct_str(value_float),
+        }
+        for value_float in tick_value_list
     ]
 
 
-def _build_drawdown_polygon_path_str(
+def _build_x_axis_tick_dict_list(
     equity_pairs_list: list[tuple[str, float | None, float | None]],
     point_xy_list: list[tuple[float, float]],
-) -> str:
-    """Polygon between the running-peak line and the equity curve.
-
-    Renders as semi-transparent fill underneath the curve to flag periods of
-    drawdown. Returns "" if the curve never has a meaningful dip.
-    """
-    if len(equity_pairs_list) < 2:
-        return ""
-    running_peak_float = float(equity_pairs_list[0][1] or 0.0)
-    underwater_xy_list: list[tuple[float, float]] = []
-    for index_int, (_date_str, equity_float, _pnl_float) in enumerate(equity_pairs_list):
-        if equity_float is None:
-            continue
-        if float(equity_float) > running_peak_float:
-            running_peak_float = float(equity_float)
-        underwater_xy_list.append((index_int, running_peak_float))
-    if not any(equity_float is not None and float(equity_float) < peak_float
-               for (_, equity_float, _), (_, peak_float) in zip(equity_pairs_list, underwater_xy_list)):
-        return ""
-
-    # Top edge follows the running peak.
-    min_equity_value_float = min(
-        float(equity_float) for (_, equity_float, _) in equity_pairs_list if equity_float is not None
-    )
-    range_max_float = max(peak_float for (_, peak_float) in underwater_xy_list)
-    value_range_float = max(1e-9, range_max_float - min_equity_value_float)
-    inner_height_float = CHART_VIEW_HEIGHT_INT - 2 * CHART_VERTICAL_PADDING_INT
-    horizontal_step_float = CHART_VIEW_WIDTH_INT / max(1, len(equity_pairs_list) - 1)
-
-    def y_for_float(value_float: float) -> float:
-        return (
-            CHART_VIEW_HEIGHT_INT
-            - CHART_VERTICAL_PADDING_INT
-            - ((value_float - min_equity_value_float) / value_range_float) * inner_height_float
+) -> list[dict[str, Any]]:
+    if not equity_pairs_list or not point_xy_list:
+        return []
+    candidate_index_list = sorted({0, len(equity_pairs_list) // 2, len(equity_pairs_list) - 1})
+    tick_dict_list: list[dict[str, Any]] = []
+    for position_int, index_int in enumerate(candidate_index_list):
+        if position_int == 0:
+            text_anchor_str = "start"
+        elif position_int == len(candidate_index_list) - 1:
+            text_anchor_str = "end"
+        else:
+            text_anchor_str = "middle"
+        tick_dict_list.append(
+            {
+                "x_float": round(point_xy_list[index_int][0], 2),
+                "date_str": equity_pairs_list[index_int][0],
+                "label_str": _format_short_date_label_str(equity_pairs_list[index_int][0]),
+                "text_anchor_str": text_anchor_str,
+            }
         )
-
-    parts_list: list[str] = []
-    for index_int, (_, peak_float) in enumerate(underwater_xy_list):
-        x_float = index_int * horizontal_step_float
-        prefix_str = "M" if index_int == 0 else "L"
-        parts_list.append(f"{prefix_str} {x_float:.2f} {y_for_float(peak_float):.2f}")
-    # Bottom edge follows the curve in reverse.
-    for index_int in range(len(point_xy_list) - 1, -1, -1):
-        x_float, y_float = point_xy_list[index_int]
-        parts_list.append(f"L {x_float:.2f} {y_float:.2f}")
-    parts_list.append("Z")
-    return " ".join(parts_list)
+    return tick_dict_list
 
 
 def _build_pnl_bar_dict_list(
     equity_pairs_list: list[tuple[str, float | None, float | None]],
     horizontal_step_float: float,
 ) -> list[dict[str, Any]]:
-    pnl_value_list = [pair[2] for pair in equity_pairs_list if pair[2] is not None]
-    if not pnl_value_list:
+    daily_return_pct_list: list[float | None] = []
+    for index_int, (_date_str, equity_float, _pnl_float) in enumerate(equity_pairs_list):
+        previous_equity_float = equity_pairs_list[index_int - 1][1] if index_int > 0 else None
+        daily_return_pct_float = (
+            (float(equity_float) / float(previous_equity_float)) - 1.0
+            if equity_float is not None and previous_equity_float not in (None, 0)
+            else None
+        )
+        daily_return_pct_list.append(daily_return_pct_float)
+    valid_daily_return_pct_list = [
+        value_float for value_float in daily_return_pct_list if value_float is not None
+    ]
+    if not valid_daily_return_pct_list:
         return []
-    max_abs_float = max(abs(value_float) for value_float in pnl_value_list)
+    max_abs_float = max(abs(value_float) for value_float in valid_daily_return_pct_list)
     if max_abs_float <= 0:
         return []
     bar_dict_list: list[dict[str, Any]] = []
@@ -302,15 +359,16 @@ def _build_pnl_bar_dict_list(
     # Capped width + centered under each point so a few EOD bars read as
     # distinct bars (with gaps) rather than one merged slab.
     bar_width_float = max(1.0, min(horizontal_step_float * 0.6, MAX_PNL_BAR_WIDTH_FLOAT))
-    for index_int, (date_str, _equity_float, pnl_float) in enumerate(equity_pairs_list):
-        if pnl_float is None:
+    for index_int, (date_str, _equity_float, _pnl_float) in enumerate(equity_pairs_list):
+        daily_return_pct_float = daily_return_pct_list[index_int]
+        if daily_return_pct_float is None:
             continue
-        bar_height_float = abs(float(pnl_float)) / max_abs_float * half_height_float
-        is_positive_bool = float(pnl_float) >= 0
-        center_x_float = index_int * horizontal_step_float
+        bar_height_float = abs(float(daily_return_pct_float)) / max_abs_float * half_height_float
+        is_positive_bool = float(daily_return_pct_float) >= 0
+        center_x_float = CHART_PLOT_LEFT_INT + index_int * horizontal_step_float
         bar_x_float = min(
-            max(0.0, center_x_float - bar_width_float / 2.0),
-            CHART_VIEW_WIDTH_INT - bar_width_float,
+            max(float(CHART_PLOT_LEFT_INT), center_x_float - bar_width_float / 2.0),
+            CHART_VIEW_WIDTH_INT - CHART_PLOT_RIGHT_INT - bar_width_float,
         )
         bar_dict_list.append({
             "x_float": round(bar_x_float, 2),
@@ -319,7 +377,7 @@ def _build_pnl_bar_dict_list(
             "height_float": round(max(0.5, bar_height_float), 2),
             "is_positive_bool": is_positive_bool,
             "market_date_str": date_str,
-            "pnl_label_str": _format_signed_money_str(pnl_float),
+            "pnl_label_str": _format_signed_pct_str(daily_return_pct_float),
         })
     return bar_dict_list
 
@@ -361,6 +419,14 @@ def _format_month_label_str(year_month_str: str) -> str:
         return f"{_MONTH_ABBREVIATION_STR_LIST[int(month_str)]} {year_str[2:]}"
     except (ValueError, IndexError):
         return year_month_str
+
+
+def _format_short_date_label_str(date_str: str) -> str:
+    try:
+        _year_str, month_str, day_str = date_str.split("-")[:3]
+        return f"{_MONTH_ABBREVIATION_STR_LIST[int(month_str)]} {int(day_str)}"
+    except (ValueError, IndexError):
+        return date_str
 
 
 def build_monthly_return_dict_list(

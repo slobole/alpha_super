@@ -43,27 +43,41 @@ def test_two_points_produces_valid_path_str() -> None:
     # Path starts with M and ends with an L command at the right edge.
     assert chart_obj.path_d_str.startswith("M ")
     assert " L " in chart_obj.path_d_str
-    # First x is 0 and last x is the full chart width.
+    # First/last x values sit inside the reserved plot area, leaving room for
+    # visible Y-axis labels.
     parts_list = chart_obj.path_d_str.split()
     first_x_float = float(parts_list[1])
     last_x_float = float(parts_list[-2])
-    assert abs(first_x_float - 0.0) < 1e-6
-    assert abs(last_x_float - CHART_VIEW_WIDTH_INT) < 1e-6
+    chart_dict = chart_obj.as_dict()
+    assert abs(first_x_float - chart_dict["plot_left_int"]) < 1e-6
+    assert abs(last_x_float - chart_dict["plot_right_int"]) < 1e-6
     assert chart_obj.curve_area_d_str.startswith("M ")
     assert chart_obj.curve_area_d_str.endswith("Z")
 
 
-def test_chart_exposes_static_grid_lines_for_svg_rendering() -> None:
+def test_chart_exposes_axis_ticks_for_svg_rendering() -> None:
     chart_dict = build_equity_chart_dict([
         _point("2026-05-01", 10000.0),
         _point("2026-05-02", 10500.0),
     ]).as_dict()
 
-    grid_line_dict_list = chart_dict["grid_line_dict_list"]
-    assert len(grid_line_dict_list) == 3
-    for grid_line_dict in grid_line_dict_list:
-        assert 0 < grid_line_dict["y_float"] < CHART_VIEW_HEIGHT_INT
+    y_axis_tick_dict_list = chart_dict["y_axis_tick_dict_list"]
+    x_axis_tick_dict_list = chart_dict["x_axis_tick_dict_list"]
+    assert len(y_axis_tick_dict_list) == 3
+    assert [tick_dict["label_str"] for tick_dict in y_axis_tick_dict_list] == [
+        "+5.00%", "+2.50%", "+0.00%",
+    ]
+    for tick_dict in y_axis_tick_dict_list:
+        assert 0 < tick_dict["y_float"] < CHART_VIEW_HEIGHT_INT
+    assert [tick_dict["label_str"] for tick_dict in x_axis_tick_dict_list] == [
+        "May 1", "May 2",
+    ]
+    assert [tick_dict["text_anchor_str"] for tick_dict in x_axis_tick_dict_list] == [
+        "start", "end",
+    ]
     assert chart_dict["pnl_zero_y_float"] == PNL_BAR_BLOCK_HEIGHT_INT / 2
+    assert chart_dict["latest_since_start_pnl_label_str"] == "+$500"
+    assert chart_dict["latest_since_start_return_label_str"] == "+5.00%"
 
 
 def test_chart_records_min_max_range_labels() -> None:
@@ -72,20 +86,23 @@ def test_chart_records_min_max_range_labels() -> None:
         _point("2026-05-02", 11000.0),
         _point("2026-05-03", 9500.0),
     ])
-    assert chart_obj.range_min_float == 9500.0
-    assert chart_obj.range_max_float == 11000.0
-    assert "9,500" in chart_obj.range_min_label_str
-    assert "11,000" in chart_obj.range_max_label_str
+    assert abs(chart_obj.range_min_float - (-0.05)) < 1e-12
+    assert abs(chart_obj.range_max_float - 0.10) < 1e-12
+    assert chart_obj.range_min_label_str == "-5.00%"
+    assert chart_obj.range_max_label_str == "+10.00%"
 
 
-def test_drawdown_polygon_emitted_when_curve_falls_below_peak() -> None:
+def test_cumulative_pnl_axis_includes_zero_when_curve_falls_below_start() -> None:
     chart_obj = build_equity_chart_dict([
         _point("2026-05-01", 10000.0),
         _point("2026-05-02", 11000.0),
         _point("2026-05-03", 9500.0),
     ])
-    assert chart_obj.drawdown_d_str != ""
-    assert chart_obj.drawdown_d_str.endswith("Z")
+    chart_dict = chart_obj.as_dict()
+    assert chart_dict["range_min_label_str"] == "-5.00%"
+    assert chart_dict["range_max_label_str"] == "+10.00%"
+    assert chart_dict["zero_y_float"] > chart_dict["plot_top_int"]
+    assert chart_dict["zero_y_float"] < chart_dict["plot_bottom_int"]
 
 
 def test_drawdown_polygon_omitted_when_curve_is_monotonic_up() -> None:
@@ -121,9 +138,9 @@ def test_pnl_bars_built_proportional_to_max_abs() -> None:
         _point("2026-05-02", 10100.0, pnl_float=100.0),
         _point("2026-05-03", 9900.0, pnl_float=-200.0),
     ])
-    assert len(chart_obj.pnl_bar_dict_list) == 3
+    assert len(chart_obj.pnl_bar_dict_list) == 2
     largest_bar_dict = max(chart_obj.pnl_bar_dict_list, key=lambda d: d["height_float"])
-    # The largest bar should correspond to the -200 PnL day.
+    # The largest bar should correspond to the down-return day.
     assert largest_bar_dict["is_positive_bool"] is False
     # All bars fit within the half-height of the bar block.
     for bar_dict in chart_obj.pnl_bar_dict_list:

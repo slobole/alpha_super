@@ -1493,8 +1493,8 @@ def test_build_monthly_return_dict_list_groups_by_month() -> None:
 def test_mode_page_shows_daily_pct_and_monthly_returns(test_client_obj) -> None:
     response_text_str = test_client_obj.get("/live").get_data(as_text=True)
     assert "today" in response_text_str          # latest daily % next to equity
-    assert "EOD PnL path" in response_text_str   # polished chart header
-    assert "Daily PnL" in response_text_str       # the bar strip is now labeled
+    assert "Cumulative return" in response_text_str  # axis-based percent chart header
+    assert "Daily return" in response_text_str       # the bar strip is now labeled
     assert "zero line centered" in response_text_str
     assert "recent days" in response_text_str     # recent-days table
     assert "Monthly return" in response_text_str  # monthly strip
