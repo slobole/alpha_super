@@ -1135,6 +1135,7 @@ def test_equity_chart_fragment_renders_svg(test_client_obj) -> None:
     response_text_str = response_obj.get_data(as_text=True)
     assert "<svg" in response_text_str
     assert "viewBox" in response_text_str
+    assert "equity-area-gradient-dv2_caspersky_live" in response_text_str
     # Window selector buttons should be present and "all" should be marked active.
     assert "window=30d" in response_text_str
     assert "window=90d" in response_text_str
@@ -1492,7 +1493,9 @@ def test_build_monthly_return_dict_list_groups_by_month() -> None:
 def test_mode_page_shows_daily_pct_and_monthly_returns(test_client_obj) -> None:
     response_text_str = test_client_obj.get("/live").get_data(as_text=True)
     assert "today" in response_text_str          # latest daily % next to equity
+    assert "EOD PnL path" in response_text_str   # polished chart header
     assert "Daily PnL" in response_text_str       # the bar strip is now labeled
+    assert "zero line centered" in response_text_str
     assert "recent days" in response_text_str     # recent-days table
     assert "Monthly return" in response_text_str  # monthly strip
     assert "May 26" in response_text_str          # the live combined book is all in May 2026

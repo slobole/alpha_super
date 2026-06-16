@@ -5,6 +5,7 @@ from __future__ import annotations
 from alpha.live.dashboard_v3.charts import (
     CHART_VIEW_HEIGHT_INT,
     CHART_VIEW_WIDTH_INT,
+    PNL_BAR_BLOCK_HEIGHT_INT,
     build_equity_chart_dict,
 )
 
@@ -48,6 +49,21 @@ def test_two_points_produces_valid_path_str() -> None:
     last_x_float = float(parts_list[-2])
     assert abs(first_x_float - 0.0) < 1e-6
     assert abs(last_x_float - CHART_VIEW_WIDTH_INT) < 1e-6
+    assert chart_obj.curve_area_d_str.startswith("M ")
+    assert chart_obj.curve_area_d_str.endswith("Z")
+
+
+def test_chart_exposes_static_grid_lines_for_svg_rendering() -> None:
+    chart_dict = build_equity_chart_dict([
+        _point("2026-05-01", 10000.0),
+        _point("2026-05-02", 10500.0),
+    ]).as_dict()
+
+    grid_line_dict_list = chart_dict["grid_line_dict_list"]
+    assert len(grid_line_dict_list) == 3
+    for grid_line_dict in grid_line_dict_list:
+        assert 0 < grid_line_dict["y_float"] < CHART_VIEW_HEIGHT_INT
+    assert chart_dict["pnl_zero_y_float"] == PNL_BAR_BLOCK_HEIGHT_INT / 2
 
 
 def test_chart_records_min_max_range_labels() -> None:
@@ -112,7 +128,7 @@ def test_pnl_bars_built_proportional_to_max_abs() -> None:
     # All bars fit within the half-height of the bar block.
     for bar_dict in chart_obj.pnl_bar_dict_list:
         assert bar_dict["y_float"] >= 0
-        assert bar_dict["y_float"] + bar_dict["height_float"] <= CHART_VIEW_HEIGHT_INT
+        assert bar_dict["y_float"] + bar_dict["height_float"] <= PNL_BAR_BLOCK_HEIGHT_INT
 
 
 def test_unknown_window_falls_back_to_all() -> None:

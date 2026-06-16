@@ -23,9 +23,9 @@ TRADING_DAYS_PER_YEAR_INT = 252
 
 
 CHART_VIEW_WIDTH_INT = 600
-CHART_VIEW_HEIGHT_INT = 120
+CHART_VIEW_HEIGHT_INT = 140
 CHART_VERTICAL_PADDING_INT = 6
-PNL_BAR_BLOCK_HEIGHT_INT = 32
+PNL_BAR_BLOCK_HEIGHT_INT = 44
 # Cap the daily-PnL bar width (viewBox units) so a handful of EOD points render
 # as distinct bars instead of merging into one fat slab.
 MAX_PNL_BAR_WIDTH_FLOAT = 14.0
@@ -42,6 +42,7 @@ class EquityChartDict:
     point_count_int: int = 0
     has_curve_bool: bool = False
     path_d_str: str = ""
+    curve_area_d_str: str = ""
     drawdown_d_str: str = ""
     point_dict_list: list[dict[str, Any]] = field(default_factory=list)
     pnl_bar_dict_list: list[dict[str, Any]] = field(default_factory=list)
@@ -62,6 +63,7 @@ class EquityChartDict:
             "point_count_int": self.point_count_int,
             "has_curve_bool": self.has_curve_bool,
             "path_d_str": self.path_d_str,
+            "curve_area_d_str": self.curve_area_d_str,
             "drawdown_d_str": self.drawdown_d_str,
             "point_dict_list": self.point_dict_list,
             "pnl_bar_dict_list": self.pnl_bar_dict_list,
@@ -79,6 +81,8 @@ class EquityChartDict:
             "width_int": CHART_VIEW_WIDTH_INT,
             "height_int": CHART_VIEW_HEIGHT_INT,
             "bar_height_int": PNL_BAR_BLOCK_HEIGHT_INT,
+            "grid_line_dict_list": _build_chart_grid_line_dict_list(),
+            "pnl_zero_y_float": PNL_BAR_BLOCK_HEIGHT_INT / 2,
         }
 
 
@@ -155,6 +159,7 @@ def build_equity_chart_dict(
         })
 
     path_d_str = _build_polyline_path_str(point_xy_list)
+    curve_area_d_str = _build_curve_area_path_str(point_xy_list)
     drawdown_d_str = _build_drawdown_polygon_path_str(equity_pairs_list, point_xy_list)
     pnl_bar_dict_list = _build_pnl_bar_dict_list(equity_pairs_list, horizontal_step_float)
 
@@ -165,6 +170,7 @@ def build_equity_chart_dict(
         point_count_int=point_count_int,
         has_curve_bool=True,
         path_d_str=path_d_str,
+        curve_area_d_str=curve_area_d_str,
         drawdown_d_str=drawdown_d_str,
         point_dict_list=point_dict_list,
         pnl_bar_dict_list=pnl_bar_dict_list,
@@ -203,6 +209,30 @@ def _build_polyline_path_str(point_xy_list: list[tuple[float, float]]) -> str:
         prefix_str = "M" if index_int == 0 else "L"
         parts_list.append(f"{prefix_str} {x_float:.2f} {y_float:.2f}")
     return " ".join(parts_list)
+
+
+def _build_curve_area_path_str(point_xy_list: list[tuple[float, float]]) -> str:
+    if len(point_xy_list) < 2:
+        return ""
+    bottom_y_float = CHART_VIEW_HEIGHT_INT - CHART_VERTICAL_PADDING_INT
+    parts_list = []
+    for index_int, (x_float, y_float) in enumerate(point_xy_list):
+        prefix_str = "M" if index_int == 0 else "L"
+        parts_list.append(f"{prefix_str} {x_float:.2f} {y_float:.2f}")
+    last_x_float = point_xy_list[-1][0]
+    first_x_float = point_xy_list[0][0]
+    parts_list.append(f"L {last_x_float:.2f} {bottom_y_float:.2f}")
+    parts_list.append(f"L {first_x_float:.2f} {bottom_y_float:.2f}")
+    parts_list.append("Z")
+    return " ".join(parts_list)
+
+
+def _build_chart_grid_line_dict_list() -> list[dict[str, float]]:
+    inner_height_float = CHART_VIEW_HEIGHT_INT - 2 * CHART_VERTICAL_PADDING_INT
+    return [
+        {"y_float": round(CHART_VERTICAL_PADDING_INT + inner_height_float * ratio_float, 2)}
+        for ratio_float in (0.25, 0.50, 0.75)
+    ]
 
 
 def _build_drawdown_polygon_path_str(

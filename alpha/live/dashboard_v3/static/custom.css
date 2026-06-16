@@ -15,3 +15,14 @@ table tbody tr:nth-child(even) td { background: #fafafa; }
 /* Smooth swap-in for HTMX-targeted regions. */
 .htmx-swapping { opacity: 0.5; transition: opacity 100ms ease; }
 .htmx-settling { opacity: 1.0; transition: opacity 100ms ease; }
+
+/* Dashboard PnL chart: visual-only polish over the pure-SVG template. */
+.equity-chart-surface {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border-radius: 6px;
+}
+
+.equity-pnl-bars {
+  background: #f8fafc;
+  border-radius: 6px;
+}
