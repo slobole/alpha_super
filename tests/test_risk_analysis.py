@@ -17,6 +17,7 @@ from alpha.engine.risk_analysis import (
     build_bootstrap_equity_path_df,
     build_bootstrap_interval_df,
     build_bootstrap_path_metric_df,
+    build_horizon_probability_df,
     compute_path_metric_dict,
     extract_realized_return_ser,
     build_return_histogram_df,
@@ -60,6 +61,20 @@ def test_stationary_bootstrap_index_matrix_is_deterministic_and_in_range():
     assert np.array_equal(first_index_mat, second_index_mat)
     assert int(first_index_mat.min()) >= 0
     assert int(first_index_mat.max()) < 6
+
+
+def test_stationary_bootstrap_index_matrix_accepts_shorter_path_length():
+    index_mat = stationary_bootstrap_index_mat(
+        sample_size_int=6,
+        simulation_count_int=4,
+        mean_block_length_int=3,
+        random_seed_int=123,
+        path_length_int=2,
+    )
+
+    assert index_mat.shape == (4, 2)
+    assert int(index_mat.min()) >= 0
+    assert int(index_mat.max()) < 6
 
 
 def test_compute_path_metrics_match_synthetic_formula():
@@ -236,6 +251,85 @@ def test_bootstrap_intervals_include_confidence_bounds():
     assert pd.notna(terminal_row["bootstrap_mean_float"])
 
 
+def test_horizon_probability_table_counts_positive_constant_sample():
+    calendar_idx = pd.date_range("2020-01-01", periods=252, freq="B")
+    realized_return_ser = pd.Series(
+        [0.01] * 252,
+        index=calendar_idx,
+        name="realized_return_float",
+    )
+
+    horizon_df = build_horizon_probability_df(
+        realized_return_ser=realized_return_ser,
+        mean_block_length_int=21,
+        simulation_count_int=3,
+        random_seed_int=7,
+        horizon_year_tuple=(1, 2),
+        drawdown_threshold_tuple=(-0.10,),
+        upside_threshold_tuple=(0.10, 0.50),
+    )
+
+    one_year_ser = horizon_df[horizon_df["horizon_year_int"] == 1].iloc[0]
+    assert int(one_year_ser["simulation_path_count_int"]) == 3
+    assert np.isclose(float(one_year_ser["drawdown_lte_10pct_probability_float"]), 0.0)
+    assert np.isclose(float(one_year_ser["gain_gte_10pct_probability_float"]), 1.0)
+    assert np.isclose(float(one_year_ser["gain_gte_50pct_probability_float"]), 1.0)
+    assert float(one_year_ser["max_gain_p50_float"]) > 0.50
+
+    two_year_ser = horizon_df[horizon_df["horizon_year_int"] == 2].iloc[0]
+    assert int(two_year_ser["simulation_path_count_int"]) == 0
+    assert pd.isna(two_year_ser["gain_gte_10pct_probability_float"])
+
+
+def test_horizon_probability_table_counts_negative_constant_sample():
+    calendar_idx = pd.date_range("2020-01-01", periods=252, freq="B")
+    realized_return_ser = pd.Series(
+        [-0.01] * 252,
+        index=calendar_idx,
+        name="realized_return_float",
+    )
+
+    horizon_df = build_horizon_probability_df(
+        realized_return_ser=realized_return_ser,
+        mean_block_length_int=21,
+        simulation_count_int=3,
+        random_seed_int=7,
+        horizon_year_tuple=(1,),
+        drawdown_threshold_tuple=(-0.10, -0.50),
+        upside_threshold_tuple=(0.10,),
+    )
+
+    one_year_ser = horizon_df.iloc[0]
+    assert int(one_year_ser["simulation_path_count_int"]) == 3
+    assert np.isclose(float(one_year_ser["drawdown_lte_10pct_probability_float"]), 1.0)
+    assert np.isclose(float(one_year_ser["drawdown_lte_50pct_probability_float"]), 1.0)
+    assert np.isclose(float(one_year_ser["gain_gte_10pct_probability_float"]), 0.0)
+    assert float(one_year_ser["max_drawdown_p50_float"]) < -0.50
+
+
+def test_horizon_probability_table_exercises_default_one_to_five_years():
+    calendar_idx = pd.date_range("2020-01-01", periods=252 * 5, freq="B")
+    realized_return_ser = pd.Series(
+        [0.001] * (252 * 5),
+        index=calendar_idx,
+        name="realized_return_float",
+    )
+
+    horizon_df = build_horizon_probability_df(
+        realized_return_ser=realized_return_ser,
+        mean_block_length_int=21,
+        simulation_count_int=2,
+        random_seed_int=7,
+    )
+
+    assert horizon_df["horizon_year_int"].tolist() == [1, 2, 3, 4, 5]
+    assert horizon_df["horizon_day_int"].tolist() == [252, 504, 756, 1008, 1260]
+    assert horizon_df["simulation_path_count_int"].tolist() == [2, 2, 2, 2, 2]
+    assert np.isclose(float(horizon_df.iloc[0]["drawdown_lte_10pct_probability_float"]), 0.0)
+    assert np.isclose(float(horizon_df.iloc[0]["gain_gte_10pct_probability_float"]), 1.0)
+    assert np.isclose(float(horizon_df.iloc[-1]["gain_gte_50pct_probability_float"]), 1.0)
+
+
 def test_bootstrap_intervals_reject_invalid_confidence_level():
     bootstrap_metric_df = pd.DataFrame(
         {
@@ -280,6 +374,7 @@ def test_risk_analysis_saves_expected_artifacts(tmp_path):
         "bootstrap_equity_paths.csv",
         "bootstrap_path_metrics.csv",
         "bootstrap_metric_intervals.csv",
+        "horizon_probabilities.csv",
         "summary.json",
         "run_info.json",
         "metadata.json",
@@ -291,5 +386,29 @@ def test_risk_analysis_saves_expected_artifacts(tmp_path):
     assert summary_dict["primary_mean_block_length_int"] == 2
     assert summary_dict["simulation_count_int"] == 8
     assert summary_dict["confidence_level_float"] == 0.95
+    assert summary_dict["drawdown_threshold_list"] == [-0.10, -0.20, -0.30, -0.40, -0.50]
+    assert summary_dict["upside_threshold_list"] == [0.10, 0.20, 0.30, 0.40, 0.50]
     assert "stress_status_str" not in summary_dict
     assert "var_95_daily_return_float" in summary_dict["observed_metrics"]
+    assert summary_dict["horizon_year_list"] == [1, 2, 3, 4, 5]
+    assert len(summary_dict["primary_horizon_probabilities"]) == 5
+    first_horizon_dict = summary_dict["primary_horizon_probabilities"][0]
+    assert first_horizon_dict["horizon_day_int"] == 252
+    assert first_horizon_dict["simulation_path_count_int"] == 0
+    assert first_horizon_dict["drawdown_lte_10pct_probability_float"] is None
+    assert first_horizon_dict["gain_gte_10pct_probability_float"] is None
+
+    horizon_df = pd.read_csv(output_path / "horizon_probabilities.csv")
+    assert horizon_df["horizon_year_int"].tolist() == [1, 2, 3, 4, 5]
+    assert "drawdown_lte_10pct_probability_float" in horizon_df.columns
+    assert "gain_gte_10pct_probability_float" in horizon_df.columns
+    assert "max_drawdown_p05_float" in horizon_df.columns
+    assert "max_gain_p95_float" in horizon_df.columns
+
+    report_html_str = (output_path / "report.html").read_text(encoding="utf-8")
+    assert "Horizon Probability Tables" in report_html_str
+    assert "Bootstrap-implied horizon probabilities from realized returns." in report_html_str
+    assert "Downside drawdown odds" in report_html_str
+    assert "Upside reach odds" in report_html_str
+    assert "DD &lt;= -10%" in report_html_str
+    assert "Gain &gt;= +10%" in report_html_str

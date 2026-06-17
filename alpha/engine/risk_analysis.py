@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import html
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Sequence
@@ -39,6 +39,7 @@ RETURN_HISTOGRAM_CSV_FILENAME_STR = "return_histogram.csv"
 BOOTSTRAP_EQUITY_PATH_CSV_FILENAME_STR = "bootstrap_equity_paths.csv"
 BOOTSTRAP_PATH_METRIC_CSV_FILENAME_STR = "bootstrap_path_metrics.csv"
 BOOTSTRAP_INTERVAL_CSV_FILENAME_STR = "bootstrap_metric_intervals.csv"
+HORIZON_PROBABILITY_CSV_FILENAME_STR = "horizon_probabilities.csv"
 SUMMARY_FILENAME_STR = "summary.json"
 RUN_INFO_FILENAME_STR = "run_info.json"
 METADATA_FILENAME_STR = "metadata.json"
@@ -50,9 +51,12 @@ DEFAULT_SIMULATION_COUNT_INT = 10000
 DEFAULT_RANDOM_SEED_INT = 42
 DEFAULT_CONFIDENCE_LEVEL_FLOAT = 0.95
 DEFAULT_DRAWDOWN_THRESHOLD_TUPLE = (-0.10, -0.20, -0.30, -0.40, -0.50)
+DEFAULT_UPSIDE_THRESHOLD_TUPLE = (0.10, 0.20, 0.30, 0.40, 0.50)
+DEFAULT_HORIZON_YEAR_TUPLE = (1, 2, 3, 4, 5)
 DEFAULT_ROLLING_LOSS_WINDOW_TUPLE = (1, 5, 21, 63, 126, 252)
 DEFAULT_TIME_UNDERWATER_BREACH_MONTH_TUPLE = (3, 6, 12, 24)
 TRADING_DAYS_PER_MONTH_INT = 21
+TRADING_DAYS_PER_YEAR_INT = 252
 DEFAULT_RETURN_HISTOGRAM_BIN_COUNT_INT = 80
 DEFAULT_EQUITY_PATH_SAMPLE_COUNT_INT = 100
 TRADING_DAYS_PER_YEAR_FLOAT = 252.0
@@ -99,6 +103,7 @@ class RiskAnalysisResult:
     bootstrap_path_metric_df: pd.DataFrame
     bootstrap_interval_df: pd.DataFrame
     summary_dict: dict[str, object]
+    horizon_probability_df: pd.DataFrame = field(default_factory=pd.DataFrame)
     output_dir_path: Path | None = None
 
 
@@ -133,6 +138,7 @@ def stationary_bootstrap_index_mat(
     simulation_count_int: int,
     mean_block_length_int: int,
     random_seed_int: int,
+    path_length_int: int | None = None,
 ) -> np.ndarray:
     if sample_size_int <= 0:
         raise ValueError("sample_size_int must be positive.")
@@ -140,14 +146,18 @@ def stationary_bootstrap_index_mat(
         raise ValueError("simulation_count_int must be positive.")
     if mean_block_length_int <= 0:
         raise ValueError("mean_block_length_int must be positive.")
+    if path_length_int is None:
+        path_length_int = int(sample_size_int)
+    if path_length_int <= 0:
+        raise ValueError("path_length_int must be positive.")
 
     rng_obj = np.random.default_rng(int(random_seed_int))
     restart_probability_float = 1.0 / float(mean_block_length_int)
-    index_mat = np.empty((int(simulation_count_int), int(sample_size_int)), dtype=np.int64)
+    index_mat = np.empty((int(simulation_count_int), int(path_length_int)), dtype=np.int64)
 
     for simulation_idx_int in range(int(simulation_count_int)):
         current_index_int = 0
-        for step_idx_int in range(int(sample_size_int)):
+        for step_idx_int in range(int(path_length_int)):
             if step_idx_int == 0 or rng_obj.random() < restart_probability_float:
                 current_index_int = int(rng_obj.integers(0, sample_size_int))
             else:
@@ -434,6 +444,137 @@ def build_bootstrap_interval_df(
     return pd.DataFrame(row_list)
 
 
+def build_horizon_probability_df(
+    realized_return_ser: pd.Series,
+    mean_block_length_int: int,
+    simulation_count_int: int = DEFAULT_SIMULATION_COUNT_INT,
+    random_seed_int: int = DEFAULT_RANDOM_SEED_INT,
+    horizon_year_tuple: Sequence[int] = DEFAULT_HORIZON_YEAR_TUPLE,
+    drawdown_threshold_tuple: Sequence[float] = DEFAULT_DRAWDOWN_THRESHOLD_TUPLE,
+    upside_threshold_tuple: Sequence[float] = DEFAULT_UPSIDE_THRESHOLD_TUPLE,
+) -> pd.DataFrame:
+    """
+    Build horizon-level downside and upside probability rows.
+
+    For horizon H and bootstrap path s:
+
+        equity_s,t = product(1 + return_s,i), i=1..t
+        drawdown_s,t = equity_s,t / max(1, equity_s,1, ..., equity_s,t) - 1
+        max_gain_s,H = max(1, equity_s,1, ..., equity_s,H) - 1
+
+    The downside cells count paths where min(drawdown_s,1..H) breaches a
+    threshold. The upside cells count paths where max_gain_s,H reaches a
+    threshold at least once. This is report-only and uses only resampled
+    realized returns.
+    """
+    return_vec = realized_return_ser.astype(float).replace([np.inf, -np.inf], np.nan).dropna().to_numpy(dtype=float)
+    if return_vec.size == 0:
+        raise ValueError("realized_return_ser must contain at least one return.")
+
+    normalized_horizon_year_tuple = _normalized_positive_int_tuple(horizon_year_tuple, "horizon years")
+    normalized_drawdown_threshold_tuple = tuple(float(value_float) for value_float in drawdown_threshold_tuple)
+    normalized_upside_threshold_tuple = tuple(float(value_float) for value_float in upside_threshold_tuple)
+    if len(normalized_drawdown_threshold_tuple) == 0:
+        raise ValueError("At least one drawdown threshold is required.")
+    if len(normalized_upside_threshold_tuple) == 0:
+        raise ValueError("At least one upside threshold is required.")
+
+    max_requested_day_int = max(
+        int(year_int) * TRADING_DAYS_PER_YEAR_INT
+        for year_int in normalized_horizon_year_tuple
+    )
+    bootstrap_path_length_int = min(int(return_vec.size), int(max_requested_day_int))
+    index_mat = stationary_bootstrap_index_mat(
+        sample_size_int=int(return_vec.size),
+        simulation_count_int=int(simulation_count_int),
+        mean_block_length_int=int(mean_block_length_int),
+        random_seed_int=int(random_seed_int),
+        path_length_int=bootstrap_path_length_int,
+    )
+
+    horizon_metric_dict: dict[int, dict[str, list[float]]] = {
+        int(year_int): {
+            "max_drawdown_float": [],
+            "max_gain_float": [],
+            "terminal_return_float": [],
+        }
+        for year_int in normalized_horizon_year_tuple
+    }
+    for index_vec in index_mat:
+        simulated_return_vec = return_vec[index_vec]
+        for horizon_year_int in normalized_horizon_year_tuple:
+            horizon_day_int = int(horizon_year_int) * TRADING_DAYS_PER_YEAR_INT
+            if simulated_return_vec.size < horizon_day_int:
+                continue
+            path_horizon_metric_dict = _path_horizon_metric_dict(
+                simulated_return_vec,
+                horizon_day_int,
+            )
+            horizon_metric_dict[int(horizon_year_int)]["max_drawdown_float"].append(
+                float(path_horizon_metric_dict["max_drawdown_float"])
+            )
+            horizon_metric_dict[int(horizon_year_int)]["max_gain_float"].append(
+                float(path_horizon_metric_dict["max_gain_float"])
+            )
+            horizon_metric_dict[int(horizon_year_int)]["terminal_return_float"].append(
+                float(path_horizon_metric_dict["terminal_return_float"])
+            )
+
+    row_list: list[dict[str, object]] = []
+    for horizon_year_int in normalized_horizon_year_tuple:
+        horizon_day_int = int(horizon_year_int) * TRADING_DAYS_PER_YEAR_INT
+        row_dict: dict[str, object] = {
+            "horizon_year_int": int(horizon_year_int),
+            "horizon_day_int": int(horizon_day_int),
+        }
+        max_drawdown_vec = np.asarray(
+            horizon_metric_dict[int(horizon_year_int)]["max_drawdown_float"],
+            dtype=float,
+        )
+        max_gain_vec = np.asarray(
+            horizon_metric_dict[int(horizon_year_int)]["max_gain_float"],
+            dtype=float,
+        )
+        terminal_return_vec = np.asarray(
+            horizon_metric_dict[int(horizon_year_int)]["terminal_return_float"],
+            dtype=float,
+        )
+        row_dict["simulation_path_count_int"] = int(max_drawdown_vec.size)
+        if max_drawdown_vec.size == 0:
+            row_dict["max_drawdown_p05_float"] = None
+            row_dict["max_drawdown_p50_float"] = None
+            row_dict["max_gain_p50_float"] = None
+            row_dict["max_gain_p95_float"] = None
+            row_dict["terminal_return_p50_float"] = None
+            row_dict["terminal_return_p95_float"] = None
+            for threshold_float in normalized_drawdown_threshold_tuple:
+                row_dict[_threshold_column_name_str("drawdown_lte", abs(float(threshold_float)))] = None
+            for threshold_float in normalized_upside_threshold_tuple:
+                row_dict[_threshold_column_name_str("gain_gte", abs(float(threshold_float)))] = None
+            row_list.append(row_dict)
+            continue
+
+        row_dict["max_drawdown_p05_float"] = float(np.quantile(max_drawdown_vec, 0.05))
+        row_dict["max_drawdown_p50_float"] = float(np.quantile(max_drawdown_vec, 0.50))
+        row_dict["max_gain_p50_float"] = float(np.quantile(max_gain_vec, 0.50))
+        row_dict["max_gain_p95_float"] = float(np.quantile(max_gain_vec, 0.95))
+        row_dict["terminal_return_p50_float"] = float(np.quantile(terminal_return_vec, 0.50))
+        row_dict["terminal_return_p95_float"] = float(np.quantile(terminal_return_vec, 0.95))
+        for threshold_float in normalized_drawdown_threshold_tuple:
+            drawdown_threshold_float = -abs(float(threshold_float))
+            row_dict[_threshold_column_name_str("drawdown_lte", abs(drawdown_threshold_float))] = float(
+                (max_drawdown_vec <= drawdown_threshold_float).mean()
+            )
+        for threshold_float in normalized_upside_threshold_tuple:
+            upside_threshold_float = abs(float(threshold_float))
+            row_dict[_threshold_column_name_str("gain_gte", upside_threshold_float)] = float(
+                (max_gain_vec >= upside_threshold_float).mean()
+            )
+        row_list.append(row_dict)
+
+    return pd.DataFrame(row_list)
+
+
 def _observed_percentile_float(
     bootstrap_metric_ser: pd.Series,
     observed_value_float: float | None,
@@ -479,6 +620,10 @@ def save_risk_analysis_results(
         output_dir_path / BOOTSTRAP_INTERVAL_CSV_FILENAME_STR,
         index=False,
     )
+    risk_result_obj.horizon_probability_df.to_csv(
+        output_dir_path / HORIZON_PROBABILITY_CSV_FILENAME_STR,
+        index=False,
+    )
 
     _write_json_file(output_dir_path / SUMMARY_FILENAME_STR, risk_result_obj.summary_dict)
     _write_json_file(output_dir_path / RUN_INFO_FILENAME_STR, _build_run_info_dict(risk_result_obj))
@@ -506,6 +651,8 @@ class RiskAnalysis:
         random_seed_int: int = DEFAULT_RANDOM_SEED_INT,
         confidence_level_float: float = DEFAULT_CONFIDENCE_LEVEL_FLOAT,
         drawdown_threshold_tuple: Sequence[float] = DEFAULT_DRAWDOWN_THRESHOLD_TUPLE,
+        upside_threshold_tuple: Sequence[float] = DEFAULT_UPSIDE_THRESHOLD_TUPLE,
+        horizon_year_tuple: Sequence[int] = DEFAULT_HORIZON_YEAR_TUPLE,
         rolling_loss_window_tuple: Sequence[int] = DEFAULT_ROLLING_LOSS_WINDOW_TUPLE,
         time_underwater_breach_month_tuple: Sequence[int] = DEFAULT_TIME_UNDERWATER_BREACH_MONTH_TUPLE,
     ):
@@ -522,6 +669,8 @@ class RiskAnalysis:
         self.random_seed_int = int(random_seed_int)
         self.confidence_level_float = float(confidence_level_float)
         self.drawdown_threshold_tuple = tuple(float(value_float) for value_float in drawdown_threshold_tuple)
+        self.upside_threshold_tuple = tuple(float(value_float) for value_float in upside_threshold_tuple)
+        self.horizon_year_tuple = _normalized_positive_int_tuple(horizon_year_tuple, "horizon years")
         self.rolling_loss_window_tuple = tuple(int(value_int) for value_int in rolling_loss_window_tuple)
         self.time_underwater_breach_month_tuple = tuple(
             int(value_int) for value_int in time_underwater_breach_month_tuple
@@ -554,11 +703,21 @@ class RiskAnalysis:
             observed_metric_dict=observed_metric_dict,
             confidence_level_float=self.confidence_level_float,
         )
+        horizon_probability_df = build_horizon_probability_df(
+            realized_return_ser=realized_return_ser,
+            mean_block_length_int=self.primary_mean_block_length_int,
+            simulation_count_int=self.simulation_count_int,
+            random_seed_int=self.random_seed_int,
+            horizon_year_tuple=self.horizon_year_tuple,
+            drawdown_threshold_tuple=self.drawdown_threshold_tuple,
+            upside_threshold_tuple=self.upside_threshold_tuple,
+        )
         summary_dict = _build_summary_dict(
             strategy_obj=self.strategy_obj,
             realized_return_ser=realized_return_ser,
             bootstrap_path_metric_df=bootstrap_path_metric_df,
             bootstrap_interval_df=bootstrap_interval_df,
+            horizon_probability_df=horizon_probability_df,
             observed_metric_dict=observed_metric_dict,
             primary_mean_block_length_int=self.primary_mean_block_length_int,
             mean_block_length_tuple=self.mean_block_length_tuple,
@@ -566,6 +725,8 @@ class RiskAnalysis:
             random_seed_int=self.random_seed_int,
             confidence_level_float=self.confidence_level_float,
             drawdown_threshold_tuple=self.drawdown_threshold_tuple,
+            upside_threshold_tuple=self.upside_threshold_tuple,
+            horizon_year_tuple=self.horizon_year_tuple,
             time_underwater_breach_month_tuple=self.time_underwater_breach_month_tuple,
         )
 
@@ -577,6 +738,7 @@ class RiskAnalysis:
             bootstrap_equity_path_df=bootstrap_equity_path_df,
             bootstrap_path_metric_df=bootstrap_path_metric_df,
             bootstrap_interval_df=bootstrap_interval_df,
+            horizon_probability_df=horizon_probability_df,
             summary_dict=summary_dict,
         )
         if self.save_output_bool:
@@ -599,12 +761,29 @@ def _normalized_block_length_tuple(
     return tuple(normalized_list)
 
 
+def _normalized_positive_int_tuple(
+    raw_value_tuple: Sequence[int],
+    label_str: str,
+) -> tuple[int, ...]:
+    normalized_list = []
+    for value_int in raw_value_tuple:
+        normalized_value_int = int(value_int)
+        if normalized_value_int <= 0:
+            raise ValueError(f"{label_str} must be positive.")
+        if normalized_value_int not in normalized_list:
+            normalized_list.append(normalized_value_int)
+    if len(normalized_list) == 0:
+        raise ValueError(f"At least one {label_str} value is required.")
+    return tuple(normalized_list)
+
+
 def _build_summary_dict(
     *,
     strategy_obj: Strategy,
     realized_return_ser: pd.Series,
     bootstrap_path_metric_df: pd.DataFrame,
     bootstrap_interval_df: pd.DataFrame,
+    horizon_probability_df: pd.DataFrame,
     observed_metric_dict: dict[str, object],
     primary_mean_block_length_int: int,
     mean_block_length_tuple: Sequence[int],
@@ -612,6 +791,8 @@ def _build_summary_dict(
     random_seed_int: int,
     confidence_level_float: float,
     drawdown_threshold_tuple: Sequence[float],
+    upside_threshold_tuple: Sequence[float],
+    horizon_year_tuple: Sequence[int],
     time_underwater_breach_month_tuple: Sequence[int],
 ) -> dict[str, object]:
     primary_metric_df = bootstrap_path_metric_df[
@@ -631,8 +812,12 @@ def _build_summary_dict(
         "simulation_count_int": int(simulation_count_int),
         "random_seed_int": int(random_seed_int),
         "confidence_level_float": float(confidence_level_float),
+        "horizon_year_list": [int(value_int) for value_int in horizon_year_tuple],
+        "drawdown_threshold_list": [float(value_float) for value_float in drawdown_threshold_tuple],
+        "upside_threshold_list": [float(value_float) for value_float in upside_threshold_tuple],
         "observed_metrics": _compact_dict(observed_metric_dict),
         "primary_intervals": _primary_interval_dict(primary_interval_df),
+        "primary_horizon_probabilities": _records_from_df(horizon_probability_df),
         "primary_drawdown_breach_probabilities": _drawdown_breach_probability_dict(
             primary_metric_df,
             drawdown_threshold_tuple,
@@ -645,6 +830,38 @@ def _build_summary_dict(
     }
     summary_dict["verdict"] = _build_verdict_row_list(summary_dict)
     return summary_dict
+
+
+def _path_horizon_metric_dict(
+    return_vec: np.ndarray,
+    horizon_day_int: int,
+) -> dict[str, float]:
+    clean_return_vec = np.asarray(return_vec, dtype=float)
+    clean_return_vec = clean_return_vec[np.isfinite(clean_return_vec)]
+    if horizon_day_int <= 0:
+        raise ValueError("horizon_day_int must be positive.")
+    if clean_return_vec.size < horizon_day_int:
+        return {
+            "max_drawdown_float": np.nan,
+            "max_gain_float": np.nan,
+            "terminal_return_float": np.nan,
+        }
+
+    horizon_return_vec = clean_return_vec[: int(horizon_day_int)]
+    horizon_equity_vec = np.cumprod(1.0 + horizon_return_vec)
+    equity_with_start_vec = np.concatenate(([1.0], horizon_equity_vec))
+    terminal_return_float = float(horizon_equity_vec[-1] - 1.0)
+
+    # *** CRITICAL*** horizon drawdown is path-local and starts from fresh
+    # equity 1.0: drawdown_t = E_t / max(1, E_1, ..., E_t) - 1. It is a
+    # report-only bootstrap diagnostic and must never feed order or sizing.
+    running_peak_vec = np.maximum.accumulate(equity_with_start_vec)[1:]
+    drawdown_vec = horizon_equity_vec / running_peak_vec - 1.0
+    return {
+        "max_drawdown_float": float(np.min(drawdown_vec)),
+        "max_gain_float": float(np.max(equity_with_start_vec) - 1.0),
+        "terminal_return_float": terminal_return_float,
+    }
 
 
 def _band_status_str(
@@ -885,6 +1102,15 @@ def _terminal_loss_probability_float(metric_df: pd.DataFrame) -> float | None:
     return _json_float((terminal_return_ser < 0.0).mean())
 
 
+def _threshold_column_name_str(prefix_str: str, threshold_float: float) -> str:
+    threshold_pct_float = abs(float(threshold_float)) * 100.0
+    if np.isclose(threshold_pct_float, round(threshold_pct_float)):
+        threshold_label_str = f"{int(round(threshold_pct_float))}pct"
+    else:
+        threshold_label_str = f"{threshold_pct_float:.2f}".rstrip("0").rstrip(".").replace(".", "p") + "pct"
+    return f"{prefix_str}_{threshold_label_str}_probability_float"
+
+
 def _monthly_return_vec_from_daily_float(daily_return_vec: np.ndarray) -> np.ndarray:
     """
     Compound non-overlapping 21-trading-day chunks into a monthly return vec.
@@ -970,6 +1196,9 @@ def _build_run_info_dict(risk_result_obj: RiskAnalysisResult) -> dict[str, objec
             "simulation_count_int": summary_dict.get("simulation_count_int"),
             "random_seed_int": summary_dict.get("random_seed_int"),
             "confidence_level_float": summary_dict.get("confidence_level_float"),
+            "horizon_year_list": summary_dict.get("horizon_year_list"),
+            "drawdown_threshold_list": summary_dict.get("drawdown_threshold_list"),
+            "upside_threshold_list": summary_dict.get("upside_threshold_list"),
         },
     }
 
@@ -1003,6 +1232,7 @@ body {{ font-family: Arial, sans-serif; color: #1d2733; margin: 0; background: #
 .wrap {{ max-width: 1180px; margin: 0 auto; padding: 30px 28px 42px; }}
 h1 {{ margin: 0 0 8px; font-size: 30px; letter-spacing: 0; }}
 h2 {{ margin: 0 0 12px; font-size: 19px; letter-spacing: 0; }}
+h3 {{ margin: 14px 0 8px; font-size: 15px; letter-spacing: 0; }}
 p {{ color: #536170; line-height: 1.45; }}
 .meta {{ color: #536170; margin-bottom: 18px; }}
 .tile-grid {{ display: grid; grid-template-columns: repeat(5, minmax(140px, 1fr)); gap: 10px; margin: 18px 0 22px; }}
@@ -1074,6 +1304,11 @@ Return window: {html.escape(str(summary_dict.get("start_date_str")))} to {html.e
 <h2>Monthly Risk Metrics</h2>
 <div class="subtitle">Monthly = 21 consecutive trading days. Computed from the same bootstrap paths as the daily metrics for direct comparability.</div>
 <div class="scroll">{_interval_table_html(risk_result_obj.bootstrap_interval_df, int(summary_dict["primary_mean_block_length_int"]), confidence_level_float, simulation_count_int, metric_order_list=MONTHLY_METRIC_ORDER_LIST, label_dict=MONTHLY_METRIC_LABEL_DICT)}</div>
+</div>
+<div class="section">
+<h2>Horizon Probability Tables</h2>
+<div class="subtitle">Bootstrap-implied horizon probabilities from realized returns. Trading-year horizons use {TRADING_DAYS_PER_YEAR_INT} days. Downside is max drawdown touched inside the horizon; upside is max gain touched inside the horizon. Rows beyond the realized sample length render as N/A.</div>
+{_horizon_probability_tables_html(risk_result_obj.horizon_probability_df, summary_dict.get("drawdown_threshold_list", DEFAULT_DRAWDOWN_THRESHOLD_TUPLE), summary_dict.get("upside_threshold_list", DEFAULT_UPSIDE_THRESHOLD_TUPLE))}
 </div>
 <div class="section">
 <h2>Drawdown and Time-Underwater Breach Probabilities</h2>
@@ -1447,6 +1682,109 @@ MONTHLY_METRIC_ORDER_LIST = [
 ]
 
 
+def _horizon_probability_tables_html(
+    horizon_probability_df: pd.DataFrame,
+    drawdown_threshold_tuple: Sequence[float],
+    upside_threshold_tuple: Sequence[float],
+) -> str:
+    if horizon_probability_df is None or len(horizon_probability_df) == 0:
+        return "<p>No horizon probability data available.</p>"
+
+    normalized_drawdown_threshold_tuple = tuple(float(value_float) for value_float in drawdown_threshold_tuple)
+    normalized_upside_threshold_tuple = tuple(float(value_float) for value_float in upside_threshold_tuple)
+
+    downside_header_html_list = [
+        "<th>Horizon</th>",
+        "<th>Paths</th>",
+    ]
+    for threshold_float in normalized_drawdown_threshold_tuple:
+        downside_header_html_list.append(
+            f"<th>{html.escape(f'DD <= {_signed_percent_str(-abs(float(threshold_float)))}')}</th>"
+        )
+    downside_header_html_list.extend(
+        [
+            "<th>Median max DD</th>",
+            "<th>1-in-20 max DD</th>",
+        ]
+    )
+
+    downside_row_html_list = []
+    upside_row_html_list = []
+    for _, row_ser in horizon_probability_df.iterrows():
+        horizon_label_str = f"{int(row_ser['horizon_year_int'])}y"
+        path_count_int = int(row_ser.get("simulation_path_count_int", 0))
+        downside_cell_html_list = [
+            f"<td>{html.escape(horizon_label_str)}</td>",
+            f"<td>{path_count_int}</td>",
+        ]
+        for threshold_float in normalized_drawdown_threshold_tuple:
+            column_name_str = _threshold_column_name_str("drawdown_lte", abs(float(threshold_float)))
+            downside_cell_html_list.append(
+                f"<td>{_format_percent(row_ser.get(column_name_str))}</td>"
+            )
+        downside_cell_html_list.append(
+            _metric_cell_html(row_ser.get("max_drawdown_p50_float"), "max_drawdown_float")
+        )
+        downside_cell_html_list.append(
+            _metric_cell_html(row_ser.get("max_drawdown_p05_float"), "max_drawdown_float")
+        )
+        downside_row_html_list.append("<tr>" + "".join(downside_cell_html_list) + "</tr>")
+
+        upside_cell_html_list = [
+            f"<td>{html.escape(horizon_label_str)}</td>",
+            f"<td>{path_count_int}</td>",
+        ]
+        for threshold_float in normalized_upside_threshold_tuple:
+            column_name_str = _threshold_column_name_str("gain_gte", abs(float(threshold_float)))
+            upside_cell_html_list.append(
+                f"<td>{_format_percent(row_ser.get(column_name_str))}</td>"
+            )
+        upside_cell_html_list.append(
+            _metric_cell_html(row_ser.get("max_gain_p50_float"), "max_gain_float")
+        )
+        upside_cell_html_list.append(
+            _metric_cell_html(row_ser.get("max_gain_p95_float"), "max_gain_float")
+        )
+        upside_cell_html_list.append(
+            _metric_cell_html(row_ser.get("terminal_return_p50_float"), "terminal_return_float")
+        )
+        upside_row_html_list.append("<tr>" + "".join(upside_cell_html_list) + "</tr>")
+
+    upside_header_html_list = [
+        "<th>Horizon</th>",
+        "<th>Paths</th>",
+    ]
+    for threshold_float in normalized_upside_threshold_tuple:
+        upside_header_html_list.append(
+            f"<th>{html.escape(f'Gain >= {_signed_percent_str(abs(float(threshold_float)))}')}</th>"
+        )
+    upside_header_html_list.extend(
+        [
+            "<th>Median max gain</th>",
+            "<th>1-in-20 max gain</th>",
+            "<th>Median terminal</th>",
+        ]
+    )
+
+    downside_table_html = (
+        "<h3>Downside drawdown odds</h3>"
+        "<div class=\"scroll\"><table><thead><tr>"
+        + "".join(downside_header_html_list)
+        + "</tr></thead><tbody>"
+        + "".join(downside_row_html_list)
+        + "</tbody></table></div>"
+    )
+    upside_table_html = (
+        "<h3>Upside reach odds</h3>"
+        "<div class=\"scroll\"><table><thead><tr>"
+        + "".join(upside_header_html_list)
+        + "</tr></thead><tbody>"
+        + "".join(upside_row_html_list)
+        + "</tbody></table></div>"
+    )
+    return downside_table_html + upside_table_html
+
+
 def _interval_table_html(
     interval_df: pd.DataFrame,
     primary_mean_block_length_int: int,
@@ -1609,7 +1947,7 @@ def _metric_cell_html(value_obj, metric_name_str: str) -> str:
     value_float = _json_float(value_obj)
     if value_float is not None and any(
         token_str in metric_name_str
-        for token_str in ["return", "cagr", "drawdown", "var", "cvar", "ev"]
+        for token_str in ["return", "cagr", "drawdown", "var", "cvar", "ev", "gain"]
     ):
         class_str = "pos" if value_float >= 0.0 else "neg"
     class_attr_str = f' class="{class_str}"' if class_str else ""
@@ -1667,6 +2005,10 @@ def _format_percent(value_obj) -> str:
     if value_float is None:
         return "N/A"
     return f"{value_float:.2%}"
+
+
+def _signed_percent_str(value_float: float) -> str:
+    return f"{float(value_float):+.0%}"
 
 
 def _format_float(value_obj, digits_int: int) -> str:
@@ -1732,6 +2074,12 @@ def _compact_dict(raw_dict: dict[str, object]) -> dict[str, object]:
     }
 
 
+def _records_from_df(record_df: pd.DataFrame) -> list[dict[str, object]]:
+    if record_df is None or len(record_df) == 0:
+        return []
+    return [dict(row_ser) for _, row_ser in record_df.iterrows()]
+
+
 def _date_or_none_str(value_obj) -> str | None:
     if value_obj is None or pd.isna(value_obj):
         return None
@@ -1744,12 +2092,15 @@ __all__ = [
     "DEFAULT_RANDOM_SEED_INT",
     "DEFAULT_SENSITIVITY_BLOCK_LENGTH_TUPLE",
     "DEFAULT_SIMULATION_COUNT_INT",
+    "DEFAULT_HORIZON_YEAR_TUPLE",
+    "DEFAULT_UPSIDE_THRESHOLD_TUPLE",
     "RISK_ANALYSIS_TYPE_STR",
     "RiskAnalysis",
     "RiskAnalysisResult",
     "build_bootstrap_equity_path_df",
     "build_bootstrap_interval_df",
     "build_bootstrap_path_metric_df",
+    "build_horizon_probability_df",
     "build_return_histogram_df",
     "compute_path_metric_dict",
     "extract_realized_return_ser",
