@@ -36,6 +36,7 @@ from alpha.live.dashboard_v3.actions import (
     validate_action_request,
 )
 from alpha.live.dashboard_v3.charts import (
+    SUPPORTED_VALUE_MODE_STR_LIST,
     SUPPORTED_WINDOW_STR_LIST,
     build_allocation_pie_dict,
     build_book_risk_dict,
@@ -395,9 +396,8 @@ def create_app(
 
     @flask_app_obj.route("/fragments/equity-chart/<pod_id_str>")
     def equity_chart_fragment_route_fn(pod_id_str: str):
-        window_str = request.args.get("window", "all")
-        if window_str not in SUPPORTED_WINDOW_STR_LIST:
-            window_str = "all"
+        window_str = _resolve_window_str(request.args.get("window"))
+        value_mode_str = _resolve_value_mode_str(request.args.get("value"))
         provider_obj = flask_app_obj.config["data_provider_obj"]
         try:
             detail_dict = provider_obj.get_pod_detail_dict(pod_id_str)
@@ -407,11 +407,36 @@ def create_app(
         chart_obj = build_equity_chart_dict(
             pnl_dict.get("equity_point_dict_list"),
             window_str=window_str,
+            value_mode_str=value_mode_str,
         )
         return render_template(
             "_equity_chart.html",
             chart_dict=chart_obj.as_dict(),
             window_selector_pod_id_str=pod_id_str,
+        )
+
+    @flask_app_obj.route("/fragments/combined-equity-chart/<mode_str>")
+    def combined_equity_chart_fragment_route_fn(mode_str: str):
+        if mode_str not in SUPPORTED_MODE_STR_LIST:
+            abort(404)
+        window_str = _resolve_window_str(request.args.get("window"))
+        value_mode_str = _resolve_value_mode_str(request.args.get("value"))
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        summary_dict = provider_obj.get_summary_dict()
+        combined_book_env_dict = _find_combined_book_environment_dict(summary_dict, mode_str)
+        combined_book_equity_point_dict_list = (
+            (combined_book_env_dict or {}).get("equity_point_dict_list")
+            or (combined_book_env_dict or {}).get("carry_forward_equity_point_dict_list")
+        )
+        chart_obj = build_equity_chart_dict(
+            combined_book_equity_point_dict_list,
+            window_str=window_str,
+            value_mode_str=value_mode_str,
+        )
+        return render_template(
+            "_equity_chart.html",
+            chart_dict=chart_obj.as_dict(),
+            combined_chart_mode_str=mode_str,
         )
 
     # ── Phase 4: action preview + execution + journal ─────────────────
@@ -637,6 +662,16 @@ _MARKET_TIMEZONE_OBJ = ZoneInfo("America/New_York")
 def _now_clock_str() -> str:
     # Market time (New York), seconds precision, no milliseconds.
     return datetime.now(timezone.utc).astimezone(_MARKET_TIMEZONE_OBJ).strftime("%H:%M:%S ET")
+
+
+def _resolve_window_str(window_arg_str: str | None) -> str:
+    window_str = window_arg_str or "all"
+    return window_str if window_str in SUPPORTED_WINDOW_STR_LIST else "all"
+
+
+def _resolve_value_mode_str(value_arg_str: str | None) -> str:
+    value_mode_str = value_arg_str or "pct"
+    return value_mode_str if value_mode_str in SUPPORTED_VALUE_MODE_STR_LIST else "pct"
 
 
 def _provider_results_root_path_str(provider_obj) -> str:

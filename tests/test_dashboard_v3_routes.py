@@ -880,14 +880,18 @@ def test_pod_row_carries_data_pod_id_attribute(test_client_obj) -> None:
 # ── equity chart point markers ────────────────────────────────────────────
 
 
-def test_equity_chart_fragment_renders_point_markers(test_client_obj) -> None:
+def test_equity_chart_fragment_renders_milestone_markers(test_client_obj) -> None:
     response_obj = test_client_obj.get("/fragments/equity-chart/dv2_caspersky_live")
     assert response_obj.status_code == 200
     response_text_str = response_obj.get_data(as_text=True)
-    # The stub has 3 EOD points → a curve plus one <circle> marker per point,
-    # each carrying a hover <title> with date · equity · daily PnL.
-    assert response_text_str.count("<circle") >= 3
+    # The redesigned curve marks month ends rather than every EOD point. The stub
+    # is all in one month, so there is at least the latest month-end marker,
+    # carrying a hover <title> with its period and value.
+    assert response_text_str.count("<circle") >= 1
     assert "<title>" in response_text_str
+    # The %/$ value toggle is offered alongside the window selector.
+    assert "value=dollar" in response_text_str
+    assert "value=pct" in response_text_str
 
 
 # ── per-cycle trace panel ─────────────────────────────────────────────────
@@ -1149,6 +1153,43 @@ def test_equity_chart_fragment_unknown_pod_404s(test_client_obj) -> None:
 def test_equity_chart_fragment_clamps_unknown_window_to_all(test_client_obj) -> None:
     response_obj = test_client_obj.get("/fragments/equity-chart/dv2_caspersky_live?window=bogus")
     assert response_obj.status_code == 200
+
+
+def test_equity_chart_fragment_dollar_mode_renders_dollar_axis(test_client_obj) -> None:
+    response_obj = test_client_obj.get(
+        "/fragments/equity-chart/dv2_caspersky_live?window=all&value=dollar"
+    )
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    # In $ mode the headline reads "Cumulative P&L" and the milestone/axis labels
+    # carry a $ sign rather than a percent.
+    assert "Cumulative P&amp;L" in response_text_str
+    assert "$" in response_text_str
+
+
+def test_equity_chart_fragment_clamps_unknown_value_to_pct(test_client_obj) -> None:
+    response_obj = test_client_obj.get(
+        "/fragments/equity-chart/dv2_caspersky_live?value=bogus"
+    )
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    assert "Cumulative return" in response_text_str
+
+
+def test_combined_equity_chart_fragment_renders_svg(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/fragments/combined-equity-chart/live?window=all")
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    assert "<svg" in response_text_str
+    assert "equity-area-gradient-combined-live" in response_text_str
+    # Combined-book selector points back at the combined fragment endpoint.
+    assert "/fragments/combined-equity-chart/live" in response_text_str
+    assert "value=dollar" in response_text_str
+
+
+def test_combined_equity_chart_fragment_unknown_mode_404s(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/fragments/combined-equity-chart/bogus")
+    assert response_obj.status_code == 404
 
 
 def test_live_page_embeds_combined_book_chart(test_client_obj) -> None:

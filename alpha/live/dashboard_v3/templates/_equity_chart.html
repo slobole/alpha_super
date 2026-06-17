@@ -1,6 +1,19 @@
 {# Equity chart partial. Pure SVG, no JS dependencies.
-   Top region: cumulative return percent from the first visible EOD sample.
-   Bottom region: daily return bars. #}
+   Top region: cumulative return percent (or $ P&L when toggled) from the first
+   visible EOD sample, drawn as a calm filled-area line with month-end milestone
+   markers. The daily-return bars and recent-days table are collapsed below. #}
+{% set window_selector_pod_id_str = window_selector_pod_id_str | default('') %}
+{% set combined_chart_mode_str = combined_chart_mode_str | default('') %}
+{% set chart_selector_endpoint_str = '' %}
+{% set chart_selector_id_str = 'combined' %}
+{% if window_selector_pod_id_str %}
+  {% set chart_selector_endpoint_str = '/fragments/equity-chart/' ~ window_selector_pod_id_str %}
+  {% set chart_selector_id_str = window_selector_pod_id_str %}
+{% elif combined_chart_mode_str %}
+  {% set chart_selector_endpoint_str = '/fragments/combined-equity-chart/' ~ combined_chart_mode_str %}
+  {% set chart_selector_id_str = 'combined-' ~ combined_chart_mode_str %}
+{% endif %}
+{% set is_dollar_mode_bool = chart_dict.value_mode_str == 'dollar' %}
 <figure class="equity-chart-figure">
   {% if not chart_dict.has_curve_bool %}
     <div class="text-xs text-ink-500 italic">
@@ -12,12 +25,18 @@
       {% endif %}
     </div>
   {% else %}
-    {% set gradient_id_str = 'equity-area-gradient-' ~ (window_selector_pod_id_str or 'combined') %}
+    {% set gradient_id_str = 'equity-area-gradient-' ~ chart_selector_id_str %}
     <div class="flex flex-wrap items-end justify-between gap-3 mb-2">
       <div>
-        <div class="text-[10px] uppercase tracking-wide text-ink-400">Cumulative return</div>
+        <div class="text-[10px] uppercase tracking-wide text-ink-400">
+          {% if is_dollar_mode_bool %}Cumulative P&amp;L{% else %}Cumulative return{% endif %}
+        </div>
         <div class="text-lg font-semibold tabular-nums text-ink-900">
-          {{ chart_dict.latest_since_start_return_label_str }}
+          {% if is_dollar_mode_bool %}
+            {{ chart_dict.latest_since_start_pnl_label_str }}
+          {% else %}
+            {{ chart_dict.latest_since_start_return_label_str }}
+          {% endif %}
           <span class="ml-2 text-sm font-normal {% if chart_dict.latest_daily_is_positive_bool %}text-ok{% else %}text-bad{% endif %}">
             {{ chart_dict.latest_daily_pct_label_str }} today
           </span>
@@ -35,133 +54,169 @@
 
     <div class="equity-chart-surface">
       <svg viewBox="0 0 {{ chart_dict.width_int }} {{ chart_dict.height_int }}"
-           preserveAspectRatio="none"
+           preserveAspectRatio="xMidYMid meet"
            class="w-full block"
-           style="height:{{ chart_dict.height_int }}px;"
-           role="img" aria-label="Cumulative return curve">
+           style="width:100%;height:auto;"
+           role="img"
+           aria-label="Cumulative {% if is_dollar_mode_bool %}P&amp;L{% else %}return{% endif %} curve with month-end milestones">
         <defs>
           <linearGradient id="{{ gradient_id_str }}" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stop-color="#c06b75" stop-opacity="0.24"></stop>
-            <stop offset="100%" stop-color="#c06b75" stop-opacity="0.03"></stop>
+            <stop offset="0%" stop-color="#2f8fb0" stop-opacity="0.22"></stop>
+            <stop offset="100%" stop-color="#2f8fb0" stop-opacity="0.02"></stop>
           </linearGradient>
         </defs>
         {% for tick_dict in chart_dict.y_axis_tick_dict_list %}
           <line x1="{{ chart_dict.plot_left_int }}" x2="{{ chart_dict.plot_right_int }}"
                 y1="{{ tick_dict.y_float }}" y2="{{ tick_dict.y_float }}"
-                stroke="#e5e7eb" stroke-width="0.7"></line>
+                stroke="#eef2f6" stroke-width="0.7"></line>
           <text x="{{ chart_dict.plot_left_int - 8 }}" y="{{ tick_dict.y_float + 3 }}"
-                text-anchor="end" font-size="9" fill="#64748b">{{ tick_dict.label_str }}</text>
+                text-anchor="end" font-size="9" fill="#94a3b8">{{ tick_dict.label_str }}</text>
         {% endfor %}
-        <line x1="{{ chart_dict.plot_left_int }}" x2="{{ chart_dict.plot_right_int }}"
-              y1="{{ chart_dict.zero_y_float }}" y2="{{ chart_dict.zero_y_float }}"
-              stroke="#94a3b8" stroke-width="0.9"></line>
-        <line x1="{{ chart_dict.plot_left_int }}" x2="{{ chart_dict.plot_left_int }}"
-              y1="{{ chart_dict.plot_top_int }}" y2="{{ chart_dict.plot_bottom_int }}"
-              stroke="#cbd5e1" stroke-width="0.9"></line>
-        <line x1="{{ chart_dict.plot_left_int }}" x2="{{ chart_dict.plot_right_int }}"
-              y1="{{ chart_dict.plot_bottom_int }}" y2="{{ chart_dict.plot_bottom_int }}"
-              stroke="#cbd5e1" stroke-width="0.9"></line>
         {% if chart_dict.curve_area_d_str %}
           <path d="{{ chart_dict.curve_area_d_str }}" fill="url(#{{ gradient_id_str }})"></path>
         {% endif %}
-        <path d="{{ chart_dict.path_d_str }}" fill="none" stroke="#c06b75" stroke-width="1.7"
+        {# Zero baseline: dashed, like the reference figure. #}
+        <line x1="{{ chart_dict.plot_left_int }}" x2="{{ chart_dict.plot_right_int }}"
+              y1="{{ chart_dict.zero_y_float }}" y2="{{ chart_dict.zero_y_float }}"
+              stroke="#94a3b8" stroke-width="0.8" stroke-dasharray="3 2"></line>
+        <line x1="{{ chart_dict.plot_left_int }}" x2="{{ chart_dict.plot_left_int }}"
+              y1="{{ chart_dict.plot_top_int }}" y2="{{ chart_dict.plot_bottom_int }}"
+              stroke="#cbd5e1" stroke-width="0.8"></line>
+        <line x1="{{ chart_dict.plot_left_int }}" x2="{{ chart_dict.plot_right_int }}"
+              y1="{{ chart_dict.plot_bottom_int }}" y2="{{ chart_dict.plot_bottom_int }}"
+              stroke="#cbd5e1" stroke-width="0.8"></line>
+        <path d="{{ chart_dict.path_d_str }}" fill="none" stroke="#2f8fb0" stroke-width="1.8"
               stroke-linecap="round" stroke-linejoin="round"></path>
-        {# Per-EOD point markers. <title> gives on-hover date, equity, and daily PnL. #}
-        {% for point_dict in chart_dict.point_dict_list %}
-          <circle cx="{{ point_dict.x_float }}" cy="{{ point_dict.y_float }}" r="1.7"
-                  fill="#ffffff" stroke="#c06b75" stroke-width="1">
-            <title>{{ point_dict.market_date_str }} | cumulative {{ point_dict.cumulative_return_label_str }} | equity {{ point_dict.equity_label_str }} | daily {{ point_dict.daily_pct_label_str }} ({{ point_dict.daily_pnl_label_str }})</title>
+        {# Month-end milestone markers + labels, in the style of the reference. #}
+        {% for milestone_dict in chart_dict.milestone_dict_list %}
+          <circle cx="{{ milestone_dict.x_float }}" cy="{{ milestone_dict.y_float }}"
+                  r="{% if milestone_dict.is_latest_bool %}3.2{% else %}2.6{% endif %}"
+                  fill="{% if milestone_dict.is_latest_bool %}#2f8fb0{% else %}#ffffff{% endif %}"
+                  stroke="#2f8fb0" stroke-width="1.3">
+            <title>{{ milestone_dict.period_label_str }} | {{ milestone_dict.value_label_str }}</title>
           </circle>
+          {% if milestone_dict.show_label_bool %}
+            <text x="{{ milestone_dict.x_float }}" y="{{ milestone_dict.label_period_y_float }}"
+                  text-anchor="{{ milestone_dict.text_anchor_str }}"
+                  font-size="8" fill="#64748b">{{ milestone_dict.period_label_str }}</text>
+            <text x="{{ milestone_dict.x_float }}" y="{{ milestone_dict.label_value_y_float }}"
+                  text-anchor="{{ milestone_dict.text_anchor_str }}"
+                  font-size="8.5" font-weight="600" fill="#0f172a">{{ milestone_dict.value_label_str }}</text>
+          {% endif %}
         {% endfor %}
         {% for tick_dict in chart_dict.x_axis_tick_dict_list %}
           <line x1="{{ tick_dict.x_float }}" x2="{{ tick_dict.x_float }}"
                 y1="{{ chart_dict.plot_bottom_int }}" y2="{{ chart_dict.plot_bottom_int + 3 }}"
                 stroke="#94a3b8" stroke-width="0.8"></line>
           <text x="{{ tick_dict.x_float }}" y="{{ chart_dict.plot_bottom_int + 15 }}"
-                text-anchor="{{ tick_dict.text_anchor_str }}" font-size="9" fill="#64748b">{{ tick_dict.label_str }}</text>
+                text-anchor="{{ tick_dict.text_anchor_str }}" font-size="9" fill="#94a3b8">{{ tick_dict.label_str }}</text>
         {% endfor %}
       </svg>
     </div>
-
-    {% if chart_dict.pnl_bar_dict_list %}
-      <div class="flex items-center justify-between text-[10px] uppercase tracking-wide text-ink-400 mt-3">
-        <span>Daily return</span>
-        <span class="normal-case tracking-normal text-ink-500">zero line centered</span>
-      </div>
-      <svg viewBox="0 0 {{ chart_dict.width_int }} {{ chart_dict.bar_height_int }}"
-           preserveAspectRatio="none"
-           class="w-full block mt-1 equity-pnl-bars"
-           style="height:{{ chart_dict.bar_height_int }}px;"
-           role="img" aria-label="Daily return bars (green up day, red down day)">
-        <text x="{{ chart_dict.plot_left_int - 8 }}" y="{{ chart_dict.pnl_zero_y_float + 3 }}"
-              text-anchor="end" font-size="9" fill="#64748b">0.00%</text>
-        <line x1="{{ chart_dict.plot_left_int }}" x2="{{ chart_dict.plot_right_int }}"
-              y1="{{ chart_dict.pnl_zero_y_float }}" y2="{{ chart_dict.pnl_zero_y_float }}"
-              stroke="#94a3b8" stroke-width="0.8"></line>
-        <line x1="{{ chart_dict.plot_left_int }}" x2="{{ chart_dict.plot_left_int }}"
-              y1="2" y2="{{ chart_dict.bar_height_int - 2 }}"
-              stroke="#cbd5e1" stroke-width="0.8"></line>
-        {% for bar_dict in chart_dict.pnl_bar_dict_list %}
-          <rect x="{{ bar_dict.x_float }}" y="{{ bar_dict.y_float }}"
-                width="{{ bar_dict.width_float }}" height="{{ bar_dict.height_float }}"
-                rx="1.4"
-                fill="{% if bar_dict.is_positive_bool %}#16a34a{% else %}#dc2626{% endif %}"
-                opacity="0.9">
-            <title>{{ bar_dict.market_date_str }} | {{ bar_dict.pnl_label_str }}</title>
-          </rect>
-        {% endfor %}
-      </svg>
-    {% endif %}
 
     <div class="flex items-baseline justify-between text-[10px] text-ink-500 mt-2 tabular-nums">
       <span>range {{ chart_dict.range_min_label_str }} to {{ chart_dict.range_max_label_str }}</span>
       <span>{{ chart_dict.earliest_market_date_str or '-' }} to {{ chart_dict.latest_market_date_str or '-' }}</span>
     </div>
 
-    {# Recent days: date, equity, daily $, daily %. Collapsed by default. #}
-    <details class="mt-1">
-      <summary class="cursor-pointer text-[11px] text-ink-500 hover:text-ink-900">recent days</summary>
-      <table class="mt-1 w-full text-xs tabular-nums">
-        <thead class="text-ink-400">
-          <tr>
-            <th class="text-left font-normal">Date</th>
-            <th class="text-right font-normal">Equity</th>
-            <th class="text-right font-normal">Daily PnL</th>
-            <th class="text-right font-normal">%</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for point_dict in chart_dict.point_dict_list[-8:] | reverse %}
-            <tr class="border-t border-ink-100">
-              <td>{{ point_dict.market_date_str }}</td>
-              <td class="text-right">{{ point_dict.equity_label_str }}</td>
-              <td class="text-right">{{ point_dict.daily_pnl_label_str }}</td>
-              <td class="text-right {% if (point_dict.daily_pct_float or 0) >= 0 %}text-ok{% else %}text-bad{% endif %}">
-                {{ point_dict.daily_pct_label_str }}
-              </td>
-            </tr>
+    {% if chart_selector_endpoint_str %}
+      <div class="flex flex-wrap items-center gap-3 mt-3 text-[10px]">
+        <div class="flex gap-1">
+          {% for window_option_str in ['30d', '90d', 'all'] %}
+            <button type="button"
+                    hx-get="{{ chart_selector_endpoint_str }}?window={{ window_option_str }}&value={{ chart_dict.value_mode_str }}"
+                    hx-target="closest .equity-chart-figure"
+                    hx-swap="outerHTML"
+                    class="px-2 py-0.5 rounded border
+                           {% if chart_dict.window_str == window_option_str %}
+                             bg-ink-900 text-white border-ink-900
+                           {% else %}
+                             bg-white text-ink-500 border-ink-100 hover:bg-ink-50
+                           {% endif %}">
+              {{ window_option_str }}
+            </button>
           {% endfor %}
-        </tbody>
-      </table>
-    </details>
-  {% endif %}
+        </div>
+        <div class="flex gap-1">
+          {% for value_option_str, value_label_str in [('pct', '%'), ('dollar', '$')] %}
+            <button type="button"
+                    hx-get="{{ chart_selector_endpoint_str }}?window={{ chart_dict.window_str }}&value={{ value_option_str }}"
+                    hx-target="closest .equity-chart-figure"
+                    hx-swap="outerHTML"
+                    class="px-2 py-0.5 rounded border
+                           {% if chart_dict.value_mode_str == value_option_str %}
+                             bg-ink-900 text-white border-ink-900
+                           {% else %}
+                             bg-white text-ink-500 border-ink-100 hover:bg-ink-50
+                           {% endif %}">
+              {{ value_label_str }}
+            </button>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
 
-  {% if window_selector_pod_id_str %}
-    <div class="flex gap-1 mt-2 text-[10px]">
-      {% for window_option_str in ['30d', '90d', 'all'] %}
-        <button type="button"
-                hx-get="/fragments/equity-chart/{{ window_selector_pod_id_str }}?window={{ window_option_str }}"
-                hx-target="closest .equity-chart-figure"
-                hx-swap="outerHTML"
-                class="px-2 py-0.5 rounded border
-                       {% if chart_dict.window_str == window_option_str %}
-                         bg-ink-900 text-white border-ink-900
-                       {% else %}
-                         bg-white text-ink-500 border-ink-100 hover:bg-ink-50
-                       {% endif %}">
-          {{ window_option_str }}
-        </button>
-      {% endfor %}
-    </div>
+    {# Daily-return bars + recent-days table, collapsed so the default view is the
+       single clean curve panel. #}
+    {% if chart_dict.pnl_bar_dict_list or chart_dict.point_dict_list %}
+      <details class="mt-3">
+        <summary class="cursor-pointer text-[11px] text-ink-500 hover:text-ink-900">daily detail</summary>
+
+        {% if chart_dict.pnl_bar_dict_list %}
+          <div class="flex items-center justify-between text-[10px] uppercase tracking-wide text-ink-400 mt-3">
+            <span>Daily return</span>
+            <span class="normal-case tracking-normal text-ink-500">zero line centered</span>
+          </div>
+          <svg viewBox="0 0 {{ chart_dict.width_int }} {{ chart_dict.bar_height_int }}"
+               preserveAspectRatio="none"
+               class="w-full block mt-1 equity-pnl-bars"
+               style="height:{{ chart_dict.bar_height_int }}px;"
+               role="img" aria-label="Daily return bars (green up day, red down day)">
+            <text x="{{ chart_dict.plot_left_int - 8 }}" y="{{ chart_dict.pnl_zero_y_float + 3 }}"
+                  text-anchor="end" font-size="9" fill="#64748b">0.00%</text>
+            <line x1="{{ chart_dict.plot_left_int }}" x2="{{ chart_dict.plot_right_int }}"
+                  y1="{{ chart_dict.pnl_zero_y_float }}" y2="{{ chart_dict.pnl_zero_y_float }}"
+                  stroke="#94a3b8" stroke-width="0.8"></line>
+            <line x1="{{ chart_dict.plot_left_int }}" x2="{{ chart_dict.plot_left_int }}"
+                  y1="2" y2="{{ chart_dict.bar_height_int - 2 }}"
+                  stroke="#cbd5e1" stroke-width="0.8"></line>
+            {% for bar_dict in chart_dict.pnl_bar_dict_list %}
+              <rect x="{{ bar_dict.x_float }}" y="{{ bar_dict.y_float }}"
+                    width="{{ bar_dict.width_float }}" height="{{ bar_dict.height_float }}"
+                    rx="1.4"
+                    fill="{% if bar_dict.is_positive_bool %}#16a34a{% else %}#dc2626{% endif %}"
+                    opacity="0.9">
+                <title>{{ bar_dict.market_date_str }} | {{ bar_dict.pnl_label_str }}</title>
+              </rect>
+            {% endfor %}
+          </svg>
+        {% endif %}
+
+        {# Recent days: date, equity, daily $, daily %. #}
+        <div class="text-[10px] uppercase tracking-wide text-ink-400 mt-3">recent days</div>
+        <table class="mt-1 w-full text-xs tabular-nums">
+          <thead class="text-ink-400">
+            <tr>
+              <th class="text-left font-normal">Date</th>
+              <th class="text-right font-normal">Equity</th>
+              <th class="text-right font-normal">Daily PnL</th>
+              <th class="text-right font-normal">%</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for point_dict in chart_dict.point_dict_list[-8:] | reverse %}
+              <tr class="border-t border-ink-100">
+                <td>{{ point_dict.market_date_str }}</td>
+                <td class="text-right">{{ point_dict.equity_label_str }}</td>
+                <td class="text-right">{{ point_dict.daily_pnl_label_str }}</td>
+                <td class="text-right {% if (point_dict.daily_pct_float or 0) >= 0 %}text-ok{% else %}text-bad{% endif %}">
+                  {{ point_dict.daily_pct_label_str }}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </details>
+    {% endif %}
   {% endif %}
 </figure>

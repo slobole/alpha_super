@@ -33,6 +33,14 @@ PNL_BAR_BLOCK_HEIGHT_INT = 44
 # as distinct bars instead of merging into one fat slab.
 MAX_PNL_BAR_WIDTH_FLOAT = 14.0
 SUPPORTED_WINDOW_STR_LIST = ["30d", "90d", "all"]
+# The headline curve can be read two equivalent ways from the SAME equity
+# series: cumulative return percent (default, comparable across pods) or
+# cumulative dollar P&L since the first visible sample.
+SUPPORTED_VALUE_MODE_STR_LIST = ["pct", "dollar"]
+# Month-end markers are drawn at every month boundary, but only this many get a
+# text label so labels never overlap on a long "all" window. The latest month is
+# always labeled.
+MAX_MILESTONE_LABEL_COUNT_INT = 7
 
 _MONTH_ABBREVIATION_STR_LIST = [
     "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -52,6 +60,7 @@ class EquityChartDict:
     x_axis_tick_dict_list: list[dict[str, Any]] = field(default_factory=list)
     point_dict_list: list[dict[str, Any]] = field(default_factory=list)
     pnl_bar_dict_list: list[dict[str, Any]] = field(default_factory=list)
+    milestone_dict_list: list[dict[str, Any]] = field(default_factory=list)
     range_min_float: float = 0.0
     range_max_float: float = 0.0
     range_min_label_str: str = "—"
@@ -65,6 +74,7 @@ class EquityChartDict:
     latest_daily_pct_label_str: str = "—"
     latest_daily_is_positive_bool: bool = True
     window_str: str = "all"
+    value_mode_str: str = "pct"
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -78,6 +88,7 @@ class EquityChartDict:
             "x_axis_tick_dict_list": self.x_axis_tick_dict_list,
             "point_dict_list": self.point_dict_list,
             "pnl_bar_dict_list": self.pnl_bar_dict_list,
+            "milestone_dict_list": self.milestone_dict_list,
             "range_min_float": self.range_min_float,
             "range_max_float": self.range_max_float,
             "range_min_label_str": self.range_min_label_str,
@@ -91,6 +102,7 @@ class EquityChartDict:
             "latest_daily_pct_label_str": self.latest_daily_pct_label_str,
             "latest_daily_is_positive_bool": self.latest_daily_is_positive_bool,
             "window_str": self.window_str,
+            "value_mode_str": self.value_mode_str,
             "width_int": CHART_VIEW_WIDTH_INT,
             "height_int": CHART_VIEW_HEIGHT_INT,
             "plot_left_int": CHART_PLOT_LEFT_INT,
@@ -106,9 +118,12 @@ def build_equity_chart_dict(
     equity_point_dict_list: list[dict[str, Any]] | None,
     *,
     window_str: str = "all",
+    value_mode_str: str = "pct",
 ) -> EquityChartDict:
+    if value_mode_str not in SUPPORTED_VALUE_MODE_STR_LIST:
+        value_mode_str = "pct"
     if not equity_point_dict_list:
-        return EquityChartDict(window_str=window_str)
+        return EquityChartDict(window_str=window_str, value_mode_str=value_mode_str)
 
     clean_point_list = _truncate_for_window(equity_point_dict_list, window_str)
     equity_pairs_list = [
@@ -122,7 +137,7 @@ def build_equity_chart_dict(
     equity_pairs_list = [pair for pair in equity_pairs_list if pair[1] is not None]
     point_count_int = len(equity_pairs_list)
     if point_count_int == 0:
-        return EquityChartDict(window_str=window_str)
+        return EquityChartDict(window_str=window_str, value_mode_str=value_mode_str)
     if point_count_int == 1:
         only_date_str, only_equity_float, _ = equity_pairs_list[0]
         return EquityChartDict(
@@ -136,6 +151,7 @@ def build_equity_chart_dict(
             latest_market_date_str=only_date_str,
             earliest_market_date_str=only_date_str,
             window_str=window_str,
+            value_mode_str=value_mode_str,
         )
 
     equity_value_list = [pair[1] for pair in equity_pairs_list]
@@ -150,8 +166,20 @@ def build_equity_chart_dict(
         else 0.0
         for equity_float in equity_value_list
     ]
-    range_min_float = min(0.0, min(cumulative_return_pct_list))
-    range_max_float = max(0.0, max(cumulative_return_pct_list))
+    # The %/$ toggle only decides which already-computed cumulative series drives
+    # the y-geometry and the labels. Both are derived from the same equity series
+    # with no future information, so switching modes can never alter the curve's
+    # shape or introduce lookahead — it is a pure display choice.
+    is_dollar_mode_bool = value_mode_str == "dollar"
+    active_value_list = (
+        cumulative_pnl_value_list if is_dollar_mode_bool else cumulative_return_pct_list
+    )
+    format_value_fn = (
+        _format_signed_money_str if is_dollar_mode_bool else _format_signed_pct_str
+    )
+
+    range_min_float = min(0.0, min(active_value_list))
+    range_max_float = max(0.0, max(active_value_list))
     if abs(range_max_float - range_min_float) < 1e-9:
         range_min_float -= 0.0001
         range_max_float += 0.0001
@@ -166,11 +194,12 @@ def build_equity_chart_dict(
     for index_int, (date_str, equity_float, pnl_float) in enumerate(equity_pairs_list):
         cumulative_pnl_float = cumulative_pnl_value_list[index_int]
         cumulative_return_pct_float = cumulative_return_pct_list[index_int]
+        active_value_float = active_value_list[index_int]
         x_float = CHART_PLOT_LEFT_INT + index_int * horizontal_step_float
         y_float = (
             CHART_VIEW_HEIGHT_INT
             - CHART_PLOT_BOTTOM_INT
-            - ((cumulative_return_pct_float - range_min_float) / value_range_float) * plot_height_float
+            - ((active_value_float - range_min_float) / value_range_float) * plot_height_float
         )
         point_xy_list.append((x_float, y_float))
         # Daily return % from the equity ratio vs the prior session (honest
@@ -197,8 +226,13 @@ def build_equity_chart_dict(
     zero_y_float = _y_for_chart_value_float(0.0, range_min_float, value_range_float)
     curve_area_d_str = _build_curve_area_path_str(point_xy_list, zero_y_float)
     pnl_bar_dict_list = _build_pnl_bar_dict_list(equity_pairs_list, horizontal_step_float)
-    y_axis_tick_dict_list = _build_y_axis_tick_dict_list(range_min_float, range_max_float)
+    y_axis_tick_dict_list = _build_y_axis_tick_dict_list(
+        range_min_float, range_max_float, format_value_fn
+    )
     x_axis_tick_dict_list = _build_x_axis_tick_dict_list(equity_pairs_list, point_xy_list)
+    milestone_dict_list = _build_milestone_dict_list(
+        equity_pairs_list, point_xy_list, active_value_list, format_value_fn
+    )
 
     latest_pnl_float = equity_pairs_list[-1][2]
     latest_since_start_pnl_float = cumulative_pnl_value_list[-1]
@@ -216,10 +250,11 @@ def build_equity_chart_dict(
         x_axis_tick_dict_list=x_axis_tick_dict_list,
         point_dict_list=point_dict_list,
         pnl_bar_dict_list=pnl_bar_dict_list,
+        milestone_dict_list=milestone_dict_list,
         range_min_float=float(range_min_float),
         range_max_float=float(range_max_float),
-        range_min_label_str=_format_signed_pct_str(range_min_float),
-        range_max_label_str=_format_signed_pct_str(range_max_float),
+        range_min_label_str=format_value_fn(range_min_float),
+        range_max_label_str=format_value_fn(range_max_float),
         latest_equity_float=equity_value_list[-1],
         latest_market_date_str=equity_pairs_list[-1][0],
         earliest_market_date_str=equity_pairs_list[0][0],
@@ -229,6 +264,7 @@ def build_equity_chart_dict(
         latest_daily_pct_label_str=_format_signed_pct_str(latest_daily_pct_float),
         latest_daily_is_positive_bool=(latest_daily_pct_float or 0.0) >= 0,
         window_str=window_str,
+        value_mode_str=value_mode_str,
     )
 
 
@@ -290,6 +326,7 @@ def _y_for_chart_value_float(
 def _build_y_axis_tick_dict_list(
     range_min_float: float,
     range_max_float: float,
+    format_value_fn,
 ) -> list[dict[str, Any]]:
     value_range_float = max(1e-9, range_max_float - range_min_float)
     tick_value_list = [
@@ -301,10 +338,85 @@ def _build_y_axis_tick_dict_list(
         {
             "value_float": value_float,
             "y_float": _y_for_chart_value_float(value_float, range_min_float, value_range_float),
-            "label_str": _format_signed_pct_str(value_float),
+            "label_str": format_value_fn(value_float),
         }
         for value_float in tick_value_list
     ]
+
+
+def _build_milestone_dict_list(
+    equity_pairs_list: list[tuple[str, float | None, float | None]],
+    point_xy_list: list[tuple[float, float]],
+    active_value_list: list[float],
+    format_value_fn,
+) -> list[dict[str, Any]]:
+    """Mark each calendar month's end on the curve, like the reference figure.
+
+    A *** CRITICAL*** point: a month-end here is the last EOD sample that falls
+    inside a ``YYYY-MM`` bucket — it uses only that sample's own date, never a
+    future bar. The final (possibly still-in-progress) month is always included
+    so the latest point carries a marker.
+
+    Markers are drawn at every month end; to keep a long "all" window legible,
+    only ``MAX_MILESTONE_LABEL_COUNT_INT`` evenly-spaced labels are shown (the
+    latest month is always labeled). The label sits above the marker, dropping
+    below it only when the point hugs the top edge.
+    """
+    point_count_int = len(equity_pairs_list)
+    if point_count_int < 2 or len(point_xy_list) != point_count_int:
+        return []
+
+    month_end_index_list: list[int] = []
+    previous_month_key_str: str | None = None
+    for index_int in range(point_count_int):
+        month_key_str = str(equity_pairs_list[index_int][0])[:7]
+        if month_key_str != previous_month_key_str:
+            if previous_month_key_str is not None:
+                month_end_index_list.append(index_int - 1)
+            previous_month_key_str = month_key_str
+    month_end_index_list.append(point_count_int - 1)
+    month_end_index_list = sorted(set(month_end_index_list))
+
+    milestone_count_int = len(month_end_index_list)
+    label_step_int = max(
+        1, math.ceil(milestone_count_int / MAX_MILESTONE_LABEL_COUNT_INT)
+    )
+    milestone_dict_list: list[dict[str, Any]] = []
+    for position_int, index_int in enumerate(month_end_index_list):
+        x_float, y_float = point_xy_list[index_int]
+        is_latest_bool = index_int == point_count_int - 1
+        # Thin from the end so the latest month is always kept.
+        show_label_bool = is_latest_bool or (
+            (milestone_count_int - 1 - position_int) % label_step_int == 0
+        )
+        if index_int == 0:
+            text_anchor_str = "start"
+        elif is_latest_bool:
+            text_anchor_str = "end"
+        else:
+            text_anchor_str = "middle"
+        if y_float - 16 < CHART_PLOT_TOP_INT:
+            label_period_y_float = y_float + 11
+            label_value_y_float = y_float + 20
+        else:
+            label_period_y_float = y_float - 13
+            label_value_y_float = y_float - 4
+        milestone_dict_list.append(
+            {
+                "x_float": round(x_float, 2),
+                "y_float": round(y_float, 2),
+                "period_label_str": _format_month_label_str(
+                    str(equity_pairs_list[index_int][0])
+                ),
+                "value_label_str": format_value_fn(active_value_list[index_int]),
+                "text_anchor_str": text_anchor_str,
+                "label_period_y_float": round(label_period_y_float, 2),
+                "label_value_y_float": round(label_value_y_float, 2),
+                "show_label_bool": show_label_bool,
+                "is_latest_bool": is_latest_bool,
+            }
+        )
+    return milestone_dict_list
 
 
 def _build_x_axis_tick_dict_list(
@@ -926,6 +1038,7 @@ __all__ = [
     "BookRiskDict",
     "EquityChartDict",
     "PNL_BAR_BLOCK_HEIGHT_INT",
+    "SUPPORTED_VALUE_MODE_STR_LIST",
     "SUPPORTED_WINDOW_STR_LIST",
     "build_allocation_pie_dict",
     "build_book_risk_dict",
