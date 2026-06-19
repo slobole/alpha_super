@@ -188,38 +188,42 @@ def test_unknown_value_mode_falls_back_to_pct() -> None:
     assert chart_obj.value_mode_str == "pct"
 
 
-def test_milestones_mark_each_month_end_with_latest_always_labeled() -> None:
-    # Three calendar months → three month-end markers; the last one is "latest".
-    point_list = [
-        _point("2026-03-30", 10000.0),
-        _point("2026-03-31", 10100.0),
-        _point("2026-04-29", 10200.0),
-        _point("2026-04-30", 10250.0),
-        _point("2026-05-29", 10400.0),
-    ]
-    chart_obj = build_equity_chart_dict(point_list)
-    milestone_dict_list = chart_obj.milestone_dict_list
-    assert [m["period_label_str"] for m in milestone_dict_list] == ["Mar 26", "Apr 26", "May 26"]
-    # Each month's marker sits on its last in-month sample (here, every other point).
-    assert milestone_dict_list[0]["value_label_str"] == "+1.00%"   # 10100/10000 - 1
-    assert milestone_dict_list[-1]["is_latest_bool"] is True
-    assert milestone_dict_list[-1]["show_label_bool"] is True
-    # Few months → every milestone keeps its label.
-    assert all(m["show_label_bool"] for m in milestone_dict_list)
+def test_max_drawdown_footnote_measures_from_running_peak() -> None:
+    # Up to 11000 (peak), down to 9900, back up. *** the running peak must only
+    # look backward, so the trough is -10% from the 11000 peak, not from a later
+    # higher value.
+    chart_obj = build_equity_chart_dict([
+        _point("2026-05-01", 10000.0),
+        _point("2026-05-02", 11000.0),
+        _point("2026-05-03", 9900.0),
+        _point("2026-05-04", 12000.0),
+    ])
+    assert chart_obj.max_drawdown_label_str == "-10.00%"   # 9900/11000 - 1
 
 
-def test_milestone_labels_thin_out_on_long_history() -> None:
-    # 18 distinct months → 18 markers, but labels are capped so they don't overlap.
-    point_list = []
-    for month_int in range(1, 13):
-        point_list.append(_point(f"2025-{month_int:02d}-15", 10000.0 + month_int * 10))
-        point_list.append(_point(f"2025-{month_int:02d}-28", 10000.0 + month_int * 12))
-    for month_int in range(1, 7):
-        point_list.append(_point(f"2026-{month_int:02d}-15", 10200.0 + month_int * 10))
-        point_list.append(_point(f"2026-{month_int:02d}-28", 10200.0 + month_int * 12))
-    chart_obj = build_equity_chart_dict(point_list)
-    milestone_dict_list = chart_obj.milestone_dict_list
-    assert len(milestone_dict_list) == 18  # a marker per month end
-    labeled_count_int = sum(1 for m in milestone_dict_list if m["show_label_bool"])
-    assert labeled_count_int <= 7  # MAX_MILESTONE_LABEL_COUNT_INT
-    assert milestone_dict_list[-1]["show_label_bool"] is True  # latest always labeled
+def test_monotonic_up_curve_reports_no_drawdown() -> None:
+    chart_obj = build_equity_chart_dict([
+        _point("2026-05-01", 10000.0),
+        _point("2026-05-02", 10500.0),
+        _point("2026-05-03", 11000.0),
+    ])
+    assert chart_obj.max_drawdown_label_str == "0.00%"
+
+
+def test_annualized_vol_footnote_is_computed() -> None:
+    chart_obj = build_equity_chart_dict([
+        _point("2026-05-01", 10000.0),
+        _point("2026-05-02", 10200.0),
+        _point("2026-05-03", 9900.0),
+        _point("2026-05-04", 10100.0),
+    ])
+    assert chart_obj.annualized_vol_label_str.endswith("%")
+
+
+def test_vol_footnote_degrades_gracefully_for_two_points() -> None:
+    # A single return is not enough for a sample stdev → vol stays "—".
+    chart_obj = build_equity_chart_dict([
+        _point("2026-05-01", 10000.0),
+        _point("2026-05-02", 10500.0),
+    ])
+    assert chart_obj.annualized_vol_label_str == "—"

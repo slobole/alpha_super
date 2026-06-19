@@ -1,7 +1,9 @@
-{# Equity chart partial. Pure SVG, no JS dependencies.
-   Top region: cumulative return percent (or $ P&L when toggled) from the first
-   visible EOD sample, drawn as a calm filled-area line with month-end milestone
-   markers. The daily-return bars and recent-days table are collapsed below. #}
+{# Equity / PnL curve partial. Pure SVG, no JS dependencies.
+   One elegant cumulative curve with a soft fill, a single headline number, and a
+   small muted footnote for max drawdown + volatility. The %/$ toggle switches
+   between cumulative return percent and cumulative dollar P&L. Uniform scaling
+   (preserveAspectRatio "meet" + height:auto) keeps the line, text, and dot crisp
+   at any width. #}
 {% set window_selector_pod_id_str = window_selector_pod_id_str | default('') %}
 {% set combined_chart_mode_str = combined_chart_mode_str | default('') %}
 {% set chart_selector_endpoint_str = '' %}
@@ -26,29 +28,27 @@
     </div>
   {% else %}
     {% set gradient_id_str = 'equity-area-gradient-' ~ chart_selector_id_str %}
-    <div class="flex flex-wrap items-end justify-between gap-3 mb-2">
-      <div>
-        <div class="text-[10px] uppercase tracking-wide text-ink-400">
-          {% if is_dollar_mode_bool %}Cumulative P&amp;L{% else %}Cumulative return{% endif %}
-        </div>
-        <div class="text-lg font-semibold tabular-nums text-ink-900">
+
+    {# Headline: one big number, the day's move, and the date range. #}
+    <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 mb-2">
+      <div class="flex items-baseline gap-2">
+        <span class="text-2xl font-semibold tabular-nums text-ink-900 leading-none">
           {% if is_dollar_mode_bool %}
             {{ chart_dict.latest_since_start_pnl_label_str }}
           {% else %}
             {{ chart_dict.latest_since_start_return_label_str }}
           {% endif %}
-          <span class="ml-2 text-sm font-normal {% if chart_dict.latest_daily_is_positive_bool %}text-ok{% else %}text-bad{% endif %}">
-            {{ chart_dict.latest_daily_pct_label_str }} today
-          </span>
-        </div>
-      </div>
-      <div class="flex items-center gap-3 text-[11px] text-ink-500 tabular-nums">
-        <span>equity {{ chart_dict.latest_equity_float | money }}</span>
-        <span>{{ chart_dict.earliest_market_date_str or '-' }}</span>
-        <span>{{ chart_dict.point_count_int }} pts</span>
-        <span class="{% if chart_dict.latest_daily_is_positive_bool %}text-ok{% else %}text-bad{% endif %}">
-          {{ chart_dict.latest_daily_pct_label_str }}
         </span>
+        <span class="text-xs text-ink-500">
+          {% if is_dollar_mode_bool %}cumulative P&amp;L{% else %}cumulative return{% endif %}
+        </span>
+        <span class="text-xs {% if chart_dict.latest_daily_is_positive_bool %}text-ok{% else %}text-bad{% endif %}">
+          {{ chart_dict.latest_daily_pct_label_str }} today
+        </span>
+      </div>
+      <div class="text-[11px] text-ink-500 tabular-nums">
+        {{ chart_dict.earliest_market_date_str or '-' }} → {{ chart_dict.latest_market_date_str or '-' }}
+        · {{ chart_dict.latest_equity_float | money }}
       </div>
     </div>
 
@@ -58,11 +58,11 @@
            class="w-full block"
            style="width:100%;height:auto;"
            role="img"
-           aria-label="Cumulative {% if is_dollar_mode_bool %}P&amp;L{% else %}return{% endif %} curve with month-end milestones">
+           aria-label="Cumulative {% if is_dollar_mode_bool %}P&amp;L{% else %}return{% endif %} curve">
         <defs>
           <linearGradient id="{{ gradient_id_str }}" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stop-color="#2f8fb0" stop-opacity="0.22"></stop>
-            <stop offset="100%" stop-color="#2f8fb0" stop-opacity="0.02"></stop>
+            <stop offset="0%" stop-color="#2f8fb0" stop-opacity="0.18"></stop>
+            <stop offset="100%" stop-color="#2f8fb0" stop-opacity="0.01"></stop>
           </linearGradient>
         </defs>
         {% for tick_dict in chart_dict.y_axis_tick_dict_list %}
@@ -75,89 +75,67 @@
         {% if chart_dict.curve_area_d_str %}
           <path d="{{ chart_dict.curve_area_d_str }}" fill="url(#{{ gradient_id_str }})"></path>
         {% endif %}
-        {# Zero baseline: dashed, like the reference figure. #}
+        {# Soft zero baseline. #}
         <line x1="{{ chart_dict.plot_left_int }}" x2="{{ chart_dict.plot_right_int }}"
               y1="{{ chart_dict.zero_y_float }}" y2="{{ chart_dict.zero_y_float }}"
-              stroke="#94a3b8" stroke-width="0.8" stroke-dasharray="3 2"></line>
-        <line x1="{{ chart_dict.plot_left_int }}" x2="{{ chart_dict.plot_left_int }}"
-              y1="{{ chart_dict.plot_top_int }}" y2="{{ chart_dict.plot_bottom_int }}"
-              stroke="#cbd5e1" stroke-width="0.8"></line>
-        <line x1="{{ chart_dict.plot_left_int }}" x2="{{ chart_dict.plot_right_int }}"
-              y1="{{ chart_dict.plot_bottom_int }}" y2="{{ chart_dict.plot_bottom_int }}"
-              stroke="#cbd5e1" stroke-width="0.8"></line>
-        <path d="{{ chart_dict.path_d_str }}" fill="none" stroke="#2f8fb0" stroke-width="1.8"
+              stroke="#cbd5e1" stroke-width="0.8" stroke-dasharray="3 3"></line>
+        <path d="{{ chart_dict.path_d_str }}" fill="none" stroke="#2f8fb0" stroke-width="2"
               stroke-linecap="round" stroke-linejoin="round"></path>
-        {# Month-end milestone markers + labels, in the style of the reference. #}
-        {% for milestone_dict in chart_dict.milestone_dict_list %}
-          <circle cx="{{ milestone_dict.x_float }}" cy="{{ milestone_dict.y_float }}"
-                  r="{% if milestone_dict.is_latest_bool %}3.2{% else %}2.6{% endif %}"
-                  fill="{% if milestone_dict.is_latest_bool %}#2f8fb0{% else %}#ffffff{% endif %}"
-                  stroke="#2f8fb0" stroke-width="1.3">
-            <title>{{ milestone_dict.period_label_str }} | {{ milestone_dict.value_label_str }}</title>
-          </circle>
-          {% if milestone_dict.show_label_bool %}
-            <text x="{{ milestone_dict.x_float }}" y="{{ milestone_dict.label_period_y_float }}"
-                  text-anchor="{{ milestone_dict.text_anchor_str }}"
-                  font-size="8" fill="#64748b">{{ milestone_dict.period_label_str }}</text>
-            <text x="{{ milestone_dict.x_float }}" y="{{ milestone_dict.label_value_y_float }}"
-                  text-anchor="{{ milestone_dict.text_anchor_str }}"
-                  font-size="8.5" font-weight="600" fill="#0f172a">{{ milestone_dict.value_label_str }}</text>
-          {% endif %}
-        {% endfor %}
+        {% set latest_point_dict = chart_dict.point_dict_list[-1] %}
+        <circle cx="{{ latest_point_dict.x_float }}" cy="{{ latest_point_dict.y_float }}" r="3"
+                fill="#2f8fb0" stroke="#ffffff" stroke-width="1.2">
+          <title>{{ latest_point_dict.market_date_str }} | cumulative {{ latest_point_dict.cumulative_return_label_str }} | equity {{ latest_point_dict.equity_label_str }}</title>
+        </circle>
         {% for tick_dict in chart_dict.x_axis_tick_dict_list %}
-          <line x1="{{ tick_dict.x_float }}" x2="{{ tick_dict.x_float }}"
-                y1="{{ chart_dict.plot_bottom_int }}" y2="{{ chart_dict.plot_bottom_int + 3 }}"
-                stroke="#94a3b8" stroke-width="0.8"></line>
           <text x="{{ tick_dict.x_float }}" y="{{ chart_dict.plot_bottom_int + 15 }}"
                 text-anchor="{{ tick_dict.text_anchor_str }}" font-size="9" fill="#94a3b8">{{ tick_dict.label_str }}</text>
         {% endfor %}
       </svg>
     </div>
 
-    <div class="flex items-baseline justify-between text-[10px] text-ink-500 mt-2 tabular-nums">
-      <span>range {{ chart_dict.range_min_label_str }} to {{ chart_dict.range_max_label_str }}</span>
-      <span>{{ chart_dict.earliest_market_date_str or '-' }} to {{ chart_dict.latest_market_date_str or '-' }}</span>
+    {# Understated risk footnote — kept small and secondary on purpose. #}
+    <div class="flex flex-wrap items-center justify-between gap-2 text-[11px] text-ink-500 tabular-nums mt-2">
+      <span>Max drawdown {{ chart_dict.max_drawdown_label_str }} &nbsp;·&nbsp; Annualized vol {{ chart_dict.annualized_vol_label_str }}</span>
+      {% if chart_selector_endpoint_str %}
+        <span class="flex items-center gap-3">
+          <span class="flex gap-1">
+            {% for window_option_str in ['30d', '90d', 'all'] %}
+              <button type="button"
+                      hx-get="{{ chart_selector_endpoint_str }}?window={{ window_option_str }}&value={{ chart_dict.value_mode_str }}"
+                      hx-target="closest .equity-chart-figure"
+                      hx-swap="outerHTML"
+                      class="px-2 py-0.5 rounded border
+                             {% if chart_dict.window_str == window_option_str %}
+                               bg-ink-900 text-white border-ink-900
+                             {% else %}
+                               bg-white text-ink-500 border-ink-100 hover:bg-ink-50
+                             {% endif %}">
+                {{ window_option_str }}
+              </button>
+            {% endfor %}
+          </span>
+          <span class="flex gap-1">
+            {% for value_option_str, value_label_str in [('pct', '%'), ('dollar', '$')] %}
+              <button type="button"
+                      hx-get="{{ chart_selector_endpoint_str }}?window={{ chart_dict.window_str }}&value={{ value_option_str }}"
+                      hx-target="closest .equity-chart-figure"
+                      hx-swap="outerHTML"
+                      class="px-2 py-0.5 rounded border
+                             {% if chart_dict.value_mode_str == value_option_str %}
+                               bg-ink-900 text-white border-ink-900
+                             {% else %}
+                               bg-white text-ink-500 border-ink-100 hover:bg-ink-50
+                             {% endif %}">
+                {{ value_label_str }}
+              </button>
+            {% endfor %}
+          </span>
+        </span>
+      {% endif %}
     </div>
 
-    {% if chart_selector_endpoint_str %}
-      <div class="flex flex-wrap items-center gap-3 mt-3 text-[10px]">
-        <div class="flex gap-1">
-          {% for window_option_str in ['30d', '90d', 'all'] %}
-            <button type="button"
-                    hx-get="{{ chart_selector_endpoint_str }}?window={{ window_option_str }}&value={{ chart_dict.value_mode_str }}"
-                    hx-target="closest .equity-chart-figure"
-                    hx-swap="outerHTML"
-                    class="px-2 py-0.5 rounded border
-                           {% if chart_dict.window_str == window_option_str %}
-                             bg-ink-900 text-white border-ink-900
-                           {% else %}
-                             bg-white text-ink-500 border-ink-100 hover:bg-ink-50
-                           {% endif %}">
-              {{ window_option_str }}
-            </button>
-          {% endfor %}
-        </div>
-        <div class="flex gap-1">
-          {% for value_option_str, value_label_str in [('pct', '%'), ('dollar', '$')] %}
-            <button type="button"
-                    hx-get="{{ chart_selector_endpoint_str }}?window={{ chart_dict.window_str }}&value={{ value_option_str }}"
-                    hx-target="closest .equity-chart-figure"
-                    hx-swap="outerHTML"
-                    class="px-2 py-0.5 rounded border
-                           {% if chart_dict.value_mode_str == value_option_str %}
-                             bg-ink-900 text-white border-ink-900
-                           {% else %}
-                             bg-white text-ink-500 border-ink-100 hover:bg-ink-50
-                           {% endif %}">
-              {{ value_label_str }}
-            </button>
-          {% endfor %}
-        </div>
-      </div>
-    {% endif %}
-
-    {# Daily-return bars + recent-days table, collapsed so the default view is the
-       single clean curve panel. #}
+    {# Daily-return bars + recent-days table, collapsed so the default view stays
+       a single clean curve. #}
     {% if chart_dict.pnl_bar_dict_list or chart_dict.point_dict_list %}
       <details class="mt-3">
         <summary class="cursor-pointer text-[11px] text-ink-500 hover:text-ink-900">daily detail</summary>

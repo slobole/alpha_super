@@ -880,13 +880,19 @@ def test_pod_row_carries_data_pod_id_attribute(test_client_obj) -> None:
 # ── equity chart point markers ────────────────────────────────────────────
 
 
-def test_equity_chart_fragment_renders_milestone_markers(test_client_obj) -> None:
+def test_equity_chart_fragment_renders_elegant_curve(test_client_obj) -> None:
     response_obj = test_client_obj.get("/fragments/equity-chart/dv2_caspersky_live")
     assert response_obj.status_code == 200
     response_text_str = response_obj.get_data(as_text=True)
-    # The redesigned curve marks month ends rather than every EOD point. The stub
-    # is all in one month, so there is at least the latest month-end marker,
-    # carrying a hover <title> with its period and value.
+    # One clean curve with a single headline and a small risk footnote — no stat
+    # cards, no CAGR/Sharpe, no separate drawdown panel.
+    assert "cumulative return" in response_text_str
+    assert "Max drawdown" in response_text_str
+    assert "Annualized vol" in response_text_str
+    assert "CAGR" not in response_text_str
+    assert "Sharpe" not in response_text_str
+    # Crisp uniform scaling, plus the latest-point marker with a hover title.
+    assert 'preserveAspectRatio="xMidYMid meet"' in response_text_str
     assert response_text_str.count("<circle") >= 1
     assert "<title>" in response_text_str
     # The %/$ value toggle is offered alongside the window selector.
@@ -1534,7 +1540,7 @@ def test_build_monthly_return_dict_list_groups_by_month() -> None:
 def test_mode_page_shows_daily_pct_and_monthly_returns(test_client_obj) -> None:
     response_text_str = test_client_obj.get("/live").get_data(as_text=True)
     assert "today" in response_text_str          # latest daily % next to equity
-    assert "Cumulative return" in response_text_str  # axis-based percent chart header
+    assert "cumulative return" in response_text_str  # curve headline label
     assert "Daily return" in response_text_str       # the bar strip is now labeled
     assert "zero line centered" in response_text_str
     assert "recent days" in response_text_str     # recent-days table
