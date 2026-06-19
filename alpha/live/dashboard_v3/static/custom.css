@@ -21,8 +21,3 @@ table tbody tr:nth-child(even) td { background: #fafafa; }
   background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   border-radius: 6px;
 }
-
-.equity-pnl-bars {
-  background: #f8fafc;
-  border-radius: 6px;
-}

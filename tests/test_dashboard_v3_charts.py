@@ -5,7 +5,7 @@ from __future__ import annotations
 from alpha.live.dashboard_v3.charts import (
     CHART_VIEW_HEIGHT_INT,
     CHART_VIEW_WIDTH_INT,
-    PNL_BAR_BLOCK_HEIGHT_INT,
+    DAILY_PANEL_VIEW_HEIGHT_INT,
     build_equity_chart_dict,
 )
 
@@ -75,7 +75,6 @@ def test_chart_exposes_axis_ticks_for_svg_rendering() -> None:
     assert [tick_dict["text_anchor_str"] for tick_dict in x_axis_tick_dict_list] == [
         "start", "end",
     ]
-    assert chart_dict["pnl_zero_y_float"] == PNL_BAR_BLOCK_HEIGHT_INT / 2
     assert chart_dict["latest_since_start_pnl_label_str"] == "+$500"
     assert chart_dict["latest_since_start_return_label_str"] == "+5.00%"
 
@@ -132,20 +131,37 @@ def test_window_all_preserves_full_history() -> None:
     assert chart_obj.point_count_int == 31
 
 
-def test_pnl_bars_built_proportional_to_max_abs() -> None:
+def test_daily_bars_built_proportional_to_max_abs() -> None:
     chart_obj = build_equity_chart_dict([
         _point("2026-05-01", 10000.0, pnl_float=0.0),
         _point("2026-05-02", 10100.0, pnl_float=100.0),
         _point("2026-05-03", 9900.0, pnl_float=-200.0),
     ])
+    # Default pct mode → daily return bars (first point has no prior, so 2 bars).
     assert len(chart_obj.pnl_bar_dict_list) == 2
     largest_bar_dict = max(chart_obj.pnl_bar_dict_list, key=lambda d: d["height_float"])
-    # The largest bar should correspond to the down-return day.
+    # The largest bar should correspond to the down day.
     assert largest_bar_dict["is_positive_bool"] is False
-    # All bars fit within the half-height of the bar block.
+    # All bars fit inside the panel viewBox.
     for bar_dict in chart_obj.pnl_bar_dict_list:
         assert bar_dict["y_float"] >= 0
-        assert bar_dict["y_float"] + bar_dict["height_float"] <= PNL_BAR_BLOCK_HEIGHT_INT
+        assert bar_dict["y_float"] + bar_dict["height_float"] <= DAILY_PANEL_VIEW_HEIGHT_INT
+    # IBKR-style panel exposes a centered zero line and a symmetric ±max axis.
+    assert chart_obj.daily_zero_y_float > 0
+    assert len(chart_obj.daily_y_axis_tick_dict_list) == 3
+    assert chart_obj.daily_y_axis_tick_dict_list[1]["label_str"] in ("+0.00%", "+$0")
+
+
+def test_daily_bars_follow_the_dollar_toggle() -> None:
+    chart_obj = build_equity_chart_dict([
+        _point("2026-05-01", 10000.0, pnl_float=0.0),
+        _point("2026-05-02", 10100.0, pnl_float=100.0),
+        _point("2026-05-03", 9900.0, pnl_float=-200.0),
+    ], value_mode_str="dollar")
+    # In $ mode the bars use the daily dollar PnL and label it in dollars.
+    label_str_list = [bar_dict["pnl_label_str"] for bar_dict in chart_obj.pnl_bar_dict_list]
+    assert any("$" in label_str for label_str in label_str_list)
+    assert "-$200" in label_str_list
 
 
 def test_unknown_window_falls_back_to_all() -> None:

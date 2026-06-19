@@ -28,9 +28,13 @@ CHART_PLOT_LEFT_INT = 58
 CHART_PLOT_RIGHT_INT = 8
 CHART_PLOT_TOP_INT = 10
 CHART_PLOT_BOTTOM_INT = 24
-PNL_BAR_BLOCK_HEIGHT_INT = 44
-# Cap the daily-PnL bar width (viewBox units) so a handful of EOD points render
-# as distinct bars instead of merging into one fat slab.
+# Daily-P&L panel (IBKR-style green/red bars around a centered zero line). Its
+# own viewBox with margins for a real value axis and date labels.
+DAILY_PANEL_VIEW_HEIGHT_INT = 96
+DAILY_PANEL_PLOT_TOP_INT = 10
+DAILY_PANEL_PLOT_BOTTOM_INT = 20
+# Cap the daily bar width (viewBox units) so a handful of EOD points render as
+# distinct bars instead of merging into one fat slab.
 MAX_PNL_BAR_WIDTH_FLOAT = 14.0
 SUPPORTED_WINDOW_STR_LIST = ["30d", "90d", "all"]
 # The headline curve can be read two equivalent ways from the SAME equity
@@ -56,6 +60,8 @@ class EquityChartDict:
     x_axis_tick_dict_list: list[dict[str, Any]] = field(default_factory=list)
     point_dict_list: list[dict[str, Any]] = field(default_factory=list)
     pnl_bar_dict_list: list[dict[str, Any]] = field(default_factory=list)
+    daily_y_axis_tick_dict_list: list[dict[str, Any]] = field(default_factory=list)
+    daily_zero_y_float: float = 0.0
     # Two understated risk readouts shown as a small footnote under the curve.
     max_drawdown_label_str: str = "—"
     annualized_vol_label_str: str = "—"
@@ -86,6 +92,8 @@ class EquityChartDict:
             "x_axis_tick_dict_list": self.x_axis_tick_dict_list,
             "point_dict_list": self.point_dict_list,
             "pnl_bar_dict_list": self.pnl_bar_dict_list,
+            "daily_y_axis_tick_dict_list": self.daily_y_axis_tick_dict_list,
+            "daily_zero_y_float": self.daily_zero_y_float,
             "max_drawdown_label_str": self.max_drawdown_label_str,
             "annualized_vol_label_str": self.annualized_vol_label_str,
             "range_min_float": self.range_min_float,
@@ -108,8 +116,11 @@ class EquityChartDict:
             "plot_right_int": CHART_VIEW_WIDTH_INT - CHART_PLOT_RIGHT_INT,
             "plot_top_int": CHART_PLOT_TOP_INT,
             "plot_bottom_int": CHART_VIEW_HEIGHT_INT - CHART_PLOT_BOTTOM_INT,
-            "bar_height_int": PNL_BAR_BLOCK_HEIGHT_INT,
-            "pnl_zero_y_float": PNL_BAR_BLOCK_HEIGHT_INT / 2,
+            "daily_panel_height_int": DAILY_PANEL_VIEW_HEIGHT_INT,
+            "daily_panel_plot_left_int": CHART_PLOT_LEFT_INT,
+            "daily_panel_plot_right_int": CHART_VIEW_WIDTH_INT - CHART_PLOT_RIGHT_INT,
+            "daily_panel_plot_top_int": DAILY_PANEL_PLOT_TOP_INT,
+            "daily_panel_plot_bottom_int": DAILY_PANEL_VIEW_HEIGHT_INT - DAILY_PANEL_PLOT_BOTTOM_INT,
         }
 
 
@@ -224,7 +235,9 @@ def build_equity_chart_dict(
     path_d_str = _build_polyline_path_str(point_xy_list)
     zero_y_float = _y_for_chart_value_float(0.0, range_min_float, value_range_float)
     curve_area_d_str = _build_curve_area_path_str(point_xy_list, zero_y_float)
-    pnl_bar_dict_list = _build_pnl_bar_dict_list(equity_pairs_list, horizontal_step_float)
+    daily_panel_dict = _build_daily_panel_dict(
+        equity_pairs_list, point_count_int, is_dollar_mode_bool
+    )
     y_axis_tick_dict_list = _build_y_axis_tick_dict_list(
         range_min_float, range_max_float, format_value_fn
     )
@@ -246,7 +259,9 @@ def build_equity_chart_dict(
         y_axis_tick_dict_list=y_axis_tick_dict_list,
         x_axis_tick_dict_list=x_axis_tick_dict_list,
         point_dict_list=point_dict_list,
-        pnl_bar_dict_list=pnl_bar_dict_list,
+        pnl_bar_dict_list=daily_panel_dict["bar_dict_list"],
+        daily_y_axis_tick_dict_list=daily_panel_dict["y_axis_tick_dict_list"],
+        daily_zero_y_float=daily_panel_dict["zero_y_float"],
         max_drawdown_label_str=risk_footnote_dict["max_drawdown_label_str"],
         annualized_vol_label_str=risk_footnote_dict["annualized_vol_label_str"],
         range_min_float=float(range_min_float),
@@ -408,38 +423,62 @@ def _build_x_axis_tick_dict_list(
     return tick_dict_list
 
 
-def _build_pnl_bar_dict_list(
+def _build_daily_panel_dict(
     equity_pairs_list: list[tuple[str, float | None, float | None]],
-    horizontal_step_float: float,
-) -> list[dict[str, Any]]:
-    daily_return_pct_list: list[float | None] = []
-    for index_int, (_date_str, equity_float, _pnl_float) in enumerate(equity_pairs_list):
-        previous_equity_float = equity_pairs_list[index_int - 1][1] if index_int > 0 else None
-        daily_return_pct_float = (
-            (float(equity_float) / float(previous_equity_float)) - 1.0
-            if equity_float is not None and previous_equity_float not in (None, 0)
-            else None
-        )
-        daily_return_pct_list.append(daily_return_pct_float)
-    valid_daily_return_pct_list = [
-        value_float for value_float in daily_return_pct_list if value_float is not None
-    ]
-    if not valid_daily_return_pct_list:
-        return []
-    max_abs_float = max(abs(value_float) for value_float in valid_daily_return_pct_list)
+    point_count_int: int,
+    is_dollar_mode_bool: bool,
+) -> dict[str, Any]:
+    """IBKR-style daily-P&L panel: green/red bars around a centered zero line.
+
+    Each day's value follows the active %/$ toggle — the daily dollar P&L in
+    ``$`` mode, or the day-over-day equity return in ``%`` mode. Bars are scaled
+    against the largest absolute day so the axis is symmetric (+max at the top,
+    -max at the bottom). The panel reuses the equity panel's left/right margins so
+    its bars line up under the curve and share the same date ticks.
+    """
+    empty_dict: dict[str, Any] = {
+        "bar_dict_list": [],
+        "y_axis_tick_dict_list": [],
+        "zero_y_float": round(
+            DAILY_PANEL_PLOT_TOP_INT
+            + (DAILY_PANEL_VIEW_HEIGHT_INT - DAILY_PANEL_PLOT_TOP_INT - DAILY_PANEL_PLOT_BOTTOM_INT) / 2.0,
+            2,
+        ),
+    }
+    format_value_fn = _format_signed_money_str if is_dollar_mode_bool else _format_signed_pct_str
+    daily_value_list: list[float | None] = []
+    for index_int, (_date_str, equity_float, pnl_float) in enumerate(equity_pairs_list):
+        if is_dollar_mode_bool:
+            daily_value_list.append(_float_or_none(pnl_float))
+        else:
+            previous_equity_float = equity_pairs_list[index_int - 1][1] if index_int > 0 else None
+            daily_value_list.append(
+                (float(equity_float) / float(previous_equity_float)) - 1.0
+                if equity_float is not None and previous_equity_float not in (None, 0)
+                else None
+            )
+    valid_value_list = [value for value in daily_value_list if value is not None]
+    if not valid_value_list:
+        return empty_dict
+    max_abs_float = max(abs(value) for value in valid_value_list)
     if max_abs_float <= 0:
-        return []
+        return empty_dict
+
+    plot_height_float = (
+        DAILY_PANEL_VIEW_HEIGHT_INT - DAILY_PANEL_PLOT_TOP_INT - DAILY_PANEL_PLOT_BOTTOM_INT
+    )
+    zero_y_float = DAILY_PANEL_PLOT_TOP_INT + plot_height_float / 2.0
+    half_height_float = plot_height_float / 2.0 - 2.0
+    plot_width_float = CHART_VIEW_WIDTH_INT - CHART_PLOT_LEFT_INT - CHART_PLOT_RIGHT_INT
+    horizontal_step_float = plot_width_float / max(1, point_count_int - 1)
+    bar_width_float = max(0.8, min(horizontal_step_float * 0.7, MAX_PNL_BAR_WIDTH_FLOAT))
+
     bar_dict_list: list[dict[str, Any]] = []
-    half_height_float = PNL_BAR_BLOCK_HEIGHT_INT / 2
-    # Capped width + centered under each point so a few EOD bars read as
-    # distinct bars (with gaps) rather than one merged slab.
-    bar_width_float = max(1.0, min(horizontal_step_float * 0.6, MAX_PNL_BAR_WIDTH_FLOAT))
-    for index_int, (date_str, _equity_float, _pnl_float) in enumerate(equity_pairs_list):
-        daily_return_pct_float = daily_return_pct_list[index_int]
-        if daily_return_pct_float is None:
+    for index_int, daily_value_float in enumerate(daily_value_list):
+        if daily_value_float is None:
             continue
-        bar_height_float = abs(float(daily_return_pct_float)) / max_abs_float * half_height_float
-        is_positive_bool = float(daily_return_pct_float) >= 0
+        bar_height_float = abs(float(daily_value_float)) / max_abs_float * half_height_float
+        is_positive_bool = float(daily_value_float) >= 0
         center_x_float = CHART_PLOT_LEFT_INT + index_int * horizontal_step_float
         bar_x_float = min(
             max(float(CHART_PLOT_LEFT_INT), center_x_float - bar_width_float / 2.0),
@@ -447,14 +486,24 @@ def _build_pnl_bar_dict_list(
         )
         bar_dict_list.append({
             "x_float": round(bar_x_float, 2),
-            "y_float": round(half_height_float - bar_height_float if is_positive_bool else half_height_float, 2),
+            "y_float": round(zero_y_float - bar_height_float if is_positive_bool else zero_y_float, 2),
             "width_float": round(bar_width_float, 2),
             "height_float": round(max(0.5, bar_height_float), 2),
             "is_positive_bool": is_positive_bool,
-            "market_date_str": date_str,
-            "pnl_label_str": _format_signed_pct_str(daily_return_pct_float),
+            "market_date_str": equity_pairs_list[index_int][0],
+            "pnl_label_str": format_value_fn(daily_value_float),
         })
-    return bar_dict_list
+
+    y_axis_tick_dict_list = [
+        {"y_float": round(zero_y_float - half_height_float, 2), "label_str": format_value_fn(max_abs_float)},
+        {"y_float": round(zero_y_float, 2), "label_str": format_value_fn(0.0)},
+        {"y_float": round(zero_y_float + half_height_float, 2), "label_str": format_value_fn(-max_abs_float)},
+    ]
+    return {
+        "bar_dict_list": bar_dict_list,
+        "y_axis_tick_dict_list": y_axis_tick_dict_list,
+        "zero_y_float": round(zero_y_float, 2),
+    }
 
 
 def _float_or_none(value_obj: Any) -> float | None:
@@ -997,10 +1046,10 @@ def build_cross_pod_exposure_dict(
 __all__ = [
     "CHART_VIEW_HEIGHT_INT",
     "CHART_VIEW_WIDTH_INT",
+    "DAILY_PANEL_VIEW_HEIGHT_INT",
     "AllocationPieDict",
     "BookRiskDict",
     "EquityChartDict",
-    "PNL_BAR_BLOCK_HEIGHT_INT",
     "SUPPORTED_VALUE_MODE_STR_LIST",
     "SUPPORTED_WINDOW_STR_LIST",
     "build_allocation_pie_dict",
