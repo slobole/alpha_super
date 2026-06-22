@@ -293,6 +293,22 @@ class DefenseFirstFallbackVixCashVariantTests(unittest.TestCase):
             lineary_bool=False,
         )
 
+    def test_standard_tqqq_vix_cash_zroz_variant_replaces_tlt_only(self):
+        variant_module = importlib.import_module(
+            "strategies.taa_df.strategy_taa_df_fallback_tqqq_vix_cash_zroz"
+        )
+
+        self.assertEqual(variant_module.DEFAULT_CONFIG.defensive_asset_list, ("GLD", "UUP", "ZROZ", "DBC"))
+        self.assertEqual(variant_module.DEFAULT_CONFIG.fallback_asset, "TQQQ")
+        self.assertNotIn("TLT", variant_module.DEFAULT_CONFIG.tradeable_asset_list)
+
+    def test_standard_tqqq_vix_cash_zroz_variant_smoke(self):
+        self._run_smoke_variant(
+            module_name_str="strategies.taa_df.strategy_taa_df_fallback_tqqq_vix_cash_zroz",
+            loader_attr_str="get_defense_first_data",
+            lineary_bool=False,
+        )
+
     def test_btal_1n_vix_cash_variant_smoke(self):
         self._run_smoke_variant(
             module_name_str="strategies.taa_df.strategy_taa_df_btal_1n_fallback_upro_vix_cash",

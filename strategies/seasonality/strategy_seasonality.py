@@ -75,6 +75,7 @@ DEFAULT_MONTH_TARGET_WEIGHT_MAP = {
     8: {"IEF": 1.0},
 }
 DEFAULT_BENCHMARK_LIST = ("$SPX",)
+STRATEGY_NAME_STR = "strategy_seasonality"
 
 
 def default_trade_id_int() -> int:
@@ -223,12 +224,16 @@ class SeasonalityStrategy(Strategy):
             )
 
 
-if __name__ == "__main__":
+def run_variant(
+    show_display_bool: bool = True,
+    save_results_bool: bool = True,
+    output_dir_str: str = "results",
+) -> SeasonalityStrategy:
     symbol_list = sorted(
         {
             asset_str
-            for target_weight_map in DEFAULT_MONTH_TARGET_WEIGHT_MAP.values()
-            for asset_str in target_weight_map
+            for monthly_target_weight_map in DEFAULT_MONTH_TARGET_WEIGHT_MAP.values()
+            for asset_str in monthly_target_weight_map
         }
     )
     benchmark_list = list(DEFAULT_BENCHMARK_LIST)
@@ -239,8 +244,8 @@ if __name__ == "__main__":
         end_date_str=None,
     )
 
-    strategy = SeasonalityStrategy(
-        name="strategy_seasonality",
+    strategy_obj = SeasonalityStrategy(
+        name=STRATEGY_NAME_STR,
         benchmarks=benchmark_list,
         month_target_weight_map=DEFAULT_MONTH_TARGET_WEIGHT_MAP,
         capital_base=100_000,
@@ -250,10 +255,18 @@ if __name__ == "__main__":
     )
 
     calendar_idx = pricing_data_df.index
-    run_daily(strategy, pricing_data_df, calendar_idx)
+    run_daily(strategy_obj, pricing_data_df, calendar_idx)
 
-    pd.set_option("display.max_columns", None)
-    pd.set_option("display.width", 1000)
-    display(strategy.summary)
-    display(strategy.summary_trades)
-    save_results(strategy)
+    if show_display_bool:
+        pd.set_option("display.max_columns", None)
+        pd.set_option("display.width", 1000)
+        display(strategy_obj.summary)
+        display(strategy_obj.summary_trades)
+    if save_results_bool:
+        save_results(strategy_obj, output_dir=output_dir_str)
+
+    return strategy_obj
+
+
+if __name__ == "__main__":
+    run_variant()

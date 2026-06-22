@@ -6,10 +6,10 @@ will rarely reach the logs.
 
 ## Mental model: one source, zoom levels
 
-The dashboard, the Discord alert, and `ops_report` all read the **same state**
-(the pod's SQLite DB + release config), so they cannot contradict each other.
-The log files are not competing truths — they are the detailed timeline behind
-that state.
+The dashboard, the Discord alert, and `ops_report` all read the pod's SQLite DB
+and release config at their own collection times. Treat differences as
+timestamp/source differences first. The log files are not competing truths —
+they are the detailed timeline behind that state.
 
 ```
   ONE source of truth = the pod's state (DB)
@@ -116,12 +116,51 @@ or the watchdog itself is down — a dead machine cannot send Discord. Then:
      → fix whatever it prints (env, uv, config.env), then confirm pings resume.
 ```
 
+## Hand off evidence to Codex
+
+When the dashboard/doctor output is not enough, collect one redacted bundle and
+send the zip for review:
+
+```powershell
+.\scripts\collect_vps_debug_bundle.ps1 -Mode live -PodId <pod_id>
+```
+
+If the live service uses an explicit DB path, pass the same path here:
+
+```powershell
+.\scripts\collect_vps_debug_bundle.ps1 -Mode live -PodId <pod_id> -DbPath <db_path>
+```
+
+The default bundle captures `ops_report`, high-signal log tails, redacted
+`config.env`, release/config evidence, git state, and scheduler-task status. It
+does not run `tick`, `submit_vplan`, `post_execution_reconcile`, or
+`eod_snapshot`.
+
+The zip is meant for trusted operator/Codex review. API tokens and webhooks are
+redacted, but deeper opt-in commands can include account routes, positions,
+cash, NetLiq, open orders, and current broker state.
+
+Deeper checks are opt-in by design:
+
+- `-IncludeRunnerDetails` runs `status`, `next_due`, and plan/report view
+  commands. These are not order actions, but they can record diagnostic
+  job/release metadata in the pod SQLite DB.
+- `-IncludeDoctor -DoctorBrokerClientId <unused_id>` runs `doctor` with an
+  explicit alternate IBKR client ID. Doctor can query broker state and update
+  snapshot readiness metadata.
+- `-IncludeNorgateDoctor` runs `doctor_norgate_client.py`, which can sync local
+  snapshot files under `NORGATE_SNAPSHOT_ROOT`.
+- `-ReleaseManifestPath <yaml> -IbkrProbeClientId <unused_id>` runs the
+  standalone IBKR probe with an explicit unused client ID so it does not collide
+  with the scheduler session.
+
 ## Command quick reference
 
 ```
   Dashboard            uv run python -m alpha.live.dashboard_v3
   Inspector (CLI)      uv run python -m alpha.live.runner ops_report --mode live --json
   Doctor (deep)        uv run python -m alpha.live.runner doctor --mode live --pod-id <pod_id> --json
+  Debug bundle         .\scripts\collect_vps_debug_bundle.ps1 -Mode live -PodId <pod_id>
   Decision plan        uv run python -m alpha.live.runner show_decision_plan --mode live --pod-id <pod_id>
   VPlan                uv run python -m alpha.live.runner show_vplan --mode live --pod-id <pod_id>
   State                uv run python -m alpha.live.runner status --mode live --pod-id <pod_id>
