@@ -339,6 +339,39 @@ def test_client_sync_derives_profiles_and_promotes_valid_snapshot(tmp_path, monk
         assert (promoted_path_obj / PRICE_FILE_NAME_STR).exists()
 
 
+def test_client_sync_can_skip_valid_existing_same_date_snapshot(
+    tmp_path,
+    monkeypatch,
+):
+    releases_root_path_obj = tmp_path / "releases"
+    _write_release_manifest(
+        releases_root_path_obj,
+        file_name_str="enabled.yaml",
+        release_id_str="release.enabled",
+        pod_id_str="pod_enabled",
+        profile_str=PROFILE_STR,
+    )
+    local_root_path_obj = tmp_path / "local_snapshots"
+    existing_snapshot_path_obj = _write_snapshot(local_root_path_obj)
+
+    def _fail_download_file(**_kwargs):
+        raise AssertionError("valid same-date local snapshot should not be downloaded again")
+
+    monkeypatch.setattr("scripts.sync_norgate_snapshots_api._download_file", _fail_download_file)
+    with _api_server(tmp_path) as (api_url_str, _service_obj):
+        promoted_path_list = sync_required_snapshots(
+            api_url_str=api_url_str,
+            token_str=TOKEN_STR,
+            client_id_str=CLIENT_ID_STR,
+            releases_root_path_str=str(releases_root_path_obj),
+            local_root_path_str=str(local_root_path_obj),
+            overwrite_bool=True,
+            skip_valid_existing_bool=True,
+        )
+
+    assert promoted_path_list == [existing_snapshot_path_obj]
+
+
 def test_client_sync_refuses_hash_mismatch_and_does_not_promote(tmp_path):
     releases_root_path_obj = tmp_path / "releases"
     _write_release_manifest(

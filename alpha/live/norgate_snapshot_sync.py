@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +29,9 @@ SYNC_LOCK_FILE_NAME_STR = ".sync.lock"
 SYNC_LOCK_TTL_SECONDS_INT = 600
 SYNC_FAILURE_COOLDOWN_SECONDS_INT = 60
 SYNC_ACTIVE_WAIT_STATUS_SET = {"waiting", "failed"}
+SNAPSHOT_STALE_FOR_CYCLE_REASON_CODE_STR = "snapshot_stale_for_cycle"
+DEFAULT_PROVIDER_PUBLISH_GRACE_MINUTES_INT = 180
+DEFAULT_STALE_ALERT_SUBMISSION_LEAD_MINUTES_INT = 30
 SNAPSHOT_STALE_GATE_REASON_SET = {
     "snapshot_not_ready",
     "snapshot_not_ready_for_session",
@@ -93,6 +96,9 @@ def _emit_sync_event(
     elif event_name_str == "norgate_snapshot_sync_failed":
         level_str = "WARN"
         phase_action_str = "norgate.sync.failed"
+    elif event_name_str == "norgate_snapshot_sync_waiting":
+        level_str = "WARN"
+        phase_action_str = "norgate.sync.waiting"
     else:
         level_str = "INFO"
         phase_action_str = "norgate.sync.skipped"
@@ -168,12 +174,276 @@ def _build_gate_reason_by_release_dict(
     return gate_reason_by_release_dict
 
 
+def _required_snapshot_session_by_release_dict(
+    release_list: list[LiveRelease],
+    as_of_ts: datetime,
+) -> dict[str, Any]:
+    required_snapshot_session_by_release_dict: dict[str, Any] = {}
+    for release_obj in release_list:
+        signal_clock_str = scheduler_utils.normalize_signal_clock_str(release_obj.signal_clock_str)
+        if signal_clock_str == "eod_snapshot_ready":
+            required_session_label_ts = scheduler_utils.get_latest_completed_session_label_ts(
+                as_of_ts,
+                release_obj.session_calendar_id_str,
+            )
+        elif signal_clock_str == "month_end_snapshot_ready":
+            required_session_label_ts = scheduler_utils.get_latest_completed_month_end_session_label_ts(
+                as_of_ts,
+                release_obj.session_calendar_id_str,
+            )
+        else:
+            continue
+        if required_session_label_ts is not None:
+            required_snapshot_session_by_release_dict[release_obj.release_id_str] = required_session_label_ts
+    return required_snapshot_session_by_release_dict
+
+
+def _required_snapshot_date_by_release_dict(
+    required_snapshot_session_by_release_dict: dict[str, Any],
+) -> dict[str, str]:
+    required_snapshot_date_by_release_dict: dict[str, str] = {}
+    for release_id_str, required_session_label_ts in required_snapshot_session_by_release_dict.items():
+        required_snapshot_date_by_release_dict[release_id_str] = (
+            required_session_label_ts.date().isoformat()
+        )
+    return required_snapshot_date_by_release_dict
+
+
+def _stale_alert_deadline_by_release_dict(
+    release_list: list[LiveRelease],
+    required_snapshot_session_by_release_dict: dict[str, Any],
+) -> dict[str, str]:
+    stale_alert_deadline_by_release_dict: dict[str, str] = {}
+    release_by_id_dict = {release_obj.release_id_str: release_obj for release_obj in release_list}
+    for release_id_str, required_session_label_ts in required_snapshot_session_by_release_dict.items():
+        release_obj = release_by_id_dict.get(release_id_str)
+        if release_obj is None:
+            continue
+        close_deadline_ts = scheduler_utils.get_session_close_timestamp_ts(
+            required_session_label_ts,
+            release_obj.session_calendar_id_str,
+        ) + timedelta(minutes=DEFAULT_PROVIDER_PUBLISH_GRACE_MINUTES_INT)
+        submission_deadline_ts = scheduler_utils.build_submission_timestamp_ts(
+            required_session_label_ts.to_pydatetime(),
+            release_obj,
+        ) - timedelta(minutes=DEFAULT_STALE_ALERT_SUBMISSION_LEAD_MINUTES_INT)
+        alert_deadline_ts = min(close_deadline_ts, submission_deadline_ts)
+        stale_alert_deadline_by_release_dict[release_id_str] = alert_deadline_ts.isoformat()
+    return stale_alert_deadline_by_release_dict
+
+
+def _timestamp_from_iso_or_none(timestamp_str: str | None) -> datetime | None:
+    if not timestamp_str:
+        return None
+    try:
+        timestamp_ts = datetime.fromisoformat(str(timestamp_str).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if timestamp_ts.tzinfo is None:
+        return timestamp_ts.replace(tzinfo=UTC)
+    return timestamp_ts.astimezone(UTC)
+
+
+def _snapshot_stale_past_alert_deadline_bool(
+    *,
+    release_list: list[LiveRelease],
+    local_detail_dict: dict[str, Any],
+    as_of_ts: datetime,
+) -> bool:
+    stale_profile_set = {
+        str(profile_obj)
+        for profile_obj in local_detail_dict.get("stale_profile_list", [])
+    }
+    if len(stale_profile_set) == 0:
+        return False
+    release_by_id_dict = {release_obj.release_id_str: release_obj for release_obj in release_list}
+    deadline_by_release_dict = dict(local_detail_dict.get("stale_alert_deadline_by_release_dict", {}))
+    as_of_utc_ts = as_of_ts if as_of_ts.tzinfo is not None else as_of_ts.replace(tzinfo=UTC)
+    as_of_utc_ts = as_of_utc_ts.astimezone(UTC)
+    for release_id_str, deadline_str in deadline_by_release_dict.items():
+        release_obj = release_by_id_dict.get(str(release_id_str))
+        if release_obj is None or str(release_obj.data_profile_str) not in stale_profile_set:
+            continue
+        deadline_ts = _timestamp_from_iso_or_none(str(deadline_str))
+        if deadline_ts is not None and as_of_utc_ts >= deadline_ts:
+            return True
+    return False
+
+
+def _minimum_required_snapshot_date_by_profile_dict(
+    release_list: list[LiveRelease],
+    required_snapshot_date_by_release_dict: dict[str, str],
+) -> dict[str, str]:
+    minimum_required_snapshot_date_by_profile_dict: dict[str, str] = {}
+    release_by_id_dict = {release_obj.release_id_str: release_obj for release_obj in release_list}
+    for release_id_str, required_snapshot_date_str in required_snapshot_date_by_release_dict.items():
+        release_obj = release_by_id_dict.get(release_id_str)
+        if release_obj is None:
+            continue
+        profile_str = str(release_obj.data_profile_str)
+        current_required_date_str = minimum_required_snapshot_date_by_profile_dict.get(profile_str)
+        if current_required_date_str is None or required_snapshot_date_str > current_required_date_str:
+            minimum_required_snapshot_date_by_profile_dict[profile_str] = required_snapshot_date_str
+    return minimum_required_snapshot_date_by_profile_dict
+
+
+def _with_cycle_freshness_detail_dict(
+    local_detail_dict: dict[str, Any],
+    release_list: list[LiveRelease],
+    as_of_ts: datetime,
+) -> dict[str, Any]:
+    detail_dict = dict(local_detail_dict)
+    snapshot_date_by_profile_dict = dict(detail_dict.get("snapshot_date_by_profile_dict", {}))
+    required_snapshot_session_by_release_dict = _required_snapshot_session_by_release_dict(
+        release_list,
+        as_of_ts,
+    )
+    required_snapshot_date_by_release_dict = _required_snapshot_date_by_release_dict(
+        required_snapshot_session_by_release_dict
+    )
+    stale_alert_deadline_by_release_dict = _stale_alert_deadline_by_release_dict(
+        release_list,
+        required_snapshot_session_by_release_dict,
+    )
+    minimum_required_snapshot_date_by_profile_dict = (
+        _minimum_required_snapshot_date_by_profile_dict(
+            release_list,
+            required_snapshot_date_by_release_dict,
+        )
+    )
+    stale_profile_list = []
+    for profile_str, minimum_required_snapshot_date_str in (
+        minimum_required_snapshot_date_by_profile_dict.items()
+    ):
+        snapshot_date_str = snapshot_date_by_profile_dict.get(profile_str)
+        if snapshot_date_str is None or snapshot_date_str < minimum_required_snapshot_date_str:
+            stale_profile_list.append(profile_str)
+
+    detail_dict["required_snapshot_date_by_release_dict"] = required_snapshot_date_by_release_dict
+    detail_dict["stale_alert_deadline_by_release_dict"] = stale_alert_deadline_by_release_dict
+    detail_dict["minimum_required_snapshot_date_by_profile_dict"] = (
+        minimum_required_snapshot_date_by_profile_dict
+    )
+    detail_dict["stale_profile_list"] = sorted(stale_profile_list)
+    detail_dict["snapshot_fresh_for_cycle_bool"] = len(stale_profile_list) == 0
+    detail_dict["snapshot_stale_past_alert_deadline_bool"] = (
+        _snapshot_stale_past_alert_deadline_bool(
+            release_list=release_list,
+            local_detail_dict=detail_dict,
+            as_of_ts=as_of_ts,
+        )
+    )
+    return detail_dict
+
+
+def _stale_snapshot_error_str(local_detail_dict: dict[str, Any]) -> str | None:
+    stale_profile_list = [str(profile_obj) for profile_obj in local_detail_dict.get("stale_profile_list", [])]
+    if len(stale_profile_list) == 0:
+        return None
+    snapshot_date_by_profile_dict = dict(local_detail_dict.get("snapshot_date_by_profile_dict", {}))
+    minimum_required_snapshot_date_by_profile_dict = dict(
+        local_detail_dict.get("minimum_required_snapshot_date_by_profile_dict", {})
+    )
+    profile_str = stale_profile_list[0]
+    required_snapshot_date_str = str(
+        minimum_required_snapshot_date_by_profile_dict.get(profile_str) or "unknown"
+    )
+    snapshot_date_str = str(snapshot_date_by_profile_dict.get(profile_str) or "missing")
+    return (
+        "Local Norgate data is too old for the next DecisionPlan. "
+        f"Required data date: {required_snapshot_date_str}. "
+        f"Local data date: {snapshot_date_str}."
+    )
+
+
+def _operator_message_str(status_dict: dict[str, Any]) -> str:
+    stale_error_str = _stale_snapshot_error_str(status_dict)
+    if stale_error_str is not None:
+        status_str = str(status_dict.get("status_str") or "")
+        reason_code_str = str(status_dict.get("reason_code_str") or "")
+        hard_stale_bool = status_str in {"failed", "local_snapshot_only"} or reason_code_str == "api_config_missing"
+        if (
+            not hard_stale_bool
+            and not bool(status_dict.get("snapshot_stale_past_alert_deadline_bool", False))
+        ):
+            return (
+                f"Waiting: {stale_error_str} "
+                "This is still inside the normal Norgate publish window."
+            )
+        return f"Blocked: {stale_error_str}"
+
+    status_str = str(status_dict.get("status_str") or "")
+    reason_code_str = str(status_dict.get("reason_code_str") or "")
+    if status_str == "direct":
+        return "Direct Norgate mode is active."
+    if status_str == "ready":
+        minimum_required_snapshot_date_by_profile_dict = dict(
+            status_dict.get("minimum_required_snapshot_date_by_profile_dict", {})
+        )
+        snapshot_date_by_profile_dict = dict(status_dict.get("snapshot_date_by_profile_dict", {}))
+        if minimum_required_snapshot_date_by_profile_dict:
+            profile_str = sorted(minimum_required_snapshot_date_by_profile_dict)[0]
+            required_snapshot_date_str = minimum_required_snapshot_date_by_profile_dict[profile_str]
+            snapshot_date_str = str(snapshot_date_by_profile_dict.get(profile_str) or "missing")
+            return (
+                "Norgate data is fresh for the next DecisionPlan. "
+                f"Required data date: {required_snapshot_date_str}. "
+                f"Local data date: {snapshot_date_str}."
+            )
+        return "Local Norgate snapshot is valid."
+    if reason_code_str == "sync_started":
+        return "Norgate sync is running. New DecisionPlan waits for fresh data."
+    if reason_code_str == "sync_lock_busy":
+        return "Another local Norgate sync is already running."
+    if reason_code_str == "sync_failure_cooldown":
+        return "Norgate sync failed recently. Waiting before retrying."
+    if reason_code_str == "sync_waiting_for_newer_snapshot":
+        return "Norgate server has not provided newer data yet. Waiting before retrying."
+    if reason_code_str == "api_config_missing":
+        return "Norgate API is not configured. New DecisionPlan may require local data."
+    if status_str == "failed":
+        return "Norgate sync failed. New DecisionPlan is blocked until fresh data is available."
+    if status_str == "waiting":
+        return "Waiting for Norgate snapshot data."
+    if status_str == "local_snapshot_only":
+        return "Norgate API is not configured; only local snapshot files are available."
+    return "Norgate snapshot status is unknown."
+
+
+def _operator_action_str(status_dict: dict[str, Any]) -> str:
+    if _stale_snapshot_error_str(status_dict) is not None:
+        status_str = str(status_dict.get("status_str") or "")
+        reason_code_str = str(status_dict.get("reason_code_str") or "")
+        hard_stale_bool = status_str in {"failed", "local_snapshot_only"} or reason_code_str == "api_config_missing"
+        if (
+            not hard_stale_bool
+            and not bool(status_dict.get("snapshot_stale_past_alert_deadline_bool", False))
+        ):
+            return "Wait for Norgate provider data; run doctor/sync if this persists."
+        return "Check Norgate server or run Norgate doctor/sync."
+    reason_code_str = str(status_dict.get("reason_code_str") or "")
+    status_str = str(status_dict.get("status_str") or "")
+    if reason_code_str == "sync_lock_busy":
+        return "Wait for the current sync to finish."
+    if reason_code_str == "sync_failure_cooldown":
+        return "Wait for the cooldown or check the last sync error."
+    if reason_code_str == "sync_waiting_for_newer_snapshot":
+        return "Wait for Norgate provider data; run doctor/sync if this persists."
+    if status_str == "failed":
+        return "Check the Norgate sync error and server/API health."
+    if status_str in {"ready", "direct"}:
+        return "No action needed."
+    return "Inspect Norgate sync status."
+
+
 def _needs_sync_bool(
     *,
     local_detail_dict: dict[str, Any],
     gate_reason_by_release_dict: dict[str, str],
 ) -> bool:
     if not bool(local_detail_dict.get("all_profiles_ready_bool")):
+        return True
+    if len(local_detail_dict.get("stale_profile_list", [])) > 0:
         return True
     return any(
         reason_str in SNAPSHOT_STALE_GATE_REASON_SET or reason_str.startswith("snapshot_error:")
@@ -280,12 +550,30 @@ def _base_status_dict(
             (local_detail_dict or {}).get("manifest_hash_by_profile_dict", {})
         ),
         "error_by_profile_dict": dict((local_detail_dict or {}).get("error_by_profile_dict", {})),
+        "required_snapshot_date_by_release_dict": dict(
+            (local_detail_dict or {}).get("required_snapshot_date_by_release_dict", {})
+        ),
+        "stale_alert_deadline_by_release_dict": dict(
+            (local_detail_dict or {}).get("stale_alert_deadline_by_release_dict", {})
+        ),
+        "minimum_required_snapshot_date_by_profile_dict": dict(
+            (local_detail_dict or {}).get("minimum_required_snapshot_date_by_profile_dict", {})
+        ),
+        "stale_profile_list": list((local_detail_dict or {}).get("stale_profile_list", [])),
+        "snapshot_fresh_for_cycle_bool": bool(
+            (local_detail_dict or {}).get("snapshot_fresh_for_cycle_bool", True)
+        ),
+        "snapshot_stale_past_alert_deadline_bool": bool(
+            (local_detail_dict or {}).get("snapshot_stale_past_alert_deadline_bool", False)
+        ),
         "gate_reason_by_release_id_dict": dict(gate_reason_by_release_dict or {}),
         "release_id_list": [release_obj.release_id_str for release_obj in release_list],
         "pod_id_list": [release_obj.pod_id_str for release_obj in release_list],
         "reason_code_str": reason_code_str,
         "error_str": error_str,
     }
+    status_dict["operator_message_str"] = _operator_message_str(status_dict)
+    status_dict["operator_action_str"] = _operator_action_str(status_dict)
     return status_dict
 
 
@@ -357,7 +645,11 @@ def ensure_norgate_snapshots_for_live_tick(
     release_list = _selected_release_list(releases_root_path_str, env_mode_str, pod_id_str)
     profile_list = _required_profile_list(release_list)
     previous_status_dict = read_client_sync_status_dict(snapshot_root_path_obj)
-    local_detail_dict = _local_snapshot_detail_dict(profile_list)
+    local_detail_dict = _with_cycle_freshness_detail_dict(
+        _local_snapshot_detail_dict(profile_list),
+        release_list,
+        as_of_ts,
+    )
     gate_reason_by_release_dict = _build_gate_reason_by_release_dict(release_list, as_of_ts)
 
     if len(profile_list) == 0:
@@ -431,14 +723,27 @@ def ensure_norgate_snapshots_for_live_tick(
 
     now_ts = datetime.now(tz=UTC)
     if _cooldown_active_bool(previous_status_dict, now_ts):
+        previous_reason_code_str = str(previous_status_dict.get("reason_code_str") or "")
+        cooldown_reason_code_str = (
+            "sync_waiting_for_newer_snapshot"
+            if previous_reason_code_str == SNAPSHOT_STALE_FOR_CYCLE_REASON_CODE_STR
+            else "sync_failure_cooldown"
+        )
         status_dict = _base_status_dict(
             status_str="waiting",
             release_list=release_list,
             profile_list=profile_list,
             local_detail_dict=local_detail_dict,
             gate_reason_by_release_dict=gate_reason_by_release_dict,
-            error_str=str(previous_status_dict.get("error_str") or "Previous sync failed recently."),
-            reason_code_str="sync_failure_cooldown",
+            error_str=str(
+                previous_status_dict.get("error_str")
+                or (
+                    "Previous sync did not produce newer Norgate data yet."
+                    if cooldown_reason_code_str == "sync_waiting_for_newer_snapshot"
+                    else "Previous sync failed recently."
+                )
+            ),
+            reason_code_str=cooldown_reason_code_str,
             last_attempt_utc_str=str(previous_status_dict.get("last_attempt_utc_str")),
             last_success_utc_str=_latest_status_success_utc_str(previous_status_dict),
         )
@@ -501,32 +806,62 @@ def ensure_norgate_snapshots_for_live_tick(
             mode_str=env_mode_str,
             pod_id_str=pod_id_str,
             overwrite_bool=True,
+            skip_valid_existing_bool=True,
         )
-        local_detail_dict = _local_snapshot_detail_dict(profile_list)
+        local_detail_dict = _with_cycle_freshness_detail_dict(
+            _local_snapshot_detail_dict(profile_list),
+            release_list,
+            as_of_ts,
+        )
         gate_reason_by_release_dict = _build_gate_reason_by_release_dict(release_list, as_of_ts)
         success_utc_str = _utc_now_str()
+        post_sync_stale_error_str = _stale_snapshot_error_str(local_detail_dict)
+        post_sync_ready_bool = bool(local_detail_dict.get("all_profiles_ready_bool")) and (
+            post_sync_stale_error_str is None
+        )
+        post_sync_error_str = post_sync_stale_error_str
+        post_sync_reason_code_str = "sync_ready"
+        if not post_sync_ready_bool:
+            if post_sync_stale_error_str is not None:
+                post_sync_reason_code_str = SNAPSHOT_STALE_FOR_CYCLE_REASON_CODE_STR
+            else:
+                post_sync_reason_code_str = "snapshot_not_ready"
+                post_sync_error_str = json.dumps(
+                    local_detail_dict.get("error_by_profile_dict", {}),
+                    sort_keys=True,
+                )
         status_dict = _base_status_dict(
-            status_str="ready",
+            status_str="ready" if post_sync_ready_bool else "waiting",
             release_list=release_list,
             profile_list=profile_list,
             local_detail_dict=local_detail_dict,
             gate_reason_by_release_dict=gate_reason_by_release_dict,
-            error_str=None,
-            reason_code_str="sync_ready",
+            error_str=post_sync_error_str,
+            reason_code_str=post_sync_reason_code_str,
             last_attempt_utc_str=started_status_dict["last_attempt_utc_str"],
-            last_success_utc_str=success_utc_str,
+            last_success_utc_str=(
+                success_utc_str
+                if post_sync_ready_bool
+                else _latest_status_success_utc_str(previous_status_dict)
+            ),
         )
         status_dict["promoted_path_list"] = [str(path_obj) for path_obj in promoted_path_list]
         _write_client_sync_status(snapshot_root_path_obj, status_dict)
         _emit_sync_event(
-            "norgate_snapshot_sync_ready",
+            "norgate_snapshot_sync_ready"
+            if post_sync_ready_bool
+            else "norgate_snapshot_sync_waiting",
             status_dict,
             log_path_str=log_path_str,
             print_operator_bool=print_operator_bool,
         )
         return status_dict
     except Exception as exc:
-        local_detail_dict = _local_snapshot_detail_dict(profile_list)
+        local_detail_dict = _with_cycle_freshness_detail_dict(
+            _local_snapshot_detail_dict(profile_list),
+            release_list,
+            as_of_ts,
+        )
         status_dict = _base_status_dict(
             status_str="failed",
             release_list=release_list,
@@ -556,7 +891,19 @@ def norgate_snapshot_sync_active_wait_bool(status_dict: dict[str, Any] | None) -
     return str(status_dict.get("status_str") or "") in SYNC_ACTIVE_WAIT_STATUS_SET
 
 
-def _status_severity_str(status_str: str, build_gate_reason_code_str: str | None) -> str:
+def _status_severity_str(
+    status_str: str,
+    build_gate_reason_code_str: str | None,
+    snapshot_fresh_for_cycle_bool: bool = True,
+    snapshot_stale_past_alert_deadline_bool: bool = False,
+    reason_code_str: str | None = None,
+) -> str:
+    if not snapshot_fresh_for_cycle_bool:
+        if status_str in {"failed", "local_snapshot_only"} or reason_code_str == "api_config_missing":
+            return "red"
+        if snapshot_stale_past_alert_deadline_bool:
+            return "red"
+        return "yellow"
     if status_str == "failed":
         return "red"
     if status_str == "ready" and build_gate_reason_code_str == "snapshot_window_expired":
@@ -578,32 +925,39 @@ def _sync_stage_label_str(
     status_str: str,
     reason_code_str: str | None,
     build_gate_reason_code_str: str | None = None,
+    snapshot_fresh_for_cycle_bool: bool = True,
 ) -> str:
     if data_source_mode_str == "direct":
         return "Direct Norgate"
+    reason_label_map_dict = {
+        "api_config_missing": "API config missing",
+        "direct_norgate_mode": "Direct Norgate",
+        "local_snapshot_ready": "Norgate data fresh",
+        "no_enabled_releases": "No enabled releases",
+        SNAPSHOT_STALE_FOR_CYCLE_REASON_CODE_STR: "Local data too old",
+        "snapshot_root_missing": "Snapshot root missing",
+        "sync_failed": "Sync failed",
+        "sync_failure_cooldown": "Cooldown after failure",
+        "sync_waiting_for_newer_snapshot": "Waiting for provider data",
+        "sync_lock_busy": "Sync lock busy",
+        "sync_ready": "Norgate data fresh",
+        "sync_started": "Sync running",
+    }
+    reason_label_str = reason_label_map_dict.get(str(reason_code_str or ""))
+    if reason_label_str is not None and reason_code_str not in {"local_snapshot_ready", "sync_ready"}:
+        return reason_label_str
+    if not snapshot_fresh_for_cycle_bool:
+        return "Local data too old"
     if status_str == "ready" and build_gate_reason_code_str == "snapshot_window_expired":
         return "Snapshot window expired"
     if status_str == "ready" and build_gate_reason_code_str in SNAPSHOT_STALE_GATE_REASON_SET:
         return "Build gate waiting"
-    reason_label_map_dict = {
-        "api_config_missing": "API config missing",
-        "direct_norgate_mode": "Direct Norgate",
-        "local_snapshot_ready": "Local snapshot ready",
-        "no_enabled_releases": "No enabled releases",
-        "snapshot_root_missing": "Snapshot root missing",
-        "sync_failed": "Sync failed",
-        "sync_failure_cooldown": "Cooldown after failure",
-        "sync_lock_busy": "Sync lock busy",
-        "sync_ready": "Sync completed",
-        "sync_started": "Sync running",
-    }
-    reason_label_str = reason_label_map_dict.get(str(reason_code_str or ""))
     if reason_label_str is not None:
         return reason_label_str
     status_label_map_dict = {
         "failed": "Sync failed",
         "local_snapshot_only": "Local snapshot only",
-        "ready": "Snapshot ready",
+        "ready": "Norgate data fresh",
         "waiting": "Waiting for snapshot",
     }
     return status_label_map_dict.get(status_str, "Snapshot status unknown")
@@ -700,12 +1054,20 @@ def build_norgate_snapshot_status_dict(
             "snapshot_date_by_profile_dict": {},
             "manifest_hash_by_profile_dict": {},
             "error_by_profile_dict": {},
+            "required_snapshot_date_by_release_dict": {},
+            "stale_alert_deadline_by_release_dict": {},
+            "minimum_required_snapshot_date_by_profile_dict": {},
+            "stale_profile_list": [],
+            "snapshot_fresh_for_cycle_bool": True,
+            "snapshot_stale_past_alert_deadline_bool": False,
             "gate_reason_by_release_id_dict": {},
             "profile_status_dict_list": [],
             "release_gate_status_dict_list": [],
             "last_sync_utc_str": None,
             "last_attempt_utc_str": None,
             "last_error_str": None,
+            "operator_message_str": "Direct Norgate mode is active.",
+            "operator_action_str": "No action needed.",
             "build_gate_reason_code_str": None,
             "status_file_path_str": None,
             "snapshot_mode_env_str": os.getenv(ALPHA_USE_NORGATE_SNAPSHOT_ENV_STR, ""),
@@ -725,12 +1087,26 @@ def build_norgate_snapshot_status_dict(
     if root_path_obj is None:
         local_error_str = f"{NORGATE_SNAPSHOT_ROOT_ENV_STR} is not set."
     else:
-        try:
-            snapshot_manifest_obj = load_valid_snapshot_manifest(release_obj.data_profile_str)
-            snapshot_date_str = snapshot_manifest_obj.snapshot_date_ts.date().isoformat()
-            manifest_hash_str = snapshot_manifest_obj.manifest_hash_str
-        except Exception as exc:
-            local_error_str = str(exc)
+        current_local_detail_dict = _with_cycle_freshness_detail_dict(
+            _local_snapshot_detail_dict([release_obj.data_profile_str]),
+            [release_obj],
+            as_of_ts,
+        )
+        snapshot_date_str = (
+            current_local_detail_dict.get("snapshot_date_by_profile_dict", {}).get(
+                release_obj.data_profile_str
+            )
+        )
+        manifest_hash_str = (
+            current_local_detail_dict.get("manifest_hash_by_profile_dict", {}).get(
+                release_obj.data_profile_str
+            )
+        )
+        local_error_str = (
+            current_local_detail_dict.get("error_by_profile_dict", {}).get(
+                release_obj.data_profile_str
+            )
+        )
 
     build_gate_reason_code_str = None
     signal_clock_str = scheduler_utils.normalize_signal_clock_str(release_obj.signal_clock_str)
@@ -744,9 +1120,50 @@ def build_norgate_snapshot_status_dict(
             if local_error_str is None:
                 local_error_str = str(exc)
 
+    current_snapshot_fresh_for_cycle_bool = True
+    current_snapshot_stale_past_alert_deadline_bool = False
+    current_required_snapshot_date_by_release_dict: dict[str, str] = {}
+    current_stale_alert_deadline_by_release_dict: dict[str, str] = {}
+    current_minimum_required_snapshot_date_by_profile_dict: dict[str, str] = {}
+    current_stale_profile_list: list[str] = []
+    if root_path_obj is not None:
+        current_snapshot_fresh_for_cycle_bool = bool(
+            current_local_detail_dict.get("snapshot_fresh_for_cycle_bool", True)
+        )
+        current_snapshot_stale_past_alert_deadline_bool = bool(
+            current_local_detail_dict.get("snapshot_stale_past_alert_deadline_bool", False)
+        )
+        current_required_snapshot_date_by_release_dict = dict(
+            current_local_detail_dict.get("required_snapshot_date_by_release_dict", {})
+        )
+        current_stale_alert_deadline_by_release_dict = dict(
+            current_local_detail_dict.get("stale_alert_deadline_by_release_dict", {})
+        )
+        current_minimum_required_snapshot_date_by_profile_dict = dict(
+            current_local_detail_dict.get("minimum_required_snapshot_date_by_profile_dict", {})
+        )
+        current_stale_profile_list = [
+            str(profile_obj)
+            for profile_obj in current_local_detail_dict.get("stale_profile_list", [])
+        ]
+
     status_str = str(status_file_dict.get("status_str") or ("ready" if snapshot_date_str else "waiting"))
     reason_code_str = str(status_file_dict.get("reason_code_str") or "") or None
     last_error_str = str(status_file_dict.get("error_str") or local_error_str or "") or None
+    if snapshot_date_str is not None and current_snapshot_fresh_for_cycle_bool:
+        status_str = "ready"
+        if reason_code_str in {
+            None,
+            "api_config_missing",
+            SNAPSHOT_STALE_FOR_CYCLE_REASON_CODE_STR,
+            "sync_failed",
+            "sync_failure_cooldown",
+            "sync_lock_busy",
+            "sync_started",
+        }:
+            reason_code_str = "local_snapshot_ready"
+        if local_error_str is None:
+            last_error_str = None
     profile_list = _string_list_from_status_file(
         status_file_dict,
         "required_profile_list",
@@ -767,24 +1184,35 @@ def build_norgate_snapshot_status_dict(
         "error_by_profile_dict",
     )
     if snapshot_date_str is not None:
-        snapshot_date_by_profile_dict.setdefault(release_obj.data_profile_str, snapshot_date_str)
+        snapshot_date_by_profile_dict[release_obj.data_profile_str] = snapshot_date_str
     if manifest_hash_str is not None:
-        manifest_hash_by_profile_dict.setdefault(release_obj.data_profile_str, manifest_hash_str)
-    if local_error_str is not None and release_obj.data_profile_str not in error_by_profile_dict:
+        manifest_hash_by_profile_dict[release_obj.data_profile_str] = manifest_hash_str
+    if local_error_str is not None:
         error_by_profile_dict[release_obj.data_profile_str] = local_error_str
+    else:
+        error_by_profile_dict.pop(release_obj.data_profile_str, None)
     gate_reason_by_release_id_dict = _string_dict_from_status_file(
         status_file_dict,
         "gate_reason_by_release_id_dict",
     )
-    return {
+    status_dict = {
         "data_source_mode_str": "snapshot",
         "status_str": status_str,
-        "severity_str": _status_severity_str(status_str, build_gate_reason_code_str),
+        "severity_str": _status_severity_str(
+            status_str,
+            build_gate_reason_code_str,
+            snapshot_fresh_for_cycle_bool=current_snapshot_fresh_for_cycle_bool,
+            snapshot_stale_past_alert_deadline_bool=(
+                current_snapshot_stale_past_alert_deadline_bool
+            ),
+            reason_code_str=reason_code_str,
+        ),
         "sync_stage_label_str": _sync_stage_label_str(
             data_source_mode_str="snapshot",
             status_str=status_str,
             reason_code_str=reason_code_str,
             build_gate_reason_code_str=build_gate_reason_code_str,
+            snapshot_fresh_for_cycle_bool=current_snapshot_fresh_for_cycle_bool,
         ),
         "profile_str": release_obj.data_profile_str,
         "snapshot_date_str": snapshot_date_str,
@@ -794,6 +1222,16 @@ def build_norgate_snapshot_status_dict(
         "snapshot_date_by_profile_dict": snapshot_date_by_profile_dict,
         "manifest_hash_by_profile_dict": manifest_hash_by_profile_dict,
         "error_by_profile_dict": error_by_profile_dict,
+        "required_snapshot_date_by_release_dict": current_required_snapshot_date_by_release_dict,
+        "stale_alert_deadline_by_release_dict": current_stale_alert_deadline_by_release_dict,
+        "minimum_required_snapshot_date_by_profile_dict": (
+            current_minimum_required_snapshot_date_by_profile_dict
+        ),
+        "stale_profile_list": current_stale_profile_list,
+        "snapshot_fresh_for_cycle_bool": current_snapshot_fresh_for_cycle_bool,
+        "snapshot_stale_past_alert_deadline_bool": (
+            current_snapshot_stale_past_alert_deadline_bool
+        ),
         "gate_reason_by_release_id_dict": gate_reason_by_release_id_dict,
         "profile_status_dict_list": _profile_status_dict_list(
             profile_list=profile_list,
@@ -815,3 +1253,6 @@ def build_norgate_snapshot_status_dict(
         "status_file_path_str": str(_status_path_obj(root_path_obj)) if root_path_obj is not None else None,
         "snapshot_mode_env_str": os.getenv(ALPHA_USE_NORGATE_SNAPSHOT_ENV_STR, ""),
     }
+    status_dict["operator_message_str"] = _operator_message_str(status_dict)
+    status_dict["operator_action_str"] = _operator_action_str(status_dict)
+    return status_dict

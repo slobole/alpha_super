@@ -1730,6 +1730,7 @@ def _humanize_reason_code_str(reason_code_str: str | None) -> str:
         "live_reference_fallback": "using fallback market prices instead of auction prices",
         "missing_broker_response_ack": "broker did not acknowledge all submitted orders",
         "missing_live_price": "missing live reference price for at least one asset",
+        "missed_monthly_decision_cycle": "monthly DecisionPlan cycle was missed",
         "no_due_work": "no due work right now",
         "non_positive_net_liq": "broker net liquidation value is non-positive",
         "not_month_end_session": "waiting for the last session of the month",
@@ -1738,9 +1739,11 @@ def _humanize_reason_code_str(reason_code_str: str | None) -> str:
         "ready_to_build_vplan": "ready to build the order plan",
         "ready_to_reconcile": "ready to reconcile post-execution broker state",
         "session_mode_mismatch": "broker session mode does not match the release mode",
+        "snapshot_stale_for_cycle": "local Norgate data is too old for the next DecisionPlan",
         "snapshot_not_ready_for_session": "snapshot is not ready for this session yet",
         "snapshot_ready": "snapshot is ready for this cycle",
         "snapshot_window_expired": "snapshot submit window already passed for this session",
+        "sync_waiting_for_newer_snapshot": "waiting for Norgate provider data",
         "submission_claim_failed": "submit claim failed because the order plan is no longer ready",
         "submission_window_expired": "submit window already passed for this session",
         "submitted": "orders submitted to the broker",
@@ -1767,6 +1770,7 @@ def _humanize_next_action_str(next_action_str: str | None) -> str:
         "review_vplan": "review orders manually",
         "post_execution_reconcile": "reconcile broker execution",
         "manual_review": "manual review required",
+        "missed_decision_cycle": "missed DecisionPlan cycle",
     }
     normalized_next_action_str = str(next_action_str or "").strip()
     if normalized_next_action_str in next_action_map_dict:

@@ -126,6 +126,11 @@ reads it, but does not mutate it.
 snapshot root at the same time. Stale locks are recovered after the configured
 TTL.
 
+When an API sync completes but the local snapshot is still not fresh enough for
+the required cycle, the operator log records `WARN norgate.sync.waiting`. The
+short retry cooldown then uses `sync_waiting_for_newer_snapshot`, which means
+the client is intentionally waiting before asking the server again.
+
 ## Failure Behavior
 
 Bad or missing market data blocks new trading intent.
@@ -156,9 +161,53 @@ ready/submitted VPlan exists
 ```
 
 Local snapshot `ready` means the manifest and hashes are valid. A DecisionPlan
-can still fail later during strategy data loading. The dashboard separates these
-states so an operator can see whether the stop happened at sync, build gate, or
-post-sync strategy data loading.
+must also be fresh enough for the current live decision cycle before it can
+create new trading intent. A structurally valid snapshot can still be stale.
+For example, a `2026-06-18` snapshot is valid by hash, but it is not fresh
+enough for a July 1 month-end rebalance that requires `2026-06-30` data.
+
+The client sync status records cycle freshness explicitly:
+
+- `required_snapshot_date_by_release_dict`: date each release currently needs
+  before a new DecisionPlan can be built.
+- `minimum_required_snapshot_date_by_profile_dict`: strictest required date per
+  data profile.
+- `stale_alert_deadline_by_release_dict`: timestamp when stale local data stops
+  being a normal provider-delay wait and becomes an operator red condition.
+- `stale_profile_list`: profiles whose local snapshot date is missing or older
+  than the required date.
+- `snapshot_fresh_for_cycle_bool`: `true` only when local snapshots are fresh
+  enough for the current decision cycle.
+- `snapshot_stale_past_alert_deadline_bool`: `true` when stale local data is
+  past the alert deadline.
+- `operator_message_str` and `operator_action_str`: simple English status text
+  for dashboard, ops report, and Discord alert payloads.
+
+If local data is stale, the tick attempts API sync when API config exists. If
+the API is missing, busy, failing, or still cannot produce fresh data, only new
+DecisionPlan creation is blocked. Existing DecisionPlan/VPlan submit and
+reconcile flow continues from persisted state.
+
+Stale data blocks new DecisionPlan creation immediately, but it is not always
+an operator red condition immediately. After a normal EOD close, Norgate may
+need time to publish the latest EOD data. During that provider window the
+dashboard shows yellow `Wait Norgate data`: the system is safe because it will
+not build from stale data, but Discord does not fire a red alert. If the data
+is still stale after the alert deadline, the dashboard turns red.
+
+The alert deadline is the earlier of:
+
+- exchange close plus the provider publish grace window; and
+- 30 minutes before the planned submission timestamp.
+
+For the current open-execution NDX/TAA style flows this normally means roughly
+close plus three hours, while still failing loud before the next submission
+window.
+
+Manual recovery is self-clearing. If an operator runs doctor/sync manually and
+fresh local snapshot files appear, the next tick/dashboard refresh recomputes
+freshness from the current manifests and leaves the stale blocked state without
+DB edits or a restart.
 
 ## Dashboard Debugging
 
@@ -169,12 +218,45 @@ The `Norgate Sync` panel shows:
 - data source: `direct` or `snapshot`
 - status: `direct`, `ready`, `waiting`, `failed`, or `local_snapshot_only`
 - stage: human label such as `Local snapshot ready`, `API config missing`,
-  `Sync failed`, `Build gate waiting`, or `Snapshot window expired`
+  `Norgate data fresh`, `Local data too old`, `Sync failed`,
+  `Build gate waiting`, or `Snapshot window expired`
 - profile and snapshot date
+- required data date and local data date when the current cycle has a freshness
+  requirement
 - build gate reason
 - per-profile snapshot date, manifest hash prefix, and error
 - per-release gate reason scoped to the selected POD
 - last attempt, last success, status file path, and last error
+
+Operator-facing states use these meanings:
+
+```text
+Norgate data fresh
+  -> no data action needed for the next DecisionPlan
+
+Local data too old
+  -> new DecisionPlan is blocked; yellow while waiting for normal provider
+     publication, red after the alert deadline
+
+Sync running / Sync lock busy
+  -> new DecisionPlan waits; do not build from stale local data
+
+Sync failed / API config missing
+  -> new DecisionPlan stays blocked when fresh local data is unavailable
+```
+
+If a monthly pod skips over the required month-end cycle, the dashboard reports
+`Missed DecisionPlan cycle` in red after the target execution window has passed.
+This covers the case where a later local snapshot, such as July 1, is newer
+than the required June 30 month-end data but no DecisionPlan was ever built for
+the June rebalance. The system does not auto-build a late monthly trade; it
+alerts the operator.
+
+The Live OPS watchdog sends Discord notifications only for red transitions.
+A stale snapshot becomes red only after the stale alert deadline, on hard sync
+failure/configuration failure, or when an execution/cycle window has been
+missed. Yellow waiting states remain visible in dashboard/ops but do not spam
+Discord.
 
 The `Debug` tab also shows a compact `Norgate sync` evidence item and can show
 `Post-sync data load failed` only when a DecisionPlan data-load error happened

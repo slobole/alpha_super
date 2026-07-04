@@ -58,6 +58,8 @@ def _write_release_manifest(
     mode_str: str,
     enabled_bool: bool = True,
     account_route_str: str | None = None,
+    signal_clock_str: str = "eod_snapshot_ready",
+    execution_policy_str: str = "next_open_moo",
 ) -> None:
     user_dir_path_obj = releases_root_path_obj / user_id_str
     user_dir_path_obj.mkdir(parents=True, exist_ok=True)
@@ -86,8 +88,8 @@ def _write_release_manifest(
                 "market:",
                 "  session_calendar_id_str: XNYS",
                 "schedule:",
-                "  signal_clock_str: eod_snapshot_ready",
-                "  execution_policy_str: next_open_moo",
+                f"  signal_clock_str: {signal_clock_str}",
+                f"  execution_policy_str: {execution_policy_str}",
                 "execution:",
                 "  pod_budget_fraction_float: 0.5",
                 "  auto_submit_enabled_bool: true",
@@ -1238,7 +1240,7 @@ def test_dashboard_norgate_snapshot_status_includes_sync_debug_payload(tmp_path:
 
     status_dict = norgate_sync_module.build_norgate_snapshot_status_dict(release_obj, AS_OF_TS)
 
-    assert status_dict["sync_stage_label_str"] == "Local snapshot ready"
+    assert status_dict["sync_stage_label_str"] == "Norgate data fresh"
     assert status_dict["reason_code_str"] == "local_snapshot_ready"
     assert status_dict["profile_status_dict_list"] == [
         {
@@ -1344,6 +1346,275 @@ def test_dashboard_norgate_ready_status_respects_stale_build_gate(tmp_path: Path
     assert status_dict["severity_str"] == "red"
     assert status_dict["sync_stage_label_str"] == "Snapshot window expired"
     assert status_dict["release_gate_status_dict_list"][0]["gate_reason_code_str"] == "snapshot_window_expired"
+
+
+def test_dashboard_stale_required_norgate_data_waits_yellow_inside_provider_window(
+    tmp_path: Path,
+    monkeypatch,
+):
+    releases_root_path_obj = tmp_path / "releases"
+    _write_release_manifest(
+        releases_root_path_obj,
+        user_id_str="paper_user",
+        pod_id_str="pod_stale_norgate",
+        mode_str="paper",
+    )
+    release_obj = load_release_list(str(releases_root_path_obj))[0]
+    db_path_obj = tmp_path / "state" / "pod_stale_norgate.sqlite3"
+    _seed_pod_state(db_path_obj, release_obj, 10000.0)
+    config_path_obj = tmp_path / "dashboard_config.yaml"
+    _write_config(config_path_obj, {"pod_stale_norgate": str(db_path_obj)})
+    snapshot_root_path_obj = tmp_path / "snapshots"
+    snapshot_root_path_obj.mkdir(parents=True)
+    monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "true")
+    monkeypatch.setenv("NORGATE_SNAPSHOT_ROOT", str(snapshot_root_path_obj))
+    monkeypatch.setattr(
+        norgate_sync_module,
+        "load_valid_snapshot_manifest",
+        lambda profile_str: SimpleNamespace(
+            snapshot_date_ts=datetime(2024, 1, 2, tzinfo=UTC),
+            manifest_hash_str="abcdef1234567890",
+        ),
+    )
+    monkeypatch.setattr(
+        dashboard_module.scheduler_utils,
+        "evaluate_build_gate_dict",
+        lambda release_obj, as_of_ts: {"due_bool": False, "reason_code_str": "snapshot_window_expired"},
+    )
+    app_obj = DashboardApp(
+        releases_root_path_str=str(releases_root_path_obj),
+        config_path_str=str(config_path_obj),
+        results_root_path_str=str(tmp_path / "results"),
+    )
+
+    summary_dict = build_dashboard_summary_dict(
+        app_obj,
+        as_of_ts=datetime(2024, 1, 3, 21, 20, tzinfo=UTC),
+    )
+    row_dict = _row_by_pod_id(summary_dict, "pod_stale_norgate")
+    norgate_item_dict = next(
+        item_dict
+        for item_dict in row_dict["data_freshness_dict"]["item_dict_list"]
+        if item_dict["label_str"] == "Norgate"
+    )
+
+    assert row_dict["required_action_dict"]["label_str"] == "Wait Norgate data"
+    assert row_dict["required_action_dict"]["severity_str"] == "yellow"
+    assert norgate_item_dict["severity_str"] == "yellow"
+    assert "Waiting:" in norgate_item_dict["detail_str"]
+    assert "Required data date: 2024-01-03" in norgate_item_dict["detail_str"]
+    assert "Local data date: 2024-01-02" in norgate_item_dict["detail_str"]
+    assert row_dict["debug_summary_dict"]["severity_str"] == "yellow"
+    assert any(
+        alert_dict["label_str"] == "Norgate freshness"
+        and alert_dict["severity_str"] == "yellow"
+        for alert_dict in summary_dict["alert_dict_list"]
+    )
+
+
+def test_dashboard_stale_required_norgate_data_turns_red_after_provider_deadline(
+    tmp_path: Path,
+    monkeypatch,
+):
+    releases_root_path_obj = tmp_path / "releases"
+    _write_release_manifest(
+        releases_root_path_obj,
+        user_id_str="paper_user",
+        pod_id_str="pod_late_norgate",
+        mode_str="paper",
+    )
+    release_obj = load_release_list(str(releases_root_path_obj))[0]
+    db_path_obj = tmp_path / "state" / "pod_late_norgate.sqlite3"
+    _seed_pod_state(db_path_obj, release_obj, 10000.0)
+    config_path_obj = tmp_path / "dashboard_config.yaml"
+    _write_config(config_path_obj, {"pod_late_norgate": str(db_path_obj)})
+    snapshot_root_path_obj = tmp_path / "snapshots"
+    snapshot_root_path_obj.mkdir(parents=True)
+    monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "true")
+    monkeypatch.setenv("NORGATE_SNAPSHOT_ROOT", str(snapshot_root_path_obj))
+    monkeypatch.setattr(
+        norgate_sync_module,
+        "load_valid_snapshot_manifest",
+        lambda profile_str: SimpleNamespace(
+            snapshot_date_ts=datetime(2024, 1, 2, tzinfo=UTC),
+            manifest_hash_str="abcdef1234567890",
+        ),
+    )
+    monkeypatch.setattr(
+        dashboard_module.scheduler_utils,
+        "evaluate_build_gate_dict",
+        lambda release_obj, as_of_ts: {"due_bool": False, "reason_code_str": "snapshot_window_expired"},
+    )
+    app_obj = DashboardApp(
+        releases_root_path_str=str(releases_root_path_obj),
+        config_path_str=str(config_path_obj),
+        results_root_path_str=str(tmp_path / "results"),
+    )
+
+    summary_dict = build_dashboard_summary_dict(
+        app_obj,
+        as_of_ts=datetime(2024, 1, 4, 0, 30, tzinfo=UTC),
+    )
+    row_dict = _row_by_pod_id(summary_dict, "pod_late_norgate")
+    norgate_item_dict = next(
+        item_dict
+        for item_dict in row_dict["data_freshness_dict"]["item_dict_list"]
+        if item_dict["label_str"] == "Norgate"
+    )
+
+    assert row_dict["required_action_dict"]["label_str"] == "Review Norgate data"
+    assert row_dict["required_action_dict"]["severity_str"] == "red"
+    assert norgate_item_dict["severity_str"] == "red"
+    assert "Required data date: 2024-01-03" in norgate_item_dict["detail_str"]
+    assert "Local data date: 2024-01-02" in norgate_item_dict["detail_str"]
+    assert row_dict["debug_summary_dict"]["severity_str"] == "red"
+    assert any(
+        alert_dict["label_str"] == "Norgate freshness"
+        and alert_dict["severity_str"] == "red"
+        for alert_dict in summary_dict["alert_dict_list"]
+    )
+
+
+def test_dashboard_monthly_overshot_snapshot_marks_missed_decision_cycle_red(
+    tmp_path: Path,
+    monkeypatch,
+):
+    releases_root_path_obj = tmp_path / "releases"
+    _write_release_manifest(
+        releases_root_path_obj,
+        user_id_str="paper_user",
+        pod_id_str="pod_missed_monthly",
+        mode_str="paper",
+        signal_clock_str="month_end_snapshot_ready",
+        execution_policy_str="next_month_first_open",
+    )
+    release_obj = load_release_list(str(releases_root_path_obj))[0]
+    db_path_obj = tmp_path / "state" / "pod_missed_monthly.sqlite3"
+    _seed_pod_state(db_path_obj, release_obj, 10000.0)
+    config_path_obj = tmp_path / "dashboard_config.yaml"
+    _write_config(config_path_obj, {"pod_missed_monthly": str(db_path_obj)})
+    snapshot_root_path_obj = tmp_path / "snapshots"
+    snapshot_root_path_obj.mkdir(parents=True)
+    monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "true")
+    monkeypatch.setenv("NORGATE_SNAPSHOT_ROOT", str(snapshot_root_path_obj))
+    monkeypatch.setattr(
+        norgate_sync_module,
+        "load_valid_snapshot_manifest",
+        lambda profile_str: SimpleNamespace(
+            snapshot_date_ts=datetime(2026, 7, 1, tzinfo=UTC),
+            manifest_hash_str="overshot123456",
+        ),
+    )
+    monkeypatch.setattr(
+        dashboard_module.scheduler_utils,
+        "evaluate_build_gate_dict",
+        lambda release_obj, as_of_ts: {"due_bool": False, "reason_code_str": "not_month_end_session"},
+    )
+    app_obj = DashboardApp(
+        releases_root_path_str=str(releases_root_path_obj),
+        config_path_str=str(config_path_obj),
+        results_root_path_str=str(tmp_path / "results"),
+    )
+
+    summary_dict = build_dashboard_summary_dict(
+        app_obj,
+        as_of_ts=datetime(2026, 7, 1, 14, 0, tzinfo=UTC),
+    )
+    row_dict = _row_by_pod_id(summary_dict, "pod_missed_monthly")
+    norgate_item_dict = next(
+        item_dict
+        for item_dict in row_dict["data_freshness_dict"]["item_dict_list"]
+        if item_dict["label_str"] == "Norgate"
+    )
+
+    assert row_dict["next_action_str"] == "missed_decision_cycle"
+    assert row_dict["reason_code_str"] == "missed_monthly_decision_cycle"
+    assert row_dict["required_action_dict"]["label_str"] == "Missed DecisionPlan cycle"
+    assert row_dict["required_action_dict"]["severity_str"] == "red"
+    assert row_dict["missed_signal_date_str"] == "2026-06-30"
+    assert row_dict["debug_summary_dict"]["verdict_label_str"] == "Missed DecisionPlan cycle"
+    assert norgate_item_dict["severity_str"] == "green"
+    assert any(
+        alert_dict["label_str"] == "Missed DecisionPlan cycle"
+        and alert_dict["severity_str"] == "red"
+        for alert_dict in summary_dict["alert_dict_list"]
+    )
+
+
+def test_dashboard_manual_snapshot_recovery_clears_stale_norgate_red(
+    tmp_path: Path,
+    monkeypatch,
+):
+    releases_root_path_obj = tmp_path / "releases"
+    _write_release_manifest(
+        releases_root_path_obj,
+        user_id_str="paper_user",
+        pod_id_str="pod_recovered_norgate",
+        mode_str="paper",
+    )
+    release_obj = load_release_list(str(releases_root_path_obj))[0]
+    db_path_obj = tmp_path / "state" / "pod_recovered_norgate.sqlite3"
+    _seed_pod_state(db_path_obj, release_obj, 10000.0)
+    config_path_obj = tmp_path / "dashboard_config.yaml"
+    _write_config(config_path_obj, {"pod_recovered_norgate": str(db_path_obj)})
+    snapshot_root_path_obj = tmp_path / "snapshots"
+    snapshot_root_path_obj.mkdir(parents=True)
+    (snapshot_root_path_obj / ".client_sync_status.json").write_text(
+        json.dumps(
+            {
+                "status_str": "local_snapshot_only",
+                "reason_code_str": "api_config_missing",
+                "required_profile_list": ["norgate_eod_sp500_pit"],
+                "snapshot_date_by_profile_dict": {"norgate_eod_sp500_pit": "2024-01-02"},
+                "minimum_required_snapshot_date_by_profile_dict": {
+                    "norgate_eod_sp500_pit": "2024-01-03"
+                },
+                "stale_profile_list": ["norgate_eod_sp500_pit"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "true")
+    monkeypatch.setenv("NORGATE_SNAPSHOT_ROOT", str(snapshot_root_path_obj))
+    monkeypatch.setattr(
+        norgate_sync_module,
+        "load_valid_snapshot_manifest",
+        lambda profile_str: SimpleNamespace(
+            snapshot_date_ts=datetime(2024, 1, 3, tzinfo=UTC),
+            manifest_hash_str="fresh1234567890",
+        ),
+    )
+    monkeypatch.setattr(
+        dashboard_module.scheduler_utils,
+        "evaluate_build_gate_dict",
+        lambda release_obj, as_of_ts: {"due_bool": True, "reason_code_str": "snapshot_ready"},
+    )
+    app_obj = DashboardApp(
+        releases_root_path_str=str(releases_root_path_obj),
+        config_path_str=str(config_path_obj),
+        results_root_path_str=str(tmp_path / "results"),
+    )
+
+    summary_dict = build_dashboard_summary_dict(
+        app_obj,
+        as_of_ts=datetime(2024, 1, 3, 21, 20, tzinfo=UTC),
+    )
+    row_dict = _row_by_pod_id(summary_dict, "pod_recovered_norgate")
+    norgate_item_dict = next(
+        item_dict
+        for item_dict in row_dict["data_freshness_dict"]["item_dict_list"]
+        if item_dict["label_str"] == "Norgate"
+    )
+
+    assert row_dict["required_action_dict"]["label_str"] == "Build DecisionPlan"
+    assert row_dict["required_action_dict"]["severity_str"] == "yellow"
+    assert norgate_item_dict["severity_str"] == "green"
+    assert "Required data date: 2024-01-03" in norgate_item_dict["detail_str"]
+    assert not any(
+        alert_dict["label_str"] == "Norgate freshness"
+        and alert_dict["severity_str"] == "red"
+        for alert_dict in summary_dict["alert_dict_list"]
+    )
 
 
 def test_dashboard_norgate_ready_snapshot_does_not_override_waiting_submission_window(

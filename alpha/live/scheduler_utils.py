@@ -35,6 +35,7 @@ from data.norgate_loader import is_snapshot_mode_enabled_bool, load_latest_snaps
 DEFAULT_SUBMISSION_BUFFER_MINUTES_INT = 10
 DEFAULT_OPEN_SUBMISSION_LEAD_SECONDS_INT = (6 * 60) + 30
 DEFAULT_OPEN_MARKET_EXPIRY_GRACE_SECONDS_INT = 60
+DEFAULT_SNAPSHOT_READY_BUFFER_MINUTES_INT = 10
 PRE_CLOSE_SIGNAL_BUFFER_MINUTES_INT = 15
 SUPPORTED_SESSION_CALENDAR_ID_TUPLE: tuple[str, ...] = ("XNYS", "XTSE", "XASX")
 SUPPORTED_SIGNAL_CLOCK_TUPLE: tuple[str, ...] = (
@@ -196,6 +197,54 @@ def is_last_session_of_month_bool(
         next_session_label_ts.year != session_label_ts.year
         or next_session_label_ts.month != session_label_ts.month
     )
+
+
+def get_latest_completed_session_label_ts(
+    as_of_ts: datetime,
+    session_calendar_id_str: str,
+    snapshot_ready_buffer_minutes_int: int = DEFAULT_SNAPSHOT_READY_BUFFER_MINUTES_INT,
+) -> pd.Timestamp | None:
+    market_timestamp_ts = to_market_timestamp_ts(as_of_ts, session_calendar_id_str)
+    latest_session_label_ts = _latest_session_on_or_before_date_ts(
+        market_timestamp_ts.date(),
+        session_calendar_id_str,
+    )
+    if latest_session_label_ts is None:
+        return None
+
+    session_ready_timestamp_ts = get_session_close_timestamp_ts(
+        latest_session_label_ts,
+        session_calendar_id_str,
+    ) + timedelta(minutes=int(snapshot_ready_buffer_minutes_int))
+    if market_timestamp_ts >= session_ready_timestamp_ts:
+        return latest_session_label_ts
+
+    calendar_obj = get_exchange_calendar_obj(session_calendar_id_str)
+    try:
+        return calendar_obj.previous_session(latest_session_label_ts)
+    except ValueError:
+        return None
+
+
+def get_latest_completed_month_end_session_label_ts(
+    as_of_ts: datetime,
+    session_calendar_id_str: str,
+    snapshot_ready_buffer_minutes_int: int = DEFAULT_SNAPSHOT_READY_BUFFER_MINUTES_INT,
+) -> pd.Timestamp | None:
+    session_label_ts = get_latest_completed_session_label_ts(
+        as_of_ts,
+        session_calendar_id_str,
+        snapshot_ready_buffer_minutes_int=snapshot_ready_buffer_minutes_int,
+    )
+    calendar_obj = get_exchange_calendar_obj(session_calendar_id_str)
+    while session_label_ts is not None:
+        if is_last_session_of_month_bool(session_label_ts, session_calendar_id_str):
+            return session_label_ts
+        try:
+            session_label_ts = calendar_obj.previous_session(session_label_ts)
+        except ValueError:
+            return None
+    return None
 
 
 def _date_from_timestamp_obj(timestamp_obj, session_calendar_id_str: str):

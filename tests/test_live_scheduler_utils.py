@@ -10,6 +10,8 @@ from alpha.live.scheduler_utils import (
     build_submission_timestamp_ts,
     build_target_execution_timestamp_ts,
     evaluate_build_gate_dict,
+    get_latest_completed_month_end_session_label_ts,
+    get_latest_completed_session_label_ts,
     is_execution_window_expired_bool,
     is_release_due_for_build,
     resolve_calendar_month_end_label_to_last_tradable_session,
@@ -129,6 +131,38 @@ def test_scheduler_maps_next_month_first_open_through_calendar_closure():
     assert target_execution_timestamp_ts.date().isoformat() == "2022-01-03"
     assert target_execution_timestamp_ts.hour == 9
     assert target_execution_timestamp_ts.minute == 30
+
+
+def test_latest_completed_session_respects_weekend_and_holiday():
+    completed_session_label_ts = get_latest_completed_session_label_ts(
+        datetime(2024, 3, 31, 12, 0, tzinfo=UTC),
+        "XNYS",
+    )
+
+    assert completed_session_label_ts == pd.Timestamp("2024-03-28")
+
+
+def test_latest_completed_session_respects_early_close_buffer():
+    before_buffer_session_label_ts = get_latest_completed_session_label_ts(
+        datetime(2024, 11, 29, 18, 9, tzinfo=UTC),
+        "XNYS",
+    )
+    after_buffer_session_label_ts = get_latest_completed_session_label_ts(
+        datetime(2024, 11, 29, 18, 10, tzinfo=UTC),
+        "XNYS",
+    )
+
+    assert before_buffer_session_label_ts == pd.Timestamp("2024-11-27")
+    assert after_buffer_session_label_ts == pd.Timestamp("2024-11-29")
+
+
+def test_latest_completed_month_end_session_returns_last_tradable_month_end():
+    completed_month_end_session_label_ts = get_latest_completed_month_end_session_label_ts(
+        datetime(2026, 7, 4, 12, 0, tzinfo=UTC),
+        "XNYS",
+    )
+
+    assert completed_month_end_session_label_ts == pd.Timestamp("2026-06-30")
 
 
 def test_scheduler_maps_next_open_market_to_open_submit_and_target_with_grace():

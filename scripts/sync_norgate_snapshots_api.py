@@ -213,6 +213,7 @@ def _download_snapshot_entry(
     temp_root_path_obj: Path,
     snapshot_file_dict: dict[str, Any],
     overwrite_bool: bool,
+    skip_valid_existing_bool: bool = False,
 ) -> Path:
     profile_str = _validate_path_component_str(str(snapshot_file_dict["profile_str"]), "profile_str")
     snapshot_date_str = _validate_path_component_str(
@@ -221,14 +222,16 @@ def _download_snapshot_entry(
     )
     local_target_dir_path_obj = local_root_path_obj / profile_str / snapshot_date_str
 
-    if local_target_dir_path_obj.exists() and not overwrite_bool:
-        if _existing_target_is_valid_bool(
+    if local_target_dir_path_obj.exists():
+        existing_target_valid_bool = _existing_target_is_valid_bool(
             local_root_path_obj=local_root_path_obj,
             profile_str=profile_str,
             snapshot_date_str=snapshot_date_str,
-        ):
+        )
+        if existing_target_valid_bool and (skip_valid_existing_bool or not overwrite_bool):
             return local_target_dir_path_obj
-        raise RuntimeError(f"Existing local snapshot is invalid: {local_target_dir_path_obj}")
+        if not overwrite_bool:
+            raise RuntimeError(f"Existing local snapshot is invalid: {local_target_dir_path_obj}")
 
     file_url_path_dict = snapshot_file_dict.get("file_url_path_dict")
     if not isinstance(file_url_path_dict, dict):
@@ -273,6 +276,7 @@ def sync_required_snapshots(
     mode_str: str | None = None,
     pod_id_str: str | None = None,
     overwrite_bool: bool = False,
+    skip_valid_existing_bool: bool = False,
 ) -> list[Path]:
     profile_list = derive_required_profile_list(
         releases_root_path_str=releases_root_path_str,
@@ -312,6 +316,7 @@ def sync_required_snapshots(
                     temp_root_path_obj=temp_root_path_obj,
                     snapshot_file_dict=snapshot_file_obj,
                     overwrite_bool=overwrite_bool,
+                    skip_valid_existing_bool=skip_valid_existing_bool,
                 )
             )
     finally:

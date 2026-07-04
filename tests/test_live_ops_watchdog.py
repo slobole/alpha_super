@@ -231,6 +231,71 @@ def test_watchdog_red_transition_fires_webhook_once_across_runs(
     assert state_dict["pod_severity_map_dict"]["pod_taa_live_01"] == "red"
 
 
+def test_watchdog_yellow_norgate_waiting_does_not_fire_discord(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    yellow_summary_dict = _summary_dict(severity_str="yellow")
+    yellow_row_dict = yellow_summary_dict["pod_row_dict_list"][0]
+    yellow_row_dict["required_action_dict"] = {
+        "label_str": "Wait Norgate data",
+        "severity_str": "yellow",
+        "reason_str": (
+            "Waiting: Local Norgate data is too old for the next DecisionPlan. "
+            "This is still inside the normal Norgate publish window."
+        ),
+        "inspect_command_name_str": "status",
+    }
+
+    return_code_int, _, webhook_call_list, _ = _run_watchdog(
+        monkeypatch,
+        tmp_path,
+        summary_dict=yellow_summary_dict,
+        discord_webhook_url_str="https://discord.example/webhook",
+    )
+
+    assert return_code_int == 0
+    assert webhook_call_list == []
+
+
+def test_watchdog_norgate_red_recovery_allows_later_red_alert(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    stale_reason_str = (
+        "Blocked: local Norgate data is too old for the next DecisionPlan. "
+        "Required data date: 2026-06-30. Local data date: 2026-06-18."
+    )
+    red_summary_dict = _summary_dict(severity_str="red")
+    red_row_dict = red_summary_dict["pod_row_dict_list"][0]
+    red_row_dict["required_action_dict"] = {
+        "label_str": "Review Norgate data",
+        "severity_str": "red",
+        "reason_str": stale_reason_str,
+        "inspect_command_name_str": "status",
+    }
+    red_row_dict["debug_summary_dict"] = {
+        "severity_str": "red",
+        "verdict_label_str": "Norgate freshness",
+        "primary_reason_str": stale_reason_str,
+    }
+
+    webhook_total_call_list: list[tuple[str, dict[str, object]]] = []
+    for summary_dict in [red_summary_dict, _summary_dict(severity_str="green"), red_summary_dict]:
+        return_code_int, _, webhook_call_list, _ = _run_watchdog(
+            monkeypatch,
+            tmp_path,
+            summary_dict=summary_dict,
+            discord_webhook_url_str="https://discord.example/webhook",
+        )
+        webhook_total_call_list.extend(webhook_call_list)
+        assert return_code_int in {0, 1}
+
+    assert len(webhook_total_call_list) == 2
+    assert stale_reason_str in str(webhook_total_call_list[0][1]["content"])
+    assert stale_reason_str in str(webhook_total_call_list[1][1]["content"])
+
+
 def test_watchdog_missing_heartbeat_url_is_disabled_but_report_still_written(
     monkeypatch, tmp_path, capsys
 ) -> None:
