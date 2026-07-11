@@ -1,0 +1,297 @@
+{"kind":"deck","id":"pr/8fvl0y","name":"Deck"}
+{"kind":"layout","layoutId":"57171e4f-4105-414d-8d25-bab0de3dfd16","name":"Master","type":"master"}
+{"kind":"layout","layoutId":"f91caea6-d358-4ee3-8bff-57f1e92b4396","name":"Title Slide","type":"title"}
+{"kind":"slide","id":"sl/a3raut","slide":1,"title":"FRIENDS & FAMILY","textShapes":8}
+{"kind":"textbox","id":"sh/29snqxwn","slide":1,"name":"s1-eyebrow","text":"FRIENDS & FAMILY","textPreview":"FRIENDS & FAMILY","textChars":16,"textLines":1,"bbox":[850,48,350,36]}
+{"kind":"textbox","id":"sh/pc36lsfy","slide":1,"name":"s1-draft-label","text":"טיוטה פנימית","textPreview":"טיוטה פנימית","textChars":12,"textLines":1,"bbox":[660,48,170,36]}
+{"kind":"textbox","id":"sh/4ba5s7et","slide":1,"name":"s1-program-label","text":"שם התוכנית","textPreview":"שם התוכנית","textChars":10,"textLines":1,"bbox":[1000,108,200,28]}
+{"kind":"shape","id":"sh/f61ofixw","slide":1,"name":"s1-program-fill-panel","bbox":[1084,142,116,44]}
+{"kind":"textbox","id":"sh/u5snmdwb","slide":1,"name":"s1-program-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[1094,146,96,36]}
+{"kind":"textbox","id":"sh/h8j6hsf2","slide":1,"name":"s1-headline","text":"תהליך השקעה שיטתי\nבשלב מוקדם ושקוף","textPreview":"תהליך השקעה שיטתי | בשלב מוקדם ושקוף","textChars":34,"textLines":2,"bbox":[250,238,950,214]}
+{"kind":"shape","id":"sh/g7a5oneh","slide":1,"name":"s1-accent-rule","bbox":[746,483,454,0.03]}
+{"kind":"textbox","id":"sh/7ih4bix0","slide":1,"name":"s1-subtitle","text":"כללים שנבדקו מראש. כמה גישות נפרדות. סיכון שמוצג בגלוי.","textPreview":"כללים שנבדקו מראש. כמה גישות נפרדות. סיכון שמוצג בגלוי.","textChars":55,"textLines":1,"bbox":[530,520,670,86]}
+{"kind":"textbox","id":"sh/6h8nidwf","slide":1,"name":"s1-goal-label","text":"מטרת השלב הראשוני","textPreview":"מטרת השלב הראשוני","textChars":17,"textLines":1,"bbox":[900,630,300,25]}
+{"kind":"shape","id":"sh/4f6d43y5","slide":1,"name":"s1-goal-fill-panel","bbox":[1076,658,124,40]}
+{"kind":"textbox","id":"sh/5gfud8fq","slide":1,"name":"s1-goal-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[1086,662,104,32]}
+{"kind":"notes","id":"nt/a3raut","slide":1,"text":""}
+{"kind":"slide","id":"sl/lw53n4","slide":2,"title":"לא תלויים ברעיון אחד","textShapes":19}
+{"kind":"textbox","id":"sh/vy1gby94","slide":2,"name":"slide-2-title","text":"לא תלויים ברעיון אחד","textPreview":"לא תלויים ברעיון אחד","textChars":20,"textLines":1,"bbox":[41,34,1198,78]}
+{"kind":"textbox","id":"sh/wzahk3q9","slide":2,"name":"s2-intro","text":"המערכת נועדה לשלב כמה חלקים נפרדים, שלכל אחד מהם כללים ותפקיד משלו. ההרכב המוצע עדיין דורש השלמה.","textPreview":"המערכת נועדה לשלב כמה חלקים נפרדים, שלכל אחד מהם כללים ותפקיד משלו. ההרכב המוצע עדיין דורש השלמה.","textChars":97,"textLines":1,"bbox":[310,128,928,70]}
+{"kind":"shape","id":"sh/h0jyd8ru","slide":2,"name":"s2-divider-1","bbox":[431,232,0.03,350]}
+{"kind":"shape","id":"sh/i1szmd8f","slide":2,"name":"s2-divider-2","bbox":[842,232,0.03,350]}
+{"kind":"textbox","id":"sh/jm1gfi90","slide":2,"name":"s2-01-index","text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[864,232,374,50]}
+{"kind":"textbox","id":"sh/4nahonql","slide":2,"name":"s2-01-title","text":"מומנטום","textPreview":"מומנטום","textChars":7,"textLines":1,"bbox":[864,316,374,54]}
+{"kind":"textbox","id":"sh/5o3yhsr6","slide":2,"name":"s2-01-body","text":"חיפוש אחר חוזקה יחסית שמתפתחת בהדרגה, תחת כללי סינון וסיכון.","textPreview":"חיפוש אחר חוזקה יחסית שמתפתחת בהדרגה, תחת כללי סינון וסיכון.","textChars":60,"textLines":1,"bbox":[864,390,374,128]}
+{"kind":"shape","id":"sh/y58fa9sb","slide":2,"name":"s2-01-fill-panel","bbox":[1114,538,124,42]}
+{"kind":"textbox","id":"sh/z6hg3e9w","slide":2,"name":"s2-01-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[1124,542,104,34]}
+{"kind":"textbox","id":"sh/nad4r6hs","slide":2,"name":"s2-01-fill-label","text":"המשקל והאסטרטגיה הסופיים","textPreview":"המשקל והאסטרטגיה הסופיים","textChars":24,"textLines":1,"bbox":[864,590,374,35]}
+{"kind":"textbox","id":"sh/2943i107","slide":2,"name":"s2-02-index","text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[453,232,374,50]}
+{"kind":"textbox","id":"sh/pcfmtgzi","slide":2,"name":"s2-02-title","text":"חזרה לממוצע","textPreview":"חזרה לממוצע","textChars":11,"textLines":1,"bbox":[453,316,374,54]}
+{"kind":"textbox","id":"sh/ob6lkbix","slide":2,"name":"s2-02-body","text":"ניסיון לנצל תנועות קיצוניות וקצרות, בלי להניח שכל ירידה חייבת להתהפך.","textPreview":"ניסיון לנצל תנועות קיצוניות וקצרות, בלי להניח שכל ירידה חייבת להתהפך.","textChars":69,"textLines":1,"bbox":[453,390,374,128]}
+{"kind":"shape","id":"sh/fmd4nmhg","slide":2,"name":"s2-02-fill-panel","bbox":[703,538,124,42]}
+{"kind":"textbox","id":"sh/el43e10v","slide":2,"name":"s2-02-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[713,542,104,34]}
+{"kind":"textbox","id":"sh/18vmpwzm","slide":2,"name":"s2-02-fill-label","text":"המשקל והאסטרטגיה הסופיים","textPreview":"המשקל והאסטרטגיה הסופיים","textChars":24,"textLines":1,"bbox":[453,590,374,35]}
+{"kind":"textbox","id":"sh/07mlgri1","slide":2,"name":"s2-03-index","text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[41,232,374,50]}
+{"kind":"textbox","id":"sh/ritkjm1k","slide":2,"name":"s2-03-title","text":"הקצאה טקטית","textPreview":"הקצאה טקטית","textChars":11,"textLines":1,"bbox":[41,316,374,54]}
+{"kind":"textbox","id":"sh/qhk3ah0z","slide":2,"name":"s2-03-body","text":"שינוי חשיפה בין נכסים לפי כללים קבועים ותנאי שוק מוגדרים.","textPreview":"שינוי חשיפה בין נכסים לפי כללים קבועים ותנאי שוק מוגדרים.","textChars":57,"textLines":1,"bbox":[41,390,374,128]}
+{"kind":"shape","id":"sh/udknmhkr","slide":2,"name":"s2-03-fill-panel","bbox":[291,538,124,42]}
+{"kind":"textbox","id":"sh/vet4vmlc","slide":2,"name":"s2-03-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[301,542,104,34]}
+{"kind":"textbox","id":"sh/gf25or2x","slide":2,"name":"s2-03-fill-label","text":"המשקל והאסטרטגיה הסופיים","textPreview":"המשקל והאסטרטגיה הסופיים","textChars":24,"textLines":1,"bbox":[41,590,374,35]}
+{"kind":"textbox","id":"sh/hgbmxw3i","slide":2,"name":"slide-2-draft-footer","text":"טיוטה פנימית — לא להפצה | נוסח משפטי: FILL","textPreview":"טיוטה פנימית — לא להפצה | נוסח משפטי: FILL","textChars":42,"textLines":1,"bbox":[520,667,718,24]}
+{"kind":"textbox","id":"sh/ihknqhk3","slide":2,"name":"slide-2-page","text":"2","textPreview":"2","textChars":1,"textLines":1,"bbox":[41,667,54,24]}
+{"kind":"notes","id":"nt/lw53n4","slide":2,"text":""}
+{"kind":"slide","id":"sl/2xr34k","slide":3,"title":"אמון מתחיל במי שמנהל את הכסף","textShapes":14}
+{"kind":"textbox","id":"sh/itgjuxsr","slide":3,"name":"slide-3-title","text":"אמון מתחיל במי שמנהל את הכסף","textPreview":"אמון מתחיל במי שמנהל את הכסף","textChars":28,"textLines":1,"bbox":[41,34,1198,78]}
+{"kind":"shape","id":"sh/5wr25sri","slide":3,"name":"s3-photo-placeholder","bbox":[41,148,500,466]}
+{"kind":"textbox","id":"sh/4vi1w7ax","slide":3,"name":"s3-photo-fill","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[170,310,240,70]}
+{"kind":"textbox","id":"sh/vqpkzit0","slide":3,"name":"s3-photo-label","text":"תמונת מייסד","textPreview":"תמונת מייסד","textChars":11,"textLines":1,"bbox":[170,390,240,38]}
+{"kind":"textbox","id":"sh/u5gjqdsv","slide":3,"name":"s3-row-0-label","text":"שם המייסד והתפקיד","textPreview":"שם המייסד והתפקיד","textChars":17,"textLines":1,"bbox":[675,170,520,35]}
+{"kind":"shape","id":"sh/hs721sr6","slide":3,"name":"s3-row-0-fill-panel","bbox":[1072,212,124,40]}
+{"kind":"textbox","id":"sh/gry1snal","slide":3,"name":"s3-row-0-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[1082,216,104,32]}
+{"kind":"shape","id":"sh/fmtkbm9k","slide":3,"name":"s3-row-0-rule","bbox":[675,256,520,0.03]}
+{"kind":"textbox","id":"sh/e1k32hsz","slide":3,"name":"s3-row-1-label","text":"רקע וניסיון רלוונטי","textPreview":"רקע וניסיון רלוונטי","textChars":19,"textLines":1,"bbox":[675,260,520,35]}
+{"kind":"shape","id":"sh/g3690r2l","slide":3,"name":"s3-row-1-fill-panel","bbox":[1072,302,124,40]}
+{"kind":"textbox","id":"sh/h4fqtw36","slide":3,"name":"s3-row-1-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[1082,306,104,32]}
+{"kind":"shape","id":"sh/u1oryhkf","slide":3,"name":"s3-row-1-rule","bbox":[675,346,520,0.03]}
+{"kind":"textbox","id":"sh/v2x8rml0","slide":3,"name":"s3-row-2-label","text":"הון אישי המושקע לצד המשקיעים","textPreview":"הון אישי המושקע לצד המשקיעים","textChars":28,"textLines":1,"bbox":[675,350,520,35]}
+{"kind":"shape","id":"sh/8fm9w729","slide":3,"name":"s3-row-2-fill-panel","bbox":[1072,392,124,40]}
+{"kind":"textbox","id":"sh/t0vqpc3u","slide":3,"name":"s3-row-2-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[1082,396,104,32]}
+{"kind":"shape","id":"sh/6d4ruxkj","slide":3,"name":"s3-row-2-rule","bbox":[675,436,520,0.03]}
+{"kind":"textbox","id":"sh/7ed8n2lo","slide":3,"name":"s3-row-3-label","text":"ממתי פועל חשבון אמיתי","textPreview":"ממתי פועל חשבון אמיתי","textChars":21,"textLines":1,"bbox":[675,440,520,35]}
+{"kind":"shape","id":"sh/kbm9s7md","slide":3,"name":"s3-row-3-fill-panel","bbox":[1072,482,124,40]}
+{"kind":"textbox","id":"sh/lcvqlc3y","slide":3,"name":"s3-row-3-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[1082,486,104,32]}
+{"kind":"shape","id":"sh/l8n6povm","slide":3,"name":"s3-row-3-rule","bbox":[675,526,520,0.03]}
+{"kind":"shape","id":"sh/07epgje1","slide":3,"name":"s3-commitment-panel","bbox":[658,548,581,66]}
+{"kind":"textbox","id":"sh/z65onydg","slide":3,"name":"s3-commitment","text":"המחויבות: להסביר מה נעשה, מה עבד, מה לא — ומה השתנה.","textPreview":"המחויבות: להסביר מה נעשה, מה עבד, מה לא — ומה השתנה.","textChars":52,"textLines":1,"bbox":[680,562,537,40]}
+{"kind":"textbox","id":"sh/y5c7etwv","slide":3,"name":"slide-3-draft-footer","text":"טיוטה פנימית — לא להפצה | נוסח משפטי: FILL","textPreview":"טיוטה פנימית — לא להפצה | נוסח משפטי: FILL","textChars":42,"textLines":1,"bbox":[520,667,718,24]}
+{"kind":"textbox","id":"sh/d436lovq","slide":3,"name":"slide-3-page","text":"3","textPreview":"3","textChars":1,"textLines":1,"bbox":[41,667,54,24]}
+{"kind":"notes","id":"nt/2xr34k","slide":3,"text":""}
+{"kind":"slide","id":"sl/btv3v5","slide":4,"title":"דוגמה ליתרון: השוק לא תמיד מגיב מיד","textShapes":17}
+{"kind":"textbox","id":"sh/2h47qlof","slide":4,"name":"slide-4-title","text":"דוגמה ליתרון: השוק לא תמיד מגיב מיד","textPreview":"דוגמה ליתרון: השוק לא תמיד מגיב מיד","textChars":35,"textLines":1,"bbox":[41,34,1198,78]}
+{"kind":"shape","id":"sh/pkvql07q","slide":4,"name":"s4-center-rule","bbox":[640,175,0.03,380]}
+{"kind":"textbox","id":"sh/ojmpsv65","slide":4,"name":"s4-principle-label","text":"הרעיון","textPreview":"הרעיון","textChars":6,"textLines":1,"bbox":[686,180,512,42]}
+{"kind":"textbox","id":"sh/bmd8nqpw","slide":4,"name":"s4-principle-main","text":"לעיתים, נכסים שהציגו חוזקה יחסית ממשיכים להוביל עוד זמן מה. לתופעה הזו קוראים מומנטום.","textPreview":"לעיתים, נכסים שהציגו חוזקה יחסית ממשיכים להוביל עוד זמן מה. לתופעה הזו קוראים מומנטום.","textChars":86,"textLines":1,"bbox":[686,242,512,148]}
+{"kind":"textbox","id":"sh/al47u5ob","slide":4,"name":"s4-principle-caveat","text":"זה אינו חוק, והוא אינו עובד בכל תקופה.","textPreview":"זה אינו חוק, והוא אינו עובד בכל תקופה.","textChars":38,"textLines":1,"bbox":[686,420,512,72]}
+{"kind":"textbox","id":"sh/x8fqp072","slide":4,"name":"s4-test-label","text":"איך בודקים","textPreview":"איך בודקים","textChars":10,"textLines":1,"bbox":[80,180,512,42]}
+{"kind":"textbox","id":"sh/c7mpwv6h","slide":4,"name":"s4-test-0-check","text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[540,246,48,40]}
+{"kind":"textbox","id":"sh/zax8ra5s","slide":4,"name":"s4-test-0-text","text":"מתי התופעה הופיעה — ומתי נכשלה","textPreview":"מתי התופעה הופיעה — ומתי נכשלה","textChars":30,"textLines":1,"bbox":[80,246,446,48]}
+{"kind":"textbox","id":"sh/y9o7y5o7","slide":4,"name":"s4-test-1-check","text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[540,314,48,40]}
+{"kind":"textbox","id":"sh/cj69ofat","slide":4,"name":"s4-test-1-text","text":"האם היא נשארת לאחר עלויות מסחר","textPreview":"האם היא נשארת לאחר עלויות מסחר","textChars":30,"textLines":1,"bbox":[80,314,446,48]}
+{"kind":"textbox","id":"sh/xkfaxkre","slide":4,"name":"s4-test-2-check","text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[540,382,48,40]}
+{"kind":"textbox","id":"sh/ahorm5s3","slide":4,"name":"s4-test-2-text","text":"האם התוצאה תלויה בתקופה חריגה אחת","textPreview":"האם התוצאה תלויה בתקופה חריגה אחת","textChars":33,"textLines":1,"bbox":[80,382,446,48]}
+{"kind":"textbox","id":"sh/bixsva98","slide":4,"name":"s4-test-3-check","text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[540,450,48,40]}
+{"kind":"textbox","id":"sh/knq9sfa5","slide":4,"name":"s4-test-3-text","text":"האם היא מוסיפה ערך לתיק המלא","textPreview":"האם היא מוסיפה ערך לתיק המלא","textChars":28,"textLines":1,"bbox":[80,450,446,48]}
+{"kind":"shape","id":"sh/loza1krq","slide":4,"name":"s4-bottom-callout","bbox":[41,570,1198,62]}
+{"kind":"textbox","id":"sh/yl8rq5sz","slide":4,"name":"s4-bottom-text","text":"לא רודפים אחרי מה שעלה. מיישמים כלל עקבי — ורק לאחר בדיקות.","textPreview":"לא רודפים אחרי מה שעלה. מיישמים כלל עקבי — ורק לאחר בדיקות.","textChars":59,"textLines":1,"bbox":[80,584,1120,36]}
+{"kind":"textbox","id":"sh/zmhsza9k","slide":4,"name":"s4-source","text":"דוגמת מחקר וניסוי תפעולי בלבד | מקור אקדמי להצגה: FILL","textPreview":"דוגמת מחקר וניסוי תפעולי בלבד | מקור אקדמי להצגה: FILL","textChars":54,"textLines":1,"bbox":[600,642,598,24]}
+{"kind":"textbox","id":"sh/8bq9wza1","slide":4,"name":"slide-4-draft-footer","text":"טיוטה פנימית — לא להפצה | נוסח משפטי: FILL","textPreview":"טיוטה פנימית — לא להפצה | נוסח משפטי: FILL","textChars":42,"textLines":1,"bbox":[520,667,718,24]}
+{"kind":"textbox","id":"sh/9cja54rm","slide":4,"name":"slide-4-page","text":"4","textPreview":"4","textChars":1,"textLines":1,"bbox":[41,667,54,24]}
+{"kind":"notes","id":"nt/btv3v5","slide":4,"text":""}
+{"kind":"slide","id":"sl/dnuh9r","slide":5,"title":"רעיון מקבל הון רק אחרי שניסינו לשבור אותו","textShapes":16}
+{"kind":"textbox","id":"sh/61832pg7","slide":5,"name":"slide-5-title","text":"רעיון מקבל הון רק אחרי שניסינו לשבור אותו","textPreview":"רעיון מקבל הון רק אחרי שניסינו לשבור אותו","textChars":41,"textLines":1,"bbox":[41,34,1198,78]}
+{"kind":"shape","id":"sh/t4zmx4zy","slide":5,"name":"s5-timeline-line","bbox":[90,520,1100,0.03]}
+{"kind":"shape","id":"sh/s3ql4zyd","slide":5,"name":"s5-dot-1","bbox":[1060,514,13,13]}
+{"kind":"shape","id":"sh/jyxkruhw","slide":5,"name":"s5-dot-2","bbox":[634,514,13,13]}
+{"kind":"shape","id":"sh/ixo3ypgb","slide":5,"name":"s5-dot-3","bbox":[208,514,13,13]}
+{"kind":"shape","id":"sh/50f2tkz2","slide":5,"name":"s5-stage-1-panel","bbox":[850,154,374,320]}
+{"kind":"textbox","id":"sh/kz6l0fyh","slide":5,"name":"s5-stage-1-number","text":"1","textPreview":"1","textChars":1,"textLines":1,"bbox":[1136,180,56,58]}
+{"kind":"textbox","id":"sh/vaxknahk","slide":5,"name":"s5-stage-1-title","text":"מנסחים השערה","textPreview":"מנסחים השערה","textChars":12,"textLines":1,"bbox":[884,254,306,52]}
+{"kind":"textbox","id":"sh/a9o3u50f","slide":5,"name":"s5-stage-1-body","text":"מה אמור לעבוד, למה, ומתי בדיוק מתקבלת ההחלטה.","textPreview":"מה אמור לעבוד, למה, ומתי בדיוק מתקבלת ההחלטה.","textChars":45,"textLines":1,"bbox":[884,330,306,110]}
+{"kind":"textbox","id":"sh/8rmd83i1","slide":5,"name":"s5-stage-1-label","text":"שלב 1","textPreview":"שלב 1","textChars":5,"textLines":1,"bbox":[884,542,306,34]}
+{"kind":"shape","id":"sh/9sfu1ozm","slide":5,"name":"s5-stage-2-panel","bbox":[453,154,374,320]}
+{"kind":"textbox","id":"sh/mp4v6t0v","slide":5,"name":"s5-stage-2-number","text":"2","textPreview":"2","textChars":1,"textLines":1,"bbox":[739,180,56,58]}
+{"kind":"textbox","id":"sh/7qdczyhg","slide":5,"name":"s5-stage-2-title","text":"מנסים להפריך","textPreview":"מנסים להפריך","textChars":12,"textLines":1,"bbox":[487,254,306,52]}
+{"kind":"textbox","id":"sh/k3md4jip","slide":5,"name":"s5-stage-2-body","text":"תקופות שונות, עלויות, תנאי שוק קשים ותלות באירוע חריג.","textPreview":"תקופות שונות, עלויות, תנאי שוק קשים ותלות באירוע חריג.","textChars":54,"textLines":1,"bbox":[487,330,306,110]}
+{"kind":"textbox","id":"sh/l4vuxoza","slide":5,"name":"s5-stage-2-label","text":"שלב 2","textPreview":"שלב 2","textChars":5,"textLines":1,"bbox":[487,542,306,34]}
+{"kind":"shape","id":"sh/y14v290z","slide":5,"name":"s5-stage-3-panel","bbox":[56,154,374,320]}
+{"kind":"textbox","id":"sh/z2dcvehk","slide":5,"name":"s5-stage-3-number","text":"3","textPreview":"3","textChars":1,"textLines":1,"bbox":[342,180,56,58]}
+{"kind":"textbox","id":"sh/4z6dgni9","slide":5,"name":"s5-stage-3-title","text":"מתחילים קטן","textPreview":"מתחילים קטן","textChars":11,"textLines":1,"bbox":[90,254,306,52]}
+{"kind":"textbox","id":"sh/50ze98zu","slide":5,"name":"s5-stage-3-body","text":"ניסוי תפעולי, מסחר מוגבל, ניטור — ואז הגדלה או עצירה.","textPreview":"ניסוי תפעולי, מסחר מוגבל, ניטור — ואז הגדלה או עצירה.","textChars":53,"textLines":1,"bbox":[90,330,306,110]}
+{"kind":"textbox","id":"sh/dgvut8ry","slide":5,"name":"s5-stage-3-label","text":"שלב 3","textPreview":"שלב 3","textChars":5,"textLines":1,"bbox":[90,542,306,34]}
+{"kind":"textbox","id":"sh/sfmdk3ad","slide":5,"name":"s5-rejected-example","text":"דוגמה: רעיון המבוסס על פער פתיחה נראה חזק לפני עלויות. לאחר עלויות ובדיקת תקופות שונות, התוצאה לא הייתה יציבה — ולכן לא קודם להשקעה.","textPreview":"דוגמה: רעיון המבוסס על פער פתיחה נראה חזק לפני עלויות. לאחר עלויות ובדיקת תקופות שונות, התוצאה לא הייתה יציבה — ולכן לא קודם להשקעה.","textChars":132,"textLines":1,"bbox":[78,595,1124,58]}
+{"kind":"textbox","id":"sh/retcry9s","slide":5,"name":"slide-5-draft-footer","text":"טיוטה פנימית — לא להפצה | נוסח משפטי: FILL","textPreview":"טיוטה פנימית — לא להפצה | נוסח משפטי: FILL","textChars":42,"textLines":1,"bbox":[520,667,718,24]}
+{"kind":"textbox","id":"sh/qdkvids7","slide":5,"name":"slide-5-page","text":"5","textPreview":"5","textChars":1,"textLines":1,"bbox":[41,667,54,24]}
+{"kind":"notes","id":"nt/dnuh9r","slide":5,"text":""}
+{"kind":"slide","id":"sl/fk4b52","slide":6,"title":"בדיקה וכסף אמיתי מוצגים בנפרד","textShapes":18}
+{"kind":"textbox","id":"sh/kbip4b25","slide":6,"name":"slide-6-title","text":"בדיקה וכסף אמיתי מוצגים בנפרד","textPreview":"בדיקה וכסף אמיתי מוצגים בנפרד","textChars":29,"textLines":1,"bbox":[41,34,1198,78]}
+{"kind":"textbox","id":"sh/ja98v61k","slide":6,"name":"s6-intro","text":"לכל תוצאה מוצמדת רמת הראיה שלה. סימולציה לעולם לא תוצג כתשואה שהושגה בחשבון אמיתי.","textPreview":"לכל תוצאה מוצמדת רמת הראיה שלה. סימולציה לעולם לא תוצג כתשואה שהושגה בחשבון אמיתי.","textChars":82,"textLines":1,"bbox":[280,126,958,68]}
+{"kind":"shape","id":"sh/y90721kf","slide":6,"name":"s6-evidence-0-panel","bbox":[864,238,375,338]}
+{"kind":"textbox","id":"sh/tgbq1gj2","slide":6,"name":"s6-evidence-0-title","text":"כסף אמיתי","textPreview":"כסף אמיתי","textChars":9,"textLines":1,"bbox":[894,268,315,46]}
+{"kind":"textbox","id":"sh/8f2p8b2h","slide":6,"name":"s6-evidence-0-subtitle","text":"LIVE","textPreview":"LIVE","textChars":4,"textLines":1,"bbox":[894,326,315,44]}
+{"kind":"shape","id":"sh/7e98zq1w","slide":6,"name":"s6-evidence-0-fill-panel","bbox":[1085,388,124,46]}
+{"kind":"textbox","id":"sh/6d076lkb","slide":6,"name":"s6-evidence-0-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[1095,392,104,38]}
+{"kind":"textbox","id":"sh/9k7qpwji","slide":6,"name":"s6-evidence-0-body","text":"ביצוע בפועל בחשבון. נדרשים תאריך התחלה, הפקדות ומשיכות ובסיס מדידה.","textPreview":"ביצוע בפועל בחשבון. נדרשים תאריך התחלה, הפקדות ומשיכות ובסיס מדידה.","textChars":67,"textLines":1,"bbox":[894,458,315,90]}
+{"kind":"shape","id":"sh/ojypwr2x","slide":6,"name":"s6-evidence-1-panel","bbox":[453,238,375,338]}
+{"kind":"textbox","id":"sh/alk3edgb","slide":6,"name":"s6-evidence-1-title","text":"ניסוי בזמן אמת","textPreview":"ניסוי בזמן אמת","textChars":14,"textLines":1,"bbox":[483,268,315,46]}
+{"kind":"textbox","id":"sh/b6tk7ixw","slide":6,"name":"s6-evidence-1-subtitle","text":"INCUBATION / PAPER","textPreview":"INCUBATION / PAPER","textChars":18,"textLines":1,"bbox":[483,326,315,44]}
+{"kind":"shape","id":"sh/c72lgnyh","slide":6,"name":"s6-evidence-1-fill-panel","bbox":[674,388,124,46]}
+{"kind":"textbox","id":"sh/x8b29sf2","slide":6,"name":"s6-evidence-1-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[684,392,104,38]}
+{"kind":"textbox","id":"sh/y9k32xgn","slide":6,"name":"s6-evidence-1-body","text":"בודק תהליך, תזמון וחיבור לברוקר. אינו תשואה שהושגה בכסף אמיתי.","textPreview":"בודק תהליך, תזמון וחיבור לברוקר. אינו תשואה שהושגה בכסף אמיתי.","textChars":62,"textLines":1,"bbox":[483,458,315,90]}
+{"kind":"shape","id":"sh/zat4bix8","slide":6,"name":"s6-evidence-2-panel","bbox":[41,238,375,338]}
+{"kind":"textbox","id":"sh/kb2l4nyd","slide":6,"name":"s6-evidence-2-title","text":"בדיקה היסטורית","textPreview":"בדיקה היסטורית","textChars":14,"textLines":1,"bbox":[71,268,315,46]}
+{"kind":"textbox","id":"sh/lcvmdsfy","slide":6,"name":"s6-evidence-2-subtitle","text":"BACKTEST","textPreview":"BACKTEST","textChars":8,"textLines":1,"bbox":[71,326,315,44]}
+{"kind":"shape","id":"sh/md436xgj","slide":6,"name":"s6-evidence-2-fill-panel","bbox":[262,388,124,46]}
+{"kind":"textbox","id":"sh/7ed4f2x4","slide":6,"name":"s6-evidence-2-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[272,392,104,38]}
+{"kind":"textbox","id":"sh/jidk32dc","slide":6,"name":"s6-evidence-2-body","text":"מה היה קורה לפי נתוני עבר והנחות מוגדרות. תוצאה היפותטית בלבד.","textPreview":"מה היה קורה לפי נתוני עבר והנחות מוגדרות. תוצאה היפותטית בלבד.","textChars":62,"textLines":1,"bbox":[71,458,315,90]}
+{"kind":"textbox","id":"sh/ih4juxcr","slide":6,"name":"s6-status-note","text":"הסטטוס הנוכחי של כל רכיב בפורטפוליו","textPreview":"הסטטוס הנוכחי של כל רכיב בפורטפוליו","textChars":35,"textLines":1,"bbox":[760,610,440,36]}
+{"kind":"shape","id":"sh/54f25cvi","slide":6,"name":"s6-status-fill-panel","bbox":[590,604,138,42]}
+{"kind":"textbox","id":"sh/436lw7ux","slide":6,"name":"s6-status-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[600,608,118,34]}
+{"kind":"textbox","id":"sh/vedkz2d0","slide":6,"name":"slide-6-draft-footer","text":"טיוטה פנימית — לא להפצה | נוסח משפטי: FILL","textPreview":"טיוטה פנימית — לא להפצה | נוסח משפטי: FILL","textChars":42,"textLines":1,"bbox":[520,667,718,24]}
+{"kind":"textbox","id":"sh/ud4jqxcv","slide":6,"name":"slide-6-page","text":"6","textPreview":"6","textChars":1,"textLines":1,"bbox":[41,667,54,24]}
+{"kind":"notes","id":"nt/fk4b52","slide":6,"text":""}
+{"kind":"slide","id":"sl/wt43dm","slide":7,"title":"גם תהליך טוב כולל תקופות קשות","textShapes":18}
+{"kind":"textbox","id":"sh/dkjax4zq","slide":7,"name":"slide-7-title","text":"גם תהליך טוב כולל תקופות קשות","textPreview":"גם תהליך טוב כולל תקופות קשות","textChars":29,"textLines":1,"bbox":[41,34,1198,78]}
+{"kind":"shape","id":"sh/qx8bm9gz","slide":7,"name":"s7-intro-panel","bbox":[864,180,375,440]}
+{"kind":"textbox","id":"sh/ry1svehk","slide":7,"name":"s7-intro-title","text":"לפני השקעה, נציג טווחים — לא מספר יעד יחיד.","textPreview":"לפני השקעה, נציג טווחים — לא מספר יעד יחיד.","textChars":43,"textLines":1,"bbox":[898,226,305,112]}
+{"kind":"textbox","id":"sh/0natsjyh","slide":7,"name":"s7-intro-body","text":"המשקיע צריך להבין מראש כיצד חודש חלש, ירידה מהשיא או התאוששות ארוכה עלולים להרגיש.","textPreview":"המשקיע צריך להבין מראש כיצד חודש חלש, ירידה מהשיא או התאוששות ארוכה עלולים להרגיש.","textChars":82,"textLines":1,"bbox":[898,374,305,150]}
+{"kind":"textbox","id":"sh/1oja1of2","slide":7,"name":"s7-intro-caveat","text":"המספרים יתארו תרחישים מותנים בהיסטוריה ובהנחות. הם אינם תחזית או הבטחה.","textPreview":"המספרים יתארו תרחישים מותנים בהיסטוריה ובהנחות. הם אינם תחזית או הבטחה.","textChars":71,"textLines":1,"bbox":[898,544,305,58]}
+{"kind":"shape","id":"sh/elsbq9gb","slide":7,"name":"s7-row-0-line","bbox":[41,273,786,0.03]}
+{"kind":"textbox","id":"sh/zm1szexw","slide":7,"name":"s7-row-0-label","text":"תנועה חודשית טיפוסית","textPreview":"תנועה חודשית טיפוסית","textChars":20,"textLines":1,"bbox":[575,185,252,38]}
+{"kind":"textbox","id":"sh/orutw3yd","slide":7,"name":"s7-row-0-detail","text":"טווח מרכזי, לאחר עלויות","textPreview":"טווח מרכזי, לאחר עלויות","textChars":23,"textLines":1,"bbox":[575,227,252,30]}
+{"kind":"shape","id":"sh/9s3u58fy","slide":7,"name":"s7-row-0-fill-panel","bbox":[80,201,138,50]}
+{"kind":"textbox","id":"sh/hwfehkbe","slide":7,"name":"s7-row-0-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[90,205,118,42]}
+{"kind":"shape","id":"sh/gv6d8fat","slide":7,"name":"s7-row-1-line","bbox":[41,380,786,0.03]}
+{"kind":"textbox","id":"sh/fuxwfat8","slide":7,"name":"s7-row-1-label","text":"שכיחות חודש שלילי","textPreview":"שכיחות חודש שלילי","textChars":17,"textLines":1,"bbox":[575,292,252,38]}
+{"kind":"textbox","id":"sh/utov65sn","slide":7,"name":"s7-row-1-detail","text":"לא הבטחה לגבי חודש מסוים","textPreview":"לא הבטחה לגבי חודש מסוים","textChars":24,"textLines":1,"bbox":[575,334,252,30]}
+{"kind":"shape","id":"sh/p0zelkba","slide":7,"name":"s7-row-1-fill-panel","bbox":[80,308,138,50]}
+{"kind":"textbox","id":"sh/4zqdcfap","slide":7,"name":"s7-row-1-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[90,312,118,42]}
+{"kind":"shape","id":"sh/3yhwjutk","slide":7,"name":"s7-row-2-line","bbox":[41,487,786,0.03]}
+{"kind":"textbox","id":"sh/2xovapsz","slide":7,"name":"s7-row-2-label","text":"תרחיש שנה קשה","textPreview":"תרחיש שנה קשה","textChars":13,"textLines":1,"bbox":[575,399,252,38]}
+{"kind":"textbox","id":"sh/l4vu90b6","slide":7,"name":"s7-row-2-detail","text":"תוצאה חריגה אך אפשרית","textPreview":"תוצאה חריגה אך אפשרית","textChars":21,"textLines":1,"bbox":[575,441,252,30]}
+{"kind":"shape","id":"sh/k3md0val","slide":7,"name":"s7-row-2-fill-panel","bbox":[80,415,138,50]}
+{"kind":"textbox","id":"sh/c7qdgvih","slide":7,"name":"s7-row-2-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[90,419,118,42]}
+{"kind":"shape","id":"sh/x8zep0j2","slide":7,"name":"s7-row-3-line","bbox":[41,594,786,0.03]}
+{"kind":"textbox","id":"sh/a58vel0b","slide":7,"name":"s7-row-3-label","text":"ירידה וזמן התאוששות","textPreview":"ירידה וזמן התאוששות","textChars":19,"textLines":1,"bbox":[575,506,252,38]}
+{"kind":"textbox","id":"sh/b6hwnq1w","slide":7,"name":"s7-row-3-detail","text":"עומק ומשך מתחת לשיא","textPreview":"עומק ומשך מתחת לשיא","textChars":19,"textLines":1,"bbox":[575,548,252,30]}
+{"kind":"shape","id":"sh/kbqdkfid","slide":7,"name":"s7-row-3-fill-panel","bbox":[80,522,138,50]}
+{"kind":"textbox","id":"sh/lcjet0jy","slide":7,"name":"s7-row-3-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[90,526,118,42]}
+{"kind":"textbox","id":"sh/y98vi50n","slide":7,"name":"slide-7-draft-footer","text":"טיוטה פנימית — לא להפצה | נוסח משפטי: FILL","textPreview":"טיוטה פנימית — לא להפצה | נוסח משפטי: FILL","textChars":42,"textLines":1,"bbox":[520,667,718,24]}
+{"kind":"textbox","id":"sh/zahwra18","slide":7,"name":"slide-7-page","text":"7","textPreview":"7","textChars":1,"textLines":1,"bbox":[41,667,54,24]}
+{"kind":"notes","id":"nt/wt43dm","slide":7,"text":""}
+{"kind":"slide","id":"sl/wue1nj","slide":8,"title":"מה פירוש להצטרף לשלב הראשוני","textShapes":25}
+{"kind":"textbox","id":"sh/gj2do3el","slide":8,"name":"slide-8-title","text":"מה פירוש להצטרף לשלב הראשוני","textPreview":"מה פירוש להצטרף לשלב הראשוני","textChars":28,"textLines":1,"bbox":[41,34,1198,78]}
+{"kind":"shape","id":"sh/fitcvyx0","slide":8,"name":"s8-summary-panel","bbox":[658,168,581,412]}
+{"kind":"textbox","id":"sh/ex0vmtwf","slide":8,"name":"s8-stage-tag","text":"FRIENDS & FAMILY","textPreview":"FRIENDS & FAMILY","textChars":16,"textLines":1,"bbox":[888,184,315,26]}
+{"kind":"textbox","id":"sh/twrutofu","slide":8,"name":"s8-summary-title","text":"זהו שלב מוקדם","textPreview":"זהו שלב מוקדם","textChars":13,"textLines":1,"bbox":[694,210,509,54]}
+{"kind":"textbox","id":"sh/svidkje9","slide":8,"name":"s8-summary-body","text":"מטרת השלב היא לצבור ניסיון אמיתי, לבדוק את התפעול ולבנות היסטוריה שקופה — בלי להציג את המוצר כבשל יותר מכפי שהוא.","textPreview":"מטרת השלב היא לצבור ניסיון אמיתי, לבדוק את התפעול ולבנות היסטוריה שקופה — בלי להציג את המוצר כבשל יותר מכפי שהוא.","textChars":113,"textLines":1,"bbox":[694,292,509,166]}
+{"kind":"textbox","id":"sh/ru9crexo","slide":8,"name":"s8-summary-caveat","text":"לפני הצטרפות תתקיים שיחה אישית על התהליך, הסיכונים, התנאים וההתאמה למשקיע.","textPreview":"לפני הצטרפות תתקיים שיחה אישית על התהליך, הסיכונים, התנאים וההתאמה למשקיע.","textChars":74,"textLines":1,"bbox":[694,480,509,78]}
+{"kind":"textbox","id":"sh/6t0vytwj","slide":8,"name":"s8-item-0-check","text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[560,190,42,42]}
+{"kind":"textbox","id":"sh/5srupofy","slide":8,"name":"s8-item-0-label","text":"מבנה החשבון והמשמורת","textPreview":"מבנה החשבון והמשמורת","textChars":20,"textLines":1,"bbox":[210,190,330,42]}
+{"kind":"shape","id":"sh/4ritwjed","slide":8,"name":"s8-item-0-fill-panel","bbox":[56,190,124,42]}
+{"kind":"textbox","id":"sh/i98re1sn","slide":8,"name":"s8-item-0-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[66,194,104,34]}
+{"kind":"textbox","id":"sh/3ahs76t8","slide":8,"name":"s8-item-1-check","text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[560,262,42,42]}
+{"kind":"textbox","id":"sh/4bq9gbat","slide":8,"name":"s8-item-1-label","text":"סכום מינימום","textPreview":"סכום מינימום","textChars":12,"textLines":1,"bbox":[210,262,330,42]}
+{"kind":"shape","id":"sh/5cza9gbe","slide":8,"name":"s8-item-1-fill-panel","bbox":[56,262,124,42]}
+{"kind":"textbox","id":"sh/u5ora1sr","slide":8,"name":"s8-item-1-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[66,266,104,34]}
+{"kind":"textbox","id":"sh/v6x83mtw","slide":8,"name":"s8-item-2-check","text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[560,334,42,42]}
+{"kind":"textbox","id":"sh/g7q9crah","slide":8,"name":"s8-item-2-label","text":"נזילות ומשיכות","textPreview":"נזילות ומשיכות","textChars":14,"textLines":1,"bbox":[210,334,330,42]}
+{"kind":"shape","id":"sh/h8za5wb2","slide":8,"name":"s8-item-2-fill-panel","bbox":[56,334,124,42]}
+{"kind":"textbox","id":"sh/mhor6hsf","slide":8,"name":"s8-item-2-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[66,338,104,34]}
+{"kind":"textbox","id":"sh/7ix8zmt0","slide":8,"name":"s8-item-3-check","text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[560,406,42,42]}
+{"kind":"textbox","id":"sh/bmto7i9s","slide":8,"name":"s8-item-3-label","text":"עמלות ודמי ניהול","textPreview":"עמלות ודמי ניהול","textChars":16,"textLines":1,"bbox":[210,406,330,42]}
+{"kind":"shape","id":"sh/alk7ed87","slide":8,"name":"s8-item-3-fill-panel","bbox":[56,406,124,42]}
+{"kind":"textbox","id":"sh/xov69sry","slide":8,"name":"s8-item-3-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[66,410,104,34]}
+{"kind":"textbox","id":"sh/cnmpgnqd","slide":8,"name":"s8-item-4-check","text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[560,478,42,42]}
+{"kind":"textbox","id":"sh/zqdob29o","slide":8,"name":"s8-item-4-label","text":"דיווח ותדירות","textPreview":"דיווח ותדירות","textChars":13,"textLines":1,"bbox":[210,478,330,42]}
+{"kind":"shape","id":"sh/yp47ix8j","slide":8,"name":"s8-item-4-fill-panel","bbox":[56,478,124,42]}
+{"kind":"textbox","id":"sh/lcv6dsru","slide":8,"name":"s8-item-4-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[66,482,104,34]}
+{"kind":"shape","id":"sh/kbmpknq9","slide":8,"name":"s8-next-step-panel","bbox":[41,604,1198,44]}
+{"kind":"textbox","id":"sh/fu9ozy9k","slide":8,"name":"s8-next-step-label","text":"הצעד הבא","textPreview":"הצעד הבא","textChars":8,"textLines":1,"bbox":[1000,612,198,28]}
+{"kind":"shape","id":"sh/et0n6tsz","slide":8,"name":"s8-next-step-fill-panel","bbox":[80,606,138,40]}
+{"kind":"textbox","id":"sh/4zylgz6x","slide":8,"name":"s8-next-step-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[90,610,118,32]}
+{"kind":"textbox","id":"sh/507m947i","slide":8,"name":"s8-next-step-text","text":"פגישת המשך, מסמכים ובדיקת התאמה","textPreview":"פגישת המשך, מסמכים ובדיקת התאמה","textChars":31,"textLines":1,"bbox":[245,610,720,30]}
+{"kind":"textbox","id":"sh/ixg3ep8r","slide":8,"name":"slide-8-draft-footer","text":"טיוטה פנימית — לא להפצה | נוסח משפטי: FILL","textPreview":"טיוטה פנימית — לא להפצה | נוסח משפטי: FILL","textChars":42,"textLines":1,"bbox":[520,667,718,24]}
+{"kind":"textbox","id":"sh/3yp47upc","slide":8,"name":"slide-8-page","text":"8","textPreview":"8","textChars":1,"textLines":1,"bbox":[41,667,54,24]}
+{"kind":"notes","id":"nt/wue1nj","slide":8,"text":""}
+{"kind":"slide","id":"sl/ryotr7","slide":9,"title":"מה כל שכבת ראיה באמת מוכיחה","textShapes":22}
+{"kind":"textbox","id":"sh/9s72h4zq","slide":9,"name":"slide-9-title","text":"מה כל שכבת ראיה באמת מוכיחה","textPreview":"מה כל שכבת ראיה באמת מוכיחה","textChars":27,"textLines":1,"bbox":[41,34,1198,78]}
+{"kind":"textbox","id":"sh/mpg36pgz","slide":9,"name":"slide-9-appendix","text":"נספח","textPreview":"נספח","textChars":4,"textLines":1,"bbox":[41,36,130,30]}
+{"kind":"textbox","id":"sh/nqpkfuhk","slide":9,"name":"s9-intro","text":"כל נתון במצגת הסופית צריך להופיע עם סוג הראיה, התקופה, העלויות ומקור המדידה.","textPreview":"כל נתון במצגת הסופית צריך להופיע עם סוג הראיה, התקופה, העלויות ומקור המדידה.","textChars":76,"textLines":1,"bbox":[300,126,938,54]}
+{"kind":"shape","id":"sh/0nyl4zit","slide":9,"name":"s9-header-panel","bbox":[41,190,1198,55]}
+{"kind":"textbox","id":"sh/1o72d4ze","slide":9,"name":"s9-header-layer","text":"שכבה","textPreview":"שכבה","textChars":4,"textLines":1,"bbox":[968,202,250,32]}
+{"kind":"textbox","id":"sh/elwj2p03","slide":9,"name":"s9-header-proves","text":"מה היא מוכיחה","textPreview":"מה היא מוכיחה","textChars":13,"textLines":1,"bbox":[470,202,470,32]}
+{"kind":"textbox","id":"sh/zmpkbuho","slide":9,"name":"s9-header-not-proves","text":"מה היא אינה מוכיחה","textPreview":"מה היא אינה מוכיחה","textChars":18,"textLines":1,"bbox":[64,202,380,32]}
+{"kind":"shape","id":"sh/cze10fix","slide":9,"name":"s9-row-0-panel","bbox":[41,245,1198,90]}
+{"kind":"textbox","id":"sh/dkn29kzi","slide":9,"name":"s9-row-0-layer","text":"בדיקה היסטורית","textPreview":"בדיקה היסטורית","textChars":14,"textLines":1,"bbox":[968,262,250,54]}
+{"kind":"textbox","id":"sh/p8bu9kjy","slide":9,"name":"s9-row-0-proves","text":"האם הרעיון היה אפשרי בעבר","textPreview":"האם הרעיון היה אפשרי בעבר","textChars":25,"textLines":1,"bbox":[470,262,470,54]}
+{"kind":"textbox","id":"sh/o72dgfit","slide":9,"name":"s9-row-0-not-proves","text":"ביצוע עתידי","textPreview":"ביצוע עתידי","textChars":11,"textLines":1,"bbox":[64,262,380,54]}
+{"kind":"shape","id":"sh/n6tc7a18","slide":9,"name":"s9-row-1-panel","bbox":[41,335,1198,90]}
+{"kind":"textbox","id":"sh/25kve50n","slide":9,"name":"s9-row-1-layer","text":"Incubation","textPreview":"Incubation","textChars":10,"textLines":1,"bbox":[968,352,250,54]}
+{"kind":"textbox","id":"sh/14bu50j2","slide":9,"name":"s9-row-1-proves","text":"האם התהליך עובד בזמן אמת","textPreview":"האם התהליך עובד בזמן אמת","textChars":24,"textLines":1,"bbox":[470,352,470,54]}
+{"kind":"textbox","id":"sh/032dcfih","slide":9,"name":"s9-row-1-not-proves","text":"תשואה בכסף אמיתי","textPreview":"תשואה בכסף אמיתי","textChars":16,"textLines":1,"bbox":[64,352,380,54]}
+{"kind":"shape","id":"sh/fi9c3a1w","slide":9,"name":"s9-row-2-panel","bbox":[41,425,1198,90]}
+{"kind":"textbox","id":"sh/eh0va50b","slide":9,"name":"s9-row-2-layer","text":"Paper / מסחר מוגבל","textPreview":"Paper / מסחר מוגבל","textChars":18,"textLines":1,"bbox":[968,442,250,54]}
+{"kind":"textbox","id":"sh/dgru10jq","slide":9,"name":"s9-row-2-proves","text":"האם חיבור הברוקר והתפעול עובדים","textPreview":"האם חיבור הברוקר והתפעול עובדים","textChars":31,"textLines":1,"bbox":[470,442,470,54]}
+{"kind":"textbox","id":"sh/sfit8vil","slide":9,"name":"s9-row-2-not-proves","text":"איכות מילוי אמיתית לאורך זמן","textPreview":"איכות מילוי אמיתית לאורך זמן","textChars":28,"textLines":1,"bbox":[64,442,380,54]}
+{"kind":"shape","id":"sh/kjmdovqh","slide":9,"name":"s9-row-3-panel","bbox":[41,515,1198,90]}
+{"kind":"textbox","id":"sh/5kvux0rm","slide":9,"name":"s9-row-3-layer","text":"Live","textPreview":"Live","textChars":4,"textLines":1,"bbox":[968,532,250,54]}
+{"kind":"textbox","id":"sh/ix4vm58b","slide":9,"name":"s9-row-3-proves","text":"מה קרה בפועל בחשבון","textPreview":"מה קרה בפועל בחשבון","textChars":19,"textLines":1,"bbox":[470,532,470,54]}
+{"kind":"textbox","id":"sh/jidcvq9w","slide":9,"name":"s9-row-3-not-proves","text":"עמידות לאורך מחזורי שוק שלמים","textPreview":"עמידות לאורך מחזורי שוק שלמים","textChars":29,"textLines":1,"bbox":[64,532,380,54]}
+{"kind":"textbox","id":"sh/wv2dkvq5","slide":9,"name":"s9-method-label","text":"שיטת המדידה והמקורות","textPreview":"שיטת המדידה והמקורות","textChars":20,"textLines":1,"bbox":[930,618,268,28]}
+{"kind":"shape","id":"sh/xwbut0rq","slide":9,"name":"s9-method-fill-panel","bbox":[80,610,138,40]}
+{"kind":"textbox","id":"sh/atkvil8z","slide":9,"name":"s9-method-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[90,614,118,32]}
+{"kind":"textbox","id":"sh/vutcrq9k","slide":9,"name":"slide-9-draft-footer","text":"טיוטה פנימית — לא להפצה | נוסח משפטי: FILL","textPreview":"טיוטה פנימית — לא להפצה | נוסח משפטי: FILL","textChars":42,"textLines":1,"bbox":[520,667,718,24]}
+{"kind":"textbox","id":"sh/gr6dwfq9","slide":9,"name":"slide-9-page","text":"9","textPreview":"9","textChars":1,"textLines":1,"bbox":[41,667,54,24]}
+{"kind":"notes","id":"nt/ryotr7","slide":9,"text":""}
+{"kind":"slide","id":"sl/t27vzd","slide":10,"title":"מודל הסיכון מתאר טווחים, לא תחזית","textShapes":26}
+{"kind":"textbox","id":"sh/po3adgzu","slide":10,"name":"slide-10-title","text":"מודל הסיכון מתאר טווחים, לא תחזית","textPreview":"מודל הסיכון מתאר טווחים, לא תחזית","textChars":33,"textLines":1,"bbox":[41,34,1198,78]}
+{"kind":"textbox","id":"sh/21sril03","slide":10,"name":"slide-10-appendix","text":"נספח","textPreview":"נספח","textChars":4,"textLines":1,"bbox":[41,36,130,30]}
+{"kind":"textbox","id":"sh/nm1sbq1o","slide":10,"name":"s10-intro","text":"המודל מסדר מחדש מקטעים של תשואות עבר כדי להראות מסלולים היסטוריים חלופיים — כולל רצפים לא נעימים.","textPreview":"המודל מסדר מחדש מקטעים של תשואות עבר כדי להראות מסלולים היסטוריים חלופיים — כולל רצפים לא נעימים.","textChars":97,"textLines":1,"bbox":[240,128,998,60]}
+{"kind":"shape","id":"sh/cru9ovi5","slide":10,"name":"s10-does-panel","bbox":[658,214,581,330]}
+{"kind":"shape","id":"sh/xs3ah0zq","slide":10,"name":"s10-does-not-panel","bbox":[41,214,581,330]}
+{"kind":"textbox","id":"sh/apcrml0z","slide":10,"name":"s10-does-title","text":"מה הוא עושה","textPreview":"מה הוא עושה","textChars":11,"textLines":1,"bbox":[696,246,505,44]}
+{"kind":"textbox","id":"sh/bqlsfqhk","slide":10,"name":"s10-does-not-title","text":"מה הוא לא עושה","textPreview":"מה הוא לא עושה","textChars":14,"textLines":1,"bbox":[79,246,505,44]}
+{"kind":"textbox","id":"sh/svq9cbi1","slide":10,"name":"s10-does-0-check","text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[1160,314,36,32]}
+{"kind":"textbox","id":"sh/twjq5wjm","slide":10,"name":"s10-does-0-text","text":"מראה חודשים ושנים חלשים אפשריים","textPreview":"מראה חודשים ושנים חלשים אפשריים","textChars":31,"textLines":1,"bbox":[698,314,440,36]}
+{"kind":"textbox","id":"sh/1knm1kju","slide":10,"name":"s10-does-not-0-check","text":"×","textPreview":"×","textChars":1,"textLines":1,"bbox":[543,314,36,32]}
+{"kind":"textbox","id":"sh/0je58f29","slide":10,"name":"s10-does-not-0-text","text":"אינו יודע לחזות משבר שלא הופיע בעבר","textPreview":"אינו יודע לחזות משבר שלא הופיע בעבר","textChars":35,"textLines":1,"bbox":[80,314,440,36]}
+{"kind":"textbox","id":"sh/zi54za1o","slide":10,"name":"s10-does-1-check","text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[1160,368,36,32]}
+{"kind":"textbox","id":"sh/ehwn65k3","slide":10,"name":"s10-does-1-text","text":"בודק ירידות מהשיא וזמן מתחת לשיא","textPreview":"בודק ירידות מהשיא וזמן מתחת לשיא","textChars":32,"textLines":1,"bbox":[698,368,440,36]}
+{"kind":"textbox","id":"sh/9o7m5kjq","slide":10,"name":"s10-does-not-1-check","text":"×","textPreview":"×","textChars":1,"textLines":1,"bbox":[543,368,36,32]}
+{"kind":"textbox","id":"sh/ony5cf25","slide":10,"name":"s10-does-not-1-text","text":"אינו מבטל סיכון מודל או בחירת יתר","textPreview":"אינו מבטל סיכון מודל או בחירת יתר","textChars":33,"textLines":1,"bbox":[80,368,440,36]}
+{"kind":"textbox","id":"sh/nm543a1k","slide":10,"name":"s10-does-2-check","text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[1160,422,36,32]}
+{"kind":"textbox","id":"sh/mlwna5kf","slide":10,"name":"s10-does-2-text","text":"משווה הנחות עלויות ותרחישים","textPreview":"משווה הנחות עלויות ותרחישים","textChars":27,"textLines":1,"bbox":[698,422,440,36]}
+{"kind":"textbox","id":"sh/xc7m94j2","slide":10,"name":"s10-does-not-2-check","text":"×","textPreview":"×","textChars":1,"textLines":1,"bbox":[543,422,36,32]}
+{"kind":"textbox","id":"sh/wby5gz2h","slide":10,"name":"s10-does-not-2-text","text":"אינו מבטיח שהתוצאה תישאר בטווח","textPreview":"אינו מבטיח שהתוצאה תישאר בטווח","textChars":30,"textLines":1,"bbox":[80,422,440,36]}
+{"kind":"textbox","id":"sh/gv6pc3ad","slide":10,"name":"s10-does-3-check","text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[1160,476,36,32]}
+{"kind":"textbox","id":"sh/hwf658ry","slide":10,"name":"s10-does-3-text","text":"מציג טווחים במקום מספר יעד יחיד","textPreview":"מציג טווחים במקום מספר יעד יחיד","textChars":31,"textLines":1,"bbox":[698,476,440,36]}
+{"kind":"textbox","id":"sh/uto7atsn","slide":10,"name":"s10-does-not-3-check","text":"×","textPreview":"×","textChars":1,"textLines":1,"bbox":[543,476,36,32]}
+{"kind":"textbox","id":"sh/vuxo3y98","slide":10,"name":"s10-does-not-3-text","text":"אינו מחליף היסטוריה אמיתית בכסף אמיתי","textPreview":"אינו מחליף היסטוריה אמיתית בכסף אמיתי","textChars":37,"textLines":1,"bbox":[80,476,440,36]}
+{"kind":"shape","id":"sh/4jqpg3ap","slide":10,"name":"s10-fill-band","bbox":[41,574,1198,74]}
+{"kind":"textbox","id":"sh/5kz698ra","slide":10,"name":"s10-fill-label","text":"התיק, התקופה, העלויות והעמלות במודל","textPreview":"התיק, התקופה, העלויות והעמלות במודל","textChars":35,"textLines":1,"bbox":[600,592,598,34]}
+{"kind":"shape","id":"sh/ixo7edsj","slide":10,"name":"s10-fill-panel","bbox":[80,588,138,46]}
+{"kind":"textbox","id":"sh/3ixo7i94","slide":10,"name":"s10-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[90,592,118,38]}
+{"kind":"textbox","id":"sh/knm54ja5","slide":10,"name":"s10-current-note","text":"הערה: במודל הנוכחי חודש מחושב כ־21 ימי מסחר; התאמה לחודש קלנדרי: FILL","textPreview":"הערה: במודל הנוכחי חודש מחושב כ־21 ימי מסחר; התאמה לחודש קלנדרי: FILL","textChars":69,"textLines":1,"bbox":[260,648,938,22]}
+{"kind":"textbox","id":"sh/lov6xorq","slide":10,"name":"slide-10-draft-footer","text":"טיוטה פנימית — לא להפצה | נוסח משפטי: FILL","textPreview":"טיוטה פנימית — לא להפצה | נוסח משפטי: FILL","textChars":42,"textLines":1,"bbox":[520,667,718,24]}
+{"kind":"textbox","id":"sh/nul0zqxk","slide":10,"name":"slide-10-page","text":"10","textPreview":"10","textChars":2,"textLines":1,"bbox":[41,667,54,24]}
+{"kind":"notes","id":"nt/t27vzd","slide":10,"text":""}
+{"kind":"slide","id":"sl/8m4kht","slide":11,"title":"לפני הפצה נדרש אישור משפטי","textShapes":17}
+{"kind":"textbox","id":"sh/of6p4761","slide":11,"name":"slide-11-title","text":"לפני הפצה נדרש אישור משפטי","textPreview":"לפני הפצה נדרש אישור משפטי","textChars":26,"textLines":1,"bbox":[41,34,1198,78]}
+{"kind":"textbox","id":"sh/nex8v25g","slide":11,"name":"slide-11-appendix","text":"נספח","textPreview":"נספח","textChars":4,"textLines":1,"bbox":[41,36,130,30]}
+{"kind":"textbox","id":"sh/2do72xov","slide":11,"name":"s11-intro","text":"המצגת יכולה להיות כלי שיחה רק לאחר שהמבנה, הקהל והנוסח אושרו מקצועית.","textPreview":"המצגת יכולה להיות כלי שיחה רק לאחר שהמבנה, הקהל והנוסח אושרו מקצועית.","textChars":69,"textLines":1,"bbox":[300,128,938,58]}
+{"kind":"textbox","id":"sh/1cvqtsna","slide":11,"name":"s11-field-0-label","text":"זהות הישות והמנהל","textPreview":"זהות הישות והמנהל","textChars":17,"textLines":1,"bbox":[570,214,628,42]}
+{"kind":"shape","id":"sh/0bmp0n6p","slide":11,"name":"s11-field-0-fill-panel","bbox":[80,214,138,44]}
+{"kind":"textbox","id":"sh/fad8r254","slide":11,"name":"s11-field-0-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[90,218,118,36]}
+{"kind":"shape","id":"sh/e947yxoz","slide":11,"name":"s11-field-0-line","bbox":[250,262,948,0.03]}
+{"kind":"textbox","id":"sh/l8zq5wne","slide":11,"name":"s11-field-1-label","text":"מבנה משפטי ומבנה החשבון","textPreview":"מבנה משפטי ומבנה החשבון","textChars":23,"textLines":1,"bbox":[570,283,628,42]}
+{"kind":"shape","id":"sh/k7q9cr69","slide":11,"name":"s11-field-1-fill-panel","bbox":[80,283,138,44]}
+{"kind":"textbox","id":"sh/ydo3ahsn","slide":11,"name":"s11-field-1-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[90,287,118,36]}
+{"kind":"shape","id":"sh/jex43mt8","slide":11,"name":"s11-field-1-line","bbox":[250,331,948,0.03]}
+{"kind":"textbox","id":"sh/kf6lcrat","slide":11,"name":"s11-field-2-label","text":"רישוי, פטורים וקהל היעד","textPreview":"רישוי, פטורים וקהל היעד","textChars":23,"textLines":1,"bbox":[570,352,628,42]}
+{"kind":"shape","id":"sh/lgfm5wby","slide":11,"name":"s11-field-2-fill-panel","bbox":[80,352,138,44]}
+{"kind":"textbox","id":"sh/a9436xsb","slide":11,"name":"s11-field-2-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[90,356,118,36]}
+{"kind":"shape","id":"sh/bad4z2tw","slide":11,"name":"s11-field-2-line","bbox":[250,400,948,0.03]}
+{"kind":"textbox","id":"sh/wb6l87ah","slide":11,"name":"s11-field-3-label","text":"תנאי ההשקעה והמשיכה","textPreview":"תנאי ההשקעה והמשיכה","textChars":19,"textLines":1,"bbox":[570,421,628,42]}
+{"kind":"shape","id":"sh/xcfm1cb2","slide":11,"name":"s11-field-3-fill-panel","bbox":[80,421,138,44]}
+{"kind":"textbox","id":"sh/u58ni1sv","slide":11,"name":"s11-field-3-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[90,425,118,36]}
+{"kind":"shape","id":"sh/v6h4b6tg","slide":11,"name":"s11-field-3-line","bbox":[250,469,948,0.03]}
+{"kind":"textbox","id":"sh/re9snu5g","slide":11,"name":"s11-field-4-label","text":"נוסח גילוי נאות שאושר משפטית","textPreview":"נוסח גילוי נאות שאושר משפטית","textChars":28,"textLines":1,"bbox":[570,490,628,42]}
+{"kind":"shape","id":"sh/6dgrep4v","slide":11,"name":"s11-field-4-fill-panel","bbox":[80,490,138,44]}
+{"kind":"textbox","id":"sh/tgrap4nm","slide":11,"name":"s11-field-4-fill-text","text":"FILL","textPreview":"FILL","textChars":4,"textLines":1,"bbox":[90,494,118,36]}
+{"kind":"shape","id":"sh/sfi9gzm1","slide":11,"name":"s11-field-4-line","bbox":[250,538,948,0.03]}
+{"kind":"shape","id":"sh/fi9sre5s","slide":11,"name":"s11-warning-panel","bbox":[41,582,1198,66]}
+{"kind":"textbox","id":"sh/eh0ri947","slide":11,"name":"s11-warning","text":"טיוטה פנימית. אין להפיץ או למסור נתוני תשואה ותנאים לפני אישור עורך דין מתאים.","textPreview":"טיוטה פנימית. אין להפיץ או למסור נתוני תשואה ותנאים לפני אישור עורך דין מתאים.","textChars":78,"textLines":1,"bbox":[80,596,1120,38]}
+{"kind":"textbox","id":"sh/14ratoni","slide":11,"name":"s11-risk","text":"השקעה כרוכה בסיכון להפסד, לרבות הפסד משמעותי. תוצאות עבר ובדיקות היסטוריות אינן מבטיחות תוצאות עתידיות.","textPreview":"השקעה כרוכה בסיכון להפסד, לרבות הפסד משמעותי. תוצאות עבר ובדיקות היסטוריות אינן מבטיחות תוצאות עתידיות.","textChars":103,"textLines":1,"bbox":[170,652,1030,26]}
+{"kind":"textbox","id":"sh/gjitkjmx","slide":11,"name":"slide-11-draft-footer","text":"טיוטה פנימית — לא להפצה | נוסח משפטי: FILL","textPreview":"טיוטה פנימית — לא להפצה | נוסח משפטי: FILL","textChars":42,"textLines":1,"bbox":[520,667,718,24]}
+{"kind":"textbox","id":"sh/36tsve5o","slide":11,"name":"slide-11-page","text":"11","textPreview":"11","textChars":2,"textLines":1,"bbox":[41,667,54,24]}
+{"kind":"notes","id":"nt/8m4kht","slide":11,"text":""}

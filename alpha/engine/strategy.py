@@ -30,6 +30,8 @@ from alpha.live.logging_utils import log_event, log_trace_event
 from alpha.engine.plot import plot
 from alpha.engine.order import Order, MarketOrder, LimitOrder, StopOrder
 from alpha.engine.metrics import (
+    BENCHMARK_REGRESSION_METRIC_NAME_TUPLE,
+    generate_benchmark_regression_metrics,
     generate_drawdowns,
     generate_monthly_returns,
     generate_open_trades,
@@ -41,7 +43,9 @@ from alpha.engine.metrics import (
 
 class Strategy(ABC):
     def __init__(self, name: str, benchmarks: list | tuple, capital_base = 10_000, slippage: float = 0.00025,
-                 commission_per_share: float = 0.005, commission_minimum: float = 1.0):
+                 commission_per_share: float = 0.005, commission_minimum: float = 1.0,
+                 performance_benchmark_symbol_str: str | None = None,
+                 performance_benchmark_adjustment_str: str | None = None):
         # strategy metadata
         self.name = name  # name of the strategy for identification
 
@@ -54,6 +58,17 @@ class Strategy(ABC):
         self._commission_per_share = commission_per_share  # IBKR default: $0.005/share
         self._commission_minimum = commission_minimum  # IBKR default: $1.00 minimum per order
         self._benchmarks = benchmarks  # list of benchmark assets for performance comparison
+        self._performance_benchmark_symbol_str = (
+            str(performance_benchmark_symbol_str)
+            if performance_benchmark_symbol_str is not None
+            else (str(benchmarks[0]) if len(benchmarks) > 0 else None)
+        )
+        self._performance_benchmark_adjustment_str = (
+            str(performance_benchmark_adjustment_str)
+            if performance_benchmark_adjustment_str is not None
+            else ('not_declared' if self._performance_benchmark_symbol_str is not None else None)
+        )
+        self.benchmark_regression_metadata_by_column_dict: dict[str, dict[str, object]] = {}
 
         # data storage and results tracking
         self.results = self.initialize_results()  # DataFrame to store performance metrics throughout the simulation
@@ -931,6 +946,38 @@ class Strategy(ABC):
         pass
 
     # summarize results
+    def _append_benchmark_regression_metrics(self) -> None:
+        benchmark_symbol_str = getattr(
+            self,
+            '_performance_benchmark_symbol_str',
+            str(self._benchmarks[0]) if len(self._benchmarks) > 0 else None,
+        )
+        benchmark_return_ser = None
+        if benchmark_symbol_str is not None and benchmark_symbol_str in self.results.columns:
+            # *** CRITICAL*** report-only realized benchmark returns: pct_change
+            # uses the stored benchmark wealth history and never enters signal
+            # or order logic. Missing dates remain missing and are not filled.
+            benchmark_return_ser = self.results[benchmark_symbol_str].astype(float).pct_change(
+                fill_method=None
+            )
+
+        strategy_return_ser = self.results['daily_returns'].astype(float).iloc[1:]
+        regression_metric_ser, regression_metadata_dict = generate_benchmark_regression_metrics(
+            strategy_return_ser,
+            benchmark_return_ser,
+            benchmark_label_str=benchmark_symbol_str,
+            benchmark_adjustment_str=getattr(
+                self,
+                '_performance_benchmark_adjustment_str',
+                'not_declared' if benchmark_symbol_str is not None else None,
+            ),
+        )
+        for metric_name_str in BENCHMARK_REGRESSION_METRIC_NAME_TUPLE:
+            self.summary.loc[metric_name_str, 'Strategy'] = regression_metric_ser.loc[metric_name_str]
+        self.benchmark_regression_metadata_by_column_dict = {
+            'Strategy': regression_metadata_dict,
+        }
+
     def summarize(self, include_benchmarks=True):
         """
         generates a summary of the strategy's performance, including
@@ -976,6 +1023,7 @@ class Strategy(ABC):
                     None,
                     self.results['daily_returns']
                 )
+        self._append_benchmark_regression_metrics()
 
         # generate trade performance summary
         self.summary_trades = generate_trades_metrics(self._trades, self.results.index)

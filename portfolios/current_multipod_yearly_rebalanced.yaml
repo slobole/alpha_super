@@ -8,6 +8,7 @@ rebalance:
   frequency_str: annually
   policy_str: fixed
 save_pod_artifacts_bool: true
+regression_benchmark_symbol_str: "$SPX"
 
 pods:
   - pod_id_str: pod_taa

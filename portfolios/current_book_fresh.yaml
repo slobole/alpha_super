@@ -6,6 +6,7 @@ allocation_policy_str: fixed
 max_workers_int: null
 rebalance: null
 save_pod_artifacts_bool: true
+regression_benchmark_symbol_str: "$SPX"
 
 pods:
   - pod_id_str: pod_dv2

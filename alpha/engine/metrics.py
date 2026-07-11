@@ -16,6 +16,132 @@ overview:
 """
 import numpy as np
 import pandas as pd
+import statsmodels.api as sm
+
+
+BENCHMARK_REGRESSION_METRIC_NAME_TUPLE = (
+    'Beta',
+    'Alpha (Ann.) [%]',
+    'Alpha HAC t-stat',
+    'R²',
+)
+
+
+def generate_benchmark_regression_metrics(
+    strategy_return_ser: pd.Series | None,
+    benchmark_return_ser: pd.Series | None,
+    *,
+    benchmark_label_str: str | None,
+    benchmark_adjustment_str: str | None = None,
+    days_in_year: int = 252,
+    min_observation_count_int: int = 252,
+) -> tuple[pd.Series, dict[str, object]]:
+    """Estimate a zero-rate daily market regression with HAC alpha inference.
+
+    The report-only model is:
+
+        r_strategy,t = alpha_daily + beta * r_benchmark,t + epsilon_t
+
+        alpha_ann = days_in_year * alpha_daily
+
+    Returns are inner-aligned, non-finite pairs are removed, and no values are
+    filled. This function never feeds strategy signal or order logic.
+    """
+    if days_in_year <= 0:
+        raise ValueError('days_in_year must be positive.')
+    if min_observation_count_int <= 1:
+        raise ValueError('min_observation_count_int must be greater than 1.')
+
+    regression_metric_ser = pd.Series(
+        {metric_name_str: np.nan for metric_name_str in BENCHMARK_REGRESSION_METRIC_NAME_TUPLE},
+        dtype=float,
+    )
+    regression_metadata_dict: dict[str, object] = {
+        'model_str': 'zero_rate_daily_ols_hac',
+        'benchmark_label_str': benchmark_label_str,
+        'benchmark_adjustment_str': benchmark_adjustment_str,
+        'status_str': 'unavailable',
+        'reason_str': 'missing_benchmark',
+        'observation_count_int': 0,
+        'minimum_observation_count_int': int(min_observation_count_int),
+        'days_in_year_int': int(days_in_year),
+        'hac_max_lag_int': None,
+    }
+    if strategy_return_ser is None or benchmark_return_ser is None or not benchmark_label_str:
+        return regression_metric_ser, regression_metadata_dict
+
+    # *** CRITICAL*** report-only realized-return alignment: use only paired
+    # observations already present in both realized histories. Never fill a
+    # missing benchmark or strategy return across a date boundary.
+    regression_return_df = pd.concat(
+        [
+            strategy_return_ser.astype(float).rename('strategy_return'),
+            benchmark_return_ser.astype(float).rename('benchmark_return'),
+        ],
+        axis=1,
+        join='inner',
+    )
+    regression_return_df = regression_return_df.replace([np.inf, -np.inf], np.nan).dropna()
+    observation_count_int = int(len(regression_return_df))
+    regression_metadata_dict['observation_count_int'] = observation_count_int
+    if observation_count_int < min_observation_count_int:
+        regression_metadata_dict['reason_str'] = 'insufficient_observations'
+        return regression_metric_ser, regression_metadata_dict
+
+    benchmark_variance_float = float(regression_return_df['benchmark_return'].var(ddof=1))
+    if not np.isfinite(benchmark_variance_float) or benchmark_variance_float <= np.finfo(float).eps:
+        regression_metadata_dict['reason_str'] = 'zero_benchmark_variance'
+        return regression_metric_ser, regression_metadata_dict
+
+    strategy_variance_float = float(regression_return_df['strategy_return'].var(ddof=1))
+    if not np.isfinite(strategy_variance_float) or strategy_variance_float <= np.finfo(float).eps:
+        regression_metadata_dict['reason_str'] = 'zero_strategy_variance'
+        return regression_metric_ser, regression_metadata_dict
+
+    hac_max_lag_int = int(np.floor(4.0 * (observation_count_int / 100.0) ** (2.0 / 9.0)))
+    regression_design_df = sm.add_constant(
+        regression_return_df[['benchmark_return']],
+        has_constant='add',
+    )
+    regression_result_obj = sm.OLS(
+        regression_return_df['strategy_return'],
+        regression_design_df,
+    ).fit(
+        cov_type='HAC',
+        cov_kwds={'maxlags': hac_max_lag_int},
+    )
+
+    alpha_daily_float = float(regression_result_obj.params['const'])
+    beta_float = float(regression_result_obj.params['benchmark_return'])
+    alpha_annual_percent_float = alpha_daily_float * days_in_year * 100.0
+    alpha_hac_t_stat_float = float(regression_result_obj.tvalues['const'])
+    r_squared_float = float(regression_result_obj.rsquared)
+    core_result_vec = np.asarray(
+        [alpha_daily_float, beta_float, alpha_annual_percent_float, r_squared_float],
+        dtype=float,
+    )
+    if (
+        not np.isfinite(core_result_vec).all()
+        or r_squared_float < -1e-12
+        or r_squared_float > 1.0 + 1e-12
+    ):
+        regression_metadata_dict['reason_str'] = 'invalid_regression_result'
+        return regression_metric_ser, regression_metadata_dict
+
+    regression_metric_ser.loc['Beta'] = beta_float
+    regression_metric_ser.loc['Alpha (Ann.) [%]'] = alpha_annual_percent_float
+    regression_metric_ser.loc['Alpha HAC t-stat'] = (
+        alpha_hac_t_stat_float if np.isfinite(alpha_hac_t_stat_float) else np.nan
+    )
+    regression_metric_ser.loc['R²'] = min(1.0, max(0.0, r_squared_float))
+    regression_metadata_dict.update(
+        {
+            'status_str': 'ok',
+            'reason_str': None,
+            'hac_max_lag_int': hac_max_lag_int,
+        }
+    )
+    return regression_metric_ser, regression_metadata_dict
 
 
 def _concat_unique_asset_str(asset_ser: pd.Series) -> str:
@@ -457,7 +583,7 @@ def generate_overall_metrics(total_value: pd.Series, trades: pd.DataFrame = None
     s.loc['Avg. Drawdown Duration [days]'] = pd.Timedelta(np.ceil(drawdowns['duration'].mean()), unit=u).days
     # count drawdown occurrences
     s.loc['# Drawdowns'] = len(drawdowns)
-    s.loc['# Drawdowns / year'] = int(len(drawdowns) / (s.loc['Duration [days]'] / 365))
+    s.loc['# Drawdowns / year'] = len(drawdowns) / (duration_day_count_int / days_in_year)
 
     if transactions_df is not None and len(transactions_df) > 0:
         average_equity_float = float(total_value_ser.mean())

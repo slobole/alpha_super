@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+import warnings
 
 import pandas as pd
 import yaml
@@ -27,6 +28,7 @@ from alpha.engine.report import (
     save_results as save_strategy_results,
 )
 from alpha.engine.strategy import Strategy
+from data.norgate_loader import TOTALRETURN_ADJUSTMENT_STR, load_price_timeseries
 
 
 SUPPORTED_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = (
@@ -37,6 +39,8 @@ SUPPORTED_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = (
     "strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash",
     "strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy",
     "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy",
+    "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc",
+    "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc_asset_sma200",
 )
 POD_MINIMUM_ALLOCATED_CAPITAL_FLOAT_DICT: dict[str, float] = {
     "strategies.dv2.strategy_mr_dv2:DVO2Strategy": 25_000.0,
@@ -63,6 +67,7 @@ TOP_LEVEL_FIELD_SET: frozenset[str] = frozenset(
         "max_workers_int",
         "rebalance",
         "save_pod_artifacts_bool",
+        "regression_benchmark_symbol_str",
         "pods",
     }
 )
@@ -107,6 +112,7 @@ class PortfolioManagerConfig:
     max_workers_int: int | None
     rebalance: PortfolioRebalanceConfig | None
     save_pod_artifacts_bool: bool
+    regression_benchmark_symbol_str: str | None
     pod_config_list: list[PortfolioPodConfig]
 
     @property
@@ -394,6 +400,10 @@ def build_portfolio_manager_config(config_dict: dict[str, Any]) -> PortfolioMana
     save_pod_artifacts_obj = config_dict.get("save_pod_artifacts_bool", True)
     if not isinstance(save_pod_artifacts_obj, bool):
         raise ValueError("Field 'save_pod_artifacts_bool' must be a boolean.")
+    regression_benchmark_symbol_str = _coerce_optional_str(
+        config_dict,
+        "regression_benchmark_symbol_str",
+    )
 
     raw_pod_list = config_dict.get("pods")
     if not isinstance(raw_pod_list, list):
@@ -414,6 +424,7 @@ def build_portfolio_manager_config(config_dict: dict[str, Any]) -> PortfolioMana
         max_workers_int=max_workers_int,
         rebalance=rebalance_config,
         save_pod_artifacts_bool=save_pod_artifacts_obj,
+        regression_benchmark_symbol_str=regression_benchmark_symbol_str,
         pod_config_list=pod_config_list,
     )
 
@@ -628,6 +639,31 @@ class PortfolioManager:
                 }
             )
 
+        regression_benchmark_value_ser = None
+        regression_benchmark_label_str = None
+        if self.config.regression_benchmark_symbol_str is not None:
+            regression_benchmark_label_str = (
+                f"{self.config.regression_benchmark_symbol_str} · TOTALRETURN"
+            )
+            try:
+                regression_benchmark_price_df = load_price_timeseries(
+                    self.config.regression_benchmark_symbol_str,
+                    adjustment_str=TOTALRETURN_ADJUSTMENT_STR,
+                    start_date_str=self.config.backtest_start_date_str,
+                    end_date_str=self.config.end_date_str,
+                )
+                if len(regression_benchmark_price_df) > 0:
+                    regression_benchmark_value_ser = regression_benchmark_price_df[
+                        "Close"
+                    ].astype(float)
+            except Exception as exception_obj:  # report-only external data boundary
+                warnings.warn(
+                    "Portfolio benchmark regression is unavailable because "
+                    f"{self.config.regression_benchmark_symbol_str} TOTALRETURN could not be loaded: "
+                    f"{exception_obj}",
+                    RuntimeWarning,
+                )
+
         portfolio = Portfolio(
             strategies=[pod_run_result.strategy for pod_run_result in pod_run_result_list],
             weights=self.config.weight_list,
@@ -649,6 +685,13 @@ class PortfolioManager:
                 if self.config.rebalance is not None
                 and self.config.rebalance.lookback_day_int is not None
                 else DEFAULT_INVERSE_VOLATILITY_LOOKBACK_DAY_INT
+            ),
+            regression_benchmark_value_ser=regression_benchmark_value_ser,
+            regression_benchmark_label_str=regression_benchmark_label_str,
+            regression_benchmark_adjustment_str=(
+                TOTALRETURN_ADJUSTMENT_STR
+                if self.config.regression_benchmark_symbol_str is not None
+                else None
             ),
         )
         portfolio.source_config_path = self.source_config_path_str
@@ -694,6 +737,12 @@ class PortfolioManager:
             "backtest_start_date_str": self.config.backtest_start_date_str,
             "end_date_str": self.config.end_date_str,
             "allocation_policy_str": self.config.allocation_policy_str,
+            "regression_benchmark_symbol_str": self.config.regression_benchmark_symbol_str,
+            "regression_benchmark_adjustment_str": (
+                TOTALRETURN_ADJUSTMENT_STR
+                if self.config.regression_benchmark_symbol_str is not None
+                else None
+            ),
             "max_workers_int": worker_count_int,
             "rebalance": (
                 self.config.rebalance.to_metadata_dict()

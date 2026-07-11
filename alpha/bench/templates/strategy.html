@@ -83,7 +83,7 @@
     <h2 class="section-title" style="margin:0;">Latest report · {{ latest_report_run.analysis_label_str }} · {{ latest_report_run.display_timestamp_str }}</h2>
     <a class="btn btn-sm btn-ghost" href="{{ url_for('artifact_fn', rel_path_str=latest_report_run.report_artifact_str) }}" target="_blank" rel="noopener noreferrer">Open full ↗</a>
   </div>
-  <iframe class="report-frame" sandbox referrerpolicy="no-referrer" src="{{ url_for('artifact_fn', rel_path_str=latest_report_run.report_artifact_str) }}"></iframe>
+  <iframe class="report-frame" sandbox="allow-scripts" referrerpolicy="no-referrer" src="{{ url_for('artifact_fn', rel_path_str=latest_report_run.report_artifact_str) }}"></iframe>
 </div>
 {% endif %}
 {% endblock %}

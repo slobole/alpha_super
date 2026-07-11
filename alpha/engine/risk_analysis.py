@@ -1,9 +1,9 @@
 """
-Post-run risk diagnostics for completed strategy runs.
+Post-run risk diagnostics for completed strategy or portfolio runs.
 
-RiskAnalysis is report-only. It reads realized strategy returns after a
-completed vanilla backtest and never changes strategy, order, fill, sizing, or
-live execution semantics.
+RiskAnalysis is report-only. It reads realized returns after a completed
+backtest and never changes strategy, order, fill, sizing, or live execution
+semantics.
 
 Core return path:
 
@@ -31,15 +31,18 @@ import numpy as np
 import pandas as pd
 
 from alpha.engine.report import build_research_output_path
-from alpha.engine.strategy import Strategy
 
 
 RISK_ANALYSIS_TYPE_STR = "risk_analysis"
+RISK_ANALYSIS_SCHEMA_VERSION_INT = 2
 RETURN_HISTOGRAM_CSV_FILENAME_STR = "return_histogram.csv"
 BOOTSTRAP_EQUITY_PATH_CSV_FILENAME_STR = "bootstrap_equity_paths.csv"
 BOOTSTRAP_PATH_METRIC_CSV_FILENAME_STR = "bootstrap_path_metrics.csv"
 BOOTSTRAP_INTERVAL_CSV_FILENAME_STR = "bootstrap_metric_intervals.csv"
 HORIZON_PROBABILITY_CSV_FILENAME_STR = "horizon_probabilities.csv"
+OBSERVED_CALENDAR_MONTH_CSV_FILENAME_STR = "observed_calendar_months.csv"
+INVESTOR_SCENARIO_CSV_FILENAME_STR = "investor_scenarios.csv"
+INVESTOR_SUMMARY_FILENAME_STR = "investor_summary.json"
 SUMMARY_FILENAME_STR = "summary.json"
 RUN_INFO_FILENAME_STR = "run_info.json"
 METADATA_FILENAME_STR = "metadata.json"
@@ -53,6 +56,7 @@ DEFAULT_CONFIDENCE_LEVEL_FLOAT = 0.95
 DEFAULT_DRAWDOWN_THRESHOLD_TUPLE = (-0.10, -0.20, -0.30, -0.40, -0.50)
 DEFAULT_UPSIDE_THRESHOLD_TUPLE = (0.10, 0.20, 0.30, 0.40, 0.50)
 DEFAULT_HORIZON_YEAR_TUPLE = (1, 2, 3, 4, 5)
+DEFAULT_INVESTOR_HORIZON_YEAR_TUPLE = (1, 3, 5)
 DEFAULT_ROLLING_LOSS_WINDOW_TUPLE = (1, 5, 21, 63, 126, 252)
 DEFAULT_TIME_UNDERWATER_BREACH_MONTH_TUPLE = (3, 6, 12, 24)
 TRADING_DAYS_PER_MONTH_INT = 21
@@ -60,6 +64,16 @@ TRADING_DAYS_PER_YEAR_INT = 252
 DEFAULT_RETURN_HISTOGRAM_BIN_COUNT_INT = 80
 DEFAULT_EQUITY_PATH_SAMPLE_COUNT_INT = 100
 TRADING_DAYS_PER_YEAR_FLOAT = 252.0
+OBSERVED_CALENDAR_MONTH_COLUMN_TUPLE = (
+    "calendar_month_str",
+    "calendar_month_end_str",
+    "scheduled_calendar_month_end_str",
+    "effective_start_date_str",
+    "effective_end_date_str",
+    "sample_boundary_month_bool",
+    "trading_day_count_int",
+    "calendar_month_return_float",
+)
 CVAR_99_TAIL_FRACTION_FLOAT = 0.01
 CVAR_99_MIN_TAIL_SAMPLE_INT = 50
 CVAR_99_SMALL_SAMPLE_FOOTNOTE_STR = (
@@ -82,13 +96,13 @@ VERDICT_STATUS_NA_STR = "na"
 # Edge: probability the bootstrap path ended below where it started.
 EDGE_TERMINAL_LOSS_GREEN_MAX_FLOAT = 0.10
 EDGE_TERMINAL_LOSS_AMBER_MAX_FLOAT = 0.30
-# Drawdown depth: |1-in-20 bad-case max drawdown| (p05 of max_drawdown dist).
+# Drawdown depth: |bootstrap p05 max drawdown|.
 DRAWDOWN_DEPTH_GREEN_MAX_FLOAT = 0.20
 DRAWDOWN_DEPTH_AMBER_MAX_FLOAT = 0.35
 # Time underwater: P(longest underwater stretch >= 12 trading months).
 UNDERWATER_12M_GREEN_MAX_FLOAT = 0.20
 UNDERWATER_12M_AMBER_MAX_FLOAT = 0.50
-# Worst rolling 12-month return: |1-in-20 bad-case worst-12m| (p05 of worst_252d).
+# Worst rolling 12-month return: |bootstrap p05 worst-12m|.
 WORST_YEAR_GREEN_MAX_FLOAT = 0.15
 WORST_YEAR_AMBER_MAX_FLOAT = 0.30
 
@@ -105,9 +119,14 @@ class RiskAnalysisResult:
     summary_dict: dict[str, object]
     horizon_probability_df: pd.DataFrame = field(default_factory=pd.DataFrame)
     output_dir_path: Path | None = None
+    observed_calendar_month_df: pd.DataFrame = field(default_factory=pd.DataFrame)
+    investor_scenario_df: pd.DataFrame = field(default_factory=pd.DataFrame)
+    investor_summary_dict: dict[str, object] = field(default_factory=dict)
+    source_entity_type_str: str = "strategy"
+    analysis_context_dict: dict[str, object] = field(default_factory=dict)
 
 
-def extract_realized_return_ser(strategy_obj: Strategy) -> pd.Series:
+def extract_realized_return_ser(strategy_obj: object) -> pd.Series:
     """
     Return the realized post-run daily return series.
 
@@ -444,6 +463,53 @@ def build_bootstrap_interval_df(
     return pd.DataFrame(row_list)
 
 
+def build_observed_calendar_month_df(
+    realized_return_ser: pd.Series,
+) -> pd.DataFrame:
+    """Compound dated realized returns into observed calendar-month rows."""
+    return_ser = realized_return_ser.astype(float).replace([np.inf, -np.inf], np.nan).dropna()
+    if not isinstance(return_ser.index, pd.DatetimeIndex):
+        raise ValueError("realized_return_ser must use a DatetimeIndex for calendar-month analysis.")
+    if len(return_ser) == 0:
+        return pd.DataFrame(columns=OBSERVED_CALENDAR_MONTH_COLUMN_TUPLE)
+
+    sorted_return_ser = return_ser.sort_index()
+    # *** CRITICAL*** report-only calendar aggregation: each calendar-month
+    # return compounds only realized daily returns whose timestamps fall inside
+    # that month. It must never feed signal, sizing, or execution logic.
+    month_group_obj = sorted_return_ser.groupby(sorted_return_ser.index.to_period("M"))
+    row_list: list[dict[str, object]] = []
+    calendar_month_obj_list = list(month_group_obj.groups)
+    for calendar_month_obj, calendar_month_return_ser in month_group_obj:
+        calendar_month_return_float = float(
+            np.prod(1.0 + calendar_month_return_ser.to_numpy(dtype=float)) - 1.0
+        )
+        effective_start_date_str = (
+            pd.Timestamp(calendar_month_return_ser.index.min()).date().isoformat()
+        )
+        effective_end_date_str = (
+            pd.Timestamp(calendar_month_return_ser.index.max()).date().isoformat()
+        )
+        row_list.append(
+            {
+                "calendar_month_str": str(calendar_month_obj),
+                "calendar_month_end_str": effective_end_date_str,
+                "scheduled_calendar_month_end_str": (
+                    calendar_month_obj.end_time.date().isoformat()
+                ),
+                "effective_start_date_str": effective_start_date_str,
+                "effective_end_date_str": effective_end_date_str,
+                "sample_boundary_month_bool": bool(
+                    calendar_month_obj == calendar_month_obj_list[0]
+                    or calendar_month_obj == calendar_month_obj_list[-1]
+                ),
+                "trading_day_count_int": int(len(calendar_month_return_ser)),
+                "calendar_month_return_float": calendar_month_return_float,
+            }
+        )
+    return pd.DataFrame(row_list)
+
+
 def build_horizon_probability_df(
     realized_return_ser: pd.Series,
     mean_block_length_int: int,
@@ -452,6 +518,7 @@ def build_horizon_probability_df(
     horizon_year_tuple: Sequence[int] = DEFAULT_HORIZON_YEAR_TUPLE,
     drawdown_threshold_tuple: Sequence[float] = DEFAULT_DRAWDOWN_THRESHOLD_TUPLE,
     upside_threshold_tuple: Sequence[float] = DEFAULT_UPSIDE_THRESHOLD_TUPLE,
+    time_underwater_breach_month_tuple: Sequence[int] = DEFAULT_TIME_UNDERWATER_BREACH_MONTH_TUPLE,
 ) -> pd.DataFrame:
     """
     Build horizon-level downside and upside probability rows.
@@ -474,6 +541,10 @@ def build_horizon_probability_df(
     normalized_horizon_year_tuple = _normalized_positive_int_tuple(horizon_year_tuple, "horizon years")
     normalized_drawdown_threshold_tuple = tuple(float(value_float) for value_float in drawdown_threshold_tuple)
     normalized_upside_threshold_tuple = tuple(float(value_float) for value_float in upside_threshold_tuple)
+    normalized_underwater_month_tuple = _normalized_positive_int_tuple(
+        time_underwater_breach_month_tuple,
+        "time-underwater months",
+    )
     if len(normalized_drawdown_threshold_tuple) == 0:
         raise ValueError("At least one drawdown threshold is required.")
     if len(normalized_upside_threshold_tuple) == 0:
@@ -492,11 +563,15 @@ def build_horizon_probability_df(
         path_length_int=bootstrap_path_length_int,
     )
 
-    horizon_metric_dict: dict[int, dict[str, list[float]]] = {
+    horizon_metric_dict: dict[int, dict[str, list[object]]] = {
         int(year_int): {
             "max_drawdown_float": [],
             "max_gain_float": [],
             "terminal_return_float": [],
+            "longest_underwater_days_float": [],
+            "max_drawdown_recovery_days_float": [],
+            "max_drawdown_unrecovered_bool": [],
+            "terminal_underwater_bool": [],
         }
         for year_int in normalized_horizon_year_tuple
     }
@@ -519,6 +594,20 @@ def build_horizon_probability_df(
             horizon_metric_dict[int(horizon_year_int)]["terminal_return_float"].append(
                 float(path_horizon_metric_dict["terminal_return_float"])
             )
+            horizon_metric_dict[int(horizon_year_int)]["longest_underwater_days_float"].append(
+                float(path_horizon_metric_dict["longest_underwater_days_float"])
+            )
+            recovery_days_obj = path_horizon_metric_dict["max_drawdown_recovery_days_float"]
+            if recovery_days_obj is not None:
+                horizon_metric_dict[int(horizon_year_int)]["max_drawdown_recovery_days_float"].append(
+                    float(recovery_days_obj)
+                )
+            horizon_metric_dict[int(horizon_year_int)]["max_drawdown_unrecovered_bool"].append(
+                bool(path_horizon_metric_dict["max_drawdown_unrecovered_bool"])
+            )
+            horizon_metric_dict[int(horizon_year_int)]["terminal_underwater_bool"].append(
+                bool(path_horizon_metric_dict["terminal_underwater_bool"])
+            )
 
     row_list: list[dict[str, object]] = []
     for horizon_year_int in normalized_horizon_year_tuple:
@@ -539,18 +628,48 @@ def build_horizon_probability_df(
             horizon_metric_dict[int(horizon_year_int)]["terminal_return_float"],
             dtype=float,
         )
+        longest_underwater_days_vec = np.asarray(
+            horizon_metric_dict[int(horizon_year_int)]["longest_underwater_days_float"],
+            dtype=float,
+        )
+        recovery_days_vec = np.asarray(
+            horizon_metric_dict[int(horizon_year_int)]["max_drawdown_recovery_days_float"],
+            dtype=float,
+        )
+        unrecovered_bool_vec = np.asarray(
+            horizon_metric_dict[int(horizon_year_int)]["max_drawdown_unrecovered_bool"],
+            dtype=bool,
+        )
+        terminal_underwater_bool_vec = np.asarray(
+            horizon_metric_dict[int(horizon_year_int)]["terminal_underwater_bool"],
+            dtype=bool,
+        )
         row_dict["simulation_path_count_int"] = int(max_drawdown_vec.size)
         if max_drawdown_vec.size == 0:
             row_dict["max_drawdown_p05_float"] = None
             row_dict["max_drawdown_p50_float"] = None
             row_dict["max_gain_p50_float"] = None
             row_dict["max_gain_p95_float"] = None
+            row_dict["terminal_return_p05_float"] = None
+            row_dict["terminal_return_p25_float"] = None
             row_dict["terminal_return_p50_float"] = None
+            row_dict["terminal_return_p75_float"] = None
             row_dict["terminal_return_p95_float"] = None
+            row_dict["terminal_loss_probability_float"] = None
+            row_dict["longest_underwater_days_p50_float"] = None
+            row_dict["longest_underwater_days_p95_float"] = None
+            row_dict["max_drawdown_recovery_days_p50_float"] = None
+            row_dict["max_drawdown_recovery_days_p95_float"] = None
+            row_dict["max_drawdown_recovered_path_count_int"] = 0
+            row_dict["max_drawdown_unrecovered_probability_float"] = None
+            row_dict["deepest_drawdown_unrecovered_probability_float"] = None
+            row_dict["terminal_underwater_probability_float"] = None
             for threshold_float in normalized_drawdown_threshold_tuple:
                 row_dict[_threshold_column_name_str("drawdown_lte", abs(float(threshold_float)))] = None
             for threshold_float in normalized_upside_threshold_tuple:
                 row_dict[_threshold_column_name_str("gain_gte", abs(float(threshold_float)))] = None
+            for month_int in normalized_underwater_month_tuple:
+                row_dict[f"underwater_ge_{int(month_int)}m_probability_float"] = None
             row_list.append(row_dict)
             continue
 
@@ -558,8 +677,34 @@ def build_horizon_probability_df(
         row_dict["max_drawdown_p50_float"] = float(np.quantile(max_drawdown_vec, 0.50))
         row_dict["max_gain_p50_float"] = float(np.quantile(max_gain_vec, 0.50))
         row_dict["max_gain_p95_float"] = float(np.quantile(max_gain_vec, 0.95))
+        row_dict["terminal_return_p05_float"] = float(np.quantile(terminal_return_vec, 0.05))
+        row_dict["terminal_return_p25_float"] = float(np.quantile(terminal_return_vec, 0.25))
         row_dict["terminal_return_p50_float"] = float(np.quantile(terminal_return_vec, 0.50))
+        row_dict["terminal_return_p75_float"] = float(np.quantile(terminal_return_vec, 0.75))
         row_dict["terminal_return_p95_float"] = float(np.quantile(terminal_return_vec, 0.95))
+        row_dict["terminal_loss_probability_float"] = float((terminal_return_vec < 0.0).mean())
+        row_dict["longest_underwater_days_p50_float"] = float(
+            np.quantile(longest_underwater_days_vec, 0.50)
+        )
+        row_dict["longest_underwater_days_p95_float"] = float(
+            np.quantile(longest_underwater_days_vec, 0.95)
+        )
+        row_dict["max_drawdown_recovery_days_p50_float"] = (
+            float(np.quantile(recovery_days_vec, 0.50)) if recovery_days_vec.size else None
+        )
+        row_dict["max_drawdown_recovery_days_p95_float"] = (
+            float(np.quantile(recovery_days_vec, 0.95)) if recovery_days_vec.size else None
+        )
+        row_dict["max_drawdown_recovered_path_count_int"] = int(recovery_days_vec.size)
+        row_dict["max_drawdown_unrecovered_probability_float"] = float(
+            unrecovered_bool_vec.mean()
+        )
+        row_dict["deepest_drawdown_unrecovered_probability_float"] = row_dict[
+            "max_drawdown_unrecovered_probability_float"
+        ]
+        row_dict["terminal_underwater_probability_float"] = float(
+            terminal_underwater_bool_vec.mean()
+        )
         for threshold_float in normalized_drawdown_threshold_tuple:
             drawdown_threshold_float = -abs(float(threshold_float))
             row_dict[_threshold_column_name_str("drawdown_lte", abs(drawdown_threshold_float))] = float(
@@ -570,9 +715,374 @@ def build_horizon_probability_df(
             row_dict[_threshold_column_name_str("gain_gte", upside_threshold_float)] = float(
                 (max_gain_vec >= upside_threshold_float).mean()
             )
+        for month_int in normalized_underwater_month_tuple:
+            underwater_day_int = int(month_int) * TRADING_DAYS_PER_MONTH_INT
+            row_dict[f"underwater_ge_{int(month_int)}m_probability_float"] = float(
+                (longest_underwater_days_vec >= float(underwater_day_int)).mean()
+            )
         row_list.append(row_dict)
 
     return pd.DataFrame(row_list)
+
+
+def build_investor_scenario_df(
+    realized_return_ser: pd.Series,
+    horizon_probability_df: pd.DataFrame,
+    mean_block_length_int: int,
+    simulation_count_int: int = DEFAULT_SIMULATION_COUNT_INT,
+    random_seed_int: int = DEFAULT_RANDOM_SEED_INT,
+    investor_horizon_year_tuple: Sequence[int] = DEFAULT_INVESTOR_HORIZON_YEAR_TUPLE,
+) -> pd.DataFrame:
+    """
+    Build a small, investor-readable scenario table from realized returns.
+
+    Observed calendar months and bootstrap-implied 21-trading-day periods are
+    intentionally separate. The modeled rows are historically conditioned
+    diagnostics, not forecasts or promised ranges.
+    """
+    clean_return_ser = (
+        realized_return_ser.astype(float)
+        .replace([np.inf, -np.inf], np.nan)
+        .dropna()
+        .sort_index()
+    )
+    if len(clean_return_ser) == 0:
+        raise ValueError("realized_return_ser must contain at least one return.")
+    normalized_horizon_year_tuple = _normalized_positive_int_tuple(
+        investor_horizon_year_tuple,
+        "investor horizon years",
+    )
+
+    row_list: list[dict[str, object]] = []
+    daily_return_vec = clean_return_ser.to_numpy(dtype=float)
+    observed_daily_row_dict = _empty_investor_scenario_row_dict(
+        scenario_key_str="observed_daily",
+        scenario_label_str="Observed trading day",
+        evidence_kind_str="observed",
+        period_definition_str="realized_trading_day",
+        horizon_day_int=1,
+        sample_count_int=int(daily_return_vec.size),
+    )
+    observed_daily_row_dict.update(_terminal_distribution_dict(daily_return_vec))
+    row_list.append(observed_daily_row_dict)
+
+    observed_calendar_month_df = (
+        build_observed_calendar_month_df(clean_return_ser)
+        if isinstance(clean_return_ser.index, pd.DatetimeIndex)
+        else pd.DataFrame(columns=OBSERVED_CALENDAR_MONTH_COLUMN_TUPLE)
+    )
+    calendar_month_return_vec = observed_calendar_month_df[
+        "calendar_month_return_float"
+    ].to_numpy(dtype=float)
+    observed_calendar_month_row_dict = _empty_investor_scenario_row_dict(
+        scenario_key_str="observed_calendar_month",
+        scenario_label_str="Observed calendar month",
+        evidence_kind_str="observed",
+        period_definition_str="calendar_month_including_boundary_months",
+        horizon_day_int=None,
+        sample_count_int=int(calendar_month_return_vec.size),
+    )
+    observed_calendar_month_row_dict.update(
+        _terminal_distribution_dict(calendar_month_return_vec)
+    )
+    row_list.append(observed_calendar_month_row_dict)
+
+    modeled_month_row_dict = _empty_investor_scenario_row_dict(
+        scenario_key_str="modeled_21d",
+        scenario_label_str="Modeled 21-trading-day period",
+        evidence_kind_str="bootstrap_implied",
+        period_definition_str="21_consecutive_trading_days",
+        horizon_day_int=TRADING_DAYS_PER_MONTH_INT,
+        sample_count_int=int(daily_return_vec.size),
+    )
+    if daily_return_vec.size >= TRADING_DAYS_PER_MONTH_INT:
+        # *** CRITICAL*** report-only bootstrap: these 21-day paths resample
+        # realized returns and have no calendar timestamps. They must not be
+        # labeled as observed calendar months or used by trading logic.
+        month_index_mat = stationary_bootstrap_index_mat(
+            sample_size_int=int(daily_return_vec.size),
+            simulation_count_int=int(simulation_count_int),
+            mean_block_length_int=int(mean_block_length_int),
+            random_seed_int=int(random_seed_int),
+            path_length_int=TRADING_DAYS_PER_MONTH_INT,
+        )
+        month_path_return_mat = daily_return_vec[month_index_mat]
+        modeled_month_row_dict.update(
+            _path_distribution_dict(month_path_return_mat)
+        )
+        modeled_month_row_dict["simulation_path_count_int"] = int(
+            month_path_return_mat.shape[0]
+        )
+    row_list.append(modeled_month_row_dict)
+
+    for horizon_year_int in normalized_horizon_year_tuple:
+        horizon_day_int = int(horizon_year_int) * TRADING_DAYS_PER_YEAR_INT
+        horizon_row_dict = _empty_investor_scenario_row_dict(
+            scenario_key_str=f"modeled_{int(horizon_year_int)}y",
+            scenario_label_str=f"Modeled {int(horizon_year_int)}-year horizon",
+            evidence_kind_str="bootstrap_implied",
+            period_definition_str=f"{int(horizon_day_int)}_consecutive_trading_days",
+            horizon_day_int=int(horizon_day_int),
+            sample_count_int=int(daily_return_vec.size),
+        )
+        matching_horizon_df = horizon_probability_df[
+            horizon_probability_df["horizon_year_int"] == int(horizon_year_int)
+        ]
+        if len(matching_horizon_df) > 0:
+            source_horizon_ser = matching_horizon_df.iloc[0]
+            for field_str in (
+                "simulation_path_count_int",
+                "terminal_return_p05_float",
+                "terminal_return_p25_float",
+                "terminal_return_p50_float",
+                "terminal_return_p75_float",
+                "terminal_return_p95_float",
+                "terminal_loss_probability_float",
+                "max_drawdown_p05_float",
+                "max_drawdown_p50_float",
+                "longest_underwater_days_p50_float",
+                "longest_underwater_days_p95_float",
+                "max_drawdown_recovery_days_p50_float",
+                "max_drawdown_recovery_days_p95_float",
+                "max_drawdown_recovered_path_count_int",
+                "max_drawdown_unrecovered_probability_float",
+                "deepest_drawdown_unrecovered_probability_float",
+                "terminal_underwater_probability_float",
+                "underwater_ge_12m_probability_float",
+            ):
+                if field_str in source_horizon_ser.index:
+                    horizon_row_dict[field_str] = source_horizon_ser[field_str]
+        row_list.append(horizon_row_dict)
+
+    investor_scenario_df = pd.DataFrame(row_list)
+    for integer_column_str in (
+        "horizon_day_int",
+        "sample_count_int",
+        "simulation_path_count_int",
+        "max_drawdown_recovered_path_count_int",
+    ):
+        investor_scenario_df[integer_column_str] = investor_scenario_df[
+            integer_column_str
+        ].astype("Int64")
+    return investor_scenario_df
+
+
+def _empty_investor_scenario_row_dict(
+    *,
+    scenario_key_str: str,
+    scenario_label_str: str,
+    evidence_kind_str: str,
+    period_definition_str: str,
+    horizon_day_int: int | None,
+    sample_count_int: int,
+) -> dict[str, object]:
+    return {
+        "scenario_key_str": str(scenario_key_str),
+        "scenario_label_str": str(scenario_label_str),
+        "evidence_kind_str": str(evidence_kind_str),
+        "period_definition_str": str(period_definition_str),
+        "horizon_day_int": horizon_day_int,
+        "sample_count_int": int(sample_count_int),
+        "simulation_path_count_int": 0,
+        "terminal_return_p05_float": None,
+        "terminal_return_p25_float": None,
+        "terminal_return_p50_float": None,
+        "terminal_return_p75_float": None,
+        "terminal_return_p95_float": None,
+        "terminal_loss_probability_float": None,
+        "max_drawdown_p05_float": None,
+        "max_drawdown_p50_float": None,
+        "longest_underwater_days_p50_float": None,
+        "longest_underwater_days_p95_float": None,
+        "max_drawdown_recovery_days_p50_float": None,
+        "max_drawdown_recovery_days_p95_float": None,
+        "max_drawdown_recovered_path_count_int": 0,
+        "max_drawdown_unrecovered_probability_float": None,
+        "deepest_drawdown_unrecovered_probability_float": None,
+        "terminal_underwater_probability_float": None,
+        "underwater_ge_12m_probability_float": None,
+    }
+
+
+def _terminal_distribution_dict(period_return_vec: np.ndarray) -> dict[str, object]:
+    clean_period_return_vec = np.asarray(period_return_vec, dtype=float)
+    clean_period_return_vec = clean_period_return_vec[np.isfinite(clean_period_return_vec)]
+    if clean_period_return_vec.size == 0:
+        return {}
+    return {
+        "terminal_return_p05_float": float(np.quantile(clean_period_return_vec, 0.05)),
+        "terminal_return_p25_float": float(np.quantile(clean_period_return_vec, 0.25)),
+        "terminal_return_p50_float": float(np.quantile(clean_period_return_vec, 0.50)),
+        "terminal_return_p75_float": float(np.quantile(clean_period_return_vec, 0.75)),
+        "terminal_return_p95_float": float(np.quantile(clean_period_return_vec, 0.95)),
+        "terminal_loss_probability_float": float((clean_period_return_vec < 0.0).mean()),
+    }
+
+
+def _path_distribution_dict(path_return_mat: np.ndarray) -> dict[str, object]:
+    clean_path_return_mat = np.asarray(path_return_mat, dtype=float)
+    if clean_path_return_mat.ndim != 2 or clean_path_return_mat.shape[0] == 0:
+        return {}
+
+    horizon_day_int = int(clean_path_return_mat.shape[1])
+    terminal_return_vec = np.prod(1.0 + clean_path_return_mat, axis=1) - 1.0
+    path_metric_dict_list = [
+        _path_horizon_metric_dict(path_return_vec, horizon_day_int)
+        for path_return_vec in clean_path_return_mat
+    ]
+    max_drawdown_vec = np.asarray(
+        [metric_dict["max_drawdown_float"] for metric_dict in path_metric_dict_list],
+        dtype=float,
+    )
+    longest_underwater_days_vec = np.asarray(
+        [metric_dict["longest_underwater_days_float"] for metric_dict in path_metric_dict_list],
+        dtype=float,
+    )
+    recovery_days_vec = np.asarray(
+        [
+            metric_dict["max_drawdown_recovery_days_float"]
+            for metric_dict in path_metric_dict_list
+            if metric_dict["max_drawdown_recovery_days_float"] is not None
+        ],
+        dtype=float,
+    )
+    unrecovered_bool_vec = np.asarray(
+        [metric_dict["max_drawdown_unrecovered_bool"] for metric_dict in path_metric_dict_list],
+        dtype=bool,
+    )
+    terminal_underwater_bool_vec = np.asarray(
+        [metric_dict["terminal_underwater_bool"] for metric_dict in path_metric_dict_list],
+        dtype=bool,
+    )
+    metric_summary_dict = _terminal_distribution_dict(terminal_return_vec)
+    metric_summary_dict.update(
+        {
+            "max_drawdown_p05_float": float(np.quantile(max_drawdown_vec, 0.05)),
+            "max_drawdown_p50_float": float(np.quantile(max_drawdown_vec, 0.50)),
+            "longest_underwater_days_p50_float": float(
+                np.quantile(longest_underwater_days_vec, 0.50)
+            ),
+            "longest_underwater_days_p95_float": float(
+                np.quantile(longest_underwater_days_vec, 0.95)
+            ),
+            "max_drawdown_recovery_days_p50_float": (
+                float(np.quantile(recovery_days_vec, 0.50))
+                if recovery_days_vec.size
+                else None
+            ),
+            "max_drawdown_recovery_days_p95_float": (
+                float(np.quantile(recovery_days_vec, 0.95))
+                if recovery_days_vec.size
+                else None
+            ),
+            "max_drawdown_recovered_path_count_int": int(recovery_days_vec.size),
+            "max_drawdown_unrecovered_probability_float": float(
+                unrecovered_bool_vec.mean()
+            ),
+            "deepest_drawdown_unrecovered_probability_float": float(
+                unrecovered_bool_vec.mean()
+            ),
+            "terminal_underwater_probability_float": float(
+                terminal_underwater_bool_vec.mean()
+            ),
+            "underwater_ge_12m_probability_float": float(
+                (
+                    longest_underwater_days_vec
+                    >= float(12 * TRADING_DAYS_PER_MONTH_INT)
+                ).mean()
+            ),
+        }
+    )
+    return metric_summary_dict
+
+
+def _build_investor_summary_dict(
+    *,
+    realized_return_ser: pd.Series,
+    investor_scenario_df: pd.DataFrame,
+    source_entity_type_str: str,
+    analysis_context_dict: dict[str, object],
+) -> dict[str, object]:
+    scenario_record_list = _records_from_df(investor_scenario_df)
+    scenario_by_key_dict = {
+        str(scenario_dict.get("scenario_key_str")): scenario_dict
+        for scenario_dict in scenario_record_list
+    }
+
+    def scenario_value_obj(scenario_key_str: str, field_str: str):
+        return scenario_by_key_dict.get(scenario_key_str, {}).get(field_str)
+
+    return {
+        "schema_version_int": RISK_ANALYSIS_SCHEMA_VERSION_INT,
+        "status_str": "historically_conditioned_not_forecast",
+        "source_entity_type_str": str(source_entity_type_str),
+        "month_definition_dict": {
+            "modeled_month_str": "21_trading_days",
+            "observed_month_str": "calendar_month",
+        },
+        "sample_window_dict": {
+            "start_date_str": (
+                _date_or_none_str(realized_return_ser.index.min())
+                if isinstance(realized_return_ser.index, pd.DatetimeIndex)
+                else None
+            ),
+            "end_date_str": (
+                _date_or_none_str(realized_return_ser.index.max())
+                if isinstance(realized_return_ser.index, pd.DatetimeIndex)
+                else None
+            ),
+            "realized_trading_day_count_int": int(len(realized_return_ser)),
+        },
+        "analysis_context_dict": dict(analysis_context_dict),
+        "headline_metric_dict": {
+            "modeled_21d_typical_low_p25_float": scenario_value_obj(
+                "modeled_21d", "terminal_return_p25_float"
+            ),
+            "modeled_21d_typical_high_p75_float": scenario_value_obj(
+                "modeled_21d", "terminal_return_p75_float"
+            ),
+            "modeled_21d_bad_case_p05_float": scenario_value_obj(
+                "modeled_21d", "terminal_return_p05_float"
+            ),
+            "modeled_21d_loss_probability_float": scenario_value_obj(
+                "modeled_21d", "terminal_loss_probability_float"
+            ),
+            "observed_calendar_month_loss_probability_float": scenario_value_obj(
+                "observed_calendar_month", "terminal_loss_probability_float"
+            ),
+            "modeled_1y_terminal_p05_block_specific_float": scenario_value_obj(
+                "modeled_1y", "terminal_return_p05_float"
+            ),
+            "modeled_3y_bad_drawdown_p05_float": scenario_value_obj(
+                "modeled_3y", "max_drawdown_p05_float"
+            ),
+            "modeled_3y_underwater_ge_12m_probability_float": scenario_value_obj(
+                "modeled_3y", "underwater_ge_12m_probability_float"
+            ),
+            "modeled_3y_recovery_days_p50_conditional_float": scenario_value_obj(
+                "modeled_3y", "max_drawdown_recovery_days_p50_float"
+            ),
+            "modeled_3y_recovery_days_p95_conditional_float": scenario_value_obj(
+                "modeled_3y", "max_drawdown_recovery_days_p95_float"
+            ),
+            "modeled_3y_deepest_drawdown_unrecovered_probability_float": scenario_value_obj(
+                "modeled_3y", "deepest_drawdown_unrecovered_probability_float"
+            ),
+            "modeled_3y_terminal_underwater_probability_float": scenario_value_obj(
+                "modeled_3y", "terminal_underwater_probability_float"
+            ),
+        },
+        "scenario_list": scenario_record_list,
+        "limitations_list": [
+            "Bootstrap rows resample dependent blocks from realized daily returns with replacement; they can duplicate or omit observations and do not forecast unseen regimes.",
+            "Bootstrapping does not correct source-backtest lookahead, survivorship, corporate-action, price-adjustment, strategy-selection, or data-mining defects.",
+            "Observed calendar-month rows include partial boundary months when the sample starts or ends mid-month.",
+            "Modeled 21-day periods have no simulated calendar dates and are not observed calendar months.",
+            "Recovery-day percentiles are conditional on recovery of the last deepest-drawdown episode inside the stated horizon; its unrecovered path share is reported separately.",
+            "No claim should be used in investor materials until the offered portfolio, costs, and legal structure are approved.",
+            "Each modeled horizon row uses one mean block length and is model-specific; block-length sensitivity must accompany any horizon claim.",
+        ],
+    }
 
 
 def _observed_percentile_float(
@@ -589,7 +1099,14 @@ def _observed_percentile_float(
     )
     if finite_metric_vec.size == 0:
         return None
-    return float((finite_metric_vec <= float(observed_value_float)).mean())
+    observed_value_float = float(observed_value_float)
+    less_or_tied_bool_vec = (finite_metric_vec < observed_value_float) | np.isclose(
+        finite_metric_vec,
+        observed_value_float,
+        rtol=1e-12,
+        atol=1e-14,
+    )
+    return float(less_or_tied_bool_vec.mean())
 
 
 def save_risk_analysis_results(
@@ -598,7 +1115,7 @@ def save_risk_analysis_results(
 ) -> Path:
     output_dir_path = build_research_output_path(
         output_dir_str,
-        "strategy",
+        risk_result_obj.source_entity_type_str,
         risk_result_obj.strategy_name_str,
         RISK_ANALYSIS_TYPE_STR,
     )
@@ -624,8 +1141,20 @@ def save_risk_analysis_results(
         output_dir_path / HORIZON_PROBABILITY_CSV_FILENAME_STR,
         index=False,
     )
+    risk_result_obj.observed_calendar_month_df.to_csv(
+        output_dir_path / OBSERVED_CALENDAR_MONTH_CSV_FILENAME_STR,
+        index=False,
+    )
+    risk_result_obj.investor_scenario_df.to_csv(
+        output_dir_path / INVESTOR_SCENARIO_CSV_FILENAME_STR,
+        index=False,
+    )
 
     _write_json_file(output_dir_path / SUMMARY_FILENAME_STR, risk_result_obj.summary_dict)
+    _write_json_file(
+        output_dir_path / INVESTOR_SUMMARY_FILENAME_STR,
+        risk_result_obj.investor_summary_dict,
+    )
     _write_json_file(output_dir_path / RUN_INFO_FILENAME_STR, _build_run_info_dict(risk_result_obj))
     _write_json_file(output_dir_path / METADATA_FILENAME_STR, _build_metadata_dict(risk_result_obj))
     (output_dir_path / REPORT_FILENAME_STR).write_text(
@@ -640,9 +1169,11 @@ def save_risk_analysis_results(
 class RiskAnalysis:
     def __init__(
         self,
-        strategy_obj: Strategy,
+        strategy_obj: object,
         *,
         source_strategy_ref_str: str = "",
+        source_entity_type_str: str = "strategy",
+        analysis_context_dict: dict[str, object] | None = None,
         output_dir_str: str = "results",
         save_output_bool: bool = True,
         primary_mean_block_length_int: int = DEFAULT_PRIMARY_MEAN_BLOCK_LENGTH_INT,
@@ -655,9 +1186,14 @@ class RiskAnalysis:
         horizon_year_tuple: Sequence[int] = DEFAULT_HORIZON_YEAR_TUPLE,
         rolling_loss_window_tuple: Sequence[int] = DEFAULT_ROLLING_LOSS_WINDOW_TUPLE,
         time_underwater_breach_month_tuple: Sequence[int] = DEFAULT_TIME_UNDERWATER_BREACH_MONTH_TUPLE,
+        investor_horizon_year_tuple: Sequence[int] = DEFAULT_INVESTOR_HORIZON_YEAR_TUPLE,
     ):
         self.strategy_obj = strategy_obj
         self.source_strategy_ref_str = str(source_strategy_ref_str)
+        self.source_entity_type_str = str(source_entity_type_str).strip().lower()
+        if self.source_entity_type_str not in {"strategy", "portfolio"}:
+            raise ValueError("source_entity_type_str must be 'strategy' or 'portfolio'.")
+        self.analysis_context_dict = dict(analysis_context_dict or {})
         self.output_dir_str = str(output_dir_str)
         self.save_output_bool = bool(save_output_bool)
         self.primary_mean_block_length_int = int(primary_mean_block_length_int)
@@ -672,8 +1208,13 @@ class RiskAnalysis:
         self.upside_threshold_tuple = tuple(float(value_float) for value_float in upside_threshold_tuple)
         self.horizon_year_tuple = _normalized_positive_int_tuple(horizon_year_tuple, "horizon years")
         self.rolling_loss_window_tuple = tuple(int(value_int) for value_int in rolling_loss_window_tuple)
-        self.time_underwater_breach_month_tuple = tuple(
-            int(value_int) for value_int in time_underwater_breach_month_tuple
+        self.time_underwater_breach_month_tuple = _normalized_positive_int_tuple(
+            time_underwater_breach_month_tuple,
+            "time-underwater months",
+        )
+        self.investor_horizon_year_tuple = _normalized_positive_int_tuple(
+            investor_horizon_year_tuple,
+            "investor horizon years",
         )
 
     def run(self) -> RiskAnalysisResult:
@@ -711,6 +1252,26 @@ class RiskAnalysis:
             horizon_year_tuple=self.horizon_year_tuple,
             drawdown_threshold_tuple=self.drawdown_threshold_tuple,
             upside_threshold_tuple=self.upside_threshold_tuple,
+            time_underwater_breach_month_tuple=self.time_underwater_breach_month_tuple,
+        )
+        observed_calendar_month_df = (
+            build_observed_calendar_month_df(realized_return_ser)
+            if isinstance(realized_return_ser.index, pd.DatetimeIndex)
+            else pd.DataFrame(columns=OBSERVED_CALENDAR_MONTH_COLUMN_TUPLE)
+        )
+        investor_scenario_df = build_investor_scenario_df(
+            realized_return_ser=realized_return_ser,
+            horizon_probability_df=horizon_probability_df,
+            mean_block_length_int=self.primary_mean_block_length_int,
+            simulation_count_int=self.simulation_count_int,
+            random_seed_int=self.random_seed_int,
+            investor_horizon_year_tuple=self.investor_horizon_year_tuple,
+        )
+        investor_summary_dict = _build_investor_summary_dict(
+            realized_return_ser=realized_return_ser,
+            investor_scenario_df=investor_scenario_df,
+            source_entity_type_str=self.source_entity_type_str,
+            analysis_context_dict=self.analysis_context_dict,
         )
         summary_dict = _build_summary_dict(
             strategy_obj=self.strategy_obj,
@@ -729,6 +1290,14 @@ class RiskAnalysis:
             horizon_year_tuple=self.horizon_year_tuple,
             time_underwater_breach_month_tuple=self.time_underwater_breach_month_tuple,
         )
+        summary_dict["schema_version_int"] = RISK_ANALYSIS_SCHEMA_VERSION_INT
+        summary_dict["investor_horizon_year_list"] = [
+            int(value_int) for value_int in self.investor_horizon_year_tuple
+        ]
+        summary_dict["time_underwater_breach_month_list"] = [
+            int(value_int) for value_int in self.time_underwater_breach_month_tuple
+        ]
+        summary_dict["investor_summary"] = investor_summary_dict
 
         risk_result_obj = RiskAnalysisResult(
             strategy_name_str=str(self.strategy_obj.name),
@@ -739,6 +1308,11 @@ class RiskAnalysis:
             bootstrap_path_metric_df=bootstrap_path_metric_df,
             bootstrap_interval_df=bootstrap_interval_df,
             horizon_probability_df=horizon_probability_df,
+            observed_calendar_month_df=observed_calendar_month_df,
+            investor_scenario_df=investor_scenario_df,
+            investor_summary_dict=investor_summary_dict,
+            source_entity_type_str=self.source_entity_type_str,
+            analysis_context_dict=self.analysis_context_dict,
             summary_dict=summary_dict,
         )
         if self.save_output_bool:
@@ -779,7 +1353,7 @@ def _normalized_positive_int_tuple(
 
 def _build_summary_dict(
     *,
-    strategy_obj: Strategy,
+    strategy_obj: object,
     realized_return_ser: pd.Series,
     bootstrap_path_metric_df: pd.DataFrame,
     bootstrap_interval_df: pd.DataFrame,
@@ -835,7 +1409,7 @@ def _build_summary_dict(
 def _path_horizon_metric_dict(
     return_vec: np.ndarray,
     horizon_day_int: int,
-) -> dict[str, float]:
+) -> dict[str, object]:
     clean_return_vec = np.asarray(return_vec, dtype=float)
     clean_return_vec = clean_return_vec[np.isfinite(clean_return_vec)]
     if horizon_day_int <= 0:
@@ -845,6 +1419,10 @@ def _path_horizon_metric_dict(
             "max_drawdown_float": np.nan,
             "max_gain_float": np.nan,
             "terminal_return_float": np.nan,
+            "longest_underwater_days_float": np.nan,
+            "max_drawdown_recovery_days_float": None,
+            "max_drawdown_unrecovered_bool": True,
+            "terminal_underwater_bool": True,
         }
 
     horizon_return_vec = clean_return_vec[: int(horizon_day_int)]
@@ -855,12 +1433,65 @@ def _path_horizon_metric_dict(
     # *** CRITICAL*** horizon drawdown is path-local and starts from fresh
     # equity 1.0: drawdown_t = E_t / max(1, E_1, ..., E_t) - 1. It is a
     # report-only bootstrap diagnostic and must never feed order or sizing.
-    running_peak_vec = np.maximum.accumulate(equity_with_start_vec)[1:]
-    drawdown_vec = horizon_equity_vec / running_peak_vec - 1.0
+    running_peak_with_start_vec = np.maximum.accumulate(equity_with_start_vec)
+    drawdown_with_start_vec = equity_with_start_vec / running_peak_with_start_vec - 1.0
+    drawdown_vec = drawdown_with_start_vec[1:]
+    max_drawdown_float = float(np.min(drawdown_vec))
+    longest_underwater_days_float = float(_longest_underwater_days_int(drawdown_vec))
+
+    # *** CRITICAL*** report-only recovery measurement: recovery is measured
+    # from the peak that precedes the path's deepest drawdown to the first later
+    # day at or above that peak. If the path ends first, the duration is
+    # right-censored and remains None; it must not be counted as a fast recovery.
+    if np.isclose(max_drawdown_float, 0.0):
+        max_drawdown_recovery_days_float: float | None = 0.0
+        max_drawdown_unrecovered_bool = False
+    else:
+        deepest_drawdown_position_vec = np.flatnonzero(
+            np.isclose(
+                drawdown_with_start_vec,
+                max_drawdown_float,
+                rtol=1e-12,
+                atol=1e-12,
+            )
+        )
+        # When the same deepest drawdown recurs, use its last occurrence so a
+        # final unrecovered repeat is not hidden by an earlier recovered episode.
+        trough_position_int = int(deepest_drawdown_position_vec[-1])
+        preceding_peak_float = float(running_peak_with_start_vec[trough_position_int])
+        preceding_peak_position_vec = np.flatnonzero(
+            np.isclose(
+                equity_with_start_vec[: trough_position_int + 1],
+                preceding_peak_float,
+                rtol=1e-12,
+                atol=1e-12,
+            )
+        )
+        preceding_peak_position_int = int(preceding_peak_position_vec[-1])
+        recovery_position_vec = np.flatnonzero(
+            equity_with_start_vec[trough_position_int + 1 :]
+            >= preceding_peak_float * (1.0 - 1e-12)
+        )
+        if recovery_position_vec.size == 0:
+            max_drawdown_recovery_days_float = None
+            max_drawdown_unrecovered_bool = True
+        else:
+            recovery_position_int = (
+                int(trough_position_int) + 1 + int(recovery_position_vec[0])
+            )
+            max_drawdown_recovery_days_float = float(
+                recovery_position_int - preceding_peak_position_int
+            )
+            max_drawdown_unrecovered_bool = False
+
     return {
-        "max_drawdown_float": float(np.min(drawdown_vec)),
+        "max_drawdown_float": max_drawdown_float,
         "max_gain_float": float(np.max(equity_with_start_vec) - 1.0),
         "terminal_return_float": terminal_return_float,
+        "longest_underwater_days_float": longest_underwater_days_float,
+        "max_drawdown_recovery_days_float": max_drawdown_recovery_days_float,
+        "max_drawdown_unrecovered_bool": max_drawdown_unrecovered_bool,
+        "terminal_underwater_bool": bool(drawdown_vec[-1] < -1e-12),
     }
 
 
@@ -899,8 +1530,7 @@ def _interval_value_float(summary_dict: dict[str, object], metric_name_str: str,
 def _build_verdict_row_list(summary_dict: dict[str, object]) -> list[dict[str, str]]:
     row_list: list[dict[str, str]] = []
 
-    # --- Edge: did the strategy reliably end in profit, and is the edge
-    # statistically separated from zero? ---
+    # --- Historical resampling diagnostic. This is not independent edge proof. ---
     terminal_loss_float = _json_float(summary_dict.get("primary_terminal_loss_probability_float"))
     sharpe_ci_lower_float = _interval_value_float(summary_dict, "sharpe_float", "ci_lower_float")
     edge_status_str = _band_status_str(
@@ -913,38 +1543,37 @@ def _build_verdict_row_list(summary_dict: dict[str, object]) -> list[dict[str, s
         and sharpe_ci_lower_float is not None
         and sharpe_ci_lower_float <= 0.0
     ):
-        # Profitable most resamples, but Sharpe CI still includes zero: do not
-        # call the edge proven.
+        # Profitable most bootstrap paths, but Sharpe CI still includes zero.
         edge_status_str = VERDICT_STATUS_AMBER_STR
     if terminal_loss_float is None:
         edge_value_str = "N/A"
-        edge_conclusion_str = "Not enough data to assess edge."
+        edge_conclusion_str = "Not enough data for the historical resampling diagnostic."
     else:
         profit_probability_float = 1.0 - terminal_loss_float
-        edge_value_str = f"{profit_probability_float:.0%} profitable resamples"
+        edge_value_str = f"{profit_probability_float:.0%} profitable bootstrap paths"
         if edge_status_str == VERDICT_STATUS_GREEN_STR:
             edge_conclusion_str = (
-                f"Ended profitable in {profit_probability_float:.0%} of resamples — edge looks real."
+                f"Ended profitable in {profit_probability_float:.0%} of historically conditioned bootstrap paths."
             )
         elif edge_status_str == VERDICT_STATUS_AMBER_STR:
             edge_conclusion_str = (
-                f"Profitable in {profit_probability_float:.0%} of resamples, "
-                "but not clearly separated from zero — treat edge as tentative."
+                f"Profitable in {profit_probability_float:.0%} of historically conditioned bootstrap paths; "
+                "this does not independently validate edge."
             )
         else:
             edge_conclusion_str = (
-                f"Profitable in only {profit_probability_float:.0%} of resamples — close to a coin flip."
+                f"Profitable in {profit_probability_float:.0%} of historically conditioned bootstrap paths."
             )
     row_list.append(
         {
-            "label_str": "Edge",
+            "label_str": "Historical resampling",
             "status_str": edge_status_str,
             "value_str": edge_value_str,
             "conclusion_str": edge_conclusion_str,
         }
     )
 
-    # --- Drawdown depth: 1-in-20 bad-case max drawdown (p05 of distribution). ---
+    # --- Drawdown depth: p05 of the bootstrap max-drawdown distribution. ---
     drawdown_bad_float = _interval_value_float(summary_dict, "max_drawdown_float", "p05_float")
     drawdown_magnitude_float = abs(drawdown_bad_float) if drawdown_bad_float is not None else None
     drawdown_status_str = _band_status_str(
@@ -956,14 +1585,9 @@ def _build_verdict_row_list(summary_dict: dict[str, object]) -> list[dict[str, s
         drawdown_value_str = "N/A"
         drawdown_conclusion_str = "Not enough data to assess drawdown."
     else:
-        drawdown_value_str = f"{drawdown_bad_float:.0%} (1-in-20 bad case)"
-        word_str = {
-            VERDICT_STATUS_GREEN_STR: "tolerable",
-            VERDICT_STATUS_AMBER_STR: "painful",
-            VERDICT_STATUS_RED_STR: "severe",
-        }.get(drawdown_status_str, "")
+        drawdown_value_str = f"{drawdown_bad_float:.0%} (bootstrap p05)"
         drawdown_conclusion_str = (
-            f"Bad-case drawdown around {drawdown_bad_float:.0%} — {word_str}."
+            f"Historically conditioned bootstrap p05 max drawdown was {drawdown_bad_float:.0%}."
         )
     row_list.append(
         {
@@ -990,19 +1614,13 @@ def _build_verdict_row_list(summary_dict: dict[str, object]) -> list[dict[str, s
         underwater_value_str = "N/A"
         underwater_conclusion_str = "Not enough data to assess time underwater."
     else:
-        underwater_value_str = f"{underwater_12m_float:.0%} chance >= 12m underwater"
-        if underwater_status_str == VERDICT_STATUS_GREEN_STR:
-            underwater_conclusion_str = (
-                f"{underwater_12m_float:.0%} chance of a 12-month+ underwater stretch — manageable."
-            )
-        elif underwater_status_str == VERDICT_STATUS_AMBER_STR:
-            underwater_conclusion_str = (
-                f"{underwater_12m_float:.0%} chance of a 12-month+ underwater stretch — be prepared."
-            )
-        else:
-            underwater_conclusion_str = (
-                f"{underwater_12m_float:.0%} chance of a 12-month+ underwater stretch — expect long pain."
-            )
+        underwater_value_str = (
+            f"{underwater_12m_float:.0%} of bootstrap paths had >= 12m underwater"
+        )
+        underwater_conclusion_str = (
+            f"A 12-month+ underwater stretch occurred in {underwater_12m_float:.0%} "
+            "of historically conditioned bootstrap paths."
+        )
     row_list.append(
         {
             "label_str": "Time underwater",
@@ -1012,7 +1630,7 @@ def _build_verdict_row_list(summary_dict: dict[str, object]) -> list[dict[str, s
         }
     )
 
-    # --- Worst year: 1-in-20 bad-case worst rolling 12-month return. ---
+    # --- Worst year: p05 worst rolling 12-month return across bootstrap paths. ---
     worst_year_bad_float = _interval_value_float(summary_dict, "worst_252d_return_float", "p05_float")
     worst_year_magnitude_float = (
         abs(worst_year_bad_float) if worst_year_bad_float is not None else None
@@ -1026,14 +1644,9 @@ def _build_verdict_row_list(summary_dict: dict[str, object]) -> list[dict[str, s
         worst_year_value_str = "N/A"
         worst_year_conclusion_str = "Not enough history for a 12-month window."
     else:
-        worst_year_value_str = f"{worst_year_bad_float:.0%} (1-in-20 bad case)"
-        word_str = {
-            VERDICT_STATUS_GREEN_STR: "mild",
-            VERDICT_STATUS_AMBER_STR: "significant",
-            VERDICT_STATUS_RED_STR: "severe",
-        }.get(worst_year_status_str, "")
+        worst_year_value_str = f"{worst_year_bad_float:.0%} (bootstrap p05)"
         worst_year_conclusion_str = (
-            f"Worst rolling year around {worst_year_bad_float:.0%} — {word_str}."
+            f"Bootstrap p05 worst rolling 12-month return was {worst_year_bad_float:.0%}."
         )
     row_list.append(
         {
@@ -1176,20 +1789,40 @@ def _worst_rolling_return_float(return_vec: np.ndarray, window_int: int) -> floa
     clean_return_vec = clean_return_vec[np.isfinite(clean_return_vec)]
     if window_int <= 0 or clean_return_vec.size < window_int:
         return np.nan
-    rolling_return_list = [
-        float(np.prod(1.0 + clean_return_vec[start_int : start_int + window_int]) - 1.0)
-        for start_int in range(0, clean_return_vec.size - window_int + 1)
-    ]
-    return float(np.min(rolling_return_list))
+    growth_vec = 1.0 + clean_return_vec
+    # *** CRITICAL*** trailing report metric: cumulative_log[t+w] -
+    # cumulative_log[t] is exactly the log growth over returns t..t+w-1.
+    # Every window is backward/within-path only; no observation after the
+    # window end enters the result. This replaces an equivalent product loop.
+    if bool((growth_vec > 0.0).all()):
+        cumulative_log_vec = np.concatenate(
+            ([0.0], np.cumsum(np.log(growth_vec), dtype=float))
+        )
+        rolling_log_return_vec = (
+            cumulative_log_vec[int(window_int) :]
+            - cumulative_log_vec[: -int(window_int)]
+        )
+        rolling_return_vec = np.expm1(rolling_log_return_vec)
+    else:
+        # Defensive fallback for non-financial inputs containing returns <= -100%.
+        rolling_growth_mat = np.lib.stride_tricks.sliding_window_view(
+            growth_vec,
+            int(window_int),
+        )
+        rolling_return_vec = np.prod(rolling_growth_mat, axis=1) - 1.0
+    return float(np.min(rolling_return_vec))
 
 
 def _build_run_info_dict(risk_result_obj: RiskAnalysisResult) -> dict[str, object]:
     summary_dict = risk_result_obj.summary_dict
     return {
-        "entity_type": "strategy",
+        "entity_type": risk_result_obj.source_entity_type_str,
         "entity_id": risk_result_obj.strategy_name_str,
         "analysis_type": RISK_ANALYSIS_TYPE_STR,
+        "schema_version_int": RISK_ANALYSIS_SCHEMA_VERSION_INT,
+        "analysis_context": risk_result_obj.analysis_context_dict,
         "parameters": {
+            "source_entity_ref": risk_result_obj.source_strategy_ref_str,
             "source_strategy_ref": risk_result_obj.source_strategy_ref_str,
             "primary_mean_block_length_int": summary_dict.get("primary_mean_block_length_int"),
             "mean_block_length_list": summary_dict.get("mean_block_length_list"),
@@ -1197,6 +1830,12 @@ def _build_run_info_dict(risk_result_obj: RiskAnalysisResult) -> dict[str, objec
             "random_seed_int": summary_dict.get("random_seed_int"),
             "confidence_level_float": summary_dict.get("confidence_level_float"),
             "horizon_year_list": summary_dict.get("horizon_year_list"),
+            "investor_horizon_year_list": summary_dict.get(
+                "investor_horizon_year_list"
+            ),
+            "time_underwater_breach_month_list": summary_dict.get(
+                "time_underwater_breach_month_list"
+            ),
             "drawdown_threshold_list": summary_dict.get("drawdown_threshold_list"),
             "upside_threshold_list": summary_dict.get("upside_threshold_list"),
         },
@@ -1206,16 +1845,22 @@ def _build_run_info_dict(risk_result_obj: RiskAnalysisResult) -> dict[str, objec
 def _build_metadata_dict(risk_result_obj: RiskAnalysisResult) -> dict[str, object]:
     return {
         "artifact_type": RISK_ANALYSIS_TYPE_STR,
+        "schema_version": RISK_ANALYSIS_SCHEMA_VERSION_INT,
         "saved_at": datetime.now().isoformat(timespec="seconds"),
+        "entity_type": risk_result_obj.source_entity_type_str,
+        "entity_name": risk_result_obj.strategy_name_str,
         "strategy_name": risk_result_obj.strategy_name_str,
+        "source_entity_ref": risk_result_obj.source_strategy_ref_str,
         "source_strategy_ref": risk_result_obj.source_strategy_ref_str,
         "return_count": int(len(risk_result_obj.realized_return_ser)),
+        "analysis_context": risk_result_obj.analysis_context_dict,
     }
 
 
 def _build_report_html_str(risk_result_obj: RiskAnalysisResult) -> str:
     summary_dict = risk_result_obj.summary_dict
     strategy_name_html = html.escape(risk_result_obj.strategy_name_str)
+    entity_type_html = html.escape(risk_result_obj.source_entity_type_str)
     confidence_level_float = float(summary_dict.get("confidence_level_float", DEFAULT_CONFIDENCE_LEVEL_FLOAT))
     simulation_count_int = int(summary_dict.get("simulation_count_int", DEFAULT_SIMULATION_COUNT_INT))
     realized_return_ser = risk_result_obj.realized_return_ser.astype(float).replace([np.inf, -np.inf], np.nan).dropna()
@@ -1235,6 +1880,7 @@ h2 {{ margin: 0 0 12px; font-size: 19px; letter-spacing: 0; }}
 h3 {{ margin: 14px 0 8px; font-size: 15px; letter-spacing: 0; }}
 p {{ color: #536170; line-height: 1.45; }}
 .meta {{ color: #536170; margin-bottom: 18px; }}
+.status-banner {{ background: #fdecec; border: 2px solid #c9372c; border-radius: 8px; padding: 13px 15px; margin: 12px 0 18px; color: #7a1f1a; font-size: 14px; font-weight: 700; line-height: 1.45; }}
 .tile-grid {{ display: grid; grid-template-columns: repeat(5, minmax(140px, 1fr)); gap: 10px; margin: 18px 0 22px; }}
 .tile {{ background: #fff; border: 1px solid #d9e0e7; border-radius: 8px; padding: 13px 14px; }}
 .tile-label {{ color: #637184; font-size: 12px; margin-bottom: 6px; }}
@@ -1279,8 +1925,14 @@ Return window: {html.escape(str(summary_dict.get("start_date_str")))} to {html.e
 | Primary block length: {summary_dict.get("primary_mean_block_length_int")}
 | Simulations: {summary_dict.get("simulation_count_int")}
 </div>
+{_analysis_status_banner_html(risk_result_obj.analysis_context_dict)}
 <div class="caveat">
-<strong>What this report is.</strong> This block-bootstraps the strategy's <em>realized</em> daily returns to quantify how much of the realized path was ordering luck for a history of this length. The intervals, equity fan, and breach probabilities describe alternative orderings of the returns we already observed. <strong>What it is not.</strong> It does not simulate the strategy in regimes outside the sample, does not model regime-conditional dependence, and does not extend the horizon beyond {summary_dict.get("return_count_int")} days. Use it to calibrate confidence in the realized record, not as forward stress testing.
+<strong>What this report is.</strong> This stationary-bootstrap report resamples dependent blocks from the {entity_type_html}'s <em>realized</em> daily returns with replacement. Paths can duplicate or omit observations; they measure historically conditioned sampling and sequence sensitivity. <strong>What it is not.</strong> It does not validate edge independently, correct defects in the source backtest, simulate regimes outside the sample, or calibrate forward event odds. Use it as a diagnostic, not as forward stress testing or a promise.
+</div>
+<div class="section">
+<h2>Investor Scenario Summary</h2>
+<div class="subtitle">Simple historical and historically conditioned ranges under the primary block assumption. “Observed calendar month” and “modeled 21 trading days” are different definitions. Typical range = p25 to p75; p05 is a bootstrap percentile, not a calibrated forward 1-in-20 event. Horizon rows are model-specific and must be read with the separate block-length sensitivity sweep. Recovery percentiles include only paths whose last deepest-drawdown episode recovered inside the horizon; terminal-underwater path share is separate.</div>
+<div class="scroll">{_investor_scenario_table_html(risk_result_obj.investor_scenario_df)}</div>
 </div>
 {_verdict_panel_html(summary_dict.get("verdict"))}
 {_summary_tiles_html(summary_dict)}
@@ -1291,7 +1943,7 @@ Return window: {html.escape(str(summary_dict.get("start_date_str")))} to {html.e
 </div>
 <div class="section">
 <h2>Monte Carlo Equity Paths</h2>
-<div class="subtitle">Simulated paths have the same length as the realized history; this shows ordering risk over the historical horizon, not forward horizon.</div>
+<div class="subtitle">Simulated paths have the same length as the realized history; this shows historically conditioned resampling sensitivity, not a forward horizon.</div>
 {_bootstrap_equity_svg(risk_result_obj.bootstrap_equity_path_df)}
 <div class="legend">Primary block length {summary_dict.get("primary_mean_block_length_int")}; sampled bootstrap paths plus observed, p05, p50, and p95 curves.</div>
 </div>
@@ -1329,6 +1981,79 @@ TILE_SUBTITLE_BY_METRIC_DICT = {
 }
 
 
+def _analysis_status_banner_html(analysis_context_dict: dict[str, object]) -> str:
+    if not analysis_context_dict:
+        return ""
+    analysis_status_str = str(
+        analysis_context_dict.get("analysis_status_str", "unspecified")
+    )
+    investor_use_approved_bool = bool(
+        analysis_context_dict.get("investor_use_approved_bool", False)
+    )
+    if investor_use_approved_bool:
+        approval_label_str = "INVESTOR USE APPROVED IN SOURCE CONTEXT"
+    else:
+        approval_label_str = "NOT APPROVED FOR INVESTOR USE"
+    return (
+        "<div class=\"status-banner\">"
+        f"ANALYSIS STATUS: {html.escape(analysis_status_str.replace('_', ' ').upper())}"
+        f" &nbsp;|&nbsp; {html.escape(approval_label_str)}"
+        "</div>"
+    )
+
+
+def _investor_scenario_table_html(investor_scenario_df: pd.DataFrame) -> str:
+    if investor_scenario_df is None or len(investor_scenario_df) == 0:
+        return "<p>N/A</p>"
+    header_html_str = (
+        "<tr>"
+        "<th>Scenario</th>"
+        "<th>Evidence</th>"
+        "<th>Typical p25-p75</th>"
+        "<th>Bootstrap p05</th>"
+        "<th>Terminal-loss path share</th>"
+        "<th>Bad max DD p05</th>"
+        "<th>Underwater p95</th>"
+        "<th>Recovery p50*</th>"
+        "<th>Ends below peak</th>"
+        "<th>Last deepest DD unrecovered</th>"
+        "</tr>"
+    )
+    row_html_list = []
+    for _, scenario_ser in investor_scenario_df.iterrows():
+        typical_low_str = _format_percent(scenario_ser.get("terminal_return_p25_float"))
+        typical_high_str = _format_percent(scenario_ser.get("terminal_return_p75_float"))
+        typical_range_str = (
+            "N/A"
+            if typical_low_str == "N/A" or typical_high_str == "N/A"
+            else f"{typical_low_str} to {typical_high_str}"
+        )
+        evidence_label_str = (
+            "Observed"
+            if str(scenario_ser.get("evidence_kind_str")) == "observed"
+            else "Bootstrap implied"
+        )
+        row_html_list.append(
+            "<tr>"
+            f"<td>{html.escape(str(scenario_ser.get('scenario_label_str', '')))}</td>"
+            f"<td>{html.escape(evidence_label_str)}</td>"
+            f"<td>{html.escape(typical_range_str)}</td>"
+            f"<td>{html.escape(_format_percent(scenario_ser.get('terminal_return_p05_float')))}</td>"
+            f"<td>{html.escape(_format_percent(scenario_ser.get('terminal_loss_probability_float')))}</td>"
+            f"<td>{html.escape(_format_percent(scenario_ser.get('max_drawdown_p05_float')))}</td>"
+            f"<td>{html.escape(_format_days_str(scenario_ser.get('longest_underwater_days_p95_float')))}</td>"
+            f"<td>{html.escape(_format_days_str(scenario_ser.get('max_drawdown_recovery_days_p50_float')))}</td>"
+            f"<td>{html.escape(_format_percent(scenario_ser.get('terminal_underwater_probability_float')))}</td>"
+            f"<td>{html.escape(_format_percent(scenario_ser.get('deepest_drawdown_unrecovered_probability_float')))}</td>"
+            "</tr>"
+        )
+    return (
+        f"<table><thead>{header_html_str}</thead><tbody>{''.join(row_html_list)}</tbody></table>"
+        "<div class=\"footnote\">* Recovery p50 is conditional on recovery of the last occurrence of the deepest drawdown inside the stated horizon. "
+        "Observed daily and calendar-month rows report return distributions only.</div>"
+    )
+
+
 def _verdict_panel_html(verdict_row_list: object) -> str:
     if not isinstance(verdict_row_list, list) or len(verdict_row_list) == 0:
         return ""
@@ -1354,10 +2079,10 @@ def _verdict_panel_html(verdict_row_list: object) -> str:
         )
     return (
         "<div class=\"verdict-panel\">"
-        "<div class=\"verdict-title\">Read-first verdict</div>"
+        "<div class=\"verdict-title\">Read-first diagnostic bands</div>"
         + "".join(row_html_list)
-        + "<div class=\"verdict-disclaimer\">Bands are generic reference heuristics for fast reading, "
-        "not trade advice or account-calibrated limits. See ASSUMPTIONS_AND_GAPS.</div>"
+        + "<div class=\"verdict-disclaimer\">Bands classify historically conditioned bootstrap diagnostics only. "
+        "They do not validate edge, calibrate forward odds, or define account limits. See ASSUMPTIONS_AND_GAPS.</div>"
         "</div>"
     )
 
@@ -1704,7 +2429,7 @@ def _horizon_probability_tables_html(
     downside_header_html_list.extend(
         [
             "<th>Median max DD</th>",
-            "<th>1-in-20 max DD</th>",
+            "<th>Bootstrap p05 max DD</th>",
         ]
     )
 
@@ -1761,13 +2486,13 @@ def _horizon_probability_tables_html(
     upside_header_html_list.extend(
         [
             "<th>Median max gain</th>",
-            "<th>1-in-20 max gain</th>",
+            "<th>Bootstrap p95 max gain</th>",
             "<th>Median terminal</th>",
         ]
     )
 
     downside_table_html = (
-        "<h3>Downside drawdown odds</h3>"
+        "<h3>Downside drawdown path shares</h3>"
         "<div class=\"scroll\"><table><thead><tr>"
         + "".join(downside_header_html_list)
         + "</tr></thead><tbody>"
@@ -1775,7 +2500,7 @@ def _horizon_probability_tables_html(
         + "</tbody></table></div>"
     )
     upside_table_html = (
-        "<h3>Upside reach odds</h3>"
+        "<h3>Upside reach path shares</h3>"
         "<div class=\"scroll\"><table><thead><tr>"
         + "".join(upside_header_html_list)
         + "</tr></thead><tbody>"
@@ -1995,7 +2720,7 @@ def _metric_label_str(metric_name_str: str, label_dict: dict[str, str] | None = 
 
 
 def _format_metric_value(value_obj, metric_name_str: str) -> str:
-    if metric_name_str in {"sharpe_float", "mar_float"}:
+    if metric_name_str in {"sharpe_float", "monthly_sharpe_float", "mar_float"}:
         return _format_float(value_obj, 2)
     return _format_percent(value_obj)
 
@@ -2005,6 +2730,13 @@ def _format_percent(value_obj) -> str:
     if value_float is None:
         return "N/A"
     return f"{value_float:.2%}"
+
+
+def _format_days_str(value_obj) -> str:
+    value_float = _json_float(value_obj)
+    if value_float is None:
+        return "N/A"
+    return f"{value_float:.0f} days"
 
 
 def _signed_percent_str(value_float: float) -> str:
@@ -2077,7 +2809,18 @@ def _compact_dict(raw_dict: dict[str, object]) -> dict[str, object]:
 def _records_from_df(record_df: pd.DataFrame) -> list[dict[str, object]]:
     if record_df is None or len(record_df) == 0:
         return []
-    return [dict(row_ser) for _, row_ser in record_df.iterrows()]
+    record_list: list[dict[str, object]] = []
+    for _, row_ser in record_df.iterrows():
+        row_dict: dict[str, object] = {}
+        for field_str, value_obj in row_ser.items():
+            if field_str.endswith("_int") and not pd.isna(value_obj):
+                row_dict[str(field_str)] = int(value_obj)
+            elif pd.isna(value_obj):
+                row_dict[str(field_str)] = None
+            else:
+                row_dict[str(field_str)] = value_obj
+        record_list.append(row_dict)
+    return record_list
 
 
 def _date_or_none_str(value_obj) -> str | None:
@@ -2093,14 +2836,18 @@ __all__ = [
     "DEFAULT_SENSITIVITY_BLOCK_LENGTH_TUPLE",
     "DEFAULT_SIMULATION_COUNT_INT",
     "DEFAULT_HORIZON_YEAR_TUPLE",
+    "DEFAULT_INVESTOR_HORIZON_YEAR_TUPLE",
     "DEFAULT_UPSIDE_THRESHOLD_TUPLE",
     "RISK_ANALYSIS_TYPE_STR",
+    "RISK_ANALYSIS_SCHEMA_VERSION_INT",
     "RiskAnalysis",
     "RiskAnalysisResult",
     "build_bootstrap_equity_path_df",
     "build_bootstrap_interval_df",
     "build_bootstrap_path_metric_df",
     "build_horizon_probability_df",
+    "build_investor_scenario_df",
+    "build_observed_calendar_month_df",
     "build_return_histogram_df",
     "compute_path_metric_dict",
     "extract_realized_return_ser",

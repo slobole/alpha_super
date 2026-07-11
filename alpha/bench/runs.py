@@ -18,13 +18,16 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 
 REPO_ROOT_PATH = Path(__file__).resolve().parents[2]
 RESULTS_ROOT_PATH = REPO_ROOT_PATH / "results"
+STRATEGIES_ROOT_PATH = REPO_ROOT_PATH / "strategies"
 RESEARCH_STRATEGY_ROOT_PATH = RESULTS_ROOT_PATH / "research" / "strategy"
 RESEARCH_PORTFOLIO_ROOT_PATH = RESULTS_ROOT_PATH / "research" / "portfolio"
+RUN_TIMESTAMP_FORMAT_STR = "%Y-%m-%d_%H%M%S"
 
 ANALYSIS_LABEL_DICT: dict[str, str] = {
     "vanilla_backtest": "Vanilla",
@@ -61,16 +64,37 @@ class RunEntry:
     timestamp_str: str  # raw folder, e.g. "2026-05-20_160858"
     rel_dir_from_results_str: str  # posix path relative to results/, for the artifact route
     has_report_bool: bool
+    activity_timestamp_float: float = 0.0
     summary_dict: dict = field(default_factory=dict)
     metadata_dict: dict = field(default_factory=dict)
 
     @property
+    def timestamp_datetime_obj(self) -> datetime | None:
+        try:
+            return datetime.strptime(self.timestamp_str, RUN_TIMESTAMP_FORMAT_STR)
+        except ValueError:
+            return None
+
+    @property
+    def effective_activity_timestamp_float(self) -> float:
+        if self.activity_timestamp_float > 0:
+            return self.activity_timestamp_float
+        timestamp_datetime_obj = self.timestamp_datetime_obj
+        return timestamp_datetime_obj.timestamp() if timestamp_datetime_obj is not None else 0.0
+
+    @property
+    def is_indexable_run_bool(self) -> bool:
+        return self.effective_activity_timestamp_float > 0
+
+    @property
     def display_timestamp_str(self) -> str:
-        # "2026-05-20_160858" -> "2026-05-20 16:08:58"
-        if "_" in self.timestamp_str and len(self.timestamp_str) >= 15:
-            date_part_str, _, time_part_str = self.timestamp_str.partition("_")
-            if len(time_part_str) == 6 and time_part_str.isdigit():
-                return f"{date_part_str} {time_part_str[0:2]}:{time_part_str[2:4]}:{time_part_str[4:6]}"
+        if self.activity_timestamp_float > 0:
+            return datetime.fromtimestamp(self.activity_timestamp_float).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+        timestamp_datetime_obj = self.timestamp_datetime_obj
+        if timestamp_datetime_obj is not None:
+            return timestamp_datetime_obj.strftime("%Y-%m-%d %H:%M:%S")
         return self.timestamp_str
 
     @property
@@ -130,6 +154,28 @@ def _read_json_dict(json_path: Path) -> dict:
         return {}
 
 
+def _activity_timestamp_float(
+    timestamp_dir_path: Path,
+    artifact_path_list: list[Path],
+    metadata_dict: dict,
+) -> float:
+    saved_at_obj = metadata_dict.get("saved_at")
+    if isinstance(saved_at_obj, str):
+        try:
+            return datetime.fromisoformat(saved_at_obj).timestamp()
+        except ValueError:
+            pass
+
+    try:
+        return datetime.strptime(timestamp_dir_path.name, RUN_TIMESTAMP_FORMAT_STR).timestamp()
+    except ValueError:
+        return max(artifact_path.stat().st_mtime for artifact_path in artifact_path_list)
+
+
+def _run_sort_key(run_obj: RunEntry) -> tuple[float, str]:
+    return (run_obj.effective_activity_timestamp_float, run_obj.timestamp_str)
+
+
 def _scan_run_entries(name_dir_path: Path, run_name_str: str) -> list[RunEntry]:
     """Scan one ``{run_name}/`` folder into RunEntry rows, newest first."""
     run_entry_list: list[RunEntry] = []
@@ -143,7 +189,17 @@ def _scan_run_entries(name_dir_path: Path, run_name_str: str) -> list[RunEntry]:
         for timestamp_dir_path in sorted(analysis_dir_path.iterdir(), reverse=True):
             if not timestamp_dir_path.is_dir():
                 continue
+            artifact_path_list = [
+                artifact_path
+                for artifact_path in timestamp_dir_path.iterdir()
+                if artifact_path.is_file()
+            ]
+            # Nested study trees can occupy this position. An actual run leaf
+            # has at least one immediate artifact; empty containers do not.
+            if not artifact_path_list:
+                continue
             report_path = timestamp_dir_path / "report.html"
+            metadata_dict = _read_json_dict(timestamp_dir_path / "metadata.json")
             rel_dir_from_results_str = timestamp_dir_path.resolve().relative_to(
                 RESULTS_ROOT_PATH
             ).as_posix()
@@ -157,12 +213,17 @@ def _scan_run_entries(name_dir_path: Path, run_name_str: str) -> list[RunEntry]:
                     timestamp_str=timestamp_dir_path.name,
                     rel_dir_from_results_str=rel_dir_from_results_str,
                     has_report_bool=report_path.is_file(),
+                    activity_timestamp_float=_activity_timestamp_float(
+                        timestamp_dir_path,
+                        artifact_path_list,
+                        metadata_dict,
+                    ),
                     summary_dict=_read_json_dict(timestamp_dir_path / "summary.json"),
-                    metadata_dict=_read_json_dict(timestamp_dir_path / "metadata.json"),
+                    metadata_dict=metadata_dict,
                 )
             )
 
-    run_entry_list.sort(key=lambda run_obj: run_obj.timestamp_str, reverse=True)
+    run_entry_list.sort(key=_run_sort_key, reverse=True)
     return run_entry_list
 
 
@@ -178,25 +239,57 @@ def _module_import_for_runs(run_entry_list: list[RunEntry]) -> str | None:
 class StrategyRunIndex:
     runs_by_module_dict: dict[str, list[RunEntry]]
     runs_by_run_name_dict: dict[str, list[RunEntry]]
+    strategy_stem_set: set[str] = field(default_factory=set)
 
     def runs_for(self, module_import_str: str, stem_str: str) -> list[RunEntry]:
-        run_entry_list = self.runs_by_module_dict.get(module_import_str)
-        if run_entry_list:
-            return run_entry_list
-        # Fall back to a direct run-name match (covers runs with no metadata).
-        return self.runs_by_run_name_dict.get(stem_str, [])
+        module_run_entry_list = self.runs_by_module_dict.get(module_import_str, [])
+        direct_run_name_entry_list = self.runs_by_run_name_dict.get(stem_str, [])
+        owned_module_run_entry_list = [
+            run_obj
+            for run_obj in module_run_entry_list
+            if (
+                run_obj.run_name_str == stem_str
+                or run_obj.run_name_str not in self.strategy_stem_set
+            )
+        ]
+        combined_run_entry_list: list[RunEntry] = []
+        seen_rel_dir_set: set[str] = set()
+        for run_obj in [*direct_run_name_entry_list, *owned_module_run_entry_list]:
+            if run_obj.rel_dir_from_results_str in seen_rel_dir_set:
+                continue
+            seen_rel_dir_set.add(run_obj.rel_dir_from_results_str)
+            combined_run_entry_list.append(run_obj)
+        combined_run_entry_list.sort(key=_run_sort_key, reverse=True)
+        return combined_run_entry_list
 
     def latest_vanilla_for(self, module_import_str: str, stem_str: str) -> RunEntry | None:
         for run_obj in self.runs_for(module_import_str, stem_str):
-            if run_obj.analysis_dir_str == "vanilla_backtest":
+            if run_obj.analysis_dir_str == "vanilla_backtest" and run_obj.is_indexable_run_bool:
+                return run_obj
+        return None
+
+    def latest_run_for(self, module_import_str: str, stem_str: str) -> RunEntry | None:
+        for run_obj in self.runs_for(module_import_str, stem_str):
+            if run_obj.is_indexable_run_bool:
                 return run_obj
         return None
 
     def run_count_for(self, module_import_str: str, stem_str: str) -> int:
         return len(self.runs_for(module_import_str, stem_str))
 
+    def recent_runs(self, limit_int: int = 12) -> list[RunEntry]:
+        """Newest result rows that have metrics or an actionable report."""
+        recent_run_list = [
+            run_obj
+            for run_entry_list in self.runs_by_run_name_dict.values()
+            for run_obj in run_entry_list
+            if run_obj.is_indexable_run_bool and (run_obj.has_report_bool or run_obj.summary_dict)
+        ]
+        recent_run_list.sort(key=_run_sort_key, reverse=True)
+        return recent_run_list[:limit_int]
 
-def build_strategy_run_index() -> StrategyRunIndex:
+
+def build_strategy_run_index(strategy_stem_set: set[str] | None = None) -> StrategyRunIndex:
     """One pass over ``results/research/strategy`` returning runs keyed two ways."""
     runs_by_module_dict: dict[str, list[RunEntry]] = {}
     runs_by_run_name_dict: dict[str, list[RunEntry]] = {}
@@ -215,11 +308,17 @@ def build_strategy_run_index() -> StrategyRunIndex:
                 runs_by_module_dict.setdefault(module_import_str, []).extend(run_entry_list)
 
     for module_import_str, run_entry_list in runs_by_module_dict.items():
-        run_entry_list.sort(key=lambda run_obj: run_obj.timestamp_str, reverse=True)
+        run_entry_list.sort(key=_run_sort_key, reverse=True)
+
+    if strategy_stem_set is None:
+        strategy_stem_set = {
+            strategy_path.stem for strategy_path in STRATEGIES_ROOT_PATH.rglob("strategy_*.py")
+        }
 
     return StrategyRunIndex(
         runs_by_module_dict=runs_by_module_dict,
         runs_by_run_name_dict=runs_by_run_name_dict,
+        strategy_stem_set=set(strategy_stem_set),
     )
 
 
@@ -229,12 +328,7 @@ def scan_portfolio_runs(portfolio_name_str: str) -> list[RunEntry]:
 
 def recent_runs(limit_int: int = 12) -> list[RunEntry]:
     """Newest analyzer runs across all strategies, for the home feed."""
-    all_run_list: list[RunEntry] = []
-    index_obj = build_strategy_run_index()
-    for run_entry_list in index_obj.runs_by_run_name_dict.values():
-        all_run_list.extend(run_entry_list)
-    all_run_list.sort(key=lambda run_obj: run_obj.timestamp_str, reverse=True)
-    return all_run_list[:limit_int]
+    return build_strategy_run_index().recent_runs(limit_int=limit_int)
 
 
 def resolve_artifact_path(rel_path_str: str) -> Path | None:

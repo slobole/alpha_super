@@ -38,6 +38,7 @@ PORTFOLIOS_ROOT_PATH = REPO_ROOT_PATH / "portfolios"
 # title-cased version of the folder name, so a brand-new family still renders.
 CATEGORY_LABEL_DICT: dict[str, str] = {
     "dv2": "DV2 mean-reversion",
+    "mean_reversion": "Mean Reversion",
     "qpi": "QPI mean-reversion",
     "taa_df": "TAA dual-momentum",
     "momentum": "Momentum",
@@ -48,6 +49,30 @@ CATEGORY_LABEL_DICT: dict[str, str] = {
     "seasonality": "Seasonality",
 }
 
+MOMENTUM_CATEGORY_STR = "momentum"
+MOMENTUM_SUBCATEGORY_LABEL_DICT: dict[str, str] = {
+    "atr_normalized_rotation": "ATR-Normalized Rotation",
+    "smooth_trend": "Smooth Trend",
+    "canary_rotation": "Canary Rotation",
+    "etf_timing_trend": "ETF Timing & Trend",
+    "gap_overnight": "Gap / Overnight",
+    "cross_sectional": "Cross-Sectional Momentum",
+    "other_allocation": "Other Allocation",
+}
+
+CROSS_SECTIONAL_MOMENTUM_STEM_SET = frozenset(
+    {
+        "strategy_mo_alpha23_breakout",
+        "strategy_mo_clenow_top10_vol63",
+        "strategy_mo_ev_lrb_252_ndx",
+        "strategy_mo_jt_12_1_top20",
+        "strategy_mo_pretom_loser_short_sp500",
+        "strategy_mo_pta_winner_continuation",
+        "strategy_mo_sp500_ret3m_natr21_long_short",
+        "strategy_mo_weekly_sector_momentum",
+    }
+)
+
 
 @dataclass(frozen=True)
 class StrategyEntry:
@@ -57,6 +82,8 @@ class StrategyEntry:
     display_name_str: str  # prettified, e.g. "Mr Dv2"
     category_str: str  # the containing folder, e.g. "dv2"
     category_label_str: str
+    subcategory_str: str | None  # finer UI grouping; currently used for Momentum
+    subcategory_label_str: str | None
     module_import_str: str  # e.g. "strategies.dv2.strategy_mr_dv2"
     rel_path_str: str  # posix path relative to the repo root
     is_wired_bool: bool
@@ -114,6 +141,34 @@ def _category_label(category_str: str) -> str:
     return CATEGORY_LABEL_DICT.get(category_str, category_str.replace("_", " ").title())
 
 
+def _momentum_subcategory_str(stem_str: str) -> str:
+    """Return a stable UI family for one strategy in ``strategies/momentum``."""
+    if stem_str.startswith("strategy_mo_atr_normalized_") or stem_str == "strategy_mo_radge_ndx":
+        return "atr_normalized_rotation"
+    if stem_str.startswith("strategy_mo_smooth_trend_"):
+        return "smooth_trend"
+    if "_sphb_splv_canary" in stem_str:
+        return "canary_rotation"
+    if (
+        stem_str.startswith("strategy_mo_mtum_timed_by_")
+        or stem_str.startswith("strategy_mo_pdp_timed_by_")
+        or stem_str == "strategy_mo_spy_vol_adj_ema"
+    ):
+        return "etf_timing_trend"
+    if stem_str.startswith("strategy_mo_gappers_"):
+        return "gap_overnight"
+    if stem_str in CROSS_SECTIONAL_MOMENTUM_STEM_SET:
+        return "cross_sectional"
+    return "other_allocation"
+
+
+def _subcategory_pair(category_str: str, stem_str: str) -> tuple[str | None, str | None]:
+    if category_str != MOMENTUM_CATEGORY_STR:
+        return (None, None)
+    subcategory_str = _momentum_subcategory_str(stem_str)
+    return (subcategory_str, MOMENTUM_SUBCATEGORY_LABEL_DICT[subcategory_str])
+
+
 def _wired_module_set() -> set[str]:
     # Entries are either "module" or "module:Class"; we key on the module path.
     return {entry_str.split(":", maxsplit=1)[0] for entry_str in SUPPORTED_STRATEGY_IMPORT_TUPLE}
@@ -169,12 +224,15 @@ def list_strategies() -> list[StrategyEntry]:
         category_str = (
             module_path.parent.name if module_path.parent != STRATEGIES_ROOT_PATH else "uncategorized"
         )
+        subcategory_str, subcategory_label_str = _subcategory_pair(category_str, module_path.stem)
         entry_list.append(
             StrategyEntry(
                 stem_str=module_path.stem,
                 display_name_str=prettify_stem(module_path.stem),
                 category_str=category_str,
                 category_label_str=_category_label(category_str),
+                subcategory_str=subcategory_str,
+                subcategory_label_str=subcategory_label_str,
                 module_import_str=module_import_str,
                 rel_path_str=_rel_posix_str(module_path),
                 is_wired_bool=module_import_str in wired_module_set,
@@ -206,6 +264,22 @@ def list_categories() -> list[tuple[str, str]]:
     for entry_obj in list_strategies():
         seen_dict[entry_obj.category_str] = entry_obj.category_label_str
     return sorted(seen_dict.items(), key=lambda pair: pair[1].lower())
+
+
+def list_momentum_subcategories() -> list[tuple[str, str, int]]:
+    """Momentum UI groups as ``(key, label, strategy_count)`` in display order."""
+    count_by_subcategory_dict = {
+        subcategory_str: 0 for subcategory_str in MOMENTUM_SUBCATEGORY_LABEL_DICT
+    }
+    for entry_obj in list_strategies():
+        if entry_obj.category_str != MOMENTUM_CATEGORY_STR or entry_obj.subcategory_str is None:
+            continue
+        count_by_subcategory_dict[entry_obj.subcategory_str] += 1
+    return [
+        (subcategory_str, label_str, count_by_subcategory_dict[subcategory_str])
+        for subcategory_str, label_str in MOMENTUM_SUBCATEGORY_LABEL_DICT.items()
+        if count_by_subcategory_dict[subcategory_str] > 0
+    ]
 
 
 def _short_strategy_label(strategy_ref_str: str) -> str:

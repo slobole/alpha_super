@@ -18,6 +18,7 @@ from alpha.engine.report import (
     _corr_color,
     _daily_return_histogram_b64,
     _drawdown_color,
+    _format_portfolio_summary,
     _format_summary,
     _format_trades,
     _pm_allocation_snapshot_df,
@@ -31,7 +32,12 @@ from alpha.engine.report import (
 )
 from alpha.engine.portfolio import Portfolio
 from alpha.engine.strategy import Strategy
-from alpha.engine.theme import SEABORN_DEEP_COLOR_LIST, SIGNATURE_PALETTE_DICT, blend_hex_color_str
+from alpha.engine.theme import (
+    SEABORN_DEEP_COLOR_LIST,
+    SIGNATURE_PALETTE_DICT,
+    blend_hex_color_str,
+    build_report_css,
+)
 
 
 class DummyStrategy(Strategy):
@@ -153,6 +159,93 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertNotIn('class="drawdown"', summary_html_str)
         self.assertIn('<td>-8.40%</td>', summary_html_str)
 
+    def test_format_summary_adds_help_for_non_trivial_metrics(self):
+        summary_df = pd.DataFrame(
+            {'Strategy': [0.42, 100_000.0]},
+            index=['Beta', 'Start [$]'],
+        )
+
+        summary_html_str = _format_summary(summary_df)
+
+        self.assertIn('<button type="button" class="metric-help"', summary_html_str)
+        self.assertIn('How much benchmark exposure', summary_html_str)
+        self.assertNotIn('role="button"', summary_html_str)
+        self.assertIn('aria-label="Beta: How much benchmark exposure', summary_html_str)
+        self.assertIn('data-help="How much benchmark exposure', summary_html_str)
+        self.assertNotIn('title="How much benchmark exposure', summary_html_str)
+        self.assertNotIn('Start [$] <button', summary_html_str)
+
+    def test_format_portfolio_summary_groups_rows_and_keeps_drawdown_counts_visible(self):
+        summary_df = pd.DataFrame(
+            {'Portfolio': [100_000.0, 12.0, 1.1, 0.4, 4.2, 1.3, 0.18, 100.0, -8.0, 5, 2, 0.6, 1.0, 20.0]},
+            index=[
+                'Start [$]',
+                'Return (Ann.) [%]',
+                'Sharpe Ratio',
+                'Beta',
+                'Alpha (Ann.) [%]',
+                'Alpha HAC t-stat',
+                'R²',
+                'Exposure Time [%]',
+                'Max. Drawdown [%]',
+                '# Drawdowns',
+                '# Drawdowns / year',
+                'Avg. Drawdown [%]',
+                'Correlation',
+                'Exposure-Adjusted Return (Ann.) [%]',
+            ],
+        )
+
+        summary_html_str = _format_portfolio_summary(summary_df)
+
+        self.assertIn('Period &amp; Capital', summary_html_str)
+        self.assertIn('Return &amp; Risk-Adjusted Performance', summary_html_str)
+        self.assertIn('Benchmark Regression', summary_html_str)
+        for regression_metric_name_str in ('Beta', 'Alpha (Ann.) / HAC t-stat', 'R²'):
+            self.assertEqual(
+                summary_html_str.count(f'<td class="metric">{regression_metric_name_str} '),
+                1,
+            )
+        self.assertNotIn('<td class="metric">Alpha HAC t-stat ', summary_html_str)
+        self.assertNotIn('<h3>Other Metrics</h3>', summary_html_str)
+        self.assertIn('Drawdown &amp; Recovery', summary_html_str)
+        self.assertEqual(summary_html_str.count('<td class="metric"># Drawdowns'), 2)
+        self.assertIn('<td class="metric"># Drawdowns / year ', summary_html_str)
+        self.assertIn('<summary>Extended Risk Diagnostics</summary>', summary_html_str)
+        self.assertNotIn('<td class="metric">Correlation ', summary_html_str)
+        self.assertNotIn('Exposure-Adjusted Return (Ann.)', summary_html_str)
+
+    def test_benchmark_regression_section_renders_explicit_unavailable_reason(self):
+        summary_df = pd.DataFrame(
+            {'Strategy': [np.nan, np.nan, np.nan, np.nan]},
+            index=['Beta', 'Alpha (Ann.) [%]', 'Alpha HAC t-stat', 'R²'],
+        )
+
+        summary_html_str = _format_portfolio_summary(
+            summary_df,
+            {
+                'Strategy': {
+                    'status_str': 'unavailable',
+                    'reason_str': 'insufficient_observations',
+                    'benchmark_label_str': '$SPX',
+                    'benchmark_adjustment_str': 'TOTALRETURN',
+                    'observation_count_int': 120,
+                    'hac_max_lag_int': None,
+                }
+            },
+        )
+
+        self.assertIn('$SPX · TOTALRETURN · N/A: insufficient observations', summary_html_str)
+        self.assertEqual(summary_html_str.count('>N/A</td>'), 3)
+
+    def test_format_portfolio_summary_preserves_unknown_metrics_in_other_section(self):
+        summary_df = pd.DataFrame({'Portfolio': [3.14]}, index=['Custom Diagnostic'])
+
+        summary_html_str = _format_portfolio_summary(summary_df)
+
+        self.assertIn('<h3>Other Metrics</h3>', summary_html_str)
+        self.assertEqual(summary_html_str.count('Custom Diagnostic'), 1)
+
     def test_prepare_daily_return_distribution_excludes_bootstrap_and_preserves_formulas(self):
         strategy = make_strategy([0.0, 0.01, -0.02, 0.0, 0.03])
 
@@ -180,7 +273,23 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertIn('alt="Daily Return Distribution"', report_html_str)
         self.assertIn('Mean</th><th>Std. Dev.</th><th>Skew</th><th>Negative Days</th>', report_html_str)
         self.assertIn('class="kpi-grid"', report_html_str)
-        self.assertIn('Final Value', report_html_str)
+        self.assertIn('id="metric-help-tooltip"', report_html_str)
+        self.assertIn("trigger.addEventListener('mouseenter'", report_html_str)
+        self.assertIn("trigger.addEventListener('focus'", report_html_str)
+        self.assertIn("trigger.addEventListener('click'", report_html_str)
+        self.assertIn("event.key === 'Escape'", report_html_str)
+        self.assertIn(
+            "document.documentElement.classList.add('metric-tooltip-js-enabled')",
+            report_html_str,
+        )
+        report_css_str = build_report_css()
+        self.assertIn(
+            'html:not(.metric-tooltip-js-enabled) .metric-help:hover::after',
+            report_css_str,
+        )
+        self.assertIn('content: attr(data-help);', report_css_str)
+        self.assertNotIn('<div class="kpi-label">Final Value</div>', report_html_str)
+        self.assertEqual(report_html_str.count('<div class="kpi-card">'), 5)
         self.assertIn('Total Return', report_html_str)
         self.assertIn('Volatility', report_html_str)
         self.assertIn('11.58%', report_html_str)
@@ -198,6 +307,85 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertNotIn('<h2>All Transactions</h2>', report_html_str)
         self.assertLess(trade_statistics_idx_int, daily_distribution_idx_int)
         self.assertLess(daily_distribution_idx_int, closed_trades_idx_int)
+
+    def test_build_html_groups_strategy_summary_and_adds_alpha_kpi_when_available(self):
+        strategy = make_strategy([0.0, 0.01, -0.005, 0.008, -0.002, 0.004])
+        strategy.summary.loc['Beta', 'Strategy'] = 0.75
+        strategy.summary.loc['Alpha (Ann.) [%]', 'Strategy'] = 4.2
+        strategy.summary.loc['Alpha HAC t-stat', 'Strategy'] = 1.35
+        strategy.summary.loc['R²', 'Strategy'] = 0.31
+        strategy.benchmark_regression_metadata_by_column_dict = {
+            'Strategy': {
+                'status_str': 'ok',
+                'reason_str': None,
+                'benchmark_label_str': '$SPX',
+                'observation_count_int': 500,
+                'hac_max_lag_int': 5,
+            }
+        }
+
+        report_html_str = _build_html(strategy, chart_b64='equity-chart-b64')
+
+        self.assertIn('<h3>Period &amp; Capital</h3>', report_html_str)
+        self.assertIn('<h3>Benchmark Regression</h3>', report_html_str)
+        self.assertIn('Zero-Rate Market Regression', report_html_str)
+        self.assertIn('$SPX · N=500 · HAC L=5', report_html_str)
+        self.assertIn('<div class="kpi-label">Alpha (Ann.)</div>', report_html_str)
+        self.assertIn('Zero-rate vs $SPX · HAC t=1.35', report_html_str)
+        self.assertEqual(report_html_str.count('<div class="kpi-card">'), 6)
+        self.assertIn('+4.20% / 1.35', report_html_str)
+
+    def test_strategy_appends_regression_metrics_from_declared_stored_benchmark(self):
+        daily_return_list = [0.0] + [0.01 if idx_int % 2 == 0 else -0.006 for idx_int in range(299)]
+        strategy = make_strategy(daily_return_list)
+
+        strategy._append_benchmark_regression_metrics()
+
+        metadata_dict = strategy.benchmark_regression_metadata_by_column_dict['Strategy']
+        self.assertEqual(metadata_dict['status_str'], 'ok')
+        self.assertEqual(metadata_dict['benchmark_label_str'], '$SPX')
+        self.assertEqual(metadata_dict['benchmark_adjustment_str'], 'not_declared')
+        self.assertEqual(metadata_dict['observation_count_int'], 299)
+        self.assertTrue(np.isfinite(float(strategy.summary.loc['Beta', 'Strategy'])))
+        self.assertTrue(np.isfinite(float(strategy.summary.loc['R²', 'Strategy'])))
+
+    def test_strategy_declared_benchmark_overrides_first_comparison_benchmark(self):
+        date_index = pd.bdate_range('2020-01-02', periods=300)
+        declared_benchmark_return_ser = pd.Series(
+            np.linspace(-0.01, 0.01, len(date_index)),
+            index=date_index,
+            dtype=float,
+        )
+        strategy_return_ser = 0.0001 + 0.8 * declared_benchmark_return_ser
+        strategy = DummyStrategy(
+            name='DeclaredBenchmarkStrategy',
+            benchmarks=['$SPX', '$NDX'],
+            capital_base=100_000.0,
+            slippage=0.0,
+            commission_per_share=0.0,
+            commission_minimum=0.0,
+            performance_benchmark_symbol_str='$NDX',
+            performance_benchmark_adjustment_str='TOTALRETURN',
+        )
+        strategy.results = pd.DataFrame(
+            {
+                'daily_returns': pd.concat(
+                    [pd.Series([0.0], index=date_index[:1]), strategy_return_ser.iloc[1:]]
+                ),
+                'total_value': 100_000.0 * (1.0 + strategy_return_ser).cumprod(),
+                '$SPX': 100_000.0 * (1.0 - 0.2 * declared_benchmark_return_ser).cumprod(),
+                '$NDX': 100_000.0 * (1.0 + declared_benchmark_return_ser).cumprod(),
+            },
+            index=date_index,
+        )
+        strategy.summary = pd.DataFrame(columns=['Strategy'])
+
+        strategy._append_benchmark_regression_metrics()
+
+        metadata_dict = strategy.benchmark_regression_metadata_by_column_dict['Strategy']
+        self.assertEqual(metadata_dict['benchmark_label_str'], '$NDX')
+        self.assertEqual(metadata_dict['benchmark_adjustment_str'], 'TOTALRETURN')
+        self.assertAlmostEqual(float(strategy.summary.loc['Beta', 'Strategy']), 0.8, places=10)
 
     def test_strategy_records_realized_weight_snapshot_after_valuation(self):
         strategy = DummyStrategy(
@@ -313,6 +501,7 @@ class ReportFormattingTests(unittest.TestCase):
 
     def test_save_results_writes_transactions_csv(self):
         strategy = make_strategy([0.0, 0.01, -0.02, 0.0, 0.03, -0.01])
+        strategy._append_benchmark_regression_metrics()
         strategy._transactions = pd.DataFrame(
             [
                 {
@@ -376,6 +565,14 @@ class ReportFormattingTests(unittest.TestCase):
             self.assertEqual(run_info_dict['parameters']['capital'], 100_000.0)
             self.assertEqual(summary_dict['final_equity'], float(strategy.results['total_value'].iloc[-1]))
             self.assertEqual(summary_dict['trade_count'], 4)
+            regression_metadata_dict = summary_dict['benchmark_regression']['Strategy']
+            self.assertEqual(regression_metadata_dict['model_str'], 'zero_rate_daily_ols_hac')
+            self.assertEqual(regression_metadata_dict['benchmark_label_str'], '$SPX')
+            self.assertEqual(regression_metadata_dict['benchmark_adjustment_str'], 'not_declared')
+            self.assertEqual(regression_metadata_dict['observation_count_int'], 5)
+            self.assertIsNone(regression_metadata_dict['hac_max_lag_int'])
+            self.assertEqual(regression_metadata_dict['status_str'], 'unavailable')
+            self.assertEqual(regression_metadata_dict['reason_str'], 'insufficient_observations')
 
             report_html_str = report_html_path.read_text(encoding='utf-8')
             self.assertNotIn('<h2>All Transactions</h2>', report_html_str)
@@ -505,6 +702,11 @@ class ReportFormattingTests(unittest.TestCase):
         portfolio = make_portfolio()
 
         report_html_str = _build_portfolio_html(portfolio, chart_b64='portfolio-chart-b64')
+        performance_summary_start_int = report_html_str.index('<h2>Portfolio Performance Summary</h2>')
+        performance_summary_end_int = report_html_str.index('<h2>Portfolio Monthly Returns</h2>')
+        performance_summary_html_str = report_html_str[
+            performance_summary_start_int:performance_summary_end_int
+        ]
 
         self.assertIn('<h2>Pod Drift Diagnostics</h2>', report_html_str)
         self.assertIn('Actual Sleeve Weights', report_html_str)
@@ -513,6 +715,20 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertIn('Rolling 63-Day Diversification Ratio', report_html_str)
         self.assertIn('class="kpi-grid"', report_html_str)
         self.assertIn('class="card-grid"', report_html_str)
+        self.assertIn('<button type="button" class="metric-help"', report_html_str)
+        self.assertIn('id="metric-help-tooltip"', report_html_str)
+        self.assertIn(
+            "document.documentElement.classList.add('metric-tooltip-js-enabled')",
+            report_html_str,
+        )
+        self.assertIn('<h3>Period &amp; Capital</h3>', performance_summary_html_str)
+        self.assertIn('<h3>Drawdown &amp; Recovery</h3>', performance_summary_html_str)
+        self.assertIn('<summary>Extended Risk Diagnostics</summary>', performance_summary_html_str)
+        self.assertIn('Final [$]', performance_summary_html_str)
+        self.assertNotIn('<td class="metric">Correlation ', performance_summary_html_str)
+        self.assertEqual(report_html_str.count('class="summary-section-stack"'), 5)
+        self.assertEqual(report_html_str.count('<h3>Allocated Sleeve Summary</h3>'), 2)
+        self.assertEqual(report_html_str.count('<h3>Standalone Pod Summary</h3>'), 2)
         self.assertIn('https://ds-cdn.prod-east.frontend.public.atl-paas.net/assets/font-rules/v5/atlassian-fonts.css', report_html_str)
         self.assertIn('SPX Ann Ret', report_html_str)
         self.assertIn('<h2>Pooled Pod Trade Statistics</h2>', report_html_str)
@@ -614,6 +830,12 @@ class ReportFormattingTests(unittest.TestCase):
             self.assertEqual(run_info_dict['parameters']['capital'], 100_000.0)
             self.assertEqual(len(run_info_dict['parameters']['pods']), 2)
             self.assertIn('final_equity', summary_dict)
+            portfolio_regression_metadata_dict = summary_dict['benchmark_regression']['Portfolio']
+            self.assertEqual(portfolio_regression_metadata_dict['model_str'], 'zero_rate_daily_ols_hac')
+            self.assertEqual(portfolio_regression_metadata_dict['status_str'], 'unavailable')
+            self.assertEqual(portfolio_regression_metadata_dict['reason_str'], 'missing_benchmark')
+            self.assertIn('PodA Sleeve (40%)', summary_dict['benchmark_regression'])
+            self.assertIn('PodA Standalone', summary_dict['standalone_benchmark_regression'])
 
     def test_save_portfolio_results_writes_rebalance_csv_artifacts(self):
         strategy_a = make_strategy([0.0] + [0.01, -0.005] * 20)

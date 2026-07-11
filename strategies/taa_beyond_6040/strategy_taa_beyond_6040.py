@@ -533,6 +533,7 @@ class Beyond6040Strategy(Strategy):
                     None,
                     self.results["daily_returns"],
                 )
+        self._append_benchmark_regression_metrics()
 
         if self._trades is not None and len(self._trades) > 0:
             self.summary_trades = generate_trades_metrics(self._trades, self.results.index)

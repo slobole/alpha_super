@@ -2,8 +2,13 @@ import unittest
 
 import numpy as np
 import pandas as pd
+import statsmodels.api as sm
 
-from alpha.engine.metrics import generate_overall_metrics, generate_trades
+from alpha.engine.metrics import (
+    generate_benchmark_regression_metrics,
+    generate_overall_metrics,
+    generate_trades,
+)
 
 
 class GenerateTradesTests(unittest.TestCase):
@@ -73,6 +78,171 @@ class GenerateTradesTests(unittest.TestCase):
 
 
 class GenerateOverallMetricsTests(unittest.TestCase):
+    def test_drawdowns_per_year_preserves_fractional_annualization(self):
+        date_index = pd.date_range("2024-01-01", periods=5, freq="D")
+        total_value_ser = pd.Series(
+            [100.0, 90.0, 100.0, 100.0, 100.0],
+            index=date_index,
+            dtype=float,
+        )
+
+        summary_ser = generate_overall_metrics(
+            total_value_ser,
+            capital_base=100.0,
+            days_in_year=4,
+        )
+
+        self.assertEqual(float(summary_ser.loc["# Drawdowns"]), 1.0)
+        self.assertAlmostEqual(float(summary_ser.loc["# Drawdowns / year"]), 0.8)
+
+    def test_benchmark_regression_recovers_known_alpha_beta_and_r_squared(self):
+        random_generator_obj = np.random.default_rng(7)
+        date_index = pd.date_range('2020-01-01', periods=400, freq='B')
+        benchmark_return_ser = pd.Series(
+            random_generator_obj.normal(0.0004, 0.01, len(date_index)),
+            index=date_index,
+            dtype=float,
+        )
+        residual_return_ser = pd.Series(
+            random_generator_obj.normal(0.0, 0.002, len(date_index)),
+            index=date_index,
+            dtype=float,
+        )
+        residual_return_ser = residual_return_ser - residual_return_ser.mean()
+        centered_benchmark_ser = benchmark_return_ser - benchmark_return_ser.mean()
+        residual_return_ser = residual_return_ser - (
+            residual_return_ser.cov(centered_benchmark_ser)
+            / centered_benchmark_ser.var()
+        ) * centered_benchmark_ser
+        alpha_daily_float = 0.0002
+        beta_float = 1.5
+        strategy_return_ser = alpha_daily_float + beta_float * benchmark_return_ser + residual_return_ser
+
+        regression_metric_ser, regression_metadata_dict = generate_benchmark_regression_metrics(
+            strategy_return_ser,
+            benchmark_return_ser,
+            benchmark_label_str='$SPX · TOTALRETURN',
+        )
+
+        self.assertEqual(regression_metadata_dict['status_str'], 'ok')
+        self.assertEqual(regression_metadata_dict['observation_count_int'], 400)
+        self.assertEqual(
+            regression_metadata_dict['hac_max_lag_int'],
+            int(np.floor(4.0 * (400 / 100.0) ** (2.0 / 9.0))),
+        )
+        expected_r_squared_float = 1.0 - float(
+            np.square(residual_return_ser).sum()
+            / np.square(strategy_return_ser - strategy_return_ser.mean()).sum()
+        )
+        self.assertAlmostEqual(float(regression_metric_ser.loc['Beta']), beta_float, places=10)
+        self.assertAlmostEqual(
+            float(regression_metric_ser.loc['Alpha (Ann.) [%]']),
+            alpha_daily_float * 252 * 100.0,
+            places=10,
+        )
+        self.assertAlmostEqual(
+            float(regression_metric_ser.loc['R²']),
+            expected_r_squared_float,
+            places=12,
+        )
+        expected_hac_lag_int = int(regression_metadata_dict['hac_max_lag_int'])
+        expected_regression_result_obj = sm.OLS(
+            strategy_return_ser,
+            sm.add_constant(benchmark_return_ser.rename('benchmark_return'), has_constant='add'),
+        ).fit(cov_type='HAC', cov_kwds={'maxlags': expected_hac_lag_int})
+        self.assertAlmostEqual(
+            float(regression_metric_ser.loc['Alpha HAC t-stat']),
+            float(expected_regression_result_obj.tvalues['const']),
+            places=12,
+        )
+
+    def test_benchmark_regression_supports_negative_and_zero_beta(self):
+        date_index = pd.date_range('2020-01-01', periods=300, freq='B')
+        benchmark_return_ser = pd.Series(
+            np.linspace(-0.02, 0.02, len(date_index)),
+            index=date_index,
+            dtype=float,
+        )
+
+        negative_metric_ser, _ = generate_benchmark_regression_metrics(
+            -0.5 * benchmark_return_ser,
+            benchmark_return_ser,
+            benchmark_label_str='Benchmark',
+        )
+        zero_beta_return_ser = pd.Series(
+            np.tile([-0.001, 0.001], len(date_index) // 2),
+            index=date_index,
+            dtype=float,
+        )
+        centered_benchmark_ser = benchmark_return_ser - benchmark_return_ser.mean()
+        zero_beta_return_ser = zero_beta_return_ser - (
+            zero_beta_return_ser.cov(centered_benchmark_ser)
+            / centered_benchmark_ser.var()
+        ) * centered_benchmark_ser
+        zero_metric_ser, _ = generate_benchmark_regression_metrics(
+            zero_beta_return_ser,
+            benchmark_return_ser,
+            benchmark_label_str='Benchmark',
+        )
+
+        self.assertAlmostEqual(float(negative_metric_ser.loc['Beta']), -0.5, places=12)
+        self.assertAlmostEqual(float(negative_metric_ser.loc['R²']), 1.0, places=12)
+        self.assertAlmostEqual(float(zero_metric_ser.loc['Beta']), 0.0, places=12)
+        self.assertAlmostEqual(float(zero_metric_ser.loc['R²']), 0.0, places=12)
+
+    def test_benchmark_regression_aligns_without_fill_and_handles_unavailable_cases(self):
+        strategy_date_index = pd.date_range('2020-01-01', periods=260, freq='B')
+        benchmark_date_index = pd.date_range('2020-01-15', periods=260, freq='B')
+        strategy_return_ser = pd.Series(0.001, index=strategy_date_index, dtype=float)
+        benchmark_return_ser = pd.Series(
+            np.linspace(-0.01, 0.01, len(benchmark_date_index)),
+            index=benchmark_date_index,
+            dtype=float,
+        )
+        strategy_return_ser.iloc[20] = np.nan
+        benchmark_return_ser.iloc[20] = np.inf
+
+        _, aligned_metadata_dict = generate_benchmark_regression_metrics(
+            strategy_return_ser,
+            benchmark_return_ser,
+            benchmark_label_str='Benchmark',
+            min_observation_count_int=10,
+        )
+        missing_metric_ser, missing_metadata_dict = generate_benchmark_regression_metrics(
+            strategy_return_ser,
+            None,
+            benchmark_label_str=None,
+        )
+        _, short_metadata_dict = generate_benchmark_regression_metrics(
+            strategy_return_ser.iloc[:20],
+            benchmark_return_ser.iloc[:20],
+            benchmark_label_str='Benchmark',
+        )
+        _, flat_metadata_dict = generate_benchmark_regression_metrics(
+            strategy_return_ser,
+            pd.Series(0.0, index=strategy_date_index, dtype=float),
+            benchmark_label_str='Benchmark',
+        )
+        _, flat_strategy_metadata_dict = generate_benchmark_regression_metrics(
+            pd.Series(0.001, index=strategy_date_index, dtype=float),
+            benchmark_return_ser.reindex(strategy_date_index),
+            benchmark_label_str='Benchmark',
+            min_observation_count_int=10,
+        )
+
+        expected_pair_count_int = int(
+            pd.concat([strategy_return_ser, benchmark_return_ser], axis=1, join='inner')
+            .replace([np.inf, -np.inf], np.nan)
+            .dropna()
+            .shape[0]
+        )
+        self.assertEqual(aligned_metadata_dict['observation_count_int'], expected_pair_count_int)
+        self.assertEqual(missing_metadata_dict['reason_str'], 'missing_benchmark')
+        self.assertTrue(missing_metric_ser.isna().all())
+        self.assertEqual(short_metadata_dict['reason_str'], 'insufficient_observations')
+        self.assertEqual(flat_metadata_dict['reason_str'], 'zero_benchmark_variance')
+        self.assertEqual(flat_strategy_metadata_dict['reason_str'], 'zero_strategy_variance')
+
     def test_generate_overall_metrics_adds_l1_mar_and_underwater_metrics(self):
         date_index = pd.date_range("2024-01-01", periods=5, freq="D")
         total_value_ser = pd.Series(
@@ -112,6 +282,13 @@ class GenerateOverallMetricsTests(unittest.TestCase):
         self.assertAlmostEqual(
             float(summary_ser.loc["MAR Ratio"]),
             annual_return_pct_float / abs(max_drawdown_pct_float),
+        )
+        expected_drawdowns_per_year_float = (
+            float(summary_ser.loc["# Drawdowns"]) / (len(total_value_ser) / 5.0)
+        )
+        self.assertAlmostEqual(
+            float(summary_ser.loc["# Drawdowns / year"]),
+            expected_drawdowns_per_year_float,
         )
 
     def test_generate_overall_metrics_adds_turnover_and_cost_drag_from_transactions(self):

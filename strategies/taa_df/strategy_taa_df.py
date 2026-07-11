@@ -52,9 +52,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import sys
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
 import numpy as np
 import pandas as pd
@@ -79,6 +79,9 @@ from data.norgate_loader import (
     TOTALRETURN_ADJUSTMENT_STR,
     load_price_timeseries,
 )
+
+
+STRATEGY_NAME_STR = "strategy_taa_df"
 
 
 @dataclass(frozen=True)
@@ -111,6 +114,7 @@ class DefenseFirstConfig:
 
 
 DEFAULT_CONFIG = DefenseFirstConfig()
+DefenseFirstDataTuple = tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]
 
 
 def default_trade_id_int() -> int:
@@ -464,49 +468,91 @@ class DefenseFirstStrategy(Strategy):
             self.order_target_percent(asset_str, target_weight_float, trade_id=self.current_trade_map[asset_str])
 
 
-if __name__ == "__main__":
-    config = DEFAULT_CONFIG
+def run_defense_first_variant(
+    strategy_name_str: str,
+    config: DefenseFirstConfig,
+    data_loader_fn: Callable[[DefenseFirstConfig], DefenseFirstDataTuple],
+    show_display_bool: bool = True,
+    save_results_bool: bool = True,
+    output_dir_str: str = "results",
+    backtest_start_date_str: str | None = None,
+    capital_base_float: float = 100_000.0,
+) -> DefenseFirstStrategy:
+    execution_price_df, momentum_score_df, month_end_weight_df, rebalance_weight_df = data_loader_fn(config)
 
-    execution_price_df, momentum_score_df, month_end_weight_df, rebalance_weight_df = get_defense_first_data(config)
-
-    strategy = DefenseFirstStrategy(
-        name="strategy_taa_df",
+    strategy_obj = DefenseFirstStrategy(
+        name=strategy_name_str,
         benchmarks=config.benchmark_list,
         rebalance_weight_df=rebalance_weight_df,
         tradeable_asset_list=config.tradeable_asset_list,
-        capital_base=100_000,
+        capital_base=capital_base_float,
         slippage=0.00025,
         commission_per_share=0.005,
         commission_minimum=1.0,
     )
-    strategy.show_taa_weights_report = True
-    # strategy.daily_target_weights = rebalance_weight_df.copy()
-    strategy.daily_target_weights = rebalance_weight_df.reindex(execution_price_df.index).ffill().dropna()
+    strategy_obj.show_taa_weights_report = True
+
+    # *** CRITICAL*** This forward fill is for post-run target-weight reporting
+    # only. Execution still uses the discrete month-to-open rebalance dates in
+    # `rebalance_weight_df` inside `iterate()`.
+    strategy_obj.daily_target_weights = rebalance_weight_df.reindex(execution_price_df.index).ffill().dropna()
+
+    calendar_start_ts = pd.Timestamp(rebalance_weight_df.index[0])
+    if backtest_start_date_str is not None:
+        calendar_start_ts = max(calendar_start_ts, pd.Timestamp(backtest_start_date_str))
+
+    # *** CRITICAL*** Full pre-start data remains loaded for month-end signal
+    # warmup, while executable backtest bars start at the requested fill date.
+    calendar_idx = execution_price_df.index[execution_price_df.index >= calendar_start_ts]
+    run_daily(strategy_obj, execution_price_df, calendar_idx)
+
+    if show_display_bool:
+        pd.set_option("display.max_columns", None)
+        pd.set_option("display.width", 1000)
+
+        print("First momentum scores:")
+        display(momentum_score_df.dropna().head())
+
+        print("First month-end decisions:")
+        display(month_end_weight_df.head())
+
+        print("First rebalance opens:")
+        display(rebalance_weight_df.head())
+
+        display(strategy_obj.summary)
+        display(strategy_obj.summary_trades)
+
+    if save_results_bool:
+        save_results(strategy_obj, output_dir=output_dir_str)
+
+    return strategy_obj
 
 
-    calendar_idx = execution_price_df.index[execution_price_df.index >= rebalance_weight_df.index[0]]
-    run_daily(strategy, execution_price_df, calendar_idx)
+def run_variant(
+    show_display_bool: bool = True,
+    save_results_bool: bool = True,
+    output_dir_str: str = "results",
+    backtest_start_date_str: str | None = None,
+    capital_base_float: float = 100_000.0,
+    end_date_str: str | None = None,
+    config: DefenseFirstConfig = DEFAULT_CONFIG,
+    strategy_name_str: str = STRATEGY_NAME_STR,
+) -> DefenseFirstStrategy:
+    config = config if end_date_str is None else replace(config, end_date_str=end_date_str)
+    return run_defense_first_variant(
+        strategy_name_str=strategy_name_str,
+        config=config,
+        data_loader_fn=get_defense_first_data,
+        show_display_bool=show_display_bool,
+        save_results_bool=save_results_bool,
+        output_dir_str=output_dir_str,
+        backtest_start_date_str=backtest_start_date_str,
+        capital_base_float=capital_base_float,
+    )
 
-    pd.set_option("display.max_columns", None)
-    pd.set_option("display.width", 1000)
 
-    print("First momentum scores:")
-    display(momentum_score_df.dropna().head())
-
-    print("First month-end decisions:")
-    display(month_end_weight_df.head())
-
-    print("First rebalance opens:")
-    display(rebalance_weight_df.head())
-
-    display(strategy.summary)
-    display(strategy.summary_trades)
-
-    save_results(strategy)
-
-
-
-
+if __name__ == "__main__":
+    run_variant()
 
 
 

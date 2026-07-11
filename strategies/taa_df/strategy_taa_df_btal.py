@@ -33,34 +33,30 @@ pre-inception signal history or fills.
 
 from __future__ import annotations
 
+from dataclasses import replace
 import sys
 from pathlib import Path
-
-import pandas as pd
-from IPython.display import display
 
 repo_root_path = Path(__file__).resolve().parents[2]
 repo_root_str = str(repo_root_path)
 if repo_root_str not in sys.path:
     sys.path.insert(0, repo_root_str)
 
-from alpha.engine.backtest import run_daily
-from alpha.engine.report import save_results
-
 try:
     from strategies.taa_df.strategy_taa_df import (
         DefenseFirstConfig,
-        DefenseFirstStrategy,
         get_defense_first_data,
+        run_defense_first_variant,
     )
 except ModuleNotFoundError:
     from strategy_taa_df import (
         DefenseFirstConfig,
-        DefenseFirstStrategy,
         get_defense_first_data,
+        run_defense_first_variant,
     )
 
 
+STRATEGY_NAME_STR = "strategy_taa_df_btal"
 btal_inception_date_str = "2011-09-13"
 effective_start_date_str = btal_inception_date_str
 btal_defensive_asset_list = ("GLD", "UUP", "TLT", "DBC", "BTAL")
@@ -80,42 +76,26 @@ DEFAULT_CONFIG = DefenseFirstConfig(
 )
 
 
+def run_variant(
+    show_display_bool: bool = True,
+    save_results_bool: bool = True,
+    output_dir_str: str = "results",
+    backtest_start_date_str: str | None = None,
+    capital_base_float: float = 100_000.0,
+    end_date_str: str | None = None,
+):
+    config = DEFAULT_CONFIG if end_date_str is None else replace(DEFAULT_CONFIG, end_date_str=end_date_str)
+    return run_defense_first_variant(
+        strategy_name_str=STRATEGY_NAME_STR,
+        config=config,
+        data_loader_fn=get_defense_first_data,
+        show_display_bool=show_display_bool,
+        save_results_bool=save_results_bool,
+        output_dir_str=output_dir_str,
+        backtest_start_date_str=backtest_start_date_str,
+        capital_base_float=capital_base_float,
+    )
+
+
 if __name__ == "__main__":
-    taa_config = DEFAULT_CONFIG
-
-    execution_price_df, momentum_score_df, month_end_weight_df, rebalance_weight_df = (
-        get_defense_first_data(taa_config)
-    )
-
-    strategy = DefenseFirstStrategy(
-        name="strategy_taa_df_btal",
-        benchmarks=taa_config.benchmark_list,
-        rebalance_weight_df=rebalance_weight_df,
-        tradeable_asset_list=taa_config.tradeable_asset_list,
-        capital_base=100_000,
-        slippage=0.00025,
-        commission_per_share=0.005,
-        commission_minimum=1.0,
-    )
-    strategy.show_taa_weights_report = True
-    strategy.daily_target_weights = rebalance_weight_df.reindex(execution_price_df.index).ffill().dropna()
-
-    calendar_idx = execution_price_df.index[execution_price_df.index >= rebalance_weight_df.index[0]]
-    run_daily(strategy, execution_price_df, calendar_idx)
-
-    pd.set_option("display.max_columns", None)
-    pd.set_option("display.width", 1000)
-
-    print("First momentum scores:")
-    display(momentum_score_df.dropna().head())
-
-    print("First month-end decisions:")
-    display(month_end_weight_df.head())
-
-    print("First rebalance opens:")
-    display(rebalance_weight_df.head())
-
-    display(strategy.summary)
-    display(strategy.summary_trades)
-
-    save_results(strategy)
+    run_variant()

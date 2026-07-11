@@ -18,8 +18,9 @@ It binds to `127.0.0.1` only — a single-operator console, not a service.
 - **Strategies** — every `strategies/**/strategy_*.py`, with a ★ WIRED badge for
   the live/supported pods (read from `SUPPORTED_STRATEGY_IMPORT_TUPLE` in
   `alpha/live/release_manifest.py`). Search, filter by family, and see the latest
-  vanilla CAGR / Sharpe / Max DD per strategy. Drop a new strategy file in and it
-  appears automatically.
+  vanilla CAGR / Sharpe / Max DD per strategy. Momentum is split into focused
+  sub-families, and **Recent Runs** shows strategies with mapped result activity
+  in the last 30 days. Drop a new strategy file in and it appears automatically.
 - **Strategy detail** — one-click run buttons (Vanilla / Friction / Timing / Risk
   / Stress, plus *Standard* = V+F+T and *Full* = all five), the full run history
   from `results/`, and the latest report embedded inline.

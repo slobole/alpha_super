@@ -45,6 +45,198 @@ _WEIGHT_STACK_EDGE_COLOR_STR = '#101418'
 _FONT_HEAD_HTML_STR = build_report_font_head_html()
 
 
+METRIC_HELP_TEXT_DICT = {
+    'Duration [days]': 'Number of stored equity observations in the report period.',
+    'Peak [$]': 'Highest portfolio equity observed during the report period.',
+    'Return [%]': 'Total compounded return from starting capital to ending equity.',
+    'Return (Ann.) [%]': 'Compounded annual return using the report\'s 252-trading-day convention.',
+    'Volatility (Ann.) [%]': 'Standard deviation of daily returns annualized by the square root of 252.',
+    'AAR [%]': 'Mean absolute realized daily return, including both positive and negative days.',
+    'Downside L1 [%]': 'Mean daily downside magnitude across all days; non-loss days contribute zero.',
+    'Avg. Loss Day [%]': 'Mean loss magnitude conditional on the strategy having a negative day.',
+    'Sharpe Ratio': (
+        'Mean daily return divided by daily-return standard deviation, multiplied by the square root of 252. '
+        'The risk-free rate is zero.'
+    ),
+    'Exposure Time [%]': (
+        'Percentage of stored days covered by at least one closed-trade interval. '
+        'The engine assumes 100% when no trade history is supplied.'
+    ),
+    'Exposure-Adjusted Return (Ann.) [%]': (
+        'Annualized return divided by the fraction of days marked exposed. '
+        'This binary measure does not account for position size or leverage.'
+    ),
+    'Correlation': (
+        'Pearson correlation of aligned daily returns against the supplied comparison series. '
+        'The engine currently reports 1 when no comparison series is supplied.'
+    ),
+    'Max. Drawdown [%]': 'Largest peak-to-trough decline in the realized equity curve.',
+    'MAR Ratio': 'Annualized return divided by the absolute value of maximum drawdown.',
+    'Time Under Water [%]': 'Percentage of stored days when equity was below its previous running peak.',
+    'Avg. Drawdown [%]': 'Mean trough depth across distinct below-peak drawdown episodes.',
+    'Max. Drawdown Duration [days]': 'Longest number of stored observations in one below-peak episode.',
+    'Avg. Drawdown Duration [days]': 'Mean number of stored observations across below-peak episodes.',
+    '# Drawdowns': 'Number of distinct continuous below-peak episodes in the equity curve.',
+    '# Drawdowns / year': 'Drawdown-episode count divided by stored observations and scaled by 252.',
+    'Total Commissions [$]': (
+        'Modeled commissions already charged to backtest cash and equity; this row attributes that embedded cost.'
+    ),
+    'Turnover (Ann.) [%]': 'Gross traded notional divided by average equity and annualized.',
+    'Estimated Slippage [$]': (
+        'Attribution of slippage already embedded in backtest fills using the configured fixed price-penalty model; '
+        'it is not a liquidity-aware live estimate.'
+    ),
+    'Total Trading Costs [$]': 'Attribution of modeled commissions plus slippage already reflected in backtest equity.',
+    'Cost Drag (Ann.) [%]': (
+        'Modeled trading-cost attribution divided by average equity and annualized; '
+        'it is not the exact difference between gross and net CAGR.'
+    ),
+    'Beta': 'How much benchmark exposure the complete strategy behaved as if it had.',
+    'Alpha (Ann.) [%]': 'Annualized return not explained by estimated benchmark exposure.',
+    'Alpha HAC t-stat': 'Newey-West t-statistic for the estimated regression alpha.',
+    'Alpha (Ann.) / HAC t-stat': (
+        'Annualized zero-rate regression intercept with its Newey-West/HAC t-statistic, which measures '
+        'sampling uncertainty under this regression model and is not adjusted for strategy selection or '
+        'multiple comparisons.'
+    ),
+    'R²': 'Percentage of daily strategy-return variation explained by the benchmark regression.',
+    'Mean Rank IC': (
+        'Mean decision-date Spearman correlation between point-in-time signal ranks known at the decision and '
+        'returns from the first executable price through the configured forecast horizon.'
+    ),
+    'ICIR': (
+        'Mean decision-date information coefficient divided by its standard deviation and annualized using the '
+        'actual decision frequency; interpret together with decision-date and cross-sectional sample counts.'
+    ),
+}
+
+
+_PERFORMANCE_SUMMARY_SECTION_TUPLE = (
+    (
+        'Period & Capital',
+        ('Start', 'End', 'Duration [days]', 'Start [$]', 'Final [$]', 'Peak [$]'),
+        False,
+    ),
+    (
+        'Return & Risk-Adjusted Performance',
+        ('Return [%]', 'Return (Ann.) [%]', 'Volatility (Ann.) [%]', 'Sharpe Ratio', 'MAR Ratio'),
+        False,
+    ),
+    (
+        'Benchmark Regression',
+        ('Beta', 'Alpha (Ann.) [%]', 'Alpha HAC t-stat', 'R²'),
+        False,
+    ),
+    ('Exposure', ('Exposure Time [%]',), False),
+    (
+        'Drawdown & Recovery',
+        (
+            'Max. Drawdown [%]',
+            'Max. Drawdown Duration [days]',
+            'Time Under Water [%]',
+            '# Drawdowns',
+            '# Drawdowns / year',
+        ),
+        False,
+    ),
+    (
+        'Trading Activity & Costs',
+        (
+            'Total Commissions [$]',
+            'Turnover (Ann.) [%]',
+            'Estimated Slippage [$]',
+            'Total Trading Costs [$]',
+            'Cost Drag (Ann.) [%]',
+        ),
+        False,
+    ),
+    (
+        'Extended Risk Diagnostics',
+        (
+            'AAR [%]',
+            'Downside L1 [%]',
+            'Avg. Loss Day [%]',
+            'Avg. Drawdown [%]',
+            'Avg. Drawdown Duration [days]',
+        ),
+        True,
+    ),
+)
+_PERFORMANCE_SUMMARY_HIDDEN_METRIC_SET = frozenset(
+    {'Correlation', 'Exposure-Adjusted Return (Ann.) [%]'}
+)
+
+_METRIC_TOOLTIP_HTML_STR = (
+    '<div id="metric-help-tooltip" class="metric-help-tooltip" role="tooltip" hidden></div>'
+)
+_METRIC_TOOLTIP_SCRIPT_STR = r'''
+<script>
+(() => {
+    const tooltip = document.getElementById('metric-help-tooltip');
+    if (!tooltip) return;
+    document.documentElement.classList.add('metric-tooltip-js-enabled');
+    let pinnedTrigger = null;
+
+    const hideTooltip = () => {
+        document.querySelectorAll('.metric-help[aria-expanded="true"]').forEach((trigger) => {
+            trigger.setAttribute('aria-expanded', 'false');
+            trigger.removeAttribute('aria-describedby');
+        });
+        tooltip.hidden = true;
+        pinnedTrigger = null;
+    };
+
+    const showTooltip = (trigger) => {
+        tooltip.textContent = trigger.dataset.help || '';
+        tooltip.hidden = false;
+        trigger.setAttribute('aria-expanded', 'true');
+        trigger.setAttribute('aria-describedby', 'metric-help-tooltip');
+
+        const triggerRect = trigger.getBoundingClientRect();
+        const tooltipRect = tooltip.getBoundingClientRect();
+        const margin = 8;
+        let left = triggerRect.left + (triggerRect.width - tooltipRect.width) / 2;
+        left = Math.max(margin, Math.min(left, window.innerWidth - tooltipRect.width - margin));
+        let top = triggerRect.bottom + margin;
+        if (top + tooltipRect.height > window.innerHeight - margin) {
+            top = Math.max(margin, triggerRect.top - tooltipRect.height - margin);
+        }
+        tooltip.style.left = `${left}px`;
+        tooltip.style.top = `${top}px`;
+    };
+
+    document.querySelectorAll('.metric-help').forEach((trigger) => {
+        trigger.addEventListener('mouseenter', () => {
+            if (!pinnedTrigger) showTooltip(trigger);
+        });
+        trigger.addEventListener('mouseleave', () => {
+            if (!pinnedTrigger) hideTooltip();
+        });
+        trigger.addEventListener('focus', () => showTooltip(trigger));
+        trigger.addEventListener('blur', () => {
+            if (pinnedTrigger === trigger) pinnedTrigger = null;
+            hideTooltip();
+        });
+        trigger.addEventListener('click', (event) => {
+            event.stopPropagation();
+            if (pinnedTrigger === trigger) {
+                hideTooltip();
+                return;
+            }
+            hideTooltip();
+            pinnedTrigger = trigger;
+            showTooltip(trigger);
+        });
+    });
+    document.addEventListener('click', hideTooltip);
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') hideTooltip();
+    });
+})();
+</script>
+'''
+
+
 def build_research_output_path(
     output_dir: str | Path,
     entity_type_str: str,
@@ -180,6 +372,16 @@ def _summary_metrics_dict(result_obj) -> dict:
             'trade_count': _trade_count_int(
                 getattr(result_obj, 'summary_trades', None),
                 getattr(result_obj, '_trades', None),
+            ),
+            'benchmark_regression': getattr(
+                result_obj,
+                'benchmark_regression_metadata_by_column_dict',
+                None,
+            ),
+            'standalone_benchmark_regression': getattr(
+                result_obj,
+                'standalone_benchmark_regression_metadata_by_column_dict',
+                None,
             ),
         }
     )
@@ -511,7 +713,7 @@ def _format_kpi_value_str(metric_name_str: str, metric_value_obj) -> str:
 def _kpi_value_class_str(metric_name_str: str, metric_value_obj) -> str:
     if metric_value_obj is None:
         return ''
-    if metric_name_str in {'Return [%]', 'Return (Ann.) [%]'}:
+    if metric_name_str in {'Return [%]', 'Return (Ann.) [%]', 'Alpha (Ann.) [%]'}:
         return _signed_value_class_str(metric_value_obj)
     return ''
 
@@ -532,10 +734,13 @@ def _build_kpi_card_html(
     )
 
 
-def _build_kpi_grid_html(summary_df: pd.DataFrame | None, column_name_str: str) -> str:
+def _build_kpi_grid_html(
+    summary_df: pd.DataFrame | None,
+    column_name_str: str,
+    regression_metadata_by_column_dict: dict[str, dict[str, object]] | None = None,
+) -> str:
     """Build the KPI summary row shown beneath the report header."""
     kpi_spec_list = [
-        ('Final [$]', 'Final Value', 'Ending equity'),
         ('Return [%]', 'Total Return', 'Full sample'),
         ('Return (Ann.) [%]', 'Annualized Return', '252-day convention'),
         ('Volatility (Ann.) [%]', 'Volatility', 'Annualized sigma'),
@@ -551,6 +756,33 @@ def _build_kpi_grid_html(summary_df: pd.DataFrame | None, column_name_str: str) 
                 value_str=_format_kpi_value_str(metric_name_str, metric_value_obj),
                 note_str=note_str,
                 value_class_str=_kpi_value_class_str(metric_name_str, metric_value_obj),
+            )
+        )
+    regression_metadata_dict = (regression_metadata_by_column_dict or {}).get(
+        column_name_str,
+        {},
+    )
+    alpha_value_obj = _safe_summary_metric_value(
+        summary_df,
+        column_name_str,
+        'Alpha (Ann.) [%]',
+    )
+    alpha_t_value_obj = _safe_summary_metric_value(
+        summary_df,
+        column_name_str,
+        'Alpha HAC t-stat',
+    )
+    if regression_metadata_dict.get('status_str') == 'ok' and alpha_value_obj is not None:
+        benchmark_label_str = str(regression_metadata_dict.get('benchmark_label_str') or 'Benchmark')
+        alpha_note_str = f'Zero-rate vs {benchmark_label_str}'
+        if alpha_t_value_obj is not None:
+            alpha_note_str += f' · HAC t={float(alpha_t_value_obj):.2f}'
+        kpi_card_html_list.append(
+            _build_kpi_card_html(
+                title_str='Alpha (Ann.)',
+                value_str=_fmt_signed_pct(alpha_value_obj),
+                note_str=html.escape(alpha_note_str),
+                value_class_str=_kpi_value_class_str('Alpha (Ann.) [%]', alpha_value_obj),
             )
         )
     return f'<div class="kpi-grid">{"".join(kpi_card_html_list)}</div>'
@@ -1145,7 +1377,9 @@ def _format_summary(df: pd.DataFrame) -> str:
     headers = '<th>Metric</th>' + ''.join(f'<th>{c}</th>' for c in df.columns)
     rows = []
     for metric in df.index:
-        cells = [f'<td class="metric">{metric}</td>']
+        metric_name_str = str(metric)
+        metric_label_html_str = _metric_label_html(metric_name_str)
+        cells = [f'<td class="metric">{metric_label_html_str}</td>']
         for col in df.columns:
             metric_value_obj = df.loc[metric, col]
             cell_class_str = _summary_metric_cell_class_str(metric, metric_value_obj)
@@ -1153,6 +1387,175 @@ def _format_summary(df: pd.DataFrame) -> str:
             cells.append(f'<td{class_attr_str}>{_fmt_cell(metric, metric_value_obj)}</td>')
         rows.append('<tr>' + ''.join(cells) + '</tr>')
     return f'<table><thead><tr>{headers}</tr></thead><tbody>{"".join(rows)}</tbody></table>'
+
+
+def _metric_label_html(metric_name_str: str) -> str:
+    metric_help_text_str = METRIC_HELP_TEXT_DICT.get(metric_name_str)
+    metric_label_html_str = html.escape(metric_name_str)
+    if metric_help_text_str:
+        escaped_help_text_str = html.escape(metric_help_text_str, quote=True)
+        metric_label_html_str += (
+            f' <button type="button" class="metric-help" '
+            f'aria-label="{html.escape(metric_name_str, quote=True)}: {escaped_help_text_str}" '
+            f'aria-expanded="false" data-help="{escaped_help_text_str}">i</button>'
+        )
+    return metric_label_html_str
+
+
+def _format_benchmark_regression_summary(
+    summary_df: pd.DataFrame,
+    regression_metadata_by_column_dict: dict[str, dict[str, object]] | None,
+) -> str:
+    regression_metadata_by_column_dict = regression_metadata_by_column_dict or {}
+    regression_column_name_list = [
+        column_name_str
+        for column_name_str in summary_df.columns
+        if str(column_name_str) in regression_metadata_by_column_dict
+    ]
+    if len(regression_column_name_list) == 0:
+        regression_column_name_list = list(summary_df.columns)
+    header_html_str = '<th>Metric</th>'
+    for column_name_str in regression_column_name_list:
+        metadata_dict = regression_metadata_by_column_dict.get(str(column_name_str), {})
+        benchmark_label_str = metadata_dict.get('benchmark_label_str') or 'No valid benchmark'
+        benchmark_adjustment_str = metadata_dict.get('benchmark_adjustment_str')
+        benchmark_context_str = (
+            f'{benchmark_label_str} · {benchmark_adjustment_str}'
+            if benchmark_adjustment_str
+            and str(benchmark_adjustment_str) not in str(benchmark_label_str)
+            else str(benchmark_label_str)
+        )
+        if metadata_dict.get('status_str') == 'ok':
+            context_str = (
+                f'{benchmark_context_str} · N={metadata_dict.get("observation_count_int", 0)} '
+                f'· HAC L={metadata_dict.get("hac_max_lag_int", 0)}'
+            )
+        else:
+            reason_str = str(metadata_dict.get('reason_str') or 'unavailable').replace('_', ' ')
+            context_str = f'{benchmark_context_str} · N/A: {reason_str}'
+        header_html_str += (
+            f'<th>{html.escape(str(column_name_str))}'
+            f'<div class="metric-context">{html.escape(context_str)}</div></th>'
+        )
+
+    regression_row_spec_tuple = (
+        ('Beta', 'Beta'),
+        ('Alpha (Ann.) / HAC t-stat', 'alpha_combined'),
+        ('R²', 'R²'),
+    )
+    row_html_list: list[str] = []
+    for display_metric_name_str, source_metric_name_str in regression_row_spec_tuple:
+        cell_html_list = [
+            f'<td class="metric">{_metric_label_html(display_metric_name_str)}</td>'
+        ]
+        for column_name_str in regression_column_name_list:
+            if source_metric_name_str == 'alpha_combined':
+                alpha_value_obj = (
+                    summary_df.loc['Alpha (Ann.) [%]', column_name_str]
+                    if 'Alpha (Ann.) [%]' in summary_df.index
+                    else np.nan
+                )
+                alpha_t_value_obj = (
+                    summary_df.loc['Alpha HAC t-stat', column_name_str]
+                    if 'Alpha HAC t-stat' in summary_df.index
+                    else np.nan
+                )
+                if pd.notna(alpha_value_obj):
+                    alpha_t_value_str = (
+                        _fmt_num(alpha_t_value_obj, 2)
+                        if pd.notna(alpha_t_value_obj)
+                        else 'N/A'
+                    )
+                    value_html_str = f'{_fmt_signed_pct(alpha_value_obj)} / {alpha_t_value_str}'
+                else:
+                    value_html_str = 'N/A'
+            else:
+                value_obj = (
+                    summary_df.loc[source_metric_name_str, column_name_str]
+                    if source_metric_name_str in summary_df.index
+                    else np.nan
+                )
+                value_html_str = _fmt_num(value_obj, 2) if pd.notna(value_obj) else 'N/A'
+            cell_html_list.append(f'<td>{value_html_str}</td>')
+        row_html_list.append('<tr>' + ''.join(cell_html_list) + '</tr>')
+
+    return (
+        '<div class="regression-model-note">Zero-Rate Market Regression</div>'
+        f'<table><thead><tr>{header_html_str}</tr></thead>'
+        f'<tbody>{"".join(row_html_list)}</tbody></table>'
+    )
+
+
+def _format_performance_summary(
+    summary_df: pd.DataFrame,
+    regression_metadata_by_column_dict: dict[str, dict[str, object]] | None = None,
+) -> str:
+    """Render a flat performance summary as consistent named sections."""
+    section_html_list: list[str] = []
+    assigned_metric_name_set: set[str] = set()
+
+    for section_title_str, metric_name_tuple, collapsed_bool in _PERFORMANCE_SUMMARY_SECTION_TUPLE:
+        if section_title_str == 'Benchmark Regression':
+            assigned_metric_name_set.update(metric_name_tuple)
+            regression_table_html_str = _format_benchmark_regression_summary(
+                summary_df,
+                regression_metadata_by_column_dict,
+            )
+            section_html_list.append(
+                '<div class="summary-section">'
+                '<h3>Benchmark Regression</h3>'
+                f'<div class="scroll">{regression_table_html_str}</div>'
+                '</div>'
+            )
+            continue
+        present_metric_name_list = [
+            metric_name_str
+            for metric_name_str in metric_name_tuple
+            if metric_name_str in summary_df.index
+        ]
+        assigned_metric_name_set.update(present_metric_name_list)
+        if len(present_metric_name_list) == 0:
+            continue
+
+        section_table_html_str = _format_summary(summary_df.loc[present_metric_name_list])
+        if collapsed_bool:
+            section_html_list.append(
+                '<details class="summary-details">'
+                f'<summary>{html.escape(section_title_str)}</summary>'
+                f'<div class="scroll">{section_table_html_str}</div>'
+                '</details>'
+            )
+        else:
+            section_html_list.append(
+                '<div class="summary-section">'
+                f'<h3>{html.escape(section_title_str)}</h3>'
+                f'<div class="scroll">{section_table_html_str}</div>'
+                '</div>'
+            )
+
+    unassigned_metric_name_list = [
+        str(metric_name_str)
+        for metric_name_str in summary_df.index
+        if str(metric_name_str) not in assigned_metric_name_set
+        and str(metric_name_str) not in _PERFORMANCE_SUMMARY_HIDDEN_METRIC_SET
+    ]
+    if len(unassigned_metric_name_list) > 0:
+        section_html_list.append(
+            '<div class="summary-section">'
+            '<h3>Other Metrics</h3>'
+            f'<div class="scroll">{_format_summary(summary_df.loc[unassigned_metric_name_list])}</div>'
+            '</div>'
+        )
+
+    return '<div class="summary-section-stack">' + ''.join(section_html_list) + '</div>'
+
+
+def _format_portfolio_summary(
+    df: pd.DataFrame,
+    regression_metadata_by_column_dict: dict[str, dict[str, object]] | None = None,
+) -> str:
+    """Backward-compatible wrapper for callers and focused renderer tests."""
+    return _format_performance_summary(df, regression_metadata_by_column_dict)
 
 
 def _format_summary_trades(df: pd.DataFrame) -> str:
@@ -2488,16 +2891,35 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
             and portfolio.sleeve_summary is not None
             and sleeve_col_name_str in portfolio.sleeve_summary.columns
         ):
+            allocated_regression_metadata_by_column_dict = {
+                sleeve_col_name_str: portfolio.benchmark_regression_metadata_by_column_dict.get(
+                    sleeve_col_name_str,
+                    {},
+                )
+            }
+            allocated_summary_table_html_str = _format_performance_summary(
+                portfolio.sleeve_summary[[sleeve_col_name_str]],
+                allocated_regression_metadata_by_column_dict,
+            )
             allocated_summary_html = (
                 '<h3>Allocated Sleeve Summary</h3>'
-                f'<div class="scroll">{_format_summary(portfolio.sleeve_summary[[sleeve_col_name_str]])}</div>'
+                f'{allocated_summary_table_html_str}'
             )
 
         standalone_summary_html = ''
         if hasattr(s, 'summary') and s.summary is not None:
+            standalone_regression_metadata_by_column_dict = getattr(
+                s,
+                'benchmark_regression_metadata_by_column_dict',
+                {},
+            )
+            standalone_summary_table_html_str = _format_performance_summary(
+                s.summary,
+                standalone_regression_metadata_by_column_dict,
+            )
             standalone_summary_html = (
                 '<h3>Standalone Pod Summary</h3>'
-                f'<div class="scroll">{_format_summary(s.summary)}</div>'
+                f'{standalone_summary_table_html_str}'
             )
 
         pod_sections += _wrap_card_html(
@@ -2520,7 +2942,11 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
         capital_base_obj=capital_base,
         final_value_obj=final_val,
     )
-    kpi_grid_html_str = _build_kpi_grid_html(summ, portfolio.name)
+    kpi_grid_html_str = _build_kpi_grid_html(
+        summ,
+        portfolio.name,
+        portfolio.benchmark_regression_metadata_by_column_dict,
+    )
     pm_allocation_card_html_str = _wrap_card_html(_build_pm_allocation_html(portfolio))
     equity_card_html_str = _wrap_card_html(
         f'''
@@ -2541,7 +2967,7 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
     performance_summary_card_html_str = _wrap_card_html(
         f'''
 <h2>Portfolio Performance Summary</h2>
-<div class="scroll">{_format_summary(summ)}</div>
+{_format_performance_summary(summ, portfolio.benchmark_regression_metadata_by_column_dict)}
 ''',
     )
     monthly_returns_card_html_str = _wrap_card_html(
@@ -2591,6 +3017,8 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
 </head>
 <body>
 {body}
+{_METRIC_TOOLTIP_HTML_STR}
+{_METRIC_TOOLTIP_SCRIPT_STR}
 </body>
 </html>'''
 
@@ -2613,7 +3041,16 @@ def _build_html(strategy, chart_b64: str) -> str:
         capital_base_obj=capital_base,
         final_value_obj=final_val,
     )
-    kpi_grid_html_str = _build_kpi_grid_html(summ, 'Strategy')
+    strategy_regression_metadata_by_column_dict = getattr(
+        strategy,
+        'benchmark_regression_metadata_by_column_dict',
+        {},
+    )
+    kpi_grid_html_str = _build_kpi_grid_html(
+        summ,
+        'Strategy',
+        strategy_regression_metadata_by_column_dict,
+    )
     equity_card_html_str = _wrap_card_html(
         f'''
 <h2>Equity Curve</h2>
@@ -2628,7 +3065,7 @@ def _build_html(strategy, chart_b64: str) -> str:
     performance_summary_card_html_str = _wrap_card_html(
         f'''
 <h2>Performance Summary</h2>
-<div class="scroll">{_format_summary(summ)}</div>
+{_format_performance_summary(summ, strategy_regression_metadata_by_column_dict)}
 ''',
     )
     benchmark_monthly_metric_df, benchmark_label_str = _strategy_monthly_benchmark_metric_bundle(strategy)
@@ -2688,6 +3125,8 @@ def _build_html(strategy, chart_b64: str) -> str:
 </head>
 <body>
 {body}
+{_METRIC_TOOLTIP_HTML_STR}
+{_METRIC_TOOLTIP_SCRIPT_STR}
 </body>
 </html>'''
 

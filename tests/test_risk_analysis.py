@@ -12,12 +12,19 @@ from alpha.engine.risk_analysis import (
     VERDICT_STATUS_NA_STR,
     VERDICT_STATUS_RED_STR,
     RiskAnalysis,
+    RiskAnalysisResult,
+    _observed_percentile_float,
+    _format_metric_value,
+    _path_horizon_metric_dict,
+    _worst_rolling_return_float,
     _band_status_str,
     _build_verdict_row_list,
     build_bootstrap_equity_path_df,
     build_bootstrap_interval_df,
     build_bootstrap_path_metric_df,
     build_horizon_probability_df,
+    build_investor_scenario_df,
+    build_observed_calendar_month_df,
     compute_path_metric_dict,
     extract_realized_return_ser,
     build_return_histogram_df,
@@ -132,6 +139,92 @@ def test_compute_path_metrics_include_monthly_and_time_underwater():
     assert np.isfinite(float(metric_dict["worst_252d_return_float"]))
 
 
+def test_observed_calendar_month_returns_compound_real_months():
+    calendar_idx = pd.to_datetime(
+        ["2020-01-02", "2020-01-03", "2020-02-03", "2020-02-04"]
+    )
+    realized_return_ser = pd.Series(
+        [0.10, -0.05, -0.10, 0.05],
+        index=calendar_idx,
+        name="realized_return_float",
+    )
+
+    calendar_month_df = build_observed_calendar_month_df(realized_return_ser)
+
+    assert calendar_month_df["calendar_month_str"].tolist() == ["2020-01", "2020-02"]
+    assert calendar_month_df["trading_day_count_int"].tolist() == [2, 2]
+    assert calendar_month_df["calendar_month_end_str"].tolist() == [
+        "2020-01-03",
+        "2020-02-04",
+    ]
+    assert calendar_month_df["scheduled_calendar_month_end_str"].tolist() == [
+        "2020-01-31",
+        "2020-02-29",
+    ]
+    assert calendar_month_df["sample_boundary_month_bool"].tolist() == [True, True]
+    assert np.isclose(float(calendar_month_df.iloc[0]["calendar_month_return_float"]), 1.10 * 0.95 - 1.0)
+    assert np.isclose(float(calendar_month_df.iloc[1]["calendar_month_return_float"]), 0.90 * 1.05 - 1.0)
+
+
+def test_path_horizon_metrics_measure_recovery_and_censoring():
+    recovered_metric_dict = _path_horizon_metric_dict(
+        np.array([0.10, -0.20, 0.25], dtype=float),
+        horizon_day_int=3,
+    )
+    assert np.isclose(float(recovered_metric_dict["max_drawdown_float"]), -0.20)
+    assert recovered_metric_dict["max_drawdown_unrecovered_bool"] is False
+    assert np.isclose(float(recovered_metric_dict["max_drawdown_recovery_days_float"]), 2.0)
+    assert np.isclose(float(recovered_metric_dict["longest_underwater_days_float"]), 1.0)
+
+    unrecovered_metric_dict = _path_horizon_metric_dict(
+        np.array([0.10, -0.20, 0.00], dtype=float),
+        horizon_day_int=3,
+    )
+    assert unrecovered_metric_dict["max_drawdown_unrecovered_bool"] is True
+    assert unrecovered_metric_dict["max_drawdown_recovery_days_float"] is None
+    assert np.isclose(float(unrecovered_metric_dict["longest_underwater_days_float"]), 2.0)
+
+    repeated_deepest_metric_dict = _path_horizon_metric_dict(
+        np.array([0.10, -0.20, 0.25, -0.20], dtype=float),
+        horizon_day_int=4,
+    )
+    assert repeated_deepest_metric_dict["max_drawdown_unrecovered_bool"] is True
+    assert repeated_deepest_metric_dict["max_drawdown_recovery_days_float"] is None
+
+    recovered_then_underwater_metric_dict = _path_horizon_metric_dict(
+        np.array([0.10, -0.20, 0.25, -0.05], dtype=float),
+        horizon_day_int=4,
+    )
+    assert recovered_then_underwater_metric_dict["max_drawdown_unrecovered_bool"] is False
+    assert recovered_then_underwater_metric_dict["terminal_underwater_bool"] is True
+
+
+def test_worst_rolling_return_matches_direct_window_products():
+    return_vec = np.array(
+        [0.02, -0.01, 0.03, -0.04, 0.01, 0.005, -0.02],
+        dtype=float,
+    )
+    for window_int in (1, 2, 3, 5, 7):
+        expected_float = min(
+            float(np.prod(1.0 + return_vec[start_int : start_int + window_int]) - 1.0)
+            for start_int in range(return_vec.size - window_int + 1)
+        )
+        actual_float = _worst_rolling_return_float(return_vec, window_int)
+        assert np.isclose(actual_float, expected_float, rtol=1e-12, atol=1e-12)
+
+
+def test_observed_percentile_treats_floating_noise_as_a_tie():
+    bootstrap_metric_ser = pd.Series([0.10 - 1e-15, 0.10 + 1e-15, 0.20])
+
+    percentile_float = _observed_percentile_float(bootstrap_metric_ser, 0.10)
+
+    assert np.isclose(float(percentile_float), 2.0 / 3.0)
+
+
+def test_monthly_sharpe_formats_as_ratio_not_percentage():
+    assert _format_metric_value(1.7906, "monthly_sharpe_float") == "1.79"
+
+
 def _verdict_status_by_label(verdict_row_list):
     return {row_dict["label_str"]: row_dict["status_str"] for row_dict in verdict_row_list}
 
@@ -155,7 +248,7 @@ def test_verdict_bands_classify_expected():
         },
     }
     green_status_dict = _verdict_status_by_label(_build_verdict_row_list(green_summary_dict))
-    assert green_status_dict["Edge"] == VERDICT_STATUS_GREEN_STR
+    assert green_status_dict["Historical resampling"] == VERDICT_STATUS_GREEN_STR
     assert green_status_dict["Drawdown depth"] == VERDICT_STATUS_GREEN_STR
     assert green_status_dict["Time underwater"] == VERDICT_STATUS_GREEN_STR
     assert green_status_dict["Worst year"] == VERDICT_STATUS_GREEN_STR
@@ -165,7 +258,7 @@ def test_verdict_bands_classify_expected():
     capped_summary_dict["primary_intervals"] = dict(green_summary_dict["primary_intervals"])
     capped_summary_dict["primary_intervals"]["sharpe_float"] = {"ci_lower_float": -0.1}
     capped_status_dict = _verdict_status_by_label(_build_verdict_row_list(capped_summary_dict))
-    assert capped_status_dict["Edge"] == VERDICT_STATUS_AMBER_STR
+    assert capped_status_dict["Historical resampling"] == VERDICT_STATUS_AMBER_STR
 
     red_summary_dict = {
         "primary_terminal_loss_probability_float": 0.40,
@@ -177,7 +270,7 @@ def test_verdict_bands_classify_expected():
         },
     }
     red_status_dict = _verdict_status_by_label(_build_verdict_row_list(red_summary_dict))
-    assert red_status_dict["Edge"] == VERDICT_STATUS_RED_STR
+    assert red_status_dict["Historical resampling"] == VERDICT_STATUS_RED_STR
     assert red_status_dict["Drawdown depth"] == VERDICT_STATUS_RED_STR
     assert red_status_dict["Time underwater"] == VERDICT_STATUS_RED_STR
     assert red_status_dict["Worst year"] == VERDICT_STATUS_RED_STR
@@ -275,6 +368,11 @@ def test_horizon_probability_table_counts_positive_constant_sample():
     assert np.isclose(float(one_year_ser["gain_gte_10pct_probability_float"]), 1.0)
     assert np.isclose(float(one_year_ser["gain_gte_50pct_probability_float"]), 1.0)
     assert float(one_year_ser["max_gain_p50_float"]) > 0.50
+    assert float(one_year_ser["terminal_return_p05_float"]) > 0.0
+    assert np.isclose(float(one_year_ser["terminal_loss_probability_float"]), 0.0)
+    assert np.isclose(float(one_year_ser["underwater_ge_12m_probability_float"]), 0.0)
+    assert np.isclose(float(one_year_ser["max_drawdown_unrecovered_probability_float"]), 0.0)
+    assert np.isclose(float(one_year_ser["terminal_underwater_probability_float"]), 0.0)
 
     two_year_ser = horizon_df[horizon_df["horizon_year_int"] == 2].iloc[0]
     assert int(two_year_ser["simulation_path_count_int"]) == 0
@@ -305,6 +403,59 @@ def test_horizon_probability_table_counts_negative_constant_sample():
     assert np.isclose(float(one_year_ser["drawdown_lte_50pct_probability_float"]), 1.0)
     assert np.isclose(float(one_year_ser["gain_gte_10pct_probability_float"]), 0.0)
     assert float(one_year_ser["max_drawdown_p50_float"]) < -0.50
+    assert float(one_year_ser["terminal_return_p95_float"]) < 0.0
+    assert np.isclose(float(one_year_ser["terminal_loss_probability_float"]), 1.0)
+    assert np.isclose(float(one_year_ser["underwater_ge_12m_probability_float"]), 1.0)
+    assert np.isclose(float(one_year_ser["max_drawdown_unrecovered_probability_float"]), 1.0)
+    assert np.isclose(float(one_year_ser["terminal_underwater_probability_float"]), 1.0)
+
+
+def test_investor_scenarios_separate_observed_calendar_and_modeled_month():
+    calendar_idx = pd.date_range("2020-01-01", periods=252 * 5, freq="B")
+    realized_return_ser = pd.Series(
+        [0.001] * (252 * 5),
+        index=calendar_idx,
+        name="realized_return_float",
+    )
+    horizon_df = build_horizon_probability_df(
+        realized_return_ser=realized_return_ser,
+        mean_block_length_int=21,
+        simulation_count_int=4,
+        random_seed_int=7,
+        horizon_year_tuple=(1, 3, 5),
+    )
+
+    investor_scenario_df = build_investor_scenario_df(
+        realized_return_ser=realized_return_ser,
+        horizon_probability_df=horizon_df,
+        mean_block_length_int=21,
+        simulation_count_int=4,
+        random_seed_int=7,
+        investor_horizon_year_tuple=(1, 3, 5),
+    )
+
+    assert investor_scenario_df["scenario_key_str"].tolist() == [
+        "observed_daily",
+        "observed_calendar_month",
+        "modeled_21d",
+        "modeled_1y",
+        "modeled_3y",
+        "modeled_5y",
+    ]
+    observed_month_ser = investor_scenario_df[
+        investor_scenario_df["scenario_key_str"] == "observed_calendar_month"
+    ].iloc[0]
+    modeled_month_ser = investor_scenario_df[
+        investor_scenario_df["scenario_key_str"] == "modeled_21d"
+    ].iloc[0]
+    assert observed_month_ser["evidence_kind_str"] == "observed"
+    assert modeled_month_ser["evidence_kind_str"] == "bootstrap_implied"
+    assert pd.isna(observed_month_ser["horizon_day_int"])
+    assert int(modeled_month_ser["horizon_day_int"]) == 21
+    assert str(investor_scenario_df["horizon_day_int"].dtype) == "Int64"
+    assert str(investor_scenario_df["simulation_path_count_int"].dtype) == "Int64"
+    assert np.isclose(float(modeled_month_ser["terminal_loss_probability_float"]), 0.0)
+    assert float(modeled_month_ser["terminal_return_p05_float"]) > 0.0
 
 
 def test_horizon_probability_table_exercises_default_one_to_five_years():
@@ -375,6 +526,9 @@ def test_risk_analysis_saves_expected_artifacts(tmp_path):
         "bootstrap_path_metrics.csv",
         "bootstrap_metric_intervals.csv",
         "horizon_probabilities.csv",
+        "observed_calendar_months.csv",
+        "investor_scenarios.csv",
+        "investor_summary.json",
         "summary.json",
         "run_info.json",
         "metadata.json",
@@ -391,10 +545,15 @@ def test_risk_analysis_saves_expected_artifacts(tmp_path):
     assert "stress_status_str" not in summary_dict
     assert "var_95_daily_return_float" in summary_dict["observed_metrics"]
     assert summary_dict["horizon_year_list"] == [1, 2, 3, 4, 5]
+    assert summary_dict["schema_version_int"] == 2
+    assert summary_dict["investor_horizon_year_list"] == [1, 3, 5]
+    assert summary_dict["time_underwater_breach_month_list"] == [3, 6, 12, 24]
     assert len(summary_dict["primary_horizon_probabilities"]) == 5
+    assert summary_dict["investor_summary"]["status_str"] == "historically_conditioned_not_forecast"
     first_horizon_dict = summary_dict["primary_horizon_probabilities"][0]
     assert first_horizon_dict["horizon_day_int"] == 252
     assert first_horizon_dict["simulation_path_count_int"] == 0
+    assert isinstance(first_horizon_dict["simulation_path_count_int"], int)
     assert first_horizon_dict["drawdown_lte_10pct_probability_float"] is None
     assert first_horizon_dict["gain_gte_10pct_probability_float"] is None
 
@@ -404,11 +563,116 @@ def test_risk_analysis_saves_expected_artifacts(tmp_path):
     assert "gain_gte_10pct_probability_float" in horizon_df.columns
     assert "max_drawdown_p05_float" in horizon_df.columns
     assert "max_gain_p95_float" in horizon_df.columns
+    assert "terminal_return_p05_float" in horizon_df.columns
+    assert "terminal_loss_probability_float" in horizon_df.columns
+    assert "max_drawdown_unrecovered_probability_float" in horizon_df.columns
+
+    investor_summary_dict = json.loads(
+        (output_path / "investor_summary.json").read_text(encoding="utf-8")
+    )
+    assert investor_summary_dict["month_definition_dict"] == {
+        "modeled_month_str": "21_trading_days",
+        "observed_month_str": "calendar_month",
+    }
+    assert investor_summary_dict["analysis_context_dict"] == {}
+    modeled_month_dict = next(
+        scenario_dict
+        for scenario_dict in investor_summary_dict["scenario_list"]
+        if scenario_dict["scenario_key_str"] == "modeled_21d"
+    )
+    assert isinstance(modeled_month_dict["horizon_day_int"], int)
+    assert isinstance(modeled_month_dict["simulation_path_count_int"], int)
 
     report_html_str = (output_path / "report.html").read_text(encoding="utf-8")
     assert "Horizon Probability Tables" in report_html_str
     assert "Bootstrap-implied horizon probabilities from realized returns." in report_html_str
-    assert "Downside drawdown odds" in report_html_str
-    assert "Upside reach odds" in report_html_str
+    assert "Downside drawdown path shares" in report_html_str
+    assert "Upside reach path shares" in report_html_str
     assert "DD &lt;= -10%" in report_html_str
     assert "Gain &gt;= +10%" in report_html_str
+    assert "Investor Scenario Summary" in report_html_str
+    assert "edge looks real" not in report_html_str.lower()
+    assert "1-in-20 bad case" not in report_html_str.lower()
+
+
+def test_risk_analysis_saves_portfolio_entity_path_and_context(tmp_path):
+    portfolio_obj = _toy_strategy_obj()
+    portfolio_obj.name = "toy_portfolio"
+    analysis_context_dict = {
+        "analysis_status_str": "provisional_research_only",
+        "source_config_path_str": "portfolios/toy.yaml",
+    }
+
+    risk_result_obj = RiskAnalysis(
+        portfolio_obj,
+        source_strategy_ref_str="results/toy_portfolio.pkl",
+        source_entity_type_str="portfolio",
+        analysis_context_dict=analysis_context_dict,
+        output_dir_str=str(tmp_path),
+        save_output_bool=True,
+        primary_mean_block_length_int=2,
+        mean_block_length_tuple=(2,),
+        simulation_count_int=4,
+        random_seed_int=11,
+        horizon_year_tuple=(1,),
+        rolling_loss_window_tuple=(1, 5),
+    ).run()
+
+    output_path = risk_result_obj.output_dir_path
+    assert output_path is not None
+    assert output_path.relative_to(tmp_path).parts[:4] == (
+        "research",
+        "portfolio",
+        "toy_portfolio",
+        RISK_ANALYSIS_TYPE_STR,
+    )
+    run_info_dict = json.loads((output_path / "run_info.json").read_text(encoding="utf-8"))
+    assert run_info_dict["entity_type"] == "portfolio"
+    investor_summary_dict = json.loads(
+        (output_path / "investor_summary.json").read_text(encoding="utf-8")
+    )
+    assert investor_summary_dict["analysis_context_dict"] == analysis_context_dict
+    report_html_str = (output_path / "report.html").read_text(encoding="utf-8")
+    assert "ANALYSIS STATUS: PROVISIONAL RESEARCH ONLY" in report_html_str
+    assert "NOT APPROVED FOR INVESTOR USE" in report_html_str
+
+
+def test_risk_analysis_keeps_legacy_non_datetime_index_usable():
+    strategy_obj = _toy_strategy_obj()
+    strategy_obj.results.index = pd.RangeIndex(len(strategy_obj.results))
+
+    risk_result_obj = RiskAnalysis(
+        strategy_obj,
+        save_output_bool=False,
+        primary_mean_block_length_int=2,
+        mean_block_length_tuple=(2,),
+        simulation_count_int=4,
+        horizon_year_tuple=(1,),
+        rolling_loss_window_tuple=(1, 5),
+    ).run()
+
+    assert risk_result_obj.observed_calendar_month_df.empty
+    observed_month_ser = risk_result_obj.investor_scenario_df[
+        risk_result_obj.investor_scenario_df["scenario_key_str"]
+        == "observed_calendar_month"
+    ].iloc[0]
+    assert int(observed_month_ser["sample_count_int"]) == 0
+
+
+def test_risk_analysis_result_keeps_legacy_output_path_positional_slot(tmp_path):
+    empty_df = pd.DataFrame()
+    output_dir_path = tmp_path / "legacy-output"
+    result_obj = RiskAnalysisResult(
+        "toy",
+        "strategies.toy",
+        pd.Series(dtype=float),
+        empty_df,
+        empty_df,
+        empty_df,
+        empty_df,
+        {},
+        empty_df,
+        output_dir_path,
+    )
+
+    assert result_obj.output_dir_path == output_dir_path

@@ -15,6 +15,8 @@ import numpy as np
 
 from alpha.engine.plot import plot as engine_plot
 from alpha.engine.metrics import (
+    BENCHMARK_REGRESSION_METRIC_NAME_TUPLE,
+    generate_benchmark_regression_metrics,
     generate_overall_metrics,
     generate_trades_metrics,
     generate_monthly_returns,
@@ -38,7 +40,10 @@ class Portfolio:
                  name: str = 'Portfolio', capital_base: float = None,
                  rebalance: str = None, pod_info_list: list[dict] | None = None,
                  rebalance_policy_str: str = 'fixed',
-                 rebalance_inverse_volatility_lookback_day_int: int = None):
+                 rebalance_inverse_volatility_lookback_day_int: int = None,
+                 regression_benchmark_value_ser: pd.Series | None = None,
+                 regression_benchmark_label_str: str | None = None,
+                 regression_benchmark_adjustment_str: str | None = None):
         """
         parameters:
         - strategies: list of Strategy objects that have been run through run_daily().
@@ -102,6 +107,15 @@ class Portfolio:
         )
         self.source_config_path = None
         self.pod_info_list = self._build_pod_info_list(pod_info_list)
+        self.regression_benchmark_value_ser = (
+            None
+            if regression_benchmark_value_ser is None
+            else regression_benchmark_value_ser.astype(float).sort_index().copy()
+        )
+        self.regression_benchmark_label_str = regression_benchmark_label_str
+        self.regression_benchmark_adjustment_str = regression_benchmark_adjustment_str
+        self.benchmark_regression_metadata_by_column_dict: dict[str, dict[str, object]] = {}
+        self.standalone_benchmark_regression_metadata_by_column_dict: dict[str, dict[str, object]] = {}
 
         # populated by _build()
         self.results = None
@@ -464,6 +478,82 @@ class Portfolio:
                 capital_base=strategy_obj._capital_base,
                 total_commissions=standalone_commission_float,
             )
+
+        # *** CRITICAL*** report-only realized-return attribution: PM portfolio
+        # and allocated sleeves use one explicit PM benchmark. Standalone pods
+        # use their own stored strategy benchmark. No series is filled.
+        pm_benchmark_return_ser = None
+        if self.regression_benchmark_value_ser is not None:
+            pm_benchmark_return_ser = self.regression_benchmark_value_ser.pct_change(fill_method=None)
+
+        summary_return_ser_by_column_dict = {
+            self.name: self.results['total_value'].astype(float).pct_change(fill_method=None),
+        }
+        for strategy_idx_int, strategy_obj in enumerate(self.strategies):
+            pct_label_str = f"{self.weights[strategy_idx_int]:.0%}"
+            sleeve_col_name_str = f"{strategy_obj.name} Sleeve ({pct_label_str})"
+            # *** CRITICAL*** transfer-neutral attribution: rebalancing changes
+            # allocated sleeve capital without creating investment return. Use
+            # the overlap-aligned pod return path, not sleeve equity pct_change.
+            summary_return_ser_by_column_dict[sleeve_col_name_str] = (
+                self._aligned_pod_total_value_df[strategy_obj.name]
+                .astype(float)
+                .pct_change(fill_method=None)
+            )
+
+        for column_name_str, entity_return_ser in summary_return_ser_by_column_dict.items():
+            regression_metric_ser, regression_metadata_dict = generate_benchmark_regression_metrics(
+                entity_return_ser,
+                pm_benchmark_return_ser,
+                benchmark_label_str=self.regression_benchmark_label_str,
+                benchmark_adjustment_str=self.regression_benchmark_adjustment_str,
+            )
+            for metric_name_str in BENCHMARK_REGRESSION_METRIC_NAME_TUPLE:
+                self.summary.loc[metric_name_str, column_name_str] = regression_metric_ser.loc[metric_name_str]
+            self.benchmark_regression_metadata_by_column_dict[column_name_str] = regression_metadata_dict
+
+        sleeve_column_name_list = [
+            column_name_str
+            for column_name_str in self.summary.columns
+            if column_name_str != self.name
+        ]
+        self.sleeve_summary = self.summary[sleeve_column_name_list].copy()
+
+        for strategy_idx_int, strategy_obj in enumerate(self.strategies):
+            standalone_col_name_str = f"{strategy_obj.name} Standalone"
+            standalone_total_value_ser = strategy_obj.results.loc[
+                common_idx, 'total_value'
+            ].astype(float)
+            strategy_benchmark_symbol_str = getattr(
+                strategy_obj,
+                '_performance_benchmark_symbol_str',
+                str(strategy_obj._benchmarks[0]) if len(strategy_obj._benchmarks) > 0 else None,
+            )
+            strategy_benchmark_return_ser = None
+            if (
+                strategy_benchmark_symbol_str is not None
+                and strategy_benchmark_symbol_str in strategy_obj.results.columns
+            ):
+                strategy_benchmark_return_ser = strategy_obj.results.loc[
+                    common_idx, strategy_benchmark_symbol_str
+                ].astype(float).pct_change(fill_method=None)
+            regression_metric_ser, regression_metadata_dict = generate_benchmark_regression_metrics(
+                standalone_total_value_ser.pct_change(fill_method=None),
+                strategy_benchmark_return_ser,
+                benchmark_label_str=strategy_benchmark_symbol_str,
+                benchmark_adjustment_str=getattr(
+                    strategy_obj,
+                    '_performance_benchmark_adjustment_str',
+                    'not_declared' if strategy_benchmark_symbol_str is not None else None,
+                ),
+            )
+            for metric_name_str in BENCHMARK_REGRESSION_METRIC_NAME_TUPLE:
+                self.standalone_pod_summary.loc[
+                    metric_name_str, standalone_col_name_str
+                ] = regression_metric_ser.loc[metric_name_str]
+            self.standalone_benchmark_regression_metadata_by_column_dict[
+                standalone_col_name_str
+            ] = regression_metadata_dict
 
         # --- concatenate trades with pod column ---
         all_trades = []

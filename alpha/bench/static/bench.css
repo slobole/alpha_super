@@ -134,7 +134,12 @@ a { color: inherit; text-decoration: none; }
 .search:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .search::placeholder { color: var(--muted-2); }
 
-.filter-bar { display: flex; gap: 6px; flex-wrap: wrap; }
+.filter-stack { display: flex; flex: 3 1 640px; flex-direction: column; gap: 7px; }
+.filter-bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.filter-group-label {
+  padding: 0 4px; color: var(--muted-2); font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
 .filter-chip {
   padding: 7px 12px; border-radius: 999px; font-size: 12px; font-weight: 600;
   background: var(--panel); border: 1px solid var(--border); color: var(--muted);
@@ -143,6 +148,7 @@ a { color: inherit; text-decoration: none; }
 .filter-chip:hover { color: var(--text); border-color: var(--muted-2); }
 .filter-chip.active { background: var(--accent-soft); color: var(--accent-strong); border-color: var(--accent); }
 .filter-chip.wired.active { background: var(--gold-soft); color: var(--gold); border-color: var(--gold); }
+.filter-count { color: var(--muted-2); font-size: 10px; margin-left: 3px; }
 
 /* ── cards ─────────────────────────────────────────────────────────────── */
 
@@ -174,6 +180,7 @@ a { color: inherit; text-decoration: none; }
 }
 .badge-wired { background: var(--gold-soft); color: var(--gold); box-shadow: inset 0 0 0 1px rgba(245,158,11,0.45); }
 .badge-cat { background: var(--panel-2); color: var(--muted); box-shadow: inset 0 0 0 1px var(--border-soft); }
+.badge-subcat { background: var(--accent-soft); color: var(--accent-strong); box-shadow: inset 0 0 0 1px var(--accent); }
 .badge-norun { background: var(--red-soft); color: var(--red); }
 
 /* metric chips */

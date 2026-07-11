@@ -385,6 +385,105 @@ td.metric {{
     background: var(--color-panel);
     white-space: nowrap;
 }}
+.metric-help {{
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 15px;
+    height: 15px;
+    margin-left: 3px;
+    padding: 0;
+    border: 1px solid var(--color-muted);
+    border-radius: 50%;
+    background: transparent;
+    color: var(--color-muted);
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: help;
+    vertical-align: middle;
+}}
+.metric-help:focus {{
+    outline: 2px solid var(--color-strategy);
+    outline-offset: 2px;
+}}
+html:not(.metric-tooltip-js-enabled) .metric-help:hover::after,
+html:not(.metric-tooltip-js-enabled) .metric-help:focus::after {{
+    content: attr(data-help);
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 1000;
+    width: max-content;
+    max-width: min(320px, calc(100vw - 32px));
+    padding: 9px 11px;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    background: var(--color-ink);
+    color: var(--color-panel);
+    box-shadow: 0 4px 12px var(--color-shadow);
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.4;
+    text-align: left;
+    white-space: normal;
+}}
+.metric-help-tooltip {{
+    position: fixed;
+    z-index: 1000;
+    max-width: 320px;
+    padding: 9px 11px;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    background: var(--color-ink);
+    color: var(--color-panel);
+    box-shadow: 0 4px 12px var(--color-shadow);
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.4;
+    white-space: normal;
+}}
+.metric-help-tooltip[hidden] {{
+    display: none;
+}}
+.metric-context {{
+    margin-top: 3px;
+    color: var(--color-muted);
+    font-size: 0.78em;
+    font-weight: 400;
+    white-space: normal;
+}}
+.regression-model-note {{
+    margin-bottom: 8px;
+    color: var(--color-muted);
+    font-size: 0.82em;
+}}
+.summary-section-stack {{
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}}
+.summary-section h3 {{
+    margin-bottom: 8px;
+}}
+.summary-details {{
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    background: var(--color-neutral);
+    padding: 10px 12px;
+}}
+.summary-details summary {{
+    color: var(--color-ink);
+    cursor: pointer;
+    font-size: 0.95em;
+    font-weight: 600;
+}}
+.summary-details[open] summary {{
+    margin-bottom: 10px;
+}}
 td.pos {{
     color: var(--color-profit-dark);
     font-weight: 600;

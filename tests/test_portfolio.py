@@ -195,6 +195,136 @@ class PortfolioTests(unittest.TestCase):
             60.0,
         )
 
+    def test_portfolio_and_allocated_sleeves_share_explicit_pm_regression_benchmark(self):
+        dates_index = pd.bdate_range('2020-01-02', periods=300)
+        benchmark_return_ser = pd.Series(
+            np.linspace(-0.01, 0.01, len(dates_index)),
+            index=dates_index,
+            dtype=float,
+        )
+        benchmark_value_ser = 100.0 * (1.0 + benchmark_return_ser).cumprod()
+        strategy_a = make_strategy(
+            'StrategyA',
+            dates_index,
+            [0.0] + (1.2 * benchmark_return_ser.iloc[1:]).tolist(),
+        )
+        strategy_b = make_strategy(
+            'StrategyB',
+            dates_index,
+            [0.0] + (0.4 * benchmark_return_ser.iloc[1:]).tolist(),
+        )
+
+        portfolio = Portfolio(
+            strategies=[strategy_a, strategy_b],
+            weights=[0.5, 0.5],
+            capital_base=100.0,
+            regression_benchmark_value_ser=benchmark_value_ser,
+            regression_benchmark_label_str='$SPX · TOTALRETURN',
+            regression_benchmark_adjustment_str='TOTALRETURN',
+        )
+
+        expected_column_name_list = [
+            portfolio.name,
+            'StrategyA Sleeve (50%)',
+            'StrategyB Sleeve (50%)',
+        ]
+        for column_name_str in expected_column_name_list:
+            metadata_dict = portfolio.benchmark_regression_metadata_by_column_dict[column_name_str]
+            self.assertEqual(metadata_dict['status_str'], 'ok')
+            self.assertEqual(metadata_dict['benchmark_label_str'], '$SPX · TOTALRETURN')
+            self.assertTrue(np.isfinite(float(portfolio.summary.loc['Beta', column_name_str])))
+        self.assertEqual(
+            portfolio.standalone_benchmark_regression_metadata_by_column_dict[
+                'StrategyA Standalone'
+            ]['reason_str'],
+            'missing_benchmark',
+        )
+
+    def test_rebalanced_sleeve_regression_excludes_pm_cash_transfers(self):
+        dates_index = pd.bdate_range('2020-01-02', periods=320)
+        benchmark_return_ser = pd.Series(
+            np.linspace(-0.005, 0.005, len(dates_index)),
+            index=dates_index,
+            dtype=float,
+        )
+        benchmark_value_ser = 100.0 * (1.0 + benchmark_return_ser).cumprod()
+        strategy_a = make_strategy(
+            'StrategyA',
+            dates_index,
+            [0.0] + (1.5 * benchmark_return_ser.iloc[1:]).tolist(),
+        )
+        strategy_b = make_strategy(
+            'StrategyB',
+            dates_index,
+            [0.0] + (0.25 * benchmark_return_ser.iloc[1:]).tolist(),
+        )
+
+        portfolio = Portfolio(
+            strategies=[strategy_a, strategy_b],
+            weights=[0.5, 0.5],
+            capital_base=100.0,
+            rebalance='monthly',
+            regression_benchmark_value_ser=benchmark_value_ser,
+            regression_benchmark_label_str='$SPX · TOTALRETURN',
+            regression_benchmark_adjustment_str='TOTALRETURN',
+        )
+
+        sleeve_column_name_str = 'StrategyA Sleeve (50%)'
+        sleeve_equity_beta_float = float(
+            np.cov(
+                portfolio._pod_equities['StrategyA'].pct_change(fill_method=None).iloc[1:],
+                benchmark_return_ser.iloc[1:],
+                ddof=1,
+            )[0, 1]
+            / np.var(benchmark_return_ser.iloc[1:], ddof=1)
+        )
+        self.assertAlmostEqual(
+            float(portfolio.summary.loc['Beta', sleeve_column_name_str]),
+            1.5,
+            places=10,
+        )
+        self.assertNotAlmostEqual(sleeve_equity_beta_float, 1.5, places=4)
+
+    def test_sleeve_regression_drops_internal_missing_returns_without_filling(self):
+        dates_index = pd.bdate_range('2020-01-02', periods=320)
+        benchmark_return_ser = pd.Series(
+            np.linspace(-0.005, 0.005, len(dates_index)),
+            index=dates_index,
+            dtype=float,
+        )
+        benchmark_value_ser = 100.0 * (1.0 + benchmark_return_ser).cumprod()
+        strategy_a = make_strategy(
+            'StrategyA',
+            dates_index,
+            [0.0] + (1.5 * benchmark_return_ser.iloc[1:]).tolist(),
+        )
+        strategy_b = make_strategy(
+            'StrategyB',
+            dates_index,
+            [0.0] + (0.25 * benchmark_return_ser.iloc[1:]).tolist(),
+        )
+        strategy_a.results.loc[dates_index[100], 'total_value'] = np.nan
+
+        portfolio = Portfolio(
+            strategies=[strategy_a, strategy_b],
+            weights=[0.5, 0.5],
+            capital_base=100.0,
+            regression_benchmark_value_ser=benchmark_value_ser,
+            regression_benchmark_label_str='$SPX · TOTALRETURN',
+            regression_benchmark_adjustment_str='TOTALRETURN',
+        )
+
+        sleeve_column_name_str = 'StrategyA Sleeve (50%)'
+        metadata_dict = portfolio.benchmark_regression_metadata_by_column_dict[
+            sleeve_column_name_str
+        ]
+        self.assertEqual(metadata_dict['observation_count_int'], 317)
+        self.assertAlmostEqual(
+            float(portfolio.summary.loc['Beta', sleeve_column_name_str]),
+            1.5,
+            places=10,
+        )
+
     def test_buy_and_hold_pod_math_differs_from_daily_rebalanced_shortcut(self):
         dates_index = pd.to_datetime(['2024-01-30', '2024-01-31', '2024-02-03', '2024-02-04'])
         strategy_a = make_strategy('StrategyA', dates_index, [0.0, 1.0, 0.0, 0.0])
