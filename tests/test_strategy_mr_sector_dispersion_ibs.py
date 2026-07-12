@@ -6,6 +6,15 @@ import pandas as pd
 
 from alpha.engine.backtest import run_daily
 from alpha.engine.order import MarketOrder
+from strategies.mean_reversion import strategy_mr_sector_dispersion_ibs_kie as kie_module
+from strategies.mean_reversion import strategy_mr_sector_dispersion_ibs_kie_ihi as kie_ihi_module
+from strategies.mean_reversion import (
+    strategy_mr_sector_dispersion_ibs_kie_ihi_asset_sma200 as kie_ihi_asset_sma_module,
+)
+from strategies.mean_reversion import strategy_mr_sector_dispersion_ibs_kie_ihi_xlc as kie_ihi_xlc_module
+from strategies.mean_reversion import (
+    strategy_mr_sector_dispersion_ibs_kie_ihi_xlc_asset_sma200 as asset_sma_module,
+)
 from strategies.mean_reversion.strategy_mr_sector_dispersion_ibs import (
     DEFAULT_CONFIG,
     ORIGINAL_SYMBOL_TUPLE,
@@ -16,8 +25,11 @@ from strategies.mean_reversion.strategy_mr_sector_dispersion_ibs import (
     UNIVERSE_C_SYMBOL_TUPLE,
     compute_sector_dispersion_ibs_signal_df,
     normalize_universe_name_str,
+    resolve_effective_backtest_start_date_str,
+    resolve_full_basket_calendar_idx,
     resolve_history_start_date_str,
     resolve_universe_symbol_tuple,
+    run_variant,
 )
 
 
@@ -83,13 +95,13 @@ class SectorDispersionIbsStrategyTests(unittest.TestCase):
             config_obj=config_obj,
         )
 
-    def test_default_config_matches_article_basket_and_next_open_translation(self):
+    def test_default_config_uses_unlevered_article_signal_translation(self):
         self.assertEqual(DEFAULT_CONFIG.symbol_tuple, ORIGINAL_SYMBOL_TUPLE)
         self.assertEqual(DEFAULT_CONFIG.entry_ibs_max_float, 0.10)
         self.assertEqual(DEFAULT_CONFIG.exit_ibs_min_float, 0.90)
         self.assertEqual(DEFAULT_CONFIG.range_vol_lookback_day_int, 21)
         self.assertEqual(DEFAULT_CONFIG.min_relative_range_float, 1.0)
-        self.assertAlmostEqual(DEFAULT_CONFIG.portfolio_leverage_float, 1.5)
+        self.assertAlmostEqual(DEFAULT_CONFIG.portfolio_leverage_float, 1.0)
         self.assertAlmostEqual(DEFAULT_CONFIG.slippage_float, 0.00025)
         self.assertAlmostEqual(DEFAULT_CONFIG.commission_per_share_float, 0.00525)
         self.assertEqual(DEFAULT_CONFIG.commission_minimum_float, 0.0)
@@ -137,6 +149,323 @@ class SectorDispersionIbsStrategyTests(unittest.TestCase):
             pd.Timestamp(history_start_date_str),
             pd.Timestamp("2004-01-01"),
         )
+
+    def test_effective_start_honors_explicit_caller_boundary(self):
+        self.assertEqual(
+            resolve_effective_backtest_start_date_str(DEFAULT_CONFIG, "2004-01-01"),
+            "2004-01-01",
+        )
+        self.assertEqual(
+            resolve_effective_backtest_start_date_str(DEFAULT_CONFIG, "2020-01-02"),
+            "2020-01-02",
+        )
+        self.assertEqual(
+            resolve_effective_backtest_start_date_str(DEFAULT_CONFIG, None),
+            "2004-01-01",
+        )
+
+    def test_every_fixed_wrapper_honors_explicit_start_and_earlier_default(self):
+        date_index = pd.bdate_range("2015-01-02", periods=280)
+        neutral_ohlc_dict = self.make_symbol_ohlc_map(
+            log_range_list=[0.01] * len(date_index),
+            ibs_list=[0.50] * len(date_index),
+        )
+        price_map_dict = {
+            symbol_str: neutral_ohlc_dict
+            for symbol_str in UNIVERSE_C_SYMBOL_TUPLE
+        }
+        price_map_dict["$SPX"] = {
+            "Close": [5000.0 + index_int for index_int in range(len(date_index))]
+        }
+        pricing_data_df = self.make_pricing_data_df(price_map_dict, date_index)
+        wrapper_case_list = [
+            ("base", run_variant, False),
+            ("kie", kie_module.run_variant, False),
+            ("kie_ihi", kie_ihi_module.run_variant, False),
+            ("kie_ihi_asset_sma200", kie_ihi_asset_sma_module.run_variant, True),
+            ("kie_ihi_xlc", kie_ihi_xlc_module.run_variant, False),
+            ("asset_sma200", asset_sma_module.run_variant, True),
+        ]
+
+        for wrapper_name_str, run_variant_func, requires_sma200_bool in wrapper_case_list:
+            with self.subTest(wrapper_name_str=wrapper_name_str, mode_str="explicit"):
+                explicit_strategy_obj = run_variant_func(
+                    show_display_bool=False,
+                    save_results_bool=False,
+                    backtest_start_date_str="2004-01-01",
+                    pricing_data_df=pricing_data_df,
+                    audit_override_bool=False,
+                )
+                expected_explicit_start_ts = date_index[
+                    199 if requires_sma200_bool else 21
+                ]
+                self.assertEqual(
+                    explicit_strategy_obj.config_obj.backtest_start_date_str,
+                    "2004-01-01",
+                )
+                self.assertEqual(
+                    explicit_strategy_obj.results.index[0],
+                    expected_explicit_start_ts,
+                )
+
+            with self.subTest(wrapper_name_str=wrapper_name_str, mode_str="default"):
+                default_strategy_obj = run_variant_func(
+                    show_display_bool=False,
+                    save_results_bool=False,
+                    pricing_data_df=pricing_data_df,
+                    audit_override_bool=False,
+                )
+                self.assertEqual(
+                    default_strategy_obj.config_obj.backtest_start_date_str,
+                    "2004-01-01",
+                )
+                self.assertEqual(
+                    default_strategy_obj.config_obj.history_start_date_str,
+                    "2003-01-01",
+                )
+                self.assertEqual(
+                    default_strategy_obj.results.index[0],
+                    date_index[199 if requires_sma200_bool else 21],
+                )
+
+    def test_full_basket_calendar_waits_for_every_symbol_warmup(self):
+        date_index = pd.bdate_range("2024-01-02", periods=10)
+        neutral_ohlc_dict = self.make_symbol_ohlc_map(
+            log_range_list=[0.01] * len(date_index),
+            ibs_list=[0.50] * len(date_index),
+        )
+        delayed_ohlc_dict = {
+            field_str: [np.nan] * 4 + value_list[4:]
+            for field_str, value_list in neutral_ohlc_dict.items()
+        }
+        pricing_data_df = self.make_pricing_data_df(
+            {
+                "AAA": neutral_ohlc_dict,
+                "BBB": neutral_ohlc_dict,
+                "CCC": delayed_ohlc_dict,
+            },
+            date_index=date_index,
+        )
+        config_obj = replace(
+            DEFAULT_CONFIG,
+            symbol_tuple=("AAA", "BBB", "CCC"),
+            backtest_start_date_str=date_index[0].date().isoformat(),
+            range_vol_lookback_day_int=2,
+        )
+
+        calendar_idx = resolve_full_basket_calendar_idx(
+            pricing_data_df=pricing_data_df,
+            config_obj=config_obj,
+        )
+
+        self.assertEqual(calendar_idx[0], date_index[6])
+
+    def test_full_basket_calendar_fails_when_one_etf_never_becomes_ready(self):
+        date_index = pd.bdate_range("2024-01-02", periods=6)
+        neutral_ohlc_dict = self.make_symbol_ohlc_map(
+            log_range_list=[0.01] * len(date_index),
+            ibs_list=[0.50] * len(date_index),
+        )
+        missing_ohlc_dict = {
+            field_str: [np.nan] * len(date_index)
+            for field_str in neutral_ohlc_dict
+        }
+        pricing_data_df = self.make_pricing_data_df(
+            {"AAA": neutral_ohlc_dict, "BBB": missing_ohlc_dict},
+            date_index=date_index,
+        )
+        config_obj = replace(
+            DEFAULT_CONFIG,
+            symbol_tuple=("AAA", "BBB"),
+            backtest_start_date_str=date_index[0].date().isoformat(),
+            range_vol_lookback_day_int=2,
+        )
+
+        with self.assertRaisesRegex(ValueError, "No full-basket Sector Dispersion start"):
+            resolve_full_basket_calendar_idx(
+                pricing_data_df=pricing_data_df,
+                config_obj=config_obj,
+            )
+
+    def test_full_basket_calendar_fails_on_post_start_invalid_ohlc(self):
+        date_index = pd.bdate_range("2024-01-02", periods=8)
+        neutral_ohlc_dict = self.make_symbol_ohlc_map(
+            log_range_list=[0.01] * len(date_index),
+            ibs_list=[0.50] * len(date_index),
+        )
+        broken_ohlc_dict = {
+            field_str: list(value_list)
+            for field_str, value_list in neutral_ohlc_dict.items()
+        }
+        broken_ohlc_dict["Open"][6] = np.nan
+        pricing_data_df = self.make_pricing_data_df(
+            {"AAA": neutral_ohlc_dict, "BBB": broken_ohlc_dict},
+            date_index=date_index,
+        )
+        config_obj = replace(
+            DEFAULT_CONFIG,
+            symbol_tuple=("AAA", "BBB"),
+            backtest_start_date_str=date_index[0].date().isoformat(),
+            range_vol_lookback_day_int=2,
+        )
+
+        with self.assertRaisesRegex(ValueError, "became invalid after the effective start"):
+            resolve_full_basket_calendar_idx(
+                pricing_data_df=pricing_data_df,
+                config_obj=config_obj,
+            )
+
+    def test_full_basket_calendar_allows_integrity_valid_flat_bar_after_start(self):
+        date_index = pd.bdate_range("2024-01-02", periods=8)
+        neutral_ohlc_dict = self.make_symbol_ohlc_map(
+            log_range_list=[0.01] * len(date_index),
+            ibs_list=[0.50] * len(date_index),
+        )
+        flat_ohlc_dict = {
+            field_str: list(value_list)
+            for field_str, value_list in neutral_ohlc_dict.items()
+        }
+        for field_str in ("Open", "High", "Low", "Close"):
+            flat_ohlc_dict[field_str][6] = 100.0
+        pricing_data_df = self.make_pricing_data_df(
+            {"AAA": neutral_ohlc_dict, "BBB": flat_ohlc_dict},
+            date_index=date_index,
+        )
+        config_obj = replace(
+            DEFAULT_CONFIG,
+            symbol_tuple=("AAA", "BBB"),
+            backtest_start_date_str=date_index[0].date().isoformat(),
+            range_vol_lookback_day_int=2,
+        )
+
+        calendar_idx = resolve_full_basket_calendar_idx(pricing_data_df, config_obj)
+
+        self.assertEqual(calendar_idx[0], date_index[2])
+        self.assertIn(date_index[6], calendar_idx)
+
+    def test_full_basket_calendar_rejects_malformed_ohlc_after_start(self):
+        date_index = pd.bdate_range("2024-01-02", periods=8)
+        neutral_ohlc_dict = self.make_symbol_ohlc_map(
+            log_range_list=[0.01] * len(date_index),
+            ibs_list=[0.50] * len(date_index),
+        )
+        malformed_ohlc_dict = {
+            field_str: list(value_list)
+            for field_str, value_list in neutral_ohlc_dict.items()
+        }
+        malformed_ohlc_dict["Close"][6] = malformed_ohlc_dict["High"][6] + 1.0
+        pricing_data_df = self.make_pricing_data_df(
+            {"AAA": neutral_ohlc_dict, "BBB": malformed_ohlc_dict},
+            date_index=date_index,
+        )
+        config_obj = replace(
+            DEFAULT_CONFIG,
+            symbol_tuple=("AAA", "BBB"),
+            backtest_start_date_str=date_index[0].date().isoformat(),
+            range_vol_lookback_day_int=2,
+        )
+
+        with self.assertRaisesRegex(ValueError, "became invalid after the effective start"):
+            resolve_full_basket_calendar_idx(pricing_data_df, config_obj)
+
+    def test_full_basket_calendar_waits_for_readiness_after_configured_start_gap(self):
+        date_index = pd.bdate_range("2024-01-02", periods=12)
+        neutral_ohlc_dict = self.make_symbol_ohlc_map(
+            log_range_list=[0.01] * len(date_index),
+            ibs_list=[0.50] * len(date_index),
+        )
+        gapped_ohlc_dict = {
+            field_str: list(value_list)
+            for field_str, value_list in neutral_ohlc_dict.items()
+        }
+        for field_str in gapped_ohlc_dict:
+            gapped_ohlc_dict[field_str][5] = np.nan
+        pricing_data_df = self.make_pricing_data_df(
+            {"AAA": neutral_ohlc_dict, "BBB": gapped_ohlc_dict},
+            date_index=date_index,
+        )
+        config_obj = replace(
+            DEFAULT_CONFIG,
+            symbol_tuple=("AAA", "BBB"),
+            backtest_start_date_str=date_index[5].date().isoformat(),
+            range_vol_lookback_day_int=2,
+        )
+
+        calendar_idx = resolve_full_basket_calendar_idx(pricing_data_df, config_obj)
+
+        self.assertEqual(calendar_idx[0], date_index[8])
+
+    def test_extra_close_warmup_does_not_require_old_range_rows(self):
+        date_index = pd.bdate_range("2024-01-02", periods=205)
+        neutral_ohlc_dict = self.make_symbol_ohlc_map(
+            log_range_list=[0.01] * len(date_index),
+            ibs_list=[0.50] * len(date_index),
+        )
+        old_flat_ohlc_dict = {
+            field_str: list(value_list)
+            for field_str, value_list in neutral_ohlc_dict.items()
+        }
+        old_flat_ohlc_dict["High"][:100] = old_flat_ohlc_dict["Low"][:100]
+        pricing_data_df = self.make_pricing_data_df(
+            {"AAA": neutral_ohlc_dict, "BBB": old_flat_ohlc_dict},
+            date_index=date_index,
+        )
+        config_obj = replace(
+            DEFAULT_CONFIG,
+            symbol_tuple=("AAA", "BBB"),
+            backtest_start_date_str=date_index[0].date().isoformat(),
+            range_vol_lookback_day_int=2,
+        )
+
+        calendar_idx = resolve_full_basket_calendar_idx(
+            pricing_data_df=pricing_data_df,
+            config_obj=config_obj,
+            required_close_history_observation_count_int=200,
+        )
+
+        self.assertEqual(calendar_idx[0], date_index[199])
+
+    def test_original_and_named_universes_apply_full_basket_gate_in_run_variant(self):
+        date_index = pd.bdate_range("2015-12-01", periods=60)
+        neutral_ohlc_dict = self.make_symbol_ohlc_map(
+            log_range_list=[0.01] * len(date_index),
+            ibs_list=[0.50] * len(date_index),
+        )
+        delayed_symbol_by_universe_dict = {
+            "original": None,
+            "a": "XLC",
+            "b": "IHI",
+            "c": "KIE",
+        }
+        for universe_name_str, delayed_symbol_str in delayed_symbol_by_universe_dict.items():
+            with self.subTest(universe_name_str=universe_name_str):
+                price_map_dict = {}
+                for symbol_str in UNIVERSE_C_SYMBOL_TUPLE:
+                    if symbol_str == delayed_symbol_str:
+                        price_map_dict[symbol_str] = {
+                            field_str: [np.nan] * 4 + value_list[4:]
+                            for field_str, value_list in neutral_ohlc_dict.items()
+                        }
+                    else:
+                        price_map_dict[symbol_str] = neutral_ohlc_dict
+                price_map_dict["$SPX"] = {
+                    "Close": [5000.0 + index_int for index_int in range(len(date_index))]
+                }
+                pricing_data_df = self.make_pricing_data_df(price_map_dict, date_index)
+                strategy_obj = run_variant(
+                    show_display_bool=False,
+                    save_results_bool=False,
+                    backtest_start_date_str="2004-01-01",
+                    universe_name_str=universe_name_str,
+                    pricing_data_df=pricing_data_df,
+                    audit_override_bool=False,
+                )
+                expected_start_ts = (
+                    date_index[21]
+                    if universe_name_str == "original"
+                    else date_index[25]
+                )
+                self.assertEqual(strategy_obj.results.index[0], expected_start_ts)
 
     def test_compute_signals_uses_lagged_range_volatility(self):
         date_index = pd.bdate_range("2024-01-02", periods=6)
@@ -216,7 +545,12 @@ class SectorDispersionIbsStrategyTests(unittest.TestCase):
         self.assertEqual(order_list[1].asset, "BBB")
         self.assertEqual(order_list[1].unit, "shares")
         self.assertTrue(order_list[1].target)
-        self.assertAlmostEqual(order_list[1].amount, 5.0)
+        expected_target_share_float = (
+            float(strategy_obj.previous_total_value)
+            * strategy_obj.target_weight_float
+            / 100.0
+        )
+        self.assertAlmostEqual(order_list[1].amount, expected_target_share_float)
 
     def test_iterate_does_not_rebalance_held_position_without_exit(self):
         strategy_obj = self.make_strategy()

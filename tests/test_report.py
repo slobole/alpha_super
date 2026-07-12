@@ -21,6 +21,7 @@ from alpha.engine.report import (
     _format_portfolio_summary,
     _format_summary,
     _format_trades,
+    _monthly_returns_html,
     _pm_allocation_snapshot_df,
     _prepare_daily_return_distribution_dict,
     _prepare_trade_distribution_dict,
@@ -288,6 +289,17 @@ class ReportFormattingTests(unittest.TestCase):
             report_css_str,
         )
         self.assertIn('content: attr(data-help);', report_css_str)
+        self.assertIn('font-size: 1.18rem;', report_css_str)
+        self.assertIn('background: var(--color-neutral);', report_css_str)
+        self.assertIn('border-left: 4px solid var(--color-strategy-dark);', report_css_str)
+        self.assertIn('color: var(--color-strategy-dark);', report_css_str)
+        h2_rule_str = report_css_str.split('h2 {', 1)[1].split('}', 1)[0]
+        h3_rule_str = report_css_str.split('\nh3 {', 1)[1].split('}', 1)[0]
+        self.assertIn('font-size: 1.18rem;', h2_rule_str)
+        self.assertIn('background: var(--color-neutral);', h2_rule_str)
+        self.assertIn('border-left: 4px solid var(--color-strategy-dark);', h2_rule_str)
+        self.assertIn('font-size: 0.94rem;', h3_rule_str)
+        self.assertNotIn('background:', h3_rule_str)
         self.assertNotIn('<div class="kpi-label">Final Value</div>', report_html_str)
         self.assertEqual(report_html_str.count('<div class="kpi-card">'), 5)
         self.assertIn('Total Return', report_html_str)
@@ -726,14 +738,19 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertIn('<summary>Extended Risk Diagnostics</summary>', performance_summary_html_str)
         self.assertIn('Final [$]', performance_summary_html_str)
         self.assertNotIn('<td class="metric">Correlation ', performance_summary_html_str)
-        self.assertEqual(report_html_str.count('class="summary-section-stack"'), 5)
-        self.assertEqual(report_html_str.count('<h3>Allocated Sleeve Summary</h3>'), 2)
-        self.assertEqual(report_html_str.count('<h3>Standalone Pod Summary</h3>'), 2)
+        self.assertEqual(report_html_str.count('class="summary-section-stack"'), 3)
+        self.assertEqual(
+            report_html_str.count('<h3>Allocated Sleeve Performance — PM Window</h3>'),
+            2,
+        )
         self.assertIn('https://ds-cdn.prod-east.frontend.public.atl-paas.net/assets/font-rules/v5/atlassian-fonts.css', report_html_str)
-        self.assertIn('SPX Ann Ret', report_html_str)
-        self.assertIn('<h2>Pooled Pod Trade Statistics</h2>', report_html_str)
-        self.assertIn('Allocated Sleeve Summary', report_html_str)
-        self.assertIn('Standalone Pod Summary', report_html_str)
+        self.assertNotIn('SPX Ann Ret', report_html_str)
+        self.assertIn('Allocated Sleeve Performance — PM Window', report_html_str)
+        self.assertNotIn('Standalone Pod Summary', report_html_str)
+        self.assertIn('<h2>PM-Window Pod Trade Statistics</h2>', report_html_str)
+        self.assertIn('PM-Window Pod Trade Distribution', report_html_str)
+        self.assertNotIn('<h3>Monthly Returns</h3>', report_html_str)
+        self.assertNotIn('<h3>Trade Statistics</h3>', report_html_str)
         self.assertIn('Common Overlap Window', report_html_str)
         self.assertIn('<h2>PM Allocation Overview</h2>', report_html_str)
         self.assertIn('Construction Policy', report_html_str)
@@ -741,6 +758,48 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertIn('Weight Drift = actual end weight - active target weight', report_html_str)
         self.assertIn('Manual Delta = target capital - current sleeve equity', report_html_str)
         self.assertIn('None (buy-and-hold)', report_html_str)
+        portfolio_monthly_index_int = report_html_str.index('<h2>Portfolio Monthly Returns</h2>')
+        benchmark_monthly_index_int = report_html_str.index(
+            '<h2>Benchmark Portfolio Monthly Returns — Benchmark</h2>'
+        )
+        self.assertLess(portfolio_monthly_index_int, benchmark_monthly_index_int)
+        self.assertIn(
+            'N/A — PM performance benchmark data is unavailable for this reporting window.',
+            report_html_str,
+        )
+
+    def test_portfolio_html_does_not_render_standalone_pod_sentinels(self):
+        portfolio = make_portfolio()
+        for strategy_obj in portfolio.strategies:
+            strategy_obj.summary.loc['Standalone Sentinel', 'Strategy'] = 'DO_NOT_RENDER'
+            strategy_obj.monthly_returns = pd.DataFrame(
+                {'Annual Return': [9.99]},
+                index=pd.Index([2004], name='year'),
+            )
+            strategy_obj.summary_trades = pd.DataFrame(
+                {'All Trades': [9999]},
+                index=['# Trades'],
+            )
+
+        report_html_str = _build_portfolio_html(portfolio, chart_b64='portfolio-chart-b64')
+
+        self.assertNotIn('Standalone Sentinel', report_html_str)
+        self.assertNotIn('DO_NOT_RENDER', report_html_str)
+        self.assertNotIn('<td>2004</td>', report_html_str)
+        self.assertNotIn('9.99', report_html_str)
+        self.assertNotIn('9999', report_html_str)
+
+    def test_portfolio_provenance_distinguishes_requested_and_effective_pod_starts(self):
+        portfolio = make_portfolio()
+        portfolio.pod_info_list[0]['requested_backtest_start_date_str'] = '2004-01-01'
+        portfolio.pod_info_list[0]['effective_backtest_start_date_str'] = '2018-07-19'
+
+        report_html_str = _build_portfolio_html(portfolio, chart_b64='portfolio-chart-b64')
+
+        self.assertIn('<th>Requested Start</th>', report_html_str)
+        self.assertIn('<th>Effective Pod Start</th>', report_html_str)
+        self.assertIn('<td>2004-01-01</td>', report_html_str)
+        self.assertIn('<td>2018-07-19</td>', report_html_str)
 
     def test_build_portfolio_html_includes_tail_risk_diagnostics(self):
         portfolio = make_portfolio()
@@ -751,6 +810,71 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertIn('Tail Correlation Matrix', report_html_str)
         self.assertIn('Tail Summary By Pod', report_html_str)
         self.assertIn('Worst Portfolio Days - Pod Contributions', report_html_str)
+
+    def test_build_portfolio_html_renders_full_benchmark_monthly_returns_card(self):
+        dates_index = pd.bdate_range('2024-01-02', periods=40)
+        benchmark_return_ser = pd.Series(
+            np.linspace(-0.003, 0.004, len(dates_index)),
+            index=dates_index,
+            dtype=float,
+        )
+        benchmark_value_ser = 100.0 * (1.0 + benchmark_return_ser).cumprod()
+        strategy_a = make_strategy([0.0] + [0.001] * 39)
+        strategy_a.name = 'PodA'
+        strategy_a.results.index = dates_index
+        strategy_b = make_strategy([0.0] + [0.002] * 39)
+        strategy_b.name = 'PodB'
+        strategy_b.results.index = dates_index
+        portfolio = Portfolio(
+            strategies=[strategy_a, strategy_b],
+            weights=[0.5, 0.5],
+            capital_base=100_000.0,
+            regression_benchmark_value_ser=benchmark_value_ser,
+            regression_benchmark_label_str='$SPX · TOTALRETURN',
+            regression_benchmark_adjustment_str='TOTALRETURN',
+        )
+
+        report_html_str = _build_portfolio_html(portfolio, chart_b64='portfolio-chart-b64')
+        benchmark_card_start_int = report_html_str.index(
+            '<h2>Benchmark Portfolio Monthly Returns — $SPX · TOTALRETURN</h2>'
+        )
+        benchmark_card_end_int = report_html_str.index(
+            '<h2>Cross-Strategy Diagnostics</h2>'
+        )
+        benchmark_card_html_str = report_html_str[
+            benchmark_card_start_int:benchmark_card_end_int
+        ]
+        portfolio_card_start_int = report_html_str.index('<h2>Portfolio Monthly Returns</h2>')
+        portfolio_card_html_str = report_html_str[
+            portfolio_card_start_int:benchmark_card_start_int
+        ]
+
+        for expected_header_str in (
+            '<th>Jan</th>',
+            '<th>Feb</th>',
+            '<th>Annual Return</th>',
+            '<th>Max Drawdown</th>',
+            '<th>Sharpe Ratio</th>',
+        ):
+            self.assertIn(expected_header_str, benchmark_card_html_str)
+        portfolio_header_html_str = portfolio_card_html_str.split('<thead>', 1)[1].split(
+            '</thead>',
+            1,
+        )[0]
+        benchmark_header_html_str = benchmark_card_html_str.split('<thead>', 1)[1].split(
+            '</thead>',
+            1,
+        )[0]
+        self.assertEqual(benchmark_header_html_str, portfolio_header_html_str)
+        self.assertIn(
+            _monthly_returns_html(portfolio.benchmark_monthly_returns),
+            benchmark_card_html_str,
+        )
+        self.assertNotIn(
+            _monthly_returns_html(portfolio.monthly_returns),
+            benchmark_card_html_str,
+        )
+        self.assertNotIn('N/A — PM performance benchmark data is unavailable', benchmark_card_html_str)
 
     def test_build_portfolio_html_includes_pm_rebalance_targets(self):
         strategy_a = make_strategy([0.0] + [0.01, -0.005] * 20)

@@ -91,7 +91,7 @@ class DefenseFirstConfig:
     benchmark_list: tuple[str, ...] = ("$SPX",)
     rank_weight_vec: tuple[float, ...] = (0.40, 0.30, 0.20, 0.10)
     momentum_lookback_month_vec: tuple[int, ...] = (1, 3, 6, 12)
-    start_date_str: str = "2012-01-01"
+    start_date_str: str = "2000-01-01"
     end_date_str: str | None = None
     dtb3_csv_path_str: str = str(default_dtb3_csv_path)
     dtb3_series_id_str: str = "DTB3"

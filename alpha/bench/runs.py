@@ -32,6 +32,7 @@ RUN_TIMESTAMP_FORMAT_STR = "%Y-%m-%d_%H%M%S"
 ANALYSIS_LABEL_DICT: dict[str, str] = {
     "vanilla_backtest": "Vanilla",
     "friction_analysis": "Friction",
+    "capacity_analysis": "Capacity",
     "execution_timing_analyzer": "Timing",
     "risk_analysis": "Risk",
     "stress_test": "Stress",
@@ -322,8 +323,30 @@ def build_strategy_run_index(strategy_stem_set: set[str] | None = None) -> Strat
     )
 
 
-def scan_portfolio_runs(portfolio_name_str: str) -> list[RunEntry]:
-    return _scan_run_entries(RESEARCH_PORTFOLIO_ROOT_PATH / portfolio_name_str, portfolio_name_str)
+def scan_portfolio_runs(*portfolio_name_str_tuple: str) -> list[RunEntry]:
+    """Read portfolio runs written under any configured portfolio name.
+
+    PortfolioManager writes results below the YAML ``name_str`` while Bench
+    identifies a card by its YAML filename. Most configs use the same value,
+    but both are valid result owners when they differ.
+    """
+    combined_run_entry_list: list[RunEntry] = []
+    seen_rel_dir_set: set[str] = set()
+    seen_name_set: set[str] = set()
+    for portfolio_name_str in portfolio_name_str_tuple:
+        if not portfolio_name_str or portfolio_name_str in seen_name_set:
+            continue
+        seen_name_set.add(portfolio_name_str)
+        for run_obj in _scan_run_entries(
+            RESEARCH_PORTFOLIO_ROOT_PATH / portfolio_name_str,
+            portfolio_name_str,
+        ):
+            if run_obj.rel_dir_from_results_str in seen_rel_dir_set:
+                continue
+            seen_rel_dir_set.add(run_obj.rel_dir_from_results_str)
+            combined_run_entry_list.append(run_obj)
+    combined_run_entry_list.sort(key=_run_sort_key, reverse=True)
+    return combined_run_entry_list
 
 
 def recent_runs(limit_int: int = 12) -> list[RunEntry]:

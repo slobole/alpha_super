@@ -2110,11 +2110,21 @@ def _build_provenance_html(portfolio) -> str:
     """Build a provenance section for portfolio configuration and sources."""
     rows = []
     for pod_info_dict in portfolio.pod_info_list:
+        requested_start_date_str = pod_info_dict.get(
+            "requested_backtest_start_date_str",
+            "",
+        )
+        effective_start_date_str = pod_info_dict.get(
+            "effective_backtest_start_date_str",
+            pod_info_dict.get("backtest_start_date_str", ""),
+        )
         rows.append(
             '<tr>'
             f'<td>{pod_info_dict.get("strategy_name", "")}</td>'
             f'<td>{pod_info_dict.get("weight", 0):.1%}</td>'
             f'<td>{_fmt_dollar(pod_info_dict.get("allocated_capital", ""))}</td>'
+            f'<td>{requested_start_date_str}</td>'
+            f'<td>{effective_start_date_str}</td>'
             f'<td>{pod_info_dict.get("source_pkl", "")}</td>'
             '</tr>'
         )
@@ -2129,7 +2139,8 @@ def _build_provenance_html(portfolio) -> str:
 
     config_path = portfolio.source_config_path or ''
     source_table = (
-        '<table><thead><tr><th>Pod</th><th>Weight</th><th>Allocated Capital</th><th>Source Pickle</th></tr></thead>'
+        '<table><thead><tr><th>Pod</th><th>Weight</th><th>Allocated Capital</th>'
+        '<th>Requested Start</th><th>Effective Pod Start</th><th>Source Pickle</th></tr></thead>'
         f'<tbody>{"".join(rows)}</tbody></table>'
     )
 
@@ -2873,18 +2884,6 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
         pod_name = f"{s.name} ({pct_label})"
         sleeve_col_name_str = f"{s.name} Sleeve ({pct_label})"
 
-        pod_monthly = ''
-        if hasattr(s, 'monthly_returns') and s.monthly_returns is not None:
-            pod_benchmark_monthly_metric_df, pod_benchmark_label_str = _strategy_monthly_benchmark_metric_bundle(s)
-            pod_monthly = (
-                '<h3>Monthly Returns</h3>'
-                f'<div class="scroll">{_monthly_returns_html(s.monthly_returns, pod_benchmark_monthly_metric_df, pod_benchmark_label_str)}</div>'
-            )
-
-        pod_trade_stats = ''
-        if hasattr(s, 'summary_trades') and s.summary_trades is not None and len(s.summary_trades) > 0:
-            pod_trade_stats = f'<h3>Trade Statistics</h3><div class="scroll">{_format_summary_trades(s.summary_trades)}</div>'
-
         allocated_summary_html = ''
         if (
             hasattr(portfolio, 'sleeve_summary')
@@ -2902,33 +2901,14 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
                 allocated_regression_metadata_by_column_dict,
             )
             allocated_summary_html = (
-                '<h3>Allocated Sleeve Summary</h3>'
+                '<h3>Allocated Sleeve Performance — PM Window</h3>'
                 f'{allocated_summary_table_html_str}'
-            )
-
-        standalone_summary_html = ''
-        if hasattr(s, 'summary') and s.summary is not None:
-            standalone_regression_metadata_by_column_dict = getattr(
-                s,
-                'benchmark_regression_metadata_by_column_dict',
-                {},
-            )
-            standalone_summary_table_html_str = _format_performance_summary(
-                s.summary,
-                standalone_regression_metadata_by_column_dict,
-            )
-            standalone_summary_html = (
-                '<h3>Standalone Pod Summary</h3>'
-                f'{standalone_summary_table_html_str}'
             )
 
         pod_sections += _wrap_card_html(
             f'''
-<h2>{pod_name}</h2>
+<h2>Allocated Sleeve — {pod_name}</h2>
 {allocated_summary_html}
-{standalone_summary_html}
-{pod_monthly}
-{pod_trade_stats}
 ''',
             card_class_str='card-pod',
         )
@@ -2977,17 +2957,38 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
 ''',
         card_class_str='card-monthly-returns',
     )
+    benchmark_monthly_returns_df = getattr(portfolio, 'benchmark_monthly_returns', None)
+    benchmark_monthly_label_str = str(
+        getattr(portfolio, 'regression_benchmark_label_str', None)
+        or 'Benchmark'
+    )
+    benchmark_monthly_body_html_str = (
+        f'<div class="scroll">{_monthly_returns_html(benchmark_monthly_returns_df)}</div>'
+        if benchmark_monthly_returns_df is not None and len(benchmark_monthly_returns_df) > 0
+        else '<p>N/A — PM performance benchmark data is unavailable for this reporting window.</p>'
+    )
+    benchmark_monthly_returns_card_html_str = _wrap_card_html(
+        f'''
+<h2>Benchmark Portfolio Monthly Returns — {html.escape(benchmark_monthly_label_str)}</h2>
+{benchmark_monthly_body_html_str}
+''',
+        card_class_str='card-monthly-returns',
+    )
     diagnostics_card_html_str = _wrap_card_html(_build_diagnostics_html(portfolio))
     tail_risk_card_html_str = _wrap_card_html(_build_tail_risk_html(portfolio))
     pod_drift_card_html_str = _wrap_card_html(_portfolio_pod_drift_html(portfolio))
     pooled_trade_stats_card_html_str = _wrap_card_html(
         f'''
-<h2>Pooled Pod Trade Statistics</h2>
-<div class="scroll">{_format_summary_trades(portfolio.summary_trades) if portfolio.summary_trades is not None and len(portfolio.summary_trades) > 0 else '<p>No trades.</p>'}</div>
+<h2>PM-Window Pod Trade Statistics</h2>
+<p>Completed pod trades whose full entry-to-exit lifecycle falls inside the common PM reporting window.</p>
+<div class="scroll">{_format_summary_trades(portfolio.summary_trades) if portfolio.summary_trades is not None and len(portfolio.summary_trades) > 0 else '<p>No completed PM-window trades.</p>'}</div>
 ''',
     )
     pooled_trade_distribution_card_html_str = _wrap_card_html(
-        _build_trade_distribution_html(portfolio._trades, 'Pooled Pod Trade Distribution')
+        _build_trade_distribution_html(
+            portfolio._trades,
+            'PM-Window Pod Trade Distribution',
+        )
     )
 
     body = f'''<div class="report-shell">
@@ -2998,6 +2999,7 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
 {_build_card_grid_html([weight_allocation_card_html_str, provenance_card_html_str])}
 {performance_summary_card_html_str}
 {monthly_returns_card_html_str}
+{benchmark_monthly_returns_card_html_str}
 {diagnostics_card_html_str}
 {tail_risk_card_html_str}
 {pod_drift_card_html_str}

@@ -9,7 +9,6 @@ rebalance:
   policy_str: inverse_volatility
   lookback_day_int: 60
 save_pod_artifacts_bool: true
-regression_benchmark_symbol_str: "$SPX"
 
 pods:
   - pod_id_str: pod_taa

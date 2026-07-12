@@ -7,6 +7,7 @@ import pandas as pd
 import yaml
 
 import alpha.engine.portfolio_manager as portfolio_manager
+from alpha.engine.report import _build_portfolio_html
 
 
 LINEARITY_QQQ_VIX_CASH_IMPORT_STR = (
@@ -24,6 +25,9 @@ SECTOR_DISPERSION_KIE_IHI_XLC_IMPORT_STR = (
 SECTOR_DISPERSION_KIE_IHI_XLC_ASSET_SMA200_IMPORT_STR = (
     "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc_asset_sma200"
 )
+SECTOR_DISPERSION_KIE_IHI_ASSET_SMA200_IMPORT_STR = (
+    "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_asset_sma200"
+)
 
 
 def test_supported_strategy_imports_include_vxn_scaled_ndx_momentum():
@@ -36,6 +40,10 @@ def test_supported_strategy_imports_include_sector_dispersion_mean_reversion_var
         SECTOR_DISPERSION_KIE_IHI_XLC_ASSET_SMA200_IMPORT_STR
         in portfolio_manager.SUPPORTED_STRATEGY_IMPORT_TUPLE
     )
+    assert (
+        SECTOR_DISPERSION_KIE_IHI_ASSET_SMA200_IMPORT_STR
+        in portfolio_manager.SUPPORTED_STRATEGY_IMPORT_TUPLE
+    )
 
 
 def write_dummy_strategy_module(
@@ -45,6 +53,7 @@ def write_dummy_strategy_module(
     return_float: float,
     sleep_seconds_float: float = 0.0,
     raise_message_str: str | None = None,
+    start_offset_business_day_int: int = 0,
 ) -> str:
     module_path = tmp_path / f"{module_name_str}.py"
     raise_line_str = (
@@ -80,7 +89,10 @@ def write_dummy_strategy_module(
             ):
 {raise_line_str}
                 time.sleep({sleep_seconds_float!r})
-                start_ts = pd.Timestamp(backtest_start_date_str)
+                start_ts = (
+                    pd.Timestamp(backtest_start_date_str)
+                    + pd.offsets.BDay({start_offset_business_day_int!r})
+                )
                 date_index = pd.bdate_range(start=start_ts, periods=3)
                 daily_return_ser = pd.Series(
                     [0.0, {return_float!r}, 0.0],
@@ -313,9 +325,17 @@ def test_current_aggressive_config_accepts_promoted_taa_pod():
 
 def test_config_accepts_optional_regression_benchmark_symbol():
     config_dict = make_fixed_config_dict([VXN_SCALED_NDX_IMPORT_STR])
-    config_dict['regression_benchmark_symbol_str'] = '$SPX'
+    config_dict['regression_benchmark_symbol_str'] = '$NDX'
 
     config_obj = portfolio_manager.build_portfolio_manager_config(config_dict)
+
+    assert config_obj.regression_benchmark_symbol_str == '$NDX'
+
+
+def test_config_defaults_pm_performance_benchmark_to_spx():
+    config_obj = portfolio_manager.build_portfolio_manager_config(
+        make_fixed_config_dict([VXN_SCALED_NDX_IMPORT_STR])
+    )
 
     assert config_obj.regression_benchmark_symbol_str == '$SPX'
 
@@ -331,14 +351,19 @@ def test_config_accepts_optional_regression_benchmark_symbol():
         'portfolios/current_multipod_monthly.yaml',
         'portfolios/current_multipod_yearly_inverse_volatility.yaml',
         'portfolios/current_multipod_yearly_rebalanced.yaml',
+        'portfolios/multipod_low_risk.yaml',
+        'portfolios/multipod_monthly.yaml',
+        'portfolios/sector_dispersion_mr_variants.yaml',
+        'portfolios/current_book.yaml',
+        'portfolios/multipod.yaml',
     ],
 )
-def test_tracked_current_pm_configs_declare_spx_regression_benchmark(
+def test_tracked_current_pm_configs_do_not_require_benchmark_declaration(
     config_path_str: str,
 ):
     config_dict = yaml.safe_load(Path(config_path_str).read_text(encoding='utf-8'))
 
-    assert config_dict['regression_benchmark_symbol_str'] == '$SPX'
+    assert 'regression_benchmark_symbol_str' not in config_dict
 
 
 def test_manager_loads_total_return_pm_regression_benchmark(monkeypatch, tmp_path):
@@ -355,7 +380,6 @@ def test_manager_loads_total_return_pm_regression_benchmark(monkeypatch, tmp_pat
         (strategy_import_str,),
     )
     config_dict = make_fixed_config_dict([strategy_import_str])
-    config_dict['regression_benchmark_symbol_str'] = '$SPX'
     config_obj = portfolio_manager.build_portfolio_manager_config(config_dict)
     load_call_dict: dict[str, object] = {'call_count_int': 0}
 
@@ -381,6 +405,51 @@ def test_manager_loads_total_return_pm_regression_benchmark(monkeypatch, tmp_pat
         result_obj.portfolio.name
     ]
     assert portfolio_metadata_dict['reason_str'] == 'insufficient_observations'
+
+
+def test_manager_continues_with_explicit_na_when_pm_benchmark_load_fails(
+    monkeypatch,
+    tmp_path,
+):
+    strategy_import_str = write_dummy_strategy_module(
+        tmp_path,
+        'dummy_pm_missing_regression_benchmark',
+        'StrategyMissingRegression',
+        0.01,
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr(
+        portfolio_manager,
+        'SUPPORTED_STRATEGY_IMPORT_TUPLE',
+        (strategy_import_str,),
+    )
+    config_obj = portfolio_manager.build_portfolio_manager_config(
+        make_fixed_config_dict([strategy_import_str])
+    )
+
+    def failing_load_price_timeseries(*args, **kwargs):
+        raise RuntimeError('benchmark unavailable')
+
+    monkeypatch.setattr(
+        portfolio_manager,
+        'load_price_timeseries',
+        failing_load_price_timeseries,
+    )
+
+    with pytest.warns(RuntimeWarning, match='Portfolio benchmark regression is unavailable'):
+        result_obj = portfolio_manager.PortfolioManager(config_obj).run(
+            save_results_bool=False,
+            show_display_bool=False,
+        )
+
+    assert result_obj.portfolio.regression_benchmark_label_str == '$SPX · TOTALRETURN'
+    assert result_obj.portfolio.benchmark_monthly_returns is None
+    report_html_str = _build_portfolio_html(
+        result_obj.portfolio,
+        chart_b64='portfolio-chart-b64',
+    )
+    assert 'Benchmark Portfolio Monthly Returns — $SPX · TOTALRETURN' in report_html_str
+    assert 'N/A — PM performance benchmark data is unavailable' in report_html_str
 
 
 def test_sector_dispersion_mr_variants_config_loads_named_pods():
@@ -412,6 +481,25 @@ def test_monthly_multipod_config_accepts_sector_dispersion_raw_pod():
     assert (
         strategy_import_by_pod_id_dict["pod_sector_dispersion_kie_ihi_xlc"]
         == SECTOR_DISPERSION_KIE_IHI_XLC_IMPORT_STR
+    )
+
+
+def test_low_risk_no_xlc_config_uses_full_history_sma200_sector_pod():
+    config_obj = portfolio_manager.load_portfolio_manager_config(
+        Path("portfolios/multipod_low_risk_noXLC.yaml")
+    )
+    strategy_import_by_pod_id_dict = {
+        pod_config.pod_id_str: pod_config.strategy_import_str
+        for pod_config in config_obj.pod_config_list
+    }
+
+    assert config_obj.name_str == "multipod_low_risk_no_xlc"
+    assert config_obj.backtest_start_date_str == "2012-10-01"
+    assert (
+        strategy_import_by_pod_id_dict[
+            "pod_mr_sector_dispersion_ibs_kie_ihi_asset_sma200"
+        ]
+        == SECTOR_DISPERSION_KIE_IHI_ASSET_SMA200_IMPORT_STR
     )
 
 
@@ -451,6 +539,7 @@ def test_btal_1n_tqqq_vix_cash_taa_exposes_manager_run_contract():
     [
         SECTOR_DISPERSION_KIE_IHI_XLC_IMPORT_STR,
         SECTOR_DISPERSION_KIE_IHI_XLC_ASSET_SMA200_IMPORT_STR,
+        SECTOR_DISPERSION_KIE_IHI_ASSET_SMA200_IMPORT_STR,
     ],
 )
 def test_sector_dispersion_variants_validate_as_supported_manager_pods(strategy_import_str):
@@ -465,6 +554,7 @@ def test_sector_dispersion_variants_validate_as_supported_manager_pods(strategy_
     [
         SECTOR_DISPERSION_KIE_IHI_XLC_IMPORT_STR,
         SECTOR_DISPERSION_KIE_IHI_XLC_ASSET_SMA200_IMPORT_STR,
+        SECTOR_DISPERSION_KIE_IHI_ASSET_SMA200_IMPORT_STR,
     ],
 )
 def test_sector_dispersion_variants_expose_manager_run_contract(strategy_import_str):
@@ -612,6 +702,7 @@ def test_artifact_metadata_records_pod_and_portfolio_outputs(monkeypatch, tmp_pa
         "dummy_pm_artifacts",
         "StrategyArtifacts",
         0.01,
+        start_offset_business_day_int=5,
     )
     monkeypatch.syspath_prepend(str(tmp_path))
     monkeypatch.setattr(
@@ -658,6 +749,12 @@ def test_artifact_metadata_records_pod_and_portfolio_outputs(monkeypatch, tmp_pa
     metadata_dict = json.loads(result_obj.manager_metadata_path.read_text(encoding="utf-8"))
     assert metadata_dict["artifact_type"] == "portfolio_manager"
     assert metadata_dict["validation_status_str"] == "passed"
+    assert metadata_dict["requested_backtest_start_date_str"] == "2024-01-02"
+    assert metadata_dict["effective_portfolio_start_date_str"] == "2024-01-09"
     assert metadata_dict["portfolio_output_dir_path"].endswith("portfolio_artifact")
     assert metadata_dict["pods"][0]["pod_artifact_dir_path"].endswith("pod_artifact")
+    assert metadata_dict["pods"][0]["requested_backtest_start_date_str"] == "2024-01-02"
+    assert metadata_dict["pods"][0]["effective_backtest_start_date_str"] == "2024-01-09"
     assert result_obj.portfolio.pod_info_list[0]["pod_artifact_dir"].endswith("pod_artifact")
+    assert result_obj.portfolio.pod_info_list[0]["backtest_start_date_str"] == "2024-01-09"
+    assert result_obj.portfolio.pod_info_list[0]["requested_backtest_start_date_str"] == "2024-01-02"

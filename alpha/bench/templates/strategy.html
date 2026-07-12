@@ -21,13 +21,17 @@
   <div class="action-group">
     <span class="action-group-label">Run</span>
     {% for analysis_str in single_analysis_tuple %}
+    {% set analysis_available_bool = analysis_str != 'capacity' or strategy.has_capacity_analysis_bool %}
     <form class="inline" method="post" action="{{ url_for('run_api_fn') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
       <input type="hidden" name="module_import" value="{{ strategy.module_import_str }}">
       <input type="hidden" name="analysis" value="{{ analysis_str }}">
-      <button class="btn btn-sm">{{ analysis_label_dict[analysis_str] }}</button>
+      <button class="btn btn-sm"{% if not analysis_available_bool %} disabled title="Capacity unavailable — missing capacity hook"{% endif %}>{{ analysis_label_dict[analysis_str] }}</button>
     </form>
     {% endfor %}
+    {% if not strategy.has_capacity_analysis_bool %}
+    <span class="muted">Capacity unavailable — missing capacity hook</span>
+    {% endif %}
   </div>
   <div class="action-divider"></div>
   <div class="action-group">
@@ -36,7 +40,7 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
       <input type="hidden" name="module_import" value="{{ strategy.module_import_str }}">
       {% for analysis_str in preset_dict['standard'] %}<input type="hidden" name="analysis" value="{{ analysis_str }}">{% endfor %}
-      <button class="btn btn-sm">Standard · V+F+T</button>
+      <button class="btn btn-sm">Standard · V+C+T</button>
     </form>
     <form class="inline" method="post" action="{{ url_for('run_api_fn') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">

@@ -36,7 +36,6 @@ if repo_root_str not in sys.path:
     sys.path.insert(0, repo_root_str)
 
 from alpha.engine.backtest import run_daily
-from alpha.engine.friction_analysis import FrictionAnalysis
 from alpha.engine.report import save_results
 
 try:
@@ -214,7 +213,7 @@ def run_standard_fallback_variant(
     return strategy
 
 
-def build_standard_fallback_friction_analysis_inputs(
+def build_standard_fallback_capacity_analysis_inputs(
     strategy_name_str: str,
     config: DefenseFirstConfig,
     data_loader_fn: Callable[[DefenseFirstConfig], tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]],
@@ -223,7 +222,7 @@ def build_standard_fallback_friction_analysis_inputs(
     capital_base_float: float = 100_000.0,
 ) -> dict[str, object]:
     """
-    Build FrictionAnalysis inputs for a standard fallback variant.
+    Build CapacityAnalysis inputs for a standard fallback variant.
     """
     execution_price_df, _momentum_score_df, _month_end_weight_df, rebalance_weight_df = data_loader_fn(config)
     strategy_obj = _build_defense_first_strategy(
@@ -233,7 +232,7 @@ def build_standard_fallback_friction_analysis_inputs(
         capital_base_float=capital_base_float,
     )
 
-    # *** CRITICAL *** FrictionAnalysis must reuse the deployment-reference TAA
+    # *** CRITICAL *** CapacityAnalysis must reuse the deployment-reference TAA
     # next-open completed ledger. The month-end signal maps to the next
     # tradable open before auction capacity is assessed.
     _run_strategy_from_weight_df(
@@ -246,39 +245,14 @@ def build_standard_fallback_friction_analysis_inputs(
     if show_display_bool:
         display(strategy_obj.summary)
 
+    strategy_obj._performance_benchmark_symbol_str = str(config.benchmark_list[0])
+    strategy_obj._performance_benchmark_adjustment_str = "TOTALRETURN"
     return {
         "strategy_obj": strategy_obj,
         "pricing_data_df": execution_price_df,
         "execution_policy_str": "MOO",
+        "impact_profile_str": "MOO_ETF_PROXY",
     }
-
-
-def run_standard_fallback_friction_analysis(
-    strategy_name_str: str,
-    config: DefenseFirstConfig,
-    data_loader_fn: Callable[[DefenseFirstConfig], tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]],
-    save_results_bool: bool = True,
-    output_dir_str: str = "results",
-    show_display_bool: bool = False,
-    backtest_start_date_str: str | None = None,
-    capital_base_float: float = 100_000.0,
-):
-    friction_input_dict = build_standard_fallback_friction_analysis_inputs(
-        strategy_name_str=strategy_name_str,
-        config=config,
-        data_loader_fn=data_loader_fn,
-        show_display_bool=show_display_bool,
-        backtest_start_date_str=backtest_start_date_str,
-        capital_base_float=capital_base_float,
-    )
-    friction_analysis_obj = FrictionAnalysis(
-        strategy_obj=friction_input_dict["strategy_obj"],
-        pricing_data_df=friction_input_dict["pricing_data_df"],
-        execution_policy_str=friction_input_dict["execution_policy_str"],
-        output_dir_str=output_dir_str,
-        save_output_bool=save_results_bool,
-    )
-    return friction_analysis_obj.run()
 
 
 def build_standard_fallback_execution_timing_analysis_inputs(

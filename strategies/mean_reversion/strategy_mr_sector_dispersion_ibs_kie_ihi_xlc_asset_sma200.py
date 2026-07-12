@@ -26,8 +26,11 @@ from strategies.mean_reversion.strategy_mr_sector_dispersion_ibs import (
     SectorDispersionIbsConfig,
     SectorDispersionIbsStrategy,
     _write_assumptions_md,
+    build_sector_dispersion_capacity_analysis_inputs,
     compute_sector_dispersion_ibs_signal_df,
     get_sector_dispersion_ibs_data,
+    resolve_effective_backtest_start_date_str,
+    resolve_full_basket_calendar_idx,
     resolve_history_start_date_str,
 )
 
@@ -66,9 +69,28 @@ __all__ = [
     "STRATEGY_NAME_STR",
     "STRATEGY_SYMBOL_TUPLE",
     "SectorDispersionIbsKieIhiXlcAssetSma200Strategy",
+    "build_capacity_analysis_inputs",
     "compute_asset_sma200_filtered_signal_df",
     "run_variant",
 ]
+
+
+def build_capacity_analysis_inputs(
+    capital_base_float: float,
+    show_display_bool: bool = False,
+    backtest_start_date_str: str | None = None,
+    end_date_str: str | None = None,
+) -> dict[str, object]:
+    return build_sector_dispersion_capacity_analysis_inputs(
+        strategy_class=SectorDispersionIbsKieIhiXlcAssetSma200Strategy,
+        strategy_name_str=STRATEGY_NAME_STR,
+        config_obj=DEFAULT_CONFIG,
+        capital_base_float=capital_base_float,
+        show_display_bool=show_display_bool,
+        backtest_start_date_str=backtest_start_date_str,
+        end_date_str=end_date_str,
+        required_close_history_observation_count_int=ASSET_SMA_LOOKBACK_DAY_INT,
+    )
 
 
 def _symbol_close_df(
@@ -185,18 +207,18 @@ def run_variant(
     audit_override_bool: bool | None = None,
 ) -> SectorDispersionIbsKieIhiXlcAssetSma200Strategy:
     config_obj: SectorDispersionIbsConfig = DEFAULT_CONFIG
+    effective_backtest_start_date_str = resolve_effective_backtest_start_date_str(
+        config_obj=config_obj,
+        requested_backtest_start_date_str=backtest_start_date_str,
+    )
     if backtest_start_date_str is not None or capital_base_float is not None or end_date_str is not None:
         config_obj = replace(
             config_obj,
             history_start_date_str=resolve_history_start_date_str(
                 config_obj=config_obj,
-                backtest_start_date_str=backtest_start_date_str,
+                backtest_start_date_str=effective_backtest_start_date_str,
             ),
-            backtest_start_date_str=(
-                config_obj.backtest_start_date_str
-                if backtest_start_date_str is None
-                else backtest_start_date_str
-            ),
+            backtest_start_date_str=effective_backtest_start_date_str,
             capital_base_float=(
                 config_obj.capital_base_float
                 if capital_base_float is None
@@ -215,11 +237,13 @@ def run_variant(
     )
 
     # *** CRITICAL*** Keep pre-start history for both the lagged range scale
-    # and SMA200 gate, but execute only on and after backtest_start_date_str.
-    # Orders still fill at the next bar open under the Vanilla engine contract.
-    calendar_idx = pricing_data_df.index[
-        pricing_data_df.index >= pd.Timestamp(config_obj.backtest_start_date_str)
-    ]
+    # and SMA200 gate. Execution begins only when every fixed-basket ETF has a
+    # complete causal SMA200 history; orders still fill at Open T+1.
+    calendar_idx = resolve_full_basket_calendar_idx(
+        pricing_data_df=pricing_data_df,
+        config_obj=config_obj,
+        required_close_history_observation_count_int=ASSET_SMA_LOOKBACK_DAY_INT,
+    )
     run_daily(
         strategy_obj,
         pricing_data_df,

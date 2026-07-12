@@ -1,6 +1,6 @@
-name_str: multipod_low_risk
+name_str: multipod_low_risk_no_xlc
 capital_base_float: 100000.0
-backtest_start_date_str: "2016-01-01"
+backtest_start_date_str: "2012-10-01"
 end_date_str: null
 allocation_policy_str: fixed
 max_workers_int: null
@@ -12,6 +12,6 @@ pods:
     strategy_import_str: strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash
     weight_float: 0.5
 
-  - pod_id_str: pod_mr_sector_dispersion_ibs_kie_ihi_xlc_asset_sma200
-    strategy_import_str: strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc_asset_sma200
+  - pod_id_str: pod_mr_sector_dispersion_ibs_kie_ihi_asset_sma200
+    strategy_import_str: strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_asset_sma200
     weight_float: 0.5

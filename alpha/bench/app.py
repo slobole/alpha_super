@@ -42,18 +42,18 @@ RUN_PORTFOLIO_SCRIPT_PATH = REPO_ROOT_PATH / "strategies" / "run_portfolio.py"
 RUN_PORTFOLIO_MANAGER_SCRIPT_PATH = REPO_ROOT_PATH / "strategies" / "run_portfolio_manager.py"
 REPORT_TOOLTIP_SCRIPT_SHA256_BASE64_STR = "4x6jPzYq7ERLrCfTtOFnnJrgm6t+NFxUP+8hnzmKgAY="
 
-SUPPORTED_ANALYSIS_TUPLE = ("vanilla", "friction", "timing", "risk", "stress")
+SUPPORTED_ANALYSIS_TUPLE = ("vanilla", "capacity", "timing", "risk", "stress")
 ANALYSIS_LABEL_DICT = {
     "vanilla": "Vanilla",
-    "friction": "Friction",
+    "capacity": "Capacity",
     "timing": "Timing",
     "risk": "Risk",
     "stress": "Stress",
 }
 # Quick presets surfaced as one-click buttons on each strategy.
 RUN_PRESET_DICT = {
-    "standard": ("vanilla", "friction", "timing"),
-    "full": ("vanilla", "friction", "timing", "risk", "stress"),
+    "standard": ("vanilla", "capacity", "timing"),
+    "full": ("vanilla", "capacity", "timing", "risk", "stress"),
 }
 RECENT_RUN_WINDOW_DAY_INT = 30
 RECENT_RUN_TABLE_LIMIT_INT = 8
@@ -159,7 +159,10 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
         portfolio_entry_list = catalog.list_portfolios()
         portfolio_view_list = []
         for portfolio_entry_obj in portfolio_entry_list:
-            run_entry_list = runs.scan_portfolio_runs(portfolio_entry_obj.name_str)
+            run_entry_list = runs.scan_portfolio_runs(
+                portfolio_entry_obj.name_str,
+                portfolio_entry_obj.config_name_str,
+            )
             latest_report_run_obj = next(
                 (run_obj for run_obj in run_entry_list if run_obj.has_report_bool), None
             )
@@ -224,6 +227,14 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
         invalid_analysis_list = [a for a in analysis_list if a not in SUPPORTED_ANALYSIS_TUPLE]
         if invalid_analysis_list:
             abort(400, description=f"Unknown analysis: {', '.join(invalid_analysis_list)}")
+        if (
+            analysis_list == ["capacity"]
+            and not strategy_entry_obj.has_capacity_analysis_bool
+        ):
+            abort(
+                400,
+                description="Capacity unavailable — missing capacity hook.",
+            )
 
         command_list = [
             sys.executable,

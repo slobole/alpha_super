@@ -255,6 +255,38 @@ class DefenseFirstStrategyTests(unittest.TestCase):
                 self.assertEqual(strategy_obj._capital_base, 12345.0)
                 self.assertGreaterEqual(strategy_obj.results.index.min(), pd.Timestamp("2020-03-02"))
 
+    def test_leveraged_fallback_modules_expose_vanilla_with_valid_start_dates(self):
+        variant_case_tuple = (
+            ("strategies.taa_df.strategy_taa_df_sso", "strategy_taa_df_sso", "SSO", "2006-06-21"),
+            ("strategies.taa_df.strategy_taa_df_upro", "strategy_taa_df_upro", "UPRO", "2009-06-25"),
+            ("strategies.taa_df.strategy_taa_df_tqqq", "strategy_taa_df_tqqq", "TQQQ", "2010-02-11"),
+        )
+
+        for module_import_str, strategy_name_str, fallback_asset_str, inception_date_str in variant_case_tuple:
+            with self.subTest(module_import_str=module_import_str):
+                variant_module = importlib.import_module(module_import_str)
+                captured_config_list = []
+
+                def standard_loader_fn(config):
+                    captured_config_list.append(config)
+                    return make_standard_loader_output(config)
+
+                with patch.object(variant_module, "get_defense_first_data", side_effect=standard_loader_fn):
+                    strategy_obj = variant_module.run_variant(
+                        show_display_bool=False,
+                        save_results_bool=False,
+                        backtest_start_date_str="2020-03-02",
+                        capital_base_float=12345.0,
+                        end_date_str="2020-03-31",
+                    )
+
+                self.assertEqual(variant_module.DEFAULT_CONFIG.fallback_asset, fallback_asset_str)
+                self.assertEqual(variant_module.DEFAULT_CONFIG.start_date_str, inception_date_str)
+                self.assertEqual(captured_config_list[0].end_date_str, "2020-03-31")
+                self.assertEqual(strategy_obj.name, strategy_name_str)
+                self.assertEqual(strategy_obj._capital_base, 12345.0)
+                self.assertGreaterEqual(strategy_obj.results.index.min(), pd.Timestamp("2020-03-02"))
+
 
 if __name__ == "__main__":
     unittest.main()

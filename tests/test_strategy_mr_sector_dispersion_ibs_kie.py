@@ -29,6 +29,8 @@ class SectorDispersionIbsKieStrategyTests(unittest.TestCase):
             open_vec = close_vec.copy()
         else:
             open_vec = np.array(open_list, dtype=float)
+        high_vec = np.maximum(high_vec, open_vec)
+        low_vec = np.minimum(low_vec, open_vec)
         return {
             "Open": open_vec.tolist(),
             "High": high_vec.tolist(),
@@ -53,11 +55,14 @@ class SectorDispersionIbsKieStrategyTests(unittest.TestCase):
         pricing_data_df.columns = pd.MultiIndex.from_tuples(pricing_data_df.columns)
         return pricing_data_df
 
-    def make_kie_signal_pricing_data_tuple(self) -> tuple[pd.DataFrame, pd.DatetimeIndex, int, int]:
-        date_index = pd.bdate_range("2024-01-02", periods=25)
+    def make_kie_signal_pricing_data_tuple(
+        self,
+        period_count_int: int = 25,
+        signal_day_int: int = 22,
+        fill_day_int: int = 23,
+    ) -> tuple[pd.DataFrame, pd.DatetimeIndex, int, int]:
+        date_index = pd.bdate_range("2024-01-02", periods=period_count_int)
         log_range_list = [0.010 + 0.001 * index_int for index_int in range(len(date_index))]
-        signal_day_int = 22
-        fill_day_int = 23
         log_range_list[signal_day_int] = 0.120
         neutral_ibs_list = [0.50] * len(date_index)
         kie_ibs_list = [0.50] * len(date_index)
@@ -90,7 +95,7 @@ class SectorDispersionIbsKieStrategyTests(unittest.TestCase):
         self.assertEqual(STRATEGY_SYMBOL_TUPLE, ("SOXX", "IGV", "IBB", "KIE"))
         self.assertEqual(DEFAULT_CONFIG.symbol_tuple, STRATEGY_SYMBOL_TUPLE)
         self.assertEqual(DEFAULT_CONFIG.benchmark_symbol_str, "$SPX")
-        self.assertAlmostEqual(DEFAULT_CONFIG.portfolio_leverage_float, 1.5)
+        self.assertAlmostEqual(DEFAULT_CONFIG.portfolio_leverage_float, 1.0)
 
     def test_run_variant_uses_kie_basket_and_next_open_fill(self):
         pricing_data_df, date_index, signal_day_int, fill_day_int = (
@@ -109,6 +114,7 @@ class SectorDispersionIbsKieStrategyTests(unittest.TestCase):
         transaction_df = strategy_obj.get_transactions().reset_index(drop=True)
         self.assertEqual(strategy_obj.name, STRATEGY_NAME_STR)
         self.assertEqual(strategy_obj.symbol_tuple, STRATEGY_SYMBOL_TUPLE)
+        self.assertEqual(strategy_obj.results.index[0], date_index[21])
         self.assertEqual(len(transaction_df), 1)
         entry_row_ser = transaction_df.iloc[0]
         expected_target_share_float = (
@@ -156,6 +162,28 @@ class SectorDispersionIbsKieStrategyTests(unittest.TestCase):
             "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie",
         )
         self.assertEqual(metadata_dict["class_name"], "SectorDispersionIbsKieStrategy")
+
+    def test_run_variant_waits_for_delayed_kie_history(self):
+        pricing_data_df, date_index, _signal_day_int, _fill_day_int = (
+            self.make_kie_signal_pricing_data_tuple(
+                period_count_int=30,
+                signal_day_int=26,
+                fill_day_int=27,
+            )
+        )
+        for field_str in ("Open", "High", "Low", "Close"):
+            pricing_data_df.loc[date_index[:4], ("KIE", field_str)] = np.nan
+
+        strategy_obj = run_variant(
+            show_display_bool=False,
+            save_results_bool=False,
+            backtest_start_date_str=date_index[0].date().isoformat(),
+            capital_base_float=100_000.0,
+            pricing_data_df=pricing_data_df,
+            audit_override_bool=False,
+        )
+
+        self.assertEqual(strategy_obj.results.index[0], date_index[25])
 
 
 if __name__ == "__main__":

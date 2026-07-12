@@ -38,7 +38,7 @@ PORTFOLIOS_ROOT_PATH = REPO_ROOT_PATH / "portfolios"
 # title-cased version of the folder name, so a brand-new family still renders.
 CATEGORY_LABEL_DICT: dict[str, str] = {
     "dv2": "DV2 mean-reversion",
-    "mean_reversion": "Mean Reversion",
+    "mean_reversion": "Sector Dispersion",
     "qpi": "QPI mean-reversion",
     "taa_df": "TAA dual-momentum",
     "momentum": "Momentum",
@@ -88,6 +88,7 @@ class StrategyEntry:
     rel_path_str: str  # posix path relative to the repo root
     is_wired_bool: bool
     has_run_variant_bool: bool
+    has_capacity_analysis_bool: bool
     summary_str: str  # first line of the module docstring (may be empty)
 
 
@@ -109,7 +110,7 @@ SCHEMA_MANAGER_STR = "manager"
 
 @dataclass(frozen=True)
 class PortfolioEntry:
-    name_str: str  # file stem — also the results-tree run name
+    name_str: str  # YAML filename stem used by the Bench card
     config_name_str: str  # the name field inside the YAML
     rel_path_str: str  # posix path relative to the repo root
     schema_str: str  # SCHEMA_SIMPLE_STR | SCHEMA_MANAGER_STR
@@ -175,8 +176,8 @@ def _wired_module_set() -> set[str]:
 
 
 @lru_cache(maxsize=1024)
-def _parse_strategy_source(path_str: str, mtime_ns_int: int) -> tuple[str, bool]:
-    """Return ``(first_docstring_line, has_run_variant)`` for a strategy file.
+def _parse_strategy_source(path_str: str, mtime_ns_int: int) -> tuple[str, bool, bool]:
+    """Return docstring and analysis-hook availability for a strategy file.
 
     Cached on ``(path, mtime_ns)`` so edits invalidate the entry automatically.
     Parsing is best-effort: a syntactically broken file degrades to no summary
@@ -191,7 +192,7 @@ def _parse_strategy_source(path_str: str, mtime_ns_int: int) -> tuple[str, bool]
         source_str = Path(path_str).read_bytes().decode("utf-8-sig", errors="replace")
         module_ast = ast.parse(source_str)
     except (OSError, SyntaxError, ValueError):
-        return ("", False)
+        return ("", False, False)
 
     docstring_str = ast.get_docstring(module_ast) or ""
     first_line_str = ""
@@ -204,7 +205,16 @@ def _parse_strategy_source(path_str: str, mtime_ns_int: int) -> tuple[str, bool]
         isinstance(node_obj, (ast.FunctionDef, ast.AsyncFunctionDef)) and node_obj.name == "run_variant"
         for node_obj in module_ast.body
     )
-    return (first_line_str, has_run_variant_bool)
+    has_capacity_analysis_bool = any(
+        isinstance(node_obj, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node_obj.name == "build_capacity_analysis_inputs"
+        for node_obj in module_ast.body
+    )
+    return (
+        first_line_str,
+        has_run_variant_bool,
+        has_capacity_analysis_bool,
+    )
 
 
 def list_strategies() -> list[StrategyEntry]:
@@ -218,7 +228,7 @@ def list_strategies() -> list[StrategyEntry]:
 
     for module_path in sorted(STRATEGIES_ROOT_PATH.rglob("strategy_*.py")):
         module_import_str = _module_import_str(module_path)
-        summary_str, has_run_variant_bool = _parse_strategy_source(
+        summary_str, has_run_variant_bool, has_capacity_analysis_bool = _parse_strategy_source(
             str(module_path), module_path.stat().st_mtime_ns
         )
         category_str = (
@@ -237,6 +247,7 @@ def list_strategies() -> list[StrategyEntry]:
                 rel_path_str=_rel_posix_str(module_path),
                 is_wired_bool=module_import_str in wired_module_set,
                 has_run_variant_bool=has_run_variant_bool,
+                has_capacity_analysis_bool=has_capacity_analysis_bool,
                 summary_str=summary_str,
             )
         )

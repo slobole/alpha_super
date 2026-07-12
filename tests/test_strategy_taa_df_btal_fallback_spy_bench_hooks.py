@@ -103,7 +103,7 @@ def test_btal_fallback_spy_honors_bench_run_contract():
     assert strategy_obj.results.index.min() >= pd.Timestamp("2020-03-02")
 
 
-def test_btal_fallback_spy_exposes_friction_inputs_for_bench():
+def test_btal_fallback_spy_exposes_capacity_inputs_for_bench():
     variant_module = importlib.import_module(MODULE_IMPORT_STR)
 
     with patch.object(
@@ -111,19 +111,19 @@ def test_btal_fallback_spy_exposes_friction_inputs_for_bench():
         "get_defense_first_data",
         side_effect=make_standard_loader_output,
     ):
-        friction_input_dict = variant_module.build_friction_analysis_inputs(
+        capacity_input_dict = variant_module.build_capacity_analysis_inputs(
             show_display_bool=False,
             backtest_start_date_str="2020-03-02",
             capital_base_float=12345.0,
             end_date_str="2020-03-31",
         )
 
-    strategy_obj = friction_input_dict["strategy_obj"]
+    strategy_obj = capacity_input_dict["strategy_obj"]
     assert strategy_obj.name == "strategy_taa_df_btal_fallback_spy"
     assert strategy_obj._capital_base == 12345.0
     assert strategy_obj.results.index.min() >= pd.Timestamp("2020-03-02")
-    assert friction_input_dict["execution_policy_str"] == "MOO"
-    assert isinstance(friction_input_dict["pricing_data_df"], pd.DataFrame)
+    assert capacity_input_dict["execution_policy_str"] == "MOO"
+    assert isinstance(capacity_input_dict["pricing_data_df"], pd.DataFrame)
 
 
 def test_btal_fallback_spy_exposes_execution_timing_inputs_for_bench():

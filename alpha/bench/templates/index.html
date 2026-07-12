@@ -27,7 +27,6 @@
     {% endfor %}
     </div>
     <div class="filter-bar momentum-filter-bar">
-      <span class="filter-group-label">Momentum</span>
       {% for subcategory_str, subcategory_label_str, strategy_count_int in momentum_subcategory_tuple_list %}
         <span class="filter-chip" data-filter="subcat:{{ subcategory_str }}">{{ subcategory_label_str }} <span class="filter-count">{{ strategy_count_int }}</span></span>
       {% endfor %}

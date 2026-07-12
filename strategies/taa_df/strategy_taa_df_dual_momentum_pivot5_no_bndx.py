@@ -15,8 +15,7 @@ from strategies.taa_df.strategy_taa_df_dual_momentum_pivot5 import (
     DualMomentumPivot5Config,
     DualMomentumPivot5Strategy,
     build_execution_timing_analysis_inputs as _base_build_execution_timing_analysis_inputs,
-    build_friction_analysis_inputs as _base_build_friction_analysis_inputs,
-    run_friction_analysis as _base_run_friction_analysis,
+    build_capacity_analysis_inputs as _base_build_capacity_analysis_inputs,
     run_variant as _base_run_variant,
 )
 
@@ -46,33 +45,13 @@ def run_variant(
     )
 
 
-def build_friction_analysis_inputs(
+def build_capacity_analysis_inputs(
     show_display_bool: bool = False,
     backtest_start_date_str: str | None = None,
     capital_base_float: float = NO_BNDX_CONFIG.capital_base_float,
     end_date_str: str | None = None,
 ) -> dict[str, object]:
-    return _base_build_friction_analysis_inputs(
-        show_display_bool=show_display_bool,
-        backtest_start_date_str=backtest_start_date_str,
-        capital_base_float=capital_base_float,
-        end_date_str=end_date_str,
-        config=NO_BNDX_CONFIG,
-        strategy_name_str=STRATEGY_NAME_STR,
-    )
-
-
-def run_friction_analysis(
-    save_results_bool: bool = True,
-    output_dir_str: str = "results",
-    show_display_bool: bool = False,
-    backtest_start_date_str: str | None = None,
-    capital_base_float: float = NO_BNDX_CONFIG.capital_base_float,
-    end_date_str: str | None = None,
-):
-    return _base_run_friction_analysis(
-        save_results_bool=save_results_bool,
-        output_dir_str=output_dir_str,
+    return _base_build_capacity_analysis_inputs(
         show_display_bool=show_display_bool,
         backtest_start_date_str=backtest_start_date_str,
         capital_base_float=capital_base_float,

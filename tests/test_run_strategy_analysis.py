@@ -20,12 +20,12 @@ def _install_fake_strategy_module(monkeypatch, module_name_str: str, hook_name_t
     return fake_module_obj
 
 
-def test_strategy_analysis_runs_vanilla_and_friction_then_skips_missing_timing(monkeypatch, capsys):
+def test_strategy_analysis_runs_vanilla_and_capacity_then_skips_missing_timing(monkeypatch, capsys):
     module_name_str = "test_fake_analysis_strategy"
     _install_fake_strategy_module(
         monkeypatch,
         module_name_str,
-        ("run_variant", "run_friction_analysis"),
+        ("run_variant", "build_capacity_analysis_inputs"),
     )
     command_list = []
 
@@ -47,7 +47,7 @@ def test_strategy_analysis_runs_vanilla_and_friction_then_skips_missing_timing(m
         module_name_str,
     ]
     assert "strategies\\run_strategy.py" in command_list[0][1]
-    assert "strategies\\run_friction_analysis.py" in command_list[1][1]
+    assert "strategies\\run_capacity_analysis.py" in command_list[1][1]
     assert "missing strategy hook: build_execution_timing_analysis_inputs(...)" in capsys.readouterr().out
 
 
@@ -82,7 +82,7 @@ def test_strategy_analysis_runs_timing_when_hook_exists(monkeypatch):
         module_name_str,
         (
             "run_variant",
-            "run_friction_analysis",
+            "build_capacity_analysis_inputs",
             "build_execution_timing_analysis_inputs",
         ),
     )
@@ -150,7 +150,7 @@ def test_strategy_analysis_forwards_strategy_kwargs_to_vanilla_only(monkeypatch)
     _install_fake_strategy_module(
         monkeypatch,
         module_name_str,
-        ("run_variant", "run_friction_analysis"),
+        ("run_variant", "build_capacity_analysis_inputs"),
     )
     command_list = []
 
@@ -162,7 +162,7 @@ def test_strategy_analysis_forwards_strategy_kwargs_to_vanilla_only(monkeypatch)
 
     return_code_int, result_list = analysis_runner.run_strategy_analysis(
         strategy_ref_str="fake.py",
-        analysis_tuple=("vanilla", "friction"),
+        analysis_tuple=("vanilla", "capacity"),
         strategy_kwarg_tuple=("market_cap_csv_path_str=C:\\data\\pit_market_cap.csv",),
     )
 
@@ -211,7 +211,7 @@ def test_strategy_analysis_stops_after_failure_without_keep_going(monkeypatch):
     _install_fake_strategy_module(
         monkeypatch,
         module_name_str,
-        ("run_variant", "run_friction_analysis"),
+        ("run_variant", "build_capacity_analysis_inputs"),
     )
     command_list = []
 
@@ -223,7 +223,7 @@ def test_strategy_analysis_stops_after_failure_without_keep_going(monkeypatch):
 
     return_code_int, result_list = analysis_runner.run_strategy_analysis(
         strategy_ref_str="fake.py",
-        analysis_tuple=("vanilla", "friction"),
+        analysis_tuple=("vanilla", "capacity"),
     )
 
     assert return_code_int == 1
@@ -243,6 +243,21 @@ def test_strategy_analysis_returns_zero_when_everything_is_skipped(monkeypatch):
     assert [result_obj.status_str for result_obj in result_list] == ["SKIP"]
 
 
+def test_strategy_analysis_records_missing_capacity_hook_as_skip(monkeypatch, capsys):
+    _install_fake_strategy_module(
+        monkeypatch,
+        "test_fake_no_capacity_strategy",
+        ("run_variant",),
+    )
+    return_code_int, result_list = analysis_runner.run_strategy_analysis(
+        strategy_ref_str="fake.py",
+        analysis_tuple=("capacity",),
+    )
+    assert return_code_int == 0
+    assert [result_obj.status_str for result_obj in result_list] == ["SKIP"]
+    assert "missing strategy hook: build_capacity_analysis_inputs(...)" in capsys.readouterr().out
+
+
 def test_unique_analysis_tuple_keeps_requested_order_without_duplicates():
     assert analysis_runner._unique_analysis_tuple(["timing", "vanilla", "timing"]) == (
         "timing",
@@ -258,7 +273,7 @@ def test_wired_strategy_modules_expose_all_analysis_hooks():
 
     hook_tuple = (
         "run_variant",
-        "run_friction_analysis",
+        "build_capacity_analysis_inputs",
         "build_execution_timing_analysis_inputs",
     )
     missing_hook_dict = {}

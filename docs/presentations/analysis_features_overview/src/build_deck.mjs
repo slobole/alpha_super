@@ -394,10 +394,10 @@ function inventorySlide() {
             "Question: what breaks in known shocks?",
           ),
           featureCard(
-            "FrictionAnalysis",
+            "CapacityAnalysis",
             C.purple,
             "Auction capacity and cost proxy overlay.",
-            "strategies/run_friction_analysis.py",
+            "strategies/run_capacity_analysis.py",
             "Question: are orders believable at scale?",
           ),
           panel(
@@ -428,7 +428,7 @@ function inventorySlide() {
         labeledText("Important caveat", "None of these tools turns a backtest into live readiness by itself.", C.red),
       ]),
     ],
-    { accent: C.teal, footer: "Core code paths: alpha/engine/backtester.py, portfolio.py, execution_timing.py, crisis.py, friction_analysis.py" },
+    { accent: C.teal, footer: "Core code paths: alpha/engine/backtester.py, portfolio.py, execution_timing.py, crisis.py, capacity_analysis.py" },
   );
 }
 
@@ -653,56 +653,56 @@ function stressSlide() {
   );
 }
 
-function frictionSlide() {
+function capacitySlide() {
   simpleSlide(
-    "FrictionAnalysis",
-    "Order realism overlay for auction capacity and cost",
-    "It reads completed orders and pricing data. It does not change fills, PnL, sizing, or Vanilla reports.",
+    "CapacityAnalysis",
+    "AUM curve for auction liquidity and deployable capital",
+    "It reruns real strategy sizing at each AUM, then applies the declared MOO or MOC capacity policy.",
     [
       grid(
         { width: fill, height: fixed(600), columns: [fr(1), fr(1)], columnGap: 58 },
         [
           column({ width: fill, height: hug, gap: 24 }, [
             command(
-              "uv run python strategies/run_friction_analysis.py dv2/strategy_mr_dv2.py",
-              "The strategy must expose run_friction_analysis(...).",
+              "uv run python strategies/run_capacity_analysis.py dv2/strategy_mr_dv2.py",
+              "The strategy must expose build_capacity_analysis_inputs(...).",
               C.black,
             ),
             labeledText(
               "Core calculation",
-              "auction_proxy_t = lagged 20-day median dollar ADV * auction_fraction. participation_t = abs(order_notional_t) / auction_proxy_t.",
+              "q_t = abs(order_notional_t) / min(lagged 10d mean ADV, lagged 20d median ADV).",
               C.purple,
             ),
             compactTable(
               ["Policy", "Assumption"],
               [
-                ["MOO", "2% of lagged dollar ADV proxy"],
-                ["MOC", "10% of lagged dollar ADV proxy"],
-                ["Default cost", "2.5 bps plus commission model"],
-                ["Impact", "adverse proxy, not broker truth"],
+                ["MOO", "2.5 bps plus 0.05% / 0.10% ADV limits"],
+                ["MOC", "max(2.5 bps, square-root impact)"],
+                ["Default cost", "Already inside each baseline backtest"],
+                ["Output", "Recommended, Outer, Break-even"],
               ],
               [0.75, 1.8],
               { rowHeight: 50, bodyFontSize: 16, headerFill: C.purple },
             ),
           ]),
           column({ width: fill, height: hug, gap: 22 }, [
-            t("Example: NDX VXN scaled friction run", { fontSize: 27, bold: true }),
+            t("Capacity report", { fontSize: 27, bold: true }),
             grid({ width: fill, height: hug, columns: [fr(1), fr(1)], columnGap: 34, rowGap: 28 }, [
-              metric("Watch", "Friction verdict", "auction verdict: Stressed", C.amber),
-              metric("3,126", "Orders", "$303.7M assessed", C.blue),
-              metric("8.64%", "Auction p95", "participation proxy", C.red),
-              metric("-0.12 pp", "Return impact", "18.07% to 17.95%", C.purple),
+              metric("$X", "Recommended", "fully supported grid point", C.green),
+              metric("$Y", "Outer", "stretch, not target", C.amber),
+              metric("P95 / P99", "Order / ADV", "against soft and hard limits", C.red),
+              metric("3 charts", "Visual report", "performance, liquidity, breaches", C.purple),
             ]),
             labeledText(
               "Boundary",
-              "No rescale, no retrade, no fill changes. This is a diagnostic overlay only.",
+              "CapacityAnalysis is report-only, but each AUM is a full strategy rerun rather than a scaled PnL shortcut.",
               C.red,
             ),
           ]),
         ],
       ),
     ],
-    { accent: C.purple, footer: "Code: alpha/engine/friction_analysis.py, strategies/run_friction_analysis.py" },
+    { accent: C.purple, footer: "Code: alpha/engine/capacity_analysis.py, strategies/run_capacity_analysis.py" },
   );
 }
 
@@ -718,7 +718,7 @@ function artifactsSlide() {
           column({ width: fill, height: hug, gap: 24 }, [
             command(
               "results/research/{entity_type}/{entity_id}/{analysis_type}/{timestamp}/",
-              "Example: results/research/strategy/strategy_mr_dv2/friction_analysis/...",
+              "Example: results/research/strategy/strategy_mr_dv2/capacity_analysis/...",
               C.black,
             ),
             compactTable(
@@ -727,7 +727,7 @@ function artifactsSlide() {
                 ["vanilla_backtest", "strategy or portfolio"],
                 ["execution_timing_analyzer", "strategy"],
                 ["stress_analysis", "strategy"],
-                ["friction_analysis", "strategy"],
+                ["capacity_analysis", "strategy"],
               ],
               [1.25, 1.3],
               { rowHeight: 54, bodyFontSize: 17 },
@@ -748,7 +748,7 @@ function artifactsSlide() {
             ),
             labeledText(
               "Why it helps",
-              "A future review can tell whether a number came from Vanilla, timing, stress, portfolio, or friction work.",
+              "A future review can tell whether a number came from Vanilla, timing, stress, portfolio, or capacity work.",
               C.teal,
             ),
           ]),
@@ -772,7 +772,7 @@ function runbookSlide() {
           ["Is performance timing fragile?", "ExecutionTimingAnalyzer", "risk labels and timing matrices"],
           ["Does it survive known shocks?", "Stress Replay", "crisis_metrics.csv and paths"],
           ["Do pods diversify?", "Portfolio Analysis", "correlation and tail contribution"],
-          ["Are orders believable?", "FrictionAnalysis", "verdict, p95 participation, scale limits"],
+          ["How much capital is deployable?", "CapacityAnalysis", "AUM curve, limits, capacity estimates"],
         ],
         [1.5, 1.0, 1.55],
         { rowHeight: 66, bodyFontSize: 17 },
@@ -802,7 +802,7 @@ function bottomLineSlide() {
           column({ width: fill, height: hug, gap: 28 }, [
             labeledText(
               "Mature surfaces",
-              "Vanilla reports, portfolio aggregation, FrictionAnalysis, and the artifact tree are directly wired.",
+              "Vanilla reports, portfolio aggregation, CapacityAnalysis, and the artifact tree are directly wired.",
               C.green,
             ),
             labeledText(
@@ -825,7 +825,7 @@ function bottomLineSlide() {
                 ["Engine timing preserved?", "Vanilla vs timing"],
                 ["Stress reviewed?", "Crisis replay"],
                 ["Pod math realistic?", "Independent compounding"],
-                ["Execution scale believable?", "FrictionAnalysis"],
+                ["Execution scale believable?", "CapacityAnalysis"],
               ],
               [1.3, 1.0],
               { rowHeight: 54, bodyFontSize: 17 },
@@ -844,7 +844,7 @@ vanillaSlide();
 portfolioSlide();
 timingSlide();
 stressSlide();
-frictionSlide();
+capacitySlide();
 artifactsSlide();
 runbookSlide();
 bottomLineSlide();

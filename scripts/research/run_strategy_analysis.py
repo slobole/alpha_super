@@ -2,7 +2,7 @@
 Run a strategy's research analyses from one command.
 
 This is an orchestration CLI only. It delegates to the existing Vanilla,
-FrictionAnalysis, ExecutionTimingAnalyzer, RiskAnalysis, and StressTestAnalyzer
+CapacityAnalysis, ExecutionTimingAnalyzer, RiskAnalysis, and StressTestAnalyzer
 CLIs without changing strategy or execution semantics.
 """
 
@@ -25,18 +25,18 @@ from strategies.run_strategy import _resolve_strategy_module_import_str
 from alpha.engine.stress_test import supported_stress_test_strategy_key_list
 
 ANALYSIS_VANILLA_STR = "vanilla"
-ANALYSIS_FRICTION_STR = "friction"
+ANALYSIS_CAPACITY_STR = "capacity"
 ANALYSIS_TIMING_STR = "timing"
 ANALYSIS_RISK_STR = "risk"
 ANALYSIS_STRESS_STR = "stress"
 DEFAULT_ANALYSIS_TUPLE = (
     ANALYSIS_VANILLA_STR,
-    ANALYSIS_FRICTION_STR,
+    ANALYSIS_CAPACITY_STR,
     ANALYSIS_TIMING_STR,
 )
 SUPPORTED_ANALYSIS_TUPLE = (
     ANALYSIS_VANILLA_STR,
-    ANALYSIS_FRICTION_STR,
+    ANALYSIS_CAPACITY_STR,
     ANALYSIS_TIMING_STR,
     ANALYSIS_RISK_STR,
     ANALYSIS_STRESS_STR,
@@ -85,7 +85,7 @@ def _missing_hook_detail_str(strategy_module_obj, analysis_str: str) -> str | No
 
     hook_by_analysis_dict = {
         ANALYSIS_VANILLA_STR: "run_variant",
-        ANALYSIS_FRICTION_STR: "run_friction_analysis",
+        ANALYSIS_CAPACITY_STR: "build_capacity_analysis_inputs",
         ANALYSIS_TIMING_STR: "build_execution_timing_analysis_inputs",
         ANALYSIS_RISK_STR: "run_variant",
     }
@@ -128,10 +128,10 @@ def _analysis_command_tuple(
             command_list.extend(["--strategy-kwarg", strategy_kwarg_str])
         return tuple(command_list)
 
-    if analysis_str == ANALYSIS_FRICTION_STR:
+    if analysis_str == ANALYSIS_CAPACITY_STR:
         command_list = [
             sys.executable,
-            str(REPO_ROOT_PATH / "strategies" / "run_friction_analysis.py"),
+            str(REPO_ROOT_PATH / "strategies" / "run_capacity_analysis.py"),
             module_import_str,
             "--output-dir",
             output_dir_str,
@@ -306,7 +306,7 @@ def main() -> None:
         "--analysis",
         action="append",
         choices=SUPPORTED_ANALYSIS_TUPLE,
-        help="Analysis to run. Repeat for a subset. Defaults to vanilla, friction, and timing.",
+        help="Analysis to run. Repeat for a subset. Defaults to vanilla, capacity, and timing.",
     )
     parser.add_argument(
         "--output-dir",
@@ -321,7 +321,7 @@ def main() -> None:
     parser.add_argument(
         "--show-display",
         action="store_true",
-        help="Let strategy and friction analyses print their verbose displays.",
+        help="Let strategy and capacity analyses print their verbose displays.",
     )
     parser.add_argument(
         "--show-signal-progress",

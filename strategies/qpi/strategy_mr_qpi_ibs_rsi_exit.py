@@ -46,7 +46,6 @@ import talib
 from IPython.display import display
 
 from alpha.engine.backtest import run_daily
-from alpha.engine.friction_analysis import FrictionAnalysis
 from alpha.engine.report import save_results
 from alpha.engine.strategy import Strategy
 from alpha.indicators import ibs_indicator, qp_indicator
@@ -138,7 +137,7 @@ def build_execution_timing_analysis_inputs() -> dict[str, object]:
     }
 
 
-def build_friction_analysis_inputs(
+def build_capacity_analysis_inputs(
     show_display_bool: bool = False,
     backtest_start_date_str: str = "2004-01-01",
     capital_base_float: float = 100_000.0,
@@ -165,7 +164,7 @@ def build_friction_analysis_inputs(
     strategy_obj.trade_id_int = 0
     strategy_obj.current_trade_map = defaultdict(default_trade_id_int)
 
-    # *** CRITICAL *** FrictionAnalysis must assess the same completed order
+    # *** CRITICAL *** CapacityAnalysis must assess the same completed order
     # ledger as the deployment-reference QPI backtest. Keep pre-start history
     # for QPI/IBS/RSI features, but execute only on the configured calendar.
     calendar_idx = pricing_data_df.index[
@@ -180,10 +179,13 @@ def build_friction_analysis_inputs(
     )
 
     strategy_obj.universe_df = None
+    strategy_obj._performance_benchmark_symbol_str = "$SPX"
+    strategy_obj._performance_benchmark_adjustment_str = "TOTALRETURN"
     return {
         "strategy_obj": strategy_obj,
         "pricing_data_df": pricing_data_df,
         "execution_policy_str": "MOO",
+        "impact_profile_str": "MOO_LARGE_MIXED",
     }
 
 
@@ -501,30 +503,6 @@ def run_variant(
         save_results(strategy, output_dir=output_dir_str)
 
     return strategy
-
-
-def run_friction_analysis(
-    save_results_bool: bool = True,
-    output_dir_str: str = "results",
-    show_display_bool: bool = False,
-    backtest_start_date_str: str = "2004-01-01",
-    capital_base_float: float = 100_000.0,
-    end_date_str: str | None = None,
-):
-    friction_input_dict = build_friction_analysis_inputs(
-        show_display_bool=show_display_bool,
-        backtest_start_date_str=backtest_start_date_str,
-        capital_base_float=capital_base_float,
-        end_date_str=end_date_str,
-    )
-    friction_analysis_obj = FrictionAnalysis(
-        strategy_obj=friction_input_dict["strategy_obj"],
-        pricing_data_df=friction_input_dict["pricing_data_df"],
-        execution_policy_str=friction_input_dict["execution_policy_str"],
-        output_dir_str=output_dir_str,
-        save_output_bool=save_results_bool,
-    )
-    return friction_analysis_obj.run()
 
 
 if __name__ == "__main__":

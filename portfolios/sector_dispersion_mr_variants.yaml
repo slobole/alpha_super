@@ -1,12 +1,11 @@
 name_str: sector_dispersion_mr_variants
 capital_base_float: 100000.0
-backtest_start_date_str: "2016-01-01"
+backtest_start_date_str: "2004-01-01"
 end_date_str: null
 allocation_policy_str: fixed
 max_workers_int: null
 rebalance: null
 save_pod_artifacts_bool: true
-regression_benchmark_symbol_str: "$SPX"
 
 pods:
   - pod_id_str: pod_sector_dispersion_kie_ihi_xlc

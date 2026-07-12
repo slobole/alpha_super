@@ -7,10 +7,12 @@ import numpy as np
 import pandas as pd
 
 from alpha.bench import catalog
-from strategies.mean_reversion import strategy_mr_sector_dispersion_ibs_kie_ihi_xlc_asset_sma200 as asset_sma_module
+from strategies.mean_reversion import (
+    strategy_mr_sector_dispersion_ibs_kie_ihi_asset_sma200 as asset_sma_module,
+)
 
 
-class SectorDispersionIbsKieIhiXlcAssetSma200Tests(unittest.TestCase):
+class SectorDispersionIbsKieIhiAssetSma200Tests(unittest.TestCase):
     def make_symbol_ohlc_map(
         self,
         log_range_list: list[float],
@@ -21,10 +23,7 @@ class SectorDispersionIbsKieIhiXlcAssetSma200Tests(unittest.TestCase):
         low_vec = np.array(low_list, dtype=float)
         high_vec = low_vec * np.exp(np.array(log_range_list, dtype=float))
         close_vec = low_vec + np.array(ibs_list, dtype=float) * (high_vec - low_vec)
-        if open_list is None:
-            open_vec = close_vec.copy()
-        else:
-            open_vec = np.array(open_list, dtype=float)
+        open_vec = close_vec.copy() if open_list is None else np.array(open_list, dtype=float)
         high_vec = np.maximum(high_vec, open_vec)
         low_vec = np.minimum(low_vec, open_vec)
         return {
@@ -36,13 +35,15 @@ class SectorDispersionIbsKieIhiXlcAssetSma200Tests(unittest.TestCase):
 
     def make_pricing_data_df(
         self,
-        signal_symbol_str: str,
         signal_low_list: list[float],
         date_index: pd.DatetimeIndex,
         signal_day_int: int,
         fill_day_int: int,
     ) -> pd.DataFrame:
-        log_range_list = [0.010 + 0.001 * (index_int % 5) for index_int in range(len(date_index))]
+        log_range_list = [
+            0.010 + 0.001 * (index_int % 5)
+            for index_int in range(len(date_index))
+        ]
         log_range_list[signal_day_int] = 0.120
         neutral_ibs_list = [0.50] * len(date_index)
         signal_ibs_list = [0.50] * len(date_index)
@@ -53,7 +54,7 @@ class SectorDispersionIbsKieIhiXlcAssetSma200Tests(unittest.TestCase):
 
         column_map: dict[tuple[str, str], pd.Series] = {}
         for symbol_str in asset_sma_module.STRATEGY_SYMBOL_TUPLE:
-            if symbol_str == signal_symbol_str:
+            if symbol_str == "IHI":
                 field_map_dict = self.make_symbol_ohlc_map(
                     log_range_list=log_range_list,
                     ibs_list=signal_ibs_list,
@@ -67,7 +68,11 @@ class SectorDispersionIbsKieIhiXlcAssetSma200Tests(unittest.TestCase):
                     low_list=neutral_low_list,
                 )
             for field_str, value_list in field_map_dict.items():
-                column_map[(symbol_str, field_str)] = pd.Series(value_list, index=date_index, dtype=float)
+                column_map[(symbol_str, field_str)] = pd.Series(
+                    value_list,
+                    index=date_index,
+                    dtype=float,
+                )
 
         column_map[("$SPX", "Close")] = pd.Series(
             [5000.0 + index_int for index_int in range(len(date_index))],
@@ -78,17 +83,14 @@ class SectorDispersionIbsKieIhiXlcAssetSma200Tests(unittest.TestCase):
         pricing_data_df.columns = pd.MultiIndex.from_tuples(pricing_data_df.columns)
         return pricing_data_df
 
-    def test_default_config_uses_fixed_defensive_basket(self):
+    def test_default_config_and_bench_discovery(self):
         self.assertEqual(
             asset_sma_module.STRATEGY_SYMBOL_TUPLE,
-            ("SOXX", "IGV", "IBB", "KIE", "IHI", "XLC"),
+            ("SOXX", "IGV", "IBB", "KIE", "IHI"),
         )
-        self.assertEqual(asset_sma_module.DEFAULT_CONFIG.symbol_tuple, asset_sma_module.STRATEGY_SYMBOL_TUPLE)
         self.assertAlmostEqual(asset_sma_module.DEFAULT_CONFIG.portfolio_leverage_float, 1.0)
-        self.assertAlmostEqual(asset_sma_module.DEFAULT_CONFIG.slippage_float, 0.00025)
         self.assertEqual(asset_sma_module.ASSET_SMA_LOOKBACK_DAY_INT, 200)
 
-    def test_bench_catalog_discovers_asset_sma200_variant(self):
         entry_obj = catalog.get_strategy_by_module(asset_sma_module.__name__)
 
         self.assertIsNotNone(entry_obj)
@@ -96,40 +98,34 @@ class SectorDispersionIbsKieIhiXlcAssetSma200Tests(unittest.TestCase):
         self.assertTrue(entry_obj.has_run_variant_bool)
         self.assertFalse(entry_obj.is_wired_bool)
 
-    def test_signal_layer_preserves_raw_entry_and_gates_entry_with_asset_sma200(self):
+    def test_bearish_asset_keeps_raw_entry_but_blocks_final_entry(self):
         date_index = pd.bdate_range("2023-01-02", periods=205)
         signal_day_int = 202
-        fill_day_int = 203
-        signal_low_list = [200.0 - 0.45 * index_int for index_int in range(len(date_index))]
         pricing_data_df = self.make_pricing_data_df(
-            signal_symbol_str="XLC",
-            signal_low_list=signal_low_list,
+            signal_low_list=[200.0 - 0.45 * index_int for index_int in range(len(date_index))],
             date_index=date_index,
             signal_day_int=signal_day_int,
-            fill_day_int=fill_day_int,
+            fill_day_int=203,
         )
 
         signal_data_df = asset_sma_module.compute_asset_sma200_filtered_signal_df(
             pricing_data_df=pricing_data_df,
-            config_obj=asset_sma_module.DEFAULT_CONFIG,
         )
 
         self.assertTrue(
-            bool(signal_data_df.loc[date_index[signal_day_int], ("XLC", asset_sma_module.RAW_ENTRY_SIGNAL_FIELD_STR)])
+            bool(signal_data_df.loc[date_index[signal_day_int], ("IHI", asset_sma_module.RAW_ENTRY_SIGNAL_FIELD_STR)])
         )
         self.assertFalse(
-            bool(signal_data_df.loc[date_index[signal_day_int], ("XLC", asset_sma_module.ASSET_BULLISH_FIELD_STR)])
+            bool(signal_data_df.loc[date_index[signal_day_int], ("IHI", asset_sma_module.ASSET_BULLISH_FIELD_STR)])
         )
-        self.assertFalse(bool(signal_data_df.loc[date_index[signal_day_int], ("XLC", "entry_signal_bool")]))
+        self.assertFalse(bool(signal_data_df.loc[date_index[signal_day_int], ("IHI", "entry_signal_bool")]))
 
-    def test_run_variant_enters_only_when_asset_is_above_sma200_and_fills_next_open(self):
+    def test_bullish_asset_enters_at_next_open(self):
         date_index = pd.bdate_range("2023-01-02", periods=205)
         signal_day_int = 202
         fill_day_int = 203
-        signal_low_list = [80.0 + 0.45 * index_int for index_int in range(len(date_index))]
         pricing_data_df = self.make_pricing_data_df(
-            signal_symbol_str="XLC",
-            signal_low_list=signal_low_list,
+            signal_low_list=[80.0 + 0.45 * index_int for index_int in range(len(date_index))],
             date_index=date_index,
             signal_day_int=signal_day_int,
             fill_day_int=fill_day_int,
@@ -145,60 +141,48 @@ class SectorDispersionIbsKieIhiXlcAssetSma200Tests(unittest.TestCase):
         )
 
         transaction_df = strategy_obj.get_transactions().reset_index(drop=True)
-        close_price_float = float(pricing_data_df.loc[date_index[signal_day_int], ("XLC", "Close")])
-        expected_target_share_float = (
+        signal_close_float = float(pricing_data_df.loc[date_index[signal_day_int], ("IHI", "Close")])
+        expected_amount_float = (
             100_000.0
             * (asset_sma_module.DEFAULT_CONFIG.portfolio_leverage_float / len(asset_sma_module.STRATEGY_SYMBOL_TUPLE))
-            / close_price_float
+            / signal_close_float
         )
-        fill_open_price_float = float(pricing_data_df.loc[date_index[fill_day_int], ("XLC", "Open")])
-        expected_fill_price_float = fill_open_price_float * (
-            1.0 + asset_sma_module.DEFAULT_CONFIG.slippage_float
-        )
+        fill_open_float = float(pricing_data_df.loc[date_index[fill_day_int], ("IHI", "Open")])
+        expected_fill_float = fill_open_float * (1.0 + asset_sma_module.DEFAULT_CONFIG.slippage_float)
 
-        self.assertEqual(strategy_obj.name, asset_sma_module.STRATEGY_NAME_STR)
-        self.assertEqual(strategy_obj.symbol_tuple, asset_sma_module.STRATEGY_SYMBOL_TUPLE)
         self.assertEqual(strategy_obj.results.index[0], date_index[199])
         self.assertEqual(len(transaction_df), 1)
         entry_row_ser = transaction_df.iloc[0]
         self.assertEqual(pd.Timestamp(entry_row_ser["bar"]), date_index[fill_day_int])
-        self.assertEqual(entry_row_ser["asset"], "XLC")
-        self.assertAlmostEqual(float(entry_row_ser["price"]), expected_fill_price_float)
-        self.assertAlmostEqual(float(entry_row_ser["amount"]), expected_target_share_float)
+        self.assertEqual(entry_row_ser["asset"], "IHI")
+        self.assertAlmostEqual(float(entry_row_ser["price"]), expected_fill_float)
+        self.assertAlmostEqual(float(entry_row_ser["amount"]), expected_amount_float)
 
-    def test_run_variant_honors_earlier_portfolio_manager_start(self):
-        date_index = pd.bdate_range("2015-01-02", periods=280)
-        signal_low_list = [80.0 + 0.45 * index_int for index_int in range(len(date_index))]
+    def test_readiness_waits_for_200_delayed_ihi_closes(self):
+        date_index = pd.bdate_range("2023-01-02", periods=210)
         pricing_data_df = self.make_pricing_data_df(
-            signal_symbol_str="XLC",
-            signal_low_list=signal_low_list,
+            signal_low_list=[80.0 + 0.45 * index_int for index_int in range(len(date_index))],
             date_index=date_index,
-            signal_day_int=270,
-            fill_day_int=271,
+            signal_day_int=205,
+            fill_day_int=206,
         )
+        for field_str in ("Open", "High", "Low", "Close"):
+            pricing_data_df.loc[date_index[:4], ("IHI", field_str)] = np.nan
 
         strategy_obj = asset_sma_module.run_variant(
             show_display_bool=False,
             save_results_bool=False,
-            backtest_start_date_str="2004-01-01",
-            capital_base_float=100_000.0,
+            backtest_start_date_str=date_index[0].date().isoformat(),
             pricing_data_df=pricing_data_df,
             audit_override_bool=False,
         )
 
-        self.assertLess(
-            pd.Timestamp(strategy_obj.config_obj.history_start_date_str),
-            pd.Timestamp(strategy_obj.config_obj.backtest_start_date_str),
-        )
-        self.assertEqual(strategy_obj.config_obj.backtest_start_date_str, "2004-01-01")
-        self.assertEqual(strategy_obj.results.index[0], date_index[199])
+        self.assertEqual(strategy_obj.results.index[0], date_index[203])
 
-    def test_saved_metadata_points_to_asset_sma200_wrapper_module(self):
+    def test_saved_metadata_points_to_new_wrapper(self):
         date_index = pd.bdate_range("2023-01-02", periods=205)
-        signal_low_list = [80.0 + 0.45 * index_int for index_int in range(len(date_index))]
         pricing_data_df = self.make_pricing_data_df(
-            signal_symbol_str="XLC",
-            signal_low_list=signal_low_list,
+            signal_low_list=[80.0 + 0.45 * index_int for index_int in range(len(date_index))],
             date_index=date_index,
             signal_day_int=202,
             fill_day_int=203,
@@ -210,7 +194,6 @@ class SectorDispersionIbsKieIhiXlcAssetSma200Tests(unittest.TestCase):
                 save_results_bool=True,
                 output_dir_str=temp_dir_str,
                 backtest_start_date_str=date_index[0].date().isoformat(),
-                capital_base_float=100_000.0,
                 pricing_data_df=pricing_data_df,
                 audit_override_bool=False,
             )
@@ -227,31 +210,10 @@ class SectorDispersionIbsKieIhiXlcAssetSma200Tests(unittest.TestCase):
             metadata_dict = json.loads(metadata_path_list[0].read_text(encoding="utf-8"))
 
         self.assertEqual(metadata_dict["class_module"], asset_sma_module.__name__)
-        self.assertEqual(metadata_dict["class_name"], "SectorDispersionIbsKieIhiXlcAssetSma200Strategy")
-
-    def test_asset_sma200_wrapper_waits_for_200_delayed_xlc_closes(self):
-        date_index = pd.bdate_range("2023-01-02", periods=210)
-        signal_low_list = [80.0 + 0.45 * index_int for index_int in range(len(date_index))]
-        pricing_data_df = self.make_pricing_data_df(
-            signal_symbol_str="XLC",
-            signal_low_list=signal_low_list,
-            date_index=date_index,
-            signal_day_int=205,
-            fill_day_int=206,
+        self.assertEqual(
+            metadata_dict["class_name"],
+            "SectorDispersionIbsKieIhiAssetSma200Strategy",
         )
-        for field_str in ("Open", "High", "Low", "Close"):
-            pricing_data_df.loc[date_index[:4], ("XLC", field_str)] = np.nan
-
-        strategy_obj = asset_sma_module.run_variant(
-            show_display_bool=False,
-            save_results_bool=False,
-            backtest_start_date_str=date_index[0].date().isoformat(),
-            capital_base_float=100_000.0,
-            pricing_data_df=pricing_data_df,
-            audit_override_bool=False,
-        )
-
-        self.assertEqual(strategy_obj.results.index[0], date_index[203])
 
 
 if __name__ == "__main__":

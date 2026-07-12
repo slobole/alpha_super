@@ -6,7 +6,6 @@ from collections import defaultdict
 from typing import List
 from alpha.engine.strategy import Strategy
 from alpha.engine.backtest import run_daily
-from alpha.engine.friction_analysis import FrictionAnalysis
 from alpha.engine.report import save_results
 from alpha.indicators import dv2_indicator
 from data.norgate_loader import build_index_constituent_matrix, load_raw_prices
@@ -92,22 +91,17 @@ def get_asof_universe_symbol_list(
     return universe_membership_ser[universe_membership_ser == 1].index.astype(str).tolist()
 
 
-def build_friction_analysis_inputs(
+def build_capacity_analysis_inputs(
     show_display_bool: bool = False,
     backtest_start_date_str: str = "2004-01-01",
     capital_base_float: float = 100_000.0,
     end_date_str: str | None = None,
 ) -> dict[str, object]:
     """
-    Build the completed DV2 run needed by FrictionAnalysis.
+    Build one completed DV2 run for CapacityAnalysis.
 
-    Formula:
-
-        auction_proxy_dollar_t = lagged_20d_median_dollar_adv_t * auction_fraction
-        participation_t = abs(order_dollar_t) / auction_proxy_dollar_t
-
-    The actual auction proxy is computed inside alpha.engine.friction_analysis.
-    This hook only preserves the existing DV2 data-loading and run path.
+    CapacityAnalysis computes lagged liquidity and cost diagnostics. This hook
+    only preserves the existing DV2 data-loading and run path at one AUM.
     """
     benchmark_list = ['$SPX']
     symbol_list, universe_df = build_index_constituent_matrix(indexname='S&P 500')
@@ -130,7 +124,7 @@ def build_friction_analysis_inputs(
     strategy_obj.trade_id = 0
     strategy_obj.current_trade = defaultdict(default_trade_id_int)
 
-    # *** CRITICAL*** FrictionAnalysis must assess the same completed order
+    # *** CRITICAL*** CapacityAnalysis must assess the same completed order
     # ledger as the deployment-reference DV2 backtest. Keep pre-start history
     # for indicators, but execute only on the configured backtest calendar.
     calendar_idx = pricing_data_df.index[
@@ -145,10 +139,13 @@ def build_friction_analysis_inputs(
     )
 
     strategy_obj.universe_df = None
+    strategy_obj._performance_benchmark_symbol_str = "$SPX"
+    strategy_obj._performance_benchmark_adjustment_str = "TOTALRETURN"
     return {
         "strategy_obj": strategy_obj,
         "pricing_data_df": pricing_data_df,
         "execution_policy_str": "MOO",
+        "impact_profile_str": "MOO_LARGE_MIXED",
     }
 
 
@@ -303,31 +300,6 @@ def run_variant(
         save_results(strategy, output_dir=output_dir_str)
 
     return strategy
-
-
-def run_friction_analysis(
-    save_results_bool: bool = True,
-    output_dir_str: str = "results",
-    show_display_bool: bool = False,
-    backtest_start_date_str: str = "2004-01-01",
-    capital_base_float: float = 100_000.0,
-    end_date_str: str | None = None,
-):
-    friction_input_dict = build_friction_analysis_inputs(
-        show_display_bool=show_display_bool,
-        backtest_start_date_str=backtest_start_date_str,
-        capital_base_float=capital_base_float,
-        end_date_str=end_date_str,
-    )
-    friction_analysis_obj = FrictionAnalysis(
-        strategy_obj=friction_input_dict["strategy_obj"],
-        pricing_data_df=friction_input_dict["pricing_data_df"],
-        execution_policy_str=friction_input_dict["execution_policy_str"],
-        output_dir_str=output_dir_str,
-        save_output_bool=save_results_bool,
-    )
-    return friction_analysis_obj.run()
-
 
 
 if __name__ == "__main__":

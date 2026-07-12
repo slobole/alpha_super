@@ -80,20 +80,37 @@ def test_catalog_lists_strategies_and_flags_wired():
     assert dv2_entry is not None
     assert dv2_entry.is_wired_bool is True
     assert dv2_entry.has_run_variant_bool is True  # guards the BOM/cp1252 decode fix
+    assert dv2_entry.has_capacity_analysis_bool is True
 
     eom_zroz_entry = catalog.get_strategy_by_module(EOM_ZROZ_SPY_SSO_MODULE_STR)
     assert eom_zroz_entry is not None
     assert eom_zroz_entry.has_run_variant_bool is True
+    assert eom_zroz_entry.has_capacity_analysis_bool is False
 
     seasonality_entry = catalog.get_strategy_by_module(SEASONALITY_MODULE_STR)
     assert seasonality_entry is not None
     assert seasonality_entry.has_run_variant_bool is True
+
+    capacity_entry_list = [
+        entry_obj
+        for entry_obj in strategy_entry_list
+        if entry_obj.has_capacity_analysis_bool
+    ]
+    assert len(capacity_entry_list) == 16
+    assert (
+        "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi"
+        in {entry_obj.module_import_str for entry_obj in capacity_entry_list}
+    )
 
 
 def test_catalog_handles_non_utf8_sources_without_crashing():
     strategy_entry_list = catalog.list_strategies()
     runnable_count = sum(1 for entry in strategy_entry_list if entry.has_run_variant_bool)
     assert runnable_count >= 7  # at least every wired strategy is runnable
+
+
+def test_mean_reversion_folder_uses_sector_dispersion_display_label():
+    assert catalog._category_label("mean_reversion") == "Sector Dispersion"
 
 
 @pytest.mark.parametrize(
@@ -156,6 +173,45 @@ def test_artifact_path_guard_blocks_traversal():
 def test_run_index_builds_without_error():
     index_obj = runs.build_strategy_run_index()
     assert isinstance(index_obj.runs_by_run_name_dict, dict)
+
+
+def test_portfolio_page_finds_runs_written_under_yaml_config_name(monkeypatch, tmp_path):
+    results_root_path = tmp_path / "results"
+    timestamp_dir_path = (
+        results_root_path
+        / "research"
+        / "portfolio"
+        / "multipod_low_risk_no_xlc"
+        / "vanilla_backtest"
+        / "2026-07-11_220000"
+    )
+    timestamp_dir_path.mkdir(parents=True)
+    (timestamp_dir_path / "report.html").write_text("<h1>report</h1>", encoding="utf-8")
+
+    portfolio_entry_obj = catalog.PortfolioEntry(
+        name_str="multipod_low_risk_noXLC",
+        config_name_str="multipod_low_risk_no_xlc",
+        rel_path_str="portfolios/multipod_low_risk_noXLC.yaml",
+        schema_str=catalog.SCHEMA_MANAGER_STR,
+        capital_float=100000.0,
+        rebalance_str=None,
+        pod_tuple=(),
+        error_str=None,
+    )
+    monkeypatch.setattr(runs, "RESULTS_ROOT_PATH", results_root_path)
+    monkeypatch.setattr(
+        runs,
+        "RESEARCH_PORTFOLIO_ROOT_PATH",
+        results_root_path / "research" / "portfolio",
+    )
+    monkeypatch.setattr(catalog, "list_portfolios", lambda: [portfolio_entry_obj])
+
+    client = create_app(job_manager_obj=RecordingJobManager()).test_client()
+    html_str = client.get("/portfolios").get_data(as_text=True)
+
+    assert "1 run" in html_str
+    assert ">Report</a>" in html_str
+    assert "multipod_low_risk_no_xlc/vanilla_backtest/2026-07-11_220000/report.html" in html_str
 
 
 def _run_entry(
@@ -457,13 +513,41 @@ def test_run_api_full_preset_passes_all_five_with_keep_going(recording_client):
         data={
             "csrf_token": token_str,
             "module_import": DV2_MODULE_STR,
-            "analysis": ["vanilla", "friction", "timing", "risk", "stress"],
+            "analysis": ["vanilla", "capacity", "timing", "risk", "stress"],
         },
     )
     assert response.status_code == 302
     command_list = job_manager.call_list[-1][2]
     assert command_list.count("--analysis") == 5
     assert "--keep-going" in command_list
+
+
+def test_run_api_rejects_single_capacity_for_strategy_without_hook(recording_client):
+    client, job_manager, token_str = recording_client
+    response = client.post(
+        "/api/run",
+        data={
+            "csrf_token": token_str,
+            "module_import": EOM_ZROZ_SPY_SSO_MODULE_STR,
+            "analysis": "capacity",
+        },
+    )
+    assert response.status_code == 400
+    assert job_manager.call_list == []
+
+
+def test_full_preset_still_launches_for_strategy_without_capacity_hook(recording_client):
+    client, job_manager, token_str = recording_client
+    response = client.post(
+        "/api/run",
+        data={
+            "csrf_token": token_str,
+            "module_import": EOM_ZROZ_SPY_SSO_MODULE_STR,
+            "analysis": ["vanilla", "capacity", "timing", "risk", "stress"],
+        },
+    )
+    assert response.status_code == 302
+    assert "--keep-going" in job_manager.call_list[-1][2]
 
 
 def test_run_api_rejects_unknown_module(recording_client):
@@ -538,12 +622,29 @@ def test_pages_render(recording_client, path_str):
     assert client.get(path_str).status_code == 200
 
 
+def test_strategy_page_marks_capacity_unavailable_without_hook(recording_client):
+    client, _job_manager, _token_str = recording_client
+    response = client.get(f"/strategy/{EOM_ZROZ_SPY_SSO_MODULE_STR}")
+    response_text_str = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "Capacity unavailable — missing capacity hook" in response_text_str
+    assert 'disabled title="Capacity unavailable — missing capacity hook"' in response_text_str
+
+
 def test_index_renders_momentum_and_recent_run_filters(recording_client):
     client, _job_manager, _token_str = recording_client
     html_str = client.get("/").get_data(as_text=True)
 
     assert 'data-filter="recent"' in html_str
     assert 'data-filter="subcat:atr_normalized_rotation"' in html_str
+    assert '<span class="filter-group-label">Momentum</span>' not in html_str
+    assert 'data-filter="cat:mean_reversion">Sector Dispersion</span>' in html_str
+    sector_module_str = "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs"
+    sector_card_start_int = html_str.index(f'data-module="{sector_module_str}"')
+    sector_card_excerpt_str = html_str[sector_card_start_int : sector_card_start_int + 1_500]
+    assert '<span class="badge badge-cat">Sector Dispersion</span>' in sector_card_excerpt_str
+    sector_detail_html_str = client.get(f"/strategy/{sector_module_str}").get_data(as_text=True)
+    assert '<span class="badge badge-cat">Sector Dispersion</span>' in sector_detail_html_str
     atr_card_start_int = html_str.index(f'data-module="{ATR_NDX_MODULE_STR}"')
     atr_card_excerpt_str = html_str[atr_card_start_int : atr_card_start_int + 1_200]
     assert 'data-subcategory="atr_normalized_rotation"' in atr_card_excerpt_str

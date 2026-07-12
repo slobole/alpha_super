@@ -128,7 +128,9 @@ class SectorDispersionVolatilityRankFilterStudyTests(unittest.TestCase):
 
         transaction_df = strategy_obj.get_transactions().reset_index(drop=True)
         close_price_float = float(pricing_data_df.loc[date_index[signal_day_int], ("AAA", "Close")])
-        expected_target_share_float = 100_000.0 * 1.5 / close_price_float
+        expected_target_share_float = (
+            100_000.0 * strategy_obj.target_weight_float / close_price_float
+        )
 
         self.assertEqual(len(transaction_df), 1)
         entry_row_ser = transaction_df.iloc[0]
@@ -178,7 +180,9 @@ class SectorDispersionVolatilityRankFilterStudyTests(unittest.TestCase):
 
         transaction_df = strategy_obj.get_transactions().reset_index(drop=True)
         close_price_float = float(pricing_data_df.loc[date_index[signal_day_int], ("AAA", "Close")])
-        expected_target_share_float = 100_000.0 * 0.75 / close_price_float
+        expected_target_share_float = (
+            100_000.0 * strategy_obj.target_weight_float / close_price_float
+        )
 
         self.assertEqual(len(transaction_df), 1)
         entry_row_ser = transaction_df.iloc[0]

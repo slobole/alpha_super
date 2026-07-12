@@ -52,7 +52,6 @@ if repo_root_str not in sys.path:
     sys.path.insert(0, repo_root_str)
 
 from alpha.engine.backtest import run_daily
-from alpha.engine.friction_analysis import FrictionAnalysis
 from alpha.engine.report import save_results
 from alpha.engine.strategy import Strategy
 from data.norgate_loader import (
@@ -589,7 +588,7 @@ def run_variant(
     return strategy_obj
 
 
-def build_friction_analysis_inputs(
+def build_capacity_analysis_inputs(
     show_display_bool: bool = False,
     backtest_start_date_str: str | None = None,
     capital_base_float: float = DEFAULT_CONFIG.capital_base_float,
@@ -613,7 +612,7 @@ def build_friction_analysis_inputs(
         capital_base_float=capital_base_float,
     )
 
-    # *** CRITICAL*** FrictionAnalysis reuses the default next-open completed
+    # *** CRITICAL*** CapacityAnalysis reuses the default next-open completed
     # ledger. Month-end signal timing is not changed by capacity diagnostics.
     _run_strategy_from_weight_df(
         strategy_obj=strategy_obj,
@@ -625,39 +624,14 @@ def build_friction_analysis_inputs(
     if show_display_bool:
         display(strategy_obj.summary)
 
+    strategy_obj._performance_benchmark_symbol_str = str(config.benchmark_list[0])
+    strategy_obj._performance_benchmark_adjustment_str = "TOTALRETURN"
     return {
         "strategy_obj": strategy_obj,
         "pricing_data_df": execution_price_df,
         "execution_policy_str": "MOO",
+        "impact_profile_str": "MOO_ETF_PROXY",
     }
-
-
-def run_friction_analysis(
-    save_results_bool: bool = True,
-    output_dir_str: str = "results",
-    show_display_bool: bool = False,
-    backtest_start_date_str: str | None = None,
-    capital_base_float: float = DEFAULT_CONFIG.capital_base_float,
-    end_date_str: str | None = None,
-    config: DualMomentumPivot5Config = DEFAULT_CONFIG,
-    strategy_name_str: str = STRATEGY_NAME_STR,
-):
-    friction_input_dict = build_friction_analysis_inputs(
-        show_display_bool=show_display_bool,
-        backtest_start_date_str=backtest_start_date_str,
-        capital_base_float=capital_base_float,
-        end_date_str=end_date_str,
-        config=config,
-        strategy_name_str=strategy_name_str,
-    )
-    friction_analysis_obj = FrictionAnalysis(
-        strategy_obj=friction_input_dict["strategy_obj"],
-        pricing_data_df=friction_input_dict["pricing_data_df"],
-        execution_policy_str=friction_input_dict["execution_policy_str"],
-        output_dir_str=output_dir_str,
-        save_output_bool=save_results_bool,
-    )
-    return friction_analysis_obj.run()
 
 
 def build_execution_timing_analysis_inputs(

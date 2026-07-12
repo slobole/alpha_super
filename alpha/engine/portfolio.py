@@ -124,6 +124,7 @@ class Portfolio:
         self.standalone_pod_summary = None
         self.summary_trades = None
         self.monthly_returns = None
+        self.benchmark_monthly_returns = None
         self._trades = None
         self._transactions = None
         self._common_start = None
@@ -560,6 +561,17 @@ class Portfolio:
         for strategy_obj in self.strategies:
             if strategy_obj._trades is not None and len(strategy_obj._trades) > 0:
                 t = strategy_obj._trades.copy()
+                trade_start_ser = pd.to_datetime(t['start'])
+                trade_end_ser = pd.to_datetime(t['end'])
+                # PM trade diagnostics include only trades whose complete PnL
+                # lifecycle is inside the common PM reporting window.
+                pm_window_trade_bool_ser = (
+                    trade_start_ser.ge(common_idx[0])
+                    & trade_end_ser.le(common_idx[-1])
+                )
+                t = t.loc[pm_window_trade_bool_ser].copy()
+                if len(t) == 0:
+                    continue
                 t['pod'] = strategy_obj.name
                 all_trades.append(t)
         self._trades = pd.concat(all_trades, ignore_index=True) if all_trades else pd.DataFrame()
@@ -570,6 +582,14 @@ class Portfolio:
             txns = strategy_obj.get_transactions()
             if txns is not None and len(txns) > 0:
                 t = txns.copy()
+                transaction_date_ser = pd.to_datetime(t['bar'])
+                pm_window_transaction_bool_ser = (
+                    transaction_date_ser.ge(common_idx[0])
+                    & transaction_date_ser.le(common_idx[-1])
+                )
+                t = t.loc[pm_window_transaction_bool_ser].copy()
+                if len(t) == 0:
+                    continue
                 t['pod'] = strategy_obj.name
                 all_txns.append(t)
         self._transactions = pd.concat(all_txns, ignore_index=True) if all_txns else pd.DataFrame()
@@ -586,6 +606,20 @@ class Portfolio:
             add_sharpe_ratios=True,
             add_max_drawdowns=True,
         )
+        if self.regression_benchmark_value_ser is not None:
+            aligned_benchmark_value_ser = self.regression_benchmark_value_ser.reindex(
+                self.results.index
+            ).astype(float)
+            complete_benchmark_bool = (
+                len(aligned_benchmark_value_ser) >= 2
+                and np.isfinite(aligned_benchmark_value_ser.to_numpy()).all()
+            )
+            if complete_benchmark_bool:
+                self.benchmark_monthly_returns = generate_monthly_returns(
+                    aligned_benchmark_value_ser.copy(),
+                    add_sharpe_ratios=True,
+                    add_max_drawdowns=True,
+                )
 
         # --- total commissions ---
         if len(self._transactions) > 0 and 'commission' in self._transactions.columns:

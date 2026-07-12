@@ -2,10 +2,14 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
 
+from alpha.engine.capacity_analysis import CapacityAnalysis
+
+from strategies.mean_reversion import strategy_mr_sector_dispersion_ibs as base_module
 from strategies.mean_reversion import strategy_mr_sector_dispersion_ibs_kie_ihi as kie_ihi_module
 from strategies.mean_reversion import strategy_mr_sector_dispersion_ibs_kie_ihi_xlc as kie_ihi_xlc_module
 
@@ -24,6 +28,8 @@ class SectorDispersionIbsKieIhiVariantTests(unittest.TestCase):
             open_vec = close_vec.copy()
         else:
             open_vec = np.array(open_list, dtype=float)
+        high_vec = np.maximum(high_vec, open_vec)
+        low_vec = np.minimum(low_vec, open_vec)
         return {
             "Open": open_vec.tolist(),
             "High": high_vec.tolist(),
@@ -70,6 +76,17 @@ class SectorDispersionIbsKieIhiVariantTests(unittest.TestCase):
             index=date_index,
             dtype=float,
         )
+        for symbol_str in ("SOXX", "IGV", "IBB", "KIE", "IHI", "XLC"):
+            column_map[(symbol_str, "Volume")] = pd.Series(
+                [1_000_000.0] * len(date_index),
+                index=date_index,
+                dtype=float,
+            )
+            column_map[(symbol_str, "Turnover")] = pd.Series(
+                [100_000_000.0] * len(date_index),
+                index=date_index,
+                dtype=float,
+            )
 
         pricing_data_df = pd.DataFrame(column_map, index=date_index)
         pricing_data_df.columns = pd.MultiIndex.from_tuples(pricing_data_df.columns)
@@ -86,10 +103,38 @@ class SectorDispersionIbsKieIhiVariantTests(unittest.TestCase):
         )
         self.assertEqual(kie_ihi_module.DEFAULT_CONFIG.symbol_tuple, kie_ihi_module.STRATEGY_SYMBOL_TUPLE)
         self.assertEqual(kie_ihi_xlc_module.DEFAULT_CONFIG.symbol_tuple, kie_ihi_xlc_module.STRATEGY_SYMBOL_TUPLE)
-        self.assertAlmostEqual(kie_ihi_module.DEFAULT_CONFIG.portfolio_leverage_float, 1.5)
-        self.assertAlmostEqual(kie_ihi_xlc_module.DEFAULT_CONFIG.portfolio_leverage_float, 1.5)
+        self.assertAlmostEqual(kie_ihi_module.DEFAULT_CONFIG.portfolio_leverage_float, 1.0)
+        self.assertAlmostEqual(kie_ihi_xlc_module.DEFAULT_CONFIG.portfolio_leverage_float, 1.0)
         self.assertAlmostEqual(kie_ihi_module.DEFAULT_CONFIG.slippage_float, 0.00025)
         self.assertAlmostEqual(kie_ihi_xlc_module.DEFAULT_CONFIG.slippage_float, 0.00025)
+
+    def test_kie_ihi_capacity_builder_runs_with_etf_proxy_profile(self):
+        date_index = pd.bdate_range("2024-01-02", periods=25)
+        pricing_data_df = self.make_pricing_data_df(
+            signal_symbol_str="KIE",
+            date_index=date_index,
+            signal_day_int=22,
+            fill_day_int=23,
+        )
+        with patch.object(
+            base_module,
+            "get_sector_dispersion_ibs_data",
+            return_value=pricing_data_df,
+        ):
+            capacity_input_dict = kie_ihi_module.build_capacity_analysis_inputs(
+                capital_base_float=250_000.0,
+            )
+
+        self.assertEqual(capacity_input_dict["execution_policy_str"], "MOO")
+        self.assertEqual(capacity_input_dict["impact_profile_str"], "MOO_ETF_PROXY")
+        capacity_result_obj = CapacityAnalysis(**capacity_input_dict).run()
+        self.assertEqual(capacity_result_obj.impact_profile_str, "MOO_ETF_PROXY")
+        self.assertTrue(
+            (
+                capacity_result_obj.equity_curve_df["stress_equity_float"]
+                <= capacity_result_obj.equity_curve_df["central_equity_float"] + 1e-12
+            ).all()
+        )
 
     def test_run_variant_uses_fixed_basket_and_next_open_fill(self):
         date_index = pd.bdate_range("2024-01-02", periods=25)
@@ -130,6 +175,7 @@ class SectorDispersionIbsKieIhiVariantTests(unittest.TestCase):
 
                 self.assertEqual(strategy_obj.name, module_obj.STRATEGY_NAME_STR)
                 self.assertEqual(strategy_obj.symbol_tuple, module_obj.STRATEGY_SYMBOL_TUPLE)
+                self.assertEqual(strategy_obj.results.index[0], date_index[21])
                 self.assertEqual(len(transaction_df), 1)
                 entry_row_ser = transaction_df.iloc[0]
                 self.assertEqual(pd.Timestamp(entry_row_ser["bar"]), date_index[fill_day_int])
@@ -177,6 +223,38 @@ class SectorDispersionIbsKieIhiVariantTests(unittest.TestCase):
 
                 self.assertEqual(metadata_dict["class_module"], module_obj.__name__)
                 self.assertEqual(metadata_dict["class_name"], class_name_str)
+
+    def test_fixed_wrappers_wait_for_their_latest_constituent(self):
+        date_index = pd.bdate_range("2024-01-02", periods=30)
+        case_tuple = (
+            (kie_ihi_module, "IHI"),
+            (kie_ihi_xlc_module, "XLC"),
+        )
+
+        for module_obj, delayed_symbol_str in case_tuple:
+            with self.subTest(strategy_name_str=module_obj.STRATEGY_NAME_STR):
+                pricing_data_df = self.make_pricing_data_df(
+                    signal_symbol_str=delayed_symbol_str,
+                    date_index=date_index,
+                    signal_day_int=26,
+                    fill_day_int=27,
+                )
+                for field_str in ("Open", "High", "Low", "Close"):
+                    pricing_data_df.loc[
+                        date_index[:4],
+                        (delayed_symbol_str, field_str),
+                    ] = np.nan
+
+                strategy_obj = module_obj.run_variant(
+                    show_display_bool=False,
+                    save_results_bool=False,
+                    backtest_start_date_str=date_index[0].date().isoformat(),
+                    capital_base_float=100_000.0,
+                    pricing_data_df=pricing_data_df,
+                    audit_override_bool=False,
+                )
+
+                self.assertEqual(strategy_obj.results.index[0], date_index[25])
 
 
 if __name__ == "__main__":

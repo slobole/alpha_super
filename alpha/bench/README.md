@@ -35,7 +35,7 @@ It binds to `127.0.0.1` only — a single-operator console, not a service.
 | Button | Command |
 |---|---|
 | Vanilla | `python scripts/research/run_strategy_analysis.py <module> --analysis vanilla` |
-| Full | `… --analysis vanilla --analysis friction --analysis timing --analysis risk --analysis stress --keep-going` |
+| Full | `… --analysis vanilla --analysis capacity --analysis timing --analysis risk --analysis stress --keep-going` |
 | Build (simple) | `python strategies/run_portfolio.py <yaml>` |
 | Build (manager) | `python strategies/run_portfolio_manager.py <yaml>` |
 

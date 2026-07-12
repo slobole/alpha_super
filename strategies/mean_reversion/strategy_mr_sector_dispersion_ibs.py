@@ -22,10 +22,15 @@ For ETF i on decision date t:
     exit_{i,t}
         = 1[IBS_{i,t} > 0.90] * 1[RelativeRange_{i,t} > 1.0]
 
-    target_weight_i = 1.5 / N
+    paper_target_weight_i = 1.5 / N
+
+    implemented_target_weight_i = 1.0 / N
 
     target_shares_{i,t}
-        = previous_total_value_t * target_weight_i / Close_{i,t}
+        = previous_total_value_t * implemented_target_weight_i / Close_{i,t}
+
+The signal follows the paper, but the default sizing is deliberately
+unlevered. The paper's 1.5 / N sizing remains documented above for comparison.
 
 Execution mapping
 -----------------
@@ -132,14 +137,14 @@ class SectorDispersionIbsConfig:
     symbol_tuple: tuple[str, ...] = ORIGINAL_SYMBOL_TUPLE
     universe_name_str: str = "original"
     benchmark_symbol_str: str = "$SPX"
-    history_start_date_str: str = "2015-01-01"
-    backtest_start_date_str: str = "2016-01-01"
+    history_start_date_str: str = "2003-01-01"
+    backtest_start_date_str: str = "2004-01-01"
     end_date_str: str | None = None
     entry_ibs_max_float: float = 0.10
     exit_ibs_min_float: float = 0.90
     range_vol_lookback_day_int: int = 21
     min_relative_range_float: float = 1.0
-    portfolio_leverage_float: float = 1.5
+    portfolio_leverage_float: float = 1.0
     capital_base_float: float = 100_000.0
     slippage_float: float = 0.00025
     commission_per_share_float: float = 0.00525
@@ -200,12 +205,29 @@ __all__ = [
     "UNIVERSE_A_SYMBOL_TUPLE",
     "UNIVERSE_B_SYMBOL_TUPLE",
     "UNIVERSE_C_SYMBOL_TUPLE",
+    "build_capacity_analysis_inputs",
+    "build_sector_dispersion_capacity_analysis_inputs",
     "compute_sector_dispersion_ibs_signal_df",
     "get_sector_dispersion_ibs_data",
     "resolve_history_start_date_str",
+    "resolve_effective_backtest_start_date_str",
+    "resolve_full_basket_calendar_idx",
     "resolve_universe_symbol_tuple",
     "run_variant",
 ]
+
+
+def resolve_effective_backtest_start_date_str(
+    config_obj: SectorDispersionIbsConfig,
+    requested_backtest_start_date_str: str | None,
+) -> str:
+    """Honor an explicit caller boundary; basket readiness sets the actual start."""
+    configured_start_ts = pd.Timestamp(config_obj.backtest_start_date_str)
+    if requested_backtest_start_date_str is None:
+        return configured_start_ts.date().isoformat()
+
+    requested_start_ts = pd.Timestamp(requested_backtest_start_date_str)
+    return requested_start_ts.date().isoformat()
 
 
 def resolve_history_start_date_str(
@@ -225,6 +247,145 @@ def resolve_history_start_date_str(
         days=DEFAULT_WARMUP_CALENDAR_DAY_INT
     )
     return warmup_start_ts.date().isoformat()
+
+
+def resolve_full_basket_calendar_idx(
+    pricing_data_df: pd.DataFrame,
+    config_obj: SectorDispersionIbsConfig,
+    required_history_observation_count_int: int | None = None,
+    required_close_history_observation_count_int: int | None = None,
+) -> pd.DatetimeIndex:
+    """Return the execution calendar after every fixed-basket ETF is signal-ready."""
+    if required_history_observation_count_int is None:
+        required_history_observation_count_int = (
+            int(config_obj.range_vol_lookback_day_int) + 1
+        )
+    if required_history_observation_count_int <= 0:
+        raise ValueError("required_history_observation_count_int must be positive.")
+    if (
+        required_close_history_observation_count_int is not None
+        and required_close_history_observation_count_int <= 0
+    ):
+        raise ValueError(
+            "required_close_history_observation_count_int must be positive."
+        )
+
+    symbol_ready_bool_df = pd.DataFrame(index=pricing_data_df.index)
+    symbol_tradable_ohlc_bool_df = pd.DataFrame(index=pricing_data_df.index)
+    for symbol_str in config_obj.symbol_tuple:
+        field_ser_dict = {
+            field_str: pd.to_numeric(
+                pricing_data_df[(symbol_str, field_str)],
+                errors="coerce",
+            )
+            for field_str in ("Open", "High", "Low", "Close")
+        }
+        tradable_ohlc_bool_ser = pd.Series(
+            np.isfinite(field_ser_dict["Open"])
+            & np.isfinite(field_ser_dict["High"])
+            & np.isfinite(field_ser_dict["Low"])
+            & np.isfinite(field_ser_dict["Close"])
+            & field_ser_dict["Open"].gt(0.0)
+            & field_ser_dict["High"].gt(0.0)
+            & field_ser_dict["Low"].gt(0.0)
+            & field_ser_dict["Close"].gt(0.0)
+            & field_ser_dict["High"].ge(field_ser_dict["Open"])
+            & field_ser_dict["High"].ge(field_ser_dict["Close"])
+            & field_ser_dict["High"].ge(field_ser_dict["Low"])
+            & field_ser_dict["Low"].le(field_ser_dict["Open"])
+            & field_ser_dict["Low"].le(field_ser_dict["Close"])
+            & field_ser_dict["Low"].le(field_ser_dict["High"]),
+            index=pricing_data_df.index,
+            dtype=bool,
+        )
+        symbol_tradable_ohlc_bool_df[symbol_str] = tradable_ohlc_bool_ser
+        positive_range_bool_ser = (
+            tradable_ohlc_bool_ser
+            & field_ser_dict["High"].gt(field_ser_dict["Low"])
+        )
+        # *** CRITICAL*** readiness at T uses only the current completed OHLC
+        # row and the preceding fixed lookback. It never backfills pre-inception
+        # history or uses observations after T.
+        symbol_ready_bool_ser = (
+            positive_range_bool_ser.astype(int)
+            .rolling(
+                window=required_history_observation_count_int,
+                min_periods=required_history_observation_count_int,
+            )
+            .sum()
+            .eq(required_history_observation_count_int)
+        )
+        if required_close_history_observation_count_int is not None:
+            valid_close_bool_ser = pd.Series(
+                np.isfinite(field_ser_dict["Close"])
+                & field_ser_dict["Close"].gt(0.0),
+                index=pricing_data_df.index,
+                dtype=bool,
+            )
+            # *** CRITICAL*** Close-history readiness at T uses only closes up
+            # to and including completed decision bar T. It does not require
+            # unrelated historical Open/High/Low rows outside the range window.
+            close_ready_bool_ser = (
+                valid_close_bool_ser.astype(int)
+                .rolling(
+                    window=required_close_history_observation_count_int,
+                    min_periods=required_close_history_observation_count_int,
+                )
+                .sum()
+                .eq(required_close_history_observation_count_int)
+            )
+            symbol_ready_bool_ser = symbol_ready_bool_ser & close_ready_bool_ser
+        symbol_ready_bool_df[symbol_str] = symbol_ready_bool_ser
+
+    full_basket_ready_bool_ser = symbol_ready_bool_df.all(axis=1)
+    ready_date_index = pricing_data_df.index[full_basket_ready_bool_ser]
+    if len(ready_date_index) == 0:
+        symbol_list_str = ", ".join(config_obj.symbol_tuple)
+        close_requirement_str = (
+            ""
+            if required_close_history_observation_count_int is None
+            else (
+                f" and {required_close_history_observation_count_int} consecutive "
+                "valid closes"
+            )
+        )
+        raise ValueError(
+            "No full-basket Sector Dispersion start is available: "
+            f"{required_history_observation_count_int} consecutive positive-range OHLC observations"
+            f"{close_requirement_str} "
+            f"are required for every ETF in [{symbol_list_str}]."
+        )
+
+    configured_start_ts = pd.Timestamp(config_obj.backtest_start_date_str)
+    eligible_ready_date_index = ready_date_index[
+        ready_date_index >= configured_start_ts
+    ]
+    if len(eligible_ready_date_index) == 0:
+        raise ValueError(
+            "No full-basket Sector Dispersion start remains on or after the configured "
+            f"start {configured_start_ts.date()}."
+        )
+    effective_start_ts = pd.Timestamp(
+        eligible_ready_date_index[0]
+    )
+    calendar_idx = pricing_data_df.index[pricing_data_df.index >= effective_start_ts]
+    if len(calendar_idx) == 0:
+        raise ValueError(
+            "No Sector Dispersion observations remain on or after the effective "
+            f"full-basket start {effective_start_ts.date()}."
+        )
+    invalid_after_start_bool_df = ~symbol_tradable_ohlc_bool_df.loc[calendar_idx]
+    if invalid_after_start_bool_df.any(axis=None):
+        first_invalid_ts = invalid_after_start_bool_df.any(axis=1).idxmax()
+        invalid_symbol_list = invalid_after_start_bool_df.columns[
+            invalid_after_start_bool_df.loc[first_invalid_ts]
+        ].to_list()
+        raise ValueError(
+            "Sector Dispersion fixed-basket OHLC became invalid after the effective "
+            f"start on {pd.Timestamp(first_invalid_ts).date()}: "
+            f"{', '.join(invalid_symbol_list)}."
+        )
+    return pd.DatetimeIndex(calendar_idx)
 
 
 def _symbol_field_df(
@@ -434,6 +595,85 @@ def get_sector_dispersion_ibs_data(
     return pricing_data_df.sort_index()
 
 
+def build_sector_dispersion_capacity_analysis_inputs(
+    strategy_class: type[SectorDispersionIbsStrategy],
+    strategy_name_str: str,
+    config_obj: SectorDispersionIbsConfig,
+    capital_base_float: float,
+    show_display_bool: bool = False,
+    backtest_start_date_str: str | None = None,
+    end_date_str: str | None = None,
+    required_close_history_observation_count_int: int | None = None,
+) -> dict[str, object]:
+    """Rerun one fixed-basket sector variant for the Capacity analyzer."""
+    effective_backtest_start_date_str = resolve_effective_backtest_start_date_str(
+        config_obj=config_obj,
+        requested_backtest_start_date_str=backtest_start_date_str,
+    )
+    capacity_config_obj = replace(
+        config_obj,
+        history_start_date_str=resolve_history_start_date_str(
+            config_obj=config_obj,
+            backtest_start_date_str=effective_backtest_start_date_str,
+        ),
+        backtest_start_date_str=effective_backtest_start_date_str,
+        capital_base_float=float(capital_base_float),
+        end_date_str=end_date_str,
+    )
+    pricing_data_df = get_sector_dispersion_ibs_data(config_obj=capacity_config_obj)
+    strategy_obj = strategy_class(
+        name=strategy_name_str,
+        benchmarks=[capacity_config_obj.benchmark_symbol_str],
+        config_obj=capacity_config_obj,
+    )
+
+    # *** CRITICAL *** lookahead-sensitive: the execution calendar keeps the
+    # full causal warmup and orders generated from completed bar T still fill
+    # at Open_(T+1), exactly as in each normal sector strategy run.
+    calendar_idx = resolve_full_basket_calendar_idx(
+        pricing_data_df=pricing_data_df,
+        config_obj=capacity_config_obj,
+        required_close_history_observation_count_int=(
+            required_close_history_observation_count_int
+        ),
+    )
+    run_daily(
+        strategy_obj,
+        pricing_data_df,
+        calendar_idx,
+        show_progress=show_display_bool,
+        show_signal_progress_bool=show_display_bool,
+    )
+    strategy_obj._performance_benchmark_symbol_str = (
+        capacity_config_obj.benchmark_symbol_str
+    )
+    strategy_obj._performance_benchmark_adjustment_str = "TOTALRETURN"
+
+    return {
+        "strategy_obj": strategy_obj,
+        "pricing_data_df": pricing_data_df,
+        "execution_policy_str": "MOO",
+        "impact_profile_str": "MOO_ETF_PROXY",
+    }
+
+
+def build_capacity_analysis_inputs(
+    capital_base_float: float,
+    show_display_bool: bool = False,
+    backtest_start_date_str: str | None = None,
+    end_date_str: str | None = None,
+) -> dict[str, object]:
+    return build_sector_dispersion_capacity_analysis_inputs(
+        strategy_class=SectorDispersionIbsStrategy,
+        strategy_name_str=build_strategy_name_str(DEFAULT_CONFIG),
+        config_obj=DEFAULT_CONFIG,
+        capital_base_float=capital_base_float,
+        show_display_bool=show_display_bool,
+        backtest_start_date_str=backtest_start_date_str,
+        end_date_str=end_date_str,
+    )
+
+
 def _write_assumptions_md(
     output_path: Path,
     strategy_obj: SectorDispersionIbsStrategy,
@@ -480,6 +720,10 @@ def run_variant(
     audit_override_bool: bool | None = None,
 ) -> SectorDispersionIbsStrategy:
     config_obj = DEFAULT_CONFIG
+    effective_backtest_start_date_str = resolve_effective_backtest_start_date_str(
+        config_obj=config_obj,
+        requested_backtest_start_date_str=backtest_start_date_str,
+    )
     if universe_name_str is not None:
         normalized_universe_name_str = normalize_universe_name_str(universe_name_str)
         config_obj = replace(
@@ -493,13 +737,9 @@ def run_variant(
             config_obj,
             history_start_date_str=resolve_history_start_date_str(
                 config_obj=config_obj,
-                backtest_start_date_str=backtest_start_date_str,
+                backtest_start_date_str=effective_backtest_start_date_str,
             ),
-            backtest_start_date_str=(
-                config_obj.backtest_start_date_str
-                if backtest_start_date_str is None
-                else backtest_start_date_str
-            ),
+            backtest_start_date_str=effective_backtest_start_date_str,
             capital_base_float=(
                 config_obj.capital_base_float
                 if capital_base_float is None
@@ -517,11 +757,13 @@ def run_variant(
         config_obj=config_obj,
     )
 
-    # *** CRITICAL*** Keep pre-start history for the lagged range scale, but
-    # only execute the backtest on and after backtest_start_date_str.
-    calendar_idx = pricing_data_df.index[
-        pricing_data_df.index >= pd.Timestamp(config_obj.backtest_start_date_str)
-    ]
+    # *** CRITICAL*** Keep pre-start history for the lagged range scale. The
+    # execution calendar begins only when every fixed-basket ETF has enough
+    # causal history; pre-inception rows are never treated as a partial basket.
+    calendar_idx = resolve_full_basket_calendar_idx(
+        pricing_data_df=pricing_data_df,
+        config_obj=config_obj,
+    )
     run_daily(
         strategy_obj,
         pricing_data_df,

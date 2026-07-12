@@ -41,6 +41,7 @@ SUPPORTED_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = (
     "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy",
     "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc",
     "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc_asset_sma200",
+    "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_asset_sma200",
 )
 POD_MINIMUM_ALLOCATED_CAPITAL_FLOAT_DICT: dict[str, float] = {
     "strategies.dv2.strategy_mr_dv2:DVO2Strategy": 25_000.0,
@@ -50,6 +51,7 @@ SUPPORTED_ALLOCATION_POLICY_TUPLE: tuple[str, ...] = ("fixed", "equal")
 SUPPORTED_REBALANCE_FREQUENCY_TUPLE: tuple[str, ...] = ("monthly", "quarterly", "annually")
 SUPPORTED_REBALANCE_POLICY_TUPLE: tuple[str, ...] = ("fixed", "equal", "inverse_volatility")
 DEFAULT_INVERSE_VOLATILITY_LOOKBACK_DAY_INT = 60
+DEFAULT_PM_PERFORMANCE_BENCHMARK_SYMBOL_STR = "$SPX"
 REBALANCE_FIELD_SET: frozenset[str] = frozenset(
     {
         "frequency_str",
@@ -112,7 +114,7 @@ class PortfolioManagerConfig:
     max_workers_int: int | None
     rebalance: PortfolioRebalanceConfig | None
     save_pod_artifacts_bool: bool
-    regression_benchmark_symbol_str: str | None
+    regression_benchmark_symbol_str: str
     pod_config_list: list[PortfolioPodConfig]
 
     @property
@@ -403,7 +405,7 @@ def build_portfolio_manager_config(config_dict: dict[str, Any]) -> PortfolioMana
     regression_benchmark_symbol_str = _coerce_optional_str(
         config_dict,
         "regression_benchmark_symbol_str",
-    )
+    ) or DEFAULT_PM_PERFORMANCE_BENCHMARK_SYMBOL_STR
 
     raw_pod_list = config_dict.get("pods")
     if not isinstance(raw_pod_list, list):
@@ -500,9 +502,9 @@ def _run_pod_worker_unchecked(worker_payload_dict: dict[str, Any]) -> dict[str, 
         raise AttributeError(f"Module '{module_import_str}' does not expose run_variant(...).")
     _validate_run_variant_signature(run_variant_fn, pod_config.strategy_import_str)
 
-    # *** CRITICAL*** Every fresh-run pod receives the same executable
-    # portfolio date range. Individual strategy loaders may still keep earlier
-    # history for causal indicators, but fills must start from this shared date.
+    # *** CRITICAL*** Every fresh-run pod receives the same requested PM date
+    # boundary. A strategy may enforce a later causal validity/readiness start;
+    # portfolio aggregation then begins at the common realized overlap.
     strategy_obj = run_variant_fn(
         show_display_bool=bool(worker_payload_dict["show_display_bool"]),
         save_results_bool=False,
@@ -623,6 +625,9 @@ class PortfolioManager:
         pod_info_list = []
         for pod_run_result in pod_run_result_list:
             pod_config = pod_run_result.pod_config
+            effective_pod_start_date_str = pd.Timestamp(
+                pod_run_result.strategy.results.index[0]
+            ).date().isoformat()
             pod_info_list.append(
                 {
                     "pod_id_str": pod_config.pod_id_str,
@@ -634,7 +639,9 @@ class PortfolioManager:
                         if pod_run_result.pod_artifact_dir_path is not None
                         else None
                     ),
-                    "backtest_start_date_str": self.config.backtest_start_date_str,
+                    "backtest_start_date_str": effective_pod_start_date_str,
+                    "requested_backtest_start_date_str": self.config.backtest_start_date_str,
+                    "effective_backtest_start_date_str": effective_pod_start_date_str,
                     "end_date_str": self.config.end_date_str,
                 }
             )
@@ -709,6 +716,7 @@ class PortfolioManager:
                 manager_metadata_path=manager_metadata_path,
                 worker_count_int=worker_count_int,
                 pod_run_result_list=pod_run_result_list,
+                portfolio=portfolio,
                 portfolio_output_dir_path=portfolio_output_dir_path,
             )
 
@@ -726,6 +734,7 @@ class PortfolioManager:
         manager_metadata_path: Path,
         worker_count_int: int,
         pod_run_result_list: list[PortfolioPodRunResult],
+        portfolio: Portfolio,
         portfolio_output_dir_path: Path,
     ) -> None:
         metadata_dict = {
@@ -735,6 +744,10 @@ class PortfolioManager:
             "source_config_path_str": self.source_config_path_str,
             "capital_base_float": float(self.config.capital_base_float),
             "backtest_start_date_str": self.config.backtest_start_date_str,
+            "requested_backtest_start_date_str": self.config.backtest_start_date_str,
+            "effective_portfolio_start_date_str": pd.Timestamp(
+                portfolio._common_start
+            ).date().isoformat(),
             "end_date_str": self.config.end_date_str,
             "allocation_policy_str": self.config.allocation_policy_str,
             "regression_benchmark_symbol_str": self.config.regression_benchmark_symbol_str,
@@ -760,6 +773,10 @@ class PortfolioManager:
                     "allocated_capital_float": float(
                         pod_run_result.pod_config.allocated_capital_float
                     ),
+                    "requested_backtest_start_date_str": self.config.backtest_start_date_str,
+                    "effective_backtest_start_date_str": pd.Timestamp(
+                        pod_run_result.strategy.results.index[0]
+                    ).date().isoformat(),
                     "pod_artifact_dir_path": (
                         str(pod_run_result.pod_artifact_dir_path)
                         if pod_run_result.pod_artifact_dir_path is not None

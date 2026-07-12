@@ -263,15 +263,21 @@ h1 {{
     font-weight: 700;
 }}
 h2 {{
-    font-size: 1.02rem;
-    margin: 0 0 12px;
-    border-bottom: none;
-    padding-bottom: 0;
+    font-size: 1.18rem;
+    line-height: 1.25;
+    font-weight: 750;
+    margin: 0 0 16px;
+    padding: 8px 10px;
+    background: var(--color-neutral);
+    border-left: 4px solid var(--color-strategy-dark);
+    border-radius: 3px;
 }}
 h3 {{
-    font-size: 0.92rem;
-    margin-top: 16px;
-    margin-bottom: 8px;
+    color: var(--color-strategy-dark);
+    font-size: 0.94rem;
+    font-weight: 700;
+    margin-top: 20px;
+    margin-bottom: 9px;
 }}
 .meta {{
     color: var(--color-muted);

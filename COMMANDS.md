@@ -8,7 +8,7 @@ the repo root and use `uv` (Python 3.12). Flags shown are the useful ones — ad
 [0. Setup](#0-setup--basics) ·
 [1. Run one strategy](#1-run-one-strategy) ·
 [2. Research (all-in-one)](#2-research-orchestration--the-main-one) ·
-[3. Single analyses](#3-single-analyses-frictiontimingriskcrisisstress) ·
+[3. Single analyses](#3-single-analyses-capacitytimingriskcrisisstress) ·
 [4. Variant suites](#4-variant-suites-compare-many-configs) ·
 [5. Portfolios](#5-portfolios-multi-pod) ·
 [6. Control panels (web UI)](#6-control-panels-web-ui) ·
@@ -52,7 +52,7 @@ analyses in one shot. This is the command Bench's run buttons call. **Start here
 for a full picture of a strategy.
 
 ```bash
-# Default = vanilla + friction + timing
+# Default = vanilla + capacity + timing
 uv run python scripts/research/run_strategy_analysis.py strategy_mr_dv2
 
 # Pick a subset (repeat --analysis)
@@ -61,22 +61,22 @@ uv run python scripts/research/run_strategy_analysis.py strategy_mr_dv2 \
 
 # Everything, and don't stop on a failure
 uv run python scripts/research/run_strategy_analysis.py strategy_mr_dv2 \
-  --analysis vanilla --analysis friction --analysis timing \
+  --analysis vanilla --analysis capacity --analysis timing \
   --analysis risk --analysis stress --keep-going
 ```
-`--analysis` choices: `vanilla` · `friction` · `timing` · `risk` · `stress`
+`--analysis` choices: `vanilla` · `capacity` · `timing` · `risk` · `stress`
 (default: the first three). Other flags: `--no-save`, `--keep-going`,
 `--output-dir results`.
 
 ---
 
-## 3. Single analyses (friction / timing / risk / crisis / stress)
+## 3. Single analyses (capacity / timing / risk / crisis / stress)
 
 Use these when you want just one lens (or finer control than section 2 gives).
 
 | Command | What / when |
 |---|---|
-| `uv run python strategies/run_friction_analysis.py <name>` | Execution friction / slippage / auction cost for one strategy. |
+| `uv run python strategies/run_capacity_analysis.py <name>` | MOO/MOC strategy capacity curve across the default AUM grid. |
 | `uv run python scripts/research/execution_timing_analyzer.py <dotted.module>` | Entry/exit timing matrix. Takes a **dotted module path**, not a bare name. Tune with `--entry-timing` / `--exit-timing` (repeatable). |
 | `uv run python strategies/run_risk_analysis.py <name>` | Stationary-bootstrap risk / confidence intervals. Flags: `--simulation-count 500`, `--block-length` (repeatable, default 21/63/126), `--confidence-level 0.95`. |
 | `uv run python strategies/run_crisis_replay.py <key>` | Replay a strategy across historical crisis windows. Flags: `--show-progress`, `--no-save`. |

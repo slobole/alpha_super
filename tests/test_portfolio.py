@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from alpha.engine.metrics import select_tail_event_date_index
+from alpha.engine.metrics import generate_monthly_returns, select_tail_event_date_index
 from alpha.engine.portfolio import Portfolio
 from alpha.engine.strategy import Strategy
 
@@ -38,6 +38,50 @@ def make_strategy(name: str, dates_index: pd.DatetimeIndex, daily_returns_list: 
 
 
 class PortfolioTests(unittest.TestCase):
+    def test_pooled_trade_diagnostics_use_only_complete_pm_window_lifecycles(self):
+        strategy_a_date_index = pd.bdate_range('2024-01-02', periods=7)
+        strategy_b_date_index = strategy_a_date_index[2:5]
+        strategy_a = make_strategy(
+            'StrategyA',
+            strategy_a_date_index,
+            [0.0, 0.01, -0.01, 0.01, 0.0, 0.01, 0.0],
+        )
+        strategy_b = make_strategy(
+            'StrategyB',
+            strategy_b_date_index,
+            [0.0, 0.01, 0.0],
+        )
+        strategy_a._trades = pd.DataFrame(
+            {
+                'start': [strategy_a_date_index[0], strategy_a_date_index[1], strategy_a_date_index[2], strategy_a_date_index[3]],
+                'end': [strategy_a_date_index[1], strategy_a_date_index[3], strategy_a_date_index[3], strategy_a_date_index[5]],
+                'return': [0.01, 0.02, 0.03, 0.04],
+                'duration': [pd.Timedelta(days=1), pd.Timedelta(days=2), pd.Timedelta(days=1), pd.Timedelta(days=2)],
+                'profit': [1.0, 2.0, 3.0, 4.0],
+                'commission': [0.1, 0.2, 0.3, 0.4],
+            }
+        )
+        strategy_a._transactions = pd.DataFrame(
+            {
+                'bar': [strategy_a_date_index[0], strategy_a_date_index[2], strategy_a_date_index[4], strategy_a_date_index[5]],
+                'commission': [0.1, 0.2, 0.3, 0.4],
+            }
+        )
+
+        portfolio = Portfolio(
+            strategies=[strategy_a, strategy_b],
+            weights=[0.5, 0.5],
+            capital_base=100.0,
+        )
+
+        self.assertEqual(portfolio._common_start, strategy_a_date_index[2])
+        self.assertEqual(len(portfolio._trades), 1)
+        self.assertEqual(float(portfolio._trades.iloc[0]['profit']), 3.0)
+        self.assertEqual(
+            portfolio._transactions['bar'].to_list(),
+            [strategy_a_date_index[2], strategy_a_date_index[4]],
+        )
+
     def test_no_rebalance_compounds_pods_independently(self):
         dates_index = pd.to_datetime(['2024-01-30', '2024-01-31', '2024-02-03', '2024-02-04'])
         strategy_a = make_strategy('StrategyA', dates_index, [0.0, 1.0, 0.0, 0.0])
@@ -233,12 +277,99 @@ class PortfolioTests(unittest.TestCase):
             self.assertEqual(metadata_dict['status_str'], 'ok')
             self.assertEqual(metadata_dict['benchmark_label_str'], '$SPX · TOTALRETURN')
             self.assertTrue(np.isfinite(float(portfolio.summary.loc['Beta', column_name_str])))
+        expected_benchmark_monthly_return_df = generate_monthly_returns(
+            benchmark_value_ser.copy(),
+            add_sharpe_ratios=True,
+            add_max_drawdowns=True,
+        )
+        pd.testing.assert_frame_equal(
+            portfolio.benchmark_monthly_returns,
+            expected_benchmark_monthly_return_df,
+        )
         self.assertEqual(
             portfolio.standalone_benchmark_regression_metadata_by_column_dict[
                 'StrategyA Standalone'
             ]['reason_str'],
             'missing_benchmark',
         )
+
+    def test_portfolio_without_benchmark_has_no_benchmark_monthly_returns(self):
+        dates_index = pd.bdate_range('2024-01-02', periods=30)
+        portfolio = Portfolio(
+            strategies=[
+                make_strategy('StrategyA', dates_index, [0.0] + [0.001] * 29),
+                make_strategy('StrategyB', dates_index, [0.0] + [0.002] * 29),
+            ],
+            weights=[0.5, 0.5],
+            capital_base=100.0,
+        )
+
+        self.assertIsNone(portfolio.benchmark_monthly_returns)
+
+    def test_benchmark_monthly_returns_require_complete_reporting_window(self):
+        portfolio_date_index = pd.bdate_range('2024-01-15', periods=40)
+        benchmark_date_index = pd.bdate_range('2024-01-02', periods=70)
+        benchmark_return_ser = pd.Series(
+            np.linspace(-0.002, 0.003, len(benchmark_date_index)),
+            index=benchmark_date_index,
+            dtype=float,
+        )
+        benchmark_value_ser = 100.0 * (1.0 + benchmark_return_ser).cumprod()
+        benchmark_value_ser.loc[portfolio_date_index[5]] = np.nan
+        benchmark_value_ser.loc[portfolio_date_index[10]] = np.inf
+        portfolio = Portfolio(
+            strategies=[
+                make_strategy('StrategyA', portfolio_date_index, [0.0] + [0.001] * 39),
+                make_strategy('StrategyB', portfolio_date_index, [0.0] + [0.002] * 39),
+            ],
+            weights=[0.5, 0.5],
+            capital_base=100.0,
+            regression_benchmark_value_ser=benchmark_value_ser,
+            regression_benchmark_label_str='$SPX · TOTALRETURN',
+            regression_benchmark_adjustment_str='TOTALRETURN',
+        )
+        self.assertIsNone(portfolio.benchmark_monthly_returns)
+
+    def test_benchmark_monthly_returns_are_unavailable_without_usable_overlap(self):
+        portfolio_date_index = pd.bdate_range('2024-01-02', periods=30)
+        benchmark_date_index = pd.bdate_range('2020-01-02', periods=30)
+        portfolio = Portfolio(
+            strategies=[
+                make_strategy('StrategyA', portfolio_date_index, [0.0] + [0.001] * 29),
+                make_strategy('StrategyB', portfolio_date_index, [0.0] + [0.002] * 29),
+            ],
+            weights=[0.5, 0.5],
+            capital_base=100.0,
+            regression_benchmark_value_ser=pd.Series(
+                np.linspace(100.0, 110.0, len(benchmark_date_index)),
+                index=benchmark_date_index,
+                dtype=float,
+            ),
+            regression_benchmark_label_str='$SPX · TOTALRETURN',
+            regression_benchmark_adjustment_str='TOTALRETURN',
+        )
+
+        self.assertIsNone(portfolio.benchmark_monthly_returns)
+
+    def test_benchmark_monthly_returns_are_unavailable_with_one_overlap_point(self):
+        portfolio_date_index = pd.bdate_range('2024-01-02', periods=30)
+        portfolio = Portfolio(
+            strategies=[
+                make_strategy('StrategyA', portfolio_date_index, [0.0] + [0.001] * 29),
+                make_strategy('StrategyB', portfolio_date_index, [0.0] + [0.002] * 29),
+            ],
+            weights=[0.5, 0.5],
+            capital_base=100.0,
+            regression_benchmark_value_ser=pd.Series(
+                [100.0],
+                index=pd.DatetimeIndex([portfolio_date_index[10]]),
+                dtype=float,
+            ),
+            regression_benchmark_label_str='$SPX · TOTALRETURN',
+            regression_benchmark_adjustment_str='TOTALRETURN',
+        )
+
+        self.assertIsNone(portfolio.benchmark_monthly_returns)
 
     def test_rebalanced_sleeve_regression_excludes_pm_cash_transfers(self):
         dates_index = pd.bdate_range('2020-01-02', periods=320)

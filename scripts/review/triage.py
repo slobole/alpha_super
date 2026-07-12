@@ -103,7 +103,7 @@ def _is_engine_or_shared_path_bool(path_str: str) -> bool:
         or path_str.startswith("tests/test_run_daily")
         or path_str.startswith("tests/test_fast_indicators")
         or path_str.startswith("tests/test_indicators")
-        or path_str.startswith("tests/test_friction_analysis")
+        or path_str.startswith("tests/test_capacity_analysis")
     )
 
 

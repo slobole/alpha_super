@@ -5,14 +5,15 @@ Baseline:
 exact_fees + fixed_slippage
 
 Capacity / scaling check:
-exact_fees + fixed_slippage + ADV_addon
+rerun the strategy across AUM levels
++ MOO Order/ADV limits or MOC square-root impact
 ```
 
 This note records the source-backed facts, the current repo implementation snapshot, and the practical house heuristic that follows from them.
 
 # Transaction Costs Research
 
-As of date: `2026-04-16`
+As of date: `2026-07-11`
 
 ## Purpose
 
@@ -32,7 +33,7 @@ The note separates:
 
 ## Current Repo Snapshot
 
-As of `2026-04-16`, the local repo implements:
+As of `2026-07-11`, the local repo implements:
 
 - Engine default slippage:
 
@@ -234,25 +235,28 @@ This is the model to use for normal research and backtest reporting.
 
 ### Capacity / scaling model
 
-Keep the same exact fees and fixed slippage, then add one simple `%ADV` tier:
+`CapacityAnalysis` reruns the strategy across the configured AUM grid. For
+every completed order it uses the lower of lagged 10-day mean and lagged
+20-day median dollar ADV.
 
-| `participation_rate_float` | `adv_addon_bps_float` | Type |
-|---:|---:|---|
-| `<= 0.10%` | `0` | `house_heuristic_str` |
-| `0.10% - 0.50%` | `1` | `house_heuristic_str` |
-| `0.50% - 1.00%` | `2` | `house_heuristic_str` |
-| `1.00% - 5.00%` | `5` | `house_heuristic_str` |
-| `> 5.00%` | `10` | `house_heuristic_str` |
-
-Then:
+For MOC:
 
 ```text
-implicit_slippage_bps_float
-=
-fixed_asset_type_slippage_bps_float + adv_addon_bps_float
+order_adv_ratio = abs(order_notional) / robust_lagged_dollar_adv
+central_impact_bps = 8.2 * sqrt(order_adv_ratio / 0.01)
+stress_impact_bps = 17.8 * sqrt(order_adv_ratio / 0.01)
+capacity_implicit_cost_bps = max(2.5, modeled_impact_bps)
 ```
 
-This is not a claim that the world behaves in these exact step functions. It is a deliberate simplicity choice for robust capacity testing.
+The MOC Soft and Hard limits are `0.25% ADV` and `0.50% ADV`.
+
+For MOO, v1 keeps the normal `2.5 bps` implicit cost and uses `0.05% ADV`
+and `0.10% ADV` as Soft and Hard limits. It does not claim a calibrated MOO
+stress model without point-in-time exchange and size metadata.
+
+The analysis subtracts only cost above the baseline 2.5 bps already present in
+the completed backtest. It never adds the full impact on top of 2.5 bps and
+never gives baseline slippage back.
 
 ## Why This House Model Is Reasonable
 
@@ -262,7 +266,7 @@ It is:
 - anchored to exact broker fees where possible
 - conservative without pretending to model microstructure exactly
 - robust to the known weakness of PaperTrader as a fill-quality proxy
-- sensitive to scale through a single `%ADV` control
+- sensitive to scale through explicit Order/ADV controls
 
 It avoids:
 
@@ -277,7 +281,7 @@ When evaluating a strategy:
 1. Report `gross`, `net_of_fees`, and `net_all_in`.
 2. Keep fees explicit.
 3. Use fixed slippage for baseline research.
-4. Use the `%ADV` addon only for capacity / scale checks.
+4. Use `CapacityAnalysis` for capacity / scale checks; do not change the normal backtest cost model.
 5. Do not calibrate permanent house slippage from IBKR PaperTrader `MOO` fills alone.
 
 ## Source List
@@ -295,6 +299,7 @@ Official and primary sources used:
 - NYSE auctions page: <https://www.nyse.com/trade/auctions>
 - NYSE American trading info: <https://www.nyse.com/markets/nyse-mkt/trading-info>
 - Nasdaq opening and closing crosses FAQ: <https://nasdaqtrader.com/content/productsservices/trading/crosses/openclose_faqs.pdf>
+- Goyal, Jegadeesh, and Wu, *Price Impact in Closing Auctions, Opening Auctions, and Continuous Markets*: <https://doi.org/10.1017/S0022109026102592>
 - AQR working paper: <https://www.aqr.com/Insights/Research/Working-Paper/Trading-Costs-of-Asset-Pricing-Anomalies>
 - Novy-Marx and Velikov, Review of Financial Studies: <https://academic.oup.com/rfs/article/29/1/104/1844518>
 
