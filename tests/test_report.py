@@ -14,6 +14,7 @@ from alpha.engine.report import (
     _DAILY_RETURN_HISTOGRAM_BIN_COUNT_INT,
     _build_daily_return_distribution_html,
     _build_html,
+    _display_metric_dict_for_value_ser,
     _build_portfolio_html,
     _corr_color,
     _daily_return_histogram_b64,
@@ -261,6 +262,47 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertAlmostEqual(distribution_dict['std_return_float'], np.sqrt(0.0013 / 3.0))
         self.assertAlmostEqual(distribution_dict['skew_return_float'], 0.0, places=12)
         self.assertAlmostEqual(distribution_dict['negative_rate_float'], 0.25)
+
+    def test_display_metrics_sortino_penalizes_only_downside(self):
+        """Sortino must exceed Sharpe when upside moves dominate the variance."""
+        bar_date_idx = pd.bdate_range('2024-01-02', periods=260)
+        # One big up day and one modest down day repeating: high total volatility,
+        # small downside deviation.
+        daily_return_vec = np.where(np.arange(260) % 2 == 0, 0.02, -0.005)
+        value_ser = pd.Series(
+            100_000.0 * np.cumprod(1.0 + daily_return_vec), index=bar_date_idx
+        )
+
+        display_metric_dict = _display_metric_dict_for_value_ser(value_ser)
+        return_ser = value_ser.pct_change(fill_method=None).dropna()
+        year_count_float = len(return_ser) / 252.0
+        annualised_return_float = (
+            float(value_ser.iloc[-1] / value_ser.iloc[0]) ** (1.0 / year_count_float) - 1.0
+        )
+        sharpe_float = annualised_return_float / float(return_ser.std() * np.sqrt(252.0))
+
+        self.assertIn('Sortino Ratio', display_metric_dict)
+        self.assertGreater(display_metric_dict['Sortino Ratio'], sharpe_float)
+
+    def test_display_metrics_ulcer_index_punishes_prolonged_drawdown(self):
+        """A book that stays underwater must score worse than one that recovers."""
+        bar_date_idx = pd.bdate_range('2024-01-02', periods=120)
+        deep_value_vec = np.concatenate([
+            np.full(10, 100.0), np.full(110, 70.0),  # drops and never recovers
+        ])
+        shallow_value_vec = np.concatenate([
+            np.full(10, 100.0), np.full(5, 70.0), np.full(105, 100.0),  # quick recovery
+        ])
+
+        deep_ulcer_float = _display_metric_dict_for_value_ser(
+            pd.Series(deep_value_vec, index=bar_date_idx)
+        )['Ulcer Index']
+        shallow_ulcer_float = _display_metric_dict_for_value_ser(
+            pd.Series(shallow_value_vec, index=bar_date_idx)
+        )['Ulcer Index']
+
+        # Same 30% trough depth; only time underwater differs.
+        self.assertGreater(deep_ulcer_float, shallow_ulcer_float)
 
     def test_build_html_sections_and_removed_distributions(self):
         strategy = make_strategy([0.0, 0.01, -0.02, 0.0, 0.03, -0.01])

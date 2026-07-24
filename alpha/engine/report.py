@@ -51,6 +51,7 @@ _TAIL_CONTRIBUTION_CSV_FILENAME = 'tail_contribution.csv'
 _TAIL_RETURNS_CSV_FILENAME = 'tail_returns.csv'
 _REBALANCE_TARGET_WEIGHTS_CSV_FILENAME = 'rebalance_target_weights.csv'
 _REBALANCE_DIAGNOSTICS_CSV_FILENAME = 'rebalance_diagnostics.csv'
+_TRADING_DAY_PER_YEAR_FLOAT = 252.0
 _DAILY_RETURN_HISTOGRAM_BIN_COUNT_INT = 60
 _TRADE_RETURN_HISTOGRAM_BIN_COUNT_INT = 60
 _FALLBACK_ASSET_SET = frozenset({'SPY', 'SSO', 'QQQ', 'QLD', 'TQQQ', 'UPRO'})
@@ -85,6 +86,14 @@ METRIC_HELP_TEXT_DICT = {
     ),
     'Max. Drawdown [%]': 'Largest peak-to-trough decline in the realized equity curve.',
     'MAR Ratio': 'Annualized return divided by the absolute value of maximum drawdown.',
+    'Sortino Ratio': (
+        'Annualized return divided by annualized downside deviation, so only losing days count '
+        'toward risk. Downside deviation averages squared negative returns over all observations.'
+    ),
+    'Ulcer Index': (
+        'Root mean square of the drawdown path in per cent, penalizing both how deep drawdowns '
+        'go and how long they last. Lower is better.'
+    ),
     'Time Under Water [%]': 'Percentage of stored days when equity was below its previous running peak.',
     'Avg. Drawdown [%]': 'Mean trough depth across distinct below-peak drawdown episodes.',
     'Max. Drawdown Duration [days]': 'Longest number of stored observations in one below-peak episode.',
@@ -169,7 +178,8 @@ _PERFORMANCE_SUMMARY_SECTION_TUPLE = (
     (
         'Extended Risk Diagnostics',
         (
-            'AAR [%]',
+            'Sortino Ratio',
+            'Ulcer Index',
             'Downside L1 [%]',
             'Avg. Loss Day [%]',
             'Avg. Drawdown [%]',
@@ -190,8 +200,10 @@ _PERFORMANCE_SUMMARY_SECTION_TUPLE = (
         False,
     ),
 )
+# AAR is the arithmetic average annual return, which duplicates the compounded
+# Return (Ann.) already shown in the headline and summary.
 _PERFORMANCE_SUMMARY_HIDDEN_METRIC_SET = frozenset(
-    {'Correlation', 'Exposure-Adjusted Return (Ann.) [%]'}
+    {'Correlation', 'Exposure-Adjusted Return (Ann.) [%]', 'AAR [%]'}
 )
 
 _METRIC_TOOLTIP_HTML_STR = (
@@ -1534,7 +1546,7 @@ def _display_metric_dict_for_value_ser(value_ser: pd.Series) -> dict[str, float]
     cvar_tail_ser = daily_return_ser[daily_return_ser <= var_95_float]
     cvar_95_float = float(cvar_tail_ser.mean()) if len(cvar_tail_ser) else var_95_float
 
-    return {
+    display_metric_dict = {
         'Volatility (Monthly) [%]': float(monthly_return_ser.std()) * 100.0,
         'Positive Months [%]': float((monthly_return_ser > 0.0).mean()) * 100.0,
         'Skewness (Daily)': float(daily_return_ser.skew()),
@@ -1544,6 +1556,33 @@ def _display_metric_dict_for_value_ser(value_ser: pd.Series) -> dict[str, float]
         'VaR 95% (Daily) [%]': var_95_float * 100.0,
         'CVaR 95% (Daily) [%]': cvar_95_float * 100.0,
     }
+
+    # Sortino: like Sharpe, but the denominator counts only downside deviation,
+    # so upside volatility is not penalised.
+    #
+    #     downside_deviation = sqrt(mean(min(r_t, 0)^2)) * sqrt(252)
+    #     sortino = annualised_return / downside_deviation
+    #
+    # *** CRITICAL*** The downside deviation averages over *all* observations,
+    # not only the losing ones. Dividing by the loss count instead would inflate
+    # the ratio for strategies that lose rarely but severely.
+    year_count_float = len(daily_return_ser) / _TRADING_DAY_PER_YEAR_FLOAT
+    growth_float = float(value_ser.iloc[-1] / value_ser.iloc[0])
+    downside_deviation_float = float(
+        np.sqrt(np.mean(np.square(np.minimum(daily_return_ser.to_numpy(), 0.0))))
+        * np.sqrt(_TRADING_DAY_PER_YEAR_FLOAT)
+    )
+    if year_count_float > 0.0 and growth_float > 0.0 and downside_deviation_float > 0.0:
+        annualised_return_float = growth_float ** (1.0 / year_count_float) - 1.0
+        display_metric_dict['Sortino Ratio'] = annualised_return_float / downside_deviation_float
+
+    # Ulcer Index: RMS of the drawdown path, so depth *and* time underwater are
+    # both punished — a single number for how painful the ride was.
+    #
+    #     ulcer = sqrt(mean(drawdown_t^2)),  drawdown_t = V_t / max(V_1..V_t) - 1
+    drawdown_pct_vec = (value_ser / value_ser.cummax() - 1.0).to_numpy() * 100.0
+    display_metric_dict['Ulcer Index'] = float(np.sqrt(np.mean(np.square(drawdown_pct_vec))))
+    return display_metric_dict
 
 
 def _strategy_unconditional_beta_float(strategy) -> float | None:
@@ -1943,7 +1982,9 @@ def _signature_within_year_stat_df(total_value_ser: pd.Series) -> pd.DataFrame:
         if len(year_return_ser) < 2:
             continue
         year_growth_float = float(year_value_ser.iloc[-1] / year_value_ser.iloc[0])
-        year_volatility_float = float(year_return_ser.std() * np.sqrt(252.0))
+        year_volatility_float = float(
+            year_return_ser.std() * np.sqrt(_TRADING_DAY_PER_YEAR_FLOAT)
+        )
         year_drawdown_float = float((year_value_ser / year_value_ser.cummax() - 1.0).min())
         stat_row_list.append({
             'year_int': int(year_int),
