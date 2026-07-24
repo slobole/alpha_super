@@ -1013,6 +1013,36 @@ h1 {
 .plate .chart-wrap img {
     border-radius: 0;
 }
+/* Index of plates: gives a long sheet a visible shape without hiding any of
+   it behind tabs, and prints as plain text. */
+.plate-index {
+    margin: 18px 0 22px;
+    padding: 12px 14px;
+    border: 1px solid var(--color-border);
+    background: var(--color-neutral);
+}
+.plate-index ol {
+    margin: 0;
+    padding-left: 22px;
+    columns: 2;
+    column-gap: 28px;
+    font-family: var(--font-figure);
+    font-size: 0.72rem;
+    line-height: 1.85;
+}
+.plate-index a {
+    color: var(--color-ink);
+    text-decoration: none;
+    border-bottom: 1px solid var(--color-border);
+}
+.plate-index a:hover {
+    border-bottom-color: var(--color-ink);
+}
+@media (max-width: 720px) {
+    .plate-index ol {
+        columns: 1;
+    }
+}
 .spec-masthead {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));

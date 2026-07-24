@@ -1,6 +1,7 @@
 import unittest
 import tempfile
 import json
+import re
 from unittest import mock
 from pathlib import Path
 
@@ -946,6 +947,48 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertIn('<th>Effective Pod Start</th>', report_html_str)
         self.assertIn('<td>2004-01-01</td>', report_html_str)
         self.assertIn('<td>2018-07-19</td>', report_html_str)
+
+    def test_pod_links_use_the_pod_id_not_the_strategy_name(self):
+        """The artifact directory is the pod id; linking by strategy name 404s."""
+        from alpha.engine.report import _build_pod_report_links_html
+
+        class _PortfolioStub:
+            pod_info_list = [
+                {
+                    'pod_id_str': 'pod_taa',
+                    'strategy_name': 'strategy_taa_df_btal_fallback_tqqq',
+                    'weight': 0.32,
+                    'allocated_capital': 64_000.0,
+                },
+            ]
+
+        links_html_str = _build_pod_report_links_html(_PortfolioStub())
+
+        self.assertIn('href="pods/pod_taa/report.html"', links_html_str)
+        self.assertNotIn('pods/strategy_taa_df_btal_fallback_tqqq/', links_html_str)
+        self.assertIn('32%', links_html_str)
+
+    def test_pod_links_omitted_without_pod_metadata(self):
+        from alpha.engine.report import _build_pod_report_links_html
+
+        class _PortfolioStub:
+            pod_info_list = []
+
+        self.assertEqual(_build_pod_report_links_html(_PortfolioStub()), '')
+
+    def test_plate_index_links_every_plate_to_a_real_anchor(self):
+        from alpha.engine.theme import signature_variant_context
+
+        portfolio = make_portfolio()
+        # Plates only exist under the spec layout; the card layouts have none.
+        with signature_variant_context('journal_spec'):
+            report_html_str = _build_portfolio_html(portfolio, chart_b64='portfolio-chart-b64')
+
+        anchor_id_list = re.findall(r'<div class="plate" id="(plate-\d+)"', report_html_str)
+        index_target_list = re.findall(r'<li><a href="#(plate-\d+)"', report_html_str)
+        self.assertGreater(len(anchor_id_list), 0)
+        # Every index entry points at a plate that exists, and vice versa.
+        self.assertEqual(index_target_list, anchor_id_list)
 
     def test_build_portfolio_html_includes_tail_risk_diagnostics(self):
         portfolio = make_portfolio()

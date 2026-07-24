@@ -4,6 +4,7 @@ import html
 import inspect
 import json
 import os
+import re
 import warnings
 import matplotlib
 matplotlib.use('Agg')
@@ -1623,7 +1624,7 @@ def _strategy_unconditional_beta_float(strategy) -> float | None:
     regression (which additionally requires a tradeable benchmark).
     """
     strategy_value_ser, benchmark_value_ser, _label_str = _strategy_benchmark_value_pair(strategy)
-    if strategy_value_ser is None:
+    if strategy_value_ser is None or benchmark_value_ser is None:
         return None
     aligned_df = pd.concat(
         {
@@ -1645,13 +1646,17 @@ def _augment_summary_display_metrics(strategy, summary_df: pd.DataFrame) -> pd.D
     matching series (or too little data) are simply left without the extra rows.
     """
     augmented_summary_df = summary_df.copy()
+    primary_value_ser, _b, _l = _strategy_benchmark_value_pair(strategy)
     for column_name_str in augmented_summary_df.columns:
-        source_column_str = (
-            'total_value' if str(column_name_str) == 'Strategy' else str(column_name_str)
-        )
-        if source_column_str not in strategy.results.columns:
+        # The first summary column is the entity itself, whatever it is called
+        # ('Strategy' for a strategy, 'Portfolio' for a book); the rest name
+        # benchmark series stored alongside it.
+        if column_name_str == augmented_summary_df.columns[0] and primary_value_ser is not None:
+            value_ser = primary_value_ser.dropna()
+        elif str(column_name_str) in strategy.results.columns:
+            value_ser = strategy.results[str(column_name_str)].astype(float).dropna()
+        else:
             continue
-        value_ser = strategy.results[source_column_str].astype(float).dropna()
         for metric_name_str, metric_value_float in _display_metric_dict_for_value_ser(value_ser).items():
             augmented_summary_df.loc[metric_name_str, column_name_str] = metric_value_float
 
@@ -1952,23 +1957,40 @@ def _strategy_monthly_benchmark_metric_bundle(strategy) -> tuple[pd.DataFrame | 
     return benchmark_monthly_metric_df, _monthly_benchmark_label(benchmark_name_str)
 
 
-def _strategy_benchmark_value_pair(strategy):
-    """Return (strategy_value_ser, benchmark_value_ser, label) or (None, None, None).
+def _strategy_benchmark_value_pair(entity):
+    """Return (value_ser, benchmark_value_ser, label) for a strategy or portfolio.
 
-    Both series are the stored daily equity curves, so the relative-performance
-    and conditional-beta plates measure the same wealth the rest of the report
-    does — no re-simulation, no re-derivation.
+    Both series are stored daily equity curves, so the shared plates measure
+    the same wealth the rest of the report does — no re-simulation.
+
+    A strategy keeps its benchmark as a column inside ``results``; a portfolio
+    carries an explicit PM benchmark series instead. Resolving both here is
+    what lets one set of plate builders serve either entity.
     """
-    benchmark_name_list = list(getattr(strategy, '_benchmarks', []))
-    if len(benchmark_name_list) == 0:
+    results_df = getattr(entity, 'results', None)
+    if results_df is None or 'total_value' not in results_df.columns:
         return None, None, None
-    benchmark_name_str = benchmark_name_list[0]
-    if 'total_value' not in strategy.results.columns or benchmark_name_str not in strategy.results.columns:
-        return None, None, None
+    value_ser = results_df['total_value'].astype(float)
 
-    strategy_value_ser = strategy.results['total_value'].astype(float)
-    benchmark_value_ser = strategy.results[benchmark_name_str].astype(float)
-    return strategy_value_ser, benchmark_value_ser, _monthly_benchmark_label(benchmark_name_str)
+    portfolio_benchmark_value_ser = getattr(entity, 'regression_benchmark_value_ser', None)
+    if portfolio_benchmark_value_ser is not None and len(portfolio_benchmark_value_ser) > 0:
+        benchmark_label_str = (
+            getattr(entity, 'regression_benchmark_label_str', None) or 'Benchmark'
+        )
+        aligned_benchmark_ser = (
+            portfolio_benchmark_value_ser.astype(float).reindex(results_df.index).ffill()
+        )
+        return value_ser, aligned_benchmark_ser, benchmark_label_str
+
+    benchmark_name_list = list(getattr(entity, '_benchmarks', []))
+    if len(benchmark_name_list) > 0 and benchmark_name_list[0] in results_df.columns:
+        benchmark_name_str = benchmark_name_list[0]
+        return (
+            value_ser,
+            results_df[benchmark_name_str].astype(float),
+            _monthly_benchmark_label(benchmark_name_str),
+        )
+    return value_ser, None, None
 
 
 def _build_composition_plate_html(strategy) -> str:
@@ -2157,10 +2179,11 @@ def _signature_monthly_table_html(
 
 def _build_signature_monthly_returns_html(strategy) -> str:
     """Strategy monthly grid over benchmark grid, on one shared return scale."""
-    if 'total_value' not in strategy.results.columns:
+    strategy_value_ser, benchmark_value_ser, benchmark_label_str = (
+        _strategy_benchmark_value_pair(strategy)
+    )
+    if strategy_value_ser is None:
         return ''
-    strategy_value_ser = strategy.results['total_value'].astype(float)
-    _s, benchmark_value_ser, benchmark_label_str = _strategy_benchmark_value_pair(strategy)
 
     # One scale spanning both tables, so an identical return is an identical
     # shade in each and the two grids can be compared directly.
@@ -2226,9 +2249,10 @@ def _build_annual_paths_plate_html(strategy) -> str:
     shape of every year is comparable — the good years and the bad ones shown
     at the same size, which is the point of the device.
     """
-    if 'total_value' not in strategy.results.columns:
+    total_value_ser, _b, _l = _strategy_benchmark_value_pair(strategy)
+    if total_value_ser is None:
         return ''
-    total_value_ser = strategy.results['total_value'].astype(float).dropna()
+    total_value_ser = total_value_ser.dropna()
     if len(total_value_ser) < 2:
         return ''
 
@@ -2267,7 +2291,7 @@ winning ones. The figure beside each year is where it ended.</p>
 def _build_relative_performance_plate_html(strategy) -> str:
     """Cumulative strategy-over-benchmark ratio (log). Empty without a benchmark."""
     strategy_value_ser, benchmark_value_ser, _label_str = _strategy_benchmark_value_pair(strategy)
-    if strategy_value_ser is None:
+    if strategy_value_ser is None or benchmark_value_ser is None:
         return ''
     try:
         relative_uri_str = render_relative_performance_data_uri_str(
@@ -2292,7 +2316,7 @@ def _build_conditional_beta_plate_html(strategy) -> str:
     either regime.
     """
     strategy_value_ser, benchmark_value_ser, _label_str = _strategy_benchmark_value_pair(strategy)
-    if strategy_value_ser is None:
+    if strategy_value_ser is None or benchmark_value_ser is None:
         return ''
     strategy_return_ser = strategy_value_ser.pct_change(fill_method=None).dropna()
     benchmark_return_ser = benchmark_value_ser.pct_change(fill_method=None).dropna()
@@ -3646,29 +3670,34 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
         portfolio.name,
         portfolio.benchmark_regression_metadata_by_column_dict,
     )
-    pm_allocation_card_html_str = _wrap_card_html(_build_pm_allocation_html(portfolio))
-    equity_card_html_str = _wrap_card_html(
-        f'''
+    # Raw section content, wrapped as cards below or emitted as plates by the
+    # spec body builder.
+    pm_allocation_content_html_str = _build_pm_allocation_html(portfolio)
+    equity_content_html_str = f'''
 <h2>Equity Curve</h2>
 <div class="chart-wrap">
   <img src="data:image/png;base64,{chart_b64}" alt="Portfolio Equity Curve">
 </div>
-''',
-        card_class_str='card-primary',
-    )
-    weight_allocation_card_html_str = _wrap_card_html(
-        f'''
+'''
+    weight_allocation_content_html_str = f'''
 <h2>Weight Allocation</h2>
 {weight_table}
-''',
-    )
-    provenance_card_html_str = _wrap_card_html(_build_provenance_html(portfolio))
-    performance_summary_card_html_str = _wrap_card_html(
-        f'''
+'''
+    provenance_content_html_str = _build_provenance_html(portfolio)
+    performance_summary_content_html_str = f'''
 <h2>Portfolio Performance Summary</h2>
-{_format_performance_summary(summ, portfolio.benchmark_regression_metadata_by_column_dict)}
-''',
+{_format_performance_summary(
+    _augment_summary_display_metrics(portfolio, summ),
+    portfolio.benchmark_regression_metadata_by_column_dict,
+)}
+'''
+    pm_allocation_card_html_str = _wrap_card_html(pm_allocation_content_html_str)
+    equity_card_html_str = _wrap_card_html(
+        equity_content_html_str, card_class_str='card-primary'
     )
+    weight_allocation_card_html_str = _wrap_card_html(weight_allocation_content_html_str)
+    provenance_card_html_str = _wrap_card_html(provenance_content_html_str)
+    performance_summary_card_html_str = _wrap_card_html(performance_summary_content_html_str)
     monthly_returns_card_html_str = _wrap_card_html(
         f'''
 <h2>Portfolio Monthly Returns</h2>
@@ -3696,13 +3725,13 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
     diagnostics_card_html_str = _wrap_card_html(_build_diagnostics_html(portfolio))
     tail_risk_card_html_str = _wrap_card_html(_build_tail_risk_html(portfolio))
     pod_drift_card_html_str = _wrap_card_html(_portfolio_pod_drift_html(portfolio))
-    pooled_trade_stats_card_html_str = _wrap_card_html(
-        f'''
+    pooled_trade_stats_content_html_str = f'''
 <h2>PM-Window Pod Trade Statistics</h2>
 <p>Completed pod trades whose full entry-to-exit lifecycle falls inside the common PM reporting window.</p>
-<div class="scroll">{_format_summary_trades(portfolio.summary_trades) if portfolio.summary_trades is not None and len(portfolio.summary_trades) > 0 else '<p>No completed PM-window trades.</p>'}</div>
-''',
-    )
+<div class="scroll">{_format_summary_trades(_curate_summary_trades(portfolio.summary_trades)) if portfolio.summary_trades is not None and len(portfolio.summary_trades) > 0 else '<p>No completed PM-window trades.</p>'}</div>
+{_degenerate_trade_note_html(portfolio)}
+'''
+    pooled_trade_stats_card_html_str = _wrap_card_html(pooled_trade_stats_content_html_str)
     pooled_trade_distribution_card_html_str = _wrap_card_html(
         _build_trade_distribution_html(
             portfolio._trades,
@@ -3710,7 +3739,43 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
         )
     )
 
-    body = f'''<div class="report-shell">
+    if str(SIGNATURE_PALETTE_DICT['layout_str']) == 'spec':
+        # A portfolio is a strategy that happens to be made of pods, so it
+        # leads with the same devices in the same order, then adds the
+        # book-level ones. Per-pod detail is linked, not restated: each pod
+        # already has its own full report beside this file.
+        portfolio_monthly_content_html_str = _build_signature_monthly_returns_html(portfolio)
+        body = _build_spec_report_body_html(
+            strategy=portfolio,
+            run_date_str=run_date,
+            start_str=start_str,
+            end_str=end_str,
+            capital_base_obj=capital_base,
+            final_value_obj=final_val,
+            headline_metrics_html_str=kpi_grid_html_str,
+            report_kind_str='Portfolio Report',
+            plate_content_html_list=[
+                equity_content_html_str,
+                _build_annual_paths_plate_html(portfolio),
+                _build_relative_performance_plate_html(portfolio),
+                weight_allocation_content_html_str,
+                pm_allocation_content_html_str,
+                performance_summary_content_html_str,
+                _build_conditional_beta_plate_html(portfolio),
+                _build_diagnostics_html(portfolio),
+                _build_tail_risk_html(portfolio),
+                _portfolio_pod_drift_html(portfolio),
+                (
+                    f'<h2>Portfolio Monthly Returns</h2>{portfolio_monthly_content_html_str}'
+                    if portfolio_monthly_content_html_str else ''
+                ),
+                pooled_trade_stats_content_html_str,
+                _build_pod_report_links_html(portfolio),
+                provenance_content_html_str,
+            ],
+        )
+    else:
+        body = f'''<div class="report-shell">
 {header_html_str}
 {kpi_grid_html_str}
 {pm_allocation_card_html_str}
@@ -3744,6 +3809,88 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
 </html>'''
 
 
+def _plate_anchor_id_str(plate_index_int: int) -> str:
+    return f'plate-{plate_index_int:02d}'
+
+
+def _plate_title_str(plate_content_html_str: str) -> str:
+    """Pull a plate's heading out of its own content for the index."""
+    heading_match = re.search(r'<h2>(.*?)</h2>', plate_content_html_str, re.S)
+    if heading_match is None:
+        return ''
+    return html.unescape(re.sub(r'<[^>]+>', '', heading_match.group(1))).strip()
+
+
+def _build_plate_index_html(plate_content_html_list: list[str]) -> str:
+    """List the plates up front so a long sheet can be navigated.
+
+    A specimen sheet is read by scrolling, not by hiding sections behind tabs;
+    an index gives the document a visible shape without putting any evidence
+    out of sight, and it survives printing because it is plain anchors.
+    """
+    entry_html_list = []
+    for plate_index_int, plate_content_html_str in enumerate(plate_content_html_list, start=1):
+        plate_title_str = _plate_title_str(plate_content_html_str)
+        if not plate_title_str:
+            continue
+        entry_html_list.append(
+            f'<li><a href="#{_plate_anchor_id_str(plate_index_int)}">'
+            f'{html.escape(plate_title_str)}</a></li>'
+        )
+    if len(entry_html_list) == 0:
+        return ''
+    return (
+        '<nav class="plate-index"><ol>' + ''.join(entry_html_list) + '</ol></nav>'
+    )
+
+
+def _build_pod_report_links_html(portfolio) -> str:
+    """Link each pod to its own full report rather than restating it here.
+
+    ``save_portfolio_results`` already writes a complete report for every pod
+    beside the portfolio's own, and each of those carries the full device set.
+    Summarising them again in the book-level sheet duplicates a better
+    artifact, so this points at them instead.
+    """
+    pod_info_list = list(getattr(portfolio, 'pod_info_list', None) or [])
+    if len(pod_info_list) == 0:
+        return ''
+
+    row_html_list = []
+    for pod_info_dict in pod_info_list:
+        # *** CRITICAL*** The artifact directory is the pod id, not the
+        # strategy name. Linking by strategy name produces a dead link for
+        # every pod whose id differs from the strategy it runs.
+        pod_id_str = str(pod_info_dict.get('pod_id_str') or '').strip()
+        if not pod_id_str:
+            continue
+        strategy_name_str = str(pod_info_dict.get('strategy_name') or pod_id_str)
+        weight_obj = pod_info_dict.get('weight')
+        weight_str = f'{float(weight_obj) * 100:.0f}%' if weight_obj is not None else ''
+        capital_obj = pod_info_dict.get('allocated_capital')
+        capital_str = _fmt_dollar(capital_obj) if capital_obj is not None else ''
+        pod_report_path_str = f'pods/{pod_id_str}/report.html'
+        row_html_list.append(
+            f'<tr><td class="metric">{html.escape(pod_id_str)}</td>'
+            f'<td>{html.escape(strategy_name_str)}</td>'
+            f'<td>{weight_str}</td><td>{capital_str}</td>'
+            f'<td><a href="{html.escape(pod_report_path_str)}">open report</a></td></tr>'
+        )
+    if len(row_html_list) == 0:
+        return ''
+
+    return (
+        '<h2>Pods</h2>'
+        '<div class="scroll"><table class="stats-table">'
+        '<thead><tr><th>Pod</th><th>Strategy</th><th>Weight</th><th>Capital</th>'
+        '<th>Full report</th></tr></thead>'
+        f'<tbody>{"".join(row_html_list)}</tbody></table></div>'
+        '<p class="metric-context">Each pod is written as its own complete report beside this '
+        'one, carrying the same devices at strategy level. Book-level questions are answered '
+        'here; per-pod detail is one click away rather than restated.</p>'
+    )
+
+
 def _build_spec_report_body_html(
     strategy,
     run_date_str: str,
@@ -3753,6 +3900,7 @@ def _build_spec_report_body_html(
     final_value_obj,
     headline_metrics_html_str: str,
     plate_content_html_list: list[str],
+    report_kind_str: str = 'Strategy Report',
 ) -> str:
     """Assemble the specimen-sheet body: provenance masthead, then numbered plates.
 
@@ -3773,18 +3921,22 @@ def _build_spec_report_body_html(
         f'<div class="spec-field-value">{html.escape(str(value_str))}</div></div>'
         for label_str, value_str in masthead_field_list
     )
-    plate_html_str = ''.join(
-        f'<div class="plate">{content_html_str}</div>'
-        for content_html_str in plate_content_html_list
+    active_plate_content_html_list = [
+        content_html_str for content_html_str in plate_content_html_list
         if content_html_str and content_html_str.strip()
+    ]
+    plate_html_str = ''.join(
+        f'<div class="plate" id="{_plate_anchor_id_str(plate_index_int)}">{content_html_str}</div>'
+        for plate_index_int, content_html_str in enumerate(active_plate_content_html_list, start=1)
     )
     return f'''<div class="report-shell">
 <header class="report-header">
-  <div class="report-eyebrow">Strategy Report</div>
+  <div class="report-eyebrow">{html.escape(report_kind_str)}</div>
   <h1>{html.escape(str(strategy.name))}</h1>
 </header>
 <div class="spec-masthead">{masthead_html_str}</div>
 {headline_metrics_html_str}
+{_build_plate_index_html(active_plate_content_html_list)}
 {plate_html_str}
 </div>'''
 
