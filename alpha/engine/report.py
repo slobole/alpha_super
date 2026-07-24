@@ -940,7 +940,7 @@ def _daily_return_histogram_b64(distribution_dict: dict[str, object]) -> str | N
         axis_obj.hist(
             return_vec,
             bins=bin_edge_vec,
-            color=SEABORN_DEEP_COLOR_LIST[0],
+            color=SIGNATURE_PALETTE_DICT['overlay_cycle'][0],
             alpha=0.78,
             edgecolor=SIGNATURE_PALETTE_DICT['bar_edge'],
             linewidth=0.65,
@@ -954,7 +954,7 @@ def _daily_return_histogram_b64(distribution_dict: dict[str, object]) -> str | N
         )
         axis_obj.axvline(
             mean_return_float,
-            color=SEABORN_DEEP_COLOR_LIST[1],
+            color=SIGNATURE_PALETTE_DICT['overlay_cycle'][1],
             linestyle='-',
             linewidth=1.1,
             label='Mean return',
@@ -1171,7 +1171,7 @@ def _trade_return_histogram_b64(distribution_dict: dict[str, object]) -> str | N
             axis_obj.hist(
             losing_trade_return_vec,
             bins=bin_edge_vec,
-            color=SEABORN_DEEP_COLOR_LIST[0],
+            color=SIGNATURE_PALETTE_DICT['overlay_cycle'][0],
             alpha=0.72,
             edgecolor=SIGNATURE_PALETTE_DICT['bar_edge'],
             linewidth=0.60,
@@ -1181,7 +1181,7 @@ def _trade_return_histogram_b64(distribution_dict: dict[str, object]) -> str | N
             axis_obj.hist(
             winning_trade_return_vec,
             bins=bin_edge_vec,
-            color=SEABORN_DEEP_COLOR_LIST[1],
+            color=SIGNATURE_PALETTE_DICT['overlay_cycle'][1],
             alpha=0.72,
             edgecolor=SIGNATURE_PALETTE_DICT['bar_edge'],
             linewidth=0.60,
@@ -1197,7 +1197,7 @@ def _trade_return_histogram_b64(distribution_dict: dict[str, object]) -> str | N
         )
         axis_obj.axvline(
             mean_trade_return_float,
-            color=SEABORN_DEEP_COLOR_LIST[2],
+            color=SIGNATURE_PALETTE_DICT['overlay_cycle'][2],
             linestyle='-',
             linewidth=1.1,
             label='Mean trade return',
@@ -1239,7 +1239,7 @@ def _trade_return_duration_scatter_b64(distribution_dict: dict[str, object]) -> 
             axis_obj.scatter(
                 trade_duration_day_vec[losing_mask_vec],
                 trade_return_vec[losing_mask_vec],
-                color=SEABORN_DEEP_COLOR_LIST[0],
+                color=SIGNATURE_PALETTE_DICT['overlay_cycle'][0],
                 alpha=0.58,
                 s=20,
                 edgecolors='none',
@@ -1249,7 +1249,7 @@ def _trade_return_duration_scatter_b64(distribution_dict: dict[str, object]) -> 
             axis_obj.scatter(
                 trade_duration_day_vec[winning_mask_vec],
                 trade_return_vec[winning_mask_vec],
-                color=SEABORN_DEEP_COLOR_LIST[1],
+                color=SIGNATURE_PALETTE_DICT['overlay_cycle'][1],
                 alpha=0.58,
                 s=20,
                 edgecolors='none',
