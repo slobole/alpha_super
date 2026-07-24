@@ -809,7 +809,12 @@ strong {{
 
 
 def _build_spec_layout_css() -> str:
-    """Datasheet layout: ruled field masthead, numbered plates, tight rhythm."""
+    """Datasheet layout: ruled field masthead, numbered plates, tight rhythm.
+
+    Plate numbers come from a CSS counter on the plate's own heading, so any
+    section wrapped in ``.plate`` is indexed automatically — the report reuses
+    its existing ``<h2>`` sections as plates with no per-section renumbering.
+    """
     return '''
 body {
     font-size: 14.5px;
@@ -817,6 +822,7 @@ body {
 }
 .report-shell {
     max-width: 1000px;
+    counter-reset: plate;
 }
 .report-header {
     margin-bottom: 0;
@@ -830,37 +836,40 @@ h1 {
     letter-spacing: 0.09em;
     text-transform: uppercase;
 }
-h2 {
-    margin: 30px 0 13px;
-}
 .report-shell > p {
     max-width: 70ch;
 }
-/* Every chart is a numbered plate with a ruled caption bar, the way a
-   datasheet indexes its figures — never a chart floating in whitespace. */
+/* Every section is a numbered plate framed like a datasheet figure, never a
+   table or chart floating in whitespace. The plate's own <h2> becomes the
+   ruled caption bar, and a CSS counter stamps the plate number onto it. */
 .plate {
+    counter-increment: plate;
     border: 1px solid var(--color-border);
-    padding: 0;
-    margin-bottom: 16px;
     background: var(--color-panel);
+    padding: 0 13px 13px;
+    margin-bottom: 16px;
 }
-.plate-label {
-    display: flex;
-    justify-content: space-between;
-    gap: 16px;
+.plate > h2 {
+    margin: 0 -13px 13px;
+    padding: 7px 13px;
+    background: var(--color-neutral);
+    border: none;
+    border-bottom: 1px solid var(--color-border);
+    border-radius: 0;
     font-family: var(--font-figure);
-    font-size: 0.58rem;
-    letter-spacing: 0.14em;
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.13em;
     text-transform: uppercase;
     color: var(--color-muted);
-    padding: 7px 11px;
-    border-bottom: 1px solid var(--color-border);
-    background: var(--color-neutral);
 }
-.plate-body {
-    padding: 12px 11px;
+.plate > h2::before {
+    content: "Plate " counter(plate, decimal-leading-zero) " \\2014 ";
 }
-.plate-body > .chart-wrap img {
+.plate > h2 ~ h2 {
+    counter-increment: none;
+}
+.plate .chart-wrap img {
     border-radius: 0;
 }
 .spec-masthead {

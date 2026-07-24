@@ -3,6 +3,7 @@ import base64
 import html
 import inspect
 import json
+import os
 import warnings
 import matplotlib
 matplotlib.use('Agg')
@@ -22,7 +23,15 @@ from alpha.engine.theme import (
     build_report_css,
     build_report_font_head_html,
     build_signature_rcparams,
+    signature_variant_context,
 )
+
+
+# The signature variant every report renders under. journal_spec is the shipped
+# look; override with ALPHA_REPORT_VARIANT_STR (e.g. 'current' for the legacy
+# card dashboard) without touching code. The report resolves its CSS, fonts and
+# charts inside this variant at render time — see _render_report_html.
+_ACTIVE_REPORT_VARIANT_STR = os.environ.get('ALPHA_REPORT_VARIANT_STR', 'journal_spec')
 
 
 _MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -607,13 +616,15 @@ def save_results(strategy, output_dir='results', output_path: str | Path | None 
     _write_metadata(out / _RUN_INFO_FILENAME, _strategy_run_info_dict(strategy))
     _write_metadata(out / _SUMMARY_FILENAME, _summary_metrics_dict(strategy))
 
-    buf = io.BytesIO()
-    strategy.plot(save_to=buf)
-    plt.close('all')
-    buf.seek(0)
-    chart_b64 = base64.b64encode(buf.read()).decode('ascii')
-
-    html = _build_html(strategy, chart_b64)
+    # Chart and HTML are rendered inside the active signature variant so the
+    # flagship chart and the page styling always agree.
+    with signature_variant_context(_ACTIVE_REPORT_VARIANT_STR):
+        buf = io.BytesIO()
+        strategy.plot(save_to=buf)
+        plt.close('all')
+        buf.seek(0)
+        chart_b64 = base64.b64encode(buf.read()).decode('ascii')
+        html = _build_html(strategy, chart_b64)
     (out / 'report.html').write_text(html, encoding='utf-8')
     _write_transaction_csv(strategy._transactions, out / _TRANSACTION_CSV_FILENAME)
 
@@ -3025,6 +3036,52 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
 </html>'''
 
 
+def _build_spec_report_body_html(
+    strategy,
+    run_date_str: str,
+    start_str: str,
+    end_str: str,
+    capital_base_obj,
+    final_value_obj,
+    headline_metrics_html_str: str,
+    plate_content_html_list: list[str],
+) -> str:
+    """Assemble the specimen-sheet body: provenance masthead, then numbered plates.
+
+    Reuses each section's existing content unchanged; the plate frame and its
+    number are supplied by CSS (see theme._build_spec_layout_css). Empty
+    sections (e.g. no weights for a single-asset book) are dropped so the plate
+    sequence has no gaps.
+    """
+    masthead_field_list = [
+        ('Report', 'Strategy'),
+        ('Name', strategy.name),
+        ('Period', f'{start_str} → {end_str}'),
+        ('Capital', _fmt_dollar(capital_base_obj)),
+        ('Final', _fmt_dollar(final_value_obj)),
+        ('Run', run_date_str),
+    ]
+    masthead_html_str = ''.join(
+        f'<div class="spec-field"><div class="spec-field-label">{html.escape(str(label_str))}</div>'
+        f'<div class="spec-field-value">{html.escape(str(value_str))}</div></div>'
+        for label_str, value_str in masthead_field_list
+    )
+    plate_html_str = ''.join(
+        f'<div class="plate">{content_html_str}</div>'
+        for content_html_str in plate_content_html_list
+        if content_html_str and content_html_str.strip()
+    )
+    return f'''<div class="report-shell">
+<header class="report-header">
+  <div class="report-eyebrow">Specimen sheet</div>
+  <h1>{html.escape(str(strategy.name))}</h1>
+</header>
+<div class="spec-masthead">{masthead_html_str}</div>
+{headline_metrics_html_str}
+{plate_html_str}
+</div>'''
+
+
 def _build_html(strategy, chart_b64: str) -> str:
     summ = strategy.summary
     start_val = summ.loc['Start', 'Strategy']
@@ -3053,77 +3110,93 @@ def _build_html(strategy, chart_b64: str) -> str:
         'Strategy',
         strategy_regression_metadata_by_column_dict,
     )
-    equity_card_html_str = _wrap_card_html(
-        f'''
+    benchmark_monthly_metric_df, benchmark_label_str = _strategy_monthly_benchmark_metric_bundle(strategy)
+
+    # Raw section content (each carrying its own <h2>), assembled below either
+    # as cards (dashboard/document) or as numbered plates (spec).
+    equity_content_html_str = f'''
 <h2>Equity Curve</h2>
 <div class="chart-wrap">
   <img src="data:image/png;base64,{chart_b64}" alt="Equity Curve">
 </div>
-''',
-        card_class_str='card-primary',
-    )
-    weights_html_str = _portfolio_weights_html(strategy)
-    weights_card_html_str = _wrap_card_html(weights_html_str) if weights_html_str else ''
-    performance_summary_card_html_str = _wrap_card_html(
-        f'''
+'''
+    weights_content_html_str = _portfolio_weights_html(strategy)
+    performance_summary_content_html_str = f'''
 <h2>Performance Summary</h2>
 {_format_performance_summary(summ, strategy_regression_metadata_by_column_dict)}
-''',
-    )
-    benchmark_monthly_metric_df, benchmark_label_str = _strategy_monthly_benchmark_metric_bundle(strategy)
-    monthly_returns_card_html_str = _wrap_card_html(
-        f'''
+'''
+    monthly_returns_content_html_str = f'''
 <h2>Monthly Returns</h2>
 <div class="scroll">{_monthly_returns_html(strategy.monthly_returns, benchmark_monthly_metric_df, benchmark_label_str)}</div>
-''',
-        card_class_str='card-monthly-returns',
-    )
-    trade_statistics_card_html_str = _wrap_card_html(
-        f'''
+'''
+    trade_statistics_content_html_str = f'''
 <h2>Trade Statistics</h2>
 <div class="scroll">{_format_summary_trades(strategy.summary_trades)}</div>
-''',
+'''
+    trade_distribution_content_html_str = _build_trade_distribution_html(
+        strategy._trades, 'Trade Return Distribution'
     )
-    trade_distribution_card_html_str = _wrap_card_html(
-        _build_trade_distribution_html(strategy._trades, 'Trade Return Distribution')
-    )
-    daily_distribution_card_html_str = _wrap_card_html(
-        _build_daily_return_distribution_html(strategy)
-    )
-    open_trades_card_html_str = _wrap_card_html(
-        f'''
+    daily_distribution_content_html_str = _build_daily_return_distribution_html(strategy)
+    open_trades_content_html_str = f'''
 <h2>Open Trades</h2>
 <div class="scroll">{_format_open_trades(strategy._open_trades)}</div>
-''',
-    )
-    closed_trades_card_html_str = _wrap_card_html(
-        f'''
+'''
+    closed_trades_content_html_str = f'''
 <h2>Closed Trades</h2>
 <div class="scroll">{_format_trades(strategy._trades)}</div>
-''',
-    )
+'''
 
-    body = f'''<div class="report-shell">
+    if str(SIGNATURE_PALETTE_DICT['layout_str']) == 'spec':
+        body = _build_spec_report_body_html(
+            strategy=strategy,
+            run_date_str=run_date,
+            start_str=start_str,
+            end_str=end_str,
+            capital_base_obj=capital_base,
+            final_value_obj=final_val,
+            headline_metrics_html_str=kpi_grid_html_str,
+            plate_content_html_list=[
+                equity_content_html_str,
+                weights_content_html_str,
+                performance_summary_content_html_str,
+                trade_statistics_content_html_str,
+                monthly_returns_content_html_str,
+                trade_distribution_content_html_str,
+                daily_distribution_content_html_str,
+                open_trades_content_html_str,
+                closed_trades_content_html_str,
+            ],
+        )
+    else:
+        weights_card_html_str = (
+            _wrap_card_html(weights_content_html_str) if weights_content_html_str else ''
+        )
+        body = f'''<div class="report-shell">
 {header_html_str}
 {kpi_grid_html_str}
-{equity_card_html_str}
+{_wrap_card_html(equity_content_html_str, card_class_str='card-primary')}
 {weights_card_html_str}
-{_build_card_grid_html([performance_summary_card_html_str, trade_statistics_card_html_str])}
-{monthly_returns_card_html_str}
-{trade_distribution_card_html_str}
-{daily_distribution_card_html_str}
-{open_trades_card_html_str}
-{closed_trades_card_html_str}
+{_build_card_grid_html([
+    _wrap_card_html(performance_summary_content_html_str),
+    _wrap_card_html(trade_statistics_content_html_str),
+])}
+{_wrap_card_html(monthly_returns_content_html_str, card_class_str='card-monthly-returns')}
+{_wrap_card_html(trade_distribution_content_html_str)}
+{_wrap_card_html(daily_distribution_content_html_str)}
+{_wrap_card_html(open_trades_content_html_str)}
+{_wrap_card_html(closed_trades_content_html_str)}
 </div>'''
 
+    # Resolve styling at render time so it reflects whichever signature variant
+    # is active \u2014 not the one frozen into module constants at import.
     return f'''<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{strategy.name} \u2014 Strategy Report</title>
-{_FONT_HEAD_HTML_STR}
-<style>{_CSS}</style>
+{build_report_font_head_html()}
+<style>{build_report_css()}</style>
 </head>
 <body>
 {body}
