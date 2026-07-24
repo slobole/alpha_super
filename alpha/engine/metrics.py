@@ -235,7 +235,17 @@ def generate_trades(transactions: pd.DataFrame) -> pd.DataFrame:
     # calculate trade duration (time between opening and closing)
     trades['duration'] = trades['end'] - trades['start']
     # compute trade return as profit divided by initial capital
-    trades['return'] = trades['profit'] / trades['capital']
+    #
+    # *** CRITICAL*** A zero capital base makes the return undefined, not
+    # infinitely negative. Dividing straight through emits -inf, which then
+    # silently propagates into every statistic built on trade returns (average
+    # return per trade, best/worst trade, payoff ratio). NaN is the honest
+    # value: pandas excludes it from aggregates instead of poisoning them, and
+    # it stays visible as a non-finite entry for anything auditing the ledger.
+    # The engine no longer records zero-share fills, so this is a guard against
+    # regressions and against older stored runs.
+    positive_capital_ser = trades['capital'].where(trades['capital'] > 0.0)
+    trades['return'] = trades['profit'] / positive_capital_ser
     return trades
 
 

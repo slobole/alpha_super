@@ -239,6 +239,32 @@ class Strategy(ABC):
         if self._commission_per_share == 0:
             return 0.0
         return max(self._commission_minimum, self._commission_per_share * abs(shares))
+
+    def _cancel_zero_share_fill_bool(self, order, amount_float) -> bool:
+        """Cancel an order that would fill zero shares. True when cancelled.
+
+        *** CRITICAL*** A zero-share fill is not a trade. Nothing is bought or
+        sold, so no transaction is recorded and no commission is charged.
+
+        This arises when the sizing price is so high that the target allocation
+        rounds down to zero shares — for example a reverse-split-adjusted price
+        above the pod's entire capital base. Executing it anyway would bill the
+        commission minimum for an unfilled order and register a phantom
+        round-trip trade whose return is profit / 0, which is not finite and
+        silently corrupts every statistic derived from trade returns.
+        """
+        if not np.isclose(float(amount_float), 0.0):
+            return False
+
+        self.log_audit_event(
+            "engine.order.canceled",
+            self._build_order_log_payload_dict(
+                order,
+                {"reason_code_str": "zero_share_fill"},
+            ),
+        )
+        self.remove_order(order)
+        return True
     
     def initialize_results(self) -> pd.DataFrame:
         columns = ['portfolio_value', 'cash', 'total_value', 'daily_returns',
@@ -709,6 +735,8 @@ class Strategy(ABC):
                 # (liquidity/cash constraints are ignored here; this can be improved)
                 price = current_open * penalty
                 amount = order.amount_in_shares(sizing_price_float, portfolio_value_float, position)
+                if self._cancel_zero_share_fill_bool(order, amount):
+                    continue
                 commission = self._compute_commission(amount)
                 self.add_transaction(order.trade_id, self.current_bar, order.asset, amount, price,
                                     price * amount, order.id, commission)
@@ -729,6 +757,8 @@ class Strategy(ABC):
                                     current_open) * penalty  # sell at the best valid price
 
                     amount_exact = order.amount_in_shares(sizing_price_float, portfolio_value_float, position)
+                    if self._cancel_zero_share_fill_bool(order, amount_exact):
+                        continue
                     commission = self._compute_commission(amount_exact)
                     self.add_transaction(order.trade_id, self.current_bar, order.asset,
                                         amount_exact, price, price * amount_exact, order.id, commission)
@@ -759,6 +789,8 @@ class Strategy(ABC):
                                     current_open) * penalty  # sell at stop or worse
 
                     amount_exact = order.amount_in_shares(sizing_price_float, portfolio_value_float, position)
+                    if self._cancel_zero_share_fill_bool(order, amount_exact):
+                        continue
                     commission = self._compute_commission(amount_exact)
                     self.add_transaction(order.trade_id, self.current_bar, order.asset,
                                         amount_exact, price, price * amount_exact, order.id, commission)

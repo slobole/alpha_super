@@ -44,6 +44,52 @@ class GenerateTradesTests(unittest.TestCase):
         self.assertAlmostEqual(float(trade_df.loc[1, "profit"]), 100.0)
         self.assertAlmostEqual(float(trade_df.loc[1, "return"]), 0.10)
 
+    def test_generate_trades_returns_nan_for_zero_capital_trade(self):
+        """A zero-capital entry must not yield -inf and poison the aggregates."""
+        transaction_df = pd.DataFrame(
+            [
+                {
+                    "trade_id": 1,
+                    "bar": pd.Timestamp("2024-01-02"),
+                    "asset": "AAA",
+                    "amount": 0.0,
+                    "price": 29_912.99,
+                    "total_value": 0.0,
+                    "order_id": 1,
+                    "commission": 1.0,
+                },
+                {
+                    "trade_id": 2,
+                    "bar": pd.Timestamp("2024-01-02"),
+                    "asset": "BBB",
+                    "amount": 10,
+                    "price": 100.0,
+                    "total_value": 1_000.0,
+                    "order_id": 2,
+                    "commission": 0.0,
+                },
+                {
+                    "trade_id": 2,
+                    "bar": pd.Timestamp("2024-01-10"),
+                    "asset": "BBB",
+                    "amount": -10,
+                    "price": 110.0,
+                    "total_value": -1_100.0,
+                    "order_id": 3,
+                    "commission": 0.0,
+                },
+            ]
+        )
+
+        trade_df = generate_trades(transaction_df)
+        return_ser = trade_df["return"].astype(float)
+
+        self.assertTrue(np.isnan(float(trade_df.loc[1, "return"])))
+        self.assertFalse(np.isinf(return_ser).any())
+        # The healthy trade is unaffected, and the mean skips the undefined row.
+        self.assertAlmostEqual(float(trade_df.loc[2, "return"]), 0.10)
+        self.assertAlmostEqual(float(return_ser.mean()), 0.10)
+
     def test_generate_trades_uses_absolute_entry_notional_for_short_trade(self):
         transaction_df = pd.DataFrame(
             [
