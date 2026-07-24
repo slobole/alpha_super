@@ -19,6 +19,7 @@ from alpha.engine.signature import (
     compute_conditional_beta_dict,
     render_composition_data_uri_str,
     render_relative_performance_data_uri_str,
+    render_small_multiples_data_uri_str,
 )
 from alpha.engine.theme import (
     SIGNATURE_ASSET_COLOR_DICT,
@@ -2125,6 +2126,47 @@ def _build_signature_monthly_returns_html(strategy) -> str:
     return ''.join(html_part_list)
 
 
+def _build_annual_paths_plate_html(strategy) -> str:
+    """One mini-chart per calendar year, all on a shared vertical scale.
+
+    Each panel is that year's growth path rebased to 0 at its first bar, so the
+    shape of every year is comparable — the good years and the bad ones shown
+    at the same size, which is the point of the device.
+    """
+    if 'total_value' not in strategy.results.columns:
+        return ''
+    total_value_ser = strategy.results['total_value'].astype(float).dropna()
+    if len(total_value_ser) < 2:
+        return ''
+
+    annual_path_ser_dict: dict[str, pd.Series] = {}
+    for year_int, year_value_ser in total_value_ser.groupby(total_value_ser.index.year):
+        if len(year_value_ser) < 2:
+            continue
+        annual_path_ser_dict[str(int(year_int))] = (
+            year_value_ser / year_value_ser.iloc[0] - 1.0
+        ).reset_index(drop=True)
+    if len(annual_path_ser_dict) == 0:
+        return ''
+
+    try:
+        small_multiples_uri_str = render_small_multiples_data_uri_str(
+            annual_path_ser_dict,
+            column_count_int=4,
+            share_ylim_bool=True,
+            value_formatter_fn=lambda value_float: f'{value_float * 100:.0f}%',
+        )
+    except ValueError:
+        return ''
+    return f'''
+<h2>Year by Year</h2>
+<div class="chart-wrap"><img src="{small_multiples_uri_str}" alt="Growth path by calendar year"></div>
+<p class="metric-context">Each calendar year&rsquo;s path, rebased to zero at the year&rsquo;s first
+bar and drawn on one shared vertical scale — the losing years are shown at the same size as the
+winning ones. The figure beside each year is where it ended.</p>
+'''
+
+
 def _build_relative_performance_plate_html(strategy) -> str:
     """Cumulative strategy-over-benchmark ratio (log). Empty without a benchmark."""
     strategy_value_ser, benchmark_value_ser, _label_str = _strategy_benchmark_value_pair(strategy)
@@ -3600,6 +3642,7 @@ def _build_html(strategy, chart_b64: str) -> str:
             headline_metrics_html_str=kpi_grid_html_str,
             plate_content_html_list=[
                 equity_content_html_str,
+                _build_annual_paths_plate_html(strategy),
                 _build_relative_performance_plate_html(strategy),
                 _build_composition_plate_html(strategy),
                 weights_content_html_str,
