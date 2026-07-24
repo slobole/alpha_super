@@ -66,6 +66,8 @@ CROSS_SECTIONAL_MOMENTUM_STEM_SET = frozenset(
         "strategy_mo_clenow_top10_vol63",
         "strategy_mo_ev_lrb_252_ndx",
         "strategy_mo_jt_12_1_top20",
+        "strategy_mo_paper_b_russell1000_vol15",
+        "strategy_mo_paper_b_russell3000_vol10",
         "strategy_mo_pretom_loser_short_sp500",
         "strategy_mo_pta_winner_continuation",
         "strategy_mo_sp500_ret3m_natr21_long_short",

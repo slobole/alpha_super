@@ -250,13 +250,58 @@ capacity_implicit_cost_bps = max(2.5, modeled_impact_bps)
 
 The MOC Soft and Hard limits are `0.25% ADV` and `0.50% ADV`.
 
-For MOO, v1 keeps the normal `2.5 bps` implicit cost and uses `0.05% ADV`
-and `0.10% ADV` as Soft and Hard limits. It does not claim a calibrated MOO
-stress model without point-in-time exchange and size metadata.
+For MOO, v2.1 requires an explicit strategy impact profile. The profile selects
+Central and Stress lambdas measured in bps at `1% ADV`:
+
+| Profile | Central lambda | Stress lambda | Intended use |
+|---|---:|---:|---|
+| `MOO_LARGE_MIXED` | `40.0` | `66.4` | DV2 and QPI common-stock strategies |
+| `MOO_NASDAQ_LARGE` | `66.4` | `114.0` | Nasdaq-100 strategies |
+| `MOO_ETF_PROXY` | `40.0` | `66.4` | TAA and sector-dispersion ETF sensitivity |
+
+The Central cost uses `max(2.5 bps, central impact)` and Stress uses
+`max(2.5 bps, stress impact)`. The existing `0.05% ADV` and `0.10% ADV` Soft
+and Hard guardrails remain. Every MOO order above `1% ADV` is flagged as
+extrapolation. For ETFs this is explicitly a low-confidence common-stock proxy,
+not ETF-specific calibration; the direction of proxy bias is unknown.
 
 The analysis subtracts only cost above the baseline 2.5 bps already present in
 the completed backtest. It never adds the full impact on top of 2.5 bps and
 never gives baseline slippage back.
+
+The MOC `8.2/17.8` coefficients are the combined Large/Small closing-auction
+estimates summarized from Table 3. The MOO profile anchors are conservative
+working mappings from the opening-auction estimates in Table 5 of Goyal,
+Jegadeesh, and Wu. The [open-access JFQA paper](https://www.cambridge.org/core/journals/journal-of-financial-and-quantitative-analysis/article/price-impact-in-closing-auctions-opening-auctions-and-continuous-markets-a-benchmark-for-cost-of-trading-on-anomalies/0F72910A79C5B42CF6E85F55164CE846)
+is the primary methodology source.
+
+For auditability, Table 5's Model A anchors used in the profile mapping are
+`13.4 bps` for NYSE Large, `66.4 bps` for Nasdaq Large, and `114.0 bps` for
+Nasdaq Small, each at `1% ADV`. `MOO_LARGE_MIXED` Central `40.0` is the rounded
+midpoint of the NYSE- and Nasdaq-Large estimates; its Stress `66.4` uses the
+Nasdaq-Large estimate. `MOO_NASDAQ_LARGE` uses Nasdaq Large centrally and
+Nasdaq Small as stress. `MOO_ETF_PROXY` deliberately reuses the mixed profile;
+that is a house sensitivity mapping, not a coefficient estimated on ETFs.
+
+### v2.1 reporting windows and classifications
+
+Each AUM is fully rerun over:
+
+1. full available history; and
+2. the trailing five years ending at the completed full-history endpoint.
+
+The recent window supplies the current headline. Full history answers whether
+the same AUM would have been feasible under earlier liquidity. Recommended and
+Outer classifications are contiguous from the lowest tested AUM: once a grid
+point fails, later passing points are diagnostic only. The rolling three-year
+Recommended gate includes only windows whose baseline Sharpe is at least
+`0.30`; if none are eligible, Recommended Capacity is withheld. A passing top
+grid point is reported as right-censored (`>= tested maximum`), not as a precise
+maximum.
+
+Capacity return terminology is **benchmark excess annual return**: strategy
+annual return minus the declared performance benchmark annual return. It is not
+beta-adjusted alpha.
 
 ## Why This House Model Is Reasonable
 
@@ -299,7 +344,7 @@ Official and primary sources used:
 - NYSE auctions page: <https://www.nyse.com/trade/auctions>
 - NYSE American trading info: <https://www.nyse.com/markets/nyse-mkt/trading-info>
 - Nasdaq opening and closing crosses FAQ: <https://nasdaqtrader.com/content/productsservices/trading/crosses/openclose_faqs.pdf>
-- Goyal, Jegadeesh, and Wu, *Price Impact in Closing Auctions, Opening Auctions, and Continuous Markets*: <https://doi.org/10.1017/S0022109026102592>
+- Goyal, Jegadeesh, and Wu, *Price Impact in Closing Auctions, Opening Auctions, and Continuous Markets* (open access): <https://www.cambridge.org/core/journals/journal-of-financial-and-quantitative-analysis/article/price-impact-in-closing-auctions-opening-auctions-and-continuous-markets-a-benchmark-for-cost-of-trading-on-anomalies/0F72910A79C5B42CF6E85F55164CE846>
 - AQR working paper: <https://www.aqr.com/Insights/Research/Working-Paper/Trading-Costs-of-Asset-Pricing-Anomalies>
 - Novy-Marx and Velikov, Review of Financial Studies: <https://academic.oup.com/rfs/article/29/1/104/1844518>
 

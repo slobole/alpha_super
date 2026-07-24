@@ -21,8 +21,8 @@ It binds to `127.0.0.1` only — a single-operator console, not a service.
   vanilla CAGR / Sharpe / Max DD per strategy. Momentum is split into focused
   sub-families, and **Recent Runs** shows strategies with mapped result activity
   in the last 30 days. Drop a new strategy file in and it appears automatically.
-- **Strategy detail** — one-click run buttons (Vanilla / Friction / Timing / Risk
-  / Stress, plus *Standard* = V+F+T and *Full* = all five), the full run history
+- **Strategy detail** — one-click run buttons (Vanilla / Capacity / Timing / Risk
+  / Stress, plus *Standard* = V+C+T and *Full* = all five), the full run history
   from `results/`, and the latest report embedded inline.
 - **Portfolios** — the books under `portfolios/*.yaml` (both the simple
   `run_portfolio.py` schema and the richer `run_portfolio_manager.py` schema),
@@ -54,3 +54,6 @@ to `results/_bench/jobs/<job_id>.log`.
 | `__main__.py` | `python -m alpha.bench` entry point |
 
 Tests live in `tests/test_bench.py`.
+
+For the complete Capacity workflow and report-reading guide, see
+[`docs/research/CAPACITY_ANALYSIS_GUIDE.md`](../../docs/research/CAPACITY_ANALYSIS_GUIDE.md).

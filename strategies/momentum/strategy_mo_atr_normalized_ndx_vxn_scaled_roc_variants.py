@@ -18,6 +18,10 @@ For stock i on month-end decision date t:
     roc_prior_1m_{i,t}
         = Close_ME_{i,t-1} / Close_ME_{i,t-2} - 1
 
+    paper_b_{i,t}
+        = (Close_ME_{i,t} / Close_ME_{i,t-1})
+          * (Close_ME_{i,t-1} / Close_ME_{i,t-12} - 1)
+
     roc_last_3m_{i,t}
         = Close_ME_{i,t} / Close_ME_{i,t-3} - 1
 
@@ -78,6 +82,7 @@ DEFAULT_ATR_WINDOW_INT = ATR_WINDOW_INT
 ROC_MODE_LAST_12M_STR = "last_12m"
 ROC_MODE_LAST_1M_STR = "last_1m"
 ROC_MODE_PRIOR_1M_STR = "prior_1m"
+ROC_MODE_PAPER_B_STR = "paper_b"
 ROC_MODE_LAST_3M_STR = "last_3m"
 ROC_MODE_SKIP_12_1_STR = "skip_12_1"
 ROC_MODE_SKIP_6_1_STR = "skip_6_1"
@@ -91,6 +96,7 @@ VALID_ROC_MODE_SET = frozenset(
         ROC_MODE_LAST_12M_STR,
         ROC_MODE_LAST_1M_STR,
         ROC_MODE_PRIOR_1M_STR,
+        ROC_MODE_PAPER_B_STR,
         ROC_MODE_LAST_3M_STR,
         ROC_MODE_SKIP_12_1_STR,
         ROC_MODE_SKIP_6_1_STR,
@@ -110,6 +116,8 @@ def get_required_roc_history_month_int(roc_mode_str: str) -> int:
         return 1
     if roc_mode_str == ROC_MODE_PRIOR_1M_STR:
         return 2
+    if roc_mode_str == ROC_MODE_PAPER_B_STR:
+        return 12
     if roc_mode_str == ROC_MODE_LAST_3M_STR:
         return 3
     if roc_mode_str == ROC_MODE_SKIP_3_1_STR:
@@ -156,6 +164,7 @@ __all__ = [
     "ROC_MODE_LAST_1M_STR",
     "ROC_MODE_LAST_3M_STR",
     "ROC_MODE_PRIOR_1M_STR",
+    "ROC_MODE_PAPER_B_STR",
     "ROC_MODE_ANTI_REVERSAL_SKIP_BLEND_STR",
     "ROC_MODE_CONSISTENCY_SKIP_BLEND_STR",
     "ROC_MODE_EQUAL_SKIP_BLEND_STR",
@@ -235,6 +244,13 @@ def compute_monthly_roc_variant_df(
         # *** CRITICAL*** prior_1m ROC intentionally skips the newest month.
         # It uses t-1 divided by t-2, never a value after decision_t.
         monthly_roc_df = (close_df.shift(1) / close_df.shift(2)) - 1.0
+    elif roc_mode_str == ROC_MODE_PAPER_B_STR:
+        # *** CRITICAL*** Paper-B uses only completed month-end closes known
+        # at decision_t. Classic momentum excludes the newest month; the
+        # newest completed month's gross return then adjusts that signal.
+        classic_momentum_df = (close_df.shift(1) / close_df.shift(12)) - 1.0
+        last_month_return_df = (close_df / close_df.shift(1)) - 1.0
+        monthly_roc_df = (1.0 + last_month_return_df) * classic_momentum_df
     elif roc_mode_str == ROC_MODE_LAST_3M_STR:
         # *** CRITICAL*** last_3m ROC uses the decision month-end close and
         # the trailing three-month-old close only.

@@ -73,7 +73,7 @@
 
     <div class="card-foot">
       <span class="muted-2" style="font-size:12px;">
-        {% if card.latest_run %}{{ card.latest_run.analysis_label_str|lower }} {{ card.latest_run.display_timestamp_str }}{% endif %}
+        {% if card.latest_run %}{{ card.latest_run.display_analysis_label_str|lower }} {{ card.latest_run.display_timestamp_str }}{% endif %}
         {% if card.run_count_int %} · {{ card.run_count_int }} run{{ 's' if card.run_count_int != 1 }}{% endif %}
       </span>
       <div class="btn-row">
@@ -101,7 +101,7 @@
         {% for run in recent_run_list %}
         <tr>
           <td class="mono">{{ run.run_name_str }}</td>
-          <td>{{ run.analysis_label_str }}</td>
+          <td>{{ run.display_analysis_label_str }}</td>
           <td class="muted">{{ run.display_timestamp_str }}</td>
           {% set sm = run.summary_dict %}
           <td class="num {{ 'tone-pos' if (sm.get('ann_return_pct') or 0) >= 0 else 'tone-neg' }}">{{ '%.1f%%'|format(sm.get('ann_return_pct')) if sm.get('ann_return_pct') is not none else '—' }}</td>

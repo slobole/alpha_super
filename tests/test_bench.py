@@ -232,6 +232,93 @@ def _run_entry(
     )
 
 
+def _capacity_run_entry(
+    timestamp_str: str,
+    metadata_dict: dict | None = None,
+) -> runs.RunEntry:
+    return runs.RunEntry(
+        run_name_str="strategy_mr_dv2",
+        analysis_dir_str="capacity_analysis",
+        analysis_label_str="Capacity",
+        timestamp_str=timestamp_str,
+        rel_dir_from_results_str=(
+            "research/strategy/strategy_mr_dv2/capacity_analysis/" + timestamp_str
+        ),
+        has_report_bool=True,
+        metadata_dict={} if metadata_dict is None else metadata_dict,
+    )
+
+
+def test_capacity_run_labels_legacy_and_v2_1_window_dates():
+    legacy_run_obj = _capacity_run_entry("2026-07-12_120000")
+    current_run_obj = _capacity_run_entry(
+        "2026-07-12_110000",
+        {
+            "model_version_str": "capacity_v2_1",
+            "window_date_dict": {
+                "recent_5y": {
+                    "actual_start_date_str": "2021-07-11",
+                    "actual_end_date_str": "2026-07-11",
+                },
+                "full_history": {
+                    "actual_start_date_str": "2004-01-02",
+                    "actual_end_date_str": "2026-07-11",
+                },
+            },
+        },
+    )
+
+    assert legacy_run_obj.is_legacy_capacity_bool is True
+    assert legacy_run_obj.display_analysis_label_str == "Capacity · Legacy v1"
+    assert current_run_obj.is_legacy_capacity_bool is False
+    assert current_run_obj.display_analysis_label_str == "Capacity · v2.1"
+    assert current_run_obj.capacity_window_date_summary_str == (
+        "Recent: 2021-07-11 to 2026-07-11 · "
+        "Full: 2004-01-02 to 2026-07-11"
+    )
+
+
+def test_strategy_page_prefers_non_legacy_capacity_report(monkeypatch):
+    legacy_run_obj = _capacity_run_entry("2026-07-12_120000")
+    vanilla_run_obj = _run_entry("strategy_mr_dv2", "2026-07-12_113000")
+    current_run_obj = _capacity_run_entry(
+        "2026-07-12_110000",
+        {
+            "model_version_str": "capacity_v2_1",
+            "window_date_dict": {
+                "recent_5y": {
+                    "actual_start_date_str": "2021-07-11",
+                    "actual_end_date_str": "2026-07-11",
+                },
+                "full_history": {
+                    "actual_start_date_str": "2004-01-02",
+                    "actual_end_date_str": "2026-07-11",
+                },
+            },
+        },
+    )
+    strategy_entry_obj = catalog.get_strategy_by_module(DV2_MODULE_STR)
+    assert strategy_entry_obj is not None
+    run_index_obj = SimpleNamespace(
+        runs_for=lambda _module_import_str, _stem_str: [
+            legacy_run_obj,
+            vanilla_run_obj,
+            current_run_obj,
+        ]
+    )
+    monkeypatch.setattr(catalog, "get_strategy_by_module", lambda _module_str: strategy_entry_obj)
+    monkeypatch.setattr(runs, "build_strategy_run_index", lambda: run_index_obj)
+
+    client = create_app(job_manager_obj=RecordingJobManager()).test_client()
+    html_str = client.get(f"/strategy/{DV2_MODULE_STR}").get_data(as_text=True)
+
+    assert current_run_obj.report_artifact_str in html_str
+    assert f'src="/artifact/{legacy_run_obj.report_artifact_str}"' not in html_str
+    assert "Capacity · v2.1" in html_str
+    assert "Recent: 2021-07-11 to 2026-07-11" in html_str
+    assert "Full: 2004-01-02 to 2026-07-11" in html_str
+
+
 def test_run_index_prefers_exact_stem_when_wrapper_metadata_points_to_base_module():
     base_module_str = "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs"
     wrapper_module_str = "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie"

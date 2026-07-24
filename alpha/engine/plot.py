@@ -11,14 +11,63 @@ from matplotlib.ticker import FixedLocator, FuncFormatter
 
 from alpha.engine.theme import (
     SIGNATURE_PALETTE_DICT,
+    SIGNATURE_TIME_AXIS_ROTATION_FLOAT,
     apply_signature_axis_style,
     build_plot_color_dict,
     build_signature_rcparams,
+    build_signature_time_axis_spec,
 )
 
 
 _PLOT_X_MARGIN_FLOAT = 0.008
 _PROMOTED_TICK_MIN_VERTICAL_GAP_PIXELS_FLOAT = 18.0
+
+
+def _annotate_drawdown_trough(
+        drawdown_ax,
+        drawdown_ser: pd.Series,
+        color_str: str,
+) -> None:
+    """Mark the single deepest drawdown with its depth.
+
+    The trough is *when it hurt most*, and a reader should not have to hunt for
+    it. *** CRITICAL*** The label is always placed *above* the trough, toward
+    zero. The deepest drawdown is by definition the most negative point, so it
+    sits against the bottom axis — a label placed below it would be clipped off
+    the panel.
+    """
+    plotted_drawdown_ser = pd.Series(drawdown_ser, copy=False).astype(float).dropna()
+    if len(plotted_drawdown_ser) == 0:
+        return
+
+    trough_ts = plotted_drawdown_ser.idxmin()
+    trough_depth_float = float(plotted_drawdown_ser.min())
+    if not np.isfinite(trough_depth_float) or trough_depth_float >= 0.0:
+        return
+
+    drawdown_ax.plot(
+        [trough_ts], [trough_depth_float],
+        marker='o', markersize=2.6, color=color_str, zorder=6, clip_on=False,
+    )
+
+    # Anchor the label away from the panel edge the trough sits near, so a
+    # trough late in the sample does not push its text off the right side.
+    midpoint_ts = plotted_drawdown_ser.index[len(plotted_drawdown_ser) // 2]
+    anchor_right_bool = trough_ts > midpoint_ts
+
+    drawdown_ax.annotate(
+        f'{trough_depth_float * 100:.1f}%',
+        xy=(trough_ts, trough_depth_float),
+        xytext=(-5.0 if anchor_right_bool else 5.0, 4.0),
+        textcoords='offset points',
+        ha='right' if anchor_right_bool else 'left',
+        va='bottom',
+        fontsize=7.0,
+        color=color_str,
+        zorder=7,
+    )
+
+
 _SHORT_WINDOW_MAX_DAY_COUNT_INT = 62
 _MEDIUM_WINDOW_MAX_DAY_COUNT_INT = 366
 _INTERMEDIATE_WINDOW_MAX_DAY_COUNT_INT = 3 * 366
@@ -261,6 +310,9 @@ def plot(
                 alpha=0.10,
                 zorder=1,
             )
+            _annotate_drawdown_trough(
+                drawdown_ax, benchmark_drawdown_ser, benchmark_color_str
+            )
 
         strategy_drawdown_line_obj, = drawdown_ax.plot(
             strategy_drawdown_ser.index,
@@ -278,6 +330,9 @@ def plot(
             color=strategy_color_str,
             alpha=0.07,
             zorder=2,
+        )
+        _annotate_drawdown_trough(
+            drawdown_ax, strategy_drawdown_ser, strategy_color_str
         )
 
         if additional_drawdowns_df is not None:
@@ -357,7 +412,9 @@ def plot(
         ]
         annual_ax.set_ylabel(return_panel_ylabel_str)
         annual_ax.set_xticks(return_position_vec)
-        annual_ax.set_xticklabels(return_label_list, rotation=90)
+        annual_ax.set_xticklabels(
+            return_label_list, rotation=SIGNATURE_TIME_AXIS_ROTATION_FLOAT
+        )
         annual_ax.set_xlim(-0.6, len(strategy_period_return_ser) - 0.4)
         annual_ax.yaxis.set_major_formatter(FuncFormatter(fraction_major_formatter))
 
@@ -411,67 +468,38 @@ def _build_time_axis_locator_formatter_tuple(
     bar_date_idx: pd.DatetimeIndex,
 ) -> tuple[object, object, float]:
     """
-    Build an adaptive date axis for the lower panel.
+    Build the date axis for the lower panel.
 
-    For short windows, the tick dates are sampled from the actual observed bars:
-
-        i_k = round(k * (N - 1) / (K - 1))
-
-        tick_date_k = T[i_k]
-
-    where:
-
-        T = observed bar-date index
-        N = len(T)
-        K = requested tick count
+    Delegates to the shared signature convention so every time panel in the
+    repo — drawdown, composition, exposure — uses identical tick dates and
+    identical label orientation. See ``theme.build_signature_time_axis_spec``.
     """
-    normalized_bar_date_idx = pd.DatetimeIndex(bar_date_idx).sort_values().unique()
-    if len(normalized_bar_date_idx) == 0:
-        return mdates.YearLocator(), mdates.DateFormatter('%Y'), 0.0
-
-    if len(normalized_bar_date_idx) == 1:
-        single_tick_float = float(mdates.date2num(normalized_bar_date_idx[0].to_pydatetime()))
-        return FixedLocator([single_tick_float]), mdates.DateFormatter('%Y-%m-%d'), 35.0
-
-    span_day_count_int = int(
-        (normalized_bar_date_idx[-1] - normalized_bar_date_idx[0]).days
-    )
-
-    if span_day_count_int <= _SHORT_WINDOW_MAX_DAY_COUNT_INT:
-        tick_count_int = min(_SHORT_WINDOW_MAX_TICK_COUNT_INT, len(normalized_bar_date_idx))
-        tick_position_vec = np.linspace(
-            0.0,
-            float(len(normalized_bar_date_idx) - 1),
-            tick_count_int,
-        )
-        tick_index_vec = np.unique(np.round(tick_position_vec).astype(int))
-        # *** CRITICAL*** Sample short-window tick labels from the actual
-        # observed bar dates so crisis plots show real tradable dates rather
-        # than synthetic calendar interpolation.
-        tick_date_idx = normalized_bar_date_idx[tick_index_vec]
-        tick_location_vec = mdates.date2num(tick_date_idx.to_pydatetime())
-        return FixedLocator(tick_location_vec), mdates.DateFormatter('%Y-%m-%d'), 35.0
-
-    if span_day_count_int <= _MEDIUM_WINDOW_MAX_DAY_COUNT_INT:
-        return mdates.MonthLocator(interval=1), mdates.DateFormatter('%Y-%m'), 25.0
-
-    if span_day_count_int <= _INTERMEDIATE_WINDOW_MAX_DAY_COUNT_INT:
-        return mdates.MonthLocator(interval=3), mdates.DateFormatter('%Y-%m'), 0.0
-
-    return mdates.YearLocator(), mdates.DateFormatter('%Y'), 0.0
+    return build_signature_time_axis_spec(bar_date_idx)
 
 
 def _set_growth_of_1_ticks(axis_obj, growth_of_1_max_float: float) -> None:
-    upper_tick_float = max(1.0, float(growth_of_1_max_float))
-    major_tick_list = [0.5, 1.0]
-    candidate_tick_list = [1.25, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0]
-    major_tick_list.extend(
-        tick_float for tick_float in candidate_tick_list if tick_float <= upper_tick_float * 1.02
-    )
+    """Choose Growth of $1 ticks that stay legible on a log axis.
 
-    if upper_tick_float > 10.0:
-        extended_tick_arr = np.arange(12.0, np.ceil(upper_tick_float) + 2.0, 2.0)
-        major_tick_list.extend(extended_tick_arr.tolist())
+    *** CRITICAL*** The ladder is roughly geometric, not linear. Stepping
+    linearly above 10x crushed the labels together at the top of a log axis —
+    a 40x curve produced sixteen ticks in the space of one decade, which
+    rendered as an unreadable block of overlapping text.
+    """
+    upper_tick_float = max(1.0, float(growth_of_1_max_float))
+    candidate_tick_list = [
+        0.5, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0,
+        15.0, 20.0, 30.0, 40.0, 50.0, 75.0, 100.0,
+    ]
+    major_tick_list = [
+        tick_float for tick_float in candidate_tick_list
+        if tick_float <= upper_tick_float * 1.02
+    ]
+
+    # Beyond the tabulated ladder, keep extending geometrically.
+    next_tick_float = 150.0
+    while next_tick_float <= upper_tick_float * 1.02:
+        major_tick_list.append(next_tick_float)
+        next_tick_float *= 1.5
 
     axis_obj.set_yticks(sorted(set(major_tick_list)))
 

@@ -8,6 +8,8 @@ from alpha.engine.capacity_analysis import (
     BASELINE_SLIPPAGE_BPS_FLOAT,
     CAPACITY_CURVE_CSV_FILENAME_STR,
     CAPACITY_ORDER_CSV_FILENAME_STR,
+    CAPACITY_MODEL_VERSION_STR,
+    FULL_HISTORY_WINDOW_STR,
     METADATA_FILENAME_STR,
     MOC_CENTRAL_LAMBDA_1PCT_ADV_BPS_FLOAT,
     MOC_HARD_ORDER_ADV_LIMIT_FLOAT,
@@ -15,6 +17,7 @@ from alpha.engine.capacity_analysis import (
     MOO_HARD_ORDER_ADV_LIMIT_FLOAT,
     MOO_IMPACT_PROFILE_DICT,
     MOO_LARGE_MIXED_PROFILE_STR,
+    RECENT_FIVE_YEAR_WINDOW_STR,
     MOO_SOFT_ORDER_ADV_LIMIT_FLOAT,
     REPORT_FILENAME_STR,
     SUMMARY_FILENAME_STR,
@@ -22,6 +25,7 @@ from alpha.engine.capacity_analysis import (
     CapacityRunResult,
     _adjusted_equity_ser,
     _break_even_bracket_str,
+    _eligible_rolling_sharpe_erosion_tuple,
     build_capacity_study_result,
     capacity_implicit_cost_bps_float,
     normalize_execution_policy_str,
@@ -278,7 +282,7 @@ def test_early_capacity_cost_reduces_later_compounding():
 def _manual_run_result(
     capital_base_float: float,
     execution_policy_str: str,
-    central_active_return_float: float,
+    central_benchmark_excess_return_float: float,
     recommended_pass_inputs_bool: bool,
 ) -> CapacityRunResult:
     pricing_data_df = _pricing_data_df()
@@ -311,13 +315,16 @@ def _manual_run_result(
         "central_sharpe_float": 0.9,
         "stress_sharpe_float": 0.8,
         "sharpe_erosion_float": 0.10,
-        "central_cost_consumption_float": 0.10,
-        "stress_cost_consumption_float": 0.20,
-        "baseline_active_return_float": 0.10,
-        "central_active_return_float": central_active_return_float,
-        "stress_active_return_float": central_active_return_float - 0.01,
-        "worst_positive_rolling_3y_sharpe_erosion_float": 0.10,
+        "central_cost_consumption_of_benchmark_excess_float": 0.10,
+        "stress_cost_consumption_of_benchmark_excess_float": 0.20,
+        "baseline_benchmark_excess_return_float": 0.10,
+        "central_benchmark_excess_return_float": central_benchmark_excess_return_float,
+        "stress_benchmark_excess_return_float": central_benchmark_excess_return_float - 0.01,
+        "worst_eligible_rolling_3y_sharpe_erosion_float": 0.10,
+        "rolling_3y_eligible_window_count_int": 10,
         "rolling_3y_available_bool": True,
+        "actual_start_date_str": str(pricing_data_df.index[0].date()),
+        "actual_end_date_str": str(pricing_data_df.index[-1].date()),
         "total_order_count_int": 1,
         "assessed_order_count_int": 1,
         "unavailable_order_count_int": 0,
@@ -332,6 +339,8 @@ def _manual_run_result(
         "central_incremental_cost_float": 10.0,
         "stress_incremental_cost_float": 20.0,
         "academic_extrapolation_share_float": 0.0,
+        "proxy_extrapolation_share_float": 0.0,
+        "model_extrapolation_share_float": 0.0,
     }
     order_diagnostics_df = pd.DataFrame(
         [
@@ -344,6 +353,9 @@ def _manual_run_result(
                 "order_notional_float": 1_000.0,
                 "robust_adv_dollar_lagged_float": 1_000_000.0,
                 "central_implicit_cost_bps_float": 2.5,
+                "model_extrapolation_bool": False,
+                "academic_extrapolation_bool": False,
+                "proxy_extrapolation_bool": False,
             }
         ]
     )
@@ -376,7 +388,7 @@ def test_moc_study_classifies_capacity_and_break_even(tmp_path):
         _manual_run_result(10_000_000.0, "MOC", -0.01, False),
     ]
     study_result_obj = build_capacity_study_result(
-        run_result_list,
+        {RECENT_FIVE_YEAR_WINDOW_STR: run_result_list},
         output_dir_str=str(tmp_path),
         save_output_bool=True,
     )
@@ -411,13 +423,216 @@ def test_moc_study_classifies_capacity_and_break_even(tmp_path):
     assert json.loads((output_dir_path / SUMMARY_FILENAME_STR).read_text())["execution_policy_str"] == "MOC"
 
 
+def test_dual_window_outputs_use_recent_headline_and_preserve_full_history(tmp_path):
+    full_run_result_obj = _manual_run_result(100_000.0, "MOO", 0.08, False)
+    recent_run_result_obj = _manual_run_result(100_000.0, "MOO", 0.08, True)
+    full_run_result_obj.summary_dict["actual_start_date_str"] = "2010-01-04"
+    full_run_result_obj.summary_dict["actual_end_date_str"] = "2025-06-30"
+    recent_run_result_obj.summary_dict["actual_start_date_str"] = "2020-06-30"
+    recent_run_result_obj.summary_dict["actual_end_date_str"] = "2025-06-30"
+
+    study_result_obj = build_capacity_study_result(
+        {
+            FULL_HISTORY_WINDOW_STR: [full_run_result_obj],
+            RECENT_FIVE_YEAR_WINDOW_STR: [recent_run_result_obj],
+        },
+        output_dir_str=str(tmp_path),
+        save_output_bool=True,
+    )
+
+    assert study_result_obj.summary_dict["headline_window_str"] == RECENT_FIVE_YEAR_WINDOW_STR
+    assert study_result_obj.summary_dict["recommended_capacity_float"] == 100_000.0
+    assert (
+        study_result_obj.summary_dict["window_summary_dict"][FULL_HISTORY_WINDOW_STR][
+            "recommended_capacity_float"
+        ]
+        is None
+    )
+    assert study_result_obj.summary_dict["historical_feasibility_warning_bool"] is True
+    assert set(study_result_obj.capacity_curve_df["window_str"]) == {
+        FULL_HISTORY_WINDOW_STR,
+        RECENT_FIVE_YEAR_WINDOW_STR,
+    }
+    assert set(study_result_obj.order_diagnostics_df["window_str"]) == {
+        FULL_HISTORY_WINDOW_STR,
+        RECENT_FIVE_YEAR_WINDOW_STR,
+    }
+    metadata_dict = json.loads(
+        (study_result_obj.output_dir_path / METADATA_FILENAME_STR).read_text()
+    )
+    assert metadata_dict["model_version_str"] == CAPACITY_MODEL_VERSION_STR
+    assert metadata_dict["window_date_dict"][RECENT_FIVE_YEAR_WINDOW_STR] == {
+        "actual_start_date_str": "2020-06-30",
+        "actual_end_date_str": "2025-06-30",
+    }
+    assert metadata_dict["full_history_actual_start_date_str"] == "2010-01-04"
+    assert metadata_dict["recent_5y_actual_start_date_str"] == "2020-06-30"
+    assert metadata_dict["common_actual_end_date_str"] == "2025-06-30"
+    report_html_str = (study_result_obj.output_dir_path / REPORT_FILENAME_STR).read_text(
+        encoding="utf-8"
+    )
+    assert "Historical feasibility warning" in report_html_str
+    assert "Full-history feasibility" in report_html_str
+    assert "active alpha" not in report_html_str.lower()
+    assert "active return" not in report_html_str.lower()
+
+
+def test_classification_stops_at_first_failure_and_warns_on_later_pass(tmp_path):
+    low_run_result_obj = _manual_run_result(100_000.0, "MOO", 0.08, True)
+    middle_run_result_obj = _manual_run_result(1_000_000.0, "MOO", 0.07, False)
+    high_run_result_obj = _manual_run_result(10_000_000.0, "MOO", 0.06, True)
+
+    study_result_obj = build_capacity_study_result(
+        {
+            RECENT_FIVE_YEAR_WINDOW_STR: [
+                low_run_result_obj,
+                middle_run_result_obj,
+                high_run_result_obj,
+            ]
+        },
+        output_dir_str=str(tmp_path),
+        save_output_bool=True,
+    )
+
+    assert study_result_obj.summary_dict["recommended_capacity_float"] == 100_000.0
+    assert study_result_obj.summary_dict["recommended_non_contiguous_pass_bool"] is True
+    assert study_result_obj.capacity_curve_df["recommended_pass_bool"].tolist() == [
+        True,
+        False,
+        False,
+    ]
+    assert study_result_obj.capacity_curve_df["recommended_raw_pass_bool"].tolist() == [
+        True,
+        False,
+        True,
+    ]
+    assert study_result_obj.summary_dict["outer_capacity_float"] == 100_000.0
+    assert study_result_obj.summary_dict["outer_non_contiguous_pass_bool"] is True
+    assert study_result_obj.capacity_curve_df["outer_pass_bool"].tolist() == [
+        True,
+        False,
+        False,
+    ]
+    report_html_str = (study_result_obj.output_dir_path / REPORT_FILENAME_STR).read_text(
+        encoding="utf-8"
+    )
+    assert "Recommended Max and Outer Capacity" in report_html_str
+
+
+def test_top_grid_capacity_is_right_censored(tmp_path):
+    study_result_obj = build_capacity_study_result(
+        {
+            RECENT_FIVE_YEAR_WINDOW_STR: [
+                _manual_run_result(100_000.0, "MOO", 0.08, True),
+                _manual_run_result(1_000_000.0, "MOO", 0.07, True),
+            ]
+        },
+        output_dir_str=str(tmp_path),
+        save_output_bool=True,
+    )
+
+    assert study_result_obj.summary_dict["recommended_capacity_float"] == 1_000_000.0
+    assert study_result_obj.summary_dict["recommended_capacity_censored_bool"] is True
+    assert study_result_obj.summary_dict["outer_capacity_censored_bool"] is True
+    report_html_str = (study_result_obj.output_dir_path / REPORT_FILENAME_STR).read_text(
+        encoding="utf-8"
+    )
+    assert "≥ $1,000,000" in report_html_str
+
+
+def test_equal_recent_and_full_capacity_has_no_historical_warning(tmp_path):
+    full_run_result_obj = _manual_run_result(100_000.0, "MOO", 0.08, True)
+    recent_run_result_obj = _manual_run_result(100_000.0, "MOO", 0.08, True)
+    full_run_result_obj.summary_dict["actual_start_date_str"] = "2010-01-04"
+    full_run_result_obj.summary_dict["actual_end_date_str"] = "2025-06-30"
+    recent_run_result_obj.summary_dict["actual_start_date_str"] = "2020-06-30"
+    recent_run_result_obj.summary_dict["actual_end_date_str"] = "2025-06-30"
+
+    study_result_obj = build_capacity_study_result(
+        {
+            FULL_HISTORY_WINDOW_STR: [full_run_result_obj],
+            RECENT_FIVE_YEAR_WINDOW_STR: [recent_run_result_obj],
+        },
+        output_dir_str=str(tmp_path),
+        save_output_bool=True,
+    )
+
+    assert study_result_obj.summary_dict["historical_feasibility_warning_bool"] is False
+    report_html_str = (study_result_obj.output_dir_path / REPORT_FILENAME_STR).read_text(
+        encoding="utf-8"
+    )
+    assert "Historical feasibility warning" not in report_html_str
+
+
+def test_recent_numeric_capacity_remains_headline_when_full_history_is_lower():
+    full_run_result_obj = _manual_run_result(100_000.0, "MOO", 0.08, True)
+    recent_low_run_result_obj = _manual_run_result(100_000.0, "MOO", 0.08, True)
+    recent_high_run_result_obj = _manual_run_result(1_000_000.0, "MOO", 0.07, True)
+    full_run_result_obj.summary_dict["actual_start_date_str"] = "2010-01-04"
+    full_run_result_obj.summary_dict["actual_end_date_str"] = "2025-06-30"
+    for recent_run_result_obj in [recent_low_run_result_obj, recent_high_run_result_obj]:
+        recent_run_result_obj.summary_dict["actual_start_date_str"] = "2020-06-30"
+        recent_run_result_obj.summary_dict["actual_end_date_str"] = "2025-06-30"
+
+    study_result_obj = build_capacity_study_result(
+        {
+            FULL_HISTORY_WINDOW_STR: [full_run_result_obj],
+            RECENT_FIVE_YEAR_WINDOW_STR: [
+                recent_low_run_result_obj,
+                recent_high_run_result_obj,
+            ],
+        },
+        save_output_bool=False,
+    )
+
+    assert study_result_obj.summary_dict["recommended_capacity_float"] == 1_000_000.0
+    assert (
+        study_result_obj.summary_dict["window_summary_dict"][FULL_HISTORY_WINDOW_STR][
+            "recommended_capacity_float"
+        ]
+        == 100_000.0
+    )
+    assert study_result_obj.summary_dict["historical_feasibility_warning_bool"] is True
+
+
+def test_rolling_sharpe_floor_includes_exact_threshold_and_withholds_when_empty():
+    baseline_sharpe_ser = pd.Series([0.29, 0.30, 0.31])
+    central_sharpe_ser = pd.Series([0.10, 0.24, 0.248])
+
+    erosion_float, eligible_count_int = _eligible_rolling_sharpe_erosion_tuple(
+        baseline_sharpe_ser,
+        central_sharpe_ser,
+    )
+    assert eligible_count_int == 2
+    assert erosion_float == pytest.approx(0.20)
+
+    empty_erosion_float, empty_count_int = _eligible_rolling_sharpe_erosion_tuple(
+        pd.Series([0.10, 0.29]),
+        pd.Series([0.08, 0.25]),
+    )
+    assert np.isnan(empty_erosion_float)
+    assert empty_count_int == 0
+
+    run_result_obj = _manual_run_result(100_000.0, "MOO", 0.08, True)
+    run_result_obj.summary_dict["rolling_3y_available_bool"] = False
+    run_result_obj.summary_dict["rolling_3y_eligible_window_count_int"] = 0
+    run_result_obj.summary_dict["worst_eligible_rolling_3y_sharpe_erosion_float"] = np.nan
+    study_result_obj = build_capacity_study_result(
+        {RECENT_FIVE_YEAR_WINDOW_STR: [run_result_obj]},
+        save_output_bool=False,
+    )
+    assert study_result_obj.summary_dict["recommended_capacity_float"] is None
+
+
 def test_optimal_capacity_uses_supported_grid_not_all_recommended_gates():
     low_run_result_obj = _manual_run_result(100_000.0, "MOO", 0.08, True)
     high_run_result_obj = _manual_run_result(1_000_000.0, "MOO", 0.07, True)
     high_run_result_obj.summary_dict["central_sharpe_float"] = 1.1
-    high_run_result_obj.summary_dict["central_cost_consumption_float"] = 0.30
+    high_run_result_obj.summary_dict[
+        "central_cost_consumption_of_benchmark_excess_float"
+    ] = 0.30
     study_result_obj = build_capacity_study_result(
-        [low_run_result_obj, high_run_result_obj],
+        {RECENT_FIVE_YEAR_WINDOW_STR: [low_run_result_obj, high_run_result_obj]},
         save_output_bool=False,
     )
     assert study_result_obj.summary_dict["optimal_capacity_float"] == 1_000_000.0
@@ -430,7 +645,7 @@ def test_moo_study_uses_impact_profile_and_reports_equity(tmp_path):
         _manual_run_result(1_000_000.0, "MOO", 0.07, False),
     ]
     study_result_obj = build_capacity_study_result(
-        run_result_list,
+        {RECENT_FIVE_YEAR_WINDOW_STR: run_result_list},
         output_dir_str=str(tmp_path),
         save_output_bool=True,
     )
@@ -455,7 +670,7 @@ def test_etf_profile_report_discloses_low_confidence_proxy(tmp_path):
     run_result_obj.summary_dict["model_confidence_str"] = "low"
     run_result_obj.summary_dict["proxy_bool"] = True
     study_result_obj = build_capacity_study_result(
-        [run_result_obj],
+        {RECENT_FIVE_YEAR_WINDOW_STR: [run_result_obj]},
         output_dir_str=str(tmp_path),
         save_output_bool=True,
     )
@@ -478,7 +693,7 @@ def test_common_stock_moo_extrapolation_is_flagged_and_warned(tmp_path):
     ).run()
     assert run_result_obj.order_diagnostics_df["academic_extrapolation_bool"].all()
     study_result_obj = build_capacity_study_result(
-        [run_result_obj],
+        {RECENT_FIVE_YEAR_WINDOW_STR: [run_result_obj]},
         output_dir_str=str(tmp_path),
         save_output_bool=True,
     )
@@ -490,11 +705,27 @@ def test_common_stock_moo_extrapolation_is_flagged_and_warned(tmp_path):
     assert "Diagnostic only - no AUM point met every Recommended Max rule." in report_html_str
 
 
+def test_etf_moo_extrapolation_uses_low_confidence_proxy_flag(tmp_path):
+    pricing_data_df = _pricing_data_df(turnover_float=1_000_000.0)
+    strategy_obj = _strategy_obj(pricing_data_df, order_notional_float=20_000.0)
+    run_result_obj = CapacityAnalysis(
+        strategy_obj,
+        pricing_data_df,
+        "MOO",
+        "MOO_ETF_PROXY",
+    ).run()
+
+    assert run_result_obj.order_diagnostics_df["model_extrapolation_bool"].all()
+    assert run_result_obj.order_diagnostics_df["proxy_extrapolation_bool"].all()
+    assert not run_result_obj.order_diagnostics_df["academic_extrapolation_bool"].any()
+    assert run_result_obj.summary_dict["proxy_extrapolation_share_float"] == 1.0
+
+
 def test_break_even_requires_adjacent_finite_sign_crossing():
     negative_to_positive_df = pd.DataFrame(
         {
             "capital_base_float": [100_000.0, 1_000_000.0],
-            "central_active_return_float": [-0.01, 0.02],
+            "central_benchmark_excess_return_float": [-0.01, 0.02],
         }
     )
     assert _break_even_bracket_str(negative_to_positive_df) == "$100,000 to $1,000,000"
@@ -502,7 +733,7 @@ def test_break_even_requires_adjacent_finite_sign_crossing():
     missing_middle_df = pd.DataFrame(
         {
             "capital_base_float": [100_000.0, 1_000_000.0, 10_000_000.0],
-            "central_active_return_float": [0.02, np.nan, -0.01],
+            "central_benchmark_excess_return_float": [0.02, np.nan, -0.01],
         }
     )
     assert _break_even_bracket_str(missing_middle_df) == (
@@ -511,7 +742,7 @@ def test_break_even_requires_adjacent_finite_sign_crossing():
     exact_zero_df = pd.DataFrame(
         {
             "capital_base_float": [100_000.0, 1_000_000.0],
-            "central_active_return_float": [0.02, 0.0],
+            "central_benchmark_excess_return_float": [0.02, 0.0],
         }
     )
     assert _break_even_bracket_str(exact_zero_df) == "$1,000,000"
@@ -522,7 +753,10 @@ def test_missing_liquidity_fails_capacity_classifications():
     run_result_obj.summary_dict["liquidity_complete_bool"] = False
     run_result_obj.summary_dict["unavailable_order_share_float"] = 0.5
 
-    study_result_obj = build_capacity_study_result([run_result_obj], save_output_bool=False)
+    study_result_obj = build_capacity_study_result(
+        {RECENT_FIVE_YEAR_WINDOW_STR: [run_result_obj]},
+        save_output_bool=False,
+    )
 
     assert study_result_obj.summary_dict["recommended_capacity_float"] is None
     assert study_result_obj.summary_dict["outer_capacity_float"] is None
@@ -539,7 +773,10 @@ def test_undeclared_performance_benchmark_makes_recommended_unavailable():
         "MOO",
         MOO_LARGE_MIXED_PROFILE_STR,
     ).run()
-    study_result_obj = build_capacity_study_result([run_result_obj], save_output_bool=False)
+    study_result_obj = build_capacity_study_result(
+        {RECENT_FIVE_YEAR_WINDOW_STR: [run_result_obj]},
+        save_output_bool=False,
+    )
 
     assert np.isnan(run_result_obj.summary_dict["benchmark_annual_return_float"])
     assert study_result_obj.summary_dict["recommended_capacity_float"] is None
@@ -548,10 +785,13 @@ def test_undeclared_performance_benchmark_makes_recommended_unavailable():
 def test_moo_outer_is_unavailable_when_benchmark_is_unavailable():
     run_result_obj = _manual_run_result(100_000.0, "MOO", 0.08, True)
     run_result_obj.summary_dict["benchmark_annual_return_float"] = np.nan
-    run_result_obj.summary_dict["central_active_return_float"] = np.nan
-    run_result_obj.summary_dict["stress_active_return_float"] = np.nan
+    run_result_obj.summary_dict["central_benchmark_excess_return_float"] = np.nan
+    run_result_obj.summary_dict["stress_benchmark_excess_return_float"] = np.nan
 
-    study_result_obj = build_capacity_study_result([run_result_obj], save_output_bool=False)
+    study_result_obj = build_capacity_study_result(
+        {RECENT_FIVE_YEAR_WINDOW_STR: [run_result_obj]},
+        save_output_bool=False,
+    )
 
     assert study_result_obj.summary_dict["recommended_capacity_float"] is None
     assert study_result_obj.summary_dict["outer_capacity_float"] is None

@@ -8,15 +8,22 @@ import inspect
 import sys
 from pathlib import Path
 
+import pandas as pd
+
 
 REPO_ROOT_PATH = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT_PATH) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT_PATH))
 
 from alpha.engine.capacity_analysis import (
+    ADV_MEDIAN_LOOKBACK_INT,
     DEFAULT_AUM_GRID_TUPLE,
     CapacityAnalysis,
+    CapacityRunResult,
     CapacityStudyResult,
+    FULL_HISTORY_WINDOW_STR,
+    RECENT_FIVE_YEAR_WINDOW_STR,
+    RECENT_WINDOW_YEAR_INT,
     build_capacity_study_result,
 )
 from strategies.run_strategy import _resolve_strategy_module_import_str
@@ -49,12 +56,73 @@ def _run_capacity_analysis_module(
             "build_capacity_analysis_inputs(...) must accept capital_base_float so "
             "each AUM point is a full strategy rerun."
         )
+    required_date_parameter_set = {"backtest_start_date_str", "end_date_str"}
+    missing_date_parameter_list = sorted(
+        required_date_parameter_set.difference(inspect.signature(build_inputs_fn).parameters)
+    )
+    if missing_date_parameter_list:
+        raise TypeError(
+            "build_capacity_analysis_inputs(...) must accept backtest_start_date_str "
+            "and end_date_str for Capacity v2.1 dual-window reruns; missing "
+            f"{missing_date_parameter_list}."
+        )
 
     normalized_aum_float_tuple = _normalize_aum_float_tuple(aum_float_tuple)
+    full_history_run_result_list = _run_capacity_window(
+        build_inputs_fn=build_inputs_fn,
+        aum_float_tuple=normalized_aum_float_tuple,
+        window_label_str="Full history",
+        show_display_bool=show_display_bool,
+        backtest_start_date_str=backtest_start_date_str,
+        end_date_str=end_date_str,
+    )
+    actual_full_start_ts = pd.Timestamp(
+        full_history_run_result_list[0].summary_dict["actual_start_date_str"]
+    )
+    actual_end_ts = pd.Timestamp(
+        full_history_run_result_list[0].summary_dict["actual_end_date_str"]
+    )
+    recent_start_ts = actual_end_ts - pd.DateOffset(years=RECENT_WINDOW_YEAR_INT)
+    if actual_full_start_ts >= recent_start_ts:
+        recent_run_result_list = full_history_run_result_list
+    else:
+        recent_run_result_list = _run_capacity_window(
+            build_inputs_fn=build_inputs_fn,
+            aum_float_tuple=normalized_aum_float_tuple,
+            window_label_str="Recent five years",
+            show_display_bool=show_display_bool,
+            backtest_start_date_str=recent_start_ts.date().isoformat(),
+            end_date_str=actual_end_ts.date().isoformat(),
+        )
+        _validate_recent_window_run_result_list(
+            recent_run_result_list,
+            requested_recent_start_ts=recent_start_ts,
+        )
+
+    study_result_obj = build_capacity_study_result(
+        {
+            FULL_HISTORY_WINDOW_STR: full_history_run_result_list,
+            RECENT_FIVE_YEAR_WINDOW_STR: recent_run_result_list,
+        },
+        output_dir_str=output_dir_str,
+        save_output_bool=save_results_bool,
+    )
+    _print_capacity_summary(study_result_obj)
+    return study_result_obj
+
+
+def _run_capacity_window(
+    build_inputs_fn,
+    aum_float_tuple: tuple[float, ...],
+    window_label_str: str,
+    show_display_bool: bool,
+    backtest_start_date_str: str | None,
+    end_date_str: str | None,
+) -> list[CapacityRunResult]:
     run_result_list = []
-    for index_int, capital_base_float in enumerate(normalized_aum_float_tuple, start=1):
+    for index_int, capital_base_float in enumerate(aum_float_tuple, start=1):
         print(
-            f"[{index_int}/{len(normalized_aum_float_tuple)}] "
+            f"{window_label_str} [{index_int}/{len(aum_float_tuple)}] "
             f"Running {_format_dollar_str(capital_base_float)}"
         )
         input_kwarg_dict = _supported_input_kwarg_dict(
@@ -93,14 +161,32 @@ def _run_capacity_analysis_module(
                 impact_profile_str=capacity_input_dict.get("impact_profile_str"),
             ).run()
         )
+    return run_result_list
 
-    study_result_obj = build_capacity_study_result(
-        run_result_list,
-        output_dir_str=output_dir_str,
-        save_output_bool=save_results_bool,
-    )
-    _print_capacity_summary(study_result_obj)
-    return study_result_obj
+
+def _validate_recent_window_run_result_list(
+    recent_run_result_list: list[CapacityRunResult],
+    requested_recent_start_ts: pd.Timestamp,
+) -> None:
+    latest_acceptable_start_ts = requested_recent_start_ts + pd.Timedelta(days=7)
+    for run_result_obj in recent_run_result_list:
+        actual_start_ts = pd.Timestamp(run_result_obj.summary_dict["actual_start_date_str"])
+        if not requested_recent_start_ts <= actual_start_ts <= latest_acceptable_start_ts:
+            raise ValueError(
+                "Recent Capacity run did not honor the requested trailing-five-year "
+                f"start. Requested {requested_recent_start_ts.date()}, received "
+                f"{actual_start_ts.date()} at AUM {run_result_obj.capital_base_float:g}."
+            )
+
+        pricing_date_idx = pd.DatetimeIndex(run_result_obj.pricing_data_df.index).normalize()
+        warmup_observation_count_int = int((pricing_date_idx < actual_start_ts).sum())
+        if warmup_observation_count_int < ADV_MEDIAN_LOOKBACK_INT:
+            raise ValueError(
+                "Recent Capacity pricing data must retain at least "
+                f"{ADV_MEDIAN_LOOKBACK_INT} pre-start observations for causal ADV "
+                f"warmup; received {warmup_observation_count_int} at AUM "
+                f"{run_result_obj.capital_base_float:g}."
+            )
 
 
 def _supported_input_kwarg_dict(
@@ -144,11 +230,11 @@ def _print_capacity_summary(study_result_obj: CapacityStudyResult) -> None:
     )
     print(
         "  Recommended capacity: "
-        f"{_format_optional_dollar_str(summary_dict.get('recommended_capacity_float'))}"
+        f"{_format_capacity_str(summary_dict, 'recommended')}"
     )
     print(
         "  Outer capacity: "
-        f"{_format_optional_dollar_str(summary_dict.get('outer_capacity_float'))}"
+        f"{_format_capacity_str(summary_dict, 'outer')}"
     )
     print(
         "  Break-even capacity: "
@@ -169,6 +255,17 @@ def _format_optional_dollar_str(value_obj) -> str:
         return _format_dollar_str(float(value_obj))
     except (TypeError, ValueError):
         return "N/A"
+
+
+def _format_capacity_str(summary_dict: dict[str, object], prefix_str: str) -> str:
+    value_obj = summary_dict.get(f"{prefix_str}_capacity_float")
+    capacity_str = _format_optional_dollar_str(value_obj)
+    return (
+        f">= {capacity_str}"
+        if value_obj is not None
+        and bool(summary_dict.get(f"{prefix_str}_capacity_censored_bool"))
+        else capacity_str
+    )
 
 
 def main() -> None:

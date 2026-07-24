@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 
 import matplotlib.pyplot as plt
 from cycler import cycler
@@ -19,6 +20,17 @@ SEABORN_DEEP_COLOR_LIST: list[str] = [
     '#ccb974',
     '#64b5cd',
 ]
+
+
+SIGNATURE_FONT_STACK_LIST: list[str] = [
+    'Atlassian Sans',
+    'Segoe UI',
+    'Arial',
+    'DejaVu Sans',
+    'sans-serif',
+]
+SIGNATURE_FONT_STACK_STR: str = '"Atlassian Sans", "Segoe UI", Arial, "DejaVu Sans", sans-serif'
+_ATLASSIAN_FONT_CDN_BASE_URL_STR: str = 'https://ds-cdn.prod-east.frontend.public.atl-paas.net'
 
 
 SIGNATURE_PALETTE_DICT: dict[str, object] = {
@@ -47,6 +59,15 @@ SIGNATURE_PALETTE_DICT: dict[str, object] = {
     'overlay_cycle': list(SEABORN_DEEP_COLOR_LIST),
     'mean_line': '#357de8',
     'shadow_rgba': 'rgba(9, 30, 66, 0.04)',
+    'font_family_str': 'sans-serif',
+    'font_stack_list': list(SIGNATURE_FONT_STACK_LIST),
+    'font_stack_str': SIGNATURE_FONT_STACK_STR,
+    'prose_font_stack_str': SIGNATURE_FONT_STACK_STR,
+    'layout_str': 'dashboard',
+    'axis_style_str': 'dashboard',
+    # Empty means fills are distinguished by colour alone. A populated cycle
+    # lets a monochrome variant separate areas by texture instead.
+    'hatch_cycle_list': [],
 }
 
 SIGNATURE_ASSET_COLOR_DICT: dict[str, str] = {
@@ -66,21 +87,130 @@ SIGNATURE_ASSET_COLOR_DICT: dict[str, str] = {
     'DEFAULT': '#7a869a',
 }
 
-SIGNATURE_FONT_STACK_LIST: list[str] = [
-    'Atlassian Sans',
-    'Segoe UI',
-    'Arial',
-    'DejaVu Sans',
-    'sans-serif',
-]
-SIGNATURE_FONT_STACK_STR: str = '"Atlassian Sans", "Segoe UI", Arial, "DejaVu Sans", sans-serif'
-_ATLASSIAN_FONT_CDN_BASE_URL_STR: str = 'https://ds-cdn.prod-east.frontend.public.atl-paas.net'
+_BASE_VARIANT_NAME_STR: str = 'current'
+
+# Candidate signature variants under evaluation. Each entry lists only the keys
+# that differ from SIGNATURE_PALETTE_DICT; the resolver merges them onto the
+# base and rejects unknown keys, so a typo fails loud instead of silently
+# introducing an unused colour.
+# Journal palette — the settled direction. Ink on paper with no hue at all:
+# series separate by value and by hatch texture rather than by colour. Survives
+# black-and-white printing and photocopying, and is legible to any form of
+# colour vision. The constraint is the point — nothing can be decorative if
+# there is no colour budget to spend.
+#
+# Layout is deliberately *not* set here. The journal_* variants below pair this
+# one palette with each candidate structure, so structure is the only variable
+# left under comparison.
+_JOURNAL_PALETTE_DICT: dict[str, object] = {
+    'ink': '#111111',
+    'page': '#ffffff',
+    'panel': '#ffffff',
+    'neutral': '#f2f2f2',
+    'grid': '#e4e4e4',
+    'border': '#d6d6d6',
+    'axes_border': '#111111',
+    'muted': '#6e6e6e',
+    'strategy': '#111111',
+    'strategy_dark': '#000000',
+    'benchmark': '#a8a8a8',
+    'benchmark_dark': '#7d7d7d',
+    'profit': '#111111',
+    'profit_dark': '#111111',
+    'loss': '#6e6e6e',
+    'loss_dark': '#4a4a4a',
+    'vertical_line': '#a8a8a8',
+    'zero_line': '#111111',
+    'bar_edge': '#111111',
+    'legend_face': '#ffffff',
+    'legend_edge': '#111111',
+    'label_face': '#ffffff',
+    'overlay_cycle': [
+        '#111111', '#8a8a8a', '#4a4a4a', '#c2c2c2',
+        '#6e6e6e', '#a8a8a8', '#2e2e2e', '#d6d6d6',
+    ],
+    'hatch_cycle_list': ['', '///', '...', 'xxx', '\\\\', '+++', 'ooo', '---'],
+    'mean_line': '#111111',
+    'shadow_rgba': 'rgba(17, 17, 17, 0.05)',
+    'font_family_str': 'monospace',
+    'font_stack_list': ['Cascadia Mono', 'Consolas', 'DejaVu Sans Mono', 'monospace'],
+    'font_stack_str': '"Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace',
+    'prose_font_stack_str': 'Constantia, Sitka, Georgia, "Times New Roman", serif',
+    'axis_style_str': 'minimal',
+}
+
+
+_VARIANT_OVERRIDE_DICT: dict[str, dict[str, object]] = {
+    _BASE_VARIANT_NAME_STR: {},
+    # Single reading column: sections stacked, hairline rules, no containers.
+    'journal': {**_JOURNAL_PALETTE_DICT, 'layout_str': 'document'},
+    # Specimen sheet: provenance promoted from footer to masthead, numbered
+    # plates instead of free-floating charts. Dense on purpose.
+    'journal_spec': {**_JOURNAL_PALETTE_DICT, 'layout_str': 'spec'},
+}
+
+SIGNATURE_VARIANT_NAME_LIST: list[str] = list(_VARIANT_OVERRIDE_DICT)
+
+
+def _copy_palette_dict(palette_dict: dict[str, object]) -> dict[str, object]:
+    return {
+        key_str: (list(value_obj) if isinstance(value_obj, list) else value_obj)
+        for key_str, value_obj in palette_dict.items()
+    }
+
+
+def resolve_variant_palette_dict(variant_name_str: str = _BASE_VARIANT_NAME_STR) -> dict[str, object]:
+    """Return the full palette for a named variant.
+
+    The base variant resolves to SIGNATURE_PALETTE_DICT unchanged, so every
+    existing call path keeps its current appearance byte for byte.
+    """
+    if variant_name_str not in _VARIANT_OVERRIDE_DICT:
+        raise ValueError(
+            f'Unknown signature variant {variant_name_str!r}. '
+            f'Expected one of {SIGNATURE_VARIANT_NAME_LIST}.'
+        )
+
+    resolved_palette_dict = _copy_palette_dict(SIGNATURE_PALETTE_DICT)
+    override_dict = _VARIANT_OVERRIDE_DICT[variant_name_str]
+
+    unknown_key_list = sorted(set(override_dict) - set(resolved_palette_dict))
+    if unknown_key_list:
+        raise KeyError(
+            f'Signature variant {variant_name_str!r} defines unknown palette keys: '
+            f'{unknown_key_list}.'
+        )
+
+    for key_str, value_obj in override_dict.items():
+        resolved_palette_dict[key_str] = list(value_obj) if isinstance(value_obj, list) else value_obj
+
+    return resolved_palette_dict
+
+
+@contextmanager
+def signature_variant_context(variant_name_str: str) -> Iterator[dict[str, object]]:
+    """Temporarily activate a named signature variant.
+
+    *** CRITICAL*** SIGNATURE_PALETTE_DICT is mutated in place rather than
+    rebound. plot.py and report.py bind the dict object at import time, so
+    rebinding the module-level name here would leave those modules pointing at
+    the old palette and the preview would silently show the wrong theme. The
+    original contents are always restored on exit.
+    """
+    restore_palette_dict = _copy_palette_dict(SIGNATURE_PALETTE_DICT)
+    resolved_palette_dict = resolve_variant_palette_dict(variant_name_str)
+
+    SIGNATURE_PALETTE_DICT.clear()
+    SIGNATURE_PALETTE_DICT.update(resolved_palette_dict)
+    try:
+        yield resolved_palette_dict
+    finally:
+        SIGNATURE_PALETTE_DICT.clear()
+        SIGNATURE_PALETTE_DICT.update(restore_palette_dict)
 
 
 def get_signature_palette_dict() -> dict[str, object]:
-    signature_palette_dict = dict(SIGNATURE_PALETTE_DICT)
-    signature_palette_dict['overlay_cycle'] = list(SIGNATURE_PALETTE_DICT['overlay_cycle'])
-    return signature_palette_dict
+    return _copy_palette_dict(SIGNATURE_PALETTE_DICT)
 
 
 def build_report_font_head_html() -> str:
@@ -96,8 +226,10 @@ def build_report_font_head_html() -> str:
 
 def build_signature_rcparams(to_web_bool: bool) -> dict[str, object]:
     base_style_dict = dict(plt.style.library.get('seaborn-v0_8-whitegrid', {}))
+    font_family_str = str(SIGNATURE_PALETTE_DICT['font_family_str'])
+    font_stack_list = list(SIGNATURE_PALETTE_DICT['font_stack_list'])
     override_style_dict = {
-        'axes.prop_cycle': cycler(color=SEABORN_DEEP_COLOR_LIST),
+        'axes.prop_cycle': cycler(color=list(SIGNATURE_PALETTE_DICT['overlay_cycle'])),
         'figure.facecolor': SIGNATURE_PALETTE_DICT['page'],
         'axes.facecolor': SIGNATURE_PALETTE_DICT['panel'],
         'axes.edgecolor': SIGNATURE_PALETTE_DICT['axes_border'],
@@ -110,8 +242,8 @@ def build_signature_rcparams(to_web_bool: bool) -> dict[str, object]:
         'xtick.color': SIGNATURE_PALETTE_DICT['ink'],
         'ytick.color': SIGNATURE_PALETTE_DICT['ink'],
         'text.color': SIGNATURE_PALETTE_DICT['ink'],
-        'font.family': 'sans-serif',
-        'font.sans-serif': list(SIGNATURE_FONT_STACK_LIST),
+        'font.family': font_family_str,
+        f'font.{font_family_str}': font_stack_list,
         'font.size': 9.5 if to_web_bool else 10.0,
         'axes.titlesize': 10.5 if to_web_bool else 11.0,
         'axes.labelsize': 9.0 if to_web_bool else 9.5,
@@ -154,6 +286,10 @@ def build_plot_color_dict(colors=None) -> dict[str, object]:
 
 
 def apply_signature_axis_style(axis_obj, vertical_line_iterable: Iterable[object] = ()) -> None:
+    if str(SIGNATURE_PALETTE_DICT['axis_style_str']) == 'minimal':
+        _apply_minimal_axis_style(axis_obj, vertical_line_iterable)
+        return
+
     signature_palette_dict = SIGNATURE_PALETTE_DICT
 
     axis_obj.spines['top'].set_visible(False)
@@ -189,6 +325,129 @@ def apply_signature_axis_style(axis_obj, vertical_line_iterable: Iterable[object
         )
 
 
+SIGNATURE_TIME_AXIS_ROTATION_FLOAT: float = 90.0
+_SHORT_WINDOW_MAX_DAY_COUNT_INT = 62
+_MEDIUM_WINDOW_MAX_DAY_COUNT_INT = 366
+_INTERMEDIATE_WINDOW_MAX_DAY_COUNT_INT = 3 * 366
+_SHORT_WINDOW_MAX_TICK_COUNT_INT = 8
+_MAX_YEAR_TICK_COUNT_INT = 40
+
+
+def build_signature_time_axis_spec(bar_date_idx) -> tuple[object, object, float]:
+    """Build the one date-axis convention every time panel shares.
+
+    *** CRITICAL*** Tick labels are always vertical, at every span. Rotation
+    used to vary with the plotted window, so a drawdown panel and the return
+    panel directly beneath it printed the same years in two different
+    orientations within a single figure. One convention, everywhere.
+
+    Year spacing widens only when annual ticks would exceed what fits, so
+    panels covering the same window always agree on their tick dates.
+    """
+    import matplotlib.dates as mdates
+    import numpy as np
+    import pandas as pd
+    from matplotlib.ticker import FixedLocator
+
+    normalized_bar_date_idx = pd.DatetimeIndex(bar_date_idx).sort_values().unique()
+    rotation_float = SIGNATURE_TIME_AXIS_ROTATION_FLOAT
+
+    if len(normalized_bar_date_idx) == 0:
+        return mdates.YearLocator(), mdates.DateFormatter('%Y'), rotation_float
+
+    if len(normalized_bar_date_idx) == 1:
+        single_tick_float = float(mdates.date2num(normalized_bar_date_idx[0].to_pydatetime()))
+        return FixedLocator([single_tick_float]), mdates.DateFormatter('%Y-%m-%d'), rotation_float
+
+    span_day_count_int = int((normalized_bar_date_idx[-1] - normalized_bar_date_idx[0]).days)
+
+    if span_day_count_int <= _SHORT_WINDOW_MAX_DAY_COUNT_INT:
+        tick_count_int = min(_SHORT_WINDOW_MAX_TICK_COUNT_INT, len(normalized_bar_date_idx))
+        tick_position_vec = np.linspace(
+            0.0, float(len(normalized_bar_date_idx) - 1), tick_count_int
+        )
+        tick_index_vec = np.unique(np.round(tick_position_vec).astype(int))
+        # *** CRITICAL*** Sample short-window tick labels from the actual
+        # observed bar dates so crisis plots show real tradable dates rather
+        # than synthetic calendar interpolation.
+        tick_date_idx = normalized_bar_date_idx[tick_index_vec]
+        tick_location_vec = mdates.date2num(tick_date_idx.to_pydatetime())
+        return FixedLocator(tick_location_vec), mdates.DateFormatter('%Y-%m-%d'), rotation_float
+
+    if span_day_count_int <= _MEDIUM_WINDOW_MAX_DAY_COUNT_INT:
+        return mdates.MonthLocator(interval=1), mdates.DateFormatter('%Y-%m'), rotation_float
+
+    if span_day_count_int <= _INTERMEDIATE_WINDOW_MAX_DAY_COUNT_INT:
+        return mdates.MonthLocator(interval=3), mdates.DateFormatter('%Y-%m'), rotation_float
+
+    year_count_int = max(1, int(round(span_day_count_int / 365.25)))
+    year_interval_int = 1
+    for candidate_interval_int in (1, 2, 5, 10):
+        year_interval_int = candidate_interval_int
+        if year_count_int / candidate_interval_int <= _MAX_YEAR_TICK_COUNT_INT:
+            break
+    return (
+        mdates.YearLocator(base=year_interval_int),
+        mdates.DateFormatter('%Y'),
+        rotation_float,
+    )
+
+
+def apply_signature_time_axis(axis_obj, bar_date_idx) -> None:
+    """Apply the shared date-axis convention to an axis."""
+    locator_obj, formatter_obj, rotation_float = build_signature_time_axis_spec(bar_date_idx)
+    axis_obj.xaxis.set_major_locator(locator_obj)
+    axis_obj.xaxis.set_major_formatter(formatter_obj)
+    axis_obj.tick_params(axis='x', labelbottom=True, rotation=rotation_float)
+
+
+def _apply_minimal_axis_style(axis_obj, vertical_line_iterable: Iterable[object] = ()) -> None:
+    """Strip the chart frame down to a baseline and hairline value rules.
+
+    Data-ink discipline: the box around the plot encodes nothing, so it goes.
+    What remains is a single bottom baseline plus the faintest horizontal rules
+    needed to read a value off the axis. Series stay directly labelled rather
+    than relying on a legend box.
+    """
+    signature_palette_dict = SIGNATURE_PALETTE_DICT
+
+    for side_name_str in ('top', 'left', 'right'):
+        axis_obj.spines[side_name_str].set_visible(False)
+    axis_obj.spines['bottom'].set_visible(True)
+    axis_obj.spines['bottom'].set_color(signature_palette_dict['axes_border'])
+    axis_obj.spines['bottom'].set_linewidth(0.6)
+
+    axis_obj.tick_params(
+        axis='x', labelsize=7.5, colors=signature_palette_dict['muted'], pad=5, length=2.5, width=0.6
+    )
+    axis_obj.tick_params(
+        axis='y', labelsize=7.5, colors=signature_palette_dict['muted'], pad=5, length=0.0
+    )
+    axis_obj.grid(
+        axis='y',
+        which='major',
+        linestyle='-',
+        linewidth=0.5,
+        color=signature_palette_dict['grid'],
+        alpha=1.0,
+    )
+    axis_obj.xaxis.grid(False, which='major')
+    axis_obj.xaxis.grid(False, which='minor')
+    axis_obj.set_axisbelow(True)
+    axis_obj.yaxis.tick_right()
+    axis_obj.yaxis.set_label_position('left')
+
+    for vertical_line_obj in vertical_line_iterable:
+        axis_obj.axvline(
+            vertical_line_obj,
+            color=signature_palette_dict['vertical_line'],
+            linestyle='-',
+            linewidth=0.6,
+            alpha=0.8,
+            zorder=1,
+        )
+
+
 def blend_hex_color_str(
         start_color_str: str,
         end_color_str: str,
@@ -209,8 +468,452 @@ def blend_hex_color_str(
     return '#{0:02x}{1:02x}{2:02x}'.format(*channel_value_list)
 
 
-def build_report_css() -> str:
+def _build_document_report_css() -> str:
+    """Single-column research-note grammar over the standard report classes.
+
+    Deliberately reuses every class name emitted by report.py so the same markup
+    renders as a note rather than a dashboard with no change to the report
+    builders. Containers carry no weight of their own: cards lose their border,
+    radius, fill and shadow, and structure comes from typography, whitespace and
+    hairline rules instead.
+    """
     signature_palette_dict = SIGNATURE_PALETTE_DICT
+    figure_font_stack_str = str(signature_palette_dict['font_stack_str'])
+    prose_font_stack_str = str(signature_palette_dict['prose_font_stack_str'])
+    return f'''
+:root {{
+    --color-ink: {signature_palette_dict["ink"]};
+    --color-page: {signature_palette_dict["page"]};
+    --color-panel: {signature_palette_dict["panel"]};
+    --color-neutral: {signature_palette_dict["neutral"]};
+    --color-grid: {signature_palette_dict["grid"]};
+    --color-border: {signature_palette_dict["border"]};
+    --color-muted: {signature_palette_dict["muted"]};
+    --color-strategy: {signature_palette_dict["strategy"]};
+    --color-strategy-dark: {signature_palette_dict["strategy_dark"]};
+    --color-benchmark: {signature_palette_dict["benchmark"]};
+    --color-benchmark-dark: {signature_palette_dict["benchmark_dark"]};
+    --color-profit: {signature_palette_dict["profit"]};
+    --color-profit-dark: {signature_palette_dict["profit_dark"]};
+    --color-loss: {signature_palette_dict["loss"]};
+    --color-loss-dark: {signature_palette_dict["loss_dark"]};
+    --color-shadow: {signature_palette_dict["shadow_rgba"]};
+    --font-figure: {figure_font_stack_str};
+    --font-prose: {prose_font_stack_str};
+}}
+body {{
+    font-family: var(--font-prose);
+    margin: 0;
+    padding: 56px 24px 96px;
+    background: var(--color-page);
+    color: var(--color-ink);
+    line-height: 1.62;
+    font-size: 15.5px;
+}}
+.report-shell {{
+    max-width: 880px;
+    margin: 0 auto;
+}}
+.report-header {{
+    margin-bottom: 40px;
+    padding-bottom: 22px;
+    border-bottom: 1.5px solid var(--color-ink);
+}}
+.report-eyebrow {{
+    margin: 0 0 10px;
+    font-family: var(--font-figure);
+    color: var(--color-muted);
+    font-size: 0.66rem;
+    font-weight: 400;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}}
+h1 {{
+    font-family: var(--font-prose);
+    font-size: 1.85rem;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.012em;
+    margin: 0 0 8px;
+    color: var(--color-ink);
+}}
+h2 {{
+    font-family: var(--font-figure);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    margin: 52px 0 20px;
+    padding: 0 0 7px;
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--color-border);
+    border-radius: 0;
+}}
+h3 {{
+    font-family: var(--font-figure);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    margin: 0 0 12px;
+}}
+.meta {{
+    font-family: var(--font-figure);
+    color: var(--color-muted);
+    font-size: 0.74rem;
+    line-height: 1.55;
+    margin: 0 0 3px;
+}}
+p {{
+    color: var(--color-ink);
+    margin-top: 0;
+    margin-bottom: 1.1em;
+    max-width: 68ch;
+}}
+/* The headline result is stated as a sentence. A row of stat tiles reports
+   numbers without ever saying what they mean; a lede has to make a claim. */
+.lede {{
+    font-size: 1.16rem;
+    line-height: 1.62;
+    max-width: 60ch;
+    margin: 0 0 1.5em;
+}}
+.fig {{
+    font-family: var(--font-figure);
+    font-size: 0.9em;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}}
+.fig.neg {{
+    color: var(--color-loss-dark);
+}}
+/* Retained for the dashboard baseline and any report still emitting tiles. */
+.kpi-grid {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 46px;
+    margin: 0 0 12px;
+    padding: 16px 0 18px;
+    border-top: 1.5px solid var(--color-ink);
+    border-bottom: 1px solid var(--color-border);
+}}
+.kpi-card {{
+    background: none;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    box-shadow: none;
+    min-width: 118px;
+}}
+.kpi-label {{
+    font-family: var(--font-figure);
+    color: var(--color-muted);
+    font-size: 0.62rem;
+    font-weight: 400;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+}}
+.kpi-value {{
+    font-family: var(--font-figure);
+    margin-top: 7px;
+    font-size: 1.42rem;
+    font-weight: 500;
+    line-height: 1.05;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-ink);
+}}
+.kpi-value.pos {{
+    color: var(--color-ink);
+}}
+.kpi-value.neg {{
+    color: var(--color-loss-dark);
+}}
+.kpi-note {{
+    font-family: var(--font-prose);
+    margin-top: 5px;
+    color: var(--color-muted);
+    font-size: 0.76rem;
+    font-style: italic;
+}}
+/* Containers carry no visual weight; whitespace is the separator. */
+.card, .chart-panel {{
+    background: none;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    box-shadow: none;
+    margin-bottom: 34px;
+}}
+.card-primary {{
+    padding-top: 0;
+}}
+.card-grid, .crisis-chart-grid, .chart-grid {{
+    display: block;
+    margin-bottom: 0;
+}}
+.card-grid > .card, .crisis-chart-grid > .card {{
+    margin-bottom: 34px;
+}}
+.section-stack, .summary-section-stack {{
+    display: block;
+}}
+/* Scientific table rules: horizontal only, figures in tabular monospace. */
+table {{
+    font-family: var(--font-figure);
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 0;
+}}
+th {{
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--color-ink);
+    padding: 0 10px 7px;
+    text-align: right;
+    font-weight: 600;
+    font-size: 0.62rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    white-space: nowrap;
+}}
+td {{
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--color-border);
+    padding: 7px 10px;
+    text-align: right;
+}}
+th:first-child, td:first-child, td.metric {{
+    text-align: left;
+}}
+td.metric {{
+    background: none;
+    font-weight: 400;
+    color: var(--color-muted);
+    white-space: nowrap;
+}}
+tbody tr:last-child td {{
+    border-bottom: 1px solid var(--color-ink);
+}}
+td.pos {{
+    color: var(--color-profit-dark);
+    font-weight: 500;
+}}
+td.neg {{
+    color: var(--color-loss-dark);
+    font-weight: 500;
+}}
+.heatmap td {{
+    text-align: center;
+    font-size: 0.72rem;
+    padding: 6px 4px;
+    border-bottom: none;
+}}
+.heatmap th {{
+    text-align: center;
+    padding: 0 4px 7px;
+}}
+.heatmap tbody tr:last-child td {{
+    border-bottom: none;
+}}
+.heatmap {{
+    table-layout: fixed;
+}}
+.heatmap .divider-left {{
+    border-left: 1px solid var(--color-border);
+}}
+.metric-help {{
+    appearance: none;
+    display: none;
+}}
+.metric-context {{
+    font-family: var(--font-prose);
+    margin-top: 3px;
+    color: var(--color-muted);
+    font-size: 0.72rem;
+    font-style: italic;
+    font-weight: 400;
+    white-space: normal;
+}}
+.regression-model-note {{
+    margin-bottom: 10px;
+    color: var(--color-muted);
+    font-size: 0.8rem;
+    font-style: italic;
+}}
+.summary-details {{
+    border: none;
+    border-top: 1px solid var(--color-border);
+    border-radius: 0;
+    background: none;
+    padding: 12px 0 0;
+}}
+.summary-details summary {{
+    font-family: var(--font-figure);
+    color: var(--color-muted);
+    cursor: pointer;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+}}
+.summary-details[open] summary {{
+    margin-bottom: 12px;
+}}
+.chart-wrap {{
+    margin: 0;
+}}
+.chart-wrap img, .chart-panel img {{
+    max-width: 100%;
+    width: 100%;
+    display: block;
+    border: none;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+}}
+.stats-table {{
+    width: 100%;
+    min-width: 0;
+}}
+.scroll {{
+    overflow-x: auto;
+    width: 100%;
+    border: none;
+    border-radius: 0;
+    background: none;
+    padding: 0;
+    margin-bottom: 0;
+}}
+strong {{
+    color: var(--color-ink);
+    font-weight: 600;
+}}
+@media (max-width: 760px) {{
+    body {{
+        padding: 32px 18px 64px;
+        font-size: 15px;
+    }}
+    .kpi-grid {{
+        gap: 18px 32px;
+    }}
+}}
+'''
+
+
+def _build_spec_layout_css() -> str:
+    """Datasheet layout: ruled field masthead, numbered plates, tight rhythm."""
+    return '''
+body {
+    font-size: 14.5px;
+    padding-top: 40px;
+}
+.report-shell {
+    max-width: 1000px;
+}
+.report-header {
+    margin-bottom: 0;
+    padding-bottom: 14px;
+    border-bottom: 2px solid var(--color-ink);
+}
+h1 {
+    font-family: var(--font-figure);
+    font-size: 1.06rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+}
+h2 {
+    margin: 30px 0 13px;
+}
+.report-shell > p {
+    max-width: 70ch;
+}
+/* Every chart is a numbered plate with a ruled caption bar, the way a
+   datasheet indexes its figures — never a chart floating in whitespace. */
+.plate {
+    border: 1px solid var(--color-border);
+    padding: 0;
+    margin-bottom: 16px;
+    background: var(--color-panel);
+}
+.plate-label {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    font-family: var(--font-figure);
+    font-size: 0.58rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    padding: 7px 11px;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-neutral);
+}
+.plate-body {
+    padding: 12px 11px;
+}
+.plate-body > .chart-wrap img {
+    border-radius: 0;
+}
+.spec-masthead {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+    border-bottom: 1px solid var(--color-ink);
+}
+.spec-field {
+    padding: 8px 12px;
+    border-right: 1px solid var(--color-border);
+}
+.spec-field:last-child {
+    border-right: none;
+}
+.spec-field-label {
+    font-family: var(--font-figure);
+    font-size: 0.55rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+}
+.spec-field-value {
+    font-family: var(--font-figure);
+    font-size: 0.74rem;
+    color: var(--color-ink);
+    margin-top: 3px;
+}
+.card {
+    margin-bottom: 22px;
+}
+table {
+    font-size: 0.74rem;
+}
+td {
+    padding: 5px 10px;
+}
+'''
+
+
+def build_report_css() -> str:
+    layout_str = str(SIGNATURE_PALETTE_DICT['layout_str'])
+
+    if layout_str in ('document', 'spec'):
+        report_css_str = _build_document_report_css()
+        if layout_str == 'spec':
+            report_css_str += _build_spec_layout_css()
+        return report_css_str
+
+    if str(SIGNATURE_PALETTE_DICT['layout_str']) == 'document':
+        return _build_document_report_css()
+
+    signature_palette_dict = SIGNATURE_PALETTE_DICT
+    report_font_stack_str = str(signature_palette_dict['font_stack_str'])
     return f'''
 :root {{
     --color-ink: {signature_palette_dict["ink"]};
@@ -231,7 +934,7 @@ def build_report_css() -> str:
     --color-shadow: {signature_palette_dict["shadow_rgba"]};
 }}
 body {{
-    font-family: {SIGNATURE_FONT_STACK_STR};
+    font-family: {report_font_stack_str};
     margin: 0;
     padding: 18px 20px 32px;
     background: var(--color-page);
@@ -254,7 +957,7 @@ body {{
     text-transform: uppercase;
 }}
 h1, h2, h3 {{
-    font-family: {SIGNATURE_FONT_STACK_STR};
+    font-family: {report_font_stack_str};
     color: var(--color-ink);
 }}
 h1 {{

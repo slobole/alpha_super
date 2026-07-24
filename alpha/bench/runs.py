@@ -102,6 +102,50 @@ class RunEntry:
     def report_artifact_str(self) -> str:
         return f"{self.rel_dir_from_results_str}/report.html"
 
+    @property
+    def capacity_model_version_str(self) -> str | None:
+        if self.analysis_dir_str != "capacity_analysis":
+            return None
+        model_version_obj = self.metadata_dict.get("model_version_str")
+        return str(model_version_obj) if model_version_obj else "capacity_v1"
+
+    @property
+    def is_legacy_capacity_bool(self) -> bool:
+        return self.capacity_model_version_str == "capacity_v1"
+
+    @property
+    def display_analysis_label_str(self) -> str:
+        if self.is_legacy_capacity_bool:
+            return "Capacity · Legacy v1"
+        if self.capacity_model_version_str:
+            version_str = self.capacity_model_version_str.replace("capacity_", "").replace(
+                "_",
+                ".",
+            )
+            return f"Capacity · {version_str}"
+        return self.analysis_label_str
+
+    @property
+    def capacity_window_date_summary_str(self) -> str | None:
+        if self.analysis_dir_str != "capacity_analysis":
+            return None
+        window_date_obj = self.metadata_dict.get("window_date_dict")
+        if not isinstance(window_date_obj, dict):
+            return "Window dates unavailable"
+
+        def window_date_range_str(window_str: str) -> str:
+            date_obj = window_date_obj.get(window_str)
+            if not isinstance(date_obj, dict):
+                return "N/A"
+            start_obj = date_obj.get("actual_start_date_str")
+            end_obj = date_obj.get("actual_end_date_str")
+            return f"{start_obj} to {end_obj}" if start_obj and end_obj else "N/A"
+
+        return (
+            f"Recent: {window_date_range_str('recent_5y')} · "
+            f"Full: {window_date_range_str('full_history')}"
+        )
+
     def headline_chip_list(self) -> list[MetricChip]:
         return [
             chip_obj

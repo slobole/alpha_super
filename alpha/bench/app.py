@@ -143,8 +143,17 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             abort(404)
         run_index_obj = runs.build_strategy_run_index()
         run_entry_list = run_index_obj.runs_for(module_import_str, strategy_entry_obj.stem_str)
+        report_run_entry_list = [
+            run_obj for run_obj in run_entry_list if run_obj.has_report_bool
+        ]
         latest_report_run_obj = next(
-            (run_obj for run_obj in run_entry_list if run_obj.has_report_bool), None
+            (
+                run_obj
+                for run_obj in report_run_entry_list
+                if run_obj.analysis_dir_str == "capacity_analysis"
+                and not run_obj.is_legacy_capacity_bool
+            ),
+            report_run_entry_list[0] if report_run_entry_list else None,
         )
         return render_template(
             "strategy.html",
