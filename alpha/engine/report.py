@@ -175,7 +175,7 @@ _PERFORMANCE_SUMMARY_SECTION_TUPLE = (
             'Avg. Drawdown [%]',
             'Avg. Drawdown Duration [days]',
         ),
-        True,
+        False,
     ),
     (
         'Distribution & Tails',
@@ -735,7 +735,7 @@ def _format_kpi_value_str(metric_name_str: str, metric_value_obj) -> str:
         return _fmt_pct(metric_value_obj)
     if '[$]' in metric_name_str:
         return _fmt_dollar(metric_value_obj)
-    if metric_name_str == 'Sharpe Ratio':
+    if metric_name_str in {'Sharpe Ratio', 'Beta'}:
         return _fmt_num(metric_value_obj, 2)
     return str(metric_value_obj)
 
@@ -771,11 +771,11 @@ def _build_kpi_grid_html(
 ) -> str:
     """Build the KPI summary row shown beneath the report header."""
     kpi_spec_list = [
-        ('Return [%]', 'Total Return', 'Full sample'),
         ('Return (Ann.) [%]', 'Annualized Return', '252-day convention'),
         ('Volatility (Ann.) [%]', 'Volatility', 'Annualized sigma'),
         ('Sharpe Ratio', 'Sharpe Ratio', 'Risk-free rate = 0'),
         ('Max. Drawdown [%]', 'Max Drawdown', 'Peak to trough'),
+        ('Beta', 'Beta', 'vs benchmark'),
     ]
     kpi_card_html_list: list[str] = []
     for metric_name_str, title_str, note_str in kpi_spec_list:
@@ -1546,6 +1546,30 @@ def _display_metric_dict_for_value_ser(value_ser: pd.Series) -> dict[str, float]
     }
 
 
+def _strategy_unconditional_beta_float(strategy) -> float | None:
+    """Full-sample beta of strategy daily returns to the benchmark's.
+
+        beta = cov(r_strategy, r_benchmark) / var(r_benchmark)
+
+    Returned only when a benchmark series is present with enough overlap; this
+    is the raw market beta shown in the headline, distinct from the alpha/beta
+    regression (which additionally requires a tradeable benchmark).
+    """
+    strategy_value_ser, benchmark_value_ser, _label_str = _strategy_benchmark_value_pair(strategy)
+    if strategy_value_ser is None:
+        return None
+    aligned_df = pd.concat(
+        {
+            'strategy': strategy_value_ser.pct_change(fill_method=None),
+            'benchmark': benchmark_value_ser.pct_change(fill_method=None),
+        },
+        axis=1,
+    ).dropna()
+    if len(aligned_df) < 3 or float(aligned_df['benchmark'].var()) == 0.0:
+        return None
+    return float(aligned_df['strategy'].cov(aligned_df['benchmark']) / aligned_df['benchmark'].var())
+
+
 def _augment_summary_display_metrics(strategy, summary_df: pd.DataFrame) -> pd.DataFrame:
     """Return a summary copy with distribution/consistency rows added per column.
 
@@ -1563,6 +1587,15 @@ def _augment_summary_display_metrics(strategy, summary_df: pd.DataFrame) -> pd.D
         value_ser = strategy.results[source_column_str].astype(float).dropna()
         for metric_name_str, metric_value_float in _display_metric_dict_for_value_ser(value_ser).items():
             augmented_summary_df.loc[metric_name_str, column_name_str] = metric_value_float
+
+    # Full-sample beta: the strategy against its benchmark, and a benchmark
+    # column against itself is 1.0 by definition.
+    strategy_beta_float = _strategy_unconditional_beta_float(strategy)
+    if strategy_beta_float is not None and 'Strategy' in augmented_summary_df.columns:
+        augmented_summary_df.loc['Beta', 'Strategy'] = strategy_beta_float
+        for column_name_str in augmented_summary_df.columns:
+            if str(column_name_str) != 'Strategy':
+                augmented_summary_df.loc['Beta', column_name_str] = 1.0
     return augmented_summary_df
 
 
@@ -1636,6 +1669,23 @@ def _format_portfolio_summary(
 ) -> str:
     """Backward-compatible wrapper for callers and focused renderer tests."""
     return _format_performance_summary(df, regression_metadata_by_column_dict)
+
+
+# Trade-statistic rows dropped from the report as redundant: the yearly rate
+# duplicates the weekly one, Win/Loss Ratio overlaps Win Rate + Payoff, and CPC
+# Index is an obscure composite of the two. Only the display is trimmed; the
+# underlying summary_trades from metrics.py is unchanged.
+_TRADE_STATISTIC_DROP_SET = frozenset({'# Trades / year', 'Win/Loss Ratio', 'CPC Index'})
+
+
+def _curate_summary_trades(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or len(df) == 0:
+        return df
+    keep_metric_list = [
+        metric_name for metric_name in df.index
+        if str(metric_name) not in _TRADE_STATISTIC_DROP_SET
+    ]
+    return df.loc[keep_metric_list]
 
 
 def _format_summary_trades(df: pd.DataFrame) -> str:
@@ -3425,8 +3475,11 @@ def _build_html(strategy, chart_b64: str) -> str:
         'benchmark_regression_metadata_by_column_dict',
         {},
     )
+    # Augment once with the display-only rows (beta, monthly vol, tails, …) so
+    # both the headline and the summary see the same values.
+    augmented_summary_df = _augment_summary_display_metrics(strategy, summ)
     kpi_grid_html_str = _build_kpi_grid_html(
-        summ,
+        augmented_summary_df,
         'Strategy',
         strategy_regression_metadata_by_column_dict,
     )
@@ -3443,10 +3496,7 @@ def _build_html(strategy, chart_b64: str) -> str:
     weights_content_html_str = _portfolio_weights_html(strategy)
     performance_summary_content_html_str = f'''
 <h2>Performance Summary</h2>
-{_format_performance_summary(
-    _augment_summary_display_metrics(strategy, summ),
-    strategy_regression_metadata_by_column_dict,
-)}
+{_format_performance_summary(augmented_summary_df, strategy_regression_metadata_by_column_dict)}
 '''
     if str(SIGNATURE_PALETTE_DICT['layout_str']) == 'dashboard':
         monthly_returns_body_html_str = (
@@ -3460,19 +3510,19 @@ def _build_html(strategy, chart_b64: str) -> str:
 '''
     trade_statistics_content_html_str = f'''
 <h2>Trade Statistics</h2>
-<div class="scroll">{_format_summary_trades(strategy.summary_trades)}</div>
+<div class="scroll">{_format_summary_trades(_curate_summary_trades(strategy.summary_trades))}</div>
 '''
-    trade_distribution_content_html_str = _build_trade_distribution_html(
-        strategy._trades, 'Trade Return Distribution'
-    )
-    daily_distribution_content_html_str = _build_daily_return_distribution_html(strategy)
     open_trades_content_html_str = f'''
 <h2>Open Trades</h2>
 <div class="scroll">{_format_open_trades(strategy._open_trades)}</div>
 '''
+    # Closed trades are long and rarely the first thing read, so the table is
+    # folded behind a summary by default.
     closed_trades_content_html_str = f'''
 <h2>Closed Trades</h2>
+<details class="summary-details"><summary>Show closed trades</summary>
 <div class="scroll">{_format_trades(strategy._trades)}</div>
+</details>
 '''
 
     if str(SIGNATURE_PALETTE_DICT['layout_str']) == 'spec':
@@ -3493,8 +3543,6 @@ def _build_html(strategy, chart_b64: str) -> str:
                 _build_conditional_beta_plate_html(strategy),
                 trade_statistics_content_html_str,
                 monthly_returns_content_html_str,
-                trade_distribution_content_html_str,
-                daily_distribution_content_html_str,
                 open_trades_content_html_str,
                 closed_trades_content_html_str,
             ],
@@ -3513,8 +3561,6 @@ def _build_html(strategy, chart_b64: str) -> str:
     _wrap_card_html(trade_statistics_content_html_str),
 ])}
 {_wrap_card_html(monthly_returns_content_html_str, card_class_str='card-monthly-returns')}
-{_wrap_card_html(trade_distribution_content_html_str)}
-{_wrap_card_html(daily_distribution_content_html_str)}
 {_wrap_card_html(open_trades_content_html_str)}
 {_wrap_card_html(closed_trades_content_html_str)}
 </div>'''

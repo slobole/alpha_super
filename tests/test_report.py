@@ -212,7 +212,7 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertIn('Drawdown &amp; Recovery', summary_html_str)
         self.assertEqual(summary_html_str.count('<td class="metric"># Drawdowns'), 2)
         self.assertIn('<td class="metric"># Drawdowns / year ', summary_html_str)
-        self.assertIn('<summary>Extended Risk Diagnostics</summary>', summary_html_str)
+        self.assertIn('<h3>Extended Risk Diagnostics</h3>', summary_html_str)
         self.assertNotIn('<td class="metric">Correlation ', summary_html_str)
         self.assertNotIn('Exposure-Adjusted Return (Ann.)', summary_html_str)
 
@@ -262,20 +262,24 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertAlmostEqual(distribution_dict['skew_return_float'], 0.0, places=12)
         self.assertAlmostEqual(distribution_dict['negative_rate_float'], 0.25)
 
-    def test_build_html_includes_daily_return_distribution_and_existing_sections(self):
+    def test_build_html_sections_and_removed_distributions(self):
         strategy = make_strategy([0.0, 0.01, -0.02, 0.0, 0.03, -0.01])
 
         report_html_str = _build_html(strategy, chart_b64='equity-chart-b64')
         trade_statistics_idx_int = report_html_str.index('<h2>Trade Statistics</h2>')
-        daily_distribution_idx_int = report_html_str.index('<h2>Daily Return Distribution</h2>')
+        open_trades_idx_int = report_html_str.index('<h2>Open Trades</h2>')
         closed_trades_idx_int = report_html_str.index('<h2>Closed Trades</h2>')
 
-        self.assertIn('<h2>Daily Return Distribution</h2>', report_html_str)
-        self.assertIn('alt="Daily Return Distribution"', report_html_str)
-        # The distribution section is a chart plus a one-line caption; the fuller
-        # stats moved to the performance summary, so the glued table is gone.
-        self.assertIn('negative days', report_html_str)
-        self.assertNotIn('Mean</th><th>Std. Dev.</th><th>Skew</th><th>Negative Days</th>', report_html_str)
+        # The trade and daily return distribution plates were removed.
+        self.assertNotIn('<h2>Daily Return Distribution</h2>', report_html_str)
+        self.assertNotIn('Trade Return Distribution', report_html_str)
+        # Core sections remain in order.
+        self.assertLess(trade_statistics_idx_int, open_trades_idx_int)
+        self.assertLess(open_trades_idx_int, closed_trades_idx_int)
+        # Closed trades are folded behind a summary by default.
+        self.assertIn('<summary>Show closed trades</summary>', report_html_str)
+        # Redundant trade statistics are trimmed from the display.
+        self.assertNotIn('CPC Index', report_html_str)
         self.assertIn('class="kpi-grid"', report_html_str)
         self.assertIn('id="metric-help-tooltip"', report_html_str)
         self.assertIn("trigger.addEventListener('mouseenter'", report_html_str)
@@ -305,10 +309,11 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertNotIn('background:', h3_rule_str)
         self.assertNotIn('<div class="kpi-label">Final Value</div>', report_html_str)
         self.assertEqual(report_html_str.count('<div class="kpi-card">'), 5)
-        self.assertIn('Total Return', report_html_str)
+        # Headline drops Total Return and ends with Beta.
+        self.assertNotIn('<div class="kpi-label">Total Return</div>', report_html_str)
+        self.assertIn('<div class="kpi-label">Beta</div>', report_html_str)
         self.assertIn('Volatility', report_html_str)
         self.assertIn('11.58%', report_html_str)
-        self.assertIn('class="kpi-value pos">+7.42%</div>', report_html_str)
         self.assertIn('class="kpi-value pos">+6.11%</div>', report_html_str)
         self.assertIn('<h2>Performance Summary</h2>', report_html_str)
         self.assertIn('<h2>Monthly Returns</h2>', report_html_str)
@@ -320,8 +325,6 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertIn('<h2>Trade Statistics</h2>', report_html_str)
         self.assertIn('<h2>Closed Trades</h2>', report_html_str)
         self.assertNotIn('<h2>All Transactions</h2>', report_html_str)
-        self.assertLess(trade_statistics_idx_int, daily_distribution_idx_int)
-        self.assertLess(daily_distribution_idx_int, closed_trades_idx_int)
 
     def test_build_html_groups_strategy_summary_and_adds_alpha_kpi_when_available(self):
         strategy = make_strategy([0.0, 0.01, -0.005, 0.008, -0.002, 0.004])
@@ -738,7 +741,7 @@ class ReportFormattingTests(unittest.TestCase):
         )
         self.assertIn('<h3>Period &amp; Capital</h3>', performance_summary_html_str)
         self.assertIn('<h3>Drawdown &amp; Recovery</h3>', performance_summary_html_str)
-        self.assertIn('<summary>Extended Risk Diagnostics</summary>', performance_summary_html_str)
+        self.assertIn('<h3>Extended Risk Diagnostics</h3>', performance_summary_html_str)
         self.assertIn('Final [$]', performance_summary_html_str)
         self.assertNotIn('<td class="metric">Correlation ', performance_summary_html_str)
         self.assertEqual(report_html_str.count('class="summary-section-stack"'), 3)
