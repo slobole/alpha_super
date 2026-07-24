@@ -15,6 +15,10 @@ from datetime import datetime
 
 from alpha.engine.metrics import generate_monthly_returns
 from alpha.engine.plot import plot as render_strategy_plot
+from alpha.engine.signature import (
+    compute_conditional_beta_dict,
+    render_relative_performance_data_uri_str,
+)
 from alpha.engine.theme import (
     SEABORN_DEEP_COLOR_LIST,
     SIGNATURE_ASSET_COLOR_DICT,
@@ -1757,6 +1761,92 @@ def _strategy_monthly_benchmark_metric_bundle(strategy) -> tuple[pd.DataFrame | 
     return benchmark_monthly_metric_df, _monthly_benchmark_label(benchmark_name_str)
 
 
+def _strategy_benchmark_value_pair(strategy):
+    """Return (strategy_value_ser, benchmark_value_ser, label) or (None, None, None).
+
+    Both series are the stored daily equity curves, so the relative-performance
+    and conditional-beta plates measure the same wealth the rest of the report
+    does — no re-simulation, no re-derivation.
+    """
+    benchmark_name_list = list(getattr(strategy, '_benchmarks', []))
+    if len(benchmark_name_list) == 0:
+        return None, None, None
+    benchmark_name_str = benchmark_name_list[0]
+    if 'total_value' not in strategy.results.columns or benchmark_name_str not in strategy.results.columns:
+        return None, None, None
+
+    strategy_value_ser = strategy.results['total_value'].astype(float)
+    benchmark_value_ser = strategy.results[benchmark_name_str].astype(float)
+    return strategy_value_ser, benchmark_value_ser, _monthly_benchmark_label(benchmark_name_str)
+
+
+def _build_relative_performance_plate_html(strategy) -> str:
+    """Cumulative strategy-over-benchmark ratio (log). Empty without a benchmark."""
+    strategy_value_ser, benchmark_value_ser, _label_str = _strategy_benchmark_value_pair(strategy)
+    if strategy_value_ser is None:
+        return ''
+    try:
+        relative_uri_str = render_relative_performance_data_uri_str(
+            strategy_value_ser, benchmark_value_ser
+        )
+    except ValueError:
+        return ''
+    return f'''
+<h2>Relative Performance</h2>
+<div class="chart-wrap"><img src="{relative_uri_str}" alt="Relative performance"></div>
+<p class="metric-context">Strategy &divide; benchmark, log scale. Rising = beating the
+benchmark, flat = matching it, falling = lagging; edge decay shows as flattening.
+Both series rebased at the first common bar.</p>
+'''
+
+
+def _build_conditional_beta_plate_html(strategy) -> str:
+    """Down/up beta, correlation and capture split by benchmark direction.
+
+    Conditioning is on the benchmark's sign, never the strategy's own — the
+    computation guards that. Empty without a benchmark or with too few days in
+    either regime.
+    """
+    strategy_value_ser, benchmark_value_ser, _label_str = _strategy_benchmark_value_pair(strategy)
+    if strategy_value_ser is None:
+        return ''
+    strategy_return_ser = strategy_value_ser.pct_change(fill_method=None).dropna()
+    benchmark_return_ser = benchmark_value_ser.pct_change(fill_method=None).dropna()
+    try:
+        conditional_metric_dict = compute_conditional_beta_dict(
+            strategy_return_ser, benchmark_return_ser
+        )
+    except ValueError:
+        return ''
+
+    row_spec_list = [
+        ('Beta', 'down_beta_float', 'up_beta_float', '{:.2f}'),
+        ('Correlation', 'down_correlation_float', 'up_correlation_float', '{:.2f}'),
+        ('Capture', 'down_capture_float', 'up_capture_float', '{:.0%}'),
+        ('Observations', 'down_day_count_float', 'up_day_count_float', '{:,.0f}'),
+    ]
+    row_html_list = [
+        f'<tr><td class="metric">{label_str}</td>'
+        f'<td>{format_str.format(conditional_metric_dict[down_key_str])}</td>'
+        f'<td>{format_str.format(conditional_metric_dict[up_key_str])}</td></tr>'
+        for label_str, down_key_str, up_key_str, format_str in row_spec_list
+    ]
+    asymmetry_float = conditional_metric_dict['beta_asymmetry_float']
+    row_html_list.append(
+        '<tr><td class="metric">Beta asymmetry</td>'
+        f'<td colspan="2">{asymmetry_float:+.2f} (up minus down)</td></tr>'
+    )
+    return f'''
+<h2>Conditional Beta</h2>
+<div class="scroll"><table class="stats-table">
+<thead><tr><th>Metric</th><th>Benchmark down</th><th>Benchmark up</th></tr></thead>
+<tbody>{''.join(row_html_list)}</tbody></table></div>
+<p class="metric-context">Beta, correlation and capture split by the sign of the
+benchmark day — conditioned on the benchmark, never the strategy's own returns.
+A lower down-beta than up-beta is the asymmetry a defensive book is built for.</p>
+'''
+
+
 def _monthly_extra_cell_html(
     column_name_str: str,
     value_obj,
@@ -3157,8 +3247,10 @@ def _build_html(strategy, chart_b64: str) -> str:
             headline_metrics_html_str=kpi_grid_html_str,
             plate_content_html_list=[
                 equity_content_html_str,
+                _build_relative_performance_plate_html(strategy),
                 weights_content_html_str,
                 performance_summary_content_html_str,
+                _build_conditional_beta_plate_html(strategy),
                 trade_statistics_content_html_str,
                 monthly_returns_content_html_str,
                 trade_distribution_content_html_str,
