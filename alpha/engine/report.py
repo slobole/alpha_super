@@ -2482,8 +2482,17 @@ def save_portfolio_results(portfolio, output_dir='results', output_path: str | P
 
 
 def _corr_color(val) -> str:
-    """Map a correlation value to an inline CSS background.
-    Low correlation (near 0) = teal, high (near 1) = muted rose."""
+    """Map a correlation to the page's gain/loss language.
+
+    Low correlation is what a multi-pod book wants, so it reads green; high
+    correlation is concentration risk, so it reads brown. Using the same two
+    tones as the monthly grids means one colour vocabulary across the report
+    rather than a second, mute one built from the strategy and benchmark hues.
+
+    *** CRITICAL*** The scale is on |rho|. A strongly negative correlation is
+    as much a real relationship as a strongly positive one, and colouring it as
+    if it were independent would hide a genuine linkage between pods.
+    """
     try:
         value_float = float(val)
     except (TypeError, ValueError):
@@ -2497,13 +2506,13 @@ def _corr_color(val) -> str:
     intensity_float = min(abs(value_float), 1.0)
     low_corr_color_str = blend_hex_color_str(
         SIGNATURE_PALETTE_DICT['page'],
-        SIGNATURE_PALETTE_DICT['strategy'],
-        0.30,
+        SIGNATURE_PALETTE_DICT['profit'],
+        0.34,
     )
     high_corr_color_str = blend_hex_color_str(
         SIGNATURE_PALETTE_DICT['page'],
-        SIGNATURE_PALETTE_DICT['benchmark'],
-        0.52,
+        SIGNATURE_PALETTE_DICT['loss'],
+        0.62,
     )
     background_color_str = blend_hex_color_str(
         low_corr_color_str,
@@ -2512,7 +2521,7 @@ def _corr_color(val) -> str:
     )
     font_color_str = (
         SIGNATURE_PALETTE_DICT['ink']
-        if intensity_float < 0.72 else SIGNATURE_PALETTE_DICT['page']
+        if intensity_float < 0.78 else SIGNATURE_PALETTE_DICT['page']
     )
     return f'background-color: {background_color_str}; color: {font_color_str};'
 
@@ -2529,6 +2538,113 @@ def _format_correlation_matrix(corr: 'pd.DataFrame') -> str:
             cells.append(f'<td style="{style} text-align:center;">{val:.3f}</td>')
         rows.append('<tr>' + ''.join(cells) + '</tr>')
     return f'<table><thead><tr>{headers}</tr></thead><tbody>{"".join(rows)}</tbody></table>'
+
+
+def _correlation_shift_color_str(shift_float: float) -> str:
+    """Colour a correlation shift by whether diversification held or broke.
+
+    A pair that decouples in the tail is genuinely diversifying and reads
+    green; a pair that converges is where the benefit disappears at the moment
+    it is needed, and reads brown.
+    """
+    if not np.isfinite(shift_float):
+        return (
+            f'background-color: {SIGNATURE_PALETTE_DICT["neutral"]}; '
+            f'color: {SIGNATURE_PALETTE_DICT["ink"]};'
+        )
+    tone_color_str = str(
+        SIGNATURE_PALETTE_DICT['loss'] if shift_float > 0.0 else SIGNATURE_PALETTE_DICT['profit']
+    )
+    # A shift of one full correlation point is the strongest tint on the scale.
+    intensity_float = min(abs(shift_float), 1.0)
+    background_color_str = blend_hex_color_str(
+        str(SIGNATURE_PALETTE_DICT['page']), tone_color_str, intensity_float * 0.62
+    )
+    font_color_str = (
+        SIGNATURE_PALETTE_DICT['ink']
+        if intensity_float < 0.78 else SIGNATURE_PALETTE_DICT['page']
+    )
+    return f'background-color: {background_color_str}; color: {font_color_str};'
+
+
+def _build_correlation_shift_html(portfolio) -> str:
+    """Show how far each pod pair's correlation moves in the tail.
+
+        shift_ij = rho_ij(tail days) - rho_ij(full sample)
+
+    The level of tail correlation is not the insight on its own — the change is.
+    A pair sitting at 0.20 normally and 0.70 in the tail has tripled exactly
+    when the diversification was supposed to pay, and neither matrix alone
+    makes that visible.
+
+    *** CRITICAL*** Both matrices must be aligned on the same pods before
+    subtracting. Differencing them positionally would silently pair unrelated
+    strategies if either matrix ever ordered or filtered its pods differently.
+
+    *** CRITICAL*** Tail days are currently selected by the portfolio's own
+    worst returns, which biases these numbers downward: conditioning on an
+    extreme value of the sum mechanically forces its components to offset one
+    another inside that subset. Simulating four independent pods with a true
+    pairwise correlation of zero yields an apparent shift near -0.27 under this
+    definition. Read the table as indicative only until tail days are keyed off
+    an exogenous stress measure, such as the benchmark's worst days, which
+    carries no such selection effect.
+    """
+    full_correlation_df = getattr(portfolio, 'correlation_matrix', None)
+    tail_correlation_df = getattr(portfolio, 'tail_correlation_matrix', None)
+    if full_correlation_df is None or tail_correlation_df is None:
+        return ''
+    if len(full_correlation_df) == 0 or len(tail_correlation_df) == 0:
+        return ''
+
+    shared_pod_name_list = [
+        pod_name_str for pod_name_str in full_correlation_df.index
+        if pod_name_str in tail_correlation_df.index
+        and pod_name_str in full_correlation_df.columns
+        and pod_name_str in tail_correlation_df.columns
+    ]
+    if len(shared_pod_name_list) < 2:
+        return ''
+
+    shift_df = (
+        tail_correlation_df.loc[shared_pod_name_list, shared_pod_name_list]
+        - full_correlation_df.loc[shared_pod_name_list, shared_pod_name_list]
+    )
+
+    header_html_str = '<th></th>' + ''.join(f'<th>{c}</th>' for c in shift_df.columns)
+    row_html_list = []
+    for row_label_str in shift_df.index:
+        cell_html_list = [f'<td class="metric">{row_label_str}</td>']
+        for column_label_str in shift_df.columns:
+            if row_label_str == column_label_str:
+                cell_html_list.append('<td style="text-align:center;">—</td>')
+                continue
+            shift_float = float(shift_df.loc[row_label_str, column_label_str])
+            style_str = _correlation_shift_color_str(shift_float)
+            cell_html_list.append(
+                f'<td style="{style_str} text-align:center;">{shift_float:+.3f}</td>'
+            )
+        row_html_list.append('<tr>' + ''.join(cell_html_list) + '</tr>')
+
+    off_diagonal_shift_vec = shift_df.to_numpy()[~np.eye(len(shift_df), dtype=bool)]
+    finite_shift_vec = off_diagonal_shift_vec[np.isfinite(off_diagonal_shift_vec)]
+    worst_shift_note_str = (
+        f' Largest convergence: {float(finite_shift_vec.max()):+.2f}.'
+        if len(finite_shift_vec) else ''
+    )
+
+    return (
+        '<h3>Correlation Shift in the Tail</h3>'
+        f'<div class="scroll"><table><thead><tr>{header_html_str}</tr></thead>'
+        f'<tbody>{"".join(row_html_list)}</tbody></table></div>'
+        '<p class="metric-context">Tail correlation minus full-sample correlation. '
+        'Brown means a pair converged when it mattered — diversification that was not there '
+        f'in the drawdown; green means it decoupled.{worst_shift_note_str} '
+        '<strong>Indicative only:</strong> tail days are the portfolio\'s own worst returns, '
+        'and conditioning on the sum mechanically pushes its components apart — independent '
+        'pods score about &minus;0.27 under this definition, so treat negative shifts as '
+        'unproven rather than as evidence of diversification.</p>'
+    )
 
 
 def _fmt_decimal_pct(value_obj, signed_bool: bool = False) -> str:
@@ -2637,6 +2753,7 @@ def _build_tail_risk_html(portfolio) -> str:
     if tail_correlation_matrix is not None and len(tail_correlation_matrix) > 0:
         parts.append('<h3>Tail Correlation Matrix</h3>')
         parts.append(f'<div class="scroll">{_format_correlation_matrix(tail_correlation_matrix)}</div>')
+        parts.append(_build_correlation_shift_html(portfolio))
 
     parts.append('<h3>Tail Summary By Pod</h3>')
     parts.append(f'<div class="scroll">{_tail_summary_html(getattr(portfolio, "tail_summary_df", pd.DataFrame()))}</div>')

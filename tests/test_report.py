@@ -748,19 +748,66 @@ class ReportFormattingTests(unittest.TestCase):
         )
         expected_low_corr_color_str = blend_hex_color_str(
             SIGNATURE_PALETTE_DICT['page'],
-            SIGNATURE_PALETTE_DICT['strategy'],
-            0.30,
+            # Low correlation is the diversification a multi-pod book wants, so
+            # it speaks the same green/brown language as the monthly grids.
+            SIGNATURE_PALETTE_DICT['profit'],
+            0.34,
         )
         expected_high_corr_color_str = blend_hex_color_str(
             SIGNATURE_PALETTE_DICT['page'],
-            SIGNATURE_PALETTE_DICT['benchmark'],
-            0.52,
+            SIGNATURE_PALETTE_DICT['loss'],
+            0.62,
         )
 
         self.assertIn(expected_positive_color_str, positive_style_str)
         self.assertIn(expected_negative_color_str, negative_style_str)
         self.assertIn(expected_low_corr_color_str, low_corr_style_str)
         self.assertIn(expected_high_corr_color_str, high_corr_style_str)
+
+    def test_correlation_shift_aligns_pods_before_subtracting(self):
+        """Differencing must match pods by name, not by position."""
+        from alpha.engine.report import _build_correlation_shift_html
+
+        class _PortfolioStub:
+            pass
+
+        portfolio_stub = _PortfolioStub()
+        portfolio_stub.correlation_matrix = pd.DataFrame(
+            [[1.0, 0.20], [0.20, 1.0]], index=['pod_a', 'pod_b'], columns=['pod_a', 'pod_b']
+        )
+        # Same pods, reversed order: a positional subtraction would pair the
+        # wrong strategies and report a fabricated shift.
+        portfolio_stub.tail_correlation_matrix = pd.DataFrame(
+            [[1.0, 0.70], [0.70, 1.0]], index=['pod_b', 'pod_a'], columns=['pod_b', 'pod_a']
+        )
+
+        shift_html_str = _build_correlation_shift_html(portfolio_stub)
+
+        self.assertIn('+0.500', shift_html_str)
+        self.assertIn('Correlation Shift in the Tail', shift_html_str)
+
+    def test_correlation_shift_colors_convergence_and_decoupling(self):
+        from alpha.engine.report import _correlation_shift_color_str
+
+        converging_style_str = _correlation_shift_color_str(0.5)
+        decoupling_style_str = _correlation_shift_color_str(-0.5)
+
+        def rgb_tuple(style_str):
+            hex_str = style_str.split('background-color: ')[1][:7].lstrip('#')
+            return tuple(int(hex_str[i:i + 2], 16) for i in (0, 2, 4))
+
+        # Convergence reads warm (loss tone), decoupling reads green.
+        self.assertGreater(rgb_tuple(converging_style_str)[0], rgb_tuple(converging_style_str)[1])
+        self.assertGreater(rgb_tuple(decoupling_style_str)[1], rgb_tuple(decoupling_style_str)[0])
+
+    def test_correlation_shift_omitted_without_both_matrices(self):
+        from alpha.engine.report import _build_correlation_shift_html
+
+        class _PortfolioStub:
+            correlation_matrix = pd.DataFrame()
+            tail_correlation_matrix = pd.DataFrame()
+
+        self.assertEqual(_build_correlation_shift_html(_PortfolioStub()), '')
 
     def test_drawdown_color_uses_light_red_palette(self):
         drawdown_style_str = _drawdown_color(-0.12)
