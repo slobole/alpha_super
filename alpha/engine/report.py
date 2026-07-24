@@ -132,7 +132,10 @@ _PERFORMANCE_SUMMARY_SECTION_TUPLE = (
     ),
     (
         'Return & Risk-Adjusted Performance',
-        ('Return [%]', 'Return (Ann.) [%]', 'Volatility (Ann.) [%]', 'Sharpe Ratio', 'MAR Ratio'),
+        (
+            'Return [%]', 'Return (Ann.) [%]', 'Volatility (Ann.) [%]',
+            'Volatility (Monthly) [%]', 'Sharpe Ratio', 'MAR Ratio', 'Positive Months [%]',
+        ),
         False,
     ),
     (
@@ -173,6 +176,18 @@ _PERFORMANCE_SUMMARY_SECTION_TUPLE = (
             'Avg. Drawdown Duration [days]',
         ),
         True,
+    ),
+    (
+        'Distribution & Tails',
+        (
+            'Skewness (Daily)',
+            'Skewness (Monthly)',
+            'Excess Kurtosis (Daily)',
+            'Worst Day [%]',
+            'VaR 95% (Daily) [%]',
+            'CVaR 95% (Daily) [%]',
+        ),
+        False,
     ),
 )
 _PERFORMANCE_SUMMARY_HIDDEN_METRIC_SET = frozenset(
@@ -1499,6 +1514,56 @@ def _format_benchmark_regression_summary(
         f'<table><thead><tr>{header_html_str}</tr></thead>'
         f'<tbody>{"".join(row_html_list)}</tbody></table>'
     )
+
+
+def _display_metric_dict_for_value_ser(value_ser: pd.Series) -> dict[str, float]:
+    """Distribution and consistency stats derived from a daily equity curve.
+
+    These are presentation-only: computed from the already-realized wealth
+    series for the report, not part of the core metrics contract. Percent
+    metrics are returned already in percent units, matching the summary
+    formatter's convention. VaR/CVaR are historical (non-parametric): the 5th
+    percentile of daily returns and the mean of days at or below it.
+    """
+    daily_return_ser = value_ser.pct_change(fill_method=None).dropna()
+    monthly_return_ser = value_ser.resample('ME').last().pct_change(fill_method=None).dropna()
+    if len(daily_return_ser) < 2 or len(monthly_return_ser) < 2:
+        return {}
+
+    var_95_float = float(np.percentile(daily_return_ser, 5.0))
+    cvar_tail_ser = daily_return_ser[daily_return_ser <= var_95_float]
+    cvar_95_float = float(cvar_tail_ser.mean()) if len(cvar_tail_ser) else var_95_float
+
+    return {
+        'Volatility (Monthly) [%]': float(monthly_return_ser.std()) * 100.0,
+        'Positive Months [%]': float((monthly_return_ser > 0.0).mean()) * 100.0,
+        'Skewness (Daily)': float(daily_return_ser.skew()),
+        'Skewness (Monthly)': float(monthly_return_ser.skew()),
+        'Excess Kurtosis (Daily)': float(daily_return_ser.kurtosis()),
+        'Worst Day [%]': float(daily_return_ser.min()) * 100.0,
+        'VaR 95% (Daily) [%]': var_95_float * 100.0,
+        'CVaR 95% (Daily) [%]': cvar_95_float * 100.0,
+    }
+
+
+def _augment_summary_display_metrics(strategy, summary_df: pd.DataFrame) -> pd.DataFrame:
+    """Return a summary copy with distribution/consistency rows added per column.
+
+    Each column is marked to its own equity curve: the strategy column to
+    ``total_value``, a benchmark column to its stored series. Columns with no
+    matching series (or too little data) are simply left without the extra rows.
+    """
+    augmented_summary_df = summary_df.copy()
+    for column_name_str in augmented_summary_df.columns:
+        source_column_str = (
+            'total_value' if str(column_name_str) == 'Strategy' else str(column_name_str)
+        )
+        if source_column_str not in strategy.results.columns:
+            continue
+        value_ser = strategy.results[source_column_str].astype(float).dropna()
+        for metric_name_str, metric_value_float in _display_metric_dict_for_value_ser(value_ser).items():
+            augmented_summary_df.loc[metric_name_str, column_name_str] = metric_value_float
+    return augmented_summary_df
 
 
 def _format_performance_summary(
@@ -3213,7 +3278,10 @@ def _build_html(strategy, chart_b64: str) -> str:
     weights_content_html_str = _portfolio_weights_html(strategy)
     performance_summary_content_html_str = f'''
 <h2>Performance Summary</h2>
-{_format_performance_summary(summ, strategy_regression_metadata_by_column_dict)}
+{_format_performance_summary(
+    _augment_summary_display_metrics(strategy, summ),
+    strategy_regression_metadata_by_column_dict,
+)}
 '''
     monthly_returns_content_html_str = f'''
 <h2>Monthly Returns</h2>
