@@ -1,0 +1,82 @@
+"""Drift guard: presentation modules must not hardcode their own colours.
+
+Every colour belongs in ``alpha/engine/theme.py``. When a chart or report
+builder inlines its own hex literal, that mark stops following the active
+signature variant — which is exactly how a monochrome report ends up with a
+blue sleeve in its weight stack, and how a second, silently diverging palette
+took root in the Bench stylesheet.
+
+This test fails on any new hex literal outside the theme so the identity does
+not decay one convenient exception at a time.
+"""
+
+from __future__ import annotations
+
+import re
+import unittest
+from pathlib import Path
+
+REPO_ROOT_PATH = Path(__file__).resolve().parents[1]
+
+# Presentation modules that must source every colour from the theme.
+_GUARDED_MODULE_PATH_TUPLE = (
+    Path('alpha/engine/report.py'),
+    Path('alpha/engine/plot.py'),
+    Path('alpha/engine/signature.py'),
+)
+
+_HEX_COLOR_PATTERN = re.compile(r'#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?\b')
+
+# Colours that are structural rather than thematic, with the reason they stay.
+_ALLOWED_HEX_COLOR_DICT = {
+    '#101418': 'weight-stack edge; folded into the theme when stacks are restyled',
+}
+
+
+def _hex_literal_finding_list(module_path: Path) -> list[str]:
+    finding_list: list[str] = []
+    source_text_str = (REPO_ROOT_PATH / module_path).read_text(encoding='utf-8')
+    for line_number_int, line_str in enumerate(source_text_str.splitlines(), start=1):
+        stripped_line_str = line_str.strip()
+        # Comments and docstring prose may name a colour when explaining one.
+        if stripped_line_str.startswith('#'):
+            continue
+        for hex_color_str in _HEX_COLOR_PATTERN.findall(line_str):
+            if hex_color_str.lower() in _ALLOWED_HEX_COLOR_DICT:
+                continue
+            finding_list.append(f'{module_path}:{line_number_int}: {hex_color_str}  |  {stripped_line_str[:90]}')
+    return finding_list
+
+
+class ThemeColorOwnershipTests(unittest.TestCase):
+    def test_presentation_modules_have_no_hardcoded_hex_colors(self):
+        finding_list: list[str] = []
+        for module_path in _GUARDED_MODULE_PATH_TUPLE:
+            finding_list.extend(_hex_literal_finding_list(module_path))
+
+        self.assertEqual(
+            finding_list,
+            [],
+            'Hardcoded colours found outside alpha/engine/theme.py. Move them into the '
+            'palette so they follow the active signature variant:\n  '
+            + '\n  '.join(finding_list),
+        )
+
+    def test_bench_stylesheet_tokens_come_from_the_theme(self):
+        """Bench must not reintroduce its own palette under :root."""
+        from alpha.engine.theme import build_bench_theme_css
+
+        bench_theme_css_str = build_bench_theme_css()
+        self.assertIn('--accent:', bench_theme_css_str)
+        self.assertIn('--text:', bench_theme_css_str)
+        # The generated block must actually carry the journal ink, not the
+        # stylesheet's original blue accent.
+        self.assertNotIn('#0c8ce0', bench_theme_css_str)
+
+    def test_guarded_modules_exist(self):
+        for module_path in _GUARDED_MODULE_PATH_TUPLE:
+            self.assertTrue((REPO_ROOT_PATH / module_path).exists(), module_path)
+
+
+if __name__ == '__main__':
+    unittest.main()

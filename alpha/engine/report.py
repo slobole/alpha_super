@@ -312,12 +312,19 @@ def _json_default(value):
 
 
 def _weight_color_for_asset(asset_name_str: str) -> str:
+    """Resolve an asset's chart colour from the active signature palette.
+
+    Read from the palette rather than the module-level baseline so a monochrome
+    variant maps assets onto its own grey ramp instead of leaving a blue TLT
+    and a gold GLD inside an otherwise colourless report.
+    """
     normalized_asset_name_str = str(asset_name_str).upper()
     if normalized_asset_name_str in _FALLBACK_ASSET_SET:
         return SIGNATURE_PALETTE_DICT['benchmark']
-    return SIGNATURE_ASSET_COLOR_DICT.get(
+    active_asset_color_dict = SIGNATURE_PALETTE_DICT['asset_color_dict']
+    return active_asset_color_dict.get(
         normalized_asset_name_str,
-        SIGNATURE_ASSET_COLOR_DICT['DEFAULT'],
+        active_asset_color_dict['DEFAULT'],
     )
 
 

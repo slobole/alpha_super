@@ -63,6 +63,8 @@ SIGNATURE_PALETTE_DICT: dict[str, object] = {
     'font_stack_list': list(SIGNATURE_FONT_STACK_LIST),
     'font_stack_str': SIGNATURE_FONT_STACK_STR,
     'prose_font_stack_str': SIGNATURE_FONT_STACK_STR,
+    # Populated just below, once SIGNATURE_ASSET_COLOR_DICT exists.
+    'asset_color_dict': {},
     'layout_str': 'dashboard',
     'axis_style_str': 'dashboard',
     # Empty means fills are distinguished by colour alone. A populated cycle
@@ -71,6 +73,8 @@ SIGNATURE_PALETTE_DICT: dict[str, object] = {
 }
 
 SIGNATURE_ASSET_COLOR_DICT: dict[str, str] = {
+    # Baseline (dashboard) asset hues. Variants override this wholesale via the
+    # 'asset_color_dict' palette key — see _build_monochrome_asset_color_dict.
     'TLT': '#4f6bed',
     'GLD': '#d9a441',
     'DBC': '#36b37e',
@@ -86,6 +90,40 @@ SIGNATURE_ASSET_COLOR_DICT: dict[str, str] = {
     'CASH': '#b3bac5',
     'DEFAULT': '#7a869a',
 }
+
+SIGNATURE_PALETTE_DICT['asset_color_dict'] = dict(SIGNATURE_ASSET_COLOR_DICT)
+
+
+def _build_monochrome_asset_color_dict(
+        ink_color_str: str,
+        light_color_str: str,
+        page_color_str: str,
+) -> dict[str, str]:
+    """Give every named asset a distinct grey on a monochrome ramp.
+
+    A variant with no colour budget still needs the sleeves in a weight stack
+    to be told apart, so each asset gets its own step from ink to light rather
+    than keeping the baseline hues — which would otherwise leave a blue TLT and
+    a gold GLD sitting inside an all-grey report.
+
+    Ordering follows the baseline dict, so an asset keeps the same shade across
+    runs instead of shifting when the set of held names changes.
+    """
+    ramp_asset_name_list = [
+        asset_name_str for asset_name_str in SIGNATURE_ASSET_COLOR_DICT
+        if asset_name_str not in ('CASH', 'DEFAULT')
+    ]
+    monochrome_asset_color_dict: dict[str, str] = {}
+    for asset_idx_int, asset_name_str in enumerate(ramp_asset_name_list):
+        ramp_position_float = asset_idx_int / max(len(ramp_asset_name_list) - 1, 1)
+        monochrome_asset_color_dict[asset_name_str] = blend_hex_color_str(
+            ink_color_str, light_color_str, ramp_position_float
+        )
+    # Cash is not an exposure, so it reads as near-empty; unknown names sit mid-ramp.
+    monochrome_asset_color_dict['CASH'] = blend_hex_color_str(light_color_str, page_color_str, 0.55)
+    monochrome_asset_color_dict['DEFAULT'] = blend_hex_color_str(ink_color_str, light_color_str, 0.5)
+    return monochrome_asset_color_dict
+
 
 _BASE_VARIANT_NAME_STR: str = 'current'
 
@@ -153,10 +191,21 @@ SIGNATURE_VARIANT_NAME_LIST: list[str] = list(_VARIANT_OVERRIDE_DICT)
 
 
 def _copy_palette_dict(palette_dict: dict[str, object]) -> dict[str, object]:
-    return {
-        key_str: (list(value_obj) if isinstance(value_obj, list) else value_obj)
-        for key_str, value_obj in palette_dict.items()
-    }
+    """Copy a palette, duplicating its mutable containers.
+
+    *** CRITICAL*** Lists and dicts are copied, not shared. The variant context
+    mutates SIGNATURE_PALETTE_DICT in place, so a shared container would let a
+    variant's edits leak into the saved baseline and survive the restore.
+    """
+    copied_palette_dict: dict[str, object] = {}
+    for key_str, value_obj in palette_dict.items():
+        if isinstance(value_obj, list):
+            copied_palette_dict[key_str] = list(value_obj)
+        elif isinstance(value_obj, dict):
+            copied_palette_dict[key_str] = dict(value_obj)
+        else:
+            copied_palette_dict[key_str] = value_obj
+    return copied_palette_dict
 
 
 def resolve_variant_palette_dict(variant_name_str: str = _BASE_VARIANT_NAME_STR) -> dict[str, object]:
@@ -182,7 +231,12 @@ def resolve_variant_palette_dict(variant_name_str: str = _BASE_VARIANT_NAME_STR)
         )
 
     for key_str, value_obj in override_dict.items():
-        resolved_palette_dict[key_str] = list(value_obj) if isinstance(value_obj, list) else value_obj
+        if isinstance(value_obj, list):
+            resolved_palette_dict[key_str] = list(value_obj)
+        elif isinstance(value_obj, dict):
+            resolved_palette_dict[key_str] = dict(value_obj)
+        else:
+            resolved_palette_dict[key_str] = value_obj
 
     return resolved_palette_dict
 
@@ -529,6 +583,18 @@ def blend_hex_color_str(
         channel_value_list.append(int(round(blended_channel_float * 255.0)))
 
     return '#{0:02x}{1:02x}{2:02x}'.format(*channel_value_list)
+
+
+# Populated here rather than in the variant literals above because the ramp
+# needs blend_hex_color_str, which is defined further down the module.
+for _monochrome_variant_name_str in ('journal', 'journal_spec'):
+    _VARIANT_OVERRIDE_DICT[_monochrome_variant_name_str]['asset_color_dict'] = (
+        _build_monochrome_asset_color_dict(
+            ink_color_str=str(_JOURNAL_PALETTE_DICT['ink']),
+            light_color_str=str(_JOURNAL_PALETTE_DICT['benchmark']),
+            page_color_str=str(_JOURNAL_PALETTE_DICT['page']),
+        )
+    )
 
 
 def _build_document_report_css() -> str:
