@@ -398,20 +398,33 @@ def _render_rotation_composition_figure(
     occupancy_ax.set_ylim(0, resolved_capacity_int * 1.12)
     occupancy_ax.margins(x=0.008)
 
-    median_holding_period_float = float(np.median(holding_period_length_list))
+    holding_period_vec = np.asarray(holding_period_length_list, dtype=float)
+    median_holding_period_float = float(np.median(holding_period_vec))
+    # *** CRITICAL*** A few names held almost the whole backtest stretch the
+    # x-axis to thousands of bars and crush the bulk into one bar. Cap the
+    # *display* at the 98th percentile so the mass is readable; the top bin
+    # absorbs the long holds. The median annotation stays on the true data.
+    display_cap_float = max(float(np.percentile(holding_period_vec, 98.0)), 10.0)
+    clipped_holding_period_vec = np.clip(holding_period_vec, None, display_cap_float)
+    long_hold_count_int = int((holding_period_vec > display_cap_float).sum())
     holding_ax.hist(
-        holding_period_length_list,
-        bins=min(30, max(6, len(set(holding_period_length_list)))),
+        clipped_holding_period_vec,
+        bins=min(30, max(6, len(set(clipped_holding_period_vec.tolist())))),
         color=strategy_color_str, alpha=0.75,
         edgecolor=str(SIGNATURE_PALETTE_DICT['bar_edge']), linewidth=0.5,
     )
     holding_ax.axvline(
-        median_holding_period_float, color=ink_color_str, linestyle='--', linewidth=0.8,
+        min(median_holding_period_float, display_cap_float),
+        color=ink_color_str, linestyle='--', linewidth=0.8,
     )
+    holding_ax.set_xlim(0.0, display_cap_float)
     holding_ax.set_ylabel('Spells')
+    long_hold_note_str = (
+        f', {long_hold_count_int} beyond {display_cap_float:.0f}' if long_hold_count_int else ''
+    )
     holding_ax.set_xlabel(
         f'Holding period (bars) — median {median_holding_period_float:.0f}, '
-        f'{len(holding_period_length_list)} spells'
+        f'{len(holding_period_length_list)} spells{long_hold_note_str}'
     )
 
     for axis_obj in (exposure_ax, occupancy_ax, holding_ax):

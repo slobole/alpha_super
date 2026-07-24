@@ -17,6 +17,7 @@ from alpha.engine.metrics import generate_monthly_returns
 from alpha.engine.plot import plot as render_strategy_plot
 from alpha.engine.signature import (
     compute_conditional_beta_dict,
+    render_composition_data_uri_str,
     render_relative_performance_data_uri_str,
 )
 from alpha.engine.theme import (
@@ -1845,6 +1846,41 @@ def _strategy_benchmark_value_pair(strategy):
     return strategy_value_ser, benchmark_value_ser, _monthly_benchmark_label(benchmark_name_str)
 
 
+def _build_composition_plate_html(strategy) -> str:
+    """Composition of the strategy's own book, in the view its shape calls for.
+
+    Detected from the realized weights: a persistent-sleeve book (few distinct
+    names) stacks by weight; a rotating book (many names, e.g. a slot momentum
+    strategy) shows deployed capital, slot occupancy and holding periods, since
+    a per-name weight chart there encodes nothing. Empty without weight history.
+    """
+    realized_weight_df = getattr(strategy, 'realized_weight_df', None)
+    if realized_weight_df is None or len(realized_weight_df) == 0 or realized_weight_df.shape[1] == 0:
+        return ''
+    try:
+        composition_uri_str, resolved_mode_str = render_composition_data_uri_str(realized_weight_df)
+    except ValueError:
+        return ''
+
+    distinct_name_count_int = int(realized_weight_df.fillna(0.0).abs().gt(0.0).any(axis=0).sum())
+    caption_str = {
+        'sleeve': (
+            f'{distinct_name_count_int} distinct names ever held — few enough that weights '
+            'by name are the story, so composition stacks by weight.'
+        ),
+        'rotation': (
+            f'{distinct_name_count_int} distinct names ever held — a per-name weight chart '
+            'would be unreadable, so composition shows deployed capital, slot occupancy and '
+            'holding periods instead.'
+        ),
+    }[resolved_mode_str]
+    return f'''
+<h2>Composition</h2>
+<div class="chart-wrap"><img src="{composition_uri_str}" alt="Composition"></div>
+<p class="metric-context">{caption_str}</p>
+'''
+
+
 def _build_relative_performance_plate_html(strategy) -> str:
     """Cumulative strategy-over-benchmark ratio (log). Empty without a benchmark."""
     strategy_value_ser, benchmark_value_ser, _label_str = _strategy_benchmark_value_pair(strategy)
@@ -3316,6 +3352,7 @@ def _build_html(strategy, chart_b64: str) -> str:
             plate_content_html_list=[
                 equity_content_html_str,
                 _build_relative_performance_plate_html(strategy),
+                _build_composition_plate_html(strategy),
                 weights_content_html_str,
                 performance_summary_content_html_str,
                 _build_conditional_beta_plate_html(strategy),
