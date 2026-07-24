@@ -263,21 +263,44 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertAlmostEqual(distribution_dict['skew_return_float'], 0.0, places=12)
         self.assertAlmostEqual(distribution_dict['negative_rate_float'], 0.25)
 
-    def test_monthly_heatmap_shades_darker_for_higher_returns(self):
-        """Darker must always mean a higher return, never the reverse."""
+    def test_monthly_heatmap_uses_gain_and_loss_hues(self):
+        """Hue must carry the sign: gains green-side, losses brown-side."""
         from alpha.engine.report import _signature_heatmap_background_str
+        from alpha.engine.theme import signature_variant_context
+
+        def rgb_tuple(hex_color_str):
+            hex_digit_str = hex_color_str.lstrip('#')
+            return tuple(int(hex_digit_str[i:i + 2], 16) for i in (0, 2, 4))
+
+        with signature_variant_context('journal'):
+            gain_rgb_tuple = rgb_tuple(_signature_heatmap_background_str(0.10, -0.10, 0.10))
+            loss_rgb_tuple = rgb_tuple(_signature_heatmap_background_str(-0.10, -0.10, 0.10))
+            flat_color_str = _signature_heatmap_background_str(0.0, -0.10, 0.10)
+            panel_color_str = str(SIGNATURE_PALETTE_DICT['panel'])
+
+        # A gain leans green (green channel dominates red); a loss leans warm.
+        self.assertGreater(gain_rgb_tuple[1], gain_rgb_tuple[0])
+        self.assertGreater(loss_rgb_tuple[0], loss_rgb_tuple[1])
+        # Zero is bare paper, so the ramp diverges from the page itself.
+        self.assertEqual(flat_color_str, panel_color_str)
+
+    def test_monthly_heatmap_intensity_grows_with_magnitude(self):
+        from alpha.engine.report import _signature_heatmap_background_str
+        from alpha.engine.theme import signature_variant_context
 
         def luminance_float(hex_color_str):
             hex_digit_str = hex_color_str.lstrip('#')
             return sum(int(hex_digit_str[i:i + 2], 16) for i in (0, 2, 4)) / 3.0
 
-        worst_color_str = _signature_heatmap_background_str(-0.10, -0.10, 0.10)
-        flat_color_str = _signature_heatmap_background_str(0.0, -0.10, 0.10)
-        best_color_str = _signature_heatmap_background_str(0.10, -0.10, 0.10)
+        with signature_variant_context('journal'):
+            small_gain_str = _signature_heatmap_background_str(0.02, -0.10, 0.10)
+            big_gain_str = _signature_heatmap_background_str(0.10, -0.10, 0.10)
+            small_loss_str = _signature_heatmap_background_str(-0.02, -0.10, 0.10)
+            big_loss_str = _signature_heatmap_background_str(-0.10, -0.10, 0.10)
 
-        # Luminance must decrease (get darker) as the return rises.
-        self.assertGreater(luminance_float(worst_color_str), luminance_float(flat_color_str))
-        self.assertGreater(luminance_float(flat_color_str), luminance_float(best_color_str))
+        # Within each side, a larger move is a stronger tint.
+        self.assertLess(luminance_float(big_gain_str), luminance_float(small_gain_str))
+        self.assertLess(luminance_float(big_loss_str), luminance_float(small_loss_str))
 
     def test_monthly_heatmap_clamps_out_of_range_returns(self):
         from alpha.engine.report import _signature_heatmap_background_str

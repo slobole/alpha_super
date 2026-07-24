@@ -2053,23 +2053,35 @@ def _signature_heatmap_background_str(
     low_float: float,
     high_float: float,
 ) -> str:
-    """Map a return onto one monotonic light-to-dark ramp.
+    """Map a return onto a diverging gain/loss ramp.
 
-    *** CRITICAL*** Shade is monotonic in the *signed* return, not in its
-    magnitude and not in losses alone: the worst reading is the lightest and
-    the best is the darkest, so darker always means a higher return anywhere
-    in the table. Encoding magnitude instead would make a large loss and a
-    large gain look alike, and shading only losses inverts the reader's
-    intuition that darker is better.
+    *** CRITICAL*** Hue carries the direction and intensity carries the
+    magnitude — gains tint toward the palette's profit tone, losses toward its
+    loss tone, both fading to bare paper at zero. Splitting the two roles is
+    what makes this readable: a single-hue ramp had to choose between showing
+    direction and showing size, and either choice made one of them a guess.
+
+    Each side is scaled against its own extreme, so the worst loss and the best
+    gain both reach full intensity regardless of which is larger in the sample.
     """
-    span_float = high_float - low_float
-    if not np.isfinite(span_float) or span_float <= 0.0:
+    if not np.isfinite(value_float):
         return str(SIGNATURE_PALETTE_DICT['panel'])
-    position_float = min(max((value_float - low_float) / span_float, 0.0), 1.0)
+
+    if value_float >= 0.0:
+        tone_color_str = str(SIGNATURE_PALETTE_DICT['profit'])
+        extreme_float = max(high_float, 0.0)
+    else:
+        tone_color_str = str(SIGNATURE_PALETTE_DICT['loss'])
+        extreme_float = abs(min(low_float, 0.0))
+
+    if not np.isfinite(extreme_float) or extreme_float <= 0.0:
+        return str(SIGNATURE_PALETTE_DICT['panel'])
+
+    intensity_float = min(abs(value_float) / extreme_float, 1.0)
     return blend_hex_color_str(
         str(SIGNATURE_PALETTE_DICT['panel']),
-        str(SIGNATURE_PALETTE_DICT['ink']),
-        position_float * _SIGNATURE_HEATMAP_MAX_BLEND_FLOAT,
+        tone_color_str,
+        intensity_float * _SIGNATURE_HEATMAP_MAX_BLEND_FLOAT,
     )
 
 
@@ -2175,9 +2187,10 @@ def _build_signature_monthly_returns_html(strategy) -> str:
             _signature_monthly_table_html(benchmark_value_ser, monthly_range_tuple)
         )
     html_part_list.append(
-        '<p class="metric-context">Monthly returns in per cent, shaded light to dark by return — '
-        'darker is a better month — on one scale shared between both tables. Each year\'s return, '
-        'volatility, max drawdown and Sharpe are computed within that calendar year only.</p>'
+        '<p class="metric-context">Monthly returns in per cent. Gains tint green and losses '
+        'brown, deepening with the size of the move, on one scale shared between both tables. '
+        'Each year\'s return, volatility, max drawdown and Sharpe are computed within that '
+        'calendar year only.</p>'
     )
     return ''.join(html_part_list)
 

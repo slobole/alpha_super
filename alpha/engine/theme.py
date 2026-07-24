@@ -141,35 +141,44 @@ _BASE_VARIANT_NAME_STR: str = 'current'
 # one palette with each candidate structure, so structure is the only variable
 # left under comparison.
 _JOURNAL_PALETTE_DICT: dict[str, object] = {
-    'ink': '#111111',
-    'page': '#ffffff',
-    'panel': '#ffffff',
-    'neutral': '#f2f2f2',
-    'grid': '#e4e4e4',
-    'border': '#d6d6d6',
-    'axes_border': '#111111',
-    'muted': '#6e6e6e',
-    'strategy': '#111111',
+    # Warm ink on warm paper. The greys carry a trace of brown so nothing on
+    # the page reads as cold blue-grey next to the earth tones below.
+    'ink': '#1e1b16',
+    'page': '#fdfcf9',
+    'panel': '#fdfcf9',
+    'neutral': '#f3f1ea',
+    'grid': '#e6e2d8',
+    'border': '#dbd6c9',
+    'axes_border': '#1e1b16',
+    'muted': '#6f6a5e',
+    # The equity line stays ink: the curve's shape is the message, and holding
+    # colour back here is what lets green and brown mean something when they
+    # do appear.
+    'strategy': '#1e1b16',
     'strategy_dark': '#000000',
-    'benchmark': '#a8a8a8',
-    'benchmark_dark': '#7d7d7d',
-    'profit': '#111111',
-    'profit_dark': '#111111',
-    'loss': '#6e6e6e',
-    'loss_dark': '#4a4a4a',
-    'vertical_line': '#a8a8a8',
-    'zero_line': '#111111',
-    'bar_edge': '#111111',
-    'legend_face': '#ffffff',
-    'legend_edge': '#111111',
-    'label_face': '#ffffff',
+    'benchmark': '#aaa496',
+    'benchmark_dark': '#7f7a6d',
+    # Earth semantics: moss green for gains, umber for losses. Muted enough to
+    # sit on paper without shouting, distinct enough to read at a glance.
+    'profit': '#4a7c59',
+    'profit_dark': '#376243',
+    'loss': '#9c6644',
+    'loss_dark': '#7c4e31',
+    'vertical_line': '#aaa496',
+    'zero_line': '#1e1b16',
+    'bar_edge': '#1e1b16',
+    'legend_face': '#fdfcf9',
+    'legend_edge': '#1e1b16',
+    'label_face': '#fdfcf9',
+    # Earth cycle for composition stacks: pine, umber, olive, tan, slate-green,
+    # bark, sage, sand.
     'overlay_cycle': [
-        '#111111', '#8a8a8a', '#4a4a4a', '#c2c2c2',
-        '#6e6e6e', '#a8a8a8', '#2e2e2e', '#d6d6d6',
+        '#2b4b3f', '#8a6a4b', '#5c6b52', '#a08768',
+        '#3f5a52', '#6e5442', '#7d8a76', '#c2b39a',
     ],
     'hatch_cycle_list': ['', '///', '...', 'xxx', '\\\\', '+++', 'ooo', '---'],
-    'mean_line': '#111111',
-    'shadow_rgba': 'rgba(17, 17, 17, 0.05)',
+    'mean_line': '#1e1b16',
+    'shadow_rgba': 'rgba(30, 27, 22, 0.05)',
     'font_family_str': 'monospace',
     'font_stack_list': ['Cascadia Mono', 'Consolas', 'DejaVu Sans Mono', 'monospace'],
     'font_stack_str': '"Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace',
@@ -682,11 +691,11 @@ h2 {{
 }}
 h3 {{
     font-family: var(--font-figure);
-    font-size: 0.68rem;
-    font-weight: 600;
-    letter-spacing: 0.12em;
+    font-size: 0.74rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: var(--color-muted);
+    color: var(--color-ink);
     margin: 0 0 12px;
 }}
 .meta {{
@@ -979,19 +988,21 @@ h1 {
     padding: 0 13px 13px;
     margin-bottom: 16px;
 }
+/* Plate headings carry real weight: they are the page's main separator, so
+   they read at a glance rather than as fine print. */
 .plate > h2 {
-    margin: 0 -13px 13px;
-    padding: 7px 13px;
+    margin: 0 -13px 14px;
+    padding: 9px 13px;
     background: var(--color-neutral);
     border: none;
-    border-bottom: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--color-ink);
     border-radius: 0;
     font-family: var(--font-figure);
-    font-size: 0.6rem;
-    font-weight: 600;
-    letter-spacing: 0.13em;
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: var(--color-muted);
+    color: var(--color-ink);
 }
 .plate > h2::before {
     content: "Plate " counter(plate, decimal-leading-zero) " \\2014 ";
