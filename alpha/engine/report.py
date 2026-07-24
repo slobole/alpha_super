@@ -21,7 +21,6 @@ from alpha.engine.signature import (
     render_relative_performance_data_uri_str,
 )
 from alpha.engine.theme import (
-    SEABORN_DEEP_COLOR_LIST,
     SIGNATURE_ASSET_COLOR_DICT,
     SIGNATURE_PALETTE_DICT,
     blend_hex_color_str,
@@ -988,23 +987,17 @@ def _build_daily_return_distribution_html(strategy) -> str:
     std_return_float = float(distribution_dict['std_return_float'])
     skew_return_float = float(distribution_dict['skew_return_float'])
     negative_rate_float = float(distribution_dict['negative_rate_float'])
+    skew_str = _fmt_num(skew_return_float, 2) if np.isfinite(skew_return_float) else 'N/A'
 
-    stats_table_html = (
-        '<table class="stats-table"><thead><tr>'
-        '<th>Mean</th><th>Std. Dev.</th><th>Skew</th><th>Negative Days</th>'
-        '</tr></thead><tbody><tr>'
-        f'<td>{mean_return_float:.3%}</td>'
-        f'<td>{std_return_float:.3%}</td>'
-        f'<td>{_fmt_num(skew_return_float, 3) if np.isfinite(skew_return_float) else "N/A"}</td>'
-        f'<td>{negative_rate_float:.2%}</td>'
-        '</tr></tbody></table>'
-    )
-
+    # Chart plus a one-line caption, not a glued stats table — the fuller
+    # distribution stats live in the performance summary's tails section.
     return (
         '<h2>Daily Return Distribution</h2>'
         f'<div class="chart-wrap"><img src="data:image/png;base64,{histogram_b64}" '
         'alt="Daily Return Distribution"></div>'
-        f'{stats_table_html}'
+        f'<p class="metric-context">Realized daily returns — mean {mean_return_float:.3%}, '
+        f'sigma {std_return_float:.3%}, skew {skew_str}, {negative_rate_float:.1%} negative days. '
+        'Fuller distribution and tail stats are in the performance summary.</p>'
     )
 
 
@@ -1360,11 +1353,17 @@ def _build_trade_distribution_html(trade_df: pd.DataFrame | None, section_title_
         if len(chart_block_list) > 0 else ''
     )
 
+    # Charts plus a one-line caption, not glued stats tables — win rate and
+    # payoff live in the Trade Statistics plate, tail stats in the summary.
+    trade_count_int = int(distribution_dict['trade_count_int'])
+    win_rate_float = float(distribution_dict.get('win_rate_float', float('nan')))
+    win_rate_str = f'{win_rate_float:.1%}' if np.isfinite(win_rate_float) else 'N/A'
     return (
         f'<h2>{section_title_str}</h2>'
         f'{chart_grid_html}'
-        f'<div class="scroll">{_trade_distribution_summary_table_html(distribution_dict)}</div>'
-        f'<div class="scroll">{_loss_tail_summary_table_html(distribution_dict)}</div>'
+        f'<p class="metric-context">Each trade\'s return against its holding duration, winners '
+        f'and losers separated — {trade_count_int:,} closed trades, {win_rate_str} winners. '
+        'Trade-level statistics are in the Trade Statistics plate.</p>'
     )
 
 
@@ -1879,6 +1878,136 @@ def _build_composition_plate_html(strategy) -> str:
 <div class="chart-wrap"><img src="{composition_uri_str}" alt="Composition"></div>
 <p class="metric-context">{caption_str}</p>
 '''
+
+
+def _signature_within_year_stat_df(total_value_ser: pd.Series) -> pd.DataFrame:
+    """Per-calendar-year return, volatility, max drawdown and Sharpe.
+
+    *** CRITICAL*** Each year's statistics are computed inside that year only,
+    rebased to its first bar. Carrying a running peak across the year boundary
+    would report a prior year's damage against this year's row.
+    """
+    stat_row_list = []
+    for year_int, year_value_ser in total_value_ser.groupby(total_value_ser.index.year):
+        year_return_ser = year_value_ser.pct_change(fill_method=None).dropna()
+        if len(year_return_ser) < 2:
+            continue
+        year_growth_float = float(year_value_ser.iloc[-1] / year_value_ser.iloc[0])
+        year_volatility_float = float(year_return_ser.std() * np.sqrt(252.0))
+        year_drawdown_float = float((year_value_ser / year_value_ser.cummax() - 1.0).min())
+        stat_row_list.append({
+            'year_int': int(year_int),
+            'return_float': year_growth_float - 1.0,
+            'volatility_float': year_volatility_float,
+            'max_drawdown_float': year_drawdown_float,
+            'sharpe_float': (
+                (year_growth_float - 1.0) / year_volatility_float
+                if year_volatility_float > 0.0 else np.nan
+            ),
+        })
+    return pd.DataFrame(stat_row_list).set_index('year_int')
+
+
+def _signature_max_abs_monthly_loss_float(total_value_ser: pd.Series) -> float:
+    monthly_return_ser = (
+        total_value_ser.resample('ME').last().pct_change(fill_method=None).dropna()
+    )
+    loss_ser = monthly_return_ser[monthly_return_ser < 0.0]
+    return float(loss_ser.abs().max()) if len(loss_ser) else 1.0
+
+
+def _signature_monthly_table_html(
+    total_value_ser: pd.Series,
+    shared_max_abs_loss_float: float,
+) -> str:
+    """One monthly grid, newest year on top, losing months shaded.
+
+    Monochrome has a single light-to-dark axis, so a diverging gain/loss ramp
+    cannot work: shading only the losses keeps the rule unambiguous (any shade
+    is a losing month, darker is worse) and makes drawdown clusters legible.
+    """
+    monthly_return_ser = (
+        total_value_ser.resample('ME').last().pct_change(fill_method=None).dropna()
+    )
+    monthly_return_df = pd.DataFrame({
+        'year_int': monthly_return_ser.index.year,
+        'month_int': monthly_return_ser.index.month,
+        'return_float': monthly_return_ser.to_numpy(),
+    }).pivot(index='year_int', columns='month_int', values='return_float')
+    yearly_stat_df = _signature_within_year_stat_df(total_value_ser)
+    panel_color_str = str(SIGNATURE_PALETTE_DICT['panel'])
+    loss_color_str = str(SIGNATURE_PALETTE_DICT['loss'])
+
+    row_html_list = []
+    # Newest year first: the current year is what the reader checks.
+    for year_int, month_return_ser in monthly_return_df.iloc[::-1].iterrows():
+        cell_html_list = []
+        for month_int in range(1, 13):
+            return_float = month_return_ser.get(month_int, np.nan)
+            if pd.isna(return_float):
+                cell_html_list.append('<td></td>')
+                continue
+            if return_float >= 0.0:
+                cell_html_list.append(f'<td>{return_float * 100:.1f}</td>')
+                continue
+            blend_weight_float = min(1.0, abs(return_float) / shared_max_abs_loss_float) * 0.55
+            cell_background_str = blend_hex_color_str(
+                panel_color_str, loss_color_str, blend_weight_float
+            )
+            cell_html_list.append(
+                f'<td style="background:{cell_background_str}">{return_float * 100:.1f}</td>'
+            )
+        if int(year_int) not in yearly_stat_df.index:
+            continue
+        yearly_stat_ser = yearly_stat_df.loc[int(year_int)]
+        row_html_list.append(
+            f'<tr><td class="metric">{year_int}</td>'
+            + ''.join(cell_html_list)
+            + f'<td class="divider-left">{yearly_stat_ser["return_float"] * 100:.1f}</td>'
+            + f'<td>{yearly_stat_ser["volatility_float"] * 100:.1f}</td>'
+            + f'<td>{yearly_stat_ser["max_drawdown_float"] * 100:.1f}</td>'
+            + f'<td>{yearly_stat_ser["sharpe_float"]:.2f}</td></tr>'
+        )
+    return (
+        '<div class="scroll"><table class="heatmap">'
+        '<thead><tr><th>Year</th>'
+        + ''.join(f'<th>{month_str}</th>' for month_str in _MONTH_NAMES)
+        + '<th class="divider-left">Year</th><th>Vol</th><th>Max DD</th><th>Sharpe</th>'
+        + '</tr></thead>'
+        f'<tbody>{"".join(row_html_list)}</tbody></table></div>'
+    )
+
+
+def _build_signature_monthly_returns_html(strategy) -> str:
+    """Strategy monthly grid over benchmark grid, on a shared loss scale."""
+    if 'total_value' not in strategy.results.columns:
+        return ''
+    strategy_value_ser = strategy.results['total_value'].astype(float)
+    _s, benchmark_value_ser, benchmark_label_str = _strategy_benchmark_value_pair(strategy)
+
+    shared_max_abs_loss_float = _signature_max_abs_monthly_loss_float(strategy_value_ser)
+    if benchmark_value_ser is not None:
+        shared_max_abs_loss_float = max(
+            shared_max_abs_loss_float, _signature_max_abs_monthly_loss_float(benchmark_value_ser)
+        )
+
+    html_part_list = [
+        '<h3>Strategy</h3>',
+        _signature_monthly_table_html(strategy_value_ser, shared_max_abs_loss_float),
+    ]
+    if benchmark_value_ser is not None:
+        html_part_list.append(
+            f'<h3 style="margin-top:22px">{html.escape(str(benchmark_label_str))} (benchmark)</h3>'
+        )
+        html_part_list.append(
+            _signature_monthly_table_html(benchmark_value_ser, shared_max_abs_loss_float)
+        )
+    html_part_list.append(
+        '<p class="metric-context">Monthly returns in per cent. Only losing months are shaded — '
+        'darker is worse — on a loss scale shared between both tables. Each year\'s return, '
+        'volatility, max drawdown and Sharpe are computed within that calendar year only.</p>'
+    )
+    return ''.join(html_part_list)
 
 
 def _build_relative_performance_plate_html(strategy) -> str:
@@ -2434,7 +2563,7 @@ def _stacked_equity_chart_b64(
         return None
 
     color_list = [
-        SEABORN_DEEP_COLOR_LIST[column_idx_int % len(SEABORN_DEEP_COLOR_LIST)]
+        SIGNATURE_PALETTE_DICT['overlay_cycle'][column_idx_int % len(SIGNATURE_PALETTE_DICT['overlay_cycle'])]
         for column_idx_int, _ in enumerate(active_col_list)
     ]
 
@@ -2491,7 +2620,7 @@ def _multi_line_chart_b64(
                 value_ser.index,
                 value_ser.to_numpy(),
                 label=column_str,
-                color=SEABORN_DEEP_COLOR_LIST[column_idx_int % len(SEABORN_DEEP_COLOR_LIST)],
+                color=SIGNATURE_PALETTE_DICT['overlay_cycle'][column_idx_int % len(SIGNATURE_PALETTE_DICT['overlay_cycle'])],
                 linewidth=1.15,
                 alpha=0.95,
             )
@@ -3319,9 +3448,15 @@ def _build_html(strategy, chart_b64: str) -> str:
     strategy_regression_metadata_by_column_dict,
 )}
 '''
+    if str(SIGNATURE_PALETTE_DICT['layout_str']) == 'dashboard':
+        monthly_returns_body_html_str = (
+            f'<div class="scroll">{_monthly_returns_html(strategy.monthly_returns, benchmark_monthly_metric_df, benchmark_label_str)}</div>'
+        )
+    else:
+        monthly_returns_body_html_str = _build_signature_monthly_returns_html(strategy)
     monthly_returns_content_html_str = f'''
 <h2>Monthly Returns</h2>
-<div class="scroll">{_monthly_returns_html(strategy.monthly_returns, benchmark_monthly_metric_df, benchmark_label_str)}</div>
+{monthly_returns_body_html_str}
 '''
     trade_statistics_content_html_str = f'''
 <h2>Trade Statistics</h2>

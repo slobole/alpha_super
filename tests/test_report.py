@@ -272,7 +272,10 @@ class ReportFormattingTests(unittest.TestCase):
 
         self.assertIn('<h2>Daily Return Distribution</h2>', report_html_str)
         self.assertIn('alt="Daily Return Distribution"', report_html_str)
-        self.assertIn('Mean</th><th>Std. Dev.</th><th>Skew</th><th>Negative Days</th>', report_html_str)
+        # The distribution section is a chart plus a one-line caption; the fuller
+        # stats moved to the performance summary, so the glued table is gone.
+        self.assertIn('negative days', report_html_str)
+        self.assertNotIn('Mean</th><th>Std. Dev.</th><th>Skew</th><th>Negative Days</th>', report_html_str)
         self.assertIn('class="kpi-grid"', report_html_str)
         self.assertIn('id="metric-help-tooltip"', report_html_str)
         self.assertIn("trigger.addEventListener('mouseenter'", report_html_str)
