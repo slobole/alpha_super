@@ -152,7 +152,6 @@ _PERFORMANCE_SUMMARY_SECTION_TUPLE = (
         ('Beta', 'Alpha (Ann.) [%]', 'Alpha HAC t-stat', 'R²'),
         False,
     ),
-    ('Exposure', ('Exposure Time [%]',), False),
     (
         'Drawdown & Recovery',
         (
@@ -194,6 +193,7 @@ _PERFORMANCE_SUMMARY_SECTION_TUPLE = (
             'Skewness (Monthly)',
             'Excess Kurtosis (Daily)',
             'Worst Day [%]',
+            'Worst Month [%]',
             'VaR 95% (Daily) [%]',
             'CVaR 95% (Daily) [%]',
         ),
@@ -202,9 +202,12 @@ _PERFORMANCE_SUMMARY_SECTION_TUPLE = (
 )
 # AAR is the arithmetic average annual return, which duplicates the compounded
 # Return (Ann.) already shown in the headline and summary.
-_PERFORMANCE_SUMMARY_HIDDEN_METRIC_SET = frozenset(
-    {'Correlation', 'Exposure-Adjusted Return (Ann.) [%]', 'AAR [%]'}
-)
+_PERFORMANCE_SUMMARY_HIDDEN_METRIC_SET = frozenset({
+    'Correlation',
+    'Exposure-Adjusted Return (Ann.) [%]',
+    'AAR [%]',
+    'Exposure Time [%]',
+})
 
 _METRIC_TOOLTIP_HTML_STR = (
     '<div id="metric-help-tooltip" class="metric-help-tooltip" role="tooltip" hidden></div>'
@@ -1553,6 +1556,7 @@ def _display_metric_dict_for_value_ser(value_ser: pd.Series) -> dict[str, float]
         'Skewness (Monthly)': float(monthly_return_ser.skew()),
         'Excess Kurtosis (Daily)': float(daily_return_ser.kurtosis()),
         'Worst Day [%]': float(daily_return_ser.min()) * 100.0,
+        'Worst Month [%]': float(monthly_return_ser.min()) * 100.0,
         'VaR 95% (Daily) [%]': var_95_float * 100.0,
         'CVaR 95% (Daily) [%]': cvar_95_float * 100.0,
     }
@@ -2014,8 +2018,14 @@ def _signature_monthly_table_html(
     """One monthly grid, newest year on top, losing months shaded.
 
     Monochrome has a single light-to-dark axis, so a diverging gain/loss ramp
-    cannot work: shading only the losses keeps the rule unambiguous (any shade
-    is a losing month, darker is worse) and makes drawdown clusters legible.
+    cannot work across the month grid: shading only the losses keeps the rule
+    unambiguous (any shade is a losing month, darker is worse) and makes
+    drawdown clusters legible.
+
+    The Year column is the one exception. It is a single column of signed
+    totals, so shade there encodes *magnitude* only — how big the year was in
+    either direction — and the printed sign carries the direction. That keeps
+    the encoding honest while letting the summary column carry visual weight.
     """
     monthly_return_ser = (
         total_value_ser.resample('ME').last().pct_change(fill_method=None).dropna()
@@ -2028,6 +2038,12 @@ def _signature_monthly_table_html(
     yearly_stat_df = _signature_within_year_stat_df(total_value_ser)
     panel_color_str = str(SIGNATURE_PALETTE_DICT['panel'])
     loss_color_str = str(SIGNATURE_PALETTE_DICT['loss'])
+    ink_color_str = str(SIGNATURE_PALETTE_DICT['ink'])
+    # The Year column gets its own scale: annual moves dwarf monthly ones, so
+    # reusing the month scale would saturate every cell.
+    max_abs_year_return_float = (
+        float(yearly_stat_df['return_float'].abs().max()) if len(yearly_stat_df) else 0.0
+    ) or 1.0
 
     row_html_list = []
     # Newest year first: the current year is what the reader checks.
@@ -2051,10 +2067,18 @@ def _signature_monthly_table_html(
         if int(year_int) not in yearly_stat_df.index:
             continue
         yearly_stat_ser = yearly_stat_df.loc[int(year_int)]
+        year_return_float = float(yearly_stat_ser['return_float'])
+        year_blend_weight_float = (
+            min(1.0, abs(year_return_float) / max_abs_year_return_float) * 0.50
+        )
+        year_background_str = blend_hex_color_str(
+            panel_color_str, ink_color_str, year_blend_weight_float
+        )
         row_html_list.append(
             f'<tr><td class="metric">{year_int}</td>'
             + ''.join(cell_html_list)
-            + f'<td class="divider-left">{yearly_stat_ser["return_float"] * 100:.1f}</td>'
+            + f'<td class="divider-left" style="background:{year_background_str}">'
+              f'{year_return_float * 100:.1f}</td>'
             + f'<td>{yearly_stat_ser["volatility_float"] * 100:.1f}</td>'
             + f'<td>{yearly_stat_ser["max_drawdown_float"] * 100:.1f}</td>'
             + f'<td>{yearly_stat_ser["sharpe_float"]:.2f}</td></tr>'
@@ -3464,12 +3488,11 @@ def _build_spec_report_body_html(
     sections (e.g. no weights for a single-asset book) are dropped so the plate
     sequence has no gaps.
     """
+    # The strategy name is the page title above, so the masthead carries only
+    # what the title cannot: the window, the capital path, and the run stamp.
     masthead_field_list = [
-        ('Report', 'Strategy'),
-        ('Name', strategy.name),
         ('Period', f'{start_str} → {end_str}'),
-        ('Capital', _fmt_dollar(capital_base_obj)),
-        ('Final', _fmt_dollar(final_value_obj)),
+        ('Capital', f'{_fmt_dollar(capital_base_obj)} → {_fmt_dollar(final_value_obj)}'),
         ('Run', run_date_str),
     ]
     masthead_html_str = ''.join(
@@ -3484,7 +3507,7 @@ def _build_spec_report_body_html(
     )
     return f'''<div class="report-shell">
 <header class="report-header">
-  <div class="report-eyebrow">Specimen sheet</div>
+  <div class="report-eyebrow">Strategy Report</div>
   <h1>{html.escape(str(strategy.name))}</h1>
 </header>
 <div class="spec-masthead">{masthead_html_str}</div>
