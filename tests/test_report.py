@@ -784,7 +784,7 @@ class ReportFormattingTests(unittest.TestCase):
         shift_html_str = _build_correlation_shift_html(portfolio_stub)
 
         self.assertIn('+0.500', shift_html_str)
-        self.assertIn('Correlation Shift in the Tail', shift_html_str)
+        self.assertIn('Correlation Shift Under Stress', shift_html_str)
 
     def test_correlation_shift_colors_convergence_and_decoupling(self):
         from alpha.engine.report import _correlation_shift_color_str
@@ -953,9 +953,39 @@ class ReportFormattingTests(unittest.TestCase):
         report_html_str = _build_portfolio_html(portfolio, chart_b64='portfolio-chart-b64')
 
         self.assertIn('<h2>Tail Risk Diagnostics</h2>', report_html_str)
-        self.assertIn('Tail Correlation Matrix', report_html_str)
         self.assertIn('Tail Summary By Pod', report_html_str)
         self.assertIn('Worst Portfolio Days - Pod Contributions', report_html_str)
+        # Attribution needs no benchmark, but correlation does: without one the
+        # report says so rather than showing a self-conditioned estimate.
+        self.assertNotIn('Correlation on Benchmark Stress Days', report_html_str)
+        self.assertIn('No benchmark is attached to this portfolio', report_html_str)
+
+    def test_build_portfolio_html_reports_stress_correlation_with_a_benchmark(self):
+        date_index = pd.bdate_range('2024-01-02', periods=120)
+        random_generator = np.random.default_rng(3)
+        strategy_a = make_strategy(list(random_generator.normal(0.0, 0.01, len(date_index))))
+        strategy_a.name = 'PodA'
+        strategy_b = make_strategy(list(random_generator.normal(0.0, 0.01, len(date_index))))
+        strategy_b.name = 'PodB'
+        benchmark_value_ser = pd.Series(
+            100.0 * (1.0 + pd.Series(
+                random_generator.normal(0.0, 0.011, len(date_index)), index=date_index
+            )).cumprod(),
+            index=date_index,
+        )
+
+        portfolio = Portfolio(
+            strategies=[strategy_a, strategy_b],
+            weights=[0.5, 0.5],
+            capital_base=100_000.0,
+            regression_benchmark_value_ser=benchmark_value_ser,
+            regression_benchmark_label_str='BENCH',
+        )
+        report_html_str = _build_portfolio_html(portfolio, chart_b64='portfolio-chart-b64')
+
+        self.assertIn('Correlation on Benchmark Stress Days', report_html_str)
+        self.assertIn('worst benchmark days', report_html_str)
+        self.assertGreater(len(portfolio.stress_event_date_index), 0)
 
     def test_build_portfolio_html_renders_full_benchmark_monthly_returns_card(self):
         dates_index = pd.bdate_range('2024-01-02', periods=40)

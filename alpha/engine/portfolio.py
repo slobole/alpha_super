@@ -146,6 +146,7 @@ class Portfolio:
         self.rolling_pairwise_correlation_df = None
         self.rolling_diversification_ratio_ser = None
         self.tail_event_date_index = pd.DatetimeIndex([])
+        self.stress_event_date_index = pd.DatetimeIndex([])
         self.tail_return_df = pd.DataFrame()
         self.tail_correlation_matrix = pd.DataFrame()
         self.tail_contribution_df = pd.DataFrame()
@@ -676,14 +677,29 @@ class Portfolio:
             )
             self.average_rolling_diversification_ratio = np.nan
 
+        # *** CRITICAL*** Co-movement between pods must be measured on days
+        # chosen by something other than the pods themselves. The benchmark is
+        # exogenous to this book, so conditioning on its worst days carries no
+        # selection effect; conditioning on the portfolio's own worst days
+        # would force the pods to offset one another by construction.
+        stress_reference_return_ser = None
+        if self.regression_benchmark_value_ser is not None:
+            stress_reference_return_ser = (
+                self.regression_benchmark_value_ser
+                .reindex(self.results.index)
+                .pct_change(fill_method=None)
+            )
+
         tail_diagnostic_dict = generate_tail_risk_diagnostics(
             pod_daily_return_df=self._daily_rets,
             portfolio_daily_return_ser=self.results['daily_returns'],
             pod_equity_df=self._pod_equities,
             tail_fraction_float=self._TAIL_FRACTION_FLOAT,
             min_tail_days_int=self._MIN_TAIL_DAYS_INT,
+            stress_reference_return_ser=stress_reference_return_ser,
         )
         self.tail_event_date_index = tail_diagnostic_dict['tail_event_date_index']
+        self.stress_event_date_index = tail_diagnostic_dict['stress_event_date_index']
         self.tail_return_df = tail_diagnostic_dict['tail_return_df']
         self.tail_correlation_matrix = tail_diagnostic_dict['tail_correlation_matrix']
         self.tail_contribution_df = tail_diagnostic_dict['tail_contribution_df']

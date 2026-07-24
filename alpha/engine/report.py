@@ -2581,14 +2581,10 @@ def _build_correlation_shift_html(portfolio) -> str:
     subtracting. Differencing them positionally would silently pair unrelated
     strategies if either matrix ever ordered or filtered its pods differently.
 
-    *** CRITICAL*** Tail days are currently selected by the portfolio's own
-    worst returns, which biases these numbers downward: conditioning on an
-    extreme value of the sum mechanically forces its components to offset one
-    another inside that subset. Simulating four independent pods with a true
-    pairwise correlation of zero yields an apparent shift near -0.27 under this
-    definition. Read the table as indicative only until tail days are keyed off
-    an exogenous stress measure, such as the benchmark's worst days, which
-    carries no such selection effect.
+    The stress correlation is measured on the benchmark's worst days, which is
+    exogenous to this book, so the difference reflects genuine co-movement
+    rather than the selection effect that conditioning on the portfolio's own
+    losses would introduce.
     """
     full_correlation_df = getattr(portfolio, 'correlation_matrix', None)
     tail_correlation_df = getattr(portfolio, 'tail_correlation_matrix', None)
@@ -2634,16 +2630,12 @@ def _build_correlation_shift_html(portfolio) -> str:
     )
 
     return (
-        '<h3>Correlation Shift in the Tail</h3>'
+        '<h3>Correlation Shift Under Stress</h3>'
         f'<div class="scroll"><table><thead><tr>{header_html_str}</tr></thead>'
         f'<tbody>{"".join(row_html_list)}</tbody></table></div>'
-        '<p class="metric-context">Tail correlation minus full-sample correlation. '
-        'Brown means a pair converged when it mattered — diversification that was not there '
-        f'in the drawdown; green means it decoupled.{worst_shift_note_str} '
-        '<strong>Indicative only:</strong> tail days are the portfolio\'s own worst returns, '
-        'and conditioning on the sum mechanically pushes its components apart — independent '
-        'pods score about &minus;0.27 under this definition, so treat negative shifts as '
-        'unproven rather than as evidence of diversification.</p>'
+        '<p class="metric-context">Correlation on benchmark stress days minus full-sample '
+        'correlation. Brown means a pair converged when it mattered — diversification that was '
+        f'not there in the drawdown; green means it decoupled.{worst_shift_note_str}</p>'
     )
 
 
@@ -2750,10 +2742,34 @@ def _build_tail_risk_html(portfolio) -> str:
     )
 
     tail_correlation_matrix = getattr(portfolio, 'tail_correlation_matrix', pd.DataFrame())
-    if tail_correlation_matrix is not None and len(tail_correlation_matrix) > 0:
-        parts.append('<h3>Tail Correlation Matrix</h3>')
+    stress_event_date_index = getattr(portfolio, 'stress_event_date_index', None)
+    # *** CRITICAL*** Only present the correlation when the run actually keyed
+    # it off an exogenous stress reference. Runs stored before that change hold
+    # a matrix conditioned on the portfolio's own tail, which is biased;
+    # labelling it as benchmark-based would misrepresent it.
+    if stress_event_date_index is None:
+        parts.append(
+            '<p class="metric-context">Cross-pod correlation under stress is not shown: this '
+            'run predates keying stress days off the benchmark, and its stored matrix was '
+            'conditioned on the portfolio\'s own worst days, which biases the estimate '
+            'downward. Re-run the portfolio to populate it.</p>'
+        )
+    elif len(stress_event_date_index) > 0 and len(tail_correlation_matrix) > 0:
+        parts.append('<h3>Correlation on Benchmark Stress Days</h3>')
         parts.append(f'<div class="scroll">{_format_correlation_matrix(tail_correlation_matrix)}</div>')
+        parts.append(
+            '<p class="metric-context">Measured on the '
+            f'{len(stress_event_date_index)} worst benchmark days, not the portfolio\'s own. '
+            'Selecting days by the book\'s own losses would force its pods to offset one '
+            'another by construction; an exogenous reference carries no such effect.</p>'
+        )
         parts.append(_build_correlation_shift_html(portfolio))
+    else:
+        parts.append(
+            '<p class="metric-context">No benchmark is attached to this portfolio, so '
+            'cross-pod correlation under stress is not reported: the only alternative would '
+            'be to condition on the book\'s own worst days, which biases the estimate.</p>'
+        )
 
     parts.append('<h3>Tail Summary By Pod</h3>')
     parts.append(f'<div class="scroll">{_tail_summary_html(getattr(portfolio, "tail_summary_df", pd.DataFrame()))}</div>')

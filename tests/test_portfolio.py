@@ -553,7 +553,7 @@ class PortfolioTests(unittest.TestCase):
             -0.25,
         )
 
-    def test_portfolio_exposes_tail_diagnostics_and_tail_corr_differs_from_full_sample(self):
+    def test_portfolio_exposes_tail_attribution_and_withholds_biased_correlation(self):
         dates_index = pd.date_range('2024-01-01', periods=41, freq='B')
         strategy_a_return_list = [0.0]
         strategy_b_return_list = [0.0]
@@ -584,7 +584,14 @@ class PortfolioTests(unittest.TestCase):
         self.assertListEqual(list(portfolio.tail_return_df.columns), ['StrategyA', 'StrategyB'])
         self.assertListEqual(list(portfolio.tail_contribution_df.columns), ['StrategyA', 'StrategyB'])
         self.assertIn('average_loss_contribution_share_float', portfolio.tail_summary_df.columns)
+
+        # Attribution is conditioned on the book's own worst days, which is the
+        # right question for "who hurt me" and stays available here.
+        #
+        # Correlation is not. This portfolio has no benchmark, so there is no
+        # exogenous stress reference, and measuring co-movement on the
+        # portfolio's own tail would force the pods to offset one another by
+        # construction. The estimate is withheld rather than reported biased.
+        self.assertEqual(len(portfolio.stress_event_date_index), 0)
         tail_corr_float = float(portfolio.tail_correlation_matrix.loc['StrategyA', 'StrategyB'])
-        full_corr_float = float(portfolio.correlation_matrix.loc['StrategyA', 'StrategyB'])
-        self.assertTrue(np.isfinite(tail_corr_float))
-        self.assertNotAlmostEqual(tail_corr_float, full_corr_float)
+        self.assertTrue(np.isnan(tail_corr_float))

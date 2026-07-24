@@ -749,13 +749,37 @@ def generate_tail_risk_diagnostics(
     pod_equity_df: pd.DataFrame,
     tail_fraction_float: float = 0.05,
     min_tail_days_int: int = 1,
+    stress_reference_return_ser: pd.Series | None = None,
 ) -> dict[str, object]:
-    """Build portfolio-level tail-risk diagnostics from aligned pod paths."""
+    """Build portfolio-level tail-risk diagnostics from aligned pod paths.
+
+    Two different questions need two different conditionings, so this returns
+    two date sets:
+
+    * ``tail_event_date_index`` — the portfolio's own worst days. Correct for
+      attribution: on the days that hurt, which pod did the damage.
+    * ``stress_event_date_index`` — the worst days of an exogenous reference,
+      normally the benchmark. Correct for co-movement.
+
+    *** CRITICAL*** The correlation matrix is computed on the stress days, not
+    the portfolio's own tail. Selecting days by an extreme value of the sum
+    mechanically forces its components to offset one another inside that
+    subset, so pods that are genuinely independent still score a large negative
+    correlation. Without a stress reference the correlation is left empty
+    rather than falling back to the biased estimate.
+    """
     tail_event_date_index = select_tail_event_date_index(
         portfolio_daily_return_ser=portfolio_daily_return_ser,
         tail_fraction_float=tail_fraction_float,
         min_tail_days_int=min_tail_days_int,
     )
+    stress_event_date_index = pd.DatetimeIndex([])
+    if stress_reference_return_ser is not None and len(stress_reference_return_ser) > 0:
+        stress_event_date_index = select_tail_event_date_index(
+            portfolio_daily_return_ser=stress_reference_return_ser,
+            tail_fraction_float=tail_fraction_float,
+            min_tail_days_int=min_tail_days_int,
+        ).intersection(pd.DatetimeIndex(pod_daily_return_df.index))
 
     common_column_list = [
         column_str for column_str in pod_daily_return_df.columns
@@ -767,6 +791,7 @@ def generate_tail_risk_diagnostics(
         empty_contribution_df = pd.DataFrame(index=tail_event_date_index, columns=common_column_list, dtype=float)
         return {
             'tail_event_date_index': tail_event_date_index,
+            'stress_event_date_index': stress_event_date_index,
             'tail_return_df': empty_return_df,
             'tail_correlation_matrix': empty_correlation_df,
             'tail_contribution_df': empty_contribution_df,
@@ -778,7 +803,16 @@ def generate_tail_risk_diagnostics(
         }
 
     tail_return_df = pod_daily_return_df.loc[tail_event_date_index, common_column_list].astype(float)
-    tail_correlation_matrix = cross_correlation_matrix(tail_return_df)
+    # Correlation is measured on exogenous stress days only; see the docstring.
+    if len(stress_event_date_index) >= 2:
+        stress_return_df = pod_daily_return_df.loc[
+            stress_event_date_index, common_column_list
+        ].astype(float)
+        tail_correlation_matrix = cross_correlation_matrix(stress_return_df)
+    else:
+        tail_correlation_matrix = cross_correlation_matrix(
+            pd.DataFrame(columns=common_column_list, dtype=float)
+        )
     tail_contribution_df = build_tail_contribution_df(
         pod_daily_return_df=pod_daily_return_df[common_column_list],
         pod_equity_df=pod_equity_df[common_column_list],
@@ -792,6 +826,7 @@ def generate_tail_risk_diagnostics(
 
     return {
         'tail_event_date_index': tail_event_date_index,
+        'stress_event_date_index': stress_event_date_index,
         'tail_return_df': tail_return_df,
         'tail_correlation_matrix': tail_correlation_matrix,
         'tail_contribution_df': tail_contribution_df,

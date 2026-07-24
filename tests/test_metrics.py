@@ -44,6 +44,73 @@ class GenerateTradesTests(unittest.TestCase):
         self.assertAlmostEqual(float(trade_df.loc[1, "profit"]), 100.0)
         self.assertAlmostEqual(float(trade_df.loc[1, "return"]), 0.10)
 
+    def test_stress_correlation_is_unbiased_for_independent_pods(self):
+        """Independent pods must not appear to decouple under stress.
+
+        Conditioning on the portfolio's own worst days forces its components to
+        offset one another, so genuinely independent pods score a large
+        negative correlation. Selecting days by an exogenous benchmark removes
+        that selection effect.
+        """
+        from alpha.engine.metrics import generate_tail_risk_diagnostics
+
+        random_generator = np.random.default_rng(0)
+        bar_date_idx = pd.bdate_range('2010-01-04', periods=4000)
+        pod_name_list = [f'pod_{idx}' for idx in range(4)]
+        pod_daily_return_df = pd.DataFrame(
+            random_generator.normal(0.0, 0.01, (len(bar_date_idx), len(pod_name_list))),
+            index=bar_date_idx,
+            columns=pod_name_list,
+        )
+        pod_equity_df = (1.0 + pod_daily_return_df).cumprod() * 10_000.0
+        portfolio_daily_return_ser = pod_daily_return_df.mean(axis=1)
+        # A benchmark unrelated to the pods: the honest stress reference.
+        benchmark_return_ser = pd.Series(
+            random_generator.normal(0.0, 0.011, len(bar_date_idx)), index=bar_date_idx
+        )
+
+        diagnostic_dict = generate_tail_risk_diagnostics(
+            pod_daily_return_df=pod_daily_return_df,
+            portfolio_daily_return_ser=portfolio_daily_return_ser,
+            pod_equity_df=pod_equity_df,
+            tail_fraction_float=0.05,
+            stress_reference_return_ser=benchmark_return_ser,
+        )
+        correlation_matrix = diagnostic_dict['tail_correlation_matrix'].to_numpy()
+        off_diagonal_mask = ~np.eye(len(pod_name_list), dtype=bool)
+        mean_correlation_float = float(np.nanmean(correlation_matrix[off_diagonal_mask]))
+
+        # The biased definition produced roughly -0.27 here; the truth is 0.
+        self.assertLess(abs(mean_correlation_float), 0.12)
+        self.assertGreater(len(diagnostic_dict['stress_event_date_index']), 0)
+
+    def test_stress_correlation_omitted_without_a_reference(self):
+        """No benchmark means no correlation, rather than a biased one."""
+        from alpha.engine.metrics import generate_tail_risk_diagnostics
+
+        random_generator = np.random.default_rng(1)
+        bar_date_idx = pd.bdate_range('2010-01-04', periods=400)
+        pod_daily_return_df = pd.DataFrame(
+            random_generator.normal(0.0, 0.01, (len(bar_date_idx), 3)),
+            index=bar_date_idx,
+            columns=['pod_a', 'pod_b', 'pod_c'],
+        )
+        diagnostic_dict = generate_tail_risk_diagnostics(
+            pod_daily_return_df=pod_daily_return_df,
+            portfolio_daily_return_ser=pod_daily_return_df.mean(axis=1),
+            pod_equity_df=(1.0 + pod_daily_return_df).cumprod() * 10_000.0,
+            tail_fraction_float=0.05,
+            stress_reference_return_ser=None,
+        )
+
+        self.assertEqual(len(diagnostic_dict['stress_event_date_index']), 0)
+        # The diagonal is 1.0 by definition; every pod *pair* must be undefined.
+        correlation_matrix = diagnostic_dict['tail_correlation_matrix'].to_numpy()
+        off_diagonal_mask = ~np.eye(len(correlation_matrix), dtype=bool)
+        self.assertTrue(np.isnan(correlation_matrix[off_diagonal_mask]).all())
+        # Attribution still works: it is correctly conditioned on the book's own tail.
+        self.assertGreater(len(diagnostic_dict['tail_event_date_index']), 0)
+
     def test_generate_trades_returns_nan_for_zero_capital_trade(self):
         """A zero-capital entry must not yield -inf and poison the aggregates."""
         transaction_df = pd.DataFrame(
