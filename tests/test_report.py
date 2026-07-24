@@ -263,6 +263,34 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertAlmostEqual(distribution_dict['skew_return_float'], 0.0, places=12)
         self.assertAlmostEqual(distribution_dict['negative_rate_float'], 0.25)
 
+    def test_monthly_heatmap_shades_darker_for_higher_returns(self):
+        """Darker must always mean a higher return, never the reverse."""
+        from alpha.engine.report import _signature_heatmap_background_str
+
+        def luminance_float(hex_color_str):
+            hex_digit_str = hex_color_str.lstrip('#')
+            return sum(int(hex_digit_str[i:i + 2], 16) for i in (0, 2, 4)) / 3.0
+
+        worst_color_str = _signature_heatmap_background_str(-0.10, -0.10, 0.10)
+        flat_color_str = _signature_heatmap_background_str(0.0, -0.10, 0.10)
+        best_color_str = _signature_heatmap_background_str(0.10, -0.10, 0.10)
+
+        # Luminance must decrease (get darker) as the return rises.
+        self.assertGreater(luminance_float(worst_color_str), luminance_float(flat_color_str))
+        self.assertGreater(luminance_float(flat_color_str), luminance_float(best_color_str))
+
+    def test_monthly_heatmap_clamps_out_of_range_returns(self):
+        from alpha.engine.report import _signature_heatmap_background_str
+
+        self.assertEqual(
+            _signature_heatmap_background_str(-5.0, -0.10, 0.10),
+            _signature_heatmap_background_str(-0.10, -0.10, 0.10),
+        )
+        self.assertEqual(
+            _signature_heatmap_background_str(5.0, -0.10, 0.10),
+            _signature_heatmap_background_str(0.10, -0.10, 0.10),
+        )
+
     def test_display_metrics_sortino_penalizes_only_downside(self):
         """Sortino must exceed Sharpe when upside moves dominate the variance."""
         bar_date_idx = pd.bdate_range('2024-01-02', periods=260)

@@ -2013,29 +2013,54 @@ def _signature_within_year_stat_df(total_value_ser: pd.Series) -> pd.DataFrame:
     return pd.DataFrame(stat_row_list).set_index('year_int')
 
 
-def _signature_max_abs_monthly_loss_float(total_value_ser: pd.Series) -> float:
+_SIGNATURE_HEATMAP_MAX_BLEND_FLOAT = 0.55
+
+
+def _signature_monthly_return_range_tuple(total_value_ser: pd.Series) -> tuple[float, float]:
     monthly_return_ser = (
         total_value_ser.resample('ME').last().pct_change(fill_method=None).dropna()
     )
-    loss_ser = monthly_return_ser[monthly_return_ser < 0.0]
-    return float(loss_ser.abs().max()) if len(loss_ser) else 1.0
+    if len(monthly_return_ser) == 0:
+        return 0.0, 1.0
+    return float(monthly_return_ser.min()), float(monthly_return_ser.max())
+
+
+def _signature_heatmap_background_str(
+    value_float: float,
+    low_float: float,
+    high_float: float,
+) -> str:
+    """Map a return onto one monotonic light-to-dark ramp.
+
+    *** CRITICAL*** Shade is monotonic in the *signed* return, not in its
+    magnitude and not in losses alone: the worst reading is the lightest and
+    the best is the darkest, so darker always means a higher return anywhere
+    in the table. Encoding magnitude instead would make a large loss and a
+    large gain look alike, and shading only losses inverts the reader's
+    intuition that darker is better.
+    """
+    span_float = high_float - low_float
+    if not np.isfinite(span_float) or span_float <= 0.0:
+        return str(SIGNATURE_PALETTE_DICT['panel'])
+    position_float = min(max((value_float - low_float) / span_float, 0.0), 1.0)
+    return blend_hex_color_str(
+        str(SIGNATURE_PALETTE_DICT['panel']),
+        str(SIGNATURE_PALETTE_DICT['ink']),
+        position_float * _SIGNATURE_HEATMAP_MAX_BLEND_FLOAT,
+    )
 
 
 def _signature_monthly_table_html(
     total_value_ser: pd.Series,
-    shared_max_abs_loss_float: float,
+    monthly_range_tuple: tuple[float, float],
 ) -> str:
-    """One monthly grid, newest year on top, losing months shaded.
+    """One monthly grid, newest year on top, shaded light-to-dark by return.
 
-    Monochrome has a single light-to-dark axis, so a diverging gain/loss ramp
-    cannot work across the month grid: shading only the losses keeps the rule
-    unambiguous (any shade is a losing month, darker is worse) and makes
-    drawdown clusters legible.
-
-    The Year column is the one exception. It is a single column of signed
-    totals, so shade there encodes *magnitude* only — how big the year was in
-    either direction — and the printed sign carries the direction. That keeps
-    the encoding honest while letting the summary column carry visual weight.
+    Every shaded cell in the table — months and the Year column alike — uses
+    the same rule: darker means a higher return. The month cells share a scale
+    with the benchmark table so the same return is the same shade in both; the
+    Year column gets its own scale because annual moves dwarf monthly ones and
+    would otherwise saturate.
     """
     monthly_return_ser = (
         total_value_ser.resample('ME').last().pct_change(fill_method=None).dropna()
@@ -2046,14 +2071,13 @@ def _signature_monthly_table_html(
         'return_float': monthly_return_ser.to_numpy(),
     }).pivot(index='year_int', columns='month_int', values='return_float')
     yearly_stat_df = _signature_within_year_stat_df(total_value_ser)
-    panel_color_str = str(SIGNATURE_PALETTE_DICT['panel'])
-    loss_color_str = str(SIGNATURE_PALETTE_DICT['loss'])
-    ink_color_str = str(SIGNATURE_PALETTE_DICT['ink'])
-    # The Year column gets its own scale: annual moves dwarf monthly ones, so
-    # reusing the month scale would saturate every cell.
-    max_abs_year_return_float = (
-        float(yearly_stat_df['return_float'].abs().max()) if len(yearly_stat_df) else 0.0
-    ) or 1.0
+    monthly_low_float, monthly_high_float = monthly_range_tuple
+    year_low_float = (
+        float(yearly_stat_df['return_float'].min()) if len(yearly_stat_df) else 0.0
+    )
+    year_high_float = (
+        float(yearly_stat_df['return_float'].max()) if len(yearly_stat_df) else 1.0
+    )
 
     row_html_list = []
     # Newest year first: the current year is what the reader checks.
@@ -2064,12 +2088,8 @@ def _signature_monthly_table_html(
             if pd.isna(return_float):
                 cell_html_list.append('<td></td>')
                 continue
-            if return_float >= 0.0:
-                cell_html_list.append(f'<td>{return_float * 100:.1f}</td>')
-                continue
-            blend_weight_float = min(1.0, abs(return_float) / shared_max_abs_loss_float) * 0.55
-            cell_background_str = blend_hex_color_str(
-                panel_color_str, loss_color_str, blend_weight_float
+            cell_background_str = _signature_heatmap_background_str(
+                float(return_float), monthly_low_float, monthly_high_float
             )
             cell_html_list.append(
                 f'<td style="background:{cell_background_str}">{return_float * 100:.1f}</td>'
@@ -2078,11 +2098,8 @@ def _signature_monthly_table_html(
             continue
         yearly_stat_ser = yearly_stat_df.loc[int(year_int)]
         year_return_float = float(yearly_stat_ser['return_float'])
-        year_blend_weight_float = (
-            min(1.0, abs(year_return_float) / max_abs_year_return_float) * 0.50
-        )
-        year_background_str = blend_hex_color_str(
-            panel_color_str, ink_color_str, year_blend_weight_float
+        year_background_str = _signature_heatmap_background_str(
+            year_return_float, year_low_float, year_high_float
         )
         row_html_list.append(
             f'<tr><td class="metric">{year_int}</td>'
@@ -2104,32 +2121,39 @@ def _signature_monthly_table_html(
 
 
 def _build_signature_monthly_returns_html(strategy) -> str:
-    """Strategy monthly grid over benchmark grid, on a shared loss scale."""
+    """Strategy monthly grid over benchmark grid, on one shared return scale."""
     if 'total_value' not in strategy.results.columns:
         return ''
     strategy_value_ser = strategy.results['total_value'].astype(float)
     _s, benchmark_value_ser, benchmark_label_str = _strategy_benchmark_value_pair(strategy)
 
-    shared_max_abs_loss_float = _signature_max_abs_monthly_loss_float(strategy_value_ser)
+    # One scale spanning both tables, so an identical return is an identical
+    # shade in each and the two grids can be compared directly.
+    monthly_low_float, monthly_high_float = _signature_monthly_return_range_tuple(
+        strategy_value_ser
+    )
     if benchmark_value_ser is not None:
-        shared_max_abs_loss_float = max(
-            shared_max_abs_loss_float, _signature_max_abs_monthly_loss_float(benchmark_value_ser)
+        benchmark_low_float, benchmark_high_float = _signature_monthly_return_range_tuple(
+            benchmark_value_ser
         )
+        monthly_low_float = min(monthly_low_float, benchmark_low_float)
+        monthly_high_float = max(monthly_high_float, benchmark_high_float)
+    monthly_range_tuple = (monthly_low_float, monthly_high_float)
 
     html_part_list = [
         '<h3>Strategy</h3>',
-        _signature_monthly_table_html(strategy_value_ser, shared_max_abs_loss_float),
+        _signature_monthly_table_html(strategy_value_ser, monthly_range_tuple),
     ]
     if benchmark_value_ser is not None:
         html_part_list.append(
             f'<h3 style="margin-top:22px">{html.escape(str(benchmark_label_str))} (benchmark)</h3>'
         )
         html_part_list.append(
-            _signature_monthly_table_html(benchmark_value_ser, shared_max_abs_loss_float)
+            _signature_monthly_table_html(benchmark_value_ser, monthly_range_tuple)
         )
     html_part_list.append(
-        '<p class="metric-context">Monthly returns in per cent. Only losing months are shaded — '
-        'darker is worse — on a loss scale shared between both tables. Each year\'s return, '
+        '<p class="metric-context">Monthly returns in per cent, shaded light to dark by return — '
+        'darker is a better month — on one scale shared between both tables. Each year\'s return, '
         'volatility, max drawdown and Sharpe are computed within that calendar year only.</p>'
     )
     return ''.join(html_part_list)
