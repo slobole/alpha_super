@@ -1715,19 +1715,28 @@ def _format_portfolio_summary(
     return _format_performance_summary(df, regression_metadata_by_column_dict)
 
 
-# Trade-statistic rows dropped from the report as redundant: the yearly rate
-# duplicates the weekly one, Win/Loss Ratio overlaps Win Rate + Payoff, and CPC
-# Index is an obscure composite of the two. Only the display is trimmed; the
-# underlying summary_trades from metrics.py is unchanged.
-_TRADE_STATISTIC_DROP_SET = frozenset({'# Trades / year', 'Win/Loss Ratio', 'CPC Index'})
+# The report shows only the trade statistics that answer a distinct question:
+# how many trades, how often, how often right, and what each one costs. The
+# rest (duration spreads, profit factor, expectancy, payoff, CPC) are either
+# derivable from these or too specialised for the headline table.
+#
+# Note this also drops the rows currently poisoned by degenerate zero-capital
+# trades (see _TRADE_RETURN_DEGENERATE_NOTE_STR); trimming is not the fix for
+# that, it just keeps the visible table honest until the ledger is corrected.
+_TRADE_STATISTIC_KEEP_TUPLE = (
+    '# Trades',
+    '# Trades / week',
+    'Win Rate [%]',
+    'Avg. Commission / trade [$]',
+)
 
 
 def _curate_summary_trades(df: pd.DataFrame) -> pd.DataFrame:
     if df is None or len(df) == 0:
         return df
     keep_metric_list = [
-        metric_name for metric_name in df.index
-        if str(metric_name) not in _TRADE_STATISTIC_DROP_SET
+        metric_name for metric_name in _TRADE_STATISTIC_KEEP_TUPLE
+        if metric_name in df.index
     ]
     return df.loc[keep_metric_list]
 
@@ -2126,6 +2135,30 @@ def _build_signature_monthly_returns_html(strategy) -> str:
     return ''.join(html_part_list)
 
 
+def _degenerate_trade_note_html(strategy) -> str:
+    """Warn on the report when trade returns contain non-finite values.
+
+    A trade recorded with zero capital but a non-zero commission yields
+    return = profit / capital = -inf, which silently poisons every aggregate
+    computed from trade returns (average return per trade, best/worst trade,
+    payoff ratio). Rather than hide the affected rows and move on, the report
+    states the count so the ledger gets fixed at the source.
+    """
+    trade_df = getattr(strategy, '_trades', None)
+    if trade_df is None or len(trade_df) == 0 or 'return' not in trade_df.columns:
+        return ''
+    trade_return_vec = trade_df['return'].astype(float).to_numpy()
+    degenerate_count_int = int((~np.isfinite(trade_return_vec)).sum())
+    if degenerate_count_int == 0:
+        return ''
+    return (
+        f'<p class="metric-context"><strong>{degenerate_count_int:,} of {len(trade_return_vec):,} '
+        'trades have a non-finite return</strong> (zero recorded capital with a non-zero '
+        'commission). Statistics derived from trade returns are unreliable until those ledger '
+        'entries are corrected.</p>'
+    )
+
+
 def _build_annual_paths_plate_html(strategy) -> str:
     """One mini-chart per calendar year, all on a shared vertical scale.
 
@@ -2139,8 +2172,12 @@ def _build_annual_paths_plate_html(strategy) -> str:
     if len(total_value_ser) < 2:
         return ''
 
+    # Newest year first, matching the monthly tables: the current year is what
+    # the reader checks, so it leads rather than trailing twenty panels of history.
     annual_path_ser_dict: dict[str, pd.Series] = {}
-    for year_int, year_value_ser in total_value_ser.groupby(total_value_ser.index.year):
+    for year_int, year_value_ser in sorted(
+        total_value_ser.groupby(total_value_ser.index.year), key=lambda pair: pair[0], reverse=True
+    ):
         if len(year_value_ser) < 2:
             continue
         annual_path_ser_dict[str(int(year_int))] = (
@@ -3617,6 +3654,7 @@ def _build_html(strategy, chart_b64: str) -> str:
     trade_statistics_content_html_str = f'''
 <h2>Trade Statistics</h2>
 <div class="scroll">{_format_summary_trades(_curate_summary_trades(strategy.summary_trades))}</div>
+{_degenerate_trade_note_html(strategy)}
 '''
     open_trades_content_html_str = f'''
 <h2>Open Trades</h2>

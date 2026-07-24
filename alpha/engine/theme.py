@@ -591,11 +591,12 @@ p {{
 .fig.neg {{
     color: var(--color-loss-dark);
 }}
-/* Retained for the dashboard baseline and any report still emitting tiles. */
+/* Headline metrics span the full measure in equal columns rather than packing
+   to the left, so the row reads as one balanced band under the masthead. */
 .kpi-grid {{
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0 46px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 14px 24px;
     margin: 0 0 12px;
     padding: 16px 0 18px;
     border-top: 1.5px solid var(--color-ink);
