@@ -6,6 +6,9 @@
   <title>Bench · {% block title %}Research console{% endblock %}</title>
   <script src="{{ url_for('static', filename='htmx.min.js') }}"></script>
   <link rel="stylesheet" href="{{ url_for('static', filename='bench.css') }}">
+  <!-- Signature tokens derived from alpha.engine.theme, loaded after bench.css
+       so the console shares one palette with the reports it embeds. -->
+  <style>{{ bench_theme_css_str }}</style>
 </head>
 <body>
   <header class="topbar">

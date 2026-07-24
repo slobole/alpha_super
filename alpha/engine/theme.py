@@ -213,8 +213,71 @@ def get_signature_palette_dict() -> dict[str, object]:
     return _copy_palette_dict(SIGNATURE_PALETTE_DICT)
 
 
+def build_bench_theme_css(variant_name_str: str = 'journal') -> str:
+    """Map a signature variant onto the Bench control panel's CSS variables.
+
+    Bench keeps its own stylesheet for layout and components; only the colour
+    and type tokens are derived here, so the console and the reports it embeds
+    share one palette instead of maintaining two. Emitted after bench.css so
+    these values win.
+    """
+    palette_dict = resolve_variant_palette_dict(variant_name_str)
+    accent_str = str(palette_dict['strategy'])
+    accent_rgb_tuple = tuple(int(round(channel * 255)) for channel in mcolors.to_rgb(accent_str))
+    ink_rgb_tuple = tuple(
+        int(round(channel * 255)) for channel in mcolors.to_rgb(str(palette_dict['ink']))
+    )
+    return f''':root {{
+  --bg: {palette_dict['neutral']};
+  --bg-grad-top: {palette_dict['page']};
+  --panel: {palette_dict['panel']};
+  --panel-2: {palette_dict['neutral']};
+  --panel-hover: {blend_hex_color_str(str(palette_dict['panel']), accent_str, 0.06)};
+  --border: {palette_dict['border']};
+  --border-soft: {blend_hex_color_str(str(palette_dict['page']), str(palette_dict['border']), 0.55)};
+  --text: {palette_dict['ink']};
+  --muted: {palette_dict['muted']};
+  --muted-2: {blend_hex_color_str(str(palette_dict['muted']), str(palette_dict['page']), 0.35)};
+  --accent: {accent_str};
+  --accent-strong: {palette_dict['strategy_dark']};
+  --accent-soft: rgba({accent_rgb_tuple[0]}, {accent_rgb_tuple[1]}, {accent_rgb_tuple[2]}, 0.10);
+  --gold: {palette_dict['benchmark_dark']};
+  --gold-soft: rgba({accent_rgb_tuple[0]}, {accent_rgb_tuple[1]}, {accent_rgb_tuple[2]}, 0.08);
+  --green: {palette_dict['profit_dark']};
+  --green-soft: rgba({accent_rgb_tuple[0]}, {accent_rgb_tuple[1]}, {accent_rgb_tuple[2]}, 0.08);
+  --red: {palette_dict['loss_dark']};
+  --red-soft: rgba({accent_rgb_tuple[0]}, {accent_rgb_tuple[1]}, {accent_rgb_tuple[2]}, 0.08);
+  --amber: {palette_dict['benchmark_dark']};
+  --shadow: none;
+  --radius: 3px;
+  --radius-sm: 2px;
+}}
+body {{
+  font-family: {palette_dict['prose_font_stack_str']};
+  background-image: none;
+}}
+.brand-name, .brand-tag, .nav a, button, .btn, code, kbd,
+table, th, td, .chip, .badge, .mono {{
+  font-family: {palette_dict['font_stack_str']};
+}}
+.brand-mark {{
+  border-radius: 2px;
+}}
+'''
+
+
 def build_report_font_head_html() -> str:
-    """Return the official Atlassian Sans font preload tags for report HTML."""
+    """Return font preload tags for the active variant's report HTML.
+
+    Only the Atlassian-derived baseline uses a CDN font. Variants whose stacks
+    are entirely locally installed emit nothing: preloading a face they never
+    render would be a pointless external request and would break the property
+    that those reports display identically with no network access.
+    """
+    active_font_stack_str = str(SIGNATURE_PALETTE_DICT['font_stack_str'])
+    active_prose_stack_str = str(SIGNATURE_PALETTE_DICT['prose_font_stack_str'])
+    if 'Atlassian Sans' not in active_font_stack_str + active_prose_stack_str:
+        return ''
     return (
         f'<link rel="preconnect" href="{_ATLASSIAN_FONT_CDN_BASE_URL_STR}" crossorigin>\n'
         f'<link rel="preload" href="{_ATLASSIAN_FONT_CDN_BASE_URL_STR}/assets/fonts/atlassian-sans/v3/AtlassianSans-latin.woff2" '

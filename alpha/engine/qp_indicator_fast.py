@@ -127,6 +127,7 @@ def qp_indicator_fast(
     close_ser: pd.Series,
     window_int: int = 3,
     lookback_years_int: int = 5,
+    periods_per_year_int: int = 252,
 ) -> pd.Series:
     """
     Fast QPI implementation.
@@ -138,14 +139,19 @@ def qp_indicator_fast(
     window_int : int, default 3
         Period length for the trailing return.
     lookback_years_int : int, default 5
-        Lookback depth, converted to trading days via 252 * years.
+        Lookback depth in years.
+    periods_per_year_int : int, default 252
+        Observations per year. Daily inputs use 252; completed weekly inputs
+        use 52.
     """
     if window_int <= 0:
         raise ValueError("window_int must be positive.")
     if lookback_years_int <= 0:
         raise ValueError("lookback_years_int must be positive.")
+    if periods_per_year_int <= 0:
+        raise ValueError("periods_per_year_int must be positive.")
 
-    lookback_window_int = lookback_years_int * 252
+    lookback_window_int = lookback_years_int * periods_per_year_int
     close_price_arr = close_ser.to_numpy(dtype=np.float64, copy=False)
     return_value_arr = _pct_change_periods(close_price_arr, window_int)
     percent_rank_arr, down_count_arr = _rolling_rank_and_down_count(

@@ -34,6 +34,7 @@ from flask import (
 
 from alpha.bench import __version__, catalog, runs
 from alpha.bench.jobs import JobManager
+from alpha.engine.theme import build_bench_theme_css
 
 
 REPO_ROOT_PATH = Path(__file__).resolve().parents[2]
@@ -78,6 +79,9 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             "analysis_label_dict": ANALYSIS_LABEL_DICT,
             "single_analysis_tuple": SUPPORTED_ANALYSIS_TUPLE,
             "csrf_token_str": flask_app_obj.config["bench_token_str"],
+            # Colour and type tokens for the console, derived from the same
+            # signature palette the embedded reports render with.
+            "bench_theme_css_str": build_bench_theme_css(),
         }
 
     def _csrf_failure_response_fn():

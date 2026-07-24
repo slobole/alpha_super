@@ -7,6 +7,7 @@ order and produced a phantom round-trip trade whose return is profit / 0.
 """
 
 import unittest
+from unittest import mock
 
 import numpy as np
 import pandas as pd
@@ -43,6 +44,34 @@ class BuyBothStrategy(Strategy):
         self._has_ordered_bool = True
         self.order_target_percent("CHEAP", 0.5)
         self.order_target_percent("PRICEY", 0.5)
+
+
+class StopOnlyStrategy(Strategy):
+    """Submit one unaffordable stop order whose share count rounds to zero."""
+
+    def compute_signals(self, pricing_data):
+        self._has_ordered_bool = False
+        return pricing_data
+
+    def iterate(self, data, close, open_prices):
+        if getattr(self, '_has_ordered_bool', False):
+            return
+        self._has_ordered_bool = True
+        self.order_percent("PRICEY", 0.5, stop_price=40_000.0)
+
+
+class LimitOnlyStrategy(Strategy):
+    """Submit one unaffordable limit order whose share count rounds to zero."""
+
+    def compute_signals(self, pricing_data):
+        self._has_ordered_bool = False
+        return pricing_data
+
+    def iterate(self, data, close, open_prices):
+        if getattr(self, '_has_ordered_bool', False):
+            return
+        self._has_ordered_bool = True
+        self.order_percent("PRICEY", 0.5, limit_price=60_000.0)
 
 
 class ZeroShareFillTests(unittest.TestCase):
@@ -101,6 +130,46 @@ class ZeroShareFillTests(unittest.TestCase):
         pricey_transaction_df = transaction_df[transaction_df["asset"] == "PRICEY"]
         self.assertGreater(len(pricey_transaction_df), 0)
         self.assertGreater(float(pricey_transaction_df["amount"].abs().sum()), 0.0)
+
+    def test_zero_share_stop_order_is_canceled_before_trigger_evaluation(self):
+        pricing_data_df = make_pricing_data(close_price_float=50_000.0)
+        strategy_obj = StopOnlyStrategy(
+            name="zero_share_stop",
+            benchmarks=[],
+            capital_base=10_000.0,
+            commission_per_share=0.005,
+            commission_minimum=1.0,
+        )
+
+        run_daily(strategy_obj, pricing_data_df, show_progress=False)
+
+        self.assertEqual(len(strategy_obj.get_orders()), 0)
+        self.assertEqual(len(strategy_obj.get_transactions()), 0)
+
+    def test_zero_share_limit_order_uses_zero_share_audit_reason(self):
+        pricing_data_df = make_pricing_data(close_price_float=50_000.0)
+        strategy_obj = LimitOnlyStrategy(
+            name="zero_share_limit",
+            benchmarks=[],
+            capital_base=10_000.0,
+            commission_per_share=0.005,
+            commission_minimum=1.0,
+        )
+        strategy_obj.log_audit_event = mock.Mock()
+
+        run_daily(strategy_obj, pricing_data_df, show_progress=False)
+
+        cancellation_payload_dict_list = [
+            audit_call_obj.args[1]
+            for audit_call_obj in strategy_obj.log_audit_event.call_args_list
+            if audit_call_obj.args[0] == "engine.order.canceled"
+        ]
+        self.assertEqual(len(strategy_obj.get_orders()), 0)
+        self.assertEqual(len(strategy_obj.get_transactions()), 0)
+        self.assertEqual(
+            [payload_dict["reason_code_str"] for payload_dict in cancellation_payload_dict_list],
+            ["zero_share_fill"],
+        )
 
 
 if __name__ == "__main__":

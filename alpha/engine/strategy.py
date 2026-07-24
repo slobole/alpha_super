@@ -726,6 +726,8 @@ class Strategy(ABC):
                 continue
 
             amount_approx = order.amount_in_shares(sizing_price_float, portfolio_value_float, position)
+            if self._cancel_zero_share_fill_bool(order, amount_approx):
+                continue
             # apply slippage (penalty) to execution price
             penalty = 1 + np.sign(amount_approx) * self._slippage  # slippage adjustment for the amount
 
@@ -735,8 +737,6 @@ class Strategy(ABC):
                 # (liquidity/cash constraints are ignored here; this can be improved)
                 price = current_open * penalty
                 amount = order.amount_in_shares(sizing_price_float, portfolio_value_float, position)
-                if self._cancel_zero_share_fill_bool(order, amount):
-                    continue
                 commission = self._compute_commission(amount)
                 self.add_transaction(order.trade_id, self.current_bar, order.asset, amount, price,
                                     price * amount, order.id, commission)
@@ -757,8 +757,6 @@ class Strategy(ABC):
                                     current_open) * penalty  # sell at the best valid price
 
                     amount_exact = order.amount_in_shares(sizing_price_float, portfolio_value_float, position)
-                    if self._cancel_zero_share_fill_bool(order, amount_exact):
-                        continue
                     commission = self._compute_commission(amount_exact)
                     self.add_transaction(order.trade_id, self.current_bar, order.asset,
                                         amount_exact, price, price * amount_exact, order.id, commission)
@@ -789,8 +787,6 @@ class Strategy(ABC):
                                     current_open) * penalty  # sell at stop or worse
 
                     amount_exact = order.amount_in_shares(sizing_price_float, portfolio_value_float, position)
-                    if self._cancel_zero_share_fill_bool(order, amount_exact):
-                        continue
                     commission = self._compute_commission(amount_exact)
                     self.add_transaction(order.trade_id, self.current_bar, order.asset,
                                         amount_exact, price, price * amount_exact, order.id, commission)

@@ -80,8 +80,8 @@ def test_default_config_matches_requested_paper_b_specification():
     assert DEFAULT_CONFIG.indexname_str == "Russell 3000"
     assert DEFAULT_CONFIG.max_long_positions_int == 50
     assert DEFAULT_CONFIG.max_short_positions_int == 50
-    assert DEFAULT_CONFIG.minimum_unadjusted_close_float == 5.0
-    assert DEFAULT_CONFIG.minimum_adv_dollar_float == 5_000_000.0
+    assert DEFAULT_CONFIG.minimum_unadjusted_close_float == 1.0
+    assert DEFAULT_CONFIG.minimum_adv_dollar_float == 1_000_000.0
     assert DEFAULT_CONFIG.adv_lookback_day_int == 63
     assert DEFAULT_CONFIG.volatility_lookback_month_int == 12
     assert DEFAULT_CONFIG.target_annualized_volatility_float == 0.10
@@ -119,9 +119,11 @@ def test_build_selection_uses_pit_raw_price_adv_and_equal_side_weights():
     classic_ser = score_ser / 10.0
     last_month_ser = pd.Series(0.05, index=symbol_list)
     raw_close_ser = pd.Series(20.0, index=symbol_list)
-    raw_close_ser["C"] = 4.99
+    raw_close_ser["A"] = 1.0
+    raw_close_ser["C"] = 0.99
     adv_ser = pd.Series(10_000_000.0, index=symbol_list)
-    adv_ser["D"] = 4_999_999.0
+    adv_ser["D"] = 999_999.0
+    adv_ser["E"] = 1_000_000.0
 
     universe_df = pd.DataFrame(
         {symbol_str: [0 if symbol_str == "OUT" else 1] for symbol_str in symbol_list},

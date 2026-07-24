@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+import numpy as np
 import pandas as pd
 
 from alpha.engine.order import MarketOrder
@@ -20,6 +21,7 @@ from strategies.qpi.strategy_mr_qpi_ibs_rsi_exit import (
 )
 from strategies.qpi.strategy_mr_qpi_ibs_rsi_exit_weekly import (
     WeeklyQPIIbsRsiExitStrategy,
+    _weekly_qpi_indicator_ser,
     three_week_return_field_str,
     weekly_decision_marker_field_str as qpi_weekly_marker_field_str,
     weekly_ibs_field_str,
@@ -71,6 +73,24 @@ def test_build_completed_week_ohlcv_uses_actual_completed_week_dates():
     assert float(weekly_bar_df.loc["2024-03-28", ("AAA", "Low")]) == 8.0
     assert float(weekly_bar_df.loc["2024-03-28", ("AAA", "Close")]) == 13.5
     assert float(weekly_bar_df.loc["2024-03-28", ("AAA", "Turnover")]) == 10.0
+
+
+def test_weekly_qpi_uses_52_observations_per_year():
+    weekly_date_index = pd.date_range("2020-01-03", periods=80, freq="W-FRI")
+    close_price_ser = pd.Series(
+        100.0 + np.sin(np.arange(len(weekly_date_index)) / 4.0) * 5.0,
+        index=weekly_date_index,
+        dtype=float,
+    )
+
+    qpi_value_ser = _weekly_qpi_indicator_ser(
+        close_price_ser,
+        window_week_int=3,
+        lookback_years_int=1,
+    )
+
+    assert qpi_value_ser.iloc[:54].isna().all()
+    assert np.isfinite(float(qpi_value_ser.iloc[54]))
 
 
 def test_dv2_weekly_iterate_ignores_non_weekly_decision_rows():

@@ -100,11 +100,13 @@ def qp_indicator_fast(
     close_price_ser: pd.Series,
     window_int: int = 3,
     lookback_years_int: int = 5,
+    periods_per_year_int: int = 252,
 ) -> pd.Series:
     return _qp_indicator_fast_backend(
         close_price_ser,
         window_int=window_int,
         lookback_years_int=lookback_years_int,
+        periods_per_year_int=periods_per_year_int,
     )
 
 
@@ -126,11 +128,13 @@ def qp_indicator(
     close_price_ser: pd.Series,
     window_int: int = 3,
     lookback_years_int: int = 5,
+    periods_per_year_int: int = 252,
 ) -> pd.Series:
     return qp_indicator_fast(
         close_price_ser,
         window_int=window_int,
         lookback_years_int=lookback_years_int,
+        periods_per_year_int=periods_per_year_int,
     )
 
 

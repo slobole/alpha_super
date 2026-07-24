@@ -38,14 +38,9 @@ import talib
 from IPython.display import display
 
 from alpha.engine.backtest import run_daily
-from alpha.engine.qp_indicator_fast import (
-    _compute_qpi_value_arr,
-    _pct_change_periods,
-    _rolling_rank_and_down_count,
-)
 from alpha.engine.report import save_results
 from alpha.engine.strategy import Strategy
-from alpha.indicators import ibs_indicator
+from alpha.indicators import ibs_indicator, qp_indicator
 from data.norgate_loader import build_index_constituent_matrix, load_raw_prices
 from strategies.qpi.strategy_mr_qpi_ibs_rsi_exit import (
     default_trade_id_int,
@@ -92,22 +87,13 @@ def _weekly_qpi_indicator_ser(
     if lookback_years_int <= 0:
         raise ValueError("lookback_years_int must be positive.")
 
-    lookback_window_week_int = int(lookback_years_int) * 52
-    close_price_arr = close_price_ser.to_numpy(dtype=np.float64, copy=False)
-
     # *** CRITICAL *** QPI weekly return uses only C_W,t and C_W,t-window.
-    return_value_arr = _pct_change_periods(close_price_arr, int(window_week_int))
-    percent_rank_arr, down_count_arr = _rolling_rank_and_down_count(
-        return_value_arr,
-        lookback_window_week_int,
+    return qp_indicator(
+        close_price_ser,
+        window_int=int(window_week_int),
+        lookback_years_int=int(lookback_years_int),
+        periods_per_year_int=52,
     )
-    qpi_value_arr = _compute_qpi_value_arr(
-        return_value_arr,
-        percent_rank_arr,
-        down_count_arr,
-        lookback_window_week_int,
-    )
-    return pd.Series(qpi_value_arr, index=close_price_ser.index, name=close_price_ser.name, dtype=float)
 
 
 class WeeklyQPIIbsRsiExitStrategy(Strategy):

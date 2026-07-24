@@ -57,7 +57,6 @@ _DAILY_RETURN_HISTOGRAM_BIN_COUNT_INT = 60
 _TRADE_RETURN_HISTOGRAM_BIN_COUNT_INT = 60
 _FALLBACK_ASSET_SET = frozenset({'SPY', 'SSO', 'QQQ', 'QLD', 'TQQQ', 'UPRO'})
 _WEIGHT_STACK_EDGE_COLOR_STR = '#101418'
-_FONT_HEAD_HTML_STR = build_report_font_head_html()
 
 
 METRIC_HELP_TEXT_DICT = {
@@ -693,7 +692,8 @@ def save_crisis_replay_results(crisis_replay_result, output_dir='results') -> Pa
         date_format='%Y-%m-%d',
     )
 
-    html = _build_crisis_replay_html(crisis_replay_result)
+    with signature_variant_context(_ACTIVE_REPORT_VARIANT_STR):
+        html = _build_crisis_replay_html(crisis_replay_result)
     (out / 'report.html').write_text(html, encoding='utf-8')
 
     print(f'Results saved to: {out.resolve()}')
@@ -835,6 +835,18 @@ def _build_kpi_grid_html(
 
 
 def _wrap_card_html(card_body_html_str: str, card_class_str: str = '') -> str:
+    """Wrap a section for the active layout: a card, or a numbered plate.
+
+    Under the spec layout every section becomes a plate and the CSS counter
+    numbers it from its own heading, so the portfolio and crisis reports adopt
+    the specimen sheet without restructuring how they assemble their sections.
+    Empty bodies are dropped so the plate sequence has no gaps.
+    """
+    if not card_body_html_str or not card_body_html_str.strip():
+        return ''
+    if str(SIGNATURE_PALETTE_DICT['layout_str']) == 'spec':
+        return f'<div class="plate">{card_body_html_str}</div>'
+
     card_class_attr_str = 'card'
     if card_class_str:
         card_class_attr_str += f' {card_class_str}'
@@ -845,6 +857,10 @@ def _build_card_grid_html(card_html_list: list[str]) -> str:
     active_card_html_list = [card_html_str for card_html_str in card_html_list if card_html_str]
     if len(active_card_html_list) == 0:
         return ''
+    # Plates own the full measure, so the spec layout stacks them instead of
+    # pairing them side by side.
+    if str(SIGNATURE_PALETTE_DICT['layout_str']) == 'spec':
+        return ''.join(active_card_html_list)
     return f'<div class="card-grid">{"".join(active_card_html_list)}</div>'
 
 
@@ -2403,7 +2419,6 @@ def _monthly_returns_html(
 
 # ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ HTML assembly ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
-_CSS = build_report_css()
 
 
 def save_portfolio_results(portfolio, output_dir='results', output_path: str | Path | None = None) -> Path:
@@ -2429,13 +2444,15 @@ def save_portfolio_results(portfolio, output_dir='results', output_path: str | P
     _write_metadata(out / _RUN_INFO_FILENAME, _portfolio_run_info_dict(portfolio))
     _write_metadata(out / _SUMMARY_FILENAME, _summary_metrics_dict(portfolio))
 
-    buf = io.BytesIO()
-    portfolio.plot(save_to=buf)
-    plt.close('all')
-    buf.seek(0)
-    chart_b64 = base64.b64encode(buf.read()).decode('ascii')
-
-    html = _build_portfolio_html(portfolio, chart_b64)
+    # Chart and HTML render inside the active signature variant so the charts
+    # and the page styling always agree — same contract as save_results.
+    with signature_variant_context(_ACTIVE_REPORT_VARIANT_STR):
+        buf = io.BytesIO()
+        portfolio.plot(save_to=buf)
+        plt.close('all')
+        buf.seek(0)
+        chart_b64 = base64.b64encode(buf.read()).decode('ascii')
+        html = _build_portfolio_html(portfolio, chart_b64)
     (out / 'report.html').write_text(html, encoding='utf-8')
     _write_portfolio_tail_csvs(portfolio, out)
     _write_portfolio_rebalance_csvs(portfolio, out)
@@ -3563,8 +3580,8 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{portfolio.name} \u2014 Portfolio Report</title>
-{_FONT_HEAD_HTML_STR}
-<style>{_CSS}</style>
+{build_report_font_head_html()}
+<style>{build_report_css()}</style>
 </head>
 <body>
 {body}
@@ -3894,6 +3911,10 @@ def _build_crisis_chart_cards_html(crisis_replay_result) -> str:
 
     if len(card_html_list) == 0:
         return ''
+    # Plates own the full measure, so the spec layout stacks the crisis charts
+    # rather than pairing them two-up.
+    if str(SIGNATURE_PALETTE_DICT['layout_str']) == 'spec':
+        return ''.join(card_html_list)
     return f'<div class="crisis-chart-grid">{"".join(card_html_list)}</div>'
 
 
@@ -3927,8 +3948,8 @@ def _build_crisis_replay_html(crisis_replay_result) -> str:
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{crisis_replay_result.strategy_name_str} - Crisis Replay Report</title>
-{_FONT_HEAD_HTML_STR}
-<style>{_CSS}</style>
+{build_report_font_head_html()}
+<style>{build_report_css()}</style>
 </head>
 <body>
 {body}

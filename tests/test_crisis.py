@@ -318,7 +318,9 @@ class CrisisReplayTests(unittest.TestCase):
             report_html_str = (output_path / 'report.html').read_text(encoding='utf-8')
             self.assertIn('<h2>Crisis Summary</h2>', report_html_str)
             self.assertIn('toy_crisis', report_html_str)
-            self.assertIn('class="crisis-chart-grid"', report_html_str)
+            # Under the spec layout each crisis chart is its own numbered plate
+            # spanning the full measure, rather than a two-up grid.
+            self.assertIn('class="plate"', report_html_str)
             self.assertIn('<td class="pos">+7.00%</td>', report_html_str)
             self.assertNotIn('Crisis Windows', report_html_str)
             self.assertNotIn('Unsupported Crisis Windows', report_html_str)

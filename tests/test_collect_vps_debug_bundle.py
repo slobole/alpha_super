@@ -252,6 +252,7 @@ def test_collect_bundle_writes_manifest_summary_and_zip(monkeypatch, tmp_path: P
         no_zip_bool=False,
     )
 
+    monkeypatch.chdir(repo_root_path)
     result_dict = bundle_module.collect_bundle_dict(parsed_args_obj)
 
     bundle_dir_path = Path(str(result_dict["bundle_dir_path_str"]))

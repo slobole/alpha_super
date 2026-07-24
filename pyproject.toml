@@ -33,6 +33,7 @@ include = ["alpha*", "data*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
