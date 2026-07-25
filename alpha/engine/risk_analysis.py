@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -1864,6 +1865,34 @@ def _build_metadata_dict(risk_result_obj: RiskAnalysisResult) -> dict[str, objec
     }
 
 
+def _full_sample_drawdown_row_dict(risk_result_obj: RiskAnalysisResult) -> dict[str, object]:
+    """Assemble the full-sample-length row of the downside horizon table.
+
+    The breach probabilities and the max-drawdown percentiles come from the
+    same primary-block bootstrap as the fixed horizons, just measured over the
+    whole realized sample rather than a truncated window.
+    """
+    summary_dict = risk_result_obj.summary_dict
+    row_dict: dict[str, object] = dict(
+        summary_dict.get("primary_drawdown_breach_probabilities", {}) or {}
+    )
+    row_dict["simulation_path_count_int"] = int(
+        summary_dict.get("simulation_count_int", DEFAULT_SIMULATION_COUNT_INT)
+    )
+
+    interval_df = risk_result_obj.bootstrap_interval_df
+    if interval_df is not None and len(interval_df) > 0:
+        primary_block_length_int = int(summary_dict["primary_mean_block_length_int"])
+        drawdown_row_df = interval_df[
+            (interval_df["mean_block_length_int"] == primary_block_length_int)
+            & (interval_df["metric_name_str"] == "max_drawdown_float")
+        ]
+        if len(drawdown_row_df) > 0:
+            row_dict["max_drawdown_p50_float"] = drawdown_row_df.iloc[0].get("p50_float")
+            row_dict["max_drawdown_p05_float"] = drawdown_row_df.iloc[0].get("p05_float")
+    return row_dict
+
+
 def _build_report_html_str(risk_result_obj: RiskAnalysisResult) -> str:
     summary_dict = risk_result_obj.summary_dict
     strategy_name_html = html.escape(risk_result_obj.strategy_name_str)
@@ -1926,13 +1955,13 @@ Return window: {html.escape(str(summary_dict.get("start_date_str")))} to {html.e
 </div>
 <div class="section">
 <h2>Horizon Probability Tables</h2>
-<div class="subtitle">Bootstrap-implied horizon probabilities from realized returns. Trading-year horizons use {TRADING_DAYS_PER_YEAR_INT} days. Downside is max drawdown touched inside the horizon; upside is max gain touched inside the horizon. Rows beyond the realized sample length render as N/A.</div>
-{_horizon_probability_tables_html(risk_result_obj.horizon_probability_df, summary_dict.get("drawdown_threshold_list", DEFAULT_DRAWDOWN_THRESHOLD_TUPLE), summary_dict.get("upside_threshold_list", DEFAULT_UPSIDE_THRESHOLD_TUPLE))}
+<div class="subtitle">Bootstrap-implied horizon probabilities from realized returns. Trading-year horizons use {TRADING_DAYS_PER_YEAR_INT} days. Downside is max drawdown touched inside the horizon; upside is max gain touched inside the horizon. Rows beyond the realized sample length render as N/A. The final downside row is the bootstrap at its full realized sample length, so it is a longer exposure than the fixed horizons above it rather than a higher rate.</div>
+{_horizon_probability_tables_html(risk_result_obj.horizon_probability_df, summary_dict.get("drawdown_threshold_list", DEFAULT_DRAWDOWN_THRESHOLD_TUPLE), summary_dict.get("upside_threshold_list", DEFAULT_UPSIDE_THRESHOLD_TUPLE), _full_sample_drawdown_row_dict(risk_result_obj))}
 </div>
 <div class="section">
-<h2>Drawdown and Time-Underwater Breach Probabilities</h2>
-<div class="subtitle">Probability across bootstrap paths that the realized event occurred at least once. Time-underwater thresholds are in trading months of {TRADING_DAYS_PER_MONTH_INT} days.</div>
-<div class="scroll">{_breach_table_html(summary_dict.get("primary_drawdown_breach_probabilities", {}), summary_dict.get("primary_terminal_loss_probability_float"), summary_dict.get("primary_time_underwater_breach_probabilities", {}))}</div>
+<h2>Time Underwater</h2>
+<div class="subtitle">Probability across bootstrap paths that the event occurred at least once over the full realized sample length. Thresholds are in trading months of {TRADING_DAYS_PER_MONTH_INT} days. Drawdown-depth probabilities are the full-sample row of the downside table above.</div>
+<div class="scroll">{_breach_table_html(summary_dict.get("primary_terminal_loss_probability_float"), summary_dict.get("primary_time_underwater_breach_probabilities", {}))}</div>
 </div>
 </div>
 </body>
@@ -2378,7 +2407,15 @@ def _horizon_probability_tables_html(
     horizon_probability_df: pd.DataFrame,
     drawdown_threshold_tuple: Sequence[float],
     upside_threshold_tuple: Sequence[float],
+    full_sample_drawdown_row_dict: dict[str, object] | None = None,
 ) -> str:
+    """Lay out downside and upside horizon probabilities.
+
+    ``full_sample_drawdown_row_dict`` appends the whole-sample-length bootstrap
+    as one more horizon row. Those probabilities used to live in a separate
+    breach table over the *same* five thresholds, which made the reader compare
+    a row of columns against a column of rows to answer one question.
+    """
     if horizon_probability_df is None or len(horizon_probability_df) == 0:
         return "<p>No horizon probability data available.</p>"
 
@@ -2441,6 +2478,33 @@ def _horizon_probability_tables_html(
             _metric_cell_html(row_ser.get("terminal_return_p50_float"), "terminal_return_float")
         )
         upside_row_html_list.append("<tr>" + "".join(upside_cell_html_list) + "</tr>")
+
+    if full_sample_drawdown_row_dict:
+        # *** CRITICAL*** This row is the full realized sample length, not a
+        # fixed horizon, so it is not comparable to the 1y-5y rows as a rate.
+        # It is the same bootstrap at its native length; the label must say so.
+        full_sample_cell_html_list = [
+            '<td class="metric">Full sample</td>',
+            f"<td>{int(full_sample_drawdown_row_dict.get('simulation_path_count_int', 0))}</td>",
+        ]
+        for threshold_float in normalized_drawdown_threshold_tuple:
+            breach_key_str = f"max_drawdown_lte_{abs(float(threshold_float)):.0%}"
+            full_sample_cell_html_list.append(
+                f"<td>{_format_percent(full_sample_drawdown_row_dict.get(breach_key_str))}</td>"
+            )
+        full_sample_cell_html_list.append(
+            _metric_cell_html(
+                full_sample_drawdown_row_dict.get("max_drawdown_p50_float"), "max_drawdown_float"
+            )
+        )
+        full_sample_cell_html_list.append(
+            _metric_cell_html(
+                full_sample_drawdown_row_dict.get("max_drawdown_p05_float"), "max_drawdown_float"
+            )
+        )
+        downside_row_html_list.append(
+            '<tr class="full-sample-row">' + "".join(full_sample_cell_html_list) + "</tr>"
+        )
 
     upside_header_html_list = [
         "<th>Horizon</th>",
@@ -2554,24 +2618,58 @@ def _format_observed_percentile_str(value_obj) -> str:
     return f"p{value_float * 100.0:.0f}"
 
 
+_UNDERWATER_BREACH_KEY_PATTERN = re.compile(r"^underwater_ge_(\d+)m$")
+
+
+def _breach_event_label_str(key_str: str) -> str:
+    """Turn a breach dictionary key into something a reader can read.
+
+    These keys are storage identifiers. Printing them raw put
+    ``underwater_ge_3m`` in the middle of a report whose every other label is
+    prose, so the reader had to decode the schema to read the number.
+    """
+    underwater_match = _UNDERWATER_BREACH_KEY_PATTERN.match(key_str)
+    if underwater_match is not None:
+        month_int = int(underwater_match.group(1))
+        return f"Underwater for {month_int} months or more"
+    return key_str.replace("_", " ")
+
+
+def _breach_event_sort_key_tuple(key_str: str) -> tuple[int, int, str]:
+    """Sort underwater keys by their month, keeping unknown keys last and stable."""
+    underwater_match = _UNDERWATER_BREACH_KEY_PATTERN.match(key_str)
+    if underwater_match is not None:
+        return (0, int(underwater_match.group(1)), key_str)
+    return (1, 0, key_str)
+
+
 def _breach_table_html(
-    breach_probability_dict: dict[str, object],
     terminal_loss_probability_float: object,
     time_underwater_breach_probability_dict: dict[str, object] | None = None,
 ) -> str:
+    """Report only what the horizon table cannot say.
+
+    The drawdown-threshold rows moved into the downside horizon table as its
+    full-sample row; repeating them here asked the same question twice in two
+    different shapes.
+    """
     row_html_list = [
-        f"<tr><td>{html.escape(str(key_str))}</td><td>{_format_percent(value_obj)}</td></tr>"
-        for key_str, value_obj in breach_probability_dict.items()
-    ]
-    row_html_list.append(
-        "<tr><td>terminal_return_lt_0</td>"
+        '<tr><td class="metric">Ends below its starting value</td>'
         f"<td>{_format_percent(terminal_loss_probability_float)}</td></tr>"
-    )
+    ]
     if time_underwater_breach_probability_dict:
-        for key_str, value_obj in time_underwater_breach_probability_dict.items():
+        # *** CRITICAL*** Order by the month the key encodes, not by the key.
+        # The summary is persisted with sorted keys, so relying on dict order
+        # printed 12m, 24m, 3m, 6m whenever a saved result was re-rendered --
+        # a monotonic series shown out of order reads as a broken model.
+        ordered_key_list = sorted(
+            time_underwater_breach_probability_dict,
+            key=lambda key_str: _breach_event_sort_key_tuple(str(key_str)),
+        )
+        for key_str in ordered_key_list:
             row_html_list.append(
-                f"<tr><td>{html.escape(str(key_str))}</td>"
-                f"<td>{_format_percent(value_obj)}</td></tr>"
+                f'<tr><td class="metric">{html.escape(_breach_event_label_str(str(key_str)))}</td>'
+                f"<td>{_format_percent(time_underwater_breach_probability_dict[key_str])}</td></tr>"
             )
     return "<table><thead><tr><th>Event</th><th>Probability</th></tr></thead><tbody>" + "".join(row_html_list) + "</tbody></table>"
 

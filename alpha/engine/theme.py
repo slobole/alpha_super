@@ -956,6 +956,11 @@ td.metric {{
 tbody tr:last-child td {{
     border-bottom: 1px solid var(--color-ink);
 }}
+/* A row measured over a different window than the rows above it. The rule
+   separates it so it is not read as one more step in the same sequence. */
+tr.full-sample-row td {{
+    border-top: 1px solid var(--color-ink);
+}}
 td.pos {{
     color: var(--color-profit-dark);
     font-weight: 500;
@@ -1227,6 +1232,10 @@ def build_report_css() -> str:
     --color-loss: {signature_palette_dict["loss"]};
     --color-loss-dark: {signature_palette_dict["loss_dark"]};
     --color-shadow: {signature_palette_dict["shadow_rgba"]};
+    /* The analyzer appendix sets figure type on tiles and tables. Without
+       this the whole declaration is void and those numbers silently fall
+       back to the body font in every non-document layout. */
+    --font-figure: {report_font_stack_str};
 }}
 body {{
     font-family: {report_font_stack_str};
@@ -1388,6 +1397,11 @@ td.metric {{
     font-weight: 500;
     background: var(--color-panel);
     white-space: nowrap;
+}}
+/* A row measured over a different window than the rows above it. The rule
+   separates it so it is not read as one more step in the same sequence. */
+tr.full-sample-row td {{
+    border-top: 2px solid var(--color-ink);
 }}
 .metric-help {{
     appearance: none;

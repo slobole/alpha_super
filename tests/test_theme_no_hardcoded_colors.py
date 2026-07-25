@@ -87,6 +87,48 @@ class ThemeColorOwnershipTests(unittest.TestCase):
         # stylesheet's original blue accent.
         self.assertNotIn('#0c8ce0', bench_theme_css_str)
 
+    def test_every_referenced_css_variable_is_defined(self):
+        """An undefined custom property silently voids its whole declaration.
+
+        ``border-top: 2px solid var(--color-text)`` where ``--color-text`` does
+        not exist is not a wrong colour — the browser drops the rule entirely
+        and the border never renders. Nothing else in the suite notices, because
+        the CSS text still contains exactly what was written.
+        """
+        from alpha.engine.theme import (
+            build_analyzer_report_css,
+            build_bench_theme_css,
+            build_report_css,
+            signature_variant_context,
+        )
+
+        builder_dict = {
+            'build_report_css': build_report_css,
+            'build_analyzer_report_css': build_analyzer_report_css,
+            'build_bench_theme_css': build_bench_theme_css,
+        }
+        # The stylesheets branch on the active variant, so a rule can exist in
+        # one layout and be missing from another. Check every variant.
+        finding_list: list[str] = []
+        for variant_name_str in ('current', 'journal', 'journal_spec'):
+            for builder_name_str, builder_callable in builder_dict.items():
+                with signature_variant_context(variant_name_str):
+                    stylesheet_str = builder_callable()
+                defined_name_set = set(re.findall(r'(--[\w-]+)\s*:', stylesheet_str))
+                referenced_name_set = set(re.findall(r'var\(\s*(--[\w-]+)', stylesheet_str))
+                for undefined_name_str in sorted(referenced_name_set - defined_name_set):
+                    finding_list.append(
+                        f'{builder_name_str} [{variant_name_str}]: {undefined_name_str}'
+                    )
+
+        self.assertEqual(
+            finding_list,
+            [],
+            'CSS variables referenced but never defined in the same stylesheet. '
+            'Every declaration using them is dropped at render time:\n  '
+            + '\n  '.join(finding_list),
+        )
+
     def test_guarded_modules_exist(self):
         for module_path in _GUARDED_MODULE_PATH_TUPLE:
             self.assertTrue((REPO_ROOT_PATH / module_path).exists(), module_path)

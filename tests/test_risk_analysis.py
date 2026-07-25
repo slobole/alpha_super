@@ -594,6 +594,17 @@ def test_risk_analysis_saves_expected_artifacts(tmp_path):
     assert "edge looks real" not in report_html_str.lower()
     assert "1-in-20 bad case" not in report_html_str.lower()
 
+    # The whole-sample drawdown probabilities belong to the downside horizon
+    # table as one more row, not to a second table over the same thresholds.
+    assert "Full sample" in report_html_str
+    assert "Drawdown and Time-Underwater Breach Probabilities" not in report_html_str
+    assert "Time Underwater" in report_html_str
+    # Storage identifiers must not reach the page.
+    assert "max_drawdown_lte_" not in report_html_str
+    assert "underwater_ge_" not in report_html_str
+    assert "terminal_return_lt_0" not in report_html_str
+    assert "Underwater for 3 months or more" in report_html_str
+
 
 def test_risk_analysis_saves_portfolio_entity_path_and_context(tmp_path):
     portfolio_obj = _toy_strategy_obj()
@@ -676,3 +687,56 @@ def test_risk_analysis_result_keeps_legacy_output_path_positional_slot(tmp_path)
     )
 
     assert result_obj.output_dir_path == output_dir_path
+
+
+def test_time_underwater_rows_are_ordered_by_month_not_by_key():
+    """Regression: the saved summary sorts keys lexicographically.
+
+    Rendering a reloaded result in dict order printed 12m, 24m, 3m, 6m. A
+    monotonically decreasing probability shown out of order reads as a broken
+    model, so the table must order by the month the key encodes.
+    """
+    from alpha.engine.risk_analysis import _breach_table_html
+
+    lexicographically_sorted_dict = {
+        "underwater_ge_12m": 0.5203,
+        "underwater_ge_24m": 0.0544,
+        "underwater_ge_3m": 1.0,
+        "underwater_ge_6m": 0.9854,
+    }
+    table_html_str = _breach_table_html(0.0, lexicographically_sorted_dict)
+    position_list = [
+        table_html_str.index(f"Underwater for {month_int} months or more")
+        for month_int in (3, 6, 12, 24)
+    ]
+    assert position_list == sorted(position_list)
+
+
+def test_full_sample_row_reports_every_drawdown_threshold():
+    """The appended row must carry the same thresholds as the columns above it."""
+    from alpha.engine.risk_analysis import _horizon_probability_tables_html
+
+    horizon_df = pd.DataFrame(
+        [{"horizon_year_int": 1, "simulation_path_count_int": 10,
+          "drawdown_lte_10pct_probability_float": 0.27,
+          "gain_gte_10pct_probability_float": 0.8}]
+    )
+    table_html_str = _horizon_probability_tables_html(
+        horizon_df,
+        drawdown_threshold_tuple=(0.10,),
+        upside_threshold_tuple=(0.10,),
+        full_sample_drawdown_row_dict={
+            "max_drawdown_lte_10%": 0.9937,
+            "simulation_path_count_int": 10000,
+            "max_drawdown_p50_float": -0.1512,
+            "max_drawdown_p05_float": -0.2162,
+        },
+    )
+    assert "Full sample" in table_html_str
+    assert "99.37%" in table_html_str
+    assert 'class="full-sample-row"' in table_html_str
+    # Omitting the row must leave the table unchanged apart from that row.
+    assert "Full sample" not in _horizon_probability_tables_html(
+        horizon_df, drawdown_threshold_tuple=(0.10,), upside_threshold_tuple=(0.10,)
+    )
+
