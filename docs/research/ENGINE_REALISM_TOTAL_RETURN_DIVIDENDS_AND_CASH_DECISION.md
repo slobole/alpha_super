@@ -1,6 +1,6 @@
 # Engine Realism Decision: Execution Prices, Signal Returns, Dividends, and Cash
 
-**Decision status:** OPEN - awaiting Claude review and a joint verdict
+**Decision status:** REVIEWED - Codex and Claude positions recorded and aligned on all eleven decisions; awaiting human-owner sign-off before any implementation
 
 **Implementation status:** Documentation only; no engine, strategy, release, or live behavior changed
 

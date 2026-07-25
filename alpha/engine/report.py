@@ -2868,6 +2868,58 @@ def _build_tail_risk_html(portfolio) -> str:
     return '\n'.join(parts)
 
 
+def _diversification_ratio_table_html(portfolio) -> str:
+    """Report each diversification ratio next to what it actually means.
+
+    The ratio on its own is hard to act on. Two readings make it concrete:
+
+        volatility saved   = 1 - 1 / DR
+        effective bets     = DR^2
+
+    Effective bets is the useful one: with N equally weighted, equally
+    volatile and uncorrelated pods the ratio is sqrt(N), so squaring it says
+    how many genuinely independent pods the book behaves like — against the
+    pod count as the ceiling.
+    """
+    ratio_spec_list = [
+        ('At target weights', getattr(portfolio, 'target_diversification_ratio', None)),
+        ('At end weights', getattr(portfolio, 'realized_diversification_ratio', None)),
+        ('Rolling 63-day average', getattr(portfolio, 'average_rolling_diversification_ratio', None)),
+    ]
+    row_html_list = []
+    for label_str, ratio_obj in ratio_spec_list:
+        if ratio_obj is None or not np.isfinite(float(ratio_obj)) or float(ratio_obj) <= 0.0:
+            continue
+        ratio_float = float(ratio_obj)
+        row_html_list.append(
+            f'<tr><td class="metric">{label_str}</td>'
+            f'<td>{ratio_float:.3f}</td>'
+            f'<td>{(1.0 - 1.0 / ratio_float) * 100:.1f}%</td>'
+            f'<td>{ratio_float ** 2:.2f}</td></tr>'
+        )
+    if len(row_html_list) == 0:
+        return ''
+
+    pod_count_int = len(getattr(portfolio, 'strategies', []) or [])
+    ceiling_note_str = (
+        f' With {pod_count_int} pods the ceiling is {pod_count_int} effective bets '
+        f'(a ratio of {np.sqrt(pod_count_int):.2f}), reached only if they were fully independent.'
+        if pod_count_int > 1 else ''
+    )
+    return (
+        '<h3>Diversification Ratio</h3>'
+        '<div class="scroll"><table class="stats-table">'
+        '<thead><tr><th>Measured</th><th>Ratio</th><th>Volatility saved</th>'
+        '<th>Effective bets</th></tr></thead>'
+        f'<tbody>{"".join(row_html_list)}</tbody></table></div>'
+        '<p class="metric-context">A ratio of 1.00 means the pods move as one and the book is no '
+        'calmer than its parts. Volatility saved is how much lower the book\'s volatility is than '
+        'the weighted sum of its pods; effective bets is how many genuinely independent pods it '
+        f'behaves like.{ceiling_note_str} Measured across the whole sample — whether the benefit '
+        'survives a crash is the correlation shift under Tail Risk.</p>'
+    )
+
+
 def _build_diagnostics_html(portfolio) -> str:
     """Build the Cross-Strategy Diagnostics HTML section."""
     parts = ['<h2>Diversification</h2>']
@@ -2876,26 +2928,7 @@ def _build_diagnostics_html(portfolio) -> str:
         parts.append('<h3>Correlation Matrix</h3>')
         parts.append(f'<div class="scroll">{_format_correlation_matrix(portfolio.correlation_matrix)}</div>')
 
-    if portfolio.target_diversification_ratio is not None and np.isfinite(portfolio.target_diversification_ratio):
-        parts.append(
-            f'<p><strong>Target-Weight Diversification Ratio:</strong> '
-            f'{portfolio.target_diversification_ratio:.3f}</p>'
-        )
-
-    if portfolio.realized_diversification_ratio is not None and np.isfinite(portfolio.realized_diversification_ratio):
-        parts.append(
-            f'<p><strong>End-Weight Diversification Ratio:</strong> '
-            f'{portfolio.realized_diversification_ratio:.3f}</p>'
-        )
-
-    if (
-        portfolio.average_rolling_diversification_ratio is not None
-        and np.isfinite(portfolio.average_rolling_diversification_ratio)
-    ):
-        parts.append(
-            f'<p><strong>Average Rolling Diversification Ratio (63d):</strong> '
-            f'{portfolio.average_rolling_diversification_ratio:.3f}</p>'
-        )
+    parts.append(_diversification_ratio_table_html(portfolio))
 
     if portfolio._rebalance is not None:
         parts.append(f'<p><strong>Rebalance Frequency:</strong> {portfolio._rebalance}</p>')
