@@ -23,6 +23,19 @@ _GUARDED_MODULE_PATH_TUPLE = (
     Path('alpha/engine/report.py'),
     Path('alpha/engine/plot.py'),
     Path('alpha/engine/signature.py'),
+    Path('alpha/engine/stress_test.py'),
+    Path('alpha/engine/execution_timing.py'),
+)
+
+# Analyzers still carrying their own palette. Each entry is a debt to clear,
+# not a permanent exemption: the guard covers the module the moment it is
+# converted, and the list is expected to shrink to empty.
+#
+# alpha/live/reference_compare.py is deliberately absent — it is live-path
+# code and is being handled separately from the research analyzers.
+_PENDING_CONVERSION_MODULE_PATH_TUPLE = (
+    Path('alpha/engine/capacity_analysis.py'),
+    Path('alpha/engine/risk_analysis.py'),
 )
 
 _HEX_COLOR_PATTERN = re.compile(r'#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?\b')
@@ -76,6 +89,22 @@ class ThemeColorOwnershipTests(unittest.TestCase):
     def test_guarded_modules_exist(self):
         for module_path in _GUARDED_MODULE_PATH_TUPLE:
             self.assertTrue((REPO_ROOT_PATH / module_path).exists(), module_path)
+
+    def test_pending_modules_are_tracked_and_shrinking(self):
+        """Keep the unconverted analyzers visible instead of silently excluded.
+
+        A module that still hardcodes colours belongs on the pending list; one
+        that no longer does belongs in the guard. This fails either way round,
+        so the debt cannot quietly grow or be forgotten once paid.
+        """
+        for module_path in _PENDING_CONVERSION_MODULE_PATH_TUPLE:
+            self.assertTrue((REPO_ROOT_PATH / module_path).exists(), module_path)
+            self.assertGreater(
+                len(_hex_literal_finding_list(module_path)),
+                0,
+                f'{module_path} no longer hardcodes colours — move it into '
+                '_GUARDED_MODULE_PATH_TUPLE.',
+            )
 
 
 if __name__ == '__main__':

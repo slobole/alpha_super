@@ -36,8 +36,13 @@ import numpy as np
 import pandas as pd
 
 from alpha.engine.order import MarketOrder, Order
-from alpha.engine.report import build_research_output_path
+from alpha.engine.report import _ACTIVE_REPORT_VARIANT_STR, build_research_output_path
 from alpha.engine.strategy import Strategy
+from alpha.engine.theme import (
+    build_report_css,
+    build_report_font_head_html,
+    signature_variant_context,
+)
 
 
 EXECUTION_TIMING_ANALYZER_ANALYSIS_TYPE_STR = "execution_timing_analyzer"
@@ -867,38 +872,49 @@ def save_execution_timing_results(
         _execution_timing_summary_dict(execution_timing_result_obj),
     )
 
-    html_str = f"""<!DOCTYPE html>
+    with signature_variant_context(_ACTIVE_REPORT_VARIANT_STR):
+        html_str = _build_execution_timing_html_str(execution_timing_result_obj)
+    (output_path / "report.html").write_text(html_str, encoding="utf-8")
+    return output_path
+
+
+def _build_execution_timing_html_str(execution_timing_result_obj) -> str:
+    """Render the timing matrix page under whichever variant is active."""
+    return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{html.escape(execution_timing_result_obj.strategy_name_str)} Execution Timing Analyzer</title>
-<style>
-body {{ font-family: Arial, sans-serif; margin: 32px; color: #17202a; }}
-table {{ border-collapse: collapse; width: 100%; font-size: 13px; }}
-th, td {{ border: 1px solid #d7dde5; padding: 8px; text-align: left; vertical-align: top; }}
-th {{ background: #f3f6fa; }}
-.note {{ color: #52606d; max-width: 960px; line-height: 1.45; }}
-.default-row {{ background: #eef7f1; }}
-.default-row td:first-child {{ color: #0f6b3d; font-weight: 700; }}
-.risk-clean {{ color: #0f6b3d; font-weight: 700; }}
-.risk-moc-assumption {{ color: #9a5b00; font-weight: 700; }}
-.risk-biased-moc {{ color: #9b1c31; font-weight: 700; }}
-.risk-diagnostic-only {{ color: #9b1c31; font-weight: 700; }}
-.risk-funding-assumption {{ color: #7a4b00; font-weight: 700; }}
+{build_report_font_head_html()}
+<style>{build_report_css()}
+/* Risk labels reuse the report's own semantics: clean fills are unremarkable
+   ink, anything needing live handling reads as a loss tone. */
+.default-row td {{ background: var(--color-neutral); }}
+.default-row td:first-child {{ font-weight: 700; }}
+.risk-clean {{ color: var(--color-profit-dark); font-weight: 700; }}
+.risk-moc-assumption {{ color: var(--color-loss); font-weight: 700; }}
+.risk-biased-moc {{ color: var(--color-loss-dark); font-weight: 700; }}
+.risk-diagnostic-only {{ color: var(--color-loss-dark); font-weight: 700; }}
+.risk-funding-assumption {{ color: var(--color-loss); font-weight: 700; }}
 </style>
 </head>
 <body>
-<h1>{html.escape(execution_timing_result_obj.strategy_name_str)} Execution Timing Analyzer</h1>
-<p class="note">
-This report is a research diagnostic. The default execution path is highlighted. MOC and funding labels mark cells
-that need explicit live execution handling before they should be treated as live-clean.
-</p>
-{_format_metric_table_html(execution_timing_result_obj.metric_df)}
+<div class="report-shell">
+<header class="report-header">
+  <div class="report-eyebrow">Execution Timing</div>
+  <h1>{html.escape(execution_timing_result_obj.strategy_name_str)}</h1>
+</header>
+<div class="plate">
+<h2>Entry and Exit Timing Matrix</h2>
+<div class="scroll">{_format_metric_table_html(execution_timing_result_obj.metric_df)}</div>
+<p class="metric-context">A research diagnostic. The default execution path is highlighted.
+MOC and funding labels mark cells that need explicit live execution handling before they
+should be treated as live-clean.</p>
+</div>
+</div>
 </body>
 </html>"""
-    (output_path / "report.html").write_text(html_str, encoding="utf-8")
-    return output_path
 
 
 class ExecutionTimingAnalyzer:

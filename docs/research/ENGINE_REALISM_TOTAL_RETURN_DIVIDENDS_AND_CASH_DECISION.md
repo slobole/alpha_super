@@ -22,7 +22,7 @@ The preliminary Codex position is:
 
 - Never use `TOTALRETURN` prices as order-fill prices or position marks.
 - Keep a non-total-return execution basis. The current engine uses Norgate `CAPITALSPECIAL`, but this is an adjusted price proxy, not literally the historical exchange quote.
-- Add explicit dividend events. Keep positive cash at the owner-approved `0%`, and treat negative cash as an invalid state for the current WIRED book.
+- Add explicit dividend events. Keep positive cash at the owner-approved `0%`, and report negative cash as a disclosed diagnostic under the current owner-approved research policy.
 - Do not globally change every signal to `TOTALRETURN`. Choose the signal basis feature by feature and strategy by strategy.
 - Treat Norgate `TOTALRETURN` as a signal or benchmark representation and as a parity check, not as the account ledger.
 - Correct the NDX/SPY benchmark provenance mismatch before relying on benchmark-relative analyzer output.
@@ -500,7 +500,7 @@ The owner-approved policy for the current engine is:
 - Positive cash earns exactly `0%`. This is an intentional pessimistic assumption, not an unmodelled promise of broker parity.
 - No historical broker-rate, threshold, or tier model will be added for positive cash.
 - Cross-strategy comparisons must disclose that this policy penalizes cash-heavy strategies asymmetrically, especially VXN-scaled NDX and the TAA cash sleeves.
-- The current WIRED strategies are not designed to use account-level leverage. Any negative-cash day is therefore an invariant breach and must fail loudly as a probable sizing or execution bug.
+- The current WIRED strategies are not designed to use account-level leverage. Negative-cash days are reported as a known sizing and execution diagnostic, but do not block the current dividend-accounting research.
 - A future strategy that intentionally uses negative cash must introduce and validate a separate financing-cost policy before it can be accepted.
 
 ## 12. Issue register
@@ -509,13 +509,13 @@ The owner-approved policy for the current engine is:
 |---|---|---|---|---|
 | ER-001 | No shared dividend ledger | Long pessimistic; short optimistic | High | Explicit long credit, short debit, and entitlement tests |
 | ER-002 | Positive residual cash earns zero by explicit owner policy | Pessimistic for absolute return; asymmetrically penalizes cash-heavy pods | High for VXN/TAA cash; potentially material for DV2/QPI | Declare `0%` in artifacts and allocation reviews; report or inspect cash exposure when comparing pods |
-| ER-003 | The engine can permit free negative cash even though current WIRED strategies are non-levered | Optimistic if it occurs | High if triggered; expected to be absent | Fail loudly on every negative-cash day; require a separate financing model only for a future intentionally leveraged strategy |
+| ER-003 | The engine can permit free negative cash even though current WIRED strategies are non-levered | Optimistic if it occurs | High if triggered; expected to be absent | Report day count, episodes, minimum dollars, minimum NAV weight, and average deficit; revisit sizing or financing only if the owner later chooses to close the gap |
 | ER-004 | Price-only signals react to ex-dividend moves | Non-directional strategy change | High for QPI; Medium for DV2/NDX | Feature-specific dividend-neutral signal research |
 | ER-005 | `CAPITALSPECIAL` described as literal trade-as | Audit/provenance error | Medium | Use precise terminology; decide whether true raw corporate-action replay is required |
 | ER-006 | NDX SPY benchmark data and metadata disagree or are undeclared | Benchmark comparison unreliable | Medium to High | Load separate SPY price and SPY TR roles; assert provenance |
 | ER-007 | Incubation omits events that live IBKR NetLiq includes | Systematic reference drift | High | Add the dividend ledger and declare actual broker cash interest as expected policy-driven drift from the `0%` reference |
 | ER-008 | Saved artifacts omit accounting policy metadata | Results can be misinterpreted | Medium | Persist signal, execution, dividend, interest, and tax contracts |
-| ER-009 | Ordinary-dividend and cash-policy assumptions were not previously explicit in `ASSUMPTIONS_AND_GAPS.md` | Hidden known gap | Medium | Record the owner-approved zero-positive-cash policy and the negative-cash invariant in the formal register |
+| ER-009 | Ordinary-dividend and cash-policy assumptions were not previously explicit in `ASSUMPTIONS_AND_GAPS.md` | Hidden known gap | Medium | Record the owner-approved zero-positive-cash policy and negative-cash diagnostic contract in the formal register |
 
 ## 13. Preliminary Codex verdict
 
@@ -535,7 +535,7 @@ For phase 1, use prior-entitlement-close positions and recognize the economic cr
 
 Positive cash earns `0%` by explicit owner decision. This deliberately understates absolute performance and must be disclosed when comparing pods because it penalizes cash-heavy strategies more heavily.
 
-For the current non-levered WIRED book, negative cash is invalid rather than a financing choice. Fail loudly if it occurs. Add a financing-cost model only when a future strategy is intentionally authorized to use account-level leverage.
+For the current non-levered WIRED book, negative cash remains an optimistic free-financing gap. Report it explicitly without blocking the current research. Add a financing-cost model only when the owner chooses to close this gap or a future strategy is intentionally authorized to use account-level leverage.
 
 Do not double-charge leveraged ETFs for leverage already embedded in their NAV.
 
@@ -567,7 +567,7 @@ If the joint verdict accepts the direction, the lowest-risk sequence is:
 2. Add a shadow dividend ledger and reconciliation diagnostics without changing saved headline equity.
 3. Validate entitlement timing, long/short signs, and CS-plus-dividend parity against Norgate TR.
 4. Activate corrected equity under a versioned engine/accounting contract.
-5. Persist the intentional `0%` positive-cash policy and add a fail-loud negative-cash invariant; do not add a positive-cash rate model.
+5. Persist the intentional `0%` positive-cash policy and the negative-cash diagnostic contract; do not add a positive-cash rate model.
 6. Extend incubation and its cash-ledger schema to non-order economic events.
 7. Fix benchmark provenance and separate SPY signal/benchmark roles.
 8. Run controlled signal-basis variants; do not mutate WIRED signals in place.
@@ -587,7 +587,7 @@ A corrected implementation should not be accepted until all of these are demonst
 - No future dividend information enters a historical signal.
 - No dividend is counted both in a price series and in the ledger.
 - Positive cash earns exactly `0%`, and saved artifacts identify this as an intentional pessimistic policy.
-- Any negative-cash day in a current WIRED run fails loudly.
+- Every current WIRED run reports negative-cash day count, episodes, minimum dollars, minimum NAV weight, and average deficit without blocking the research run.
 - TAA and VXN residual cash receive the same zero-return treatment, and cross-pod allocation reviews disclose the asymmetric penalty.
 - Leveraged ETF financing is not double-counted.
 - NDX has separate, correctly labelled SPY regime and SPY benchmark series.
@@ -643,7 +643,7 @@ Claude should answer each question directly:
 | Dividend accounting | Explicit long credit and short debit | AGREE. Gross amount computed first, with a configurable withholding rate applied as policy (see Claude answers, Q3) | AGREED; owner sign-off pending |
 | Dividend timing | Ex-date economic event first; receivable/pay-date later | AGREE (Model A first). Norgate entitlement-session stamping verified empirically on 2026-07-25: AAPL `Dividend` 0.205 on 2020-08-06 (ex 2020-08-07), SPY 1.3392 on 2020-09-17 (ex 2020-09-18) | AGREED; owner sign-off pending |
 | Positive cash | Explicit policy; zero allowed if declared | AGREE. Zero is acceptable as a declared pessimistic mode; materiality is highest for VXN-scaled and TAA cash sleeves | OWNER DECISION: `0%` by design; no broker-rate model; disclose the asymmetric cross-strategy penalty |
-| Negative cash | Must never remain an invisible free-financing path | AGREE that every negative-cash episode must be loud because no WIRED strategy is meant to lever | OWNER DECISION: invalid for the current WIRED book; fail loudly; defer financing-rate modeling until an intentionally leveraged strategy exists |
+| Negative cash | Must never remain an invisible free-financing path | AGREE that every negative-cash episode must be visible because no WIRED strategy is meant to lever | OWNER DECISION: report the defined diagnostics without blocking current research; defer sizing and financing changes |
 | Signals | Feature-specific; no global TR switch | AGREE. Controlled A/B variants only; strongest candidate is NDX cross-sectional momentum; IBS stays on traded OHLC; VIX/VXN stay observed levels | AGREED; owner sign-off pending |
 | TAA TR signals | Defensible existing exception, doctrine must be clarified | AGREE retain. Return-space TR signal formation is causal; amend `CLAUDE.md` to state the precise rule (TR allowed for return-space signals and benchmarks; never for fills, marks, or level/scale-sensitive features) | AGREED; owner sign-off pending |
 | NDX benchmark provenance | Must be corrected | AGREE. Confirmed defect: `strategy_mo_atr_normalized_ndx.py:916` and the VXN variant `:409` stamp `TOTALRETURN` while the loader fetched SPY with `benchmarks=[]`, i.e. `CAPITALSPECIAL`. Fix early — it is small and independent | AGREED; owner sign-off pending |
@@ -720,7 +720,7 @@ Claude should answer each question directly:
 4. **Which NDX features get economic returns?** Only cross-sectional momentum is a strong candidate, because its hypothesis is relative investor wealth. ATR should remain a traded-price range measure (a mechanical ex-dividend gap is not volatility, but ordinary NDX dividends are small relative to ATR20; test a dividend-neutral variant before adopting it). Stock SMA100 and SPY SMA200 should stay price-based initially — changing a regime filter's basis changes regime dates, which is a strategy redefinition, not a correction. All of this via controlled A/B runs; never mutate the WIRED signal in place.
 5. **QPI/DV2 ex-dividend neutralization?** Compute short-horizon returns as dividend-neutral returns: `r = (close_t + dividend_known_at_t) / close_{t-1} - 1`, using the entitlement-aligned `Dividend` field (causally safe: Norgate stamps it at the entitlement session, after public declaration). For level-based indicators (RSI2, DV2, SMA200) build a *causal forward-compounded economic close index* anchored at the strategy start — never a globally back-adjusted series, whose scale embeds future adjustment factors. IBS stays on raw traded OHLC; it measures location in the actual traded range. All variants are separate research strategies until validated.
 6. **TAA TR signals despite `CLAUDE.md`?** Retain them. Return-space signals from a TR series over past windows use only adjustment factors from dividends that occurred inside those past windows — causal. The `CLAUDE.md:53` rule exists to block forward-looking bias in *level/scale-sensitive* usage of back-adjusted stock series and to keep fills honest. Resolution: amend the doctrine to the precise rule — `TOTALRETURN` is permitted for return-space signal formation and benchmarks, and forbidden for fills, marks, stops/limits, and any level- or scale-sensitive feature — rather than forcing TAA back to price-return signals, which would change a WIRED strategy's meaning.
-7. **Zero positive-cash interest acceptable? Minimum negative-cash model?** Zero is acceptable only as a *declared* pessimistic mode, and the declaration must note materiality: near-zero drag over 2009-2021, but on the order of 1-3%/yr of understatement for a pod holding 25-75% cash during 2022-2025 rate regimes. The recommended default is a dated benchmark-rate series (e.g. daily fed funds or DTB3) minus a broker haircut, applied to positive settled cash above a threshold. Minimum negative-cash model: benchmark rate plus a spread (IBKR-style ~1.5%) charged daily on negative settled cash — and since no WIRED strategy is designed to lever, any negative-cash day should additionally emit a loud diagnostic, because it signals a sizing bug, not a financing choice.
+7. **Zero positive-cash interest acceptable? Minimum negative-cash model?** Zero is acceptable only as a *declared* pessimistic mode, and the declaration must note materiality: near-zero drag over 2009-2021, but on the order of 1-3%/yr of understatement for a pod holding 25-75% cash during 2022-2025 rate regimes. The recommended default is a dated benchmark-rate series (e.g. daily fed funds or DTB3) minus a broker haircut, applied to positive settled cash above a threshold. Minimum negative-cash model: benchmark rate plus a spread (IBKR-style ~1.5%) charged daily on negative settled cash. This was Claude's reviewer recommendation; the later owner amendment supersedes it for the current research and requires diagnostics only.
 8. **Label BENCH artifacts `price-return ledger`?** Yes, immediately. It costs nothing, changes no numbers, and converts a hidden assumption into a declared one — exactly the fail-loud doctrine.
 9. **NDX provenance fix a prerequisite?** Yes, for any *benchmark-relative* verdict (alpha, relative drawdown, analyzer comparisons). The strategy's own equity curve is unaffected, so absolute-return conclusions stand. This is also the item I would fix first (see amendment 1).
 10. **Does the phased order minimize parity risk?** Broadly yes. Three changes: pull the provenance fix forward (amendment 1); fold the snapshot `Dividend` contract into step 1 (amendment 2); and treat step 3's parity validation as the hard gate for everything after it — no corrected-equity activation (step 4) until CS + dividends reproduces TR buy-and-hold wealth within the documented tolerance on a multi-symbol, multi-year sample including split-plus-dividend overlaps (the AAPL 2020-08-06/07 window is a good canonical test case, since it has a dividend two days after a 4:1 split).
@@ -734,7 +734,7 @@ Claude should answer each question directly:
 - Positive cash earns `0%` in research, backtests, and incubation. This is an intentional pessimistic assumption.
 - No positive-cash broker-rate, threshold, or tier model is requested.
 - The owner accepts that this policy is not neutral when comparing pods: it penalizes cash-heavy strategies such as VXN-scaled NDX and TAA more than fully invested strategies.
-- Current WIRED strategies are not permitted to use account-level leverage. Any negative-cash day must fail loudly as a likely sizing or execution defect.
+- Current WIRED strategies are not intended to use account-level leverage. Negative cash is reported through the defined diagnostics and does not block the current dividend-accounting research.
 - Financing-rate modeling is deferred until a future strategy is intentionally authorized to use negative cash.
 - This decision does not authorize the remaining engine or live implementation.
 
@@ -747,7 +747,7 @@ Claude should answer each question directly:
 - Execution and marks stay on the non-TR `CAPITALSPECIAL` basis, documented as a corporate-action-normalized proxy, never `TOTALRETURN`.
 - Model A dividend events: long credit / short debit recognized on the ex-dividend transition from prior-entitlement-close positions, using Norgate's entitlement-session `Dividend` field (empirically verified convention); no automatic reinvestment; posted exactly once.
 - Withholding is a first-class configurable policy (gross computed first; parity tests at 0; live-first default set to the operator's actual treaty rate after verification against IBKR statements).
-- Positive cash earns `0%` by intentional owner policy. Negative cash is invalid for current WIRED strategies and must fail loudly; financing-rate modeling is required only for a future intentionally leveraged strategy.
+- Positive cash earns `0%` by intentional owner policy. Negative cash is a disclosed diagnostic-only gap for the current research; financing-rate modeling remains deferred.
 - No double-charging of leveraged-ETF internal financing.
 - Accounting contract is versioned; existing artifacts relabeled `price-return ledger` and preserved; corrected baselines regenerated alongside, never overwritten silently.
 
@@ -763,7 +763,7 @@ Claude should answer each question directly:
 - Dividend-aware NDX momentum A/B (momentum only; ATR and SMA unchanged).
 - Dividend-neutral short-horizon return variants for QPI and DV2 as separate research strategies.
 
-**Implementation scope:** Codex's section 14 sequence with Claude's amendments and the owner cash-policy amendment: benchmark-provenance fix moved to immediately after step 1; snapshot validation contract must require the `Dividend` column in step 1; step 3 parity is a hard gate for steps 4+; positive-cash rate modeling is removed; negative cash becomes a fail-loud invariant for current WIRED strategies.
+**Implementation scope:** Codex's section 14 sequence with Claude's amendments and the owner cash-policy amendment: benchmark-provenance fix moved to immediately after step 1; snapshot validation contract must require the `Dividend` column in step 1; step 3 parity is a hard gate for steps 4+; positive-cash rate modeling is removed; negative cash remains a reported, non-blocking gap for the current research.
 
 **Deployment gate:** All section 15 acceptance tests pass; all WIRED analyzer artifacts regenerated and old-vs-corrected compared; IBKR position/dividend reconciliation demonstrated; any NetLiq difference caused by actual broker cash interest is explicitly labeled as expected drift from the `0%` reference policy.
 
@@ -803,3 +803,14 @@ Not activated in Phase 1:
 - no financing-rate model;
 - no corrected-equity baseline replacement;
 - no live order, sizing, fill, or reconciliation change.
+
+### Owner amendment - negative cash diagnostics - 2026-07-25
+
+The owner has deferred cash-constrained sizing and negative-cash financing.
+For the current dividend-accounting research, negative cash is therefore a
+disclosed diagnostic rather than a blocking gate. Reports must include its day
+count, episode count, minimum dollar balance, minimum NAV weight, and average
+deficit. Positive cash continues to earn the intentional `0%`.
+
+This amendment does not change LIVE, VPS, release YAML, order sizing, or the
+existing engine.
