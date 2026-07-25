@@ -276,6 +276,121 @@ def get_signature_palette_dict() -> dict[str, object]:
     return _copy_palette_dict(SIGNATURE_PALETTE_DICT)
 
 
+def build_analyzer_report_css() -> str:
+    """Signature CSS plus a mapping for the analyzers' own class names.
+
+    Capacity and risk each grew a private design system — panels, tiles, cards,
+    verdict rows — before the signature existed. Rewriting their markup would
+    be a large change to working research code for no analytical gain, so this
+    maps those class names onto the active palette instead: the pages inherit
+    the theme, and their builders keep emitting exactly what they emit today.
+    """
+    palette_dict = SIGNATURE_PALETTE_DICT
+    return build_report_css() + f'''
+/* Shared containers */
+main, .wrap {{
+    max-width: 1000px;
+    margin: 0 auto;
+}}
+.panel, .tile, .verdict-panel, .chart-panel {{
+    background: var(--color-panel);
+    border: 1px solid var(--color-border);
+    border-radius: 0;
+    box-shadow: none;
+    padding: 14px 16px;
+    margin: 14px 0;
+}}
+.panel > h2:first-child, .verdict-panel > .verdict-title {{
+    margin-top: 0;
+}}
+.read-first {{
+    border-left: 3px solid var(--color-ink);
+}}
+/* Metric tiles reuse the headline grammar */
+.cards, .tile-grid {{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 14px 24px;
+    margin: 16px 0 20px;
+    padding: 16px 0 18px;
+    border-top: 1.5px solid var(--color-ink);
+    border-bottom: 1px solid var(--color-border);
+}}
+.card, .tile {{
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+}}
+.card b, .tile-value {{
+    font-family: var(--font-figure);
+    display: block;
+    font-size: 1.35rem;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    margin-top: 6px;
+}}
+.tile-label {{
+    font-family: var(--font-figure);
+    font-size: 0.62rem;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+}}
+.muted, .meta, .tile-sub, .verdict-text {{
+    color: var(--color-muted);
+}}
+/* Warnings keep their weight: these are the caveats that must not fade out. */
+.status-banner {{
+    background: {blend_hex_color_str(str(palette_dict['page']), str(palette_dict['loss']), 0.12)};
+    border: 1px solid var(--color-loss);
+    border-radius: 0;
+    color: var(--color-loss-dark);
+    padding: 12px 14px;
+    font-weight: 700;
+}}
+.caveat {{
+    background: var(--color-neutral);
+    border: 1px solid var(--color-border);
+    border-left: 3px solid var(--color-loss);
+    border-radius: 0;
+    color: var(--color-ink);
+    padding: 12px 14px;
+}}
+.formula {{
+    font-family: var(--font-figure);
+    background: var(--color-neutral);
+    border: 1px solid var(--color-border);
+    border-radius: 0;
+    padding: 12px;
+}}
+code {{
+    font-family: var(--font-figure);
+    background: var(--color-neutral);
+    border-radius: 0;
+    padding: 1px 4px;
+}}
+.verdict-title, .verdict-label {{
+    font-family: var(--font-figure);
+    color: var(--color-ink);
+}}
+.verdict-value {{
+    font-family: var(--font-figure);
+    font-variant-numeric: tabular-nums;
+    color: var(--color-ink);
+}}
+.verdict-row {{
+    border-bottom: 1px solid var(--color-border);
+}}
+.table-wrap {{
+    overflow-x: auto;
+}}
+a {{
+    color: var(--color-ink);
+}}
+'''
+
+
 def build_bench_theme_css(variant_name_str: str = 'journal') -> str:
     """Map a signature variant onto the Bench control panel's CSS variables.
 

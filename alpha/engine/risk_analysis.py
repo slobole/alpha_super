@@ -30,7 +30,13 @@ from typing import Sequence
 import numpy as np
 import pandas as pd
 
-from alpha.engine.report import build_research_output_path
+from alpha.engine.report import _ACTIVE_REPORT_VARIANT_STR, build_research_output_path
+from alpha.engine.theme import (
+    SIGNATURE_PALETTE_DICT,
+    build_analyzer_report_css,
+    build_report_font_head_html,
+    signature_variant_context,
+)
 
 
 RISK_ANALYSIS_TYPE_STR = "risk_analysis"
@@ -1157,10 +1163,11 @@ def save_risk_analysis_results(
     )
     _write_json_file(output_dir_path / RUN_INFO_FILENAME_STR, _build_run_info_dict(risk_result_obj))
     _write_json_file(output_dir_path / METADATA_FILENAME_STR, _build_metadata_dict(risk_result_obj))
-    (output_dir_path / REPORT_FILENAME_STR).write_text(
-        _build_report_html_str(risk_result_obj),
-        encoding="utf-8",
-    )
+    # Render inside the active signature variant so the analyzer page matches
+    # the reports it sits beside.
+    with signature_variant_context(_ACTIVE_REPORT_VARIANT_STR):
+        report_html_str = _build_report_html_str(risk_result_obj)
+    (output_dir_path / REPORT_FILENAME_STR).write_text(report_html_str, encoding="utf-8")
 
     risk_result_obj.output_dir_path = output_dir_path
     return output_dir_path
@@ -1872,48 +1879,8 @@ def _build_report_html_str(risk_result_obj: RiskAnalysisResult) -> str:
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{strategy_name_html} RiskAnalysis</title>
-<style>
-body {{ font-family: Arial, sans-serif; color: #1d2733; margin: 0; background: #f3f5f7; }}
-.wrap {{ max-width: 1180px; margin: 0 auto; padding: 30px 28px 42px; }}
-h1 {{ margin: 0 0 8px; font-size: 30px; letter-spacing: 0; }}
-h2 {{ margin: 0 0 12px; font-size: 19px; letter-spacing: 0; }}
-h3 {{ margin: 14px 0 8px; font-size: 15px; letter-spacing: 0; }}
-p {{ color: #536170; line-height: 1.45; }}
-.meta {{ color: #536170; margin-bottom: 18px; }}
-.status-banner {{ background: #fdecec; border: 2px solid #c9372c; border-radius: 8px; padding: 13px 15px; margin: 12px 0 18px; color: #7a1f1a; font-size: 14px; font-weight: 700; line-height: 1.45; }}
-.tile-grid {{ display: grid; grid-template-columns: repeat(5, minmax(140px, 1fr)); gap: 10px; margin: 18px 0 22px; }}
-.tile {{ background: #fff; border: 1px solid #d9e0e7; border-radius: 8px; padding: 13px 14px; }}
-.tile-label {{ color: #637184; font-size: 12px; margin-bottom: 6px; }}
-.tile-value {{ font-size: 20px; font-weight: 700; }}
-.tile-sub {{ color: #637184; font-size: 11px; margin-top: 4px; line-height: 1.35; }}
-.caveat {{ background: #fff8e1; border: 1px solid #f0d68c; border-radius: 8px; padding: 12px 14px; margin: 14px 0 18px; color: #5c4a14; font-size: 13px; line-height: 1.45; }}
-.verdict-panel {{ background: #fff; border: 1px solid #d9e0e7; border-left: 5px solid #8590a2; border-radius: 8px; padding: 14px 16px; margin: 14px 0 18px; }}
-.verdict-title {{ font-size: 15px; font-weight: 700; margin: 0 0 10px; color: #1d2733; }}
-.verdict-row {{ display: flex; align-items: baseline; gap: 10px; padding: 7px 0; border-bottom: 1px solid #eef2f6; }}
-.verdict-row:last-of-type {{ border-bottom: none; }}
-.verdict-dot {{ flex: 0 0 auto; width: 11px; height: 11px; border-radius: 50%; margin-top: 3px; }}
-.verdict-label {{ flex: 0 0 130px; font-weight: 700; font-size: 13px; }}
-.verdict-value {{ flex: 0 0 200px; font-size: 13px; color: #334155; }}
-.verdict-text {{ flex: 1 1 auto; font-size: 13px; color: #536170; }}
-.verdict-disclaimer {{ color: #8590a2; font-size: 11px; margin-top: 10px; }}
-.v-green {{ background: #22a06b; }}
-.v-amber {{ background: #f5a524; }}
-.v-red {{ background: #c9372c; }}
-.v-na {{ background: #8590a2; }}
-.subtitle {{ color: #637184; font-size: 12px; margin: -4px 0 12px; }}
-.footnote {{ color: #637184; font-size: 11px; margin-top: 8px; }}
-.footnote sup {{ color: #b42318; font-weight: 700; }}
-.section {{ background: #fff; border: 1px solid #d9e0e7; border-radius: 8px; padding: 20px; margin: 16px 0; }}
-.chart {{ width: 100%; max-width: 1080px; height: auto; display: block; }}
-.legend {{ color: #536170; font-size: 12px; margin-top: 8px; }}
-table {{ border-collapse: collapse; width: 100%; background: #fff; font-size: 13px; }}
-th, td {{ border-bottom: 1px solid #e4e8ee; padding: 9px 10px; text-align: right; vertical-align: top; }}
-th:first-child, td:first-child {{ text-align: left; }}
-th {{ background: #eef2f6; color: #334155; font-weight: 700; }}
-.neg {{ color: #b42318; }}
-.pos {{ color: #067647; }}
-.scroll {{ overflow-x: auto; }}
-@media (max-width: 850px) {{ .tile-grid {{ grid-template-columns: repeat(2, minmax(140px, 1fr)); }} .wrap {{ padding: 20px 14px; }} }}
+{build_report_font_head_html()}
+<style>{build_analyzer_report_css()}
 </style>
 </head>
 <body>
@@ -2143,11 +2110,11 @@ def _return_histogram_svg(
             gridline_html_list.append(
                 f"<line x1=\"{left_float:.1f}\" y1=\"{tick_y_float:.1f}\" "
                 f"x2=\"{left_float + plot_width_float:.1f}\" y2=\"{tick_y_float:.1f}\" "
-                "stroke=\"#e4e8ee\" stroke-width=\"1\" />"
+                "stroke=\"{SIGNATURE_PALETTE_DICT['grid']}\" stroke-width=\"1\" />"
             )
         gridline_html_list.append(
             f"<text x=\"{left_float - 6:.1f}\" y=\"{tick_y_float + 4:.1f}\" "
-            f"fill=\"#536170\" font-size=\"11\" text-anchor=\"end\">{int(round(tick_count_float))}</text>"
+            f"fill=\"{SIGNATURE_PALETTE_DICT['muted']}\" font-size=\"11\" text-anchor=\"end\">{int(round(tick_count_float))}</text>"
         )
 
     # Evenly spaced x-axis ticks across the full return range.
@@ -2165,7 +2132,7 @@ def _return_histogram_svg(
             anchor_str = "end"
         x_tick_html_list.append(
             f"<text x=\"{tick_x_float:.1f}\" y=\"{axis_y_float + 16:.1f}\" "
-            f"fill=\"#536170\" font-size=\"11\" text-anchor=\"{anchor_str}\">{_format_percent(tick_return_float)}</text>"
+            f"fill=\"{SIGNATURE_PALETTE_DICT['muted']}\" font-size=\"11\" text-anchor=\"{anchor_str}\">{_format_percent(tick_return_float)}</text>"
         )
 
     bar_html_list = []
@@ -2178,7 +2145,7 @@ def _return_histogram_svg(
         y_float = _scale_float(count_float, 0.0, y_max_float, axis_y_float, top_float)
         bar_width_float = max(1.0, x2_float - x_float - 1.0)
         bar_height_float = axis_y_float - y_float
-        fill_str = "#1f7a8c" if float(row_ser["bin_mid_float"]) >= 0.0 else "#b84a4a"
+        fill_str = str(SIGNATURE_PALETTE_DICT['overlay_cycle'][4]) if float(row_ser["bin_mid_float"]) >= 0.0 else str(SIGNATURE_PALETTE_DICT['loss'])
         bar_html_list.append(
             f"<rect x=\"{x_float:.2f}\" y=\"{y_float:.2f}\" width=\"{bar_width_float:.2f}\" height=\"{bar_height_float:.2f}\" fill=\"{fill_str}\" opacity=\"0.82\" />"
         )
@@ -2193,7 +2160,7 @@ def _return_histogram_svg(
         )
         reference_line_html_list.append(
             f"<line x1=\"{mean_x_float:.1f}\" y1=\"{top_float:.1f}\" x2=\"{mean_x_float:.1f}\" "
-            f"y2=\"{axis_y_float:.1f}\" stroke=\"#1d4ed8\" stroke-width=\"2\" />"
+            f"y2=\"{axis_y_float:.1f}\" stroke=\"{SIGNATURE_PALETTE_DICT['overlay_cycle'][0]}\" stroke-width=\"2\" />"
         )
     median_value_float = _json_float(median_float)
     if median_value_float is not None:
@@ -2202,35 +2169,35 @@ def _return_histogram_svg(
         )
         reference_line_html_list.append(
             f"<line x1=\"{median_x_float:.1f}\" y1=\"{top_float:.1f}\" x2=\"{median_x_float:.1f}\" "
-            f"y2=\"{axis_y_float:.1f}\" stroke=\"#7c3aed\" stroke-width=\"2\" stroke-dasharray=\"5 3\" />"
+            f"y2=\"{axis_y_float:.1f}\" stroke=\"{SIGNATURE_PALETTE_DICT['overlay_cycle'][5]}\" stroke-width=\"2\" stroke-dasharray=\"5 3\" />"
         )
 
     legend_y_float = top_float + 6.0
     legend_x_float = left_float + 10.0
     legend_html_list = [
-        f"<line x1=\"{legend_x_float:.1f}\" y1=\"{legend_y_float:.1f}\" x2=\"{legend_x_float + 18:.1f}\" y2=\"{legend_y_float:.1f}\" stroke=\"#1d4ed8\" stroke-width=\"2\" />",
-        f"<text x=\"{legend_x_float + 24:.1f}\" y=\"{legend_y_float + 4:.1f}\" fill=\"#536170\" font-size=\"11\">mean</text>",
-        f"<line x1=\"{legend_x_float + 70:.1f}\" y1=\"{legend_y_float:.1f}\" x2=\"{legend_x_float + 88:.1f}\" y2=\"{legend_y_float:.1f}\" stroke=\"#7c3aed\" stroke-width=\"2\" stroke-dasharray=\"5 3\" />",
-        f"<text x=\"{legend_x_float + 94:.1f}\" y=\"{legend_y_float + 4:.1f}\" fill=\"#536170\" font-size=\"11\">median</text>",
-        f"<line x1=\"{legend_x_float + 150:.1f}\" y1=\"{legend_y_float:.1f}\" x2=\"{legend_x_float + 168:.1f}\" y2=\"{legend_y_float:.1f}\" stroke=\"#111827\" stroke-width=\"1\" stroke-dasharray=\"4 4\" />",
-        f"<text x=\"{legend_x_float + 174:.1f}\" y=\"{legend_y_float + 4:.1f}\" fill=\"#536170\" font-size=\"11\">zero</text>",
+        f"<line x1=\"{legend_x_float:.1f}\" y1=\"{legend_y_float:.1f}\" x2=\"{legend_x_float + 18:.1f}\" y2=\"{legend_y_float:.1f}\" stroke=\"{SIGNATURE_PALETTE_DICT['overlay_cycle'][0]}\" stroke-width=\"2\" />",
+        f"<text x=\"{legend_x_float + 24:.1f}\" y=\"{legend_y_float + 4:.1f}\" fill=\"{SIGNATURE_PALETTE_DICT['muted']}\" font-size=\"11\">mean</text>",
+        f"<line x1=\"{legend_x_float + 70:.1f}\" y1=\"{legend_y_float:.1f}\" x2=\"{legend_x_float + 88:.1f}\" y2=\"{legend_y_float:.1f}\" stroke=\"{SIGNATURE_PALETTE_DICT['overlay_cycle'][5]}\" stroke-width=\"2\" stroke-dasharray=\"5 3\" />",
+        f"<text x=\"{legend_x_float + 94:.1f}\" y=\"{legend_y_float + 4:.1f}\" fill=\"{SIGNATURE_PALETTE_DICT['muted']}\" font-size=\"11\">median</text>",
+        f"<line x1=\"{legend_x_float + 150:.1f}\" y1=\"{legend_y_float:.1f}\" x2=\"{legend_x_float + 168:.1f}\" y2=\"{legend_y_float:.1f}\" stroke=\"{SIGNATURE_PALETTE_DICT['ink']}\" stroke-width=\"1\" stroke-dasharray=\"4 4\" />",
+        f"<text x=\"{legend_x_float + 174:.1f}\" y=\"{legend_y_float + 4:.1f}\" fill=\"{SIGNATURE_PALETTE_DICT['muted']}\" font-size=\"11\">zero</text>",
     ]
 
     y_axis_title_x_float = 18.0
     y_axis_title_y_float = top_float + plot_height_float / 2.0
     return (
         f"<svg class=\"chart\" viewBox=\"0 0 {width_float:.0f} {height_float:.0f}\" role=\"img\" aria-label=\"Returns histogram\">"
-        f"<rect x=\"0\" y=\"0\" width=\"{width_float:.0f}\" height=\"{height_float:.0f}\" fill=\"#ffffff\" />"
+        f"<rect x=\"0\" y=\"0\" width=\"{width_float:.0f}\" height=\"{height_float:.0f}\" fill=\"{SIGNATURE_PALETTE_DICT['page']}\" />"
         + "".join(gridline_html_list)
-        + f"<line x1=\"{left_float:.1f}\" y1=\"{axis_y_float:.1f}\" x2=\"{left_float + plot_width_float:.1f}\" y2=\"{axis_y_float:.1f}\" stroke=\"#8291a3\" stroke-width=\"1\" />"
-        + f"<line x1=\"{left_float:.1f}\" y1=\"{top_float:.1f}\" x2=\"{left_float:.1f}\" y2=\"{axis_y_float:.1f}\" stroke=\"#8291a3\" stroke-width=\"1\" />"
+        + f"<line x1=\"{left_float:.1f}\" y1=\"{axis_y_float:.1f}\" x2=\"{left_float + plot_width_float:.1f}\" y2=\"{axis_y_float:.1f}\" stroke=\"{SIGNATURE_PALETTE_DICT['muted']}\" stroke-width=\"1\" />"
+        + f"<line x1=\"{left_float:.1f}\" y1=\"{top_float:.1f}\" x2=\"{left_float:.1f}\" y2=\"{axis_y_float:.1f}\" stroke=\"{SIGNATURE_PALETTE_DICT['muted']}\" stroke-width=\"1\" />"
         + "".join(bar_html_list)
-        + f"<line x1=\"{zero_x_float:.1f}\" y1=\"{top_float:.1f}\" x2=\"{zero_x_float:.1f}\" y2=\"{axis_y_float:.1f}\" stroke=\"#111827\" stroke-width=\"1\" stroke-dasharray=\"4 4\" />"
+        + f"<line x1=\"{zero_x_float:.1f}\" y1=\"{top_float:.1f}\" x2=\"{zero_x_float:.1f}\" y2=\"{axis_y_float:.1f}\" stroke=\"{SIGNATURE_PALETTE_DICT['ink']}\" stroke-width=\"1\" stroke-dasharray=\"4 4\" />"
         + "".join(reference_line_html_list)
         + "".join(x_tick_html_list)
         + "".join(legend_html_list)
-        + f"<text x=\"{left_float + plot_width_float / 2.0:.1f}\" y=\"{height_float - 8:.1f}\" fill=\"#334155\" font-size=\"12\" text-anchor=\"middle\">Daily return</text>"
-        + f"<text x=\"{y_axis_title_x_float:.1f}\" y=\"{y_axis_title_y_float:.1f}\" fill=\"#334155\" font-size=\"12\" text-anchor=\"middle\" transform=\"rotate(-90 {y_axis_title_x_float:.1f} {y_axis_title_y_float:.1f})\">Count of days</text>"
+        + f"<text x=\"{left_float + plot_width_float / 2.0:.1f}\" y=\"{height_float - 8:.1f}\" fill=\"{SIGNATURE_PALETTE_DICT['ink']}\" font-size=\"12\" text-anchor=\"middle\">Daily return</text>"
+        + f"<text x=\"{y_axis_title_x_float:.1f}\" y=\"{y_axis_title_y_float:.1f}\" fill=\"{SIGNATURE_PALETTE_DICT['ink']}\" font-size=\"12\" text-anchor=\"middle\" transform=\"rotate(-90 {y_axis_title_x_float:.1f} {y_axis_title_y_float:.1f})\">Count of days</text>"
         + "</svg>"
     )
 
@@ -2281,11 +2248,11 @@ def _bootstrap_equity_svg(equity_path_df: pd.DataFrame) -> str:
             gridline_html_list.append(
                 f"<line x1=\"{left_float:.1f}\" y1=\"{tick_y_float:.1f}\" "
                 f"x2=\"{left_float + plot_width_float:.1f}\" y2=\"{tick_y_float:.1f}\" "
-                "stroke=\"#e4e8ee\" stroke-width=\"1\" />"
+                "stroke=\"{SIGNATURE_PALETTE_DICT['grid']}\" stroke-width=\"1\" />"
             )
         gridline_html_list.append(
             f"<text x=\"{left_float - 6:.1f}\" y=\"{tick_y_float + 4:.1f}\" "
-            f"fill=\"#536170\" font-size=\"11\" text-anchor=\"end\">{np.exp(tick_log_float):.2f}x</text>"
+            f"fill=\"{SIGNATURE_PALETTE_DICT['muted']}\" font-size=\"11\" text-anchor=\"end\">{np.exp(tick_log_float):.2f}x</text>"
         )
 
     path_html_list = []
@@ -2303,16 +2270,16 @@ def _bootstrap_equity_svg(equity_path_df: pd.DataFrame) -> str:
                 top_float,
                 plot_width_float,
                 plot_height_float,
-                "#7b8794",
+                str(SIGNATURE_PALETTE_DICT['muted']),
                 0.18,
                 1.0,
             )
         )
     overlay_tuple = (
-        ("p05", "#b42318", 0.95, 2.2, "p05"),
-        ("p50", "#111827", 0.95, 2.2, "p50"),
-        ("p95", "#067647", 0.95, 2.2, "p95"),
-        ("observed", "#1d4ed8", 1.0, 2.4, "observed"),
+        ("p05", str(SIGNATURE_PALETTE_DICT['loss_dark']), 0.95, 2.2, "p05"),
+        ("p50", str(SIGNATURE_PALETTE_DICT['ink']), 0.95, 2.2, "p50"),
+        ("p95", str(SIGNATURE_PALETTE_DICT['profit_dark']), 0.95, 2.2, "p95"),
+        ("observed", str(SIGNATURE_PALETTE_DICT['overlay_cycle'][0]), 1.0, 2.4, "observed"),
     )
     for path_kind_str, stroke_str, opacity_float, stroke_width_float, _label_str in overlay_tuple:
         path_df = equity_path_df[equity_path_df["path_kind_str"] == path_kind_str]
@@ -2341,7 +2308,7 @@ def _bootstrap_equity_svg(equity_path_df: pd.DataFrame) -> str:
     legend_html_list = [
         f"<rect x=\"{legend_x_float:.1f}\" y=\"{legend_y_float:.1f}\" "
         f"width=\"{legend_box_width_float:.1f}\" height=\"{legend_box_height_float:.1f}\" "
-        "fill=\"#ffffff\" fill-opacity=\"0.92\" stroke=\"#d9e0e7\" stroke-width=\"1\" rx=\"4\" />"
+        "fill=\"{SIGNATURE_PALETTE_DICT['page']}\" fill-opacity=\"0.92\" stroke=\"{SIGNATURE_PALETTE_DICT['border']}\" stroke-width=\"1\" rx=\"4\" />"
     ]
     for legend_idx_int, (_path_kind_str, stroke_str, _opacity_float, _stroke_width_float, label_str) in enumerate(overlay_tuple):
         row_y_float = legend_y_float + 14.0 + legend_idx_int * 16.0
@@ -2352,22 +2319,22 @@ def _bootstrap_equity_svg(equity_path_df: pd.DataFrame) -> str:
         )
         legend_html_list.append(
             f"<text x=\"{legend_x_float + 40.0:.1f}\" y=\"{row_y_float:.1f}\" "
-            f"fill=\"#334155\" font-size=\"11\">{html.escape(label_str)}</text>"
+            f"fill=\"{SIGNATURE_PALETTE_DICT['ink']}\" font-size=\"11\">{html.escape(label_str)}</text>"
         )
 
     y_axis_title_x_float = 18.0
     y_axis_title_y_float = top_float + plot_height_float / 2.0
     return (
         f"<svg class=\"chart\" viewBox=\"0 0 {width_float:.0f} {height_float:.0f}\" role=\"img\" aria-label=\"Monte Carlo equity paths\">"
-        f"<rect x=\"0\" y=\"0\" width=\"{width_float:.0f}\" height=\"{height_float:.0f}\" fill=\"#ffffff\" />"
+        f"<rect x=\"0\" y=\"0\" width=\"{width_float:.0f}\" height=\"{height_float:.0f}\" fill=\"{SIGNATURE_PALETTE_DICT['page']}\" />"
         + "".join(gridline_html_list)
-        + f"<line x1=\"{left_float:.1f}\" y1=\"{axis_y_float:.1f}\" x2=\"{left_float + plot_width_float:.1f}\" y2=\"{axis_y_float:.1f}\" stroke=\"#8291a3\" stroke-width=\"1\" />"
-        + f"<line x1=\"{left_float:.1f}\" y1=\"{top_float:.1f}\" x2=\"{left_float:.1f}\" y2=\"{axis_y_float:.1f}\" stroke=\"#8291a3\" stroke-width=\"1\" />"
+        + f"<line x1=\"{left_float:.1f}\" y1=\"{axis_y_float:.1f}\" x2=\"{left_float + plot_width_float:.1f}\" y2=\"{axis_y_float:.1f}\" stroke=\"{SIGNATURE_PALETTE_DICT['muted']}\" stroke-width=\"1\" />"
+        + f"<line x1=\"{left_float:.1f}\" y1=\"{top_float:.1f}\" x2=\"{left_float:.1f}\" y2=\"{axis_y_float:.1f}\" stroke=\"{SIGNATURE_PALETTE_DICT['muted']}\" stroke-width=\"1\" />"
         + "".join(path_html_list)
-        + f"<text x=\"{left_float:.1f}\" y=\"{axis_y_float + 16:.1f}\" fill=\"#536170\" font-size=\"11\">0</text>"
-        + f"<text x=\"{left_float + plot_width_float:.1f}\" y=\"{axis_y_float + 16:.1f}\" fill=\"#536170\" font-size=\"11\" text-anchor=\"end\">{int(x_max_float)} days</text>"
-        + f"<text x=\"{left_float + plot_width_float / 2.0:.1f}\" y=\"{height_float - 8:.1f}\" fill=\"#334155\" font-size=\"12\" text-anchor=\"middle\">Days from start</text>"
-        + f"<text x=\"{y_axis_title_x_float:.1f}\" y=\"{y_axis_title_y_float:.1f}\" fill=\"#334155\" font-size=\"12\" text-anchor=\"middle\" transform=\"rotate(-90 {y_axis_title_x_float:.1f} {y_axis_title_y_float:.1f})\">Equity multiple (log)</text>"
+        + f"<text x=\"{left_float:.1f}\" y=\"{axis_y_float + 16:.1f}\" fill=\"{SIGNATURE_PALETTE_DICT['muted']}\" font-size=\"11\">0</text>"
+        + f"<text x=\"{left_float + plot_width_float:.1f}\" y=\"{axis_y_float + 16:.1f}\" fill=\"{SIGNATURE_PALETTE_DICT['muted']}\" font-size=\"11\" text-anchor=\"end\">{int(x_max_float)} days</text>"
+        + f"<text x=\"{left_float + plot_width_float / 2.0:.1f}\" y=\"{height_float - 8:.1f}\" fill=\"{SIGNATURE_PALETTE_DICT['ink']}\" font-size=\"12\" text-anchor=\"middle\">Days from start</text>"
+        + f"<text x=\"{y_axis_title_x_float:.1f}\" y=\"{y_axis_title_y_float:.1f}\" fill=\"{SIGNATURE_PALETTE_DICT['ink']}\" font-size=\"12\" text-anchor=\"middle\" transform=\"rotate(-90 {y_axis_title_x_float:.1f} {y_axis_title_y_float:.1f})\">Equity multiple (log)</text>"
         + "".join(legend_html_list)
         + "</svg>"
     )

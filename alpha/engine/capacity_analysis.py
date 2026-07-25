@@ -16,7 +16,13 @@ import json
 import numpy as np
 import pandas as pd
 
-from alpha.engine.report import build_research_output_path
+from alpha.engine.report import _ACTIVE_REPORT_VARIANT_STR, build_research_output_path
+from alpha.engine.theme import (
+    SIGNATURE_PALETTE_DICT,
+    build_analyzer_report_css,
+    build_report_font_head_html,
+    signature_variant_context,
+)
 from alpha.engine.strategy import Strategy
 
 
@@ -438,10 +444,11 @@ def save_capacity_study_results(
             ],
         },
     )
-    (output_dir_path / REPORT_FILENAME_STR).write_text(
-        _build_report_html_str(study_result_obj),
-        encoding="utf-8",
-    )
+    # Render inside the active signature variant so the analyzer page matches
+    # the reports it sits beside.
+    with signature_variant_context(_ACTIVE_REPORT_VARIANT_STR):
+        report_html_str = _build_report_html_str(study_result_obj)
+    (output_dir_path / REPORT_FILENAME_STR).write_text(report_html_str, encoding="utf-8")
     study_result_obj.output_dir_path = output_dir_path
     return output_dir_path
 
@@ -1391,9 +1398,9 @@ def _build_report_html_str(study_result_obj: CapacityStudyResult) -> str:
             "not raise the contiguous capacity classification.</p>"
         )
     chart_one_series_list = [
-        ("Baseline Sharpe", "baseline_sharpe_float", "#2563eb"),
-        ("Capacity Sharpe", "central_sharpe_float", "#059669"),
-        ("Stress Sharpe", "stress_sharpe_float", "#dc2626"),
+        ("Baseline Sharpe", "baseline_sharpe_float", str(SIGNATURE_PALETTE_DICT['overlay_cycle'][0])),
+        ("Capacity Sharpe", "central_sharpe_float", str(SIGNATURE_PALETTE_DICT['profit'])),
+        ("Stress Sharpe", "stress_sharpe_float", str(SIGNATURE_PALETTE_DICT['loss'])),
     ]
     performance_chart_str = _line_chart_svg_str(
         curve_df,
@@ -1407,10 +1414,10 @@ def _build_report_html_str(study_result_obj: CapacityStudyResult) -> str:
     liquidity_chart_str = _line_chart_svg_str(
         liquidity_chart_df,
         [
-            ("P95 Order/ADV", "order_adv_p95_float", "#2563eb"),
-            ("P99 Order/ADV", "order_adv_p99_float", "#7c3aed"),
-            ("Soft limit", "soft_limit_chart_float", "#d97706"),
-            ("Hard limit", "hard_limit_chart_float", "#dc2626"),
+            ("P95 Order/ADV", "order_adv_p95_float", str(SIGNATURE_PALETTE_DICT['overlay_cycle'][0])),
+            ("P99 Order/ADV", "order_adv_p99_float", str(SIGNATURE_PALETTE_DICT['overlay_cycle'][4])),
+            ("Soft limit", "soft_limit_chart_float", str(SIGNATURE_PALETTE_DICT['overlay_cycle'][2])),
+            ("Hard limit", "hard_limit_chart_float", str(SIGNATURE_PALETTE_DICT['loss'])),
         ],
         "Liquidity usage versus AUM",
         percent_axis_bool=True,
@@ -1418,8 +1425,8 @@ def _build_report_html_str(study_result_obj: CapacityStudyResult) -> str:
     breach_chart_str = _line_chart_svg_str(
         curve_df,
         [
-            ("Soft breaches", "soft_breach_share_float", "#d97706"),
-            ("Hard breaches", "hard_breach_share_float", "#dc2626"),
+            ("Soft breaches", "soft_breach_share_float", str(SIGNATURE_PALETTE_DICT['overlay_cycle'][2])),
+            ("Hard breaches", "hard_breach_share_float", str(SIGNATURE_PALETTE_DICT['loss'])),
         ],
         "Share of orders beyond limits",
         percent_axis_bool=True,
@@ -1477,17 +1484,8 @@ def _build_report_html_str(study_result_obj: CapacityStudyResult) -> str:
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CapacityAnalysis - {html.escape(study_result_obj.strategy_name_str)}</title>
-<style>
-:root{{--ink:#172033;--muted:#64748b;--line:#dbe3ef;--paper:#fff;--bg:#f4f7fb;--blue:#2563eb;--green:#059669;--amber:#d97706;--red:#dc2626}}
-*{{box-sizing:border-box}} body{{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 system-ui,-apple-system,Segoe UI,sans-serif}}
-main{{max-width:1180px;margin:0 auto;padding:28px 18px 60px}} h1{{margin:0 0 4px;font-size:32px}} h2{{margin:34px 0 12px;font-size:22px}} h3{{margin:22px 0 8px}} p{{max-width:900px}} .muted{{color:var(--muted)}}
-.panel{{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:20px;margin:14px 0;box-shadow:0 4px 18px rgba(15,23,42,.04)}}
-.read-first{{border-left:5px solid var(--blue)}} .cards{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}}
-.card{{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:16px}} .card b{{display:block;font-size:23px;margin-top:5px}}
-.charts{{display:grid;grid-template-columns:1fr;gap:14px}} svg{{width:100%;height:auto;display:block}} .table-wrap{{overflow:auto}}
-table{{border-collapse:collapse;width:100%;font-size:13px}} th,td{{padding:9px 10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}} th:first-child,td:first-child{{text-align:left}} th{{background:#f8fafc}}
-code{{background:#eef2ff;padding:2px 5px;border-radius:5px}} .formula{{font-family:ui-monospace,Consolas,monospace;background:#f8fafc;border:1px solid var(--line);padding:12px;border-radius:9px;overflow:auto}}
-ul{{padding-left:22px}} a{{color:var(--blue)}} @media(max-width:760px){{.cards{{grid-template-columns:1fr}}}}
+{build_report_font_head_html()}
+<style>{build_analyzer_report_css()}
 </style></head><body><main>
 <h1>CapacityAnalysis</h1><div class="muted">{html.escape(study_result_obj.strategy_name_str)} · Declared execution: {execution_policy_str}</div>
 <section class="panel read-first"><h2>Read this first</h2><p>{html.escape(read_first_str)}</p><p>{html.escape(policy_explanation_str)}</p>{historical_warning_html_str}{non_contiguous_warning_html_str}</section>
@@ -1524,9 +1522,9 @@ def _historical_feasibility_section_html_str(
     performance_chart_str = _line_chart_svg_str(
         full_history_curve_df,
         [
-            ("Baseline Sharpe", "baseline_sharpe_float", "#2563eb"),
-            ("Capacity Sharpe", "central_sharpe_float", "#059669"),
-            ("Stress Sharpe", "stress_sharpe_float", "#dc2626"),
+            ("Baseline Sharpe", "baseline_sharpe_float", str(SIGNATURE_PALETTE_DICT['overlay_cycle'][0])),
+            ("Capacity Sharpe", "central_sharpe_float", str(SIGNATURE_PALETTE_DICT['profit'])),
+            ("Stress Sharpe", "stress_sharpe_float", str(SIGNATURE_PALETTE_DICT['loss'])),
         ],
         "Full-history performance versus AUM",
         percent_axis_bool=False,
@@ -1615,7 +1613,7 @@ def _line_chart_svg_str(
 
     svg_part_list = [
         f'<h3>{html.escape(title_str)}</h3><svg viewBox="0 0 {width_float:.0f} {height_float:.0f}" role="img" aria-label="{html.escape(title_str)}">',
-        '<rect width="100%" height="100%" fill="#ffffff"/>',
+        f'<rect width="100%" height="100%" fill="{SIGNATURE_PALETTE_DICT['page']}"/>',
     ]
     for tick_int in range(5):
         tick_value_float = y_min_float + (y_max_float - y_min_float) * tick_int / 4.0
@@ -1624,13 +1622,13 @@ def _line_chart_svg_str(
             f"{tick_value_float * 100.0:.2f}%" if percent_axis_bool else f"{tick_value_float:.2f}"
         )
         svg_part_list.append(
-            f'<line x1="{left_float}" y1="{tick_y_float:.1f}" x2="{width_float-right_float}" y2="{tick_y_float:.1f}" stroke="#e5e7eb"/>'
-            f'<text x="{left_float-8}" y="{tick_y_float+4:.1f}" text-anchor="end" font-size="11" fill="#64748b">{tick_label_str}</text>'
+            f'<line x1="{left_float}" y1="{tick_y_float:.1f}" x2="{width_float-right_float}" y2="{tick_y_float:.1f}" stroke="{SIGNATURE_PALETTE_DICT['grid']}"/>'
+            f'<text x="{left_float-8}" y="{tick_y_float+4:.1f}" text-anchor="end" font-size="11" fill="{SIGNATURE_PALETTE_DICT['muted']}">{tick_label_str}</text>'
         )
     for index_int, (_, row_ser) in enumerate(curve_df.iterrows()):
         x_value_float = x_float(index_int)
         svg_part_list.append(
-            f'<text x="{x_value_float:.1f}" y="{height_float-25:.1f}" text-anchor="middle" font-size="10" fill="#64748b">{_fmt_compact_dollar_str(row_ser["capital_base_float"])}</text>'
+            f'<text x="{x_value_float:.1f}" y="{height_float-25:.1f}" text-anchor="middle" font-size="10" fill="{SIGNATURE_PALETTE_DICT['muted']}">{_fmt_compact_dollar_str(row_ser["capital_base_float"])}</text>'
         )
     legend_x_float = left_float
     for label_str, column_str, color_str in series_spec_list:
@@ -1649,7 +1647,7 @@ def _line_chart_svg_str(
                 )
         svg_part_list.append(
             f'<line x1="{legend_x_float:.1f}" y1="22" x2="{legend_x_float+18:.1f}" y2="22" stroke="{color_str}" stroke-width="3"/>'
-            f'<text x="{legend_x_float+23:.1f}" y="26" font-size="11" fill="#334155">{html.escape(label_str)}</text>'
+            f'<text x="{legend_x_float+23:.1f}" y="26" font-size="11" fill="{SIGNATURE_PALETTE_DICT['ink']}">{html.escape(label_str)}</text>'
         )
         legend_x_float += 150.0
     svg_part_list.append("</svg>")
@@ -1736,27 +1734,27 @@ def _equity_chart_svg_str(equity_curve_df: pd.DataFrame, title_str: str) -> str:
         )
 
     series_spec_list = [
-        ("Baseline", "baseline_equity_float", "#2563eb"),
-        ("Central", "central_equity_float", "#059669"),
-        ("Stress", "stress_equity_float", "#dc2626"),
+        ("Baseline", "baseline_equity_float", str(SIGNATURE_PALETTE_DICT['overlay_cycle'][0])),
+        ("Central", "central_equity_float", str(SIGNATURE_PALETTE_DICT['profit'])),
+        ("Stress", "stress_equity_float", str(SIGNATURE_PALETTE_DICT['loss'])),
     ]
     svg_part_list = [
         f'<h3>{html.escape(title_str)}</h3><svg viewBox="0 0 {width_float:.0f} {height_float:.0f}" role="img" aria-label="{html.escape(title_str)}">',
-        '<rect width="100%" height="100%" fill="#ffffff"/>',
+        f'<rect width="100%" height="100%" fill="{SIGNATURE_PALETTE_DICT['page']}"/>',
     ]
     for tick_int in range(5):
         tick_value_float = y_min_float + (y_max_float - y_min_float) * tick_int / 4.0
         tick_y_float = y_float(tick_value_float)
         svg_part_list.append(
-            f'<line x1="{left_float}" y1="{tick_y_float:.1f}" x2="{width_float-right_float}" y2="{tick_y_float:.1f}" stroke="#e2e8f0"/>'
-            f'<text x="{left_float-10}" y="{tick_y_float+4:.1f}" text-anchor="end" font-size="10" fill="#64748b">{tick_value_float:.2f}</text>'
+            f'<line x1="{left_float}" y1="{tick_y_float:.1f}" x2="{width_float-right_float}" y2="{tick_y_float:.1f}" stroke="{SIGNATURE_PALETTE_DICT['grid']}"/>'
+            f'<text x="{left_float-10}" y="{tick_y_float+4:.1f}" text-anchor="end" font-size="10" fill="{SIGNATURE_PALETTE_DICT['muted']}">{tick_value_float:.2f}</text>'
         )
     for tick_int in range(5):
         row_int = round((len(numeric_df) - 1) * tick_int / 4.0)
         tick_x_float = x_float(row_int)
         date_str = str(pd.Timestamp(numeric_df.index[row_int]).date())
         svg_part_list.append(
-            f'<text x="{tick_x_float:.1f}" y="{height_float-25:.1f}" text-anchor="middle" font-size="10" fill="#64748b">{date_str}</text>'
+            f'<text x="{tick_x_float:.1f}" y="{height_float-25:.1f}" text-anchor="middle" font-size="10" fill="{SIGNATURE_PALETTE_DICT['muted']}">{date_str}</text>'
         )
     legend_x_float = left_float
     for label_str, column_str, color_str in series_spec_list:
@@ -1772,7 +1770,7 @@ def _equity_chart_svg_str(equity_curve_df: pd.DataFrame, title_str: str) -> str:
             )
         svg_part_list.append(
             f'<line x1="{legend_x_float:.1f}" y1="22" x2="{legend_x_float+18:.1f}" y2="22" stroke="{color_str}" stroke-width="3"/>'
-            f'<text x="{legend_x_float+23:.1f}" y="26" font-size="11" fill="#334155">{label_str}</text>'
+            f'<text x="{legend_x_float+23:.1f}" y="26" font-size="11" fill="{SIGNATURE_PALETTE_DICT['ink']}">{label_str}</text>'
         )
         legend_x_float += 120.0
     svg_part_list.append("</svg>")
