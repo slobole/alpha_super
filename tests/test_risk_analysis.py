@@ -878,3 +878,62 @@ def test_client_horizon_summary_is_empty_without_data():
     from alpha.engine.risk_analysis import _client_horizon_summary_html
 
     assert _client_horizon_summary_html(pd.DataFrame()) == ""
+
+
+def _investor_scenario_fixture_df():
+    return pd.DataFrame([
+        {"scenario_key_str": "observed_daily", "scenario_label_str": "Observed trading day",
+         "evidence_kind_str": "observed", "sample_count_int": 3460,
+         "terminal_return_p25_float": -0.0031, "terminal_return_p75_float": 0.0052,
+         "terminal_return_p05_float": -0.0136, "terminal_loss_probability_float": 0.4315},
+        {"scenario_key_str": "modeled_3y", "scenario_label_str": "Modeled 3-year horizon",
+         "evidence_kind_str": "bootstrap_implied", "sample_count_int": 10000,
+         "terminal_return_p25_float": 0.5798, "terminal_return_p75_float": 1.0586,
+         "terminal_return_p05_float": 0.3151, "terminal_loss_probability_float": 0.0010,
+         "max_drawdown_p05_float": -0.1766, "longest_underwater_days_p95_float": 319.0,
+         "max_drawdown_recovery_days_p50_float": 110.0,
+         "terminal_underwater_probability_float": 0.8446,
+         "deepest_drawdown_unrecovered_probability_float": 0.1336},
+    ])
+
+
+def test_investor_scenario_splits_observed_from_modeled():
+    """Observed rows have no paths, so they must not sit in the path columns.
+
+    Keeping them in one grid left five columns permanently N/A for two of the
+    rows, and the modelled rows had to be read past that hole.
+    """
+    from alpha.engine.risk_analysis import _investor_scenario_table_html
+
+    table_html_str = _investor_scenario_table_html(_investor_scenario_fixture_df())
+    assert "What actually happened" in table_html_str
+    assert "What the bootstrap produced" in table_html_str
+    # Two tables, and the observed one must not carry the path-only headers.
+    observed_html_str = table_html_str[: table_html_str.index("What the bootstrap produced")]
+    assert "Longest underwater" not in observed_html_str
+    assert "Never recovered" not in observed_html_str
+    assert "Periods observed" in observed_html_str
+    assert "3,460" in observed_html_str
+    # The Evidence column is gone: the table a row is in now says what it said.
+    assert "Bootstrap implied" not in table_html_str
+
+
+def test_investor_scenario_labels_do_not_restate_their_heading():
+    from alpha.engine.risk_analysis import _investor_scenario_table_html
+
+    table_html_str = _investor_scenario_table_html(_investor_scenario_fixture_df())
+    assert ">Trading day<" in table_html_str
+    assert ">3 years<" in table_html_str
+    assert "Modeled 3-year horizon" not in table_html_str
+
+
+def test_investor_scenario_label_falls_back_for_an_unknown_key():
+    """A configured horizon set must not produce a blank or mangled label."""
+    from alpha.engine.risk_analysis import _investor_scenario_table_html
+
+    scenario_df = _investor_scenario_fixture_df()
+    scenario_df.loc[1, "scenario_key_str"] = "modeled_7y"
+    assert ">7 years<" in _investor_scenario_table_html(scenario_df)
+
+    scenario_df.loc[1, "scenario_key_str"] = "something_unexpected"
+    assert "Modeled 3-year horizon" in _investor_scenario_table_html(scenario_df)

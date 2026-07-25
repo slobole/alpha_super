@@ -1924,7 +1924,7 @@ Return window: {html.escape(str(summary_dict.get("start_date_str")))} to {html.e
 {_analysis_status_banner_html(risk_result_obj.analysis_context_dict)}
 <div class="section">
 <h2>Investor Scenario Summary</h2>
-<div class="scroll">{_investor_scenario_table_html(risk_result_obj.investor_scenario_df)}</div>
+{_investor_scenario_table_html(risk_result_obj.investor_scenario_df)}
 </div>
 {_verdict_panel_html(summary_dict.get("verdict"))}
 {_summary_tiles_html(summary_dict)}
@@ -2011,23 +2011,42 @@ def _analysis_status_banner_html(analysis_context_dict: dict[str, object]) -> st
 
 
 def _investor_scenario_table_html(investor_scenario_df: pd.DataFrame) -> str:
+    """Split realized history from modelled horizons into two tables.
+
+    They were one ten-column grid, but the observed rows have no paths, so
+    five of those columns were permanently N/A for them and the modelled rows
+    had to be read past that hole. Splitting also drops the Evidence column --
+    which table a row is in now says what the column used to -- and lets each
+    table carry only headers that mean something for its rows, so neither one
+    has to be scrolled sideways to be read.
+    """
     if investor_scenario_df is None or len(investor_scenario_df) == 0:
         return "<p>N/A</p>"
-    header_html_str = (
-        "<tr>"
-        "<th>Scenario</th>"
-        "<th>Evidence</th>"
-        "<th>Typical p25-p75</th>"
-        "<th>Bootstrap p05</th>"
-        "<th>Terminal-loss path share</th>"
-        "<th>Bad max DD p05</th>"
-        "<th>Underwater p95</th>"
-        "<th>Recovery p50*</th>"
-        "<th>Ends below peak</th>"
-        "<th>Last deepest DD unrecovered</th>"
-        "</tr>"
-    )
-    row_html_list = []
+
+    def display_label_str(scenario_key_str: str, scenario_label_str: str) -> str:
+        """Name the period without restating the table's own heading.
+
+        "Modeled 1-year horizon" under a heading that already says these are
+        bootstrap outputs spends its width twice, and the label column is what
+        pushes the table past the reading measure. Derived from the scenario
+        key rather than by trimming the label, so a configured horizon set
+        still reads as prose instead of leaving "1-year" dangling. The stored
+        scenario_label_str is untouched; this is display only.
+        """
+        if scenario_key_str == "observed_daily":
+            return "Trading day"
+        if scenario_key_str == "observed_calendar_month":
+            return "Calendar month"
+        if scenario_key_str == "modeled_21d":
+            return "21 trading days"
+        horizon_match = re.match(r"^modeled_(\d+)y$", scenario_key_str)
+        if horizon_match is not None:
+            year_int = int(horizon_match.group(1))
+            return "1 year" if year_int == 1 else f"{year_int} years"
+        return scenario_label_str
+
+    observed_row_html_list: list[str] = []
+    modeled_row_html_list: list[str] = []
     for _, scenario_ser in investor_scenario_df.iterrows():
         typical_low_str = _format_percent(scenario_ser.get("terminal_return_p25_float"))
         typical_high_str = _format_percent(scenario_ser.get("terminal_return_p75_float"))
@@ -2036,18 +2055,33 @@ def _investor_scenario_table_html(investor_scenario_df: pd.DataFrame) -> str:
             if typical_low_str == "N/A" or typical_high_str == "N/A"
             else f"{typical_low_str} to {typical_high_str}"
         )
-        evidence_label_str = (
-            "Observed"
-            if str(scenario_ser.get("evidence_kind_str")) == "observed"
-            else "Bootstrap implied"
+        label_html_str = html.escape(
+            display_label_str(
+                str(scenario_ser.get("scenario_key_str", "")),
+                str(scenario_ser.get("scenario_label_str", "")),
+            )
         )
-        row_html_list.append(
-            "<tr>"
-            f"<td>{html.escape(str(scenario_ser.get('scenario_label_str', '')))}</td>"
-            f"<td>{html.escape(evidence_label_str)}</td>"
+        shared_cell_html_str = (
             f"<td>{html.escape(typical_range_str)}</td>"
             f"<td>{html.escape(_format_percent(scenario_ser.get('terminal_return_p05_float')))}</td>"
             f"<td>{html.escape(_format_percent(scenario_ser.get('terminal_loss_probability_float')))}</td>"
+        )
+
+        if str(scenario_ser.get("evidence_kind_str")) == "observed":
+            sample_count_obj = scenario_ser.get("sample_count_int")
+            sample_count_str = (
+                f"{int(sample_count_obj):,}" if pd.notna(sample_count_obj) else "N/A"
+            )
+            observed_row_html_list.append(
+                f'<tr><td class="metric">{label_html_str}</td>'
+                f"<td>{html.escape(sample_count_str)}</td>"
+                f"{shared_cell_html_str}</tr>"
+            )
+            continue
+
+        modeled_row_html_list.append(
+            f'<tr><td class="metric">{label_html_str}</td>'
+            f"{shared_cell_html_str}"
             f"<td>{html.escape(_format_percent(scenario_ser.get('max_drawdown_p05_float')))}</td>"
             f"<td>{html.escape(_format_days_str(scenario_ser.get('longest_underwater_days_p95_float')))}</td>"
             f"<td>{html.escape(_format_days_str(scenario_ser.get('max_drawdown_recovery_days_p50_float')))}</td>"
@@ -2055,11 +2089,33 @@ def _investor_scenario_table_html(investor_scenario_df: pd.DataFrame) -> str:
             f"<td>{html.escape(_format_percent(scenario_ser.get('deepest_drawdown_unrecovered_probability_float')))}</td>"
             "</tr>"
         )
-    return (
-        f"<table><thead>{header_html_str}</thead><tbody>{''.join(row_html_list)}</tbody></table>"
-        "<div class=\"footnote\">* Recovery p50 is conditional on recovery of the last occurrence of the deepest drawdown inside the stated horizon. "
-        "Observed daily and calendar-month rows report return distributions only.</div>"
-    )
+
+    section_html_list: list[str] = []
+    if observed_row_html_list:
+        section_html_list.append(
+            "<h3>What actually happened</h3>"
+            '<div class="scroll"><table><thead><tr>'
+            "<th>Period</th><th>Periods observed</th><th>Typical range</th>"
+            "<th>Worst 5%</th><th>Ended down</th>"
+            "</tr></thead><tbody>" + "".join(observed_row_html_list) + "</tbody></table></div>"
+        )
+    if modeled_row_html_list:
+        section_html_list.append(
+            "<h3>What the bootstrap produced</h3>"
+            '<div class="scroll"><table><thead><tr>'
+            "<th>Horizon</th><th>Typical range</th><th>Bad case</th><th>Ended down</th>"
+            "<th>Worst fall</th><th>Longest underwater</th><th>Recovery</th>"
+            "<th>Ended below peak</th><th>Never recovered</th>"
+            "</tr></thead><tbody>" + "".join(modeled_row_html_list) + "</tbody></table></div>"
+            '<div class="footnote">Typical range is p25 to p75; bad case, worst fall and '
+            "worst 5% are p05; longest underwater is p95; recovery is p50. Recovery counts "
+            "only paths whose deepest drawdown recovered inside the horizon -- "
+            '"never recovered" is how often that did not happen, so the two must be read '
+            "together.</div>"
+        )
+    if not section_html_list:
+        return "<p>N/A</p>"
+    return "".join(section_html_list)
 
 
 def _verdict_panel_html(verdict_row_list: object) -> str:
