@@ -2,7 +2,7 @@
 
 **Decision status:** REVIEWED - Codex and Claude positions recorded; the owner-approved cash policy is recorded below; full implementation authorization remains pending
 
-**Implementation status:** Documentation only; no engine, strategy, release, or live behavior changed
+**Implementation status:** Phase 1 provenance/data-contract work and the gross/net research-only dividend shadow studies are complete; no dividend event is active in the engine, releases, or LIVE
 
 **Repository snapshot reviewed:** 2026-07-25
 
@@ -814,3 +814,85 @@ deficit. Positive cash continues to earn the intentional `0%`.
 
 This amendment does not change LIVE, VPS, release YAML, order sizing, or the
 existing engine.
+
+### Full WIRED dividend-ledger A/B - 2026-07-25
+
+The approved gross-parity candidate was run once against the unchanged
+price-return baseline for all seven WIRED strategy modules. This was one
+predefined accounting comparison, not a parameter sweep. Costs, slippage,
+signal definitions, execution timing, universes, and positive-cash return
+remained unchanged. Withholding was `0%` so that this run measures gross
+dividend accounting before any owner-specific tax policy.
+
+| WIRED strategy | Baseline CAGR | Dividend CAGR | Delta | Baseline Sharpe | Dividend Sharpe |
+|---|---:|---:|---:|---:|---:|
+| DV2 | 17.836% | 19.236% | +1.400 pp | 0.911 | 0.969 |
+| QPI | 14.302% | 15.743% | +1.441 pp | 0.944 | 1.026 |
+| TAA BTAL fallback | 22.809% | 23.740% | +0.931 pp | 1.277 | 1.321 |
+| TAA BTAL 1/N | 29.158% | 30.043% | +0.885 pp | 1.219 | 1.249 |
+| TAA linearity 1/N | 11.834% | 12.709% | +0.875 pp | 1.236 | 1.320 |
+| NDX ATR-normalized | 18.922% | 19.493% | +0.571 pp | 1.119 | 1.147 |
+| NDX VXN-scaled | 17.367% | 17.911% | +0.544 pp | 1.194 | 1.226 |
+
+All seven pairs completed with identical pricing inputs, calendars, and stored
+signal diagnostics. DV2 and QPI also retained identical executed
+date/asset/direction skeletons. The five target-sized monthly strategies
+developed small execution-skeleton differences because the credited
+dividends raised NAV and therefore changed integer target-share rounding.
+Examples include an additional one-share rebalance or a tiny target correction
+changing from a two-share sale to a three-share purchase. This is an intended
+accounting consequence, not a signal change, but it means the result is not a
+fixed-quantity attribution.
+
+Negative cash remained the owner-approved non-blocking diagnostic and was
+reported separately for baseline and candidate ledgers. The study did not add
+cash interest, financing charges, a reserve-cash rule, or any
+deployment-budget feature.
+
+Saved artifact:
+`results/research/accounting/wired_dividend_cash_ledger/ab_study/2026-07-25_213011`.
+
+**Research verdict:** Gross dividend omission is material and pessimistic for
+every current long-only WIRED strategy. This gross run established the upper
+accounting bound and justified the owner-approved `25%` withholding run below.
+It did not authorize an engine, LIVE, VPS, release, or reconciliation change.
+
+### Full WIRED net-dividend A/B - 2026-07-25
+
+The same seven baseline/candidate pairs were rerun with the owner-approved
+`25%` withholding rate. Every positive dividend event therefore credited
+`75%` of gross cash; a future short manufactured-dividend event would still
+debit the full gross amount. Positive cash continued to earn `0%`, and negative
+cash remained diagnostic-only.
+
+| WIRED strategy | Baseline CAGR | Net-dividend CAGR | Delta | Baseline Sharpe | Net-dividend Sharpe |
+|---|---:|---:|---:|---:|---:|
+| DV2 | 17.836% | 18.886% | +1.050 pp | 0.911 | 0.955 |
+| QPI | 14.302% | 15.384% | +1.082 pp | 0.944 | 1.005 |
+| TAA BTAL fallback | 22.809% | 23.508% | +0.699 pp | 1.277 | 1.310 |
+| TAA BTAL 1/N | 29.158% | 29.821% | +0.664 pp | 1.219 | 1.241 |
+| TAA linearity 1/N | 11.834% | 12.492% | +0.658 pp | 1.236 | 1.299 |
+| NDX ATR-normalized | 18.922% | 19.350% | +0.429 pp | 1.119 | 1.140 |
+| NDX VXN-scaled | 17.367% | 17.775% | +0.408 pp | 1.194 | 1.218 |
+
+Validation results:
+
+- all seven runs completed;
+- every baseline terminal value exactly matched the prior gross-study baseline;
+- pricing inputs, calendars, and stored signal diagnostics matched within every
+  baseline/candidate pair;
+- `net_dividend_cash / gross_dividend_cash = 0.75` for every current long-only
+  WIRED strategy;
+- every net-dividend CAGR was strictly above its no-dividend baseline and
+  strictly below its gross-dividend counterpart.
+
+Saved artifact:
+`results/research/accounting/wired_dividend_cash_ledger/ab_study/2026-07-25_224817`.
+
+**Net research verdict:** The `25%` withholding candidate is the recommended
+backtest-accounting policy for the current owner context. It materially reduces
+the known pessimistic dividend omission without using gross cash that the
+account does not retain. The next gated step is an engine-only implementation
+under a new accounting-contract version, followed by regeneration and
+comparison of all WIRED analyzers. LIVE, VPS, release YAML, signal definitions,
+order timing, and execution remain out of scope unless separately authorized.
