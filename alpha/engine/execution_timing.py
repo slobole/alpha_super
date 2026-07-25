@@ -39,6 +39,8 @@ from alpha.engine.order import MarketOrder, Order
 from alpha.engine.report import _ACTIVE_REPORT_VARIANT_STR, build_research_output_path
 from alpha.engine.strategy import Strategy
 from alpha.engine.theme import (
+    SIGNATURE_PALETTE_DICT,
+    blend_hex_color_str,
     build_report_css,
     build_report_font_head_html,
     signature_variant_context,
@@ -878,6 +880,134 @@ def save_execution_timing_results(
     return output_path
 
 
+def _timing_matrix_heatmap_html_str(
+    matrix_df: pd.DataFrame,
+    title_str: str,
+    value_format_str: str,
+    higher_is_better_bool: bool,
+    default_entry_timing_str: str,
+    default_exit_timing_str: str,
+) -> str:
+    """Render one entry-by-exit matrix as a shaded grid.
+
+    The flat table forces the reader to scan every row and hold four numbers in
+    their head to answer "which timing is best". The same values laid out on
+    their own axes answer it at a glance — and answer a second question the
+    table cannot: how much timing matters at all. A grid that is one flat shade
+    is a timing-robust strategy; one dark cell beside a light one is a knife
+    edge, which is a robustness finding rather than a formatting preference.
+
+    *** CRITICAL*** Shading is scaled across the whole matrix, so cells are
+    comparable to each other. Scaling per row or column would make a trivial
+    spread look like a decisive one.
+    """
+    if matrix_df is None or len(matrix_df) == 0:
+        return ""
+
+    numeric_value_vec = matrix_df.to_numpy(dtype=float)
+    finite_value_vec = numeric_value_vec[np.isfinite(numeric_value_vec)]
+    if len(finite_value_vec) == 0:
+        return ""
+    low_float = float(finite_value_vec.min())
+    high_float = float(finite_value_vec.max())
+    span_float = high_float - low_float
+
+    header_html_str = "".join(
+        f"<th>{html.escape(str(column_str))}</th>" for column_str in matrix_df.columns
+    )
+    row_html_list: list[str] = []
+    for row_label_str in matrix_df.index:
+        cell_html_list = [f'<td class="metric">{html.escape(str(row_label_str))}</td>']
+        for column_label_str in matrix_df.columns:
+            cell_value_obj = matrix_df.loc[row_label_str, column_label_str]
+            cell_value_float = float(cell_value_obj)
+            if not np.isfinite(cell_value_float):
+                cell_html_list.append('<td style="text-align:center;">—</td>')
+                continue
+            if span_float > 0.0:
+                position_float = (cell_value_float - low_float) / span_float
+            else:
+                position_float = 0.0
+            if not higher_is_better_bool:
+                position_float = 1.0 - position_float
+            background_color_str = blend_hex_color_str(
+                str(SIGNATURE_PALETTE_DICT["page"]),
+                str(SIGNATURE_PALETTE_DICT["profit"]),
+                position_float * 0.55,
+            )
+            is_default_bool = (
+                str(row_label_str) == default_entry_timing_str
+                and str(column_label_str) == default_exit_timing_str
+            )
+            outline_style_str = (
+                f' outline: 2px solid {SIGNATURE_PALETTE_DICT["ink"]}; outline-offset: -2px;'
+                if is_default_bool else ""
+            )
+            cell_html_list.append(
+                f'<td style="background:{background_color_str}; text-align:center;'
+                f'{outline_style_str}">{format(cell_value_float, value_format_str)}</td>'
+            )
+        row_html_list.append("<tr>" + "".join(cell_html_list) + "</tr>")
+
+    # Losses are carried signed-negative, so "higher is better" and "closer to
+    # zero is better" are the same rule. Say so, or the darkest cell on a
+    # drawdown grid reads as the worst one.
+    direction_note_str = "darker is better" if higher_is_better_bool else "lighter is better"
+    if higher_is_better_bool and high_float <= 0.0:
+        direction_note_str = "darker is better (losses are negative, so closer to zero)"
+    return (
+        f"<h3>{html.escape(title_str)}</h3>"
+        '<div class="scroll"><table class="heatmap">'
+        f"<thead><tr><th>Entry \\ Exit</th>{header_html_str}</tr></thead>"
+        f'<tbody>{"".join(row_html_list)}</tbody></table></div>'
+        f'<p class="metric-context">Rows are entry timing, columns exit timing; '
+        f"{direction_note_str}, shaded across the whole grid so cells compare directly. "
+        "The outlined cell is the default execution path. A grid of one flat shade means "
+        "timing barely matters for this strategy; a sharp contrast between neighbours means "
+        "the result depends on an execution assumption.</p>"
+    )
+
+
+def _build_timing_heatmap_section_html_str(execution_timing_result_obj) -> str:
+    """Lay out every timing matrix as a heatmap, best measure first."""
+    # *** CRITICAL*** The matrices are indexed by display label, not by the raw
+    # timing key, so the default path has to be translated before it can be
+    # matched. Comparing the key directly silently highlights nothing.
+    order_generation_mode_str = execution_timing_result_obj.order_generation_mode_str
+    default_entry_label_str = _timing_display_label_str(
+        execution_timing_result_obj.default_entry_timing_str, order_generation_mode_str
+    )
+    default_exit_label_str = _timing_display_label_str(
+        execution_timing_result_obj.default_exit_timing_str, order_generation_mode_str
+    )
+
+    matrix_spec_list = [
+        ("Sharpe Ratio", execution_timing_result_obj.sharpe_matrix_df, ".2f", True),
+        ("Annualized Return [%]", execution_timing_result_obj.ann_return_matrix_df, ".2f", True),
+        ("Max Drawdown [%]", execution_timing_result_obj.max_drawdown_matrix_df, ".2f", True),
+        ("CVaR 5% (Daily) [%]", execution_timing_result_obj.cvar_5_matrix_df, ".2f", True),
+    ]
+    section_html_list = [
+        _timing_matrix_heatmap_html_str(
+            matrix_df=matrix_df,
+            title_str=title_str,
+            value_format_str=value_format_str,
+            higher_is_better_bool=higher_is_better_bool,
+            default_entry_timing_str=default_entry_label_str,
+            default_exit_timing_str=default_exit_label_str,
+        )
+        for title_str, matrix_df, value_format_str, higher_is_better_bool in matrix_spec_list
+    ]
+    active_section_html_list = [s for s in section_html_list if s]
+    if len(active_section_html_list) == 0:
+        return ""
+    return (
+        '<div class="plate"><h2>Timing Sensitivity</h2>'
+        + "".join(active_section_html_list)
+        + "</div>"
+    )
+
+
 def _build_execution_timing_html_str(execution_timing_result_obj) -> str:
     """Render the timing matrix page under whichever variant is active."""
     return f"""<!DOCTYPE html>
@@ -905,8 +1035,9 @@ def _build_execution_timing_html_str(execution_timing_result_obj) -> str:
   <div class="report-eyebrow">Execution Timing</div>
   <h1>{html.escape(execution_timing_result_obj.strategy_name_str)}</h1>
 </header>
+{_build_timing_heatmap_section_html_str(execution_timing_result_obj)}
 <div class="plate">
-<h2>Entry and Exit Timing Matrix</h2>
+<h2>All Timing Combinations</h2>
 <div class="scroll">{_format_metric_table_html(execution_timing_result_obj.metric_df)}</div>
 <p class="metric-context">A research diagnostic. The default execution path is highlighted.
 MOC and funding labels mark cells that need explicit live execution handling before they

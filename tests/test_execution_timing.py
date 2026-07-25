@@ -12,8 +12,11 @@ import pandas as pd
 from alpha.engine.backtest import run_daily
 from alpha.engine.execution_timing import (
     ExecutionTimingAnalysis,
+    ExecutionTimingAnalysisResult,
     ExecutionTimingAnalyzer,
     _build_results_df,
+    _build_timing_heatmap_section_html_str,
+    _timing_matrix_heatmap_html_str,
     compute_cvar_5_pct_float,
 )
 from alpha.engine.strategy import Strategy
@@ -635,6 +638,109 @@ class ExecutionTimingAnalysisTests(unittest.TestCase):
             pd.Timestamp(strategy_obj.rebalance_schedule_df.loc[pd.Timestamp("2024-01-03"), "decision_date_ts"]),
             pd.Timestamp("2024-01-03"),
         )
+
+
+class TimingHeatmapTests(unittest.TestCase):
+    """The heatmap is the answer to "does timing matter"; it must not lie."""
+
+    @staticmethod
+    def _matrix_df() -> pd.DataFrame:
+        return pd.DataFrame(
+            [[1.86, 1.84], [1.73, 1.70]],
+            index=pd.Index(["T+1 Open", "T+1 Close (MOC)"], name="Entry Timing"),
+            columns=["T+1 Open", "T+1 Close (MOC)"],
+        )
+
+    def _cell_background_list(self, html_str: str) -> list[str]:
+        import re
+
+        return re.findall(r'<td style="background:(#[0-9a-fA-F]{6})', html_str)
+
+    def test_shading_is_monotonic_in_the_value(self):
+        """Best cell darkest, worst cell the unshaded page — one ramp, not two."""
+        html_str = _timing_matrix_heatmap_html_str(
+            matrix_df=self._matrix_df(),
+            title_str="Sharpe Ratio",
+            value_format_str=".2f",
+            higher_is_better_bool=True,
+            default_entry_timing_str="T+1 Open",
+            default_exit_timing_str="T+1 Open",
+        )
+        background_list = self._cell_background_list(html_str)
+        self.assertEqual(len(background_list), 4)
+        # Cells in row-major order: 1.86, 1.84, 1.73, 1.70 — strictly decreasing,
+        # so the shading must lighten strictly and monotonically alongside them.
+        brightness_list = [int(c[1:3], 16) for c in background_list]
+        self.assertEqual(brightness_list, sorted(brightness_list))
+        self.assertEqual(len(set(brightness_list)), 4)
+
+    def test_worse_is_better_flips_the_ramp(self):
+        html_str = _timing_matrix_heatmap_html_str(
+            matrix_df=self._matrix_df(),
+            title_str="Turnover",
+            value_format_str=".2f",
+            higher_is_better_bool=False,
+            default_entry_timing_str="T+1 Open",
+            default_exit_timing_str="T+1 Open",
+        )
+        brightness_list = [int(c[1:3], 16) for c in self._cell_background_list(html_str)]
+        self.assertEqual(brightness_list, sorted(brightness_list, reverse=True))
+
+    def test_flat_matrix_does_not_manufacture_contrast(self):
+        """A strategy insensitive to timing must not be shaded like a knife edge."""
+        flat_matrix_df = self._matrix_df().copy()
+        flat_matrix_df.loc[:, :] = 1.5
+        html_str = _timing_matrix_heatmap_html_str(
+            matrix_df=flat_matrix_df,
+            title_str="Sharpe Ratio",
+            value_format_str=".2f",
+            higher_is_better_bool=True,
+            default_entry_timing_str="T+1 Open",
+            default_exit_timing_str="T+1 Open",
+        )
+        self.assertEqual(len(set(self._cell_background_list(html_str))), 1)
+
+    def test_signed_loss_matrix_states_its_sign_convention(self):
+        """Darkest cell on a drawdown grid is the smallest loss — say so."""
+        drawdown_matrix_df = pd.DataFrame(
+            [[-18.49, -17.89], [-15.30, -16.51]],
+            index=pd.Index(["T+1 Open", "T+1 Close (MOC)"], name="Entry Timing"),
+            columns=["T+1 Open", "T+1 Close (MOC)"],
+        )
+        html_str = _timing_matrix_heatmap_html_str(
+            matrix_df=drawdown_matrix_df,
+            title_str="Max Drawdown [%]",
+            value_format_str=".2f",
+            higher_is_better_bool=True,
+            default_entry_timing_str="T+1 Open",
+            default_exit_timing_str="T+1 Open",
+        )
+        self.assertIn("losses are negative", html_str)
+        # -15.30 is the shallowest drawdown, so it must carry the darkest shade.
+        background_list = self._cell_background_list(html_str)
+        self.assertEqual(min(background_list, key=lambda c: int(c[1:3], 16)), background_list[2])
+
+    def test_default_path_outline_survives_key_to_label_translation(self):
+        """Regression: matrices are keyed by display label, defaults by raw key.
+
+        Comparing the raw key against the label matched nothing, so the default
+        execution path silently lost its outline on every report.
+        """
+        analysis_result_obj = ExecutionTimingAnalysisResult(
+            strategy_name_str="unit_test",
+            metric_df=pd.DataFrame(),
+            ann_return_matrix_df=self._matrix_df(),
+            cvar_5_matrix_df=self._matrix_df(),
+            sharpe_matrix_df=self._matrix_df(),
+            max_drawdown_matrix_df=self._matrix_df(),
+            strategy_map={},
+            order_generation_mode_str="prior_bar_signal",
+            default_entry_timing_str="next_open",
+            default_exit_timing_str="next_open",
+        )
+        html_str = _build_timing_heatmap_section_html_str(analysis_result_obj)
+        # One outlined cell per rendered matrix, never zero.
+        self.assertEqual(html_str.count("outline: 2px solid"), 4)
 
 
 if __name__ == "__main__":
