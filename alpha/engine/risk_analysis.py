@@ -1922,12 +1922,8 @@ Return window: {html.escape(str(summary_dict.get("start_date_str")))} to {html.e
 | Simulations: {summary_dict.get("simulation_count_int")}
 </div>
 {_analysis_status_banner_html(risk_result_obj.analysis_context_dict)}
-<div class="caveat">
-<strong>What this report is.</strong> This stationary-bootstrap report resamples dependent blocks from the {entity_type_html}'s <em>realized</em> daily returns with replacement. Paths can duplicate or omit observations; they measure historically conditioned sampling and sequence sensitivity. <strong>What it is not.</strong> It does not validate edge independently, correct defects in the source backtest, simulate regimes outside the sample, or calibrate forward event odds. Use it as a diagnostic, not as forward stress testing or a promise.
-</div>
 <div class="section">
 <h2>Investor Scenario Summary</h2>
-<div class="subtitle">Simple historical and historically conditioned ranges under the primary block assumption. “Observed calendar month” and “modeled 21 trading days” are different definitions. Typical range = p25 to p75; p05 is a bootstrap percentile, not a calibrated forward 1-in-20 event. Horizon rows are model-specific and must be read with the separate block-length sensitivity sweep. Recovery percentiles include only paths whose last deepest-drawdown episode recovered inside the horizon; terminal-underwater path share is separate.</div>
 <div class="scroll">{_investor_scenario_table_html(risk_result_obj.investor_scenario_df)}</div>
 </div>
 {_verdict_panel_html(summary_dict.get("verdict"))}
@@ -1959,8 +1955,12 @@ Return window: {html.escape(str(summary_dict.get("start_date_str")))} to {html.e
 <div class="scroll">{_interval_table_html(risk_result_obj.bootstrap_interval_df, int(summary_dict["primary_mean_block_length_int"]), confidence_level_float, simulation_count_int, metric_order_list=MONTHLY_METRIC_ORDER_LIST, label_dict=MONTHLY_METRIC_LABEL_DICT)}</div>
 </div>
 <div class="section">
+<h2>What a Holding Period Looked Like</h2>
+{_client_horizon_summary_html(risk_result_obj.horizon_probability_df)}
+</div>
+<div class="section">
 <h2>Horizon Probability Tables</h2>
-<div class="subtitle">Bootstrap-implied horizon probabilities from realized returns. Trading-year horizons use {TRADING_DAYS_PER_YEAR_INT} days. Downside is max drawdown touched inside the horizon; upside is max gain touched inside the horizon. Rows beyond the realized sample length render as N/A. The final downside row is the bootstrap at its full realized sample length, so it is a longer exposure than the fixed horizons above it rather than a higher rate.</div>
+<div class="subtitle">Trading-year horizons use {TRADING_DAYS_PER_YEAR_INT} days. Downside is max drawdown touched inside the horizon; upside is max gain touched inside the horizon. The final downside row is the bootstrap at its full realized sample length, so it is a longer exposure than the fixed horizons above it rather than a higher rate.</div>
 {_horizon_probability_tables_html(risk_result_obj.horizon_probability_df, summary_dict.get("drawdown_threshold_list", DEFAULT_DRAWDOWN_THRESHOLD_TUPLE), summary_dict.get("upside_threshold_list", DEFAULT_UPSIDE_THRESHOLD_TUPLE), _full_sample_drawdown_row_dict(risk_result_obj))}
 </div>
 <div class="section">
@@ -1968,6 +1968,13 @@ Return window: {html.escape(str(summary_dict.get("start_date_str")))} to {html.e
 <div class="subtitle">Probability across bootstrap paths that the event occurred at least once over the full realized sample length. Thresholds are in trading months of {TRADING_DAYS_PER_MONTH_INT} days. Drawdown-depth probabilities are the full-sample row of the downside table above.</div>
 <div class="scroll">{_breach_table_html(summary_dict.get("primary_terminal_loss_probability_float"), summary_dict.get("primary_time_underwater_breach_probabilities", {}))}</div>
 </div>
+<details class="method-note">
+<summary>Method and limits</summary>
+<p><strong>What this report is.</strong> This stationary-bootstrap report resamples dependent blocks from the {entity_type_html}'s <em>realized</em> daily returns with replacement. Paths can duplicate or omit observations; they measure historically conditioned sampling and sequence sensitivity.</p>
+<p><strong>What it is not.</strong> It does not validate edge independently, correct defects in the source backtest, simulate regimes outside the sample, or calibrate forward event odds. Use it as a diagnostic, not as forward stress testing or a promise.</p>
+<p><strong>Reading the scenario table.</strong> “Observed calendar month” and “modeled 21 trading days” are different definitions. Typical range = p25 to p75; p05 is a bootstrap percentile, not a calibrated forward 1-in-20 event. Horizon rows are model-specific and must be read with the separate block-length sensitivity sweep. Recovery percentiles include only paths whose last deepest-drawdown episode recovered inside the horizon; terminal-underwater path share is separate. Horizon rows beyond the realized sample length render as N/A.</p>
+<p><strong>Diagnostic bands.</strong> Bands classify historically conditioned bootstrap diagnostics only. They do not validate edge, calibrate forward odds, or define account limits. See ASSUMPTIONS_AND_GAPS.</p>
+</details>
 </div>
 </body>
 </html>"""
@@ -2082,9 +2089,7 @@ def _verdict_panel_html(verdict_row_list: object) -> str:
         "<div class=\"verdict-panel\">"
         "<div class=\"verdict-title\">Read-first diagnostic bands</div>"
         + "".join(row_html_list)
-        + "<div class=\"verdict-disclaimer\">Bands classify historically conditioned bootstrap diagnostics only. "
-        "They do not validate edge, calibrate forward odds, or define account limits. See ASSUMPTIONS_AND_GAPS.</div>"
-        "</div>"
+        + "</div>"
     )
 
 
@@ -2634,6 +2639,99 @@ MONTHLY_METRIC_ORDER_LIST = [
     "worst_126d_return_float",
     "worst_252d_return_float",
 ]
+
+
+CLIENT_HORIZON_YEAR_TUPLE = (1, 3, 5)
+
+
+def _odds_phrase_str(probability_float: float | None) -> str:
+    """Say a probability the way a person says it.
+
+    "0.10%" makes the reader do arithmetic before they can picture anything;
+    "1 in 1,000 paths" is the same number already pictured. The denominator
+    steps rather than staying fixed so a small probability does not round away
+    to "0 in 100".
+    """
+    value_float = _json_float(probability_float)
+    if value_float is None:
+        return "N/A"
+    if value_float <= 0.0:
+        return "none of the paths"
+    if value_float >= 0.995:
+        return "essentially every path"
+    if value_float >= 0.01:
+        return f"{value_float * 100.0:.0f} in 100 paths"
+    if value_float >= 0.001:
+        return f"{value_float * 1000.0:.0f} in 1,000 paths"
+    return "fewer than 1 in 1,000 paths"
+
+
+def _client_horizon_summary_html(horizon_probability_df: pd.DataFrame) -> str:
+    """State each horizon as sentences instead of a row of nine columns.
+
+    The grid below answers every threshold at every horizon, which is what the
+    research needs and the opposite of what someone being walked through the
+    numbers needs. This says the three things they actually ask -- where does
+    it usually end up, how bad does a bad one get, and how far down does it go
+    on the way -- for a few round horizons.
+    """
+    if horizon_probability_df is None or len(horizon_probability_df) == 0:
+        return ""
+
+    row_html_list: list[str] = []
+    for horizon_year_int in CLIENT_HORIZON_YEAR_TUPLE:
+        horizon_row_df = horizon_probability_df[
+            horizon_probability_df["horizon_year_int"] == horizon_year_int
+        ]
+        if len(horizon_row_df) == 0:
+            continue
+        horizon_row_ser = horizon_row_df.iloc[0]
+
+        terminal_p50_float = _json_float(horizon_row_ser.get("terminal_return_p50_float"))
+        terminal_p05_float = _json_float(horizon_row_ser.get("terminal_return_p05_float"))
+        drawdown_p50_float = _json_float(horizon_row_ser.get("max_drawdown_p50_float"))
+        drawdown_p05_float = _json_float(horizon_row_ser.get("max_drawdown_p05_float"))
+        # *** CRITICAL*** p05 of terminal return and p05 of max drawdown are
+        # different paths. Presenting them as one bad case would describe a
+        # scenario no simulation produced.
+        loss_probability_float = _json_float(horizon_row_ser.get("terminal_loss_probability_float"))
+
+        sentence_html_list = [
+            f"Typically ended <b>{html.escape(_format_percent(terminal_p50_float))}</b> up, "
+            f"and <b>{html.escape(_format_percent(terminal_p05_float))}</b> in the worst 1 in 20."
+            if terminal_p50_float is not None and terminal_p05_float is not None
+            else "",
+            f"Ended below where it started in <b>{html.escape(_odds_phrase_str(loss_probability_float))}</b>."
+            if loss_probability_float is not None
+            else "",
+            f"Along the way the usual worst fall from a peak was "
+            f"<b>{html.escape(_format_percent(drawdown_p50_float))}</b>, "
+            f"reaching <b>{html.escape(_format_percent(drawdown_p05_float))}</b> in the worst 1 in 20."
+            if drawdown_p50_float is not None and drawdown_p05_float is not None
+            else "",
+        ]
+        body_html_str = " ".join(s for s in sentence_html_list if s)
+        if not body_html_str:
+            continue
+        horizon_label_str = "1 year" if horizon_year_int == 1 else f"{horizon_year_int} years"
+        row_html_list.append(
+            '<div class="horizon-readout-row">'
+            f'<div class="horizon-readout-term">Held {html.escape(horizon_label_str)}</div>'
+            f'<div class="horizon-readout-body">{body_html_str}</div>'
+            "</div>"
+        )
+
+    if not row_html_list:
+        return ""
+    return (
+        '<div class="horizon-readout">'
+        + "".join(row_html_list)
+        + '<div class="horizon-readout-note">Shares of simulated paths resampled from this '
+        "strategy's own realized returns, not forward probabilities. The worst-case figures "
+        "are separate percentiles: the path that ends worst is rarely the path that falls "
+        "furthest along the way.</div>"
+        "</div>"
+    )
 
 
 def _horizon_probability_tables_html(

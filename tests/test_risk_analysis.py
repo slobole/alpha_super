@@ -585,7 +585,18 @@ def test_risk_analysis_saves_expected_artifacts(tmp_path):
 
     report_html_str = (output_path / "report.html").read_text(encoding="utf-8")
     assert "Horizon Probability Tables" in report_html_str
-    assert "Bootstrap-implied horizon probabilities from realized returns." in report_html_str
+    # The caveats are house doctrine, so moving them out of the reading path
+    # must not drop them from the artifact.
+    assert "<details class=\"method-note\">" in report_html_str
+    assert "It does not validate edge independently" in report_html_str
+    assert "not a calibrated forward 1-in-20 event" in report_html_str
+    assert "do not validate edge, calibrate forward odds" in report_html_str
+    # ...and they must not be sitting in the body as a wall of prose again.
+    assert "<div class=\"caveat\">" not in report_html_str
+    # Plain-language holding-period readout. This fixture is only a few days
+    # long, so the readout rows are legitimately absent -- the section must
+    # still render rather than raising on the missing horizons.
+    assert "What a Holding Period Looked Like" in report_html_str
     assert "Downside drawdown path shares" in report_html_str
     assert "Upside reach path shares" in report_html_str
     assert "DD &lt;= -10%" in report_html_str
@@ -827,3 +838,43 @@ def test_returns_histogram_keeps_the_tail_visible():
     assert "%" in svg_str
     assert "Share of days (sqrt scale)" in svg_str
 
+
+
+def test_odds_phrase_steps_its_denominator_instead_of_rounding_away():
+    """A 1-in-1,000 event must not print as "0 in 100"."""
+    from alpha.engine.risk_analysis import _odds_phrase_str
+
+    assert _odds_phrase_str(0.0393) == "4 in 100 paths"
+    assert _odds_phrase_str(0.0010) == "1 in 1,000 paths"
+    assert _odds_phrase_str(0.0001) == "fewer than 1 in 1,000 paths"
+    assert _odds_phrase_str(0.0) == "none of the paths"
+    assert _odds_phrase_str(1.0) == "essentially every path"
+    assert _odds_phrase_str(None) == "N/A"
+
+
+def test_client_horizon_summary_states_each_horizon_in_sentences():
+    from alpha.engine.risk_analysis import _client_horizon_summary_html
+
+    horizon_df = pd.DataFrame([
+        {"horizon_year_int": 1, "terminal_return_p50_float": 0.2169,
+         "terminal_return_p05_float": 0.0140, "max_drawdown_p50_float": -0.0840,
+         "max_drawdown_p05_float": -0.1430, "terminal_loss_probability_float": 0.0393},
+        {"horizon_year_int": 3, "terminal_return_p50_float": 0.8096,
+         "terminal_return_p05_float": 0.3151, "max_drawdown_p50_float": -0.1121,
+         "max_drawdown_p05_float": -0.1766, "terminal_loss_probability_float": 0.0010},
+    ])
+    readout_html_str = _client_horizon_summary_html(horizon_df)
+    assert "Held 1 year" in readout_html_str
+    assert "Held 3 years" in readout_html_str
+    # A horizon with no row must be skipped rather than rendered empty.
+    assert "Held 5 years" not in readout_html_str
+    assert "21.69%" in readout_html_str
+    assert "4 in 100 paths" in readout_html_str
+    # The two worst cases are different paths and the note must say so.
+    assert "rarely the path that falls" in readout_html_str
+
+
+def test_client_horizon_summary_is_empty_without_data():
+    from alpha.engine.risk_analysis import _client_horizon_summary_html
+
+    assert _client_horizon_summary_html(pd.DataFrame()) == ""

@@ -379,8 +379,112 @@ code {{
     font-variant-numeric: tabular-nums;
     color: var(--color-ink);
 }}
+/* The row's four spans carried no layout at all, so label, value and
+   conclusion rendered as one run-on string. Give them columns. */
 .verdict-row {{
+    display: grid;
+    grid-template-columns: 10px 150px minmax(150px, 1fr) 2fr;
+    align-items: baseline;
+    gap: 0 16px;
+    padding: 9px 0;
     border-bottom: 1px solid var(--color-border);
+}}
+.verdict-row:last-of-type {{
+    border-bottom: none;
+}}
+.verdict-dot {{
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    align-self: center;
+    background: var(--color-muted);
+}}
+/* The caution band must not read as the no-signal band. --color-benchmark-dark
+   is a near-neutral grey in the earth palette and was indistinguishable from
+   the default dot, so the middle step comes from the palette's tan instead:
+   green, tan, umber is a visible three-step progression. */
+.verdict-dot.v-green {{ background: var(--color-profit-dark); }}
+.verdict-dot.v-amber {{ background: {palette_dict['overlay_cycle'][3]}; }}
+.verdict-dot.v-red {{ background: var(--color-loss-dark); }}
+.verdict-dot.v-na {{ background: var(--color-border); }}
+.verdict-text {{
+    font-family: var(--font-prose);
+    line-height: 1.5;
+}}
+@media (max-width: 780px) {{
+    .verdict-row {{
+        grid-template-columns: 10px 1fr;
+    }}
+    .verdict-value, .verdict-text {{
+        grid-column: 2;
+    }}
+}}
+/* Method and limits: kept in the artifact and out of the reading path. The
+   caveats are house doctrine, so they are collapsed rather than dropped. */
+details.method-note {{
+    margin: 34px 0 0;
+    padding-top: 16px;
+    border-top: 1px solid var(--color-border);
+}}
+details.method-note > summary {{
+    font-family: var(--font-figure);
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    cursor: pointer;
+}}
+details.method-note p {{
+    font-family: var(--font-prose);
+    font-size: 0.8rem;
+    line-height: 1.6;
+    color: var(--color-muted);
+    max-width: 68ch;
+}}
+/* Plain-language horizon readout: prose measure, figures in figure type. */
+.horizon-readout {{
+    margin: 4px 0 22px;
+}}
+.horizon-readout-row {{
+    display: grid;
+    grid-template-columns: 120px minmax(0, 1fr);
+    gap: 0 20px;
+    padding: 11px 0;
+    border-bottom: 1px solid var(--color-border);
+}}
+.horizon-readout-term {{
+    font-family: var(--font-figure);
+    font-size: 0.72rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    padding-top: 2px;
+}}
+.horizon-readout-body {{
+    font-family: var(--font-prose);
+    font-size: 0.95rem;
+    line-height: 1.65;
+    max-width: 62ch;
+}}
+.horizon-readout-body b {{
+    font-family: var(--font-figure);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}}
+.horizon-readout-note {{
+    font-family: var(--font-prose);
+    font-size: 0.78rem;
+    line-height: 1.55;
+    color: var(--color-muted);
+    max-width: 62ch;
+    padding-top: 12px;
+}}
+@media (max-width: 780px) {{
+    .horizon-readout-row {{
+        grid-template-columns: 1fr;
+        gap: 6px 0;
+    }}
 }}
 .table-wrap {{
     overflow-x: auto;
@@ -920,7 +1024,7 @@ table {{
     font-family: var(--font-figure);
     border-collapse: collapse;
     width: 100%;
-    font-size: 0.78rem;
+    font-size: 0.92rem;
     font-variant-numeric: tabular-nums;
     margin-bottom: 0;
 }}
@@ -931,7 +1035,7 @@ th {{
     padding: 0 10px 7px;
     text-align: right;
     font-weight: 600;
-    font-size: 0.62rem;
+    font-size: 0.66rem;
     letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--color-muted);
@@ -1192,7 +1296,10 @@ h1 {
     margin-bottom: 22px;
 }
 table {
-    font-size: 0.74rem;
+    /* The spec layout re-declares the table size after the document
+     * stylesheet, so this is the value that actually applies there.
+     */
+    font-size: 0.86rem;
 }
 td {
     padding: 5px 10px;
@@ -1232,10 +1339,11 @@ def build_report_css() -> str:
     --color-loss: {signature_palette_dict["loss"]};
     --color-loss-dark: {signature_palette_dict["loss_dark"]};
     --color-shadow: {signature_palette_dict["shadow_rgba"]};
-    /* The analyzer appendix sets figure type on tiles and tables. Without
-       this the whole declaration is void and those numbers silently fall
-       back to the body font in every non-document layout. */
+    /* The analyzer appendix sets figure and prose type on tiles, tables and
+       verdict rows. Without these the whole declaration is void and the text
+       silently falls back to the body font in every non-document layout. */
     --font-figure: {report_font_stack_str};
+    --font-prose: {report_font_stack_str};
 }}
 body {{
     font-family: {report_font_stack_str};
