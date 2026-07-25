@@ -574,7 +574,7 @@ def _build_mo_atr_normalized_ndx_strategy_obj(
     config_obj = context_dict["config_obj"]
     strategy_obj = AtrNormalizedNdxStrategy(
         name=str(context_dict["strategy_name_str"]),
-        benchmarks=[str(config_obj.regime_symbol_str)],
+        benchmarks=[str(config_obj.performance_benchmark_symbol_str)],
         rebalance_schedule_df=context_dict["rebalance_schedule_df"],
         regime_symbol_str=str(config_obj.regime_symbol_str),
         capital_base=float(context_dict["capital_base_float"]),

@@ -16,7 +16,6 @@ from strategies.momentum.strategy_mo_radge_ndx import RadgeMomentumNdxStrategy
 from strategies.momentum.strategy_mo_atr_normalized_ndx import (
     AtrNormalizedNdxStrategy,
     DEFAULT_CONFIG as NDX_DEFAULT_CONFIG,
-    TOTAL_RETURN_BENCHMARK_SUFFIX_STR,
     append_total_return_benchmark_data_df,
     configure_total_return_benchmark_provenance,
     get_monthly_decision_close_df,
@@ -86,6 +85,8 @@ class AtrNormalizedVariantConstructionTests(unittest.TestCase):
     def test_ndx_default_config_points_to_nasdaq_100(self):
         self.assertEqual(NDX_DEFAULT_CONFIG.indexname_str, "Nasdaq 100")
         self.assertEqual(NDX_DEFAULT_CONFIG.regime_symbol_str, "SPY")
+        self.assertEqual(NDX_DEFAULT_CONFIG.performance_benchmark_symbol_str, "$SPX")
+        self.assertEqual(NDX_DEFAULT_CONFIG.performance_benchmark_data_symbol_str, "$SPXTR")
         self.assertEqual(NDX_DEFAULT_CONFIG.max_positions_int, 10)
 
     def test_ndx_total_return_benchmark_is_loaded_under_separate_alias(self):
@@ -99,7 +100,7 @@ class AtrNormalizedVariantConstructionTests(unittest.TestCase):
         )
         capital_price_df.columns = pd.MultiIndex.from_tuples(capital_price_df.columns)
         total_return_price_df = pd.DataFrame(
-            {("SPY", "Close"): [100.0, 101.0]},
+            {("$SPXTR", "Close"): [100.0, 101.0]},
             index=date_index,
         )
         total_return_price_df.columns = pd.MultiIndex.from_tuples(total_return_price_df.columns)
@@ -113,9 +114,7 @@ class AtrNormalizedVariantConstructionTests(unittest.TestCase):
                 config_obj=NDX_DEFAULT_CONFIG,
             )
 
-        benchmark_data_symbol_str = (
-            f"{NDX_DEFAULT_CONFIG.regime_symbol_str}{TOTAL_RETURN_BENCHMARK_SUFFIX_STR}"
-        )
+        benchmark_data_symbol_str = NDX_DEFAULT_CONFIG.performance_benchmark_data_symbol_str
         self.assertIn(("SPY", "Close"), combined_price_df.columns)
         self.assertIn((benchmark_data_symbol_str, "Close"), combined_price_df.columns)
         self.assertAlmostEqual(float(combined_price_df.iloc[-1][("SPY", "Close")]), 99.0)
@@ -125,7 +124,7 @@ class AtrNormalizedVariantConstructionTests(unittest.TestCase):
         )
         load_raw_prices_mock.assert_called_once_with(
             symbols=[],
-            benchmarks=["SPY"],
+            benchmarks=["$SPXTR"],
             start_date=NDX_DEFAULT_CONFIG.history_start_date_str,
             end_date=NDX_DEFAULT_CONFIG.end_date_str,
         )
@@ -139,14 +138,14 @@ class AtrNormalizedVariantConstructionTests(unittest.TestCase):
                 ("AAA", "Low"): np.linspace(98.0, 118.0, len(date_index)),
                 ("AAA", "Close"): np.linspace(100.0, 120.0, len(date_index)),
                 ("SPY", "Close"): np.linspace(200.0, 230.0, len(date_index)),
-                ("SPY_TR", "Close"): np.linspace(200.0, 250.0, len(date_index)),
+                ("$SPXTR", "Close"): np.linspace(200.0, 250.0, len(date_index)),
             },
             index=date_index,
         )
         pricing_data_df.columns = pd.MultiIndex.from_tuples(pricing_data_df.columns)
         strategy_obj = AtrNormalizedNdxStrategy(
             name="AtrNormalizedNdxBenchmarkIsolationTest",
-            benchmarks=["SPY"],
+            benchmarks=["$SPX"],
             rebalance_schedule_df=self.make_rebalance_schedule_df(),
             regime_symbol_str="SPY",
             capital_base=100_000.0,
@@ -166,7 +165,7 @@ class AtrNormalizedVariantConstructionTests(unittest.TestCase):
         signal_data_df = strategy_obj.compute_signals(pricing_data_df)
 
         self.assertIn(("AAA", "risk_adj_score_ser"), signal_data_df.columns)
-        self.assertNotIn(("SPY_TR", "risk_adj_score_ser"), signal_data_df.columns)
+        self.assertNotIn(("$SPXTR", "risk_adj_score_ser"), signal_data_df.columns)
 
     def test_ndx_total_return_benchmark_changes_only_benchmark_results(self):
         date_index = pd.bdate_range("2023-01-02", periods=300)
@@ -188,6 +187,7 @@ class AtrNormalizedVariantConstructionTests(unittest.TestCase):
                 ("SPY", "High"): regime_close_ser + 1.00,
                 ("SPY", "Low"): regime_close_ser - 1.00,
                 ("SPY", "Close"): regime_close_ser,
+                ("$SPX", "Close"): np.linspace(200.0, 240.0, len(date_index)),
             },
             index=date_index,
         )
@@ -204,7 +204,7 @@ class AtrNormalizedVariantConstructionTests(unittest.TestCase):
         def build_strategy_obj(name_str: str) -> AtrNormalizedNdxStrategy:
             strategy_obj = AtrNormalizedNdxStrategy(
                 name=name_str,
-                benchmarks=["SPY"],
+                benchmarks=["$SPX"],
                 rebalance_schedule_df=rebalance_schedule_df,
                 regime_symbol_str="SPY",
                 capital_base=100_000.0,
@@ -226,7 +226,7 @@ class AtrNormalizedVariantConstructionTests(unittest.TestCase):
             config_obj=NDX_DEFAULT_CONFIG,
         )
         total_return_pricing_data_df = pricing_data_df.copy()
-        total_return_pricing_data_df[("SPY_TR", "Close")] = np.linspace(
+        total_return_pricing_data_df[("$SPXTR", "Close")] = np.linspace(
             200.0,
             260.0,
             len(date_index),
@@ -267,8 +267,8 @@ class AtrNormalizedVariantConstructionTests(unittest.TestCase):
             total_return_benchmark_strategy_obj._transactions[transaction_field_list].reset_index(drop=True),
         )
         self.assertNotAlmostEqual(
-            float(price_benchmark_strategy_obj.results["SPY"].iloc[-1]),
-            float(total_return_benchmark_strategy_obj.results["SPY"].iloc[-1]),
+            float(price_benchmark_strategy_obj.results["$SPX"].iloc[-1]),
+            float(total_return_benchmark_strategy_obj.results["$SPX"].iloc[-1]),
         )
 
         vxn_scale_signal_df = pd.DataFrame(
@@ -279,7 +279,7 @@ class AtrNormalizedVariantConstructionTests(unittest.TestCase):
         def build_vxn_strategy_obj(name_str: str) -> VxnScaledAtrNormalizedNdxStrategy:
             strategy_obj = VxnScaledAtrNormalizedNdxStrategy(
                 name=name_str,
-                benchmarks=["SPY"],
+                benchmarks=["$SPX"],
                 rebalance_schedule_df=rebalance_schedule_df,
                 vxn_scale_signal_df=vxn_scale_signal_df,
                 regime_symbol_str="SPY",
@@ -339,9 +339,9 @@ class AtrNormalizedVariantConstructionTests(unittest.TestCase):
             ].reset_index(drop=True),
         )
         self.assertNotAlmostEqual(
-            float(vxn_price_benchmark_strategy_obj.results["SPY"].iloc[-1]),
+            float(vxn_price_benchmark_strategy_obj.results["$SPX"].iloc[-1]),
             float(
-                vxn_total_return_benchmark_strategy_obj.results["SPY"].iloc[-1]
+                vxn_total_return_benchmark_strategy_obj.results["$SPX"].iloc[-1]
             ),
         )
 

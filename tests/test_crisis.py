@@ -112,7 +112,12 @@ class CrisisReplayTests(unittest.TestCase):
 
         self.assertEqual(
             strategy_obj._benchmark_data_symbol_map_dict,
-            {"SPY": "SPY_TR"},
+            {"$SPX": "$SPXTR"},
+        )
+        self.assertEqual(strategy_obj._benchmarks, ["$SPX"])
+        self.assertEqual(
+            strategy_obj._performance_benchmark_symbol_str,
+            "$SPX",
         )
         self.assertEqual(
             strategy_obj._performance_benchmark_adjustment_str,

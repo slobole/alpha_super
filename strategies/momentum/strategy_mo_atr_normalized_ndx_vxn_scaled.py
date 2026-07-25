@@ -308,7 +308,7 @@ def run_variant(
 
     strategy_obj = VxnScaledAtrNormalizedNdxStrategy(
         name="strategy_mo_atr_normalized_ndx_vxn_scaled",
-        benchmarks=[config_obj.regime_symbol_str],
+        benchmarks=[config_obj.performance_benchmark_symbol_str],
         rebalance_schedule_df=rebalance_schedule_df,
         vxn_scale_signal_df=vxn_scale_signal_df,
         regime_symbol_str=config_obj.regime_symbol_str,
@@ -389,7 +389,7 @@ def build_capacity_analysis_inputs(
 
     strategy_obj = VxnScaledAtrNormalizedNdxStrategy(
         name="strategy_mo_atr_normalized_ndx_vxn_scaled",
-        benchmarks=[config_obj.regime_symbol_str],
+        benchmarks=[config_obj.performance_benchmark_symbol_str],
         rebalance_schedule_df=rebalance_schedule_df,
         vxn_scale_signal_df=vxn_scale_signal_df,
         regime_symbol_str=config_obj.regime_symbol_str,
@@ -458,7 +458,7 @@ def build_execution_timing_analysis_inputs() -> dict[str, object]:
     def strategy_factory_fn():
         strategy_obj = VxnScaledAtrNormalizedNdxStrategy(
             name="strategy_mo_atr_normalized_ndx_vxn_scaled",
-            benchmarks=[config_obj.regime_symbol_str],
+            benchmarks=[config_obj.performance_benchmark_symbol_str],
             rebalance_schedule_df=decision_close_schedule_df,
             vxn_scale_signal_df=vxn_scale_signal_df,
             regime_symbol_str=config_obj.regime_symbol_str,

@@ -771,12 +771,17 @@ Claude should answer each question directly:
 
 Implemented scope:
 
-- NDX and VXN-NDX research/analyzer runs keep `SPY` `CAPITALSPECIAL` for the
-  regime signal and use a separately loaded `SPY_TR` source for the reported
-  `SPY` total-return benchmark. Vanilla, Capacity, Execution Timing, and NDX
-  Crisis replay all resolve the public `SPY` label through this mapping.
-- The benchmark display label remains `SPY`; saved metadata records the actual
-  data-symbol mapping and adjustment roles.
+- Direct-Norgate NDX and VXN-NDX research/analyzer runs keep `SPY`
+  `CAPITALSPECIAL` for the regime signal and use the explicit Norgate `$SPXTR`
+  series for the reported `$SPX` total-return benchmark. Vanilla, Capacity,
+  Execution Timing, and NDX Crisis replay all resolve the public `$SPX` label
+  through this mapping.
+- The benchmark display label is `$SPX`; saved metadata records the actual
+  `$SPX -> $SPXTR` data-symbol mapping and adjustment roles.
+- This benchmark amendment does not change the snapshot exporter, client
+  schema, VPS rollout, or live DecisionPlan. Existing NDX snapshots do not
+  contain `$SPXTR`, so snapshot-mode analyzers remain unsupported until a
+  separately approved rollout; live trading remains `CAPITALSPECIAL`-only.
 - Strategy artifacts declare `price_return_ledger_v1`, dividends not credited,
   intentional `0%` positive-cash return, and no modeled negative-cash financing.
 - Existing snapshot schema v1 remains readable. New exporter output is schema
