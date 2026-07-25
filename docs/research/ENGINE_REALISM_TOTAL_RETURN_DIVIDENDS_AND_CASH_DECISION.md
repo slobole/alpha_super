@@ -1,0 +1,692 @@
+# Engine Realism Decision: Execution Prices, Signal Returns, Dividends, and Cash
+
+**Decision status:** OPEN - awaiting Claude review and a joint verdict
+
+**Implementation status:** Documentation only; no engine, strategy, release, or live behavior changed
+
+**Repository snapshot reviewed:** 2026-07-25
+
+**Primary question:** How should `alpha_super` separate executable prices, signal returns, and broker-account economics so that BENCH, incubation, and live trading describe the same strategy?
+
+## TL;DR
+
+The current engine mixes three different concepts:
+
+1. the price at which a security can be traded;
+2. the return representation used to form a signal;
+3. the economic value of the brokerage account.
+
+They must be separated.
+
+The preliminary Codex position is:
+
+- Never use `TOTALRETURN` prices as order-fill prices or position marks.
+- Keep a non-total-return execution basis. The current engine uses Norgate `CAPITALSPECIAL`, but this is an adjusted price proxy, not literally the historical exchange quote.
+- Add explicit account events for long dividends, short dividend liabilities, eligible cash interest, margin interest, and borrow costs.
+- Do not globally change every signal to `TOTALRETURN`. Choose the signal basis feature by feature and strategy by strategy.
+- Treat Norgate `TOTALRETURN` as a signal or benchmark representation and as a parity check, not as the account ledger.
+- Correct the NDX/SPY benchmark provenance mismatch before relying on benchmark-relative analyzer output.
+
+The highest-priority gap is the economic ledger. The signal question is important but separate: changing a signal from price return to total return changes the strategy, while crediting a dividend that the account actually earned corrects missing accounting.
+
+## 1. Purpose and review protocol
+
+This file is a decision document for Codex, Claude, and the human owner. It is not an implementation specification yet.
+
+Each reviewer should:
+
+1. distinguish verified current behavior from recommendations;
+2. cite the exact code or external documentation behind any factual disagreement;
+3. state whether a proposal changes only accounting or also changes strategy semantics;
+4. state the expected bias direction and affected WIRED strategies;
+5. finish with a direct verdict in the review table near the end of this document.
+
+Do not silently rewrite the verified-facts sections. If a fact is disputed, add the conflicting evidence to the review log.
+
+## 2. The central problem
+
+A realistic daily trading engine needs three separate data and accounting channels:
+
+```text
+Market observations
+    |
+    +--> Execution and valuation prices
+    |       Actual/non-total-return price basis
+    |       Used for fills, marks, gaps, stops, and order sizing
+    |
+    +--> Signal representations
+    |       Price return, economic total return, volatility, index level, etc.
+    |       Selected explicitly for each feature
+    |
+    +--> Economic events
+            Dividends, interest, borrow, taxes, splits, mergers, and settlements
+            Posted to an account ledger
+```
+
+The present engine has the first channel in an approximate form and has several signal representations, but it does not have a complete shared economic-event ledger.
+
+That omission affects more than the final performance report. Account equity is reused for later position sizing, so a missing cash flow changes:
+
+- subsequent share quantities;
+- portfolio exposure;
+- compounding;
+- drawdowns;
+- capacity analysis;
+- risk analysis;
+- portfolio aggregation;
+- reference-to-live tracking error.
+
+## 3. Precise definitions
+
+### 3.1 True historical as-traded prices
+
+A true as-traded price is the quote that existed on that historical date. It includes visible price discontinuities from splits, special distributions, and other corporate actions. A broker account then needs corresponding share and cash events.
+
+This is the cleanest economic model, but it requires a corporate-action-aware position ledger.
+
+### 3.2 Norgate `CAPITALSPECIAL`
+
+The current repository normally uses Norgate `CAPITALSPECIAL` for tradeable securities. It adjusts for capital reconstructions and special distributions while leaving ordinary cash dividends outside the price return.
+
+This is not literally an as-traded price series. For example, a direct local Norgate check of AAPL on 2020-08-28 returned an approximately `126.01` `CAPITALSPECIAL` open versus an approximately `504.05` unadjusted historical open before the four-for-one split.
+
+Therefore the accurate description of current behavior is:
+
+> `CAPITALSPECIAL` is the repository's corporate-action-normalized, non-total-return execution and valuation proxy.
+
+It preserves return continuity without requiring the common engine to change historical share quantities for splits. That is useful, but it must not be confused with a literal broker fill record.
+
+### 3.3 Norgate `TOTALRETURN`
+
+`TOTALRETURN` incorporates distributions into the price history as split-like adjustments. It represents the economic growth of a reinvested position.
+
+It is useful for:
+
+- economic momentum;
+- relative-return ranking;
+- benchmark wealth;
+- parity checks against an explicit dividend ledger.
+
+It is not suitable for:
+
+- historical order fills;
+- stop or limit prices;
+- broker cash;
+- literal share quantities;
+- exact dividend payment timing.
+
+Using `TOTALRETURN` for position marks and also crediting explicit dividends would double-count the same economic benefit.
+
+### 3.4 Explicit economic ledger
+
+The target account equation is:
+
+```text
+account equity
+= settled cash
++ marked position value
++ dividend receivables
++ interest receivables
+- short dividend liabilities
+- financing and borrow liabilities
+- other accrued fees and taxes
+```
+
+The ledger, not a synthetic price, should determine what cash is available to size future orders.
+
+## 4. Simple examples
+
+### 4.1 Long dividend
+
+Assume an account holds 100 shares at a close of `$100`. The security has a `$1` dividend and opens ex-dividend at `$99`, with no other market movement.
+
+Current price-only ledger:
+
+```text
+position value = 100 x $99 = $9,900
+dividend value = $0
+economic change = -$100
+```
+
+Correct gross economic ledger:
+
+```text
+position value      = 100 x $99 = $9,900
+dividend receivable = 100 x $1  =   $100
+economic equity                    $10,000
+```
+
+The dividend should not automatically buy more shares. It becomes a receivable and later cash, unless the strategy explicitly reinvests it.
+
+### 4.2 Short dividend
+
+If the account is short 100 shares through the same entitlement boundary, the account owes the equivalent dividend:
+
+```text
+short dividend liability = 100 x $1 = $100
+```
+
+Ignoring this liability makes a short backtest optimistic.
+
+### 4.3 Signal ranking
+
+Suppose:
+
+- Asset A gains 5% in price and distributes approximately 4%.
+- Asset B gains 8% in price and distributes nothing.
+
+A price-return momentum signal ranks B above A. An economic-return momentum signal may rank A above B. Neither representation is universally correct; the strategy hypothesis must decide what is being measured.
+
+### 4.4 Ex-dividend oversold signal
+
+A stock falling from `$100` to `$99` only because of a `$1` distribution has approximately:
+
+```text
+price return    = -1%
+economic return =  0%
+```
+
+A short-horizon mean-reversion signal can incorrectly interpret the mechanical ex-dividend move as selling pressure. This is especially relevant to QPI and, to a lesser degree, DV2.
+
+### 4.5 VXN cash sleeve
+
+The WIRED VXN scaler uses:
+
+```text
+exposure = clip(22 / VXN, 0.25, 1.00)
+```
+
+At `VXN = 44`, exposure is 50%. A `$100,000` pod therefore carries approximately `$50,000` as residual cash before rounding. The current backtest and incubation model give that cash a zero return.
+
+The real broker rate is not simply DTB3. It depends on settled cash, currency, account NAV, account segment, thresholds, and the broker's historical rate schedule.
+
+## 5. Verified current repository behavior
+
+### 5.1 Loader
+
+[`data/norgate_loader.py`](../../data/norgate_loader.py) `:105-143` loads:
+
+- ordinary symbols with `CAPITALSPECIAL`;
+- symbols passed in the benchmark list with `TOTALRETURN`.
+
+Snapshot mode preserves the same selection in [`data/norgate_snapshot_store.py`](../../data/norgate_snapshot_store.py) `:396-436`.
+
+The snapshot exporter retains the Norgate fields returned by the API, including `Dividend`, rather than reducing the data to OHLC only. See [`scripts/export_norgate_snapshot.py`](../../scripts/export_norgate_snapshot.py) `:124-139`. The snapshot validation contract does not currently require a `Dividend` column, so this must be made explicit before relying on it universally.
+
+### 5.2 Shared backtest ledger
+
+[`alpha/engine/strategy.py`](../../alpha/engine/strategy.py) `:653-823`:
+
+- executes orders;
+- deducts trade notional;
+- deducts commission;
+- marks positions at the current close;
+- calculates `total_value = cash + portfolio_value`.
+
+The common engine does not post:
+
+- ordinary long dividends;
+- short dividend liabilities;
+- dividend receivables;
+- positive-cash interest;
+- negative-cash margin interest;
+- borrow fees;
+- taxes or withholding;
+- corporate-action cash or successor securities.
+
+The engine can create negative cash without applying a shared financing charge. Missing-price positions use a synthetic last-available-close liquidation rather than a complete corporate-action replay.
+
+### 5.3 BENCH and analyzers
+
+Vanilla reports and the standard analyzers consume the same `Strategy.results` equity path:
+
+- RiskAnalysis uses `daily_returns` or reconstructs returns from `total_value`: [`alpha/engine/risk_analysis.py`](../../alpha/engine/risk_analysis.py) `:129-152`.
+- CapacityAnalysis consumes the completed strategy equity and transaction path: [`alpha/engine/capacity_analysis.py`](../../alpha/engine/capacity_analysis.py) `:1041-1043`.
+- ExecutionTiming builds its own timing paths but still uses the same strategy cash and marked-position concepts: [`alpha/engine/execution_timing.py`](../../alpha/engine/execution_timing.py) `:1100-1264`.
+
+No analyzer can reconstruct a dividend or interest event that is absent from the underlying ledger. Existing results are useful price-return research, but they are not complete broker-economic returns.
+
+### 5.4 Incubation
+
+The currently enabled release manifests in this checkout are incubation manifests.
+
+[`alpha/live/incubation.py`](../../alpha/live/incubation.py) `:701-897` records:
+
+- trade notional;
+- commission;
+- updated positions;
+- `total_value = cash + marked positions`.
+
+It does not accrue dividends or interest. Incubation therefore reproduces the same economic omission as the research backtester.
+
+### 5.5 Real IBKR mode
+
+The real broker path reads:
+
+- `TotalCashValue`;
+- `NetLiquidation`;
+- positions;
+- available funds and related account fields.
+
+See [`alpha/live/ibkr_socket_client.py`](../../alpha/live/ibkr_socket_client.py) `:395-428`.
+
+IBKR NetLiq includes dividend accruals as balance-sheet items. Broker cash and NetLiq therefore absorb posted dividends, interest, fees, and taxes at the aggregate account level.
+
+However, the local system does not persist dividend or interest line items. Cash mismatch is intentionally non-blocking in [`alpha/live/reconcile.py`](../../alpha/live/reconcile.py) `:25-46`. Real live equity may therefore be economically correct because IBKR is the source of truth, while the system cannot independently explain why its research/reference cash differs.
+
+### 5.6 Current doctrine conflict
+
+[`CLAUDE.md`](../../CLAUDE.md) `:53` says:
+
+> Use `CAPITALSPECIAL` for individual stocks and `TOTALRETURN` only for benchmark indices.
+
+The WIRED TAA implementation intentionally uses `TOTALRETURN` ETF closes for signals. This is an existing doctrine/code conflict. It must be resolved explicitly rather than hidden by a global loader change.
+
+## 6. WIRED scope
+
+BENCH defines a module as WIRED when it appears in `SUPPORTED_STRATEGY_IMPORT_TUPLE`. The seven current imports are listed in [`alpha/live/release_manifest.py`](../../alpha/live/release_manifest.py) `:14-22`:
+
+1. DV2;
+2. QPI IBS/RSI exit;
+3. TAA BTAL fallback-TQQQ VIX-cash;
+4. TAA BTAL 1/n fallback-TQQQ VIX-cash;
+5. TAA BTAL linearity 1/n fallback-QQQ VIX-cash;
+6. NDX ATR-normalized momentum;
+7. NDX ATR-normalized VXN-scaled momentum.
+
+WIRED does not mean currently submitting broker orders. In this local checkout:
+
+- seven manifest instances are enabled, all in `mode: incubation`;
+- the broker-facing QPI paper manifest is disabled;
+- the broker-facing NDX VXN and TAA live manifests are disabled;
+- two of the WIRED TAA variants have host/template support but no current release manifest.
+
+Runtime VPS state can differ from the local checkout. This document is not an operational live-status report.
+
+## 7. WIRED strategy impact table
+
+| WIRED module | Current signal basis | Execution and valuation | Cash behavior | Main realism consequence |
+|---|---|---|---|---|
+| `strategy_mr_dv2` | Stock `CAPITALSPECIAL` OHLC; 126-day return, NATR, DV2, SMA200 | Same stock series; next open | Empty slots remain cash | Held dividends and cash yield disappear; ex-dividend signal effects are non-directional |
+| `strategy_mr_qpi_ibs_rsi_exit` | Stock `CAPITALSPECIAL` OHLC; 3-day return, SMA200, IBS, QPI, RSI2 | Same stock series; next open | Empty slots remain cash; enabled manifest reserves 5% of account budget | Missing dividends/cash yield depress equity; ex-dividend moves can create artificial oversold states |
+| `strategy_mo_atr_normalized_ndx` | NDX stocks and SPY all use `CAPITALSPECIAL`; momentum, ATR20, stock SMA100, SPY SMA200 | Same stock series; first open of next month | Regime failure can produce 100% cash; incomplete selection leaves residual cash | Long return usually understated, but price-only signals can change holdings and are not simply conservative |
+| `strategy_mo_atr_normalized_ndx_vxn_scaled` | Same NDX signals plus observed VXN level | Same | Deliberate 25%-100% exposure, hence up to 75% cash | Cash-interest omission can be material; missing stock dividends; same signal ambiguity as base NDX |
+| `strategy_taa_df_btal_fallback_tqqq_vix_cash` | Defensive ETF momentum uses `TOTALRETURN`; SPY/VIX gate uses `CAPITALSPECIAL` | Tradeable ETFs use `CAPITALSPECIAL`; next-month open | VIX gate can turn the TQQQ fallback allocation into real cash | Signals are distribution-aware, but ETF distributions and cash yield disappear from account P&L |
+| `strategy_taa_df_btal_1n_fallback_tqqq_vix_cash` | Same, with equal defensive slots | Same | Same VIX cash mechanism | Same accounting gap |
+| `strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash` | `TOTALRETURN` defensive ETF closes feed the linearity signal; SPY/VIX gate uses `CAPITALSPECIAL` | Same, with QQQ fallback | Same VIX cash mechanism | Same accounting gap |
+
+## 8. Strategy-specific examples
+
+### 8.1 DV2
+
+DV2 loads S&P 500 point-in-time stocks as `CAPITALSPECIAL` and `$SPX` as a true `TOTALRETURN` benchmark. Its price-based features are constructed in [`strategies/dv2/strategy_mr_dv2.py`](../../strategies/dv2/strategy_mr_dv2.py) `:158-183`.
+
+The strategy is long-only with up to ten equal slots. Its holding periods are often short, so dividend drag may be smaller than for a monthly ETF allocator, but it is not zero.
+
+Two separate effects exist:
+
+- A position held through entitlement loses the ex-dividend price amount without receiving the dividend in the ledger. This is pessimistic.
+- An ex-dividend move can change DV2, NATR, SMA, and entry eligibility. The direction of that strategy change is not known in advance.
+
+### 8.2 QPI
+
+QPI uses price-based 3-day return, SMA200, IBS, QPI, and RSI2 in [`strategies/qpi/strategy_mr_qpi_ibs_rsi_exit.py`](../../strategies/qpi/strategy_mr_qpi_ibs_rsi_exit.py) `:281-360`.
+
+QPI is particularly sensitive to ex-dividend mechanics because a mechanical price drop can look like short-horizon weakness. IBS is an intraday range location and may be less directly affected, but 3-day return, RSI, QPI, and the trend filter can change.
+
+Blindly replacing the strategy's OHLC with synthetic `TOTALRETURN` OHLC would also be wrong because order-relevant ranges must remain tied to the traded market. A dividend-neutral return or reference-close treatment should be tested as a separate signal change.
+
+The enabled local QPI incubation manifest also uses a `0.95` pod budget fraction, leaving an additional account reserve that may or may not earn broker interest.
+
+### 8.3 NDX ATR-normalized momentum
+
+The NDX loader creates:
+
+```text
+symbols = point-in-time NDX stocks + SPY
+benchmarks = []
+```
+
+See [`strategies/momentum/strategy_mo_atr_normalized_ndx.py`](../../strategies/momentum/strategy_mo_atr_normalized_ndx.py) `:344-367`.
+
+Therefore:
+
+- NDX stocks are `CAPITALSPECIAL`;
+- SPY regime data is `CAPITALSPECIAL`;
+- the benchmark curve produced from the loaded SPY close is also `CAPITALSPECIAL`.
+
+Some helper paths later label the benchmark adjustment as `TOTALRETURN`, while Vanilla artifacts may leave it undeclared. The data curve itself is not total return. This is a concrete provenance defect, not a philosophical signal question.
+
+NDX uses price-only 12-month momentum, ATR20, stock SMA100, and SPY SMA200. Missing dividends normally depress the long ledger, but a change to dividend-aware signals could alter rankings, eligibility, and regime decisions. The impact is not merely an additive return correction.
+
+SPY needs two explicit roles:
+
+```text
+SPY_PRICE  -> regime signal, if that is the chosen strategy definition
+SPY_TR     -> performance benchmark
+```
+
+One loaded column should not silently serve both roles.
+
+### 8.4 VXN-scaled NDX
+
+The VXN variant multiplies the base NDX target weights by:
+
+```text
+clip(22 / VXN, 0.25, 1.00)
+```
+
+See [`strategies/momentum/strategy_mo_atr_normalized_ndx_vxn_scaled.py`](../../strategies/momentum/strategy_mo_atr_normalized_ndx_vxn_scaled.py) `:123-159`.
+
+The strategy is explicitly no-leverage at the brokerage-account level. VXN itself has no dividend issue. The important gaps are:
+
+- missing dividends on the selected stocks;
+- zero interest on deliberate residual cash;
+- the same price-only momentum/ATR/SMA question as base NDX;
+- the same SPY benchmark provenance problem.
+
+### 8.5 TAA Defense First family
+
+TAA already has the cleanest data separation in the WIRED set:
+
+- `TOTALRETURN` closes form defensive ETF signals;
+- `CAPITALSPECIAL` OHLC is used for tradeable ETF execution and valuation;
+- `$SPX TOTALRETURN` is used as the benchmark.
+
+See [`strategies/taa_df/strategy_taa_df.py`](../../strategies/taa_df/strategy_taa_df.py) `:187-250`.
+
+The standard BTAL/TQQQ family ranks `GLD`, `UUP`, `TLT`, `DBC`, and `BTAL`. Failed defensive slots flow to the fallback ETF. The VIX overlay can remove the fallback allocation and leave the residual as cash. See [`strategies/taa_df/strategy_taa_df_fallback_vix_cash_variant_utils.py`](../../strategies/taa_df/strategy_taa_df_fallback_vix_cash_variant_utils.py) `:170-229`.
+
+The inconsistencies are:
+
+- DTB3 is used as an economic hurdle, but residual cash earns zero.
+- TLT, BTAL, QQQ/TQQQ, and other ETF distributions are absent from account P&L.
+- SPY realized volatility for the VIX gate uses `CAPITALSPECIAL`; an ETF distribution can slightly contaminate the 20-day volatility estimate.
+
+TQQQ is an internally leveraged ETF. Its fund financing, fees, and daily reset are already embedded in the traded ETF price. The engine should not add a second brokerage margin charge merely because TQQQ is leveraged. A separate margin charge is required only if the pod itself creates negative broker cash.
+
+### 8.6 Levered All-Weather research variant
+
+The source PDF at `C:/Users/User/Downloads/4weather.pdf` describes a leveraged portfolio of SPY, TLT, DBC, and GLD. It is a useful motivation for this audit because the portfolio combines:
+
+- distribution-paying ETFs;
+- explicit leverage;
+- periodic rebalancing;
+- potentially material cash financing.
+
+The local research-only variant [`strategies/all_weather/strategy_taa_levered_all_weather.py`](../../strategies/all_weather/strategy_taa_levered_all_weather.py):
+
+- uses `CAPITALSPECIAL` ETF prices;
+- charges a fixed 2.4% annual rate on negative cash;
+- does not receive a shared ordinary-dividend ledger;
+- is not WIRED.
+
+Its bias is mixed: omitted distributions are pessimistic, while a fixed 2.4% financing assumption can be optimistic or pessimistic depending on the historical broker-rate regime.
+
+The article does not settle the engine design question. A published equity curve is not enough unless its price adjustment, dividend, financing, tax, and rebalance accounting contracts are explicit.
+
+## 9. Signal-basis decision matrix
+
+There should be no global `use_total_return_bool` that silently changes every feature.
+
+| Feature | Preliminary preferred basis | Reason | Decision status |
+|---|---|---|---|
+| Order fills and position marks | Non-total-return execution basis | Must correspond to tradeable economics | Strong agreement expected |
+| Stop, limit, and gap levels | As-traded or corporate-action-safe price levels | Synthetic total-return levels are not executable | Strong agreement expected |
+| Cross-sectional momentum | Causal economic-return index when the hypothesis is investor wealth | Dividends are part of economic performance | Needs controlled validation |
+| SMA trend | Price or economic index, explicitly chosen | The choice changes regime and eligibility | OPEN |
+| ATR / realized volatility | Dividend-neutral range/return construction | Ordinary distributions should not masquerade as risk | OPEN |
+| IBS | Tradeable daily OHLC | It measures location within the traded daily range | Likely price based |
+| QPI / RSI / short returns | Price data plus explicit dividend-neutralization where appropriate | Ex-dividend drops can create false oversold signals | OPEN |
+| VIX / VXN | Observed index level | These are state variables, not dividend-paying holdings | Strong agreement expected |
+| Performance benchmark | True `TOTALRETURN` series with asserted provenance | Benchmark should represent investor wealth | Strong agreement expected |
+
+A safe causal economic-return index can be built from `CAPITALSPECIAL` prices and dividend events known by each date. That avoids relying on a globally back-adjusted price level where scale-sensitive cross-sectional features could accidentally use future adjustment information.
+
+## 10. Dividend timing
+
+Norgate's `Dividend` indicator is attached to the entitlement session: the trading day before the ex-dividend date. The holder at that session's close is entitled.
+
+Therefore a correct event order must ensure:
+
+- a position held at entitlement close receives the dividend;
+- a buyer at the next ex-dividend open does not receive it;
+- a seller at the ex-dividend open retains the entitlement;
+- a short held at entitlement close owes the dividend;
+- the event is posted exactly once.
+
+Two accounting models are possible:
+
+### Model A - RealTest-like research accrual
+
+Credit or debit account equity on the ex-dividend session. This is practical with Norgate daily data and closely matches economic total return. RealTest uses this type of mark-to-market dividend credit and does not automatically reinvest the cash into the same position.
+
+### Model B - Broker-style receivable and pay-date cash
+
+Create a dividend receivable on the ex-date, include it in NAV, and convert it to settled cash on pay date. This is closer to IBKR statements but requires reliable pay-date, tax, fee, correction, and currency data.
+
+The joint verdict must decide whether phase 1 targets research-economic parity or exact broker statement timing. A reasonable staged approach is Model A first, followed by Model B when the data contract exists.
+
+## 11. Cash, financing, and borrow
+
+The ledger must distinguish:
+
+- positive settled cash interest;
+- negative cash or margin interest;
+- short-stock borrow fees;
+- interest on short proceeds;
+- ETF-internal leverage;
+- unsettled trade cash;
+- account-specific broker thresholds and tiers.
+
+For IBKR, positive cash interest depends on account NAV, cash balance, currency, account segment, and current rate tiers. The rate changes over time. A constant current rate or a constant DTB3 proxy is not a historically exact broker model.
+
+The conservative fallback can remain zero positive-cash interest, but it must be declared as a pessimistic assumption. Negative cash must not remain free.
+
+## 12. Issue register
+
+| ID | Issue | Expected bias direction | Impact | Proposed mitigation |
+|---|---|---|---|---|
+| ER-001 | No shared dividend ledger | Long pessimistic; short optimistic | High | Explicit long credit, short debit, and entitlement tests |
+| ER-002 | Positive residual cash earns zero | Usually pessimistic | High for VXN/TAA cash; potentially material for DV2/QPI | Configurable broker cash policy with zero-rate fallback |
+| ER-003 | Negative cash can be free | Optimistic | High for leveraged books | Margin-interest ledger |
+| ER-004 | Price-only signals react to ex-dividend moves | Non-directional strategy change | High for QPI; Medium for DV2/NDX | Feature-specific dividend-neutral signal research |
+| ER-005 | `CAPITALSPECIAL` described as literal trade-as | Audit/provenance error | Medium | Use precise terminology; decide whether true raw corporate-action replay is required |
+| ER-006 | NDX SPY benchmark data and metadata disagree or are undeclared | Benchmark comparison unreliable | Medium to High | Load separate SPY price and SPY TR roles; assert provenance |
+| ER-007 | Incubation omits events that live IBKR NetLiq includes | Systematic reference drift | High | Shared economic-event model plus broker event reconciliation |
+| ER-008 | Saved artifacts omit accounting policy metadata | Results can be misinterpreted | Medium | Persist signal, execution, dividend, interest, and tax contracts |
+| ER-009 | `ASSUMPTIONS_AND_GAPS.md` has no dedicated ordinary-dividend/cash-interest entry | Hidden known gap | Medium | Add a formal gap only after the joint verdict defines scope |
+
+## 13. Preliminary Codex verdict
+
+### Decision 1 - execution and valuation
+
+`TOTALRETURN` must never be used for order fills.
+
+Continue using a non-total-return execution basis in the near term. Describe current `CAPITALSPECIAL` accurately as a normalized proxy. True historical as-traded prices plus explicit split/corporate-action share events are the more exact long-term design.
+
+### Decision 2 - dividends
+
+Dividends must be explicit ledger events.
+
+For phase 1, use prior-entitlement-close positions and recognize the economic credit/debit on the ex-dividend transition. Do not automatically reinvest it in the same security.
+
+### Decision 3 - cash and financing
+
+Add an explicit policy for positive and negative cash. Preserve zero positive-cash return as an allowed conservative mode, but never leave negative cash uncharged.
+
+Do not double-charge leveraged ETFs for leverage already embedded in their NAV.
+
+### Decision 4 - signals
+
+Do not make a global signal adjustment change.
+
+- Preserve current WIRED strategy semantics until controlled comparisons exist.
+- Test dividend-aware NDX momentum separately from ATR and SMA.
+- Test dividend-neutral short-horizon features for QPI and DV2.
+- Keep observed VIX/VXN levels.
+- Keep TAA's signal/execution separation as the leading architectural example, while explicitly resolving its conflict with `CLAUDE.md`.
+
+### Decision 5 - benchmark truth
+
+Fix data provenance so the adjustment label is generated and asserted by the loader. Give SPY separate regime and benchmark series where necessary.
+
+### Decision 6 - release policy
+
+Do not silently overwrite historical BENCH results. Version the accounting contract, regenerate the WIRED baselines, and show old versus corrected results.
+
+## 14. Proposed implementation order after joint approval
+
+No implementation is authorized by this document alone.
+
+If the joint verdict accepts the direction, the lowest-risk sequence is:
+
+1. Add explicit accounting-policy metadata and the formal gap register entry.
+2. Add a shadow dividend ledger and reconciliation diagnostics without changing saved headline equity.
+3. Validate entitlement timing, long/short signs, and CS-plus-dividend parity against Norgate TR.
+4. Activate corrected equity under a versioned engine/accounting contract.
+5. Add cash-interest and margin-interest policies.
+6. Extend incubation and its cash-ledger schema to non-order economic events.
+7. Fix benchmark provenance and separate SPY signal/benchmark roles.
+8. Run controlled signal-basis variants; do not mutate WIRED signals in place.
+9. Regenerate Vanilla, Risk, Capacity, Stress, and reference artifacts for every WIRED strategy.
+10. Reconcile corrected reference equity against IBKR EOD NetLiq and statement events before enabling real capital.
+
+## 15. Minimum acceptance tests
+
+A corrected implementation should not be accepted until all of these are demonstrated:
+
+- A long held at entitlement close receives exactly one dividend.
+- A same-open ex-date buyer receives no dividend.
+- A same-open ex-date seller retains entitlement.
+- A short held at entitlement close pays the dividend.
+- A zero-market-move ex-dividend example leaves gross economic NAV unchanged.
+- `CAPITALSPECIAL + explicit eligible dividends` matches Norgate `TOTALRETURN` buy-and-hold wealth within a documented tolerance.
+- No future dividend information enters a historical signal.
+- No dividend is counted both in a price series and in the ledger.
+- Positive and negative cash use explicit, dated policies.
+- TAA residual cash and VXN residual cash receive the selected treatment.
+- Leveraged ETF financing is not double-counted.
+- NDX has separate, correctly labelled SPY regime and SPY benchmark series.
+- Incubation and Vanilla produce the same accounting events under the same price path.
+- IBKR NetLiq can be reconciled to cash, positions, receivables, and liabilities.
+- Saved artifacts declare signal adjustment, execution adjustment, dividend policy, cash policy, tax policy, and engine version.
+- All WIRED analyzer outputs are regenerated and compared before a deployment decision.
+
+## 16. Blast radius of a future implementation
+
+This is not a small strategy edit.
+
+At minimum, a shared dividend or interest implementation would touch Tier 2 engine behavior:
+
+- loader and snapshot contracts;
+- `Strategy` cash and equity;
+- alternate execution timing;
+- reports, metrics, capacity, risk, and portfolio aggregation;
+- saved artifact schemas.
+
+If extended to incubation, released configs, broker reconciliation, or live state, it becomes Tier 3:
+
+- incubation cash ledger;
+- state-store schema;
+- EOD snapshots;
+- reconciliation and reference comparison;
+- dashboard/operator fields;
+- backward compatibility of existing pod state.
+
+Changing any WIRED signal basis is also a separate quantitative strategy change and requires the quant-pitfalls, parity, and coverage review stack.
+
+## 17. Questions for Claude
+
+Claude should answer each question directly:
+
+1. Is the verified description of `CAPITALSPECIAL`, `TOTALRETURN`, and the current ledger correct?
+2. Should phase 1 recognize dividends as RealTest-like ex-date equity events, or should it wait for a full receivable/pay-date model?
+3. Should ordinary dividends be gross, net of withholding, or policy-configurable?
+4. Which exact NDX features should use economic returns: momentum, SMA, ATR, or some subset?
+5. How should QPI and DV2 neutralize ex-dividend moves without replacing executable OHLC?
+6. Should TAA retain `TOTALRETURN` ETF signals despite the current `CLAUDE.md` rule?
+7. Is zero interest an acceptable declared conservative mode for positive cash? What is the minimum acceptable negative-cash model?
+8. Should current BENCH artifacts be labelled `price-return ledger` until they are regenerated?
+9. Is fixing NDX benchmark provenance a prerequisite before any further performance verdict?
+10. Does the proposed phased implementation minimize live/research parity risk, or should the order change?
+
+## 18. Review and joint-verdict table
+
+| Decision | Codex position | Claude position | Joint verdict |
+|---|---|---|---|
+| Fill and mark price | Never `TOTALRETURN`; keep non-TR basis | PENDING | OPEN |
+| Meaning of current `CAPITALSPECIAL` | Adjusted execution proxy, not literal as-traded | PENDING | OPEN |
+| Dividend accounting | Explicit long credit and short debit | PENDING | OPEN |
+| Dividend timing | Ex-date economic event first; receivable/pay-date later | PENDING | OPEN |
+| Positive cash | Explicit broker policy; zero allowed only if declared | PENDING | OPEN |
+| Negative cash | Must incur financing cost | PENDING | OPEN |
+| Signals | Feature-specific; no global TR switch | PENDING | OPEN |
+| TAA TR signals | Defensible existing exception, doctrine must be clarified | PENDING | OPEN |
+| NDX benchmark provenance | Must be corrected | PENDING | OPEN |
+| Existing results | Preserve and relabel/version; regenerate after change | PENDING | OPEN |
+| Implementation authorization | None until joint approval | PENDING | OPEN |
+
+## 19. Evidence and external references
+
+### Repository sources
+
+- [`QUANT_PHILOSOPHY.md`](../../QUANT_PHILOSOPHY.md)
+- [`ASSUMPTIONS_AND_GAPS.md`](../../ASSUMPTIONS_AND_GAPS.md)
+- [`CLAUDE.md`](../../CLAUDE.md)
+- [`data/norgate_loader.py`](../../data/norgate_loader.py)
+- [`alpha/engine/strategy.py`](../../alpha/engine/strategy.py)
+- [`alpha/live/release_manifest.py`](../../alpha/live/release_manifest.py)
+- [`alpha/live/incubation.py`](../../alpha/live/incubation.py)
+- [`alpha/live/ibkr_socket_client.py`](../../alpha/live/ibkr_socket_client.py)
+- [`alpha/live/reconcile.py`](../../alpha/live/reconcile.py)
+- [`docs/research/ENGINE_REALISM_DIVIDENDS_AND_REALTEST_HE.md`](ENGINE_REALISM_DIVIDENDS_AND_REALTEST_HE.md)
+
+### External references
+
+- Norgate Dividend indicator and entitlement timing: <https://norgatedata.com/data-content-tables.php>
+- RealTest adjustment modes: <https://mhptrading.com/docs/topics/idh-topic1390.htm>
+- RealTest dividend handling: <https://mhptrading.com/docs/topics/idh-topic1100.htm>
+- RealTest `IgnoreDividends`: <https://mhptrading.com/docs/topics/idh-topic10807.htm>
+- IBKR dividend accruals and NAV: <https://www.ibkrguides.com/reportingreference/reportguide/changeindividendaccruals_realized.htm>
+- IBKR cash-interest calculations: <https://www.interactivebrokers.com/en/pricing/pricing-calculations-int.php>
+
+## 20. Review log
+
+### Codex - 2026-07-25
+
+- Completed a read-only audit of the shared engine, the original PDF, official Norgate/RealTest/IBKR documentation, all seven WIRED modules, local release manifests, incubation accounting, and broker snapshot accounting.
+- Recorded the preliminary verdict above.
+- Made no implementation or release change.
+
+### Claude
+
+**Status:** PENDING
+
+**Reviewer:**
+
+**Date:**
+
+**Facts disputed:**
+
+**Decisions accepted:**
+
+**Decisions rejected:**
+
+**Alternative proposal:**
+
+**Final verdict:**
+
+### Joint verdict
+
+**Status:** OPEN
+
+**Approved accounting contract:**
+
+**Approved signal contracts:**
+
+**Required experiments:**
+
+**Implementation scope:**
+
+**Deployment gate:**

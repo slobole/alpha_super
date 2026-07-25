@@ -88,13 +88,46 @@ METRIC_HELP_TEXT_DICT = {
     'Max. Drawdown [%]': 'Largest peak-to-trough decline in the realized equity curve.',
     'MAR Ratio': 'Annualized return divided by the absolute value of maximum drawdown.',
     'Sortino Ratio': (
-        'Annualized return divided by annualized downside deviation, so only losing days count '
-        'toward risk. Downside deviation averages squared negative returns over all observations.'
+        'Like Sharpe, but only losing days count as risk. '
+        'sortino = annual return / (sqrt(mean(min(r,0)^2)) * sqrt(252)). Higher is better.'
     ),
     'Ulcer Index': (
-        'Root mean square of the drawdown path in per cent, penalizing both how deep drawdowns '
-        'go and how long they last. Lower is better.'
+        'How deep drawdowns go and how long they last, in one number. '
+        'ulcer = sqrt(mean(drawdown_t^2)), drawdown in per cent. Lower is better.'
     ),
+    'Volatility (Monthly) [%]': (
+        'Spread of monthly returns, not annualized — what a monthly track record shows. '
+        'vol = std(monthly returns).'
+    ),
+    'Positive Months [%]': (
+        'Share of months that finished up. '
+        'positive months = count(monthly return > 0) / count(months).'
+    ),
+    'Skewness (Daily)': (
+        'Whether the tail is on the losing or winning side. Negative means rare large losses '
+        'against many small gains; positive is the reverse. Zero is symmetric.'
+    ),
+    'Skewness (Monthly)': (
+        'The same shape measured on monthly returns, which is the figure allocators quote. '
+        'Monthly and daily skew can disagree because compounding reshapes the distribution.'
+    ),
+    'Excess Kurtosis (Daily)': (
+        'How fat the tails are versus a normal distribution, which scores zero. '
+        'Above zero means extreme days happen more often than a bell curve predicts.'
+    ),
+    'Worst Day [%]': 'The single worst daily return in the sample.',
+    'Worst Month [%]': 'The single worst monthly return in the sample.',
+    'VaR 95% (Daily) [%]': (
+        'The daily loss only the worst 1-in-20 days exceed. Historical, not modelled: '
+        'VaR = 5th percentile of daily returns.'
+    ),
+    'CVaR 95% (Daily) [%]': (
+        'The average loss on the days that breach VaR — how bad it gets once it is bad. '
+        'CVaR = mean(returns <= VaR 95%).'
+    ),
+    'AAR [%]': 'Average absolute daily move, annualized. A size-of-swing measure, not a return.',
+    'Downside L1 [%]': 'Average size of a losing day. mean(|r|) over days where r < 0.',
+    '# Drawdowns / month': 'Drawdown episodes per month. The annual rate divided by twelve.',
     'Time Under Water [%]': 'Percentage of stored days when equity was below its previous running peak.',
     'Avg. Drawdown [%]': 'Mean trough depth across distinct below-peak drawdown episodes.',
     'Max. Drawdown Duration [days]': 'Longest number of stored observations in one below-peak episode.',
@@ -161,6 +194,7 @@ _PERFORMANCE_SUMMARY_SECTION_TUPLE = (
             'Time Under Water [%]',
             '# Drawdowns',
             '# Drawdowns / year',
+            '# Drawdowns / month',
         ),
         False,
     ),
@@ -1662,6 +1696,17 @@ def _augment_summary_display_metrics(strategy, summary_df: pd.DataFrame) -> pd.D
 
     # Full-sample beta: the strategy against its benchmark, and a benchmark
     # column against itself is 1.0 by definition.
+    # Drawdown frequency per month, derived from the annual count already in
+    # the summary so both rates always agree.
+    for column_name_str in augmented_summary_df.columns:
+        annual_drawdown_count_obj = _safe_summary_metric_value(
+            augmented_summary_df, column_name_str, '# Drawdowns / year'
+        )
+        if annual_drawdown_count_obj is not None and np.isfinite(float(annual_drawdown_count_obj)):
+            augmented_summary_df.loc['# Drawdowns / month', column_name_str] = (
+                float(annual_drawdown_count_obj) / 12.0
+            )
+
     strategy_beta_float = _strategy_unconditional_beta_float(strategy)
     if strategy_beta_float is not None and 'Strategy' in augmented_summary_df.columns:
         augmented_summary_df.loc['Beta', 'Strategy'] = strategy_beta_float
@@ -1752,7 +1797,9 @@ def _format_performance_summary(
         )
 
     if extra_section_html_str:
-        section_html_list.append(extra_section_html_str)
+        # Trade activity is the first thing read about a book, so it leads the
+        # summary rather than sitting behind seven tables of risk statistics.
+        section_html_list.insert(0, extra_section_html_str)
     return '<div class="summary-section-stack">' + ''.join(section_html_list) + '</div>'
 
 
@@ -3830,6 +3877,52 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
 </html>'''
 
 
+_PLATE_CAPTION_PATTERN = re.compile(r'<p class="metric-context">(.*?)</p>', re.S)
+
+
+def _hoist_plate_captions_html(plate_content_html_str: str) -> str:
+    """Move a plate's explanatory captions into a hover marker on its heading.
+
+    Long captions under every figure cost more vertical space than the charts
+    they describe. The text is not deleted — it moves into the same info marker
+    the metric tables already use, so it is one hover away and the figures get
+    the room back.
+
+    *** CRITICAL*** Captions carrying emphasis are left in place. Those are the
+    caveats and data warnings — a non-finite trade ledger, a biased estimate —
+    and a warning that has to be hovered to be discovered is not a warning.
+    """
+    caption_match_list = _PLATE_CAPTION_PATTERN.findall(plate_content_html_str)
+    hoistable_caption_list = [
+        caption_html_str for caption_html_str in caption_match_list
+        if '<strong>' not in caption_html_str
+    ]
+    if len(hoistable_caption_list) == 0:
+        return plate_content_html_str
+
+    for caption_html_str in hoistable_caption_list:
+        plate_content_html_str = plate_content_html_str.replace(
+            f'<p class="metric-context">{caption_html_str}</p>', '', 1
+        )
+
+    caption_text_str = ' '.join(
+        ' '.join(html.unescape(re.sub(r'<[^>]+>', '', caption_html_str)).split())
+        for caption_html_str in hoistable_caption_list
+    )
+    escaped_caption_str = html.escape(caption_text_str, quote=True)
+    marker_html_str = (
+        f' <button type="button" class="metric-help" aria-label="{escaped_caption_str}" '
+        f'aria-expanded="false" data-help="{escaped_caption_str}">i</button>'
+    )
+    return re.sub(
+        r'(<h2>.*?)(</h2>)',
+        lambda m: f'{m.group(1)}{marker_html_str}{m.group(2)}',
+        plate_content_html_str,
+        count=1,
+        flags=re.S,
+    )
+
+
 def _plate_anchor_id_str(plate_index_int: int) -> str:
     return f'plate-{plate_index_int:02d}'
 
@@ -3995,7 +4088,8 @@ def _build_spec_report_body_html(
         if content_html_str and content_html_str.strip()
     ]
     plate_html_str = ''.join(
-        f'<div class="plate" id="{_plate_anchor_id_str(plate_index_int)}">{content_html_str}</div>'
+        f'<div class="plate" id="{_plate_anchor_id_str(plate_index_int)}">'
+        f'{_hoist_plate_captions_html(content_html_str)}</div>'
         for plate_index_int, content_html_str in enumerate(active_plate_content_html_list, start=1)
     )
     return f'''<div class="report-shell">
