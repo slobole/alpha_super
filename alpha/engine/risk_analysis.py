@@ -2139,7 +2139,7 @@ def _return_histogram_svg(
             gridline_html_list.append(
                 f"<line x1=\"{left_float:.1f}\" y1=\"{tick_y_float:.1f}\" "
                 f"x2=\"{left_float + plot_width_float:.1f}\" y2=\"{tick_y_float:.1f}\" "
-                "stroke=\"{SIGNATURE_PALETTE_DICT['grid']}\" stroke-width=\"1\" />"
+                f"stroke=\"{SIGNATURE_PALETTE_DICT['grid']}\" stroke-width=\"1\" />"
             )
         gridline_html_list.append(
             f"<text x=\"{left_float - 6:.1f}\" y=\"{tick_y_float + 4:.1f}\" "
@@ -2277,7 +2277,7 @@ def _bootstrap_equity_svg(equity_path_df: pd.DataFrame) -> str:
             gridline_html_list.append(
                 f"<line x1=\"{left_float:.1f}\" y1=\"{tick_y_float:.1f}\" "
                 f"x2=\"{left_float + plot_width_float:.1f}\" y2=\"{tick_y_float:.1f}\" "
-                "stroke=\"{SIGNATURE_PALETTE_DICT['grid']}\" stroke-width=\"1\" />"
+                f"stroke=\"{SIGNATURE_PALETTE_DICT['grid']}\" stroke-width=\"1\" />"
             )
         gridline_html_list.append(
             f"<text x=\"{left_float - 6:.1f}\" y=\"{tick_y_float + 4:.1f}\" "
@@ -2337,7 +2337,7 @@ def _bootstrap_equity_svg(equity_path_df: pd.DataFrame) -> str:
     legend_html_list = [
         f"<rect x=\"{legend_x_float:.1f}\" y=\"{legend_y_float:.1f}\" "
         f"width=\"{legend_box_width_float:.1f}\" height=\"{legend_box_height_float:.1f}\" "
-        "fill=\"{SIGNATURE_PALETTE_DICT['page']}\" fill-opacity=\"0.92\" stroke=\"{SIGNATURE_PALETTE_DICT['border']}\" stroke-width=\"1\" rx=\"4\" />"
+        f"fill=\"{SIGNATURE_PALETTE_DICT['page']}\" fill-opacity=\"0.92\" stroke=\"{SIGNATURE_PALETTE_DICT['border']}\" stroke-width=\"1\" rx=\"4\" />"
     ]
     for legend_idx_int, (_path_kind_str, stroke_str, _opacity_float, _stroke_width_float, label_str) in enumerate(overlay_tuple):
         row_y_float = legend_y_float + 14.0 + legend_idx_int * 16.0

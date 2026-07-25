@@ -12,6 +12,7 @@ not decay one convenient exception at a time.
 
 from __future__ import annotations
 
+import ast
 import re
 import unittest
 from pathlib import Path
@@ -127,6 +128,38 @@ class ThemeColorOwnershipTests(unittest.TestCase):
             'CSS variables referenced but never defined in the same stylesheet. '
             'Every declaration using them is dropped at render time:\n  '
             + '\n  '.join(finding_list),
+        )
+
+    def test_no_theme_placeholder_is_left_unrendered(self):
+        """A plain string holding an f-string placeholder emits it verbatim.
+
+        These modules were converted from hex literals to palette lookups by
+        bulk edit, which left ``"stroke=\\"{SIGNATURE_PALETTE_DICT['grid']}\\""``
+        on strings that were never marked ``f``. The result reaches the page as
+        a literal brace expression, and since it is not a valid colour the SVG
+        element falls back to a stroke of ``none`` -- an invisible gridline, not
+        a wrong one. No hex literal is involved, so the colour guard is blind
+        to it and the source reads as correct.
+        """
+        placeholder_pattern = re.compile(r'\{\s*(?:SIGNATURE_PALETTE_DICT|blend_hex_color_str)')
+        finding_list: list[str] = []
+        for module_path in _GUARDED_MODULE_PATH_TUPLE + _PENDING_CONVERSION_MODULE_PATH_TUPLE:
+            source_text_str = (REPO_ROOT_PATH / module_path).read_text(encoding='utf-8')
+            for node in ast.walk(ast.parse(source_text_str)):
+                # A JoinedStr (f-string) renders its placeholders; a bare
+                # Constant cannot, so any placeholder inside one is dead text.
+                if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+                    continue
+                if placeholder_pattern.search(node.value):
+                    finding_list.append(
+                        f'{module_path}:{node.lineno}: {node.value.strip()[:80]}'
+                    )
+
+        self.assertEqual(
+            finding_list,
+            [],
+            'Theme placeholders inside non-f-strings. They are emitted literally '
+            'and render as an invalid value:\n  ' + '\n  '.join(finding_list),
         )
 
     def test_guarded_modules_exist(self):
