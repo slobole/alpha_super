@@ -1,9 +1,12 @@
 import os
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pandas as pd
+
+from alpha.engine.backtest import run_daily
 
 TEST_NORGATEDATA_ROOT = Path(__file__).resolve().parents[1] / ".tmp_norgatedata"
 TEST_NORGATEDATA_ROOT.mkdir(exist_ok=True)
@@ -13,6 +16,11 @@ from strategies.momentum.strategy_mo_radge_ndx import RadgeMomentumNdxStrategy
 from strategies.momentum.strategy_mo_atr_normalized_ndx import (
     AtrNormalizedNdxStrategy,
     DEFAULT_CONFIG as NDX_DEFAULT_CONFIG,
+    TOTAL_RETURN_BENCHMARK_SUFFIX_STR,
+    append_total_return_benchmark_data_df,
+    configure_total_return_benchmark_provenance,
+    get_monthly_decision_close_df,
+    map_month_end_decision_dates_to_rebalance_schedule_df,
 )
 from strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled import (
     VxnScaledAtrNormalizedNdxStrategy,
@@ -79,6 +87,263 @@ class AtrNormalizedVariantConstructionTests(unittest.TestCase):
         self.assertEqual(NDX_DEFAULT_CONFIG.indexname_str, "Nasdaq 100")
         self.assertEqual(NDX_DEFAULT_CONFIG.regime_symbol_str, "SPY")
         self.assertEqual(NDX_DEFAULT_CONFIG.max_positions_int, 10)
+
+    def test_ndx_total_return_benchmark_is_loaded_under_separate_alias(self):
+        date_index = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        capital_price_df = pd.DataFrame(
+            {
+                ("AAA", "Close"): [10.0, 11.0],
+                ("SPY", "Close"): [100.0, 99.0],
+            },
+            index=date_index,
+        )
+        capital_price_df.columns = pd.MultiIndex.from_tuples(capital_price_df.columns)
+        total_return_price_df = pd.DataFrame(
+            {("SPY", "Close"): [100.0, 101.0]},
+            index=date_index,
+        )
+        total_return_price_df.columns = pd.MultiIndex.from_tuples(total_return_price_df.columns)
+
+        with mock.patch(
+            "strategies.momentum.strategy_mo_atr_normalized_ndx.load_raw_prices",
+            return_value=total_return_price_df,
+        ) as load_raw_prices_mock:
+            combined_price_df = append_total_return_benchmark_data_df(
+                pricing_data_df=capital_price_df,
+                config_obj=NDX_DEFAULT_CONFIG,
+            )
+
+        benchmark_data_symbol_str = (
+            f"{NDX_DEFAULT_CONFIG.regime_symbol_str}{TOTAL_RETURN_BENCHMARK_SUFFIX_STR}"
+        )
+        self.assertIn(("SPY", "Close"), combined_price_df.columns)
+        self.assertIn((benchmark_data_symbol_str, "Close"), combined_price_df.columns)
+        self.assertAlmostEqual(float(combined_price_df.iloc[-1][("SPY", "Close")]), 99.0)
+        self.assertAlmostEqual(
+            float(combined_price_df.iloc[-1][(benchmark_data_symbol_str, "Close")]),
+            101.0,
+        )
+        load_raw_prices_mock.assert_called_once_with(
+            symbols=[],
+            benchmarks=["SPY"],
+            start_date=NDX_DEFAULT_CONFIG.history_start_date_str,
+            end_date=NDX_DEFAULT_CONFIG.end_date_str,
+        )
+
+    def test_ndx_total_return_benchmark_does_not_enter_signal_features(self):
+        date_index = pd.bdate_range("2023-01-02", periods=280)
+        pricing_data_df = pd.DataFrame(
+            {
+                ("AAA", "Open"): np.linspace(99.0, 119.0, len(date_index)),
+                ("AAA", "High"): np.linspace(101.0, 121.0, len(date_index)),
+                ("AAA", "Low"): np.linspace(98.0, 118.0, len(date_index)),
+                ("AAA", "Close"): np.linspace(100.0, 120.0, len(date_index)),
+                ("SPY", "Close"): np.linspace(200.0, 230.0, len(date_index)),
+                ("SPY_TR", "Close"): np.linspace(200.0, 250.0, len(date_index)),
+            },
+            index=date_index,
+        )
+        pricing_data_df.columns = pd.MultiIndex.from_tuples(pricing_data_df.columns)
+        strategy_obj = AtrNormalizedNdxStrategy(
+            name="AtrNormalizedNdxBenchmarkIsolationTest",
+            benchmarks=["SPY"],
+            rebalance_schedule_df=self.make_rebalance_schedule_df(),
+            regime_symbol_str="SPY",
+            capital_base=100_000.0,
+            slippage=0.0,
+            commission_per_share=0.0,
+            commission_minimum=0.0,
+            lookback_month_int=1,
+            index_trend_window_int=2,
+            stock_trend_window_int=2,
+            max_positions_int=1,
+        )
+        configure_total_return_benchmark_provenance(
+            strategy_obj=strategy_obj,
+            config_obj=NDX_DEFAULT_CONFIG,
+        )
+
+        signal_data_df = strategy_obj.compute_signals(pricing_data_df)
+
+        self.assertIn(("AAA", "risk_adj_score_ser"), signal_data_df.columns)
+        self.assertNotIn(("SPY_TR", "risk_adj_score_ser"), signal_data_df.columns)
+
+    def test_ndx_total_return_benchmark_changes_only_benchmark_results(self):
+        date_index = pd.bdate_range("2023-01-02", periods=300)
+        stock_close_ser = pd.Series(
+            np.linspace(100.0, 140.0, len(date_index)),
+            index=date_index,
+        )
+        regime_close_ser = pd.Series(
+            np.linspace(200.0, 230.0, len(date_index)),
+            index=date_index,
+        )
+        pricing_data_df = pd.DataFrame(
+            {
+                ("AAA", "Open"): stock_close_ser + 0.10,
+                ("AAA", "High"): stock_close_ser + 1.00,
+                ("AAA", "Low"): stock_close_ser - 1.00,
+                ("AAA", "Close"): stock_close_ser,
+                ("SPY", "Open"): regime_close_ser + 0.10,
+                ("SPY", "High"): regime_close_ser + 1.00,
+                ("SPY", "Low"): regime_close_ser - 1.00,
+                ("SPY", "Close"): regime_close_ser,
+            },
+            index=date_index,
+        )
+        pricing_data_df.columns = pd.MultiIndex.from_tuples(pricing_data_df.columns)
+        monthly_decision_close_df = get_monthly_decision_close_df(
+            pd.DataFrame({"AAA": stock_close_ser}, index=date_index)
+        )
+        rebalance_schedule_df = map_month_end_decision_dates_to_rebalance_schedule_df(
+            decision_date_index=pd.DatetimeIndex(monthly_decision_close_df.index),
+            execution_index=date_index,
+        )
+        universe_df = pd.DataFrame({"AAA": 1}, index=date_index)
+
+        def build_strategy_obj(name_str: str) -> AtrNormalizedNdxStrategy:
+            strategy_obj = AtrNormalizedNdxStrategy(
+                name=name_str,
+                benchmarks=["SPY"],
+                rebalance_schedule_df=rebalance_schedule_df,
+                regime_symbol_str="SPY",
+                capital_base=100_000.0,
+                slippage=0.0,
+                commission_per_share=0.0,
+                commission_minimum=0.0,
+                lookback_month_int=1,
+                index_trend_window_int=2,
+                stock_trend_window_int=2,
+                max_positions_int=1,
+            )
+            strategy_obj.universe_df = universe_df
+            return strategy_obj
+
+        price_benchmark_strategy_obj = build_strategy_obj("NdxPriceBenchmark")
+        total_return_benchmark_strategy_obj = build_strategy_obj("NdxTotalReturnBenchmark")
+        configure_total_return_benchmark_provenance(
+            strategy_obj=total_return_benchmark_strategy_obj,
+            config_obj=NDX_DEFAULT_CONFIG,
+        )
+        total_return_pricing_data_df = pricing_data_df.copy()
+        total_return_pricing_data_df[("SPY_TR", "Close")] = np.linspace(
+            200.0,
+            260.0,
+            len(date_index),
+        )
+        total_return_pricing_data_df = total_return_pricing_data_df.sort_index(axis=1)
+
+        run_daily(
+            price_benchmark_strategy_obj,
+            pricing_data_df,
+            calendar=date_index,
+            show_progress=False,
+            audit_override_bool=False,
+        )
+        run_daily(
+            total_return_benchmark_strategy_obj,
+            total_return_pricing_data_df,
+            calendar=date_index,
+            show_progress=False,
+            audit_override_bool=False,
+        )
+
+        pd.testing.assert_series_equal(
+            price_benchmark_strategy_obj.results["total_value"],
+            total_return_benchmark_strategy_obj.results["total_value"],
+            check_names=False,
+        )
+        transaction_field_list = [
+            "trade_id",
+            "bar",
+            "asset",
+            "amount",
+            "price",
+            "total_value",
+            "commission",
+        ]
+        pd.testing.assert_frame_equal(
+            price_benchmark_strategy_obj._transactions[transaction_field_list].reset_index(drop=True),
+            total_return_benchmark_strategy_obj._transactions[transaction_field_list].reset_index(drop=True),
+        )
+        self.assertNotAlmostEqual(
+            float(price_benchmark_strategy_obj.results["SPY"].iloc[-1]),
+            float(total_return_benchmark_strategy_obj.results["SPY"].iloc[-1]),
+        )
+
+        vxn_scale_signal_df = pd.DataFrame(
+            {"vxn_exposure_scale_float": [0.5]},
+            index=pd.DatetimeIndex([date_index[0]]),
+        )
+
+        def build_vxn_strategy_obj(name_str: str) -> VxnScaledAtrNormalizedNdxStrategy:
+            strategy_obj = VxnScaledAtrNormalizedNdxStrategy(
+                name=name_str,
+                benchmarks=["SPY"],
+                rebalance_schedule_df=rebalance_schedule_df,
+                vxn_scale_signal_df=vxn_scale_signal_df,
+                regime_symbol_str="SPY",
+                capital_base=100_000.0,
+                slippage=0.0,
+                commission_per_share=0.0,
+                commission_minimum=0.0,
+                lookback_month_int=1,
+                index_trend_window_int=2,
+                stock_trend_window_int=2,
+                max_positions_int=1,
+            )
+            strategy_obj.universe_df = universe_df
+            return strategy_obj
+
+        vxn_price_benchmark_strategy_obj = build_vxn_strategy_obj(
+            "VxnPriceBenchmark"
+        )
+        vxn_total_return_benchmark_strategy_obj = build_vxn_strategy_obj(
+            "VxnTotalReturnBenchmark"
+        )
+        configure_total_return_benchmark_provenance(
+            strategy_obj=vxn_total_return_benchmark_strategy_obj,
+            config_obj=VXN_SCALED_NDX_DEFAULT_CONFIG,
+        )
+        run_daily(
+            vxn_price_benchmark_strategy_obj,
+            pricing_data_df,
+            calendar=date_index,
+            show_progress=False,
+            audit_override_bool=False,
+        )
+        run_daily(
+            vxn_total_return_benchmark_strategy_obj,
+            total_return_pricing_data_df,
+            calendar=date_index,
+            show_progress=False,
+            audit_override_bool=False,
+        )
+
+        pd.testing.assert_series_equal(
+            vxn_price_benchmark_strategy_obj.results["total_value"],
+            vxn_total_return_benchmark_strategy_obj.results["total_value"],
+            check_names=False,
+        )
+        pd.testing.assert_series_equal(
+            vxn_price_benchmark_strategy_obj.results["cash"],
+            vxn_total_return_benchmark_strategy_obj.results["cash"],
+            check_names=False,
+        )
+        pd.testing.assert_frame_equal(
+            vxn_price_benchmark_strategy_obj._transactions[
+                transaction_field_list
+            ].reset_index(drop=True),
+            vxn_total_return_benchmark_strategy_obj._transactions[
+                transaction_field_list
+            ].reset_index(drop=True),
+        )
+        self.assertNotAlmostEqual(
+            float(vxn_price_benchmark_strategy_obj.results["SPY"].iloc[-1]),
+            float(
+                vxn_total_return_benchmark_strategy_obj.results["SPY"].iloc[-1]
+            ),
+        )
 
     def test_weekly_ndx_default_config_points_to_nasdaq_100_with_52_week_lookback(self):
         self.assertEqual(WEEKLY_NDX_DEFAULT_CONFIG.indexname_str, "Nasdaq 100")

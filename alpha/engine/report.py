@@ -624,6 +624,13 @@ def _strategy_metadata_dict(strategy, pickle_path: Path) -> dict:
         'class_file': Path(class_file).resolve() if class_file is not None else None,
         'capital_base': float(strategy._capital_base),
         'benchmarks': list(strategy._benchmarks),
+        'benchmark_data_symbol_map': dict(
+            getattr(strategy, '_benchmark_data_symbol_map_dict', {})
+        ),
+        'accounting_policy': dict(getattr(strategy, '_accounting_policy_dict', {})),
+        'data_adjustment_policy': dict(
+            getattr(strategy, '_data_adjustment_policy_dict', {})
+        ),
     }
 
 

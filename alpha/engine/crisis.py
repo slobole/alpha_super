@@ -547,6 +547,7 @@ def _load_mo_atr_normalized_ndx_context_dict() -> dict[str, object]:
     config_obj = DEFAULT_CONFIG
     pricing_data_df, universe_df, rebalance_schedule_df = get_atr_normalized_ndx_data(
         config=config_obj,
+        include_total_return_benchmark_bool=True,
     )
     calendar_idx = pricing_data_df.index[
         pricing_data_df.index >= pd.Timestamp(config_obj.backtest_start_date_str)
@@ -565,7 +566,10 @@ def _load_mo_atr_normalized_ndx_context_dict() -> dict[str, object]:
 def _build_mo_atr_normalized_ndx_strategy_obj(
     context_dict: dict[str, object],
 ) -> Strategy:
-    from strategies.momentum.strategy_mo_atr_normalized_ndx import AtrNormalizedNdxStrategy
+    from strategies.momentum.strategy_mo_atr_normalized_ndx import (
+        AtrNormalizedNdxStrategy,
+        configure_total_return_benchmark_provenance,
+    )
 
     config_obj = context_dict["config_obj"]
     strategy_obj = AtrNormalizedNdxStrategy(
@@ -583,6 +587,10 @@ def _build_mo_atr_normalized_ndx_strategy_obj(
         max_positions_int=int(config_obj.max_positions_int),
     )
     strategy_obj.universe_df = context_dict["universe_df"]
+    configure_total_return_benchmark_provenance(
+        strategy_obj=strategy_obj,
+        config_obj=config_obj,
+    )
     return strategy_obj
 
 

@@ -24,6 +24,7 @@ from alpha.engine.capacity_analysis import (
     CapacityAnalysis,
     CapacityRunResult,
     _adjusted_equity_ser,
+    _benchmark_annual_return_tuple,
     _break_even_bracket_str,
     _eligible_rolling_sharpe_erosion_tuple,
     build_capacity_study_result,
@@ -780,6 +781,27 @@ def test_undeclared_performance_benchmark_makes_recommended_unavailable():
 
     assert np.isnan(run_result_obj.summary_dict["benchmark_annual_return_float"])
     assert study_result_obj.summary_dict["recommended_capacity_float"] is None
+
+
+def test_capacity_benchmark_uses_declared_data_symbol_mapping():
+    pricing_data_df = _pricing_data_df(bar_count_int=252)
+    pricing_data_df[("$SPX_TR", "Close")] = np.linspace(
+        100.0,
+        130.0,
+        len(pricing_data_df),
+    )
+    strategy_obj = _strategy_obj(pricing_data_df)
+    strategy_obj._benchmark_data_symbol_map_dict = {"$SPX": "$SPX_TR"}
+
+    annual_return_float, benchmark_label_str = _benchmark_annual_return_tuple(
+        strategy_obj,
+        pricing_data_df,
+        pricing_data_df.index,
+    )
+
+    assert benchmark_label_str == "$SPX"
+    expected_annual_return_float = (1.30 ** (252.0 / 251.0)) - 1.0
+    assert annual_return_float == pytest.approx(expected_annual_return_float)
 
 
 def test_moo_outer_is_unavailable_when_benchmark_is_unavailable():

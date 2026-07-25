@@ -12,11 +12,18 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator, Sequence
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 
 ALPHA_USE_NORGATE_SNAPSHOT_ENV_STR = "ALPHA_USE_NORGATE_SNAPSHOT_BOOL"
 NORGATE_SNAPSHOT_ROOT_ENV_STR = "NORGATE_SNAPSHOT_ROOT"
-SNAPSHOT_SCHEMA_VERSION_INT = 1
+LEGACY_SNAPSHOT_SCHEMA_VERSION_INT = 1
+SNAPSHOT_SCHEMA_VERSION_INT = 2
+SUPPORTED_SNAPSHOT_SCHEMA_VERSION_SET = {
+    LEGACY_SNAPSHOT_SCHEMA_VERSION_INT,
+    SNAPSHOT_SCHEMA_VERSION_INT,
+}
 MANIFEST_FILE_NAME_STR = "manifest.json"
 PRICE_FILE_NAME_STR = "prices.parquet"
 UNIVERSE_FILE_NAME_STR = "universe.parquet"
@@ -31,6 +38,10 @@ PIT_PROFILE_BY_INDEX_NAME_DICT: dict[str, str] = {
 HELPER_PROFILE_BY_SYMBOL_DICT: dict[str, str] = {
     "$VIX": "norgate_eod_etf_plus_vix_helper",
     "$VXN": "norgate_eod_ndx_pit_plus_vxn_helper",
+}
+NDX_PROFILE_SET = {
+    "norgate_eod_ndx_pit",
+    "norgate_eod_ndx_pit_plus_vxn_helper",
 }
 
 _ACTIVE_DATA_PROFILE_CONTEXT_VAR: contextvars.ContextVar[str | None] = contextvars.ContextVar(
@@ -182,6 +193,70 @@ def _validate_file_hash(snapshot_dir_path_obj: Path, manifest_dict: dict[str, An
         )
 
 
+def _validate_price_contract(
+    snapshot_dir_path_obj: Path,
+    schema_version_int: int,
+    profile_str: str,
+) -> None:
+    if schema_version_int < SNAPSHOT_SCHEMA_VERSION_INT:
+        return
+
+    price_path_obj = snapshot_dir_path_obj / PRICE_FILE_NAME_STR
+    price_schema_obj = pq.read_schema(price_path_obj)
+    price_column_set = {
+        str(column_name_obj)
+        for column_name_obj in price_schema_obj.names
+    }
+    required_price_field_set = {"Close", "Dividend"}
+    missing_price_field_set = required_price_field_set.difference(price_column_set)
+    if len(missing_price_field_set) > 0:
+        raise NorgateSnapshotValidationError(
+            "prices.parquet is missing current-contract fields: "
+            f"{sorted(missing_price_field_set)}"
+        )
+    dividend_field_obj = price_schema_obj.field("Dividend")
+    if not (
+        pa.types.is_floating(dividend_field_obj.type)
+        or pa.types.is_integer(dividend_field_obj.type)
+    ):
+        raise NorgateSnapshotValidationError(
+            "prices.parquet Dividend must be numeric."
+        )
+    price_contract_table_obj = pq.read_table(
+        price_path_obj,
+        columns=["Close", "Dividend"],
+    )
+    close_ser = price_contract_table_obj.column("Close").to_pandas()
+    dividend_ser = price_contract_table_obj.column("Dividend").to_pandas()
+    applicable_price_mask_ser = close_ser.notna()
+    if dividend_ser.loc[applicable_price_mask_ser].isna().any():
+        raise NorgateSnapshotValidationError(
+            "prices.parquet Dividend must not contain null values on price rows."
+        )
+    if profile_str in NDX_PROFILE_SET:
+        spy_adjustment_df = pd.read_parquet(
+            price_path_obj,
+            columns=["symbol_str", "adjustment_str"],
+            filters=[("symbol_str", "==", "SPY")],
+        )
+        actual_spy_adjustment_set = {
+            str(adjustment_obj).upper()
+            for adjustment_obj in spy_adjustment_df["adjustment_str"].dropna().unique()
+        }
+        required_spy_adjustment_set = {
+            CAPITALSPECIAL_ADJUSTMENT_STR,
+            TOTALRETURN_ADJUSTMENT_STR,
+        }
+        missing_spy_adjustment_set = required_spy_adjustment_set.difference(
+            actual_spy_adjustment_set
+        )
+        if len(missing_spy_adjustment_set) > 0:
+            raise NorgateSnapshotValidationError(
+                "NDX schema-v2 snapshot is missing SPY adjustment rows: "
+                f"{sorted(missing_spy_adjustment_set)}"
+            )
+
+
 def _load_manifest_from_dir(snapshot_dir_path_obj: Path) -> tuple[dict[str, Any], str]:
     manifest_path_obj = snapshot_dir_path_obj / MANIFEST_FILE_NAME_STR
     if not manifest_path_obj.exists():
@@ -238,10 +313,10 @@ def _load_valid_snapshot_manifest_cached(
         )
 
     schema_version_int = int(manifest_dict.get("schema_version", -1))
-    if schema_version_int != SNAPSHOT_SCHEMA_VERSION_INT:
+    if schema_version_int not in SUPPORTED_SNAPSHOT_SCHEMA_VERSION_SET:
         raise NorgateSnapshotValidationError(
             f"Unsupported Norgate snapshot schema_version {schema_version_int}; "
-            f"expected {SNAPSHOT_SCHEMA_VERSION_INT}."
+            f"expected one of {sorted(SUPPORTED_SNAPSHOT_SCHEMA_VERSION_SET)}."
         )
 
     snapshot_date_ts = _get_manifest_snapshot_date_ts(manifest_dict)
@@ -261,6 +336,11 @@ def _load_valid_snapshot_manifest_cached(
             )
 
     _validate_file_hash(snapshot_dir_path_obj, manifest_dict, PRICE_FILE_NAME_STR)
+    _validate_price_contract(
+        snapshot_dir_path_obj,
+        schema_version_int,
+        profile_str,
+    )
     files_dict = manifest_dict.get("files", {})
     file_hashes_dict = manifest_dict.get("file_hashes", {})
     has_universe_entry_bool = (
@@ -475,6 +555,13 @@ def build_data_source_metadata_dict(data_profile_str: str | None = None) -> dict
         "norgate_data_profile_str": snapshot_manifest_obj.profile_str,
         "norgate_snapshot_date_str": snapshot_manifest_obj.snapshot_date_ts.date().isoformat(),
         "norgate_manifest_hash_str": snapshot_manifest_obj.manifest_hash_str,
+        "norgate_snapshot_schema_version_int": int(
+            snapshot_manifest_obj.manifest_dict["schema_version"]
+        ),
+        "norgate_dividend_field_required_bool": (
+            int(snapshot_manifest_obj.manifest_dict["schema_version"])
+            >= SNAPSHOT_SCHEMA_VERSION_INT
+        ),
     }
 
 
@@ -502,7 +589,32 @@ def write_snapshot_files(
     adjustment_mode_map_dict: dict[str, object] | None = None,
     generated_timestamp_ts: datetime | None = None,
     overwrite_bool: bool = False,
+    schema_version_int: int = LEGACY_SNAPSHOT_SCHEMA_VERSION_INT,
 ) -> Path:
+    if schema_version_int not in SUPPORTED_SNAPSHOT_SCHEMA_VERSION_SET:
+        raise NorgateSnapshotValidationError(
+            f"Unsupported Norgate snapshot schema_version {schema_version_int}; "
+            f"expected one of {sorted(SUPPORTED_SNAPSHOT_SCHEMA_VERSION_SET)}."
+        )
+    if schema_version_int >= SNAPSHOT_SCHEMA_VERSION_INT:
+        if "Dividend" not in price_df.columns:
+            raise NorgateSnapshotValidationError(
+                "price_df is missing current-contract fields: ['Dividend']"
+            )
+        if not pd.api.types.is_numeric_dtype(price_df["Dividend"]):
+            raise NorgateSnapshotValidationError(
+                "price_df Dividend must be numeric."
+            )
+        applicable_price_mask_ser = (
+            price_df["Close"].notna()
+            if "Close" in price_df.columns
+            else pd.Series(True, index=price_df.index)
+        )
+        if price_df.loc[applicable_price_mask_ser, "Dividend"].isna().any():
+            raise NorgateSnapshotValidationError(
+                "price_df Dividend must not contain null values on price rows."
+            )
+
     snapshot_date_ts = _coerce_snapshot_date_ts(snapshot_date_str)
     snapshot_dir_path_obj = (
         Path(snapshot_root_str).expanduser()
@@ -536,7 +648,7 @@ def write_snapshot_files(
         "profile": profile_str,
         "snapshot_market_session_date_str": snapshot_date_ts.date().isoformat(),
         "generated_timestamp_utc_str": generated_ts.astimezone(UTC).isoformat(),
-        "schema_version": SNAPSHOT_SCHEMA_VERSION_INT,
+        "schema_version": int(schema_version_int),
         "files": file_manifest_dict,
         "required_symbols": sorted({str(symbol_str) for symbol_str in (required_symbol_list or [])}),
         "required_helpers": sorted({str(symbol_str) for symbol_str in (required_helper_symbol_list or [])}),

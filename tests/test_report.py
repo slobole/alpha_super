@@ -28,6 +28,7 @@ from alpha.engine.report import (
     _prepare_daily_return_distribution_dict,
     _prepare_trade_distribution_dict,
     _ret_color,
+    _strategy_metadata_dict,
     _trade_return_histogram_b64,
     _weight_color_for_asset,
     save_portfolio_results,
@@ -533,6 +534,66 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertAlmostEqual(float(strategy.realized_weight_df.loc[current_bar_ts, 'AAA']), 0.80)
         self.assertAlmostEqual(float(strategy.realized_weight_df.loc[current_bar_ts, 'Cash']), 0.20)
 
+    def test_strategy_benchmark_can_use_separate_total_return_data_symbol(self):
+        strategy = DummyStrategy(
+            name='BenchmarkSourceStrategy',
+            benchmarks=['SPY'],
+            capital_base=100.0,
+            slippage=0.0,
+            commission_per_share=0.0,
+            commission_minimum=0.0,
+        )
+        strategy._benchmark_data_symbol_map_dict = {'SPY': 'SPY_TR'}
+        date_index = pd.to_datetime(['2024-01-02', '2024-01-03'])
+        price_df = pd.DataFrame(
+            {
+                ('SPY', 'Close'): [100.0, 90.0],
+                ('SPY_TR', 'Close'): [100.0, 110.0],
+            },
+            index=date_index,
+        )
+        price_df.columns = pd.MultiIndex.from_tuples(price_df.columns)
+
+        strategy.current_bar = date_index[0]
+        strategy.update_metrics(price_df, date_index[0])
+        strategy.previous_bar = date_index[0]
+        strategy.current_bar = date_index[1]
+        strategy.update_metrics(price_df, date_index[0])
+
+        self.assertAlmostEqual(float(strategy.results.iloc[-1]['SPY']), 110.0)
+        self.assertAlmostEqual(float(strategy.results.iloc[-1]['total_value']), 100.0)
+
+    def test_strategy_metadata_records_benchmark_and_adjustment_provenance(self):
+        strategy = DummyStrategy(
+            name='MetadataProvenanceStrategy',
+            benchmarks=['SPY'],
+            capital_base=100.0,
+            slippage=0.0,
+            commission_per_share=0.0,
+            commission_minimum=0.0,
+        )
+        strategy._benchmark_data_symbol_map_dict = {'SPY': 'SPY_TR'}
+        strategy._data_adjustment_policy_dict = {
+            'execution_and_marks_adjustment_str': 'CAPITALSPECIAL',
+            'regime_signal_adjustment_str': 'CAPITALSPECIAL',
+            'performance_benchmark_adjustment_str': 'TOTALRETURN',
+            'performance_benchmark_data_symbol_str': 'SPY_TR',
+        }
+
+        metadata_dict = _strategy_metadata_dict(
+            strategy,
+            Path('metadata-provenance.pkl'),
+        )
+
+        self.assertEqual(
+            metadata_dict['benchmark_data_symbol_map'],
+            {'SPY': 'SPY_TR'},
+        )
+        self.assertEqual(
+            metadata_dict['data_adjustment_policy'],
+            strategy._data_adjustment_policy_dict,
+        )
+
     def test_build_html_includes_recent_taa_target_realized_and_drift_weights(self):
         strategy = make_strategy([0.0, 0.01, -0.02, 0.0, 0.03, -0.01])
         rebalance_date_index = pd.to_datetime(
@@ -684,6 +745,28 @@ class ReportFormattingTests(unittest.TestCase):
             self.assertIsNone(regression_metadata_dict['hac_max_lag_int'])
             self.assertEqual(regression_metadata_dict['status_str'], 'unavailable')
             self.assertEqual(regression_metadata_dict['reason_str'], 'insufficient_observations')
+            metadata_dict = json.loads((output_path / 'metadata.json').read_text(encoding='utf-8'))
+            self.assertEqual(
+                metadata_dict['accounting_policy']['accounting_contract_version_str'],
+                'price_return_ledger_v1',
+            )
+            self.assertEqual(metadata_dict['accounting_policy']['dividend_policy_str'], 'not_credited')
+            self.assertEqual(
+                metadata_dict['accounting_policy']['positive_cash_rate_policy_str'],
+                'zero_percent_intentional',
+            )
+            self.assertEqual(
+                metadata_dict['accounting_policy']['negative_cash_financing_policy_str'],
+                'not_modeled',
+            )
+            self.assertEqual(
+                metadata_dict['accounting_policy']['current_wired_negative_cash_policy_str'],
+                'invalid',
+            )
+            self.assertEqual(
+                metadata_dict['accounting_policy']['negative_cash_enforcement_str'],
+                'not_implemented',
+            )
 
             report_html_str = report_html_path.read_text(encoding='utf-8')
             self.assertNotIn('<h2>All Transactions</h2>', report_html_str)

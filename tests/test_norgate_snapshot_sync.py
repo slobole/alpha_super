@@ -14,7 +14,13 @@ from alpha.live.norgate_snapshot_sync import (
     ensure_norgate_snapshots_for_live_tick,
 )
 from alpha.live.release_manifest import load_release_list
-from data.norgate_snapshot_store import CAPITALSPECIAL_ADJUSTMENT_STR, MANIFEST_FILE_NAME_STR, write_snapshot_files
+from data.norgate_snapshot_store import (
+    CAPITALSPECIAL_ADJUSTMENT_STR,
+    MANIFEST_FILE_NAME_STR,
+    SNAPSHOT_SCHEMA_VERSION_INT,
+    load_valid_snapshot_manifest,
+    write_snapshot_files,
+)
 
 
 PROFILE_STR = "norgate_eod_etf_plus_vix_helper"
@@ -50,18 +56,23 @@ def _price_snapshot_df(snapshot_date_str: str = SNAPSHOT_DATE_STR) -> pd.DataFra
 def _write_snapshot(
     snapshot_root_path_obj: Path,
     snapshot_date_str: str = SNAPSHOT_DATE_STR,
+    schema_version_int: int = 1,
 ) -> Path:
+    price_df = _price_snapshot_df(snapshot_date_str)
+    if schema_version_int >= SNAPSHOT_SCHEMA_VERSION_INT:
+        price_df = price_df.assign(Dividend=0.0)
     return write_snapshot_files(
         snapshot_root_str=str(snapshot_root_path_obj),
         profile_str=PROFILE_STR,
         snapshot_date_str=snapshot_date_str,
-        price_df=_price_snapshot_df(snapshot_date_str),
+        price_df=price_df,
         required_symbol_list=["SPY"],
         required_helper_symbol_list=["$VIX"],
         adjustment_mode_map_dict={
             "SPY": CAPITALSPECIAL_ADJUSTMENT_STR,
             "$VIX": CAPITALSPECIAL_ADJUSTMENT_STR,
         },
+        schema_version_int=schema_version_int,
     )
 
 
@@ -428,6 +439,45 @@ def test_snapshot_missing_with_api_syncs_and_promotes(tmp_path: Path, monkeypatc
     assert status_dict["status_str"] == "ready"
     assert status_dict["reason_code_str"] == "sync_ready"
     assert (snapshot_root_path_obj / PROFILE_STR / SNAPSHOT_DATE_STR / MANIFEST_FILE_NAME_STR).exists()
+
+
+def test_snapshot_missing_with_api_syncs_and_validates_schema_v2(
+    tmp_path: Path,
+    monkeypatch,
+):
+    releases_root_path_obj = tmp_path / "releases"
+    snapshot_root_path_obj = tmp_path / "snapshots"
+    _write_release_manifest(releases_root_path_obj)
+    _set_snapshot_mode(monkeypatch, snapshot_root_path_obj)
+    monkeypatch.setenv("NORGATE_API_URL", "http://127.0.0.1:8787")
+    monkeypatch.setenv("NORGATE_API_TOKEN", "secret")
+    monkeypatch.setenv("NORGATE_CLIENT_ID", "client_test")
+
+    def _fake_sync_required_snapshots(**_kwargs):
+        snapshot_dir_path_obj = _write_snapshot(
+            snapshot_root_path_obj,
+            schema_version_int=SNAPSHOT_SCHEMA_VERSION_INT,
+        )
+        return [snapshot_dir_path_obj]
+
+    monkeypatch.setattr(
+        "alpha.live.norgate_snapshot_sync.sync_required_snapshots",
+        _fake_sync_required_snapshots,
+    )
+
+    status_dict = ensure_norgate_snapshots_for_live_tick(
+        releases_root_path_str=str(releases_root_path_obj),
+        env_mode_str="paper",
+        as_of_ts=datetime(2024, 1, 2, 16, 10, tzinfo=MARKET_TZ),
+        log_path_str=str(tmp_path / "events.jsonl"),
+    )
+    snapshot_manifest_obj = load_valid_snapshot_manifest(PROFILE_STR)
+
+    assert status_dict["status_str"] == "ready"
+    assert (
+        snapshot_manifest_obj.manifest_dict["schema_version"]
+        == SNAPSHOT_SCHEMA_VERSION_INT
+    )
 
 
 def test_snapshot_sync_lock_busy_skips_api(tmp_path: Path, monkeypatch):

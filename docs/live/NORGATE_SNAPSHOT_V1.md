@@ -32,6 +32,62 @@ client-local release YAMLs
   -> DecisionPlan build from local snapshot files
 ```
 
+## Schema Compatibility
+
+The loader accepts both snapshot schema versions:
+
+- schema v1 is the legacy OHLC-compatible contract and remains readable;
+- schema v2 is the current export contract and requires the Norgate `Dividend`
+  field in `prices.parquet`.
+
+New exports use schema v2. A v2 snapshot without `Dividend` fails validation
+before any new DecisionPlan or research artifact can consume it. Requiring the
+field does not activate dividend accounting; the current engine still declares
+`price_return_ledger_v1` and does not post dividend cash events.
+
+Schema rollout order is mandatory:
+
+1. deploy the dual-version reader to every client VPS while the producer still
+   exports v1;
+2. verify each client accepts both v1 and a staged v2 snapshot;
+3. only then deploy the v2 exporter on the Windows Norgate node.
+
+Reversing this order can make an old client reject the newest snapshot and
+block new DecisionPlan creation. The server must not publish v2 as the current
+artifact until all intended clients have the dual-version reader.
+
+If a client already has a valid v1 snapshot for the same date, automatic live
+sync keeps that valid local folder. This is safe for live DecisionPlan creation,
+which still uses the v1 capital-price path, but same-date research/analyzer
+regeneration needs an explicit replacement after the producer publishes v2:
+
+```powershell
+uv run python scripts\sync_norgate_snapshots_api.py --overwrite
+```
+
+The command uses the configured API, client, releases root, and local snapshot
+root. It downloads to a temporary folder, validates the v2 artifact, and only
+then replaces the same-date local snapshot. Without `--overwrite`, research
+paths that require `SPY_TR` fail loudly rather than silently falling back to
+the v1 SPY price benchmark.
+
+`--overwrite` replaces only the client-local folder. It cannot upgrade a date
+that the producer API still serves as v1. Before a same-date client upgrade,
+the Windows Norgate operator must confirm that the producer-side artifact for
+that client/profile/date was regenerated and published as v2. The producer
+export path does not overwrite an already-existing date by default. If the
+producer-side v1 artifact is intentionally preserved, wait for the next market
+session's v2 snapshot instead of treating client overwrite as a migration.
+
+The NDX export profiles now carry both `SPY` adjustment rows:
+
+- `SPY` `CAPITALSPECIAL` is the regime and traded-price representation;
+- `SPY` `TOTALRETURN` is loaded under the internal `SPY_TR` alias only for
+  benchmark measurement in research/analyzer runs.
+
+Live DecisionPlan construction continues to request the capital-price path and
+does not add `SPY_TR` to the tradeable universe.
+
 Live trading state stays local to the client VPS:
 
 - DecisionPlan semantics stay unchanged.

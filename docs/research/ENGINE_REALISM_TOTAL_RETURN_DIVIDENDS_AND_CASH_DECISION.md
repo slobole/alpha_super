@@ -450,6 +450,17 @@ A safe causal economic-return index can be built from `CAPITALSPECIAL` prices an
 
 Norgate's `Dividend` indicator is attached to the entitlement session: the trading day before the ex-dividend date. The holder at that session's close is entitled.
 
+For a raw Norgate series, let `D^N_t` be the `Dividend` value stamped on
+entitlement session `t`. The economic ex-date return on the next trading
+session `t+1` is:
+
+`r^(economic)_(t+1) = (Close_(t+1) + D^N_t) / Close_t - 1`.
+
+Equivalently, an ex-date-aligned event series shifts the raw Norgate dividend
+forward by one trading session. This alignment is mandatory; adding `D^N_t`
+to the entitlement-session close-to-close return would post the event one day
+too early.
+
 Therefore a correct event order must ensure:
 
 - a position held at entitlement close receives the dividend;
@@ -729,7 +740,7 @@ Claude should answer each question directly:
 
 ### Joint verdict
 
-**Status:** ALIGNED (Codex + Claude, 2026-07-25), with the owner cash-policy amendment above; full implementation authorization remains pending
+**Status:** ALIGNED (Codex + Claude, 2026-07-25), with the owner cash-policy amendment above. The owner authorized Phase 1 truth/provenance work; dividend-ledger activation remains gated.
 
 **Approved accounting contract (proposed):**
 
@@ -755,3 +766,35 @@ Claude should answer each question directly:
 **Implementation scope:** Codex's section 14 sequence with Claude's amendments and the owner cash-policy amendment: benchmark-provenance fix moved to immediately after step 1; snapshot validation contract must require the `Dividend` column in step 1; step 3 parity is a hard gate for steps 4+; positive-cash rate modeling is removed; negative cash becomes a fail-loud invariant for current WIRED strategies.
 
 **Deployment gate:** All section 15 acceptance tests pass; all WIRED analyzer artifacts regenerated and old-vs-corrected compared; IBKR position/dividend reconciliation demonstrated; any NetLiq difference caused by actual broker cash interest is explicitly labeled as expected drift from the `0%` reference policy.
+
+### Phase 1 implementation - 2026-07-25
+
+Implemented scope:
+
+- NDX and VXN-NDX research/analyzer runs keep `SPY` `CAPITALSPECIAL` for the
+  regime signal and use a separately loaded `SPY_TR` source for the reported
+  `SPY` total-return benchmark. Vanilla, Capacity, Execution Timing, and NDX
+  Crisis replay all resolve the public `SPY` label through this mapping.
+- The benchmark display label remains `SPY`; saved metadata records the actual
+  data-symbol mapping and adjustment roles.
+- Strategy artifacts declare `price_return_ledger_v1`, dividends not credited,
+  intentional `0%` positive-cash return, and no modeled negative-cash financing.
+- Existing snapshot schema v1 remains readable. New exporter output is schema
+  v2 and fails validation if the `Dividend` field is absent, nonnumeric, or
+  null. Norgate index/helper rows that cannot distribute cash (`$SPX`, `$VIX`,
+  `$VXN`) are explicitly normalized to `Dividend = 0`; missing ETF/stock
+  dividend data still fails loudly. NDX v2 snapshots must contain both SPY
+  `CAPITALSPECIAL` and SPY `TOTALRETURN` rows.
+- Deployment is reader-first: every client receives the dual v1/v2 reader
+  before the producer publishes v2. Same-date analyzer regeneration uses the
+  validated `--overwrite` sync path when a client already has v1.
+- TAA and all other WIRED signal rules remain unchanged.
+
+Not activated in Phase 1:
+
+- no dividend cash or receivable events;
+- no withholding calculation;
+- no positive-cash interest model;
+- no financing-rate model;
+- no corrected-equity baseline replacement;
+- no live order, sizing, fill, or reconciliation change.

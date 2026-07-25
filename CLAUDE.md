@@ -50,7 +50,7 @@ Any dangerous operation, realism gap, hidden assumption, operational ambiguity, 
 
 **Execution realism** — Orders placed in `iterate()` execute at the *next bar's open*, not the close that triggered the signal. This is already enforced by the engine. Never bypass this by using same-bar prices.
 
-**Price adjustment** — Use `CAPITALSPECIAL` adjustment (not `TOTALRETURN`) for individual stocks to avoid forward-looking dividend bias. Use `TOTALRETURN` only for benchmark indices.
+**Price adjustment** — Use `CAPITALSPECIAL` for fills, marks, traded OHLC, and level- or scale-sensitive features. `TOTALRETURN` is allowed only for explicitly causal return-space signals and performance benchmarks; never use it as a fill or mark price. Declare the adjustment role and provenance in saved artifacts.
 
 **Statistical honesty** — Report metrics on the full out-of-sample period. Do not cherry-pick start/end dates or exclude drawdown periods. Sharpe ratio is computed with 0 risk-free rate (clearly documented).
 

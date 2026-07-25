@@ -18,6 +18,7 @@ if repo_root_str not in sys.path:
 
 from data.norgate_snapshot_store import (
     CAPITALSPECIAL_ADJUSTMENT_STR,
+    SNAPSHOT_SCHEMA_VERSION_INT,
     TOTALRETURN_ADJUSTMENT_STR,
     write_snapshot_files,
 )
@@ -44,15 +45,18 @@ PROFILE_EXPORT_SPEC_DICT: dict[str, NorgateExportProfileSpec] = {
     "norgate_eod_ndx_pit": NorgateExportProfileSpec(
         indexname_str="Nasdaq 100",
         capital_symbol_tuple=("SPY",),
+        total_return_symbol_tuple=("SPY",),
     ),
     "norgate_eod_ndx_pit_plus_vxn_helper": NorgateExportProfileSpec(
         indexname_str="Nasdaq 100",
         capital_symbol_tuple=("SPY",),
+        total_return_symbol_tuple=("SPY",),
         helper_symbol_tuple=("$VXN",),
     ),
 }
 
 SUPPORTED_EOD_PROFILE_TUPLE: tuple[str, ...] = tuple(PROFILE_EXPORT_SPEC_DICT.keys())
+NON_DISTRIBUTING_INDEX_SYMBOL_SET = {"$SPX", "$VIX", "$VXN"}
 
 
 def _load_direct_norgate_module():
@@ -134,6 +138,13 @@ def _load_price_frame_df(
 
     price_df = raw_price_df.reset_index()
     price_df = price_df.rename(columns={price_df.columns[0]: "date"})
+    if "Dividend" not in price_df.columns:
+        if symbol_str not in NON_DISTRIBUTING_INDEX_SYMBOL_SET:
+            raise RuntimeError(
+                "Norgate price data is missing Dividend for a distributing "
+                f"security: symbol={symbol_str} adjustment={adjustment_str}."
+            )
+        price_df["Dividend"] = 0.0
     price_df.insert(1, "symbol_str", symbol_str)
     price_df.insert(2, "adjustment_str", adjustment_str)
     return price_df
@@ -232,6 +243,7 @@ def _export_profile_to_root_path(
         required_helper_symbol_list=helper_symbol_list,
         adjustment_mode_map_dict=adjustment_mode_map_dict,
         overwrite_bool=overwrite_bool,
+        schema_version_int=SNAPSHOT_SCHEMA_VERSION_INT,
     )
 
 

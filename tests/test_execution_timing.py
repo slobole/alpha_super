@@ -13,6 +13,7 @@ from alpha.engine.backtest import run_daily
 from alpha.engine.execution_timing import (
     ExecutionTimingAnalysis,
     ExecutionTimingAnalyzer,
+    _build_results_df,
     compute_cvar_5_pct_float,
 )
 from alpha.engine.strategy import Strategy
@@ -160,6 +161,34 @@ class ExecutionTimingAnalysisTests(unittest.TestCase):
             commission_per_share=0.0,
             commission_minimum=0.0,
         )
+
+    def test_results_benchmark_uses_declared_data_symbol_mapping(self):
+        pricing_data_df = make_timing_pricing_data_with_spy_df()
+        pricing_data_df[("SPY_TR", "Close")] = [100.0, 102.0, 104.0, 108.0, 110.0]
+        strategy_obj = TimingToyStrategy(
+            name="TimingBenchmarkMapping",
+            benchmarks=["SPY"],
+            capital_base=1_000.0,
+            slippage=0.0,
+            commission_per_share=0.0,
+            commission_minimum=0.0,
+        )
+        strategy_obj._benchmark_data_symbol_map_dict = {"SPY": "SPY_TR"}
+        flat_value_map = {
+            pd.Timestamp(date_obj): 1_000.0
+            for date_obj in pricing_data_df.index
+        }
+
+        results_df = _build_results_df(
+            strategy_obj=strategy_obj,
+            pricing_data_df=pricing_data_df,
+            calendar_idx=pd.DatetimeIndex(pricing_data_df.index),
+            portfolio_value_map=flat_value_map,
+            cash_value_map=flat_value_map,
+            total_value_map=flat_value_map,
+        )
+
+        self.assertAlmostEqual(float(results_df["SPY"].iloc[-1]), 1_100.0)
 
     def test_next_open_next_open_cell_matches_vanilla_backtest(self):
         pricing_data_df = make_timing_pricing_data_df()

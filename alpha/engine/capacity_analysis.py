@@ -1103,9 +1103,20 @@ def _benchmark_annual_return_tuple(
     ):
         return np.nan, None
     benchmark_symbol_str = str(benchmark_symbol_obj)
-    if (benchmark_symbol_str, "Close") not in pricing_data_df.columns:
+    benchmark_data_symbol_map_dict = getattr(
+        strategy_obj,
+        "_benchmark_data_symbol_map_dict",
+        {},
+    )
+    benchmark_data_symbol_str = benchmark_data_symbol_map_dict.get(
+        benchmark_symbol_str,
+        benchmark_symbol_str,
+    )
+    if (benchmark_data_symbol_str, "Close") not in pricing_data_df.columns:
         return np.nan, benchmark_symbol_str
-    close_ser = pricing_data_df[(benchmark_symbol_str, "Close")].astype(float).dropna()
+    close_ser = pricing_data_df[
+        (benchmark_data_symbol_str, "Close")
+    ].astype(float).dropna()
     close_ser.index = pd.to_datetime(close_ser.index).normalize()
     aligned_ser = close_ser.reindex(pd.DatetimeIndex(result_idx), method="ffill").dropna()
     return _annualized_return_float(aligned_ser), benchmark_symbol_str

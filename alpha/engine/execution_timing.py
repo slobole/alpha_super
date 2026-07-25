@@ -640,7 +640,19 @@ def _build_results_df(
     results_df["max_drawdown"] = drawdown_ser.cummin().astype(float)
 
     for benchmark_str in strategy_obj._benchmarks:
-        benchmark_close_ser = pricing_data_df.loc[calendar_idx, (benchmark_str, "Close")].astype(float)
+        benchmark_data_symbol_map_dict = getattr(
+            strategy_obj,
+            "_benchmark_data_symbol_map_dict",
+            {},
+        )
+        benchmark_data_symbol_str = benchmark_data_symbol_map_dict.get(
+            str(benchmark_str),
+            str(benchmark_str),
+        )
+        benchmark_close_ser = pricing_data_df.loc[
+            calendar_idx,
+            (benchmark_data_symbol_str, "Close"),
+        ].astype(float)
         benchmark_value_ser = (
             benchmark_close_ser / float(benchmark_close_ser.iloc[0]) * float(strategy_obj._capital_base)
         )

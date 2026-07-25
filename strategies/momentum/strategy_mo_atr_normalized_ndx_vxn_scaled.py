@@ -47,6 +47,7 @@ from strategies.momentum.strategy_mo_atr_normalized_ndx import (
     AtrNormalizedNdxStrategy,
     audit_pit_universe_df,
     compute_atr_normalized_signal_tables,
+    configure_total_return_benchmark_provenance,
     default_trade_id_int,
     get_atr_normalized_ndx_data,
     get_monthly_decision_close_df,
@@ -249,8 +250,13 @@ class VxnScaledAtrNormalizedNdxStrategy(AtrNormalizedNdxStrategy):
 
 def get_vxn_scaled_atr_normalized_ndx_data(
     config: VxnScaledAtrNormalizedNdxConfig = DEFAULT_CONFIG,
+    *,
+    include_total_return_benchmark_bool: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    pricing_data_df, universe_df, rebalance_schedule_df = get_atr_normalized_ndx_data(config=config)
+    pricing_data_df, universe_df, rebalance_schedule_df = get_atr_normalized_ndx_data(
+        config=config,
+        include_total_return_benchmark_bool=include_total_return_benchmark_bool,
+    )
     vxn_close_ser = load_vxn_close_ser(
         symbol_str=config.vxn_symbol_str,
         start_date_str=config.history_start_date_str,
@@ -294,7 +300,10 @@ def run_variant(
             end_date_str=end_date_str,
         )
     pricing_data_df, universe_df, rebalance_schedule_df, vxn_scale_signal_df = (
-        get_vxn_scaled_atr_normalized_ndx_data(config_obj)
+        get_vxn_scaled_atr_normalized_ndx_data(
+            config_obj,
+            include_total_return_benchmark_bool=True,
+        )
     )
 
     strategy_obj = VxnScaledAtrNormalizedNdxStrategy(
@@ -313,6 +322,10 @@ def run_variant(
         max_positions_int=config_obj.max_positions_int,
     )
     strategy_obj.universe_df = universe_df
+    configure_total_return_benchmark_provenance(
+        strategy_obj=strategy_obj,
+        config_obj=config_obj,
+    )
 
     # *** CRITICAL*** Deployment-reference backtests keep full pre-start
     # history for monthly ATR and trend features, but the executable calendar
@@ -368,7 +381,10 @@ def build_capacity_analysis_inputs(
             end_date_str=end_date_str,
         )
     pricing_data_df, universe_df, rebalance_schedule_df, vxn_scale_signal_df = (
-        get_vxn_scaled_atr_normalized_ndx_data(config_obj)
+        get_vxn_scaled_atr_normalized_ndx_data(
+            config_obj,
+            include_total_return_benchmark_bool=True,
+        )
     )
 
     strategy_obj = VxnScaledAtrNormalizedNdxStrategy(
@@ -387,6 +403,10 @@ def build_capacity_analysis_inputs(
         max_positions_int=config_obj.max_positions_int,
     )
     strategy_obj.universe_df = universe_df
+    configure_total_return_benchmark_provenance(
+        strategy_obj=strategy_obj,
+        config_obj=config_obj,
+    )
 
     # *** CRITICAL *** CapacityAnalysis must assess the same completed order
     # ledger as the deployment-reference VXN-scaled NDX momentum backtest.
@@ -405,8 +425,6 @@ def build_capacity_analysis_inputs(
     )
 
     strategy_obj.universe_df = None
-    strategy_obj._performance_benchmark_symbol_str = config_obj.regime_symbol_str
-    strategy_obj._performance_benchmark_adjustment_str = "TOTALRETURN"
     return {
         "strategy_obj": strategy_obj,
         "pricing_data_df": pricing_data_df,
@@ -428,7 +446,10 @@ def build_execution_timing_analysis_inputs() -> dict[str, object]:
     """
     config_obj = DEFAULT_CONFIG
     pricing_data_df, universe_df, rebalance_schedule_df, vxn_scale_signal_df = (
-        get_vxn_scaled_atr_normalized_ndx_data(config_obj)
+        get_vxn_scaled_atr_normalized_ndx_data(
+            config_obj,
+            include_total_return_benchmark_bool=True,
+        )
     )
     decision_close_schedule_df = _map_rebalance_schedule_to_decision_close_schedule_df(
         rebalance_schedule_df=rebalance_schedule_df,
@@ -451,6 +472,10 @@ def build_execution_timing_analysis_inputs() -> dict[str, object]:
             max_positions_int=config_obj.max_positions_int,
         )
         strategy_obj.universe_df = universe_df
+        configure_total_return_benchmark_provenance(
+            strategy_obj=strategy_obj,
+            config_obj=config_obj,
+        )
         strategy_obj.trade_id_int = 0
         strategy_obj.current_trade_map = defaultdict(default_trade_id_int)
         return strategy_obj

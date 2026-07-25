@@ -58,6 +58,9 @@ class Strategy(ABC):
         self._commission_per_share = commission_per_share  # IBKR default: $0.005/share
         self._commission_minimum = commission_minimum  # IBKR default: $1.00 minimum per order
         self._benchmarks = benchmarks  # list of benchmark assets for performance comparison
+        self._benchmark_data_symbol_map_dict: dict[str, str] = {
+            str(benchmark_str): str(benchmark_str) for benchmark_str in self._benchmarks
+        }
         self._performance_benchmark_symbol_str = (
             str(performance_benchmark_symbol_str)
             if performance_benchmark_symbol_str is not None
@@ -68,6 +71,15 @@ class Strategy(ABC):
             if performance_benchmark_adjustment_str is not None
             else ('not_declared' if self._performance_benchmark_symbol_str is not None else None)
         )
+        self._accounting_policy_dict: dict[str, object] = {
+            'accounting_contract_version_str': 'price_return_ledger_v1',
+            'dividend_policy_str': 'not_credited',
+            'positive_cash_rate_policy_str': 'zero_percent_intentional',
+            'negative_cash_financing_policy_str': 'not_modeled',
+            'current_wired_negative_cash_policy_str': 'invalid',
+            'negative_cash_enforcement_str': 'not_implemented',
+        }
+        self._data_adjustment_policy_dict: dict[str, object] = {}
         self.benchmark_regression_metadata_by_column_dict: dict[str, dict[str, object]] = {}
 
         # data storage and results tracking
@@ -872,8 +884,21 @@ class Strategy(ABC):
             benchmark_metric_list = []
             for benchmark_str in self._benchmarks:
                 # retrieve closing price of the benchmark for the current and start dates
-                benchmark_close_float = float(prices.loc[self.current_bar, (benchmark_str, 'Close')])
-                benchmark_start_close_float = float(prices.loc[start, (benchmark_str, 'Close')])
+                benchmark_data_symbol_map_dict = getattr(
+                    self,
+                    '_benchmark_data_symbol_map_dict',
+                    {},
+                )
+                benchmark_data_symbol_str = benchmark_data_symbol_map_dict.get(
+                    str(benchmark_str),
+                    str(benchmark_str),
+                )
+                benchmark_close_float = float(
+                    prices.loc[self.current_bar, (benchmark_data_symbol_str, 'Close')]
+                )
+                benchmark_start_close_float = float(
+                    prices.loc[start, (benchmark_data_symbol_str, 'Close')]
+                )
                 # compute the benchmark's total value assuming it started with the same capital
                 benchmark_value_float = float(
                     (benchmark_close_float / benchmark_start_close_float) * self._capital_base

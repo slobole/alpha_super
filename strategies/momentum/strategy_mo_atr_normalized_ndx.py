@@ -65,9 +65,14 @@ from alpha.engine.backtest import run_daily
 from alpha.engine.report import save_results
 from alpha.engine.strategy import Strategy
 from data.norgate_loader import build_index_constituent_matrix, load_raw_prices
+from data.norgate_snapshot_store import (
+    CAPITALSPECIAL_ADJUSTMENT_STR,
+    TOTALRETURN_ADJUSTMENT_STR,
+)
 
 
 ATR_WINDOW_INT = 20
+TOTAL_RETURN_BENCHMARK_SUFFIX_STR = "_TR"
 
 
 def default_trade_id_int() -> int:
@@ -141,14 +146,81 @@ __all__ = [
     "AtrNormalizedNdxConfig",
     "AtrNormalizedNdxStrategy",
     "DEFAULT_CONFIG",
+    "TOTAL_RETURN_BENCHMARK_SUFFIX_STR",
+    "append_total_return_benchmark_data_df",
     "audit_pit_universe_df",
     "build_execution_timing_analysis_inputs",
     "compute_atr_normalized_signal_tables",
+    "configure_total_return_benchmark_provenance",
     "get_atr_normalized_ndx_data",
     "get_monthly_decision_close_df",
     "map_month_end_decision_dates_to_rebalance_schedule_df",
     "run_variant",
 ]
+
+
+def _total_return_benchmark_data_symbol_str(regime_symbol_str: str) -> str:
+    return f"{regime_symbol_str}{TOTAL_RETURN_BENCHMARK_SUFFIX_STR}"
+
+
+def append_total_return_benchmark_data_df(
+    pricing_data_df: pd.DataFrame,
+    config_obj: AtrNormalizedNdxConfig,
+) -> pd.DataFrame:
+    total_return_benchmark_df = load_raw_prices(
+        symbols=[],
+        benchmarks=[config_obj.regime_symbol_str],
+        start_date=config_obj.history_start_date_str,
+        end_date=config_obj.end_date_str,
+    )
+    benchmark_data_symbol_str = _total_return_benchmark_data_symbol_str(
+        config_obj.regime_symbol_str
+    )
+    total_return_benchmark_df = total_return_benchmark_df.rename(
+        columns={config_obj.regime_symbol_str: benchmark_data_symbol_str},
+        level=0,
+    )
+    # *** CRITICAL*** Benchmark provenance must not expand or remap the
+    # strategy calendar. Align the TR benchmark to the already-established
+    # CAPITALSPECIAL price index; it is reporting-only and cannot create a
+    # signal or execution session.
+    total_return_benchmark_df = total_return_benchmark_df.reindex(
+        pricing_data_df.index
+    )
+    benchmark_close_ser = total_return_benchmark_df[
+        (benchmark_data_symbol_str, "Close")
+    ]
+    if benchmark_close_ser.isna().any():
+        missing_benchmark_date_list = [
+            pd.Timestamp(date_obj).date().isoformat()
+            for date_obj in benchmark_close_ser.index[benchmark_close_ser.isna()][:5]
+        ]
+        raise RuntimeError(
+            "TOTALRETURN benchmark is missing CAPITALSPECIAL calendar dates: "
+            f"symbol={config_obj.regime_symbol_str} "
+            f"sample_dates={missing_benchmark_date_list}"
+        )
+    return pd.concat([pricing_data_df, total_return_benchmark_df], axis=1).sort_index()
+
+
+def configure_total_return_benchmark_provenance(
+    strategy_obj: Strategy,
+    config_obj: AtrNormalizedNdxConfig,
+) -> None:
+    benchmark_data_symbol_str = _total_return_benchmark_data_symbol_str(
+        config_obj.regime_symbol_str
+    )
+    strategy_obj._benchmark_data_symbol_map_dict = {
+        config_obj.regime_symbol_str: benchmark_data_symbol_str
+    }
+    strategy_obj._performance_benchmark_symbol_str = config_obj.regime_symbol_str
+    strategy_obj._performance_benchmark_adjustment_str = TOTALRETURN_ADJUSTMENT_STR
+    strategy_obj._data_adjustment_policy_dict = {
+        "execution_and_marks_adjustment_str": CAPITALSPECIAL_ADJUSTMENT_STR,
+        "regime_signal_adjustment_str": CAPITALSPECIAL_ADJUSTMENT_STR,
+        "performance_benchmark_adjustment_str": TOTALRETURN_ADJUSTMENT_STR,
+        "performance_benchmark_data_symbol_str": benchmark_data_symbol_str,
+    }
 
 
 def audit_pit_universe_df(
@@ -343,6 +415,8 @@ def map_month_end_decision_dates_to_rebalance_schedule_df(
 
 def get_atr_normalized_ndx_data(
     config: AtrNormalizedNdxConfig = DEFAULT_CONFIG,
+    *,
+    include_total_return_benchmark_bool: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     _, raw_universe_df = build_index_constituent_matrix(indexname=config.indexname_str)
 
@@ -381,6 +455,11 @@ def get_atr_normalized_ndx_data(
         :,
         pricing_data_df.columns.get_level_values(0).isin(keep_symbol_set),
     ].sort_index()
+    if include_total_return_benchmark_bool:
+        pricing_data_df = append_total_return_benchmark_data_df(
+            pricing_data_df=pricing_data_df,
+            config_obj=config,
+        )
 
     close_symbol_list = audited_universe_df.columns.tolist()
     price_close_df = pd.DataFrame(
@@ -458,7 +537,10 @@ def build_execution_timing_analysis_inputs() -> dict[str, object]:
         exit_fill  = decision_t + exit_lag  at exit_price_field
     """
     config = DEFAULT_CONFIG
-    pricing_data_df, universe_df, rebalance_schedule_df = get_atr_normalized_ndx_data(config)
+    pricing_data_df, universe_df, rebalance_schedule_df = get_atr_normalized_ndx_data(
+        config,
+        include_total_return_benchmark_bool=True,
+    )
     decision_close_schedule_df = _map_rebalance_schedule_to_decision_close_schedule_df(
         rebalance_schedule_df=rebalance_schedule_df,
     )
@@ -479,6 +561,10 @@ def build_execution_timing_analysis_inputs() -> dict[str, object]:
             max_positions_int=config.max_positions_int,
         )
         strategy_obj.universe_df = universe_df
+        configure_total_return_benchmark_provenance(
+            strategy_obj=strategy_obj,
+            config_obj=config,
+        )
         strategy_obj.trade_id_int = 0
         strategy_obj.current_trade_map = defaultdict(default_trade_id_int)
         return strategy_obj
@@ -566,10 +652,16 @@ class AtrNormalizedNdxStrategy(Strategy):
 
     def compute_signals(self, pricing_data: pd.DataFrame) -> pd.DataFrame:
         signal_data_df = pricing_data.copy()
+        benchmark_data_symbol_set = set(
+            self._benchmark_data_symbol_map_dict.values()
+        )
         tradeable_symbol_list = [
             str(symbol_str)
             for symbol_str in signal_data_df.columns.get_level_values(0).unique()
-            if str(symbol_str) not in self._benchmarks
+            if (
+                str(symbol_str) not in self._benchmarks
+                and str(symbol_str) not in benchmark_data_symbol_set
+            )
         ]
         if len(tradeable_symbol_list) == 0:
             raise RuntimeError("No tradeable stock symbols were found in pricing_data.")
@@ -807,7 +899,10 @@ def run_variant(
             ),
             end_date_str=end_date_str,
         )
-    pricing_data_df, universe_df, rebalance_schedule_df = get_atr_normalized_ndx_data(config_obj)
+    pricing_data_df, universe_df, rebalance_schedule_df = get_atr_normalized_ndx_data(
+        config_obj,
+        include_total_return_benchmark_bool=True,
+    )
 
     strategy_obj = AtrNormalizedNdxStrategy(
         name="strategy_mo_atr_normalized_ndx",
@@ -824,6 +919,10 @@ def run_variant(
         max_positions_int=config_obj.max_positions_int,
     )
     strategy_obj.universe_df = universe_df
+    configure_total_return_benchmark_provenance(
+        strategy_obj=strategy_obj,
+        config_obj=config_obj,
+    )
 
     # *** CRITICAL*** Deployment-reference backtests keep full pre-start
     # history for monthly ATR and trend features, but the executable calendar
@@ -878,7 +977,10 @@ def build_capacity_analysis_inputs(
             ),
             end_date_str=end_date_str,
         )
-    pricing_data_df, universe_df, rebalance_schedule_df = get_atr_normalized_ndx_data(config_obj)
+    pricing_data_df, universe_df, rebalance_schedule_df = get_atr_normalized_ndx_data(
+        config_obj,
+        include_total_return_benchmark_bool=True,
+    )
 
     strategy_obj = AtrNormalizedNdxStrategy(
         name="strategy_mo_atr_normalized_ndx",
@@ -895,6 +997,10 @@ def build_capacity_analysis_inputs(
         max_positions_int=config_obj.max_positions_int,
     )
     strategy_obj.universe_df = universe_df
+    configure_total_return_benchmark_provenance(
+        strategy_obj=strategy_obj,
+        config_obj=config_obj,
+    )
 
     # *** CRITICAL *** CapacityAnalysis must assess the same completed order
     # ledger as the deployment-reference NDX momentum backtest. Keep pre-start
@@ -912,8 +1018,6 @@ def build_capacity_analysis_inputs(
     )
 
     strategy_obj.universe_df = None
-    strategy_obj._performance_benchmark_symbol_str = config_obj.regime_symbol_str
-    strategy_obj._performance_benchmark_adjustment_str = "TOTALRETURN"
     return {
         "strategy_obj": strategy_obj,
         "pricing_data_df": pricing_data_df,

@@ -9,6 +9,7 @@ from alpha.engine.crisis import (
     CrisisAnalyzer,
     CrisisPeriodConfig,
     CrisisStrategySpec,
+    _build_mo_atr_normalized_ndx_strategy_obj,
     resolve_crisis_window,
     run_crisis_replay_suite,
 )
@@ -86,6 +87,36 @@ class CrisisReplayTests(unittest.TestCase):
         self.assertIn(
             'strategy_mo_atr_normalized_ndx',
             CrisisAnalyzer.supported_strategy_key_tuple(),
+        )
+
+    def test_ndx_crisis_strategy_uses_total_return_benchmark_mapping(self):
+        from strategies.momentum.strategy_mo_atr_normalized_ndx import DEFAULT_CONFIG
+
+        rebalance_schedule_df = pd.DataFrame(
+            {"decision_date_ts": [pd.Timestamp("2024-01-31")]},
+            index=pd.to_datetime(["2024-02-01"]),
+        )
+        universe_df = pd.DataFrame(
+            {"AAA": [1]},
+            index=pd.to_datetime(["2024-01-31"]),
+        )
+        strategy_obj = _build_mo_atr_normalized_ndx_strategy_obj(
+            {
+                "strategy_name_str": "strategy_mo_atr_normalized_ndx",
+                "capital_base_float": 100_000.0,
+                "config_obj": DEFAULT_CONFIG,
+                "rebalance_schedule_df": rebalance_schedule_df,
+                "universe_df": universe_df,
+            }
+        )
+
+        self.assertEqual(
+            strategy_obj._benchmark_data_symbol_map_dict,
+            {"SPY": "SPY_TR"},
+        )
+        self.assertEqual(
+            strategy_obj._performance_benchmark_adjustment_str,
+            "TOTALRETURN",
         )
 
     def test_crisis_analyzer_class_api_runs_suite(self):
