@@ -1671,9 +1671,28 @@ def _augment_summary_display_metrics(strategy, summary_df: pd.DataFrame) -> pd.D
     return augmented_summary_df
 
 
+def _trade_statistics_section_html(entity, intro_html_str: str = '') -> str:
+    """Trade statistics as a summary sub-section rather than its own plate.
+
+    These are summary numbers of the same kind as the sections around them, so
+    they belong in the one place a reader goes for summary numbers.
+    """
+    summary_trades_df = getattr(entity, 'summary_trades', None)
+    if summary_trades_df is None or len(summary_trades_df) == 0:
+        return ''
+    return (
+        '<div class="summary-section"><h3>Trade Statistics</h3>'
+        f'{intro_html_str}'
+        f'<div class="scroll">{_format_summary_trades(_curate_summary_trades(summary_trades_df))}</div>'
+        f'{_degenerate_trade_note_html(entity)}'
+        '</div>'
+    )
+
+
 def _format_performance_summary(
     summary_df: pd.DataFrame,
     regression_metadata_by_column_dict: dict[str, dict[str, object]] | None = None,
+    extra_section_html_str: str = '',
 ) -> str:
     """Render a flat performance summary as consistent named sections."""
     section_html_list: list[str] = []
@@ -1732,6 +1751,8 @@ def _format_performance_summary(
             '</div>'
         )
 
+    if extra_section_html_str:
+        section_html_list.append(extra_section_html_str)
     return '<div class="summary-section-stack">' + ''.join(section_html_list) + '</div>'
 
 
@@ -2506,12 +2527,12 @@ def save_portfolio_results(portfolio, output_dir='results', output_path: str | P
 
 
 def _corr_color(val) -> str:
-    """Map a correlation to the page's gain/loss language.
+    """Shade a correlation by how much concentration risk it carries.
 
-    Low correlation is what a multi-pod book wants, so it reads green; high
-    correlation is concentration risk, so it reads brown. Using the same two
-    tones as the monthly grids means one colour vocabulary across the report
-    rather than a second, mute one built from the strategy and benchmark hues.
+    A single hue deepening from bare paper: zero correlation is the neutral
+    baseline rather than something to celebrate, and only rising correlation
+    is a flag. Blending between two hues instead pushed mid-range values —
+    where most real pairs sit — through a muddy midpoint that read as neither.
 
     *** CRITICAL*** The scale is on |rho|. A strongly negative correlation is
     as much a real relationship as a strongly positive one, and colouring it as
@@ -2528,35 +2549,33 @@ def _corr_color(val) -> str:
         )
 
     intensity_float = min(abs(value_float), 1.0)
-    low_corr_color_str = blend_hex_color_str(
-        SIGNATURE_PALETTE_DICT['page'],
-        SIGNATURE_PALETTE_DICT['profit'],
-        0.34,
-    )
-    high_corr_color_str = blend_hex_color_str(
-        SIGNATURE_PALETTE_DICT['page'],
-        SIGNATURE_PALETTE_DICT['loss'],
-        0.62,
-    )
     background_color_str = blend_hex_color_str(
-        low_corr_color_str,
-        high_corr_color_str,
-        intensity_float,
+        str(SIGNATURE_PALETTE_DICT['page']),
+        str(SIGNATURE_PALETTE_DICT['loss']),
+        intensity_float * 0.62,
     )
     font_color_str = (
         SIGNATURE_PALETTE_DICT['ink']
-        if intensity_float < 0.78 else SIGNATURE_PALETTE_DICT['page']
+        if intensity_float < 0.82 else SIGNATURE_PALETTE_DICT['page']
     )
     return f'background-color: {background_color_str}; color: {font_color_str};'
 
 
 def _format_correlation_matrix(corr: 'pd.DataFrame') -> str:
-    """Render a correlation matrix as a color-coded HTML table."""
+    """Render a correlation matrix as a colour-coded HTML table.
+
+    The diagonal is left blank. Self-correlation is 1.0 by construction, so
+    shading it would put the loudest cells in the table on the one quantity
+    that carries no information and draw the eye away from the pairs.
+    """
     headers = '<th></th>' + ''.join(f'<th>{c}</th>' for c in corr.columns)
     rows = []
     for row_label in corr.index:
         cells = [f'<td class="metric">{row_label}</td>']
         for col_label in corr.columns:
+            if row_label == col_label:
+                cells.append('<td style="text-align:center;">—</td>')
+                continue
             val = corr.loc[row_label, col_label]
             style = _corr_color(val)
             cells.append(f'<td style="{style} text-align:center;">{val:.3f}</td>')
@@ -2804,7 +2823,7 @@ def _build_tail_risk_html(portfolio) -> str:
 
 def _build_diagnostics_html(portfolio) -> str:
     """Build the Cross-Strategy Diagnostics HTML section."""
-    parts = ['<h2>Cross-Strategy Diagnostics</h2>']
+    parts = ['<h2>Diversification</h2>']
 
     if portfolio.correlation_matrix is not None and len(portfolio.correlation_matrix) > 0:
         parts.append('<h3>Correlation Matrix</h3>')
@@ -3685,10 +3704,15 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
 '''
     provenance_content_html_str = _build_provenance_html(portfolio)
     performance_summary_content_html_str = f'''
-<h2>Portfolio Performance Summary</h2>
+<h2>Performance Summary</h2>
 {_format_performance_summary(
     _augment_summary_display_metrics(portfolio, summ),
     portfolio.benchmark_regression_metadata_by_column_dict,
+    extra_section_html_str=_trade_statistics_section_html(
+        portfolio,
+        '<p class="metric-context">Completed pod trades whose full entry-to-exit lifecycle '
+        'falls inside the common PM reporting window.</p>',
+    ),
 )}
 '''
     pm_allocation_card_html_str = _wrap_card_html(pm_allocation_content_html_str)
@@ -3725,13 +3749,6 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
     diagnostics_card_html_str = _wrap_card_html(_build_diagnostics_html(portfolio))
     tail_risk_card_html_str = _wrap_card_html(_build_tail_risk_html(portfolio))
     pod_drift_card_html_str = _wrap_card_html(_portfolio_pod_drift_html(portfolio))
-    pooled_trade_stats_content_html_str = f'''
-<h2>PM-Window Pod Trade Statistics</h2>
-<p>Completed pod trades whose full entry-to-exit lifecycle falls inside the common PM reporting window.</p>
-<div class="scroll">{_format_summary_trades(_curate_summary_trades(portfolio.summary_trades)) if portfolio.summary_trades is not None and len(portfolio.summary_trades) > 0 else '<p>No completed PM-window trades.</p>'}</div>
-{_degenerate_trade_note_html(portfolio)}
-'''
-    pooled_trade_stats_card_html_str = _wrap_card_html(pooled_trade_stats_content_html_str)
     pooled_trade_distribution_card_html_str = _wrap_card_html(
         _build_trade_distribution_html(
             portfolio._trades,
@@ -3757,21 +3774,26 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
             plate_content_html_list=[
                 equity_content_html_str,
                 _build_annual_paths_plate_html(portfolio),
+                (
+                    f'<h2>Monthly Returns</h2>{portfolio_monthly_content_html_str}'
+                    if portfolio_monthly_content_html_str else ''
+                ),
                 _build_relative_performance_plate_html(portfolio),
-                weight_allocation_content_html_str,
-                pm_allocation_content_html_str,
                 performance_summary_content_html_str,
                 _build_conditional_beta_plate_html(portfolio),
                 _build_diagnostics_html(portfolio),
                 _build_tail_risk_html(portfolio),
-                _portfolio_pod_drift_html(portfolio),
-                (
-                    f'<h2>Portfolio Monthly Returns</h2>{portfolio_monthly_content_html_str}'
-                    if portfolio_monthly_content_html_str else ''
-                ),
-                pooled_trade_stats_content_html_str,
+                # Allocation and drift are one operational question: what the
+                # book targets, what it actually holds, and the gap between.
+                _merge_plate_sections_html('Allocation & Drift', [
+                    pm_allocation_content_html_str,
+                    weight_allocation_content_html_str,
+                    _portfolio_pod_drift_html(portfolio),
+                ]),
                 _build_pod_report_links_html(portfolio),
-                provenance_content_html_str,
+                _collapse_plate_body_html(
+                    provenance_content_html_str, 'Show data sources and run windows'
+                ),
             ],
         )
     else:
@@ -3787,7 +3809,6 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
 {diagnostics_card_html_str}
 {tail_risk_card_html_str}
 {pod_drift_card_html_str}
-{pooled_trade_stats_card_html_str}
 {pooled_trade_distribution_card_html_str}
 <div class="section-stack">{pod_sections}</div>
 </div>'''
@@ -3844,6 +3865,46 @@ def _build_plate_index_html(plate_content_html_list: list[str]) -> str:
     )
 
 
+def _collapse_plate_body_html(section_html_str: str, summary_label_str: str) -> str:
+    """Keep a plate's heading visible but fold its body behind a summary.
+
+    Used for reference material — an audit trail is something you go looking
+    for, not something that should sit between two things you read.
+    """
+    if not section_html_str or not section_html_str.strip():
+        return ''
+    heading_match = re.search(r'(<h2>.*?</h2>)', section_html_str, re.S)
+    if heading_match is None:
+        return section_html_str
+    heading_html_str = heading_match.group(1)
+    body_html_str = section_html_str.replace(heading_html_str, '', 1)
+    return (
+        f'{heading_html_str}'
+        f'<details class="summary-details"><summary>{html.escape(summary_label_str)}</summary>'
+        f'{body_html_str}</details>'
+    )
+
+
+def _merge_plate_sections_html(plate_title_str: str, section_html_list: list[str]) -> str:
+    """Combine related sections into one plate under a single heading.
+
+    Each source section carries its own ``<h2>``; those are demoted to ``<h3>``
+    so the plate has exactly one title. Without this the plate index — which
+    reads the first heading — would silently label the plate after whichever
+    section happened to come first.
+    """
+    demoted_html_list = []
+    for section_html_str in section_html_list:
+        if not section_html_str or not section_html_str.strip():
+            continue
+        demoted_html_list.append(
+            section_html_str.replace('<h2>', '<h3>').replace('</h2>', '</h3>')
+        )
+    if len(demoted_html_list) == 0:
+        return ''
+    return f'<h2>{html.escape(plate_title_str)}</h2>' + ''.join(demoted_html_list)
+
+
 def _build_pod_report_links_html(portfolio) -> str:
     """Link each pod to its own full report rather than restating it here.
 
@@ -3869,11 +3930,19 @@ def _build_pod_report_links_html(portfolio) -> str:
         weight_str = f'{float(weight_obj) * 100:.0f}%' if weight_obj is not None else ''
         capital_obj = pod_info_dict.get('allocated_capital')
         capital_str = _fmt_dollar(capital_obj) if capital_obj is not None else ''
+        # The effective start is what the pod actually traded from, which can
+        # lag the requested start when its data begins later.
+        start_str = str(
+            pod_info_dict.get('effective_backtest_start_date_str')
+            or pod_info_dict.get('backtest_start_date_str')
+            or ''
+        )
         pod_report_path_str = f'pods/{pod_id_str}/report.html'
         row_html_list.append(
             f'<tr><td class="metric">{html.escape(pod_id_str)}</td>'
             f'<td>{html.escape(strategy_name_str)}</td>'
             f'<td>{weight_str}</td><td>{capital_str}</td>'
+            f'<td>{html.escape(start_str)}</td>'
             f'<td><a href="{html.escape(pod_report_path_str)}">open report</a></td></tr>'
         )
     if len(row_html_list) == 0:
@@ -3883,11 +3952,11 @@ def _build_pod_report_links_html(portfolio) -> str:
         '<h2>Pods</h2>'
         '<div class="scroll"><table class="stats-table">'
         '<thead><tr><th>Pod</th><th>Strategy</th><th>Weight</th><th>Capital</th>'
-        '<th>Full report</th></tr></thead>'
+        '<th>Start</th><th>Full report</th></tr></thead>'
         f'<tbody>{"".join(row_html_list)}</tbody></table></div>'
-        '<p class="metric-context">Each pod is written as its own complete report beside this '
-        'one, carrying the same devices at strategy level. Book-level questions are answered '
-        'here; per-pod detail is one click away rather than restated.</p>'
+        '<p class="metric-context">The one place each pod is identified. Every pod is also '
+        'written as its own complete report beside this one, carrying the same devices at '
+        'strategy level, so per-pod detail is one click away rather than restated here.</p>'
     )
 
 
@@ -3935,8 +4004,8 @@ def _build_spec_report_body_html(
   <h1>{html.escape(str(strategy.name))}</h1>
 </header>
 <div class="spec-masthead">{masthead_html_str}</div>
-{headline_metrics_html_str}
 {_build_plate_index_html(active_plate_content_html_list)}
+{headline_metrics_html_str}
 {plate_html_str}
 </div>'''
 
@@ -3985,7 +4054,11 @@ def _build_html(strategy, chart_b64: str) -> str:
     weights_content_html_str = _portfolio_weights_html(strategy)
     performance_summary_content_html_str = f'''
 <h2>Performance Summary</h2>
-{_format_performance_summary(augmented_summary_df, strategy_regression_metadata_by_column_dict)}
+{_format_performance_summary(
+    augmented_summary_df,
+    strategy_regression_metadata_by_column_dict,
+    extra_section_html_str=_trade_statistics_section_html(strategy),
+)}
 '''
     if str(SIGNATURE_PALETTE_DICT['layout_str']) == 'dashboard':
         monthly_returns_body_html_str = (
@@ -3996,11 +4069,6 @@ def _build_html(strategy, chart_b64: str) -> str:
     monthly_returns_content_html_str = f'''
 <h2>Monthly Returns</h2>
 {monthly_returns_body_html_str}
-'''
-    trade_statistics_content_html_str = f'''
-<h2>Trade Statistics</h2>
-<div class="scroll">{_format_summary_trades(_curate_summary_trades(strategy.summary_trades))}</div>
-{_degenerate_trade_note_html(strategy)}
 '''
     open_trades_content_html_str = f'''
 <h2>Open Trades</h2>
@@ -4027,13 +4095,14 @@ def _build_html(strategy, chart_b64: str) -> str:
             plate_content_html_list=[
                 equity_content_html_str,
                 _build_annual_paths_plate_html(strategy),
+                # Year by year and monthly returns are siblings — both are
+                # performance over time — so they sit together.
+                monthly_returns_content_html_str,
                 _build_relative_performance_plate_html(strategy),
                 _build_composition_plate_html(strategy),
                 weights_content_html_str,
                 performance_summary_content_html_str,
                 _build_conditional_beta_plate_html(strategy),
-                trade_statistics_content_html_str,
-                monthly_returns_content_html_str,
                 open_trades_content_html_str,
                 closed_trades_content_html_str,
             ],
@@ -4047,10 +4116,7 @@ def _build_html(strategy, chart_b64: str) -> str:
 {kpi_grid_html_str}
 {_wrap_card_html(equity_content_html_str, card_class_str='card-primary')}
 {weights_card_html_str}
-{_build_card_grid_html([
-    _wrap_card_html(performance_summary_content_html_str),
-    _wrap_card_html(trade_statistics_content_html_str),
-])}
+{_wrap_card_html(performance_summary_content_html_str)}
 {_wrap_card_html(monthly_returns_content_html_str, card_class_str='card-monthly-returns')}
 {_wrap_card_html(open_trades_content_html_str)}
 {_wrap_card_html(closed_trades_content_html_str)}
