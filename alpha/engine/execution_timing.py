@@ -949,22 +949,11 @@ def _timing_matrix_heatmap_html_str(
             )
         row_html_list.append("<tr>" + "".join(cell_html_list) + "</tr>")
 
-    # Losses are carried signed-negative, so "higher is better" and "closer to
-    # zero is better" are the same rule. Say so, or the darkest cell on a
-    # drawdown grid reads as the worst one.
-    direction_note_str = "darker is better" if higher_is_better_bool else "lighter is better"
-    if higher_is_better_bool and high_float <= 0.0:
-        direction_note_str = "darker is better (losses are negative, so closer to zero)"
     return (
         f"<h3>{html.escape(title_str)}</h3>"
         '<div class="scroll"><table class="heatmap">'
         f"<thead><tr><th>Entry \\ Exit</th>{header_html_str}</tr></thead>"
         f'<tbody>{"".join(row_html_list)}</tbody></table></div>'
-        f'<p class="metric-context">Rows are entry timing, columns exit timing; '
-        f"{direction_note_str}, shaded across the whole grid so cells compare directly. "
-        "The outlined cell is the default execution path. A grid of one flat shade means "
-        "timing barely matters for this strategy; a sharp contrast between neighbours means "
-        "the result depends on an execution assumption.</p>"
     )
 
 

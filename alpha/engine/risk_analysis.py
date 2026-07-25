@@ -1933,8 +1933,13 @@ Return window: {html.escape(str(summary_dict.get("start_date_str")))} to {html.e
 {_verdict_panel_html(summary_dict.get("verdict"))}
 {_summary_tiles_html(summary_dict)}
 <div class="section">
+<h2>Sample Distribution</h2>
+<div class="subtitle">Each bootstrap path produces its own CAGR, drawdown and Sharpe, so these are {summary_dict.get("simulation_count_int")} draws of how this {entity_type_html} could have gone under the primary block assumption. The shaded band is the 5th to 95th percentile reported in the interval table. The vertical rule is the value the realized backtest actually produced: near the middle of a broad distribution means the result is ordinary for this return series, out at an edge means it depended on the particular sequence that happened.</div>
+{_sample_distribution_svg(risk_result_obj.bootstrap_path_metric_df, risk_result_obj.bootstrap_interval_df, int(summary_dict["primary_mean_block_length_int"]))}
+</div>
+<div class="section">
 <h2>Returns Histogram</h2>
-<div class="subtitle">Distribution of realized daily returns over the sample window. Mean left of median signals negative skew (occasional larger losses).</div>
+<div class="subtitle">Distribution of realized daily returns over the sample window. Mean left of median signals negative skew (occasional larger losses). Bar height is share of days, on a square-root scale so the tail stays visible against the central mass.</div>
 {_return_histogram_svg(risk_result_obj.return_histogram_df, mean_float=return_mean_float, median_float=return_median_float)}
 </div>
 <div class="section">
@@ -2125,16 +2130,27 @@ def _return_histogram_svg(
     plot_height_float = height_float - top_float - bottom_float
     x_min_float = float(histogram_df["bin_left_float"].min())
     x_max_float = float(histogram_df["bin_right_float"].max())
-    y_max_float = float(max(1, int(histogram_df["count_int"].max())))
     axis_y_float = top_float + plot_height_float
+
+    # *** CRITICAL*** Bar height is the square root of the share of days, not
+    # the share itself. On a linear count axis this strategy's peak bin holds
+    # 343 days while thirty of eighty bins hold two or fewer, so the entire
+    # left tail -- the only part a risk report exists to show -- draws under
+    # one pixel. The square root is a deliberate distortion of area for
+    # legibility, which is why the axis is labelled with its true shares and
+    # the tick spacing is visibly uneven.
+    total_count_float = float(max(1.0, float(histogram_df["count_int"].sum())))
+    max_share_float = float(max(1e-9, float(histogram_df["count_int"].max()) / total_count_float))
+
+    def share_height_float(share_float: float) -> float:
+        return plot_height_float * float(np.sqrt(max(0.0, share_float) / max_share_float))
 
     gridline_count_int = 4
     gridline_html_list = []
     for tick_idx_int in range(gridline_count_int + 1):
-        tick_count_float = y_max_float * tick_idx_int / gridline_count_int
-        tick_y_float = _scale_float(
-            tick_count_float, 0.0, y_max_float, axis_y_float, top_float
-        )
+        position_fraction_float = tick_idx_int / gridline_count_int
+        tick_share_float = max_share_float * position_fraction_float**2
+        tick_y_float = axis_y_float - plot_height_float * position_fraction_float
         if tick_idx_int > 0:
             gridline_html_list.append(
                 f"<line x1=\"{left_float:.1f}\" y1=\"{tick_y_float:.1f}\" "
@@ -2143,7 +2159,7 @@ def _return_histogram_svg(
             )
         gridline_html_list.append(
             f"<text x=\"{left_float - 6:.1f}\" y=\"{tick_y_float + 4:.1f}\" "
-            f"fill=\"{SIGNATURE_PALETTE_DICT['muted']}\" font-size=\"11\" text-anchor=\"end\">{int(round(tick_count_float))}</text>"
+            f"fill=\"{SIGNATURE_PALETTE_DICT['muted']}\" font-size=\"11\" text-anchor=\"end\">{tick_share_float:.1%}</text>"
         )
 
     # Evenly spaced x-axis ticks across the full return range.
@@ -2171,12 +2187,15 @@ def _return_histogram_svg(
         count_float = float(row_ser["count_int"])
         x_float = _scale_float(bin_left_float, x_min_float, x_max_float, left_float, left_float + plot_width_float)
         x2_float = _scale_float(bin_right_float, x_min_float, x_max_float, left_float, left_float + plot_width_float)
-        y_float = _scale_float(count_float, 0.0, y_max_float, axis_y_float, top_float)
         bar_width_float = max(1.0, x2_float - x_float - 1.0)
-        bar_height_float = axis_y_float - y_float
-        fill_str = str(SIGNATURE_PALETTE_DICT['overlay_cycle'][4]) if float(row_ser["bin_mid_float"]) >= 0.0 else str(SIGNATURE_PALETTE_DICT['loss'])
+        bar_height_float = share_height_float(count_float / total_count_float)
+        y_float = axis_y_float - bar_height_float
+        # Colouring by sign repeats what the position on the axis already says
+        # and spends the strongest channel on nothing. One fill; the zero rule
+        # carries the split.
+        fill_str = str(SIGNATURE_PALETTE_DICT['muted'])
         bar_html_list.append(
-            f"<rect x=\"{x_float:.2f}\" y=\"{y_float:.2f}\" width=\"{bar_width_float:.2f}\" height=\"{bar_height_float:.2f}\" fill=\"{fill_str}\" opacity=\"0.82\" />"
+            f"<rect x=\"{x_float:.2f}\" y=\"{y_float:.2f}\" width=\"{bar_width_float:.2f}\" height=\"{bar_height_float:.2f}\" fill=\"{fill_str}\" opacity=\"0.55\" />"
         )
     zero_x_float = _scale_float(0.0, x_min_float, x_max_float, left_float, left_float + plot_width_float)
 
@@ -2226,7 +2245,221 @@ def _return_histogram_svg(
         + "".join(x_tick_html_list)
         + "".join(legend_html_list)
         + f"<text x=\"{left_float + plot_width_float / 2.0:.1f}\" y=\"{height_float - 8:.1f}\" fill=\"{SIGNATURE_PALETTE_DICT['ink']}\" font-size=\"12\" text-anchor=\"middle\">Daily return</text>"
-        + f"<text x=\"{y_axis_title_x_float:.1f}\" y=\"{y_axis_title_y_float:.1f}\" fill=\"{SIGNATURE_PALETTE_DICT['ink']}\" font-size=\"12\" text-anchor=\"middle\" transform=\"rotate(-90 {y_axis_title_x_float:.1f} {y_axis_title_y_float:.1f})\">Count of days</text>"
+        + f"<text x=\"{y_axis_title_x_float:.1f}\" y=\"{y_axis_title_y_float:.1f}\" fill=\"{SIGNATURE_PALETTE_DICT['ink']}\" font-size=\"12\" text-anchor=\"middle\" transform=\"rotate(-90 {y_axis_title_x_float:.1f} {y_axis_title_y_float:.1f})\">Share of days (sqrt scale)</text>"
+        + "</svg>"
+    )
+
+
+SAMPLE_DISTRIBUTION_METRIC_TUPLE = (
+    "cagr_float",
+    "max_drawdown_float",
+    "sharpe_float",
+    "worst_21d_return_float",
+)
+
+
+def _sample_distribution_panel_html_str(
+    path_value_vec: np.ndarray,
+    observed_value_float: float | None,
+    observed_percentile_float: float | None,
+    p05_float: float | None,
+    p95_float: float | None,
+    title_str: str,
+    metric_name_str: str,
+    origin_x_float: float,
+    origin_y_float: float,
+    panel_width_float: float,
+    panel_height_float: float,
+) -> str:
+    """Draw one metric's bootstrap distribution with the observed value on it.
+
+    This is the sampling distribution the report is built on: one draw per
+    simulated path, so it answers "was the backtest lucky" directly rather than
+    through a percentile in a table. The observed value is the whole point of
+    the panel, so it is the only mark drawn in full-strength ink.
+    """
+    left_float = origin_x_float + 8.0
+    plot_width_float = panel_width_float - 24.0
+    # The panel title and the observed-value label are both anchored near the
+    # top edge, and the label follows the observed value horizontally. Leave a
+    # full line between them so they cannot collide when a metric's observed
+    # value happens to sit at the left of its distribution.
+    top_float = origin_y_float + 36.0
+    plot_height_float = panel_height_float - 68.0
+    axis_y_float = top_float + plot_height_float
+
+    finite_value_vec = path_value_vec[np.isfinite(path_value_vec)]
+    if len(finite_value_vec) == 0:
+        return ""
+
+    # *** CRITICAL*** The observed value must be inside the drawn range or the
+    # panel would show a distribution and silently clip the one mark that gives
+    # it meaning.
+    low_float = float(finite_value_vec.min())
+    high_float = float(finite_value_vec.max())
+    if observed_value_float is not None and np.isfinite(observed_value_float):
+        low_float = min(low_float, float(observed_value_float))
+        high_float = max(high_float, float(observed_value_float))
+    if high_float <= low_float:
+        high_float = low_float + 1e-9
+
+    bin_count_int = 44
+    count_vec, edge_vec = np.histogram(
+        finite_value_vec, bins=bin_count_int, range=(low_float, high_float)
+    )
+    peak_count_float = float(max(1, int(count_vec.max())))
+
+    def x_of(value_float: float) -> float:
+        return _scale_float(
+            float(value_float), low_float, high_float, left_float, left_float + plot_width_float
+        )
+
+    # The 5th-95th band behind the bars carries the interval the table reports,
+    # so the two sections cannot disagree about what "likely range" means.
+    band_html_str = ""
+    if p05_float is not None and p95_float is not None:
+        band_x_float = x_of(p05_float)
+        band_x2_float = x_of(p95_float)
+        band_html_str = (
+            f'<rect x="{band_x_float:.1f}" y="{top_float:.1f}" '
+            f'width="{max(0.0, band_x2_float - band_x_float):.1f}" height="{plot_height_float:.1f}" '
+            f'fill="{SIGNATURE_PALETTE_DICT["neutral"]}" opacity="0.45" />'
+        )
+
+    bar_html_list = []
+    for bin_idx_int in range(len(count_vec)):
+        if count_vec[bin_idx_int] == 0:
+            continue
+        bar_x_float = x_of(edge_vec[bin_idx_int])
+        bar_x2_float = x_of(edge_vec[bin_idx_int + 1])
+        bar_height_float = plot_height_float * float(count_vec[bin_idx_int]) / peak_count_float
+        bar_html_list.append(
+            f'<rect x="{bar_x_float:.2f}" y="{axis_y_float - bar_height_float:.2f}" '
+            f'width="{max(0.6, bar_x2_float - bar_x_float - 0.6):.2f}" height="{bar_height_float:.2f}" '
+            f'fill="{SIGNATURE_PALETTE_DICT["muted"]}" opacity="0.5" />'
+        )
+
+    observed_html_str = ""
+    if observed_value_float is not None and np.isfinite(observed_value_float):
+        observed_x_float = x_of(observed_value_float)
+        percentile_str = ""
+        if observed_percentile_float is not None and np.isfinite(observed_percentile_float):
+            percentile_str = f" (p{float(observed_percentile_float) * 100.0:.0f})"
+        label_anchor_str = "start" if observed_x_float < left_float + plot_width_float * 0.6 else "end"
+        label_offset_float = 5.0 if label_anchor_str == "start" else -5.0
+        observed_html_str = (
+            f'<line x1="{observed_x_float:.1f}" y1="{top_float - 6:.1f}" '
+            f'x2="{observed_x_float:.1f}" y2="{axis_y_float:.1f}" '
+            f'stroke="{SIGNATURE_PALETTE_DICT["ink"]}" stroke-width="1.5" />'
+            f'<text x="{observed_x_float + label_offset_float:.1f}" y="{top_float - 10:.1f}" '
+            f'fill="{SIGNATURE_PALETTE_DICT["ink"]}" font-size="10.5" text-anchor="{label_anchor_str}">'
+            f"observed {html.escape(_format_metric_value(observed_value_float, metric_name_str))}"
+            f"{html.escape(percentile_str)}</text>"
+        )
+
+    axis_label_html_str = "".join(
+        f'<text x="{x_of(edge_value_float):.1f}" y="{axis_y_float + 14:.1f}" '
+        f'fill="{SIGNATURE_PALETTE_DICT["muted"]}" font-size="10" '
+        f'text-anchor="{anchor_str}">'
+        f"{html.escape(_format_metric_value(edge_value_float, metric_name_str))}</text>"
+        for edge_value_float, anchor_str in (
+            (low_float, "start"),
+            (high_float, "end"),
+        )
+    )
+
+    return (
+        band_html_str
+        + "".join(bar_html_list)
+        + f'<line x1="{left_float:.1f}" y1="{axis_y_float:.1f}" '
+        f'x2="{left_float + plot_width_float:.1f}" y2="{axis_y_float:.1f}" '
+        f'stroke="{SIGNATURE_PALETTE_DICT["muted"]}" stroke-width="1" />'
+        + observed_html_str
+        + axis_label_html_str
+        + f'<text x="{left_float:.1f}" y="{origin_y_float + 12:.1f}" '
+        f'fill="{SIGNATURE_PALETTE_DICT["ink"]}" font-size="12" font-weight="600">'
+        f"{html.escape(title_str)}</text>"
+    )
+
+
+def _sample_distribution_svg(
+    path_metric_df: pd.DataFrame,
+    interval_df: pd.DataFrame,
+    primary_mean_block_length_int: int,
+) -> str:
+    """Small multiples of the bootstrap distribution for the headline metrics.
+
+    Every path in the bootstrap produces its own CAGR, drawdown and Sharpe, so
+    these are ten thousand draws of "how this strategy could have gone". The
+    interval table reduces each one to three percentiles; the shape is what
+    says whether the observed result sits on a plateau or on a cliff edge.
+    """
+    if path_metric_df is None or len(path_metric_df) == 0:
+        return "<p>No bootstrap path metric data available.</p>"
+
+    primary_path_df = path_metric_df[
+        path_metric_df["mean_block_length_int"] == primary_mean_block_length_int
+    ]
+    if len(primary_path_df) == 0:
+        return "<p>No bootstrap path metric data available.</p>"
+
+    interval_lookup_df = None
+    if interval_df is not None and len(interval_df) > 0:
+        interval_lookup_df = interval_df[
+            interval_df["mean_block_length_int"] == primary_mean_block_length_int
+        ]
+
+    width_float = 960.0
+    panel_width_float = width_float / 2.0
+    panel_height_float = 150.0
+    height_float = panel_height_float * 2.0 + 10.0
+
+    panel_html_list = []
+    for panel_idx_int, metric_name_str in enumerate(SAMPLE_DISTRIBUTION_METRIC_TUPLE):
+        if metric_name_str not in primary_path_df.columns:
+            continue
+        observed_value_float = None
+        observed_percentile_float = None
+        p05_float = None
+        p95_float = None
+        if interval_lookup_df is not None:
+            metric_row_df = interval_lookup_df[
+                interval_lookup_df["metric_name_str"] == metric_name_str
+            ]
+            if len(metric_row_df) > 0:
+                metric_row_ser = metric_row_df.iloc[0]
+                observed_value_float = _json_float(metric_row_ser.get("observed_value_float"))
+                observed_percentile_float = _json_float(
+                    metric_row_ser.get("observed_percentile_float")
+                )
+                p05_float = _json_float(metric_row_ser.get("p05_float"))
+                p95_float = _json_float(metric_row_ser.get("p95_float"))
+
+        panel_html_list.append(
+            _sample_distribution_panel_html_str(
+                path_value_vec=primary_path_df[metric_name_str].to_numpy(dtype=float),
+                observed_value_float=observed_value_float,
+                observed_percentile_float=observed_percentile_float,
+                p05_float=p05_float,
+                p95_float=p95_float,
+                title_str=_metric_label_str(metric_name_str),
+                metric_name_str=metric_name_str,
+                origin_x_float=(panel_idx_int % 2) * panel_width_float,
+                origin_y_float=(panel_idx_int // 2) * panel_height_float + 8.0,
+                panel_width_float=panel_width_float,
+                panel_height_float=panel_height_float,
+            )
+        )
+
+    if not any(panel_html_list):
+        return "<p>No bootstrap path metric data available.</p>"
+
+    return (
+        f'<svg class="chart" viewBox="0 0 {width_float:.0f} {height_float:.0f}" role="img" '
+        'aria-label="Bootstrap sample distributions for the headline metrics">'
+        f'<rect x="0" y="0" width="{width_float:.0f}" height="{height_float:.0f}" '
+        f'fill="{SIGNATURE_PALETTE_DICT["page"]}" />'
+        + "".join(panel_html_list)
         + "</svg>"
     )
 

@@ -700,8 +700,8 @@ class TimingHeatmapTests(unittest.TestCase):
         )
         self.assertEqual(len(set(self._cell_background_list(html_str))), 1)
 
-    def test_signed_loss_matrix_states_its_sign_convention(self):
-        """Darkest cell on a drawdown grid is the smallest loss — say so."""
+    def test_signed_loss_matrix_shades_the_shallowest_loss_darkest(self):
+        """Losses are signed-negative, so "higher is better" is "closer to zero"."""
         drawdown_matrix_df = pd.DataFrame(
             [[-18.49, -17.89], [-15.30, -16.51]],
             index=pd.Index(["T+1 Open", "T+1 Close (MOC)"], name="Entry Timing"),
@@ -715,7 +715,6 @@ class TimingHeatmapTests(unittest.TestCase):
             default_entry_timing_str="T+1 Open",
             default_exit_timing_str="T+1 Open",
         )
-        self.assertIn("losses are negative", html_str)
         # -15.30 is the shallowest drawdown, so it must carry the darkest shade.
         background_list = self._cell_background_list(html_str)
         self.assertEqual(min(background_list, key=lambda c: int(c[1:3], 16)), background_list[2])

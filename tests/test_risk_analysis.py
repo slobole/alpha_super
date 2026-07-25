@@ -740,3 +740,90 @@ def test_full_sample_row_reports_every_drawdown_threshold():
         horizon_df, drawdown_threshold_tuple=(0.10,), upside_threshold_tuple=(0.10,)
     )
 
+
+def _sample_distribution_frames():
+    rng = np.random.default_rng(0)
+    path_metric_df = pd.DataFrame({
+        "cagr_float": rng.normal(0.22, 0.04, 500),
+        "max_drawdown_float": rng.normal(-0.15, 0.03, 500),
+        "sharpe_float": rng.normal(1.47, 0.22, 500),
+        "worst_21d_return_float": rng.normal(-0.11, 0.02, 500),
+        "mean_block_length_int": 21,
+    })
+    interval_df = pd.DataFrame([
+        {"mean_block_length_int": 21, "metric_name_str": "cagr_float",
+         "observed_value_float": 0.2189, "observed_percentile_float": 0.4994,
+         "p05_float": 0.1605, "p95_float": 0.2822},
+    ])
+    return path_metric_df, interval_df
+
+
+def test_sample_distribution_draws_a_panel_per_metric_with_the_observed_mark():
+    """The observed value is the point of the panel, so it must be labelled."""
+    from alpha.engine.risk_analysis import (
+        SAMPLE_DISTRIBUTION_METRIC_TUPLE,
+        _sample_distribution_svg,
+    )
+
+    path_metric_df, interval_df = _sample_distribution_frames()
+    svg_str = _sample_distribution_svg(path_metric_df, interval_df, 21)
+    for metric_name_str in SAMPLE_DISTRIBUTION_METRIC_TUPLE:
+        assert metric_name_str in path_metric_df.columns
+    assert "CAGR" in svg_str
+    assert "Sharpe" in svg_str
+    assert "observed 21.89%" in svg_str
+    assert "(p50)" in svg_str
+
+
+def test_sample_distribution_keeps_an_extreme_observed_value_inside_the_plot():
+    """An observed value outside the bootstrap range must not be clipped away.
+
+    Scaling the axis to the simulated values alone would drop the one mark
+    that gives the panel meaning — and it is exactly when the backtest sits
+    outside its own resampling that the reader most needs to see it.
+    """
+    from alpha.engine.risk_analysis import _sample_distribution_svg
+    import re
+
+    path_metric_df, interval_df = _sample_distribution_frames()
+    interval_df.loc[0, "observed_value_float"] = 0.95  # far above every path
+    svg_str = _sample_distribution_svg(path_metric_df, interval_df, 21)
+    assert "observed 95.00%" in svg_str
+    observed_line_match = re.search(r'<line x1="([\d.]+)"[^>]*stroke-width="1\.5"', svg_str)
+    assert observed_line_match is not None, svg_str[:400]
+    observed_x_float = float(observed_line_match.group(1))
+    assert 0.0 < observed_x_float <= 960.0
+
+
+def test_sample_distribution_handles_a_missing_block_length():
+    from alpha.engine.risk_analysis import _sample_distribution_svg
+
+    path_metric_df, interval_df = _sample_distribution_frames()
+    assert "No bootstrap path metric data" in _sample_distribution_svg(
+        path_metric_df, interval_df, 999
+    )
+
+
+def test_returns_histogram_keeps_the_tail_visible():
+    """A one-day bin drew under a pixel on a linear count axis.
+
+    The left tail is the only part of a return distribution a risk report
+    exists to show, so a bin holding 0.03% of days must still be drawn.
+    """
+    from alpha.engine.risk_analysis import _return_histogram_svg
+    import re
+
+    histogram_df = pd.DataFrame({
+        "bin_left_float": [-0.05, -0.01, 0.0],
+        "bin_right_float": [-0.01, 0.0, 0.04],
+        "bin_mid_float": [-0.03, -0.005, 0.02],
+        "count_int": [1, 343, 200],
+    })
+    svg_str = _return_histogram_svg(histogram_df, mean_float=0.0007, median_float=0.0009)
+    height_list = [float(m) for m in re.findall(r'<rect x="[-\d.]+" y="[-\d.]+" width="[\d.]+" height="([\d.]+)"', svg_str)]
+    tail_bar_height_float = min(h for h in height_list if h > 0.0)
+    assert tail_bar_height_float > 8.0, height_list
+    # The axis must report true shares even though the bars are square-rooted.
+    assert "%" in svg_str
+    assert "Share of days (sqrt scale)" in svg_str
+
