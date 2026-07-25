@@ -1,6 +1,6 @@
 # Engine Realism Decision: Execution Prices, Signal Returns, Dividends, and Cash
 
-**Decision status:** REVIEWED - Codex and Claude positions recorded and aligned on all eleven decisions; awaiting human-owner sign-off before any implementation
+**Decision status:** REVIEWED - Codex and Claude positions recorded; the owner-approved cash policy is recorded below; full implementation authorization remains pending
 
 **Implementation status:** Documentation only; no engine, strategy, release, or live behavior changed
 
@@ -22,7 +22,7 @@ The preliminary Codex position is:
 
 - Never use `TOTALRETURN` prices as order-fill prices or position marks.
 - Keep a non-total-return execution basis. The current engine uses Norgate `CAPITALSPECIAL`, but this is an adjusted price proxy, not literally the historical exchange quote.
-- Add explicit account events for long dividends, short dividend liabilities, eligible cash interest, margin interest, and borrow costs.
+- Add explicit dividend events. Keep positive cash at the owner-approved `0%`, and treat negative cash as an invalid state for the current WIRED book.
 - Do not globally change every signal to `TOTALRETURN`. Choose the signal basis feature by feature and strategy by strategy.
 - Treat Norgate `TOTALRETURN` as a signal or benchmark representation and as a parity check, not as the account ledger.
 - Correct the NDX/SPY benchmark provenance mismatch before relying on benchmark-relative analyzer output.
@@ -58,9 +58,10 @@ Market observations
     |       Price return, economic total return, volatility, index level, etc.
     |       Selected explicitly for each feature
     |
-    +--> Economic events
-            Dividends, interest, borrow, taxes, splits, mergers, and settlements
-            Posted to an account ledger
+    +--> Economic events and declared policies
+            Dividends, the explicit 0% positive-cash policy, borrow, taxes,
+            splits, mergers, and settlements
+            Posted to or enforced by the account ledger
 ```
 
 The present engine has the first channel in an approximate form and has several signal representations, but it does not have a complete shared economic-event ledger.
@@ -132,7 +133,7 @@ account equity
 - other accrued fees and taxes
 ```
 
-The ledger, not a synthetic price, should determine what cash is available to size future orders.
+The ledger, not a synthetic price, should determine what cash is available to size future orders. Under the owner-approved current policy, the positive-cash interest term is explicitly zero.
 
 ## 4. Simple examples
 
@@ -199,6 +200,8 @@ exposure = clip(22 / VXN, 0.25, 1.00)
 At `VXN = 44`, exposure is 50%. A `$100,000` pod therefore carries approximately `$50,000` as residual cash before rounding. The current backtest and incubation model give that cash a zero return.
 
 The real broker rate is not simply DTB3. It depends on settled cash, currency, account NAV, account segment, thresholds, and the broker's historical rate schedule.
+
+The owner has chosen to retain the zero-return treatment as an explicit, intentionally pessimistic policy rather than model those broker details. This is conservative for absolute returns but not neutral across strategies: it penalizes cash-heavy pods such as VXN-scaled NDX and TAA more than fully invested pods.
 
 ## 5. Verified current repository behavior
 
@@ -310,8 +313,8 @@ Runtime VPS state can differ from the local checkout. This document is not an op
 | `strategy_mr_dv2` | Stock `CAPITALSPECIAL` OHLC; 126-day return, NATR, DV2, SMA200 | Same stock series; next open | Empty slots remain cash | Held dividends and cash yield disappear; ex-dividend signal effects are non-directional |
 | `strategy_mr_qpi_ibs_rsi_exit` | Stock `CAPITALSPECIAL` OHLC; 3-day return, SMA200, IBS, QPI, RSI2 | Same stock series; next open | Empty slots remain cash; enabled manifest reserves 5% of account budget | Missing dividends/cash yield depress equity; ex-dividend moves can create artificial oversold states |
 | `strategy_mo_atr_normalized_ndx` | NDX stocks and SPY all use `CAPITALSPECIAL`; momentum, ATR20, stock SMA100, SPY SMA200 | Same stock series; first open of next month | Regime failure can produce 100% cash; incomplete selection leaves residual cash | Long return usually understated, but price-only signals can change holdings and are not simply conservative |
-| `strategy_mo_atr_normalized_ndx_vxn_scaled` | Same NDX signals plus observed VXN level | Same | Deliberate 25%-100% exposure, hence up to 75% cash | Cash-interest omission can be material; missing stock dividends; same signal ambiguity as base NDX |
-| `strategy_taa_df_btal_fallback_tqqq_vix_cash` | Defensive ETF momentum uses `TOTALRETURN`; SPY/VIX gate uses `CAPITALSPECIAL` | Tradeable ETFs use `CAPITALSPECIAL`; next-month open | VIX gate can turn the TQQQ fallback allocation into real cash | Signals are distribution-aware, but ETF distributions and cash yield disappear from account P&L |
+| `strategy_mo_atr_normalized_ndx_vxn_scaled` | Same NDX signals plus observed VXN level | Same | Deliberate 25%-100% exposure, hence up to 75% cash | The intentional `0%` cash policy depresses its absolute result and penalizes it versus the base NDX strategy; stock dividends are also missing |
+| `strategy_taa_df_btal_fallback_tqqq_vix_cash` | Defensive ETF momentum uses `TOTALRETURN`; SPY/VIX gate uses `CAPITALSPECIAL` | Tradeable ETFs use `CAPITALSPECIAL`; next-month open | VIX gate can turn the TQQQ fallback allocation into real cash | Signals are distribution-aware, but ETF distributions are missing and the intentional `0%` cash policy penalizes cash-heavy periods |
 | `strategy_taa_df_btal_1n_fallback_tqqq_vix_cash` | Same, with equal defensive slots | Same | Same VIX cash mechanism | Same accounting gap |
 | `strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash` | `TOTALRETURN` defensive ETF closes feed the linearity signal; SPY/VIX gate uses `CAPITALSPECIAL` | Same, with QQQ fallback | Same VIX cash mechanism | Same accounting gap |
 
@@ -481,21 +484,27 @@ The ledger must distinguish:
 
 For IBKR, positive cash interest depends on account NAV, cash balance, currency, account segment, and current rate tiers. The rate changes over time. A constant current rate or a constant DTB3 proxy is not a historically exact broker model.
 
-The conservative fallback can remain zero positive-cash interest, but it must be declared as a pessimistic assumption. Negative cash must not remain free.
+The owner-approved policy for the current engine is:
+
+- Positive cash earns exactly `0%`. This is an intentional pessimistic assumption, not an unmodelled promise of broker parity.
+- No historical broker-rate, threshold, or tier model will be added for positive cash.
+- Cross-strategy comparisons must disclose that this policy penalizes cash-heavy strategies asymmetrically, especially VXN-scaled NDX and the TAA cash sleeves.
+- The current WIRED strategies are not designed to use account-level leverage. Any negative-cash day is therefore an invariant breach and must fail loudly as a probable sizing or execution bug.
+- A future strategy that intentionally uses negative cash must introduce and validate a separate financing-cost policy before it can be accepted.
 
 ## 12. Issue register
 
 | ID | Issue | Expected bias direction | Impact | Proposed mitigation |
 |---|---|---|---|---|
 | ER-001 | No shared dividend ledger | Long pessimistic; short optimistic | High | Explicit long credit, short debit, and entitlement tests |
-| ER-002 | Positive residual cash earns zero | Usually pessimistic | High for VXN/TAA cash; potentially material for DV2/QPI | Configurable broker cash policy with zero-rate fallback |
-| ER-003 | Negative cash can be free | Optimistic | High for leveraged books | Margin-interest ledger |
+| ER-002 | Positive residual cash earns zero by explicit owner policy | Pessimistic for absolute return; asymmetrically penalizes cash-heavy pods | High for VXN/TAA cash; potentially material for DV2/QPI | Declare `0%` in artifacts and allocation reviews; report or inspect cash exposure when comparing pods |
+| ER-003 | The engine can permit free negative cash even though current WIRED strategies are non-levered | Optimistic if it occurs | High if triggered; expected to be absent | Fail loudly on every negative-cash day; require a separate financing model only for a future intentionally leveraged strategy |
 | ER-004 | Price-only signals react to ex-dividend moves | Non-directional strategy change | High for QPI; Medium for DV2/NDX | Feature-specific dividend-neutral signal research |
 | ER-005 | `CAPITALSPECIAL` described as literal trade-as | Audit/provenance error | Medium | Use precise terminology; decide whether true raw corporate-action replay is required |
 | ER-006 | NDX SPY benchmark data and metadata disagree or are undeclared | Benchmark comparison unreliable | Medium to High | Load separate SPY price and SPY TR roles; assert provenance |
-| ER-007 | Incubation omits events that live IBKR NetLiq includes | Systematic reference drift | High | Shared economic-event model plus broker event reconciliation |
+| ER-007 | Incubation omits events that live IBKR NetLiq includes | Systematic reference drift | High | Add the dividend ledger and declare actual broker cash interest as expected policy-driven drift from the `0%` reference |
 | ER-008 | Saved artifacts omit accounting policy metadata | Results can be misinterpreted | Medium | Persist signal, execution, dividend, interest, and tax contracts |
-| ER-009 | `ASSUMPTIONS_AND_GAPS.md` has no dedicated ordinary-dividend/cash-interest entry | Hidden known gap | Medium | Add a formal gap only after the joint verdict defines scope |
+| ER-009 | Ordinary-dividend and cash-policy assumptions were not previously explicit in `ASSUMPTIONS_AND_GAPS.md` | Hidden known gap | Medium | Record the owner-approved zero-positive-cash policy and the negative-cash invariant in the formal register |
 
 ## 13. Preliminary Codex verdict
 
@@ -513,7 +522,9 @@ For phase 1, use prior-entitlement-close positions and recognize the economic cr
 
 ### Decision 3 - cash and financing
 
-Add an explicit policy for positive and negative cash. Preserve zero positive-cash return as an allowed conservative mode, but never leave negative cash uncharged.
+Positive cash earns `0%` by explicit owner decision. This deliberately understates absolute performance and must be disclosed when comparing pods because it penalizes cash-heavy strategies more heavily.
+
+For the current non-levered WIRED book, negative cash is invalid rather than a financing choice. Fail loudly if it occurs. Add a financing-cost model only when a future strategy is intentionally authorized to use account-level leverage.
 
 Do not double-charge leveraged ETFs for leverage already embedded in their NAV.
 
@@ -545,12 +556,12 @@ If the joint verdict accepts the direction, the lowest-risk sequence is:
 2. Add a shadow dividend ledger and reconciliation diagnostics without changing saved headline equity.
 3. Validate entitlement timing, long/short signs, and CS-plus-dividend parity against Norgate TR.
 4. Activate corrected equity under a versioned engine/accounting contract.
-5. Add cash-interest and margin-interest policies.
+5. Persist the intentional `0%` positive-cash policy and add a fail-loud negative-cash invariant; do not add a positive-cash rate model.
 6. Extend incubation and its cash-ledger schema to non-order economic events.
 7. Fix benchmark provenance and separate SPY signal/benchmark roles.
 8. Run controlled signal-basis variants; do not mutate WIRED signals in place.
 9. Regenerate Vanilla, Risk, Capacity, Stress, and reference artifacts for every WIRED strategy.
-10. Reconcile corrected reference equity against IBKR EOD NetLiq and statement events before enabling real capital.
+10. Compare corrected reference equity against IBKR EOD NetLiq, explicitly classifying actual broker cash interest as expected drift from the intentional `0%` reference policy.
 
 ## 15. Minimum acceptance tests
 
@@ -564,12 +575,13 @@ A corrected implementation should not be accepted until all of these are demonst
 - `CAPITALSPECIAL + explicit eligible dividends` matches Norgate `TOTALRETURN` buy-and-hold wealth within a documented tolerance.
 - No future dividend information enters a historical signal.
 - No dividend is counted both in a price series and in the ledger.
-- Positive and negative cash use explicit, dated policies.
-- TAA residual cash and VXN residual cash receive the selected treatment.
+- Positive cash earns exactly `0%`, and saved artifacts identify this as an intentional pessimistic policy.
+- Any negative-cash day in a current WIRED run fails loudly.
+- TAA and VXN residual cash receive the same zero-return treatment, and cross-pod allocation reviews disclose the asymmetric penalty.
 - Leveraged ETF financing is not double-counted.
 - NDX has separate, correctly labelled SPY regime and SPY benchmark series.
 - Incubation and Vanilla produce the same accounting events under the same price path.
-- IBKR NetLiq can be reconciled to cash, positions, receivables, and liabilities.
+- IBKR comparisons require position and dividend reconciliation while explicitly labeling actual broker cash interest as accepted policy-driven drift from the `0%` reference.
 - Saved artifacts declare signal adjustment, execution adjustment, dividend policy, cash policy, tax policy, and engine version.
 - All WIRED analyzer outputs are regenerated and compared before a deployment decision.
 
@@ -615,17 +627,17 @@ Claude should answer each question directly:
 
 | Decision | Codex position | Claude position | Joint verdict |
 |---|---|---|---|
-| Fill and mark price | Never `TOTALRETURN`; keep non-TR basis | PENDING | OPEN |
-| Meaning of current `CAPITALSPECIAL` | Adjusted execution proxy, not literal as-traded | PENDING | OPEN |
-| Dividend accounting | Explicit long credit and short debit | PENDING | OPEN |
-| Dividend timing | Ex-date economic event first; receivable/pay-date later | PENDING | OPEN |
-| Positive cash | Explicit broker policy; zero allowed only if declared | PENDING | OPEN |
-| Negative cash | Must incur financing cost | PENDING | OPEN |
-| Signals | Feature-specific; no global TR switch | PENDING | OPEN |
-| TAA TR signals | Defensible existing exception, doctrine must be clarified | PENDING | OPEN |
-| NDX benchmark provenance | Must be corrected | PENDING | OPEN |
-| Existing results | Preserve and relabel/version; regenerate after change | PENDING | OPEN |
-| Implementation authorization | None until joint approval | PENDING | OPEN |
+| Fill and mark price | Never `TOTALRETURN`; keep non-TR basis | AGREE. Verified ledger in `alpha/engine/strategy.py:653-823`; TR fills plus an explicit dividend ledger would double-count | AGREED (Codex + Claude); owner sign-off pending |
+| Meaning of current `CAPITALSPECIAL` | Adjusted execution proxy, not literal as-traded | AGREE. Split-adjusted levels confirmed (AAPL 2020 unadjusted ~504 vs CAPITALSPECIAL ~126); terminology fix only, no behavior change required now | AGREED; owner sign-off pending |
+| Dividend accounting | Explicit long credit and short debit | AGREE. Gross amount computed first, with a configurable withholding rate applied as policy (see Claude answers, Q3) | AGREED; owner sign-off pending |
+| Dividend timing | Ex-date economic event first; receivable/pay-date later | AGREE (Model A first). Norgate entitlement-session stamping verified empirically on 2026-07-25: AAPL `Dividend` 0.205 on 2020-08-06 (ex 2020-08-07), SPY 1.3392 on 2020-09-17 (ex 2020-09-18) | AGREED; owner sign-off pending |
+| Positive cash | Explicit policy; zero allowed if declared | AGREE. Zero is acceptable as a declared pessimistic mode; materiality is highest for VXN-scaled and TAA cash sleeves | OWNER DECISION: `0%` by design; no broker-rate model; disclose the asymmetric cross-strategy penalty |
+| Negative cash | Must never remain an invisible free-financing path | AGREE that every negative-cash episode must be loud because no WIRED strategy is meant to lever | OWNER DECISION: invalid for the current WIRED book; fail loudly; defer financing-rate modeling until an intentionally leveraged strategy exists |
+| Signals | Feature-specific; no global TR switch | AGREE. Controlled A/B variants only; strongest candidate is NDX cross-sectional momentum; IBS stays on traded OHLC; VIX/VXN stay observed levels | AGREED; owner sign-off pending |
+| TAA TR signals | Defensible existing exception, doctrine must be clarified | AGREE retain. Return-space TR signal formation is causal; amend `CLAUDE.md` to state the precise rule (TR allowed for return-space signals and benchmarks; never for fills, marks, or level/scale-sensitive features) | AGREED; owner sign-off pending |
+| NDX benchmark provenance | Must be corrected | AGREE. Confirmed defect: `strategy_mo_atr_normalized_ndx.py:916` and the VXN variant `:409` stamp `TOTALRETURN` while the loader fetched SPY with `benchmarks=[]`, i.e. `CAPITALSPECIAL`. Fix early — it is small and independent | AGREED; owner sign-off pending |
+| Existing results | Preserve and relabel/version; regenerate after change | AGREE. Label existing artifacts `price-return ledger` immediately; regenerate under a versioned accounting contract | AGREED; owner sign-off pending |
+| Implementation authorization | None until joint approval | AGREE. This document authorizes nothing; owner must approve scope and sequence | AGREED that no implementation is authorized; OPEN until owner approves |
 
 ## 19. Evidence and external references
 
@@ -659,34 +671,87 @@ Claude should answer each question directly:
 - Recorded the preliminary verdict above.
 - Made no implementation or release change.
 
-### Claude
+### Claude - 2026-07-25
 
-**Status:** PENDING
+**Status:** COMPLETE
 
-**Reviewer:**
+**Reviewer:** Claude (Fable 5), independent read-only verification against the local checkout plus a live Norgate data check.
 
-**Date:**
+**Date:** 2026-07-25
 
-**Facts disputed:**
+**Facts verified independently:**
 
-**Decisions accepted:**
+- Loader adjustment split (`CAPITALSPECIAL` for symbols, `TOTALRETURN` for benchmarks): confirmed at `data/norgate_loader.py:125-129`.
+- Shared ledger posts only trade notional, commission, and close marks; `total_value = cash + portfolio_value`; no dividend, interest, borrow, or tax events; negative cash possible with no financing charge: confirmed at `alpha/engine/strategy.py:653-823`.
+- Incubation cash ledger contains only `trade_notional` and `commission` entry types; `total_value_float = cash + marked positions`: confirmed at `alpha/live/incubation.py:796-897`.
+- Cash mismatch intentionally non-blocking in reconciliation: confirmed at `alpha/live/reconcile.py:25-46`.
+- TAA signal/execution separation (`TOTALRETURN` signal closes, `CAPITALSPECIAL` execution OHLC): confirmed at `strategies/taa_df/strategy_taa_df.py:187-250`.
+- NDX benchmark provenance defect: `strategies/momentum/strategy_mo_atr_normalized_ndx.py:916` and `strategy_mo_atr_normalized_ndx_vxn_scaled.py:409` hard-code `_performance_benchmark_adjustment_str = "TOTALRETURN"` while the loader is called with `benchmarks=[]` at `:362-367`, so SPY is actually `CAPITALSPECIAL`. Metadata and data disagree exactly as claimed.
+- Norgate dividend timing: verified empirically on 2026-07-25 with the local Norgate install. AAPL shows `Dividend = 0.205` (0.82 pre-split / 4) on 2020-08-06, the session **before** the 2020-08-07 ex-date; SPY shows `Dividend = 1.3392` on 2020-09-17, the session before the 2020-09-18 ex-date. The entitlement-session convention in section 10 is correct as stated, and the amount is expressed in the split-adjusted price scale, which is the correct scale to pair with `CAPITALSPECIAL` share quantities.
 
-**Decisions rejected:**
+**Facts disputed:** None. All checked factual claims in sections 5-8 and 10 are accurate.
 
-**Alternative proposal:**
+**Decisions accepted:** All six preliminary Codex decisions (execution basis, dividends, cash/financing, signals, benchmark truth, release policy).
 
-**Final verdict:**
+**Decisions rejected:** None.
+
+**Alternative proposal (amendments, not rejections):**
+
+1. **Reorder the implementation sequence.** Move benchmark-provenance repair (step 7) to immediately after step 1. It is small, independent of the ledger work, and the current state is not merely incomplete but actively mislabeled — the only place in this audit where an artifact claims something untrue rather than omitting something.
+2. **Make the snapshot `Dividend` column a validation-contract requirement in step 1.** Section 5.1 notes the exporter retains `Dividend` but the validation contract does not require it. The dividend ledger must not silently degrade when running in snapshot mode on the client VPS; a missing `Dividend` column must fail loud.
+3. **Add withholding as a first-class policy field from day one** (see Q3 below), even if phase 1 defaults it to zero for the TR-parity test.
+
+**Answers to section 17 questions:**
+
+1. **Correct?** Yes. Every claim I checked is verified above, including the two that matter most: the ledger omission and the entitlement-session dividend stamping.
+2. **Model A or wait for Model B?** Model A now. It is implementable from data already in the snapshot, it matches the RealTest research convention, and the CS-plus-dividends vs TR parity test gives it an objective acceptance gate. Model B adds pay-date/receivable realism that only matters for IBKR statement-level reconciliation; build it when that reconciliation is actually being enabled. Waiting for Model B means keeping a known-wrong ledger longer for no research benefit.
+3. **Gross, net, or configurable?** Policy-configurable with an explicit rate, computed as gross first. The parity test against Norgate `TOTALRETURN` must run at withholding = 0 (TR is a gross-reinvestment series). The live-first default for this operator should then be net of actual withholding (for an Israeli tax resident holding US listings via IBKR, the US treaty rate is 25%; verify against actual IBKR statements before hard-coding). A gross-only ledger would overstate live-account economics by roughly a quarter of the dividend stream.
+4. **Which NDX features get economic returns?** Only cross-sectional momentum is a strong candidate, because its hypothesis is relative investor wealth. ATR should remain a traded-price range measure (a mechanical ex-dividend gap is not volatility, but ordinary NDX dividends are small relative to ATR20; test a dividend-neutral variant before adopting it). Stock SMA100 and SPY SMA200 should stay price-based initially — changing a regime filter's basis changes regime dates, which is a strategy redefinition, not a correction. All of this via controlled A/B runs; never mutate the WIRED signal in place.
+5. **QPI/DV2 ex-dividend neutralization?** Compute short-horizon returns as dividend-neutral returns: `r = (close_t + dividend_known_at_t) / close_{t-1} - 1`, using the entitlement-aligned `Dividend` field (causally safe: Norgate stamps it at the entitlement session, after public declaration). For level-based indicators (RSI2, DV2, SMA200) build a *causal forward-compounded economic close index* anchored at the strategy start — never a globally back-adjusted series, whose scale embeds future adjustment factors. IBS stays on raw traded OHLC; it measures location in the actual traded range. All variants are separate research strategies until validated.
+6. **TAA TR signals despite `CLAUDE.md`?** Retain them. Return-space signals from a TR series over past windows use only adjustment factors from dividends that occurred inside those past windows — causal. The `CLAUDE.md:53` rule exists to block forward-looking bias in *level/scale-sensitive* usage of back-adjusted stock series and to keep fills honest. Resolution: amend the doctrine to the precise rule — `TOTALRETURN` is permitted for return-space signal formation and benchmarks, and forbidden for fills, marks, stops/limits, and any level- or scale-sensitive feature — rather than forcing TAA back to price-return signals, which would change a WIRED strategy's meaning.
+7. **Zero positive-cash interest acceptable? Minimum negative-cash model?** Zero is acceptable only as a *declared* pessimistic mode, and the declaration must note materiality: near-zero drag over 2009-2021, but on the order of 1-3%/yr of understatement for a pod holding 25-75% cash during 2022-2025 rate regimes. The recommended default is a dated benchmark-rate series (e.g. daily fed funds or DTB3) minus a broker haircut, applied to positive settled cash above a threshold. Minimum negative-cash model: benchmark rate plus a spread (IBKR-style ~1.5%) charged daily on negative settled cash — and since no WIRED strategy is designed to lever, any negative-cash day should additionally emit a loud diagnostic, because it signals a sizing bug, not a financing choice.
+8. **Label BENCH artifacts `price-return ledger`?** Yes, immediately. It costs nothing, changes no numbers, and converts a hidden assumption into a declared one — exactly the fail-loud doctrine.
+9. **NDX provenance fix a prerequisite?** Yes, for any *benchmark-relative* verdict (alpha, relative drawdown, analyzer comparisons). The strategy's own equity curve is unaffected, so absolute-return conclusions stand. This is also the item I would fix first (see amendment 1).
+10. **Does the phased order minimize parity risk?** Broadly yes. Three changes: pull the provenance fix forward (amendment 1); fold the snapshot `Dividend` contract into step 1 (amendment 2); and treat step 3's parity validation as the hard gate for everything after it — no corrected-equity activation (step 4) until CS + dividends reproduces TR buy-and-hold wealth within the documented tolerance on a multi-symbol, multi-year sample including split-plus-dividend overlaps (the AAPL 2020-08-06/07 window is a good canonical test case, since it has a dividend two days after a 4:1 split).
+
+**Bias-direction summary for the owner:** For the current all-long, no-leverage, no-short WIRED book, the ledger omissions make backtests and incubation *pessimistic* (missing long dividends, missing cash interest), not inflated. The genuinely misleading items are narrower: (a) the NDX benchmark label claims TR while the data is price-return, so benchmark-relative conclusions there are unreliable; (b) incubation/reference equity will drift from IBKR NetLiq for reasons the system cannot itemize; (c) signal-level ex-dividend contamination in QPI/DV2 is non-directional — it adds noise trades, not systematic optimism. Free negative cash and short-dividend omission are real engine defects but currently latent for this strategy set.
+
+**Final verdict:** ACCEPT all six Codex decisions with the three amendments above. No implementation is authorized by this review; owner sign-off on scope and sequence is the remaining gate.
+
+### Owner cash-policy decision - 2026-07-25
+
+- Positive cash earns `0%` in research, backtests, and incubation. This is an intentional pessimistic assumption.
+- No positive-cash broker-rate, threshold, or tier model is requested.
+- The owner accepts that this policy is not neutral when comparing pods: it penalizes cash-heavy strategies such as VXN-scaled NDX and TAA more than fully invested strategies.
+- Current WIRED strategies are not permitted to use account-level leverage. Any negative-cash day must fail loudly as a likely sizing or execution defect.
+- Financing-rate modeling is deferred until a future strategy is intentionally authorized to use negative cash.
+- This decision does not authorize the remaining engine or live implementation.
 
 ### Joint verdict
 
-**Status:** OPEN
+**Status:** ALIGNED (Codex + Claude, 2026-07-25), with the owner cash-policy amendment above; full implementation authorization remains pending
 
-**Approved accounting contract:**
+**Approved accounting contract (proposed):**
 
-**Approved signal contracts:**
+- Execution and marks stay on the non-TR `CAPITALSPECIAL` basis, documented as a corporate-action-normalized proxy, never `TOTALRETURN`.
+- Model A dividend events: long credit / short debit recognized on the ex-dividend transition from prior-entitlement-close positions, using Norgate's entitlement-session `Dividend` field (empirically verified convention); no automatic reinvestment; posted exactly once.
+- Withholding is a first-class configurable policy (gross computed first; parity tests at 0; live-first default set to the operator's actual treaty rate after verification against IBKR statements).
+- Positive cash earns `0%` by intentional owner policy. Negative cash is invalid for current WIRED strategies and must fail loudly; financing-rate modeling is required only for a future intentionally leveraged strategy.
+- No double-charging of leveraged-ETF internal financing.
+- Accounting contract is versioned; existing artifacts relabeled `price-return ledger` and preserved; corrected baselines regenerated alongside, never overwritten silently.
+
+**Approved signal contracts (proposed):**
+
+- No global TR switch. WIRED signal semantics frozen until controlled A/B comparisons exist.
+- TAA keeps `TOTALRETURN` return-space signals; `CLAUDE.md` doctrine amended to the precise rule (TR for return-space signals and benchmarks only; never fills, marks, or level/scale-sensitive features).
+- IBS stays on traded OHLC; VIX/VXN stay observed levels; SPY gets separate regime (price) and benchmark (TR) series with loader-asserted provenance.
 
 **Required experiments:**
 
-**Implementation scope:**
+- CS + explicit dividends vs Norgate TR buy-and-hold parity across multiple symbols/years, including split-plus-dividend overlaps (AAPL 2020-08 canonical case).
+- Dividend-aware NDX momentum A/B (momentum only; ATR and SMA unchanged).
+- Dividend-neutral short-horizon return variants for QPI and DV2 as separate research strategies.
 
-**Deployment gate:**
+**Implementation scope:** Codex's section 14 sequence with Claude's amendments and the owner cash-policy amendment: benchmark-provenance fix moved to immediately after step 1; snapshot validation contract must require the `Dividend` column in step 1; step 3 parity is a hard gate for steps 4+; positive-cash rate modeling is removed; negative cash becomes a fail-loud invariant for current WIRED strategies.
+
+**Deployment gate:** All section 15 acceptance tests pass; all WIRED analyzer artifacts regenerated and old-vs-corrected compared; IBKR position/dividend reconciliation demonstrated; any NetLiq difference caused by actual broker cash interest is explicitly labeled as expected drift from the `0%` reference policy.

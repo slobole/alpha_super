@@ -10,12 +10,12 @@ save_pod_artifacts_bool: true
 pods:
   - pod_id_str: pod_taa
     strategy_import_str: strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash
-    weight_float: 0.5
+    weight_float: 0.34
 
   - pod_id_str: pod_ndx_mo
     strategy_import_str: strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy
-    weight_float: 0.3
+    weight_float: 0.33
 
   - pod_id_str: pod_sector_dispersion_kie_ihi_xlc
     strategy_import_str: strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc
-    weight_float: 0.2
+    weight_float: 0.33
