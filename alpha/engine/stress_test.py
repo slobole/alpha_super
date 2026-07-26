@@ -52,16 +52,17 @@ from alpha.engine.crisis import (
     _coerce_crisis_period_config_list,
     resolve_crisis_window,
 )
-from alpha.engine.report import build_research_output_path
+from alpha.engine.report import _ACTIVE_REPORT_VARIANT_STR, build_research_output_path
 from alpha.engine.signature import render_small_multiples_data_uri_str
 from alpha.engine.strategy import Strategy
 from alpha.engine.theme import (
     SEABORN_DEEP_COLOR_LIST,
     SIGNATURE_PALETTE_DICT,
     blend_hex_color_str,
-    build_report_css,
+    build_analyzer_report_css,
     build_report_font_head_html,
     build_signature_rcparams,
+    signature_variant_context,
 )
 
 
@@ -426,10 +427,14 @@ def save_stress_test_results(
         index=False,
         date_format="%Y-%m-%d",
     )
-    (output_path / REPORT_FILENAME_STR).write_text(
-        _build_report_html_str(stress_result_obj),
-        encoding="utf-8",
-    )
+    # *** CRITICAL*** Every other analyzer renders inside this context; stress
+    # did not, so it alone was drawn from the baseline dashboard palette --
+    # different typeface, different colours -- while the rest of the book had
+    # moved to the signature variant. The palette is read at render time, so
+    # the context has to wrap the call, not the module import.
+    with signature_variant_context(_ACTIVE_REPORT_VARIANT_STR):
+        report_html_str = _build_report_html_str(stress_result_obj)
+    (output_path / REPORT_FILENAME_STR).write_text(report_html_str, encoding="utf-8")
 
     print(f"Results saved to: {output_path.resolve()}")
     return output_path
@@ -3015,7 +3020,6 @@ def _build_report_html_str(stress_result_obj: StressTestResult) -> str:
   <h1>{html.escape(stress_result_obj.strategy_name_str)}</h1>
   <div class="meta">
     Run: {run_date_str} &nbsp;|&nbsp;
-    Strategy Key: {html.escape(stress_result_obj.strategy_key_str)} &nbsp;|&nbsp;
     Capital: {_fmt_dollar(stress_result_obj.capital_base_float)} &nbsp;|&nbsp;
     Launch offsets: {html.escape(launch_offset_str)}
   </div>
@@ -3037,7 +3041,7 @@ def _build_report_html_str(stress_result_obj: StressTestResult) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{html.escape(stress_result_obj.strategy_name_str)} - StressTestAnalyzer Report</title>
 {build_report_font_head_html()}
-<style>{build_report_css()}{_stress_report_css_str()}</style>
+<style>{build_analyzer_report_css()}{_stress_report_css_str()}</style>
 </head>
 <body>
 {body_html_str}

@@ -303,6 +303,35 @@ main, .wrap {{
 .panel > h2:first-child, .verdict-panel > .verdict-title {{
     margin-top: 0;
 }}
+/* Section headings across the analyzers get the same ruled caption bar the
+   strategy report gives a plate. Without this they fell through to the bare
+   h2 rule -- 0.7rem, muted, the eyebrow style -- so the analyzers read as a
+   different product from the report they sit beside. No plate counter: these
+   sections are not numbered plates, and stamping a number on them would
+   invent an ordering the page does not have. */
+.panel > h2, .card > h2, .stress-section > h2, .section > h2, .verdict-panel > .verdict-title {{
+    background: var(--color-neutral);
+    border: none;
+    border-bottom: 1px solid var(--color-ink);
+    border-radius: 0;
+    font-family: var(--font-figure);
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-ink);
+    padding: 9px 13px;
+    margin: 0 0 14px;
+}}
+/* Pull the caption bar out to the container's edge so it rules the full width
+   of its panel, the way a plate caption does.
+   *** UI*** The offsets must mirror the container's own padding. Only .panel
+   and .verdict-panel are padded here -- this stylesheet strips .card and
+   .stress-section to zero -- so applying the same pull to those pushed the bar
+   clean outside its box. */
+.panel > h2, .verdict-panel > .verdict-title {{
+    margin: -14px -16px 14px;
+}}
 .read-first {{
     border-left: 3px solid var(--color-ink);
 }}
