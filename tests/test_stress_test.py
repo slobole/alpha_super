@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 import json
 import math
 import tempfile
@@ -483,3 +484,43 @@ class CrisisSummaryTests(unittest.TestCase):
         self.assertEqual(table_html_str.count("5, 21, 42, 63"), 1)
         # One body row per crisis, not one per offset.
         self.assertEqual(table_html_str.count('<td class="metric">'), 1)
+
+
+class CrisisPanelLabelTests(unittest.TestCase):
+    def test_a_crisis_name_that_already_carries_its_year_is_not_doubled(self):
+        """Regression: appending unconditionally gave "european debt 2011 2011"."""
+        from alpha.engine.stress_test import _build_crisis_small_multiples_html
+
+        path_df = pd.DataFrame({
+            "crisis_name_str": ["european_debt_2011"] * 3 + ["volmageddon"] * 3,
+            "launch_offset_int": [5, 5, 5, 5, 5, 5],
+            "bar_offset_int": [0, 1, 2, 0, 1, 2],
+            "event_window_bool": [True] * 6,
+            "event_start_ts": ["2011-07-01"] * 3 + ["2018-02-01"] * 3,
+            "event_end_ts": ["2011-10-01"] * 3 + ["2018-02-28"] * 3,
+            "benchmark_name_str": ["SPY"] * 6,
+            "normalized_strategy_from_event_entry_float": [1.0, 0.95, 0.97, 1.0, 0.98, 0.99],
+            "normalized_benchmark_from_event_entry_float": [1.0, 0.90, 0.92, 1.0, 0.95, 0.96],
+        })
+        result_obj = SimpleNamespace(stress_path_df=path_df)
+        html_str = _build_crisis_small_multiples_html(result_obj)
+        self.assertNotIn("2011 2011", html_str)
+        # The benchmark is named once, in the caption, not per panel.
+        self.assertIn("The dashed line is SPY", html_str)
+
+    def test_no_benchmark_column_means_no_dashed_line_claim(self):
+        from alpha.engine.stress_test import _build_crisis_small_multiples_html
+
+        path_df = pd.DataFrame({
+            "crisis_name_str": ["volmageddon"] * 3,
+            "launch_offset_int": [5, 5, 5],
+            "bar_offset_int": [0, 1, 2],
+            "event_window_bool": [True] * 3,
+            "event_start_ts": ["2018-02-01"] * 3,
+            "event_end_ts": ["2018-02-28"] * 3,
+            "benchmark_name_str": [""] * 3,
+            "normalized_strategy_from_event_entry_float": [1.0, 0.98, 0.99],
+            "normalized_benchmark_from_event_entry_float": [None, None, None],
+        })
+        html_str = _build_crisis_small_multiples_html(SimpleNamespace(stress_path_df=path_df))
+        self.assertNotIn("dashed line", html_str)

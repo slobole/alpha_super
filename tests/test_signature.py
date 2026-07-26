@@ -405,3 +405,54 @@ def test_marks_follow_the_active_variant(value_ser):
         current_uri_str = render_sparkline_data_uri_str(value_ser)
 
     assert journal_uri_str != current_uri_str
+
+
+def _decode_small_multiples_png_bytes(data_uri_str: str) -> bytes:
+    import base64
+
+    return base64.b64decode(data_uri_str.split(",", 1)[1])
+
+
+class TestSmallMultiplesOverlay:
+    """The reference line must be drawn, and must not be scaled off the panel."""
+
+    def test_overlay_series_widen_the_shared_range(self):
+        """*** CRITICAL*** regression: a benchmark that fell further than the
+        strategy is exactly the case the comparison exists for. Scaling to the
+        panel series alone clips it, and clipping is silent -- the grid would
+        understate how much the strategy avoided.
+        """
+        panel_ser_dict = {"crisis": pd.Series([0.0, -0.05, -0.10])}
+        overlay_ser_dict = {"crisis": pd.Series([0.0, -0.30, -0.44])}
+
+        without_overlay_uri_str = render_small_multiples_data_uri_str(
+            panel_ser_dict, column_count_int=1,
+            value_formatter_fn=lambda v: f"{v * 100:.0f}%",
+        )
+        with_overlay_uri_str = render_small_multiples_data_uri_str(
+            panel_ser_dict, column_count_int=1,
+            value_formatter_fn=lambda v: f"{v * 100:.0f}%",
+            overlay_ser_dict=overlay_ser_dict,
+        )
+        # Different y range and an extra line means different pixels.
+        assert _decode_small_multiples_png_bytes(
+            without_overlay_uri_str
+        ) != _decode_small_multiples_png_bytes(with_overlay_uri_str)
+
+    def test_a_panel_without_an_overlay_still_renders(self):
+        """Overlays are keyed by panel name; a missing key is not an error."""
+        data_uri_str = render_small_multiples_data_uri_str(
+            {"a": pd.Series([0.0, 0.1]), "b": pd.Series([0.0, -0.1])},
+            column_count_int=2,
+            overlay_ser_dict={"a": pd.Series([0.0, 0.05])},
+        )
+        assert data_uri_str.startswith("data:image/png;base64,")
+
+    def test_omitting_the_overlay_keeps_the_previous_output(self):
+        """The parameter is additive: existing callers must be unaffected."""
+        panel_ser_dict = {"a": pd.Series([0.0, 0.1, 0.05])}
+        assert render_small_multiples_data_uri_str(
+            panel_ser_dict, column_count_int=1
+        ) == render_small_multiples_data_uri_str(
+            panel_ser_dict, column_count_int=1, overlay_ser_dict=None
+        )

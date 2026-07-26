@@ -140,8 +140,13 @@ def render_small_multiples_data_uri_str(
         panel_width_inch_float: float = 2.05,
         panel_height_inch_float: float = 1.25,
         value_formatter_fn=None,
+        overlay_ser_dict: dict[str, pd.Series] | None = None,
 ) -> str:
     """Render a family of series as one grid of panels on shared axes.
+
+    ``overlay_ser_dict`` draws an optional reference line in each panel, keyed
+    by the same panel name — a benchmark against which the panel's own series
+    is meant to be read. Panels with no entry simply have no reference line.
 
     *** CRITICAL*** All panels share a single y range by default. Per-panel
     autoscaling would make unequal moves look equal and is the main way a grid
@@ -153,11 +158,23 @@ def render_small_multiples_data_uri_str(
     panel_name_list = list(panel_ser_dict)
     row_count_int = math.ceil(len(panel_name_list) / column_count_int)
     strategy_color_str = str(SIGNATURE_PALETTE_DICT['strategy'])
+    benchmark_color_str = str(SIGNATURE_PALETTE_DICT['benchmark'])
     muted_color_str = str(SIGNATURE_PALETTE_DICT['muted'])
     grid_color_str = str(SIGNATURE_PALETTE_DICT['grid'])
 
-    shared_min_float = min(float(pd.Series(s).min()) for s in panel_ser_dict.values())
-    shared_max_float = max(float(pd.Series(s).max()) for s in panel_ser_dict.values())
+    # *** CRITICAL*** The reference lines join the shared range. Scaling to the
+    # panel series alone would clip exactly the case the comparison exists for
+    # — a benchmark that fell further than the strategy — and the clipping is
+    # silent, so the grid would understate how much was avoided.
+    range_source_ser_list = list(panel_ser_dict.values())
+    if overlay_ser_dict:
+        range_source_ser_list += [
+            overlay_value_ser
+            for overlay_value_ser in overlay_ser_dict.values()
+            if len(pd.Series(overlay_value_ser)) > 0
+        ]
+    shared_min_float = min(float(pd.Series(s).min()) for s in range_source_ser_list)
+    shared_max_float = max(float(pd.Series(s).max()) for s in range_source_ser_list)
     shared_pad_float = (shared_max_float - shared_min_float) * 0.12 or 0.1
 
     with plt.rc_context(build_signature_rcparams(to_web_bool=True)):
@@ -181,6 +198,19 @@ def render_small_multiples_data_uri_str(
             panel_name_str = panel_name_list[panel_idx_int]
             panel_value_ser = pd.Series(panel_ser_dict[panel_name_str], copy=False).astype(float)
 
+            # Reference first, so the panel's own series is never overdrawn.
+            if overlay_ser_dict and panel_name_str in overlay_ser_dict:
+                overlay_value_ser = pd.Series(
+                    overlay_ser_dict[panel_name_str], copy=False
+                ).astype(float)
+                if len(overlay_value_ser) > 0:
+                    axis_obj.plot(
+                        np.arange(len(overlay_value_ser)),
+                        overlay_value_ser.to_numpy(),
+                        color=benchmark_color_str,
+                        linewidth=0.75,
+                        linestyle=(0, (2.5, 1.5)),
+                    )
             axis_obj.plot(
                 np.arange(len(panel_value_ser)),
                 panel_value_ser.to_numpy(),

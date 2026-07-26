@@ -2081,6 +2081,8 @@ def _build_crisis_small_multiples_html(stress_result_obj: StressTestResult) -> s
         return ""
 
     panel_ser_dict: dict[str, pd.Series] = {}
+    overlay_ser_dict: dict[str, pd.Series] = {}
+    benchmark_name_set: set[str] = set()
     for crisis_name_str, crisis_group_df in event_path_df.groupby(
         "crisis_name_str", sort=False
     ):
@@ -2097,9 +2099,47 @@ def _build_crisis_small_multiples_html(stress_result_obj: StressTestResult) -> s
         ).dropna()
         if len(value_ser) < 2 or float(value_ser.iloc[0]) == 0.0:
             continue
-        panel_ser_dict[str(crisis_name_str).replace("_", " ")] = (
+
+        # The crisis year, so a panel can be placed in time without an axis of
+        # dates under every one of them. Names like "volmageddon" carry no date
+        # at all; full start-to-end dates on nine panels are more ink than the
+        # question needs.
+        panel_label_str = str(crisis_name_str).replace("_", " ")
+        event_start_ts = pd.to_datetime(
+            offset_path_df["event_start_ts"].iloc[0], errors="coerce"
+        )
+        event_end_ts = pd.to_datetime(
+            offset_path_df["event_end_ts"].iloc[0], errors="coerce"
+        )
+        if pd.notna(event_start_ts):
+            start_year_str = str(int(event_start_ts.year))
+            year_label_str = start_year_str
+            if pd.notna(event_end_ts) and int(event_end_ts.year) != int(event_start_ts.year):
+                year_label_str += f"-{int(event_end_ts.year) % 100:02d}"
+            # Most crisis names already end in their year, so appending one
+            # unconditionally produced "european debt 2011 2011". Replace the
+            # name's own year rather than adding a second copy of it.
+            if panel_label_str.endswith(f" {start_year_str}"):
+                panel_label_str = panel_label_str[: -len(start_year_str) - 1]
+            panel_label_str = f"{panel_label_str} {year_label_str}"
+
+        panel_ser_dict[panel_label_str] = (
             value_ser / float(value_ser.iloc[0]) - 1.0
         ).reset_index(drop=True)
+
+        benchmark_value_ser = pd.to_numeric(
+            offset_path_df.get(
+                "normalized_benchmark_from_event_entry_float", pd.Series(dtype=float)
+            ),
+            errors="coerce",
+        ).dropna()
+        if len(benchmark_value_ser) >= 2 and float(benchmark_value_ser.iloc[0]) != 0.0:
+            overlay_ser_dict[panel_label_str] = (
+                benchmark_value_ser / float(benchmark_value_ser.iloc[0]) - 1.0
+            ).reset_index(drop=True)
+            benchmark_label_obj = offset_path_df["benchmark_name_str"].iloc[0]
+            if isinstance(benchmark_label_obj, str) and benchmark_label_obj:
+                benchmark_name_set.add(benchmark_label_obj)
 
     if len(panel_ser_dict) == 0:
         return ""
@@ -2109,17 +2149,28 @@ def _build_crisis_small_multiples_html(stress_result_obj: StressTestResult) -> s
             column_count_int=3,
             share_ylim_bool=True,
             value_formatter_fn=lambda value_float: f"{value_float * 100:.0f}%",
+            overlay_ser_dict=overlay_ser_dict or None,
         )
     except ValueError:
         return ""
+    benchmark_note_str = ""
+    if overlay_ser_dict:
+        benchmark_label_str = (
+            sorted(benchmark_name_set)[0] if len(benchmark_name_set) == 1 else "the benchmark"
+        )
+        benchmark_note_str = (
+            f" The dashed line is {html.escape(benchmark_label_str)} over the same window, "
+            "so the gap between the two lines is what the strategy avoided or gave up."
+        )
     return (
         '<div class="chart-wrap">'
         f'<img src="{small_multiples_uri_str}" alt="Strategy path through each crisis">'
         "</div>"
         '<p class="metric-context">Each crisis from its event entry, rebased to zero and '
         "drawn on one shared vertical scale, so a mild crisis looks mild beside a severe "
-        "one. The figure beside each name is where the strategy ended that crisis. Paths "
-        "use the longest launch offset, which is the fully established case.</p>"
+        f"one.{benchmark_note_str} The figure beside each name is where the strategy ended "
+        "that crisis. Paths use the longest launch offset, which is the fully established "
+        "case.</p>"
     )
 
 
