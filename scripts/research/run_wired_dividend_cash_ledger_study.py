@@ -239,6 +239,7 @@ def credit_dividend_cash_before_open(
 def research_dividend_cash_ledger_context(
     *,
     withholding_rate_float: float = 0.0,
+    dividend_credit_enabled_bool: bool = True,
 ) -> Iterator[None]:
     """Temporarily wrap the shared order processor for one research run."""
     validated_rate_float = _validated_withholding_rate_float(
@@ -258,11 +259,16 @@ def research_dividend_cash_ledger_context(
         prices: pd.DataFrame,
     ):
         pricing_data_df = prices
-        credit_dividend_cash_before_open(
-            strategy_obj,
-            pricing_data_df,
+        strategy_obj.configure_dividend_cash_ledger(
+            enabled_bool=False,
             withholding_rate_float=validated_rate_float,
         )
+        if dividend_credit_enabled_bool:
+            credit_dividend_cash_before_open(
+                strategy_obj,
+                pricing_data_df,
+                withholding_rate_float=validated_rate_float,
+            )
         return original_process_orders_fn(strategy_obj, pricing_data_df)
 
     Strategy.process_orders = dividend_aware_process_orders_fn
@@ -820,7 +826,11 @@ def run_wired_dividend_cash_ledger_study(
             end_date_str=end_date_str,
             show_progress_bool=show_progress_bool,
         )
-        baseline_input_dict = builder_fn(**builder_keyword_dict)
+        with research_dividend_cash_ledger_context(
+            withholding_rate_float=validated_rate_float,
+            dividend_credit_enabled_bool=False,
+        ):
+            baseline_input_dict = builder_fn(**builder_keyword_dict)
         baseline_strategy_obj = baseline_input_dict["strategy_obj"]
 
         print(

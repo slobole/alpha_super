@@ -46,6 +46,7 @@ _METADATA_FILENAME = 'metadata.json'
 _RUN_INFO_FILENAME = 'run_info.json'
 _SUMMARY_FILENAME = 'summary.json'
 _TRANSACTION_CSV_FILENAME = 'transactions.csv'
+_DIVIDEND_LEDGER_CSV_FILENAME = 'dividend_ledger.csv'
 _CRISIS_METRICS_CSV_FILENAME = 'crisis_metrics.csv'
 _CRISIS_PATHS_CSV_FILENAME = 'crisis_paths.csv'
 _TAIL_SUMMARY_CSV_FILENAME = 'tail_summary.csv'
@@ -683,6 +684,7 @@ def save_results(strategy, output_dir='results', output_path: str | Path | None 
             {strategy.name}.pkl
             report.html
             transactions.csv
+            dividend_ledger.csv
 
     Returns the output directory path.
     """
@@ -710,6 +712,11 @@ def save_results(strategy, output_dir='results', output_path: str | Path | None 
         html = _build_html(strategy, chart_b64)
     (out / 'report.html').write_text(html, encoding='utf-8')
     _write_transaction_csv(strategy._transactions, out / _TRANSACTION_CSV_FILENAME)
+    strategy.get_dividend_ledger().to_csv(
+        out / _DIVIDEND_LEDGER_CSV_FILENAME,
+        index=False,
+        date_format='%Y-%m-%d',
+    )
 
     print(f'Results saved to: {out.resolve()}')
     return out

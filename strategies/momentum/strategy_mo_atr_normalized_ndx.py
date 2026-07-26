@@ -194,7 +194,28 @@ def append_total_return_benchmark_data_df(
             f"symbol={config_obj.performance_benchmark_data_symbol_str} "
             f"sample_dates={missing_benchmark_date_list}"
         )
-    return pd.concat([pricing_data_df, total_return_benchmark_df], axis=1).sort_index()
+    adjustment_by_symbol_dict = {
+        **dict(
+            pricing_data_df.attrs.get(
+                "norgate_adjustment_by_symbol_dict",
+                {},
+            )
+        ),
+        **dict(
+            total_return_benchmark_df.attrs.get(
+                "norgate_adjustment_by_symbol_dict",
+                {},
+            )
+        ),
+    }
+    combined_price_df = pd.concat(
+        [pricing_data_df, total_return_benchmark_df],
+        axis=1,
+    ).sort_index()
+    combined_price_df.attrs["norgate_adjustment_by_symbol_dict"] = (
+        adjustment_by_symbol_dict
+    )
+    return combined_price_df
 
 
 def configure_total_return_benchmark_provenance(

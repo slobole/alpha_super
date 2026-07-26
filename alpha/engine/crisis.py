@@ -387,6 +387,7 @@ def _load_dv2_context_dict() -> dict[str, object]:
 
 
 def _build_dv2_strategy_obj(context_dict: dict[str, object]) -> Strategy:
+    from data.norgate_loader import TOTALRETURN_ADJUSTMENT_STR
     from strategies.dv2.strategy_mr_dv2 import DVO2Strategy
 
     strategy_obj = DVO2Strategy(
@@ -396,6 +397,7 @@ def _build_dv2_strategy_obj(context_dict: dict[str, object]) -> Strategy:
         slippage=0.00025,
         commission_per_share=0.005,
         commission_minimum=1.0,
+        performance_benchmark_adjustment_str=TOTALRETURN_ADJUSTMENT_STR,
     )
     strategy_obj.universe_df = context_dict["universe_df"]
     return strategy_obj

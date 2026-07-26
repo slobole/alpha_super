@@ -698,6 +698,20 @@ class ReportFormattingTests(unittest.TestCase):
                 },
             ]
         )
+        strategy.previous_bar = pd.Timestamp('2024-01-02')
+        strategy.current_bar = pd.Timestamp('2024-01-03')
+        strategy._position_amount_map = {'AAA': 10.0}
+        dividend_pricing_data_df = pd.DataFrame(
+            {
+                ('AAA', 'Open'): [100.0, 99.0],
+                ('AAA', 'High'): [100.0, 99.0],
+                ('AAA', 'Low'): [100.0, 99.0],
+                ('AAA', 'Close'): [100.0, 99.0],
+                ('AAA', 'Dividend'): [1.0, 0.0],
+            },
+            index=pd.to_datetime(['2024-01-02', '2024-01-03']),
+        )
+        strategy._credit_dividend_cash_before_open(dividend_pricing_data_df)
 
         def write_fake_chart(*, save_to):
             save_to.write(b'fake-chart-bytes')
@@ -709,6 +723,7 @@ class ReportFormattingTests(unittest.TestCase):
             output_path = save_results(strategy, output_dir=temp_dir_str)
 
             transaction_csv_path = output_path / 'transactions.csv'
+            dividend_ledger_csv_path = output_path / 'dividend_ledger.csv'
             report_html_path = output_path / 'report.html'
             run_info_path = output_path / 'run_info.json'
             summary_json_path = output_path / 'summary.json'
@@ -722,6 +737,7 @@ class ReportFormattingTests(unittest.TestCase):
             ))
 
             self.assertTrue(transaction_csv_path.exists())
+            self.assertTrue(dividend_ledger_csv_path.exists())
             self.assertTrue(run_info_path.exists())
             self.assertTrue(summary_json_path.exists())
             transaction_df = pd.read_csv(transaction_csv_path)
@@ -729,6 +745,24 @@ class ReportFormattingTests(unittest.TestCase):
             self.assertListEqual(list(transaction_df.columns), list(strategy._transactions.columns))
             self.assertEqual(transaction_df.loc[0, 'asset'], 'AAA')
             self.assertEqual(int(transaction_df.loc[1, 'amount']), -5)
+            dividend_ledger_df = pd.read_csv(dividend_ledger_csv_path)
+            self.assertListEqual(
+                list(dividend_ledger_df.columns),
+                list(strategy.get_dividend_ledger().columns),
+            )
+            self.assertEqual(len(dividend_ledger_df), 1)
+            self.assertEqual(
+                float(dividend_ledger_df.loc[0, 'gross_dividend_cash_float']),
+                10.0,
+            )
+            self.assertEqual(
+                float(dividend_ledger_df.loc[0, 'withholding_cash_float']),
+                2.5,
+            )
+            self.assertEqual(
+                float(dividend_ledger_df.loc[0, 'net_dividend_cash_float']),
+                7.5,
+            )
             run_info_dict = json.loads(run_info_path.read_text(encoding='utf-8'))
             summary_dict = json.loads(summary_json_path.read_text(encoding='utf-8'))
             self.assertEqual(run_info_dict['entity_type'], 'strategy')
@@ -748,9 +782,20 @@ class ReportFormattingTests(unittest.TestCase):
             metadata_dict = json.loads((output_path / 'metadata.json').read_text(encoding='utf-8'))
             self.assertEqual(
                 metadata_dict['accounting_policy']['accounting_contract_version_str'],
-                'price_return_ledger_v1',
+                'net_dividend_cash_ledger_v2',
             )
-            self.assertEqual(metadata_dict['accounting_policy']['dividend_policy_str'], 'not_credited')
+            self.assertEqual(
+                metadata_dict['accounting_policy']['dividend_policy_str'],
+                'explicit_entitlement_transition_cash_no_automatic_reinvestment',
+            )
+            self.assertEqual(
+                metadata_dict['accounting_policy']['dividend_event_count_int'],
+                1,
+            )
+            self.assertEqual(
+                metadata_dict['accounting_policy']['dividend_cash_net_total_float'],
+                7.5,
+            )
             self.assertEqual(
                 metadata_dict['accounting_policy']['positive_cash_rate_policy_str'],
                 'zero_percent_intentional',
@@ -761,11 +806,11 @@ class ReportFormattingTests(unittest.TestCase):
             )
             self.assertEqual(
                 metadata_dict['accounting_policy']['current_wired_negative_cash_policy_str'],
-                'invalid',
+                'diagnostic_only',
             )
             self.assertEqual(
                 metadata_dict['accounting_policy']['negative_cash_enforcement_str'],
-                'not_implemented',
+                'reported_not_blocked',
             )
 
             report_html_str = report_html_path.read_text(encoding='utf-8')

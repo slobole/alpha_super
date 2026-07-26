@@ -49,7 +49,12 @@ from alpha.engine.backtest import run_daily
 from alpha.engine.report import save_results
 from alpha.engine.strategy import Strategy
 from alpha.indicators import ibs_indicator, qp_indicator
-from data.norgate_loader import build_index_constituent_matrix, load_raw_prices
+from data.norgate_loader import (
+    CAPITALSPECIAL_ADJUSTMENT_STR,
+    TOTALRETURN_ADJUSTMENT_STR,
+    build_index_constituent_matrix,
+    load_raw_prices,
+)
 
 
 def default_trade_id_int() -> int:
@@ -242,6 +247,7 @@ class QPIIbsRsiExitStrategy(Strategy):
             slippage=slippage,
             commission_per_share=commission_per_share,
             commission_minimum=commission_minimum,
+            performance_benchmark_adjustment_str=TOTALRETURN_ADJUSTMENT_STR,
         )
 
         if max_positions_int <= 0:
@@ -266,6 +272,13 @@ class QPIIbsRsiExitStrategy(Strategy):
         self.trade_id_int = 0
         self.current_trade_map: defaultdict[str, int] = defaultdict(default_trade_id_int)
         self.universe_df: pd.DataFrame | None = None
+        self._data_adjustment_policy_dict.update(
+            {
+                "stock_signal_adjustment_str": CAPITALSPECIAL_ADJUSTMENT_STR,
+                "execution_and_marks_adjustment_str": CAPITALSPECIAL_ADJUSTMENT_STR,
+                "performance_benchmark_adjustment_str": TOTALRETURN_ADJUSTMENT_STR,
+            }
+        )
 
         self.max_positions_int = max_positions_int
         self.qpi_threshold_float = qpi_threshold_float

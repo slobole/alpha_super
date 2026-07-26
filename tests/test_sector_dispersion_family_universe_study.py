@@ -138,6 +138,53 @@ class SectorDispersionFamilyUniverseStudyTests(unittest.TestCase):
         self.assertAlmostEqual(strategy_obj.cash, 20.0)
         self.assertAlmostEqual(strategy_obj.dividend_cash_total_float, 20.0)
         self.assertEqual(len(strategy_obj.dividend_credit_df), 2)
+        self.assertEqual(len(strategy_obj.get_dividend_ledger()), 0)
+        self.assertEqual(
+            strategy_obj._accounting_policy_dict["dividend_data_status_str"],
+            "disabled_explicitly",
+        )
+
+    def test_manual_dividend_strategy_does_not_double_credit_on_next_bar(self):
+        date_index = pd.bdate_range("2024-01-02", periods=2)
+        manifest_row_ser = pd.Series(
+            {
+                "universe_id_str": "synthetic",
+                "symbol_tuple_str": "AAA",
+                "raw_common_start_date_str": date_index[0].date().isoformat(),
+            }
+        )
+        config_obj = build_universe_config_obj(
+            manifest_row_ser=manifest_row_ser,
+            end_date_str=date_index[-1].date().isoformat(),
+        )
+        strategy_obj = SectorDispersionDividendStrategy(
+            name="test_no_double_credit",
+            benchmarks=[],
+            config_obj=config_obj,
+        )
+        strategy_obj.cash = 0.0
+        strategy_obj._position_amount_map = {"AAA": 10.0}
+        pricing_data_df = pd.DataFrame(
+            {
+                ("AAA", "Open"): [100.0, 99.0],
+                ("AAA", "High"): [100.0, 99.0],
+                ("AAA", "Low"): [100.0, 99.0],
+                ("AAA", "Close"): [100.0, 99.0],
+                ("AAA", "Dividend"): [1.0, 0.0],
+            },
+            index=date_index,
+        )
+
+        strategy_obj.current_bar = date_index[0]
+        strategy_obj.process_orders(pricing_data_df)
+        strategy_obj.previous_bar = date_index[0]
+        strategy_obj.current_bar = date_index[1]
+        strategy_obj.process_orders(pricing_data_df)
+
+        self.assertAlmostEqual(strategy_obj.cash, 10.0)
+        self.assertAlmostEqual(strategy_obj.dividend_cash_total_float, 10.0)
+        self.assertEqual(len(strategy_obj.dividend_credit_df), 1)
+        self.assertEqual(len(strategy_obj.get_dividend_ledger()), 0)
 
     def test_isolated_no_print_session_is_stale_valued_and_order_is_canceled(self):
         date_index = pd.bdate_range("2024-01-02", periods=3)

@@ -10,7 +10,7 @@ from typing import Any
 
 import pandas as pd
 
-from alpha.engine.strategy import Strategy
+from alpha.engine.strategy import Strategy, dividend_cash_ledger_disabled_context
 from alpha.live.models import LiveRelease
 from data.norgate_loader import use_norgate_data_profile
 
@@ -20,6 +20,7 @@ REFERENCE_RUN_VARIANT_PARAMETER_NAME_LIST: list[str] = [
     "capital_base_float",
     "end_date_str",
 ]
+LIVE_REFERENCE_ACCOUNTING_CONTRACT_VERSION_STR = "price_return_ledger_v1"
 
 
 def build_reference_output_dir_path(
@@ -106,18 +107,67 @@ def run_auto_reference_strategy(
     if "output_dir_str" in signature_obj.parameters:
         run_kwarg_dict["output_dir_str"] = str(output_dir_path_obj)
 
-    with use_norgate_data_profile(release_obj.data_profile_str):
+    # The current live/reference contract is still price_return_ledger_v1.
+    # Keep this diagnostic on the same accounting basis as LIVE/IBKR until a
+    # separately authorized broker-dividend reconciliation rollout exists.
+    with (
+        use_norgate_data_profile(release_obj.data_profile_str),
+        dividend_cash_ledger_disabled_context(),
+    ):
         strategy_obj = run_variant_fn(**run_kwarg_dict)
     if not isinstance(strategy_obj, Strategy):
         raise TypeError(
             f"Strategy module '{module_import_str}' run_variant(...) returned "
             f"{type(strategy_obj).__name__}, expected Strategy."
         )
+    validate_live_reference_accounting_contract(strategy_obj)
+    strategy_obj.configure_dividend_cash_ledger(enabled_bool=False)
     return strategy_obj
+
+
+def validate_live_reference_accounting_contract(
+    reference_strategy_obj: Strategy,
+) -> dict[str, object]:
+    accounting_contract_version_str = str(
+        reference_strategy_obj._accounting_policy_dict.get(
+            "accounting_contract_version_str",
+            "",
+        )
+    )
+    dividend_cash_ledger_mode_str = str(
+        reference_strategy_obj._accounting_policy_dict.get(
+            "dividend_cash_ledger_mode_str",
+            "",
+        )
+    )
+    dividend_event_count_int = int(
+        len(reference_strategy_obj.get_dividend_ledger())
+    )
+    if (
+        accounting_contract_version_str
+        != LIVE_REFERENCE_ACCOUNTING_CONTRACT_VERSION_STR
+        or dividend_event_count_int != 0
+    ):
+        raise RuntimeError(
+            "Live reference must preserve price_return_ledger_v1 until "
+            "broker-dividend reconciliation is separately authorized. "
+            f"accounting_contract={accounting_contract_version_str!r}, "
+            f"dividend_event_count={dividend_event_count_int}."
+        )
+    return {
+        "reference_accounting_contract_version_str": (
+            accounting_contract_version_str
+        ),
+        "reference_dividend_cash_ledger_mode_str": (
+            dividend_cash_ledger_mode_str
+        ),
+        "reference_dividend_event_count_int": dividend_event_count_int,
+    }
 
 
 def load_reference_maps_from_pickle(reference_strategy_pickle_path_str: str) -> dict[str, Any]:
     reference_strategy_obj = Strategy.read_pickle(reference_strategy_pickle_path_str)
+    validate_live_reference_accounting_contract(reference_strategy_obj)
     return build_reference_maps_dict(reference_strategy_obj)
 
 
@@ -126,6 +176,9 @@ def _date_key_str(timestamp_obj: object) -> str:
 
 
 def build_reference_maps_dict(reference_strategy_obj: Strategy) -> dict[str, Any]:
+    reference_accounting_policy_dict = validate_live_reference_accounting_contract(
+        reference_strategy_obj
+    )
     transaction_map_dict: dict[tuple[str, str], dict[str, float | int | None]] = {}
     transaction_df = reference_strategy_obj.get_transactions()
     if transaction_df is not None and len(transaction_df) > 0:
@@ -155,6 +208,7 @@ def build_reference_maps_dict(reference_strategy_obj: Strategy) -> dict[str, Any
 
     return {
         "reference_strategy_obj": reference_strategy_obj,
+        **reference_accounting_policy_dict,
         "transaction_map_dict": transaction_map_dict,
         "equity_by_date_dict": equity_by_date_dict,
         "cash_by_date_dict": cash_by_date_dict,
@@ -482,6 +536,15 @@ def write_reference_compare_artifacts(
         "actual_cash_float": compare_report_dict.get("actual_cash_float"),
         "backtest_cash_float": compare_report_dict.get("backtest_cash_float"),
         "cash_diff_float": compare_report_dict.get("cash_diff_float"),
+        "reference_accounting_contract_version_str": reference_maps_dict.get(
+            "reference_accounting_contract_version_str"
+        ),
+        "reference_dividend_cash_ledger_mode_str": reference_maps_dict.get(
+            "reference_dividend_cash_ledger_mode_str"
+        ),
+        "reference_dividend_event_count_int": reference_maps_dict.get(
+            "reference_dividend_event_count_int"
+        ),
         **trade_fill_summary_dict,
         "reference_strategy_pickle_path_str": reference_strategy_pickle_path_str,
     }
@@ -699,6 +762,16 @@ def _write_html_report(
             ("Actual equity source", summary_dict.get("actual_equity_source_str")),
             ("Actual equity basis", summary_dict.get("actual_equity_basis_str")),
             ("Cash diff", summary_dict.get("cash_diff_float")),
+            (
+                "Reference accounting",
+                summary_dict.get(
+                    "reference_accounting_contract_version_str"
+                ),
+            ),
+            (
+                "Reference dividend events",
+                summary_dict.get("reference_dividend_event_count_int"),
+            ),
         ]
     )
     trade_fill_table_html_str = _df_to_labeled_html_table_str(

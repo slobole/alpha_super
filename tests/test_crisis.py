@@ -9,6 +9,7 @@ from alpha.engine.crisis import (
     CrisisAnalyzer,
     CrisisPeriodConfig,
     CrisisStrategySpec,
+    _build_dv2_strategy_obj,
     _build_mo_atr_normalized_ndx_strategy_obj,
     resolve_crisis_window,
     run_crisis_replay_suite,
@@ -119,6 +120,26 @@ class CrisisReplayTests(unittest.TestCase):
             strategy_obj._performance_benchmark_symbol_str,
             "$SPX",
         )
+        self.assertEqual(
+            strategy_obj._performance_benchmark_adjustment_str,
+            "TOTALRETURN",
+        )
+
+    def test_dv2_crisis_strategy_declares_total_return_benchmark(self):
+        universe_df = pd.DataFrame(
+            {"AAA": [1]},
+            index=pd.to_datetime(["2024-01-31"]),
+        )
+        strategy_obj = _build_dv2_strategy_obj(
+            {
+                "strategy_name_str": "strategy_mr_dv2",
+                "capital_base_float": 100_000.0,
+                "benchmark_list": ["$SPX"],
+                "universe_df": universe_df,
+            }
+        )
+
+        self.assertIs(strategy_obj.universe_df, universe_df)
         self.assertEqual(
             strategy_obj._performance_benchmark_adjustment_str,
             "TOTALRETURN",

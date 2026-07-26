@@ -99,11 +99,18 @@ class AtrNormalizedVariantConstructionTests(unittest.TestCase):
             index=date_index,
         )
         capital_price_df.columns = pd.MultiIndex.from_tuples(capital_price_df.columns)
+        capital_price_df.attrs["norgate_adjustment_by_symbol_dict"] = {
+            "AAA": "CAPITALSPECIAL",
+            "SPY": "CAPITALSPECIAL",
+        }
         total_return_price_df = pd.DataFrame(
             {("$SPXTR", "Close"): [100.0, 101.0]},
             index=date_index,
         )
         total_return_price_df.columns = pd.MultiIndex.from_tuples(total_return_price_df.columns)
+        total_return_price_df.attrs["norgate_adjustment_by_symbol_dict"] = {
+            "$SPXTR": "TOTALRETURN",
+        }
 
         with mock.patch(
             "strategies.momentum.strategy_mo_atr_normalized_ndx.load_raw_prices",
@@ -121,6 +128,14 @@ class AtrNormalizedVariantConstructionTests(unittest.TestCase):
         self.assertAlmostEqual(
             float(combined_price_df.iloc[-1][(benchmark_data_symbol_str, "Close")]),
             101.0,
+        )
+        self.assertEqual(
+            combined_price_df.attrs["norgate_adjustment_by_symbol_dict"],
+            {
+                "AAA": "CAPITALSPECIAL",
+                "SPY": "CAPITALSPECIAL",
+                "$SPXTR": "TOTALRETURN",
+            },
         )
         load_raw_prices_mock.assert_called_once_with(
             symbols=[],

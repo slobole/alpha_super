@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from alpha.engine.strategy import Strategy
 from alpha.live import reference_compare
 from alpha.live.models import BrokerSnapshot, DecisionPlan, LiveRelease, PodState, VPlan, VPlanRow
 from alpha.live.release_manifest import SUPPORTED_MODE_TUPLE, SUPPORTED_STRATEGY_IMPORT_TUPLE
@@ -15,6 +18,11 @@ from alpha.live.state_store_v2 import LiveStateStore
 
 
 MARKET_TZ = ZoneInfo("America/New_York")
+
+
+class AutoReferenceAccountingTestStrategy(Strategy):
+    def iterate(self, data, close, open_prices):
+        return None
 
 
 def test_reference_output_dir_path_stays_outside_research_tree(tmp_path):
@@ -32,6 +40,10 @@ def test_reference_output_dir_path_stays_outside_research_tree(tmp_path):
 
 class FakeReferenceStrategy:
     def __init__(self) -> None:
+        self._accounting_policy_dict = {
+            "accounting_contract_version_str": "price_return_ledger_v1",
+            "dividend_cash_ledger_mode_str": "disabled",
+        }
         self.results = pd.DataFrame(
             {
                 "total_value": [5000.0],
@@ -60,6 +72,9 @@ class FakeReferenceStrategy:
 
     def get_transactions(self):
         return self.transaction_df
+
+    def get_dividend_ledger(self):
+        return pd.DataFrame()
 
     def to_pickle(self, path):
         Path(path).write_bytes(b"fake-reference")
@@ -98,6 +113,92 @@ def test_supported_deployment_strategies_expose_auto_reference_contract():
 
         assert support_dict["supported_bool"] is True
         assert support_dict["missing_parameter_list"] == []
+
+
+def test_auto_reference_keeps_legacy_price_return_ledger(monkeypatch, tmp_path):
+    captured_strategy_obj = None
+
+    def fake_run_variant(
+        backtest_start_date_str,
+        capital_base_float,
+        end_date_str,
+        **_run_kwarg_dict,
+    ):
+        nonlocal captured_strategy_obj
+        captured_strategy_obj = AutoReferenceAccountingTestStrategy(
+            name="auto_reference_accounting_test",
+            benchmarks=[],
+        )
+        captured_strategy_obj.configure_dividend_cash_ledger(enabled_bool=True)
+        dividend_pricing_data_df = pd.DataFrame(
+            {
+                ("AAA", "Open"): [100.0],
+                ("AAA", "High"): [100.0],
+                ("AAA", "Low"): [100.0],
+                ("AAA", "Close"): [100.0],
+                ("AAA", "Dividend"): [1.0],
+            },
+            index=pd.to_datetime(["2024-01-31"]),
+        )
+        captured_strategy_obj._credit_dividend_cash_before_open(
+            dividend_pricing_data_df
+        )
+        return captured_strategy_obj
+
+    @contextmanager
+    def fake_data_profile_context(_data_profile_str):
+        yield
+
+    monkeypatch.setattr(
+        reference_compare.importlib,
+        "import_module",
+        lambda _module_import_str: SimpleNamespace(run_variant=fake_run_variant),
+    )
+    monkeypatch.setattr(
+        reference_compare,
+        "use_norgate_data_profile",
+        fake_data_profile_context,
+    )
+
+    strategy_obj = reference_compare.run_auto_reference_strategy(
+        release_obj=_build_release(),
+        deployment_start_date_str="2024-01-01",
+        reference_end_date_str="2024-01-31",
+        deployment_initial_cash_float=10_000.0,
+        output_dir_path_obj=tmp_path,
+    )
+
+    assert strategy_obj is captured_strategy_obj
+    assert strategy_obj._dividend_cash_ledger_mode_str == "disabled"
+    assert strategy_obj._accounting_policy_dict[
+        "accounting_contract_version_str"
+    ] == "price_return_ledger_v1"
+    assert strategy_obj._accounting_policy_dict[
+        "dividend_data_status_str"
+    ] == "disabled_by_context"
+    assert len(strategy_obj.get_dividend_ledger()) == 0
+
+
+def test_manual_reference_pickle_rejects_dividend_ledger_v2(tmp_path):
+    strategy_obj = AutoReferenceAccountingTestStrategy(
+        name="manual_reference_accounting_test",
+        benchmarks=[],
+    )
+    strategy_obj._accounting_policy_dict[
+        "accounting_contract_version_str"
+    ] = "net_dividend_cash_ledger_v2"
+    pickle_path_obj = tmp_path / "reference_v2.pkl"
+    strategy_obj.to_pickle(str(pickle_path_obj))
+
+    try:
+        reference_compare.load_reference_maps_from_pickle(
+            str(pickle_path_obj)
+        )
+    except RuntimeError as exc_obj:
+        assert "price_return_ledger_v1" in str(exc_obj)
+        assert "net_dividend_cash_ledger_v2" in str(exc_obj)
+    else:
+        raise AssertionError("Expected v2 live reference pickle to be rejected.")
 
 
 def _insert_vplan(
@@ -551,6 +652,12 @@ def test_html_report_writes_expected_artifacts(tmp_path):
     assert summary_dict["total_abs_share_diff_float"] == 0.0
     assert summary_dict["total_abs_notional_diff_float"] == 0.0
     assert summary_dict["total_price_diff_notional_float"] == 0.0
+    assert (
+        summary_dict["reference_accounting_contract_version_str"]
+        == "price_return_ledger_v1"
+    )
+    assert summary_dict["reference_dividend_cash_ledger_mode_str"] == "disabled"
+    assert summary_dict["reference_dividend_event_count_int"] == 0
     assert "status_str" not in summary_dict
     assert "open_issue_count_int" not in summary_dict
     html_text_str = Path(artifact_path_dict["html_path_str"]).read_text(encoding="utf-8")
@@ -563,6 +670,8 @@ def test_html_report_writes_expected_artifacts(tmp_path):
     assert "Raw Detail Tables" in html_text_str
     assert "Official open" in html_text_str
     assert "VPlan reference" in html_text_str
+    assert "Reference accounting" in html_text_str
+    assert "price_return_ledger_v1" in html_text_str
     assert "<th>reference_price_float</th>" not in html_text_str
 
 

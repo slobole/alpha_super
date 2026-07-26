@@ -288,6 +288,14 @@ class Beyond6040StrategyTests(unittest.TestCase):
         self.assertTrue({"VTI", "GLD", "TLT", "Cash"}.issubset(strategy.daily_target_weights.columns))
         weight_sum_ser = strategy.daily_target_weights.sum(axis=1)
         self.assertTrue(np.allclose(weight_sum_ser.to_numpy(dtype=float), 1.0, atol=1e-12))
+        self.assertIn(
+            "negative_cash_day_count_int",
+            strategy._accounting_policy_dict,
+        )
+        self.assertIn(
+            "minimum_cash_weight_float",
+            strategy._accounting_policy_dict,
+        )
 
 
 if __name__ == "__main__":

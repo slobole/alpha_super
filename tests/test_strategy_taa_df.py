@@ -88,6 +88,35 @@ class DefenseFirstStrategyTests(unittest.TestCase):
             commission_minimum=0.0,
         )
 
+    def test_strategy_declares_signal_and_execution_adjustment_provenance(self):
+        strategy_obj = self.make_strategy(
+            pd.DataFrame(index=pd.to_datetime(["2024-01-02"])),
+            ["GLD", "SPY"],
+        )
+
+        self.assertEqual(
+            strategy_obj._data_adjustment_policy_dict[
+                "return_space_signal_adjustment_str"
+            ],
+            "TOTALRETURN",
+        )
+        self.assertEqual(
+            strategy_obj._data_adjustment_policy_dict[
+                "execution_and_marks_adjustment_str"
+            ],
+            "CAPITALSPECIAL",
+        )
+        self.assertEqual(
+            strategy_obj._data_adjustment_policy_dict[
+                "performance_benchmark_adjustment_str"
+            ],
+            "TOTALRETURN",
+        )
+        self.assertEqual(
+            strategy_obj._performance_benchmark_adjustment_str,
+            "TOTALRETURN",
+        )
+
     def test_map_month_end_weights_to_rebalance_open_df_uses_first_trading_day_of_next_month(self):
         month_end_weight_df = pd.DataFrame(
             {"GLD": [0.40, 0.20], "SPY": [0.60, 0.80]},

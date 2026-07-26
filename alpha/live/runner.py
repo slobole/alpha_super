@@ -2267,6 +2267,8 @@ def _render_compare_reference_detail_str(detail_dict: dict[str, object]) -> str:
                 f"- Actual cash: {_format_optional_float_str(compare_report_dict.get('actual_cash_float'))}",
                 f"- Backtest cash: {_format_optional_float_str(compare_report_dict.get('backtest_cash_float'))}",
                 f"- Cash diff: {_format_optional_float_str(compare_report_dict.get('cash_diff_float'))}",
+                f"- Reference accounting: {compare_report_dict.get('reference_accounting_contract_version_str') or 'unknown'}",
+                f"- Reference dividend events: {compare_report_dict.get('reference_dividend_event_count_int')}",
                 f"- Trade fill rows: {len(trade_fill_diff_row_dict_list)}",
             ]
         )
@@ -4837,6 +4839,15 @@ def get_compare_reference_summary(
             "actual_equity_timestamp_str": actual_state_dict["actual_equity_timestamp_str"],
             "backtest_cash_float": backtest_cash_float,
             "cash_diff_float": cash_diff_float,
+            "reference_accounting_contract_version_str": reference_maps_dict.get(
+                "reference_accounting_contract_version_str"
+            ),
+            "reference_dividend_cash_ledger_mode_str": reference_maps_dict.get(
+                "reference_dividend_cash_ledger_mode_str"
+            ),
+            "reference_dividend_event_count_int": reference_maps_dict.get(
+                "reference_dividend_event_count_int"
+            ),
             "reference_strategy_pickle_path_str": reference_strategy_pickle_path_for_report_str,
             "reference_auto_generated_bool": reference_strategy_pickle_path_str is None,
             "compare_row_dict_list": compare_row_dict_list,
