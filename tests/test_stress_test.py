@@ -332,13 +332,24 @@ class StressTestAnalyzerTests(unittest.TestCase):
             self.assertIn("toy crisis", report_html_str)
             self.assertIn("Stress Matrix", report_html_str)
             self.assertIn("Worst Cases", report_html_str)
-            self.assertIn("Event Chapter", report_html_str)
+            # Chapters are collapsed: the detail is still emitted, one click away.
+            self.assertIn('<details class="event-chapter">', report_html_str)
+            self.assertIn("chapter-dates", report_html_str)
             self.assertIn("Combined Launch-to-End Chart", report_html_str)
             self.assertIn("event-chart-stack", report_html_str)
             self.assertIn("event-chart-panel", report_html_str)
             self.assertNotIn('<div class="chart-grid">', report_html_str)
             self.assertIn("Exposure By Offset", report_html_str)
-            self.assertIn("Crisis start marker", report_html_str)
+            # Offset averaging: one row per crisis, with the entry posture that
+            # makes a 0.00% return readable, plus the shared small multiples.
+            self.assertIn("Crisis by Crisis", report_html_str)
+            self.assertIn("Crisis Summary", report_html_str)
+            self.assertIn("trading days before the crisis begins", report_html_str)
+            self.assertIn("Entry is the average gross exposure going in", report_html_str)
+            # The per-offset heatmaps move to the appendix rather than being lost.
+            heatmap_idx_int = report_html_str.index("Heatmap Dashboard")
+            self.assertLess(report_html_str.index("Raw Detail Appendix"), heatmap_idx_int)
+            self.assertIn("Per-Offset Heatmaps", report_html_str)
             self.assertIn("Entering Positions", report_html_str)
             self.assertIn("Raw Detail Appendix", report_html_str)
             self.assertIn("Transaction Summary", report_html_str)
@@ -409,3 +420,66 @@ class StressTestAnalyzerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CrisisSummaryTests(unittest.TestCase):
+    """Offset averaging must not turn two outcomes into one number."""
+
+    @staticmethod
+    def _metric_df(event_return_list, gross_list):
+        return pd.DataFrame({
+            "crisis_name_str": ["toy_crisis"] * len(event_return_list),
+            "launch_offset_int": [5, 21, 42, 63][: len(event_return_list)],
+            "event_return_pct_float": event_return_list,
+            "event_max_drawdown_pct_float": [-1.0] * len(event_return_list),
+            "relative_event_return_pct_float": [1.0] * len(event_return_list),
+            "worst_event_day_pct_float": [-0.5] * len(event_return_list),
+            "entry_top1_weight_float": [0.08] * len(event_return_list),
+            "gross_exposure_float": gross_list,
+        })
+
+    def test_a_crisis_sat_out_in_cash_is_not_a_zero_return(self):
+        """0.00% means "sat it out" or "was in and ended flat" -- opposite things."""
+        from alpha.engine.stress_test import _build_crisis_summary_table_html
+
+        table_html_str = _build_crisis_summary_table_html(
+            self._metric_df([0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]), (5, 21, 42, 63)
+        )
+        self.assertIn("in cash", table_html_str)
+
+    def test_divergent_offsets_are_flagged_with_their_spread(self):
+        from alpha.engine.stress_test import _build_crisis_summary_table_html
+
+        table_html_str = _build_crisis_summary_table_html(
+            self._metric_df([0.0, -13.9, -13.8, -13.8], [0.0, 1.0, 1.0, 1.0]), (5, 21, 42, 63)
+        )
+        self.assertIn('class="crisis-mixed-entry"', table_html_str)
+        self.assertIn("13.9pp", table_html_str)
+        self.assertIn("sits between", table_html_str)
+
+    def test_agreeing_offsets_are_not_flagged_despite_mixed_entry_exposure(self):
+        """Regression: entry posture is not what decides whether the mean is safe.
+
+        dot_com_bubble enters anywhere from 0.00 to 1.03 gross across its
+        offsets and still lands every one within 0.42pp, because an offset that
+        enters flat can invest during the event. Flagging on entry exposure
+        marked six of nine crises and meant nothing.
+        """
+        from alpha.engine.stress_test import _build_crisis_summary_table_html
+
+        table_html_str = _build_crisis_summary_table_html(
+            self._metric_df([-8.0, -8.2, -8.4, -8.1], [0.0, 1.03, 0.9, 0.95]), (5, 21, 42, 63)
+        )
+        self.assertNotIn('class="crisis-mixed-entry"', table_html_str)
+        self.assertNotIn("sits between", table_html_str)
+
+    def test_offsets_are_named_once_rather_than_per_column(self):
+        from alpha.engine.stress_test import _build_crisis_summary_table_html
+
+        table_html_str = _build_crisis_summary_table_html(
+            self._metric_df([-8.0, -8.2, -8.4, -8.1], [1.0, 1.0, 1.0, 1.0]), (5, 21, 42, 63)
+        )
+        self.assertIn("5, 21, 42, 63", table_html_str)
+        self.assertEqual(table_html_str.count("5, 21, 42, 63"), 1)
+        # One body row per crisis, not one per offset.
+        self.assertEqual(table_html_str.count('<td class="metric">'), 1)
