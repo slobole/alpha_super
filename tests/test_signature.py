@@ -289,6 +289,57 @@ def test_holding_periods_count_a_spell_open_at_the_end():
     assert compute_holding_period_length_list(holding_df) == [3]
 
 
+def test_composition_metrics_exclude_cash():
+    bar_date_idx = pd.bdate_range('2024-01-01', periods=5)
+    holding_weight_df = pd.DataFrame(
+        {
+            'A': [0.0, 0.4, 0.4, 0.0, 0.0],
+            'Cash': [1.0, 0.6, 0.6, 1.0, 1.0],
+        },
+        index=bar_date_idx,
+    )
+
+    assert detect_composition_mode_str(holding_weight_df) == 'sleeve'
+    assert compute_holding_period_length_list(holding_weight_df) == [2]
+
+
+def test_composition_renderer_does_not_pass_cash_to_rotation_figure(monkeypatch):
+    import matplotlib.pyplot as plt
+    import alpha.engine.signature as signature_module
+
+    captured_column_list: list[str] = []
+
+    def fake_render_rotation_figure(
+        holding_weight_df: pd.DataFrame,
+        slot_capacity_int: int | None,
+    ):
+        captured_column_list.extend(
+            str(column_obj) for column_obj in holding_weight_df.columns
+        )
+        figure_obj, axis_obj = plt.subplots()
+        return figure_obj, (axis_obj,)
+
+    monkeypatch.setattr(
+        signature_module,
+        '_render_rotation_composition_figure',
+        fake_render_rotation_figure,
+    )
+    holding_weight_df = pd.DataFrame(
+        {
+            'A': [0.4, 0.4],
+            'Cash': [0.6, 0.6],
+        },
+        index=pd.bdate_range('2024-01-01', periods=2),
+    )
+
+    signature_module.render_composition_data_uri_str(
+        holding_weight_df,
+        composition_mode_str='rotation',
+    )
+
+    assert captured_column_list == ['A']
+
+
 def _conditional_return_pair(down_beta_float, up_beta_float, observation_count_int=900):
     random_generator = np.random.default_rng(11)
     benchmark_return_vec = random_generator.normal(0.0004, 0.011, observation_count_int)

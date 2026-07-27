@@ -35,6 +35,15 @@ DV2_MODULE_STR = "strategies.dv2.strategy_mr_dv2"
 EOM_ZROZ_SPY_SSO_MODULE_STR = "strategies.eom_tlt_vs_spy.strategy_eom_zroz_spy_sso_variant"
 SEASONALITY_MODULE_STR = "strategies.seasonality.strategy_seasonality"
 ATR_NDX_MODULE_STR = "strategies.momentum.strategy_mo_atr_normalized_ndx"
+US_SECTOR_ETF_IBS_DOWNSHOCK_MODULE_STR = (
+    "strategies.mean_reversion.strategy_mr_us_sector_etf_ibs_downshock"
+)
+US_SECTOR_ETF_IBS_DOWNSHOCK_NO_XLC_MODULE_STR = (
+    "strategies.mean_reversion.strategy_mr_us_sector_etf_ibs_downshock_no_xlc"
+)
+US_SECTOR_ETF_IBS_DOWNSHOCK_VOX_IYR_MODULE_STR = (
+    "strategies.mean_reversion.strategy_mr_us_sector_etf_ibs_downshock_vox_iyr"
+)
 
 
 class RecordingJobManager:
@@ -91,12 +100,36 @@ def test_catalog_lists_strategies_and_flags_wired():
     assert seasonality_entry is not None
     assert seasonality_entry.has_run_variant_bool is True
 
+    sector_etf_entry = catalog.get_strategy_by_module(
+        US_SECTOR_ETF_IBS_DOWNSHOCK_MODULE_STR
+    )
+    assert sector_etf_entry is not None
+    assert sector_etf_entry.is_wired_bool is False
+    assert sector_etf_entry.has_run_variant_bool is True
+    assert sector_etf_entry.has_capacity_analysis_bool is True
+
+    no_xlc_entry = catalog.get_strategy_by_module(
+        US_SECTOR_ETF_IBS_DOWNSHOCK_NO_XLC_MODULE_STR
+    )
+    assert no_xlc_entry is not None
+    assert no_xlc_entry.is_wired_bool is False
+    assert no_xlc_entry.has_run_variant_bool is True
+    assert no_xlc_entry.has_capacity_analysis_bool is True
+
+    vox_iyr_entry = catalog.get_strategy_by_module(
+        US_SECTOR_ETF_IBS_DOWNSHOCK_VOX_IYR_MODULE_STR
+    )
+    assert vox_iyr_entry is not None
+    assert vox_iyr_entry.is_wired_bool is False
+    assert vox_iyr_entry.has_run_variant_bool is True
+    assert vox_iyr_entry.has_capacity_analysis_bool is True
+
     capacity_entry_list = [
         entry_obj
         for entry_obj in strategy_entry_list
         if entry_obj.has_capacity_analysis_bool
     ]
-    assert len(capacity_entry_list) == 17
+    assert len(capacity_entry_list) == 20
     assert (
         "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi"
         in {entry_obj.module_import_str for entry_obj in capacity_entry_list}

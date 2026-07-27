@@ -2203,12 +2203,20 @@ def _build_composition_plate_html(strategy) -> str:
     realized_weight_df = getattr(strategy, 'realized_weight_df', None)
     if realized_weight_df is None or len(realized_weight_df) == 0 or realized_weight_df.shape[1] == 0:
         return ''
+    position_weight_df = realized_weight_df.drop(
+        columns=['Cash'],
+        errors='ignore',
+    )
     try:
-        composition_uri_str, resolved_mode_str = render_composition_data_uri_str(realized_weight_df)
+        composition_uri_str, resolved_mode_str = render_composition_data_uri_str(
+            position_weight_df
+        )
     except ValueError:
         return ''
 
-    distinct_name_count_int = int(realized_weight_df.fillna(0.0).abs().gt(0.0).any(axis=0).sum())
+    distinct_name_count_int = int(
+        position_weight_df.fillna(0.0).abs().gt(0.0).any(axis=0).sum()
+    )
     caption_str = {
         'sleeve': (
             f'{distinct_name_count_int} distinct names ever held — few enough that weights '

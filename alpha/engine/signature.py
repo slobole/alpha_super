@@ -280,11 +280,20 @@ SLEEVE_COMPOSITION_MODE_STR = 'sleeve'
 ROTATION_COMPOSITION_MODE_STR = 'rotation'
 
 
-def _is_held_df(holding_weight_df: pd.DataFrame) -> pd.DataFrame:
-    if holding_weight_df.shape[1] == 0:
-        raise ValueError('holding_weight_df must contain at least one name column.')
+def _position_weight_df(holding_weight_df: pd.DataFrame) -> pd.DataFrame:
+    """Return investable holdings only; Cash is the undeployed remainder."""
+    return holding_weight_df.drop(columns=['Cash'], errors='ignore')
 
-    is_held_df = holding_weight_df.fillna(0.0).abs().gt(0.0)
+
+def _is_held_df(holding_weight_df: pd.DataFrame) -> pd.DataFrame:
+    position_weight_df = _position_weight_df(holding_weight_df)
+    if position_weight_df.shape[1] == 0:
+        raise ValueError(
+            'holding_weight_df must contain at least one name column after '
+            'excluding Cash.'
+        )
+
+    is_held_df = position_weight_df.fillna(0.0).abs().gt(0.0)
     if not is_held_df.to_numpy().any():
         raise ValueError('holding_weight_df contains no held positions.')
     return is_held_df
@@ -553,7 +562,10 @@ def render_composition_data_uri_str(
     figure with the mode that was actually used rather than assuming one.
     Pass ``composition_mode_str`` to override the detection.
     """
-    resolved_mode_str = composition_mode_str or detect_composition_mode_str(holding_weight_df)
+    position_weight_df = _position_weight_df(holding_weight_df)
+    resolved_mode_str = composition_mode_str or detect_composition_mode_str(
+        position_weight_df
+    )
     if resolved_mode_str not in (SLEEVE_COMPOSITION_MODE_STR, ROTATION_COMPOSITION_MODE_STR):
         raise ValueError(
             f'Unknown composition mode {resolved_mode_str!r}. Expected '
@@ -562,10 +574,12 @@ def render_composition_data_uri_str(
 
     with plt.rc_context(build_signature_rcparams(to_web_bool=True)):
         if resolved_mode_str == SLEEVE_COMPOSITION_MODE_STR:
-            figure_obj, axis_tuple = _render_sleeve_composition_figure(holding_weight_df)
+            figure_obj, axis_tuple = _render_sleeve_composition_figure(
+                position_weight_df
+            )
         else:
             figure_obj, axis_tuple = _render_rotation_composition_figure(
-                holding_weight_df, slot_capacity_int
+                position_weight_df, slot_capacity_int
             )
 
         for axis_obj in axis_tuple:
