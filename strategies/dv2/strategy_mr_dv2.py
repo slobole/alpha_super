@@ -8,7 +8,12 @@ from alpha.engine.strategy import Strategy
 from alpha.engine.backtest import run_daily
 from alpha.engine.report import save_results
 from alpha.indicators import dv2_indicator
-from data.norgate_loader import build_index_constituent_matrix, load_raw_prices
+from data.norgate_loader import (
+    CAPITALSPECIAL_ADJUSTMENT_STR,
+    TOTALRETURN_ADJUSTMENT_STR,
+    build_index_constituent_matrix,
+    load_raw_prices,
+)
 
 
 def get_prices(symbols: List[str], benchmarks: List[str], start_date: str = '1998-01-01', end_date: str = None) -> pd.DataFrame:
@@ -47,6 +52,7 @@ def build_execution_timing_analysis_inputs() -> dict[str, object]:
             slippage=0.00025,
             commission_per_share=0.005,
             commission_minimum=1.0,
+            performance_benchmark_adjustment_str=TOTALRETURN_ADJUSTMENT_STR,
         )
         strategy_obj.universe_df = universe_df
         strategy_obj.trade_id = 0
@@ -119,6 +125,7 @@ def build_capacity_analysis_inputs(
         slippage=0.00025,
         commission_per_share=0.005,
         commission_minimum=1.0,
+        performance_benchmark_adjustment_str=TOTALRETURN_ADJUSTMENT_STR,
     )
     strategy_obj.universe_df = universe_df
     strategy_obj.trade_id = 0
@@ -156,6 +163,13 @@ class DVO2Strategy(Strategy):
     universe_df = None  # df storing the universe of stocks
 
     def compute_signals(self, pricing_data: pd.DataFrame) -> pd.DataFrame:
+        self._data_adjustment_policy_dict.update(
+            {
+                "stock_signal_adjustment_str": CAPITALSPECIAL_ADJUSTMENT_STR,
+                "execution_and_marks_adjustment_str": CAPITALSPECIAL_ADJUSTMENT_STR,
+                "performance_benchmark_adjustment_str": TOTALRETURN_ADJUSTMENT_STR,
+            }
+        )
         signal_data = pricing_data.copy()
         symbols = signal_data.columns.get_level_values(0).unique()
         feature_cols = {}
@@ -271,6 +285,7 @@ def run_variant(
         slippage=0.00025,
         commission_per_share=0.005,
         commission_minimum=1.0,
+        performance_benchmark_adjustment_str=TOTALRETURN_ADJUSTMENT_STR,
     )
     strategy.universe_df = universe_df
     strategy.trade_id = 0

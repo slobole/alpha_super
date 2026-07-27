@@ -17,6 +17,7 @@ from datetime import datetime
 from alpha.engine.metrics import generate_monthly_returns
 from alpha.engine.plot import plot as render_strategy_plot
 from alpha.engine.signature import (
+    build_metric_delta_table_html,
     compute_conditional_beta_dict,
     render_composition_data_uri_str,
     render_relative_performance_data_uri_str,
@@ -46,6 +47,7 @@ _METADATA_FILENAME = 'metadata.json'
 _RUN_INFO_FILENAME = 'run_info.json'
 _SUMMARY_FILENAME = 'summary.json'
 _TRANSACTION_CSV_FILENAME = 'transactions.csv'
+_DIVIDEND_LEDGER_CSV_FILENAME = 'dividend_ledger.csv'
 _CRISIS_METRICS_CSV_FILENAME = 'crisis_metrics.csv'
 _CRISIS_PATHS_CSV_FILENAME = 'crisis_paths.csv'
 _TAIL_SUMMARY_CSV_FILENAME = 'tail_summary.csv'
@@ -683,6 +685,7 @@ def save_results(strategy, output_dir='results', output_path: str | Path | None 
             {strategy.name}.pkl
             report.html
             transactions.csv
+            dividend_ledger.csv
 
     Returns the output directory path.
     """
@@ -710,6 +713,11 @@ def save_results(strategy, output_dir='results', output_path: str | Path | None 
         html = _build_html(strategy, chart_b64)
     (out / 'report.html').write_text(html, encoding='utf-8')
     _write_transaction_csv(strategy._transactions, out / _TRANSACTION_CSV_FILENAME)
+    strategy.get_dividend_ledger().to_csv(
+        out / _DIVIDEND_LEDGER_CSV_FILENAME,
+        index=False,
+        date_format='%Y-%m-%d',
+    )
 
     print(f'Results saved to: {out.resolve()}')
     return out
@@ -881,6 +889,122 @@ def _build_kpi_grid_html(
             )
         )
     return f'<div class="kpi-grid">{"".join(kpi_card_html_list)}</div>'
+
+
+def _build_headline_delta_table_html(
+        summary_df: 'pd.DataFrame | None',
+        strategy_column_name_str: str,
+) -> str:
+    """Headline metrics as a strategy / benchmark / delta table.
+
+    Every figure is read out of the same summary frame the Performance Summary
+    plate prints, so the headline cannot drift from the table below it.
+
+    Returns '' when there is no benchmark column to compare against, so the
+    caller can fall back rather than render a table of em dashes.
+    """
+    if summary_df is None or len(summary_df) == 0:
+        return ''
+    if strategy_column_name_str not in summary_df.columns:
+        return ''
+    benchmark_column_name_list = [
+        column_name_str
+        for column_name_str in summary_df.columns
+        if column_name_str != strategy_column_name_str
+    ]
+    if len(benchmark_column_name_list) == 0:
+        return ''
+    benchmark_column_name_str = benchmark_column_name_list[0]
+
+    def metric_float(column_name_str: str, metric_name_str: str):
+        value_obj = _safe_summary_metric_value(summary_df, column_name_str, metric_name_str)
+        try:
+            value_float = float(value_obj)
+        except (TypeError, ValueError):
+            return None
+        return value_float if np.isfinite(value_float) else None
+
+    metric_spec_list: list[dict[str, object]] = []
+
+    for label_str, summary_metric_name_str, higher_is_better_bool in (
+        ('CAGR (net)', 'Return (Ann.) [%]', True),
+        ('Volatility', 'Volatility (Ann.) [%]', False),
+    ):
+        strategy_float = metric_float(strategy_column_name_str, summary_metric_name_str)
+        benchmark_float = metric_float(benchmark_column_name_str, summary_metric_name_str)
+        if strategy_float is None:
+            continue
+        metric_spec_list.append({
+            'label_str': label_str,
+            'value_float': strategy_float,
+            'display_str': f'{strategy_float:.1f}%',
+            'benchmark_float': benchmark_float,
+            'benchmark_display_str': None if benchmark_float is None else f'{benchmark_float:.1f}%',
+            'delta_display_str': (
+                '' if benchmark_float is None else f'{strategy_float - benchmark_float:+.1f}pp'
+            ),
+            'higher_is_better_bool': higher_is_better_bool,
+        })
+
+    sharpe_float = metric_float(strategy_column_name_str, 'Sharpe Ratio')
+    benchmark_sharpe_float = metric_float(benchmark_column_name_str, 'Sharpe Ratio')
+    if sharpe_float is not None:
+        metric_spec_list.append({
+            'label_str': 'Sharpe ratio',
+            'value_float': sharpe_float,
+            'display_str': f'{sharpe_float:.2f}',
+            'benchmark_float': benchmark_sharpe_float,
+            'benchmark_display_str': (
+                None if benchmark_sharpe_float is None else f'{benchmark_sharpe_float:.2f}'
+            ),
+            'delta_display_str': (
+                '' if benchmark_sharpe_float is None
+                else f'{sharpe_float - benchmark_sharpe_float:+.2f}'
+            ),
+            'higher_is_better_bool': True,
+        })
+
+    drawdown_float = metric_float(strategy_column_name_str, 'Max. Drawdown [%]')
+    benchmark_drawdown_float = metric_float(benchmark_column_name_str, 'Max. Drawdown [%]')
+    if drawdown_float is not None:
+        # Drawdowns are stored negative. Compare depth, so a shallower drawdown
+        # reads as the better one whichever sign convention the source used.
+        metric_spec_list.append({
+            'label_str': 'Max drawdown',
+            'value_float': abs(drawdown_float),
+            'display_str': f'{drawdown_float:.1f}%',
+            'benchmark_float': None if benchmark_drawdown_float is None else abs(benchmark_drawdown_float),
+            'benchmark_display_str': (
+                None if benchmark_drawdown_float is None else f'{benchmark_drawdown_float:.1f}%'
+            ),
+            'delta_display_str': (
+                '' if benchmark_drawdown_float is None
+                else f'{abs(drawdown_float) - abs(benchmark_drawdown_float):+.1f}pp'
+            ),
+            'higher_is_better_bool': False,
+            'is_adverse_bool': True,
+        })
+
+    # *** CRITICAL*** The summary stores Correlation per column as that column's
+    # correlation to the strategy, so the strategy's own cell is 1.0 and the
+    # figure we want -- how closely the strategy tracks the benchmark -- sits in
+    # the benchmark column. Reading the strategy column here would print 1.00
+    # for every strategy ever run and a delta of zero.
+    correlation_float = metric_float(benchmark_column_name_str, 'Correlation')
+    if correlation_float is not None:
+        metric_spec_list.append({
+            'label_str': 'Correlation',
+            'value_float': correlation_float,
+            'display_str': f'{correlation_float:.2f}',
+            'benchmark_float': 1.0,
+            'benchmark_display_str': '1.00',
+            'delta_display_str': f'{correlation_float - 1.0:+.2f}',
+            'higher_is_better_bool': False,
+        })
+
+    if len(metric_spec_list) == 0:
+        return ''
+    return build_metric_delta_table_html(metric_spec_list)
 
 
 def _wrap_card_html(card_body_html_str: str, card_class_str: str = '') -> str:
@@ -2079,12 +2203,20 @@ def _build_composition_plate_html(strategy) -> str:
     realized_weight_df = getattr(strategy, 'realized_weight_df', None)
     if realized_weight_df is None or len(realized_weight_df) == 0 or realized_weight_df.shape[1] == 0:
         return ''
+    position_weight_df = realized_weight_df.drop(
+        columns=['Cash'],
+        errors='ignore',
+    )
     try:
-        composition_uri_str, resolved_mode_str = render_composition_data_uri_str(realized_weight_df)
+        composition_uri_str, resolved_mode_str = render_composition_data_uri_str(
+            position_weight_df
+        )
     except ValueError:
         return ''
 
-    distinct_name_count_int = int(realized_weight_df.fillna(0.0).abs().gt(0.0).any(axis=0).sum())
+    distinct_name_count_int = int(
+        position_weight_df.fillna(0.0).abs().gt(0.0).any(axis=0).sum()
+    )
     caption_str = {
         'sleeve': (
             f'{distinct_name_count_int} distinct names ever held — few enough that weights '
@@ -3776,6 +3908,10 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
         portfolio.name,
         portfolio.benchmark_regression_metadata_by_column_dict,
     )
+    spec_headline_metrics_html_str = (
+        _build_headline_delta_table_html(summ, portfolio.name)
+        or kpi_grid_html_str
+    )
     # Raw section content, wrapped as cards below or emitted as plates by the
     # spec body builder.
     pm_allocation_content_html_str = _build_pm_allocation_html(portfolio)
@@ -3856,7 +3992,7 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
             end_str=end_str,
             capital_base_obj=capital_base,
             final_value_obj=final_val,
-            headline_metrics_html_str=kpi_grid_html_str,
+            headline_metrics_html_str=spec_headline_metrics_html_str,
             report_kind_str='Portfolio Report',
             plate_content_html_list=[
                 equity_content_html_str,
@@ -4175,6 +4311,14 @@ def _build_html(strategy, chart_b64: str) -> str:
         'Strategy',
         strategy_regression_metadata_by_column_dict,
     )
+    # The specimen sheet leads with the delta table: the same five figures the
+    # tiles carried, but next to the benchmark and the gap, which is the
+    # question the tiles left the reader to do in their head. Falls back to the
+    # tiles when there is no benchmark to compare against.
+    spec_headline_metrics_html_str = (
+        _build_headline_delta_table_html(augmented_summary_df, 'Strategy')
+        or kpi_grid_html_str
+    )
     benchmark_monthly_metric_df, benchmark_label_str = _strategy_monthly_benchmark_metric_bundle(strategy)
 
     # Raw section content (each carrying its own <h2>), assembled below either
@@ -4225,7 +4369,7 @@ def _build_html(strategy, chart_b64: str) -> str:
             end_str=end_str,
             capital_base_obj=capital_base,
             final_value_obj=final_val,
-            headline_metrics_html_str=kpi_grid_html_str,
+            headline_metrics_html_str=spec_headline_metrics_html_str,
             plate_content_html_list=[
                 equity_content_html_str,
                 _build_annual_paths_plate_html(strategy),

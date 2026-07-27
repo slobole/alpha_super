@@ -264,6 +264,10 @@ class SectorDispersionDividendStrategy(SectorDispersionIbsStrategy):
         config_obj: SectorDispersionIbsConfig,
     ):
         super().__init__(name=name, benchmarks=benchmarks, config_obj=config_obj)
+        # This frozen research strategy owns a separate gross-dividend ledger
+        # with its original current-bar timing. Keep the shared engine ledger
+        # disabled so the same distribution cannot be posted twice.
+        self.configure_dividend_cash_ledger(enabled_bool=False)
         self._dividend_credit_row_dict_list: list[dict[str, object]] = []
         self._stale_order_cancellation_row_dict_list: list[dict[str, object]] = []
         self.dividend_cash_total_float = 0.0

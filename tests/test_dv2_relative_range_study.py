@@ -85,6 +85,92 @@ def test_relative_range_feature_is_unchanged_by_future_prices():
     )
 
 
+def test_dv2_declares_signal_execution_and_benchmark_adjustment_provenance():
+    date_index = pd.bdate_range("2024-01-02", periods=5)
+    close_price_vec = np.linspace(100.0, 104.0, len(date_index))
+    pricing_data_df = pd.DataFrame(
+        {
+            ("AAA", "High"): close_price_vec + 1.0,
+            ("AAA", "Low"): close_price_vec - 1.0,
+            ("AAA", "Close"): close_price_vec,
+        },
+        index=date_index,
+    )
+    pricing_data_df.columns = pd.MultiIndex.from_tuples(pricing_data_df.columns)
+    strategy_obj = DVO2Strategy(name="dv2_adjustment_test", benchmarks=[])
+
+    strategy_obj.compute_signals(pricing_data_df)
+
+    assert strategy_obj._data_adjustment_policy_dict == {
+        "stock_signal_adjustment_str": "CAPITALSPECIAL",
+        "execution_and_marks_adjustment_str": "CAPITALSPECIAL",
+        "performance_benchmark_adjustment_str": "TOTALRETURN",
+    }
+
+
+def test_dv2_production_paths_declare_total_return_benchmark_before_run(
+    monkeypatch,
+):
+    date_index = pd.bdate_range("2024-01-02", periods=2)
+    pricing_data_df = pd.DataFrame(
+        {
+            ("AAA", "Open"): [100.0, 101.0],
+            ("AAA", "High"): [101.0, 102.0],
+            ("AAA", "Low"): [99.0, 100.0],
+            ("AAA", "Close"): [100.0, 101.0],
+            ("AAA", "Dividend"): [0.0, 0.0],
+            ("$SPX", "Open"): [4_700.0, 4_710.0],
+            ("$SPX", "High"): [4_710.0, 4_720.0],
+            ("$SPX", "Low"): [4_690.0, 4_700.0],
+            ("$SPX", "Close"): [4_700.0, 4_710.0],
+            ("$SPX", "Dividend"): [0.0, 0.0],
+        },
+        index=date_index,
+    )
+    pricing_data_df.columns = pd.MultiIndex.from_tuples(pricing_data_df.columns)
+    pricing_data_df.attrs["norgate_adjustment_by_symbol_dict"] = {
+        "AAA": "CAPITALSPECIAL",
+        "$SPX": "TOTALRETURN",
+    }
+    universe_df = pd.DataFrame({"AAA": [1, 1]}, index=date_index)
+    captured_adjustment_list: list[str] = []
+
+    monkeypatch.setattr(
+        "strategies.dv2.strategy_mr_dv2.build_index_constituent_matrix",
+        lambda indexname: (["AAA"], universe_df),
+    )
+    monkeypatch.setattr(
+        "strategies.dv2.strategy_mr_dv2.get_prices",
+        lambda *args, **kwargs: pricing_data_df,
+    )
+
+    def run_daily_stub(strategy_obj, *args, **kwargs):
+        captured_adjustment_list.append(
+            strategy_obj._performance_benchmark_adjustment_str
+        )
+
+    monkeypatch.setattr(
+        "strategies.dv2.strategy_mr_dv2.run_daily",
+        run_daily_stub,
+    )
+
+    from strategies.dv2 import strategy_mr_dv2 as dv2_module
+
+    dv2_module.build_capacity_analysis_inputs(
+        backtest_start_date_str="2024-01-02",
+        end_date_str="2024-01-03",
+    )
+    strategy_obj = dv2_module.run_variant(
+        show_display_bool=False,
+        save_results_bool=False,
+        backtest_start_date_str="2024-01-02",
+        end_date_str="2024-01-03",
+    )
+
+    assert captured_adjustment_list == ["TOTALRETURN", "TOTALRETURN"]
+    assert strategy_obj._performance_benchmark_adjustment_str == "TOTALRETURN"
+
+
 def test_baseline_opportunities_match_current_dv2_natr_ranking():
     close_row_ser = _close_row_ser()
     research_strategy_obj = _strategy(VARIANT_BASELINE_STR)

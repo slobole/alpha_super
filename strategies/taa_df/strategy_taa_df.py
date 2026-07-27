@@ -253,6 +253,14 @@ def load_execution_price_df(
         raise RuntimeError("No execution price data was loaded.")
 
     execution_price_df = pd.concat(execution_frame_list, axis=1).sort_index()
+    execution_price_df.attrs["norgate_adjustment_by_symbol_dict"] = {
+        str(symbol_str): (
+            TOTALRETURN_ADJUSTMENT_STR
+            if symbol_str in benchmark_list
+            else CAPITALSPECIAL_ADJUSTMENT_STR
+        )
+        for symbol_str in symbol_list
+    }
     return execution_price_df
 
 
@@ -415,11 +423,19 @@ class DefenseFirstStrategy(Strategy):
             slippage=slippage,
             commission_per_share=commission_per_share,
             commission_minimum=commission_minimum,
+            performance_benchmark_adjustment_str=TOTALRETURN_ADJUSTMENT_STR,
         )
         self.rebalance_weight_df = rebalance_weight_df.copy()
         self.tradeable_asset_list = list(tradeable_asset_list)
         self.trade_id_int = 0
         self.current_trade_map: defaultdict[str, int] = defaultdict(default_trade_id_int)
+        self._data_adjustment_policy_dict.update(
+            {
+                "return_space_signal_adjustment_str": TOTALRETURN_ADJUSTMENT_STR,
+                "execution_and_marks_adjustment_str": CAPITALSPECIAL_ADJUSTMENT_STR,
+                "performance_benchmark_adjustment_str": TOTALRETURN_ADJUSTMENT_STR,
+            }
+        )
 
     def compute_signals(self, pricing_data: pd.DataFrame) -> pd.DataFrame:
         return pricing_data
@@ -553,6 +569,3 @@ def run_variant(
 
 if __name__ == "__main__":
     run_variant()
-
-
-

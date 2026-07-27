@@ -289,6 +289,57 @@ def test_holding_periods_count_a_spell_open_at_the_end():
     assert compute_holding_period_length_list(holding_df) == [3]
 
 
+def test_composition_metrics_exclude_cash():
+    bar_date_idx = pd.bdate_range('2024-01-01', periods=5)
+    holding_weight_df = pd.DataFrame(
+        {
+            'A': [0.0, 0.4, 0.4, 0.0, 0.0],
+            'Cash': [1.0, 0.6, 0.6, 1.0, 1.0],
+        },
+        index=bar_date_idx,
+    )
+
+    assert detect_composition_mode_str(holding_weight_df) == 'sleeve'
+    assert compute_holding_period_length_list(holding_weight_df) == [2]
+
+
+def test_composition_renderer_does_not_pass_cash_to_rotation_figure(monkeypatch):
+    import matplotlib.pyplot as plt
+    import alpha.engine.signature as signature_module
+
+    captured_column_list: list[str] = []
+
+    def fake_render_rotation_figure(
+        holding_weight_df: pd.DataFrame,
+        slot_capacity_int: int | None,
+    ):
+        captured_column_list.extend(
+            str(column_obj) for column_obj in holding_weight_df.columns
+        )
+        figure_obj, axis_obj = plt.subplots()
+        return figure_obj, (axis_obj,)
+
+    monkeypatch.setattr(
+        signature_module,
+        '_render_rotation_composition_figure',
+        fake_render_rotation_figure,
+    )
+    holding_weight_df = pd.DataFrame(
+        {
+            'A': [0.4, 0.4],
+            'Cash': [0.6, 0.6],
+        },
+        index=pd.bdate_range('2024-01-01', periods=2),
+    )
+
+    signature_module.render_composition_data_uri_str(
+        holding_weight_df,
+        composition_mode_str='rotation',
+    )
+
+    assert captured_column_list == ['A']
+
+
 def _conditional_return_pair(down_beta_float, up_beta_float, observation_count_int=900):
     random_generator = np.random.default_rng(11)
     benchmark_return_vec = random_generator.normal(0.0004, 0.011, observation_count_int)
@@ -405,3 +456,108 @@ def test_marks_follow_the_active_variant(value_ser):
         current_uri_str = render_sparkline_data_uri_str(value_ser)
 
     assert journal_uri_str != current_uri_str
+
+
+def _decode_small_multiples_png_bytes(data_uri_str: str) -> bytes:
+    import base64
+
+    return base64.b64decode(data_uri_str.split(",", 1)[1])
+
+
+class TestSmallMultiplesOverlay:
+    """The reference line must be drawn, and must not be scaled off the panel."""
+
+    def test_overlay_series_widen_the_shared_range(self):
+        """*** CRITICAL*** regression: a benchmark that fell further than the
+        strategy is exactly the case the comparison exists for. Scaling to the
+        panel series alone clips it, and clipping is silent -- the grid would
+        understate how much the strategy avoided.
+        """
+        panel_ser_dict = {"crisis": pd.Series([0.0, -0.05, -0.10])}
+        overlay_ser_dict = {"crisis": pd.Series([0.0, -0.30, -0.44])}
+
+        without_overlay_uri_str = render_small_multiples_data_uri_str(
+            panel_ser_dict, column_count_int=1,
+            value_formatter_fn=lambda v: f"{v * 100:.0f}%",
+        )
+        with_overlay_uri_str = render_small_multiples_data_uri_str(
+            panel_ser_dict, column_count_int=1,
+            value_formatter_fn=lambda v: f"{v * 100:.0f}%",
+            overlay_ser_dict=overlay_ser_dict,
+        )
+        # Different y range and an extra line means different pixels.
+        assert _decode_small_multiples_png_bytes(
+            without_overlay_uri_str
+        ) != _decode_small_multiples_png_bytes(with_overlay_uri_str)
+
+    def test_a_panel_without_an_overlay_still_renders(self):
+        """Overlays are keyed by panel name; a missing key is not an error."""
+        data_uri_str = render_small_multiples_data_uri_str(
+            {"a": pd.Series([0.0, 0.1]), "b": pd.Series([0.0, -0.1])},
+            column_count_int=2,
+            overlay_ser_dict={"a": pd.Series([0.0, 0.05])},
+        )
+        assert data_uri_str.startswith("data:image/png;base64,")
+
+    def test_omitting_the_overlay_keeps_the_previous_output(self):
+        """The parameter is additive: existing callers must be unaffected."""
+        panel_ser_dict = {"a": pd.Series([0.0, 0.1, 0.05])}
+        assert render_small_multiples_data_uri_str(
+            panel_ser_dict, column_count_int=1
+        ) == render_small_multiples_data_uri_str(
+            panel_ser_dict, column_count_int=1, overlay_ser_dict=None
+        )
+
+
+class TestWeightAxisTicks:
+    """The composition rows must label every level the book actually reaches."""
+
+    def test_ticks_step_by_twenty_up_to_the_data(self):
+        from alpha.engine.signature import _weight_axis_tick_list
+
+        assert _weight_axis_tick_list(0.21) == [0.2]
+        assert _weight_axis_tick_list(0.40) == [0.2, 0.4]
+        assert _weight_axis_tick_list(0.62) == [0.2, 0.4, 0.6]
+        assert _weight_axis_tick_list(1.00) == [0.2, 0.4, 0.6, 0.8, 1.0]
+
+    def test_no_tick_is_drawn_above_every_bar(self):
+        """A labelled gridline with no data under it costs the rows height."""
+        from alpha.engine.signature import _weight_axis_tick_list
+
+        for max_weight_float in (0.05, 0.21, 0.39, 0.62, 0.81):
+            tick_list = _weight_axis_tick_list(max_weight_float)
+            assert len(tick_list) == len(set(tick_list))
+            if max_weight_float >= 0.2:
+                assert max(tick_list) <= max_weight_float + 1e-9
+
+    def test_a_degenerate_maximum_still_yields_one_tick(self):
+        from alpha.engine.signature import _weight_axis_tick_list
+
+        assert _weight_axis_tick_list(0.0) == [0.2]
+        assert _weight_axis_tick_list(float('nan')) == [0.2]
+
+    def test_occupancy_ignores_rebalance_residue(self):
+        """*** CRITICAL*** regression.
+
+        Rebalancing leaves fractional residue in a name for long stretches. On
+        the TAA book the Cash line is above zero on every single day with a
+        median of 0.23%, so counting against zero reported "100% of days" for
+        what is dust. The floor makes it 30%.
+        """
+        from alpha.engine.signature import (
+            _MATERIAL_WEIGHT_FLOOR_FLOAT,
+            render_composition_data_uri_str,
+        )
+
+        index = pd.date_range('2020-01-01', periods=100, freq='B')
+        weight_df = pd.DataFrame(
+            {
+                'AAA': [0.5] * 100,
+                # Held materially for a quarter of the sample, dust for the rest.
+                'DUST': [0.5] * 25 + [_MATERIAL_WEIGHT_FLOOR_FLOAT / 2.0] * 75,
+            },
+            index=index,
+        )
+        data_uri_str, mode_str = render_composition_data_uri_str(weight_df)
+        assert mode_str == 'sleeve'
+        assert data_uri_str.startswith('data:image/png;base64,')

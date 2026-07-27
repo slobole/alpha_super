@@ -71,6 +71,29 @@ class QPIIbsRsiExitStrategyTests(unittest.TestCase):
 
         signal_data_df = strategy.compute_signals(pricing_data_df)
 
+        self.assertEqual(
+            strategy._data_adjustment_policy_dict[
+                "stock_signal_adjustment_str"
+            ],
+            "CAPITALSPECIAL",
+        )
+        self.assertEqual(
+            strategy._data_adjustment_policy_dict[
+                "execution_and_marks_adjustment_str"
+            ],
+            "CAPITALSPECIAL",
+        )
+        self.assertEqual(
+            strategy._data_adjustment_policy_dict[
+                "performance_benchmark_adjustment_str"
+            ],
+            "TOTALRETURN",
+        )
+        self.assertEqual(
+            strategy._performance_benchmark_adjustment_str,
+            "TOTALRETURN",
+        )
+
         self.assertIn(("AAA", "three_day_return_ser"), signal_data_df.columns)
         self.assertIn(("AAA", "qpi_value_ser"), signal_data_df.columns)
         self.assertIn(("AAA", "sma_200_price_ser"), signal_data_df.columns)

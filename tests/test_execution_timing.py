@@ -528,6 +528,10 @@ class ExecutionTimingAnalysisTests(unittest.TestCase):
         strategy_obj = strategy_input_dict["strategy_factory_fn"]()
         self.assertEqual(strategy_obj.name, "strategy_mr_dv2")
         self.assertIs(strategy_obj.universe_df, universe_df)
+        self.assertEqual(
+            strategy_obj._performance_benchmark_adjustment_str,
+            "TOTALRETURN",
+        )
 
     def test_qpi_modules_expose_execution_timing_cli_hooks(self):
         import strategies.qpi.strategy_mr_qpi as qpi_module

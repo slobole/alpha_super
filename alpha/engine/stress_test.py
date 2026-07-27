@@ -52,15 +52,17 @@ from alpha.engine.crisis import (
     _coerce_crisis_period_config_list,
     resolve_crisis_window,
 )
-from alpha.engine.report import build_research_output_path
+from alpha.engine.report import _ACTIVE_REPORT_VARIANT_STR, build_research_output_path
+from alpha.engine.signature import render_small_multiples_data_uri_str
 from alpha.engine.strategy import Strategy
 from alpha.engine.theme import (
     SEABORN_DEEP_COLOR_LIST,
     SIGNATURE_PALETTE_DICT,
     blend_hex_color_str,
-    build_report_css,
+    build_analyzer_report_css,
     build_report_font_head_html,
     build_signature_rcparams,
+    signature_variant_context,
 )
 
 
@@ -425,10 +427,14 @@ def save_stress_test_results(
         index=False,
         date_format="%Y-%m-%d",
     )
-    (output_path / REPORT_FILENAME_STR).write_text(
-        _build_report_html_str(stress_result_obj),
-        encoding="utf-8",
-    )
+    # *** CRITICAL*** Every other analyzer renders inside this context; stress
+    # did not, so it alone was drawn from the baseline dashboard palette --
+    # different typeface, different colours -- while the rest of the book had
+    # moved to the signature variant. The palette is read at render time, so
+    # the context has to wrap the call, not the module import.
+    with signature_variant_context(_ACTIVE_REPORT_VARIANT_STR):
+        report_html_str = _build_report_html_str(stress_result_obj)
+    (output_path / REPORT_FILENAME_STR).write_text(report_html_str, encoding="utf-8")
 
     print(f"Results saved to: {output_path.resolve()}")
     return output_path
@@ -1927,6 +1933,252 @@ def _format_metric_heatmap_html(
     )
 
 
+CRISIS_SUMMARY_IN_CASH_THRESHOLD_FLOAT = 0.05
+# Above this spread between the best and worst launch offset, the mean stops
+# describing any single launch and the per-offset detail has to be read instead.
+CRISIS_SUMMARY_DIVERGENT_SPREAD_PCT_FLOAT = 2.0
+
+
+def _crisis_entry_state_str(gross_exposure_value_list) -> str:
+    """Say how invested the strategy was entering the crisis.
+
+    *** CRITICAL*** A 0.00% event return means one of two opposite things: the
+    strategy sat the crisis out in cash, or it was invested and happened to end
+    flat. Rendered as a bare number they are indistinguishable, and "sat it out"
+    is usually the most important line in the whole report.
+    """
+    exposure_float_list = [
+        float(value_obj)
+        for value_obj in gross_exposure_value_list
+        if value_obj is not None and np.isfinite(float(value_obj))
+    ]
+    if len(exposure_float_list) == 0:
+        return "no data"
+    if all(
+        value_float <= CRISIS_SUMMARY_IN_CASH_THRESHOLD_FLOAT
+        for value_float in exposure_float_list
+    ):
+        return "in cash"
+    mean_exposure_float = sum(exposure_float_list) / len(exposure_float_list)
+    return f"{mean_exposure_float * 100.0:.0f}% gross"
+
+
+def _crisis_offset_spread_pct_float(event_return_value_ser) -> float:
+    """Spread of the event return between the best and worst launch offset.
+
+    *** CRITICAL*** This, not the entry exposure, is what decides whether the
+    mean is safe to read. Entry posture looked like the right proxy and is not:
+    on this book dot_com_bubble enters anywhere from 0.00 to 1.03 gross across
+    its offsets and still lands every one of them within 0.42pp, because an
+    offset entering flat can invest during the event and arrive in the same
+    place. Only two crises actually diverge, and the spread finds exactly those.
+    """
+    numeric_value_ser = pd.to_numeric(event_return_value_ser, errors="coerce").dropna()
+    if len(numeric_value_ser) < 2:
+        return 0.0
+    return float(numeric_value_ser.max() - numeric_value_ser.min())
+
+
+def _build_crisis_summary_table_html(
+    stress_metric_df: pd.DataFrame,
+    launch_offset_tuple: Sequence[int],
+) -> str:
+    """One row per crisis, averaged over the launch offsets.
+
+    The five offset-by-crisis heatmaps told the same story four times over: on
+    this book seven of nine crises move less than 1.6pp across all four launch
+    offsets, so the extra columns spent most of the page restating one number.
+
+    *** CRITICAL*** Averaging across offsets is only safe while the offsets
+    agree. Where they do not -- covid_crash spans 13.9pp between its best and
+    worst launch on this book -- the mean sits between two outcomes and
+    describes neither, so those rows are marked and carry their spread.
+    """
+    if stress_metric_df is None or len(stress_metric_df) == 0:
+        return "<p>No scenarios were evaluated.</p>"
+
+    metric_column_spec_tuple = (
+        ("event_return_pct_float", "Event return", True),
+        ("event_max_drawdown_pct_float", "Max drawdown", True),
+        ("relative_event_return_pct_float", "vs benchmark", True),
+        ("worst_event_day_pct_float", "Worst day", True),
+        ("entry_top1_weight_float", "Top-1 at entry", False),
+    )
+
+    row_html_list = []
+    mixed_present_bool = False
+    for crisis_name_str, crisis_group_df in stress_metric_df.groupby(
+        "crisis_name_str", sort=False
+    ):
+        entry_state_str = _crisis_entry_state_str(
+            crisis_group_df.get("gross_exposure_float", pd.Series(dtype=float)).tolist()
+        )
+        spread_pct_float = _crisis_offset_spread_pct_float(
+            crisis_group_df.get("event_return_pct_float", pd.Series(dtype=float))
+        )
+        divergent_bool = spread_pct_float > CRISIS_SUMMARY_DIVERGENT_SPREAD_PCT_FLOAT
+        if divergent_bool:
+            mixed_present_bool = True
+        cell_html_list = [
+            f'<td class="metric">{html.escape(str(crisis_name_str).replace("_", " "))}</td>',
+            f"<td>{html.escape(entry_state_str)}</td>",
+        ]
+        for column_name_str, _label_str, is_percent_bool in metric_column_spec_tuple:
+            if column_name_str not in crisis_group_df.columns:
+                cell_html_list.append("<td>N/A</td>")
+                continue
+            value_ser = pd.to_numeric(
+                crisis_group_df[column_name_str], errors="coerce"
+            ).dropna()
+            if len(value_ser) == 0:
+                cell_html_list.append("<td>N/A</td>")
+                continue
+            mean_float = float(value_ser.mean())
+            cell_text_str = (
+                f"{mean_float:.2f}%" if is_percent_bool else f"{mean_float * 100.0:.1f}%"
+            )
+            cell_html_list.append(f"<td>{html.escape(cell_text_str)}</td>")
+        cell_html_list.append(
+            f"<td>{spread_pct_float:.1f}pp</td>" if divergent_bool else "<td>&mdash;</td>"
+        )
+        row_class_str = ' class="crisis-mixed-entry"' if divergent_bool else ""
+        row_html_list.append(f"<tr{row_class_str}>" + "".join(cell_html_list) + "</tr>")
+
+    header_html_str = "".join(
+        f"<th>{html.escape(label_str)}</th>"
+        for _column_name_str, label_str, _is_percent_bool in metric_column_spec_tuple
+    )
+    offset_label_str = ", ".join(str(int(offset_int)) for offset_int in launch_offset_tuple)
+    mixed_note_str = (
+        " A shaded row's launches disagreed by more than "
+        f"{CRISIS_SUMMARY_DIVERGENT_SPREAD_PCT_FLOAT:.0f}pp, so its mean sits between "
+        "outcomes rather than describing one; open that crisis below, or the per-offset "
+        "heatmaps in the appendix."
+        if mixed_present_bool
+        else ""
+    )
+    return (
+        '<div class="scroll"><table><thead><tr>'
+        f"<th>Crisis</th><th>Entry</th>{header_html_str}<th>Offset spread</th>"
+        "</tr></thead><tbody>" + "".join(row_html_list) + "</tbody></table></div>"
+        '<p class="metric-context">Each figure is the mean across the '
+        f"{len(launch_offset_tuple)} launch offsets ({html.escape(offset_label_str)} "
+        "trading days before the crisis begins). Entry is the average gross exposure "
+        'going in, so a crisis the strategy sat out reads as "in cash" rather than as '
+        f"a 0.00% return.{mixed_note_str}</p>"
+    )
+
+
+def _build_crisis_small_multiples_html(stress_result_obj: StressTestResult) -> str:
+    """One panel per crisis on a shared vertical scale.
+
+    The per-crisis chapters draw three charts each; at nine crises that is
+    twenty-seven figures comparable only by scrolling between them. Drawn as
+    small multiples on one shared scale, a mild crisis looks mild beside a
+    severe one, which is the comparison the report exists to make.
+    """
+    stress_path_df = stress_result_obj.stress_path_df
+    if stress_path_df is None or len(stress_path_df) == 0:
+        return ""
+
+    event_path_df = stress_path_df[stress_path_df["event_window_bool"]]
+    if len(event_path_df) == 0:
+        return ""
+
+    panel_ser_dict: dict[str, pd.Series] = {}
+    overlay_ser_dict: dict[str, pd.Series] = {}
+    benchmark_name_set: set[str] = set()
+    for crisis_name_str, crisis_group_df in event_path_df.groupby(
+        "crisis_name_str", sort=False
+    ):
+        # *** CRITICAL*** One offset per panel, never a mean of the offsets. An
+        # averaged path is not a path any launch took, and its drawdown is
+        # shallower than every real one. The longest launch is the fully
+        # established case and is the conservative one to draw.
+        longest_offset_int = int(crisis_group_df["launch_offset_int"].max())
+        offset_path_df = crisis_group_df[
+            crisis_group_df["launch_offset_int"] == longest_offset_int
+        ].sort_values("bar_offset_int", kind="mergesort")
+        value_ser = pd.to_numeric(
+            offset_path_df["normalized_strategy_from_event_entry_float"], errors="coerce"
+        ).dropna()
+        if len(value_ser) < 2 or float(value_ser.iloc[0]) == 0.0:
+            continue
+
+        # The crisis year, so a panel can be placed in time without an axis of
+        # dates under every one of them. Names like "volmageddon" carry no date
+        # at all; full start-to-end dates on nine panels are more ink than the
+        # question needs.
+        panel_label_str = str(crisis_name_str).replace("_", " ")
+        event_start_ts = pd.to_datetime(
+            offset_path_df["event_start_ts"].iloc[0], errors="coerce"
+        )
+        event_end_ts = pd.to_datetime(
+            offset_path_df["event_end_ts"].iloc[0], errors="coerce"
+        )
+        if pd.notna(event_start_ts):
+            start_year_str = str(int(event_start_ts.year))
+            year_label_str = start_year_str
+            if pd.notna(event_end_ts) and int(event_end_ts.year) != int(event_start_ts.year):
+                year_label_str += f"-{int(event_end_ts.year) % 100:02d}"
+            # Most crisis names already end in their year, so appending one
+            # unconditionally produced "european debt 2011 2011". Replace the
+            # name's own year rather than adding a second copy of it.
+            if panel_label_str.endswith(f" {start_year_str}"):
+                panel_label_str = panel_label_str[: -len(start_year_str) - 1]
+            panel_label_str = f"{panel_label_str} {year_label_str}"
+
+        panel_ser_dict[panel_label_str] = (
+            value_ser / float(value_ser.iloc[0]) - 1.0
+        ).reset_index(drop=True)
+
+        benchmark_value_ser = pd.to_numeric(
+            offset_path_df.get(
+                "normalized_benchmark_from_event_entry_float", pd.Series(dtype=float)
+            ),
+            errors="coerce",
+        ).dropna()
+        if len(benchmark_value_ser) >= 2 and float(benchmark_value_ser.iloc[0]) != 0.0:
+            overlay_ser_dict[panel_label_str] = (
+                benchmark_value_ser / float(benchmark_value_ser.iloc[0]) - 1.0
+            ).reset_index(drop=True)
+            benchmark_label_obj = offset_path_df["benchmark_name_str"].iloc[0]
+            if isinstance(benchmark_label_obj, str) and benchmark_label_obj:
+                benchmark_name_set.add(benchmark_label_obj)
+
+    if len(panel_ser_dict) == 0:
+        return ""
+    try:
+        small_multiples_uri_str = render_small_multiples_data_uri_str(
+            panel_ser_dict,
+            column_count_int=3,
+            share_ylim_bool=True,
+            value_formatter_fn=lambda value_float: f"{value_float * 100:.0f}%",
+            overlay_ser_dict=overlay_ser_dict or None,
+        )
+    except ValueError:
+        return ""
+    benchmark_note_str = ""
+    if overlay_ser_dict:
+        benchmark_label_str = (
+            sorted(benchmark_name_set)[0] if len(benchmark_name_set) == 1 else "the benchmark"
+        )
+        benchmark_note_str = (
+            f" The dashed line is {html.escape(benchmark_label_str)} over the same window, "
+            "so the gap between the two lines is what the strategy avoided or gave up."
+        )
+    return (
+        '<div class="chart-wrap">'
+        f'<img src="{small_multiples_uri_str}" alt="Strategy path through each crisis">'
+        "</div>"
+        '<p class="metric-context">Each crisis from its event entry, rebased to zero and '
+        "drawn on one shared vertical scale, so a mild crisis looks mild beside a severe "
+        f"one.{benchmark_note_str} The figure beside each name is where the strategy ended "
+        "that crisis. Paths use the longest launch offset, which is the fully established "
+        "case.</p>"
+    )
+
+
 def _build_heatmap_dashboard_html(stress_metric_df: pd.DataFrame) -> str:
     heatmap_card_html_list = [
         _format_metric_heatmap_html(
@@ -2350,24 +2602,24 @@ def _build_event_chapters_html(stress_result_obj: StressTestResult) -> str:
             )
             + "</div>"
         )
+        # Each chapter is six sub-sections; at nine crises they were most of the
+        # report's height, and the reader had to scroll past all of them to
+        # reach anything else. Collapsed, the detail is one click away and the
+        # summary above is what the page opens on.
         chapter_html_list.append(
             f"""
-<section class="event-chapter">
-  <div class="chapter-divider">
-    <div class="report-eyebrow">Event Chapter</div>
-    <h2>{html.escape(crisis_name_str)}</h2>
-    <div class="meta">
-      Crisis start marker: {_fmt_date(event_start_ts)} &nbsp;|&nbsp;
-      End: {_fmt_date(event_end_ts)}
-    </div>
-  </div>
+<details class="event-chapter">
+  <summary>
+    <span class="chapter-name">{html.escape(crisis_name_str.replace("_", " "))}</span>
+    <span class="chapter-dates">{_fmt_date(event_start_ts)} to {_fmt_date(event_end_ts)}</span>
+  </summary>
   <div class="card-grid">
     {chapter_summary_card_html_str}
     {exposure_card_html_str}
   </div>
   <div class="event-chart-stack">{"".join(chart_panel_html_list)}</div>
   {entering_position_card_html_str}
-</section>
+</details>
 """
         )
     return '<section class="stress-section"><h2>Event Chapters</h2>' + "".join(chapter_html_list) + "</section>"
@@ -2406,6 +2658,7 @@ def _format_transaction_summary_table_html(stress_metric_df: pd.DataFrame) -> st
 def _build_appendix_html(
     metric_matrix_html_str: str,
     transaction_summary_html_str: str,
+    heatmap_dashboard_html_str: str = "",
 ) -> str:
     stress_matrix_card_html_str = _wrap_card_html(
         '<details class="appendix-details" open>'
@@ -2422,6 +2675,20 @@ def _build_appendix_html(
         + transaction_summary_html_str
         + "</div></details>"
     )
+    # Kept, but closed: the offset detail matters only when a crisis actually
+    # moves across offsets, and the summary table flags those rows as mixed.
+    heatmap_card_html_str = (
+        _wrap_card_html(
+            '<details class="appendix-details">'
+            '<summary class="appendix-summary">Per-Offset Heatmaps</summary>'
+            '<p class="muted">Every metric by crisis and launch offset, before averaging. '
+            "Worth opening for a crisis whose entry posture changed across offsets.</p>"
+            + heatmap_dashboard_html_str
+            + "</details>"
+        )
+        if heatmap_dashboard_html_str
+        else ""
+    )
     assumption_card_html_str = _wrap_card_html(
         "<h3>Assumption Boundary</h3>"
         "<p><strong>What this report is.</strong> Historical pre-crisis launch stress: "
@@ -2433,6 +2700,7 @@ def _build_appendix_html(
     return f"""
 <section class="stress-section appendix-section">
   <h2>Raw Detail Appendix</h2>
+  {heatmap_card_html_str}
   {stress_matrix_card_html_str}
   {transaction_summary_card_html_str}
   {assumption_card_html_str}
@@ -2578,9 +2846,52 @@ def _stress_report_css_str() -> str:
     }
 }
 .event-chapter {
-    border-top: 2px solid var(--color-border);
-    padding-top: 18px;
-    margin-top: 22px;
+    border-top: 1px solid var(--color-border);
+    padding-top: 0;
+    margin-top: 0;
+}
+.event-chapter > summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 16px;
+    padding: 13px 2px;
+    cursor: pointer;
+    list-style: none;
+}
+.event-chapter > summary::-webkit-details-marker {
+    display: none;
+}
+/* A closed row must look openable. The caret is the only affordance a
+   collapsed chapter has, so it is drawn rather than left to the default
+   marker, which the flex summary suppresses. */
+.event-chapter > summary::before {
+    content: "+";
+    font-family: var(--font-figure);
+    color: var(--color-muted);
+    width: 12px;
+}
+.event-chapter[open] > summary::before {
+    content: "\\2212";
+}
+.event-chapter > summary .chapter-name {
+    font-weight: 600;
+}
+.event-chapter > summary .chapter-dates {
+    font-size: 0.8em;
+    color: var(--color-muted);
+}
+.event-chapter[open] > summary {
+    border-bottom: 1px solid var(--color-border);
+    margin-bottom: 14px;
+}
+.event-chapter[open] {
+    padding-bottom: 20px;
+}
+/* A crisis whose launches split between cash and invested: its average is
+   between two outcomes, so the row is marked rather than read as one. */
+tr.crisis-mixed-entry td {
+    background: var(--color-neutral);
 }
 .chapter-divider {
     margin-bottom: 12px;
@@ -2677,12 +2988,22 @@ def _build_report_html_str(stress_result_obj: StressTestResult) -> str:
     transaction_summary_html_str = _format_transaction_summary_table_html(
         stress_result_obj.stress_metric_df
     )
+    # The five offset-by-crisis heatmaps move into the appendix: on a book whose
+    # crises barely move across launch offsets they restated one number four
+    # times each. The averaged table and the small multiples answer the same
+    # question in one screen; the heatmaps stay available for the cases where
+    # the offset really does matter.
     heatmap_dashboard_html_str = _build_heatmap_dashboard_html(stress_result_obj.stress_metric_df)
+    crisis_summary_html_str = _build_crisis_summary_table_html(
+        stress_result_obj.stress_metric_df, stress_result_obj.launch_offset_tuple
+    )
+    crisis_small_multiples_html_str = _build_crisis_small_multiples_html(stress_result_obj)
     risk_flag_html_str = _build_risk_flag_grid_html(stress_result_obj.stress_metric_df)
     event_chapters_html_str = _build_event_chapters_html(stress_result_obj)
     appendix_html_str = _build_appendix_html(
         metric_matrix_html_str=metric_matrix_html_str,
         transaction_summary_html_str=transaction_summary_html_str,
+        heatmap_dashboard_html_str=heatmap_dashboard_html_str,
     )
     launch_offset_str = ", ".join(str(offset_int) for offset_int in stress_result_obj.launch_offset_tuple)
 
@@ -2699,7 +3020,6 @@ def _build_report_html_str(stress_result_obj: StressTestResult) -> str:
   <h1>{html.escape(stress_result_obj.strategy_name_str)}</h1>
   <div class="meta">
     Run: {run_date_str} &nbsp;|&nbsp;
-    Strategy Key: {html.escape(stress_result_obj.strategy_key_str)} &nbsp;|&nbsp;
     Capital: {_fmt_dollar(stress_result_obj.capital_base_float)} &nbsp;|&nbsp;
     Launch offsets: {html.escape(launch_offset_str)}
   </div>
@@ -2707,7 +3027,8 @@ def _build_report_html_str(stress_result_obj: StressTestResult) -> str:
 {verdict_html_str}
 {_build_stress_kpi_grid_html(stress_result_obj)}
 {risk_flag_html_str}
-{heatmap_dashboard_html_str}
+{_wrap_card_html(f'<h2>Crisis by Crisis</h2>{crisis_small_multiples_html_str}')}
+{_wrap_card_html(f'<h2>Crisis Summary</h2>{crisis_summary_html_str}')}
 {worst_case_card_html_str}
 {event_chapters_html_str}
 {appendix_html_str}
@@ -2720,7 +3041,7 @@ def _build_report_html_str(stress_result_obj: StressTestResult) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{html.escape(stress_result_obj.strategy_name_str)} - StressTestAnalyzer Report</title>
 {build_report_font_head_html()}
-<style>{build_report_css()}{_stress_report_css_str()}</style>
+<style>{build_analyzer_report_css()}{_stress_report_css_str()}</style>
 </head>
 <body>
 {body_html_str}

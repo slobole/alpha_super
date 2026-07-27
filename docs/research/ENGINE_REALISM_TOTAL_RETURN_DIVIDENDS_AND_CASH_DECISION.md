@@ -1,8 +1,8 @@
 # Engine Realism Decision: Execution Prices, Signal Returns, Dividends, and Cash
 
-**Decision status:** REVIEWED - Codex and Claude positions recorded; the owner-approved cash policy is recorded below; full implementation authorization remains pending
+**Decision status:** OWNER APPROVED - Codex and Claude aligned; the owner authorized the engine-only net-dividend ledger on a dedicated branch
 
-**Implementation status:** Phase 1 provenance/data-contract work and the gross/net research-only dividend shadow studies are complete; no dividend event is active in the engine, releases, or LIVE
+**Implementation status:** Phase 1 provenance/data-contract work, gross/net shadow studies, the engine-only `net_dividend_cash_ledger_v2` implementation, and the seven WIRED Vanilla artifact regenerations are complete on the feature branch; releases, incubation, and LIVE remain unchanged
 
 **Repository snapshot reviewed:** 2026-07-25
 
@@ -896,3 +896,81 @@ account does not retain. The next gated step is an engine-only implementation
 under a new accounting-contract version, followed by regeneration and
 comparison of all WIRED analyzers. LIVE, VPS, release YAML, signal definitions,
 order timing, and execution remain out of scope unless separately authorized.
+
+### Engine-only activation - 2026-07-26
+
+The owner authorized the next gated step on the dedicated
+`codex/dividend-ledger-v2` branch.
+
+Implemented behavior:
+
+- Vanilla engine inputs containing a `Dividend` field activate
+  `net_dividend_cash_ledger_v2` automatically.
+- Fills and end-of-day marks remain on the existing non-TR execution basis.
+- The engine samples positions held before the current open, reads Norgate's
+  `Dividend` from the prior entitlement session, and posts the event before
+  processing current-open orders.
+- Positive gross dividend cash uses the owner default `25%` withholding; short
+  manufactured dividends are debited at full gross.
+- Dividends remain cash. There is no automatic share purchase and no change to
+  strategy signals, order timing, or sizing policy. A later normal sizing
+  decision may use the higher recorded NAV.
+- Positive cash still earns `0%`. Negative cash remains a reported,
+  non-blocking diagnostic with no financing charge.
+- Saved strategy artifacts include versioned accounting metadata and a separate
+  `dividend_ledger.csv`.
+- Norgate execution inputs carry per-symbol adjustment provenance. The ledger
+  fails before execution if a traded asset is marked `TOTALRETURN`; verified
+  traded assets are recorded as `CAPITALSPECIAL` in artifact metadata.
+- Legacy inputs with no `Dividend` field remain readable and are explicitly
+  labeled `price_return_ledger_v1`; callers can force validation when v2 is
+  required.
+
+Semantics explicitly unchanged:
+
+- incubation, broker reconciliation, VPS procedures, release YAML, and pod
+  sizing;
+- automatic `compare_reference` remains explicitly pinned to
+  `price_return_ledger_v1`; a small fail-loud guard prevents the new research
+  ledger from entering this LIVE diagnostic before a separate authorization;
+- WIRED signals, regimes, universes, costs, slippage, and next-open execution;
+- existing saved artifacts, which are not overwritten.
+
+### WIRED Vanilla regeneration - 2026-07-26
+
+All seven WIRED Vanilla artifacts were regenerated from the engine
+implementation and compared with the frozen 2026-07-25 paired baseline and
+approved net-dividend shadow candidate.
+
+| WIRED strategy | Old CAGR | Engine v2 CAGR | Delta | Old Sharpe | Engine v2 Sharpe |
+|---|---:|---:|---:|---:|---:|
+| DV2 | 17.836% | 18.886% | +1.050 pp | 0.911 | 0.955 |
+| QPI | 14.302% | 15.384% | +1.082 pp | 0.944 | 1.005 |
+| TAA BTAL fallback | 22.809% | 23.508% | +0.699 pp | 1.277 | 1.310 |
+| TAA BTAL 1/N | 29.158% | 29.821% | +0.664 pp | 1.219 | 1.241 |
+| TAA linearity 1/N | 11.834% | 12.492% | +0.658 pp | 1.236 | 1.299 |
+| NDX ATR-normalized | 18.922% | 19.350% | +0.429 pp | 1.119 | 1.140 |
+| NDX VXN-scaled | 17.367% | 17.775% | +0.408 pp | 1.194 | 1.218 |
+
+Validation results:
+
+- all seven engine-v2 artifacts reproduced the approved shadow candidate;
+- transactions matched exactly after excluding the process-global `order_id`;
+- dividend-ledger rows matched exactly;
+- headline metrics and terminal NAV matched within recorded CSV/JSON
+  serialization tolerances;
+- pricing inputs and stored signal diagnostics remained equal in every pair;
+- every saved artifact declares `net_dividend_cash_ledger_v2`, `25%`
+  withholding, `0%` positive-cash return, `CAPITALSPECIAL` execution/marks,
+  and a `TOTALRETURN` reporting benchmark;
+- the regeneration exposed and fixed stale DV2/QPI/TAA regression-benchmark
+  metadata. This reporting-only fix initializes benchmark provenance before
+  summarization and did not change any economic result.
+
+Saved comparison package:
+`results/dividend_ledger_v2_wired_regeneration_20260726/comparison`.
+
+The seven-strategy Vanilla regeneration gate is complete. Risk, Capacity,
+Stress, live-reference, incubation, and broker-reconciliation rollout remain
+separate tasks; any LIVE or incubation dividend event still requires explicit
+authorization.

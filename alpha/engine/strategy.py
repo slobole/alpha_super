@@ -25,6 +25,9 @@ import numpy as np
 import pickle
 
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Iterator
 from tqdm.auto import tqdm
 from alpha.live.logging_utils import log_event, log_trace_event
 from alpha.engine.plot import plot
@@ -40,6 +43,33 @@ from alpha.engine.metrics import (
     generate_trades_metrics,
     sharpe_ratio,
 )
+
+DIVIDEND_LEDGER_COLUMN_TUPLE = (
+    'entitlement_date',
+    'ex_date',
+    'asset_str',
+    'position_share_float',
+    'dividend_per_share_float',
+    'gross_dividend_cash_float',
+    'withholding_cash_float',
+    'net_dividend_cash_float',
+)
+DEFAULT_DIVIDEND_WITHHOLDING_RATE_FLOAT = 0.25
+_DIVIDEND_CASH_LEDGER_DISABLED_CONTEXT_BOOL = ContextVar(
+    'dividend_cash_ledger_disabled_context_bool',
+    default=False,
+)
+
+
+@contextmanager
+def dividend_cash_ledger_disabled_context() -> Iterator[None]:
+    """Keep a contained backtest on the legacy price-return ledger."""
+    context_token_obj = _DIVIDEND_CASH_LEDGER_DISABLED_CONTEXT_BOOL.set(True)
+    try:
+        yield
+    finally:
+        _DIVIDEND_CASH_LEDGER_DISABLED_CONTEXT_BOOL.reset(context_token_obj)
+
 
 class Strategy(ABC):
     def __init__(self, name: str, benchmarks: list | tuple, capital_base = 10_000, slippage: float = 0.00025,
@@ -71,13 +101,21 @@ class Strategy(ABC):
             if performance_benchmark_adjustment_str is not None
             else ('not_declared' if self._performance_benchmark_symbol_str is not None else None)
         )
+        dividend_cash_ledger_disabled_bool = (
+            _DIVIDEND_CASH_LEDGER_DISABLED_CONTEXT_BOOL.get()
+        )
+        dividend_cash_ledger_mode_str = (
+            'disabled' if dividend_cash_ledger_disabled_bool else 'auto'
+        )
         self._accounting_policy_dict: dict[str, object] = {
             'accounting_contract_version_str': 'price_return_ledger_v1',
             'dividend_policy_str': 'not_credited',
+            'dividend_cash_ledger_mode_str': dividend_cash_ledger_mode_str,
+            'dividend_data_status_str': 'not_evaluated',
             'positive_cash_rate_policy_str': 'zero_percent_intentional',
             'negative_cash_financing_policy_str': 'not_modeled',
-            'current_wired_negative_cash_policy_str': 'invalid',
-            'negative_cash_enforcement_str': 'not_implemented',
+            'current_wired_negative_cash_policy_str': 'diagnostic_only',
+            'negative_cash_enforcement_str': 'reported_not_blocked',
         }
         self._data_adjustment_policy_dict: dict[str, object] = {}
         self.benchmark_regression_metadata_by_column_dict: dict[str, dict[str, object]] = {}
@@ -129,6 +167,13 @@ class Strategy(ABC):
             benchmark: 0.0 for benchmark in self._benchmarks
         }
         self._latest_close_price_ser = pd.Series(dtype=float)
+        self._dividend_cash_ledger_mode_str = dividend_cash_ledger_mode_str
+        self.dividend_withholding_rate_float = DEFAULT_DIVIDEND_WITHHOLDING_RATE_FLOAT
+        self._dividend_processed_ex_date_set: set[pd.Timestamp] = set()
+        self._dividend_ledger_row_dict_list: list[dict[str, object]] = []
+        self.dividend_cash_gross_total_float = 0.0
+        self.dividend_withholding_total_float = 0.0
+        self.dividend_cash_net_total_float = 0.0
         self._structured_run_id_str: str | None = None
         self._structured_audit_log_path_str: str | None = None
         self._structured_trace_enabled_bool = False
@@ -143,6 +188,366 @@ class Strategy(ABC):
     @staticmethod
     def initialize_transactions() -> pd.DataFrame:
         return pd.DataFrame(columns=['trade_id', 'bar', 'asset', 'amount', 'price', 'total_value', 'order_id', 'commission'])
+
+    def configure_dividend_cash_ledger(
+        self,
+        *,
+        enabled_bool: bool | None = None,
+        withholding_rate_float: float = DEFAULT_DIVIDEND_WITHHOLDING_RATE_FLOAT,
+    ) -> None:
+        """Configure explicit dividend cash accounting for a backtest.
+
+        ``enabled_bool=None`` keeps the backward-compatible auto mode: activate
+        when the pricing input contains Norgate's ``Dividend`` field, otherwise
+        retain the declared price-return ledger v1 contract.
+        """
+        self._ensure_dividend_accounting_state()
+        validated_rate_float = float(withholding_rate_float)
+        if not np.isfinite(validated_rate_float):
+            raise ValueError("withholding_rate_float must be finite.")
+        if validated_rate_float < 0.0 or validated_rate_float > 1.0:
+            raise ValueError("withholding_rate_float must be between 0 and 1.")
+
+        if enabled_bool is None:
+            dividend_cash_ledger_mode_str = 'auto'
+        elif bool(enabled_bool):
+            dividend_cash_ledger_mode_str = 'enabled'
+        else:
+            dividend_cash_ledger_mode_str = 'disabled'
+
+        self._dividend_cash_ledger_mode_str = dividend_cash_ledger_mode_str
+        self.dividend_withholding_rate_float = validated_rate_float
+        self._accounting_policy_dict['dividend_cash_ledger_mode_str'] = (
+            dividend_cash_ledger_mode_str
+        )
+        self._accounting_policy_dict['dividend_withholding_rate_float'] = (
+            validated_rate_float
+        )
+
+    def _ensure_dividend_accounting_state(self) -> None:
+        """Hydrate fields absent from strategy pickles saved before ledger v2."""
+        if not hasattr(self, '_accounting_policy_dict'):
+            self._accounting_policy_dict = {}
+        self._accounting_policy_dict.setdefault(
+            'accounting_contract_version_str',
+            'price_return_ledger_v1',
+        )
+        self._accounting_policy_dict.setdefault(
+            'dividend_policy_str',
+            'not_credited',
+        )
+        self._accounting_policy_dict.setdefault(
+            'dividend_cash_ledger_mode_str',
+            'auto',
+        )
+        self._accounting_policy_dict.setdefault(
+            'dividend_data_status_str',
+            'not_evaluated',
+        )
+        if not hasattr(self, '_dividend_cash_ledger_mode_str'):
+            self._dividend_cash_ledger_mode_str = 'auto'
+        if not hasattr(self, 'dividend_withholding_rate_float'):
+            self.dividend_withholding_rate_float = (
+                DEFAULT_DIVIDEND_WITHHOLDING_RATE_FLOAT
+            )
+        if not hasattr(self, '_dividend_processed_ex_date_set'):
+            self._dividend_processed_ex_date_set = set()
+        if not hasattr(self, '_dividend_ledger_row_dict_list'):
+            self._dividend_ledger_row_dict_list = []
+        if not hasattr(self, 'dividend_cash_gross_total_float'):
+            self.dividend_cash_gross_total_float = 0.0
+        if not hasattr(self, 'dividend_withholding_total_float'):
+            self.dividend_withholding_total_float = 0.0
+        if not hasattr(self, 'dividend_cash_net_total_float'):
+            self.dividend_cash_net_total_float = 0.0
+
+    @staticmethod
+    def _pricing_has_dividend_field_bool(pricing_data_df: pd.DataFrame) -> bool:
+        if not isinstance(pricing_data_df.columns, pd.MultiIndex):
+            return False
+        return 'Dividend' in pricing_data_df.columns.get_level_values(-1)
+
+    def _dividend_cash_ledger_active_bool(
+        self,
+        pricing_data_df: pd.DataFrame,
+    ) -> bool:
+        self._ensure_dividend_accounting_state()
+        if _DIVIDEND_CASH_LEDGER_DISABLED_CONTEXT_BOOL.get():
+            self._accounting_policy_dict['dividend_data_status_str'] = (
+                'disabled_by_context'
+            )
+            return False
+        dividend_field_available_bool = self._pricing_has_dividend_field_bool(
+            pricing_data_df
+        )
+        dividend_cash_ledger_mode_str = self._dividend_cash_ledger_mode_str
+
+        if dividend_cash_ledger_mode_str == 'disabled':
+            self._accounting_policy_dict['dividend_data_status_str'] = (
+                'disabled_explicitly'
+            )
+            return False
+        if not dividend_field_available_bool:
+            if dividend_cash_ledger_mode_str == 'enabled':
+                raise RuntimeError(
+                    "Dividend cash ledger is enabled, but pricing data has no "
+                    "Dividend field."
+                )
+            self._accounting_policy_dict['dividend_data_status_str'] = (
+                'not_available_legacy_input'
+            )
+            return False
+
+        self._accounting_policy_dict.update(
+            {
+                'accounting_contract_version_str': 'net_dividend_cash_ledger_v2',
+                'dividend_policy_str': (
+                    'explicit_entitlement_transition_cash_no_automatic_reinvestment'
+                ),
+                'dividend_data_status_str': 'available_and_active',
+                'dividend_source_timing_str': (
+                    'norgate_entitlement_session_T_credited_before_open_T_plus_1'
+                ),
+                'dividend_withholding_rate_float': float(
+                    self.dividend_withholding_rate_float
+                ),
+                'short_dividend_policy_str': (
+                    'full_gross_manufactured_dividend_debit'
+                ),
+            }
+        )
+        return True
+
+    def _credit_dividend_cash_before_open(
+        self,
+        pricing_data_df: pd.DataFrame,
+    ) -> float:
+        """Post the prior session's dividend entitlement before today's open.
+
+        For asset i, entitlement session T, and next market session T+1:
+
+            gross_cash = shares_held_at_close_T * Dividend_T
+            withholding = max(gross_cash, 0) * withholding_rate
+            net_cash = gross_cash - withholding
+
+        Shorts therefore pay the full gross manufactured dividend.
+        """
+        self._ensure_dividend_accounting_state()
+        if not self._dividend_cash_ledger_active_bool(pricing_data_df):
+            return 0.0
+        declared_benchmark_data_symbol_set = {
+            str(benchmark_str) for benchmark_str in self._benchmarks
+        }
+        declared_benchmark_data_symbol_set.update(
+            str(benchmark_data_symbol_str)
+            for benchmark_data_symbol_str in self._benchmark_data_symbol_map_dict.values()
+        )
+        position_or_order_asset_set = {
+            str(asset_str)
+            for asset_str, position_share_float in self.get_positions().items()
+            if not np.isclose(float(position_share_float), 0.0)
+        }
+        position_or_order_asset_set.update(
+            str(order_obj.asset) for order_obj in self.get_orders()
+        )
+        benchmark_trade_overlap_set = (
+            position_or_order_asset_set & declared_benchmark_data_symbol_set
+        )
+        if benchmark_trade_overlap_set:
+            raise RuntimeError(
+                "Dividend cash ledger cannot trade a declared benchmark because "
+                "benchmark data may use TOTALRETURN and double-count dividends. "
+                f"Overlapping assets: {sorted(benchmark_trade_overlap_set)}."
+            )
+        adjustment_by_symbol_dict = dict(
+            pricing_data_df.attrs.get(
+                'norgate_adjustment_by_symbol_dict',
+                {},
+            )
+        )
+        if adjustment_by_symbol_dict and position_or_order_asset_set:
+            missing_adjustment_asset_list = sorted(
+                position_or_order_asset_set
+                - {str(asset_str) for asset_str in adjustment_by_symbol_dict}
+            )
+            if missing_adjustment_asset_list:
+                raise RuntimeError(
+                    "Dividend cash ledger is missing adjustment provenance for "
+                    f"traded assets: {missing_adjustment_asset_list}."
+                )
+            non_capitalspecial_trade_asset_list = sorted(
+                asset_str
+                for asset_str in position_or_order_asset_set
+                if str(adjustment_by_symbol_dict[asset_str]).upper()
+                != 'CAPITALSPECIAL'
+            )
+            if non_capitalspecial_trade_asset_list:
+                invalid_adjustment_by_symbol_dict = {
+                    asset_str: str(adjustment_by_symbol_dict[asset_str])
+                    for asset_str in non_capitalspecial_trade_asset_list
+                }
+                raise RuntimeError(
+                    "Dividend cash ledger requires CAPITALSPECIAL fills and "
+                    "marks for every traded asset. Invalid adjustment map: "
+                    f"{invalid_adjustment_by_symbol_dict}."
+                )
+            self._data_adjustment_policy_dict.update(
+                {
+                    'execution_and_marks_adjustment_str': 'CAPITALSPECIAL',
+                    'dividend_ledger_execution_basis_validation_str': (
+                        'verified_from_norgate_source_metadata'
+                    ),
+                }
+            )
+        elif position_or_order_asset_set:
+            self._data_adjustment_policy_dict.setdefault(
+                'dividend_ledger_execution_basis_validation_str',
+                'unverified_input_without_adjustment_metadata',
+            )
+        if self.current_bar is None or self.previous_bar is None:
+            return 0.0
+
+        ex_date_ts = pd.Timestamp(self.current_bar)
+        entitlement_date_ts = pd.Timestamp(self.previous_bar)
+        if ex_date_ts in self._dividend_processed_ex_date_set:
+            return 0.0
+        if entitlement_date_ts not in pricing_data_df.index:
+            raise RuntimeError(
+                "Dividend entitlement date is missing from pricing data: "
+                f"{entitlement_date_ts.date()}."
+            )
+        previous_bar_location_int = int(
+            pricing_data_df.index.get_loc(entitlement_date_ts)
+        )
+        current_bar_location_int = int(pricing_data_df.index.get_loc(ex_date_ts))
+        if current_bar_location_int != previous_bar_location_int + 1:
+            raise RuntimeError(
+                "Dividend cash ledger requires consecutive pricing sessions; "
+                f"previous_bar={entitlement_date_ts.date()}, "
+                f"current_bar={ex_date_ts.date()}."
+            )
+
+        # *** CRITICAL*** Norgate stamps Dividend on entitlement session T.
+        # Positions are sampled before T+1 open orders, so an ex-date buyer gets
+        # nothing and an ex-date seller keeps the distribution earned at T close.
+        preopen_position_ser = self.get_positions().astype(float)
+        active_position_ser = preopen_position_ser.loc[
+            ~np.isclose(preopen_position_ser, 0.0)
+        ]
+
+        pending_ledger_row_dict_list: list[dict[str, object]] = []
+        gross_dividend_cash_sum_float = 0.0
+        withholding_cash_sum_float = 0.0
+        net_dividend_cash_sum_float = 0.0
+        for asset_str, position_share_float in active_position_ser.items():
+            dividend_column_tuple = (str(asset_str), 'Dividend')
+            if dividend_column_tuple not in pricing_data_df.columns:
+                raise RuntimeError(
+                    f"Missing Dividend field for active asset {asset_str}."
+                )
+
+            dividend_value_obj = pricing_data_df.loc[
+                entitlement_date_ts,
+                dividend_column_tuple,
+            ]
+            dividend_per_share_float = float(
+                pd.to_numeric(
+                    pd.Series([dividend_value_obj]),
+                    errors='coerce',
+                ).iloc[0]
+            )
+            if not np.isfinite(dividend_per_share_float):
+                raise RuntimeError(
+                    "Invalid Dividend for active asset "
+                    f"{asset_str} on entitlement date "
+                    f"{entitlement_date_ts.date()}."
+                )
+            if np.isclose(dividend_per_share_float, 0.0):
+                continue
+
+            gross_dividend_cash_float = (
+                float(position_share_float) * dividend_per_share_float
+            )
+            withholding_cash_float = (
+                max(gross_dividend_cash_float, 0.0)
+                * float(self.dividend_withholding_rate_float)
+            )
+            net_dividend_cash_float = (
+                gross_dividend_cash_float - withholding_cash_float
+            )
+            gross_dividend_cash_sum_float += gross_dividend_cash_float
+            withholding_cash_sum_float += withholding_cash_float
+            net_dividend_cash_sum_float += net_dividend_cash_float
+            pending_ledger_row_dict_list.append(
+                {
+                    'entitlement_date': entitlement_date_ts,
+                    'ex_date': ex_date_ts,
+                    'asset_str': str(asset_str),
+                    'position_share_float': float(position_share_float),
+                    'dividend_per_share_float': dividend_per_share_float,
+                    'gross_dividend_cash_float': gross_dividend_cash_float,
+                    'withholding_cash_float': withholding_cash_float,
+                    'net_dividend_cash_float': net_dividend_cash_float,
+                }
+            )
+
+        # Apply only after every active asset passes validation. A bad source
+        # row cannot leave a partial cash posting behind.
+        self.cash += net_dividend_cash_sum_float
+        self.dividend_cash_gross_total_float += gross_dividend_cash_sum_float
+        self.dividend_withholding_total_float += withholding_cash_sum_float
+        self.dividend_cash_net_total_float += net_dividend_cash_sum_float
+        self._dividend_ledger_row_dict_list.extend(
+            pending_ledger_row_dict_list
+        )
+        self._dividend_processed_ex_date_set.add(ex_date_ts)
+        self._accounting_policy_dict.update(
+            {
+                'dividend_cash_gross_total_float': float(
+                    self.dividend_cash_gross_total_float
+                ),
+                'dividend_withholding_total_float': float(
+                    self.dividend_withholding_total_float
+                ),
+                'dividend_cash_net_total_float': float(
+                    self.dividend_cash_net_total_float
+                ),
+                'dividend_event_count_int': int(
+                    len(self._dividend_ledger_row_dict_list)
+                ),
+            }
+        )
+        if pending_ledger_row_dict_list:
+            self.log_audit_event(
+                'engine.dividend_cash.posted',
+                {
+                    'entitlement_date_timestamp_str': (
+                        entitlement_date_ts.isoformat()
+                    ),
+                    'ex_date_timestamp_str': ex_date_ts.isoformat(),
+                    'event_count_int': int(
+                        len(pending_ledger_row_dict_list)
+                    ),
+                    'gross_dividend_cash_float': float(
+                        gross_dividend_cash_sum_float
+                    ),
+                    'withholding_cash_float': float(
+                        withholding_cash_sum_float
+                    ),
+                    'net_dividend_cash_float': float(
+                        net_dividend_cash_sum_float
+                    ),
+                },
+            )
+        return net_dividend_cash_sum_float
+
+    def get_dividend_ledger(self) -> pd.DataFrame:
+        """Return explicit dividend cash events with a stable empty schema."""
+        self._ensure_dividend_accounting_state()
+        return pd.DataFrame(
+            self._dividend_ledger_row_dict_list,
+            columns=DIVIDEND_LEDGER_COLUMN_TUPLE,
+        )
 
     def configure_structured_logging(
         self,
@@ -686,6 +1091,8 @@ class Strategy(ABC):
         latest_close_price_ser.index = latest_close_price_ser.index.get_level_values(0)
         self._latest_close_price_ser = latest_close_price_ser.astype(float)
 
+        self._credit_dividend_cash_before_open(prices)
+
         executed_orders = []  # list to store successfully executed orders
         total_value_sum_float = 0.0
         commission_sum_float = 0.0
@@ -1044,6 +1451,7 @@ class Strategy(ABC):
         - self.summary_trades: A DataFrame summarizing trade statistics.
         """
         self._materialize_realized_weight_df()
+        self._update_accounting_diagnostics()
 
         # generate trade history and drawdown metrics
         self._trades = generate_trades(self.get_transactions())
@@ -1087,6 +1495,47 @@ class Strategy(ABC):
             self.results['total_value'],
             add_sharpe_ratios=True,
             add_max_drawdowns=True
+        )
+
+    def _update_accounting_diagnostics(self) -> None:
+        if len(self.results) == 0:
+            return
+
+        cash_ser = self.results['cash'].astype(float)
+        total_value_ser = self.results['total_value'].astype(float)
+        cash_weight_ser = cash_ser / total_value_ser.replace(0.0, np.nan)
+        negative_cash_mask_ser = cash_ser.lt(-1e-8)
+        # *** CRITICAL*** Report-only backward lag: shift(1) checks whether the
+        # immediately prior simulated session was already negative. It never
+        # enters signal, sizing, or order logic.
+        negative_cash_start_mask_ser = (
+            negative_cash_mask_ser
+            & ~negative_cash_mask_ser.shift(1, fill_value=False)
+        )
+        negative_cash_ser = cash_ser.loc[negative_cash_mask_ser]
+        negative_cash_weight_ser = cash_weight_ser.loc[negative_cash_mask_ser]
+
+        self._accounting_policy_dict.update(
+            {
+                'negative_cash_day_count_int': int(
+                    negative_cash_mask_ser.sum()
+                ),
+                'negative_cash_episode_count_int': int(
+                    negative_cash_start_mask_ser.sum()
+                ),
+                'minimum_cash_float': float(cash_ser.min()),
+                'minimum_cash_weight_float': float(cash_weight_ser.min()),
+                'average_negative_cash_float': (
+                    0.0
+                    if len(negative_cash_ser) == 0
+                    else float(negative_cash_ser.mean())
+                ),
+                'average_negative_cash_weight_float': (
+                    0.0
+                    if len(negative_cash_weight_ser) == 0
+                    else float(negative_cash_weight_ser.mean())
+                ),
+            }
         )
     # ------------------------------------------ 2 - ORDER-PLACEMENT INTERFACE ------------------------------------------ #
     # order placement methods

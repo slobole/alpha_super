@@ -41,7 +41,7 @@ from alpha.engine.strategy import Strategy
 from alpha.engine.theme import (
     SIGNATURE_PALETTE_DICT,
     blend_hex_color_str,
-    build_report_css,
+    build_analyzer_report_css,
     build_report_font_head_html,
     signature_variant_context,
 )
@@ -1006,7 +1006,7 @@ def _build_execution_timing_html_str(execution_timing_result_obj) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{html.escape(execution_timing_result_obj.strategy_name_str)} Execution Timing Analyzer</title>
 {build_report_font_head_html()}
-<style>{build_report_css()}
+<style>{build_analyzer_report_css()}
 /* Risk labels reuse the report's own semantics: clean fills are unremarkable
    ink, anything needing live handling reads as a loss tone. */
 .default-row td {{ background: var(--color-neutral); }}

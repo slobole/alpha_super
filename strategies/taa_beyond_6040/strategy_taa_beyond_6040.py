@@ -509,6 +509,7 @@ class Beyond6040Strategy(Strategy):
             )
 
     def summarize(self, include_benchmarks: bool = True):
+        self._update_accounting_diagnostics()
         self._trades = generate_trades(self.get_transactions())
         self._drawdowns = generate_drawdowns(self.results["drawdown"])
         self.summary = pd.DataFrame()

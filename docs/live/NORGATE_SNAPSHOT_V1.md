@@ -41,9 +41,16 @@ The loader accepts both snapshot schema versions:
   field in `prices.parquet`.
 
 New exports use schema v2. A v2 snapshot without `Dividend` fails validation
-before any new DecisionPlan or research artifact can consume it. Requiring the
-field does not activate dividend accounting; the current engine still declares
-`price_return_ledger_v1` and does not post dividend cash events.
+before any new DecisionPlan or research artifact can consume it. Vanilla
+research backtests activate `net_dividend_cash_ledger_v2` when the field is
+available. Norgate execution frames also carry per-symbol adjustment metadata,
+which lets the ledger reject `TOTALRETURN` tradeables before execution. Live
+DecisionPlan logic does not use the backtest account ledger,
+and `compare_reference` explicitly stays on `price_return_ledger_v1` until a
+separate broker-dividend reconciliation rollout is authorized. This guard
+applies to both auto-generated references and manually supplied reference
+pickles: an incompatible accounting contract fails closed. Comparison
+artifacts disclose the reference accounting contract and dividend-event count.
 
 Schema rollout order is mandatory:
 

@@ -112,13 +112,26 @@ def load_raw_prices(
     Load raw OHLCV data from Norgate or from a validated snapshot.
     The output stays a MultiIndex column DataFrame: (symbol, field).
     """
+    benchmark_symbol_set = {str(symbol_str) for symbol_str in benchmarks}
+    adjustment_by_symbol_dict = {
+        str(symbol_str): (
+            TOTALRETURN_ADJUSTMENT_STR
+            if str(symbol_str) in benchmark_symbol_set
+            else CAPITALSPECIAL_ADJUSTMENT_STR
+        )
+        for symbol_str in symbols + benchmarks
+    }
     if is_snapshot_mode_enabled_bool():
-        return norgate_snapshot_store.load_raw_prices_df(
+        pricing_data_df = norgate_snapshot_store.load_raw_prices_df(
             symbols=symbols,
             benchmarks=benchmarks,
             start_date_str=start_date,
             end_date_str=end_date,
         )
+        pricing_data_df.attrs["norgate_adjustment_by_symbol_dict"] = (
+            adjustment_by_symbol_dict
+        )
+        return pricing_data_df
 
     pricing_data = []
 
@@ -141,4 +154,8 @@ def load_raw_prices(
         price_df.columns = pd.MultiIndex.from_tuples([(symbol, column_str) for column_str in price_df.columns])
         pricing_data.append(price_df)
 
-    return pd.concat(pricing_data, axis=1).sort_index()
+    pricing_data_df = pd.concat(pricing_data, axis=1).sort_index()
+    pricing_data_df.attrs["norgate_adjustment_by_symbol_dict"] = (
+        adjustment_by_symbol_dict
+    )
+    return pricing_data_df

@@ -38,6 +38,7 @@ PORTFOLIOS_ROOT_PATH = REPO_ROOT_PATH / "portfolios"
 # title-cased version of the folder name, so a brand-new family still renders.
 CATEGORY_LABEL_DICT: dict[str, str] = {
     "dv2": "DV2 mean-reversion",
+    "hpi": "HPI mean-reversion",
     "mean_reversion": "Sector Dispersion",
     "qpi": "QPI mean-reversion",
     "taa_df": "TAA dual-momentum",

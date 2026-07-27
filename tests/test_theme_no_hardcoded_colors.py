@@ -185,3 +185,86 @@ class ThemeColorOwnershipTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class AnalyzerMatchesVanillaTests(unittest.TestCase):
+    """The analyzers must render as the same product as the strategy report."""
+
+    _ANALYZER_MODULE_NAME_TUPLE = (
+        'alpha.engine.risk_analysis',
+        'alpha.engine.capacity_analysis',
+        'alpha.engine.execution_timing',
+        'alpha.engine.stress_test',
+    )
+
+    def test_every_analyzer_renders_inside_the_active_variant(self):
+        """A report built outside the context uses the baseline dashboard palette.
+
+        stress_test was the one analyzer missing this, so it alone came out in
+        the old blue palette and Atlassian Sans while the rest of the book had
+        moved to the journal signature. The palette is read at render time, so
+        the omission is invisible until you look at the page.
+        """
+        import importlib
+
+        finding_list: list[str] = []
+        for module_name_str in self._ANALYZER_MODULE_NAME_TUPLE:
+            source_text_str = Path(
+                importlib.import_module(module_name_str).__file__
+            ).read_text(encoding='utf-8')
+            if 'signature_variant_context(_ACTIVE_REPORT_VARIANT_STR)' not in source_text_str:
+                finding_list.append(module_name_str)
+        self.assertEqual(finding_list, [], f'Analyzers rendering outside the variant: {finding_list}')
+
+    def test_analyzers_do_not_load_the_bare_report_stylesheet(self):
+        """build_analyzer_report_css maps .panel/.card/.muted onto the theme.
+
+        Loading build_report_css directly skips that mapping, so a report using
+        the analyzer class vocabulary gets none of it.
+        """
+        import importlib
+        import re
+
+        finding_list: list[str] = []
+        for module_name_str in self._ANALYZER_MODULE_NAME_TUPLE:
+            source_text_str = Path(
+                importlib.import_module(module_name_str).__file__
+            ).read_text(encoding='utf-8')
+            if re.search(r'(?<!analyzer_)build_report_css\(\)', source_text_str):
+                finding_list.append(module_name_str)
+        self.assertEqual(finding_list, [], f'Analyzers on the bare stylesheet: {finding_list}')
+
+    def test_analyzer_section_headings_match_the_plate_heading(self):
+        """Same size, weight and colour as the strategy report's plate caption."""
+        import re
+
+        from alpha.engine.theme import (
+            build_analyzer_report_css,
+            build_report_css,
+            signature_variant_context,
+        )
+
+        with signature_variant_context('journal_spec'):
+            analyzer_css_str = build_analyzer_report_css()
+            report_css_str = build_report_css()
+
+        def declaration_dict(css_str: str, selector_str: str) -> dict[str, str]:
+            match_obj = re.search(re.escape(selector_str) + r'[^{]*\{([^}]*)\}', css_str)
+            assert match_obj is not None, selector_str
+            return {
+                key_str.strip(): value_str.strip()
+                for key_str, _s, value_str in (
+                    declaration_str.partition(':')
+                    for declaration_str in match_obj.group(1).split(';')
+                )
+                if key_str.strip()
+            }
+
+        plate_dict = declaration_dict(report_css_str, '.plate > h2')
+        analyzer_dict = declaration_dict(analyzer_css_str, '.panel > h2, .card > h2')
+        for property_name_str in ('font-size', 'font-weight', 'color', 'text-transform'):
+            self.assertEqual(
+                analyzer_dict.get(property_name_str),
+                plate_dict.get(property_name_str),
+                f'{property_name_str} differs between the analyzers and the report',
+            )

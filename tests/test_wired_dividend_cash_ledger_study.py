@@ -244,12 +244,15 @@ def test_vanilla_backtester_credits_entitlement_before_next_open_sale():
         commission_minimum=0.0,
     )
 
-    run_daily(
-        baseline_strategy_obj,
-        pricing_data_df,
-        calendar=date_idx,
-        show_progress=False,
-    )
+    with research_dividend_cash_ledger_context(
+        dividend_credit_enabled_bool=False,
+    ):
+        run_daily(
+            baseline_strategy_obj,
+            pricing_data_df,
+            calendar=date_idx,
+            show_progress=False,
+        )
     with research_dividend_cash_ledger_context():
         run_daily(
             dividend_strategy_obj,
