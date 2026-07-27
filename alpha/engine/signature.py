@@ -334,40 +334,113 @@ def compute_holding_period_length_list(holding_weight_df: pd.DataFrame) -> list[
     return holding_period_length_list
 
 
+# Below this a name is carrying rebalance residue rather than a position.
+_MATERIAL_WEIGHT_FLOOR_FLOAT = 0.005
+
+
+def _weight_axis_tick_list(max_weight_float: float) -> list[float]:
+    """Ticks in 20-point steps up to the largest weight the book actually used.
+
+    A fixed 20/40 pair leaves anything above it unlabelled, so a name running
+    at 60% is read against the nearest tick below it and understates by a third.
+    Steps stop at the last one the data reaches: a tick drawn above every bar
+    in the figure labels empty space and costs the rows vertical room.
+    """
+    if not np.isfinite(max_weight_float) or max_weight_float <= 0.0:
+        return [0.2]
+    tick_count_int = max(1, int(math.floor(round(max_weight_float, 6) / 0.2)))
+    return [round(0.2 * (step_int + 1), 2) for step_int in range(tick_count_int)]
+
+
 def _render_sleeve_composition_figure(holding_weight_df: pd.DataFrame):
-    """Stacked weights by name — correct while the names persist."""
-    overlay_color_list = list(SIGNATURE_PALETTE_DICT['overlay_cycle'])
-    hatch_cycle_list = list(SIGNATURE_PALETTE_DICT['hatch_cycle_list'])
+    """One row per name, each drawn from its own zero, plus a gross strip.
+
+    Stacking was the previous device and it is the harder one to read: only the
+    bottom band sits on a common baseline, so every other name has to be
+    measured by subtracting the band beneath it while also decoding which hatch
+    belongs to whom. Given a row apiece the weight is read straight off the
+    axis. The gross strip keeps the one thing stacking did show — the book's
+    total — which separate rows would otherwise lose.
+    """
     ink_color_str = str(SIGNATURE_PALETTE_DICT['ink'])
-    zero_line_color_str = str(SIGNATURE_PALETTE_DICT['zero_line'])
+    muted_color_str = str(SIGNATURE_PALETTE_DICT['muted'])
+    grid_color_str = str(SIGNATURE_PALETTE_DICT['grid'])
 
-    figure_obj, axis_obj = plt.subplots(figsize=(9.5, 3.4))
-    stack_collection_list = axis_obj.stackplot(
-        holding_weight_df.index,
-        *[holding_weight_df[column_str].to_numpy() for column_str in holding_weight_df.columns],
-        labels=list(holding_weight_df.columns),
-        colors=overlay_color_list[: holding_weight_df.shape[1]],
-        alpha=0.88,
-    )
-    if hatch_cycle_list:
-        plt.rcParams['hatch.linewidth'] = 0.4
-        for stack_idx_int, stack_collection_obj in enumerate(stack_collection_list):
-            stack_collection_obj.set_hatch(hatch_cycle_list[stack_idx_int % len(hatch_cycle_list)])
-            stack_collection_obj.set_edgecolor(ink_color_str)
-            stack_collection_obj.set_linewidth(0.4)
-            stack_collection_obj.set_facecolor(SIGNATURE_PALETTE_DICT['page'])
+    weight_df = holding_weight_df.fillna(0.0)
+    name_order_index = weight_df.abs().mean().sort_values(ascending=False).index
+    gross_exposure_ser = weight_df.abs().sum(axis=1)
+    max_weight_float = float(weight_df.abs().to_numpy().max()) if weight_df.size else 0.0
+    weight_tick_list = _weight_axis_tick_list(max_weight_float)
 
-    axis_obj.plot(
-        holding_weight_df.index, holding_weight_df.sum(axis=1),
-        color=ink_color_str, linewidth=1.0, label='Gross exposure',
+    figure_obj, axis_arr = plt.subplots(
+        len(name_order_index) + 1,
+        1,
+        figsize=(9.5, 0.62 + 0.62 * len(name_order_index)),
+        sharex=True,
+        gridspec_kw={'height_ratios': [0.62] + [1.0] * len(name_order_index)},
     )
-    axis_obj.axhline(1.0, color=zero_line_color_str, linestyle='--', linewidth=0.8)
-    axis_obj.set_ylabel('Weight of capital')
-    axis_obj.set_title('Capital weights — stack height is gross exposure')
-    axis_obj.margins(x=0.008)
-    axis_obj.legend(loc='lower center', ncol=6, frameon=False, fontsize=7)
-    apply_signature_time_axis(axis_obj, holding_weight_df.index)
-    return figure_obj, (axis_obj,)
+    axis_list = np.atleast_1d(axis_arr).ravel().tolist()
+
+    def strip_axis(axis_obj):
+        for spine_name_str in ('top', 'right', 'left'):
+            axis_obj.spines[spine_name_str].set_visible(False)
+        axis_obj.spines['bottom'].set_color(grid_color_str)
+        axis_obj.spines['bottom'].set_linewidth(0.5)
+        axis_obj.tick_params(length=0.0)
+
+    gross_axis_obj = axis_list[0]
+    gross_axis_obj.fill_between(
+        weight_df.index, 0.0, gross_exposure_ser.to_numpy(),
+        color=muted_color_str, linewidth=0.0, alpha=0.5, step='post',
+    )
+    gross_axis_obj.set_ylim(0.0, max(1.05, float(gross_exposure_ser.max() or 1.0) * 1.05))
+    gross_axis_obj.set_yticks([1.0])
+    gross_axis_obj.set_yticklabels(['100%'], fontsize=6.5, color=muted_color_str)
+    gross_axis_obj.set_ylabel(
+        'Gross', rotation=0, ha='right', va='center', fontsize=7.5,
+        color=muted_color_str, labelpad=8,
+    )
+    strip_axis(gross_axis_obj)
+
+    for axis_obj, name_str in zip(axis_list[1:], name_order_index):
+        name_weight_ser = weight_df[name_str].abs()
+        axis_obj.fill_between(
+            weight_df.index, 0.0, name_weight_ser.to_numpy(),
+            color=ink_color_str, linewidth=0.0, alpha=0.82, step='post',
+        )
+        # The ceiling follows the data, not the last tick, so a bar between two
+        # steps is still drawn in full rather than clipped at the gridline.
+        axis_obj.set_ylim(0.0, max(max(weight_tick_list), max_weight_float) * 1.08)
+        axis_obj.set_yticks(weight_tick_list)
+        axis_obj.set_yticklabels(
+            [f'{tick_float * 100:.0f}' for tick_float in weight_tick_list],
+            fontsize=6.5, color=muted_color_str,
+        )
+        for tick_float in weight_tick_list:
+            axis_obj.axhline(tick_float, color=grid_color_str, linewidth=0.5, zorder=0)
+        axis_obj.set_ylabel(
+            str(name_str), rotation=0, ha='right', va='center', fontsize=8.5,
+            color=ink_color_str, labelpad=8,
+        )
+        # The share of days held, so the row carries a figure and not only a
+        # shape — the same reading Year by Year prints beside each panel.
+        #
+        # *** CRITICAL*** Counted against a materiality floor, not against
+        # zero. Rebalancing leaves fractional residue in a name for long
+        # stretches: this book's Cash line is above zero on every single day
+        # with a median of 0.23%, so a bare > 0 test reports "100% of days"
+        # for what is rounding dust rather than a position.
+        held_share_float = float((name_weight_ser > _MATERIAL_WEIGHT_FLOOR_FLOAT).mean())
+        axis_obj.text(
+            1.005, 0.5, f'{held_share_float * 100:.0f}% of days',
+            transform=axis_obj.transAxes, fontsize=6.8,
+            color=muted_color_str, va='center',
+        )
+        strip_axis(axis_obj)
+        axis_obj.margins(x=0.008)
+
+    apply_signature_time_axis(axis_list[-1], weight_df.index)
+    return figure_obj, tuple(axis_list)
 
 
 def _render_rotation_composition_figure(

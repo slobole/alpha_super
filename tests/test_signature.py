@@ -456,3 +456,57 @@ class TestSmallMultiplesOverlay:
         ) == render_small_multiples_data_uri_str(
             panel_ser_dict, column_count_int=1, overlay_ser_dict=None
         )
+
+
+class TestWeightAxisTicks:
+    """The composition rows must label every level the book actually reaches."""
+
+    def test_ticks_step_by_twenty_up_to_the_data(self):
+        from alpha.engine.signature import _weight_axis_tick_list
+
+        assert _weight_axis_tick_list(0.21) == [0.2]
+        assert _weight_axis_tick_list(0.40) == [0.2, 0.4]
+        assert _weight_axis_tick_list(0.62) == [0.2, 0.4, 0.6]
+        assert _weight_axis_tick_list(1.00) == [0.2, 0.4, 0.6, 0.8, 1.0]
+
+    def test_no_tick_is_drawn_above_every_bar(self):
+        """A labelled gridline with no data under it costs the rows height."""
+        from alpha.engine.signature import _weight_axis_tick_list
+
+        for max_weight_float in (0.05, 0.21, 0.39, 0.62, 0.81):
+            tick_list = _weight_axis_tick_list(max_weight_float)
+            assert len(tick_list) == len(set(tick_list))
+            if max_weight_float >= 0.2:
+                assert max(tick_list) <= max_weight_float + 1e-9
+
+    def test_a_degenerate_maximum_still_yields_one_tick(self):
+        from alpha.engine.signature import _weight_axis_tick_list
+
+        assert _weight_axis_tick_list(0.0) == [0.2]
+        assert _weight_axis_tick_list(float('nan')) == [0.2]
+
+    def test_occupancy_ignores_rebalance_residue(self):
+        """*** CRITICAL*** regression.
+
+        Rebalancing leaves fractional residue in a name for long stretches. On
+        the TAA book the Cash line is above zero on every single day with a
+        median of 0.23%, so counting against zero reported "100% of days" for
+        what is dust. The floor makes it 30%.
+        """
+        from alpha.engine.signature import (
+            _MATERIAL_WEIGHT_FLOOR_FLOAT,
+            render_composition_data_uri_str,
+        )
+
+        index = pd.date_range('2020-01-01', periods=100, freq='B')
+        weight_df = pd.DataFrame(
+            {
+                'AAA': [0.5] * 100,
+                # Held materially for a quarter of the sample, dust for the rest.
+                'DUST': [0.5] * 25 + [_MATERIAL_WEIGHT_FLOOR_FLOAT / 2.0] * 75,
+            },
+            index=index,
+        )
+        data_uri_str, mode_str = render_composition_data_uri_str(weight_df)
+        assert mode_str == 'sleeve'
+        assert data_uri_str.startswith('data:image/png;base64,')
