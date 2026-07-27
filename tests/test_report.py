@@ -14,6 +14,7 @@ import pandas as pd
 from alpha.engine.report import (
     _DAILY_RETURN_HISTOGRAM_BIN_COUNT_INT,
     _build_daily_return_distribution_html,
+    _build_headline_delta_table_html,
     _build_html,
     _display_metric_dict_for_value_ser,
     _build_portfolio_html,
@@ -1347,3 +1348,84 @@ class ReportFormattingTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class HeadlineDeltaTableTests(unittest.TestCase):
+    """The specimen sheet's headline is the delta table, not the KPI tiles."""
+
+    @staticmethod
+    def _summary_df() -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                'Strategy': {
+                    'Return (Ann.) [%]': 18.886,
+                    'Volatility (Ann.) [%]': 20.458,
+                    'Sharpe Ratio': 0.9548,
+                    'Max. Drawdown [%]': -30.914,
+                    'Correlation': 1.0,
+                },
+                '$SPX': {
+                    'Return (Ann.) [%]': 8.804,
+                    'Volatility (Ann.) [%]': 18.747,
+                    'Sharpe Ratio': 0.5442,
+                    'Max. Drawdown [%]': -56.775,
+                    'Correlation': 0.6825,
+                },
+            }
+        )
+
+    def test_correlation_is_read_from_the_benchmark_column(self):
+        """*** CRITICAL*** regression.
+
+        The summary stores Correlation per column as that column's correlation
+        to the strategy, so the strategy's own cell is always 1.0. Reading it
+        would print 1.00 for every strategy ever run, with a delta of zero.
+        """
+        table_html_str = _build_headline_delta_table_html(self._summary_df(), 'Strategy')
+        correlation_row_str = re.search(
+            r'<tr><td class="metric">Correlation</td>(.*?)</tr>', table_html_str
+        ).group(1)
+        cell_list = re.findall(r'<td[^>]*>([^<]*)</td>', correlation_row_str)
+        self.assertEqual(cell_list[0], '0.68')
+        self.assertEqual(cell_list[1], '1.00')
+        self.assertEqual(cell_list[2], '-0.32')
+
+    def test_a_shallower_drawdown_reads_as_favourable_despite_a_negative_delta(self):
+        """Depth is what is compared, so the sign of the delta is not the verdict."""
+        table_html_str = _build_headline_delta_table_html(self._summary_df(), 'Strategy')
+        drawdown_row_str = re.search(
+            r'<tr><td class="metric">Max drawdown</td>(.*?)</tr>', table_html_str
+        ).group(1)
+        self.assertIn('-25.9pp', drawdown_row_str)
+        self.assertIn('--color-profit-dark', drawdown_row_str)
+
+    def test_higher_volatility_reads_as_unfavourable(self):
+        table_html_str = _build_headline_delta_table_html(self._summary_df(), 'Strategy')
+        volatility_row_str = re.search(
+            r'<tr><td class="metric">Volatility</td>(.*?)</tr>', table_html_str
+        ).group(1)
+        self.assertIn('+1.7pp', volatility_row_str)
+        self.assertIn('--color-loss-dark', volatility_row_str)
+
+    def test_every_headline_metric_is_present_in_order(self):
+        table_html_str = _build_headline_delta_table_html(self._summary_df(), 'Strategy')
+        label_list = re.findall(r'<td class="metric">([^<]+)</td>', table_html_str)
+        self.assertEqual(
+            label_list,
+            ['CAGR (net)', 'Volatility', 'Sharpe ratio', 'Max drawdown', 'Correlation'],
+        )
+
+    def test_no_benchmark_column_yields_no_table_so_the_caller_can_fall_back(self):
+        """A table of em dashes is worse than the tiles it replaced."""
+        strategy_only_df = self._summary_df()[['Strategy']]
+        self.assertEqual(_build_headline_delta_table_html(strategy_only_df, 'Strategy'), '')
+        self.assertEqual(_build_headline_delta_table_html(None, 'Strategy'), '')
+
+    def test_the_headline_table_agrees_with_the_summary_it_came_from(self):
+        """The headline must not drift from the Performance Summary below it."""
+        summary_df = self._summary_df()
+        table_html_str = _build_headline_delta_table_html(summary_df, 'Strategy')
+        self.assertIn('18.9%', table_html_str)
+        self.assertIn('8.8%', table_html_str)
+        self.assertIn('+10.1pp', table_html_str)
+        self.assertIn('0.95', table_html_str)
