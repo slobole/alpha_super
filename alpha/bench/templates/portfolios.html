@@ -17,7 +17,9 @@
 <div class="empty">No portfolio configs found under <span class="mono">portfolios/</span>.</div>
 {% endif %}
 
-<div class="card-grid">
+<div class="section section-flush">
+  <h2 class="section-title">Books</h2>
+  <div class="card-grid">
   {% for view in portfolio_view_list %}
   {% set p = view.portfolio %}
   <div class="card">
@@ -30,7 +32,7 @@
 
     {% if p.error_str %}
       <div class="badge badge-norun">YAML error</div>
-      <div class="muted-2" style="font-size:12px;">{{ p.error_str }}</div>
+      <div class="cell-note">{{ p.error_str }}</div>
     {% else %}
       <div class="card-meta">
         {% if p.capital_float is not none %}<span class="badge badge-cat">${{ '{:,.0f}'.format(p.capital_float) }}</span>{% endif %}
@@ -46,8 +48,13 @@
     {% endif %}
 
     <div class="card-foot">
-      <span class="muted-2" style="font-size:12px;">
-        {% if view.run_entry_list %}{{ view.run_entry_list|length }} run{{ 's' if view.run_entry_list|length != 1 }}{% else %}no runs yet{% endif %}
+      <span class="muted-2">
+        {% if view.run_entry_list %}
+          {{ view.run_entry_list|length }} run{{ 's' if view.run_entry_list|length != 1 }}
+          {% if view.latest_report_run and view.latest_report_run.backtest_window_str %}
+          <div class="cell-note">{{ view.latest_report_run.backtest_window_str }}</div>
+          {% endif %}
+        {% else %}no runs yet{% endif %}
       </span>
       <div class="btn-row">
         {% if view.latest_report_run %}
@@ -62,5 +69,6 @@
     </div>
   </div>
   {% endfor %}
+  </div>
 </div>
 {% endblock %}

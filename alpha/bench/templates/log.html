@@ -17,6 +17,19 @@
   </div>
 </div>
 
+{% if job.is_cancellable_bool %}
+<div class="action-bar">
+  <div class="action-group">
+    <span class="action-group-label">Running</span>
+    <form class="inline" method="post" action="{{ url_for('cancel_job_api_fn', job_id_str=job.job_id_str) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
+      <button class="btn btn-sm">Cancel this run</button>
+    </form>
+    <span class="muted">Kills the whole process tree. Artifacts already written stay on disk.</span>
+  </div>
+</div>
+{% endif %}
+
 <div id="log-body"
      {% if job.is_active_bool %}hx-get="{{ url_for('job_log_page_fn', job_id_str=job.job_id_str) }}" hx-trigger="every 2s" hx-select="#log-body" hx-swap="outerHTML"{% endif %}>
   <pre class="log">{{ log_text_str or '(no output yet)' }}</pre>

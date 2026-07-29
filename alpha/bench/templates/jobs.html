@@ -6,14 +6,17 @@
 <div class="page-head">
   <div>
     <h1 class="page-title">Jobs</h1>
-    <p class="page-sub">Background runs launched from Bench. Output streams to <span class="mono">results/_bench/jobs/</span>.</p>
+    <p class="page-sub">Background runs launched from Bench. Output streams to <span class="mono">results/_bench/jobs/</span>. Click a row for its live log. Cancelling kills the whole process tree — a part-finished analysis leaves whatever artifacts it had already written.</p>
   </div>
 </div>
 
+<div class="section section-flush">
+<h2 class="section-title">Runs launched from Bench</h2>
 <div id="jobs-table"
      hx-get="{{ url_for('jobs_fragment_fn') }}"
      hx-trigger="load, every 2s"
      hx-swap="innerHTML">
   {% include "_jobs_table.html" %}
+</div>
 </div>
 {% endblock %}

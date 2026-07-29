@@ -77,6 +77,30 @@ CROSS_SECTIONAL_MOMENTUM_STEM_SET = frozenset(
 )
 
 
+# run_variant kwargs Bench will never offer as a form field. These are the
+# runner's own plumbing — Bench sets them itself when it builds the command, and
+# letting the operator override them would change where artifacts land or
+# whether they are written at all.
+RUNNER_CONTROLLED_KWARG_SET = frozenset(
+    {"show_display_bool", "save_results_bool", "output_dir_str"}
+)
+
+# A --strategy-kwarg value is one JSON scalar or string on a command line, so
+# only scalar parameters can be offered as form fields. The repo's Domain_Type
+# naming convention makes that decidable from the name alone: run_variant kwargs
+# like ``pricing_data_df`` or a bare ``config`` take objects no text box can
+# express, and offering them would produce a job that dies on launch.
+SCALAR_KWARG_SUFFIX_TUPLE = ("_str", "_float", "_int", "_bool")
+
+
+@dataclass(frozen=True)
+class RunVariantParam:
+    """One overridable keyword argument of a strategy's ``run_variant``."""
+
+    name_str: str
+    default_repr_str: str  # source text of the default, or "" when there is none
+
+
 @dataclass(frozen=True)
 class StrategyEntry:
     """One runnable strategy file, plus the metadata Bench renders."""
@@ -93,6 +117,7 @@ class StrategyEntry:
     has_run_variant_bool: bool
     has_capacity_analysis_bool: bool
     summary_str: str  # first line of the module docstring (may be empty)
+    run_variant_param_tuple: tuple[RunVariantParam, ...]  # overridable kwargs
 
 
 @dataclass(frozen=True)
@@ -178,8 +203,50 @@ def _wired_module_set() -> set[str]:
     return {entry_str.split(":", maxsplit=1)[0] for entry_str in SUPPORTED_STRATEGY_IMPORT_TUPLE}
 
 
+def _run_variant_param_tuple(run_variant_node_obj) -> tuple[RunVariantParam, ...]:
+    """Overridable keyword arguments of one ``run_variant`` definition.
+
+    Read from the signature rather than assumed, because the kwargs are not
+    uniform across the catalog: most strategies take
+    ``backtest_start_date_str``/``end_date_str``, but plenty do not, and
+    ``run_strategy.py`` raises on a kwarg the target does not declare. Offering
+    a field the strategy cannot accept would produce a job that fails on launch.
+
+    Positional-only parameters and ``*args``/``**kwargs`` are skipped: only
+    named parameters can be passed as ``--strategy-kwarg KEY=VALUE``.
+    """
+    arguments_obj = run_variant_node_obj.args
+    named_arg_list = list(arguments_obj.args) + list(arguments_obj.kwonlyargs)
+    # Defaults right-align against args; kwonly defaults pair up positionally.
+    positional_default_list = list(arguments_obj.defaults)
+    padded_default_list: list[object] = (
+        [None] * (len(arguments_obj.args) - len(positional_default_list))
+        + positional_default_list
+        + list(arguments_obj.kw_defaults)
+    )
+
+    param_list: list[RunVariantParam] = []
+    for arg_obj, default_obj in zip(named_arg_list, padded_default_list):
+        if arg_obj.arg in RUNNER_CONTROLLED_KWARG_SET:
+            continue
+        if not arg_obj.arg.endswith(SCALAR_KWARG_SUFFIX_TUPLE):
+            continue
+        default_repr_str = ""
+        if default_obj is not None:
+            try:
+                default_repr_str = ast.unparse(default_obj)
+            except (AttributeError, ValueError):
+                default_repr_str = ""
+        param_list.append(
+            RunVariantParam(name_str=arg_obj.arg, default_repr_str=default_repr_str)
+        )
+    return tuple(param_list)
+
+
 @lru_cache(maxsize=1024)
-def _parse_strategy_source(path_str: str, mtime_ns_int: int) -> tuple[str, bool, bool]:
+def _parse_strategy_source(
+    path_str: str, mtime_ns_int: int
+) -> tuple[str, bool, bool, tuple[RunVariantParam, ...]]:
     """Return docstring and analysis-hook availability for a strategy file.
 
     Cached on ``(path, mtime_ns)`` so edits invalidate the entry automatically.
@@ -195,7 +262,7 @@ def _parse_strategy_source(path_str: str, mtime_ns_int: int) -> tuple[str, bool,
         source_str = Path(path_str).read_bytes().decode("utf-8-sig", errors="replace")
         module_ast = ast.parse(source_str)
     except (OSError, SyntaxError, ValueError):
-        return ("", False, False)
+        return ("", False, False, ())
 
     docstring_str = ast.get_docstring(module_ast) or ""
     first_line_str = ""
@@ -204,9 +271,14 @@ def _parse_strategy_source(path_str: str, mtime_ns_int: int) -> tuple[str, bool,
             first_line_str = raw_line_str.strip()
             break
 
-    has_run_variant_bool = any(
-        isinstance(node_obj, (ast.FunctionDef, ast.AsyncFunctionDef)) and node_obj.name == "run_variant"
-        for node_obj in module_ast.body
+    run_variant_node_obj = next(
+        (
+            node_obj
+            for node_obj in module_ast.body
+            if isinstance(node_obj, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node_obj.name == "run_variant"
+        ),
+        None,
     )
     has_capacity_analysis_bool = any(
         isinstance(node_obj, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -215,8 +287,9 @@ def _parse_strategy_source(path_str: str, mtime_ns_int: int) -> tuple[str, bool,
     )
     return (
         first_line_str,
-        has_run_variant_bool,
+        run_variant_node_obj is not None,
         has_capacity_analysis_bool,
+        () if run_variant_node_obj is None else _run_variant_param_tuple(run_variant_node_obj),
     )
 
 
@@ -231,9 +304,12 @@ def list_strategies() -> list[StrategyEntry]:
 
     for module_path in sorted(STRATEGIES_ROOT_PATH.rglob("strategy_*.py")):
         module_import_str = _module_import_str(module_path)
-        summary_str, has_run_variant_bool, has_capacity_analysis_bool = _parse_strategy_source(
-            str(module_path), module_path.stat().st_mtime_ns
-        )
+        (
+            summary_str,
+            has_run_variant_bool,
+            has_capacity_analysis_bool,
+            run_variant_param_tuple,
+        ) = _parse_strategy_source(str(module_path), module_path.stat().st_mtime_ns)
         category_str = (
             module_path.parent.name if module_path.parent != STRATEGIES_ROOT_PATH else "uncategorized"
         )
@@ -252,6 +328,7 @@ def list_strategies() -> list[StrategyEntry]:
                 has_run_variant_bool=has_run_variant_bool,
                 has_capacity_analysis_bool=has_capacity_analysis_bool,
                 summary_str=summary_str,
+                run_variant_param_tuple=run_variant_param_tuple,
             )
         )
 

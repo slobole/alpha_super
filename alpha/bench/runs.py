@@ -3,10 +3,10 @@
 Every analyzer run already writes a tidy, timestamped folder:
 
     results/research/strategy/{run_name}/{analysis}/{YYYY-MM-DD_HHMMSS}/
-        summary.json   metadata.json   report.html   ...
+        summary.json   metadata.json   run_info.json   report.html   ...
 
     results/research/portfolio/{name}/{analysis}/{YYYY-MM-DD_HHMMSS}/
-        summary.json   report.html     ...
+        summary.json   run_info.json   report.html     ...
 
 Bench just lists those folders and reads the small JSON sidecars. It writes
 nothing here. Linking a results folder back to a catalog strategy uses the
@@ -68,6 +68,7 @@ class RunEntry:
     activity_timestamp_float: float = 0.0
     summary_dict: dict = field(default_factory=dict)
     metadata_dict: dict = field(default_factory=dict)
+    run_info_dict: dict = field(default_factory=dict)
 
     @property
     def timestamp_datetime_obj(self) -> datetime | None:
@@ -101,6 +102,34 @@ class RunEntry:
     @property
     def report_artifact_str(self) -> str:
         return f"{self.rel_dir_from_results_str}/report.html"
+
+    @property
+    def parameter_dict(self) -> dict:
+        parameter_obj = self.run_info_dict.get("parameters")
+        return parameter_obj if isinstance(parameter_obj, dict) else {}
+
+    @property
+    def backtest_window_str(self) -> str | None:
+        """The tested date range, as the runner recorded it.
+
+        Two runs of the same strategy over different windows are otherwise
+        indistinguishable in the run history — same analysis, same metrics
+        columns — which makes the table unusable for comparison. Returns None
+        when the runner wrote no window, so the UI can show an explicit dash
+        rather than implying full history.
+        """
+        start_obj = self.parameter_dict.get("start_date")
+        end_obj = self.parameter_dict.get("end_date")
+        if not (isinstance(start_obj, str) and isinstance(end_obj, str)):
+            return None
+        return f"{start_obj[:10]} → {end_obj[:10]}"
+
+    @property
+    def capital_display_str(self) -> str | None:
+        capital_obj = self.parameter_dict.get("capital")
+        if not isinstance(capital_obj, (int, float)) or isinstance(capital_obj, bool):
+            return None
+        return f"{float(capital_obj):,.0f}"
 
     @property
     def capacity_model_version_str(self) -> str | None:
@@ -265,6 +294,7 @@ def _scan_run_entries(name_dir_path: Path, run_name_str: str) -> list[RunEntry]:
                     ),
                     summary_dict=_read_json_dict(timestamp_dir_path / "summary.json"),
                     metadata_dict=metadata_dict,
+                    run_info_dict=_read_json_dict(timestamp_dir_path / "run_info.json"),
                 )
             )
 
@@ -391,6 +421,52 @@ def scan_portfolio_runs(*portfolio_name_str_tuple: str) -> list[RunEntry]:
             combined_run_entry_list.append(run_obj)
     combined_run_entry_list.sort(key=_run_sort_key, reverse=True)
     return combined_run_entry_list
+
+
+class ProducedRunFinder:
+    """Resolves "what did this job produce?" against one scan of ``results/``.
+
+    *** CRITICAL*** The scan must be shared across a whole page render. Building
+    a fresh index per job turned the Jobs page into a ~49 s render (156 finished
+    jobs x a 0.3 s walk of the results tree) on a view that polls every two
+    seconds. The index is read once here and reused for every row.
+
+    *** Matched by time, not by identity.*** The runners return no run id to the
+    caller, so this is a heuristic: if two jobs for the same target overlap
+    (concurrency is 2), the newest run may belong to the other one. It is used
+    only to offer a convenience link, never to attribute metrics to a job.
+    """
+
+    def __init__(self) -> None:
+        self._strategy_run_index_obj: StrategyRunIndex | None = None
+        self._portfolio_run_list_by_name_dict: dict[str, list[RunEntry]] = {}
+
+    def _candidate_run_entry_list(self, target_name_str: str, kind_str: str) -> list[RunEntry]:
+        if kind_str == "portfolio":
+            if target_name_str not in self._portfolio_run_list_by_name_dict:
+                self._portfolio_run_list_by_name_dict[target_name_str] = scan_portfolio_runs(
+                    target_name_str
+                )
+            return self._portfolio_run_list_by_name_dict[target_name_str]
+
+        if self._strategy_run_index_obj is None:
+            self._strategy_run_index_obj = build_strategy_run_index()
+        return self._strategy_run_index_obj.runs_by_run_name_dict.get(target_name_str, [])
+
+    def find_run_produced_after(
+        self,
+        target_name_str: str,
+        started_at_timestamp_float: float,
+        kind_str: str,
+    ) -> RunEntry | None:
+        """Newest report this target wrote after ``started_at``, if any."""
+        for run_obj in self._candidate_run_entry_list(target_name_str, kind_str):
+            # already newest-first
+            if not run_obj.has_report_bool:
+                continue
+            if run_obj.effective_activity_timestamp_float >= started_at_timestamp_float:
+                return run_obj
+        return None
 
 
 def recent_runs(limit_int: int = 12) -> list[RunEntry]:

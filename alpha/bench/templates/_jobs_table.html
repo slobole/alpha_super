@@ -1,4 +1,4 @@
-{% if not job_list %}
+{% if not job_view_list %}
 <div class="empty">No jobs yet. Launch one from a strategy or portfolio.</div>
 {% else %}
 <div class="panel">
@@ -7,9 +7,15 @@
       <tr><th>Status</th><th>Job</th><th>Target</th><th>Created</th><th class="num">Elapsed</th><th class="num">Exit</th><th></th></tr>
     </thead>
     <tbody>
-      {% for job in job_list %}
-      <tr>
-        <td><span class="pill pill-{{ job.status_str }}">{{ job.status_str }}</span></td>
+      {% for view in job_view_list %}
+      {% set job = view.job %}
+      {# The whole row is a click target for the log; the explicit Log link
+         stays so the row is still reachable by keyboard. #}
+      <tr class="job-row" data-log-href="{{ url_for('job_log_page_fn', job_id_str=job.job_id_str) }}">
+        <td>
+          <span class="pill pill-{{ job.status_str }}">{{ job.status_str }}</span>
+          {% if job.queue_position_int %}<div class="cell-note">#{{ job.queue_position_int }} in line</div>{% endif %}
+        </td>
         <td>
           <div><b>{{ job.label_str }}</b></div>
           <div class="mono muted-2 job-cmd">{{ job.command_display_str }}</div>
@@ -18,7 +24,20 @@
         <td class="muted">{{ job.created_at_str.replace('T', ' ') }}</td>
         <td class="num">{{ job.elapsed_str }}</td>
         <td class="num">{% if job.return_code_int is not none %}{{ job.return_code_int }}{% else %}—{% endif %}</td>
-        <td class="num"><a class="btn btn-sm btn-ghost" href="{{ url_for('job_log_page_fn', job_id_str=job.job_id_str) }}">Log</a></td>
+        <td class="num">
+          <div class="btn-row job-actions">
+            {% if view.produced_run %}
+            <a class="btn btn-sm btn-ghost" href="{{ url_for('artifact_fn', rel_path_str=view.produced_run.report_artifact_str) }}" target="_blank" rel="noopener noreferrer">Report</a>
+            {% endif %}
+            <a class="btn btn-sm btn-ghost" href="{{ url_for('job_log_page_fn', job_id_str=job.job_id_str) }}">Log</a>
+            {% if job.is_cancellable_bool %}
+            <form class="inline" method="post" action="{{ url_for('cancel_job_api_fn', job_id_str=job.job_id_str) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
+              <button class="btn btn-sm">Cancel</button>
+            </form>
+            {% endif %}
+          </div>
+        </td>
       </tr>
       {% endfor %}
     </tbody>

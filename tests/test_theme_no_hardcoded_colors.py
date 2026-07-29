@@ -48,6 +48,13 @@ _ALLOWED_HEX_COLOR_DICT = {
 }
 
 
+BENCH_STYLESHEET_PATH = Path('alpha/bench/static/bench.css')
+
+
+def _bench_stylesheet_str() -> str:
+    return (REPO_ROOT_PATH / BENCH_STYLESHEET_PATH).read_text(encoding='utf-8')
+
+
 def _hex_literal_finding_list(module_path: Path) -> list[str]:
     finding_list: list[str] = []
     source_text_str = (REPO_ROOT_PATH / module_path).read_text(encoding='utf-8')
@@ -78,15 +85,77 @@ class ThemeColorOwnershipTests(unittest.TestCase):
         )
 
     def test_bench_stylesheet_tokens_come_from_the_theme(self):
-        """Bench must not reintroduce its own palette under :root."""
+        """Bench must not reintroduce its own palette under :root.
+
+        Bench writes its rules against the report's own token names, so the
+        console and the reports it embeds cannot drift apart by construction.
+        """
         from alpha.engine.theme import build_bench_theme_css
 
         bench_theme_css_str = build_bench_theme_css()
-        self.assertIn('--accent:', bench_theme_css_str)
-        self.assertIn('--text:', bench_theme_css_str)
-        # The generated block must actually carry the journal ink, not the
-        # stylesheet's original blue accent.
+        self.assertIn('--color-ink:', bench_theme_css_str)
+        self.assertIn('--color-muted:', bench_theme_css_str)
+        self.assertIn('--font-figure:', bench_theme_css_str)
+        # The generated block must carry the journal ink, not the stylesheet's
+        # original blue accent.
         self.assertNotIn('#0c8ce0', bench_theme_css_str)
+
+    def test_bench_stylesheet_fallback_root_matches_the_theme(self):
+        """The offline fallback in bench.css must mirror the journal palette.
+
+        bench.css keeps a ``:root`` of its own so the console still renders with
+        no theme block injected. That is a second copy of the palette, and a
+        second copy is exactly how the two surfaces drifted apart the first
+        time — so every token it declares is pinned to the generated value here.
+        """
+        from alpha.engine.theme import build_bench_theme_css
+
+        theme_value_dict = dict(
+            re.findall(r'(--[\w-]+)\s*:\s*([^;]+);', build_bench_theme_css())
+        )
+        bench_css_str = _bench_stylesheet_str()
+        root_block_match_obj = re.search(r':root\s*\{([^}]*)\}', bench_css_str)
+        self.assertIsNotNone(root_block_match_obj, 'bench.css has no :root block')
+
+        mismatch_list: list[str] = []
+        for token_name_str, token_value_str in re.findall(
+            r'(--[\w-]+)\s*:\s*([^;]+);', root_block_match_obj.group(1)
+        ):
+            expected_value_str = theme_value_dict.get(token_name_str)
+            if expected_value_str is None:
+                mismatch_list.append(f'{token_name_str}: not emitted by the theme at all')
+            elif expected_value_str.strip() != token_value_str.strip():
+                mismatch_list.append(
+                    f'{token_name_str}: bench.css has {token_value_str.strip()!r}, '
+                    f'theme emits {expected_value_str.strip()!r}'
+                )
+
+        self.assertEqual(
+            mismatch_list,
+            [],
+            'bench.css fallback tokens have drifted from the journal palette:\n  '
+            + '\n  '.join(mismatch_list),
+        )
+
+    def test_bench_stylesheet_references_only_defined_tokens(self):
+        """A var() bench.css uses but nothing defines voids the declaration.
+
+        The generated theme block and the fallback :root are the only sources,
+        so anything referenced outside them renders as a dropped rule — an
+        invisible border or an unstyled colour, with the source reading fine.
+        """
+        from alpha.engine.theme import build_bench_theme_css
+
+        bench_css_str = _bench_stylesheet_str()
+        defined_name_set = set(re.findall(r'(--[\w-]+)\s*:', bench_css_str))
+        defined_name_set |= set(re.findall(r'(--[\w-]+)\s*:', build_bench_theme_css()))
+        referenced_name_set = set(re.findall(r'var\(\s*(--[\w-]+)', bench_css_str))
+
+        self.assertEqual(
+            sorted(referenced_name_set - defined_name_set),
+            [],
+            'bench.css references CSS variables that no stylesheet defines.',
+        )
 
     def test_every_referenced_css_variable_is_defined(self):
         """An undefined custom property silently voids its whole declaration.
@@ -97,6 +166,7 @@ class ThemeColorOwnershipTests(unittest.TestCase):
         the CSS text still contains exactly what was written.
         """
         from alpha.engine.theme import (
+            SIGNATURE_VARIANT_NAME_LIST,
             build_analyzer_report_css,
             build_bench_theme_css,
             build_report_css,
@@ -109,9 +179,10 @@ class ThemeColorOwnershipTests(unittest.TestCase):
             'build_bench_theme_css': build_bench_theme_css,
         }
         # The stylesheets branch on the active variant, so a rule can exist in
-        # one layout and be missing from another. Check every variant.
+        # one layout and be missing from another. Driven off the variant list
+        # itself so a newly added variant is covered without editing this test.
         finding_list: list[str] = []
-        for variant_name_str in ('current', 'journal', 'journal_spec'):
+        for variant_name_str in SIGNATURE_VARIANT_NAME_LIST:
             for builder_name_str, builder_callable in builder_dict.items():
                 with signature_variant_context(variant_name_str):
                     stylesheet_str = builder_callable()

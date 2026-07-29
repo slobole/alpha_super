@@ -7,18 +7,28 @@
   <script src="{{ url_for('static', filename='htmx.min.js') }}"></script>
   <link rel="stylesheet" href="{{ url_for('static', filename='bench.css') }}">
   <!-- Signature tokens derived from alpha.engine.theme, loaded after bench.css
-       so the console shares one palette with the reports it embeds. -->
-  <style>{{ bench_theme_css_str }}</style>
+       so the console shares one palette with the reports it embeds.
+       Marked safe deliberately: this is server-generated CSS built from the
+       palette, never user input, and autoescaping mangles the quoted family
+       names in the font stacks ("Cascadia Mono" -> &#34;Cascadia Mono&#34;),
+       which voids the whole declaration and drops the page to a default serif. -->
+  <style>{{ bench_theme_css_str | safe }}</style>
 </head>
 <body>
-  <header class="topbar">
-    <a class="brand" href="{{ url_for('index_page_fn') }}">
-      <span class="brand-mark">B</span>
-      <span>
-        <div class="brand-name">Bench</div>
-        <div class="brand-tag">strategy test bench</div>
-      </span>
-    </a>
+  {# Masthead scrolls away with the page; only the nav rule below it sticks, so
+     a long catalog keeps its navigation without a tall header following you. #}
+  <header class="masthead">
+    <a class="masthead-title" href="{{ url_for('index_page_fn') }}">Bench</a>
+    <div class="masthead-strapline">
+      <span>Strategy research console</span>
+      <span class="strapline-sep">·</span>
+      <span>{{ server_date_str }}</span>
+      <span class="strapline-sep">·</span>
+      <span>{{ server_clock_str }}</span>
+    </div>
+  </header>
+
+  <div class="nav-bar">
     <nav class="nav">
       <a href="{{ url_for('index_page_fn') }}" class="{{ 'active' if active_nav == 'strategies' }}">Strategies</a>
       <a href="{{ url_for('portfolios_page_fn') }}" class="{{ 'active' if active_nav == 'portfolios' }}">Portfolios</a>
@@ -32,16 +42,25 @@
         </span>
       </a>
     </nav>
-    <div class="topbar-spacer"></div>
-    <div class="topbar-clock">{{ server_clock_str }}</div>
-  </header>
+  </div>
 
   <main class="container">
     {% block content %}{% endblock %}
   </main>
 
   <footer class="footer">
-    Bench {{ bench_version_str }} · local research console · reads <span class="mono">results/</span>, launches your existing runners
+    <div>
+      Bench {{ bench_version_str }} · local research console · reads <span class="mono">results/</span>, launches your existing runners · press <kbd>/</kbd> to search
+    </div>
+    {# Restyles the console only. Reports are baked at render time, so an
+       already-generated report.html keeps the variant that produced it. #}
+    <div class="variant-switch">
+      <span>Style</span>
+      {% for variant_str, variant_label_str in variant_label_dict.items() %}
+      <a href="{{ url_for('set_variant_fn', variant_name_str=variant_str) }}"
+         class="{{ 'active' if variant_str == active_variant_str }}">{{ variant_label_str }}</a>
+      {% endfor %}
+    </div>
   </footer>
 
   <script>
@@ -56,6 +75,29 @@
       buttonEl.dataset.busy = '1';
       setTimeout(function () { buttonEl.disabled = true; buttonEl.textContent = '…'; }, 0);
     }, true);
+
+    // A jobs row opens its log, except when the click landed on a real control
+    // (the Report/Log links, the Cancel button) which has its own destination.
+    document.addEventListener('click', function (event) {
+      var rowEl = event.target.closest ? event.target.closest('tr.job-row') : null;
+      if (!rowEl) return;
+      if (event.target.closest('a, button, form')) return;
+      var hrefStr = rowEl.dataset.logHref;
+      if (hrefStr) window.location.href = hrefStr;
+    });
+
+    // "/" focuses the catalog search from anywhere on the page, unless you are
+    // already typing into a field.
+    document.addEventListener('keydown', function (event) {
+      if (event.key !== '/' || event.ctrlKey || event.metaKey || event.altKey) return;
+      var activeEl = document.activeElement;
+      if (activeEl && /^(INPUT|TEXTAREA|SELECT)$/.test(activeEl.tagName)) return;
+      var searchEl = document.getElementById('search');
+      if (!searchEl) return;
+      event.preventDefault();
+      searchEl.focus();
+      searchEl.select();
+    });
   </script>
 </body>
 </html>

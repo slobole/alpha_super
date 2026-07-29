@@ -44,6 +44,17 @@ RUN_PORTFOLIO_MANAGER_SCRIPT_PATH = REPO_ROOT_PATH / "strategies" / "run_portfol
 REPORT_TOOLTIP_SCRIPT_SHA256_BASE64_STR = "4x6jPzYq7ERLrCfTtOFnnJrgm6t+NFxUP+8hnzmKgAY="
 
 SUPPORTED_ANALYSIS_TUPLE = ("vanilla", "capacity", "timing", "risk", "stress")
+# *** CRITICAL*** Only these analyses receive --strategy-kwarg. Verified against
+# _analysis_command_tuple in scripts/research/run_strategy_analysis.py: capacity,
+# timing and stress build their commands without forwarding the kwargs at all.
+#
+# The consequence is quantitative, not cosmetic. Selecting a custom window plus
+# a multi-analysis preset produces a vanilla run over the requested window and a
+# capacity run over full history, written side by side under one job and one
+# timestamp, with nothing in either artifact saying they disagree. Bench states
+# this in the UI rather than letting the operator discover it by comparing two
+# reports that were never measured over the same period.
+KWARG_AWARE_ANALYSIS_TUPLE = ("vanilla", "risk")
 ANALYSIS_LABEL_DICT = {
     "vanilla": "Vanilla",
     "capacity": "Capacity",
@@ -59,6 +70,25 @@ RUN_PRESET_DICT = {
 RECENT_RUN_WINDOW_DAY_INT = 30
 RECENT_RUN_TABLE_LIMIT_INT = 8
 
+# Signature variants the console can be rendered in. Display-only: the cookie
+# changes nothing on the server and never reaches a launched job.
+#
+# It restyles *Bench*, not the reports it embeds. Those are baked at render time
+# by alpha.engine.report, so an already-generated report.html keeps whatever
+# variant produced it — switching here can leave the console and an embedded
+# report disagreeing until that report is re-rendered.
+BENCH_VARIANT_COOKIE_STR = "bench_variant"
+DEFAULT_BENCH_VARIANT_STR = "swiss"
+# Keep DEFAULT_BENCH_VARIANT_STR in sync with the :root fallback in bench.css —
+# tests/test_theme_no_hardcoded_colors.py pins the two together.
+BENCH_VARIANT_LABEL_DICT = {
+    "swiss": "Swiss",
+    "blueprint": "Blueprint",
+    "journal": "Journal",
+}
+# One year: a display preference the operator sets once, not a session.
+BENCH_VARIANT_COOKIE_MAX_AGE_INT = 365 * 24 * 60 * 60
+
 
 def create_app(job_manager_obj: JobManager | None = None) -> Flask:
     flask_app_obj = Flask(__name__)
@@ -68,12 +98,29 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
     # any page open in the browser, so we require a token only same-origin pages
     # can read, plus an Origin check. See _csrf_failure_response_fn.
     flask_app_obj.config["bench_token_str"] = secrets.token_urlsafe(24)
+    # job_id -> the run it produced. A finished job's answer never changes,
+    # so this stops the polling Jobs view from rescanning results/ forever.
+    flask_app_obj.config["produced_run_cache_dict"] = {}
+
+    def _active_variant_str() -> str:
+        """The requested signature variant, or the default if unrecognized.
+
+        Never trust the cookie: it reaches ``build_bench_theme_css``, which
+        raises on an unknown variant, so an edited cookie would otherwise 500
+        every page in the console.
+        """
+        cookie_value_str = request.cookies.get(BENCH_VARIANT_COOKIE_STR, "")
+        if cookie_value_str in BENCH_VARIANT_LABEL_DICT:
+            return cookie_value_str
+        return DEFAULT_BENCH_VARIANT_STR
 
     @flask_app_obj.context_processor
     def inject_globals_fn() -> dict[str, Any]:
         job_manager = flask_app_obj.config["job_manager_obj"]
+        active_variant_str = _active_variant_str()
         return {
             "bench_version_str": __version__,
+            "server_date_str": datetime.now().strftime("%Y-%m-%d"),
             "server_clock_str": datetime.now().strftime("%H:%M:%S"),
             "active_job_count_int": job_manager.active_count(),
             "analysis_label_dict": ANALYSIS_LABEL_DICT,
@@ -81,7 +128,9 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             "csrf_token_str": flask_app_obj.config["bench_token_str"],
             # Colour and type tokens for the console, derived from the same
             # signature palette the embedded reports render with.
-            "bench_theme_css_str": build_bench_theme_css(),
+            "bench_theme_css_str": build_bench_theme_css(active_variant_str),
+            "active_variant_str": active_variant_str,
+            "variant_label_dict": BENCH_VARIANT_LABEL_DICT,
         }
 
     def _csrf_failure_response_fn():
@@ -165,6 +214,12 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             run_entry_list=run_entry_list,
             latest_report_run=latest_report_run_obj,
             preset_dict=RUN_PRESET_DICT,
+            kwarg_aware_analysis_tuple=KWARG_AWARE_ANALYSIS_TUPLE,
+            kwarg_blind_analysis_tuple=tuple(
+                analysis_str
+                for analysis_str in SUPPORTED_ANALYSIS_TUPLE
+                if analysis_str not in KWARG_AWARE_ANALYSIS_TUPLE
+            ),
         )
 
     @flask_app_obj.route("/portfolios")
@@ -188,10 +243,59 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             )
         return render_template("portfolios.html", portfolio_view_list=portfolio_view_list)
 
+    @flask_app_obj.route("/variant/<variant_name_str>")
+    def set_variant_fn(variant_name_str: str) -> Response:
+        """Switch the console's signature variant and return where you were.
+
+        A GET is appropriate here: this writes one display cookie in the
+        operator's own browser and touches no server state, so there is nothing
+        for a cross-site request to accomplish beyond restyling their page.
+        """
+        if variant_name_str not in BENCH_VARIANT_LABEL_DICT:
+            abort(404)
+        # Only follow a referrer back to ourselves — an absolute foreign URL
+        # here would turn this route into an open redirect.
+        referrer_str = request.referrer or ""
+        same_origin_bool = bool(referrer_str) and urlparse(referrer_str).netloc == request.host
+        response_obj = redirect(referrer_str if same_origin_bool else url_for("index_page_fn"))
+        response_obj.set_cookie(
+            BENCH_VARIANT_COOKIE_STR,
+            variant_name_str,
+            max_age=BENCH_VARIANT_COOKIE_MAX_AGE_INT,
+            samesite="Lax",
+            httponly=True,
+        )
+        return response_obj
+
     @flask_app_obj.route("/jobs")
     def jobs_page_fn() -> str:
         job_manager = flask_app_obj.config["job_manager_obj"]
-        return render_template("jobs.html", job_list=job_manager.list_jobs())
+        job_list = job_manager.list_jobs()
+        return render_template(
+            "jobs.html",
+            job_list=job_list,
+            job_view_list=_job_view_dict_list(
+                job_list, flask_app_obj.config["produced_run_cache_dict"]
+            ),
+        )
+
+    @flask_app_obj.route("/api/jobs/<job_id_str>/cancel", methods=["POST"])
+    def cancel_job_api_fn(job_id_str: str) -> Response:
+        """Stop a queued or running job.
+
+        POST + CSRF, unlike the display-only variant switch: this kills a real
+        process tree, and a half-finished analysis leaves partial artifacts on
+        disk.
+        """
+        csrf_failure_obj = _csrf_failure_response_fn()
+        if csrf_failure_obj is not None:
+            return csrf_failure_obj
+
+        job_manager = flask_app_obj.config["job_manager_obj"]
+        if job_manager.get_job(job_id_str) is None:
+            abort(404)
+        job_manager.cancel(job_id_str)
+        return redirect(url_for("jobs_page_fn"))
 
     @flask_app_obj.route("/jobs/<job_id_str>/log")
     def job_log_page_fn(job_id_str: str) -> str:
@@ -210,7 +314,14 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
     @flask_app_obj.route("/fragments/jobs")
     def jobs_fragment_fn() -> str:
         job_manager = flask_app_obj.config["job_manager_obj"]
-        return render_template("_jobs_table.html", job_list=job_manager.list_jobs())
+        job_list = job_manager.list_jobs()
+        return render_template(
+            "_jobs_table.html",
+            job_list=job_list,
+            job_view_list=_job_view_dict_list(
+                job_list, flask_app_obj.config["produced_run_cache_dict"]
+            ),
+        )
 
     @flask_app_obj.route("/fragments/job-indicator")
     def job_indicator_fragment_fn() -> str:
@@ -249,6 +360,33 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
                 description="Capacity unavailable — missing capacity hook.",
             )
 
+        # Only kwargs this strategy's run_variant actually declares. run_strategy.py
+        # raises on an undeclared kwarg, so an unfiltered pass-through would just
+        # produce a job that dies on launch.
+        declared_param_name_set = {
+            param_obj.name_str for param_obj in strategy_entry_obj.run_variant_param_tuple
+        }
+        strategy_kwarg_list: list[str] = []
+        for param_name_str in sorted(declared_param_name_set):
+            submitted_value_str = request.form.get(f"kwarg__{param_name_str}", "").strip()
+            if submitted_value_str:
+                strategy_kwarg_list.append(f"{param_name_str}={submitted_value_str}")
+
+        unknown_kwarg_list = [
+            field_name_str[len("kwarg__") :]
+            for field_name_str in request.form
+            if field_name_str.startswith("kwarg__")
+            and field_name_str[len("kwarg__") :] not in declared_param_name_set
+            and request.form.get(field_name_str, "").strip()
+        ]
+        if unknown_kwarg_list:
+            abort(
+                400,
+                description=(
+                    "run_variant() does not accept: " + ", ".join(sorted(unknown_kwarg_list))
+                ),
+            )
+
         command_list = [
             sys.executable,
             str(RUN_ANALYSIS_SCRIPT_PATH),
@@ -258,8 +396,15 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             command_list += ["--analysis", analysis_str]
         if len(analysis_list) > 1:
             command_list.append("--keep-going")
+        for strategy_kwarg_str in strategy_kwarg_list:
+            command_list += ["--strategy-kwarg", strategy_kwarg_str]
 
-        label_str = f"{strategy_entry_obj.display_name_str} · {'+'.join(analysis_list)}"
+        # Jobs are labeled by the file stem — the same identity the results
+        # tree, the logs, and the catalog cards use. Overrides go in the label
+        # so the Jobs table never shows two runs of one strategy as identical.
+        label_str = f"{strategy_entry_obj.stem_str} · {'+'.join(analysis_list)}"
+        if strategy_kwarg_list:
+            label_str += f" · {' '.join(strategy_kwarg_list)}"
         job_manager = flask_app_obj.config["job_manager_obj"]
         job_manager.submit(label_str, strategy_entry_obj.stem_str, "analysis", command_list)
         return redirect(url_for("jobs_page_fn"))
@@ -322,12 +467,80 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
     return flask_app_obj
 
 
+def _job_view_dict_list(
+    job_list: list,
+    produced_run_cache_dict: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Pair each finished job with the report it appears to have produced.
+
+    Only for jobs that actually completed — a failed or cancelled run may still
+    have written partial artifacts, and offering them behind a "Report" button
+    would present an abandoned run as a finished result.
+
+    One ProducedRunFinder is shared by every row: it scans the results tree
+    lazily and at most once per render, which is what keeps this view usable
+    with a few hundred jobs on a page that polls every two seconds.
+
+    Resolved answers are memoised across renders. A job that has already
+    finished cannot produce a different artifact later, so once its report is
+    located the lookup never has to run again — after the first render the
+    polling view stops touching the results tree at all.
+    """
+    if produced_run_cache_dict is None:
+        produced_run_cache_dict = {}
+    produced_run_finder_obj = runs.ProducedRunFinder()
+    job_view_dict_list: list[dict[str, Any]] = []
+    for job_obj in job_list:
+        if job_obj.job_id_str in produced_run_cache_dict:
+            job_view_dict_list.append(
+                {"job": job_obj, "produced_run": produced_run_cache_dict[job_obj.job_id_str]}
+            )
+            continue
+
+        produced_run_obj = None
+        if job_obj.status_str == "passed" and job_obj.started_at_str:
+            try:
+                started_at_timestamp_float = datetime.fromisoformat(
+                    job_obj.started_at_str
+                ).timestamp()
+            except ValueError:
+                started_at_timestamp_float = None
+            if started_at_timestamp_float is not None:
+                produced_run_obj = produced_run_finder_obj.find_run_produced_after(
+                    job_obj.target_str,
+                    started_at_timestamp_float,
+                    job_obj.kind_str,
+                )
+        # Only a job that has stopped has a final answer; an active one may not
+        # have written its artifacts yet, so leave it to resolve next render.
+        if not job_obj.is_active_bool:
+            produced_run_cache_dict[job_obj.job_id_str] = produced_run_obj
+        job_view_dict_list.append({"job": job_obj, "produced_run": produced_run_obj})
+    return job_view_dict_list
+
+
+def _sortable_metric_float(summary_dict: dict, key_str: str) -> float | None:
+    """A summary metric as a plain float, or None when it is not a number.
+
+    None is kept distinct from 0.0 deliberately: a strategy with no Sharpe has
+    not scored zero, and sorting must sink it below every measured one rather
+    than placing it among the mediocre.
+    """
+    value_obj = summary_dict.get(key_str)
+    if isinstance(value_obj, bool) or not isinstance(value_obj, (int, float)):
+        return None
+    return float(value_obj)
+
+
 def _build_strategy_card_dict(strategy_entry_obj, run_index_obj) -> dict[str, Any]:
     latest_vanilla_run_obj = run_index_obj.latest_vanilla_for(
         strategy_entry_obj.module_import_str, strategy_entry_obj.stem_str
     )
     latest_run_obj = run_index_obj.latest_run_for(
         strategy_entry_obj.module_import_str, strategy_entry_obj.stem_str
+    )
+    vanilla_summary_dict = (
+        latest_vanilla_run_obj.summary_dict if latest_vanilla_run_obj is not None else {}
     )
     return {
         "strategy": strategy_entry_obj,
@@ -340,6 +553,22 @@ def _build_strategy_card_dict(strategy_entry_obj, run_index_obj) -> dict[str, An
         "headline_chip_list": latest_vanilla_run_obj.headline_chip_list()
         if latest_vanilla_run_obj is not None
         else [],
+        # A strategy is "tested" when the results tree has a run mapped to it.
+        # This is the catalog's most useful split: most files here have never
+        # been run, and a card with no numbers is a different kind of object
+        # from one carrying a measured track record.
+        "is_tested_bool": latest_run_obj is not None,
+        "sort_value_dict": {
+            "cagr": _sortable_metric_float(vanilla_summary_dict, "ann_return_pct"),
+            "sharpe": _sortable_metric_float(vanilla_summary_dict, "sharpe"),
+            "maxdd": _sortable_metric_float(vanilla_summary_dict, "max_drawdown_pct"),
+            "trades": _sortable_metric_float(vanilla_summary_dict, "trade_count"),
+            "last_run": (
+                latest_run_obj.effective_activity_timestamp_float
+                if latest_run_obj is not None
+                else None
+            ),
+        },
     }
 
 

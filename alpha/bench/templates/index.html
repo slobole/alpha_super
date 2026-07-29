@@ -3,20 +3,29 @@
 {% block title %}Strategies{% endblock %}
 
 {% block content %}
+{# Evidence and absence of evidence are different objects: a strategy with a
+   measured track record renders as a dense sortable row, while the many files
+   that have never been run are collapsed below — they would otherwise drown
+   the seven you actually trade in identical empty cards. #}
+{% set tested_card_list = card_dict_list | selectattr('is_tested_bool') | list %}
+{% set untested_card_list = card_dict_list | rejectattr('is_tested_bool') | list %}
+
 <div class="page-head">
   <div>
     <h1 class="page-title">Strategies</h1>
-    <p class="page-sub">Every <span class="mono">strategy_*.py</span> in the repo. Wired = live / supported pods. Drop in a new file and it shows up here.</p>
   </div>
   <div class="stat-row">
     <div class="stat"><div class="stat-value">{{ strategy_count_int }}</div><div class="stat-label">Strategies</div></div>
-    <div class="stat"><div class="stat-value" style="color:var(--gold)">{{ wired_count_int }}</div><div class="stat-label">Wired</div></div>
+    <div class="stat"><div class="stat-value">{{ tested_card_list|length }}</div><div class="stat-label">Tested</div></div>
+    <div class="stat"><div class="stat-value">{{ wired_count_int }}</div><div class="stat-label">Wired</div></div>
     <div class="stat"><div class="stat-value">{{ recent_strategy_count_int }}</div><div class="stat-label">Recent {{ recent_run_window_day_int }}d</div></div>
   </div>
 </div>
 
 <div class="toolbar">
-  <input id="search" class="search" type="text" placeholder="Search strategies by name, family, or description…" autocomplete="off">
+  {# Filters get the full measure; search sits under them so neither has to
+     compete for width. Category chips stack (OR within the set); Wired and
+     Recent are independent toggles that AND on top. #}
   <div class="filter-stack" id="filter-bar">
     <div class="filter-bar">
     <span class="filter-chip active" data-filter="all">All</span>
@@ -32,77 +41,143 @@
       {% endfor %}
     </div>
   </div>
+  <input id="search" class="search" type="text" placeholder="Search strategies by name, family, or description…" autocomplete="off">
 </div>
 
-<div class="card-grid" id="card-grid">
-  {% for card in card_dict_list %}
-  {% set s = card.strategy %}
-  <div class="card {{ 'is-wired' if s.is_wired_bool }}"
-       data-module="{{ s.module_import_str }}"
-       data-wired="{{ '1' if s.is_wired_bool else '0' }}"
-       data-recent="{{ '1' if card.has_recent_run_bool else '0' }}"
-       data-category="{{ s.category_str }}"
-       data-subcategory="{{ s.subcategory_str or '' }}"
-       data-search="{{ (s.display_name_str ~ ' ' ~ s.stem_str ~ ' ' ~ s.summary_str ~ ' ' ~ s.category_label_str ~ ' ' ~ (s.subcategory_label_str or ''))|lower }}">
-    <div class="card-head">
-      <div>
-        <div class="card-title"><a href="{{ url_for('strategy_page_fn', module_import_str=s.module_import_str) }}">{{ s.display_name_str }}</a></div>
-        <div class="card-sub">{{ s.summary_str or s.stem_str }}</div>
-      </div>
-      {% if s.is_wired_bool %}<span class="badge badge-wired">★ Wired</span>{% endif %}
-    </div>
-
-    <div class="card-meta">
-      <span class="badge badge-cat">{{ s.category_label_str }}</span>
-      {% if s.subcategory_label_str %}<span class="badge badge-subcat">{{ s.subcategory_label_str }}</span>{% endif %}
-      {% if not s.has_run_variant_bool %}<span class="badge badge-norun">no run_variant</span>{% endif %}
-    </div>
-
-    {% if card.headline_chip_list %}
-    <div class="chip-row">
-      {% for chip in card.headline_chip_list %}
-      <div class="chip {{ chip.tone_str }}">
-        <span class="chip-label">{{ chip.label_str }}</span>
-        <span class="chip-value">{{ chip.value_str }}</span>
-      </div>
-      {% endfor %}
-    </div>
-    {% else %}
-    <div class="muted-2" style="font-size:12px;">No vanilla run yet — click Run to create one.</div>
-    {% endif %}
-
-    <div class="card-foot">
-      <span class="muted-2" style="font-size:12px;">
-        {% if card.latest_run %}{{ card.latest_run.display_analysis_label_str|lower }} {{ card.latest_run.display_timestamp_str }}{% endif %}
-        {% if card.run_count_int %} · {{ card.run_count_int }} run{{ 's' if card.run_count_int != 1 }}{% endif %}
-      </span>
-      <div class="btn-row">
-        <form class="inline" method="post" action="{{ url_for('run_api_fn') }}">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
-          <input type="hidden" name="module_import" value="{{ s.module_import_str }}">
-          <input type="hidden" name="analysis" value="vanilla">
-          <button class="btn btn-sm" {{ 'disabled' if not s.has_run_variant_bool }}>Run vanilla</button>
-        </form>
-        <a class="btn btn-sm btn-primary" href="{{ url_for('strategy_page_fn', module_import_str=s.module_import_str) }}">Open</a>
-      </div>
-    </div>
+<div class="section section-flush">
+  <h2 class="section-title">Tested</h2>
+  <p class="table-caption">{{ tested_card_list|length }} strategies with at least one recorded run. Metrics are the latest vanilla backtest; click a column header to sort — strategies missing that figure always sink to the bottom.</p>
+  <div class="panel">
+    <table class="table table-dense" id="tested-table">
+      <thead>
+        <tr>
+          <th>Strategy</th>
+          <th class="num sortable" data-sort-key="cagr">CAGR</th>
+          <th class="num sortable" data-sort-key="sharpe">Sharpe</th>
+          <th class="num sortable" data-sort-key="maxdd">Max DD</th>
+          <th class="num sortable" data-sort-key="trades">Trades</th>
+          <th class="sortable" data-sort-key="lastrun">Last run</th>
+          <th class="num">Runs</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for card in tested_card_list %}
+        {% set s = card.strategy %}
+        {% set sv = card.sort_value_dict %}
+        {% set sm = card.latest_vanilla_run.summary_dict if card.latest_vanilla_run else {} %}
+        <tr class="strat-item"
+            data-module="{{ s.module_import_str }}"
+            data-wired="{{ '1' if s.is_wired_bool else '0' }}"
+            data-recent="{{ '1' if card.has_recent_run_bool else '0' }}"
+            data-category="{{ s.category_str }}"
+            data-subcategory="{{ s.subcategory_str or '' }}"
+            data-search="{{ (s.display_name_str ~ ' ' ~ s.stem_str ~ ' ' ~ s.summary_str ~ ' ' ~ s.category_label_str ~ ' ' ~ (s.subcategory_label_str or ''))|lower }}"
+            data-cagr="{{ '%.4f'|format(sv.cagr) if sv.cagr is not none }}"
+            data-sharpe="{{ '%.4f'|format(sv.sharpe) if sv.sharpe is not none }}"
+            data-maxdd="{{ '%.4f'|format(sv.maxdd) if sv.maxdd is not none }}"
+            data-trades="{{ '%.0f'|format(sv.trades) if sv.trades is not none }}"
+            data-lastrun="{{ '%.0f'|format(sv.last_run) if sv.last_run is not none }}">
+          <td>
+            <div class="strat-name">
+              <a class="mono" href="{{ url_for('strategy_page_fn', module_import_str=s.module_import_str) }}">{{ s.stem_str }}</a>
+              {% if s.is_wired_bool %}<span class="badge badge-wired">Wired</span>{% endif %}
+            </div>
+            <div class="strat-badges">
+              <span class="badge badge-cat">{{ s.category_label_str }}</span>
+              {% if s.subcategory_label_str %}<span class="badge badge-subcat">{{ s.subcategory_label_str }}</span>{% endif %}
+              {% if not s.has_run_variant_bool %}<span class="badge badge-norun">no run_variant</span>{% endif %}
+            </div>
+          </td>
+          <td class="num {{ 'tone-pos' if (sm.get('ann_return_pct') or 0) >= 0 else 'tone-neg' }}">{{ '%.1f%%'|format(sm.get('ann_return_pct')) if sm.get('ann_return_pct') is not none else '—' }}</td>
+          <td class="num">{{ '%.2f'|format(sm.get('sharpe')) if sm.get('sharpe') is not none else '—' }}</td>
+          <td class="num tone-neg">{{ '%.1f%%'|format(sm.get('max_drawdown_pct')) if sm.get('max_drawdown_pct') is not none else '—' }}</td>
+          <td class="num">{{ '{:,}'.format(sm.get('trade_count')|int) if sm.get('trade_count') is not none else '—' }}</td>
+          <td class="muted">{{ card.latest_run.display_timestamp_str[:10] }} · {{ card.latest_run.display_analysis_label_str|lower }}</td>
+          <td class="num">{{ card.run_count_int }}</td>
+          <td class="num">
+            <div class="btn-row job-actions">
+              <form class="inline" method="post" action="{{ url_for('run_api_fn') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
+                <input type="hidden" name="module_import" value="{{ s.module_import_str }}">
+                <input type="hidden" name="analysis" value="vanilla">
+                <button class="btn btn-sm" {{ 'disabled' if not s.has_run_variant_bool }}>Run</button>
+              </form>
+              <a class="btn btn-sm btn-primary" href="{{ url_for('strategy_page_fn', module_import_str=s.module_import_str) }}">Open</a>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
-  {% endfor %}
+  <div id="no-results" class="empty hidden">No tested strategies match your search.</div>
 </div>
-<div id="no-results" class="empty hidden">No strategies match your search.</div>
+
+<div class="section">
+  <h2 class="section-title">Not yet tested</h2>
+  <details id="untested-list" class="untested">
+    <summary class="untested-summary">
+      Show {{ untested_card_list|length }} strategies with no recorded run
+    </summary>
+    <p class="table-caption">Files under <span class="mono">strategies/</span> that no run in <span class="mono">results/</span> maps to. "Never run" is a different state from "ran and failed" — nothing here carries a measured number.</p>
+    <div class="panel">
+      <table class="table table-dense">
+        <thead><tr><th>Strategy</th><th>Family</th><th></th></tr></thead>
+        <tbody>
+          {% for card in untested_card_list %}
+          {% set s = card.strategy %}
+          <tr class="strat-item"
+              data-module="{{ s.module_import_str }}"
+              data-wired="{{ '1' if s.is_wired_bool else '0' }}"
+              data-recent="0"
+              data-category="{{ s.category_str }}"
+              data-subcategory="{{ s.subcategory_str or '' }}"
+              data-search="{{ (s.display_name_str ~ ' ' ~ s.stem_str ~ ' ' ~ s.summary_str ~ ' ' ~ s.category_label_str ~ ' ' ~ (s.subcategory_label_str or ''))|lower }}">
+            <td>
+              <div class="strat-name">
+                <a class="mono" href="{{ url_for('strategy_page_fn', module_import_str=s.module_import_str) }}">{{ s.stem_str }}</a>
+                {% if s.is_wired_bool %}<span class="badge badge-wired">Wired</span>{% endif %}
+                {% if not s.has_run_variant_bool %}<span class="badge badge-norun">no run_variant</span>{% endif %}
+              </div>
+            </td>
+            <td>
+              <span class="badge badge-cat">{{ s.category_label_str }}</span>
+              {% if s.subcategory_label_str %}<span class="badge badge-subcat">{{ s.subcategory_label_str }}</span>{% endif %}
+            </td>
+            <td class="num">
+              <div class="btn-row job-actions">
+                <form class="inline" method="post" action="{{ url_for('run_api_fn') }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
+                  <input type="hidden" name="module_import" value="{{ s.module_import_str }}">
+                  <input type="hidden" name="analysis" value="vanilla">
+                  <button class="btn btn-sm" {{ 'disabled' if not s.has_run_variant_bool }}>Run vanilla</button>
+                </form>
+                <a class="btn btn-sm btn-ghost" href="{{ url_for('strategy_page_fn', module_import_str=s.module_import_str) }}">Open</a>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+</div>
 
 {% if recent_run_list %}
 <div class="section">
-  <h2 class="section-title">Recent Runs</h2>
+  <h2 class="section-title">Recent runs</h2>
+  <p class="table-caption">Newest {{ recent_run_list|length }} analyzer run{{ 's' if recent_run_list|length != 1 }} across every strategy, ordered by when the artifacts were written.</p>
   <div class="panel">
     <table class="table">
-      <thead><tr><th>Strategy</th><th>Analysis</th><th>When</th><th class="num">CAGR</th><th class="num">Sharpe</th><th class="num">Max DD</th><th></th></tr></thead>
+      <thead><tr><th>Strategy</th><th>Analysis</th><th>When</th><th>Backtest window</th><th class="num">CAGR</th><th class="num">Sharpe</th><th class="num">Max DD</th><th></th></tr></thead>
       <tbody>
         {% for run in recent_run_list %}
         <tr>
           <td class="mono">{{ run.run_name_str }}</td>
           <td>{{ run.display_analysis_label_str }}</td>
           <td class="muted">{{ run.display_timestamp_str }}</td>
+          <td class="mono">{{ run.backtest_window_str or '—' }}</td>
           {% set sm = run.summary_dict %}
           <td class="num {{ 'tone-pos' if (sm.get('ann_return_pct') or 0) >= 0 else 'tone-neg' }}">{{ '%.1f%%'|format(sm.get('ann_return_pct')) if sm.get('ann_return_pct') is not none else '—' }}</td>
           <td class="num">{{ '%.2f'|format(sm.get('sharpe')) if sm.get('sharpe') is not none else '—' }}</td>
@@ -119,37 +194,95 @@
 <script>
   (function () {
     const searchInput = document.getElementById('search');
-    const cardList = Array.from(document.querySelectorAll('#card-grid .card'));
+    const itemList = Array.from(document.querySelectorAll('.strat-item'));
     const chipList = Array.from(document.querySelectorAll('#filter-bar .filter-chip'));
+    const allChip = chipList.find(function (c) { return c.dataset.filter === 'all'; });
     const noResults = document.getElementById('no-results');
-    let activeFilter = 'all';
+    const untestedDetails = document.getElementById('untested-list');
+
+    // Stacking filters: category/subcategory chips accumulate (an item matches
+    // if it belongs to ANY selected family); Wired and Recent are independent
+    // toggles ANDed on top. "All" clears everything.
+    const activeCategorySet = new Set();
+    let wiredOnly = false;
+    let recentOnly = false;
 
     function apply() {
       const query = searchInput.value.trim().toLowerCase();
-      let visible = 0;
-      cardList.forEach(function (card) {
-        let okFilter = true;
-        if (activeFilter === 'recent') okFilter = card.dataset.recent === '1';
-        else if (activeFilter === 'wired') okFilter = card.dataset.wired === '1';
-        else if (activeFilter.startsWith('cat:')) okFilter = card.dataset.category === activeFilter.slice(4);
-        else if (activeFilter.startsWith('subcat:')) okFilter = card.dataset.subcategory === activeFilter.slice(7);
-        const okSearch = !query || card.dataset.search.indexOf(query) !== -1;
-        const show = okFilter && okSearch;
-        card.classList.toggle('hidden', !show);
-        if (show) visible++;
+      let testedVisible = 0;
+      let untestedVisible = 0;
+      itemList.forEach(function (item) {
+        const inTested = !untestedDetails.contains(item);
+        let ok = true;
+        if (wiredOnly) ok = ok && item.dataset.wired === '1';
+        if (recentOnly) ok = ok && item.dataset.recent === '1';
+        if (activeCategorySet.size > 0) {
+          ok = ok && (activeCategorySet.has('cat:' + item.dataset.category)
+                   || activeCategorySet.has('subcat:' + item.dataset.subcategory));
+        }
+        ok = ok && (!query || item.dataset.search.indexOf(query) !== -1);
+        item.classList.toggle('hidden', !ok);
+        if (ok) { if (inTested) testedVisible++; else untestedVisible++; }
       });
-      noResults.classList.toggle('hidden', visible !== 0);
+      noResults.classList.toggle('hidden', testedVisible !== 0);
+      // A search that only matches never-run files would look like "no results"
+      // while its hits sit inside the collapsed section — open it for them.
+      if (query && untestedVisible > 0 && testedVisible === 0) untestedDetails.open = true;
+      allChip.classList.toggle('active', activeCategorySet.size === 0 && !wiredOnly && !recentOnly);
     }
 
     chipList.forEach(function (chip) {
       chip.addEventListener('click', function () {
-        chipList.forEach(function (c) { c.classList.remove('active'); });
-        chip.classList.add('active');
-        activeFilter = chip.dataset.filter;
+        const filter = chip.dataset.filter;
+        if (filter === 'all') {
+          activeCategorySet.clear();
+          wiredOnly = false;
+          recentOnly = false;
+          chipList.forEach(function (c) { c.classList.remove('active'); });
+        } else if (filter === 'wired') {
+          wiredOnly = !wiredOnly;
+          chip.classList.toggle('active', wiredOnly);
+        } else if (filter === 'recent') {
+          recentOnly = !recentOnly;
+          chip.classList.toggle('active', recentOnly);
+        } else {
+          if (activeCategorySet.has(filter)) activeCategorySet.delete(filter);
+          else activeCategorySet.add(filter);
+          chip.classList.toggle('active', activeCategorySet.has(filter));
+        }
         apply();
       });
     });
     searchInput.addEventListener('input', apply);
+    apply();
+
+    // Column sorting for the tested table. First click sorts descending (the
+    // "best first" reading for every metric here — Max DD values are negative,
+    // so descending puts the shallowest drawdown on top too); a second click
+    // flips it. Rows missing the figure always sink to the bottom: absence of
+    // a number is not a score.
+    const testedBody = document.querySelector('#tested-table tbody');
+    const sortableHeads = Array.from(document.querySelectorAll('#tested-table th.sortable'));
+    sortableHeads.forEach(function (head) {
+      head.addEventListener('click', function () {
+        const key = head.dataset.sortKey;
+        const desc = !(head.dataset.dir === 'desc');
+        sortableHeads.forEach(function (h) { h.removeAttribute('data-dir'); h.classList.remove('sort-desc', 'sort-asc'); });
+        head.dataset.dir = desc ? 'desc' : 'asc';
+        head.classList.add(desc ? 'sort-desc' : 'sort-asc');
+        const rows = Array.from(testedBody.querySelectorAll('tr'));
+        rows.sort(function (a, b) {
+          const va = parseFloat(a.dataset[key]);
+          const vb = parseFloat(b.dataset[key]);
+          const aMiss = isNaN(va), bMiss = isNaN(vb);
+          if (aMiss && bMiss) return 0;
+          if (aMiss) return 1;
+          if (bMiss) return -1;
+          return desc ? vb - va : va - vb;
+        });
+        rows.forEach(function (row) { testedBody.appendChild(row); });
+      });
+    });
   })();
 </script>
 {% endblock %}

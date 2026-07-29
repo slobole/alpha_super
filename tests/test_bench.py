@@ -51,6 +51,7 @@ class RecordingJobManager:
 
     def __init__(self) -> None:
         self.call_list: list[tuple[str, str, list[str]]] = []
+        self.cancelled_id_list: list[str] = []
 
     def submit(self, label_str, target_str, kind_str, command_list):
         self.call_list.append((kind_str, target_str, list(command_list)))
@@ -68,6 +69,10 @@ class RecordingJobManager:
 
     def get_job(self, job_id_str):
         return None
+
+    def cancel(self, job_id_str):
+        self.cancelled_id_list.append(job_id_str)
+        return True
 
 
 @pytest.fixture()
@@ -479,6 +484,63 @@ def test_run_scanner_keeps_artifact_leaves_and_ignores_empty_nested_containers(
     assert run_entry_list[1].activity_timestamp_float == pytest.approx(legacy_timestamp_float)
 
 
+def test_run_scanner_reads_the_backtest_window_the_runner_recorded(monkeypatch, tmp_path):
+    """The tested window must come from run_info.json, never be inferred.
+
+    Two runs of one strategy over different windows are otherwise identical in
+    the history table, which makes it impossible to tell a full-history run from
+    a truncated one when comparing metrics.
+    """
+    results_root_path = tmp_path / "results"
+    run_name_dir_path = results_root_path / "research" / "strategy" / "sample_strategy"
+
+    windowed_leaf_path = run_name_dir_path / "vanilla_backtest" / "2026-07-01_120000"
+    windowed_leaf_path.mkdir(parents=True)
+    (windowed_leaf_path / "run_info.json").write_text(
+        json.dumps(
+            {
+                "analysis_type": "vanilla_backtest",
+                "parameters": {
+                    "capital": 100000.0,
+                    "start_date": "2004-01-02",
+                    "end_date": "2026-06-30",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    windowless_leaf_path = run_name_dir_path / "stress_test" / "2026-07-02_120000"
+    windowless_leaf_path.mkdir(parents=True)
+    (windowless_leaf_path / "summary.json").write_text(json.dumps({"sharpe": 1.0}), encoding="utf-8")
+
+    monkeypatch.setattr(runs, "RESULTS_ROOT_PATH", results_root_path)
+    run_by_analysis_dict = {
+        run_obj.analysis_dir_str: run_obj
+        for run_obj in runs._scan_run_entries(run_name_dir_path, "sample_strategy")
+    }
+
+    vanilla_run_obj = run_by_analysis_dict["vanilla_backtest"]
+    assert vanilla_run_obj.backtest_window_str == "2004-01-02 → 2026-06-30"
+    assert vanilla_run_obj.capital_display_str == "100,000"
+
+    # An analysis that recorded no window must report nothing rather than
+    # implying it covered full history.
+    stress_run_obj = run_by_analysis_dict["stress_test"]
+    assert stress_run_obj.backtest_window_str is None
+    assert stress_run_obj.capital_display_str is None
+
+
+def test_run_entry_ignores_a_partial_or_malformed_window():
+    """A half-written window is not a window."""
+    run_obj = _run_entry("sample", "vanilla_backtest")
+    run_obj.run_info_dict = {"parameters": {"start_date": "2004-01-02", "capital": True}}
+
+    assert run_obj.backtest_window_str is None
+    # ``True`` is an int subclass; treating it as capital would print "1".
+    assert run_obj.capital_display_str is None
+
+
 def test_recent_feed_uses_activity_order_and_limit():
     older_run_obj = _run_entry("older", "legacy_older", activity_timestamp_float=100.0)
     newest_run_obj = _run_entry("newest", "legacy_newest", activity_timestamp_float=300.0)
@@ -670,6 +732,112 @@ def test_full_preset_still_launches_for_strategy_without_capacity_hook(recording
     assert "--keep-going" in job_manager.call_list[-1][2]
 
 
+def test_run_variant_params_are_read_from_the_signature(recording_client):
+    """Fields come from each strategy's own run_variant, not an assumption.
+
+    run_strategy.py raises on a kwarg the target does not declare, so offering
+    a field the strategy cannot accept would build a job that dies on launch.
+    """
+    dv2_entry = catalog.get_strategy_by_module(DV2_MODULE_STR)
+    param_name_tuple = tuple(p.name_str for p in dv2_entry.run_variant_param_tuple)
+
+    assert "backtest_start_date_str" in param_name_tuple
+    assert "end_date_str" in param_name_tuple
+    assert "capital_base_float" in param_name_tuple
+    # Bench builds the command, so the runner's own plumbing is never offered.
+    assert "output_dir_str" not in param_name_tuple
+    assert "save_results_bool" not in param_name_tuple
+
+    default_by_name_dict = {
+        p.name_str: p.default_repr_str for p in dv2_entry.run_variant_param_tuple
+    }
+    assert default_by_name_dict["backtest_start_date_str"] == "'2004-01-01'"
+
+
+def test_only_scalar_kwargs_are_offered_as_fields():
+    """A DataFrame cannot be expressed as --strategy-kwarg KEY=VALUE."""
+    offered_name_set = {
+        param_obj.name_str
+        for entry_obj in catalog.list_strategies()
+        for param_obj in entry_obj.run_variant_param_tuple
+    }
+    assert "pricing_data_df" not in offered_name_set
+    assert "config" not in offered_name_set
+    assert offered_name_set  # the filter did not empty the catalog
+    assert all(
+        name_str.endswith(catalog.SCALAR_KWARG_SUFFIX_TUPLE) for name_str in offered_name_set
+    )
+
+
+def test_run_api_forwards_declared_kwargs_and_stamps_them_on_the_label(recording_client):
+    client, job_manager, token_str = recording_client
+    response = client.post(
+        "/api/run",
+        data={
+            "csrf_token": token_str,
+            "module_import": DV2_MODULE_STR,
+            "analysis": "vanilla",
+            "kwarg__backtest_start_date_str": "2015-01-01",
+            "kwarg__end_date_str": "2020-12-31",
+            "kwarg__capital_base_float": "",  # blank means "use the default"
+        },
+    )
+    assert response.status_code == 302
+
+    _kind_str, _target_str, command_list = job_manager.call_list[-1]
+    assert "--strategy-kwarg" in command_list
+    assert "backtest_start_date_str=2015-01-01" in command_list
+    assert "end_date_str=2020-12-31" in command_list
+    # A blank field must not be forwarded as an empty override.
+    assert not any(part_str.startswith("capital_base_float=") for part_str in command_list)
+
+
+def test_run_api_rejects_a_kwarg_the_strategy_does_not_declare(recording_client):
+    """Fail here rather than launching a job that dies inside the runner."""
+    client, job_manager, token_str = recording_client
+    response = client.post(
+        "/api/run",
+        data={
+            "csrf_token": token_str,
+            "module_import": DV2_MODULE_STR,
+            "analysis": "vanilla",
+            "kwarg__not_a_real_param_str": "x",
+        },
+    )
+    assert response.status_code == 400
+    assert job_manager.call_list == []
+
+
+def test_kwarg_blind_analyses_match_the_runner(recording_client):
+    """The warning must name the analyses that genuinely ignore the kwargs.
+
+    *** CRITICAL*** This is asserted against the runner's own command builder,
+    not against a hand-maintained list. If a future change starts forwarding
+    --strategy-kwarg to capacity or stress, the UI warning becomes false and
+    this test fails instead of the operator silently comparing a windowed
+    vanilla against a full-history capacity run.
+    """
+    from alpha.bench.app import KWARG_AWARE_ANALYSIS_TUPLE, SUPPORTED_ANALYSIS_TUPLE
+    from scripts.research.run_strategy_analysis import _analysis_command_tuple
+
+    forwarding_analysis_set = set()
+    for analysis_str in SUPPORTED_ANALYSIS_TUPLE:
+        command_tuple = _analysis_command_tuple(
+            analysis_str=analysis_str,
+            module_import_str=DV2_MODULE_STR,
+            output_dir_str="results",
+            save_results_bool=True,
+            show_display_bool=False,
+            show_signal_progress_bool=False,
+            performance_warnings_as_errors_bool=False,
+            strategy_kwarg_tuple=("probe_marker_str=1",),
+        )
+        if "probe_marker_str=1" in command_tuple:
+            forwarding_analysis_set.add(analysis_str)
+
+    assert forwarding_analysis_set == set(KWARG_AWARE_ANALYSIS_TUPLE)
+
+
 def test_run_api_rejects_unknown_module(recording_client):
     client, _job_manager, token_str = recording_client
     response = client.post("/api/run", data={"csrf_token": token_str, "module_import": "does.not.exist", "analysis": "vanilla"})
@@ -742,6 +910,49 @@ def test_pages_render(recording_client, path_str):
     assert client.get(path_str).status_code == 200
 
 
+def test_variant_switch_sets_the_cookie_and_restyles_the_console(recording_client):
+    client, _job_manager, _token_str = recording_client
+
+    default_text_str = client.get("/").get_data(as_text=True)
+    assert "#ffffff" in default_text_str  # swiss page
+
+    switch_response = client.get("/variant/blueprint")
+    assert switch_response.status_code == 302
+    assert "bench_variant=blueprint" in switch_response.headers["Set-Cookie"]
+
+    blueprint_text_str = client.get("/").get_data(as_text=True)
+    assert "#16283e" in blueprint_text_str  # blueprint sheet
+    assert "--color-ink: #dce8f5" in blueprint_text_str
+
+
+def test_variant_switch_rejects_an_unknown_variant(recording_client):
+    client, _job_manager, _token_str = recording_client
+    assert client.get("/variant/not-a-variant").status_code == 404
+
+
+def test_console_falls_back_when_the_variant_cookie_is_tampered_with(recording_client):
+    """An edited cookie must not 500 every page.
+
+    The value reaches build_bench_theme_css, which raises on an unknown
+    variant, so it has to be validated against the allowlist first.
+    """
+    client, _job_manager, _token_str = recording_client
+    client.set_cookie("bench_variant", "'; DROP TABLE", domain="localhost")
+
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "--color-page: #ffffff" in response.get_data(as_text=True)
+
+
+def test_variant_switch_does_not_follow_a_foreign_referrer(recording_client):
+    """The referrer bounce must not become an open redirect."""
+    client, _job_manager, _token_str = recording_client
+
+    response = client.get("/variant/journal", headers={"Referer": "https://evil.example/x"})
+    assert response.status_code == 302
+    assert "evil.example" not in response.headers["Location"]
+
+
 def test_strategy_page_marks_capacity_unavailable_without_hook(recording_client):
     client, _job_manager, _token_str = recording_client
     response = client.get(f"/strategy/{EOM_ZROZ_SPY_SSO_MODULE_STR}")
@@ -769,6 +980,49 @@ def test_index_renders_momentum_and_recent_run_filters(recording_client):
     atr_card_excerpt_str = html_str[atr_card_start_int : atr_card_start_int + 1_200]
     assert 'data-subcategory="atr_normalized_rotation"' in atr_card_excerpt_str
     assert "ATR-Normalized Rotation" in atr_card_excerpt_str
+
+
+def test_sortable_metric_rejects_non_numbers_and_keeps_none_distinct_from_zero():
+    """A strategy with no Sharpe has not scored zero.
+
+    Sorting must sink it below every measured strategy, so the helper returns
+    None — never 0.0 — for anything that is not a real number. bool is an int
+    subclass, so a stray True in a summary would otherwise sort as 1.0.
+    """
+    from alpha.bench.app import _sortable_metric_float
+
+    assert _sortable_metric_float({"sharpe": 1.35}, "sharpe") == pytest.approx(1.35)
+    assert _sortable_metric_float({"sharpe": 2}, "sharpe") == pytest.approx(2.0)
+    assert _sortable_metric_float({}, "sharpe") is None
+    assert _sortable_metric_float({"sharpe": None}, "sharpe") is None
+    assert _sortable_metric_float({"sharpe": "1.2"}, "sharpe") is None
+    assert _sortable_metric_float({"sharpe": True}, "sharpe") is None
+
+
+def test_index_splits_tested_rows_from_the_untested_fold(recording_client):
+    """Evidence and absence of evidence render as different objects.
+
+    A tested strategy is a dense sortable row carrying its metrics as data
+    attributes; the never-run majority is folded into a collapsed section so it
+    cannot drown the strategies that carry a track record.
+    """
+    client, _job_manager, _token_str = recording_client
+    html_str = client.get("/").get_data(as_text=True)
+
+    assert 'id="tested-table"' in html_str
+    assert 'id="untested-list"' in html_str
+    assert 'data-sort-key="sharpe"' in html_str
+
+    # DV2 has recorded vanilla runs, so its row must sit in the tested table
+    # with a numeric sharpe to sort on.
+    dv2_row_start_int = html_str.index(f'data-module="{DV2_MODULE_STR}"')
+    dv2_row_excerpt_str = html_str[dv2_row_start_int : dv2_row_start_int + 1_500]
+    assert 'data-sharpe="' in dv2_row_excerpt_str
+    untested_start_int = html_str.index('id="untested-list"')
+    assert dv2_row_start_int < untested_start_int  # tested section renders first
+
+    # Every strategy appears exactly once across the two sections.
+    assert html_str.count(f'data-module="{DV2_MODULE_STR}"') == 1
 
 
 def test_index_reuses_one_run_index(recording_client, monkeypatch):
@@ -841,6 +1095,219 @@ def test_job_runner_dedupes_active_duplicates(monkeypatch, tmp_path):
     third_job = job_manager.submit("dup", "dup", "analysis", list(sleep_command_list))
     assert third_job.job_id_str != first_job.job_id_str  # a finished job is not a duplicate
     _wait_for_terminal(job_manager, third_job.job_id_str)
+
+
+def test_cancel_stops_a_running_job_without_calling_it_a_failure(monkeypatch, tmp_path):
+    """A cancelled run is stopped, not judged.
+
+    The kill produces a non-zero exit code; recording that as "failed" would put
+    a red row against a backtest nobody ever evaluated.
+    """
+    from alpha.bench import jobs as jobs_module
+
+    monkeypatch.setattr(jobs_module, "JOBS_DIR_PATH", tmp_path)
+    job_manager = jobs_module.JobManager(max_concurrency_int=2)
+
+    long_job = job_manager.submit(
+        "long", "long", "analysis", [sys.executable, "-c", "import time; time.sleep(30)"]
+    )
+    # Wait for the child to actually exist before cancelling it.
+    for _attempt_int in range(100):
+        if job_manager.get_job(long_job.job_id_str).pid_int is not None:
+            break
+        time.sleep(0.05)
+
+    assert job_manager.cancel(long_job.job_id_str) is True
+    cancelled_job = _wait_for_terminal(job_manager, long_job.job_id_str)
+    assert cancelled_job.status_str == jobs_module.STATUS_CANCELLED_STR
+    assert cancelled_job.status_str != jobs_module.STATUS_FAILED_STR
+
+
+def test_cancel_of_a_queued_job_never_launches_it(monkeypatch, tmp_path):
+    """Cancelling in the queue must stop the command running at all."""
+    from alpha.bench import jobs as jobs_module
+
+    monkeypatch.setattr(jobs_module, "JOBS_DIR_PATH", tmp_path)
+    job_manager = jobs_module.JobManager(max_concurrency_int=1)
+
+    marker_path = tmp_path / "queued-job-ran.txt"
+    blocking_job = job_manager.submit(
+        "block", "block", "analysis", [sys.executable, "-c", "import time; time.sleep(2)"]
+    )
+    queued_job = job_manager.submit(
+        "queued",
+        "queued",
+        "analysis",
+        [sys.executable, "-c", f"open(r'{marker_path}', 'w').write('ran')"],
+    )
+
+    assert job_manager.cancel(queued_job.job_id_str) is True
+    assert job_manager.get_job(queued_job.job_id_str).status_str == jobs_module.STATUS_CANCELLED_STR
+
+    _wait_for_terminal(job_manager, blocking_job.job_id_str)
+    time.sleep(0.4)  # give the released semaphore slot a chance to misbehave
+    assert not marker_path.exists()
+    # See the note in test_queue_position_...: no worker may outlive the test.
+    assert job_manager.wait_for_workers() is True
+
+
+def test_cancel_refuses_a_job_that_already_finished(monkeypatch, tmp_path):
+    from alpha.bench import jobs as jobs_module
+
+    monkeypatch.setattr(jobs_module, "JOBS_DIR_PATH", tmp_path)
+    job_manager = jobs_module.JobManager(max_concurrency_int=2)
+
+    quick_job = job_manager.submit("quick", "quick", "analysis", [sys.executable, "-c", "pass"])
+    _wait_for_terminal(job_manager, quick_job.job_id_str)
+    assert job_manager.cancel(quick_job.job_id_str) is False
+    assert job_manager.cancel("no-such-job") is False
+
+
+def test_queue_position_is_reported_and_not_persisted(monkeypatch, tmp_path):
+    from alpha.bench import jobs as jobs_module
+
+    monkeypatch.setattr(jobs_module, "JOBS_DIR_PATH", tmp_path)
+    job_manager = jobs_module.JobManager(max_concurrency_int=1)
+
+    job_manager.submit("block", "block", "analysis", [sys.executable, "-c", "import time; time.sleep(1.5)"])
+    first_queued_job = job_manager.submit("q1", "q1", "analysis", [sys.executable, "-c", "pass"])
+    second_queued_job = job_manager.submit("q2", "q2", "analysis", [sys.executable, "-c", "import sys; sys.exit(0)"])
+
+    position_by_id_dict = {
+        job_obj.job_id_str: job_obj.queue_position_int for job_obj in job_manager.list_jobs()
+    }
+    assert position_by_id_dict[first_queued_job.job_id_str] == 1
+    assert position_by_id_dict[second_queued_job.job_id_str] == 2
+
+    # Position is a live fact about this process, so it must not reach the disk.
+    sidecar_dict = json.loads(
+        (tmp_path / f"{first_queued_job.job_id_str}.json").read_text(encoding="utf-8")
+    )
+    assert "queue_position_int" not in sidecar_dict
+
+    # *** CRITICAL*** No worker thread may outlive this test. monkeypatch
+    # restores JOBS_DIR_PATH on teardown, and a worker still running past that
+    # point persists its sidecar into the real results/_bench/jobs/ tree — test
+    # jobs showing up in the operator's console. Waiting on job *status* is not
+    # enough: a cancelled job reports terminal immediately while its thread is
+    # still finishing.
+    for job_obj in job_manager.list_jobs():
+        job_manager.cancel(job_obj.job_id_str)
+    assert job_manager.wait_for_workers() is True
+
+
+def test_cancel_api_requires_csrf(recording_client):
+    client, job_manager, _token_str = recording_client
+    response = client.post("/api/jobs/anything/cancel", data={})
+    assert response.status_code == 403
+    assert job_manager.cancelled_id_list == []
+
+
+def test_job_view_only_offers_a_report_for_a_job_that_passed(monkeypatch):
+    """A failed or cancelled run may have written partial artifacts.
+
+    Offering those behind a Report button would present an abandoned run as a
+    finished result.
+    """
+    from alpha.bench.app import _job_view_dict_list
+
+    called_target_list: list[str] = []
+
+    def fake_find_fn(self, target_str, started_at_float, kind_str):
+        called_target_list.append(target_str)
+        return SimpleNamespace(report_artifact_str="x/report.html")
+
+    monkeypatch.setattr(runs.ProducedRunFinder, "find_run_produced_after", fake_find_fn)
+
+    job_view_dict_list = _job_view_dict_list(
+        [
+            SimpleNamespace(
+                job_id_str="passed-job", is_active_bool=False,
+                status_str="passed", started_at_str="2026-07-01T10:00:00",
+                target_str="passed_target", kind_str="analysis",
+            ),
+            SimpleNamespace(
+                job_id_str="failed-job", is_active_bool=False,
+                status_str="failed", started_at_str="2026-07-01T10:00:00",
+                target_str="failed_target", kind_str="analysis",
+            ),
+            SimpleNamespace(
+                job_id_str="cancelled-job", is_active_bool=False,
+                status_str="cancelled", started_at_str="2026-07-01T10:00:00",
+                target_str="cancelled_target", kind_str="analysis",
+            ),
+        ]
+    )
+
+    assert called_target_list == ["passed_target"]
+    assert job_view_dict_list[0]["produced_run"] is not None
+    assert job_view_dict_list[1]["produced_run"] is None
+    assert job_view_dict_list[2]["produced_run"] is None
+
+
+def test_jobs_view_scans_the_results_tree_at_most_once_per_render(monkeypatch):
+    """*** CRITICAL*** One scan per render, not one per job.
+
+    Building a fresh run index per job turned the Jobs page into a ~49 s render
+    (156 finished jobs x a 0.3 s walk of results/) on a view that polls every
+    two seconds — the page simply never loaded. This pins the shape of the fix.
+    """
+    from alpha.bench.app import _job_view_dict_list
+
+    scan_count_int = 0
+    real_build_fn = runs.build_strategy_run_index
+
+    def counting_build_fn(*args, **kwargs):
+        nonlocal scan_count_int
+        scan_count_int += 1
+        return real_build_fn(*args, **kwargs)
+
+    monkeypatch.setattr(runs, "build_strategy_run_index", counting_build_fn)
+
+    job_list = [
+        SimpleNamespace(
+            job_id_str=f"job-{index_int}",
+            status_str="passed",
+            started_at_str="2026-07-01T10:00:00",
+            target_str=f"target_{index_int}",
+            kind_str="analysis",
+            is_active_bool=False,
+        )
+        for index_int in range(25)
+    ]
+
+    _job_view_dict_list(job_list)
+    assert scan_count_int <= 1
+
+
+def test_finished_job_report_lookup_is_memoised_across_renders():
+    """The polling view must stop touching results/ once answers are known."""
+    from alpha.bench.app import _job_view_dict_list
+
+    finished_job_obj = SimpleNamespace(
+        job_id_str="job-done",
+        status_str="passed",
+        started_at_str="2026-07-01T10:00:00",
+        target_str="some_target",
+        kind_str="analysis",
+        is_active_bool=False,
+    )
+    active_job_obj = SimpleNamespace(
+        job_id_str="job-running",
+        status_str="running",
+        started_at_str="2026-07-01T10:00:00",
+        target_str="some_target",
+        kind_str="analysis",
+        is_active_bool=True,
+    )
+
+    produced_run_cache_dict: dict = {}
+    _job_view_dict_list([finished_job_obj, active_job_obj], produced_run_cache_dict)
+
+    # The finished job's answer is final and gets remembered; the running one
+    # may not have written its artifacts yet, so it must resolve again later.
+    assert "job-done" in produced_run_cache_dict
+    assert "job-running" not in produced_run_cache_dict
 
 
 def test_job_runner_marks_stale_jobs_unknown(monkeypatch, tmp_path):

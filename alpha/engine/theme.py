@@ -187,6 +187,118 @@ _JOURNAL_PALETTE_DICT: dict[str, object] = {
 }
 
 
+# Swiss / International Typographic Style: pure white, one grotesque sans for
+# everything, heavy black rules, and a single red that is the only colour on
+# the page. Where the journal palette is warm paper, this is cold grid — the
+# discipline is the same (no decorative colour budget), the temperature is not.
+#
+# The one red is deliberately shared: losses, warnings, and marked elements
+# (wired badges, the active nav item) all carry it. A second accent would
+# dilute the only signal the style has.
+_SWISS_FONT_STACK_LIST: list[str] = ['Helvetica Neue', 'Helvetica', 'Arial', 'sans-serif']
+_SWISS_FONT_STACK_STR: str = '"Helvetica Neue", Helvetica, Arial, sans-serif'
+_SWISS_PALETTE_DICT: dict[str, object] = {
+    'ink': '#111111',
+    'page': '#ffffff',
+    'panel': '#ffffff',
+    'neutral': '#f4f4f4',
+    'grid': '#e0e0e0',
+    'border': '#d4d4d4',
+    'axes_border': '#111111',
+    'muted': '#6e6e6e',
+    # The equity line stays ink, exactly as in the journal: holding colour back
+    # from the curve is what lets the one red mean something when it appears.
+    'strategy': '#111111',
+    'strategy_dark': '#000000',
+    'benchmark': '#8c8c8c',
+    'benchmark_dark': '#6e6e6e',
+    # Single-accent semantics: gains are unremarkable (ink), losses are the
+    # exception and take the red. This is the Swiss inversion of the usual
+    # green/red pair — only the thing that demands attention gets colour.
+    'profit': '#111111',
+    'profit_dark': '#111111',
+    'loss': '#d92b1f',
+    'loss_dark': '#b91c12',
+    'vertical_line': '#8c8c8c',
+    'zero_line': '#111111',
+    'bar_edge': '#111111',
+    'legend_face': '#ffffff',
+    'legend_edge': '#111111',
+    'label_face': '#ffffff',
+    # Grey ramp plus the accent for composition stacks; hatch textures carry
+    # the separation where adjacent greys get close.
+    'overlay_cycle': [
+        '#111111', '#5a5a5a', '#8c8c8c', '#b4b4b4',
+        '#d92b1f', '#3a3a3a', '#737373', '#9e9e9e',
+    ],
+    'hatch_cycle_list': ['', '///', '...', 'xxx', '\\\\', '+++', 'ooo', '---'],
+    'mean_line': '#111111',
+    'shadow_rgba': 'rgba(0, 0, 0, 0.06)',
+    'font_family_str': 'sans-serif',
+    'font_stack_list': list(_SWISS_FONT_STACK_LIST),
+    'font_stack_str': _SWISS_FONT_STACK_STR,
+    # One face for prose and figures both — the grotesque is the whole voice.
+    'prose_font_stack_str': _SWISS_FONT_STACK_STR,
+    'axis_style_str': 'minimal',
+}
+
+
+# Blueprint: a cyanotype drawing sheet. The only genuinely dark variant, so it
+# inverts an assumption the others share — the page is darker than the ink.
+#
+# *** CRITICAL*** The ``*_dark`` palette keys are consumed as *text* colours
+# (td.pos/td.neg, --color-profit-dark, --color-loss-dark), which on a light page
+# means "darker than the base hue". On a dark page that reading inverts: the
+# text-weight value must be *lighter* than the base to stay readable. The keys
+# below are deliberately set lighter than their base counterparts. Do not
+# "correct" them to be darker — that silently drops contrast on every figure.
+_BLUEPRINT_FONT_STACK_LIST: list[str] = [
+    'Cascadia Mono', 'Consolas', 'DejaVu Sans Mono', 'monospace',
+]
+_BLUEPRINT_FONT_STACK_STR: str = '"Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace'
+_BLUEPRINT_PALETTE_DICT: dict[str, object] = {
+    'ink': '#dce8f5',
+    'page': '#16283e',
+    'panel': '#16283e',
+    'neutral': '#1e3350',
+    'grid': '#2f4a6b',
+    'border': '#3d5a7d',
+    'axes_border': '#7c93ad',
+    'muted': '#7c93ad',
+    # The drawn line is the white lead on the sheet, exactly as ink is the
+    # equity curve in the other monochrome variants.
+    'strategy': '#dce8f5',
+    'strategy_dark': '#ffffff',
+    'benchmark': '#5f7b99',
+    'benchmark_dark': '#7c93ad',
+    'profit': '#8fc79b',
+    'profit_dark': '#a8d5b0',
+    'loss': '#d4906f',
+    'loss_dark': '#e0a48a',
+    'vertical_line': '#5f7b99',
+    'zero_line': '#dce8f5',
+    'bar_edge': '#16283e',
+    'legend_face': '#16283e',
+    'legend_edge': '#dce8f5',
+    'label_face': '#16283e',
+    # Light-lead ramp for composition stacks, with hatch texture separating the
+    # steps that sit close together on a dark ground.
+    'overlay_cycle': [
+        '#dce8f5', '#a8bfd6', '#7c93ad', '#5f7b99',
+        '#a8d5b0', '#d4906f', '#8fa8c4', '#46618a',
+    ],
+    'hatch_cycle_list': ['', '///', '...', 'xxx', '\\\\', '+++', 'ooo', '---'],
+    'mean_line': '#dce8f5',
+    'shadow_rgba': 'rgba(0, 0, 0, 0.35)',
+    'font_family_str': 'monospace',
+    'font_stack_list': list(_BLUEPRINT_FONT_STACK_LIST),
+    'font_stack_str': _BLUEPRINT_FONT_STACK_STR,
+    # Drafting lettering is monospace throughout — no prose face on a drawing.
+    'prose_font_stack_str': _BLUEPRINT_FONT_STACK_STR,
+    'axis_style_str': 'minimal',
+}
+
+
 _VARIANT_OVERRIDE_DICT: dict[str, dict[str, object]] = {
     _BASE_VARIANT_NAME_STR: {},
     # Single reading column: sections stacked, hairline rules, no containers.
@@ -194,6 +306,10 @@ _VARIANT_OVERRIDE_DICT: dict[str, dict[str, object]] = {
     # Specimen sheet: provenance promoted from footer to masthead, numbered
     # plates instead of free-floating charts. Dense on purpose.
     'journal_spec': {**_JOURNAL_PALETTE_DICT, 'layout_str': 'spec'},
+    # White grid, grotesque sans, heavy rules, one red. Bench renders with this.
+    'swiss': {**_SWISS_PALETTE_DICT, 'layout_str': 'document'},
+    # Cyanotype drawing sheet: light lead on dark blue, monospace lettering.
+    'blueprint': {**_BLUEPRINT_PALETTE_DICT, 'layout_str': 'document'},
 }
 
 SIGNATURE_VARIANT_NAME_LIST: list[str] = list(_VARIANT_OVERRIDE_DICT)
@@ -524,57 +640,21 @@ a {{
 '''
 
 
-def build_bench_theme_css(variant_name_str: str = 'journal') -> str:
-    """Map a signature variant onto the Bench control panel's CSS variables.
+def build_bench_theme_css(variant_name_str: str = 'swiss') -> str:
+    """Emit a signature variant's palette for the Bench control panel.
 
-    Bench keeps its own stylesheet for layout and components; only the colour
-    and type tokens are derived here, so the console and the reports it embeds
-    share one palette instead of maintaining two. Emitted after bench.css so
-    these values win.
+    Bench's stylesheet is written directly against the report's own token names
+    (``--color-ink``, ``--font-figure``, …), so this is the whole mapping: the
+    console and the reports it embeds read from one palette rather than two
+    parallel ones that drift. Emitted after bench.css so a variant switch wins
+    over the stylesheet's built-in defaults.
     """
     palette_dict = resolve_variant_palette_dict(variant_name_str)
-    accent_str = str(palette_dict['strategy'])
-    accent_rgb_tuple = tuple(int(round(channel * 255)) for channel in mcolors.to_rgb(accent_str))
-    ink_rgb_tuple = tuple(
-        int(round(channel * 255)) for channel in mcolors.to_rgb(str(palette_dict['ink']))
-    )
-    return f''':root {{
-  --bg: {palette_dict['neutral']};
-  --bg-grad-top: {palette_dict['page']};
-  --panel: {palette_dict['panel']};
-  --panel-2: {palette_dict['neutral']};
-  --panel-hover: {blend_hex_color_str(str(palette_dict['panel']), accent_str, 0.06)};
-  --border: {palette_dict['border']};
-  --border-soft: {blend_hex_color_str(str(palette_dict['page']), str(palette_dict['border']), 0.55)};
-  --text: {palette_dict['ink']};
-  --muted: {palette_dict['muted']};
-  --muted-2: {blend_hex_color_str(str(palette_dict['muted']), str(palette_dict['page']), 0.35)};
-  --accent: {accent_str};
-  --accent-strong: {palette_dict['strategy_dark']};
-  --accent-soft: rgba({accent_rgb_tuple[0]}, {accent_rgb_tuple[1]}, {accent_rgb_tuple[2]}, 0.10);
-  --gold: {palette_dict['benchmark_dark']};
-  --gold-soft: rgba({accent_rgb_tuple[0]}, {accent_rgb_tuple[1]}, {accent_rgb_tuple[2]}, 0.08);
-  --green: {palette_dict['profit_dark']};
-  --green-soft: rgba({accent_rgb_tuple[0]}, {accent_rgb_tuple[1]}, {accent_rgb_tuple[2]}, 0.08);
-  --red: {palette_dict['loss_dark']};
-  --red-soft: rgba({accent_rgb_tuple[0]}, {accent_rgb_tuple[1]}, {accent_rgb_tuple[2]}, 0.08);
-  --amber: {palette_dict['benchmark_dark']};
-  --shadow: none;
-  --radius: 3px;
-  --radius-sm: 2px;
-}}
-body {{
-  font-family: {palette_dict['prose_font_stack_str']};
-  background-image: none;
-}}
-.brand-name, .brand-tag, .nav a, button, .btn, code, kbd,
-table, th, td, .chip, .badge, .mono {{
-  font-family: {palette_dict['font_stack_str']};
-}}
-.brand-mark {{
-  border-radius: 2px;
-}}
-'''
+    return _build_palette_root_css(
+        palette_dict,
+        figure_font_stack_str=str(palette_dict['font_stack_str']),
+        prose_font_stack_str=str(palette_dict['prose_font_stack_str']),
+    ).lstrip('\n')
 
 
 def build_report_font_head_html() -> str:
@@ -844,14 +924,56 @@ def blend_hex_color_str(
 
 # Populated here rather than in the variant literals above because the ramp
 # needs blend_hex_color_str, which is defined further down the module.
-for _monochrome_variant_name_str in ('journal', 'journal_spec'):
+for _monochrome_variant_name_str, _monochrome_source_palette_dict in (
+    ('journal', _JOURNAL_PALETTE_DICT),
+    ('journal_spec', _JOURNAL_PALETTE_DICT),
+    ('swiss', _SWISS_PALETTE_DICT),
+    # Blueprint's ramp runs from the light lead down toward the sheet, which is
+    # the same call as the others: ink first, page last.
+    ('blueprint', _BLUEPRINT_PALETTE_DICT),
+):
     _VARIANT_OVERRIDE_DICT[_monochrome_variant_name_str]['asset_color_dict'] = (
         _build_monochrome_asset_color_dict(
-            ink_color_str=str(_JOURNAL_PALETTE_DICT['ink']),
-            light_color_str=str(_JOURNAL_PALETTE_DICT['benchmark']),
-            page_color_str=str(_JOURNAL_PALETTE_DICT['page']),
+            ink_color_str=str(_monochrome_source_palette_dict['ink']),
+            light_color_str=str(_monochrome_source_palette_dict['benchmark']),
+            page_color_str=str(_monochrome_source_palette_dict['page']),
         )
     )
+
+
+def _build_palette_root_css(
+        palette_dict: dict[str, object],
+        figure_font_stack_str: str,
+        prose_font_stack_str: str,
+) -> str:
+    """Emit one palette as the ``:root`` custom-property block.
+
+    Shared by the document report layout and the Bench console so a colour only
+    ever has to be named once. Callers pass the font stacks explicitly because
+    the dashboard layout deliberately sets figure and prose type to the same
+    stack while the document layout does not.
+    """
+    return f'''
+:root {{
+    --color-ink: {palette_dict["ink"]};
+    --color-page: {palette_dict["page"]};
+    --color-panel: {palette_dict["panel"]};
+    --color-neutral: {palette_dict["neutral"]};
+    --color-grid: {palette_dict["grid"]};
+    --color-border: {palette_dict["border"]};
+    --color-muted: {palette_dict["muted"]};
+    --color-strategy: {palette_dict["strategy"]};
+    --color-strategy-dark: {palette_dict["strategy_dark"]};
+    --color-benchmark: {palette_dict["benchmark"]};
+    --color-benchmark-dark: {palette_dict["benchmark_dark"]};
+    --color-profit: {palette_dict["profit"]};
+    --color-profit-dark: {palette_dict["profit_dark"]};
+    --color-loss: {palette_dict["loss"]};
+    --color-loss-dark: {palette_dict["loss_dark"]};
+    --color-shadow: {palette_dict["shadow_rgba"]};
+    --font-figure: {figure_font_stack_str};
+    --font-prose: {prose_font_stack_str};
+}}'''
 
 
 def _build_document_report_css() -> str:
@@ -866,27 +988,11 @@ def _build_document_report_css() -> str:
     signature_palette_dict = SIGNATURE_PALETTE_DICT
     figure_font_stack_str = str(signature_palette_dict['font_stack_str'])
     prose_font_stack_str = str(signature_palette_dict['prose_font_stack_str'])
-    return f'''
-:root {{
-    --color-ink: {signature_palette_dict["ink"]};
-    --color-page: {signature_palette_dict["page"]};
-    --color-panel: {signature_palette_dict["panel"]};
-    --color-neutral: {signature_palette_dict["neutral"]};
-    --color-grid: {signature_palette_dict["grid"]};
-    --color-border: {signature_palette_dict["border"]};
-    --color-muted: {signature_palette_dict["muted"]};
-    --color-strategy: {signature_palette_dict["strategy"]};
-    --color-strategy-dark: {signature_palette_dict["strategy_dark"]};
-    --color-benchmark: {signature_palette_dict["benchmark"]};
-    --color-benchmark-dark: {signature_palette_dict["benchmark_dark"]};
-    --color-profit: {signature_palette_dict["profit"]};
-    --color-profit-dark: {signature_palette_dict["profit_dark"]};
-    --color-loss: {signature_palette_dict["loss"]};
-    --color-loss-dark: {signature_palette_dict["loss_dark"]};
-    --color-shadow: {signature_palette_dict["shadow_rgba"]};
-    --font-figure: {figure_font_stack_str};
-    --font-prose: {prose_font_stack_str};
-}}
+    return _build_palette_root_css(
+        signature_palette_dict,
+        figure_font_stack_str=figure_font_stack_str,
+        prose_font_stack_str=prose_font_stack_str,
+    ) + f'''
 body {{
     font-family: var(--font-prose);
     margin: 0;

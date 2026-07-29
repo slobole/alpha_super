@@ -1,31 +1,31 @@
-/* Bench — research control panel theme.
-   Self-contained LIGHT theme (no CDN), so the tool works offline.
-   Soft off-white base (not glaring white), white cards for gentle depth. */
+/* Bench — research control panel.
+
+   Swiss / International Typographic Style, shared with the 'swiss' signature
+   variant: white page, one grotesque sans for everything, heavy black rules,
+   and a single red that is the only colour on the page. Containers carry no
+   visual weight; structure comes from the grid, the rules, and the type.
+
+   Colour and type live in the report's own token names (--color-ink,
+   --font-figure, …). The :root below is a self-contained fallback holding the
+   swiss values, so the console still renders correctly offline or if the
+   injected theme block from alpha.engine.theme is ever missing; when it is
+   present it overrides these, and a variant switch moves both surfaces at once.
+   Add no palette here — add it to the signature palette instead. */
 
 :root {
-  --bg: #eaeef3;
-  --bg-grad-top: #fbfcfe;
-  --panel: #ffffff;
-  --panel-2: #f1f4f8;
-  --panel-hover: #e9eef4;
-  --border: #d3dbe5;
-  --border-soft: #e4e9f0;
-  --text: #1f2733;
-  --muted: #5b6776;
-  --muted-2: #8a96a4;
-  --accent: #0c8ce0;
-  --accent-strong: #0369a1;
-  --accent-soft: rgba(12, 140, 224, 0.12);
-  --gold: #b45309;
-  --gold-soft: rgba(245, 158, 11, 0.16);
-  --green: #15803d;
-  --green-soft: rgba(34, 197, 94, 0.15);
-  --red: #c0392b;
-  --red-soft: rgba(239, 68, 68, 0.13);
-  --amber: #b7791f;
-  --shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 10px 28px rgba(16, 24, 40, 0.08);
-  --radius: 12px;
-  --radius-sm: 8px;
+  --color-ink: #111111;
+  --color-page: #ffffff;
+  --color-panel: #ffffff;
+  --color-neutral: #f4f4f4;
+  --color-grid: #e0e0e0;
+  --color-border: #d4d4d4;
+  --color-muted: #6e6e6e;
+  --color-profit-dark: #111111;
+  --color-loss: #d92b1f;
+  --color-loss-dark: #b91c12;
+  --color-benchmark-dark: #6e6e6e;
+  --font-figure: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-prose: "Helvetica Neue", Helvetica, Arial, sans-serif;
   font-synthesis: none;
 }
 
@@ -34,270 +34,599 @@
 html, body {
   margin: 0;
   padding: 0;
-  background: var(--bg);
-  background-image: linear-gradient(180deg, #f2f5f9 0%, var(--bg) 240px);
-  background-attachment: fixed;
-  color: var(--text);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-  font-size: 14px;
-  line-height: 1.5;
+  background: var(--color-page);
+  color: var(--color-ink);
+  font-family: var(--font-prose);
+  font-size: 15px;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Layout constants live here rather than in :root, which is reserved as an
+   exact mirror of the theme palette and is checked against it. */
+body {
+  /* Must match the rendered .nav-bar height exactly: a short value lets rows
+     show through the gap above the sticky column headers. 46 = 10px padding
+     ×2 + ~22px line + the 3px rule above + 1px hairline below. */
+  --nav-bar-height: 46px;
+  /* Program output and identifiers stay monospace in every variant — the
+     grotesque is the interface voice, not the voice of code. */
+  --font-code: "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
 }
 
 a { color: inherit; text-decoration: none; }
 
-.mono {
-  font-family: ui-monospace, "SF Mono", "Cascadia Code", "Consolas", monospace;
-  font-size: 0.86em;
+/* One eyebrow grammar for every small uppercase label on the page. */
+.mono, .masthead-strapline, .nav a, .nav-badge, .stat-label,
+.section-title, .filter-group-label, .filter-chip, .badge, .chip-label,
+.chip-value, .stat-value, .btn, button, .pill, .table, .detail-path, .pod-tag,
+.log, .footer, .job-cmd {
+  font-family: var(--font-figure);
 }
 
-.muted { color: var(--muted); }
-.muted-2 { color: var(--muted-2); }
+.mono { font-size: 0.86em; }
+/* Code-shaped content keeps a monospace face regardless of the variant. */
+.mono, .log, .job-cmd, .detail-path { font-family: var(--font-code); }
+.muted { color: var(--color-muted); }
+/* The journal palette has one muted grey, not two. Both names resolve to it so
+   templates keep working without inventing a colour the palette does not own. */
+.muted-2 { color: var(--color-muted); }
 
-/* ── top bar ───────────────────────────────────────────────────────────── */
+/* ── masthead ──────────────────────────────────────────────────────────── */
 
-.topbar {
+/* A publication opens with a masthead, not a toolbar: the title set large in
+   the prose face, a standing strapline, and a heavy rule closing the block. */
+.masthead {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 34px 26px 0;
+}
+.masthead-title {
+  display: block;
+  font-family: var(--font-prose);
+  font-size: 2.6rem; font-weight: 600; line-height: 1;
+  letter-spacing: -0.022em;
+  color: var(--color-ink);
+}
+.masthead-strapline {
+  display: flex; flex-wrap: wrap; gap: 0 8px;
+  margin-top: 12px; padding-bottom: 10px;
+  color: var(--color-muted);
+  font-size: 0.62rem; letter-spacing: 0.16em; text-transform: uppercase;
+}
+.strapline-sep { color: var(--color-border); }
+
+/* Only the navigation rule follows you down a 230-entry catalog. */
+/* The Swiss rule under the masthead is genuinely heavy — the weight is the
+   identity, where the journal used a 1.5px hairline. */
+.nav-bar {
   position: sticky;
   top: 0;
   z-index: 30;
-  display: flex;
-  align-items: center;
-  gap: 22px;
-  padding: 0 26px;
-  height: 58px;
-  background: rgba(255, 255, 255, 0.82);
-  backdrop-filter: blur(10px);
-  border-bottom: 1px solid var(--border);
+  background: var(--color-page);
+  border-top: 3px solid var(--color-ink);
+  border-bottom: 1px solid var(--color-border);
 }
 
-.brand { display: flex; align-items: center; gap: 11px; }
-.brand-mark {
-  width: 30px; height: 30px; border-radius: 9px;
-  display: grid; place-items: center;
-  font-weight: 800; font-size: 16px; color: #ffffff;
-  background: linear-gradient(135deg, var(--accent) 0%, #18b6c9 100%);
-  box-shadow: 0 2px 8px rgba(12, 140, 224, 0.35);
+.nav {
+  display: flex; gap: 26px;
+  max-width: 1180px; margin: 0 auto;
+  padding: 10px 26px;
 }
-.brand-name { font-weight: 700; font-size: 16px; letter-spacing: -0.01em; }
-.brand-tag { color: var(--muted-2); font-size: 12px; margin-top: -2px; }
-
-.nav { display: flex; gap: 4px; margin-left: 8px; }
 .nav a {
-  padding: 7px 13px; border-radius: var(--radius-sm);
-  color: var(--muted); font-weight: 600; font-size: 13px;
+  padding: 3px 0 2px;
+  color: var(--color-muted);
+  font-size: 0.66rem; font-weight: 400;
+  letter-spacing: 0.15em; text-transform: uppercase;
   display: flex; align-items: center; gap: 7px;
-  transition: background 0.12s, color 0.12s;
+  border-bottom: 1.5px solid transparent;
 }
-.nav a:hover { color: var(--text); background: var(--panel-2); }
-.nav a.active { color: var(--accent-strong); background: var(--accent-soft); }
-
-.topbar-spacer { flex: 1; }
-.topbar-clock { color: var(--muted-2); font-size: 12px; }
+.nav a:hover { color: var(--color-ink); }
+/* The single red: the active section, the wired badge, and negative figures
+   share the page's one colour. Nothing else may take it. */
+.nav a.active { color: var(--color-loss); border-bottom-color: var(--color-loss); }
 
 .nav-badge {
-  min-width: 18px; height: 18px; padding: 0 5px;
-  border-radius: 9px; font-size: 11px; font-weight: 700;
+  min-width: 17px; padding: 0 4px;
+  font-size: 0.6rem; font-weight: 600;
   display: inline-grid; place-items: center;
-  background: var(--accent); color: #ffffff;
+  background: var(--color-ink); color: var(--color-page);
 }
-.nav-badge.zero { background: var(--panel-2); color: var(--muted-2); box-shadow: inset 0 0 0 1px var(--border); }
+.nav-badge.zero {
+  background: none; color: var(--color-muted);
+  box-shadow: inset 0 0 0 1px var(--color-border);
+}
 
 /* ── layout ────────────────────────────────────────────────────────────── */
 
-.container { max-width: 1320px; margin: 0 auto; padding: 26px; }
+.container { max-width: 1180px; margin: 0 auto; padding: 40px 26px 72px; }
 
-.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
-.page-title { font-size: 22px; font-weight: 750; letter-spacing: -0.02em; margin: 0; }
-.page-sub { color: var(--muted); margin: 4px 0 0; font-size: 13px; }
-
-.stat-row { display: flex; gap: 10px; flex-wrap: wrap; }
-.stat {
-  background: var(--panel); border: 1px solid var(--border-soft);
-  border-radius: var(--radius-sm); padding: 8px 14px; min-width: 84px;
-  box-shadow: var(--shadow);
+.page-head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 24px; margin-bottom: 26px; flex-wrap: wrap;
+  padding-bottom: 20px;
+  border-bottom: 3px solid var(--color-ink);
 }
-.stat-value { font-size: 18px; font-weight: 750; }
-.stat-label { font-size: 11px; color: var(--muted-2); text-transform: uppercase; letter-spacing: 0.06em; }
+.page-title {
+  font-family: var(--font-prose);
+  font-size: 1.85rem; font-weight: 600; line-height: 1.2;
+  letter-spacing: -0.012em; margin: 0;
+}
+.page-sub { color: var(--color-muted); margin: 8px 0 0; font-size: 0.88rem; max-width: 68ch; }
 
-.section { margin-top: 30px; }
-.section-title { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 12px; }
+/* Headline counts read as a figure row, not as tiles. */
+.stat-row { display: flex; gap: 0; flex-wrap: wrap; }
+.stat {
+  padding: 0 22px;
+  border-left: 1px solid var(--color-border);
+  min-width: 92px;
+}
+.stat:first-child { border-left: none; padding-left: 0; }
+.stat:last-child { padding-right: 0; }
+.stat-value {
+  font-size: 1.42rem; font-weight: 500; line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+.stat-label {
+  margin-top: 6px;
+  font-size: 0.6rem; color: var(--color-muted);
+  text-transform: uppercase; letter-spacing: 0.11em;
+}
+
+/* Sections are numbered so a long strategy page can be referred to by section
+   rather than by scroll position. The counter runs over .container, so every
+   page numbers from I independently. */
+.container { counter-reset: bench-section; }
+.section { margin-top: 52px; counter-increment: bench-section; }
+/* A section that follows the filter bar rather than another section. */
+.section-flush { margin-top: 8px; }
+.section-title {
+  font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.15em; color: var(--color-muted);
+  margin: 0 0 18px; padding-bottom: 7px;
+  border-bottom: 1px solid var(--color-border);
+}
+.section > .section-title::before,
+.section > .report-bar > .section-title::before {
+  content: counter(bench-section, upper-roman) ".";
+  color: var(--color-ink);
+  margin-right: 8px;
+}
+
+/* Table caption: what the rows below actually are, stated once. */
+.table-caption {
+  font-size: 0.66rem; color: var(--color-muted);
+  letter-spacing: 0.04em; margin: 0 0 10px;
+}
 
 /* ── filter bar ────────────────────────────────────────────────────────── */
 
-.toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 18px; }
+/* Stacked, not side by side: the family switches need the full measure or they
+   wrap into four ragged rows against a search box that never needed the space. */
+.toolbar {
+  display: flex; flex-direction: column; align-items: stretch;
+  gap: 18px; margin-bottom: 26px;
+}
 .search {
-  flex: 1; min-width: 220px;
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: var(--radius-sm); color: var(--text);
-  padding: 9px 13px; font-size: 13px; outline: none;
+  width: 100%;
+  background: none; border: none;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0; color: var(--color-ink);
+  font-family: var(--font-prose); font-size: 0.95rem;
+  padding: 6px 2px; outline: none;
 }
-.search:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.search::placeholder { color: var(--muted-2); }
+.search:focus { border-bottom: 1.5px solid var(--color-ink); }
+/* No italics anywhere: the grotesque speaks in weight and size only. */
+.search::placeholder { color: var(--color-muted); }
 
-.filter-stack { display: flex; flex: 3 1 640px; flex-direction: column; gap: 7px; }
-.filter-bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.filter-stack { display: flex; flex-direction: column; gap: 10px; }
+.filter-bar { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
 .filter-group-label {
-  padding: 0 4px; color: var(--muted-2); font-size: 11px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--color-muted); font-size: 0.6rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.11em;
 }
+/* Text switches with a rule under the active one — no pills, no fills. */
 .filter-chip {
-  padding: 7px 12px; border-radius: 999px; font-size: 12px; font-weight: 600;
-  background: var(--panel); border: 1px solid var(--border); color: var(--muted);
-  cursor: pointer; transition: all 0.12s; user-select: none;
+  padding: 2px 0;
+  font-size: 0.64rem; font-weight: 400;
+  text-transform: uppercase; letter-spacing: 0.11em;
+  background: none; border: none;
+  border-bottom: 1.5px solid transparent;
+  color: var(--color-muted);
+  cursor: pointer; user-select: none;
 }
-.filter-chip:hover { color: var(--text); border-color: var(--muted-2); }
-.filter-chip.active { background: var(--accent-soft); color: var(--accent-strong); border-color: var(--accent); }
-.filter-chip.wired.active { background: var(--gold-soft); color: var(--gold); border-color: var(--gold); }
-.filter-count { color: var(--muted-2); font-size: 10px; margin-left: 3px; }
+.filter-chip:hover { color: var(--color-ink); }
+.filter-chip.active { color: var(--color-ink); border-bottom-color: var(--color-ink); }
+.filter-count { color: var(--color-muted); font-size: 0.9em; margin-left: 4px; }
 
-/* ── cards ─────────────────────────────────────────────────────────────── */
+/* ── strategy entries ──────────────────────────────────────────────────── */
 
-.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 30px 34px;
+}
 
+/* Each entry is a column item under a rule, the way a listing page sets an
+   article — a wired pod gets the heavier ink rule. */
 .card {
-  background: var(--panel);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius);
-  padding: 16px;
-  display: flex; flex-direction: column; gap: 12px;
-  box-shadow: var(--shadow);
-  transition: border-color 0.14s, transform 0.14s, box-shadow 0.14s;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--color-border);
+  border-radius: 0;
+  padding: 14px 0 0;
+  display: flex; flex-direction: column; gap: 14px;
+  box-shadow: none;
+  /* Grid items default to min-width:auto, so one long unbroken name (a
+     portfolio stem, a deep module path) would otherwise widen its column and
+     push the whole page into a horizontal scroll. */
+  min-width: 0;
 }
-.card:hover { border-color: var(--border); transform: translateY(-2px); box-shadow: 0 2px 4px rgba(16,24,40,0.06), 0 14px 32px rgba(16,24,40,0.12); }
-.card.is-wired { border-color: rgba(245, 158, 11, 0.45); box-shadow: var(--shadow), inset 3px 0 0 var(--gold-soft); }
-.card.is-wired:hover { border-color: var(--gold); }
+.card.is-wired { border-top: 2px solid var(--color-ink); }
 
-.card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
-.card-title { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
-.card-title a:hover { color: var(--accent-strong); }
-.card-sub { color: var(--muted); font-size: 12px; margin-top: 3px; line-height: 1.45;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.card-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--muted-2); }
+.card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.card-title {
+  font-family: var(--font-prose);
+  font-size: 1.02rem; font-weight: 600; letter-spacing: -0.008em; line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.card-title a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.card-sub {
+  color: var(--color-muted); font-size: 0.84rem; margin-top: 5px; line-height: 1.5;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.card-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
 .badge {
-  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
-  padding: 3px 8px; border-radius: 6px; white-space: nowrap;
+  font-size: 0.58rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.11em;
+  padding: 2px 6px; border-radius: 0; white-space: nowrap;
+  border: 1px solid var(--color-border); color: var(--color-muted);
+  background: none;
 }
-.badge-wired { background: var(--gold-soft); color: var(--gold); box-shadow: inset 0 0 0 1px rgba(245,158,11,0.45); }
-.badge-cat { background: var(--panel-2); color: var(--muted); box-shadow: inset 0 0 0 1px var(--border-soft); }
-.badge-subcat { background: var(--accent-soft); color: var(--accent-strong); box-shadow: inset 0 0 0 1px var(--accent); }
-.badge-norun { background: var(--red-soft); color: var(--red); }
+.badge-wired { background: var(--color-loss); border-color: var(--color-loss); color: var(--color-page); }
+.badge-cat { border-color: var(--color-border); }
+.badge-subcat { border-color: var(--color-border); color: var(--color-muted); }
+.badge-norun { border-color: var(--color-loss-dark); color: var(--color-loss-dark); }
 
-/* metric chips */
-.chip-row { display: flex; gap: 8px; flex-wrap: wrap; }
+/* Metrics sit in a fixed three-column grid rather than flowing inline, so CAGR
+   in one card lines up with CAGR in the next and the whole catalog can be
+   scanned down a column instead of card by card. */
+.chip-row {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 14px;
+}
 .chip {
-  display: flex; flex-direction: column; gap: 1px;
-  padding: 6px 11px; border-radius: var(--radius-sm);
-  background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--border-soft); min-width: 64px;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 0; border-radius: 0; background: none; box-shadow: none; min-width: 0;
 }
-.chip-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted-2); }
-.chip-value { font-size: 14px; font-weight: 700; }
-.chip.pos .chip-value { color: var(--green); }
-.chip.neg .chip-value { color: var(--red); }
-.chip.neutral .chip-value { color: var(--text); }
+.chip-label {
+  font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.11em;
+  color: var(--color-muted);
+}
+.chip-value { font-size: 1.02rem; font-weight: 500; font-variant-numeric: tabular-nums; }
+.chip.pos .chip-value { color: var(--color-profit-dark); }
+.chip.neg .chip-value { color: var(--color-loss-dark); }
+.chip.neutral .chip-value { color: var(--color-ink); }
 
-.card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 2px; }
+.card-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-top: auto; padding-top: 4px;
+}
+.card-foot .muted-2, .card-foot .muted { font-size: 0.62rem; letter-spacing: 0.06em; }
 
 /* ── buttons ───────────────────────────────────────────────────────────── */
 
 .btn {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 7px 13px; border-radius: var(--radius-sm);
-  font-size: 12.5px; font-weight: 650; cursor: pointer;
-  background: var(--panel); color: var(--text);
-  border: 1px solid var(--border); transition: all 0.12s;
+  padding: 5px 11px; border-radius: 0;
+  font-size: 0.62rem; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.11em;
+  cursor: pointer;
+  background: none; color: var(--color-ink);
+  border: 1px solid var(--color-border);
 }
-.btn:hover { border-color: var(--muted-2); background: var(--panel-2); }
-.btn-primary { background: var(--accent); color: #ffffff; border-color: var(--accent-strong); }
-.btn-primary:hover { background: var(--accent-strong); }
-.btn-gold { background: var(--gold); color: #ffffff; border-color: #92400e; }
-.btn-gold:hover { background: #92400e; }
-.btn-ghost { background: transparent; }
-.btn-sm { padding: 5px 10px; font-size: 11.5px; }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn-row { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
+.btn:hover { border-color: var(--color-ink); }
+.btn-primary { background: var(--color-ink); color: var(--color-page); border-color: var(--color-ink); }
+.btn-primary:hover { background: var(--color-page); color: var(--color-ink); }
+/* No gold in a monochrome palette: emphasis is a heavier rule, not a hue. */
+.btn-gold { border: 1.5px solid var(--color-ink); }
+.btn-ghost { border-color: transparent; text-decoration: underline; text-underline-offset: 3px; }
+.btn-ghost:hover { border-color: transparent; color: var(--color-ink); }
+.btn-sm { padding: 3px 8px; font-size: 0.58rem; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 form.inline { display: inline; margin: 0; }
 
 /* ── tables ────────────────────────────────────────────────────────────── */
 
+/* Scientific table rules: horizontal only, figures in tabular monospace. */
+/* No overflow container by default: `overflow-x: auto` computes overflow-y to
+   auto too, which silently disables the sticky column headers below. The narrow
+   media query restores the scroll container where a table genuinely cannot fit. */
 .panel {
-  background: var(--panel); border: 1px solid var(--border-soft);
-  border-radius: var(--radius); overflow-x: auto; box-shadow: var(--shadow);
+  background: none; border: none; border-radius: 0;
+  box-shadow: none;
 }
-.job-cmd { font-size: 11px; white-space: normal; word-break: break-all; max-width: 620px; margin-top: 2px; }
-.table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table {
+  width: 100%; border-collapse: collapse;
+  font-size: 0.78rem; font-variant-numeric: tabular-nums;
+}
+/* Column headers follow a long run history down the page — without them you
+   lose which figure is Sharpe and which is Max DD after the first screen.
+   They park directly under the sticky nav rule, and carry the page colour so
+   rows scroll under rather than through them. */
 .table th {
-  text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
-  color: var(--muted-2); font-weight: 700; padding: 10px 14px;
-  border-bottom: 1px solid var(--border); background: var(--panel-2);
+  position: sticky;
+  top: var(--nav-bar-height);
+  z-index: 5;
+  text-align: left; font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--color-muted); font-weight: 600;
+  padding: 8px 12px 7px; background: var(--color-page);
+  border-bottom: 1px solid var(--color-ink);
+  white-space: nowrap;
 }
-.table td { padding: 10px 14px; border-bottom: 1px solid var(--border-soft); vertical-align: middle; }
-.table tr:last-child td { border-bottom: none; }
-.table tbody tr:hover td { background: var(--panel-2); }
-.table .num { text-align: right; font-variant-numeric: tabular-nums; }
+/* A sticky cell's own border scrolls away with it in some engines; the shadow
+   keeps the rule under the header at all times. */
+.table thead th { box-shadow: inset 0 -1px 0 var(--color-ink); }
+.table th:first-child, .table td:first-child { padding-left: 0; }
+.table th:last-child, .table td:last-child { padding-right: 0; }
+.table td { padding: 8px 12px; border-bottom: 1px solid var(--color-border); vertical-align: top; }
+.table tbody tr:last-child td { border-bottom: 1px solid var(--color-ink); }
+.table tbody tr:hover td { background: var(--color-neutral); }
+.table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.table th.num { text-align: right; }
+.table b { font-weight: 600; }
+.job-cmd { font-size: 0.68rem; white-space: normal; word-break: break-all; max-width: 620px; margin-top: 3px; }
+/* Secondary line under a table cell's primary value. */
+.cell-note { font-size: 0.66rem; color: var(--color-muted); margin-top: 3px; letter-spacing: 0.04em; }
 
-/* status + tone pills */
+/* Dense catalog rows: 65 strategies must scan as a list, not as pages. */
+.table-dense td { padding: 6px 12px; font-size: 0.74rem; }
+.table-dense .btn-sm { padding: 2px 7px; }
+.strat-name { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.strat-name a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.strat-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+
+/* Sortable column headers: the affordance is a cursor and, once active, the
+   direction arrow. Sticky headers make these clickable from anywhere. */
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { color: var(--color-ink); }
+th.sortable.sort-desc::after { content: " ↓"; color: var(--color-ink); }
+th.sortable.sort-asc::after { content: " ↑"; color: var(--color-ink); }
+
+/* The never-run majority stays folded; the summary line is the only control. */
+.untested > summary { list-style: none; }
+.untested > summary::-webkit-details-marker { display: none; }
+.untested-summary {
+  cursor: pointer; user-select: none;
+  font-family: var(--font-figure);
+  font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.11em;
+  color: var(--color-muted);
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--color-border);
+}
+.untested-summary:hover { color: var(--color-ink); }
+.untested-summary::before { content: "▸ "; }
+.untested[open] > .untested-summary::before { content: "▾ "; }
+.untested[open] > .untested-summary { margin-bottom: 14px; }
+
+/* status + tone marks */
 .pill {
   display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px;
-  text-transform: uppercase; letter-spacing: 0.03em;
+  font-size: 0.6rem; font-weight: 500; padding: 0; border-radius: 0;
+  background: none;
+  text-transform: uppercase; letter-spacing: 0.11em;
 }
-.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.pill-running { background: var(--accent-soft); color: var(--accent-strong); }
-.pill-queued  { background: var(--panel-2); color: var(--muted); }
-.pill-passed  { background: var(--green-soft); color: var(--green); }
-.pill-failed  { background: var(--red-soft); color: var(--red); }
-.pill-error   { background: var(--red-soft); color: var(--red); }
-.pill-unknown { background: var(--gold-soft); color: var(--gold); }
-.pill-running::before { animation: pulse 1.1s ease-in-out infinite; }
-@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+.pill::before { content: ""; width: 5px; height: 5px; background: currentColor; }
+.pill-running   { color: var(--color-ink); }
+.pill-queued    { color: var(--color-muted); }
+.pill-passed    { color: var(--color-profit-dark); }
+.pill-failed    { color: var(--color-loss-dark); }
+.pill-error     { color: var(--color-loss-dark); }
+.pill-unknown   { color: var(--color-benchmark-dark); }
+/* Stopped, not judged — reads as muted, never as a failed backtest. */
+.pill-cancelled { color: var(--color-muted); }
 
-.tone-pos { color: var(--green); }
-.tone-neg { color: var(--red); }
+tr.job-row { cursor: pointer; }
+.job-actions { justify-content: flex-end; }
+.pill-running::before { animation: pulse 1.1s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.2; } }
+
+.tone-pos { color: var(--color-profit-dark); }
+.tone-neg { color: var(--color-loss-dark); }
 
 /* ── detail header ─────────────────────────────────────────────────────── */
 
-.detail-head { display: flex; flex-direction: column; gap: 10px; margin-bottom: 8px; }
-.detail-title { font-size: 24px; font-weight: 780; letter-spacing: -0.02em; margin: 0; }
-.detail-path { color: var(--muted-2); }
-.detail-doc { color: var(--muted); max-width: 760px; }
+.detail-head {
+  display: flex; flex-direction: column; gap: 12px;
+  margin-bottom: 0; padding-bottom: 22px;
+  border-bottom: 3px solid var(--color-ink);
+}
+.detail-title {
+  font-family: var(--font-prose);
+  font-size: 1.85rem; font-weight: 600; letter-spacing: -0.012em; margin: 0;
+}
+.detail-path { color: var(--color-muted); font-size: 0.7rem; letter-spacing: 0.06em; }
+.detail-doc { color: var(--color-ink); max-width: 68ch; margin: 0; font-size: 0.95rem; }
 
 .action-bar {
-  background: var(--panel); border: 1px solid var(--border-soft);
-  border-radius: var(--radius); padding: 14px 16px; margin: 18px 0;
-  display: flex; gap: 18px; align-items: center; flex-wrap: wrap;
-  box-shadow: var(--shadow);
+  background: none; border: none; border-bottom: 1px solid var(--color-border);
+  border-radius: 0; padding: 18px 0; margin: 0 0 8px;
+  display: flex; gap: 30px; align-items: center; flex-wrap: wrap;
+  box-shadow: none;
 }
-.action-group { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; }
-.action-group-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted-2); margin-right: 2px; }
-.action-divider { width: 1px; align-self: stretch; background: var(--border); }
+.action-group { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.action-group-label {
+  font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.11em;
+  color: var(--color-muted); margin-right: 2px;
+}
+.action-divider { width: 1px; align-self: stretch; background: var(--color-border); }
+
+/* ── parameter form ────────────────────────────────────────────────────── */
+
+.param-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 14px 20px; margin-bottom: 14px;
+}
+.param-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.param-name {
+  font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--color-muted); overflow-wrap: anywhere;
+}
+.param-field input {
+  background: none; color: var(--color-ink);
+  border: none; border-bottom: 1px solid var(--color-border); border-radius: 0;
+  font-family: var(--font-code); font-size: 0.78rem;
+  padding: 4px 2px; outline: none; width: 100%;
+}
+.param-field input:focus { border-bottom: 1.5px solid var(--color-ink); }
+.param-field input::placeholder { color: var(--color-muted); opacity: 0.7; }
+
+.param-note, .param-warning {
+  font-size: 0.72rem; line-height: 1.55; color: var(--color-muted);
+  max-width: 76ch; margin: 0 0 16px;
+}
+.param-analysis {
+  display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+  padding: 14px 0; border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border); margin-bottom: 14px;
+}
+.param-check {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.09em;
+  font-family: var(--font-figure); cursor: pointer;
+}
+/* Analyses that silently ignore the parameters above are marked at the point
+   of selection, not only in the note below. */
+.param-check.is-blind { color: var(--color-muted); }
+.param-check.is-blind::after { content: "ignores params"; font-size: 0.9em; opacity: 0.8; }
+
+.param-warning {
+  border-left: 3px solid var(--color-loss); border-radius: 0;
+  padding-left: 12px; color: var(--color-ink);
+}
+.param-warning b { color: var(--color-loss); font-weight: 600; }
 
 /* ── report frame ──────────────────────────────────────────────────────── */
 
+/* The embedded report is the same document as the page around it, so the frame
+   is a hairline, not a raised panel. */
 .report-frame {
-  width: 100%; height: 720px; border: 1px solid var(--border);
-  border-radius: var(--radius); background: #fff; box-shadow: var(--shadow);
+  width: 100%; height: 860px;
+  border: 1px solid var(--color-border);
+  border-radius: 0; background: var(--color-page); box-shadow: none;
 }
-.report-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.report-bar { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.report-bar .section-title { flex: 1; margin-bottom: 0; }
+.report-bar + .report-frame, .report-bar ~ .report-frame { margin-top: 18px; }
 
 /* ── empty states + misc ───────────────────────────────────────────────── */
 
 .empty {
-  border: 1px dashed var(--border); border-radius: var(--radius);
-  padding: 34px; text-align: center; color: var(--muted); background: var(--panel);
+  border: 1px dashed var(--color-border); border-radius: 0;
+  padding: 34px; text-align: center; color: var(--color-muted);
+  background: none;
 }
 .hidden { display: none !important; }
 
 .log {
-  background: #0f172a; border: 1px solid #1e2a3d;
-  border-radius: var(--radius); padding: 16px;
-  font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12.5px;
-  line-height: 1.55; color: #d7e0ea; white-space: pre-wrap; word-break: break-word;
+  background: var(--color-neutral);
+  border: 1px solid var(--color-border);
+  border-radius: 0; padding: 18px 20px;
+  font-size: 0.72rem; line-height: 1.6;
+  color: var(--color-ink); white-space: pre-wrap; word-break: break-word;
   max-height: 70vh; overflow: auto;
 }
 
-.footer { text-align: center; color: var(--muted-2); font-size: 12px; padding: 26px; border-top: 1px solid var(--border-soft); margin-top: 30px; }
+.footer {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 20px; flex-wrap: wrap;
+  text-align: left; color: var(--color-muted);
+  font-size: 0.6rem; letter-spacing: 0.09em; text-transform: uppercase;
+  padding: 22px 26px 40px; border-top: 1px solid var(--color-border);
+  margin: 40px auto 0; max-width: 1180px;
+}
 
-.pods-line { display: flex; flex-wrap: wrap; gap: 6px; }
-.pod-tag { font-size: 11.5px; padding: 3px 8px; border-radius: 6px; background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--border-soft); color: var(--muted); }
-.pod-tag b { color: var(--text); font-weight: 700; }
+.variant-switch { display: flex; gap: 12px; align-items: baseline; }
+.variant-switch a {
+  color: var(--color-muted);
+  border-bottom: 1.5px solid transparent;
+  padding-bottom: 1px;
+}
+.variant-switch a:hover { color: var(--color-ink); }
+.variant-switch a.active { color: var(--color-loss); border-bottom-color: var(--color-loss); }
+
+.pods-line { display: flex; flex-wrap: wrap; gap: 10px; }
+.pod-tag {
+  font-size: 0.62rem; padding: 0; border-radius: 0;
+  background: none; box-shadow: none; color: var(--color-muted);
+  letter-spacing: 0.06em;
+}
+.pod-tag b { color: var(--color-ink); font-weight: 600; }
+
+kbd {
+  font-family: var(--font-figure); font-size: 0.9em;
+  border: 1px solid var(--color-border); padding: 0 4px;
+}
+
+/* Bench is a desktop console, but a narrow split window should still degrade
+   to a readable column instead of a page that scrolls sideways. */
+@media (max-width: 720px) {
+  .masthead { padding: 22px 18px 0; }
+  .masthead-title { font-size: 2rem; }
+  .nav { gap: 14px; flex-wrap: wrap; padding: 10px 18px; }
+  .container { padding: 26px 18px 56px; }
+  .footer { padding: 20px 18px 32px; }
+  .page-head { align-items: flex-start; }
+  .card-grid { grid-template-columns: 1fr; }
+  /* Below this width a run table cannot fit, so it scrolls inside its own
+     container. Sticky headers do not survive a scroll container — that is the
+     trade, and the desktop case (where the headers matter) keeps them. */
+  .panel { overflow-x: auto; }
+  .table thead th { position: static; }
+}
+
+/* ── print ─────────────────────────────────────────────────────────────── */
+
+/* A catalog page or a run history should print as a sheet you can mark up:
+   controls and embedded frames drop out, headers repeat across pages, and
+   nothing breaks mid-row. */
+@media print {
+  /* Paper is a physical medium, not a signature variant: it is always white,
+     and the ink is always black. Without this the dark variants print their
+     light foreground onto white and the sheet comes out nearly blank — the
+     page background is dropped by the browser but every var(--color-ink) rule
+     below would still resolve to a pale blue. Redeclaring the tokens converts
+     any variant to ink-on-paper in one place. */
+  :root {
+    --color-ink: #000000;
+    --color-page: #ffffff;
+    --color-panel: #ffffff;
+    --color-neutral: #ffffff;
+    --color-grid: #cccccc;
+    --color-border: #999999;
+    --color-muted: #444444;
+    --color-profit-dark: #000000;
+    --color-loss: #000000;
+    --color-loss-dark: #000000;
+    --color-benchmark-dark: #444444;
+  }
+  html, body { background: #ffffff; color: #000000; font-size: 10.5pt; }
+  /* The one accent is a fill on screen; on paper it becomes an outline. */
+  .badge-wired { background: none; border-color: #000000; color: #000000; }
+  .nav-bar, .toolbar, .action-bar, .btn, .btn-row, form.inline,
+  .report-frame, .report-bar, #no-results { display: none !important; }
+  .masthead { padding: 0 0 4px; max-width: none; }
+  .masthead-title { font-size: 1.8rem; }
+  .container { max-width: none; padding: 0; }
+  .footer { padding: 12px 0 0; margin-top: 18px; }
+  .panel { overflow: visible; }
+  .table thead th { position: static; }
+  /* Repeat the column headers on every printed page of a long run history. */
+  thead { display: table-header-group; }
+  tr, .card { break-inside: avoid; }
+  .card-grid { grid-template-columns: 1fr 1fr; gap: 18px 24px; }
+  .card:hover { background: none; }
+  a { text-decoration: none; }
+}
