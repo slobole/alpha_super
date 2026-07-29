@@ -32,6 +32,7 @@
     <nav class="nav">
       <a href="{{ url_for('index_page_fn') }}" class="{{ 'active' if active_nav == 'strategies' }}">Strategies</a>
       <a href="{{ url_for('portfolios_page_fn') }}" class="{{ 'active' if active_nav == 'portfolios' }}">Portfolios</a>
+      <a href="{{ url_for('research_page_fn') }}" class="{{ 'active' if active_nav == 'research' }}">Research</a>
       <a href="{{ url_for('jobs_page_fn') }}" class="{{ 'active' if active_nav == 'jobs' }}">
         Jobs
         <span id="nav-job-badge"

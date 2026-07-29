@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% set active_nav = "research" %}
+{% block title %}Research{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Research</h1>
+    <p class="page-sub">Result folders under <span class="mono">results/research/strategy/</span> that no strategy page can reach — sweeps, universe comparisons, and diagnostics written under names that match no <span class="mono">strategy_*.py</span> file. The work already ran; this page just makes it visible.</p>
+  </div>
+  <div class="stat-row">
+    <div class="stat"><div class="stat-value">{{ orphan_view_list|length }}</div><div class="stat-label">Studies</div></div>
+  </div>
+</div>
+
+{% if not orphan_view_list %}
+<div class="empty">Every result folder is reachable from a strategy page — nothing is orphaned.</div>
+{% endif %}
+
+{% for view in orphan_view_list %}
+<div class="section {{ 'section-flush' if loop.first }}">
+  <h2 class="section-title">{{ view.name_str }}</h2>
+  <div class="panel">
+    <table class="table table-dense">
+      <thead><tr><th>Analysis</th><th>When</th><th>Backtest window</th><th class="num">CAGR</th><th class="num">Sharpe</th><th class="num">Max DD</th><th>Artifacts</th><th></th></tr></thead>
+      <tbody>
+        {% for run in view.run_entry_list %}
+        {% set sm = run.summary_dict %}
+        <tr>
+          <td><b>{{ run.display_analysis_label_str }}</b></td>
+          <td class="muted">{{ run.display_timestamp_str }}</td>
+          <td class="mono">{{ run.backtest_window_str or '—' }}</td>
+          <td class="num {{ 'tone-pos' if (sm.get('ann_return_pct') or 0) >= 0 else 'tone-neg' }}">{{ '%.1f%%'|format(sm.get('ann_return_pct')) if sm.get('ann_return_pct') is not none else '—' }}</td>
+          <td class="num">{{ '%.2f'|format(sm.get('sharpe')) if sm.get('sharpe') is not none else '—' }}</td>
+          <td class="num tone-neg">{{ '%.1f%%'|format(sm.get('max_drawdown_pct')) if sm.get('max_drawdown_pct') is not none else '—' }}</td>
+          <td class="mono muted">{{ run.rel_dir_from_results_str }}</td>
+          <td class="num">{% if run.has_report_bool %}<a class="btn btn-sm btn-ghost" href="{{ url_for('artifact_fn', rel_path_str=run.report_artifact_str) }}" target="_blank" rel="noopener noreferrer">Report</a>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endfor %}
+{% endblock %}

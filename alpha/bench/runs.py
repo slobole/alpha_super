@@ -474,6 +474,42 @@ def recent_runs(limit_int: int = 12) -> list[RunEntry]:
     return build_strategy_run_index().recent_runs(limit_int=limit_int)
 
 
+def orphan_research_view_list(
+    strategy_entry_list: list,
+) -> list[dict]:
+    """Result folders no strategy page can reach, newest activity first.
+
+    Sweeps, universe comparisons and diagnostics write under names that match
+    no ``strategy_*.py`` stem and carry no usable ``class_module``, so none of
+    the per-strategy pages ever list them. That is real, already-paid-for
+    research sitting invisible on disk. Each entry is
+    ``{"name_str": ..., "run_entry_list": [...]}``.
+
+    Read-only like everything else here: this changes nothing about how runs
+    are attributed, it only gives the unreachable ones a page.
+    """
+    run_index_obj = build_strategy_run_index(
+        strategy_stem_set={entry_obj.stem_str for entry_obj in strategy_entry_list}
+    )
+    reachable_run_name_set: set[str] = set()
+    for entry_obj in strategy_entry_list:
+        for run_obj in run_index_obj.runs_for(entry_obj.module_import_str, entry_obj.stem_str):
+            reachable_run_name_set.add(run_obj.run_name_str)
+
+    orphan_view_list: list[dict] = []
+    for run_name_str, run_entry_list in run_index_obj.runs_by_run_name_dict.items():
+        if run_name_str in reachable_run_name_set:
+            continue
+        orphan_view_list.append(
+            {"name_str": run_name_str, "run_entry_list": run_entry_list}
+        )
+    orphan_view_list.sort(
+        key=lambda view_dict: view_dict["run_entry_list"][0].effective_activity_timestamp_float,
+        reverse=True,
+    )
+    return orphan_view_list
+
+
 def resolve_artifact_path(rel_path_str: str) -> Path | None:
     """Resolve a results-relative path, refusing anything outside ``results/``."""
     results_root_resolved_path = RESULTS_ROOT_PATH.resolve()

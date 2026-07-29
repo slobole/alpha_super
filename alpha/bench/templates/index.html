@@ -46,11 +46,17 @@
 
 <div class="section section-flush">
   <h2 class="section-title">Tested</h2>
-  <p class="table-caption">{{ tested_card_list|length }} strategies with at least one recorded run. Metrics are the latest vanilla backtest; click a column header to sort — strategies missing that figure always sink to the bottom.</p>
+  <p class="table-caption">{{ tested_card_list|length }} strategies with at least one recorded run. Metrics are the latest vanilla backtest; click a column header to sort — strategies missing that figure always sink to the bottom. Tick 2–5 rows to compare them side by side.</p>
+  <div id="compare-bar" class="compare-bar hidden">
+    <span class="compare-count" id="compare-count"></span>
+    <a class="btn btn-sm btn-primary" id="compare-link" href="#">Compare</a>
+    <button class="btn btn-sm btn-ghost" id="compare-clear" type="button">Clear</button>
+  </div>
   <div class="panel">
     <table class="table table-dense" id="tested-table">
       <thead>
         <tr>
+          <th class="cmp-cell"></th>
           <th>Strategy</th>
           <th class="num sortable" data-sort-key="cagr">CAGR</th>
           <th class="num sortable" data-sort-key="sharpe">Sharpe</th>
@@ -78,6 +84,7 @@
             data-maxdd="{{ '%.4f'|format(sv.maxdd) if sv.maxdd is not none }}"
             data-trades="{{ '%.0f'|format(sv.trades) if sv.trades is not none }}"
             data-lastrun="{{ '%.0f'|format(sv.last_run) if sv.last_run is not none }}">
+          <td class="cmp-cell"><input type="checkbox" class="cmp-check" value="{{ s.module_import_str }}" aria-label="Select {{ s.stem_str }} for comparison"></td>
           <td>
             <div class="strat-name">
               <a class="mono" href="{{ url_for('strategy_page_fn', module_import_str=s.module_import_str) }}">{{ s.stem_str }}</a>
@@ -282,6 +289,42 @@
         });
         rows.forEach(function (row) { testedBody.appendChild(row); });
       });
+    });
+
+    // Compare selection: 2–5 ticked rows enable the Compare link, which is a
+    // plain GET to /compare — selection lives only in the DOM.
+    const COMPARE_MAX = 5;
+    const compareBar = document.getElementById('compare-bar');
+    const compareCount = document.getElementById('compare-count');
+    const compareLink = document.getElementById('compare-link');
+    const compareChecks = Array.from(document.querySelectorAll('.cmp-check'));
+
+    function refreshCompareBar() {
+      const picked = compareChecks.filter(function (c) { return c.checked; });
+      compareBar.classList.toggle('hidden', picked.length === 0);
+      compareCount.textContent = picked.length + ' selected' + (picked.length < 2 ? ' — pick at least 2' : '');
+      const ready = picked.length >= 2 && picked.length <= COMPARE_MAX;
+      compareLink.classList.toggle('disabled', !ready);
+      compareLink.href = ready
+        ? '{{ url_for("compare_page_fn") }}?' + picked.map(function (c) {
+            return 'm=' + encodeURIComponent(c.value);
+          }).join('&')
+        : '#';
+    }
+
+    compareChecks.forEach(function (check) {
+      check.addEventListener('change', function () {
+        const picked = compareChecks.filter(function (c) { return c.checked; });
+        if (picked.length > COMPARE_MAX) { check.checked = false; return; }
+        refreshCompareBar();
+      });
+    });
+    compareLink.addEventListener('click', function (event) {
+      if (compareLink.classList.contains('disabled')) event.preventDefault();
+    });
+    document.getElementById('compare-clear').addEventListener('click', function () {
+      compareChecks.forEach(function (c) { c.checked = false; });
+      refreshCompareBar();
     });
   })();
 </script>

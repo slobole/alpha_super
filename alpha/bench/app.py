@@ -69,6 +69,10 @@ RUN_PRESET_DICT = {
 }
 RECENT_RUN_WINDOW_DAY_INT = 30
 RECENT_RUN_TABLE_LIMIT_INT = 8
+# Compare is a side-by-side reading aid, not a ranking engine: below 2 there is
+# nothing to compare, above 5 the columns stop being readable.
+COMPARE_MIN_INT = 2
+COMPARE_MAX_INT = 5
 
 # Signature variants the console can be rendered in. Display-only: the cookie
 # changes nothing on the server and never reaches a launched job.
@@ -221,6 +225,62 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
                 if analysis_str not in KWARG_AWARE_ANALYSIS_TUPLE
             ),
         )
+
+    @flask_app_obj.route("/compare")
+    def compare_page_fn() -> str:
+        """Side-by-side latest-vanilla metrics for 2–5 strategies.
+
+        Read-only: every number is lifted from summary.json exactly as the
+        strategy pages show it — no metric is recomputed here.
+        """
+        submitted_module_list = request.args.getlist("m")
+        deduped_module_list: list[str] = []
+        for module_import_str in submitted_module_list:
+            if module_import_str not in deduped_module_list:
+                deduped_module_list.append(module_import_str)
+        if not (COMPARE_MIN_INT <= len(deduped_module_list) <= COMPARE_MAX_INT):
+            abort(
+                400,
+                description=(
+                    f"Pick {COMPARE_MIN_INT}–{COMPARE_MAX_INT} strategies to compare."
+                ),
+            )
+
+        run_index_obj = runs.build_strategy_run_index()
+        column_view_list = []
+        for module_import_str in deduped_module_list:
+            strategy_entry_obj = catalog.get_strategy_by_module(module_import_str)
+            if strategy_entry_obj is None:
+                abort(404)
+            column_view_list.append(
+                {
+                    "strategy": strategy_entry_obj,
+                    "vanilla_run": run_index_obj.latest_vanilla_for(
+                        strategy_entry_obj.module_import_str, strategy_entry_obj.stem_str
+                    ),
+                }
+            )
+
+        # Metrics measured over different periods are not comparable. The page
+        # still renders — the windows are data the operator may want to see —
+        # but the disagreement is stated up front, never left to be noticed.
+        window_str_set = {
+            view_dict["vanilla_run"].backtest_window_str
+            for view_dict in column_view_list
+            if view_dict["vanilla_run"] is not None
+        }
+        return render_template(
+            "compare.html",
+            column_view_list=column_view_list,
+            windows_match_bool=len(window_str_set) <= 1,
+        )
+
+    @flask_app_obj.route("/research")
+    def research_page_fn() -> str:
+        """Result folders no strategy page can reach — sweeps, comparisons,
+        diagnostics written under names that match no strategy file."""
+        orphan_view_list = runs.orphan_research_view_list(catalog.list_strategies())
+        return render_template("research.html", orphan_view_list=orphan_view_list)
 
     @flask_app_obj.route("/portfolios")
     def portfolios_page_fn() -> str:

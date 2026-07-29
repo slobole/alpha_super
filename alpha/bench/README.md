@@ -34,6 +34,16 @@ It binds to `127.0.0.1` only — a single-operator console, not a service.
   an analysis that wrote no window shows `—` rather than implying full history.
   Without this, two runs of the same strategy over different windows are
   indistinguishable in the table.
+- **Compare** — tick 2–5 rows in the Tested table to see their latest vanilla
+  metrics side by side, read straight from each run's `summary.json` with
+  nothing recomputed. When the runs' backtest windows differ, the page says so
+  before the numbers: metrics measured over different periods are not directly
+  comparable, and that disagreement must never be left for the operator to
+  notice on their own.
+- **Research** — result folders under `results/research/strategy/` that no
+  strategy page can reach: sweeps, universe comparisons, and diagnostics
+  written under names that match no `strategy_*.py` file. The work already
+  ran; this page makes it visible instead of leaving it stranded on disk.
 - **Portfolios** — the books under `portfolios/*.yaml` (both the simple
   `run_portfolio.py` schema and the richer `run_portfolio_manager.py` schema),
   with a Build button routed to the correct runner.

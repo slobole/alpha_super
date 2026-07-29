@@ -395,6 +395,20 @@ th.sortable:hover { color: var(--color-ink); }
 th.sortable.sort-desc::after { content: " ↓"; color: var(--color-ink); }
 th.sortable.sort-asc::after { content: " ↑"; color: var(--color-ink); }
 
+/* Compare selection: a quiet bar that only exists while rows are ticked. */
+.cmp-cell { width: 26px; padding-right: 0 !important; }
+.cmp-check { accent-color: var(--color-ink); cursor: pointer; }
+.compare-bar {
+  display: flex; gap: 12px; align-items: center;
+  margin-bottom: 12px;
+}
+.compare-count {
+  font-family: var(--font-figure);
+  font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--color-muted);
+}
+.btn.disabled { opacity: 0.4; cursor: not-allowed; }
+
 /* The never-run majority stays folded; the summary line is the only control. */
 .untested > summary { list-style: none; }
 .untested > summary::-webkit-details-marker { display: none; }

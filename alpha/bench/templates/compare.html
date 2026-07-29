@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% set active_nav = "strategies" %}
+{% block title %}Compare{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:6px;"><a class="muted" href="{{ url_for('index_page_fn') }}">← Strategies</a></div>
+
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Compare</h1>
+    <p class="page-sub">Latest vanilla backtest of each strategy, side by side. Every figure is read from the run's own <span class="mono">summary.json</span> — nothing is recomputed here.</p>
+  </div>
+</div>
+
+{% if not windows_match_bool %}
+{# Metrics measured over different periods are not comparable — say so before
+   the numbers, not after the operator has already drawn a conclusion. #}
+<p class="param-warning">
+  <b>Backtest windows differ.</b>
+  These runs were not measured over the same period, so their metrics are not
+  directly comparable — a strategy tested only through a calm regime will look
+  better than one that carried a crisis. Compare the window row first.
+</p>
+{% endif %}
+
+<div class="section section-flush">
+  <h2 class="section-title">Latest vanilla, side by side</h2>
+  <div class="panel">
+    <table class="table">
+      <thead>
+        <tr>
+          <th></th>
+          {% for view in column_view_list %}
+          <th><a class="mono" href="{{ url_for('strategy_page_fn', module_import_str=view.strategy.module_import_str) }}">{{ view.strategy.stem_str }}</a></th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="muted">Family</td>
+          {% for view in column_view_list %}
+          <td><span class="badge badge-cat">{{ view.strategy.category_label_str }}</span>
+            {% if view.strategy.is_wired_bool %}<span class="badge badge-wired">Wired</span>{% endif %}</td>
+          {% endfor %}
+        </tr>
+        <tr>
+          <td class="muted">Backtest window</td>
+          {% for view in column_view_list %}
+          <td class="mono">{{ view.vanilla_run.backtest_window_str or '—' if view.vanilla_run else 'no vanilla run' }}</td>
+          {% endfor %}
+        </tr>
+        <tr>
+          <td class="muted">Capital</td>
+          {% for view in column_view_list %}
+          <td class="num">{{ view.vanilla_run.capital_display_str or '—' if view.vanilla_run else '—' }}</td>
+          {% endfor %}
+        </tr>
+        <tr>
+          <td class="muted">CAGR</td>
+          {% for view in column_view_list %}
+          {% set sm = view.vanilla_run.summary_dict if view.vanilla_run else {} %}
+          <td class="num {{ 'tone-pos' if (sm.get('ann_return_pct') or 0) >= 0 else 'tone-neg' }}">{{ '%.2f%%'|format(sm.get('ann_return_pct')) if sm.get('ann_return_pct') is not none else '—' }}</td>
+          {% endfor %}
+        </tr>
+        <tr>
+          <td class="muted">Sharpe</td>
+          {% for view in column_view_list %}
+          {% set sm = view.vanilla_run.summary_dict if view.vanilla_run else {} %}
+          <td class="num">{{ '%.2f'|format(sm.get('sharpe')) if sm.get('sharpe') is not none else '—' }}</td>
+          {% endfor %}
+        </tr>
+        <tr>
+          <td class="muted">Max drawdown</td>
+          {% for view in column_view_list %}
+          {% set sm = view.vanilla_run.summary_dict if view.vanilla_run else {} %}
+          <td class="num tone-neg">{{ '%.2f%%'|format(sm.get('max_drawdown_pct')) if sm.get('max_drawdown_pct') is not none else '—' }}</td>
+          {% endfor %}
+        </tr>
+        <tr>
+          <td class="muted">Trades</td>
+          {% for view in column_view_list %}
+          {% set sm = view.vanilla_run.summary_dict if view.vanilla_run else {} %}
+          <td class="num">{{ '{:,}'.format(sm.get('trade_count')|int) if sm.get('trade_count') is not none else '—' }}</td>
+          {% endfor %}
+        </tr>
+        <tr>
+          <td class="muted">Final equity</td>
+          {% for view in column_view_list %}
+          {% set sm = view.vanilla_run.summary_dict if view.vanilla_run else {} %}
+          <td class="num">{{ '{:,.0f}'.format(sm.get('final_equity')) if sm.get('final_equity') is not none else '—' }}</td>
+          {% endfor %}
+        </tr>
+        <tr>
+          <td class="muted">Run date</td>
+          {% for view in column_view_list %}
+          <td class="muted">{{ view.vanilla_run.display_timestamp_str if view.vanilla_run else '—' }}</td>
+          {% endfor %}
+        </tr>
+        <tr>
+          <td class="muted">Report</td>
+          {% for view in column_view_list %}
+          <td>{% if view.vanilla_run and view.vanilla_run.has_report_bool %}<a class="btn btn-sm btn-ghost" href="{{ url_for('artifact_fn', rel_path_str=view.vanilla_run.report_artifact_str) }}" target="_blank" rel="noopener noreferrer">Open</a>{% endif %}</td>
+          {% endfor %}
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

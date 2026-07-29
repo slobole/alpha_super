@@ -903,7 +903,7 @@ def test_portfolio_api_requires_csrf_token(recording_client):
 
 @pytest.mark.parametrize(
     "path_str",
-    ["/", "/jobs", "/portfolios", "/healthz", f"/strategy/{DV2_MODULE_STR}"],
+    ["/", "/jobs", "/portfolios", "/research", "/healthz", f"/strategy/{DV2_MODULE_STR}"],
 )
 def test_pages_render(recording_client, path_str):
     client, _job_manager, _token_str = recording_client
@@ -977,7 +977,7 @@ def test_index_renders_momentum_and_recent_run_filters(recording_client):
     sector_detail_html_str = client.get(f"/strategy/{sector_module_str}").get_data(as_text=True)
     assert '<span class="badge badge-cat">Sector Dispersion</span>' in sector_detail_html_str
     atr_card_start_int = html_str.index(f'data-module="{ATR_NDX_MODULE_STR}"')
-    atr_card_excerpt_str = html_str[atr_card_start_int : atr_card_start_int + 1_200]
+    atr_card_excerpt_str = html_str[atr_card_start_int : atr_card_start_int + 1_800]
     assert 'data-subcategory="atr_normalized_rotation"' in atr_card_excerpt_str
     assert "ATR-Normalized Rotation" in atr_card_excerpt_str
 
@@ -1023,6 +1023,57 @@ def test_index_splits_tested_rows_from_the_untested_fold(recording_client):
 
     # Every strategy appears exactly once across the two sections.
     assert html_str.count(f'data-module="{DV2_MODULE_STR}"') == 1
+
+
+def test_research_page_lists_only_unreachable_result_folders(recording_client):
+    """Orphan studies get a page; attributed runs must not be duplicated onto it.
+
+    A result folder that some strategy page already lists is not an orphan —
+    showing it twice would let the same run read as two pieces of evidence.
+    """
+    orphan_view_list = runs.orphan_research_view_list(catalog.list_strategies())
+    orphan_name_set = {view_dict["name_str"] for view_dict in orphan_view_list}
+
+    # Reachable runs stay off the orphan page.
+    assert "strategy_mr_dv2" not in orphan_name_set
+    # Every orphan really is a results folder, and every one carries runs.
+    run_index_obj = runs.build_strategy_run_index()
+    assert orphan_name_set <= set(run_index_obj.runs_by_run_name_dict)
+    assert all(view_dict["run_entry_list"] for view_dict in orphan_view_list)
+
+    client, _job_manager, _token_str = recording_client
+    html_str = client.get("/research").get_data(as_text=True)
+    for orphan_name_str in orphan_name_set:
+        assert orphan_name_str in html_str
+
+
+SECTOR_IBS_MODULE_STR = "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs"
+
+
+def test_compare_page_shows_latest_vanilla_side_by_side(recording_client):
+    client, _job_manager, _token_str = recording_client
+    html_str = client.get(
+        f"/compare?m={DV2_MODULE_STR}&m={SECTOR_IBS_MODULE_STR}"
+    ).get_data(as_text=True)
+
+    assert "strategy_mr_dv2" in html_str
+    assert "strategy_mr_sector_dispersion_ibs" in html_str
+    assert "Sharpe" in html_str
+    assert "Backtest window" in html_str
+
+
+def test_compare_page_rejects_wrong_counts_and_unknown_modules(recording_client):
+    client, _job_manager, _token_str = recording_client
+
+    # One strategy is not a comparison.
+    assert client.get(f"/compare?m={DV2_MODULE_STR}").status_code == 400
+    # Duplicates are deduped before the count check, so twice-the-same is one.
+    assert client.get(f"/compare?m={DV2_MODULE_STR}&m={DV2_MODULE_STR}").status_code == 400
+    # An unknown module 404s rather than rendering an empty column.
+    assert (
+        client.get(f"/compare?m={DV2_MODULE_STR}&m=strategies.nope.strategy_missing").status_code
+        == 404
+    )
 
 
 def test_index_reuses_one_run_index(recording_client, monkeypatch):
