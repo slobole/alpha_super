@@ -81,6 +81,44 @@ class PodCandidate:
     def max_drawdown_float(self) -> float | None:
         return _summary_float(self.run_obj, "max_drawdown_pct")
 
+    @property
+    def trade_count_float(self) -> float | None:
+        return _summary_float(self.run_obj, "trade_count")
+
+    @property
+    def window_year_float(self) -> float | None:
+        start_str = self.run_obj.parameter_dict.get("start_date")
+        end_str = self.run_obj.parameter_dict.get("end_date")
+        if not start_str or not end_str:
+            return None
+        try:
+            day_count_int = (pd.Timestamp(end_str) - pd.Timestamp(start_str)).days
+        except (TypeError, ValueError):
+            return None
+        return day_count_int / 365.25 if day_count_int > 0 else None
+
+    @property
+    def trades_per_year_float(self) -> float | None:
+        """Round-trip trades per year — a free proxy for how busy a pod is.
+
+        Read from the summary rather than the transaction log: exact cadence
+        (distinct trading days per month) costs a CSV read per strategy, which
+        is affordable for a handful of selected pods on the review page but not
+        for the whole catalog. This separates a monthly rotation from a daily
+        book well enough to sort by.
+        """
+        trade_count_float = self.trade_count_float
+        window_year_float = self.window_year_float
+        if not trade_count_float or not window_year_float:
+            return None
+        return trade_count_float / window_year_float
+
+    @property
+    def search_text_str(self) -> str:
+        return " ".join(
+            [self.display_name_str, self.stem_str, self.category_label_str]
+        ).lower()
+
 
 @dataclass(frozen=True)
 class BuilderNotice:

@@ -6,14 +6,14 @@
 <div class="page-head">
   <div>
     <h1 class="page-title">New Portfolio</h1>
-    <p class="page-sub">Pick pods, set weights, review the checks, write the YAML. Only strategies with a saved <b>vanilla</b> run appear — those are the ones a combine-pkls book can aggregate.</p>
+    <p class="page-sub">Pick pods, set weights, review the checks, save. Only strategies with a saved <b>vanilla</b> run appear — those are the ones a combine-pkls book can aggregate. Click a column header to sort.</p>
   </div>
   <div class="stat-row">
     <div class="stat"><div class="stat-value">{{ candidate_list|length }}</div><div class="stat-label">Combinable</div></div>
   </div>
 </div>
 
-<form method="post" action="{{ url_for('portfolio_review_page_fn') }}">
+<form method="post" action="{{ url_for('portfolio_review_page_fn') }}" id="builder-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
 
   <div class="panel builder-head">
@@ -30,26 +30,74 @@
       <input id="benchmark" name="benchmark" placeholder="$SPX">
     </div>
     <div class="builder-actions">
-      <button class="btn" type="button" id="equal-weight-btn">Equal weight</button>
-      <button class="btn btn-primary" type="submit">Review &rarr;</button>
+      <button class="btn btn-primary" type="submit" id="review-btn" disabled>Review &rarr;</button>
     </div>
   </div>
 
+  {# The basket, drawn as you build it: proportions at a glance, exact figures
+     beside them, and the one number that decides whether the config is valid. #}
+  <div class="panel selection-panel hidden" id="selection-panel">
+    <div class="selection-chart">
+      <svg viewBox="0 0 120 120" class="donut" aria-label="Weight allocation">
+        <g id="donut-slices" transform="rotate(-90 60 60)"></g>
+        <text x="60" y="57" class="donut-center-value" id="donut-count">0</text>
+        <text x="60" y="72" class="donut-center-label">PODS</text>
+      </svg>
+    </div>
+    <div class="selection-legend" id="selection-legend"></div>
+    <div class="selection-side">
+      <div class="selection-total" id="selection-total">0%</div>
+      <div class="selection-total-label" id="selection-total-label">allocated</div>
+      <div class="btn-row selection-buttons">
+        <button class="btn btn-sm" type="button" id="equal-weight-btn">Equal</button>
+        <button class="btn btn-sm" type="button" id="normalize-btn">Normalize</button>
+        <button class="btn btn-sm" type="button" id="clear-btn">Clear</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toolbar builder-toolbar">
+    <div class="filter-bar" id="builder-filter-bar">
+      <span class="filter-chip active" data-filter="all">All</span>
+      <span class="filter-chip wired" data-filter="wired">★ Wired</span>
+      <span class="filter-chip" data-filter="research">Research</span>
+      <span class="filter-chip" data-filter="selected">Selected</span>
+    </div>
+    <input id="builder-search" class="search" type="text" autocomplete="off"
+           placeholder="Search strategies by name or family…">
+  </div>
+
   <div class="section section-flush">
-    <h2 class="section-title">Pods</h2>
     <div class="panel">
-      <table class="table builder-table">
+      <table class="table builder-table" id="builder-table">
         <thead>
           <tr>
-            <th></th><th>Strategy</th><th>Category</th>
-            <th class="num">Ann.</th><th class="num">Sharpe</th><th class="num">MaxDD</th>
-            <th>Window</th><th>Bench</th><th class="num">Weight</th>
+            <th></th>
+            <th class="sortable" data-sort-key="name">Strategy</th>
+            <th class="sortable" data-sort-key="category">Category</th>
+            <th class="num sortable" data-sort-key="cagr">Ann.</th>
+            <th class="num sortable" data-sort-key="sharpe">Sharpe</th>
+            <th class="num sortable" data-sort-key="maxdd">Max DD</th>
+            <th class="num sortable" data-sort-key="tradesyr">Trades/yr</th>
+            <th class="sortable" data-sort-key="start">Window</th>
+            <th>Bench</th>
+            <th class="num">Weight</th>
           </tr>
         </thead>
         <tbody>
           {% for c in candidate_list %}
-          <tr class="builder-row">
-            <td><input type="checkbox" name="pod" value="{{ c.stem_str }}" class="pod-check"></td>
+          <tr class="builder-row"
+              data-search="{{ c.search_text_str }}"
+              data-wired="{{ '1' if c.is_wired_bool else '0' }}"
+              data-name="{{ c.stem_str|lower }}"
+              data-category="{{ c.category_label_str|lower }}"
+              data-cagr="{{ c.ann_return_float if c.ann_return_float is not none else '' }}"
+              data-sharpe="{{ c.sharpe_float if c.sharpe_float is not none else '' }}"
+              data-maxdd="{{ c.max_drawdown_float if c.max_drawdown_float is not none else '' }}"
+              data-tradesyr="{{ '%.1f'|format(c.trades_per_year_float) if c.trades_per_year_float is not none else '' }}"
+              data-start="{{ c.run_obj.parameter_dict.get('start_date') or '' }}">
+            <td><input type="checkbox" name="pod" value="{{ c.stem_str }}" class="pod-check"
+                       data-label="{{ c.display_name_str }}"></td>
             <td>
               <div><b>{{ c.display_name_str }}</b>
                 {% if c.is_wired_bool %}<span class="badge badge-wired">wired</span>{% endif %}
@@ -60,42 +108,180 @@
             <td class="num">{% if c.ann_return_float is not none %}{{ '%.1f%%'|format(c.ann_return_float) }}{% else %}&mdash;{% endif %}</td>
             <td class="num">{% if c.sharpe_float is not none %}{{ '%.2f'|format(c.sharpe_float) }}{% else %}&mdash;{% endif %}</td>
             <td class="num">{% if c.max_drawdown_float is not none %}{{ '%.1f%%'|format(c.max_drawdown_float) }}{% else %}&mdash;{% endif %}</td>
+            <td class="num">{% if c.trades_per_year_float is not none %}{{ '%.0f'|format(c.trades_per_year_float) }}{% else %}&mdash;{% endif %}</td>
             <td class="mono muted-2">{{ c.window_str or '—' }}</td>
             <td class="mono muted-2">{{ c.benchmark_symbol_str or '—' }}</td>
             <td class="num">
-              <input class="weight-input" name="weight__{{ c.stem_str }}" value="" inputmode="decimal" placeholder="0.00">
+              <input class="weight-input" name="weight__{{ c.stem_str }}" value="" inputmode="decimal" placeholder="—">
             </td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
+    <div id="builder-no-results" class="empty hidden">No strategies match your search.</div>
   </div>
 </form>
 
+<script src="{{ url_for('static', filename='weight_donut.js') }}"></script>
 <script>
-  // Ticking a pod gives it a weight straight away, so the common case — an
-  // equal-weight book — needs no typing at all. Untick clears it.
   (function () {
-    function checkedInputs() {
-      return Array.prototype.slice.call(document.querySelectorAll('.pod-check')).filter(function (el) { return el.checked; });
+    const rowList = Array.from(document.querySelectorAll('.builder-row'));
+    const checkList = Array.from(document.querySelectorAll('.pod-check'));
+    const searchInput = document.getElementById('builder-search');
+    const chipList = Array.from(document.querySelectorAll('#builder-filter-bar .filter-chip'));
+    const allChip = chipList.find(function (c) { return c.dataset.filter === 'all'; });
+    const noResults = document.getElementById('builder-no-results');
+    const panel = document.getElementById('selection-panel');
+    const legend = document.getElementById('selection-legend');
+    const slicesGroup = document.getElementById('donut-slices');
+    const totalEl = document.getElementById('selection-total');
+    const totalLabelEl = document.getElementById('selection-total-label');
+    const countEl = document.getElementById('donut-count');
+    const reviewBtn = document.getElementById('review-btn');
+    const tableBody = document.querySelector('#builder-table tbody');
+
+    function rowOf(el) { return el.closest('tr'); }
+    function weightInputOf(check) { return rowOf(check).querySelector('.weight-input'); }
+    function checkedList() { return checkList.filter(function (c) { return c.checked; }); }
+    function weightOf(check) {
+      const raw = parseFloat(weightInputOf(check).value);
+      return isNaN(raw) || raw < 0 ? 0 : raw;
     }
-    function weightInputFor(checkEl) {
-      return checkEl.closest('tr').querySelector('.weight-input');
-    }
+
     function spreadEqually() {
-      var checked = checkedInputs();
+      const checked = checkedList();
       if (!checked.length) return;
-      var each = (1 / checked.length);
-      checked.forEach(function (el) { weightInputFor(el).value = each.toFixed(4).replace(/0+$/, '').replace(/\.$/, ''); });
+      // Carry the rounding residue on the first pod so the row always reads
+      // 100%, matching what the server writes into the YAML.
+      const each = Math.round((1 / checked.length) * 10000) / 10000;
+      checked.forEach(function (c, i) { weightInputOf(c).value = String(each); });
+      const residue = Math.round((1 - each * checked.length) * 10000) / 10000;
+      if (residue !== 0) {
+        weightInputOf(checked[0]).value = String(Math.round((each + residue) * 10000) / 10000);
+      }
+      render();
     }
+
+    function normalize() {
+      const checked = checkedList();
+      const total = checked.reduce(function (sum, c) { return sum + weightOf(c); }, 0);
+      if (!checked.length || total <= 0) { spreadEqually(); return; }
+      checked.forEach(function (c) {
+        weightInputOf(c).value = String(Math.round((weightOf(c) / total) * 10000) / 10000);
+      });
+      render();
+    }
+
+    function render() {
+      const checked = checkedList();
+      panel.classList.toggle('hidden', checked.length === 0);
+      reviewBtn.disabled = checked.length < 2;
+      countEl.textContent = String(checked.length);
+
+      const total = checked.reduce(function (sum, c) { return sum + weightOf(c); }, 0);
+      totalEl.textContent = (total * 100).toFixed(total * 100 % 1 === 0 ? 0 : 1) + '%';
+      const balanced = Math.abs(total - 1) < 0.0005;
+      totalEl.classList.toggle('cell-bad', checked.length > 0 && !balanced);
+      totalLabelEl.textContent = balanced ? 'allocated' : 'rescaled on save';
+
+      BenchWeightDonut.render(slicesGroup, legend, checked.map(function (c) {
+        return { label: c.dataset.label, weight: weightOf(c) };
+      }));
+      apply();
+    }
+
+    // ── filter + search ──────────────────────────────────────────────────
+    let wiredOnly = false, researchOnly = false, selectedOnly = false;
+
+    function apply() {
+      const query = searchInput.value.trim().toLowerCase();
+      let visible = 0;
+      rowList.forEach(function (row) {
+        const check = row.querySelector('.pod-check');
+        let ok = true;
+        if (wiredOnly) ok = ok && row.dataset.wired === '1';
+        if (researchOnly) ok = ok && row.dataset.wired === '0';
+        if (selectedOnly) ok = ok && check.checked;
+        ok = ok && (!query || row.dataset.search.indexOf(query) !== -1);
+        row.classList.toggle('hidden', !ok);
+        if (ok) visible++;
+      });
+      noResults.classList.toggle('hidden', visible !== 0);
+      allChip.classList.toggle('active', !wiredOnly && !researchOnly && !selectedOnly);
+    }
+
+    chipList.forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        const filter = chip.dataset.filter;
+        if (filter === 'all') {
+          wiredOnly = researchOnly = selectedOnly = false;
+          chipList.forEach(function (c) { c.classList.remove('active'); });
+        } else {
+          if (filter === 'wired') { wiredOnly = !wiredOnly; if (wiredOnly) researchOnly = false; }
+          if (filter === 'research') { researchOnly = !researchOnly; if (researchOnly) wiredOnly = false; }
+          if (filter === 'selected') { selectedOnly = !selectedOnly; }
+          chipList.forEach(function (c) {
+            const f = c.dataset.filter;
+            c.classList.toggle('active',
+              (f === 'wired' && wiredOnly) || (f === 'research' && researchOnly) || (f === 'selected' && selectedOnly));
+          });
+        }
+        apply();
+      });
+    });
+    searchInput.addEventListener('input', apply);
+
+    // ── sorting ──────────────────────────────────────────────────────────
+    // Same contract as the strategy catalog: first click sorts best-first,
+    // a second flips it, and rows missing the figure always sink — absence of
+    // a number is not a score. Text columns sort alphabetically.
+    const TEXT_KEY_SET = { name: true, category: true, start: true };
+    const sortableHeads = Array.from(document.querySelectorAll('#builder-table th.sortable'));
+    sortableHeads.forEach(function (head) {
+      head.addEventListener('click', function () {
+        const key = head.dataset.sortKey;
+        const isText = TEXT_KEY_SET[key] === true;
+        const desc = !(head.dataset.dir === 'desc');
+        sortableHeads.forEach(function (h) { h.removeAttribute('data-dir'); h.classList.remove('sort-desc', 'sort-asc'); });
+        head.dataset.dir = desc ? 'desc' : 'asc';
+        head.classList.add(desc ? 'sort-desc' : 'sort-asc');
+
+        const rows = Array.from(tableBody.querySelectorAll('tr'));
+        rows.sort(function (a, b) {
+          const rawA = a.dataset[key], rawB = b.dataset[key];
+          const missA = !rawA, missB = !rawB;
+          if (missA && missB) return 0;
+          if (missA) return 1;
+          if (missB) return -1;
+          if (isText) return desc ? rawB.localeCompare(rawA) : rawA.localeCompare(rawB);
+          return desc ? parseFloat(rawB) - parseFloat(rawA) : parseFloat(rawA) - parseFloat(rawB);
+        });
+        rows.forEach(function (row) { tableBody.appendChild(row); });
+      });
+    });
+
+    // ── wiring ───────────────────────────────────────────────────────────
     document.addEventListener('change', function (event) {
       if (!event.target.classList || !event.target.classList.contains('pod-check')) return;
-      if (!event.target.checked) { weightInputFor(event.target).value = ''; }
-      spreadEqually();
+      if (event.target.checked) {
+        if (!weightInputOf(event.target).value) spreadEqually(); else render();
+      } else {
+        weightInputOf(event.target).value = '';
+        render();
+      }
     });
-    var btn = document.getElementById('equal-weight-btn');
-    if (btn) btn.addEventListener('click', spreadEqually);
+    document.addEventListener('input', function (event) {
+      if (event.target.classList && event.target.classList.contains('weight-input')) render();
+    });
+    document.getElementById('equal-weight-btn').addEventListener('click', spreadEqually);
+    document.getElementById('normalize-btn').addEventListener('click', normalize);
+    document.getElementById('clear-btn').addEventListener('click', function () {
+      checkList.forEach(function (c) { c.checked = false; weightInputOf(c).value = ''; });
+      render();
+    });
+
+    render();
   })();
 </script>
 {% endblock %}

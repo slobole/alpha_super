@@ -301,6 +301,38 @@ def test_rendered_yaml_matches_the_house_style(stub_pods):
     assert diagnostics_obj.yaml_text_str.endswith("\n")
 
 
+def test_candidate_exposes_sort_and_search_keys():
+    """The catalog's sort and search run client-side off these fields."""
+    candidate_obj = _stub_candidate("strategy_alpha")
+    # 2012-10-01 -> 2026-07-24 is ~13.8 years.
+    assert candidate_obj.window_year_float == pytest.approx(13.8, abs=0.2)
+    assert "strategy_alpha" in candidate_obj.search_text_str
+    assert candidate_obj.search_text_str == candidate_obj.search_text_str.lower()
+
+
+def test_trades_per_year_separates_a_monthly_rotation_from_a_daily_book():
+    """The free activity proxy: exact cadence costs a CSV read per strategy."""
+    monthly_candidate_obj = _stub_candidate("strategy_monthly")
+    monthly_candidate_obj.run_obj.summary_dict["trade_count"] = 867
+    daily_candidate_obj = _stub_candidate("strategy_daily")
+    daily_candidate_obj.run_obj.summary_dict["trade_count"] = 10613
+
+    assert monthly_candidate_obj.trades_per_year_float < 100
+    assert daily_candidate_obj.trades_per_year_float > 500
+
+
+def test_trades_per_year_is_none_without_a_window_or_trades():
+    """Absence of a figure must stay distinct from zero so sorting can sink it."""
+    candidate_obj = _stub_candidate("strategy_alpha")
+    candidate_obj.run_obj.summary_dict.pop("trade_count", None)
+    assert candidate_obj.trades_per_year_float is None
+
+    windowless_candidate_obj = _stub_candidate("strategy_beta")
+    windowless_candidate_obj.run_obj.run_info_dict["parameters"] = {}
+    assert windowless_candidate_obj.window_year_float is None
+    assert windowless_candidate_obj.trades_per_year_float is None
+
+
 def test_candidate_list_only_offers_strategies_with_a_saved_vanilla_run():
     """Against the real results tree: every candidate must have a pickle to combine."""
     for candidate_obj in portfolio_builder.list_pod_candidates()[:12]:

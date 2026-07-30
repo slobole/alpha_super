@@ -6,97 +6,137 @@
 <div class="page-head">
   <div>
     <h1 class="page-title">{{ name_str }}</h1>
-    <p class="page-sub">Checks on the <b>inputs</b> — redundancy, window, funding, benchmark agreement. Returns come from the engine when you run the book, never estimated here.</p>
+    <p class="page-sub">Checks on the <b>inputs</b> — redundancy, window, funding, benchmark agreement. Returns come from the engine when you run the book, never estimated here. Adjust weights below and re-check as often as you like.</p>
   </div>
 </div>
 
-{% if diagnostics.notice_list %}
-<div class="section section-flush">
-  <h2 class="section-title">Checks</h2>
-  {% for notice in diagnostics.notice_list %}
-  <div class="panel notice notice-{{ notice.severity_str }}">
-    <div class="notice-title">{{ notice.title_str }}</div>
-    <div class="notice-detail">{{ notice.detail_str }}</div>
-  </div>
-  {% endfor %}
-</div>
-{% else %}
-<div class="panel notice notice-info">
-  <div class="notice-title">No issues found</div>
-  <div class="notice-detail">Pods are distinct, funded, and share a usable window.</div>
-</div>
-{% endif %}
-
-{% if diagnostics.pod_view_list %}
-<div class="section section-flush">
-  <h2 class="section-title">Pods</h2>
-  <div class="panel">
-    <table class="table">
-      <thead>
-        <tr><th>Strategy</th><th class="num">Weight</th><th class="num">Capital</th><th class="num">Trade days/mo</th><th>Window</th></tr>
-      </thead>
-      <tbody>
-        {% for pod in diagnostics.pod_view_list %}
-        <tr>
-          <td>
-            <div><b>{{ pod.candidate.display_name_str }}</b>
-              {% if pod.candidate.is_wired_bool %}<span class="badge badge-wired">wired</span>
-              {% else %}<span class="badge badge-cat">research</span>{% endif %}
-            </div>
-            <div class="mono muted-2">{{ pod.candidate.stem_str }}</div>
-          </td>
-          <td class="num">{{ '%.1f%%'|format(pod.weight_float * 100) }}</td>
-          <td class="num {{ 'cell-bad' if pod.underfunded_bool }}">${{ '{:,.0f}'.format(pod.allocated_float) }}</td>
-          <td class="num">{% if pod.cadence_float is not none %}{{ '%.1f'|format(pod.cadence_float) }}{% else %}&mdash;{% endif %}</td>
-          <td class="mono muted-2">{{ pod.candidate.window_str or '—' }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
-{% endif %}
-
-{% if diagnostics.correlation_row_list %}
-<div class="section section-flush">
-  <h2 class="section-title">Correlation</h2>
-  <p class="page-sub">Daily returns over the {{ diagnostics.common_start_str }} &rarr; {{ diagnostics.common_end_str }} overlap. Highlighted cells are pairs close enough to be one trade.</p>
-  <div class="panel scroll">
-    <table class="table">
-      <thead>
-        <tr><th></th>{% for label in diagnostics.correlation_label_list %}<th class="num mono">{{ label[:18] }}</th>{% endfor %}</tr>
-      </thead>
-      <tbody>
-        {% for row in diagnostics.correlation_row_list %}
-        <tr>
-          <td class="mono">{{ row.label_str }}</td>
-          {% for cell in row.value_list %}
-          <td class="num {{ 'cell-bad' if cell.redundant_bool }} {{ 'muted-2' if cell.self_bool }}">{{ '%.2f'|format(cell.value_float) }}</td>
-          {% endfor %}
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
-{% endif %}
-
-<div class="section section-flush">
-  <h2 class="section-title">Config</h2>
-  <div class="panel">
-    <pre class="mono yaml-preview">{{ diagnostics.yaml_text_str }}</pre>
-  </div>
-</div>
-
-<form method="post" action="{{ url_for('portfolio_create_api_fn') }}">
+{# One form, two destinations: re-check keeps you here with new weights, save
+   writes the file. The buttons pick the target with formaction, so editing a
+   weight never means going back and starting the selection over. #}
+<form method="post" action="{{ url_for('portfolio_review_page_fn') }}" id="review-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
-  <input type="hidden" name="name" value="{{ name_str }}">
-  <input type="hidden" name="capital" value="{{ capital_float }}">
-  <input type="hidden" name="benchmark" value="{{ benchmark_str }}">
-  {% for stem_str, weight_float in selection_pair_list %}
-  <input type="hidden" name="pod" value="{{ stem_str }}">
-  <input type="hidden" name="weight__{{ stem_str }}" value="{{ weight_float }}">
-  {% endfor %}
+
+  <div class="panel builder-head">
+    <div class="builder-field">
+      <label for="name">Name</label>
+      <input id="name" name="name" value="{{ name_str }}" required>
+    </div>
+    <div class="builder-field">
+      <label for="capital">Capital</label>
+      <input id="capital" name="capital" value="{{ '%g'|format(capital_float) }}" inputmode="decimal">
+    </div>
+    <div class="builder-field">
+      <label for="benchmark">Benchmark <span class="muted">(blank = derive)</span></label>
+      <input id="benchmark" name="benchmark" value="{{ benchmark_str }}" placeholder="$SPX">
+    </div>
+    <div class="builder-actions">
+      <a class="btn" href="{{ url_for('portfolio_new_page_fn') }}">Back to pods</a>
+      <button class="btn" type="submit" formaction="{{ url_for('portfolio_review_page_fn') }}">Re-check</button>
+    </div>
+  </div>
+
+  {% if diagnostics.notice_list %}
+  <div class="section section-flush">
+    <h2 class="section-title">Checks</h2>
+    {% for notice in diagnostics.notice_list %}
+    <div class="panel notice notice-{{ notice.severity_str }}">
+      <div class="notice-title">{{ notice.title_str }}</div>
+      <div class="notice-detail">{{ notice.detail_str }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="panel notice notice-info">
+    <div class="notice-title">No issues found</div>
+    <div class="notice-detail">Pods are distinct, funded, and share a usable window.</div>
+  </div>
+  {% endif %}
+
+  {% if diagnostics.pod_view_list %}
+  <div class="panel selection-panel">
+    <div class="selection-chart">
+      <svg viewBox="0 0 120 120" class="donut" aria-label="Weight allocation">
+        <g id="donut-slices" transform="rotate(-90 60 60)"></g>
+        <text x="60" y="57" class="donut-center-value">{{ diagnostics.pod_view_list|length }}</text>
+        <text x="60" y="72" class="donut-center-label">PODS</text>
+      </svg>
+    </div>
+    <div class="selection-legend" id="selection-legend"></div>
+    <div class="selection-side">
+      <div class="selection-total" id="selection-total">100%</div>
+      <div class="selection-total-label" id="selection-total-label">allocated</div>
+      <div class="btn-row selection-buttons">
+        <button class="btn btn-sm" type="button" id="equal-weight-btn">Equal</button>
+        <button class="btn btn-sm" type="button" id="normalize-btn">Normalize</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="section section-flush">
+    <h2 class="section-title">Pods</h2>
+    <div class="panel">
+      <table class="table">
+        <thead>
+          <tr><th>Strategy</th><th class="num">Weight</th><th class="num">Capital</th><th class="num">Trade days/mo</th><th>Window</th></tr>
+        </thead>
+        <tbody>
+          {% for pod in diagnostics.pod_view_list %}
+          <tr>
+            <td>
+              <div><b>{{ pod.candidate.display_name_str }}</b>
+                {% if pod.candidate.is_wired_bool %}<span class="badge badge-wired">wired</span>
+                {% else %}<span class="badge badge-cat">research</span>{% endif %}
+              </div>
+              <div class="mono muted-2">{{ pod.candidate.stem_str }}</div>
+              <input type="hidden" name="pod" value="{{ pod.candidate.stem_str }}">
+            </td>
+            <td class="num">
+              <input class="weight-input" name="weight__{{ pod.candidate.stem_str }}"
+                     value="{{ '%g'|format(pod.weight_float) }}" inputmode="decimal"
+                     data-label="{{ pod.candidate.display_name_str }}">
+            </td>
+            <td class="num {{ 'cell-bad' if pod.underfunded_bool }}" data-capital-cell>${{ '{:,.0f}'.format(pod.allocated_float) }}</td>
+            <td class="num">{% if pod.cadence_float is not none %}{{ '%.1f'|format(pod.cadence_float) }}{% else %}&mdash;{% endif %}</td>
+            <td class="mono muted-2">{{ pod.candidate.window_str or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if diagnostics.correlation_row_list %}
+  <div class="section section-flush">
+    <h2 class="section-title">Correlation</h2>
+    <p class="page-sub">Daily returns over the {{ diagnostics.common_start_str }} &rarr; {{ diagnostics.common_end_str }} overlap. Highlighted cells are pairs close enough to be one trade.</p>
+    <div class="panel scroll">
+      <table class="table">
+        <thead>
+          <tr><th></th>{% for label in diagnostics.correlation_label_list %}<th class="num mono">{{ label[:18] }}</th>{% endfor %}</tr>
+        </thead>
+        <tbody>
+          {% for row in diagnostics.correlation_row_list %}
+          <tr>
+            <td class="mono">{{ row.label_str }}</td>
+            {% for cell in row.value_list %}
+            <td class="num {{ 'cell-bad' if cell.redundant_bool }} {{ 'muted-2' if cell.self_bool }}">{{ '%.2f'|format(cell.value_float) }}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="section section-flush">
+    <h2 class="section-title">Config</h2>
+    <div class="panel">
+      <pre class="mono yaml-preview">{{ diagnostics.yaml_text_str }}</pre>
+    </div>
+    <p class="table-caption">Weights shown above are what the file will carry. Edit and re-check to refresh this preview before saving.</p>
+  </div>
 
   <div class="panel builder-head">
     <div class="builder-field">
@@ -107,13 +147,79 @@
       <label><input type="checkbox" name="overwrite" value="1"> Overwrite if it exists</label>
     </div>
     <div class="builder-actions">
-      <a class="btn" href="{{ url_for('portfolio_new_page_fn') }}">Back</a>
       {% if diagnostics.has_block_bool %}
       <button class="btn" type="submit" disabled>Cannot save</button>
       {% else %}
-      <button class="btn btn-primary" type="submit">Save config</button>
+      <button class="btn btn-primary" type="submit" formaction="{{ url_for('portfolio_create_api_fn') }}">Save config</button>
       {% endif %}
     </div>
   </div>
 </form>
+
+<script src="{{ url_for('static', filename='weight_donut.js') }}"></script>
+<script>
+  (function () {
+    const slicesGroup = document.getElementById('donut-slices');
+    const legend = document.getElementById('selection-legend');
+    if (!slicesGroup || !legend) return;
+    const weightInputs = Array.from(document.querySelectorAll('.weight-input'));
+    const totalEl = document.getElementById('selection-total');
+    const totalLabelEl = document.getElementById('selection-total-label');
+    const capitalInput = document.getElementById('capital');
+
+    function weightOf(input) {
+      const raw = parseFloat(input.value);
+      return isNaN(raw) || raw < 0 ? 0 : raw;
+    }
+
+    // The capital column follows the weights as you type, so the funding
+    // question is answered before you re-check rather than after.
+    function repaintCapital(total) {
+      const capital = parseFloat(capitalInput.value);
+      if (isNaN(capital)) return;
+      weightInputs.forEach(function (input) {
+        const cell = input.closest('tr').querySelector('[data-capital-cell]');
+        const share = total > 0 ? weightOf(input) / total : 0;
+        cell.textContent = '$' + Math.round(capital * share).toLocaleString('en-US');
+      });
+    }
+
+    function render() {
+      const total = BenchWeightDonut.render(slicesGroup, legend, weightInputs.map(function (input) {
+        return { label: input.dataset.label, weight: weightOf(input) };
+      }));
+      totalEl.textContent = (total * 100).toFixed(total * 100 % 1 === 0 ? 0 : 1) + '%';
+      const balanced = Math.abs(total - 1) < 0.0005;
+      totalEl.classList.toggle('cell-bad', !balanced);
+      totalLabelEl.textContent = balanced ? 'allocated' : 'rescaled on save';
+      repaintCapital(total);
+    }
+
+    function spreadEqually() {
+      const each = Math.round((1 / weightInputs.length) * 10000) / 10000;
+      weightInputs.forEach(function (input) { input.value = String(each); });
+      const residue = Math.round((1 - each * weightInputs.length) * 10000) / 10000;
+      if (residue !== 0) {
+        weightInputs[0].value = String(Math.round((each + residue) * 10000) / 10000);
+      }
+      render();
+    }
+
+    document.getElementById('equal-weight-btn').addEventListener('click', spreadEqually);
+    document.getElementById('normalize-btn').addEventListener('click', function () {
+      const total = weightInputs.reduce(function (sum, i) { return sum + weightOf(i); }, 0);
+      if (total <= 0) { spreadEqually(); return; }
+      weightInputs.forEach(function (input) {
+        input.value = String(Math.round((weightOf(input) / total) * 10000) / 10000);
+      });
+      render();
+    });
+    document.addEventListener('input', function (event) {
+      if (event.target === capitalInput ||
+          (event.target.classList && event.target.classList.contains('weight-input'))) render();
+    });
+
+    render();
+  })();
+</script>
 {% endblock %}
