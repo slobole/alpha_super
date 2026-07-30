@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import inspect
 import json
 import sys
 from dataclasses import asdict, dataclass
@@ -92,11 +93,24 @@ def _run_strategy(strategy_import_str: str, capital_base_float: float):
     run_variant_fn = getattr(module_obj, "run_variant", None)
     if run_variant_fn is None:
         raise AttributeError(f"{strategy_import_str} exposes no run_variant.")
+
+    # *** CRITICAL*** Take the strategy's own default start rather than passing
+    # None. Each strategy's valid start differs (warmup, universe inception),
+    # and a None reaching `pd.Timestamp` becomes NaT, which silently yields an
+    # empty execution calendar instead of an error the caller can read.
+    signature_obj = inspect.signature(run_variant_fn)
+    start_parameter_obj = signature_obj.parameters.get("backtest_start_date_str")
+    default_start_obj = (
+        start_parameter_obj.default
+        if start_parameter_obj is not None
+        and start_parameter_obj.default is not inspect.Parameter.empty
+        else None
+    )
     return run_variant_fn(
         show_display_bool=False,
         save_results_bool=False,
         output_dir_str="",
-        backtest_start_date_str=None,
+        backtest_start_date_str=default_start_obj,
         capital_base_float=capital_base_float,
         end_date_str=None,
     )

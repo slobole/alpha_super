@@ -120,8 +120,23 @@ def load_raw_prices(
     """
     Load raw OHLCV data from Norgate or from a validated snapshot.
     The output stays a MultiIndex column DataFrame: (symbol, field).
+
+    *** CRITICAL*** A symbol passed as a benchmark is loaded for performance
+    comparison, which is why this function already requests TOTALRETURN for it.
+    That adjustment back-adjusts dividends on stocks and ETFs but does nothing
+    on an index symbol, so ``$SPX`` came back as the PRICE index — roughly
+    2pp/yr below the total return every report presented it as. The genuine
+    total-return index is a separate data symbol, so an index benchmark is read
+    from that symbol and returned under the requested name: callers keep asking
+    for ``$SPX`` and now receive what they were always told they had.
     """
     benchmark_symbol_set = {str(symbol_str) for symbol_str in benchmarks}
+    benchmark_data_symbol_dict = {
+        str(symbol_str): INDEX_TOTALRETURN_DATA_SYMBOL_MAP_DICT.get(
+            str(symbol_str), str(symbol_str)
+        )
+        for symbol_str in benchmarks
+    }
     adjustment_by_symbol_dict = {
         str(symbol_str): (
             TOTALRETURN_ADJUSTMENT_STR
@@ -129,6 +144,13 @@ def load_raw_prices(
             else CAPITALSPECIAL_ADJUSTMENT_STR
         )
         for symbol_str in symbols + benchmarks
+    }
+    # Provenance: record which data symbol actually backed each benchmark, so a
+    # saved artifact shows the total-return series it was measured against.
+    benchmark_data_provenance_dict = {
+        label_str: data_symbol_str
+        for label_str, data_symbol_str in benchmark_data_symbol_dict.items()
+        if label_str != data_symbol_str
     }
     if is_snapshot_mode_enabled_bool():
         pricing_data_df = norgate_snapshot_store.load_raw_prices_df(
@@ -140,6 +162,7 @@ def load_raw_prices(
         pricing_data_df.attrs["norgate_adjustment_by_symbol_dict"] = (
             adjustment_by_symbol_dict
         )
+        pricing_data_df.attrs["benchmark_data_symbol_dict"] = benchmark_data_provenance_dict
         return pricing_data_df
 
     pricing_data = []
@@ -151,7 +174,7 @@ def load_raw_prices(
             adjustment_str = CAPITALSPECIAL_ADJUSTMENT_STR
 
         price_df = load_price_timeseries(
-            symbol,
+            benchmark_data_symbol_dict.get(str(symbol), symbol),
             adjustment_str=adjustment_str,
             start_date_str=start_date,
             end_date_str=end_date,
@@ -160,6 +183,8 @@ def load_raw_prices(
         if len(price_df) == 0:
             continue
 
+        # Returned under the requested name: the caller asked for the benchmark
+        # by its familiar symbol and the column it reads must carry that label.
         price_df.columns = pd.MultiIndex.from_tuples([(symbol, column_str) for column_str in price_df.columns])
         pricing_data.append(price_df)
 
@@ -167,4 +192,5 @@ def load_raw_prices(
     pricing_data_df.attrs["norgate_adjustment_by_symbol_dict"] = (
         adjustment_by_symbol_dict
     )
+    pricing_data_df.attrs["benchmark_data_symbol_dict"] = benchmark_data_provenance_dict
     return pricing_data_df
