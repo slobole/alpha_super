@@ -652,6 +652,11 @@ kbd {
 .selection-buttons { margin-top: 12px; justify-content: flex-end; }
 .builder-toolbar { margin-top: 18px; }
 
+/* The benchmark column is context, not a competitor: tinted so the eye reads
+   the books against it rather than as one more product in the row. */
+.compare-table .compare-benchmark-col { background: var(--color-neutral); }
+.compare-table td.metric { font-weight: 500; white-space: nowrap; }
+
 /* Promoted but not live: outlined rather than filled, so it reads as a step
    below the wired badge without taking the page's single colour. */
 .badge-pmready { border-color: var(--color-ink); color: var(--color-ink); }

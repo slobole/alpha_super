@@ -32,7 +32,14 @@ from flask import (
     url_for,
 )
 
-from alpha.bench import __version__, catalog, portfolio_builder, portfolio_overview, runs
+from alpha.bench import (
+    __version__,
+    catalog,
+    portfolio_builder,
+    portfolio_compare,
+    portfolio_overview,
+    runs,
+)
 from alpha.bench.jobs import JobManager
 from alpha.engine.theme import build_bench_theme_css
 
@@ -294,6 +301,36 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             stale_count_int=sum(
                 1 for overview_obj in overview_list if overview_obj.is_stale_bool
             ),
+        )
+
+    @flask_app_obj.route("/compare-portfolios")
+    def compare_portfolios_page_fn() -> str:
+        """Books side by side, every column recomputed on their shared window.
+
+        A GET so a comparison can be bookmarked and reopened; the selection
+        lives entirely in the query string, like the strategy compare page.
+        """
+        submitted_path_list = request.args.getlist("p")
+        deduped_path_list: list[str] = []
+        for rel_path_str in submitted_path_list:
+            if rel_path_str not in deduped_path_list:
+                deduped_path_list.append(rel_path_str)
+        if not (
+            portfolio_compare.COMPARE_MIN_INT
+            <= len(deduped_path_list)
+            <= portfolio_compare.COMPARE_MAX_INT
+        ):
+            abort(
+                400,
+                description=(
+                    f"Pick {portfolio_compare.COMPARE_MIN_INT}–"
+                    f"{portfolio_compare.COMPARE_MAX_INT} books to compare."
+                ),
+            )
+        return render_template(
+            "portfolio_compare.html",
+            comparison=portfolio_compare.compare_books(deduped_path_list),
+            metric_row_tuple=portfolio_compare.METRIC_ROW_TUPLE,
         )
 
     @flask_app_obj.route("/portfolios/new")

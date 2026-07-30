@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% set active_nav = "portfolios" %}
+{% block title %}Compare Books{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Compare Books</h1>
+    <p class="page-sub">Every column is recomputed on the window these books share, so the figures answer one question at a time. A book that merely started later cannot look better here for having missed a drawdown the others lived through.</p>
+  </div>
+  {% if comparison.common_year_float %}
+  <div class="stat-row">
+    <div class="stat"><div class="stat-value">{{ '%.1f'|format(comparison.common_year_float) }}y</div><div class="stat-label">Shared window</div></div>
+    <div class="stat"><div class="stat-value">{{ comparison.column_list|length }}</div><div class="stat-label">Columns</div></div>
+  </div>
+  {% endif %}
+</div>
+
+{% for notice in comparison.notice_list %}
+<div class="panel notice notice-{{ notice.severity_str }}">
+  <div class="notice-title">{{ notice.title_str }}</div>
+  <div class="notice-detail">{{ notice.detail_str }}</div>
+</div>
+{% endfor %}
+
+{% if comparison.has_columns_bool %}
+<div class="section section-flush">
+  <h2 class="section-title">Side by side</h2>
+  <div class="panel scroll">
+    <table class="table compare-table">
+      <thead>
+        <tr>
+          <th>Metric</th>
+          {% for column in comparison.column_list %}
+          <th class="num {{ 'compare-benchmark-col' if column.is_benchmark_bool }}">
+            {{ column.label_str }}
+            {% if column.is_benchmark_bool %}<div class="cell-note">benchmark</div>
+            {% elif column.is_stale_bool %}<div class="stale-flag">▲ stale</div>{% endif %}
+          </th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for metric_name_str, label_str, format_str in metric_row_tuple %}
+        <tr>
+          <td class="metric">{{ label_str }}</td>
+          {% for column in comparison.column_list %}
+          {% set value = column.metric_by_name_dict.get(metric_name_str) %}
+          <td class="num {{ 'compare-benchmark-col' if column.is_benchmark_bool }}">
+            {% if value is none %}&mdash;
+            {% elif format_str == 'pct' %}{{ '%.1f%%'|format(value) }}
+            {% else %}{{ '%.2f'|format(value) }}{% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+        <tr>
+          <td class="metric">Full history</td>
+          {% for column in comparison.column_list %}
+          <td class="num mono muted-2 {{ 'compare-benchmark-col' if column.is_benchmark_bool }}">{{ column.full_window_str or '—' }}</td>
+          {% endfor %}
+        </tr>
+        <tr>
+          <td class="metric">Pods</td>
+          {% for column in comparison.column_list %}
+          <td class="{{ 'compare-benchmark-col' if column.is_benchmark_bool }}">
+            {% if column.pod_label_list %}
+            <div class="pods-line">
+              {% for pod_label_str in column.pod_label_list %}<span class="pod-tag">{{ pod_label_str }}</span>{% endfor %}
+            </div>
+            {% else %}<span class="muted-2">&mdash;</span>{% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="table-caption">Metrics come from the engine's own <span class="mono">generate_overall_metrics</span>, applied to each book's stored equity curve sliced to the shared window — nothing is re-derived here.</p>
+</div>
+{% endif %}
+
+{% if comparison.correlation_row_list %}
+<div class="section section-flush">
+  <h2 class="section-title">Are these different products?</h2>
+  <p class="page-sub">Daily-return correlation between the books themselves. Highlighted pairs move together closely enough that offering both gives a client a choice that is not a choice.</p>
+  <div class="panel scroll">
+    <table class="table">
+      <thead>
+        <tr><th></th>{% for label_str in comparison.correlation_label_list %}<th class="num mono">{{ label_str[:18] }}</th>{% endfor %}</tr>
+      </thead>
+      <tbody>
+        {% for row in comparison.correlation_row_list %}
+        <tr>
+          <td class="mono">{{ row.label_str }}</td>
+          {% for cell in row.value_list %}
+          <td class="num {{ 'cell-bad' if cell.duplicate_bool }} {{ 'muted-2' if cell.self_bool }}">{{ '%.2f'|format(cell.value_float) }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<div class="btn-row">
+  <a class="btn" href="{{ url_for('portfolios_page_fn') }}">Back to books</a>
+</div>
+{% endblock %}

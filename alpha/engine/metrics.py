@@ -565,12 +565,17 @@ def generate_overall_metrics(total_value: pd.Series, trades: pd.DataFrame = None
         s.loc['Exposure-Adjusted Return (Ann.) [%]'] = s.loc['Return (Ann.) [%]'] / exposure_time
 
     # compute correlation with a benchmark series (if provided)
+    # *** CRITICAL*** No benchmark means no correlation, not a correlation of 1.
+    # This defaulted to 1 and every benchmark-less summary reported perfect
+    # correlation as a measured fact — a portfolio report showed "Correlation
+    # 1.00" for a book of uncorrelated pods. Absent stays absent, like Beta and
+    # Alpha beside it.
     if series_to_correlate is not None:
         pct = daily_return_ser.dropna()
         idx = pct.index.intersection(series_to_correlate.index)  # align indices
         s.loc['Correlation'] = pct[idx].corr(series_to_correlate[idx])
     else:
-        s.loc['Correlation'] = 1  # Default correlation value if no benchmark is given
+        s.loc['Correlation'] = np.nan
 
     # compute drawdown metrics
     # *** CRITICAL*** Drawdown uses only the running historical equity peak:

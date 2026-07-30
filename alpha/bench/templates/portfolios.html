@@ -36,11 +36,17 @@
 </div>
 
 <div class="section section-flush">
-  <p class="table-caption">A book's figures are only as fresh as the pod runs it was built from. <b>Stale</b> means a pod has been re-run since — rebuild before quoting it.</p>
+  <div id="pf-compare-bar" class="compare-bar hidden">
+    <span class="compare-count" id="pf-compare-count"></span>
+    <a class="btn btn-sm btn-primary" id="pf-compare-link" href="#">Compare</a>
+    <button class="btn btn-sm btn-ghost" id="pf-compare-clear" type="button">Clear</button>
+  </div>
+  <p class="table-caption">Tick 2&ndash;5 measured books to compare them on their shared window. A book's figures are only as fresh as the pod runs it was built from. <b>Stale</b> means a pod has been re-run since — rebuild before quoting it.</p>
   <div class="panel">
     <table class="table" id="pf-table">
       <thead>
         <tr>
+          <th class="cmp-cell"></th>
           <th class="sortable" data-sort-key="name">Book</th>
           <th class="sortable" data-sort-key="schema">Schema</th>
           <th class="num sortable" data-sort-key="pods">Pods</th>
@@ -72,6 +78,9 @@
             data-mar="{{ v.mar_float if v.mar_float is not none else '' }}"
             data-start="{{ v.window_start_str }}"
             data-lastrun="{{ v.latest_metric_run.timestamp_str if v.latest_metric_run else '' }}">
+          <td class="cmp-cell">
+            {% if v.has_run_bool %}<input type="checkbox" class="pf-cmp-check" value="{{ p.rel_path_str }}">{% endif %}
+          </td>
           <td>
             <div><b>{{ p.config_name_str }}</b>
               {% if p.error_str %}<span class="badge badge-norun">YAML error</span>{% endif %}
@@ -184,6 +193,35 @@
       });
     });
     searchInput.addEventListener('input', apply);
+
+    // 2-5 ticked books enable the Compare link, a plain GET whose selection
+    // lives in the query string so a comparison can be bookmarked.
+    const COMPARE_MIN = 2, COMPARE_MAX = 5;
+    const compareBar = document.getElementById('pf-compare-bar');
+    const compareCount = document.getElementById('pf-compare-count');
+    const compareLink = document.getElementById('pf-compare-link');
+    const compareChecks = Array.from(document.querySelectorAll('.pf-cmp-check'));
+
+    function refreshCompareBar() {
+      const picked = compareChecks.filter(function (c) { return c.checked; });
+      compareBar.classList.toggle('hidden', picked.length === 0);
+      compareCount.textContent = picked.length + ' selected'
+        + (picked.length < COMPARE_MIN ? ' — pick at least ' + COMPARE_MIN : '');
+      const ok = picked.length >= COMPARE_MIN && picked.length <= COMPARE_MAX;
+      compareLink.classList.toggle('disabled', !ok);
+      compareLink.href = ok
+        ? '/compare-portfolios?' + picked.map(function (c) { return 'p=' + encodeURIComponent(c.value); }).join('&')
+        : '#';
+      compareChecks.forEach(function (c) {
+        c.disabled = !c.checked && picked.length >= COMPARE_MAX;
+      });
+    }
+    compareChecks.forEach(function (c) { c.addEventListener('change', refreshCompareBar); });
+    document.getElementById('pf-compare-clear').addEventListener('click', function () {
+      compareChecks.forEach(function (c) { c.checked = false; });
+      refreshCompareBar();
+    });
+    refreshCompareBar();
 
     // Same sort contract as the strategy catalog: first click best-first, a
     // second flips it, and a book missing the figure always sinks.
