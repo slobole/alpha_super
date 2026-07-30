@@ -32,7 +32,7 @@ from flask import (
     url_for,
 )
 
-from alpha.bench import __version__, catalog, portfolio_builder, runs
+from alpha.bench import __version__, catalog, portfolio_builder, portfolio_overview, runs
 from alpha.bench.jobs import JobManager
 from alpha.engine.theme import build_bench_theme_css
 
@@ -284,24 +284,17 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
 
     @flask_app_obj.route("/portfolios")
     def portfolios_page_fn() -> str:
-        portfolio_entry_list = catalog.list_portfolios()
-        portfolio_view_list = []
-        for portfolio_entry_obj in portfolio_entry_list:
-            run_entry_list = runs.scan_portfolio_runs(
-                portfolio_entry_obj.name_str,
-                portfolio_entry_obj.config_name_str,
-            )
-            latest_report_run_obj = next(
-                (run_obj for run_obj in run_entry_list if run_obj.has_report_bool), None
-            )
-            portfolio_view_list.append(
-                {
-                    "portfolio": portfolio_entry_obj,
-                    "run_entry_list": run_entry_list,
-                    "latest_report_run": latest_report_run_obj,
-                }
-            )
-        return render_template("portfolios.html", portfolio_view_list=portfolio_view_list)
+        overview_list = portfolio_overview.list_portfolio_overviews()
+        return render_template(
+            "portfolios.html",
+            overview_list=overview_list,
+            measured_count_int=sum(
+                1 for overview_obj in overview_list if overview_obj.has_run_bool
+            ),
+            stale_count_int=sum(
+                1 for overview_obj in overview_list if overview_obj.is_stale_bool
+            ),
+        )
 
     @flask_app_obj.route("/portfolios/new")
     def portfolio_new_page_fn() -> str:

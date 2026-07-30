@@ -652,6 +652,15 @@ kbd {
 .selection-buttons { margin-top: 12px; justify-content: flex-end; }
 .builder-toolbar { margin-top: 18px; }
 
+/* A book quoting figures from a superseded pod is the one error on this page
+   that looks like a correct answer, so it takes the page's single colour. */
+.stale-flag {
+  margin-top: 4px;
+  font-size: 0.66rem; font-weight: 600; letter-spacing: 0.04em;
+  color: var(--color-loss);
+  cursor: help;
+}
+
 /* A check the operator must not skim past reads as a bar, not a footnote. */
 .notice { padding: 12px 16px; margin-bottom: 10px; border-left: 3px solid var(--color-border); }
 .notice-title { font-weight: 600; margin-bottom: 3px; }

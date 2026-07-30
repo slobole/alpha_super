@@ -6,70 +6,210 @@
 <div class="page-head">
   <div>
     <h1 class="page-title">Portfolios</h1>
-    <p class="page-sub">Multi-pod books from <span class="mono">portfolios/*.yaml</span>. Build runs each book — <b>combine pkls</b> configs aggregate the latest saved pod pickles, <b>fresh run</b> configs re-run every pod from scratch.</p>
+    <p class="page-sub">Multi-pod books from <span class="mono">portfolios/*.yaml</span>. Metrics are the latest recorded run — click a column header to sort; books missing a figure always sink. <b>Combine pkls</b> aggregates saved pod pickles, <b>fresh run</b> re-runs every pod from scratch.</p>
   </div>
   <div class="stat-row">
-    <div class="stat"><div class="stat-value">{{ portfolio_view_list|length }}</div><div class="stat-label">Books</div></div>
+    <div class="stat"><div class="stat-value">{{ overview_list|length }}</div><div class="stat-label">Books</div></div>
+    <div class="stat"><div class="stat-value">{{ measured_count_int }}</div><div class="stat-label">Measured</div></div>
+    {% if stale_count_int %}
+    <div class="stat"><div class="stat-value cell-bad">{{ stale_count_int }}</div><div class="stat-label">Stale</div></div>
+    {% endif %}
     <a class="btn btn-primary" href="{{ url_for('portfolio_new_page_fn') }}">New portfolio</a>
   </div>
 </div>
 
-{% if not portfolio_view_list %}
+{% if not overview_list %}
 <div class="empty">No portfolio configs found under <span class="mono">portfolios/</span>.</div>
-{% endif %}
+{% else %}
+
+<div class="toolbar">
+  <div class="filter-bar" id="pf-filter-bar">
+    <span class="filter-chip active" data-filter="all">All</span>
+    <span class="filter-chip" data-filter="measured">Measured</span>
+    <span class="filter-chip" data-filter="norun">Never run</span>
+    <span class="filter-chip wired" data-filter="stale">Stale</span>
+    <span class="filter-chip" data-filter="combine">Combine pkls</span>
+    <span class="filter-chip" data-filter="fresh">Fresh run</span>
+  </div>
+  <input id="pf-search" class="search" type="text" autocomplete="off"
+         placeholder="Search books by name or the pods inside them…">
+</div>
 
 <div class="section section-flush">
-  <h2 class="section-title">Books</h2>
-  <div class="card-grid">
-  {% for view in portfolio_view_list %}
-  {% set p = view.portfolio %}
-  <div class="card">
-    <div class="card-head">
-      <div>
-        <div class="card-title">{{ p.config_name_str }}</div>
-        <div class="card-sub mono">{{ p.rel_path_str }}</div>
-      </div>
-    </div>
-
-    {% if p.error_str %}
-      <div class="badge badge-norun">YAML error</div>
-      <div class="cell-note">{{ p.error_str }}</div>
-    {% else %}
-      <div class="card-meta">
-        {% if p.capital_float is not none %}<span class="badge badge-cat">${{ '{:,.0f}'.format(p.capital_float) }}</span>{% endif %}
-        <span class="badge badge-cat">{{ p.rebalance_str or 'buy & hold' }}</span>
-        <span class="badge badge-cat">{{ p.pod_tuple|length }} pods</span>
-        <span class="badge badge-cat">{{ 'fresh run' if p.schema_str == 'manager' else 'combine pkls' }}</span>
-      </div>
-      <div class="pods-line">
-        {% for pod in p.pod_tuple %}
-        <span class="pod-tag">{{ pod.strategy_str }} <b>{{ '%.0f%%'|format(pod.weight_float * 100) }}</b></span>
+  <p class="table-caption">A book's figures are only as fresh as the pod runs it was built from. <b>Stale</b> means a pod has been re-run since — rebuild before quoting it.</p>
+  <div class="panel">
+    <table class="table" id="pf-table">
+      <thead>
+        <tr>
+          <th class="sortable" data-sort-key="name">Book</th>
+          <th class="sortable" data-sort-key="schema">Schema</th>
+          <th class="num sortable" data-sort-key="pods">Pods</th>
+          <th class="num sortable" data-sort-key="capital">Capital</th>
+          <th class="num sortable" data-sort-key="cagr">CAGR</th>
+          <th class="num sortable" data-sort-key="sharpe">Sharpe</th>
+          <th class="num sortable" data-sort-key="maxdd">Max DD</th>
+          <th class="num sortable" data-sort-key="mar">MAR</th>
+          <th class="sortable" data-sort-key="start">Window</th>
+          <th class="sortable" data-sort-key="lastrun">Last run</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for v in overview_list %}
+        {% set p = v.portfolio %}
+        <tr class="pf-row"
+            data-search="{{ v.search_text_str }}"
+            data-measured="{{ '1' if v.has_run_bool else '0' }}"
+            data-stale="{{ '1' if v.is_stale_bool else '0' }}"
+            data-schema-key="{{ p.schema_str }}"
+            data-name="{{ p.name_str|lower }}"
+            data-schema="{{ p.schema_str }}"
+            data-pods="{{ p.pod_tuple|length }}"
+            data-capital="{{ p.capital_float if p.capital_float is not none else '' }}"
+            data-cagr="{{ v.ann_return_float if v.ann_return_float is not none else '' }}"
+            data-sharpe="{{ v.sharpe_float if v.sharpe_float is not none else '' }}"
+            data-maxdd="{{ v.max_drawdown_float if v.max_drawdown_float is not none else '' }}"
+            data-mar="{{ v.mar_float if v.mar_float is not none else '' }}"
+            data-start="{{ v.window_start_str }}"
+            data-lastrun="{{ v.latest_metric_run.timestamp_str if v.latest_metric_run else '' }}">
+          <td>
+            <div><b>{{ p.config_name_str }}</b>
+              {% if p.error_str %}<span class="badge badge-norun">YAML error</span>{% endif %}
+            </div>
+            <div class="mono muted-2">{{ p.rel_path_str }}</div>
+            {% if p.pod_tuple %}
+            <div class="pods-line">
+              {% for pod in p.pod_tuple %}
+              <span class="pod-tag">{{ pod.strategy_str }} <b>{{ '%.0f%%'|format(pod.weight_float * 100) }}</b></span>
+              {% endfor %}
+            </div>
+            {% endif %}
+            {% if p.error_str %}<div class="cell-note">{{ p.error_str }}</div>{% endif %}
+          </td>
+          <td><span class="badge badge-cat">{{ 'fresh run' if p.schema_str == 'manager' else 'combine pkls' }}</span>
+            {% if p.rebalance_str %}<div class="cell-note">{{ p.rebalance_str }}</div>{% endif %}
+          </td>
+          <td class="num">{{ p.pod_tuple|length }}</td>
+          <td class="num">{% if p.capital_float is not none %}${{ '{:,.0f}'.format(p.capital_float) }}{% else %}&mdash;{% endif %}</td>
+          <td class="num">{% if v.ann_return_float is not none %}{{ '%.1f%%'|format(v.ann_return_float) }}{% else %}&mdash;{% endif %}</td>
+          <td class="num">{% if v.sharpe_float is not none %}{{ '%.2f'|format(v.sharpe_float) }}{% else %}&mdash;{% endif %}</td>
+          <td class="num">{% if v.max_drawdown_float is not none %}{{ '%.1f%%'|format(v.max_drawdown_float) }}{% else %}&mdash;{% endif %}</td>
+          <td class="num">{% if v.mar_float is not none %}{{ '%.2f'|format(v.mar_float) }}{% else %}&mdash;{% endif %}</td>
+          <td class="mono muted-2">{{ v.window_str or '—' }}</td>
+          <td class="muted-2">
+            {# A book with runs but no recorded return still has runs: the count
+               is reported independently of whether a metric was written. #}
+            {% if v.run_entry_list %}
+              {{ (v.latest_metric_run or v.run_entry_list[0]).display_timestamp_str[:16] }}
+              <div class="cell-note">{{ v.run_entry_list|length }} run{{ 's' if v.run_entry_list|length != 1 }}</div>
+              {% if not v.latest_metric_run %}<div class="cell-note">no metrics recorded</div>{% endif %}
+              {% if v.is_stale_bool %}
+              <div class="stale-flag" title="{% for s in v.stale_pod_list %}{{ s.strategy_name_str }}: used {{ s.used_timestamp_str }}, latest {{ s.latest_timestamp_str }}&#10;{% endfor %}">
+                ▲ {{ v.stale_pod_list|length }} pod{{ 's' if v.stale_pod_list|length != 1 }} re-run since
+              </div>
+              {% endif %}
+            {% else %}
+              <span class="badge badge-norun">no runs</span>
+            {% endif %}
+          </td>
+          <td class="num">
+            <div class="btn-row">
+              {% if v.latest_report_run %}
+              <a class="btn btn-sm btn-ghost" href="{{ url_for('artifact_fn', rel_path_str=v.latest_report_run.report_artifact_str) }}" target="_blank" rel="noopener noreferrer">Report</a>
+              {% endif %}
+              <form class="inline" method="post" action="{{ url_for('run_portfolio_api_fn') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
+                <input type="hidden" name="config_rel_path" value="{{ p.rel_path_str }}">
+                <button class="btn btn-sm {{ 'btn-primary' if v.is_stale_bool or not v.has_run_bool }}" {{ 'disabled' if p.error_str }}>Build</button>
+              </form>
+            </div>
+          </td>
+        </tr>
         {% endfor %}
-      </div>
-    {% endif %}
-
-    <div class="card-foot">
-      <span class="muted-2">
-        {% if view.run_entry_list %}
-          {{ view.run_entry_list|length }} run{{ 's' if view.run_entry_list|length != 1 }}
-          {% if view.latest_report_run and view.latest_report_run.backtest_window_str %}
-          <div class="cell-note">{{ view.latest_report_run.backtest_window_str }}</div>
-          {% endif %}
-        {% else %}no runs yet{% endif %}
-      </span>
-      <div class="btn-row">
-        {% if view.latest_report_run %}
-        <a class="btn btn-sm btn-ghost" href="{{ url_for('artifact_fn', rel_path_str=view.latest_report_run.report_artifact_str) }}" target="_blank" rel="noopener noreferrer">Report</a>
-        {% endif %}
-        <form class="inline" method="post" action="{{ url_for('run_portfolio_api_fn') }}">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
-          <input type="hidden" name="config_rel_path" value="{{ p.rel_path_str }}">
-          <button class="btn btn-sm btn-primary" {{ 'disabled' if p.error_str }}>Build</button>
-        </form>
-      </div>
-    </div>
+      </tbody>
+    </table>
   </div>
-  {% endfor %}
-  </div>
+  <div id="pf-no-results" class="empty hidden">No books match your search.</div>
 </div>
+{% endif %}
+
+<script>
+  (function () {
+    const rowList = Array.from(document.querySelectorAll('.pf-row'));
+    if (!rowList.length) return;
+    const searchInput = document.getElementById('pf-search');
+    const chipList = Array.from(document.querySelectorAll('#pf-filter-bar .filter-chip'));
+    const allChip = chipList.find(function (c) { return c.dataset.filter === 'all'; });
+    const noResults = document.getElementById('pf-no-results');
+    const tableBody = document.querySelector('#pf-table tbody');
+    const activeSet = new Set();
+
+    function apply() {
+      const query = searchInput.value.trim().toLowerCase();
+      let visible = 0;
+      rowList.forEach(function (row) {
+        let ok = true;
+        if (activeSet.has('measured')) ok = ok && row.dataset.measured === '1';
+        if (activeSet.has('norun')) ok = ok && row.dataset.measured === '0';
+        if (activeSet.has('stale')) ok = ok && row.dataset.stale === '1';
+        if (activeSet.has('combine')) ok = ok && row.dataset.schemaKey === 'simple';
+        if (activeSet.has('fresh')) ok = ok && row.dataset.schemaKey === 'manager';
+        ok = ok && (!query || row.dataset.search.indexOf(query) !== -1);
+        row.classList.toggle('hidden', !ok);
+        if (ok) visible++;
+      });
+      noResults.classList.toggle('hidden', visible !== 0);
+      allChip.classList.toggle('active', activeSet.size === 0);
+    }
+
+    chipList.forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        const filter = chip.dataset.filter;
+        if (filter === 'all') {
+          activeSet.clear();
+          chipList.forEach(function (c) { c.classList.remove('active'); });
+        } else {
+          // Measured and Never-run are opposites; picking one drops the other
+          // rather than producing an empty table.
+          if (filter === 'measured') activeSet.delete('norun');
+          if (filter === 'norun') activeSet.delete('measured');
+          if (filter === 'combine') activeSet.delete('fresh');
+          if (filter === 'fresh') activeSet.delete('combine');
+          if (activeSet.has(filter)) activeSet.delete(filter); else activeSet.add(filter);
+          chipList.forEach(function (c) {
+            if (c.dataset.filter !== 'all') c.classList.toggle('active', activeSet.has(c.dataset.filter));
+          });
+        }
+        apply();
+      });
+    });
+    searchInput.addEventListener('input', apply);
+
+    // Same sort contract as the strategy catalog: first click best-first, a
+    // second flips it, and a book missing the figure always sinks.
+    const TEXT_KEY_SET = { name: true, schema: true, start: true, lastrun: true };
+    const sortableHeads = Array.from(document.querySelectorAll('#pf-table th.sortable'));
+    sortableHeads.forEach(function (head) {
+      head.addEventListener('click', function () {
+        const key = head.dataset.sortKey;
+        const isText = TEXT_KEY_SET[key] === true;
+        const desc = !(head.dataset.dir === 'desc');
+        sortableHeads.forEach(function (h) { h.removeAttribute('data-dir'); h.classList.remove('sort-desc', 'sort-asc'); });
+        head.dataset.dir = desc ? 'desc' : 'asc';
+        head.classList.add(desc ? 'sort-desc' : 'sort-asc');
+        const rows = Array.from(tableBody.querySelectorAll('tr'));
+        rows.sort(function (a, b) {
+          const rawA = a.dataset[key], rawB = b.dataset[key];
+          const missA = !rawA, missB = !rawB;
+          if (missA && missB) return 0;
+          if (missA) return 1;
+          if (missB) return -1;
+          if (isText) return desc ? rawB.localeCompare(rawA) : rawA.localeCompare(rawB);
+          return desc ? parseFloat(rawB) - parseFloat(rawA) : parseFloat(rawA) - parseFloat(rawB);
+        });
+        rows.forEach(function (row) { tableBody.appendChild(row); });
+      });
+    });
+  })();
+</script>
 {% endblock %}
