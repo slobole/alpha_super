@@ -1,0 +1,14 @@
+# Risk-first monthly book. Lowest volatility of the ladder.
+name: ladder_1_defensive
+capital: 100000
+benchmark: $SPX
+
+pods:
+  - strategy: strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash
+    weight: 0.4
+
+  - strategy: strategy_taa_beyond_6040_inverse_vol
+    weight: 0.3
+
+  - strategy: strategy_mr_us_sector_etf_ibs_downshock_vox_iyr
+    weight: 0.3

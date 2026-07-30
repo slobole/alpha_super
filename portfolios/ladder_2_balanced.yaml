@@ -1,0 +1,14 @@
+# Adds the NDX momentum engine to the low-drawdown monthly base.
+name: ladder_2_balanced
+capital: 100000
+benchmark: $SPX
+
+pods:
+  - strategy: strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash
+    weight: 0.45
+
+  - strategy: strategy_mr_us_sector_etf_ibs_downshock_vox_iyr
+    weight: 0.25
+
+  - strategy: strategy_mo_atr_normalized_ndx_vxn_scaled
+    weight: 0.3
