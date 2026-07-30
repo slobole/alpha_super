@@ -729,16 +729,26 @@ class Portfolio:
         # build additional_returns: one column per pod, normalized to start at 1.0
         additional = self._pod_equities.loc[common_idx].copy()
 
-        # find a benchmark from the first strategy that has one
+        # Prefer the explicit PM benchmark so the plotted line is the same
+        # series every benchmark-relative number in the report is computed
+        # against; fall back to the first pod that stores one.
         benchmark_tv = None
         benchmark_label = 'Benchmark'
-        for strategy_obj in self.strategies:
-            if hasattr(strategy_obj, '_benchmarks') and len(strategy_obj._benchmarks) > 0:
-                bm = strategy_obj._benchmarks[0]
-                if bm in strategy_obj.results.columns:
-                    benchmark_tv = strategy_obj.results.loc[common_idx, bm].astype(float)
-                    benchmark_label = bm
-                    break
+        if self.regression_benchmark_value_ser is not None:
+            aligned_benchmark_ser = (
+                self.regression_benchmark_value_ser.astype(float).reindex(common_idx)
+            )
+            if np.isfinite(aligned_benchmark_ser.to_numpy()).all():
+                benchmark_tv = aligned_benchmark_ser
+                benchmark_label = self.regression_benchmark_label_str or 'Benchmark'
+        if benchmark_tv is None:
+            for strategy_obj in self.strategies:
+                if hasattr(strategy_obj, '_benchmarks') and len(strategy_obj._benchmarks) > 0:
+                    bm = strategy_obj._benchmarks[0]
+                    if bm in strategy_obj.results.columns:
+                        benchmark_tv = strategy_obj.results.loc[common_idx, bm].astype(float)
+                        benchmark_label = bm
+                        break
 
         engine_plot(
             strategy_total_value=self.results['total_value'],

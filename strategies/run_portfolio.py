@@ -250,22 +250,46 @@ def load_strategy_pickle(pkl_path: Path, expected_strategy_name: str | None = No
 
 
 def find_latest_pkl(strategy_name: str, results_dir: Path = RESULTS_DIR) -> Path:
-    """Find the most recent result pickle for a strategy by timestamped folder name."""
-    strategy_dir = results_dir / strategy_name
-    if not strategy_dir.exists():
-        raise FileNotFoundError(f"No results found for '{strategy_name}' in '{results_dir}'.")
+    """Find the most recent result pickle for a strategy by timestamped folder name.
 
-    run_dirs_list = sorted(
-        [path for path in strategy_dir.iterdir() if path.is_dir()],
-        reverse=True,
-    )
-    for run_dir in run_dirs_list:
+    Searches the research tree first (``results/research/strategy/<name>/
+    vanilla_backtest/<ts>/``) — vanilla_backtest only, because other analyzers
+    may pickle modified configurations — then falls back to the legacy layout
+    ``results/<name>/<ts>/``. Both are ordered newest-first by folder name.
+    """
+    candidate_run_dir_list: list[Path] = []
+    research_vanilla_dir = results_dir / 'research' / 'strategy' / strategy_name / 'vanilla_backtest'
+    if research_vanilla_dir.exists():
+        candidate_run_dir_list.extend(
+            sorted(
+                [path for path in research_vanilla_dir.iterdir() if path.is_dir()],
+                reverse=True,
+            )
+        )
+    legacy_strategy_dir = results_dir / strategy_name
+    if legacy_strategy_dir.exists():
+        candidate_run_dir_list.extend(
+            sorted(
+                [path for path in legacy_strategy_dir.iterdir() if path.is_dir()],
+                reverse=True,
+            )
+        )
+    if not candidate_run_dir_list:
+        raise FileNotFoundError(
+            f"No results found for '{strategy_name}' in '{research_vanilla_dir}' "
+            f"or '{legacy_strategy_dir}'."
+        )
+
+    for run_dir in candidate_run_dir_list:
         pkl_path = run_dir / f'{strategy_name}.pkl'
         if pkl_path.exists():
-            print(f"  Falling back to latest result for {strategy_name}: {run_dir.name}")
+            print(f"  Using latest result for {strategy_name}: {run_dir.parent.name}/{run_dir.name}")
             return pkl_path.resolve()
 
-    raise FileNotFoundError(f"No pickle file found in '{strategy_dir}'.")
+    raise FileNotFoundError(
+        f"No pickle file found for '{strategy_name}' under "
+        f"'{research_vanilla_dir}' or '{legacy_strategy_dir}'."
+    )
 
 
 def _normalize_rebalance(rebalance):
@@ -411,7 +435,7 @@ def derive_pm_benchmark(
     Returns ``(benchmark_value_ser, benchmark_label_str, benchmark_adjustment_str)``
     or ``(None, None, None)`` when no consistent benchmark exists.
     """
-    candidate_list: list[tuple[str, str, pd.Series]] = []
+    candidate_list: list[tuple[str, str, pd.Series, str]] = []
     for strategy_obj in strategies_list:
         symbol_str = getattr(strategy_obj, '_performance_benchmark_symbol_str', None)
         if symbol_str is None:
@@ -425,7 +449,9 @@ def derive_pm_benchmark(
         benchmark_value_ser = strategy_obj.results[symbol_str].astype(float).dropna()
         if len(benchmark_value_ser) < 2:
             continue
-        candidate_list.append((symbol_str, str(adjustment_str), benchmark_value_ser))
+        candidate_list.append(
+            (symbol_str, str(adjustment_str), benchmark_value_ser, strategy_obj.name)
+        )
 
     if preferred_symbol_str is not None:
         candidate_list = [
@@ -443,8 +469,8 @@ def derive_pm_benchmark(
                 'benchmark-relative report sections will be omitted.'
             )
             return None, None, None
-        symbol_set = {symbol_str for symbol_str, _, _ in candidate_list}
-        adjustment_set = {adjustment_str for _, adjustment_str, _ in candidate_list}
+        symbol_set = {symbol_str for symbol_str, _, _, _ in candidate_list}
+        adjustment_set = {adjustment_str for _, adjustment_str, _, _ in candidate_list}
         if len(symbol_set) > 1 or len(adjustment_set) > 1:
             print(
                 'PM benchmark WARNING: pods disagree on benchmark '
@@ -456,7 +482,7 @@ def derive_pm_benchmark(
 
     declared_adjustment_set = {
         adjustment_str
-        for _, adjustment_str, _ in candidate_list
+        for _, adjustment_str, _, _ in candidate_list
         if adjustment_str != 'not_declared'
     }
     if len(declared_adjustment_set) > 1:
@@ -469,13 +495,59 @@ def derive_pm_benchmark(
     )
 
     symbol_str = candidate_list[0][0]
-    # Prefer a pod that declares its adjustment, then the longest stored series;
-    # every candidate covers the PM common window, and the Portfolio validates
-    # completeness after reindexing to that window.
-    benchmark_value_ser = max(
-        candidate_list,
-        key=lambda candidate: (candidate[1] != 'not_declared', len(candidate[2])),
-    )[2]
+
+    # *** CRITICAL*** same-symbol stored series must actually agree. Some runs
+    # have stored a price-adjusted benchmark while declaring TOTALRETURN; when a
+    # genuinely total-return series is also present, the two drift apart by
+    # roughly the dividend yield. Compare candidates over their common dates
+    # and, on material divergence, say so and prefer the fastest-growing series
+    # — for one symbol, total return >= price by construction.
+    divergent_growth_pod_name_str = None
+    if len(candidate_list) > 1:
+        common_index = candidate_list[0][2].index
+        for _, _, value_ser, _ in candidate_list[1:]:
+            common_index = common_index.intersection(value_ser.index)
+        if len(common_index) >= 252:
+            year_count_float = (common_index[-1] - common_index[0]).days / 365.25
+            cagr_by_pod_dict = {
+                pod_name_str: (
+                    (value_ser.loc[common_index].iloc[-1] / value_ser.loc[common_index].iloc[0])
+                    ** (1.0 / year_count_float)
+                    - 1.0
+                )
+                for _, _, value_ser, pod_name_str in candidate_list
+            }
+            if max(cagr_by_pod_dict.values()) - min(cagr_by_pod_dict.values()) > 0.005:
+                print(
+                    f"PM benchmark *** CRITICAL***: pods store '{symbol_str}' series that "
+                    'disagree materially over their common window '
+                    f'({common_index[0].date()} -> {common_index[-1].date()}):'
+                )
+                for pod_name_str, cagr_float in sorted(
+                    cagr_by_pod_dict.items(), key=lambda item: item[1], reverse=True
+                ):
+                    print(f'  {pod_name_str}: {cagr_float:.2%} CAGR')
+                divergent_growth_pod_name_str = max(cagr_by_pod_dict, key=cagr_by_pod_dict.get)
+                print(
+                    f"  Using the fastest-growing series ({divergent_growth_pod_name_str}) as "
+                    f"'{adjustment_str}': for one symbol total return >= price. At least one "
+                    'other pod mislabels its stored benchmark adjustment — fix it at the source.'
+                )
+
+    if divergent_growth_pod_name_str is not None:
+        benchmark_value_ser = next(
+            value_ser
+            for _, _, value_ser, pod_name_str in candidate_list
+            if pod_name_str == divergent_growth_pod_name_str
+        )
+    else:
+        # Prefer a pod that declares its adjustment, then the longest stored
+        # series; every candidate covers the PM common window, and the Portfolio
+        # validates completeness after reindexing to that window.
+        benchmark_value_ser = max(
+            candidate_list,
+            key=lambda candidate: (candidate[1] != 'not_declared', len(candidate[2])),
+        )[2]
     print(
         f'PM benchmark attached from pod results: {symbol_str} ({adjustment_str}), '
         f'{len(benchmark_value_ser)} bars '

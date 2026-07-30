@@ -14,7 +14,7 @@ import numpy as np
 from pathlib import Path
 from datetime import datetime
 
-from alpha.engine.metrics import generate_monthly_returns
+from alpha.engine.metrics import generate_monthly_returns, generate_overall_metrics
 from alpha.engine.plot import plot as render_strategy_plot
 from alpha.engine.signature import (
     build_metric_delta_table_html,
@@ -3865,6 +3865,43 @@ def _portfolio_pod_drift_html(portfolio) -> str:
     )
     return ''.join(parts)
 
+def _portfolio_headline_summary_df(portfolio, summary_df) -> 'pd.DataFrame | None':
+    """Two-column frame for the headline delta: portfolio vs the PM benchmark.
+
+    The full portfolio summary's columns are ``[portfolio, sleeve1, sleeve2,
+    ...]`` and the delta builder treats "the first other column" as the
+    benchmark — which rendered pod #1 as BENCHMARK in the report header. Build
+    the comparison frame explicitly from the attached PM benchmark instead;
+    without one, return only the portfolio column so the caller falls back to
+    the metric tiles rather than comparing against a sleeve.
+    """
+    if summary_df is None or portfolio.name not in getattr(summary_df, 'columns', []):
+        return None
+    headline_df = summary_df[[portfolio.name]].copy()
+
+    benchmark_value_ser = getattr(portfolio, 'regression_benchmark_value_ser', None)
+    if benchmark_value_ser is None:
+        return headline_df
+    aligned_benchmark_ser = (
+        benchmark_value_ser.astype(float).reindex(portfolio.results.index).dropna()
+    )
+    if len(aligned_benchmark_ser) < 2:
+        return headline_df
+
+    benchmark_label_str = (
+        getattr(portfolio, 'regression_benchmark_label_str', None) or 'Benchmark'
+    )
+    # Mirrors the strategy report: the benchmark column's Correlation is its
+    # correlation to the entity under review.
+    headline_df[benchmark_label_str] = generate_overall_metrics(
+        aligned_benchmark_ser,
+        series_to_correlate=(
+            portfolio.results['total_value'].astype(float).pct_change(fill_method=None)
+        ),
+    )
+    return headline_df
+
+
 def _build_portfolio_html(portfolio, chart_b64: str) -> str:
     summ = portfolio.summary
     start_val = summ.loc['Start', portfolio.name]
@@ -3939,7 +3976,9 @@ def _build_portfolio_html(portfolio, chart_b64: str) -> str:
         portfolio.benchmark_regression_metadata_by_column_dict,
     )
     spec_headline_metrics_html_str = (
-        _build_headline_delta_table_html(summ, portfolio.name)
+        _build_headline_delta_table_html(
+            _portfolio_headline_summary_df(portfolio, summ), portfolio.name
+        )
         or kpi_grid_html_str
     )
     # Raw section content, wrapped as cards below or emitted as plates by the
