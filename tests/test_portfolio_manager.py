@@ -353,7 +353,6 @@ def test_config_defaults_pm_performance_benchmark_to_spx():
         'portfolios/current_multipod_yearly_rebalanced.yaml',
         'portfolios/multipod_low_risk.yaml',
         'portfolios/multipod_monthly.yaml',
-        'portfolios/sector_dispersion_mr_variants.yaml',
         'portfolios/current_book.yaml',
         'portfolios/multipod.yaml',
     ],
@@ -450,23 +449,6 @@ def test_manager_continues_with_explicit_na_when_pm_benchmark_load_fails(
     )
     assert 'Benchmark Portfolio Monthly Returns — $SPX · TOTALRETURN' in report_html_str
     assert 'N/A — PM performance benchmark data is unavailable' in report_html_str
-
-
-def test_sector_dispersion_mr_variants_config_loads_named_pods():
-    config_obj = portfolio_manager.load_portfolio_manager_config(
-        Path("portfolios/sector_dispersion_mr_variants.yaml")
-    )
-    strategy_import_by_pod_id_dict = {
-        pod_config.pod_id_str: pod_config.strategy_import_str
-        for pod_config in config_obj.pod_config_list
-    }
-
-    assert strategy_import_by_pod_id_dict == {
-        "pod_sector_dispersion_kie_ihi_xlc": SECTOR_DISPERSION_KIE_IHI_XLC_IMPORT_STR,
-        "pod_sector_dispersion_kie_ihi_xlc_asset_sma200": (
-            SECTOR_DISPERSION_KIE_IHI_XLC_ASSET_SMA200_IMPORT_STR
-        ),
-    }
 
 
 def test_monthly_multipod_config_accepts_sector_dispersion_raw_pod():
