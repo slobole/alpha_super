@@ -21,6 +21,12 @@ import pandas as pd
 import yaml
 from IPython.display import display
 
+# Executed by file path (Bench, terminal), the script dir — not the repo root —
+# lands on sys.path, so make the repo root importable before touching alpha.
+REPO_ROOT_PATH = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT_PATH) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT_PATH))
+
 from alpha.engine.portfolio import Portfolio
 from alpha.engine.report import save_portfolio_results
 from alpha.engine.strategy import Strategy
@@ -294,10 +300,17 @@ def validate_portfolio_config(config_dict: dict, config_path: Path) -> dict:
     if capital is not None and float(capital) <= 0:
         raise ValueError(f"Portfolio capital must be positive, got {capital}.")
 
+    benchmark_symbol = config_dict.get('benchmark')
+    if benchmark_symbol is not None and (
+        not isinstance(benchmark_symbol, str) or not benchmark_symbol.strip()
+    ):
+        raise ValueError(f"Portfolio 'benchmark' must be a non-empty string, got {benchmark_symbol!r}.")
+
     normalized_config = {
         'name': config_dict.get('name', 'Portfolio'),
         'capital': float(capital) if capital is not None else None,
         'rebalance': _normalize_rebalance(config_dict.get('rebalance')),
+        'benchmark': benchmark_symbol.strip() if benchmark_symbol is not None else None,
         'pods': [],
     }
 
@@ -378,6 +391,99 @@ def load_pod_strategy(pod_dict: dict) -> tuple[Strategy, dict]:
     return strategy, pod_info_dict
 
 
+def derive_pm_benchmark(
+    strategies_list,
+    preferred_symbol_str: str | None = None,
+) -> tuple[pd.Series | None, str | None, str | None]:
+    """Pick the PM benchmark from benchmark value columns stored in pod results.
+
+    Uses only data already inside the pickles (no fresh data load): each saved
+    strategy run stores its benchmark level series (e.g. ``$SPX``, TOTALRETURN)
+    as a column of ``results``.
+
+    Selection is explicit, never a silent vote:
+      * ``preferred_symbol_str`` set (YAML ``benchmark:`` key) — use that symbol;
+        raise if no pod stores it, so a configured benchmark cannot silently
+        disappear from the report.
+      * auto mode — all pods that store a benchmark must agree on symbol and
+        adjustment, otherwise attach nothing and say so loudly.
+
+    Returns ``(benchmark_value_ser, benchmark_label_str, benchmark_adjustment_str)``
+    or ``(None, None, None)`` when no consistent benchmark exists.
+    """
+    candidate_list: list[tuple[str, str, pd.Series]] = []
+    for strategy_obj in strategies_list:
+        symbol_str = getattr(strategy_obj, '_performance_benchmark_symbol_str', None)
+        if symbol_str is None:
+            benchmark_list = list(getattr(strategy_obj, '_benchmarks', []) or [])
+            symbol_str = str(benchmark_list[0]) if len(benchmark_list) > 0 else None
+        if symbol_str is None or symbol_str not in strategy_obj.results.columns:
+            continue
+        adjustment_str = getattr(
+            strategy_obj, '_performance_benchmark_adjustment_str', 'not_declared'
+        )
+        benchmark_value_ser = strategy_obj.results[symbol_str].astype(float).dropna()
+        if len(benchmark_value_ser) < 2:
+            continue
+        candidate_list.append((symbol_str, str(adjustment_str), benchmark_value_ser))
+
+    if preferred_symbol_str is not None:
+        candidate_list = [
+            candidate for candidate in candidate_list if candidate[0] == preferred_symbol_str
+        ]
+        if not candidate_list:
+            raise ValueError(
+                f"Configured benchmark '{preferred_symbol_str}' is not stored in any pod's "
+                'results; remove the benchmark key or re-run a pod with that benchmark.'
+            )
+    else:
+        if not candidate_list:
+            print(
+                'PM benchmark: no pod stores a benchmark value column; '
+                'benchmark-relative report sections will be omitted.'
+            )
+            return None, None, None
+        symbol_set = {symbol_str for symbol_str, _, _ in candidate_list}
+        adjustment_set = {adjustment_str for _, adjustment_str, _ in candidate_list}
+        if len(symbol_set) > 1 or len(adjustment_set) > 1:
+            print(
+                'PM benchmark WARNING: pods disagree on benchmark '
+                f'(symbols={sorted(symbol_set)}, adjustments={sorted(adjustment_set)}); '
+                'attaching none instead of silently choosing one. '
+                "Set an explicit 'benchmark: <symbol>' key in the portfolio YAML to resolve."
+            )
+            return None, None, None
+
+    declared_adjustment_set = {
+        adjustment_str
+        for _, adjustment_str, _ in candidate_list
+        if adjustment_str != 'not_declared'
+    }
+    if len(declared_adjustment_set) > 1:
+        raise ValueError(
+            f"Pods store benchmark '{candidate_list[0][0]}' under conflicting declared "
+            f'adjustments {sorted(declared_adjustment_set)}; refusing to mix them.'
+        )
+    adjustment_str = (
+        next(iter(declared_adjustment_set)) if declared_adjustment_set else 'not_declared'
+    )
+
+    symbol_str = candidate_list[0][0]
+    # Prefer a pod that declares its adjustment, then the longest stored series;
+    # every candidate covers the PM common window, and the Portfolio validates
+    # completeness after reindexing to that window.
+    benchmark_value_ser = max(
+        candidate_list,
+        key=lambda candidate: (candidate[1] != 'not_declared', len(candidate[2])),
+    )[2]
+    print(
+        f'PM benchmark attached from pod results: {symbol_str} ({adjustment_str}), '
+        f'{len(benchmark_value_ser)} bars '
+        f'({benchmark_value_ser.index[0].date()} -> {benchmark_value_ser.index[-1].date()}).'
+    )
+    return benchmark_value_ser, symbol_str, adjustment_str
+
+
 def build_portfolio(config_path: Path, name_override=None, capital_override=None) -> Portfolio:
     """Build a portfolio object from a validated YAML configuration."""
     config_path = config_path.resolve()
@@ -397,6 +503,11 @@ def build_portfolio(config_path: Path, name_override=None, capital_override=None
         pod_info_list.append(pod_info_dict)
 
     print(f'\nLoaded {len(strategies_list)} strategies: {[strategy.name for strategy in strategies_list]}')
+    (
+        benchmark_value_ser,
+        benchmark_label_str,
+        benchmark_adjustment_str,
+    ) = derive_pm_benchmark(strategies_list, preferred_symbol_str=config_dict['benchmark'])
     portfolio = Portfolio(
         strategies=strategies_list,
         weights=weights_list,
@@ -404,6 +515,9 @@ def build_portfolio(config_path: Path, name_override=None, capital_override=None
         capital_base=capital,
         rebalance=config_dict['rebalance'],
         pod_info_list=pod_info_list,
+        regression_benchmark_value_ser=benchmark_value_ser,
+        regression_benchmark_label_str=benchmark_label_str,
+        regression_benchmark_adjustment_str=benchmark_adjustment_str,
     )
     portfolio.source_config_path = str(config_path)
     return portfolio

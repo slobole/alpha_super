@@ -3148,6 +3148,31 @@ def _add_vertical_line_markers(ax, vertical_line_index: pd.DatetimeIndex | None)
         )
 
 
+def _short_chart_label_str(label_str: str, max_part_len_int: int = 34) -> str:
+    """Legend-safe display label: drop the 'strategy_' prefix and cap length.
+
+    Pod labels are file stems (~55 chars) and pairwise-correlation labels join
+    two of them with ' vs '. A multi-column legend of such labels grows wider
+    than the 12-inch figure, and ``savefig(bbox_inches='tight')`` then expands
+    the canvas around the legend — leaving the actual plot as a tiny sliver.
+    """
+    part_list = [part_str.strip() for part_str in str(label_str).split(' vs ')]
+    short_part_list = []
+    for part_str in part_list:
+        trimmed_str = part_str.removeprefix('strategy_')
+        if len(trimmed_str) > max_part_len_int:
+            trimmed_str = trimmed_str[: max_part_len_int - 1] + '…'
+        short_part_list.append(trimmed_str)
+    return ' vs '.join(short_part_list)
+
+
+def _legend_ncol_int(label_list: list[str]) -> int:
+    """One column when any label is long, else up to three side by side."""
+    if any(len(label_str) > 30 for label_str in label_list):
+        return 1
+    return min(3, max(1, len(label_list)))
+
+
 def _weights_chart_b64(
     weights: pd.DataFrame,
     title: str,
@@ -3169,7 +3194,7 @@ def _weights_chart_b64(
         ax.stackplot(
             weights.index,
             [weights[col].fillna(0).to_numpy() for col in active_cols],
-            labels=active_cols,
+            labels=[_short_chart_label_str(col) for col in active_cols],
             colors=weight_color_list,
             alpha=0.88,
             edgecolor=_WEIGHT_STACK_EDGE_COLOR_STR,
@@ -3182,7 +3207,10 @@ def _weights_chart_b64(
         ax.yaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(xmax=1.0, decimals=0))
         ax.grid(axis='y', alpha=1.0)
         _add_vertical_line_markers(ax, vertical_line_index)
-        legend_obj = ax.legend(loc='upper left', ncol=min(3, len(active_cols)), fontsize=8, frameon=True)
+        legend_label_list = [_short_chart_label_str(col) for col in active_cols]
+        legend_obj = ax.legend(
+            loc='upper left', ncol=_legend_ncol_int(legend_label_list), fontsize=8, frameon=True
+        )
         legend_obj.get_frame().set_edgecolor(SIGNATURE_PALETTE_DICT['legend_edge'])
         legend_obj.get_frame().set_facecolor(SIGNATURE_PALETTE_DICT['legend_face'])
         fig.autofmt_xdate()
@@ -3222,7 +3250,7 @@ def _stacked_equity_chart_b64(
         ax.stackplot(
             pod_equity_df.index,
             [pod_equity_df[column_str].fillna(0.0).to_numpy() for column_str in active_col_list],
-            labels=active_col_list,
+            labels=[_short_chart_label_str(column_str) for column_str in active_col_list],
             colors=color_list,
             alpha=0.84,
             edgecolor=SIGNATURE_PALETTE_DICT['page'],
@@ -3236,7 +3264,8 @@ def _stacked_equity_chart_b64(
         )
         ax.grid(True)
         _add_vertical_line_markers(ax, vertical_line_index)
-        ax.legend(loc='upper left', ncol=min(3, len(active_col_list)), fontsize=8)
+        legend_label_list = [_short_chart_label_str(column_str) for column_str in active_col_list]
+        ax.legend(loc='upper left', ncol=_legend_ncol_int(legend_label_list), fontsize=8)
         fig.autofmt_xdate()
         fig.tight_layout()
 
@@ -3269,7 +3298,7 @@ def _multi_line_chart_b64(
             ax.plot(
                 value_ser.index,
                 value_ser.to_numpy(),
-                label=column_str,
+                label=_short_chart_label_str(column_str),
                 color=SIGNATURE_PALETTE_DICT['overlay_cycle'][column_idx_int % len(SIGNATURE_PALETTE_DICT['overlay_cycle'])],
                 linewidth=1.15,
                 alpha=0.95,
@@ -3282,7 +3311,8 @@ def _multi_line_chart_b64(
             ax.set_ylim(*ylim_tuple)
         ax.grid(True)
         _add_vertical_line_markers(ax, vertical_line_index)
-        ax.legend(loc='upper left', ncol=min(3, len(plot_df.columns)), fontsize=8)
+        legend_label_list = [_short_chart_label_str(column_str) for column_str in plot_df.columns]
+        ax.legend(loc='upper left', ncol=_legend_ncol_int(legend_label_list), fontsize=8)
         fig.autofmt_xdate()
         fig.tight_layout()
 

@@ -424,14 +424,43 @@ class Portfolio:
 
         return result
 
+    def _pod_stored_benchmark(self, strategy_obj, common_idx):
+        """Symbol and daily-return series of one pod's own stored benchmark.
+
+        Report-only lookup: reads the benchmark level column the pod saved in
+        its ``results`` (e.g. ``$SPX``). Returns ``(symbol_str, return_ser)``
+        where either may be ``None`` when the pod stores no usable benchmark.
+        """
+        symbol_str = getattr(
+            strategy_obj,
+            '_performance_benchmark_symbol_str',
+            str(strategy_obj._benchmarks[0]) if len(strategy_obj._benchmarks) > 0 else None,
+        )
+        if symbol_str is None or symbol_str not in strategy_obj.results.columns:
+            return symbol_str, None
+        benchmark_return_ser = (
+            strategy_obj.results.loc[common_idx, symbol_str]
+            .astype(float)
+            .pct_change(fill_method=None)
+        )
+        return symbol_str, benchmark_return_ser
+
     def _summarize(self):
         """Build summary tables, trades, monthly returns."""
         common_idx = self.results.index
+
+        # *** CRITICAL*** report-only realized-return attribution: PM portfolio
+        # and allocated sleeves use one explicit PM benchmark. Standalone pods
+        # use their own stored strategy benchmark. No series is filled.
+        pm_benchmark_return_ser = None
+        if self.regression_benchmark_value_ser is not None:
+            pm_benchmark_return_ser = self.regression_benchmark_value_ser.pct_change(fill_method=None)
 
         # --- overall metrics: portfolio column + weighted sleeves ---
         self.summary = pd.DataFrame()
         self.summary[self.name] = generate_overall_metrics(
             self.results['total_value'],
+            series_to_correlate=pm_benchmark_return_ser,
             capital_base=self._capital_base,
         )
         self.sleeve_summary = pd.DataFrame()
@@ -454,6 +483,7 @@ class Portfolio:
                 sleeve_total_value_ser,
                 trades=sleeve_trade_df,
                 portfolio_value=sleeve_portfolio_value_ser,
+                series_to_correlate=pm_benchmark_return_ser,
                 capital_base=allocated_capital_float,
             )
             self.sleeve_summary[sleeve_col_name_str] = self.summary[sleeve_col_name_str]
@@ -473,20 +503,17 @@ class Portfolio:
             if transaction_df is not None and len(transaction_df) > 0 and 'commission' in transaction_df.columns:
                 standalone_commission_float = float(transaction_df['commission'].sum())
 
+            _, standalone_benchmark_return_ser = self._pod_stored_benchmark(
+                strategy_obj, common_idx
+            )
             self.standalone_pod_summary[standalone_col_name_str] = generate_overall_metrics(
                 standalone_total_value_ser,
                 trades=standalone_trade_df,
                 portfolio_value=standalone_portfolio_value_ser,
+                series_to_correlate=standalone_benchmark_return_ser,
                 capital_base=strategy_obj._capital_base,
                 total_commissions=standalone_commission_float,
             )
-
-        # *** CRITICAL*** report-only realized-return attribution: PM portfolio
-        # and allocated sleeves use one explicit PM benchmark. Standalone pods
-        # use their own stored strategy benchmark. No series is filled.
-        pm_benchmark_return_ser = None
-        if self.regression_benchmark_value_ser is not None:
-            pm_benchmark_return_ser = self.regression_benchmark_value_ser.pct_change(fill_method=None)
 
         summary_return_ser_by_column_dict = {
             self.name: self.results['total_value'].astype(float).pct_change(fill_method=None),
@@ -526,19 +553,9 @@ class Portfolio:
             standalone_total_value_ser = strategy_obj.results.loc[
                 common_idx, 'total_value'
             ].astype(float)
-            strategy_benchmark_symbol_str = getattr(
-                strategy_obj,
-                '_performance_benchmark_symbol_str',
-                str(strategy_obj._benchmarks[0]) if len(strategy_obj._benchmarks) > 0 else None,
+            strategy_benchmark_symbol_str, strategy_benchmark_return_ser = (
+                self._pod_stored_benchmark(strategy_obj, common_idx)
             )
-            strategy_benchmark_return_ser = None
-            if (
-                strategy_benchmark_symbol_str is not None
-                and strategy_benchmark_symbol_str in strategy_obj.results.columns
-            ):
-                strategy_benchmark_return_ser = strategy_obj.results.loc[
-                    common_idx, strategy_benchmark_symbol_str
-                ].astype(float).pct_change(fill_method=None)
             regression_metric_ser, regression_metadata_dict = generate_benchmark_regression_metrics(
                 standalone_total_value_ser.pct_change(fill_method=None),
                 strategy_benchmark_return_ser,
