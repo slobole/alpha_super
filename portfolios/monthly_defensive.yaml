@@ -1,0 +1,39 @@
+# Monthly Defensive — client-facing low-risk, low-friction book.
+#
+# Category: monthly cadence (~4 tx/month/pod), ETF-only, defensive risk tier.
+# Combines saved vanilla_backtest runs via strategies/run_portfolio.py (simple
+# schema, read-only aggregation — no strategy re-runs).
+#
+# Pod notes (from latest vanilla_backtest artifacts, 2026-07-30):
+#   * taa_df_btal_linearity_1n_fallback_qqq_vix_cash — WIRED. 12.5% ann,
+#     Sharpe 1.30, MaxDD -11.1%, vol 9.4% (2012-10 -> 2026-07).
+#   * strategy_eom_zroz_spy_sso_variant_research — NOT WIRED (incubation).
+#     15.5% ann, Sharpe 1.85, MaxDD -17.9%, vol 14.2% (2009-11 -> 2026-07).
+#     Lowest correlation pod in the book (0.07-0.25 vs everything).
+#   * strategy_taa_beyond_6040_inverse_vol — NOT WIRED (incubation). 8.5% ann,
+#     Sharpe 0.95, MaxDD -23.1%, vol 9.1% (2005-03 -> 2026-07).
+#
+# Portfolio math: buy-and-hold pod compounding (house default, no rebalance).
+# Common window is bounded by the latest pod start: 2012-10 (linearity QQQ).
+#
+# Pickles are pinned explicitly so the artifact is reproducible; refresh the
+# paths deliberately when pods are re-run, instead of relying on find_latest.
+
+name: MonthlyDefensive
+capital: 15000
+# PM benchmark for report attribution: $SPX (TOTALRETURN) is stored in the TAA
+# pods' results; the EOM pod stores SPY, so auto-derivation would refuse to pick.
+benchmark: $SPX
+
+pods:
+  - strategy: strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash
+    weight: 0.34
+    pkl: ../results/research/strategy/strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash/vanilla_backtest/2026-07-30_002313/strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash.pkl
+
+  - strategy: strategy_eom_zroz_spy_sso_variant_research
+    weight: 0.33
+    pkl: ../results/research/strategy/strategy_eom_zroz_spy_sso_variant_research/vanilla_backtest/2026-07-30_001305/strategy_eom_zroz_spy_sso_variant_research.pkl
+
+  - strategy: strategy_taa_beyond_6040_inverse_vol
+    weight: 0.33
+    pkl: ../results/research/strategy/strategy_taa_beyond_6040_inverse_vol/vanilla_backtest/2026-07-30_001549/strategy_taa_beyond_6040_inverse_vol.pkl
