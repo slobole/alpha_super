@@ -1,0 +1,38 @@
+# Growth, evidenced through 2008.
+#
+# Same shape as ladder_3_growth but the tactical sleeve uses the 2x Nasdaq
+# fallback instead of the 3x one. That is the whole point: TQQQ launched in
+# 2010, so no book built on it can ever show the financial crisis, while QLD
+# dates to 2006. Every pod here reaches back to 2008, so the book has a
+# crisis on its record rather than an asterisk.
+#
+# It is a different product, not a proxy — less leverage means less return.
+# The 2x sleeve tracks the 3x one at 0.955 daily correlation, so the logic is
+# the same and only the gearing differs.
+#
+# DV2 and HPI each need $25,000, so this book cannot run below ~$140,000.
+name_str: ladder_3b_growth_2x
+capital_base_float: 150000.0
+backtest_start_date_str: "2004-01-01"
+end_date_str: null
+allocation_policy_str: fixed
+max_workers_int: null
+rebalance: null
+save_pod_artifacts_bool: true
+
+pods:
+  - pod_id_str: pod_taa_2x
+    strategy_import_str: strategies.taa_df.strategy_taa_df_1n_fallback_qld_vix_cash
+    weight_float: 0.32
+
+  - pod_id_str: pod_ndx_mo
+    strategy_import_str: strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy
+    weight_float: 0.32
+
+  - pod_id_str: pod_dv2
+    strategy_import_str: strategies.dv2.strategy_mr_dv2:DVO2Strategy
+    weight_float: 0.18
+
+  - pod_id_str: pod_hpi
+    strategy_import_str: strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote
+    weight_float: 0.18

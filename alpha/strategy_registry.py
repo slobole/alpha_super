@@ -60,6 +60,12 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     "strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy": MaturityTier.WIRED,
     "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy": MaturityTier.WIRED,
     # ── pm-ready: may join a book, not connected to live ────────────────────
+    # The 2x fallback pair. Promoted because their fallback ETFs date to
+    # 2006-06 rather than 2010, so a book built on them carries the 2008
+    # crisis that no 3x variant can reach. Both passed the readiness checks:
+    # capital scales, and the stored benchmark is genuinely total return.
+    "strategies.taa_df.strategy_taa_df_1n_fallback_qld_vix_cash": MaturityTier.PM_READY,
+    "strategies.taa_df.strategy_taa_df_1n_fallback_sso_vix_cash": MaturityTier.PM_READY,
     "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc": MaturityTier.PM_READY,
     "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc_asset_sma200": MaturityTier.PM_READY,
     "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_asset_sma200": MaturityTier.PM_READY,
