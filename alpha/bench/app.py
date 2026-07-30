@@ -32,7 +32,7 @@ from flask import (
     url_for,
 )
 
-from alpha.bench import __version__, catalog, runs
+from alpha.bench import __version__, catalog, portfolio_builder, runs
 from alpha.bench.jobs import JobManager
 from alpha.engine.theme import build_bench_theme_css
 
@@ -302,6 +302,111 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
                 }
             )
         return render_template("portfolios.html", portfolio_view_list=portfolio_view_list)
+
+    @flask_app_obj.route("/portfolios/new")
+    def portfolio_new_page_fn() -> str:
+        """Pick pods for a new book. Read-only: nothing is written here."""
+        return render_template(
+            "portfolio_new.html",
+            candidate_list=portfolio_builder.list_pod_candidates(),
+        )
+
+    def _submitted_selection_tuple() -> tuple[list[tuple[str, float]], str, float, str]:
+        """Read one builder submission from the form, with usable defaults."""
+        stem_list = request.form.getlist("pod")
+        selection_pair_list: list[tuple[str, float]] = []
+        for stem_str in stem_list:
+            raw_weight_str = request.form.get(f"weight__{stem_str}", "").strip()
+            try:
+                weight_float = float(raw_weight_str) if raw_weight_str else 0.0
+            except ValueError:
+                weight_float = 0.0
+            selection_pair_list.append((stem_str, weight_float))
+
+        name_str = (request.form.get("name") or "").strip() or "NewPortfolio"
+        try:
+            capital_float = float((request.form.get("capital") or "100000").strip())
+        except ValueError:
+            capital_float = 100_000.0
+        benchmark_str = (request.form.get("benchmark") or "").strip()
+        return selection_pair_list, name_str, capital_float, benchmark_str
+
+    @flask_app_obj.route("/portfolios/new/review", methods=["POST"])
+    def portfolio_review_page_fn() -> str:
+        """Diagnose a candidate book and show the YAML it would write.
+
+        POST because the selection is a form body, not a bookmarkable view, and
+        reading pod returns to correlate them is too expensive to invite from a
+        crawled URL. Still writes nothing.
+        """
+        csrf_failure_obj = _csrf_failure_response_fn()
+        if csrf_failure_obj is not None:
+            return csrf_failure_obj
+
+        (
+            selection_pair_list,
+            name_str,
+            capital_float,
+            benchmark_str,
+        ) = _submitted_selection_tuple()
+        diagnostics_obj = portfolio_builder.analyze_selection(
+            selection_pair_list=selection_pair_list,
+            name_str=name_str,
+            capital_float=capital_float,
+            benchmark_override_str=benchmark_str or None,
+        )
+        return render_template(
+            "portfolio_review.html",
+            diagnostics=diagnostics_obj,
+            name_str=name_str,
+            capital_float=capital_float,
+            benchmark_str=benchmark_str,
+            selection_pair_list=selection_pair_list,
+        )
+
+    @flask_app_obj.route("/api/portfolios/new", methods=["POST"])
+    def portfolio_create_api_fn() -> Response:
+        """Write the reviewed config into ``portfolios/``.
+
+        The only Bench route that writes to the repo. It re-derives the YAML
+        from the submitted selection rather than trusting posted text, refuses
+        to write outside ``portfolios/``, and will not clobber an existing file
+        unless the operator explicitly said so.
+        """
+        csrf_failure_obj = _csrf_failure_response_fn()
+        if csrf_failure_obj is not None:
+            return csrf_failure_obj
+
+        (
+            selection_pair_list,
+            name_str,
+            capital_float,
+            benchmark_str,
+        ) = _submitted_selection_tuple()
+        diagnostics_obj = portfolio_builder.analyze_selection(
+            selection_pair_list=selection_pair_list,
+            name_str=name_str,
+            capital_float=capital_float,
+            benchmark_override_str=benchmark_str or None,
+        )
+        if diagnostics_obj.has_block_bool:
+            abort(400, description="This selection cannot be written; see the review page.")
+
+        filename_str = (
+            request.form.get("filename") or diagnostics_obj.suggested_filename_str
+        ).strip()
+        overwrite_bool = request.form.get("overwrite") == "1"
+        try:
+            portfolio_builder.write_portfolio_yaml(
+                filename_str=filename_str,
+                yaml_text_str=diagnostics_obj.yaml_text_str,
+                overwrite_bool=overwrite_bool,
+            )
+        except FileExistsError as exception_obj:
+            abort(409, description=f"{exception_obj} Tick overwrite to replace it.")
+        except ValueError as exception_obj:
+            abort(400, description=str(exception_obj))
+        return redirect(url_for("portfolios_page_fn"))
 
     @flask_app_obj.route("/variant/<variant_name_str>")
     def set_variant_fn(variant_name_str: str) -> Response:

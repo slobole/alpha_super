@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% set active_nav = "portfolios" %}
+{% block title %}New Portfolio{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">New Portfolio</h1>
+    <p class="page-sub">Pick pods, set weights, review the checks, write the YAML. Only strategies with a saved <b>vanilla</b> run appear — those are the ones a combine-pkls book can aggregate.</p>
+  </div>
+  <div class="stat-row">
+    <div class="stat"><div class="stat-value">{{ candidate_list|length }}</div><div class="stat-label">Combinable</div></div>
+  </div>
+</div>
+
+<form method="post" action="{{ url_for('portfolio_review_page_fn') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
+
+  <div class="panel builder-head">
+    <div class="builder-field">
+      <label for="name">Name</label>
+      <input id="name" name="name" value="NewPortfolio" required>
+    </div>
+    <div class="builder-field">
+      <label for="capital">Capital</label>
+      <input id="capital" name="capital" value="100000" inputmode="decimal">
+    </div>
+    <div class="builder-field">
+      <label for="benchmark">Benchmark <span class="muted">(blank = derive)</span></label>
+      <input id="benchmark" name="benchmark" placeholder="$SPX">
+    </div>
+    <div class="builder-actions">
+      <button class="btn" type="button" id="equal-weight-btn">Equal weight</button>
+      <button class="btn btn-primary" type="submit">Review &rarr;</button>
+    </div>
+  </div>
+
+  <div class="section section-flush">
+    <h2 class="section-title">Pods</h2>
+    <div class="panel">
+      <table class="table builder-table">
+        <thead>
+          <tr>
+            <th></th><th>Strategy</th><th>Category</th>
+            <th class="num">Ann.</th><th class="num">Sharpe</th><th class="num">MaxDD</th>
+            <th>Window</th><th>Bench</th><th class="num">Weight</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in candidate_list %}
+          <tr class="builder-row">
+            <td><input type="checkbox" name="pod" value="{{ c.stem_str }}" class="pod-check"></td>
+            <td>
+              <div><b>{{ c.display_name_str }}</b>
+                {% if c.is_wired_bool %}<span class="badge badge-wired">wired</span>{% endif %}
+              </div>
+              <div class="mono muted-2">{{ c.stem_str }}</div>
+            </td>
+            <td>{{ c.category_label_str }}</td>
+            <td class="num">{% if c.ann_return_float is not none %}{{ '%.1f%%'|format(c.ann_return_float) }}{% else %}&mdash;{% endif %}</td>
+            <td class="num">{% if c.sharpe_float is not none %}{{ '%.2f'|format(c.sharpe_float) }}{% else %}&mdash;{% endif %}</td>
+            <td class="num">{% if c.max_drawdown_float is not none %}{{ '%.1f%%'|format(c.max_drawdown_float) }}{% else %}&mdash;{% endif %}</td>
+            <td class="mono muted-2">{{ c.window_str or '—' }}</td>
+            <td class="mono muted-2">{{ c.benchmark_symbol_str or '—' }}</td>
+            <td class="num">
+              <input class="weight-input" name="weight__{{ c.stem_str }}" value="" inputmode="decimal" placeholder="0.00">
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</form>
+
+<script>
+  // Ticking a pod gives it a weight straight away, so the common case — an
+  // equal-weight book — needs no typing at all. Untick clears it.
+  (function () {
+    function checkedInputs() {
+      return Array.prototype.slice.call(document.querySelectorAll('.pod-check')).filter(function (el) { return el.checked; });
+    }
+    function weightInputFor(checkEl) {
+      return checkEl.closest('tr').querySelector('.weight-input');
+    }
+    function spreadEqually() {
+      var checked = checkedInputs();
+      if (!checked.length) return;
+      var each = (1 / checked.length);
+      checked.forEach(function (el) { weightInputFor(el).value = each.toFixed(4).replace(/0+$/, '').replace(/\.$/, ''); });
+    }
+    document.addEventListener('change', function (event) {
+      if (!event.target.classList || !event.target.classList.contains('pod-check')) return;
+      if (!event.target.checked) { weightInputFor(event.target).value = ''; }
+      spreadEqually();
+    });
+    var btn = document.getElementById('equal-weight-btn');
+    if (btn) btn.addEventListener('click', spreadEqually);
+  })();
+</script>
+{% endblock %}

@@ -601,6 +601,37 @@ kbd {
   .table thead th { position: static; }
 }
 
+/* ── portfolio builder ─────────────────────────────────────────────────── */
+
+/* The builder is a form that has to stay readable next to a wide table, so the
+   controls sit on one line and wrap as a unit rather than stacking per field. */
+.builder-head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 18px; padding: 16px 18px; }
+.builder-field { display: flex; flex-direction: column; gap: 5px; }
+.builder-field label { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-muted); }
+.builder-field input[type="text"], .builder-field input:not([type]) {
+  font: inherit; padding: 6px 9px; min-width: 190px;
+  background: var(--color-page); color: var(--color-ink);
+  border: 1px solid var(--color-border);
+}
+.builder-field-check { justify-content: flex-end; }
+.builder-field-check label { text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--color-ink); }
+.builder-actions { display: flex; gap: 10px; margin-left: auto; align-items: center; }
+.builder-table .weight-input {
+  font: inherit; width: 72px; text-align: right; padding: 4px 7px;
+  background: var(--color-page); color: var(--color-ink); border: 1px solid var(--color-border);
+}
+.builder-row:hover { background: var(--color-panel); }
+.yaml-preview { margin: 0; padding: 16px 18px; white-space: pre; overflow-x: auto; font-size: 12.5px; line-height: 1.55; }
+
+/* A check the operator must not skim past reads as a bar, not a footnote. */
+.notice { padding: 12px 16px; margin-bottom: 10px; border-left: 3px solid var(--color-border); }
+.notice-title { font-weight: 600; margin-bottom: 3px; }
+.notice-detail { font-size: 13px; color: var(--color-muted); line-height: 1.55; }
+.notice-block { border-left-color: var(--color-loss); }
+.notice-warn { border-left-color: var(--color-benchmark-dark); }
+.notice-info { border-left-color: var(--color-border); }
+.cell-bad { color: var(--color-loss); font-weight: 600; }
+
 /* ── print ─────────────────────────────────────────────────────────────── */
 
 /* A catalog page or a run history should print as a sheet you can mark up:

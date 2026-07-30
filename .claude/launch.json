@@ -6,6 +6,12 @@
       "runtimeExecutable": "uv",
       "runtimeArgs": ["run", "python", "-m", "alpha.bench", "--skip-env-file", "--port", "8765"],
       "port": 8765
+    },
+    {
+      "name": "bench-preview",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "python", "-m", "alpha.bench", "--skip-env-file", "--port", "8766"],
+      "port": 8766
     }
   ]
 }
