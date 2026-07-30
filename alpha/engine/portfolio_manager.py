@@ -28,7 +28,11 @@ from alpha.engine.report import (
     save_results as save_strategy_results,
 )
 from alpha.engine.strategy import Strategy
-from data.norgate_loader import TOTALRETURN_ADJUSTMENT_STR, load_price_timeseries
+from data.norgate_loader import (
+    INDEX_TOTALRETURN_DATA_SYMBOL_MAP_DICT,
+    TOTALRETURN_ADJUSTMENT_STR,
+    load_price_timeseries,
+)
 
 
 SUPPORTED_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = (
@@ -652,9 +656,19 @@ class PortfolioManager:
             regression_benchmark_label_str = (
                 f"{self.config.regression_benchmark_symbol_str} · TOTALRETURN"
             )
+            # *** CRITICAL*** Norgate's TOTALRETURN adjustment back-adjusts
+            # dividends on stocks and ETFs but does nothing on an index symbol,
+            # so requesting it on $SPX silently returns the PRICE index — which
+            # understated this benchmark by the dividend yield (13.59% vs 15.36%
+            # CAGR over 2019-04..2026-07) while the report labelled it
+            # TOTALRETURN. The genuine total-return index is a separate symbol.
+            benchmark_data_symbol_str = INDEX_TOTALRETURN_DATA_SYMBOL_MAP_DICT.get(
+                str(self.config.regression_benchmark_symbol_str),
+                str(self.config.regression_benchmark_symbol_str),
+            )
             try:
                 regression_benchmark_price_df = load_price_timeseries(
-                    self.config.regression_benchmark_symbol_str,
+                    benchmark_data_symbol_str,
                     adjustment_str=TOTALRETURN_ADJUSTMENT_STR,
                     start_date_str=self.config.backtest_start_date_str,
                     end_date_str=self.config.end_date_str,
@@ -666,7 +680,8 @@ class PortfolioManager:
             except Exception as exception_obj:  # report-only external data boundary
                 warnings.warn(
                     "Portfolio benchmark regression is unavailable because "
-                    f"{self.config.regression_benchmark_symbol_str} TOTALRETURN could not be loaded: "
+                    f"{benchmark_data_symbol_str} (the TOTALRETURN series for "
+                    f"{self.config.regression_benchmark_symbol_str}) could not be loaded: "
                     f"{exception_obj}",
                     RuntimeWarning,
                 )

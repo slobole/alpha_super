@@ -396,7 +396,14 @@ def test_manager_loads_total_return_pm_regression_benchmark(monkeypatch, tmp_pat
         show_display_bool=False,
     )
 
-    assert load_call_dict['symbol_str'] == '$SPX'
+    # *** CRITICAL*** The data symbol is not the configured label. Norgate's
+    # TOTALRETURN adjustment back-adjusts dividends on stocks and ETFs but does
+    # nothing on an index symbol, so loading '$SPX' would return the PRICE index
+    # while the report claimed total return — it understated this benchmark by
+    # the dividend yield (13.59% vs 15.36% CAGR over 2019-04..2026-07). The
+    # genuine total-return index is the separate symbol '$SPXTR'; the label the
+    # report shows stays the familiar one.
+    assert load_call_dict['symbol_str'] == '$SPXTR'
     assert load_call_dict['call_count_int'] == 1
     assert load_call_dict['adjustment_str'] == portfolio_manager.TOTALRETURN_ADJUSTMENT_STR
     assert result_obj.portfolio.regression_benchmark_label_str == '$SPX · TOTALRETURN'
