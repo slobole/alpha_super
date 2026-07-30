@@ -41,9 +41,17 @@ from data.norgate_loader import (
 # Hand-keeping this list is what let two wired HPI strategies be refused by the
 # portfolio engine while trading real money. See alpha.strategy_registry.
 SUPPORTED_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = strategy_registry.pm_ready_import_tuple()
+# *** CRITICAL*** Every single-name S&P 500 sleeve belongs here. These hold
+# ~20 positions and trade on most sessions, so below this the fixed commission
+# and whole-share rounding eat the edge the strategy is supposed to earn. The
+# HPI pair was missing while DV2 and QPI were listed, which meant swapping QPI
+# for HPI — the same strategy by correlation — silently removed the funding
+# floor from a book.
 POD_MINIMUM_ALLOCATED_CAPITAL_FLOAT_DICT: dict[str, float] = {
     "strategies.dv2.strategy_mr_dv2:DVO2Strategy": 25_000.0,
     "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy": 25_000.0,
+    "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote": 25_000.0,
+    "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit": 25_000.0,
 }
 SUPPORTED_ALLOCATION_POLICY_TUPLE: tuple[str, ...] = ("fixed", "equal")
 SUPPORTED_REBALANCE_FREQUENCY_TUPLE: tuple[str, ...] = ("monthly", "quarterly", "annually")

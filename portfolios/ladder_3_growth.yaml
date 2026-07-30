@@ -1,0 +1,33 @@
+# Growth rung: every pod wired, run fresh with real per-sleeve capital.
+#
+# HPI carries the single-name mean-reversion sleeve rather than QPI. The two
+# correlate at 1.00 over their shared history — they are the same trade — so
+# holding both would double one bet, and only one belongs in a book.
+#
+# Capital floor is not cosmetic: the DV2 and HPI sleeves each need $25,000, so
+# this book cannot run below ~$140,000. The manager refuses to start otherwise.
+name_str: ladder_3_growth
+capital_base_float: 150000.0
+backtest_start_date_str: "2004-01-01"
+end_date_str: null
+allocation_policy_str: fixed
+max_workers_int: null
+rebalance: null
+save_pod_artifacts_bool: true
+
+pods:
+  - pod_id_str: pod_taa
+    strategy_import_str: strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash
+    weight_float: 0.32
+
+  - pod_id_str: pod_ndx_mo
+    strategy_import_str: strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy
+    weight_float: 0.32
+
+  - pod_id_str: pod_dv2
+    strategy_import_str: strategies.dv2.strategy_mr_dv2:DVO2Strategy
+    weight_float: 0.18
+
+  - pod_id_str: pod_hpi
+    strategy_import_str: strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote
+    weight_float: 0.18
