@@ -1,0 +1,14 @@
+# PROXY, not a product. Swaps the BTAL sleeve for its no-BTAL
+# counterpart, which reaches back to 2008-03 instead of 2012-10 and so
+# carries the financial crisis. Tracks the product to 0.0pp of CAGR over
+# their common window, which is what makes it usable as evidence.
+name: ladder_1_defensive_proxy_2008
+capital: 100000
+benchmark: $SPX
+
+pods:
+  - strategy: strategy_taa_df_linearity_1n_fallback_qqq_vix_cash
+    weight: 0.55
+
+  - strategy: strategy_mr_us_sector_etf_ibs_downshock_vox_iyr
+    weight: 0.45

@@ -1,0 +1,15 @@
+# PROXY, not a product. See ladder_1_defensive_proxy_2008.
+# Tracks its product to 0.2pp of CAGR over the common window.
+name: ladder_2_balanced_proxy_2008
+capital: 100000
+benchmark: $SPX
+
+pods:
+  - strategy: strategy_taa_df_linearity_1n_fallback_qqq_vix_cash
+    weight: 0.45
+
+  - strategy: strategy_mr_us_sector_etf_ibs_downshock_vox_iyr
+    weight: 0.25
+
+  - strategy: strategy_mo_atr_normalized_ndx_vxn_scaled
+    weight: 0.3

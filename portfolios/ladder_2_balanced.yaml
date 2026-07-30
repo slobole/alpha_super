@@ -1,4 +1,4 @@
-# Adds the NDX momentum engine to the low-drawdown monthly base.
+# Adds the NDX momentum engine to the low-drawdown base.
 name: ladder_2_balanced
 capital: 100000
 benchmark: $SPX
