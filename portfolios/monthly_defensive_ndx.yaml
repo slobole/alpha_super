@@ -10,20 +10,17 @@
 # Pickles pinned explicitly; buy-and-hold pod compounding (house default).
 
 name: MonthlyDefensiveNdx
-capital: 15000
+capital: 100000
 # PM benchmark for report attribution: $SPX (TOTALRETURN) is stored in the TAA
 # pod's results; the EOM pod stores SPY, so auto-derivation would refuse to pick.
 benchmark: $SPX
 
 pods:
   - strategy: strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash
-    weight: 0.34
-    pkl: ../results/research/strategy/strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash/vanilla_backtest/2026-07-30_002313/strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash.pkl
+    weight: 0.4
 
   - strategy: strategy_eom_zroz_spy_sso_variant_research
-    weight: 0.33
-    pkl: ../results/research/strategy/strategy_eom_zroz_spy_sso_variant_research/vanilla_backtest/2026-07-30_001305/strategy_eom_zroz_spy_sso_variant_research.pkl
+    weight: 0.4
 
   - strategy: strategy_mo_atr_normalized_ndx_vxn_scaled
-    weight: 0.33
-    pkl: ../results/dividend_ledger_v2_wired_regeneration_20260726/research/strategy/strategy_mo_atr_normalized_ndx_vxn_scaled/vanilla_backtest/2026-07-26_230937/strategy_mo_atr_normalized_ndx_vxn_scaled.pkl
+    weight: 0.2

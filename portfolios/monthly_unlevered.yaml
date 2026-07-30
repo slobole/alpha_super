@@ -1,13 +1,13 @@
-name: MonthlyDefensive
+name: MonthlyUnlevered
 capital: 100000
 benchmark: $SPX
 
 pods:
   - strategy: strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash
-    weight: 0.34
-
-  - strategy: strategy_eom_zroz_spy_sso_variant_research
-    weight: 0.33
+    weight: 0.4
 
   - strategy: strategy_taa_beyond_6040_inverse_vol
-    weight: 0.33
+    weight: 0.3
+
+  - strategy: strategy_mo_spy_sphb_splv_canary
+    weight: 0.3

@@ -1,0 +1,13 @@
+name: MonthlyAggressive
+capital: 100000
+benchmark: $SPX
+
+pods:
+  - strategy: strategy_taa_df_btal_1n_fallback_tqqq_vix_cash
+    weight: 0.4
+
+  - strategy: strategy_eom_zroz_spy_sso_variant_research
+    weight: 0.3
+
+  - strategy: strategy_mo_atr_normalized_ndx_vxn_scaled
+    weight: 0.3
