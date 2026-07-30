@@ -76,12 +76,18 @@ from alpha.engine.report import save_results
 from alpha.engine.strategy import Strategy
 from data.norgate_loader import (
     CAPITALSPECIAL_ADJUSTMENT_STR,
+    INDEX_TOTALRETURN_DATA_SYMBOL_MAP_DICT,
     TOTALRETURN_ADJUSTMENT_STR,
     load_price_timeseries,
 )
 
 
 STRATEGY_NAME_STR = "strategy_taa_df"
+
+# Benchmarks load from — and report against — their explicit total-return data
+# symbol while keeping the familiar label (same pattern as the momentum
+# family). See the *** CRITICAL*** note on the map in data/norgate_loader.py.
+BENCHMARK_DATA_SYMBOL_MAP_DICT: dict[str, str] = INDEX_TOTALRETURN_DATA_SYMBOL_MAP_DICT
 
 
 @dataclass(frozen=True)
@@ -229,10 +235,17 @@ def load_execution_price_df(
     Benchmarks use TOTALRETURN for comparison only.
     """
     execution_frame_list: list[pd.DataFrame] = []
-    symbol_list = list(dict.fromkeys(list(tradeable_asset_list) + list(benchmark_list)))
+    # *** CRITICAL*** Benchmarks load from their TR data symbol (e.g. $SPX ->
+    # $SPXTR): requesting TOTALRETURN on an index symbol returns the price
+    # index, which would understate the benchmark by the dividend yield.
+    benchmark_data_symbol_list = [
+        BENCHMARK_DATA_SYMBOL_MAP_DICT.get(str(benchmark_str), str(benchmark_str))
+        for benchmark_str in benchmark_list
+    ]
+    symbol_list = list(dict.fromkeys(list(tradeable_asset_list) + benchmark_data_symbol_list))
 
     for symbol_str in tqdm(symbol_list, desc="loading execution prices"):
-        if symbol_str in benchmark_list:
+        if symbol_str in benchmark_data_symbol_list:
             adjustment_str = TOTALRETURN_ADJUSTMENT_STR
         else:
             adjustment_str = CAPITALSPECIAL_ADJUSTMENT_STR
@@ -256,7 +269,7 @@ def load_execution_price_df(
     execution_price_df.attrs["norgate_adjustment_by_symbol_dict"] = {
         str(symbol_str): (
             TOTALRETURN_ADJUSTMENT_STR
-            if symbol_str in benchmark_list
+            if symbol_str in benchmark_data_symbol_list
             else CAPITALSPECIAL_ADJUSTMENT_STR
         )
         for symbol_str in symbol_list
@@ -425,6 +438,15 @@ class DefenseFirstStrategy(Strategy):
             commission_minimum=commission_minimum,
             performance_benchmark_adjustment_str=TOTALRETURN_ADJUSTMENT_STR,
         )
+        # Report-only provenance: benchmark metrics stay labeled with the
+        # familiar symbol while reading the total-return data series the
+        # loader stored (e.g. results['$SPX'] accumulates $SPXTR wealth).
+        self._benchmark_data_symbol_map_dict = {
+            str(benchmark_str): BENCHMARK_DATA_SYMBOL_MAP_DICT.get(
+                str(benchmark_str), str(benchmark_str)
+            )
+            for benchmark_str in benchmarks
+        }
         self.rebalance_weight_df = rebalance_weight_df.copy()
         self.tradeable_asset_list = list(tradeable_asset_list)
         self.trade_id_int = 0

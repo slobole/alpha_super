@@ -93,6 +93,10 @@ class VanillaBacktester(Backtester):
                 "pricing_column_count_int": int(len(pricing_data_df.columns)),
             },
         )
+        # Report-only: bind benchmark labels to columns actually loaded before
+        # any metric reads them, so a declared total-return data symbol that was
+        # never loaded is recorded as such instead of silently assumed.
+        strategy.resolve_benchmark_data_symbol_map(pricing_data_df)
         print("signal precompute...")
         signal_start_float = perf_counter()
         full_data_df = strategy.compute_signals(pricing_data_df)

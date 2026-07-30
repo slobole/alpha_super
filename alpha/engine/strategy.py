@@ -549,6 +549,63 @@ class Strategy(ABC):
             columns=DIVIDEND_LEDGER_COLUMN_TUPLE,
         )
 
+    def resolve_benchmark_data_symbol_map(self, pricing_data_df: pd.DataFrame) -> None:
+        """Bind each benchmark label to a data column that is actually present.
+
+        A strategy may declare a data symbol that differs from the benchmark
+        label — the genuine total-return index ($SPXTR) behind the familiar
+        label ($SPX), because Norgate's TOTALRETURN adjustment back-adjusts
+        dividends on stocks and ETFs but does nothing on an index symbol.
+
+        That declaration only holds if the column was actually loaded. Resolve
+        it against the data once per run: use the declared data symbol when it
+        is present, fall back to the label when it is not, and *** CRITICAL***
+        downgrade the recorded adjustment in the fallback case so a saved
+        artifact never claims a total return it never read. Report-only: no
+        signal or order logic reads this map.
+        """
+        if len(self._benchmarks) == 0:
+            return
+
+        column_obj = pricing_data_df.columns
+        available_symbol_set = set(
+            column_obj.get_level_values(0)
+            if isinstance(column_obj, pd.MultiIndex)
+            else column_obj
+        )
+
+        resolved_map_dict: dict[str, str] = {}
+        unavailable_label_list: list[str] = []
+        downgraded_label_list: list[str] = []
+        for benchmark_str in self._benchmarks:
+            label_str = str(benchmark_str)
+            declared_symbol_str = self._benchmark_data_symbol_map_dict.get(label_str, label_str)
+            if declared_symbol_str in available_symbol_set:
+                resolved_map_dict[label_str] = declared_symbol_str
+                continue
+            if label_str in available_symbol_set:
+                resolved_map_dict[label_str] = label_str
+                if declared_symbol_str != label_str:
+                    downgraded_label_list.append(f"{label_str} (declared {declared_symbol_str})")
+                continue
+            unavailable_label_list.append(label_str)
+
+        if len(unavailable_label_list) > 0:
+            raise RuntimeError(
+                "Benchmark data is missing from the pricing data for: "
+                f"{', '.join(unavailable_label_list)}."
+            )
+
+        self._benchmark_data_symbol_map_dict = resolved_map_dict
+        if len(downgraded_label_list) == 0:
+            return
+
+        self._performance_benchmark_adjustment_str = "not_declared"
+        self._data_adjustment_policy_dict["performance_benchmark_adjustment_str"] = "not_declared"
+        self._data_adjustment_policy_dict["benchmark_data_symbol_fallback_str"] = (
+            "; ".join(downgraded_label_list)
+        )
+
     def configure_structured_logging(
         self,
         *,

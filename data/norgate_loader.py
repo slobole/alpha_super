@@ -16,6 +16,15 @@ from data.norgate_snapshot_store import (
 )
 
 
+# *** CRITICAL*** Norgate's TOTALRETURN price adjustment only affects stocks
+# and ETFs (dividend back-adjustment). An index symbol such as $SPX carries no
+# dividends, so requesting TOTALRETURN on it silently returns the PRICE index —
+# the genuinely total-return index is a separate data symbol. Strategies that
+# benchmark against an index should load the mapped TR data symbol below and
+# keep the familiar label via ``Strategy._benchmark_data_symbol_map_dict``.
+INDEX_TOTALRETURN_DATA_SYMBOL_MAP_DICT: dict[str, str] = {"$SPX": "$SPXTR"}
+
+
 class _NorgateDataProxy:
     def __getattr__(self, name_str: str):
         return getattr(_load_direct_norgate_module(), name_str)

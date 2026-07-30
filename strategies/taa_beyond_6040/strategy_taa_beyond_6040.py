@@ -66,7 +66,11 @@ from alpha.engine.metrics import (
 )
 from alpha.engine.report import save_results
 from alpha.engine.strategy import Strategy
-from data.norgate_loader import load_raw_prices
+from data.norgate_loader import (
+    INDEX_TOTALRETURN_DATA_SYMBOL_MAP_DICT,
+    TOTALRETURN_ADJUSTMENT_STR,
+    load_raw_prices,
+)
 
 
 def default_trade_id_int() -> int:
@@ -127,10 +131,18 @@ def get_beyond_6040_data(
     """
     Load CAPITALSPECIAL prices for tradeable assets and TOTALRETURN prices for
     optional benchmarks.
+
+    *** CRITICAL*** Index benchmarks load from their TR data symbol (e.g.
+    $SPX -> $SPXTR): requesting TOTALRETURN on an index symbol returns the
+    price index. See INDEX_TOTALRETURN_DATA_SYMBOL_MAP_DICT in the loader.
     """
+    benchmark_data_symbol_list = [
+        INDEX_TOTALRETURN_DATA_SYMBOL_MAP_DICT.get(str(benchmark_str), str(benchmark_str))
+        for benchmark_str in config.benchmark_list
+    ]
     return load_raw_prices(
         symbols=list(config.asset_list),
-        benchmarks=list(config.benchmark_list),
+        benchmarks=benchmark_data_symbol_list,
         start_date=config.start_date_str,
         end_date=config.end_date_str,
     )
@@ -341,7 +353,16 @@ class Beyond6040Strategy(Strategy):
             slippage=slippage,
             commission_per_share=commission_per_share,
             commission_minimum=commission_minimum,
+            performance_benchmark_adjustment_str=TOTALRETURN_ADJUSTMENT_STR,
         )
+        # Report-only provenance: benchmark metrics stay labeled with the
+        # familiar symbol while reading the TR data series the loader stored.
+        self._benchmark_data_symbol_map_dict = {
+            str(benchmark_str): INDEX_TOTALRETURN_DATA_SYMBOL_MAP_DICT.get(
+                str(benchmark_str), str(benchmark_str)
+            )
+            for benchmark_str in benchmark_list
+        }
         self.asset_list = list(asset_list)
         if len(self.asset_list) != len(set(self.asset_list)):
             raise ValueError("asset_list contains duplicate symbols.")
