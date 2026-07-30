@@ -444,8 +444,22 @@ class ProducedRunFinder:
     def _candidate_run_entry_list(self, target_name_str: str, kind_str: str) -> list[RunEntry]:
         if kind_str == "portfolio":
             if target_name_str not in self._portfolio_run_list_by_name_dict:
+                # A portfolio job's target is the YAML filename stem, but the
+                # runners write results under the YAML's internal name (e.g.
+                # target "monthly_defensive" -> results ".../MonthlyDefensive").
+                # Scan both, exactly like the Portfolios page does.
+                from alpha.bench import catalog
+
+                config_name_str = next(
+                    (
+                        entry_obj.config_name_str
+                        for entry_obj in catalog.list_portfolios()
+                        if entry_obj.name_str == target_name_str
+                    ),
+                    None,
+                )
                 self._portfolio_run_list_by_name_dict[target_name_str] = scan_portfolio_runs(
-                    target_name_str
+                    *(name_str for name_str in (target_name_str, config_name_str) if name_str)
                 )
             return self._portfolio_run_list_by_name_dict[target_name_str]
 

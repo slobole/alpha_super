@@ -77,12 +77,16 @@
       setTimeout(function () { buttonEl.disabled = true; buttonEl.textContent = '…'; }, 0);
     }, true);
 
-    // A jobs row opens its log, except when the click landed on a real control
-    // (the Report/Log links, the Cancel button) which has its own destination.
+    // A jobs row opens the report it produced (new tab, like the Report link),
+    // falling back to its live log while running or after a failure — except
+    // when the click landed on a real control (the Report/Log links, the
+    // Cancel button) which has its own destination.
     document.addEventListener('click', function (event) {
       var rowEl = event.target.closest ? event.target.closest('tr.job-row') : null;
       if (!rowEl) return;
       if (event.target.closest('a, button, form')) return;
+      var reportHrefStr = rowEl.dataset.reportHref;
+      if (reportHrefStr) { window.open(reportHrefStr, '_blank', 'noopener'); return; }
       var hrefStr = rowEl.dataset.logHref;
       if (hrefStr) window.location.href = hrefStr;
     });

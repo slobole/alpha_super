@@ -9,9 +9,10 @@
     <tbody>
       {% for view in job_view_list %}
       {% set job = view.job %}
-      {# The whole row is a click target for the log; the explicit Log link
-         stays so the row is still reachable by keyboard. #}
-      <tr class="job-row" data-log-href="{{ url_for('job_log_page_fn', job_id_str=job.job_id_str) }}">
+      {# The whole row is a click target: it opens the produced report when one
+         exists, otherwise the live log. The explicit Report/Log links stay so
+         both destinations remain reachable directly and by keyboard. #}
+      <tr class="job-row" data-log-href="{{ url_for('job_log_page_fn', job_id_str=job.job_id_str) }}"{% if view.produced_run %} data-report-href="{{ url_for('artifact_fn', rel_path_str=view.produced_run.report_artifact_str) }}"{% endif %}>
         <td>
           <span class="pill pill-{{ job.status_str }}">{{ job.status_str }}</span>
           {% if job.queue_position_int %}<div class="cell-note">#{{ job.queue_position_int }} in line</div>{% endif %}
