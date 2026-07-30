@@ -27,7 +27,8 @@ from pathlib import Path
 
 import yaml
 
-from alpha.live.release_manifest import SUPPORTED_STRATEGY_IMPORT_TUPLE
+from alpha import strategy_registry
+from alpha.strategy_registry import MaturityTier
 
 
 REPO_ROOT_PATH = Path(__file__).resolve().parents[2]
@@ -113,11 +114,23 @@ class StrategyEntry:
     subcategory_label_str: str | None
     module_import_str: str  # e.g. "strategies.dv2.strategy_mr_dv2"
     rel_path_str: str  # posix path relative to the repo root
-    is_wired_bool: bool
+    tier_int: int  # alpha.strategy_registry.MaturityTier
+    tier_label_str: str  # "research" | "pm-ready" | "wired"
     has_run_variant_bool: bool
     has_capacity_analysis_bool: bool
     summary_str: str  # first line of the module docstring (may be empty)
     run_variant_param_tuple: tuple[RunVariantParam, ...]  # overridable kwargs
+
+    @property
+    def is_wired_bool(self) -> bool:
+        """Connected to a live account route. Derived so callers predating the
+        tiers keep working unchanged."""
+        return self.tier_int >= int(MaturityTier.WIRED)
+
+    @property
+    def is_pm_ready_bool(self) -> bool:
+        """May be allocated to inside a portfolio book. Wired implies pm-ready."""
+        return self.tier_int >= int(MaturityTier.PM_READY)
 
 
 @dataclass(frozen=True)
@@ -198,9 +211,16 @@ def _subcategory_pair(category_str: str, stem_str: str) -> tuple[str | None, str
     return (subcategory_str, MOMENTUM_SUBCATEGORY_LABEL_DICT[subcategory_str])
 
 
-def _wired_module_set() -> set[str]:
-    # Entries are either "module" or "module:Class"; we key on the module path.
-    return {entry_str.split(":", maxsplit=1)[0] for entry_str in SUPPORTED_STRATEGY_IMPORT_TUPLE}
+def _tier_by_module_dict() -> dict[str, MaturityTier]:
+    """Maturity tier keyed on the module path.
+
+    Registry entries are either ``module`` or ``module:Class``; the catalog
+    discovers files, so it only ever knows the module.
+    """
+    return {
+        strategy_registry.module_import_str(entry_str): tier_obj
+        for entry_str, tier_obj in strategy_registry.STRATEGY_TIER_DICT.items()
+    }
 
 
 def _run_variant_param_tuple(run_variant_node_obj) -> tuple[RunVariantParam, ...]:
@@ -296,10 +316,11 @@ def _parse_strategy_source(
 def list_strategies() -> list[StrategyEntry]:
     """All ``strategy_*.py`` files under ``strategies/``, wired ones first.
 
-    Sort order: wired before experimental, then by category, then by name —
-    so the strategies you actually trade sit at the top of the catalog.
+    Sort order: most mature first, then by category, then by name — so the
+    strategies you actually trade sit at the top of the catalog, with the
+    promoted-but-not-live ones directly beneath them.
     """
-    wired_module_set = _wired_module_set()
+    tier_by_module_dict = _tier_by_module_dict()
     entry_list: list[StrategyEntry] = []
 
     for module_path in sorted(STRATEGIES_ROOT_PATH.rglob("strategy_*.py")):
@@ -324,7 +345,12 @@ def list_strategies() -> list[StrategyEntry]:
                 subcategory_label_str=subcategory_label_str,
                 module_import_str=module_import_str,
                 rel_path_str=_rel_posix_str(module_path),
-                is_wired_bool=module_import_str in wired_module_set,
+                tier_int=int(
+                    tier_by_module_dict.get(module_import_str, MaturityTier.RESEARCH)
+                ),
+                tier_label_str=strategy_registry.TIER_LABEL_DICT[
+                    tier_by_module_dict.get(module_import_str, MaturityTier.RESEARCH)
+                ],
                 has_run_variant_bool=has_run_variant_bool,
                 has_capacity_analysis_bool=has_capacity_analysis_bool,
                 summary_str=summary_str,
@@ -332,9 +358,11 @@ def list_strategies() -> list[StrategyEntry]:
             )
         )
 
+    # Most mature first, so the strategies carrying real money lead the catalog
+    # and the promoted-but-not-live ones sit directly under them.
     entry_list.sort(
         key=lambda entry_obj: (
-            not entry_obj.is_wired_bool,
+            -entry_obj.tier_int,
             entry_obj.category_label_str.lower(),
             entry_obj.stem_str.lower(),
         )

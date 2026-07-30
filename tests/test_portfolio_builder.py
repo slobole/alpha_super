@@ -15,6 +15,7 @@ import pytest
 import yaml
 
 from alpha.bench import portfolio_builder
+from alpha.strategy_registry import TIER_LABEL_DICT, MaturityTier
 
 
 def _notice_title_set(diagnostics_obj) -> set[str]:
@@ -25,6 +26,7 @@ def _stub_candidate(
     stem_str: str,
     is_wired_bool: bool = True,
     benchmark_symbol_str: str | None = "$SPX",
+    tier_obj: MaturityTier | None = None,
 ):
     run_obj = portfolio_builder.runs.RunEntry(
         run_name_str=stem_str,
@@ -38,12 +40,16 @@ def _stub_candidate(
         metadata_dict={"benchmarks": [benchmark_symbol_str] if benchmark_symbol_str else []},
         run_info_dict={"parameters": {"start_date": "2012-10-01", "end_date": "2026-07-24"}},
     )
+    resolved_tier_obj = tier_obj or (
+        MaturityTier.WIRED if is_wired_bool else MaturityTier.RESEARCH
+    )
     return portfolio_builder.PodCandidate(
         stem_str=stem_str,
         display_name_str=stem_str.replace("strategy_", "").title(),
         module_import_str=f"strategies.x.{stem_str}",
         category_label_str="Test",
-        is_wired_bool=is_wired_bool,
+        tier_int=int(resolved_tier_obj),
+        tier_label_str=TIER_LABEL_DICT[resolved_tier_obj],
         run_obj=run_obj,
         benchmark_symbol_str=benchmark_symbol_str,
     )

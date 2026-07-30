@@ -88,7 +88,7 @@
           <td>
             <div class="strat-name">
               <a class="mono" href="{{ url_for('strategy_page_fn', module_import_str=s.module_import_str) }}">{{ s.stem_str }}</a>
-              {% if s.is_wired_bool %}<span class="badge badge-wired">Wired</span>{% endif %}
+              {% if s.is_wired_bool %}<span class="badge badge-wired">Wired</span>{% elif s.is_pm_ready_bool %}<span class="badge badge-pmready">PM-ready</span>{% endif %}
             </div>
             <div class="strat-badges">
               <span class="badge badge-cat">{{ s.category_label_str }}</span>
@@ -144,7 +144,7 @@
             <td>
               <div class="strat-name">
                 <a class="mono" href="{{ url_for('strategy_page_fn', module_import_str=s.module_import_str) }}">{{ s.stem_str }}</a>
-                {% if s.is_wired_bool %}<span class="badge badge-wired">Wired</span>{% endif %}
+                {% if s.is_wired_bool %}<span class="badge badge-wired">Wired</span>{% elif s.is_pm_ready_bool %}<span class="badge badge-pmready">PM-ready</span>{% endif %}
                 {% if not s.has_run_variant_bool %}<span class="badge badge-norun">no run_variant</span>{% endif %}
               </div>
             </td>

@@ -29,6 +29,7 @@ import pandas as pd
 
 from alpha.bench import catalog, runs
 from alpha.engine.metrics import cross_correlation_matrix
+from alpha.strategy_registry import MaturityTier
 
 
 PORTFOLIOS_ROOT_PATH = catalog.PORTFOLIOS_ROOT_PATH
@@ -61,9 +62,18 @@ class PodCandidate:
     display_name_str: str
     module_import_str: str
     category_label_str: str
-    is_wired_bool: bool
+    tier_int: int
+    tier_label_str: str
     run_obj: runs.RunEntry
     benchmark_symbol_str: str | None
+
+    @property
+    def is_wired_bool(self) -> bool:
+        return self.tier_int >= int(MaturityTier.WIRED)
+
+    @property
+    def is_pm_ready_bool(self) -> bool:
+        return self.tier_int >= int(MaturityTier.PM_READY)
 
     @property
     def window_str(self) -> str | None:
@@ -184,14 +194,15 @@ def list_pod_candidates() -> list[PodCandidate]:
                 display_name_str=strategy_entry_obj.display_name_str,
                 module_import_str=strategy_entry_obj.module_import_str,
                 category_label_str=strategy_entry_obj.category_label_str,
-                is_wired_bool=strategy_entry_obj.is_wired_bool,
+                tier_int=strategy_entry_obj.tier_int,
+                tier_label_str=strategy_entry_obj.tier_label_str,
                 run_obj=run_obj,
                 benchmark_symbol_str=_benchmark_symbol_str(run_obj),
             )
         )
     candidate_list.sort(
         key=lambda candidate_obj: (
-            not candidate_obj.is_wired_bool,
+            -candidate_obj.tier_int,
             candidate_obj.category_label_str.lower(),
             candidate_obj.stem_str.lower(),
         )
@@ -474,23 +485,51 @@ def _append_funding_notices(diagnostics_obj: SelectionDiagnostics) -> None:
 
 
 def _append_wired_notice(diagnostics_obj: SelectionDiagnostics) -> None:
+    """Name the pods that have not earned a tier, and say what that costs.
+
+    Two distinct facts, because they carry different weight: a research pod has
+    not passed the engine-contract checks at all, while a pm-ready pod has —
+    it simply is not connected to a live account.
+    """
     research_stem_list = [
         pod_view_dict["candidate"].stem_str
         for pod_view_dict in diagnostics_obj.pod_view_list
-        if not pod_view_dict["candidate"].is_wired_bool
+        if not pod_view_dict["candidate"].is_pm_ready_bool
     ]
-    if not research_stem_list:
-        return
-    diagnostics_obj.notice_list.append(
-        BuilderNotice(
-            severity_str=SEVERITY_INFO_STR,
-            title_str="Contains research pods",
-            detail_str=(
-                "Not wired for live: " + ", ".join(research_stem_list) + ". "
-                "Fine for research; label it before showing the book to anyone else."
-            ),
+    pm_ready_only_stem_list = [
+        pod_view_dict["candidate"].stem_str
+        for pod_view_dict in diagnostics_obj.pod_view_list
+        if pod_view_dict["candidate"].is_pm_ready_bool
+        and not pod_view_dict["candidate"].is_wired_bool
+    ]
+
+    if research_stem_list:
+        diagnostics_obj.notice_list.append(
+            BuilderNotice(
+                severity_str=SEVERITY_WARN_STR,
+                title_str="Contains research pods",
+                detail_str=(
+                    "Not promoted past research: "
+                    + ", ".join(research_stem_list)
+                    + ". These have not passed the engine-contract checks, so a "
+                    "fresh-run book cannot allocate to them and their figures "
+                    "carry no promotion evidence. Label the book before showing "
+                    "it to anyone else."
+                ),
+            )
         )
-    )
+    if pm_ready_only_stem_list:
+        diagnostics_obj.notice_list.append(
+            BuilderNotice(
+                severity_str=SEVERITY_INFO_STR,
+                title_str="Contains pm-ready pods",
+                detail_str=(
+                    "Portfolio-eligible but not wired for live: "
+                    + ", ".join(pm_ready_only_stem_list)
+                    + ". Fine in a book; not something you are trading today."
+                ),
+            )
+        )
 
 
 def _append_window_notices(

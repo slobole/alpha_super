@@ -60,6 +60,7 @@
     <div class="filter-bar" id="builder-filter-bar">
       <span class="filter-chip active" data-filter="all">All</span>
       <span class="filter-chip wired" data-filter="wired">★ Wired</span>
+      <span class="filter-chip" data-filter="pmready">PM-ready</span>
       <span class="filter-chip" data-filter="research">Research</span>
       <span class="filter-chip" data-filter="selected">Selected</span>
     </div>
@@ -89,6 +90,7 @@
           <tr class="builder-row"
               data-search="{{ c.search_text_str }}"
               data-wired="{{ '1' if c.is_wired_bool else '0' }}"
+              data-tier="{{ c.tier_int }}"
               data-name="{{ c.stem_str|lower }}"
               data-category="{{ c.category_label_str|lower }}"
               data-cagr="{{ c.ann_return_float if c.ann_return_float is not none else '' }}"
@@ -100,7 +102,7 @@
                        data-label="{{ c.display_name_str }}"></td>
             <td>
               <div><b>{{ c.display_name_str }}</b>
-                {% if c.is_wired_bool %}<span class="badge badge-wired">wired</span>{% endif %}
+                {% if c.is_wired_bool %}<span class="badge badge-wired">wired</span>{% elif c.is_pm_ready_bool %}<span class="badge badge-pmready">pm-ready</span>{% endif %}
               </div>
               <div class="mono muted-2">{{ c.stem_str }}</div>
             </td>
@@ -192,7 +194,10 @@
     }
 
     // ── filter + search ──────────────────────────────────────────────────
-    let wiredOnly = false, researchOnly = false, selectedOnly = false;
+    // Tier filters are exclusive of each other: a pod sits at exactly one tier,
+    // so stacking them would only ever produce an empty table.
+    let tierFilterStr = '', selectedOnly = false;
+    const TIER_BY_FILTER = { wired: '3', pmready: '2', research: '1' };
 
     function apply() {
       const query = searchInput.value.trim().toLowerCase();
@@ -200,33 +205,32 @@
       rowList.forEach(function (row) {
         const check = row.querySelector('.pod-check');
         let ok = true;
-        if (wiredOnly) ok = ok && row.dataset.wired === '1';
-        if (researchOnly) ok = ok && row.dataset.wired === '0';
+        if (tierFilterStr) ok = ok && row.dataset.tier === TIER_BY_FILTER[tierFilterStr];
         if (selectedOnly) ok = ok && check.checked;
         ok = ok && (!query || row.dataset.search.indexOf(query) !== -1);
         row.classList.toggle('hidden', !ok);
         if (ok) visible++;
       });
       noResults.classList.toggle('hidden', visible !== 0);
-      allChip.classList.toggle('active', !wiredOnly && !researchOnly && !selectedOnly);
+      allChip.classList.toggle('active', !tierFilterStr && !selectedOnly);
     }
 
     chipList.forEach(function (chip) {
       chip.addEventListener('click', function () {
         const filter = chip.dataset.filter;
         if (filter === 'all') {
-          wiredOnly = researchOnly = selectedOnly = false;
-          chipList.forEach(function (c) { c.classList.remove('active'); });
+          tierFilterStr = '';
+          selectedOnly = false;
+        } else if (filter === 'selected') {
+          selectedOnly = !selectedOnly;
         } else {
-          if (filter === 'wired') { wiredOnly = !wiredOnly; if (wiredOnly) researchOnly = false; }
-          if (filter === 'research') { researchOnly = !researchOnly; if (researchOnly) wiredOnly = false; }
-          if (filter === 'selected') { selectedOnly = !selectedOnly; }
-          chipList.forEach(function (c) {
-            const f = c.dataset.filter;
-            c.classList.toggle('active',
-              (f === 'wired' && wiredOnly) || (f === 'research' && researchOnly) || (f === 'selected' && selectedOnly));
-          });
+          tierFilterStr = tierFilterStr === filter ? '' : filter;
         }
+        chipList.forEach(function (c) {
+          const f = c.dataset.filter;
+          if (f === 'all') return;
+          c.classList.toggle('active', f === tierFilterStr || (f === 'selected' && selectedOnly));
+        });
         apply();
       });
     });

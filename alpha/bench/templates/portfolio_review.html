@@ -85,6 +85,7 @@
             <td>
               <div><b>{{ pod.candidate.display_name_str }}</b>
                 {% if pod.candidate.is_wired_bool %}<span class="badge badge-wired">wired</span>
+                {% elif pod.candidate.is_pm_ready_bool %}<span class="badge badge-pmready">pm-ready</span>
                 {% else %}<span class="badge badge-cat">research</span>{% endif %}
               </div>
               <div class="mono muted-2">{{ pod.candidate.stem_str }}</div>

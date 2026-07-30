@@ -28,6 +28,7 @@ from alpha.engine.report import (
     save_results as save_strategy_results,
 )
 from alpha.engine.strategy import Strategy
+from alpha import strategy_registry
 from data.norgate_loader import (
     INDEX_TOTALRETURN_DATA_SYMBOL_MAP_DICT,
     TOTALRETURN_ADJUSTMENT_STR,
@@ -35,18 +36,11 @@ from data.norgate_loader import (
 )
 
 
-SUPPORTED_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = (
-    "strategies.dv2.strategy_mr_dv2:DVO2Strategy",
-    "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy",
-    "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash",
-    "strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash",
-    "strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash",
-    "strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy",
-    "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy",
-    "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc",
-    "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc_asset_sma200",
-    "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_asset_sma200",
-)
+# Derived, not maintained here: a book may allocate to anything pm-ready or
+# above, so a strategy wired for live is portfolio-eligible by construction.
+# Hand-keeping this list is what let two wired HPI strategies be refused by the
+# portfolio engine while trading real money. See alpha.strategy_registry.
+SUPPORTED_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = strategy_registry.pm_ready_import_tuple()
 POD_MINIMUM_ALLOCATED_CAPITAL_FLOAT_DICT: dict[str, float] = {
     "strategies.dv2.strategy_mr_dv2:DVO2Strategy": 25_000.0,
     "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy": 25_000.0,
