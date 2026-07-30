@@ -58,7 +58,11 @@ from alpha.engine.backtest import run_daily
 from alpha.engine.report import save_results
 from alpha.engine.strategy import Strategy
 from alpha.indicators import ibs_indicator
-from data.norgate_loader import load_raw_prices
+from data.norgate_loader import (
+    INDEX_TOTALRETURN_DATA_SYMBOL_MAP_DICT,
+    TOTALRETURN_ADJUSTMENT_STR,
+    load_raw_prices,
+)
 
 
 def default_trade_id_int() -> int:
@@ -501,7 +505,16 @@ class SectorDispersionIbsStrategy(Strategy):
             slippage=config_obj.slippage_float,
             commission_per_share=config_obj.commission_per_share_float,
             commission_minimum=config_obj.commission_minimum_float,
+            performance_benchmark_adjustment_str=TOTALRETURN_ADJUSTMENT_STR,
         )
+        # Report-only provenance: benchmark metrics keep the familiar label
+        # while reading the total-return series the loader stored for it.
+        self._benchmark_data_symbol_map_dict = {
+            str(benchmark_str): INDEX_TOTALRETURN_DATA_SYMBOL_MAP_DICT.get(
+                str(benchmark_str), str(benchmark_str)
+            )
+            for benchmark_str in benchmarks
+        }
         self.config_obj = config_obj
         self.symbol_tuple = tuple(config_obj.symbol_tuple)
         self.trade_id_int = 0
@@ -573,9 +586,17 @@ class SectorDispersionIbsStrategy(Strategy):
 def get_sector_dispersion_ibs_data(
     config_obj: SectorDispersionIbsConfig = DEFAULT_CONFIG,
 ) -> pd.DataFrame:
+    # *** CRITICAL*** Norgate's TOTALRETURN adjustment back-adjusts dividends
+    # on stocks and ETFs but does nothing on an index symbol, so loading '$SPX'
+    # returns the PRICE index. The genuine total-return index is a separate
+    # data symbol; the report keeps the familiar label via the strategy's
+    # benchmark data-symbol map.
+    benchmark_data_symbol_str = INDEX_TOTALRETURN_DATA_SYMBOL_MAP_DICT.get(
+        config_obj.benchmark_symbol_str, config_obj.benchmark_symbol_str
+    )
     pricing_data_df = load_raw_prices(
         symbols=list(config_obj.symbol_tuple),
-        benchmarks=[config_obj.benchmark_symbol_str],
+        benchmarks=[benchmark_data_symbol_str],
         start_date=config_obj.history_start_date_str,
         end_date=config_obj.end_date_str,
     )
@@ -585,7 +606,7 @@ def get_sector_dispersion_ibs_data(
         for symbol_str in config_obj.symbol_tuple
         for field_str in ("Open", "High", "Low", "Close")
     ]
-    required_column_list.append((config_obj.benchmark_symbol_str, "Close"))
+    required_column_list.append((benchmark_data_symbol_str, "Close"))
     missing_column_list = [
         column_tuple for column_tuple in required_column_list if column_tuple not in pricing_data_df.columns
     ]
