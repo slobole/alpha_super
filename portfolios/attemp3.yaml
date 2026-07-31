@@ -1,0 +1,10 @@
+name: attemp3
+capital: 100000
+benchmark: $SPX
+
+pods:
+  - strategy: strategy_mo_atr_normalized_ndx_vxn_scaled
+    weight: 0.5
+
+  - strategy: strategy_taa_df_btal_fallback_tqqq_vix_cash
+    weight: 0.5

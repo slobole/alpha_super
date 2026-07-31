@@ -343,8 +343,6 @@ def test_config_defaults_pm_performance_benchmark_to_spx():
 @pytest.mark.parametrize(
     'config_path_str',
     [
-        'portfolios/current_book_fresh.yaml',
-        'portfolios/current_multipod_all.yaml',
         'portfolios/current_multipod_all_aggresive.yaml',
         'portfolios/current_multipod_all_aggressive_yearly_inverse_volatility.yaml',
         'portfolios/current_multipod_all_aggressive_yearly_rebalanced.yaml',
@@ -353,7 +351,11 @@ def test_config_defaults_pm_performance_benchmark_to_spx():
         'portfolios/current_multipod_yearly_rebalanced.yaml',
         'portfolios/multipod_low_risk.yaml',
         'portfolios/multipod_monthly.yaml',
-        'portfolios/current_book.yaml',
+        'portfolios/ladder_3_growth.yaml',
+        'portfolios/ladder_3b_growth_2x.yaml',
+        'portfolios/ladder_3c_growth_2x_btal.yaml',
+        'portfolios/ladder_1_defensive.yaml',
+        'portfolios/ladder_2_balanced.yaml',
         'portfolios/multipod.yaml',
     ],
 )

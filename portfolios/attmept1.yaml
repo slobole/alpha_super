@@ -1,0 +1,13 @@
+name: attmept1
+capital: 120000
+benchmark: $SPX
+
+pods:
+  - strategy: strategy_mo_atr_normalized_ndx_vxn_scaled
+    weight: 0.3334
+
+  - strategy: strategy_taa_df_btal_fallback_tqqq_vix_cash
+    weight: 0.3333
+
+  - strategy: strategy_mr_hpi_sp500_2_3_5_vote
+    weight: 0.3333

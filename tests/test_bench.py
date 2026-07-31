@@ -134,7 +134,7 @@ def test_catalog_lists_strategies_and_flags_wired():
         for entry_obj in strategy_entry_list
         if entry_obj.has_capacity_analysis_bool
     ]
-    assert len(capacity_entry_list) == 20
+    assert len(capacity_entry_list) == 31
     assert (
         "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi"
         in {entry_obj.module_import_str for entry_obj in capacity_entry_list}
@@ -194,9 +194,9 @@ def test_catalog_parses_both_portfolio_schemas():
     assert simple_entry.schema_str == catalog.SCHEMA_SIMPLE_STR
     assert len(simple_entry.pod_tuple) > 0
 
-    manager_entry = portfolio_by_name["current_multipod_all"]
+    manager_entry = portfolio_by_name["ladder_3_growth"]
     assert manager_entry.schema_str == catalog.SCHEMA_MANAGER_STR
-    assert manager_entry.capital_float == pytest.approx(200000.0)
+    assert manager_entry.capital_float == pytest.approx(150000.0)
     assert len(manager_entry.pod_tuple) == 4
 
 
@@ -886,7 +886,7 @@ def test_portfolio_api_routes_by_schema(recording_client):
 
     client.post(
         "/api/run-portfolio",
-        data={"csrf_token": token_str, "config_rel_path": "portfolios/current_multipod_all.yaml"},
+        data={"csrf_token": token_str, "config_rel_path": "portfolios/ladder_3_growth.yaml"},
     )
     assert job_manager.call_list[-1][2][1].endswith("run_portfolio_manager.py")
 

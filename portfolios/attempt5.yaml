@@ -1,0 +1,10 @@
+name: attempt5
+capital: 100000
+benchmark: $SPX
+
+pods:
+  - strategy: strategy_mo_atr_normalized_sector_vox_iyr
+    weight: 0.5
+
+  - strategy: strategy_mr_us_sector_etf_ibs_downshock_vox_iyr
+    weight: 0.5
