@@ -4,6 +4,7 @@ import importlib
 import os
 import sys
 import unittest
+from dataclasses import asdict
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,6 +21,86 @@ from strategies.taa_df.run_taa_df_fallback_vix_cash_variant_suite import _varian
 from strategies.taa_df.strategy_taa_df import DefenseFirstConfig
 import strategies.taa_df.strategy_taa_df_btal_fallback_upro_vix_cash as reference_vix_module
 import strategies.taa_df.strategy_taa_df_fallback_vix_cash_variant_utils as shared_vix_helper
+
+
+LEVERAGE_TWO_VARIANT_CASE_TUPLE = (
+    (
+        "strategies.taa_df.strategy_taa_df_fallback_sso_vix_cash",
+        "strategies.taa_df.strategy_taa_df_fallback_tqqq_vix_cash",
+        "SSO",
+        ("GLD", "UUP", "TLT", "DBC"),
+        (0.40, 0.30, 0.20, 0.10),
+        "2006-06-21",
+    ),
+    (
+        "strategies.taa_df.strategy_taa_df_fallback_qld_vix_cash",
+        "strategies.taa_df.strategy_taa_df_fallback_tqqq_vix_cash",
+        "QLD",
+        ("GLD", "UUP", "TLT", "DBC"),
+        (0.40, 0.30, 0.20, 0.10),
+        "2006-06-21",
+    ),
+    (
+        "strategies.taa_df.strategy_taa_df_btal_1n_fallback_sso_vix_cash",
+        "strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash",
+        "SSO",
+        ("GLD", "UUP", "TLT", "DBC", "BTAL"),
+        (0.20, 0.20, 0.20, 0.20, 0.20),
+        "2011-09-13",
+    ),
+    (
+        "strategies.taa_df.strategy_taa_df_btal_1n_fallback_qld_vix_cash",
+        "strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash",
+        "QLD",
+        ("GLD", "UUP", "TLT", "DBC", "BTAL"),
+        (0.20, 0.20, 0.20, 0.20, 0.20),
+        "2011-09-13",
+    ),
+)
+
+
+NO_BTAL_VARIANT_CASE_TUPLE = (
+    (
+        "strategies.taa_df.strategy_taa_df_1n_fallback_sso_vix_cash",
+        "get_defense_first_data",
+        False,
+        "SSO",
+        (0.25, 0.25, 0.25, 0.25),
+        "2006-06-21",
+    ),
+    (
+        "strategies.taa_df.strategy_taa_df_1n_fallback_qld_vix_cash",
+        "get_defense_first_data",
+        False,
+        "QLD",
+        (0.25, 0.25, 0.25, 0.25),
+        "2006-06-21",
+    ),
+    (
+        "strategies.taa_df.strategy_taa_df_1n_fallback_tqqq_vix_cash",
+        "get_defense_first_data",
+        False,
+        "TQQQ",
+        (0.25, 0.25, 0.25, 0.25),
+        "2010-02-11",
+    ),
+    (
+        "strategies.taa_df.strategy_taa_df_fallback_tqqq_vix_cash",
+        "get_defense_first_data",
+        False,
+        "TQQQ",
+        (0.40, 0.30, 0.20, 0.10),
+        "2010-02-11",
+    ),
+    (
+        "strategies.taa_df.strategy_taa_df_linearity_1n_fallback_qqq_vix_cash",
+        "get_defense_first_linearity_1n_data",
+        True,
+        "QQQ",
+        (0.25, 0.25, 0.25, 0.25),
+        "2000-01-01",
+    ),
+)
 
 
 def make_execution_price_df(symbol_list: list[str]) -> pd.DataFrame:
@@ -449,6 +530,319 @@ class DefenseFirstFallbackVixCashVariantTests(unittest.TestCase):
         self.assertEqual(strategy_obj.name, "strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash")
         self.assertIn(pd.Timestamp("2020-01-31"), strategy_obj.rebalance_weight_df.index)
         self.assertTrue(hasattr(strategy_obj, "daily_target_weights"))
+
+    def test_leverage_two_variant_configs_change_only_requested_fallback(self):
+        for (
+            module_name_str,
+            parent_module_name_str,
+            expected_fallback_asset_str,
+            expected_defensive_asset_tuple,
+            expected_rank_weight_tuple,
+            expected_start_date_str,
+        ) in LEVERAGE_TWO_VARIANT_CASE_TUPLE:
+            with self.subTest(module_name_str=module_name_str):
+                variant_module = importlib.import_module(module_name_str)
+                parent_module = importlib.import_module(
+                    parent_module_name_str
+                )
+                config_obj = variant_module.DEFAULT_CONFIG
+
+                self.assertEqual(
+                    config_obj.fallback_asset,
+                    expected_fallback_asset_str,
+                )
+                self.assertEqual(
+                    config_obj.defensive_asset_list,
+                    expected_defensive_asset_tuple,
+                )
+                self.assertEqual(
+                    config_obj.rank_weight_vec,
+                    expected_rank_weight_tuple,
+                )
+                self.assertEqual(
+                    config_obj.start_date_str,
+                    expected_start_date_str,
+                )
+                self.assertEqual(
+                    config_obj.momentum_lookback_month_vec,
+                    (1, 3, 6, 12),
+                )
+                variant_config_dict = asdict(config_obj)
+                parent_config_dict = asdict(parent_module.DEFAULT_CONFIG)
+                for changed_field_str in (
+                    "fallback_asset",
+                    "start_date_str",
+                ):
+                    variant_config_dict.pop(changed_field_str)
+                    parent_config_dict.pop(changed_field_str)
+                self.assertEqual(
+                    variant_config_dict,
+                    parent_config_dict,
+                )
+
+    def test_leverage_two_variants_smoke_and_honor_manager_run_contract(self):
+        for (
+            module_name_str,
+            _parent_module_name_str,
+            _expected_fallback_asset_str,
+            _expected_defensive_asset_tuple,
+            _expected_rank_weight_tuple,
+            _expected_start_date_str,
+        ) in LEVERAGE_TWO_VARIANT_CASE_TUPLE:
+            with self.subTest(module_name_str=module_name_str):
+                variant_module = importlib.import_module(module_name_str)
+                captured_config_list: list[DefenseFirstConfig] = []
+
+                def loader_side_effect_fn(config_obj: DefenseFirstConfig):
+                    captured_config_list.append(config_obj)
+                    return make_standard_loader_output(config_obj)
+
+                execution_price_df = make_standard_loader_output(
+                    variant_module.DEFAULT_CONFIG
+                )[0]
+                with patch.object(
+                    variant_module,
+                    "get_defense_first_data",
+                    side_effect=loader_side_effect_fn,
+                ):
+                    with patch.object(
+                        shared_vix_helper,
+                        "load_helper_close_ser",
+                        side_effect=make_helper_close_ser_side_effect(
+                            execution_price_df.index
+                        ),
+                    ):
+                        strategy_obj = variant_module.run_variant(
+                            show_display_bool=False,
+                            save_results_bool=False,
+                            backtest_start_date_str="2020-03-02",
+                            capital_base_float=12345.0,
+                            end_date_str="2020-03-31",
+                        )
+
+                self.assertEqual(
+                    captured_config_list[0].end_date_str,
+                    "2020-03-31",
+                )
+                self.assertAlmostEqual(
+                    strategy_obj._capital_base,
+                    12345.0,
+                )
+                self.assertGreaterEqual(
+                    strategy_obj.results.index.min(),
+                    pd.Timestamp("2020-03-02"),
+                )
+
+    def test_leverage_two_variants_expose_analysis_hooks(self):
+        for (
+            module_name_str,
+            _parent_module_name_str,
+            _expected_fallback_asset_str,
+            _expected_defensive_asset_tuple,
+            _expected_rank_weight_tuple,
+            _expected_start_date_str,
+        ) in LEVERAGE_TWO_VARIANT_CASE_TUPLE:
+            with self.subTest(module_name_str=module_name_str):
+                variant_module = importlib.import_module(module_name_str)
+                base_loader_output = make_standard_loader_output(
+                    variant_module.DEFAULT_CONFIG
+                )
+                execution_price_df = base_loader_output[0]
+
+                with patch.object(
+                    variant_module,
+                    "get_defense_first_data",
+                    return_value=base_loader_output,
+                ):
+                    with patch.object(
+                        shared_vix_helper,
+                        "load_helper_close_ser",
+                        side_effect=make_helper_close_ser_side_effect(
+                            execution_price_df.index
+                        ),
+                    ):
+                        timing_input_dict = (
+                            variant_module.build_execution_timing_analysis_inputs()
+                        )
+                        capacity_input_dict = (
+                            variant_module.build_capacity_analysis_inputs(
+                                capital_base_float=12345.0
+                            )
+                        )
+
+                self.assertEqual(
+                    timing_input_dict["order_generation_mode_str"],
+                    "signal_bar",
+                )
+                self.assertEqual(
+                    timing_input_dict["default_entry_timing_str"],
+                    "next_open",
+                )
+                self.assertEqual(
+                    timing_input_dict["default_exit_timing_str"],
+                    "next_open",
+                )
+                self.assertEqual(
+                    capacity_input_dict["execution_policy_str"],
+                    "MOO",
+                )
+                self.assertEqual(
+                    capacity_input_dict["impact_profile_str"],
+                    "MOO_ETF_PROXY",
+                )
+                self.assertEqual(
+                    capacity_input_dict["strategy_obj"].name,
+                    variant_module.STRATEGY_NAME_STR,
+                )
+                self.assertAlmostEqual(
+                    capacity_input_dict["strategy_obj"]._capital_base,
+                    12345.0,
+                )
+
+    def test_no_btal_variant_configs_remove_btal_and_preserve_variant_rules(self):
+        expected_defensive_asset_tuple = ("GLD", "UUP", "TLT", "DBC")
+
+        for (
+            module_name_str,
+            _loader_attr_str,
+            _linearity_bool,
+            expected_fallback_asset_str,
+            expected_rank_weight_tuple,
+            expected_start_date_str,
+        ) in NO_BTAL_VARIANT_CASE_TUPLE:
+            with self.subTest(module_name_str=module_name_str):
+                variant_module = importlib.import_module(module_name_str)
+                config_obj = variant_module.DEFAULT_CONFIG
+
+                self.assertEqual(config_obj.defensive_asset_list, expected_defensive_asset_tuple)
+                self.assertEqual(config_obj.fallback_asset, expected_fallback_asset_str)
+                self.assertEqual(config_obj.rank_weight_vec, expected_rank_weight_tuple)
+                self.assertEqual(config_obj.start_date_str, expected_start_date_str)
+                self.assertNotIn("BTAL", config_obj.tradeable_asset_list)
+
+    def test_no_btal_1n_leverage_two_variants_change_only_requested_fallback(self):
+        parent_module = importlib.import_module(
+            "strategies.taa_df.strategy_taa_df_1n_fallback_tqqq_vix_cash"
+        )
+
+        for module_name_str in (
+            "strategies.taa_df.strategy_taa_df_1n_fallback_sso_vix_cash",
+            "strategies.taa_df.strategy_taa_df_1n_fallback_qld_vix_cash",
+        ):
+            with self.subTest(module_name_str=module_name_str):
+                variant_module = importlib.import_module(module_name_str)
+                variant_config_dict = asdict(variant_module.DEFAULT_CONFIG)
+                parent_config_dict = asdict(parent_module.DEFAULT_CONFIG)
+
+                for changed_field_str in ("fallback_asset", "start_date_str"):
+                    variant_config_dict.pop(changed_field_str)
+                    parent_config_dict.pop(changed_field_str)
+
+                self.assertEqual(variant_config_dict, parent_config_dict)
+
+    def test_no_btal_variants_smoke(self):
+        for (
+            module_name_str,
+            loader_attr_str,
+            linearity_bool,
+            _expected_fallback_asset_str,
+            _expected_rank_weight_tuple,
+            _expected_start_date_str,
+        ) in NO_BTAL_VARIANT_CASE_TUPLE:
+            with self.subTest(module_name_str=module_name_str):
+                self._run_smoke_variant(
+                    module_name_str=module_name_str,
+                    loader_attr_str=loader_attr_str,
+                    lineary_bool=linearity_bool,
+                )
+
+    def test_no_btal_variants_honor_manager_run_contract(self):
+        for (
+            module_name_str,
+            loader_attr_str,
+            linearity_bool,
+            _expected_fallback_asset_str,
+            _expected_rank_weight_tuple,
+            _expected_start_date_str,
+        ) in NO_BTAL_VARIANT_CASE_TUPLE:
+            with self.subTest(module_name_str=module_name_str):
+                variant_module = importlib.import_module(module_name_str)
+                captured_config_list: list[DefenseFirstConfig] = []
+
+                if linearity_bool:
+                    base_loader_output = make_linearity_loader_output(variant_module.DEFAULT_CONFIG)
+
+                    def loader_side_effect_fn(config_obj: DefenseFirstConfig):
+                        captured_config_list.append(config_obj)
+                        return make_linearity_loader_output(config_obj)
+
+                else:
+                    base_loader_output = make_standard_loader_output(variant_module.DEFAULT_CONFIG)
+
+                    def loader_side_effect_fn(config_obj: DefenseFirstConfig):
+                        captured_config_list.append(config_obj)
+                        return make_standard_loader_output(config_obj)
+
+                execution_price_df = base_loader_output[0]
+                with patch.object(
+                    variant_module,
+                    loader_attr_str,
+                    side_effect=loader_side_effect_fn,
+                ):
+                    with patch.object(
+                        shared_vix_helper,
+                        "load_helper_close_ser",
+                        side_effect=make_helper_close_ser_side_effect(execution_price_df.index),
+                    ):
+                        strategy_obj = variant_module.run_variant(
+                            show_display_bool=False,
+                            save_results_bool=False,
+                            backtest_start_date_str="2020-03-02",
+                            capital_base_float=12345.0,
+                            end_date_str="2020-03-31",
+                        )
+
+                self.assertEqual(captured_config_list[0].end_date_str, "2020-03-31")
+                self.assertAlmostEqual(strategy_obj._capital_base, 12345.0)
+                self.assertGreaterEqual(strategy_obj.results.index.min(), pd.Timestamp("2020-03-02"))
+
+    def test_no_btal_variants_expose_next_open_execution_timing_hook(self):
+        for (
+            module_name_str,
+            loader_attr_str,
+            linearity_bool,
+            _expected_fallback_asset_str,
+            _expected_rank_weight_tuple,
+            _expected_start_date_str,
+        ) in NO_BTAL_VARIANT_CASE_TUPLE:
+            with self.subTest(module_name_str=module_name_str):
+                variant_module = importlib.import_module(module_name_str)
+                if linearity_bool:
+                    base_loader_output = make_linearity_loader_output(variant_module.DEFAULT_CONFIG)
+                else:
+                    base_loader_output = make_standard_loader_output(variant_module.DEFAULT_CONFIG)
+                execution_price_df = base_loader_output[0]
+
+                with patch.object(
+                    variant_module,
+                    loader_attr_str,
+                    return_value=base_loader_output,
+                ):
+                    with patch.object(
+                        shared_vix_helper,
+                        "load_helper_close_ser",
+                        side_effect=make_helper_close_ser_side_effect(execution_price_df.index),
+                    ):
+                        strategy_input_dict = variant_module.build_execution_timing_analysis_inputs()
+
+                self.assertEqual(strategy_input_dict["order_generation_mode_str"], "signal_bar")
+                self.assertEqual(strategy_input_dict["risk_model_str"], "taa_rebalance")
+                self.assertEqual(strategy_input_dict["default_entry_timing_str"], "next_open")
+                self.assertEqual(strategy_input_dict["default_exit_timing_str"], "next_open")
+
+                strategy_obj = strategy_input_dict["strategy_factory_fn"]()
+                self.assertEqual(strategy_obj.name, variant_module.STRATEGY_NAME_STR)
+                self.assertNotIn("BTAL", strategy_obj.tradeable_asset_list)
 
 
 if __name__ == "__main__":

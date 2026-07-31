@@ -1,17 +1,23 @@
 """
-Defense First no-BTAL fallback-TQQQ variant with a month-end VRP cash gate.
+Defense First no-BTAL 1/n fallback-TQQQ variant with a month-end VRP cash gate.
 
 This is the no-BTAL counterpart of
-`strategy_taa_df_btal_fallback_tqqq_vix_cash`.
+`strategy_taa_df_btal_1n_fallback_tqqq_vix_cash`.
 
-Only intended defensive-basket change:
+Only intended defensive-basket and slot-size changes:
 
     old defensive assets = ("GLD", "UUP", "TLT", "DBC", "BTAL")
     new defensive assets = ("GLD", "UUP", "TLT", "DBC")
 
-The original no-BTAL rank weights remain:
+    old slot weight = 1 / 5 = 0.20
+    new slot weight = 1 / 4 = 0.25
 
-    rank_weight_vec = (0.40, 0.30, 0.20, 0.10)
+For each defensive asset i at month-end m:
+
+    if momentum_score_{i,m} > cash_return_m:
+        w_{i,m} = 0.25
+    else:
+        w_{TQQQ,m} += 0.25
 
 Fallback overlay:
     if rv20_m < VIX_m:
@@ -28,27 +34,49 @@ from __future__ import annotations
 from dataclasses import replace
 
 try:
-    from strategies.taa_df.strategy_taa_df import get_defense_first_data
-    from strategies.taa_df.strategy_taa_df_fallback_tqqq import DEFAULT_CONFIG as BASE_CONFIG
+    from strategies.taa_df.strategy_taa_df import (
+        DEFAULT_CONFIG as TAA_BASE_CONFIG,
+        get_defense_first_data,
+    )
+    from strategies.taa_df.strategy_taa_df_fallback_variant_utils import (
+        build_fallback_variant_config,
+    )
     from strategies.taa_df.strategy_taa_df_fallback_vix_cash_variant_utils import (
-        build_vix_cash_variant_config,
         build_standard_fallback_vix_cash_capacity_analysis_inputs,
         build_standard_fallback_vix_cash_execution_timing_analysis_inputs,
+        build_vix_cash_variant_config,
         run_standard_fallback_vix_cash_variant,
     )
 except ModuleNotFoundError:
-    from strategy_taa_df import get_defense_first_data
-    from strategy_taa_df_fallback_tqqq import DEFAULT_CONFIG as BASE_CONFIG
+    from strategy_taa_df import (
+        DEFAULT_CONFIG as TAA_BASE_CONFIG,
+        get_defense_first_data,
+    )
+    from strategy_taa_df_fallback_variant_utils import (
+        build_fallback_variant_config,
+    )
     from strategy_taa_df_fallback_vix_cash_variant_utils import (
-        build_vix_cash_variant_config,
         build_standard_fallback_vix_cash_capacity_analysis_inputs,
         build_standard_fallback_vix_cash_execution_timing_analysis_inputs,
+        build_vix_cash_variant_config,
         run_standard_fallback_vix_cash_variant,
     )
 
 
-STRATEGY_NAME_STR = "strategy_taa_df_fallback_tqqq_vix_cash"
-DEFAULT_CONFIG = build_vix_cash_variant_config(BASE_CONFIG)
+STRATEGY_NAME_STR = "strategy_taa_df_1n_fallback_tqqq_vix_cash"
+NO_BTAL_DEFENSIVE_ASSET_TUPLE = ("GLD", "UUP", "TLT", "DBC")
+NO_BTAL_1N_RANK_WEIGHT_TUPLE = (0.25, 0.25, 0.25, 0.25)
+
+NO_BTAL_1N_CONFIG = replace(
+    TAA_BASE_CONFIG,
+    defensive_asset_list=NO_BTAL_DEFENSIVE_ASSET_TUPLE,
+    rank_weight_vec=NO_BTAL_1N_RANK_WEIGHT_TUPLE,
+)
+TQQQ_FALLBACK_CONFIG = build_fallback_variant_config(
+    NO_BTAL_1N_CONFIG,
+    "TQQQ",
+)
+DEFAULT_CONFIG = build_vix_cash_variant_config(TQQQ_FALLBACK_CONFIG)
 
 
 def run_variant(
