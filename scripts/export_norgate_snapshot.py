@@ -18,6 +18,8 @@ if repo_root_str not in sys.path:
 
 from data.norgate_snapshot_store import (
     CAPITALSPECIAL_ADJUSTMENT_STR,
+    HPI_SP500_DATA_CONTRACT_DICT,
+    HPI_SP500_PROFILE_STR,
     SNAPSHOT_SCHEMA_VERSION_INT,
     TOTALRETURN_ADJUSTMENT_STR,
     write_snapshot_files,
@@ -30,12 +32,20 @@ class NorgateExportProfileSpec:
     capital_symbol_tuple: tuple[str, ...] = ()
     total_return_symbol_tuple: tuple[str, ...] = ()
     helper_symbol_tuple: tuple[str, ...] = ()
+    padding_type_name_str: str = "ALLMARKETDAYS"
+    trim_past_member_tail_bool: bool = True
 
 
 PROFILE_EXPORT_SPEC_DICT: dict[str, NorgateExportProfileSpec] = {
     "norgate_eod_sp500_pit": NorgateExportProfileSpec(
         indexname_str="S&P 500",
         total_return_symbol_tuple=("$SPX",),
+    ),
+    HPI_SP500_PROFILE_STR: NorgateExportProfileSpec(
+        indexname_str="S&P 500",
+        total_return_symbol_tuple=("$SPX", "$SPXTR"),
+        padding_type_name_str="NONE",
+        trim_past_member_tail_bool=False,
     ),
     "norgate_eod_etf_plus_vix_helper": NorgateExportProfileSpec(
         capital_symbol_tuple=("GLD", "UUP", "TLT", "DBC", "BTAL", "SPY", "QQQ", "TQQQ"),
@@ -56,7 +66,7 @@ PROFILE_EXPORT_SPEC_DICT: dict[str, NorgateExportProfileSpec] = {
 }
 
 SUPPORTED_EOD_PROFILE_TUPLE: tuple[str, ...] = tuple(PROFILE_EXPORT_SPEC_DICT.keys())
-NON_DISTRIBUTING_INDEX_SYMBOL_SET = {"$SPX", "$VIX", "$VXN"}
+NON_DISTRIBUTING_INDEX_SYMBOL_SET = {"$SPX", "$SPXTR", "$VIX", "$VXN"}
 
 
 def _load_direct_norgate_module():
@@ -83,7 +93,11 @@ def _latest_norgate_session_date_str() -> str:
     return pd.Timestamp(heartbeat_df.index[-1]).date().isoformat()
 
 
-def _load_index_constituent_matrix_df(indexname_str: str) -> tuple[list[str], pd.DataFrame]:
+def _load_index_constituent_matrix_df(
+    indexname_str: str,
+    *,
+    trim_past_member_tail_bool: bool = True,
+) -> tuple[list[str], pd.DataFrame]:
     norgatedata_module = _load_direct_norgate_module()
     symbol_list = norgatedata_module.watchlist_symbols(f"{indexname_str} Current & Past")
     calendar_index = norgatedata_module.price_timeseries("$SPX", timeseriesformat="pandas-dataframe").index
@@ -100,7 +114,10 @@ def _load_index_constituent_matrix_df(indexname_str: str) -> tuple[list[str], pd
             continue
         constituent_df = constituent_df.rename(columns={"Index Constituent": symbol_str})
         constituent_df = constituent_df.loc[constituent_df[symbol_str] == 1]
-        if last_trading_day_ts != constituent_df.index[-1]:
+        if (
+            trim_past_member_tail_bool
+            and last_trading_day_ts != constituent_df.index[-1]
+        ):
             constituent_df = constituent_df.iloc[:-5]
         universe_frame_list.append(constituent_df)
 
@@ -123,12 +140,17 @@ def _load_price_frame_df(
     adjustment_str: str,
     start_date_str: str,
     end_date_str: str,
+    padding_type_name_str: str = "ALLMARKETDAYS",
 ) -> pd.DataFrame:
     norgatedata_module = _load_direct_norgate_module()
+    padding_type_obj = getattr(
+        norgatedata_module.PaddingType,
+        padding_type_name_str,
+    )
     raw_price_df = norgatedata_module.price_timeseries(
         symbol_str,
         stock_price_adjustment_setting=_adjustment_type_obj(adjustment_str),
-        padding_setting=norgatedata_module.PaddingType.ALLMARKETDAYS,
+        padding_setting=padding_type_obj,
         start_date=start_date_str,
         end_date=end_date_str,
         timeseriesformat="pandas-dataframe",
@@ -156,6 +178,7 @@ def _build_price_snapshot_df(
     total_return_symbol_list: Iterable[str],
     start_date_str: str,
     end_date_str: str,
+    padding_type_name_str: str = "ALLMARKETDAYS",
 ) -> pd.DataFrame:
     price_frame_list: list[pd.DataFrame] = []
     for symbol_str in tqdm(list(dict.fromkeys(capital_symbol_list)), desc="exporting CAPITALSPECIAL prices"):
@@ -165,6 +188,7 @@ def _build_price_snapshot_df(
                 adjustment_str=CAPITALSPECIAL_ADJUSTMENT_STR,
                 start_date_str=start_date_str,
                 end_date_str=end_date_str,
+                padding_type_name_str=padding_type_name_str,
             )
         )
     for symbol_str in tqdm(list(dict.fromkeys(total_return_symbol_list)), desc="exporting TOTALRETURN prices"):
@@ -174,6 +198,7 @@ def _build_price_snapshot_df(
                 adjustment_str=TOTALRETURN_ADJUSTMENT_STR,
                 start_date_str=start_date_str,
                 end_date_str=end_date_str,
+                padding_type_name_str=padding_type_name_str,
             )
         )
     if len(price_frame_list) == 0:
@@ -216,7 +241,12 @@ def _export_profile_to_root_path(
     universe_df: pd.DataFrame | None = None
     pit_symbol_list: list[str] = []
     if profile_spec_obj.indexname_str is not None:
-        pit_symbol_list, universe_df = _load_index_constituent_matrix_df(profile_spec_obj.indexname_str)
+        pit_symbol_list, universe_df = _load_index_constituent_matrix_df(
+            profile_spec_obj.indexname_str,
+            trim_past_member_tail_bool=(
+                profile_spec_obj.trim_past_member_tail_bool
+            ),
+        )
 
     symbol_list = list(dict.fromkeys(pit_symbol_list + list(profile_spec_obj.capital_symbol_tuple)))
     helper_symbol_list = list(profile_spec_obj.helper_symbol_tuple)
@@ -226,6 +256,7 @@ def _export_profile_to_root_path(
         total_return_symbol_list=benchmark_symbol_list,
         start_date_str=start_date_str,
         end_date_str=end_date_str,
+        padding_type_name_str=profile_spec_obj.padding_type_name_str,
     )
 
     required_symbol_list = list(dict.fromkeys(symbol_list + benchmark_symbol_list))
@@ -233,6 +264,23 @@ def _export_profile_to_root_path(
         capital_symbol_list=symbol_list + helper_symbol_list,
         total_return_symbol_list=benchmark_symbol_list,
     )
+    data_contract_dict = {
+        "price_padding_setting_str": (
+            profile_spec_obj.padding_type_name_str
+        ),
+        "past_member_tail_policy_str": (
+            "trim_last_5"
+            if profile_spec_obj.trim_past_member_tail_bool
+            else "exact"
+        ),
+    }
+    if (
+        profile_str == HPI_SP500_PROFILE_STR
+        and data_contract_dict != HPI_SP500_DATA_CONTRACT_DICT
+    ):
+        raise RuntimeError(
+            "HPI snapshot export contract drifted from the strict HPI data contract."
+        )
     return write_snapshot_files(
         snapshot_root_str=snapshot_root_str,
         profile_str=profile_str,
@@ -242,6 +290,7 @@ def _export_profile_to_root_path(
         required_symbol_list=required_symbol_list,
         required_helper_symbol_list=helper_symbol_list,
         adjustment_mode_map_dict=adjustment_mode_map_dict,
+        data_contract_dict=data_contract_dict,
         overwrite_bool=overwrite_bool,
         schema_version_int=SNAPSHOT_SCHEMA_VERSION_INT,
     )

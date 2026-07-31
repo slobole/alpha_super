@@ -17,6 +17,7 @@ from data.norgate_snapshot_store import (
     PRICE_FILE_NAME_STR,
     write_snapshot_files,
 )
+from scripts import doctor_norgate_client as client_doctor_module
 from scripts import norgate_config_env
 from scripts.doctor_norgate_client import main as doctor_main, run_norgate_client_doctor
 from scripts.serve_norgate_snapshot_api import NorgateSnapshotApiService, make_handler_class
@@ -150,6 +151,89 @@ def _silent_print(_line_str: str) -> None:
 
 def _status_dict(report_obj) -> dict[str, str]:
     return {check_obj.name_str: check_obj.status_str for check_obj in report_obj.check_list}
+
+
+def test_hpi_profile_smoke_rejects_short_benchmark_history(tmp_path, monkeypatch):
+    short_price_df = pd.DataFrame(
+        {"Close": [100.0] * 1_263},
+        index=pd.date_range("2019-01-01", periods=1_263, freq="B"),
+    )
+    monkeypatch.setattr(
+        client_doctor_module,
+        "load_index_constituent_matrix_df",
+        lambda *args, **kwargs: (
+            ["AAPL"],
+            pd.DataFrame(
+                {"AAPL": [1]},
+                index=[pd.Timestamp("2024-01-02")],
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        client_doctor_module,
+        "load_price_timeseries_df",
+        lambda *args, **kwargs: short_price_df,
+    )
+    check_list = []
+
+    client_doctor_module._check_profile_smoke(
+        check_list,
+        local_root_path_obj=tmp_path,
+        profile_list=[client_doctor_module.HPI_SP500_PROFILE_STR],
+        printer_fn=_silent_print,
+    )
+
+    assert any(
+        check_obj.status_str == "FAIL"
+        and "history is too short" in check_obj.detail_str
+        for check_obj in check_list
+    )
+
+
+def test_hpi_profile_smoke_reads_total_return_benchmark(tmp_path, monkeypatch):
+    price_call_list = []
+    sufficient_price_df = pd.DataFrame(
+        {"Close": [100.0] * 1_264},
+        index=pd.date_range("2019-01-01", periods=1_264, freq="B"),
+    )
+    monkeypatch.setattr(
+        client_doctor_module,
+        "load_index_constituent_matrix_df",
+        lambda *args, **kwargs: (
+            ["AAPL"],
+            pd.DataFrame(
+                {"AAPL": [1]},
+                index=[pd.Timestamp("2024-01-02")],
+            ),
+        ),
+    )
+
+    def load_price_stub(symbol_str, adjustment_str, **kwargs):
+        price_call_list.append((symbol_str, adjustment_str, kwargs))
+        return sufficient_price_df
+
+    monkeypatch.setattr(
+        client_doctor_module,
+        "load_price_timeseries_df",
+        load_price_stub,
+    )
+    check_list = []
+
+    client_doctor_module._check_profile_smoke(
+        check_list,
+        local_root_path_obj=tmp_path,
+        profile_list=[client_doctor_module.HPI_SP500_PROFILE_STR],
+        printer_fn=_silent_print,
+    )
+
+    assert all(check_obj.status_str == "PASS" for check_obj in check_list)
+    assert price_call_list == [
+        (
+            "$SPXTR",
+            client_doctor_module.TOTALRETURN_ADJUSTMENT_STR,
+            {"data_profile_str": client_doctor_module.HPI_SP500_PROFILE_STR},
+        )
+    ]
 
 
 def test_client_doctor_passes_with_fake_api_and_report_json(tmp_path, monkeypatch):

@@ -38,8 +38,14 @@ from alpha.indicators import ibs_indicator
 from data.norgate_loader import (
     CAPITALSPECIAL_ADJUSTMENT_STR,
     TOTALRETURN_ADJUSTMENT_STR,
+    build_index_constituent_matrix,
+    load_raw_prices,
 )
-from data.norgate_snapshot_store import is_snapshot_mode_enabled_bool
+from data.norgate_snapshot_store import (
+    HPI_SP500_PROFILE_STR,
+    get_active_data_profile_str,
+    is_snapshot_mode_enabled_bool,
+)
 
 
 HPI_LOOKBACK_INT = 1_260
@@ -158,71 +164,84 @@ def load_exact_hpi_inputs(
     start_date_str: str,
     end_date_str: str | None,
 ) -> tuple[list[str], pd.DataFrame, pd.DataFrame]:
-    """Load exact PIT membership and no-padding prices for HPI research."""
+    """Load exact PIT membership and no-padding prices for HPI."""
 
     if is_snapshot_mode_enabled_bool():
-        raise RuntimeError(
-            "HPI requires direct Norgate data because current snapshots truncate "
-            "past-member PIT history and use padded prices."
+        active_profile_str = get_active_data_profile_str()
+        if active_profile_str != HPI_SP500_PROFILE_STR:
+            raise RuntimeError(
+                "Strict HPI snapshot mode requires data profile "
+                f"'{HPI_SP500_PROFILE_STR}', got {active_profile_str!r}."
+            )
+        symbol_list, universe_df = build_index_constituent_matrix(
+            indexname=indexname_str
         )
-
-    import norgatedata
-
-    watchlist_symbol_list = list(
-        norgatedata.watchlist_symbols(f"{indexname_str} Current & Past")
-    )
-    membership_ser_list: list[pd.Series] = []
-    symbol_list: list[str] = []
-    for symbol_str in watchlist_symbol_list:
-        membership_df = norgatedata.index_constituent_timeseries(
-            symbol_str,
-            indexname_str,
+        pricing_data_df = load_raw_prices(
+            symbol_list,
+            [benchmark_symbol_str],
             start_date=start_date_str,
             end_date=end_date_str,
-            timeseriesformat="pandas-dataframe",
         )
-        if membership_df is None or membership_df.empty:
-            continue
-        membership_ser = membership_df["Index Constituent"].rename(symbol_str)
-        if not membership_ser.eq(1).any():
-            continue
-        membership_ser_list.append(membership_ser)
-        symbol_list.append(symbol_str)
+    else:
+        import norgatedata
 
-    if not membership_ser_list:
-        raise RuntimeError(f"No PIT members found for {indexname_str}.")
-    universe_df = (
-        pd.concat(membership_ser_list, axis=1)
-        .fillna(0)
-        .astype(int)
-        .sort_index()
-    )
+        watchlist_symbol_list = list(
+            norgatedata.watchlist_symbols(f"{indexname_str} Current & Past")
+        )
+        membership_ser_list: list[pd.Series] = []
+        symbol_list = []
+        for symbol_str in watchlist_symbol_list:
+            membership_df = norgatedata.index_constituent_timeseries(
+                symbol_str,
+                indexname_str,
+                start_date=start_date_str,
+                end_date=end_date_str,
+                timeseriesformat="pandas-dataframe",
+            )
+            if membership_df is None or membership_df.empty:
+                continue
+            membership_ser = membership_df["Index Constituent"].rename(
+                symbol_str
+            )
+            if not membership_ser.eq(1).any():
+                continue
+            membership_ser_list.append(membership_ser)
+            symbol_list.append(symbol_str)
 
-    pricing_frame_list: list[pd.DataFrame] = []
-    for symbol_str in symbol_list + [benchmark_symbol_str]:
-        adjustment_obj = (
-            norgatedata.StockPriceAdjustmentType.TOTALRETURN
-            if symbol_str == benchmark_symbol_str
-            else norgatedata.StockPriceAdjustmentType.CAPITALSPECIAL
+        if not membership_ser_list:
+            raise RuntimeError(f"No PIT members found for {indexname_str}.")
+        universe_df = (
+            pd.concat(membership_ser_list, axis=1)
+            .fillna(0)
+            .astype(int)
+            .sort_index()
         )
-        price_df = norgatedata.price_timeseries(
-            symbol_str,
-            stock_price_adjustment_setting=adjustment_obj,
-            padding_setting=norgatedata.PaddingType.NONE,
-            start_date=start_date_str,
-            end_date=end_date_str,
-            timeseriesformat="pandas-dataframe",
-        )
-        if price_df is None or price_df.empty:
-            continue
-        price_df.columns = pd.MultiIndex.from_tuples(
-            [(symbol_str, field_str) for field_str in price_df.columns]
-        )
-        pricing_frame_list.append(price_df)
 
-    if not pricing_frame_list:
-        raise RuntimeError(f"No prices loaded for {indexname_str}.")
-    pricing_data_df = pd.concat(pricing_frame_list, axis=1).sort_index()
+        pricing_frame_list: list[pd.DataFrame] = []
+        for symbol_str in symbol_list + [benchmark_symbol_str]:
+            adjustment_obj = (
+                norgatedata.StockPriceAdjustmentType.TOTALRETURN
+                if symbol_str == benchmark_symbol_str
+                else norgatedata.StockPriceAdjustmentType.CAPITALSPECIAL
+            )
+            price_df = norgatedata.price_timeseries(
+                symbol_str,
+                stock_price_adjustment_setting=adjustment_obj,
+                padding_setting=norgatedata.PaddingType.NONE,
+                start_date=start_date_str,
+                end_date=end_date_str,
+                timeseriesformat="pandas-dataframe",
+            )
+            if price_df is None or price_df.empty:
+                continue
+            price_df.columns = pd.MultiIndex.from_tuples(
+                [(symbol_str, field_str) for field_str in price_df.columns]
+            )
+            pricing_frame_list.append(price_df)
+
+        if not pricing_frame_list:
+            raise RuntimeError(f"No prices loaded for {indexname_str}.")
+        pricing_data_df = pd.concat(pricing_frame_list, axis=1).sort_index()
     for symbol_str in symbol_list + [benchmark_symbol_str]:
         observed_price_key_list = [
             (symbol_str, field_str)
@@ -553,6 +572,10 @@ class HPIStatefulLongStrategy(Strategy):
                     0.0,
                     trade_id=self.current_trade_map[symbol_str],
                 )
+                # *** CRITICAL*** Backtests know this Open-(T+1) is finite and
+                # therefore model the exit fill before reusing the slot. The
+                # live host passes no open here because the future auction fill
+                # is unknown; live conservatively waits for broker confirmation.
                 long_slots_int += 1
 
         capital_per_trade_float = self.previous_total_value / float(
@@ -847,3 +870,102 @@ def run_hpi_variant(
     if save_results_bool:
         save_results(strategy_obj, output_dir=output_dir_str)
     return strategy_obj
+
+
+def build_hpi_execution_timing_analysis_inputs(
+    *,
+    strategy_name_str: str,
+    entry_mode_str: str,
+) -> dict[str, object]:
+    benchmark_symbol_str = "$SPXTR"
+    _, universe_df, pricing_data_df = load_exact_hpi_inputs(
+        indexname_str="S&P 500",
+        benchmark_symbol_str=benchmark_symbol_str,
+        start_date_str="1998-01-01",
+        end_date_str=None,
+    )
+    calendar_idx = pricing_data_df.index[
+        pricing_data_df.index >= pd.Timestamp("2004-01-01")
+    ]
+
+    def strategy_factory_fn() -> HPIStatefulLongStrategy:
+        strategy_obj = HPIStatefulLongStrategy(
+            name=strategy_name_str,
+            benchmarks=[benchmark_symbol_str],
+            ranking_field_str=TURNOVER_FIELD_STR,
+            entry_mode_str=entry_mode_str,
+            backtest_start_date_str="2004-01-01",
+        )
+        strategy_obj.universe_df = universe_df
+        return strategy_obj
+
+    return {
+        "strategy_factory_fn": strategy_factory_fn,
+        "pricing_data_df": pricing_data_df,
+        "calendar_idx": pd.DatetimeIndex(calendar_idx),
+        "order_generation_mode_str": "signal_bar",
+        "risk_model_str": "daily_ohlc_signal",
+        "entry_timing_str_tuple": (
+            "same_close_moc",
+            "next_open",
+            "next_close",
+        ),
+        "exit_timing_str_tuple": (
+            "same_close_moc",
+            "next_open",
+            "next_close",
+        ),
+        "default_entry_timing_str": "next_open",
+        "default_exit_timing_str": "next_open",
+    }
+
+
+def build_hpi_capacity_analysis_inputs(
+    *,
+    strategy_name_str: str,
+    entry_mode_str: str,
+    show_display_bool: bool = False,
+    backtest_start_date_str: str = "2004-01-01",
+    capital_base_float: float = 100_000.0,
+    end_date_str: str | None = None,
+) -> dict[str, object]:
+    benchmark_symbol_str = "$SPXTR"
+    _, universe_df, pricing_data_df = load_exact_hpi_inputs(
+        indexname_str="S&P 500",
+        benchmark_symbol_str=benchmark_symbol_str,
+        start_date_str="1998-01-01",
+        end_date_str=end_date_str,
+    )
+    strategy_obj = HPIStatefulLongStrategy(
+        name=strategy_name_str,
+        benchmarks=[benchmark_symbol_str],
+        ranking_field_str=TURNOVER_FIELD_STR,
+        capital_base=capital_base_float,
+        entry_mode_str=entry_mode_str,
+        backtest_start_date_str=backtest_start_date_str,
+    )
+    strategy_obj.universe_df = universe_df
+
+    # *** CRITICAL*** Retain pre-start history for the prior-only 1,260-row
+    # HPI reference set, but execute only on the requested calendar.
+    calendar_idx = pricing_data_df.index[
+        pricing_data_df.index >= pd.Timestamp(backtest_start_date_str)
+    ]
+    run_daily(
+        strategy_obj,
+        pricing_data_df,
+        calendar_idx,
+        show_progress=show_display_bool,
+        show_signal_progress_bool=show_display_bool,
+    )
+    strategy_obj.universe_df = None
+    strategy_obj._performance_benchmark_symbol_str = benchmark_symbol_str
+    strategy_obj._performance_benchmark_adjustment_str = (
+        TOTALRETURN_ADJUSTMENT_STR
+    )
+    return {
+        "strategy_obj": strategy_obj,
+        "pricing_data_df": pricing_data_df,
+        "execution_policy_str": "MOO",
+        "impact_profile_str": "MOO_LARGE_MIXED",
+    }

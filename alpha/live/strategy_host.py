@@ -61,6 +61,7 @@ from datetime import datetime
 from importlib import import_module
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from alpha.data import LIVE_FRED_STALE_WARNING_BUSINESS_DAYS_INT
@@ -70,9 +71,15 @@ from alpha.live.models import DecisionPlan, LiveRelease, PodState
 from data.norgate_loader import build_data_source_metadata_dict, use_norgate_data_profile
 
 
+HPI_MINIMUM_READY_MEMBER_COUNT_INT = 400
+HPI_MINIMUM_READY_MEMBER_RATIO_FLOAT = 0.80
+
+
 INCREMENTAL_DECISION_STRATEGY_IMPORT_SET: set[str] = {
     "strategies.dv2.strategy_mr_dv2:DVO2Strategy",
     "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy",
+    "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote",
+    "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit",
 }
 FULL_TARGET_DECISION_STRATEGY_IMPORT_SET: set[str] = {
     "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash",
@@ -115,6 +122,14 @@ def _seed_strategy_state(strategy_obj: Strategy, pod_state_obj: PodState | None)
             strategy_obj.current_trade_map = defaultdict(lambda: -1, current_trade_map_dict)
         if hasattr(strategy_obj, "current_trade"):
             strategy_obj.current_trade = defaultdict(lambda: -1, current_trade_map_dict)
+    if (
+        "pending_exit_symbol_list" in strategy_state_dict
+        and hasattr(strategy_obj, "pending_exit_symbol_set")
+    ):
+        strategy_obj.pending_exit_symbol_set = {
+            str(asset_str)
+            for asset_str in strategy_state_dict["pending_exit_symbol_list"]
+        }
 
 
 def _extract_strategy_state_dict(strategy_obj: Strategy) -> dict[str, Any]:
@@ -134,6 +149,11 @@ def _extract_strategy_state_dict(strategy_obj: Strategy) -> dict[str, Any]:
             str(asset_str): int(trade_id_int)
             for asset_str, trade_id_int in dict(strategy_obj.current_trade).items()
         }
+    if hasattr(strategy_obj, "pending_exit_symbol_set"):
+        strategy_state_dict["pending_exit_symbol_list"] = sorted(
+            str(asset_str)
+            for asset_str in strategy_obj.pending_exit_symbol_set
+        )
     return strategy_state_dict
 
 
@@ -556,6 +576,225 @@ def _build_qpi_ibs_rsi_exit_decision_plan(
         strategy_obj=strategy_obj,
         snapshot_metadata_dict={"strategy_family_str": "qpi_ibs_rsi_exit"},
     )
+
+
+def _run_hpi_strategy_for_live_decision(
+    release_obj: LiveRelease,
+    as_of_ts: datetime,
+    pod_state_obj: PodState | None,
+    *,
+    entry_mode_str: str,
+) -> tuple[datetime, Strategy]:
+    hpi_module = import_module("strategies.hpi.stateful_long")
+    benchmark_symbol_str = str(
+        release_obj.params_dict.get("benchmark_symbol_str", "$SPXTR")
+    )
+    start_date_str = str(
+        release_obj.params_dict.get("start_date_str", "1998-01-01")
+    )
+    indexname_str = str(
+        release_obj.params_dict.get("indexname_str", "S&P 500")
+    )
+
+    _, universe_df, pricing_data_df = hpi_module.load_exact_hpi_inputs(
+        indexname_str=indexname_str,
+        benchmark_symbol_str=benchmark_symbol_str,
+        start_date_str=start_date_str,
+        end_date_str=pd.Timestamp(as_of_ts).strftime("%Y-%m-%d"),
+    )
+    if len(pricing_data_df.index) == 0:
+        raise RuntimeError("HPI live host loaded no pricing data.")
+
+    strategy_obj = hpi_module.HPIStatefulLongStrategy(
+        name=release_obj.pod_id_str,
+        benchmarks=[benchmark_symbol_str],
+        ranking_field_str=hpi_module.TURNOVER_FIELD_STR,
+        capital_base=float(
+            release_obj.params_dict.get("capital_base_float", 100_000.0)
+        ),
+        slippage=float(
+            release_obj.params_dict.get("slippage_float", 0.00025)
+        ),
+        commission_per_share=float(
+            release_obj.params_dict.get(
+                "commission_per_share_float",
+                0.005,
+            )
+        ),
+        commission_minimum=float(
+            release_obj.params_dict.get("commission_minimum_float", 1.0)
+        ),
+        max_positions_int=int(
+            release_obj.params_dict.get("max_positions_int", 10)
+        ),
+        entry_mode_str=entry_mode_str,
+        backtest_start_date_str=str(
+            release_obj.params_dict.get(
+                "backtest_start_date_str",
+                "2004-01-01",
+            )
+        ),
+    )
+    strategy_obj.universe_df = universe_df
+    _seed_strategy_state(strategy_obj, pod_state_obj)
+
+    full_signal_df = strategy_obj.compute_signals(pricing_data_df.copy())
+    signal_date_ts = pd.Timestamp(pricing_data_df.index[-1]).to_pydatetime()
+    strategy_obj.previous_bar = pd.Timestamp(signal_date_ts)
+    # *** CRITICAL*** Map Close-T intent to the true next tradable session.
+    strategy_obj.current_bar = pd.Timestamp(
+        scheduler_utils.next_business_day_timestamp_ts(
+            signal_date_ts,
+            session_calendar_id_str=release_obj.session_calendar_id_str,
+        ).date()
+    )
+    close_row_ser = full_signal_df.loc[pd.Timestamp(signal_date_ts)]
+    _validate_hpi_live_feature_readiness(
+        hpi_module=hpi_module,
+        strategy_obj=strategy_obj,
+        close_row_ser=close_row_ser,
+        universe_df=universe_df,
+        decision_date_ts=pd.Timestamp(signal_date_ts),
+    )
+    current_data_df = full_signal_df.loc[: pd.Timestamp(signal_date_ts)]
+
+    # *** CRITICAL*** Live cannot know whether Open-(T+1) will print. Keep the
+    # open series empty so iterate() does not free a slot based on an uncertain
+    # exit fill. Pending exits are converted to MOO intents immediately after
+    # candidate selection, without using or inventing an execution price.
+    strategy_obj.iterate(
+        current_data_df,
+        close_row_ser,
+        pd.Series(dtype=float),
+    )
+    held_position_ser = strategy_obj.get_positions()
+    held_symbol_set = set(
+        held_position_ser[held_position_ser > 0.0].index.astype(str)
+    )
+    for symbol_str in sorted(
+        strategy_obj.pending_exit_symbol_set.intersection(held_symbol_set)
+    ):
+        strategy_obj.order_target_value(
+            symbol_str,
+            0.0,
+            trade_id=strategy_obj.current_trade_map[symbol_str],
+        )
+    return signal_date_ts, strategy_obj
+
+
+def _validate_hpi_live_feature_readiness(
+    *,
+    hpi_module,
+    strategy_obj: Strategy,
+    close_row_ser: pd.Series,
+    universe_df: pd.DataFrame,
+    decision_date_ts: pd.Timestamp,
+) -> None:
+    member_symbol_set = hpi_module.get_asof_universe_symbol_set(
+        universe_df,
+        decision_date_ts,
+    )
+    if not member_symbol_set:
+        raise RuntimeError(
+            "HPI live host found no PIT members on the decision date."
+        )
+
+    required_feature_list = [
+        "return_3d_ser",
+        "hpi_value_ser",
+        "ibs_value_ser",
+        "rsi2_value_ser",
+        "sma_200_price_ser",
+        hpi_module.TURNOVER_FIELD_STR,
+    ]
+    if strategy_obj.entry_mode_str == hpi_module.ENTRY_HORIZON_VOTE_STR:
+        required_feature_list.extend(
+            [
+                hpi_module.RETURN_2D_FIELD_STR,
+                hpi_module.RETURN_5D_FIELD_STR,
+                hpi_module.HPI_2D_FIELD_STR,
+                hpi_module.HPI_5D_FIELD_STR,
+            ]
+        )
+
+    latest_feature_df = close_row_ser.unstack()
+    missing_feature_list = [
+        field_str
+        for field_str in required_feature_list
+        if field_str not in latest_feature_df.columns
+    ]
+    if missing_feature_list:
+        raise RuntimeError(
+            "HPI live host is missing latest required feature fields: "
+            f"{missing_feature_list}."
+        )
+
+    member_feature_df = latest_feature_df.reindex(
+        sorted(member_symbol_set)
+    )[required_feature_list]
+    numeric_feature_df = member_feature_df.apply(
+        pd.to_numeric,
+        errors="coerce",
+    )
+    ready_symbol_mask_ser = pd.Series(
+        np.isfinite(numeric_feature_df.to_numpy()).all(axis=1),
+        index=numeric_feature_df.index,
+    )
+    if not ready_symbol_mask_ser.any():
+        raise RuntimeError(
+            "HPI live host has no fully ready PIT member on the latest "
+            "decision date. The strict 1,260-observation history may be "
+            "missing or too short."
+        )
+    ready_member_count_int = int(ready_symbol_mask_ser.sum())
+    total_member_count_int = int(len(ready_symbol_mask_ser))
+    ratio_required_count_int = int(
+        np.ceil(
+            total_member_count_int
+            * HPI_MINIMUM_READY_MEMBER_RATIO_FLOAT
+        )
+    )
+    required_member_count_int = max(
+        HPI_MINIMUM_READY_MEMBER_COUNT_INT,
+        ratio_required_count_int,
+    )
+    if ready_member_count_int < required_member_count_int:
+        raise RuntimeError(
+            "HPI live feature coverage is insufficient on the latest "
+            "decision date: "
+            f"ready_members={ready_member_count_int} "
+            f"pit_members={total_member_count_int} "
+            f"required_ready_members={required_member_count_int}. "
+            "The fixed gate requires at least 400 members and 80% of the "
+            "current S&P 500 PIT universe."
+        )
+
+
+def _build_hpi_decision_plan(
+    release_obj: LiveRelease,
+    as_of_ts: datetime,
+    pod_state_obj: PodState | None,
+    *,
+    entry_mode_str: str,
+    strategy_family_str: str,
+) -> DecisionPlan:
+    signal_date_ts, strategy_obj = _run_hpi_strategy_for_live_decision(
+        release_obj=release_obj,
+        as_of_ts=as_of_ts,
+        pod_state_obj=pod_state_obj,
+        entry_mode_str=entry_mode_str,
+    )
+    return _build_decision_plan_from_orders(
+        release_obj=release_obj,
+        signal_date_ts=signal_date_ts,
+        strategy_obj=strategy_obj,
+        snapshot_metadata_dict={
+            "strategy_family_str": strategy_family_str,
+            "hpi_observation_clock_str": "norgate_padding_none",
+            "hpi_membership_contract_str": "exact_pit",
+        },
+    )
+
 
 def _build_dtb3_snapshot_metadata_dict(
     dtb3_snapshot_obj,
@@ -1054,6 +1293,30 @@ def build_decision_plan_for_release(
             return _build_dv2_decision_plan(release_obj, as_of_ts, pod_state_obj)
         if release_obj.strategy_import_str == "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy":
             return _build_qpi_ibs_rsi_exit_decision_plan(release_obj, as_of_ts, pod_state_obj)
+        if (
+            release_obj.strategy_import_str
+            == "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote"
+        ):
+            hpi_module = import_module("strategies.hpi.stateful_long")
+            return _build_hpi_decision_plan(
+                release_obj,
+                as_of_ts,
+                pod_state_obj,
+                entry_mode_str=hpi_module.ENTRY_HORIZON_VOTE_STR,
+                strategy_family_str="hpi_sp500_2_3_5_vote",
+            )
+        if (
+            release_obj.strategy_import_str
+            == "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit"
+        ):
+            hpi_module = import_module("strategies.hpi.stateful_long")
+            return _build_hpi_decision_plan(
+                release_obj,
+                as_of_ts,
+                pod_state_obj,
+                entry_mode_str=hpi_module.ENTRY_BASELINE_STR,
+                strategy_family_str="hpi_sp500_ibs_rsi_exit",
+            )
         if release_obj.strategy_import_str == "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash":
             return _build_taa_btal_tqqq_vix_cash_decision_plan(release_obj, as_of_ts, pod_state_obj)
         if release_obj.strategy_import_str == "strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash":

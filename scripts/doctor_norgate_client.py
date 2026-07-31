@@ -13,6 +13,8 @@ from urllib.error import HTTPError
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
+import pandas as pd
+
 repo_root_path = Path(__file__).resolve().parents[1]
 repo_root_str = str(repo_root_path)
 if repo_root_str not in sys.path:
@@ -21,7 +23,10 @@ if repo_root_str not in sys.path:
 from alpha.live.scheduler_utils import load_latest_norgate_heartbeat_session_label_ts
 from data.norgate_snapshot_store import (
     ALPHA_USE_NORGATE_SNAPSHOT_ENV_STR,
+    CAPITALSPECIAL_ADJUSTMENT_STR,
+    HPI_SP500_PROFILE_STR,
     NORGATE_SNAPSHOT_ROOT_ENV_STR,
+    TOTALRETURN_ADJUSTMENT_STR,
     is_snapshot_mode_enabled_bool,
     load_index_constituent_matrix_df,
     load_price_timeseries_df,
@@ -46,6 +51,7 @@ from scripts.sync_norgate_snapshots_api import (
 
 
 PrinterFn = Callable[[str], None]
+HPI_MINIMUM_OBSERVED_SESSION_COUNT_INT = 1_264
 
 
 @dataclass(frozen=True)
@@ -400,6 +406,10 @@ def _check_profile_smoke(
     smoke_map_dict: dict[str, list[tuple[str, str]]] = {
         "norgate_eod_etf_plus_vix_helper": [("symbol", "SPY"), ("symbol", "$VIX")],
         "norgate_eod_sp500_pit": [("index", "S&P 500")],
+        HPI_SP500_PROFILE_STR: [
+            ("index", "S&P 500"),
+            ("symbol", "$SPXTR"),
+        ],
         "norgate_eod_ndx_pit": [("index", "Nasdaq 100")],
         "norgate_eod_ndx_pit_plus_vxn_helper": [("index", "Nasdaq 100"), ("symbol", "$VXN")],
     }
@@ -408,8 +418,41 @@ def _check_profile_smoke(
             for smoke_type_str, value_str in smoke_map_dict.get(profile_str, []):
                 try:
                     if smoke_type_str == "symbol":
-                        price_df = load_price_timeseries_df(value_str, data_profile_str=profile_str)
-                        detail_str = f"profile={profile_str} symbol={value_str} rows={len(price_df.index)}"
+                        adjustment_str = (
+                            TOTALRETURN_ADJUSTMENT_STR
+                            if (
+                                profile_str == HPI_SP500_PROFILE_STR
+                                and value_str == "$SPXTR"
+                            )
+                            else CAPITALSPECIAL_ADJUSTMENT_STR
+                        )
+                        price_df = load_price_timeseries_df(
+                            value_str,
+                            adjustment_str,
+                            data_profile_str=profile_str,
+                        )
+                        observed_close_count_int = int(
+                            pd.to_numeric(
+                                price_df["Close"],
+                                errors="coerce",
+                            ).notna().sum()
+                        )
+                        if (
+                            profile_str == HPI_SP500_PROFILE_STR
+                            and value_str == "$SPXTR"
+                            and observed_close_count_int
+                            < HPI_MINIMUM_OBSERVED_SESSION_COUNT_INT
+                        ):
+                            raise RuntimeError(
+                                "HPI snapshot benchmark history is too short: "
+                                f"observed_close_rows={observed_close_count_int} "
+                                f"required_close_rows={HPI_MINIMUM_OBSERVED_SESSION_COUNT_INT}."
+                            )
+                        detail_str = (
+                            f"profile={profile_str} symbol={value_str} "
+                            f"rows={len(price_df.index)} "
+                            f"observed_close_rows={observed_close_count_int}"
+                        )
                     else:
                         symbol_list, universe_df = load_index_constituent_matrix_df(
                             value_str,

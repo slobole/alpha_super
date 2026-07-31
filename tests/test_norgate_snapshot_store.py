@@ -231,6 +231,208 @@ def test_ndx_export_profiles_include_price_and_total_return_spy():
         assert "SPY" in profile_spec_obj.total_return_symbol_tuple
 
 
+def test_hpi_export_profile_preserves_strict_data_contract():
+    from scripts.export_norgate_snapshot import PROFILE_EXPORT_SPEC_DICT
+
+    profile_spec_obj = PROFILE_EXPORT_SPEC_DICT[
+        "norgate_eod_sp500_hpi_pit"
+    ]
+
+    assert profile_spec_obj.indexname_str == "S&P 500"
+    assert profile_spec_obj.padding_type_name_str == "NONE"
+    assert profile_spec_obj.trim_past_member_tail_bool is False
+    assert profile_spec_obj.total_return_symbol_tuple == ("$SPX", "$SPXTR")
+
+
+def test_hpi_export_writes_end_to_end_strict_contract(tmp_path, monkeypatch):
+    from data.norgate_snapshot_store import (
+        HPI_SP500_DATA_CONTRACT_DICT,
+        HPI_SP500_PROFILE_STR,
+    )
+    from scripts import export_norgate_snapshot as export_module
+
+    universe_df = pd.DataFrame(
+        {"AAPL": [1]},
+        index=[pd.Timestamp("2024-01-02")],
+    )
+    price_df = pd.DataFrame(
+        [
+            {
+                "date": "2024-01-02",
+                "symbol_str": "AAPL",
+                "adjustment_str": CAPITALSPECIAL_ADJUSTMENT_STR,
+                "Open": 100.0,
+                "High": 101.0,
+                "Low": 99.0,
+                "Close": 100.5,
+                "Dividend": 0.0,
+            },
+            {
+                "date": "2024-01-02",
+                "symbol_str": "$SPX",
+                "adjustment_str": TOTALRETURN_ADJUSTMENT_STR,
+                "Open": 4_700.0,
+                "High": 4_710.0,
+                "Low": 4_690.0,
+                "Close": 4_705.0,
+                "Dividend": 0.0,
+            },
+            {
+                "date": "2024-01-02",
+                "symbol_str": "$SPXTR",
+                "adjustment_str": TOTALRETURN_ADJUSTMENT_STR,
+                "Open": 10_000.0,
+                "High": 10_010.0,
+                "Low": 9_990.0,
+                "Close": 10_005.0,
+                "Dividend": 0.0,
+            },
+        ]
+    )
+    monkeypatch.setenv("NORGATE_SNAPSHOT_ROOT", str(tmp_path))
+
+    with mock.patch.object(
+        export_module,
+        "_load_index_constituent_matrix_df",
+        return_value=(["AAPL"], universe_df),
+    ) as universe_loader_mock, mock.patch.object(
+        export_module,
+        "_build_price_snapshot_df",
+        return_value=price_df,
+    ) as price_builder_mock:
+        export_module._export_profile_to_root_path(
+            snapshot_root_str=str(tmp_path),
+            profile_str=HPI_SP500_PROFILE_STR,
+            snapshot_date_str="2024-01-02",
+            start_date_str="1998-01-01",
+            end_date_str="2024-01-02",
+            overwrite_bool=False,
+        )
+
+    universe_loader_mock.assert_called_once_with(
+        "S&P 500",
+        trim_past_member_tail_bool=False,
+    )
+    assert (
+        price_builder_mock.call_args.kwargs["padding_type_name_str"]
+        == "NONE"
+    )
+    assert price_builder_mock.call_args.kwargs[
+        "total_return_symbol_list"
+    ] == ["$SPX", "$SPXTR"]
+    snapshot_manifest_obj = load_valid_snapshot_manifest(
+        HPI_SP500_PROFILE_STR
+    )
+    assert (
+        snapshot_manifest_obj.manifest_dict["data_contract"]
+        == HPI_SP500_DATA_CONTRACT_DICT
+    )
+
+
+def test_hpi_snapshot_rejects_missing_strict_contract(tmp_path, monkeypatch):
+    from data.norgate_snapshot_store import (
+        HPI_SP500_PROFILE_STR,
+        NorgateSnapshotValidationError,
+        load_valid_snapshot_manifest,
+    )
+
+    monkeypatch.setenv("NORGATE_SNAPSHOT_ROOT", str(tmp_path))
+    write_snapshot_files(
+        snapshot_root_str=str(tmp_path),
+        profile_str=HPI_SP500_PROFILE_STR,
+        snapshot_date_str="2024-01-02",
+        price_df=_price_snapshot_df(),
+    )
+
+    with pytest.raises(
+        NorgateSnapshotValidationError,
+        match="data_contract mismatch",
+    ):
+        load_valid_snapshot_manifest(HPI_SP500_PROFILE_STR)
+
+
+def test_hpi_export_requests_no_padding():
+    from types import SimpleNamespace
+
+    from scripts import export_norgate_snapshot as export_module
+
+    raw_price_df = pd.DataFrame(
+        {
+            "Open": [100.0],
+            "High": [101.0],
+            "Low": [99.0],
+            "Close": [100.5],
+            "Dividend": [0.0],
+        },
+        index=pd.to_datetime(["2024-01-02"]),
+    )
+    direct_norgate_mock = mock.Mock()
+    direct_norgate_mock.PaddingType = SimpleNamespace(NONE="none")
+    direct_norgate_mock.price_timeseries.return_value = raw_price_df
+
+    with mock.patch.object(
+        export_module,
+        "_load_direct_norgate_module",
+        return_value=direct_norgate_mock,
+    ), mock.patch.object(
+        export_module,
+        "_adjustment_type_obj",
+        return_value=object(),
+    ):
+        export_module._load_price_frame_df(
+            symbol_str="AAPL",
+            adjustment_str=CAPITALSPECIAL_ADJUSTMENT_STR,
+            start_date_str="2024-01-02",
+            end_date_str="2024-01-02",
+            padding_type_name_str="NONE",
+        )
+
+    assert (
+        direct_norgate_mock.price_timeseries.call_args.kwargs[
+            "padding_setting"
+        ]
+        == "none"
+    )
+
+
+def test_hpi_export_does_not_trim_past_member_tail():
+    from scripts import export_norgate_snapshot as export_module
+
+    date_idx = pd.bdate_range("2024-01-02", periods=10)
+    membership_df = pd.DataFrame(
+        {"Index Constituent": 1},
+        index=date_idx,
+    )
+    heartbeat_df = pd.DataFrame(index=pd.bdate_range("2024-01-02", periods=15))
+    direct_norgate_mock = mock.Mock()
+    direct_norgate_mock.watchlist_symbols.return_value = ["OLD"]
+    direct_norgate_mock.price_timeseries.return_value = heartbeat_df
+    direct_norgate_mock.index_constituent_timeseries.return_value = (
+        membership_df
+    )
+
+    with mock.patch.object(
+        export_module,
+        "_load_direct_norgate_module",
+        return_value=direct_norgate_mock,
+    ):
+        _, exact_universe_df = (
+            export_module._load_index_constituent_matrix_df(
+                "S&P 500",
+                trim_past_member_tail_bool=False,
+            )
+        )
+        _, shared_universe_df = (
+            export_module._load_index_constituent_matrix_df(
+                "S&P 500",
+                trim_past_member_tail_bool=True,
+            )
+        )
+
+    assert len(exact_universe_df.index) == 10
+    assert len(shared_universe_df.index) == 5
+
+
 def test_snapshot_export_normalizes_dividend_only_for_non_distributing_indices():
     from scripts import export_norgate_snapshot as export_module
 
@@ -298,6 +500,40 @@ def test_snapshot_export_rejects_missing_dividend_for_etf():
             )
 
 
+def test_snapshot_export_accepts_spxtr_without_dividend():
+    from scripts import export_norgate_snapshot as export_module
+
+    raw_index_price_df = pd.DataFrame(
+        {
+            "Open": [100.0],
+            "High": [101.0],
+            "Low": [99.0],
+            "Close": [100.5],
+        },
+        index=pd.to_datetime(["2024-01-02"]),
+    )
+    direct_norgate_mock = mock.Mock()
+    direct_norgate_mock.price_timeseries.return_value = raw_index_price_df
+
+    with mock.patch.object(
+        export_module,
+        "_load_direct_norgate_module",
+        return_value=direct_norgate_mock,
+    ), mock.patch.object(
+        export_module,
+        "_adjustment_type_obj",
+        return_value=object(),
+    ):
+        price_df = export_module._load_price_frame_df(
+            symbol_str="$SPXTR",
+            adjustment_str=TOTALRETURN_ADJUSTMENT_STR,
+            start_date_str="2024-01-02",
+            end_date_str="2024-01-02",
+        )
+
+    assert float(price_df.loc[0, "Dividend"]) == 0.0
+
+
 def test_loader_snapshot_mode_preserves_raw_price_multiindex_shape(tmp_path, monkeypatch):
     from data.norgate_loader import load_raw_prices
 
@@ -315,6 +551,143 @@ def test_loader_snapshot_mode_preserves_raw_price_multiindex_shape(tmp_path, mon
     assert isinstance(pricing_data_df.columns, pd.MultiIndex)
     assert ("SPY", "Close") in pricing_data_df.columns
     assert float(pricing_data_df.loc[pd.Timestamp("2024-01-02"), ("SPY", "Close")]) == 100.5
+
+
+def test_raw_snapshot_loader_reads_price_table_once(tmp_path, monkeypatch):
+    import data.norgate_snapshot_store as snapshot_store_module
+
+    monkeypatch.setenv("NORGATE_SNAPSHOT_ROOT", str(tmp_path))
+    _write_snapshot(tmp_path)
+
+    with mock.patch.object(
+        snapshot_store_module,
+        "_read_prices_df",
+        wraps=snapshot_store_module._read_prices_df,
+    ) as read_prices_mock:
+        pricing_data_df = load_raw_prices_df(
+            symbols=["SPY"],
+            benchmarks=[],
+            start_date_str="2024-01-02",
+            end_date_str="2024-01-02",
+            data_profile_str=PROFILE_STR,
+        )
+
+    assert read_prices_mock.call_count == 1
+    assert ("SPY", "Close") in pricing_data_df.columns
+
+
+def test_bulk_raw_snapshot_loader_matches_repeated_symbol_loads(
+    tmp_path,
+    monkeypatch,
+):
+    from data.norgate_snapshot_store import (
+        HPI_SP500_DATA_CONTRACT_DICT,
+        HPI_SP500_PROFILE_STR,
+    )
+
+    monkeypatch.setenv("NORGATE_SNAPSHOT_ROOT", str(tmp_path))
+    price_df = pd.DataFrame(
+        [
+            {
+                "date": date_str,
+                "symbol_str": symbol_str,
+                "adjustment_str": adjustment_str,
+                "Open": close_float - 0.5,
+                "High": close_float + 1.0,
+                "Low": close_float - 1.0,
+                "Close": close_float,
+                "Dividend": 0.0,
+            }
+            for date_str, symbol_str, adjustment_str, close_float in [
+                (
+                    "2024-01-02",
+                    "AAPL",
+                    CAPITALSPECIAL_ADJUSTMENT_STR,
+                    100.0,
+                ),
+                (
+                    "2024-01-03",
+                    "AAPL",
+                    CAPITALSPECIAL_ADJUSTMENT_STR,
+                    101.0,
+                ),
+                (
+                    "2024-01-03",
+                    "MSFT",
+                    CAPITALSPECIAL_ADJUSTMENT_STR,
+                    200.0,
+                ),
+                (
+                    "2024-01-02",
+                    "$SPXTR",
+                    TOTALRETURN_ADJUSTMENT_STR,
+                    10_000.0,
+                ),
+                (
+                    "2024-01-03",
+                    "$SPXTR",
+                    TOTALRETURN_ADJUSTMENT_STR,
+                    10_010.0,
+                ),
+            ]
+        ]
+    )
+    write_snapshot_files(
+        snapshot_root_str=str(tmp_path),
+        profile_str=HPI_SP500_PROFILE_STR,
+        snapshot_date_str="2024-01-03",
+        price_df=price_df,
+        required_symbol_list=["AAPL", "MSFT", "$SPXTR"],
+        adjustment_mode_map_dict={
+            "AAPL": CAPITALSPECIAL_ADJUSTMENT_STR,
+            "MSFT": CAPITALSPECIAL_ADJUSTMENT_STR,
+            "$SPXTR": TOTALRETURN_ADJUSTMENT_STR,
+        },
+        data_contract_dict=HPI_SP500_DATA_CONTRACT_DICT,
+    )
+
+    bulk_price_df = load_raw_prices_df(
+        symbols=["AAPL", "MSFT"],
+        benchmarks=["$SPXTR"],
+        start_date_str="2024-01-02",
+        end_date_str="2024-01-03",
+        data_profile_str=HPI_SP500_PROFILE_STR,
+    )
+    expected_frame_list = []
+    for symbol_str, adjustment_str in [
+        ("AAPL", CAPITALSPECIAL_ADJUSTMENT_STR),
+        ("MSFT", CAPITALSPECIAL_ADJUSTMENT_STR),
+        ("$SPXTR", TOTALRETURN_ADJUSTMENT_STR),
+    ]:
+        symbol_price_df = load_price_timeseries_df(
+            symbol_str,
+            adjustment_str,
+            start_date_str="2024-01-02",
+            end_date_str="2024-01-03",
+            data_profile_str=HPI_SP500_PROFILE_STR,
+        )
+        symbol_price_df.columns = pd.MultiIndex.from_tuples(
+            [
+                (symbol_str, field_str)
+                for field_str in symbol_price_df.columns
+            ]
+        )
+        expected_frame_list.append(symbol_price_df)
+    expected_price_df = pd.concat(
+        expected_frame_list,
+        axis=1,
+    ).sort_index()
+
+    pd.testing.assert_frame_equal(bulk_price_df, expected_price_df)
+    assert list(
+        bulk_price_df.columns.get_level_values(0).unique()
+    ) == ["AAPL", "MSFT", "$SPXTR"]
+    assert pd.isna(
+        bulk_price_df.loc[
+            pd.Timestamp("2024-01-02"),
+            ("MSFT", "Close"),
+        ]
+    )
 
 
 def test_snapshot_raw_prices_skips_pit_symbols_outside_requested_date_range(tmp_path, monkeypatch):

@@ -29,6 +29,11 @@ PRICE_FILE_NAME_STR = "prices.parquet"
 UNIVERSE_FILE_NAME_STR = "universe.parquet"
 CAPITALSPECIAL_ADJUSTMENT_STR = "CAPITALSPECIAL"
 TOTALRETURN_ADJUSTMENT_STR = "TOTALRETURN"
+HPI_SP500_PROFILE_STR = "norgate_eod_sp500_hpi_pit"
+HPI_SP500_DATA_CONTRACT_DICT: dict[str, str] = {
+    "price_padding_setting_str": "NONE",
+    "past_member_tail_policy_str": "exact",
+}
 
 PIT_PROFILE_BY_INDEX_NAME_DICT: dict[str, str] = {
     "S&P 500": "norgate_eod_sp500_pit",
@@ -311,6 +316,13 @@ def _load_valid_snapshot_manifest_cached(
         raise NorgateSnapshotValidationError(
             f"Manifest profile mismatch: expected {profile_str}, got {manifest_profile_str}."
         )
+    if profile_str == HPI_SP500_PROFILE_STR:
+        data_contract_dict = manifest_dict.get("data_contract", {})
+        if data_contract_dict != HPI_SP500_DATA_CONTRACT_DICT:
+            raise NorgateSnapshotValidationError(
+                "Strict HPI snapshot data_contract mismatch: expected "
+                f"{HPI_SP500_DATA_CONTRACT_DICT}, got {data_contract_dict!r}."
+            )
 
     schema_version_int = int(manifest_dict.get("schema_version", -1))
     if schema_version_int not in SUPPORTED_SNAPSHOT_SCHEMA_VERSION_SET:
@@ -481,31 +493,99 @@ def load_raw_prices_df(
     end_date_str: str | None = None,
     data_profile_str: str | None = None,
 ) -> pd.DataFrame:
-    price_frame_list: list[pd.DataFrame] = []
     benchmark_set = {str(symbol_str) for symbol_str in benchmarks}
     symbol_list = [str(symbol_str) for symbol_str in list(symbols) + list(benchmarks)]
+    default_profile_str = (
+        default_profile_for_symbol_str(symbol_list[0])
+        if symbol_list
+        else None
+    )
+    profile_str = get_active_data_profile_str(
+        data_profile_str or default_profile_str
+    )
+    if profile_str is None:
+        raise NorgateSnapshotValidationError(
+            "No data profile was provided for raw snapshot prices."
+        )
+    snapshot_manifest_obj = load_valid_snapshot_manifest(profile_str)
+    price_df = _read_prices_df(snapshot_manifest_obj)
+    field_name_list = _price_field_name_list(price_df)
 
-    for symbol_str in symbol_list:
-        adjustment_str = (
+    adjustment_by_symbol_dict = {
+        symbol_str: (
             TOTALRETURN_ADJUSTMENT_STR
             if symbol_str in benchmark_set
             else CAPITALSPECIAL_ADJUSTMENT_STR
         )
-        try:
-            symbol_price_df = load_price_timeseries_df(
-                symbol_str,
-                adjustment_str,
-                start_date_str=start_date_str,
-                end_date_str=end_date_str,
-                data_profile_str=data_profile_str,
-            )
-        except NorgateSnapshotValidationError as exc:
+        for symbol_str in symbol_list
+    }
+    requested_pair_set = {
+        (symbol_str, adjustment_by_symbol_dict[symbol_str])
+        for symbol_str in symbol_list
+    }
+    available_pair_set = set(
+        price_df[["symbol_str", "adjustment_str"]]
+        .drop_duplicates()
+        .itertuples(index=False, name=None)
+    )
+
+    start_date_ts = pd.Timestamp(start_date_str).normalize()
+    date_mask_ser = price_df["date"] >= start_date_ts
+    if end_date_str is not None:
+        date_mask_ser &= (
+            price_df["date"] <= pd.Timestamp(end_date_str).normalize()
+        )
+    requested_pair_mask_ser = pd.MultiIndex.from_arrays(
+        [
+            price_df["symbol_str"],
+            price_df["adjustment_str"],
+        ]
+    ).isin(requested_pair_set)
+    selected_price_df = price_df.loc[
+        date_mask_ser & requested_pair_mask_ser,
+        ["date", "symbol_str", "adjustment_str", *field_name_list],
+    ]
+    price_group_dict = {
+        (str(symbol_str), str(adjustment_str)): symbol_price_df
+        for (
+            symbol_str,
+            adjustment_str,
+        ), symbol_price_df in selected_price_df.groupby(
+            ["symbol_str", "adjustment_str"],
+            sort=False,
+        )
+    }
+
+    price_frame_list: list[pd.DataFrame] = []
+    for symbol_str in symbol_list:
+        adjustment_str = adjustment_by_symbol_dict[symbol_str]
+        pair_tuple = (symbol_str, adjustment_str)
+        symbol_price_df = price_group_dict.get(pair_tuple)
+        if symbol_price_df is None:
             if (
                 symbol_str not in benchmark_set
-                and str(exc).startswith("Snapshot has no rows for requested date range:")
+                and pair_tuple in available_pair_set
             ):
                 continue
-            raise
+            if pair_tuple not in available_pair_set:
+                raise NorgateSnapshotValidationError(
+                    "Snapshot is missing required symbol/adjustment data: "
+                    f"profile={profile_str} symbol={symbol_str} "
+                    f"adjustment={adjustment_str}."
+                )
+            raise NorgateSnapshotValidationError(
+                "Snapshot has no rows for requested date range: "
+                f"profile={profile_str} symbol={symbol_str} "
+                f"start={start_date_str} end={end_date_str}."
+            )
+
+        symbol_price_df = (
+            symbol_price_df[["date", *field_name_list]]
+            .set_index("date")
+            .sort_index()
+        )
+        symbol_price_df.index.name = None
+        symbol_price_df = symbol_price_df[field_name_list]
         symbol_price_df.columns = pd.MultiIndex.from_tuples(
             [(symbol_str, field_str) for field_str in symbol_price_df.columns]
         )
@@ -587,6 +667,7 @@ def write_snapshot_files(
     required_symbol_list: Iterable[str] | None = None,
     required_helper_symbol_list: Iterable[str] | None = None,
     adjustment_mode_map_dict: dict[str, object] | None = None,
+    data_contract_dict: dict[str, object] | None = None,
     generated_timestamp_ts: datetime | None = None,
     overwrite_bool: bool = False,
     schema_version_int: int = LEGACY_SNAPSHOT_SCHEMA_VERSION_INT,
@@ -653,6 +734,7 @@ def write_snapshot_files(
         "required_symbols": sorted({str(symbol_str) for symbol_str in (required_symbol_list or [])}),
         "required_helpers": sorted({str(symbol_str) for symbol_str in (required_helper_symbol_list or [])}),
         "adjustment_modes": dict(adjustment_mode_map_dict or {}),
+        "data_contract": dict(data_contract_dict or {}),
     }
     manifest_path_obj = snapshot_dir_path_obj / MANIFEST_FILE_NAME_STR
     manifest_path_obj.write_text(

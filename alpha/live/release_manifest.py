@@ -9,11 +9,17 @@ import yaml
 from alpha.live import scheduler_utils
 from alpha.live.models import LiveRelease
 from alpha.live.order_clerk import validate_account_route_matches_mode
+from data.norgate_snapshot_store import HPI_SP500_PROFILE_STR
 
 
+HPI_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = (
+    "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote",
+    "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit",
+)
 SUPPORTED_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = (
     "strategies.dv2.strategy_mr_dv2:DVO2Strategy",
     "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy",
+    *HPI_STRATEGY_IMPORT_TUPLE,
     "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash",
     "strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash",
     "strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash",
@@ -30,6 +36,7 @@ SUPPORTED_MODE_TUPLE: tuple[str, ...] = ("incubation", "paper", "live")
 SUPPORTED_SIGNAL_CLOCK_TUPLE: tuple[str, ...] = scheduler_utils.SUPPORTED_SIGNAL_CLOCK_TUPLE
 SUPPORTED_DATA_PROFILE_TUPLE: tuple[str, ...] = (
     "norgate_eod_sp500_pit",
+    HPI_SP500_PROFILE_STR,
     "norgate_eod_etf_plus_vix_helper",
     "norgate_eod_ndx_pit",
     "norgate_eod_ndx_pit_plus_vxn_helper",
@@ -238,6 +245,96 @@ def validate_release_manifest(release_obj: LiveRelease) -> None:
             f"Unsupported data_profile_str '{release_obj.data_profile_str}'. "
             f"Expected one of {SUPPORTED_DATA_PROFILE_TUPLE}."
         )
+    is_hpi_strategy_bool = (
+        release_obj.strategy_import_str in HPI_STRATEGY_IMPORT_TUPLE
+    )
+    if is_hpi_strategy_bool and (
+        release_obj.data_profile_str != HPI_SP500_PROFILE_STR
+    ):
+        raise ValueError(
+            "HPI strategies require the strict snapshot profile "
+            f"'{HPI_SP500_PROFILE_STR}'."
+        )
+    if (
+        not is_hpi_strategy_bool
+        and release_obj.data_profile_str == HPI_SP500_PROFILE_STR
+    ):
+        raise ValueError(
+            f"Snapshot profile '{HPI_SP500_PROFILE_STR}' is reserved for "
+            "strict HPI strategies."
+        )
+    if is_hpi_strategy_bool:
+        required_hpi_field_dict = {
+            "session_calendar_id_str": (
+                release_obj.session_calendar_id_str,
+                "XNYS",
+            ),
+            "signal_clock_str": (
+                release_obj.signal_clock_str,
+                "eod_snapshot_ready",
+            ),
+            "execution_policy_str": (
+                release_obj.execution_policy_str,
+                "next_open_moo",
+            ),
+        }
+        for field_name_str, (
+            actual_value_str,
+            expected_value_str,
+        ) in required_hpi_field_dict.items():
+            if actual_value_str != expected_value_str:
+                raise ValueError(
+                    "Strict HPI releases require "
+                    f"{field_name_str}='{expected_value_str}', got "
+                    f"'{actual_value_str}'."
+                )
+        required_hpi_param_dict = {
+            "indexname_str": (
+                str(release_obj.params_dict.get("indexname_str", "S&P 500")),
+                "S&P 500",
+            ),
+            "benchmark_symbol_str": (
+                str(
+                    release_obj.params_dict.get(
+                        "benchmark_symbol_str",
+                        "$SPXTR",
+                    )
+                ),
+                "$SPXTR",
+            ),
+            "start_date_str": (
+                str(
+                    release_obj.params_dict.get(
+                        "start_date_str",
+                        "1998-01-01",
+                    )
+                ),
+                "1998-01-01",
+            ),
+            "backtest_start_date_str": (
+                str(
+                    release_obj.params_dict.get(
+                        "backtest_start_date_str",
+                        "2004-01-01",
+                    )
+                ),
+                "2004-01-01",
+            ),
+            "max_positions_int": (
+                int(release_obj.params_dict.get("max_positions_int", 10)),
+                10,
+            ),
+        }
+        for param_name_str, (
+            actual_value_obj,
+            expected_value_obj,
+        ) in required_hpi_param_dict.items():
+            if actual_value_obj != expected_value_obj:
+                raise ValueError(
+                    "Strict HPI releases require "
+                    f"params.{param_name_str}={expected_value_obj!r}, got "
+                    f"{actual_value_obj!r}."
+                )
     validate_account_route_matches_mode(
         mode_str=release_obj.mode_str,
         account_route_str=release_obj.account_route_str,

@@ -141,6 +141,12 @@ and ignored by Git. Use tracked examples from `docs/live/release_templates/`,
 copy them into the local client folder, then edit account routes, mode, budgets,
 and `enabled_bool` on that VPS only.
 
+For the strict HPI S&P 500 profile, live DecisionPlan creation also fails closed
+unless the latest decision date has complete required features for at least 400
+current PIT members and at least 80% of the current PIT universe. This fixed
+coverage gate permits legitimate short-history constituents while preventing a
+collapsed or stale cross-section from being treated as ready.
+
 ## Runtime Flow
 
 ```text
@@ -381,10 +387,16 @@ uv run python -m alpha.live.runner status `
 
 ```text
 norgate_eod_sp500_pit
+norgate_eod_sp500_hpi_pit
 norgate_eod_etf_plus_vix_helper
 norgate_eod_ndx_pit
 norgate_eod_ndx_pit_plus_vxn_helper
 ```
+
+`norgate_eod_sp500_hpi_pit` is intentionally separate from the shared
+QPI/DV2 profile. It exports S&P 500 stocks with `PaddingType.NONE` and keeps
+the exact raw point-in-time membership tail. Changing those semantics changes
+strict HPI features and order intent.
 
 `intraday_1m_plus_daily_pit` is intentionally unsupported in Snapshot V1.
 

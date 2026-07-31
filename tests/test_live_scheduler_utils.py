@@ -14,9 +14,34 @@ from alpha.live.scheduler_utils import (
     get_latest_completed_session_label_ts,
     is_execution_window_expired_bool,
     is_release_due_for_build,
+    load_latest_norgate_heartbeat_session_label_ts,
     resolve_calendar_month_end_label_to_last_tradable_session,
     select_due_release_list,
 )
+
+
+def test_hpi_profile_uses_snapshot_heartbeat(monkeypatch):
+    captured_profile_list = []
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.is_snapshot_mode_enabled_bool",
+        lambda: True,
+    )
+
+    def load_snapshot_heartbeat_stub(data_profile_str):
+        captured_profile_list.append(data_profile_str)
+        return pd.Timestamp("2024-01-31")
+
+    monkeypatch.setattr(
+        "alpha.live.scheduler_utils.load_latest_snapshot_session_label_ts",
+        load_snapshot_heartbeat_stub,
+    )
+
+    heartbeat_ts = load_latest_norgate_heartbeat_session_label_ts(
+        "norgate_eod_sp500_hpi_pit"
+    )
+
+    assert heartbeat_ts == pd.Timestamp("2024-01-31")
+    assert captured_profile_list == ["norgate_eod_sp500_hpi_pit"]
 
 
 def make_release(

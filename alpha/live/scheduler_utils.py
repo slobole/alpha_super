@@ -50,6 +50,7 @@ SIGNAL_CLOCK_ALIAS_MAP: dict[str, str] = {
 }
 DATA_PROFILE_HEARTBEAT_SYMBOL_MAP: dict[str, str] = {
     "norgate_eod_sp500_pit": "$SPX",
+    "norgate_eod_sp500_hpi_pit": "$SPX",
     "norgate_eod_etf_plus_vix_helper": "$SPX",
     "norgate_eod_ndx_pit": "$SPX",
     "norgate_eod_ndx_pit_plus_vxn_helper": "$SPX",

@@ -436,6 +436,95 @@ def test_exact_loader_preserves_final_membership_and_uses_no_padding(monkeypatch
     assert pd.isna(pricing_data_df.loc[date_index[4], ("OLD", "Dividend")])
 
 
+def test_exact_loader_reads_dedicated_hpi_snapshot(tmp_path, monkeypatch):
+    from data.norgate_snapshot_store import (
+        CAPITALSPECIAL_ADJUSTMENT_STR,
+        HPI_SP500_DATA_CONTRACT_DICT,
+        HPI_SP500_PROFILE_STR,
+        TOTALRETURN_ADJUSTMENT_STR,
+        use_norgate_data_profile,
+        write_snapshot_files,
+    )
+
+    date_idx = pd.DatetimeIndex(["2024-01-02", "2024-01-03"])
+    price_df = pd.DataFrame(
+        [
+            {
+                "date": date_idx[0],
+                "symbol_str": "OLD",
+                "adjustment_str": CAPITALSPECIAL_ADJUSTMENT_STR,
+                "Open": 10.0,
+                "High": 11.0,
+                "Low": 9.0,
+                "Close": 10.5,
+                "Turnover": 1_000_000.0,
+                "Dividend": 0.0,
+            },
+            *[
+                {
+                    "date": date_ts,
+                    "symbol_str": "$SPX",
+                    "adjustment_str": TOTALRETURN_ADJUSTMENT_STR,
+                    "Open": 100.0,
+                    "High": 101.0,
+                    "Low": 99.0,
+                    "Close": 100.5,
+                    "Turnover": 0.0,
+                    "Dividend": 0.0,
+                }
+                for date_ts in date_idx
+            ],
+        ]
+    )
+    universe_df = pd.DataFrame(
+        {"OLD": [1, 0]},
+        index=date_idx,
+    )
+    write_snapshot_files(
+        snapshot_root_str=str(tmp_path),
+        profile_str=HPI_SP500_PROFILE_STR,
+        snapshot_date_str="2024-01-03",
+        price_df=price_df,
+        universe_df=universe_df,
+        required_symbol_list=["OLD", "$SPX"],
+        data_contract_dict=HPI_SP500_DATA_CONTRACT_DICT,
+    )
+    monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "true")
+    monkeypatch.setenv("NORGATE_SNAPSHOT_ROOT", str(tmp_path))
+
+    with use_norgate_data_profile(HPI_SP500_PROFILE_STR):
+        symbol_list, loaded_universe_df, pricing_data_df = (
+            load_exact_hpi_inputs(
+                indexname_str="S&P 500",
+                benchmark_symbol_str="$SPX",
+                start_date_str="2024-01-02",
+                end_date_str="2024-01-03",
+            )
+        )
+
+    assert symbol_list == ["OLD"]
+    assert loaded_universe_df.loc[date_idx[1], "OLD"] == 0
+    assert pd.isna(pricing_data_df.loc[date_idx[1], ("OLD", "Open")])
+    assert pricing_data_df.loc[
+        date_idx[1],
+        ("OLD", "Close"),
+    ] == pytest.approx(10.5)
+
+
+def test_exact_loader_rejects_shared_snapshot_profile(monkeypatch):
+    from data.norgate_snapshot_store import use_norgate_data_profile
+
+    monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "true")
+    with use_norgate_data_profile("norgate_eod_sp500_pit"):
+        with pytest.raises(RuntimeError, match="Strict HPI snapshot mode"):
+            load_exact_hpi_inputs(
+                indexname_str="S&P 500",
+                benchmark_symbol_str="$SPX",
+                start_date_str="2024-01-02",
+                end_date_str="2024-01-03",
+            )
+
+
 @pytest.mark.parametrize(
     ("ranking_field_str", "expected_symbol_list"),
     [
@@ -466,8 +555,8 @@ def test_opportunity_ranking_depends_only_on_approved_universe_rule(
     assert opportunity_symbol_list == expected_symbol_list
 
 
-def test_removed_member_exits_and_freed_slot_enters_next_candidate():
-    strategy_obj = make_strategy(max_positions_int=2)
+def test_removed_member_exit_funds_replacement_after_known_open_fill():
+    strategy_obj = make_strategy(max_positions_int=1)
     strategy_obj.previous_bar = pd.Timestamp("2024-03-08")
     strategy_obj.current_bar = pd.Timestamp("2024-03-11")
     strategy_obj.universe_df = pd.DataFrame(
@@ -512,8 +601,7 @@ def test_removed_member_exits_and_freed_slot_enters_next_candidate():
     assert exit_order_obj.trade_id == 7
     assert isinstance(entry_order_obj, MarketOrder)
     assert entry_order_obj.target is False
-    assert entry_order_obj.unit == "value"
-    assert entry_order_obj.amount == pytest.approx(50_000.0)
+    assert entry_order_obj.amount == 100_000.0
 
 
 def test_missing_open_for_current_member_defers_exit_until_next_tradable_open():
@@ -770,7 +858,7 @@ def test_position_remains_open_without_an_exit_signal():
     assert strategy_obj.get_orders() == []
 
 
-def test_bench_discovers_all_hpi_variants_as_unwired_and_runnable():
+def test_bench_discovers_hpi_variants_with_expected_wired_scope():
     expected_module_set = {
         "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit",
         "strategies.hpi.strategy_mr_hpi_nasdaq100_ibs_rsi_exit",
@@ -789,7 +877,15 @@ def test_bench_discovers_all_hpi_variants_as_unwired_and_runnable():
     assert {entry_obj.module_import_str for entry_obj in hpi_entry_list} == expected_module_set
     assert all(entry_obj.category_label_str == "HPI mean-reversion" for entry_obj in hpi_entry_list)
     assert all(entry_obj.has_run_variant_bool for entry_obj in hpi_entry_list)
-    assert all(not entry_obj.is_wired_bool for entry_obj in hpi_entry_list)
+    wired_module_set = {
+        entry_obj.module_import_str
+        for entry_obj in hpi_entry_list
+        if entry_obj.is_wired_bool
+    }
+    assert wired_module_set == {
+        "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote",
+        "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit",
+    }
 
 
 @pytest.mark.parametrize(
@@ -797,7 +893,16 @@ def test_bench_discovers_all_hpi_variants_as_unwired_and_runnable():
     [
         (
             "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote",
-            {"entry_mode_str": ENTRY_HORIZON_VOTE_STR},
+            {
+                "entry_mode_str": ENTRY_HORIZON_VOTE_STR,
+                "benchmark_symbol_str": "$SPXTR",
+            },
+        ),
+        (
+            "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit",
+            {
+                "benchmark_symbol_str": "$SPXTR",
+            },
         ),
         (
             (
@@ -807,6 +912,7 @@ def test_bench_discovers_all_hpi_variants_as_unwired_and_runnable():
             {
                 "entry_mode_str": ENTRY_HORIZON_VOTE_STR,
                 "liquidity_mode_str": LIQUIDITY_RELATIVE_STR,
+                "benchmark_symbol_str": "$SPX",
             },
         ),
     ],

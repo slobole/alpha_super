@@ -212,6 +212,421 @@ def test_strategy_host_builds_mixed_qpi_decision_plan(monkeypatch):
     assert decision_plan_obj.target_execution_timestamp_ts == datetime(2024, 1, 2, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ)
 
 
+@pytest.mark.parametrize(
+    (
+        "strategy_import_str",
+        "expected_entry_mode_str",
+        "max_positions_int",
+        "expected_entry_weight_map_dict",
+        "preseed_pending_exit_bool",
+        "old_ibs_value_float",
+    ),
+    [
+        (
+            "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote",
+            "hpi_2_3_5_vote",
+            2,
+            {"NEW": 0.5},
+            True,
+            0.1,
+        ),
+        (
+            "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit",
+            "baseline",
+            2,
+            {"NEW": 0.5},
+            True,
+            0.1,
+        ),
+        (
+            "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit",
+            "baseline",
+            1,
+            {},
+            True,
+            0.1,
+        ),
+        (
+            "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit",
+            "baseline",
+            1,
+            {},
+            False,
+            0.95,
+        ),
+    ],
+)
+def test_strategy_host_builds_hpi_decision_plan_with_pending_exit(
+    monkeypatch,
+    strategy_import_str,
+    expected_entry_mode_str,
+    max_positions_int,
+    expected_entry_weight_map_dict,
+    preseed_pending_exit_bool,
+    old_ibs_value_float,
+):
+    import alpha.live.strategy_host as strategy_host_module
+    import strategies.hpi.stateful_long as hpi_module
+
+    monkeypatch.setattr(
+        strategy_host_module,
+        "HPI_MINIMUM_READY_MEMBER_COUNT_INT",
+        1,
+    )
+    monkeypatch.setattr(
+        strategy_host_module,
+        "HPI_MINIMUM_READY_MEMBER_RATIO_FLOAT",
+        0.5,
+    )
+    date_idx = pd.bdate_range("2023-01-02", periods=260)
+    pricing_data_df = make_price_df(["OLD", "NEW", "$SPXTR"], date_idx)
+    universe_df = pd.DataFrame(
+        1,
+        index=date_idx,
+        columns=["OLD", "NEW"],
+    )
+
+    def compute_signals_stub(self, pricing_data_df):
+        signal_data_df = pricing_data_df.copy()
+        feature_df = pd.DataFrame(
+            {
+                ("OLD", "ibs_value_ser"): pd.Series(
+                    old_ibs_value_float,
+                    index=date_idx,
+                ),
+                ("OLD", "rsi2_value_ser"): pd.Series(10.0, index=date_idx),
+                ("NEW", "ibs_value_ser"): pd.Series(0.05, index=date_idx),
+                ("NEW", "rsi2_value_ser"): pd.Series(10.0, index=date_idx),
+                ("OLD", "return_2d_ser"): pd.Series(-0.01, index=date_idx),
+                ("OLD", "return_3d_ser"): pd.Series(-0.01, index=date_idx),
+                ("OLD", "return_5d_ser"): pd.Series(-0.01, index=date_idx),
+                ("NEW", "return_2d_ser"): pd.Series(-0.01, index=date_idx),
+                ("NEW", "return_3d_ser"): pd.Series(-0.01, index=date_idx),
+                ("NEW", "return_5d_ser"): pd.Series(-0.01, index=date_idx),
+                ("OLD", "hpi_2d_ser"): pd.Series(20.0, index=date_idx),
+                ("OLD", "hpi_value_ser"): pd.Series(20.0, index=date_idx),
+                ("OLD", "hpi_5d_ser"): pd.Series(20.0, index=date_idx),
+                ("NEW", "hpi_2d_ser"): pd.Series(20.0, index=date_idx),
+                ("NEW", "hpi_value_ser"): pd.Series(20.0, index=date_idx),
+                ("NEW", "hpi_5d_ser"): pd.Series(20.0, index=date_idx),
+                ("OLD", "sma_200_price_ser"): pd.Series(
+                    90.0,
+                    index=date_idx,
+                ),
+                ("NEW", "sma_200_price_ser"): pd.Series(
+                    90.0,
+                    index=date_idx,
+                ),
+                ("OLD", "Turnover"): pd.Series(1_000_000.0, index=date_idx),
+                ("NEW", "Turnover"): pd.Series(2_000_000.0, index=date_idx),
+            },
+            index=date_idx,
+        )
+        feature_df.columns = pd.MultiIndex.from_tuples(feature_df.columns)
+        return pd.concat([signal_data_df, feature_df], axis=1)
+
+    monkeypatch.setattr(
+        hpi_module,
+        "load_exact_hpi_inputs",
+        lambda **_kwargs: (
+            ["OLD", "NEW"],
+            universe_df,
+            pricing_data_df,
+        ),
+    )
+    monkeypatch.setattr(
+        hpi_module.HPIStatefulLongStrategy,
+        "compute_signals",
+        compute_signals_stub,
+    )
+    monkeypatch.setattr(
+        hpi_module.HPIStatefulLongStrategy,
+        "get_opportunity_list",
+        lambda self, close_row_ser, member_symbol_set=None: ["NEW"],
+    )
+    original_iterate_func = hpi_module.HPIStatefulLongStrategy.iterate
+
+    def iterate_with_contract_assertion(
+        self,
+        data_df,
+        close_row_ser,
+        open_price_ser,
+    ):
+        assert self.entry_mode_str == expected_entry_mode_str
+        assert self.previous_bar == pd.Timestamp("2023-12-29")
+        assert self.current_bar == pd.Timestamp("2024-01-02")
+        assert open_price_ser.empty
+        original_iterate_func(
+            self,
+            data_df,
+            close_row_ser,
+            open_price_ser,
+        )
+
+    monkeypatch.setattr(
+        hpi_module.HPIStatefulLongStrategy,
+        "iterate",
+        iterate_with_contract_assertion,
+    )
+
+    release_obj = make_release(
+        strategy_import_str=strategy_import_str,
+        data_profile_str="norgate_eod_sp500_hpi_pit",
+        params_dict={
+            "capital_base_float": 100000.0,
+            "max_positions_int": max_positions_int,
+        },
+    )
+    pod_state_obj = PodState(
+        pod_id_str=release_obj.pod_id_str,
+        user_id_str=release_obj.user_id_str,
+        account_route_str=release_obj.account_route_str,
+        position_amount_map={"OLD": 12.0},
+        cash_float=1000.0,
+        total_value_float=100000.0,
+        strategy_state_dict={
+            "trade_id_int": 7,
+            "current_trade_map": {"OLD": 7},
+            **(
+                {"pending_exit_symbol_list": ["OLD"]}
+                if preseed_pending_exit_bool
+                else {}
+            ),
+        },
+        updated_timestamp_ts=datetime(
+            2024,
+            1,
+            30,
+            16,
+            0,
+            tzinfo=MARKET_TIMEZONE_OBJ,
+        ),
+    )
+
+    decision_plan_obj = build_decision_plan_for_release(
+        release_obj=release_obj,
+        as_of_ts=datetime(
+            2024,
+            1,
+            31,
+            16,
+            10,
+            tzinfo=MARKET_TIMEZONE_OBJ,
+        ),
+        pod_state_obj=pod_state_obj,
+    )
+
+    assert decision_plan_obj.decision_base_position_map == {"OLD": 12.0}
+    assert decision_plan_obj.exit_asset_set == {"OLD"}
+    assert (
+        decision_plan_obj.entry_target_weight_map_dict
+        == expected_entry_weight_map_dict
+    )
+    assert decision_plan_obj.entry_priority_list == list(
+        expected_entry_weight_map_dict
+    )
+    assert decision_plan_obj.strategy_state_dict[
+        "pending_exit_symbol_list"
+    ] == ["OLD"]
+    assert decision_plan_obj.snapshot_metadata_dict[
+        "hpi_observation_clock_str"
+    ] == "norgate_padding_none"
+    assert decision_plan_obj.snapshot_metadata_dict[
+        "hpi_membership_contract_str"
+    ] == "exact_pit"
+
+
+def test_hpi_live_readiness_rejects_short_history_features():
+    import alpha.live.strategy_host as strategy_host_module
+    import strategies.hpi.stateful_long as hpi_module
+
+    decision_date_ts = pd.Timestamp("2024-01-31")
+    strategy_obj = hpi_module.HPIStatefulLongStrategy(
+        name="hpi_readiness_test",
+        benchmarks=["$SPXTR"],
+        ranking_field_str=hpi_module.TURNOVER_FIELD_STR,
+    )
+    universe_df = pd.DataFrame(
+        {"TEST": [1]},
+        index=[decision_date_ts],
+    )
+    feature_value_dict = {
+        ("TEST", "return_3d_ser"): np.nan,
+        ("TEST", "hpi_value_ser"): np.nan,
+        ("TEST", "ibs_value_ser"): 0.05,
+        ("TEST", "rsi2_value_ser"): 10.0,
+        ("TEST", "sma_200_price_ser"): np.nan,
+        ("TEST", "Turnover"): 1_000_000.0,
+    }
+    close_row_ser = pd.Series(feature_value_dict, name=decision_date_ts)
+    close_row_ser.index = pd.MultiIndex.from_tuples(close_row_ser.index)
+
+    with pytest.raises(RuntimeError, match="no fully ready PIT member"):
+        strategy_host_module._validate_hpi_live_feature_readiness(
+            hpi_module=hpi_module,
+            strategy_obj=strategy_obj,
+            close_row_ser=close_row_ser,
+            universe_df=universe_df,
+            decision_date_ts=decision_date_ts,
+        )
+
+
+def test_hpi_live_readiness_rejects_collapsed_cross_section():
+    import alpha.live.strategy_host as strategy_host_module
+    import strategies.hpi.stateful_long as hpi_module
+
+    decision_date_ts = pd.Timestamp("2024-01-31")
+    strategy_obj = hpi_module.HPIStatefulLongStrategy(
+        name="hpi_coverage_test",
+        benchmarks=["$SPXTR"],
+        ranking_field_str=hpi_module.TURNOVER_FIELD_STR,
+    )
+    symbol_list = [f"TEST{symbol_int:03d}" for symbol_int in range(500)]
+    universe_df = pd.DataFrame(
+        1,
+        index=[decision_date_ts],
+        columns=symbol_list,
+    )
+    feature_value_dict = {}
+    required_feature_list = [
+        "return_3d_ser",
+        "hpi_value_ser",
+        "ibs_value_ser",
+        "rsi2_value_ser",
+        "sma_200_price_ser",
+        hpi_module.TURNOVER_FIELD_STR,
+    ]
+    for symbol_int, symbol_str in enumerate(symbol_list):
+        feature_float = 1.0 if symbol_int < 399 else np.nan
+        for feature_str in required_feature_list:
+            feature_value_dict[(symbol_str, feature_str)] = feature_float
+    close_row_ser = pd.Series(feature_value_dict, name=decision_date_ts)
+    close_row_ser.index = pd.MultiIndex.from_tuples(close_row_ser.index)
+
+    with pytest.raises(RuntimeError, match="feature coverage is insufficient"):
+        strategy_host_module._validate_hpi_live_feature_readiness(
+            hpi_module=hpi_module,
+            strategy_obj=strategy_obj,
+            close_row_ser=close_row_ser,
+            universe_df=universe_df,
+            decision_date_ts=decision_date_ts,
+        )
+
+
+@pytest.mark.parametrize(
+    ("member_count_int", "ready_member_count_int", "should_pass_bool"),
+    [
+        (500, 400, True),
+        (501, 400, False),
+    ],
+)
+def test_hpi_live_readiness_enforces_count_and_ratio_boundaries(
+    member_count_int,
+    ready_member_count_int,
+    should_pass_bool,
+):
+    import alpha.live.strategy_host as strategy_host_module
+    import strategies.hpi.stateful_long as hpi_module
+
+    decision_date_ts = pd.Timestamp("2024-01-31")
+    strategy_obj = hpi_module.HPIStatefulLongStrategy(
+        name="hpi_coverage_boundary_test",
+        benchmarks=["$SPXTR"],
+        ranking_field_str=hpi_module.TURNOVER_FIELD_STR,
+    )
+    symbol_list = [
+        f"BOUNDARY{symbol_int:03d}"
+        for symbol_int in range(member_count_int)
+    ]
+    universe_df = pd.DataFrame(
+        1,
+        index=[decision_date_ts],
+        columns=symbol_list,
+    )
+    required_feature_list = [
+        "return_3d_ser",
+        "hpi_value_ser",
+        "ibs_value_ser",
+        "rsi2_value_ser",
+        "sma_200_price_ser",
+        hpi_module.TURNOVER_FIELD_STR,
+    ]
+    feature_value_dict = {
+        (symbol_str, feature_str): (
+            1.0
+            if symbol_int < ready_member_count_int
+            else np.nan
+        )
+        for symbol_int, symbol_str in enumerate(symbol_list)
+        for feature_str in required_feature_list
+    }
+    close_row_ser = pd.Series(feature_value_dict, name=decision_date_ts)
+    close_row_ser.index = pd.MultiIndex.from_tuples(close_row_ser.index)
+
+    validate_fn = strategy_host_module._validate_hpi_live_feature_readiness
+    validate_kwarg_dict = {
+        "hpi_module": hpi_module,
+        "strategy_obj": strategy_obj,
+        "close_row_ser": close_row_ser,
+        "universe_df": universe_df,
+        "decision_date_ts": decision_date_ts,
+    }
+    if should_pass_bool:
+        validate_fn(**validate_kwarg_dict)
+    else:
+        with pytest.raises(
+            RuntimeError,
+            match="feature coverage is insufficient",
+        ):
+            validate_fn(**validate_kwarg_dict)
+
+
+def test_hpi_vote_live_readiness_requires_vote_features():
+    import alpha.live.strategy_host as strategy_host_module
+    import strategies.hpi.stateful_long as hpi_module
+
+    decision_date_ts = pd.Timestamp("2024-01-31")
+    strategy_obj = hpi_module.HPIStatefulLongStrategy(
+        name="hpi_vote_coverage_test",
+        benchmarks=["$SPXTR"],
+        ranking_field_str=hpi_module.TURNOVER_FIELD_STR,
+        entry_mode_str=hpi_module.ENTRY_HORIZON_VOTE_STR,
+    )
+    symbol_list = [f"VOTE{symbol_int:03d}" for symbol_int in range(500)]
+    universe_df = pd.DataFrame(
+        1,
+        index=[decision_date_ts],
+        columns=symbol_list,
+    )
+    common_feature_list = [
+        "return_3d_ser",
+        "hpi_value_ser",
+        "ibs_value_ser",
+        "rsi2_value_ser",
+        "sma_200_price_ser",
+        hpi_module.TURNOVER_FIELD_STR,
+        hpi_module.RETURN_2D_FIELD_STR,
+        hpi_module.RETURN_5D_FIELD_STR,
+        hpi_module.HPI_2D_FIELD_STR,
+    ]
+    feature_value_dict = {
+        (symbol_str, feature_str): 1.0
+        for symbol_str in symbol_list
+        for feature_str in common_feature_list
+    }
+    close_row_ser = pd.Series(feature_value_dict, name=decision_date_ts)
+    close_row_ser.index = pd.MultiIndex.from_tuples(close_row_ser.index)
+
+    with pytest.raises(RuntimeError, match="missing latest required feature"):
+        strategy_host_module._validate_hpi_live_feature_readiness(
+            hpi_module=hpi_module,
+            strategy_obj=strategy_obj,
+            close_row_ser=close_row_ser,
+            universe_df=universe_df,
+            decision_date_ts=decision_date_ts,
+        )
+
+
 def test_strategy_host_rejects_unsupported_incremental_limit_order_shape(monkeypatch):
     import strategies.dv2.strategy_mr_dv2 as dv2_module
 

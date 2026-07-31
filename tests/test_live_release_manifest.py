@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -9,12 +10,21 @@ from alpha.live.release_manifest import (
     load_release_list,
     parse_release_manifest,
     validate_enabled_deployment_for_mode,
+    validate_release_manifest,
 )
 
 
 RELEASE_TEMPLATE_PATH_TUPLE: tuple[Path, ...] = (
     Path("docs/live/release_templates/pod_dv2_daily_moo.yaml.example"),
     Path("docs/live/release_templates/pod_qpi_daily_moo.yaml.example"),
+    Path(
+        "docs/live/release_templates/"
+        "pod_hpi_sp500_2_3_5_vote_daily_moo.yaml.example"
+    ),
+    Path(
+        "docs/live/release_templates/"
+        "pod_hpi_sp500_ibs_rsi_exit_daily_moo.yaml.example"
+    ),
     Path(
         "docs/live/release_templates/"
         "pod_taa_btal_fallback_tqqq_vix_cash_monthly_open.yaml.example"
@@ -82,6 +92,88 @@ def test_release_templates_cover_every_wired_strategy():
     }
 
     assert template_strategy_import_set == set(SUPPORTED_STRATEGY_IMPORT_TUPLE)
+
+
+def test_hpi_release_requires_dedicated_snapshot_profile():
+    release_obj = parse_release_manifest(
+        str(RELEASE_TEMPLATE_PATH_TUPLE[2].resolve())
+    )
+
+    with pytest.raises(ValueError, match="strict snapshot profile"):
+        validate_release_manifest(
+            replace(
+                release_obj,
+                data_profile_str="norgate_eod_sp500_pit",
+            )
+        )
+
+
+def test_non_hpi_release_rejects_dedicated_hpi_snapshot_profile():
+    release_obj = parse_release_manifest(
+        str(RELEASE_TEMPLATE_PATH_TUPLE[0].resolve())
+    )
+
+    with pytest.raises(ValueError, match="reserved for strict HPI"):
+        validate_release_manifest(
+            replace(
+                release_obj,
+                data_profile_str="norgate_eod_sp500_hpi_pit",
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("field_name_str", "invalid_value_str"),
+    [
+        ("session_calendar_id_str", "XTSE"),
+        ("signal_clock_str", "month_end_snapshot_ready"),
+        ("execution_policy_str", "same_day_moc"),
+    ],
+)
+def test_hpi_release_preserves_close_to_next_open_contract(
+    field_name_str,
+    invalid_value_str,
+):
+    release_obj = parse_release_manifest(
+        str(RELEASE_TEMPLATE_PATH_TUPLE[2].resolve())
+    )
+
+    with pytest.raises(ValueError, match="Strict HPI releases require"):
+        validate_release_manifest(
+            replace(
+                release_obj,
+                **{field_name_str: invalid_value_str},
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("param_name_str", "invalid_value_obj"),
+    [
+        ("indexname_str", "Nasdaq 100"),
+        ("benchmark_symbol_str", "$SPX"),
+        ("start_date_str", "2024-01-01"),
+        ("backtest_start_date_str", "2010-01-01"),
+        ("max_positions_int", 1),
+    ],
+)
+def test_hpi_release_preserves_named_strategy_parameters(
+    param_name_str,
+    invalid_value_obj,
+):
+    release_obj = parse_release_manifest(
+        str(RELEASE_TEMPLATE_PATH_TUPLE[2].resolve())
+    )
+    params_dict = dict(release_obj.params_dict)
+    params_dict[param_name_str] = invalid_value_obj
+
+    with pytest.raises(ValueError, match="Strict HPI releases require"):
+        validate_release_manifest(
+            replace(
+                release_obj,
+                params_dict=params_dict,
+            )
+        )
 
 
 @pytest.mark.parametrize("template_path_obj", RELEASE_TEMPLATE_PATH_TUPLE)

@@ -61,6 +61,8 @@ alpha/live/releases/<client_id>/*.yaml
 |---|---|---|
 | `pod_dv2_daily_moo.yaml.example` | `strategies.dv2.strategy_mr_dv2:DVO2Strategy` | `norgate_eod_sp500_pit` |
 | `pod_qpi_daily_moo.yaml.example` | `strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy` | `norgate_eod_sp500_pit` |
+| `pod_hpi_sp500_2_3_5_vote_daily_moo.yaml.example` | `strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote` | `norgate_eod_sp500_hpi_pit` |
+| `pod_hpi_sp500_ibs_rsi_exit_daily_moo.yaml.example` | `strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit` | `norgate_eod_sp500_hpi_pit` |
 | `pod_taa_btal_fallback_tqqq_vix_cash_monthly_open.yaml.example` | `strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash` | `norgate_eod_etf_plus_vix_helper` |
 | `pod_taa_btal_1n_fallback_tqqq_vix_cash_monthly_open.yaml.example` | `strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash` | `norgate_eod_etf_plus_vix_helper` |
 | `pod_taa_btal_linearity_1n_fallback_qqq_vix_cash_monthly_open.yaml.example` | `strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash` | `norgate_eod_etf_plus_vix_helper` |

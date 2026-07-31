@@ -217,6 +217,7 @@ data_profile_str: norgate_eod_sp500_pit
 
 What it does:
 - says what data contract this release expects
+- selects the immutable snapshot profile used while building the decision
 
 Why it exists:
 - the same strategy logic can require different data stacks
@@ -225,9 +226,12 @@ Why it exists:
   - EOD
   - point-in-time S&P 500 universe
 
+Strict HPI uses `norgate_eod_sp500_hpi_pit`, which preserves exact PIT
+membership and `PaddingType.NONE`. QPI and DV2 remain on
+`norgate_eod_sp500_pit`. The manifest validator rejects mixing these contracts.
+
 Right now in v1:
-- this is partly metadata
-- and partly a control hook
+- this is both audited metadata and an active data-routing control
 - for example, `same_day_moc + intraday` is explicitly blocked until real intraday adapters exist
 
 Used by:
