@@ -70,6 +70,12 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     # drawdown, so the best 2x book carries it — at the price of BTAL's 2011
     # inception, which keeps this variant off the 2008 record.
     "strategies.taa_df.strategy_taa_df_btal_1n_fallback_qld_vix_cash": MaturityTier.PM_READY,
+    # Promoted so the client-ladder books can run fresh through the manager:
+    # vox_iyr is the long-history sector-MR sleeve in rungs 1-2, and the
+    # no-BTAL linearity variant carries the 2008 proxy books. Both passed the
+    # readiness gate (capital scales, benchmark genuinely total return).
+    "strategies.mean_reversion.strategy_mr_us_sector_etf_ibs_downshock_vox_iyr": MaturityTier.PM_READY,
+    "strategies.taa_df.strategy_taa_df_linearity_1n_fallback_qqq_vix_cash": MaturityTier.PM_READY,
     "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc": MaturityTier.PM_READY,
     "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc_asset_sma200": MaturityTier.PM_READY,
     "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_asset_sma200": MaturityTier.PM_READY,

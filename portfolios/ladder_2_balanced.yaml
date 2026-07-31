@@ -1,14 +1,22 @@
-# Adds the NDX momentum engine to the low-drawdown base.
-name: ladder_2_balanced
-capital: 100000
-benchmark: $SPX
+# Adds the NDX momentum engine to the low-drawdown base. Fresh run.
+name_str: ladder_2_balanced
+capital_base_float: 100000.0
+backtest_start_date_str: "2004-01-01"
+end_date_str: null
+allocation_policy_str: fixed
+max_workers_int: null
+rebalance: null
+save_pod_artifacts_bool: true
 
 pods:
-  - strategy: strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash
-    weight: 0.45
+  - pod_id_str: pod_taa_linearity
+    strategy_import_str: strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash
+    weight_float: 0.45
 
-  - strategy: strategy_mr_us_sector_etf_ibs_downshock_vox_iyr
-    weight: 0.25
+  - pod_id_str: pod_sector_mr
+    strategy_import_str: strategies.mean_reversion.strategy_mr_us_sector_etf_ibs_downshock_vox_iyr
+    weight_float: 0.25
 
-  - strategy: strategy_mo_atr_normalized_ndx_vxn_scaled
-    weight: 0.3
+  - pod_id_str: pod_ndx_mo
+    strategy_import_str: strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy
+    weight_float: 0.3
