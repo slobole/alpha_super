@@ -66,6 +66,10 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     # capital scales, and the stored benchmark is genuinely total return.
     "strategies.taa_df.strategy_taa_df_1n_fallback_qld_vix_cash": MaturityTier.PM_READY,
     "strategies.taa_df.strategy_taa_df_1n_fallback_sso_vix_cash": MaturityTier.PM_READY,
+    # 2x with BTAL: the clean isolation showed BTAL adds return AND cuts the
+    # drawdown, so the best 2x book carries it — at the price of BTAL's 2011
+    # inception, which keeps this variant off the 2008 record.
+    "strategies.taa_df.strategy_taa_df_btal_1n_fallback_qld_vix_cash": MaturityTier.PM_READY,
     "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc": MaturityTier.PM_READY,
     "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc_asset_sma200": MaturityTier.PM_READY,
     "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_asset_sma200": MaturityTier.PM_READY,

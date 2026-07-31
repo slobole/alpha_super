@@ -1,0 +1,37 @@
+# Growth at 2x leverage, keeping the BTAL defensive sleeve.
+#
+# The clean isolation (leverage-only vs BTAL-only) showed the two changes do
+# opposite things: dropping to 2x cuts the drawdown, and dropping BTAL deepens
+# it. So the best 2x book keeps BTAL. The price is history: BTAL launched in
+# 2011, so unlike ladder_3b this book cannot reach 2008.
+#
+#   3c = best risk profile of the growth family, 2012-10 window
+#   3b = 2008 evidence, weaker risk profile
+#   3  = highest return, 3x, 2012-10 window
+#
+# DV2 and HPI each need $25,000, so this book cannot run below ~$140,000.
+name_str: ladder_3c_growth_2x_btal
+capital_base_float: 150000.0
+backtest_start_date_str: "2004-01-01"
+end_date_str: null
+allocation_policy_str: fixed
+max_workers_int: null
+rebalance: null
+save_pod_artifacts_bool: true
+
+pods:
+  - pod_id_str: pod_taa_2x_btal
+    strategy_import_str: strategies.taa_df.strategy_taa_df_btal_1n_fallback_qld_vix_cash
+    weight_float: 0.32
+
+  - pod_id_str: pod_ndx_mo
+    strategy_import_str: strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy
+    weight_float: 0.32
+
+  - pod_id_str: pod_dv2
+    strategy_import_str: strategies.dv2.strategy_mr_dv2:DVO2Strategy
+    weight_float: 0.18
+
+  - pod_id_str: pod_hpi
+    strategy_import_str: strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote
+    weight_float: 0.18
