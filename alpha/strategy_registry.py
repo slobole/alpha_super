@@ -79,6 +79,12 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc": MaturityTier.PM_READY,
     "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc_asset_sma200": MaturityTier.PM_READY,
     "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_asset_sma200": MaturityTier.PM_READY,
+    # MOSAIC: correlation-penalized Russell 1000 momentum (N=20, lambda=0.75,
+    # corr window 126d, ADV >= $5M). Promoted 2026-07-31 after the four-part
+    # validation cycle: monotone lambda effect, sub-period stability,
+    # corr-window robustness, S&P 500 replication, GICS cross-check, and the
+    # liquidity gate. Deliberately NOT wired — no live account route yet.
+    "strategies.momentum.strategy_mo_mosaic_russell1000:MosaicRussell1000Strategy": MaturityTier.PM_READY,
 }
 
 
