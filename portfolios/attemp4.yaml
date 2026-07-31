@@ -1,13 +1,23 @@
-name: attemp4
-capital: 100000
-benchmark: $SPX
+# Converted from the simple (combine-pickles) schema to the manager schema on
+# 2026-07-31 so the Bench Run button executes a fresh run per pod.
+name_str: attemp4
+capital_base_float: 100000.0
+backtest_start_date_str: "2004-01-01"
+end_date_str: null
+allocation_policy_str: fixed
+max_workers_int: null
+rebalance: null
+save_pod_artifacts_bool: true
 
 pods:
-  - strategy: strategy_mr_sector_dispersion_ibs_kie_ihi_xlc
-    weight: 0.3334
+  - pod_id_str: pod_sector_dispersion_kie_ihi_xlc
+    strategy_import_str: strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc
+    weight_float: 0.3334
 
-  - strategy: strategy_mr_hpi_sp500_2_3_5_vote
-    weight: 0.3333
+  - pod_id_str: pod_hpi
+    strategy_import_str: strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote
+    weight_float: 0.3333
 
-  - strategy: strategy_mr_dv2
-    weight: 0.3333
+  - pod_id_str: pod_dv2
+    strategy_import_str: strategies.dv2.strategy_mr_dv2:DVO2Strategy
+    weight_float: 0.3333

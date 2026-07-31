@@ -1,0 +1,29 @@
+# Converted from the simple (combine-pickles) schema to the manager schema on
+# 2026-07-31 so the Bench Run button executes a fresh run per pod.
+#
+# VXN + MOSAIC pair: same momentum premium, two orthogonal defenses — VXN
+# sizes a concentrated NDX basket by implied vol ("how much to hold"), MOSAIC
+# assembles a decorrelated Russell 1000 basket ("what to hold"). Measured
+# monthly-return correlation between the two pods: 0.665 (2000-2026).
+name_str: attemp6
+capital_base_float: 100000.0
+backtest_start_date_str: "2004-01-01"
+end_date_str: null
+allocation_policy_str: fixed
+max_workers_int: null
+# Annual reset to 50/50: under buy-and-hold the VXN pod drifted to 65% of the
+# book by 2026, re-concentrating exactly the NDX exposure MOSAIC was added to
+# dilute. Monthly-rebalanced 50/50 measured Sharpe 1.297 vs 1.266 for drift.
+rebalance:
+  frequency_str: annually
+  policy_str: fixed
+save_pod_artifacts_bool: true
+
+pods:
+  - pod_id_str: pod_ndx_mo
+    strategy_import_str: strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy
+    weight_float: 0.5
+
+  - pod_id_str: pod_mosaic
+    strategy_import_str: strategies.momentum.strategy_mo_mosaic_russell1000:MosaicRussell1000Strategy
+    weight_float: 0.5
