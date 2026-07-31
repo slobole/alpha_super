@@ -663,14 +663,13 @@ class AtrNormalizedNdxStrategy(Strategy):
         self.current_trade_map: defaultdict[str, int] = defaultdict(default_trade_id_int)
         self.universe_df: pd.DataFrame | None = None
 
-    def compute_signals(self, pricing_data: pd.DataFrame) -> pd.DataFrame:
-        signal_data_df = pricing_data.copy()
+    def get_tradeable_symbol_list(self, pricing_data: pd.DataFrame) -> list[str]:
         benchmark_data_symbol_set = set(
             self._benchmark_data_symbol_map_dict.values()
         )
         tradeable_symbol_list = [
             str(symbol_str)
-            for symbol_str in signal_data_df.columns.get_level_values(0).unique()
+            for symbol_str in pricing_data.columns.get_level_values(0).unique()
             if (
                 str(symbol_str) not in self._benchmarks
                 and str(symbol_str) != self.regime_symbol_str
@@ -679,6 +678,11 @@ class AtrNormalizedNdxStrategy(Strategy):
         ]
         if len(tradeable_symbol_list) == 0:
             raise RuntimeError("No tradeable stock symbols were found in pricing_data.")
+        return tradeable_symbol_list
+
+    def compute_signals(self, pricing_data: pd.DataFrame) -> pd.DataFrame:
+        signal_data_df = pricing_data.copy()
+        tradeable_symbol_list = self.get_tradeable_symbol_list(signal_data_df)
 
         price_close_df = pd.DataFrame(
             {symbol_str: signal_data_df[(symbol_str, "Close")] for symbol_str in tradeable_symbol_list},
@@ -755,20 +759,30 @@ class AtrNormalizedNdxStrategy(Strategy):
 
         return pd.concat([signal_data_df] + feature_frame_list, axis=1)
 
-    def get_target_weight_ser(self, close_row_ser: pd.Series) -> pd.Series:
+    def get_ranked_candidate_feature_df(self, close_row_ser: pd.Series) -> pd.DataFrame:
+        """
+        Return all eligible candidates sorted by risk-adjusted score.
+
+        Ordering is deterministic: risk_adj_score_float descending, then
+        symbol_str ascending on ties. Returns an empty DataFrame when the
+        regime gate fails or no candidate survives the filters.
+        """
         if self.universe_df is None:
             raise RuntimeError("universe_df must be set before monthly rebalances.")
         candidate_feature_df = close_row_ser.unstack()
         if self.regime_symbol_str not in candidate_feature_df.index:
             raise RuntimeError(f"Missing regime feature row for {self.regime_symbol_str}.")
 
+        empty_candidate_feature_df = pd.DataFrame(
+            columns=["risk_adj_score_float", "stock_trend_pass_bool", "symbol_str"]
+        )
         regime_pass_value = candidate_feature_df.loc[self.regime_symbol_str].get("regime_pass_bool", np.nan)
         if pd.isna(regime_pass_value) or not bool(regime_pass_value):
-            return pd.Series(dtype=float)
+            return empty_candidate_feature_df
 
         required_field_list = ["stock_trend_pass_bool", "risk_adj_score_ser"]
         if any(field_str not in candidate_feature_df.columns for field_str in required_field_list):
-            return pd.Series(dtype=float)
+            return empty_candidate_feature_df
 
         universe_member_ser = get_asof_universe_membership_ser(
             self.universe_df,
@@ -777,7 +791,7 @@ class AtrNormalizedNdxStrategy(Strategy):
         active_symbol_list = universe_member_ser[universe_member_ser == 1].index.astype(str).tolist()
         candidate_feature_df = candidate_feature_df[candidate_feature_df.index.isin(active_symbol_list)].copy()
         if len(candidate_feature_df) == 0:
-            return pd.Series(dtype=float)
+            return empty_candidate_feature_df
 
         stock_trend_raw_ser = candidate_feature_df["stock_trend_pass_bool"]
         stock_trend_pass_ser = stock_trend_raw_ser.where(stock_trend_raw_ser.notna(), False).astype(bool)
@@ -794,14 +808,20 @@ class AtrNormalizedNdxStrategy(Strategy):
             finite_risk_adj_mask_vec & stock_trend_pass_mask_vec
         ]
         if len(candidate_feature_df) == 0:
-            return pd.Series(dtype=float)
+            return empty_candidate_feature_df
 
-        candidate_feature_df = candidate_feature_df.sort_values(
+        return candidate_feature_df.sort_values(
             by=["risk_adj_score_float", "symbol_str"],
             ascending=[False, True],
             kind="mergesort",
         )
-        selected_feature_df = candidate_feature_df.iloc[: self.max_positions_int].copy()
+
+    def get_target_weight_ser(self, close_row_ser: pd.Series) -> pd.Series:
+        ranked_candidate_feature_df = self.get_ranked_candidate_feature_df(close_row_ser=close_row_ser)
+        if len(ranked_candidate_feature_df) == 0:
+            return pd.Series(dtype=float)
+
+        selected_feature_df = ranked_candidate_feature_df.iloc[: self.max_positions_int].copy()
 
         target_weight_float = 1.0 / float(self.max_positions_int)
         target_weight_ser = pd.Series(
