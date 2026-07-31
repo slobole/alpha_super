@@ -287,15 +287,19 @@ The WIRED TAA implementation intentionally uses `TOTALRETURN` ETF closes for sig
 
 ## 6. WIRED scope
 
-BENCH defines a module as WIRED when it appears in `SUPPORTED_STRATEGY_IMPORT_TUPLE`. The seven current imports are listed in [`alpha/live/release_manifest.py`](../../alpha/live/release_manifest.py) `:14-22`:
+BENCH defines a module as WIRED when it appears in
+`SUPPORTED_STRATEGY_IMPORT_TUPLE`. The current imports are listed in
+[`alpha/live/release_manifest.py`](../../alpha/live/release_manifest.py):
 
 1. DV2;
 2. QPI IBS/RSI exit;
-3. TAA BTAL fallback-TQQQ VIX-cash;
-4. TAA BTAL 1/n fallback-TQQQ VIX-cash;
-5. TAA BTAL linearity 1/n fallback-QQQ VIX-cash;
-6. NDX ATR-normalized momentum;
-7. NDX ATR-normalized VXN-scaled momentum.
+3. HPI S&P 500 2/3/5 vote;
+4. HPI S&P 500 IBS/RSI exit;
+5. TAA BTAL fallback-TQQQ VIX-cash;
+6. TAA BTAL 1/n fallback-TQQQ VIX-cash;
+7. TAA BTAL linearity 1/n fallback-QQQ VIX-cash;
+8. NDX ATR-normalized momentum;
+9. NDX ATR-normalized VXN-scaled momentum.
 
 WIRED does not mean currently submitting broker orders. In this local checkout:
 
@@ -312,6 +316,7 @@ Runtime VPS state can differ from the local checkout. This document is not an op
 |---|---|---|---|---|
 | `strategy_mr_dv2` | Stock `CAPITALSPECIAL` OHLC; 126-day return, NATR, DV2, SMA200 | Same stock series; next open | Empty slots remain cash | Held dividends and cash yield disappear; ex-dividend signal effects are non-directional |
 | `strategy_mr_qpi_ibs_rsi_exit` | Stock `CAPITALSPECIAL` OHLC; 3-day return, SMA200, IBS, QPI, RSI2 | Same stock series; next open | Empty slots remain cash; enabled manifest reserves 5% of account budget | Missing dividends/cash yield depress equity; ex-dividend moves can create artificial oversold states |
+| HPI S&P 500 variants | Stock `CAPITALSPECIAL` OHLC on the dedicated no-padding/exact-PIT profile; prior-only 1,260-observation HPI, SMA200, IBS, RSI2 | Same stock series; next open | Empty slots remain cash | Separate profile preserves strict HPI feature timing; missing dividends/cash yield still affect equity realism |
 | `strategy_mo_atr_normalized_ndx` | NDX stocks and SPY all use `CAPITALSPECIAL`; momentum, ATR20, stock SMA100, SPY SMA200 | Same stock series; first open of next month | Regime failure can produce 100% cash; incomplete selection leaves residual cash | Long return usually understated, but price-only signals can change holdings and are not simply conservative |
 | `strategy_mo_atr_normalized_ndx_vxn_scaled` | Same NDX signals plus observed VXN level | Same | Deliberate 25%-100% exposure, hence up to 75% cash | The intentional `0%` cash policy depresses its absolute result and penalizes it versus the base NDX strategy; stock dividends are also missing |
 | `strategy_taa_df_btal_fallback_tqqq_vix_cash` | Defensive ETF momentum uses `TOTALRETURN`; SPY/VIX gate uses `CAPITALSPECIAL` | Tradeable ETFs use `CAPITALSPECIAL`; next-month open | VIX gate can turn the TQQQ fallback allocation into real cash | Signals are distribution-aware, but ETF distributions are missing and the intentional `0%` cash policy penalizes cash-heavy periods |
