@@ -5,9 +5,14 @@
 # it. So the best 2x book keeps BTAL. The price is history: BTAL launched in
 # 2011, so unlike ladder_3b this book cannot reach 2008.
 #
-#   3c = best risk profile of the growth family, 2012-10 window
-#   3b = 2008 evidence, weaker risk profile
-#   3  = highest return, 3x, 2012-10 window
+# Measured outcome (2012-10..2026-07): the sleeve-level advantage did NOT
+# carry to book level. ladder_3 (3x+BTAL) dominates this book on every axis —
+# 21.8%/-13.5% vs 21.0%/-15.2% — because at 32% weight the sleeve's standalone
+# drawdown matters less than how it diversifies against the other pods.
+#
+#   3  = the growth default: best return AND best drawdown of the family
+#   3c = for clients who refuse 3x ETFs specifically; 2x sleeve, same shape
+#   3b = 2008 evidence (no BTAL, so it reaches 2008); weakest risk profile
 #
 # DV2 and HPI each need $25,000, so this book cannot run below ~$140,000.
 name_str: ladder_3c_growth_2x_btal
