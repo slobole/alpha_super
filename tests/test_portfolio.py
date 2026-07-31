@@ -3,8 +3,9 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from alpha.engine.metrics import generate_monthly_returns, select_tail_event_date_index
+from alpha.engine.metrics import generate_monthly_returns, select_tail_event_date_index, sharpe_ratio
 from alpha.engine.portfolio import Portfolio
+from alpha.engine.report import _summary_metrics_dict
 from alpha.engine.strategy import Strategy
 
 
@@ -80,6 +81,74 @@ class PortfolioTests(unittest.TestCase):
         self.assertEqual(
             portfolio._transactions['bar'].to_list(),
             [strategy_a_date_index[2], strategy_a_date_index[4]],
+        )
+
+    def test_book_and_pod_summaries_share_sharpe_basis(self):
+        # Regression guard: the book column used to report all-days Sharpe while
+        # pod columns reported dead-days-excluded Sharpe, so a 50/50 book could
+        # show a headline below both of its pods. Both levels must now report
+        # the all-days basis as 'Sharpe Ratio' and the dead-days-excluded basis
+        # as 'Sharpe Ratio (Active Days)'.
+        dates_index = pd.bdate_range('2024-01-02', periods=8)
+        returns_a_list = [0.0, 0.01, 0.0, 0.0, -0.005, 0.02, 0.0, 0.01]
+        returns_b_list = [0.0, 0.0, 0.012, 0.0, 0.008, 0.0, -0.004, 0.0]
+        strategy_a = make_strategy('StrategyA', dates_index, returns_a_list)
+        strategy_b = make_strategy('StrategyB', dates_index, returns_b_list)
+        # each pod is all-cash (invested value 0) on its flat days => dead days exist
+        for strategy_obj, returns_list in ((strategy_a, returns_a_list), (strategy_b, returns_b_list)):
+            invested_mask_ser = pd.Series(returns_list, index=dates_index) != 0.0
+            strategy_obj.results['portfolio_value'] = (
+                strategy_obj.results['total_value'].where(invested_mask_ser, 0.0)
+            )
+
+        portfolio = Portfolio(
+            strategies=[strategy_a, strategy_b],
+            weights=[0.5, 0.5],
+            capital_base=100.0,
+        )
+
+        book_column_ser = portfolio.summary[portfolio.name]
+        book_return_ser = portfolio.results['total_value'].pct_change(fill_method=None)
+        expected_book_all_days_float = float(sharpe_ratio(book_return_ser))
+
+        self.assertAlmostEqual(
+            float(book_column_ser.loc['Sharpe Ratio']),
+            expected_book_all_days_float,
+        )
+        self.assertTrue(np.isfinite(float(book_column_ser.loc['Sharpe Ratio (Active Days)'])))
+
+        for strategy_obj in (strategy_a, strategy_b):
+            standalone_col_name_str = f'{strategy_obj.name} Standalone'
+            pod_column_ser = portfolio.standalone_pod_summary[standalone_col_name_str]
+            pod_return_ser = (
+                strategy_obj.results['total_value'].astype(float).pct_change(fill_method=None)
+            )
+            expected_pod_all_days_float = float(sharpe_ratio(pod_return_ser))
+            expected_pod_active_days_float = float(
+                sharpe_ratio(pod_return_ser, strategy_obj.results['portfolio_value'])
+            )
+            # the two bases genuinely differ for these pods, so a basis mismatch
+            # between book and pod columns would fail the headline assertions
+            self.assertNotAlmostEqual(
+                expected_pod_all_days_float, expected_pod_active_days_float
+            )
+            self.assertAlmostEqual(
+                float(pod_column_ser.loc['Sharpe Ratio']),
+                expected_pod_all_days_float,
+            )
+            self.assertAlmostEqual(
+                float(pod_column_ser.loc['Sharpe Ratio (Active Days)']),
+                expected_pod_active_days_float,
+            )
+
+        # the saved summary.json payload carries both bases for the book
+        summary_metrics_dict = _summary_metrics_dict(portfolio)
+        self.assertAlmostEqual(
+            summary_metrics_dict['sharpe'], expected_book_all_days_float
+        )
+        self.assertAlmostEqual(
+            summary_metrics_dict['sharpe_active_days'],
+            float(book_column_ser.loc['Sharpe Ratio (Active Days)']),
         )
 
     def test_no_rebalance_compounds_pods_independently(self):

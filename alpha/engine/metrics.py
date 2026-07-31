@@ -477,8 +477,9 @@ def generate_overall_metrics(total_value: pd.Series, trades: pd.DataFrame = None
     parameters:
     - total_value: Series representing the portfolio's total value over time.
     - trades: DataFrame of closed trades (optional, used for exposure time calculation).
-    - portfolio_value: Series representing the portfolio's value excluding cash 
-        (optional, used for Sharpe ratio).
+    - portfolio_value: Series representing the portfolio's value excluding cash
+        (optional, used only for 'Sharpe Ratio (Active Days)'; the headline
+        'Sharpe Ratio' is always computed over all days).
     - series_to_correlate: benchmark series for correlation analysis (optional).
     - capital_base: initial portfolio value (optional, defaults to first value 
         of total_value).
@@ -556,8 +557,18 @@ def generate_overall_metrics(total_value: pd.Series, trades: pd.DataFrame = None
         s.loc['Avg. Loss Day [%]'] = (-negative_daily_return_ser).mean() * 100
     else:
         s.loc['Avg. Loss Day [%]'] = np.nan
-    # compute Sharpe ratio
-    s.loc['Sharpe Ratio'] = sharpe_ratio(daily_return_ser, portfolio_value, days_in_year=days_in_year)
+    # compute Sharpe ratio on two explicit bases (house convention):
+    # 'Sharpe Ratio' (headline) uses every day in the window, flat all-cash
+    # days included, so pod and book summaries are always comparable.
+    # 'Sharpe Ratio (Active Days)' excludes dead days (invested value == 0 and
+    # return == 0); it needs an invested-value series and is NaN without one.
+    s.loc['Sharpe Ratio'] = sharpe_ratio(daily_return_ser, days_in_year=days_in_year)
+    if portfolio_value is not None:
+        s.loc['Sharpe Ratio (Active Days)'] = sharpe_ratio(
+            daily_return_ser, portfolio_value, days_in_year=days_in_year
+        )
+    else:
+        s.loc['Sharpe Ratio (Active Days)'] = np.nan
     # compute exposure-adjusted return (only if exposure time is nonzero)
     if exposure_time == 0:
         s.loc['Exposure-Adjusted Return (Ann.) [%]'] = 0

@@ -8,6 +8,7 @@ from alpha.engine.metrics import (
     generate_benchmark_regression_metrics,
     generate_overall_metrics,
     generate_trades,
+    sharpe_ratio,
 )
 
 
@@ -402,6 +403,54 @@ class GenerateOverallMetricsTests(unittest.TestCase):
         self.assertAlmostEqual(
             float(summary_ser.loc["# Drawdowns / year"]),
             expected_drawdowns_per_year_float,
+        )
+
+    def test_generate_overall_metrics_reports_both_sharpe_bases(self):
+        date_index = pd.date_range("2024-01-01", periods=6, freq="D")
+        daily_return_ser = pd.Series(
+            [0.0, 0.01, 0.0, 0.0, -0.005, 0.02],
+            index=date_index,
+            dtype=float,
+        )
+        total_value_ser = 100.0 * (1.0 + daily_return_ser).cumprod()
+        # invested only on days that produced a return; all-cash (dead) otherwise
+        portfolio_value_ser = total_value_ser.where(daily_return_ser != 0.0, 0.0)
+
+        summary_with_pv_ser = generate_overall_metrics(
+            total_value_ser,
+            portfolio_value=portfolio_value_ser,
+            capital_base=100.0,
+        )
+        summary_without_pv_ser = generate_overall_metrics(
+            total_value_ser,
+            capital_base=100.0,
+        )
+
+        realized_return_ser = total_value_ser.pct_change(fill_method=None)
+        expected_all_days_float = float(sharpe_ratio(realized_return_ser))
+        expected_active_days_float = float(
+            sharpe_ratio(realized_return_ser, portfolio_value_ser)
+        )
+
+        # the fixture must actually separate the two bases
+        self.assertNotAlmostEqual(expected_all_days_float, expected_active_days_float)
+
+        # headline Sharpe is all-days regardless of whether an invested-value
+        # series was supplied — the caller can no longer switch its basis
+        self.assertAlmostEqual(
+            float(summary_with_pv_ser.loc["Sharpe Ratio"]), expected_all_days_float
+        )
+        self.assertAlmostEqual(
+            float(summary_without_pv_ser.loc["Sharpe Ratio"]), expected_all_days_float
+        )
+
+        # active-days Sharpe is present and labeled when computable, NaN otherwise
+        self.assertAlmostEqual(
+            float(summary_with_pv_ser.loc["Sharpe Ratio (Active Days)"]),
+            expected_active_days_float,
+        )
+        self.assertTrue(
+            np.isnan(float(summary_without_pv_ser.loc["Sharpe Ratio (Active Days)"]))
         )
 
     def test_generate_overall_metrics_adds_turnover_and_cost_drag_from_transactions(self):

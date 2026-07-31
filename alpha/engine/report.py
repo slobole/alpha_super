@@ -73,7 +73,13 @@ METRIC_HELP_TEXT_DICT = {
     'Avg. Loss Day [%]': 'Mean loss magnitude conditional on the strategy having a negative day.',
     'Sharpe Ratio': (
         'Mean daily return divided by daily-return standard deviation, multiplied by the square root of 252. '
-        'The risk-free rate is zero.'
+        'The risk-free rate is zero. Uses every day in the window, including flat all-cash days, '
+        'so pod and book figures share one basis.'
+    ),
+    'Sharpe Ratio (Active Days)': (
+        'Same formula, but dead days — invested value zero and return zero — are excluded first. '
+        'Shows risk-adjusted return while capital was actually deployed; blank when no '
+        'invested-value series is available.'
     ),
     'Exposure Time [%]': (
         'Percentage of stored days covered by at least one closed-trade interval. '
@@ -179,7 +185,8 @@ _PERFORMANCE_SUMMARY_SECTION_TUPLE = (
         'Return & Risk-Adjusted Performance',
         (
             'Return [%]', 'Return (Ann.) [%]', 'Volatility (Ann.) [%]',
-            'Volatility (Monthly) [%]', 'Sharpe Ratio', 'MAR Ratio', 'Positive Months [%]',
+            'Volatility (Monthly) [%]', 'Sharpe Ratio', 'Sharpe Ratio (Active Days)',
+            'MAR Ratio', 'Positive Months [%]',
         ),
         False,
     ),
@@ -423,6 +430,23 @@ def _first_summary_value(summary_df: pd.DataFrame | None, metric_name_list: list
     return None
 
 
+def _entity_column_summary_value(summary_df: pd.DataFrame | None, metric_name_str: str):
+    """Read a metric from the entity's own (first) summary column only.
+
+    'Sharpe Ratio (Active Days)' is legitimately NaN for benchmark columns, so
+    scanning across columns for the first non-NaN value would silently report a
+    benchmark's figure as the entity's.
+    """
+    if summary_df is None or len(summary_df) == 0 or len(summary_df.columns) == 0:
+        return None
+    if metric_name_str not in summary_df.index:
+        return None
+    value_obj = summary_df[summary_df.columns[0]].loc[metric_name_str]
+    if pd.isna(value_obj):
+        return None
+    return value_obj
+
+
 def _trade_count_int(summary_trades_df: pd.DataFrame | None, fallback_trade_df: pd.DataFrame | None = None):
     if summary_trades_df is not None and '# Trades' in summary_trades_df.index:
         value_obj = _first_summary_value(summary_trades_df, ['# Trades'])
@@ -455,6 +479,9 @@ def _summary_metrics_dict(result_obj) -> dict:
             'final_equity': final_equity_float,
             'ann_return_pct': _json_float(_first_summary_value(summary_df, ['Return (Ann.) [%]'])),
             'sharpe': _json_float(_first_summary_value(summary_df, ['Sharpe Ratio'])),
+            'sharpe_active_days': _json_float(
+                _entity_column_summary_value(summary_df, 'Sharpe Ratio (Active Days)')
+            ),
             'max_drawdown_pct': _json_float(_first_summary_value(summary_df, ['Max. Drawdown [%]'])),
             'trade_count': _trade_count_int(
                 getattr(result_obj, 'summary_trades', None),
@@ -846,7 +873,7 @@ def _build_kpi_grid_html(
     kpi_spec_list = [
         ('Return (Ann.) [%]', 'Annualized Return', '252-day convention'),
         ('Volatility (Ann.) [%]', 'Volatility', 'Annualized sigma'),
-        ('Sharpe Ratio', 'Sharpe Ratio', 'Risk-free rate = 0'),
+        ('Sharpe Ratio', 'Sharpe Ratio', 'All days, risk-free rate = 0'),
         ('Max. Drawdown [%]', 'Max Drawdown', 'Peak to trough'),
         ('Beta', 'Beta', 'vs benchmark'),
     ]

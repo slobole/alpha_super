@@ -457,9 +457,16 @@ class Portfolio:
             pm_benchmark_return_ser = self.regression_benchmark_value_ser.pct_change(fill_method=None)
 
         # --- overall metrics: portfolio column + weighted sleeves ---
+        # *** CRITICAL*** Sharpe-basis parity with the pods: the book's
+        # invested-value series is the sum of sleeve invested values, so the
+        # book's 'Sharpe Ratio (Active Days)' applies the same dead-day rule
+        # (invested value == 0 and return == 0) the pod summaries use. The
+        # headline 'Sharpe Ratio' is all-days at every level.
+        book_invested_value_ser = self._sleeve_portfolio_value_df.sum(axis=1).astype(float)
         self.summary = pd.DataFrame()
         self.summary[self.name] = generate_overall_metrics(
             self.results['total_value'],
+            portfolio_value=book_invested_value_ser,
             series_to_correlate=pm_benchmark_return_ser,
             capital_base=self._capital_base,
         )
