@@ -14,12 +14,14 @@ fake instead of spawning real subprocesses.
 
 from __future__ import annotations
 
+import re
 import secrets
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 from flask import (
     Flask,
@@ -51,6 +53,13 @@ RUN_PORTFOLIO_MANAGER_SCRIPT_PATH = REPO_ROOT_PATH / "strategies" / "run_portfol
 REPORT_TOOLTIP_SCRIPT_SHA256_BASE64_STR = "4x6jPzYq7ERLrCfTtOFnnJrgm6t+NFxUP+8hnzmKgAY="
 
 SUPPORTED_ANALYSIS_TUPLE = ("vanilla", "capacity", "timing", "risk", "stress")
+ANALYSIS_DIR_BY_ANALYSIS_DICT = {
+    "vanilla": "vanilla_backtest",
+    "capacity": "capacity_analysis",
+    "timing": "execution_timing_analyzer",
+    "risk": "risk_analysis",
+    "stress": "stress_test",
+}
 # *** CRITICAL*** Only these analyses receive --strategy-kwarg. Verified against
 # _analysis_command_tuple in scripts/research/run_strategy_analysis.py: capacity,
 # timing and stress build their commands without forwarding the kwargs at all.
@@ -80,6 +89,7 @@ RECENT_RUN_TABLE_LIMIT_INT = 8
 # nothing to compare, above 5 the columns stop being readable.
 COMPARE_MIN_INT = 2
 COMPARE_MAX_INT = 5
+MARKET_TIMEZONE_OBJ = ZoneInfo("America/New_York")
 
 # Signature variants the console can be rendered in. Display-only: the cookie
 # changes nothing on the server and never reaches a launched job.
@@ -129,10 +139,12 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
     def inject_globals_fn() -> dict[str, Any]:
         job_manager = flask_app_obj.config["job_manager_obj"]
         active_variant_str = _active_variant_str()
+        market_now_datetime_obj = datetime.now(MARKET_TIMEZONE_OBJ)
         return {
             "bench_version_str": __version__,
-            "server_date_str": datetime.now().strftime("%Y-%m-%d"),
-            "server_clock_str": datetime.now().strftime("%H:%M:%S"),
+            "server_date_str": market_now_datetime_obj.strftime("%Y-%m-%d"),
+            "server_clock_str": market_now_datetime_obj.strftime("%H:%M:%S"),
+            "server_timezone_str": market_now_datetime_obj.tzname() or "ET",
             "active_job_count_int": job_manager.active_count(),
             "analysis_label_dict": ANALYSIS_LABEL_DICT,
             "single_analysis_tuple": SUPPORTED_ANALYSIS_TUPLE,
@@ -207,23 +219,31 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             abort(404)
         run_index_obj = runs.build_strategy_run_index()
         run_entry_list = run_index_obj.runs_for(module_import_str, strategy_entry_obj.stem_str)
-        report_run_entry_list = [
-            run_obj for run_obj in run_entry_list if run_obj.has_report_bool
-        ]
+        selected_analysis_str = request.args.get("analysis", "vanilla")
+        if selected_analysis_str not in SUPPORTED_ANALYSIS_TUPLE:
+            abort(400, description=f"Unknown analysis: {selected_analysis_str}")
+        analyzer_view_list = _analyzer_view_dict_list(
+            strategy_entry_obj,
+            run_entry_list,
+            flask_app_obj.config["job_manager_obj"],
+        )
         latest_report_run_obj = next(
             (
-                run_obj
-                for run_obj in report_run_entry_list
-                if run_obj.analysis_dir_str == "capacity_analysis"
-                and not run_obj.is_legacy_capacity_bool
+                view_dict["latest_run"]
+                for view_dict in analyzer_view_list
+                if view_dict["analysis_str"] == selected_analysis_str
+                and view_dict["latest_run"] is not None
+                and view_dict["latest_run"].has_report_bool
             ),
-            report_run_entry_list[0] if report_run_entry_list else None,
+            None,
         )
         return render_template(
             "strategy.html",
             strategy=strategy_entry_obj,
             run_entry_list=run_entry_list,
             latest_report_run=latest_report_run_obj,
+            selected_analysis_str=selected_analysis_str,
+            analyzer_view_list=analyzer_view_list,
             preset_dict=RUN_PRESET_DICT,
             kwarg_aware_analysis_tuple=KWARG_AWARE_ANALYSIS_TUPLE,
             kwarg_blind_analysis_tuple=tuple(
@@ -241,6 +261,31 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
         strategy pages show it — no metric is recomputed here.
         """
         submitted_module_list = request.args.getlist("m")
+        if len(submitted_module_list) == 0:
+            strategy_entry_list = catalog.list_strategies()
+            run_index_obj = runs.build_strategy_run_index(
+                strategy_stem_set={entry_obj.stem_str for entry_obj in strategy_entry_list}
+            )
+            compare_candidate_list = []
+            for entry_obj in strategy_entry_list:
+                latest_vanilla_run_obj = run_index_obj.latest_vanilla_for(
+                    entry_obj.module_import_str,
+                    entry_obj.stem_str,
+                )
+                if (
+                    latest_vanilla_run_obj is not None
+                    and latest_vanilla_run_obj.has_report_bool
+                    and latest_vanilla_run_obj.summary_dict
+                ):
+                    compare_candidate_list.append(
+                        _build_strategy_card_dict(entry_obj, run_index_obj)
+                    )
+            return render_template(
+                "compare_landing.html",
+                compare_candidate_list=compare_candidate_list,
+                compare_min_int=COMPARE_MIN_INT,
+                compare_max_int=COMPARE_MAX_INT,
+            )
         deduped_module_list: list[str] = []
         for module_import_str in submitted_module_list:
             if module_import_str not in deduped_module_list:
@@ -286,8 +331,28 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
     def research_page_fn() -> str:
         """Result folders no strategy page can reach — sweeps, comparisons,
         diagnostics written under names that match no strategy file."""
-        orphan_view_list = runs.orphan_research_view_list(catalog.list_strategies())
-        return render_template("research.html", orphan_view_list=orphan_view_list)
+        strategy_entry_list = catalog.list_strategies()
+        run_index_obj = runs.build_strategy_run_index(
+            strategy_stem_set={entry_obj.stem_str for entry_obj in strategy_entry_list}
+        )
+        readiness_row_list = [
+            {
+                "strategy": entry_obj,
+                "analyzer_view_list": _analyzer_view_dict_list(
+                    entry_obj,
+                    run_index_obj.runs_for(entry_obj.module_import_str, entry_obj.stem_str),
+                    flask_app_obj.config["job_manager_obj"],
+                ),
+            }
+            for entry_obj in strategy_entry_list
+            if entry_obj.is_pm_ready_bool
+        ]
+        orphan_view_list = runs.orphan_research_view_list(strategy_entry_list)
+        return render_template(
+            "research.html",
+            orphan_view_list=orphan_view_list,
+            readiness_row_list=readiness_row_list,
+        )
 
     @flask_app_obj.route("/portfolios")
     def portfolios_page_fn() -> str:
@@ -498,10 +563,14 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
         job_obj = job_manager.get_job(job_id_str)
         if job_obj is None:
             abort(404)
+        job_view_dict = _job_view_dict_list(
+            [job_obj], flask_app_obj.config["produced_run_cache_dict"]
+        )[0]
         return render_template(
             "log.html",
             job=job_obj,
             log_text_str=job_manager.read_log_text(job_id_str),
+            produced_run=job_view_dict["produced_run"],
         )
 
     # ── HTMX fragments ───────────────────────────────────────────────────
@@ -546,13 +615,13 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
         invalid_analysis_list = [a for a in analysis_list if a not in SUPPORTED_ANALYSIS_TUPLE]
         if invalid_analysis_list:
             abort(400, description=f"Unknown analysis: {', '.join(invalid_analysis_list)}")
-        if (
-            analysis_list == ["capacity"]
-            and not strategy_entry_obj.has_capacity_analysis_bool
+        if len(analysis_list) == 1 and not _analysis_available_bool(
+            strategy_entry_obj, analysis_list[0]
         ):
+            analysis_label_str = ANALYSIS_LABEL_DICT[analysis_list[0]]
             abort(
                 400,
-                description="Capacity unavailable — missing capacity hook.",
+                description=f"{analysis_label_str} unavailable — missing analyzer hook.",
             )
 
         # Only kwargs this strategy's run_variant actually declares. run_strategy.py
@@ -727,6 +796,152 @@ def _sortable_metric_float(summary_dict: dict, key_str: str) -> float | None:
     return float(value_obj)
 
 
+def _analysis_available_bool(
+    strategy_entry_obj: catalog.StrategyEntry,
+    analysis_str: str,
+) -> bool:
+    """Whether the current module exposes the hook required by an analyzer."""
+    if analysis_str in {"vanilla", "risk"}:
+        return strategy_entry_obj.has_run_variant_bool
+    if analysis_str == "capacity":
+        return strategy_entry_obj.has_capacity_analysis_bool
+    return strategy_entry_obj.has_timing_analysis_bool
+
+
+def _analysis_tuple_from_command_list(command_list: list[str]) -> tuple[str, ...]:
+    analysis_list: list[str] = []
+    for part_index_int, part_str in enumerate(command_list[:-1]):
+        if (
+            part_str == "--analysis"
+            and command_list[part_index_int + 1] in SUPPORTED_ANALYSIS_TUPLE
+        ):
+            analysis_list.append(command_list[part_index_int + 1])
+    return tuple(dict.fromkeys(analysis_list))
+
+
+def _summary_status_by_analysis_dict(log_text_str: str) -> dict[str, str]:
+    """Parse the runner's final per-analysis table, never an incidental line."""
+    normalized_log_text_str = log_text_str.replace("\r\n", "\n").replace("\r", "\n")
+    summary_marker_str = "Summary\nAnalysis  Status  Seconds  Detail"
+    if summary_marker_str not in normalized_log_text_str:
+        return {}
+    summary_text_str = normalized_log_text_str.rsplit(summary_marker_str, maxsplit=1)[-1]
+    status_by_analysis_dict: dict[str, str] = {}
+    for analysis_str, status_str in re.findall(
+        r"^(vanilla|capacity|timing|risk|stress)\s+(PASS|SKIP|FAIL)\b",
+        summary_text_str,
+        flags=re.MULTILINE,
+    ):
+        status_by_analysis_dict[analysis_str] = status_str
+    return status_by_analysis_dict
+
+
+def _latest_job_record_by_analysis_dict(job_manager_obj, strategy_stem_str: str) -> dict:
+    """Newest BENCH job evidence for each analyzer on one strategy."""
+    if job_manager_obj is None or not hasattr(job_manager_obj, "list_jobs"):
+        return {}
+    read_log_fn = getattr(job_manager_obj, "read_log_text", None)
+    latest_record_by_analysis_dict: dict[str, dict[str, Any]] = {}
+    for job_obj in job_manager_obj.list_jobs():
+        if job_obj.kind_str != "analysis" or job_obj.target_str != strategy_stem_str:
+            continue
+        analysis_tuple = _analysis_tuple_from_command_list(list(job_obj.command_list))
+        if len(analysis_tuple) == 0:
+            continue
+        log_text_str = ""
+        if callable(read_log_fn):
+            try:
+                log_text_str = str(read_log_fn(job_obj.job_id_str))
+            except OSError:
+                log_text_str = ""
+        parsed_status_dict = _summary_status_by_analysis_dict(log_text_str)
+        try:
+            created_timestamp_float = datetime.fromisoformat(job_obj.created_at_str).timestamp()
+        except (TypeError, ValueError):
+            created_timestamp_float = 0.0
+        for analysis_str in analysis_tuple:
+            if analysis_str in latest_record_by_analysis_dict:
+                continue
+            if job_obj.is_active_bool:
+                status_str = job_obj.status_str.upper()
+            elif analysis_str in parsed_status_dict:
+                status_str = parsed_status_dict[analysis_str]
+            elif len(analysis_tuple) == 1 and job_obj.status_str in {"failed", "error"}:
+                status_str = "FAIL"
+            else:
+                # Exit 0 also covers a runner-level SKIP. Without the summary
+                # table there is no per-analyzer evidence to promote to PASS.
+                status_str = "NOT RUN"
+            latest_record_by_analysis_dict[analysis_str] = {
+                "status_str": status_str,
+                "timestamp_float": created_timestamp_float,
+                "job": job_obj,
+            }
+    return latest_record_by_analysis_dict
+
+
+def _analyzer_view_dict_list(
+    strategy_entry_obj: catalog.StrategyEntry,
+    run_entry_list: list[runs.RunEntry],
+    job_manager_obj=None,
+) -> list[dict[str, Any]]:
+    """Five analyzer cells backed by hooks, artifacts, and BENCH job evidence."""
+    latest_run_by_analysis_dict: dict[str, runs.RunEntry] = {}
+    for run_obj in run_entry_list:
+        for analysis_str, analysis_dir_str in ANALYSIS_DIR_BY_ANALYSIS_DICT.items():
+            if (
+                analysis_str not in latest_run_by_analysis_dict
+                and run_obj.analysis_dir_str == analysis_dir_str
+                and run_obj.has_report_bool
+            ):
+                latest_run_by_analysis_dict[analysis_str] = run_obj
+
+    latest_job_record_dict = _latest_job_record_by_analysis_dict(
+        job_manager_obj,
+        strategy_entry_obj.stem_str,
+    )
+    analyzer_view_list: list[dict[str, Any]] = []
+    for analysis_str in SUPPORTED_ANALYSIS_TUPLE:
+        available_bool = _analysis_available_bool(strategy_entry_obj, analysis_str)
+        latest_run_obj = latest_run_by_analysis_dict.get(analysis_str)
+        artifact_timestamp_float = (
+            latest_run_obj.effective_activity_timestamp_float if latest_run_obj is not None else 0.0
+        )
+        job_record_dict = latest_job_record_dict.get(analysis_str)
+        if not available_bool:
+            status_str = "SKIP"
+            detail_str = "Missing analyzer hook"
+        elif (
+            job_record_dict is not None
+            and job_record_dict["timestamp_float"] >= artifact_timestamp_float
+            and (
+                job_record_dict["status_str"] != "NOT RUN"
+                or latest_run_obj is None
+            )
+        ):
+            status_str = job_record_dict["status_str"]
+            detail_str = "Latest BENCH job"
+        elif latest_run_obj is not None:
+            status_str = "PASS"
+            detail_str = latest_run_obj.display_timestamp_str
+        else:
+            status_str = "NOT RUN"
+            detail_str = "No saved evidence"
+        analyzer_view_list.append(
+            {
+                "analysis_str": analysis_str,
+                "code_str": analysis_str[0].upper(),
+                "label_str": ANALYSIS_LABEL_DICT[analysis_str],
+                "status_str": status_str,
+                "status_class_str": status_str.lower().replace(" ", "-"),
+                "detail_str": detail_str,
+                "available_bool": available_bool,
+                "latest_run": latest_run_obj,
+            }
+        )
+    return analyzer_view_list
+
+
 def _build_strategy_card_dict(strategy_entry_obj, run_index_obj) -> dict[str, Any]:
     latest_vanilla_run_obj = run_index_obj.latest_vanilla_for(
         strategy_entry_obj.module_import_str, strategy_entry_obj.stem_str
@@ -745,6 +960,13 @@ def _build_strategy_card_dict(strategy_entry_obj, run_index_obj) -> dict[str, An
         "latest_vanilla_run": latest_vanilla_run_obj,
         "latest_run": latest_run_obj,
         "has_recent_run_bool": False,
+        "analyzer_view_list": _analyzer_view_dict_list(
+            strategy_entry_obj,
+            run_index_obj.runs_for(
+                strategy_entry_obj.module_import_str,
+                strategy_entry_obj.stem_str,
+            ),
+        ),
         "headline_chip_list": latest_vanilla_run_obj.headline_chip_list()
         if latest_vanilla_run_obj is not None
         else [],

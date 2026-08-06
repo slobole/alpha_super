@@ -14,6 +14,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime
@@ -25,6 +26,10 @@ import pytest
 from alpha.bench import catalog, runs
 from alpha.bench.app import (
     REPORT_TOOLTIP_SCRIPT_SHA256_BASE64_STR,
+    _analyzer_view_dict_list,
+    _analysis_tuple_from_command_list,
+    _latest_job_record_by_analysis_dict,
+    _summary_status_by_analysis_dict,
     _recent_strategy_stem_set,
     create_app,
 )
@@ -44,6 +49,7 @@ US_SECTOR_ETF_IBS_DOWNSHOCK_NO_XLC_MODULE_STR = (
 US_SECTOR_ETF_IBS_DOWNSHOCK_VOX_IYR_MODULE_STR = (
     "strategies.mean_reversion.strategy_mr_us_sector_etf_ibs_downshock_vox_iyr"
 )
+DV2_SEMIVOL_MODULE_STR = "strategies.dv2.strategy_mr_dv2_semivol_sized"
 
 
 class RecordingJobManager:
@@ -95,11 +101,13 @@ def test_catalog_lists_strategies_and_flags_wired():
     assert dv2_entry.is_wired_bool is True
     assert dv2_entry.has_run_variant_bool is True  # guards the BOM/cp1252 decode fix
     assert dv2_entry.has_capacity_analysis_bool is True
+    assert dv2_entry.has_timing_analysis_bool is True
 
     eom_zroz_entry = catalog.get_strategy_by_module(EOM_ZROZ_SPY_SSO_MODULE_STR)
     assert eom_zroz_entry is not None
     assert eom_zroz_entry.has_run_variant_bool is True
     assert eom_zroz_entry.has_capacity_analysis_bool is False
+    assert eom_zroz_entry.has_timing_analysis_bool is True
 
     seasonality_entry = catalog.get_strategy_by_module(SEASONALITY_MODULE_STR)
     assert seasonality_entry is not None
@@ -718,6 +726,25 @@ def test_run_api_rejects_single_capacity_for_strategy_without_hook(recording_cli
     assert job_manager.call_list == []
 
 
+@pytest.mark.parametrize("analysis_str", ["timing", "stress"])
+def test_run_api_rejects_single_timing_family_analysis_without_hook(
+    recording_client,
+    analysis_str,
+):
+    client, job_manager, token_str = recording_client
+    response = client.post(
+        "/api/run",
+        data={
+            "csrf_token": token_str,
+            "module_import": DV2_SEMIVOL_MODULE_STR,
+            "analysis": analysis_str,
+        },
+    )
+
+    assert response.status_code == 400
+    assert job_manager.call_list == []
+
+
 def test_full_preset_still_launches_for_strategy_without_capacity_hook(recording_client):
     client, job_manager, token_str = recording_client
     response = client.post(
@@ -908,6 +935,150 @@ def test_portfolio_api_requires_csrf_token(recording_client):
 def test_pages_render(recording_client, path_str):
     client, _job_manager, _token_str = recording_client
     assert client.get(path_str).status_code == 200
+
+
+def test_quiet_ops_shell_has_no_live_navigation(recording_client):
+    client, _job_manager, _token_str = recording_client
+    html_str = client.get("/").get_data(as_text=True)
+
+    assert 'class="app-shell"' in html_str
+    assert ">Studies</a>" in html_str
+    assert ">Compare</a>" in html_str
+    assert ">LIVE</a>" not in html_str
+    assert re.search(r"\d{2}:\d{2}:\d{2} (EST|EDT)", html_str)
+
+
+@pytest.mark.parametrize("line_end_str", ["\n", "\r\n"])
+def test_analyzer_job_summary_parser_uses_the_final_summary_table(line_end_str):
+    log_text_str = """[1/3] vanilla
+PASS
+[2/3] capacity
+SKIP: missing hook
+[3/3] risk
+FAIL: analyzer failed
+
+Summary
+Analysis  Status  Seconds  Detail
+vanilla   PASS       12.4
+capacity  SKIP        0.0  missing hook
+risk      FAIL        1.2  analyzer failed
+""".replace("\n", line_end_str)
+
+    assert _analysis_tuple_from_command_list(
+        [
+            "python", "runner.py", "--analysis", "vanilla",
+            "--analysis", "capacity", "--analysis", "risk",
+        ]
+    ) == ("vanilla", "capacity", "risk")
+    assert _summary_status_by_analysis_dict(log_text_str) == {
+        "vanilla": "PASS",
+        "capacity": "SKIP",
+        "risk": "FAIL",
+    }
+
+
+def test_passed_job_without_summary_is_not_promoted_to_analyzer_pass():
+    job_obj = SimpleNamespace(
+        kind_str="analysis",
+        target_str="strategy_mr_dv2",
+        command_list=["python", "runner.py", "--analysis", "vanilla"],
+        job_id_str="job-no-summary",
+        is_active_bool=False,
+        status_str="passed",
+        created_at_str="2026-08-06T12:00:00",
+    )
+    job_manager_obj = SimpleNamespace(
+        list_jobs=lambda: [job_obj],
+        read_log_text=lambda _job_id_str: "runner exited 0 without a summary table",
+    )
+
+    record_dict = _latest_job_record_by_analysis_dict(
+        job_manager_obj, "strategy_mr_dv2"
+    )
+
+    assert record_dict["vanilla"]["status_str"] == "NOT RUN"
+
+
+def test_partial_artifact_without_report_is_not_promoted_to_analyzer_pass():
+    strategy_entry_obj = catalog.get_strategy_by_module(DV2_MODULE_STR)
+    partial_run_obj = _run_entry("strategy_mr_dv2", "2026-08-06_120000")
+    partial_run_obj.has_report_bool = False
+
+    analyzer_view_list = _analyzer_view_dict_list(
+        strategy_entry_obj,
+        [partial_run_obj],
+    )
+    vanilla_view_dict = next(
+        view_dict
+        for view_dict in analyzer_view_list
+        if view_dict["analysis_str"] == "vanilla"
+    )
+
+    assert vanilla_view_dict["status_str"] == "NOT RUN"
+    assert vanilla_view_dict["latest_run"] is None
+
+
+def test_compare_has_a_zero_selection_landing_page(recording_client):
+    client, _job_manager, _token_str = recording_client
+    html_str = client.get("/compare").get_data(as_text=True)
+
+    assert "Choose 2–5 strategies" in html_str
+    assert 'class="compare-picker-check"' in html_str
+
+
+def test_compare_landing_excludes_partial_vanilla_artifact(monkeypatch):
+    strategy_entry_obj = catalog.get_strategy_by_module(DV2_MODULE_STR)
+    partial_run_obj = _run_entry("strategy_mr_dv2", "2026-08-06_120000")
+    partial_run_obj.has_report_bool = False
+    partial_run_obj.summary_dict = {"sharpe": 1.0}
+
+    class _PartialRunIndex:
+        def latest_vanilla_for(self, _module_import_str, _stem_str):
+            return partial_run_obj
+
+    monkeypatch.setattr(catalog, "list_strategies", lambda: [strategy_entry_obj])
+    monkeypatch.setattr(runs, "build_strategy_run_index", lambda **_kwargs: _PartialRunIndex())
+    client = create_app(job_manager_obj=RecordingJobManager()).test_client()
+
+    html_str = client.get("/compare").get_data(as_text=True)
+
+    assert "No comparable Vanilla evidence yet" in html_str
+    assert 'class="compare-picker-check"' not in html_str
+
+
+def test_strategy_workspace_exposes_all_analyzers_and_vanilla_depth(recording_client):
+    client, _job_manager, _token_str = recording_client
+    html_str = client.get(f"/strategy/{DV2_MODULE_STR}").get_data(as_text=True)
+
+    assert "Analyzer contract" in html_str
+    for label_str in ("Vanilla", "Capacity", "Timing", "Risk", "Stress"):
+        assert label_str in html_str
+    for section_str in (
+        "Statistics",
+        "Exposure &amp; composition",
+        "Trades &amp; costs",
+        "Audit",
+    ):
+        assert section_str in html_str
+
+
+def test_strategy_workspace_selects_analyzer_and_rejects_unknown_key(recording_client):
+    client, _job_manager, _token_str = recording_client
+    risk_html_str = client.get(
+        f"/strategy/{DV2_MODULE_STR}?analysis=risk"
+    ).get_data(as_text=True)
+
+    assert 'class="active">\n      Risk' in risk_html_str
+    assert client.get(f"/strategy/{DV2_MODULE_STR}?analysis=unknown").status_code == 400
+
+
+def test_studies_page_marks_skip_as_not_ready(recording_client):
+    client, _job_manager, _token_str = recording_client
+    html_str = client.get("/research").get_data(as_text=True)
+
+    assert "Analyzer readiness · promoted strategies" in html_str
+    assert "SKIP is not ready" in html_str
+    assert 'class="readiness-table"' in html_str or "readiness-table" in html_str
 
 
 def test_variant_switch_sets_the_cookie_and_restyles_the_console(recording_client):

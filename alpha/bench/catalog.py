@@ -118,6 +118,7 @@ class StrategyEntry:
     tier_label_str: str  # "research" | "pm-ready" | "wired"
     has_run_variant_bool: bool
     has_capacity_analysis_bool: bool
+    has_timing_analysis_bool: bool
     summary_str: str  # first line of the module docstring (may be empty)
     run_variant_param_tuple: tuple[RunVariantParam, ...]  # overridable kwargs
 
@@ -266,7 +267,7 @@ def _run_variant_param_tuple(run_variant_node_obj) -> tuple[RunVariantParam, ...
 @lru_cache(maxsize=1024)
 def _parse_strategy_source(
     path_str: str, mtime_ns_int: int
-) -> tuple[str, bool, bool, tuple[RunVariantParam, ...]]:
+) -> tuple[str, bool, bool, bool, tuple[RunVariantParam, ...]]:
     """Return docstring and analysis-hook availability for a strategy file.
 
     Cached on ``(path, mtime_ns)`` so edits invalidate the entry automatically.
@@ -282,7 +283,7 @@ def _parse_strategy_source(
         source_str = Path(path_str).read_bytes().decode("utf-8-sig", errors="replace")
         module_ast = ast.parse(source_str)
     except (OSError, SyntaxError, ValueError):
-        return ("", False, False, ())
+        return ("", False, False, False, ())
 
     docstring_str = ast.get_docstring(module_ast) or ""
     first_line_str = ""
@@ -305,10 +306,16 @@ def _parse_strategy_source(
         and node_obj.name == "build_capacity_analysis_inputs"
         for node_obj in module_ast.body
     )
+    has_timing_analysis_bool = any(
+        isinstance(node_obj, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node_obj.name == "build_execution_timing_analysis_inputs"
+        for node_obj in module_ast.body
+    )
     return (
         first_line_str,
         run_variant_node_obj is not None,
         has_capacity_analysis_bool,
+        has_timing_analysis_bool,
         () if run_variant_node_obj is None else _run_variant_param_tuple(run_variant_node_obj),
     )
 
@@ -329,6 +336,7 @@ def list_strategies() -> list[StrategyEntry]:
             summary_str,
             has_run_variant_bool,
             has_capacity_analysis_bool,
+            has_timing_analysis_bool,
             run_variant_param_tuple,
         ) = _parse_strategy_source(str(module_path), module_path.stat().st_mtime_ns)
         category_str = (
@@ -353,6 +361,7 @@ def list_strategies() -> list[StrategyEntry]:
                 ],
                 has_run_variant_bool=has_run_variant_bool,
                 has_capacity_analysis_bool=has_capacity_analysis_bool,
+                has_timing_analysis_bool=has_timing_analysis_bool,
                 summary_str=summary_str,
                 run_variant_param_tuple=run_variant_param_tuple,
             )

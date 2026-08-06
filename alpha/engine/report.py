@@ -4325,6 +4325,48 @@ def _build_pod_report_links_html(portfolio) -> str:
     )
 
 
+def _compact_policy_str(policy_obj: object) -> str:
+    if not isinstance(policy_obj, dict) or len(policy_obj) == 0:
+        return 'Not recorded'
+    return ' · '.join(
+        f'{key_str}={value_obj}' for key_str, value_obj in sorted(policy_obj.items())
+    )
+
+
+def _build_strategy_audit_html(strategy) -> str:
+    """Human-readable provenance already saved beside the report as metadata."""
+    benchmark_list = list(getattr(strategy, '_benchmarks', []) or [])
+    audit_pair_list = [
+        ('Implementation', f'{strategy.__class__.__module__}.{strategy.__class__.__name__}'),
+        (
+            'Execution provenance',
+            'Read from the strategy implementation; this report does not infer fill timing',
+        ),
+        ('Benchmarks', ', '.join(str(item_obj) for item_obj in benchmark_list) or 'None'),
+        (
+            'Data adjustment',
+            _compact_policy_str(getattr(strategy, '_data_adjustment_policy_dict', {})),
+        ),
+        (
+            'Accounting',
+            _compact_policy_str(getattr(strategy, '_accounting_policy_dict', {})),
+        ),
+        ('Scope', 'Research artifact only; this report does not assert LIVE readiness'),
+    ]
+    row_html_str = ''.join(
+        '<tr><td class="metric">'
+        f'{html.escape(label_str)}</td><td>{html.escape(value_str)}</td></tr>'
+        for label_str, value_str in audit_pair_list
+    )
+    return (
+        '<h2>Audit &amp; Provenance</h2>'
+        '<div class="scroll"><table class="stats-table"><tbody>'
+        f'{row_html_str}</tbody></table></div>'
+        '<p class="metric-context">These fields describe the saved research run. '
+        'They do not change strategy behavior or execution semantics.</p>'
+    )
+
+
 def _build_spec_report_body_html(
     strategy,
     run_date_str: str,
@@ -4386,7 +4428,7 @@ def _build_html(strategy, chart_b64: str) -> str:
     final_val = summ.loc['Final [$]', 'Strategy']
     run_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     header_html_str = _build_report_header_html(
-        report_kind_str='Strategy Report',
+        report_kind_str='Vanilla Backtest',
         report_name_str=strategy.name,
         run_date_str=run_date,
         start_str=start_str,
@@ -4427,7 +4469,7 @@ def _build_html(strategy, chart_b64: str) -> str:
 '''
     weights_content_html_str = _portfolio_weights_html(strategy)
     performance_summary_content_html_str = f'''
-<h2>Performance Summary</h2>
+<h2>Statistics</h2>
 {_format_performance_summary(
     augmented_summary_df,
     strategy_regression_metadata_by_column_dict,
@@ -4479,7 +4521,9 @@ def _build_html(strategy, chart_b64: str) -> str:
                 _build_conditional_beta_plate_html(strategy),
                 open_trades_content_html_str,
                 closed_trades_content_html_str,
+                _build_strategy_audit_html(strategy),
             ],
+            report_kind_str='Vanilla Backtest',
         )
     else:
         weights_card_html_str = (
@@ -4494,6 +4538,7 @@ def _build_html(strategy, chart_b64: str) -> str:
 {_wrap_card_html(monthly_returns_content_html_str, card_class_str='card-monthly-returns')}
 {_wrap_card_html(open_trades_content_html_str)}
 {_wrap_card_html(closed_trades_content_html_str)}
+{_wrap_card_html(_build_strategy_audit_html(strategy))}
 </div>'''
 
     # Resolve styling at render time so it reflects whichever signature variant
@@ -4503,7 +4548,7 @@ def _build_html(strategy, chart_b64: str) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{strategy.name} \u2014 Strategy Report</title>
+<title>{strategy.name} \u2014 Vanilla Backtest</title>
 {build_report_font_head_html()}
 <style>{build_report_css()}</style>
 </head>

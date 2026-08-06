@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% set active_nav = "compare" %}
+{% block title %}Compare strategies{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="page-kicker">Cross-strategy reading</div>
+    <h1 class="page-title">Compare</h1>
+    <p class="page-sub">Choose {{ compare_min_int }}–{{ compare_max_int }} strategies. BENCH reads each latest saved Vanilla summary exactly as written; it does not recompute or rank the results.</p>
+  </div>
+</div>
+
+<form method="get" action="{{ url_for('compare_page_fn') }}" class="compare-picker">
+  {% if compare_candidate_list %}
+  <div class="compare-picker-head">
+    <span id="compare-picker-count">0 selected</span>
+    <button class="btn btn-primary" id="compare-picker-submit" disabled>Open comparison</button>
+  </div>
+  <div class="panel">
+    <table class="table table-dense">
+      <thead><tr><th class="cmp-cell"></th><th>Strategy</th><th class="num">CAGR</th><th class="num">Sharpe</th><th class="num">Max DD</th><th>Window</th></tr></thead>
+      <tbody>
+      {% for card in compare_candidate_list %}
+      {% set strategy = card.strategy %}
+      {% set run = card.latest_vanilla_run %}
+      {% set summary = run.summary_dict %}
+      <tr>
+        <td class="cmp-cell"><input type="checkbox" name="m" value="{{ strategy.module_import_str }}" class="compare-picker-check"></td>
+        <td><a class="mono" href="{{ url_for('strategy_page_fn', module_import_str=strategy.module_import_str) }}">{{ strategy.stem_str }}</a></td>
+        <td class="num">{{ '%.2f%%'|format(summary.get('ann_return_pct')) if summary.get('ann_return_pct') is not none else '—' }}</td>
+        <td class="num">{{ '%.2f'|format(summary.get('sharpe')) if summary.get('sharpe') is not none else '—' }}</td>
+        <td class="num tone-neg">{{ '%.2f%%'|format(summary.get('max_drawdown_pct')) if summary.get('max_drawdown_pct') is not none else '—' }}</td>
+        <td class="mono muted">{{ run.backtest_window_str or '—' }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state panel">
+    <b>No comparable Vanilla evidence yet.</b>
+    <span>Run Vanilla and save both its report and summary before comparing strategies.</span>
+  </div>
+  {% endif %}
+</form>
+
+{% if compare_candidate_list %}
+<script>
+  (function () {
+    var checkList = Array.from(document.querySelectorAll('.compare-picker-check'));
+    var countEl = document.getElementById('compare-picker-count');
+    var submitEl = document.getElementById('compare-picker-submit');
+    function update() {
+      var selectedCountInt = checkList.filter(function (checkEl) { return checkEl.checked; }).length;
+      countEl.textContent = selectedCountInt + ' selected';
+      submitEl.disabled = selectedCountInt < {{ compare_min_int }} || selectedCountInt > {{ compare_max_int }};
+      checkList.forEach(function (checkEl) {
+        checkEl.disabled = !checkEl.checked && selectedCountInt >= {{ compare_max_int }};
+      });
+    }
+    checkList.forEach(function (checkEl) { checkEl.addEventListener('change', update); });
+    update();
+  }());
+</script>
+{% endif %}
+{% endblock %}

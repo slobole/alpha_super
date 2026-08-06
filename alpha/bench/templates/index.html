@@ -12,7 +12,9 @@
 
 <div class="page-head">
   <div>
+    <div class="page-kicker">Research inventory</div>
     <h1 class="page-title">Strategies</h1>
+    <p class="page-sub">Saved evidence first. Analyzer cells read V / C / T / R / S; an inked cell means a saved report exists, while a dashed cell means the current module lacks the required hook.</p>
   </div>
   <div class="stat-row">
     <div class="stat"><div class="stat-value">{{ strategy_count_int }}</div><div class="stat-label">Strategies</div></div>
@@ -58,6 +60,7 @@
         <tr>
           <th class="cmp-cell"></th>
           <th>Strategy</th>
+          <th>Analyzers</th>
           <th class="num sortable" data-sort-key="cagr">CAGR</th>
           <th class="num sortable" data-sort-key="sharpe">Sharpe</th>
           <th class="num sortable" data-sort-key="maxdd">Max DD</th>
@@ -96,6 +99,13 @@
               {% if not s.has_run_variant_bool %}<span class="badge badge-norun">no run_variant</span>{% endif %}
             </div>
           </td>
+          <td>
+            <div class="analyzer-mini" aria-label="Analyzer readiness">
+              {% for analyzer in card.analyzer_view_list %}
+              <span class="analyzer-dot status-{{ analyzer.status_class_str }}" title="{{ analyzer.label_str }} · {{ analyzer.status_str }}">{{ analyzer.code_str }}</span>
+              {% endfor %}
+            </div>
+          </td>
           <td class="num {{ 'tone-pos' if (sm.get('ann_return_pct') or 0) >= 0 else 'tone-neg' }}">{{ '%.1f%%'|format(sm.get('ann_return_pct')) if sm.get('ann_return_pct') is not none else '—' }}</td>
           <td class="num">{{ '%.2f'|format(sm.get('sharpe')) if sm.get('sharpe') is not none else '—' }}</td>
           <td class="num tone-neg">{{ '%.1f%%'|format(sm.get('max_drawdown_pct')) if sm.get('max_drawdown_pct') is not none else '—' }}</td>
@@ -130,7 +140,7 @@
     <p class="table-caption">Files under <span class="mono">strategies/</span> that no run in <span class="mono">results/</span> maps to. "Never run" is a different state from "ran and failed" — nothing here carries a measured number.</p>
     <div class="panel">
       <table class="table table-dense">
-        <thead><tr><th>Strategy</th><th>Family</th><th></th></tr></thead>
+        <thead><tr><th>Strategy</th><th>Family</th><th>Analyzers</th><th></th></tr></thead>
         <tbody>
           {% for card in untested_card_list %}
           {% set s = card.strategy %}
@@ -151,6 +161,13 @@
             <td>
               <span class="badge badge-cat">{{ s.category_label_str }}</span>
               {% if s.subcategory_label_str %}<span class="badge badge-subcat">{{ s.subcategory_label_str }}</span>{% endif %}
+            </td>
+            <td>
+              <div class="analyzer-mini" aria-label="Analyzer readiness">
+                {% for analyzer in card.analyzer_view_list %}
+                <span class="analyzer-dot status-{{ analyzer.status_class_str }}" title="{{ analyzer.label_str }} · {{ analyzer.status_str }}">{{ analyzer.code_str }}</span>
+                {% endfor %}
+              </div>
             </td>
             <td class="num">
               <div class="btn-row job-actions">

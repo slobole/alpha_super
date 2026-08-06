@@ -411,7 +411,11 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertIn('Volatility', report_html_str)
         self.assertIn('11.58%', report_html_str)
         self.assertIn('class="kpi-value pos">+6.11%</div>', report_html_str)
-        self.assertIn('<h2>Performance Summary</h2>', report_html_str)
+        self.assertIn('<h2>Statistics</h2>', report_html_str)
+        self.assertIn('<h2>Audit &amp; Provenance</h2>', report_html_str)
+        self.assertIn('Research artifact only; this report does not assert LIVE readiness', report_html_str)
+        self.assertIn('this report does not infer fill timing', report_html_str)
+        self.assertNotIn('orders execute at T+1 open', report_html_str)
         self.assertIn('<h2>Monthly Returns</h2>', report_html_str)
         self.assertIn('class="card card-monthly-returns"', report_html_str)
         self.assertIn('SPX Ann Ret', report_html_str)
@@ -448,6 +452,25 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertIn('Zero-rate vs $SPX · HAC t=1.35', report_html_str)
         self.assertEqual(report_html_str.count('<div class="kpi-card">'), 6)
         self.assertIn('+4.20% / 1.35', report_html_str)
+
+    def test_journal_spec_indexes_audit_plate_and_escapes_policy_values(self):
+        strategy = make_strategy([0.0, 0.01, -0.005, 0.008, -0.002, 0.004])
+        strategy._data_adjustment_policy_dict = {"source_str": "<raw>"}
+        strategy._accounting_policy_dict = {"mode_str": "cash & carry"}
+
+        with signature_variant_context('journal_spec'):
+            report_html_str = _build_html(strategy, chart_b64='equity-chart-b64')
+
+        self.assertRegex(
+            report_html_str,
+            r'<li><a href="#plate-\d{2}">Audit &amp; Provenance</a></li>',
+        )
+        self.assertRegex(
+            report_html_str,
+            r'<div class="plate" id="plate-\d{2}">.*?Audit &amp; Provenance',
+        )
+        self.assertIn('source_str=&lt;raw&gt;', report_html_str)
+        self.assertIn('mode_str=cash &amp; carry', report_html_str)
 
     def test_strategy_appends_regression_metrics_from_declared_stored_benchmark(self):
         daily_return_list = [0.0] + [0.01 if idx_int % 2 == 0 else -0.006 for idx_int in range(299)]

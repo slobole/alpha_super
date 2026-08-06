@@ -1,38 +1,73 @@
 {% extends "base.html" %}
 {% set active_nav = "research" %}
-{% block title %}Research{% endblock %}
+{% block title %}Studies{% endblock %}
 
 {% block content %}
 <div class="page-head">
   <div>
-    <h1 class="page-title">Research</h1>
-    <p class="page-sub">Result folders under <span class="mono">results/research/strategy/</span> that no strategy page can reach — sweeps, universe comparisons, and diagnostics written under names that match no <span class="mono">strategy_*.py</span> file. The work already ran; this page just makes it visible.</p>
+    <div class="page-kicker">Evidence coverage</div>
+    <h1 class="page-title">Studies</h1>
+    <p class="page-sub">Analyzer readiness for every PM-ready and wired strategy, followed by saved studies that are not owned by a catalog strategy.</p>
   </div>
   <div class="stat-row">
-    <div class="stat"><div class="stat-value">{{ orphan_view_list|length }}</div><div class="stat-label">Studies</div></div>
+    <div class="stat"><div class="stat-value">{{ readiness_row_list|length }}</div><div class="stat-label">Promoted</div></div>
+    <div class="stat"><div class="stat-value">{{ orphan_view_list|length }}</div><div class="stat-label">Unattributed</div></div>
+  </div>
+</div>
+
+<div class="section section-flush">
+  <div class="section-heading-row">
+    <div>
+      <h2 class="section-title">Analyzer readiness · promoted strategies</h2>
+      <p class="table-caption">PASS is backed by a saved report or completed BENCH job. SKIP is not ready. NOT RUN means the hook exists but no evidence has been saved.</p>
+    </div>
+    <div class="readiness-legend"><span class="status-pass">PASS</span><span class="status-skip">SKIP</span><span class="status-fail">FAIL</span><span class="status-not-run">NOT RUN</span></div>
+  </div>
+  <div class="panel readiness-panel">
+    <table class="table table-dense readiness-table">
+      <thead><tr><th>Strategy</th><th>Stage</th>{% for analysis_str in single_analysis_tuple %}<th>{{ analysis_label_dict[analysis_str] }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for row in readiness_row_list %}
+      <tr>
+        <td><a class="mono" href="{{ url_for('strategy_page_fn', module_import_str=row.strategy.module_import_str) }}">{{ row.strategy.stem_str }}</a></td>
+        <td><span class="badge {{ 'badge-wired' if row.strategy.is_wired_bool else 'badge-pmready' }}">{{ 'Wired' if row.strategy.is_wired_bool else 'PM-ready' }}</span></td>
+        {% for analyzer in row.analyzer_view_list %}
+        <td><a class="readiness-cell status-{{ analyzer.status_class_str }}" title="{{ analyzer.detail_str }}" href="{{ url_for('strategy_page_fn', module_import_str=row.strategy.module_import_str, analysis=analyzer.analysis_str) }}#analyzer-report">{{ analyzer.status_str }}</a></td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="section-heading-row orphan-heading">
+  <div>
+    <h2 class="section-title">Unattributed saved studies</h2>
+    <p class="table-caption">Folders under <span class="mono">results/research/strategy/</span> that no strategy page can reach.</p>
   </div>
 </div>
 
 {% if not orphan_view_list %}
-<div class="empty">Every result folder is reachable from a strategy page — nothing is orphaned.</div>
+<div class="empty">Every result folder is reachable from a strategy page.</div>
 {% endif %}
 
 {% for view in orphan_view_list %}
 <div class="section {{ 'section-flush' if loop.first }}">
   <h2 class="section-title">{{ view.name_str }}</h2>
-  <div class="panel">
+  <div class="panel study-artifact-panel">
     <table class="table table-dense">
       <thead><tr><th>Analysis</th><th>When</th><th>Backtest window</th><th class="num">CAGR</th><th class="num">Sharpe</th><th class="num">Max DD</th><th>Artifacts</th><th></th></tr></thead>
       <tbody>
         {% for run in view.run_entry_list %}
-        {% set sm = run.summary_dict %}
+        {% set summary = run.summary_dict %}
         <tr>
           <td><b>{{ run.display_analysis_label_str }}</b></td>
           <td class="muted">{{ run.display_timestamp_str }}</td>
           <td class="mono">{{ run.backtest_window_str or '—' }}</td>
-          <td class="num {{ 'tone-pos' if (sm.get('ann_return_pct') or 0) >= 0 else 'tone-neg' }}">{{ '%.1f%%'|format(sm.get('ann_return_pct')) if sm.get('ann_return_pct') is not none else '—' }}</td>
-          <td class="num">{{ '%.2f'|format(sm.get('sharpe')) if sm.get('sharpe') is not none else '—' }}</td>
-          <td class="num tone-neg">{{ '%.1f%%'|format(sm.get('max_drawdown_pct')) if sm.get('max_drawdown_pct') is not none else '—' }}</td>
+          <td class="num">{{ '%.1f%%'|format(summary.get('ann_return_pct')) if summary.get('ann_return_pct') is not none else '—' }}</td>
+          <td class="num">{{ '%.2f'|format(summary.get('sharpe')) if summary.get('sharpe') is not none else '—' }}</td>
+          <td class="num tone-neg">{{ '%.1f%%'|format(summary.get('max_drawdown_pct')) if summary.get('max_drawdown_pct') is not none else '—' }}</td>
           <td class="mono muted">{{ run.rel_dir_from_results_str }}</td>
           <td class="num">{% if run.has_report_bool %}<a class="btn btn-sm btn-ghost" href="{{ url_for('artifact_fn', rel_path_str=run.report_artifact_str) }}" target="_blank" rel="noopener noreferrer">Report</a>{% endif %}</td>
         </tr>
