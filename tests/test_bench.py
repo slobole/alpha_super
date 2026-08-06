@@ -27,6 +27,7 @@ from alpha.bench import catalog, runs
 from alpha.bench.app import (
     REPORT_TOOLTIP_SCRIPT_SHA256_BASE64_STR,
     _analyzer_view_dict_list,
+    _analysis_workspace_dict,
     _analysis_tuple_from_command_list,
     _latest_job_record_by_analysis_dict,
     _summary_status_by_analysis_dict,
@@ -356,9 +357,14 @@ def test_strategy_page_prefers_non_legacy_capacity_report(monkeypatch):
     monkeypatch.setattr(runs, "build_strategy_run_index", lambda: run_index_obj)
 
     client = create_app(job_manager_obj=RecordingJobManager()).test_client()
-    html_str = client.get(f"/strategy/{DV2_MODULE_STR}").get_data(as_text=True)
+    html_str = client.get(
+        f"/strategy/{DV2_MODULE_STR}?analysis=capacity"
+    ).get_data(as_text=True)
 
-    assert current_run_obj.report_artifact_str in html_str
+    assert (
+        f'src="/artifact/{current_run_obj.report_artifact_str}?embed=bench"'
+        in html_str
+    )
     assert f'src="/artifact/{legacy_run_obj.report_artifact_str}"' not in html_str
     assert "Capacity · v2.1" in html_str
     assert "Recent: 2021-07-11 to 2026-07-11" in html_str
@@ -745,6 +751,35 @@ def test_run_api_rejects_single_timing_family_analysis_without_hook(
     assert job_manager.call_list == []
 
 
+def test_run_api_uses_the_stress_registry_not_the_timing_hook(recording_client):
+    client, job_manager, token_str = recording_client
+    stress_only_module_str = (
+        "strategies.taa_df.strategy_taa_df"
+    )
+
+    supported_response = client.post(
+        "/api/run",
+        data={
+            "csrf_token": token_str,
+            "module_import": stress_only_module_str,
+            "analysis": "stress",
+        },
+    )
+    unsupported_response = client.post(
+        "/api/run",
+        data={
+            "csrf_token": token_str,
+            "module_import": EOM_ZROZ_SPY_SSO_MODULE_STR,
+            "analysis": "stress",
+        },
+    )
+
+    assert supported_response.status_code == 302
+    assert job_manager.call_list[-1][2][-2:] == ["--analysis", "stress"]
+    assert unsupported_response.status_code == 400
+    assert len(job_manager.call_list) == 1
+
+
 def test_full_preset_still_launches_for_strategy_without_capacity_hook(recording_client):
     client, job_manager, token_str = recording_client
     response = client.post(
@@ -937,11 +972,12 @@ def test_pages_render(recording_client, path_str):
     assert client.get(path_str).status_code == 200
 
 
-def test_quiet_ops_shell_has_no_live_navigation(recording_client):
+def test_mockup_shell_keeps_live_non_interactive(recording_client):
     client, _job_manager, _token_str = recording_client
     html_str = client.get("/").get_data(as_text=True)
 
-    assert 'class="app-shell"' in html_str
+    assert 'class="system-topbar"' in html_str
+    assert 'class="mode-tab mode-tab-muted"' in html_str
     assert ">Studies</a>" in html_str
     assert ">Compare</a>" in html_str
     assert ">LIVE</a>" not in html_str
@@ -999,6 +1035,101 @@ def test_passed_job_without_summary_is_not_promoted_to_analyzer_pass():
     assert record_dict["vanilla"]["status_str"] == "NOT RUN"
 
 
+def test_completed_job_end_time_keeps_its_new_artifact_as_explicit_pass():
+    strategy_entry_obj = catalog.get_strategy_by_module(DV2_MODULE_STR)
+    completed_job_obj = SimpleNamespace(
+        kind_str="analysis",
+        target_str="strategy_mr_dv2",
+        command_list=["python", "runner.py", "--analysis", "vanilla"],
+        job_id_str="job-with-report",
+        is_active_bool=False,
+        status_str="passed",
+        created_at_str="2026-08-06T12:00:00",
+        started_at_str="2026-08-06T12:00:01",
+        ended_at_str="2026-08-06T12:05:00",
+    )
+    job_manager_obj = SimpleNamespace(
+        list_jobs=lambda: [completed_job_obj],
+        read_log_text=lambda _job_id_str: (
+            "Summary\n"
+            "Analysis  Status  Seconds  Detail\n"
+            "vanilla   PASS        1.0\n"
+        ),
+    )
+    run_obj = _run_entry(
+        "strategy_mr_dv2",
+        "2026-08-06_120500",
+        activity_timestamp_float=datetime.fromisoformat(
+            "2026-08-06T12:05:00.633000"
+        ).timestamp(),
+    )
+
+    analyzer_view_list = _analyzer_view_dict_list(
+        strategy_entry_obj,
+        [run_obj],
+        job_manager_obj,
+    )
+    vanilla_view_dict = next(
+        view_dict
+        for view_dict in analyzer_view_list
+        if view_dict["analysis_str"] == "vanilla"
+    )
+
+    assert vanilla_view_dict["status_str"] == "PASS"
+    assert vanilla_view_dict["detail_str"] == "Latest BENCH job"
+
+
+def test_overlapping_jobs_choose_latest_completion_not_latest_creation():
+    later_created_short_job_obj = SimpleNamespace(
+        kind_str="analysis",
+        target_str="strategy_mr_dv2",
+        command_list=["python", "runner.py", "--analysis", "vanilla"],
+        job_id_str="short-fail",
+        is_active_bool=False,
+        status_str="failed",
+        created_at_str="2026-08-06T12:01:00.000000",
+        started_at_str="2026-08-06T12:01:01.000000",
+        ended_at_str="2026-08-06T12:03:00.000000",
+    )
+    earlier_created_long_job_obj = SimpleNamespace(
+        kind_str="analysis",
+        target_str="strategy_mr_dv2",
+        command_list=["python", "runner.py", "--analysis", "vanilla"],
+        job_id_str="long-pass",
+        is_active_bool=False,
+        status_str="passed",
+        created_at_str="2026-08-06T12:00:00.000000",
+        started_at_str="2026-08-06T12:00:01.000000",
+        ended_at_str="2026-08-06T12:05:00.000000",
+    )
+    log_by_id_dict = {
+        "short-fail": (
+            "Summary\nAnalysis  Status  Seconds  Detail\n"
+            "vanilla   FAIL        1.0  failed\n"
+        ),
+        "long-pass": (
+            "Summary\nAnalysis  Status  Seconds  Detail\n"
+            "vanilla   PASS        1.0\n"
+        ),
+    }
+    job_manager_obj = SimpleNamespace(
+        # Mirrors JobManager.list_jobs(): reverse creation order.
+        list_jobs=lambda: [
+            later_created_short_job_obj,
+            earlier_created_long_job_obj,
+        ],
+        read_log_text=lambda job_id_str: log_by_id_dict[job_id_str],
+    )
+
+    record_dict = _latest_job_record_by_analysis_dict(
+        job_manager_obj,
+        "strategy_mr_dv2",
+    )
+
+    assert record_dict["vanilla"]["status_str"] == "PASS"
+    assert record_dict["vanilla"]["job"].job_id_str == "long-pass"
+
+
 def test_partial_artifact_without_report_is_not_promoted_to_analyzer_pass():
     strategy_entry_obj = catalog.get_strategy_by_module(DV2_MODULE_STR)
     partial_run_obj = _run_entry("strategy_mr_dv2", "2026-08-06_120000")
@@ -1054,12 +1185,20 @@ def test_strategy_workspace_exposes_all_analyzers_and_vanilla_depth(recording_cl
     for label_str in ("Vanilla", "Capacity", "Timing", "Risk", "Stress"):
         assert label_str in html_str
     for section_str in (
+        "Equity",
+        "Monthly returns",
+        "Composition",
         "Statistics",
-        "Exposure &amp; composition",
-        "Trades &amp; costs",
-        "Audit",
+        "Trades",
     ):
         assert section_str in html_str
+    assert 'class="artifact-meta-grid"' in html_str
+    assert 'class="artifact-stat-strip"' in html_str
+    assert 'class="artifact-report-stage"' in html_str
+    assert html_str.index('class="artifact-report-stage"') < html_str.index(
+        'class="research-tools"'
+    )
+    assert '<details class="research-tools">' in html_str
 
 
 def test_strategy_workspace_selects_analyzer_and_rejects_unknown_key(recording_client):
@@ -1068,8 +1207,247 @@ def test_strategy_workspace_selects_analyzer_and_rejects_unknown_key(recording_c
         f"/strategy/{DV2_MODULE_STR}?analysis=risk"
     ).get_data(as_text=True)
 
-    assert 'class="active">\n      Risk' in risk_html_str
+    assert re.search(r'class="active">\s*<span>Risk</span>', risk_html_str)
+    assert "RISK ANALYSIS" in risk_html_str
     assert client.get(f"/strategy/{DV2_MODULE_STR}?analysis=unknown").status_code == 400
+
+
+@pytest.mark.parametrize(
+    ("analysis_str", "summary_dict", "metadata_dict", "expected_eyebrow_str", "expected_stat_str"),
+    [
+        ("vanilla", {"ann_return_pct": 12.5, "sharpe": 1.1}, {}, "VANILLA BACKTEST", "CAGR"),
+        (
+            "capacity",
+            {"assessed_order_count_int": 30, "execution_policy_str": "MOO"},
+            {},
+            "CAPACITY ANALYSIS",
+            "RECOMMENDED",
+        ),
+        (
+            "timing",
+            {"sharpe": 1.2, "risk_label": "Clean"},
+            {"default_entry_timing": "T+1 Open", "default_exit_timing": "T+1 Open"},
+            "EXECUTION TIMING ANALYSIS",
+            "CVaR 5%",
+        ),
+        (
+            "risk",
+            {"simulation_count_int": 10_000},
+            {},
+            "RISK ANALYSIS",
+            "DD P05",
+        ),
+        (
+            "stress",
+            {"scenario_count_int": 20},
+            {},
+            "HISTORICAL STRESS TEST",
+            "WORST RETURN",
+        ),
+    ],
+)
+def test_saved_analyzer_workspace_has_analysis_specific_summary_strip(
+    analysis_str,
+    summary_dict,
+    metadata_dict,
+    expected_eyebrow_str,
+    expected_stat_str,
+):
+    run_obj = runs.RunEntry(
+        run_name_str="strategy_example",
+        analysis_dir_str=f"{analysis_str}_analysis",
+        analysis_label_str=analysis_str.title(),
+        timestamp_str="2026-08-05_120000",
+        rel_dir_from_results_str=f"research/strategy/strategy_example/{analysis_str}_analysis/2026-08-05_120000",
+        has_report_bool=True,
+        summary_dict=summary_dict,
+        metadata_dict=metadata_dict,
+        run_info_dict={"parameters": {"capital": 100_000}},
+    )
+
+    workspace_dict = _analysis_workspace_dict(analysis_str, run_obj)
+
+    assert workspace_dict["eyebrow_str"] == expected_eyebrow_str
+    assert expected_stat_str in {
+        stat_dict["label_str"] for stat_dict in workspace_dict["stat_list"]
+    }
+
+
+def test_risk_workspace_reads_the_current_saved_summary_schema():
+    run_obj = runs.RunEntry(
+        run_name_str="strategy_example",
+        analysis_dir_str="risk_analysis",
+        analysis_label_str="Risk",
+        timestamp_str="2026-08-05_120000",
+        rel_dir_from_results_str="research/strategy/strategy_example/risk_analysis/2026-08-05_120000",
+        has_report_bool=True,
+        summary_dict={
+            "simulation_count_int": 10_000,
+            "return_count_int": 3_471,
+            "primary_intervals": {
+                "max_drawdown_float": {"p05_float": -0.2802444},
+                "sharpe_float": {"observed_value_float": 1.2769729},
+            },
+            "primary_time_underwater_breach_probabilities": {
+                "underwater_ge_12m": 0.7296
+            },
+            "investor_summary": {
+                "headline_metric_dict": {
+                    "modeled_1y_terminal_p05_block_specific_float": -0.0160475
+                }
+            },
+        },
+    )
+
+    workspace_dict = _analysis_workspace_dict("risk", run_obj)
+    value_by_label_dict = {
+        stat_dict["label_str"]: stat_dict["value_str"]
+        for stat_dict in workspace_dict["stat_list"]
+    }
+
+    assert value_by_label_dict == {
+        "OBS. SHARPE": "1.28",
+        "DD P05": "-28.02%",
+        "12M+ UNDERWATER": "72.96%",
+        "1Y TERMINAL P05": "-1.60%",
+        "OBSERVATIONS": "3,471",
+    }
+
+
+@pytest.mark.parametrize(
+    ("analysis_str", "metric_label_str"),
+    [
+        ("vanilla", "SHARPE"),
+        ("timing", "SHARPE"),
+        ("risk", "OBS. SHARPE"),
+        ("stress", "MAX GROSS"),
+    ],
+)
+def test_sparse_saved_summary_preserves_missing_metrics(
+    analysis_str,
+    metric_label_str,
+):
+    run_obj = runs.RunEntry(
+        run_name_str="strategy_example",
+        analysis_dir_str=f"{analysis_str}_analysis",
+        analysis_label_str=analysis_str.title(),
+        timestamp_str="2026-08-05_120000",
+        rel_dir_from_results_str=f"research/strategy/strategy_example/{analysis_str}_analysis/2026-08-05_120000",
+        has_report_bool=True,
+    )
+
+    workspace_dict = _analysis_workspace_dict(analysis_str, run_obj)
+    value_by_label_dict = {
+        stat_dict["label_str"]: stat_dict["value_str"]
+        for stat_dict in workspace_dict["stat_list"]
+    }
+
+    assert value_by_label_dict[metric_label_str] == "—"
+
+
+def test_workspace_reads_saved_analyzer_dimensions_instead_of_defaults():
+    capacity_run_obj = runs.RunEntry(
+        run_name_str="strategy_example",
+        analysis_dir_str="capacity_analysis",
+        analysis_label_str="Capacity",
+        timestamp_str="2026-08-05_120000",
+        rel_dir_from_results_str="capacity",
+        has_report_bool=True,
+        summary_dict={"aum_grid_list": [75_000, 2_500_000]},
+    )
+    timing_run_obj = runs.RunEntry(
+        run_name_str="strategy_example",
+        analysis_dir_str="execution_timing_analyzer",
+        analysis_label_str="Timing",
+        timestamp_str="2026-08-05_120000",
+        rel_dir_from_results_str="timing",
+        has_report_bool=True,
+        run_info_dict={
+            "parameters": {
+                "entry_timing_labels": ["T close", "T+1 open"],
+                "exit_timing_labels": ["T+1 open", "T+1 close"],
+            }
+        },
+    )
+    stress_run_obj = runs.RunEntry(
+        run_name_str="strategy_example",
+        analysis_dir_str="stress_test",
+        analysis_label_str="Stress",
+        timestamp_str="2026-08-05_120000",
+        rel_dir_from_results_str="stress",
+        has_report_bool=True,
+        metadata_dict={"configured_crisis_count": 3},
+        run_info_dict={"parameters": {"launch_offsets": [5, 21]}},
+    )
+
+    capacity_workspace_dict = _analysis_workspace_dict("capacity", capacity_run_obj)
+    timing_workspace_dict = _analysis_workspace_dict("timing", timing_run_obj)
+    stress_workspace_dict = _analysis_workspace_dict("stress", stress_run_obj)
+
+    assert capacity_workspace_dict["meta_list"][1]["value_str"] == "$75K → $2.5M"
+    assert timing_workspace_dict["meta_list"][0]["value_str"] == (
+        "2 entry timings × 2 exit timings"
+    )
+    assert stress_workspace_dict["meta_list"][0]["value_str"] == (
+        "3 crises · 2 launch offsets"
+    )
+
+
+def test_capacity_workspace_distinguishes_missing_from_explicit_not_cleared():
+    missing_run_obj = runs.RunEntry(
+        run_name_str="strategy_example",
+        analysis_dir_str="capacity_analysis",
+        analysis_label_str="Capacity",
+        timestamp_str="2026-08-05_120000",
+        rel_dir_from_results_str="missing",
+        has_report_bool=True,
+    )
+    not_cleared_run_obj = runs.RunEntry(
+        run_name_str="strategy_example",
+        analysis_dir_str="capacity_analysis",
+        analysis_label_str="Capacity",
+        timestamp_str="2026-08-05_120000",
+        rel_dir_from_results_str="not-cleared",
+        has_report_bool=True,
+        summary_dict={"recommended_capacity_float": None},
+    )
+
+    missing_workspace_dict = _analysis_workspace_dict("capacity", missing_run_obj)
+    not_cleared_workspace_dict = _analysis_workspace_dict(
+        "capacity", not_cleared_run_obj
+    )
+
+    assert missing_workspace_dict["stat_list"][0]["value_str"] == "—"
+    assert not_cleared_workspace_dict["stat_list"][0]["value_str"] == "NOT CLEARED"
+
+
+def test_no_report_workspace_uses_selected_analyzer_status_and_detail():
+    workspace_dict = _analysis_workspace_dict(
+        "capacity",
+        None,
+        status_str="SKIP",
+        detail_str="Capacity unavailable — missing capacity hook",
+    )
+
+    assert workspace_dict["summary_str"] == (
+        "Capacity unavailable — missing capacity hook"
+    )
+    assert workspace_dict["meta_list"][1]["value_str"] == "SKIP"
+
+
+def test_saved_report_is_historical_evidence_not_current_pass():
+    strategy_entry_obj = catalog.get_strategy_by_module(DV2_MODULE_STR)
+    analyzer_view_list = _analyzer_view_dict_list(
+        strategy_entry_obj,
+        [_run_entry("strategy_mr_dv2", "2026-08-05_120000")],
+    )
+    vanilla_view_dict = next(
+        view_dict
+        for view_dict in analyzer_view_list
+        if view_dict["analysis_str"] == "vanilla"
+    )
+
+    assert vanilla_view_dict["status_str"] == "SAVED"
 
 
 def test_studies_page_marks_skip_as_not_ready(recording_client):
@@ -1130,7 +1508,27 @@ def test_strategy_page_marks_capacity_unavailable_without_hook(recording_client)
     response_text_str = response.get_data(as_text=True)
     assert response.status_code == 200
     assert "Capacity unavailable — missing capacity hook" in response_text_str
-    assert 'disabled title="Capacity unavailable — missing capacity hook"' in response_text_str
+
+
+def test_strategy_page_names_the_missing_run_variant_hook(recording_client):
+    client, _job_manager, _token_str = recording_client
+    response_text_str = client.get(
+        "/strategy/strategies.alpha19.strategy_mr_alpha19"
+    ).get_data(as_text=True)
+
+    assert "Vanilla unavailable — missing run_variant hook" in response_text_str
+    assert "Risk unavailable — missing run_variant hook" in response_text_str
+
+
+def test_strategy_page_explains_registered_but_unrunnable_stress_wrapper(
+    recording_client,
+):
+    client, _job_manager, _token_str = recording_client
+    response_text_str = client.get(
+        "/strategy/strategies.dv2.strategy_mr_dv2_price_adv_ibs_rsi_exit"
+    ).get_data(as_text=True)
+
+    assert "Stress unavailable — missing run_variant hook" in response_text_str
 
 
 def test_index_renders_momentum_and_recent_run_filters(recording_client):
@@ -1146,7 +1544,7 @@ def test_index_renders_momentum_and_recent_run_filters(recording_client):
     sector_card_excerpt_str = html_str[sector_card_start_int : sector_card_start_int + 1_500]
     assert '<span class="badge badge-cat">Sector Dispersion</span>' in sector_card_excerpt_str
     sector_detail_html_str = client.get(f"/strategy/{sector_module_str}").get_data(as_text=True)
-    assert '<span class="badge badge-cat">Sector Dispersion</span>' in sector_detail_html_str
+    assert 'class="artifact-breadcrumb"' in sector_detail_html_str
     atr_card_start_int = html_str.index(f'data-module="{ATR_NDX_MODULE_STR}"')
     atr_card_excerpt_str = html_str[atr_card_start_int : atr_card_start_int + 1_800]
     assert 'data-subcategory="atr_normalized_rotation"' in atr_card_excerpt_str

@@ -10,54 +10,58 @@
   <style>{{ bench_theme_css_str | safe }}</style>
 </head>
 <body class="bench-body">
-  <div class="app-shell">
-    <aside class="side-rail">
-      <a class="brand" href="{{ url_for('index_page_fn') }}">
-        <span class="brand-mark">A</span>
-        <span><b>Alpha</b><small>Research system</small></span>
-      </a>
-      <nav class="side-nav" aria-label="Research navigation">
-        <a href="{{ url_for('index_page_fn') }}" class="{{ 'active' if active_nav == 'strategies' }}"><span>01</span>Strategies</a>
-        <a href="{{ url_for('compare_page_fn') }}" class="{{ 'active' if active_nav == 'compare' }}"><span>02</span>Compare</a>
-        <a href="{{ url_for('research_page_fn') }}" class="{{ 'active' if active_nav == 'research' }}"><span>03</span>Studies</a>
-        <a href="{{ url_for('portfolios_page_fn') }}" class="{{ 'active' if active_nav == 'portfolios' }}"><span>04</span>Portfolios</a>
-        <a href="{{ url_for('jobs_page_fn') }}" class="{{ 'active' if active_nav == 'jobs' }}">
-          <span>05</span>Jobs
-          <span id="nav-job-badge" class="side-job-badge"
-                hx-get="{{ url_for('job_indicator_fragment_fn') }}"
-                hx-trigger="load, every 3s"
-                hx-swap="innerHTML">{% include "_job_indicator.html" %}</span>
-        </a>
-      </nav>
-      <div class="side-foot">
-        <div class="side-foot-label">Display</div>
-        <div class="variant-switch">
+  <header class="system-topbar">
+    <div class="mode-switcher" aria-label="Environment">
+      <span class="mode-tab mode-tab-muted" title="LIVE is intentionally outside this BENCH redesign">LIVE</span>
+      <details class="topbar-menu bench-menu">
+        <summary class="mode-tab mode-tab-active">BENCH <span aria-hidden="true">⌄</span></summary>
+        <div class="topbar-popover variant-popover">
+          <div class="popover-label">Display</div>
           {% for variant_str, variant_label_str in variant_label_dict.items() %}
           <a href="{{ url_for('set_variant_fn', variant_name_str=variant_str) }}"
              class="{{ 'active' if variant_str == active_variant_str }}">{{ variant_label_str }}</a>
           {% endfor %}
         </div>
-        <div class="side-version">Bench {{ bench_version_str }}</div>
-      </div>
-    </aside>
-
-    <div class="app-workspace">
-      <header class="topbar">
-        <div class="environment-lockup"><span class="environment-dot"></span>BENCH</div>
-        <div class="topbar-meta">
-          <span class="topbar-clock">{{ server_clock_str }} {{ server_timezone_str }}</span>
-          <span>{{ server_date_str }}</span>
-          <span class="topbar-help">/ search</span>
-        </div>
-      </header>
-      <main class="container">
-        {% block content %}{% endblock %}
-      </main>
-      <footer class="footer">
-        Read-only evidence from <span class="mono">results/</span>; run controls call the existing research runners.
-      </footer>
+      </details>
     </div>
-  </div>
+
+    <nav class="topbar-primary-nav" aria-label="Research navigation">
+      <a href="{{ url_for('index_page_fn') }}" class="{{ 'active' if active_nav == 'strategies' }}">Strategies</a>
+      <a href="{{ url_for('compare_page_fn') }}" class="{{ 'active' if active_nav == 'compare' }}">Compare</a>
+      <a href="{{ url_for('research_page_fn') }}" class="{{ 'active' if active_nav == 'research' }}">Studies</a>
+      <a href="{{ url_for('portfolios_page_fn') }}" class="{{ 'active' if active_nav == 'portfolios' }}">Portfolios</a>
+      <a href="{{ url_for('jobs_page_fn') }}" class="{{ 'active' if active_nav == 'jobs' }}">
+        Jobs
+        <span id="nav-job-badge" class="topbar-job-badge"
+              hx-get="{{ url_for('job_indicator_fragment_fn') }}"
+              hx-trigger="load, every 3s"
+              hx-swap="innerHTML">{% include "_job_indicator.html" %}</span>
+      </a>
+    </nav>
+
+    <div class="system-topbar-meta">
+      <span class="topbar-clock">{{ server_clock_str }} {{ server_timezone_str }}</span>
+      <span class="topbar-divider" aria-hidden="true"></span>
+      <span class="topbar-icon" title="Research notifications" aria-label="Research notifications">♧</span>
+      <span class="topbar-icon" title="Help" aria-label="Help">?</span>
+      <details class="topbar-menu research-menu">
+        <summary>Research <span aria-hidden="true">⌄</span></summary>
+        <div class="topbar-popover research-popover">
+          <a href="{{ url_for('index_page_fn') }}">Strategy library</a>
+          <a href="{{ url_for('research_page_fn') }}">Studies</a>
+          <a href="{{ url_for('jobs_page_fn') }}">Jobs</a>
+          <span class="popover-version">Bench {{ bench_version_str }} · {{ server_date_str }}</span>
+        </div>
+      </details>
+    </div>
+  </header>
+
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="footer">
+    Read-only evidence from <span class="mono">results/</span>; run controls call the existing research runners.
+  </footer>
 
   <script>
     document.addEventListener('submit', function (event) {

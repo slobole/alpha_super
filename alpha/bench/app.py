@@ -43,6 +43,7 @@ from alpha.bench import (
     runs,
 )
 from alpha.bench.jobs import JobManager
+from alpha.engine.stress_test import supported_stress_test_strategy_key_list
 from alpha.engine.theme import build_bench_theme_css
 
 
@@ -237,13 +238,29 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             ),
             None,
         )
+        selected_analyzer_view_dict = next(
+            view_dict
+            for view_dict in analyzer_view_list
+            if view_dict["analysis_str"] == selected_analysis_str
+        )
         return render_template(
             "strategy.html",
             strategy=strategy_entry_obj,
             run_entry_list=run_entry_list,
             latest_report_run=latest_report_run_obj,
             selected_analysis_str=selected_analysis_str,
+            selected_analyzer=selected_analyzer_view_dict,
+            analysis_workspace=_analysis_workspace_dict(
+                selected_analysis_str,
+                latest_report_run_obj,
+                status_str=selected_analyzer_view_dict["status_str"],
+                detail_str=selected_analyzer_view_dict["detail_str"],
+            ),
             analyzer_view_list=analyzer_view_list,
+            analysis_available_by_key_dict={
+                view_dict["analysis_str"]: view_dict["available_bool"]
+                for view_dict in analyzer_view_list
+            },
             preset_dict=RUN_PRESET_DICT,
             kwarg_aware_analysis_tuple=KWARG_AWARE_ANALYSIS_TUPLE,
             kwarg_blind_analysis_tuple=tuple(
@@ -604,8 +621,6 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
         strategy_entry_obj = catalog.get_strategy_by_module(module_import_str)
         if strategy_entry_obj is None:
             abort(400, description="Unknown strategy module.")
-        if not strategy_entry_obj.has_run_variant_bool:
-            abort(400, description="Strategy has no run_variant() hook.")
 
         # Reject the whole request if any submitted analysis is unrecognized,
         # rather than silently dropping it and running a different subset.
@@ -621,7 +636,7 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             analysis_label_str = ANALYSIS_LABEL_DICT[analysis_list[0]]
             abort(
                 400,
-                description=f"{analysis_label_str} unavailable — missing analyzer hook.",
+                description=f"{analysis_label_str} unavailable — missing analyzer contract.",
             )
 
         # Only kwargs this strategy's run_variant actually declares. run_strategy.py
@@ -805,7 +820,12 @@ def _analysis_available_bool(
         return strategy_entry_obj.has_run_variant_bool
     if analysis_str == "capacity":
         return strategy_entry_obj.has_capacity_analysis_bool
-    return strategy_entry_obj.has_timing_analysis_bool
+    if analysis_str == "timing":
+        return strategy_entry_obj.has_timing_analysis_bool
+    return (
+        strategy_entry_obj.has_run_variant_bool
+        and strategy_entry_obj.stem_str in supported_stress_test_strategy_key_list()
+    )
 
 
 def _analysis_tuple_from_command_list(command_list: list[str]) -> tuple[str, ...]:
@@ -855,12 +875,32 @@ def _latest_job_record_by_analysis_dict(job_manager_obj, strategy_stem_str: str)
             except OSError:
                 log_text_str = ""
         parsed_status_dict = _summary_status_by_analysis_dict(log_text_str)
+        if job_obj.is_active_bool:
+            evidence_timestamp_str = (
+                getattr(job_obj, "started_at_str", None) or job_obj.created_at_str
+            )
+        else:
+            evidence_timestamp_str = (
+                getattr(job_obj, "ended_at_str", None) or job_obj.created_at_str
+            )
         try:
-            created_timestamp_float = datetime.fromisoformat(job_obj.created_at_str).timestamp()
+            evidence_timestamp_float = datetime.fromisoformat(
+                evidence_timestamp_str
+            ).timestamp()
         except (TypeError, ValueError):
-            created_timestamp_float = 0.0
+            evidence_timestamp_float = 0.0
+        precision_tolerance_float = (
+            1.0
+            if not job_obj.is_active_bool and "." not in evidence_timestamp_str
+            else 0.0
+        )
         for analysis_str in analysis_tuple:
-            if analysis_str in latest_record_by_analysis_dict:
+            existing_record_dict = latest_record_by_analysis_dict.get(analysis_str)
+            if (
+                existing_record_dict is not None
+                and existing_record_dict["timestamp_float"]
+                >= evidence_timestamp_float
+            ):
                 continue
             if job_obj.is_active_bool:
                 status_str = job_obj.status_str.upper()
@@ -874,7 +914,8 @@ def _latest_job_record_by_analysis_dict(job_manager_obj, strategy_stem_str: str)
                 status_str = "NOT RUN"
             latest_record_by_analysis_dict[analysis_str] = {
                 "status_str": status_str,
-                "timestamp_float": created_timestamp_float,
+                "timestamp_float": evidence_timestamp_float,
+                "precision_tolerance_float": precision_tolerance_float,
                 "job": job_obj,
             }
     return latest_record_by_analysis_dict
@@ -887,14 +928,20 @@ def _analyzer_view_dict_list(
 ) -> list[dict[str, Any]]:
     """Five analyzer cells backed by hooks, artifacts, and BENCH job evidence."""
     latest_run_by_analysis_dict: dict[str, runs.RunEntry] = {}
-    for run_obj in run_entry_list:
-        for analysis_str, analysis_dir_str in ANALYSIS_DIR_BY_ANALYSIS_DICT.items():
-            if (
-                analysis_str not in latest_run_by_analysis_dict
-                and run_obj.analysis_dir_str == analysis_dir_str
-                and run_obj.has_report_bool
-            ):
-                latest_run_by_analysis_dict[analysis_str] = run_obj
+    for analysis_str, analysis_dir_str in ANALYSIS_DIR_BY_ANALYSIS_DICT.items():
+        matching_run_list = [
+            run_obj
+            for run_obj in run_entry_list
+            if run_obj.analysis_dir_str == analysis_dir_str and run_obj.has_report_bool
+        ]
+        if analysis_str == "capacity":
+            current_capacity_run_list = [
+                run_obj for run_obj in matching_run_list if not run_obj.is_legacy_capacity_bool
+            ]
+            if current_capacity_run_list:
+                matching_run_list = current_capacity_run_list
+        if matching_run_list:
+            latest_run_by_analysis_dict[analysis_str] = matching_run_list[0]
 
     latest_job_record_dict = _latest_job_record_by_analysis_dict(
         job_manager_obj,
@@ -910,10 +957,28 @@ def _analyzer_view_dict_list(
         job_record_dict = latest_job_record_dict.get(analysis_str)
         if not available_bool:
             status_str = "SKIP"
-            detail_str = "Missing analyzer hook"
+            if analysis_str in {"vanilla", "risk"}:
+                missing_hook_str = "run_variant hook"
+            elif analysis_str == "capacity":
+                missing_hook_str = "capacity hook"
+            elif analysis_str == "stress":
+                missing_hook_str = (
+                    "run_variant hook"
+                    if not strategy_entry_obj.has_run_variant_bool
+                    else "stress registry"
+                )
+            else:
+                missing_hook_str = "timing hook"
+            detail_str = (
+                f"{ANALYSIS_LABEL_DICT[analysis_str]} unavailable — missing {missing_hook_str}"
+            )
         elif (
             job_record_dict is not None
-            and job_record_dict["timestamp_float"] >= artifact_timestamp_float
+            and (
+                job_record_dict["timestamp_float"]
+                + job_record_dict.get("precision_tolerance_float", 0.0)
+                >= artifact_timestamp_float
+            )
             and (
                 job_record_dict["status_str"] != "NOT RUN"
                 or latest_run_obj is None
@@ -922,7 +987,10 @@ def _analyzer_view_dict_list(
             status_str = job_record_dict["status_str"]
             detail_str = "Latest BENCH job"
         elif latest_run_obj is not None:
-            status_str = "PASS"
+            # A report proves saved historical evidence, not parity with the
+            # strategy source currently on disk. Only an explicit BENCH job
+            # summary may say PASS until artifacts record a code fingerprint.
+            status_str = "SAVED"
             detail_str = latest_run_obj.display_timestamp_str
         else:
             status_str = "NOT RUN"
@@ -940,6 +1008,291 @@ def _analyzer_view_dict_list(
             }
         )
     return analyzer_view_list
+
+
+def _number_float(value_obj: object) -> float | None:
+    if isinstance(value_obj, bool) or not isinstance(value_obj, (int, float)):
+        return None
+    return float(value_obj)
+
+
+def _percent_str(value_obj: object, *, decimal_fraction_bool: bool = False) -> str:
+    value_float = _number_float(value_obj)
+    if value_float is None:
+        return "—"
+    if decimal_fraction_bool:
+        value_float *= 100.0
+    return f"{value_float:,.2f}%"
+
+
+def _money_str(value_obj: object) -> str:
+    value_float = _number_float(value_obj)
+    return "—" if value_float is None else f"${value_float:,.0f}"
+
+
+def _integer_str(value_obj: object) -> str:
+    value_float = _number_float(value_obj)
+    return "—" if value_float is None else f"{int(value_float):,}"
+
+
+def _decimal_str(value_obj: object, *, suffix_str: str = "") -> str:
+    value_float = _number_float(value_obj)
+    return "—" if value_float is None else f"{value_float:.2f}{suffix_str}"
+
+
+def _compact_money_str(value_obj: object) -> str:
+    value_float = _number_float(value_obj)
+    if value_float is None:
+        return "—"
+    for divisor_float, suffix_str in (
+        (1_000_000_000.0, "B"),
+        (1_000_000.0, "M"),
+        (1_000.0, "K"),
+    ):
+        if abs(value_float) >= divisor_float:
+            compact_float = value_float / divisor_float
+            decimal_count_int = 0 if compact_float.is_integer() else 1
+            return f"${compact_float:.{decimal_count_int}f}{suffix_str}"
+    return f"${value_float:,.0f}"
+
+
+def _nested_value_obj(source_dict: dict, *key_str_tuple: str) -> object:
+    value_obj: object = source_dict
+    for key_str in key_str_tuple:
+        if not isinstance(value_obj, dict):
+            return None
+        value_obj = value_obj.get(key_str)
+    return value_obj
+
+
+def _analysis_workspace_dict(
+    analysis_str: str,
+    latest_run_obj: runs.RunEntry | None,
+    *,
+    status_str: str = "NOT RUN",
+    detail_str: str | None = None,
+) -> dict[str, Any]:
+    """Mockup-faithful analyzer header, using saved evidence without recomputation."""
+    outline_by_analysis_dict = {
+        "vanilla": ("Equity", "Monthly returns", "Composition", "Statistics", "Trades"),
+        "capacity": ("Capacity curve", "Decision bands", "Liquidity", "Orders", "Assumptions"),
+        "timing": ("Return matrix", "Sharpe matrix", "Drawdown", "CVaR", "Cell detail"),
+        "risk": ("Read first", "Return distribution", "Monte Carlo paths", "Metrics", "Horizon odds"),
+        "stress": ("Scenario summary", "Event paths", "Drawdowns", "Entry exposure", "Recovery"),
+    }
+    workspace_dict: dict[str, Any] = {
+        "eyebrow_str": f"{ANALYSIS_LABEL_DICT[analysis_str].upper()} ANALYSIS",
+        "summary_str": detail_str or "No saved report exists for this analyzer yet.",
+        "meta_list": (
+            {"label_str": "EVIDENCE", "value_str": "Not saved"},
+            {"label_str": "STATUS", "value_str": status_str},
+            {"label_str": "ANALYZER", "value_str": ANALYSIS_LABEL_DICT[analysis_str]},
+            {"label_str": "RUN", "value_str": "—"},
+        ),
+        "stat_list": (),
+        "outline_list": outline_by_analysis_dict[analysis_str],
+    }
+    if latest_run_obj is None:
+        return workspace_dict
+
+    summary_dict = latest_run_obj.summary_dict
+    metadata_dict = latest_run_obj.metadata_dict
+    parameter_dict = latest_run_obj.parameter_dict
+    run_timestamp_str = latest_run_obj.display_timestamp_str
+
+    if analysis_str == "vanilla":
+        capital_float = _number_float(parameter_dict.get("capital"))
+        final_equity_float = _number_float(summary_dict.get("final_equity"))
+        sharpe_str = _decimal_str(summary_dict.get("sharpe"))
+        workspace_dict.update(
+            {
+                "eyebrow_str": "VANILLA BACKTEST",
+                "summary_str": (
+                    f"Compounded at {_percent_str(summary_dict.get('ann_return_pct'))} "
+                    f"with a {sharpe_str} Sharpe; "
+                    f"the worst drawdown was {_percent_str(summary_dict.get('max_drawdown_pct'))}."
+                ),
+                "meta_list": (
+                    {"label_str": "PERIOD", "value_str": latest_run_obj.backtest_window_str or "Not recorded"},
+                    {
+                        "label_str": "CAPITAL",
+                        "value_str": f"{_money_str(capital_float)} → {_money_str(final_equity_float)}",
+                    },
+                    {"label_str": "EXECUTION", "value_str": "Recorded in strategy implementation"},
+                    {"label_str": "RUN", "value_str": run_timestamp_str},
+                ),
+                "stat_list": (
+                    {"label_str": "CAGR", "value_str": _percent_str(summary_dict.get("ann_return_pct"))},
+                    {"label_str": "SHARPE", "value_str": sharpe_str},
+                    {"label_str": "MAX DD", "value_str": _percent_str(summary_dict.get("max_drawdown_pct")), "tone_str": "negative"},
+                    {"label_str": "TRADES", "value_str": _integer_str(summary_dict.get("trade_count"))},
+                    {"label_str": "FINAL", "value_str": _money_str(final_equity_float)},
+                ),
+            }
+        )
+    elif analysis_str == "capacity":
+        if "recommended_capacity_float" not in summary_dict:
+            recommended_capacity_str = "—"
+        elif summary_dict["recommended_capacity_float"] is None:
+            recommended_capacity_str = "NOT CLEARED"
+        else:
+            recommended_capacity_str = _money_str(
+                summary_dict["recommended_capacity_float"]
+            )
+        break_even_str = str(summary_dict.get("break_even_capacity_bracket_str") or "—")
+        aum_grid_obj = summary_dict.get("aum_grid_list")
+        if isinstance(aum_grid_obj, list) and aum_grid_obj:
+            aum_grid_str = (
+                f"{_compact_money_str(aum_grid_obj[0])} → "
+                f"{_compact_money_str(aum_grid_obj[-1])}"
+            )
+        else:
+            aum_grid_str = "See saved artifact"
+        workspace_dict.update(
+            {
+                "eyebrow_str": "CAPACITY ANALYSIS",
+                "summary_str": (
+                    f"Recommended capacity: {recommended_capacity_str}. "
+                    f"The recent-window break-even bracket was {break_even_str}."
+                ),
+                "meta_list": (
+                    {
+                        "label_str": "PERIOD",
+                        "value_str": (
+                            f"{summary_dict.get('actual_start_date_str', '—')} → "
+                            f"{summary_dict.get('actual_end_date_str', '—')}"
+                        ),
+                    },
+                    {"label_str": "AUM GRID", "value_str": aum_grid_str},
+                    {"label_str": "EXECUTION", "value_str": str(summary_dict.get("execution_policy_str") or "—")},
+                    {"label_str": "RUN", "value_str": run_timestamp_str},
+                ),
+                "stat_list": (
+                    {"label_str": "RECOMMENDED", "value_str": recommended_capacity_str},
+                    {"label_str": "BREAK-EVEN", "value_str": break_even_str},
+                    {"label_str": "ORDERS", "value_str": _integer_str(summary_dict.get("assessed_order_count_int"))},
+                    {"label_str": "EXTRAPOLATED", "value_str": _percent_str(summary_dict.get("model_extrapolation_share_float"), decimal_fraction_bool=True)},
+                    {"label_str": "PROFILE", "value_str": str(summary_dict.get("impact_profile_str") or "—")},
+                ),
+            }
+        )
+    elif analysis_str == "timing":
+        default_entry_str = str(metadata_dict.get("default_entry_timing") or "—")
+        default_exit_str = str(metadata_dict.get("default_exit_timing") or "—")
+        sharpe_str = _decimal_str(summary_dict.get("sharpe"))
+        entry_timing_obj = parameter_dict.get("entry_timing_labels")
+        exit_timing_obj = parameter_dict.get("exit_timing_labels")
+        if isinstance(entry_timing_obj, list) and isinstance(exit_timing_obj, list):
+            matrix_str = (
+                f"{len(entry_timing_obj)} entry timings × "
+                f"{len(exit_timing_obj)} exit timings"
+            )
+        else:
+            matrix_str = "See saved artifact"
+        workspace_dict.update(
+            {
+                "eyebrow_str": "EXECUTION TIMING ANALYSIS",
+                "summary_str": (
+                    f"The default {default_entry_str} / {default_exit_str} cell produced "
+                    f"a {sharpe_str} Sharpe and is labeled "
+                    f"{summary_dict.get('risk_label', 'Not recorded')}."
+                ),
+                "meta_list": (
+                    {"label_str": "MATRIX", "value_str": matrix_str},
+                    {"label_str": "DEFAULT ENTRY", "value_str": default_entry_str},
+                    {"label_str": "DEFAULT EXIT", "value_str": default_exit_str},
+                    {"label_str": "RUN", "value_str": run_timestamp_str},
+                ),
+                "stat_list": (
+                    {"label_str": "CAGR", "value_str": _percent_str(summary_dict.get("ann_return_pct"))},
+                    {"label_str": "SHARPE", "value_str": sharpe_str},
+                    {"label_str": "MAX DD", "value_str": _percent_str(summary_dict.get("max_drawdown_pct")), "tone_str": "negative"},
+                    {"label_str": "CVaR 5%", "value_str": _percent_str(summary_dict.get("cvar_5_pct")), "tone_str": "negative"},
+                    {"label_str": "LABEL", "value_str": str(summary_dict.get("risk_label") or "—")},
+                ),
+            }
+        )
+    elif analysis_str == "risk":
+        simulation_count_obj = summary_dict.get("simulation_count_int")
+        mean_block_length_obj = summary_dict.get("primary_mean_block_length_int")
+        max_drawdown_p05_obj = _nested_value_obj(
+            summary_dict, "primary_intervals", "max_drawdown_float", "p05_float"
+        )
+        sharpe_observed_obj = _nested_value_obj(
+            summary_dict, "primary_intervals", "sharpe_float", "observed_value_float"
+        )
+        underwater_12m_obj = _nested_value_obj(
+            summary_dict, "primary_time_underwater_breach_probabilities", "underwater_ge_12m"
+        )
+        one_year_p05_obj = _nested_value_obj(
+            summary_dict,
+            "investor_summary",
+            "headline_metric_dict",
+            "modeled_1y_terminal_p05_block_specific_float",
+        )
+        workspace_dict.update(
+            {
+                "eyebrow_str": "RISK ANALYSIS",
+                "summary_str": (
+                    f"{_integer_str(simulation_count_obj)} historically conditioned bootstrap paths "
+                    f"calibrate uncertainty around the saved return record; they are not a forecast."
+                ),
+                "meta_list": (
+                    {
+                        "label_str": "PERIOD",
+                        "value_str": f"{summary_dict.get('start_date_str', '—')} → {summary_dict.get('end_date_str', '—')}",
+                    },
+                    {"label_str": "BOOTSTRAP", "value_str": f"{_integer_str(simulation_count_obj)} paths · block {mean_block_length_obj or '—'}d"},
+                    {"label_str": "CONFIDENCE", "value_str": _percent_str(summary_dict.get("confidence_level_float"), decimal_fraction_bool=True)},
+                    {"label_str": "RUN", "value_str": run_timestamp_str},
+                ),
+                "stat_list": (
+                    {"label_str": "OBS. SHARPE", "value_str": _decimal_str(sharpe_observed_obj)},
+                    {"label_str": "DD P05", "value_str": _percent_str(max_drawdown_p05_obj, decimal_fraction_bool=True), "tone_str": "negative"},
+                    {"label_str": "12M+ UNDERWATER", "value_str": _percent_str(underwater_12m_obj, decimal_fraction_bool=True), "tone_str": "negative"},
+                    {"label_str": "1Y TERMINAL P05", "value_str": _percent_str(one_year_p05_obj, decimal_fraction_bool=True)},
+                    {"label_str": "OBSERVATIONS", "value_str": _integer_str(summary_dict.get("return_count_int"))},
+                ),
+            }
+        )
+    else:
+        capital_obj = parameter_dict.get("capital")
+        launch_offset_obj = parameter_dict.get("launch_offsets")
+        if not isinstance(launch_offset_obj, list):
+            launch_offset_obj = metadata_dict.get("launch_offsets")
+        crisis_count_obj = metadata_dict.get("configured_crisis_count")
+        crisis_count_str = _integer_str(crisis_count_obj)
+        offset_count_str = (
+            _integer_str(len(launch_offset_obj))
+            if isinstance(launch_offset_obj, list)
+            else "—"
+        )
+        scenario_contract_str = (
+            f"{crisis_count_str} crises · {offset_count_str} launch offsets"
+        )
+        workspace_dict.update(
+            {
+                "eyebrow_str": "HISTORICAL STRESS TEST",
+                "summary_str": (
+                    f"Evaluated {_integer_str(summary_dict.get('scenario_count_int'))} pre-crisis launch scenarios; "
+                    f"the worst event return was {_percent_str(summary_dict.get('worst_event_return_pct_float'))}."
+                ),
+                "meta_list": (
+                    {"label_str": "SCENARIOS", "value_str": scenario_contract_str},
+                    {"label_str": "CAPITAL", "value_str": _money_str(capital_obj)},
+                    {"label_str": "MODEL", "value_str": "Historical pre-crisis launch"},
+                    {"label_str": "RUN", "value_str": run_timestamp_str},
+                ),
+                "stat_list": (
+                    {"label_str": "SCENARIOS", "value_str": _integer_str(summary_dict.get("scenario_count_int"))},
+                    {"label_str": "WORST RETURN", "value_str": _percent_str(summary_dict.get("worst_event_return_pct_float")), "tone_str": "negative"},
+                    {"label_str": "WORST DD", "value_str": _percent_str(summary_dict.get("worst_event_max_drawdown_pct_float")), "tone_str": "negative"},
+                    {"label_str": "UNRECOVERED", "value_str": _integer_str(summary_dict.get("unrecovered_scenario_count_int"))},
+                    {"label_str": "MAX GROSS", "value_str": _decimal_str(summary_dict.get("max_entering_gross_exposure_float"), suffix_str="×")},
+                ),
+            }
+        )
+    return workspace_dict
 
 
 def _build_strategy_card_dict(strategy_entry_obj, run_index_obj) -> dict[str, Any]:

@@ -111,7 +111,10 @@ class Job:
 
 
 def _now_iso_str() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    # Artifact writers preserve fractional seconds. BENCH job evidence must do
+    # the same or a report saved late in the completion second can appear newer
+    # than the PASS that produced it.
+    return datetime.now().isoformat(timespec="microseconds")
 
 
 def terminate_process_tree_fn(process_obj: subprocess.Popen) -> None:

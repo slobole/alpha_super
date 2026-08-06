@@ -21,8 +21,8 @@
 <div class="job-pipeline" aria-label="Job pipeline">
   <div class="pipeline-step done"><span>01</span><b>Accepted</b><small>{{ job.created_at_str.replace('T', ' ') }}</small></div>
   <div class="pipeline-step {{ 'done' if job.started_at_str else ('current' if job.status_str == 'queued' else '') }}"><span>02</span><b>Runner</b><small>{{ 'Process started' if job.started_at_str else ('Waiting for slot' if job.status_str == 'queued' else 'Not started') }}</small></div>
-  <div class="pipeline-step {{ 'done' if job.status_str == 'passed' else ('failed' if job.status_str in ['failed', 'error', 'cancelled'] else ('current' if job.status_str == 'running' else '')) }}"><span>03</span><b>Analysis</b><small>{{ job.status_str }}</small></div>
-  <div class="pipeline-step {{ 'done' if produced_run else '' }}"><span>04</span><b>Evidence</b><small>{{ 'Saved report found' if produced_run else ('No saved report found' if not job.is_active_bool else 'Pending completion') }}</small></div>
+  <div class="pipeline-step {{ 'done' if job.status_str == 'passed' else ('failed' if job.status_str in ['failed', 'error', 'cancelled', 'unknown'] else ('current' if job.status_str == 'running' else '')) }}"><span>03</span><b>Analysis</b><small>{{ job.status_str }}</small></div>
+  <div class="pipeline-step {{ 'done' if produced_run else ('current' if job.is_active_bool else 'failed') }}"><span>04</span><b>Evidence</b><small>{{ 'Saved report found' if produced_run else ('Pending completion' if job.is_active_bool else 'No saved report found') }}</small></div>
 </div>
 
 {% if job.is_cancellable_bool %}
