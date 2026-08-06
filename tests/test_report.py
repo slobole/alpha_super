@@ -42,6 +42,7 @@ from alpha.engine.theme import (
     SIGNATURE_PALETTE_DICT,
     blend_hex_color_str,
     build_report_css,
+    signature_variant_context,
 )
 
 
