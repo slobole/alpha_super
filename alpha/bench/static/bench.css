@@ -243,26 +243,30 @@
   text-align: center;
   white-space: nowrap;
 }
-.status-pass, .status-saved {
-  background: var(--color-profit-wash) !important;
-  color: var(--color-profit-dark) !important;
+.readiness-pill.status-pass, .readiness-cell.status-pass, .legend-key.status-pass,
+.readiness-pill.status-saved, .readiness-cell.status-saved, .legend-key.status-saved {
+  background: var(--color-profit-wash);
+  color: var(--color-profit-dark);
 }
-.status-fail {
-  background: var(--color-loss-wash) !important;
-  color: var(--color-loss-dark) !important;
+.readiness-pill.status-fail, .readiness-cell.status-fail, .legend-key.status-fail {
+  background: var(--color-loss-wash);
+  color: var(--color-loss-dark);
 }
-.status-skip {
-  background: var(--color-warning-wash) !important;
-  color: var(--color-warning-dark) !important;
+.readiness-pill.status-skip, .readiness-cell.status-skip, .legend-key.status-skip {
+  background: var(--color-warning-wash);
+  color: var(--color-warning-dark);
 }
-.status-not-run {
-  background: var(--color-neutral) !important;
-  color: var(--color-muted) !important;
+.readiness-pill.status-not-run, .readiness-cell.status-not-run, .legend-key.status-not-run {
+  background: var(--color-neutral);
+  color: var(--color-muted);
 }
-.status-running, .status-queued {
-  background: var(--color-accent-wash) !important;
-  color: var(--color-accent-dark) !important;
+.readiness-pill.status-running, .readiness-cell.status-running,
+.readiness-pill.status-queued, .readiness-cell.status-queued,
+.readiness-pill.status-passed, .readiness-cell.status-passed {
+  background: var(--color-accent-wash);
+  color: var(--color-accent-dark);
 }
+.readiness-pill.status-passed { background: var(--color-profit-wash); color: var(--color-profit-dark); }
 .analyzer-card-actions {
   min-height: 31px;
   padding: 6px 12px;
@@ -1986,6 +1990,203 @@ kbd {
   .catalog-stat-band { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .catalog-stat-band > div:nth-child(2) { border-right: 0; }
   .toolbar-recent { margin-left: 0; }
+}
+
+/* Strategy control page ---------------------------------------------------
+   What this module is, which contracts it satisfies, what to run, and what
+   has run before. The evidence itself lives one click away, so this page is
+   allowed to be about the decision rather than about the numbers. */
+.overview-path { margin: 9px 0 0; color: var(--color-muted); font-size: .78rem; }
+.contract-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+}
+.contract-cell {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 13px;
+  border-right: 1px solid var(--color-border);
+  font-family: var(--font-figure);
+  font-size: .68rem;
+  letter-spacing: .08em;
+}
+.contract-cell:last-child { border-right: 0; }
+.contract-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-border); }
+.contract-cell.is-ready .contract-dot { background: var(--color-profit); }
+.contract-cell.is-missing { color: var(--color-muted); align-items: flex-start; }
+.contract-cell small {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--font-prose);
+  font-size: .72rem;
+  letter-spacing: 0;
+  line-height: 1.4;
+  text-transform: none;
+}
+.contract-cell.is-missing .contract-dot { background: var(--color-warning); }
+
+.run-panel { display: grid; gap: 16px; }
+.run-panel-analyses, .run-panel-params { display: grid; gap: 9px; }
+.run-panel-analyses { grid-auto-flow: row; }
+.run-panel-analyses .param-check { display: inline-flex; align-items: center; gap: 8px; font-size: .82rem; }
+.run-panel-analyses { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; }
+.run-panel-warning {
+  margin: 0;
+  padding: 11px 13px;
+  border-left: 3px solid var(--color-warning);
+  background: var(--color-warning-wash);
+  color: var(--color-ink);
+  font-family: var(--font-prose);
+  font-size: .82rem;
+  line-height: 1.5;
+  max-width: 88ch;
+}
+.run-panel-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.run-panel-full { display: inline-block; margin: 0 0 0 10px; }
+
+.overview-stat-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  margin-bottom: 10px;
+}
+.overview-stat-strip > div {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 13px;
+  border-right: 1px solid var(--color-border);
+}
+.overview-stat-strip > div:last-child { border-right: 0; }
+.overview-stat-strip span {
+  color: var(--color-muted);
+  font-family: var(--font-figure);
+  font-size: .6rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.overview-stat-strip b {
+  font-family: var(--font-figure);
+  font-size: 1.2rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Job detail --------------------------------------------------------------
+   One row of analyzer contracts, then the evidence they produced, then the
+   raw log. The stepper is the page's headline: it answers "how far did this
+   get, and did anything skip?" without reading a line of output. */
+.job-title { font-size: clamp(1.35rem, 2.2vw, 1.85rem); font-weight: 650; letter-spacing: -.02em; }
+.job-stepper {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  margin-bottom: 10px;
+  overflow-x: auto;
+}
+.job-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  min-width: 130px;
+  padding: 15px 12px 17px;
+  border-right: 1px solid var(--color-border);
+  text-align: center;
+}
+.job-step:last-child { border-right: 0; }
+.job-step-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid var(--color-border);
+  background: var(--color-page);
+  margin-bottom: 3px;
+}
+.job-step-name {
+  font-family: var(--font-figure);
+  font-size: .68rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+.job-step-status {
+  font-family: var(--font-figure);
+  font-size: .82rem;
+  letter-spacing: .06em;
+}
+.job-step-elapsed {
+  font-family: var(--font-figure);
+  font-size: .74rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-muted);
+}
+.job-step.status-pass .job-step-dot { border-color: var(--color-profit); }
+.job-step.status-pass .job-step-status { color: var(--color-profit-dark); }
+.job-step.status-fail .job-step-dot { border-color: var(--color-loss); }
+.job-step.status-fail .job-step-status { color: var(--color-loss-dark); }
+.job-step.status-skip .job-step-dot { border-color: var(--color-warning); }
+.job-step.status-skip .job-step-status { color: var(--color-warning-dark); }
+.job-step.status-running .job-step-dot { border-color: var(--color-accent); }
+.job-step.status-running .job-step-status { color: var(--color-accent); }
+.job-step.status-queued .job-step-status,
+.job-step.status-not-run .job-step-status { color: var(--color-muted); }
+
+.job-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr);
+  gap: 10px;
+  align-items: start;
+  margin-bottom: 10px;
+}
+.job-panel {
+  padding: 15px 17px 17px;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  background: var(--color-panel);
+  margin-bottom: 10px;
+}
+.job-panel .section-heading-row { align-items: center; margin-bottom: 12px; }
+.job-panel .section-heading-row > .section-title { margin-bottom: 0; }
+.job-panel > .section-title {
+  margin-top: 0;
+  margin-bottom: 12px;
+  font-family: var(--font-prose);
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-ink);
+}
+.job-contract-table th {
+  width: 44%;
+  text-align: left;
+  font-weight: 400;
+  color: var(--color-muted);
+}
+.job-command { word-break: break-all; white-space: normal; margin-top: 11px; }
+.job-log-panel { margin-bottom: 0; }
+.job-log-panel .log {
+  max-height: 420px;
+  overflow: auto;
+  margin: 0;
+  font-size: .74rem;
+  line-height: 1.55;
+}
+/* Cancelling is the one destructive control in the console. It is outlined in
+   the loss colour rather than filled: it must be unmistakable, but it is not
+   the action the page is steering you toward. */
+.btn-danger { border-color: var(--color-loss); color: var(--color-loss-dark); }
+.btn-danger:hover { background: var(--color-loss-wash); border-color: var(--color-loss); }
+
+@media (max-width: 980px) {
+  .job-detail-grid { grid-template-columns: 1fr; }
 }
 
 /* Desk workspace ----------------------------------------------------------

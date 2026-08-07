@@ -1,45 +1,139 @@
 {% extends "base.html" %}
 {% set active_nav = "jobs" %}
-{% block title %}{{ job.label_str }} · log{% endblock %}
+{% block title %}{{ job.label_str }} · job{% endblock %}
 
 {% block content %}
-<div style="margin-bottom:6px;"><a class="muted" href="{{ url_for('jobs_page_fn') }}">← Jobs</a></div>
+<nav class="artifact-breadcrumb" aria-label="Breadcrumb">
+  <a href="{{ url_for('jobs_page_fn') }}">Jobs</a>
+  <span>/</span>
+  <b class="mono">{{ job.job_id_str }}</b>
+</nav>
 
-<div class="page-head">
-  <div>
-    <div class="page-kicker">Job detail</div>
-    <h1 class="page-title">{{ job.label_str }}</h1>
-    <p class="page-sub mono">{{ job.command_display_str }}</p>
+<header class="catalog-head">
+  <div class="page-kicker">{{ 'Full analysis' if analyzer_step_list|length >= 5 else 'Analysis run' if job.kind_str == 'analysis' else 'Portfolio run' }}</div>
+  <div class="artifact-title-row">
+    <h1 class="job-title mono">{{ job.target_str }}</h1>
+    <span class="readiness-pill status-{{ job.status_str }}">{{ job.status_str|upper }}</span>
   </div>
-  <div class="stat-row">
-    <div class="stat"><div class="stat-value"><span class="pill pill-{{ job.status_str }}">{{ job.status_str }}</span></div><div class="stat-label">Status</div></div>
-    <div class="stat"><div class="stat-value">{{ job.elapsed_str }}</div><div class="stat-label">Elapsed</div></div>
-    <div class="stat"><div class="stat-value">{{ job.return_code_int if job.return_code_int is not none else '—' }}</div><div class="stat-label">Exit code</div></div>
-  </div>
-</div>
+  <p class="catalog-strapline">{{ job_headline_str }}</p>
+</header>
 
-<div class="job-pipeline" aria-label="Job pipeline">
-  <div class="pipeline-step done"><span>01</span><b>Accepted</b><small>{{ job.created_at_str.replace('T', ' ') }}</small></div>
-  <div class="pipeline-step {{ 'done' if job.started_at_str else ('current' if job.status_str == 'queued' else '') }}"><span>02</span><b>Runner</b><small>{{ 'Process started' if job.started_at_str else ('Waiting for slot' if job.status_str == 'queued' else 'Not started') }}</small></div>
-  <div class="pipeline-step {{ 'done' if job.status_str == 'passed' else ('failed' if job.status_str in ['failed', 'error', 'cancelled', 'unknown'] else ('current' if job.status_str == 'running' else '')) }}"><span>03</span><b>Analysis</b><small>{{ job.status_str }}</small></div>
-  <div class="pipeline-step {{ 'done' if produced_run else ('current' if job.is_active_bool else 'failed') }}"><span>04</span><b>Evidence</b><small>{{ 'Saved report found' if produced_run else ('Pending completion' if job.is_active_bool else 'No saved report found') }}</small></div>
-</div>
-
-{% if job.is_cancellable_bool %}
-<div class="action-bar">
-  <div class="action-group">
-    <span class="action-group-label">Running</span>
-    <form class="inline" method="post" action="{{ url_for('cancel_job_api_fn', job_id_str=job.job_id_str) }}">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
-      <button class="btn btn-sm">Cancel this run</button>
-    </form>
-    <span class="muted">Kills the whole process tree. Artifacts already written stay on disk.</span>
+{% if analyzer_step_list %}
+{# Per-analyzer stepper. Steps come from the launched command, so a contract
+   the job never reached still appears — a job that requested five analyzers
+   and reported three has two unreported contracts, and that gap is exactly
+   what an operator needs to see. #}
+<section class="job-stepper" aria-label="Analyzer progress">
+  {% for step in analyzer_step_list %}
+  <div class="job-step status-{{ step.status_class_str }}">
+    <i class="job-step-dot" aria-hidden="true"></i>
+    <span class="job-step-name">{{ step.label_str }}</span>
+    <b class="job-step-status">{{ step.status_str }}</b>
+    <small class="job-step-elapsed">{{ step.elapsed_str }}</small>
   </div>
-</div>
+  {% endfor %}
+</section>
 {% endif %}
 
-<div id="log-body"
-     {% if job.is_active_bool %}hx-get="{{ url_for('job_log_page_fn', job_id_str=job.job_id_str) }}" hx-trigger="every 2s" hx-select="#log-body" hx-swap="outerHTML"{% endif %}>
-  <pre class="log">{{ log_text_str or '(no output yet)' }}</pre>
+<div class="job-detail-grid">
+  <section class="panel job-panel">
+    <h2 class="section-title">Run evidence</h2>
+    {% if analyzer_step_list %}
+    <table class="table table-dense job-evidence-table">
+      <thead><tr><th>Analysis</th><th>Status</th><th class="num">Elapsed</th><th>Detail</th></tr></thead>
+      <tbody>
+        {% for step in analyzer_step_list %}
+        <tr>
+          <td><b>{{ step.label_str }}</b></td>
+          <td><span class="readiness-cell status-{{ step.status_class_str }}">{{ step.status_str }}</span></td>
+          <td class="num">{{ step.elapsed_str }}</td>
+          <td class="muted">{{ step.detail_str }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="table-caption">Status is read from the runner's own final summary table, not from an incidental log line. A contract with no row was never reported.</p>
+    {% else %}
+    <div class="empty">This job launched no analyzer contract.</div>
+    {% endif %}
+  </section>
+
+  {# The mockup shows a timing contract here (decision close, execution open,
+     schedule factories). Those values live inside the analyzer artifacts, not
+     in the job record — this panel reports what the job itself actually
+     contracted for. Inventing the timing fields would be a fabricated audit
+     trail, which is worse than an honest smaller panel. #}
+  <section class="panel job-panel">
+    <h2 class="section-title">Run contract</h2>
+    <table class="table table-dense job-contract-table">
+      <tbody>
+        <tr><th>Target</th><td class="mono">{{ job.target_str }}</td></tr>
+        <tr><th>Kind</th><td>{{ job.kind_str }}</td></tr>
+        <tr><th>Contracts requested</th><td>{{ analyzer_step_list|length or '—' }}</td></tr>
+        <tr><th>Queued</th><td class="mono">{{ job.created_at_str.replace('T', ' ')[:19] }}</td></tr>
+        <tr><th>Started</th><td class="mono">{{ job.started_at_str.replace('T', ' ')[:19] if job.started_at_str else 'Not started' }}</td></tr>
+        <tr><th>Ended</th><td class="mono">{{ job.ended_at_str.replace('T', ' ')[:19] if job.ended_at_str else '—' }}</td></tr>
+        <tr><th>Elapsed</th><td class="mono">{{ job.elapsed_str }}</td></tr>
+        <tr><th>Exit code</th><td class="mono">{{ job.return_code_int if job.return_code_int is not none else '—' }}</td></tr>
+        <tr><th>Saved evidence</th><td>{{ 'Report found' if produced_run else ('Pending completion' if job.is_active_bool else 'No saved report') }}</td></tr>
+      </tbody>
+    </table>
+    <p class="table-caption job-command mono">{{ job.command_display_str }}</p>
+  </section>
 </div>
+
+<section class="panel job-panel job-log-panel">
+  <h2 class="section-title">Streaming log</h2>
+  <div id="log-body"
+       {% if job.is_active_bool %}hx-get="{{ url_for('job_log_page_fn', job_id_str=job.job_id_str) }}" hx-trigger="every 2s" hx-select="#log-body" hx-swap="outerHTML"{% endif %}>
+    <pre class="log" id="job-log">{{ log_text_str or '(no output yet)' }}</pre>
+  </div>
+</section>
+
+<div class="catalog-footer-bar">
+  <span class="readiness-note">
+    {% if job.is_active_bool %}Cancelling kills the whole process tree. Artifacts already written stay on disk.
+    {% else %}A part-finished analysis leaves whatever artifacts it had already written.{% endif %}
+  </span>
+  <div class="catalog-footer-actions">
+    {% if produced_run and produced_run.has_report_bool %}
+    <a class="btn" href="{{ url_for('artifact_fn', rel_path_str=produced_run.report_artifact_str) }}"
+       target="_blank" rel="noopener noreferrer">Open artifacts</a>
+    {% endif %}
+    {% if job.is_cancellable_bool %}
+    <form class="inline" method="post" action="{{ url_for('cancel_job_api_fn', job_id_str=job.job_id_str) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
+      <button class="btn btn-danger">Cancel run</button>
+    </form>
+    {% endif %}
+    <button class="btn btn-primary" id="follow-log" type="button" aria-pressed="true">Follow log</button>
+  </div>
+</div>
+
+<script>
+  (function () {
+    // Tail-following is a toggle, not a permanent behaviour: an operator
+    // reading back through a stack trace must not be yanked to the bottom
+    // every two seconds by the poll.
+    const button = document.getElementById('follow-log');
+    if (!button) return;
+    let following = true;
+
+    function scrollToTail() {
+      const pre = document.getElementById('job-log');
+      if (following && pre) pre.scrollTop = pre.scrollHeight;
+    }
+
+    button.addEventListener('click', function () {
+      following = !following;
+      button.setAttribute('aria-pressed', String(following));
+      button.classList.toggle('btn-primary', following);
+      button.textContent = following ? 'Follow log' : 'Following off';
+      scrollToTail();
+    });
+
+    document.body.addEventListener('htmx:afterSwap', scrollToTail);
+    scrollToTail();
+  })();
+</script>
 {% endblock %}

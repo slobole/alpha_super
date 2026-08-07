@@ -361,13 +361,18 @@ def test_strategy_page_prefers_non_legacy_capacity_report(monkeypatch):
         f"/strategy/{DV2_MODULE_STR}?analysis=capacity"
     ).get_data(as_text=True)
 
-    primary_workspace_html_str = html_str[: html_str.index('<details class="research-tools">')]
-    assert f'href="/artifact/{current_run_obj.report_artifact_str}"' in primary_workspace_html_str
-    assert f'href="/artifact/{legacy_run_obj.report_artifact_str}"' not in primary_workspace_html_str
+    # Run history moved to the strategy's control page, so the whole evidence
+    # view is the primary workspace: the legacy artifact must not appear at all.
+    assert f'href="/artifact/{current_run_obj.report_artifact_str}"' in html_str
+    assert f'href="/artifact/{legacy_run_obj.report_artifact_str}"' not in html_str
     assert "artifact-report-frame" not in html_str
-    assert "Capacity · v2.1" in html_str
-    assert "Recent: 2021-07-11 to 2026-07-11" in html_str
-    assert "Full: 2004-01-02 to 2026-07-11" in html_str
+
+    # The run label and its window summary are history, which the control page
+    # owns now — the evidence view shows one artifact, not the ledger.
+    overview_html_str = client.get(f"/strategy/{DV2_MODULE_STR}").get_data(as_text=True)
+    assert "Capacity · v2.1" in overview_html_str
+    assert "Recent: 2021-07-11 to 2026-07-11" in overview_html_str
+    assert "Full: 2004-01-02 to 2026-07-11" in overview_html_str
 
 
 def test_run_index_prefers_exact_stem_when_wrapper_metadata_points_to_base_module():
@@ -1431,11 +1436,28 @@ def test_compare_landing_excludes_partial_vanilla_artifact(monkeypatch):
     assert 'class="compare-picker-check"' not in html_str
 
 
-def test_strategy_workspace_exposes_all_analyzers_and_vanilla_depth(recording_client):
+def test_strategy_overview_is_the_control_page(recording_client):
+    """No ?analysis= is the strategy's control page, not its evidence.
+
+    The two were one page, which forced the run controls into a collapsed
+    <details> under the report — so the primary reason to open a strategy was
+    the least reachable thing on it.
+    """
     client, _job_manager, _token_str = recording_client
     html_str = client.get(f"/strategy/{DV2_MODULE_STR}").get_data(as_text=True)
 
     assert "Analyzer contract" in html_str
+    assert "Run analysis" in html_str
+    assert "Run history" in html_str
+    # The evidence view belongs to the other page.
+    assert 'class="artifact-report-stage"' not in html_str
+    assert 'href="/strategy/' + DV2_MODULE_STR + '?analysis=vanilla"' in html_str
+
+
+def test_strategy_workspace_exposes_all_analyzers_and_vanilla_depth(recording_client):
+    client, _job_manager, _token_str = recording_client
+    html_str = client.get(f"/strategy/{DV2_MODULE_STR}?analysis=vanilla").get_data(as_text=True)
+
     for label_str in ("Vanilla", "Capacity", "Timing", "Risk", "Stress"):
         assert label_str in html_str
     for section_str in (
@@ -1449,10 +1471,6 @@ def test_strategy_workspace_exposes_all_analyzers_and_vanilla_depth(recording_cl
     assert 'class="artifact-meta-grid"' in html_str
     assert 'class="artifact-stat-strip artifact-stat-strip-vanilla"' in html_str
     assert 'class="artifact-report-stage"' in html_str
-    assert html_str.index('class="artifact-report-stage"') < html_str.index(
-        'class="research-tools"'
-    )
-    assert '<details class="research-tools">' in html_str
 
 
 def test_strategy_workspace_selects_analyzer_and_rejects_unknown_key(recording_client):

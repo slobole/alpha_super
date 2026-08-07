@@ -266,7 +266,8 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             abort(404)
         run_index_obj = runs.build_strategy_run_index()
         run_entry_list = run_index_obj.runs_for(module_import_str, strategy_entry_obj.stem_str)
-        selected_analysis_str = request.args.get("analysis", "vanilla")
+        requested_analysis_str = request.args.get("analysis")
+        selected_analysis_str = requested_analysis_str or "vanilla"
         if selected_analysis_str not in SUPPORTED_ANALYSIS_TUPLE:
             abort(400, description=f"Unknown analysis: {selected_analysis_str}")
         analyzer_view_list = _analyzer_view_dict_list(
@@ -274,6 +275,45 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             run_entry_list,
             flask_app_obj.config["job_manager_obj"],
         )
+        # Two pages, one route. Without ?analysis= this is the strategy's
+        # control page: what it is, which contracts it satisfies, what to run,
+        # and what has run before. With ?analysis= it is the evidence itself.
+        #
+        # They were one page, which forced the run controls into a collapsed
+        # <details> under the report — so the primary reason to open a strategy
+        # was the least reachable thing on it.
+        if requested_analysis_str is None:
+            latest_vanilla_run_obj = next(
+                (
+                    view_dict["latest_run"]
+                    for view_dict in analyzer_view_list
+                    if view_dict["analysis_str"] == "vanilla"
+                    and view_dict["latest_run"] is not None
+                ),
+                None,
+            )
+            return render_template(
+                "strategy_overview.html",
+                strategy=strategy_entry_obj,
+                analyzer_view_list=analyzer_view_list,
+                run_entry_list=run_entry_list,
+                latest_vanilla_run=latest_vanilla_run_obj,
+                headline_stat_list=_overview_stat_dict_list(latest_vanilla_run_obj),
+                ready_count_int=sum(
+                    1 for view_dict in analyzer_view_list if view_dict["available_bool"]
+                ),
+                preset_dict=RUN_PRESET_DICT,
+                analysis_available_by_key_dict={
+                    view_dict["analysis_str"]: view_dict["available_bool"]
+                    for view_dict in analyzer_view_list
+                },
+                kwarg_aware_analysis_tuple=KWARG_AWARE_ANALYSIS_TUPLE,
+                kwarg_blind_analysis_tuple=tuple(
+                    analysis_str
+                    for analysis_str in SUPPORTED_ANALYSIS_TUPLE
+                    if analysis_str not in KWARG_AWARE_ANALYSIS_TUPLE
+                ),
+            )
         latest_report_run_obj = next(
             (
                 view_dict["latest_run"]
@@ -648,11 +688,15 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
         job_view_dict = _job_view_dict_list(
             [job_obj], flask_app_obj.config["produced_run_cache_dict"]
         )[0]
+        log_text_str = job_manager.read_log_text(job_id_str)
+        analyzer_step_list = _job_analyzer_step_list(job_obj, log_text_str)
         return render_template(
             "log.html",
             job=job_obj,
-            log_text_str=job_manager.read_log_text(job_id_str),
+            log_text_str=log_text_str,
             produced_run=job_view_dict["produced_run"],
+            analyzer_step_list=analyzer_step_list,
+            job_headline_str=_job_headline_str(job_obj, analyzer_step_list),
         )
 
     # ── HTMX fragments ───────────────────────────────────────────────────
@@ -904,21 +948,39 @@ def _analysis_tuple_from_command_list(command_list: list[str]) -> tuple[str, ...
     return tuple(dict.fromkeys(analysis_list))
 
 
-def _summary_status_by_analysis_dict(log_text_str: str) -> dict[str, str]:
-    """Parse the runner's final per-analysis table, never an incidental line."""
+def _summary_row_by_analysis_dict(log_text_str: str) -> dict[str, dict[str, str]]:
+    """Parse the runner's final per-analysis table, never an incidental line.
+
+    Returns status, elapsed seconds and detail per analyzer. The seconds and
+    detail columns are optional in the runner's output, so a row missing them
+    still parses — a status with no timing is better evidence than no row.
+    """
     normalized_log_text_str = log_text_str.replace("\r\n", "\n").replace("\r", "\n")
     summary_marker_str = "Summary\nAnalysis  Status  Seconds  Detail"
     if summary_marker_str not in normalized_log_text_str:
         return {}
     summary_text_str = normalized_log_text_str.rsplit(summary_marker_str, maxsplit=1)[-1]
-    status_by_analysis_dict: dict[str, str] = {}
-    for analysis_str, status_str in re.findall(
-        r"^(vanilla|capacity|timing|risk|stress)\s+(PASS|SKIP|FAIL)\b",
+    row_by_analysis_dict: dict[str, dict[str, str]] = {}
+    for analysis_str, status_str, seconds_str, detail_str in re.findall(
+        r"^(vanilla|capacity|timing|risk|stress)\s+(PASS|SKIP|FAIL)\b"
+        r"[ \t]*([0-9]+\.?[0-9]*)?[ \t]*(.*)$",
         summary_text_str,
         flags=re.MULTILINE,
     ):
-        status_by_analysis_dict[analysis_str] = status_str
-    return status_by_analysis_dict
+        row_by_analysis_dict[analysis_str] = {
+            "status_str": status_str,
+            "seconds_str": seconds_str,
+            "detail_str": detail_str.strip(),
+        }
+    return row_by_analysis_dict
+
+
+def _summary_status_by_analysis_dict(log_text_str: str) -> dict[str, str]:
+    """Status only, for callers that just need the verdict."""
+    return {
+        analysis_str: row_dict["status_str"]
+        for analysis_str, row_dict in _summary_row_by_analysis_dict(log_text_str).items()
+    }
 
 
 def _latest_job_record_by_analysis_dict(job_manager_obj, strategy_stem_str: str) -> dict:
@@ -984,6 +1046,117 @@ def _latest_job_record_by_analysis_dict(job_manager_obj, strategy_stem_str: str)
                 "job": job_obj,
             }
     return latest_record_by_analysis_dict
+
+
+def _overview_stat_dict_list(run_obj) -> list[dict[str, str]]:
+    """Headline figures for the strategy control page.
+
+    Read straight from the saved vanilla summary — nothing is recomputed here.
+    A metric the artifact does not carry renders as an em dash rather than a
+    zero, because "not measured" and "measured as zero" are different claims.
+    """
+    if run_obj is None:
+        return []
+    summary_dict = run_obj.summary_dict
+    # *** UI*** These are exactly the figures the saved vanilla summary
+    # carries. Volatility, Sortino, turnover and capacity are NOT in the
+    # artifact schema, so a strip that showed them would render permanent em
+    # dashes and imply the run failed to measure something it never claimed
+    # to. Add a tile here only when the artifact starts recording the value.
+    spec_tuple = (
+        ("Return (CAGR)", _decimal_str(summary_dict.get("ann_return_pct"), suffix_str="%")),
+        ("Sharpe", _decimal_str(summary_dict.get("sharpe"))),
+        ("Max drawdown", _decimal_str(summary_dict.get("max_drawdown_pct"), suffix_str="%")),
+        ("Final equity", _compact_money_str(summary_dict.get("final_equity"))),
+        ("Trades", _integer_str(summary_dict.get("trade_count"))),
+    )
+    return [
+        {"label_str": label_str, "value_str": value_str} for label_str, value_str in spec_tuple
+    ]
+
+
+def _job_analyzer_step_list(
+    job_obj, log_text_str: str
+) -> list[dict[str, Any]]:
+    """One step per analyzer this job was asked to run.
+
+    The steps come from the *command*, not from the log, so an analyzer that
+    has not started yet is still shown as pending rather than silently missing.
+    A job that requested five analyzers and finished three has two unreported
+    contracts, and that gap is the thing an operator needs to see.
+    """
+    requested_analysis_tuple = _analysis_tuple_from_command_list(list(job_obj.command_list))
+    summary_row_dict = _summary_row_by_analysis_dict(log_text_str)
+    # The runner works through the requested analyzers in order, so the first
+    # one with no summary row is the one currently executing.
+    running_analysis_str = ""
+    if job_obj.is_active_bool:
+        running_analysis_str = next(
+            (
+                analysis_str
+                for analysis_str in requested_analysis_tuple
+                if analysis_str not in summary_row_dict
+            ),
+            "",
+        )
+    step_list: list[dict[str, Any]] = []
+    for analysis_str in requested_analysis_tuple:
+        row_dict = summary_row_dict.get(analysis_str)
+        if row_dict is not None:
+            status_str = row_dict["status_str"]
+            elapsed_str = f"{float(row_dict['seconds_str']):.0f}s" if row_dict["seconds_str"] else "—"
+            detail_str = row_dict["detail_str"] or "—"
+        elif analysis_str == running_analysis_str:
+            status_str, elapsed_str, detail_str = "RUNNING", job_obj.elapsed_str, "In progress"
+        elif job_obj.is_active_bool:
+            status_str, elapsed_str, detail_str = "QUEUED", "—", "Not started"
+        else:
+            # The job ended without reporting this contract at all.
+            status_str, elapsed_str, detail_str = "NOT RUN", "—", "No summary row"
+        step_list.append(
+            {
+                "analysis_str": analysis_str,
+                "label_str": ANALYSIS_LABEL_DICT[analysis_str],
+                "status_str": status_str,
+                "status_class_str": status_str.lower().replace(" ", "-"),
+                "elapsed_str": elapsed_str,
+                "detail_str": detail_str,
+            }
+        )
+    return step_list
+
+
+def _job_headline_str(job_obj, step_list: list[dict[str, Any]]) -> str:
+    """One plain-language sentence about what this job actually did."""
+    if not step_list:
+        return "This job ran no analyzer contract."
+    count_by_status_dict: dict[str, int] = {}
+    for step_dict in step_list:
+        count_by_status_dict[step_dict["status_str"]] = (
+            count_by_status_dict.get(step_dict["status_str"], 0) + 1
+        )
+    clause_list: list[str] = []
+    for status_str, verb_str in (
+        ("PASS", "passed"),
+        ("FAIL", "failed"),
+        ("SKIP", "were skipped"),
+    ):
+        count_int = count_by_status_dict.get(status_str, 0)
+        if count_int:
+            clause_list.append(f"{count_int} {verb_str}")
+    running_label_str = next(
+        (step["label_str"] for step in step_list if step["status_str"] == "RUNNING"), ""
+    )
+    if running_label_str:
+        clause_list.append(f"{running_label_str} is running")
+    if not clause_list:
+        return "No analyzer has reported yet."
+    # A skip is the quiet failure mode this console exists to surface, so it is
+    # called out explicitly rather than left to be inferred from the counts.
+    suffix_str = (
+        "" if count_by_status_dict.get("SKIP") else " No analyzer was skipped."
+    )
+    return f"{', '.join(clause_list).capitalize()}.{suffix_str}"
 
 
 def _readiness_row_dict(

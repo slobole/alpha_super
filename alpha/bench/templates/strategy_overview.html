@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% set active_nav = "strategies" %}
+{% block title %}{{ strategy.stem_str }}{% endblock %}
+
+{% block content %}
+<nav class="artifact-breadcrumb" aria-label="Breadcrumb">
+  <a href="{{ url_for('index_page_fn') }}">Strategies</a>
+  <span>/</span>
+  <b class="mono">{{ strategy.stem_str }}</b>
+</nav>
+
+<header class="catalog-head">
+  <div class="page-kicker">
+    {{ 'Wired strategy' if strategy.is_wired_bool else 'PM_ready strategy' if strategy.is_pm_ready_bool else 'Research strategy' }}
+  </div>
+  <div class="artifact-title-row">
+    <h1 class="job-title mono">{{ strategy.stem_str }}</h1>
+    {% if strategy.is_wired_bool %}<span class="maturity maturity-wired">WIRED</span>
+    {% elif strategy.is_pm_ready_bool %}<span class="maturity maturity-pm">PM_READY</span>
+    {% else %}<span class="maturity maturity-research">RESEARCH</span>{% endif %}
+  </div>
+  <p class="overview-path mono">{{ strategy.rel_path_str }}</p>
+  {% if strategy.summary_str %}<p class="catalog-strapline">{{ strategy.summary_str }}</p>{% endif %}
+</header>
+
+<section class="panel job-panel">
+  <h2 class="section-title">Analyzer contract</h2>
+  {# Whether the module exposes each analyzer's hook. This is a property of the
+     source on disk, not of any saved run — a contract can be READY with no
+     evidence behind it, and MISSING with a stale report still on disk. The two
+     questions are answered in different places on purpose. #}
+  <div class="contract-row">
+    {% for analyzer in analyzer_view_list %}
+    <div class="contract-cell {{ 'is-ready' if analyzer.available_bool else 'is-missing' }}">
+      <i class="contract-dot" aria-hidden="true"></i>
+      <span>
+        {{ analyzer.label_str|upper }} {{ 'READY' if analyzer.available_bool else 'MISSING' }}
+        {# Name the missing hook here rather than only in a tooltip. "Capacity
+           is unavailable" without saying which hook is absent leaves the
+           operator to go read the source to find out. #}
+        {% if not analyzer.available_bool %}<small>{{ analyzer.detail_str }}</small>{% endif %}
+      </span>
+    </div>
+    {% endfor %}
+  </div>
+  <p class="table-caption">{{ ready_count_int }} of {{ analyzer_view_list|length }} analyzer hooks exist on this module. READY means the hook is present, not that evidence has been saved.</p>
+</section>
+
+{% if strategy.has_run_variant_bool %}
+<section class="panel job-panel">
+  <h2 class="section-title">Run analysis</h2>
+  <form method="post" action="{{ url_for('run_api_fn') }}" class="run-panel">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
+    <input type="hidden" name="module_import" value="{{ strategy.module_import_str }}">
+
+    <div class="run-panel-analyses">
+      <span class="toolbar-group-label">Analyzers</span>
+      {% for analysis_str in single_analysis_tuple %}
+      {% set available_bool = analysis_available_by_key_dict[analysis_str] %}
+      <label class="param-check {{ 'is-blind' if analysis_str in kwarg_blind_analysis_tuple }}">
+        <input type="checkbox" name="analysis" value="{{ analysis_str }}"
+               {{ 'checked' if available_bool }} {{ 'disabled' if not available_bool }}>
+        {{ analysis_label_dict[analysis_str] }}
+      </label>
+      {% endfor %}
+    </div>
+
+    {% if strategy.run_variant_param_tuple %}
+    <div class="run-panel-params">
+      <span class="toolbar-group-label">Parameters</span>
+      <div class="param-grid">
+        {% for param in strategy.run_variant_param_tuple %}
+        <label class="param-field">
+          <span class="param-name mono">{{ param.name_str }}</span>
+          <input type="text" name="kwarg__{{ param.name_str }}" autocomplete="off"
+                 placeholder="{{ param.default_repr_str or 'no default' }}">
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <p class="run-panel-warning">
+      <b>Parameters reach {{ kwarg_aware_analysis_tuple | map('capitalize') | join(' and ') }} only.</b>
+      {{ kwarg_blind_analysis_tuple | map('capitalize') | join(', ') }} use the strategy defaults, so a
+      parameter set here does not change what they measure.
+    </p>
+
+    <div class="run-panel-actions">
+      <button class="btn btn-run is-due" name="preset" value="selected">Run selected</button>
+    </div>
+  </form>
+  <form class="inline run-panel-full" method="post" action="{{ url_for('run_api_fn') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
+    <input type="hidden" name="module_import" value="{{ strategy.module_import_str }}">
+    {% for analysis_str in preset_dict['full'] %}<input type="hidden" name="analysis" value="{{ analysis_str }}">{% endfor %}
+    <button class="btn btn-run">Run all {{ preset_dict['full']|length }}</button>
+  </form>
+</section>
+{% else %}
+<div class="empty">This module exposes no <span class="mono">run_variant</span> hook, so Bench cannot launch it.</div>
+{% endif %}
+
+{% if latest_vanilla_run %}
+<section class="panel job-panel">
+  <div class="section-heading-row">
+    <h2 class="section-title">Latest vanilla · {{ latest_vanilla_run.display_timestamp_str[:16] }}</h2>
+    <a class="btn btn-sm" href="{{ url_for('strategy_page_fn', module_import_str=strategy.module_import_str, analysis='vanilla') }}">Open report</a>
+  </div>
+  <div class="overview-stat-strip">
+    {% for stat in headline_stat_list %}
+    <div><span>{{ stat.label_str }}</span><b>{{ stat.value_str }}</b></div>
+    {% endfor %}
+  </div>
+  <p class="table-caption">
+    Window {{ latest_vanilla_run.backtest_window_str or 'not recorded' }} · read from the saved artifact, not recomputed.
+  </p>
+</section>
+{% endif %}
+
+<section class="panel job-panel">
+  <h2 class="section-title">Run history</h2>
+  {% if run_entry_list %}
+  <table class="table table-dense">
+    <thead><tr><th>Analysis</th><th>When</th><th>Recorded window</th><th class="num">CAGR</th><th class="num">Sharpe</th><th class="num">Max DD</th><th>Artifact</th></tr></thead>
+    <tbody>
+      {% for run in run_entry_list %}
+      {% set summary = run.summary_dict %}
+      <tr>
+        <td><b>{{ run.display_analysis_label_str }}</b>{% if run.capacity_window_date_summary_str %}<div class="cell-note">{{ run.capacity_window_date_summary_str }}</div>{% endif %}</td>
+        <td class="muted">{{ run.display_timestamp_str[:16] }}</td>
+        <td class="mono">{{ run.backtest_window_str or '—' }}</td>
+        <td class="num">{{ summary.get('ann_return_pct')|pct }}</td>
+        <td class="num">{{ summary.get('sharpe')|ratio }}</td>
+        <td class="num">{{ summary.get('max_drawdown_pct')|pct }}</td>
+        <td>{% if run.has_report_bool %}<a href="{{ url_for('artifact_fn', rel_path_str=run.report_artifact_str) }}" target="_blank" rel="noopener noreferrer">Open ↗</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">No saved artifacts for this strategy. Nothing here has been measured.</div>
+  {% endif %}
+</section>
+
+<div class="catalog-footer-bar">
+  <span class="readiness-note">Evidence is read from <span class="mono">results/</span>; nothing on this page is recomputed.</span>
+  <div class="catalog-footer-actions">
+    <a class="btn" href="{{ url_for('compare_page_fn') }}">Compare</a>
+    <a class="btn btn-primary" href="{{ url_for('strategy_page_fn', module_import_str=strategy.module_import_str, analysis='vanilla') }}">Open evidence</a>
+  </div>
+</div>
+{% endblock %}
