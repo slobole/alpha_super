@@ -654,14 +654,25 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertIn('2024-02-29', report_html_str)
         self.assertIn('2024-03-29', report_html_str)
         self.assertIn('2024-04-30', report_html_str)
-        self.assertIn(
-            '<td>2024-02-29</td><td>AAPL</td><td>60.00%</td><td>58.00%</td><td class="neg">-2.00%</td>',
-            report_html_str,
-        )
-        self.assertIn(
-            '<td>2024-02-29</td><td>Cash</td><td>10.00%</td><td>11.00%</td><td class="pos">1.00%</td>',
-            report_html_str,
-        )
+        # Pivoted: one row per asset, one column group per rebalance. The long
+        # form was 21 rows for a seven-sleeve book and made comparing one asset
+        # across three dates a hunt through scattered rows.
+        # Scoped to the rebalance table: the current-composition block below
+        # also carries a row per asset, so an unscoped split matches that one.
+        rebalance_table_str = report_html_str.split('rebalance-table')[1]
+        aapl_row_str = rebalance_table_str.split('<tr><th>AAPL</th>')[1].split('</tr>')[0]
+        self.assertIn('<td>60.00%</td><td>58.00%</td><td class="neg">-2.00%</td>', aapl_row_str)
+        cash_row_str = rebalance_table_str.split('<tr><th>Cash</th>')[1].split('</tr>')[0]
+        self.assertIn('<td>10.00%</td><td>11.00%</td><td class="pos">1.00%</td>', cash_row_str)
+
+        # Today's book is stated directly rather than left to be read off the
+        # right edge of a decade-long stacked chart.
+        self.assertIn('Current Composition', report_html_str)
+        self.assertIn('composition-bars', report_html_str)
+        current_block_str = report_html_str.split('Current Composition')[1]
+        # *** CRITICAL*** Realized weights, not targets: the last realized row
+        # is 0%/69%/31%, while the target for that date is 0%/70%/30%.
+        self.assertIn('69.00%', current_block_str.split('Recent TAA Weights')[0])
 
     def test_build_html_does_not_show_recent_taa_weights_for_non_taa_strategy(self):
         strategy = make_strategy([0.0, 0.01, -0.02, 0.0, 0.03, -0.01])

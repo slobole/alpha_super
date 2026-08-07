@@ -3760,38 +3760,121 @@ def _recent_taa_weight_comparison_df(strategy) -> pd.DataFrame:
     return pd.DataFrame(row_dict_list, columns=['date', 'asset', 'target_weight', 'realized_weight', 'drift_weight'])
 
 
+def _current_composition_html(strategy) -> str:
+    """What the book holds right now, as a labelled bar per sleeve.
+
+    The stacked weight chart above answers "how did this change over a decade";
+    it cannot be read for "what do I hold today" without squinting at its right
+    edge. This answers the second question directly, and that is the one an
+    operator and an investor both ask first.
+
+    Bars are HTML, not a rasterised chart: they stay crisp at any zoom, add no
+    bytes to the artifact, and reuse the same per-asset colours as the stack
+    above, so a sleeve is the same colour in both.
+
+    *** CRITICAL*** Read from the last row of the REALIZED weight history --
+    close-marked weights after execution and valuation, not the target the
+    rebalance asked for. Showing targets here would state an intention as
+    though it were a position.
+    """
+    realized_weight_df = getattr(strategy, 'realized_weight_df', None)
+    if realized_weight_df is None or len(realized_weight_df) == 0:
+        return ''
+    latest_weight_ser = realized_weight_df.iloc[-1].apply(
+        pd.to_numeric, errors='coerce'
+    ).dropna()
+    latest_weight_ser = latest_weight_ser[latest_weight_ser.abs() > 1e-6]
+    if len(latest_weight_ser) == 0:
+        return ''
+    latest_weight_ser = latest_weight_ser.sort_values(ascending=False)
+
+    as_of_obj = realized_weight_df.index[-1]
+    as_of_str = as_of_obj.date().isoformat() if hasattr(as_of_obj, 'date') else str(as_of_obj)
+    # Bars scale to the largest holding, not to 100%: a book whose biggest
+    # sleeve is 25% would otherwise render as a row of barely visible slivers.
+    scale_weight_float = float(latest_weight_ser.abs().max()) or 1.0
+
+    row_html_list: list[str] = []
+    for asset_name_obj, weight_float in latest_weight_ser.items():
+        asset_name_str = str(asset_name_obj)
+        width_pct_float = abs(float(weight_float)) / scale_weight_float * 100.0
+        row_html_list.append(
+            '<tr>'
+            f'<th>{html.escape(asset_name_str)}</th>'
+            '<td class="composition-bar-cell">'
+            f'<span class="composition-bar" style="width:{width_pct_float:.1f}%;'
+            f'background:{_weight_color_for_asset(asset_name_str)}"></span>'
+            '</td>'
+            f'<td class="composition-bar-value">{_format_weight_ratio_str(weight_float)}</td>'
+            '</tr>'
+        )
+    return (
+        '<h3>Current Composition</h3>'
+        f'<p class="metric-context">Close-marked realized weights as of {html.escape(as_of_str)}. '
+        'Bar length is relative to the largest sleeve, not to 100%.</p>'
+        '<table class="composition-bars"><tbody>'
+        f'{"".join(row_html_list)}'
+        '</tbody></table>'
+    )
+
+
 def _recent_taa_weight_comparison_html(strategy) -> str:
+    """The last three rebalances, pivoted so one asset is one row.
+
+    Emitted long (date, asset, target, realized, drift) this is 21 rows for a
+    seven-sleeve book, and comparing one asset across three dates means finding
+    three rows scattered through it. Pivoted to assets-by-date it is seven rows
+    and the comparison runs horizontally -- which is the whole reason to show
+    three rebalances rather than one.
+    """
     recent_weight_df = _recent_taa_weight_comparison_df(strategy)
     if len(recent_weight_df) == 0:
         return ''
 
-    header_html_str = (
-        '<th>date</th>'
-        '<th>asset</th>'
-        '<th>target_weight</th>'
-        '<th>realized_weight</th>'
-        '<th>drift_weight</th>'
+    rebalance_date_list = list(dict.fromkeys(recent_weight_df['date'].tolist()))
+    asset_name_list = list(dict.fromkeys(recent_weight_df['asset'].tolist()))
+    weight_row_by_key_dict = {
+        (str(row_ser['date']), str(row_ser['asset'])): row_ser
+        for _, row_ser in recent_weight_df.iterrows()
+    }
+
+    group_header_html_str = '<th></th>' + ''.join(
+        f'<th colspan="3" class="rebalance-group">{html.escape(str(date_obj))}</th>'
+        for date_obj in rebalance_date_list
     )
-    row_html_list: list[str] = []
-    for _, weight_row_ser in recent_weight_df.iterrows():
-        drift_weight_obj = weight_row_ser['drift_weight']
-        drift_class_str = _signed_value_class_str(drift_weight_obj)
-        drift_class_attr_str = f' class="{drift_class_str}"' if drift_class_str else ''
-        row_html_list.append(
-            '<tr>'
-            f'<td>{weight_row_ser["date"]}</td>'
-            f'<td>{html.escape(str(weight_row_ser["asset"]))}</td>'
-            f'<td>{_format_weight_ratio_str(weight_row_ser["target_weight"])}</td>'
-            f'<td>{_format_weight_ratio_str(weight_row_ser["realized_weight"])}</td>'
-            f'<td{drift_class_attr_str}>{_format_weight_ratio_str(drift_weight_obj)}</td>'
-            '</tr>'
+    column_header_html_str = '<th>Asset</th>' + ''.join(
+        '<th>Target</th><th>Realized</th><th>Drift</th>'
+        for _ in rebalance_date_list
+    )
+
+    body_row_html_list: list[str] = []
+    for asset_name_str in asset_name_list:
+        cell_html_list: list[str] = []
+        for date_obj in rebalance_date_list:
+            weight_row_ser = weight_row_by_key_dict.get((str(date_obj), str(asset_name_str)))
+            if weight_row_ser is None:
+                cell_html_list.append('<td>&mdash;</td><td>&mdash;</td><td>&mdash;</td>')
+                continue
+            drift_weight_obj = weight_row_ser['drift_weight']
+            drift_class_str = _signed_value_class_str(drift_weight_obj)
+            drift_class_attr_str = f' class="{drift_class_str}"' if drift_class_str else ''
+            cell_html_list.append(
+                f'<td>{_format_weight_ratio_str(weight_row_ser["target_weight"])}</td>'
+                f'<td>{_format_weight_ratio_str(weight_row_ser["realized_weight"])}</td>'
+                f'<td{drift_class_attr_str}>{_format_weight_ratio_str(drift_weight_obj)}</td>'
+            )
+        body_row_html_list.append(
+            f'<tr><th>{html.escape(str(asset_name_str))}</th>{"".join(cell_html_list)}</tr>'
         )
 
     return (
         '<h3>Recent TAA Weights - Last 3 Rebalances</h3>'
         '<p>Close-marked realized weights after execution and valuation; drift = realized_weight - target_weight.</p>'
         '<div class="scroll">'
-        f'<table><thead><tr>{header_html_str}</tr></thead><tbody>{"".join(row_html_list)}</tbody></table>'
+        '<table class="rebalance-table"><thead>'
+        f'<tr>{group_header_html_str}</tr>'
+        f'<tr>{column_header_html_str}</tr>'
+        f'</thead><tbody>{"".join(body_row_html_list)}</tbody></table>'
         '</div>'
     )
 
@@ -3813,6 +3896,10 @@ def _portfolio_weights_html(strategy) -> str:
     trailing_weights = weights.loc[weights.index >= trailing_start]
 
     parts = ['<h2>Portfolio Weights</h2>']
+    # Today's book first. The rebalance history and the multi-year stacks below
+    # answer how it got here; this answers what it is, which is the question
+    # asked first and was previously not answered anywhere in the report.
+    parts.append(_current_composition_html(strategy))
     parts.append(_recent_taa_weight_comparison_html(strategy))
     parts.append(
         _weights_chart_block(

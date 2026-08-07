@@ -1535,6 +1535,19 @@ h1 {
 }
 /* No specimen numbering: these are panels, not plates in a datasheet. */
 .plate > h2::before { content: none; }
+/* Sub-sections inside a panel follow the same voice as the panel title, one
+   step down. The document layout sets these uppercase mono, which is the
+   eyebrow style and reads as a label rather than as a heading. */
+h3 {
+    font-family: var(--font-prose);
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--color-ink);
+    margin: 18px 0 8px;
+}
+.plate > h3:first-of-type { margin-top: 4px; }
 
 table { font-size: 0.8rem; }
 th {
@@ -1543,6 +1556,53 @@ th {
     padding-bottom: 8px;
 }
 td { padding: 8px 10px; }
+
+/* Current composition: name, bar, weight. The bar is the mark and the number
+   is the value; neither is decoration for the other. */
+.composition-bars { width: 100%; table-layout: fixed; }
+.composition-bars th {
+    width: 84px;
+    text-align: left;
+    font-family: var(--font-figure);
+    font-size: 0.74rem;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--color-ink);
+    border-bottom: 1px solid var(--color-border);
+    padding: 7px 10px 7px 0;
+}
+.composition-bar-cell { width: auto; padding: 7px 10px 7px 0 !important; }
+.composition-bar {
+    display: block;
+    height: 13px;
+    border-radius: 2px;
+    min-width: 2px;
+}
+.composition-bar-value {
+    width: 88px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Rebalance history: three date groups, ruled so the eye does not read a
+   target from one date against a realized from the next. */
+.rebalance-table th.rebalance-group {
+    text-align: center;
+    border-bottom: 1px solid var(--color-border);
+    color: var(--color-ink);
+}
+.rebalance-table thead tr:first-child th + th { border-left: 1px solid var(--color-border); }
+.rebalance-table thead tr:last-child th:nth-child(3n + 2) { border-left: 1px solid var(--color-border); }
+.rebalance-table tbody td:nth-child(3n + 2) { border-left: 1px solid var(--color-border); }
+.rebalance-table tbody th {
+    text-align: left;
+    font-weight: 400;
+    color: var(--color-ink);
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 0.74rem;
+}
 
 /* Vanilla pairs its headline panels; other analyzers are untouched. */
 /* Full width, on purpose. Pairing it beside the equity curve squeezed a
