@@ -316,7 +316,7 @@ _DESK_PALETTE_DICT: dict[str, object] = {
     # a line; at a faint weight the panel collapsed into a black scribble. The
     # area carries the shape and the line becomes a hairline edge on it.
     'equity_fill_alpha_float': 0.09,
-    'drawdown_fill_alpha_float': 0.45,
+    'drawdown_fill_alpha_float': 0.26,
     'benchmark_drawdown_fill_alpha_float': 0.16,
     'vertical_line': '#9aa0a6',
     'zero_line': '#16181d',

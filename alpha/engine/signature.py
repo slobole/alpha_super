@@ -161,6 +161,8 @@ def render_small_multiples_data_uri_str(
     benchmark_color_str = str(SIGNATURE_PALETTE_DICT['benchmark'])
     muted_color_str = str(SIGNATURE_PALETTE_DICT['muted'])
     grid_color_str = str(SIGNATURE_PALETTE_DICT['grid'])
+    profit_color_str = str(SIGNATURE_PALETTE_DICT['profit_dark'])
+    loss_color_str = str(SIGNATURE_PALETTE_DICT['loss_dark'])
 
     # *** CRITICAL*** The reference lines join the shared range. Scaling to the
     # panel series alone would clip exactly the case the comparison exists for
@@ -228,18 +230,30 @@ def render_small_multiples_data_uri_str(
             # Print each panel's own outcome. Without it a grid of small charts
             # shows relative shape but cannot be read for magnitude, which is
             # what turns the device from evidence into decoration.
-            panel_title_str = panel_name_str
-            if value_formatter_fn is not None and len(panel_value_ser) > 0:
-                panel_title_str = (
-                    f'{panel_name_str}   {value_formatter_fn(float(panel_value_ser.iloc[-1]))}'
-                )
+            #
+            # The label is drawn in two parts so the outcome can carry its
+            # sign's colour while the panel name stays neutral. The *line* is
+            # deliberately left in ink: a year's path is not positive or
+            # negative, only its outcome is, and colouring the whole curve by
+            # its endpoint would claim the year was never under water.
             axis_obj.set_title(
-                panel_title_str,
+                panel_name_str,
                 fontsize=6.5,
                 color=muted_color_str,
                 loc='left',
                 pad=3.0,
             )
+            if value_formatter_fn is not None and len(panel_value_ser) > 0:
+                panel_outcome_float = float(panel_value_ser.iloc[-1])
+                axis_obj.set_title(
+                    value_formatter_fn(panel_outcome_float),
+                    fontsize=6.5,
+                    color=(
+                        loss_color_str if panel_outcome_float < 0.0 else profit_color_str
+                    ),
+                    loc='right',
+                    pad=3.0,
+                )
             for spine_name_str in ('top', 'right', 'left'):
                 axis_obj.spines[spine_name_str].set_visible(False)
             axis_obj.spines['bottom'].set_color(grid_color_str)

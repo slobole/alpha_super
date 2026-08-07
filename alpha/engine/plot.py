@@ -291,6 +291,17 @@ def plot(
         if len(ylims) > 0:
             equity_ax.set_ylim(ylims)
 
+        # *** UI*** Drawdown is a loss quantity by definition, so it carries the
+        # loss colour rather than the strategy's own. In a report you are
+        # reading one strategy through time, and what you scan for is the sign
+        # of the value — the same semantics the year and monthly tables use.
+        # Drawing this panel in ink made the largest block on the page a grey
+        # mass that said nothing.
+        # loss_dark, not loss: this is the same red the tables use for a
+        # negative cell, so a -25.5% in the year table and the trough it came
+        # from are visibly the same quantity. The brighter loss tone is a
+        # signal colour and reads as an alarm when it covers a whole panel.
+        drawdown_color_str = str(SIGNATURE_PALETTE_DICT['loss_dark'])
         if benchmark_drawdown_ser is not None:
             benchmark_drawdown_line_obj, = drawdown_ax.plot(
                 benchmark_drawdown_ser.index,
@@ -317,7 +328,7 @@ def plot(
         strategy_drawdown_line_obj, = drawdown_ax.plot(
             strategy_drawdown_ser.index,
             strategy_drawdown_ser,
-            color=strategy_color_str,
+            color=drawdown_color_str,
             linewidth=0.45,
             alpha=1.0,
             zorder=5,
@@ -327,12 +338,12 @@ def plot(
             strategy_drawdown_ser.index,
             0.0,
             strategy_drawdown_ser,
-            color=strategy_color_str,
+            color=drawdown_color_str,
             alpha=float(SIGNATURE_PALETTE_DICT['drawdown_fill_alpha_float']),
             zorder=2,
         )
         _annotate_drawdown_trough(
-            drawdown_ax, strategy_drawdown_ser, strategy_color_str
+            drawdown_ax, strategy_drawdown_ser, drawdown_color_str
         )
 
         if additional_drawdowns_df is not None:
@@ -377,12 +388,22 @@ def plot(
             strategy_bar_center_vec = return_position_vec
             benchmark_bar_center_vec = None
 
+        # The strategy's bars are coloured by the sign of the year, because
+        # that is the question the panel answers. The benchmark keeps the
+        # neutral grey: it is the reference, not the subject, and colouring
+        # both would leave nothing to tell them apart.
+        strategy_bar_color_list = [
+            str(SIGNATURE_PALETTE_DICT['loss'])
+            if float(period_return_float) < 0.0
+            else str(SIGNATURE_PALETTE_DICT['profit'])
+            for period_return_float in strategy_period_return_ser.to_numpy()
+        ]
         strategy_bar_container = annual_ax.bar(
             strategy_bar_center_vec,
             strategy_period_return_ser.to_numpy(),
             bar_width_float,
             label=strategy_label,
-            color=strategy_color_str,
+            color=strategy_bar_color_list,
             alpha=0.78,
             edgecolor=bar_edge_color_str,
             linewidth=0.75,
