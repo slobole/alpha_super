@@ -369,7 +369,20 @@ def _weight_color_for_asset(asset_name_str: str) -> str:
     """
     normalized_asset_name_str = str(asset_name_str).upper()
     if normalized_asset_name_str in _FALLBACK_ASSET_SET:
-        return SIGNATURE_PALETTE_DICT['benchmark']
+        # These are all equity-beta proxies, so they share the benchmark hue —
+        # that relationship is the point.
+        #
+        # *** UI*** But they must not share the same *shade*. A book holding
+        # QQQ alongside TQQQ, or SPY alongside SSO, is ordinary, and returning
+        # one flat colour made those two sleeves indistinguishable in the same
+        # weight stack. Each proxy takes its own step along the benchmark-to-ink
+        # ramp: same family, still separable.
+        proxy_index_int = sorted(_FALLBACK_ASSET_SET).index(normalized_asset_name_str)
+        return blend_hex_color_str(
+            str(SIGNATURE_PALETTE_DICT['benchmark']),
+            str(SIGNATURE_PALETTE_DICT['ink']),
+            proxy_index_int / max(len(_FALLBACK_ASSET_SET) - 1, 1) * 0.6,
+        )
     active_asset_color_dict = SIGNATURE_PALETTE_DICT['asset_color_dict']
     return active_asset_color_dict.get(
         normalized_asset_name_str,
@@ -3273,19 +3286,46 @@ def _weights_chart_b64(
     return base64.b64encode(buf.read()).decode('ascii')
 
 
+def _legible_label_color_str(band_color_str: str) -> str:
+    """Darken a band colour until it is readable as text on the page.
+
+    Stack fills are chosen for how they sit beside each other, which makes the
+    palest of them — cash, and any near-white sleeve — invisible as a label.
+    Blending toward ink keeps the hue, so the label still identifies its band,
+    while raising contrast enough to read.
+    """
+    from matplotlib import colors as mcolors
+
+    red_float, green_float, blue_float = mcolors.to_rgb(band_color_str)
+    # Rec. 601 luma: cheap, and adequate for "is this too pale for text".
+    luma_float = 0.299 * red_float + 0.587 * green_float + 0.114 * blue_float
+    if luma_float <= 0.55:
+        return band_color_str
+    blend_weight_float = min(0.75, (luma_float - 0.55) / 0.45 * 0.75)
+    return blend_hex_color_str(
+        band_color_str, str(SIGNATURE_PALETTE_DICT['ink']), blend_weight_float
+    )
+
+
 def _composition_weights_chart_b64(weights_df) -> str | None:
-    """Full-history weight stack, labelled at the right edge.
+    """Full-history weight stack, labelled down the right edge.
 
     Distinct from _weights_chart_b64, which is the windowed chart the portfolio
-    pages use. Two differences, both because this one carries a decade rather
-    than a two-year window:
+    pages use. Three differences, all because this one carries a decade of a
+    rotating book rather than a two-year window of a stable one:
 
-    * Sleeves are labelled where they END, not in a legend box. With seven
-      bands a top-left legend forces the reader to match a swatch to a band
-      by colour alone, which is exactly what fails when two muted tones sit
-      next to each other. A label at the band's own height needs no matching.
-    * Bands carry a hatch as well as a colour, so a sleeve that narrows to a
-      few pixels is still identifiable, and the stack survives printing.
+    * Labels run down the right edge at even spacing, in the bands' own colours
+      and in the bands' own top-to-bottom order. Anchoring each label to its
+      sleeve's FINAL height fails badly here: a rotating strategy ends most
+      sleeves at zero, so six of seven labels collapse onto the baseline and
+      overprint each other. Even spacing plus colour is what makes the chart
+      answer "which band is which" at all.
+    * One hatch for every band, not a different pattern per band. Cycling
+      dots, circles and plus-signs reads as seven unrelated textures fighting
+      each other; the texture's job here is to give the fills a surface, and
+      the differentiation is carried by colour and the labels.
+    * A banner proportion. The stack is a shape read left to right; height
+      beyond what the bands need is empty page.
     """
     if weights_df is None or len(weights_df) == 0:
         return None
@@ -3297,7 +3337,6 @@ def _composition_weights_chart_b64(weights_df) -> str | None:
     if not active_column_name_list:
         return None
 
-    hatch_cycle_list = list(SIGNATURE_PALETTE_DICT['hatch_cycle_list']) or ['']
     weight_color_list = [
         _weight_color_for_asset(column_name_str) for column_name_str in active_column_name_list
     ]
@@ -3306,66 +3345,70 @@ def _composition_weights_chart_b64(weights_df) -> str | None:
         for column_name_str in active_column_name_list
     ]
 
-    # The hatch is drawn in the page colour at a thin stroke, so it reads as a
-    # light texture over the sleeve's hue rather than as a dark mesh on top of
-    # it. The same colour draws the band separators, which is what gives the
-    # stack its hairline partings.
+    # Hatch drawn in the page colour at a thin stroke, so it reads as a surface
+    # texture over the sleeve's hue rather than as a mesh on top of it. The
+    # same colour draws the band separators, which gives the stack its hairline
+    # partings.
     stack_rcparam_dict = dict(build_signature_rcparams(to_web_bool=True))
-    stack_rcparam_dict['hatch.linewidth'] = 0.35
+    stack_rcparam_dict['hatch.linewidth'] = 0.3
+    page_color_str = str(SIGNATURE_PALETTE_DICT['page'])
     with plt.rc_context(stack_rcparam_dict):
-        figure_obj, axis_obj = plt.subplots(figsize=(12, 3.6))
+        figure_obj, axis_obj = plt.subplots(figsize=(12, 2.6))
         stack_collection_list = axis_obj.stackplot(
             weights_df.index,
             weight_value_list,
             colors=weight_color_list,
             alpha=0.95,
-            edgecolor=str(SIGNATURE_PALETTE_DICT['page']),
-            linewidth=0.7,
+            edgecolor=page_color_str,
+            linewidth=0.8,
         )
-        for band_index_int, band_collection_obj in enumerate(stack_collection_list):
-            band_collection_obj.set_hatch(hatch_cycle_list[band_index_int % len(hatch_cycle_list)])
-
-        # Label each sleeve at its own final height. Bands that end at zero
-        # would collide at the baseline, so they are stacked upward by a
-        # minimum step rather than overprinting each other.
-        cumulative_float = 0.0
-        label_position_list: list[tuple[float, str]] = []
-        for column_index_int, column_name_str in enumerate(active_column_name_list):
-            final_weight_float = float(weight_value_list[column_index_int][-1])
-            label_position_list.append((
-                cumulative_float + final_weight_float / 2.0,
-                _short_chart_label_str(column_name_str),
-            ))
-            cumulative_float += final_weight_float
-
-        minimum_label_gap_float = 0.045
-        previous_y_float = -1.0
-        for label_y_float, label_text_str in label_position_list:
-            resolved_y_float = max(label_y_float, previous_y_float + minimum_label_gap_float)
-            previous_y_float = resolved_y_float
-            axis_obj.annotate(
-                label_text_str,
-                xy=(1.005, resolved_y_float),
-                xycoords=('axes fraction', 'data'),
-                va='center',
-                ha='left',
-                fontsize=7.5,
-                color=SIGNATURE_PALETTE_DICT['ink'],
-                annotation_clip=False,
-            )
+        for band_collection_obj in stack_collection_list:
+            band_collection_obj.set_hatch('////')
 
         axis_obj.set_ylabel('Weight')
-        axis_obj.set_ylim(0, 1.0)
+        axis_obj.set_ylim(0.0, 1.0)
         axis_obj.set_xlim(weights_df.index.min(), weights_df.index.max())
+        axis_obj.set_yticks([0.0, 0.25, 0.5, 0.75, 1.0])
         axis_obj.yaxis.set_major_formatter(
             matplotlib.ticker.PercentFormatter(xmax=1.0, decimals=0)
         )
         axis_obj.grid(axis='y', alpha=1.0)
+
+        # Top band first, so the label column reads in the same order as the
+        # bands it names.
+        label_name_list = list(reversed(active_column_name_list))
+        # A band's own colour is chosen to sit inside a stack, not to be read
+        # as text on white. Cash and the palest sleeves come out barely legible
+        # as a label, so anything too light for body text is darkened toward
+        # ink until it carries. The hue is preserved, so the label still points
+        # at its band.
+        label_color_list = [
+            _legible_label_color_str(band_color_str)
+            for band_color_str in reversed(weight_color_list)
+        ]
+        label_count_int = len(label_name_list)
+        for label_index_int, label_name_str in enumerate(label_name_list):
+            label_y_float = (
+                1.0 - (label_index_int + 0.5) / label_count_int
+                if label_count_int > 1 else 0.5
+            )
+            axis_obj.annotate(
+                _short_chart_label_str(label_name_str),
+                xy=(1.012, label_y_float),
+                xycoords=('axes fraction', 'axes fraction'),
+                va='center',
+                ha='left',
+                fontsize=7.5,
+                fontweight='medium',
+                color=label_color_list[label_index_int],
+                annotation_clip=False,
+            )
+
         figure_obj.autofmt_xdate()
         figure_obj.tight_layout()
 
         buffer_obj = io.BytesIO()
-        figure_obj.savefig(buffer_obj, format='png', dpi=140, bbox_inches='tight')
+        figure_obj.savefig(buffer_obj, format='png', dpi=170, bbox_inches='tight')
         plt.close(figure_obj)
     buffer_obj.seek(0)
     return base64.b64encode(buffer_obj.read()).decode('ascii')

@@ -72,3 +72,37 @@ def test_every_variant_is_complete_and_renderable(variant_name_str):
 def test_unknown_variant_fails_loud():
     with pytest.raises(ValueError, match='Unknown signature variant'):
         resolve_variant_palette_dict('does-not-exist')
+
+
+def test_co_held_sleeves_never_share_a_weight_stack_colour():
+    """Two sleeves of one book must not render in the same colour.
+
+    Two separate wraps caused this. The overlay cycle wrapped at eight colours
+    over twelve named assets, putting TLT and TQQQ — routinely held together in
+    a TAA book — in the identical tone, along with DBC and BTAL. And every
+    equity proxy in _FALLBACK_ASSET_SET returned one flat benchmark colour, so
+    a book holding QQQ alongside TQQQ showed them as one band.
+
+    A weight stack with two indistinguishable bands cannot be read no matter
+    how it is labelled, and the failure looks like a design choice rather than
+    a bug.
+    """
+    from alpha.engine.report import _FALLBACK_ASSET_SET, _weight_color_for_asset
+    from alpha.engine.theme import signature_variant_context
+
+    book_asset_name_list = [
+        'GLD', 'UUP', 'TLT', 'DBC', 'BTAL', 'TQQQ', 'Cash',
+        *sorted(_FALLBACK_ASSET_SET),
+    ]
+    for variant_name_str in ('current', 'desk'):
+        with signature_variant_context(variant_name_str):
+            color_by_asset_dict = {
+                asset_name_str: _weight_color_for_asset(asset_name_str)
+                for asset_name_str in book_asset_name_list
+            }
+        shared_color_list = [
+            (color_str, sorted(k for k, v in color_by_asset_dict.items() if v == color_str))
+            for color_str in set(color_by_asset_dict.values())
+            if list(color_by_asset_dict.values()).count(color_str) > 1
+        ]
+        assert shared_color_list == [], f'{variant_name_str}: {shared_color_list}'

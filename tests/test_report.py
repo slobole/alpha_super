@@ -980,9 +980,26 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertIn(expected_drawdown_color_str, drawdown_style_str)
         self.assertIn(SIGNATURE_PALETTE_DICT['loss_dark'], drawdown_style_str)
 
-    def test_weight_color_helper_maps_fallback_to_benchmark_orange(self):
-        self.assertEqual(_weight_color_for_asset('SPY'), SIGNATURE_PALETTE_DICT['benchmark'])
-        self.assertEqual(_weight_color_for_asset('TQQQ'), SIGNATURE_PALETTE_DICT['benchmark'])
+    def test_equity_proxies_share_the_benchmark_family_but_not_one_shade(self):
+        """Same hue family, still separable.
+
+        These are all equity-beta proxies, so they belong to the benchmark
+        hue. This used to return one flat colour for every one of them, which
+        made a book holding QQQ alongside TQQQ render both sleeves as a single
+        indistinguishable band in the weight stack.
+        """
+        from alpha.engine.report import _FALLBACK_ASSET_SET
+
+        proxy_color_list = [
+            _weight_color_for_asset(asset_name_str)
+            for asset_name_str in sorted(_FALLBACK_ASSET_SET)
+        ]
+        self.assertEqual(len(set(proxy_color_list)), len(proxy_color_list))
+        # The ramp starts at the benchmark colour itself, so the family is
+        # still visibly the benchmark's.
+        self.assertEqual(proxy_color_list[0], SIGNATURE_PALETTE_DICT['benchmark'])
+
+        # Non-proxy assets keep their own identity, untouched by the ramp.
         self.assertEqual(_weight_color_for_asset('GLD'), '#d9a441')
         self.assertEqual(_weight_color_for_asset('BTAL'), '#c251c0')
 

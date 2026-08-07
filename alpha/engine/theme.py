@@ -350,12 +350,19 @@ _DESK_PALETTE_DICT: dict[str, object] = {
         '#7c3aed', '#0e7490', '#be185d', '#4d7c0f',
     ],
     # Composition stacks: muted earth and slate, lifted from the mockups'
-    # weight charts. Desaturated on purpose — seven sleeves of one book are
-    # parts of a whole, not competing series, and at series saturation the
-    # stack would shout louder than every chart around it.
+    # weight charts. Desaturated on purpose — the sleeves of one book are parts
+    # of a whole, not competing series, and at series saturation the stack
+    # would shout louder than every chart around it.
+    #
+    # *** UI*** Long enough to give every named asset its own entry. At eight
+    # it wrapped, and the wrap put TLT and TQQQ — which are held in the same
+    # book — in the identical colour, along with DBC/BTAL. Two bands of one
+    # stack rendering the same made the chart unreadable no matter how it was
+    # labelled. _build_cycle_asset_color_dict asserts there is no wrap.
     'overlay_cycle': [
         '#3f5a63', '#a8845c', '#6b7f6a', '#c4b39a',
         '#4a6670', '#8b6f4e', '#9aa5a0', '#d8cdb8',
+        '#7e94a6', '#b5906b', '#566b4f', '#a9b3bd',
     ],
     # Weight stacks are hatched as well as coloured. Seven adjacent muted
     # tones are hard to tell apart at the point a band narrows to a few pixels,
@@ -1027,11 +1034,19 @@ def _build_cycle_asset_color_dict(
         asset_name_str for asset_name_str in SIGNATURE_ASSET_COLOR_DICT
         if asset_name_str not in ('CASH', 'DEFAULT')
     ]
+    # *** CRITICAL*** Fail loud rather than wrap. A wrapped cycle silently
+    # gives two assets the same colour, and when both are held in one book the
+    # stack becomes unreadable — a rendering bug that looks like a design
+    # choice. Extend overlay_cycle instead of letting this fall through.
+    if len(overlay_cycle_list) < len(cycle_asset_name_list):
+        raise ValueError(
+            f'overlay_cycle has {len(overlay_cycle_list)} colours for '
+            f'{len(cycle_asset_name_list)} named assets. Two assets would share '
+            'a colour; extend the cycle.'
+        )
     cycle_asset_color_dict: dict[str, str] = {}
     for asset_idx_int, asset_name_str in enumerate(cycle_asset_name_list):
-        cycle_asset_color_dict[asset_name_str] = overlay_cycle_list[
-            asset_idx_int % len(overlay_cycle_list)
-        ]
+        cycle_asset_color_dict[asset_name_str] = overlay_cycle_list[asset_idx_int]
     # Cash is not an exposure, so it reads as near-empty; unknown names sit mid-ramp.
     cycle_asset_color_dict['CASH'] = blend_hex_color_str(light_color_str, page_color_str, 0.62)
     cycle_asset_color_dict['DEFAULT'] = light_color_str
