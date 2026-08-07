@@ -8,22 +8,30 @@
   <script src="{{ url_for('static', filename='htmx.min.js') }}"></script>
   <link rel="stylesheet" href="{{ url_for('static', filename='custom.css') }}">
   <script>
+    /* Semantic slots only — hues come from the desk palette in
+       alpha/engine/theme.py so LIVE and BENCH read as one product.
+       The slot names (ok/warn/bad) keep their meaning; only hues moved. */
     tailwind.config = {
       theme: {
         extend: {
           colors: {
-            ink: { 900: '#0b0d10', 700: '#1f2937', 500: '#6b7280', 300: '#d1d5db', 100: '#f3f4f6', 50: '#f9fafb' },
-            ok:   { DEFAULT: '#15803d', soft: '#dcfce7' },
-            warn: { DEFAULT: '#a16207', soft: '#fef9c3' },
-            bad:  { DEFAULT: '#b91c1c', soft: '#fee2e2' },
-            mute: { DEFAULT: '#6b7280', soft: '#f3f4f6' },
+            ink: { 900: '#16181d', 700: '#334155', 500: '#64748b', 300: '#cbd5e1', 100: '#e2e8f0', 50: '#f8fafc' },
+            ok:   { DEFAULT: '#15803d', soft: '#f0fdf4' },
+            warn: { DEFAULT: '#d97706', soft: '#fffbeb' },
+            bad:  { DEFAULT: '#dc2626', soft: '#fef2f2' },
+            mute: { DEFAULT: '#64748b', soft: '#f8fafc' },
+            accent: { DEFAULT: '#2563eb', soft: '#eff6ff' },
+          },
+          fontFamily: {
+            sans: ['IBM Plex Sans', 'Segoe UI', 'system-ui', 'sans-serif'],
+            mono: ['IBM Plex Mono', 'Cascadia Mono', 'Consolas', 'monospace'],
           }
         }
       }
     }
   </script>
 </head>
-<body class="bg-ink-50 text-ink-900 min-h-screen font-[ui-sans-serif,system-ui]">
+<body class="bg-white text-ink-900 min-h-screen font-sans">
   {% include "_top_bar.html" %}
 
   <div class="max-w-[1480px] mx-auto px-6 pt-3 grid gap-3"

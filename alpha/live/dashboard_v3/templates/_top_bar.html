@@ -2,7 +2,10 @@
 <header class="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-ink-100">
   <div class="max-w-[1480px] mx-auto px-6 h-16 flex items-center justify-between gap-4">
     <div class="flex items-center gap-6">
-      <a href="/" class="font-bold tracking-tight text-lg">ALPHA OPS</a>
+      <a href="/" class="flex items-center gap-2.5">
+        <span class="w-7 h-7 grid place-items-center border border-ink-900 font-mono font-bold text-xs">A</span>
+        <span class="font-mono font-bold tracking-tight">ALPHA&nbsp;/&nbsp;LIVE</span>
+      </a>
       {% set active_nav_key_str = nav_active_str if nav_active_str is defined else mode_str %}
       <nav class="flex gap-1 text-sm">
         {% for nav_item in [('live', 'Live', '/live'), ('paper', 'Paper', '/paper'), ('incubation', 'Incubation', '/incubation'), ('exposure', 'Exposure', '/exposure'), ('journal', 'Journal', '/journal')] %}
