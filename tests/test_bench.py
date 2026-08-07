@@ -23,7 +23,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from alpha.bench import catalog, runs
+from alpha.bench import artifact_view, catalog, runs
 from alpha.bench.app import (
     REPORT_TOOLTIP_SCRIPT_SHA256_BASE64_STR,
     _analyzer_view_dict_list,
@@ -361,11 +361,10 @@ def test_strategy_page_prefers_non_legacy_capacity_report(monkeypatch):
         f"/strategy/{DV2_MODULE_STR}?analysis=capacity"
     ).get_data(as_text=True)
 
-    assert (
-        f'src="/artifact/{current_run_obj.report_artifact_str}?embed=bench"'
-        in html_str
-    )
-    assert f'src="/artifact/{legacy_run_obj.report_artifact_str}"' not in html_str
+    primary_workspace_html_str = html_str[: html_str.index('<details class="research-tools">')]
+    assert f'href="/artifact/{current_run_obj.report_artifact_str}"' in primary_workspace_html_str
+    assert f'href="/artifact/{legacy_run_obj.report_artifact_str}"' not in primary_workspace_html_str
+    assert "artifact-report-frame" not in html_str
     assert "Capacity · v2.1" in html_str
     assert "Recent: 2021-07-11 to 2026-07-11" in html_str
     assert "Full: 2004-01-02 to 2026-07-11" in html_str
@@ -685,7 +684,189 @@ def test_bench_allows_only_the_exact_generated_tooltip_script():
     )
 
     assert tooltip_script_hash_str == REPORT_TOOLTIP_SCRIPT_SHA256_BASE64_STR
-    assert 'sandbox="allow-scripts"' in strategy_template_str
+    assert "artifact-report-frame" not in strategy_template_str
+    assert "html_markup" in strategy_template_str
+
+
+def test_native_artifact_view_strips_active_content_and_keeps_static_evidence(
+    tmp_path,
+    monkeypatch,
+):
+    report_dir_path = tmp_path / "research" / "strategy" / "demo" / "risk_analysis" / "run"
+    report_dir_path.mkdir(parents=True)
+    (report_dir_path / "report.html").write_text(
+        """<html><body><main><h1>Risk report</h1>
+        <section class="panel"><h2>Distribution <button type="button" class="metric-help" data-help="P05: loss tail; not a forecast.">i</button></h2>
+        <script>window.pwned = true</script>
+        <iframe src="https://example.com"></iframe>
+        <a href="javascript:alert(1)" onclick="alert(2)">unsafe</a>
+        <table><tbody><tr><td style="background-color:#eef2ff">P05</td><td>-12%</td></tr></tbody></table>
+        <svg viewBox="0 0 10 10"><line x1="0" y1="0" x2="10" y2="10" stroke="#111111"></line></svg>
+        </section></main></body></html>""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runs, "RESULTS_ROOT_PATH", tmp_path)
+    run_obj = runs.RunEntry(
+        run_name_str="demo",
+        analysis_dir_str="risk_analysis",
+        analysis_label_str="Risk",
+        timestamp_str="run",
+        rel_dir_from_results_str="research/strategy/demo/risk_analysis/run",
+        has_report_bool=True,
+    )
+
+    view_obj = artifact_view.build_artifact_view("risk", run_obj, None)
+
+    assert view_obj is not None
+    report_html_str = str(view_obj.selected_tab.html_markup)
+    assert "Distribution" in report_html_str
+    assert "<table>" in report_html_str
+    assert "<svg" in report_html_str
+    assert "<script" not in report_html_str
+    assert "<iframe" not in report_html_str
+    assert "javascript:" not in report_html_str
+    assert "onclick" not in report_html_str
+    assert 'data-help="P05: loss tail; not a forecast."' in report_html_str
+
+
+def test_vanilla_native_view_has_all_mockup_sections(tmp_path, monkeypatch):
+    report_dir_path = tmp_path / "research" / "strategy" / "demo" / "vanilla_backtest" / "run"
+    report_dir_path.mkdir(parents=True)
+    heading_str_list = [
+        "Equity Curve",
+        "Year by Year",
+        "Monthly Returns",
+        "Relative Performance",
+        "Composition",
+        "Portfolio Weights",
+        "Statistics",
+        "Conditional Beta",
+        "Open Trades",
+        "Closed Trades",
+        "Audit & Provenance",
+    ]
+    plate_html_str = "".join(
+        f'<div class="plate" id="plate-{index_int:02d}"><h2>{heading_str}</h2><table><tr><td>{index_int}</td></tr></table></div>'
+        for index_int, heading_str in enumerate(heading_str_list, start=1)
+    )
+    (report_dir_path / "report.html").write_text(
+        "<html><body><div class=\"report-shell\">"
+        "<header class=\"report-header\"><h1>Demo</h1></header>"
+        "<div class=\"spec-masthead\">Period 2020 to 2026</div>"
+        "<div class=\"plate-index\">Report contents</div>"
+        "<div class=\"headline-comparison\"><table><tr><th>Metric</th><th>Strategy</th><th>SPX</th><th>Delta</th></tr>"
+        "<tr><td>CAGR</td><td>12%</td><td>9%</td><td>+3pp</td></tr></table></div>"
+        f"{plate_html_str}</div></body></html>",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runs, "RESULTS_ROOT_PATH", tmp_path)
+    run_obj = runs.RunEntry(
+        run_name_str="demo",
+        analysis_dir_str="vanilla_backtest",
+        analysis_label_str="Vanilla",
+        timestamp_str="run",
+        rel_dir_from_results_str="research/strategy/demo/vanilla_backtest/run",
+        has_report_bool=True,
+        metadata_dict={"class_module": "strategies.demo"},
+    )
+
+    view_obj = artifact_view.build_artifact_view("vanilla", run_obj, "statistics")
+
+    assert view_obj is not None
+    assert [tab_obj.key_str for tab_obj in view_obj.tab_tuple] == [
+        "overview",
+        "statistics",
+        "composition",
+        "trades",
+        "audit",
+    ]
+    assert view_obj.selected_tab.key_str == "statistics"
+    assert "Statistics" in str(view_obj.selected_tab.html_markup)
+    assert "Conditional Beta" in str(view_obj.selected_tab.html_markup)
+    assert "Open Trades" not in str(view_obj.selected_tab.html_markup)
+    overview_tab_obj = next(tab_obj for tab_obj in view_obj.tab_tuple if tab_obj.key_str == "overview")
+    overview_html_str = str(overview_tab_obj.html_markup)
+    assert "Strategy" in overview_html_str
+    assert "SPX" in overview_html_str
+    assert "Delta" in overview_html_str
+    assert "+3pp" in overview_html_str
+    assert "Demo" not in overview_html_str
+    assert "Period 2020 to 2026" not in overview_html_str
+    assert "Report contents" not in overview_html_str
+    assert "plate-index" not in overview_html_str
+    trades_tab_obj = next(tab_obj for tab_obj in view_obj.tab_tuple if tab_obj.key_str == "trades")
+    assert "Statistics" in str(trades_tab_obj.html_markup)
+    assert "Open Trades" in str(trades_tab_obj.html_markup)
+    assert "Closed Trades" in str(trades_tab_obj.html_markup)
+    assert "Audit &amp; Provenance" not in str(trades_tab_obj.html_markup)
+    audit_tab_obj = next(tab_obj for tab_obj in view_obj.tab_tuple if tab_obj.key_str == "audit")
+    assert "Audit &amp; provenance" in str(audit_tab_obj.html_markup)
+    assert "strategies.demo" in str(audit_tab_obj.html_markup)
+
+
+def test_vanilla_non_spec_report_falls_back_to_full_native_report(tmp_path, monkeypatch):
+    report_dir_path = tmp_path / "research" / "strategy" / "demo" / "vanilla_backtest" / "run"
+    report_dir_path.mkdir(parents=True)
+    (report_dir_path / "report.html").write_text(
+        "<html><body><div class=\"report-shell\"><h1>Demo</h1>"
+        "<div class=\"card\"><h2>Statistics</h2><table><tr><td>Sharpe</td><td>1.23</td></tr></table></div>"
+        "</div></body></html>",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runs, "RESULTS_ROOT_PATH", tmp_path)
+    run_obj = runs.RunEntry(
+        run_name_str="demo",
+        analysis_dir_str="vanilla_backtest",
+        analysis_label_str="Vanilla",
+        timestamp_str="run",
+        rel_dir_from_results_str="research/strategy/demo/vanilla_backtest/run",
+        has_report_bool=True,
+    )
+
+    view_obj = artifact_view.build_artifact_view("vanilla", run_obj, None)
+
+    assert view_obj is not None
+    assert [tab_obj.key_str for tab_obj in view_obj.tab_tuple] == ["report"]
+    report_html_str = str(view_obj.selected_tab.html_markup)
+    assert "Statistics" in report_html_str
+    assert "Sharpe" in report_html_str
+    assert "1.23" in report_html_str
+
+
+@pytest.mark.parametrize(
+    "report_bytes",
+    [
+        b"\xff\xfe\x00",
+        b"<html><body></body></html>",
+        b"<html><body><h1>Title only</h1></body></html>",
+        b"<html><body><script>window.bad = true</script></body></html>",
+    ],
+)
+def test_strategy_page_distinguishes_unrenderable_saved_report(
+    tmp_path, monkeypatch, report_bytes
+):
+    strategy_entry_obj = catalog.get_strategy_by_module(DV2_MODULE_STR)
+    assert strategy_entry_obj is not None
+    run_obj = _run_entry("strategy_mr_dv2", "2026-08-07_120000")
+    report_path = tmp_path / run_obj.report_artifact_str
+    report_path.parent.mkdir(parents=True)
+    report_path.write_bytes(report_bytes)
+    run_index_obj = SimpleNamespace(
+        runs_for=lambda _module_import_str, _stem_str: [run_obj]
+    )
+    monkeypatch.setattr(catalog, "get_strategy_by_module", lambda _module_str: strategy_entry_obj)
+    monkeypatch.setattr(runs, "build_strategy_run_index", lambda: run_index_obj)
+    monkeypatch.setattr(runs, "RESULTS_ROOT_PATH", tmp_path)
+
+    client = create_app(job_manager_obj=RecordingJobManager()).test_client()
+    html_str = client.get(
+        f"/strategy/{DV2_MODULE_STR}?analysis=vanilla"
+    ).get_data(as_text=True)
+
+    assert "SAVED ARTIFACT" in html_str
+    assert "Saved Vanilla report could not be displayed." in html_str
+    assert "No saved Vanilla report." not in html_str
+    assert f'href="/artifact/{run_obj.report_artifact_str}"' in html_str
 
 
 # ── run API command wiring + CSRF ────────────────────────────────────────────
@@ -972,15 +1153,16 @@ def test_pages_render(recording_client, path_str):
     assert client.get(path_str).status_code == 200
 
 
-def test_mockup_shell_keeps_live_non_interactive(recording_client):
+def test_mockup_shell_uses_fixed_research_sidebar_and_excludes_live(recording_client):
     client, _job_manager, _token_str = recording_client
     html_str = client.get("/").get_data(as_text=True)
 
     assert 'class="system-topbar"' in html_str
-    assert 'class="mode-tab mode-tab-muted"' in html_str
+    assert 'class="bench-sidebar"' in html_str
+    assert "ALPHA / BENCH" in html_str
     assert ">Studies</a>" in html_str
     assert ">Compare</a>" in html_str
-    assert ">LIVE</a>" not in html_str
+    assert "LIVE" not in html_str
     assert re.search(r"\d{2}:\d{2}:\d{2} (EST|EDT)", html_str)
 
 

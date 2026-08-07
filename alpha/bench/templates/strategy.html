@@ -55,14 +55,29 @@
 {% endif %}
 
 <section class="artifact-report-stage" id="analyzer-report">
-  {% if latest_report_run %}
-  <iframe class="artifact-report-frame" sandbox="allow-scripts" referrerpolicy="no-referrer"
-          title="{{ selected_analyzer.label_str }} report for {{ strategy.stem_str }}"
-          src="{{ url_for('artifact_fn', rel_path_str=latest_report_run.report_artifact_str, embed='bench') }}{{ '#plate-01' if selected_analysis_str == 'vanilla' else '' }}"></iframe>
+  {% if artifact_report_view %}
+  {% if artifact_report_view.tab_tuple|length > 1 %}
+  <nav class="report-view-tabs" aria-label="{{ selected_analyzer.label_str }} report sections">
+    {% for report_tab in artifact_report_view.tab_tuple %}
+    <a href="{{ url_for('strategy_page_fn', module_import_str=strategy.module_import_str, analysis=selected_analysis_str, view=report_tab.key_str) }}#analyzer-report"
+       class="{{ 'active' if report_tab.key_str == artifact_report_view.selected_tab.key_str }}">
+      {{ report_tab.label_str }}
+    </a>
+    {% endfor %}
+  </nav>
+  {% endif %}
+  <div class="native-report native-report-{{ selected_analysis_str }}">
+    {{ artifact_report_view.selected_tab.html_markup }}
+  </div>
   {% else %}
   <div class="artifact-empty">
+    {% if latest_report_run %}
+    <b>Saved {{ selected_analyzer.label_str }} report could not be displayed.</b>
+    <span>The artifact exists, but its HTML is empty, malformed or unreadable. Open the source artifact below or run the analyzer again; no values are inferred.</span>
+    {% else %}
     <b>No saved {{ selected_analyzer.label_str }} report.</b>
-    <span>Run this analyzer to create the first evidence artifact.</span>
+    <span>Run this analyzer to create the first evidence artifact. No values are inferred.</span>
+    {% endif %}
   </div>
   {% endif %}
 </section>

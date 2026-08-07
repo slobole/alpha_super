@@ -29,7 +29,10 @@ It binds to `127.0.0.1` only — a single-operator console, not a service.
   strategy file in and it appears automatically.
 - **Strategy detail** — one-click run buttons (Vanilla / Capacity / Timing / Risk
   / Stress, plus *Standard* = V+C+T and *Full* = all five), the full run history
-  from `results/`, and the latest report embedded inline. Each run row shows the
+  from `results/`, and the latest saved report rendered natively inside the
+  unified BENCH workspace. Static charts, tables and prose are preserved while
+  active HTML is stripped; **Open artifact** remains the exact source document.
+  Each run row shows the
   backtest window and capital **as the runner recorded them** in `run_info.json`;
   an analysis that wrote no window shows `—` rather than implying full history.
   Without this, two runs of the same strategy over different windows are

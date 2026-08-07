@@ -36,6 +36,7 @@ from flask import (
 
 from alpha.bench import (
     __version__,
+    artifact_view,
     catalog,
     portfolio_builder,
     portfolio_compare,
@@ -243,6 +244,11 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             for view_dict in analyzer_view_list
             if view_dict["analysis_str"] == selected_analysis_str
         )
+        artifact_report_view_obj = artifact_view.build_artifact_view(
+            selected_analysis_str,
+            latest_report_run_obj,
+            request.args.get("view"),
+        )
         return render_template(
             "strategy.html",
             strategy=strategy_entry_obj,
@@ -250,6 +256,7 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             latest_report_run=latest_report_run_obj,
             selected_analysis_str=selected_analysis_str,
             selected_analyzer=selected_analyzer_view_dict,
+            artifact_report_view=artifact_report_view_obj,
             analysis_workspace=_analysis_workspace_dict(
                 selected_analysis_str,
                 latest_report_run_obj,
