@@ -297,11 +297,10 @@ def plot(
         # of the value — the same semantics the year and monthly tables use.
         # Drawing this panel in ink made the largest block on the page a grey
         # mass that said nothing.
-        # loss_dark, not loss: this is the same red the tables use for a
-        # negative cell, so a -25.5% in the year table and the trough it came
-        # from are visibly the same quantity. The brighter loss tone is a
-        # signal colour and reads as an alarm when it covers a whole panel.
-        drawdown_color_str = str(SIGNATURE_PALETTE_DICT['loss_dark'])
+        # Drawdown draws in the strategy's own colour, not a loss red. Red was
+        # tried and rejected: it covers a whole panel and reads as an alarm
+        # rather than as the same series measured a second way.
+        drawdown_color_str = strategy_color_str
         if benchmark_drawdown_ser is not None:
             benchmark_drawdown_line_obj, = drawdown_ax.plot(
                 benchmark_drawdown_ser.index,
@@ -388,22 +387,12 @@ def plot(
             strategy_bar_center_vec = return_position_vec
             benchmark_bar_center_vec = None
 
-        # The strategy's bars are coloured by the sign of the year, because
-        # that is the question the panel answers. The benchmark keeps the
-        # neutral grey: it is the reference, not the subject, and colouring
-        # both would leave nothing to tell them apart.
-        strategy_bar_color_list = [
-            str(SIGNATURE_PALETTE_DICT['loss'])
-            if float(period_return_float) < 0.0
-            else str(SIGNATURE_PALETTE_DICT['profit'])
-            for period_return_float in strategy_period_return_ser.to_numpy()
-        ]
         strategy_bar_container = annual_ax.bar(
             strategy_bar_center_vec,
             strategy_period_return_ser.to_numpy(),
             bar_width_float,
             label=strategy_label,
-            color=strategy_bar_color_list,
+            color=strategy_color_str,
             alpha=0.78,
             edgecolor=bar_edge_color_str,
             linewidth=0.75,

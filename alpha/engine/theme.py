@@ -301,14 +301,13 @@ _DESK_PALETTE_DICT: dict[str, object] = {
     'border': '#e2e8f0',
     'axes_border': '#16181d',
     'muted': '#64748b',
-    # One brand blue, used for the subject of every chart and for every
-    # interactive affordance. The strategy line is blue, not ink: it is the
-    # thing the page is about, and an ink line makes the headline chart read as
-    # a printout rather than as this product.
-    'strategy': '#2563eb',
-    'strategy_dark': '#1d4ed8',
-    # The benchmark is context, so it stays neutral — but a slate grey rather
-    # than a dead grey, so it sits in the same family as the ink.
+    # The equity curve is ink and the benchmark is grey. Blue was tried here
+    # and rejected: the headline chart is a strategy against its benchmark, and
+    # the house reading of that pair is ink versus neutral. The brand blue
+    # stays where it belongs — links, active tabs, and the first analytic
+    # series in series_cycle.
+    'strategy': '#16181d',
+    'strategy_dark': '#000000',
     'benchmark': '#94a3b8',
     'benchmark_dark': '#64748b',
     'profit': '#15803d',
@@ -335,7 +334,7 @@ _DESK_PALETTE_DICT: dict[str, object] = {
     # a line; at a faint weight the panel collapsed into a black scribble. The
     # area carries the shape and the line becomes a hairline edge on it.
     'equity_fill_alpha_float': 0.09,
-    'drawdown_fill_alpha_float': 0.26,
+    'drawdown_fill_alpha_float': 0.16,
     'benchmark_drawdown_fill_alpha_float': 0.16,
     'vertical_line': '#9aa0a6',
     'zero_line': '#16181d',
@@ -358,10 +357,16 @@ _DESK_PALETTE_DICT: dict[str, object] = {
         '#3f5a63', '#a8845c', '#6b7f6a', '#c4b39a',
         '#4a6670', '#8b6f4e', '#9aa5a0', '#d8cdb8',
     ],
-    # *** UI*** Deliberately empty. Hatch textures alias badly through a
-    # projector and this variant exists to be presented, so sleeves separate by
-    # value alone and the ramp above is spaced to allow it.
-    'hatch_cycle_list': [],
+    # Weight stacks are hatched as well as coloured. Seven adjacent muted
+    # tones are hard to tell apart at the point a band narrows to a few pixels,
+    # and texture survives that where a hue difference does not. It also means
+    # the stack still reads if the artifact is printed or photocopied.
+    # *** UI*** Single-density patterns, not tripled ones. '///' at the
+    # default hatch linewidth covers the fill so densely that the colour
+    # underneath stops being legible — the texture must be a light overlay
+    # on the hue, not a replacement for it. _composition_weights_chart_b64
+    # also thins the stroke and draws it in the page colour.
+    'hatch_cycle_list': ['', '/', '.', 'x', chr(92), '+', 'o', '-'],
     'mean_line': '#16181d',
     'shadow_rgba': 'rgba(22, 24, 29, 0.06)',
     'font_family_str': 'monospace',

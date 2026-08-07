@@ -2260,11 +2260,29 @@ def _build_composition_plate_html(strategy) -> str:
             'holding periods instead.'
         ),
     }[resolved_mode_str]
-    return f'''
-<h2>Composition</h2>
-<div class="chart-wrap"><img src="{composition_uri_str}" alt="Composition"></div>
-<p class="metric-context">{caption_str}</p>
-'''
+
+    # One plate answers the whole allocation question: the full history, what
+    # is held today, and how the last three rebalances landed against target.
+    # These used to be split across Composition and a separate Portfolio
+    # Weights plate that re-drew the same stack over two arbitrary windows.
+    section_html_list = ['<h2>Composition</h2>']
+
+    weight_stack_b64_str = _composition_weights_chart_b64(realized_weight_df)
+    if weight_stack_b64_str is not None:
+        section_html_list.append(
+            '<h3>Portfolio weights</h3>'
+            '<div class="chart-wrap">'
+            f'<img src="data:image/png;base64,{weight_stack_b64_str}" alt="Portfolio weights">'
+            '</div>'
+        )
+    else:
+        section_html_list.append(
+            f'<div class="chart-wrap"><img src="{composition_uri_str}" alt="Composition"></div>'
+        )
+    section_html_list.append(f'<p class="metric-context">{caption_str}</p>')
+    section_html_list.append(_current_composition_html(strategy))
+    section_html_list.append(_recent_taa_weight_comparison_html(strategy))
+    return '\n'.join(part_str for part_str in section_html_list if part_str)
 
 
 def _signature_within_year_stat_df(total_value_ser: pd.Series) -> pd.DataFrame:
@@ -3253,6 +3271,104 @@ def _weights_chart_b64(
         plt.close(fig)
     buf.seek(0)
     return base64.b64encode(buf.read()).decode('ascii')
+
+
+def _composition_weights_chart_b64(weights_df) -> str | None:
+    """Full-history weight stack, labelled at the right edge.
+
+    Distinct from _weights_chart_b64, which is the windowed chart the portfolio
+    pages use. Two differences, both because this one carries a decade rather
+    than a two-year window:
+
+    * Sleeves are labelled where they END, not in a legend box. With seven
+      bands a top-left legend forces the reader to match a swatch to a band
+      by colour alone, which is exactly what fails when two muted tones sit
+      next to each other. A label at the band's own height needs no matching.
+    * Bands carry a hatch as well as a colour, so a sleeve that narrows to a
+      few pixels is still identifiable, and the stack survives printing.
+    """
+    if weights_df is None or len(weights_df) == 0:
+        return None
+    weights_df = weights_df.copy().sort_index()
+    active_column_name_list = [
+        column_name_str for column_name_str in weights_df.columns
+        if not np.allclose(weights_df[column_name_str].fillna(0).to_numpy(), 0.0)
+    ]
+    if not active_column_name_list:
+        return None
+
+    hatch_cycle_list = list(SIGNATURE_PALETTE_DICT['hatch_cycle_list']) or ['']
+    weight_color_list = [
+        _weight_color_for_asset(column_name_str) for column_name_str in active_column_name_list
+    ]
+    weight_value_list = [
+        weights_df[column_name_str].fillna(0).to_numpy()
+        for column_name_str in active_column_name_list
+    ]
+
+    # The hatch is drawn in the page colour at a thin stroke, so it reads as a
+    # light texture over the sleeve's hue rather than as a dark mesh on top of
+    # it. The same colour draws the band separators, which is what gives the
+    # stack its hairline partings.
+    stack_rcparam_dict = dict(build_signature_rcparams(to_web_bool=True))
+    stack_rcparam_dict['hatch.linewidth'] = 0.35
+    with plt.rc_context(stack_rcparam_dict):
+        figure_obj, axis_obj = plt.subplots(figsize=(12, 3.6))
+        stack_collection_list = axis_obj.stackplot(
+            weights_df.index,
+            weight_value_list,
+            colors=weight_color_list,
+            alpha=0.95,
+            edgecolor=str(SIGNATURE_PALETTE_DICT['page']),
+            linewidth=0.7,
+        )
+        for band_index_int, band_collection_obj in enumerate(stack_collection_list):
+            band_collection_obj.set_hatch(hatch_cycle_list[band_index_int % len(hatch_cycle_list)])
+
+        # Label each sleeve at its own final height. Bands that end at zero
+        # would collide at the baseline, so they are stacked upward by a
+        # minimum step rather than overprinting each other.
+        cumulative_float = 0.0
+        label_position_list: list[tuple[float, str]] = []
+        for column_index_int, column_name_str in enumerate(active_column_name_list):
+            final_weight_float = float(weight_value_list[column_index_int][-1])
+            label_position_list.append((
+                cumulative_float + final_weight_float / 2.0,
+                _short_chart_label_str(column_name_str),
+            ))
+            cumulative_float += final_weight_float
+
+        minimum_label_gap_float = 0.045
+        previous_y_float = -1.0
+        for label_y_float, label_text_str in label_position_list:
+            resolved_y_float = max(label_y_float, previous_y_float + minimum_label_gap_float)
+            previous_y_float = resolved_y_float
+            axis_obj.annotate(
+                label_text_str,
+                xy=(1.005, resolved_y_float),
+                xycoords=('axes fraction', 'data'),
+                va='center',
+                ha='left',
+                fontsize=7.5,
+                color=SIGNATURE_PALETTE_DICT['ink'],
+                annotation_clip=False,
+            )
+
+        axis_obj.set_ylabel('Weight')
+        axis_obj.set_ylim(0, 1.0)
+        axis_obj.set_xlim(weights_df.index.min(), weights_df.index.max())
+        axis_obj.yaxis.set_major_formatter(
+            matplotlib.ticker.PercentFormatter(xmax=1.0, decimals=0)
+        )
+        axis_obj.grid(axis='y', alpha=1.0)
+        figure_obj.autofmt_xdate()
+        figure_obj.tight_layout()
+
+        buffer_obj = io.BytesIO()
+        figure_obj.savefig(buffer_obj, format='png', dpi=140, bbox_inches='tight')
+        plt.close(figure_obj)
+    buffer_obj.seek(0)
+    return base64.b64encode(buffer_obj.read()).decode('ascii')
 
 
 def _stacked_equity_chart_b64(
@@ -4607,8 +4723,11 @@ def _build_html(strategy, chart_b64: str) -> str:
                 # performance over time — so they sit together.
                 monthly_returns_content_html_str,
                 _build_relative_performance_plate_html(strategy),
+                # Composition owns the whole allocation story now. The
+                # Portfolio Weights plate re-drew the same stack over two
+                # arbitrary windows and carried the tables Composition now
+                # holds, so it was answering a question already answered.
                 _build_composition_plate_html(strategy),
-                weights_content_html_str,
                 performance_summary_content_html_str,
                 _build_conditional_beta_plate_html(strategy),
                 open_trades_content_html_str,
