@@ -301,13 +301,20 @@ _DESK_PALETTE_DICT: dict[str, object] = {
     'border': '#e2e8f0',
     'axes_border': '#16181d',
     'muted': '#64748b',
-    # The equity curve is ink and the benchmark is grey. Blue was tried here
-    # and rejected: the headline chart is a strategy against its benchmark, and
-    # the house reading of that pair is ink versus neutral. The brand blue
-    # stays where it belongs — links, active tabs, and the first analytic
-    # series in series_cycle.
-    'strategy': '#16181d',
-    'strategy_dark': '#000000',
+    # The strategy is the brand blue, the benchmark is neutral slate. Ink was
+    # the first choice here (ink versus neutral, documentary), but it was
+    # reversed after reviewing the rendered report as an investor-facing
+    # artifact: the one chart a reader remembers carried no brand, and two
+    # dark lines converge at small sizes. Blue-as-subject also makes one rule
+    # hold on every surface — links, active tabs, the first analytic series,
+    # and the equity curve are all "the thing we run".
+    #
+    # The line takes accent_dark rather than accent: same hue family as every
+    # interactive affordance, one step darker, because a 1.5px data line on
+    # white needs more weight than underlined text. Data = dark shade,
+    # interaction = light shade.
+    'strategy': '#1d4ed8',
+    'strategy_dark': '#1e3a8a',
     'benchmark': '#94a3b8',
     'benchmark_dark': '#64748b',
     'profit': '#15803d',
