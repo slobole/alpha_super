@@ -67,9 +67,7 @@
         <th class="num sortable" data-sort-key="sharpe">Sharpe</th>
         <th class="num sortable" data-sort-key="maxdd">Max DD</th>
         <th class="num sortable" data-sort-key="trades">Trades</th>
-        {# The analyzer block is one unit, so it takes one header cell and the
-           five codes label the marks beneath them. #}
-        <th class="analyzer-head">Analyzers <span class="analyzer-code-row">{% for code_str in ('V', 'C', 'T', 'R', 'S') %}<i>{{ code_str }}</i>{% endfor %}</span></th>
+        <th class="analyzer-head">Analyzers</th>
       </tr>
     </thead>
     <tbody>
@@ -111,13 +109,13 @@
         <td class="num">{{ sm.get('max_drawdown_pct')|pct }}</td>
         <td class="num">{{ sm.get('trade_count')|count }}</td>
         <td>
-          {# A filled mark means a saved report exists for that analyzer; a
-             hollow one means it does not. The distinction is the whole point
-             of the catalog, so it is never collapsed into a single score. #}
-          <span class="analyzer-marks" aria-label="Analyzer evidence">
+          {# One chip per analyzer, carrying its own initial. Filled means a
+             saved report exists. Never collapsed into a single score: which
+             analyzers have run is the catalog's whole claim. #}
+          <span class="evidence-chips" aria-label="Analyzer evidence">
             {% for analyzer in card.analyzer_view_list %}
-            <i class="analyzer-mark {{ '' if analyzer.has_evidence_bool else 'is-absent' }}"
-               title="{{ analyzer.label_str }} · {{ analyzer.status_str }}">{{ '✓' if analyzer.has_evidence_bool else '○' }}</i>
+            <i class="evidence-chip {{ 'is-on' if analyzer.has_evidence_bool }}"
+               title="{{ analyzer.label_str }} · {{ analyzer.status_str }}">{{ analyzer.code_str }}</i>
             {% endfor %}
           </span>
         </td>
@@ -157,10 +155,10 @@
            reachable on hover rather than being dropped. #}
         <td class="catalog-family"><span title="{{ s.subcategory_label_str or s.category_label_str }}">{{ s.category_code_str }}</span></td>
           <td>
-            <span class="analyzer-marks" aria-label="Analyzer evidence">
+            <span class="evidence-chips" aria-label="Analyzer evidence">
               {% for analyzer in card.analyzer_view_list %}
-              <i class="analyzer-mark {{ '' if analyzer.has_evidence_bool else 'is-absent' }}"
-                 title="{{ analyzer.label_str }} · {{ analyzer.status_str }}">{{ '✓' if analyzer.has_evidence_bool else '○' }}</i>
+              <i class="evidence-chip {{ 'is-on' if analyzer.has_evidence_bool }}"
+                 title="{{ analyzer.label_str }} · {{ analyzer.status_str }}">{{ analyzer.code_str }}</i>
               {% endfor %}
             </span>
           </td>

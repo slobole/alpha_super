@@ -34,8 +34,11 @@
   --color-loss-wash: #fce8e6;
   --color-benchmark-dark: #71767d;
   --font-figure: "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
-  --font-prose: "Segoe UI", Inter, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-prose: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
   font-synthesis: none;
+  /* Every figure in the console sits in a column that has to align, whether it
+     is set in the mono or in the sans. */
+  font-variant-numeric: tabular-nums;
 }
 
 /* Density ------------------------------------------------------------------
@@ -1823,9 +1826,10 @@ kbd {
   text-transform: uppercase;
 }
 .catalog-stat-band b {
-  font-family: var(--font-figure);
+  font-family: var(--font-prose);
   font-size: 1.85rem;
-  font-weight: 400;
+  font-weight: 600;
+  letter-spacing: -.015em;
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
@@ -1944,24 +1948,37 @@ kbd {
    ~77px off from the column of marks beneath them. */
 #tested-table .analyzer-head, #tested-table td:last-child { text-align: right; }
 .analyzer-head { white-space: nowrap; }
-.analyzer-code-row { display: inline-flex; gap: 10px; margin-left: 12px; }
-.analyzer-code-row i { font-style: normal; width: 15px; text-align: center; opacity: .8; }
-.analyzer-marks { display: inline-flex; gap: 10px; }
+.evidence-chips { display: inline-flex; gap: 3px; }
+.evidence-chip {
+  width: 17px;
+  height: 17px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  border-radius: 2px;
+  font-family: var(--font-figure);
+  font-style: normal;
+  font-size: .58rem;
+  line-height: 1;
+  color: var(--color-border);
+  cursor: help;
+}
+/* Filled means a saved report exists for that analyzer. Monochrome on
+   purpose: this is a two-state presence question, and verdict colour belongs
+   to the readiness matrix. */
+.evidence-chip.is-on {
+  background: var(--color-ink);
+  border-color: var(--color-ink);
+  color: var(--color-page);
+}
 /* *** UI*** These marks are monochrome on purpose, and it is not an oversight.
    The catalog answers "does saved evidence exist?" — a two-state question, so
    it gets a two-state mark: inked check or hollow ring. Verdict colour
    (PASS/SKIP/FAIL) belongs to the readiness matrix, which answers a different
    question. Tinting these green would make a row of five ticks read as five
    passes when several may be stale, failed or skipped. */
-.analyzer-mark {
-  font-style: normal;
-  width: 15px;
-  text-align: center;
-  font-size: .92rem;
-  line-height: 1;
-  color: var(--color-ink);
-}
-.analyzer-mark.is-absent { color: var(--color-border); }
+
 
 .catalog-footer-bar {
   position: sticky;

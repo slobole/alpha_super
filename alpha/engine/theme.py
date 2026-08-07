@@ -135,8 +135,34 @@ _DESK_FIGURE_FONT_STACK_STR: str = '"Cascadia Mono", Consolas, "DejaVu Sans Mono
 # Prose is a grotesque, figures are mono. The split is the point: an identifier
 # like a module path or a price is a figure and must align in a column; a
 # heading is language and should not.
+#
+# Both stacks are deliberately restricted to faces that ship with the OS. A
+# webfont would render the console beautifully and then render every saved
+# report artifact differently the moment it is opened without network — and
+# those artifacts are the evidence. Segoe UI is the institutional sans on
+# Windows; Cascadia Mono is the softest mono available there, which matters
+# because this face carries every number in the console.
+#
+# *** UI*** "Inter" used to sit second in this stack. It is not installed, so
+# it never applied — it only misled anyone reading the theme into thinking the
+# console rendered in a face it never had. Do not list a font here that is not
+# actually resolvable offline.
+# *** UI*** Two faces were tried here and removed after measuring, not after
+# guessing. Do not re-add either without re-measuring:
+#
+#   * "Inter" — not installed. It sat second in this stack and never applied;
+#     it only misled anyone reading the theme.
+#   * "Segoe UI Variable" (Text / Display / bare) — installed at the OS level
+#     and enumerable through GDI, but NOT addressable from Chromium under any
+#     name form. Measured against a deliberately bogus family, every variant
+#     produced identical metrics, i.e. it silently fell through. It would have
+#     been three dead names at the front of the stack.
+#
+# A font belongs in this stack only if it resolves in the browser that renders
+# the console. Verify with a canvas width measurement against a nonsense family
+# name — checking the OS font list is not sufficient.
 _DESK_PROSE_FONT_STACK_STR: str = (
-    '"Segoe UI", Inter, "Helvetica Neue", Helvetica, Arial, sans-serif'
+    '"Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif'
 )
 _DESK_PALETTE_DICT: dict[str, object] = {
     # Cool near-black on pure white. Not #000: full black on white vibrates
