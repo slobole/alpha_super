@@ -3016,7 +3016,7 @@ def _build_report_html_str(stress_result_obj: StressTestResult) -> str:
 
     body_html_str = f"""<div class="report-shell">
 <header class="report-header">
-  <div class="report-eyebrow">StressTestAnalyzer Report</div>
+  <div class="report-eyebrow">Stress Test</div>
   <h1>{html.escape(stress_result_obj.strategy_name_str)}</h1>
   <div class="meta">
     Run: {run_date_str} &nbsp;|&nbsp;

@@ -1907,14 +1907,15 @@ def _build_report_html_str(risk_result_obj: RiskAnalysisResult) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{strategy_name_html} RiskAnalysis</title>
+<title>Risk Analysis - {strategy_name_html}</title>
 {build_report_font_head_html()}
 <style>{build_analyzer_report_css()}
 </style>
 </head>
 <body>
 <div class="wrap">
-<h1>{strategy_name_html} RiskAnalysis</h1>
+<header class="report-header"><div class="report-eyebrow">Risk Analysis</div>
+<h1>{strategy_name_html}</h1></header>
 <div class="meta">
 Return window: {html.escape(str(summary_dict.get("start_date_str")))} to {html.escape(str(summary_dict.get("end_date_str")))}
 | Returns: {summary_dict.get("return_count_int")}

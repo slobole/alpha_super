@@ -1416,7 +1416,10 @@ def _build_report_html_str(study_result_obj: CapacityStudyResult) -> str:
         [
             ("P95 Order/ADV", "order_adv_p95_float", str(SIGNATURE_PALETTE_DICT['series_cycle'][0])),
             ("P99 Order/ADV", "order_adv_p99_float", str(SIGNATURE_PALETTE_DICT['series_cycle'][4])),
-            ("Soft limit", "soft_limit_chart_float", str(SIGNATURE_PALETTE_DICT['series_cycle'][2])),
+            # *** UI*** Soft is the warning hue, hard is the loss hue. Both sat
+            # on red cycle slots before, so the two limit lines were
+            # indistinguishable in the rendered chart.
+            ("Soft limit", "soft_limit_chart_float", str(SIGNATURE_PALETTE_DICT['warning'])),
             ("Hard limit", "hard_limit_chart_float", str(SIGNATURE_PALETTE_DICT['loss'])),
         ],
         "Liquidity usage versus AUM",
@@ -1425,7 +1428,7 @@ def _build_report_html_str(study_result_obj: CapacityStudyResult) -> str:
     breach_chart_str = _line_chart_svg_str(
         curve_df,
         [
-            ("Soft breaches", "soft_breach_share_float", str(SIGNATURE_PALETTE_DICT['series_cycle'][2])),
+            ("Soft breaches", "soft_breach_share_float", str(SIGNATURE_PALETTE_DICT['warning'])),
             ("Hard breaches", "hard_breach_share_float", str(SIGNATURE_PALETTE_DICT['loss'])),
         ],
         "Share of orders beyond limits",
@@ -1490,11 +1493,13 @@ def _build_report_html_str(study_result_obj: CapacityStudyResult) -> str:
     )
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CapacityAnalysis - {html.escape(study_result_obj.strategy_name_str)}</title>
+<title>Capacity Analysis - {html.escape(study_result_obj.strategy_name_str)}</title>
 {build_report_font_head_html()}
 <style>{build_analyzer_report_css()}
 </style></head><body><main>
-<h1>CapacityAnalysis</h1><div class="muted">{html.escape(study_result_obj.strategy_name_str)} · Declared execution: {execution_policy_str}</div>
+<header class="report-header"><div class="report-eyebrow">Capacity Analysis</div>
+<h1>{html.escape(study_result_obj.strategy_name_str)}</h1>
+<div class="muted">Declared execution: {execution_policy_str}</div></header>
 <section class="panel read-first"><h2>Read this first</h2><p>{html.escape(read_first_str)}</p><p>{html.escape(policy_explanation_str)}</p>{historical_warning_html_str}{non_contiguous_warning_html_str}{hoisted_warning_html_str}</section>
 <section class="cards"><div class="card">Optimal capacity<b>{optimal_capacity_str}</b><span class="muted">Highest Central Sharpe among supported current grid points</span></div><div class="card">Recommended max<b>{recommended_capacity_str}</b><span class="muted">Current deployable estimate; contiguous from the lowest grid point</span></div><div class="card">Outer capacity<b>{outer_capacity_str}</b><span class="muted">Stretch estimate, not an operating target</span></div><div class="card">Break-even bracket<b>{break_even_str}</b><span class="muted">Central benchmark-excess-return crossing on the tested grid</span></div></section>
 <h2>Current deployable capacity — recent five years</h2><section class="charts"><div class="panel">{performance_chart_str}</div><div class="panel">{equity_chart_str}<p class="muted">{html.escape(equity_chart_note_str)}</p></div><div class="panel">{liquidity_chart_str}</div><div class="panel">{breach_chart_str}</div></section>
