@@ -1058,3 +1058,112 @@ __all__ = [
     "build_equity_chart_dict",
     "build_monthly_return_dict_list",
 ]
+
+
+# Muted stack tones mirroring the desk overlay cycle in alpha/engine/theme.py:
+# the sleeves of one pod are parts of a whole, not competing series.
+_HOLDINGS_COLOR_STR_LIST = [
+    "#5a6943", "#8db388", "#5b8f70", "#436965",
+    "#88a2b3", "#5b608f", "#524369", "#af88b3",
+    "#8f5b7a", "#694347", "#b39988", "#8f895b",
+]
+_HOLDINGS_CASH_COLOR_STR = "#cbd5e1"
+
+
+def build_pod_holdings_pie_dict(
+    position_exposure_dict_list: list[dict[str, Any]] | None,
+    cash_float: Any,
+    equity_float: Any,
+    target_weight_map_dict: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """One pod's current holdings as donut slices with target drift.
+
+    Read-only presentation math over data the dashboard already carries:
+    ``position_exposure_dict_list`` (asset, market value) from the pod row,
+    ``cash_float``/``equity_float`` from the same snapshot, and the latest
+    decision plan's target weights when available.
+
+    *** CRITICAL*** Weights use absolute market value over the sum of
+    absolute exposures plus clamped cash, so a short leg still occupies a
+    visible share instead of shrinking the pie. Drift is
+    ``current_weight - target_weight`` in percentage points and is only
+    reported for priced assets when a target exists — an unpriced position
+    shows as unpriced, never as a fake 0% drift.
+    """
+    equity_value_float = _float_or_none(equity_float)
+    cash_value_float = _float_or_none(cash_float) or 0.0
+    priced_dict_list = [
+        item_dict
+        for item_dict in (position_exposure_dict_list or [])
+        if item_dict.get("market_value_float") is not None
+    ]
+    unpriced_count_int = len(position_exposure_dict_list or []) - len(priced_dict_list)
+    cash_in_pie_float = max(cash_value_float, 0.0)
+    denominator_float = (
+        sum(abs(float(item_dict["market_value_float"])) for item_dict in priced_dict_list)
+        + cash_in_pie_float
+    )
+    if denominator_float <= 0.0:
+        return {"has_data_bool": False, "unpriced_count_int": unpriced_count_int}
+
+    slice_dict_list: list[dict[str, Any]] = []
+    start_deg_float = 0.0
+    entry_list = [
+        (
+            str(item_dict["asset_str"]),
+            abs(float(item_dict["market_value_float"])),
+            float(item_dict["market_value_float"]),
+        )
+        for item_dict in priced_dict_list
+    ]
+    if cash_in_pie_float > 0.0:
+        entry_list.append(("Cash", cash_in_pie_float, cash_in_pie_float))
+    for index_int, (label_str, weight_value_float, signed_value_float) in enumerate(entry_list):
+        weight_float = weight_value_float / denominator_float
+        sweep_deg_float = weight_float * 360.0
+        end_deg_float = start_deg_float + sweep_deg_float
+        is_cash_bool = label_str == "Cash"
+        color_str = (
+            _HOLDINGS_CASH_COLOR_STR
+            if is_cash_bool
+            else _HOLDINGS_COLOR_STR_LIST[index_int % len(_HOLDINGS_COLOR_STR_LIST)]
+        )
+        target_float = None
+        drift_pp_float = None
+        if not is_cash_bool and target_weight_map_dict:
+            target_obj = target_weight_map_dict.get(label_str)
+            target_float = _float_or_none(target_obj)
+            if target_float is not None:
+                drift_pp_float = (weight_float - target_float) * 100.0
+        slice_dict_list.append(
+            {
+                "label_str": label_str,
+                "is_cash_bool": is_cash_bool,
+                "market_value_float": signed_value_float,
+                "weight_float": weight_float,
+                "weight_pct_label_str": f"{weight_float * 100.0:.1f}%",
+                "target_pct_label_str": (
+                    f"{target_float * 100.0:.1f}%" if target_float is not None else "—"
+                ),
+                "drift_pp_float": drift_pp_float,
+                "drift_pp_label_str": (
+                    f"{drift_pp_float:+.1f}pp" if drift_pp_float is not None else "—"
+                ),
+                "color_str": color_str,
+                "is_full_circle_bool": weight_float >= 0.9999,
+                "path_d_str": (
+                    "" if weight_float >= 0.9999
+                    else _pie_slice_path_str(start_deg_float, end_deg_float)
+                ),
+            }
+        )
+        start_deg_float = end_deg_float
+    return {
+        "has_data_bool": True,
+        "slice_dict_list": slice_dict_list,
+        "unpriced_count_int": unpriced_count_int,
+        "equity_label_str": (
+            f"${equity_value_float:,.0f}" if equity_value_float is not None else "—"
+        ),
+        "view_size_int": PIE_VIEW_SIZE_INT,
+    }

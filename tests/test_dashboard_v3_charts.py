@@ -243,3 +243,38 @@ def test_vol_footnote_degrades_gracefully_for_two_points() -> None:
         _point("2026-05-02", 10500.0),
     ])
     assert chart_obj.annualized_vol_label_str == "—"
+
+
+# ── build_pod_holdings_pie_dict — presentation math only, no I/O ──────────
+
+def test_holdings_pie_weights_targets_and_drift():
+    from alpha.live.dashboard_v3.charts import build_pod_holdings_pie_dict
+
+    pie_dict = build_pod_holdings_pie_dict(
+        [
+            {"asset_str": "SPY", "market_value_float": 4000.0},
+            {"asset_str": "TLT", "market_value_float": -1000.0},
+            {"asset_str": "GHOST", "market_value_float": None},
+        ],
+        cash_float=1000.0,
+        equity_float=5000.0,
+        target_weight_map_dict={"SPY": 0.6, "TLT": 0.2},
+    )
+    assert pie_dict["has_data_bool"]
+    by_label_dict = {s["label_str"]: s for s in pie_dict["slice_dict_list"]}
+    # *** CRITICAL*** Short legs weight by absolute value: |4000|+|-1000|+1000 = 6000.
+    assert by_label_dict["SPY"]["weight_pct_label_str"] == "66.7%"
+    assert by_label_dict["TLT"]["weight_pct_label_str"] == "16.7%"
+    assert by_label_dict["Cash"]["weight_pct_label_str"] == "16.7%"
+    assert by_label_dict["SPY"]["drift_pp_label_str"] == "+6.7pp"
+    assert by_label_dict["Cash"]["drift_pp_label_str"] == "—"
+    # Unpriced positions are surfaced, never silently dropped.
+    assert pie_dict["unpriced_count_int"] == 1
+    assert abs(sum(s["weight_float"] for s in pie_dict["slice_dict_list"]) - 1.0) < 1e-6
+
+
+def test_holdings_pie_empty_book_reports_no_data():
+    from alpha.live.dashboard_v3.charts import build_pod_holdings_pie_dict
+
+    pie_dict = build_pod_holdings_pie_dict([], cash_float=0.0, equity_float=None)
+    assert not pie_dict["has_data_bool"]

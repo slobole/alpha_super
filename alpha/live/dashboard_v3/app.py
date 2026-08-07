@@ -43,6 +43,7 @@ from alpha.live.dashboard_v3.charts import (
     build_cross_pod_exposure_dict,
     build_equity_chart_dict,
     build_monthly_return_dict_list,
+    build_pod_holdings_pie_dict,
 )
 from alpha.live.dashboard_v3.data import (
     DashboardActionInFlightError,
@@ -329,9 +330,21 @@ def create_app(
             detail_dict = provider_obj.get_pod_detail_dict(pod_id_str)
         except KeyError:
             abort(404)
+        # Presentation-only derivation over data the detail already carries:
+        # current exposures from the pod row, targets from the latest decision
+        # plan. No new I/O and no quant logic.
+        pod_row_dict = detail_dict.get("pod_row_dict") or {}
+        decision_plan_dict = detail_dict.get("latest_decision_plan_dict") or {}
+        holdings_pie_dict = build_pod_holdings_pie_dict(
+            pod_row_dict.get("position_exposure_dict_list"),
+            pod_row_dict.get("cash_float"),
+            pod_row_dict.get("equity_float"),
+            decision_plan_dict.get("display_target_weight_map_dict"),
+        )
         return render_template(
             "_pod_detail.html",
             detail_dict=detail_dict,
+            holdings_pie_dict=holdings_pie_dict,
             as_of_clock_str=_now_clock_str(),
         )
 

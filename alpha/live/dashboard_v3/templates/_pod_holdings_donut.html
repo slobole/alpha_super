@@ -1,0 +1,63 @@
+{# Current holdings of one pod: donut of weights with the pod equity in the
+   centre, and a legend that reads current / target / drift per asset.
+   Pure SVG over data the detail route already carries — no JS, no new I/O. #}
+{% if holdings_pie_dict and holdings_pie_dict.has_data_bool %}
+<section class="mb-3 border border-ink-100 bg-white p-4">
+  <header class="flex items-baseline justify-between mb-3">
+    <div class="text-xs uppercase tracking-wide font-mono text-ink-500">Holdings</div>
+    <div class="text-xs text-ink-500">current weights vs latest decision targets</div>
+  </header>
+  <div class="flex items-center gap-5">
+    <svg viewBox="0 0 {{ holdings_pie_dict.view_size_int }} {{ holdings_pie_dict.view_size_int }}"
+         class="w-36 h-36 shrink-0" role="img" aria-label="Current holdings by asset">
+      {% for slice_dict in holdings_pie_dict.slice_dict_list %}
+        {% if slice_dict.is_full_circle_bool %}
+          <circle cx="50" cy="50" r="46" fill="{{ slice_dict.color_str }}"></circle>
+        {% else %}
+          <path d="{{ slice_dict.path_d_str }}" fill="{{ slice_dict.color_str }}"
+                stroke="#ffffff" stroke-width="0.75">
+            <title>{{ slice_dict.label_str }} · {{ slice_dict.weight_pct_label_str }}</title>
+          </path>
+        {% endif %}
+      {% endfor %}
+      <circle cx="50" cy="50" r="27" fill="#ffffff"></circle>
+      <text x="50" y="53" text-anchor="middle"
+            font-family="IBM Plex Mono, monospace" font-size="9"
+            fill="#16181d">{{ holdings_pie_dict.equity_label_str }}</text>
+    </svg>
+    <div class="flex-1 min-w-0">
+      <table class="w-full text-xs tabular-nums">
+        <thead>
+          <tr class="text-[10px] uppercase tracking-wide text-ink-500 font-mono">
+            <th class="text-left font-medium pb-1">Asset</th>
+            <th class="text-right font-medium pb-1">Current</th>
+            <th class="text-right font-medium pb-1">Target</th>
+            <th class="text-right font-medium pb-1">Drift</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for slice_dict in holdings_pie_dict.slice_dict_list %}
+          <tr>
+            <td class="py-0.5">
+              <span class="inline-block w-2.5 h-2.5 shrink-0 align-middle mr-1.5"
+                    style="background:{{ slice_dict.color_str }}"></span>
+              <span class="font-mono">{{ slice_dict.label_str }}</span>
+            </td>
+            <td class="text-right font-mono">{{ slice_dict.weight_pct_label_str }}</td>
+            <td class="text-right font-mono text-ink-500">{{ slice_dict.target_pct_label_str }}</td>
+            <td class="text-right font-mono
+                       {% if slice_dict.drift_pp_float is not none and slice_dict.drift_pp_float | abs > 1.0 %}text-warn{% else %}text-ink-500{% endif %}">
+              {{ slice_dict.drift_pp_label_str }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% if holdings_pie_dict.unpriced_count_int %}
+      <div class="mt-1 text-[11px] text-warn italic">
+        {{ holdings_pie_dict.unpriced_count_int }} position(s) without a usable price not shown.
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endif %}
