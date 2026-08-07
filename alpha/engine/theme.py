@@ -102,6 +102,9 @@ SIGNATURE_PALETTE_DICT: dict[str, object] = {
     'asset_color_dict': {},
     'layout_str': 'dashboard',
     'axis_style_str': 'dashboard',
+    # Optional CSS layer applied over layout_str's own stylesheet. Empty means
+    # the layout renders as it always has.
+    'report_skin_str': '',
     # Empty means fills are distinguished by colour alone. A populated cycle
     # lets a monochrome variant separate areas by texture instead.
     'hatch_cycle_list': [],
@@ -343,6 +346,7 @@ _DESK_PALETTE_DICT: dict[str, object] = {
     'prose_font_stack_str': _DESK_PROSE_FONT_STACK_STR,
     'code_font_stack_str': _DESK_FIGURE_FONT_STACK_STR,
     'axis_style_str': 'minimal',
+    'report_skin_str': 'desk',
 }
 
 
@@ -1392,6 +1396,175 @@ strong {{
 '''
 
 
+def _build_desk_report_skin_css() -> str:
+    """Restyle the spec layout as the trading-desk report in the mockups.
+
+    This is a skin, not a layout: the markup is untouched. report.py emits
+    ``plate-NN`` ids under the spec layout and alpha/bench/artifact_view.py
+    locates report sections by them, so forking the layout would fork the
+    markup and break the Bench workspace. Everything below is CSS.
+
+    What changes, and why each one:
+
+    * The datasheet chrome goes. Numbered "Plate 01 —" prefixes and grey ruled
+      caption bars are the journal identity — a specimen sheet. A desk report
+      is a set of panels, so sections become cards with plain sentence-case
+      headings.
+    * The title stops shouting. Spec sets h1 uppercase at 1.06rem, which turns
+      a module path into a banner and makes it harder to read than the body
+      text under it. It is an identifier: lowercase, mono, and large.
+    * The measure widens. 1000px was sized for a single reading column; these
+      pages carry wide tables and paired panels.
+    * Vanilla pairs its headline panels. The equity curve and the metric table
+      that summarises it belong side by side, as do the year and monthly
+      tables — that is the mockup's arrangement and it halves the scroll. Keyed
+      on the vanilla marker classes so the other four analyzers, whose plates
+      hold different content, are untouched.
+    """
+    return '''
+/* ── Desk skin ─────────────────────────────────────────────────────────── */
+body {
+    padding: 40px 28px 80px;
+    font-size: 14px;
+}
+.report-shell {
+    max-width: 1240px;
+}
+.report-header {
+    margin-bottom: 14px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--color-border);
+}
+.report-eyebrow {
+    font-size: 0.68rem;
+    letter-spacing: 0.14em;
+    color: var(--color-muted);
+}
+/* An identifier, not a banner. */
+h1 {
+    font-family: var(--font-figure);
+    font-size: clamp(1.4rem, 2.3vw, 1.95rem);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    text-transform: none;
+    line-height: 1.15;
+}
+/* Run metadata as a ruled band, matching the console's own meta strip. */
+.spec-masthead {
+    border: 1px solid var(--color-border);
+    border-radius: 3px;
+    margin-bottom: 10px;
+}
+.spec-field {
+    padding: 11px 14px;
+    border-right: 1px solid var(--color-border);
+}
+.spec-field-label {
+    font-size: 0.6rem;
+    letter-spacing: 0.13em;
+}
+.spec-field-value {
+    font-size: 0.82rem;
+    margin-top: 5px;
+}
+/* Section index as a quiet inline run, not a boxed ordered list. */
+.plate-index {
+    padding: 0;
+    margin: 0 0 12px;
+    border: 0;
+    background: none;
+}
+.plate-index ol {
+    columns: auto;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 18px;
+    padding: 0;
+    list-style: none;
+    font-size: 0.7rem;
+}
+.plate-index a {
+    color: var(--color-muted);
+    border-bottom: 0;
+}
+.plate-index a:hover { color: var(--color-accent); }
+
+/* Sections are cards. */
+.plate {
+    border: 1px solid var(--color-border);
+    border-radius: 3px;
+    padding: 0 15px 15px;
+    margin-bottom: 10px;
+}
+.plate > h2 {
+    margin: 0 -15px 13px;
+    padding: 12px 15px;
+    background: none;
+    border: 0;
+    border-bottom: 1px solid var(--color-border);
+    font-family: var(--font-prose);
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--color-ink);
+}
+/* No specimen numbering: these are panels, not plates in a datasheet. */
+.plate > h2::before { content: none; }
+
+table { font-size: 0.8rem; }
+th {
+    font-size: 0.62rem;
+    letter-spacing: 0.09em;
+    padding-bottom: 8px;
+}
+td { padding: 8px 10px; }
+
+/* Vanilla pairs its headline panels; other analyzers are untouched. */
+.report-shell:has(.headline-comparison) .headline-comparison,
+.report-shell:has(.vanilla-summary-table) .vanilla-summary-table {
+    border: 1px solid var(--color-border);
+    border-radius: 3px;
+    padding: 6px 15px 10px;
+    margin-bottom: 10px;
+    /* This card holds five short rows and is never wide enough to need a
+       scroller. Leaving .scroll's overflow on put a scrollbar under a table
+       that already fit, which reads as truncated evidence. */
+    overflow-x: visible;
+}
+.headline-comparison table { font-size: 0.76rem; }
+.headline-comparison td,
+.headline-comparison th { padding-left: 6px; padding-right: 6px; }
+.headline-comparison .stats-table { min-width: 0; }
+@media (min-width: 1100px) {
+    .report-shell:has(.headline-comparison) {
+        display: grid;
+        grid-template-columns: minmax(0, 1.62fr) minmax(370px, 0.38fr);
+        /* *** UI*** Dense placement is what makes the pairing robust. The
+           headline table precedes the equity plate in the DOM, so ordinary
+           auto-placement would put the plate on the *next* row. Dense lets the
+           plate back-fill the empty column-1 slot beside it — without pinning
+           either to a hardcoded row number, which would break the moment a
+           report gains or loses a full-width section above them. */
+        grid-auto-flow: dense;
+        gap: 0 10px;
+        align-items: start;
+    }
+    .report-shell > .report-header,
+    .report-shell > .spec-masthead,
+    .report-shell > .plate-index {
+        grid-column: 1 / -1;
+    }
+    .report-shell > .headline-comparison { grid-column: 2; }
+    .report-shell > #plate-01 { grid-column: 1; }
+    /* Everything after the headline pair returns to full width: the remaining
+       sections carry wide tables and stacked charts that a half column would
+       compress into unreadability. */
+    .report-shell > .plate:not(#plate-01) { grid-column: 1 / -1; }
+}
+'''
+
+
 def _build_spec_layout_css() -> str:
     """Datasheet layout: ruled field masthead, numbered plates, tight rhythm.
 
@@ -1541,6 +1714,8 @@ def _build_report_body_css() -> str:
         report_css_str = _build_document_report_css()
         if layout_str == 'spec':
             report_css_str += _build_spec_layout_css()
+        if str(SIGNATURE_PALETTE_DICT['report_skin_str']) == 'desk':
+            report_css_str += _build_desk_report_skin_css()
         return report_css_str
 
     if str(SIGNATURE_PALETTE_DICT['layout_str']) == 'document':

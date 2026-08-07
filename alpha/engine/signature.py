@@ -915,8 +915,13 @@ def build_metric_delta_table_html(metric_spec_list: list[dict[str, object]]) -> 
             f'<td style="color:{delta_color_str}">{html.escape(delta_display_str)}</td></tr>'
         )
 
+    # Named, not just a generic scroll container. This table is the report's
+    # headline claim, and a layout that wants to place it — beside the equity
+    # curve rather than above it — needs a hook that says what it is. The Bench
+    # workspace already synthesises the same class name when it rebuilds this
+    # table from a saved artifact, so both paths agree.
     return (
-        '<div class="scroll"><table class="stats-table">'
+        '<div class="scroll headline-comparison"><table class="stats-table">'
         '<thead><tr><th>Metric</th><th>Strategy</th><th>Benchmark</th><th>Delta</th></tr></thead>'
         f'<tbody>{"".join(row_html_list)}</tbody></table></div>'
     )
