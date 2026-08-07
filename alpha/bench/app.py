@@ -653,9 +653,23 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
     def jobs_page_fn() -> str:
         job_manager = flask_app_obj.config["job_manager_obj"]
         job_list = job_manager.list_jobs()
+        # Cancelled and errored jobs count as failed here: from the ledger's
+        # point of view they are all "did not produce evidence", and splitting
+        # them into their own tile would spend a headline slot on a
+        # distinction the detail page already makes.
         return render_template(
             "jobs.html",
             job_list=job_list,
+            job_status_count_dict={
+                "active": sum(1 for job_obj in job_list if job_obj.is_active_bool),
+                "passed": sum(1 for job_obj in job_list if job_obj.status_str == "passed"),
+                "failed": sum(
+                    1
+                    for job_obj in job_list
+                    if job_obj.status_str in ("failed", "error", "cancelled")
+                ),
+                "total": len(job_list),
+            },
             job_view_list=_job_view_dict_list(
                 job_list, flask_app_obj.config["produced_run_cache_dict"]
             ),

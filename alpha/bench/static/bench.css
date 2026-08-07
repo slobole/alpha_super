@@ -841,7 +841,14 @@ th.sortable.sort-asc::after { content: " ↑"; color: var(--color-ink); }
 .pill-cancelled { color: var(--color-muted); }
 
 tr.job-row { cursor: pointer; }
-.job-actions { justify-content: flex-end; }
+.job-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  white-space: nowrap;
+}
+.job-actions a { color: var(--color-accent); text-decoration: underline; text-underline-offset: 3px; }
 .pill-running::before { animation: pulse 1.1s ease-in-out infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.2; } }
 

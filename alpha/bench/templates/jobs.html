@@ -3,21 +3,27 @@
 {% block title %}Jobs{% endblock %}
 
 {% block content %}
-<div class="page-head">
-  <div>
-    <div class="page-kicker">Execution ledger</div>
-    <h1 class="page-title">Jobs</h1>
-    <p class="page-sub">Background runs launched from Bench. Output streams to <span class="mono">results/_bench/jobs/</span>. Click a row for its live log. Cancelling kills the whole process tree — a part-finished analysis leaves whatever artifacts it had already written.</p>
-  </div>
-</div>
+<header class="catalog-head">
+  <div class="page-kicker">Execution ledger</div>
+  <h1 class="catalog-title">Jobs</h1>
+  <p class="catalog-strapline">
+    Background runs launched from Bench. Output streams to <span class="mono">results/_bench/jobs/</span>.
+    Click a row for its job page. Cancelling kills the whole process tree — a part-finished analysis leaves
+    whatever artifacts it had already written.
+  </p>
+</header>
 
-<div class="section section-flush">
-<h2 class="section-title">Runs launched from Bench</h2>
+<section class="catalog-stat-band" aria-label="Job totals">
+  <div><span>Active</span><b>{{ job_status_count_dict.active }}</b></div>
+  <div><span>Passed</span><b>{{ job_status_count_dict.passed }}</b></div>
+  <div><span>Failed</span><b>{{ job_status_count_dict.failed }}</b></div>
+  <div><span>Total</span><b>{{ job_status_count_dict.total }}</b></div>
+</section>
+
 <div id="jobs-table"
      hx-get="{{ url_for('jobs_fragment_fn') }}"
      hx-trigger="load, every 2s"
      hx-swap="innerHTML">
   {% include "_jobs_table.html" %}
-</div>
 </div>
 {% endblock %}
