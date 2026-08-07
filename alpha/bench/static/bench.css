@@ -1969,16 +1969,20 @@ kbd {
    purpose: this is a two-state presence question, and verdict colour belongs
    to the readiness matrix. */
 .evidence-chip.is-on {
-  background: var(--color-ink);
+  background: var(--color-neutral);
   border-color: var(--color-ink);
-  color: var(--color-page);
+  color: var(--color-ink);
+  font-weight: 700;
 }
 /* *** UI*** These marks are monochrome on purpose, and it is not an oversight.
    The catalog answers "does saved evidence exist?" — a two-state question, so
-   it gets a two-state mark: inked check or hollow ring. Verdict colour
+   it gets a two-state mark: inked outline or pale ring. Verdict colour
    (PASS/SKIP/FAIL) belongs to the readiness matrix, which answers a different
    question. Tinting these green would make a row of five ticks read as five
-   passes when several may be stale, failed or skipped. */
+   passes when several may be stale, failed or skipped.
+   Outline rather than a solid ink fill: five filled squares per row were the
+   heaviest ink on the page, outweighing the names and figures the catalog
+   actually exists to show. */
 
 
 .catalog-footer-bar {

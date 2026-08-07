@@ -88,13 +88,15 @@
 
     <div class="run-panel-actions">
       <button class="btn btn-run is-due" name="preset" value="selected">Run selected</button>
+      {# Submits the sibling full-run form below; nesting a form here is invalid
+         HTML, the form attribute keeps one action row with one primary. #}
+      <button class="btn btn-run" type="submit" form="run-panel-full-form">Run all {{ preset_dict['full']|length }}</button>
     </div>
   </form>
-  <form class="inline run-panel-full" method="post" action="{{ url_for('run_api_fn') }}">
+  <form id="run-panel-full-form" class="inline run-panel-full" method="post" action="{{ url_for('run_api_fn') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
     <input type="hidden" name="module_import" value="{{ strategy.module_import_str }}">
     {% for analysis_str in preset_dict['full'] %}<input type="hidden" name="analysis" value="{{ analysis_str }}">{% endfor %}
-    <button class="btn btn-run">Run all {{ preset_dict['full']|length }}</button>
   </form>
 </section>
 {% else %}
