@@ -7,8 +7,8 @@
 
 <div class="page-head">
   <div>
-    <h1 class="page-title">Compare</h1>
-    <p class="page-sub">Latest vanilla backtest of each strategy, side by side. Every figure is read from the run's own <span class="mono">summary.json</span> — nothing is recomputed here.</p>
+    <h1 class="catalog-title">Compare</h1>
+    <p class="catalog-strapline">Latest vanilla backtest of each strategy, side by side. Every figure is read from the run's own <span class="mono">summary.json</span> — nothing is recomputed here.</p>
   </div>
 </div>
 
@@ -73,7 +73,7 @@
           <td class="muted">Max drawdown</td>
           {% for view in column_view_list %}
           {% set sm = view.vanilla_run.summary_dict if view.vanilla_run else {} %}
-          <td class="num tone-neg">{{ sm.get('max_drawdown_pct')|pct }}</td>
+          <td class="num ">{{ sm.get('max_drawdown_pct')|pct }}</td>
           {% endfor %}
         </tr>
         <tr>

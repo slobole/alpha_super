@@ -3,22 +3,22 @@
 {% block title %}Compare strategies{% endblock %}
 
 {% block content %}
-<div class="page-head">
-  <div>
-    <div class="page-kicker">Cross-strategy reading</div>
-    <h1 class="page-title">Compare</h1>
-    <p class="page-sub">Choose {{ compare_min_int }}–{{ compare_max_int }} strategies. BENCH reads each latest saved Vanilla summary exactly as written; it does not recompute or rank the results.</p>
-  </div>
-</div>
+<header class="catalog-head">
+  <div class="page-kicker">Cross-strategy reading</div>
+  <h1 class="catalog-title">Compare</h1>
+  <p class="catalog-strapline">Choose {{ compare_min_int }}–{{ compare_max_int }} strategies. BENCH reads each latest saved Vanilla summary exactly as written; it does not recompute or rank the results.</p>
+</header>
+
+<section class="catalog-stat-band" aria-label="Comparable evidence">
+  <div><span>Comparable</span><b>{{ compare_candidate_list|length }}</b></div>
+  <div><span>Minimum</span><b>{{ compare_min_int }}</b></div>
+  <div><span>Maximum</span><b>{{ compare_max_int }}</b></div>
+</section>
 
 <form method="get" action="{{ url_for('compare_page_fn') }}" class="compare-picker">
   {% if compare_candidate_list %}
-  <div class="compare-picker-head">
-    <span id="compare-picker-count">0 selected</span>
-    <button class="btn btn-primary" id="compare-picker-submit" disabled>Open comparison</button>
-  </div>
-  <div class="panel">
-    <table class="table table-dense">
+  <div class="panel catalog-panel">
+    <table class="table table-dense catalog-table">
       <thead><tr><th class="cmp-cell"></th><th>Strategy</th><th class="num">CAGR</th><th class="num">Sharpe</th><th class="num">Max DD</th><th>Window</th></tr></thead>
       <tbody>
       {% for card in compare_candidate_list %}
@@ -28,14 +28,21 @@
       <tr>
         <td class="cmp-cell"><input type="checkbox" name="m" value="{{ strategy.module_import_str }}" class="compare-picker-check"></td>
         <td><a class="mono" href="{{ url_for('strategy_page_fn', module_import_str=strategy.module_import_str) }}">{{ strategy.stem_str }}</a></td>
-        <td class="num">{{ summary.get('ann_return_pct')|pct }}</td>
+        <td class="num">{{ summary.get('ann_return_pct')|signed_pct }}</td>
         <td class="num">{{ summary.get('sharpe')|ratio }}</td>
-        <td class="num tone-neg">{{ summary.get('max_drawdown_pct')|pct }}</td>
+        <td class="num">{{ summary.get('max_drawdown_pct')|pct }}</td>
         <td class="mono muted">{{ run.backtest_window_str or '—' }}</td>
       </tr>
       {% endfor %}
       </tbody>
     </table>
+  </div>
+  <div class="catalog-footer-bar">
+    <span class="readiness-note">Every figure is the strategy's own saved Vanilla summary, read as written.</span>
+    <div class="catalog-footer-actions">
+      <span class="catalog-selection" id="compare-picker-count">0 selected</span>
+      <button class="btn btn-primary" id="compare-picker-submit" disabled>Open comparison</button>
+    </div>
   </div>
   {% else %}
   <div class="empty-state panel">

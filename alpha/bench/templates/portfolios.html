@@ -3,36 +3,47 @@
 {% block title %}Portfolios{% endblock %}
 
 {% block content %}
-<div class="page-head">
-  <div>
-    <h1 class="page-title">Portfolios</h1>
-    <p class="page-sub">Multi-pod books from <span class="mono">portfolios/*.yaml</span>. Metrics are the latest recorded run — click a column header to sort; books missing a figure always sink. <b>Combine pkls</b> aggregates saved pod pickles, <b>fresh run</b> re-runs every pod from scratch.</p>
-  </div>
-  <div class="stat-row">
-    <div class="stat"><div class="stat-value">{{ overview_list|length }}</div><div class="stat-label">Books</div></div>
-    <div class="stat"><div class="stat-value">{{ measured_count_int }}</div><div class="stat-label">Measured</div></div>
-    {% if stale_count_int %}
-    <div class="stat"><div class="stat-value cell-bad">{{ stale_count_int }}</div><div class="stat-label">Stale</div></div>
-    {% endif %}
-    <a class="btn btn-primary" href="{{ url_for('portfolio_new_page_fn') }}">New portfolio</a>
-  </div>
-</div>
+<header class="catalog-head">
+  <div class="page-kicker">Book construction</div>
+  <h1 class="catalog-title">Portfolios</h1>
+  <p class="catalog-strapline">Multi-pod books from <span class="mono">portfolios/*.yaml</span>. Metrics are the latest recorded run — click a column header to sort; books missing a figure always sink. <b>Combine pkls</b> aggregates saved pod pickles, <b>fresh run</b> re-runs every pod from scratch.</p>
+</header>
+
+{# Stale is a count, not an alarm: a book whose pods have been re-run since it
+   was built is not wrong, it is out of date. It reads in ink like every other
+   total and earns its emphasis on the row that is actually stale. #}
+<section class="catalog-stat-band" aria-label="Book totals">
+  <div><span>Books</span><b>{{ overview_list|length }}</b></div>
+  <div><span>Measured</span><b>{{ measured_count_int }}</b></div>
+  <div><span>Stale</span><b>{{ stale_count_int }}</b></div>
+  <div><span>Never run</span><b>{{ overview_list|length - measured_count_int }}</b></div>
+</section>
 
 {% if not overview_list %}
 <div class="empty">No portfolio configs found under <span class="mono">portfolios/</span>.</div>
 {% else %}
 
-<div class="toolbar">
-  <div class="filter-bar" id="pf-filter-bar">
+<div class="catalog-toolbar" id="pf-filter-bar">
+  <label class="search-box">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="7.2" cy="7.2" r="4.6"/><path d="m10.6 10.6 3 3"/></svg>
+    <input id="pf-search" class="search" type="text" autocomplete="off"
+           placeholder="Search books by name or the pods inside them…">
+  </label>
+  <div class="toolbar-group">
+    <span class="toolbar-group-label">State</span>
     <span class="filter-chip active" data-filter="all">All</span>
     <span class="filter-chip" data-filter="measured">Measured</span>
     <span class="filter-chip" data-filter="norun">Never run</span>
-    <span class="filter-chip wired" data-filter="stale">Stale</span>
+    <span class="filter-chip" data-filter="stale">Stale</span>
+  </div>
+  <div class="toolbar-group">
+    <span class="toolbar-group-label">Schema</span>
     <span class="filter-chip" data-filter="combine">Combine pkls</span>
     <span class="filter-chip" data-filter="fresh">Fresh run</span>
   </div>
-  <input id="pf-search" class="search" type="text" autocomplete="off"
-         placeholder="Search books by name or the pods inside them…">
+  <span class="toolbar-recent">
+    <a class="btn btn-primary" href="{{ url_for('portfolio_new_page_fn') }}">New portfolio</a>
+  </span>
 </div>
 
 <div class="section section-flush">
@@ -100,7 +111,7 @@
           </td>
           <td class="num">{{ p.pod_tuple|length }}</td>
           <td class="num">{% if p.capital_float is not none %}${{ '{:,.0f}'.format(p.capital_float) }}{% else %}&mdash;{% endif %}</td>
-          <td class="num">{{ v.ann_return_float|pct }}</td>
+          <td class="num">{{ v.ann_return_float|signed_pct }}</td>
           <td class="num">{{ v.sharpe_float|ratio }}</td>
           <td class="num">{{ v.max_drawdown_float|pct }}</td>
           <td class="num">{{ v.mar_float|ratio }}</td>
