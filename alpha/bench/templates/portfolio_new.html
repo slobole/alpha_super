@@ -107,9 +107,9 @@
               <div class="mono muted-2">{{ c.stem_str }}</div>
             </td>
             <td>{{ c.category_label_str }}</td>
-            <td class="num">{% if c.ann_return_float is not none %}{{ '%.1f%%'|format(c.ann_return_float) }}{% else %}&mdash;{% endif %}</td>
-            <td class="num">{% if c.sharpe_float is not none %}{{ '%.2f'|format(c.sharpe_float) }}{% else %}&mdash;{% endif %}</td>
-            <td class="num">{% if c.max_drawdown_float is not none %}{{ '%.1f%%'|format(c.max_drawdown_float) }}{% else %}&mdash;{% endif %}</td>
+            <td class="num">{{ c.ann_return_float|pct }}</td>
+            <td class="num">{{ c.sharpe_float|ratio }}</td>
+            <td class="num">{{ c.max_drawdown_float|pct }}</td>
             <td class="num">{% if c.trades_per_year_float is not none %}{{ '%.0f'|format(c.trades_per_year_float) }}{% else %}&mdash;{% endif %}</td>
             <td class="mono muted-2">{{ c.window_str or '—' }}</td>
             <td class="mono muted-2">{{ c.benchmark_symbol_str or '—' }}</td>

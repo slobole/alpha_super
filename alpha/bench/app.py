@@ -101,16 +101,34 @@ MARKET_TIMEZONE_OBJ = ZoneInfo("America/New_York")
 # variant produced it — switching here can leave the console and an embedded
 # report disagreeing until that report is re-rendered.
 BENCH_VARIANT_COOKIE_STR = "bench_variant"
-DEFAULT_BENCH_VARIANT_STR = "swiss"
-# Keep DEFAULT_BENCH_VARIANT_STR in sync with the :root fallback in bench.css —
-# tests/test_theme_no_hardcoded_colors.py pins the two together.
+DEFAULT_BENCH_VARIANT_STR = "desk"
+# Keep DEFAULT_BENCH_VARIANT_STR in sync with the :root fallback in bench.css
+# *and* with the default argument of build_bench_theme_css —
+# tests/test_theme_no_hardcoded_colors.py pins all three together.
 BENCH_VARIANT_LABEL_DICT = {
+    "desk": "Desk",
     "swiss": "Swiss",
     "blueprint": "Blueprint",
     "journal": "Journal",
 }
 # One year: a display preference the operator sets once, not a session.
 BENCH_VARIANT_COOKIE_MAX_AGE_INT = 365 * 24 * 60 * 60
+
+# Display density. Purely a type-and-spacing scale applied in CSS: the same
+# markup, the same rows, the same numbers. "Present" exists because the console
+# gets shown on a projector, where the working density is unreadable from the
+# back of a room.
+#
+# *** UI*** This must never gate content. If a future change makes a column or
+# a panel appear in one density and not the other, the two modes have become
+# two different pages and the operator can no longer trust that what they
+# rehearsed is what the room sees.
+BENCH_DENSITY_COOKIE_STR = "bench_density"
+DEFAULT_BENCH_DENSITY_STR = "work"
+BENCH_DENSITY_LABEL_DICT = {
+    "work": "Working",
+    "present": "Presentation",
+}
 
 
 def create_app(job_manager_obj: JobManager | None = None) -> Flask:
@@ -137,6 +155,32 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             return cookie_value_str
         return DEFAULT_BENCH_VARIANT_STR
 
+    def _active_density_str() -> str:
+        """The requested display density, or the default if unrecognized.
+
+        Same rule as the variant cookie: the value is echoed into an HTML
+        attribute, so an edited cookie must not reach the template.
+        """
+        cookie_value_str = request.cookies.get(BENCH_DENSITY_COOKIE_STR, "")
+        if cookie_value_str in BENCH_DENSITY_LABEL_DICT:
+            return cookie_value_str
+        return DEFAULT_BENCH_DENSITY_STR
+
+    # House number format, in one place.
+    #
+    # The same metric used to render at one decimal on the catalog and two on
+    # the strategy page, so a max drawdown read as -30.9% in one view and
+    # -30.94% in another. In a console whose entire claim is precision, that
+    # reads as carelessness — and worse, it makes two views of one saved value
+    # look like two different measurements. The rule: percentages and ratios
+    # both carry two decimals, counts carry thousands separators, and a missing
+    # value is an em dash rather than a zero.
+    flask_app_obj.jinja_env.filters["pct"] = lambda value_obj: _decimal_str(
+        value_obj, suffix_str="%"
+    )
+    flask_app_obj.jinja_env.filters["ratio"] = _decimal_str
+    flask_app_obj.jinja_env.filters["count"] = _integer_str
+
     @flask_app_obj.context_processor
     def inject_globals_fn() -> dict[str, Any]:
         job_manager = flask_app_obj.config["job_manager_obj"]
@@ -156,6 +200,8 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             "bench_theme_css_str": build_bench_theme_css(active_variant_str),
             "active_variant_str": active_variant_str,
             "variant_label_dict": BENCH_VARIANT_LABEL_DICT,
+            "active_density_str": _active_density_str(),
+            "density_label_dict": BENCH_DENSITY_LABEL_DICT,
         }
 
     def _csrf_failure_response_fn():
@@ -545,6 +591,28 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
         response_obj.set_cookie(
             BENCH_VARIANT_COOKIE_STR,
             variant_name_str,
+            max_age=BENCH_VARIANT_COOKIE_MAX_AGE_INT,
+            samesite="Lax",
+            httponly=True,
+        )
+        return response_obj
+
+    @flask_app_obj.route("/density/<density_name_str>")
+    def set_density_fn(density_name_str: str) -> Response:
+        """Switch the console's display density and return where you were.
+
+        Same shape and same reasoning as ``set_variant_fn``: one display cookie
+        in the operator's own browser, no server state, so a GET is appropriate
+        and the referrer is only followed back to our own host.
+        """
+        if density_name_str not in BENCH_DENSITY_LABEL_DICT:
+            abort(404)
+        referrer_str = request.referrer or ""
+        same_origin_bool = bool(referrer_str) and urlparse(referrer_str).netloc == request.host
+        response_obj = redirect(referrer_str if same_origin_bool else url_for("index_page_fn"))
+        response_obj.set_cookie(
+            BENCH_DENSITY_COOKIE_STR,
+            density_name_str,
             max_age=BENCH_VARIANT_COOKIE_MAX_AGE_INT,
             samesite="Lax",
             httponly=True,

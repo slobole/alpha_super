@@ -1,32 +1,55 @@
 /* Bench — research control panel.
 
-   Swiss / International Typographic Style, shared with the 'swiss' signature
-   variant: white page, one grotesque sans for everything, heavy black rules,
-   and a single red that is the only colour on the page. Containers carry no
-   visual weight; structure comes from the grid, the rules, and the type.
+   Trading-desk console, shared with the 'desk' signature variant: pure white,
+   mono figures against a grotesque for prose, hairline containers, and colour
+   spent only on machine-readable state — a link, an active tab, a PASS, a
+   SKIP, a FAIL. Structure comes from the grid, the rules, and the type.
 
    Colour and type live in the report's own token names (--color-ink,
    --font-figure, …). The :root below is a self-contained fallback holding the
-   swiss values, so the console still renders correctly offline or if the
+   desk values, so the console still renders correctly offline or if the
    injected theme block from alpha.engine.theme is ever missing; when it is
    present it overrides these, and a variant switch moves both surfaces at once.
    Add no palette here — add it to the signature palette instead. */
 
 :root {
-  --color-ink: #111111;
+  --color-ink: #16181d;
   --color-page: #ffffff;
   --color-panel: #ffffff;
-  --color-neutral: #f4f4f4;
-  --color-grid: #e0e0e0;
-  --color-border: #d4d4d4;
-  --color-muted: #6e6e6e;
-  --color-profit-dark: #111111;
-  --color-loss: #d92b1f;
-  --color-loss-dark: #b91c12;
-  --color-benchmark-dark: #6e6e6e;
-  --font-figure: "Helvetica Neue", Helvetica, Arial, sans-serif;
-  --font-prose: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --color-neutral: #f8f9fa;
+  --color-grid: #eceef1;
+  --color-border: #e0e3e8;
+  --color-muted: #5f6470;
+  --color-profit: #1e8e3e;
+  --color-profit-dark: #137333;
+  --color-loss: #d93025;
+  --color-loss-dark: #b3261e;
+  --color-accent: #1a73e8;
+  --color-accent-dark: #1558d6;
+  --color-warning: #e37400;
+  --color-warning-dark: #b45309;
+  --color-benchmark-dark: #71767d;
+  --font-figure: "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
+  --font-prose: "Segoe UI", Inter, "Helvetica Neue", Helvetica, Arial, sans-serif;
   font-synthesis: none;
+}
+
+/* Density ------------------------------------------------------------------
+   One scale knob, set by a cookie-backed attribute on <html>. "Present" is for
+   showing the console on a projector or a shared screen: the same layout, the
+   same information, just larger type and taller rows. It is a display setting,
+   never a different page — nothing appears or disappears between the two.
+
+   Every size below that should respond is expressed as a multiple of
+   --density-scale. Rules that must NOT grow (hairline borders, icon dots) stay
+   in absolute px on purpose. */
+:root {
+  --density-scale: 1;
+  --row-pad-y: calc(7px * var(--density-scale));
+  --stat-value-size: 1.32rem;
+}
+:root[data-density="present"] {
+  --density-scale: 1.22;
 }
 
 /* Quiet Ops shell ---------------------------------------------------------
@@ -320,13 +343,19 @@
 
 * { box-sizing: border-box; }
 
+/* *** UI*** The density scale belongs on the ROOT font size, not on body.
+   Almost every size in this stylesheet is expressed in rem, and rem resolves
+   against <html> — so scaling body would leave the entire type system fixed
+   and the density switch would appear to do nothing. */
+html {
+  font-size: calc(15px * var(--density-scale));
+}
 html, body {
   margin: 0;
   padding: 0;
   background: var(--color-page);
   color: var(--color-ink);
   font-family: var(--font-prose);
-  font-size: 15px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
 }
@@ -623,6 +652,29 @@ a { color: inherit; text-decoration: none; }
 .btn-ghost { border-color: transparent; text-decoration: underline; text-underline-offset: 3px; }
 .btn-ghost:hover { border-color: transparent; color: var(--color-ink); }
 .btn-sm { padding: 3px 8px; font-size: 0.58rem; }
+/* Launches a background job: spends minutes of compute and writes a new
+   artifact. Navigation buttons sit right beside these and used to carry the
+   identical solid-ink treatment, so "open the report I already have" and "go
+   compute a new one" were one click apart and indistinguishable. The marker
+   is what separates them — a run button always announces itself.
+
+   Two levels, and they encode different things. The marker means "this spends
+   compute"; the fill means "this one is actually due". Keeping them separate
+   is what lets a stale portfolio stand out from an up-to-date one without
+   making every run button shout. */
+.btn-run { border-color: var(--color-ink); }
+.btn-run::before {
+  content: "▶";
+  font-size: 0.72em;
+  line-height: 1;
+  opacity: 0.85;
+}
+.btn-run.is-due {
+  background: var(--color-ink);
+  color: var(--color-page);
+  border-color: var(--color-ink);
+}
+.btn-run.is-due:hover { background: var(--color-page); color: var(--color-ink); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 form.inline { display: inline; margin: 0; }
@@ -1079,6 +1131,8 @@ kbd {
   text-transform: uppercase;
 }
 .popover-version { border-top: 1px solid var(--color-border); margin-top: 4px; }
+.popover-label-split { border-top: 1px solid var(--color-border); margin-top: 4px; }
+.topbar-popover a.active { color: var(--color-accent); }
 .topbar-primary-nav {
   min-width: 0;
   display: flex;
@@ -1436,23 +1490,47 @@ kbd {
   overflow: visible;
   background: var(--color-page);
 }
-.report-view-tabs {
-  min-height: 34px;
-  display: flex;
-  align-items: end;
-  gap: 26px;
-  overflow-x: auto;
-  border-bottom: 1px solid var(--color-border);
+/* Report sections ---------------------------------------------------------
+   A vertical sub-rail, deliberately not a second horizontal tab strip. The
+   analyzer tabs above own the horizontal axis and the accent underline; this
+   level is subordinate and says so by running down the page instead of across
+   it. It sticks so the section list stays reachable on a long sheet. */
+.report-stage-grid { min-width: 0; }
+.report-stage-grid.has-sections {
+  display: grid;
+  grid-template-columns: 152px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
 }
-.report-view-tabs a {
-  padding: 0 2px 9px;
-  border-bottom: 2px solid transparent;
+.report-section-rail {
+  position: sticky;
+  top: calc(58px * var(--density-scale));
+  display: grid;
+  gap: 1px;
+  padding-top: 14px;
+}
+.report-section-rail-label {
+  padding: 0 8px 7px;
   color: var(--color-muted);
-  font-size: .62rem;
-  white-space: nowrap;
+  font-family: var(--font-figure);
+  font-size: .58rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
 }
-.report-view-tabs a:hover { color: var(--color-ink); }
-.report-view-tabs a.active { color: var(--color-ink); border-bottom-color: #1677ff; }
+.report-section-rail a {
+  padding: 7px 8px;
+  border-left: 2px solid transparent;
+  color: var(--color-muted);
+  font-family: var(--font-figure);
+  font-size: .72rem;
+  line-height: 1.3;
+}
+.report-section-rail a:hover { color: var(--color-ink); background: var(--color-neutral); }
+.report-section-rail a.active {
+  color: var(--color-accent);
+  border-left-color: var(--color-accent);
+  background: var(--color-neutral);
+}
 .native-report {
   padding: 14px 0 4px;
   color: var(--color-ink);
@@ -1547,7 +1625,7 @@ kbd {
   font-size: .62rem;
   white-space: normal;
 }
-.native-report a { color: #1677ff; text-decoration: underline; text-underline-offset: 2px; }
+.native-report a { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; }
 .native-report .metric-help {
   width: 15px;
   height: 15px;
@@ -1636,204 +1714,227 @@ kbd {
   .native-report .plate, .native-report .panel, .native-report section { padding: 8px; }
 }
 
-/* Mockup parity ----------------------------------------------------------
-   This is the strategy workspace shown in the approved mockup: compact mono
-   evidence sheet, blue selection state, fixed research rail, and a two-row
-   Vanilla overview. Saved values and charts are unchanged. */
+/* Desk workspace ----------------------------------------------------------
+   The strategy workspace from the approved mockup: mono evidence sheet, accent
+   selection state, fixed research rail, two-row Vanilla overview. Saved values
+   and charts are unchanged — this is presentation only.
+
+   *** UI*** Every colour and face here is a token. This block previously
+   carried ~60 literal hex values and three inline "Cascadia Mono" stacks,
+   which made it a second palette: the variant switch moved the rest of the
+   console and left this workspace on its own hardcoded blue-on-white. Adding a
+   literal back here silently reintroduces that split — put it in the signature
+   palette instead.
+
+   Type is expressed in rem against --font-size-base, so the density switch
+   scales the whole sheet from one place. Sizes below ~0.6rem are not used: the
+   previous scale bottomed out near 7px, which is unreadable on a shared screen
+   and was the single biggest legibility problem in the console. */
 .bench-body {
-  background: #fff;
-  color: #161616;
+  background: var(--color-page);
+  color: var(--color-ink);
 }
-.bench-shell { grid-template-columns: 132px minmax(0, 1fr); background: #fff; }
+.bench-shell { grid-template-columns: 148px minmax(0, 1fr); background: var(--color-page); }
 .bench-sidebar {
   padding: 14px 10px 12px;
-  border-right-color: #e2e2e2;
-  background: #fff;
+  border-right-color: var(--color-border);
+  background: var(--color-panel);
 }
 .bench-brand {
   min-height: 32px;
   padding: 0 6px 13px;
   gap: 7px;
-  border-bottom-color: #e2e2e2;
-  font-family: "Cascadia Mono", Consolas, monospace;
-  font-size: .59rem;
+  border-bottom-color: var(--color-border);
+  font-family: var(--font-figure);
+  font-size: .68rem;
   letter-spacing: .035em;
 }
-.bench-brand-mark { width: 19px; height: 19px; font-size: .5rem; }
+.bench-brand-mark { width: 21px; height: 21px; font-size: .58rem; }
 .sidebar-nav { margin-top: 13px; gap: 1px; }
 .sidebar-nav a {
-  min-height: 34px;
+  min-height: calc(34px * var(--density-scale));
   padding: 0 7px;
-  grid-template-columns: 19px 1fr auto;
+  grid-template-columns: 21px 1fr auto;
   border-left-width: 2px;
-  color: #666;
-  font-size: .61rem;
+  color: var(--color-muted);
+  font-size: .74rem;
 }
-.sidebar-nav a:hover { color: #111; background: #f7f9fc; }
+.sidebar-nav a:hover { color: var(--color-ink); background: var(--color-neutral); }
 .sidebar-nav a.active {
-  color: #0878ff;
-  border-left-color: #0878ff;
-  background: #f4f8ff;
+  color: var(--color-accent);
+  border-left-color: var(--color-accent);
+  background: var(--color-neutral);
 }
-.sidebar-nav a.active .sidebar-icon { color: #0878ff; }
-.sidebar-icon { font-size: .62rem; }
-.sidebar-foot { padding: 11px 7px 0; border-top-color: #e2e2e2; font-size: .49rem; }
-.sidebar-foot small { font-size: .48rem; }
+.sidebar-nav a.active .sidebar-icon { color: var(--color-accent); }
+.sidebar-icon { font-size: .78rem; }
+.sidebar-foot { padding: 11px 7px 0; border-top-color: var(--color-border); font-size: .6rem; }
+.sidebar-foot small { font-size: .58rem; }
 .bench-main .system-topbar {
-  min-height: 42px;
+  min-height: calc(44px * var(--density-scale));
   padding: 0 18px;
-  border-bottom: 1px solid #e2e2e2;
-  background: rgba(255,255,255,.97);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-page);
   backdrop-filter: none;
 }
 .bench-menu > summary,
 .system-topbar-meta,
-.research-menu > summary { font-size: .61rem; }
+.research-menu > summary { font-size: .7rem; }
 .topbar-clock {
-  font-family: "Cascadia Mono", Consolas, monospace;
-  font-size: .61rem;
+  font-family: var(--font-figure);
+  font-size: .7rem;
 }
 .bench-content {
   max-width: none;
   padding: 17px 20px 40px;
 }
 
+/* Identifiers, figures and state are mono; only running prose is not. */
 .artifact-breadcrumb,
-.artifact-head,
 .artifact-meta-grid,
 .artifact-tabs,
 .artifact-stat-strip,
 .artifact-report-stage,
 .artifact-footer-bar,
 .research-tools {
-  font-family: "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
+  font-family: var(--font-figure);
 }
 .artifact-breadcrumb {
   gap: 8px;
   margin: 0 0 17px;
-  color: #666;
-  font-size: .6rem;
+  color: var(--color-muted);
+  font-size: .72rem;
 }
-.artifact-breadcrumb a { color: #0878ff; }
+.artifact-breadcrumb a { color: var(--color-accent); }
 .artifact-head { margin-bottom: 13px; }
 .artifact-eyebrow {
   margin-bottom: 8px;
-  color: #202020;
-  font-size: .58rem;
-  letter-spacing: .04em;
+  color: var(--color-muted);
+  font-family: var(--font-figure);
+  font-size: .66rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
 }
 .artifact-title-row { gap: 10px; }
+/* The title is a module path, so it is a figure and stays mono. */
 .artifact-title-row h1 {
-  font-family: "Cascadia Mono", Consolas, monospace;
-  font-size: clamp(1.05rem, 1.65vw, 1.42rem);
+  font-family: var(--font-figure);
+  font-size: clamp(1.25rem, 1.9vw, 1.68rem);
   font-weight: 650;
-  line-height: 1.12;
-  letter-spacing: -.035em;
+  line-height: 1.14;
+  letter-spacing: -.028em;
 }
 .artifact-badge {
-  padding: 3px 6px;
-  border-color: #d8d8d8;
+  padding: 4px 7px;
+  border-color: var(--color-border);
   border-radius: 2px;
-  background: #fff;
-  font-size: .49rem;
-  letter-spacing: .035em;
+  background: var(--color-page);
+  font-family: var(--font-figure);
+  font-size: .58rem;
+  letter-spacing: .06em;
 }
+/* The one-line plain-language claim under the title. Prose, not figures —
+   it is the sentence that says what the numbers mean. */
 .artifact-summary {
-  margin-top: 8px;
-  color: #333;
-  font-size: .64rem;
-  line-height: 1.4;
+  margin-top: 9px;
+  color: var(--color-ink);
+  font-family: var(--font-prose);
+  font-size: .92rem;
+  line-height: 1.5;
+  max-width: 74ch;
 }
-.artifact-meta-grid { margin-bottom: 9px; border-color: #dedede; border-radius: 3px; }
+.artifact-meta-grid { margin-bottom: 9px; border-color: var(--color-border); border-radius: 3px; }
 .artifact-meta-cell {
-  min-height: 49px;
-  padding: 8px 11px 7px;
-  border-right-color: #e2e2e2;
+  min-height: calc(50px * var(--density-scale));
+  padding: 9px 12px 8px;
+  border-right-color: var(--color-border);
 }
 .artifact-meta-cell span,
 .artifact-stat-strip span {
   margin-bottom: 4px;
-  color: #666;
-  font-size: .48rem;
-  letter-spacing: .04em;
+  color: var(--color-muted);
+  font-size: .62rem;
+  letter-spacing: .1em;
 }
-.artifact-meta-cell b { color: #202020; font-size: .65rem; }
-.artifact-tabs { margin-bottom: 0; border-color: #dedede; border-radius: 2px; }
+.artifact-meta-cell b { color: var(--color-ink); font-size: .82rem; }
+.artifact-tabs { margin-bottom: 0; border-color: var(--color-border); border-radius: 2px; }
 .artifact-tabs a {
-  min-height: 31px;
-  color: #4f4f4f;
-  font-size: .58rem;
+  min-height: calc(34px * var(--density-scale));
+  color: var(--color-muted);
+  font-size: .72rem;
   border-bottom-width: 2px;
 }
-.artifact-tabs a.active { color: #0878ff; border-bottom-color: #0878ff; }
-.artifact-status { display: none; }
+.artifact-tabs a.active { color: var(--color-accent); border-bottom-color: var(--color-accent); }
+/* Saved-evidence dot per analyzer. Kept visible: which analyzers have actually
+   run is the evidence-first claim this console is built on, and hiding it
+   makes an unrun analyzer look identical to a passing one. */
+.artifact-tabs .artifact-status {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-border);
+}
+.artifact-tabs .artifact-status.status-saved,
+.artifact-tabs .artifact-status.status-pass { background: var(--color-profit); }
+.artifact-tabs .artifact-status.status-skip { background: var(--color-warning); }
+.artifact-tabs .artifact-status.status-fail { background: var(--color-loss); }
 .artifact-stat-strip {
   margin: 8px 0 0;
-  border-color: #dedede;
+  border-color: var(--color-border);
   border-radius: 2px;
 }
-.artifact-stat-strip > div { padding: 9px 9px 8px; border-right-color: #e2e2e2; }
-.artifact-stat-strip b { font-size: .92rem; }
+.artifact-stat-strip > div { padding: 10px 10px 9px; border-right-color: var(--color-border); }
+.artifact-stat-strip b { font-size: var(--stat-value-size); }
 .artifact-stat-strip-vanilla { display: none; }
 
 .artifact-report-stage { min-height: 470px; border: 0; }
-.report-view-tabs {
-  min-height: 30px;
-  gap: 34px;
-  border-bottom-color: #dedede;
-}
-.report-view-tabs a {
-  padding: 9px 2px 7px;
-  color: #555;
-  font-family: "Cascadia Mono", Consolas, monospace;
-  font-size: .53rem;
-}
-.report-view-tabs a.active { color: #0878ff; border-bottom-color: #0878ff; }
 .native-report {
   padding: 8px 0 2px;
-  color: #202020;
-  font-family: "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
-  font-size: .58rem;
-  line-height: 1.35;
+  color: var(--color-ink);
+  font-family: var(--font-figure);
+  font-size: .78rem;
+  line-height: 1.45;
 }
-.native-report h2 { margin-bottom: 7px; color: #202020; font-size: .61rem; }
-.native-report h3 { margin: 10px 0 6px; font-size: .57rem; }
-.native-report h4 { font-size: .54rem; }
-.native-report p { margin: 5px 0; color: #606060; }
+.native-report h2 { margin-bottom: 8px; color: var(--color-ink); font-size: .76rem; }
+.native-report h3 { margin: 12px 0 7px; font-size: .72rem; }
+.native-report h4 { font-size: .68rem; }
+.native-report p { margin: 6px 0; color: var(--color-muted); font-family: var(--font-prose); }
 .native-report .plate,
 .native-report .panel,
 .native-report .card,
 .native-report .chart-panel,
 .native-report section {
   margin: 0 0 8px;
-  padding: 8px;
-  border-color: #dedede;
+  padding: 10px;
+  border-color: var(--color-border);
   border-radius: 3px;
-  background: #fff;
+  background: var(--color-panel);
 }
-.native-report table { font-size: .53rem; }
+.native-report table { font-size: .7rem; }
 .native-report th {
-  padding: 4px 5px;
-  border-bottom-color: #c7c7c7;
-  color: #555;
-  font-size: .46rem;
-  letter-spacing: .025em;
+  padding: 5px 6px;
+  border-bottom-color: var(--color-ink);
+  color: var(--color-muted);
+  font-size: .62rem;
+  letter-spacing: .05em;
 }
-.native-report td { padding: 4px 5px; border-bottom-color: #ededed; }
-.native-report td.pos { color: #237347; }
-.native-report td.neg { color: #b33a2a; }
-.native-report .heatmap td { padding: 3px 2px; }
+.native-report td { padding: var(--row-pad-y) 6px; border-bottom-color: var(--color-border); }
+.native-report td.pos { color: var(--color-profit-dark); }
+.native-report td.neg { color: var(--color-loss-dark); }
+.native-report .heatmap td { padding: 4px 3px; }
 .native-report .cards,
 .native-report .kpi-grid,
-.native-report .card-grid { gap: 6px; margin-bottom: 8px; }
+.native-report .card-grid { gap: 8px; margin-bottom: 8px; }
 .native-report .card b,
-.native-report .kpi-value { font-size: .82rem; }
+.native-report .kpi-value { font-size: var(--stat-value-size); }
 
+/* The equity curve is the first thing anyone looks at, so it takes the wider
+   column and the taller crop. The comparison table beside it is a fixed-width
+   read and does not need the extra room. */
 .native-report-vanilla:has(#plate-01) {
   display: grid;
-  grid-template-columns: minmax(0, 1.28fr) minmax(360px, .72fr);
+  grid-template-columns: minmax(0, 1.42fr) minmax(340px, .58fr);
   grid-auto-flow: row;
-  gap: 8px;
+  gap: 10px;
   align-items: start;
 }
 .native-report-vanilla:has(#plate-01) > .headline-comparison,
@@ -1843,9 +1944,9 @@ kbd {
   align-self: center;
   margin: 0;
   padding: 8px 9px;
-  border: 1px solid #dedede;
+  border: 1px solid var(--color-border);
   border-radius: 3px;
-  background: #fff;
+  background: var(--color-panel);
 }
 .native-report-vanilla:has(#plate-01) > .headline-comparison h2,
 .native-report-vanilla:has(#plate-01) > .vanilla-summary-table h2 { margin-bottom: 8px; }
@@ -1865,14 +1966,14 @@ kbd {
   grid-column: 1;
   grid-row: 2;
   margin: 0;
-  max-height: 390px;
+  max-height: calc(480px * var(--density-scale));
   overflow: auto;
 }
 .native-report-vanilla:has(#plate-01) #plate-03 {
   grid-column: 2;
   grid-row: 2;
   margin: 0;
-  max-height: 390px;
+  max-height: calc(480px * var(--density-scale));
   overflow: auto;
 }
 .native-report-vanilla:has(#plate-01) #plate-04 {
@@ -1883,26 +1984,34 @@ kbd {
 .native-report-vanilla #plate-01 img,
 .native-report-vanilla #plate-04 img { width: 100%; }
 .native-report-vanilla #plate-01 .chart-wrap {
-  max-height: 430px;
+  max-height: calc(560px * var(--density-scale));
   overflow: hidden;
 }
 .native-report-vanilla #plate-full-equity .chart-wrap {
   max-height: none;
   overflow: visible;
 }
+/* The year and monthly grids are the densest tables in the console. They were
+   set at .49rem (~8px) to fit the crop; the crop grows instead, because a
+   number nobody can read is not evidence. */
 .native-report-vanilla .vanilla-year-table table,
-.native-report-vanilla #plate-03 table { font-size: .49rem; }
+.native-report-vanilla #plate-03 table { font-size: .64rem; }
 .native-report-vanilla .vanilla-year-table th,
-.native-report-vanilla #plate-03 th { position: sticky; top: 0; z-index: 2; background: #fff; }
+.native-report-vanilla #plate-03 th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--color-panel);
+}
 
 .artifact-footer-bar {
   padding: 12px 0 14px;
-  border-bottom-color: #dedede;
+  border-bottom-color: var(--color-border);
 }
-.artifact-outline span { font-size: .53rem; }
-.artifact-outline span:first-child { color: #0878ff; }
-.artifact-footer-actions .btn { min-height: 34px; font-size: .58rem; }
-.research-tools { border-color: #dedede; }
+.artifact-outline span { font-size: .68rem; }
+.artifact-outline span:first-child { color: var(--color-accent); }
+.artifact-footer-actions .btn { min-height: calc(34px * var(--density-scale)); font-size: .72rem; }
+.research-tools { border-color: var(--color-border); }
 .research-tools > summary { min-height: 48px; }
 
 @media (max-width: 980px) {
@@ -1915,6 +2024,21 @@ kbd {
   .native-report-vanilla:has(#plate-01) { display: block; }
   .native-report-vanilla:has(#plate-01) > .headline-comparison,
   .native-report-vanilla:has(#plate-01) > .vanilla-summary-table { margin-bottom: 8px; }
+  /* Too narrow for a side rail: the sections lay out across the top instead,
+     but keep the label so the level is still named rather than reading as a
+     second, equal tab strip. */
+  .report-stage-grid.has-sections { display: block; }
+  .report-section-rail {
+    position: static;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 16px;
+    padding: 0 0 8px;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .report-section-rail a { padding: 6px 0; border-left: 0; border-bottom: 2px solid transparent; }
+  .report-section-rail a.active { border-left: 0; border-bottom-color: var(--color-accent); background: none; }
 }
 
 @media (max-width: 620px) {
@@ -1922,5 +2046,5 @@ kbd {
   .bench-content { padding: 14px 10px 32px; }
   .artifact-title-row h1 { font-size: .98rem; }
   .artifact-breadcrumb { margin-bottom: 13px; }
-  .report-view-tabs { gap: 22px; }
+  .report-section-rail { gap: 0 14px; }
 }

@@ -56,18 +56,26 @@
 
 <section class="artifact-report-stage" id="analyzer-report">
   {% if artifact_report_view %}
-  {% if artifact_report_view.tab_tuple|length > 1 %}
-  <nav class="report-view-tabs" aria-label="{{ selected_analyzer.label_str }} report sections">
-    {% for report_tab in artifact_report_view.tab_tuple %}
-    <a href="{{ url_for('strategy_page_fn', module_import_str=strategy.module_import_str, analysis=selected_analysis_str, view=report_tab.key_str) }}#analyzer-report"
-       class="{{ 'active' if report_tab.key_str == artifact_report_view.selected_tab.key_str }}">
-      {{ report_tab.label_str }}
-    </a>
-    {% endfor %}
-  </nav>
-  {% endif %}
-  <div class="native-report native-report-{{ selected_analysis_str }}">
-    {{ artifact_report_view.selected_tab.html_markup }}
+  {# Sections are a sub-rail, not a second tab strip. Two stacked horizontal
+     strips compete for the same active-state cue and the reader loses track of
+     which level they are on; a vertical rail is unmistakably subordinate to
+     the analyzer tabs above it. Same server-side selection either way. #}
+  <div class="report-stage-grid{{ ' has-sections' if artifact_report_view.tab_tuple|length > 1 }}">
+    {% if artifact_report_view.tab_tuple|length > 1 %}
+    <nav class="report-section-rail" aria-label="{{ selected_analyzer.label_str }} report sections">
+      <span class="report-section-rail-label">Section</span>
+      {% for report_tab in artifact_report_view.tab_tuple %}
+      <a href="{{ url_for('strategy_page_fn', module_import_str=strategy.module_import_str, analysis=selected_analysis_str, view=report_tab.key_str) }}#analyzer-report"
+         class="{{ 'active' if report_tab.key_str == artifact_report_view.selected_tab.key_str }}"
+         {{ 'aria-current="page"' if report_tab.key_str == artifact_report_view.selected_tab.key_str }}>
+        {{ report_tab.label_str }}
+      </a>
+      {% endfor %}
+    </nav>
+    {% endif %}
+    <div class="native-report native-report-{{ selected_analysis_str }}">
+      {{ artifact_report_view.selected_tab.html_markup }}
+    </div>
   </div>
   {% else %}
   <div class="artifact-empty">
@@ -114,7 +122,7 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
           <input type="hidden" name="module_import" value="{{ strategy.module_import_str }}">
           {% for analysis_str in preset_dict['full'] %}<input type="hidden" name="analysis" value="{{ analysis_str }}">{% endfor %}
-          <button class="btn btn-primary">Run full analysis</button>
+          <button class="btn btn-run is-due">Run full analysis</button>
         </form>
         {% endif %}
       </div>
@@ -166,7 +174,7 @@
             {{ analysis_label_dict[analysis_str] }}
           </label>
           {% endfor %}
-          <button class="btn btn-sm btn-primary">Run</button>
+          <button class="btn btn-sm btn-run">Run</button>
         </div>
         <p class="param-warning"><b>Parameters reach {{ kwarg_aware_analysis_tuple | map('capitalize') | join(' and ') }} only.</b> {{ kwarg_blind_analysis_tuple | map('capitalize') | join(', ') }} use the strategy defaults.</p>
       </form>
@@ -186,9 +194,9 @@
               <td><b>{{ run.display_analysis_label_str }}</b>{% if run.capacity_window_date_summary_str %}<div class="cell-note">{{ run.capacity_window_date_summary_str }}</div>{% endif %}</td>
               <td class="muted">{{ run.display_timestamp_str }}</td>
               <td class="mono">{{ run.backtest_window_str or '—' }}</td>
-              <td class="num">{{ '%.2f%%'|format(summary.get('ann_return_pct')) if summary.get('ann_return_pct') is not none else '—' }}</td>
-              <td class="num">{{ '%.2f'|format(summary.get('sharpe')) if summary.get('sharpe') is not none else '—' }}</td>
-              <td class="num tone-neg">{{ '%.2f%%'|format(summary.get('max_drawdown_pct')) if summary.get('max_drawdown_pct') is not none else '—' }}</td>
+              <td class="num">{{ summary.get('ann_return_pct')|pct }}</td>
+              <td class="num">{{ summary.get('sharpe')|ratio }}</td>
+              <td class="num tone-neg">{{ summary.get('max_drawdown_pct')|pct }}</td>
               <td class="num">{% if run.has_report_bool %}<a href="{{ url_for('artifact_fn', rel_path_str=run.report_artifact_str) }}" target="_blank" rel="noopener noreferrer">Open ↗</a>{% endif %}</td>
             </tr>
             {% endfor %}

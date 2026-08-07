@@ -50,6 +50,15 @@ SIGNATURE_PALETTE_DICT: dict[str, object] = {
     'profit_dark': '#216e4e',
     'loss': '#c9372c',
     'loss_dark': '#ae2e24',
+    # Navigation accent and the third state between profit and loss. Kept
+    # separate from profit/loss on purpose: a link and an active tab are not
+    # "good news", and a SKIP is not a FAIL. Before these existed the console
+    # spent --color-ink on both, which is why every interactive affordance read
+    # with the same weight as body text.
+    'accent': '#357de8',
+    'accent_dark': '#1d5fdb',
+    'warning': '#b45309',
+    'warning_dark': '#8a3f07',
     'vertical_line': '#8590a2',
     'zero_line': '#626f86',
     'bar_edge': '#dfe1e6',
@@ -164,6 +173,13 @@ _JOURNAL_PALETTE_DICT: dict[str, object] = {
     'profit_dark': '#376243',
     'loss': '#9c6644',
     'loss_dark': '#7c4e31',
+    # No colour budget for navigation either: a link is ink with a rule under
+    # it. The caution step borrows the palette's bark so it sits between the
+    # moss and the umber rather than introducing a fourth hue.
+    'accent': '#1e1b16',
+    'accent_dark': '#000000',
+    'warning': '#8a6a4b',
+    'warning_dark': '#6e5442',
     'vertical_line': '#aaa496',
     'zero_line': '#1e1b16',
     'bar_edge': '#1e1b16',
@@ -219,6 +235,13 @@ _SWISS_PALETTE_DICT: dict[str, object] = {
     'profit_dark': '#111111',
     'loss': '#d92b1f',
     'loss_dark': '#b91c12',
+    # The one red is the whole accent budget, so navigation shares it rather
+    # than adding a second hue. Caution has no colour left and separates by
+    # value alone.
+    'accent': '#d92b1f',
+    'accent_dark': '#b91c12',
+    'warning': '#5a5a5a',
+    'warning_dark': '#3a3a3a',
     'vertical_line': '#8c8c8c',
     'zero_line': '#111111',
     'bar_edge': '#111111',
@@ -275,6 +298,12 @@ _BLUEPRINT_PALETTE_DICT: dict[str, object] = {
     'profit_dark': '#a8d5b0',
     'loss': '#d4906f',
     'loss_dark': '#e0a48a',
+    # *** CRITICAL*** Same inversion as the other ``*_dark`` keys on this dark
+    # sheet: the text-weight accent is *lighter* than its base, not darker.
+    'accent': '#8fa8c4',
+    'accent_dark': '#a8bfd6',
+    'warning': '#d4b06f',
+    'warning_dark': '#e0c48a',
     'vertical_line': '#5f7b99',
     'zero_line': '#dce8f5',
     'bar_edge': '#16283e',
@@ -299,6 +328,78 @@ _BLUEPRINT_PALETTE_DICT: dict[str, object] = {
 }
 
 
+# Desk: the institutional trading-desk console the investor mockups describe.
+# Where journal and swiss both spend their whole colour budget on one accent,
+# this one accepts that a control panel has *states* a research note does not —
+# a link, an active tab, a PASS, a SKIP, a FAIL — and gives each exactly one
+# hue. Nothing else on the page is allowed colour: the equity curve is ink, the
+# benchmark is grey, and every container is a hairline on white.
+#
+# The rule that keeps this from drifting into decoration: a colour here always
+# encodes machine-readable state. If a value cannot be PASS/SKIP/FAIL or
+# navigable, it renders in ink.
+_DESK_FIGURE_FONT_STACK_LIST: list[str] = [
+    'Cascadia Mono', 'Consolas', 'DejaVu Sans Mono', 'monospace',
+]
+_DESK_FIGURE_FONT_STACK_STR: str = '"Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace'
+# Prose is a grotesque, figures are mono. The split is the point: an identifier
+# like a module path or a price is a figure and must align in a column; a
+# heading is language and should not.
+_DESK_PROSE_FONT_STACK_STR: str = (
+    '"Segoe UI", Inter, "Helvetica Neue", Helvetica, Arial, sans-serif'
+)
+_DESK_PALETTE_DICT: dict[str, object] = {
+    # Cool near-black on pure white. Not #000: full black on white vibrates
+    # under projection, which is where this design gets used.
+    'ink': '#16181d',
+    'page': '#ffffff',
+    'panel': '#ffffff',
+    'neutral': '#f8f9fa',
+    'grid': '#eceef1',
+    'border': '#e0e3e8',
+    'axes_border': '#16181d',
+    'muted': '#5f6470',
+    # The equity curve is ink and the benchmark is grey — the same restraint
+    # every monochrome variant here keeps. Colour is reserved for state.
+    'strategy': '#16181d',
+    'strategy_dark': '#000000',
+    'benchmark': '#9aa0a6',
+    'benchmark_dark': '#71767d',
+    'profit': '#1e8e3e',
+    'profit_dark': '#137333',
+    'loss': '#d93025',
+    'loss_dark': '#b3261e',
+    'accent': '#1a73e8',
+    'accent_dark': '#1558d6',
+    'warning': '#e37400',
+    'warning_dark': '#b45309',
+    'vertical_line': '#9aa0a6',
+    'zero_line': '#16181d',
+    'bar_edge': '#16181d',
+    'legend_face': '#ffffff',
+    'legend_edge': '#e0e3e8',
+    'label_face': '#ffffff',
+    # Muted earth-and-slate ramp for composition stacks, lifted from the
+    # mockups' weight charts. Desaturated enough that a seven-sleeve stack
+    # never competes with a PASS/FAIL badge sitting next to it.
+    'overlay_cycle': [
+        '#3f5a63', '#a8845c', '#6b7f6a', '#c4b39a',
+        '#4a6670', '#8b6f4e', '#9aa5a0', '#d8cdb8',
+    ],
+    # *** UI*** Deliberately empty. Hatch textures alias badly through a
+    # projector and this variant exists to be presented, so sleeves separate by
+    # value alone and the ramp above is spaced to allow it.
+    'hatch_cycle_list': [],
+    'mean_line': '#16181d',
+    'shadow_rgba': 'rgba(22, 24, 29, 0.06)',
+    'font_family_str': 'monospace',
+    'font_stack_list': list(_DESK_FIGURE_FONT_STACK_LIST),
+    'font_stack_str': _DESK_FIGURE_FONT_STACK_STR,
+    'prose_font_stack_str': _DESK_PROSE_FONT_STACK_STR,
+    'axis_style_str': 'minimal',
+}
+
+
 _VARIANT_OVERRIDE_DICT: dict[str, dict[str, object]] = {
     _BASE_VARIANT_NAME_STR: {},
     # Single reading column: sections stacked, hairline rules, no containers.
@@ -306,8 +407,11 @@ _VARIANT_OVERRIDE_DICT: dict[str, dict[str, object]] = {
     # Specimen sheet: provenance promoted from footer to masthead, numbered
     # plates instead of free-floating charts. Dense on purpose.
     'journal_spec': {**_JOURNAL_PALETTE_DICT, 'layout_str': 'spec'},
-    # White grid, grotesque sans, heavy rules, one red. Bench renders with this.
+    # White grid, grotesque sans, heavy rules, one red.
     'swiss': {**_SWISS_PALETTE_DICT, 'layout_str': 'document'},
+    # Trading-desk console: mono figures, sans prose, colour only for state.
+    # Bench renders with this.
+    'desk': {**_DESK_PALETTE_DICT, 'layout_str': 'document'},
     # Cyanotype drawing sheet: light lead on dark blue, monospace lettering.
     'blueprint': {**_BLUEPRINT_PALETTE_DICT, 'layout_str': 'document'},
 }
@@ -640,7 +744,7 @@ a {{
 '''
 
 
-def build_bench_theme_css(variant_name_str: str = 'swiss') -> str:
+def build_bench_theme_css(variant_name_str: str = 'desk') -> str:
     """Emit a signature variant's palette for the Bench control panel.
 
     Bench's stylesheet is written directly against the report's own token names
@@ -941,6 +1045,43 @@ for _monochrome_variant_name_str, _monochrome_source_palette_dict in (
     )
 
 
+def _build_cycle_asset_color_dict(
+        overlay_cycle_list: list[str],
+        light_color_str: str,
+        page_color_str: str,
+) -> dict[str, str]:
+    """Assign each named asset a hue from a variant's own overlay cycle.
+
+    Desk keeps muted composition hues rather than a grey ramp, so its weight
+    stacks stay readable at seven sleeves without borrowing the saturated
+    baseline asset colours — which would put a bright blue TLT next to a PASS
+    badge and break the rule that colour means state.
+
+    Ordering follows the baseline dict so an asset keeps the same hue across
+    runs instead of shifting when the set of held names changes.
+    """
+    cycle_asset_name_list = [
+        asset_name_str for asset_name_str in SIGNATURE_ASSET_COLOR_DICT
+        if asset_name_str not in ('CASH', 'DEFAULT')
+    ]
+    cycle_asset_color_dict: dict[str, str] = {}
+    for asset_idx_int, asset_name_str in enumerate(cycle_asset_name_list):
+        cycle_asset_color_dict[asset_name_str] = overlay_cycle_list[
+            asset_idx_int % len(overlay_cycle_list)
+        ]
+    # Cash is not an exposure, so it reads as near-empty; unknown names sit mid-ramp.
+    cycle_asset_color_dict['CASH'] = blend_hex_color_str(light_color_str, page_color_str, 0.62)
+    cycle_asset_color_dict['DEFAULT'] = light_color_str
+    return cycle_asset_color_dict
+
+
+_VARIANT_OVERRIDE_DICT['desk']['asset_color_dict'] = _build_cycle_asset_color_dict(
+    overlay_cycle_list=list(_DESK_PALETTE_DICT['overlay_cycle']),
+    light_color_str=str(_DESK_PALETTE_DICT['benchmark']),
+    page_color_str=str(_DESK_PALETTE_DICT['page']),
+)
+
+
 def _build_palette_root_css(
         palette_dict: dict[str, object],
         figure_font_stack_str: str,
@@ -970,6 +1111,10 @@ def _build_palette_root_css(
     --color-profit-dark: {palette_dict["profit_dark"]};
     --color-loss: {palette_dict["loss"]};
     --color-loss-dark: {palette_dict["loss_dark"]};
+    --color-accent: {palette_dict["accent"]};
+    --color-accent-dark: {palette_dict["accent_dark"]};
+    --color-warning: {palette_dict["warning"]};
+    --color-warning-dark: {palette_dict["warning_dark"]};
     --color-shadow: {palette_dict["shadow_rgba"]};
     --font-figure: {figure_font_stack_str};
     --font-prose: {prose_font_stack_str};
@@ -1473,6 +1618,10 @@ def build_report_css() -> str:
     --color-profit-dark: {signature_palette_dict["profit_dark"]};
     --color-loss: {signature_palette_dict["loss"]};
     --color-loss-dark: {signature_palette_dict["loss_dark"]};
+    --color-accent: {signature_palette_dict["accent"]};
+    --color-accent-dark: {signature_palette_dict["accent_dark"]};
+    --color-warning: {signature_palette_dict["warning"]};
+    --color-warning-dark: {signature_palette_dict["warning_dark"]};
     --color-shadow: {signature_palette_dict["shadow_rgba"]};
     /* The analyzer appendix sets figure and prose type on tiles, tables and
        verdict rows. Without these the whole declaration is void and the text

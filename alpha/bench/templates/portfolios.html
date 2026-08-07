@@ -100,10 +100,10 @@
           </td>
           <td class="num">{{ p.pod_tuple|length }}</td>
           <td class="num">{% if p.capital_float is not none %}${{ '{:,.0f}'.format(p.capital_float) }}{% else %}&mdash;{% endif %}</td>
-          <td class="num">{% if v.ann_return_float is not none %}{{ '%.1f%%'|format(v.ann_return_float) }}{% else %}&mdash;{% endif %}</td>
-          <td class="num">{% if v.sharpe_float is not none %}{{ '%.2f'|format(v.sharpe_float) }}{% else %}&mdash;{% endif %}</td>
-          <td class="num">{% if v.max_drawdown_float is not none %}{{ '%.1f%%'|format(v.max_drawdown_float) }}{% else %}&mdash;{% endif %}</td>
-          <td class="num">{% if v.mar_float is not none %}{{ '%.2f'|format(v.mar_float) }}{% else %}&mdash;{% endif %}</td>
+          <td class="num">{{ v.ann_return_float|pct }}</td>
+          <td class="num">{{ v.sharpe_float|ratio }}</td>
+          <td class="num">{{ v.max_drawdown_float|pct }}</td>
+          <td class="num">{{ v.mar_float|ratio }}</td>
           <td class="mono muted-2">{{ v.window_str or '—' }}</td>
           <td class="muted-2">
             {# A book with runs but no recorded return still has runs: the count
@@ -129,7 +129,7 @@
               <form class="inline" method="post" action="{{ url_for('run_portfolio_api_fn') }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
                 <input type="hidden" name="config_rel_path" value="{{ p.rel_path_str }}">
-                <button class="btn btn-sm {{ 'btn-primary' if v.is_stale_bool or not v.has_run_bool }}" {{ 'disabled' if p.error_str }}>Build</button>
+                <button class="btn btn-sm btn-run {{ 'is-due' if v.is_stale_bool or not v.has_run_bool }}" {{ 'disabled' if p.error_str }}>Build</button>
               </form>
             </div>
           </td>

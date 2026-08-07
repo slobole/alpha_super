@@ -59,21 +59,21 @@
           <td class="muted">CAGR</td>
           {% for view in column_view_list %}
           {% set sm = view.vanilla_run.summary_dict if view.vanilla_run else {} %}
-          <td class="num {{ 'tone-pos' if (sm.get('ann_return_pct') or 0) >= 0 else 'tone-neg' }}">{{ '%.2f%%'|format(sm.get('ann_return_pct')) if sm.get('ann_return_pct') is not none else '—' }}</td>
+          <td class="num {{ 'tone-pos' if (sm.get('ann_return_pct') or 0) >= 0 else 'tone-neg' }}">{{ sm.get('ann_return_pct')|pct }}</td>
           {% endfor %}
         </tr>
         <tr>
           <td class="muted">Sharpe</td>
           {% for view in column_view_list %}
           {% set sm = view.vanilla_run.summary_dict if view.vanilla_run else {} %}
-          <td class="num">{{ '%.2f'|format(sm.get('sharpe')) if sm.get('sharpe') is not none else '—' }}</td>
+          <td class="num">{{ sm.get('sharpe')|ratio }}</td>
           {% endfor %}
         </tr>
         <tr>
           <td class="muted">Max drawdown</td>
           {% for view in column_view_list %}
           {% set sm = view.vanilla_run.summary_dict if view.vanilla_run else {} %}
-          <td class="num tone-neg">{{ '%.2f%%'|format(sm.get('max_drawdown_pct')) if sm.get('max_drawdown_pct') is not none else '—' }}</td>
+          <td class="num tone-neg">{{ sm.get('max_drawdown_pct')|pct }}</td>
           {% endfor %}
         </tr>
         <tr>
