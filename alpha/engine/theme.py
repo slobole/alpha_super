@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 from cycler import cycler
@@ -140,42 +141,136 @@ _BASE_VARIANT_NAME_STR: str = 'current'
 # The rule that keeps this from drifting into decoration: a colour here always
 # encodes machine-readable state. If a value cannot be PASS/SKIP/FAIL or
 # navigable, it renders in ink.
-_DESK_FIGURE_FONT_STACK_LIST: list[str] = [
-    'Cascadia Mono', 'Consolas', 'DejaVu Sans Mono', 'monospace',
-]
-_DESK_FIGURE_FONT_STACK_STR: str = '"Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace'
 # Prose is a grotesque, figures are mono. The split is the point: an identifier
 # like a module path or a price is a figure and must align in a column; a
-# heading is language and should not.
+# heading is language and should not. IBM Plex Sans and IBM Plex Mono are
+# siblings from one design, so the split reads as deliberate rather than as two
+# unrelated fonts colliding.
 #
-# Both stacks are deliberately restricted to faces that ship with the OS. A
-# webfont would render the console beautifully and then render every saved
-# report artifact differently the moment it is opened without network — and
-# those artifacts are the evidence. Segoe UI is the institutional sans on
-# Windows; Cascadia Mono is the softest mono available there, which matters
-# because this face carries every number in the console.
+# These are vendored under alpha/assets/fonts (SIL OFL) and shipped with the
+# artifact — see that directory's README for why. The short version: a report
+# must look the same on the machine that wrote it and the machine that reads
+# it, and neither a CDN nor an OS font can promise that.
 #
-# *** UI*** "Inter" used to sit second in this stack. It is not installed, so
-# it never applied — it only misled anyone reading the theme into thinking the
-# console rendered in a face it never had. Do not list a font here that is not
-# actually resolvable offline.
-# *** UI*** Two faces were tried here and removed after measuring, not after
-# guessing. Do not re-add either without re-measuring:
+# The OS names after Plex are the offline fallback if the woff2 fails to load.
 #
-#   * "Inter" — not installed. It sat second in this stack and never applied;
-#     it only misled anyone reading the theme.
+# *** UI*** Two faces were tried in this stack and removed after MEASURING, not
+# after guessing. Do not re-add either without re-measuring:
+#
+#   * "Inter" — not installed on the target machine. It sat second in the stack
+#     and never applied; it only misled anyone reading the theme.
 #   * "Segoe UI Variable" (Text / Display / bare) — installed at the OS level
 #     and enumerable through GDI, but NOT addressable from Chromium under any
 #     name form. Measured against a deliberately bogus family, every variant
-#     produced identical metrics, i.e. it silently fell through. It would have
-#     been three dead names at the front of the stack.
+#     produced identical text metrics, i.e. it silently fell through.
 #
-# A font belongs in this stack only if it resolves in the browser that renders
-# the console. Verify with a canvas width measurement against a nonsense family
+# A font belongs in a stack only if it resolves in the browser that renders the
+# console. Verify with a canvas width measurement against a nonsense family
 # name — checking the OS font list is not sufficient.
-_DESK_PROSE_FONT_STACK_STR: str = (
-    '"Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif'
+_DESK_FIGURE_FONT_STACK_LIST: list[str] = [
+    'IBM Plex Mono', 'Cascadia Mono', 'Consolas', 'DejaVu Sans Mono', 'monospace',
+]
+_DESK_FIGURE_FONT_STACK_STR: str = (
+    '"IBM Plex Mono", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace'
 )
+_DESK_PROSE_FONT_STACK_STR: str = (
+    '"IBM Plex Sans", "Segoe UI", system-ui, -apple-system, '
+    '"Helvetica Neue", Arial, sans-serif'
+)
+
+
+# Vendored faces, in the order they are declared. Each entry is
+# (family, weight-or-range, filename).
+VENDORED_FONT_FACE_TUPLE: tuple[tuple[str, str, str], ...] = (
+    # Sans is a variable font: one file covers the whole weight axis, so it is
+    # declared with a range rather than once per weight.
+    ('IBM Plex Sans', '100 700', 'IBMPlexSans-latin.woff2'),
+    ('IBM Plex Mono', '400', 'IBMPlexMono-400-latin.woff2'),
+    ('IBM Plex Mono', '500', 'IBMPlexMono-500-latin.woff2'),
+)
+VENDORED_FONT_DIR_PATH = Path(__file__).resolve().parents[1] / 'assets' / 'fonts'
+
+# TrueType copies of the same faces, for matplotlib.
+#
+# *** UI*** These exist because matplotlib cannot read WOFF2. Without them the
+# charts silently fell back to whatever mono the OS had while the surrounding
+# HTML rendered in Plex — two fonts inside one document, which is worse than
+# having picked neither. They are build-time assets: matplotlib rasterises to
+# PNG, so unlike the woff2 files these are never embedded in an artifact.
+_MATPLOTLIB_FONT_FILE_TUPLE: tuple[str, ...] = (
+    'IBMPlexSans-Regular.ttf',
+    'IBMPlexMono-Regular.ttf',
+)
+
+
+def _register_vendored_matplotlib_fonts() -> None:
+    """Make the vendored faces resolvable by name in matplotlib.
+
+    Missing files are skipped rather than raised on: a chart drawn in a
+    fallback face is still correct evidence, and a research run must not die
+    because an asset is absent.
+    """
+    from matplotlib import font_manager
+
+    for font_file_name_str in _MATPLOTLIB_FONT_FILE_TUPLE:
+        font_path = VENDORED_FONT_DIR_PATH / font_file_name_str
+        if not font_path.is_file():
+            continue
+        try:
+            font_manager.fontManager.addfont(str(font_path))
+        except (OSError, RuntimeError):
+            continue
+
+
+_register_vendored_matplotlib_fonts()
+
+
+def build_font_face_css(url_builder_fn) -> str:
+    """Emit @font-face rules for the vendored faces.
+
+    ``url_builder_fn`` maps a filename to whatever the consuming surface needs
+    as the src URL — a served path for the console, a base64 data URI for a
+    saved report. The declarations are otherwise identical, so the two surfaces
+    cannot drift in weight, style or family name.
+
+    *** UI*** font-display is 'block', not 'swap'. These pages are dense
+    numeric tables; a swap would render them once in a fallback metric and then
+    reflow every column the moment the real face arrives. The files are local
+    and tens of kilobytes, so the block period is imperceptible.
+    """
+    rule_str_list: list[str] = []
+    for family_str, weight_str, file_name_str in VENDORED_FONT_FACE_TUPLE:
+        rule_str_list.append(
+            "@font-face{{font-family:'{0}';font-style:normal;font-weight:{1};"
+            "font-display:block;src:url({2}) format('woff2');}}".format(
+                family_str, weight_str, url_builder_fn(file_name_str)
+            )
+        )
+    return '\n'.join(rule_str_list)
+
+
+def build_embedded_font_face_css() -> str:
+    """@font-face rules with the woff2 inlined as base64 data URIs.
+
+    This is what makes a saved report self-contained: it carries its own type
+    and renders identically with no network and no particular OS. Missing files
+    degrade to the OS fallback in the stack rather than raising — a report that
+    renders in the wrong face is still readable evidence, one that fails to
+    build is not.
+    """
+    import base64
+
+    def data_uri_str(file_name_str: str) -> str:
+        font_path = VENDORED_FONT_DIR_PATH / file_name_str
+        try:
+            encoded_str = base64.b64encode(font_path.read_bytes()).decode('ascii')
+        except OSError:
+            return ''
+        return f'data:font/woff2;base64,{encoded_str}'
+
+    return build_font_face_css(data_uri_str)
+
+
 _DESK_PALETTE_DICT: dict[str, object] = {
     # Cool near-black on pure white. Not #000: full black on white vibrates
     # under projection, which is where this design gets used.
@@ -1422,6 +1517,12 @@ td {
 
 
 def build_report_css() -> str:
+    # Every report carries its own type. Prepended here rather than in each
+    # layout branch so no layout can ship without it.
+    return build_embedded_font_face_css() + '\n' + _build_report_body_css()
+
+
+def _build_report_body_css() -> str:
     layout_str = str(SIGNATURE_PALETTE_DICT['layout_str'])
 
     if layout_str in ('document', 'spec'):

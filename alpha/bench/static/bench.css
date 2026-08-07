@@ -33,8 +33,8 @@
   --color-warning-wash: #fef7e0;
   --color-loss-wash: #fce8e6;
   --color-benchmark-dark: #71767d;
-  --font-figure: "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
-  --font-prose: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --font-figure: "IBM Plex Mono", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
+  --font-prose: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
   font-synthesis: none;
   /* Every figure in the console sits in a column that has to align, whether it
      is set in the mono or in the sans. */

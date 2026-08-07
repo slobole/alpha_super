@@ -31,6 +31,7 @@ from flask import (
     render_template,
     request,
     send_file,
+    send_from_directory,
     url_for,
 )
 
@@ -45,7 +46,12 @@ from alpha.bench import (
 )
 from alpha.bench.jobs import JobManager
 from alpha.engine.stress_test import supported_stress_test_strategy_key_list
-from alpha.engine.theme import build_bench_theme_css
+from alpha.engine.theme import (
+    VENDORED_FONT_DIR_PATH,
+    VENDORED_FONT_FACE_TUPLE,
+    build_bench_theme_css,
+    build_font_face_css,
+)
 
 
 REPO_ROOT_PATH = Path(__file__).resolve().parents[2]
@@ -189,7 +195,13 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             "csrf_token_str": flask_app_obj.config["bench_token_str"],
             # Colour and type tokens for the console, derived from the same
             # signature palette the embedded reports render with.
-            "bench_theme_css_str": build_bench_theme_css(BENCH_VARIANT_STR),
+            "bench_theme_css_str": (
+                build_font_face_css(
+                    lambda file_name_str: url_for("font_fn", file_name_str=file_name_str)
+                )
+                + "\n"
+                + build_bench_theme_css(BENCH_VARIANT_STR)
+            ),
             "active_density_str": _active_density_str(),
             "density_label_dict": BENCH_DENSITY_LABEL_DICT,
         }
@@ -624,6 +636,27 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
         except ValueError as exception_obj:
             abort(400, description=str(exception_obj))
         return redirect(url_for("portfolios_page_fn"))
+
+    @flask_app_obj.route("/fonts/<file_name_str>")
+    def font_fn(file_name_str: str) -> Response:
+        """Serve one vendored font face.
+
+        The filename is checked against the declared face list rather than
+        sanitised, so this route can only ever return one of three known files
+        — no traversal to reason about, and a typo fails as 404 instead of
+        reaching the filesystem.
+        """
+        allowed_file_name_set = {
+            face_file_name_str for _, _, face_file_name_str in VENDORED_FONT_FACE_TUPLE
+        }
+        if file_name_str not in allowed_file_name_set:
+            abort(404)
+        return send_from_directory(
+            VENDORED_FONT_DIR_PATH,
+            file_name_str,
+            mimetype="font/woff2",
+            max_age=60 * 60 * 24 * 365,
+        )
 
     @flask_app_obj.route("/density/<density_name_str>")
     def set_density_fn(density_name_str: str) -> Response:
