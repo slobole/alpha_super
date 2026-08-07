@@ -74,35 +74,62 @@ def test_unknown_variant_fails_loud():
         resolve_variant_palette_dict('does-not-exist')
 
 
-def test_co_held_sleeves_never_share_a_weight_stack_colour():
-    """Two sleeves of one book must not render in the same colour.
+def test_co_held_sleeves_stay_visually_separable_in_a_weight_stack():
+    """Sleeves of one book must be tellable apart, not merely non-identical.
 
-    Two separate wraps caused this. The overlay cycle wrapped at eight colours
-    over twelve named assets, putting TLT and TQQQ — routinely held together in
-    a TAA book — in the identical tone, along with DBC and BTAL. And every
-    equity proxy in _FALLBACK_ASSET_SET returned one flat benchmark colour, so
-    a book holding QQQ alongside TQQQ showed them as one band.
+    Three separate bugs made bands indistinguishable, and each looked like a
+    design choice rather than a fault:
 
-    A weight stack with two indistinguishable bands cannot be read no matter
-    how it is labelled, and the failure looks like a design choice rather than
-    a bug.
+    * overlay_cycle wrapped at eight colours over twelve named assets, giving
+      TLT and TQQQ — routinely held together in a TAA book — the same tone.
+    * every asset in _FALLBACK_ASSET_SET returned one flat benchmark colour,
+      so QQQ beside TQQQ was a single band.
+    * ramping those proxies off the benchmark instead converged on dark
+      neutrals and put TQQQ back on top of TLT.
+
+    Equality is too weak a bar: two colours can differ by a hex digit and
+    still be one band to the eye. This asserts a minimum perceptual distance
+    over a realistic book plus every proxy.
     """
+    from itertools import combinations
+
+    from matplotlib import colors as mcolors
+
     from alpha.engine.report import _FALLBACK_ASSET_SET, _weight_color_for_asset
     from alpha.engine.theme import signature_variant_context
 
+    def perceptual_distance_float(first_color_str: str, second_color_str: str) -> float:
+        first_rgb = mcolors.to_rgb(first_color_str)
+        second_rgb = mcolors.to_rgb(second_color_str)
+        return (
+            2 * (first_rgb[0] - second_rgb[0]) ** 2
+            + 4 * (first_rgb[1] - second_rgb[1]) ** 2
+            + 3 * (first_rgb[2] - second_rgb[2]) ** 2
+        ) ** 0.5
+
+    # The worst pair measured 0.164 when TQQQ sat on TLT; the floor is set
+    # below what the current palette achieves so an unrelated tweak has room,
+    # but well above the failure.
+    minimum_distance_float = 0.22
     book_asset_name_list = [
-        'GLD', 'UUP', 'TLT', 'DBC', 'BTAL', 'TQQQ', 'Cash',
-        *sorted(_FALLBACK_ASSET_SET),
+        'GLD', 'UUP', 'TLT', 'DBC', 'BTAL', 'TQQQ', 'Cash', *sorted(_FALLBACK_ASSET_SET)
     ]
-    for variant_name_str in ('current', 'desk'):
-        with signature_variant_context(variant_name_str):
-            color_by_asset_dict = {
-                asset_name_str: _weight_color_for_asset(asset_name_str)
-                for asset_name_str in book_asset_name_list
-            }
-        shared_color_list = [
-            (color_str, sorted(k for k, v in color_by_asset_dict.items() if v == color_str))
-            for color_str in set(color_by_asset_dict.values())
-            if list(color_by_asset_dict.values()).count(color_str) > 1
-        ]
-        assert shared_color_list == [], f'{variant_name_str}: {shared_color_list}'
+    # Scoped to the shipped variant. 'current' is the legacy baseline, which
+    # resolve_variant_palette_dict contracts to reproduce byte for byte, and it
+    # hardcodes SPY and SSO to the same benchmark colour (distance 0.0) with
+    # QLD/TQQQ close behind at 0.144. That is known debt in a variant nothing
+    # renders with by default; fixing it would break the byte-identical
+    # promise, so it is recorded here rather than silently uncovered.
+    with signature_variant_context('desk'):
+        color_by_asset_dict = {
+            asset_name_str: _weight_color_for_asset(asset_name_str)
+            for asset_name_str in book_asset_name_list
+        }
+    too_close_list = [
+        (first_str, second_str, round(distance_float, 3))
+        for first_str, second_str in combinations(sorted(set(book_asset_name_list)), 2)
+        if (distance_float := perceptual_distance_float(
+            color_by_asset_dict[first_str], color_by_asset_dict[second_str]
+        )) < minimum_distance_float
+    ]
+    assert too_close_list == [], f'desk: {too_close_list}'

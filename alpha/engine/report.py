@@ -367,22 +367,17 @@ def _weight_color_for_asset(asset_name_str: str) -> str:
     variant maps assets onto its own grey ramp instead of leaving a blue TLT
     and a gold GLD inside an otherwise colourless report.
     """
+    # *** UI*** No benchmark override here. Equity proxies (SPY, SSO, QQQ,
+    # QLD, TQQQ, UPRO) used to all return the flat benchmark colour, which made
+    # every one of them the same band in a weight stack. Ramping them off the
+    # benchmark instead was no better: it converged on dark neutrals and landed
+    # TQQQ on top of TLT.
+    #
+    # In a weight stack an equity proxy is a HOLDING, not the benchmark — this
+    # helper only ever colours weight charts — so it takes its own entry from
+    # the asset palette like every other sleeve. Measured pairwise separation
+    # of a real TAA book improves from 0.164 to 0.229 by dropping the override.
     normalized_asset_name_str = str(asset_name_str).upper()
-    if normalized_asset_name_str in _FALLBACK_ASSET_SET:
-        # These are all equity-beta proxies, so they share the benchmark hue —
-        # that relationship is the point.
-        #
-        # *** UI*** But they must not share the same *shade*. A book holding
-        # QQQ alongside TQQQ, or SPY alongside SSO, is ordinary, and returning
-        # one flat colour made those two sleeves indistinguishable in the same
-        # weight stack. Each proxy takes its own step along the benchmark-to-ink
-        # ramp: same family, still separable.
-        proxy_index_int = sorted(_FALLBACK_ASSET_SET).index(normalized_asset_name_str)
-        return blend_hex_color_str(
-            str(SIGNATURE_PALETTE_DICT['benchmark']),
-            str(SIGNATURE_PALETTE_DICT['ink']),
-            proxy_index_int / max(len(_FALLBACK_ASSET_SET) - 1, 1) * 0.6,
-        )
     active_asset_color_dict = SIGNATURE_PALETTE_DICT['asset_color_dict']
     return active_asset_color_dict.get(
         normalized_asset_name_str,
@@ -3374,35 +3369,48 @@ def _composition_weights_chart_b64(weights_df) -> str | None:
         )
         axis_obj.grid(axis='y', alpha=1.0)
 
-        # Top band first, so the label column reads in the same order as the
-        # bands it names.
-        label_name_list = list(reversed(active_column_name_list))
-        # A band's own colour is chosen to sit inside a stack, not to be read
-        # as text on white. Cash and the palest sleeves come out barely legible
-        # as a label, so anything too light for body text is darkened toward
-        # ink until it carries. The hue is preserved, so the label still points
-        # at its band.
-        label_color_list = [
-            _legible_label_color_str(band_color_str)
-            for band_color_str in reversed(weight_color_list)
+        # A swatch legend, not edge labels.
+        #
+        # *** UI*** Two positional schemes were tried and both failed on this
+        # data. Anchoring each label to its sleeve's final height collapses six
+        # of seven onto the baseline, because a rotating book ends most sleeves
+        # at zero. Spreading them evenly instead detaches them from the bands
+        # entirely — the labels then sit at heights that name nothing, which
+        # looks like labelling while telling the reader nothing true.
+        #
+        # When the bands move this much, no position can carry the mapping, so
+        # the swatch does. Each entry repeats its band's fill and hatch exactly,
+        # and carries the sleeve's current weight — which is what lets the eye
+        # find the band it names at the chart's right edge.
+        legend_handle_list = [
+            matplotlib.patches.Patch(
+                facecolor=weight_color_list[column_index_int],
+                edgecolor=page_color_str,
+                linewidth=0.8,
+                hatch='////',
+                alpha=0.95,
+                label='{0}  {1:.0f}%'.format(
+                    _short_chart_label_str(active_column_name_list[column_index_int]),
+                    float(weight_value_list[column_index_int][-1]) * 100.0,
+                ),
+            )
+            # Top band first, so the legend reads in the same order as the
+            # stack it describes.
+            for column_index_int in reversed(range(len(active_column_name_list)))
         ]
-        label_count_int = len(label_name_list)
-        for label_index_int, label_name_str in enumerate(label_name_list):
-            label_y_float = (
-                1.0 - (label_index_int + 0.5) / label_count_int
-                if label_count_int > 1 else 0.5
-            )
-            axis_obj.annotate(
-                _short_chart_label_str(label_name_str),
-                xy=(1.012, label_y_float),
-                xycoords=('axes fraction', 'axes fraction'),
-                va='center',
-                ha='left',
-                fontsize=7.5,
-                fontweight='medium',
-                color=label_color_list[label_index_int],
-                annotation_clip=False,
-            )
+        legend_obj = axis_obj.legend(
+            handles=legend_handle_list,
+            loc='center left',
+            bbox_to_anchor=(1.008, 0.5),
+            frameon=False,
+            handlelength=1.1,
+            handleheight=1.1,
+            labelspacing=0.5,
+            fontsize=7.5,
+            borderaxespad=0.0,
+        )
+        for legend_text_obj in legend_obj.get_texts():
+            legend_text_obj.set_color(SIGNATURE_PALETTE_DICT['ink'])
 
         figure_obj.autofmt_xdate()
         figure_obj.tight_layout()

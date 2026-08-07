@@ -359,10 +359,20 @@ _DESK_PALETTE_DICT: dict[str, object] = {
     # book — in the identical colour, along with DBC/BTAL. Two bands of one
     # stack rendering the same made the chart unreadable no matter how it was
     # labelled. _build_cycle_asset_color_dict asserts there is no wrap.
+    # *** UI*** Generated, not hand-picked, and the constraint is measurable:
+    # twelve muted tones whose worst pairwise perceptual distance is 0.264.
+    #
+    # Hand-tuning kept failing. Eight colours wrapped onto twelve assets; the
+    # extended hand-written set still put SPY on TLT at 0.143 and GLD on UPRO
+    # at 0.156. Twelve tones cannot all be earth-and-slate AND mutually
+    # separable — that is a real tension, not a tuning miss — so this walks
+    # hue evenly at saturation 0.22 with alternating lightness, which is the
+    # lowest saturation that clears the 0.22 floor the test enforces.
+    # tests/test_theme.py pins it.
     'overlay_cycle': [
-        '#3f5a63', '#a8845c', '#6b7f6a', '#c4b39a',
-        '#4a6670', '#8b6f4e', '#9aa5a0', '#d8cdb8',
-        '#7e94a6', '#b5906b', '#566b4f', '#a9b3bd',
+        '#5a6943', '#8db388', '#5b8f70', '#436965',
+        '#88a2b3', '#5b608f', '#524369', '#af88b3',
+        '#8f5b7a', '#694347', '#b39988', '#8f895b',
     ],
     # Weight stacks are hatched as well as coloured. Seven adjacent muted
     # tones are hard to tell apart at the point a band narrows to a few pixels,
