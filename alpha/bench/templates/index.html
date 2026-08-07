@@ -24,7 +24,10 @@
 </section>
 
 <div class="catalog-toolbar" id="filter-bar">
-  <input id="search" class="search" type="text" placeholder="Search module or family…" autocomplete="off">
+  <label class="search-box">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="7.2" cy="7.2" r="4.6"/><path d="m10.6 10.6 3 3"/></svg>
+    <input id="search" class="search" type="text" placeholder="Search module or family…" autocomplete="off">
+  </label>
 
   <div class="toolbar-group">
     <span class="toolbar-group-label">Maturity</span>
@@ -99,9 +102,13 @@
            reachable on hover rather than being dropped. #}
         <td class="catalog-family"><span title="{{ s.subcategory_label_str or s.category_label_str }}">{{ s.category_code_str }}</span></td>
         <td class="muted">{{ card.latest_vanilla_run.display_timestamp_str[:16] if card.latest_vanilla_run else '—' }}</td>
-        <td class="num {{ 'tone-pos' if (sm.get('ann_return_pct') or 0) >= 0 else 'tone-neg' }}">{{ sm.get('ann_return_pct')|signed_pct }}</td>
+        {# Metrics are ink. Colour is reserved for state (PASS/SKIP/FAIL, maturity,
+           selection); tinting every return green and every drawdown red spends
+           the whole budget on values that are merely negative by definition —
+           a max drawdown is always negative, so red carries no information. #}
+        <td class="num">{{ sm.get('ann_return_pct')|signed_pct }}</td>
         <td class="num">{{ sm.get('sharpe')|ratio }}</td>
-        <td class="num tone-neg">{{ sm.get('max_drawdown_pct')|pct }}</td>
+        <td class="num">{{ sm.get('max_drawdown_pct')|pct }}</td>
         <td class="num">{{ sm.get('trade_count')|count }}</td>
         <td>
           {# A filled mark means a saved report exists for that analyzer; a

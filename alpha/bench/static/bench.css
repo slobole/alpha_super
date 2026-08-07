@@ -49,7 +49,7 @@
    in absolute px on purpose. */
 :root {
   --density-scale: 1;
-  --row-pad-y: calc(7px * var(--density-scale));
+  --row-pad-y: calc(10px * var(--density-scale));
   --stat-value-size: 1.32rem;
 }
 :root[data-density="present"] {
@@ -640,10 +640,11 @@ a { color: inherit; text-decoration: none; }
 /* ── buttons ───────────────────────────────────────────────────────────── */
 
 .btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 5px 11px; border-radius: 0;
-  font-size: 0.62rem; font-weight: 500;
-  text-transform: uppercase; letter-spacing: 0.11em;
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 15px; border-radius: 3px;
+  font-family: var(--font-prose);
+  font-size: 0.84rem; font-weight: 500;
+  letter-spacing: 0.005em;
   cursor: pointer;
   background: none; color: var(--color-ink);
   border: 1px solid var(--color-border);
@@ -655,7 +656,7 @@ a { color: inherit; text-decoration: none; }
 .btn-gold { border: 1.5px solid var(--color-ink); }
 .btn-ghost { border-color: transparent; text-decoration: underline; text-underline-offset: 3px; }
 .btn-ghost:hover { border-color: transparent; color: var(--color-ink); }
-.btn-sm { padding: 3px 8px; font-size: 0.58rem; }
+.btn-sm { padding: 5px 10px; font-size: 0.76rem; }
 /* Launches a background job: spends minutes of compute and writes a new
    artifact. Navigation buttons sit right beside these and used to carry the
    identical solid-ink treatment, so "open the report I already have" and "go
@@ -1727,8 +1728,8 @@ kbd {
 .catalog-title {
   margin: 6px 0 0;
   font-family: var(--font-prose);
-  font-size: clamp(1.5rem, 2.4vw, 2rem);
-  font-weight: 650;
+  font-size: clamp(1.7rem, 2.8vw, 2.3rem);
+  font-weight: 700;
   letter-spacing: -.02em;
   line-height: 1.1;
 }
@@ -1764,7 +1765,7 @@ kbd {
 }
 .catalog-stat-band b {
   font-family: var(--font-figure);
-  font-size: 1.65rem;
+  font-size: 1.85rem;
   font-weight: 400;
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -1772,38 +1773,80 @@ kbd {
 .catalog-toolbar {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 16px;
   flex-wrap: wrap;
-  padding: 9px 12px;
+  padding: 11px 13px;
   border: 1px solid var(--color-border);
   border-radius: 3px;
   margin-bottom: 10px;
 }
-.catalog-toolbar .search { flex: 1 1 260px; min-width: 200px; margin: 0; }
+/* Bordered field with its own magnifier, as in the mockup. The console's
+   default .search is a bare underline, which reads as part of the page rather
+   than as a control you can put a cursor in. */
+.search-box {
+  flex: 1 1 300px;
+  min-width: 210px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 11px;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  color: var(--color-muted);
+}
+.search-box:focus-within { border-color: var(--color-accent); }
+.search-box svg { width: 14px; height: 14px; flex: none; }
+.catalog-toolbar .search {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 9px 0;
+  border: 0;
+  font-family: var(--font-prose);
+  font-size: .86rem;
+}
 .toolbar-group { display: flex; align-items: center; gap: 8px; }
 .toolbar-recent { margin-left: auto; }
 .toolbar-group-label {
   color: var(--color-muted);
   font-family: var(--font-figure);
-  font-size: .6rem;
+  font-size: .64rem;
   letter-spacing: .12em;
   text-transform: uppercase;
 }
-.toolbar-select {
-  padding: 5px 8px;
+/* Inside the catalog toolbar the maturity filters are segmented pills, not the
+   underlined text chips used elsewhere: they sit beside a bordered field and a
+   bordered select, and an underline would not read as the same class of
+   control. */
+.catalog-toolbar .filter-chip {
+  padding: 6px 12px;
   border: 1px solid var(--color-border);
-  border-radius: 2px;
+  border-bottom-width: 1px;
+  border-radius: 3px;
+  font-size: .66rem;
+  color: var(--color-muted);
+}
+.catalog-toolbar .filter-chip:hover { border-color: var(--color-muted); color: var(--color-ink); }
+.catalog-toolbar .filter-chip.active {
+  border-color: var(--color-accent);
+  background: var(--color-accent-wash);
+  color: var(--color-accent-dark);
+}
+.toolbar-select {
+  padding: 7px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
   background: var(--color-page);
   color: var(--color-ink);
   font-family: var(--font-figure);
-  font-size: .72rem;
+  font-size: .76rem;
 }
 .catalog-panel { border-radius: 3px; }
 .catalog-table { font-family: var(--font-figure); }
-.catalog-table th { font-size: .62rem; letter-spacing: .09em; }
-.catalog-table td { font-size: .74rem; padding-top: var(--row-pad-y); padding-bottom: var(--row-pad-y); }
+.catalog-table th { font-size: .68rem; letter-spacing: .09em; }
+.catalog-table td { font-size: .84rem; padding-top: var(--row-pad-y); padding-bottom: var(--row-pad-y); }
 .catalog-name { white-space: nowrap; }
-.catalog-family { color: var(--color-muted); font-size: .7rem; }
+.catalog-family { color: var(--color-muted); font-size: .78rem; }
 .catalog-row { cursor: pointer; }
 .catalog-row:hover { background: var(--color-neutral); }
 /* Selection is an outline rather than a fill: a filled row would compete with
@@ -1825,11 +1868,11 @@ kbd {
    colour separates cleanly at a glance and keeps the row quiet. */
 .maturity {
   display: inline-block;
-  min-width: 84px;
-  padding: 3px 8px;
+  min-width: 94px;
+  padding: 4px 9px;
   border-radius: 3px;
   font-family: var(--font-figure);
-  font-size: .58rem;
+  font-size: .64rem;
   letter-spacing: .08em;
   text-align: center;
 }
@@ -1837,10 +1880,14 @@ kbd {
 .maturity-pm { background: var(--color-warning-wash); color: var(--color-warning-dark); }
 .maturity-research { background: var(--color-neutral); color: var(--color-muted); }
 
+/* Right-aligned so the V/C/T/R/S header codes land directly above the marks
+   they label. Left-aligned, the header's "ANALYZERS" word pushed the codes
+   ~77px off from the column of marks beneath them. */
+.analyzer-head, .catalog-table td:last-child { text-align: right; }
 .analyzer-head { white-space: nowrap; }
-.analyzer-code-row { display: inline-flex; gap: 9px; margin-left: 11px; }
-.analyzer-code-row i { font-style: normal; width: 13px; text-align: center; opacity: .8; }
-.analyzer-marks { display: inline-flex; gap: 9px; }
+.analyzer-code-row { display: inline-flex; gap: 10px; margin-left: 12px; }
+.analyzer-code-row i { font-style: normal; width: 15px; text-align: center; opacity: .8; }
+.analyzer-marks { display: inline-flex; gap: 10px; }
 /* *** UI*** These marks are monochrome on purpose, and it is not an oversight.
    The catalog answers "does saved evidence exist?" — a two-state question, so
    it gets a two-state mark: inked check or hollow ring. Verdict colour
@@ -1849,15 +1896,19 @@ kbd {
    passes when several may be stale, failed or skipped. */
 .analyzer-mark {
   font-style: normal;
-  width: 13px;
+  width: 15px;
   text-align: center;
-  font-size: .8rem;
+  font-size: .92rem;
   line-height: 1;
   color: var(--color-ink);
 }
 .analyzer-mark.is-absent { color: var(--color-border); }
 
 .catalog-footer-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  background: var(--color-page);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1909,7 +1960,7 @@ kbd {
   background: var(--color-page);
   color: var(--color-ink);
 }
-.bench-shell { grid-template-columns: 148px minmax(0, 1fr); background: var(--color-page); }
+.bench-shell { grid-template-columns: 194px minmax(0, 1fr); background: var(--color-page); }
 .bench-sidebar {
   padding: 14px 10px 12px;
   border-right-color: var(--color-border);
@@ -1921,18 +1972,18 @@ kbd {
   gap: 7px;
   border-bottom-color: var(--color-border);
   font-family: var(--font-figure);
-  font-size: .68rem;
-  letter-spacing: .035em;
+  font-size: .84rem;
+  letter-spacing: .045em;
 }
-.bench-brand-mark { width: 21px; height: 21px; font-size: .58rem; }
+.bench-brand-mark { width: 25px; height: 25px; font-size: .66rem; }
 .sidebar-nav { margin-top: 13px; gap: 1px; }
 .sidebar-nav a {
-  min-height: calc(34px * var(--density-scale));
-  padding: 0 7px;
-  grid-template-columns: 21px 1fr auto;
+  min-height: calc(40px * var(--density-scale));
+  padding: 0 10px;
+  grid-template-columns: 25px 1fr auto;
   border-left-width: 2px;
   color: var(--color-muted);
-  font-size: .74rem;
+  font-size: .9rem;
 }
 .sidebar-nav a:hover { color: var(--color-ink); background: var(--color-neutral); }
 .sidebar-nav a.active {
@@ -1941,8 +1992,8 @@ kbd {
   background: var(--color-neutral);
 }
 .sidebar-nav a.active .sidebar-icon { color: var(--color-accent); }
-.sidebar-icon { font-size: .78rem; }
-.sidebar-foot { padding: 11px 7px 0; border-top-color: var(--color-border); font-size: .6rem; }
+.sidebar-icon { font-size: .9rem; }
+.sidebar-foot { padding: 13px 10px 0; border-top-color: var(--color-border); font-size: .66rem; }
 .sidebar-foot small { font-size: .58rem; }
 .bench-main .system-topbar {
   min-height: calc(44px * var(--density-scale));
@@ -1978,7 +2029,7 @@ kbd {
 }
 /* The sidebar icons are drawn, so they inherit the nav item's colour and stay
    optically the same size as the label beside them. */
-.sidebar-icon svg { width: 15px; height: 15px; display: block; }
+.sidebar-icon svg { width: 17px; height: 17px; display: block; }
 .topbar-clock {
   font-family: var(--font-figure);
   font-size: .7rem;
