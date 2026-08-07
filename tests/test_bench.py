@@ -783,6 +783,8 @@ def test_vanilla_native_view_has_all_mockup_sections(tmp_path, monkeypatch):
     assert view_obj.selected_tab.key_str == "statistics"
     assert "Statistics" in str(view_obj.selected_tab.html_markup)
     assert "Conditional Beta" in str(view_obj.selected_tab.html_markup)
+    assert "plate-full-equity" in str(view_obj.selected_tab.html_markup)
+    assert "plate-full-year-chart" in str(view_obj.selected_tab.html_markup)
     assert "Open Trades" not in str(view_obj.selected_tab.html_markup)
     overview_tab_obj = next(tab_obj for tab_obj in view_obj.tab_tuple if tab_obj.key_str == "overview")
     overview_html_str = str(overview_tab_obj.html_markup)
@@ -802,6 +804,65 @@ def test_vanilla_native_view_has_all_mockup_sections(tmp_path, monkeypatch):
     audit_tab_obj = next(tab_obj for tab_obj in view_obj.tab_tuple if tab_obj.key_str == "audit")
     assert "Audit &amp; provenance" in str(audit_tab_obj.html_markup)
     assert "strategies.demo" in str(audit_tab_obj.html_markup)
+
+
+def test_vanilla_saved_statistics_build_mockup_comparison_without_recomputing_report():
+    statistics_html_str = """
+    <div class="plate" id="plate-08"><h2>Performance Summary</h2>
+      <table><thead><tr><th>Metric</th><th>Strategy</th><th>$SPX</th></tr></thead>
+      <tbody>
+        <tr><td>Return (Ann.) [%]</td><td>23.77%</td><td>14.98%</td></tr>
+        <tr><td>Volatility (Ann.) [%]</td><td>17.32%</td><td>16.86%</td></tr>
+        <tr><td>Sharpe Ratio</td><td>1.32</td><td>0.91</td></tr>
+        <tr><td>Max. Drawdown [%]</td><td>-17.68%</td><td>-33.79%</td></tr>
+        <tr><td>Sortino Ratio</td><td>2.02</td><td>1.26</td></tr>
+        <tr><td>CVaR 95% (Daily) [%]</td><td>-2.63%</td><td>-2.54%</td></tr>
+      </tbody></table>
+    </div>
+    """
+
+    comparison_html_str = artifact_view._vanilla_comparison_html_str(statistics_html_str)
+
+    assert "Performance vs benchmark" in comparison_html_str
+    assert "CAGR (net)" in comparison_html_str
+    assert "$SPX" in comparison_html_str
+    assert "+8.79pp" in comparison_html_str
+    assert "+0.41" in comparison_html_str
+    assert "+16.11pp" in comparison_html_str
+    assert "-0.09pp" in comparison_html_str
+
+
+def test_vanilla_monthly_tables_build_mockup_year_table_from_saved_values():
+    header_html_str = "".join(
+        f"<th>{label_str}</th>"
+        for label_str in (
+            "Year", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul",
+            "Aug", "Sep", "Oct", "Nov", "Dec", "Year", "Vol", "Max DD", "Sharpe",
+        )
+    )
+    strategy_value_str_list = [
+        "2025", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12",
+        "25.48%", "11.6%", "-6.39%", "2.62",
+    ]
+    benchmark_value_str_list = [
+        "2025", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12",
+        "15.89%", "18.8%", "-18.7%", "0.97",
+    ]
+    strategy_row_html_str = "".join(f"<td>{value_str}</td>" for value_str in strategy_value_str_list)
+    benchmark_row_html_str = "".join(f"<td>{value_str}</td>" for value_str in benchmark_value_str_list)
+    monthly_html_str = (
+        f"<table><tr>{header_html_str}</tr><tr>{strategy_row_html_str}</tr></table>"
+        f"<table><tr>{header_html_str}</tr><tr>{benchmark_row_html_str}</tr></table>"
+    )
+
+    year_table_html_str = artifact_view._vanilla_year_table_html_str(monthly_html_str)
+
+    assert "Year by year" in year_table_html_str
+    assert "2025" in year_table_html_str
+    assert "25.48%" in year_table_html_str
+    assert "15.89%" in year_table_html_str
+    assert "+9.59pp" in year_table_html_str
+    assert "-6.39%" in year_table_html_str
 
 
 def test_vanilla_non_spec_report_falls_back_to_full_native_report(tmp_path, monkeypatch):
@@ -1375,7 +1436,7 @@ def test_strategy_workspace_exposes_all_analyzers_and_vanilla_depth(recording_cl
     ):
         assert section_str in html_str
     assert 'class="artifact-meta-grid"' in html_str
-    assert 'class="artifact-stat-strip"' in html_str
+    assert 'class="artifact-stat-strip artifact-stat-strip-vanilla"' in html_str
     assert 'class="artifact-report-stage"' in html_str
     assert html_str.index('class="artifact-report-stage"') < html_str.index(
         'class="research-tools"'

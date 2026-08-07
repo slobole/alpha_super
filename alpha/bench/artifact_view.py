@@ -26,9 +26,21 @@ _PLATE_START_RE = re.compile(
     r'(?=[^>]*\bid=["\'](plate-\d+)["\'])[^>]*>',
     re.IGNORECASE,
 )
+_PLATE_ID_ATTR_RE = re.compile(r'\bid=["\']plate-\d+["\']', re.IGNORECASE)
 _TITLE_RE = re.compile(r"<h1\b[^>]*>.*?</h1\s*>", re.IGNORECASE | re.DOTALL)
 _H2_RE = re.compile(r"<h2\b[^>]*>(.*?)</h2\s*>", re.IGNORECASE | re.DOTALL)
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
+_TABLE_ROW_RE = re.compile(r"<tr\b[^>]*>(.*?)</tr\s*>", re.IGNORECASE | re.DOTALL)
+_TABLE_RE = re.compile(r"<table\b[^>]*>(.*?)</table\s*>", re.IGNORECASE | re.DOTALL)
+_TABLE_CELL_RE = re.compile(
+    r"<t[dh]\b[^>]*>(.*?)</t[dh]\s*>", re.IGNORECASE | re.DOTALL
+)
+_BENCHMARK_HEADER_RE = re.compile(
+    r"<th\b[^>]*>\s*Metric\s*</th\s*>\s*"
+    r"<th\b[^>]*>\s*Strategy\s*</th\s*>\s*"
+    r"<th\b[^>]*>(.*?)</th\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
 _REPORT_SHELL_OPEN_RE = re.compile(
     r'^\s*<div\b[^>]*\bclass=["\'][^"\']*\breport-shell\b[^"\']*["\'][^>]*>',
     re.IGNORECASE,
@@ -301,6 +313,7 @@ def _vanilla_tab_tuple(
         "trades": [],
         "audit": [],
     }
+    has_headline_comparison_bool = False
     first_plate_match_obj = _PLATE_START_RE.search(main_html_str)
     if first_plate_match_obj is not None:
         pre_plate_html_str = main_html_str[: first_plate_match_obj.start()]
@@ -308,12 +321,35 @@ def _vanilla_tab_tuple(
         # only the saved pre-plate evidence, especially the benchmark/delta
         # headline table, and remove the now-duplicate report chrome.
         pre_plate_html_str = _strip_pre_plate_chrome(pre_plate_html_str)
+        has_headline_comparison_bool = "headline-comparison" in pre_plate_html_str
         grouped_html_dict["overview"].append(pre_plate_html_str)
     for plate_html_str in plate_html_dict.values():
         heading_str = _plate_heading_str(plate_html_str)
         group_key_str = _vanilla_group_key_str(heading_str)
+        if group_key_str == "overview" and "year by year" in heading_str:
+            full_year_chart_html_str = _PLATE_ID_ATTR_RE.sub(
+                'id="plate-full-year-chart"', plate_html_str, count=1
+            )
+            grouped_html_dict["statistics"].append(full_year_chart_html_str)
+            continue
         grouped_html_dict[group_key_str].append(plate_html_str)
+        if group_key_str == "overview" and "equity curve" in heading_str:
+            # The mockup overview uses a compact crop so the annual tables stay
+            # above the fold. Keep the untouched full chart in Statistics.
+            full_chart_html_str = _PLATE_ID_ATTR_RE.sub(
+                'id="plate-full-equity"', plate_html_str, count=1
+            )
+            grouped_html_dict["statistics"].append(full_chart_html_str)
+        if group_key_str == "overview" and "monthly returns" in heading_str:
+            year_table_html_str = _vanilla_year_table_html_str(plate_html_str)
+            if year_table_html_str:
+                grouped_html_dict["overview"].append(year_table_html_str)
         if group_key_str == "statistics":
+            if not has_headline_comparison_bool:
+                comparison_html_str = _vanilla_comparison_html_str(plate_html_str)
+                if comparison_html_str:
+                    grouped_html_dict["overview"].append(comparison_html_str)
+                    has_headline_comparison_bool = True
             # The saved statistics section owns turnover and cost attribution,
             # so it is repeated in Trades & Costs rather than silently omitted.
             grouped_html_dict["trades"].append(plate_html_str)
@@ -343,6 +379,142 @@ def _plate_heading_str(plate_html_str: str) -> str:
         return ""
     heading_html_str = heading_match_obj.group(1)
     return html.unescape(_HTML_TAG_RE.sub("", heading_html_str)).strip().lower()
+
+
+def _table_cell_text_str(cell_html_str: str) -> str:
+    text_str = html.unescape(_HTML_TAG_RE.sub("", cell_html_str))
+    return " ".join(text_str.split()).removesuffix(" i")
+
+
+def _metric_delta_str(strategy_value_str: str, benchmark_value_str: str) -> str:
+    def value_float(value_str: str) -> float | None:
+        normalized_str = (
+            value_str.replace("$", "")
+            .replace("%", "")
+            .replace("×", "")
+            .replace(",", "")
+            .strip()
+        )
+        try:
+            return float(normalized_str)
+        except ValueError:
+            return None
+
+    strategy_float = value_float(strategy_value_str)
+    benchmark_float = value_float(benchmark_value_str)
+    if strategy_float is None or benchmark_float is None:
+        return "—"
+    suffix_str = "pp" if "%" in strategy_value_str or "%" in benchmark_value_str else ""
+    return f"{strategy_float - benchmark_float:+.2f}{suffix_str}"
+
+
+def _vanilla_comparison_html_str(statistics_plate_html_str: str) -> str:
+    """Build the mockup's compact comparison from values already in the report."""
+    row_by_metric_dict: dict[str, tuple[str, str]] = {}
+    for row_match_obj in _TABLE_ROW_RE.finditer(statistics_plate_html_str):
+        cell_text_list = [
+            _table_cell_text_str(cell_html_str)
+            for cell_html_str in _TABLE_CELL_RE.findall(row_match_obj.group(1))
+        ]
+        if len(cell_text_list) >= 3:
+            row_by_metric_dict[cell_text_list[0]] = (cell_text_list[1], cell_text_list[2])
+
+    benchmark_match_obj = _BENCHMARK_HEADER_RE.search(statistics_plate_html_str)
+    benchmark_label_str = (
+        _table_cell_text_str(benchmark_match_obj.group(1))
+        if benchmark_match_obj is not None
+        else "Benchmark"
+    )
+    metric_spec_tuple = (
+        ("CAGR (net)", "Return (Ann.) [%]"),
+        ("Volatility", "Volatility (Ann.) [%]"),
+        ("Sharpe ratio", "Sharpe Ratio"),
+        ("Max drawdown", "Max. Drawdown [%]"),
+        ("Sortino ratio", "Sortino Ratio"),
+        ("Expected shortfall", "CVaR 95% (Daily) [%]"),
+    )
+    row_html_str_list: list[str] = []
+    for display_label_str, source_label_str in metric_spec_tuple:
+        value_pair = row_by_metric_dict.get(source_label_str)
+        if value_pair is None:
+            continue
+        strategy_value_str, benchmark_value_str = value_pair
+        delta_str = _metric_delta_str(strategy_value_str, benchmark_value_str)
+        delta_class_str = "pos" if delta_str.startswith("+") else "neg" if delta_str.startswith("-") else ""
+        row_html_str_list.append(
+            "<tr><th>{}</th><td>{}</td><td>{}</td><td class=\"{}\">{}</td></tr>".format(
+                html.escape(display_label_str),
+                html.escape(strategy_value_str),
+                html.escape(benchmark_value_str),
+                delta_class_str,
+                html.escape(delta_str),
+            )
+        )
+    if not row_html_str_list:
+        return ""
+    return (
+        '<section class="vanilla-summary-table"><h2>Performance vs benchmark</h2>'
+        '<table><thead><tr><th>Metric</th><th>Strategy</th><th>'
+        + html.escape(benchmark_label_str)
+        + "</th><th>Delta</th></tr></thead><tbody>"
+        + "".join(row_html_str_list)
+        + "</tbody></table></section>"
+    )
+
+
+def _vanilla_year_table_html_str(monthly_plate_html_str: str) -> str:
+    """Create the mockup year table from the report's saved monthly tables."""
+    table_html_str_list = _TABLE_RE.findall(monthly_plate_html_str)
+    if len(table_html_str_list) < 2:
+        return ""
+
+    def row_by_year_dict(table_html_str: str) -> dict[str, list[str]]:
+        output_dict: dict[str, list[str]] = {}
+        for row_match_obj in _TABLE_ROW_RE.finditer(table_html_str):
+            cell_text_list = [
+                _table_cell_text_str(cell_html_str)
+                for cell_html_str in _TABLE_CELL_RE.findall(row_match_obj.group(1))
+            ]
+            if len(cell_text_list) >= 16 and cell_text_list[0][:4].isdigit():
+                output_dict[cell_text_list[0]] = cell_text_list
+        return output_dict
+
+    strategy_row_by_year_dict = row_by_year_dict(table_html_str_list[0])
+    benchmark_row_by_year_dict = row_by_year_dict(table_html_str_list[1])
+    row_html_str_list: list[str] = []
+    for year_str, strategy_cell_list in strategy_row_by_year_dict.items():
+        benchmark_cell_list = benchmark_row_by_year_dict.get(year_str)
+        strategy_return_str = strategy_cell_list[13]
+        benchmark_return_str = benchmark_cell_list[13] if benchmark_cell_list else "—"
+        max_drawdown_str = strategy_cell_list[15]
+        excess_return_str = _metric_delta_str(strategy_return_str, benchmark_return_str)
+        return_class_str = "pos" if not strategy_return_str.startswith("-") else "neg"
+        excess_class_str = (
+            "pos" if excess_return_str.startswith("+")
+            else "neg" if excess_return_str.startswith("-")
+            else ""
+        )
+        row_html_str_list.append(
+            "<tr><th>{}</th><td class=\"{}\">{}</td><td>{}</td>"
+            "<td class=\"{}\">{}</td><td class=\"neg\">{}</td></tr>".format(
+                html.escape(year_str),
+                return_class_str,
+                html.escape(strategy_return_str),
+                html.escape(benchmark_return_str),
+                excess_class_str,
+                html.escape(excess_return_str),
+                html.escape(max_drawdown_str),
+            )
+        )
+    if not row_html_str_list:
+        return ""
+    return (
+        '<section class="vanilla-year-table"><h2>Year by year</h2>'
+        '<div class="scroll"><table><thead><tr><th>Year</th><th>Return</th>'
+        '<th>Benchmark</th><th>Excess return</th><th>Max DD</th></tr></thead><tbody>'
+        + "".join(row_html_str_list)
+        + "</tbody></table></div></section>"
+    )
 
 
 def _vanilla_group_key_str(heading_str: str) -> str:

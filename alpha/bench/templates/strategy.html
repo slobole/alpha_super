@@ -44,7 +44,7 @@
 </nav>
 
 {% if analysis_workspace.stat_list %}
-<section class="artifact-stat-strip" aria-label="Headline statistics">
+<section class="artifact-stat-strip artifact-stat-strip-{{ selected_analysis_str }}" aria-label="Headline statistics">
   {% for stat in analysis_workspace.stat_list %}
   <div>
     <span>{{ stat.label_str }}</span>
