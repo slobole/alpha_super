@@ -173,10 +173,10 @@ def plot(
         benchmark_period_return_ser = period_return_df[benchmark_label]
 
     with plt.rc_context(plot_style_dict):
-        figure_obj = plt.figure(figsize=(12, 11.2))
+        figure_obj = plt.figure(figsize=(12, 12.4))
         outer_gs = gridspec.GridSpec(2, 1, height_ratios=[3, 1], hspace=0.16)
         inner_gs = gridspec.GridSpecFromSubplotSpec(
-            2, 1, height_ratios=[2, 1], subplot_spec=outer_gs[0], hspace=0.07
+            2, 1, height_ratios=[5, 3], subplot_spec=outer_gs[0], hspace=0.07
         )
 
         equity_ax = figure_obj.add_subplot(inner_gs[0])
@@ -218,7 +218,7 @@ def plot(
                 where=outperformance_mask_ser.to_numpy(),
                 interpolate=True,
                 color=strategy_color_str,
-                alpha=0.24,
+                alpha=float(SIGNATURE_PALETTE_DICT['equity_fill_alpha_float']),
                 zorder=2,
             )
         else:
@@ -227,7 +227,7 @@ def plot(
                 equity_baseline_growth_of_1_float,
                 strategy_growth_of_1_ser,
                 color=strategy_color_str,
-                alpha=0.24,
+                alpha=float(SIGNATURE_PALETTE_DICT['equity_fill_alpha_float']),
                 zorder=2,
             )
         strategy_equity_fill_collection_obj.set_gid('strategy_equity_fill')
@@ -297,8 +297,8 @@ def plot(
                 benchmark_drawdown_ser,
                 color=benchmark_color_str,
                 linestyle='-',
-                linewidth=0.8,
-                alpha=0.98,
+                linewidth=0.4,
+                alpha=0.9,
                 zorder=4,
             )
             benchmark_drawdown_line_obj.set_gid('benchmark_drawdown_line')
@@ -307,7 +307,7 @@ def plot(
                 0.0,
                 benchmark_drawdown_ser,
                 color=benchmark_color_str,
-                alpha=0.10,
+                alpha=float(SIGNATURE_PALETTE_DICT['benchmark_drawdown_fill_alpha_float']),
                 zorder=1,
             )
             _annotate_drawdown_trough(
@@ -318,7 +318,7 @@ def plot(
             strategy_drawdown_ser.index,
             strategy_drawdown_ser,
             color=strategy_color_str,
-            linewidth=0.9,
+            linewidth=0.45,
             alpha=1.0,
             zorder=5,
         )
@@ -328,7 +328,7 @@ def plot(
             0.0,
             strategy_drawdown_ser,
             color=strategy_color_str,
-            alpha=0.07,
+            alpha=float(SIGNATURE_PALETTE_DICT['drawdown_fill_alpha_float']),
             zorder=2,
         )
         _annotate_drawdown_trough(

@@ -68,6 +68,18 @@ SIGNATURE_PALETTE_DICT: dict[str, object] = {
     'profit_wash': '#e6f4ea',
     'warning_wash': '#fef7e0',
     'loss_wash': '#fce8e6',
+    # Area-fill weights, as alpha over the line colour they belong to. A
+    # palette whose series lines are dark must dial the equity band down; one
+    # with a mid-tone accent can afford more.
+    #
+    # *** UI*** The drawdown weight is raised here too, not only for desk. The
+    # outlines are now hairlines because the area carries the shape, and
+    # leaving the baseline at 0.07 would pair a faint fill with a thin line and
+    # render the panel *less* readable than before. Drawing drawdown as an area
+    # is correct for any palette, so there is one behaviour, not two.
+    'equity_fill_alpha_float': 0.24,
+    'drawdown_fill_alpha_float': 0.38,
+    'benchmark_drawdown_fill_alpha_float': 0.14,
     'vertical_line': '#8590a2',
     'zero_line': '#626f86',
     'bar_edge': '#dfe1e6',
@@ -193,6 +205,20 @@ _DESK_PALETTE_DICT: dict[str, object] = {
     'profit_wash': '#e6f4ea',
     'warning_wash': '#fef7e0',
     'loss_wash': '#fce8e6',
+    # *** UI*** The two panels want opposite treatments, and it is worth being
+    # explicit about why.
+    #
+    # Equity: the fill is a *band between two curves*, so it must stay faint —
+    # at the baseline weight it composited over an ink line into solid grey and
+    # hid the benchmark running through it.
+    #
+    # Drawdown: the fill IS the mark. Drawdown is an area quantity — depth
+    # below zero — and a daily series over a decade is far too dense to read as
+    # a line; at a faint weight the panel collapsed into a black scribble. The
+    # area carries the shape and the line becomes a hairline edge on it.
+    'equity_fill_alpha_float': 0.09,
+    'drawdown_fill_alpha_float': 0.45,
+    'benchmark_drawdown_fill_alpha_float': 0.16,
     'vertical_line': '#9aa0a6',
     'zero_line': '#16181d',
     'bar_edge': '#16181d',
