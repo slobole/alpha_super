@@ -637,6 +637,30 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             abort(400, description=str(exception_obj))
         return redirect(url_for("portfolios_page_fn"))
 
+    # Refusals stay inside the console.
+    #
+    # Bench aborts on a bad analysis key, an unknown module, a short compare
+    # selection. Every one of those dropped the operator onto Flask's raw error
+    # page — unstyled Times New Roman, no navigation back. The refusal itself
+    # is correct; presenting it as though the console had crashed is not.
+    @flask_app_obj.errorhandler(400)
+    @flask_app_obj.errorhandler(403)
+    @flask_app_obj.errorhandler(404)
+    @flask_app_obj.errorhandler(409)
+    def styled_error_fn(exception_obj):
+        status_code_int = getattr(exception_obj, "code", 500) or 500
+        return (
+            render_template(
+                "error.html",
+                status_code_int=status_code_int,
+                status_title_str=getattr(exception_obj, "name", "Request refused"),
+                # abort(...) descriptions carry the actionable reason; the
+                # generic status text does not.
+                status_detail_str=getattr(exception_obj, "description", "") or "",
+            ),
+            status_code_int,
+        )
+
     @flask_app_obj.route("/fonts/<file_name_str>")
     def font_fn(file_name_str: str) -> Response:
         """Serve one vendored font face.

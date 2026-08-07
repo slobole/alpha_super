@@ -35,6 +35,7 @@
   --color-benchmark-dark: #71767d;
   --font-figure: "IBM Plex Mono", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
   --font-prose: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --font-code: "IBM Plex Mono", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
   font-synthesis: none;
   /* Every figure in the console sits in a column that has to align, whether it
      is set in the mono or in the sans. */
@@ -401,6 +402,9 @@
 }
 
 * { box-sizing: border-box; }
+/* Form elements take a UA font rather than inheriting one. Reset once here so
+   no control can quietly render in Arial inside a console set in Plex. */
+button, input, select, textarea { font: inherit; }
 
 /* *** UI*** The density scale belongs on the ROOT font size, not on body.
    Almost every size in this stylesheet is expressed in rem, and rem resolves
@@ -426,9 +430,6 @@ body {
      show through the gap above the sticky column headers. 46 = 10px padding
      ×2 + ~22px line + the 3px rule above + 1px hairline below. */
   --nav-bar-height: 46px;
-  /* Program output and identifiers stay monospace in every variant — the
-     grotesque is the interface voice, not the voice of code. */
-  --font-code: "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
 }
 
 a { color: inherit; text-decoration: none; }
@@ -1688,7 +1689,7 @@ kbd {
 .native-report summary { cursor: pointer; color: var(--color-ink); font-weight: 600; }
 .native-report code,
 .native-report .formula {
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-family: var(--font-code);
   font-size: .62rem;
   white-space: normal;
 }

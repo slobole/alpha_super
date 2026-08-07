@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ status_code_int }}{% endblock %}
+
+{% block content %}
+<header class="catalog-head">
+  <div class="page-kicker">{{ status_code_int }}</div>
+  <h1 class="catalog-title">{{ status_title_str }}</h1>
+  {# The abort() description carries the real reason — "Unknown analysis: foo",
+     "Pick 2-5 books to compare". Showing the generic status text instead would
+     throw away the only part an operator can act on. #}
+  <p class="catalog-strapline">{{ status_detail_str }}</p>
+</header>
+
+<div class="catalog-footer-bar">
+  <span class="readiness-note">Nothing was changed. This request was refused before it reached any runner.</span>
+  <div class="catalog-footer-actions">
+    <a class="btn btn-primary" href="{{ url_for('index_page_fn') }}">Back to strategies</a>
+  </div>
+</div>
+{% endblock %}

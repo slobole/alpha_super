@@ -94,6 +94,10 @@ SIGNATURE_PALETTE_DICT: dict[str, object] = {
     'font_stack_list': list(SIGNATURE_FONT_STACK_LIST),
     'font_stack_str': SIGNATURE_FONT_STACK_STR,
     'prose_font_stack_str': SIGNATURE_FONT_STACK_STR,
+    # Program output and identifiers — logs, commands, paths. A distinct role
+    # from 'figure': a variant whose figure face is a sans still needs code to
+    # be monospace, or a command line stops being copy-readable.
+    'code_font_stack_str': '"Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace',
     # Populated just below, once SIGNATURE_ASSET_COLOR_DICT exists.
     'asset_color_dict': {},
     'layout_str': 'dashboard',
@@ -337,6 +341,7 @@ _DESK_PALETTE_DICT: dict[str, object] = {
     'font_stack_list': list(_DESK_FIGURE_FONT_STACK_LIST),
     'font_stack_str': _DESK_FIGURE_FONT_STACK_STR,
     'prose_font_stack_str': _DESK_PROSE_FONT_STACK_STR,
+    'code_font_stack_str': _DESK_FIGURE_FONT_STACK_STR,
     'axis_style_str': 'minimal',
 }
 
@@ -1047,6 +1052,7 @@ def _build_palette_root_css(
     --color-shadow: {palette_dict["shadow_rgba"]};
     --font-figure: {figure_font_stack_str};
     --font-prose: {prose_font_stack_str};
+    --font-code: {palette_dict["code_font_stack_str"]};
 }}'''
 
 
@@ -1067,6 +1073,12 @@ def _build_document_report_css() -> str:
         figure_font_stack_str=figure_font_stack_str,
         prose_font_stack_str=prose_font_stack_str,
     ) + f'''
+/* *** UI*** Buttons, inputs and selects do not inherit font-family from the
+   page — they fall back to a UA font. Without this the report's own tooltip
+   buttons rendered in Arial inside a document set entirely in Plex. */
+button, input, select, textarea {{
+    font: inherit;
+}}
 body {{
     font-family: var(--font-prose);
     margin: 0;
@@ -1567,6 +1579,7 @@ def _build_report_body_css() -> str:
        silently falls back to the body font in every non-document layout. */
     --font-figure: {report_font_stack_str};
     --font-prose: {report_font_stack_str};
+    --font-code: {signature_palette_dict["code_font_stack_str"]};
 }}
 body {{
     font-family: {report_font_stack_str};

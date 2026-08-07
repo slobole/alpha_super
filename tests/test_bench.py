@@ -2248,3 +2248,50 @@ def test_job_runner_marks_stale_jobs_unknown(monkeypatch, tmp_path):
     reloaded_job = second_manager.get_job("20260101-000000-abcd")
     assert reloaded_job is not None
     assert reloaded_job.status_str == jobs_module.STATUS_UNKNOWN_STR
+
+
+def test_every_rendered_surface_uses_the_vendored_faces(recording_client):
+    """No page may fall back to an OS font.
+
+    The console had two private font stacks that escaped the theme: a
+    --font-code declared outside the pinned :root, and one hardcoded
+    ui-monospace rule. Both kept rendering in Cascadia after the vendored
+    faces landed, and neither was visible in a screenshot. This asserts the
+    property directly instead.
+    """
+    client, _job_manager, _token_str = recording_client
+    page_path_list = [
+        "/",
+        "/compare",
+        "/portfolios",
+        "/portfolios/new",
+        "/research",
+        "/jobs",
+        f"/strategy/{DV2_MODULE_STR}",
+        f"/strategy/{DV2_MODULE_STR}?analysis=vanilla",
+    ]
+    for page_path_str in page_path_list:
+        html_str = client.get(page_path_str).get_data(as_text=True)
+        assert "@font-face" in html_str, page_path_str
+        for token_str in ("--font-figure", "--font-prose", "--font-code"):
+            declaration_index_int = html_str.index(token_str + ":")
+            declaration_str = html_str[declaration_index_int : declaration_index_int + 90]
+            assert "IBM Plex" in declaration_str, f"{page_path_str} {token_str}"
+
+
+def test_refusals_stay_inside_the_console(recording_client):
+    """An abort() must not drop the operator onto Flask's raw error page.
+
+    The refusal is correct; presenting it as though the console had crashed is
+    not. The abort description carries the only actionable part, so it has to
+    survive into the rendered page.
+    """
+    client, _job_manager, _token_str = recording_client
+
+    response = client.get(f"/strategy/{DV2_MODULE_STR}?analysis=bogus")
+    html_str = response.get_data(as_text=True)
+    assert response.status_code == 400
+    assert 'class="bench-shell"' in html_str
+    assert "bogus" in html_str
+
+    assert client.get("/strategy/no.such.module").status_code == 404
