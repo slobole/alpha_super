@@ -100,17 +100,16 @@ MARKET_TIMEZONE_OBJ = ZoneInfo("America/New_York")
 # by alpha.engine.report, so an already-generated report.html keeps whatever
 # variant produced it — switching here can leave the console and an embedded
 # report disagreeing until that report is re-rendered.
-BENCH_VARIANT_COOKIE_STR = "bench_variant"
-DEFAULT_BENCH_VARIANT_STR = "desk"
-# Keep DEFAULT_BENCH_VARIANT_STR in sync with the :root fallback in bench.css
-# *and* with the default argument of build_bench_theme_css —
+# The console renders in one house style. There used to be a switcher offering
+# four, which is a design-search artifact rather than an operator need: a
+# single-operator research console gains nothing from a menu of identities, and
+# the switch could leave the console and the report embedded inside it
+# disagreeing about which palette was active.
+#
+# Keep BENCH_VARIANT_STR in sync with the :root fallback in bench.css *and*
+# with the default argument of build_bench_theme_css —
 # tests/test_theme_no_hardcoded_colors.py pins all three together.
-BENCH_VARIANT_LABEL_DICT = {
-    "desk": "Desk",
-    "swiss": "Swiss",
-    "blueprint": "Blueprint",
-    "journal": "Journal",
-}
+BENCH_VARIANT_STR = "desk"
 # One year: a display preference the operator sets once, not a session.
 BENCH_VARIANT_COOKIE_MAX_AGE_INT = 365 * 24 * 60 * 60
 
@@ -143,18 +142,6 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
     # so this stops the polling Jobs view from rescanning results/ forever.
     flask_app_obj.config["produced_run_cache_dict"] = {}
 
-    def _active_variant_str() -> str:
-        """The requested signature variant, or the default if unrecognized.
-
-        Never trust the cookie: it reaches ``build_bench_theme_css``, which
-        raises on an unknown variant, so an edited cookie would otherwise 500
-        every page in the console.
-        """
-        cookie_value_str = request.cookies.get(BENCH_VARIANT_COOKIE_STR, "")
-        if cookie_value_str in BENCH_VARIANT_LABEL_DICT:
-            return cookie_value_str
-        return DEFAULT_BENCH_VARIANT_STR
-
     def _active_density_str() -> str:
         """The requested display density, or the default if unrecognized.
 
@@ -184,7 +171,6 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
     @flask_app_obj.context_processor
     def inject_globals_fn() -> dict[str, Any]:
         job_manager = flask_app_obj.config["job_manager_obj"]
-        active_variant_str = _active_variant_str()
         market_now_datetime_obj = datetime.now(MARKET_TIMEZONE_OBJ)
         return {
             "bench_version_str": __version__,
@@ -197,9 +183,7 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             "csrf_token_str": flask_app_obj.config["bench_token_str"],
             # Colour and type tokens for the console, derived from the same
             # signature palette the embedded reports render with.
-            "bench_theme_css_str": build_bench_theme_css(active_variant_str),
-            "active_variant_str": active_variant_str,
-            "variant_label_dict": BENCH_VARIANT_LABEL_DICT,
+            "bench_theme_css_str": build_bench_theme_css(BENCH_VARIANT_STR),
             "active_density_str": _active_density_str(),
             "density_label_dict": BENCH_DENSITY_LABEL_DICT,
         }
@@ -244,9 +228,18 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
                 card_dict["strategy"].stem_str in recent_strategy_stem_set
             )
         wired_count_int = sum(1 for entry_obj in strategy_entry_list if entry_obj.is_wired_bool)
+        # Promoted = past the research gate, by either route. WIRED and
+        # PM_READY are separate maturities but the same claim at catalog level:
+        # someone decided this module is more than an experiment.
+        promoted_count_int = sum(
+            1
+            for entry_obj in strategy_entry_list
+            if entry_obj.is_wired_bool or entry_obj.is_pm_ready_bool
+        )
         return render_template(
             "index.html",
             card_dict_list=card_dict_list,
+            promoted_count_int=promoted_count_int,
             category_pair_list=[
                 category_pair
                 for category_pair in catalog.list_categories()
@@ -573,37 +566,15 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             abort(400, description=str(exception_obj))
         return redirect(url_for("portfolios_page_fn"))
 
-    @flask_app_obj.route("/variant/<variant_name_str>")
-    def set_variant_fn(variant_name_str: str) -> Response:
-        """Switch the console's signature variant and return where you were.
-
-        A GET is appropriate here: this writes one display cookie in the
-        operator's own browser and touches no server state, so there is nothing
-        for a cross-site request to accomplish beyond restyling their page.
-        """
-        if variant_name_str not in BENCH_VARIANT_LABEL_DICT:
-            abort(404)
-        # Only follow a referrer back to ourselves — an absolute foreign URL
-        # here would turn this route into an open redirect.
-        referrer_str = request.referrer or ""
-        same_origin_bool = bool(referrer_str) and urlparse(referrer_str).netloc == request.host
-        response_obj = redirect(referrer_str if same_origin_bool else url_for("index_page_fn"))
-        response_obj.set_cookie(
-            BENCH_VARIANT_COOKIE_STR,
-            variant_name_str,
-            max_age=BENCH_VARIANT_COOKIE_MAX_AGE_INT,
-            samesite="Lax",
-            httponly=True,
-        )
-        return response_obj
-
     @flask_app_obj.route("/density/<density_name_str>")
     def set_density_fn(density_name_str: str) -> Response:
         """Switch the console's display density and return where you were.
 
-        Same shape and same reasoning as ``set_variant_fn``: one display cookie
-        in the operator's own browser, no server state, so a GET is appropriate
-        and the referrer is only followed back to our own host.
+        A GET is appropriate here: this writes one display cookie in the
+        operator's own browser and touches no server state, so there is nothing
+        for a cross-site request to accomplish beyond resizing their type. The
+        referrer is only followed back to our own host — an absolute foreign
+        URL would turn this route into an open redirect.
         """
         if density_name_str not in BENCH_DENSITY_LABEL_DICT:
             abort(404)
@@ -1079,6 +1050,16 @@ def _analyzer_view_dict_list(
                 "status_class_str": status_str.lower().replace(" ", "-"),
                 "detail_str": detail_str,
                 "available_bool": available_bool,
+                # Does a readable saved report exist for this analyzer?
+                #
+                # This is the catalog's filled-versus-hollow mark, so the
+                # definition has to be narrow: a saved artifact, or a BENCH job
+                # that explicitly passed. SKIP is not evidence (the hook is
+                # missing), FAIL is not evidence (the run did not produce a
+                # usable report), and NOT RUN is obviously not. Widening this
+                # would make an unrun strategy look identical to a tested one,
+                # which is the exact claim this console exists to keep honest.
+                "has_evidence_bool": latest_run_obj is not None or status_str == "PASS",
                 "latest_run": latest_run_obj,
             }
         )

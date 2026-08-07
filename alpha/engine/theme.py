@@ -83,7 +83,7 @@ SIGNATURE_PALETTE_DICT: dict[str, object] = {
 
 SIGNATURE_ASSET_COLOR_DICT: dict[str, str] = {
     # Baseline (dashboard) asset hues. Variants override this wholesale via the
-    # 'asset_color_dict' palette key — see _build_monochrome_asset_color_dict.
+    # 'asset_color_dict' palette key — see _build_cycle_asset_color_dict.
     'TLT': '#4f6bed',
     'GLD': '#d9a441',
     'DBC': '#36b37e',
@@ -103,231 +103,12 @@ SIGNATURE_ASSET_COLOR_DICT: dict[str, str] = {
 SIGNATURE_PALETTE_DICT['asset_color_dict'] = dict(SIGNATURE_ASSET_COLOR_DICT)
 
 
-def _build_monochrome_asset_color_dict(
-        ink_color_str: str,
-        light_color_str: str,
-        page_color_str: str,
-) -> dict[str, str]:
-    """Give every named asset a distinct grey on a monochrome ramp.
-
-    A variant with no colour budget still needs the sleeves in a weight stack
-    to be told apart, so each asset gets its own step from ink to light rather
-    than keeping the baseline hues — which would otherwise leave a blue TLT and
-    a gold GLD sitting inside an all-grey report.
-
-    Ordering follows the baseline dict, so an asset keeps the same shade across
-    runs instead of shifting when the set of held names changes.
-    """
-    ramp_asset_name_list = [
-        asset_name_str for asset_name_str in SIGNATURE_ASSET_COLOR_DICT
-        if asset_name_str not in ('CASH', 'DEFAULT')
-    ]
-    monochrome_asset_color_dict: dict[str, str] = {}
-    for asset_idx_int, asset_name_str in enumerate(ramp_asset_name_list):
-        ramp_position_float = asset_idx_int / max(len(ramp_asset_name_list) - 1, 1)
-        monochrome_asset_color_dict[asset_name_str] = blend_hex_color_str(
-            ink_color_str, light_color_str, ramp_position_float
-        )
-    # Cash is not an exposure, so it reads as near-empty; unknown names sit mid-ramp.
-    monochrome_asset_color_dict['CASH'] = blend_hex_color_str(light_color_str, page_color_str, 0.55)
-    monochrome_asset_color_dict['DEFAULT'] = blend_hex_color_str(ink_color_str, light_color_str, 0.5)
-    return monochrome_asset_color_dict
-
-
 _BASE_VARIANT_NAME_STR: str = 'current'
 
 # Candidate signature variants under evaluation. Each entry lists only the keys
 # that differ from SIGNATURE_PALETTE_DICT; the resolver merges them onto the
 # base and rejects unknown keys, so a typo fails loud instead of silently
 # introducing an unused colour.
-# Journal palette — the settled direction. Ink on paper with no hue at all:
-# series separate by value and by hatch texture rather than by colour. Survives
-# black-and-white printing and photocopying, and is legible to any form of
-# colour vision. The constraint is the point — nothing can be decorative if
-# there is no colour budget to spend.
-#
-# Layout is deliberately *not* set here. The journal_* variants below pair this
-# one palette with each candidate structure, so structure is the only variable
-# left under comparison.
-_JOURNAL_PALETTE_DICT: dict[str, object] = {
-    # Warm ink on warm paper. The greys carry a trace of brown so nothing on
-    # the page reads as cold blue-grey next to the earth tones below.
-    'ink': '#1e1b16',
-    'page': '#fdfcf9',
-    'panel': '#fdfcf9',
-    'neutral': '#f3f1ea',
-    'grid': '#e6e2d8',
-    'border': '#dbd6c9',
-    'axes_border': '#1e1b16',
-    'muted': '#6f6a5e',
-    # The equity line stays ink: the curve's shape is the message, and holding
-    # colour back here is what lets green and brown mean something when they
-    # do appear.
-    'strategy': '#1e1b16',
-    'strategy_dark': '#000000',
-    'benchmark': '#aaa496',
-    'benchmark_dark': '#7f7a6d',
-    # Earth semantics: moss green for gains, umber for losses. Muted enough to
-    # sit on paper without shouting, distinct enough to read at a glance.
-    'profit': '#4a7c59',
-    'profit_dark': '#376243',
-    'loss': '#9c6644',
-    'loss_dark': '#7c4e31',
-    # No colour budget for navigation either: a link is ink with a rule under
-    # it. The caution step borrows the palette's bark so it sits between the
-    # moss and the umber rather than introducing a fourth hue.
-    'accent': '#1e1b16',
-    'accent_dark': '#000000',
-    'warning': '#8a6a4b',
-    'warning_dark': '#6e5442',
-    'vertical_line': '#aaa496',
-    'zero_line': '#1e1b16',
-    'bar_edge': '#1e1b16',
-    'legend_face': '#fdfcf9',
-    'legend_edge': '#1e1b16',
-    'label_face': '#fdfcf9',
-    # Earth cycle for composition stacks: pine, umber, olive, tan, slate-green,
-    # bark, sage, sand.
-    'overlay_cycle': [
-        '#2b4b3f', '#8a6a4b', '#5c6b52', '#a08768',
-        '#3f5a52', '#6e5442', '#7d8a76', '#c2b39a',
-    ],
-    'hatch_cycle_list': ['', '///', '...', 'xxx', '\\\\', '+++', 'ooo', '---'],
-    'mean_line': '#1e1b16',
-    'shadow_rgba': 'rgba(30, 27, 22, 0.05)',
-    'font_family_str': 'monospace',
-    'font_stack_list': ['Cascadia Mono', 'Consolas', 'DejaVu Sans Mono', 'monospace'],
-    'font_stack_str': '"Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace',
-    'prose_font_stack_str': 'Constantia, Sitka, Georgia, "Times New Roman", serif',
-    'axis_style_str': 'minimal',
-}
-
-
-# Swiss / International Typographic Style: pure white, one grotesque sans for
-# everything, heavy black rules, and a single red that is the only colour on
-# the page. Where the journal palette is warm paper, this is cold grid — the
-# discipline is the same (no decorative colour budget), the temperature is not.
-#
-# The one red is deliberately shared: losses, warnings, and marked elements
-# (wired badges, the active nav item) all carry it. A second accent would
-# dilute the only signal the style has.
-_SWISS_FONT_STACK_LIST: list[str] = ['Helvetica Neue', 'Helvetica', 'Arial', 'sans-serif']
-_SWISS_FONT_STACK_STR: str = '"Helvetica Neue", Helvetica, Arial, sans-serif'
-_SWISS_PALETTE_DICT: dict[str, object] = {
-    'ink': '#111111',
-    'page': '#ffffff',
-    'panel': '#ffffff',
-    'neutral': '#f4f4f4',
-    'grid': '#e0e0e0',
-    'border': '#d4d4d4',
-    'axes_border': '#111111',
-    'muted': '#6e6e6e',
-    # The equity line stays ink, exactly as in the journal: holding colour back
-    # from the curve is what lets the one red mean something when it appears.
-    'strategy': '#111111',
-    'strategy_dark': '#000000',
-    'benchmark': '#8c8c8c',
-    'benchmark_dark': '#6e6e6e',
-    # Single-accent semantics: gains are unremarkable (ink), losses are the
-    # exception and take the red. This is the Swiss inversion of the usual
-    # green/red pair — only the thing that demands attention gets colour.
-    'profit': '#111111',
-    'profit_dark': '#111111',
-    'loss': '#d92b1f',
-    'loss_dark': '#b91c12',
-    # The one red is the whole accent budget, so navigation shares it rather
-    # than adding a second hue. Caution has no colour left and separates by
-    # value alone.
-    'accent': '#d92b1f',
-    'accent_dark': '#b91c12',
-    'warning': '#5a5a5a',
-    'warning_dark': '#3a3a3a',
-    'vertical_line': '#8c8c8c',
-    'zero_line': '#111111',
-    'bar_edge': '#111111',
-    'legend_face': '#ffffff',
-    'legend_edge': '#111111',
-    'label_face': '#ffffff',
-    # Grey ramp plus the accent for composition stacks; hatch textures carry
-    # the separation where adjacent greys get close.
-    'overlay_cycle': [
-        '#111111', '#5a5a5a', '#8c8c8c', '#b4b4b4',
-        '#d92b1f', '#3a3a3a', '#737373', '#9e9e9e',
-    ],
-    'hatch_cycle_list': ['', '///', '...', 'xxx', '\\\\', '+++', 'ooo', '---'],
-    'mean_line': '#111111',
-    'shadow_rgba': 'rgba(0, 0, 0, 0.06)',
-    'font_family_str': 'sans-serif',
-    'font_stack_list': list(_SWISS_FONT_STACK_LIST),
-    'font_stack_str': _SWISS_FONT_STACK_STR,
-    # One face for prose and figures both — the grotesque is the whole voice.
-    'prose_font_stack_str': _SWISS_FONT_STACK_STR,
-    'axis_style_str': 'minimal',
-}
-
-
-# Blueprint: a cyanotype drawing sheet. The only genuinely dark variant, so it
-# inverts an assumption the others share — the page is darker than the ink.
-#
-# *** CRITICAL*** The ``*_dark`` palette keys are consumed as *text* colours
-# (td.pos/td.neg, --color-profit-dark, --color-loss-dark), which on a light page
-# means "darker than the base hue". On a dark page that reading inverts: the
-# text-weight value must be *lighter* than the base to stay readable. The keys
-# below are deliberately set lighter than their base counterparts. Do not
-# "correct" them to be darker — that silently drops contrast on every figure.
-_BLUEPRINT_FONT_STACK_LIST: list[str] = [
-    'Cascadia Mono', 'Consolas', 'DejaVu Sans Mono', 'monospace',
-]
-_BLUEPRINT_FONT_STACK_STR: str = '"Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace'
-_BLUEPRINT_PALETTE_DICT: dict[str, object] = {
-    'ink': '#dce8f5',
-    'page': '#16283e',
-    'panel': '#16283e',
-    'neutral': '#1e3350',
-    'grid': '#2f4a6b',
-    'border': '#3d5a7d',
-    'axes_border': '#7c93ad',
-    'muted': '#7c93ad',
-    # The drawn line is the white lead on the sheet, exactly as ink is the
-    # equity curve in the other monochrome variants.
-    'strategy': '#dce8f5',
-    'strategy_dark': '#ffffff',
-    'benchmark': '#5f7b99',
-    'benchmark_dark': '#7c93ad',
-    'profit': '#8fc79b',
-    'profit_dark': '#a8d5b0',
-    'loss': '#d4906f',
-    'loss_dark': '#e0a48a',
-    # *** CRITICAL*** Same inversion as the other ``*_dark`` keys on this dark
-    # sheet: the text-weight accent is *lighter* than its base, not darker.
-    'accent': '#8fa8c4',
-    'accent_dark': '#a8bfd6',
-    'warning': '#d4b06f',
-    'warning_dark': '#e0c48a',
-    'vertical_line': '#5f7b99',
-    'zero_line': '#dce8f5',
-    'bar_edge': '#16283e',
-    'legend_face': '#16283e',
-    'legend_edge': '#dce8f5',
-    'label_face': '#16283e',
-    # Light-lead ramp for composition stacks, with hatch texture separating the
-    # steps that sit close together on a dark ground.
-    'overlay_cycle': [
-        '#dce8f5', '#a8bfd6', '#7c93ad', '#5f7b99',
-        '#a8d5b0', '#d4906f', '#8fa8c4', '#46618a',
-    ],
-    'hatch_cycle_list': ['', '///', '...', 'xxx', '\\\\', '+++', 'ooo', '---'],
-    'mean_line': '#dce8f5',
-    'shadow_rgba': 'rgba(0, 0, 0, 0.35)',
-    'font_family_str': 'monospace',
-    'font_stack_list': list(_BLUEPRINT_FONT_STACK_LIST),
-    'font_stack_str': _BLUEPRINT_FONT_STACK_STR,
-    # Drafting lettering is monospace throughout — no prose face on a drawing.
-    'prose_font_stack_str': _BLUEPRINT_FONT_STACK_STR,
-    'axis_style_str': 'minimal',
-}
-
-
 # Desk: the institutional trading-desk console the investor mockups describe.
 # Where journal and swiss both spend their whole colour budget on one accent,
 # this one accepts that a control panel has *states* a research note does not —
@@ -400,20 +181,23 @@ _DESK_PALETTE_DICT: dict[str, object] = {
 }
 
 
+# One house look, plus the legacy baseline.
+#
+# The journal, journal_spec, swiss and blueprint variants were a design search:
+# four candidate identities kept side by side so they could be compared. That
+# search is settled — desk is the house style — and keeping the losers alive
+# had a real cost. Bench shipped a menu offering four looks for a
+# single-operator console, and the console and its embedded reports could
+# disagree about which one was active.
+#
+# desk carries the *spec* layout: numbered plates with a ruled masthead. That
+# is not cosmetic — alpha/bench/artifact_view.py locates report sections by
+# their `plate-NN` ids, so the Bench vanilla overview grid depends on plates
+# existing. A layout without them silently degrades that page to one long
+# unstructured column.
 _VARIANT_OVERRIDE_DICT: dict[str, dict[str, object]] = {
     _BASE_VARIANT_NAME_STR: {},
-    # Single reading column: sections stacked, hairline rules, no containers.
-    'journal': {**_JOURNAL_PALETTE_DICT, 'layout_str': 'document'},
-    # Specimen sheet: provenance promoted from footer to masthead, numbered
-    # plates instead of free-floating charts. Dense on purpose.
-    'journal_spec': {**_JOURNAL_PALETTE_DICT, 'layout_str': 'spec'},
-    # White grid, grotesque sans, heavy rules, one red.
-    'swiss': {**_SWISS_PALETTE_DICT, 'layout_str': 'document'},
-    # Trading-desk console: mono figures, sans prose, colour only for state.
-    # Bench renders with this.
-    'desk': {**_DESK_PALETTE_DICT, 'layout_str': 'document'},
-    # Cyanotype drawing sheet: light lead on dark blue, monospace lettering.
-    'blueprint': {**_BLUEPRINT_PALETTE_DICT, 'layout_str': 'document'},
+    'desk': {**_DESK_PALETTE_DICT, 'layout_str': 'spec'},
 }
 
 SIGNATURE_VARIANT_NAME_LIST: list[str] = list(_VARIANT_OVERRIDE_DICT)
@@ -1024,25 +808,6 @@ def blend_hex_color_str(
         channel_value_list.append(int(round(blended_channel_float * 255.0)))
 
     return '#{0:02x}{1:02x}{2:02x}'.format(*channel_value_list)
-
-
-# Populated here rather than in the variant literals above because the ramp
-# needs blend_hex_color_str, which is defined further down the module.
-for _monochrome_variant_name_str, _monochrome_source_palette_dict in (
-    ('journal', _JOURNAL_PALETTE_DICT),
-    ('journal_spec', _JOURNAL_PALETTE_DICT),
-    ('swiss', _SWISS_PALETTE_DICT),
-    # Blueprint's ramp runs from the light lead down toward the sheet, which is
-    # the same call as the others: ink first, page last.
-    ('blueprint', _BLUEPRINT_PALETTE_DICT),
-):
-    _VARIANT_OVERRIDE_DICT[_monochrome_variant_name_str]['asset_color_dict'] = (
-        _build_monochrome_asset_color_dict(
-            ink_color_str=str(_monochrome_source_palette_dict['ink']),
-            light_color_str=str(_monochrome_source_palette_dict['benchmark']),
-            page_color_str=str(_monochrome_source_palette_dict['page']),
-        )
-    )
 
 
 def _build_cycle_asset_color_dict(

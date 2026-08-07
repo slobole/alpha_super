@@ -1221,8 +1221,11 @@ def test_mockup_shell_uses_fixed_research_sidebar_and_excludes_live(recording_cl
     assert 'class="system-topbar"' in html_str
     assert 'class="bench-sidebar"' in html_str
     assert "ALPHA / BENCH" in html_str
-    assert ">Studies</a>" in html_str
-    assert ">Compare</a>" in html_str
+    # Pinned to the sidebar's own markup. These previously matched ">Studies</a>"
+    # and ">Compare</a>", which the sidebar never emits -- it wraps each label in
+    # a <span>. They were passing on unrelated buttons elsewhere on the page.
+    assert "<span>Studies</span>" in html_str
+    assert "<span>Compare</span>" in html_str
     assert "LIVE" not in html_str
     assert re.search(r"\d{2}:\d{2}:\d{2} (EST|EDT)", html_str)
 
@@ -1702,45 +1705,63 @@ def test_studies_page_marks_skip_as_not_ready(recording_client):
     assert 'class="readiness-table"' in html_str or "readiness-table" in html_str
 
 
-def test_variant_switch_sets_the_cookie_and_restyles_the_console(recording_client):
-    client, _job_manager, _token_str = recording_client
+def test_console_renders_the_single_house_variant(recording_client):
+    """One style, no switcher.
 
-    default_text_str = client.get("/").get_data(as_text=True)
-    assert "#ffffff" in default_text_str  # swiss page
-
-    switch_response = client.get("/variant/blueprint")
-    assert switch_response.status_code == 302
-    assert "bench_variant=blueprint" in switch_response.headers["Set-Cookie"]
-
-    blueprint_text_str = client.get("/").get_data(as_text=True)
-    assert "#16283e" in blueprint_text_str  # blueprint sheet
-    assert "--color-ink: #dce8f5" in blueprint_text_str
-
-
-def test_variant_switch_rejects_an_unknown_variant(recording_client):
-    client, _job_manager, _token_str = recording_client
-    assert client.get("/variant/not-a-variant").status_code == 404
-
-
-def test_console_falls_back_when_the_variant_cookie_is_tampered_with(recording_client):
-    """An edited cookie must not 500 every page.
-
-    The value reaches build_bench_theme_css, which raises on an unknown
-    variant, so it has to be validated against the allowlist first.
+    The variant menu is gone, so the console must still emit a complete desk
+    palette from the theme rather than falling through to the stylesheet's
+    offline copy.
     """
     client, _job_manager, _token_str = recording_client
-    client.set_cookie("bench_variant", "'; DROP TABLE", domain="localhost")
+
+    html_str = client.get("/").get_data(as_text=True)
+    assert "--color-ink: #16181d" in html_str
+    assert "--color-page: #ffffff" in html_str
+    assert "--color-accent: #1a73e8" in html_str
+    # The retired variants must not be reachable or referenced.
+    assert client.get("/variant/blueprint").status_code == 404
+    for retired_name_str in ("Blueprint", "Journal", "Swiss"):
+        assert retired_name_str not in html_str
+
+
+def test_density_switch_sets_the_cookie_and_rescales_the_console(recording_client):
+    client, _job_manager, _token_str = recording_client
+
+    assert 'data-density="work"' in client.get("/").get_data(as_text=True)
+
+    switch_response = client.get("/density/present")
+    assert switch_response.status_code == 302
+    assert "bench_density=present" in switch_response.headers["Set-Cookie"]
+
+    assert 'data-density="present"' in client.get("/").get_data(as_text=True)
+
+
+def test_density_switch_rejects_an_unknown_density(recording_client):
+    client, _job_manager, _token_str = recording_client
+    assert client.get("/density/not-a-density").status_code == 404
+
+
+def test_console_falls_back_when_the_density_cookie_is_tampered_with(recording_client):
+    """An edited cookie must not reach the rendered attribute.
+
+    The value is echoed into data-density on <html>, so it has to be validated
+    against the allowlist rather than trusted.
+    """
+    client, _job_manager, _token_str = recording_client
+    client.set_cookie("bench_density", '"><script>', domain="localhost")
 
     response = client.get("/")
+    html_str = response.get_data(as_text=True)
     assert response.status_code == 200
-    assert "--color-page: #ffffff" in response.get_data(as_text=True)
+    assert 'data-density="work"' in html_str
+    assert "<script>" not in html_str.split("</head>")[0]
 
 
-def test_variant_switch_does_not_follow_a_foreign_referrer(recording_client):
+def test_density_switch_does_not_follow_a_foreign_referrer(recording_client):
     """The referrer bounce must not become an open redirect."""
     client, _job_manager, _token_str = recording_client
 
-    response = client.get("/variant/journal", headers={"Referer": "https://evil.example/x"})
+    response = client.get("/density/present", headers={"Referer": "https://evil.example/x"})
     assert response.status_code == 302
     assert "evil.example" not in response.headers["Location"]
 
@@ -1779,13 +1800,14 @@ def test_index_renders_momentum_and_recent_run_filters(recording_client):
     html_str = client.get("/").get_data(as_text=True)
 
     assert 'data-filter="recent"' in html_str
-    assert 'data-filter="subcat:atr_normalized_rotation"' in html_str
+    # Families live in the catalog's single Family dropdown, not a chip row.
+    assert 'value="subcat:atr_normalized_rotation"' in html_str
     assert '<span class="filter-group-label">Momentum</span>' not in html_str
-    assert 'data-filter="cat:mean_reversion">Sector Dispersion</span>' in html_str
+    assert 'value="cat:mean_reversion">Sector Dispersion</option>' in html_str
     sector_module_str = "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs"
     sector_card_start_int = html_str.index(f'data-module="{sector_module_str}"')
     sector_card_excerpt_str = html_str[sector_card_start_int : sector_card_start_int + 1_500]
-    assert '<span class="badge badge-cat">Sector Dispersion</span>' in sector_card_excerpt_str
+    assert '<td class="catalog-family">Sector Dispersion</td>' in sector_card_excerpt_str
     sector_detail_html_str = client.get(f"/strategy/{sector_module_str}").get_data(as_text=True)
     assert 'class="artifact-breadcrumb"' in sector_detail_html_str
     atr_card_start_int = html_str.index(f'data-module="{ATR_NDX_MODULE_STR}"')

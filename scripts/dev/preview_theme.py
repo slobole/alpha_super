@@ -67,9 +67,8 @@ _FIXTURE_END_DATE_STR = '2026-06-30'
 _FIXTURE_SLEEVE_NAME_LIST = ['SPY', 'TLT', 'DBC', 'GLD']
 
 _VARIANT_BLURB_DICT = {
-    'current': 'Baseline — today’s shipping theme, card grid and blue accent.',
-    'journal': 'Journal · single column — sections stacked, hairline rules, no containers.',
-    'journal_spec': 'Journal · specimen sheet — provenance as masthead, numbered plates, dense.',
+    'current': 'Baseline — the legacy card grid and blue accent.',
+    'desk': 'Desk · specimen sheet — mono figures, numbered plates, colour only for state.',
 }
 
 _PROSE_PARAGRAPH_STR = (

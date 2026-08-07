@@ -34,11 +34,16 @@ from alpha.engine.theme import (
 )
 
 
-# The signature variant every report renders under. journal_spec is the shipped
-# look; override with ALPHA_REPORT_VARIANT_STR (e.g. 'current' for the legacy
-# card dashboard) without touching code. The report resolves its CSS, fonts and
-# charts inside this variant at render time — see _render_report_html.
-_ACTIVE_REPORT_VARIANT_STR = os.environ.get('ALPHA_REPORT_VARIANT_STR', 'journal_spec')
+# The signature variant every report renders under. desk is the shipped look
+# and the one Bench renders with, so the console and the artifacts embedded in
+# it agree; override with ALPHA_REPORT_VARIANT_STR (e.g. 'current' for the
+# legacy card dashboard) without touching code. The report resolves its CSS,
+# fonts and charts inside this variant at render time — see _render_report_html.
+#
+# *** UI*** Charts are rasterised at render time, so this variant is baked into
+# every saved PNG. Artifacts written under a previous variant keep that variant
+# for good; only a fresh run adopts a change here.
+_ACTIVE_REPORT_VARIANT_STR = os.environ.get('ALPHA_REPORT_VARIANT_STR', 'desk')
 
 
 _MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',

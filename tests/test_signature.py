@@ -450,12 +450,12 @@ def test_relative_performance_rejects_nonpositive_values():
 
 def test_marks_follow_the_active_variant(value_ser):
     """Sparkline colour must come from whichever theme is active."""
-    with signature_variant_context('journal'):
-        journal_uri_str = render_sparkline_data_uri_str(value_ser)
+    with signature_variant_context('desk'):
+        desk_uri_str = render_sparkline_data_uri_str(value_ser)
     with signature_variant_context('current'):
         current_uri_str = render_sparkline_data_uri_str(value_ser)
 
-    assert journal_uri_str != current_uri_str
+    assert desk_uri_str != current_uri_str
 
 
 def _decode_small_multiples_png_bytes(data_uri_str: str) -> bytes:

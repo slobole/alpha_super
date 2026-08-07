@@ -315,7 +315,7 @@ class AnalyzerMatchesVanillaTests(unittest.TestCase):
             signature_variant_context,
         )
 
-        with signature_variant_context('journal_spec'):
+        with signature_variant_context('desk'):
             analyzer_css_str = build_analyzer_report_css()
             report_css_str = build_report_css()
 

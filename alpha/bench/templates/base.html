@@ -48,12 +48,7 @@
         <details class="topbar-menu bench-menu">
           <summary>BENCH <span aria-hidden="true">⌄</span></summary>
           <div class="topbar-popover variant-popover">
-            <div class="popover-label">Display</div>
-            {% for variant_str, variant_label_str in variant_label_dict.items() %}
-            <a href="{{ url_for('set_variant_fn', variant_name_str=variant_str) }}"
-               class="{{ 'active' if variant_str == active_variant_str }}">{{ variant_label_str }}</a>
-            {% endfor %}
-            <div class="popover-label popover-label-split">Density</div>
+            <div class="popover-label">Density</div>
             {% for density_str, density_label_str in density_label_dict.items() %}
             <a href="{{ url_for('set_density_fn', density_name_str=density_str) }}"
                class="{{ 'active' if density_str == active_density_str }}">{{ density_label_str }}</a>

@@ -109,12 +109,12 @@ by `tests/test_theme_no_hardcoded_colors.py`.
 
 ## Look and feel
 
-Bench renders in the `swiss` signature variant: white page, one grotesque sans
-for everything, heavy black rules, and a single red. The red is the page's only
-colour and is deliberately shared by the active nav item, the WIRED badge, and
-negative figures — gains stay ink, because only the thing that demands
-attention gets colour. Code-shaped content (logs, commands, paths) keeps a
-monospace face regardless of the variant.
+Bench renders in the `desk` signature variant: pure white, mono figures against
+a grotesque for prose, hairline containers, and colour spent only on
+machine-readable state — a link, an active tab, a PASS, a SKIP, a FAIL. The
+equity curve stays ink and the benchmark stays grey. The rule that keeps this
+from drifting into decoration: if a value cannot be PASS/SKIP/FAIL or
+navigable, it renders in ink.
 
 Strategies are identified by their file stem (`strategy_mr_dv2`), not a
 prettified rename — the stem is the identity the results tree, the logs, and
@@ -135,26 +135,33 @@ It also redeclares the palette tokens to plain black-on-white — paper is a
 physical medium, not a signature variant, and without that override a dark
 variant would print its light foreground onto white and come out near-blank.
 
-## Switching style
+## One style, two densities
 
-The **Style** control in the footer switches the console between signature
-variants — `swiss` (default), `blueprint` (a dark cyanotype drawing sheet,
-monospace throughout), and `journal` (warm paper, serif). It writes one
-display-only cookie; nothing reaches the server or a launched job.
+There is no style switcher. Bench previously offered `swiss`, `blueprint` and
+`journal` alongside the house look — a design search kept alive past its
+usefulness. A single-operator research console gains nothing from a menu of
+identities, and the switch could leave the console and the report embedded
+inside it disagreeing about which palette was active.
 
-It restyles **Bench only**. Reports are baked at render time by
-`alpha.engine.report`, so an already-generated `report.html` keeps whatever
-variant produced it — switching here can leave the console and an embedded
-report disagreeing until that report is re-rendered. The report variant is set
-separately by `ALPHA_REPORT_VARIANT_STR`.
+What remains is a **Density** control in the top bar: `Working` and
+`Presentation`. It scales type and row height only, for showing the console on
+a projector, and writes one display-only cookie; nothing reaches the server or
+a launched job. It never gates content — both densities render identical
+markup, so what you rehearse is what the room sees.
 
 There is **one palette**, and it lives in `alpha/engine/theme.py`. `bench.css`
 is written directly against the report's own token names (`--color-ink`,
-`--font-figure`, …), and `build_bench_theme_css()` emits the active signature
-variant using the exact same `:root` builder the report layout uses. Switching
-signature variant therefore moves both surfaces at once.
+`--font-figure`, …), and `build_bench_theme_css()` emits it using the exact
+same `:root` builder the report layout uses. `alpha.engine.report` renders
+under the same `desk` variant by default, so the console and the artifacts
+embedded in it agree.
 
-`bench.css` keeps a `:root` of its own holding the swiss values, purely so the
+Charts are rasterised at render time, so the variant is baked into every saved
+PNG. Artifacts written under a previous variant keep it for good; only a fresh
+run adopts a change. Override with `ALPHA_REPORT_VARIANT_STR` if you need the
+legacy `current` dashboard.
+
+`bench.css` keeps a `:root` of its own holding the desk values, purely so the
 console still renders correctly with no theme block injected. That is a second
 copy of the palette, so a test pins every token in it to the generated value —
 add a colour to the signature palette, never to the stylesheet.

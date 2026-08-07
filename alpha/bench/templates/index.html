@@ -1,197 +1,176 @@
 {% extends "base.html" %}
 {% set active_nav = "strategies" %}
-{% block title %}Strategies{% endblock %}
+{% block title %}Strategy catalog{% endblock %}
 
 {% block content %}
 {# Evidence and absence of evidence are different objects: a strategy with a
    measured track record renders as a dense sortable row, while the many files
-   that have never been run are collapsed below — they would otherwise drown
-   the seven you actually trade in identical empty cards. #}
+   that have never been run are disclosed separately — they would otherwise
+   drown the handful you actually trade in identical empty rows. #}
 {% set tested_card_list = card_dict_list | selectattr('is_tested_bool') | list %}
 {% set untested_card_list = card_dict_list | rejectattr('is_tested_bool') | list %}
 
-<div class="page-head">
-  <div>
-    <div class="page-kicker">Research inventory</div>
-    <h1 class="page-title">Strategies</h1>
-    <p class="page-sub">Saved evidence first. Analyzer cells read V / C / T / R / S; an inked cell means a saved report exists, while a dashed cell means the current module lacks the required hook.</p>
-  </div>
-  <div class="stat-row">
-    <div class="stat"><div class="stat-value">{{ strategy_count_int }}</div><div class="stat-label">Strategies</div></div>
-    <div class="stat"><div class="stat-value">{{ tested_card_list|length }}</div><div class="stat-label">Tested</div></div>
-    <div class="stat"><div class="stat-value">{{ wired_count_int }}</div><div class="stat-label">Wired</div></div>
-    <div class="stat"><div class="stat-value">{{ recent_strategy_count_int }}</div><div class="stat-label">Recent {{ recent_run_window_day_int }}d</div></div>
-  </div>
-</div>
+<header class="catalog-head">
+  <div class="page-kicker">Research control panel</div>
+  <h1 class="catalog-title">Strategy catalog</h1>
+  <p class="catalog-strapline">Evidence first: tested strategies are separate from strategies that have never run.</p>
+</header>
 
-<div class="toolbar">
-  {# Filters get the full measure; search sits under them so neither has to
-     compete for width. Category chips stack (OR within the set); Wired and
-     Recent are independent toggles that AND on top. #}
-  <div class="filter-stack" id="filter-bar">
-    <div class="filter-bar">
+<section class="catalog-stat-band" aria-label="Catalog totals">
+  <div><span>Discovered</span><b>{{ strategy_count_int }}</b></div>
+  <div><span>Promoted</span><b>{{ promoted_count_int }}</b></div>
+  <div><span>Tested</span><b>{{ tested_card_list|length }}</b></div>
+  <div><span>Never run</span><b>{{ untested_card_list|length }}</b></div>
+</section>
+
+<div class="catalog-toolbar" id="filter-bar">
+  <input id="search" class="search" type="text" placeholder="Search module or family…" autocomplete="off">
+
+  <div class="toolbar-group">
+    <span class="toolbar-group-label">Maturity</span>
     <span class="filter-chip active" data-filter="all">All</span>
-    <span class="filter-chip recent" data-filter="recent">Recent Runs · {{ recent_run_window_day_int }}d</span>
-    <span class="filter-chip wired" data-filter="wired">★ Wired</span>
-    {% for category_str, category_label_str in category_pair_list %}
-      <span class="filter-chip" data-filter="cat:{{ category_str }}">{{ category_label_str }}</span>
-    {% endfor %}
-    </div>
-    <div class="filter-bar momentum-filter-bar">
-      {% for subcategory_str, subcategory_label_str, strategy_count_int in momentum_subcategory_tuple_list %}
-        <span class="filter-chip" data-filter="subcat:{{ subcategory_str }}">{{ subcategory_label_str }} <span class="filter-count">{{ strategy_count_int }}</span></span>
-      {% endfor %}
-    </div>
+    <span class="filter-chip" data-filter="maturity:wired">Wired</span>
+    <span class="filter-chip" data-filter="maturity:pm_ready">PM_ready</span>
+    <span class="filter-chip" data-filter="maturity:research">Research</span>
   </div>
-  <input id="search" class="search" type="text" placeholder="Search strategies by name, family, or description…" autocomplete="off">
+
+  <div class="toolbar-group">
+    <span class="toolbar-group-label">Family</span>
+    <select id="family-select" class="toolbar-select" aria-label="Filter by family">
+      <option value="">All families</option>
+      {% for category_str, category_label_str in category_pair_list %}
+      <option value="cat:{{ category_str }}">{{ category_label_str }}</option>
+      {% endfor %}
+      {% for subcategory_str, subcategory_label_str, subcategory_count_int in momentum_subcategory_tuple_list %}
+      <option value="subcat:{{ subcategory_str }}">{{ subcategory_label_str }} ({{ subcategory_count_int }})</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <span class="toolbar-recent">
+    <span class="filter-chip" data-filter="recent">Recent · {{ recent_run_window_day_int }}d</span>
+  </span>
 </div>
 
-<div class="section section-flush">
-  <h2 class="section-title">Tested</h2>
-  <p class="table-caption">{{ tested_card_list|length }} strategies with at least one recorded run. Metrics are the latest vanilla backtest; click a column header to sort — strategies missing that figure always sink to the bottom. Tick 2–5 rows to compare them side by side.</p>
-  <div id="compare-bar" class="compare-bar hidden">
-    <span class="compare-count" id="compare-count"></span>
-    <a class="btn btn-sm btn-primary" id="compare-link" href="#">Compare</a>
-    <button class="btn btn-sm btn-ghost" id="compare-clear" type="button">Clear</button>
-  </div>
-  <div class="panel">
-    <table class="table table-dense" id="tested-table">
-      <thead>
-        <tr>
-          <th class="cmp-cell"></th>
-          <th>Strategy</th>
-          <th>Analyzers</th>
-          <th class="num sortable" data-sort-key="cagr">CAGR</th>
-          <th class="num sortable" data-sort-key="sharpe">Sharpe</th>
-          <th class="num sortable" data-sort-key="maxdd">Max DD</th>
-          <th class="num sortable" data-sort-key="trades">Trades</th>
-          <th class="sortable" data-sort-key="lastrun">Last run</th>
-          <th class="num">Runs</th>
-          <th></th>
-        </tr>
-      </thead>
+<div class="panel catalog-panel">
+  <table class="table table-dense catalog-table" id="tested-table">
+    <thead>
+      <tr>
+        <th>Strategy</th>
+        <th>Maturity</th>
+        <th>Family</th>
+        <th class="sortable" data-sort-key="lastrun">Last vanilla</th>
+        <th class="num sortable" data-sort-key="cagr">CAGR</th>
+        <th class="num sortable" data-sort-key="sharpe">Sharpe</th>
+        <th class="num sortable" data-sort-key="maxdd">Max DD</th>
+        <th class="num sortable" data-sort-key="trades">Trades</th>
+        {# The analyzer block is one unit, so it takes one header cell and the
+           five codes label the marks beneath them. #}
+        <th class="analyzer-head">Analyzers <span class="analyzer-code-row">{% for code_str in ('V', 'C', 'T', 'R', 'S') %}<i>{{ code_str }}</i>{% endfor %}</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for card in tested_card_list %}
+      {% set s = card.strategy %}
+      {% set sv = card.sort_value_dict %}
+      {% set sm = card.latest_vanilla_run.summary_dict if card.latest_vanilla_run else {} %}
+      <tr class="strat-item catalog-row"
+          data-module="{{ s.module_import_str }}"
+          data-href="{{ url_for('strategy_page_fn', module_import_str=s.module_import_str) }}"
+          data-maturity="{{ 'wired' if s.is_wired_bool else 'pm_ready' if s.is_pm_ready_bool else 'research' }}"
+          data-recent="{{ '1' if card.has_recent_run_bool else '0' }}"
+          data-category="{{ s.category_str }}"
+          data-subcategory="{{ s.subcategory_str or '' }}"
+          data-search="{{ (s.display_name_str ~ ' ' ~ s.stem_str ~ ' ' ~ s.summary_str ~ ' ' ~ s.category_label_str ~ ' ' ~ (s.subcategory_label_str or ''))|lower }}"
+          data-cagr="{{ '%.4f'|format(sv.cagr) if sv.cagr is not none }}"
+          data-sharpe="{{ '%.4f'|format(sv.sharpe) if sv.sharpe is not none }}"
+          data-maxdd="{{ '%.4f'|format(sv.maxdd) if sv.maxdd is not none }}"
+          data-trades="{{ '%.0f'|format(sv.trades) if sv.trades is not none }}"
+          data-lastrun="{{ '%.0f'|format(sv.last_run) if sv.last_run is not none }}">
+        <td class="catalog-name mono">{{ s.stem_str }}{% if not s.has_run_variant_bool %} <span class="badge badge-norun">no run_variant</span>{% endif %}</td>
+        <td>
+          {% if s.is_wired_bool %}<span class="maturity maturity-wired">WIRED</span>
+          {% elif s.is_pm_ready_bool %}<span class="maturity maturity-pm">PM_READY</span>
+          {% else %}<span class="maturity maturity-research">RESEARCH</span>{% endif %}
+        </td>
+        {# Most specific label available. Momentum strategies are only really
+           distinguished by their subfamily, so collapsing every one of them to
+           "Momentum" would make the column useless for the largest family. #}
+        <td class="catalog-family">{{ s.subcategory_label_str or s.category_label_str }}</td>
+        <td class="muted">{{ card.latest_vanilla_run.display_timestamp_str if card.latest_vanilla_run else '—' }}</td>
+        <td class="num {{ 'tone-pos' if (sm.get('ann_return_pct') or 0) >= 0 else 'tone-neg' }}">{{ sm.get('ann_return_pct')|pct }}</td>
+        <td class="num">{{ sm.get('sharpe')|ratio }}</td>
+        <td class="num tone-neg">{{ sm.get('max_drawdown_pct')|pct }}</td>
+        <td class="num">{{ sm.get('trade_count')|count }}</td>
+        <td>
+          {# A filled mark means a saved report exists for that analyzer; a
+             hollow one means it does not. The distinction is the whole point
+             of the catalog, so it is never collapsed into a single score. #}
+          <span class="analyzer-marks" aria-label="Analyzer evidence">
+            {% for analyzer in card.analyzer_view_list %}
+            <i class="analyzer-mark status-{{ analyzer.status_class_str }}"
+               title="{{ analyzer.label_str }} · {{ analyzer.status_str }}">{{ '✓' if analyzer.has_evidence_bool else '○' }}</i>
+            {% endfor %}
+          </span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div id="no-results" class="empty hidden">No tested strategies match your search.</div>
+</div>
+
+<div class="catalog-footer-bar">
+  <details id="untested-list" class="untested catalog-untested">
+    <summary class="untested-summary">{{ untested_card_list|length }} strategies never run</summary>
+    <p class="table-caption">Files under <span class="mono">strategies/</span> that no run in <span class="mono">results/</span> maps to. "Never run" is a different state from "ran and failed" — nothing here carries a measured number.</p>
+    <table class="table table-dense">
+      <thead><tr><th>Strategy</th><th>Maturity</th><th>Family</th><th>Analyzers</th></tr></thead>
       <tbody>
-        {% for card in tested_card_list %}
+        {% for card in untested_card_list %}
         {% set s = card.strategy %}
-        {% set sv = card.sort_value_dict %}
-        {% set sm = card.latest_vanilla_run.summary_dict if card.latest_vanilla_run else {} %}
-        <tr class="strat-item"
+        <tr class="strat-item catalog-row"
             data-module="{{ s.module_import_str }}"
-            data-wired="{{ '1' if s.is_wired_bool else '0' }}"
-            data-recent="{{ '1' if card.has_recent_run_bool else '0' }}"
+            data-href="{{ url_for('strategy_page_fn', module_import_str=s.module_import_str) }}"
+            data-maturity="{{ 'wired' if s.is_wired_bool else 'pm_ready' if s.is_pm_ready_bool else 'research' }}"
+            data-recent="0"
             data-category="{{ s.category_str }}"
             data-subcategory="{{ s.subcategory_str or '' }}"
-            data-search="{{ (s.display_name_str ~ ' ' ~ s.stem_str ~ ' ' ~ s.summary_str ~ ' ' ~ s.category_label_str ~ ' ' ~ (s.subcategory_label_str or ''))|lower }}"
-            data-cagr="{{ '%.4f'|format(sv.cagr) if sv.cagr is not none }}"
-            data-sharpe="{{ '%.4f'|format(sv.sharpe) if sv.sharpe is not none }}"
-            data-maxdd="{{ '%.4f'|format(sv.maxdd) if sv.maxdd is not none }}"
-            data-trades="{{ '%.0f'|format(sv.trades) if sv.trades is not none }}"
-            data-lastrun="{{ '%.0f'|format(sv.last_run) if sv.last_run is not none }}">
-          <td class="cmp-cell"><input type="checkbox" class="cmp-check" value="{{ s.module_import_str }}" aria-label="Select {{ s.stem_str }} for comparison"></td>
+            data-search="{{ (s.display_name_str ~ ' ' ~ s.stem_str ~ ' ' ~ s.summary_str ~ ' ' ~ s.category_label_str ~ ' ' ~ (s.subcategory_label_str or ''))|lower }}">
+          <td class="catalog-name mono">{{ s.stem_str }}{% if not s.has_run_variant_bool %} <span class="badge badge-norun">no run_variant</span>{% endif %}</td>
           <td>
-            <div class="strat-name">
-              <a class="mono" href="{{ url_for('strategy_page_fn', module_import_str=s.module_import_str) }}">{{ s.stem_str }}</a>
-              {% if s.is_wired_bool %}<span class="badge badge-wired">Wired</span>{% elif s.is_pm_ready_bool %}<span class="badge badge-pmready">PM-ready</span>{% endif %}
-            </div>
-            <div class="strat-badges">
-              <span class="badge badge-cat">{{ s.category_label_str }}</span>
-              {% if s.subcategory_label_str %}<span class="badge badge-subcat">{{ s.subcategory_label_str }}</span>{% endif %}
-              {% if not s.has_run_variant_bool %}<span class="badge badge-norun">no run_variant</span>{% endif %}
-            </div>
+            {% if s.is_wired_bool %}<span class="maturity maturity-wired">WIRED</span>
+            {% elif s.is_pm_ready_bool %}<span class="maturity maturity-pm">PM_READY</span>
+            {% else %}<span class="maturity maturity-research">RESEARCH</span>{% endif %}
           </td>
+          {# Most specific label available. Momentum strategies are only really
+           distinguished by their subfamily, so collapsing every one of them to
+           "Momentum" would make the column useless for the largest family. #}
+        <td class="catalog-family">{{ s.subcategory_label_str or s.category_label_str }}</td>
           <td>
-            <div class="analyzer-mini" aria-label="Analyzer readiness">
+            <span class="analyzer-marks" aria-label="Analyzer evidence">
               {% for analyzer in card.analyzer_view_list %}
-              <span class="analyzer-dot status-{{ analyzer.status_class_str }}" title="{{ analyzer.label_str }} · {{ analyzer.status_str }}">{{ analyzer.code_str }}</span>
+              <i class="analyzer-mark status-{{ analyzer.status_class_str }}"
+                 title="{{ analyzer.label_str }} · {{ analyzer.status_str }}">{{ '✓' if analyzer.has_evidence_bool else '○' }}</i>
               {% endfor %}
-            </div>
-          </td>
-          <td class="num {{ 'tone-pos' if (sm.get('ann_return_pct') or 0) >= 0 else 'tone-neg' }}">{{ sm.get('ann_return_pct')|pct }}</td>
-          <td class="num">{{ sm.get('sharpe')|ratio }}</td>
-          <td class="num tone-neg">{{ sm.get('max_drawdown_pct')|pct }}</td>
-          <td class="num">{{ '{:,}'.format(sm.get('trade_count')|int) if sm.get('trade_count') is not none else '—' }}</td>
-          <td class="muted">{{ card.latest_run.display_timestamp_str[:10] }} · {{ card.latest_run.display_analysis_label_str|lower }}</td>
-          <td class="num">{{ card.run_count_int }}</td>
-          <td class="num">
-            <div class="btn-row job-actions">
-              <form class="inline" method="post" action="{{ url_for('run_api_fn') }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
-                <input type="hidden" name="module_import" value="{{ s.module_import_str }}">
-                <input type="hidden" name="analysis" value="vanilla">
-                <button class="btn btn-sm" {{ 'disabled' if not s.has_run_variant_bool }}>Run</button>
-              </form>
-              <a class="btn btn-sm btn-primary" href="{{ url_for('strategy_page_fn', module_import_str=s.module_import_str) }}">Open</a>
-            </div>
+            </span>
           </td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
-  </div>
-  <div id="no-results" class="empty hidden">No tested strategies match your search.</div>
-</div>
-
-<div class="section">
-  <h2 class="section-title">Not yet tested</h2>
-  <details id="untested-list" class="untested">
-    <summary class="untested-summary">
-      Show {{ untested_card_list|length }} strategies with no recorded run
-    </summary>
-    <p class="table-caption">Files under <span class="mono">strategies/</span> that no run in <span class="mono">results/</span> maps to. "Never run" is a different state from "ran and failed" — nothing here carries a measured number.</p>
-    <div class="panel">
-      <table class="table table-dense">
-        <thead><tr><th>Strategy</th><th>Family</th><th>Analyzers</th><th></th></tr></thead>
-        <tbody>
-          {% for card in untested_card_list %}
-          {% set s = card.strategy %}
-          <tr class="strat-item"
-              data-module="{{ s.module_import_str }}"
-              data-wired="{{ '1' if s.is_wired_bool else '0' }}"
-              data-recent="0"
-              data-category="{{ s.category_str }}"
-              data-subcategory="{{ s.subcategory_str or '' }}"
-              data-search="{{ (s.display_name_str ~ ' ' ~ s.stem_str ~ ' ' ~ s.summary_str ~ ' ' ~ s.category_label_str ~ ' ' ~ (s.subcategory_label_str or ''))|lower }}">
-            <td>
-              <div class="strat-name">
-                <a class="mono" href="{{ url_for('strategy_page_fn', module_import_str=s.module_import_str) }}">{{ s.stem_str }}</a>
-                {% if s.is_wired_bool %}<span class="badge badge-wired">Wired</span>{% elif s.is_pm_ready_bool %}<span class="badge badge-pmready">PM-ready</span>{% endif %}
-                {% if not s.has_run_variant_bool %}<span class="badge badge-norun">no run_variant</span>{% endif %}
-              </div>
-            </td>
-            <td>
-              <span class="badge badge-cat">{{ s.category_label_str }}</span>
-              {% if s.subcategory_label_str %}<span class="badge badge-subcat">{{ s.subcategory_label_str }}</span>{% endif %}
-            </td>
-            <td>
-              <div class="analyzer-mini" aria-label="Analyzer readiness">
-                {% for analyzer in card.analyzer_view_list %}
-                <span class="analyzer-dot status-{{ analyzer.status_class_str }}" title="{{ analyzer.label_str }} · {{ analyzer.status_str }}">{{ analyzer.code_str }}</span>
-                {% endfor %}
-              </div>
-            </td>
-            <td class="num">
-              <div class="btn-row job-actions">
-                <form class="inline" method="post" action="{{ url_for('run_api_fn') }}">
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
-                  <input type="hidden" name="module_import" value="{{ s.module_import_str }}">
-                  <input type="hidden" name="analysis" value="vanilla">
-                  <button class="btn btn-sm" {{ 'disabled' if not s.has_run_variant_bool }}>Run vanilla</button>
-                </form>
-                <a class="btn btn-sm btn-ghost" href="{{ url_for('strategy_page_fn', module_import_str=s.module_import_str) }}">Open</a>
-              </div>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
   </details>
+
+  <div class="catalog-footer-actions">
+    <span class="catalog-selection" id="selection-note">Select a row</span>
+    <a class="btn" id="compare-link" href="#">Compare selected</a>
+    <a class="btn btn-primary" id="open-link" href="#">Open strategy</a>
+  </div>
 </div>
 
 {% if recent_run_list %}
-<div class="section">
-  <h2 class="section-title">Recent runs</h2>
-  <p class="table-caption">Newest {{ recent_run_list|length }} analyzer run{{ 's' if recent_run_list|length != 1 }} across every strategy, ordered by when the artifacts were written.</p>
+<details class="section recent-runs-disclosure">
+  <summary class="untested-summary">Recent runs · newest {{ recent_run_list|length }} across every strategy</summary>
   <div class="panel">
     <table class="table">
       <thead><tr><th>Strategy</th><th>Analysis</th><th>When</th><th>Backtest window</th><th class="num">CAGR</th><th class="num">Sharpe</th><th class="num">Max DD</th><th></th></tr></thead>
@@ -212,73 +191,78 @@
       </tbody>
     </table>
   </div>
-</div>
+</details>
 {% endif %}
 
 <script>
   (function () {
     const searchInput = document.getElementById('search');
+    const familySelect = document.getElementById('family-select');
     const itemList = Array.from(document.querySelectorAll('.strat-item'));
     const chipList = Array.from(document.querySelectorAll('#filter-bar .filter-chip'));
     const allChip = chipList.find(function (c) { return c.dataset.filter === 'all'; });
     const noResults = document.getElementById('no-results');
     const untestedDetails = document.getElementById('untested-list');
 
-    // Stacking filters: category/subcategory chips accumulate (an item matches
-    // if it belongs to ANY selected family); Wired and Recent are independent
-    // toggles ANDed on top. "All" clears everything.
-    const activeCategorySet = new Set();
-    let wiredOnly = false;
+    // Maturity chips accumulate (a row matches if it is ANY selected
+    // maturity); family is a single-choice dropdown; Recent is an independent
+    // toggle ANDed on top. "All" clears the maturity set only — the family
+    // dropdown owns its own reset option.
+    const activeMaturitySet = new Set();
     let recentOnly = false;
 
     function apply() {
       const query = searchInput.value.trim().toLowerCase();
+      const family = familySelect.value;
       let testedVisible = 0;
       let untestedVisible = 0;
       itemList.forEach(function (item) {
         const inTested = !untestedDetails.contains(item);
         let ok = true;
-        if (wiredOnly) ok = ok && item.dataset.wired === '1';
         if (recentOnly) ok = ok && item.dataset.recent === '1';
-        if (activeCategorySet.size > 0) {
-          ok = ok && (activeCategorySet.has('cat:' + item.dataset.category)
-                   || activeCategorySet.has('subcat:' + item.dataset.subcategory));
+        if (activeMaturitySet.size > 0) {
+          ok = ok && activeMaturitySet.has('maturity:' + item.dataset.maturity);
+        }
+        if (family) {
+          ok = ok && (family === 'cat:' + item.dataset.category
+                   || family === 'subcat:' + item.dataset.subcategory);
         }
         ok = ok && (!query || item.dataset.search.indexOf(query) !== -1);
         item.classList.toggle('hidden', !ok);
+        // A row filtered out of view must not stay selected: acting on an
+        // invisible selection is how you open the wrong strategy.
+        if (!ok) item.classList.remove('is-selected');
         if (ok) { if (inTested) testedVisible++; else untestedVisible++; }
       });
       noResults.classList.toggle('hidden', testedVisible !== 0);
       // A search that only matches never-run files would look like "no results"
       // while its hits sit inside the collapsed section — open it for them.
       if (query && untestedVisible > 0 && testedVisible === 0) untestedDetails.open = true;
-      allChip.classList.toggle('active', activeCategorySet.size === 0 && !wiredOnly && !recentOnly);
+      allChip.classList.toggle('active', activeMaturitySet.size === 0);
+      refreshSelection();
     }
 
     chipList.forEach(function (chip) {
       chip.addEventListener('click', function () {
         const filter = chip.dataset.filter;
         if (filter === 'all') {
-          activeCategorySet.clear();
-          wiredOnly = false;
-          recentOnly = false;
-          chipList.forEach(function (c) { c.classList.remove('active'); });
-        } else if (filter === 'wired') {
-          wiredOnly = !wiredOnly;
-          chip.classList.toggle('active', wiredOnly);
+          activeMaturitySet.clear();
+          chipList.forEach(function (c) {
+            if (c.dataset.filter !== 'recent') c.classList.remove('active');
+          });
         } else if (filter === 'recent') {
           recentOnly = !recentOnly;
           chip.classList.toggle('active', recentOnly);
         } else {
-          if (activeCategorySet.has(filter)) activeCategorySet.delete(filter);
-          else activeCategorySet.add(filter);
-          chip.classList.toggle('active', activeCategorySet.has(filter));
+          if (activeMaturitySet.has(filter)) activeMaturitySet.delete(filter);
+          else activeMaturitySet.add(filter);
+          chip.classList.toggle('active', activeMaturitySet.has(filter));
         }
         apply();
       });
     });
     searchInput.addEventListener('input', apply);
-    apply();
+    familySelect.addEventListener('change', apply);
 
     // Column sorting for the tested table. First click sorts descending (the
     // "best first" reading for every metric here — Max DD values are negative,
@@ -308,41 +292,57 @@
       });
     });
 
-    // Compare selection: 2–5 ticked rows enable the Compare link, which is a
-    // plain GET to /compare — selection lives only in the DOM.
+    // Row selection drives both footer actions: one row opens, two to five
+    // compare. Selection lives only in the DOM — both actions are plain GETs.
     const COMPARE_MAX = 5;
-    const compareBar = document.getElementById('compare-bar');
-    const compareCount = document.getElementById('compare-count');
+    const selectionNote = document.getElementById('selection-note');
     const compareLink = document.getElementById('compare-link');
-    const compareChecks = Array.from(document.querySelectorAll('.cmp-check'));
+    const openLink = document.getElementById('open-link');
 
-    function refreshCompareBar() {
-      const picked = compareChecks.filter(function (c) { return c.checked; });
-      compareBar.classList.toggle('hidden', picked.length === 0);
-      compareCount.textContent = picked.length + ' selected' + (picked.length < 2 ? ' — pick at least 2' : '');
-      const ready = picked.length >= 2 && picked.length <= COMPARE_MAX;
-      compareLink.classList.toggle('disabled', !ready);
-      compareLink.href = ready
-        ? '{{ url_for("compare_page_fn") }}?' + picked.map(function (c) {
-            return 'm=' + encodeURIComponent(c.value);
-          }).join('&')
-        : '#';
+    function selectedRows() {
+      return itemList.filter(function (r) { return r.classList.contains('is-selected'); });
     }
 
-    compareChecks.forEach(function (check) {
-      check.addEventListener('change', function () {
-        const picked = compareChecks.filter(function (c) { return c.checked; });
-        if (picked.length > COMPARE_MAX) { check.checked = false; return; }
-        refreshCompareBar();
+    function refreshSelection() {
+      const picked = selectedRows();
+      const compareReady = picked.length >= 2 && picked.length <= COMPARE_MAX;
+      const openReady = picked.length === 1;
+
+      selectionNote.textContent = picked.length === 0
+        ? 'Select a row'
+        : picked.length + ' selected';
+
+      compareLink.classList.toggle('disabled', !compareReady);
+      compareLink.href = compareReady
+        ? '{{ url_for("compare_page_fn") }}?' + picked.map(function (r) {
+            return 'm=' + encodeURIComponent(r.dataset.module);
+          }).join('&')
+        : '#';
+
+      openLink.classList.toggle('disabled', !openReady);
+      openLink.href = openReady ? picked[0].dataset.href : '#';
+    }
+
+    itemList.forEach(function (row) {
+      row.addEventListener('click', function (event) {
+        // Let a real link inside the row win over row selection.
+        if (event.target.closest('a, button, input, select')) return;
+        row.classList.toggle('is-selected');
+        if (selectedRows().length > COMPARE_MAX) row.classList.remove('is-selected');
+        refreshSelection();
+      });
+      row.addEventListener('dblclick', function () {
+        window.location.href = row.dataset.href;
       });
     });
-    compareLink.addEventListener('click', function (event) {
-      if (compareLink.classList.contains('disabled')) event.preventDefault();
+
+    [compareLink, openLink].forEach(function (link) {
+      link.addEventListener('click', function (event) {
+        if (link.classList.contains('disabled')) event.preventDefault();
+      });
     });
-    document.getElementById('compare-clear').addEventListener('click', function () {
-      compareChecks.forEach(function (c) { c.checked = false; });
-      refreshCompareBar();
-    });
+
+    apply();
   })();
 </script>
 {% endblock %}

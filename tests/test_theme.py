@@ -37,7 +37,7 @@ def test_base_variant_context_is_a_no_op():
 def test_variant_context_restores_palette_on_exit():
     before_palette_dict = dict(SIGNATURE_PALETTE_DICT)
 
-    with signature_variant_context('journal'):
+    with signature_variant_context('desk'):
         assert SIGNATURE_PALETTE_DICT['strategy'] != before_palette_dict['strategy']
 
     assert dict(SIGNATURE_PALETTE_DICT) == before_palette_dict
@@ -47,7 +47,7 @@ def test_variant_context_restores_palette_after_exception():
     before_palette_dict = dict(SIGNATURE_PALETTE_DICT)
 
     with pytest.raises(RuntimeError):
-        with signature_variant_context('journal'):
+        with signature_variant_context('desk'):
             raise RuntimeError('boom')
 
     assert dict(SIGNATURE_PALETTE_DICT) == before_palette_dict

@@ -276,7 +276,7 @@ class ReportFormattingTests(unittest.TestCase):
             hex_digit_str = hex_color_str.lstrip('#')
             return tuple(int(hex_digit_str[i:i + 2], 16) for i in (0, 2, 4))
 
-        with signature_variant_context('journal'):
+        with signature_variant_context('desk'):
             gain_rgb_tuple = rgb_tuple(_signature_heatmap_background_str(0.10, -0.10, 0.10))
             loss_rgb_tuple = rgb_tuple(_signature_heatmap_background_str(-0.10, -0.10, 0.10))
             flat_color_str = _signature_heatmap_background_str(0.0, -0.10, 0.10)
@@ -296,7 +296,7 @@ class ReportFormattingTests(unittest.TestCase):
             hex_digit_str = hex_color_str.lstrip('#')
             return sum(int(hex_digit_str[i:i + 2], 16) for i in (0, 2, 4)) / 3.0
 
-        with signature_variant_context('journal'):
+        with signature_variant_context('desk'):
             small_gain_str = _signature_heatmap_background_str(0.02, -0.10, 0.10)
             big_gain_str = _signature_heatmap_background_str(0.10, -0.10, 0.10)
             small_loss_str = _signature_heatmap_background_str(-0.02, -0.10, 0.10)
@@ -454,12 +454,12 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertEqual(report_html_str.count('<div class="kpi-card">'), 6)
         self.assertIn('+4.20% / 1.35', report_html_str)
 
-    def test_journal_spec_indexes_audit_plate_and_escapes_policy_values(self):
+    def test_spec_layout_indexes_audit_plate_and_escapes_policy_values(self):
         strategy = make_strategy([0.0, 0.01, -0.005, 0.008, -0.002, 0.004])
         strategy._data_adjustment_policy_dict = {"source_str": "<raw>"}
         strategy._accounting_policy_dict = {"mode_str": "cash & carry"}
 
-        with signature_variant_context('journal_spec'):
+        with signature_variant_context('desk'):
             report_html_str = _build_html(strategy, chart_b64='equity-chart-b64')
 
         self.assertRegex(
@@ -1130,7 +1130,7 @@ class ReportFormattingTests(unittest.TestCase):
 
         portfolio = make_portfolio()
         # Plates only exist under the spec layout; the card layouts have none.
-        with signature_variant_context('journal_spec'):
+        with signature_variant_context('desk'):
             report_html_str = _build_portfolio_html(portfolio, chart_b64='portfolio-chart-b64')
 
         anchor_id_list = re.findall(r'<div class="plate" id="(plate-\d+)"', report_html_str)
