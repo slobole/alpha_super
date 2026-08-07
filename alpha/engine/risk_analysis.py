@@ -2269,7 +2269,7 @@ def _return_histogram_svg(
         )
         reference_line_html_list.append(
             f"<line x1=\"{mean_x_float:.1f}\" y1=\"{top_float:.1f}\" x2=\"{mean_x_float:.1f}\" "
-            f"y2=\"{axis_y_float:.1f}\" stroke=\"{SIGNATURE_PALETTE_DICT['overlay_cycle'][0]}\" stroke-width=\"2\" />"
+            f"y2=\"{axis_y_float:.1f}\" stroke=\"{SIGNATURE_PALETTE_DICT['series_cycle'][0]}\" stroke-width=\"2\" />"
         )
     median_value_float = _json_float(median_float)
     if median_value_float is not None:
@@ -2278,15 +2278,15 @@ def _return_histogram_svg(
         )
         reference_line_html_list.append(
             f"<line x1=\"{median_x_float:.1f}\" y1=\"{top_float:.1f}\" x2=\"{median_x_float:.1f}\" "
-            f"y2=\"{axis_y_float:.1f}\" stroke=\"{SIGNATURE_PALETTE_DICT['overlay_cycle'][5]}\" stroke-width=\"2\" stroke-dasharray=\"5 3\" />"
+            f"y2=\"{axis_y_float:.1f}\" stroke=\"{SIGNATURE_PALETTE_DICT['series_cycle'][5]}\" stroke-width=\"2\" stroke-dasharray=\"5 3\" />"
         )
 
     legend_y_float = top_float + 6.0
     legend_x_float = left_float + 10.0
     legend_html_list = [
-        f"<line x1=\"{legend_x_float:.1f}\" y1=\"{legend_y_float:.1f}\" x2=\"{legend_x_float + 18:.1f}\" y2=\"{legend_y_float:.1f}\" stroke=\"{SIGNATURE_PALETTE_DICT['overlay_cycle'][0]}\" stroke-width=\"2\" />",
+        f"<line x1=\"{legend_x_float:.1f}\" y1=\"{legend_y_float:.1f}\" x2=\"{legend_x_float + 18:.1f}\" y2=\"{legend_y_float:.1f}\" stroke=\"{SIGNATURE_PALETTE_DICT['series_cycle'][0]}\" stroke-width=\"2\" />",
         f"<text x=\"{legend_x_float + 24:.1f}\" y=\"{legend_y_float + 4:.1f}\" fill=\"{SIGNATURE_PALETTE_DICT['muted']}\" font-size=\"11\">mean</text>",
-        f"<line x1=\"{legend_x_float + 70:.1f}\" y1=\"{legend_y_float:.1f}\" x2=\"{legend_x_float + 88:.1f}\" y2=\"{legend_y_float:.1f}\" stroke=\"{SIGNATURE_PALETTE_DICT['overlay_cycle'][5]}\" stroke-width=\"2\" stroke-dasharray=\"5 3\" />",
+        f"<line x1=\"{legend_x_float + 70:.1f}\" y1=\"{legend_y_float:.1f}\" x2=\"{legend_x_float + 88:.1f}\" y2=\"{legend_y_float:.1f}\" stroke=\"{SIGNATURE_PALETTE_DICT['series_cycle'][5]}\" stroke-width=\"2\" stroke-dasharray=\"5 3\" />",
         f"<text x=\"{legend_x_float + 94:.1f}\" y=\"{legend_y_float + 4:.1f}\" fill=\"{SIGNATURE_PALETTE_DICT['muted']}\" font-size=\"11\">median</text>",
         f"<line x1=\"{legend_x_float + 150:.1f}\" y1=\"{legend_y_float:.1f}\" x2=\"{legend_x_float + 168:.1f}\" y2=\"{legend_y_float:.1f}\" stroke=\"{SIGNATURE_PALETTE_DICT['ink']}\" stroke-width=\"1\" stroke-dasharray=\"4 4\" />",
         f"<text x=\"{legend_x_float + 174:.1f}\" y=\"{legend_y_float + 4:.1f}\" fill=\"{SIGNATURE_PALETTE_DICT['muted']}\" font-size=\"11\">zero</text>",
@@ -2602,7 +2602,7 @@ def _bootstrap_equity_svg(equity_path_df: pd.DataFrame) -> str:
         ("p05", str(SIGNATURE_PALETTE_DICT['loss_dark']), 0.95, 2.2, "p05"),
         ("p50", str(SIGNATURE_PALETTE_DICT['ink']), 0.95, 2.2, "p50"),
         ("p95", str(SIGNATURE_PALETTE_DICT['profit_dark']), 0.95, 2.2, "p95"),
-        ("observed", str(SIGNATURE_PALETTE_DICT['overlay_cycle'][0]), 1.0, 2.4, "observed"),
+        ("observed", str(SIGNATURE_PALETTE_DICT['series_cycle'][0]), 1.0, 2.4, "observed"),
     )
     for path_kind_str, stroke_str, opacity_float, stroke_width_float, _label_str in overlay_tuple:
         path_df = equity_path_df[equity_path_df["path_kind_str"] == path_kind_str]

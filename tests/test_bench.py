@@ -1747,7 +1747,7 @@ def test_console_renders_the_single_house_variant(recording_client):
     html_str = client.get("/").get_data(as_text=True)
     assert "--color-ink: #16181d" in html_str
     assert "--color-page: #ffffff" in html_str
-    assert "--color-accent: #1a73e8" in html_str
+    assert "--color-accent: #2563eb" in html_str
     # The retired variants must not be reachable or referenced.
     assert client.get("/variant/blueprint").status_code == 404
     for retired_name_str in ("Blueprint", "Journal", "Swiss"):

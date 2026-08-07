@@ -1398,7 +1398,7 @@ def _build_report_html_str(study_result_obj: CapacityStudyResult) -> str:
             "not raise the contiguous capacity classification.</p>"
         )
     chart_one_series_list = [
-        ("Baseline Sharpe", "baseline_sharpe_float", str(SIGNATURE_PALETTE_DICT['overlay_cycle'][0])),
+        ("Baseline Sharpe", "baseline_sharpe_float", str(SIGNATURE_PALETTE_DICT['series_cycle'][0])),
         ("Capacity Sharpe", "central_sharpe_float", str(SIGNATURE_PALETTE_DICT['profit'])),
         ("Stress Sharpe", "stress_sharpe_float", str(SIGNATURE_PALETTE_DICT['loss'])),
     ]
@@ -1414,9 +1414,9 @@ def _build_report_html_str(study_result_obj: CapacityStudyResult) -> str:
     liquidity_chart_str = _line_chart_svg_str(
         liquidity_chart_df,
         [
-            ("P95 Order/ADV", "order_adv_p95_float", str(SIGNATURE_PALETTE_DICT['overlay_cycle'][0])),
-            ("P99 Order/ADV", "order_adv_p99_float", str(SIGNATURE_PALETTE_DICT['overlay_cycle'][4])),
-            ("Soft limit", "soft_limit_chart_float", str(SIGNATURE_PALETTE_DICT['overlay_cycle'][2])),
+            ("P95 Order/ADV", "order_adv_p95_float", str(SIGNATURE_PALETTE_DICT['series_cycle'][0])),
+            ("P99 Order/ADV", "order_adv_p99_float", str(SIGNATURE_PALETTE_DICT['series_cycle'][4])),
+            ("Soft limit", "soft_limit_chart_float", str(SIGNATURE_PALETTE_DICT['series_cycle'][2])),
             ("Hard limit", "hard_limit_chart_float", str(SIGNATURE_PALETTE_DICT['loss'])),
         ],
         "Liquidity usage versus AUM",
@@ -1425,7 +1425,7 @@ def _build_report_html_str(study_result_obj: CapacityStudyResult) -> str:
     breach_chart_str = _line_chart_svg_str(
         curve_df,
         [
-            ("Soft breaches", "soft_breach_share_float", str(SIGNATURE_PALETTE_DICT['overlay_cycle'][2])),
+            ("Soft breaches", "soft_breach_share_float", str(SIGNATURE_PALETTE_DICT['series_cycle'][2])),
             ("Hard breaches", "hard_breach_share_float", str(SIGNATURE_PALETTE_DICT['loss'])),
         ],
         "Share of orders beyond limits",
@@ -1532,7 +1532,7 @@ def _historical_feasibility_section_html_str(
     performance_chart_str = _line_chart_svg_str(
         full_history_curve_df,
         [
-            ("Baseline Sharpe", "baseline_sharpe_float", str(SIGNATURE_PALETTE_DICT['overlay_cycle'][0])),
+            ("Baseline Sharpe", "baseline_sharpe_float", str(SIGNATURE_PALETTE_DICT['series_cycle'][0])),
             ("Capacity Sharpe", "central_sharpe_float", str(SIGNATURE_PALETTE_DICT['profit'])),
             ("Stress Sharpe", "stress_sharpe_float", str(SIGNATURE_PALETTE_DICT['loss'])),
         ],
@@ -1744,7 +1744,7 @@ def _equity_chart_svg_str(equity_curve_df: pd.DataFrame, title_str: str) -> str:
         )
 
     series_spec_list = [
-        ("Baseline", "baseline_equity_float", str(SIGNATURE_PALETTE_DICT['overlay_cycle'][0])),
+        ("Baseline", "baseline_equity_float", str(SIGNATURE_PALETTE_DICT['series_cycle'][0])),
         ("Central", "central_equity_float", str(SIGNATURE_PALETTE_DICT['profit'])),
         ("Stress", "stress_equity_float", str(SIGNATURE_PALETTE_DICT['loss'])),
     ]

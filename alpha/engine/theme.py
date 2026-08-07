@@ -88,6 +88,18 @@ SIGNATURE_PALETTE_DICT: dict[str, object] = {
     'legend_edge': '#dfe1e6',
     'label_face': '#ffffff',
     'overlay_cycle': list(SEABORN_DEEP_COLOR_LIST),
+    # *** UI*** Two cycles, because one list was doing two incompatible jobs.
+    #
+    #   series_cycle  — analytic lines that must be told APART: Baseline vs
+    #                   Central vs Stress, P50 vs P95 vs P99. Wants distinct,
+    #                   saturated hues.
+    #   overlay_cycle — composition stacks that must NOT compete: seven sleeves
+    #                   of one book. Wants muted, adjacent tones.
+    #
+    # They were the same list, so whichever job it was tuned for, the other got
+    # the wrong answer. Tuning it for stacks is what made every multi-series
+    # analyzer chart render in muted earth.
+    'series_cycle': list(SEABORN_DEEP_COLOR_LIST),
     'mean_line': '#357de8',
     'shadow_rgba': 'rgba(9, 30, 66, 0.04)',
     'font_family_str': 'sans-serif',
@@ -284,29 +296,33 @@ _DESK_PALETTE_DICT: dict[str, object] = {
     'ink': '#16181d',
     'page': '#ffffff',
     'panel': '#ffffff',
-    'neutral': '#f8f9fa',
-    'grid': '#eceef1',
-    'border': '#e0e3e8',
+    'neutral': '#f8fafc',
+    'grid': '#eef2f6',
+    'border': '#e2e8f0',
     'axes_border': '#16181d',
-    'muted': '#5f6470',
-    # The equity curve is ink and the benchmark is grey — the same restraint
-    # every monochrome variant here keeps. Colour is reserved for state.
-    'strategy': '#16181d',
-    'strategy_dark': '#000000',
-    'benchmark': '#9aa0a6',
-    'benchmark_dark': '#71767d',
-    'profit': '#1e8e3e',
-    'profit_dark': '#137333',
-    'loss': '#d93025',
-    'loss_dark': '#b3261e',
-    'accent': '#1a73e8',
-    'accent_dark': '#1558d6',
-    'warning': '#e37400',
+    'muted': '#64748b',
+    # One brand blue, used for the subject of every chart and for every
+    # interactive affordance. The strategy line is blue, not ink: it is the
+    # thing the page is about, and an ink line makes the headline chart read as
+    # a printout rather than as this product.
+    'strategy': '#2563eb',
+    'strategy_dark': '#1d4ed8',
+    # The benchmark is context, so it stays neutral — but a slate grey rather
+    # than a dead grey, so it sits in the same family as the ink.
+    'benchmark': '#94a3b8',
+    'benchmark_dark': '#64748b',
+    'profit': '#15803d',
+    'profit_dark': '#166534',
+    'loss': '#dc2626',
+    'loss_dark': '#b91c1c',
+    'accent': '#2563eb',
+    'accent_dark': '#1d4ed8',
+    'warning': '#d97706',
     'warning_dark': '#b45309',
-    'accent_wash': '#e8f0fe',
-    'profit_wash': '#e6f4ea',
-    'warning_wash': '#fef7e0',
-    'loss_wash': '#fce8e6',
+    'accent_wash': '#eff6ff',
+    'profit_wash': '#f0fdf4',
+    'warning_wash': '#fffbeb',
+    'loss_wash': '#fef2f2',
     # *** UI*** The two panels want opposite treatments, and it is worth being
     # explicit about why.
     #
@@ -327,9 +343,17 @@ _DESK_PALETTE_DICT: dict[str, object] = {
     'legend_face': '#ffffff',
     'legend_edge': '#e0e3e8',
     'label_face': '#ffffff',
-    # Muted earth-and-slate ramp for composition stacks, lifted from the
-    # mockups' weight charts. Desaturated enough that a seven-sleeve stack
-    # never competes with a PASS/FAIL badge sitting next to it.
+    # Analytic series: told apart at a glance, in the mockup's own order —
+    # blue is the subject, green the baseline it is measured against, red the
+    # stress or limit case.
+    'series_cycle': [
+        '#2563eb', '#15803d', '#b91c1c', '#b45309',
+        '#7c3aed', '#0e7490', '#be185d', '#4d7c0f',
+    ],
+    # Composition stacks: muted earth and slate, lifted from the mockups'
+    # weight charts. Desaturated on purpose — seven sleeves of one book are
+    # parts of a whole, not competing series, and at series saturation the
+    # stack would shout louder than every chart around it.
     'overlay_cycle': [
         '#3f5a63', '#a8845c', '#6b7f6a', '#c4b39a',
         '#4a6670', '#8b6f4e', '#9aa5a0', '#d8cdb8',
@@ -606,7 +630,7 @@ code {{
    the default dot, so the middle step comes from the palette's tan instead:
    green, tan, umber is a visible three-step progression. */
 .verdict-dot.v-green {{ background: var(--color-profit-dark); }}
-.verdict-dot.v-amber {{ background: {palette_dict['overlay_cycle'][3]}; }}
+.verdict-dot.v-amber {{ background: var(--color-warning); }}
 .verdict-dot.v-red {{ background: var(--color-loss-dark); }}
 .verdict-dot.v-na {{ background: var(--color-border); }}
 .verdict-text {{
@@ -740,7 +764,7 @@ def build_signature_rcparams(to_web_bool: bool) -> dict[str, object]:
     font_family_str = str(SIGNATURE_PALETTE_DICT['font_family_str'])
     font_stack_list = list(SIGNATURE_PALETTE_DICT['font_stack_list'])
     override_style_dict = {
-        'axes.prop_cycle': cycler(color=list(SIGNATURE_PALETTE_DICT['overlay_cycle'])),
+        'axes.prop_cycle': cycler(color=list(SIGNATURE_PALETTE_DICT['series_cycle'])),
         'figure.facecolor': SIGNATURE_PALETTE_DICT['page'],
         'axes.facecolor': SIGNATURE_PALETTE_DICT['panel'],
         'axes.edgecolor': SIGNATURE_PALETTE_DICT['axes_border'],
@@ -1521,46 +1545,16 @@ th {
 td { padding: 8px 10px; }
 
 /* Vanilla pairs its headline panels; other analyzers are untouched. */
-.report-shell:has(.headline-comparison) .headline-comparison,
-.report-shell:has(.vanilla-summary-table) .vanilla-summary-table {
+/* Full width, on purpose. Pairing it beside the equity curve squeezed a
+   five-row comparison into a side column and made it harder to read than it
+   had been — the opposite of the point. It is the report's headline claim and
+   it gets the whole measure. */
+.headline-comparison {
     border: 1px solid var(--color-border);
     border-radius: 3px;
     padding: 6px 15px 10px;
     margin-bottom: 10px;
-    /* This card holds five short rows and is never wide enough to need a
-       scroller. Leaving .scroll's overflow on put a scrollbar under a table
-       that already fit, which reads as truncated evidence. */
     overflow-x: visible;
-}
-.headline-comparison table { font-size: 0.76rem; }
-.headline-comparison td,
-.headline-comparison th { padding-left: 6px; padding-right: 6px; }
-.headline-comparison .stats-table { min-width: 0; }
-@media (min-width: 1100px) {
-    .report-shell:has(.headline-comparison) {
-        display: grid;
-        grid-template-columns: minmax(0, 1.62fr) minmax(370px, 0.38fr);
-        /* *** UI*** Dense placement is what makes the pairing robust. The
-           headline table precedes the equity plate in the DOM, so ordinary
-           auto-placement would put the plate on the *next* row. Dense lets the
-           plate back-fill the empty column-1 slot beside it — without pinning
-           either to a hardcoded row number, which would break the moment a
-           report gains or loses a full-width section above them. */
-        grid-auto-flow: dense;
-        gap: 0 10px;
-        align-items: start;
-    }
-    .report-shell > .report-header,
-    .report-shell > .spec-masthead,
-    .report-shell > .plate-index {
-        grid-column: 1 / -1;
-    }
-    .report-shell > .headline-comparison { grid-column: 2; }
-    .report-shell > #plate-01 { grid-column: 1; }
-    /* Everything after the headline pair returns to full width: the remaining
-       sections carry wide tables and stacked charts that a half column would
-       compress into unreadability. */
-    .report-shell > .plate:not(#plate-01) { grid-column: 1 / -1; }
 }
 '''
 
