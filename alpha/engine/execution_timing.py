@@ -1028,9 +1028,7 @@ def _build_execution_timing_html_str(execution_timing_result_obj) -> str:
 <div class="plate">
 <h2>All Timing Combinations</h2>
 <div class="scroll">{_format_metric_table_html(execution_timing_result_obj.metric_df)}</div>
-<p class="metric-context">A research diagnostic. The default execution path is highlighted.
-MOC and funding labels mark cells that need explicit live execution handling before they
-should be treated as live-clean.</p>
+<p class="metric-context">Outlined cell = default path · MOC labels need explicit live handling.</p>
 </div>
 </div>
 </body>

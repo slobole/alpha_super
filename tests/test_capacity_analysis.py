@@ -417,7 +417,10 @@ def test_moc_study_classifies_capacity_and_break_even(tmp_path):
         ]
     )
     report_html_str = (output_dir_path / REPORT_FILENAME_STR).read_text(encoding="utf-8")
-    assert "Read this first" in report_html_str
+    # The Read-this-first heading is gone by design: only run-specific warnings
+    # stay above the fold, and the explainer paragraphs moved into the
+    # collapsed method note.
+    assert "Read this first" not in report_html_str
     assert report_html_str.count("<svg") == 4
     assert "Worked MOC example" in report_html_str
     assert "chart.js" not in report_html_str.lower()
@@ -430,12 +433,15 @@ def test_moc_study_classifies_capacity_and_break_even(tmp_path):
     method_note_idx = report_html_str.index('<details class="method-note">')
     assert report_html_str.index("How this works") > method_note_idx
     assert report_html_str.index("Largest liquidity bottlenecks") < method_note_idx
-    # Run-specific warnings are hoisted into Read this first, so they must be
-    # <p> fragments. A leftover <li> would render outside any list.
-    read_first_html_str = report_html_str[
-        report_html_str.index('class="panel read-first"') : report_html_str.index('<section class="cards">')
-    ]
-    assert "<li>" not in read_first_html_str
+    # The window/policy explainer paragraphs live inside the collapsed note now.
+    assert report_html_str.index("Current deployable capacity uses") > method_note_idx
+    # Run-specific warnings are hoisted into the read-first panel, so they must
+    # be <p> fragments; the panel is emitted only when a warning exists.
+    if 'class="panel read-first"' in report_html_str:
+        read_first_html_str = report_html_str[
+            report_html_str.index('class="panel read-first"') : report_html_str.index('<section class="cards">')
+        ]
+        assert "<li>" not in read_first_html_str
     assert json.loads((output_dir_path / SUMMARY_FILENAME_STR).read_text())["execution_policy_str"] == "MOC"
 
 

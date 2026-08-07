@@ -1931,17 +1931,17 @@ Return window: {html.escape(str(summary_dict.get("start_date_str")))} to {html.e
 {_summary_tiles_html(summary_dict)}
 <div class="section">
 <h2>Sample Distribution</h2>
-<div class="subtitle">Each bootstrap path produces its own CAGR, drawdown and Sharpe, so these are {summary_dict.get("simulation_count_int")} draws of how this {entity_type_html} could have gone under the primary block assumption. The shaded band is the 5th to 95th percentile reported in the interval table. The vertical rule is the value the realized backtest actually produced: near the middle of a broad distribution means the result is ordinary for this return series, out at an edge means it depended on the particular sequence that happened.</div>
+<div class="subtitle">{summary_dict.get("simulation_count_int")} bootstrap draws · band = p05&ndash;p95 · rule = realized value.</div>
 {_sample_distribution_svg(risk_result_obj.bootstrap_path_metric_df, risk_result_obj.bootstrap_interval_df, int(summary_dict["primary_mean_block_length_int"]))}
 </div>
 <div class="section">
 <h2>Returns Histogram</h2>
-<div class="subtitle">Distribution of realized daily returns over the sample window. Mean left of median signals negative skew (occasional larger losses). Bar height is share of days, on a square-root scale so the tail stays visible against the central mass.</div>
+<div class="subtitle">Realized daily returns · square-root scale keeps the tail visible.</div>
 {_return_histogram_svg(risk_result_obj.return_histogram_df, mean_float=return_mean_float, median_float=return_median_float)}
 </div>
 <div class="section">
 <h2>Monte Carlo Equity Paths</h2>
-<div class="subtitle">Simulated paths have the same length as the realized history; this shows historically conditioned resampling sensitivity, not a forward horizon.</div>
+<div class="subtitle">Resampling sensitivity, not a forecast.</div>
 {_bootstrap_equity_svg(risk_result_obj.bootstrap_equity_path_df)}
 <div class="legend">Primary block length {summary_dict.get("primary_mean_block_length_int")}; sampled bootstrap paths plus observed, p05, p50, and p95 curves.</div>
 </div>
@@ -2108,11 +2108,9 @@ def _investor_scenario_table_html(investor_scenario_df: pd.DataFrame) -> str:
             "<th>Worst fall</th><th>Longest underwater</th><th>Recovery</th>"
             "<th>Ended below peak</th><th>Never recovered</th>"
             "</tr></thead><tbody>" + "".join(modeled_row_html_list) + "</tbody></table></div>"
-            '<div class="footnote">Typical range is p25 to p75; bad case, worst fall and '
-            "worst 5% are p05; longest underwater is p95; recovery is p50. Recovery counts "
-            "only paths whose deepest drawdown recovered inside the horizon -- "
-            '"never recovered" is how often that did not happen, so the two must be read '
-            "together.</div>"
+            '<div class="footnote">Typical = p25&ndash;p75 · bad case / worst fall = p05 · '
+            "longest underwater = p95 · recovery = p50, recovered paths only &mdash; read "
+            'beside "never recovered".</div>'
         )
     if not section_html_list:
         return "<p>N/A</p>"

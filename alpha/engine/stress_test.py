@@ -2061,11 +2061,8 @@ def _build_crisis_summary_table_html(
         '<div class="scroll"><table><thead><tr>'
         f"<th>Crisis</th><th>Entry</th>{header_html_str}<th>Offset spread</th>"
         "</tr></thead><tbody>" + "".join(row_html_list) + "</tbody></table></div>"
-        '<p class="metric-context">Each figure is the mean across the '
-        f"{len(launch_offset_tuple)} launch offsets ({html.escape(offset_label_str)} "
-        "trading days before the crisis begins). Entry is the average gross exposure "
-        'going in, so a crisis the strategy sat out reads as "in cash" rather than as '
-        f"a 0.00% return.{mixed_note_str}</p>"
+        f'<p class="metric-context">Mean across launch offsets {html.escape(offset_label_str)} '
+        f"trading days before the crisis · entry = gross exposure going in.{mixed_note_str}</p>"
     )
 
 
@@ -2171,11 +2168,8 @@ def _build_crisis_small_multiples_html(stress_result_obj: StressTestResult) -> s
         '<div class="chart-wrap">'
         f'<img src="{small_multiples_uri_str}" alt="Strategy path through each crisis">'
         "</div>"
-        '<p class="metric-context">Each crisis from its event entry, rebased to zero and '
-        "drawn on one shared vertical scale, so a mild crisis looks mild beside a severe "
-        f"one.{benchmark_note_str} The figure beside each name is where the strategy ended "
-        "that crisis. Paths use the longest launch offset, which is the fully established "
-        "case.</p>"
+        '<p class="metric-context">Rebased from event entry, one shared scale · figure = '
+        f"end-of-crisis return.{benchmark_note_str}</p>"
     )
 
 

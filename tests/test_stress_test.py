@@ -345,8 +345,8 @@ class StressTestAnalyzerTests(unittest.TestCase):
             # makes a 0.00% return readable, plus the shared small multiples.
             self.assertIn("Crisis by Crisis", report_html_str)
             self.assertIn("Crisis Summary", report_html_str)
-            self.assertIn("trading days before the crisis begins", report_html_str)
-            self.assertIn("Entry is the average gross exposure going in", report_html_str)
+            self.assertIn("trading days before the crisis", report_html_str)
+            self.assertIn("entry = gross exposure going in", report_html_str)
             # The per-offset heatmaps move to the appendix rather than being lost.
             heatmap_idx_int = report_html_str.index("Heatmap Dashboard")
             self.assertLess(report_html_str.index("Raw Detail Appendix"), heatmap_idx_int)

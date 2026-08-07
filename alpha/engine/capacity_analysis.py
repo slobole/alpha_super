@@ -1486,6 +1486,18 @@ def _build_report_html_str(study_result_obj: CapacityStudyResult) -> str:
     hoisted_warning_html_str = (
         extrapolation_warning_html_str + proxy_extrapolation_warning_html_str
     )
+    # Warnings are the only prose that stays above the fold; the explainer
+    # paragraphs live in the collapsed method note. No warnings, no panel —
+    # an empty ruled box would read as a rendering bug.
+    combined_warning_html_str = (
+        historical_warning_html_str
+        + non_contiguous_warning_html_str
+        + hoisted_warning_html_str
+    )
+    read_first_panel_html_str = (
+        f'<section class="panel read-first">{combined_warning_html_str}</section>'
+        if combined_warning_html_str.strip() else ""
+    )
     full_history_section_html_str = _historical_feasibility_section_html_str(
         full_history_summary_dict,
         full_history_curve_df,
@@ -1500,7 +1512,7 @@ def _build_report_html_str(study_result_obj: CapacityStudyResult) -> str:
 <header class="report-header"><div class="report-eyebrow">Capacity Analysis</div>
 <h1>{html.escape(study_result_obj.strategy_name_str)}</h1>
 <div class="muted">Declared execution: {execution_policy_str}</div></header>
-<section class="panel read-first"><h2>Read this first</h2><p>{html.escape(read_first_str)}</p><p>{html.escape(policy_explanation_str)}</p>{historical_warning_html_str}{non_contiguous_warning_html_str}{hoisted_warning_html_str}</section>
+{read_first_panel_html_str}
 <section class="cards"><div class="card">Optimal capacity<b>{optimal_capacity_str}</b><span class="muted">Highest Central Sharpe among supported current grid points</span></div><div class="card">Recommended max<b>{recommended_capacity_str}</b><span class="muted">Current deployable estimate; contiguous from the lowest grid point</span></div><div class="card">Outer capacity<b>{outer_capacity_str}</b><span class="muted">Stretch estimate, not an operating target</span></div><div class="card">Break-even bracket<b>{break_even_str}</b><span class="muted">Central benchmark-excess-return crossing on the tested grid</span></div></section>
 <h2>Current deployable capacity — recent five years</h2><section class="charts"><div class="panel">{performance_chart_str}</div><div class="panel">{equity_chart_str}<p class="muted">{html.escape(equity_chart_note_str)}</p></div><div class="panel">{liquidity_chart_str}</div><div class="panel">{breach_chart_str}</div></section>
 <section class="panel"><h2>Current-window AUM results</h2>{table_html_str}</section>
@@ -1508,6 +1520,7 @@ def _build_report_html_str(study_result_obj: CapacityStudyResult) -> str:
 <section class="panel"><h2>Largest liquidity bottlenecks</h2><p class="muted">Highest robust Order/ADV observations across the AUM study.</p>{bottleneck_html_str}</section>
 <details class="method-note">
 <summary>Method, assumptions and limitations</summary>
+<p>{html.escape(read_first_str)}</p><p>{html.escape(policy_explanation_str)}</p>
 <h3>How this works</h3><p><b>ADV</b> means average daily dollar volume. <b>Order/ADV</b> asks how large one completed order is compared with the stock's normal liquidity. Bigger ratios are harder to execute without affecting price.</p><p>For every order we calculate both the lagged 10-day mean and lagged 20-day median dollar ADV. We use the lower value. Both windows stop at the previous session, so the calculation does not know today's final volume.</p><div class="formula">q = absolute net order notional / robust lagged dollar ADV<br>impact bps = lambda at 1% ADV x sqrt(q / 0.01)<br>incremental bps = max(0, impact bps - 2.5)</div><p>The ordinary backtest already includes IBKR Fixed commissions and 2.5 bps slippage. CapacityAnalysis never adds those costs again. It subtracts only the non-negative amount above the existing 2.5 bps floor.</p><p><b>Impact profile:</b> {html.escape(profile_display_str)}. <b>Central lambda:</b> {_fmt_bps_str(profile_assumption_dict['central_lambda_1pct_adv_bps_float'])}. <b>Stress lambda:</b> {_fmt_bps_str(profile_assumption_dict['stress_lambda_1pct_adv_bps_float'])}. <b>Confidence:</b> {html.escape(str(profile_assumption_dict['model_confidence_str']))}.</p>{worked_example_str}
 <h3>Assumptions and limitations</h3><ul><li>One strategy declares one auction policy and every MOO strategy explicitly declares one impact profile. The analyzer does not guess.</li><li>{html.escape(proxy_warning_str)}</li><li>The profile lambdas are unconditional auction estimates; the model does not scale impact by each day's volatility. Stress lambda is the sensitivity buffer.</li><li>Every modeled order receives a complete fill. Partial fills, queue position, routing, auction imbalance, borrow, and live broker behavior are not simulated.</li><li>ETF proxy bias direction is unknown: creation/redemption can add liquidity, while a thin opening auction can be worse than the common-stock proxy.</li><li>Orders are aggregated only within this strategy by date, asset, and side. Client and pod aggregation is not modeled.</li><li>Norgate Close is suitable for MOC research; Norgate Open can differ from an official listing-exchange opening auction print.</li><li>The rolling gate uses only three-year windows with baseline Sharpe at least {ROLLING_BASELINE_SHARPE_FLOOR_FLOAT:.2f}; eligible current-window count at the {html.escape(str(summary_dict.get('rolling_3y_eligible_window_count_basis_str', 'diagnostic'))).replace('_', ' ')} point: {int(summary_dict.get('rolling_3y_eligible_window_count_int', 0))}.</li><li>Recommended and Outer capacity are not awarded when any saved order lacks both required lagged ADV measures.</li><li>Capacity is a research estimate. Live TCA should replace or recalibrate these assumptions.</li><li>Unavailable order share across current-window rows: {_fmt_pct_str(summary_dict.get('unavailable_order_share_float'))}.</li><li>Common-stock academic extrapolation share: {_fmt_pct_str(summary_dict.get('academic_extrapolation_share_float'))}.</li><li>ETF proxy extrapolation share: {_fmt_pct_str(summary_dict.get('proxy_extrapolation_share_float'))}.</li></ul><p class="muted">Research anchors: <a href="https://www.cambridge.org/core/journals/journal-of-financial-and-quantitative-analysis/article/price-impact-in-closing-auctions-opening-auctions-and-continuous-markets-a-benchmark-for-cost-of-trading-on-anomalies/0F72910A79C5B42CF6E85F55164CE846">Goyal, Jegadeesh and Wu (2026), Tables 3 and 5</a>; <a href="https://norgatedata.com/data-content-tables.php">Norgate price definitions</a>; <a href="https://www.interactivebrokers.com/en/pricing/commissions-stocks.php">IBKR commissions</a>.</p>
 </details>
