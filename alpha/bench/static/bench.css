@@ -226,21 +226,43 @@
   color: var(--color-muted);
   font-size: 0.62rem;
 }
-.readiness-pill, .readiness-cell, .readiness-legend span {
+/* Verdict pills. Unlike the catalog's presence/absence marks, this page
+   reports a verdict per contract, so each state gets its own tinted field —
+   that is what the colour budget is for. */
+.readiness-pill, .readiness-cell, .readiness-legend .legend-key {
   display: inline-block;
-  padding: 2px 5px;
-  border: 1px solid var(--color-border);
+  min-width: 62px;
+  padding: 4px 9px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: var(--color-neutral);
   color: var(--color-muted);
   font-family: var(--font-figure);
-  font-size: 0.53rem;
+  font-size: 0.64rem;
   letter-spacing: 0.06em;
+  text-align: center;
   white-space: nowrap;
 }
-.status-pass { color: var(--color-ink) !important; border-color: var(--color-ink) !important; }
-.status-saved { color: var(--color-ink) !important; border-color: var(--color-ink) !important; }
-.status-fail { color: var(--color-loss) !important; border-color: var(--color-loss) !important; }
-.status-skip { color: var(--color-muted) !important; border-style: dashed !important; }
-.status-running, .status-queued { color: var(--color-ink) !important; border-color: var(--color-ink) !important; }
+.status-pass, .status-saved {
+  background: var(--color-profit-wash) !important;
+  color: var(--color-profit-dark) !important;
+}
+.status-fail {
+  background: var(--color-loss-wash) !important;
+  color: var(--color-loss-dark) !important;
+}
+.status-skip {
+  background: var(--color-warning-wash) !important;
+  color: var(--color-warning-dark) !important;
+}
+.status-not-run {
+  background: var(--color-neutral) !important;
+  color: var(--color-muted) !important;
+}
+.status-running, .status-queued {
+  background: var(--color-accent-wash) !important;
+  color: var(--color-accent-dark) !important;
+}
 .analyzer-card-actions {
   min-height: 31px;
   padding: 6px 12px;
@@ -250,11 +272,37 @@
   font-size: 0.61rem;
 }
 .text-button { padding: 0; border: 0; background: none; color: var(--color-ink); font: inherit; text-decoration: underline; cursor: pointer; }
-.readiness-legend { display: flex; gap: 5px; }
-.readiness-table th:not(:first-child), .readiness-table td:not(:first-child) { text-align: center; }
-.readiness-cell { min-width: 50px; text-align: center; }
+.readiness-legend { display: flex; gap: 6px; margin-left: auto; }
+.readiness-col { text-align: center !important; }
 .readiness-panel { overflow-x: auto; }
 .readiness-panel .readiness-table { min-width: 920px; }
+.catalog-stat-band.audit-scope-band > div { align-items: flex-start; }
+.catalog-stat-band.audit-scope-band b {
+  font-size: .86rem;
+  font-weight: 500;
+  line-height: 1.3;
+}
+/* Section band inside the matrix. Attention rows are listed first, so the
+   heading has to be unmistakably a divider and not another strategy. */
+.readiness-group-head td {
+  text-align: left !important;
+  padding: 9px 12px !important;
+  background: var(--color-neutral);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-muted);
+  font-family: var(--font-figure);
+  font-size: .62rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.readiness-detail { color: var(--color-muted); font-size: .76rem; }
+.readiness-note {
+  color: var(--color-muted);
+  font-family: var(--font-prose);
+  font-size: .8rem;
+  max-width: 70ch;
+}
+.readiness-table td { vertical-align: middle; }
 .orphan-heading { margin-top: 46px; border-bottom: 1px solid var(--color-border); padding-bottom: 10px; }
 .study-artifact-panel { overflow-x: auto; }
 .study-artifact-panel .table { min-width: 1020px; }
@@ -606,7 +654,7 @@ a { color: inherit; text-decoration: none; }
   border: 1px solid var(--color-border); color: var(--color-muted);
   background: none;
 }
-.badge-wired { background: var(--color-loss); border-color: var(--color-loss); color: var(--color-page); }
+.badge-wired { background: var(--color-profit-wash); border-color: transparent; color: var(--color-profit-dark); }
 .badge-cat { border-color: var(--color-border); }
 .badge-subcat { border-color: var(--color-border); color: var(--color-muted); }
 .badge-norun { border-color: var(--color-loss-dark); color: var(--color-loss-dark); }
@@ -1005,7 +1053,7 @@ kbd {
 
 /* Promoted but not live: outlined rather than filled, so it reads as a step
    below the wired badge without taking the page's single colour. */
-.badge-pmready { border-color: var(--color-ink); color: var(--color-ink); }
+.badge-pmready { background: var(--color-warning-wash); border-color: transparent; color: var(--color-warning-dark); }
 
 /* A book quoting figures from a superseded pod is the one error on this page
    that looks like a correct answer, so it takes the page's single colour. */
@@ -1883,7 +1931,7 @@ kbd {
 /* Right-aligned so the V/C/T/R/S header codes land directly above the marks
    they label. Left-aligned, the header's "ANALYZERS" word pushed the codes
    ~77px off from the column of marks beneath them. */
-.analyzer-head, .catalog-table td:last-child { text-align: right; }
+#tested-table .analyzer-head, #tested-table td:last-child { text-align: right; }
 .analyzer-head { white-space: nowrap; }
 .analyzer-code-row { display: inline-flex; gap: 10px; margin-left: 12px; }
 .analyzer-code-row i { font-style: normal; width: 15px; text-align: center; opacity: .8; }

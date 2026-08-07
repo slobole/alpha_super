@@ -3,43 +3,148 @@
 {% block title %}Studies{% endblock %}
 
 {% block content %}
-<div class="page-head">
-  <div>
-    <div class="page-kicker">Evidence coverage</div>
-    <h1 class="page-title">Studies</h1>
-    <p class="page-sub">Analyzer readiness for every PM-ready and wired strategy, followed by saved studies that are not owned by a catalog strategy.</p>
+<header class="catalog-head">
+  <div class="page-kicker">Compatibility audit</div>
+  <h1 class="catalog-title">Analyzer readiness</h1>
+  <p class="catalog-strapline">
+    {{ ready_row_list|length }} of {{ readiness_row_list|length }} promoted strategies are ready across all five analyzers. A SKIP is not ready.
+  </p>
+</header>
+
+<section class="catalog-stat-band audit-scope-band" aria-label="Audit scope">
+  <div><span>Scope</span><b>WIRED + PM_READY</b></div>
+  <div><span>Modules</span><b>{{ readiness_row_list|length }}</b></div>
+  <div><span>Contracts</span><b>{{ contract_count_int }}</b></div>
+  <div><span>Last verified</span><b>{{ last_audit_str[:16] or '—' }}</b></div>
+</section>
+
+<div class="catalog-toolbar" id="readiness-bar">
+  <label class="search-box">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="7.2" cy="7.2" r="4.6"/><path d="m10.6 10.6 3 3"/></svg>
+    <input id="readiness-search" class="search" type="text" placeholder="Search strategies, analyzers, details…" autocomplete="off">
+  </label>
+
+  <div class="toolbar-group">
+    <span class="toolbar-group-label">Maturity</span>
+    <select id="readiness-maturity" class="toolbar-select" aria-label="Filter by maturity">
+      <option value="">All promoted</option>
+      <option value="wired">Wired</option>
+      <option value="pm_ready">PM_ready</option>
+    </select>
   </div>
-  <div class="stat-row">
-    <div class="stat"><div class="stat-value">{{ readiness_row_list|length }}</div><div class="stat-label">Promoted</div></div>
-    <div class="stat"><div class="stat-value">{{ orphan_view_list|length }}</div><div class="stat-label">Unattributed</div></div>
+
+  <div class="toolbar-group">
+    <span class="toolbar-group-label">Status</span>
+    <select id="readiness-status" class="toolbar-select" aria-label="Filter by readiness">
+      <option value="">All</option>
+      <option value="attention">Needs attention</option>
+      <option value="ready">Ready</option>
+    </select>
+  </div>
+
+  <div class="readiness-legend" aria-hidden="true">
+    <span class="legend-key status-pass">Pass</span>
+    <span class="legend-key status-skip">Skip</span>
+    <span class="legend-key status-fail">Fail</span>
+    <span class="legend-key status-not-run">Not run</span>
   </div>
 </div>
 
-<div class="section section-flush">
-  <div class="section-heading-row">
-    <div>
-      <h2 class="section-title">Analyzer readiness · promoted strategies</h2>
-      <p class="table-caption">SAVED means historical report evidence exists. PASS is an explicit BENCH job result, not source-fingerprint proof. SKIP is not ready. NOT RUN means the hook exists but no evidence has been saved.</p>
-    </div>
-    <div class="readiness-legend"><span class="status-saved">SAVED</span><span class="status-pass">PASS</span><span class="status-skip">SKIP</span><span class="status-fail">FAIL</span><span class="status-not-run">NOT RUN</span></div>
-  </div>
-  <div class="panel readiness-panel">
-    <table class="table table-dense readiness-table">
-      <thead><tr><th>Strategy</th><th>Stage</th>{% for analysis_str in single_analysis_tuple %}<th>{{ analysis_label_dict[analysis_str] }}</th>{% endfor %}</tr></thead>
-      <tbody>
-      {% for row in readiness_row_list %}
+<div class="panel catalog-panel">
+  <table class="table table-dense catalog-table readiness-table" id="readiness-table">
+    <thead>
       <tr>
-        <td><a class="mono" href="{{ url_for('strategy_page_fn', module_import_str=row.strategy.module_import_str) }}">{{ row.strategy.stem_str }}</a></td>
-        <td><span class="badge {{ 'badge-wired' if row.strategy.is_wired_bool else 'badge-pmready' }}">{{ 'Wired' if row.strategy.is_wired_bool else 'PM-ready' }}</span></td>
+        <th>Strategy</th>
+        <th>Maturity</th>
+        {% for analysis_str in single_analysis_tuple %}<th class="readiness-col">{{ analysis_label_dict[analysis_str] }}</th>{% endfor %}
+        <th>Last verified</th>
+        <th>Detail</th>
+      </tr>
+    </thead>
+    {% for group_label_str, group_row_list in (('Requires attention', attention_row_list), ('Ready', ready_row_list)) %}
+    {% if group_row_list %}
+    <tbody class="readiness-group" data-group="{{ 'attention' if loop.first else 'ready' }}">
+      <tr class="readiness-group-head"><td colspan="{{ 4 + single_analysis_tuple|length }}">{{ group_label_str }}</td></tr>
+      {% for row in group_row_list %}
+      <tr class="strat-item catalog-row readiness-row"
+          data-href="{{ url_for('strategy_page_fn', module_import_str=row.strategy.module_import_str) }}"
+          data-maturity="{{ 'wired' if row.strategy.is_wired_bool else 'pm_ready' }}"
+          data-status="{{ 'ready' if row.is_ready_bool else 'attention' }}"
+          data-search="{{ (row.strategy.stem_str ~ ' ' ~ row.detail_str)|lower }}">
+        <td class="catalog-name mono">{{ row.strategy.stem_str }}</td>
+        <td>
+          {% if row.strategy.is_wired_bool %}<span class="maturity maturity-wired">WIRED</span>
+          {% else %}<span class="maturity maturity-pm">PM_READY</span>{% endif %}
+        </td>
         {% for analyzer in row.analyzer_view_list %}
-        <td><a class="readiness-cell status-{{ analyzer.status_class_str }}" title="{{ analyzer.detail_str }}" href="{{ url_for('strategy_page_fn', module_import_str=row.strategy.module_import_str, analysis=analyzer.analysis_str) }}#analyzer-report">{{ analyzer.status_str }}</a></td>
+        <td class="readiness-col">
+          <a class="readiness-cell status-{{ analyzer.status_class_str }}"
+             title="{{ analyzer.detail_str }}"
+             href="{{ url_for('strategy_page_fn', module_import_str=row.strategy.module_import_str, analysis=analyzer.analysis_str) }}#analyzer-report">{{ analyzer.status_str }}</a>
+        </td>
         {% endfor %}
+        <td class="muted">{{ row.last_verified_str[:16] or '—' }}</td>
+        <td class="readiness-detail">{{ row.detail_str }}</td>
       </tr>
       {% endfor %}
-      </tbody>
-    </table>
+    </tbody>
+    {% endif %}
+    {% endfor %}
+  </table>
+  <div id="readiness-no-results" class="empty hidden">No strategies match this filter.</div>
+</div>
+
+<div class="catalog-footer-bar">
+  <span class="readiness-note">Exit 0 with a SKIP does not satisfy readiness — the contract was never evaluated.</span>
+  <div class="catalog-footer-actions">
+    <span class="catalog-selection">{{ attention_row_list|length }} need attention</span>
   </div>
 </div>
+
+<script>
+  (function () {
+    const searchInput = document.getElementById('readiness-search');
+    const maturitySelect = document.getElementById('readiness-maturity');
+    const statusSelect = document.getElementById('readiness-status');
+    const rowList = Array.from(document.querySelectorAll('.readiness-row'));
+    const groupList = Array.from(document.querySelectorAll('.readiness-group'));
+    const noResults = document.getElementById('readiness-no-results');
+
+    function apply() {
+      const query = searchInput.value.trim().toLowerCase();
+      const maturity = maturitySelect.value;
+      const status = statusSelect.value;
+      let visible = 0;
+      rowList.forEach(function (row) {
+        let ok = true;
+        if (maturity) ok = ok && row.dataset.maturity === maturity;
+        if (status) ok = ok && row.dataset.status === status;
+        ok = ok && (!query || row.dataset.search.indexOf(query) !== -1);
+        row.classList.toggle('hidden', !ok);
+        if (ok) visible++;
+      });
+      // A group heading with nothing under it reads as an empty claim.
+      groupList.forEach(function (group) {
+        const anyVisible = Array.from(group.querySelectorAll('.readiness-row'))
+          .some(function (r) { return !r.classList.contains('hidden'); });
+        group.classList.toggle('hidden', !anyVisible);
+      });
+      noResults.classList.toggle('hidden', visible !== 0);
+    }
+
+    [searchInput, maturitySelect, statusSelect].forEach(function (el) {
+      el.addEventListener('input', apply);
+      el.addEventListener('change', apply);
+    });
+    rowList.forEach(function (row) {
+      row.addEventListener('click', function (event) {
+        if (event.target.closest('a, button, input, select')) return;
+        window.location.href = row.dataset.href;
+      });
+    });
+    apply();
+  })();
+</script>
 
 <div class="section-heading-row orphan-heading">
   <div>

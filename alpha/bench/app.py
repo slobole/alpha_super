@@ -405,22 +405,35 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             strategy_stem_set={entry_obj.stem_str for entry_obj in strategy_entry_list}
         )
         readiness_row_list = [
-            {
-                "strategy": entry_obj,
-                "analyzer_view_list": _analyzer_view_dict_list(
+            _readiness_row_dict(
+                entry_obj,
+                _analyzer_view_dict_list(
                     entry_obj,
                     run_index_obj.runs_for(entry_obj.module_import_str, entry_obj.stem_str),
                     flask_app_obj.config["job_manager_obj"],
                 ),
-            }
+            )
             for entry_obj in strategy_entry_list
             if entry_obj.is_pm_ready_bool
         ]
+        # Attention first. A matrix sorted by name buries the two rows that
+        # need work among sixteen that do not, which is the opposite of what
+        # this page is for.
+        attention_row_list = [row for row in readiness_row_list if not row["is_ready_bool"]]
+        ready_row_list = [row for row in readiness_row_list if row["is_ready_bool"]]
+        last_audit_str = max(
+            (row["last_verified_str"] for row in readiness_row_list if row["last_verified_str"]),
+            default="—",
+        )
         orphan_view_list = runs.orphan_research_view_list(strategy_entry_list)
         return render_template(
             "research.html",
             orphan_view_list=orphan_view_list,
             readiness_row_list=readiness_row_list,
+            attention_row_list=attention_row_list,
+            ready_row_list=ready_row_list,
+            contract_count_int=len(readiness_row_list) * len(SUPPORTED_ANALYSIS_TUPLE),
+            last_audit_str=last_audit_str,
         )
 
     @flask_app_obj.route("/portfolios")
@@ -971,6 +984,54 @@ def _latest_job_record_by_analysis_dict(job_manager_obj, strategy_stem_str: str)
                 "job": job_obj,
             }
     return latest_record_by_analysis_dict
+
+
+def _readiness_row_dict(
+    strategy_entry_obj: catalog.StrategyEntry,
+    analyzer_view_list: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """One strategy's readiness across all five analyzer contracts.
+
+    *** UI*** "Ready" requires every analyzer to carry positive evidence —
+    SAVED or an explicit PASS. A SKIP is a missing hook, which means the
+    contract cannot even be evaluated, and treating that as ready is exactly
+    the failure the readiness page exists to prevent. NOT RUN and FAIL are
+    likewise not ready. This mirrors the runner's own rule that exit 0 with a
+    SKIP does not satisfy readiness.
+    """
+    ready_status_set = {"PASS", "SAVED"}
+    blocking_view_list = [
+        view_dict
+        for view_dict in analyzer_view_list
+        if view_dict["status_str"] not in ready_status_set
+    ]
+    # The most recent moment any contract on this strategy was actually
+    # verified. Blank when nothing has ever run.
+    verified_timestamp_list = [
+        view_dict["latest_run"].display_timestamp_str
+        for view_dict in analyzer_view_list
+        if view_dict["latest_run"] is not None
+    ]
+    if blocking_view_list:
+        first_blocking_dict = blocking_view_list[0]
+        if first_blocking_dict["status_str"] == "SKIP":
+            detail_str = f"missing {first_blocking_dict['label_str'].lower()} hook"
+        elif first_blocking_dict["status_str"] == "FAIL":
+            detail_str = f"{first_blocking_dict['label_str'].lower()} failed"
+        else:
+            detail_str = f"no {first_blocking_dict['label_str'].lower()} evidence"
+        if len(blocking_view_list) > 1:
+            detail_str = f"{detail_str} (+{len(blocking_view_list) - 1} more)"
+    else:
+        detail_str = "—"
+    return {
+        "strategy": strategy_entry_obj,
+        "analyzer_view_list": analyzer_view_list,
+        "is_ready_bool": not blocking_view_list,
+        "blocking_count_int": len(blocking_view_list),
+        "detail_str": detail_str,
+        "last_verified_str": max(verified_timestamp_list, default=""),
+    }
 
 
 def _analyzer_view_dict_list(

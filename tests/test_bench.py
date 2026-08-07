@@ -1708,9 +1708,13 @@ def test_studies_page_marks_skip_as_not_ready(recording_client):
     client, _job_manager, _token_str = recording_client
     html_str = client.get("/research").get_data(as_text=True)
 
-    assert "Analyzer readiness · promoted strategies" in html_str
-    assert "SKIP is not ready" in html_str
-    assert 'class="readiness-table"' in html_str or "readiness-table" in html_str
+    assert "Analyzer readiness" in html_str
+    assert "A SKIP is not ready" in html_str
+    assert "readiness-table" in html_str
+    # Attention rows are listed before ready ones: a matrix sorted by name
+    # buries the rows that need work among the ones that do not.
+    group_label_list = re.findall(r'readiness-group-head"><td colspan="\d+">([^<]+)<', html_str)
+    assert group_label_list == ["Requires attention", "Ready"]
 
 
 def test_console_renders_the_single_house_variant(recording_client):
