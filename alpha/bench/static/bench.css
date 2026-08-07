@@ -28,6 +28,10 @@
   --color-accent-dark: #1558d6;
   --color-warning: #e37400;
   --color-warning-dark: #b45309;
+  --color-accent-wash: #e8f0fe;
+  --color-profit-wash: #e6f4ea;
+  --color-warning-wash: #fef7e0;
+  --color-loss-wash: #fce8e6;
   --color-benchmark-dark: #71767d;
   --font-figure: "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
   --font-prose: "Segoe UI", Inter, "Helvetica Neue", Helvetica, Arial, sans-serif;
@@ -1745,8 +1749,9 @@ kbd {
 .catalog-stat-band > div {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 12px 14px;
+  align-items: center;
+  gap: 7px;
+  padding: 14px 14px 16px;
   border-right: 1px solid var(--color-border);
 }
 .catalog-stat-band > div:last-child { border-right: 0; }
@@ -1754,13 +1759,14 @@ kbd {
   color: var(--color-muted);
   font-family: var(--font-figure);
   font-size: .62rem;
-  letter-spacing: .12em;
+  letter-spacing: .14em;
   text-transform: uppercase;
 }
 .catalog-stat-band b {
   font-family: var(--font-figure);
-  font-size: var(--stat-value-size);
-  font-weight: 500;
+  font-size: 1.65rem;
+  font-weight: 400;
+  line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 .catalog-toolbar {
@@ -1812,39 +1818,44 @@ kbd {
 
 /* Maturity is a controlled vocabulary, so it renders as a fixed-width badge
    rather than free text: the column should scan as three states, not as
-   sentences of differing length. */
+   sentences of differing length.
+
+   Tinted fill rather than an outline. These sit in a table of hairline rules,
+   where one more thin border per row reads as grid noise; a soft field of
+   colour separates cleanly at a glance and keeps the row quiet. */
 .maturity {
   display: inline-block;
-  min-width: 78px;
-  padding: 2px 7px;
-  border: 1px solid transparent;
-  border-radius: 2px;
+  min-width: 84px;
+  padding: 3px 8px;
+  border-radius: 3px;
   font-family: var(--font-figure);
   font-size: .58rem;
   letter-spacing: .08em;
   text-align: center;
 }
-.maturity-wired { border-color: var(--color-profit); color: var(--color-profit-dark); }
-.maturity-pm { border-color: var(--color-warning); color: var(--color-warning-dark); }
-.maturity-research { border-color: var(--color-border); color: var(--color-muted); }
+.maturity-wired { background: var(--color-profit-wash); color: var(--color-profit-dark); }
+.maturity-pm { background: var(--color-warning-wash); color: var(--color-warning-dark); }
+.maturity-research { background: var(--color-neutral); color: var(--color-muted); }
 
 .analyzer-head { white-space: nowrap; }
-.analyzer-code-row { display: inline-flex; gap: 7px; margin-left: 9px; }
-.analyzer-code-row i { font-style: normal; width: 11px; text-align: center; opacity: .75; }
-.analyzer-marks { display: inline-flex; gap: 7px; }
+.analyzer-code-row { display: inline-flex; gap: 9px; margin-left: 11px; }
+.analyzer-code-row i { font-style: normal; width: 13px; text-align: center; opacity: .8; }
+.analyzer-marks { display: inline-flex; gap: 9px; }
+/* *** UI*** These marks are monochrome on purpose, and it is not an oversight.
+   The catalog answers "does saved evidence exist?" — a two-state question, so
+   it gets a two-state mark: inked check or hollow ring. Verdict colour
+   (PASS/SKIP/FAIL) belongs to the readiness matrix, which answers a different
+   question. Tinting these green would make a row of five ticks read as five
+   passes when several may be stale, failed or skipped. */
 .analyzer-mark {
   font-style: normal;
-  width: 11px;
+  width: 13px;
   text-align: center;
-  font-size: .74rem;
-  color: var(--color-border);
+  font-size: .8rem;
+  line-height: 1;
+  color: var(--color-ink);
 }
-/* Filled means a saved report exists. The hollow states stay deliberately
-   quiet — an absent analyzer is not an error, it is simply not evidence. */
-.analyzer-mark.status-saved,
-.analyzer-mark.status-pass { color: var(--color-profit); }
-.analyzer-mark.status-fail { color: var(--color-loss); }
-.analyzer-mark.status-skip { color: var(--color-warning); }
+.analyzer-mark.is-absent { color: var(--color-border); }
 
 .catalog-footer-bar {
   display: flex;
@@ -1940,9 +1951,34 @@ kbd {
   background: var(--color-page);
   backdrop-filter: none;
 }
-.bench-menu > summary,
 .system-topbar-meta,
 .research-menu > summary { font-size: .7rem; }
+/* Surface switch: two segments in one bordered group, the way the mockups
+   show it. The inactive segment is inert, so it is styled as disabled text
+   rather than as an available tab. */
+.surface-switch {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.surface-option {
+  padding: 5px 15px;
+  font-family: var(--font-figure);
+  font-size: .68rem;
+  letter-spacing: .1em;
+  color: var(--color-muted);
+  background: var(--color-neutral);
+}
+.surface-option[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+.surface-option.active {
+  background: var(--color-page);
+  color: var(--color-accent);
+  box-shadow: inset 0 -2px 0 var(--color-accent);
+}
+/* The sidebar icons are drawn, so they inherit the nav item's colour and stay
+   optically the same size as the label beside them. */
+.sidebar-icon svg { width: 15px; height: 15px; display: block; }
 .topbar-clock {
   font-family: var(--font-figure);
   font-size: .7rem;

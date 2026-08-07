@@ -93,12 +93,13 @@
           {% elif s.is_pm_ready_bool %}<span class="maturity maturity-pm">PM_READY</span>
           {% else %}<span class="maturity maturity-research">RESEARCH</span>{% endif %}
         </td>
-        {# Most specific label available. Momentum strategies are only really
-           distinguished by their subfamily, so collapsing every one of them to
-           "Momentum" would make the column useless for the largest family. #}
-        <td class="catalog-family">{{ s.subcategory_label_str or s.category_label_str }}</td>
-        <td class="muted">{{ card.latest_vanilla_run.display_timestamp_str if card.latest_vanilla_run else '—' }}</td>
-        <td class="num {{ 'tone-pos' if (sm.get('ann_return_pct') or 0) >= 0 else 'tone-neg' }}">{{ sm.get('ann_return_pct')|pct }}</td>
+        {# Coarse code so the column scans vertically; the specific sleeve is
+           already in the module stem beside it. The full label — including the
+           momentum subfamily, which is the real discriminator there — stays
+           reachable on hover rather than being dropped. #}
+        <td class="catalog-family"><span title="{{ s.subcategory_label_str or s.category_label_str }}">{{ s.category_code_str }}</span></td>
+        <td class="muted">{{ card.latest_vanilla_run.display_timestamp_str[:16] if card.latest_vanilla_run else '—' }}</td>
+        <td class="num {{ 'tone-pos' if (sm.get('ann_return_pct') or 0) >= 0 else 'tone-neg' }}">{{ sm.get('ann_return_pct')|signed_pct }}</td>
         <td class="num">{{ sm.get('sharpe')|ratio }}</td>
         <td class="num tone-neg">{{ sm.get('max_drawdown_pct')|pct }}</td>
         <td class="num">{{ sm.get('trade_count')|count }}</td>
@@ -108,7 +109,7 @@
              of the catalog, so it is never collapsed into a single score. #}
           <span class="analyzer-marks" aria-label="Analyzer evidence">
             {% for analyzer in card.analyzer_view_list %}
-            <i class="analyzer-mark status-{{ analyzer.status_class_str }}"
+            <i class="analyzer-mark {{ '' if analyzer.has_evidence_bool else 'is-absent' }}"
                title="{{ analyzer.label_str }} · {{ analyzer.status_str }}">{{ '✓' if analyzer.has_evidence_bool else '○' }}</i>
             {% endfor %}
           </span>
@@ -143,14 +144,15 @@
             {% elif s.is_pm_ready_bool %}<span class="maturity maturity-pm">PM_READY</span>
             {% else %}<span class="maturity maturity-research">RESEARCH</span>{% endif %}
           </td>
-          {# Most specific label available. Momentum strategies are only really
-           distinguished by their subfamily, so collapsing every one of them to
-           "Momentum" would make the column useless for the largest family. #}
-        <td class="catalog-family">{{ s.subcategory_label_str or s.category_label_str }}</td>
+          {# Coarse code so the column scans vertically; the specific sleeve is
+           already in the module stem beside it. The full label — including the
+           momentum subfamily, which is the real discriminator there — stays
+           reachable on hover rather than being dropped. #}
+        <td class="catalog-family"><span title="{{ s.subcategory_label_str or s.category_label_str }}">{{ s.category_code_str }}</span></td>
           <td>
             <span class="analyzer-marks" aria-label="Analyzer evidence">
               {% for analyzer in card.analyzer_view_list %}
-              <i class="analyzer-mark status-{{ analyzer.status_class_str }}"
+              <i class="analyzer-mark {{ '' if analyzer.has_evidence_bool else 'is-absent' }}"
                  title="{{ analyzer.label_str }} · {{ analyzer.status_str }}">{{ '✓' if analyzer.has_evidence_bool else '○' }}</i>
               {% endfor %}
             </span>

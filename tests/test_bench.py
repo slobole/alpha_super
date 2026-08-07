@@ -1226,7 +1226,15 @@ def test_mockup_shell_uses_fixed_research_sidebar_and_excludes_live(recording_cl
     # a <span>. They were passing on unrelated buttons elsewhere on the page.
     assert "<span>Studies</span>" in html_str
     assert "<span>Compare</span>" in html_str
-    assert "LIVE" not in html_str
+    # The surface switch shows LIVE so the operator can see which of the two
+    # surfaces they are on, but Bench must never offer a route into the live
+    # book: the segment is an inert, aria-disabled <span>, never a link.
+    assert 'aria-disabled="true"' in html_str
+    live_index_int = html_str.index(">LIVE<")
+    live_element_str = html_str[html_str.rindex("<", 0, live_index_int) : live_index_int]
+    assert live_element_str.startswith("<span")
+    assert "href" not in live_element_str
+    assert "/live" not in html_str
     assert re.search(r"\d{2}:\d{2}:\d{2} (EST|EDT)", html_str)
 
 
@@ -1807,13 +1815,14 @@ def test_index_renders_momentum_and_recent_run_filters(recording_client):
     sector_module_str = "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs"
     sector_card_start_int = html_str.index(f'data-module="{sector_module_str}"')
     sector_card_excerpt_str = html_str[sector_card_start_int : sector_card_start_int + 1_500]
-    assert '<td class="catalog-family">Sector Dispersion</td>' in sector_card_excerpt_str
+    # The FAMILY column carries the coarse code; the full label stays on hover.
+    assert 'title="Sector Dispersion">MR<' in sector_card_excerpt_str
     sector_detail_html_str = client.get(f"/strategy/{sector_module_str}").get_data(as_text=True)
     assert 'class="artifact-breadcrumb"' in sector_detail_html_str
     atr_card_start_int = html_str.index(f'data-module="{ATR_NDX_MODULE_STR}"')
     atr_card_excerpt_str = html_str[atr_card_start_int : atr_card_start_int + 1_800]
     assert 'data-subcategory="atr_normalized_rotation"' in atr_card_excerpt_str
-    assert "ATR-Normalized Rotation" in atr_card_excerpt_str
+    assert 'title="ATR-Normalized Rotation">MOM<' in atr_card_excerpt_str
 
 
 def test_sortable_metric_rejects_non_numbers_and_keeps_none_distinct_from_zero():

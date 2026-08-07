@@ -59,6 +59,15 @@ SIGNATURE_PALETTE_DICT: dict[str, object] = {
     'accent_dark': '#1d5fdb',
     'warning': '#b45309',
     'warning_dark': '#8a3f07',
+    # Tinted fields for badges and selected rows: the same semantic as the hue
+    # above, at a weight that can sit behind text. Kept as explicit palette
+    # entries rather than an alpha of the base colour, because a translucent
+    # badge over a striped or hovered table row shifts with whatever is beneath
+    # it and stops meaning one fixed state.
+    'accent_wash': '#e8f0fe',
+    'profit_wash': '#e6f4ea',
+    'warning_wash': '#fef7e0',
+    'loss_wash': '#fce8e6',
     'vertical_line': '#8590a2',
     'zero_line': '#626f86',
     'bar_edge': '#dfe1e6',
@@ -154,6 +163,10 @@ _DESK_PALETTE_DICT: dict[str, object] = {
     'accent_dark': '#1558d6',
     'warning': '#e37400',
     'warning_dark': '#b45309',
+    'accent_wash': '#e8f0fe',
+    'profit_wash': '#e6f4ea',
+    'warning_wash': '#fef7e0',
+    'loss_wash': '#fce8e6',
     'vertical_line': '#9aa0a6',
     'zero_line': '#16181d',
     'bar_edge': '#16181d',
@@ -880,6 +893,10 @@ def _build_palette_root_css(
     --color-accent-dark: {palette_dict["accent_dark"]};
     --color-warning: {palette_dict["warning"]};
     --color-warning-dark: {palette_dict["warning_dark"]};
+    --color-accent-wash: {palette_dict["accent_wash"]};
+    --color-profit-wash: {palette_dict["profit_wash"]};
+    --color-warning-wash: {palette_dict["warning_wash"]};
+    --color-loss-wash: {palette_dict["loss_wash"]};
     --color-shadow: {palette_dict["shadow_rgba"]};
     --font-figure: {figure_font_stack_str};
     --font-prose: {prose_font_stack_str};
@@ -1387,6 +1404,10 @@ def build_report_css() -> str:
     --color-accent-dark: {signature_palette_dict["accent_dark"]};
     --color-warning: {signature_palette_dict["warning"]};
     --color-warning-dark: {signature_palette_dict["warning_dark"]};
+    --color-accent-wash: {signature_palette_dict["accent_wash"]};
+    --color-profit-wash: {signature_palette_dict["profit_wash"]};
+    --color-warning-wash: {signature_palette_dict["warning_wash"]};
+    --color-loss-wash: {signature_palette_dict["loss_wash"]};
     --color-shadow: {signature_palette_dict["shadow_rgba"]};
     /* The analyzer appendix sets figure and prose type on tiles, tables and
        verdict rows. Without these the whole declaration is void and the text

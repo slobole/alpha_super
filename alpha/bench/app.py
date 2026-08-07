@@ -165,6 +165,12 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
     flask_app_obj.jinja_env.filters["pct"] = lambda value_obj: _decimal_str(
         value_obj, suffix_str="%"
     )
+    # Signed, for figures read as a comparison down a column rather than as a
+    # standalone level — catalog CAGR is the case: the sign is the first thing
+    # the eye needs, before the magnitude.
+    flask_app_obj.jinja_env.filters["signed_pct"] = lambda value_obj: _decimal_str(
+        value_obj, suffix_str="%", signed_bool=True
+    )
     flask_app_obj.jinja_env.filters["ratio"] = _decimal_str
     flask_app_obj.jinja_env.filters["count"] = _integer_str
 
@@ -1091,9 +1097,13 @@ def _integer_str(value_obj: object) -> str:
     return "—" if value_float is None else f"{int(value_float):,}"
 
 
-def _decimal_str(value_obj: object, *, suffix_str: str = "") -> str:
+def _decimal_str(
+    value_obj: object, *, suffix_str: str = "", signed_bool: bool = False
+) -> str:
     value_float = _number_float(value_obj)
-    return "—" if value_float is None else f"{value_float:.2f}{suffix_str}"
+    if value_float is None:
+        return "—"
+    return f"{value_float:{'+' if signed_bool else ''}.2f}{suffix_str}"
 
 
 def _compact_money_str(value_obj: object) -> str:

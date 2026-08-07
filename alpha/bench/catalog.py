@@ -51,6 +51,36 @@ CATEGORY_LABEL_DICT: dict[str, str] = {
     "seasonality": "Seasonality",
 }
 
+# Coarse family code for the catalog's FAMILY column.
+#
+# The column has to scan vertically at a glance, so it carries the broad asset
+# or edge family rather than the specific sleeve — the specific sleeve is
+# already spelled out in the module stem next to it (taa_df, mr_hpi, …). Several
+# categories deliberately collapse to the same code: TAA dual-momentum and TAA
+# traditional are both TAA here, and that is the point of the column.
+#
+# Anything unmapped falls back to the first four characters of its category, so
+# a new family is legible on day one instead of blank.
+CATEGORY_CODE_DICT: dict[str, str] = {
+    "dv2": "MR",
+    "hpi": "MR",
+    "qpi": "MR",
+    "mean_reversion": "MR",
+    "momentum": "MOM",
+    "taa_df": "TAA",
+    "taa_traditional": "TAA",
+    "taa_beyond_6040": "TAA",
+    "taa_growth_inflation": "TAA",
+    "all_weather": "TAA",
+    "vix_stuff": "VOL",
+    "eom_bond_basket": "RATES",
+    "bom_tlt": "RATES",
+    "eom_tlt_vs_spy": "SEAS",
+    "seasonality": "SEAS",
+    "alpha19": "EQ",
+    "crypto": "CRYPTO",
+}
+
 MOMENTUM_CATEGORY_STR = "momentum"
 MOMENTUM_SUBCATEGORY_LABEL_DICT: dict[str, str] = {
     "atr_normalized_rotation": "ATR-Normalized Rotation",
@@ -110,6 +140,7 @@ class StrategyEntry:
     display_name_str: str  # prettified, e.g. "Mr Dv2"
     category_str: str  # the containing folder, e.g. "dv2"
     category_label_str: str
+    category_code_str: str  # coarse FAMILY column code, e.g. "TAA", "MR", "MOM"
     subcategory_str: str | None  # finer UI grouping; currently used for Momentum
     subcategory_label_str: str | None
     module_import_str: str  # e.g. "strategies.dv2.strategy_mr_dv2"
@@ -182,6 +213,10 @@ def prettify_stem(stem_str: str) -> str:
 
 def _category_label(category_str: str) -> str:
     return CATEGORY_LABEL_DICT.get(category_str, category_str.replace("_", " ").title())
+
+
+def _category_code(category_str: str) -> str:
+    return CATEGORY_CODE_DICT.get(category_str, category_str.replace("_", "")[:4].upper())
 
 
 def _momentum_subcategory_str(stem_str: str) -> str:
@@ -349,6 +384,7 @@ def list_strategies() -> list[StrategyEntry]:
                 display_name_str=prettify_stem(module_path.stem),
                 category_str=category_str,
                 category_label_str=_category_label(category_str),
+                category_code_str=_category_code(category_str),
                 subcategory_str=subcategory_str,
                 subcategory_label_str=subcategory_label_str,
                 module_import_str=module_import_str,

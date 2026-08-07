@@ -16,21 +16,25 @@
         <span>ALPHA / BENCH</span>
       </a>
 
+      {# Line icons rather than unicode glyphs. The geometric characters this
+         used (▱ ⇄ ⌁ ▦ ▤) render differently on every platform and several are
+         near-identical at 13px, which makes them decoration rather than
+         navigation aid. These are drawn, so they are the same everywhere. #}
       <nav class="sidebar-nav" aria-label="Research navigation">
         <a href="{{ url_for('index_page_fn') }}" class="{{ 'active' if active_nav == 'strategies' }}">
-          <span class="sidebar-icon">▱</span><span>Strategies</span>
+          <span class="sidebar-icon">{% include "_icon_strategies.svg" %}</span><span>Strategies</span>
         </a>
         <a href="{{ url_for('compare_page_fn') }}" class="{{ 'active' if active_nav == 'compare' }}">
-          <span class="sidebar-icon">⇄</span><span>Compare</span>
+          <span class="sidebar-icon">{% include "_icon_compare.svg" %}</span><span>Compare</span>
         </a>
         <a href="{{ url_for('research_page_fn') }}" class="{{ 'active' if active_nav == 'research' }}">
-          <span class="sidebar-icon">⌁</span><span>Studies</span>
+          <span class="sidebar-icon">{% include "_icon_studies.svg" %}</span><span>Studies</span>
         </a>
         <a href="{{ url_for('portfolios_page_fn') }}" class="{{ 'active' if active_nav == 'portfolios' }}">
-          <span class="sidebar-icon">▦</span><span>Portfolios</span>
+          <span class="sidebar-icon">{% include "_icon_portfolios.svg" %}</span><span>Portfolios</span>
         </a>
         <a href="{{ url_for('jobs_page_fn') }}" class="{{ 'active' if active_nav == 'jobs' }}">
-          <span class="sidebar-icon">▤</span><span>Jobs</span>
+          <span class="sidebar-icon">{% include "_icon_jobs.svg" %}</span><span>Jobs</span>
           <span id="nav-job-badge" class="sidebar-job-badge"
                 hx-get="{{ url_for('job_indicator_fragment_fn') }}"
                 hx-trigger="load, every 3s" hx-swap="innerHTML">{% include "_job_indicator.html" %}</span>
@@ -45,16 +49,16 @@
 
     <div class="bench-main">
       <header class="system-topbar">
-        <details class="topbar-menu bench-menu">
-          <summary>BENCH <span aria-hidden="true">⌄</span></summary>
-          <div class="topbar-popover variant-popover">
-            <div class="popover-label">Density</div>
-            {% for density_str, density_label_str in density_label_dict.items() %}
-            <a href="{{ url_for('set_density_fn', density_name_str=density_str) }}"
-               class="{{ 'active' if density_str == active_density_str }}">{{ density_label_str }}</a>
-            {% endfor %}
-          </div>
-        </details>
+        {# Surface switch, as in the mockups. LIVE is deliberately an inert
+           <span> with aria-disabled, never a link: Bench is the research
+           console and must not offer a route into the live book. It is shown
+           rather than hidden so the operator can see which of the two surfaces
+           they are on — an unlabelled console is how you read a backtest as a
+           live position. #}
+        <div class="surface-switch" role="group" aria-label="Surface">
+          <span class="surface-option" aria-disabled="true" title="Live operations — not reachable from the research console">LIVE</span>
+          <span class="surface-option active" aria-current="page">BENCH</span>
+        </div>
 
         <div class="system-topbar-meta">
           <span class="topbar-clock">{{ server_clock_str }} {{ server_timezone_str }}</span>
@@ -67,6 +71,11 @@
               <a href="{{ url_for('index_page_fn') }}">Strategy library</a>
               <a href="{{ url_for('research_page_fn') }}">Studies</a>
               <a href="{{ url_for('jobs_page_fn') }}">Jobs</a>
+              <div class="popover-label popover-label-split">Density</div>
+              {% for density_str, density_label_str in density_label_dict.items() %}
+              <a href="{{ url_for('set_density_fn', density_name_str=density_str) }}"
+                 class="{{ 'active' if density_str == active_density_str }}">{{ density_label_str }}</a>
+              {% endfor %}
               <span class="popover-version">Bench {{ bench_version_str }} · {{ server_date_str }}</span>
             </div>
           </details>
