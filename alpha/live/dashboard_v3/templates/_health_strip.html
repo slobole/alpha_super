@@ -16,7 +16,13 @@
                      {% elif cell_dict.severity_str == 'yellow' %}bg-warn
                      {% elif cell_dict.severity_str == 'green' %}bg-ok
                      {% else %}bg-mute{% endif %}"></span>
-        <strong class="truncate">{{ cell_dict.value_str }}</strong>
+        <strong class="truncate">
+          {% if 'T' in cell_dict.value_str %}
+            {{ cell_dict.value_str | clock }}
+          {% else %}
+            {{ cell_dict.value_str }}
+          {% endif %}
+        </strong>
       </div>
     {% endfor %}
   </div>

@@ -14,11 +14,14 @@ import pandas as pd
 from alpha.engine.report import (
     _DAILY_RETURN_HISTOGRAM_BIN_COUNT_INT,
     _build_daily_return_distribution_html,
+    _build_composition_plate_html,
     _build_headline_delta_table_html,
     _build_html,
     _display_metric_dict_for_value_ser,
     _build_portfolio_html,
     _corr_color,
+    _composition_weight_axis_limit_tuple,
+    _composition_weights_chart_b64,
     _daily_return_histogram_b64,
     _drawdown_color,
     _format_portfolio_summary,
@@ -689,6 +692,58 @@ class ReportFormattingTests(unittest.TestCase):
         report_html_str = _build_html(strategy, chart_b64='equity-chart-b64')
 
         self.assertNotIn('Recent TAA Weights - Last 3 Rebalances', report_html_str)
+
+    def test_rotation_composition_uses_rotation_chart_without_weight_stack(self):
+        strategy = make_strategy([0.0, 0.01])
+        strategy.realized_weight_df = pd.DataFrame(
+            {
+                f'Asset{asset_index_int:02d}': [0.0, 0.10]
+                for asset_index_int in range(13)
+            },
+            index=pd.to_datetime(['2024-01-02', '2024-01-03']),
+        )
+
+        with (
+            mock.patch(
+                'alpha.engine.report.render_composition_data_uri_str',
+                return_value=('data:image/png;base64,rotation-chart', 'rotation'),
+            ),
+            mock.patch('alpha.engine.report._composition_weights_chart_b64') as weight_chart_mock,
+        ):
+            composition_html_str = _build_composition_plate_html(strategy)
+
+        weight_chart_mock.assert_not_called()
+        self.assertIn('data:image/png;base64,rotation-chart', composition_html_str)
+        self.assertNotIn('<h3>Portfolio weights</h3>', composition_html_str)
+
+    def test_composition_axis_includes_short_and_levered_weights(self):
+        lower_limit_float, upper_limit_float = _composition_weight_axis_limit_tuple(
+            [
+                np.array([0.7, 0.8]),
+                np.array([-0.2, -0.3]),
+                np.array([0.6, 0.7]),
+            ]
+        )
+
+        self.assertLess(lower_limit_float, -0.3)
+        self.assertGreater(upper_limit_float, 1.4)
+
+    def test_composition_weight_chart_renders_signed_weights(self):
+        realized_weight_df = pd.DataFrame(
+            {
+                "LongA": [0.8, 0.7],
+                "LongB": [0.6, 0.7],
+                "Short": [-0.2, -0.3],
+            },
+            index=pd.to_datetime(["2026-07-01", "2026-07-02"]),
+        )
+
+        weight_stack_b64_str = _composition_weights_chart_b64(
+            realized_weight_df
+        )
+
+        self.assertIsInstance(weight_stack_b64_str, str)
+        self.assertGreater(len(weight_stack_b64_str), 1000)
 
     def test_build_html_embeds_signature_css(self):
         strategy = make_strategy([0.0, 0.01, -0.02, 0.0, 0.03, -0.01])

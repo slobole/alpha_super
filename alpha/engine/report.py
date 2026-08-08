@@ -2275,18 +2275,23 @@ def _build_composition_plate_html(strategy) -> str:
     # Weights plate that re-drew the same stack over two arbitrary windows.
     section_html_list = ['<h2>Composition</h2>']
 
-    weight_stack_b64_str = _composition_weights_chart_b64(realized_weight_df)
-    if weight_stack_b64_str is not None:
-        section_html_list.append(
-            '<h3>Portfolio weights</h3>'
-            '<div class="chart-wrap">'
-            f'<img src="data:image/png;base64,{weight_stack_b64_str}" alt="Portfolio weights">'
-            '</div>'
-        )
-    else:
+    if resolved_mode_str == 'rotation':
         section_html_list.append(
             f'<div class="chart-wrap"><img src="{composition_uri_str}" alt="Composition"></div>'
         )
+    else:
+        weight_stack_b64_str = _composition_weights_chart_b64(realized_weight_df)
+        if weight_stack_b64_str is not None:
+            section_html_list.append(
+                '<h3>Portfolio weights</h3>'
+                '<div class="chart-wrap">'
+                f'<img src="data:image/png;base64,{weight_stack_b64_str}" alt="Portfolio weights">'
+                '</div>'
+            )
+        else:
+            section_html_list.append(
+                f'<div class="chart-wrap"><img src="{composition_uri_str}" alt="Composition"></div>'
+            )
     section_html_list.append(f'<p class="metric-context">{caption_str}</p>')
     section_html_list.append(_current_composition_html(strategy))
     section_html_list.append(_recent_taa_weight_comparison_html(strategy))
@@ -3302,6 +3307,17 @@ def _legible_label_color_str(band_color_str: str) -> str:
     )
 
 
+def _composition_weight_axis_limit_tuple(
+    weight_value_list: list[np.ndarray],
+) -> tuple[float, float]:
+    weight_value_mat = np.asarray(weight_value_list, dtype=float)
+    positive_total_vec = np.clip(weight_value_mat, 0.0, None).sum(axis=0)
+    negative_total_vec = np.clip(weight_value_mat, None, 0.0).sum(axis=0)
+    lower_limit_float = min(0.0, float(negative_total_vec.min()) * 1.05)
+    upper_limit_float = max(1.0, float(positive_total_vec.max()) * 1.05)
+    return lower_limit_float, upper_limit_float
+
+
 def _composition_weights_chart_b64(weights_df) -> str | None:
     """Full-history weight stack, labelled down the right edge.
 
@@ -3349,21 +3365,46 @@ def _composition_weights_chart_b64(weights_df) -> str | None:
     page_color_str = str(SIGNATURE_PALETTE_DICT['page'])
     with plt.rc_context(stack_rcparam_dict):
         figure_obj, axis_obj = plt.subplots(figsize=(12, 2.6))
-        stack_collection_list = axis_obj.stackplot(
+        positive_weight_value_list = [
+            np.clip(weight_value_vec, 0.0, None)
+            for weight_value_vec in weight_value_list
+        ]
+        negative_weight_value_list = [
+            np.clip(weight_value_vec, None, 0.0)
+            for weight_value_vec in weight_value_list
+        ]
+        stack_collection_list = list(axis_obj.stackplot(
             weights_df.index,
-            weight_value_list,
+            positive_weight_value_list,
             colors=weight_color_list,
             alpha=0.95,
             edgecolor=page_color_str,
             linewidth=0.8,
-        )
+        ))
+        if any(np.any(weight_value_vec < 0.0) for weight_value_vec in weight_value_list):
+            stack_collection_list.extend(
+                axis_obj.stackplot(
+                    weights_df.index,
+                    negative_weight_value_list,
+                    colors=weight_color_list,
+                    alpha=0.95,
+                    edgecolor=page_color_str,
+                    linewidth=0.8,
+                )
+            )
         for band_collection_obj in stack_collection_list:
             band_collection_obj.set_hatch('////')
 
         axis_obj.set_ylabel('Weight')
-        axis_obj.set_ylim(0.0, 1.0)
+        lower_limit_float, upper_limit_float = _composition_weight_axis_limit_tuple(
+            weight_value_list
+        )
+        axis_obj.set_ylim(lower_limit_float, upper_limit_float)
         axis_obj.set_xlim(weights_df.index.min(), weights_df.index.max())
-        axis_obj.set_yticks([0.0, 0.25, 0.5, 0.75, 1.0])
+        if lower_limit_float == 0.0 and upper_limit_float == 1.0:
+            axis_obj.set_yticks([0.0, 0.25, 0.5, 0.75, 1.0])
+        else:
+            axis_obj.yaxis.set_major_locator(matplotlib.ticker.MaxNLocator(nbins=5))
         axis_obj.yaxis.set_major_formatter(
             matplotlib.ticker.PercentFormatter(xmax=1.0, decimals=0)
         )

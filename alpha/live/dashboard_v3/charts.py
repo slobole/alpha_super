@@ -52,6 +52,8 @@ _MONTH_ABBREVIATION_STR_LIST = [
 class EquityChartDict:
     point_count_int: int = 0
     has_curve_bool: bool = False
+    return_unavailable_bool: bool = False
+    return_unavailable_reason_str: str = ""
     path_d_str: str = ""
     curve_area_d_str: str = ""
     drawdown_d_str: str = ""
@@ -84,6 +86,8 @@ class EquityChartDict:
         return {
             "point_count_int": self.point_count_int,
             "has_curve_bool": self.has_curve_bool,
+            "return_unavailable_bool": self.return_unavailable_bool,
+            "return_unavailable_reason_str": self.return_unavailable_reason_str,
             "path_d_str": self.path_d_str,
             "curve_area_d_str": self.curve_area_d_str,
             "drawdown_d_str": self.drawdown_d_str,
@@ -135,7 +139,11 @@ def build_equity_chart_dict(
     if not equity_point_dict_list:
         return EquityChartDict(window_str=window_str, value_mode_str=value_mode_str)
 
-    clean_point_list = _truncate_for_window(equity_point_dict_list, window_str)
+    clean_point_list = [
+        point_dict
+        for point_dict in _truncate_for_window(equity_point_dict_list, window_str)
+        if _float_or_none(point_dict.get("equity_float")) is not None
+    ]
     equity_pairs_list = [
         (
             str(point_dict.get("market_date_str") or ""),
@@ -145,7 +153,7 @@ def build_equity_chart_dict(
         )
         for point_dict in clean_point_list
     ]
-    equity_pairs_list = [pair for pair in equity_pairs_list if pair[1] is not None]
+    daily_return_pct_list = _flow_adjusted_daily_return_pct_list(clean_point_list)
     point_count_int = len(equity_pairs_list)
     if point_count_int == 0:
         return EquityChartDict(window_str=window_str, value_mode_str=value_mode_str)
@@ -165,6 +173,29 @@ def build_equity_chart_dict(
             value_mode_str=value_mode_str,
         )
 
+    return_unavailable_bool = (
+        float(equity_pairs_list[0][1] or 0.0) == 0.0
+        or any(
+            daily_return_pct_float is None
+            for daily_return_pct_float in daily_return_pct_list[1:]
+        )
+    )
+    if return_unavailable_bool and value_mode_str == "pct":
+        return EquityChartDict(
+            point_count_int=point_count_int,
+            has_curve_bool=False,
+            return_unavailable_bool=True,
+            return_unavailable_reason_str=(
+                "Return unavailable because the EOD series contains a zero "
+                "capital base or a non-consecutive/ambiguous interval."
+            ),
+            latest_equity_float=equity_pairs_list[-1][1],
+            latest_market_date_str=equity_pairs_list[-1][0],
+            earliest_market_date_str=equity_pairs_list[0][0],
+            window_str=window_str,
+            value_mode_str=value_mode_str,
+        )
+
     equity_value_list = [pair[1] for pair in equity_pairs_list]
     first_equity_float = float(equity_value_list[0] or 0.0)
     # Flow-adjusted cumulatives: declared deposits/withdrawals are stripped
@@ -176,15 +207,17 @@ def build_equity_chart_dict(
     cumulative_return_pct_list: list[float] = []
     running_flow_float = 0.0
     growth_float = 1.0
+    twr_valid_bool = not return_unavailable_bool
     previous_equity_float: float | None = None
-    for _, equity_obj, _, flow_float in equity_pairs_list:
+    for index_int, (_, equity_obj, _, flow_float) in enumerate(equity_pairs_list):
         equity_float = float(equity_obj or 0.0)
         if previous_equity_float is None:
             flow_float = 0.0
         else:
             running_flow_float += flow_float
-            if previous_equity_float != 0.0:
-                growth_float *= (equity_float - flow_float) / previous_equity_float
+            daily_return_pct_float = daily_return_pct_list[index_int]
+            if twr_valid_bool and daily_return_pct_float is not None:
+                growth_float *= 1.0 + daily_return_pct_float
         cumulative_pnl_value_list.append(
             equity_float - first_equity_float - running_flow_float
         )
@@ -226,14 +259,7 @@ def build_equity_chart_dict(
             - ((active_value_float - range_min_float) / value_range_float) * plot_height_float
         )
         point_xy_list.append((x_float, y_float))
-        # Daily return % from the equity ratio vs the prior session (honest
-        # daily return; None for the first point, which has no prior).
-        previous_equity_float = equity_pairs_list[index_int - 1][1] if index_int > 0 else None
-        daily_pct_float = (
-            (float(equity_float) / float(previous_equity_float)) - 1.0
-            if previous_equity_float not in (None, 0)
-            else None
-        )
+        daily_pct_float = daily_return_pct_list[index_int]
         point_dict_list.append({
             "x_float": round(x_float, 2),
             "y_float": round(y_float, 2),
@@ -250,13 +276,26 @@ def build_equity_chart_dict(
     zero_y_float = _y_for_chart_value_float(0.0, range_min_float, value_range_float)
     curve_area_d_str = _build_curve_area_path_str(point_xy_list, zero_y_float)
     daily_panel_dict = _build_daily_panel_dict(
-        equity_pairs_list, point_count_int, is_dollar_mode_bool
+        equity_pairs_list,
+        daily_return_pct_list,
+        point_count_int,
+        is_dollar_mode_bool,
     )
     y_axis_tick_dict_list = _build_y_axis_tick_dict_list(
         range_min_float, range_max_float, format_value_fn
     )
     x_axis_tick_dict_list = _build_x_axis_tick_dict_list(equity_pairs_list, point_xy_list)
-    risk_footnote_dict = _build_risk_footnote_dict(equity_value_list)
+    risk_footnote_dict = (
+        {
+            "max_drawdown_label_str": "—",
+            "annualized_vol_label_str": "—",
+        }
+        if return_unavailable_bool
+        else _build_risk_footnote_dict(
+            cumulative_return_pct_list,
+            daily_return_pct_list,
+        )
+    )
 
     latest_pnl_float = equity_pairs_list[-1][2]
     latest_since_start_pnl_float = cumulative_pnl_value_list[-1]
@@ -286,7 +325,11 @@ def build_equity_chart_dict(
         latest_market_date_str=equity_pairs_list[-1][0],
         earliest_market_date_str=equity_pairs_list[0][0],
         latest_since_start_pnl_label_str=_format_signed_money_str(latest_since_start_pnl_float),
-        latest_since_start_return_label_str=_format_signed_pct_str(latest_since_start_return_pct_float),
+        latest_since_start_return_label_str=(
+            _format_signed_pct_str(latest_since_start_return_pct_float)
+            if twr_valid_bool
+            else "—"
+        ),
         latest_daily_pnl_label_str=_format_signed_money_str(latest_pnl_float),
         latest_daily_pct_label_str=_format_signed_pct_str(latest_daily_pct_float),
         latest_daily_is_positive_bool=(latest_daily_pct_float or 0.0) >= 0,
@@ -371,7 +414,10 @@ def _build_y_axis_tick_dict_list(
     ]
 
 
-def _build_risk_footnote_dict(equity_value_list: list[float]) -> dict[str, str]:
+def _build_risk_footnote_dict(
+    cumulative_return_pct_list: list[float],
+    daily_return_pct_list: list[float | None],
+) -> dict[str, str]:
     """Two understated risk readouts for the footnote under the curve.
 
     Max drawdown is the deepest dip below the running peak; *** CRITICAL*** the
@@ -379,28 +425,31 @@ def _build_risk_footnote_dict(equity_value_list: list[float]) -> dict[str, str]:
     Volatility is the sample standard deviation of daily returns annualized by
     ``sqrt(252)`` — the same convention as ``build_book_risk_dict``.
     """
+    performance_index_list = [
+        1.0 + cumulative_return_pct_float
+        for cumulative_return_pct_float in cumulative_return_pct_list
+    ]
     max_drawdown_float = 0.0
-    running_peak_float = float(equity_value_list[0] or 0.0)
-    for equity_value in equity_value_list:
-        equity_value = float(equity_value or 0.0)
-        if equity_value > running_peak_float:
-            running_peak_float = equity_value
+    running_peak_float = performance_index_list[0]
+    for performance_index_float in performance_index_list:
+        if performance_index_float > running_peak_float:
+            running_peak_float = performance_index_float
         if running_peak_float:
-            drawdown_float = (equity_value / running_peak_float) - 1.0
+            drawdown_float = (performance_index_float / running_peak_float) - 1.0
             if drawdown_float < max_drawdown_float:
                 max_drawdown_float = drawdown_float
     max_drawdown_label_str = (
         f"{max_drawdown_float * 100:.2f}%" if max_drawdown_float < -1e-9 else "0.00%"
     )
 
-    daily_return_list = [
-        (float(equity_value_list[index_int]) / float(equity_value_list[index_int - 1])) - 1.0
-        for index_int in range(1, len(equity_value_list))
-        if equity_value_list[index_int - 1]
+    valid_daily_return_pct_list = [
+        daily_return_pct_float
+        for daily_return_pct_float in daily_return_pct_list[1:]
+        if daily_return_pct_float is not None
     ]
     annualized_vol_label_str = "—"
-    if len(daily_return_list) >= 2:
-        daily_vol_float = statistics.stdev(daily_return_list)
+    if len(valid_daily_return_pct_list) >= 2:
+        daily_vol_float = statistics.stdev(valid_daily_return_pct_list)
         annualized_vol_label_str = (
             f"{daily_vol_float * math.sqrt(TRADING_DAYS_PER_YEAR_INT) * 100:.1f}%"
         )
@@ -438,7 +487,8 @@ def _build_x_axis_tick_dict_list(
 
 
 def _build_daily_panel_dict(
-    equity_pairs_list: list[tuple[str, float | None, float | None]],
+    equity_pairs_list: list[tuple[str, float | None, float | None, float]],
+    daily_return_pct_list: list[float | None],
     point_count_int: int,
     is_dollar_mode_bool: bool,
 ) -> dict[str, Any]:
@@ -461,16 +511,11 @@ def _build_daily_panel_dict(
     }
     format_value_fn = _format_signed_money_str if is_dollar_mode_bool else _format_signed_pct_str
     daily_value_list: list[float | None] = []
-    for index_int, (_date_str, equity_float, pnl_float, _flow_float) in enumerate(equity_pairs_list):
+    for index_int, (_date_str, _equity_float, pnl_float, _flow_float) in enumerate(equity_pairs_list):
         if is_dollar_mode_bool:
             daily_value_list.append(_float_or_none(pnl_float))
         else:
-            previous_equity_float = equity_pairs_list[index_int - 1][1] if index_int > 0 else None
-            daily_value_list.append(
-                (float(equity_float) / float(previous_equity_float)) - 1.0
-                if equity_float is not None and previous_equity_float not in (None, 0)
-                else None
-            )
+            daily_value_list.append(daily_return_pct_list[index_int])
     valid_value_list = [value for value in daily_value_list if value is not None]
     if not valid_value_list:
         return empty_dict
@@ -529,6 +574,40 @@ def _float_or_none(value_obj: Any) -> float | None:
         return None
 
 
+def _flow_adjusted_daily_return_pct_list(
+    equity_point_dict_list: list[dict[str, Any]],
+) -> list[float | None]:
+    """One aligned daily-return series for every dashboard consumer.
+
+    ``daily_pnl_pct_float`` from the EOD accounting layer is authoritative.
+    The fallback preserves compatibility with older fixtures and artifacts,
+    while still stripping any declared interval flow.
+    """
+    daily_return_pct_list: list[float | None] = []
+    previous_equity_float: float | None = None
+    for point_dict in equity_point_dict_list:
+        equity_float = _float_or_none(point_dict.get("equity_float"))
+        if equity_float is None or previous_equity_float in (None, 0.0):
+            daily_return_pct_list.append(None)
+        else:
+            if "daily_pnl_pct_float" in point_dict:
+                # An explicit None means accounting declared this interval
+                # unavailable; never replace it with a prettier fallback.
+                daily_return_pct_list.append(
+                    _float_or_none(point_dict.get("daily_pnl_pct_float"))
+                )
+            else:
+                flow_float = float(point_dict.get("flow_float") or 0.0)
+                # *** CRITICAL*** This is the backward-compatible EOD return:
+                # r_t = (E_t - F_interval) / E_(t-1) - 1. Never use E_t/E_(t-1)
+                # when a declared external flow exists in the interval.
+                daily_return_pct_list.append(
+                    ((equity_float - flow_float) / previous_equity_float) - 1.0
+                )
+        previous_equity_float = equity_float
+    return daily_return_pct_list
+
+
 def _format_money_str(value_obj: Any) -> str:
     value_float = _float_or_none(value_obj)
     if value_float is None:
@@ -572,46 +651,62 @@ def build_monthly_return_dict_list(
 ) -> list[dict[str, Any]]:
     """Per-calendar-month return % from the EOD equity series.
 
-    Month-end equity = the last point in each ``YYYY-MM``; a month's return is
-    ``month_end / previous_month_end - 1``. The first month uses the series'
-    first equity as its base (return since the book started, within that month).
-    Read-only reporting — no forecasting.
+    Each month compounds the same flow-adjusted daily returns used by the
+    headline and daily panel. Read-only reporting — no forecasting.
     """
-    equity_pair_list = [
-        (str(point_dict.get("market_date_str") or ""), _float_or_none(point_dict.get("equity_float")))
+    clean_point_list = [
+        point_dict
         for point_dict in (equity_point_dict_list or [])
+        if _float_or_none(point_dict.get("equity_float")) is not None
+        and len(str(point_dict.get("market_date_str") or "")) >= 7
     ]
-    equity_pair_list = [
-        pair for pair in equity_pair_list
-        if pair[1] is not None and pair[1] > 0 and len(pair[0]) >= 7
-    ]
-    if not equity_pair_list:
+    if not clean_point_list:
         return []
 
-    month_end_equity_dict: dict[str, float] = {}
+    daily_return_pct_list = _flow_adjusted_daily_return_pct_list(clean_point_list)
+    monthly_growth_dict: dict[str, float] = {}
+    monthly_available_dict: dict[str, bool] = {}
     month_key_order_list: list[str] = []
-    for date_str, equity_float in equity_pair_list:
+    return_history_available_bool = (
+        float(clean_point_list[0].get("equity_float") or 0.0) != 0.0
+    )
+    for point_index_int, (point_dict, daily_return_pct_float) in enumerate(
+        zip(clean_point_list, daily_return_pct_list, strict=True)
+    ):
+        date_str = str(point_dict.get("market_date_str") or "")
         month_key_str = date_str[:7]
-        if month_key_str not in month_end_equity_dict:
+        if month_key_str not in monthly_growth_dict:
             month_key_order_list.append(month_key_str)
-        month_end_equity_dict[month_key_str] = equity_float  # type: ignore[assignment]
+            monthly_growth_dict[month_key_str] = 1.0
+            monthly_available_dict[month_key_str] = return_history_available_bool
+        if point_index_int > 0 and daily_return_pct_float is None:
+            return_history_available_bool = False
+        monthly_available_dict[month_key_str] = (
+            monthly_available_dict[month_key_str]
+            and return_history_available_bool
+        )
+        if return_history_available_bool and daily_return_pct_float is not None:
+            monthly_growth_dict[month_key_str] *= 1.0 + daily_return_pct_float
 
-    first_equity_float = equity_pair_list[0][1]
     monthly_return_dict_list: list[dict[str, Any]] = []
-    previous_month_end_float: float | None = None
     for month_key_str in month_key_order_list:
-        month_end_float = month_end_equity_dict[month_key_str]
-        base_float = previous_month_end_float if previous_month_end_float is not None else first_equity_float
-        return_pct_float = (month_end_float / base_float - 1.0) if base_float else 0.0
+        is_available_bool = monthly_available_dict[month_key_str]
+        return_pct_float = (
+            monthly_growth_dict[month_key_str] - 1.0
+            if is_available_bool
+            else None
+        )
         monthly_return_dict_list.append(
             {
                 "month_label_str": _format_month_label_str(month_key_str),
                 "return_pct_float": return_pct_float,
                 "return_label_str": _format_signed_pct_str(return_pct_float),
-                "is_positive_bool": return_pct_float >= 0,
+                "is_positive_bool": (
+                    return_pct_float is not None and return_pct_float >= 0
+                ),
+                "is_available_bool": is_available_bool,
             }
         )
-        previous_month_end_float = month_end_float
     return monthly_return_dict_list
 
 
@@ -858,48 +953,73 @@ class BookRiskDict:
 def build_book_risk_dict(
     equity_point_dict_list: list[dict[str, Any]] | None,
 ) -> BookRiskDict:
-    equity_pair_list = [
-        (str(point_dict.get("market_date_str") or ""), _float_or_none(point_dict.get("equity_float")))
+    clean_point_list = [
+        point_dict
         for point_dict in (equity_point_dict_list or [])
+        if _float_or_none(point_dict.get("equity_float")) is not None
     ]
-    equity_pair_list = [pair for pair in equity_pair_list if pair[1] is not None and pair[1] > 0]
-    if not equity_pair_list:
+    if not clean_point_list:
         return BookRiskDict()
 
-    current_date_str, current_equity_float = equity_pair_list[-1]
+    date_str_list = [
+        str(point_dict.get("market_date_str") or "")
+        for point_dict in clean_point_list
+    ]
+    equity_value_list = [
+        float(point_dict["equity_float"])
+        for point_dict in clean_point_list
+    ]
+    daily_return_pct_list = _flow_adjusted_daily_return_pct_list(clean_point_list)
+    if (
+        equity_value_list[0] == 0.0
+        or any(
+            daily_return_pct_float is None
+            for daily_return_pct_float in daily_return_pct_list[1:]
+        )
+    ):
+        return BookRiskDict()
+    performance_index_list: list[float] = []
+    growth_float = 1.0
+    for daily_return_pct_float in daily_return_pct_list:
+        if daily_return_pct_float is not None:
+            growth_float *= 1.0 + daily_return_pct_float
+        performance_index_list.append(growth_float)
+    current_equity_float = equity_value_list[-1]
 
-    # Drawdown vs the running peak. *** CRITICAL*** running peak must only look
-    # at sessions up to and including each point — never ahead of it.
-    running_peak_float = equity_pair_list[0][1]
-    running_peak_date_str = equity_pair_list[0][0]
+    # Flow-adjusted drawdown vs the running performance peak. *** CRITICAL***
+    # the peak only sees sessions through each point, never future returns.
+    running_peak_float = performance_index_list[0]
     overall_peak_float = running_peak_float
-    overall_peak_date_str = running_peak_date_str
+    overall_peak_index_int = 0
+    overall_peak_date_str = date_str_list[0]
     max_drawdown_pct_float = 0.0
     last_high_index_int = 0
-    for index_int, (date_str, equity_float) in enumerate(equity_pair_list):
-        if equity_float >= running_peak_float:
-            running_peak_float = equity_float
-            running_peak_date_str = date_str
+    for index_int, performance_index_float in enumerate(performance_index_list):
+        if performance_index_float >= running_peak_float:
+            running_peak_float = performance_index_float
             last_high_index_int = index_int
-        drawdown_pct_float = (running_peak_float - equity_float) / running_peak_float
+        drawdown_pct_float = (
+            (running_peak_float - performance_index_float) / running_peak_float
+        )
         if drawdown_pct_float > max_drawdown_pct_float:
             max_drawdown_pct_float = drawdown_pct_float
-        if equity_float > overall_peak_float:
-            overall_peak_float = equity_float
-            overall_peak_date_str = date_str
+        if performance_index_float > overall_peak_float:
+            overall_peak_float = performance_index_float
+            overall_peak_index_int = index_int
+            overall_peak_date_str = date_str_list[index_int]
 
     current_drawdown_pct_float = (
-        (overall_peak_float - current_equity_float) / overall_peak_float
+        (overall_peak_float - performance_index_list[-1]) / overall_peak_float
         if overall_peak_float > 0
         else 0.0
     )
-    days_underwater_int = (len(equity_pair_list) - 1) - last_high_index_int
+    days_underwater_int = (len(clean_point_list) - 1) - last_high_index_int
 
     # Realized daily returns → sample stdev → annualized volatility.
     daily_return_list = [
-        (equity_pair_list[index_int][1] / equity_pair_list[index_int - 1][1]) - 1.0
-        for index_int in range(1, len(equity_pair_list))
-        if equity_pair_list[index_int - 1][1]
+        daily_return_pct_float
+        for daily_return_pct_float in daily_return_pct_list[1:]
+        if daily_return_pct_float is not None
     ]
     daily_vol_label_str = "—"
     annualized_vol_label_str = "—"
@@ -912,9 +1032,11 @@ def build_book_risk_dict(
 
     return BookRiskDict(
         has_data_bool=True,
-        point_count_int=len(equity_pair_list),
+        point_count_int=len(clean_point_list),
         current_equity_label_str=_format_money_str(current_equity_float),
-        peak_equity_label_str=_format_money_str(overall_peak_float),
+        peak_equity_label_str=_format_money_str(
+            equity_value_list[overall_peak_index_int]
+        ),
         peak_market_date_str=overall_peak_date_str,
         current_drawdown_pct_float=current_drawdown_pct_float,
         current_drawdown_label_str=(

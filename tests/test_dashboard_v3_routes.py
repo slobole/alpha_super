@@ -57,6 +57,9 @@ def _build_pod_row_dict(
         "mode_str": mode_str,
         "account_route_str": "ibkr:demo",
         "strategy_import_str": strategy_import_str,
+        "signal_clock_str": "month_end_snapshot_ready",
+        "session_calendar_id_str": "XNYS",
+        "execution_policy_str": "next_month_first_open",
         "db_status_str": "ok",
         "health_str": severity_str,
         "next_action_str": "submit_vplan",
@@ -77,6 +80,8 @@ def _build_pod_row_dict(
         "latest_event_timestamp_str": "2026-05-21T15:45:02+00:00",
         "latest_vplan_status_str": "submitted",
         "latest_vplan_id_int": 87,
+        "latest_decision_signal_timestamp_str": "2026-05-21T15:55:00+00:00",
+        "latest_vplan_submission_timestamp_str": "2026-05-21T15:58:00+00:00",
         "latest_vplan_target_execution_timestamp_str": "2026-05-21T20:00:00+00:00",
         "latest_decision_plan_id_int": 142,
         "latest_comparison_state_str": "available",
@@ -143,10 +148,10 @@ def _build_summary_dict() -> dict[str, Any]:
                     "latest_equity_float": 28400.0,
                     "daily_pnl_float": 184.0,
                     "since_start_pnl_float": -420.0,
-                    "equity_point_dict_list": [
-                        {"market_date_str": "2026-05-19", "equity_float": 28220.0, "daily_pnl_float": 100.0},
-                        {"market_date_str": "2026-05-20", "equity_float": 28216.0, "daily_pnl_float": -4.0},
-                        {"market_date_str": "2026-05-21", "equity_float": 28400.0, "daily_pnl_float": 184.0},
+                    "strict_equity_point_dict_list": [
+                        {"market_date_str": "2026-05-19", "equity_float": 28220.0, "daily_pnl_float": 100.0, "daily_pnl_pct_float": None},
+                        {"market_date_str": "2026-05-20", "equity_float": 28216.0, "daily_pnl_float": -4.0, "daily_pnl_pct_float": (28216.0 / 28220.0) - 1.0},
+                        {"market_date_str": "2026-05-21", "equity_float": 28400.0, "daily_pnl_float": 184.0, "daily_pnl_pct_float": (28400.0 / 28216.0) - 1.0},
                     ],
                 },
             ],
@@ -179,6 +184,9 @@ class StubDataProvider:
 
     def get_summary_dict(self) -> dict[str, Any]:
         return self.summary_dict
+
+    def get_target_list(self) -> list[Any]:
+        return []
 
     def get_action_token_str(self) -> str:
         return self.ACTION_TOKEN_STR
@@ -390,11 +398,161 @@ def test_healthz_route_returns_version_marker(test_client_obj) -> None:
     assert DASHBOARD_V3_VERSION_STR in response_text_str
 
 
+def test_healthz_reports_cash_flow_config_error(
+    test_client_obj,
+    provider_obj,
+) -> None:
+    class _BadCashFlowTarget:
+        cash_flow_config_error_str = "C:/bad/pod_cash_flows.yaml: missing flows"
+
+    provider_obj.get_target_list = lambda: [_BadCashFlowTarget()]
+    response_obj = test_client_obj.get("/healthz")
+    assert response_obj.status_code == 503
+    assert "C:/bad/pod_cash_flows.yaml" in response_obj.get_data(as_text=True)
+
+
 def test_index_renders_overview(test_client_obj) -> None:
     # The root is the Overview — the five-second answer — not a redirect.
     response_obj = test_client_obj.get("/")
     assert response_obj.status_code == 200
-    assert "Live book" in response_obj.get_data(as_text=True)
+    response_text_str = response_obj.get_data(as_text=True)
+    assert "Live book" in response_text_str
+    assert "Next trading window" in response_text_str
+    assert "/fragments/trading-window/live" in response_text_str
+    assert "/fragments/health-strip?mode=live" in response_text_str
+    assert "/fragments/top-bar?mode=live" in response_text_str
+
+
+def test_overview_all_clear_is_withheld_when_live_health_is_yellow(
+    test_client_obj,
+    provider_obj,
+    monkeypatch,
+) -> None:
+    from alpha.live.dashboard_v3.health import HealthCellDict
+
+    for row_dict in provider_obj.summary_dict["pod_row_dict_list"]:
+        if row_dict["mode_str"] != "live":
+            continue
+        row_dict["health_str"] = "green"
+        row_dict["required_action_dict"] = {
+            "label_str": "No action",
+            "severity_str": "green",
+            "reason_str": "POD is idle or completed.",
+        }
+        row_dict["debug_summary_dict"] = {
+            "severity_str": "green",
+            "verdict_label_str": "healthy",
+            "primary_reason_str": "No action required.",
+        }
+        row_dict["data_freshness_dict"] = {
+            "item_dict_list": [
+                {"label_str": "Norgate", "severity_str": "green", "value_str": "2026-05-21"},
+                {"label_str": "Pod state", "severity_str": "green", "value_str": "2026-05-21T16:00:00+00:00"},
+                {"label_str": "EOD Snapshot", "severity_str": "green", "value_str": "2026-05-21"},
+            ]
+        }
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.health._build_disk_cell",
+        lambda _path_str: HealthCellDict(
+            label_str="Disk",
+            value_str="82% used",
+            severity_str="yellow",
+            detail_str="18% free",
+        ),
+    )
+
+    response_text_str = test_client_obj.get("/").get_data(as_text=True)
+    assert "Live health needs review" in response_text_str
+    assert "Disk: 82% used." in response_text_str
+    assert "All clear" not in response_text_str
+    assert "on track" not in response_text_str
+
+    fragment_text_str = test_client_obj.get(
+        "/fragments/top-bar?mode=live"
+    ).get_data(as_text=True)
+    assert "Live health needs review" in fragment_text_str
+    assert "All clear" not in fragment_text_str
+
+
+def test_live_trading_window_unknown_overrides_all_clear(
+    test_client_obj,
+    provider_obj,
+    monkeypatch,
+) -> None:
+    from alpha.live.dashboard_v3.health import HealthCellDict
+    from alpha.live.dashboard_v3.schedule import TradingWindow
+
+    for row_dict in provider_obj.summary_dict["pod_row_dict_list"]:
+        if row_dict["mode_str"] != "live":
+            continue
+        row_dict["health_str"] = "green"
+        row_dict["required_action_dict"] = {
+            "label_str": "No action",
+            "severity_str": "green",
+        }
+        row_dict["debug_summary_dict"] = {"severity_str": "green"}
+        row_dict["data_freshness_dict"] = {
+            "item_dict_list": [
+                {"label_str": "Norgate", "severity_str": "green", "value_str": "2026-05-21"},
+                {"label_str": "Pod state", "severity_str": "green", "value_str": "2026-05-21T16:00:00+00:00"},
+                {"label_str": "EOD Snapshot", "severity_str": "green", "value_str": "2026-05-21"},
+            ]
+        }
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.health._build_disk_cell",
+        lambda _path_str: HealthCellDict("Disk", "50% used", "green", "healthy"),
+    )
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.app.build_next_trading_window",
+        lambda *_args, **_kwargs: TradingWindow(
+            has_data_bool=True,
+            severity_str="gray",
+            status_label_str="Awaiting scheduler refresh",
+            detail_str="Month-end just closed; waiting for persisted state.",
+        ),
+    )
+
+    response_text_str = test_client_obj.get(
+        "/fragments/top-bar?mode=live"
+    ).get_data(as_text=True)
+    assert "Cannot verify trading window" in response_text_str
+    assert "All clear" not in response_text_str
+
+
+def test_live_health_red_overrides_yellow_pod_verdict(
+    test_client_obj,
+    provider_obj,
+) -> None:
+    live_row_dict = provider_obj.summary_dict["pod_row_dict_list"][1]
+    live_row_dict["data_freshness_dict"] = {
+        "item_dict_list": [
+            {
+                "label_str": "Norgate",
+                "severity_str": "red",
+                "value_str": "2026-05-20",
+            }
+        ]
+    }
+
+    response_text_str = test_client_obj.get(
+        "/fragments/top-bar?mode=live"
+    ).get_data(as_text=True)
+    assert "Live health needs action" in response_text_str
+    assert "Norgate: 2026-05-20." in response_text_str
+
+
+def test_non_live_top_bar_does_not_apply_live_health_labels(
+    test_client_obj,
+) -> None:
+    response_text_str = test_client_obj.get(
+        "/fragments/top-bar?mode=paper"
+    ).get_data(as_text=True)
+    assert "Live health" not in response_text_str
+
+
+def test_events_top_bar_refresh_stays_live_scoped(test_client_obj) -> None:
+    response_text_str = test_client_obj.get("/events").get_data(as_text=True)
+    assert "/fragments/top-bar?mode=live" in response_text_str
 
 
 def test_legacy_mode_urls_redirect_to_pods(test_client_obj) -> None:
@@ -877,6 +1035,78 @@ def test_schedule_strip_fragment_returns_html(test_client_obj) -> None:
     assert "submit_vplan" in response_text_str or "Schedule is empty" in response_text_str
 
 
+def test_trading_window_fragment_renders_current_live_action(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/fragments/trading-window/live")
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    assert "Next trading window" in response_text_str
+    assert "Waiting for ACKs" in response_text_str
+    assert "16:00 ET" in response_text_str
+    assert "Open required action" not in response_text_str
+
+
+def test_trading_window_fragment_renders_action_button(
+    test_client_obj,
+    provider_obj,
+) -> None:
+    live_row_dict = provider_obj.summary_dict["pod_row_dict_list"][0]
+    live_row_dict["next_action_str"] = "build_decision_plan"
+    live_row_dict["latest_vplan_target_execution_timestamp_str"] = None
+    live_row_dict["required_action_dict"] = {
+        "label_str": "Build DecisionPlan",
+        "severity_str": "yellow",
+        "detail_str": "The current month-end DecisionPlan is due.",
+    }
+
+    response_text_str = test_client_obj.get(
+        "/fragments/trading-window/live"
+    ).get_data(as_text=True)
+    assert "Build DecisionPlan" in response_text_str
+    assert "Open required action" in response_text_str
+    assert 'href="/pods/live"' in response_text_str
+
+
+def test_health_strip_live_scope_excludes_incubation_failure(
+    test_client_obj,
+    provider_obj,
+) -> None:
+    live_row_dict = provider_obj.summary_dict["pod_row_dict_list"][0]
+    second_live_row_dict = provider_obj.summary_dict["pod_row_dict_list"][1]
+    incubation_row_dict = provider_obj.summary_dict["pod_row_dict_list"][3]
+    live_row_dict["data_freshness_dict"] = {
+        "item_dict_list": [
+            {
+                "label_str": "Norgate",
+                "severity_str": "green",
+                "value_str": "LIVE-FRESH",
+            }
+        ]
+    }
+    second_live_row_dict["data_freshness_dict"] = live_row_dict[
+        "data_freshness_dict"
+    ]
+    incubation_row_dict["data_freshness_dict"] = {
+        "item_dict_list": [
+            {
+                "label_str": "Norgate",
+                "severity_str": "red",
+                "value_str": "INCUBATION-FAILED",
+            }
+        ]
+    }
+
+    response_text_str = test_client_obj.get(
+        "/fragments/health-strip?mode=live"
+    ).get_data(as_text=True)
+    assert "LIVE-FRESH" in response_text_str
+    assert "INCUBATION-FAILED" not in response_text_str
+
+
+def test_trading_window_unknown_mode_returns_404(test_client_obj) -> None:
+    assert test_client_obj.get("/fragments/trading-window/martian").status_code == 404
+    assert test_client_obj.get("/fragments/trading-window/paper").status_code == 404
+
+
 def test_pod_row_carries_data_pod_id_attribute(test_client_obj) -> None:
     response_obj = test_client_obj.get("/pods/live")
     response_text_str = response_obj.get_data(as_text=True)
@@ -1013,7 +1243,7 @@ def test_mode_page_labels_equity_time_basis(test_client_obj) -> None:
     totals on one page never read as a discrepancy."""
     response_text_str = test_client_obj.get("/").get_data(as_text=True)
     assert "current book" in response_text_str          # allocation pie basis
-    assert "Combined book · EOD" in response_text_str    # equity curve basis
+    assert "Combined book · strict common EOD" in response_text_str
     assert "Realized risk · EOD" in response_text_str    # risk strip basis
 
 

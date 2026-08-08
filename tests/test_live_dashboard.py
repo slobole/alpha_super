@@ -939,6 +939,39 @@ def test_dashboard_discovers_enabled_pods_and_resolves_defaults_and_override(tmp
         )
 
 
+def test_bad_cash_flow_config_does_not_hide_operational_targets(
+    tmp_path: Path,
+    monkeypatch,
+):
+    releases_root_path_obj = tmp_path / "releases"
+    _write_release_manifest(
+        releases_root_path_obj,
+        user_id_str="paper_user",
+        pod_id_str="pod_enabled_paper",
+        mode_str="paper",
+    )
+    bad_flows_path_obj = tmp_path / "bad_pod_cash_flows.yaml"
+    bad_flows_path_obj.write_text("flow: []\n", encoding="utf-8")
+    monkeypatch.setenv(
+        "ALPHA_POD_CASH_FLOWS_PATH_STR",
+        str(bad_flows_path_obj),
+    )
+
+    app_obj = DashboardApp(
+        releases_root_path_str=str(releases_root_path_obj),
+        config_path_str=str(tmp_path / "absent_dashboard_config.yaml"),
+        results_root_path_str=str(tmp_path / "results"),
+    )
+    target_obj_list = app_obj.get_target_list()
+
+    assert [
+        target_obj.release_obj.pod_id_str for target_obj in target_obj_list
+    ] == ["pod_enabled_paper"]
+    assert "missing required 'flows' list" in str(
+        target_obj_list[0].cash_flow_config_error_str
+    )
+
+
 def test_dashboard_incubation_rehearsal_keeps_sim_ledger_separate_from_paper_probe(tmp_path: Path):
     releases_root_path_obj = tmp_path / "releases"
     _write_release_manifest(

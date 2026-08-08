@@ -2,23 +2,36 @@
 {% block title %}Overview{% endblock %}
 {% block content %}
 
-{# The five-second answer. One status sentence, then the live book. The
-   health and next-due strips sit above in the shared shell; the pods
-   table lives on its own page — a green overview means "close the app". #}
+{# The five-second answer. One status sentence, Live-only health evidence,
+   and the next trading window sit above the analytical book detail. #}
 <section class="mb-4">
   <div class="font-mono text-[10px] uppercase tracking-widest text-ink-500">Alpha / Live</div>
   <h1 class="text-2xl font-bold tracking-tight mt-1">Live book</h1>
   <p class="text-ink-500 mt-1">
     {% if pod_count_int == 0 %}
       No live pods are enabled.
-    {% elif attention_count_int == 0 %}
-      All {{ pod_count_int }} live pod{{ 's' if pod_count_int != 1 }} on track.
     {% else %}
-      {{ attention_count_int }} of {{ pod_count_int }} live pods need attention —
-      <a href="/pods/live" class="text-accent underline">open Pods</a>.
+      {{ pod_count_int }} live pod{{ 's' if pod_count_int != 1 }} loaded —
+      <a href="/pods/live" class="text-accent underline">open Pods</a> for detail.
     {% endif %}
   </p>
 </section>
+
+<div id="health-strip"
+     class="mb-4"
+     hx-get="/fragments/health-strip?mode=live"
+     hx-trigger="every 15s"
+     hx-swap="innerHTML">
+  {% include "_health_strip.html" %}
+</div>
+
+{% if cash_flow_config_error_str %}
+  <section class="mb-4 border border-bad/40 bg-bad/5 px-4 py-3 text-sm text-bad">
+    <div class="font-semibold">Cash-flow reporting is unavailable</div>
+    <div class="font-mono text-xs mt-1 break-all">{{ cash_flow_config_error_str }}</div>
+    <div class="text-xs mt-1">Operational controls remain available; P&amp;L and return figures are withheld until this configuration is fixed.</div>
+  </section>
+{% endif %}
 
 {% if book_stat_dict %}
   {# Equity = what the book holds · Contributions = what the operator put
@@ -35,41 +48,51 @@
       <div class="text-[11px] text-ink-500 mt-0.5">declared deposits − withdrawals</div>
     </div>
     <div class="p-4">
-      <div class="font-mono text-[10px] uppercase tracking-widest text-ink-500">P&amp;L · time-weighted</div>
+      <div class="font-mono text-[10px] uppercase tracking-widest text-ink-500">P&amp;L · TWR</div>
       <div class="font-mono text-xl mt-1 tabular-nums
                   {% if (book_stat_dict.pnl_float or 0) >= 0 %}text-ok{% else %}text-bad{% endif %}">
         {{ book_stat_dict.pnl_float | money }}
-        <span class="text-sm">· {{ '%+.2f' | format(book_stat_dict.twr_pct_float * 100) }}%</span>
+        <span class="text-sm">· {% if book_stat_dict.twr_pct_float is not none %}{{ '%+.2f' | format(book_stat_dict.twr_pct_float * 100) }}%{% else %}—{% endif %}</span>
       </div>
       <div class="text-[11px] text-ink-500 mt-0.5">trading only — flows stripped</div>
     </div>
   </section>
 {% endif %}
 
-{% if combined_book_chart_dict %}
-  <section class="mb-4 rounded-md border border-ink-100 bg-white shadow-sm p-4">
-    <header class="flex items-baseline justify-between mb-1">
-      <div class="text-xs uppercase tracking-wide text-ink-500"
-           title="end-of-day combined-book equity series">
-        Combined book · EOD
-      </div>
-      <div class="text-xs tabular-nums">
-        <span class="text-ink-500">daily</span>
-        <strong class="{% if (combined_book_summary_dict.daily_pnl_float or 0) >= 0 %}text-ok{% else %}text-bad{% endif %}">
-          {{ combined_book_summary_dict.daily_pnl_float | money }}
-        </strong>
-        <span class="text-ink-500 ml-3">since start</span>
-        <strong class="{% if (combined_book_summary_dict.since_start_pnl_float or 0) >= 0 %}text-ok{% else %}text-bad{% endif %}">
-          {{ combined_book_summary_dict.since_start_pnl_float | money }}
-        </strong>
-      </div>
-    </header>
-    {% set chart_dict = combined_book_chart_dict %}
-    {% set combined_chart_mode_str = 'live' %}
-    {% include "_equity_chart.html" %}
-    {% include "_monthly_returns_strip.html" %}
-  </section>
-{% endif %}
+<section class="mb-4 grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
+  {% if combined_book_chart_dict %}
+    <div class="lg:col-span-7 rounded-md border border-ink-100 bg-white shadow-sm p-4">
+      <header class="flex items-baseline justify-between mb-1">
+        <div class="text-xs uppercase tracking-wide text-ink-500"
+             title="end-of-day combined-book equity series">
+          {% if combined_book_is_strict_bool %}Combined book · strict common EOD{% else %}Operational continuity · stale marks possible{% endif %}
+        </div>
+        {% if book_stat_dict %}<div class="text-xs tabular-nums">
+          <span class="text-ink-500">daily</span>
+          <strong class="{% if (book_stat_dict.daily_pnl_float or 0) >= 0 %}text-ok{% else %}text-bad{% endif %}">
+            {{ book_stat_dict.daily_pnl_float | money }}
+          </strong>
+          <span class="text-ink-500 ml-3">since start</span>
+          <strong class="{% if (book_stat_dict.pnl_float or 0) >= 0 %}text-ok{% else %}text-bad{% endif %}">
+            {{ book_stat_dict.pnl_float | money }}
+          </strong>
+        </div>{% endif %}
+      </header>
+      {% set chart_dict = combined_book_chart_dict %}
+      {% set combined_chart_mode_str = 'live' %}
+      {% include "_equity_chart.html" %}
+      {% include "_monthly_returns_strip.html" %}
+    </div>
+  {% endif %}
+
+  <div id="trading-window-card"
+       class="{% if combined_book_chart_dict %}lg:col-span-5{% else %}lg:col-span-12{% endif %}"
+       hx-get="/fragments/trading-window/live"
+       hx-trigger="every 30s"
+       hx-swap="innerHTML">
+    {% include "_trading_window_card.html" %}
+  </div>
+</section>
 
 {# Book-level realized risk (drawdown + volatility). #}
 {% include "_book_risk_strip.html" %}

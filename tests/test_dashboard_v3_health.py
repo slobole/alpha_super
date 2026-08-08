@@ -80,3 +80,83 @@ def test_health_rollup_unrecognised_severity_falls_back_to_gray() -> None:
         cell_obj for cell_obj in rollup_obj.cell_dict_list if cell_obj.label_str == "Norgate"
     )
     assert norgate_cell_obj.severity_str == "gray"
+
+
+def test_health_rollup_live_scope_ignores_incubation_failure() -> None:
+    summary_dict = {
+        "pod_row_dict_list": [
+            _pod_row_with_freshness(
+                "pod_live",
+                [
+                    {
+                        "label_str": "Norgate",
+                        "severity_str": "green",
+                        "value_str": "2026-05-21",
+                    }
+                ],
+            ),
+            {
+                **_pod_row_with_freshness(
+                    "pod_incubation",
+                    [
+                        {
+                            "label_str": "Norgate",
+                            "severity_str": "red",
+                            "value_str": "2026-05-20",
+                        }
+                    ],
+                ),
+                "mode_str": "incubation",
+            },
+        ]
+    }
+
+    rollup_obj = build_health_rollup(summary_dict, mode_str="live")
+    norgate_cell_obj = next(
+        cell_obj for cell_obj in rollup_obj.cell_dict_list if cell_obj.label_str == "Norgate"
+    )
+    assert norgate_cell_obj.severity_str == "green"
+    assert norgate_cell_obj.value_str == "2026-05-21"
+
+
+def test_health_rollup_displays_value_from_worst_pod() -> None:
+    summary_dict = {
+        "pod_row_dict_list": [
+            _pod_row_with_freshness(
+                "pod_green",
+                [{"label_str": "Norgate", "severity_str": "green", "value_str": "2026-05-21"}],
+            ),
+            _pod_row_with_freshness(
+                "pod_red",
+                [{"label_str": "Norgate", "severity_str": "red", "value_str": "2026-05-20"}],
+            ),
+        ]
+    }
+
+    rollup_obj = build_health_rollup(summary_dict, mode_str="live")
+    norgate_cell_obj = next(
+        cell_obj for cell_obj in rollup_obj.cell_dict_list if cell_obj.label_str == "Norgate"
+    )
+    assert norgate_cell_obj.severity_str == "red"
+    assert norgate_cell_obj.value_str == "2026-05-20"
+    assert "pod_red" in norgate_cell_obj.detail_str
+
+
+def test_health_rollup_marks_missing_pod_evidence_unknown() -> None:
+    summary_dict = {
+        "pod_row_dict_list": [
+            _pod_row_with_freshness(
+                "pod_green",
+                [{"label_str": "Norgate", "severity_str": "green", "value_str": "2026-05-21"}],
+            ),
+            _pod_row_with_freshness("pod_missing", []),
+        ]
+    }
+
+    rollup_obj = build_health_rollup(summary_dict, mode_str="live")
+    norgate_cell_obj = next(
+        cell_obj for cell_obj in rollup_obj.cell_dict_list if cell_obj.label_str == "Norgate"
+    )
+    assert norgate_cell_obj.severity_str == "gray"
+    assert norgate_cell_obj.value_str == "—"
+    assert "pod_missing" in norgate_cell_obj.detail_str

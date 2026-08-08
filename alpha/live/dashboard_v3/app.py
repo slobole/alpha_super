@@ -54,7 +54,7 @@ from alpha.live.dashboard_v3.data import (
     get_pod_row_dict_list_for_mode,
 )
 from alpha.live.dashboard_v3.filters import FILTER_MAP_DICT
-from alpha.live.dashboard_v3.health import build_health_rollup
+from alpha.live.dashboard_v3.health import SEVERITY_RANK_DICT, build_health_rollup
 from alpha.live.dashboard_v3.journal import (
     DEFAULT_JOURNAL_PATH_STR,
     append_journal_entry,
@@ -67,8 +67,11 @@ from alpha.live.dashboard_v3.notifications import (
     discord_webhook_url_from_env_str,
     post_discord_webhook_bool,
 )
-from alpha.live.dashboard_v3.schedule import build_schedule_entry_list
-from alpha.live.dashboard_v3.verdict import resolve_top_bar_verdict
+from alpha.live.dashboard_v3.schedule import (
+    build_next_trading_window,
+    build_schedule_entry_list,
+)
+from alpha.live.dashboard_v3.verdict import TopBarVerdict, resolve_top_bar_verdict
 from alpha.live.ops_report import (
     DEFAULT_STALE_AFTER_SECONDS_INT,
     apply_consumer_staleness_dict,
@@ -157,6 +160,30 @@ def create_app(
 
     @flask_app_obj.route("/healthz")
     def healthz_route_fn() -> tuple[str, int]:
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        get_target_list_fn = getattr(provider_obj, "get_target_list", None)
+        if callable(get_target_list_fn):
+            try:
+                target_obj_list = get_target_list_fn()
+            except Exception as exception_obj:  # readiness must expose config load failures
+                return (f"dashboard_v3 not ready: {exception_obj}", 503)
+            cash_flow_error_str = next(
+                (
+                    str(target_obj.cash_flow_config_error_str)
+                    for target_obj in target_obj_list
+                    if getattr(
+                        target_obj,
+                        "cash_flow_config_error_str",
+                        None,
+                    )
+                ),
+                None,
+            )
+            if cash_flow_error_str is not None:
+                return (
+                    f"dashboard_v3 cash-flow config error: {cash_flow_error_str}",
+                    503,
+                )
         return (f"dashboard_v3 ok {DASHBOARD_V3_VERSION_STR}", 200)
 
     @flask_app_obj.route("/")
@@ -170,7 +197,12 @@ def create_app(
         attention_count_int = sum(
             1 for row_dict in pod_row_dict_list if _is_attention_row_bool(row_dict)
         )
-        verdict_obj = resolve_top_bar_verdict(summary_dict, mode_str="live")
+        health_obj = build_health_rollup(summary_dict, mode_str="live")
+        verdict_obj = _resolve_verdict_with_health(summary_dict, mode_str="live")
+        trading_window_obj = build_next_trading_window(
+            summary_dict,
+            mode_str="live",
+        )
         allocation_pie_obj = build_allocation_pie_dict([
             {
                 "label_str": row_dict.get("pod_id_str"),
@@ -181,10 +213,16 @@ def create_app(
             for row_dict in pod_row_dict_list
         ])
         combined_book_env_dict = _find_combined_book_environment_dict(summary_dict, "live")
-        combined_book_equity_point_dict_list = (
-            (combined_book_env_dict or {}).get("equity_point_dict_list")
-            or (combined_book_env_dict or {}).get("carry_forward_equity_point_dict_list")
+        strict_book_equity_point_dict_list = (
+            (combined_book_env_dict or {}).get("strict_equity_point_dict_list")
+            or []
         )
+        combined_book_equity_point_dict_list = (
+            strict_book_equity_point_dict_list
+            or (combined_book_env_dict or {}).get("carry_forward_equity_point_dict_list")
+            or (combined_book_env_dict or {}).get("equity_point_dict_list")
+        )
+        combined_book_is_strict_bool = bool(strict_book_equity_point_dict_list)
         combined_book_chart_dict = None
         if combined_book_env_dict is not None:
             chart_obj = build_equity_chart_dict(
@@ -193,9 +231,9 @@ def create_app(
             )
             if chart_obj.point_count_int > 0:
                 combined_book_chart_dict = chart_obj.as_dict()
-        book_risk_obj = build_book_risk_dict(combined_book_equity_point_dict_list)
+        book_risk_obj = build_book_risk_dict(strict_book_equity_point_dict_list)
         monthly_return_dict_list = build_monthly_return_dict_list(
-            combined_book_equity_point_dict_list
+            strict_book_equity_point_dict_list
         )
         # The three numbers that must never blur into each other: what the
         # book holds, what the operator put in, what trading actually made.
@@ -203,27 +241,33 @@ def create_app(
         # flows on the first (baseline) date are starting capital, not
         # contributions. Presentation math over the chart's own series.
         book_stat_dict = None
-        if combined_book_equity_point_dict_list:
+        if strict_book_equity_point_dict_list:
             twr_growth_float = 1.0
             net_contribution_float = 0.0
-            for point_index_int, point_dict in enumerate(combined_book_equity_point_dict_list):
+            twr_valid_bool = True
+            for point_index_int, point_dict in enumerate(strict_book_equity_point_dict_list):
                 daily_pct_obj = point_dict.get("daily_pnl_pct_float")
-                if daily_pct_obj is not None:
+                if point_index_int > 0 and daily_pct_obj is None:
+                    twr_valid_bool = False
+                elif daily_pct_obj is not None:
                     twr_growth_float *= 1.0 + float(daily_pct_obj)
                 if point_index_int > 0:
                     net_contribution_float += float(point_dict.get("flow_float") or 0.0)
-            first_point_dict = combined_book_equity_point_dict_list[0]
-            last_point_dict = combined_book_equity_point_dict_list[-1]
+            first_point_dict = strict_book_equity_point_dict_list[0]
+            last_point_dict = strict_book_equity_point_dict_list[-1]
             equity_float = float(last_point_dict.get("equity_float") or 0.0)
             book_stat_dict = {
                 "equity_float": equity_float,
                 "net_contribution_float": net_contribution_float,
+                "daily_pnl_float": last_point_dict.get("daily_pnl_float"),
                 "pnl_float": (
                     equity_float
                     - float(first_point_dict.get("equity_float") or 0.0)
                     - net_contribution_float
                 ),
-                "twr_pct_float": twr_growth_float - 1.0,
+                "twr_pct_float": (
+                    twr_growth_float - 1.0 if twr_valid_bool else None
+                ),
             }
         return render_template(
             "overview_page.html",
@@ -233,10 +277,16 @@ def create_app(
             mode_label_str=MODE_LABEL_DICT["live"],
             pod_count_int=len(pod_row_dict_list),
             attention_count_int=attention_count_int,
+            cash_flow_config_error_str=summary_dict.get(
+                "cash_flow_config_error_str"
+            ),
             verdict_dict=verdict_obj.as_dict(),
+            health_dict=health_obj.as_dict(),
+            trading_window_dict=trading_window_obj.as_dict(),
             inspector_report_dict=_consumer_inspector_report_dict(summary_dict, mode_str="live"),
             as_of_clock_str=_now_clock_str(),
             combined_book_chart_dict=combined_book_chart_dict,
+            combined_book_is_strict_bool=combined_book_is_strict_bool,
             combined_book_summary_dict=combined_book_env_dict or {},
             book_risk_dict=book_risk_obj.as_dict(),
             monthly_return_dict_list=monthly_return_dict_list,
@@ -265,7 +315,7 @@ def create_app(
         reference_timestamp_str, reference_source_str = _resolve_exposure_reference_meta(
             pod_row_dict_list
         )
-        verdict_obj = resolve_top_bar_verdict(summary_dict, mode_str=mode_str)
+        verdict_obj = _resolve_verdict_with_health(summary_dict, mode_str=mode_str)
         return render_template(
             "exposure_page.html",
             mode_str=mode_str,
@@ -298,7 +348,7 @@ def create_app(
             for row_dict in pod_row_dict_list
             if _is_attention_row_bool(row_dict)
         ]
-        verdict_obj = resolve_top_bar_verdict(summary_dict, mode_str=mode_str)
+        verdict_obj = _resolve_verdict_with_health(summary_dict, mode_str=mode_str)
         return render_template(
             "pods_page.html",
             nav_active_str="pods",
@@ -416,9 +466,10 @@ def create_app(
                 group_dict["event_dict_list"]
             )[:30]
         stream_event_dict_list = _collapse_repeat_list(event_row_dict_list[:400])[:200]
-        verdict_obj = resolve_top_bar_verdict(summary_dict, mode_str="live")
+        verdict_obj = _resolve_verdict_with_health(summary_dict, mode_str="live")
         return render_template(
             "events_page.html",
+            mode_str="live",
             nav_active_str="events",
             view_str=view_str,
             event_row_dict_list=stream_event_dict_list,
@@ -480,9 +531,11 @@ def create_app(
         )
         pnl_diff_chart_dict = _build_pnl_diff_chart_dict(tracking_row_dict_list)
         top_driver_dict_list = _build_top_driver_dict_list(trade_row_dict_list)
-        verdict_obj = resolve_top_bar_verdict(summary_dict)
+        mode_str = str(row_dict.get("mode_str") or "live")
+        verdict_obj = _resolve_verdict_with_health(summary_dict, mode_str=mode_str)
         return render_template(
             "live_backtest_page.html",
+            mode_str=mode_str,
             row_dict=row_dict,
             trade_row_dict_list=trade_row_dict_list,
             trade_row_limit_int=MAX_TRADE_DETAIL_ROW_COUNT_INT,
@@ -499,7 +552,10 @@ def create_app(
     def top_bar_fragment_route_fn():
         provider_obj = flask_app_obj.config["data_provider_obj"]
         summary_dict = provider_obj.get_summary_dict()
-        verdict_obj = resolve_top_bar_verdict(summary_dict)
+        mode_str = request.args.get("mode")
+        if mode_str not in SUPPORTED_MODE_STR_LIST:
+            mode_str = None
+        verdict_obj = _resolve_verdict_with_health(summary_dict, mode_str=mode_str)
         check_and_notify_for_red_transitions(
             summary_dict,
             state_store_obj=flask_app_obj.config["notification_state_store_obj"],
@@ -580,7 +636,10 @@ def create_app(
     def health_strip_fragment_route_fn():
         provider_obj = flask_app_obj.config["data_provider_obj"]
         summary_dict = provider_obj.get_summary_dict()
-        health_obj = build_health_rollup(summary_dict)
+        mode_str = request.args.get("mode")
+        if mode_str not in SUPPORTED_MODE_STR_LIST:
+            mode_str = None
+        health_obj = build_health_rollup(summary_dict, mode_str=mode_str)
         return render_template(
             "_health_strip.html",
             health_dict=health_obj.as_dict(),
@@ -590,10 +649,31 @@ def create_app(
     def schedule_strip_fragment_route_fn():
         provider_obj = flask_app_obj.config["data_provider_obj"]
         summary_dict = provider_obj.get_summary_dict()
-        schedule_entry_obj_list = build_schedule_entry_list(summary_dict)
+        mode_str = request.args.get("mode")
+        if mode_str not in SUPPORTED_MODE_STR_LIST:
+            mode_str = None
+        schedule_entry_obj_list = build_schedule_entry_list(
+            summary_dict,
+            mode_str=mode_str,
+        )
         return render_template(
             "_schedule_strip.html",
             schedule_entry_dict_list=[entry_obj.as_dict() for entry_obj in schedule_entry_obj_list],
+        )
+
+    @flask_app_obj.route("/fragments/trading-window/<mode_str>")
+    def trading_window_fragment_route_fn(mode_str: str):
+        if mode_str != "live":
+            abort(404)
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        summary_dict = provider_obj.get_summary_dict()
+        trading_window_obj = build_next_trading_window(
+            summary_dict,
+            mode_str=mode_str,
+        )
+        return render_template(
+            "_trading_window_card.html",
+            trading_window_dict=trading_window_obj.as_dict(),
         )
 
     @flask_app_obj.route("/fragments/equity-chart/<pod_id_str>")
@@ -627,8 +707,9 @@ def create_app(
         summary_dict = provider_obj.get_summary_dict()
         combined_book_env_dict = _find_combined_book_environment_dict(summary_dict, mode_str)
         combined_book_equity_point_dict_list = (
-            (combined_book_env_dict or {}).get("equity_point_dict_list")
+            (combined_book_env_dict or {}).get("strict_equity_point_dict_list")
             or (combined_book_env_dict or {}).get("carry_forward_equity_point_dict_list")
+            or (combined_book_env_dict or {}).get("equity_point_dict_list")
         )
         chart_obj = build_equity_chart_dict(
             combined_book_equity_point_dict_list,
@@ -1262,6 +1343,61 @@ def _is_attention_row_bool(row_dict: dict[str, Any]) -> bool:
     from alpha.live.dashboard_v3.data import _effective_severity_str
 
     return _effective_severity_str(row_dict) in ("red", "yellow")
+
+
+def _resolve_verdict_with_health(
+    summary_dict: dict[str, Any],
+    *,
+    mode_str: str | None,
+) -> TopBarVerdict:
+    verdict_obj = resolve_top_bar_verdict(summary_dict, mode_str=mode_str)
+    if mode_str != "live":
+        return verdict_obj
+    health_obj = build_health_rollup(summary_dict, mode_str=mode_str)
+    if SEVERITY_RANK_DICT.get(health_obj.severity_str, 9) < SEVERITY_RANK_DICT.get(
+        verdict_obj.severity_str,
+        9,
+    ):
+        first_problem_cell_obj = next(
+            cell_obj
+            for cell_obj in health_obj.cell_dict_list
+            if cell_obj.severity_str == health_obj.severity_str
+        )
+        verdict_obj = TopBarVerdict(
+            severity_str=health_obj.severity_str,
+            title_str={
+                "gray": "Cannot verify live health",
+                "yellow": "Live health needs review",
+                "red": "Live health needs action",
+            }.get(health_obj.severity_str, "Cannot verify live health"),
+            subtitle_str=(
+                f"{first_problem_cell_obj.label_str}: {first_problem_cell_obj.value_str}."
+            ),
+        )
+
+    trading_window_obj = build_next_trading_window(summary_dict, mode_str="live")
+    window_needs_attention_bool = (
+        trading_window_obj.severity_str in ("red", "yellow")
+        or trading_window_obj.status_label_str
+        in ("Cannot verify", "Awaiting scheduler refresh")
+    )
+    if (
+        not window_needs_attention_bool
+        or SEVERITY_RANK_DICT.get(trading_window_obj.severity_str, 9)
+        >= SEVERITY_RANK_DICT.get(verdict_obj.severity_str, 9)
+    ):
+        return verdict_obj
+    return TopBarVerdict(
+        severity_str=trading_window_obj.severity_str,
+        title_str=(
+            "Trading window needs action"
+            if trading_window_obj.severity_str == "red"
+            else "Cannot verify trading window"
+            if trading_window_obj.severity_str == "gray"
+            else "Trading window needs review"
+        ),
+        subtitle_str=trading_window_obj.detail_str,
+    )
 
 
 def _find_combined_book_environment_dict(

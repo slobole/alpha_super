@@ -59,6 +59,16 @@ _SPEC_MASTHEAD_START_RE = re.compile(
     r'<div\b(?=[^>]*\bclass=["\'][^"\']*\bspec-masthead\b[^"\']*["\'])[^>]*>',
     re.IGNORECASE,
 )
+_LEGACY_ROTATION_MARKER_RE = re.compile(
+    r"per-name weight chart[^\"']*unreadable",
+    re.IGNORECASE,
+)
+_LEGACY_PORTFOLIO_WEIGHTS_BLOCK_RE = re.compile(
+    r"<h3\b[^>]*>\s*Portfolio weights\s*</h3\s*>\s*"
+    r'<div\b(?=[^>]*\bclass=["\'][^"\']*\bchart-wrap\b[^"\']*["\'])[^>]*>'
+    r".*?</div\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 @dataclass(frozen=True)
@@ -324,6 +334,9 @@ def _vanilla_tab_tuple(
         has_headline_comparison_bool = "headline-comparison" in pre_plate_html_str
         grouped_html_dict["overview"].append(pre_plate_html_str)
     for plate_html_str in plate_html_dict.values():
+        plate_html_str = _normalize_legacy_rotation_composition_html_str(
+            plate_html_str
+        )
         heading_str = _plate_heading_str(plate_html_str)
         group_key_str = _vanilla_group_key_str(heading_str)
         if group_key_str == "overview" and "year by year" in heading_str:
@@ -370,6 +383,32 @@ def _vanilla_tab_tuple(
         )
         for key_str, label_str in tab_label_tuple
         if grouped_html_dict[key_str]
+    )
+
+
+def _normalize_legacy_rotation_composition_html_str(
+    plate_html_str: str,
+) -> str:
+    """Hide the unreadable per-name stack from older rotation artifacts.
+
+    Older reports already recorded the rotation verdict in the Composition
+    tooltip, but still embedded the historical per-name stack that verdict
+    called unreadable. New reports contain the dedicated rotation figure.
+    BENCH keeps legacy artifacts truthful by removing only that contradictory
+    chart and asking for a fresh run; the original artifact remains available
+    from the explicit source link.
+    """
+    if not _LEGACY_ROTATION_MARKER_RE.search(plate_html_str):
+        return plate_html_str
+    replacement_str = (
+        '<p class="metric-context">Historical rotation view is unavailable '
+        'in this legacy artifact. Run Vanilla again to render deployed capital, '
+        'slot occupancy and holding periods with the current report code.</p>'
+    )
+    return _LEGACY_PORTFOLIO_WEIGHTS_BLOCK_RE.sub(
+        replacement_str,
+        plate_html_str,
+        count=1,
     )
 
 

@@ -4,7 +4,7 @@
 {% if book_risk_dict and book_risk_dict.has_data_bool %}
 <section class="mb-4 rounded-md border border-ink-100 bg-white shadow-sm px-4 py-3">
   <div class="text-[11px] uppercase tracking-wide text-ink-400 mb-2"
-       title="computed from the end-of-day combined-book equity series">
+       title="computed from the flow-adjusted end-of-day return series">
     Realized risk · EOD
   </div>
   <div class="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
@@ -31,7 +31,7 @@
       </div>
     </div>
     <div>
-      <div class="text-[11px] uppercase tracking-wide text-ink-500">Peak</div>
+      <div class="text-[11px] uppercase tracking-wide text-ink-500">Equity at TWR peak</div>
       <div class="font-semibold tabular-nums text-ink-900">{{ book_risk_dict.peak_equity_label_str }}</div>
       <div class="text-[11px] text-ink-500">{{ book_risk_dict.peak_market_date_str or '—' }}</div>
     </div>

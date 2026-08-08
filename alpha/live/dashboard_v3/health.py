@@ -54,8 +54,13 @@ class HealthRollup:
 def build_health_rollup(
     summary_dict: dict[str, Any],
     disk_usage_path_str: str = DISK_USAGE_PATH_STR,
+    mode_str: str | None = None,
 ) -> HealthRollup:
-    pod_row_dict_list = summary_dict.get("pod_row_dict_list") or []
+    pod_row_dict_list = [
+        row_dict
+        for row_dict in summary_dict.get("pod_row_dict_list") or []
+        if mode_str is None or str(row_dict.get("mode_str") or "") == mode_str
+    ]
     cell_obj_list = [
         _roll_up_freshness_cell(pod_row_dict_list, "Norgate"),
         _roll_up_freshness_cell(pod_row_dict_list, "Pod state"),
@@ -74,37 +79,59 @@ def build_health_rollup(
 def _roll_up_freshness_cell(
     pod_row_dict_list: list[dict[str, Any]], item_label_str: str
 ) -> HealthCellDict:
-    worst_severity_str = "gray"
-    latest_timestamp_str: str | None = None
-    detail_str = "no enabled pods reported"
-    item_count_int = 0
+    item_record_list: list[tuple[str, str, str]] = []
     for row_dict in pod_row_dict_list:
         freshness_dict = row_dict.get("data_freshness_dict") or {}
-        for item_dict in freshness_dict.get("item_dict_list") or []:
-            if str(item_dict.get("label_str")) != item_label_str:
-                continue
-            item_count_int += 1
-            item_severity_str = _normalize_severity_str(item_dict.get("severity_str"))
-            if (
-                SEVERITY_RANK_DICT.get(item_severity_str, 9)
-                < SEVERITY_RANK_DICT.get(worst_severity_str, 9)
-            ):
-                worst_severity_str = item_severity_str
-            timestamp_str = item_dict.get("timestamp_str")
-            if timestamp_str and (
-                latest_timestamp_str is None or str(timestamp_str) > latest_timestamp_str
-            ):
-                latest_timestamp_str = str(timestamp_str)
-    if item_count_int > 0:
-        detail_str = (
-            f"{item_count_int} pod(s) reporting · "
-            f"worst {worst_severity_str}"
+        matching_item_dict = next(
+            (
+                item_dict
+                for item_dict in freshness_dict.get("item_dict_list") or []
+                if str(item_dict.get("label_str")) == item_label_str
+            ),
+            None,
         )
+        pod_id_str = str(row_dict.get("pod_id_str") or "?")
+        if matching_item_dict is None:
+            item_record_list.append(("gray", "—", pod_id_str))
+            continue
+        item_severity_str = _normalize_severity_str(
+            matching_item_dict.get("severity_str")
+        )
+        timestamp_obj = (
+            matching_item_dict.get("value_str")
+            or matching_item_dict.get("timestamp_str")
+        )
+        item_record_list.append(
+            (item_severity_str, str(timestamp_obj or "—"), pod_id_str)
+        )
+    if not item_record_list:
+        return HealthCellDict(
+            label_str=item_label_str,
+            value_str="—",
+            severity_str="gray",
+            detail_str="no enabled pods reported",
+        )
+
+    worst_severity_str = _worst_severity_str(
+        severity_str for severity_str, _, _ in item_record_list
+    )
+    worst_record_list = [
+        record_tuple
+        for record_tuple in item_record_list
+        if record_tuple[0] == worst_severity_str
+    ]
+    _, displayed_value_str, displayed_pod_id_str = min(
+        worst_record_list,
+        key=lambda record_tuple: record_tuple[1],
+    )
     return HealthCellDict(
         label_str=item_label_str,
-        value_str=latest_timestamp_str or "—",
+        value_str=displayed_value_str,
         severity_str=worst_severity_str,
-        detail_str=detail_str,
+        detail_str=(
+            f"{len(item_record_list)} pod(s) reporting · worst "
+            f"{worst_severity_str}: {displayed_pod_id_str}"
+        ),
     )
 
 

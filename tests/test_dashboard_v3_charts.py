@@ -6,16 +6,29 @@ from alpha.live.dashboard_v3.charts import (
     CHART_VIEW_HEIGHT_INT,
     CHART_VIEW_WIDTH_INT,
     DAILY_PANEL_VIEW_HEIGHT_INT,
+    build_book_risk_dict,
     build_equity_chart_dict,
+    build_monthly_return_dict_list,
 )
 
 
-def _point(date_str: str, equity_float: float, pnl_float: float = 0.0) -> dict:
-    return {
+def _point(
+    date_str: str,
+    equity_float: float,
+    pnl_float: float = 0.0,
+    *,
+    daily_pct_float: float | None = None,
+    flow_float: float = 0.0,
+) -> dict:
+    point_dict = {
         "market_date_str": date_str,
         "equity_float": equity_float,
         "daily_pnl_float": pnl_float,
+        "flow_float": flow_float,
     }
+    if daily_pct_float is not None:
+        point_dict["daily_pnl_pct_float"] = daily_pct_float
+    return point_dict
 
 
 def test_empty_point_list_has_no_curve() -> None:
@@ -243,6 +256,94 @@ def test_vol_footnote_degrades_gracefully_for_two_points() -> None:
         _point("2026-05-02", 10500.0),
     ])
     assert chart_obj.annualized_vol_label_str == "—"
+
+
+def test_flow_adjusted_return_drives_every_chart_readout() -> None:
+    point_list = [
+        _point("2026-04-30", 10000.0),
+        _point(
+            "2026-05-31",
+            20100.0,
+            pnl_float=100.0,
+            daily_pct_float=0.01,
+            flow_float=10000.0,
+        ),
+        _point(
+            "2026-06-01",
+            19900.0,
+            pnl_float=-200.0,
+            daily_pct_float=(19900.0 / 20100.0) - 1.0,
+        ),
+    ]
+
+    chart_dict = build_equity_chart_dict(point_list).as_dict()
+    point_by_date_dict = {
+        point_dict["market_date_str"]: point_dict
+        for point_dict in chart_dict["point_dict_list"]
+    }
+    assert point_by_date_dict["2026-05-31"]["daily_pct_label_str"] == "+1.00%"
+    assert [
+        bar_dict["pnl_label_str"]
+        for bar_dict in chart_dict["pnl_bar_dict_list"]
+        if bar_dict["market_date_str"] == "2026-05-31"
+    ] == ["+1.00%"]
+
+    monthly_return_by_label_dict = {
+        month_dict["month_label_str"]: month_dict
+        for month_dict in build_monthly_return_dict_list(point_list)
+    }
+    assert monthly_return_by_label_dict["May 26"]["return_label_str"] == "+1.00%"
+
+    risk_dict = build_book_risk_dict(point_list).as_dict()
+    assert risk_dict["max_drawdown_label_str"] == "-1.00%"
+    assert risk_dict["current_drawdown_label_str"] == "-1.00%"
+    assert risk_dict["peak_equity_label_str"] == "$20,100"
+
+
+def test_full_withdrawal_and_redeposit_does_not_invent_return() -> None:
+    point_list = [
+        _point("2026-05-01", 10000.0),
+        _point(
+            "2026-05-02",
+            0.0,
+            flow_float=-10000.0,
+            daily_pct_float=0.0,
+        ),
+        _point(
+            "2026-05-03",
+            10000.0,
+            flow_float=10000.0,
+        ),
+    ]
+
+    pct_chart_dict = build_equity_chart_dict(point_list).as_dict()
+    assert pct_chart_dict["return_unavailable_bool"] is True
+    assert pct_chart_dict["has_curve_bool"] is False
+
+    dollar_chart_dict = build_equity_chart_dict(
+        point_list,
+        value_mode_str="dollar",
+    ).as_dict()
+    assert dollar_chart_dict["has_curve_bool"] is True
+    assert dollar_chart_dict["latest_since_start_pnl_label_str"] == "+$0"
+    assert dollar_chart_dict["latest_since_start_return_label_str"] == "—"
+
+    monthly_return_dict_list = build_monthly_return_dict_list(point_list)
+    assert monthly_return_dict_list[-1]["is_available_bool"] is False
+    assert monthly_return_dict_list[-1]["return_label_str"] == "—"
+    assert build_book_risk_dict(point_list).has_data_bool is False
+
+
+def test_latest_zero_equity_is_preserved_in_risk_state() -> None:
+    risk_dict = build_book_risk_dict(
+        [
+            _point("2026-05-01", 100.0),
+            _point("2026-05-02", 0.0, pnl_float=-100.0, daily_pct_float=-1.0),
+        ]
+    ).as_dict()
+    assert risk_dict["has_data_bool"] is True
+    assert risk_dict["current_equity_label_str"] == "$0"
+    assert risk_dict["current_drawdown_label_str"] == "-100.00%"
 
 
 # ── build_pod_holdings_pie_dict — presentation math only, no I/O ──────────

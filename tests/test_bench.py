@@ -811,6 +811,54 @@ def test_vanilla_native_view_has_all_mockup_sections(tmp_path, monkeypatch):
     assert "strategies.demo" in str(audit_tab_obj.html_markup)
 
 
+def test_legacy_rotation_artifact_hides_unreadable_weight_stack(
+    tmp_path,
+    monkeypatch,
+):
+    report_dir_path = (
+        tmp_path
+        / "research"
+        / "strategy"
+        / "demo"
+        / "vanilla_backtest"
+        / "run"
+    )
+    report_dir_path.mkdir(parents=True)
+    (report_dir_path / "report.html").write_text(
+        """<html><body><main>
+        <div class="plate" id="plate-05">
+          <h2>Composition <button data-help="912 distinct names ever held — a per-name weight chart would be unreadable.">i</button></h2>
+          <h3>Portfolio weights</h3>
+          <div class="chart-wrap"><img src="data:image/png;base64,AAAA" alt="Portfolio weights"></div>
+          <h3>Current Composition</h3><table><tr><td>DELL</td><td>10%</td></tr></table>
+        </div></main></body></html>""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runs, "RESULTS_ROOT_PATH", tmp_path)
+    run_obj = runs.RunEntry(
+        run_name_str="demo",
+        analysis_dir_str="vanilla_backtest",
+        analysis_label_str="Vanilla",
+        timestamp_str="run",
+        rel_dir_from_results_str=(
+            "research/strategy/demo/vanilla_backtest/run"
+        ),
+        has_report_bool=True,
+    )
+
+    view_obj = artifact_view.build_artifact_view(
+        "vanilla",
+        run_obj,
+        "composition",
+    )
+
+    assert view_obj is not None
+    composition_html_str = str(view_obj.selected_tab.html_markup)
+    assert "Portfolio weights" not in composition_html_str
+    assert "Current Composition" in composition_html_str
+    assert "Historical rotation view is unavailable" in composition_html_str
+
+
 def test_vanilla_saved_statistics_build_mockup_comparison_without_recomputing_report():
     statistics_html_str = """
     <div class="plate" id="plate-08"><h2>Performance Summary</h2>

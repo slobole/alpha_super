@@ -5,6 +5,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 import json
+import math
 from pathlib import Path
 import secrets
 import sqlite3
@@ -21,7 +22,10 @@ from alpha.live import logging_utils, runner, scheduler_utils
 from alpha.live.models import LiveRelease
 from alpha.live.norgate_snapshot_sync import build_norgate_snapshot_status_dict
 from alpha.live.ops_report import build_ops_report_dict
-from alpha.live.pod_cash_flow import load_flow_by_date_dict
+from alpha.live.pod_cash_flow import (
+    load_flow_by_date_dict,
+    validate_pod_cash_flow_pod_ids,
+)
 from alpha.live.release_manifest import load_release_list
 from alpha.live.state_store_v2 import LiveStateStore
 from scripts.norgate_config_env import load_config_env_file  # noqa: F401 - kept for backwards compatibility with tests/imports.
@@ -66,6 +70,7 @@ class DashboardPodTarget:
     release_obj: LiveRelease
     db_path_str: str
     db_override_bool: bool
+    cash_flow_config_error_str: str | None = None
 
 
 @dataclass
@@ -364,11 +369,21 @@ class DashboardApp:
     def get_target_list(self) -> list[DashboardPodTarget]:
         config_obj = self.load_config_obj()
         release_list = load_release_list(self.releases_root_path_str)
+        cash_flow_config_error_str = None
+        try:
+            validate_pod_cash_flow_pod_ids(
+                {release_obj.pod_id_str for release_obj in release_list}
+            )
+        except (OSError, ValueError, yaml.YAMLError) as exception_obj:
+            # Reporting config must fail loud without taking down break-glass
+            # operational routes such as manual order and reconciliation.
+            cash_flow_config_error_str = str(exception_obj)
         target_list = [
             DashboardPodTarget(
                 release_obj=release_obj,
                 db_path_str=resolve_db_path_for_release_str(release_obj, config_obj),
                 db_override_bool=release_obj.pod_id_str in config_obj.db_override_map_dict,
+                cash_flow_config_error_str=cash_flow_config_error_str,
             )
             for release_obj in release_list
             if release_obj.enabled_bool
@@ -441,6 +456,14 @@ def build_dashboard_summary_dict(app_obj: DashboardApp, as_of_ts: datetime | Non
     alert_dict_list = _build_alert_dict_list(pod_row_dict_list)
     summary_dict = {
         "as_of_timestamp_str": as_of_ts.isoformat(),
+        "cash_flow_config_error_str": next(
+            (
+                target_obj.cash_flow_config_error_str
+                for target_obj in target_list
+                if target_obj.cash_flow_config_error_str is not None
+            ),
+            None,
+        ),
         "pod_row_dict_list": pod_row_dict_list,
         "alert_dict_list": alert_dict_list,
         "alert_summary_dict": _build_alert_summary_dict(alert_dict_list),
@@ -517,6 +540,7 @@ def build_pod_detail_dict(
         detail_dict["pod_pnl_dict"] = _build_pod_pnl_dict(
             connection_obj=connection_obj,
             release_obj=target_obj.release_obj,
+            cash_flow_config_error_str=target_obj.cash_flow_config_error_str,
         )
         if not _table_exists_bool(connection_obj, "vplan"):
             return _finalize_pod_detail_debug_story_dict(detail_dict)
@@ -1461,6 +1485,7 @@ def _eod_snapshot_row_summary_dict(
 def _empty_pod_pnl_dict(status_str: str = "unavailable") -> dict[str, Any]:
     return {
         "status_str": status_str,
+        "error_str": None,
         "source_str": "pod_state_history.eod",
         "point_count_int": 0,
         "latest_market_date_str": None,
@@ -1475,10 +1500,37 @@ def _empty_pod_pnl_dict(status_str: str = "unavailable") -> dict[str, Any]:
     }
 
 
+def _market_session_interval_count_int(
+    previous_market_date_str: str | None,
+    market_date_str: str,
+    session_calendar_id_set: set[str],
+) -> int:
+    if previous_market_date_str is None:
+        return 0
+    session_count_list = [
+        max(
+            0,
+            len(
+                scheduler_utils.get_exchange_calendar_obj(
+                    session_calendar_id_str
+                ).sessions_in_range(previous_market_date_str, market_date_str)
+            )
+            - 1,
+        )
+        for session_calendar_id_str in session_calendar_id_set
+    ]
+    return max(session_count_list, default=0)
+
+
 def _build_pod_pnl_dict(
     connection_obj: sqlite3.Connection,
     release_obj: LiveRelease,
+    cash_flow_config_error_str: str | None = None,
 ) -> dict[str, Any]:
+    if cash_flow_config_error_str is not None:
+        error_dict = _empty_pod_pnl_dict("config_error")
+        error_dict["error_str"] = cash_flow_config_error_str
+        return error_dict
     if not _table_exists_bool(connection_obj, "pod_state_history"):
         return _empty_pod_pnl_dict()
     eod_row_dict_list = _fetch_all_dict_list(
@@ -1502,19 +1554,26 @@ def _build_pod_pnl_dict(
     equity_point_dict_list: list[dict[str, Any]] = []
     first_equity_float: float | None = None
     first_market_date_str: str | None = None
+    previous_market_date_str: str | None = None
     previous_equity_float: float | None = None
     twr_growth_float = 1.0
+    twr_valid_bool = True
     # Operator-declared deposits/withdrawals. Old behaviour: percentages were
     # raw equity ratios, so a deposit read as a monster up-day. New behaviour:
-    # a flow dated D is stripped from day D's return (end-of-day convention)
-    # and P&L nets out contributions; since-start % compounds the daily
-    # flow-adjusted returns (time-weighted). No declared flows == old math.
+    # a flow dated D is stripped from the observed EOD interval containing D
+    # (end-of-day convention), and P&L nets out contributions; since-start %
+    # compounds the daily flow-adjusted returns. No declared flows == old math.
     flow_by_date_dict = load_flow_by_date_dict(release_obj.pod_id_str)
     # *** CRITICAL*** PnL is computed only from market-date ordered EOD
     # broker NetLiq snapshots. Do not mix intraday/post-execution samples
     # into this series or the close-marked PnL basis becomes inconsistent.
     for market_date_str in sorted(latest_eod_row_by_market_date_dict):
         eod_row_dict = latest_eod_row_by_market_date_dict[market_date_str]
+        interval_session_count_int = _market_session_interval_count_int(
+            previous_market_date_str,
+            market_date_str,
+            {release_obj.session_calendar_id_str},
+        )
         equity_float = float(eod_row_dict["total_value_float"])
         cash_float = float(eod_row_dict["cash_float"])
         # *** CRITICAL*** Flows on the first observed date are already inside
@@ -1523,8 +1582,23 @@ def _build_pod_pnl_dict(
             first_equity_float = equity_float
             first_market_date_str = market_date_str
             flow_float = 0.0
+            flow_timing_approximation_bool = False
         else:
-            flow_float = float(flow_by_date_dict.get(market_date_str, 0.0))
+            # *** CRITICAL*** A market date can lack an EOD snapshot. Attribute
+            # every declared flow after the previous observed EOD and through
+            # this EOD to this return interval; exact-date lookup loses flows.
+            interval_flow_pair_list = [
+                (date_str, amount_float)
+                for date_str, amount_float in flow_by_date_dict.items()
+                if (previous_market_date_str or "") < date_str <= market_date_str
+            ]
+            flow_float = float(
+                sum(amount_float for _, amount_float in interval_flow_pair_list)
+            )
+            flow_timing_approximation_bool = any(
+                date_str < market_date_str
+                for date_str, _ in interval_flow_pair_list
+            )
         daily_pnl_float = (
             None
             if previous_equity_float is None
@@ -1532,10 +1606,17 @@ def _build_pod_pnl_dict(
         )
         daily_pnl_pct_float = (
             None
-            if previous_equity_float is None or previous_equity_float == 0.0
+            if (
+                previous_equity_float is None
+                or previous_equity_float == 0.0
+                or flow_timing_approximation_bool
+                or interval_session_count_int != 1
+            )
             else ((equity_float - flow_float) / previous_equity_float) - 1.0
         )
-        if daily_pnl_pct_float is not None:
+        if previous_equity_float is not None and daily_pnl_pct_float is None:
+            twr_valid_bool = False
+        if twr_valid_bool and daily_pnl_pct_float is not None:
             twr_growth_float *= 1.0 + daily_pnl_pct_float
         net_contribution_float = sum(
             amount_float
@@ -1544,7 +1625,9 @@ def _build_pod_pnl_dict(
         )
         since_start_pnl_float = equity_float - first_equity_float - net_contribution_float
         since_start_pnl_pct_float = (
-            None if first_equity_float == 0.0 else twr_growth_float - 1.0
+            None
+            if first_equity_float == 0.0 or not twr_valid_bool
+            else twr_growth_float - 1.0
         )
         equity_point_dict_list.append(
             {
@@ -1560,8 +1643,11 @@ def _build_pod_pnl_dict(
                 "recorded_timestamp_str": eod_row_dict.get("recorded_timestamp_str"),
                 "flow_float": flow_float,
                 "net_contribution_float": net_contribution_float,
+                "flow_timing_approximation_bool": flow_timing_approximation_bool,
+                "interval_session_count_int": interval_session_count_int,
             }
         )
+        previous_market_date_str = market_date_str
         previous_equity_float = equity_float
 
     if len(equity_point_dict_list) == 0:
@@ -1702,8 +1788,10 @@ def _load_combined_book_pod_dict(
         "mode_str": release_obj.mode_str,
         "strategy_import_str": release_obj.strategy_import_str,
         "account_route_str": release_obj.account_route_str,
+        "session_calendar_id_str": release_obj.session_calendar_id_str,
         "db_path_str": pod_target_obj.db_path_str,
         "db_status_str": "missing",
+        "pnl_status_str": "unavailable",
         "error_str": None,
         "pod_pnl_dict": _empty_pod_pnl_dict(),
         "point_by_market_date_dict": {},
@@ -1719,12 +1807,18 @@ def _load_combined_book_pod_dict(
             pod_pnl_dict = _build_pod_pnl_dict(
                 connection_obj=connection_obj,
                 release_obj=release_obj,
+                cash_flow_config_error_str=(
+                    pod_target_obj.cash_flow_config_error_str
+                ),
             )
     except sqlite3.DatabaseError as exception_obj:
         base_dict["db_status_str"] = "error"
         base_dict["error_str"] = str(exception_obj)
         return base_dict
     base_dict["db_status_str"] = "ok"
+    base_dict["pnl_status_str"] = str(pod_pnl_dict.get("status_str") or "unavailable")
+    if pod_pnl_dict.get("error_str"):
+        base_dict["error_str"] = str(pod_pnl_dict["error_str"])
     base_dict["pod_pnl_dict"] = pod_pnl_dict
     base_dict["point_by_market_date_dict"] = {
         point_dict["market_date_str"]: point_dict
@@ -1749,24 +1843,59 @@ def _build_combined_strict_point_dict_list(
     if not common_market_date_set:
         return []
     previous_equity_float: float | None = None
+    previous_net_contribution_float: float | None = None
+    previous_market_date_str: str | None = None
     point_dict_list: list[dict[str, Any]] = []
     # *** CRITICAL*** Combined Book strict PnL uses only market-date
     # aligned EOD snapshots. Do not mix intraday, post-execution, or
     # carry-forward values into this strict accounting series.
     for market_date_str in sorted(common_market_date_set):
+        interval_session_count_int = _market_session_interval_count_int(
+            previous_market_date_str,
+            market_date_str,
+            {
+                str(pod_book_dict["session_calendar_id_str"])
+                for pod_book_dict in pod_book_dict_list
+            },
+        )
         equity_float = sum(
             float(pod_book_dict["point_by_market_date_dict"][market_date_str]["equity_float"])
             for pod_book_dict in pod_book_dict_list
         )
-        # Book-level flow = sum of the pods' declared flows that date, so a
-        # deposit into one pod does not read as a book-level up-day.
-        flow_float = sum(
+        net_contribution_float = sum(
             float(
-                pod_book_dict["point_by_market_date_dict"][market_date_str].get("flow_float")
+                pod_book_dict["point_by_market_date_dict"][market_date_str].get(
+                    "net_contribution_float"
+                )
                 or 0.0
             )
             for pod_book_dict in pod_book_dict_list
         )
+        # *** CRITICAL*** Common dates can skip fresh pod dates. Difference the
+        # cumulative contributions so flows on skipped dates remain in the next
+        # strict return interval instead of disappearing from the book curve.
+        flow_float = (
+            0.0
+            if previous_net_contribution_float is None
+            else net_contribution_float - previous_net_contribution_float
+        )
+        current_date_flow_float = sum(
+            float(
+                pod_book_dict["point_by_market_date_dict"][market_date_str].get(
+                    "flow_float"
+                )
+                or 0.0
+            )
+            for pod_book_dict in pod_book_dict_list
+        )
+        flow_timing_approximation_bool = any(
+            bool(
+                pod_book_dict["point_by_market_date_dict"][market_date_str].get(
+                    "flow_timing_approximation_bool"
+                )
+            )
+            for pod_book_dict in pod_book_dict_list
+        ) or not math.isclose(flow_float, current_date_flow_float, abs_tol=1e-9)
         daily_pnl_float = (
             None
             if previous_equity_float is None
@@ -1774,7 +1903,12 @@ def _build_combined_strict_point_dict_list(
         )
         daily_pnl_pct_float = (
             None
-            if previous_equity_float is None or previous_equity_float == 0.0
+            if (
+                previous_equity_float is None
+                or previous_equity_float == 0.0
+                or flow_timing_approximation_bool
+                or interval_session_count_int != 1
+            )
             else ((equity_float - flow_float) / previous_equity_float) - 1.0
         )
         point_dict_list.append(
@@ -1782,6 +1916,9 @@ def _build_combined_strict_point_dict_list(
                 "market_date_str": market_date_str,
                 "equity_float": equity_float,
                 "flow_float": flow_float,
+                "flow_timing_approximation_bool": flow_timing_approximation_bool,
+                "interval_session_count_int": interval_session_count_int,
+                "net_contribution_float": net_contribution_float,
                 "daily_pnl_float": daily_pnl_float,
                 "daily_pnl_pct_float": daily_pnl_pct_float,
                 "included_pod_count_int": len(pod_book_dict_list),
@@ -1790,6 +1927,8 @@ def _build_combined_strict_point_dict_list(
                 "basis_str": "strict_common_eod",
             }
         )
+        previous_net_contribution_float = net_contribution_float
+        previous_market_date_str = market_date_str
         previous_equity_float = equity_float
     return point_dict_list
 
@@ -1805,14 +1944,26 @@ def _build_combined_carry_forward_point_dict_list(
         }
     )
     previous_total_equity_float: float | None = None
+    previous_total_net_contribution_float: float | None = None
+    previous_market_date_str: str | None = None
     last_point_by_pod_id_dict: dict[str, dict[str, Any]] = {}
     point_dict_list: list[dict[str, Any]] = []
     # *** CRITICAL*** Carry-forward is an operational continuity curve,
     # not the strict accounting headline. It may reuse an older POD EOD
     # mark only when the point is visibly labeled as stale.
     for market_date_str in market_date_str_list:
+        interval_session_count_int = _market_session_interval_count_int(
+            previous_market_date_str,
+            market_date_str,
+            {
+                str(pod_book_dict["session_calendar_id_str"])
+                for pod_book_dict in pod_book_dict_list
+            },
+        )
         total_equity_float = 0.0
-        total_flow_float = 0.0
+        total_net_contribution_float = 0.0
+        new_pod_baseline_flow_float = 0.0
+        flow_timing_approximation_bool = False
         included_pod_count_int = 0
         stale_pod_id_list: list[str] = []
         missing_pod_id_list: list[str] = []
@@ -1822,11 +1973,25 @@ def _build_combined_carry_forward_point_dict_list(
                 market_date_str
             )
             if current_point_dict is not None:
+                flow_timing_approximation_bool = (
+                    flow_timing_approximation_bool
+                    or bool(
+                        current_point_dict.get(
+                            "flow_timing_approximation_bool"
+                        )
+                    )
+                )
+                if (
+                    previous_total_equity_float is not None
+                    and pod_id_str not in last_point_by_pod_id_dict
+                ):
+                    # A pod joining the continuity book contributes its whole
+                    # first observed NetLiq; it is not trading profit.
+                    new_pod_baseline_flow_float += float(
+                        current_point_dict["equity_float"]
+                    )
                 last_point_by_pod_id_dict[pod_id_str] = current_point_dict
                 point_dict = current_point_dict
-                # A declared flow counts only on its own fresh date; a
-                # carried-forward point already had its flow counted then.
-                total_flow_float += float(current_point_dict.get("flow_float") or 0.0)
             else:
                 point_dict = last_point_by_pod_id_dict.get(pod_id_str)
                 if point_dict is None:
@@ -1834,9 +1999,19 @@ def _build_combined_carry_forward_point_dict_list(
                     continue
                 stale_pod_id_list.append(pod_id_str)
             total_equity_float += float(point_dict["equity_float"])
+            total_net_contribution_float += float(
+                point_dict.get("net_contribution_float") or 0.0
+            )
             included_pod_count_int += 1
         if included_pod_count_int == 0:
             continue
+        # *** CRITICAL*** Difference cumulative contributions so a flow is
+        # counted once when the pod first reports it, never again while stale.
+        total_flow_float = (
+            0.0
+            if previous_total_net_contribution_float is None
+            else total_net_contribution_float - previous_total_net_contribution_float
+        ) + new_pod_baseline_flow_float
         daily_pnl_float = (
             None
             if previous_total_equity_float is None
@@ -1844,7 +2019,12 @@ def _build_combined_carry_forward_point_dict_list(
         )
         daily_pnl_pct_float = (
             None
-            if previous_total_equity_float is None or previous_total_equity_float == 0.0
+            if (
+                previous_total_equity_float is None
+                or previous_total_equity_float == 0.0
+                or flow_timing_approximation_bool
+                or interval_session_count_int != 1
+            )
             else ((total_equity_float - total_flow_float) / previous_total_equity_float) - 1.0
         )
         point_dict_list.append(
@@ -1852,6 +2032,10 @@ def _build_combined_carry_forward_point_dict_list(
                 "market_date_str": market_date_str,
                 "equity_float": total_equity_float,
                 "flow_float": total_flow_float,
+                "net_contribution_float": total_net_contribution_float,
+                "new_pod_baseline_flow_float": new_pod_baseline_flow_float,
+                "flow_timing_approximation_bool": flow_timing_approximation_bool,
+                "interval_session_count_int": interval_session_count_int,
                 "daily_pnl_float": daily_pnl_float,
                 "daily_pnl_pct_float": daily_pnl_pct_float,
                 "included_pod_count_int": included_pod_count_int,
@@ -1862,6 +2046,8 @@ def _build_combined_carry_forward_point_dict_list(
                 "basis_str": "carry_forward_eod",
             }
         )
+        previous_total_net_contribution_float = total_net_contribution_float
+        previous_market_date_str = market_date_str
         previous_total_equity_float = total_equity_float
     return point_dict_list
 
@@ -1880,7 +2066,17 @@ def _build_combined_book_warning_dict_list(
             [],
         ).append(pod_id_str)
         db_status_str = str(pod_book_dict["db_status_str"])
-        if db_status_str == "missing":
+        if pod_book_dict.get("pnl_status_str") == "config_error":
+            warning_dict_list.append(
+                _combined_book_warning_dict(
+                    "cash_flow_config_error",
+                    "red",
+                    "Cash-flow config error",
+                    f"{pod_id_str}: {pod_book_dict.get('error_str') or 'validation failed'}",
+                    pod_id_str,
+                )
+            )
+        elif db_status_str == "missing":
             warning_dict_list.append(
                 _combined_book_warning_dict(
                     "missing_db",
@@ -2073,7 +2269,14 @@ def _strict_pod_daily_pnl_float(
     previous_point_dict = point_by_market_date_dict.get(previous_strict_market_date_str)
     if latest_point_dict is None or previous_point_dict is None:
         return None
-    return float(latest_point_dict["equity_float"]) - float(previous_point_dict["equity_float"])
+    interval_flow_float = float(
+        latest_point_dict.get("net_contribution_float") or 0.0
+    ) - float(previous_point_dict.get("net_contribution_float") or 0.0)
+    return (
+        float(latest_point_dict["equity_float"])
+        - float(previous_point_dict["equity_float"])
+        - interval_flow_float
+    )
 
 
 def _latest_pod_market_date_str(pod_book_dict: dict[str, Any]) -> str | None:
