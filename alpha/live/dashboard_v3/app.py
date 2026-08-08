@@ -197,9 +197,38 @@ def create_app(
         monthly_return_dict_list = build_monthly_return_dict_list(
             combined_book_equity_point_dict_list
         )
+        # The three numbers that must never blur into each other: what the
+        # book holds, what the operator put in, what trading actually made.
+        # TWR compounds the flow-adjusted daily returns the points carry;
+        # flows on the first (baseline) date are starting capital, not
+        # contributions. Presentation math over the chart's own series.
+        book_stat_dict = None
+        if combined_book_equity_point_dict_list:
+            twr_growth_float = 1.0
+            net_contribution_float = 0.0
+            for point_index_int, point_dict in enumerate(combined_book_equity_point_dict_list):
+                daily_pct_obj = point_dict.get("daily_pnl_pct_float")
+                if daily_pct_obj is not None:
+                    twr_growth_float *= 1.0 + float(daily_pct_obj)
+                if point_index_int > 0:
+                    net_contribution_float += float(point_dict.get("flow_float") or 0.0)
+            first_point_dict = combined_book_equity_point_dict_list[0]
+            last_point_dict = combined_book_equity_point_dict_list[-1]
+            equity_float = float(last_point_dict.get("equity_float") or 0.0)
+            book_stat_dict = {
+                "equity_float": equity_float,
+                "net_contribution_float": net_contribution_float,
+                "pnl_float": (
+                    equity_float
+                    - float(first_point_dict.get("equity_float") or 0.0)
+                    - net_contribution_float
+                ),
+                "twr_pct_float": twr_growth_float - 1.0,
+            }
         return render_template(
             "overview_page.html",
             nav_active_str="overview",
+            book_stat_dict=book_stat_dict,
             mode_str="live",
             mode_label_str=MODE_LABEL_DICT["live"],
             pod_count_int=len(pod_row_dict_list),

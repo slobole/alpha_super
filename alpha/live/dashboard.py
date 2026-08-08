@@ -1851,6 +1851,7 @@ def _build_combined_carry_forward_point_dict_list(
             {
                 "market_date_str": market_date_str,
                 "equity_float": total_equity_float,
+                "flow_float": total_flow_float,
                 "daily_pnl_float": daily_pnl_float,
                 "daily_pnl_pct_float": daily_pnl_pct_float,
                 "included_pod_count_int": included_pod_count_int,

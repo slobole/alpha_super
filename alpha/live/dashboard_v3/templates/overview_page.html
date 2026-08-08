@@ -20,6 +20,32 @@
   </p>
 </section>
 
+{% if book_stat_dict %}
+  {# Equity = what the book holds · Contributions = what the operator put
+     in · P&L / TWR = what trading made. Three numbers, never blurred. #}
+  <section class="mb-4 grid grid-cols-3 border border-ink-100 bg-white divide-x divide-ink-100">
+    <div class="p-4">
+      <div class="font-mono text-[10px] uppercase tracking-widest text-ink-500">Equity</div>
+      <div class="font-mono text-xl mt-1 tabular-nums">{{ book_stat_dict.equity_float | money }}</div>
+      <div class="text-[11px] text-ink-500 mt-0.5">broker EOD NetLiq</div>
+    </div>
+    <div class="p-4">
+      <div class="font-mono text-[10px] uppercase tracking-widest text-ink-500">Net contributions</div>
+      <div class="font-mono text-xl mt-1 tabular-nums">{{ book_stat_dict.net_contribution_float | money }}</div>
+      <div class="text-[11px] text-ink-500 mt-0.5">declared deposits − withdrawals</div>
+    </div>
+    <div class="p-4">
+      <div class="font-mono text-[10px] uppercase tracking-widest text-ink-500">P&amp;L · time-weighted</div>
+      <div class="font-mono text-xl mt-1 tabular-nums
+                  {% if (book_stat_dict.pnl_float or 0) >= 0 %}text-ok{% else %}text-bad{% endif %}">
+        {{ book_stat_dict.pnl_float | money }}
+        <span class="text-sm">· {{ '%+.2f' | format(book_stat_dict.twr_pct_float * 100) }}%</span>
+      </div>
+      <div class="text-[11px] text-ink-500 mt-0.5">trading only — flows stripped</div>
+    </div>
+  </section>
+{% endif %}
+
 {% if combined_book_chart_dict %}
   <section class="mb-4 rounded-md border border-ink-100 bg-white shadow-sm p-4">
     <header class="flex items-baseline justify-between mb-1">

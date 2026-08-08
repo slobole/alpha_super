@@ -141,6 +141,7 @@ def build_equity_chart_dict(
             str(point_dict.get("market_date_str") or ""),
             _float_or_none(point_dict.get("equity_float")),
             _float_or_none(point_dict.get("daily_pnl_float")),
+            float(point_dict.get("flow_float") or 0.0),
         )
         for point_dict in clean_point_list
     ]
@@ -149,7 +150,7 @@ def build_equity_chart_dict(
     if point_count_int == 0:
         return EquityChartDict(window_str=window_str, value_mode_str=value_mode_str)
     if point_count_int == 1:
-        only_date_str, only_equity_float, _ = equity_pairs_list[0]
+        only_date_str, only_equity_float, _, _ = equity_pairs_list[0]
         return EquityChartDict(
             point_count_int=1,
             has_curve_bool=False,
@@ -166,16 +167,29 @@ def build_equity_chart_dict(
 
     equity_value_list = [pair[1] for pair in equity_pairs_list]
     first_equity_float = float(equity_value_list[0] or 0.0)
-    cumulative_pnl_value_list = [
-        float(equity_float or 0.0) - first_equity_float
-        for equity_float in equity_value_list
-    ]
-    cumulative_return_pct_list = [
-        (float(equity_float or 0.0) / first_equity_float) - 1.0
-        if first_equity_float
-        else 0.0
-        for equity_float in equity_value_list
-    ]
+    # Flow-adjusted cumulatives: declared deposits/withdrawals are stripped
+    # so the headline percent matches the time-weighted stat strip — two
+    # different "cumulative %" on one screen is how trust dies. Flows on the
+    # first visible sample are baseline capital, not P&L. With no declared
+    # flows both series equal the old equity-ratio math exactly.
+    cumulative_pnl_value_list: list[float] = []
+    cumulative_return_pct_list: list[float] = []
+    running_flow_float = 0.0
+    growth_float = 1.0
+    previous_equity_float: float | None = None
+    for _, equity_obj, _, flow_float in equity_pairs_list:
+        equity_float = float(equity_obj or 0.0)
+        if previous_equity_float is None:
+            flow_float = 0.0
+        else:
+            running_flow_float += flow_float
+            if previous_equity_float != 0.0:
+                growth_float *= (equity_float - flow_float) / previous_equity_float
+        cumulative_pnl_value_list.append(
+            equity_float - first_equity_float - running_flow_float
+        )
+        cumulative_return_pct_list.append(growth_float - 1.0 if first_equity_float else 0.0)
+        previous_equity_float = equity_float
     # The %/$ toggle only decides which already-computed cumulative series drives
     # the y-geometry and the labels. Both are derived from the same equity series
     # with no future information, so switching modes can never alter the curve's
@@ -201,7 +215,7 @@ def build_equity_chart_dict(
 
     point_xy_list: list[tuple[float, float]] = []
     point_dict_list: list[dict[str, Any]] = []
-    for index_int, (date_str, equity_float, pnl_float) in enumerate(equity_pairs_list):
+    for index_int, (date_str, equity_float, pnl_float, _) in enumerate(equity_pairs_list):
         cumulative_pnl_float = cumulative_pnl_value_list[index_int]
         cumulative_return_pct_float = cumulative_return_pct_list[index_int]
         active_value_float = active_value_list[index_int]
@@ -447,7 +461,7 @@ def _build_daily_panel_dict(
     }
     format_value_fn = _format_signed_money_str if is_dollar_mode_bool else _format_signed_pct_str
     daily_value_list: list[float | None] = []
-    for index_int, (_date_str, equity_float, pnl_float) in enumerate(equity_pairs_list):
+    for index_int, (_date_str, equity_float, pnl_float, _flow_float) in enumerate(equity_pairs_list):
         if is_dollar_mode_bool:
             daily_value_list.append(_float_or_none(pnl_float))
         else:
