@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Events{% endblock %}
+{% block content %}
+
+{# The flight recorder — "what happened while I was away?": every pod's
+   feed merged into one chronological stream. The cross-pod sequence
+   (snapshot → scheduler → decisions → fills) only tells its story
+   interleaved; inside a single pod you see one thread of it. #}
+<section class="mb-4">
+  <div class="flex items-baseline justify-between">
+    <h1 class="text-2xl font-bold tracking-tight">Events</h1>
+    <span class="text-sm text-ink-500 tabular-nums">
+      last {{ event_row_dict_list | length }} · {{ pod_count_int }} pods</span>
+  </div>
+  {% if pod_filter_str %}
+    <p class="text-sm text-ink-500 mt-1">
+      Filtered to <span class="font-mono">{{ pod_filter_str }}</span> ·
+      <a href="/events" class="text-accent underline">clear</a>
+    </p>
+  {% endif %}
+</section>
+
+{% if not event_row_dict_list %}
+  <div class="border border-ink-100 bg-white p-8 text-center text-ink-500">
+    No events recorded.
+  </div>
+{% else %}
+  <ol class="space-y-1 text-xs font-mono tabular-nums">
+    {% for event_dict in event_row_dict_list %}
+      {% set ev_sev_str = (event_dict.level_str or event_dict.severity_str or 'gray') | normalize_severity %}
+      <li class="px-3 py-1.5 border
+                 {% if ev_sev_str == 'red' %}bg-bad-soft border-bad/30 text-bad
+                 {% elif ev_sev_str == 'yellow' %}bg-warn-soft border-warn/30 text-warn
+                 {% elif ev_sev_str == 'green' %}bg-ok-soft border-ok/30 text-ok
+                 {% else %}bg-white border-ink-100 text-ink-700{% endif %}
+                 flex gap-3 items-baseline">
+        <span class="text-ink-500 shrink-0 w-28">
+          {{ (event_dict.timestamp_str or event_dict.event_timestamp_str or event_dict.created_timestamp_str) | clock }}
+        </span>
+        <a href="/events?pod={{ event_dict.pod_id_str }}"
+           class="shrink-0 w-56 truncate text-ink-500 hover:text-ink-900 hover:underline">
+          {{ event_dict.pod_id_str }}</a>
+        <strong class="shrink-0">{{ event_dict.event_name_str or 'event' }}</strong>
+        <span class="truncate">{{ event_dict.reason_str or event_dict.message_str or event_dict.error_str or '' }}</span>
+      </li>
+    {% endfor %}
+  </ol>
+{% endif %}
+
+{% endblock %}

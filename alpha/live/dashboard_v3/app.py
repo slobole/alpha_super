@@ -284,6 +284,67 @@ def create_app(
             as_of_clock_str=_now_clock_str(),
         )
 
+    @flask_app_obj.route("/events")
+    def events_page_route_fn():
+        # The flight recorder — every pod's recent events merged into one
+        # chronological stream. Read-only composition over the existing
+        # per-pod feed; no new data-layer surface.
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        summary_dict = provider_obj.get_summary_dict()
+        pod_id_str_list = [
+            str(row_dict.get("pod_id_str"))
+            for row_dict in summary_dict.get("pod_row_dict_list") or []
+            if row_dict.get("pod_id_str")
+        ]
+        pod_filter_str = request.args.get("pod") or ""
+        scoped_pod_id_str_list = (
+            [pod_filter_str] if pod_filter_str in pod_id_str_list else pod_id_str_list
+        )
+        event_row_dict_list: list[dict[str, Any]] = []
+        # Global events (no pod_id, e.g. scheduler ticks) come back once per
+        # pod query — dedupe them by identity so the merged stream shows each
+        # once, labelled 'system'.
+        seen_global_key_set: set[tuple[str, str, str]] = set()
+        for scoped_pod_id_str in scoped_pod_id_str_list:
+            for event_dict in provider_obj.get_pod_event_dict_list(scoped_pod_id_str):
+                merged_event_dict = dict(event_dict)
+                if not merged_event_dict.get("pod_id_str"):
+                    global_key_tuple = (
+                        str(merged_event_dict.get("timestamp_str")
+                            or merged_event_dict.get("event_timestamp_str")
+                            or merged_event_dict.get("created_timestamp_str") or ""),
+                        str(merged_event_dict.get("event_name_str") or ""),
+                        str(merged_event_dict.get("reason_str")
+                            or merged_event_dict.get("message_str") or ""),
+                    )
+                    if global_key_tuple in seen_global_key_set:
+                        continue
+                    seen_global_key_set.add(global_key_tuple)
+                    merged_event_dict["pod_id_str"] = "system"
+                event_row_dict_list.append(merged_event_dict)
+        # *** CRITICAL*** Sort by the same timestamp fallback chain the
+        # template displays, newest first, so display order and sort order
+        # cannot disagree.
+        event_row_dict_list.sort(
+            key=lambda event_dict: str(
+                event_dict.get("timestamp_str")
+                or event_dict.get("event_timestamp_str")
+                or event_dict.get("created_timestamp_str")
+                or ""
+            ),
+            reverse=True,
+        )
+        verdict_obj = resolve_top_bar_verdict(summary_dict, mode_str="live")
+        return render_template(
+            "events_page.html",
+            nav_active_str="events",
+            event_row_dict_list=event_row_dict_list[:200],
+            pod_count_int=len(scoped_pod_id_str_list),
+            pod_filter_str=pod_filter_str if pod_filter_str in pod_id_str_list else "",
+            verdict_dict=verdict_obj.as_dict(),
+            as_of_clock_str=_now_clock_str(),
+        )
+
     @flask_app_obj.route("/<mode_str>")
     def mode_page_route_fn(mode_str: str) -> Response:
         # Legacy mode URLs stay alive — bookmarks and habits keep working.
