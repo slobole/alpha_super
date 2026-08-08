@@ -334,11 +334,30 @@ def create_app(
             ),
             reverse=True,
         )
+        # Default view groups by pod — one section per pod, most recently
+        # active first — because that is how the operator reads "what
+        # happened to each of mine". ?view=stream keeps the interleaved
+        # chronology for cross-pod debugging.
+        view_str = "stream" if request.args.get("view") == "stream" else "by_pod"
+        event_group_dict_list: list[dict[str, Any]] = []
+        group_index_by_pod_dict: dict[str, int] = {}
+        for event_dict in event_row_dict_list:
+            group_pod_id_str = str(event_dict.get("pod_id_str"))
+            if group_pod_id_str not in group_index_by_pod_dict:
+                group_index_by_pod_dict[group_pod_id_str] = len(event_group_dict_list)
+                event_group_dict_list.append(
+                    {"pod_id_str": group_pod_id_str, "event_dict_list": []}
+                )
+            group_dict = event_group_dict_list[group_index_by_pod_dict[group_pod_id_str]]
+            if len(group_dict["event_dict_list"]) < 30:
+                group_dict["event_dict_list"].append(event_dict)
         verdict_obj = resolve_top_bar_verdict(summary_dict, mode_str="live")
         return render_template(
             "events_page.html",
             nav_active_str="events",
+            view_str=view_str,
             event_row_dict_list=event_row_dict_list[:200],
+            event_group_dict_list=event_group_dict_list,
             pod_count_int=len(scoped_pod_id_str_list),
             pod_filter_str=pod_filter_str if pod_filter_str in pod_id_str_list else "",
             verdict_dict=verdict_obj.as_dict(),

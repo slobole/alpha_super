@@ -12,39 +12,71 @@
     <span class="text-sm text-ink-500 tabular-nums">
       last {{ event_row_dict_list | length }} · {{ pod_count_int }} pods</span>
   </div>
-  {% if pod_filter_str %}
-    <p class="text-sm text-ink-500 mt-1">
-      Filtered to <span class="font-mono">{{ pod_filter_str }}</span> ·
-      <a href="/events" class="text-accent underline">clear</a>
-    </p>
-  {% endif %}
+  <div class="flex items-center gap-4 mt-3">
+    <nav class="flex border border-ink-100 w-fit">
+      <a href="/events{% if pod_filter_str %}?pod={{ pod_filter_str }}{% endif %}"
+         class="px-4 py-1.5 font-mono text-xs tracking-wider
+                {% if view_str == 'by_pod' %}text-accent border-b-2 border-accent font-medium{% else %}text-ink-500 hover:text-ink-900{% endif %}">By pod</a>
+      <a href="/events?view=stream{% if pod_filter_str %}&pod={{ pod_filter_str }}{% endif %}"
+         class="px-4 py-1.5 font-mono text-xs tracking-wider
+                {% if view_str == 'stream' %}text-accent border-b-2 border-accent font-medium{% else %}text-ink-500 hover:text-ink-900{% endif %}">Stream</a>
+    </nav>
+    {% if pod_filter_str %}
+      <span class="text-sm text-ink-500">
+        Filtered to <span class="font-mono">{{ pod_filter_str }}</span> ·
+        <a href="/events" class="text-accent underline">clear</a>
+      </span>
+    {% endif %}
+  </div>
 </section>
+
+{% macro event_line(event_dict, show_pod_bool) %}
+  {% set ev_sev_str = (event_dict.level_str or event_dict.severity_str or 'gray') | normalize_severity %}
+  <li class="px-3 py-1.5 border
+             {% if ev_sev_str == 'red' %}bg-bad-soft border-bad/30 text-bad
+             {% elif ev_sev_str == 'yellow' %}bg-warn-soft border-warn/30 text-warn
+             {% elif ev_sev_str == 'green' %}bg-ok-soft border-ok/30 text-ok
+             {% else %}bg-white border-ink-100 text-ink-700{% endif %}
+             flex gap-3 items-baseline">
+    <span class="text-ink-500 shrink-0 w-28">
+      {{ (event_dict.timestamp_str or event_dict.event_timestamp_str or event_dict.created_timestamp_str) | clock }}
+    </span>
+    {% if show_pod_bool %}
+      <a href="/events?pod={{ event_dict.pod_id_str }}"
+         class="shrink-0 w-56 truncate text-ink-500 hover:text-ink-900 hover:underline">
+        {{ event_dict.pod_id_str }}</a>
+    {% endif %}
+    <strong class="shrink-0">{{ event_dict.event_name_str or 'event' }}</strong>
+    <span class="truncate">{{ event_dict.reason_str or event_dict.message_str or event_dict.error_str or '' }}</span>
+  </li>
+{% endmacro %}
 
 {% if not event_row_dict_list %}
   <div class="border border-ink-100 bg-white p-8 text-center text-ink-500">
     No events recorded.
   </div>
-{% else %}
+{% elif view_str == 'stream' %}
   <ol class="space-y-1 text-xs font-mono tabular-nums">
-    {% for event_dict in event_row_dict_list %}
-      {% set ev_sev_str = (event_dict.level_str or event_dict.severity_str or 'gray') | normalize_severity %}
-      <li class="px-3 py-1.5 border
-                 {% if ev_sev_str == 'red' %}bg-bad-soft border-bad/30 text-bad
-                 {% elif ev_sev_str == 'yellow' %}bg-warn-soft border-warn/30 text-warn
-                 {% elif ev_sev_str == 'green' %}bg-ok-soft border-ok/30 text-ok
-                 {% else %}bg-white border-ink-100 text-ink-700{% endif %}
-                 flex gap-3 items-baseline">
-        <span class="text-ink-500 shrink-0 w-28">
-          {{ (event_dict.timestamp_str or event_dict.event_timestamp_str or event_dict.created_timestamp_str) | clock }}
-        </span>
-        <a href="/events?pod={{ event_dict.pod_id_str }}"
-           class="shrink-0 w-56 truncate text-ink-500 hover:text-ink-900 hover:underline">
-          {{ event_dict.pod_id_str }}</a>
-        <strong class="shrink-0">{{ event_dict.event_name_str or 'event' }}</strong>
-        <span class="truncate">{{ event_dict.reason_str or event_dict.message_str or event_dict.error_str or '' }}</span>
-      </li>
-    {% endfor %}
+    {% for event_dict in event_row_dict_list %}{{ event_line(event_dict, True) }}{% endfor %}
   </ol>
+{% else %}
+  {# One section per pod, most recently active first; system events last
+     among equals only if quiet. Everything inside stays newest-first. #}
+  <div class="space-y-4">
+    {% for group_dict in event_group_dict_list %}
+      <section class="border border-ink-100 bg-white">
+        <header class="flex items-baseline justify-between px-3 py-2 bg-ink-50 border-b border-ink-100">
+          <a href="/events?pod={{ group_dict.pod_id_str }}"
+             class="font-mono text-xs font-medium tracking-wide hover:underline">
+            {{ group_dict.pod_id_str }}</a>
+          <span class="text-[11px] text-ink-500 tabular-nums">{{ group_dict.event_dict_list | length }} events</span>
+        </header>
+        <ol class="space-y-1 text-xs font-mono tabular-nums p-2">
+          {% for event_dict in group_dict.event_dict_list %}{{ event_line(event_dict, False) }}{% endfor %}
+        </ol>
+      </section>
+    {% endfor %}
+  </div>
 {% endif %}
 
 {% endblock %}
