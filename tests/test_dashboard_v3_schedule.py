@@ -547,3 +547,82 @@ def test_next_trading_window_is_unknown_without_live_pods() -> None:
     )
     assert window_obj.has_data_bool is False
     assert window_obj.status_label_str == "Cannot verify"
+
+
+def _daily_pod_row_dict(pod_id_str: str = "pod_dv2_live") -> dict:
+    return {
+        "pod_id_str": pod_id_str,
+        "mode_str": "live",
+        "signal_clock_str": "eod_snapshot_ready",
+        "session_calendar_id_str": "XNYS",
+        "execution_policy_str": "next_open_moo",
+        "next_action_str": "wait",
+        "reason_code_str": "awaiting_eod_cycle",
+    }
+
+
+def test_daily_window_midsession_targets_tomorrows_open() -> None:
+    # Wednesday 2026-08-05 14:00 UTC = 10:00 ET, mid-session. The coming
+    # signal is today's close; execution is Thursday's open MOO.
+    now_dt = datetime(2026, 8, 5, 14, 0, 0, tzinfo=timezone.utc)
+    window_obj = build_next_trading_window(
+        {"pod_row_dict_list": [_daily_pod_row_dict()]},
+        mode_str="live",
+        now_dt=now_dt,
+    )
+    assert window_obj.has_data_bool is True
+    assert window_obj.action_required_bool is False
+    assert window_obj.signal_timestamp_str == "2026-08-05T16:00:00-04:00"
+    assert window_obj.submission_timestamp_str == "2026-08-06T09:23:30-04:00"
+    assert window_obj.target_timestamp_str == "2026-08-06T09:30:00-04:00"
+    assert window_obj.norgate_label_str == "Required for 2026-08-05"
+    assert window_obj.pod_id_str_list == ["pod_dv2_live"]
+
+
+def test_daily_window_after_close_keeps_open_cycle() -> None:
+    # Wednesday 21:00 UTC = 17:00 ET, after the close: the cycle whose
+    # signal was today's close is still pending until Thursday's open.
+    now_dt = datetime(2026, 8, 5, 21, 0, 0, tzinfo=timezone.utc)
+    window_obj = build_next_trading_window(
+        {"pod_row_dict_list": [_daily_pod_row_dict()]},
+        mode_str="live",
+        now_dt=now_dt,
+    )
+    assert window_obj.signal_timestamp_str == "2026-08-05T16:00:00-04:00"
+    assert window_obj.target_timestamp_str == "2026-08-06T09:30:00-04:00"
+    assert window_obj.trading_session_count_int == 0
+    assert "waiting for the next open" in window_obj.detail_str.lower()
+
+
+def test_daily_window_friday_evening_targets_monday_open() -> None:
+    # Friday 2026-08-07 21:00 UTC = 17:00 ET. Signal = Friday's close,
+    # execution skips the weekend to Monday's open.
+    now_dt = datetime(2026, 8, 7, 21, 0, 0, tzinfo=timezone.utc)
+    window_obj = build_next_trading_window(
+        {"pod_row_dict_list": [_daily_pod_row_dict()]},
+        mode_str="live",
+        now_dt=now_dt,
+    )
+    assert window_obj.signal_timestamp_str == "2026-08-07T16:00:00-04:00"
+    assert window_obj.target_timestamp_str == "2026-08-10T09:30:00-04:00"
+
+
+def test_mixed_book_prefers_nearest_signal() -> None:
+    # A daily pod's tonight-close signal beats the monthly pod's month-end.
+    now_dt = datetime(2026, 8, 5, 14, 0, 0, tzinfo=timezone.utc)
+    monthly_row_dict = {
+        "pod_id_str": "pod_taa_live",
+        "mode_str": "live",
+        "signal_clock_str": "month_end_snapshot_ready",
+        "session_calendar_id_str": "XNYS",
+        "execution_policy_str": "next_month_first_open",
+        "next_action_str": "wait",
+        "reason_code_str": "not_month_end_session",
+    }
+    window_obj = build_next_trading_window(
+        {"pod_row_dict_list": [monthly_row_dict, _daily_pod_row_dict()]},
+        mode_str="live",
+        now_dt=now_dt,
+    )
+    assert window_obj.signal_timestamp_str == "2026-08-05T16:00:00-04:00"
+    assert window_obj.pod_id_str_list == ["pod_dv2_live"]

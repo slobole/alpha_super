@@ -164,9 +164,19 @@ def build_next_trading_window(
         and str(row_dict.get("execution_policy_str") or "")
         == "next_month_first_open"
     ]
-    if not monthly_row_dict_list:
+    daily_row_dict_list = [
+        row_dict
+        for row_dict in pod_row_dict_list
+        if scheduler_utils.normalize_signal_clock_str(
+            str(row_dict.get("signal_clock_str") or "")
+        )
+        == "eod_snapshot_ready"
+        and str(row_dict.get("execution_policy_str") or "")
+        == "next_open_moo"
+    ]
+    if not monthly_row_dict_list and not daily_row_dict_list:
         return TradingWindow(
-            detail_str="No future monthly window can be derived from the enabled pods.",
+            detail_str="No future trading window can be derived from the enabled pods.",
             pod_id_str_list=[
                 str(row_dict.get("pod_id_str") or "?")
                 for row_dict in pod_row_dict_list
@@ -179,6 +189,9 @@ def build_next_trading_window(
     candidate_window_obj_list = [
         _build_monthly_wait_window(row_dict, now_dt)
         for row_dict in monthly_row_dict_list
+    ] + [
+        _build_daily_wait_window(row_dict, now_dt)
+        for row_dict in daily_row_dict_list
     ]
     valid_window_obj_list = [
         window_obj
@@ -187,10 +200,10 @@ def build_next_trading_window(
     ]
     if not valid_window_obj_list:
         return TradingWindow(
-            detail_str="The next month-end session could not be resolved.",
+            detail_str="The next signal session could not be resolved.",
             pod_id_str_list=[
                 str(row_dict.get("pod_id_str") or "?")
-                for row_dict in monthly_row_dict_list
+                for row_dict in monthly_row_dict_list + daily_row_dict_list
             ],
         )
 
@@ -453,6 +466,107 @@ def _build_monthly_wait_window(
         ),
         action_str="wait",
         reason_code_str=reason_code_str or "not_month_end_session",
+        norgate_label_str=f"Required for {signal_session_label_ts.date().isoformat()}",
+        pod_id_str_list=[str(row_dict.get("pod_id_str") or "?")],
+    )
+
+
+def _build_daily_wait_window(
+    row_dict: dict[str, Any],
+    now_dt: datetime,
+) -> TradingWindow:
+    """Future window for the daily cycle: eod_snapshot_ready → next_open_moo.
+
+    Signal is a session close (the EOD snapshot follows it), execution is the
+    NEXT session's open (MOO), submission is that open minus the same lead
+    the live scheduler uses. Two cases: after a close whose next open has not
+    passed, the current cycle is still pending; otherwise the coming close is
+    the next signal. Same *** CRITICAL *** display-only calendar parity as
+    the monthly builder — this never advances scheduler state.
+    """
+    calendar_id_str = str(row_dict.get("session_calendar_id_str") or "")
+    if not calendar_id_str:
+        return TradingWindow(pod_id_str_list=[str(row_dict.get("pod_id_str") or "?")])
+    reason_code_str = str(row_dict.get("reason_code_str") or "")
+    market_now_dt = scheduler_utils.to_market_timestamp_ts(now_dt, calendar_id_str)
+
+    # Open cycle: the latest completed close whose MOO execution is still ahead.
+    signal_session_label_ts = scheduler_utils.get_latest_completed_session_label_ts(
+        now_dt,
+        calendar_id_str,
+        snapshot_ready_buffer_minutes_int=0,
+    )
+    current_cycle_wait_bool = False
+    if signal_session_label_ts is not None:
+        execution_session_label_ts = scheduler_utils.get_next_session_label_ts(
+            signal_session_label_ts,
+            calendar_id_str,
+        )
+        target_timestamp_dt = scheduler_utils.get_session_open_timestamp_ts(
+            execution_session_label_ts,
+            calendar_id_str,
+        )
+        if not scheduler_utils.is_execution_window_expired_bool(
+            "next_open_moo",
+            target_timestamp_dt,
+            market_now_dt,
+        ):
+            current_cycle_wait_bool = True
+        else:
+            # That cycle is done; the next signal is the coming session close.
+            signal_session_label_ts = scheduler_utils.get_next_session_label_ts(
+                signal_session_label_ts,
+                calendar_id_str,
+            )
+    if signal_session_label_ts is None:
+        return TradingWindow(pod_id_str_list=[str(row_dict.get("pod_id_str") or "?")])
+    if not current_cycle_wait_bool:
+        execution_session_label_ts = scheduler_utils.get_next_session_label_ts(
+            signal_session_label_ts,
+            calendar_id_str,
+        )
+        target_timestamp_dt = scheduler_utils.get_session_open_timestamp_ts(
+            execution_session_label_ts,
+            calendar_id_str,
+        )
+    signal_timestamp_dt = scheduler_utils.get_session_close_timestamp_ts(
+        signal_session_label_ts,
+        calendar_id_str,
+    )
+    submission_timestamp_dt = target_timestamp_dt - timedelta(
+        seconds=scheduler_utils.DEFAULT_OPEN_SUBMISSION_LEAD_SECONDS_INT
+    )
+    required_action_dict = row_dict.get("required_action_dict") or {}
+    required_severity_str = str(required_action_dict.get("severity_str") or "")
+    return TradingWindow(
+        has_data_bool=True,
+        severity_str=(
+            required_severity_str
+            if required_severity_str in ("red", "yellow")
+            else "gray"
+        ),
+        status_label_str=str(
+            required_action_dict.get("label_str") or "No operator action required"
+        ),
+        detail_str=str(
+            required_action_dict.get("detail_str")
+            or required_action_dict.get("reason_str")
+            or (
+                "EOD signal captured; waiting for the next open (MOO)."
+                if current_cycle_wait_bool
+                else "Waiting for the next session close and EOD snapshot."
+            )
+        ),
+        signal_timestamp_str=signal_timestamp_dt.isoformat(),
+        submission_timestamp_str=submission_timestamp_dt.isoformat(),
+        target_timestamp_str=target_timestamp_dt.isoformat(),
+        relative_str=_format_relative_time_str(
+            target_timestamp_dt.isoformat(), now_dt
+        ),
+        trading_session_count_int=0 if current_cycle_wait_bool else 1,
+        action_required_bool=_operator_action_required_bool(required_action_dict),
+        action_str="wait",
+        reason_code_str=reason_code_str or "awaiting_eod_cycle",
         norgate_label_str=f"Required for {signal_session_label_ts.date().isoformat()}",
         pod_id_str_list=[str(row_dict.get("pod_id_str") or "?")],
     )
