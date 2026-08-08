@@ -25,6 +25,12 @@ from alpha.live import scheduler_utils
 
 DEFAULT_SCHEDULE_LIMIT_INT = 6
 WINDOW_SEVERITY_RANK_DICT = {"red": 0, "yellow": 1, "gray": 2, "green": 3}
+PRE_EXECUTION_ACTION_STR_SET = {
+    "build_decision_plan",
+    "build_vplan",
+    "review_vplan",
+    "submit_vplan",
+}
 
 
 @dataclass
@@ -138,21 +144,32 @@ def build_next_trading_window(
             pod_id_str_list=[],
         )
 
-    active_row_dict_list = [
-        row_dict
-        for row_dict in pod_row_dict_list
-        if _row_has_active_window_bool(row_dict, now_dt)
-    ]
-    if active_row_dict_list:
-        selected_row_dict = min(
-            active_row_dict_list,
-            key=lambda row_dict: (
-                _row_action_priority_int(row_dict),
-                _row_severity_rank_int(row_dict),
-                str(_target_timestamp_obj(row_dict) or "9999"),
-            ),
+    invalid_target_pod_id_str_list: list[str] = []
+    for row_dict in pod_row_dict_list:
+        target_timestamp_obj = _target_timestamp_obj(row_dict)
+        if target_timestamp_obj is None:
+            continue
+        try:
+            _parse_iso_datetime(str(target_timestamp_obj))
+        except ValueError:
+            invalid_target_pod_id_str_list.append(
+                str(row_dict.get("pod_id_str") or "?")
+            )
+    if invalid_target_pod_id_str_list:
+        invalid_target_pod_id_str_list = sorted(
+            set(invalid_target_pod_id_str_list)
         )
-        return _build_active_trading_window(selected_row_dict, active_row_dict_list, now_dt)
+        return TradingWindow(
+            severity_str="red",
+            status_label_str="Cannot verify",
+            detail_str=(
+                "Persisted target timestamp is invalid for enabled "
+                f"{mode_str} pod(s): "
+                + ", ".join(invalid_target_pod_id_str_list)
+                + "."
+            ),
+            pod_id_str_list=invalid_target_pod_id_str_list,
+        )
 
     monthly_row_dict_list = [
         row_dict
@@ -174,6 +191,137 @@ def build_next_trading_window(
         and str(row_dict.get("execution_policy_str") or "")
         == "next_open_moo"
     ]
+    unresolved_row_dict_list = [
+        row_dict
+        for row_dict in monthly_row_dict_list + daily_row_dict_list
+        if str(row_dict.get("session_calendar_id_str") or "")
+        not in scheduler_utils.SUPPORTED_SESSION_CALENDAR_ID_TUPLE
+    ]
+    unresolved_pod_id_str_list = sorted(
+        {
+            str(row_dict.get("pod_id_str") or "?")
+            for row_dict in unresolved_row_dict_list
+        }
+    )
+    unresolved_pod_id_str_set = set(unresolved_pod_id_str_list)
+    unresolved_attention_row_dict_list = [
+        row_dict
+        for row_dict in unresolved_row_dict_list
+        if _row_severity_rank_int(row_dict)
+        < WINDOW_SEVERITY_RANK_DICT["gray"]
+    ]
+    active_row_dict_list = [
+        row_dict
+        for row_dict in pod_row_dict_list
+        if _row_has_active_window_bool(row_dict, now_dt)
+    ]
+    if active_row_dict_list:
+        selected_row_dict = min(
+            active_row_dict_list,
+            key=lambda row_dict: (
+                _row_action_priority_int(row_dict),
+                _row_severity_rank_int(row_dict),
+                str(_target_timestamp_obj(row_dict) or "9999"),
+            ),
+        )
+        trading_window_obj = _build_active_trading_window(
+            selected_row_dict,
+            active_row_dict_list,
+            now_dt,
+        )
+        if unresolved_pod_id_str_list:
+            unresolved_label_str = ", ".join(unresolved_pod_id_str_list)
+            unresolved_detail_str = (
+                f"Cannot resolve a trading window for: {unresolved_label_str}."
+            )
+            if unresolved_attention_row_dict_list:
+                unresolved_attention_row_dict = min(
+                    unresolved_attention_row_dict_list,
+                    key=_row_severity_rank_int,
+                )
+                unresolved_action_dict = (
+                    unresolved_attention_row_dict.get("required_action_dict") or {}
+                )
+                unresolved_severity_str = str(
+                    unresolved_action_dict.get("severity_str") or "gray"
+                )
+                if WINDOW_SEVERITY_RANK_DICT.get(unresolved_severity_str, 9) < (
+                    WINDOW_SEVERITY_RANK_DICT.get(
+                        trading_window_obj.severity_str,
+                        9,
+                    )
+                ):
+                    trading_window_obj.severity_str = unresolved_severity_str
+                    trading_window_obj.status_label_str = str(
+                        unresolved_action_dict.get("label_str") or "Cannot verify"
+                    )
+                    trading_window_obj.action_required_bool = (
+                        _operator_action_required_bool(unresolved_action_dict)
+                    )
+                    trading_window_obj.detail_str = str(
+                        unresolved_action_dict.get("detail_str")
+                        or unresolved_action_dict.get("reason_str")
+                        or unresolved_detail_str
+                    )
+            if unresolved_detail_str not in trading_window_obj.detail_str:
+                trading_window_obj.detail_str = (
+                    f"{trading_window_obj.detail_str} {unresolved_detail_str}"
+                )
+            trading_window_obj.pod_id_str_list = sorted(
+                set(trading_window_obj.pod_id_str_list or [])
+                | unresolved_pod_id_str_set
+            )
+            if trading_window_obj.severity_str not in ("red", "yellow"):
+                trading_window_obj.severity_str = "gray"
+                trading_window_obj.status_label_str = "Cannot verify"
+        return trading_window_obj
+
+    if unresolved_pod_id_str_list:
+        unresolved_label_str = ", ".join(unresolved_pod_id_str_list)
+        if unresolved_attention_row_dict_list:
+            unresolved_attention_row_dict = min(
+                unresolved_attention_row_dict_list,
+                key=_row_severity_rank_int,
+            )
+            unresolved_action_dict = (
+                unresolved_attention_row_dict.get("required_action_dict") or {}
+            )
+            unresolved_severity_str = str(
+                unresolved_action_dict.get("severity_str") or "gray"
+            )
+            return TradingWindow(
+                severity_str=unresolved_severity_str,
+                status_label_str=str(
+                    unresolved_action_dict.get("label_str") or "Cannot verify"
+                ),
+                detail_str=(
+                    str(
+                        unresolved_action_dict.get("detail_str")
+                        or unresolved_action_dict.get("reason_str")
+                        or "An unresolved pod needs attention."
+                    )
+                    + " Cannot resolve a trading window for enabled "
+                    + f"{mode_str} pod(s): {unresolved_label_str}."
+                ),
+                action_required_bool=_operator_action_required_bool(
+                    unresolved_action_dict
+                ),
+                action_str=_optional_text_str(
+                    unresolved_attention_row_dict.get("next_action_str")
+                ),
+                reason_code_str=_optional_text_str(
+                    unresolved_attention_row_dict.get("reason_code_str")
+                ),
+                pod_id_str_list=unresolved_pod_id_str_list,
+            )
+        return TradingWindow(
+            detail_str=(
+                "Cannot resolve a trading window for enabled "
+                f"{mode_str} pod(s): {unresolved_label_str}."
+            ),
+            pod_id_str_list=unresolved_pod_id_str_list,
+        )
+
     if not monthly_row_dict_list and not daily_row_dict_list:
         return TradingWindow(
             detail_str="No future trading window can be derived from the enabled pods.",
@@ -235,10 +383,22 @@ def build_next_trading_window(
 def _row_has_active_window_bool(row_dict: dict[str, Any], now_dt: datetime) -> bool:
     action_str = str(row_dict.get("next_action_str") or "")
     if action_str and action_str not in ("wait", "no_db"):
-        return True
+        if action_str not in PRE_EXECUTION_ACTION_STR_SET:
+            return True
+        return not _row_pre_execution_action_expired_bool(row_dict, now_dt)
     reason_code_str = str(row_dict.get("reason_code_str") or "")
     if reason_code_str == "not_month_end_session":
         return False
+    target_timestamp_obj = _target_timestamp_obj(row_dict)
+    if target_timestamp_obj is None:
+        return False
+    return not _row_target_window_expired_bool(row_dict, now_dt)
+
+
+def _row_target_window_expired_bool(
+    row_dict: dict[str, Any],
+    now_dt: datetime,
+) -> bool:
     target_timestamp_obj = _target_timestamp_obj(row_dict)
     if target_timestamp_obj is None:
         return False
@@ -246,7 +406,61 @@ def _row_has_active_window_bool(row_dict: dict[str, Any], now_dt: datetime) -> b
         target_dt = _parse_iso_datetime(str(target_timestamp_obj))
     except ValueError:
         return False
-    return _aware_utc_dt(target_dt) >= now_dt
+    return scheduler_utils.is_execution_window_expired_bool(
+        str(row_dict.get("execution_policy_str") or ""),
+        _aware_utc_dt(target_dt),
+        now_dt,
+    )
+
+
+def _row_pre_execution_action_expired_bool(
+    row_dict: dict[str, Any],
+    now_dt: datetime,
+) -> bool:
+    action_str = str(row_dict.get("next_action_str") or "")
+    if action_str not in PRE_EXECUTION_ACTION_STR_SET:
+        return False
+    return _row_target_window_expired_bool(row_dict, now_dt)
+
+
+def _row_decision_covers_signal_session_bool(
+    row_dict: dict[str, Any],
+    signal_session_label_ts: pd.Timestamp,
+    calendar_id_str: str,
+) -> bool:
+    signal_timestamp_str = str(
+        row_dict.get("latest_decision_signal_timestamp_str") or ""
+    )
+    if not signal_timestamp_str:
+        return False
+    try:
+        signal_timestamp_dt = _parse_iso_datetime(signal_timestamp_str)
+    except ValueError:
+        return False
+    market_signal_timestamp_dt = scheduler_utils.to_market_timestamp_ts(
+        signal_timestamp_dt,
+        calendar_id_str,
+    )
+    return market_signal_timestamp_dt.date() == signal_session_label_ts.date()
+
+
+def _row_has_cycle_obligation_evidence_bool(row_dict: dict[str, Any]) -> bool:
+    if str(row_dict.get("db_status_str") or "") in {"missing", "empty", "error"}:
+        return False
+    required_action_dict = row_dict.get("required_action_dict") or {}
+    if str(required_action_dict.get("label_str") or "") in {
+        "No state yet",
+        "Setup DB",
+    }:
+        return False
+    return any(
+        row_dict.get(field_str)
+        for field_str in (
+            "latest_pod_state_timestamp_str",
+            "latest_decision_plan_id_int",
+            "latest_vplan_id_int",
+        )
+    )
 
 
 def _build_active_trading_window(
@@ -255,16 +469,27 @@ def _build_active_trading_window(
     now_dt: datetime,
 ) -> TradingWindow:
     action_str = str(selected_row_dict.get("next_action_str") or "wait")
+    signal_clock_str = scheduler_utils.normalize_signal_clock_str(
+        str(selected_row_dict.get("signal_clock_str") or "")
+    )
+    execution_policy_str = str(selected_row_dict.get("execution_policy_str") or "")
+    calendar_id_str = str(selected_row_dict.get("session_calendar_id_str") or "")
+    trading_window_obj: TradingWindow | None = None
     if (
         action_str == "build_decision_plan"
-        and scheduler_utils.normalize_signal_clock_str(
-            str(selected_row_dict.get("signal_clock_str") or "")
-        )
-        == "month_end_snapshot_ready"
-        and str(selected_row_dict.get("execution_policy_str") or "")
-        == "next_month_first_open"
+        and calendar_id_str in scheduler_utils.SUPPORTED_SESSION_CALENDAR_ID_TUPLE
     ):
-        trading_window_obj = _build_monthly_wait_window(selected_row_dict, now_dt)
+        if (
+            signal_clock_str == "month_end_snapshot_ready"
+            and execution_policy_str == "next_month_first_open"
+        ):
+            trading_window_obj = _build_monthly_wait_window(selected_row_dict, now_dt)
+        elif (
+            signal_clock_str == "eod_snapshot_ready"
+            and execution_policy_str == "next_open_moo"
+        ):
+            trading_window_obj = _build_daily_wait_window(selected_row_dict, now_dt)
+    if trading_window_obj is not None:
         trading_window_obj.action_str = action_str
         trading_window_obj.action_required_bool = True
         if trading_window_obj.status_label_str == "No operator action required":
@@ -431,12 +656,21 @@ def _build_monthly_wait_window(
         and reason_code_str == "not_month_end_session"
         and required_severity_str not in ("red", "yellow")
     )
-    if stale_preclose_state_bool:
+    stale_expired_action_bool = (
+        _row_pre_execution_action_expired_bool(row_dict, now_dt)
+        and required_severity_str != "red"
+    )
+    if stale_preclose_state_bool or stale_expired_action_bool:
         required_severity_str = "gray"
         status_label_str = "Awaiting scheduler refresh"
         detail_str = (
-            "Month-end just closed; waiting for persisted scheduler and "
-            "Norgate state to refresh."
+            "Persisted pre-execution action has expired; waiting for "
+            "scheduler state to refresh."
+            if stale_expired_action_bool
+            else (
+                "Month-end just closed; waiting for persisted scheduler and "
+                "Norgate state to refresh."
+            )
         )
     return TradingWindow(
         has_data_bool=True,
@@ -461,7 +695,7 @@ def _build_monthly_wait_window(
         trading_session_count_int=trading_session_count_int,
         action_required_bool=(
             False
-            if stale_preclose_state_bool
+            if stale_preclose_state_bool or stale_expired_action_bool
             else _operator_action_required_bool(required_action_dict)
         ),
         action_str="wait",
@@ -496,6 +730,87 @@ def _build_daily_wait_window(
         calendar_id_str,
         snapshot_ready_buffer_minutes_int=0,
     )
+    if signal_session_label_ts is not None:
+        missed_signal_session_label_ts = signal_session_label_ts
+        missed_execution_session_label_ts = scheduler_utils.get_next_session_label_ts(
+            missed_signal_session_label_ts,
+            calendar_id_str,
+        )
+        missed_target_timestamp_dt = scheduler_utils.get_session_open_timestamp_ts(
+            missed_execution_session_label_ts,
+            calendar_id_str,
+        )
+        missed_submission_timestamp_dt = missed_target_timestamp_dt - timedelta(
+            seconds=scheduler_utils.DEFAULT_OPEN_SUBMISSION_LEAD_SECONDS_INT
+        )
+        if (
+            reason_code_str == "snapshot_window_expired"
+            and missed_submission_timestamp_dt > market_now_dt
+        ):
+            calendar_obj = scheduler_utils.get_exchange_calendar_obj(calendar_id_str)
+            missed_signal_session_label_ts = calendar_obj.previous_session(
+                missed_signal_session_label_ts
+            )
+            missed_execution_session_label_ts = (
+                scheduler_utils.get_next_session_label_ts(
+                    missed_signal_session_label_ts,
+                    calendar_id_str,
+                )
+            )
+            missed_target_timestamp_dt = (
+                scheduler_utils.get_session_open_timestamp_ts(
+                    missed_execution_session_label_ts,
+                    calendar_id_str,
+                )
+            )
+            missed_submission_timestamp_dt = missed_target_timestamp_dt - timedelta(
+                seconds=scheduler_utils.DEFAULT_OPEN_SUBMISSION_LEAD_SECONDS_INT
+            )
+        missed_cycle_evidence_bool = reason_code_str in {
+            "snapshot_window_expired",
+            "submission_window_expired",
+        } or _row_pre_execution_action_expired_bool(row_dict, now_dt)
+        if (
+            missed_cycle_evidence_bool
+            and _row_has_cycle_obligation_evidence_bool(row_dict)
+            and market_now_dt >= missed_submission_timestamp_dt
+            and not _row_decision_covers_signal_session_bool(
+                row_dict,
+                missed_signal_session_label_ts,
+                calendar_id_str,
+            )
+        ):
+            missed_signal_timestamp_dt = (
+                scheduler_utils.get_session_close_timestamp_ts(
+                    missed_signal_session_label_ts,
+                    calendar_id_str,
+                )
+            )
+            return TradingWindow(
+                has_data_bool=True,
+                severity_str="red",
+                status_label_str="Missed DecisionPlan cycle",
+                detail_str=(
+                    "No DecisionPlan was persisted for the daily signal before "
+                    "its required MOO submission deadline."
+                ),
+                signal_timestamp_str=missed_signal_timestamp_dt.isoformat(),
+                submission_timestamp_str=missed_submission_timestamp_dt.isoformat(),
+                target_timestamp_str=missed_target_timestamp_dt.isoformat(),
+                relative_str=_format_relative_time_str(
+                    missed_target_timestamp_dt.isoformat(),
+                    now_dt,
+                ),
+                trading_session_count_int=0,
+                action_required_bool=True,
+                action_str="missed_decision_cycle",
+                reason_code_str="missed_daily_decision_cycle",
+                norgate_label_str=(
+                    "Required for "
+                    f"{missed_signal_session_label_ts.date().isoformat()}"
+                ),
+                pod_id_str_list=[str(row_dict.get("pod_id_str") or "?")],
+            )
     current_cycle_wait_bool = False
     if signal_session_label_ts is not None:
         execution_session_label_ts = scheduler_utils.get_next_session_label_ts(
@@ -538,6 +853,52 @@ def _build_daily_wait_window(
     )
     required_action_dict = row_dict.get("required_action_dict") or {}
     required_severity_str = str(required_action_dict.get("severity_str") or "")
+    status_label_str = str(
+        required_action_dict.get("label_str") or "No operator action required"
+    )
+    detail_str = str(
+        required_action_dict.get("detail_str")
+        or required_action_dict.get("reason_str")
+        or (
+            "EOD signal captured; waiting for the next open (MOO)."
+            if current_cycle_wait_bool
+            else "Waiting for the next session close and EOD snapshot."
+        )
+    )
+    stale_preclose_state_bool = (
+        current_cycle_wait_bool
+        and signal_timestamp_dt <= market_now_dt
+        and required_severity_str not in ("red", "yellow")
+        and (
+            not required_action_dict
+            or str(required_action_dict.get("label_str") or "") == "No action"
+        )
+    )
+    stale_expired_action_bool = (
+        _row_pre_execution_action_expired_bool(row_dict, now_dt)
+        and required_severity_str != "red"
+    )
+    stale_expired_wait_bool = (
+        str(row_dict.get("next_action_str") or "") == "wait"
+        and status_label_str not in ("No action", "No operator action required")
+        and _row_target_window_expired_bool(row_dict, now_dt)
+        and required_severity_str != "red"
+    )
+    stale_expired_state_bool = (
+        stale_expired_action_bool or stale_expired_wait_bool
+    )
+    if stale_preclose_state_bool or stale_expired_state_bool:
+        required_severity_str = "gray"
+        status_label_str = "Awaiting scheduler refresh"
+        detail_str = (
+            "Persisted pre-execution action has expired; waiting for "
+            "scheduler state to refresh."
+            if stale_expired_state_bool
+            else (
+                "EOD just closed; waiting for persisted scheduler and "
+                "Norgate state to refresh."
+            )
+        )
     return TradingWindow(
         has_data_bool=True,
         severity_str=(
@@ -545,18 +906,8 @@ def _build_daily_wait_window(
             if required_severity_str in ("red", "yellow")
             else "gray"
         ),
-        status_label_str=str(
-            required_action_dict.get("label_str") or "No operator action required"
-        ),
-        detail_str=str(
-            required_action_dict.get("detail_str")
-            or required_action_dict.get("reason_str")
-            or (
-                "EOD signal captured; waiting for the next open (MOO)."
-                if current_cycle_wait_bool
-                else "Waiting for the next session close and EOD snapshot."
-            )
-        ),
+        status_label_str=status_label_str,
+        detail_str=detail_str,
         signal_timestamp_str=signal_timestamp_dt.isoformat(),
         submission_timestamp_str=submission_timestamp_dt.isoformat(),
         target_timestamp_str=target_timestamp_dt.isoformat(),
@@ -564,7 +915,11 @@ def _build_daily_wait_window(
             target_timestamp_dt.isoformat(), now_dt
         ),
         trading_session_count_int=0 if current_cycle_wait_bool else 1,
-        action_required_bool=_operator_action_required_bool(required_action_dict),
+        action_required_bool=(
+            False
+            if stale_preclose_state_bool or stale_expired_state_bool
+            else _operator_action_required_bool(required_action_dict)
+        ),
         action_str="wait",
         reason_code_str=reason_code_str or "awaiting_eod_cycle",
         norgate_label_str=f"Required for {signal_session_label_ts.date().isoformat()}",

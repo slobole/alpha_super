@@ -591,7 +591,383 @@ def test_daily_window_after_close_keeps_open_cycle() -> None:
     assert window_obj.signal_timestamp_str == "2026-08-05T16:00:00-04:00"
     assert window_obj.target_timestamp_str == "2026-08-06T09:30:00-04:00"
     assert window_obj.trading_session_count_int == 0
-    assert "waiting for the next open" in window_obj.detail_str.lower()
+    assert window_obj.status_label_str == "Awaiting scheduler refresh"
+    assert "scheduler" in window_obj.detail_str.lower()
+
+
+def test_daily_build_decision_plan_derives_current_cycle_timestamps() -> None:
+    daily_row_dict = {
+        **_daily_pod_row_dict(),
+        "next_action_str": "build_decision_plan",
+        "reason_code_str": "ready_to_build_decision_plan",
+        "required_action_dict": {
+            "label_str": "Build DecisionPlan",
+            "severity_str": "yellow",
+        },
+    }
+
+    window_obj = build_next_trading_window(
+        {"pod_row_dict_list": [daily_row_dict]},
+        mode_str="live",
+        now_dt=datetime(2026, 8, 5, 21, 0, 0, tzinfo=timezone.utc),
+    )
+
+    assert window_obj.action_str == "build_decision_plan"
+    assert window_obj.action_required_bool is True
+    assert window_obj.signal_timestamp_str == "2026-08-05T16:00:00-04:00"
+    assert window_obj.submission_timestamp_str == "2026-08-06T09:23:30-04:00"
+    assert window_obj.target_timestamp_str == "2026-08-06T09:30:00-04:00"
+
+
+def test_daily_malformed_persisted_target_fails_loud() -> None:
+    daily_row_dict = {
+        **_daily_pod_row_dict(),
+        "next_action_str": "build_decision_plan",
+        "reason_code_str": "ready_to_build_decision_plan",
+        "latest_decision_plan_target_execution_timestamp_str": "not-a-timestamp",
+        "required_action_dict": {
+            "label_str": "Build DecisionPlan",
+            "severity_str": "yellow",
+        },
+    }
+
+    window_obj = build_next_trading_window(
+        {"pod_row_dict_list": [daily_row_dict]},
+        mode_str="live",
+        now_dt=datetime(2026, 8, 10, 13, 30, 0, tzinfo=timezone.utc),
+    )
+
+    assert window_obj.has_data_bool is False
+    assert window_obj.severity_str == "red"
+    assert window_obj.status_label_str == "Cannot verify"
+    assert window_obj.pod_id_str_list == ["pod_dv2_live"]
+    assert "Persisted target timestamp is invalid" in window_obj.detail_str
+
+
+def test_daily_persisted_cycle_expires_at_exact_moo_open() -> None:
+    daily_row_dict = {
+        **_daily_pod_row_dict(),
+        "latest_decision_signal_timestamp_str": "2026-08-07T16:00:00-04:00",
+        "latest_decision_plan_submission_timestamp_str": "2026-08-10T09:23:30-04:00",
+        "latest_decision_plan_target_execution_timestamp_str": "2026-08-10T09:30:00-04:00",
+        "required_action_dict": {
+            "label_str": "Waiting for MOO execution",
+            "severity_str": "yellow",
+        },
+    }
+
+    before_open_window_obj = build_next_trading_window(
+        {"pod_row_dict_list": [daily_row_dict]},
+        mode_str="live",
+        now_dt=datetime(2026, 8, 10, 13, 29, 59, tzinfo=timezone.utc),
+    )
+    at_open_window_obj = build_next_trading_window(
+        {"pod_row_dict_list": [daily_row_dict]},
+        mode_str="live",
+        now_dt=datetime(2026, 8, 10, 13, 30, 0, tzinfo=timezone.utc),
+    )
+
+    assert before_open_window_obj.signal_timestamp_str == "2026-08-07T16:00:00-04:00"
+    assert before_open_window_obj.target_timestamp_str == "2026-08-10T09:30:00-04:00"
+    assert before_open_window_obj.status_label_str == "Waiting for MOO execution"
+    assert at_open_window_obj.signal_timestamp_str == "2026-08-10T16:00:00-04:00"
+    assert at_open_window_obj.submission_timestamp_str == "2026-08-11T09:23:30-04:00"
+    assert at_open_window_obj.target_timestamp_str == "2026-08-11T09:30:00-04:00"
+    assert at_open_window_obj.status_label_str == "Awaiting scheduler refresh"
+    assert at_open_window_obj.action_required_bool is False
+
+
+def test_daily_missing_decision_becomes_missed_at_submission_deadline() -> None:
+    pending_daily_row_dict = {
+        **_daily_pod_row_dict(),
+        "db_status_str": "ok",
+        "latest_pod_state_timestamp_str": "2026-08-05T15:00:00-04:00",
+        "reason_code_str": "carry_forward_snapshot_ready",
+        "required_action_dict": {
+            "label_str": "No action",
+            "severity_str": "green",
+        },
+    }
+    expired_daily_row_dict = {
+        **_daily_pod_row_dict(),
+        "db_status_str": "ok",
+        "latest_pod_state_timestamp_str": "2026-08-05T15:00:00-04:00",
+        "reason_code_str": "snapshot_window_expired",
+        "required_action_dict": {
+            "label_str": "No action",
+            "severity_str": "green",
+        },
+    }
+
+    before_submission_window_obj = build_next_trading_window(
+        {"pod_row_dict_list": [pending_daily_row_dict]},
+        mode_str="live",
+        now_dt=datetime(2026, 8, 6, 13, 23, 29, tzinfo=timezone.utc),
+    )
+    at_submission_window_obj = build_next_trading_window(
+        {"pod_row_dict_list": [expired_daily_row_dict]},
+        mode_str="live",
+        now_dt=datetime(2026, 8, 6, 13, 23, 30, tzinfo=timezone.utc),
+    )
+    at_open_window_obj = build_next_trading_window(
+        {"pod_row_dict_list": [expired_daily_row_dict]},
+        mode_str="live",
+        now_dt=datetime(2026, 8, 6, 13, 30, 0, tzinfo=timezone.utc),
+    )
+
+    assert before_submission_window_obj.status_label_str == "Awaiting scheduler refresh"
+    for missed_window_obj in (at_submission_window_obj, at_open_window_obj):
+        assert missed_window_obj.severity_str == "red"
+        assert missed_window_obj.status_label_str == "Missed DecisionPlan cycle"
+        assert missed_window_obj.action_required_bool is True
+        assert missed_window_obj.signal_timestamp_str == "2026-08-05T16:00:00-04:00"
+        assert missed_window_obj.submission_timestamp_str == "2026-08-06T09:23:30-04:00"
+        assert missed_window_obj.target_timestamp_str == "2026-08-06T09:30:00-04:00"
+
+
+def test_expired_daily_build_action_is_not_attached_to_next_cycle() -> None:
+    daily_row_dict = {
+        **_daily_pod_row_dict(),
+        "db_status_str": "ok",
+        "latest_pod_state_timestamp_str": "2026-08-05T15:00:00-04:00",
+        "next_action_str": "build_decision_plan",
+        "reason_code_str": "ready_to_build_decision_plan",
+        "latest_decision_plan_target_execution_timestamp_str": "2026-08-06T09:30:00-04:00",
+        "required_action_dict": {
+            "label_str": "Build DecisionPlan",
+            "severity_str": "yellow",
+        },
+    }
+
+    window_obj = build_next_trading_window(
+        {"pod_row_dict_list": [daily_row_dict]},
+        mode_str="live",
+        now_dt=datetime(2026, 8, 6, 13, 30, 0, tzinfo=timezone.utc),
+    )
+
+    assert window_obj.status_label_str == "Missed DecisionPlan cycle"
+    assert window_obj.action_str == "missed_decision_cycle"
+    assert window_obj.signal_timestamp_str == "2026-08-05T16:00:00-04:00"
+    assert window_obj.target_timestamp_str == "2026-08-06T09:30:00-04:00"
+
+
+def test_new_no_state_pod_is_not_marked_as_missed_cycle() -> None:
+    new_daily_row_dict = {
+        **_daily_pod_row_dict(),
+        "db_status_str": "empty",
+        "reason_code_str": "snapshot_window_expired",
+        "required_action_dict": {
+            "label_str": "No state yet",
+            "severity_str": "gray",
+        },
+    }
+
+    window_obj = build_next_trading_window(
+        {"pod_row_dict_list": [new_daily_row_dict]},
+        mode_str="live",
+        now_dt=datetime(2026, 8, 6, 14, 0, 0, tzinfo=timezone.utc),
+    )
+
+    assert window_obj.severity_str == "gray"
+    assert window_obj.status_label_str == "No state yet"
+    assert window_obj.action_required_bool is False
+    assert window_obj.status_label_str != "Missed DecisionPlan cycle"
+
+
+def test_next_open_market_action_expires_after_canonical_grace() -> None:
+    action_row_dict = {
+        **_row_dict(
+            "pod_market_open",
+            next_action_str="submit_vplan",
+            target_timestamp_str="2026-08-10T09:30:00-04:00",
+        ),
+        "execution_policy_str": "next_open_market",
+        "required_action_dict": {
+            "label_str": "Submit VPlan",
+            "severity_str": "yellow",
+        },
+    }
+
+    at_grace_boundary_window_obj = build_next_trading_window(
+        {"pod_row_dict_list": [action_row_dict]},
+        mode_str="live",
+        now_dt=datetime(2026, 8, 10, 13, 31, 0, tzinfo=timezone.utc),
+    )
+    after_grace_window_obj = build_next_trading_window(
+        {"pod_row_dict_list": [action_row_dict]},
+        mode_str="live",
+        now_dt=datetime(2026, 8, 10, 13, 31, 1, tzinfo=timezone.utc),
+    )
+
+    assert at_grace_boundary_window_obj.status_label_str == "Submit VPlan"
+    assert at_grace_boundary_window_obj.action_required_bool is True
+    assert after_grace_window_obj.status_label_str == "Cannot verify"
+    assert after_grace_window_obj.action_required_bool is False
+
+
+def test_post_execution_action_stays_active_after_target() -> None:
+    reconcile_row_dict = {
+        **_row_dict(
+            "pod_reconcile",
+            next_action_str="post_execution_reconcile",
+            target_timestamp_str="2026-08-10T09:30:00-04:00",
+        ),
+        "execution_policy_str": "next_open_moo",
+        "required_action_dict": {
+            "label_str": "Waiting reconcile",
+            "severity_str": "yellow",
+        },
+    }
+
+    window_obj = build_next_trading_window(
+        {"pod_row_dict_list": [reconcile_row_dict]},
+        mode_str="live",
+        now_dt=datetime(2026, 8, 10, 14, 0, 0, tzinfo=timezone.utc),
+    )
+
+    assert window_obj.status_label_str == "Waiting reconcile"
+    assert window_obj.action_str == "post_execution_reconcile"
+    assert window_obj.target_timestamp_str == "2026-08-10T09:30:00-04:00"
+
+
+def test_just_closed_daily_cycle_does_not_reuse_stale_no_action_status() -> None:
+    daily_row_dict = {
+        **_daily_pod_row_dict(),
+        "required_action_dict": {
+            "label_str": "No action",
+            "severity_str": "green",
+            "detail_str": "POD is idle or completed.",
+        },
+    }
+
+    window_obj = build_next_trading_window(
+        {"pod_row_dict_list": [daily_row_dict]},
+        mode_str="live",
+        now_dt=datetime(2026, 8, 5, 20, 1, 0, tzinfo=timezone.utc),
+    )
+
+    assert window_obj.signal_timestamp_str == "2026-08-05T16:00:00-04:00"
+    assert window_obj.status_label_str == "Awaiting scheduler refresh"
+    assert window_obj.severity_str == "gray"
+    assert window_obj.action_required_bool is False
+
+
+def test_mixed_book_fails_loudly_when_one_pod_window_cannot_be_resolved() -> None:
+    unresolved_daily_row_dict = {
+        **_daily_pod_row_dict("pod_missing_calendar"),
+        "session_calendar_id_str": "",
+    }
+
+    window_obj = build_next_trading_window(
+        {
+            "pod_row_dict_list": [
+                _daily_pod_row_dict("pod_valid"),
+                unresolved_daily_row_dict,
+            ]
+        },
+        mode_str="live",
+        now_dt=datetime(2026, 8, 5, 14, 0, 0, tzinfo=timezone.utc),
+    )
+
+    assert window_obj.has_data_bool is False
+    assert window_obj.status_label_str == "Cannot verify"
+    assert window_obj.pod_id_str_list == ["pod_missing_calendar"]
+    assert "pod_missing_calendar" in window_obj.detail_str
+
+
+def test_unresolved_calendar_does_not_hide_required_action() -> None:
+    unresolved_action_row_dict = {
+        **_daily_pod_row_dict("pod_missing_calendar"),
+        "session_calendar_id_str": "",
+        "next_action_str": "build_decision_plan",
+        "reason_code_str": "ready_to_build_decision_plan",
+        "required_action_dict": {
+            "label_str": "Build DecisionPlan",
+            "severity_str": "yellow",
+        },
+    }
+
+    window_obj = build_next_trading_window(
+        {
+            "pod_row_dict_list": [
+                _daily_pod_row_dict("pod_valid"),
+                unresolved_action_row_dict,
+            ]
+        },
+        mode_str="live",
+        now_dt=datetime(2026, 8, 5, 14, 0, 0, tzinfo=timezone.utc),
+    )
+
+    assert window_obj.status_label_str == "Build DecisionPlan"
+    assert window_obj.severity_str == "yellow"
+    assert window_obj.action_required_bool is True
+    assert "pod_missing_calendar" in window_obj.detail_str
+
+
+def test_unresolved_red_pod_sets_card_to_worst_severity() -> None:
+    valid_action_row_dict = {
+        **_daily_pod_row_dict("pod_valid"),
+        "next_action_str": "build_decision_plan",
+        "reason_code_str": "ready_to_build_decision_plan",
+        "required_action_dict": {
+            "label_str": "Build DecisionPlan",
+            "severity_str": "yellow",
+        },
+    }
+    unresolved_red_row_dict = {
+        **_daily_pod_row_dict("pod_missing_calendar"),
+        "session_calendar_id_str": "",
+        "required_action_dict": {
+            "label_str": "Review Norgate data",
+            "severity_str": "red",
+            "detail_str": "Norgate evidence is missing.",
+        },
+    }
+
+    window_obj = build_next_trading_window(
+        {
+            "pod_row_dict_list": [
+                valid_action_row_dict,
+                unresolved_red_row_dict,
+            ]
+        },
+        mode_str="live",
+        now_dt=datetime(2026, 8, 5, 21, 0, 0, tzinfo=timezone.utc),
+    )
+
+    assert window_obj.severity_str == "red"
+    assert window_obj.status_label_str == "Review Norgate data"
+    assert window_obj.action_required_bool is True
+    assert "Norgate evidence is missing" in window_obj.detail_str
+    assert "pod_missing_calendar" in window_obj.detail_str
+
+
+def test_daily_shared_window_uses_worst_pod_severity() -> None:
+    green_daily_row_dict = {
+        **_daily_pod_row_dict("pod_green"),
+        "required_action_dict": {
+            "label_str": "No action",
+            "severity_str": "green",
+        },
+    }
+    red_daily_row_dict = {
+        **_daily_pod_row_dict("pod_red"),
+        "required_action_dict": {
+            "label_str": "Review Norgate data",
+            "severity_str": "red",
+            "detail_str": "Norgate is beyond its publication window.",
+        },
+    }
+
+    window_obj = build_next_trading_window(
+        {"pod_row_dict_list": [green_daily_row_dict, red_daily_row_dict]},
+        mode_str="live",
+        now_dt=datetime(2026, 8, 5, 14, 0, 0, tzinfo=timezone.utc),
+    )
+
+    assert window_obj.severity_str == "red"
+    assert window_obj.status_label_str == "Review Norgate data"
+    assert window_obj.pod_id_str_list == ["pod_green", "pod_red"]
 
 
 def test_daily_window_friday_evening_targets_monday_open() -> None:
@@ -605,6 +981,30 @@ def test_daily_window_friday_evening_targets_monday_open() -> None:
     )
     assert window_obj.signal_timestamp_str == "2026-08-07T16:00:00-04:00"
     assert window_obj.target_timestamp_str == "2026-08-10T09:30:00-04:00"
+
+
+def test_daily_window_respects_black_friday_early_close() -> None:
+    window_obj = build_next_trading_window(
+        {"pod_row_dict_list": [_daily_pod_row_dict()]},
+        mode_str="live",
+        now_dt=datetime(2026, 11, 27, 18, 30, 0, tzinfo=timezone.utc),
+    )
+
+    assert window_obj.signal_timestamp_str == "2026-11-27T13:00:00-05:00"
+    assert window_obj.submission_timestamp_str == "2026-11-30T09:23:30-05:00"
+    assert window_obj.target_timestamp_str == "2026-11-30T09:30:00-05:00"
+
+
+def test_daily_window_skips_labor_day_market_holiday() -> None:
+    window_obj = build_next_trading_window(
+        {"pod_row_dict_list": [_daily_pod_row_dict()]},
+        mode_str="live",
+        now_dt=datetime(2026, 9, 4, 21, 0, 0, tzinfo=timezone.utc),
+    )
+
+    assert window_obj.signal_timestamp_str == "2026-09-04T16:00:00-04:00"
+    assert window_obj.submission_timestamp_str == "2026-09-08T09:23:30-04:00"
+    assert window_obj.target_timestamp_str == "2026-09-08T09:30:00-04:00"
 
 
 def test_mixed_book_prefers_nearest_signal() -> None:

@@ -519,6 +519,84 @@ def test_live_trading_window_unknown_overrides_all_clear(
     assert "All clear" not in response_text_str
 
 
+def test_real_daily_window_after_close_overrides_all_clear(
+    test_client_obj,
+    provider_obj,
+    monkeypatch,
+) -> None:
+    from alpha.live.dashboard_v3.health import HealthCellDict
+    from alpha.live.dashboard_v3.schedule import build_next_trading_window
+
+    daily_row_dict = _build_pod_row_dict("dv2_caspersky_live", "live", "green")
+    daily_row_dict.update(
+        {
+            "signal_clock_str": "eod_snapshot_ready",
+            "execution_policy_str": "next_open_moo",
+            "next_action_str": "wait",
+            "reason_code_str": "awaiting_eod_cycle",
+            "latest_decision_signal_timestamp_str": None,
+            "latest_decision_plan_submission_timestamp_str": None,
+            "latest_decision_plan_target_execution_timestamp_str": None,
+            "latest_vplan_submission_timestamp_str": None,
+            "latest_vplan_target_execution_timestamp_str": None,
+            "required_action_dict": {},
+            "debug_summary_dict": {"severity_str": "green"},
+            "data_freshness_dict": {
+                "item_dict_list": [
+                    {
+                        "label_str": "Norgate",
+                        "severity_str": "green",
+                        "value_str": "2026-08-05",
+                    },
+                    {
+                        "label_str": "Pod state",
+                        "severity_str": "green",
+                        "value_str": "2026-08-05T16:00:00-04:00",
+                    },
+                    {
+                        "label_str": "EOD Snapshot",
+                        "severity_str": "green",
+                        "value_str": "2026-08-05",
+                    },
+                ]
+            },
+        }
+    )
+    provider_obj.summary_dict["pod_row_dict_list"] = [daily_row_dict]
+    fixed_now_dt = datetime(2026, 8, 5, 20, 1, 0, tzinfo=UTC)
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.app.build_next_trading_window",
+        lambda summary_dict, *, mode_str: build_next_trading_window(
+            summary_dict,
+            mode_str=mode_str,
+            now_dt=fixed_now_dt,
+        ),
+    )
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.health._build_disk_cell",
+        lambda _path_str: HealthCellDict(
+            "Disk",
+            "50% used",
+            "green",
+            "healthy",
+        ),
+    )
+
+    card_text_str = test_client_obj.get(
+        "/fragments/trading-window/live"
+    ).get_data(as_text=True)
+    top_bar_text_str = test_client_obj.get(
+        "/fragments/top-bar?mode=live"
+    ).get_data(as_text=True)
+
+    assert "Awaiting scheduler refresh" in card_text_str
+    assert "16:00 ET" in card_text_str
+    assert "09:23 ET" in card_text_str
+    assert "09:30 ET" in card_text_str
+    assert "Cannot verify trading window" in top_bar_text_str
+    assert "All clear" not in top_bar_text_str
+
+
 def test_live_health_red_overrides_yellow_pod_verdict(
     test_client_obj,
     provider_obj,
@@ -1035,7 +1113,20 @@ def test_schedule_strip_fragment_returns_html(test_client_obj) -> None:
     assert "submit_vplan" in response_text_str or "Schedule is empty" in response_text_str
 
 
-def test_trading_window_fragment_renders_current_live_action(test_client_obj) -> None:
+def test_trading_window_fragment_renders_current_live_action(
+    test_client_obj,
+    monkeypatch,
+) -> None:
+    from alpha.live.dashboard_v3.schedule import build_next_trading_window
+
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.app.build_next_trading_window",
+        lambda summary_dict, *, mode_str: build_next_trading_window(
+            summary_dict,
+            mode_str=mode_str,
+            now_dt=datetime(2026, 5, 21, 14, 30, 0, tzinfo=UTC),
+        ),
+    )
     response_obj = test_client_obj.get("/fragments/trading-window/live")
     assert response_obj.status_code == 200
     response_text_str = response_obj.get_data(as_text=True)
