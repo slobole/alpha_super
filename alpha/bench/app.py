@@ -540,7 +540,9 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             candidate_list=portfolio_builder.list_pod_candidates(),
         )
 
-    def _submitted_selection_tuple() -> tuple[list[tuple[str, float]], str, float, str]:
+    def _submitted_selection_tuple() -> tuple[
+        list[tuple[str, float]], str, float, str, str, str
+    ]:
         """Read one builder submission from the form, with usable defaults."""
         stem_list = request.form.getlist("pod")
         selection_pair_list: list[tuple[str, float]] = []
@@ -558,7 +560,18 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
         except ValueError:
             capital_float = 100_000.0
         benchmark_str = (request.form.get("benchmark") or "").strip()
-        return selection_pair_list, name_str, capital_float, benchmark_str
+        backtest_start_date_str = (
+            request.form.get("backtest_start_date_str") or ""
+        ).strip() or portfolio_builder.DEFAULT_BACKTEST_START_DATE_STR
+        end_date_str = (request.form.get("end_date_str") or "").strip()
+        return (
+            selection_pair_list,
+            name_str,
+            capital_float,
+            benchmark_str,
+            backtest_start_date_str,
+            end_date_str,
+        )
 
     @flask_app_obj.route("/portfolios/new/review", methods=["POST"])
     def portfolio_review_page_fn() -> str:
@@ -577,12 +590,16 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             name_str,
             capital_float,
             benchmark_str,
+            backtest_start_date_str,
+            end_date_str,
         ) = _submitted_selection_tuple()
         diagnostics_obj = portfolio_builder.analyze_selection(
             selection_pair_list=selection_pair_list,
             name_str=name_str,
             capital_float=capital_float,
             benchmark_override_str=benchmark_str or None,
+            backtest_start_date_str=backtest_start_date_str,
+            end_date_str=end_date_str or None,
         )
         return render_template(
             "portfolio_review.html",
@@ -590,6 +607,8 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             name_str=name_str,
             capital_float=capital_float,
             benchmark_str=benchmark_str,
+            backtest_start_date_str=backtest_start_date_str,
+            end_date_str=end_date_str,
             selection_pair_list=selection_pair_list,
         )
 
@@ -611,12 +630,16 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             name_str,
             capital_float,
             benchmark_str,
+            backtest_start_date_str,
+            end_date_str,
         ) = _submitted_selection_tuple()
         diagnostics_obj = portfolio_builder.analyze_selection(
             selection_pair_list=selection_pair_list,
             name_str=name_str,
             capital_float=capital_float,
             benchmark_override_str=benchmark_str or None,
+            backtest_start_date_str=backtest_start_date_str,
+            end_date_str=end_date_str or None,
         )
         if diagnostics_obj.has_block_bool:
             abort(400, description="This selection cannot be written; see the review page.")

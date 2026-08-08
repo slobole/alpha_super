@@ -14,7 +14,9 @@ import pandas as pd
 import pytest
 import yaml
 
+from alpha import strategy_registry
 from alpha.bench import portfolio_builder
+from alpha.engine import portfolio_manager
 from alpha.strategy_registry import TIER_LABEL_DICT, MaturityTier
 
 
@@ -91,13 +93,23 @@ def test_rendered_yaml_round_trips_into_the_requested_pods_and_weights(stub_pods
     )
 
     config_dict = yaml.safe_load(diagnostics_obj.yaml_text_str)
-    assert config_dict["name"] == "RoundTrip"
-    assert config_dict["capital"] == 100_000
-    assert [pod_dict["strategy"] for pod_dict in config_dict["pods"]] == [
-        "strategy_alpha",
-        "strategy_beta",
+    assert config_dict["name_str"] == "RoundTrip"
+    assert config_dict["capital_base_float"] == 100_000
+    assert config_dict["backtest_start_date_str"] == "2004-01-01"
+    assert config_dict["end_date_str"] is None
+    assert config_dict["allocation_policy_str"] == "fixed"
+    assert config_dict["save_pod_artifacts_bool"] is True
+    assert [pod_dict["pod_id_str"] for pod_dict in config_dict["pods"]] == [
+        "pod_alpha",
+        "pod_beta",
     ]
-    assert [pod_dict["weight"] for pod_dict in config_dict["pods"]] == [0.6, 0.4]
+    assert [pod_dict["strategy_import_str"] for pod_dict in config_dict["pods"]] == [
+        "strategies.x.strategy_alpha",
+        "strategies.x.strategy_beta",
+    ]
+    assert [pod_dict["weight_float"] for pod_dict in config_dict["pods"]] == [0.6, 0.4]
+    assert "name" not in config_dict
+    assert "capital" not in config_dict
 
 
 def test_weights_are_normalized_and_the_rescaling_is_reported(stub_pods):
@@ -108,7 +120,7 @@ def test_weights_are_normalized_and_the_rescaling_is_reported(stub_pods):
     )
 
     config_dict = yaml.safe_load(diagnostics_obj.yaml_text_str)
-    assert sum(pod_dict["weight"] for pod_dict in config_dict["pods"]) == pytest.approx(1.0)
+    assert sum(pod_dict["weight_float"] for pod_dict in config_dict["pods"]) == pytest.approx(1.0)
     assert "Weights normalized" in _notice_title_set(diagnostics_obj)
 
 
@@ -132,7 +144,7 @@ def test_equal_weights_written_sum_to_exactly_one(monkeypatch, pod_count_int):
     )
 
     config_dict = yaml.safe_load(diagnostics_obj.yaml_text_str)
-    written_weight_list = [pod_dict["weight"] for pod_dict in config_dict["pods"]]
+    written_weight_list = [pod_dict["weight_float"] for pod_dict in config_dict["pods"]]
     assert abs(sum(written_weight_list) - 1.0) <= 1e-6
     assert len(written_weight_list) == pod_count_int
 
@@ -180,7 +192,10 @@ def test_mixed_benchmarks_are_resolved_explicitly_and_reported(monkeypatch, stub
     # loses every benchmark-relative section.
     assert diagnostics_obj.resolved_benchmark_str in {"$SPX", "SPY"}
     config_dict = yaml.safe_load(diagnostics_obj.yaml_text_str)
-    assert config_dict["benchmark"] == diagnostics_obj.resolved_benchmark_str
+    assert (
+        config_dict["regression_benchmark_symbol_str"]
+        == diagnostics_obj.resolved_benchmark_str
+    )
 
 
 def test_matching_benchmarks_need_no_explicit_key(stub_pods):
@@ -300,11 +315,68 @@ def test_rendered_yaml_matches_the_house_style(stub_pods):
         name_str="StyleCheck",
         capital_float=100_000.0,
     )
-    assert diagnostics_obj.yaml_text_str.startswith("name: StyleCheck\ncapital: 100000\n")
-    assert "\npods:\n  - strategy: strategy_alpha\n    weight: 0.5\n" in (
+    assert diagnostics_obj.yaml_text_str.startswith(
+        'name_str: "StyleCheck"\ncapital_base_float: 100000\n'
+    )
+    assert (
+        "\npods:\n  - pod_id_str: pod_alpha\n"
+        "    strategy_import_str: strategies.x.strategy_alpha\n"
+        "    weight_float: 0.5\n"
+    ) in (
         diagnostics_obj.yaml_text_str
     )
     assert diagnostics_obj.yaml_text_str.endswith("\n")
+
+
+def test_rendered_yaml_loads_as_a_fresh_portfolio_manager_config(
+    stub_pods, monkeypatch
+):
+    _return_ser_by_stem_dict, candidate_list = stub_pods
+    supported_import_tuple = tuple(
+        candidate_obj.module_import_str for candidate_obj in candidate_list
+    )
+    monkeypatch.setattr(
+        portfolio_manager,
+        "SUPPORTED_STRATEGY_IMPORT_TUPLE",
+        supported_import_tuple,
+    )
+
+    diagnostics_obj = portfolio_builder.analyze_selection(
+        selection_pair_list=[("strategy_alpha", 0.6), ("strategy_beta", 0.4)],
+        name_str="FreshBook",
+        capital_float=100_000.0,
+        backtest_start_date_str="2015-01-02",
+        end_date_str="2025-12-31",
+    )
+    config_obj = portfolio_manager.build_portfolio_manager_config(
+        yaml.safe_load(diagnostics_obj.yaml_text_str)
+    )
+
+    assert config_obj.name_str == "FreshBook"
+    assert config_obj.backtest_start_date_str == "2015-01-02"
+    assert config_obj.end_date_str == "2025-12-31"
+    assert [
+        pod_config.strategy_import_str for pod_config in config_obj.pod_config_list
+    ] == list(supported_import_tuple)
+
+
+@pytest.mark.parametrize(
+    ("backtest_start_date_str", "end_date_str"),
+    [("not-a-date", None), ("2025-01-01", "2024-12-31")],
+)
+def test_invalid_fresh_run_window_is_blocked(
+    stub_pods, backtest_start_date_str, end_date_str
+):
+    diagnostics_obj = portfolio_builder.analyze_selection(
+        selection_pair_list=[("strategy_alpha", 0.5), ("strategy_beta", 0.5)],
+        name_str="BadWindow",
+        capital_float=100_000.0,
+        backtest_start_date_str=backtest_start_date_str,
+        end_date_str=end_date_str,
+    )
+
+    assert diagnostics_obj.has_block_bool
+    assert "Invalid backtest window" in _notice_title_set(diagnostics_obj)
 
 
 def test_candidate_exposes_sort_and_search_keys():
@@ -339,9 +411,11 @@ def test_trades_per_year_is_none_without_a_window_or_trades():
     assert windowless_candidate_obj.trades_per_year_float is None
 
 
-def test_candidate_list_only_offers_strategies_with_a_saved_vanilla_run():
-    """Against the real results tree: every candidate must have a pickle to combine."""
+def test_candidate_list_only_offers_pm_ready_strategies_with_diagnostic_runs():
+    """Artifacts are previews; execution eligibility comes from the registry."""
     for candidate_obj in portfolio_builder.list_pod_candidates()[:12]:
+        assert candidate_obj.tier_int >= int(MaturityTier.PM_READY)
+        assert candidate_obj.module_import_str in strategy_registry.pm_ready_import_tuple()
         assert candidate_obj.run_obj.analysis_dir_str == "vanilla_backtest"
         assert Path(
             portfolio_builder.RESULTS_ROOT_PATH / candidate_obj.run_obj.rel_dir_from_results_str

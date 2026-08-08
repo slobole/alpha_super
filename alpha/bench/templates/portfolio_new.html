@@ -6,10 +6,10 @@
 <div class="page-head">
   <div>
     <h1 class="page-title">New Portfolio</h1>
-    <p class="page-sub">Pick pods, set weights, review the checks, save. Only strategies with a saved <b>vanilla</b> run appear — those are the ones a combine-pkls book can aggregate. Click a column header to sort.</p>
+    <p class="page-sub">Pick PortfolioManager-ready pods, set weights and dates, review, save. Saved <b>vanilla</b> runs are used only for the preview checks; Build Portfolio reruns every pod from scratch. Click a column header to sort.</p>
   </div>
   <div class="stat-row">
-    <div class="stat"><div class="stat-value">{{ candidate_list|length }}</div><div class="stat-label">Combinable</div></div>
+    <div class="stat"><div class="stat-value">{{ candidate_list|length }}</div><div class="stat-label">Fresh-run eligible</div></div>
   </div>
 </div>
 
@@ -28,6 +28,14 @@
     <div class="builder-field">
       <label for="benchmark">Benchmark <span class="muted">(blank = derive)</span></label>
       <input id="benchmark" name="benchmark" placeholder="$SPX">
+    </div>
+    <div class="builder-field">
+      <label for="backtest_start_date_str">Start date</label>
+      <input id="backtest_start_date_str" name="backtest_start_date_str" value="2004-01-01" placeholder="YYYY-MM-DD" required>
+    </div>
+    <div class="builder-field">
+      <label for="end_date_str">End date <span class="muted">(blank = latest)</span></label>
+      <input id="end_date_str" name="end_date_str" placeholder="YYYY-MM-DD">
     </div>
     <div class="builder-actions">
       <button class="btn btn-primary" type="submit" id="review-btn" disabled>Review &rarr;</button>
@@ -61,7 +69,6 @@
       <span class="filter-chip active" data-filter="all">All</span>
       <span class="filter-chip wired" data-filter="wired">★ Wired</span>
       <span class="filter-chip" data-filter="pmready">PM-ready</span>
-      <span class="filter-chip" data-filter="research">Research</span>
       <span class="filter-chip" data-filter="selected">Selected</span>
     </div>
     <input id="builder-search" class="search" type="text" autocomplete="off"
@@ -197,7 +204,7 @@
     // Tier filters are exclusive of each other: a pod sits at exactly one tier,
     // so stacking them would only ever produce an empty table.
     let tierFilterStr = '', selectedOnly = false;
-    const TIER_BY_FILTER = { wired: '3', pmready: '2', research: '1' };
+    const TIER_BY_FILTER = { wired: '3', pmready: '2' };
 
     function apply() {
       const query = searchInput.value.trim().toLowerCase();

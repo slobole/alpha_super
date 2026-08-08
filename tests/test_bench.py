@@ -23,7 +23,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from alpha.bench import artifact_view, catalog, runs
+from alpha.bench import artifact_view, catalog, portfolio_builder, runs
 from alpha.bench.app import (
     REPORT_TOOLTIP_SCRIPT_SHA256_BASE64_STR,
     _analyzer_view_dict_list,
@@ -1253,6 +1253,48 @@ def test_portfolio_api_requires_csrf_token(recording_client):
     response = client.post("/api/run-portfolio", data={"config_rel_path": "portfolios/multipod.yaml"})
     assert response.status_code == 403
     assert job_manager.call_list == []
+
+
+def test_new_portfolio_review_forwards_the_fresh_run_window(
+    recording_client, monkeypatch
+):
+    client, _job_manager, token_str = recording_client
+    captured_kwarg_dict = {}
+    diagnostics_obj = portfolio_builder.SelectionDiagnostics(
+        yaml_text_str=(
+            'name_str: "FreshBook"\n'
+            'backtest_start_date_str: "2015-01-02"\n'
+            'end_date_str: "2025-12-31"\n'
+        )
+    )
+
+    def fake_analyze_selection(**kwarg_dict):
+        captured_kwarg_dict.update(kwarg_dict)
+        return diagnostics_obj
+
+    monkeypatch.setattr(
+        portfolio_builder,
+        "analyze_selection",
+        fake_analyze_selection,
+    )
+    response = client.post(
+        "/portfolios/new/review",
+        data={
+            "csrf_token": token_str,
+            "pod": ["strategy_alpha", "strategy_beta"],
+            "weight__strategy_alpha": "0.6",
+            "weight__strategy_beta": "0.4",
+            "name": "FreshBook",
+            "capital": "100000",
+            "backtest_start_date_str": "2015-01-02",
+            "end_date_str": "2025-12-31",
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured_kwarg_dict["backtest_start_date_str"] == "2015-01-02"
+    assert captured_kwarg_dict["end_date_str"] == "2025-12-31"
+    assert "PortfolioManager fresh-run config" in response.get_data(as_text=True)
 
 
 # ── pages render ─────────────────────────────────────────────────────────────

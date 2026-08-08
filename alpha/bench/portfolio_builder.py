@@ -1,9 +1,9 @@
-"""Compose a portfolio YAML from analyzed strategies, with input diagnostics.
+"""Compose a fresh-run PortfolioManager YAML with input diagnostics.
 
 Bench adds no quant logic, and this module keeps that contract: it discovers
-combinable runs, reads their saved artifacts, and renders a YAML the existing
-runners consume. Every portfolio *result* still comes from
-``alpha.engine.Portfolio`` when the book is actually run.
+PortfolioManager-ready strategies, reads saved artifacts only for pre-run
+diagnostics, and renders a YAML consumed by ``run_portfolio_manager.py``.
+Every portfolio *result* comes from fresh pod runs when the book is built.
 
 What it does add is a check on the *inputs* — the questions that are cheap to
 answer before a run and expensive to notice after one:
@@ -21,12 +21,14 @@ the builder diagnoses inputs and lets the engine produce outputs.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import pandas as pd
 
+from alpha import strategy_registry
 from alpha.bench import catalog, runs
 from alpha.engine.metrics import cross_correlation_matrix
 from alpha.strategy_registry import MaturityTier
@@ -45,6 +47,7 @@ REDUNDANT_CORRELATION_FLOAT = 0.85
 SHORT_WINDOW_YEAR_FLOAT = 5.0
 # Correlation over a shorter overlap than this is noise, so it is not reported.
 MINIMUM_CORRELATION_OVERLAP_DAY_INT = 252
+DEFAULT_BACKTEST_START_DATE_STR = "2004-01-01"
 
 SEVERITY_BLOCK_STR = "block"
 SEVERITY_WARN_STR = "warn"
@@ -56,7 +59,7 @@ _cadence_float_cache_dict: dict[str, float | None] = {}
 
 @dataclass(frozen=True)
 class PodCandidate:
-    """One strategy that has a saved vanilla run, so it can join a book."""
+    """One PortfolioManager-ready strategy with a saved diagnostic preview."""
 
     stem_str: str
     display_name_str: str
@@ -174,25 +177,37 @@ def _benchmark_symbol_str(run_obj: runs.RunEntry) -> str | None:
 
 
 def list_pod_candidates() -> list[PodCandidate]:
-    """Every strategy with a saved vanilla run, wired ones first.
+    """PortfolioManager-ready strategies with saved diagnostic previews.
 
-    A pod can only join a combine-pkls book if it has a completed vanilla run
-    to combine, so the candidate list *is* the set of strategies with one —
-    offering the rest would only produce a config that dies on launch.
+    The artifact is used only for correlation, history, and cadence checks.
+    The generated portfolio reruns every selected pod from scratch.
     """
     run_index_obj = runs.build_strategy_run_index()
     candidate_list: list[PodCandidate] = []
     for strategy_entry_obj in catalog.list_strategies():
+        if strategy_entry_obj.tier_int < int(MaturityTier.PM_READY):
+            continue
         run_obj = run_index_obj.latest_vanilla_for(
             strategy_entry_obj.module_import_str, strategy_entry_obj.stem_str
         )
         if run_obj is None:
             continue
+        strategy_import_str = next(
+            (
+                registered_import_str
+                for registered_import_str in strategy_registry.pm_ready_import_tuple()
+                if strategy_registry.module_import_str(registered_import_str)
+                == strategy_entry_obj.module_import_str
+            ),
+            None,
+        )
+        if strategy_import_str is None:
+            continue
         candidate_list.append(
             PodCandidate(
                 stem_str=run_obj.run_name_str,
                 display_name_str=strategy_entry_obj.display_name_str,
-                module_import_str=strategy_entry_obj.module_import_str,
+                module_import_str=strategy_import_str,
                 category_label_str=strategy_entry_obj.category_label_str,
                 tier_int=strategy_entry_obj.tier_int,
                 tier_label_str=strategy_entry_obj.tier_label_str,
@@ -304,19 +319,36 @@ def render_yaml_text(
     name_str: str,
     capital_float: float,
     benchmark_str: str | None,
-    pod_pair_list: list[tuple[str, float]],
+    backtest_start_date_str: str,
+    end_date_str: str | None,
+    pod_pair_list: list[tuple[str, str, float]],
 ) -> str:
-    """Render the config in the house style of ``portfolios/multipod.yaml``."""
-    line_list = [f"name: {name_str}", f"capital: {capital_float:g}"]
+    """Render a fresh-run config accepted by ``PortfolioManager``."""
+    end_date_value_str = json.dumps(end_date_str) if end_date_str else "null"
+    line_list = [
+        f"name_str: {json.dumps(name_str)}",
+        f"capital_base_float: {capital_float:g}",
+        f"backtest_start_date_str: {json.dumps(backtest_start_date_str)}",
+        f"end_date_str: {end_date_value_str}",
+        "allocation_policy_str: fixed",
+        "max_workers_int: null",
+        "rebalance: null",
+        "save_pod_artifacts_bool: true",
+    ]
     if benchmark_str:
-        line_list.append(f"benchmark: {benchmark_str}")
+        line_list.append(
+            f"regression_benchmark_symbol_str: {json.dumps(benchmark_str)}"
+        )
     line_list.append("")
     line_list.append("pods:")
-    for index_int, (stem_str, weight_float) in enumerate(pod_pair_list):
+    for index_int, (pod_id_str, strategy_import_str, weight_float) in enumerate(
+        pod_pair_list
+    ):
         if index_int > 0:
             line_list.append("")
-        line_list.append(f"  - strategy: {stem_str}")
-        line_list.append(f"    weight: {weight_float:g}")
+        line_list.append(f"  - pod_id_str: {pod_id_str}")
+        line_list.append(f"    strategy_import_str: {strategy_import_str}")
+        line_list.append(f"    weight_float: {weight_float:g}")
     return "\n".join(line_list) + "\n"
 
 
@@ -363,6 +395,8 @@ def analyze_selection(
     name_str: str,
     capital_float: float,
     benchmark_override_str: str | None = None,
+    backtest_start_date_str: str = DEFAULT_BACKTEST_START_DATE_STR,
+    end_date_str: str | None = None,
 ) -> SelectionDiagnostics:
     """Diagnose one candidate book and render its YAML.
 
@@ -387,7 +421,8 @@ def analyze_selection(
                 severity_str=SEVERITY_BLOCK_STR,
                 title_str="Unknown strategy",
                 detail_str=(
-                    "No saved vanilla run for: " + ", ".join(sorted(unknown_stem_list))
+                    "Not PortfolioManager-ready or unavailable: "
+                    + ", ".join(sorted(unknown_stem_list))
                 ),
             )
         )
@@ -400,6 +435,22 @@ def analyze_selection(
             )
         )
         return diagnostics_obj
+
+    try:
+        backtest_start_ts = pd.Timestamp(backtest_start_date_str)
+        end_ts = pd.Timestamp(end_date_str) if end_date_str else None
+        if end_ts is not None and end_ts < backtest_start_ts:
+            raise ValueError
+    except (TypeError, ValueError):
+        diagnostics_obj.notice_list.append(
+            BuilderNotice(
+                severity_str=SEVERITY_BLOCK_STR,
+                title_str="Invalid backtest window",
+                detail_str=(
+                    "Start and end must be valid dates, and end must not be before start."
+                ),
+            )
+        )
 
     stem_list = [stem_str for stem_str, _ in known_pair_list]
     weight_list, was_normalized_bool = _normalized_weight_list(
@@ -448,11 +499,21 @@ def analyze_selection(
     _append_correlation_notices(diagnostics_obj, return_ser_by_stem_dict)
 
     diagnostics_obj.resolved_benchmark_str = resolved_benchmark_str
+    pod_config_tuple_list = [
+        (
+            "pod_" + slugify_filename_str(stem_str.removeprefix("strategy_")),
+            candidate_dict[stem_str].module_import_str,
+            weight_float,
+        )
+        for stem_str, weight_float in zip(stem_list, weight_list)
+    ]
     diagnostics_obj.yaml_text_str = render_yaml_text(
         name_str=name_str,
         capital_float=capital_float,
         benchmark_str=resolved_benchmark_str,
-        pod_pair_list=list(zip(stem_list, weight_list)),
+        backtest_start_date_str=backtest_start_date_str,
+        end_date_str=end_date_str,
+        pod_pair_list=pod_config_tuple_list,
     )
     diagnostics_obj.suggested_filename_str = f"{slugify_filename_str(name_str)}.yaml"
     return diagnostics_obj
@@ -647,8 +708,8 @@ def _append_benchmark_notices(
             detail_str=(
                 "Stored benchmarks: "
                 + ", ".join(f"{stem}={sym}" for stem, sym in sorted(symbol_by_stem_dict.items()))
-                + f". Writing 'benchmark: {chosen_str}' explicitly — without it the runner "
-                "refuses to choose and the report loses every benchmark-relative section."
+                + f". Writing 'regression_benchmark_symbol_str: {chosen_str}' "
+                "explicitly so the fresh-run report uses one declared benchmark."
             ),
         )
     )

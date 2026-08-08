@@ -6,7 +6,7 @@
 <div class="page-head">
   <div>
     <h1 class="page-title">{{ name_str }}</h1>
-    <p class="page-sub">Checks on the <b>inputs</b> — redundancy, window, funding, benchmark agreement. Returns come from the engine when you run the book, never estimated here. Adjust weights below and re-check as often as you like.</p>
+    <p class="page-sub">Checks on the <b>inputs</b> — redundancy, window, funding, benchmark agreement. Saved runs are diagnostics only; the portfolio result comes from fresh pod runs over the dates below. Adjust and re-check as often as you like.</p>
   </div>
 </div>
 
@@ -28,6 +28,14 @@
     <div class="builder-field">
       <label for="benchmark">Benchmark <span class="muted">(blank = derive)</span></label>
       <input id="benchmark" name="benchmark" value="{{ benchmark_str }}" placeholder="$SPX">
+    </div>
+    <div class="builder-field">
+      <label for="backtest_start_date_str">Start date</label>
+      <input id="backtest_start_date_str" name="backtest_start_date_str" value="{{ backtest_start_date_str }}" placeholder="YYYY-MM-DD" required>
+    </div>
+    <div class="builder-field">
+      <label for="end_date_str">End date <span class="muted">(blank = latest)</span></label>
+      <input id="end_date_str" name="end_date_str" value="{{ end_date_str }}" placeholder="YYYY-MM-DD">
     </div>
     <div class="builder-actions">
       <a class="btn" href="{{ url_for('portfolio_new_page_fn') }}">Back to pods</a>
@@ -136,7 +144,7 @@
     <div class="panel">
       <pre class="mono yaml-preview">{{ diagnostics.yaml_text_str }}</pre>
     </div>
-    <p class="table-caption">Weights shown above are what the file will carry. Edit and re-check to refresh this preview before saving.</p>
+    <p class="table-caption">This is a PortfolioManager fresh-run config. Weights and dates shown above are what the file will carry; no saved PKL path is written into it.</p>
   </div>
 
   <div class="panel builder-head">

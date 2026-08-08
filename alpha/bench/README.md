@@ -49,7 +49,11 @@ It binds to `127.0.0.1` only — a single-operator console, not a service.
   ran; this page makes it visible instead of leaving it stranded on disk.
 - **Portfolios** — the books under `portfolios/*.yaml` (both the simple
   `run_portfolio.py` schema and the richer `run_portfolio_manager.py` schema),
-  with a Build button routed to the correct runner.
+  with a Build button routed to the correct runner. The New Portfolio builder
+  writes only the richer PortfolioManager schema: selected pods are rerun from
+  scratch, while saved vanilla artifacts are used only for pre-run diagnostics.
+  Existing simple configs remain readable and runnable for backward
+  compatibility.
 - **Jobs** — a live view of the background runs Bench launched, with status,
   elapsed time, exit code, queue position, and streaming logs. Click a row for
   its log; a job that passed links straight to the report it produced. **Cancel**

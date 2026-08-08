@@ -114,7 +114,10 @@ There are also dedicated crisis-replay runners for specific strategies, e.g.
 
 ## 5. Portfolios (multi-pod)
 
-Two schemas, two runners. Bench's Build button routes to the right one.
+Two schemas, two runners. Bench keeps legacy simple configs runnable, but the
+New Portfolio builder always writes the PortfolioManager schema so a newly
+created book reruns every pod from scratch. Saved vanilla PKLs are preview
+diagnostics only and are never the result source for a newly created book.
 
 ```bash
 # A) Combine already-computed strategy pickles into a book (fast, read-only math)
