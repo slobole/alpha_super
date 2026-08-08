@@ -21,6 +21,7 @@ from alpha.live import logging_utils, runner, scheduler_utils
 from alpha.live.models import LiveRelease
 from alpha.live.norgate_snapshot_sync import build_norgate_snapshot_status_dict
 from alpha.live.ops_report import build_ops_report_dict
+from alpha.live.pod_cash_flow import load_flow_by_date_dict
 from alpha.live.release_manifest import load_release_list
 from alpha.live.state_store_v2 import LiveStateStore
 from scripts.norgate_config_env import load_config_env_file  # noqa: F401 - kept for backwards compatibility with tests/imports.
@@ -1500,7 +1501,15 @@ def _build_pod_pnl_dict(
 
     equity_point_dict_list: list[dict[str, Any]] = []
     first_equity_float: float | None = None
+    first_market_date_str: str | None = None
     previous_equity_float: float | None = None
+    twr_growth_float = 1.0
+    # Operator-declared deposits/withdrawals. Old behaviour: percentages were
+    # raw equity ratios, so a deposit read as a monster up-day. New behaviour:
+    # a flow dated D is stripped from day D's return (end-of-day convention)
+    # and P&L nets out contributions; since-start % compounds the daily
+    # flow-adjusted returns (time-weighted). No declared flows == old math.
+    flow_by_date_dict = load_flow_by_date_dict(release_obj.pod_id_str)
     # *** CRITICAL*** PnL is computed only from market-date ordered EOD
     # broker NetLiq snapshots. Do not mix intraday/post-execution samples
     # into this series or the close-marked PnL basis becomes inconsistent.
@@ -1508,23 +1517,34 @@ def _build_pod_pnl_dict(
         eod_row_dict = latest_eod_row_by_market_date_dict[market_date_str]
         equity_float = float(eod_row_dict["total_value_float"])
         cash_float = float(eod_row_dict["cash_float"])
+        # *** CRITICAL*** Flows on the first observed date are already inside
+        # the baseline equity; only later flows count as contributions.
         if first_equity_float is None:
             first_equity_float = equity_float
+            first_market_date_str = market_date_str
+            flow_float = 0.0
+        else:
+            flow_float = float(flow_by_date_dict.get(market_date_str, 0.0))
         daily_pnl_float = (
             None
             if previous_equity_float is None
-            else equity_float - previous_equity_float
+            else equity_float - previous_equity_float - flow_float
         )
         daily_pnl_pct_float = (
             None
             if previous_equity_float is None or previous_equity_float == 0.0
-            else (equity_float / previous_equity_float) - 1.0
+            else ((equity_float - flow_float) / previous_equity_float) - 1.0
         )
-        since_start_pnl_float = equity_float - first_equity_float
+        if daily_pnl_pct_float is not None:
+            twr_growth_float *= 1.0 + daily_pnl_pct_float
+        net_contribution_float = sum(
+            amount_float
+            for date_str, amount_float in flow_by_date_dict.items()
+            if (first_market_date_str or "") < date_str <= market_date_str
+        )
+        since_start_pnl_float = equity_float - first_equity_float - net_contribution_float
         since_start_pnl_pct_float = (
-            None
-            if first_equity_float == 0.0
-            else (equity_float / first_equity_float) - 1.0
+            None if first_equity_float == 0.0 else twr_growth_float - 1.0
         )
         equity_point_dict_list.append(
             {
@@ -1538,6 +1558,8 @@ def _build_pod_pnl_dict(
                 "snapshot_source_str": eod_row_dict.get("snapshot_source_str"),
                 "updated_timestamp_str": eod_row_dict.get("updated_timestamp_str"),
                 "recorded_timestamp_str": eod_row_dict.get("recorded_timestamp_str"),
+                "flow_float": flow_float,
+                "net_contribution_float": net_contribution_float,
             }
         )
         previous_equity_float = equity_float
@@ -1563,6 +1585,7 @@ def _build_pod_pnl_dict(
         "daily_pnl_pct_float": latest_point_dict["daily_pnl_pct_float"],
         "since_start_pnl_float": latest_point_dict["since_start_pnl_float"],
         "since_start_pnl_pct_float": latest_point_dict["since_start_pnl_pct_float"],
+        "net_contribution_float": latest_point_dict.get("net_contribution_float", 0.0),
         "equity_point_dict_list": equity_point_dict_list,
     }
 
@@ -1735,20 +1758,30 @@ def _build_combined_strict_point_dict_list(
             float(pod_book_dict["point_by_market_date_dict"][market_date_str]["equity_float"])
             for pod_book_dict in pod_book_dict_list
         )
+        # Book-level flow = sum of the pods' declared flows that date, so a
+        # deposit into one pod does not read as a book-level up-day.
+        flow_float = sum(
+            float(
+                pod_book_dict["point_by_market_date_dict"][market_date_str].get("flow_float")
+                or 0.0
+            )
+            for pod_book_dict in pod_book_dict_list
+        )
         daily_pnl_float = (
             None
             if previous_equity_float is None
-            else equity_float - previous_equity_float
+            else equity_float - previous_equity_float - flow_float
         )
         daily_pnl_pct_float = (
             None
             if previous_equity_float is None or previous_equity_float == 0.0
-            else (equity_float / previous_equity_float) - 1.0
+            else ((equity_float - flow_float) / previous_equity_float) - 1.0
         )
         point_dict_list.append(
             {
                 "market_date_str": market_date_str,
                 "equity_float": equity_float,
+                "flow_float": flow_float,
                 "daily_pnl_float": daily_pnl_float,
                 "daily_pnl_pct_float": daily_pnl_pct_float,
                 "included_pod_count_int": len(pod_book_dict_list),
@@ -1779,6 +1812,7 @@ def _build_combined_carry_forward_point_dict_list(
     # mark only when the point is visibly labeled as stale.
     for market_date_str in market_date_str_list:
         total_equity_float = 0.0
+        total_flow_float = 0.0
         included_pod_count_int = 0
         stale_pod_id_list: list[str] = []
         missing_pod_id_list: list[str] = []
@@ -1790,6 +1824,9 @@ def _build_combined_carry_forward_point_dict_list(
             if current_point_dict is not None:
                 last_point_by_pod_id_dict[pod_id_str] = current_point_dict
                 point_dict = current_point_dict
+                # A declared flow counts only on its own fresh date; a
+                # carried-forward point already had its flow counted then.
+                total_flow_float += float(current_point_dict.get("flow_float") or 0.0)
             else:
                 point_dict = last_point_by_pod_id_dict.get(pod_id_str)
                 if point_dict is None:
@@ -1803,12 +1840,12 @@ def _build_combined_carry_forward_point_dict_list(
         daily_pnl_float = (
             None
             if previous_total_equity_float is None
-            else total_equity_float - previous_total_equity_float
+            else total_equity_float - previous_total_equity_float - total_flow_float
         )
         daily_pnl_pct_float = (
             None
             if previous_total_equity_float is None or previous_total_equity_float == 0.0
-            else (total_equity_float / previous_total_equity_float) - 1.0
+            else ((total_equity_float - total_flow_float) / previous_total_equity_float) - 1.0
         )
         point_dict_list.append(
             {

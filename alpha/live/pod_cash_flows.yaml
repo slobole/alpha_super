@@ -1,0 +1,15 @@
+# Operator-declared external cash flows per pod. Read-only for the dashboard.
+#
+# Record every deposit or withdrawal here, dated by the market date (ET) the
+# money landed at the broker. Positive = deposit, negative = withdrawal.
+# A flow dated D is treated as arriving at the END of day D, so day D's
+# return excludes it. Undeclared flows re-inflate returns — the exact bug
+# this file exists to fix. See alpha/live/pod_cash_flow.py for the contract.
+#
+# Example:
+#   flows:
+#     - pod_id: pod_taa_df_btal_fallback_tqqq_vix_cash_live_01
+#       date: 2026-07-01
+#       amount: 10000.0
+#       note: July top-up
+flows: []
