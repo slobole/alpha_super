@@ -48,6 +48,11 @@
     {% endif %}
     <strong class="shrink-0">{{ event_dict.event_name_str or 'event' }}</strong>
     <span class="truncate">{{ event_dict.reason_str or event_dict.message_str or event_dict.error_str or '' }}</span>
+    {% if (event_dict.repeat_count_int or 1) > 1 %}
+      <span class="shrink-0 ml-auto px-1.5 border border-current text-[10px] font-medium"
+            title="repeated {{ event_dict.repeat_count_int }} times since {{ event_dict.repeat_since_timestamp_str | clock }}">
+        ×{{ event_dict.repeat_count_int }} since {{ event_dict.repeat_since_timestamp_str | clock }}</span>
+    {% endif %}
   </li>
 {% endmacro %}
 

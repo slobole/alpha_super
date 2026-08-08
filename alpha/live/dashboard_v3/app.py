@@ -334,6 +334,37 @@ def create_app(
             ),
             reverse=True,
         )
+        # A recurring failure writes the same line every cycle; showing each
+        # copy buries everything else. Consecutive repeats of one message
+        # collapse into a single line carrying "×N" and the span start —
+        # presentation folding only, every underlying event stays in the log.
+        def _collapse_repeat_list(source_dict_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            collapsed_dict_list: list[dict[str, Any]] = []
+            for event_dict in source_dict_list:
+                identity_tuple = (
+                    str(event_dict.get("pod_id_str") or ""),
+                    str(event_dict.get("event_name_str") or ""),
+                    str(event_dict.get("reason_str")
+                        or event_dict.get("message_str")
+                        or event_dict.get("error_str") or ""),
+                )
+                if collapsed_dict_list and collapsed_dict_list[-1]["_identity_tuple"] == identity_tuple:
+                    collapsed_dict_list[-1]["repeat_count_int"] += 1
+                    # List is newest-first, so the current event is the older
+                    # edge of the run — it becomes the span start.
+                    collapsed_dict_list[-1]["repeat_since_timestamp_str"] = (
+                        event_dict.get("timestamp_str")
+                        or event_dict.get("event_timestamp_str")
+                        or event_dict.get("created_timestamp_str")
+                    )
+                    continue
+                folded_event_dict = dict(event_dict)
+                folded_event_dict["_identity_tuple"] = identity_tuple
+                folded_event_dict["repeat_count_int"] = 1
+                folded_event_dict["repeat_since_timestamp_str"] = None
+                collapsed_dict_list.append(folded_event_dict)
+            return collapsed_dict_list
+
         # Default view groups by pod — one section per pod, most recently
         # active first — because that is how the operator reads "what
         # happened to each of mine". ?view=stream keeps the interleaved
@@ -348,15 +379,20 @@ def create_app(
                 event_group_dict_list.append(
                     {"pod_id_str": group_pod_id_str, "event_dict_list": []}
                 )
-            group_dict = event_group_dict_list[group_index_by_pod_dict[group_pod_id_str]]
-            if len(group_dict["event_dict_list"]) < 30:
-                group_dict["event_dict_list"].append(event_dict)
+            event_group_dict_list[group_index_by_pod_dict[group_pod_id_str]][
+                "event_dict_list"
+            ].append(event_dict)
+        for group_dict in event_group_dict_list:
+            group_dict["event_dict_list"] = _collapse_repeat_list(
+                group_dict["event_dict_list"]
+            )[:30]
+        stream_event_dict_list = _collapse_repeat_list(event_row_dict_list[:400])[:200]
         verdict_obj = resolve_top_bar_verdict(summary_dict, mode_str="live")
         return render_template(
             "events_page.html",
             nav_active_str="events",
             view_str=view_str,
-            event_row_dict_list=event_row_dict_list[:200],
+            event_row_dict_list=stream_event_dict_list,
             event_group_dict_list=event_group_dict_list,
             pod_count_int=len(scoped_pod_id_str_list),
             pod_filter_str=pod_filter_str if pod_filter_str in pod_id_str_list else "",
