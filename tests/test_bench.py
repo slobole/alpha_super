@@ -143,7 +143,7 @@ def test_catalog_lists_strategies_and_flags_wired():
         for entry_obj in strategy_entry_list
         if entry_obj.has_capacity_analysis_bool
     ]
-    assert len(capacity_entry_list) == 32
+    assert len(capacity_entry_list) == 33
     assert (
         "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi"
         in {entry_obj.module_import_str for entry_obj in capacity_entry_list}

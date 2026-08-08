@@ -79,6 +79,10 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc": MaturityTier.PM_READY,
     "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc_asset_sma200": MaturityTier.PM_READY,
     "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_asset_sma200": MaturityTier.PM_READY,
+    # Three-asset inverse-volatility core with a daily 8% volatility control,
+    # a five-point exposure band, and BIL as the invested reserve. Portfolio
+    # Manager-ready only; deliberately absent from every live release surface.
+    "strategies.taa_beyond_6040.strategy_taa_trinity_vol_control_8_bil": MaturityTier.PM_READY,
     # MOSAIC: correlation-penalized Russell 1000 momentum (N=20, lambda=0.75,
     # corr window 126d, ADV >= $5M). Promoted 2026-07-31 after the four-part
     # validation cycle: monotone lambda effect, sub-period stability,

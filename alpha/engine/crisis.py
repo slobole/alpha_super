@@ -540,6 +540,24 @@ def _build_taa_df_btal_fallback_tqqq_vix_cash_strategy_obj(
     return strategy_obj
 
 
+def _load_taa_trinity_vol_control_8_bil_context_dict() -> dict[str, object]:
+    from strategies.taa_beyond_6040.strategy_taa_trinity_vol_control_8_bil import (
+        build_stress_test_context_dict,
+    )
+
+    return build_stress_test_context_dict()
+
+
+def _build_taa_trinity_vol_control_8_bil_strategy_obj(
+    context_dict: dict[str, object],
+) -> Strategy:
+    from strategies.taa_beyond_6040.strategy_taa_trinity_vol_control_8_bil import (
+        build_stress_test_strategy_obj,
+    )
+
+    return build_stress_test_strategy_obj(context_dict)
+
+
 def _load_mo_atr_normalized_ndx_context_dict() -> dict[str, object]:
     from strategies.momentum.strategy_mo_atr_normalized_ndx import (
         DEFAULT_CONFIG,
@@ -621,6 +639,11 @@ SUPPORTED_CRISIS_STRATEGY_SPEC_MAP: dict[str, CrisisStrategySpec] = {
         strategy_key_str="strategy_taa_df_btal_fallback_tqqq_vix_cash",
         load_context_fn=_load_taa_df_btal_fallback_tqqq_vix_cash_context_dict,
         build_strategy_fn=_build_taa_df_btal_fallback_tqqq_vix_cash_strategy_obj,
+    ),
+    "strategy_taa_trinity_vol_control_8_bil": CrisisStrategySpec(
+        strategy_key_str="strategy_taa_trinity_vol_control_8_bil",
+        load_context_fn=_load_taa_trinity_vol_control_8_bil_context_dict,
+        build_strategy_fn=_build_taa_trinity_vol_control_8_bil_strategy_obj,
     ),
     "strategy_mo_atr_normalized_ndx": CrisisStrategySpec(
         strategy_key_str="strategy_mo_atr_normalized_ndx",
