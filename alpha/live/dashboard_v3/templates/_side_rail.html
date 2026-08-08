@@ -1,0 +1,28 @@
+{# Side rail — the operator's four questions, one nav item each:
+   Overview  "is everything OK?"
+   Pods      "what needs me?"
+   Exposure  "what am I exposed to?"
+   (Events   "what happened?" — joins when the page lands.)
+   Journal keeps its route but earns no button: a dead page in the nav
+   teaches the operator to ignore the nav. #}
+<aside class="w-52 shrink-0 border-r border-ink-100 bg-white sticky top-0 h-screen flex flex-col z-30">
+  <a href="/" class="flex items-center gap-2.5 px-4 pt-5 pb-4 border-b border-ink-100">
+    <span class="w-7 h-7 grid place-items-center border border-ink-900 font-mono font-bold text-xs">A</span>
+    <span class="font-mono font-bold tracking-tight text-sm">ALPHA&nbsp;/&nbsp;LIVE</span>
+  </a>
+  <nav class="flex flex-col gap-0.5 mt-4 px-2 text-sm">
+    {% for nav_item in [('overview', 'Overview', '/'), ('pods', 'Pods', '/pods/live'), ('exposure', 'Exposure', '/exposure')] %}
+      {% set is_active = (nav_active_str or '') == nav_item[0] %}
+      <a href="{{ nav_item[2] }}"
+         class="px-3 py-2 font-mono text-[13px] border-l-2
+                {% if is_active %}border-ink-900 bg-ink-50 text-ink-900{% else %}border-transparent text-ink-500 hover:text-ink-900 hover:bg-ink-50{% endif %}">
+        {{ nav_item[1] }}
+      </a>
+    {% endfor %}
+  </nav>
+  <div class="mt-auto px-4 pb-4 pt-3 border-t border-ink-100">
+    <div class="font-mono text-[10px] uppercase tracking-widest text-ink-500 leading-relaxed">
+      Execution evidence only</div>
+    <div class="text-[11px] text-ink-500 mt-1.5">OPS {{ version_str }}</div>
+  </div>
+</aside>

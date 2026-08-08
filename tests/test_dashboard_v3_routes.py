@@ -390,10 +390,17 @@ def test_healthz_route_returns_version_marker(test_client_obj) -> None:
     assert DASHBOARD_V3_VERSION_STR in response_text_str
 
 
-def test_index_redirects_to_live(test_client_obj) -> None:
+def test_index_renders_overview(test_client_obj) -> None:
+    # The root is the Overview — the five-second answer — not a redirect.
     response_obj = test_client_obj.get("/")
+    assert response_obj.status_code == 200
+    assert "Live book" in response_obj.get_data(as_text=True)
+
+
+def test_legacy_mode_urls_redirect_to_pods(test_client_obj) -> None:
+    response_obj = test_client_obj.get("/live")
     assert response_obj.status_code == 302
-    assert response_obj.headers["Location"].endswith("/live")
+    assert response_obj.headers["Location"].endswith("/pods/live")
 
 
 def test_unknown_mode_returns_404(test_client_obj) -> None:
@@ -412,7 +419,7 @@ def test_unknown_mode_returns_404(test_client_obj) -> None:
 def test_mode_page_lists_only_that_modes_pods(
     test_client_obj, mode_str: str, expected_pod_id_str: str
 ) -> None:
-    response_obj = test_client_obj.get(f"/{mode_str}")
+    response_obj = test_client_obj.get(f"/pods/{mode_str}")
     assert response_obj.status_code == 200
     response_text_str = response_obj.get_data(as_text=True)
     assert expected_pod_id_str in response_text_str
@@ -427,7 +434,7 @@ def test_mode_page_lists_only_that_modes_pods(
 
 
 def test_live_page_renders_pod_row_with_severity(test_client_obj) -> None:
-    response_obj = test_client_obj.get("/live")
+    response_obj = test_client_obj.get("/pods/live")
     response_text_str = response_obj.get_data(as_text=True)
     assert "dv2_caspersky_live" in response_text_str
     assert "qp_mr_live" in response_text_str
@@ -445,7 +452,7 @@ def test_live_page_renders_inspector_verdict(test_client_obj, provider_obj) -> N
         "mode_str": "live",
     }
 
-    response_obj = test_client_obj.get("/live")
+    response_obj = test_client_obj.get("/")
     response_text_str = response_obj.get_data(as_text=True)
 
     assert response_obj.status_code == 200
@@ -478,7 +485,7 @@ def test_live_page_uses_mode_scoped_inspector_report(test_client_obj, provider_o
         vps_id_str="vps_01",
     )
 
-    response_obj = test_client_obj.get("/live")
+    response_obj = test_client_obj.get("/pods/live")
     response_text_str = response_obj.get_data(as_text=True)
 
     assert response_obj.status_code == 200
@@ -871,7 +878,7 @@ def test_schedule_strip_fragment_returns_html(test_client_obj) -> None:
 
 
 def test_pod_row_carries_data_pod_id_attribute(test_client_obj) -> None:
-    response_obj = test_client_obj.get("/live")
+    response_obj = test_client_obj.get("/pods/live")
     response_text_str = response_obj.get_data(as_text=True)
     assert 'data-pod-id="dv2_caspersky_live"' in response_text_str
     assert "new_event_badge.js" in response_text_str
@@ -1004,14 +1011,14 @@ def test_mode_page_labels_equity_time_basis(test_client_obj) -> None:
     """The allocation pie is a current per-pod snapshot while the combined book
     and risk strip are EOD; each must label its basis so two different book
     totals on one page never read as a discrepancy."""
-    response_text_str = test_client_obj.get("/live").get_data(as_text=True)
+    response_text_str = test_client_obj.get("/").get_data(as_text=True)
     assert "current book" in response_text_str          # allocation pie basis
-    assert "combined book · EOD" in response_text_str    # equity curve basis
+    assert "Combined book · EOD" in response_text_str    # equity curve basis
     assert "Realized risk · EOD" in response_text_str    # risk strip basis
 
 
 def test_mode_page_renders_book_risk_strip(test_client_obj) -> None:
-    response_obj = test_client_obj.get("/live")
+    response_obj = test_client_obj.get("/")
     response_text_str = response_obj.get_data(as_text=True)
     assert "Current DD" in response_text_str
     assert "Max DD" in response_text_str
@@ -1105,7 +1112,7 @@ def test_build_allocation_pie_dict_empty_returns_no_data() -> None:
 
 
 def test_mode_page_renders_allocation_pie_with_cash(test_client_obj) -> None:
-    response_obj = test_client_obj.get("/live")
+    response_obj = test_client_obj.get("/")
     response_text_str = response_obj.get_data(as_text=True)
     # Section header + both running live pods appear in the legend.
     assert "allocation" in response_text_str.lower()
@@ -1199,7 +1206,7 @@ def test_combined_equity_chart_fragment_unknown_mode_404s(test_client_obj) -> No
 
 
 def test_live_page_embeds_combined_book_chart(test_client_obj) -> None:
-    response_obj = test_client_obj.get("/live")
+    response_obj = test_client_obj.get("/")
     response_text_str = response_obj.get_data(as_text=True)
     assert "combined book" in response_text_str.lower()
     # Combined-book equity curve renders as an SVG path inside the mode page itself.
@@ -1207,7 +1214,7 @@ def test_live_page_embeds_combined_book_chart(test_client_obj) -> None:
 
 
 def test_incubation_page_omits_combined_book_chart_when_no_data(test_client_obj) -> None:
-    response_obj = test_client_obj.get("/incubation")
+    response_obj = test_client_obj.get("/pods/incubation")
     assert response_obj.status_code == 200
     response_text_str = response_obj.get_data(as_text=True)
     # Only the live mode has combined_book data in the stub — incubation should not show the section.
@@ -1493,7 +1500,7 @@ def test_exposure_page_nets_positions_across_pods(test_client_obj) -> None:
 
 
 def test_nav_includes_exposure_link(test_client_obj) -> None:
-    response_text_str = test_client_obj.get("/live").get_data(as_text=True)
+    response_text_str = test_client_obj.get("/").get_data(as_text=True)
     assert 'href="/exposure"' in response_text_str
     assert "Exposure" in response_text_str
 
@@ -1538,7 +1545,7 @@ def test_build_monthly_return_dict_list_groups_by_month() -> None:
 
 
 def test_mode_page_shows_daily_pct_and_monthly_returns(test_client_obj) -> None:
-    response_text_str = test_client_obj.get("/live").get_data(as_text=True)
+    response_text_str = test_client_obj.get("/").get_data(as_text=True)
     assert "today" in response_text_str          # latest daily % next to equity
     assert "cumulative return" in response_text_str  # curve headline label
     assert "Daily return" in response_text_str       # the bar strip is now labeled

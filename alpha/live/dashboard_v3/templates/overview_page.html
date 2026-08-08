@@ -1,13 +1,31 @@
 {% extends "base.html" %}
-{% block title %}{{ mode_label_str }}{% endblock %}
+{% block title %}Overview{% endblock %}
 {% block content %}
+
+{# The five-second answer. One status sentence, then the live book. The
+   health and next-due strips sit above in the shared shell; the pods
+   table lives on its own page — a green overview means "close the app". #}
+<section class="mb-4">
+  <div class="font-mono text-[10px] uppercase tracking-widest text-ink-500">Alpha / Live</div>
+  <h1 class="text-2xl font-bold tracking-tight mt-1">Live book</h1>
+  <p class="text-ink-500 mt-1">
+    {% if pod_count_int == 0 %}
+      No live pods are enabled.
+    {% elif attention_count_int == 0 %}
+      All {{ pod_count_int }} live pod{{ 's' if pod_count_int != 1 }} on track.
+    {% else %}
+      {{ attention_count_int }} of {{ pod_count_int }} live pods need attention —
+      <a href="/pods/live" class="text-accent underline">open Pods</a>.
+    {% endif %}
+  </p>
+</section>
 
 {% if combined_book_chart_dict %}
   <section class="mb-4 rounded-md border border-ink-100 bg-white shadow-sm p-4">
     <header class="flex items-baseline justify-between mb-1">
       <div class="text-xs uppercase tracking-wide text-ink-500"
            title="end-of-day combined-book equity series">
-        {{ mode_label_str }} combined book · EOD
+        Combined book · EOD
       </div>
       <div class="text-xs tabular-nums">
         <span class="text-ink-500">daily</span>
@@ -21,16 +39,16 @@
       </div>
     </header>
     {% set chart_dict = combined_book_chart_dict %}
-    {% set combined_chart_mode_str = mode_str %}
+    {% set combined_chart_mode_str = 'live' %}
     {% include "_equity_chart.html" %}
     {% include "_monthly_returns_strip.html" %}
   </section>
 {% endif %}
 
-{# Book-level realized risk (drawdown + volatility) for this mode. #}
+{# Book-level realized risk (drawdown + volatility). #}
 {% include "_book_risk_strip.html" %}
 
-{# Strategy allocation pie for this mode (slices = running pods by equity). #}
+{# Strategy allocation pie (slices = running pods by equity). #}
 {% include "_allocation_pie.html" %}
 
 {% if inspector_report_dict %}
@@ -57,49 +75,5 @@
     </div>
   </section>
 {% endif %}
-
-<section class="mb-6">
-  <div class="flex items-baseline justify-between mb-2">
-    <h1 class="text-2xl font-bold tracking-tight">{{ mode_label_str }} PODs</h1>
-    <span class="text-sm text-ink-500">{{ pod_row_dict_list | length }} pods</span>
-  </div>
-
-  {% if attention_row_list %}
-    <div class="mb-4 p-3 rounded-md border border-bad/30 bg-bad-soft/40">
-      <div class="flex items-center gap-2 mb-2 text-sm font-semibold text-bad">
-        Attention ({{ attention_row_list | length }})
-      </div>
-      <ul class="text-sm divide-y divide-bad/20">
-        {% for row_dict in attention_row_list %}
-          <li class="py-1.5 flex justify-between gap-4">
-            <a href="#pod-{{ row_dict.pod_id_str }}" class="font-semibold hover:underline">
-              {{ row_dict.pod_id_str }}
-            </a>
-            <span class="text-ink-700">
-              {{ row_dict.required_action_dict.label_str
-                 or row_dict.next_action_str or '—' }}
-            </span>
-            <span class="text-ink-500 truncate">
-              {{ row_dict.required_action_dict.reason_str
-                 or row_dict.reason_code_str or '' }}
-            </span>
-          </li>
-        {% endfor %}
-      </ul>
-    </div>
-  {% endif %}
-</section>
-
-<section class="space-y-3">
-  {% if pod_row_dict_list %}
-    {% for row_dict in pod_row_dict_list %}
-      {% include "_pod_row.html" %}
-    {% endfor %}
-  {% else %}
-    <div class="rounded-md border border-ink-100 bg-white p-8 text-center text-ink-500">
-      No {{ mode_str }} pods are enabled.
-    </div>
-  {% endif %}
-</section>
 
 {% endblock %}

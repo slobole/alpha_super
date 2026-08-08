@@ -12,6 +12,7 @@ swap in a fixture instead of touching the live ``DashboardApp``.
 from __future__ import annotations
 
 import csv
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
@@ -145,6 +146,11 @@ def create_app(
         return {
             "version_str": DASHBOARD_V3_VERSION_STR,
             "server_time_str": _now_clock_str(),
+            # LIVE|BENCH toggle target — the research console. Env-overridable
+            # so the VPS can point at wherever Bench actually runs.
+            "bench_url_str": os.environ.get(
+                "ALPHA_BENCH_URL_STR", "http://127.0.0.1:8765"
+            ),
         }
 
     # ── plain routes ─────────────────────────────────────────────────────
@@ -154,8 +160,59 @@ def create_app(
         return (f"dashboard_v3 ok {DASHBOARD_V3_VERSION_STR}", 200)
 
     @flask_app_obj.route("/")
-    def index_route_fn() -> Response:
-        return redirect(url_for("mode_page_route_fn", mode_str="live"))
+    def index_route_fn():
+        # Overview — "is everything OK?": one status sentence, then the live
+        # book. Pods have their own page; a green overview means "close the
+        # app". Same read-only assembly the mode page used, live scope.
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        summary_dict = provider_obj.get_summary_dict()
+        pod_row_dict_list = get_pod_row_dict_list_for_mode(summary_dict, "live")
+        attention_count_int = sum(
+            1 for row_dict in pod_row_dict_list if _is_attention_row_bool(row_dict)
+        )
+        verdict_obj = resolve_top_bar_verdict(summary_dict, mode_str="live")
+        allocation_pie_obj = build_allocation_pie_dict([
+            {
+                "label_str": row_dict.get("pod_id_str"),
+                "sublabel_str": row_dict.get("strategy_import_str"),
+                "equity_float": row_dict.get("equity_float"),
+                "cash_float": row_dict.get("cash_float"),
+            }
+            for row_dict in pod_row_dict_list
+        ])
+        combined_book_env_dict = _find_combined_book_environment_dict(summary_dict, "live")
+        combined_book_equity_point_dict_list = (
+            (combined_book_env_dict or {}).get("equity_point_dict_list")
+            or (combined_book_env_dict or {}).get("carry_forward_equity_point_dict_list")
+        )
+        combined_book_chart_dict = None
+        if combined_book_env_dict is not None:
+            chart_obj = build_equity_chart_dict(
+                combined_book_equity_point_dict_list,
+                window_str="all",
+            )
+            if chart_obj.point_count_int > 0:
+                combined_book_chart_dict = chart_obj.as_dict()
+        book_risk_obj = build_book_risk_dict(combined_book_equity_point_dict_list)
+        monthly_return_dict_list = build_monthly_return_dict_list(
+            combined_book_equity_point_dict_list
+        )
+        return render_template(
+            "overview_page.html",
+            nav_active_str="overview",
+            mode_str="live",
+            mode_label_str=MODE_LABEL_DICT["live"],
+            pod_count_int=len(pod_row_dict_list),
+            attention_count_int=attention_count_int,
+            verdict_dict=verdict_obj.as_dict(),
+            inspector_report_dict=_consumer_inspector_report_dict(summary_dict, mode_str="live"),
+            as_of_clock_str=_now_clock_str(),
+            combined_book_chart_dict=combined_book_chart_dict,
+            combined_book_summary_dict=combined_book_env_dict or {},
+            book_risk_dict=book_risk_obj.as_dict(),
+            monthly_return_dict_list=monthly_return_dict_list,
+            allocation_pie_dict=allocation_pie_obj.as_dict(),
+        )
 
     @flask_app_obj.route("/exposure")
     def exposure_index_route_fn() -> Response:
@@ -194,8 +251,14 @@ def create_app(
             as_of_clock_str=_now_clock_str(),
         )
 
-    @flask_app_obj.route("/<mode_str>")
-    def mode_page_route_fn(mode_str: str):
+    @flask_app_obj.route("/pods")
+    def pods_index_route_fn() -> Response:
+        return redirect(url_for("pods_page_route_fn", mode_str="live"))
+
+    @flask_app_obj.route("/pods/<mode_str>")
+    def pods_page_route_fn(mode_str: str):
+        # The workbench — "what needs me?". Live/paper/incubation are the
+        # same entity at different life stages, so they filter one page.
         if mode_str not in SUPPORTED_MODE_STR_LIST:
             abort(404)
         provider_obj = flask_app_obj.config["data_provider_obj"]
@@ -207,45 +270,26 @@ def create_app(
             if _is_attention_row_bool(row_dict)
         ]
         verdict_obj = resolve_top_bar_verdict(summary_dict, mode_str=mode_str)
-        allocation_pie_obj = build_allocation_pie_dict([
-            {
-                "label_str": row_dict.get("pod_id_str"),
-                "sublabel_str": row_dict.get("strategy_import_str"),
-                "equity_float": row_dict.get("equity_float"),
-                "cash_float": row_dict.get("cash_float"),
-            }
-            for row_dict in pod_row_dict_list
-        ])
-        combined_book_env_dict = _find_combined_book_environment_dict(summary_dict, mode_str)
-        combined_book_equity_point_dict_list = (
-            (combined_book_env_dict or {}).get("equity_point_dict_list")
-            or (combined_book_env_dict or {}).get("carry_forward_equity_point_dict_list")
-        )
-        combined_book_chart_dict = None
-        if combined_book_env_dict is not None:
-            chart_obj = build_equity_chart_dict(
-                combined_book_equity_point_dict_list,
-                window_str="all",
-            )
-            if chart_obj.point_count_int > 0:
-                combined_book_chart_dict = chart_obj.as_dict()
-        book_risk_obj = build_book_risk_dict(combined_book_equity_point_dict_list)
-        monthly_return_dict_list = build_monthly_return_dict_list(combined_book_equity_point_dict_list)
         return render_template(
-            "mode_page.html",
+            "pods_page.html",
+            nav_active_str="pods",
             mode_str=mode_str,
             mode_label_str=MODE_LABEL_DICT[mode_str],
+            supported_mode_str_list=SUPPORTED_MODE_STR_LIST,
+            mode_label_dict=MODE_LABEL_DICT,
             pod_row_dict_list=pod_row_dict_list,
             attention_row_list=attention_row_list,
             verdict_dict=verdict_obj.as_dict(),
             inspector_report_dict=_consumer_inspector_report_dict(summary_dict, mode_str=mode_str),
             as_of_clock_str=_now_clock_str(),
-            combined_book_chart_dict=combined_book_chart_dict,
-            combined_book_summary_dict=combined_book_env_dict or {},
-            book_risk_dict=book_risk_obj.as_dict(),
-            monthly_return_dict_list=monthly_return_dict_list,
-            allocation_pie_dict=allocation_pie_obj.as_dict(),
         )
+
+    @flask_app_obj.route("/<mode_str>")
+    def mode_page_route_fn(mode_str: str) -> Response:
+        # Legacy mode URLs stay alive — bookmarks and habits keep working.
+        if mode_str not in SUPPORTED_MODE_STR_LIST:
+            abort(404)
+        return redirect(url_for("pods_page_route_fn", mode_str=mode_str))
 
     @flask_app_obj.route("/artifacts/<path:artifact_path_str>")
     def artifact_route_fn(artifact_path_str: str):
