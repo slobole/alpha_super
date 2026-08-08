@@ -1,0 +1,164 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+@font-face{font-family:'IBM Plex Sans';font-weight:100 700;font-display:block;
+  src:url('file:///C:/Users/User/Documents/workspace/alpha_super/alpha/assets/fonts/IBMPlexSans-latin.woff2') format('woff2');}
+@font-face{font-family:'IBM Plex Mono';font-weight:400;font-display:block;
+  src:url('file:///C:/Users/User/Documents/workspace/alpha_super/alpha/assets/fonts/IBMPlexMono-400-latin.woff2') format('woff2');}
+@font-face{font-family:'IBM Plex Mono';font-weight:500;font-display:block;
+  src:url('file:///C:/Users/User/Documents/workspace/alpha_super/alpha/assets/fonts/IBMPlexMono-500-latin.woff2') format('woff2');}
+:root{
+  --ink:#16181d; --page:#ffffff; --neutral:#f8fafc; --grid:#eef2f6; --border:#e2e8f0;
+  --muted:#64748b; --profit:#15803d; --loss:#dc2626; --accent:#2563eb; --warning:#d97706;
+  --accent-wash:#eff6ff; --profit-wash:#f0fdf4; --warning-wash:#fffbeb; --loss-wash:#fef2f2;
+  --benchmark:#94a3b8;
+  --mono:'IBM Plex Mono','Cascadia Mono',Consolas,monospace;
+  --sans:'IBM Plex Sans','Segoe UI',system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--page);color:var(--ink);font-family:var(--sans);
+  font-variant-numeric:tabular-nums;font-size:14px;line-height:1.45}
+.mono{font-family:var(--mono)}
+.kicker{font-family:var(--mono);font-size:0.62rem;letter-spacing:0.15em;
+  text-transform:uppercase;color:var(--muted)}
+table{border-collapse:collapse;width:100%}
+th{font-family:var(--mono);font-size:0.62rem;letter-spacing:0.1em;text-transform:uppercase;
+  color:var(--muted);font-weight:500;text-align:left;padding:7px 10px;
+  border-bottom:1.5px solid var(--ink)}
+td{padding:8px 10px;border-bottom:1px solid var(--grid);font-size:0.8rem}
+td.num,th.num{text-align:right;font-family:var(--mono)}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:1px}
+.dot.g{background:var(--profit)} .dot.o{background:var(--warning)} .dot.b{background:var(--accent)}
+
+.shell{display:grid;grid-template-columns:218px 1fr;min-height:100vh}
+.rail{border-right:1px solid var(--border);padding:22px 18px;display:flex;flex-direction:column}
+.brand{display:flex;gap:11px;align-items:center;padding-bottom:20px;border-bottom:1px solid var(--border)}
+.brand-mark{width:29px;height:29px;display:grid;place-items:center;border:1px solid var(--ink);
+  font-family:var(--mono);font-size:0.72rem;font-weight:700}
+.brand b{font-size:0.92rem} .brand small{display:block;color:var(--muted);font-size:0.58rem;
+  letter-spacing:0.1em;text-transform:uppercase}
+.nav{display:grid;gap:3px;margin-top:22px}
+.nav a{padding:9px;color:var(--muted);text-decoration:none;font-family:var(--mono);
+  font-size:0.75rem;border-left:2px solid transparent}
+.nav a.active{color:var(--ink);border-left-color:var(--ink);background:var(--neutral)}
+.foot{margin-top:auto;padding-top:14px;border-top:1px solid var(--border)}
+.topbar{display:flex;align-items:center;gap:14px;min-height:50px;padding:0 28px;
+  border-bottom:1px solid var(--border)}
+.toggle{display:flex;border:1px solid var(--border)}
+.toggle span{padding:5px 14px;font-family:var(--mono);font-size:0.7rem;letter-spacing:0.08em}
+.toggle .on{color:var(--accent);border-bottom:2px solid var(--accent);font-weight:500}
+.toggle .off{color:var(--muted)}
+.main{padding:24px 28px;max-width:1160px}
+.health{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--border);margin:18px 0}
+.health div{padding:11px 16px;border-right:1px solid var(--border);font-family:var(--mono);font-size:0.72rem}
+.health div:last-child{border-right:none}
+.health .lab{color:var(--muted);letter-spacing:0.1em;font-size:0.6rem;text-transform:uppercase;display:block;margin-bottom:3px}
+.grid2{display:grid;grid-template-columns:1.4fr 1fr;gap:18px;margin:18px 0}
+.panel{border:1px solid var(--border)}
+.panel h2{font-family:var(--mono);font-size:0.72rem;letter-spacing:0.1em;text-transform:uppercase;
+  padding:9px 13px;background:var(--neutral);border-bottom:1px solid var(--ink)}
+.btn{display:inline-block;padding:7px 16px;font-family:var(--mono);font-size:0.72rem;border:1px solid var(--ink);
+  background:var(--ink);color:#fff;letter-spacing:0.05em}
+.btn.ghost{background:#fff;color:var(--ink)}
+</style></head><body>
+<div class="shell">
+  <aside class="rail">
+    <div class="brand"><div class="brand-mark">A</div>
+      <div><b>ALPHA&nbsp;/&nbsp;LIVE</b><small>Operations console</small></div></div>
+    <nav class="nav">
+      <a class="active">Overview</a><a>Pods</a><a>Exposure</a><a>Schedule</a><a>Journal</a>
+    </nav>
+    <div class="foot"><span class="kicker">Execution evidence only</span>
+      <div style="color:var(--muted);font-size:0.62rem;margin-top:10px">OPS 0.6.0</div></div>
+  </aside>
+  <div>
+    <div class="topbar">
+      <div class="toggle"><span class="on">LIVE</span><span class="off">BENCH</span></div>
+      <div style="margin-left:auto" class="mono" style="font-size:0.78rem">15:47:22 ET</div>
+    </div>
+    <div class="main">
+      <span class="kicker">Alpha / Live</span>
+      <h1 style="font-family:var(--mono);font-size:1.7rem;margin:6px 0 4px">Live book</h1>
+      <p style="color:var(--muted)">All 4 pods reconciled. Next decision: pod_taa_df_btal_fallback at 16:05 ET.</p>
+      <div class="health">
+        <div><span class="lab">Norgate</span><span class="dot g"></span>SNAPSHOT 15:59</div>
+        <div><span class="lab">Pod state</span><span class="dot g"></span>RECONCILED</div>
+        <div><span class="lab">Scheduler</span><span class="dot g"></span>HEALTHY</div>
+        <div><span class="lab">Disk</span><span class="dot o"></span>85% USED</div>
+      </div>
+      <div class="grid2">
+        <div class="panel">
+          <h2>Combined book &middot; EOD</h2>
+          <div style="padding:14px 16px">
+            <svg viewBox="0 0 560 160" style="width:100%">
+              <line x1="0" y1="120" x2="560" y2="120" stroke="#eef2f6" stroke-dasharray="3 3"/>
+              <path d="M0,120 L40,124 L80,131 L120,127 L160,118 L200,112 L240,116 L280,104 L320,98 L360,101 L400,88 L440,80 L480,74 L520,66 L560,58"
+                fill="none" stroke="var(--accent)" stroke-width="1.6"/>
+              <text x="470" y="50" font-family="IBM Plex Mono" font-size="11" fill="var(--accent)">+1.18%</text>
+              <text x="0" y="140" font-family="IBM Plex Mono" font-size="10" fill="var(--muted)">09:30</text>
+              <text x="520" y="140" font-family="IBM Plex Mono" font-size="10" fill="var(--muted)">16:00</text>
+            </svg>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>Next due</h2>
+          <table>
+            <tr><th>Time</th><th>Pod</th><th>Action</th><th></th></tr>
+            <tr><td class="mono">16:05 ET</td><td class="mono" style="font-size:0.75rem">pod_taa_df_btal_fallback</td>
+              <td>Review decision</td><td><span class="btn">Review</span></td></tr>
+            <tr><td class="mono">16:25 ET</td><td class="mono" style="font-size:0.75rem">pod_ndx_atr_vxn_scaled</td>
+              <td>Monitor</td><td><span class="btn ghost">Open</span></td></tr>
+          </table>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Pods</h2>
+        <table>
+          <tr><th>Pod</th><th>State</th><th>Strategy family</th><th>Route</th>
+            <th class="num">NAV</th><th class="num">Day</th><th>Reconcile</th><th>Next</th></tr>
+          <tr>
+      <td class="mono" style="font-size:0.78rem">pod_taa_df_btal_fallback</td>
+      <td><span class="dot g"></span><span class="mono" style="font-size:0.68rem;letter-spacing:0.06em">LIVE</span></td>
+      <td style="color:var(--muted)">TAA dual-momentum</td>
+      <td class="mono" style="font-size:0.78rem">U2119••</td>
+      <td class="num">$18,420</td>
+      <td class="num" style="color:var(--profit)">+0.42%</td>
+      <td style="color:var(--muted);font-size:0.75rem">Reconciled 15:42</td>
+      <td class="mono" style="font-size:0.75rem">16:05 · Decision</td>
+    </tr>
+<tr>
+      <td class="mono" style="font-size:0.78rem">pod_ndx_atr_vxn_scaled</td>
+      <td><span class="dot g"></span><span class="mono" style="font-size:0.68rem;letter-spacing:0.06em">LIVE</span></td>
+      <td style="color:var(--muted)">ATR-normalized momentum</td>
+      <td class="mono" style="font-size:0.78rem">U2538••</td>
+      <td class="num">$11,980</td>
+      <td class="num" style="color:var(--profit)">+0.18%</td>
+      <td style="color:var(--muted);font-size:0.75rem">Reconciled 15:41</td>
+      <td class="mono" style="font-size:0.75rem">16:25 · Monitor</td>
+    </tr>
+<tr>
+      <td class="mono" style="font-size:0.78rem">pod_ndx_mo_incubation_01</td>
+      <td><span class="dot b"></span><span class="mono" style="font-size:0.68rem;letter-spacing:0.06em">PAPER</span></td>
+      <td style="color:var(--muted)">ATR-normalized momentum</td>
+      <td class="mono" style="font-size:0.78rem">paper</td>
+      <td class="num">$100,000</td>
+      <td class="num" style="color:var(--loss)">-0.11%</td>
+      <td style="color:var(--muted);font-size:0.75rem">Reconciled 15:41</td>
+      <td class="mono" style="font-size:0.75rem">16:40 · Monitor</td>
+    </tr>
+<tr>
+      <td class="mono" style="font-size:0.78rem">pod_taa_incubation_01</td>
+      <td><span class="dot b"></span><span class="mono" style="font-size:0.68rem;letter-spacing:0.06em">INCUBATION</span></td>
+      <td style="color:var(--muted)">TAA dual-momentum</td>
+      <td class="mono" style="font-size:0.78rem">paper</td>
+      <td class="num">$100,000</td>
+      <td class="num" style="color:var(--profit)">+0.35%</td>
+      <td style="color:var(--muted);font-size:0.75rem">Reconciled 15:40</td>
+      <td class="mono" style="font-size:0.75rem">16:05 · Decision</td>
+    </tr>
+        </table>
+      </div>
+      <p style="color:var(--muted);font-family:var(--mono);font-size:0.68rem;margin-top:16px">
+        server 2026-08-07 15:47:22 &middot; data snapshot 2026-08-07 &middot; dashboard_v3 0.6.0</p>
+    </div>
+  </div>
+</div>
+</body></html>
