@@ -5,12 +5,37 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from alpha.live.dashboard_v3.schedule import (
+    build_action_trading_window_list,
+    build_market_status,
     build_next_trading_window,
     build_schedule_entry_list,
+    build_trading_window_list,
 )
 
 
 REFERENCE_NOW_DT = datetime(2026, 5, 21, 14, 30, 0, tzinfo=timezone.utc)
+
+
+def _waiting_release_row_dict(
+    pod_id_str: str,
+    *,
+    signal_clock_str: str,
+    execution_policy_str: str,
+) -> dict:
+    return {
+        "pod_id_str": pod_id_str,
+        "mode_str": "live",
+        "signal_clock_str": signal_clock_str,
+        "execution_policy_str": execution_policy_str,
+        "session_calendar_id_str": "XNYS",
+        "next_action_str": "wait",
+        "reason_code_str": "not_month_end_session",
+        "required_action_dict": {
+            "label_str": "No action",
+            "severity_str": "green",
+            "reason_str": "POD is idle or completed.",
+        },
+    }
 
 
 def _row_dict(
@@ -78,6 +103,117 @@ def test_schedule_marks_past_events_as_ago() -> None:
     }
     schedule_entry_obj_list = build_schedule_entry_list(summary_dict, now_dt=REFERENCE_NOW_DT)
     assert schedule_entry_obj_list[0].relative_str.endswith("ago")
+
+
+def test_trading_window_list_orders_daily_before_monthly_and_groups_shared_cycle() -> None:
+    summary_dict = {
+        "pod_row_dict_list": [
+            _waiting_release_row_dict(
+                "monthly_pod",
+                signal_clock_str="month_end_snapshot_ready",
+                execution_policy_str="next_month_first_open",
+            ),
+            _waiting_release_row_dict(
+                "daily_a",
+                signal_clock_str="eod_snapshot_ready",
+                execution_policy_str="next_open_moo",
+            ),
+            _waiting_release_row_dict(
+                "daily_b",
+                signal_clock_str="eod_snapshot_ready",
+                execution_policy_str="next_open_moo",
+            ),
+        ]
+    }
+
+    window_obj_list = build_trading_window_list(
+        summary_dict,
+        mode_str="live",
+        now_dt=datetime(2026, 8, 5, 14, 0, 0, tzinfo=timezone.utc),
+    )
+
+    assert len(window_obj_list) == 2
+    assert window_obj_list[0].pod_id_str_list == ["daily_a", "daily_b"]
+    assert window_obj_list[0].signal_timestamp_str.startswith("2026-08-05T16:00:00")
+    assert window_obj_list[1].pod_id_str_list == ["monthly_pod"]
+    assert window_obj_list[1].signal_timestamp_str.startswith("2026-08-31T16:00:00")
+
+
+def test_shared_clock_keeps_action_ownership_on_the_correct_pod() -> None:
+    action_row_dict = _waiting_release_row_dict(
+        "action_pod",
+        signal_clock_str="eod_snapshot_ready",
+        execution_policy_str="next_open_moo",
+    )
+    action_row_dict.update(
+        {
+            "next_action_str": "build_decision_plan",
+            "required_action_dict": {
+                "label_str": "Build DecisionPlan",
+                "severity_str": "yellow",
+                "detail_str": "DecisionPlan is due.",
+            },
+        }
+    )
+    wait_row_dict = _waiting_release_row_dict(
+        "wait_pod",
+        signal_clock_str="eod_snapshot_ready",
+        execution_policy_str="next_open_moo",
+    )
+    summary_dict = {"pod_row_dict_list": [action_row_dict, wait_row_dict]}
+    now_dt = datetime(2026, 8, 5, 14, 0, 0, tzinfo=timezone.utc)
+
+    grouped_window_obj_list = build_trading_window_list(
+        summary_dict,
+        mode_str="live",
+        now_dt=now_dt,
+    )
+    action_window_obj_list = build_action_trading_window_list(
+        summary_dict,
+        mode_str="live",
+        now_dt=now_dt,
+    )
+
+    assert grouped_window_obj_list[0].pod_id_str_list == ["action_pod", "wait_pod"]
+    assert grouped_window_obj_list[0].status_label_str == "Shared trading window"
+    assert "Build DecisionPlan — action_pod: DecisionPlan is due." in (
+        grouped_window_obj_list[0].detail_str
+    )
+    assert action_window_obj_list[0].pod_id_str_list == ["action_pod"]
+
+
+def test_market_status_explains_open_weekend_and_early_close() -> None:
+    open_status_obj = build_market_status(
+        datetime(2026, 8, 5, 14, 0, 0, tzinfo=timezone.utc)
+    )
+    premarket_status_obj = build_market_status(
+        datetime(2026, 8, 5, 12, 0, 0, tzinfo=timezone.utc)
+    )
+    closed_status_obj = build_market_status(
+        datetime(2026, 8, 5, 21, 0, 0, tzinfo=timezone.utc)
+    )
+    weekend_status_obj = build_market_status(
+        datetime(2026, 8, 8, 14, 0, 0, tzinfo=timezone.utc)
+    )
+    holiday_status_obj = build_market_status(
+        datetime(2026, 7, 3, 14, 0, 0, tzinfo=timezone.utc)
+    )
+    early_close_status_obj = build_market_status(
+        datetime(2026, 11, 27, 18, 30, 0, tzinfo=timezone.utc)
+    )
+
+    assert open_status_obj.status_label_str == "Market open"
+    assert open_status_obj.reason_label_str == "Closes 16:00:00 ET"
+    assert premarket_status_obj.detail_str == "Today's session opens at 09:30:00 ET."
+    assert closed_status_obj.reason_label_str == "Session completed"
+    assert closed_status_obj.detail_str == "Today's session closed at 16:00:00 ET."
+    assert weekend_status_obj.status_label_str == "Market closed"
+    assert weekend_status_obj.reason_label_str == "Weekend"
+    assert "09:30:00 ET" in weekend_status_obj.detail_str
+    assert holiday_status_obj.reason_label_str == "Exchange holiday"
+    assert early_close_status_obj.status_label_str == "Market closed"
+    assert early_close_status_obj.reason_label_str == "Early close completed"
+    assert early_close_status_obj.detail_str == "Today's session closed at 13:00:00 ET."
 
 
 def test_schedule_respects_limit_int() -> None:
@@ -346,6 +482,113 @@ def test_just_closed_month_end_does_not_reuse_stale_no_action_status() -> None:
 
     assert window_obj.signal_timestamp_str == "2026-08-31T16:00:00-04:00"
     assert window_obj.status_label_str == "Awaiting scheduler refresh"
+
+
+def test_monthly_missed_cycle_turns_red_at_submission_and_does_not_roll_forward() -> None:
+    monthly_row_dict = _waiting_release_row_dict(
+        "monthly_pod",
+        signal_clock_str="month_end_snapshot_ready",
+        execution_policy_str="next_month_first_open",
+    )
+    monthly_row_dict.update(
+        {
+            "db_status_str": "ok",
+            "latest_pod_state_timestamp_str": "2026-08-31T16:01:00-04:00",
+            "latest_decision_signal_timestamp_str": None,
+        }
+    )
+    summary_dict = {"pod_row_dict_list": [monthly_row_dict]}
+
+    before_submission_obj = build_next_trading_window(
+        summary_dict,
+        mode_str="live",
+        now_dt=datetime(2026, 9, 1, 13, 23, 29, tzinfo=timezone.utc),
+    )
+    at_submission_obj = build_next_trading_window(
+        summary_dict,
+        mode_str="live",
+        now_dt=datetime(2026, 9, 1, 13, 23, 30, tzinfo=timezone.utc),
+    )
+    at_open_obj = build_next_trading_window(
+        summary_dict,
+        mode_str="live",
+        now_dt=datetime(2026, 9, 1, 13, 30, 0, tzinfo=timezone.utc),
+    )
+
+    assert before_submission_obj.status_label_str == "Awaiting scheduler refresh"
+    assert at_submission_obj.status_label_str == "Missed DecisionPlan cycle"
+    assert at_open_obj.status_label_str == "Missed DecisionPlan cycle"
+    assert at_open_obj.signal_timestamp_str == "2026-08-31T16:00:00-04:00"
+    assert at_open_obj.target_timestamp_str == "2026-09-01T09:30:00-04:00"
+
+
+def test_monthly_wait_status_does_not_carry_into_the_next_cycle_at_open() -> None:
+    monthly_row_dict = _waiting_release_row_dict(
+        "monthly_pod",
+        signal_clock_str="month_end_snapshot_ready",
+        execution_policy_str="next_month_first_open",
+    )
+    monthly_row_dict.update(
+        {
+            "latest_decision_signal_timestamp_str": "2026-08-31T16:00:00-04:00",
+            "latest_decision_plan_submission_timestamp_str": (
+                "2026-09-01T09:23:30-04:00"
+            ),
+            "latest_decision_plan_target_execution_timestamp_str": (
+                "2026-09-01T09:30:00-04:00"
+            ),
+            "required_action_dict": {
+                "label_str": "Waiting for MOO execution",
+                "severity_str": "yellow",
+                "detail_str": "The persisted monthly VPlan is waiting for the open.",
+            },
+        }
+    )
+    summary_dict = {"pod_row_dict_list": [monthly_row_dict]}
+
+    before_open_obj = build_next_trading_window(
+        summary_dict,
+        mode_str="live",
+        now_dt=datetime(2026, 9, 1, 13, 29, 59, tzinfo=timezone.utc),
+    )
+    at_open_obj = build_next_trading_window(
+        summary_dict,
+        mode_str="live",
+        now_dt=datetime(2026, 9, 1, 13, 30, 0, tzinfo=timezone.utc),
+    )
+
+    assert before_open_obj.status_label_str == "Waiting for MOO execution"
+    assert before_open_obj.target_timestamp_str == "2026-09-01T09:30:00-04:00"
+    assert at_open_obj.status_label_str == "Awaiting scheduler refresh"
+    assert at_open_obj.action_required_bool is False
+    assert at_open_obj.signal_timestamp_str == "2026-09-30T16:00:00-04:00"
+
+
+def test_new_monthly_pod_without_state_is_not_marked_as_a_missed_cycle() -> None:
+    monthly_row_dict = _waiting_release_row_dict(
+        "new_monthly_pod",
+        signal_clock_str="month_end_snapshot_ready",
+        execution_policy_str="next_month_first_open",
+    )
+    monthly_row_dict.update(
+        {
+            "db_status_str": "empty",
+            "latest_pod_state_timestamp_str": None,
+            "required_action_dict": {
+                "label_str": "No state yet",
+                "severity_str": "gray",
+            },
+        }
+    )
+
+    window_obj = build_next_trading_window(
+        {"pod_row_dict_list": [monthly_row_dict]},
+        mode_str="live",
+        now_dt=datetime(2026, 9, 1, 14, 0, 0, tzinfo=timezone.utc),
+    )
+
+    assert window_obj.status_label_str != "Missed DecisionPlan cycle"
+    assert window_obj.severity_str == "gray"
     assert window_obj.severity_str == "gray"
     assert window_obj.action_required_bool is False
 
@@ -642,6 +885,27 @@ def test_daily_malformed_persisted_target_fails_loud() -> None:
     assert window_obj.status_label_str == "Cannot verify"
     assert window_obj.pod_id_str_list == ["pod_dv2_live"]
     assert "Persisted target timestamp is invalid" in window_obj.detail_str
+
+
+def test_daily_malformed_persisted_signal_fails_loud() -> None:
+    daily_row_dict = {
+        **_daily_pod_row_dict(),
+        "latest_decision_signal_timestamp_str": "not-a-timestamp",
+        "latest_decision_plan_target_execution_timestamp_str": (
+            "2026-08-11T09:30:00-04:00"
+        ),
+    }
+
+    window_obj = build_next_trading_window(
+        {"pod_row_dict_list": [daily_row_dict]},
+        mode_str="live",
+        now_dt=datetime(2026, 8, 10, 13, 30, 0, tzinfo=timezone.utc),
+    )
+
+    assert window_obj.severity_str == "red"
+    assert window_obj.action_required_bool is True
+    assert window_obj.pod_id_str_list == ["pod_dv2_live"]
+    assert "signal or submission timestamp is invalid" in window_obj.detail_str
 
 
 def test_daily_persisted_cycle_expires_at_exact_moo_open() -> None:

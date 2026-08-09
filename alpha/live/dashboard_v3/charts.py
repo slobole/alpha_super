@@ -14,12 +14,14 @@ operator can see "we're still under water from the May 12 peak" at a glance.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 import math
 import statistics
 from typing import Any
 
 
 TRADING_DAYS_PER_YEAR_INT = 252
+ROLLING_VOL_SESSION_COUNT_INT = 20
 
 
 CHART_VIEW_WIDTH_INT = 600
@@ -36,7 +38,7 @@ DAILY_PANEL_PLOT_BOTTOM_INT = 20
 # Cap the daily bar width (viewBox units) so a handful of EOD points render as
 # distinct bars instead of merging into one fat slab.
 MAX_PNL_BAR_WIDTH_FLOAT = 14.0
-SUPPORTED_WINDOW_STR_LIST = ["30d", "90d", "all"]
+SUPPORTED_WINDOW_STR_LIST = ["1w", "mtd", "ytd", "all"]
 # The headline curve can be read two equivalent ways from the SAME equity
 # series: cumulative return percent (default, comparable across pods) or
 # cumulative dollar P&L since the first visible sample.
@@ -67,6 +69,7 @@ class EquityChartDict:
     # Two understated risk readouts shown as a small footnote under the curve.
     max_drawdown_label_str: str = "—"
     annualized_vol_label_str: str = "—"
+    vol_observation_count_int: int = 0
     range_min_float: float = 0.0
     range_max_float: float = 0.0
     range_min_label_str: str = "—"
@@ -80,6 +83,8 @@ class EquityChartDict:
     latest_daily_pct_label_str: str = "—"
     latest_daily_is_positive_bool: bool = True
     window_str: str = "all"
+    window_is_partial_bool: bool = False
+    window_note_str: str = ""
     value_mode_str: str = "pct"
 
     def as_dict(self) -> dict[str, Any]:
@@ -100,6 +105,8 @@ class EquityChartDict:
             "daily_zero_y_float": self.daily_zero_y_float,
             "max_drawdown_label_str": self.max_drawdown_label_str,
             "annualized_vol_label_str": self.annualized_vol_label_str,
+            "vol_observation_count_int": self.vol_observation_count_int,
+            "vol_window_session_count_int": ROLLING_VOL_SESSION_COUNT_INT,
             "range_min_float": self.range_min_float,
             "range_max_float": self.range_max_float,
             "range_min_label_str": self.range_min_label_str,
@@ -113,6 +120,8 @@ class EquityChartDict:
             "latest_daily_pct_label_str": self.latest_daily_pct_label_str,
             "latest_daily_is_positive_bool": self.latest_daily_is_positive_bool,
             "window_str": self.window_str,
+            "window_is_partial_bool": self.window_is_partial_bool,
+            "window_note_str": self.window_note_str,
             "value_mode_str": self.value_mode_str,
             "width_int": CHART_VIEW_WIDTH_INT,
             "height_int": CHART_VIEW_HEIGHT_INT,
@@ -139,11 +148,21 @@ def build_equity_chart_dict(
     if not equity_point_dict_list:
         return EquityChartDict(window_str=window_str, value_mode_str=value_mode_str)
 
-    clean_point_list = [
+    valid_equity_point_dict_list = [
         point_dict
-        for point_dict in _truncate_for_window(equity_point_dict_list, window_str)
+        for point_dict in equity_point_dict_list
         if _float_or_none(point_dict.get("equity_float")) is not None
     ]
+    if not valid_equity_point_dict_list:
+        return EquityChartDict(window_str=window_str, value_mode_str=value_mode_str)
+    window_str, window_is_partial_bool, window_note_str = _resolve_chart_window_context(
+        valid_equity_point_dict_list,
+        window_str,
+    )
+    clean_point_list = _truncate_for_window(
+        valid_equity_point_dict_list,
+        window_str,
+    )
     equity_pairs_list = [
         (
             str(point_dict.get("market_date_str") or ""),
@@ -170,6 +189,8 @@ def build_equity_chart_dict(
             latest_market_date_str=only_date_str,
             earliest_market_date_str=only_date_str,
             window_str=window_str,
+            window_is_partial_bool=window_is_partial_bool,
+            window_note_str=window_note_str,
             value_mode_str=value_mode_str,
         )
 
@@ -193,6 +214,8 @@ def build_equity_chart_dict(
             latest_market_date_str=equity_pairs_list[-1][0],
             earliest_market_date_str=equity_pairs_list[0][0],
             window_str=window_str,
+            window_is_partial_bool=window_is_partial_bool,
+            window_note_str=window_note_str,
             value_mode_str=value_mode_str,
         )
 
@@ -289,6 +312,7 @@ def build_equity_chart_dict(
         {
             "max_drawdown_label_str": "—",
             "annualized_vol_label_str": "—",
+            "vol_observation_count_int": 0,
         }
         if return_unavailable_bool
         else _build_risk_footnote_dict(
@@ -317,6 +341,7 @@ def build_equity_chart_dict(
         daily_zero_y_float=daily_panel_dict["zero_y_float"],
         max_drawdown_label_str=risk_footnote_dict["max_drawdown_label_str"],
         annualized_vol_label_str=risk_footnote_dict["annualized_vol_label_str"],
+        vol_observation_count_int=risk_footnote_dict["vol_observation_count_int"],
         range_min_float=float(range_min_float),
         range_max_float=float(range_max_float),
         range_min_label_str=format_value_fn(range_min_float),
@@ -334,6 +359,8 @@ def build_equity_chart_dict(
         latest_daily_pct_label_str=_format_signed_pct_str(latest_daily_pct_float),
         latest_daily_is_positive_bool=(latest_daily_pct_float or 0.0) >= 0,
         window_str=window_str,
+        window_is_partial_bool=window_is_partial_bool,
+        window_note_str=window_note_str,
         value_mode_str=value_mode_str,
     )
 
@@ -341,14 +368,82 @@ def build_equity_chart_dict(
 # ── private helpers ───────────────────────────────────────────────────────
 
 
+def _resolve_chart_window_context(
+    equity_point_dict_list: list[dict[str, Any]],
+    window_str: str,
+) -> tuple[str, bool, str]:
+    if window_str == "1w":
+        partial_bool = len(equity_point_dict_list) < 6
+        return (
+            window_str,
+            partial_bool,
+            "Partial window · fewer than five return intervals."
+            if partial_bool
+            else "",
+        )
+    if window_str not in ("mtd", "ytd"):
+        return window_str, False, ""
+    try:
+        latest_date_obj = date.fromisoformat(
+            str(equity_point_dict_list[-1].get("market_date_str") or "")
+        )
+    except ValueError:
+        return "all", False, "Requested period unavailable · invalid EOD date."
+    first_period_index_int = next(
+        (
+            index_int
+            for index_int, point_dict in enumerate(equity_point_dict_list)
+            if _point_is_in_chart_period_bool(point_dict, latest_date_obj, window_str)
+        ),
+        0,
+    )
+    partial_bool = first_period_index_int == 0
+    return (
+        window_str,
+        partial_bool,
+        "Partial period · prior EOD baseline unavailable."
+        if partial_bool
+        else "",
+    )
+
+
+def _point_is_in_chart_period_bool(
+    point_dict: dict[str, Any],
+    latest_date_obj: date,
+    window_str: str,
+) -> bool:
+    try:
+        point_date_obj = date.fromisoformat(
+            str(point_dict.get("market_date_str") or "")
+        )
+    except ValueError:
+        return False
+    return point_date_obj.year == latest_date_obj.year and (
+        window_str == "ytd" or point_date_obj.month == latest_date_obj.month
+    )
+
+
 def _truncate_for_window(
     equity_point_dict_list: list[dict[str, Any]], window_str: str
 ) -> list[dict[str, Any]]:
-    if window_str == "30d":
-        return equity_point_dict_list[-30:]
-    if window_str == "90d":
-        return equity_point_dict_list[-90:]
-    return equity_point_dict_list
+    if window_str == "1w":
+        # One baseline plus five observed sessions gives five return intervals.
+        return equity_point_dict_list[-6:]
+    if window_str not in ("mtd", "ytd") or not equity_point_dict_list:
+        return equity_point_dict_list
+    try:
+        latest_date_obj = date.fromisoformat(
+            str(equity_point_dict_list[-1].get("market_date_str") or "")
+        )
+    except ValueError:
+        return equity_point_dict_list
+    first_period_index_int = 0
+    for index_int, point_dict in enumerate(equity_point_dict_list):
+        if _point_is_in_chart_period_bool(point_dict, latest_date_obj, window_str):
+            first_period_index_int = index_int
+            break
+    # Keep the previous EOD as the period baseline when it exists.
+    return equity_point_dict_list[max(0, first_period_index_int - 1):]
 
 
 def _build_polyline_path_str(point_xy_list: list[tuple[float, float]]) -> str:
@@ -417,7 +512,7 @@ def _build_y_axis_tick_dict_list(
 def _build_risk_footnote_dict(
     cumulative_return_pct_list: list[float],
     daily_return_pct_list: list[float | None],
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """Two understated risk readouts for the footnote under the curve.
 
     Max drawdown is the deepest dip below the running peak; *** CRITICAL*** the
@@ -447,9 +542,14 @@ def _build_risk_footnote_dict(
         for daily_return_pct_float in daily_return_pct_list[1:]
         if daily_return_pct_float is not None
     ]
+    # *** CRITICAL *** backward-only risk window: only completed returns at or
+    # before the latest displayed EOD can enter the rolling statistic.
+    rolling_daily_return_pct_list = valid_daily_return_pct_list[
+        -ROLLING_VOL_SESSION_COUNT_INT:
+    ]
     annualized_vol_label_str = "—"
-    if len(valid_daily_return_pct_list) >= 2:
-        daily_vol_float = statistics.stdev(valid_daily_return_pct_list)
+    if len(rolling_daily_return_pct_list) >= 2:
+        daily_vol_float = statistics.stdev(rolling_daily_return_pct_list)
         annualized_vol_label_str = (
             f"{daily_vol_float * math.sqrt(TRADING_DAYS_PER_YEAR_INT) * 100:.1f}%"
         )
@@ -457,6 +557,7 @@ def _build_risk_footnote_dict(
     return {
         "max_drawdown_label_str": max_drawdown_label_str,
         "annualized_vol_label_str": annualized_vol_label_str,
+        "vol_observation_count_int": len(rolling_daily_return_pct_list),
     }
 
 
@@ -932,6 +1033,7 @@ class BookRiskDict:
     days_underwater_int: int = 0
     daily_vol_label_str: str = "—"
     annualized_vol_label_str: str = "—"
+    vol_observation_count_int: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -947,6 +1049,8 @@ class BookRiskDict:
             "days_underwater_int": self.days_underwater_int,
             "daily_vol_label_str": self.daily_vol_label_str,
             "annualized_vol_label_str": self.annualized_vol_label_str,
+            "vol_observation_count_int": self.vol_observation_count_int,
+            "vol_window_session_count_int": ROLLING_VOL_SESSION_COUNT_INT,
         }
 
 
@@ -1021,10 +1125,13 @@ def build_book_risk_dict(
         for daily_return_pct_float in daily_return_pct_list[1:]
         if daily_return_pct_float is not None
     ]
+    # *** CRITICAL *** backward-only rolling risk: use at most the latest 20
+    # completed return intervals, never future observations.
+    rolling_daily_return_list = daily_return_list[-ROLLING_VOL_SESSION_COUNT_INT:]
     daily_vol_label_str = "—"
     annualized_vol_label_str = "—"
-    if len(daily_return_list) >= 2:
-        daily_vol_float = statistics.stdev(daily_return_list)
+    if len(rolling_daily_return_list) >= 2:
+        daily_vol_float = statistics.stdev(rolling_daily_return_list)
         daily_vol_label_str = f"{daily_vol_float * 100:.2f}%"
         annualized_vol_label_str = (
             f"{daily_vol_float * math.sqrt(TRADING_DAYS_PER_YEAR_INT) * 100:.1f}%"
@@ -1047,6 +1154,7 @@ def build_book_risk_dict(
         days_underwater_int=days_underwater_int,
         daily_vol_label_str=daily_vol_label_str,
         annualized_vol_label_str=annualized_vol_label_str,
+        vol_observation_count_int=len(rolling_daily_return_list),
     )
 
 

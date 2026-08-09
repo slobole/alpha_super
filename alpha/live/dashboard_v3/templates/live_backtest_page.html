@@ -15,7 +15,7 @@
         to
         {{ row_dict.latest_comparison_target_session_date_str or 'na' }}
         {% if row_dict.latest_comparison_timestamp_str %}
-          - {{ row_dict.latest_comparison_timestamp_str }}
+          - {{ row_dict.latest_comparison_timestamp_str | clock }}
         {% endif %}
       </div>
     </div>

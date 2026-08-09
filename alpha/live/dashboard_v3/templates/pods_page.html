@@ -40,7 +40,7 @@
         </div>
       </div>
       <div class="text-xs text-ink-500 tabular-nums">
-        as-of {{ inspector_report_dict.source_as_of_utc_str or 'missing' }}
+        as-of {{ inspector_report_dict.source_as_of_utc_str | clock or 'missing' }}
       </div>
     </div>
   </section>

@@ -1,6 +1,4 @@
-{# Book-level realized risk for this mode, computed from the combined-book EOD
-   equity series (read-only reporting — no forecast). Drawdown from running
-   peak; volatility = sample stdev of daily returns, annualized by sqrt(252). #}
+{# Book-level realized risk from the flow-adjusted combined-book EOD series. #}
 {% if book_risk_dict and book_risk_dict.has_data_bool %}
 <section class="mb-4 rounded-md border border-ink-100 bg-white shadow-sm px-4 py-3">
   <div class="text-[11px] uppercase tracking-wide text-ink-400 mb-2"
@@ -24,14 +22,17 @@
       <div class="font-semibold tabular-nums text-ink-900">{{ book_risk_dict.days_underwater_int }}</div>
     </div>
     <div>
-      <div class="text-[11px] uppercase tracking-wide text-ink-500">Vol (annualized)</div>
+      <div class="text-[11px] uppercase tracking-wide text-ink-500">20D realized vol</div>
       <div class="font-semibold tabular-nums text-ink-900"
-           title="daily {{ book_risk_dict.daily_vol_label_str }}">
+           title="annualized from the latest completed flow-adjusted EOD returns; daily {{ book_risk_dict.daily_vol_label_str }}">
         {{ book_risk_dict.annualized_vol_label_str }}
+      </div>
+      <div class="text-[11px] text-ink-500">
+        {{ book_risk_dict.vol_observation_count_int }}/{{ book_risk_dict.vol_window_session_count_int }} sessions
       </div>
     </div>
     <div>
-      <div class="text-[11px] uppercase tracking-wide text-ink-500">Equity at TWR peak</div>
+      <div class="text-[11px] uppercase tracking-wide text-ink-500">Equity at EOD-return peak</div>
       <div class="font-semibold tabular-nums text-ink-900">{{ book_risk_dict.peak_equity_label_str }}</div>
       <div class="text-[11px] text-ink-500">{{ book_risk_dict.peak_market_date_str or '—' }}</div>
     </div>

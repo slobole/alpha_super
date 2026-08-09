@@ -1,0 +1,87 @@
+{# One chronological schedule. Shared cycles are grouped; the first row is the
+   nearest event and is not repeated in a separate headline card. #}
+<section class="rounded-md border border-ink-100 bg-white shadow-sm overflow-hidden">
+  <header class="px-4 py-3 border-b border-ink-100 flex flex-wrap items-center justify-between gap-2">
+    <div>
+      <div class="text-[11px] uppercase tracking-wide text-ink-500">Upcoming trading windows</div>
+      <div class="text-xs text-ink-500 mt-0.5">Nearest event first · one next cycle per Pod · shared cycles grouped</div>
+    </div>
+    <a href="/pods/live" class="text-xs text-accent underline">Open Pods</a>
+  </header>
+
+  {% if action_window_dict_list %}
+    <div class="border-b border-bad/30 bg-bad-soft/40 px-4 py-3">
+      <div class="text-[10px] uppercase tracking-widest font-bold text-bad">Action required</div>
+      <div class="mt-2 space-y-2">
+        {% for window_dict in action_window_dict_list %}
+          <div class="flex flex-wrap items-start justify-between gap-2 text-sm">
+            <div>
+              <strong>{{ window_dict.status_label_str }}</strong>
+              <span class="text-ink-500">· {{ window_dict.pod_id_str_list | join(', ') }}</span>
+            </div>
+            <a href="/pods/live" class="text-xs text-accent underline shrink-0">Review Pod</a>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+
+  {% if trading_window_dict_list %}
+    <div class="divide-y divide-ink-100">
+      {% for window_dict in trading_window_dict_list %}
+        {% set window_severity_str = window_dict.severity_str | normalize_severity %}
+        <article class="px-4 py-3 {% if loop.first %}bg-ink-50{% endif %}">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                {% if loop.first %}<span class="font-mono text-[9px] uppercase tracking-widest text-accent">Next</span>{% endif %}
+                <span class="inline-block w-2 h-2 rounded-full
+                             {% if window_severity_str == 'red' %}bg-bad
+                             {% elif window_severity_str == 'yellow' %}bg-warn
+                             {% elif window_severity_str == 'green' %}bg-ok
+                             {% else %}bg-mute{% endif %}"></span>
+                <strong class="text-sm">{{ window_dict.status_label_str }}</strong>
+                <span class="font-mono text-[11px] text-ink-500 truncate">
+                  {{ window_dict.pod_id_str_list | join(', ') }}
+                </span>
+              </div>
+              <div class="text-xs text-ink-500 mt-1">{{ window_dict.detail_str }}</div>
+            </div>
+            <div class="font-mono text-xs tabular-nums text-ink-700 shrink-0">
+              {{ window_dict.relative_str }}
+            </div>
+          </div>
+
+          {% if window_dict.has_data_bool %}
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-2 mt-3 text-xs tabular-nums">
+              <div>
+                <div class="text-[10px] uppercase tracking-wide text-ink-400">Signal</div>
+                <div>{{ window_dict.signal_timestamp_str | clock or '—' }}</div>
+              </div>
+              <div>
+                <div class="text-[10px] uppercase tracking-wide text-ink-400">Submit</div>
+                <div>{{ window_dict.submission_timestamp_str | clock or '—' }}</div>
+              </div>
+              <div>
+                <div class="text-[10px] uppercase tracking-wide text-ink-400">Execute</div>
+                <div class="font-semibold">{{ window_dict.target_timestamp_str | clock or '—' }}</div>
+              </div>
+              <div>
+                <div class="text-[10px] uppercase tracking-wide text-ink-400">Norgate</div>
+                <div>{{ window_dict.norgate_label_str }}</div>
+              </div>
+            </div>
+          {% endif %}
+
+          {% if window_dict.reason_code_str %}
+            <div class="mt-2 font-mono text-[10px] text-ink-400">
+              Scheduler · {{ window_dict.reason_code_str | humanize_reason }}
+            </div>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="px-4 py-6 text-sm text-ink-500">No live trading window can be verified.</div>
+  {% endif %}
+</section>

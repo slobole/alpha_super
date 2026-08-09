@@ -1,5 +1,11 @@
 {# Inner content of the top-bar verdict region. Polled fragment. #}
 <div class="flex items-center gap-4 text-sm">
+  <div class="flex items-center gap-2 text-xs min-w-0" title="{{ market_status_dict.detail_str }}">
+    <span class="inline-block w-2 h-2 rounded-full shrink-0
+                 {% if market_status_dict.severity_str == 'green' %}bg-ok{% else %}bg-mute{% endif %}"></span>
+    <span class="font-semibold">{{ market_status_dict.status_label_str }}</span>
+    <span class="text-ink-500 truncate">· {{ market_status_dict.reason_label_str }}</span>
+  </div>
   {% set vc = verdict_dict %}
   <div class="flex items-center gap-2">
     <span class="inline-block w-2.5 h-2.5 rounded-full

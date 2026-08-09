@@ -68,8 +68,10 @@ from alpha.live.dashboard_v3.notifications import (
     post_discord_webhook_bool,
 )
 from alpha.live.dashboard_v3.schedule import (
-    build_next_trading_window,
+    build_action_trading_window_list,
+    build_market_status,
     build_schedule_entry_list,
+    build_trading_window_list,
 )
 from alpha.live.dashboard_v3.verdict import TopBarVerdict, resolve_top_bar_verdict
 from alpha.live.ops_report import (
@@ -149,11 +151,7 @@ def create_app(
         return {
             "version_str": DASHBOARD_V3_VERSION_STR,
             "server_time_str": _now_clock_str(),
-            # LIVE|BENCH toggle target — the research console. Env-overridable
-            # so the VPS can point at wherever Bench actually runs.
-            "bench_url_str": os.environ.get(
-                "ALPHA_BENCH_URL_STR", "http://127.0.0.1:8765"
-            ),
+            "market_status_dict": build_market_status().as_dict(),
         }
 
     # ── plain routes ─────────────────────────────────────────────────────
@@ -199,7 +197,11 @@ def create_app(
         )
         health_obj = build_health_rollup(summary_dict, mode_str="live")
         verdict_obj = _resolve_verdict_with_health(summary_dict, mode_str="live")
-        trading_window_obj = build_next_trading_window(
+        trading_window_obj_list = build_trading_window_list(
+            summary_dict,
+            mode_str="live",
+        )
+        action_window_obj_list = build_action_trading_window_list(
             summary_dict,
             mode_str="live",
         )
@@ -282,7 +284,13 @@ def create_app(
             ),
             verdict_dict=verdict_obj.as_dict(),
             health_dict=health_obj.as_dict(),
-            trading_window_dict=trading_window_obj.as_dict(),
+            trading_window_dict_list=[
+                window_obj.as_dict() for window_obj in trading_window_obj_list
+            ],
+            action_window_dict_list=[
+                window_obj.as_dict()
+                for window_obj in action_window_obj_list
+            ],
             inspector_report_dict=_consumer_inspector_report_dict(summary_dict, mode_str="live"),
             as_of_clock_str=_now_clock_str(),
             combined_book_chart_dict=combined_book_chart_dict,
@@ -662,18 +670,29 @@ def create_app(
         )
 
     @flask_app_obj.route("/fragments/trading-window/<mode_str>")
+    @flask_app_obj.route("/fragments/trading-windows/<mode_str>")
     def trading_window_fragment_route_fn(mode_str: str):
         if mode_str != "live":
             abort(404)
         provider_obj = flask_app_obj.config["data_provider_obj"]
         summary_dict = provider_obj.get_summary_dict()
-        trading_window_obj = build_next_trading_window(
+        trading_window_obj_list = build_trading_window_list(
+            summary_dict,
+            mode_str=mode_str,
+        )
+        action_window_obj_list = build_action_trading_window_list(
             summary_dict,
             mode_str=mode_str,
         )
         return render_template(
-            "_trading_window_card.html",
-            trading_window_dict=trading_window_obj.as_dict(),
+            "_trading_window_list.html",
+            trading_window_dict_list=[
+                window_obj.as_dict() for window_obj in trading_window_obj_list
+            ],
+            action_window_dict_list=[
+                window_obj.as_dict()
+                for window_obj in action_window_obj_list
+            ],
         )
 
     @flask_app_obj.route("/fragments/equity-chart/<pod_id_str>")
@@ -1375,15 +1394,25 @@ def _resolve_verdict_with_health(
             ),
         )
 
-    trading_window_obj = build_next_trading_window(summary_dict, mode_str="live")
-    window_needs_attention_bool = (
-        trading_window_obj.severity_str in ("red", "yellow")
-        or trading_window_obj.status_label_str
+    trading_window_obj_list = build_trading_window_list(
+        summary_dict,
+        mode_str="live",
+    )
+    attention_window_obj_list = [
+        window_obj
+        for window_obj in trading_window_obj_list
+        if window_obj.severity_str in ("red", "yellow")
+        or window_obj.status_label_str
         in ("Cannot verify", "Awaiting scheduler refresh")
+    ]
+    if not attention_window_obj_list:
+        return verdict_obj
+    trading_window_obj = min(
+        attention_window_obj_list,
+        key=lambda window_obj: SEVERITY_RANK_DICT.get(window_obj.severity_str, 9),
     )
     if (
-        not window_needs_attention_bool
-        or SEVERITY_RANK_DICT.get(trading_window_obj.severity_str, 9)
+        SEVERITY_RANK_DICT.get(trading_window_obj.severity_str, 9)
         >= SEVERITY_RANK_DICT.get(verdict_obj.severity_str, 9)
     ):
         return verdict_obj

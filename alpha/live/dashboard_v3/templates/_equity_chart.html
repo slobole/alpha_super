@@ -51,6 +51,7 @@
       <div class="text-[11px] text-ink-500 tabular-nums">
         {{ chart_dict.earliest_market_date_str or '-' }} → {{ chart_dict.latest_market_date_str or '-' }}
         · {{ chart_dict.latest_equity_float | money }}
+        {% if chart_dict.window_note_str %}<div class="text-warn mt-0.5">{{ chart_dict.window_note_str }}</div>{% endif %}
       </div>
     </div>
 
@@ -106,11 +107,15 @@
 
     {# Understated risk footnote — kept small and secondary on purpose. #}
     <div class="flex flex-wrap items-center justify-between gap-2 text-[11px] text-ink-500 tabular-nums mt-2">
-      <span>Max drawdown {{ chart_dict.max_drawdown_label_str }} &nbsp;·&nbsp; Annualized vol {{ chart_dict.annualized_vol_label_str }}</span>
+      <span>
+        Max drawdown {{ chart_dict.max_drawdown_label_str }}
+        &nbsp;·&nbsp; 20D realized vol {{ chart_dict.annualized_vol_label_str }}
+        · {{ chart_dict.vol_observation_count_int }}/{{ chart_dict.vol_window_session_count_int }} sessions
+      </span>
       {% if chart_selector_endpoint_str %}
         <span class="flex items-center gap-3">
           <span class="flex gap-1">
-            {% for window_option_str in ['30d', '90d', 'all'] %}
+            {% for window_option_str, window_label_str in [('1w', '1W'), ('mtd', 'MTD'), ('ytd', 'YTD'), ('all', 'ALL')] %}
               <button type="button"
                       hx-get="{{ chart_selector_endpoint_str }}?window={{ window_option_str }}&value={{ chart_dict.value_mode_str }}"
                       hx-target="closest .equity-chart-figure"
@@ -121,7 +126,7 @@
                              {% else %}
                                bg-white text-ink-500 border-ink-100 hover:bg-ink-50
                              {% endif %}">
-                {{ window_option_str }}
+                {{ window_label_str }}
               </button>
             {% endfor %}
           </span>

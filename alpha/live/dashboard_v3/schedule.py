@@ -1,9 +1,8 @@
 """Cross-pod schedule builders for Dashboard V3.
 
-Surfaces the next ~4 scheduled events across the whole multi-pod book
-sorted by target execution time. Operators live by the clock — knowing
-"submit_vplan for dv2_caspersky in 1h 38m" is more useful than scanning
-individual pod cards.
+Surfaces one next cycle per pod, groups identical windows and orders them by
+the next clock event. Operators can read a mixed daily/monthly book without
+scanning every pod card.
 
 The pending-action list uses the persisted pod rows.  The Overview trading
 window also surfaces the next month-end cycle while the scheduler is in its
@@ -15,7 +14,7 @@ values built here can advance state or submit an order.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import Any
 
 import pandas as pd
@@ -87,6 +86,93 @@ class TradingWindow:
         }
 
 
+@dataclass
+class MarketStatus:
+    status_label_str: str
+    reason_label_str: str
+    severity_str: str
+    detail_str: str
+    next_transition_timestamp_str: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "status_label_str": self.status_label_str,
+            "reason_label_str": self.reason_label_str,
+            "severity_str": self.severity_str,
+            "detail_str": self.detail_str,
+            "next_transition_timestamp_str": self.next_transition_timestamp_str,
+        }
+
+
+def build_market_status(
+    now_dt: datetime | None = None,
+) -> MarketStatus:
+    """Read-only US-market status for the LIVE dashboard's New York clock."""
+    calendar_id_str = "XNYS"
+    now_dt = _aware_utc_dt(now_dt or datetime.now(timezone.utc))
+    market_now_dt = scheduler_utils.to_market_timestamp_ts(now_dt, calendar_id_str)
+    calendar_obj = scheduler_utils.get_exchange_calendar_obj(calendar_id_str)
+    session_label_ts = scheduler_utils.session_label_from_timestamp_ts(
+        now_dt,
+        calendar_id_str,
+    )
+    if session_label_ts is None:
+        reason_label_str = (
+            "Weekend" if market_now_dt.weekday() >= 5 else "Exchange holiday"
+        )
+        next_session_label_ts = calendar_obj.date_to_session(
+            pd.Timestamp(market_now_dt.date()),
+            direction="next",
+        )
+        next_open_dt = scheduler_utils.get_session_open_timestamp_ts(
+            next_session_label_ts,
+            calendar_id_str,
+        )
+        return MarketStatus(
+            status_label_str="Market closed",
+            reason_label_str=reason_label_str,
+            severity_str="gray",
+            detail_str=f"Next session opens {next_open_dt.strftime('%a %H:%M:%S ET')}.",
+            next_transition_timestamp_str=next_open_dt.isoformat(),
+        )
+
+    session_open_dt = scheduler_utils.get_session_open_timestamp_ts(
+        session_label_ts,
+        calendar_id_str,
+    )
+    session_close_dt = scheduler_utils.get_session_close_timestamp_ts(
+        session_label_ts,
+        calendar_id_str,
+    )
+    if market_now_dt < session_open_dt:
+        return MarketStatus(
+            status_label_str="Market closed",
+            reason_label_str="Pre-market",
+            severity_str="gray",
+            detail_str=f"Today's session opens at {session_open_dt.strftime('%H:%M:%S ET')}.",
+            next_transition_timestamp_str=session_open_dt.isoformat(),
+        )
+    if market_now_dt < session_close_dt:
+        return MarketStatus(
+            status_label_str="Market open",
+            reason_label_str=f"Closes {session_close_dt.strftime('%H:%M:%S ET')}",
+            severity_str="green",
+            detail_str="The regular exchange session is open.",
+            next_transition_timestamp_str=session_close_dt.isoformat(),
+        )
+
+    early_close_bool = session_close_dt.time() < time(16, 0)
+    return MarketStatus(
+        status_label_str="Market closed",
+        reason_label_str=(
+            "Early close completed" if early_close_bool else "Session completed"
+        ),
+        severity_str="gray",
+        detail_str=f"Today's session closed at {session_close_dt.strftime('%H:%M:%S ET')}.",
+        next_transition_timestamp_str=None,
+    )
+
+
 def build_schedule_entry_list(
     summary_dict: dict[str, Any],
     now_dt: datetime | None = None,
@@ -130,6 +216,7 @@ def build_next_trading_window(
     *,
     mode_str: str,
     now_dt: datetime | None = None,
+    append_share_detail_bool: bool = True,
 ) -> TradingWindow:
     """Return the nearest actionable or scheduled monthly trading window."""
     now_dt = _aware_utc_dt(now_dt or datetime.now(timezone.utc))
@@ -168,7 +255,44 @@ def build_next_trading_window(
                 + ", ".join(invalid_target_pod_id_str_list)
                 + "."
             ),
+            action_required_bool=True,
+            action_str="review_persisted_state",
             pod_id_str_list=invalid_target_pod_id_str_list,
+        )
+
+    invalid_stage_timestamp_pod_id_str_list: list[str] = []
+    for row_dict in pod_row_dict_list:
+        for field_str in (
+            "latest_decision_signal_timestamp_str",
+            "latest_decision_plan_submission_timestamp_str",
+            "latest_vplan_submission_timestamp_str",
+        ):
+            timestamp_obj = row_dict.get(field_str)
+            if timestamp_obj in (None, ""):
+                continue
+            try:
+                _parse_iso_datetime(str(timestamp_obj))
+            except ValueError:
+                invalid_stage_timestamp_pod_id_str_list.append(
+                    str(row_dict.get("pod_id_str") or "?")
+                )
+                break
+    if invalid_stage_timestamp_pod_id_str_list:
+        invalid_stage_timestamp_pod_id_str_list = sorted(
+            set(invalid_stage_timestamp_pod_id_str_list)
+        )
+        return TradingWindow(
+            severity_str="red",
+            status_label_str="Cannot verify",
+            detail_str=(
+                "Persisted signal or submission timestamp is invalid for enabled "
+                f"{mode_str} pod(s): "
+                + ", ".join(invalid_stage_timestamp_pod_id_str_list)
+                + "."
+            ),
+            action_required_bool=True,
+            action_str="review_persisted_state",
+            pod_id_str_list=invalid_stage_timestamp_pod_id_str_list,
         )
 
     monthly_row_dict_list = [
@@ -373,11 +497,166 @@ def build_next_trading_window(
     )
     selected_window_obj.pod_id_str_list = matching_pod_id_str_list
     pod_label_str = "pod" if len(matching_pod_id_str_list) == 1 else "pods"
-    selected_window_obj.detail_str = (
-        f"{selected_window_obj.detail_str} "
-        f"{len(matching_pod_id_str_list)} {mode_str} {pod_label_str} share this window."
-    )
+    if append_share_detail_bool:
+        selected_window_obj.detail_str = (
+            f"{selected_window_obj.detail_str} "
+            f"{len(matching_pod_id_str_list)} {mode_str} {pod_label_str} share this window."
+        )
     return selected_window_obj
+
+
+def build_trading_window_list(
+    summary_dict: dict[str, Any],
+    *,
+    mode_str: str,
+    now_dt: datetime | None = None,
+) -> list[TradingWindow]:
+    """One next window per pod, grouped and ordered by the next clock event."""
+    now_dt = _aware_utc_dt(now_dt or datetime.now(timezone.utc))
+    per_pod_window_obj_list = _build_per_pod_trading_window_list(
+        summary_dict,
+        mode_str=mode_str,
+        now_dt=now_dt,
+    )
+
+    grouped_window_dict: dict[tuple[str, ...], list[TradingWindow]] = {}
+    for window_obj in per_pod_window_obj_list:
+        timestamp_key_tuple = (
+            str(window_obj.signal_timestamp_str or ""),
+            str(window_obj.submission_timestamp_str or ""),
+            str(window_obj.target_timestamp_str or ""),
+        )
+        if not any(timestamp_key_tuple):
+            timestamp_key_tuple = timestamp_key_tuple + tuple(
+                window_obj.pod_id_str_list or ["?"]
+            )
+        grouped_window_dict.setdefault(timestamp_key_tuple, []).append(window_obj)
+
+    grouped_window_obj_list: list[TradingWindow] = []
+    for matching_window_obj_list in grouped_window_dict.values():
+        selected_window_obj = min(
+            matching_window_obj_list,
+            key=lambda window_obj: (
+                WINDOW_SEVERITY_RANK_DICT.get(window_obj.severity_str, 9),
+                0 if window_obj.action_required_bool else 1,
+            ),
+        )
+        grouped_pod_id_str_list = sorted(
+            {
+                pod_id_str
+                for window_obj in matching_window_obj_list
+                for pod_id_str in window_obj.pod_id_str_list or []
+            }
+        )
+        if len(grouped_pod_id_str_list) > 1:
+            state_identity_set = {
+                (
+                    window_obj.severity_str,
+                    window_obj.status_label_str,
+                    window_obj.detail_str,
+                    window_obj.action_required_bool,
+                )
+                for window_obj in matching_window_obj_list
+            }
+            if len(state_identity_set) > 1:
+                attention_status_label_str = selected_window_obj.status_label_str
+                attention_detail_str = selected_window_obj.detail_str
+                attention_pod_id_str_list = sorted(
+                    {
+                        pod_id_str
+                        for window_obj in matching_window_obj_list
+                        if window_obj.severity_str == selected_window_obj.severity_str
+                        and window_obj.status_label_str == attention_status_label_str
+                        and window_obj.detail_str == attention_detail_str
+                        for pod_id_str in window_obj.pod_id_str_list or []
+                    }
+                )
+                selected_window_obj.status_label_str = "Shared trading window"
+                selected_window_obj.detail_str = (
+                    f"{len(grouped_pod_id_str_list)} {mode_str} pods "
+                    "share this clock but have different current states. "
+                    f"{attention_status_label_str} — "
+                    f"{', '.join(attention_pod_id_str_list)}: {attention_detail_str}"
+                )
+                selected_window_obj.action_required_bool = False
+                selected_window_obj.action_str = None
+            else:
+                selected_window_obj.detail_str = (
+                    f"{selected_window_obj.detail_str} "
+                    f"{len(grouped_pod_id_str_list)} {mode_str} pods share this window."
+                )
+        selected_window_obj.pod_id_str_list = grouped_pod_id_str_list
+        grouped_window_obj_list.append(selected_window_obj)
+
+    grouped_window_obj_list.sort(
+        key=lambda window_obj: _trading_window_sort_key_tuple(window_obj, now_dt)
+    )
+    return grouped_window_obj_list
+
+
+def build_action_trading_window_list(
+    summary_dict: dict[str, Any],
+    *,
+    mode_str: str,
+    now_dt: datetime | None = None,
+) -> list[TradingWindow]:
+    """Action rows grouped only when both ownership and action identity match."""
+    now_dt = _aware_utc_dt(now_dt or datetime.now(timezone.utc))
+    action_window_obj_list = [
+        window_obj
+        for window_obj in _build_per_pod_trading_window_list(
+            summary_dict,
+            mode_str=mode_str,
+            now_dt=now_dt,
+        )
+        if window_obj.action_required_bool
+    ]
+    grouped_action_window_dict: dict[tuple[str, ...], list[TradingWindow]] = {}
+    for window_obj in action_window_obj_list:
+        action_key_tuple = (
+            str(window_obj.signal_timestamp_str or ""),
+            str(window_obj.submission_timestamp_str or ""),
+            str(window_obj.target_timestamp_str or ""),
+            window_obj.severity_str,
+            window_obj.status_label_str,
+            window_obj.detail_str,
+            str(window_obj.action_str or ""),
+        )
+        grouped_action_window_dict.setdefault(action_key_tuple, []).append(window_obj)
+
+    grouped_action_window_obj_list: list[TradingWindow] = []
+    for matching_window_obj_list in grouped_action_window_dict.values():
+        selected_window_obj = matching_window_obj_list[0]
+        selected_window_obj.pod_id_str_list = sorted(
+            {
+                pod_id_str
+                for window_obj in matching_window_obj_list
+                for pod_id_str in window_obj.pod_id_str_list or []
+            }
+        )
+        grouped_action_window_obj_list.append(selected_window_obj)
+    grouped_action_window_obj_list.sort(
+        key=lambda window_obj: _trading_window_sort_key_tuple(window_obj, now_dt)
+    )
+    return grouped_action_window_obj_list
+
+
+def _build_per_pod_trading_window_list(
+    summary_dict: dict[str, Any],
+    *,
+    mode_str: str,
+    now_dt: datetime,
+) -> list[TradingWindow]:
+    return [
+        build_next_trading_window(
+            {"pod_row_dict_list": [row_dict]},
+            mode_str=mode_str,
+            now_dt=now_dt,
+            append_share_detail_bool=False,
+        )
+        for row_dict in summary_dict.get("pod_row_dict_list") or []
+        if str(row_dict.get("mode_str") or "") == mode_str
+    ]
 
 
 def _row_has_active_window_bool(row_dict: dict[str, Any], now_dt: datetime) -> bool:
@@ -588,6 +867,71 @@ def _build_monthly_wait_window(
     if not calendar_id_str:
         return TradingWindow(pod_id_str_list=[str(row_dict.get("pod_id_str") or "?")])
     reason_code_str = str(row_dict.get("reason_code_str") or "")
+    latest_month_end_session_label_ts = (
+        scheduler_utils.get_latest_completed_month_end_session_label_ts(
+            now_dt,
+            calendar_id_str,
+            snapshot_ready_buffer_minutes_int=0,
+        )
+    )
+    if latest_month_end_session_label_ts is not None:
+        latest_execution_session_label_ts = (
+            scheduler_utils.get_first_next_month_session_label_ts(
+                latest_month_end_session_label_ts,
+                calendar_id_str,
+            )
+        )
+        latest_target_timestamp_dt = scheduler_utils.get_session_open_timestamp_ts(
+            latest_execution_session_label_ts,
+            calendar_id_str,
+        )
+        latest_submission_timestamp_dt = latest_target_timestamp_dt - timedelta(
+            seconds=scheduler_utils.DEFAULT_OPEN_SUBMISSION_LEAD_SECONDS_INT
+        )
+        market_now_dt = scheduler_utils.to_market_timestamp_ts(
+            now_dt,
+            calendar_id_str,
+        )
+        if (
+            _row_has_cycle_obligation_evidence_bool(row_dict)
+            and market_now_dt >= latest_submission_timestamp_dt
+            and not _row_decision_covers_signal_session_bool(
+                row_dict,
+                latest_month_end_session_label_ts,
+                calendar_id_str,
+            )
+        ):
+            latest_signal_timestamp_dt = (
+                scheduler_utils.get_session_close_timestamp_ts(
+                    latest_month_end_session_label_ts,
+                    calendar_id_str,
+                )
+            )
+            return TradingWindow(
+                has_data_bool=True,
+                severity_str="red",
+                status_label_str="Missed DecisionPlan cycle",
+                detail_str=(
+                    "No DecisionPlan was persisted for the month-end signal "
+                    "before its required submission deadline."
+                ),
+                signal_timestamp_str=latest_signal_timestamp_dt.isoformat(),
+                submission_timestamp_str=latest_submission_timestamp_dt.isoformat(),
+                target_timestamp_str=latest_target_timestamp_dt.isoformat(),
+                relative_str=_format_relative_time_str(
+                    latest_target_timestamp_dt.isoformat(),
+                    now_dt,
+                ),
+                trading_session_count_int=0,
+                action_required_bool=True,
+                action_str="missed_decision_cycle",
+                reason_code_str="missed_monthly_decision_cycle",
+                norgate_label_str=(
+                    "Required for "
+                    f"{latest_month_end_session_label_ts.date().isoformat()}"
+                ),
+                pod_id_str_list=[str(row_dict.get("pod_id_str") or "?")],
+            )
     signal_session_label_ts = _open_month_end_cycle_session_label_ts(
         now_dt,
         calendar_id_str,
@@ -660,13 +1004,22 @@ def _build_monthly_wait_window(
         _row_pre_execution_action_expired_bool(row_dict, now_dt)
         and required_severity_str != "red"
     )
-    if stale_preclose_state_bool or stale_expired_action_bool:
+    stale_expired_wait_bool = (
+        str(row_dict.get("next_action_str") or "") == "wait"
+        and status_label_str not in ("No action", "No operator action required")
+        and _row_target_window_expired_bool(row_dict, now_dt)
+        and required_severity_str != "red"
+    )
+    stale_expired_state_bool = (
+        stale_expired_action_bool or stale_expired_wait_bool
+    )
+    if stale_preclose_state_bool or stale_expired_state_bool:
         required_severity_str = "gray"
         status_label_str = "Awaiting scheduler refresh"
         detail_str = (
             "Persisted pre-execution action has expired; waiting for "
             "scheduler state to refresh."
-            if stale_expired_action_bool
+            if stale_expired_state_bool
             else (
                 "Month-end just closed; waiting for persisted scheduler and "
                 "Norgate state to refresh."
@@ -695,7 +1048,7 @@ def _build_monthly_wait_window(
         trading_session_count_int=trading_session_count_int,
         action_required_bool=(
             False
-            if stale_preclose_state_bool or stale_expired_action_bool
+            if stale_preclose_state_bool or stale_expired_state_bool
             else _operator_action_required_bool(required_action_dict)
         ),
         action_str="wait",
@@ -1050,6 +1403,41 @@ def _aware_utc_dt(value_dt: datetime) -> datetime:
     if value_dt.tzinfo is None:
         return value_dt.replace(tzinfo=timezone.utc)
     return value_dt.astimezone(timezone.utc)
+
+
+def _trading_window_sort_key_tuple(
+    window_obj: TradingWindow,
+    now_dt: datetime,
+) -> tuple[int, datetime, str]:
+    timestamp_dt_list: list[datetime] = []
+    for timestamp_str in (
+        window_obj.signal_timestamp_str,
+        window_obj.submission_timestamp_str,
+        window_obj.target_timestamp_str,
+    ):
+        if not timestamp_str:
+            continue
+        try:
+            timestamp_dt_list.append(_aware_utc_dt(_parse_iso_datetime(timestamp_str)))
+        except ValueError:
+            continue
+    future_timestamp_dt_list = [
+        timestamp_dt for timestamp_dt in timestamp_dt_list if timestamp_dt >= now_dt
+    ]
+    if future_timestamp_dt_list:
+        next_timestamp_dt = min(future_timestamp_dt_list)
+        expired_rank_int = 1
+    elif timestamp_dt_list:
+        next_timestamp_dt = max(timestamp_dt_list)
+        expired_rank_int = 0
+    else:
+        next_timestamp_dt = datetime.max.replace(tzinfo=timezone.utc)
+        expired_rank_int = 2
+    return (
+        expired_rank_int,
+        next_timestamp_dt,
+        ",".join(window_obj.pod_id_str_list or []),
+    )
 
 
 def _format_relative_time_str(target_timestamp_str: Any, now_dt: datetime) -> str:

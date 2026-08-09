@@ -29,7 +29,7 @@ def _coerce_value_obj(value_obj: Any) -> Any:
 # a naive timestamp is therefore assumed to be UTC before converting to ET.
 MARKET_TIMEZONE_OBJ = ZoneInfo("America/New_York")
 MARKET_TIMEZONE_SUFFIX_STR = "ET"
-CLOCK_DATE_FORMAT_STR = "%m-%d %H:%M"
+CLOCK_DATE_FORMAT_STR = "%m-%d %H:%M:%S"
 CLOCK_TIME_FORMAT_STR = "%H:%M:%S"
 
 _CLOCK_PARSE_FORMAT_STR_TUPLE = (
@@ -130,7 +130,7 @@ def filter_bps_str(value_obj: Any) -> str:
 
 
 def filter_clock_str(value_obj: Any) -> str:
-    """Date + minute in market time, e.g. ``05-21 16:00 ET``. No milliseconds."""
+    """Date + seconds in market time, e.g. ``05-21 16:00:02 ET``."""
     if not _coerce_value_obj(value_obj):
         return ""
     market_dt_obj = _parse_timestamp_to_market_dt(value_obj)

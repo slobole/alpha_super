@@ -6,7 +6,7 @@
     <div class="text-xs uppercase tracking-wide text-ink-500">Live vs Backtest</div>
     {% if comparison_state_str == 'available' %}
       <span class="text-xs text-ink-500 tabular-nums">
-        {{ row_dict.latest_comparison_timestamp_str or 'latest' }}
+        {{ row_dict.latest_comparison_timestamp_str | clock or 'latest' }}
       </span>
     {% endif %}
   </header>

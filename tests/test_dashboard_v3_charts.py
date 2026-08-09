@@ -126,13 +126,85 @@ def test_drawdown_polygon_omitted_when_curve_is_monotonic_up() -> None:
     assert chart_obj.drawdown_d_str == ""
 
 
-def test_window_30d_truncates_long_history() -> None:
+def test_window_1w_keeps_five_return_intervals_plus_baseline() -> None:
     long_point_list = [
         _point(f"2026-05-{day_int:02d}", 10000.0 + day_int)
         for day_int in range(1, 32)
     ]
-    chart_obj = build_equity_chart_dict(long_point_list, window_str="30d")
-    assert chart_obj.point_count_int == 30
+    chart_obj = build_equity_chart_dict(long_point_list, window_str="1w")
+    assert chart_obj.point_count_int == 6
+
+
+def test_mtd_and_ytd_keep_the_previous_period_eod_as_baseline() -> None:
+    point_list = [
+        _point("2025-12-31", 9000.0),
+        _point("2026-01-02", 9100.0),
+        _point("2026-04-30", 10000.0),
+        _point("2026-05-01", 10100.0),
+        _point("2026-05-04", 10200.0),
+    ]
+
+    mtd_chart_obj = build_equity_chart_dict(point_list, window_str="mtd")
+    ytd_chart_obj = build_equity_chart_dict(point_list, window_str="ytd")
+
+    assert mtd_chart_obj.earliest_market_date_str == "2026-04-30"
+    assert ytd_chart_obj.earliest_market_date_str == "2025-12-31"
+    assert mtd_chart_obj.window_is_partial_bool is False
+    assert ytd_chart_obj.window_is_partial_bool is False
+
+
+def test_mtd_marks_history_without_a_prior_eod_baseline_as_partial() -> None:
+    chart_obj = build_equity_chart_dict(
+        [
+            _point("2026-05-15", 10000.0),
+            _point("2026-05-18", 10100.0),
+        ],
+        window_str="mtd",
+    )
+
+    assert chart_obj.window_is_partial_bool is True
+    assert chart_obj.window_note_str == "Partial period · prior EOD baseline unavailable."
+
+
+def test_ytd_marks_history_without_a_prior_eod_baseline_as_partial() -> None:
+    chart_obj = build_equity_chart_dict(
+        [
+            _point("2026-05-15", 10000.0),
+            _point("2026-05-18", 10100.0),
+        ],
+        window_str="ytd",
+    )
+
+    assert chart_obj.window_str == "ytd"
+    assert chart_obj.window_is_partial_bool is True
+    assert chart_obj.window_note_str == "Partial period · prior EOD baseline unavailable."
+
+
+def test_mtd_does_not_treat_an_unusable_prior_eod_as_a_baseline() -> None:
+    chart_obj = build_equity_chart_dict(
+        [
+            {"market_date_str": "2026-04-30", "equity_float": None},
+            _point("2026-05-01", 10000.0),
+            _point("2026-05-04", 10100.0),
+        ],
+        window_str="mtd",
+    )
+
+    assert chart_obj.earliest_market_date_str == "2026-05-01"
+    assert chart_obj.window_is_partial_bool is True
+
+
+def test_malformed_period_date_falls_back_to_all() -> None:
+    chart_obj = build_equity_chart_dict(
+        [
+            _point("2026-05-15", 10000.0),
+            _point("not-a-date", 10100.0),
+        ],
+        window_str="mtd",
+    )
+
+    assert chart_obj.window_str == "all"
+    assert chart_obj.window_note_str == "Requested period unavailable · invalid EOD date."
 
 
 def test_window_all_preserves_full_history() -> None:
@@ -247,6 +319,28 @@ def test_annualized_vol_footnote_is_computed() -> None:
         _point("2026-05-04", 10100.0),
     ])
     assert chart_obj.annualized_vol_label_str.endswith("%")
+    assert chart_obj.vol_observation_count_int == 3
+
+
+def test_book_risk_vol_uses_only_latest_twenty_returns() -> None:
+    equity_float = 10000.0
+    point_list = [_point("2026-01-01", equity_float)]
+    for day_int in range(2, 27):
+        return_float = 0.01 if day_int % 2 == 0 else -0.005
+        equity_float *= 1.0 + return_float
+        point_list.append(
+            _point(f"2026-01-{day_int:02d}", equity_float)
+        )
+
+    full_risk_obj = build_book_risk_dict(point_list)
+    trailing_risk_obj = build_book_risk_dict(point_list[-21:])
+    full_chart_obj = build_equity_chart_dict(point_list)
+    trailing_chart_obj = build_equity_chart_dict(point_list[-21:])
+
+    assert full_risk_obj.vol_observation_count_int == 20
+    assert full_risk_obj.annualized_vol_label_str == trailing_risk_obj.annualized_vol_label_str
+    assert full_chart_obj.vol_observation_count_int == 20
+    assert full_chart_obj.annualized_vol_label_str == trailing_chart_obj.annualized_vol_label_str
 
 
 def test_vol_footnote_degrades_gracefully_for_two_points() -> None:
@@ -255,7 +349,14 @@ def test_vol_footnote_degrades_gracefully_for_two_points() -> None:
         _point("2026-05-01", 10000.0),
         _point("2026-05-02", 10500.0),
     ])
+    risk_obj = build_book_risk_dict([
+        _point("2026-05-01", 10000.0),
+        _point("2026-05-02", 10500.0),
+    ])
     assert chart_obj.annualized_vol_label_str == "—"
+    assert chart_obj.vol_observation_count_int == 1
+    assert risk_obj.annualized_vol_label_str == "—"
+    assert risk_obj.vol_observation_count_int == 1
 
 
 def test_flow_adjusted_return_drives_every_chart_readout() -> None:

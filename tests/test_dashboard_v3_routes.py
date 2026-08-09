@@ -417,10 +417,11 @@ def test_index_renders_overview(test_client_obj) -> None:
     assert response_obj.status_code == 200
     response_text_str = response_obj.get_data(as_text=True)
     assert "Live book" in response_text_str
-    assert "Next trading window" in response_text_str
-    assert "/fragments/trading-window/live" in response_text_str
+    assert "Upcoming trading windows" in response_text_str
+    assert "/fragments/trading-windows/live" in response_text_str
     assert "/fragments/health-strip?mode=live" in response_text_str
     assert "/fragments/top-bar?mode=live" in response_text_str
+    assert "BENCH" not in response_text_str
 
 
 def test_overview_all_clear_is_withheld_when_live_health_is_yellow(
@@ -459,6 +460,10 @@ def test_overview_all_clear_is_withheld_when_live_health_is_yellow(
             severity_str="yellow",
             detail_str="18% free",
         ),
+    )
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.app.build_trading_window_list",
+        lambda *_args, **_kwargs: [],
     )
 
     response_text_str = test_client_obj.get("/").get_data(as_text=True)
@@ -503,13 +508,15 @@ def test_live_trading_window_unknown_overrides_all_clear(
         lambda _path_str: HealthCellDict("Disk", "50% used", "green", "healthy"),
     )
     monkeypatch.setattr(
-        "alpha.live.dashboard_v3.app.build_next_trading_window",
-        lambda *_args, **_kwargs: TradingWindow(
-            has_data_bool=True,
-            severity_str="gray",
-            status_label_str="Awaiting scheduler refresh",
-            detail_str="Month-end just closed; waiting for persisted state.",
-        ),
+        "alpha.live.dashboard_v3.app.build_trading_window_list",
+        lambda *_args, **_kwargs: [
+            TradingWindow(
+                has_data_bool=True,
+                severity_str="gray",
+                status_label_str="Awaiting scheduler refresh",
+                detail_str="Month-end just closed; waiting for persisted state.",
+            )
+        ],
     )
 
     response_text_str = test_client_obj.get(
@@ -525,7 +532,7 @@ def test_real_daily_window_after_close_overrides_all_clear(
     monkeypatch,
 ) -> None:
     from alpha.live.dashboard_v3.health import HealthCellDict
-    from alpha.live.dashboard_v3.schedule import build_next_trading_window
+    from alpha.live.dashboard_v3.schedule import build_trading_window_list
 
     daily_row_dict = _build_pod_row_dict("dv2_caspersky_live", "live", "green")
     daily_row_dict.update(
@@ -565,8 +572,8 @@ def test_real_daily_window_after_close_overrides_all_clear(
     provider_obj.summary_dict["pod_row_dict_list"] = [daily_row_dict]
     fixed_now_dt = datetime(2026, 8, 5, 20, 1, 0, tzinfo=UTC)
     monkeypatch.setattr(
-        "alpha.live.dashboard_v3.app.build_next_trading_window",
-        lambda summary_dict, *, mode_str: build_next_trading_window(
+        "alpha.live.dashboard_v3.app.build_trading_window_list",
+        lambda summary_dict, *, mode_str: build_trading_window_list(
             summary_dict,
             mode_str=mode_str,
             now_dt=fixed_now_dt,
@@ -590,9 +597,9 @@ def test_real_daily_window_after_close_overrides_all_clear(
     ).get_data(as_text=True)
 
     assert "Awaiting scheduler refresh" in card_text_str
-    assert "16:00 ET" in card_text_str
-    assert "09:23 ET" in card_text_str
-    assert "09:30 ET" in card_text_str
+    assert "16:00:00 ET" in card_text_str
+    assert "09:23:30 ET" in card_text_str
+    assert "09:30:00 ET" in card_text_str
     assert "Cannot verify trading window" in top_bar_text_str
     assert "All clear" not in top_bar_text_str
 
@@ -669,7 +676,11 @@ def test_mode_page_lists_only_that_modes_pods(
             assert other_pod_id_str not in response_text_str
 
 
-def test_live_page_renders_pod_row_with_severity(test_client_obj) -> None:
+def test_live_page_renders_pod_row_with_severity(test_client_obj, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.app.build_trading_window_list",
+        lambda *_args, **_kwargs: [],
+    )
     response_obj = test_client_obj.get("/pods/live")
     response_text_str = response_obj.get_data(as_text=True)
     assert "dv2_caspersky_live" in response_text_str
@@ -1117,29 +1128,46 @@ def test_trading_window_fragment_renders_current_live_action(
     test_client_obj,
     monkeypatch,
 ) -> None:
-    from alpha.live.dashboard_v3.schedule import build_next_trading_window
+    from alpha.live.dashboard_v3.schedule import (
+        build_action_trading_window_list,
+        build_trading_window_list,
+    )
 
     monkeypatch.setattr(
-        "alpha.live.dashboard_v3.app.build_next_trading_window",
-        lambda summary_dict, *, mode_str: build_next_trading_window(
+        "alpha.live.dashboard_v3.app.build_trading_window_list",
+        lambda summary_dict, *, mode_str: build_trading_window_list(
             summary_dict,
             mode_str=mode_str,
-            now_dt=datetime(2026, 5, 21, 14, 30, 0, tzinfo=UTC),
+            now_dt=datetime(2026, 4, 30, 20, 30, 0, tzinfo=UTC),
+        ),
+    )
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.app.build_action_trading_window_list",
+        lambda summary_dict, *, mode_str: build_action_trading_window_list(
+            summary_dict,
+            mode_str=mode_str,
+            now_dt=datetime(2026, 4, 30, 20, 30, 0, tzinfo=UTC),
         ),
     )
     response_obj = test_client_obj.get("/fragments/trading-window/live")
     assert response_obj.status_code == 200
     response_text_str = response_obj.get_data(as_text=True)
-    assert "Next trading window" in response_text_str
+    assert "Upcoming trading windows" in response_text_str
     assert "Waiting for ACKs" in response_text_str
-    assert "16:00 ET" in response_text_str
-    assert "Open required action" not in response_text_str
+    assert "16:00:00 ET" in response_text_str
+    assert "Action required" not in response_text_str
 
 
 def test_trading_window_fragment_renders_action_button(
     test_client_obj,
     provider_obj,
+    monkeypatch,
 ) -> None:
+    from alpha.live.dashboard_v3.schedule import (
+        build_action_trading_window_list,
+        build_trading_window_list,
+    )
+
     live_row_dict = provider_obj.summary_dict["pod_row_dict_list"][0]
     live_row_dict["next_action_str"] = "build_decision_plan"
     live_row_dict["latest_vplan_target_execution_timestamp_str"] = None
@@ -1148,12 +1176,31 @@ def test_trading_window_fragment_renders_action_button(
         "severity_str": "yellow",
         "detail_str": "The current month-end DecisionPlan is due.",
     }
+    provider_obj.summary_dict["pod_row_dict_list"] = [live_row_dict]
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.app.build_trading_window_list",
+        lambda summary_dict, *, mode_str: build_trading_window_list(
+            summary_dict,
+            mode_str=mode_str,
+            now_dt=datetime(2026, 4, 30, 20, 30, 0, tzinfo=UTC),
+        ),
+    )
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.app.build_action_trading_window_list",
+        lambda summary_dict, *, mode_str: build_action_trading_window_list(
+            summary_dict,
+            mode_str=mode_str,
+            now_dt=datetime(2026, 4, 30, 20, 30, 0, tzinfo=UTC),
+        ),
+    )
 
     response_text_str = test_client_obj.get(
         "/fragments/trading-window/live"
     ).get_data(as_text=True)
     assert "Build DecisionPlan" in response_text_str
-    assert "Open required action" in response_text_str
+    assert "Action required" in response_text_str
+    assert "Review Pod" in response_text_str
+    assert response_text_str.count("The current month-end DecisionPlan is due.") == 1
     assert 'href="/pods/live"' in response_text_str
 
 
@@ -1196,6 +1243,7 @@ def test_health_strip_live_scope_excludes_incubation_failure(
 def test_trading_window_unknown_mode_returns_404(test_client_obj) -> None:
     assert test_client_obj.get("/fragments/trading-window/martian").status_code == 404
     assert test_client_obj.get("/fragments/trading-window/paper").status_code == 404
+    assert test_client_obj.get("/fragments/trading-windows/paper").status_code == 404
 
 
 def test_pod_row_carries_data_pod_id_attribute(test_client_obj) -> None:
@@ -1216,7 +1264,7 @@ def test_equity_chart_fragment_renders_elegant_curve(test_client_obj) -> None:
     # cards, no CAGR/Sharpe, no separate drawdown panel.
     assert "cumulative return" in response_text_str
     assert "Max drawdown" in response_text_str
-    assert "Annualized vol" in response_text_str
+    assert "20D realized vol" in response_text_str
     assert "CAGR" not in response_text_str
     assert "Sharpe" not in response_text_str
     # Crisp uniform scaling, plus the latest-point marker with a hover title.
@@ -1265,7 +1313,7 @@ def test_clock_filter_renders_market_time_without_milliseconds() -> None:
     from alpha.live.dashboard_v3.filters import filter_clock_str, filter_clock_sec_str
 
     # 2026-05-21T20:00:02.5Z UTC == 16:00:02 America/New_York (EDT, -4).
-    assert filter_clock_str("2026-05-21T20:00:02.500000+00:00") == "05-21 16:00 ET"
+    assert filter_clock_str("2026-05-21T20:00:02.500000+00:00") == "05-21 16:00:02 ET"
     assert filter_clock_sec_str("2026-05-21T20:00:02.500000+00:00") == "16:00:02 ET"
     # No millisecond fragment ever leaks through.
     assert "." not in filter_clock_sec_str("2026-05-21T20:00:02.500000+00:00")
@@ -1344,7 +1392,8 @@ def test_mode_page_renders_book_risk_strip(test_client_obj) -> None:
     assert "Current DD" in response_text_str
     assert "Max DD" in response_text_str
     assert "Days underwater" in response_text_str
-    assert "Vol (annualized)" in response_text_str
+    assert "20D realized vol" in response_text_str
+    assert "/20 sessions" in response_text_str
     # Live combined book ends at its peak ($28,400) → currently flat.
     assert "flat" in response_text_str
 
@@ -1354,7 +1403,7 @@ def test_schedule_strip_shows_et_time_and_next_marker(test_client_obj) -> None:
     assert response_obj.status_code == 200
     response_text_str = response_obj.get_data(as_text=True)
     # Absolute target execution time is shown in ET (20:00 UTC → 16:00 ET).
-    assert "16:00 ET" in response_text_str
+    assert "16:00:00 ET" in response_text_str
     # The soonest action is flagged with the ▶ marker.
     assert "▶" in response_text_str
 
@@ -1475,8 +1524,10 @@ def test_equity_chart_fragment_renders_svg(test_client_obj) -> None:
     assert "viewBox" in response_text_str
     assert "equity-area-gradient-dv2_caspersky_live" in response_text_str
     # Window selector buttons should be present and "all" should be marked active.
-    assert "window=30d" in response_text_str
-    assert "window=90d" in response_text_str
+    assert "window=1w" in response_text_str
+    assert "window=mtd" in response_text_str
+    assert "window=ytd" in response_text_str
+    assert "window=all" in response_text_str
 
 
 def test_equity_chart_fragment_unknown_pod_404s(test_client_obj) -> None:

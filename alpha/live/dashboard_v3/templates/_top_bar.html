@@ -1,13 +1,7 @@
-{# Top bar: sticky, polled every 5 seconds via HTMX to refresh the verdict.
-   Navigation lives in the side rail; this strip carries the LIVE|BENCH
-   product toggle and the verdict — state, not wayfinding. #}
+{# Top bar: LIVE identity, canonical XNYS market status and the live verdict. #}
 <header class="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-ink-100">
   <div class="max-w-[1480px] mx-auto px-6 h-14 flex items-center justify-between gap-4">
-    <div class="flex border border-ink-100">
-      <span class="px-4 py-1.5 font-mono text-xs tracking-wider text-accent border-b-2 border-accent font-medium">LIVE</span>
-      <a href="{{ bench_url_str }}"
-         class="px-4 py-1.5 font-mono text-xs tracking-wider text-ink-500 hover:text-ink-900">BENCH</a>
-    </div>
+    <span class="font-mono text-xs tracking-wider text-accent font-medium">LIVE</span>
 
     <div id="top-bar-verdict"
          hx-get="/fragments/top-bar{% if mode_str %}?mode={{ mode_str }}{% endif %}"
