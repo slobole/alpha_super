@@ -417,7 +417,7 @@ def test_index_renders_overview(test_client_obj) -> None:
     assert response_obj.status_code == 200
     response_text_str = response_obj.get_data(as_text=True)
     assert "Live book" in response_text_str
-    assert "Upcoming trading windows" in response_text_str
+    assert "Trading cycle" in response_text_str
     assert "lg:col-span-7" in response_text_str
     assert "lg:col-span-5" in response_text_str
     assert "Strategies" in response_text_str
@@ -1167,7 +1167,7 @@ def test_trading_window_fragment_renders_current_live_action(
     response_obj = test_client_obj.get("/fragments/trading-window/live")
     assert response_obj.status_code == 200
     response_text_str = response_obj.get_data(as_text=True)
-    assert "Upcoming trading windows" in response_text_str
+    assert "Trading cycle" in response_text_str
     assert "Strategies" in response_text_str
     assert "dv2_caspersky_live" in response_text_str
     assert "Waiting for ACKs" in response_text_str
@@ -1241,6 +1241,7 @@ def test_trading_window_fragment_expands_only_the_nearest_window(
                 target_timestamp_str="2026-08-11T09:30:00-04:00",
                 relative_str="in 10 hours",
                 norgate_label_str="Required for 2026-08-10",
+                reason_code_str="snapshot_not_ready_for_session",
                 pod_id_str_list=["daily_strategy"],
             ),
             TradingWindow(
@@ -1252,6 +1253,7 @@ def test_trading_window_fragment_expands_only_the_nearest_window(
                 target_timestamp_str="2026-09-01T09:30:00-04:00",
                 relative_str="in 16 sessions",
                 norgate_label_str="Required for 2026-08-31",
+                reason_code_str="later_cycle_reason",
                 pod_id_str_list=["monthly_strategy"],
             ),
         ],
@@ -1282,9 +1284,60 @@ def test_trading_window_fragment_expands_only_the_nearest_window(
     assert "Norgate" not in second_article_text_str
     assert "Later detail stays compact." not in second_article_text_str
     assert "monthly_strategy" in second_article_text_str
+    detail_obj_list = article_obj_list[0].xpath(".//details")
+    assert len(detail_obj_list) == 1
+    assert "open" not in detail_obj_list[0].attrib
+    assert detail_obj_list[0].xpath("normalize-space(./summary)") == "Technical details"
+    assert "Scheduler · Snapshot not ready for session" in detail_obj_list[0].text_content()
+    assert not article_obj_list[1].xpath(".//details")
+    assert "Later cycle reason" not in second_article_text_str
+    assert first_article_text_str.index("Norgate") < first_article_text_str.index(
+        "Signal"
+    ) < first_article_text_str.index("Submit") < first_article_text_str.index(
+        "Execute"
+    )
     assert response_text_str.index("Nearest cycle") < response_text_str.index(
         "Later cycle"
     )
+
+
+def test_trading_window_fragment_hides_later_only_scheduler_reason(
+    test_client_obj,
+    monkeypatch,
+) -> None:
+    from lxml import html as lxml_html
+
+    from alpha.live.dashboard_v3.schedule import TradingWindow
+
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.app.build_trading_window_list",
+        lambda *_args, **_kwargs: [
+            TradingWindow(
+                has_data_bool=True,
+                status_label_str="Nearest cycle",
+                pod_id_str_list=["daily_strategy"],
+            ),
+            TradingWindow(
+                has_data_bool=True,
+                status_label_str="Later cycle",
+                reason_code_str="later_cycle_reason",
+                pod_id_str_list=["monthly_strategy"],
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.app.build_action_trading_window_list",
+        lambda *_args, **_kwargs: [],
+    )
+
+    response_text_str = test_client_obj.get(
+        "/fragments/trading-windows/live"
+    ).get_data(as_text=True)
+    document_obj = lxml_html.fromstring(response_text_str)
+
+    assert not document_obj.xpath("//details")
+    assert "Technical details" not in response_text_str
+    assert "Later cycle reason" not in response_text_str
 
 
 def test_trading_window_fragment_empty_state_is_explicit(
@@ -1305,7 +1358,7 @@ def test_trading_window_fragment_empty_state_is_explicit(
     ).get_data(as_text=True)
 
     assert "Cannot verify" in response_text_str
-    assert "No live trading window can be verified." in response_text_str
+    assert "No live trading cycle can be verified." in response_text_str
     assert "<article" not in response_text_str
     assert "Action required" not in response_text_str
 

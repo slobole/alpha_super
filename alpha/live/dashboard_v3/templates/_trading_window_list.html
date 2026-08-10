@@ -1,10 +1,10 @@
-{# One chronological schedule. The nearest event keeps the old full-card
-   treatment; later events stay compact below it. Shared cycles are grouped and
-   every row names the strategy Pods that own it. #}
+{# Read-only trading-cycle view. The nearest cycle gets a minimal prerequisite
+   timeline; later cycles stay compact below it. Nothing in this template can
+   advance scheduler state or submit an order. #}
 <section class="h-full rounded-md border border-ink-100 bg-white shadow-sm overflow-hidden">
   <header class="px-4 py-3 border-b border-ink-100 flex items-start justify-between gap-3">
     <div>
-      <div class="font-mono text-[10px] uppercase tracking-widest text-ink-500">Upcoming trading windows</div>
+      <div class="font-mono text-[10px] uppercase tracking-widest text-ink-500">Trading cycle</div>
       <div class="font-semibold mt-1">
         {% if trading_window_dict_list %}
           {{ trading_window_dict_list[0].relative_str }}
@@ -24,7 +24,6 @@
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
-                {% if loop.first %}<span class="font-mono text-[9px] uppercase tracking-widest text-accent">Next</span>{% endif %}
                 <span class="inline-block w-2 h-2 rounded-full
                              {% if window_severity_str == 'red' %}bg-bad
                              {% elif window_severity_str == 'yellow' %}bg-warn
@@ -48,23 +47,24 @@
 
           {% if loop.first %}
             {% if window_dict.has_data_bool %}
-              <dl class="divide-y divide-ink-100 text-sm mt-3">
-                <div class="py-2 grid grid-cols-12 gap-2 items-baseline">
-                  <dt class="col-span-4 font-mono text-[10px] uppercase tracking-wide text-ink-500">Signal</dt>
-                  <dd class="col-span-8 font-mono tabular-nums text-right">{{ window_dict.signal_timestamp_str | clock or '—' }}</dd>
-                </div>
-                <div class="py-2 grid grid-cols-12 gap-2 items-baseline">
-                  <dt class="col-span-4 font-mono text-[10px] uppercase tracking-wide text-ink-500">Submit</dt>
-                  <dd class="col-span-8 font-mono tabular-nums text-right">{{ window_dict.submission_timestamp_str | clock or '—' }}</dd>
-                </div>
-                <div class="py-2 grid grid-cols-12 gap-2 items-baseline">
-                  <dt class="col-span-4 font-mono text-[10px] uppercase tracking-wide text-ink-500">Execute</dt>
-                  <dd class="col-span-8 font-mono tabular-nums text-right font-semibold">{{ window_dict.target_timestamp_str | clock or '—' }}</dd>
-                </div>
-                <div class="py-2 grid grid-cols-12 gap-2 items-baseline">
-                  <dt class="col-span-4 font-mono text-[10px] uppercase tracking-wide text-ink-500">Norgate</dt>
-                  <dd class="col-span-8 text-right text-ink-700">{{ window_dict.norgate_label_str }}</dd>
-                </div>
+              <dl class="mt-4 text-sm">
+                {% for stage_label_str, stage_value_str, stage_is_execute_bool in [
+                    ('Norgate', window_dict.norgate_label_str, false),
+                    ('Signal', window_dict.signal_timestamp_str | clock or '—', false),
+                    ('Submit', window_dict.submission_timestamp_str | clock or '—', false),
+                    ('Execute', window_dict.target_timestamp_str | clock or '—', true)
+                ] %}
+                  <div class="grid grid-cols-12 gap-2 min-h-10">
+                    <div class="col-span-1 relative flex justify-center pt-1.5" aria-hidden="true">
+                      <span class="relative z-10 w-2 h-2 rounded-full border border-ink-300 bg-white"></span>
+                      {% if not loop.last %}<span class="absolute top-3 bottom-[-6px] w-px bg-ink-100"></span>{% endif %}
+                    </div>
+                    <dt class="col-span-3 font-mono text-[10px] uppercase tracking-wide text-ink-500 pt-1">{{ stage_label_str }}</dt>
+                    <dd class="col-span-8 text-right tabular-nums {% if stage_is_execute_bool %}font-mono font-semibold{% elif stage_label_str != 'Norgate' %}font-mono{% endif %}">
+                      {{ stage_value_str }}
+                    </dd>
+                  </div>
+                {% endfor %}
               </dl>
             {% endif %}
 
@@ -79,9 +79,10 @@
           {% endif %}
 
           {% if loop.first and window_dict.reason_code_str %}
-            <div class="mt-2 font-mono text-[10px] text-ink-400">
-              Scheduler · {{ window_dict.reason_code_str | humanize_reason }}
-            </div>
+            <details class="mt-2 text-[10px] text-ink-400">
+              <summary class="cursor-pointer hover:text-ink-700">Technical details</summary>
+              <div class="mt-1 font-mono">Scheduler · {{ window_dict.reason_code_str | humanize_reason }}</div>
+            </details>
           {% endif %}
 
           {# Action ownership is attached to the matching clock instead of
@@ -120,6 +121,6 @@
       {% endfor %}
     </div>
   {% else %}
-    <div class="px-4 py-6 text-sm text-ink-500">No live trading window can be verified.</div>
+    <div class="px-4 py-6 text-sm text-ink-500">No live trading cycle can be verified.</div>
   {% endif %}
 </section>
