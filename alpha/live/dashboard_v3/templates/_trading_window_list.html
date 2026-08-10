@@ -1,37 +1,27 @@
-{# One chronological schedule. Shared cycles are grouped; the first row is the
-   nearest event and is not repeated in a separate headline card. #}
-<section class="rounded-md border border-ink-100 bg-white shadow-sm overflow-hidden">
-  <header class="px-4 py-3 border-b border-ink-100 flex flex-wrap items-center justify-between gap-2">
+{# One chronological schedule. The nearest event keeps the old full-card
+   treatment; later events stay compact below it. Shared cycles are grouped and
+   every row names the strategy Pods that own it. #}
+<section class="h-full rounded-md border border-ink-100 bg-white shadow-sm overflow-hidden">
+  <header class="px-4 py-3 border-b border-ink-100 flex items-start justify-between gap-3">
     <div>
-      <div class="text-[11px] uppercase tracking-wide text-ink-500">Upcoming trading windows</div>
-      <div class="text-xs text-ink-500 mt-0.5">Nearest event first · one next cycle per Pod · shared cycles grouped</div>
-    </div>
-    <a href="/pods/live" class="text-xs text-accent underline">Open Pods</a>
-  </header>
-
-  {% if action_window_dict_list %}
-    <div class="border-b border-bad/30 bg-bad-soft/40 px-4 py-3">
-      <div class="text-[10px] uppercase tracking-widest font-bold text-bad">Action required</div>
-      <div class="mt-2 space-y-2">
-        {% for window_dict in action_window_dict_list %}
-          <div class="flex flex-wrap items-start justify-between gap-2 text-sm">
-            <div>
-              <strong>{{ window_dict.status_label_str }}</strong>
-              <span class="text-ink-500">· {{ window_dict.pod_id_str_list | join(', ') }}</span>
-            </div>
-            <a href="/pods/live" class="text-xs text-accent underline shrink-0">Review Pod</a>
-          </div>
-        {% endfor %}
+      <div class="font-mono text-[10px] uppercase tracking-widest text-ink-500">Upcoming trading windows</div>
+      <div class="font-semibold mt-1">
+        {% if trading_window_dict_list %}
+          {{ trading_window_dict_list[0].relative_str }}
+        {% else %}
+          Cannot verify
+        {% endif %}
       </div>
     </div>
-  {% endif %}
+    <a href="/pods/live" class="text-xs text-accent underline shrink-0">Open Pods</a>
+  </header>
 
   {% if trading_window_dict_list %}
     <div class="divide-y divide-ink-100">
       {% for window_dict in trading_window_dict_list %}
         {% set window_severity_str = window_dict.severity_str | normalize_severity %}
-        <article class="px-4 py-3 {% if loop.first %}bg-ink-50{% endif %}">
-          <div class="flex flex-wrap items-start justify-between gap-3">
+        <article class="px-4 py-3 {% if loop.first %}bg-ink-50/60{% endif %}">
+          <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
                 {% if loop.first %}<span class="font-mono text-[9px] uppercase tracking-widest text-accent">Next</span>{% endif %}
@@ -41,43 +31,91 @@
                              {% elif window_severity_str == 'green' %}bg-ok
                              {% else %}bg-mute{% endif %}"></span>
                 <strong class="text-sm">{{ window_dict.status_label_str }}</strong>
-                <span class="font-mono text-[11px] text-ink-500 truncate">
-                  {{ window_dict.pod_id_str_list | join(', ') }}
-                </span>
               </div>
-              <div class="text-xs text-ink-500 mt-1">{{ window_dict.detail_str }}</div>
+              <div class="mt-1 flex flex-wrap items-center gap-1.5">
+                <span class="font-mono text-[9px] uppercase tracking-widest text-ink-400">Strategies</span>
+                {% for pod_id_str in window_dict.pod_id_str_list %}
+                  <span class="border border-ink-100 bg-white px-1.5 py-0.5 font-mono text-[10px] text-ink-600">
+                    {{ pod_id_str }}
+                  </span>
+                {% endfor %}
+              </div>
             </div>
-            <div class="font-mono text-xs tabular-nums text-ink-700 shrink-0">
-              {{ window_dict.relative_str }}
-            </div>
+            {% if not loop.first %}
+              <div class="font-mono text-[11px] tabular-nums text-ink-600 shrink-0">{{ window_dict.relative_str }}</div>
+            {% endif %}
           </div>
 
-          {% if window_dict.has_data_bool %}
-            <div class="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-2 mt-3 text-xs tabular-nums">
-              <div>
-                <div class="text-[10px] uppercase tracking-wide text-ink-400">Signal</div>
-                <div>{{ window_dict.signal_timestamp_str | clock or '—' }}</div>
-              </div>
-              <div>
-                <div class="text-[10px] uppercase tracking-wide text-ink-400">Submit</div>
-                <div>{{ window_dict.submission_timestamp_str | clock or '—' }}</div>
-              </div>
-              <div>
-                <div class="text-[10px] uppercase tracking-wide text-ink-400">Execute</div>
-                <div class="font-semibold">{{ window_dict.target_timestamp_str | clock or '—' }}</div>
-              </div>
-              <div>
-                <div class="text-[10px] uppercase tracking-wide text-ink-400">Norgate</div>
-                <div>{{ window_dict.norgate_label_str }}</div>
-              </div>
+          {% if loop.first %}
+            {% if window_dict.has_data_bool %}
+              <dl class="divide-y divide-ink-100 text-sm mt-3">
+                <div class="py-2 grid grid-cols-12 gap-2 items-baseline">
+                  <dt class="col-span-4 font-mono text-[10px] uppercase tracking-wide text-ink-500">Signal</dt>
+                  <dd class="col-span-8 font-mono tabular-nums text-right">{{ window_dict.signal_timestamp_str | clock or '—' }}</dd>
+                </div>
+                <div class="py-2 grid grid-cols-12 gap-2 items-baseline">
+                  <dt class="col-span-4 font-mono text-[10px] uppercase tracking-wide text-ink-500">Submit</dt>
+                  <dd class="col-span-8 font-mono tabular-nums text-right">{{ window_dict.submission_timestamp_str | clock or '—' }}</dd>
+                </div>
+                <div class="py-2 grid grid-cols-12 gap-2 items-baseline">
+                  <dt class="col-span-4 font-mono text-[10px] uppercase tracking-wide text-ink-500">Execute</dt>
+                  <dd class="col-span-8 font-mono tabular-nums text-right font-semibold">{{ window_dict.target_timestamp_str | clock or '—' }}</dd>
+                </div>
+                <div class="py-2 grid grid-cols-12 gap-2 items-baseline">
+                  <dt class="col-span-4 font-mono text-[10px] uppercase tracking-wide text-ink-500">Norgate</dt>
+                  <dd class="col-span-8 text-right text-ink-700">{{ window_dict.norgate_label_str }}</dd>
+                </div>
+              </dl>
+            {% endif %}
+
+            <div class="mt-3 border-t border-ink-100 pt-3 text-xs text-ink-500">{{ window_dict.detail_str }}</div>
+          {% elif window_dict.has_data_bool %}
+            <div class="mt-2 flex items-baseline justify-between gap-3 text-xs">
+              <span class="text-ink-500">Signal {{ window_dict.signal_timestamp_str | clock or '—' }}</span>
+              <span class="font-mono tabular-nums text-ink-700">Execute {{ window_dict.target_timestamp_str | clock or '—' }}</span>
             </div>
+          {% else %}
+            <div class="text-xs text-ink-500 mt-2">{{ window_dict.detail_str }}</div>
           {% endif %}
 
-          {% if window_dict.reason_code_str %}
+          {% if loop.first and window_dict.reason_code_str %}
             <div class="mt-2 font-mono text-[10px] text-ink-400">
               Scheduler · {{ window_dict.reason_code_str | humanize_reason }}
             </div>
           {% endif %}
+
+          {# Action ownership is attached to the matching clock instead of
+             repeating the whole event in a separate banner. #}
+          {% for action_window_dict in action_window_dict_list %}
+            {% set action_matches_window_obj = namespace(value=false) %}
+            {% set window_has_clock_bool = window_dict.signal_timestamp_str
+                                                or window_dict.submission_timestamp_str
+                                                or window_dict.target_timestamp_str %}
+            {% set action_has_clock_bool = action_window_dict.signal_timestamp_str
+                                                or action_window_dict.submission_timestamp_str
+                                                or action_window_dict.target_timestamp_str %}
+            {% if window_has_clock_bool and action_has_clock_bool
+                  and action_window_dict.signal_timestamp_str == window_dict.signal_timestamp_str
+                  and action_window_dict.submission_timestamp_str == window_dict.submission_timestamp_str
+                  and action_window_dict.target_timestamp_str == window_dict.target_timestamp_str %}
+              {% set action_matches_window_obj.value = true %}
+            {% elif not window_has_clock_bool and not action_has_clock_bool %}
+              {% for action_pod_id_str in action_window_dict.pod_id_str_list %}
+                {% if action_pod_id_str in window_dict.pod_id_str_list %}
+                  {% set action_matches_window_obj.value = true %}
+                {% endif %}
+              {% endfor %}
+            {% endif %}
+            {% if action_matches_window_obj.value %}
+              <div class="mt-3 border-l-2 border-bad bg-bad-soft/30 px-3 py-2 text-xs">
+                <div class="font-semibold text-bad">
+                  Action required{% if action_window_dict.status_label_str != window_dict.status_label_str %} · {{ action_window_dict.status_label_str }}{% endif %}
+                </div>
+                <div class="text-ink-600 mt-0.5">{{ action_window_dict.pod_id_str_list | join(', ') }}</div>
+                <a href="/pods/live" class="inline-block mt-1 text-accent underline">Review Pod</a>
+              </div>
+            {% endif %}
+          {% endfor %}
         </article>
       {% endfor %}
     </div>

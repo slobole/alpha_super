@@ -59,9 +59,9 @@
   </section>
 {% endif %}
 
-<section class="mb-4">
+<section class="mb-4 grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
   {% if combined_book_chart_dict %}
-    <div class="rounded-md border border-ink-100 bg-white shadow-sm p-4">
+    <div class="lg:col-span-7 rounded-md border border-ink-100 bg-white shadow-sm p-4">
       <header class="flex items-baseline justify-between mb-1">
         <div class="text-xs uppercase tracking-wide text-ink-500"
              title="end-of-day combined-book equity series">
@@ -85,18 +85,17 @@
     </div>
   {% endif %}
 
+  <div id="trading-window-list"
+       class="{% if combined_book_chart_dict %}lg:col-span-5{% else %}lg:col-span-12{% endif %}"
+       hx-get="/fragments/trading-windows/live"
+       hx-trigger="every 30s"
+       hx-swap="innerHTML">
+    {% include "_trading_window_list.html" %}
+  </div>
 </section>
 
 {# Book-level realized risk (drawdown + volatility). #}
 {% include "_book_risk_strip.html" %}
-
-<div id="trading-window-list"
-     class="mb-4"
-     hx-get="/fragments/trading-windows/live"
-     hx-trigger="every 30s"
-     hx-swap="innerHTML">
-  {% include "_trading_window_list.html" %}
-</div>
 
 {# Strategy allocation pie (slices = running pods by equity). #}
 {% include "_allocation_pie.html" %}

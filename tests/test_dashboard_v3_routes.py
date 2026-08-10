@@ -418,10 +418,25 @@ def test_index_renders_overview(test_client_obj) -> None:
     response_text_str = response_obj.get_data(as_text=True)
     assert "Live book" in response_text_str
     assert "Upcoming trading windows" in response_text_str
+    assert "lg:col-span-7" in response_text_str
+    assert "lg:col-span-5" in response_text_str
+    assert "Strategies" in response_text_str
     assert "/fragments/trading-windows/live" in response_text_str
     assert "/fragments/health-strip?mode=live" in response_text_str
     assert "/fragments/top-bar?mode=live" in response_text_str
     assert "BENCH" not in response_text_str
+
+    from lxml import html as lxml_html
+
+    document_obj = lxml_html.fromstring(response_text_str)
+    chart_container_obj = document_obj.xpath(
+        '//div[contains(concat(" ", normalize-space(@class), " "), " lg:col-span-7 ")]'
+    )[0]
+    trading_window_container_obj = document_obj.get_element_by_id(
+        "trading-window-list"
+    )
+    assert chart_container_obj.getparent() is trading_window_container_obj.getparent()
+    assert "lg:grid-cols-12" in str(chart_container_obj.getparent().get("class"))
 
 
 def test_overview_all_clear_is_withheld_when_live_health_is_yellow(
@@ -1153,6 +1168,8 @@ def test_trading_window_fragment_renders_current_live_action(
     assert response_obj.status_code == 200
     response_text_str = response_obj.get_data(as_text=True)
     assert "Upcoming trading windows" in response_text_str
+    assert "Strategies" in response_text_str
+    assert "dv2_caspersky_live" in response_text_str
     assert "Waiting for ACKs" in response_text_str
     assert "16:00:00 ET" in response_text_str
     assert "Action required" not in response_text_str
@@ -1202,6 +1219,200 @@ def test_trading_window_fragment_renders_action_button(
     assert "Review Pod" in response_text_str
     assert response_text_str.count("The current month-end DecisionPlan is due.") == 1
     assert 'href="/pods/live"' in response_text_str
+
+
+def test_trading_window_fragment_expands_only_the_nearest_window(
+    test_client_obj,
+    monkeypatch,
+) -> None:
+    from lxml import html as lxml_html
+
+    from alpha.live.dashboard_v3.schedule import TradingWindow
+
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.app.build_trading_window_list",
+        lambda *_args, **_kwargs: [
+            TradingWindow(
+                has_data_bool=True,
+                status_label_str="Nearest cycle",
+                detail_str="Nearest detail remains visible.",
+                signal_timestamp_str="2026-08-10T16:00:00-04:00",
+                submission_timestamp_str="2026-08-11T09:23:30-04:00",
+                target_timestamp_str="2026-08-11T09:30:00-04:00",
+                relative_str="in 10 hours",
+                norgate_label_str="Required for 2026-08-10",
+                pod_id_str_list=["daily_strategy"],
+            ),
+            TradingWindow(
+                has_data_bool=True,
+                status_label_str="Later cycle",
+                detail_str="Later detail stays compact.",
+                signal_timestamp_str="2026-08-31T16:00:00-04:00",
+                submission_timestamp_str="2026-09-01T09:23:30-04:00",
+                target_timestamp_str="2026-09-01T09:30:00-04:00",
+                relative_str="in 16 sessions",
+                norgate_label_str="Required for 2026-08-31",
+                pod_id_str_list=["monthly_strategy"],
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.app.build_action_trading_window_list",
+        lambda *_args, **_kwargs: [],
+    )
+
+    response_text_str = test_client_obj.get(
+        "/fragments/trading-windows/live"
+    ).get_data(as_text=True)
+    document_obj = lxml_html.fromstring(response_text_str)
+    article_obj_list = document_obj.xpath("//article")
+
+    assert len(article_obj_list) == 2
+    first_article_text_str = article_obj_list[0].text_content()
+    second_article_text_str = article_obj_list[1].text_content()
+    assert "Nearest cycle" in first_article_text_str
+    assert "Nearest detail remains visible." in first_article_text_str
+    assert "Submit" in first_article_text_str
+    assert "Norgate" in first_article_text_str
+    assert "daily_strategy" in first_article_text_str
+    assert "Later cycle" in second_article_text_str
+    assert "Signal" in second_article_text_str
+    assert "Execute" in second_article_text_str
+    assert "Submit" not in second_article_text_str
+    assert "Norgate" not in second_article_text_str
+    assert "Later detail stays compact." not in second_article_text_str
+    assert "monthly_strategy" in second_article_text_str
+    assert response_text_str.index("Nearest cycle") < response_text_str.index(
+        "Later cycle"
+    )
+
+
+def test_trading_window_fragment_empty_state_is_explicit(
+    test_client_obj,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.app.build_trading_window_list",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.app.build_action_trading_window_list",
+        lambda *_args, **_kwargs: [],
+    )
+
+    response_text_str = test_client_obj.get(
+        "/fragments/trading-windows/live"
+    ).get_data(as_text=True)
+
+    assert "Cannot verify" in response_text_str
+    assert "No live trading window can be verified." in response_text_str
+    assert "<article" not in response_text_str
+    assert "Action required" not in response_text_str
+
+
+def test_shared_clock_keeps_action_owner_inside_one_event(
+    test_client_obj,
+    monkeypatch,
+) -> None:
+    from lxml import html as lxml_html
+
+    from alpha.live.dashboard_v3.schedule import TradingWindow
+
+    shared_clock_dict = {
+        "has_data_bool": True,
+        "signal_timestamp_str": "2026-08-10T16:00:00-04:00",
+        "submission_timestamp_str": "2026-08-11T09:23:30-04:00",
+        "target_timestamp_str": "2026-08-11T09:30:00-04:00",
+        "relative_str": "in 10 hours",
+    }
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.app.build_trading_window_list",
+        lambda *_args, **_kwargs: [
+            TradingWindow(
+                **shared_clock_dict,
+                status_label_str="Shared trading window",
+                detail_str="Two strategies share the clock.",
+                pod_id_str_list=["action_pod", "wait_pod"],
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.app.build_action_trading_window_list",
+        lambda *_args, **_kwargs: [
+            TradingWindow(
+                **shared_clock_dict,
+                status_label_str="Build DecisionPlan",
+                detail_str="The current DecisionPlan is due.",
+                action_required_bool=True,
+                pod_id_str_list=["action_pod"],
+            )
+        ],
+    )
+
+    response_text_str = test_client_obj.get(
+        "/fragments/trading-windows/live"
+    ).get_data(as_text=True)
+    document_obj = lxml_html.fromstring(response_text_str)
+    article_obj = document_obj.xpath("//article")[0]
+    action_block_obj = article_obj.xpath(
+        './/div[contains(normalize-space(.), "Action required")]'
+    )[0]
+    action_text_str = action_block_obj.text_content()
+
+    assert "action_pod" in article_obj.text_content()
+    assert "wait_pod" in article_obj.text_content()
+    assert "action_pod" in action_text_str
+    assert "wait_pod" not in action_text_str
+    assert response_text_str.count("Action required") == 1
+    assert response_text_str.count("Two strategies share the clock.") == 1
+
+
+def test_clockless_action_is_not_attached_to_an_unrelated_pod(
+    test_client_obj,
+    monkeypatch,
+) -> None:
+    from lxml import html as lxml_html
+
+    from alpha.live.dashboard_v3.schedule import TradingWindow
+
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.app.build_trading_window_list",
+        lambda *_args, **_kwargs: [
+            TradingWindow(
+                status_label_str="Cannot verify action pod",
+                detail_str="Persisted target is invalid.",
+                pod_id_str_list=["action_pod"],
+            ),
+            TradingWindow(
+                status_label_str="Cannot verify other pod",
+                detail_str="Calendar is unavailable.",
+                pod_id_str_list=["other_pod"],
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.app.build_action_trading_window_list",
+        lambda *_args, **_kwargs: [
+            TradingWindow(
+                status_label_str="Review persisted state",
+                detail_str="Persisted target is invalid.",
+                action_required_bool=True,
+                pod_id_str_list=["action_pod"],
+            )
+        ],
+    )
+
+    response_text_str = test_client_obj.get(
+        "/fragments/trading-windows/live"
+    ).get_data(as_text=True)
+    document_obj = lxml_html.fromstring(response_text_str)
+    article_obj_list = document_obj.xpath("//article")
+
+    assert "Action required" in article_obj_list[0].text_content()
+    assert "action_pod" in article_obj_list[0].text_content()
+    assert "Action required" not in article_obj_list[1].text_content()
+    assert "other_pod" in article_obj_list[1].text_content()
+    assert response_text_str.count("Action required") == 1
 
 
 def test_health_strip_live_scope_excludes_incubation_failure(
