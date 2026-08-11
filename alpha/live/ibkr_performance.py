@@ -17,6 +17,7 @@ this line must remain a Shadow diagnostic.
 
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 import hashlib
@@ -305,7 +306,7 @@ class PerformanceStore:
 
     def initialize(self) -> None:
         self.db_path_obj.parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as connection_obj:
+        with closing(self._connect()) as connection_obj, connection_obj:
             connection_obj.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS flex_import (
@@ -367,7 +368,7 @@ class PerformanceStore:
             for binding_obj in binding_obj_list
         }
         self.initialize()
-        with self._connect() as parity_connection_obj:
+        with closing(self._connect()) as parity_connection_obj, parity_connection_obj:
             self._validate_existing_binding_parity(
                 parity_connection_obj, binding_by_account_route_dict
             )
@@ -380,7 +381,7 @@ class PerformanceStore:
         )
         checksum_str = hashlib.sha256(xml_text_str.encode("utf-8")).hexdigest()
         imported_timestamp_str = imported_timestamp_str or datetime.now(UTC).isoformat()
-        with self._connect() as connection_obj:
+        with closing(self._connect()) as connection_obj, connection_obj:
             connection_obj.execute("BEGIN IMMEDIATE")
             duplicate_row_obj = connection_obj.execute(
                 "SELECT import_id_int FROM flex_import WHERE checksum_str = ?",
@@ -463,7 +464,7 @@ class PerformanceStore:
             raise ValueError(f"Unsupported sync status {status_str!r}.")
         attempted_timestamp_str = attempted_timestamp_str or datetime.now(UTC).isoformat()
         self.initialize()
-        with self._connect() as connection_obj:
+        with closing(self._connect()) as connection_obj, connection_obj:
             connection_obj.execute(
                 """
                 INSERT INTO sync_attempt (
@@ -484,7 +485,7 @@ class PerformanceStore:
     def contains_checksum_bool(self, checksum_str: str) -> bool:
         if not self.db_path_obj.exists():
             return False
-        with self._connect() as connection_obj:
+        with closing(self._connect()) as connection_obj, connection_obj:
             return connection_obj.execute(
                 "SELECT 1 FROM flex_import WHERE checksum_str = ? LIMIT 1",
                 (checksum_str,),
@@ -495,7 +496,7 @@ class PerformanceStore:
     ) -> bool:
         if not self.db_path_obj.exists():
             return False
-        with self._connect() as connection_obj:
+        with closing(self._connect()) as connection_obj, connection_obj:
             return connection_obj.execute(
                 """
                 SELECT 1 FROM daily_performance
@@ -514,7 +515,7 @@ class PerformanceStore:
         _validate_binding_dict(binding_by_account_route_dict)
         if not self.db_path_obj.exists():
             return
-        with self._connect() as connection_obj:
+        with closing(self._connect()) as connection_obj, connection_obj:
             self._validate_existing_binding_parity(
                 connection_obj, binding_by_account_route_dict
             )
@@ -537,7 +538,7 @@ class PerformanceStore:
     def load_binding_dict(self) -> dict[str, PodPerformanceBinding]:
         if not self.db_path_obj.exists():
             return {}
-        with self._connect() as connection_obj:
+        with closing(self._connect()) as connection_obj, connection_obj:
             row_obj_list = connection_obj.execute(
                 """
                 SELECT account_route_str, pod_id_str, return_start_date_str,
@@ -562,7 +563,7 @@ class PerformanceStore:
     def load_daily_row_list(self) -> list[FlexDailyPerformance]:
         if not self.db_path_obj.exists():
             return []
-        with self._connect() as connection_obj:
+        with closing(self._connect()) as connection_obj, connection_obj:
             row_obj_list = connection_obj.execute(
                 """
                 SELECT account_route_str, pod_id_str, market_date_str,
@@ -588,7 +589,7 @@ class PerformanceStore:
     def load_latest_import_dict(self) -> dict[str, Any] | None:
         if not self.db_path_obj.exists():
             return None
-        with self._connect() as connection_obj:
+        with closing(self._connect()) as connection_obj, connection_obj:
             row_obj = connection_obj.execute(
                 """
                 SELECT imported_timestamp_str, request_from_date_str,
@@ -610,7 +611,7 @@ class PerformanceStore:
     ]:
         if not self.db_path_obj.exists():
             return {}, [], None, None
-        with self._connect() as connection_obj:
+        with closing(self._connect()) as connection_obj, connection_obj:
             connection_obj.execute("BEGIN")
             binding_row_obj_list = connection_obj.execute(
                 """

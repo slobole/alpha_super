@@ -11,11 +11,13 @@ from alpha.live.ibkr_performance_sync import (
     _date_chunk_tuple_list,
     _eod_boundary_date_tuple,
     _latest_completed_session_date_str,
+    bootstrap_remote,
     fetch_flex_statement_xml_str,
     import_xml_bool,
     sync_range_bool,
 )
 from alpha.live.ibkr_performance import (
+    PerformanceContractError,
     PerformanceStore,
     PodPerformanceBinding,
     build_performance_page_dict,
@@ -225,6 +227,147 @@ def test_bootstrap_chunks_never_exceed_365_calendar_days() -> None:
             - datetime.fromisoformat(chunk_from_date_str).date()
         ).days + 1
         assert chunk_day_count_int <= 365
+
+
+def test_bootstrap_failure_closes_sqlite_and_preserves_original_error(
+    tmp_path, monkeypatch
+) -> None:
+    db_path_obj = tmp_path / "performance.sqlite3"
+    temporary_db_path_obj = tmp_path / "performance.sqlite3.bootstrap.tmp"
+    temporary_sidecar_path_obj_list = [
+        tmp_path / "performance.sqlite3.bootstrap.tmp-journal",
+        tmp_path / "performance.sqlite3.bootstrap.tmp-wal",
+        tmp_path / "performance.sqlite3.bootstrap.tmp-shm",
+    ]
+    for temporary_sidecar_path_obj in temporary_sidecar_path_obj_list:
+        temporary_sidecar_path_obj.write_text("stale", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "alpha.live.ibkr_performance_sync.fetch_flex_statement_xml_str",
+        lambda **_kwargs: "<not-valid-flex-xml>",
+    )
+
+    with pytest.raises(PerformanceContractError, match="Flex XML"):
+        bootstrap_remote(
+            db_path_str=str(db_path_obj),
+            binding_obj_list=[
+                PodPerformanceBinding("U100", "pod_a", "2026-08-07", None, True)
+            ],
+            from_date_str="2026-08-07",
+            to_date_str="2026-08-07",
+            query_name_str="ALPHA_DAILY_TWR",
+            token_str="secret-token",
+            query_id_str="12345",
+            replace_bool=False,
+        )
+
+    assert not db_path_obj.exists()
+    assert not temporary_db_path_obj.exists()
+    assert not any(
+        temporary_sidecar_path_obj.exists()
+        for temporary_sidecar_path_obj in temporary_sidecar_path_obj_list
+    )
+
+
+def test_bootstrap_cleanup_error_does_not_mask_original_flex_error(
+    tmp_path, monkeypatch
+) -> None:
+    db_path_obj = tmp_path / "performance.sqlite3"
+    original_unlink_fn = type(db_path_obj).unlink
+
+    monkeypatch.setattr(
+        "alpha.live.ibkr_performance_sync.fetch_flex_statement_xml_str",
+        lambda **_kwargs: "<not-valid-flex-xml>",
+    )
+
+    def _unlink_with_locked_temp(self, *args, **kwargs):
+        if str(self).endswith(".bootstrap.tmp") and self.exists():
+            raise PermissionError("simulated Windows file lock")
+        return original_unlink_fn(self, *args, **kwargs)
+
+    monkeypatch.setattr(type(db_path_obj), "unlink", _unlink_with_locked_temp)
+
+    with pytest.raises(PerformanceContractError, match="Flex XML"):
+        bootstrap_remote(
+            db_path_str=str(db_path_obj),
+            binding_obj_list=[
+                PodPerformanceBinding("U100", "pod_a", "2026-08-07", None, True)
+            ],
+            from_date_str="2026-08-07",
+            to_date_str="2026-08-07",
+            query_name_str="ALPHA_DAILY_TWR",
+            token_str="secret-token",
+            query_id_str="12345",
+            replace_bool=False,
+        )
+
+    assert not db_path_obj.exists()
+
+
+def test_bootstrap_fails_closed_when_stale_temp_cannot_be_removed(
+    tmp_path, monkeypatch
+) -> None:
+    db_path_obj = tmp_path / "performance.sqlite3"
+    temporary_db_path_obj = tmp_path / "performance.sqlite3.bootstrap.tmp"
+    temporary_db_path_obj.write_text("stale", encoding="utf-8")
+    original_unlink_fn = type(db_path_obj).unlink
+    fetch_called_bool = False
+
+    def _fetch_flex_statement_xml_str(**_kwargs):
+        nonlocal fetch_called_bool
+        fetch_called_bool = True
+        return "<not-valid-flex-xml>"
+
+    def _unlink_with_locked_temp(self, *args, **kwargs):
+        if self == temporary_db_path_obj:
+            raise PermissionError("simulated Windows file lock")
+        return original_unlink_fn(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        "alpha.live.ibkr_performance_sync.fetch_flex_statement_xml_str",
+        _fetch_flex_statement_xml_str,
+    )
+    monkeypatch.setattr(type(db_path_obj), "unlink", _unlink_with_locked_temp)
+
+    with pytest.raises(FlexSyncError, match="Cannot clean"):
+        bootstrap_remote(
+            db_path_str=str(db_path_obj),
+            binding_obj_list=[
+                PodPerformanceBinding("U100", "pod_a", "2026-08-07", None, True)
+            ],
+            from_date_str="2026-08-07",
+            to_date_str="2026-08-07",
+            query_name_str="ALPHA_DAILY_TWR",
+            token_str="secret-token",
+            query_id_str="12345",
+            replace_bool=False,
+        )
+
+    assert fetch_called_bool is False
+    assert not db_path_obj.exists()
+
+
+def test_bootstrap_refuses_a_second_concurrent_run(tmp_path) -> None:
+    db_path_obj = tmp_path / "performance.sqlite3"
+    lock_path_obj = tmp_path / "performance.sqlite3.bootstrap.lock"
+    lock_path_obj.write_text("12345", encoding="utf-8")
+
+    with pytest.raises(FlexSyncError, match="already running"):
+        bootstrap_remote(
+            db_path_str=str(db_path_obj),
+            binding_obj_list=[
+                PodPerformanceBinding("U100", "pod_a", "2026-08-07", None, True)
+            ],
+            from_date_str="2026-08-07",
+            to_date_str="2026-08-07",
+            query_name_str="ALPHA_DAILY_TWR",
+            token_str="secret-token",
+            query_id_str="12345",
+            replace_bool=False,
+        )
+
+    assert not db_path_obj.exists()
+    assert lock_path_obj.exists()
 
 
 def test_only_broker_eod_rows_define_trusted_performance_boundary(

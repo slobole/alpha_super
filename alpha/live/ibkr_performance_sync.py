@@ -270,15 +270,17 @@ def bootstrap_remote(
     replace_bool: bool,
 ) -> None:
     db_path_obj = Path(db_path_str).expanduser()
-    if db_path_obj.exists() and not replace_bool:
-        raise FlexSyncError(
-            f"Performance database already exists at {db_path_obj}; "
-            "use --replace only for an intentional full rebuild."
-        )
     temporary_db_path_obj = db_path_obj.with_name(db_path_obj.name + ".bootstrap.tmp")
-    if temporary_db_path_obj.exists():
-        temporary_db_path_obj.unlink()
+    bootstrap_lock_path_obj = _acquire_bootstrap_lock_path_obj(db_path_obj)
     try:
+        if db_path_obj.exists() and not replace_bool:
+            raise FlexSyncError(
+                f"Performance database already exists at {db_path_obj}; "
+                "use --replace only for an intentional full rebuild."
+            )
+        _cleanup_bootstrap_temp_files(
+            temporary_db_path_obj, suppress_cleanup_error_bool=False
+        )
         for chunk_from_date_str, chunk_to_date_str in _date_chunk_tuple_list(
             from_date_str, to_date_str
         ):
@@ -294,9 +296,59 @@ def bootstrap_remote(
         db_path_obj.parent.mkdir(parents=True, exist_ok=True)
         os.replace(temporary_db_path_obj, db_path_obj)
     except Exception:
-        if temporary_db_path_obj.exists():
-            temporary_db_path_obj.unlink()
+        _cleanup_bootstrap_temp_files(
+            temporary_db_path_obj, suppress_cleanup_error_bool=True
+        )
         raise
+    finally:
+        try:
+            bootstrap_lock_path_obj.unlink(missing_ok=True)
+        except OSError:
+            # The work result or original failure is more important than a
+            # stale lock file; a verified stale lock can be removed manually.
+            pass
+
+
+def _acquire_bootstrap_lock_path_obj(db_path_obj: Path) -> Path:
+    lock_path_obj = db_path_obj.with_name(db_path_obj.name + ".bootstrap.lock")
+    db_path_obj.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        file_descriptor_int = os.open(
+            str(lock_path_obj), os.O_CREAT | os.O_EXCL | os.O_WRONLY
+        )
+    except FileExistsError as exception_obj:
+        raise FlexSyncError(
+            "Another performance bootstrap is already running, or a prior run "
+            f"left a stale lock at {lock_path_obj}. Verify that no performance "
+            "bootstrap process is active before removing that lock."
+        ) from exception_obj
+    with os.fdopen(file_descriptor_int, "w", encoding="utf-8") as lock_file_obj:
+        lock_file_obj.write(str(os.getpid()))
+    return lock_path_obj
+
+
+def _cleanup_bootstrap_temp_files(
+    temporary_db_path_obj: Path, *, suppress_cleanup_error_bool: bool
+) -> None:
+    temporary_path_obj_list = [
+        temporary_db_path_obj,
+        Path(str(temporary_db_path_obj) + "-journal"),
+        Path(str(temporary_db_path_obj) + "-wal"),
+        Path(str(temporary_db_path_obj) + "-shm"),
+    ]
+    for temporary_path_obj in temporary_path_obj_list:
+        try:
+            temporary_path_obj.unlink(missing_ok=True)
+        except OSError as exception_obj:
+            if suppress_cleanup_error_bool:
+                # Preserve the original Flex/validation failure. Windows cleanup
+                # errors must never replace the reason bootstrap failed.
+                continue
+            raise FlexSyncError(
+                "Cannot clean the previous performance bootstrap temporary file "
+                f"{temporary_path_obj}. Verify no performance sync is running, "
+                "then remove the temporary files before retrying."
+            ) from exception_obj
 
 
 def main() -> int:
