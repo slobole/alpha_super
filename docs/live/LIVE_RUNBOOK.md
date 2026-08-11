@@ -717,6 +717,94 @@ uv run python -m alpha.live.runner submit_vplan --mode live --vplan-id <VPLAN_ID
 uv run python -m alpha.live.runner post_execution_reconcile --mode live --broker-host 127.0.0.1 --broker-port 7496 --broker-client-id 31 --json
 ```
 
+## IBKR Performance Shadow
+
+This surface is read-only and deliberately separate from Overview. IBKR Flex
+is the authority for each account's daily TWR; the dashboard also derives a
+clearly labeled indicative multi-account diagnostic. That combined line is not
+Fund TWR. It does not change orders, sizing, scheduler state, reconciliation,
+`healthz`, or the existing Overview.
+
+The Activity Flex Query must be XML, Account-by-Account, Breakout by Day, and
+contain both LIVE accounts with exactly these fields:
+
+- Account Information: `Account ID`, `Currency`.
+- Change in NAV, Mark-to-Market: `Account ID`, `Currency`, `From Date`,
+  `To Date`, `Starting Value`, `Ending Value`, `TWR`.
+
+Add these secrets/settings to ignored `config.env`:
+
+```text
+IBKR_FLEX_TOKEN_STR=<token>
+IBKR_FLEX_QUERY_ID_STR=<query id>
+IBKR_FLEX_QUERY_NAME_STR=ALPHA_DAILY_TWR
+ALPHA_IBKR_PERFORMANCE_DB_PATH_STR=C:\alpha\live_ops\ibkr_performance.sqlite3
+```
+
+Do not paste the token into commands, logs, git, screenshots, or the dashboard.
+The sync reads it from `config.env`; the SQLite database stores only statement
+data and a checksum.
+
+Initial import from the manually downloaded historical XML:
+
+```powershell
+uv run python -m alpha.live.ibkr_performance_sync bootstrap --xml "C:\Users\User\Downloads\ALPHA_DAILY_TWR.xml"
+```
+
+If more than one historical XML file covers different ranges, import each file
+once. Imports are idempotent. A different XML that overlaps stored rows is
+refused unless the operator has reviewed the correction and adds `--replace`.
+
+Verify locally:
+
+```powershell
+uv run python -m alpha.live.ibkr_performance_sync status --json
+uv run python -m alpha.live.ibkr_performance_sync sync
+uv run python -m alpha.live.ibkr_performance_sync status --json
+```
+
+Register the once-daily 06:15 ET task only after the manual sync succeeds. The
+setup fails if Windows is not using `Eastern Standard Time`, so daylight saving
+time cannot silently move the job away from New York time.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup_ibkr_performance_task.ps1
+Start-ScheduledTask -TaskName AlphaIbkrPerformanceSync
+Get-ScheduledTaskInfo -TaskName AlphaIbkrPerformanceSync
+```
+
+The task uses `StartWhenAvailable`, refuses overlapping instances, retries a
+failed run up to three times at 15-minute intervals, and permits up to ten
+minutes per run. Flex Activity data updates once daily; the command sends one
+`SendRequest` and polls only `GetStatement` for up to two minutes while IBKR
+generates that statement.
+
+Failure policy:
+
+- malformed XML, unknown/missing account, non-USD data, missing market session,
+  or account-to-Pod mapping drift fails loud;
+- the prior valid SQLite rows remain unchanged;
+- the Performance page shows the problem only inside the Shadow surface;
+- LIVE controls, break-glass tools, Overview and `healthz` remain available.
+
+The indicative-composite formula is:
+
+```text
+AdjustedBase_i,D   = EndingNAV_i,D / (1 + IBKR_TWR_i,D)
+CompositeReturn_D  = sum(EndingNAV_i,D) / sum(AdjustedBase_i,D) - 1
+LinkedDiagnostic   = product(1 + CompositeReturn_D) - 1
+```
+
+IBKR account TWR already includes the economic effect of dividends, interest,
+fees and trading P&L while adjusting that account for external cash flows. The
+combined line is only an indicative Shadow diagnostic. A changed adjusted base
+blocks obvious flow-sensitive dates, but offsetting intraday deposits and
+withdrawals can still cancel in daily totals. Exact consolidated Fund TWR
+cannot be reconstructed from this Account-by-Account daily report alone. The
+official Pod rows remain useful; the combined line is not eligible for Overview
+promotion without an official consolidated IBKR return or a separately approved
+fund-accounting contract.
+
 ## Logs And State
 
 Live state:

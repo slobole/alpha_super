@@ -81,6 +81,10 @@ from alpha.live.ops_report import (
     parse_timestamp_ts,
 )
 from alpha.live.manual_order import MANUAL_ORDER_CONFIRMATION_TEXT_STR
+from alpha.live.ibkr_performance import (
+    build_performance_page_dict,
+    resolve_performance_db_path_str,
+)
 
 
 DASHBOARD_V3_VERSION_STR = "0.6.0-phase-6"
@@ -122,6 +126,8 @@ def create_app(
     data_provider_obj: DataProviderProtocol | None = None,
     *,
     journal_path_str: str = DEFAULT_JOURNAL_PATH_STR,
+    performance_db_path_str: str | None = None,
+    performance_binding_obj_list: list[Any] | None = None,
     notification_state_path_str: str = DEFAULT_NOTIFICATION_STATE_PATH_STR,
     notification_webhook_url_str: str | None = None,
     notification_webhook_poster_fn=None,
@@ -131,6 +137,10 @@ def create_app(
         data_provider_obj if data_provider_obj is not None else DashboardDataProvider()
     )
     flask_app_obj.config["journal_path_str"] = journal_path_str
+    flask_app_obj.config["performance_db_path_str"] = (
+        performance_db_path_str or resolve_performance_db_path_str()
+    )
+    flask_app_obj.config["performance_binding_obj_list"] = performance_binding_obj_list
     flask_app_obj.config["notification_state_store_obj"] = NotificationStateStore(
         state_path_str=notification_state_path_str
     )
@@ -304,6 +314,44 @@ def create_app(
     @flask_app_obj.route("/exposure")
     def exposure_index_route_fn() -> Response:
         return redirect(url_for("exposure_page_route_fn", mode_str="live"))
+
+    @flask_app_obj.route("/performance")
+    def performance_page_route_fn():
+        # Shadow-only comparison surface. It deliberately does not feed the
+        # Overview, top-bar verdict, healthz, orders, or scheduler state.
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        summary_dict = provider_obj.get_summary_dict()
+        window_str = str(request.args.get("window") or "all").lower()
+        current_binding_obj_list = flask_app_obj.config[
+            "performance_binding_obj_list"
+        ]
+        binding_error_str = None
+        if current_binding_obj_list is None:
+            try:
+                from alpha.live.ibkr_performance_sync import build_live_binding_obj_list
+
+                current_binding_obj_list = build_live_binding_obj_list()
+            except Exception as exception_obj:
+                binding_error_str = str(exception_obj)
+        performance_page_dict = build_performance_page_dict(
+            flask_app_obj.config["performance_db_path_str"],
+            window_str=window_str,
+            current_binding_obj_list=current_binding_obj_list,
+        )
+        if binding_error_str is not None and performance_page_dict.get("fund_chart_dict"):
+            performance_page_dict["status_str"] = "error"
+            performance_page_dict["status_label_str"] = "Cannot verify LIVE account mapping"
+            performance_page_dict["detail_str"] = binding_error_str
+        verdict_obj = _resolve_verdict_with_health(summary_dict, mode_str="live")
+        return render_template(
+            "performance_page.html",
+            nav_active_str="performance",
+            mode_str="live",
+            mode_label_str=MODE_LABEL_DICT["live"],
+            verdict_dict=verdict_obj.as_dict(),
+            performance_page_dict=performance_page_dict,
+            as_of_clock_str=_now_clock_str(),
+        )
 
     @flask_app_obj.route("/exposure/<mode_str>")
     def exposure_page_route_fn(mode_str: str):

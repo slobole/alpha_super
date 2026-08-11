@@ -425,6 +425,7 @@ def test_index_renders_overview(test_client_obj) -> None:
     assert "/fragments/health-strip?mode=live" in response_text_str
     assert "/fragments/top-bar?mode=live" in response_text_str
     assert "BENCH" not in response_text_str
+    assert 'href="/performance"' in response_text_str
 
     from lxml import html as lxml_html
 
@@ -437,6 +438,95 @@ def test_index_renders_overview(test_client_obj) -> None:
     )
     assert chart_container_obj.getparent() is trading_window_container_obj.getparent()
     assert "lg:grid-cols-12" in str(chart_container_obj.getparent().get("class"))
+
+
+def test_performance_shadow_is_separate_and_read_only(
+    provider_obj,
+    journal_path_str,
+    tmp_path,
+) -> None:
+    flask_app_obj = create_app(
+        data_provider_obj=provider_obj,
+        journal_path_str=journal_path_str,
+        performance_db_path_str=str(tmp_path / "missing-performance.sqlite3"),
+    )
+    flask_app_obj.config["TESTING"] = True
+
+    with flask_app_obj.test_client() as client_obj:
+        response_obj = client_obj.get("/performance")
+        health_response_obj = client_obj.get("/healthz")
+
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    assert "IBKR Performance" in response_text_str
+    assert "Shadow" in response_text_str
+    assert "does not drive Overview or live operations" in response_text_str
+    assert "Shadow not initialized" in response_text_str
+    assert health_response_obj.status_code == 200
+
+
+def test_performance_shadow_renders_fund_and_pod_evidence(
+    provider_obj,
+    journal_path_str,
+    tmp_path,
+) -> None:
+    from alpha.live.ibkr_performance import (
+        PerformanceStore,
+        PodPerformanceBinding,
+    )
+
+    db_path_str = str(tmp_path / "performance.sqlite3")
+    xml_text_str = """
+    <FlexQueryResponse queryName="ALPHA_DAILY_TWR" type="AF">
+      <FlexStatements count="2">
+        <FlexStatement accountId="U100">
+          <AccountInformation accountId="U100" currency="USD" />
+          <ChangeInNAV accountId="U100" currency="USD" fromDate="20260807"
+            toDate="20260807" startingValue="100" endingValue="101" twr="1" />
+        </FlexStatement>
+        <FlexStatement accountId="U200">
+          <AccountInformation accountId="U200" currency="USD" />
+          <ChangeInNAV accountId="U200" currency="USD" fromDate="20260807"
+            toDate="20260807" startingValue="100" endingValue="99" twr="-1" />
+        </FlexStatement>
+      </FlexStatements>
+    </FlexQueryResponse>
+    """
+    PerformanceStore(db_path_str).replace_range(
+        xml_text_str=xml_text_str,
+        query_name_str="ALPHA_DAILY_TWR",
+        request_from_date_str="2026-08-07",
+        request_to_date_str="2026-08-07",
+        binding_obj_list=[
+            PodPerformanceBinding("U100", "pod_taa", "2026-08-07", None, True),
+            PodPerformanceBinding("U200", "pod_ndx", "2026-08-07", None, True),
+        ],
+        imported_timestamp_str="2026-08-10T10:15:00+00:00",
+    )
+    flask_app_obj = create_app(
+        data_provider_obj=provider_obj,
+        journal_path_str=journal_path_str,
+        performance_db_path_str=db_path_str,
+        performance_binding_obj_list=[
+            PodPerformanceBinding("U100", "pod_taa", "2026-08-07", None, True),
+            PodPerformanceBinding("U200", "pod_ndx", "2026-08-07", None, True),
+        ],
+    )
+    flask_app_obj.config["TESTING"] = True
+
+    with flask_app_obj.test_client() as client_obj:
+        response_obj = client_obj.get("/performance?window=all")
+
+    assert response_obj.status_code == 200
+    response_text_str = response_obj.get_data(as_text=True)
+    assert "Indicative account composite · shadow" in response_text_str
+    assert "not Fund TWR" in response_text_str
+    assert "pod_taa" in response_text_str
+    assert "pod_ndx" in response_text_str
+    assert "Adjusted base = Ending NAV / (1 + IBKR TWR)" in response_text_str
+    assert "the entire combined history is withheld" in response_text_str
+    assert "Official Pod TWR remains available" in response_text_str
+    assert "token is never stored or displayed" in response_text_str
 
 
 def test_overview_all_clear_is_withheld_when_live_health_is_yellow(

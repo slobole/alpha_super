@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}Performance shadow{% endblock %}
+{% block content %}
+
+{% set perf_dict = performance_page_dict %}
+<section class="mb-4 flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <div class="font-mono text-[10px] uppercase tracking-widest text-ink-500">Alpha / Live / Comparison</div>
+    <div class="flex items-center gap-2 mt-1">
+      <h1 class="text-2xl font-bold tracking-tight">IBKR Performance</h1>
+      <span class="border border-accent/40 bg-accent-soft px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest text-accent">Shadow</span>
+    </div>
+    <p class="text-sm text-ink-500 mt-1">
+      Daily account TWR from IBKR Flex. Comparison only — it does not drive Overview or live operations.
+    </p>
+  </div>
+  <div class="text-right text-[11px] text-ink-500">
+    <div>Source: IBKR Flex · Change in NAV · Mark-to-Market</div>
+    <div>Combined line: indicative diagnostic · not Fund TWR</div>
+  </div>
+</section>
+
+<section class="mb-4 border
+                {% if perf_dict.status_str in ['error', 'stale'] %}border-bad/40 bg-bad-soft/20
+                {% elif perf_dict.status_str == 'available' %}border-ok/30 bg-white
+                {% else %}border-ink-100 bg-ink-50{% endif %}">
+  <div class="flex items-center gap-2 px-4 py-3 border-b border-ink-100">
+    <span class="w-2 h-2 rounded-full
+                 {% if perf_dict.status_str in ['error', 'stale'] %}bg-bad
+                 {% elif perf_dict.status_str == 'available' %}bg-ok
+                 {% else %}bg-ink-500{% endif %}"></span>
+    <strong class="text-sm">{{ perf_dict.status_label_str }}</strong>
+    <span class="text-xs text-ink-500">{{ perf_dict.detail_str }}</span>
+  </div>
+  <div class="grid grid-cols-2 lg:grid-cols-4 divide-x divide-ink-100">
+    <div class="px-4 py-3">
+      <div class="font-mono text-[10px] uppercase tracking-widest text-ink-500">Last sync</div>
+      <div class="font-mono text-sm mt-1">{{ perf_dict.latest_sync_timestamp_str | clock or '—' }}</div>
+    </div>
+    <div class="px-4 py-3">
+      <div class="font-mono text-[10px] uppercase tracking-widest text-ink-500">Finalized through</div>
+      <div class="font-mono text-sm mt-1">{{ perf_dict.coverage_through_date_str or '—' }}</div>
+    </div>
+    <div class="px-4 py-3">
+      <div class="font-mono text-[10px] uppercase tracking-widest text-ink-500">Accounts covered</div>
+      <div class="font-mono text-sm mt-1">
+        {% if perf_dict.expected_account_count_int is defined %}
+          {{ perf_dict.covered_account_count_int }}/{{ perf_dict.expected_account_count_int }}
+        {% else %}—{% endif %}
+      </div>
+    </div>
+    <div class="px-4 py-3">
+      <div class="font-mono text-[10px] uppercase tracking-widest text-ink-500">Query</div>
+      <div class="font-mono text-sm mt-1">{{ perf_dict.query_name_str or '—' }}</div>
+    </div>
+  </div>
+</section>
+
+{% if perf_dict.fund_chart_dict %}
+  <section class="mb-4 grid grid-cols-2 lg:grid-cols-4 border border-ink-100 divide-x divide-ink-100">
+    {% for label_str, value_float in [
+      ('Last session', perf_dict.latest_fund_return_float),
+      ('MTD', perf_dict.mtd_fund_return_float),
+      ('YTD', perf_dict.ytd_fund_return_float),
+      ('Since shadow start', perf_dict.cumulative_fund_return_float)
+    ] %}
+      <div class="px-4 py-3">
+        <div class="font-mono text-[10px] uppercase tracking-widest text-ink-500">{{ label_str }}</div>
+        <div class="font-mono text-lg mt-1
+                    {% if value_float is not none and value_float >= 0 %}text-ok{% elif value_float is not none %}text-bad{% endif %}">
+          {% if value_float is not none %}{{ '%+.2f' | format(value_float * 100) }}%{% else %}—{% endif %}
+        </div>
+      </div>
+    {% endfor %}
+  </section>
+
+  <section class="mb-4 grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+    <div class="lg:col-span-7 border border-ink-100 bg-white p-4">
+      <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+        <div>
+          <div class="font-mono text-[10px] uppercase tracking-widest text-ink-500">Indicative account composite · shadow</div>
+          <div class="text-sm font-semibold mt-1">Daily Pod returns linked for diagnosis · not official Fund TWR</div>
+        </div>
+        <div class="text-right text-[11px] text-ink-500">
+          NAV at {{ perf_dict.coverage_through_date_str }} · {{ perf_dict.latest_ending_nav_float | money }}
+        </div>
+      </div>
+      {% set chart_dict = perf_dict.fund_chart_dict %}
+      {% include "_performance_chart.html" %}
+    </div>
+
+    <div class="lg:col-span-5 border border-ink-100 bg-white">
+      <header class="px-4 py-3 border-b border-ink-100">
+        <div class="font-mono text-[10px] uppercase tracking-widest text-ink-500">Pod performance</div>
+        <div class="text-sm mt-1">Official IBKR account TWR, kept separate by Pod</div>
+      </header>
+      <div class="divide-y divide-ink-100">
+        {% for pod_dict in perf_dict.pod_performance_dict_list %}
+          <div class="px-4 py-3">
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <div class="font-mono text-[11px] font-medium truncate max-w-[320px]" title="{{ pod_dict.pod_id_str }}">{{ pod_dict.pod_id_str }}</div>
+                <div class="font-mono text-[10px] text-ink-500 mt-0.5">{{ pod_dict.account_route_str }}</div>
+              </div>
+              {% if pod_dict.status_str == 'available' %}
+                <div class="text-right shrink-0">
+                  <div class="font-mono text-base {% if pod_dict.latest_return_float >= 0 %}text-ok{% else %}text-bad{% endif %}">
+                    {{ '%+.2f' | format(pod_dict.latest_return_float * 100) }}%
+                  </div>
+                  <div class="text-[10px] text-ink-500">{{ pod_dict.latest_market_date_str }}</div>
+                </div>
+              {% else %}
+                <span class="text-xs text-ink-500">Awaiting trusted EOD baseline</span>
+              {% endif %}
+            </div>
+            {% if pod_dict.status_str == 'available' %}
+              <div class="grid grid-cols-3 gap-3 mt-3 text-[11px]">
+                <div><span class="text-ink-500">MTD</span><br><span class="font-mono">{{ '%+.2f' | format(pod_dict.mtd_return_float * 100) }}%</span></div>
+                <div><span class="text-ink-500">Since start</span><br><span class="font-mono">{{ '%+.2f' | format(pod_dict.cumulative_return_float * 100) }}%</span></div>
+                <div class="text-right"><span class="text-ink-500">NAV</span><br><span class="font-mono">{{ pod_dict.latest_ending_nav_float | money }}</span></div>
+              </div>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+
+  <details class="mb-4 border border-ink-100 bg-white">
+    <summary class="cursor-pointer px-4 py-3 text-sm font-medium hover:bg-ink-50">
+      Validation detail
+      <span class="font-normal text-ink-500 ml-2">formula, adjusted base and recent source rows</span>
+    </summary>
+    <div class="border-t border-ink-100 px-4 py-4 text-xs">
+      <div class="mb-3 text-ink-500 leading-relaxed">
+        For each account and day: <span class="font-mono text-ink-900">Adjusted base = Ending NAV / (1 + IBKR TWR)</span>.
+        The indicative daily return is <span class="font-mono text-ink-900">Σ Ending NAV / Σ Adjusted base − 1</span>.
+        If any flow-sensitive date is detected, the entire combined history is withheld. Official Pod TWR remains available. Offsetting intraday flows can still evade the daily totals, so this line is a Shadow diagnostic — not Fund TWR and not an official consolidated IBKR result.
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full font-mono text-[11px]">
+          <thead class="text-ink-500">
+            <tr><th class="text-left font-normal">Date</th><th class="text-right font-normal">Return</th><th class="text-right font-normal">Starting NAV</th><th class="text-right font-normal">Adjusted base</th><th class="text-right font-normal">Base change · derived</th><th class="text-right font-normal">Pods</th></tr>
+          </thead>
+          <tbody>
+            {% for row_dict in perf_dict.recent_fund_row_dict_list %}
+              <tr><td>{{ row_dict.market_date_str }}</td><td class="text-right">{{ '%+.4f' | format(row_dict.fund_return_float * 100) }}%</td><td class="text-right">{{ row_dict.starting_nav_float | money }}</td><td class="text-right">{{ row_dict.adjusted_base_float | money }}</td><td class="text-right">{{ row_dict.derived_base_change_float | money }}</td><td class="text-right">{{ row_dict.active_pod_count_int }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="font-mono text-[10px] text-ink-500 mt-3">Source checksum {{ perf_dict.checksum_short_str or '—' }} · token is never stored or displayed</div>
+    </div>
+  </details>
+{% else %}
+  {% if perf_dict.pod_performance_dict_list %}
+    <section class="border border-ink-100 bg-white">
+      <header class="px-4 py-3 border-b border-ink-100">
+        <div class="font-mono text-[10px] uppercase tracking-widest text-ink-500">Official Pod performance remains available</div>
+        <div class="text-sm mt-1">The indicative combined line is withheld; official Pod TWR remains available.</div>
+      </header>
+      <div class="divide-y divide-ink-100">
+        {% for pod_dict in perf_dict.pod_performance_dict_list %}
+          <div class="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-4 px-4 py-3">
+            <div class="min-w-0">
+              <div class="font-mono text-[11px] truncate" title="{{ pod_dict.pod_id_str }}">{{ pod_dict.pod_id_str }}</div>
+              <div class="font-mono text-[10px] text-ink-500">{{ pod_dict.account_route_str }}</div>
+            </div>
+            {% if pod_dict.status_str == 'available' %}
+              <div class="text-right"><div class="text-[10px] text-ink-500">Latest</div><div class="font-mono text-sm">{{ '%+.2f' | format(pod_dict.latest_return_float * 100) }}%</div></div>
+              <div class="text-right"><div class="text-[10px] text-ink-500">Since start</div><div class="font-mono text-sm">{{ '%+.2f' | format(pod_dict.cumulative_return_float * 100) }}%</div></div>
+            {% else %}
+              <div class="col-span-2 text-xs text-ink-500">Awaiting trusted EOD baseline</div>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+  {% else %}
+    <section class="border border-ink-100 bg-white px-4 py-8 text-center">
+      <div class="font-mono text-sm">No shadow performance is shown.</div>
+      <div class="text-xs text-ink-500 mt-2">Bootstrap or repair the local performance database; existing LIVE pages remain unchanged.</div>
+    </section>
+  {% endif %}
+{% endif %}
+
+{% endblock %}
