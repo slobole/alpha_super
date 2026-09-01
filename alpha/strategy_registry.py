@@ -83,6 +83,19 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     # a five-point exposure band, and BIL as the invested reserve. Portfolio
     # Manager-ready only; deliberately absent from every live release surface.
     "strategies.taa_beyond_6040.strategy_taa_trinity_vol_control_8_bil": MaturityTier.PM_READY,
+    # Five fixed macro sleeves independently gated by a drawdown-adaptive
+    # moving average, with inactive sleeves in BIL and a capped DBC short.
+    # PM-only: a fixed 1% annual DBC borrow baseline and restricted proceeds are
+    # modeled; account-specific borrow availability/rates and live routing remain unwired.
+    "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5": MaturityTier.PM_READY,
+    # Monthly four-regime Inflation Compass using SPY SMA200, FRED T5YIE,
+    # sector-ratio confirmation, and causal next-open ETF rebalancing. PM-only:
+    # current-vintage FRED data is not PAPER/LIVE release evidence.
+    "strategies.taa_df.strategy_taa_inflation_compass": MaturityTier.PM_READY,
+    # Frozen Pakal L14 tactical-yield rule: publication-safe FRED term/credit
+    # spreads, IEF/LQD sleeves, causal DGS3MO cash, and next-open fills. The
+    # research verdict remains diagnostic; PM_READY certifies plumbing only.
+    "strategies.taa_beyond_6040.strategy_taa_tactical_fixed_income_ief_lqd": MaturityTier.PM_READY,
     # MOSAIC: correlation-penalized Russell 1000 momentum (N=20, lambda=0.75,
     # corr window 126d, ADV >= $5M). Promoted 2026-07-31 after the four-part
     # validation cycle: monotone lambda effect, sub-period stability,

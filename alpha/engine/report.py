@@ -14,7 +14,11 @@ import numpy as np
 from pathlib import Path
 from datetime import datetime
 
-from alpha.engine.metrics import generate_monthly_returns, generate_overall_metrics
+from alpha.engine.metrics import (
+    EXPECTED_SHORTFALL_METRIC_NAME_STR,
+    generate_monthly_returns,
+    generate_overall_metrics,
+)
 from alpha.engine.plot import plot as render_strategy_plot
 from alpha.engine.signature import (
     build_metric_delta_table_html,
@@ -160,6 +164,10 @@ METRIC_HELP_TEXT_DICT = {
         'Modeled trading-cost attribution divided by average equity and annualized; '
         'it is not the exact difference between gross and net CAGR.'
     ),
+    EXPECTED_SHORTFALL_METRIC_NAME_STR: (
+        'Average of the worst 5% of 21-trading-day outcomes: the size of a bad month once it '
+        'is already bad. Overlapping windows make this a realized-path diagnostic, not a forecast.'
+    ),
     'Beta': 'How much benchmark exposure the complete strategy behaved as if it had.',
     'Alpha (Ann.) [%]': 'Annualized return not explained by estimated benchmark exposure.',
     'Alpha HAC t-stat': 'Newey-West t-statistic for the estimated regression alpha.',
@@ -256,6 +264,7 @@ _PERFORMANCE_SUMMARY_HIDDEN_METRIC_SET = frozenset({
     'Exposure-Adjusted Return (Ann.) [%]',
     'AAR [%]',
     'Exposure Time [%]',
+    EXPECTED_SHORTFALL_METRIC_NAME_STR,
 })
 
 _METRIC_TOOLTIP_HTML_STR = (
@@ -589,6 +598,8 @@ def _crisis_run_info_dict(crisis_replay_result) -> dict:
                     }
                     for crisis_period_config in crisis_replay_result.crisis_period_config_list
                 ],
+                'skipped_windows': crisis_replay_result.skipped_window_list,
+                'adjusted_windows': crisis_replay_result.adjusted_window_list,
             }
         ),
     }
@@ -596,7 +607,14 @@ def _crisis_run_info_dict(crisis_replay_result) -> dict:
 
 def _crisis_summary_dict(crisis_replay_result) -> dict:
     metric_df = getattr(crisis_replay_result, 'crisis_metric_df', pd.DataFrame())
-    summary_dict = {'crisis_count': int(len(metric_df))}
+    summary_dict = {
+        'crisis_count': int(len(metric_df)),
+        'configured_crisis_count': int(len(crisis_replay_result.crisis_period_config_list)),
+        'skipped_window_count': int(len(crisis_replay_result.skipped_window_list)),
+        'skipped_windows': crisis_replay_result.skipped_window_list,
+        'adjusted_window_count': int(len(crisis_replay_result.adjusted_window_list)),
+        'adjusted_windows': crisis_replay_result.adjusted_window_list,
+    }
     if metric_df is not None and len(metric_df) > 0:
         if 'strategy_return_pct_float' in metric_df.columns:
             summary_dict['worst_strategy_return_pct'] = _json_float(
@@ -706,6 +724,10 @@ def _crisis_replay_metadata_dict(crisis_replay_result) -> dict:
         'capital_base': float(crisis_replay_result.capital_base_float),
         'configured_crisis_count': int(len(crisis_replay_result.crisis_period_config_list)),
         'evaluated_crisis_count': int(crisis_replay_result.crisis_metric_df.shape[0]),
+        'skipped_window_count': int(len(crisis_replay_result.skipped_window_list)),
+        'skipped_windows': crisis_replay_result.skipped_window_list,
+        'adjusted_window_count': int(len(crisis_replay_result.adjusted_window_list)),
+        'adjusted_windows': crisis_replay_result.adjusted_window_list,
         'crisis_periods': [
             {
                 'crisis_name_str': crisis_period_config.crisis_name_str,
@@ -842,7 +864,12 @@ def _format_kpi_value_str(metric_name_str: str, metric_value_obj) -> str:
     """Format KPI values using the summary-table metric conventions."""
     if metric_value_obj is None:
         return 'N/A'
-    if metric_name_str in {'Return [%]', 'Return (Ann.) [%]', 'Max. Drawdown [%]'}:
+    if metric_name_str in {
+        'Return [%]',
+        'Return (Ann.) [%]',
+        'Max. Drawdown [%]',
+        EXPECTED_SHORTFALL_METRIC_NAME_STR,
+    }:
         return _fmt_signed_pct(metric_value_obj)
     if metric_name_str == 'Volatility (Ann.) [%]':
         return _fmt_pct(metric_value_obj)
@@ -888,6 +915,11 @@ def _build_kpi_grid_html(
         ('Volatility (Ann.) [%]', 'Volatility', 'Annualized sigma'),
         ('Sharpe Ratio', 'Sharpe Ratio', 'All days, risk-free rate = 0'),
         ('Max. Drawdown [%]', 'Max Drawdown', 'Peak to trough'),
+        (
+            EXPECTED_SHORTFALL_METRIC_NAME_STR,
+            'Expected Shortfall',
+            'Worst 5% of 21-day outcomes',
+        ),
         ('Beta', 'Beta', 'vs benchmark'),
     ]
     kpi_card_html_list: list[str] = []
@@ -1040,6 +1072,30 @@ def _build_headline_delta_table_html(
             'benchmark_display_str': '1.00',
             'delta_display_str': f'{correlation_float - 1.0:+.2f}',
             'higher_is_better_bool': False,
+        })
+
+    expected_shortfall_float = metric_float(
+        strategy_column_name_str, EXPECTED_SHORTFALL_METRIC_NAME_STR
+    )
+    benchmark_expected_shortfall_float = metric_float(
+        benchmark_column_name_str, EXPECTED_SHORTFALL_METRIC_NAME_STR
+    )
+    if expected_shortfall_float is not None:
+        metric_spec_list.append({
+            'label_str': 'Expected Shortfall (95%, 21 days)',
+            'value_float': expected_shortfall_float,
+            'display_str': f'{expected_shortfall_float:.1f}%',
+            'benchmark_float': benchmark_expected_shortfall_float,
+            'benchmark_display_str': (
+                None if benchmark_expected_shortfall_float is None
+                else f'{benchmark_expected_shortfall_float:.1f}%'
+            ),
+            'delta_display_str': (
+                '' if benchmark_expected_shortfall_float is None
+                else f'{expected_shortfall_float - benchmark_expected_shortfall_float:+.1f}pp'
+            ),
+            'higher_is_better_bool': True,
+            'is_adverse_bool': True,
         })
 
     if len(metric_spec_list) == 0:
@@ -4879,6 +4935,8 @@ def _format_crisis_metric_table_html(crisis_metric_df: pd.DataFrame) -> str:
         ('sharpe_ratio_float', 'Sharpe'),
         ('trade_count_int', 'Trades'),
     ]
+    if 'replay_mode_str' in crisis_metric_df.columns:
+        display_column_spec_list.insert(3, ('replay_mode_str', 'Replay Mode'))
     header_html_str = ''.join(
         f'<th>{header_label_str}</th>'
         for _, header_label_str in display_column_spec_list
@@ -4920,26 +4978,63 @@ def _format_crisis_metric_table_html(crisis_metric_df: pd.DataFrame) -> str:
     )
 
 
-def _crisis_path_chart_b64(
-    strategy_obj,
+def _crisis_chart_series_dict(
+    crisis_path_df: pd.DataFrame,
     crisis_name_str: str,
-    effective_start_ts: pd.Timestamp,
-    effective_end_ts: pd.Timestamp,
-) -> str | None:
-    if strategy_obj is None or strategy_obj.results is None or len(strategy_obj.results) == 0:
+) -> dict[str, object] | None:
+    if crisis_path_df is None or len(crisis_path_df) == 0:
+        return None
+    crisis_window_df = crisis_path_df.loc[
+        crisis_path_df['crisis_name_str'].astype(str).eq(crisis_name_str)
+    ].sort_values('bar_offset_int', kind='mergesort')
+    if len(crisis_window_df) == 0:
         return None
 
-    benchmark_name_str = None
-    benchmark_drawdown_column_name_str = None
-    if hasattr(strategy_obj, '_benchmarks') and len(strategy_obj._benchmarks) > 0:
-        candidate_benchmark_name_str = str(strategy_obj._benchmarks[0])
-        candidate_drawdown_column_name_str = f'{candidate_benchmark_name_str}_drawdown'
-        if (
-            candidate_benchmark_name_str in strategy_obj.results.columns
-            and candidate_drawdown_column_name_str in strategy_obj.results.columns
-        ):
-            benchmark_name_str = candidate_benchmark_name_str
-            benchmark_drawdown_column_name_str = candidate_drawdown_column_name_str
+    bar_index = pd.DatetimeIndex(pd.to_datetime(crisis_window_df['bar_ts']))
+    strategy_total_value_ser = pd.Series(
+        crisis_window_df['normalized_strategy_equity_float'].to_numpy(dtype=float),
+        index=bar_index,
+        name='Strategy',
+    )
+    strategy_drawdown_ser = strategy_total_value_ser / strategy_total_value_ser.cummax() - 1.0
+
+    benchmark_total_value_ser: pd.Series | None = None
+    benchmark_drawdown_ser: pd.Series | None = None
+    benchmark_label_str = 'Benchmark'
+    benchmark_value_ser = pd.to_numeric(
+        crisis_window_df['normalized_benchmark_equity_float'],
+        errors='coerce',
+    )
+    if benchmark_value_ser.notna().any():
+        benchmark_total_value_ser = pd.Series(
+            benchmark_value_ser.to_numpy(dtype=float),
+            index=bar_index,
+            name='Benchmark',
+        )
+        benchmark_drawdown_ser = (
+            benchmark_total_value_ser / benchmark_total_value_ser.cummax() - 1.0
+        )
+        benchmark_name_ser = crisis_window_df['benchmark_name_str'].dropna().astype(str)
+        benchmark_name_ser = benchmark_name_ser[benchmark_name_ser.str.len() > 0]
+        if len(benchmark_name_ser) > 0:
+            benchmark_label_str = benchmark_name_ser.iloc[0]
+
+    return {
+        'strategy_total_value_ser': strategy_total_value_ser,
+        'strategy_drawdown_ser': strategy_drawdown_ser,
+        'benchmark_total_value_ser': benchmark_total_value_ser,
+        'benchmark_drawdown_ser': benchmark_drawdown_ser,
+        'benchmark_label_str': benchmark_label_str,
+    }
+
+
+def _crisis_path_chart_b64(
+    crisis_path_df: pd.DataFrame,
+    crisis_name_str: str,
+) -> str | None:
+    chart_series_dict = _crisis_chart_series_dict(crisis_path_df, crisis_name_str)
+    if chart_series_dict is None:
+        return None
 
     buffer_obj = io.BytesIO()
     with warnings.catch_warnings():
@@ -4949,19 +5044,11 @@ def _crisis_path_chart_b64(
             category=UserWarning,
         )
         render_strategy_plot(
-            strategy_total_value=strategy_obj.results['total_value'],
-            strategy_drawdown=strategy_obj.results['drawdown'],
-            benchmark_total_value=(
-                strategy_obj.results[benchmark_name_str]
-                if benchmark_name_str is not None
-                else None
-            ),
-            benchmark_drawdown=(
-                strategy_obj.results[benchmark_drawdown_column_name_str]
-                if benchmark_drawdown_column_name_str is not None
-                else None
-            ),
-            benchmark_label=benchmark_name_str or 'Benchmark',
+            strategy_total_value=chart_series_dict['strategy_total_value_ser'],
+            strategy_drawdown=chart_series_dict['strategy_drawdown_ser'],
+            benchmark_total_value=chart_series_dict['benchmark_total_value_ser'],
+            benchmark_drawdown=chart_series_dict['benchmark_drawdown_ser'],
+            benchmark_label=chart_series_dict['benchmark_label_str'],
             strategy_label='Strategy',
             save_to=buffer_obj,
             to_web=True,
@@ -4977,12 +5064,9 @@ def _build_crisis_chart_cards_html(crisis_replay_result) -> str:
     card_html_list: list[str] = []
     for _, metric_row_ser in crisis_replay_result.crisis_metric_df.iterrows():
         crisis_name_str = str(metric_row_ser['crisis_name_str'])
-        strategy_obj = crisis_replay_result.crisis_strategy_map.get(crisis_name_str)
         chart_b64 = _crisis_path_chart_b64(
-            strategy_obj=strategy_obj,
+            crisis_path_df=crisis_replay_result.crisis_path_df,
             crisis_name_str=crisis_name_str,
-            effective_start_ts=pd.Timestamp(metric_row_ser['effective_start_ts']),
-            effective_end_ts=pd.Timestamp(metric_row_ser['effective_end_ts']),
         )
         if chart_b64 is None:
             continue
@@ -5011,6 +5095,67 @@ def _build_crisis_chart_cards_html(crisis_replay_result) -> str:
     return f'<div class="crisis-chart-grid">{"".join(card_html_list)}</div>'
 
 
+def _build_crisis_coverage_disclosure_html(crisis_replay_result) -> str:
+    skipped_window_list = crisis_replay_result.skipped_window_list
+    adjusted_window_list = crisis_replay_result.adjusted_window_list
+    if not skipped_window_list and not adjusted_window_list:
+        return _wrap_card_html(
+            '<h2>Coverage Disclosure</h2>'
+            '<p>All configured crisis windows were evaluated without history truncation.</p>'
+        )
+
+    section_html_list = ['<h2>Coverage Disclosure</h2>']
+    if skipped_window_list:
+        skipped_row_html_list = []
+        for skipped_window_dict in skipped_window_list:
+            skipped_row_html_list.append(
+                '<tr>'
+                f"<td>{html.escape(str(skipped_window_dict['crisis_name_str']))}</td>"
+                f"<td>{html.escape(str(skipped_window_dict['requested_start_date_str']))}</td>"
+                f"<td>{html.escape(str(skipped_window_dict['requested_end_date_str']))}</td>"
+                f"<td>{html.escape(str(skipped_window_dict['reason_str']))}</td>"
+                '</tr>'
+            )
+        section_html_list.extend(
+            [
+                '<h3>Skipped crisis windows</h3>',
+                '<p>These configured windows were not evaluated and are exclusions, not passing scenarios.</p>',
+                '<div class="scroll"><table><thead><tr>',
+                '<th>Crisis</th><th>Requested start</th><th>Requested end</th><th>Reason</th>',
+                '</tr></thead><tbody>',
+                ''.join(skipped_row_html_list),
+                '</tbody></table></div>',
+            ]
+        )
+
+    if adjusted_window_list:
+        adjusted_row_html_list = []
+        for adjusted_window_dict in adjusted_window_list:
+            adjusted_row_html_list.append(
+                '<tr>'
+                f"<td>{html.escape(str(adjusted_window_dict['crisis_name_str']))}</td>"
+                f"<td>{html.escape(str(adjusted_window_dict['requested_start_date_str']))}</td>"
+                f"<td>{html.escape(str(adjusted_window_dict['requested_end_date_str']))}</td>"
+                f"<td>{html.escape(str(adjusted_window_dict['effective_start_date_str']))}</td>"
+                f"<td>{html.escape(str(adjusted_window_dict['effective_end_date_str']))}</td>"
+                '</tr>'
+            )
+        section_html_list.extend(
+            [
+                '<h3>Truncated crisis windows</h3>',
+                '<p>Metrics use the effective supported dates shown below.</p>',
+                '<div class="scroll"><table><thead><tr>',
+                '<th>Crisis</th><th>Requested start</th><th>Requested end</th>',
+                '<th>Effective start</th><th>Effective end</th>',
+                '</tr></thead><tbody>',
+                ''.join(adjusted_row_html_list),
+                '</tbody></table></div>',
+            ]
+        )
+
+    return _wrap_card_html(''.join(section_html_list))
+
+
 def _build_crisis_replay_html(crisis_replay_result) -> str:
     run_date_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     summary_card_html_str = _wrap_card_html(
@@ -5018,6 +5163,9 @@ def _build_crisis_replay_html(crisis_replay_result) -> str:
 <h2>Crisis Summary</h2>
 <div class="scroll">{_format_crisis_metric_table_html(crisis_replay_result.crisis_metric_df)}</div>
 ''',
+    )
+    coverage_disclosure_html_str = _build_crisis_coverage_disclosure_html(
+        crisis_replay_result
     )
     chart_cards_html_str = _build_crisis_chart_cards_html(crisis_replay_result)
 
@@ -5032,6 +5180,7 @@ def _build_crisis_replay_html(crisis_replay_result) -> str:
   </div>
 </header>
 {summary_card_html_str}
+{coverage_disclosure_html_str}
 {chart_cards_html_str}
 </div>'''
 

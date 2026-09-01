@@ -108,6 +108,72 @@ def _run_strategy(
     return strategy_obj
 
 
+def _build_analysis_context_dict() -> dict[str, object]:
+    config_obj = DEFAULT_CONFIG
+    pricing_data_df = get_us_sector_etf_ibs_downshock_data(config_obj)
+    # *** CRITICAL*** The analyzer calendar preserves the Vanilla startup
+    # boundary: completed Close_T creates intent and the first eligible fill is
+    # Open_(T+1). The alternate timing cells may change fills, not signals.
+    calendar_idx = resolve_us_sector_etf_execution_calendar_idx(
+        pricing_data_df=pricing_data_df,
+        config_obj=config_obj,
+    )
+    return {
+        "strategy_name_str": STRATEGY_NAME_STR,
+        "capital_base_float": float(config_obj.capital_base_float),
+        "config_obj": config_obj,
+        "pricing_data_df": pricing_data_df,
+        "calendar_idx": pd.DatetimeIndex(calendar_idx),
+    }
+
+
+def build_execution_timing_analysis_inputs() -> dict[str, object]:
+    analysis_context_dict = _build_analysis_context_dict()
+    config_obj = analysis_context_dict["config_obj"]
+
+    def strategy_factory_fn() -> UsSectorEtfIbsDownshockVoxIyrStrategy:
+        return UsSectorEtfIbsDownshockVoxIyrStrategy(
+            name=STRATEGY_NAME_STR,
+            benchmarks=[config_obj.benchmark_symbol_str],
+            config_obj=config_obj,
+        )
+
+    return {
+        "strategy_factory_fn": strategy_factory_fn,
+        "pricing_data_df": analysis_context_dict["pricing_data_df"],
+        "calendar_idx": analysis_context_dict["calendar_idx"],
+        "order_generation_mode_str": "signal_bar",
+        "risk_model_str": "daily_ohlc_signal",
+        "entry_timing_str_tuple": (
+            "same_close_moc",
+            "next_open",
+            "next_close",
+        ),
+        "exit_timing_str_tuple": (
+            "same_close_moc",
+            "next_open",
+            "next_close",
+        ),
+        "default_entry_timing_str": "next_open",
+        "default_exit_timing_str": "next_open",
+    }
+
+
+def build_stress_test_context_dict() -> dict[str, object]:
+    return _build_analysis_context_dict()
+
+
+def build_stress_test_strategy_obj(
+    context_dict: dict[str, object],
+) -> UsSectorEtfIbsDownshockVoxIyrStrategy:
+    config_obj = context_dict["config_obj"]
+    return UsSectorEtfIbsDownshockVoxIyrStrategy(
+        name=str(context_dict["strategy_name_str"]),
+        benchmarks=[config_obj.benchmark_symbol_str],
+        config_obj=config_obj,
+    )
+
+
 def build_capacity_analysis_inputs(
     capital_base_float: float,
     show_display_bool: bool = False,
@@ -221,6 +287,9 @@ __all__ = [
     "UsSectorEtfIbsDownshockVoxIyrStrategy",
     "VOX_IYR_SYMBOL_TUPLE",
     "build_capacity_analysis_inputs",
+    "build_execution_timing_analysis_inputs",
+    "build_stress_test_context_dict",
+    "build_stress_test_strategy_obj",
     "run_variant",
 ]
 

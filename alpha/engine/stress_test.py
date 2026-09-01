@@ -91,6 +91,8 @@ class StressTestResult:
     stress_transaction_df: pd.DataFrame
     stress_strategy_map: dict[str, Strategy] = field(default_factory=dict)
     output_dir_path: Path | None = None
+    skipped_window_list: list[dict[str, object]] = field(default_factory=list)
+    adjusted_window_list: list[dict[str, object]] = field(default_factory=list)
 
 
 class StressTestAnalyzer:
@@ -197,6 +199,8 @@ class StressTestAnalyzer:
         path_frame_list: list[pd.DataFrame] = []
         entry_position_frame_list: list[pd.DataFrame] = []
         transaction_frame_list: list[pd.DataFrame] = []
+        skipped_window_list: list[dict[str, object]] = []
+        adjusted_window_list: list[dict[str, object]] = []
         stress_strategy_map: dict[str, Strategy] = {}
 
         for crisis_period_config in normalized_crisis_period_list:
@@ -205,7 +209,29 @@ class StressTestAnalyzer:
                 calendar_idx=supported_calendar_idx,
             )
             if skip_reason_str:
+                skipped_window_list.append(
+                    _build_skipped_window_dict(
+                        crisis_period_config=crisis_period_config,
+                        launch_offset_int=None,
+                        reason_str=skip_reason_str,
+                    )
+                )
                 continue
+
+            requested_start_ts = pd.Timestamp(crisis_period_config.start_date_str)
+            requested_end_ts = pd.Timestamp(crisis_period_config.end_date_str)
+            supported_start_ts = pd.Timestamp(supported_calendar_idx[0])
+            supported_end_ts = pd.Timestamp(supported_calendar_idx[-1])
+            if requested_start_ts < supported_start_ts or requested_end_ts > supported_end_ts:
+                adjusted_window_list.append(
+                    _build_adjusted_window_dict(
+                        crisis_period_config=crisis_period_config,
+                        effective_start_ts=event_start_ts,
+                        effective_end_ts=event_end_ts,
+                        supported_start_ts=supported_start_ts,
+                        supported_end_ts=supported_end_ts,
+                    )
+                )
 
             for launch_offset_int in normalized_launch_offset_tuple:
                 launch_ts, event_entry_ts, launch_skip_reason_str = resolve_stress_launch_window(
@@ -214,6 +240,13 @@ class StressTestAnalyzer:
                     launch_offset_int=launch_offset_int,
                 )
                 if launch_skip_reason_str:
+                    skipped_window_list.append(
+                        _build_skipped_window_dict(
+                            crisis_period_config=crisis_period_config,
+                            launch_offset_int=launch_offset_int,
+                            reason_str=launch_skip_reason_str,
+                        )
+                    )
                     continue
 
                 stress_calendar_idx = supported_calendar_idx[
@@ -221,6 +254,13 @@ class StressTestAnalyzer:
                     & (supported_calendar_idx <= event_end_ts)
                 ]
                 if len(stress_calendar_idx) == 0:
+                    skipped_window_list.append(
+                        _build_skipped_window_dict(
+                            crisis_period_config=crisis_period_config,
+                            launch_offset_int=launch_offset_int,
+                            reason_str="resolved stress calendar is empty.",
+                        )
+                    )
                     continue
 
                 # *** CRITICAL*** The stress run starts before the event and
@@ -318,6 +358,8 @@ class StressTestAnalyzer:
             stress_path_df=stress_path_df,
             stress_entry_position_df=stress_entry_position_df,
             stress_transaction_df=stress_transaction_df,
+            skipped_window_list=skipped_window_list,
+            adjusted_window_list=adjusted_window_list,
             stress_strategy_map=stress_strategy_map,
         )
 
@@ -333,6 +375,41 @@ class StressTestAnalyzer:
 
 def supported_stress_test_strategy_key_list() -> tuple[str, ...]:
     return SUPPORTED_CRISIS_STRATEGY_KEY_TUPLE
+
+
+def _build_skipped_window_dict(
+    crisis_period_config: CrisisPeriodConfig,
+    launch_offset_int: int | None,
+    reason_str: str,
+) -> dict[str, object]:
+    return {
+        "crisis_name_str": crisis_period_config.crisis_name_str,
+        "requested_start_date_str": crisis_period_config.start_date_str,
+        "requested_end_date_str": crisis_period_config.end_date_str,
+        "launch_offset_int": launch_offset_int,
+        "reason_str": reason_str,
+    }
+
+
+def _build_adjusted_window_dict(
+    crisis_period_config: CrisisPeriodConfig,
+    effective_start_ts: pd.Timestamp,
+    effective_end_ts: pd.Timestamp,
+    supported_start_ts: pd.Timestamp,
+    supported_end_ts: pd.Timestamp,
+) -> dict[str, object]:
+    return {
+        "crisis_name_str": crisis_period_config.crisis_name_str,
+        "requested_start_date_str": crisis_period_config.start_date_str,
+        "requested_end_date_str": crisis_period_config.end_date_str,
+        "effective_start_date_str": pd.Timestamp(effective_start_ts).strftime("%Y-%m-%d"),
+        "effective_end_date_str": pd.Timestamp(effective_end_ts).strftime("%Y-%m-%d"),
+        "reason_str": (
+            "requested window partially overlaps supported history "
+            f"{supported_start_ts.date()} through {supported_end_ts.date()}; "
+            "any scenario metrics that were evaluated use the effective dates shown."
+        ),
+    }
 
 
 def resolve_stress_launch_window(
@@ -1116,6 +1193,8 @@ def _build_run_info_dict(stress_result_obj: StressTestResult) -> dict[str, objec
                 }
                 for crisis_period_config in stress_result_obj.crisis_period_config_list
             ],
+            "skipped_windows": stress_result_obj.skipped_window_list,
+            "adjusted_windows": stress_result_obj.adjusted_window_list,
         },
     }
 
@@ -1130,6 +1209,10 @@ def _build_metadata_dict(stress_result_obj: StressTestResult) -> dict[str, objec
         "configured_crisis_count": int(len(stress_result_obj.crisis_period_config_list)),
         "launch_offsets": list(stress_result_obj.launch_offset_tuple),
         "evaluated_scenario_count": int(len(stress_result_obj.stress_metric_df)),
+        "skipped_window_count": int(len(stress_result_obj.skipped_window_list)),
+        "skipped_windows": stress_result_obj.skipped_window_list,
+        "adjusted_window_count": int(len(stress_result_obj.adjusted_window_list)),
+        "adjusted_windows": stress_result_obj.adjusted_window_list,
     }
 
 
@@ -1179,6 +1262,10 @@ def _build_summary_dict(stress_result_obj: StressTestResult) -> dict[str, object
         "analysis_type_str": STRESS_TEST_ANALYSIS_TYPE_STR,
         "scenario_count_int": int(len(metric_df)),
         "launch_offsets": list(stress_result_obj.launch_offset_tuple),
+        "skipped_window_count_int": int(len(stress_result_obj.skipped_window_list)),
+        "skipped_windows": stress_result_obj.skipped_window_list,
+        "adjusted_window_count_int": int(len(stress_result_obj.adjusted_window_list)),
+        "adjusted_windows": stress_result_obj.adjusted_window_list,
     }
     if len(metric_df) == 0:
         return summary_dict
@@ -2974,6 +3061,77 @@ tr.crisis-mixed-entry td {
 """
 
 
+def _build_skipped_windows_html_str(stress_result_obj: StressTestResult) -> str:
+    if not stress_result_obj.skipped_window_list and not stress_result_obj.adjusted_window_list:
+        return _wrap_card_html(
+            "<h2>Coverage Disclosure</h2>"
+            "<p>No configured crisis window was skipped or truncated by the "
+            "strategy's supported history.</p>"
+        )
+
+    section_html_list: list[str] = ["<h2>Coverage Disclosure</h2>"]
+    skipped_row_html_list: list[str] = []
+    for skipped_window_dict in stress_result_obj.skipped_window_list:
+        launch_offset_obj = skipped_window_dict["launch_offset_int"]
+        launch_offset_str = (
+            "All configured offsets" if launch_offset_obj is None else str(launch_offset_obj)
+        )
+        skipped_row_html_list.append(
+            "<tr>"
+            f"<td>{html.escape(str(skipped_window_dict['crisis_name_str']))}</td>"
+            f"<td>{html.escape(str(skipped_window_dict['requested_start_date_str']))}</td>"
+            f"<td>{html.escape(str(skipped_window_dict['requested_end_date_str']))}</td>"
+            f"<td>{html.escape(launch_offset_str)}</td>"
+            f"<td>{html.escape(str(skipped_window_dict['reason_str']))}</td>"
+            "</tr>"
+        )
+
+    if skipped_row_html_list:
+        section_html_list.extend(
+            [
+                "<h3>Skipped windows</h3>",
+                "<p>These requested windows or launch offsets were not evaluated. "
+                "They are exclusions, not passing scenarios.</p>",
+                '<div class="scroll"><table><thead><tr>',
+                "<th>Crisis</th><th>Requested start</th><th>Requested end</th>",
+                "<th>Launch offset</th><th>Reason</th>",
+                "</tr></thead><tbody>",
+                "".join(skipped_row_html_list),
+                "</tbody></table></div>",
+            ]
+        )
+
+    adjusted_row_html_list: list[str] = []
+    for adjusted_window_dict in stress_result_obj.adjusted_window_list:
+        adjusted_row_html_list.append(
+            "<tr>"
+            f"<td>{html.escape(str(adjusted_window_dict['crisis_name_str']))}</td>"
+            f"<td>{html.escape(str(adjusted_window_dict['requested_start_date_str']))}</td>"
+            f"<td>{html.escape(str(adjusted_window_dict['requested_end_date_str']))}</td>"
+            f"<td>{html.escape(str(adjusted_window_dict['effective_start_date_str']))}</td>"
+            f"<td>{html.escape(str(adjusted_window_dict['effective_end_date_str']))}</td>"
+            f"<td>{html.escape(str(adjusted_window_dict['reason_str']))}</td>"
+            "</tr>"
+        )
+    if adjusted_row_html_list:
+        section_html_list.extend(
+            [
+                "<h3>Truncated windows</h3>",
+                "<p>These requested windows were truncated to the effective "
+                "supported dates shown. Any scenario metrics that were evaluated "
+                "use those dates.</p>",
+                '<div class="scroll"><table><thead><tr>',
+                "<th>Crisis</th><th>Requested start</th><th>Requested end</th>",
+                "<th>Effective start</th><th>Effective end</th><th>Reason</th>",
+                "</tr></thead><tbody>",
+                "".join(adjusted_row_html_list),
+                "</tbody></table></div>",
+            ]
+        )
+
+    return _wrap_card_html("".join(section_html_list))
+
+
 def _build_report_html_str(stress_result_obj: StressTestResult) -> str:
     run_date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     verdict_html_str = _build_verdict_html(stress_result_obj)
@@ -3020,6 +3178,7 @@ def _build_report_html_str(stress_result_obj: StressTestResult) -> str:
 </header>
 {verdict_html_str}
 {_build_stress_kpi_grid_html(stress_result_obj)}
+{_build_skipped_windows_html_str(stress_result_obj)}
 {risk_flag_html_str}
 {_wrap_card_html(f'<h2>Crisis by Crisis</h2>{crisis_small_multiples_html_str}')}
 {_wrap_card_html(f'<h2>Crisis Summary</h2>{crisis_summary_html_str}')}

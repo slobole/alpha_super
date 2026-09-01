@@ -143,7 +143,7 @@ def test_catalog_lists_strategies_and_flags_wired():
         for entry_obj in strategy_entry_list
         if entry_obj.has_capacity_analysis_bool
     ]
-    assert len(capacity_entry_list) == 33
+    assert len(capacity_entry_list) == 39
     assert (
         "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi"
         in {entry_obj.module_import_str for entry_obj in capacity_entry_list}
@@ -760,7 +760,9 @@ def test_vanilla_native_view_has_all_mockup_sections(tmp_path, monkeypatch):
         "<div class=\"spec-masthead\">Period 2020 to 2026</div>"
         "<div class=\"plate-index\">Report contents</div>"
         "<div class=\"headline-comparison\"><table><tr><th>Metric</th><th>Strategy</th><th>SPX</th><th>Delta</th></tr>"
-        "<tr><td>CAGR</td><td>12%</td><td>9%</td><td>+3pp</td></tr></table></div>"
+        "<tr><td>CAGR</td><td>12%</td><td>9%</td><td>+3pp</td></tr>"
+        "<tr><td>Expected Shortfall (95%, 21 days)</td><td>-7.5%</td><td>-12.4%</td><td>+4.9pp</td></tr>"
+        "</table></div>"
         f"{plate_html_str}</div></body></html>",
         encoding="utf-8",
     )
@@ -797,6 +799,8 @@ def test_vanilla_native_view_has_all_mockup_sections(tmp_path, monkeypatch):
     assert "SPX" in overview_html_str
     assert "Delta" in overview_html_str
     assert "+3pp" in overview_html_str
+    assert "Expected Shortfall (95%, 21 days)" in overview_html_str
+    assert "+4.9pp" in overview_html_str
     assert "Demo" not in overview_html_str
     assert "Period 2020 to 2026" not in overview_html_str
     assert "Report contents" not in overview_html_str
@@ -883,6 +887,39 @@ def test_vanilla_saved_statistics_build_mockup_comparison_without_recomputing_re
     assert "+0.41" in comparison_html_str
     assert "+16.11pp" in comparison_html_str
     assert "-0.09pp" in comparison_html_str
+    assert "Expected shortfall (95%, daily)" in comparison_html_str
+
+
+def test_vanilla_legacy_headline_restores_saved_daily_expected_shortfall():
+    main_html_str = """
+    <div class="headline-comparison"><table><tbody>
+      <tr><td class="metric">CAGR (net)</td><td>12.0%</td><td>9.0%</td><td>+3.0pp</td></tr>
+    </tbody></table></div>
+    <div class="plate" id="plate-01"><h2>Statistics</h2>
+      <table><thead><tr><th>Metric</th><th>Strategy</th><th>$SPX</th></tr></thead>
+      <tbody><tr><td>CVaR 95% (Daily) [%]</td><td>-2.63%</td><td>-2.54%</td></tr></tbody></table>
+    </div>
+    """
+    run_obj = runs.RunEntry(
+        run_name_str="legacy",
+        analysis_dir_str="vanilla_backtest",
+        analysis_label_str="Vanilla",
+        timestamp_str="2026-08-01_120000",
+        rel_dir_from_results_str=(
+            "research/strategy/legacy/vanilla_backtest/2026-08-01_120000"
+        ),
+        has_report_bool=True,
+    )
+
+    tab_tuple = artifact_view._vanilla_tab_tuple(main_html_str, run_obj)
+    overview_html_str = str(
+        next(tab_obj for tab_obj in tab_tuple if tab_obj.key_str == "overview").html_markup
+    )
+
+    assert "Expected shortfall (95%, daily)" in overview_html_str
+    assert "-2.63%" in overview_html_str
+    assert "-2.54%" in overview_html_str
+    assert "-0.09pp" in overview_html_str
 
 
 def test_vanilla_monthly_tables_build_mockup_year_table_from_saved_values():

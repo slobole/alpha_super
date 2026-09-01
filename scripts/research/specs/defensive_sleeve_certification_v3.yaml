@@ -1,0 +1,186 @@
+study_id_str: defensive_sleeve_certification_v3
+study_version_str: "3.0"
+frozen_date_str: "2026-08-30"
+authority_str: research_bench_only
+evidence_status_str: preregistered_satellite_candidates_before_formal_run
+
+base_contract:
+  relative_path_str: scripts/research/specs/defensive_sleeve_certification_v2.yaml
+  sha256_str: bcf66a0e6184ce8f8a74e435d1e9a334125ba7715668a22a9d34d526f502666b
+  freeze_relative_path_str: scripts/research/specs/defensive_sleeve_certification_v2.freeze.json
+  freeze_sha256_str: 27a6b5167f812ed64b5a8fb86985931eb046957c6dcadd34d9e046a887d26a91
+  merge_policy_str: explicit_v3_additions_extend_v2_without_rewriting_prior_candidates
+
+v3_strategy_alias_addition:
+  inflation_compass:
+    strategy_import_str: strategies.taa_df.strategy_taa_inflation_compass
+    role_str: small_inflation_regime_satellite
+    decision_timing_str: final_month_end_Close_T
+    execution_timing_str: first_Open_T_plus_1
+    signal_adjustment_str: TOTALRETURN
+    fill_and_mark_adjustment_str: CAPITALSPECIAL
+    slippage_per_executed_side_float: 0.0005
+    commission_per_share_float: 0.0
+    commission_minimum_float: 0.0
+    FRED_series_id_str: T5YIE
+    FRED_vintage_policy_str: current_vintage_not_alfred
+    source_native_dividend_withholding_rate_float: 0.25
+    source_native_positive_cash_rate_policy_str: zero_percent_intentional
+    source_native_negative_cash_financing_modeled_bool: false
+    offered_accounting_dividend_withholding_rate_float: 0.25
+    offered_accounting_positive_cash_policy_str: causal_DGS3MO_ACT_365
+    offered_accounting_negative_cash_policy_str: causal_DGS3MO_plus_200bp_ACT_365
+    offered_accounting_adapter_must_affect_NAV_before_future_sizing_bool: true
+    source_native_result_cannot_clear_formal_gate_bool: true
+    paper_live_authorized_bool: false
+
+v3_candidate_addition:
+  DR3_core5_inflation_compass_05:
+    requested_label_str: defensive_return_with_small_inflation_satellite
+    defensive_sleeve_weight_by_alias:
+      core5: 0.95
+      inflation_compass: 0.05
+    full_product_initial_weight_by_alias:
+      growth4: 0.25
+      core5: 0.7125
+      inflation_compass: 0.0375
+    initial_subaccount_capital_by_alias:
+      growth4: 250000.0
+      core5: 712500.0
+      inflation_compass: 37500.0
+    mechanism_rationale_str: >-
+      Preserve CORE5 as the dominant defensive anchor while testing whether a
+      fixed five-percent Inflation Compass satellite improves inflation-regime
+      behavior through its distinct XLE and XLU states. The weight was requested
+      before this study and is not selected from a grid.
+
+  DR4_core5_tactical_fi_05:
+    requested_label_str: defensive_return_with_small_fixed_income_satellite
+    defensive_sleeve_weight_by_alias:
+      core5: 0.95
+      tactical_fi: 0.05
+    full_product_initial_weight_by_alias:
+      growth4: 0.25
+      core5: 0.7125
+      tactical_fi: 0.0375
+    initial_subaccount_capital_by_alias:
+      growth4: 250000.0
+      core5: 712500.0
+      tactical_fi: 37500.0
+    mechanism_rationale_str: >-
+      Preserve CORE5 as the dominant defensive anchor while measuring the
+      marginal diversification and drawdown effect of a fixed five-percent
+      Tactical Fixed Income satellite. The weight was requested before this
+      study and is not selected from a grid.
+
+  DR5_core5_tactical_fi_equal_inflation_compass_05:
+    requested_label_str: defensive_return_with_small_inflation_satellite
+    defensive_sleeve_weight_by_alias:
+      core5: 0.475
+      tactical_fi: 0.475
+      inflation_compass: 0.05
+    full_product_initial_weight_by_alias:
+      growth4: 0.25
+      core5: 0.35625
+      tactical_fi: 0.35625
+      inflation_compass: 0.0375
+    initial_subaccount_capital_by_alias:
+      growth4: 250000.0
+      core5: 356250.0
+      tactical_fi: 356250.0
+      inflation_compass: 37500.0
+    mechanism_rationale_str: >-
+      Test the same fixed five-percent Inflation Compass satellite around the
+      existing equal CORE5 and Tactical Fixed Income candidate, funding the
+      satellite equally from both anchors without optimizing their ratio.
+
+matched_controls:
+  MC1_core5_bil_05:
+    defensive_sleeve_weight_by_alias:
+      core5: 0.95
+      bil: 0.05
+    full_product_initial_weight_by_alias:
+      growth4: 0.25
+      core5: 0.7125
+      bil: 0.0375
+    initial_subaccount_capital_by_alias:
+      growth4: 250000.0
+      core5: 712500.0
+      bil: 37500.0
+    purpose_str: isolate_whether_DR3_beats_a_same_size_cash_equivalent_satellite
+  MC2_core5_tactical_fi_equal_bil_05:
+    defensive_sleeve_weight_by_alias:
+      core5: 0.475
+      tactical_fi: 0.475
+      bil: 0.05
+    full_product_initial_weight_by_alias:
+      growth4: 0.25
+      core5: 0.35625
+      tactical_fi: 0.35625
+      bil: 0.0375
+    initial_subaccount_capital_by_alias:
+      growth4: 250000.0
+      core5: 356250.0
+      tactical_fi: 356250.0
+      bil: 37500.0
+    purpose_str: isolate_whether_DR5_beats_a_same_size_cash_equivalent_satellite
+
+v3_statistical_override:
+  candidate_family_list:
+    - CP1_core5_bil
+    - CP2_core5_tfi_bil
+    - DR1_core5_tfi_trinity
+    - DR2_core5_tfi_equal
+    - DR3_core5_inflation_compass_05
+    - DR4_core5_tactical_fi_05
+    - DR5_core5_tactical_fi_equal_inflation_compass_05
+  historical_trial_count_floor_int: 73
+  historical_trial_floor_derivation_str: 68_v2_floor_plus_3_v3_candidates_plus_2_matched_controls
+  fixed_weight_grid_count_int: 1
+  tested_satellite_weight_float: 0.05
+  alternative_satellite_weight_search_allowed_bool: false
+  holm_familywise_alpha_float: 0.10
+  pure_untouched_holdout_claim_allowed_bool: false
+
+v3_relative_gates:
+  minimum_defensive_sleeve_net_cagr_float: 0.04
+  maximum_max_drawdown_worsening_vs_named_parent_float: 0.005
+  maximum_worst_252d_worsening_vs_named_parent_float: 0.005
+  primary_value_add_metric_str: full_window_defensive_sleeve_zero_rate_daily_sharpe
+  minimum_primary_sharpe_improvement_float: 0.02
+  inflation_mechanism_window:
+    label_str: inflation_bear_2022
+    start_date_str: "2022-01-03"
+    end_date_str: "2022-10-12"
+    minimum_total_return_improvement_vs_named_parent_float: 0.005
+    maximum_max_drawdown_worsening_vs_named_parent_float: 0.005
+  DR3_primary_comparator_str: MC1_core5_bil_05
+  DR3_mechanism_comparator_str: B1_core5
+  DR4_primary_comparator_str: B1_core5
+  DR5_primary_comparator_str: MC2_core5_tactical_fi_equal_bil_05
+  DR5_mechanism_comparator_str: DR2_core5_tfi_equal
+  candidate_pass_rule_str: >-
+    Every candidate must pass the four-percent CAGR floor, parent max-drawdown
+    and worst-252-day safety limits, and the 0.02 primary Sharpe improvement.
+    DR3 and DR5 must additionally pass both frozen 2022 mechanism conditions.
+  no_complexity_credit_without_measured_improvement_bool: true
+
+comparison_parent_by_candidate:
+  DR3_core5_inflation_compass_05: B1_core5
+  DR4_core5_tactical_fi_05: B1_core5
+  DR5_core5_tactical_fi_equal_inflation_compass_05: DR2_core5_tfi_equal
+
+quant_pitfall_constraints:
+  current_vintage_FRED_is_not_point_in_time_bool: true
+  inflation_compass_not_a_crash_hedge_assumption_bool: true
+  known_prior_ladder4_5_and_10_pct_trials_counted_bool: true
+  next_open_execution_contract_unchanged_bool: true
+  costs_and_accounting_contract_unchanged_from_v2_bool: true
+  independent_subaccount_compounding_unchanged_bool: true
+
+decision_rule:
+  CORE5_standalone_remains_primary_simplicity_anchor_bool: true
+  DR2_equal_mix_remains_existing_diversified_challenger_bool: true
+  v3_candidates_are_challengers_not_approved_allocations_bool: true
+  maximum_authority_str: historically_conditioned_candidate_to_forward_shadow
+  no_paper_live_release_or_allocation_authority_bool: true

@@ -5,25 +5,33 @@ For each configured crisis window c:
 
     C_c = { t : start_c <= t <= end_c }
 
-The replay runs a fresh Vanilla backtest on the restricted crisis calendar:
+The suite supports two explicit replay modes:
+
+1. Fresh-capital replay runs a new Vanilla backtest on the restricted crisis
+   calendar for strategies that do not require inherited state.
+2. Full-history replay runs once from inception, preserves pre-crisis state,
+   then slices and rebases each requested crisis window to the prior close.
+
+For a fresh-capital replay:
 
     effective_start_c = first tradable bar on or after start_c
     effective_end_c = last tradable bar on or before end_c
 
-Per-crisis return is measured from fresh crisis capital:
+Per-crisis return is measured from the applicable window base:
 
     R_c = V_end / V_0 - 1
 
 with:
 
-    V_0 = capital_base
+    V_0 = capital_base                  (fresh-capital replay)
+    V_0 = NAV at the prior close        (full-history replay)
 
 Normalized crisis paths are:
 
     normalized_equity_t = V_t / V_0
 
-This module keeps the engine contract unchanged. It only restricts the
-execution calendar while preserving full pre-crisis history for causal signals.
+This module keeps the engine contract unchanged. Coverage exclusions and
+truncated windows are recorded explicitly in every result.
 """
 
 from __future__ import annotations
@@ -36,6 +44,7 @@ import numpy as np
 import pandas as pd
 
 from alpha.engine.backtest import run_daily
+from alpha.engine.metrics import generate_overall_metrics
 from alpha.engine.strategy import Strategy
 
 
@@ -51,6 +60,7 @@ class CrisisStrategySpec:
     strategy_key_str: str
     load_context_fn: Callable[[], dict[str, object]]
     build_strategy_fn: Callable[[dict[str, object]], Strategy]
+    full_history_replay_bool: bool = False
 
 
 @dataclass
@@ -63,6 +73,8 @@ class CrisisReplayResult:
     crisis_path_df: pd.DataFrame
     crisis_strategy_map: dict[str, Strategy] = field(default_factory=dict)
     output_dir_path: Path | None = None
+    skipped_window_list: list[dict[str, object]] = field(default_factory=list)
+    adjusted_window_list: list[dict[str, object]] = field(default_factory=list)
 
     @property
     def supported_crisis_df(self) -> pd.DataFrame:
@@ -70,7 +82,15 @@ class CrisisReplayResult:
 
     @property
     def unsupported_crisis_df(self) -> pd.DataFrame:
-        return pd.DataFrame(columns=self.crisis_metric_df.columns)
+        return pd.DataFrame(
+            self.skipped_window_list,
+            columns=[
+                "crisis_name_str",
+                "requested_start_date_str",
+                "requested_end_date_str",
+                "reason_str",
+            ],
+        )
 
 
 class CrisisAnalyzer:
@@ -165,13 +185,32 @@ class CrisisAnalyzer:
         pricing_data_df = context_dict["pricing_data_df"]
         supported_calendar_idx = pd.DatetimeIndex(
             context_dict.get("calendar_idx", pricing_data_df.index)
-        )
+        ).sort_values().unique()
         capital_base_float = float(context_dict["capital_base_float"])
         strategy_name_str = str(context_dict["strategy_name_str"])
 
         metric_row_list: list[dict[str, object]] = []
         crisis_path_frame_list: list[pd.DataFrame] = []
         crisis_strategy_map: dict[str, Strategy] = {}
+        skipped_window_list: list[dict[str, object]] = []
+        adjusted_window_list: list[dict[str, object]] = []
+
+        full_history_strategy_obj: Strategy | None = None
+        if self.strategy_spec_obj.full_history_replay_bool:
+            # *** CRITICAL*** Stateful monthly strategies enter a crisis with
+            # positions created before the crisis start. Run their causal path
+            # once from inception; crisis metrics below are sliced and
+            # normalized at the close immediately before each crisis window.
+            full_history_strategy_obj = self.strategy_spec_obj.build_strategy_fn(
+                context_dict
+            )
+            run_daily(
+                strategy=full_history_strategy_obj,
+                pricing_data=pricing_data_df,
+                calendar=supported_calendar_idx,
+                show_progress=resolved_show_progress_bool,
+                show_signal_progress_bool=resolved_show_signal_progress_bool,
+            )
 
         for crisis_period_config in normalized_crisis_period_list:
             effective_start_ts, effective_end_ts, skip_reason_str = resolve_crisis_window(
@@ -179,42 +218,97 @@ class CrisisAnalyzer:
                 calendar_idx=supported_calendar_idx,
             )
             if skip_reason_str:
+                skipped_window_list.append(
+                    _build_skipped_crisis_window_dict(
+                        crisis_period_config=crisis_period_config,
+                        reason_str=skip_reason_str,
+                    )
+                )
                 continue
+
+            requested_start_ts = pd.Timestamp(crisis_period_config.start_date_str)
+            requested_end_ts = pd.Timestamp(crisis_period_config.end_date_str)
+            supported_start_ts = pd.Timestamp(supported_calendar_idx[0])
+            supported_end_ts = pd.Timestamp(supported_calendar_idx[-1])
+            if (
+                full_history_strategy_obj is not None
+                and not bool((supported_calendar_idx < effective_start_ts).any())
+            ):
+                skipped_window_list.append(
+                    _build_skipped_crisis_window_dict(
+                        crisis_period_config=crisis_period_config,
+                        reason_str=(
+                            "full-history replay requires a completed bar before "
+                            f"the effective start date {effective_start_ts.date()}."
+                        ),
+                    )
+                )
+                continue
+            if requested_start_ts < supported_start_ts or requested_end_ts > supported_end_ts:
+                adjusted_window_list.append(
+                    _build_adjusted_crisis_window_dict(
+                        crisis_period_config=crisis_period_config,
+                        effective_start_ts=effective_start_ts,
+                        effective_end_ts=effective_end_ts,
+                        supported_start_ts=supported_start_ts,
+                        supported_end_ts=supported_end_ts,
+                    )
+                )
 
             crisis_calendar_idx = supported_calendar_idx[
                 (supported_calendar_idx >= effective_start_ts)
                 & (supported_calendar_idx <= effective_end_ts)
             ]
             if len(crisis_calendar_idx) == 0:
+                skipped_window_list.append(
+                    _build_skipped_crisis_window_dict(
+                        crisis_period_config=crisis_period_config,
+                        reason_str="resolved crisis calendar is empty.",
+                    )
+                )
                 continue
 
-            # *** CRITICAL*** Restrict the execution calendar to crisis bars only
-            # while leaving the full pre-crisis price history available for causal
-            # signals through previous_bar.
-            strategy_obj = self.strategy_spec_obj.build_strategy_fn(context_dict)
-            run_daily(
-                strategy=strategy_obj,
-                pricing_data=pricing_data_df,
-                calendar=crisis_calendar_idx,
-                show_progress=resolved_show_progress_bool,
-                show_signal_progress_bool=resolved_show_signal_progress_bool,
-            )
-
-            metric_row_list.append(
-                _build_supported_metric_row_dict(
+            if full_history_strategy_obj is None:
+                # *** CRITICAL*** Restrict the execution calendar to crisis bars
+                # while leaving full prices available for causal previous_bar
+                # signals. This fresh-capital path is valid only for strategies
+                # that do not require inherited positions.
+                strategy_obj = self.strategy_spec_obj.build_strategy_fn(context_dict)
+                run_daily(
+                    strategy=strategy_obj,
+                    pricing_data=pricing_data_df,
+                    calendar=crisis_calendar_idx,
+                    show_progress=resolved_show_progress_bool,
+                    show_signal_progress_bool=resolved_show_signal_progress_bool,
+                )
+                metric_row_dict = _build_supported_metric_row_dict(
                     strategy_obj=strategy_obj,
                     crisis_period_config=crisis_period_config,
                     effective_start_ts=effective_start_ts,
                     effective_end_ts=effective_end_ts,
                 )
-            )
-            crisis_path_frame_list.append(
-                _build_crisis_path_df(
+                crisis_path_df = _build_crisis_path_df(
                     strategy_obj=strategy_obj,
                     crisis_name_str=crisis_period_config.crisis_name_str,
                     effective_start_ts=effective_start_ts,
                 )
-            )
+            else:
+                strategy_obj = full_history_strategy_obj
+                metric_row_dict = _build_windowed_metric_row_dict(
+                    strategy_obj=strategy_obj,
+                    crisis_period_config=crisis_period_config,
+                    effective_start_ts=effective_start_ts,
+                    effective_end_ts=effective_end_ts,
+                )
+                crisis_path_df = _build_windowed_crisis_path_df(
+                    strategy_obj=strategy_obj,
+                    crisis_name_str=crisis_period_config.crisis_name_str,
+                    effective_start_ts=effective_start_ts,
+                    effective_end_ts=effective_end_ts,
+                )
+
+            metric_row_list.append(metric_row_dict)
+            crisis_path_frame_list.append(crisis_path_df)
             crisis_strategy_map[crisis_period_config.crisis_name_str] = strategy_obj
 
         crisis_metric_df = pd.DataFrame(metric_row_list)
@@ -231,6 +325,8 @@ class CrisisAnalyzer:
                     "volatility_ann_pct_float",
                     "sharpe_ratio_float",
                     "trade_count_int",
+                    "replay_mode_str",
+                    "pre_crisis_state_preserved_bool",
                 ]
             )
         else:
@@ -262,6 +358,8 @@ class CrisisAnalyzer:
             crisis_metric_df=crisis_metric_df,
             crisis_path_df=crisis_path_df,
             crisis_strategy_map=crisis_strategy_map,
+            skipped_window_list=skipped_window_list,
+            adjusted_window_list=adjusted_window_list,
         )
 
         if resolved_save_output_bool:
@@ -558,6 +656,78 @@ def _build_taa_trinity_vol_control_8_bil_strategy_obj(
     return build_stress_test_strategy_obj(context_dict)
 
 
+def _load_taa_adaptive_macro_core5_context_dict() -> dict[str, object]:
+    from strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5 import (
+        build_stress_test_context_dict,
+    )
+
+    return build_stress_test_context_dict()
+
+
+def _build_taa_adaptive_macro_core5_strategy_obj(
+    context_dict: dict[str, object],
+) -> Strategy:
+    from strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5 import (
+        build_stress_test_strategy_obj,
+    )
+
+    return build_stress_test_strategy_obj(context_dict)
+
+
+def _load_taa_inflation_compass_context_dict() -> dict[str, object]:
+    from strategies.taa_df.strategy_taa_inflation_compass import (
+        build_stress_test_context_dict,
+    )
+
+    return build_stress_test_context_dict()
+
+
+def _build_taa_inflation_compass_strategy_obj(
+    context_dict: dict[str, object],
+) -> Strategy:
+    from strategies.taa_df.strategy_taa_inflation_compass import (
+        build_stress_test_strategy_obj,
+    )
+
+    return build_stress_test_strategy_obj(context_dict)
+
+
+def _load_taa_tactical_fixed_income_ief_lqd_context_dict() -> dict[str, object]:
+    from strategies.taa_beyond_6040.strategy_taa_tactical_fixed_income_ief_lqd import (
+        build_stress_test_context_dict,
+    )
+
+    return build_stress_test_context_dict()
+
+
+def _build_taa_tactical_fixed_income_ief_lqd_strategy_obj(
+    context_dict: dict[str, object],
+) -> Strategy:
+    from strategies.taa_beyond_6040.strategy_taa_tactical_fixed_income_ief_lqd import (
+        build_stress_test_strategy_obj,
+    )
+
+    return build_stress_test_strategy_obj(context_dict)
+
+
+def _load_mr_us_sector_etf_ibs_downshock_vox_iyr_context_dict() -> dict[str, object]:
+    from strategies.mean_reversion.strategy_mr_us_sector_etf_ibs_downshock_vox_iyr import (
+        build_stress_test_context_dict,
+    )
+
+    return build_stress_test_context_dict()
+
+
+def _build_mr_us_sector_etf_ibs_downshock_vox_iyr_strategy_obj(
+    context_dict: dict[str, object],
+) -> Strategy:
+    from strategies.mean_reversion.strategy_mr_us_sector_etf_ibs_downshock_vox_iyr import (
+        build_stress_test_strategy_obj,
+    )
+
+    return build_stress_test_strategy_obj(context_dict)
+
+
 def _load_mo_atr_normalized_ndx_context_dict() -> dict[str, object]:
     from strategies.momentum.strategy_mo_atr_normalized_ndx import (
         DEFAULT_CONFIG,
@@ -614,6 +784,60 @@ def _build_mo_atr_normalized_ndx_strategy_obj(
     return strategy_obj
 
 
+def _load_mo_spy_adaptive_momentum_regime_context_dict() -> dict[str, object]:
+    from strategies.momentum.strategy_mo_spy_adaptive_momentum_regime import (
+        build_stress_test_context_dict,
+    )
+
+    return build_stress_test_context_dict()
+
+
+def _build_mo_spy_adaptive_momentum_regime_strategy_obj(
+    context_dict: dict[str, object],
+) -> Strategy:
+    from strategies.momentum.strategy_mo_spy_adaptive_momentum_regime import (
+        build_stress_test_strategy_obj,
+    )
+
+    return build_stress_test_strategy_obj(context_dict)
+
+
+def _load_mo_qqq_adaptive_momentum_regime_context_dict() -> dict[str, object]:
+    from strategies.momentum.strategy_mo_qqq_adaptive_momentum_regime import (
+        build_stress_test_context_dict,
+    )
+
+    return build_stress_test_context_dict()
+
+
+def _build_mo_qqq_adaptive_momentum_regime_strategy_obj(
+    context_dict: dict[str, object],
+) -> Strategy:
+    from strategies.momentum.strategy_mo_qqq_adaptive_momentum_regime import (
+        build_stress_test_strategy_obj,
+    )
+
+    return build_stress_test_strategy_obj(context_dict)
+
+
+def _load_mo_ibit_adaptive_momentum_regime_context_dict() -> dict[str, object]:
+    from strategies.momentum.strategy_mo_ibit_adaptive_momentum_regime import (
+        build_stress_test_context_dict,
+    )
+
+    return build_stress_test_context_dict()
+
+
+def _build_mo_ibit_adaptive_momentum_regime_strategy_obj(
+    context_dict: dict[str, object],
+) -> Strategy:
+    from strategies.momentum.strategy_mo_ibit_adaptive_momentum_regime import (
+        build_stress_test_strategy_obj,
+    )
+
+    return build_stress_test_strategy_obj(context_dict)
+
+
 SUPPORTED_CRISIS_STRATEGY_SPEC_MAP: dict[str, CrisisStrategySpec] = {
     "strategy_mr_qpi_ibs_rsi_exit": CrisisStrategySpec(
         strategy_key_str="strategy_mr_qpi_ibs_rsi_exit",
@@ -645,10 +869,50 @@ SUPPORTED_CRISIS_STRATEGY_SPEC_MAP: dict[str, CrisisStrategySpec] = {
         load_context_fn=_load_taa_trinity_vol_control_8_bil_context_dict,
         build_strategy_fn=_build_taa_trinity_vol_control_8_bil_strategy_obj,
     ),
+    "strategy_taa_adaptive_macro_core5": CrisisStrategySpec(
+        strategy_key_str="strategy_taa_adaptive_macro_core5",
+        load_context_fn=_load_taa_adaptive_macro_core5_context_dict,
+        build_strategy_fn=_build_taa_adaptive_macro_core5_strategy_obj,
+        full_history_replay_bool=True,
+    ),
+    "strategy_taa_inflation_compass": CrisisStrategySpec(
+        strategy_key_str="strategy_taa_inflation_compass",
+        load_context_fn=_load_taa_inflation_compass_context_dict,
+        build_strategy_fn=_build_taa_inflation_compass_strategy_obj,
+    ),
+    "strategy_taa_tactical_fixed_income_ief_lqd": CrisisStrategySpec(
+        strategy_key_str="strategy_taa_tactical_fixed_income_ief_lqd",
+        load_context_fn=_load_taa_tactical_fixed_income_ief_lqd_context_dict,
+        build_strategy_fn=_build_taa_tactical_fixed_income_ief_lqd_strategy_obj,
+        full_history_replay_bool=True,
+    ),
+    "strategy_mr_us_sector_etf_ibs_downshock_vox_iyr": CrisisStrategySpec(
+        strategy_key_str="strategy_mr_us_sector_etf_ibs_downshock_vox_iyr",
+        load_context_fn=_load_mr_us_sector_etf_ibs_downshock_vox_iyr_context_dict,
+        build_strategy_fn=_build_mr_us_sector_etf_ibs_downshock_vox_iyr_strategy_obj,
+    ),
     "strategy_mo_atr_normalized_ndx": CrisisStrategySpec(
         strategy_key_str="strategy_mo_atr_normalized_ndx",
         load_context_fn=_load_mo_atr_normalized_ndx_context_dict,
         build_strategy_fn=_build_mo_atr_normalized_ndx_strategy_obj,
+    ),
+    "strategy_mo_spy_adaptive_momentum_regime": CrisisStrategySpec(
+        strategy_key_str="strategy_mo_spy_adaptive_momentum_regime",
+        load_context_fn=_load_mo_spy_adaptive_momentum_regime_context_dict,
+        build_strategy_fn=_build_mo_spy_adaptive_momentum_regime_strategy_obj,
+        full_history_replay_bool=True,
+    ),
+    "strategy_mo_qqq_adaptive_momentum_regime": CrisisStrategySpec(
+        strategy_key_str="strategy_mo_qqq_adaptive_momentum_regime",
+        load_context_fn=_load_mo_qqq_adaptive_momentum_regime_context_dict,
+        build_strategy_fn=_build_mo_qqq_adaptive_momentum_regime_strategy_obj,
+        full_history_replay_bool=True,
+    ),
+    "strategy_mo_ibit_adaptive_momentum_regime": CrisisStrategySpec(
+        strategy_key_str="strategy_mo_ibit_adaptive_momentum_regime",
+        load_context_fn=_load_mo_ibit_adaptive_momentum_regime_context_dict,
+        build_strategy_fn=_build_mo_ibit_adaptive_momentum_regime_strategy_obj,
+        full_history_replay_bool=True,
     ),
 }
 
@@ -678,6 +942,37 @@ def _coerce_crisis_period_config_list(
             )
         )
     return normalized_crisis_period_list
+
+
+def _build_skipped_crisis_window_dict(
+    crisis_period_config: CrisisPeriodConfig,
+    reason_str: str,
+) -> dict[str, object]:
+    return {
+        "crisis_name_str": crisis_period_config.crisis_name_str,
+        "requested_start_date_str": crisis_period_config.start_date_str,
+        "requested_end_date_str": crisis_period_config.end_date_str,
+        "reason_str": reason_str,
+    }
+
+
+def _build_adjusted_crisis_window_dict(
+    crisis_period_config: CrisisPeriodConfig,
+    effective_start_ts: pd.Timestamp,
+    effective_end_ts: pd.Timestamp,
+    supported_start_ts: pd.Timestamp,
+    supported_end_ts: pd.Timestamp,
+) -> dict[str, object]:
+    return {
+        "crisis_name_str": crisis_period_config.crisis_name_str,
+        "requested_start_date_str": crisis_period_config.start_date_str,
+        "requested_end_date_str": crisis_period_config.end_date_str,
+        "effective_start_date_str": pd.Timestamp(effective_start_ts).date().isoformat(),
+        "effective_end_date_str": pd.Timestamp(effective_end_ts).date().isoformat(),
+        "supported_start_date_str": pd.Timestamp(supported_start_ts).date().isoformat(),
+        "supported_end_date_str": pd.Timestamp(supported_end_ts).date().isoformat(),
+        "reason_str": "requested window was truncated to supported history.",
+    }
 
 
 def resolve_crisis_window(
@@ -776,7 +1071,187 @@ def _build_supported_metric_row_dict(
         "volatility_ann_pct_float": float(summary_ser.loc["Volatility (Ann.) [%]"]),
         "sharpe_ratio_float": float(summary_ser.loc["Sharpe Ratio"]),
         "trade_count_int": closed_trade_count_int + open_trade_count_int,
+        "replay_mode_str": "fresh_crisis_capital",
+        "pre_crisis_state_preserved_bool": False,
     }
+
+
+def _windowed_total_value_ser(
+    value_ser: pd.Series,
+    effective_start_ts: pd.Timestamp,
+    effective_end_ts: pd.Timestamp,
+) -> pd.Series:
+    ordered_value_ser = value_ser.astype(float).sort_index()
+    pre_crisis_value_ser = ordered_value_ser[ordered_value_ser.index < effective_start_ts]
+    if len(pre_crisis_value_ser) == 0:
+        raise ValueError(
+            "Full-history crisis replay requires at least one completed bar before "
+            f"{effective_start_ts.date()}."
+        )
+    crisis_value_ser = ordered_value_ser.loc[effective_start_ts:effective_end_ts]
+    if len(crisis_value_ser) == 0:
+        raise ValueError("Full-history crisis replay produced no in-window values.")
+    return pd.concat([pre_crisis_value_ser.iloc[[-1]], crisis_value_ser])
+
+
+def _windowed_trade_count_int(
+    strategy_obj: Strategy,
+    effective_start_ts: pd.Timestamp,
+    effective_end_ts: pd.Timestamp,
+) -> int:
+    transaction_df = strategy_obj.get_transactions()
+    if transaction_df is None or len(transaction_df) == 0:
+        return 0
+    transaction_date_column_str = next(
+        (
+            column_str
+            for column_str in ("bar", "fill_date", "date")
+            if column_str in transaction_df.columns
+        ),
+        "",
+    )
+    if not transaction_date_column_str:
+        return 0
+    transaction_date_ser = pd.to_datetime(
+        transaction_df[transaction_date_column_str]
+    )
+    in_window_mask_ser = (transaction_date_ser >= effective_start_ts) & (
+        transaction_date_ser <= effective_end_ts
+    )
+    in_window_transaction_df = transaction_df.loc[in_window_mask_ser]
+    if len(in_window_transaction_df) == 0:
+        return 0
+    if "trade_id" not in in_window_transaction_df.columns:
+        raise RuntimeError("Crisis trade count requires transaction trade_id values.")
+    return int(in_window_transaction_df["trade_id"].nunique(dropna=True))
+
+
+def _build_windowed_metric_row_dict(
+    strategy_obj: Strategy,
+    crisis_period_config: CrisisPeriodConfig,
+    effective_start_ts: pd.Timestamp,
+    effective_end_ts: pd.Timestamp,
+) -> dict[str, object]:
+    strategy_total_value_ser = _windowed_total_value_ser(
+        strategy_obj.results["total_value"],
+        effective_start_ts,
+        effective_end_ts,
+    )
+    strategy_metric_ser = generate_overall_metrics(
+        total_value=strategy_total_value_ser,
+        capital_base=float(strategy_total_value_ser.iloc[0]),
+    )
+    benchmark_name_str = _primary_benchmark_name_str(strategy_obj)
+    benchmark_return_pct_float = np.nan
+    if benchmark_name_str is not None:
+        benchmark_total_value_ser = _windowed_total_value_ser(
+            strategy_obj.results[benchmark_name_str],
+            effective_start_ts,
+            effective_end_ts,
+        )
+        benchmark_metric_ser = generate_overall_metrics(
+            total_value=benchmark_total_value_ser,
+            capital_base=float(benchmark_total_value_ser.iloc[0]),
+        )
+        benchmark_return_pct_float = float(benchmark_metric_ser.loc["Return [%]"])
+
+    strategy_return_pct_float = float(strategy_metric_ser.loc["Return [%]"])
+    return {
+        "crisis_name_str": crisis_period_config.crisis_name_str,
+        "effective_start_ts": pd.Timestamp(effective_start_ts),
+        "effective_end_ts": pd.Timestamp(effective_end_ts),
+        "strategy_return_pct_float": strategy_return_pct_float,
+        "benchmark_return_pct_float": benchmark_return_pct_float,
+        "relative_return_pct_float": (
+            strategy_return_pct_float - benchmark_return_pct_float
+            if np.isfinite(benchmark_return_pct_float)
+            else np.nan
+        ),
+        "max_drawdown_pct_float": float(
+            strategy_metric_ser.loc["Max. Drawdown [%]"]
+        ),
+        "volatility_ann_pct_float": float(
+            strategy_metric_ser.loc["Volatility (Ann.) [%]"]
+        ),
+        "sharpe_ratio_float": float(strategy_metric_ser.loc["Sharpe Ratio"]),
+        "trade_count_int": _windowed_trade_count_int(
+            strategy_obj,
+            effective_start_ts,
+            effective_end_ts,
+        ),
+        "replay_mode_str": "full_history_window",
+        "pre_crisis_state_preserved_bool": True,
+    }
+
+
+def _build_windowed_crisis_path_df(
+    strategy_obj: Strategy,
+    crisis_name_str: str,
+    effective_start_ts: pd.Timestamp,
+    effective_end_ts: pd.Timestamp,
+) -> pd.DataFrame:
+    strategy_total_value_ser = _windowed_total_value_ser(
+        strategy_obj.results["total_value"],
+        effective_start_ts,
+        effective_end_ts,
+    )
+    strategy_base_float = float(strategy_total_value_ser.iloc[0])
+    strategy_crisis_value_ser = strategy_total_value_ser.iloc[1:]
+    benchmark_name_str = _primary_benchmark_name_str(strategy_obj)
+    benchmark_base_float = np.nan
+    benchmark_crisis_value_ser = pd.Series(
+        np.nan,
+        index=strategy_crisis_value_ser.index,
+        dtype=float,
+    )
+    if benchmark_name_str is not None:
+        benchmark_total_value_ser = _windowed_total_value_ser(
+            strategy_obj.results[benchmark_name_str],
+            effective_start_ts,
+            effective_end_ts,
+        )
+        benchmark_base_float = float(benchmark_total_value_ser.iloc[0])
+        benchmark_crisis_value_ser = benchmark_total_value_ser.iloc[1:]
+
+    path_row_list: list[dict[str, object]] = [
+        {
+            "crisis_name_str": crisis_name_str,
+            "bar_offset_int": 0,
+            "bar_ts": pd.Timestamp(effective_start_ts),
+            "strategy_name_str": strategy_obj.name,
+            "benchmark_name_str": benchmark_name_str or "",
+            "normalized_strategy_equity_float": 1.0,
+            "normalized_benchmark_equity_float": (
+                1.0 if benchmark_name_str else np.nan
+            ),
+        }
+    ]
+    for bar_offset_int, bar_ts in enumerate(
+        strategy_crisis_value_ser.index,
+        start=1,
+    ):
+        path_row_list.append(
+            {
+                "crisis_name_str": crisis_name_str,
+                "bar_offset_int": int(bar_offset_int),
+                "bar_ts": pd.Timestamp(bar_ts),
+                "strategy_name_str": strategy_obj.name,
+                "benchmark_name_str": benchmark_name_str or "",
+                "normalized_strategy_equity_float": float(
+                    strategy_crisis_value_ser.loc[bar_ts] / strategy_base_float
+                ),
+                "normalized_benchmark_equity_float": (
+                    float(
+                        benchmark_crisis_value_ser.loc[bar_ts]
+                        / benchmark_base_float
+                    )
+                    if benchmark_name_str
+                    else np.nan
+                ),
+            }
+        )
+    return pd.DataFrame(path_row_list)
+
 
 def _build_crisis_path_df(
     strategy_obj: Strategy,

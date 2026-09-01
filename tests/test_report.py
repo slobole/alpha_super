@@ -16,6 +16,7 @@ from alpha.engine.report import (
     _build_daily_return_distribution_html,
     _build_composition_plate_html,
     _build_headline_delta_table_html,
+    _build_kpi_grid_html,
     _build_html,
     _display_metric_dict_for_value_ser,
     _build_portfolio_html,
@@ -37,6 +38,10 @@ from alpha.engine.report import (
     _weight_color_for_asset,
     save_portfolio_results,
     save_results,
+)
+from alpha.engine.metrics import (
+    EXPECTED_SHORTFALL_METRIC_NAME_STR,
+    generate_overall_metrics,
 )
 from alpha.engine.portfolio import Portfolio
 from alpha.engine.strategy import Strategy
@@ -408,7 +413,8 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertIn('font-size: 0.94rem;', h3_rule_str)
         self.assertNotIn('background:', h3_rule_str)
         self.assertNotIn('<div class="kpi-label">Final Value</div>', report_html_str)
-        self.assertEqual(report_html_str.count('<div class="kpi-card">'), 5)
+        self.assertEqual(report_html_str.count('<div class="kpi-card">'), 6)
+        self.assertIn('<div class="kpi-label">Expected Shortfall</div>', report_html_str)
         # Headline drops Total Return and ends with Beta.
         self.assertNotIn('<div class="kpi-label">Total Return</div>', report_html_str)
         self.assertIn('<div class="kpi-label">Beta</div>', report_html_str)
@@ -454,7 +460,7 @@ class ReportFormattingTests(unittest.TestCase):
         self.assertIn('$SPX · N=500 · HAC L=5', report_html_str)
         self.assertIn('<div class="kpi-label">Alpha (Ann.)</div>', report_html_str)
         self.assertIn('Zero-rate vs $SPX · HAC t=1.35', report_html_str)
-        self.assertEqual(report_html_str.count('<div class="kpi-card">'), 6)
+        self.assertEqual(report_html_str.count('<div class="kpi-card">'), 7)
         self.assertIn('+4.20% / 1.35', report_html_str)
 
     def test_spec_layout_indexes_audit_plate_and_escapes_policy_values(self):
@@ -1479,6 +1485,7 @@ class HeadlineDeltaTableTests(unittest.TestCase):
                     'Sharpe Ratio': 0.9548,
                     'Max. Drawdown [%]': -30.914,
                     'Correlation': 1.0,
+                    EXPECTED_SHORTFALL_METRIC_NAME_STR: -7.5,
                 },
                 '$SPX': {
                     'Return (Ann.) [%]': 8.804,
@@ -1486,6 +1493,7 @@ class HeadlineDeltaTableTests(unittest.TestCase):
                     'Sharpe Ratio': 0.5442,
                     'Max. Drawdown [%]': -56.775,
                     'Correlation': 0.6825,
+                    EXPECTED_SHORTFALL_METRIC_NAME_STR: -12.4,
                 },
             }
         )
@@ -1528,7 +1536,77 @@ class HeadlineDeltaTableTests(unittest.TestCase):
         label_list = re.findall(r'<td class="metric">([^<]+)</td>', table_html_str)
         self.assertEqual(
             label_list,
-            ['CAGR (net)', 'Volatility', 'Sharpe ratio', 'Max drawdown', 'Correlation'],
+            [
+                'CAGR (net)',
+                'Volatility',
+                'Sharpe ratio',
+                'Max drawdown',
+                'Correlation',
+                'Expected Shortfall (95%, 21 days)',
+            ],
+        )
+
+    def test_expected_shortfall_closes_the_headline_with_benchmark_delta(self):
+        table_html_str = _build_headline_delta_table_html(self._summary_df(), 'Strategy')
+
+        self.assertIn('<td>-7.5%</td>', table_html_str)
+        self.assertIn('<td>-12.4%</td>', table_html_str)
+        self.assertIn('+4.9pp', table_html_str)
+        expected_shortfall_row_str = re.search(
+            r'<tr><td class="metric">Expected Shortfall.*?</tr>',
+            table_html_str,
+        ).group(0)
+        self.assertIn('--color-profit-dark', expected_shortfall_row_str)
+        self.assertLess(
+            table_html_str.index('Max drawdown'),
+            table_html_str.index('Expected Shortfall'),
+        )
+
+    def test_positive_expected_shortfall_compares_as_a_signed_tail_return(self):
+        summary_df = self._summary_df()
+        summary_df.loc[EXPECTED_SHORTFALL_METRIC_NAME_STR, 'Strategy'] = 2.0
+        summary_df.loc[EXPECTED_SHORTFALL_METRIC_NAME_STR, '$SPX'] = 1.0
+
+        table_html_str = _build_headline_delta_table_html(summary_df, 'Strategy')
+        expected_shortfall_row_str = re.search(
+            r'<tr><td class="metric">Expected Shortfall.*?</tr>',
+            table_html_str,
+        ).group(0)
+
+        self.assertIn('+1.0pp', expected_shortfall_row_str)
+        self.assertIn('--color-profit-dark', expected_shortfall_row_str)
+
+    def test_full_vanilla_report_renders_expected_shortfall_in_the_headline(self):
+        random_generator_obj = np.random.default_rng(23)
+        strategy_obj = make_strategy(
+            [0.0] + list(random_generator_obj.normal(0.0004, 0.01, 149))
+        )
+        strategy_summary_ser = generate_overall_metrics(
+            strategy_obj.results['total_value'],
+            portfolio_value=strategy_obj.results['portfolio_value'],
+            capital_base=100_000.0,
+        )
+        benchmark_summary_ser = generate_overall_metrics(
+            strategy_obj.results['$SPX'],
+            capital_base=100_000.0,
+        )
+        strategy_obj.summary = pd.concat(
+            {
+                'Strategy': strategy_summary_ser,
+                '$SPX': benchmark_summary_ser,
+            },
+            axis=1,
+        )
+
+        with signature_variant_context('desk'):
+            report_html_str = _build_html(
+                strategy_obj,
+                chart_b64='equity-chart-b64',
+            )
+
+        self.assertEqual(
+            report_html_str.count('Expected Shortfall (95%, 21 days)'),
+            1,
         )
 
     def test_no_benchmark_column_yields_no_table_so_the_caller_can_fall_back(self):
@@ -1536,6 +1614,10 @@ class HeadlineDeltaTableTests(unittest.TestCase):
         strategy_only_df = self._summary_df()[['Strategy']]
         self.assertEqual(_build_headline_delta_table_html(strategy_only_df, 'Strategy'), '')
         self.assertEqual(_build_headline_delta_table_html(None, 'Strategy'), '')
+
+        fallback_html_str = _build_kpi_grid_html(strategy_only_df, 'Strategy')
+        self.assertIn('Expected Shortfall', fallback_html_str)
+        self.assertIn('-7.50%', fallback_html_str)
 
     def test_the_headline_table_agrees_with_the_summary_it_came_from(self):
         """The headline must not drift from the Performance Summary below it."""

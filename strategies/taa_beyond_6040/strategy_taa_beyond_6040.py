@@ -305,7 +305,10 @@ def compute_gross_exposure_float(
     portfolio_vol_float = float(trailing_return_ser.std(ddof=1) * np.sqrt(252.0))
     if not np.isfinite(portfolio_vol_float) or portfolio_vol_float <= 0.0:
         return 1.0
-    if portfolio_vol_float <= trigger_portfolio_vol_float:
+    # *** CRITICAL*** Preserve the literal inclusive trigger at floating-point
+    # equality. The tolerance is numerical only (1e-10 percentage points), not
+    # an economic widening of the volatility threshold.
+    if portfolio_vol_float <= trigger_portfolio_vol_float + 1e-12:
         return 1.0
     return float(min(1.0, target_portfolio_vol_float / portfolio_vol_float))
 

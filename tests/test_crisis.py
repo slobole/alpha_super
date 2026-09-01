@@ -11,10 +11,15 @@ from alpha.engine.crisis import (
     CrisisStrategySpec,
     _build_dv2_strategy_obj,
     _build_mo_atr_normalized_ndx_strategy_obj,
+    _windowed_trade_count_int,
     resolve_crisis_window,
     run_crisis_replay_suite,
 )
-from alpha.engine.report import _format_crisis_metric_table_html, save_crisis_replay_results
+from alpha.engine.report import (
+    _crisis_chart_series_dict,
+    _format_crisis_metric_table_html,
+    save_crisis_replay_results,
+)
 from alpha.engine.strategy import Strategy
 
 
@@ -77,6 +82,13 @@ BUY_HOLD_SPEC = CrisisStrategySpec(
     strategy_key_str='toy_buy_hold',
     load_context_fn=load_buy_hold_context_dict,
     build_strategy_fn=build_buy_hold_strategy_obj,
+)
+
+BUY_HOLD_FULL_HISTORY_SPEC = CrisisStrategySpec(
+    strategy_key_str='toy_buy_hold_full_history',
+    load_context_fn=load_buy_hold_context_dict,
+    build_strategy_fn=build_buy_hold_strategy_obj,
+    full_history_replay_bool=True,
 )
 
 class CrisisReplayTests(unittest.TestCase):
@@ -223,7 +235,7 @@ class CrisisReplayTests(unittest.TestCase):
         self.assertEqual(len(strategy_obj._open_trades), 1)
         self.assertEqual(int(strategy_obj.get_position('AAA')), 1)
 
-    def test_unsupported_periods_are_silently_dropped_from_metric_table(self):
+    def test_unsupported_periods_are_disclosed_outside_metric_table(self):
         crisis_period_list = [
             CrisisPeriodConfig(
                 crisis_name_str='supported_window',
@@ -245,7 +257,11 @@ class CrisisReplayTests(unittest.TestCase):
 
         self.assertEqual(len(crisis_replay_result.crisis_metric_df), 1)
         self.assertEqual(len(crisis_replay_result.supported_crisis_df), 1)
-        self.assertEqual(len(crisis_replay_result.unsupported_crisis_df), 0)
+        self.assertEqual(len(crisis_replay_result.unsupported_crisis_df), 1)
+        self.assertEqual(
+            crisis_replay_result.unsupported_crisis_df.iloc[0]['crisis_name_str'],
+            'unsupported_window',
+        )
         self.assertEqual(
             crisis_replay_result.crisis_metric_df.iloc[0]['crisis_name_str'],
             'supported_window',
@@ -296,6 +312,160 @@ class CrisisReplayTests(unittest.TestCase):
         self.assertAlmostEqual(float(metric_row_ser['relative_return_pct_float']), 7.0, places=12)
         self.assertAlmostEqual(float(metric_row_ser['max_drawdown_pct_float']), -2.0, places=12)
         self.assertEqual(int(metric_row_ser['trade_count_int']), 1)
+
+    def test_full_history_replay_carries_pre_crisis_position_into_window(self):
+        crisis_replay_result = run_crisis_replay_suite(
+            crisis_period_list=[
+                CrisisPeriodConfig(
+                    crisis_name_str='inherited_position_crisis',
+                    start_date_str='2020-02-21',
+                    end_date_str='2020-02-24',
+                )
+            ],
+            strategy_spec_obj=BUY_HOLD_FULL_HISTORY_SPEC,
+            save_output_bool=False,
+        )
+
+        metric_row_ser = crisis_replay_result.crisis_metric_df.iloc[0]
+        crisis_path_df = crisis_replay_result.crisis_path_df.sort_values(
+            'bar_offset_int'
+        )
+        strategy_obj = crisis_replay_result.crisis_strategy_map[
+            'inherited_position_crisis'
+        ]
+
+        self.assertEqual(strategy_obj.results.index.min(), pd.Timestamp('2020-02-19'))
+        self.assertAlmostEqual(
+            float(metric_row_ser['strategy_return_pct_float']),
+            2.0,
+            places=12,
+        )
+        self.assertEqual(int(metric_row_ser['trade_count_int']), 0)
+        self.assertEqual(metric_row_ser['replay_mode_str'], 'full_history_window')
+        self.assertTrue(bool(metric_row_ser['pre_crisis_state_preserved_bool']))
+        self.assertAlmostEqual(
+            float(crisis_path_df.iloc[1]['normalized_strategy_equity_float']),
+            0.98,
+            places=12,
+        )
+
+    def test_full_history_crisis_chart_series_are_scoped_to_each_window(self):
+        crisis_replay_result = run_crisis_replay_suite(
+            crisis_period_list=[
+                CrisisPeriodConfig(
+                    crisis_name_str='first_window',
+                    start_date_str='2020-02-20',
+                    end_date_str='2020-02-21',
+                ),
+                CrisisPeriodConfig(
+                    crisis_name_str='second_window',
+                    start_date_str='2020-02-21',
+                    end_date_str='2020-02-24',
+                ),
+            ],
+            strategy_spec_obj=BUY_HOLD_FULL_HISTORY_SPEC,
+            save_output_bool=False,
+        )
+
+        first_series_dict = _crisis_chart_series_dict(
+            crisis_replay_result.crisis_path_df,
+            'first_window',
+        )
+        second_series_dict = _crisis_chart_series_dict(
+            crisis_replay_result.crisis_path_df,
+            'second_window',
+        )
+
+        self.assertIsNotNone(first_series_dict)
+        self.assertIsNotNone(second_series_dict)
+        first_equity_ser = first_series_dict['strategy_total_value_ser']
+        second_equity_ser = second_series_dict['strategy_total_value_ser']
+        self.assertAlmostEqual(float(first_equity_ser.iloc[0]), 1.0)
+        self.assertAlmostEqual(float(second_equity_ser.iloc[0]), 1.0)
+        self.assertGreaterEqual(first_equity_ser.index.min(), pd.Timestamp('2020-02-20'))
+        self.assertLessEqual(first_equity_ser.index.max(), pd.Timestamp('2020-02-21'))
+        self.assertGreaterEqual(second_equity_ser.index.min(), pd.Timestamp('2020-02-21'))
+        self.assertLessEqual(second_equity_ser.index.max(), pd.Timestamp('2020-02-24'))
+        self.assertFalse(first_equity_ser.equals(second_equity_ser))
+
+    def test_full_history_trade_count_counts_one_lifecycle_with_multiple_fills(self):
+        strategy_obj = build_buy_hold_strategy_obj(load_buy_hold_context_dict())
+        strategy_obj.add_transaction(
+            7, pd.Timestamp('2020-02-20'), 'AAA', 1, 10.0, 10.0, 1
+        )
+        strategy_obj.add_transaction(
+            7, pd.Timestamp('2020-02-21'), 'AAA', -1, 12.0, -12.0, 2
+        )
+
+        trade_count_int = _windowed_trade_count_int(
+            strategy_obj,
+            pd.Timestamp('2020-02-20'),
+            pd.Timestamp('2020-02-21'),
+        )
+
+        self.assertEqual(trade_count_int, 1)
+
+    def test_late_inception_replay_discloses_skipped_windows(self):
+        crisis_replay_result = run_crisis_replay_suite(
+            crisis_period_list=[
+                CrisisPeriodConfig(
+                    crisis_name_str='before_inception',
+                    start_date_str='2010-01-01',
+                    end_date_str='2010-01-31',
+                ),
+                CrisisPeriodConfig(
+                    crisis_name_str='supported_window',
+                    start_date_str='2020-02-20',
+                    end_date_str='2020-02-24',
+                ),
+            ],
+            strategy_spec_obj=BUY_HOLD_FULL_HISTORY_SPEC,
+            save_output_bool=False,
+        )
+
+        self.assertEqual(len(crisis_replay_result.crisis_metric_df), 1)
+        self.assertEqual(len(crisis_replay_result.unsupported_crisis_df), 1)
+        self.assertEqual(
+            crisis_replay_result.unsupported_crisis_df.iloc[0]['crisis_name_str'],
+            'before_inception',
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir_str:
+            output_path = save_crisis_replay_results(
+                crisis_replay_result,
+                output_dir=temp_dir_str,
+            )
+            metadata_dict = json.loads(
+                (output_path / 'metadata.json').read_text(encoding='utf-8')
+            )
+            report_html_str = (output_path / 'report.html').read_text(encoding='utf-8')
+
+        self.assertEqual(metadata_dict['configured_crisis_count'], 2)
+        self.assertEqual(metadata_dict['evaluated_crisis_count'], 1)
+        self.assertEqual(metadata_dict['skipped_window_count'], 1)
+        self.assertIn('Skipped crisis windows', report_html_str)
+        self.assertIn('before_inception', report_html_str)
+
+    def test_full_history_partial_overlap_without_prior_close_is_skipped(self):
+        crisis_replay_result = run_crisis_replay_suite(
+            crisis_period_list=[
+                CrisisPeriodConfig(
+                    crisis_name_str='partial_inception_overlap',
+                    start_date_str='2019-12-01',
+                    end_date_str='2020-02-21',
+                )
+            ],
+            strategy_spec_obj=BUY_HOLD_FULL_HISTORY_SPEC,
+            save_output_bool=False,
+        )
+
+        self.assertEqual(len(crisis_replay_result.crisis_metric_df), 0)
+        self.assertEqual(len(crisis_replay_result.unsupported_crisis_df), 1)
+        self.assertEqual(len(crisis_replay_result.adjusted_window_list), 0)
+        self.assertIn(
+            'requires a completed bar before',
+            crisis_replay_result.unsupported_crisis_df.iloc[0]['reason_str'],
+        )
 
     def test_crisis_metric_table_keeps_non_negative_relative_return_green(self):
         crisis_metric_df = pd.DataFrame(

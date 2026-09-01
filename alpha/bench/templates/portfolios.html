@@ -30,16 +30,11 @@
            placeholder="Search books by name or the pods inside them…">
   </label>
   <div class="toolbar-group">
-    <span class="toolbar-group-label">State</span>
+    <span class="toolbar-group-label">Maturity</span>
     <span class="filter-chip active" data-filter="all">All</span>
-    <span class="filter-chip" data-filter="measured">Measured</span>
-    <span class="filter-chip" data-filter="norun">Never run</span>
-    <span class="filter-chip" data-filter="stale">Stale</span>
-  </div>
-  <div class="toolbar-group">
-    <span class="toolbar-group-label">Schema</span>
-    <span class="filter-chip" data-filter="combine">Combine pkls</span>
-    <span class="filter-chip" data-filter="fresh">Fresh run</span>
+    <span class="filter-chip" data-filter="maturity:wired">Wired</span>
+    <span class="filter-chip" data-filter="maturity:pm_ready">PM_ready</span>
+    <span class="filter-chip" data-filter="maturity:research">Research</span>
   </div>
   <span class="toolbar-recent">
     <a class="btn btn-primary" href="{{ url_for('portfolio_new_page_fn') }}">New portfolio</a>
@@ -59,6 +54,7 @@
         <tr>
           <th class="cmp-cell"></th>
           <th class="sortable" data-sort-key="name">Book</th>
+          <th>Maturity</th>
           <th class="sortable" data-sort-key="schema">Schema</th>
           <th class="num sortable" data-sort-key="pods">Pods</th>
           <th class="num sortable" data-sort-key="capital">Capital</th>
@@ -76,9 +72,7 @@
         {% set p = v.portfolio %}
         <tr class="pf-row"
             data-search="{{ v.search_text_str }}"
-            data-measured="{{ '1' if v.has_run_bool else '0' }}"
-            data-stale="{{ '1' if v.is_stale_bool else '0' }}"
-            data-schema-key="{{ p.schema_str }}"
+            data-maturity="{{ 'wired' if p.is_wired_bool else 'pm_ready' if p.is_pm_ready_bool else 'research' }}"
             data-name="{{ p.name_str|lower }}"
             data-schema="{{ p.schema_str }}"
             data-pods="{{ p.pod_tuple|length }}"
@@ -105,6 +99,11 @@
             </div>
             {% endif %}
             {% if p.error_str %}<div class="cell-note">{{ p.error_str }}</div>{% endif %}
+          </td>
+          <td>
+            {% if p.is_wired_bool %}<span class="maturity maturity-wired">WIRED</span>
+            {% elif p.is_pm_ready_bool %}<span class="maturity maturity-pm">PM_READY</span>
+            {% else %}<span class="maturity maturity-research">RESEARCH</span>{% endif %}
           </td>
           <td><span class="badge badge-cat">{{ 'fresh run' if p.schema_str == 'manager' else 'combine pkls' }}</span>
             {% if p.rebalance_str %}<div class="cell-note">{{ p.rebalance_str }}</div>{% endif %}
@@ -162,42 +161,37 @@
     const allChip = chipList.find(function (c) { return c.dataset.filter === 'all'; });
     const noResults = document.getElementById('pf-no-results');
     const tableBody = document.querySelector('#pf-table tbody');
-    const activeSet = new Set();
+    const activeMaturitySet = new Set();
 
     function apply() {
       const query = searchInput.value.trim().toLowerCase();
       let visible = 0;
       rowList.forEach(function (row) {
         let ok = true;
-        if (activeSet.has('measured')) ok = ok && row.dataset.measured === '1';
-        if (activeSet.has('norun')) ok = ok && row.dataset.measured === '0';
-        if (activeSet.has('stale')) ok = ok && row.dataset.stale === '1';
-        if (activeSet.has('combine')) ok = ok && row.dataset.schemaKey === 'simple';
-        if (activeSet.has('fresh')) ok = ok && row.dataset.schemaKey === 'manager';
+        if (activeMaturitySet.size > 0) {
+          ok = ok && activeMaturitySet.has('maturity:' + row.dataset.maturity);
+        }
         ok = ok && (!query || row.dataset.search.indexOf(query) !== -1);
         row.classList.toggle('hidden', !ok);
         if (ok) visible++;
       });
       noResults.classList.toggle('hidden', visible !== 0);
-      allChip.classList.toggle('active', activeSet.size === 0);
+      allChip.classList.toggle('active', activeMaturitySet.size === 0);
     }
 
     chipList.forEach(function (chip) {
       chip.addEventListener('click', function () {
         const filter = chip.dataset.filter;
         if (filter === 'all') {
-          activeSet.clear();
+          activeMaturitySet.clear();
           chipList.forEach(function (c) { c.classList.remove('active'); });
         } else {
-          // Measured and Never-run are opposites; picking one drops the other
-          // rather than producing an empty table.
-          if (filter === 'measured') activeSet.delete('norun');
-          if (filter === 'norun') activeSet.delete('measured');
-          if (filter === 'combine') activeSet.delete('fresh');
-          if (filter === 'fresh') activeSet.delete('combine');
-          if (activeSet.has(filter)) activeSet.delete(filter); else activeSet.add(filter);
+          if (activeMaturitySet.has(filter)) activeMaturitySet.delete(filter);
+          else activeMaturitySet.add(filter);
           chipList.forEach(function (c) {
-            if (c.dataset.filter !== 'all') c.classList.toggle('active', activeSet.has(c.dataset.filter));
+            if (c.dataset.filter !== 'all') {
+              c.classList.toggle('active', activeMaturitySet.has(c.dataset.filter));
+            }
           });
         }
         apply();

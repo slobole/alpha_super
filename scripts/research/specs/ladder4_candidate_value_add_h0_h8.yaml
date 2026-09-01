@@ -1,0 +1,326 @@
+study_id_str: ladder4_candidate_value_add_h0_h8_2026_08_29
+spec_version_str: "1.4"
+frozen_on_date_str: "2026-08-29"
+authority_str: research_bench_only
+forbidden_authority_list:
+  - allocation
+  - paper
+  - live
+  - broker
+  - scheduler
+  - release
+
+portfolio_contract:
+  capital_base_float: 1000000.0
+  requested_start_date_str: "2004-01-01"
+  effective_execution_start_date_str: "2012-10-01"
+  capital_anchor_date_str: "2012-09-28"
+  end_date_str: "2026-08-14"
+  baseline_reference_config_path_str: portfolios/ladder_4_growth.yaml
+  prior_baseline_context_summary_path_str: results/research/portfolio/ladder_4_growth/vanilla_backtest/2026-08-17_112428/summary.json
+  outer_rebalance: null
+  allocation_semantics_str: fixed_initial_capital_then_independent_drift
+  decision_execution_timing_str: Close_T_to_Open_T_plus_1
+  warmup_policy_str: strategy_native_pre_start_history_signal_only_no_positions
+  first_result_must_equal_effective_execution_start_bool: true
+  first_fill_return_policy_str: include_cash_anchor_to_first_post_fill_close
+  global_comparison_index_str: exact_intersection_of_all_19_sources_before_any_hypothesis_is_built
+  missing_return_policy_str: reject_no_zero_cash_or_forward_fill
+  resume_policy_str: forbidden_fresh_output_only_to_prevent_mixed_data_vintages
+
+passive_bil_contract:
+  role_str: accounting_matched_controls_not_selectable_candidates
+  strategy_import_str: strategies.portfolio_controls.strategy_passive_bil:PassiveBilControlStrategy
+  execution_adjustment_str: CAPITALSPECIAL
+  dividend_policy_str: explicit_cash_ledger_no_reinvestment
+  accounting_profile_by_candidate_family:
+    tactical_fixed_income:
+      accounting_profile_str: tactical_fi_gross_dgs3mo_cash
+      dividend_withholding_rate_float: 0.0
+      positive_cash_rate_policy_str: causal_DGS3MO_ACT_365
+      slippage_per_side_float: 0.0005
+      commission_per_share_float: 0.0
+      commission_minimum_float: 0.0
+    adaptive_macro_core5:
+      accounting_profile_str: core5_net25_zero_cash
+      dividend_withholding_rate_float: 0.25
+      positive_cash_rate_policy_str: zero_percent_intentional
+      slippage_per_side_float: 0.00025
+      commission_per_share_float: 0.005
+      commission_minimum_float: 1.0
+  negative_cash_financing_policy_str: reported_not_modeled
+  entry_timing_str: first_real_Close_T_then_Open_T_plus_1
+  rebalance: null
+
+source_runs:
+  dv2_160000:
+    strategy_import_str: strategies.dv2.strategy_mr_dv2:DVO2Strategy
+    allocated_capital_float: 160000.0
+  hpi_170000:
+    strategy_import_str: strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote
+    allocated_capital_float: 170000.0
+  ndx_250000:
+    strategy_import_str: strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy
+    allocated_capital_float: 250000.0
+  ndx_231343_28358208955:
+    strategy_import_str: strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy
+    allocated_capital_float: 231343.28358208955
+  ndx_212686_5671641791:
+    strategy_import_str: strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy
+    allocated_capital_float: 212686.5671641791
+  mosaic_80000:
+    strategy_import_str: strategies.momentum.strategy_mo_mosaic_russell1000:MosaicRussell1000Strategy
+    allocated_capital_float: 80000.0
+  mosaic_74029_85074626866:
+    strategy_import_str: strategies.momentum.strategy_mo_mosaic_russell1000:MosaicRussell1000Strategy
+    allocated_capital_float: 74029.85074626866
+  mosaic_68059_7014925373:
+    strategy_import_str: strategies.momentum.strategy_mo_mosaic_russell1000:MosaicRussell1000Strategy
+    allocated_capital_float: 68059.7014925373
+  taa_340000:
+    strategy_import_str: strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash
+    allocated_capital_float: 340000.0
+  taa_314626_8656716418:
+    strategy_import_str: strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash
+    allocated_capital_float: 314626.8656716418
+  taa_289253_7313432836:
+    strategy_import_str: strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash
+    allocated_capital_float: 289253.7313432836
+  tactical_fi_50000:
+    strategy_import_str: strategies.taa_beyond_6040.strategy_taa_tactical_fixed_income_ief_lqd
+    allocated_capital_float: 50000.0
+  tactical_fi_100000:
+    strategy_import_str: strategies.taa_beyond_6040.strategy_taa_tactical_fixed_income_ief_lqd
+    allocated_capital_float: 100000.0
+  core5_50000:
+    strategy_import_str: strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5
+    allocated_capital_float: 50000.0
+  core5_100000:
+    strategy_import_str: strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5
+    allocated_capital_float: 100000.0
+  bil_tfi_50000:
+    strategy_import_str: strategies.portfolio_controls.strategy_passive_bil:PassiveBilControlStrategy
+    allocated_capital_float: 50000.0
+    run_variant_kwargs_dict:
+      accounting_profile_str: tactical_fi_gross_dgs3mo_cash
+  bil_tfi_100000:
+    strategy_import_str: strategies.portfolio_controls.strategy_passive_bil:PassiveBilControlStrategy
+    allocated_capital_float: 100000.0
+    run_variant_kwargs_dict:
+      accounting_profile_str: tactical_fi_gross_dgs3mo_cash
+  bil_core5_50000:
+    strategy_import_str: strategies.portfolio_controls.strategy_passive_bil:PassiveBilControlStrategy
+    allocated_capital_float: 50000.0
+    run_variant_kwargs_dict:
+      accounting_profile_str: core5_net25_zero_cash
+  bil_core5_100000:
+    strategy_import_str: strategies.portfolio_controls.strategy_passive_bil:PassiveBilControlStrategy
+    allocated_capital_float: 100000.0
+    run_variant_kwargs_dict:
+      accounting_profile_str: core5_net25_zero_cash
+
+hypotheses:
+  H0:
+    label_str: Ladder4 frozen baseline
+    selectable_bool: false
+    matched_control_id_str: null
+    source_weight_list:
+      - [dv2_160000, 0.16]
+      - [hpi_170000, 0.17]
+      - [ndx_250000, 0.25]
+      - [mosaic_80000, 0.08]
+      - [taa_340000, 0.34]
+  H1:
+    label_str: Tactical Fixed Income 5 percent
+    selectable_bool: true
+    matched_control_id_str: H5
+    source_weight_list:
+      - [dv2_160000, 0.16]
+      - [hpi_170000, 0.17]
+      - [ndx_231343_28358208955, 0.23134328358208955]
+      - [mosaic_74029_85074626866, 0.07402985074626866]
+      - [taa_314626_8656716418, 0.3146268656716418]
+      - [tactical_fi_50000, 0.05]
+  H2:
+    label_str: Tactical Fixed Income 10 percent
+    selectable_bool: true
+    matched_control_id_str: H6
+    source_weight_list:
+      - [dv2_160000, 0.16]
+      - [hpi_170000, 0.17]
+      - [ndx_212686_5671641791, 0.2126865671641791]
+      - [mosaic_68059_7014925373, 0.0680597014925373]
+      - [taa_289253_7313432836, 0.2892537313432836]
+      - [tactical_fi_100000, 0.10]
+  H3:
+    label_str: Adaptive Macro CORE5 5 percent
+    selectable_bool: true
+    matched_control_id_str: H7
+    source_weight_list:
+      - [dv2_160000, 0.16]
+      - [hpi_170000, 0.17]
+      - [ndx_231343_28358208955, 0.23134328358208955]
+      - [mosaic_74029_85074626866, 0.07402985074626866]
+      - [taa_314626_8656716418, 0.3146268656716418]
+      - [core5_50000, 0.05]
+  H4:
+    label_str: Adaptive Macro CORE5 10 percent
+    selectable_bool: true
+    matched_control_id_str: H8
+    source_weight_list:
+      - [dv2_160000, 0.16]
+      - [hpi_170000, 0.17]
+      - [ndx_212686_5671641791, 0.2126865671641791]
+      - [mosaic_68059_7014925373, 0.0680597014925373]
+      - [taa_289253_7313432836, 0.2892537313432836]
+      - [core5_100000, 0.10]
+  H5:
+    label_str: Passive BIL 5 percent Tactical FI accounting matched control
+    selectable_bool: false
+    matched_control_id_str: null
+    source_weight_list:
+      - [dv2_160000, 0.16]
+      - [hpi_170000, 0.17]
+      - [ndx_231343_28358208955, 0.23134328358208955]
+      - [mosaic_74029_85074626866, 0.07402985074626866]
+      - [taa_314626_8656716418, 0.3146268656716418]
+      - [bil_tfi_50000, 0.05]
+  H6:
+    label_str: Passive BIL 10 percent Tactical FI accounting matched control
+    selectable_bool: false
+    matched_control_id_str: null
+    source_weight_list:
+      - [dv2_160000, 0.16]
+      - [hpi_170000, 0.17]
+      - [ndx_212686_5671641791, 0.2126865671641791]
+      - [mosaic_68059_7014925373, 0.0680597014925373]
+      - [taa_289253_7313432836, 0.2892537313432836]
+      - [bil_tfi_100000, 0.10]
+  H7:
+    label_str: Passive BIL 5 percent CORE5 accounting matched control
+    selectable_bool: false
+    matched_control_id_str: null
+    source_weight_list:
+      - [dv2_160000, 0.16]
+      - [hpi_170000, 0.17]
+      - [ndx_231343_28358208955, 0.23134328358208955]
+      - [mosaic_74029_85074626866, 0.07402985074626866]
+      - [taa_314626_8656716418, 0.3146268656716418]
+      - [bil_core5_50000, 0.05]
+  H8:
+    label_str: Passive BIL 10 percent CORE5 accounting matched control
+    selectable_bool: false
+    matched_control_id_str: null
+    source_weight_list:
+      - [dv2_160000, 0.16]
+      - [hpi_170000, 0.17]
+      - [ndx_212686_5671641791, 0.2126865671641791]
+      - [mosaic_68059_7014925373, 0.0680597014925373]
+      - [taa_289253_7313432836, 0.2892537313432836]
+      - [bil_core5_100000, 0.10]
+
+economic_gates:
+  versus_h0:
+    minimum_max_drawdown_improvement_float: 0.02
+    minimum_es5_loss_reduction_fraction_float: 0.10
+    minimum_cagr_delta_float: -0.01
+    minimum_sharpe_delta_float: 0.0
+  versus_matched_bil:
+    minimum_cagr_delta_float: 0.005
+    minimum_sharpe_delta_float: -0.02
+    minimum_max_drawdown_delta_float: -0.01
+    maximum_es5_loss_ratio_float: 1.05
+  formal_subperiods:
+    partition_str: three_equal_observation_chronological_thirds
+    minimum_thirds_with_es5_improvement_vs_h0_int: 2
+    minimum_thirds_with_positive_cagr_vs_matched_bil_int: 2
+    maximum_single_third_max_drawdown_worsening_vs_h0_float: 0.02
+    maximum_single_third_cagr_shortfall_vs_h0_float: 0.03
+
+statistical_contract:
+  selectable_hypothesis_id_list: [H1, H2, H3, H4]
+  bootstrap_type_str: synchronized_paired_stationary
+  simulation_count_int: 10000
+  random_seed_int: 20260829
+  primary_mean_block_length_int: 63
+  sensitivity_mean_block_length_int_list: [21, 126]
+  annualization_day_int: 252
+  risk_free_rate_float: 0.0
+  es_quantile_float: 0.05
+  candidate_p_value_str: max_centered_tail_vs_h0_and_carry_vs_matched_bil
+  finite_sample_correction_str: plus_one_over_B_plus_one
+  family_correction_str: Holm
+  family_alpha_float: 0.05
+  sensitivity_gate_str: both_component_one_sided_p_values_below_0_05
+  cumulative_related_path_lower_bound_int: 35
+  cumulative_trial_components:
+    mosaic_source_sweep_paths_int: 12
+    mosaic_walk_forward_lambda_paths_int: 5
+    momentum_allocation_and_rebalance_unique_paths_int: 8
+    inflation_compass_allocation_paths_int: 2
+    current_new_candidate_and_control_paths_int: 8
+  selected_active_sharpe_role_str: approximate_selection_bias_diagnostic_not_formal_DSR_and_not_promotion_gate
+
+crisis_diagnostic_list:
+  - [dot_com_bubble, "2000-03-10", "2002-10-09"]
+  - [911_aftermath, "2001-09-11", "2001-10-11"]
+  - [gfc_2008, "2008-09-15", "2009-03-09"]
+  - [european_debt_2011, "2011-08-01", "2011-10-04"]
+  - [china_oil_shock_2015, "2015-08-18", "2016-02-11"]
+  - [volmageddon, "2018-02-02", "2018-02-09"]
+  - [covid_crash, "2020-02-20", "2020-04-07"]
+  - [inflation_bear_2022, "2022-01-03", "2022-10-12"]
+  - [trump_tariffs_2025, "2025-02-01", "2025-04-30"]
+
+capacity_contract:
+  gate_str: phase_1_never_clears_capacity_separate_preregistered_phase_2_required
+  book_level_order_overlap_str: aggregate_actual_same_day_same_symbol_transactions_diagnostic_only
+  current_evidence_status_str: not_cleared_period_mismatch_and_null_recommended_capacity
+  exact_rerun_policy_str: required_only_if_all_non_capacity_promotion_gates_pass
+  current_study_capacity_gate_must_remain_false_bool: true
+  external_artifact_can_clear_current_study_bool: false
+  phase_2_contract_must_be_frozen_before_capacity_data_review_bool: true
+  phase_2_minimum_requirement_list:
+    - Dedicated deterministic builder must generate lineage and detailed artifacts directly.
+    - Candidate identity, strategy code, analyzer code, period, capital grid, and Norgate data panel must be hashed.
+    - Raw pass conditions must be recomputed from numeric liquidity, impact, Sharpe erosion, rolling erosion, and cost fields.
+    - Every tested AUM must have strategy-matched assessed order diagnostics and finite nonnegative liquidity inputs.
+    - Baseline slippage must be family specific: Tactical Fixed Income 5bps and CORE5 2.5bps per side.
+    - Phase 2 cannot change H0-H8 economics, candidates, weights, or statistical results.
+  exact_artifact_path_by_candidate:
+    H1: results/research/portfolio/ladder4_candidate_capacity_exact/2026-08-29_h0_h8/H1/summary.json
+    H2: results/research/portfolio/ladder4_candidate_capacity_exact/2026-08-29_h0_h8/H2/summary.json
+    H3: results/research/portfolio/ladder4_candidate_capacity_exact/2026-08-29_h0_h8/H3/summary.json
+    H4: results/research/portfolio/ladder4_candidate_capacity_exact/2026-08-29_h0_h8/H4/summary.json
+  prior_artifact_by_strategy:
+    tactical_fixed_income: results/research/strategy/strategy_taa_tactical_fixed_income_ief_lqd/capacity_analysis/2026-08-20_215559/summary.json
+    adaptive_macro_core5: results/research/strategy/strategy_taa_adaptive_macro_core5/capacity_analysis/2026-08-26_002851/summary.json
+
+lineage_contract:
+  source_set_must_match_spec_bool: true
+  source_path_transaction_and_metadata_hashes_required_bool: true
+  strategy_and_shared_engine_dependency_hashes_required_bool: true
+  requested_start_must_be_covered_bool: true
+  native_history_request_start_by_strategy_import:
+    strategies.dv2.strategy_mr_dv2:DVO2Strategy: "1998-01-01"
+    strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote: "1998-01-01"
+    strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy: "1999-01-01"
+    strategies.momentum.strategy_mo_mosaic_russell1000:MosaicRussell1000Strategy: "1999-01-01"
+    strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash: "2000-01-01"
+    strategies.taa_beyond_6040.strategy_taa_tactical_fixed_income_ief_lqd: "2002-07-26"
+    strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5: "1990-01-01"
+    strategies.portfolio_controls.strategy_passive_bil:PassiveBilControlStrategy: "2004-01-01"
+  frozen_end_must_match_bool: true
+
+cost_financing_contract:
+  cost_profile_source_str: passive_bil_contract.accounting_profile_by_candidate_family
+  maximum_candidate_or_control_negative_cash_day_count_int: 0
+  unmodeled_negative_cash_is_promotion_blocker_bool: true
+
+stop_rule:
+  if_no_candidate_passes_str: retain_H0_and_stop_without_tuning
+  maximum_authority_on_full_pass_str: frozen_candidate_to_forward_shadow_only
+  known_blockers:
+    - Tactical Fixed Income uses current-vintage non-ALFRED macro data and proxy financing.
+    - CORE5 lacks account-specific DBC borrow, locate, recall, and rate evidence.
+    - PortfolioManager outer rebalancing is disabled; weights drift after initial allocation.

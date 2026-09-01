@@ -16,6 +16,7 @@ from alpha.engine.execution_timing import (
     ExecutionTimingAnalyzer,
     _build_results_df,
     _build_timing_heatmap_section_html_str,
+    _reset_strategy_state,
     _timing_matrix_heatmap_html_str,
     compute_cvar_5_pct_float,
 )
@@ -128,6 +129,29 @@ class CurrentBarRebalanceToyStrategy(Strategy):
         self.order_target_percent("AAA", target_weight_float, trade_id=1)
 
 
+class PersistentNextCloseEntryToyStrategy(Strategy):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.next_trade_id_int = 1
+        self.current_trade_id_int: int | None = None
+
+    def compute_signals(self, pricing_data: pd.DataFrame) -> pd.DataFrame:
+        return pricing_data.copy()
+
+    def iterate(self, data: pd.DataFrame, close: pd.Series, open_prices: pd.Series):
+        if close is None:
+            return
+
+        close_price_float = float(close[("AAA", "Close")])
+        if self.get_position("AAA") == 0 and close_price_float <= 10.8:
+            trade_id_int = self.next_trade_id_int
+            self.next_trade_id_int += 1
+            self.current_trade_id_int = trade_id_int
+            self.order_target_percent("AAA", 0.5, trade_id=trade_id_int)
+        elif self.get_position("AAA") > 0 and close_price_float >= 11.6:
+            self.order_target("AAA", 0, trade_id=self.current_trade_id_int)
+
+
 class ExecutionTimingAnalysisTests(unittest.TestCase):
     def make_timing_strategy(self) -> TimingToyStrategy:
         return TimingToyStrategy(
@@ -158,6 +182,16 @@ class ExecutionTimingAnalysisTests(unittest.TestCase):
         return CurrentBarRebalanceToyStrategy(
             rebalance_weight_df=rebalance_weight_df,
             name="CurrentBarRebalanceToy",
+            benchmarks=[],
+            capital_base=1_000.0,
+            slippage=0.0,
+            commission_per_share=0.0,
+            commission_minimum=0.0,
+        )
+
+    def make_persistent_next_close_strategy(self) -> PersistentNextCloseEntryToyStrategy:
+        return PersistentNextCloseEntryToyStrategy(
+            name="PersistentNextCloseToy",
             benchmarks=[],
             capital_base=1_000.0,
             slippage=0.0,
@@ -228,6 +262,97 @@ class ExecutionTimingAnalysisTests(unittest.TestCase):
             timing_strategy_obj.get_transactions().drop(columns=["order_id"]).reset_index(drop=True),
         )
 
+    def test_next_open_default_cell_matches_vanilla_dividend_entitlement(self):
+        pricing_data_df = make_timing_pricing_data_df()
+        pricing_data_df[("AAA", "Dividend")] = [0.0, 1.0, 0.0, 0.0, 0.0]
+        pricing_data_df[("BBB", "Dividend")] = 0.0
+        pricing_data_df = pricing_data_df.sort_index(axis=1)
+        pricing_data_df.attrs["norgate_adjustment_by_symbol_dict"] = {
+            "AAA": "CAPITALSPECIAL",
+            "BBB": "CAPITALSPECIAL",
+        }
+        vanilla_strategy_obj = self.make_timing_strategy()
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            run_daily(
+                vanilla_strategy_obj,
+                pricing_data_df,
+                calendar=pricing_data_df.index,
+                show_progress=False,
+                show_signal_progress_bool=False,
+                audit_override_bool=False,
+            )
+
+        timing_result_obj = ExecutionTimingAnalysis(
+            strategy_factory_fn=self.make_timing_strategy,
+            pricing_data_df=pricing_data_df,
+            calendar_idx=pricing_data_df.index,
+            entry_timing_str_tuple=("next_open",),
+            exit_timing_str_tuple=("next_open",),
+            save_output_bool=False,
+        ).run()
+        timing_strategy_obj = timing_result_obj.strategy_map[("next_open", "next_open")]
+
+        self.assertEqual(len(vanilla_strategy_obj.get_dividend_ledger()), 1)
+        pd.testing.assert_series_equal(
+            vanilla_strategy_obj.results["total_value"],
+            timing_strategy_obj.results["total_value"],
+            check_names=False,
+            check_freq=False,
+        )
+        pd.testing.assert_frame_equal(
+            vanilla_strategy_obj.get_dividend_ledger().reset_index(drop=True),
+            timing_strategy_obj.get_dividend_ledger().reset_index(drop=True),
+        )
+
+    def test_next_open_dividend_boundary_excludes_buyer_and_includes_seller(self):
+        pricing_data_df = make_timing_pricing_data_df()
+        pricing_data_df[("AAA", "Dividend")] = [1.0, 0.0, 1.0, 0.0, 0.0]
+        pricing_data_df[("BBB", "Dividend")] = 0.0
+        pricing_data_df = pricing_data_df.sort_index(axis=1)
+        pricing_data_df.attrs["norgate_adjustment_by_symbol_dict"] = {
+            "AAA": "CAPITALSPECIAL",
+            "BBB": "CAPITALSPECIAL",
+        }
+
+        timing_result_obj = ExecutionTimingAnalysis(
+            strategy_factory_fn=self.make_timing_strategy,
+            pricing_data_df=pricing_data_df,
+            calendar_idx=pricing_data_df.index,
+            entry_timing_str_tuple=("next_open",),
+            exit_timing_str_tuple=("next_open",),
+            save_output_bool=False,
+        ).run()
+        timing_strategy_obj = timing_result_obj.strategy_map[("next_open", "next_open")]
+        dividend_ledger_df = timing_strategy_obj.get_dividend_ledger().reset_index(drop=True)
+
+        self.assertEqual(len(dividend_ledger_df), 1)
+        self.assertEqual(
+            pd.Timestamp(dividend_ledger_df.loc[0, "ex_date"]),
+            pd.Timestamp("2024-01-05"),
+        )
+        self.assertAlmostEqual(timing_strategy_obj.dividend_cash_gross_total_float, 1.0)
+        self.assertAlmostEqual(timing_strategy_obj.dividend_withholding_total_float, 0.25)
+        self.assertAlmostEqual(timing_strategy_obj.dividend_cash_net_total_float, 0.75)
+
+    def test_reset_strategy_state_clears_dividend_accounting_state(self):
+        strategy_obj = self.make_timing_strategy()
+        strategy_obj.cash = 1_123.0
+        strategy_obj._dividend_processed_ex_date_set = {pd.Timestamp("2024-01-02")}
+        strategy_obj._dividend_ledger_row_dict_list = [{"asset_str": "AAA"}]
+        strategy_obj.dividend_cash_gross_total_float = 10.0
+        strategy_obj.dividend_withholding_total_float = 2.5
+        strategy_obj.dividend_cash_net_total_float = 7.5
+
+        _reset_strategy_state(strategy_obj)
+
+        self.assertEqual(strategy_obj.cash, 1_000.0)
+        self.assertEqual(strategy_obj._dividend_processed_ex_date_set, set())
+        self.assertEqual(strategy_obj._dividend_ledger_row_dict_list, [])
+        self.assertEqual(strategy_obj.dividend_cash_gross_total_float, 0.0)
+        self.assertEqual(strategy_obj.dividend_withholding_total_float, 0.0)
+        self.assertEqual(strategy_obj.dividend_cash_net_total_float, 0.0)
+
     def test_same_close_moc_entry_fills_at_signal_bar_close(self):
         pricing_data_df = make_timing_pricing_data_df()
 
@@ -265,6 +390,30 @@ class ExecutionTimingAnalysisTests(unittest.TestCase):
         exit_row_ser = transaction_df.iloc[1]
         self.assertEqual(pd.Timestamp(exit_row_ser["bar"]), pd.Timestamp("2024-01-05"))
         self.assertAlmostEqual(float(exit_row_ser["price"]), 12.2)
+
+    def test_pending_next_close_entry_fills_before_next_signal(self):
+        pricing_data_df = make_timing_pricing_data_df()
+
+        timing_result_obj = ExecutionTimingAnalysis(
+            strategy_factory_fn=self.make_persistent_next_close_strategy,
+            pricing_data_df=pricing_data_df,
+            calendar_idx=pricing_data_df.index,
+            entry_timing_str_tuple=("next_close",),
+            exit_timing_str_tuple=("next_close",),
+            save_output_bool=False,
+        ).run()
+        transaction_df = timing_result_obj.strategy_map[
+            ("next_close", "next_close")
+        ].get_transactions().reset_index(drop=True)
+
+        self.assertEqual(len(transaction_df), 2)
+        self.assertGreater(float(transaction_df.loc[0, "amount"]), 0.0)
+        self.assertLess(float(transaction_df.loc[1, "amount"]), 0.0)
+        self.assertEqual(transaction_df["trade_id"].tolist(), [1, 1])
+        self.assertEqual(
+            pd.to_datetime(transaction_df["bar"]).tolist(),
+            [pd.Timestamp("2024-01-03"), pd.Timestamp("2024-01-05")],
+        )
 
     def test_delayed_exit_does_not_free_slot_before_earlier_entry_fill(self):
         pricing_data_df = make_timing_pricing_data_df().iloc[:3].copy()

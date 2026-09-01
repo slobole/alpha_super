@@ -1,0 +1,332 @@
+study_id_str: defensive_sleeve_certification_v1
+study_version_str: "1.0"
+frozen_date_str: "2026-08-30"
+authority_str: research_bench_only
+allocation_authority_bool: false
+paper_authority_bool: false
+live_authority_bool: false
+evidence_status_str: historically_conditioned_after_preregistered_phase0
+
+study_window:
+  requested_history_start_date_str: "2004-01-01"
+  capital_anchor_date_str: "2012-09-28"
+  effective_execution_start_date_str: "2012-10-01"
+  frozen_end_date_str: "2026-08-19"
+  comparison_index_str: exact_intersection_of_every_source_and_benchmark
+  missing_value_policy_str: reject_no_fill_no_forward_fill_no_zero_return
+  anchor_return_policy_str: >-
+    first_result_includes_cash_anchor_to_first_post_Open_T_plus_1_close
+
+research_question_str: >-
+  Can a fixed defensive sleeve earn more than 4% nominal net CAGR while
+  remaining defensive enough to receive 75% of a client portfolio whose other
+  25% is the frozen Growth 4 portfolio?
+
+product_mandate:
+  primary_label_str: defensive_return
+  capital_preservation_label_requires_separate_gate_bool: true
+  user_minimum_nominal_net_cagr_float: 0.04
+  initial_growth4_weight_float: 0.25
+  initial_defensive_weight_float: 0.75
+  primary_outer_rebalance_str: none_independently_compounded_accounts
+  annual_reset_sensitivity_bool: false
+  annual_reset_deferred_reason_str: >-
+    external capital transfer timing state preservation and transfer costs are
+    not yet defined; it cannot be inferred from daily weighted returns
+  research_capital_base_float: 1000000.0
+  exact_client_aum_float: null
+  exact_client_aum_required_for_capacity_signature_bool: true
+  product_fee_schedule: null
+  product_fee_schedule_required_for_final_net_signature_bool: true
+
+construction_doctrine:
+  full_sample_optimizer_allowed_bool: false
+  markowitz_allowed_bool: false
+  risk_parity_as_selection_authority_bool: false
+  weight_search_count_int: 0
+  adjacent_weight_search_after_failure_allowed_bool: false
+  candidate_selection_basis_str: mechanism_diversification_simplicity_and_known_maturity
+  whole_shares_bool: true
+  decision_execution_timing_str: Close_T_to_Open_T_plus_1
+  missing_return_fill_allowed_bool: false
+  full_product_value_formula_str: V_product_t_equals_sum_of_independent_account_values_t
+  full_product_return_formula_str: V_product_t_div_V_product_t_minus_1_minus_1
+
+execution_data_contract:
+  order_policy_str: strategy_native_next_open_MOO_research_proxy
+  signal_cutoff_str: strategy_native_Close_T_or_documented_month_end_cutoff
+  point_in_time_membership_required_for_growth4_stock_sleeves_bool: true
+  stock_and_etf_execution_mark_adjustment_str: CAPITALSPECIAL
+  benchmark_adjustment_str: TOTALRETURN
+  explicit_dividend_cash_ledger_required_bool: true
+  norgate_vintage_fingerprint_at_start_source_end_and_final_bool: true
+  norgate_vintage_change_is_hard_stop_bool: true
+  hash_growth4_yaml_nested_strategy_modules_and_shared_execution_tree_bool: true
+  lifecycle_last_available_close_is_diagnostic_and_must_be_counted_bool: true
+
+strategy_aliases:
+  growth4:
+    config_path_str: portfolios/ladder_4_growth.yaml
+    role_str: frozen_client_growth_book
+  core5:
+    strategy_import_str: strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5
+    role_str: defensive_anchor
+  tactical_fi:
+    strategy_import_str: strategies.taa_beyond_6040.strategy_taa_tactical_fixed_income_ief_lqd
+    role_str: low_correlation_fixed_income_diversifier
+  trinity:
+    strategy_import_str: strategies.taa_beyond_6040.strategy_taa_trinity_vol_control_8_bil
+    role_str: higher_return_defensive_diversifier
+  bil:
+    strategy_import_str: strategies.portfolio_controls.strategy_passive_bil
+    role_str: matched_cash_alternative
+  passive_20_80:
+    role_str: passive_defensive_context_only
+    weight_by_asset:
+      SPY: 0.20
+      IEF: 0.80
+
+exclusions_from_v1:
+  sector_mr_str: equity_risk_turnover_and_capacity_are_not_needed_in_first_defensive_pass
+  taa_defensive_str: overlap_with_growth4_and_core5_is_too_high_for_first_pass
+  core5_parameter_changes_str: source_rule_tuning_is_out_of_scope
+
+defensive_sleeve_controls:
+  B0_bil:
+    label_str: capital_preservation_control
+    weight_by_alias:
+      bil: 1.0
+  B1_core5:
+    label_str: active_anchor
+    weight_by_alias:
+      core5: 1.0
+  B2_passive_20_80:
+    label_str: passive_defensive_return_context
+    weight_by_alias:
+      passive_20_80: 1.0
+
+defensive_sleeve_candidates:
+  CP1_core5_bil:
+    requested_label_str: capital_preservation
+    weight_by_alias:
+      core5: 0.50
+      bil: 0.50
+  CP2_core5_tfi_bil:
+    requested_label_str: capital_preservation
+    weight_by_alias:
+      core5: 0.50
+      tactical_fi: 0.25
+      bil: 0.25
+  DR1_core5_tfi_trinity:
+    requested_label_str: defensive_return
+    weight_by_alias:
+      core5: 0.50
+      tactical_fi: 0.25
+      trinity: 0.25
+
+full_product_controls:
+  P0_growth4_bil:
+    growth4_weight_float: 0.25
+    defensive_control_id_str: B0_bil
+    defensive_weight_float: 0.75
+  P1_growth4_core5:
+    growth4_weight_float: 0.25
+    defensive_control_id_str: B1_core5
+    defensive_weight_float: 0.75
+  P2_growth4_passive_20_80:
+    growth4_weight_float: 0.25
+    defensive_control_id_str: B2_passive_20_80
+    defensive_weight_float: 0.75
+
+absolute_gate_by_label:
+  capital_preservation:
+    sleeve:
+      minimum_net_cagr_float: 0.04
+      maximum_absolute_max_drawdown_float: 0.08
+      maximum_annualized_volatility_float: 0.07
+      maximum_market_beta_float: 0.20
+      maximum_daily_es5_loss_float: 0.0125
+      minimum_worst_21d_return_float: -0.06
+      minimum_worst_252d_return_float: -0.08
+      minimum_all_rolling_756d_cagr_float: 0.0
+      maximum_underwater_session_count_int: 504
+      maximum_downside_beta_float: 0.35
+    full_product:
+      minimum_net_cagr_float: 0.04
+      maximum_absolute_max_drawdown_float: 0.10
+      maximum_annualized_volatility_float: 0.085
+      maximum_market_beta_float: 0.30
+      maximum_daily_es5_loss_float: 0.015
+      minimum_worst_21d_return_float: -0.07
+      minimum_worst_252d_return_float: -0.10
+      minimum_all_rolling_756d_cagr_float: 0.0
+      maximum_underwater_session_count_int: 504
+      maximum_downside_beta_float: 0.35
+  defensive_return:
+    sleeve:
+      minimum_net_cagr_float: 0.04
+      maximum_absolute_max_drawdown_float: 0.12
+      maximum_annualized_volatility_float: 0.09
+      maximum_market_beta_float: 0.30
+      maximum_daily_es5_loss_float: 0.0175
+      minimum_worst_21d_return_float: -0.08
+      minimum_worst_252d_return_float: -0.12
+      minimum_all_rolling_756d_cagr_float: 0.0
+      maximum_underwater_session_count_int: 756
+      maximum_downside_beta_float: 0.50
+    full_product:
+      minimum_net_cagr_float: 0.04
+      maximum_absolute_max_drawdown_float: 0.12
+      maximum_annualized_volatility_float: 0.105
+      maximum_market_beta_float: 0.40
+      maximum_daily_es5_loss_float: 0.02
+      minimum_worst_21d_return_float: -0.09
+      minimum_worst_252d_return_float: -0.15
+      minimum_all_rolling_756d_cagr_float: 0.0
+      maximum_underwater_session_count_int: 756
+      maximum_downside_beta_float: 0.50
+
+relative_gates:
+  minimum_full_product_net_cagr_delta_vs_P0_float: 0.005
+  maximum_full_product_max_drawdown_worsening_vs_P0_by_label:
+    capital_preservation: 0.03
+    defensive_return: 0.06
+  CP_minimum_sleeve_max_drawdown_improvement_vs_core5_float: 0.01
+  CP_minimum_sleeve_worst_252d_improvement_vs_core5_float: 0.01
+  DR_minimum_sleeve_cagr_improvement_vs_core5_float: 0.005
+  DR_alternative_minimum_sharpe_improvement_vs_core5_float: 0.10
+  DR_maximum_sleeve_max_drawdown_worsening_vs_core5_float: 0.01
+  maximum_each_crisis_full_product_max_drawdown_worsening_vs_P1_float: 0.01
+
+robustness_contract:
+  equal_observation_third_count_int: 3
+  positive_cagr_required_in_every_third_bool: true
+  minimum_thirds_above_four_percent_cagr_int: 2
+  risk_cap_required_in_every_third_bool: true
+  rolling_window_session_list: [21, 63, 126, 252, 756]
+  crisis_window_list:
+    - [china_oil_shock_2015, "2015-08-18", "2016-02-11"]
+    - [volmageddon, "2018-02-02", "2018-02-09"]
+    - [covid_crash, "2020-02-20", "2020-04-07"]
+    - [inflation_bear_2022, "2022-01-03", "2022-10-12"]
+    - [trump_tariffs_2025, "2025-02-01", "2025-04-30"]
+  pre_2012_crisis_replay_is_diagnostic_only_bool: true
+  crisis_maximum_full_product_absolute_drawdown_by_label:
+    capital_preservation: 0.10
+    defensive_return: 0.12
+  every_crisis_gate_must_pass_individually_bool: true
+  causal_regime_list:
+    - spxtr_above_below_sma200
+    - ief_trailing_126d_positive_negative
+    - vix_at_least_25
+    - dgs3mo_lagged_below_1_between_1_3_above_3
+  minimum_regime_observation_count_int: 252
+  insufficient_regime_sample_policy_str: diagnostic_only_cannot_pass_or_fail
+  minimum_positive_equity_rate_quadrant_count_int: 3
+  maximum_2022_sleeve_loss_by_label:
+    capital_preservation: 0.03
+    defensive_return: 0.05
+  causal_regime_definition:
+    spxtr_above_below_sma200:
+      input_str: SPXTR_TOTALRETURN_Close_T
+      formula_str: Close_T_greater_than_SMA200_including_T
+      classified_return_str: product_return_Open_T_plus_1_to_Close_T_plus_1
+    ief_trailing_126d_positive_negative:
+      input_str: IEF_TOTALRETURN_Close_T
+      formula_str: Close_T_div_Close_T_minus_126_minus_1
+      classified_return_str: product_return_Open_T_plus_1_to_Close_T_plus_1
+    vix_at_least_25:
+      input_str: VIX_Close_T
+      formula_str: VIX_Close_T_greater_than_or_equal_to_25
+      classified_return_str: product_return_Open_T_plus_1_to_Close_T_plus_1
+    dgs3mo_lagged_below_1_between_1_3_above_3:
+      input_str: frozen_FRED_DGS3MO_observation
+      publication_rule_str: first_trading_session_after_17_15_ET_cutoff
+      buckets_pct_list: [1.0, 3.0]
+      classified_return_str: product_return_after_publication_availability
+
+statistical_contract:
+  paired_stationary_bootstrap_bool: true
+  bootstrap_iteration_count_int: 10000
+  bootstrap_chunk_size_int: 250
+  random_seed_int: 20260830
+  synchronized_candidate_control_resampling_bool: true
+  stationary_bootstrap_algorithm_str: geometric_block_restart_probability_one_over_mean_block_length
+  primary_mean_block_length_int: 63
+  sensitivity_mean_block_length_list: [21, 126]
+  primary_joint_gate_probability_float: 0.60
+  sensitivity_joint_gate_probability_float: 0.55
+  multiple_comparison_method_str: holm_after_historical_trial_floor
+  holm_familywise_alpha_float: 0.10
+  candidate_family_list: [CP1_core5_bil, CP2_core5_tfi_bil, DR1_core5_tfi_trinity]
+  historical_trial_count_floor_int: 67
+  historical_trial_floor_derivation_str: 60_prior_floor_plus_4_foundry_candidates_plus_3_current_candidates
+  raw_p_value_definition_str: >-
+    one_sided paired bootstrap probability that candidate fails its frozen
+    joint absolute and relative gate versus matched controls
+  joint_gate_statistic_str: all_frozen_absolute_relative_and_subperiod_gates_pass_on_same_bootstrap_path
+  pure_untouched_holdout_claim_allowed_bool: false
+  rolling_756_effective_window_count_must_be_reported_bool: true
+
+accounting_financing_contract:
+  harmonized_accounting_required_bool: true
+  dividend_withholding_rate_float: 0.25
+  investor_tax_modeled_bool: false
+  positive_cash_policy_str: causal_DGS3MO_ACT_365
+  negative_cash_policy_str: benchmark_plus_spread
+  negative_cash_base_spread_bps_float: 200.0
+  negative_cash_stress_total_spread_bps_list: [200.0, 500.0]
+  client_actual_negative_cash_spread_required_for_final_signature_bool: true
+  maximum_unmodeled_negative_cash_day_count_int: 0
+  core5_dbc_borrow_base_pct_float: 1.0
+  core5_dbc_borrow_stress_pct_list: [3.0, 5.0, 10.0]
+  core5_no_short_survival_required_bool: true
+  daily_account_borrow_locate_recall_evidence_required_for_final_signature_bool: true
+  tactical_fi_fred_vintage_str: current_vintage_not_alfred
+  source_native_cost_contract:
+    core5:
+      slippage_per_side_bps_float: 2.5
+      commission_per_share_float: 0.005
+      commission_minimum_float: 1.0
+      dividend_withholding_rate_float: 0.25
+      positive_cash_rate_policy_str: zero_percent_intentional
+    bil_core5_matched:
+      slippage_per_side_bps_float: 2.5
+      commission_per_share_float: 0.005
+      commission_minimum_float: 1.0
+      dividend_withholding_rate_float: 0.25
+      positive_cash_rate_policy_str: zero_percent_intentional
+    tactical_fi:
+      slippage_per_side_bps_float: 5.0
+      commission_per_share_float: 0.0
+      commission_minimum_float: 0.0
+      dividend_withholding_rate_float: 0.0
+      positive_cash_rate_policy_str: causal_DGS3MO_ACT_365
+    trinity:
+      slippage_per_side_bps_float: 1.0
+      commission_per_share_float: 0.005
+      commission_minimum_float: 1.0
+      dividend_withholding_rate_float: 0.25
+      positive_cash_rate_policy_str: zero_percent_intentional
+  accounting_compatibility_gate_str: >-
+    candidate cannot pass until every component is rerun under one offered
+    account contract or a source-literal matched-control comparison proves
+    that accounting differences cannot drive the decision
+
+capacity_contract:
+  phase_two_after_non_capacity_pass_bool: true
+  exact_client_aum_required_bool: true
+  aggregate_same_day_symbol_orders_across_full_product_bool: true
+  maximum_p95_order_adv_ratio_float: 0.0005
+  maximum_p99_order_adv_ratio_float: 0.001
+  maximum_overall_and_rolling_3y_sharpe_erosion_fraction_float: 0.20
+  minimum_post_impact_net_cagr_float: 0.04
+  recommended_capacity_must_cover_client_aum_bool: true
+  dbc_borrow_capacity_is_separate_from_etf_adv_bool: true
+  prior_core5_capacity_artifact_is_context_only_bool: true
+
+stop_rule:
+  if_all_candidates_fail_str: reject_without_adjacent_weight_search
+  maximum_phase_one_authority_str: frozen_candidate_to_forward_shadow_only
+  final_ready_signature_requires_non_capacity_capacity_fees_and_borrow_gates_bool: true
+  no_live_paper_release_or_allocation_changes_bool: true

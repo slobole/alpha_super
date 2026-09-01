@@ -231,6 +231,49 @@ def test_ndx_export_profiles_include_price_and_total_return_spy():
         assert "SPY" in profile_spec_obj.total_return_symbol_tuple
 
 
+def test_etf_vix_export_profile_includes_real_sp500_total_return_index():
+    from scripts.export_norgate_snapshot import PROFILE_EXPORT_SPEC_DICT
+
+    profile_spec_obj = PROFILE_EXPORT_SPEC_DICT[
+        "norgate_eod_etf_plus_vix_helper"
+    ]
+
+    assert "$SPX" in profile_spec_obj.total_return_symbol_tuple
+    assert "$SPXTR" in profile_spec_obj.total_return_symbol_tuple
+
+
+def test_etf_vix_export_manifest_requires_spxtr_total_return(tmp_path):
+    from scripts import export_norgate_snapshot as export_module
+
+    with mock.patch.object(
+        export_module,
+        "_build_price_snapshot_df",
+        return_value=pd.DataFrame(),
+    ) as price_builder_mock, mock.patch.object(
+        export_module,
+        "write_snapshot_files",
+        return_value=tmp_path,
+    ) as snapshot_writer_mock:
+        export_module._export_profile_to_root_path(
+            snapshot_root_str=str(tmp_path),
+            profile_str="norgate_eod_etf_plus_vix_helper",
+            snapshot_date_str="2024-01-02",
+            start_date_str="1998-01-01",
+            end_date_str="2024-01-02",
+            overwrite_bool=False,
+        )
+
+    assert "$SPXTR" in price_builder_mock.call_args.kwargs[
+        "total_return_symbol_list"
+    ]
+    snapshot_write_kwargs = snapshot_writer_mock.call_args.kwargs
+    assert "$SPXTR" in snapshot_write_kwargs["required_symbol_list"]
+    assert (
+        snapshot_write_kwargs["adjustment_mode_map_dict"]["$SPXTR"]
+        == TOTALRETURN_ADJUSTMENT_STR
+    )
+
+
 def test_hpi_export_profile_preserves_strict_data_contract():
     from scripts.export_norgate_snapshot import PROFILE_EXPORT_SPEC_DICT
 

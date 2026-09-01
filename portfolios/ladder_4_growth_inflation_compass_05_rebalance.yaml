@@ -1,0 +1,36 @@
+name_str: "ladder_4_growth_inflation_compass_05_rebalance"
+capital_base_float: 1e+06
+backtest_start_date_str: "2004-01-01"
+end_date_str: "2026-08-14"
+allocation_policy_str: fixed
+max_workers_int: null
+rebalance:
+  frequency_str: annually
+  policy_str: fixed
+save_pod_artifacts_bool: true
+regression_benchmark_symbol_str: "$SPX"
+
+pods:
+  - pod_id_str: pod_mr_dv2
+    strategy_import_str: strategies.dv2.strategy_mr_dv2:DVO2Strategy
+    weight_float: 0.16
+
+  - pod_id_str: pod_mr_hpi_sp500_2_3_5_vote
+    strategy_import_str: strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote
+    weight_float: 0.17
+
+  - pod_id_str: pod_mo_atr_normalized_ndx_vxn_scaled
+    strategy_import_str: strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy
+    weight_float: 0.231343
+
+  - pod_id_str: pod_mo_mosaic_russell1000
+    strategy_import_str: strategies.momentum.strategy_mo_mosaic_russell1000:MosaicRussell1000Strategy
+    weight_float: 0.074030
+
+  - pod_id_str: pod_taa_df_btal_fallback_tqqq_vix_cash
+    strategy_import_str: strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash
+    weight_float: 0.314627
+
+  - pod_id_str: pod_taa_inflation_compass
+    strategy_import_str: strategies.taa_df.strategy_taa_inflation_compass
+    weight_float: 0.05

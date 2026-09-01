@@ -5,6 +5,7 @@ import pandas as pd
 import statsmodels.api as sm
 
 from alpha.engine.metrics import (
+    EXPECTED_SHORTFALL_METRIC_NAME_STR,
     generate_benchmark_regression_metrics,
     generate_overall_metrics,
     generate_trades,
@@ -192,6 +193,67 @@ class GenerateTradesTests(unittest.TestCase):
 
 
 class GenerateOverallMetricsTests(unittest.TestCase):
+    def test_expected_shortfall_matches_constant_growth_horizon_return(self):
+        date_index = pd.date_range("2020-01-01", periods=130, freq="D")
+        total_value_ser = pd.Series(
+            10_000.0 * (1.01 ** np.arange(len(date_index))),
+            index=date_index,
+            dtype=float,
+        )
+
+        summary_ser = generate_overall_metrics(total_value_ser, capital_base=10_000.0)
+
+        self.assertAlmostEqual(
+            float(summary_ser.loc[EXPECTED_SHORTFALL_METRIC_NAME_STR]),
+            (1.01 ** 21 - 1.0) * 100.0,
+            places=8,
+        )
+
+    def test_expected_shortfall_sits_at_or_below_the_five_percent_quantile(self):
+        random_generator_obj = np.random.default_rng(11)
+        date_index = pd.date_range("2020-01-01", periods=1_000, freq="D")
+        daily_return_ser = pd.Series(
+            random_generator_obj.normal(0.0004, 0.011, len(date_index)),
+            index=date_index,
+        )
+        total_value_ser = 10_000.0 * (1.0 + daily_return_ser).cumprod()
+
+        summary_ser = generate_overall_metrics(total_value_ser, capital_base=10_000.0)
+        # *** CRITICAL*** This reproduces the report-only backward-looking
+        # 21-day horizon exactly; it does not construct a forward return label.
+        horizon_return_ser = (
+            total_value_ser / total_value_ser.shift(21) - 1.0
+        ).dropna()
+        quantile_pct_float = float(np.quantile(horizon_return_ser, 0.05)) * 100.0
+        expected_tail_mean_pct_float = float(
+            horizon_return_ser[horizon_return_ser <= quantile_pct_float / 100.0].mean()
+            * 100.0
+        )
+        expected_shortfall_pct_float = float(
+            summary_ser.loc[EXPECTED_SHORTFALL_METRIC_NAME_STR]
+        )
+
+        self.assertAlmostEqual(
+            expected_shortfall_pct_float,
+            expected_tail_mean_pct_float,
+        )
+        self.assertLessEqual(expected_shortfall_pct_float, quantile_pct_float)
+        self.assertLess(expected_shortfall_pct_float, 0.0)
+
+    def test_expected_shortfall_is_withheld_when_the_tail_is_too_small(self):
+        date_index = pd.date_range("2020-01-01", periods=60, freq="D")
+        total_value_ser = pd.Series(
+            10_000.0 * (1.001 ** np.arange(len(date_index))),
+            index=date_index,
+            dtype=float,
+        )
+
+        summary_ser = generate_overall_metrics(total_value_ser, capital_base=10_000.0)
+
+        self.assertTrue(
+            np.isnan(float(summary_ser.loc[EXPECTED_SHORTFALL_METRIC_NAME_STR]))
+        )
+
     def test_drawdowns_per_year_preserves_fractional_annualization(self):
         date_index = pd.date_range("2024-01-01", periods=5, freq="D")
         total_value_ser = pd.Series(

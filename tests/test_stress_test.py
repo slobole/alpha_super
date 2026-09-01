@@ -15,6 +15,7 @@ from alpha.engine.crisis import (
 from alpha.engine.strategy import Strategy
 from alpha.engine.stress_test import (
     StressTestAnalyzer,
+    StressTestResult,
     _build_verdict_html,
     _heatmap_cell_style_str,
     _heatmap_scale_max_float,
@@ -119,6 +120,30 @@ EVENT_EXIT_SPEC = CrisisStrategySpec(
 
 
 class StressTestAnalyzerTests(unittest.TestCase):
+    def test_result_preserves_legacy_positional_strategy_map_and_output_path(self):
+        stress_strategy_map = {"scenario": object()}
+        output_dir_path = Path("legacy-output")
+        empty_df = pd.DataFrame()
+
+        stress_result_obj = StressTestResult(
+            "strategy_key",
+            "Strategy Name",
+            100_000.0,
+            [],
+            (5,),
+            empty_df,
+            empty_df,
+            empty_df,
+            empty_df,
+            stress_strategy_map,
+            output_dir_path,
+        )
+
+        self.assertIs(stress_result_obj.stress_strategy_map, stress_strategy_map)
+        self.assertEqual(stress_result_obj.output_dir_path, output_dir_path)
+        self.assertEqual(stress_result_obj.skipped_window_list, [])
+        self.assertEqual(stress_result_obj.adjusted_window_list, [])
+
     def test_resolve_stress_launch_window_uses_pre_event_trading_bars(self):
         calendar_idx = pd.DatetimeIndex(
             ["2020-02-18", "2020-02-19", "2020-02-20", "2020-02-21"]
@@ -270,6 +295,149 @@ class StressTestAnalyzerTests(unittest.TestCase):
 
         self.assertEqual(len(stress_result_obj.stress_metric_df), 0)
         self.assertEqual(len(stress_result_obj.stress_path_df), 0)
+        self.assertEqual(len(stress_result_obj.skipped_window_list), 1)
+        self.assertEqual(
+            stress_result_obj.skipped_window_list[0]["reason_str"],
+            "insufficient pre-launch history for launch offset.",
+        )
+
+    def test_pre_inception_crisis_is_disclosed_in_metadata_and_report(self):
+        stress_result_obj = run_stress_test_suite(
+            crisis_period_list=[
+                CrisisPeriodConfig(
+                    crisis_name_str="pre_inception_crisis",
+                    start_date_str="2019-01-01",
+                    end_date_str="2019-01-31",
+                ),
+                CrisisPeriodConfig(
+                    crisis_name_str="toy_crisis",
+                    start_date_str="2020-02-20",
+                    end_date_str="2020-02-21",
+                ),
+            ],
+            launch_offset_tuple=(1,),
+            strategy_spec_obj=BUY_HOLD_SPEC,
+            save_output_bool=False,
+        )
+
+        self.assertEqual(len(stress_result_obj.stress_metric_df), 1)
+        self.assertEqual(len(stress_result_obj.skipped_window_list), 1)
+        skipped_window_dict = stress_result_obj.skipped_window_list[0]
+        self.assertEqual(skipped_window_dict["crisis_name_str"], "pre_inception_crisis")
+        self.assertIn("before supported history", skipped_window_dict["reason_str"])
+
+        with tempfile.TemporaryDirectory() as temp_dir_str:
+            output_path = save_stress_test_results(
+                stress_result_obj,
+                output_dir_str=temp_dir_str,
+            )
+            metadata_dict = json.loads(
+                (output_path / "metadata.json").read_text(encoding="utf-8")
+            )
+            summary_dict = json.loads(
+                (output_path / "summary.json").read_text(encoding="utf-8")
+            )
+            run_info_dict = json.loads(
+                (output_path / "run_info.json").read_text(encoding="utf-8")
+            )
+            report_html_str = (output_path / "report.html").read_text(encoding="utf-8")
+
+        self.assertEqual(metadata_dict["configured_crisis_count"], 2)
+        self.assertEqual(metadata_dict["evaluated_scenario_count"], 1)
+        self.assertEqual(metadata_dict["skipped_window_count"], 1)
+        self.assertEqual(
+            metadata_dict["skipped_windows"][0]["crisis_name_str"],
+            "pre_inception_crisis",
+        )
+        self.assertEqual(summary_dict["skipped_window_count_int"], 1)
+        self.assertEqual(
+            summary_dict["skipped_windows"][0]["crisis_name_str"],
+            "pre_inception_crisis",
+        )
+        self.assertIn(
+            "before supported history",
+            run_info_dict["parameters"]["skipped_windows"][0]["reason_str"],
+        )
+        self.assertIn("Coverage Disclosure", report_html_str)
+        self.assertIn("pre_inception_crisis", report_html_str)
+        self.assertIn("before supported history", report_html_str)
+
+    def test_partially_truncated_crisis_discloses_effective_dates(self):
+        stress_result_obj = run_stress_test_suite(
+            crisis_period_list=[
+                CrisisPeriodConfig(
+                    crisis_name_str="truncated_crisis",
+                    start_date_str="2020-02-20",
+                    end_date_str="2020-03-31",
+                )
+            ],
+            launch_offset_tuple=(1,),
+            strategy_spec_obj=BUY_HOLD_SPEC,
+            save_output_bool=False,
+        )
+
+        self.assertEqual(len(stress_result_obj.stress_metric_df), 1)
+        self.assertEqual(stress_result_obj.skipped_window_list, [])
+        self.assertEqual(len(stress_result_obj.adjusted_window_list), 1)
+        adjusted_window_dict = stress_result_obj.adjusted_window_list[0]
+        self.assertEqual(adjusted_window_dict["requested_end_date_str"], "2020-03-31")
+        self.assertEqual(adjusted_window_dict["effective_end_date_str"], "2020-02-21")
+        self.assertIn("partially overlaps", adjusted_window_dict["reason_str"])
+
+        with tempfile.TemporaryDirectory() as temp_dir_str:
+            output_path = save_stress_test_results(
+                stress_result_obj,
+                output_dir_str=temp_dir_str,
+            )
+            metadata_dict = json.loads(
+                (output_path / "metadata.json").read_text(encoding="utf-8")
+            )
+            report_html_str = (output_path / "report.html").read_text(encoding="utf-8")
+
+        self.assertEqual(metadata_dict["adjusted_window_count"], 1)
+        self.assertEqual(
+            metadata_dict["adjusted_windows"][0]["effective_end_date_str"],
+            "2020-02-21",
+        )
+        self.assertIn("Truncated windows", report_html_str)
+        self.assertIn("2020-03-31", report_html_str)
+        self.assertIn("2020-02-21", report_html_str)
+
+    def test_partial_start_with_no_launch_history_does_not_claim_evaluation(self):
+        stress_result_obj = run_stress_test_suite(
+            crisis_period_list=[
+                CrisisPeriodConfig(
+                    crisis_name_str="truncated_start_crisis",
+                    start_date_str="2020-01-01",
+                    end_date_str="2020-02-21",
+                )
+            ],
+            launch_offset_tuple=(1,),
+            strategy_spec_obj=BUY_HOLD_SPEC,
+            save_output_bool=False,
+        )
+
+        self.assertEqual(len(stress_result_obj.stress_metric_df), 0)
+        self.assertEqual(len(stress_result_obj.adjusted_window_list), 1)
+        self.assertEqual(len(stress_result_obj.skipped_window_list), 1)
+        self.assertEqual(
+            stress_result_obj.adjusted_window_list[0]["effective_start_date_str"],
+            "2020-02-18",
+        )
+        self.assertIn(
+            "no tradable bar exists before event_start_ts",
+            stress_result_obj.skipped_window_list[0]["reason_str"],
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir_str:
+            output_path = save_stress_test_results(
+                stress_result_obj,
+                output_dir_str=temp_dir_str,
+            )
+            report_html_str = (output_path / "report.html").read_text(encoding="utf-8")
+
+        self.assertIn("Any scenario metrics that were evaluated", report_html_str)
+        self.assertNotIn("These scenarios were evaluated only", report_html_str)
 
     def test_save_stress_test_results_writes_expected_artifacts_and_html(self):
         stress_result_obj = StressTestAnalyzer(
@@ -307,11 +475,17 @@ class StressTestAnalyzerTests(unittest.TestCase):
 
             run_info_dict = json.loads((output_path / "run_info.json").read_text(encoding="utf-8"))
             summary_dict = json.loads((output_path / "summary.json").read_text(encoding="utf-8"))
+            metadata_dict = json.loads((output_path / "metadata.json").read_text(encoding="utf-8"))
             report_html_str = (output_path / "report.html").read_text(encoding="utf-8")
 
             self.assertEqual(run_info_dict["analysis_type"], "stress_test")
             self.assertEqual(run_info_dict["parameters"]["stress_type"], "historical_pre_crisis_launch")
             self.assertEqual(summary_dict["scenario_count_int"], 1)
+            self.assertEqual(metadata_dict["skipped_window_count"], 0)
+            self.assertEqual(metadata_dict["adjusted_window_count"], 0)
+            self.assertEqual(summary_dict["skipped_window_count_int"], 0)
+            self.assertEqual(summary_dict["adjusted_window_count_int"], 0)
+            self.assertIn("Coverage Disclosure", report_html_str)
             self.assertIn("worst_first_event_day_return_pct_float", summary_dict)
             self.assertIn("max_entry_top1_weight_float", summary_dict)
             self.assertEqual(summary_dict["unrecovered_scenario_count_int"], 0)

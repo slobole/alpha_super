@@ -20,11 +20,22 @@ def run_daily(
     trace_log_path_str: str | None = None,
     trace_log_root_path_str: str | None = None,
 ):
+    resolved_calendar_idx = pd.DatetimeIndex(
+        pricing_data.index if calendar is None else calendar
+    )
+    configure_run_calendar_fn = getattr(
+        strategy,
+        "configure_run_calendar",
+        None,
+    )
+    if callable(configure_run_calendar_fn):
+        configure_run_calendar_fn(resolved_calendar_idx)
+
     vanilla_backtester = VanillaBacktester()
     return vanilla_backtester.run(
         strategy=strategy,
         pricing_data_df=pricing_data,
-        calendar_idx=calendar,
+        calendar_idx=resolved_calendar_idx,
         show_progress_bool=show_progress,
         show_signal_progress_bool=show_signal_progress_bool,
         audit_override_bool=audit_override_bool,

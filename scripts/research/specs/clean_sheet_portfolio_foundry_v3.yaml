@@ -1,0 +1,289 @@
+study_id_str: clean_sheet_portfolio_foundry_v3
+study_version_str: "3.0"
+frozen_date_str: "2026-08-30"
+supersedes_failed_spec_str: >-
+  v1 stopped before portfolio analysis because sector_mr needed a source-specific
+  engine request; v2 proved that correction but stopped before analysis because
+  tactical_fi is frozen through 2026-08-19, earlier than the v2 common endpoint.
+research_authority_str: research_and_bench_only
+allocation_authority_bool: false
+paper_authority_bool: false
+live_authority_bool: false
+
+research_question_str: >-
+  Which economically distinct portfolios should be built from the full WIRED
+  and PM_READY strategy registry for defensive, balanced, growth, and low-touch
+  objectives, without optimizing weights on realized returns?
+
+construction_doctrine:
+  selection_basis_str: mechanism_maturity_history_and_nonduplication_before_results
+  full_sample_optimizer_allowed_bool: false
+  markowitz_allowed_bool: false
+  hrp_or_risk_parity_as_selection_authority_bool: false
+  outer_rebalance_str: none_independently_compounded_pods
+  candidate_weight_search_count_int: 0
+  weights_are_fixed_capital_budgets_bool: true
+  ladders_are_external_references_not_construction_seeds_bool: true
+
+registry_contract:
+  expected_wired_count_int: 9
+  expected_pm_ready_count_int: 13
+  expected_promoted_count_int: 22
+  selected_strategy_by_alias:
+    dv2:
+      strategy_import_str: strategies.dv2.strategy_mr_dv2:DVO2Strategy
+      tier_str: WIRED
+      family_str: single_stock_mean_reversion
+      cadence_str: daily_signal
+      native_history_request_start_date_str: "1998-01-01"
+    hpi:
+      strategy_import_str: strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote
+      tier_str: WIRED
+      family_str: single_stock_mean_reversion
+      cadence_str: daily_signal
+      native_history_request_start_date_str: "1998-01-01"
+    ndx:
+      strategy_import_str: strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy
+      tier_str: WIRED
+      family_str: equity_momentum
+      cadence_str: monthly_signal
+      native_history_request_start_date_str: "1999-01-01"
+    mosaic:
+      strategy_import_str: strategies.momentum.strategy_mo_mosaic_russell1000:MosaicRussell1000Strategy
+      tier_str: PM_READY
+      family_str: equity_momentum
+      cadence_str: monthly_signal
+      native_history_request_start_date_str: "1999-01-01"
+    taa_growth:
+      strategy_import_str: strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash
+      tier_str: WIRED
+      family_str: defense_first_growth_taa
+      cadence_str: monthly_signal
+      native_history_request_start_date_str: "2000-01-01"
+    taa_defensive:
+      strategy_import_str: strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash
+      tier_str: WIRED
+      family_str: defense_first_linearity_taa
+      cadence_str: monthly_signal
+      native_history_request_start_date_str: "2000-01-01"
+    sector_mr:
+      strategy_import_str: strategies.mean_reversion.strategy_mr_us_sector_etf_ibs_downshock_vox_iyr
+      tier_str: PM_READY
+      family_str: sector_etf_mean_reversion
+      cadence_str: daily_signal
+      native_history_request_start_date_str: "1998-01-01"
+      engine_request_start_date_str: "2012-09-28"
+    core5:
+      strategy_import_str: strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5
+      tier_str: PM_READY
+      family_str: adaptive_macro
+      cadence_str: state_change_and_month_end
+      native_history_request_start_date_str: "1990-01-01"
+    trinity:
+      strategy_import_str: strategies.taa_beyond_6040.strategy_taa_trinity_vol_control_8_bil
+      tier_str: PM_READY
+      family_str: multi_asset_volatility_control
+      cadence_str: volatility_band_and_month_end
+      native_history_request_start_date_str: "1995-01-01"
+    tactical_fi:
+      strategy_import_str: strategies.taa_beyond_6040.strategy_taa_tactical_fixed_income_ief_lqd
+      tier_str: PM_READY
+      family_str: tactical_fixed_income
+      cadence_str: monthly_signal
+      native_history_request_start_date_str: "2002-07-26"
+
+  excluded_promoted_strategy_list:
+    - strategy_import_str: strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy
+      reason_str: duplicate_single_stock_mean_reversion_trade_relative_to_selected_hpi
+    - strategy_import_str: strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit
+      reason_str: superseded_within_hpi_family_by_selected_vote_variant
+    - strategy_import_str: strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy
+      reason_str: same_momentum_engine_without_selected_vxn_risk_scaler
+    - strategy_import_str: strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash
+      reason_str: higher_risk_same_taa_family_not_needed_for_v1_product_objectives
+    - strategy_import_str: strategies.taa_df.strategy_taa_df_1n_fallback_qld_vix_cash
+      reason_str: no_btal_2008_proxy_reserved_for_phase2_history_sensitivity
+    - strategy_import_str: strategies.taa_df.strategy_taa_df_1n_fallback_sso_vix_cash
+      reason_str: same_taa_family_proxy_reserved_for_phase2
+    - strategy_import_str: strategies.taa_df.strategy_taa_df_btal_1n_fallback_qld_vix_cash
+      reason_str: same_taa_family_2x_duplicate
+    - strategy_import_str: strategies.taa_df.strategy_taa_df_linearity_1n_fallback_qqq_vix_cash
+      reason_str: no_btal_2008_proxy_reserved_for_phase2_history_sensitivity
+    - strategy_import_str: strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc
+      reason_str: short_post_2018_history_and_same_sector_mean_reversion_bucket
+    - strategy_import_str: strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc_asset_sma200
+      reason_str: short_post_2019_history_and_same_sector_mean_reversion_bucket
+    - strategy_import_str: strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_asset_sma200
+      reason_str: same_sector_mean_reversion_bucket_reserved_as_phase2_challenger
+    - strategy_import_str: strategies.taa_df.strategy_taa_inflation_compass
+      reason_str: prior_ladder_value_add_rejection_and_current_vintage_fred_gap
+
+portfolio_contract:
+  capital_base_float: 1000000.0
+  requested_start_date_str: "2004-01-01"
+  capital_anchor_date_str: "2012-09-28"
+  effective_execution_start_date_str: "2012-10-01"
+  end_date_str: "2026-08-19"
+  benchmark_symbol_str: "$SPXTR"
+  benchmark_adjustment_str: TOTALRETURN
+  whole_shares_bool: true
+  source_native_costs_unchanged_bool: true
+  positive_cash_rate_policy_str: strategy_native
+  negative_cash_financing_policy_str: unmodeled_and_gate_blocking
+  exact_global_intersection_bool: true
+  missing_value_fill_allowed_bool: false
+
+reference_portfolios:
+  R1_ladder_defensive:
+    objective_str: defensive_reference
+    weight_by_strategy_alias:
+      taa_defensive: 0.55
+      sector_mr: 0.45
+  R2_ladder_balanced:
+    objective_str: balanced_reference
+    weight_by_strategy_alias:
+      taa_defensive: 0.45
+      sector_mr: 0.25
+      ndx: 0.30
+  R3_ladder_growth:
+    objective_str: growth_reference
+    weight_by_strategy_alias:
+      dv2: 0.16
+      hpi: 0.17
+      ndx: 0.25
+      mosaic: 0.08
+      taa_growth: 0.34
+  R4_monthly_reference:
+    objective_str: low_touch_reference
+    weight_by_strategy_alias:
+      taa_defensive: 0.50
+      ndx: 0.25
+      mosaic: 0.25
+
+candidate_portfolios:
+  C1_foundry_defensive:
+    objective_str: defensive
+    reference_id_str: R1_ladder_defensive
+    weight_by_strategy_alias:
+      taa_defensive: 0.375
+      core5: 0.25
+      tactical_fi: 0.125
+      trinity: 0.125
+      sector_mr: 0.125
+  C2_foundry_balanced:
+    objective_str: balanced
+    reference_id_str: R2_ladder_balanced
+    weight_by_strategy_alias:
+      dv2: 0.125
+      hpi: 0.125
+      ndx: 0.125
+      mosaic: 0.125
+      taa_defensive: 0.25
+      core5: 0.25
+  C3_foundry_growth:
+    objective_str: growth
+    reference_id_str: R3_ladder_growth
+    weight_by_strategy_alias:
+      dv2: 0.125
+      hpi: 0.125
+      ndx: 0.125
+      mosaic: 0.125
+      taa_growth: 0.25
+      core5: 0.25
+  C4_foundry_low_touch:
+    objective_str: low_touch
+    reference_id_str: R4_monthly_reference
+    weight_by_strategy_alias:
+      ndx: 0.125
+      mosaic: 0.125
+      taa_defensive: 0.25
+      core5: 0.25
+      tactical_fi: 0.125
+      trinity: 0.125
+
+economic_gate_by_candidate:
+  C1_foundry_defensive:
+    minimum_cagr_delta_vs_reference_float: -0.01
+    minimum_sharpe_delta_vs_reference_float: 0.0
+    minimum_max_drawdown_improvement_float: 0.0
+    minimum_es5_reduction_fraction_float: 0.0
+    maximum_beta_delta_vs_reference_float: 0.0
+    maximum_absolute_max_drawdown_float: 0.12
+  C2_foundry_balanced:
+    minimum_cagr_delta_vs_reference_float: -0.01
+    minimum_sharpe_delta_vs_reference_float: 0.0
+    minimum_max_drawdown_improvement_float: 0.0
+    minimum_es5_reduction_fraction_float: 0.0
+    maximum_beta_delta_vs_reference_float: 0.0
+    maximum_absolute_max_drawdown_float: 0.18
+  C3_foundry_growth:
+    minimum_cagr_delta_vs_reference_float: -0.02
+    minimum_sharpe_delta_vs_reference_float: -0.02
+    minimum_max_drawdown_improvement_float: 0.02
+    minimum_es5_reduction_fraction_float: 0.05
+    maximum_beta_delta_vs_reference_float: 0.0
+    maximum_absolute_max_drawdown_float: 0.25
+  C4_foundry_low_touch:
+    minimum_cagr_delta_vs_reference_float: -0.01
+    minimum_sharpe_delta_vs_reference_float: 0.0
+    minimum_max_drawdown_improvement_float: 0.0
+    minimum_es5_reduction_fraction_float: 0.0
+    maximum_beta_delta_vs_reference_float: 0.0
+    maximum_absolute_max_drawdown_float: 0.18
+
+robustness_contract:
+  equal_observation_third_count_int: 3
+  minimum_passing_third_count_int: 2
+  maximum_third_cagr_shortfall_vs_reference_float: 0.03
+  maximum_third_max_drawdown_worsening_float: 0.03
+  crisis_windows_str: repository_standard
+  leave_one_sleeve_out_str: conditional_phase2_only_replace_removed_weight_with_bil
+  leave_one_sleeve_out_is_selectable_bool: false
+
+crisis_diagnostic_list:
+  - [gfc_2008, "2008-09-15", "2009-03-09"]
+  - [european_debt_2011, "2011-08-01", "2011-10-04"]
+  - [china_oil_shock_2015, "2015-08-18", "2016-02-11"]
+  - [volmageddon, "2018-02-02", "2018-02-09"]
+  - [covid_crash, "2020-02-20", "2020-04-07"]
+  - [inflation_bear_2022, "2022-01-03", "2022-10-12"]
+  - [trump_tariffs_2025, "2025-02-01", "2025-04-30"]
+
+statistical_contract:
+  bootstrap_type_str: synchronized_paired_stationary
+  bootstrap_iteration_count_int: 10000
+  bootstrap_chunk_size_int: 250
+  random_seed_int: 20260830
+  annualization_day_int: 252
+  es_quantile_float: 0.05
+  primary_mean_block_length_int: 63
+  sensitivity_mean_block_length_list: [21, 126]
+  maximum_holm_adjusted_p_value_float: 0.10
+  minimum_primary_composite_success_probability_float: 0.60
+  minimum_sensitivity_composite_success_probability_float: 0.55
+  holm_family_candidate_id_list:
+    - C1_foundry_defensive
+    - C2_foundry_balanced
+    - C3_foundry_growth
+    - C4_foundry_low_touch
+  historical_trial_count_floor_int: 60
+  current_candidate_count_added_to_historical_floor_bool: true
+  historical_trial_adjustment_method_str: bonferroni_floor_then_holm
+  pure_untouched_holdout_claim_allowed_bool: false
+
+lineage_contract:
+  fail_if_registry_changes_bool: true
+  fail_if_strategy_code_changes_during_run_bool: true
+  fail_if_shared_execution_code_changes_during_run_bool: true
+  norgate_fingerprint_at_start_source_end_and_final_bool: true
+  fail_if_norgate_fingerprint_changes_bool: true
+  manifest_hash_every_artifact_bool: true
+
+capacity_contract:
+  phase1_capacity_gate_bool: false
+  capacity_evidence_required_in_separate_preregistered_phase_bool: true
+
+stop_rule:
+  if_candidate_fails_str: reject_candidate_without_weight_tuning
+  maximum_authority_on_full_pass_str: frozen_candidate_to_forward_shadow_only
+  no_live_paper_release_or_allocation_changes_bool: true

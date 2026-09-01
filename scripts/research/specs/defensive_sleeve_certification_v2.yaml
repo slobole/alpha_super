@@ -1,0 +1,126 @@
+study_id_str: defensive_sleeve_certification_v2
+study_version_str: "2.0"
+frozen_date_str: "2026-08-30"
+authority_str: research_bench_only
+evidence_status_str: historically_conditioned_after_phase0_and_DR2_diagnostic
+
+base_contract:
+  relative_path_str: scripts/research/specs/defensive_sleeve_certification_v1.yaml
+  sha256_str: d733e343b86357e7dbbd7a72b625ead7c83a9b65cf30fca4b2195554e2cd632f
+  merge_policy_str: explicit_v2_overrides_replace_matching_v1_fields
+
+product_mandate:
+  research_capital_base_float: 1000000.0
+  exact_client_aum_float: 1000000.0
+  exact_client_aum_required_for_capacity_signature_bool: true
+  product_fee_schedule:
+    management_fee_annual_float: 0.0
+    performance_fee_float: 0.0
+    other_product_fee_float: 0.0
+  product_fee_schedule_required_for_final_net_signature_bool: false
+
+account_structure_contract:
+  master_structure_str: one_linked_user_with_separate_strategy_subaccounts
+  one_pod_per_subaccount_bool: true
+  cross_subaccount_cash_pooling_allowed_bool: false
+  cross_subaccount_financing_offset_allowed_bool: false
+  product_value_formula_str: sum_of_each_subaccount_equity
+
+defensive_sleeve_candidates:
+  DR2_core5_tfi_equal:
+    requested_label_str: defensive_return
+    weight_by_alias:
+      core5: 0.50
+      tactical_fi: 0.50
+
+statistical_contract:
+  candidate_family_list:
+    - CP1_core5_bil
+    - CP2_core5_tfi_bil
+    - DR1_core5_tfi_trinity
+    - DR2_core5_tfi_equal
+  historical_trial_count_floor_int: 68
+  historical_trial_floor_derivation_str: 60_prior_floor_plus_4_foundry_candidates_plus_4_current_candidates
+  holm_familywise_alpha_float: 0.10
+  pure_untouched_holdout_claim_allowed_bool: false
+
+resolved_client_contract:
+  total_client_aum_float: 1000000.0
+  initial_growth4_capital_float: 250000.0
+  initial_defensive_sleeve_capital_float: 750000.0
+  management_fee_annual_float: 0.0
+  performance_fee_float: 0.0
+  other_product_fee_float: 0.0
+  investor_tax_modeled_bool: false
+  dividend_withholding_rate_float: 0.25
+  master_structure_str: one_linked_user_with_separate_strategy_subaccounts
+  one_pod_per_subaccount_bool: true
+  cross_subaccount_cash_pooling_allowed_bool: false
+  cross_subaccount_financing_offset_allowed_bool: false
+  product_value_formula_str: sum_of_each_subaccount_equity
+  outer_rebalance_str: none_initial_25_75_allocation_then_independent_drift
+  central_negative_cash_rate_str: causal_DGS3MO_plus_200bp_ACT_365
+  stress_negative_cash_rate_list_str:
+    - causal_DGS3MO_plus_200bp_ACT_365
+    - causal_DGS3MO_plus_500bp_ACT_365
+  actual_client_margin_rate_known_bool: false
+  actual_client_margin_rate_required_for_final_live_signature_bool: true
+
+v2_candidate_addition:
+  DR2_core5_tfi_equal:
+    requested_label_str: defensive_return
+    defensive_sleeve_weight_by_alias:
+      core5: 0.50
+      tactical_fi: 0.50
+    full_product_initial_weight_by_alias:
+      growth4: 0.25
+      core5: 0.375
+      tactical_fi: 0.375
+    mechanism_rationale_str: >-
+      CORE5 supplies diversified adaptive macro exposure while Tactical Fixed
+      Income supplies a low-historical-correlation duration and credit state
+      machine; equal weights are structural and were not optimized.
+    concentration_diagnostic:
+      maximum_core5_IEF_contribution_float: 0.10
+      maximum_tactical_fi_IEF_contribution_float: 0.25
+      maximum_tactical_fi_LQD_contribution_float: 0.25
+      maximum_total_IEF_plus_LQD_contribution_float: 0.60
+    relative_gate_vs_core5:
+      minimum_net_cagr_float: 0.04
+      minimum_sharpe_improvement_float: 0.10
+      alternative_minimum_max_drawdown_improvement_float: 0.01
+      maximum_cagr_sacrifice_float: 0.025
+      worst_2022_drawdown_must_not_worsen_bool: true
+
+v2_statistical_override:
+  candidate_family_list:
+    - CP1_core5_bil
+    - CP2_core5_tfi_bil
+    - DR1_core5_tfi_trinity
+    - DR2_core5_tfi_equal
+  historical_trial_count_floor_int: 68
+  historical_trial_floor_derivation_str: 60_prior_floor_plus_4_foundry_candidates_plus_4_current_candidates
+  holm_familywise_alpha_float: 0.10
+  pure_untouched_holdout_claim_allowed_bool: false
+
+v2_accounting_gate:
+  every_subaccount_must_use_offered_client_accounting_bool: true
+  positive_cash_and_negative_cash_accrued_per_subaccount_bool: true
+  dividend_withholding_applied_per_subaccount_bool: true
+  CORE5_DBC_borrow_charged_per_subaccount_bool: true
+  native_Tactical_FI_gross_dividend_path_cannot_clear_gate_bool: true
+  native_zero_cash_CORE5_path_cannot_clear_gate_bool: true
+  research_adapter_must_affect_NAV_before_future_sizing_bool: true
+
+v2_capacity_gate:
+  client_aum_float: 1000000.0
+  assess_each_subaccount_separately_bool: true
+  also_aggregate_same_day_symbol_orders_at_linked_user_level_bool: true
+  recommended_capacity_must_cover_client_aum_and_each_subaccount_bool: true
+
+decision_rule:
+  CORE5_standalone_remains_primary_simplicity_anchor_bool: true
+  added_sleeve_must_improve_frozen_robustness_gates_bool: true
+  no_complexity_credit_without_measured_improvement_bool: true
+  maximum_phase_one_authority_str: historically_conditioned_candidate_to_forward_shadow
+  no_paper_live_release_or_allocation_authority_bool: true

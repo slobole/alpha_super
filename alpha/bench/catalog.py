@@ -27,7 +27,7 @@ from pathlib import Path
 
 import yaml
 
-from alpha import strategy_registry
+from alpha import portfolio_registry, strategy_registry
 from alpha.strategy_registry import MaturityTier
 
 
@@ -191,6 +191,17 @@ class PortfolioEntry:
     rebalance_str: str | None
     pod_tuple: tuple[PortfolioPod, ...]
     error_str: str | None  # set when the YAML could not be parsed
+    tier_int: int = int(MaturityTier.RESEARCH)
+    tier_label_str: str = strategy_registry.TIER_LABEL_DICT[MaturityTier.RESEARCH]
+
+    @property
+    def is_wired_bool(self) -> bool:
+        return self.tier_int >= int(MaturityTier.WIRED)
+
+    @property
+    def is_pm_ready_bool(self) -> bool:
+        """A WIRED portfolio is also past the PM_READY maturity floor."""
+        return self.tier_int >= int(MaturityTier.PM_READY)
 
 
 def _module_import_str(module_path: Path) -> str:
@@ -483,6 +494,7 @@ def list_portfolios() -> list[PortfolioEntry]:
     entry_list: list[PortfolioEntry] = []
     for config_path in sorted(PORTFOLIOS_ROOT_PATH.glob("*.yaml")):
         rel_path_str = _rel_posix_str(config_path)
+        tier_obj = portfolio_registry.tier_for(config_path.stem)
         try:
             config_dict = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
             if not isinstance(config_dict, dict):
@@ -505,6 +517,8 @@ def list_portfolios() -> list[PortfolioEntry]:
                     rebalance_str=config_dict.get("rebalance"),
                     pod_tuple=_coerce_pod_tuple(config_dict.get("pods")),
                     error_str=None,
+                    tier_int=int(tier_obj),
+                    tier_label_str=strategy_registry.TIER_LABEL_DICT[tier_obj],
                 )
             )
         except (OSError, ValueError, yaml.YAMLError) as exception_obj:
@@ -518,6 +532,8 @@ def list_portfolios() -> list[PortfolioEntry]:
                     rebalance_str=None,
                     pod_tuple=(),
                     error_str=str(exception_obj),
+                    tier_int=int(tier_obj),
+                    tier_label_str=strategy_registry.TIER_LABEL_DICT[tier_obj],
                 )
             )
     return entry_list

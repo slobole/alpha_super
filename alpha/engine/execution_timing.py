@@ -215,9 +215,13 @@ def _timing_display_label_str(timing_str: str, order_generation_mode_str: str) -
 def _daily_ohlc_signal_timing_risk_tuple(
     entry_timing_str: str,
     exit_timing_str: str,
+    order_generation_mode_str: str,
 ) -> tuple[str, str]:
     timing_set = {entry_timing_str, exit_timing_str}
-    if "same_open" in timing_set:
+    if (
+        order_generation_mode_str == "signal_bar"
+        and "same_open" in timing_set
+    ):
         return (
             "Diagnostic Only",
             "Daily OHLC signals use signal-day data, so filling at the same day's open is "
@@ -277,7 +281,11 @@ def _timing_risk_tuple(
     order_generation_mode_str: str,
 ) -> tuple[str, str]:
     if risk_model_str == "daily_ohlc_signal":
-        return _daily_ohlc_signal_timing_risk_tuple(entry_timing_str, exit_timing_str)
+        return _daily_ohlc_signal_timing_risk_tuple(
+            entry_timing_str,
+            exit_timing_str,
+            order_generation_mode_str,
+        )
     if risk_model_str == "taa_rebalance":
         return _taa_rebalance_timing_risk_tuple(
             entry_timing_str,
@@ -427,6 +435,12 @@ def _reset_strategy_state(strategy_obj: Strategy) -> None:
     strategy_obj.realized_weight_df = pd.DataFrame(dtype=float)
     strategy_obj._realized_weight_snapshot_row_dict_list = []
     strategy_obj._latest_close_price_ser = pd.Series(dtype=float)
+    strategy_obj._ensure_dividend_accounting_state()
+    strategy_obj._dividend_processed_ex_date_set = set()
+    strategy_obj._dividend_ledger_row_dict_list = []
+    strategy_obj.dividend_cash_gross_total_float = 0.0
+    strategy_obj.dividend_withholding_total_float = 0.0
+    strategy_obj.dividend_cash_net_total_float = 0.0
 
 
 def _sizing_price_float(
@@ -585,8 +599,14 @@ def _process_scheduled_order_list(
     strategy_obj: Strategy,
     signal_data_df: pd.DataFrame,
     scheduled_order_list: list[ScheduledOrder],
+    preserve_sequence_bool: bool = False,
 ) -> None:
-    for scheduled_order_obj in sorted(scheduled_order_list, key=_scheduled_order_sort_key_tuple):
+    ordered_scheduled_order_list = (
+        sorted(scheduled_order_list, key=lambda order_obj: order_obj.sequence_int)
+        if preserve_sequence_bool
+        else sorted(scheduled_order_list, key=_scheduled_order_sort_key_tuple)
+    )
+    for scheduled_order_obj in ordered_scheduled_order_list:
         _execute_scheduled_order(
             strategy_obj=strategy_obj,
             signal_data_df=signal_data_df,
@@ -611,7 +631,20 @@ def _build_results_df(
     results_df["cash"] = cash_ser.astype(float)
     results_df["total_value"] = total_value_ser.astype(float)
 
-    daily_return_ser = total_value_ser.pct_change(fill_method=None).fillna(0.0)
+    daily_return_ser = total_value_ser.pct_change(fill_method=None)
+    first_calendar_bar_ts = pd.Timestamp(calendar_idx[0])
+    first_calendar_location_int = int(
+        pricing_data_df.index.get_loc(first_calendar_bar_ts)
+    )
+    # *** CRITICAL*** Vanilla starts a clipped calendar with previous_total_value
+    # equal to initial capital. If the first executable bar has a prior source
+    # bar, its opening gap, costs, and close P&L belong to day one. Only a run
+    # beginning at the first source row has no prior decision and a zero return.
+    daily_return_ser.iloc[0] = (
+        float(total_value_ser.iloc[0]) / float(strategy_obj._capital_base) - 1.0
+        if first_calendar_location_int > 0
+        else 0.0
+    )
     results_df["daily_returns"] = daily_return_ser.astype(float)
     results_df["total_returns"] = total_value_ser / float(strategy_obj._capital_base) - 1.0
 
@@ -1222,6 +1255,13 @@ class ExecutionTimingAnalyzer:
         calendar_idx = self.calendar_idx
         if len(calendar_idx) == 0:
             raise ValueError("calendar_idx must contain at least one bar.")
+        configure_run_calendar_fn = getattr(
+            strategy_obj,
+            "configure_run_calendar",
+            None,
+        )
+        if callable(configure_run_calendar_fn):
+            configure_run_calendar_fn(calendar_idx)
 
         first_calendar_bar_ts = pd.Timestamp(calendar_idx[0])
         previous_start_bar_ts = _first_available_previous_bar_ts(full_index, first_calendar_bar_ts)
@@ -1248,6 +1288,13 @@ class ExecutionTimingAnalyzer:
         for bar_ts in engine_bar_idx:
             bar_ts = pd.Timestamp(bar_ts)
             strategy_obj.current_bar = bar_ts
+            strategy_obj.previous_bar = _previous_bar_ts(full_index, bar_ts)
+            # *** CRITICAL*** Match Vanilla's entitlement transition before
+            # any current-bar open fill. A next-open buyer must not receive the
+            # prior session's dividend, while a next-open seller keeps it.
+            strategy_obj._credit_dividend_cash_before_open(
+                self.pricing_data_df,
+            )
 
             if self.order_generation_mode_str == "vanilla_current_bar":
                 previous_bar_ts = _previous_bar_ts(full_index, bar_ts)
@@ -1325,6 +1372,14 @@ class ExecutionTimingAnalyzer:
                 total_value_float = float(strategy_obj.cash + portfolio_value_float)
                 strategy_obj.portfolio_value = portfolio_value_float
                 strategy_obj.total_value = total_value_float
+                post_mark_accounting_fn = getattr(
+                    strategy_obj,
+                    "apply_post_mark_accounting",
+                    None,
+                )
+                if callable(post_mark_accounting_fn):
+                    post_mark_accounting_fn(self.pricing_data_df)
+                    total_value_float = float(strategy_obj.total_value)
 
                 if bar_ts in calendar_bar_set:
                     portfolio_value_map[bar_ts] = portfolio_value_float
@@ -1360,6 +1415,27 @@ class ExecutionTimingAnalyzer:
             strategy_obj.total_value = pre_signal_total_value_float
             strategy_obj._total_value_history_list = [pre_signal_total_value_float]
 
+            # *** CRITICAL *** timing boundary: orders scheduled on an earlier
+            # signal bar for Close_T must fill before the Close_T decision.
+            # Otherwise iterate() sees a stale position and can schedule a
+            # duplicate next-close target with a different trade ID.
+            _process_scheduled_order_list(
+                strategy_obj=strategy_obj,
+                signal_data_df=signal_data_df,
+                scheduled_order_list=close_schedule_map.pop(bar_ts, []),
+            )
+
+            close_price_ser = _close_price_ser(signal_data_df, bar_ts)
+            post_pending_close_portfolio_value_float = _active_portfolio_value_float(
+                strategy_obj, close_price_ser
+            )
+            post_pending_close_total_value_float = float(
+                strategy_obj.cash + post_pending_close_portfolio_value_float
+            )
+            strategy_obj.portfolio_value = post_pending_close_portfolio_value_float
+            strategy_obj.total_value = post_pending_close_total_value_float
+            strategy_obj._total_value_history_list = [post_pending_close_total_value_float]
+
             if bar_ts in signal_bar_set:
                 self._generate_and_schedule_orders(
                     strategy_obj=strategy_obj,
@@ -1372,6 +1448,9 @@ class ExecutionTimingAnalyzer:
                     close_schedule_map=close_schedule_map,
                 )
 
+            # Only same-close orders created by the Close_T decision can be
+            # present here; previously scheduled Close_T orders were consumed
+            # before signal generation above.
             _process_scheduled_order_list(
                 strategy_obj=strategy_obj,
                 signal_data_df=signal_data_df,
@@ -1389,6 +1468,14 @@ class ExecutionTimingAnalyzer:
             total_value_float = float(strategy_obj.cash + portfolio_value_float)
             strategy_obj.portfolio_value = portfolio_value_float
             strategy_obj.total_value = total_value_float
+            post_mark_accounting_fn = getattr(
+                strategy_obj,
+                "apply_post_mark_accounting",
+                None,
+            )
+            if callable(post_mark_accounting_fn):
+                post_mark_accounting_fn(self.pricing_data_df)
+                total_value_float = float(strategy_obj.total_value)
 
             if bar_ts in calendar_bar_set:
                 portfolio_value_map[bar_ts] = portfolio_value_float
@@ -1521,6 +1608,14 @@ class ExecutionTimingAnalyzer:
             strategy_obj=strategy_obj,
             signal_data_df=signal_data_df,
             scheduled_order_list=immediate_open_order_info_list,
+            # *** CRITICAL*** When every order uses the same timing rule, the
+            # Vanilla path executes the submitted sequence verbatim. Reordering
+            # exits before entries would change transaction/trade lineage even
+            # when NAV happens to remain identical.
+            preserve_sequence_bool=(
+                self.order_generation_mode_str == "vanilla_current_bar"
+                and entry_timing_str == exit_timing_str
+            ),
         )
 
 

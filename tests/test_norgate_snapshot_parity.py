@@ -115,3 +115,58 @@ def test_ndx_and_vxn_boundary_parity(monkeypatch):
     _assert_frame_equal(direct_universe_df, snapshot_universe_df)
     _assert_frame_equal(direct_price_df, snapshot_price_df)
     pd.testing.assert_series_equal(direct_vxn_close_ser, snapshot_vxn_close_ser, check_dtype=False, check_freq=False)
+
+
+def test_hpi_vote_direct_vs_dedicated_snapshot_event_parity(monkeypatch):
+    from data.norgate_snapshot_store import (
+        HPI_SP500_PROFILE_STR,
+        use_norgate_data_profile,
+    )
+    from strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote import run_variant
+
+    backtest_start_date_str = os.getenv(
+        "NORGATE_PARITY_BACKTEST_START_DATE_STR",
+        "2004-01-01",
+    )
+    end_date_str = os.getenv("NORGATE_PARITY_END_DATE_STR", "2026-08-14")
+
+    _set_snapshot_mode_bool(monkeypatch, False)
+    direct_strategy_obj = run_variant(
+        show_display_bool=False,
+        save_results_bool=False,
+        backtest_start_date_str=backtest_start_date_str,
+        end_date_str=end_date_str,
+    )
+
+    _set_snapshot_mode_bool(monkeypatch, True)
+    with use_norgate_data_profile(HPI_SP500_PROFILE_STR):
+        snapshot_strategy_obj = run_variant(
+            show_display_bool=False,
+            save_results_bool=False,
+            backtest_start_date_str=backtest_start_date_str,
+            end_date_str=end_date_str,
+        )
+    semantic_transaction_column_list = [
+        "bar",
+        "asset",
+        "amount",
+        "price",
+        "total_value",
+        "commission",
+    ]
+    _assert_frame_equal(
+        direct_strategy_obj.get_transactions().loc[
+            :,
+            semantic_transaction_column_list,
+        ],
+        snapshot_strategy_obj.get_transactions().loc[
+            :,
+            semantic_transaction_column_list,
+        ],
+    )
+    pd.testing.assert_series_equal(
+        direct_strategy_obj.results["total_value"],
+        snapshot_strategy_obj.results["total_value"],
+        check_dtype=False,
+        check_freq=False,
+    )

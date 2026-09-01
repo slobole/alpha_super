@@ -12,6 +12,11 @@ Monthly inverse-volatility base weights:
 
 Daily exposure overlay:
 
+    r_{p,t}^{base} = sum_i(w_{i,T}^{base} * r_{i,t})
+
+    sigma_{portfolio,T}^{(63)}
+        = sqrt(252) * std(r_{p,T-62:T}^{base})
+
     m_t^*
         = 1                                      if sigma_{portfolio,t}^{(63)} <= 0.085
         = min(1, 0.08 / sigma_{portfolio,t}^{(63)}) otherwise
@@ -59,6 +64,7 @@ TRADEABLE_ASSET_TUPLE = RISK_ASSET_TUPLE + (CASH_SUBSTITUTE_ASSET_STR,)
 TARGET_PORTFOLIO_VOL_FLOAT = 0.08
 TRIGGER_PORTFOLIO_VOL_FLOAT = 0.085
 EXPOSURE_REBALANCE_BAND_FLOAT = 0.05
+MAX_RISK_EXPOSURE_FLOAT = 1.0
 MONTHLY_REBALANCE_FIELD_TUPLE = ("Portfolio", "monthly_rebalance_bool")
 DEFAULT_CONFIG = replace(
     BASE_DEFAULT_CONFIG,
@@ -73,13 +79,62 @@ def should_rebalance_exposure_bool(
     current_exposure_float: float,
     exposure_rebalance_band_float: float = EXPOSURE_REBALANCE_BAND_FLOAT,
     monthly_rebalance_bool: bool = False,
+    max_risk_exposure_float: float = MAX_RISK_EXPOSURE_FLOAT,
 ) -> bool:
     """Return whether the exposure or monthly rule requires an order cycle."""
     exposure_gap_float = abs(desired_exposure_float - current_exposure_float)
     return bool(
         monthly_rebalance_bool
+        or current_exposure_float > max_risk_exposure_float + 1e-12
         or exposure_gap_float + 1e-12 >= exposure_rebalance_band_float
     )
+
+
+def compute_base_portfolio_return_ser(
+    risk_return_df: pd.DataFrame,
+    base_weight_ser: pd.Series,
+    portfolio_vol_lookback_int: int = DEFAULT_CONFIG.portfolio_vol_lookback_int,
+) -> pd.Series:
+    """Return the trailing unscaled base-portfolio returns known at Close_T.
+
+    For the current monthly base weights ``w_{i,T}``, the risk estimate uses:
+
+        r_{p,t}^{base} = sum_i(w_{i,T} * r_{i,t})
+
+    over ``t = T-lookback+1, ..., T``. The result deliberately excludes the
+    prior exposure multiplier, BIL return, trading costs, and realized drift.
+    """
+    if portfolio_vol_lookback_int <= 1:
+        raise ValueError("portfolio_vol_lookback_int must be greater than one.")
+
+    risk_asset_list = list(base_weight_ser.index)
+    missing_asset_list = [
+        asset_str for asset_str in risk_asset_list if asset_str not in risk_return_df.columns
+    ]
+    if missing_asset_list:
+        raise RuntimeError(f"Missing base-portfolio returns for {missing_asset_list}.")
+
+    base_weight_ser = base_weight_ser.astype(float)
+    if base_weight_ser.isna().any() or (base_weight_ser < 0.0).any() or not np.isclose(
+        float(base_weight_ser.sum()), 1.0, atol=1e-12
+    ):
+        raise ValueError("Base portfolio weights must be non-negative and sum to 1.0.")
+
+    trailing_risk_return_df = risk_return_df.loc[:, risk_asset_list].astype(float).iloc[
+        -portfolio_vol_lookback_int:
+    ]
+    # *** CRITICAL*** Every return in this window ends no later than Close_T.
+    # The same Close_T-known monthly base weights are applied across the
+    # historical window; no m_t, BIL return, cost, or future price may enter.
+    complete_window_bool = (
+        len(trailing_risk_return_df) == portfolio_vol_lookback_int
+        and np.isfinite(trailing_risk_return_df.to_numpy(dtype=float)).all()
+    )
+    if not complete_window_bool:
+        raise RuntimeError(
+            "Base-portfolio volatility requires a complete trailing return window."
+        )
+    return trailing_risk_return_df.mul(base_weight_ser, axis=1).sum(axis=1)
 
 
 def build_target_weight_ser(
@@ -264,6 +319,30 @@ class TrinityVolControlStrategy(Beyond6040Strategy):
         }
         return pd.Series(base_weight_dict, dtype=float)
 
+    def _base_portfolio_return_ser(
+        self,
+        data_df: pd.DataFrame,
+        base_weight_ser: pd.Series,
+    ) -> pd.Series:
+        risk_return_key_list = [
+            (asset_str, "return_ser") for asset_str in self.risk_asset_list
+        ]
+        missing_return_key_list = [
+            key_tuple for key_tuple in risk_return_key_list if key_tuple not in data_df.columns
+        ]
+        if missing_return_key_list:
+            raise RuntimeError(
+                f"Missing base-portfolio return signals for {missing_return_key_list}."
+            )
+
+        risk_return_df = data_df.loc[:, risk_return_key_list].astype(float).copy()
+        risk_return_df.columns = self.risk_asset_list
+        return compute_base_portfolio_return_ser(
+            risk_return_df=risk_return_df,
+            base_weight_ser=base_weight_ser,
+            portfolio_vol_lookback_int=self.portfolio_vol_lookback_int,
+        )
+
     def _current_close_weight_ser(self, close_row_ser: pd.Series) -> pd.Series:
         total_value_float = float(self.previous_total_value)
         if not np.isfinite(total_value_float) or total_value_float <= 0.0:
@@ -348,9 +427,12 @@ class TrinityVolControlStrategy(Beyond6040Strategy):
         if base_weight_ser.isna().any():
             return
 
-        realized_return_ser = self._realized_strategy_return_ser()
+        base_portfolio_return_ser = self._base_portfolio_return_ser(
+            data_df=data_df,
+            base_weight_ser=base_weight_ser,
+        )
         desired_exposure_float = compute_gross_exposure_float(
-            realized_return_ser=realized_return_ser,
+            realized_return_ser=base_portfolio_return_ser,
             portfolio_vol_lookback_int=self.portfolio_vol_lookback_int,
             target_portfolio_vol_float=self.target_portfolio_vol_float,
             trigger_portfolio_vol_float=self.trigger_portfolio_vol_float,
@@ -369,6 +451,7 @@ class TrinityVolControlStrategy(Beyond6040Strategy):
             current_exposure_float=current_exposure_float,
             exposure_rebalance_band_float=self.exposure_rebalance_band_float,
             monthly_rebalance_bool=monthly_rebalance_bool,
+            max_risk_exposure_float=MAX_RISK_EXPOSURE_FLOAT,
         )
 
         if not rebalance_exposure_bool:

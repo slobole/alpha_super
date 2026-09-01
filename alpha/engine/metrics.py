@@ -26,6 +26,13 @@ BENCHMARK_REGRESSION_METRIC_NAME_TUPLE = (
     'R²',
 )
 
+# Expected shortfall is reported over one trading month because that is the
+# horizon a monthly statement covers. The label carries both parameters so the
+# number cannot be read against the wrong horizon.
+EXPECTED_SHORTFALL_HORIZON_DAY_INT = 21
+EXPECTED_SHORTFALL_CONFIDENCE_FLOAT = 0.95
+EXPECTED_SHORTFALL_METRIC_NAME_STR = 'Expected Shortfall (95%, 21 days) [%]'
+
 
 def generate_benchmark_regression_metrics(
     strategy_return_ser: pd.Series | None,
@@ -467,6 +474,46 @@ def _gross_trade_notional(
     return float(transactions_df["total_value"].astype(float).abs().sum())
 
 
+def _expected_shortfall_pct_float(
+    total_value_ser: pd.Series,
+    horizon_day_int: int = EXPECTED_SHORTFALL_HORIZON_DAY_INT,
+    confidence_float: float = EXPECTED_SHORTFALL_CONFIDENCE_FLOAT,
+) -> float:
+    """
+    Expected shortfall of the horizon-return distribution, in percent:
+
+        r_h,t = V_t / V_t-h - 1
+        ES    = mean(r_h,t | r_h,t <= quantile_1-confidence(r_h))
+
+    Overlapping windows keep enough observations to describe the realized 5%
+    tail. They are serially dependent, so this is a historical path diagnostic,
+    not a forecast or confidence interval.
+
+    Returns NaN when the sample is too short to place at least five observations
+    in the tail.
+    """
+    if len(total_value_ser) <= horizon_day_int:
+        return float('nan')
+
+    # *** CRITICAL*** report-only backward-looking horizon: shift(h) pairs the
+    # realized equity at t only with t-h. This metric must never feed signals,
+    # sizing, or same-day order logic.
+    horizon_return_ser = (
+        total_value_ser / total_value_ser.shift(horizon_day_int) - 1.0
+    ).replace([np.inf, -np.inf], np.nan).dropna()
+    tail_probability_float = 1.0 - confidence_float
+    if len(horizon_return_ser) < 5 / tail_probability_float:
+        return float('nan')
+
+    tail_threshold_float = float(
+        np.quantile(horizon_return_ser.to_numpy(), tail_probability_float)
+    )
+    tail_return_ser = horizon_return_ser[horizon_return_ser <= tail_threshold_float]
+    if len(tail_return_ser) == 0:
+        return float('nan')
+    return float(tail_return_ser.mean()) * 100.0
+
+
 def generate_overall_metrics(total_value: pd.Series, trades: pd.DataFrame = None, portfolio_value: pd.Series = None,
                              series_to_correlate: pd.Series = None, capital_base: float = None, days_in_year: int = 252,
                              total_commissions: float = None, transactions_df: pd.DataFrame = None,
@@ -610,6 +657,12 @@ def generate_overall_metrics(total_value: pd.Series, trades: pd.DataFrame = None
     # count drawdown occurrences
     s.loc['# Drawdowns'] = len(drawdowns)
     s.loc['# Drawdowns / year'] = len(drawdowns) / (duration_day_count_int / days_in_year)
+
+    # Max drawdown is one realized path. Expected shortfall is the average of
+    # the worst 5% of realized 21-trading-day outcomes.
+    s.loc[EXPECTED_SHORTFALL_METRIC_NAME_STR] = _expected_shortfall_pct_float(
+        total_value_ser
+    )
 
     if transactions_df is not None and len(transactions_df) > 0:
         average_equity_float = float(total_value_ser.mean())

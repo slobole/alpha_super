@@ -71,11 +71,97 @@ def test_five_point_band_and_monthly_override_are_literal():
     assert not variant_module.should_rebalance_exposure_bool(0.80, 0.751)
     assert variant_module.should_rebalance_exposure_bool(0.80, 0.75)
     assert variant_module.should_rebalance_exposure_bool(0.70, 0.65)
+    assert not variant_module.should_rebalance_exposure_bool(0.65, 0.699)
+    assert variant_module.should_rebalance_exposure_bool(0.65, 0.70)
     assert variant_module.should_rebalance_exposure_bool(
         0.80,
         0.80,
         monthly_rebalance_bool=True,
     )
+    assert variant_module.should_rebalance_exposure_bool(1.0, 1.001)
+
+
+def test_base_portfolio_volatility_uses_unscaled_risk_assets_only():
+    return_index = pd.bdate_range("2023-01-02", periods=63)
+    vti_return_vec = np.linspace(-0.02, 0.02, 63)
+    risk_return_df = pd.DataFrame(
+        {
+            "VTI": vti_return_vec,
+            "GLD": -0.5 * vti_return_vec,
+            "TLT": 0.25 * vti_return_vec,
+        },
+        index=return_index,
+    )
+    base_weight_ser = pd.Series({"VTI": 0.50, "GLD": 0.30, "TLT": 0.20})
+
+    base_portfolio_return_ser = variant_module.compute_base_portfolio_return_ser(
+        risk_return_df=risk_return_df,
+        base_weight_ser=base_weight_ser,
+        portfolio_vol_lookback_int=63,
+    )
+
+    expected_return_ser = (
+        risk_return_df["VTI"] * 0.50
+        + risk_return_df["GLD"] * 0.30
+        + risk_return_df["TLT"] * 0.20
+    )
+    pd.testing.assert_series_equal(base_portfolio_return_ser, expected_return_ser)
+
+    expected_volatility_float = float(expected_return_ser.std(ddof=1) * np.sqrt(252.0))
+    expected_exposure_float = (
+        1.0
+        if expected_volatility_float <= variant_module.TRIGGER_PORTFOLIO_VOL_FLOAT
+        else variant_module.TARGET_PORTFOLIO_VOL_FLOAT / expected_volatility_float
+    )
+    actual_exposure_float = variant_module.compute_gross_exposure_float(
+        realized_return_ser=base_portfolio_return_ser,
+        portfolio_vol_lookback_int=63,
+        target_portfolio_vol_float=variant_module.TARGET_PORTFOLIO_VOL_FLOAT,
+        trigger_portfolio_vol_float=variant_module.TRIGGER_PORTFOLIO_VOL_FLOAT,
+    )
+    assert np.isclose(actual_exposure_float, expected_exposure_float)
+
+
+def test_base_portfolio_volatility_fails_loud_on_incomplete_window():
+    risk_return_df = pd.DataFrame(
+        {
+            "VTI": np.zeros(63),
+            "GLD": np.zeros(63),
+            "TLT": np.zeros(63),
+        },
+        index=pd.bdate_range("2023-01-02", periods=63),
+    )
+    risk_return_df.iloc[-1, 0] = np.nan
+
+    with np.testing.assert_raises_regex(
+        RuntimeError,
+        "complete trailing return window",
+    ):
+        variant_module.compute_base_portfolio_return_ser(
+            risk_return_df=risk_return_df,
+            base_weight_ser=pd.Series({"VTI": 0.50, "GLD": 0.30, "TLT": 0.20}),
+            portfolio_vol_lookback_int=63,
+        )
+
+
+def test_portfolio_volatility_trigger_is_inclusive_at_eight_point_five_percent():
+    raw_return_ser = pd.Series(np.linspace(-1.0, 1.0, 63), dtype=float)
+
+    def exposure_for_vol_float(annualized_volatility_float: float) -> float:
+        scaled_return_ser = raw_return_ser * (
+            annualized_volatility_float
+            / (float(raw_return_ser.std(ddof=1)) * np.sqrt(252.0))
+        )
+        return variant_module.compute_gross_exposure_float(
+            realized_return_ser=scaled_return_ser,
+            portfolio_vol_lookback_int=63,
+            target_portfolio_vol_float=variant_module.TARGET_PORTFOLIO_VOL_FLOAT,
+            trigger_portfolio_vol_float=variant_module.TRIGGER_PORTFOLIO_VOL_FLOAT,
+        )
+
+    assert exposure_for_vol_float(0.085 - 1e-10) == 1.0
+    assert exposure_for_vol_float(0.085) == 1.0
+    assert exposure_for_vol_float(0.085 + 1e-10) < 1.0
 
 
 def test_target_weights_put_the_unexposed_share_in_bil_without_leverage():
@@ -92,6 +178,30 @@ def test_target_weights_put_the_unexposed_share_in_bil_without_leverage():
     assert target_weight_ser["Cash"] == 0.0
     assert np.isclose(target_weight_ser.sum(), 1.0)
 
+    full_risk_weight_ser = variant_module.build_target_weight_ser(
+        base_weight_ser=base_weight_ser,
+        gross_exposure_float=1.0,
+    )
+    assert np.isclose(
+        full_risk_weight_ser[list(variant_module.RISK_ASSET_TUPLE)].sum(),
+        1.0,
+    )
+    assert full_risk_weight_ser["BIL"] == 0.0
+
+    all_bil_weight_ser = variant_module.build_target_weight_ser(
+        base_weight_ser=base_weight_ser,
+        gross_exposure_float=0.0,
+    )
+    assert all_bil_weight_ser[list(variant_module.RISK_ASSET_TUPLE)].sum() == 0.0
+    assert all_bil_weight_ser["BIL"] == 1.0
+
+    for invalid_exposure_float in (-0.01, 1.01):
+        with np.testing.assert_raises_regex(ValueError, "non-negative and sum to 1.0"):
+            variant_module.build_target_weight_ser(
+                base_weight_ser=base_weight_ser,
+                gross_exposure_float=invalid_exposure_float,
+            )
+
 
 def test_monthly_override_is_marked_on_close_before_next_month_open():
     execution_index = pd.bdate_range("2023-01-02", "2023-02-03")
@@ -107,6 +217,114 @@ def test_monthly_override_is_marked_on_close_before_next_month_open():
 
     assert monthly_rebalance_ser.loc[pd.Timestamp("2023-01-31")]
     assert int(monthly_rebalance_ser.sum()) == 1
+
+
+def test_iterate_monthly_override_rebalances_inside_band():
+    strategy_obj = variant_module.TrinityVolControlStrategy(
+        name="monthly_override_test",
+        benchmarks=[],
+        capital_base=100_000.0,
+    )
+    strategy_obj.current_bar = pd.Timestamp("2023-04-03")
+    return_index = pd.bdate_range(end="2023-03-31", periods=63)
+    data_df = pd.DataFrame(
+        {
+            ("VTI", "return_ser"): np.zeros(63),
+            ("GLD", "return_ser"): np.zeros(63),
+            ("TLT", "return_ser"): np.zeros(63),
+        },
+        index=return_index,
+    )
+    data_df.columns = pd.MultiIndex.from_tuples(data_df.columns)
+    close_row_ser = pd.Series(
+        {
+            ("VTI", "base_weight_ser"): 0.50,
+            ("GLD", "base_weight_ser"): 0.30,
+            ("TLT", "base_weight_ser"): 0.20,
+            variant_module.MONTHLY_REBALANCE_FIELD_TUPLE: True,
+        }
+    )
+    current_weight_ser = pd.Series(
+        {"VTI": 0.49, "GLD": 0.29, "TLT": 0.20, "BIL": 0.02, "Cash": 0.0}
+    )
+
+    with (
+        patch.object(
+            strategy_obj,
+            "_current_close_weight_ser",
+            return_value=current_weight_ser,
+        ),
+        patch.object(strategy_obj, "_submit_target_orders") as submit_target_orders_mock,
+    ):
+        strategy_obj.iterate(data_df, close_row_ser, pd.Series(dtype=float))
+
+    submit_target_orders_mock.assert_called_once()
+    submitted_target_weight_ser = submit_target_orders_mock.call_args.kwargs[
+        "target_weight_ser"
+    ]
+    assert np.isclose(
+        submitted_target_weight_ser[list(variant_module.RISK_ASSET_TUPLE)].sum(),
+        1.0,
+    )
+    assert submitted_target_weight_ser["BIL"] == 0.0
+
+
+def test_iterate_de_risks_from_base_portfolio_not_realized_strategy_returns():
+    strategy_obj = variant_module.TrinityVolControlStrategy(
+        name="base_portfolio_vol_test",
+        benchmarks=[],
+        capital_base=100_000.0,
+    )
+    strategy_obj.current_bar = pd.Timestamp("2023-04-03")
+    strategy_obj._daily_return_history_list = [0.0] * 100
+    return_index = pd.bdate_range(end="2023-03-31", periods=63)
+    alternating_return_vec = np.resize(np.array([-0.02, 0.02]), 63)
+    data_df = pd.DataFrame(
+        {
+            ("VTI", "return_ser"): alternating_return_vec,
+            ("GLD", "return_ser"): alternating_return_vec,
+            ("TLT", "return_ser"): alternating_return_vec,
+        },
+        index=return_index,
+    )
+    data_df.columns = pd.MultiIndex.from_tuples(data_df.columns)
+    close_row_ser = pd.Series(
+        {
+            ("VTI", "base_weight_ser"): 0.50,
+            ("GLD", "base_weight_ser"): 0.30,
+            ("TLT", "base_weight_ser"): 0.20,
+            variant_module.MONTHLY_REBALANCE_FIELD_TUPLE: False,
+        }
+    )
+    current_weight_ser = pd.Series(
+        {"VTI": 0.50, "GLD": 0.30, "TLT": 0.20, "BIL": 0.0, "Cash": 0.0}
+    )
+    expected_volatility_float = float(
+        pd.Series(alternating_return_vec).std(ddof=1) * np.sqrt(252.0)
+    )
+    expected_exposure_float = variant_module.TARGET_PORTFOLIO_VOL_FLOAT / (
+        expected_volatility_float
+    )
+
+    with (
+        patch.object(
+            strategy_obj,
+            "_current_close_weight_ser",
+            return_value=current_weight_ser,
+        ),
+        patch.object(strategy_obj, "_submit_target_orders") as submit_target_orders_mock,
+    ):
+        strategy_obj.iterate(data_df, close_row_ser, pd.Series(dtype=float))
+
+    submit_target_orders_mock.assert_called_once()
+    submitted_target_weight_ser = submit_target_orders_mock.call_args.kwargs[
+        "target_weight_ser"
+    ]
+    assert np.isclose(
+        submitted_target_weight_ser[list(variant_module.RISK_ASSET_TUPLE)].sum(),
+        expected_exposure_float,
+    )
+    assert np.isclose(submitted_target_weight_ser["BIL"], 1.0 - expected_exposure_float)
 
 
 def test_first_actionable_rebalance_waits_until_bil_is_tradable():

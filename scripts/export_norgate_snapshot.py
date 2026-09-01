@@ -49,7 +49,7 @@ PROFILE_EXPORT_SPEC_DICT: dict[str, NorgateExportProfileSpec] = {
     ),
     "norgate_eod_etf_plus_vix_helper": NorgateExportProfileSpec(
         capital_symbol_tuple=("GLD", "UUP", "TLT", "DBC", "BTAL", "SPY", "QQQ", "TQQQ"),
-        total_return_symbol_tuple=("GLD", "UUP", "TLT", "DBC", "BTAL", "$SPX"),
+        total_return_symbol_tuple=("GLD", "UUP", "TLT", "DBC", "BTAL", "$SPX", "$SPXTR"),
         helper_symbol_tuple=("$VIX",),
     ),
     "norgate_eod_ndx_pit": NorgateExportProfileSpec(

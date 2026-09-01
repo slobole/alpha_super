@@ -1,0 +1,29 @@
+{
+  "evidence_status_str": "historically_conditioned_after_phase0",
+  "formal_certification_run_completed_bool": false,
+  "frozen_date_str": "2026-08-30",
+  "phase0_known_before_this_freeze_dict": {
+    "CP1_core5_bil": {
+      "cagr_float": 0.0441,
+      "max_drawdown_float": -0.0323
+    },
+    "CP2_core5_tfi_bil": {
+      "cagr_float": 0.0470,
+      "max_drawdown_float": -0.0305
+    },
+    "DR1_core5_tfi_trinity": {
+      "cagr_float": 0.0563,
+      "max_drawdown_float": -0.0641
+    }
+  },
+  "phase0_status_str": "diagnostic_only_mismatched_source_capital_and_accounting",
+  "required_unresolved_input_list": [
+    "exact_client_aum_float",
+    "product_fee_schedule",
+    "actual_client_negative_cash_spread_bps_float",
+    "pod_account_routing_and_cash_pooling_contract",
+    "account_specific_DBC_borrow_locate_recall_evidence"
+  ],
+  "spec_relative_path_str": "scripts/research/specs/defensive_sleeve_certification_v1.yaml",
+  "spec_sha256_str": "d733e343b86357e7dbbd7a72b625ead7c83a9b65cf30fca4b2195554e2cd632f"
+}

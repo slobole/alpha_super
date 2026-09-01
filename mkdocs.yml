@@ -1,0 +1,145 @@
+site_name: Alpha Super Knowledge
+site_description: Human-readable and AI-readable knowledge for Alpha Super
+site_dir: .codex_tmp/knowledge-site
+
+theme:
+  name: material
+  language: en
+  icon:
+    logo: material/chart-timeline-variant-shimmer
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue grey
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue grey
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.indexes
+    - navigation.sections
+    - navigation.top
+    - toc.follow
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Understand:
+      - Start Here: start-here/index.md
+      - How the System Works: system/system-overview.md
+  - Strategies:
+      - Catalog: strategies/index.md
+      - Daily Mean Reversion:
+          - DV2: strategies/dv2-mean-reversion.md
+          - QPI + IBS: strategies/qpi-ibs-mean-reversion.md
+          - HPI 3-Day: strategies/hpi-3d-mean-reversion.md
+          - HPI 2/3/5 Vote: strategies/hpi-235-vote.md
+      - Monthly Allocation:
+          - TAA Defensive + TQQQ: strategies/taa-defensive-tqqq.md
+          - TAA Equal Slots + TQQQ: strategies/taa-equal-slots-tqqq.md
+          - TAA Linearity + QQQ: strategies/taa-linearity-qqq.md
+          - NDX ATR Momentum: strategies/ndx-atr-momentum.md
+          - NDX ATR + VXN: strategies/ndx-atr-vxn-scaled.md
+  - Operations:
+      - Overview: operations/index.md
+      - New Client Onboarding: operations/client-onboarding.md
+      - VPS Runtime Checklist: operations/vps-runtime-checklist.md
+      - Set Up IBKR Flex Performance: operations/ibkr-flex-performance-setup.md
+  - Research:
+      - Overview: research/index.md
+      - Knowledge Base:
+          - Home: research/knowledge-base/index.md
+          - All Studies: research/knowledge-base/studies.md
+          - Feature Map: research/knowledge-base/features.md
+          - Sources: research/knowledge-base/sources.md
+          - Needs Audit: research/knowledge-base/needs-audit.md
+          - How to Read: research/knowledge-base/how-to-read.md
+  - Backlog: backlog/index.md
+  - Library:
+      - Foundational Papers:
+          - Catalog: library/foundational-papers/index.md
+          - Equity and Multi-Factor:
+              - Momentum Factor Construction: library/foundational-papers/momentum-factor-construction.md
+          - Crypto:
+              - Crypto Catalog: library/foundational-papers/crypto/index.md
+              - Crypto TSMOM: library/foundational-papers/crypto/crypto-tsmom-volume-weighted-returns.md
+      - Current Sources: reference/index.md
+      - Historical Material: archive/index.md
+  - Maintain:
+      - Overview: governance/index.md
+      - Documentation Standard: governance/documentation-standard.md
+      - Content Map: governance/content-map.md
+      - Templates:
+          - Strategy: governance/templates/strategy.md
+          - Operations: governance/templates/operations.md
+          - Architecture: governance/templates/architecture.md
+          - Research: governance/templates/research.md
+
+# Existing material stays in place until it has been classified and audited.
+# Negated paths expose only the new section landing pages.
+exclude_docs: |
+  ai/
+  live/
+  reviews/
+  investor/
+  presentations/
+  live_flow_images/
+  research/*
+  !research/index.md
+  !research/knowledge-base/
+  !research/knowledge-base/**
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - meta
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.snippets:
+      base_path:
+        - .
+        - docs
+      check_paths: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+  - https://cdn.jsdelivr.net/npm/mermaid@10.9.5/dist/mermaid.min.js
+  - javascripts/mermaid.js
+
+copyright: Local knowledge portal · Canonical sources remain in the repository

@@ -358,7 +358,14 @@ def _vanilla_tab_tuple(
             if year_table_html_str:
                 grouped_html_dict["overview"].append(year_table_html_str)
         if group_key_str == "statistics":
-            if not has_headline_comparison_bool:
+            if has_headline_comparison_bool:
+                grouped_html_dict["overview"][0] = (
+                    _vanilla_headline_with_daily_expected_shortfall_html_str(
+                        grouped_html_dict["overview"][0],
+                        plate_html_str,
+                    )
+                )
+            else:
                 comparison_html_str = _vanilla_comparison_html_str(plate_html_str)
                 if comparison_html_str:
                     grouped_html_dict["overview"].append(comparison_html_str)
@@ -447,6 +454,45 @@ def _metric_delta_str(strategy_value_str: str, benchmark_value_str: str) -> str:
     return f"{strategy_float - benchmark_float:+.2f}{suffix_str}"
 
 
+def _vanilla_headline_with_daily_expected_shortfall_html_str(
+    headline_html_str: str,
+    statistics_plate_html_str: str,
+) -> str:
+    """Restore the saved daily tail metric to a legacy headline table.
+
+    Existing artifacts cannot supply the newer 21-trading-day ES without a
+    rerun. They do carry daily CVaR in their Statistics plate, so preserve that
+    evidence with an explicit daily horizon instead of changing its meaning.
+    """
+    if "expected shortfall" in headline_html_str.lower():
+        return headline_html_str
+
+    for row_match_obj in _TABLE_ROW_RE.finditer(statistics_plate_html_str):
+        cell_text_list = [
+            _table_cell_text_str(cell_html_str)
+            for cell_html_str in _TABLE_CELL_RE.findall(row_match_obj.group(1))
+        ]
+        if len(cell_text_list) < 3 or cell_text_list[0] != "CVaR 95% (Daily) [%]":
+            continue
+        strategy_value_str, benchmark_value_str = cell_text_list[1:3]
+        delta_str = _metric_delta_str(strategy_value_str, benchmark_value_str)
+        delta_class_str = (
+            "pos" if delta_str.startswith("+") else "neg" if delta_str.startswith("-") else ""
+        )
+        row_html_str = (
+            '<tr><td class="metric">Expected shortfall (95%, daily)</td>'
+            f'<td>{html.escape(strategy_value_str)}</td>'
+            f'<td>{html.escape(benchmark_value_str)}</td>'
+            f'<td class="{delta_class_str}">{html.escape(delta_str)}</td></tr>'
+        )
+        if "</tbody>" in headline_html_str:
+            return headline_html_str.replace("</tbody>", row_html_str + "</tbody>", 1)
+        if "</table>" in headline_html_str:
+            return headline_html_str.replace("</table>", row_html_str + "</table>", 1)
+        return headline_html_str
+    return headline_html_str
+
+
 def _vanilla_comparison_html_str(statistics_plate_html_str: str) -> str:
     """Build the mockup's compact comparison from values already in the report."""
     row_by_metric_dict: dict[str, tuple[str, str]] = {}
@@ -470,7 +516,7 @@ def _vanilla_comparison_html_str(statistics_plate_html_str: str) -> str:
         ("Sharpe ratio", "Sharpe Ratio"),
         ("Max drawdown", "Max. Drawdown [%]"),
         ("Sortino ratio", "Sortino Ratio"),
-        ("Expected shortfall", "CVaR 95% (Daily) [%]"),
+        ("Expected shortfall (95%, daily)", "CVaR 95% (Daily) [%]"),
     )
     row_html_str_list: list[str] = []
     for display_label_str, source_label_str in metric_spec_tuple:

@@ -1,0 +1,50 @@
+{
+  "base_spec_sha256_str": "d733e343b86357e7dbbd7a72b625ead7c83a9b65cf30fca4b2195554e2cd632f",
+  "base_freeze_relative_path_str": "scripts/research/specs/defensive_sleeve_certification_v1.freeze.json",
+  "base_freeze_sha256_str": "b3211a875608995b9b2dc48dae0feeb8ff92185a2cae2ed40e1b0b1d30d507ef",
+  "evidence_status_str": "historically_conditioned_after_phase0_and_DR2_diagnostic",
+  "formal_certification_run_completed_bool": false,
+  "frozen_date_str": "2026-08-30",
+  "known_DR2_diagnostic_before_freeze_dict": {
+    "defensive_sleeve": {
+      "annualized_volatility_float": 0.03238,
+      "cagr_float": 0.05013,
+      "market_beta_float": 0.04861,
+      "max_drawdown_float": -0.04072,
+      "minimum_rolling_756d_cagr_float": 0.01902,
+      "sharpe_float": 1.52680,
+      "worst_252d_return_float": -0.02874
+    },
+    "full_product": {
+      "annualized_volatility_float": 0.08011,
+      "cagr_float": 0.12778,
+      "market_beta_float": 0.30166,
+      "max_drawdown_float": -0.07263,
+      "sharpe_float": 1.54158
+    }
+  },
+  "known_DR2_status_str": "diagnostic_only_mismatched_capital_and_native_accounting",
+  "known_phase0_full_product_before_freeze_dict": {
+    "CP1_core5_bil": {
+      "cagr_float": 0.1276,
+      "max_drawdown_float": -0.0747
+    },
+    "CP2_core5_tfi_bil": {
+      "cagr_float": 0.1284,
+      "max_drawdown_float": -0.0737
+    },
+    "DR1_core5_tfi_trinity": {
+      "cagr_float": 0.1312,
+      "max_drawdown_float": -0.0792
+    }
+  },
+  "remaining_final_signature_blocker_list": [
+    "actual_client_margin_rate",
+    "account_specific_DBC_borrow_locate_recall_evidence",
+    "exact_accounting_research_adapter_run",
+    "phase_two_capacity",
+    "forward_shadow"
+  ],
+  "spec_relative_path_str": "scripts/research/specs/defensive_sleeve_certification_v2.yaml",
+  "spec_sha256_str": "bcf66a0e6184ce8f8a74e435d1e9a334125ba7715668a22a9d34d526f502666b"
+}

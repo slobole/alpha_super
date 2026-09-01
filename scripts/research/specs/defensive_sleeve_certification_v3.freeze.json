@@ -1,0 +1,36 @@
+{
+  "base_freeze_relative_path_str": "scripts/research/specs/defensive_sleeve_certification_v2.freeze.json",
+  "base_freeze_sha256_str": "27a6b5167f812ed64b5a8fb86985931eb046957c6dcadd34d9e046a887d26a91",
+  "base_spec_relative_path_str": "scripts/research/specs/defensive_sleeve_certification_v2.yaml",
+  "base_spec_sha256_str": "bcf66a0e6184ce8f8a74e435d1e9a334125ba7715668a22a9d34d526f502666b",
+  "candidate_count_added_int": 3,
+  "evidence_status_str": "preregistered_satellite_candidates_before_formal_run",
+  "formal_certification_run_completed_bool": false,
+  "frozen_date_str": "2026-08-30",
+  "known_inflation_compass_evidence_before_freeze_dict": {
+    "ladder4_05": {
+      "cagr_float": 0.221556,
+      "max_drawdown_float": -0.136730,
+      "sharpe_float": 1.5320
+    },
+    "ladder4_10": {
+      "cagr_float": 0.221119,
+      "max_drawdown_float": -0.139552,
+      "sharpe_float": 1.5325
+    },
+    "prior_allocation_verdict_str": "rejected_for_ladder4_not_a_crash_hedge",
+    "prior_trial_count_included_in_statistical_floor_bool": true
+  },
+  "known_user_requested_weight_before_freeze_float": 0.05,
+  "matched_control_count_added_int": 2,
+  "remaining_final_signature_blocker_list": [
+    "actual_client_margin_rate",
+    "account_specific_DBC_borrow_locate_recall_evidence",
+    "point_in_time_inflation_data_or_bounded_current_vintage_limitation",
+    "exact_accounting_research_adapter_run",
+    "phase_two_capacity",
+    "forward_shadow"
+  ],
+  "spec_relative_path_str": "scripts/research/specs/defensive_sleeve_certification_v3.yaml",
+  "spec_sha256_str": "2a9720feb513778b3e402837d61683e3bbfaf27720c14a35a57d8e4c38bf4afc"
+}
