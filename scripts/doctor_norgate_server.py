@@ -15,6 +15,7 @@ from urllib.error import HTTPError
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
+import numpy as np
 import pandas as pd
 
 repo_root_path = Path(__file__).resolve().parents[1]
@@ -24,9 +25,14 @@ if repo_root_str not in sys.path:
 
 from data.norgate_snapshot_store import (
     NORGATE_SNAPSHOT_ROOT_ENV_STR,
+    PRICE_FILE_NAME_STR,
+    TOTALRETURN_ADJUSTMENT_STR,
     load_valid_snapshot_manifest,
 )
-from scripts.export_norgate_snapshot import export_profile_snapshot
+from scripts.export_norgate_snapshot import (
+    PROFILE_EXPORT_SPEC_DICT,
+    export_profile_snapshot,
+)
 from scripts.serve_norgate_snapshot_api import (
     NORGATE_API_TOKEN_ENV_STR,
     NORGATE_API_TOKEN_HEADER_STR,
@@ -493,19 +499,6 @@ def _validate_snapshot(
                 profile_str,
                 snapshot_date_str=snapshot_date_str,
             )
-        validated_date_str = snapshot_manifest_obj.snapshot_date_ts.date().isoformat()
-        metadata_dict = {
-            "profile_str": profile_str,
-            "snapshot_date_str": validated_date_str,
-            "manifest_hash_str": snapshot_manifest_obj.manifest_hash_str,
-        }
-        _record_pass(
-            check_list,
-            "manifest hash validation",
-            f"profile={profile_str} snapshot_date={validated_date_str}",
-            printer_fn,
-            metadata_dict,
-        )
     except Exception as exc:
         _record_fail(
             check_list,
@@ -516,6 +509,132 @@ def _validate_snapshot(
                 "exception_type_str": type(exc).__name__,
                 "profile_str": profile_str,
                 "snapshot_date_str": snapshot_date_str,
+            },
+        )
+        return
+
+    validated_date_str = snapshot_manifest_obj.snapshot_date_ts.date().isoformat()
+    metadata_dict = {
+        "profile_str": profile_str,
+        "snapshot_date_str": validated_date_str,
+        "manifest_hash_str": snapshot_manifest_obj.manifest_hash_str,
+    }
+    _record_pass(
+        check_list,
+        "manifest hash validation",
+        f"profile={profile_str} snapshot_date={validated_date_str}",
+        printer_fn,
+        metadata_dict,
+    )
+
+    profile_spec_obj = PROFILE_EXPORT_SPEC_DICT.get(profile_str)
+    if (
+        profile_spec_obj is None
+        or "$SPXTR" not in profile_spec_obj.total_return_symbol_tuple
+    ):
+        return
+
+    try:
+        manifest_dict = snapshot_manifest_obj.manifest_dict
+        required_symbol_obj = manifest_dict.get("required_symbols", [])
+        required_symbol_set = (
+            {str(symbol_obj) for symbol_obj in required_symbol_obj}
+            if isinstance(required_symbol_obj, list)
+            else set()
+        )
+        adjustment_mode_map_obj = manifest_dict.get("adjustment_modes", {})
+        declared_adjustment_obj = (
+            adjustment_mode_map_obj.get("$SPXTR")
+            if isinstance(adjustment_mode_map_obj, dict)
+            else None
+        )
+        if isinstance(declared_adjustment_obj, list):
+            declared_adjustment_set = {
+                str(adjustment_obj).upper()
+                for adjustment_obj in declared_adjustment_obj
+            }
+        elif declared_adjustment_obj is None:
+            declared_adjustment_set = set()
+        else:
+            declared_adjustment_set = {str(declared_adjustment_obj).upper()}
+
+        spxtr_adjustment_df = pd.read_parquet(
+            snapshot_manifest_obj.snapshot_dir_path_obj / PRICE_FILE_NAME_STR,
+            columns=["date", "symbol_str", "adjustment_str", "Close"],
+            filters=[("symbol_str", "==", "$SPXTR")],
+        )
+        actual_adjustment_set = {
+            str(adjustment_obj).upper()
+            for adjustment_obj in spxtr_adjustment_df["adjustment_str"].dropna().unique()
+        }
+        spxtr_close_numeric_ser = pd.to_numeric(
+            spxtr_adjustment_df["Close"],
+            errors="coerce",
+        )
+        usable_spxtr_df = spxtr_adjustment_df.loc[
+            spxtr_adjustment_df["adjustment_str"].astype(str).str.upper().eq(
+                TOTALRETURN_ADJUSTMENT_STR
+            )
+            & spxtr_close_numeric_ser.notna()
+            & np.isfinite(spxtr_close_numeric_ser)
+            & spxtr_close_numeric_ser.gt(0.0)
+        ]
+        latest_usable_session_str = (
+            pd.to_datetime(usable_spxtr_df["date"]).max().date().isoformat()
+            if len(usable_spxtr_df.index) > 0
+            else None
+        )
+
+        contract_issue_list: list[str] = []
+        if "$SPXTR" not in required_symbol_set:
+            contract_issue_list.append("manifest required_symbols")
+        if declared_adjustment_set != {TOTALRETURN_ADJUSTMENT_STR}:
+            contract_issue_list.append(
+                "manifest adjustment_modes "
+                f"expected={[TOTALRETURN_ADJUSTMENT_STR]} "
+                f"actual={sorted(declared_adjustment_set)}"
+            )
+        if actual_adjustment_set != {TOTALRETURN_ADJUSTMENT_STR}:
+            contract_issue_list.append(
+                "prices.parquet adjustments "
+                f"expected={[TOTALRETURN_ADJUSTMENT_STR]} "
+                f"actual={sorted(actual_adjustment_set)}"
+            )
+        if latest_usable_session_str != validated_date_str:
+            contract_issue_list.append(
+                "prices.parquet latest usable session "
+                f"expected={validated_date_str} actual={latest_usable_session_str}"
+            )
+        if contract_issue_list:
+            raise DoctorFailure(
+                "$SPXTR/TOTALRETURN snapshot contract failed: "
+                + "; ".join(contract_issue_list)
+            )
+
+        _record_pass(
+            check_list,
+            "$SPXTR TOTALRETURN snapshot contract",
+            f"profile={profile_str} rows={len(spxtr_adjustment_df.index)}",
+            printer_fn,
+            {
+                "profile_str": profile_str,
+                "symbol_str": "$SPXTR",
+                "adjustment_str": TOTALRETURN_ADJUSTMENT_STR,
+                "row_count_int": int(len(spxtr_adjustment_df.index)),
+                "latest_usable_session_str": latest_usable_session_str,
+            },
+        )
+    except Exception as exc:
+        _record_fail(
+            check_list,
+            "$SPXTR TOTALRETURN snapshot contract",
+            str(exc),
+            printer_fn,
+            {
+                "exception_type_str": type(exc).__name__,
+                "profile_str": profile_str,
+                "symbol_str": "$SPXTR",
+                "adjustment_str": TOTALRETURN_ADJUSTMENT_STR,
             },
         )
 

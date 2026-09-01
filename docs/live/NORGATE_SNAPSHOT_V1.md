@@ -347,6 +347,11 @@ uv run python scripts\doctor_norgate_server.py `
   --api-url http://<norgate_tailnet_ip>:8787
 ```
 
+For every profile whose export contract includes `$SPXTR`, the server Doctor
+passes only when the manifest requires `$SPXTR` as `TOTALRETURN` and the
+snapshot's `prices.parquet` contains only that adjustment with a usable close
+through the snapshot session date.
+
 Run the client doctor on a client VPS:
 
 ```powershell
