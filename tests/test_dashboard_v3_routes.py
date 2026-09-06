@@ -434,9 +434,9 @@ def test_healthz_reports_cash_flow_config_error(
     assert "C:/bad/pod_cash_flows.yaml" in response_obj.get_data(as_text=True)
 
 
-def test_index_renders_overview(test_client_obj) -> None:
-    # The root is the Overview — the five-second answer — not a redirect.
-    response_obj = test_client_obj.get("/")
+def test_advanced_vps_renders_overview(test_client_obj) -> None:
+    # The saved legacy overview remains available in Advanced at /vps.
+    response_obj = test_client_obj.get("/vps")
     assert response_obj.status_code == 200
     response_text_str = response_obj.get_data(as_text=True)
     assert "Live book" in response_text_str
@@ -594,7 +594,7 @@ def test_overview_all_clear_is_withheld_when_live_health_is_yellow(
         lambda *_args, **_kwargs: [],
     )
 
-    response_text_str = test_client_obj.get("/").get_data(as_text=True)
+    response_text_str = test_client_obj.get("/vps").get_data(as_text=True)
     assert "Live health needs review" in response_text_str
     assert "Disk: 82% used." in response_text_str
     assert "All clear" not in response_text_str
@@ -827,7 +827,7 @@ def test_live_page_renders_inspector_verdict(test_client_obj, provider_obj) -> N
         "mode_str": "live",
     }
 
-    response_obj = test_client_obj.get("/")
+    response_obj = test_client_obj.get("/vps")
     response_text_str = response_obj.get_data(as_text=True)
 
     assert response_obj.status_code == 200
@@ -1774,14 +1774,14 @@ def test_mode_page_labels_equity_time_basis(test_client_obj) -> None:
     """The allocation pie is a current per-pod snapshot while the combined book
     and risk strip are EOD; each must label its basis so two different book
     totals on one page never read as a discrepancy."""
-    response_text_str = test_client_obj.get("/").get_data(as_text=True)
+    response_text_str = test_client_obj.get("/vps").get_data(as_text=True)
     assert "current book" in response_text_str          # allocation pie basis
     assert "Combined book · strict common EOD" in response_text_str
     assert "Realized risk · EOD" in response_text_str    # risk strip basis
 
 
 def test_mode_page_renders_book_risk_strip(test_client_obj) -> None:
-    response_obj = test_client_obj.get("/")
+    response_obj = test_client_obj.get("/vps")
     response_text_str = response_obj.get_data(as_text=True)
     assert "Current DD" in response_text_str
     assert "Max DD" in response_text_str
@@ -1876,7 +1876,7 @@ def test_build_allocation_pie_dict_empty_returns_no_data() -> None:
 
 
 def test_mode_page_renders_allocation_pie_with_cash(test_client_obj) -> None:
-    response_obj = test_client_obj.get("/")
+    response_obj = test_client_obj.get("/vps")
     response_text_str = response_obj.get_data(as_text=True)
     # Section header + both running live pods appear in the legend.
     assert "allocation" in response_text_str.lower()
@@ -1972,7 +1972,7 @@ def test_combined_equity_chart_fragment_unknown_mode_404s(test_client_obj) -> No
 
 
 def test_live_page_embeds_combined_book_chart(test_client_obj) -> None:
-    response_obj = test_client_obj.get("/")
+    response_obj = test_client_obj.get("/vps")
     response_text_str = response_obj.get_data(as_text=True)
     assert "combined book" in response_text_str.lower()
     # Combined-book equity curve renders as an SVG path inside the mode page itself.
@@ -2063,9 +2063,9 @@ def test_read_only_refresh_keeps_notifications_and_journal_untouched(tmp_path, m
         journal_path_str=str(journal_path_obj),
     )
     client_obj = flask_app_obj.test_client()
-    for route_str in ["/", "/pods/live", "/events", "/fragments/top-bar?mode=live"]:
+    for route_str in ["/vps", "/pods/live", "/events", "/fragments/top-bar?mode=live"]:
         assert client_obj.get(route_str).status_code == 200
-    overview_text_str = client_obj.get("/").get_data(as_text=True)
+    overview_text_str = client_obj.get("/vps").get_data(as_text=True)
     assert "Read-only" in overview_text_str
     detail_text_str = client_obj.get(
         "/fragments/pod-detail/dv2_caspersky_live"
@@ -2389,7 +2389,7 @@ def test_exposure_page_nets_positions_across_pods(test_client_obj) -> None:
 
 
 def test_nav_includes_exposure_link(test_client_obj) -> None:
-    response_text_str = test_client_obj.get("/").get_data(as_text=True)
+    response_text_str = test_client_obj.get("/vps").get_data(as_text=True)
     assert 'href="/exposure"' in response_text_str
     assert "Exposure" in response_text_str
 
@@ -2434,7 +2434,7 @@ def test_build_monthly_return_dict_list_groups_by_month() -> None:
 
 
 def test_mode_page_shows_daily_pct_and_monthly_returns(test_client_obj) -> None:
-    response_text_str = test_client_obj.get("/").get_data(as_text=True)
+    response_text_str = test_client_obj.get("/vps").get_data(as_text=True)
     assert "today" in response_text_str          # latest daily % next to equity
     assert "cumulative return" in response_text_str  # curve headline label
     assert "Daily return" in response_text_str       # the bar strip is now labeled

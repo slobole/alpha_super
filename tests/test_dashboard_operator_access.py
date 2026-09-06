@@ -23,7 +23,7 @@ def test_health_available_without_login_even_with_stale_env(monkeypatch, access_
 
 def test_missing_client_registry_is_not_a_password_error(monkeypatch):
     monkeypatch.delenv("ALPHA_CLIENT_REPORTING_CONFIG_PATH_STR", raising=False)
-    response_obj = create_app(ForbiddenProvider()).test_client().get("/clients")
+    response_obj = create_app(ForbiddenProvider()).test_client().get("/clients", follow_redirects=True)
     assert response_obj.status_code == 200
     assert "WWW-Authenticate" not in response_obj.headers
     assert "Operator access must be configured" not in response_obj.get_data(as_text=True)

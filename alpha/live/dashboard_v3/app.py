@@ -313,7 +313,7 @@ def create_app(
     @flask_app_obj.route("/")
     @flask_app_obj.route("/vps")
     def index_route_fn():
-        if request.path == "/" and (flask_app_obj.config["client_registry_dict"] or flask_app_obj.config["client_reporting_config_path_str"]):
+        if request.path == "/":
             return redirect(url_for("clients.directory_route_fn"))
         # Overview — "is everything OK?": one status sentence, then the live
         # book. Pods have their own page; a green overview means "close the

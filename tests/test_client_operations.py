@@ -74,6 +74,19 @@ def test_pre_mandate_and_future_state_never_expose_holdings():
         assert result_dict["strategy_list"][0]["evidence_dict"] == {}
 
 
+@pytest.mark.parametrize("timestamp_str", [None, "invalid timestamp"])
+def test_local_missing_or_invalid_state_keeps_flow_not_holdings(timestamp_str):
+    registry_dict, _, _, summary_dict = fixture_tuple()
+    summary_dict["pod_row_dict_list"][0]["latest_pod_state_timestamp_str"] = timestamp_str
+    result_dict = build_client_operations_dict(registry_dict["clients"][0], summary_dict, as_of_ts=AS_OF_TS,
+        local_account_list=registry_dict["clients"][0]["accounts"][:1])
+    strategy_dict = result_dict["strategy_list"][0]
+    assert strategy_dict["matched_bool"] is True
+    assert strategy_dict["severity_str"] != "green"
+    assert strategy_dict["evidence_dict"]["position_exposure_dict_list"] == []
+    assert strategy_dict["evidence_dict"]["lifecycle_step_dict_list"]
+
+
 def test_retired_and_future_periods_do_not_enter_current_scope():
     registry_dict, _, _, summary_dict = fixture_tuple()
     registry_dict["clients"][0]["accounts"][0]["effective_to"] = "2026-09-04"

@@ -12,7 +12,7 @@
   <label>To<input name="to" type="date" value="{{ report_dict.requested_to_date_str }}" min="{{ client_dict.mandate_start_date }}" max="{{ period_max_date_str }}" required></label>
   <button class="ops-button" type="submit">Apply period</button>
   {% for key_str, label_str in [('1w', '1 week'), ('mtd', 'MTD'), ('ytd', 'YTD'), ('all', 'Since mandate')] %}
-  <a class="ops-text-link" href="{{ url_for('clients.financial_route_fn', client_id_str=client_dict.client_id, view_str=view_str, window=key_str) }}">{{ label_str }}</a>
+  <a class="ops-text-link" href="{{ url_for('clients.financial_route_fn', client_id_str=client_dict.client_id, view_str=view_str, window=key_str) }}">{{ 'All history' if local_workspace_bool and key_str == 'all' else label_str }}</a>
   {% endfor %}
 </form>
 <div class="ops-context">

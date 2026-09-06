@@ -1,19 +1,20 @@
 # Client operator workspace
 
-This is a private manager/operator console, not an investor portal. The client
-selector chooses explicit ownership and never pools unrelated accounts. Investors
+This is a private manager/operator console, not an investor portal. Normal use is
+**one VPS = one client**; each LIVE Pod is one strategy and one linked IBKR account.
+The local workspace opens directly, without a client selector or new registry. Investors
 receive an intentionally exported PDF only; the application sends nothing to them.
 These instructions describe local setup, not authorization to deploy or trade.
 
 ## Boundaries and flow
 
 ```text
-[Server-owned client registry: account + Pod + effective dates]
+[Existing local releases/config + saved performance bindings]
                    |
        +-----------+------------------+
        |                              |
        v                              v
-[Current LIVE ownership]      [Selected reporting interval]
+[Enabled local LIVE Pods]     [Available reporting history]
 [Saved operational rows]      [Saved raw IBKR Flex XML]
        |                              |
        v                              v
@@ -58,7 +59,32 @@ config.env, database or broker is used; every operational action is disabled.
 Synthetic financial history ends 2026-09-04. Later selected periods correctly
 show incomplete coverage rather than fabricating new history.
 
-For configured saved sources, **after a separate deployment review**:
+For normal VPS use, **after a separate deployment review**, keep the existing command:
+
+```powershell
+uv run --locked python -m alpha.live.dashboard_v3
+```
+
+Open `http://127.0.0.1:8080/`. No new environment setting, account mapping or
+client registry is needed. The normal CLI still loads the existing `config.env`
+and defaults to read-only. Each client's VPS runs its own console; this does not
+connect to other VPSs. `/vps` retains the advanced saved-evidence pages/tools.
+
+The local adapter uses the running provider's release and dashboard-config paths,
+including existing SQLite overrides, and the existing performance DB/query settings.
+Enabled releases determine current operational scope. Saved performance bindings
+retain retired history; disabled foreign-client templates do not hide current Pods.
+Missing/corrupt financial sources never block operational pages or earlier local logs.
+
+Financial dates mean **available performance history**, not mandate inception,
+funding or first fill. An inferred reporting endpoint does not prove a withdrawal.
+Book totals are withheld if any local account's verified reporting window does not
+cover the selected period; independently verified account NAV/TWR remains available.
+Old NAV/TWR-only Flex imports do not prove cash movements or dollar profit. No MTM
+field review or consolidated TWR method is invented to fill those gaps.
+
+An existing explicitly reviewed reporting configuration is still supported as an
+optional override (not a required setup step):
 
 ```powershell
 uv run --locked python -m alpha.live.dashboard_v3 --read-only --client-registry C:\alpha\operator\client_registry.json
@@ -69,9 +95,9 @@ Keep this file outside Git and protect its filesystem permissions; it contains
 account routes and server-local source paths. No URL/query can choose a DB path,
 snapshot path or arbitrary command.
 
-## Registry contract
+## Optional explicit registry contract
 
-The following is a schema illustration, not real client data or a verified broker
+The following applies only to that optional override. It is a schema illustration, not real client data or a verified broker
 field profile. Replace every example identity under an operator-reviewed setup.
 
 ```json
@@ -104,6 +130,12 @@ overlap across clients. Each current Pod/account pair has one LIVE route. USD
 is the only supported reporting currency; no implicit FX conversion is performed.
 
 ## Operational evidence
+
+The default local workspace reads saved state for every enabled LIVE release,
+including newly installed Pods without a first state or financial return. Missing
+state remains unverified, while available DB/lifecycle evidence stays visible.
+Operational date selection is independent of financial coverage. The source and
+ownership options below describe the optional explicit-registry path.
 
 - `operations_source: "unconfigured"` (default): explicit unavailable state,
   without asking the local provider for another client's data.
@@ -363,6 +395,21 @@ and do not inherit the dashboard approval. Even `status` writes metadata; use th
 saved status screen for strictly read-only inspection. No generic shell runs in the UI.
 
 ## Verification and remaining acceptance work
+
+`scripts/review/check_local_workspace_ui.cjs` uses the actual DashboardDataProvider
+with temporary production-format releases, config overrides, ledgers and saved Flex
+imports. It exercises the non-demo launcher without a registry, all seven pages at
+390/768/1440 pixels, visible Pod flow, historical Activity forms and the advanced
+routes. It asserts unchanged fixture bytes/mtimes and zero outgoing connection
+attempts. Its synthetic warnings are not a production health assessment.
+
+Single-VPS wiring live-impact check: order/next-open timing, sizing amount/target
+semantics, reference-price sources, released YAML intent, state/pickle formats,
+SQLite schemas and consumed logging fields are unchanged. No migration or service
+restart runs from a page. Existing path overrides are reused; financial SQLite is
+opened read-only and concurrent binding changes fail closed. Dashboard restart
+behavior and action confirmation gates are unchanged. Missing/corrupt sources and
+unverified history remain explicit rather than causing a setup prerequisite.
 
 `scripts/review/check_client_reporting_ui.cjs` runs a no-login, synthetic
 loopback server, blocks external resources, visits every client tab at 390/768/1440

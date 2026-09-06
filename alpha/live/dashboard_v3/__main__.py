@@ -31,7 +31,7 @@ def main() -> int:
     arg_parser_obj.add_argument("--host", default=DEFAULT_HOST_STR)
     arg_parser_obj.add_argument("--port", type=int, default=DEFAULT_PORT_INT)
     arg_parser_obj.add_argument("--demo", action="store_true", help="Local-only synthetic client reporting preview; no config.env or real provider.")
-    arg_parser_obj.add_argument("--client-registry", help="Local operator-maintained client reporting JSON path.")
+    arg_parser_obj.add_argument("--client-registry", help="Optional reviewed reporting configuration; normal single-VPS startup needs no registry.")
     action_mode_obj = arg_parser_obj.add_mutually_exclusive_group()
     action_mode_obj.add_argument(
         "--read-only",

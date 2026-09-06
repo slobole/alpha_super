@@ -83,14 +83,14 @@ def load_operations_summary_dict(client_dict, provider_obj):
     return {}
 
 
-def build_client_operations_dict(client_dict, summary_dict, *, as_of_ts):
+def build_client_operations_dict(client_dict, summary_dict, *, as_of_ts, local_account_list=None):
     """Pure projection. A fresh page is not a fresh broker/process probe."""
     if not isinstance(summary_dict, dict) or not isinstance(summary_dict.get("pod_row_dict_list", []), list):
         raise ValueError("Invalid saved operations summary.")
     source_timestamp_str = summary_dict.get("as_of_timestamp_str")
     source_ts = parse_timestamp_ts(source_timestamp_str or "")
     source_fresh_bool = source_ts is not None and 0 <= (as_of_ts - source_ts).total_seconds() <= SOURCE_MAX_AGE_SECONDS_INT
-    account_list = active_account_list(client_dict, as_of_ts)
+    account_list = active_account_list(client_dict, as_of_ts) if local_account_list is None else local_account_list
     result_list = []
     for account_dict in account_list:
         matching_list = [row_dict for row_dict in summary_dict.get("pod_row_dict_list", [])
@@ -107,13 +107,19 @@ def build_client_operations_dict(client_dict, summary_dict, *, as_of_ts):
         # holdings left over from an earlier mandate using the same identifiers.
         if verified_bool:
             state_ts = parse_timestamp_ts(evidence_dict.get("latest_pod_state_timestamp_str") or "")
-            if state_ts is None or state_ts > as_of_ts or state_ts.astimezone(ZoneInfo("America/New_York")).date().isoformat() < account_dict["effective_from"]:
+            if (state_ts is not None and state_ts > as_of_ts) or (local_account_list is None and (
+                state_ts is None or state_ts.astimezone(ZoneInfo("America/New_York")).date().isoformat() < account_dict["effective_from"]
+            )):
                 verified_bool, evidence_dict = False, {}
         reason_list, severity_list = [], []
         if not verified_bool:
             reason_list.append("Expected strategy/account is missing or ambiguous on this source. Enabled state cannot be inferred.")
             severity_list.append("gray")
         else:
+            if local_account_list is not None and parse_timestamp_ts(evidence_dict.get("latest_pod_state_timestamp_str") or "") is None:
+                severity_list.append("gray")
+                reason_list.append("No saved Pod state yet.")
+                evidence_dict["position_exposure_dict_list"] = []
             for key_str in ("required_action_dict", "debug_summary_dict", "data_freshness_dict"):
                 if not isinstance(evidence_dict.get(key_str), dict):
                     evidence_dict[key_str] = {}
@@ -144,7 +150,7 @@ def build_client_operations_dict(client_dict, summary_dict, *, as_of_ts):
         status_str = _worst_str(severity_list)
         result_list.append({
             "pod_id_str": account_dict["pod_id"], "account_route_str": account_dict["account_route"],
-            "display_name_str": account_dict["display_name"], "effective_from_str": account_dict["effective_from"],
+            "display_name_str": account_dict["display_name"], "effective_from_str": account_dict.get("effective_from"),
             "severity_str": status_str, "matched_bool": verified_bool,
             "status_label_str": {"red": "Action required", "yellow": "Review / waiting", "gray": "Cannot verify", "green": "No action required"}[status_str],
             "issue_list": redact_diagnostic_value(reason_list), "evidence_dict": redact_diagnostic_value(evidence_dict),

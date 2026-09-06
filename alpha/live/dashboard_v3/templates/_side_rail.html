@@ -1,7 +1,7 @@
 <aside class="client-rail">
-  <a class="client-brand" href="/clients"><span>A</span> ALPHA / OPS</a>
+  <a class="client-brand" href="/"><span>A</span> ALPHA / OPS</a>
   <nav aria-label="Advanced workspace">
-    <a href="/clients">Clients</a>
+    <a href="/">Live workspace</a>
     <div class="client-rail-separator"></div>
     {% for nav_item in [('overview', 'VPS overview', '/vps'), ('performance', 'Account performance', '/performance'), ('pods', 'Strategies', '/pods/live'), ('exposure', 'Exposure', '/exposure'), ('events', 'Activity', '/events'), ('diagnostics', 'Diagnostics', '/diagnostics')] %}
     <a href="{{ nav_item[2] }}" {% if (nav_active_str or '') == nav_item[0] %}aria-current="page"{% endif %}>{{ nav_item[1] }}</a>

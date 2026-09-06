@@ -82,10 +82,11 @@ def build_live_binding_obj_list(
     *,
     releases_root_path_str: str = DEFAULT_RELEASES_ROOT_PATH_STR,
     config_path_str: str = DEFAULT_CONFIG_PATH_STR,
+    release_obj_list: list | None = None,
 ) -> list[PodPerformanceBinding]:
     release_obj_list = [
         release_obj
-        for release_obj in load_release_list(releases_root_path_str)
+        for release_obj in (load_release_list(releases_root_path_str) if release_obj_list is None else release_obj_list)
         if release_obj.mode_str == "live"
     ]
     if not release_obj_list:

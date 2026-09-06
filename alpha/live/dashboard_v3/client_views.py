@@ -24,23 +24,47 @@ from alpha.live.dashboard_v3.client_operations import (
 )
 from alpha.live.dashboard_v3.operator_tools import redact_diagnostic_value, strategy_display_name_str
 from alpha.live.dashboard_v3.client_comparison import saved_comparison_dict
+from alpha.live.dashboard_v3.local_workspace import (
+    build_local_workspace_dict, local_financial_scope_complete_bool, validate_local_bindings_unchanged,
+)
 
 
 client_blueprint_obj = Blueprint("clients", __name__)
 OPERATION_VIEW_SET = {"strategies", "exposure", "activity", "diagnostics"}
 
 
+def local_workspace_bool():
+    return current_app.config.get("client_registry_dict") is None and not current_app.config.get("client_reporting_config_path_str")
+
+
+def _local_workspace_dict():
+    if not hasattr(g, "local_workspace_dict"):
+        g.local_workspace_dict = build_local_workspace_dict(
+            current_app.config["data_provider_obj"], current_app.config["performance_db_path_str"],
+            today_str=datetime.now(UTC).astimezone(ZoneInfo("America/New_York")).date().isoformat(),
+        )
+    return g.local_workspace_dict
+
+
 @client_blueprint_obj.context_processor
 def client_navigation_dict():
     # Carry the user's selection, not dates synthesized by another view's
     # default. Operations can include today; finalized finances still use D+1.
-    return {"client_period_query_dict": {
+    return {"local_workspace_bool": local_workspace_bool(), "client_period_query_dict": {
         key_str: request.args[key_str] for key_str in ("from", "to", "window")
         if key_str in request.args
     }}
 
 
 def _operations_dict(client_dict, as_of_ts):
+    if local_workspace_bool():
+        workspace_dict = _local_workspace_dict()
+        result_dict = build_client_operations_dict(
+            client_dict, workspace_dict["summary_dict"], as_of_ts=datetime.now(UTC),
+            local_account_list=workspace_dict["operations_account_list"],
+        )
+        result_dict["source_error_str"] = workspace_dict["operations_error_str"]
+        return result_dict
     summary_dict, error_str = {}, None
     if active_account_list(client_dict, as_of_ts):
         try:
@@ -66,6 +90,16 @@ def _query_dict():
 
 
 def _activity_dict(client_dict, from_str, to_str):
+    if local_workspace_bool():
+        # The selected log window is not an inferred funding/inception date.
+        # Existing historical bindings plus current exact release identities
+        # bound local events; no cross-account or unscoped event is admitted.
+        current_list = _local_workspace_dict()["operations_account_list"]
+        current_pair_set = {(account_dict["pod_id"], account_dict["account_route"]) for account_dict in current_list}
+        account_list = [account_dict for account_dict in client_dict["accounts"]
+            if (account_dict["pod_id"], account_dict["account_route"]) not in current_pair_set]
+        account_list.extend({**account_dict, "effective_from": from_str} for account_dict in current_list)
+        client_dict = {**client_dict, "accounts": account_list}
     return load_client_activity_dict(client_dict, current_app.config["data_provider_obj"],
         from_date_str=from_str, to_date_str=to_str, as_of_ts=datetime.now(UTC))
 
@@ -76,7 +110,7 @@ def _registry_dict():
         return validate_client_registry_dict(registry_dict)
     config_path_str = current_app.config.get("client_reporting_config_path_str")
     if not config_path_str:
-        raise ClientReportingError("Set up the client registry. Financial ownership is not inferred from enabled strategies.")
+        return {"schema_version": 1, "clients": [_local_workspace_dict()["client_dict"]]}
     return load_client_registry_dict(config_path_str)
 
 
@@ -84,6 +118,10 @@ def local_strategy_name_str(row_dict):
     """Display only: exact current local ownership; never relabel routing keys."""
     fallback_str = strategy_display_name_str(row_dict)
     if row_dict.get("mode_str") != "live":
+        return fallback_str
+    if local_workspace_bool():
+        # Local release names already feed the projection; don't recursively
+        # acquire a summary while the legacy advanced page is rendering one.
         return fallback_str
     if not hasattr(g, "local_strategy_name_dict"):
         name_dict = {}
@@ -108,11 +146,14 @@ def _snapshot_obj(client_dict):
     if snapshot_fn is not None:
         return snapshot_fn(client_dict["client_id"])
     database_path_str = client_dict.get("performance_db_path") or current_app.config["performance_db_path_str"]
-    return load_broker_reporting_snapshot(
+    snapshot_obj = load_broker_reporting_snapshot(
         database_path_str,
         allowed_account_set={account_dict["account_route"] for account_dict in client_dict["accounts"]},
         query_name_str=client_dict["query_name"],
     )
+    if local_workspace_bool():
+        validate_local_bindings_unchanged(_local_workspace_dict(), database_path_str)
+    return snapshot_obj
 
 
 def _period_tuple(client_dict, as_of_ts, *, operational_bool=False):
@@ -130,6 +171,8 @@ def _period_tuple(client_dict, as_of_ts, *, operational_bool=False):
     if window_str not in {"all", "mtd", "ytd", "1w"}:
         raise ClientReportingError("Unknown reporting period.")
     start_str = client_dict["mandate_start_date"]
+    if operational_bool and local_workspace_bool() and not client_dict["accounts"]:
+        start_str = (end_day_obj - timedelta(days=30)).isoformat()
     if window_str == "mtd":
         start_str = max(start_str, market_day_obj.replace(day=1).isoformat())
     elif window_str == "ytd":
@@ -167,6 +210,8 @@ def nav_chart_dict(daily_list):
 
 @client_blueprint_obj.get("/clients")
 def directory_route_fn():
+    if local_workspace_bool():
+        return redirect(url_for("clients.financial_route_fn", client_id_str="local", view_str="overview", **_query_dict()))
     try:
         registry_dict = _registry_dict()
     except ClientReportingError as exception_obj:
@@ -195,8 +240,9 @@ def financial_route_fn(client_id_str, view_str):
         from_str, to_str = _period_tuple(client_dict, as_of_ts, operational_bool=view_str in OPERATION_VIEW_SET)
         if any(date.fromisoformat(value_str).isoformat() != value_str for value_str in (from_str, to_str)):
             raise ClientReportingError("Use YYYY-MM-DD dates.")
-        if from_str > to_str or from_str < client_dict["mandate_start_date"] or to_str > period_max_date_str:
-            raise ClientReportingError("Choose an ordered period within the client's mandate and through today at most.")
+        local_operations_bool = local_workspace_bool() and view_str in OPERATION_VIEW_SET
+        if from_str > to_str or (not local_operations_bool and from_str < client_dict["mandate_start_date"]) or to_str > period_max_date_str:
+            raise ClientReportingError("Choose an ordered period within available reporting history and through today at most." if local_workspace_bool() else "Choose an ordered period within the client's mandate and through today at most.")
         if view_str in OPERATION_VIEW_SET:
             operations_dict = _operations_dict(client_dict, as_of_ts)
             if request.args.get("download"):
@@ -232,6 +278,7 @@ def financial_route_fn(client_id_str, view_str):
             client_dict, _snapshot_obj(client_dict),
             from_date_str=from_str, to_date_str=to_str, as_of_ts=as_of_ts,
             benchmark_snapshot_obj=benchmark_snapshot_obj,
+            scope_complete_bool=local_financial_scope_complete_bool(_local_workspace_dict(), from_str, to_str) if local_workspace_bool() else True,
         )
     except (ClientReportingError, ValueError, OSError):
         # A financial-source failure must not remove current operations or the
@@ -269,7 +316,7 @@ def financial_route_fn(client_id_str, view_str):
                 response_obj.headers["Content-Disposition"] = f'attachment; filename="{filename_str}.pdf"'
             return response_obj
         # Explicit operator evidence, not an investor statement. Generated in
-        # memory after authentication; no SQL/file writes or trading calls.
+        # memory; no SQL/file writes or trading calls.
         response_obj = Response(json.dumps(report_dict, indent=2, allow_nan=False), mimetype="application/json")
         response_obj.headers["Content-Disposition"] = f'attachment; filename="operator-report-{client_id_str}-{report_dict["report_hash_str"][:12]}.json"'
         return response_obj

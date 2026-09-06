@@ -444,6 +444,7 @@ def _client_daily_twr_dict(day_list, *, complete_bool, from_date_str):
 def build_client_report_dict(
     client_dict: dict[str, Any], snapshot_obj: BrokerReportingSnapshot, *,
     from_date_str: str, to_date_str: str, as_of_ts: datetime, benchmark_snapshot_obj=None,
+    scope_complete_bool: bool = True,
 ) -> dict[str, Any]:
     """One selected-period projection for screens and immutable report exports.
 
@@ -563,7 +564,9 @@ def build_client_report_dict(
                 from_date_str=max(from_date_str, account_dict["effective_from"]), to_date_str=min(to_date_str, account_dict.get("effective_to") or to_date_str), session_date_set=set(session_list)),
         })
         issue_list.extend(f"{account_dict['display_name']}: {issue_str}" for issue_str in dict.fromkeys(account_issue_list))
-    all_coverage_bool = bool(strategy_result_list) and all(row_dict["coverage_complete_bool"] for row_dict in strategy_result_list)
+    all_coverage_bool = scope_complete_bool and bool(strategy_result_list) and all(row_dict["coverage_complete_bool"] for row_dict in strategy_result_list)
+    if not scope_complete_bool:
+        issue_list.append("Some local strategies have no verified reporting window yet. Book totals are unavailable; verified account returns remain separate.")
     if any((account_dict["account_route"], date_str) not in row_by_key_dict for date_str in report_date_list for account_dict in account_list if _account_active_bool(account_dict, date_str)):
         all_coverage_bool = False
         issue_list.append("Client NAV aggregation needs all active accounts on each reporting date; independent account returns may still be available.")
@@ -586,7 +589,7 @@ def build_client_report_dict(
     for date_index_int, market_date_str in enumerate(report_date_list):
         active_set = {account_dict["account_route"] for account_dict in account_list if _account_active_bool(account_dict, market_date_str)}
         current_row_dict = {account_str: row_by_key_dict[(account_str, market_date_str)] for account_str in active_set if (account_str, market_date_str) in row_by_key_dict}
-        day_complete_bool = len(current_row_dict) == len(active_set)
+        day_complete_bool = scope_complete_bool and len(current_row_dict) == len(active_set)
         nav_decimal = sum((row_obj.closing_nav_decimal for row_obj in current_row_dict.values()), Decimal(0)) if day_complete_bool else None
         if date_index_int == 0:
             opening_book_decimal = sum((row_obj.opening_nav_decimal for row_obj in current_row_dict.values()), Decimal(0)) if day_complete_bool else None
@@ -685,6 +688,7 @@ def build_client_report_dict(
         "twr_method_id_str": CLIENT_TWR_METHOD_STR if client_twr_configured_bool else "official_account_only",
         **twr_result_dict,
         "coverage_complete_bool": all_coverage_bool, "flows_complete_bool": all_flows_bool,
+        "scope_complete_bool": scope_complete_bool,
         "status_str": "ready" if all_flows_bool and (not client_twr_configured_bool or client_twr_float is not None) else "draft",
         "strategy_list": strategy_result_list, "daily_book_list": daily_book_list,
         "source_list": source_list,
