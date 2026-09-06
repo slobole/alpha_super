@@ -33,7 +33,9 @@ ExecStart=/srv/alpha/.venv/bin/python -m alpha.live.dashboard_v3 \
 # Actions require replacing --read-only with --enable-actions, only under a
 # separately approved operational rollout; removing --read-only alone is inert.
 
-# Discord red-alert webhook (leave unset to silence notifications).
+# Read-only dashboard does not send alerts. Configure the independent watchdog
+# for unattended notifications; do not enable actions just to obtain alerts.
+# Optional actions-enabled dashboard webhook (browser-poll driven):
 # Environment=ALPHA_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 
 Restart=on-failure

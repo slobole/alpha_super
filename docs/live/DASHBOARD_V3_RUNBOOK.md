@@ -33,8 +33,9 @@ reachable at `http://<vps-hostname>:8080/`.
 
 `--read-only` blocks operational POSTs and action previews server-side, prevents
 notification sends/state writes and disables file-generating trade-sheet GETs.
-It does not merely hide buttons. Remove it only under a separately approved
-operational rollout. Client pages themselves never submit trading commands.
+It does not merely hide buttons. Enabling actions requires replacing it with
+`--enable-actions` under a separately approved operational rollout; removing
+`--read-only` alone does not enable actions. Client pages never submit trading commands.
 
 For client ownership, financial reporting and the synthetic preview, read
 [CLIENT_OPERATOR_WORKSPACE.md](CLIENT_OPERATOR_WORKSPACE.md). When a registry is
@@ -97,14 +98,14 @@ Create a Discord webhook in your private server, then set the env var before
 Environment=ALPHA_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 ```
 
-On every pod's green/yellow/gray → red transition, the dashboard fires a single
-message. State is persisted in `alpha/live/logs/notification_state.json`, so
-recovering and re-failing fires a fresh alert. Missing env var = silent.
+The default **read-only dashboard sends no notifications and writes no alert
+state**, even with a webhook configured. Use the independent scheduled watchdog
+below for unattended alerts; do not enable trading actions just to get alerts.
 
-The same notification path also watches the Live OPS Inspector rollup. If the
-Inspector itself turns red because the report is stale or a required proof is
-missing, it sends one red-transition message and then waits for recovery before
-firing again.
+In an explicitly actions-enabled dashboard, top-bar polling can send one alert
+per Pod/Inspector transition to red. It is browser-driven, not a background
+monitor. Its state is `alpha/live/logs/notification_state.json`. Missing webhook
+means silent. Recovery permits a later red transition to alert again.
 
 ## Live OPS Inspector
 
@@ -124,7 +125,7 @@ The scheduled watchdog (`scripts/live_ops_watchdog.py`, see
 `docs/live/LIVE_RUNBOOK.md`) is the supported way to run the Inspector and the
 heartbeat on a timer. It keeps its own notification state file
 (`alpha/live/logs/watchdog_notification_state.json`), so when both the dashboard
-and the watchdog have `ALPHA_DISCORD_WEBHOOK_URL` set, the same red transition
+in actions-enabled mode and the watchdog have `ALPHA_DISCORD_WEBHOOK_URL` set, the same red transition
 can alert twice — harmless, accepted.
 
 ## Live vs Backtest comparison

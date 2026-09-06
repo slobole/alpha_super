@@ -2066,7 +2066,7 @@ def test_read_only_refresh_keeps_notifications_and_journal_untouched(tmp_path, m
     for route_str in ["/", "/pods/live", "/events", "/fragments/top-bar?mode=live"]:
         assert client_obj.get(route_str).status_code == 200
     overview_text_str = client_obj.get("/").get_data(as_text=True)
-    assert "READ-ONLY" in overview_text_str
+    assert "Read-only" in overview_text_str
     detail_text_str = client_obj.get(
         "/fragments/pod-detail/dv2_caspersky_live"
     ).get_data(as_text=True)
@@ -2097,7 +2097,7 @@ def test_diagnostics_views_render_without_executing_actions(tmp_path, view_str):
     )
     assert response_obj.status_code == 200
     assert "Diagnostics" in response_obj.get_data(as_text=True)
-    assert "READ-ONLY" in response_obj.get_data(as_text=True)
+    assert "Read-only" in response_obj.get_data(as_text=True)
     assert "Release owner:" in response_obj.get_data(as_text=True)
     assert "not a selected client mandate" in response_obj.get_data(as_text=True)
     assert not provider_obj.action_job_dict_list

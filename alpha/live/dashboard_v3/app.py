@@ -84,9 +84,8 @@ from alpha.live.dashboard_v3.operator_tools import (
     DIAGNOSTIC_VIEW_LABEL_DICT,
     build_diagnostic_payload_dict,
     build_command_catalog_list,
-    strategy_display_name_str,
 )
-from alpha.live.dashboard_v3.client_views import client_blueprint_obj
+from alpha.live.dashboard_v3.client_views import client_blueprint_obj, local_strategy_name_str
 from alpha.live.ops_report import (
     DEFAULT_STALE_AFTER_SECONDS_INT,
     apply_consumer_staleness_dict,
@@ -188,7 +187,7 @@ def create_app(
 
     for filter_name_str, filter_fn in FILTER_MAP_DICT.items():
         flask_app_obj.jinja_env.filters[filter_name_str] = filter_fn
-    flask_app_obj.jinja_env.filters["strategy_name"] = strategy_display_name_str
+    flask_app_obj.jinja_env.filters["strategy_name"] = local_strategy_name_str
 
     @flask_app_obj.before_request
     def protect_operator_access_fn():
@@ -948,7 +947,10 @@ def create_app(
         if flask_app_obj.config["read_only_bool"]:
             return _json_error_fn(403, "read_only", "Operational command catalog is disabled in this read-only session.")
         provider_obj = flask_app_obj.config["data_provider_obj"]
-        target_obj = provider_obj.get_target_for_pod(pod_id_str)
+        try:
+            target_obj = provider_obj.get_target_for_pod(pod_id_str)
+        except ValueError:
+            return _json_error_fn(409, "target_unavailable", "Pod target is ambiguous. Review the enabled releases.")
         if target_obj is None:
             abort(404)
         return render_template("_command_catalog.html", pod_id_str=pod_id_str,
@@ -1044,7 +1046,10 @@ def create_app(
         # Read-only export of the persisted DecisionPlan + VPlan as xlsx.
         # Plain GET by design: no order/state mutation, so no action token.
         provider_obj = flask_app_obj.config["data_provider_obj"]
-        target_obj = provider_obj.get_target_for_pod(pod_id_str)
+        try:
+            target_obj = provider_obj.get_target_for_pod(pod_id_str)
+        except ValueError:
+            return _json_error_fn(409, "target_unavailable", "Pod target is ambiguous. Review the enabled releases.")
         if target_obj is None:
             return _json_error_fn(404, "unknown_pod", f"Unknown enabled pod_id_str {pod_id_str!r}.")
         try:

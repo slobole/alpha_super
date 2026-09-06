@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from contextlib import closing
 from calendar import monthrange
+from collections import OrderedDict
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -18,6 +20,7 @@ import json
 from pathlib import Path
 import re
 import sqlite3
+from threading import Lock
 from typing import Any
 import xml.etree.ElementTree as ElementTree
 
@@ -36,6 +39,10 @@ NAV_METADATA_FIELD_SET = {
     "accountId", "acctAlias", "accountAlias", "model", "currency", "fromDate",
     "toDate", "startingValue", "endingValue", "twr",
 }
+_NAV_CACHE_LIMIT_INT = 128
+_NAV_CACHE_XML_LIMIT_INT = 256_000
+_nav_cache_dict = OrderedDict()
+_nav_cache_lock = Lock()
 
 
 class ClientReportingError(ValueError):
@@ -240,6 +247,15 @@ def parse_broker_nav_import(
         raise ClientReportingError("DTD/entity declarations are not accepted in saved Flex XML.")
     if hashlib.sha256(raw_xml_str.encode("utf-8")).hexdigest() != source_checksum_str:
         raise ClientReportingError("Saved broker XML checksum mismatch.")
+    # Recheck current bytes and scope on every request. SQL revisions, omitted
+    # rows, sync attempts and report finality are deliberately NOT cached.
+    cache_key_tuple = (tuple(sorted(allowed_account_set)), query_name_str, source_import_id_int, source_checksum_str)
+    with _nav_cache_lock:
+        cached_list = _nav_cache_dict.get(cache_key_tuple)
+        if cached_list is not None:
+            _nav_cache_dict.move_to_end(cache_key_tuple)
+    if cached_list is not None:
+        return deepcopy(cached_list)
     try:
         root_obj = ElementTree.fromstring(raw_xml_str)
     except ElementTree.ParseError as exception_obj:
@@ -279,6 +295,15 @@ def parse_broker_nav_import(
                 account_str, to_str, opening_decimal, closing_decimal, twr_decimal,
                 attribute_dict, source_import_id_int, source_checksum_str,
             ))
+    # Bound retained XML-derived objects; oversized sources remain valid but
+    # are decoded normally. Detach mutable attribute dictionaries at both ends.
+    if len(raw_xml_str) <= _NAV_CACHE_XML_LIMIT_INT:
+        cached_list = deepcopy(row_list)
+        with _nav_cache_lock:
+            _nav_cache_dict[cache_key_tuple] = cached_list
+            _nav_cache_dict.move_to_end(cache_key_tuple)
+            while len(_nav_cache_dict) > _NAV_CACHE_LIMIT_INT:
+                _nav_cache_dict.popitem(last=False)
     return row_list
 
 

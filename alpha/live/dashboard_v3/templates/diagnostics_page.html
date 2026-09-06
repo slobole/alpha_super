@@ -4,7 +4,6 @@
 <section class="ops-page-heading">
   <p class="ops-eyebrow">Operator workspace / {{ mode_label_str }}</p>
   <h1>Diagnostics</h1>
-  <p>Understand the evidence. Operational actions have their own area and require confirmation.</p>
 </section>
 
 <form method="get" class="ops-toolbar">
@@ -50,7 +49,7 @@
   <a class="ops-text-link" href="/journal">Open operator journal</a>
 </section>
 {% else %}
-<div class="ops-note">{{ payload_dict.limitations_str }}</div>
+<details class="client-details mb-4"><summary>About this evidence</summary><p>{{ payload_dict.limitations_str }}</p></details>
 {% if view_str == 'status' %}
 <div class="ops-two-column">
   <section class="ops-panel">

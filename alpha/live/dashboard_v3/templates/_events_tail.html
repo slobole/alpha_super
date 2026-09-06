@@ -10,12 +10,12 @@
                  {% elif ev_sev_str == 'yellow' %}bg-warn-soft border-warn/30 text-warn
                  {% elif ev_sev_str == 'green' %}bg-ok-soft border-ok/30 text-ok
                  {% else %}bg-white border-ink-100 text-ink-700{% endif %}
-                 flex gap-3">
+                 flex flex-wrap gap-x-3 gap-y-1">
         <span class="text-ink-500 shrink-0">
           {{ (event_dict.timestamp_str or event_dict.event_timestamp_str or event_dict.created_timestamp_str) | clock }}
         </span>
-        <strong class="shrink-0">{{ event_dict.event_name_str or 'event' }}</strong>
-        <span class="truncate">{{ event_dict.reason_str or event_dict.message_str or event_dict.error_str or '' }}</span>
+        <strong class="min-w-0 break-all">{{ event_dict.event_name_str or 'event' }}</strong>
+        <span class="min-w-0 break-words">{{ event_dict.reason_str or event_dict.message_str or event_dict.error_str or '' }}</span>
       </li>
     {% endfor %}
   </ol>

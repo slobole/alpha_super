@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 import json
 
 import pytest
+from flask import template_rendered
 
 from alpha.live.dashboard_v3.app import create_app
 from alpha.live.dashboard_v3.client_operations import (
@@ -267,9 +268,17 @@ def test_operations_accessible_on_mandate_day_without_financial_read(monkeypatch
     monkeypatch.setattr("alpha.live.dashboard_v3.client_views.datetime", FixedDatetime)
     app_obj = create_app(provider_obj, read_only_bool=True, operator_access_token_str=TEST_ACCESS_STR, client_registry_dict=registry_dict,
                          client_reporting_snapshot_fn=lambda client_id_str: pytest.fail("Operations must not read financial data"))
-    response_obj = app_obj.test_client().get(f"/clients/demo-owner/{view_str}{query_str}", headers=auth_headers_dict())
+    rendered_period_list = []
+    def capture_period(sender_obj, template, context, **extra_dict):
+        rendered_period_list.append(context["report_dict"])
+    with template_rendered.connected_to(capture_period, app_obj):
+        response_obj = app_obj.test_client().get(f"/clients/demo-owner/{view_str}{query_str}", headers=auth_headers_dict())
     assert response_obj.status_code == 200
-    assert "to=2026-09-05" in response_obj.get_data(as_text=True)
+    html_str = response_obj.get_data(as_text=True)
+    assert rendered_period_list == [{"requested_from_date_str": "2026-09-05", "requested_to_date_str": "2026-09-05"}]
+    # Operational defaults include the mandate day, but rail links must not
+    # turn that default into an explicitly selected financial date.
+    assert f'href="/clients/demo-owner/performance{query_str}"' in html_str
 
 
 def test_diagnostics_preserves_nonblocking_next_cycle_source_warning(monkeypatch):

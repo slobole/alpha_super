@@ -1,7 +1,12 @@
+from datetime import UTC, datetime
+from html import unescape
+import re
+
 import pytest
 
 from alpha.live.dashboard_v3.app import create_app
 from alpha.live.dashboard_v3.client_views import nav_chart_dict
+from alpha.live.dashboard_v3.demo import DemoOperationsProvider, build_demo_fixture_tuple
 from test_client_reporting import client_config_dict, nav_attributes_dict, snapshot_obj
 from test_dashboard_operator_access import TEST_ACCESS_STR, ForbiddenProvider, auth_headers_dict
 
@@ -41,6 +46,15 @@ def test_all_views_export_same_period_result_hash(financial_client_obj):
     report_list = [financial_client_obj.get(f"/clients/sample/{view_str}?from=2026-09-01&to=2026-09-01&download=json", headers=auth_headers_dict()).get_json() for view_str in ("overview", "performance", "report")]
     assert len({report_dict["report_hash_str"] for report_dict in report_list}) == 1
     assert all(report_dict["pnl_float"] == 10 for report_dict in report_list)
+
+
+@pytest.mark.parametrize("view_str", ["overview", "performance", "report"])
+def test_negative_dollars_are_readable_in_web_views(financial_client_obj, view_str):
+    financial_client_obj.application.config["client_reporting_snapshot_fn"] = lambda client_id_str: snapshot_obj([
+        nav_attributes_dict(closing_str="990", twr_str="-1", mtm="-10")])
+    html_str = financial_client_obj.get(f"/clients/sample/{view_str}?from=2026-09-01&to=2026-09-01", headers=auth_headers_dict()).get_data(as_text=True)
+    assert "-$10.00" in html_str
+    assert "$-10.00" not in html_str
 
 
 @pytest.mark.parametrize("view_str", ["overview", "report"])
@@ -174,3 +188,35 @@ def test_financial_failure_preserves_client_context_and_operations(financial_cli
     assert "SECRET SOURCE PATH" not in html_str
     assert "$1,010.00" not in html_str
     assert financial_client_obj.get("/clients/sample/report?download=json", headers=auth_headers_dict()).status_code == 503
+
+
+@pytest.mark.parametrize("as_of_str", ["2026-09-04T16:00:00+00:00", "2026-09-06T16:00:00+00:00"])
+@pytest.mark.parametrize("query_str", ["", "?window=mtd", "?from=2026-09-01&to=2026-09-02"])
+def test_operation_navigation_keeps_selection_not_its_today_default(monkeypatch, as_of_str, query_str):
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.fromisoformat(as_of_str)
+
+    monkeypatch.setattr("alpha.live.dashboard_v3.client_views.datetime", FixedDatetime)
+    registry_dict, snapshot_dict = build_demo_fixture_tuple()
+    app_obj = create_app(DemoOperationsProvider(), read_only_bool=True, demo_mode_bool=True,
+        operator_access_token_str=TEST_ACCESS_STR, client_registry_dict=registry_dict,
+        client_reporting_snapshot_fn=lambda client_id_str: snapshot_dict[client_id_str])
+    client_obj = app_obj.test_client()
+    for view_str in ("strategies", "diagnostics", "exposure", "activity"):
+        html_str = client_obj.get(f"/clients/demo-client/{view_str}{query_str}", headers=auth_headers_dict()).get_data(as_text=True)
+        href_str = unescape(re.search(r'href="([^"]+/performance[^\"]*)"', html_str).group(1))
+        assert href_str == "/clients/demo-client/performance" + query_str
+        separator_str = "&" if query_str else "?"
+        via_dict = client_obj.get(href_str + separator_str + "download=json", headers=auth_headers_dict()).get_json()
+        direct_dict = client_obj.get("/clients/demo-client/performance" + query_str + separator_str + "download=json", headers=auth_headers_dict()).get_json()
+        assert via_dict["report_hash_str"] == direct_dict["report_hash_str"]
+        assert via_dict["pnl_float"] is not None
+
+
+@pytest.mark.parametrize("read_only_bool,label_str", [(True, "Read-only"), (False, "Actions enabled")])
+def test_client_header_reflects_actual_operator_mode(financial_client_obj, read_only_bool, label_str):
+    financial_client_obj.application.config["read_only_bool"] = read_only_bool
+    html_str = financial_client_obj.get("/clients/sample/overview?from=2026-09-01&to=2026-09-01", headers=auth_headers_dict()).get_data(as_text=True)
+    assert f'<span class="client-badge">{label_str}</span>' in html_str

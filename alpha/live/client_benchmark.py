@@ -4,6 +4,7 @@ The selected snapshot is explicit and its exact bytes are hashed before parsing.
 This is retrospective market measurement, never decision-time replay evidence.
 """
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
@@ -13,12 +14,17 @@ import json
 import math
 from pathlib import Path
 import re
+from threading import Lock
 
 from alpha.live.scheduler_utils import get_exchange_calendar_obj
 
 
 BENCHMARK_LABEL_DICT = {"SPY": "SPY total return", "$SPXTR": "S&P 500 total return"}
 BENCHMARK_METHOD_STR = "saved_total_return_close_v1"
+_BENCHMARK_CACHE_LIMIT_INT = 16
+_BENCHMARK_CACHE_ROW_LIMIT_INT = 30_000
+_benchmark_cache_dict = OrderedDict()
+_benchmark_cache_lock = Lock()
 
 
 @dataclass(frozen=True)
@@ -47,7 +53,8 @@ def load_benchmark_snapshot(benchmark_dict):
 
     File bytes (not just their names/mtime) identify the result. A concurrent
     replacement either matches the pinned manifest or fails closed. No process
-    environment, Norgate service, cache, SQLite or production file is changed.
+    environment, Norgate service, SQLite or production file is changed.
+    Only successful decoded series are cached in memory, after byte validation.
     """
     validate_benchmark_config(benchmark_dict)
     if benchmark_dict is None:
@@ -72,6 +79,13 @@ def load_benchmark_snapshot(benchmark_dict):
             price_bytes = price_file.read(512_000_001)
         if len(price_bytes) > 512_000_000 or sha256(price_bytes).hexdigest() != expected_hash_str:
             raise ValueError("Price size/hash mismatch")
+        manifest_hash_str = sha256(manifest_bytes).hexdigest()
+        cache_key_tuple = (symbol_str, manifest_hash_str, expected_hash_str)
+        with _benchmark_cache_lock:
+            cached_obj = _benchmark_cache_dict.get(cache_key_tuple)
+            if cached_obj is not None:
+                _benchmark_cache_dict.move_to_end(cache_key_tuple)
+                return cached_obj
         import pandas as pd
 
         price_df = pd.read_parquet(BytesIO(price_bytes), columns=["date", "symbol_str", "adjustment_str", "Close"],
@@ -91,8 +105,15 @@ def load_benchmark_snapshot(benchmark_dict):
             close_list.append((date_str, close_float if math.isfinite(close_float) and close_float > 0 else None))
         if not close_list:
             raise ValueError("Missing total-return benchmark")
-        return BenchmarkSnapshot(symbol_str, tuple(sorted(close_list)), sha256(manifest_bytes).hexdigest(), expected_hash_str,
+        snapshot_obj = BenchmarkSnapshot(symbol_str, tuple(sorted(close_list)), manifest_hash_str, expected_hash_str,
             snapshot_date_str, manifest_dict["profile"])
+        if len(close_list) <= _BENCHMARK_CACHE_ROW_LIMIT_INT:
+            with _benchmark_cache_lock:
+                _benchmark_cache_dict[cache_key_tuple] = snapshot_obj
+                _benchmark_cache_dict.move_to_end(cache_key_tuple)
+                while len(_benchmark_cache_dict) > _BENCHMARK_CACHE_LIMIT_INT:
+                    _benchmark_cache_dict.popitem(last=False)
+        return snapshot_obj
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
         return BenchmarkSnapshot(symbol_str=symbol_str, unavailable_reason_str="Configured benchmark snapshot could not be validated. No substitute source was used.")
 

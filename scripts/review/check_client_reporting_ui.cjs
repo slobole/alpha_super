@@ -35,10 +35,14 @@ async function main() {
     const contextObj = await browserObj.newContext({ httpCredentials: { username: 'operator', password: accessTokenStr } });
     const pageObj = await contextObj.newPage();
     const pageErrorList = [];
+    const remoteRequestList = [];
     pageObj.on('pageerror', errorObj => pageErrorList.push(errorObj.message));
     // Financial pages must remain usable without any remote CSS/scripts/fonts.
     await contextObj.route('**/*', routeObj => {
-      if (!routeObj.request().url().startsWith(originStr)) return routeObj.abort();
+      if (!routeObj.request().url().startsWith(originStr)) {
+        remoteRequestList.push(routeObj.request().url());
+        return routeObj.abort();
+      }
       return routeObj.continue();
     });
     const outputDirStr = path.resolve('.codex_tmp/client-ui');
@@ -142,8 +146,36 @@ async function main() {
     const downloadObj = await downloadPromiseObj;
     assert.equal(await downloadObj.failure(), null);
     assert(downloadObj.suggestedFilename().endsWith('.pdf'));
+    assert.equal((await contextObj.request.get(originStr + '/static/utilities.css')).status(), 200);
+    const advancedPathList = ['/vps', '/pods/live', ...['status', 'lifecycle', 'events', 'provenance', 'operations'].map(viewStr => '/diagnostics?view=' + viewStr)];
+    for (const widthInt of [1440, 768, 390]) {
+      await pageObj.setViewportSize({ width: widthInt, height: 1000 });
+      for (const pathStr of advancedPathList) {
+        const responseObj = await pageObj.goto(originStr + pathStr);
+        assert.equal(responseObj.status(), 200, pathStr);
+        await pageObj.evaluate(() => document.fonts.ready);
+        assert(await pageObj.locator('.client-badge').getByText('Read-only', { exact: true }).isVisible());
+        assert.equal(await pageObj.getByRole('link', { name: 'VPS overview', exact: true }).getAttribute('href'), '/vps');
+        if (pathStr === '/pods/live') {
+          assert.equal(await pageObj.locator('.advanced-attention li').first().getAttribute('data-severity'), 'yellow');
+          assert.equal(await pageObj.locator('.advanced-attention li').first().evaluate(elementObj => getComputedStyle(elementObj).borderLeftColor), 'rgb(183, 121, 9)');
+          assert.equal(await pageObj.locator('.advanced-attention a').first().innerText(), 'Equity mean reversion');
+          assert.equal(await pageObj.locator('.advanced-stage-strip').count(), 6);
+          assert.equal(await pageObj.locator('.advanced-stage-strip').first().evaluate(elementObj => getComputedStyle(elementObj).display), 'flex');
+          for (const flowObj of await pageObj.locator('.advanced-stage-strip').all()) {
+            assert.equal(await flowObj.locator('span').count(), 7);
+            for (const stageObj of await flowObj.locator('span').all()) assert(await stageObj.isVisible());
+          }
+        }
+        const layoutObj = await pageObj.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth,
+          overflowList: Array.from(document.querySelectorAll('main *')).filter(elementObj => elementObj.getBoundingClientRect().right > innerWidth).map(elementObj => ({ tag: elementObj.tagName, class: elementObj.className, text: elementObj.innerText?.slice(0, 80) })).slice(0, 12) }));
+        await pageObj.screenshot({ path: path.join(outputDirStr, `advanced-${pathStr.replace(/[^a-z]+/g, '-')}-${widthInt}.png`), fullPage: true });
+        assert(layoutObj.scrollWidth <= layoutObj.width, `${pathStr} overflow: ${JSON.stringify(layoutObj)}`);
+      }
+    }
+    assert.deepEqual(remoteRequestList, []);
     assert.deepEqual(pageErrorList, []);
-    console.log(JSON.stringify({ result: 'PASS', viewports: [1440, 768, 390], clientViews: clientViewList.concat('report'), strategies: 4, secondClientIsolation: 'PASS', periodForm: 'PASS', authenticatedPdfDownload: 'PASS', remoteAssetsBlocked: true, outputDir: outputDirStr }));
+    console.log(JSON.stringify({ result: 'PASS', viewports: [1440, 768, 390], clientViews: clientViewList.concat('report'), advancedPaths: advancedPathList, strategies: 4, secondClientIsolation: 'PASS', periodForm: 'PASS', authenticatedPdfDownload: 'PASS', remoteAssetsBlocked: true, outputDir: outputDirStr }));
   } finally {
     if (browserObj) await browserObj.close();
     serverObj.kill(); // Only the child created by this QA invocation.

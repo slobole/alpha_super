@@ -11,7 +11,7 @@ import json
 from zipfile import ZipFile, ZIP_DEFLATED
 from zoneinfo import ZoneInfo
 
-from flask import Blueprint, Response, abort, current_app, redirect, render_template, request, url_for
+from flask import Blueprint, Response, abort, current_app, g, redirect, render_template, request, url_for
 
 from alpha.live.client_reporting import (
     ClientReportingError, build_client_report_dict, load_broker_reporting_snapshot,
@@ -23,12 +23,22 @@ from alpha.live.dashboard_v3.client_operations import (
     active_account_list, build_client_operations_dict, build_reference_exposure_list,
     load_client_activity_dict, load_operations_summary_dict,
 )
-from alpha.live.dashboard_v3.operator_tools import redact_diagnostic_value
+from alpha.live.dashboard_v3.operator_tools import redact_diagnostic_value, strategy_display_name_str
 from alpha.live.dashboard_v3.client_comparison import saved_comparison_dict
 
 
 client_blueprint_obj = Blueprint("clients", __name__)
 OPERATION_VIEW_SET = {"strategies", "exposure", "activity", "diagnostics"}
+
+
+@client_blueprint_obj.context_processor
+def client_navigation_dict():
+    # Carry the user's selection, not dates synthesized by another view's
+    # default. Operations can include today; finalized finances still use D+1.
+    return {"client_period_query_dict": {
+        key_str: request.args[key_str] for key_str in ("from", "to", "window")
+        if key_str in request.args
+    }}
 
 
 def _operations_dict(client_dict, as_of_ts):
@@ -69,6 +79,29 @@ def _registry_dict():
     if not config_path_str:
         raise ClientReportingError("Set up the client registry. Financial ownership is not inferred from enabled strategies.")
     return load_client_registry_dict(config_path_str)
+
+
+def local_strategy_name_str(row_dict):
+    """Display only: exact current local ownership; never relabel routing keys."""
+    fallback_str = strategy_display_name_str(row_dict)
+    if row_dict.get("mode_str") != "live":
+        return fallback_str
+    if not hasattr(g, "local_strategy_name_dict"):
+        name_dict = {}
+        try:
+            registry_dict = _registry_dict()
+            as_of_ts = datetime.now(UTC)
+            for client_dict in registry_dict["clients"]:
+                if client_dict.get("operations_source") != "local":
+                    continue
+                for account_dict in active_account_list(client_dict, as_of_ts):
+                    key_tuple = (account_dict["pod_id"], account_dict["account_route"])
+                    name_dict.setdefault(key_tuple, []).append(account_dict["display_name"])
+        except (OSError, ValueError, TypeError, KeyError):
+            name_dict = {}
+        g.local_strategy_name_dict = name_dict
+    name_list = g.local_strategy_name_dict.get((row_dict.get("pod_id_str"), row_dict.get("account_route_str")), [])
+    return name_list[0] if len(name_list) == 1 else fallback_str
 
 
 def _snapshot_obj(client_dict):

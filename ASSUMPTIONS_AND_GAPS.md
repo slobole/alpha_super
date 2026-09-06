@@ -8,6 +8,18 @@ This file is part of the live-first control system. Recording a gap does not mak
 
 ## Register
 
+### Client reporting boundary
+
+The operator workspace uses saved IBKR account facts, not the operational
+combined-book curve. Finalized financial defaults exclude today (D+1);
+operational pages may include today. Explicit dates remain explicit. Multi-account
+dollar results require the reviewed NAV bridge; exact client TWR is withheld
+without sufficient flow timing evidence. A FINAL report verifies displayed facts,
+not an independently audited fund return. Saved benchmark comparisons are
+retrospective, not execution replay. Decode caches recheck current source bytes
+and do not cache SQL revisions, report finality or unavailable evidence.
+
+
 | ID | Area | Backtest Assumption / Current Behavior | Live Gap / Risk | Impact | Current Mitigation | Desired End State | Status |
 |---|---|---|---|---|---|---|---|
 | G-001 | TAA target sizing | `strategy_taa_df` sizes target shares from stored prior-bar portfolio value and prior closes, then fills at the next open. | Realized rebalance weights can drift from intended weights after overnight gaps, slippage, and rounding. | Medium for the current TAA sleeve; High if a future sleeve requires exact open weights. | Treat TAA weights as intended overnight allocations, not exact open marks. | Configurable rebalance sizing modes plus broker-aware reconciliation and optional reserve cash. | Intentional approximation |

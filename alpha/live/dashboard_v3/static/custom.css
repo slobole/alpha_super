@@ -3,7 +3,7 @@
 
    Hues and type mirror the desk palette in alpha/engine/theme.py so LIVE
    and BENCH read as one product. Semantic classes (ok/warn/bad) are
-   defined in base.html's tailwind.config; nothing here changes what any
+   defined in scripts/review/dashboard_tailwind.config.cjs; nothing here changes what any
    state means — only how it is drawn. */
 
 /* Vendored type: the console must render identically with no network.
@@ -199,9 +199,24 @@ table tbody tr td { border-bottom: 1px solid #eef2f6; }
 .client-workspace .client-source-details { border-top: 1px solid #e2e8f0; padding: 12px 0; }
 .client-workspace .client-report-actions { margin-bottom: 20px; }
 .ops-table .client-number { text-align: right; white-space: nowrap; }
+.advanced-header-content { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px 20px; width: 100%; }
+.advanced-workspace .ops-page-heading { display: block; }
+.advanced-workspace .ops-page-heading .ops-eyebrow { margin-bottom: 6px; }
+.advanced-workspace main { overflow-wrap: anywhere; }
+.advanced-workspace .ops-panel, .advanced-workspace .ops-two-column > * { min-width: 0; }
+.advanced-workspace .ops-toolbar, .advanced-workspace .ops-tabs { flex-wrap: wrap; }
+.advanced-workspace pre { max-width: 100%; overflow: auto; }
+.advanced-workspace .advanced-pod-heading > .flex-1 { min-width: 140px; }
+.advanced-workspace .advanced-stage-strip { order: 2; width: 100%; }
+@media (max-width: 1100px) {
+  .client-workspace .client-pod-flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(108px, 1fr)); gap: 8px; counter-reset: pod-stage; }
+  .client-workspace .client-pod-flow li { margin: 0; padding: 8px 10px; counter-increment: pod-stage; }
+  .client-workspace .client-pod-flow strong::before { content: counter(pod-stage) '. '; color: #64748b; font-weight: 400; }
+  .client-workspace .client-pod-flow li:not(:last-child)::after { content: none; }
+}
 @media (max-width: 1150px) { .client-finance-grid { grid-template-columns: 1fr; } .client-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .client-kpis > div { border-bottom: 1px solid #e2e8f0; } }
 @media (max-width: 700px) { .client-workspace { display: block; } .client-rail { width: auto; min-height: 0; padding: 16px; border-right: 0; border-bottom: 1px solid #e2e8f0; } .client-brand { margin-bottom: 16px; } .client-rail nav { display: flex; flex-wrap: wrap; gap: 4px; } .client-rail-foot, .client-rail-separator, .client-rail .ops-eyebrow { display: none; } .client-content { padding: 20px 16px; } .client-header { padding: 14px 16px; } .client-kpis strong { font-size: 23px; } .client-kpis > div { padding: 16px 12px; } }
-@media (max-width: 1100px) {
+@media (max-width: 900px) {
   .client-workspace .client-event-time { float: none; display: block; padding-left: 16px; }
   .client-table-scroll .ops-table thead { display: none; }
   .client-table-scroll .ops-table, .client-table-scroll tbody, .client-table-scroll tr { display: block; width: 100%; }

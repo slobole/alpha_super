@@ -58,3 +58,22 @@ def test_authenticated_healthz_is_available_without_financial_data():
 def test_weak_operator_credential_rejected():
     with pytest.raises(ValueError, match="24 characters"):
         create_app(ForbiddenProvider(), operator_access_token_str="short")
+
+
+@pytest.mark.parametrize("path_str", ["/fragments/command-catalog/ambiguous", "/api/pods/ambiguous/trade-sheet"])
+@pytest.mark.parametrize("read_only_bool,authenticated_bool,status_int", [(False, True, 409), (True, True, 403), (False, False, 401)])
+def test_ambiguous_target_is_controlled_and_never_reaches_export_or_actions(path_str, read_only_bool, authenticated_bool, status_int):
+    class AmbiguousProvider(ForbiddenProvider):
+        def get_target_for_pod(self, pod_id_str):
+            assert status_int == 409, "Authorization/read-only must reject before lookup"
+            raise ValueError("PRIVATE_PATH duplicate target")
+
+        def export_trade_sheet_path_str(self, target_obj):
+            pytest.fail("Ambiguous target must not export a file")
+
+    app_obj = create_app(AmbiguousProvider(), read_only_bool=read_only_bool, operator_access_token_str=TEST_ACCESS_STR)
+    response_obj = app_obj.test_client().get(path_str, headers=auth_headers_dict() if authenticated_bool else {})
+    assert response_obj.status_code == status_int
+    assert "PRIVATE_PATH" not in response_obj.get_data(as_text=True)
+    if status_int == 409:
+        assert "target_unavailable" in response_obj.get_data(as_text=True)

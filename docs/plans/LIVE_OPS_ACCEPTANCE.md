@@ -54,7 +54,58 @@ intraday flows are possible. The approved policy changes report eligibility, not
 accounting mathematics: verified displayed facts can be issued FINAL while the
 consolidated return remains absent. FINAL is not external audit or certification.
 
-## Current verification
+## Review fixes — 2026-09-06
+
+Local follow-up to `529668a`; accounting methodology is unchanged.
+
+- Navigation carries only explicit dates/presets. Operational defaults can
+  include today without silently selecting today in D+1 financial views.
+- Web/PDF losses use `-$10.00`; PDF renderer-v5 displays a readable UTC issue
+  time while preserving full timestamp/hash provenance. The synthetic sample
+  was regenerated and both pages inspected, plus a losing-account test PDF.
+- Both shells display the actual access mode. Ambiguous enabled targets produce
+  controlled 409 responses before command generation/export; auth/read-only
+  guards remain first. Health-probe and independent-alert instructions clarified.
+- Advanced VPS/diagnostics share the local offline styling. Friendly labels
+  require unique current local LIVE Pod/account ownership; routing IDs remain
+  unchanged. All stages stay visible on mobile. Warning rows are not painted
+  red by the attention group's container; long event names wrap.
+- Small bounded in-memory decode caches retain current-byte SHA256 validation,
+  fresh read-only SQL, source revisions/tombstones and detached Flex attributes.
+  No error/finality/report cache. Benchmark reads/hashes still occur each time;
+  long XML histories can exceed the cache, so speedup is not guaranteed.
+
+Verification: **864 passed in 72.42s**, then **132 passed** after the last
+attention-panel styling change. The offline browser matrix passed all seven
+client tabs plus `/vps`, `/pods/live` and all five advanced diagnostic tabs at
+1440/768/390. It checks local CSS/computed warning color, all stages, client
+isolation and authenticated PDF download. Separate HTMX confirmation, replay,
+cancellation, network-failure recovery and copy-without-execution QA passed.
+Three independent read-only reviewers covered parity/quant, failure modes and
+UI/coverage; no blocker remains. Tier-3 triage and diff whitespace checks pass.
+
+Commit closure recheck (2026-09-06): **859 tests passed in 40.90s** across
+client, dashboard, IBKR performance, investor report and live runner/scheduler/
+reconcile/release suites. The seven-client-tab and seven-advanced-route offline
+browser matrix passed again at 1440/768/390; desktop and mobile Pod flow images
+were inspected. Fresh parity, failure-mode and coverage reviews found only an
+ignored Tailwind MIT license, now explicitly included with the vendored CSS.
+The action-mode runbook now explicitly requires `--enable-actions`.
+
+Live-impact checklist: next-open timing, sizing/amount/target semantics,
+reference prices, schemas/state/config/pickle formats, consumed logging fields
+and released YAML/routes are unchanged. Source reads still fail closed on
+Windows file errors/replacements; no new service/process lifecycle is introduced.
+Quant semantics (PIT, timing, adjustments, costs, sample periods and official
+account return linking) are unchanged. No strategy/performance claim is added.
+This follow-up is packaged as a local review-fix commit only; no push,
+deployment, broker or VPS operation is part of this closure.
+Real-client source validation and separately authorized rollout remain required.
+Consolidated client TWR remains a separate accounting phase. Further cache-I/O
+optimization, read-only trade-sheet export and optional report-layout suggestions
+are not claimed as implemented by this review-fix commit.
+
+## Pre-review verification (`529668a`)
 
 - Main suite: **829 passed in 48.58 seconds** in the final pre-commit run,
   including the optional-comparison exclusion and diff-only fallback case.

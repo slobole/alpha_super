@@ -1,5 +1,5 @@
 {% extends 'client_layout.html' %}
-{% macro money(value_obj) -%}{% if value_obj is none %}—{% else %}${{ '{:,.2f}'.format(value_obj) }}{% endif %}{%- endmacro %}
+{% macro money(value_obj) -%}{% if value_obj is none %}—{% else %}{{ '-' if value_obj < 0 else '' }}${{ '{:,.2f}'.format(value_obj|abs) }}{% endif %}{%- endmacro %}
 {% block title %}{{ client_dict.display_name }} · {{ view_str }}{% endblock %}
 {% block content %}
 <div class="ops-page-heading"><h1>{{ view_str|capitalize }}</h1>{% if client_dict.is_demo %}<span class="client-badge">Demo data</span>{% endif %}</div>

@@ -5,6 +5,7 @@ is an allowlist: no broker account IDs, operator paths, commands, raw logs,
 query identifiers, access tokens or unscoped sync details enter the document.
 """
 
+from datetime import UTC, datetime
 from io import BytesIO
 import json
 from xml.sax.saxutils import escape
@@ -58,7 +59,7 @@ def build_investor_snapshot_dict(report_dict):
         "demonstration" if report_dict["is_demo_bool"] else "final" if final_evidence_bool else "draft"
     )
     snapshot_dict = json.loads(json.dumps(snapshot_dict, allow_nan=False))
-    snapshot_dict["renderer_version_str"] = "investor_pdf_v4"
+    snapshot_dict["renderer_version_str"] = "investor_pdf_v5"
     # Issued-document identity includes the printed issuance time. The separate
     # accounting report_hash stays stable across refreshes of unchanged facts.
     # This is a hash of the issued snapshot, not a hash of PDF bytes.
@@ -67,7 +68,7 @@ def build_investor_snapshot_dict(report_dict):
 
 
 def _money_str(value_obj):
-    return "Not available" if value_obj is None else f"${value_obj:,.2f}"
+    return "Not available" if value_obj is None else f"{'-' if value_obj < 0 else ''}${abs(value_obj):,.2f}"
 
 
 def _return_str(value_obj):
@@ -180,7 +181,7 @@ def render_investor_pdf_bytes(snapshot_dict):
         Spacer(1, 12),
         paragraph_obj("Example data only - not actual IBKR results." if snapshot_dict["is_demo_bool"]
                       else "Account data is taken from IBKR statements.", muted_style),
-        paragraph_obj("Prepared: " + snapshot_dict["generated_at_str"], muted_style),
+        paragraph_obj("Prepared: " + datetime.fromisoformat(snapshot_dict["generated_at_str"]).astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC"), muted_style),
         paragraph_obj("Report ID: " + snapshot_dict["document_hash_str"], muted_style),
     ]))
 
