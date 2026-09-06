@@ -60,6 +60,10 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     "strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy": MaturityTier.WIRED,
     "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy": MaturityTier.WIRED,
     # ── pm-ready: may join a book, not connected to live ────────────────────
+    # Frozen hedge rules. Capital, total-return benchmark and deterministic
+    # reruns passed 2026-09-05; eligibility is plumbing, not allocation approval.
+    "strategies.tail_hedge.strategy_crisis_trend_core": MaturityTier.PM_READY,
+    "strategies.tail_hedge.strategy_vixm_backwardation": MaturityTier.PM_READY,
     # The 2x fallback pair. Promoted because their fallback ETFs date to
     # 2006-06 rather than 2010, so a book built on them carries the 2008
     # crisis that no 3x variant can reach. Both passed the readiness checks:

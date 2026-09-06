@@ -1346,7 +1346,7 @@ def test_pages_render(recording_client, path_str):
     assert client.get(path_str).status_code == 200
 
 
-def test_mockup_shell_uses_fixed_research_sidebar_and_excludes_live(recording_client):
+def test_mockup_shell_has_only_bench_and_knowledge_surfaces(recording_client):
     client, _job_manager, _token_str = recording_client
     html_str = client.get("/").get_data(as_text=True)
 
@@ -1358,16 +1358,58 @@ def test_mockup_shell_uses_fixed_research_sidebar_and_excludes_live(recording_cl
     # a <span>. They were passing on unrelated buttons elsewhere on the page.
     assert "<span>Studies</span>" in html_str
     assert "<span>Compare</span>" in html_str
-    # The surface switch shows LIVE so the operator can see which of the two
-    # surfaces they are on, but Bench must never offer a route into the live
-    # book: the segment is an inert, aria-disabled <span>, never a link.
-    assert 'aria-disabled="true"' in html_str
-    live_index_int = html_str.index(">LIVE<")
-    live_element_str = html_str[html_str.rindex("<", 0, live_index_int) : live_index_int]
-    assert live_element_str.startswith("<span")
-    assert "href" not in live_element_str
+    assert ">BENCH</a>" in html_str
+    assert ">KNOWLEDGE BASE</a>" in html_str
+    assert 'href="/knowledge/"' in html_str
+    assert ">LIVE<" not in html_str
     assert "/live" not in html_str
     assert re.search(r"\d{2}:\d{2}:\d{2} (EST|EDT)", html_str)
+
+
+def test_knowledge_routes_serve_only_the_built_site(tmp_path):
+    knowledge_site_root_path_obj = tmp_path / "knowledge-site"
+    nested_dir_path_obj = knowledge_site_root_path_obj / "operations" / "guide"
+    asset_dir_path_obj = knowledge_site_root_path_obj / "assets"
+    nested_dir_path_obj.mkdir(parents=True)
+    asset_dir_path_obj.mkdir()
+    (knowledge_site_root_path_obj / "index.html").write_text(
+        "<h1>Knowledge home</h1>", encoding="utf-8"
+    )
+    (nested_dir_path_obj / "index.html").write_text(
+        "<h1>Guide</h1>", encoding="utf-8"
+    )
+    (asset_dir_path_obj / "sample.txt").write_text("asset", encoding="utf-8")
+
+    app = create_app(
+        job_manager_obj=RecordingJobManager(),
+        knowledge_site_root_path_obj=knowledge_site_root_path_obj,
+    )
+    client = app.test_client()
+
+    assert (
+        client.get("/knowledge/").get_data(as_text=True)
+        == "<h1>Knowledge home</h1>"
+    )
+    assert (
+        client.get("/knowledge/operations/guide/").get_data(as_text=True)
+        == "<h1>Guide</h1>"
+    )
+    assert client.get("/knowledge/assets/sample.txt").get_data(as_text=True) == "asset"
+    assert client.get("/knowledge/missing/").status_code == 404
+    assert client.get("/knowledge/%2e%2e/pyproject.toml").status_code == 404
+
+
+def test_knowledge_route_fails_loud_without_a_current_build():
+    app = create_app(
+        job_manager_obj=RecordingJobManager(),
+        knowledge_build_error_str="strict build failed",
+    )
+    response_obj = app.test_client().get("/knowledge/")
+
+    assert response_obj.status_code == 503
+    html_str = response_obj.get_data(as_text=True)
+    assert "Knowledge Base build failed: strict build failed" in html_str
+    assert 'aria-current="page">KNOWLEDGE BASE</a>' in html_str
 
 
 @pytest.mark.parametrize("line_end_str", ["\n", "\r\n"])

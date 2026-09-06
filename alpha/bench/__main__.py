@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 
 from alpha.bench.app import create_app
+from alpha.bench.knowledge import build_knowledge_site
 
 
 DEFAULT_HOST_STR = "127.0.0.1"
@@ -46,8 +47,23 @@ def main() -> int:
         except Exception as exception_obj:  # noqa: BLE001 — never block startup on env loading
             print(f"[bench] config.env not loaded: {exception_obj}")
 
-    flask_app_obj = create_app()
+    knowledge_site_root_path_obj = None
+    knowledge_build_error_str = None
+    try:
+        knowledge_site_root_path_obj = build_knowledge_site()
+        print(f"[bench] knowledge base built at {knowledge_site_root_path_obj}")
+    except Exception as exception_obj:  # noqa: BLE001 — BENCH remains available
+        knowledge_build_error_str = str(exception_obj)
+        print(f"[bench] knowledge base unavailable: {knowledge_build_error_str}")
+
+    flask_app_obj = create_app(
+        knowledge_site_root_path_obj=knowledge_site_root_path_obj,
+        knowledge_build_error_str=knowledge_build_error_str,
+    )
     print(f"[bench] http://{parsed_args_obj.host}:{parsed_args_obj.port}")
+    print(
+        f"[bench] knowledge http://{parsed_args_obj.host}:{parsed_args_obj.port}/knowledge/"
+    )
     flask_app_obj.run(
         host=parsed_args_obj.host,
         port=parsed_args_obj.port,

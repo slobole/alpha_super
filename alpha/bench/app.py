@@ -1,8 +1,9 @@
 """Flask application factory for Bench.
 
-Routes fall into three groups:
+Routes fall into four groups:
 
-  * pages — the catalog, a per-strategy detail page, portfolios, and jobs,
+  * pages — the catalog, a per-strategy detail page, portfolios, jobs, and the
+    read-only Knowledge Base,
   * the run API — POST endpoints that validate the request against the catalog
     and then hand a subprocess command to the :class:`JobManager`,
   * artifact serving — streams report.html (and its siblings) straight out of
@@ -39,6 +40,7 @@ from alpha.bench import (
     __version__,
     artifact_view,
     catalog,
+    knowledge,
     portfolio_builder,
     portfolio_compare,
     portfolio_overview,
@@ -136,9 +138,16 @@ BENCH_DENSITY_LABEL_DICT = {
 }
 
 
-def create_app(job_manager_obj: JobManager | None = None) -> Flask:
+def create_app(
+    job_manager_obj: JobManager | None = None,
+    *,
+    knowledge_site_root_path_obj: Path | None = None,
+    knowledge_build_error_str: str | None = None,
+) -> Flask:
     flask_app_obj = Flask(__name__)
     flask_app_obj.config["job_manager_obj"] = job_manager_obj or JobManager()
+    flask_app_obj.config["knowledge_site_root_path_obj"] = knowledge_site_root_path_obj
+    flask_app_obj.config["knowledge_build_error_str"] = knowledge_build_error_str
     # Per-process token gating every state-changing POST. Bench binds to
     # localhost, but localhost is still reachable by cross-site form POSTs from
     # any page open in the browser, so we require a token only same-origin pages
@@ -204,6 +213,9 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             ),
             "active_density_str": _active_density_str(),
             "density_label_dict": BENCH_DENSITY_LABEL_DICT,
+            "active_surface_str": (
+                "knowledge" if request.path.startswith("/knowledge") else "bench"
+            ),
         }
 
     def _csrf_failure_response_fn():
@@ -670,6 +682,7 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
     @flask_app_obj.errorhandler(403)
     @flask_app_obj.errorhandler(404)
     @flask_app_obj.errorhandler(409)
+    @flask_app_obj.errorhandler(503)
     def styled_error_fn(exception_obj):
         status_code_int = getattr(exception_obj, "code", 500) or 500
         return (
@@ -683,6 +696,34 @@ def create_app(job_manager_obj: JobManager | None = None) -> Flask:
             ),
             status_code_int,
         )
+
+    @flask_app_obj.route("/knowledge/", defaults={"rel_path_str": ""})
+    @flask_app_obj.route("/knowledge/<path:rel_path_str>")
+    def knowledge_page_fn(rel_path_str: str):
+        """Serve only files produced by the current BENCH startup build."""
+
+        knowledge_site_root_path_obj = flask_app_obj.config[
+            "knowledge_site_root_path_obj"
+        ]
+        if knowledge_site_root_path_obj is None:
+            knowledge_build_error_str = flask_app_obj.config[
+                "knowledge_build_error_str"
+            ]
+            detail_str = (
+                "Knowledge Base build is unavailable. "
+                "Restart BENCH and inspect its startup output."
+            )
+            if knowledge_build_error_str:
+                detail_str = f"Knowledge Base build failed: {knowledge_build_error_str}"
+            abort(503, description=detail_str)
+
+        knowledge_file_path_obj = knowledge.resolve_knowledge_file(
+            knowledge_site_root_path_obj,
+            rel_path_str,
+        )
+        if knowledge_file_path_obj is None:
+            abort(404, description="Knowledge Base page or asset not found.")
+        return send_file(knowledge_file_path_obj)
 
     @flask_app_obj.route("/fonts/<file_name_str>")
     def font_fn(file_name_str: str) -> Response:

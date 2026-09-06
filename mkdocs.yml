@@ -1,5 +1,5 @@
-site_name: Alpha Super Knowledge
-site_description: Human-readable and AI-readable knowledge for Alpha Super
+site_name: Alpha Super Knowledge Base
+site_description: Practical documentation for Alpha Super
 site_dir: .codex_tmp/knowledge-site
 
 theme:
@@ -32,6 +32,7 @@ theme:
     - content.code.copy
 
 nav:
+  - BENCH: /
   - Home: index.md
   - Understand:
       - Start Here: start-here/index.md
@@ -52,6 +53,7 @@ nav:
   - Operations:
       - Overview: operations/index.md
       - New Client Onboarding: operations/client-onboarding.md
+      - Open an IBKR Individual Account: operations/ibkr-individual-account-setup.md
       - VPS Runtime Checklist: operations/vps-runtime-checklist.md
       - Set Up IBKR Flex Performance: operations/ibkr-flex-performance-setup.md
   - Research:
@@ -142,4 +144,4 @@ extra_javascript:
   - https://cdn.jsdelivr.net/npm/mermaid@10.9.5/dist/mermaid.min.js
   - javascripts/mermaid.js
 
-copyright: Local knowledge portal · Canonical sources remain in the repository
+copyright: Alpha Super · Local documentation

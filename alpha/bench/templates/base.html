@@ -48,15 +48,15 @@
 
     <div class="bench-main">
       <header class="system-topbar">
-        {# Surface switch, as in the mockups. LIVE is deliberately an inert
-           <span> with aria-disabled, never a link: Bench is the research
-           console and must not offer a route into the live book. It is shown
-           rather than hidden so the operator can see which of the two surfaces
-           they are on — an unlabelled console is how you read a backtest as a
-           live position. #}
+        {# The local workspace has exactly two surfaces: BENCH and the read-only
+           Knowledge Base. LIVE OPS is intentionally absent. #}
         <div class="surface-switch" role="group" aria-label="Surface">
-          <span class="surface-option" aria-disabled="true" title="Live operations — not reachable from the research console">LIVE</span>
-          <span class="surface-option active" aria-current="page">BENCH</span>
+          <a class="surface-option {{ 'active' if active_surface_str == 'bench' }}"
+             href="{{ url_for('index_page_fn') }}"
+             {% if active_surface_str == 'bench' %}aria-current="page"{% endif %}>BENCH</a>
+          <a class="surface-option {{ 'active' if active_surface_str == 'knowledge' }}"
+             href="{{ url_for('knowledge_page_fn') }}"
+             {% if active_surface_str == 'knowledge' %}aria-current="page"{% endif %}>KNOWLEDGE BASE</a>
         </div>
 
         <div class="system-topbar-meta">

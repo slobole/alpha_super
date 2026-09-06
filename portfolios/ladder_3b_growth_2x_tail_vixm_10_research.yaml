@@ -1,0 +1,26 @@
+# Saved-artifact screen candidate; not fresh-validated or approved for live.
+# VIXM exists only from 2011; this variant cannot claim a 2008 hedge test.
+name_str: ladder_3b_growth_2x_tail_vixm_10_research
+capital_base_float: 150000.0
+backtest_start_date_str: "2004-01-01"
+end_date_str: "2026-08-31"
+allocation_policy_str: fixed
+max_workers_int: 3
+rebalance: null
+save_pod_artifacts_bool: true
+pods:
+  - pod_id_str: pod_taa_2x
+    strategy_import_str: strategies.taa_df.strategy_taa_df_1n_fallback_qld_vix_cash
+    weight_float: 0.27
+  - pod_id_str: pod_ndx_mo
+    strategy_import_str: strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy
+    weight_float: 0.27
+  - pod_id_str: pod_dv2
+    strategy_import_str: strategies.dv2.strategy_mr_dv2:DVO2Strategy
+    weight_float: 0.18
+  - pod_id_str: pod_hpi
+    strategy_import_str: strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote
+    weight_float: 0.18
+  - pod_id_str: pod_tail_vixm
+    strategy_import_str: strategies.tail_hedge.strategy_vixm_backwardation
+    weight_float: 0.10

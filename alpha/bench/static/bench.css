@@ -2282,9 +2282,7 @@ kbd {
 }
 .system-topbar-meta,
 .research-menu > summary { font-size: .7rem; }
-/* Surface switch: two segments in one bordered group, the way the mockups
-   show it. The inactive segment is inert, so it is styled as disabled text
-   rather than as an available tab. */
+/* Surface switch: the unified local workspace exposes BENCH and Knowledge. */
 .surface-switch {
   display: inline-flex;
   border: 1px solid var(--color-border);
@@ -2298,8 +2296,10 @@ kbd {
   letter-spacing: .1em;
   color: var(--color-muted);
   background: var(--color-neutral);
+  text-decoration: none;
 }
-.surface-option[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+.surface-option + .surface-option { border-left: 1px solid var(--color-border); }
+.surface-option:hover { color: var(--color-ink); }
 .surface-option.active {
   background: var(--color-page);
   color: var(--color-accent);

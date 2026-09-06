@@ -98,6 +98,7 @@ The Norgate Doctor runs in Step 9, after the Pod manifests exist.
 
 ### 6. IBKR and TWS
 
+- If the client needs a new individual account, use [Open an IBKR Individual Account](ibkr-individual-account-setup.md) as the visual application reference.
 - Finish the client accounts, POA or linked-account access, trading permissions, and market data in IBKR.
 - Install the approved standalone/offline TWS version.
 - Set the TWS time zone to **America/New_York**.

@@ -39,6 +39,7 @@ This is a routing map, not a claim that every document has been audited. “Publ
 | `docs/live/release_templates/README.md` | Reference candidate | Reference | Keep beside templates; audit links |
 | Owner new-client Word notes | Unverified source notes | Operations / New Client Onboarding | Master checklist published; private credentials and chat links excluded |
 | `docs/operations/client-onboarding.md` | Draft master guide | Operations | Publish detailed procedures one at a time; keep LIVE activation gated |
+| `docs/operations/ibkr-individual-account-setup.md` | Source-based guide | Operations | Published as a dated visual reference; sample values are not applicant instructions |
 | `docs/operations/ibkr-flex-performance-setup.md` | Audited guide | Operations | Published; re-audit when the Flex CLI, task script, or IBKR portal contract changes |
 | `docs/operations/vps-runtime-checklist.md` | Draft guide | Operations | Generic runtime checklist; keep Draft until the full check passes on each production VPS |
 

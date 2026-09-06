@@ -8,59 +8,24 @@ risk_scope: none
 
 # Start Here
 
-!!! abstract "In one sentence"
-    Use the portal for reading; humans, Git, and AI maintain the same Markdown files underneath it.
+Use the Knowledge Base when you need an answer, a rule, or a reviewed procedure. The Markdown files in the repository remain the source.
 
-Double-click `OPEN_KNOWLEDGE.cmd` in the repository root to open the local portal.
+Run `OPEN_KNOWLEDGE.cmd` to open it inside BENCH.
 
-## Choose what you need
+## Pick a route
 
-<div class="grid cards" markdown>
+- [How the system works](../system/system-overview.md)
+- [Exact strategy rules](../strategies/index.md)
+- [Operating procedures](../operations/index.md)
+- [Research and evidence](../research/index.md)
+- [Sources](../reference/index.md)
 
--   :material-family-tree: **How does it work?**
+## What to trust
 
-    [:octicons-arrow-right-24: Read the system overview](../system/system-overview.md)
+- **Canonical** — the governing specification.
+- **Guide** — a readable explanation based on named sources.
+- **Historical** — a dated record for context.
 
--   :material-chart-box-outline: **What are the exact strategy rules?**
+A polished page is not proof that a strategy is ready for deployment. Strategy maturity and LIVE status are separate decisions.
 
-    [:octicons-arrow-right-24: Browse strategies](../strategies/index.md)
-
--   :material-tools: **How do I perform a safe task?**
-
-    [:octicons-arrow-right-24: Open operations](../operations/index.md)
-
--   :material-flask-outline: **What does the evidence show?**
-
-    [:octicons-arrow-right-24: Open research](../research/index.md)
-
--   :material-bookshelf: **Where is the governing source?**
-
-    [:octicons-arrow-right-24: Open the library](../reference/index.md)
-
--   :material-file-document-edit-outline: **How do I add or update a page?**
-
-    [:octicons-arrow-right-24: Open maintenance](../governance/index.md)
-
-</div>
-
-## Three content states
-
-| State | Meaning | How to use it |
-|---|---|---|
-| **Published** | Reviewed for its stated scope and visible in the main portal | Follow its authority and risk labels |
-| **Source library** | Important repository material that has not yet been republished | Read as source material; verify before operational use |
-| **Historical** | Dated reviews, presentations, or superseded artifacts | Use for context, never as automatic current truth |
-
-## How trust works
-
-| Authority | Meaning |
-|---|---|
-| `canonical` | The governing specification for that subject |
-| `guide` | A readable explanation derived from named sources |
-| `historical` | A dated record of what was known or decided then |
-
-Document authority, strategy maturity, and LIVE status are separate. A polished page does not make a strategy deployment-ready.
-
-## Language
-
-English is the default. Hebrew versions are created when requested. Identifiers, commands, formulas, and timing notation remain unchanged.
+Need to update a page? Use the [documentation standard](../governance/documentation-standard.md).

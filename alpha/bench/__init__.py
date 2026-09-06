@@ -7,7 +7,9 @@ CLIs. It does not implement any quant logic of its own. It only:
     are *wired* (live / supported) via ``SUPPORTED_STRATEGY_IMPORT_TUPLE``,
   * surfaces the most recent analyzer runs from the ``results/`` tree,
   * launches the existing ``run_strategy_analysis.py`` / ``run_portfolio.py``
-    scripts as tracked background jobs when you click a button.
+    scripts as tracked background jobs when you click a button,
+  * builds and serves the canonical read-only Knowledge Base under
+    ``/knowledge/``.
 
 Because every heavy operation is delegated to a script that already exists,
 the backend stays light: discovery + a job runner + a results reader.

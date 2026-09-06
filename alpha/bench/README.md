@@ -5,11 +5,17 @@ otherwise drive from the command line. It is **read-mostly and back-end light**:
 every heavy operation is delegated to a script that already exists, so Bench only
 discovers, reads, and launches.
 
+The same local process also builds and serves the canonical Markdown Knowledge
+Base. There are exactly two workspace surfaces: BENCH and KNOWLEDGE BASE. LIVE
+OPS is not linked or served here.
+
 ```bash
 uv run python -m alpha.bench            # http://127.0.0.1:8765
 uv run python -m alpha.bench --port 9000
 uv run python -m alpha.bench --skip-env-file   # don't auto-load config.env
 ```
+
+Knowledge Base: `http://127.0.0.1:8765/knowledge/`
 
 It binds to `127.0.0.1` only — a single-operator console, not a service.
 
@@ -62,6 +68,9 @@ It binds to `127.0.0.1` only — a single-operator console, not a service.
   real work running with nothing left to reach it. A cancelled job is recorded
   as `cancelled`, never `failed`: the kill's exit code is not a verdict on the
   strategy, and whatever artifacts the run had already written stay on disk.
+- **Knowledge Base** — the strict MkDocs build from `docs/` and `mkdocs.yml`,
+  served read-only under `/knowledge/` by the same Flask process. A failed build
+  is shown as unavailable and never falls back silently to an older page set.
 
 ### Running with parameters
 
@@ -106,6 +115,7 @@ to `results/_bench/jobs/<job_id>.log`.
 | `runs.py` | read the `results/` tree; link runs to strategies via metadata |
 | `jobs.py` | the background job runner + status persistence |
 | `app.py` | Flask routes (pages, run API, artifact serving) |
+| `knowledge.py` | strict MkDocs build and safe built-file resolution |
 | `__main__.py` | `python -m alpha.bench` entry point |
 
 Tests live in `tests/test_bench.py`, and the palette contract below is guarded

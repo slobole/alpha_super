@@ -21,6 +21,14 @@ risk_scope: live
 
     [:octicons-arrow-right-24: Open the onboarding map](client-onboarding.md)
 
+-   :material-account-plus-outline: **Open an IBKR Individual Account**
+
+    Use the two-page visual reference for the individual-account application. All values shown are examples and must be replaced with the applicant's verified information.
+
+    **Status:** Source reference published; current IBKR screens and official documents take precedence.
+
+    [:octicons-arrow-right-24: Open the account guide](ibkr-individual-account-setup.md)
+
 -   :material-bank-transfer: **Set Up IBKR Flex Performance**
 
     Create the client Query, initialize the read-only Performance Shadow, verify account mapping, and schedule the daily refresh.

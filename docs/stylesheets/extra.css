@@ -1,33 +1,89 @@
 :root {
-  --alpha-accent: #0f766e;
-  --alpha-border: #d8dee7;
-  --alpha-surface: #f7f9fb;
+  --alpha-accent: #2457d6;
+  --alpha-border: #e3e5e8;
+  --alpha-surface: #f5f5f3;
+  --alpha-ink: #202328;
+  --md-text-font: "Aptos", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --md-code-font: "Cascadia Mono", Consolas, monospace;
+}
+
+[data-md-color-scheme="default"] {
+  --md-default-bg-color: #fbfbfa;
+  --md-default-fg-color: var(--alpha-ink);
+  --md-primary-fg-color: #fbfbfa;
+  --md-primary-bg-color: var(--alpha-ink);
+  --md-accent-fg-color: var(--alpha-accent);
 }
 
 [data-md-color-scheme="slate"] {
-  --alpha-accent: #5eead4;
-  --alpha-border: #334155;
-  --alpha-surface: #172033;
+  --alpha-accent: #8aafff;
+  --alpha-border: #343840;
+  --alpha-surface: #202329;
+  --alpha-ink: #eceef2;
+  --md-default-bg-color: #17191d;
+  --md-default-fg-color: var(--alpha-ink);
+  --md-primary-fg-color: #17191d;
+  --md-primary-bg-color: var(--alpha-ink);
+  --md-accent-fg-color: var(--alpha-accent);
 }
 
 .md-grid {
-  max-width: 90rem;
+  max-width: 82rem;
+}
+
+.md-header {
+  border-bottom: 1px solid var(--alpha-border);
+  box-shadow: none;
+}
+
+.md-header__title {
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.md-sidebar {
+  font-size: 0.74rem;
+}
+
+.md-nav__link {
+  line-height: 1.35;
 }
 
 .md-typeset {
-  font-family: "Segoe UI", Arial, sans-serif;
-  font-size: 0.82rem;
-  line-height: 1.75;
+  color: var(--alpha-ink);
+  font-size: 0.86rem;
+  line-height: 1.68;
+}
+
+.md-typeset p,
+.md-typeset ul,
+.md-typeset ol {
+  margin-block: 0 0.9rem;
 }
 
 .md-typeset h1 {
-  font-weight: 720;
-  letter-spacing: -0.025em;
+  margin: 0 0 1.5rem;
+  font-size: 2rem;
+  font-weight: 680;
+  letter-spacing: -0.04em;
+  line-height: 1.12;
 }
 
 .md-typeset h2 {
-  border-bottom: 1px solid var(--alpha-border);
-  padding-bottom: 0.35rem;
+  margin: 2.5rem 0 0.8rem;
+  font-size: 1.24rem;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+}
+
+.md-typeset h3 {
+  margin-top: 1.8rem;
+  font-size: 0.96rem;
+  font-weight: 680;
+}
+
+.md-typeset a {
+  text-underline-offset: 0.16em;
 }
 
 .md-typeset code,
@@ -45,20 +101,27 @@
 .md-typeset .grid.cards > ul > li,
 .md-typeset .grid.cards > ol > li {
   border-color: var(--alpha-border);
-  border-radius: 0.7rem;
+  border-radius: 0.25rem;
   box-shadow: none;
 }
 
 .md-typeset .grid.cards > ul > li:hover,
 .md-typeset .grid.cards > ol > li:hover {
   border-color: var(--alpha-accent);
-  box-shadow: 0 0.35rem 1rem rgb(15 23 42 / 8%);
+  box-shadow: none;
 }
 
 .md-typeset .admonition,
 .md-typeset details {
-  border-radius: 0.55rem;
+  border: 0;
+  border-inline-start: 2px solid var(--alpha-accent);
+  border-radius: 0;
   box-shadow: none;
+}
+
+.md-typeset .admonition-title,
+.md-typeset summary {
+  background: transparent;
 }
 
 .md-typeset table:not([class]) {
@@ -77,8 +140,8 @@
 
 .md-typeset figure img {
   border: 1px solid var(--alpha-border);
-  border-radius: 0.65rem;
-  box-shadow: 0 0.4rem 1.2rem rgb(15 23 42 / 8%);
+  border-radius: 0.25rem;
+  box-shadow: none;
 }
 
 .md-typeset figcaption {
@@ -91,8 +154,57 @@
   font-weight: 650;
 }
 
+.kb-route-list {
+  margin: 1.4rem 0 2rem;
+  border-top: 1px solid var(--alpha-border);
+}
+
+.kb-route-list ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kb-route-list li {
+  margin: 0;
+  padding: 0.9rem 0;
+  border-bottom: 1px solid var(--alpha-border);
+}
+
+.kb-route-list li > a:first-child {
+  display: inline-block;
+  min-width: 10.5rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.kb-secondary-links {
+  color: var(--md-default-fg-color--light);
+  font-size: 0.76rem;
+}
+
+.kb-boundary {
+  margin-top: 2rem !important;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--alpha-border);
+  color: var(--md-default-fg-color--light);
+  font-size: 0.75rem;
+}
+
 @media screen and (min-width: 76.25em) {
   .md-content__inner {
-    max-width: 60rem;
+    max-width: 48rem;
+    margin-inline: auto;
+  }
+}
+
+@media screen and (max-width: 44.984375em) {
+  .md-typeset {
+    font-size: 0.82rem;
+  }
+
+  .kb-route-list li > a:first-child {
+    display: block;
+    margin-bottom: 0.2rem;
   }
 }
