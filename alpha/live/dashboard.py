@@ -20,8 +20,9 @@ import yaml
 from alpha.data import LIVE_FRED_STALE_WARNING_BUSINESS_DAYS_INT
 from alpha.live import logging_utils, runner, scheduler_utils
 from alpha.live.models import LiveRelease
+from alpha.live.dashboard_authorization import guard_dashboard_execution
 from alpha.live.norgate_snapshot_sync import build_norgate_snapshot_status_dict
-from alpha.live.ops_report import build_ops_report_dict
+from alpha.live.ops_report import build_ops_report_dict, parse_timestamp_ts
 from alpha.live.pod_cash_flow import (
     load_flow_by_date_dict,
     validate_pod_cash_flow_pod_ids,
@@ -71,6 +72,7 @@ class DashboardPodTarget:
     db_path_str: str
     db_override_bool: bool
     cash_flow_config_error_str: str | None = None
+    operator_confirmation_dict: dict[str, Any] | None = None
 
 
 @dataclass
@@ -397,10 +399,11 @@ class DashboardApp:
         )
 
     def get_target_for_pod(self, pod_id_str: str) -> DashboardPodTarget | None:
-        for target_obj in self.get_target_list():
-            if target_obj.release_obj.pod_id_str == pod_id_str:
-                return target_obj
-        return None
+        target_list = [target_obj for target_obj in self.get_target_list()
+                       if target_obj.release_obj.pod_id_str == pod_id_str]
+        if len(target_list) > 1:
+            raise ValueError("Ambiguous Pod identity; more than one enabled release.")
+        return target_list[0] if target_list else None
 
 
 def load_dashboard_config(config_path_str: str = DEFAULT_CONFIG_PATH_STR) -> DashboardConfig:
@@ -1180,6 +1183,7 @@ def _event_matches_pod_bool(event_dict: dict[str, Any], pod_id_str: str) -> bool
     }
 
 
+@guard_dashboard_execution
 def _run_reference_diff_for_pod(
     pod_target_obj: DashboardPodTarget,
     releases_root_path_str: str,
@@ -1201,6 +1205,7 @@ def _run_reference_diff_for_pod(
     )
 
 
+@guard_dashboard_execution
 def _run_dashboard_action_for_pod(
     pod_target_obj: DashboardPodTarget,
     action_name_str: str,
@@ -1377,6 +1382,8 @@ def _empty_eod_snapshot_dict(status_str: str = "not_applicable") -> dict[str, An
         "expected_market_date_str": None,
         "same_session_bool": False,
         "unresolved_execution_bool": False,
+        "last_required_market_date_str": None,
+        "last_required_eod_present_bool": False,
         "detail_str": "EOD snapshot is not available for this DB state.",
     }
 
@@ -1390,6 +1397,18 @@ def _build_eod_snapshot_dict(
     expected_due_ts = runner._eod_snapshot_due_timestamp_ts(
         release_obj=release_obj,
         as_of_ts=as_of_ts,
+    )
+    # *** CRITICAL*** Evidence is assessed as of now, after the same close +
+    # buffer boundary as the runner. This changes reporting only: it never
+    # schedules a weekend capture or advances the execution clock.
+    last_required_session_ts = scheduler_utils.get_latest_completed_session_label_ts(
+        as_of_ts,
+        release_obj.session_calendar_id_str,
+        snapshot_ready_buffer_minutes_int=runner.DEFAULT_EOD_SNAPSHOT_BUFFER_MINUTES_INT,
+    )
+    last_required_date_str = (
+        last_required_session_ts.date().isoformat()
+        if last_required_session_ts is not None else None
     )
     expected_market_date_str = None
     if expected_due_ts is not None:
@@ -1408,6 +1427,30 @@ def _build_eod_snapshot_dict(
         """,
         (release_obj.pod_id_str,),
     )
+    required_source_str = "virtual_broker" if release_obj.mode_str == "incubation" else "broker"
+    eod_row_dict_list = [
+        eod_row_dict for eod_row_dict in eod_row_dict_list
+        if eod_row_dict.get("snapshot_source_str") == required_source_str
+        and eod_row_dict.get("account_route_str") == release_obj.account_route_str
+        and parse_timestamp_ts(eod_row_dict.get("updated_timestamp_str")) is not None
+        and parse_timestamp_ts(eod_row_dict.get("updated_timestamp_str")) <= as_of_ts
+    ]
+    trusted_eod_row_list = []
+    for eod_row_dict in eod_row_dict_list:
+        evidence_ts = parse_timestamp_ts(eod_row_dict["updated_timestamp_str"])
+        session_label_ts = scheduler_utils.session_label_from_timestamp_ts(evidence_ts, release_obj.session_calendar_id_str)
+        if session_label_ts is None:
+            continue
+        close_ts = scheduler_utils.get_session_close_timestamp_ts(session_label_ts, release_obj.session_calendar_id_str)
+        # *** CRITICAL*** An EOD label is not proof of an EOD observation:
+        # require the same exchange close + buffer boundary as the runner.
+        if evidence_ts >= close_ts + timedelta(minutes=runner.DEFAULT_EOD_SNAPSHOT_BUFFER_MINUTES_INT):
+            trusted_eod_row_list.append(eod_row_dict)
+    eod_row_dict_list = trusted_eod_row_list
+    last_required_eod_present_bool = any(
+        _market_date_from_history_row_str(eod_row_dict, release_obj) == last_required_date_str
+        for eod_row_dict in eod_row_dict_list
+    ) if last_required_date_str is not None else False
     latest_eod_row_dict = eod_row_dict_list[0] if len(eod_row_dict_list) > 0 else None
     same_session_eod_row_dict = None
     if expected_market_date_str is not None:
@@ -1424,9 +1467,13 @@ def _build_eod_snapshot_dict(
         and latest_vplan_row_dict.get("status_str") in ("submitted", "submitting")
     )
     if expected_due_ts is None:
-        status_str = "not_applicable"
-        severity_str = "gray"
-        detail_str = "No active market session for EOD sampling."
+        status_str = "not_applicable" if last_required_eod_present_bool else "due_missing"
+        severity_str = "green" if last_required_eod_present_bool else "yellow"
+        detail_str = (
+            f"No EOD capture due today. Last required session {last_required_date_str} is complete."
+            if last_required_eod_present_bool else
+            f"Market closed; the last required EOD for {last_required_date_str or 'an unknown session'} is missing."
+        )
     elif same_session_eod_row_dict is not None:
         status_str = "completed"
         severity_str = "green"
@@ -1437,8 +1484,15 @@ def _build_eod_snapshot_dict(
         detail_str = "EOD snapshot is waiting for submitted execution to reconcile."
     elif as_of_ts < expected_due_ts:
         status_str = "waiting"
-        severity_str = "gray"
-        detail_str = "EOD snapshot is not due yet."
+        severity_str = "green" if last_required_eod_present_bool else "gray"
+        detail_str = "EOD snapshot is not due yet. " + (
+            f"Last required session {last_required_date_str} is complete."
+            if last_required_eod_present_bool else
+            f"Last required session {last_required_date_str or 'unknown'} is not verified."
+        )
+        if latest_eod_row_dict is not None and not last_required_eod_present_bool:
+            status_str = "due_missing"
+            severity_str = "yellow"
     elif latest_eod_row_dict is None:
         status_str = "due_missing"
         severity_str = "yellow"
@@ -1458,6 +1512,8 @@ def _build_eod_snapshot_dict(
             "expected_market_date_str": expected_market_date_str,
             "same_session_bool": same_session_eod_row_dict is not None,
             "unresolved_execution_bool": unresolved_execution_bool,
+            "last_required_market_date_str": last_required_date_str,
+            "last_required_eod_present_bool": last_required_eod_present_bool,
             "detail_str": detail_str,
         }
     )

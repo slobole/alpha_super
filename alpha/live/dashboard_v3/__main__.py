@@ -14,6 +14,7 @@ per refresh retrying NDU even when the operator opted into snapshots.
 from __future__ import annotations
 
 import argparse
+import os
 
 from alpha.live.dashboard_v3.app import create_app
 from scripts.norgate_config_env import load_config_env_file
@@ -30,6 +31,19 @@ def main() -> int:
     )
     arg_parser_obj.add_argument("--host", default=DEFAULT_HOST_STR)
     arg_parser_obj.add_argument("--port", type=int, default=DEFAULT_PORT_INT)
+    arg_parser_obj.add_argument("--demo", action="store_true", help="Local-only synthetic client reporting preview; no config.env or real provider.")
+    arg_parser_obj.add_argument("--client-registry", help="Local operator-maintained client reporting JSON path.")
+    action_mode_obj = arg_parser_obj.add_mutually_exclusive_group()
+    action_mode_obj.add_argument(
+        "--read-only",
+        action="store_true",
+        default=True,
+        help="Disable actions, generated trade sheets and notification writes/webhooks.",
+    )
+    action_mode_obj.add_argument(
+        "--enable-actions", action="store_false", dest="read_only",
+        help="Explicitly enable advanced operational actions; confirmations are still required.",
+    )
     arg_parser_obj.add_argument(
         "--debug",
         action="store_true",
@@ -42,10 +56,36 @@ def main() -> int:
     )
     parsed_args_obj = arg_parser_obj.parse_args()
 
-    if not parsed_args_obj.skip_env_file:
+    if parsed_args_obj.demo and parsed_args_obj.host not in {"127.0.0.1", "localhost", "::1"}:
+        arg_parser_obj.error("Demonstration mode must bind to loopback only.")
+    if parsed_args_obj.demo and not parsed_args_obj.read_only:
+        arg_parser_obj.error("Demonstration mode cannot enable operational actions.")
+    if not parsed_args_obj.skip_env_file and not parsed_args_obj.demo:
         load_config_env_file(override_existing_bool=True)
 
-    flask_app_obj = create_app()
+    operator_access_token_str = os.getenv("ALPHA_OPS_OPERATOR_ACCESS_TOKEN_STR", "")
+    if len(operator_access_token_str) < 24:
+        arg_parser_obj.error(
+            "Set ALPHA_OPS_OPERATOR_ACCESS_TOKEN_STR to a private operator credential "
+            "of at least 24 characters. Login username: operator. Keep the listener "
+            "on loopback and use HTTPS for remote access."
+        )
+    if parsed_args_obj.demo:
+        from alpha.live.dashboard_v3.demo import DemoOperationsProvider, build_demo_fixture_tuple
+
+        registry_dict, snapshot_dict = build_demo_fixture_tuple()
+        flask_app_obj = create_app(
+            DemoOperationsProvider(), read_only_bool=True, demo_mode_bool=True,
+            operator_access_token_str=operator_access_token_str,
+            client_registry_dict=registry_dict,
+            client_reporting_snapshot_fn=lambda client_id_str: snapshot_dict[client_id_str],
+        )
+    else:
+        flask_app_obj = create_app(
+            read_only_bool=parsed_args_obj.read_only,
+            operator_access_token_str=operator_access_token_str,
+            client_reporting_config_path_str=parsed_args_obj.client_registry,
+        )
     flask_app_obj.run(
         host=parsed_args_obj.host,
         port=parsed_args_obj.port,

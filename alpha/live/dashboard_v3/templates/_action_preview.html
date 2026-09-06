@@ -1,11 +1,19 @@
 {# Preview shown after the operator clicks an action button. The Confirm
    button is the ONLY thing that actually triggers a POST. Cancel just
    replaces the preview region with placeholder text. #}
-<div class="rounded-md border border-warn/40 bg-warn-soft/40 p-3 text-sm space-y-2">
+<div class="ops-confirmation rounded-md border border-warn/40 bg-warn-soft/40 p-3 text-sm space-y-2">
   <div class="font-semibold">
     Confirm: <span class="font-mono">{{ action_name_str }}</span>
     for {{ row_dict.mode_str }}/<span class="font-mono">{{ row_dict.pod_id_str }}</span>
   </div>
+  <div class="text-xs break-all">
+    Account {{ context_dict.account_route_str }} · release {{ context_dict.release_id_str }}<br>
+    Decision {{ context_dict.decision_plan_id_int or 'none' }} · VPlan {{ context_dict.vplan_id_int or 'none' }}<br>
+    State {{ context_dict.state_hash_str[:12] }} · expires in 2 minutes · single use.
+  </div>
+  {% if action_name_str == 'tick' %}
+  <p class="text-xs">One lifecycle cycle for this release: may sync data, build NEW plans and send orders when due. This is not confirmation of a fixed list of orders.</p>
+  {% endif %}
   <ul class="text-xs text-ink-700 space-y-0.5 list-disc list-inside">
     {% for preview_line_str in preview_line_str_list %}
       <li>{{ preview_line_str }}</li>
@@ -15,7 +23,8 @@
     <button type="button"
             hx-post="{{ post_url_str }}"
             hx-headers='{"X-Alpha-Action-Token": "{{ action_token_str }}"}'
-            hx-vals='{"confirmed_bool": true}'
+            hx-vals='{{ {"confirmed_bool": true, "confirmation_nonce_str": confirmation_nonce_str}|tojson }}'
+            hx-disabled-elt="this"
             hx-target="#operator-tools-preview-{{ row_dict.pod_id_str }}"
             hx-swap="innerHTML"
             class="px-3 py-1.5 rounded-md bg-bad text-white text-sm font-semibold">
@@ -30,6 +39,6 @@
     </button>
   </div>
   <div class="text-[10px] text-ink-500 italic">
-    Submits a server-side job; the dashboard will show its status badge after Confirm.
+    Confirm dispatches once. Changed state requires a new preview. After an error or timeout, inspect the job and broker evidence before any new attempt.
   </div>
 </div>

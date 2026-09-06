@@ -1,0 +1,96 @@
+{% extends 'client_layout.html' %}
+{% macro money(value_obj) -%}{% if value_obj is none %}—{% else %}${{ '{:,.2f}'.format(value_obj) }}{% endif %}{%- endmacro %}
+{% block title %}{{ client_dict.display_name }}{% endblock %}
+{% block content %}
+<div class="ops-page-heading">
+  <h1>{% if view_str == 'report' %}Report preview{% elif view_str == 'performance' %}Performance{% else %}Overview{% endif %}</h1>
+  {% if report_dict.is_demo_bool %}<span class="client-badge">Demo data</span>{% endif %}
+</div>
+{% if operations_dict %}{% include '_client_operations_summary.html' %}{% endif %}
+<form class="ops-toolbar" method="get">
+  <label>From<input name="from" type="date" value="{{ report_dict.requested_from_date_str }}" min="{{ client_dict.mandate_start_date }}" max="{{ period_max_date_str }}" required></label>
+  <label>To<input name="to" type="date" value="{{ report_dict.requested_to_date_str }}" min="{{ client_dict.mandate_start_date }}" max="{{ period_max_date_str }}" required></label>
+  <button class="ops-button" type="submit">Apply period</button>
+  {% for key_str, label_str in [('1w', '1 week'), ('mtd', 'MTD'), ('ytd', 'YTD'), ('all', 'Since mandate')] %}
+  <a class="ops-text-link" href="{{ url_for('clients.financial_route_fn', client_id_str=client_dict.client_id, view_str=view_str, window=key_str) }}">{{ label_str }}</a>
+  {% endfor %}
+</form>
+<div class="ops-context">
+  <span>{{ 'Demo' if report_dict.is_demo_bool else 'IBKR' }} · {{ report_dict.opening_date_str or 'Unavailable' }} → {{ report_dict.closing_date_str or 'Unavailable' }}</span>
+  {% if report_dict.status_str != 'ready' %}<strong>Incomplete data</strong>{% endif %}
+</div>
+{% if report_dict.issue_list %}
+<details class="ops-note client-data-issues">
+  <summary><strong>Data needs review</strong> · {{ report_dict.issue_list|length }} issue(s)</summary>
+  <ul>{% for issue_str in report_dict.issue_list[:5] %}<li>{{ issue_str }}</li>{% endfor %}</ul>
+  {% if report_dict.issue_list|length > 5 %}<p>Additional details are included in the operator evidence download.</p>{% endif %}
+</details>
+{% endif %}
+<section class="client-kpis" aria-label="Selected period financial summary">
+  <div><p>Starting value</p><strong>{{ money(report_dict.opening_nav_float) }}</strong></div>
+  <div><p>Ending value</p><strong>{{ money(report_dict.closing_nav_float) }}</strong></div>
+  <div><p>Profit / loss</p><strong>{{ money(report_dict.pnl_float) }}</strong>{% if report_dict.pnl_float is none %}<small>Incomplete data</small>{% endif %}</div>
+  <div><p>{{ 'Combined return' if report_dict.twr_float is none else 'Account return' }}</p><strong>{{ report_dict.twr_float|percent }}</strong>{% if report_dict.twr_float is none %}<small>Not available · see accounts below</small>{% endif %}</div>
+</section>
+{% if view_str == 'report' %}<div class="ops-toolbar client-report-actions"><span class="client-badge">{{ investor_dict.document_status_str|upper }}</span><a class="ops-button" href="{{ url_for('clients.financial_route_fn', client_id_str=client_dict.client_id, view_str='report', download='pdf', expected=report_dict.report_hash_str, **{'from':report_dict.requested_from_date_str, 'to':report_dict.requested_to_date_str}) }}">Download investor PDF</a><a class="ops-text-link" href="{{ url_for('clients.financial_route_fn', client_id_str=client_dict.client_id, view_str='report', download='bundle', expected=report_dict.report_hash_str, **{'from':report_dict.requested_from_date_str, 'to':report_dict.requested_to_date_str}) }}">PDF + data</a></div>{% endif %}
+{% if view_str == 'performance' %}
+<div class="ops-two-column client-performance-grid">
+{% for strategy_dict in report_dict.strategy_list %}{% set performance_dict = strategy_dict.performance_dict %}{% set performance_chart_dict = performance_chart_list[loop.index0] %}
+<section class="ops-panel"><div class="ops-panel-heading"><h2>{{ strategy_dict.display_name_str }}</h2><strong>{{ strategy_dict.twr_float|percent }}</strong></div>
+<div class="client-inline-facts"><span>Value <strong>{{ money(strategy_dict.closing_nav_float) }}</strong></span><span>P&amp;L <strong>{{ money(strategy_dict.pnl_float) }}</strong></span><span>Account return</span></div>
+{% if strategy_dict.from_date_str != report_dict.requested_from_date_str or strategy_dict.to_date_str != report_dict.requested_to_date_str %}<p class="client-muted">{{ strategy_dict.from_date_str }} → {{ strategy_dict.to_date_str }}</p>{% endif %}
+{% if performance_chart_dict %}<svg class="client-nav-chart" viewBox="0 0 900 220" role="img" aria-label="Official account cumulative return, including opening zero baseline"><path d="M20 25H880 M20 110H880 M20 195H880" stroke="#e2e8f0" fill="none"/>{% for points_str in performance_chart_dict.segment_list %}<polyline points="{{ points_str }}" fill="none" stroke="#2563eb" stroke-width="2.5" vector-effect="non-scaling-stroke"/>{% endfor %}</svg><div class="client-chart-labels"><span>Range: {{ performance_chart_dict.min_float|percent }} to {{ performance_chart_dict.max_float|percent }} · own scale</span></div>{% else %}<p>Return history unavailable.</p>{% endif %}
+<div class="client-inline-facts"><span>Max drawdown <strong>{{ performance_dict.max_drawdown_float|percent }}</strong></span><span>Period-end drawdown <strong>{{ performance_dict.current_drawdown_float|percent }}</strong></span></div>
+<div class="client-lifecycle">{% for month_dict in performance_dict.monthly_return_list %}<span>{{ month_dict.month_str }} · {{ month_dict.return_float|percent }}{% if month_dict.partial_bool %} · partial{% endif %}</span>{% endfor %}</div>
+{% set benchmark_dict = strategy_dict.benchmark_dict %}<div class="client-benchmark-line">{% if benchmark_dict.status_str == 'ready' %}{{ benchmark_dict.label_str }} <strong>{{ benchmark_dict.return_float|percent }}</strong> · gap <strong>{{ '{:+.2f}'.format(benchmark_dict.difference_pp_float) }} percentage points</strong>{% if benchmark_dict.is_demo_bool %} · Demo{% endif %}{% else %}Benchmark unavailable{% endif %}</div>
+<details class="client-details"><summary>Calculation details</summary><p>Account return · {{ strategy_dict.from_date_str }} → {{ strategy_dict.to_date_str }}. {{ performance_dict.exchange_session_count_int }} exchange sessions · {{ performance_dict.non_session_count_int }} non-session days.</p><p>Drawdowns use the selected period. Partial months are labeled. Chart scales are independent.</p><p>{{ benchmark_dict.reason_str or '' }} {{ benchmark_dict.basis_str }}</p><p>Benchmark closes {{ benchmark_dict.baseline_date_str }} → {{ benchmark_dict.end_price_date_str }}.</p><p class="client-footnote">{{ benchmark_dict.method_str }} · snapshot {{ benchmark_dict.snapshot_date_str or 'unavailable' }}<br>Manifest {{ benchmark_dict.manifest_hash_str or 'unavailable' }}<br>Prices {{ benchmark_dict.price_hash_str or 'unavailable' }}</p></details>
+{% set comparison_result_dict = comparison_list[loop.index0] %}{% include '_client_comparison.html' %}
+</section>{% else %}<p>No strategy valuation rows are available for these dates.</p>{% endfor %}
+</div>
+{% else %}
+<section class="ops-panel client-value-panel">
+  <div class="ops-panel-heading"><h2>Account value</h2><span class="client-muted">Includes transfers</span></div>
+  {% if chart_dict %}
+  <div class="client-chart-labels"><span>Range: {{ money(chart_dict.min_float) }} to {{ money(chart_dict.max_float) }}</span></div>
+  <svg class="client-nav-chart" viewBox="0 0 900 220" preserveAspectRatio="none" role="img" aria-label="Combined account NAV in the selected period; this is not a return chart">
+    <path d="M20 25H880 M20 110H880 M20 195H880" stroke="#e2e8f0" stroke-width="1" fill="none"/>
+    {% for points_str in chart_dict.segment_list %}<polyline points="{{ points_str }}" fill="none" stroke="#2563eb" stroke-width="2.5" vector-effect="non-scaling-stroke"/>{% if ' ' not in points_str %}<circle cx="{{ points_str.split(',')[0] }}" cy="{{ points_str.split(',')[1] }}" r="3.5" fill="#2563eb"/>{% endif %}{% endfor %}
+  </svg>
+  <div class="client-chart-dates"><span>{{ report_dict.opening_date_str }}</span><span>{{ report_dict.closing_date_str }}</span></div>
+  {% else %}<p>No complete account valuations available in this period.</p>{% endif %}
+  <details class="client-details"><summary>Balance details</summary><dl class="client-bridge"><dt>Starting value</dt><dd>{{ money(report_dict.opening_nav_float) }}</dd><dt>Net transfers and owner payments</dt><dd>{{ money(report_dict.capital_movement_float) }}</dd><dt>Broker adjustments</dt><dd>{{ money(report_dict.linking_adjustment_float) }}</dd><dt>Capital from strategies added / removed</dt><dd>{{ money(report_dict.scope_movement_float) }}</dd><dt>Profit / loss</dt><dd>{{ money(report_dict.pnl_float) }}</dd><dt class="client-bridge-total">Ending value</dt><dd class="client-bridge-total">{{ money(report_dict.closing_nav_float) }}</dd></dl><p>Profit / loss includes realized and unrealized changes. Transfers are not profit.</p></details>
+</section>
+{% endif %}
+{% if view_str != 'performance' %}
+<section class="ops-panel">
+  <h2>Strategy results</h2>
+  <div class="client-table-scroll"><table class="ops-table">
+    <thead><tr><th>Strategy</th><th>Dates</th><th class="client-number">Value</th><th class="client-number">P&amp;L</th><th class="client-number">Account return</th><th>Data</th></tr></thead>
+    <tbody>{% for strategy_dict in report_dict.strategy_list %}<tr>
+      <td data-label="Strategy"><strong>{{ strategy_dict.display_name_str }}</strong></td>
+      <td data-label="Dates">{{ strategy_dict.from_date_str }} → {{ strategy_dict.to_date_str }}</td>
+      <td data-label="Value" class="client-number">{{ money(strategy_dict.closing_nav_float) }}</td>
+      <td data-label="P&amp;L" class="client-number">{{ money(strategy_dict.pnl_float) }}</td>
+      <td data-label="Account return" class="client-number">{{ strategy_dict.twr_float|percent }}</td>
+      <td data-label="Data">{{ 'Complete' if strategy_dict.coverage_complete_bool and strategy_dict.flows_complete_bool else 'Incomplete' }}</td>
+    </tr>{% else %}<tr><td colspan="6">No strategy valuation rows are available for these dates.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endif %}
+{% if view_str == 'overview' %}{% include '_client_activity.html' %}{% endif %}
+{% if view_str == 'report' %}
+{% if report_dict.strategy_list|selectattr('benchmark_dict.status_str', 'equalto', 'ready')|list %}
+<section class="ops-panel"><h2>Market comparison</h2><div class="ops-two-column">
+{% for strategy_dict in report_dict.strategy_list %}{% set benchmark_dict = strategy_dict.benchmark_dict %}<div><h3>{{ strategy_dict.display_name_str }}</h3>{% if benchmark_dict.status_str == 'ready' %}<p>{{ benchmark_dict.label_str }}: <strong>{{ benchmark_dict.return_float|percent }}</strong>{% if benchmark_dict.is_demo_bool %} · SYNTHETIC{% endif %}<br>Account minus market: <strong>{{ '{:+.2f}'.format(benchmark_dict.difference_pp_float) }} percentage points</strong></p><p class="client-footnote">Account {{ benchmark_dict.from_date_str }} → {{ benchmark_dict.to_date_str }}<br>Benchmark closes {{ benchmark_dict.baseline_date_str }} → {{ benchmark_dict.end_price_date_str }}</p>{% else %}<p>{{ benchmark_dict.reason_str }}</p>{% endif %}</div>{% endfor %}
+</div></section>
+{% endif %}
+{% endif %}
+<details class="client-details client-source-details"><summary>Data &amp; calculation details</summary>
+  <dl class="ops-facts">{% for strategy_dict in report_dict.strategy_list %}<dt>{{ strategy_dict.display_name_str }}</dt><dd>{{ strategy_dict.observed_day_count_int }}/{{ strategy_dict.expected_day_count_int }} observed days · {{ 'complete' if strategy_dict.flows_complete_bool else 'incomplete' }} capital data</dd>{% endfor %}</dl>
+  <p>{{ report_dict.twr_method_str }}. Returns are calculated from daily account TWR; NAV includes transfers. P&amp;L excludes capital movements and includes unrealized gains/losses.</p>
+  <p>{{ report_dict.fee_basis_str }}</p>
+  <ul>{% for limitation_str in report_dict.limitations_list %}<li>{{ limitation_str }}</li>{% endfor %}</ul>
+  <p>Method {{ report_dict.method_version_str }} · report {{ report_dict.report_hash_str[:16] }}<br>View assembled {{ report_dict.generated_at_str|clock }}; this is not a live broker-check timestamp.</p>
+  <a class="ops-text-link" href="{{ url_for('clients.financial_route_fn', client_id_str=client_dict.client_id, view_str=view_str, download='json', **{'from':report_dict.requested_from_date_str, 'to':report_dict.requested_to_date_str}) }}">Download operator evidence · JSON</a>
+</details>
+{% endblock %}

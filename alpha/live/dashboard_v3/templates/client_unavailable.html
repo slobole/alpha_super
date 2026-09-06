@@ -1,0 +1,8 @@
+{% extends 'client_layout.html' %}
+{% block title %}{{ client_dict.display_name }} · {{ view_str }}{% endblock %}
+{% block content %}
+<div class="ops-page-heading"><p class="ops-eyebrow">{{ client_dict.display_name }} / LIVE</p><h1>{{ 'Client overview' if view_str == 'overview' else view_str|capitalize }}</h1></div>
+{% if operations_dict %}{% include '_client_operations_summary.html' %}{% endif %}
+{% if activity_dict %}{% include '_client_activity.html' %}{% endif %}
+<section class="ops-panel client-status" data-severity="gray"><h2>Financial evidence unavailable</h2><p>{{ error_str }}</p><p>Selected period: {{ report_dict.requested_from_date_str }} → {{ report_dict.requested_to_date_str }}</p><a class="ops-text-link" href="{{ url_for('clients.financial_route_fn', client_id_str=client_dict.client_id, view_str='diagnostics', **{'from':report_dict.requested_from_date_str, 'to':report_dict.requested_to_date_str}) }}">Open this client's diagnostics</a></section>
+{% endblock %}

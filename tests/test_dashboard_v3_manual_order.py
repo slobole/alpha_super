@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any
+import re
+from alpha.live.dashboard import DashboardPodTarget
+from test_manual_order import _release_obj
 
 from alpha.live.dashboard_v3.app import create_app
 from alpha.live.manual_order import MANUAL_ORDER_CONFIRMATION_TEXT_STR
@@ -11,7 +14,7 @@ class ManualOrderProvider:
     def __init__(self) -> None:
         self.action_token_str = "token_123"
         self.submitted_body_dict: dict[str, Any] | None = None
-        self.target_obj = SimpleNamespace(release_obj=SimpleNamespace(pod_id_str="pod_manual"))
+        self.target_obj = DashboardPodTarget(_release_obj(), "synthetic.sqlite3", False)
         self.row_dict = {
             "pod_id_str": "pod_manual",
             "mode_str": "paper",
@@ -49,6 +52,11 @@ class ManualOrderProvider:
         if pod_id_str != "pod_manual":
             return None
         return self.target_obj
+
+    def get_confirmation_context_dict(self, target_obj):
+        return {"pod_id_str": "pod_manual", "mode_str": "paper", "account_route_str": "DU123",
+                "release_id_str": target_obj.release_obj.release_id_str, "state_hash_str": "synthetic",
+                "decision_plan_id_int": None, "vplan_id_int": None}
 
     def submit_manual_order_dict(
         self,
@@ -102,7 +110,7 @@ def test_manual_order_submit_route_validates_action_and_calls_provider() -> None
     client_obj = app_obj.test_client()
 
     response_obj = client_obj.post(
-        "/api/pods/pod_manual/manual-order",
+        "/api/pods/pod_manual/manual-order-preview",
         headers=_action_headers_dict(),
         data={
             "confirmed_bool": "true",
@@ -115,6 +123,11 @@ def test_manual_order_submit_route_validates_action_and_calls_provider() -> None
             "confirmation_text_str": MANUAL_ORDER_CONFIRMATION_TEXT_STR,
         },
     )
+    assert response_obj.status_code == 200
+    assert provider_obj.submitted_body_dict is None
+    nonce_str = re.search(r'"confirmation_nonce_str": "([^"]+)"', response_obj.get_data(as_text=True)).group(1)
+    response_obj = client_obj.post("/api/pods/pod_manual/manual-order", headers=_action_headers_dict(),
+        data={"confirmed_bool": "true", "confirmation_nonce_str": nonce_str})
     response_text_str = response_obj.get_data(as_text=True)
 
     assert response_obj.status_code == 200

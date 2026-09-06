@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}Diagnostics · {{ mode_label_str }}{% endblock %}
+{% block content %}
+<section class="ops-page-heading">
+  <p class="ops-eyebrow">Operator workspace / {{ mode_label_str }}</p>
+  <h1>Diagnostics</h1>
+  <p>Understand the evidence. Operational actions have their own area and require confirmation.</p>
+</section>
+
+<form method="get" class="ops-toolbar">
+  <input type="hidden" name="view" value="{{ view_str }}">
+  <label>Environment
+    <select name="mode" aria-label="Environment">
+      {% for item_str in ['live', 'paper', 'incubation'] %}
+      <option value="{{ item_str }}" {% if item_str == mode_str %}selected{% endif %}>{{ item_str|upper }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Strategy
+    <select name="pod" aria-label="Strategy">
+      <option value="">First strategy in selected environment</option>
+      {% for item_dict in row_dict_list %}
+      <option value="{{ item_dict.pod_id_str }}" {% if row_dict and item_dict.pod_id_str == row_dict.pod_id_str %}selected{% endif %}>{{ item_dict|strategy_name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button class="ops-button" type="submit">Open evidence</button>
+</form>
+
+{% if row_dict %}
+<div class="ops-context">
+  <strong>Release owner: {{ row_dict.user_id_str or 'not recorded' }}</strong>
+  <span>{{ mode_label_str }}</span><span>{{ row_dict.account_route_str }}</span>
+  <span>{{ row_dict|strategy_name }}</span>
+  <span>Advanced VPS scope — not a selected client mandate</span>
+</div>
+<nav class="ops-tabs" aria-label="Diagnostic views">
+  {% for item_str, label_str in diagnostic_view_label_dict.items() %}
+  <a href="{{ url_for('diagnostics_page_route_fn', mode=mode_str, pod=row_dict.pod_id_str, view=item_str) }}"
+     {% if item_str == view_str %}aria-current="page"{% endif %}>{{ label_str }}</a>
+  {% endfor %}
+</nav>
+
+{% if view_str == 'operations' %}
+<section class="ops-panel">
+  <h2>Operational actions</h2>
+  <p>These are active operations, not health checks. Tick can send LIVE orders when due.
+    Reconcile and EOD query the broker and write state. Comparison creates artifacts.</p>
+  {% include '_operator_tools.html' %}
+  <a class="ops-text-link" href="/journal">Open operator journal</a>
+</section>
+{% else %}
+<div class="ops-note">{{ payload_dict.limitations_str }}</div>
+{% if view_str == 'status' %}
+<div class="ops-two-column">
+  <section class="ops-panel">
+    <h2>Saved status</h2>
+    <p class="ops-status-title">{{ payload_dict.required_action_dict.label_str or 'Status evidence missing' }}</p>
+    <p>{{ payload_dict.required_action_dict.detail_str or payload_dict.required_action_dict.reason_str }}</p>
+    <dl class="ops-facts">
+      <dt>Last strategy state</dt><dd>{{ row_dict.latest_pod_state_timestamp_str|clock or 'Missing' }}</dd>
+      <dt>Last broker observation</dt><dd>{{ row_dict.latest_broker_snapshot_timestamp_str|clock or 'Missing' }}</dd>
+      <dt>Last reconciliation</dt><dd>{{ row_dict.latest_reconciliation_timestamp_str|clock or 'Missing' }}</dd>
+      <dt>View assembled</dt><dd>{{ payload_dict.view_built_at_str|clock or 'Unknown' }}</dd>
+    </dl>
+  </section>
+  <section class="ops-panel">
+    <h2>End-of-day evidence</h2>
+    <p>{{ payload_dict.eod_snapshot_dict.detail_str or 'No EOD evidence is available.' }}</p>
+    <dl class="ops-facts">
+      <dt>Last required session</dt><dd>{{ payload_dict.eod_snapshot_dict.last_required_market_date_str or 'Unknown' }}</dd>
+      <dt>Latest captured session</dt><dd>{{ payload_dict.eod_snapshot_dict.latest_market_date_str or 'Missing' }}</dd>
+      <dt>Source</dt><dd>{{ payload_dict.eod_snapshot_dict.source_str or 'Unknown' }}</dd>
+    </dl>
+  </section>
+</div>
+{% elif view_str == 'lifecycle' %}
+<section class="ops-panel">
+  <h2>Execution evidence</h2>
+  <p>Saved stages for the selected strategy. A completed stage is not a new broker probe.</p>
+  <table class="ops-table"><thead><tr><th>Stage</th><th>Status</th><th>Evidence</th></tr></thead><tbody>
+    {% for step_dict in payload_dict.lifecycle_step_dict_list %}
+    <tr><th>{{ step_dict.label_str }}</th><td>{{ step_dict.status_str }}</td><td>{{ step_dict.detail_str or step_dict.reason_str or 'Open raw evidence below' }}</td></tr>
+    {% else %}<tr><td colspan="3">No saved execution stages.</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+{% elif view_str == 'events' %}
+<form method="get" class="ops-toolbar">
+  <input type="hidden" name="mode" value="{{ mode_str }}"><input type="hidden" name="pod" value="{{ row_dict.pod_id_str }}"><input type="hidden" name="view" value="events">
+  <label>Level<select name="level">{% for item_str in ['all', 'info', 'warn', 'error'] %}<option {% if item_str == filter_dict.level_str %}selected{% endif %}>{{ item_str }}</option>{% endfor %}</select></label>
+  <label>From (ET)<input type="date" name="from" value="{{ filter_dict.from_date_str }}"></label>
+  <label>To (ET)<input type="date" name="to" value="{{ filter_dict.to_date_str }}"></label>
+  <label>Search<input name="q" value="{{ filter_dict.search_str }}" maxlength="160"></label>
+  <button class="ops-button" type="submit">Filter saved events</button>
+</form>
+<section class="ops-panel">
+  <h2>{{ payload_dict.event_dict_list|length }} matching events</h2>
+  <p>Search covers {{ payload_dict.scanned_event_count_int }} loaded records, not the complete log archive.</p>
+  {% set event_dict_list = payload_dict.event_dict_list %}{% include '_events_tail.html' %}
+</section>
+{% elif view_str == 'provenance' %}
+<section class="ops-panel">
+  <h2>Data & deployment</h2>
+  <dl class="ops-facts">
+    {% for key_str, value_obj in payload_dict.provenance_dict.items() %}
+    <dt>{{ key_str.replace('_str', '').replace('_', ' ')|capitalize }}</dt><dd><code>{{ value_obj or 'Not recorded' }}</code></dd>
+    {% endfor %}
+  </dl>
+  <p>These are saved/configured identities. Git cleanliness and process liveness are not inferred.</p>
+</section>
+{% endif %}
+<section class="ops-panel">
+  <div class="ops-panel-heading"><h2>Underlying evidence</h2>
+    <a class="ops-text-link" href="{{ url_for('diagnostics_page_route_fn', mode=mode_str, pod=row_dict.pod_id_str, view=view_str, level=filter_dict.level_str, **{'from': filter_dict.from_date_str, 'to': filter_dict.to_date_str, 'q': filter_dict.search_str, 'download': 'json'}) }}">Download diagnostic JSON</a>
+  </div>
+  <details><summary>Show redacted saved values</summary><pre class="ops-code">{{ payload_dict|tojson(indent=2) }}</pre></details>
+</section>
+{% endif %}
+{% else %}
+<section class="ops-panel"><h2>No strategies in this environment</h2><p>Select another environment. This page does not create accounts, releases or trading databases.</p></section>
+{% endif %}
+{% endblock %}

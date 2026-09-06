@@ -13,6 +13,9 @@ keep them.
 from __future__ import annotations
 
 import secrets
+from copy import deepcopy
+import threading
+import time
 from urllib.parse import urlparse
 
 
@@ -63,6 +66,43 @@ def confirmation_present_bool(body_dict: dict | None) -> bool:
     return confirmation_obj is True or confirmation_obj == "true"
 
 
+class ConfirmationStore:
+    """Single-process, one-use approvals. Restart/another worker fails closed."""
+
+    def __init__(self, ttl_seconds_float=120.0):
+        self.ttl_seconds_float = ttl_seconds_float
+        self._entry_dict = {}
+        self._lock_obj = threading.Lock()
+
+    def issue(self, context_dict):
+        with self._lock_obj:
+            now_float = time.monotonic()
+            self._entry_dict = {key_str: item_dict for key_str, item_dict in self._entry_dict.items()
+                if item_dict["expires_at_float"] > now_float
+                and item_dict["pod_id_str"] != context_dict["pod_id_str"]}
+            if len(self._entry_dict) >= 200:
+                raise ValueError("Too many pending confirmations.")
+            nonce_str = secrets.token_urlsafe(32)
+            self._entry_dict[nonce_str] = deepcopy({**context_dict,
+                "expires_at_float": now_float + self.ttl_seconds_float})
+            return nonce_str
+
+    def consume(self, nonce_str, pod_id_str, action_name_str):
+        with self._lock_obj:
+            # Consume even on target mismatch. Never restore after dispatch errors.
+            context_dict = self._entry_dict.pop(str(nonce_str or ""), None)
+        if (context_dict is None or time.monotonic() >= context_dict["expires_at_float"]
+                or context_dict["pod_id_str"] != pod_id_str
+                or context_dict["action_name_str"] != action_name_str):
+            raise ValueError("Confirmation missing, expired, changed or already used. Open a new preview; inspect prior job/broker evidence before retrying.")
+        return context_dict
+
+    def cancel(self, pod_id_str):
+        with self._lock_obj:
+            self._entry_dict = {key_str: item_dict for key_str, item_dict in self._entry_dict.items()
+                                if item_dict["pod_id_str"] != pod_id_str}
+
+
 def validate_action_request(
     request_headers_obj,
     body_dict: dict | None,
@@ -70,6 +110,8 @@ def validate_action_request(
 ) -> tuple[int, str, str] | None:
     """Returns ``(status_int, error_code_str, message_str)`` on rejection,
     or ``None`` if the request is acceptable."""
+    if not isinstance(body_dict, dict):
+        return (400, "invalid_body", "Expected a single request object.")
     if not action_request_origin_valid_bool(request_headers_obj):
         return (403, "origin_rejected", "Dashboard actions require a same-origin POST.")
     request_token_str = request_headers_obj.get(ACTION_TOKEN_HEADER_STR, "")

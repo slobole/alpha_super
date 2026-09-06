@@ -1,0 +1,13 @@
+<p class="text-xs">Copy does not run anything. These are PowerShell commands for the configured VPS working directory.
+  Terminal execution uses current state and does not inherit dashboard confirmations. Every command below can write files or state.</p>
+{% for command_dict in command_list %}
+<div class="ops-command">
+  <strong>{{ command_dict.label_str }}</strong><p>{{ command_dict.effects_str }}</p>
+  <textarea readonly rows="3" aria-label="{{ command_dict.label_str }} PowerShell command">{{ command_dict.command_str }}</textarea>
+  <button type="button" class="ops-button" data-copy-command>Copy command (does not run)</button>
+  {% if command_dict.action_str != 'status' %}
+  <button type="button" class="ops-button" hx-get="/fragments/action-preview/{{ pod_id_str }}/{{ command_dict.action_str }}"
+    hx-target="#operator-tools-preview-{{ pod_id_str }}" hx-swap="innerHTML">Preview action</button>
+  {% endif %}
+</div>
+{% endfor %}

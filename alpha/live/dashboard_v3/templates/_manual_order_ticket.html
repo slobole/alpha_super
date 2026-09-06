@@ -17,7 +17,7 @@
     </button>
   </div>
 
-  <form hx-post="/api/pods/{{ row_dict.pod_id_str }}/manual-order"
+  <form hx-post="/api/pods/{{ row_dict.pod_id_str }}/manual-order-preview"
         hx-headers='{"X-Alpha-Action-Token": "{{ action_token_str }}"}'
         hx-target="#operator-tools-preview-{{ row_dict.pod_id_str }}"
         hx-swap="innerHTML"
@@ -104,7 +104,7 @@
       </label>
       <button type="submit"
               class="px-4 py-2 rounded-md bg-bad text-white font-semibold">
-        Submit to IBKR
+        Preview exact ticket
       </button>
     </div>
 

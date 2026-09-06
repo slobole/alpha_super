@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from alpha.live.dashboard_authorization import (
+    assert_authorized_release, assert_authorized_release_list, assert_authorized_vplans,
+)
+
 import argparse
 import contextlib
 import io
@@ -329,6 +333,7 @@ class BrokerAdapterResolver:
         self,
         release_obj: LiveRelease,
     ) -> BrokerAdapter:
+        assert_authorized_release(release_obj)
         if self._broker_adapter_obj is not None:
             return self._broker_adapter_obj
         if release_obj.mode_str == "incubation":
@@ -458,6 +463,7 @@ def _load_release_list_and_sync(
 ) -> list[LiveRelease]:
     release_list = load_release_list(releases_root_path_str)
     selected_release_list = _filter_release_list_for_pod(release_list, pod_id_str)
+    assert_authorized_release_list(selected_release_list)
     state_store_obj.upsert_release_list(selected_release_list)
     return selected_release_list
 
@@ -472,6 +478,7 @@ def _load_release_list_validate_and_sync(
     validate_enabled_deployment_for_mode(release_list, env_mode_str)
     selected_release_list = _filter_release_list_for_pod(release_list, pod_id_str)
     _validate_selected_pod_enabled_for_mode(selected_release_list, env_mode_str, pod_id_str)
+    assert_authorized_release_list(selected_release_list)
     state_store_obj.upsert_release_list(selected_release_list)
     return selected_release_list
 
@@ -520,6 +527,7 @@ def _validate_release_root_for_mutation(
     validate_enabled_deployment_for_mode(release_list, env_mode_str)
     selected_release_list = _filter_release_list_for_pod(release_list, pod_id_str)
     _validate_selected_pod_enabled_for_mode(selected_release_list, env_mode_str, pod_id_str)
+    assert_authorized_release_list(selected_release_list)
 
 
 def _validate_state_store_releases_for_mutation(
@@ -531,6 +539,7 @@ def _validate_state_store_releases_for_mutation(
     validate_enabled_deployment_for_mode(release_list, env_mode_str)
     selected_release_list = _filter_release_list_for_pod(release_list, pod_id_str)
     _validate_selected_pod_enabled_for_mode(selected_release_list, env_mode_str, pod_id_str)
+    assert_authorized_release_list(selected_release_list)
 
 
 def _load_enabled_release_list_for_mode(
@@ -3139,6 +3148,9 @@ def submit_ready_vplans(
     else:
         candidate_vplan_list = [state_store_obj.get_vplan_by_id(vplan_id_int)]
 
+    # Dashboard direct-submit approval pins the selected objects, not a later
+    # "latest" lookup. Preserve auto-submit selection and the existing SQL claim.
+    assert_authorized_vplans("submit_vplan", candidate_vplan_list)
     for vplan_obj in candidate_vplan_list:
         if pod_id_str is not None and vplan_obj.pod_id_str != pod_id_str:
             reason_counter_obj["pod_id_mismatch"] += 1
@@ -3647,7 +3659,10 @@ def post_execution_reconcile(
         as_of_ts=as_of_ts,
         adapter_factory_func=adapter_factory_func,
     )
-    for vplan_obj in state_store_obj.get_submitted_vplan_list():
+    submitted_vplan_list = [vplan_obj for vplan_obj in state_store_obj.get_submitted_vplan_list()
+                            if pod_id_str is None or vplan_obj.pod_id_str == pod_id_str]
+    assert_authorized_vplans("post_execution_reconcile", submitted_vplan_list)
+    for vplan_obj in submitted_vplan_list:
         if pod_id_str is not None and vplan_obj.pod_id_str != pod_id_str:
             continue
         if as_of_ts < vplan_obj.target_execution_timestamp_ts:

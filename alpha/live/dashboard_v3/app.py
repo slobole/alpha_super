@@ -12,7 +12,11 @@ swap in a fixture instead of touching the live ``DashboardApp``.
 from __future__ import annotations
 
 import csv
+import json
+import math
 import os
+import secrets
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
@@ -33,6 +37,7 @@ from flask import (
 )
 
 from alpha.live.dashboard_v3.actions import (
+    ConfirmationStore,
     SUPPORTED_ACTION_NAME_LIST,
     validate_action_request,
 )
@@ -74,6 +79,14 @@ from alpha.live.dashboard_v3.schedule import (
     build_trading_window_list,
 )
 from alpha.live.dashboard_v3.verdict import TopBarVerdict, resolve_top_bar_verdict
+from alpha.live.dashboard_v3.operator_tools import (
+    DIAGNOSTIC_EVENT_LIMIT_INT,
+    DIAGNOSTIC_VIEW_LABEL_DICT,
+    build_diagnostic_payload_dict,
+    build_command_catalog_list,
+    strategy_display_name_str,
+)
+from alpha.live.dashboard_v3.client_views import client_blueprint_obj
 from alpha.live.ops_report import (
     DEFAULT_STALE_AFTER_SECONDS_INT,
     apply_consumer_staleness_dict,
@@ -81,6 +94,7 @@ from alpha.live.ops_report import (
     parse_timestamp_ts,
 )
 from alpha.live.manual_order import MANUAL_ORDER_CONFIRMATION_TEXT_STR
+from alpha.live.manual_order import build_manual_order_ticket_obj
 from alpha.live.ibkr_performance import (
     build_performance_page_dict,
     resolve_performance_db_path_str,
@@ -131,8 +145,27 @@ def create_app(
     notification_state_path_str: str = DEFAULT_NOTIFICATION_STATE_PATH_STR,
     notification_webhook_url_str: str | None = None,
     notification_webhook_poster_fn=None,
+    read_only_bool: bool = False,
+    operator_access_token_str: str | None = None,
+    client_reporting_config_path_str: str | None = None,
+    client_registry_dict: dict[str, Any] | None = None,
+    client_reporting_snapshot_fn=None,
+    demo_mode_bool: bool = False,
 ) -> Flask:
     flask_app_obj = Flask(__name__)
+    access_token_str = operator_access_token_str or os.getenv("ALPHA_OPS_OPERATOR_ACCESS_TOKEN_STR", "")
+    if access_token_str and len(access_token_str) < 24:
+        raise ValueError("Operator access token must contain at least 24 characters.")
+    flask_app_obj.config["operator_access_token_str"] = access_token_str
+    flask_app_obj.config["read_only_bool"] = read_only_bool
+    flask_app_obj.config["confirmation_store_obj"] = ConfirmationStore()
+    flask_app_obj.config["demo_mode_bool"] = demo_mode_bool
+    flask_app_obj.config["client_reporting_config_path_str"] = (
+        client_reporting_config_path_str or os.getenv("ALPHA_CLIENT_REPORTING_CONFIG_PATH_STR")
+    )
+    flask_app_obj.config["client_registry_dict"] = client_registry_dict
+    flask_app_obj.config["client_reporting_snapshot_fn"] = client_reporting_snapshot_fn
+    flask_app_obj.register_blueprint(client_blueprint_obj)
     flask_app_obj.config["data_provider_obj"] = (
         data_provider_obj if data_provider_obj is not None else DashboardDataProvider()
     )
@@ -155,6 +188,69 @@ def create_app(
 
     for filter_name_str, filter_fn in FILTER_MAP_DICT.items():
         flask_app_obj.jinja_env.filters[filter_name_str] = filter_fn
+    flask_app_obj.jinja_env.filters["strategy_name"] = strategy_display_name_str
+
+    @flask_app_obj.before_request
+    def protect_operator_access_fn():
+        # Financial routes fail closed even before client configuration exists.
+        # When configured, the same operator credential protects the entire
+        # console (not just buttons). Keep legacy factory callers compatible;
+        # the operator launcher supplies this credential for deployed use.
+        token_str = flask_app_obj.config["operator_access_token_str"]
+        if request.endpoint == "static":
+            return None
+        if not token_str and not request.path.startswith("/clients"):
+            return None
+        if not token_str:
+            return Response("Operator access must be configured before client reporting is available.", status=503, headers={"Cache-Control": "no-store"})
+        # Basic credentials must travel over TLS outside this host. The standard
+        # deployment binds to loopback behind Tailscale Serve HTTPS, never a
+        # publicly bound plain-HTTP listener. Do not trust forwarded headers.
+        if request.remote_addr not in {None, "127.0.0.1", "::1"} and not request.is_secure:
+            return Response("HTTPS is required for remote operator access.", status=426)
+        authorization_obj = request.authorization
+        if authorization_obj is None or authorization_obj.type.lower() != "basic" or not (
+            secrets.compare_digest((authorization_obj.username or "").encode("utf-8"), b"operator")
+            and secrets.compare_digest((authorization_obj.password or "").encode("utf-8"), token_str.encode("utf-8"))
+        ):
+            return Response("Operator authentication required.", status=401, headers={
+                "WWW-Authenticate": 'Basic realm="Alpha Ops operator", charset="UTF-8"',
+                "Cache-Control": "no-store",
+            })
+        return None
+
+    @flask_app_obj.after_request
+    def prevent_sensitive_response_caching_fn(response_obj):
+        if flask_app_obj.config["operator_access_token_str"] or request.path.startswith("/clients"):
+            response_obj.headers["Cache-Control"] = "no-store"
+            response_obj.headers["X-Content-Type-Options"] = "nosniff"
+            response_obj.headers["Referrer-Policy"] = "same-origin"
+            response_obj.headers["X-Frame-Options"] = "DENY"
+            response_obj.vary.add("Authorization")
+        return response_obj
+
+    @flask_app_obj.before_request
+    def protect_read_only_session_fn():
+        # Enforce this before provider, token, journal or executor access. Hiding
+        # buttons alone cannot make a connected operator console read-only.
+        if not flask_app_obj.config["read_only_bool"]:
+            return None
+        blocked_endpoint_str_set = {
+            "action_token_route_fn",
+            "action_preview_fragment_route_fn",
+            "manual_order_ticket_fragment_route_fn",
+            "trade_sheet_download_route_fn",
+        }
+        if request.method not in {"GET", "HEAD", "OPTIONS"} or (
+            request.endpoint in blocked_endpoint_str_set
+        ):
+            return _json_error_fn(
+                403,
+                "read_only_session",
+                "This console is read-only. Operational actions and file-generating "
+                "trade-sheet exports are disabled.",
+            )
+        return None
 
     @flask_app_obj.context_processor
     def inject_globals_fn() -> dict[str, Any]:
@@ -162,9 +258,56 @@ def create_app(
             "version_str": DASHBOARD_V3_VERSION_STR,
             "server_time_str": _now_clock_str(),
             "market_status_dict": build_market_status().as_dict(),
+            "read_only_bool": flask_app_obj.config["read_only_bool"],
+            "demo_mode_bool": flask_app_obj.config["demo_mode_bool"],
         }
 
     # ── plain routes ─────────────────────────────────────────────────────
+
+    @flask_app_obj.route("/diagnostics")
+    def diagnostics_page_route_fn():
+        mode_str = str(request.args.get("mode") or "live")
+        view_str = str(request.args.get("view") or "status")
+        if mode_str not in SUPPORTED_MODE_STR_LIST or view_str not in DIAGNOSTIC_VIEW_LABEL_DICT:
+            abort(404)
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        summary_dict = provider_obj.get_summary_dict()
+        row_dict_list = get_pod_row_dict_list_for_mode(summary_dict, mode_str)
+        selected_pod_id_str = str(request.args.get("pod") or (row_dict_list[0]["pod_id_str"] if row_dict_list else ""))
+        row_dict = next((item_dict for item_dict in row_dict_list if item_dict["pod_id_str"] == selected_pod_id_str), None)
+        if selected_pod_id_str and row_dict is None:
+            abort(404)
+        filter_dict = {
+            "level_str": str(request.args.get("level") or "all"),
+            "from_date_str": str(request.args.get("from") or ""),
+            "to_date_str": str(request.args.get("to") or ""),
+            "search_str": str(request.args.get("q") or ""),
+        }
+        payload_dict = None
+        if row_dict is not None:
+            try:
+                payload_dict = build_diagnostic_payload_dict(
+                    summary_dict, row_dict,
+                    provider_obj.get_pod_detail_dict(selected_pod_id_str),
+                    provider_obj.get_pod_event_dict_list(selected_pod_id_str, limit_int=DIAGNOSTIC_EVENT_LIMIT_INT),
+                    **filter_dict,
+                )
+            except ValueError as exception_obj:
+                return _json_error_fn(400, "invalid_diagnostic_filter", str(exception_obj))
+        if request.args.get("download") == "json":
+            return Response(
+                json.dumps(payload_dict or {"status_str": "no_pods"}, indent=2, ensure_ascii=False),
+                mimetype="application/json",
+                headers={"Content-Disposition": 'attachment; filename="alpha-diagnostics.json"'},
+            )
+        return render_template(
+            "diagnostics_page.html", nav_active_str="diagnostics", mode_str=mode_str,
+            mode_label_str=MODE_LABEL_DICT[mode_str], view_str=view_str,
+            diagnostic_view_label_dict=DIAGNOSTIC_VIEW_LABEL_DICT,
+            row_dict_list=row_dict_list, row_dict=row_dict, payload_dict=payload_dict,
+            filter_dict=filter_dict, verdict_dict=_resolve_verdict_with_health(summary_dict, mode_str=mode_str).as_dict(),
+            as_of_clock_str=_now_clock_str(),
+        )
 
     @flask_app_obj.route("/healthz")
     def healthz_route_fn() -> tuple[str, int]:
@@ -195,7 +338,10 @@ def create_app(
         return (f"dashboard_v3 ok {DASHBOARD_V3_VERSION_STR}", 200)
 
     @flask_app_obj.route("/")
+    @flask_app_obj.route("/vps")
     def index_route_fn():
+        if request.path == "/" and (flask_app_obj.config["client_registry_dict"] or flask_app_obj.config["client_reporting_config_path_str"]):
+            return redirect(url_for("clients.directory_route_fn"))
         # Overview — "is everything OK?": one status sentence, then the live
         # book. Pods have their own page; a green overview means "close the
         # app". Same read-only assembly the mode page used, live scope.
@@ -612,12 +758,13 @@ def create_app(
         if mode_str not in SUPPORTED_MODE_STR_LIST:
             mode_str = None
         verdict_obj = _resolve_verdict_with_health(summary_dict, mode_str=mode_str)
-        check_and_notify_for_red_transitions(
-            summary_dict,
-            state_store_obj=flask_app_obj.config["notification_state_store_obj"],
-            webhook_url_str=flask_app_obj.config["notification_webhook_url_str"],
-            webhook_poster_fn=flask_app_obj.config["notification_webhook_poster_fn"],
-        )
+        if not flask_app_obj.config["read_only_bool"]:
+            check_and_notify_for_red_transitions(
+                summary_dict,
+                state_store_obj=flask_app_obj.config["notification_state_store_obj"],
+                webhook_url_str=flask_app_obj.config["notification_webhook_url_str"],
+                webhook_poster_fn=flask_app_obj.config["notification_webhook_poster_fn"],
+            )
         return render_template(
             "_top_bar_verdict.html",
             verdict_dict=verdict_obj.as_dict(),
@@ -796,15 +943,28 @@ def create_app(
         provider_obj = flask_app_obj.config["data_provider_obj"]
         return jsonify({"action_token_str": provider_obj.get_action_token_str()})
 
+    @flask_app_obj.route("/fragments/command-catalog/<pod_id_str>")
+    def command_catalog_route_fn(pod_id_str):
+        if flask_app_obj.config["read_only_bool"]:
+            return _json_error_fn(403, "read_only", "Operational command catalog is disabled in this read-only session.")
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        target_obj = provider_obj.get_target_for_pod(pod_id_str)
+        if target_obj is None:
+            abort(404)
+        return render_template("_command_catalog.html", pod_id_str=pod_id_str,
+            command_list=build_command_catalog_list(target_obj, provider_obj.releases_root_path_str))
+
     @flask_app_obj.route("/fragments/action-preview/<pod_id_str>/<action_name_str>")
     def action_preview_fragment_route_fn(pod_id_str: str, action_name_str: str):
         if action_name_str not in ALL_ACTION_NAME_LIST:
             abort(404)
         provider_obj = flask_app_obj.config["data_provider_obj"]
-        summary_dict = provider_obj.get_summary_dict()
-        row_dict = get_pod_row_dict_by_id(summary_dict, pod_id_str)
-        if row_dict is None:
-            abort(404)
+        try:
+            target_obj, context_dict = _preview_context_tuple(pod_id_str, action_name_str)
+        except (ValueError, OSError) as exception_obj:
+            return _json_error_fn(409, "preview_unavailable", str(exception_obj))
+        row_dict = {**context_dict, "latest_vplan_id_int": context_dict["vplan_id_int"]}
+        confirmation_nonce_str = flask_app_obj.config["confirmation_store_obj"].issue(context_dict)
         preview_line_str_list = _build_action_preview_line_str_list(
             action_name_str, row_dict
         )
@@ -821,10 +981,13 @@ def create_app(
             preview_line_str_list=preview_line_str_list,
             post_url_str=post_url_str,
             action_token_str=provider_obj.get_action_token_str(),
+            confirmation_nonce_str=confirmation_nonce_str,
+            context_dict=context_dict,
         )
 
     @flask_app_obj.route("/fragments/action-preview-cancel/<pod_id_str>")
     def action_preview_cancel_route_fn(pod_id_str: str):
+        flask_app_obj.config["confirmation_store_obj"].cancel(pod_id_str)
         return (
             '<div class="text-xs text-ink-500 italic">'
             "Click an action above to see a preview before confirming."
@@ -844,6 +1007,37 @@ def create_app(
             action_token_str=provider_obj.get_action_token_str(),
             confirmation_text_str=MANUAL_ORDER_CONFIRMATION_TEXT_STR,
         )
+
+    @flask_app_obj.route("/api/pods/<pod_id_str>/manual-order-preview", methods=["POST"])
+    def manual_order_preview_route_fn(pod_id_str: str):
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        try:
+            request_body_dict = _read_action_body_dict(manual_preview_bool=True)
+        except ValueError as exception_obj:
+            return _json_error_fn(400, "invalid_body", str(exception_obj))
+        rejection_obj = validate_action_request(request.headers, request_body_dict, provider_obj.get_action_token_str())
+        if rejection_obj is not None:
+            return _json_error_fn(*rejection_obj)
+        try:
+            target_obj, context_dict = _preview_context_tuple(pod_id_str, "manual_order")
+            ticket_obj = build_manual_order_ticket_obj(release_obj=target_obj.release_obj,
+                request_body_dict=request_body_dict, submitted_timestamp_ts=datetime.now(timezone.utc))
+            if ticket_obj.limit_price_float is not None and not math.isfinite(ticket_obj.limit_price_float):
+                raise ValueError("Limit price must be finite and positive.")
+            manual_dict = {key_str: getattr(ticket_obj, key_str) for key_str in (
+                "asset_str", "side_str", "broker_order_type_str", "quantity_int", "limit_price_float",
+                "time_in_force_str", "operator_id_str", "reason_str")}
+            manual_dict["confirmation_text_str"] = MANUAL_ORDER_CONFIRMATION_TEXT_STR
+            context_dict["manual_order_dict"] = manual_dict
+            nonce_str = flask_app_obj.config["confirmation_store_obj"].issue(context_dict)
+        except (ValueError, OSError) as exception_obj:
+            return _json_error_fn(400, "manual_preview_rejected", str(exception_obj))
+        return render_template("_action_preview.html", row_dict=context_dict, context_dict=context_dict,
+            action_name_str="manual_order", action_label_str="Manual broker order",
+            preview_line_str_list=[f"{key_str}: {value_obj}" for key_str, value_obj in manual_dict.items()
+                                  if key_str != "confirmation_text_str"],
+            post_url_str=f"/api/pods/{pod_id_str}/manual-order", confirmation_nonce_str=nonce_str,
+            action_token_str=provider_obj.get_action_token_str())
 
     @flask_app_obj.route("/api/pods/<pod_id_str>/trade-sheet")
     def trade_sheet_download_route_fn(pod_id_str: str):
@@ -910,13 +1104,58 @@ def create_app(
 
     # ── helper that several action routes share ──────────────────────
 
+    def _preview_context_tuple(pod_id_str, action_name_str):
+        provider_obj = flask_app_obj.config["data_provider_obj"]
+        target_obj = provider_obj.get_target_for_pod(pod_id_str)
+        if target_obj is None:
+            raise ValueError("Unknown enabled Pod.")
+        context_dict = provider_obj.get_confirmation_context_dict(target_obj)
+        return target_obj, {**context_dict, "action_name_str": action_name_str}
+
+    def _read_action_body_dict(manual_preview_bool=False):
+        def unique_object_dict(pair_list):
+            result_dict = {}
+            for key_str, value_obj in pair_list:
+                if key_str in result_dict:
+                    raise ValueError("Duplicate request fields are not allowed.")
+                result_dict[key_str] = value_obj
+            return result_dict
+
+        if request.content_length is not None and request.content_length > 16384:
+            raise ValueError("Request body is too large.")
+        if request.mimetype == "application/json":
+            try:
+                body_dict = json.loads(request.get_data(), object_pairs_hook=unique_object_dict)
+            except (ValueError, UnicodeError) as exception_obj:
+                raise ValueError("Expected an unambiguous JSON object.") from exception_obj
+        else:
+            if any(len(request.form.getlist(key_str)) != 1 for key_str in request.form):
+                raise ValueError("Duplicate request fields are not allowed.")
+            body_dict = request.form.to_dict(flat=True)
+        allowed_set = {"confirmed_bool", "confirmation_nonce_str"}
+        if manual_preview_bool:
+            allowed_set = {"confirmed_bool", "asset_str", "side_str", "broker_order_type_str", "quantity_int",
+                "limit_price_float", "time_in_force_str", "operator_id_str", "reason_str", "confirmation_text_str"}
+        if not isinstance(body_dict, dict) or set(body_dict) - allowed_set:
+            raise ValueError("Unexpected request fields. Use a new preview to change the action.")
+        return body_dict
+
+    def _consume_target_obj(pod_id_str, action_name_str, request_body_dict):
+        expected_dict = flask_app_obj.config["confirmation_store_obj"].consume(
+            request_body_dict.get("confirmation_nonce_str"), pod_id_str, action_name_str)
+        target_obj, current_dict = _preview_context_tuple(pod_id_str, action_name_str)
+        if any(current_dict[key_str] != expected_dict.get(key_str) for key_str in current_dict):
+            raise ValueError("Target or saved execution state changed. Open a new preview.")
+        return replace(target_obj, operator_confirmation_dict=expected_dict)
+
     def _handle_action_post(pod_id_str: str, action_name_str: str):
         if action_name_str not in ALL_ACTION_NAME_LIST:
             return _json_error_fn(400, "unsupported_action", f"Unknown action {action_name_str!r}.")
         provider_obj = flask_app_obj.config["data_provider_obj"]
-        request_body_dict = request.get_json(silent=True)
-        if request_body_dict is None:
-            request_body_dict = request.form.to_dict(flat=True)
+        try:
+            request_body_dict = _read_action_body_dict()
+        except ValueError as exception_obj:
+            return _json_error_fn(400, "invalid_body", str(exception_obj))
         rejection_obj = validate_action_request(
             request.headers,
             request_body_dict,
@@ -925,9 +1164,10 @@ def create_app(
         if rejection_obj is not None:
             status_int, error_code_str, message_str = rejection_obj
             return _json_error_fn(status_int, error_code_str, message_str)
-        target_obj = provider_obj.get_target_for_pod(pod_id_str)
-        if target_obj is None:
-            return _json_error_fn(404, "unknown_pod", f"Unknown enabled pod_id_str {pod_id_str!r}.")
+        try:
+            target_obj = _consume_target_obj(pod_id_str, action_name_str, request_body_dict)
+        except (ValueError, OSError) as exception_obj:
+            return _json_error_fn(409, "confirmation_rejected", str(exception_obj))
         try:
             if action_name_str == "compare_reference":
                 job_dict = provider_obj.start_diff_job(target_obj)
@@ -935,6 +1175,8 @@ def create_app(
                 job_dict = provider_obj.start_action_job(action_name_str, target_obj)
         except DashboardActionInFlightError as exception_obj:
             return _json_error_fn(409, "action_in_flight", str(exception_obj))
+        except Exception:
+            return _json_error_fn(503, "dispatch_uncertain", "Outcome unknown. Inspect job and broker evidence before a new preview. This confirmation cannot be reused.")
         append_journal_entry(
             pod_id_str=str(job_dict.get("pod_id_str") or pod_id_str),
             mode_str=str(job_dict.get("mode_str") or "?"),
@@ -949,9 +1191,10 @@ def create_app(
 
     def _handle_manual_order_post(pod_id_str: str):
         provider_obj = flask_app_obj.config["data_provider_obj"]
-        request_body_dict = request.get_json(silent=True)
-        if request_body_dict is None:
-            request_body_dict = request.form.to_dict(flat=True)
+        try:
+            request_body_dict = _read_action_body_dict()
+        except ValueError as exception_obj:
+            return _json_error_fn(400, "invalid_body", str(exception_obj))
         rejection_obj = validate_action_request(
             request.headers,
             request_body_dict,
@@ -960,38 +1203,20 @@ def create_app(
         if rejection_obj is not None:
             status_int, error_code_str, message_str = rejection_obj
             return _json_error_fn(status_int, error_code_str, message_str)
-        target_obj = provider_obj.get_target_for_pod(pod_id_str)
-        if target_obj is None:
-            return _json_error_fn(404, "unknown_pod", f"Unknown enabled pod_id_str {pod_id_str!r}.")
+        try:
+            target_obj = _consume_target_obj(pod_id_str, "manual_order", request_body_dict)
+        except (ValueError, OSError) as exception_obj:
+            return _json_error_fn(409, "confirmation_rejected", str(exception_obj))
         try:
             result_dict = provider_obj.submit_manual_order_dict(
                 target_obj,
-                request_body_dict,
+                target_obj.operator_confirmation_dict["manual_order_dict"],
             )
         except DashboardActionInFlightError as exception_obj:
             return _json_error_fn(409, "action_in_flight", str(exception_obj))
-        except ValueError as exception_obj:
-            if request.headers.get("HX-Request"):
-                return (
-                    render_template(
-                        "_manual_order_result.html",
-                        result_dict=None,
-                        error_message_str=str(exception_obj),
-                    ),
-                    400,
-                )
-            return _json_error_fn(400, "manual_order_rejected", str(exception_obj))
-        except Exception as exception_obj:
-            if request.headers.get("HX-Request"):
-                return (
-                    render_template(
-                        "_manual_order_result.html",
-                        result_dict=None,
-                        error_message_str=str(exception_obj),
-                    ),
-                    503,
-                )
-            return _json_error_fn(503, "manual_order_failed", str(exception_obj))
+        except Exception:
+            uncertain_message_str = "Outcome unknown. Inspect broker evidence before creating another ticket. This confirmation cannot be reused."
+            return _json_error_fn(503, "manual_order_failed", uncertain_message_str)
         if request.headers.get("HX-Request"):
             return render_template(
                 "_manual_order_result.html",
@@ -1051,7 +1276,20 @@ def _consumer_inspector_report_dict(
             ),
             vps_id_str=inspector_report_dict.get("vps_id_str"),
         )
-    return apply_consumer_staleness_dict(inspector_report_dict)
+    consumer_report_dict = dict(apply_consumer_staleness_dict(inspector_report_dict))
+    canonical_verdict_obj = _resolve_verdict_with_health(summary_dict, mode_str=mode_str)
+    # The expanded inspector and compact header are views of the same verdict.
+    # Keep the raw report assessment for diagnostics; do not mutate the provider's
+    # cached report or change the standalone watchdog/runner contract here.
+    consumer_report_dict["source_assessment_dict"] = {
+        "overall_severity_str": consumer_report_dict.get("overall_severity_str"),
+        "overall_reason_str": consumer_report_dict.get("overall_reason_str"),
+    }
+    consumer_report_dict["overall_severity_str"] = canonical_verdict_obj.severity_str
+    consumer_report_dict["overall_reason_str"] = (
+        canonical_verdict_obj.title_str + ". " + canonical_verdict_obj.subtitle_str
+    )
+    return consumer_report_dict
 
 
 def _artifact_path_allowed_bool(artifact_path_str: str) -> bool:
@@ -1494,18 +1732,21 @@ def _build_action_preview_line_str_list(
         return [
             "Compares live fills and state against the same-condition backtest.",
             "Read-only relative to live trading - no orders are sent.",
+            "Creates comparison artifacts and may update local data caches.",
         ]
     if action_name_str == "tick":
         return [
             f"Manually advances the {row_dict.get('mode_str')}/{row_dict.get('pod_id_str')} pod scheduler.",
             "May build a new DecisionPlan if the data gate allows.",
+            "Can submit real orders when LIVE execution is due, reconcile positions, "
+            "and write an EOD snapshot. This is not a status check.",
         ]
     if action_name_str == "submit_vplan":
         latest_vplan_id = row_dict.get("latest_vplan_id_int") or "—"
         return [
             f"Submits VPlan #{latest_vplan_id} to the broker.",
             "Sends real orders against the configured IBKR account if the pod is LIVE.",
-            "Reference orders only on PAPER/INCUBATION pods.",
+            "PAPER sends orders to the paper broker account; INCUBATION uses the virtual ledger.",
         ]
     if action_name_str == "post_execution_reconcile":
         return [
@@ -1515,12 +1756,17 @@ def _build_action_preview_line_str_list(
     if action_name_str == "eod_snapshot":
         return [
             "Writes the EOD equity/cash/position snapshot for this pod.",
+            "Queries the configured broker in LIVE/PAPER and writes local state.",
             "Used by the equity curve and combined-book rollup.",
         ]
     return [f"Action: {action_name_str}"]
 
 
 def _json_error_fn(status_int: int, error_code_str: str, message_str: str):
+    if request.headers.get("HX-Request") and request.path.startswith(("/api/pods/", "/fragments/action-preview/")):
+        response_obj = Response(render_template("_action_error.html", message_str=message_str), status=status_int)
+        response_obj.headers["X-Alpha-Action-Error"] = "true"
+        return response_obj
     response_obj = jsonify({"error_code_str": error_code_str, "message_str": message_str})
     response_obj.status_code = status_int
     return response_obj

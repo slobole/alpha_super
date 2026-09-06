@@ -113,6 +113,13 @@ class DashboardDataProvider:
     def get_target_for_pod(self, pod_id_str: str) -> DashboardPodTarget | None:
         return self.app_obj().get_target_for_pod(pod_id_str)
 
+    def get_confirmation_context_dict(self, target_obj):
+        from alpha.live.dashboard_authorization import read_confirmation_context_dict
+
+        return {**read_confirmation_context_dict(target_obj),
+                "releases_root_path_str": str(self.releases_root_path_str),
+                "config_path_str": str(self.config_path_str)}
+
     def start_diff_job(self, target_obj: DashboardPodTarget) -> dict[str, Any]:
         app_obj = self.app_obj()
         assert app_obj.diff_job_manager_obj is not None
@@ -143,16 +150,18 @@ class DashboardDataProvider:
         request_body_dict: dict[str, Any],
     ) -> dict[str, Any]:
         from alpha.live.manual_order import submit_manual_order_ticket_dict
+        from alpha.live.dashboard_authorization import operator_execution_context
 
         app_obj = self.app_obj()
         assert app_obj.pod_job_gate_obj is not None
         app_obj.pod_job_gate_obj.acquire(target_obj.release_obj.pod_id_str)
         try:
-            return submit_manual_order_ticket_dict(
-                release_obj=target_obj.release_obj,
-                request_body_dict=request_body_dict,
-                log_path_str=app_obj.event_log_path_str,
-            )
+            with operator_execution_context(target_obj, self.get_target_for_pod, "manual_order"):
+                return submit_manual_order_ticket_dict(
+                    release_obj=target_obj.release_obj,
+                    request_body_dict=request_body_dict,
+                    log_path_str=app_obj.event_log_path_str,
+                )
         finally:
             app_obj.pod_job_gate_obj.release(target_obj.release_obj.pod_id_str)
 

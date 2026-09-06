@@ -11,20 +11,35 @@ no build step. Lives on the trading VPS, reached over Tailscale only.
 
 ## Bring it up
 
+Startup now requires `ALPHA_OPS_OPERATOR_ACCESS_TOKEN_STR`: a private credential
+of at least 24 characters, supplied in protected `config.env` or the service
+environment. Login username is `operator`. Never put the credential in a URL,
+shell argument, shared screenshot, repository file or operator report. The
+credential protects the entire console, including `/healthz`, artifacts and
+action endpoints. This is an explicit startup compatibility change.
+
+Keep the listener on loopback. Use Tailscale Serve HTTPS for another machine;
+do not send HTTP Basic credentials to a remote plain-HTTP listener.
+
 ```bash
 cd /srv/alpha
-uv sync
-uv run python -m alpha.live.dashboard_v3 --host 127.0.0.1 --port 8080
+uv sync --locked
+uv run python -m alpha.live.dashboard_v3 --host 127.0.0.1 --port 8080 --read-only
 ```
 
-That's it for a manual smoke test. From your laptop (also on the tailnet):
+On the VPS itself, open `http://127.0.0.1:8080/` and authenticate. For a laptop,
+first configure the HTTPS proxy below; a loopback listener is not directly
+reachable at `http://<vps-hostname>:8080/`.
 
-```
-http://<vps-hostname>:8080/
-```
+`--read-only` blocks operational POSTs and action previews server-side, prevents
+notification sends/state writes and disables file-generating trade-sheet GETs.
+It does not merely hide buttons. Remove it only under a separately approved
+operational rollout. Client pages themselves never submit trading commands.
 
-If Tailscale's MagicDNS is on you can use the hostname directly; otherwise use
-the Tailscale IP from `tailscale ip -4` on the VPS.
+For client ownership, financial reporting and the synthetic preview, read
+[CLIENT_OPERATOR_WORKSPACE.md](CLIENT_OPERATOR_WORKSPACE.md). When a registry is
+configured, `/` opens the client directory; `/vps` retains the explicitly global
+advanced workspace. No deployment is performed by this document.
 
 ### config.env is loaded automatically
 
@@ -115,10 +130,15 @@ can alert twice — harmless, accepted.
 ## Live vs Backtest comparison
 
 The pod detail page includes a compact Live vs Backtest card when a comparison
-artifact exists. It is read-only: it compares observed live fills and state to a
-same-condition reference backtest, and it does not send orders.
+artifact exists. Viewing a saved artifact is read-only. It shows observed live
+fills/state against a reference; inspect dates, capital, release and accounting
+basis before treating it as a same-condition comparison. Legacy artifacts are
+not automatically certified decision-time replays.
 
-Run it from Operator Tools with `Live vs Backtest`. Artifacts are written under:
+Generating a new comparison from Operator Tools (`Live vs Backtest`) does not
+send orders, but it writes artifacts and may populate data caches. This action
+is disabled under `--read-only`; it is not a passive status check. When explicitly
+authorized in a write-enabled console, its artifacts are written under:
 
 ```text
 results/live_reference_compare/<mode>/<pod_id>/<timestamp>/
@@ -157,7 +177,7 @@ From the VPS:
 
 ```bash
 ss -tlnp | grep 8080      # should show 127.0.0.1:8080 only
-curl -s http://127.0.0.1:8080/healthz   # ok
+curl --user operator http://127.0.0.1:8080/healthz  # prompts for the private credential
 ```
 
 From a non-tailnet machine on the VPS's public IP:
@@ -172,21 +192,35 @@ If that returns HTML, fix the bind before logging off.
 
 | Path | Purpose |
 |---|---|
+| `/clients` | Operator-only client selection; never an investor portal |
+| `/clients/<client>/<view>` | Overview, performance, strategies, exposure, activity, diagnostics, report |
+| `/vps` | Advanced all-VPS scope; client selection does not apply here |
 | `/live`, `/paper`, `/incubation` | Mode pages |
 | `/journal` | Operator intervention log |
-| `/healthz` | Plain-text health check |
+| `/healthz` | Authenticated application check; not proof of broker/process health |
 | `/fragments/top-bar` | Polled (5s) — also runs notification check |
 | `/fragments/health-strip` | Polled (15s) |
 | `/fragments/schedule-strip` | Polled (30s) |
 | `/fragments/pod-detail/<id>` | Expanded detail (polled 5s while open) |
 | `/fragments/events-tail/<id>` | Live event log (polled 5s while open) |
 | `/fragments/equity-chart/<id>?window=30d\|90d\|all` | SVG curve |
-| `/api/action-token` | Token for action POSTs |
+| `/api/action-token` | Same-origin action token; not sufficient without a one-use preview approval |
+| `/fragments/command-catalog/<id>` | Fixed PowerShell Copy controls, separate from action previews; disabled read-only |
+| `POST /api/pods/<id>/manual-order-preview` | Validate/freeze a manual ticket; no broker submission |
+| `POST /api/pods/<id>/manual-order` | Consume frozen ticket approval once and dispatch |
 | `POST /api/pods/<id>/diff/run` | Live vs Backtest |
 | `POST /api/pods/<id>/actions/<name>` | tick / submit_vplan / reconcile / eod_snapshot |
 | `GET /api/jobs/<id>` | Job status (HTML for HTMX, JSON otherwise) |
 
 ## Where things live
+
+Supported startup defaults to **read-only**. Enabling advanced operations requires
+the explicit `--enable-actions` flag plus the operator credential. Keep that flag
+out of the read-only service template and demo. Preview approval lasts 120 seconds,
+is bound to the exact target/release/saved state and cannot be reused after dispatch.
+Tick can create new plans; direct submit/reconcile are bound to captured plan intent.
+After an uncertain result inspect broker/job evidence before creating a new approval.
+Single dashboard process only; CLI/scheduler execution does not inherit UI approvals.
 
 - Code: `alpha/live/dashboard_v3/`
 - Templates: `alpha/live/dashboard_v3/templates/`
