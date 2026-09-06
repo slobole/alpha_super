@@ -20,15 +20,22 @@ WorkingDirectory=/srv/alpha
 # Bind to localhost only; Tailscale handles the tailnet exposure.
 ExecStart=/srv/alpha/.venv/bin/python -m alpha.live.dashboard_v3 \
     --host 127.0.0.1 \
-    --port 8080
+    --port 8080 \
+    --read-only
 
 # The dashboard auto-loads config.env from WorkingDirectory at startup, so
 # ALPHA_USE_NORGATE_SNAPSHOT_BOOL and similar vars come from there. If you'd
 # rather set them inline, uncomment the lines below and add --skip-env-file
 # to ExecStart.
 # Environment=ALPHA_USE_NORGATE_SNAPSHOT_BOOL=true
+# ALPHA_OPS_OPERATOR_ACCESS_TOKEN_STR (24+ characters) is required in protected
+# config.env or the service environment. Do not put its value in this template.
+# Actions require replacing --read-only with --enable-actions, only under a
+# separately approved operational rollout; removing --read-only alone is inert.
 
-# Discord red-alert webhook (leave unset to silence notifications).
+# Read-only dashboard does not send alerts. Configure the independent watchdog
+# for unattended notifications; do not enable actions just to obtain alerts.
+# Optional actions-enabled dashboard webhook (browser-poll driven):
 # Environment=ALPHA_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 
 Restart=on-failure

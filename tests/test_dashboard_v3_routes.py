@@ -9,6 +9,10 @@ of the dicts mirrors what ``build_dashboard_summary_dict`` and
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from dataclasses import dataclass
+from types import SimpleNamespace
+import json
+import re
 from typing import Any
 
 import pytest
@@ -159,15 +163,25 @@ def _build_summary_dict() -> dict[str, Any]:
     }
 
 
+@dataclass
 class StubTarget:
-    def __init__(self, pod_id_str: str, mode_str: str) -> None:
-        # Mirrors the shape used by alpha.live.dashboard.DashboardPodTarget enough
-        # for tests; production code only reads release_obj.pod_id_str/mode_str.
-        class _ReleaseShim:
-            pass
-        self.release_obj = _ReleaseShim()
-        self.release_obj.pod_id_str = pod_id_str
-        self.release_obj.mode_str = mode_str
+    pod_id_str: str
+    mode_str: str
+    operator_confirmation_dict: dict | None = None
+
+    @property
+    def release_obj(self):
+        return SimpleNamespace(pod_id_str=self.pod_id_str, mode_str=self.mode_str)
+
+
+def preview_nonce_str(client_obj, action_str="submit_vplan", pod_str="dv2_caspersky_live"):
+    response_obj = client_obj.get(f"/fragments/action-preview/{pod_str}/{action_str}")
+    assert response_obj.status_code == 200
+    return re.search(r'"confirmation_nonce_str": "([^"]+)"', response_obj.get_data(as_text=True)).group(1)
+
+
+def confirmed_body_str(client_obj, action_str="submit_vplan"):
+    return json.dumps({"confirmed_bool": True, "confirmation_nonce_str": preview_nonce_str(client_obj, action_str)})
 
 
 class StubDataProvider:
@@ -190,6 +204,15 @@ class StubDataProvider:
 
     def get_action_token_str(self) -> str:
         return self.ACTION_TOKEN_STR
+
+    def get_confirmation_context_dict(self, target_obj):
+        row_dict = next(row_dict for row_dict in self.summary_dict["pod_row_dict_list"]
+                        if row_dict["pod_id_str"] == target_obj.release_obj.pod_id_str)
+        return {"pod_id_str": row_dict["pod_id_str"], "mode_str": row_dict["mode_str"],
+                "account_route_str": row_dict["account_route_str"], "release_id_str": "test-release",
+                "state_hash_str": str(row_dict["latest_vplan_id_int"]),
+                "decision_plan_id_int": row_dict["latest_decision_plan_id_int"],
+                "vplan_id_int": row_dict["latest_vplan_id_int"]}
 
     def get_target_for_pod(self, pod_id_str: str) -> StubTarget | None:
         matching_row_dict = next(
@@ -815,7 +838,18 @@ def test_live_page_renders_inspector_verdict(test_client_obj, provider_obj) -> N
 # ── HTMX fragments ────────────────────────────────────────────────────────
 
 
-def test_live_page_uses_mode_scoped_inspector_report(test_client_obj, provider_obj) -> None:
+def test_live_page_uses_mode_scoped_inspector_report(test_client_obj, provider_obj, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    # Host disk pressure must not replace the missing-evidence verdict in this
+    # mode-scoping fixture. Disk thresholds have dedicated health tests.
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.health.shutil.disk_usage",
+        lambda path_obj: SimpleNamespace(total=100, used=20, free=80),
+    )
+    # This test isolates evidence/mode scoping; old synthetic VPlan clocks are
+    # not a trading-window fixture (that behavior has its own schedule suite).
+    monkeypatch.setattr("alpha.live.dashboard_v3.app.build_trading_window_list", lambda *arg_tuple, **kwarg_dict: [])
     generated_at_ts = datetime(2026, 5, 21, 16, 0, tzinfo=UTC)
     live_row_dict = _build_pod_row_dict("live_green", "live", "green")
     incubation_row_dict = _build_pod_row_dict("incubation_missed", "incubation", "yellow")
@@ -842,7 +876,11 @@ def test_live_page_uses_mode_scoped_inspector_report(test_client_obj, provider_o
 
     assert response_obj.status_code == 200
     assert "Inspector" in response_text_str
-    assert "All enabled PODs in scope are proven fresh and green." in response_text_str
+    # The LIVE fixture omits Norgate/EOD evidence. Both header and inspector
+    # must say unknown, even though the raw Pod report was green. The disabled
+    # mode's missed window must not leak into this LIVE assessment.
+    assert response_text_str.count("Cannot verify live health") == 2
+    assert "All enabled PODs in scope are proven fresh and green." not in response_text_str
     assert "Review missed window" not in response_text_str
 
 
@@ -1098,6 +1136,7 @@ def test_main_module_loads_config_env_before_serving(monkeypatch, tmp_path) -> N
     """
     from alpha.live.dashboard_v3 import __main__ as dashboard_main_module
     from scripts import norgate_config_env
+    monkeypatch.setenv("ALPHA_OPS_OPERATOR_ACCESS_TOKEN_STR", "synthetic-test-operator-access-123456")
 
     config_env_path_obj = tmp_path / "config.env"
     config_env_path_obj.write_text(
@@ -1132,6 +1171,7 @@ def test_main_module_loads_config_env_before_serving(monkeypatch, tmp_path) -> N
 def test_main_module_skip_env_file_flag_leaves_env_untouched(monkeypatch, tmp_path) -> None:
     from alpha.live.dashboard_v3 import __main__ as dashboard_main_module
     from scripts import norgate_config_env
+    monkeypatch.setenv("ALPHA_OPS_OPERATOR_ACCESS_TOKEN_STR", "synthetic-test-operator-access-123456")
 
     config_env_path_obj = tmp_path / "config.env"
     config_env_path_obj.write_text("FOO_FOR_TEST=value_from_file\n", encoding="utf-8")
@@ -1957,6 +1997,129 @@ def test_action_token_endpoint_returns_provider_token(test_client_obj) -> None:
     assert payload_dict["action_token_str"] == StubDataProvider.ACTION_TOKEN_STR
 
 
+@pytest.mark.parametrize("route_str", [
+    "/api/pods/dv2_caspersky_live/actions/tick",
+    "/api/pods/dv2_caspersky_live/actions/submit_vplan",
+    "/api/pods/dv2_caspersky_live/actions/post_execution_reconcile",
+    "/api/pods/dv2_caspersky_live/actions/eod_snapshot",
+    "/api/pods/dv2_caspersky_live/diff/run",
+    "/api/pods/dv2_caspersky_live/manual-order",
+])
+def test_read_only_rejects_authenticated_mutation_before_provider_access(tmp_path, monkeypatch, route_str):
+    provider_obj = StubDataProvider()
+
+    def forbidden_provider_access_fn(*arg_tuple, **kwarg_dict):
+        pytest.fail("Read-only request reached operational provider")
+
+    monkeypatch.setattr(provider_obj, "get_action_token_str", forbidden_provider_access_fn)
+    monkeypatch.setattr(provider_obj, "get_target_for_pod", forbidden_provider_access_fn)
+    journal_path_obj = tmp_path / "journal.jsonl"
+    flask_app_obj = create_app(
+        provider_obj, read_only_bool=True, journal_path_str=str(journal_path_obj),
+    )
+    response_obj = flask_app_obj.test_client().post(
+        route_str, json={"confirmed_bool": True},
+        headers={"Origin": "http://localhost", "X-Alpha-Action-Token": "stub-token"},
+    )
+    assert response_obj.status_code == 403
+    assert response_obj.get_json()["error_code_str"] == "read_only_session"
+    assert not provider_obj.action_job_dict_list
+    assert not journal_path_obj.exists()
+
+
+@pytest.mark.parametrize("route_str", [
+    "/api/action-token",
+    "/fragments/action-preview/dv2_caspersky_live/tick",
+    "/fragments/manual-order-ticket/dv2_caspersky_live",
+    "/api/pods/dv2_caspersky_live/trade-sheet",
+])
+def test_read_only_blocks_action_previews_and_file_generating_gets(tmp_path, monkeypatch, route_str):
+    provider_obj = StubDataProvider()
+
+    def forbidden_provider_access_fn(*arg_tuple, **kwarg_dict):
+        pytest.fail("Read-only request reached operational provider")
+
+    monkeypatch.setattr(provider_obj, "get_action_token_str", forbidden_provider_access_fn)
+    monkeypatch.setattr(provider_obj, "get_target_for_pod", forbidden_provider_access_fn)
+    flask_app_obj = create_app(provider_obj, read_only_bool=True)
+    assert flask_app_obj.test_client().get(route_str).status_code == 403
+
+
+def test_read_only_refresh_keeps_notifications_and_journal_untouched(tmp_path, monkeypatch):
+    provider_obj = StubDataProvider()
+
+    def forbidden_notification_fn(*arg_tuple, **kwarg_dict):
+        pytest.fail("Read-only refresh attempted notification processing")
+
+    monkeypatch.setattr(
+        "alpha.live.dashboard_v3.app.check_and_notify_for_red_transitions",
+        forbidden_notification_fn,
+    )
+    notification_path_obj = tmp_path / "notifications.json"
+    journal_path_obj = tmp_path / "journal.jsonl"
+    flask_app_obj = create_app(
+        provider_obj, read_only_bool=True,
+        notification_state_path_str=str(notification_path_obj),
+        journal_path_str=str(journal_path_obj),
+    )
+    client_obj = flask_app_obj.test_client()
+    for route_str in ["/", "/pods/live", "/events", "/fragments/top-bar?mode=live"]:
+        assert client_obj.get(route_str).status_code == 200
+    overview_text_str = client_obj.get("/").get_data(as_text=True)
+    assert "Read-only" in overview_text_str
+    detail_text_str = client_obj.get(
+        "/fragments/pod-detail/dv2_caspersky_live"
+    ).get_data(as_text=True)
+    assert "operational actions are disabled" in detail_text_str
+    assert "hx-post=" not in detail_text_str
+    assert "/trade-sheet" not in detail_text_str
+    assert "stub-token" not in detail_text_str
+    assert not notification_path_obj.exists()
+    assert not journal_path_obj.exists()
+
+
+def test_tick_preview_discloses_real_order_and_state_effects(test_client_obj):
+    response_obj = test_client_obj.get("/fragments/action-preview/dv2_caspersky_live/tick")
+    preview_text_str = response_obj.get_data(as_text=True)
+    assert "Can submit real orders" in preview_text_str
+    assert "not a status check" in preview_text_str
+
+
+@pytest.mark.parametrize("view_str", ["status", "lifecycle", "events", "provenance", "operations"])
+def test_diagnostics_views_render_without_executing_actions(tmp_path, view_str):
+    provider_obj = StubDataProvider()
+    flask_app_obj = create_app(
+        provider_obj, read_only_bool=True, journal_path_str=str(tmp_path / "journal.jsonl"),
+        notification_state_path_str=str(tmp_path / "notifications.json"),
+    )
+    response_obj = flask_app_obj.test_client().get(
+        f"/diagnostics?mode=live&pod=dv2_caspersky_live&view={view_str}"
+    )
+    assert response_obj.status_code == 200
+    assert "Diagnostics" in response_obj.get_data(as_text=True)
+    assert "Read-only" in response_obj.get_data(as_text=True)
+    assert "Release owner:" in response_obj.get_data(as_text=True)
+    assert "not a selected client mandate" in response_obj.get_data(as_text=True)
+    assert not provider_obj.action_job_dict_list
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_diagnostic_download_is_in_memory_and_scoped(tmp_path):
+    provider_obj = StubDataProvider()
+    flask_app_obj = create_app(provider_obj, read_only_bool=True)
+    response_obj = flask_app_obj.test_client().get(
+        "/diagnostics?mode=live&pod=dv2_caspersky_live&download=json"
+    )
+    assert response_obj.status_code == 200
+    assert "attachment" in response_obj.headers["Content-Disposition"]
+    assert response_obj.get_json()["scope_dict"]["pod_id_str"] == "dv2_caspersky_live"
+    assert "qp_mr_live" not in response_obj.get_data(as_text=True)
+    assert list(tmp_path.iterdir()) == []
+    assert flask_app_obj.test_client().get("/diagnostics?mode=live&pod=dv2_caspersky_paper").status_code == 404
+    assert flask_app_obj.test_client().get("/diagnostics?view=arbitrary_command").status_code == 404
+    assert flask_app_obj.test_client().get("/diagnostics?from=bad").status_code == 400
+
+
 def test_action_preview_fragment_renders_confirm_button(test_client_obj) -> None:
     response_obj = test_client_obj.get(
         "/fragments/action-preview/dv2_caspersky_live/submit_vplan"
@@ -2017,7 +2180,7 @@ def test_action_post_starts_job_and_appends_journal_entry(
 ) -> None:
     response_obj = test_client_obj.post(
         "/api/pods/dv2_caspersky_live/actions/submit_vplan",
-        data='{"confirmed_bool": true}',
+        data=confirmed_body_str(test_client_obj),
         headers=ACTION_HEADERS_DICT,
     )
     assert response_obj.status_code == 202
@@ -2039,20 +2202,20 @@ def test_action_post_starts_job_and_appends_journal_entry(
     assert entry_dict["job_id_str"] == job_dict["job_id_str"]
 
 
-def test_action_post_for_unknown_pod_404s(test_client_obj) -> None:
+def test_action_post_for_unknown_pod_requires_bound_confirmation(test_client_obj) -> None:
     response_obj = test_client_obj.post(
         "/api/pods/no_such_pod/actions/submit_vplan",
         data='{"confirmed_bool": true}',
         headers=ACTION_HEADERS_DICT,
     )
-    assert response_obj.status_code == 404
-    assert response_obj.get_json()["error_code_str"] == "unknown_pod"
+    assert response_obj.status_code == 409
+    assert response_obj.get_json()["error_code_str"] == "confirmation_rejected"
 
 
 def test_diff_run_post_starts_diff_job(test_client_obj, provider_obj) -> None:
     response_obj = test_client_obj.post(
         "/api/pods/dv2_caspersky_live/diff/run",
-        data='{"confirmed_bool": true}',
+        data=confirmed_body_str(test_client_obj, "compare_reference"),
         headers=ACTION_HEADERS_DICT,
     )
     assert response_obj.status_code == 202
@@ -2063,7 +2226,7 @@ def test_diff_run_post_starts_diff_job(test_client_obj, provider_obj) -> None:
 def test_diff_run_htmx_form_post_returns_job_badge(test_client_obj, provider_obj) -> None:
     response_obj = test_client_obj.post(
         "/api/pods/dv2_caspersky_live/diff/run",
-        data={"confirmed_bool": "true"},
+        data={"confirmed_bool": "true", "confirmation_nonce_str": preview_nonce_str(test_client_obj, "compare_reference")},
         headers={
             "Host": "localhost",
             "Origin": "http://localhost",
@@ -2085,7 +2248,7 @@ def test_job_status_endpoint_returns_json_for_unknown_caller(
 ) -> None:
     test_client_obj.post(
         "/api/pods/dv2_caspersky_live/actions/submit_vplan",
-        data='{"confirmed_bool": true}',
+        data=confirmed_body_str(test_client_obj),
         headers=ACTION_HEADERS_DICT,
     )
     job_id_str = provider_obj.action_job_dict_list[0]["job_id_str"]
@@ -2100,7 +2263,7 @@ def test_job_status_endpoint_returns_html_for_htmx_caller(
 ) -> None:
     test_client_obj.post(
         "/api/pods/dv2_caspersky_live/actions/submit_vplan",
-        data='{"confirmed_bool": true}',
+        data=confirmed_body_str(test_client_obj),
         headers=ACTION_HEADERS_DICT,
     )
     job_id_str = provider_obj.action_job_dict_list[0]["job_id_str"]
@@ -2119,7 +2282,7 @@ def test_journal_page_lists_entries_after_action(
 ) -> None:
     test_client_obj.post(
         "/api/pods/dv2_caspersky_live/actions/submit_vplan",
-        data='{"confirmed_bool": true}',
+        data=confirmed_body_str(test_client_obj),
         headers=ACTION_HEADERS_DICT,
     )
     response_obj = test_client_obj.get("/journal")

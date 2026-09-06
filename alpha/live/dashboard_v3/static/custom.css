@@ -3,7 +3,7 @@
 
    Hues and type mirror the desk palette in alpha/engine/theme.py so LIVE
    and BENCH read as one product. Semantic classes (ok/warn/bad) are
-   defined in base.html's tailwind.config; nothing here changes what any
+   defined in scripts/review/dashboard_tailwind.config.cjs; nothing here changes what any
    state means — only how it is drawn. */
 
 /* Vendored type: the console must render identically with no network.
@@ -62,4 +62,167 @@ table tbody tr td { border-bottom: 1px solid #eef2f6; }
 .equity-chart-surface {
   background: #ffffff;
   border: 1px solid #e2e8f0;
+}
+
+/* Operator workspace grammar. The same components will carry the unified
+   financial overview and report controls; these classes have no state logic. */
+.ops-page-heading { margin-bottom: 24px; }
+.ops-eyebrow { color: #64748b; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+.ops-page-heading h1 { font-size: 30px; font-weight: 600; line-height: 1.3; margin: 6px 0; }
+.ops-page-heading p:last-child { color: #475569; max-width: 76ch; }
+.ops-toolbar { display: flex; flex-wrap: wrap; gap: 14px; align-items: end; margin: 18px 0; }
+.ops-toolbar label { display: grid; gap: 5px; font-size: 12px; color: #475569; }
+.ops-toolbar input, .ops-toolbar select { border: 1px solid #cbd5e1; padding: 8px 10px; background: white; color: #16181d; font: inherit; font-size: 14px; min-height: 38px; max-width: 100%; }
+.ops-button { padding: 8px 16px; min-height: 38px; background: #16181d; color: white; font-size: 14px; border: 1px solid #16181d; cursor: pointer; }
+.ops-button:hover { background: #334155; }
+.ops-context { display: flex; flex-wrap: wrap; gap: 10px 24px; font-size: 13px; color: #475569; padding: 12px 0; border-top: 1px solid #e2e8f0; }
+.ops-context strong { color: #16181d; }
+.ops-tabs { display: flex; flex-wrap: wrap; gap: 24px; border-bottom: 1px solid #cbd5e1; margin-bottom: 20px; }
+.ops-tabs a { color: #475569; padding: 10px 0; font-size: 14px; border-bottom: 2px solid transparent; }
+.ops-tabs a[aria-current=page] { color: #16181d; border-color: #16181d; font-weight: 600; }
+.ops-note { background: #f8fafc; border-left: 3px solid #64748b; padding: 12px 16px; color: #475569; font-size: 13px; margin: 18px 0; }
+.ops-two-column { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.ops-panel { border: 1px solid #e2e8f0; padding: 20px; margin-bottom: 20px; min-width: 0; }
+.ops-panel h2 { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+.ops-panel p { font-size: 14px; color: #475569; line-height: 1.6; margin-bottom: 14px; }
+.ops-panel .ops-status-title { font-size: 20px; color: #16181d; font-weight: 500; }
+.ops-panel-heading { display: flex; justify-content: space-between; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+.ops-facts { display: grid; grid-template-columns: minmax(130px, .8fr) minmax(0, 1.2fr); gap: 12px; font-size: 13px; }
+.ops-facts dt { color: #64748b; }.ops-facts dd { overflow-wrap: anywhere; }
+.ops-table { width: 100%; font-size: 14px; border-collapse: collapse; }
+.ops-table th, .ops-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #e2e8f0; }
+.ops-table thead th { font-size: 12px; color: #64748b; font-weight: 500; }
+.ops-code { overflow: auto; max-height: 560px; font-size: 12px; padding: 16px; background: #f8fafc; margin-top: 12px; }
+.ops-command { border-top: 1px solid #e2e8f0; padding: 14px 0; margin-top: 12px; font: 13px/1.5 'Segoe UI', sans-serif; }
+.ops-command textarea { display: block; width: 100%; resize: vertical; padding: 8px; margin: 8px 0; font-family: monospace; border: 1px solid #e2e8f0; }
+.ops-confirmation { border: 1px solid #d9770644; background: #fffbeb; padding: 18px; border-radius: 6px; font: 13px/1.6 'Segoe UI', sans-serif; overflow-wrap: anywhere; }
+.ops-confirmation > div:first-child { font-weight: 600; margin-bottom: 8px; }
+.ops-confirmation ul { margin: 12px 0; padding-left: 20px; }
+.ops-confirmation button { border: 1px solid #cbd5e1; background: white; padding: 8px 14px; border-radius: 4px; cursor: pointer; margin: 8px 8px 8px 0; }
+.ops-confirmation button[hx-post] { background: #b91c1c; border-color: #b91c1c; color: white; font-weight: 600; }
+.ops-confirmation button:disabled { opacity: .5; cursor: wait; }
+.ops-text-link { color: #2563eb; font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
+@media (max-width: 900px) { .ops-two-column { grid-template-columns: 1fr; } }
+
+/* Client reporting is self-contained/offline: no runtime utility CDN. */
+.client-workspace { margin: 0; color: #16181d; background: #fff; font: 14px/1.5 'IBM Plex Sans', 'Segoe UI', sans-serif; display: flex; min-height: 100vh; }
+.client-workspace * { box-sizing: border-box; }
+.client-workspace a { color: inherit; text-decoration: none; }
+.client-workspace .ops-text-link { color: #2563eb; text-decoration: underline; }
+.client-workspace .ops-button { color: #fff; }
+.client-workspace h1, .client-workspace h2, .client-workspace p { margin-top: 0; }
+.client-workspace ul { padding-left: 20px; }
+.client-workspace li { margin: 6px 0; }
+.client-workspace summary { cursor: pointer; }
+.client-rail { width: 216px; flex: 0 0 216px; padding: 24px 18px; border-right: 1px solid #e2e8f0; min-height: 100vh; display: flex; flex-direction: column; }
+.client-brand { font: 600 14px 'IBM Plex Mono', monospace; display: flex; align-items: center; gap: 10px; margin-bottom: 40px; }
+.client-brand span { border: 1px solid #16181d; padding: 4px 9px; }
+.client-rail .ops-eyebrow { font-size: 10px; margin-bottom: 12px; }
+.client-rail nav { display: grid; gap: 4px; }
+.client-rail nav a { padding: 10px 8px; border-left: 2px solid transparent; color: #475569; }
+.client-rail nav a[aria-current=page] { border-left-color: #16181d; background: #f8fafc; color: #16181d; font-weight: 600; }
+.client-rail nav a:hover { background: #f8fafc; }
+.client-rail-separator { border-top: 1px solid #e2e8f0; margin: 14px 0; }
+.client-rail-foot { color: #64748b; font-size: 11px; margin-top: auto; padding-top: 40px; }
+.client-main { min-width: 0; flex: 1; }
+.client-header { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; align-items: center; padding: 18px 30px; border-bottom: 1px solid #e2e8f0; }
+.client-muted { color: #64748b; font-size: 12px; }
+.client-badge { color: #475569; border: 1px solid #cbd5e1; padding: 3px 8px; font: 10px 'IBM Plex Mono', monospace; }
+.client-content { padding: 30px; max-width: 1480px; margin: auto; }
+.client-footer { padding: 20px; text-align: center; font-size: 11px; color: #64748b; border-top: 1px solid #e2e8f0; }
+.client-card:hover { border-color: #64748b; }
+.client-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid #e2e8f0; margin: 20px 0; }
+.client-kpis > div { padding: 20px; border-right: 1px solid #e2e8f0; }
+.client-kpis > div:last-child { border-right: 0; }
+.client-kpis p { color: #64748b; font-size: 12px; margin-bottom: 8px; }
+.client-kpis strong { display: block; font-size: clamp(20px, 2vw, 30px); font-weight: 500; letter-spacing: -.03em; }
+.client-kpis small { display: block; color: #64748b; margin-top: 8px; font-size: 11px; }
+.client-finance-grid { grid-template-columns: minmax(320px, .85fr) minmax(0, 1.15fr); }
+.client-bridge { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 13px 20px; margin: 0 0 18px; }
+.client-bridge dt { color: #475569; font-size: 13px; }
+.client-bridge dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.client-bridge small { display: block; font-size: 10px; color: #64748b; }
+.client-bridge .client-bridge-total { font-weight: 600; padding-top: 12px; border-top: 1px solid #cbd5e1; color: #16181d; }
+.ops-panel .client-footnote { color: #64748b; font-size: 11px; margin: 12px 0 0; }
+.client-nav-chart { width: 100%; height: auto; display: block; }
+.client-chart-labels, .client-chart-dates { display: flex; justify-content: space-between; gap: 20px; font-size: 11px; color: #64748b; }
+.client-table-scroll { overflow-x: auto; }
+.client-status { border-left: 3px solid #64748b; }
+.client-status[data-severity=green] { border-left-color: #16803d; }
+.client-status[data-severity=yellow] { border-left-color: #b77909; }
+.client-status[data-severity=red] { border-left-color: #dc2626; }
+.client-lifecycle { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.client-lifecycle span { padding: 6px 8px; border: 1px solid #cbd5e1; font-size: 11px; }
+.client-lifecycle [data-severity=green] { color: #166534; border-color: #86b89a; }
+.client-lifecycle [data-severity=red] { color: #b91c1c; border-color: #e4a4a4; }
+.client-event { border-bottom: 1px solid #e2e8f0; padding: 14px 0; }
+.client-switch { max-width: 320px; font-size: 12px; }
+.client-switch a { display: block; padding: 8px; color: #2563eb; }
+.client-calendar { margin-top: 20px; }
+.client-workspace .ops-page-heading { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.client-workspace .ops-page-heading h1 { margin: 0; font-size: 28px; }
+.client-workspace .ops-panel { padding: 16px 20px; margin-bottom: 16px; }
+.client-workspace .ops-panel-heading { align-items: center; }
+.client-workspace .ops-panel-heading h2 { margin-bottom: 0; }
+.client-workspace .ops-context { border: 0; padding: 0; font-size: 12px; }
+.client-workspace .client-status-summary { padding: 12px 16px; }
+.client-workspace .client-status-summary .ops-status-title { font-size: 15px; font-weight: 600; }
+.client-workspace .client-status-summary > .ops-panel-heading { margin-bottom: 4px; }
+.client-workspace .client-exception { font-size: 13px; margin-top: 8px; }
+.client-workspace .client-exception p { margin: 3px 0; font-size: 13px; line-height: 1.5; }
+.client-workspace .client-details { margin-top: 10px; font-size: 12px; }
+.client-workspace .client-details > summary { color: #64748b; }
+.client-workspace .client-details[open] > summary { margin-bottom: 12px; }
+.client-workspace .client-details p { font-size: 12px; }
+.client-workspace .client-calendar-summary { padding: 10px 16px; font-size: 13px; }
+.client-workspace .client-inline-facts { display: flex; flex-wrap: wrap; gap: 8px 20px; color: #64748b; font-size: 12px; margin: 12px 0; }
+.client-workspace .client-inline-facts strong { color: #16181d; font-weight: 500; }
+.client-workspace .client-flow-heading { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 14px; font-size: 11px; color: #64748b; }
+.client-workspace .client-flow-heading strong { color: #92620b; font-weight: 500; }
+.client-workspace .client-pod-flow { display: flex; flex-wrap: wrap; gap: 10px 22px; padding: 0; margin: 10px 0 14px; list-style: none; }
+.client-workspace .client-pod-flow li { position: relative; min-width: 92px; padding: 8px 12px; border: 1px solid #cbd5e1; color: #64748b; }
+.client-workspace .client-pod-flow li:not(:last-child)::after { content: '→'; position: absolute; right: -18px; top: 16px; color: #94a3b8; }
+.client-workspace .client-pod-flow strong { display: block; font-size: 12px; font-weight: 600; }
+.client-workspace .client-pod-flow small { display: block; margin-top: 3px; font-size: 11px; }
+.client-workspace .client-pod-flow [data-severity=green] { color: #166534; border-color: #86b89a; }
+.client-workspace .client-pod-flow [data-severity=yellow] { color: #92620b; border-color: #d4b76e; background: #fffdf5; }
+.client-workspace .client-pod-flow [data-severity=red] { color: #b91c1c; border-color: #e4a4a4; background: #fff8f8; }
+.client-workspace .client-benchmark-line { font-size: 12px; border-top: 1px solid #e2e8f0; padding-top: 12px; }
+.client-workspace .client-performance-grid > .ops-panel { margin-bottom: 0; }
+.client-workspace .client-performance-grid { margin-bottom: 20px; }
+.client-workspace .client-value-panel .client-nav-chart { max-height: 180px; }
+.client-workspace .client-event { padding: 10px 0; }
+.client-workspace .client-event > summary { font-size: 13px; }
+.client-workspace .client-event-time { float: right; color: #64748b; font-size: 11px; }
+.client-workspace .client-event[open] > summary { margin-bottom: 8px; }
+.client-workspace .client-diagnostic[open] > summary { margin-bottom: 16px; }
+.client-workspace .client-source-details { border-top: 1px solid #e2e8f0; padding: 12px 0; }
+.client-workspace .client-report-actions { margin-bottom: 20px; }
+.ops-table .client-number { text-align: right; white-space: nowrap; }
+.advanced-header-content { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px 20px; width: 100%; }
+.advanced-workspace .ops-page-heading { display: block; }
+.advanced-workspace .ops-page-heading .ops-eyebrow { margin-bottom: 6px; }
+.advanced-workspace main { overflow-wrap: anywhere; }
+.advanced-workspace .ops-panel, .advanced-workspace .ops-two-column > * { min-width: 0; }
+.advanced-workspace .ops-toolbar, .advanced-workspace .ops-tabs { flex-wrap: wrap; }
+.advanced-workspace pre { max-width: 100%; overflow: auto; }
+.advanced-workspace .advanced-pod-heading > .flex-1 { min-width: 140px; }
+.advanced-workspace .advanced-stage-strip { order: 2; width: 100%; }
+@media (max-width: 1100px) {
+  .client-workspace .client-pod-flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(108px, 1fr)); gap: 8px; counter-reset: pod-stage; }
+  .client-workspace .client-pod-flow li { margin: 0; padding: 8px 10px; counter-increment: pod-stage; }
+  .client-workspace .client-pod-flow strong::before { content: counter(pod-stage) '. '; color: #64748b; font-weight: 400; }
+  .client-workspace .client-pod-flow li:not(:last-child)::after { content: none; }
+}
+@media (max-width: 1150px) { .client-finance-grid { grid-template-columns: 1fr; } .client-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .client-kpis > div { border-bottom: 1px solid #e2e8f0; } }
+@media (max-width: 700px) { .client-workspace { display: block; } .client-rail { width: auto; min-height: 0; padding: 16px; border-right: 0; border-bottom: 1px solid #e2e8f0; } .client-brand { margin-bottom: 16px; } .client-rail nav { display: flex; flex-wrap: wrap; gap: 4px; } .client-rail-foot, .client-rail-separator, .client-rail .ops-eyebrow { display: none; } .client-content { padding: 20px 16px; } .client-header { padding: 14px 16px; } .client-kpis strong { font-size: 23px; } .client-kpis > div { padding: 16px 12px; } }
+@media (max-width: 900px) {
+  .client-workspace .client-event-time { float: none; display: block; padding-left: 16px; }
+  .client-table-scroll .ops-table thead { display: none; }
+  .client-table-scroll .ops-table, .client-table-scroll tbody, .client-table-scroll tr { display: block; width: 100%; }
+  .client-table-scroll tr { padding: 12px 0; border-bottom: 1px solid #cbd5e1; }
+  .client-table-scroll td { display: grid; grid-template-columns: 94px minmax(0, 1fr); gap: 10px; border: 0; padding: 6px 0; text-align: right; white-space: normal; font-size: 12px; overflow-wrap: anywhere; }
+  .client-table-scroll td::before { content: attr(data-label); text-align: left; color: #64748b; font-size: 11px; }
+  .client-table-scroll td:first-child { display: block; text-align: left; font-size: 14px; margin-bottom: 8px; }
+  .client-table-scroll td:first-child::before { display: none; }
 }

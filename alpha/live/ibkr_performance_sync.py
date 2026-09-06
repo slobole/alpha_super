@@ -7,10 +7,12 @@ are never written to the database, UI, or logs.
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 from datetime import UTC, date, datetime, timedelta
 import hashlib
 import os
 from pathlib import Path
+import sqlite3
 import sys
 import time
 from typing import Callable
@@ -37,7 +39,6 @@ from alpha.live.ibkr_performance import (
     status_json_str,
 )
 from alpha.live.release_manifest import load_release_list
-from alpha.live.state_store import LiveStateStore
 from scripts.norgate_config_env import load_config_env_file
 
 
@@ -459,9 +460,28 @@ def _eod_boundary_date_tuple(
     db_path_obj = Path(db_path_str)
     if not db_path_obj.exists():
         return None, None
-    history_row_dict_list = LiveStateStore(db_path_str).get_pod_state_history_row_dict_list(
-        release_obj.pod_id_str
-    )
+    # Financial history discovery is also called by dashboard GET requests.
+    # Never construct LiveStateStore here: its initializer migrates trading DBs.
+    with closing(sqlite3.connect(db_path_obj.resolve().as_uri() + "?mode=ro", uri=True)) as connection_obj:
+        connection_obj.row_factory = sqlite3.Row
+        column_name_str_set = {
+            str(column_row_obj[1])
+            for column_row_obj in connection_obj.execute("PRAGMA table_info(pod_state_history)")
+        }
+        required_column_str_set = {
+            "pod_id_str", "snapshot_stage_str", "snapshot_source_str", "updated_timestamp_str",
+        }
+        if not required_column_str_set.issubset(column_name_str_set):
+            return None, None
+        history_row_dict_list = [
+            dict(history_row_obj)
+            for history_row_obj in connection_obj.execute(
+                "SELECT updated_timestamp_str, snapshot_stage_str, snapshot_source_str "
+                "FROM pod_state_history WHERE pod_id_str = ? "
+                "AND snapshot_stage_str = 'eod' AND snapshot_source_str = 'broker'",
+                (release_obj.pod_id_str,),
+            )
+        ]
     eod_market_date_str_list = sorted(
         {
             runner._market_date_str_from_timestamp_str(

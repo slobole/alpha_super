@@ -8,6 +8,25 @@ This file is part of the live-first control system. Recording a gap does not mak
 
 ## Register
 
+### Client reporting boundary
+
+The operator workspace uses saved IBKR account facts, not the operational
+combined-book curve. Finalized financial defaults exclude today (D+1);
+operational pages may include today. Explicit dates remain explicit. Multi-account
+dollar results require the reviewed NAV bridge. Optional `daily_nav_eod_v1`
+client TWR uses an explicitly reviewed end-of-day flow convention, not exact
+intraday or official consolidated IBKR TWR. Missing configuration preserves the
+legacy account-only policy. Nonzero linking/internal-transfer imbalance, missing
+evidence and nonpositive return bases withhold the full configured client return;
+unavailable configured TWR keeps its report DRAFT. Transfers in other source
+fields require reviewed same-day scope/classification; net fields cannot prove
+event matching or cash-in-transit completeness. See `docs/live/CLIENT_TWR.md`.
+A FINAL report verifies displayed facts,
+not an independently audited fund return. Saved benchmark comparisons are
+retrospective, not execution replay. Decode caches recheck current source bytes
+and do not cache SQL revisions, report finality or unavailable evidence.
+
+
 | ID | Area | Backtest Assumption / Current Behavior | Live Gap / Risk | Impact | Current Mitigation | Desired End State | Status |
 |---|---|---|---|---|---|---|---|
 | G-001 | TAA target sizing | `strategy_taa_df` sizes target shares from stored prior-bar portfolio value and prior closes, then fills at the next open. | Realized rebalance weights can drift from intended weights after overnight gaps, slippage, and rounding. | Medium for the current TAA sleeve; High if a future sleeve requires exact open weights. | Treat TAA weights as intended overnight allocations, not exact open marks. | Configurable rebalance sizing modes plus broker-aware reconciliation and optional reserve cash. | Intentional approximation |

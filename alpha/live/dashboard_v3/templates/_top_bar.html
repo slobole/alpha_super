@@ -1,7 +1,11 @@
 {# Top bar: LIVE identity, canonical XNYS market status and the live verdict. #}
-<header class="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-ink-100">
-  <div class="max-w-[1480px] mx-auto px-6 h-14 flex items-center justify-between gap-4">
-    <span class="font-mono text-xs tracking-wider text-accent font-medium">LIVE</span>
+<header class="client-header">
+  <div class="advanced-header-content">
+    <span class="font-mono text-xs tracking-wider text-accent font-medium">
+      {{ mode_label_str|default('LIVE') }}
+      {% if demo_mode_bool %}<span class="ml-2">DEMO · NO REAL ACCOUNTS</span>{% endif %}
+      <span class="client-badge ml-2">{{ 'Read-only' if read_only_bool else 'Actions enabled' }}</span>
+    </span>
 
     <div id="top-bar-verdict"
          hx-get="/fragments/top-bar{% if mode_str %}?mode={{ mode_str }}{% endif %}"

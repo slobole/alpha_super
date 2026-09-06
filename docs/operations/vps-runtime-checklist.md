@@ -667,7 +667,16 @@ if ($flex.status_str -ne 'available' -or
     throw 'Flex is not available for every expected account.'
 }
 
-$dashboardText = (Invoke-WebRequest http://127.0.0.1:8080/healthz -UseBasicParsing).Content
+# Application liveness only, not broker/Pod readiness. Keep authentication on.
+# Enter the configured operator token at the secure prompt; never paste it here.
+$dashboardProbeCredential = Get-Credential -UserName 'operator' -Message 'Dashboard operator access token'
+try {
+    $dashboardProbePair = 'operator:' + $dashboardProbeCredential.GetNetworkCredential().Password
+    $dashboardProbeHeader = @{ Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($dashboardProbePair)) }
+    $dashboardText = (Invoke-WebRequest 'http://127.0.0.1:8080/healthz' -Headers $dashboardProbeHeader -UseBasicParsing).Content
+} finally {
+    Remove-Variable dashboardProbeCredential,dashboardProbePair,dashboardProbeHeader -ErrorAction SilentlyContinue
+}
 if ($dashboardText -notmatch 'dashboard_v3 ok') { throw 'Dashboard health check failed.' }
 
 $schedulerProcessList = @(

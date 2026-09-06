@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import sqlite3
 from types import SimpleNamespace
 from urllib.error import URLError
 
@@ -374,7 +375,6 @@ def test_only_broker_eod_rows_define_trusted_performance_boundary(
     tmp_path, monkeypatch
 ) -> None:
     db_path_obj = tmp_path / "pod.sqlite3"
-    db_path_obj.touch()
     history_row_dict_list = [
         {
             "updated_timestamp_str": "2026-08-06T20:10:00+00:00",
@@ -388,17 +388,8 @@ def test_only_broker_eod_rows_define_trusted_performance_boundary(
         },
     ]
 
-    class _FakeStateStore:
-        def __init__(self, db_path_str: str) -> None:
-            assert db_path_str == str(db_path_obj)
-
-        def get_pod_state_history_row_dict_list(self, pod_id_str: str):
-            assert pod_id_str == "pod_a"
-            return history_row_dict_list
-
-    monkeypatch.setattr(
-        "alpha.live.ibkr_performance_sync.LiveStateStore", _FakeStateStore
-    )
+    _create_eod_history_fixture(db_path_obj, history_row_dict_list)
+    original_db_bytes = db_path_obj.read_bytes()
     monkeypatch.setattr(
         "alpha.live.ibkr_performance_sync.runner._market_date_str_from_timestamp_str",
         lambda *, timestamp_str, release_obj: timestamp_str[:10],
@@ -409,31 +400,59 @@ def test_only_broker_eod_rows_define_trusted_performance_boundary(
     )
 
     assert boundary_tuple == ("2026-08-07", "2026-08-07")
+    assert db_path_obj.read_bytes() == original_db_bytes
+    assert sorted(file_path_obj.name for file_path_obj in tmp_path.iterdir()) == ["pod.sqlite3"]
 
 
 def test_nonbroker_eod_does_not_create_trusted_performance_boundary(
     tmp_path, monkeypatch
 ) -> None:
     db_path_obj = tmp_path / "pod.sqlite3"
-    db_path_obj.touch()
-
-    class _FakeStateStore:
-        def __init__(self, db_path_str: str) -> None:
-            pass
-
-        def get_pod_state_history_row_dict_list(self, pod_id_str: str):
-            return [
-                {
-                    "updated_timestamp_str": "2026-08-07T20:10:00+00:00",
-                    "snapshot_stage_str": "eod",
-                    "snapshot_source_str": "pod_state",
-                }
-            ]
-
-    monkeypatch.setattr(
-        "alpha.live.ibkr_performance_sync.LiveStateStore", _FakeStateStore
+    _create_eod_history_fixture(
+        db_path_obj,
+        [{
+            "updated_timestamp_str": "2026-08-07T20:10:00+00:00",
+            "snapshot_stage_str": "eod",
+            "snapshot_source_str": "pod_state",
+        }],
     )
 
     assert _eod_boundary_date_tuple(
         SimpleNamespace(pod_id_str="pod_a"), str(db_path_obj)
     ) == (None, None)
+
+
+def _create_eod_history_fixture(db_path_obj, history_row_dict_list) -> None:
+    connection_obj = sqlite3.connect(db_path_obj)
+    try:
+        connection_obj.execute(
+            "CREATE TABLE pod_state_history (pod_id_str TEXT, "
+            "updated_timestamp_str TEXT, snapshot_stage_str TEXT, snapshot_source_str TEXT)"
+        )
+        connection_obj.executemany(
+            "INSERT INTO pod_state_history VALUES (?, ?, ?, ?)",
+            [
+                ("pod_a", history_row_dict["updated_timestamp_str"],
+                 history_row_dict["snapshot_stage_str"], history_row_dict["snapshot_source_str"])
+                for history_row_dict in history_row_dict_list
+            ],
+        )
+        connection_obj.commit()
+    finally:
+        connection_obj.close()
+
+
+def test_eod_boundary_does_not_create_or_migrate_database(tmp_path) -> None:
+    db_path_obj = tmp_path / "missing" / "pod.sqlite3"
+    release_obj = SimpleNamespace(pod_id_str="pod_a")
+    assert _eod_boundary_date_tuple(release_obj, str(db_path_obj)) == (None, None)
+    assert not db_path_obj.parent.exists()
+
+    legacy_db_path_obj = tmp_path / "legacy.sqlite3"
+    connection_obj = sqlite3.connect(legacy_db_path_obj)
+    connection_obj.execute("CREATE TABLE unrelated (value TEXT)")
+    connection_obj.commit()
+    connection_obj.close()
+    original_db_bytes = legacy_db_path_obj.read_bytes()
+    assert _eod_boundary_date_tuple(release_obj, str(legacy_db_path_obj)) == (None, None)
+    assert legacy_db_path_obj.read_bytes() == original_db_bytes

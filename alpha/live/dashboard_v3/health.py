@@ -79,7 +79,7 @@ def build_health_rollup(
 def _roll_up_freshness_cell(
     pod_row_dict_list: list[dict[str, Any]], item_label_str: str
 ) -> HealthCellDict:
-    item_record_list: list[tuple[str, str, str]] = []
+    item_record_list: list[tuple[str, str, str, str]] = []
     for row_dict in pod_row_dict_list:
         freshness_dict = row_dict.get("data_freshness_dict") or {}
         matching_item_dict = next(
@@ -92,7 +92,7 @@ def _roll_up_freshness_cell(
         )
         pod_id_str = str(row_dict.get("pod_id_str") or "?")
         if matching_item_dict is None:
-            item_record_list.append(("gray", "—", pod_id_str))
+            item_record_list.append(("gray", "—", pod_id_str, "Evidence missing"))
             continue
         item_severity_str = _normalize_severity_str(
             matching_item_dict.get("severity_str")
@@ -102,7 +102,10 @@ def _roll_up_freshness_cell(
             or matching_item_dict.get("timestamp_str")
         )
         item_record_list.append(
-            (item_severity_str, str(timestamp_obj or "—"), pod_id_str)
+            (
+                item_severity_str, str(timestamp_obj or "—"), pod_id_str,
+                str(matching_item_dict.get("detail_str") or ""),
+            )
         )
     if not item_record_list:
         return HealthCellDict(
@@ -113,14 +116,14 @@ def _roll_up_freshness_cell(
         )
 
     worst_severity_str = _worst_severity_str(
-        severity_str for severity_str, _, _ in item_record_list
+        severity_str for severity_str, _, _, _ in item_record_list
     )
     worst_record_list = [
         record_tuple
         for record_tuple in item_record_list
         if record_tuple[0] == worst_severity_str
     ]
-    _, displayed_value_str, displayed_pod_id_str = min(
+    _, displayed_value_str, displayed_pod_id_str, source_detail_str = min(
         worst_record_list,
         key=lambda record_tuple: record_tuple[1],
     )
@@ -130,7 +133,7 @@ def _roll_up_freshness_cell(
         severity_str=worst_severity_str,
         detail_str=(
             f"{len(item_record_list)} pod(s) reporting · worst "
-            f"{worst_severity_str}: {displayed_pod_id_str}"
+            f"{worst_severity_str}: {displayed_pod_id_str}. {source_detail_str}"
         ),
     )
 

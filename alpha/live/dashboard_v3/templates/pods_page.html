@@ -47,15 +47,15 @@
 {% endif %}
 
 {% if attention_row_list %}
-  <div class="mb-4 p-3 rounded-md border border-bad/30 bg-bad-soft/40">
-    <div class="flex items-center gap-2 mb-2 text-sm font-semibold text-bad">
+  <div class="advanced-attention mb-4 p-3 rounded-md border border-ink-100 bg-ink-50">
+    <div class="flex items-center gap-2 mb-2 text-sm font-semibold text-ink-900">
       Attention ({{ attention_row_list | length }})
     </div>
-    <ul class="text-sm divide-y divide-bad/20">
+    <ul class="text-sm divide-y divide-ink-100">
       {% for row_dict in attention_row_list %}
-        <li class="py-1.5 flex justify-between gap-4">
+        <li class="client-status py-1.5 pl-2 flex flex-wrap justify-between gap-4" data-severity="{{ row_dict|effective_severity }}">
           <a href="#pod-{{ row_dict.pod_id_str }}" class="font-semibold hover:underline">
-            {{ row_dict.pod_id_str }}
+            {{ row_dict|strategy_name }}
           </a>
           <span class="text-ink-700">
             {{ row_dict.required_action_dict.label_str
