@@ -1,13 +1,16 @@
 """Normal startup against isolated production-format files, not the demo UI."""
 
 from datetime import UTC, datetime
+from io import BytesIO
 import sqlite3
 
 import pytest
+from pypdf import PdfReader
 
 from alpha.live.dashboard_v3.app import create_app
 from alpha.live.dashboard_v3.data import DashboardDataProvider
 from alpha.live.dashboard_v3.local_workspace import build_local_workspace_dict
+from alpha.live.dashboard_v3.local_workspace import _saved_binding_list
 from alpha.live.ibkr_performance import PerformanceStore, PodPerformanceBinding
 from alpha.live.release_manifest import load_release_list
 from test_ibkr_performance import _xml_str
@@ -227,3 +230,98 @@ def test_foreign_disabled_identity_cannot_hide_account_remap(tmp_path, monkeypat
     client_obj = app_obj.test_client()
     assert len(client_obj.get("/clients/local/diagnostics?download=json").json["strategy_list"]) == 3
     assert client_obj.get("/clients/local/performance?download=json").status_code == 503
+
+
+def import_nav_day(app_obj, date_str, *, retired_closing_int=1020):
+    database_path_str = app_obj.config["performance_db_path_str"]
+    binding_list = _saved_binding_list(database_path_str)
+    nav_tuple_list = [(binding_obj.account_route_str, date_str, 1010,
+        retired_closing_int if binding_obj.account_route_str == "U400" else 1020, 1) for binding_obj in binding_list]
+    # An ordinary import spanning the strategy baseline can contain earlier
+    # raw NAV too; keep the existing importer contract unchanged.
+    if date_str < "2026-09-01":
+        nav_tuple_list += [(binding_obj.account_route_str, "2026-09-01", 1000, 1010, 1) for binding_obj in binding_list]
+    PerformanceStore(database_path_str).replace_range(
+        xml_text_str=_xml_str(nav_tuple_list),
+        query_name_str="ALPHA_DAILY_TWR", request_from_date_str=date_str, request_to_date_str=max(date_str, "2026-09-01"),
+        binding_obj_list=binding_list, imported_timestamp_str="2026-09-04T12:00:00+00:00")
+
+
+@pytest.mark.parametrize("date_str", ["2026-08-31", "2026-09-02"])
+def test_local_raw_nav_outside_strategy_windows_matches_screen_and_pdf(tmp_path, monkeypatch, date_str):
+    app_obj = build_fixture_app(tmp_path, monkeypatch, new_pod_bool=False)
+    import_nav_day(app_obj, date_str)
+    client_obj = app_obj.test_client()
+    route_str = f"/clients/local/report?from={date_str}&to={date_str}"
+    before_dict = file_snapshot_dict(tmp_path)
+    report_dict = client_obj.get(route_str + "&download=json").json
+    assert report_dict["opening_nav_float"] == 3030 and report_dict["closing_nav_float"] == 3060
+    assert report_dict["scope_complete_bool"] is False and report_dict["twr_float"] is None
+    assert report_dict["pnl_float"] is None
+    html_str = client_obj.get(route_str).get_data(as_text=True)
+    assert "$3,060.00" in html_str
+    if date_str == "2026-08-31":
+        assert 'min="2026-08-31"' in html_str
+    pdf_response_obj = client_obj.get(route_str + "&download=pdf&expected=" + report_dict["report_hash_str"])
+    assert pdf_response_obj.status_code == 200
+    pdf_text_str = " ".join(page_obj.extract_text() for page_obj in PdfReader(BytesIO(pdf_response_obj.data)).pages)
+    assert "3,060" in pdf_text_str and "DRAFT" in pdf_text_str
+    assert file_snapshot_dict(tmp_path) == before_dict
+
+
+def test_local_all_unknown_windows_still_show_raw_nav_and_earlier_dates(tmp_path, monkeypatch):
+    app_obj = build_fixture_app(tmp_path, monkeypatch, new_pod_bool=False)
+    import_nav_day(app_obj, "2026-08-31")
+    with sqlite3.connect(tmp_path / "performance.sqlite3") as connection_obj:
+        connection_obj.execute("UPDATE pod_binding SET return_start_date_str=NULL, return_end_date_str=NULL")
+    monkeypatch.setattr("alpha.live.dashboard_v3.local_workspace.build_live_binding_obj_list", lambda **kwargs: [])
+    client_obj = app_obj.test_client()
+    route_str = "/clients/local/overview?from=2026-08-31&to=2026-08-31"
+    report_dict = client_obj.get(route_str + "&download=json").json
+    assert report_dict["closing_nav_float"] == 3060 and report_dict["strategy_list"] == []
+    assert report_dict["status_str"] == "draft" and report_dict["twr_float"] is None
+    html_str = client_obj.get(route_str).get_data(as_text=True)
+    assert "$3,060.00" in html_str and 'min="2026-08-31"' in html_str
+    assert "no verified strategy performance window" in html_str
+
+
+@pytest.mark.parametrize("failure_str", ["missing", "corrupt", "mapping", "window"])
+def test_local_source_errors_keep_historical_overview_operations(tmp_path, monkeypatch, failure_str):
+    app_obj = build_fixture_app(tmp_path, monkeypatch, new_pod_bool=False)
+    import_nav_day(app_obj, "2026-08-31")
+    database_path_obj = tmp_path / "performance.sqlite3"
+    if failure_str == "missing":
+        database_path_obj.unlink()
+        expected_str = "missing"
+    elif failure_str == "corrupt":
+        database_path_obj.write_bytes(b"invalid sqlite")
+        expected_str = "Check the performance database and local ledger files"
+    else:
+        with sqlite3.connect(database_path_obj) as connection_obj:
+            connection_obj.execute("UPDATE pod_binding SET " + ("pod_id_str='wrong_pod'" if failure_str == "mapping" else "return_start_date_str='2026-08-30'") + " WHERE account_route_str='U100'")
+        expected_str = "Account/Pod mapping changed" if failure_str == "mapping" else "saved history start"
+    before_dict = file_snapshot_dict(tmp_path)
+    client_obj = app_obj.test_client()
+    route_str = "/clients/local/overview?from=2026-08-31&to=2026-08-31"
+    response_obj = client_obj.get(route_str)
+    assert response_obj.status_code == 200
+    html_str = response_obj.get_data(as_text=True)
+    assert expected_str.lower() in html_str.lower()
+    assert 'aria-label="Current client operations"' in html_str
+    assert client_obj.get(route_str + "&download=json").status_code == 503
+    assert str(tmp_path) not in html_str and "invalid sqlite" not in html_str
+    assert file_snapshot_dict(tmp_path) == before_dict
+
+
+def test_nav_only_revision_invalidates_previously_viewed_export(tmp_path, monkeypatch):
+    app_obj = build_fixture_app(tmp_path, monkeypatch, new_pod_bool=False)
+    import_nav_day(app_obj, "2026-09-02")
+    client_obj = app_obj.test_client()
+    route_str = "/clients/local/report?from=2026-09-02&to=2026-09-02"
+    original_dict = client_obj.get(route_str + "&download=json").json
+    import_nav_day(app_obj, "2026-09-02", retired_closing_int=1030)
+    corrected_dict = client_obj.get(route_str + "&download=json").json
+    assert corrected_dict["closing_nav_float"] == 3070
+    assert corrected_dict["report_hash_str"] != original_dict["report_hash_str"]
+    for export_str in ("pdf", "bundle"):
+        assert client_obj.get(route_str + f"&download={export_str}&expected=" + original_dict["report_hash_str"]).status_code == 409

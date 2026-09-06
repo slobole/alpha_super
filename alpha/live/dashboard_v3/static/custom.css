@@ -170,6 +170,8 @@ table tbody tr td { border-bottom: 1px solid #eef2f6; }
 .client-workspace .client-status-summary > .ops-panel-heading { margin-bottom: 4px; }
 .client-workspace .client-exception { font-size: 13px; margin-top: 8px; }
 .client-workspace .client-exception p { margin: 3px 0; font-size: 13px; line-height: 1.5; }
+.client-workspace .client-financial-notices { margin: -8px 0 20px; font-size: 13px; }
+.client-workspace .client-financial-notices p { margin: 5px 0; }
 .client-workspace .client-details { margin-top: 10px; font-size: 12px; }
 .client-workspace .client-details > summary { color: #64748b; }
 .client-workspace .client-details[open] > summary { margin-bottom: 12px; }

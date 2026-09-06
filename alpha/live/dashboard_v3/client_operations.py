@@ -59,6 +59,21 @@ def _worst_str(severity_list):
     return min(severity_list or ["gray"], key=lambda value_str: SEVERITY_RANK_DICT[value_str])
 
 
+def _deduplicated_issue_list(issue_list):
+    result_list, seen_set = [], set()
+    for issue_str in issue_list:
+        key_str = " ".join(issue_str.split())
+        for prefix_str in ("Review Norgate data: ", "Wait Norgate data: ", "Norgate: "):
+            if key_str.startswith(prefix_str):
+                key_str = key_str[len(prefix_str):]
+                break
+        if key_str not in seen_set:
+            result_list.append(issue_str)
+            seen_set.add(key_str)
+    return [issue_str for issue_str in result_list if not any(
+        other_str != issue_str and other_str.endswith(": " + issue_str) for other_str in result_list)]
+
+
 def active_account_list(client_dict, as_of_ts):
     market_date_str = as_of_ts.astimezone(ZoneInfo("America/New_York")).date().isoformat()
     return [account_dict for account_dict in client_dict["accounts"]
@@ -118,7 +133,7 @@ def build_client_operations_dict(client_dict, summary_dict, *, as_of_ts, local_a
         else:
             if local_account_list is not None and parse_timestamp_ts(evidence_dict.get("latest_pod_state_timestamp_str") or "") is None:
                 severity_list.append("gray")
-                reason_list.append("No saved Pod state yet.")
+                reason_list.append("Pod state unavailable.")
                 evidence_dict["position_exposure_dict_list"] = []
             for key_str in ("required_action_dict", "debug_summary_dict", "data_freshness_dict"):
                 if not isinstance(evidence_dict.get(key_str), dict):
@@ -141,17 +156,33 @@ def build_client_operations_dict(client_dict, summary_dict, *, as_of_ts, local_a
                 item_severity_str = _severity_str(item_dict.get("severity_str"))
                 severity_list.append(item_severity_str)
                 if item_severity_str != "green":
-                    reason_list.append(f"{label_str}: {item_dict.get('detail_str') or 'evidence requires review'}")
+                    if label_str == "Pod state" and parse_timestamp_ts(evidence_dict.get("latest_pod_state_timestamp_str") or "") is None:
+                        reason_list.append("Pod state unavailable.")
+                    else:
+                        reason_list.append(f"{label_str}: {item_dict.get('detail_str') or 'evidence requires review'}")
             if required_dict.get("severity_str") != "green":
                 reason_list.append(required_dict.get("detail_str") or required_dict.get("reason_str") or "Operational action requires review.")
         if not source_fresh_bool:
             severity_list.append("gray")
             reason_list.append("Saved operational assessment is missing, future-dated or older than 120 seconds. Refresh is not a live process check.")
         status_str = _worst_str(severity_list)
+        headline_str = reason_list[0] if reason_list else "No action required"
+        if verified_bool:
+            # Prioritize an actionable reason at the Pod's actual severity.
+            candidate_list = [evidence_dict["required_action_dict"], evidence_dict["debug_summary_dict"]]
+            candidate_list += evidence_dict["data_freshness_dict"]["item_dict_list"]
+            for candidate_dict in candidate_list:
+                detail_str = candidate_dict.get("detail_str") or candidate_dict.get("reason_str")
+                if candidate_dict.get("severity_str") == status_str and detail_str:
+                    headline_str = detail_str
+                    if candidate_dict.get("label_str") == "Pod state" and state_ts is None:
+                        headline_str = "Pod state unavailable."
+                    break
         result_list.append({
             "pod_id_str": account_dict["pod_id"], "account_route_str": account_dict["account_route"],
             "display_name_str": account_dict["display_name"], "effective_from_str": account_dict.get("effective_from"),
             "severity_str": status_str, "matched_bool": verified_bool,
+            "summary_str": redact_diagnostic_value(headline_str),
             "status_label_str": {"red": "Action required", "yellow": "Review / waiting", "gray": "Cannot verify", "green": "No action required"}[status_str],
             "issue_list": redact_diagnostic_value(reason_list), "evidence_dict": redact_diagnostic_value(evidence_dict),
         })
@@ -183,6 +214,8 @@ def build_client_operations_dict(client_dict, summary_dict, *, as_of_ts, local_a
             if calendar_severity_str == "green" or (calendar_severity_str == "gray" and calendar_verified_bool):
                 continue
             status_str = _worst_str([strategy_dict["severity_str"], calendar_severity_str])
+            if SEVERITY_RANK_DICT[calendar_severity_str] < SEVERITY_RANK_DICT[strategy_dict["severity_str"]]:
+                strategy_dict["summary_str"] = window_dict["status_label_str"] + ": " + window_dict["detail_str"]
             strategy_dict["severity_str"] = status_str
             strategy_dict["status_label_str"] = {"red": "Action required", "yellow": "Review / waiting", "gray": "Cannot verify"}[status_str]
             strategy_dict["issue_list"].insert(0, window_dict["status_label_str"] + ": " + window_dict["detail_str"])
@@ -192,6 +225,10 @@ def build_client_operations_dict(client_dict, summary_dict, *, as_of_ts, local_a
     except (KeyError, TypeError, ValueError, AttributeError):
         window_list = individual_window_list  # Grouping is presentation only.
     severity_str = _worst_str([row_dict["severity_str"] for row_dict in result_list])
+    for strategy_dict in result_list:
+        strategy_dict["issue_list"] = _deduplicated_issue_list(strategy_dict["issue_list"])
+        headline_str = strategy_dict["summary_str"]
+        strategy_dict["summary_str"] = headline_str if len(headline_str) <= 110 else headline_str[:107] + "..."
     return {
         "client_id_str": client_dict["client_id"], "mode_str": "live",
         "source_str": client_dict.get("operations_source", "unconfigured"),

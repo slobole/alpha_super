@@ -186,7 +186,14 @@ def filter_normalize_severity_str(value_obj: Any) -> str:
     return _normalize_severity_str(str(value_obj or "gray"))
 
 
+def filter_flow_status_str(value_obj: Any) -> str:
+    status_str = str(value_obj or "unverified")
+    return {"ok": "Ready", "completed": "Complete", "complete": "Complete",
+        "none": "Not recorded", "due_missing": "Missing EOD"}.get(status_str, status_str.replace("_", " ").capitalize())
+
+
 FILTER_MAP_DICT: dict[str, Any] = {
+    "flow_status": filter_flow_status_str,
     "money": filter_money_str,
     "number": filter_number_str,
     "percent": filter_percent_str,

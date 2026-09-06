@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from flask import Blueprint, Response, abort, current_app, g, redirect, render_template, request, url_for
 
 from alpha.live.client_reporting import (
-    ClientReportingError, build_client_report_dict, load_broker_reporting_snapshot,
+    BrokerReportingSnapshot, ClientReportingError, build_client_report_dict, load_broker_reporting_snapshot,
     load_client_registry_dict, validate_client_registry_dict,
 )
 from alpha.live.investor_report import build_investor_snapshot_dict, render_investor_pdf_bytes
@@ -25,7 +25,7 @@ from alpha.live.dashboard_v3.client_operations import (
 from alpha.live.dashboard_v3.operator_tools import redact_diagnostic_value, strategy_display_name_str
 from alpha.live.dashboard_v3.client_comparison import saved_comparison_dict
 from alpha.live.dashboard_v3.local_workspace import (
-    build_local_workspace_dict, local_financial_scope_complete_bool, validate_local_bindings_unchanged,
+    LocalReportingError, build_local_workspace_dict, local_financial_scope_complete_bool, validate_local_bindings_unchanged,
 )
 
 
@@ -142,6 +142,23 @@ def local_strategy_name_str(row_dict):
 
 
 def _snapshot_obj(client_dict):
+    if local_workspace_bool():
+        if hasattr(g, "local_reporting_snapshot_obj"):
+            return g.local_reporting_snapshot_obj
+        workspace_dict = _local_workspace_dict()
+        if workspace_dict["financial_error_str"]:
+            return BrokerReportingSnapshot(unavailable_reason_str=workspace_dict["financial_error_str"])
+        try:
+            database_path_str = current_app.config["performance_db_path_str"]
+            snapshot_obj = load_broker_reporting_snapshot(database_path_str,
+                allowed_account_set={account_dict["account_route"] for account_dict in workspace_dict["valuation_account_list"]},
+                query_name_str=client_dict["query_name"])
+            validate_local_bindings_unchanged(workspace_dict, database_path_str)
+        except (ClientReportingError, ValueError, OSError) as exception_obj:
+            reason_str = str(exception_obj) if isinstance(exception_obj, LocalReportingError) else "Saved IBKR report failed validation. Check the latest Flex import before using these figures."
+            snapshot_obj = BrokerReportingSnapshot(unavailable_reason_str=reason_str)
+        g.local_reporting_snapshot_obj = snapshot_obj
+        return snapshot_obj
     snapshot_fn = current_app.config.get("client_reporting_snapshot_fn")
     if snapshot_fn is not None:
         return snapshot_fn(client_dict["client_id"])
@@ -151,8 +168,6 @@ def _snapshot_obj(client_dict):
         allowed_account_set={account_dict["account_route"] for account_dict in client_dict["accounts"]},
         query_name_str=client_dict["query_name"],
     )
-    if local_workspace_bool():
-        validate_local_bindings_unchanged(_local_workspace_dict(), database_path_str)
     return snapshot_obj
 
 
@@ -237,11 +252,21 @@ def financial_route_fn(client_id_str, view_str):
             abort(404)
         as_of_ts = datetime.now(UTC)
         period_max_date_str = as_of_ts.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+        local_source_unavailable_bool = False
+        if local_workspace_bool() and view_str not in OPERATION_VIEW_SET:
+            # Available broker NAV may precede the first strategy return. This
+            # changes the selectable history, not inferred funding/entry dates.
+            snapshot_obj = _snapshot_obj(client_dict)
+            local_source_unavailable_bool = bool(snapshot_obj.unavailable_reason_str)
+            broker_date_list = [row_obj.market_date_str for row_obj in snapshot_obj.row_tuple
+                if row_obj.market_date_str <= period_max_date_str]
+            if broker_date_list:
+                client_dict["mandate_start_date"] = min(client_dict["mandate_start_date"], min(broker_date_list))
         from_str, to_str = _period_tuple(client_dict, as_of_ts, operational_bool=view_str in OPERATION_VIEW_SET)
         if any(date.fromisoformat(value_str).isoformat() != value_str for value_str in (from_str, to_str)):
             raise ClientReportingError("Use YYYY-MM-DD dates.")
         local_operations_bool = local_workspace_bool() and view_str in OPERATION_VIEW_SET
-        if from_str > to_str or (not local_operations_bool and from_str < client_dict["mandate_start_date"]) or to_str > period_max_date_str:
+        if from_str > to_str or (not local_operations_bool and not local_source_unavailable_bool and from_str < client_dict["mandate_start_date"]) or to_str > period_max_date_str:
             raise ClientReportingError("Choose an ordered period within available reporting history and through today at most." if local_workspace_bool() else "Choose an ordered period within the client's mandate and through today at most.")
         if view_str in OPERATION_VIEW_SET:
             operations_dict = _operations_dict(client_dict, as_of_ts)
@@ -269,21 +294,27 @@ def financial_route_fn(client_id_str, view_str):
             ), 400
         return render_template("client_directory.html", client_list=[], error_str=str(exception_obj)), 400
     try:
+        snapshot_obj = _snapshot_obj(client_dict)
+        if local_workspace_bool() and snapshot_obj.unavailable_reason_str:
+            raise LocalReportingError(snapshot_obj.unavailable_reason_str)
         if current_app.config.get("demo_mode_bool"):
             from alpha.live.dashboard_v3.demo import build_demo_benchmark_snapshot
             benchmark_snapshot_obj = build_demo_benchmark_snapshot()
         else:
             benchmark_snapshot_obj = load_benchmark_snapshot(client_dict.get("benchmark"))
         report_dict = build_client_report_dict(
-            client_dict, _snapshot_obj(client_dict),
+            client_dict, snapshot_obj,
             from_date_str=from_str, to_date_str=to_str, as_of_ts=as_of_ts,
             benchmark_snapshot_obj=benchmark_snapshot_obj,
             scope_complete_bool=local_financial_scope_complete_bool(_local_workspace_dict(), from_str, to_str) if local_workspace_bool() else True,
+            valuation_account_list=_local_workspace_dict()["valuation_account_list"] if local_workspace_bool() else None,
         )
-    except (ClientReportingError, ValueError, OSError):
+    except (ClientReportingError, ValueError, OSError) as exception_obj:
         # A financial-source failure must not remove current operations or the
         # selected client's navigation. Do not expose raw paths/XML in errors.
         error_str = "Financial evidence could not be read or validated. No financial figures are available; current operations remain separate."
+        if isinstance(exception_obj, LocalReportingError):
+            error_str = exception_obj.args[0]
         if request.args.get("download"):
             return Response(error_str, status=503)
         return render_template(
@@ -328,6 +359,7 @@ def financial_route_fn(client_id_str, view_str):
         operations_dict=_operations_dict(client_dict, as_of_ts) if view_str == "overview" else None,
         activity_dict=_activity_dict(client_dict, from_str, to_str) if view_str == "overview" else None,
         period_max_date_str=period_max_date_str,
+        financial_notice_list=_financial_notice_list(report_dict, client_dict),
         performance_chart_list=[nav_chart_dict([{"nav_float": point_dict["cumulative_return_float"]} for point_dict in strategy_dict["performance_dict"]["return_path_list"]]) for strategy_dict in report_dict["strategy_list"]] if view_str == "performance" else [],
         comparison_list=[saved_comparison_dict(next(
             account_dict for account_dict in client_dict["accounts"]
@@ -335,3 +367,22 @@ def financial_route_fn(client_id_str, view_str):
             and account_dict["effective_from"] <= strategy_dict["from_date_str"] <= (account_dict.get("effective_to") or "9999-12-31")
         ), from_date_str=from_str, to_date_str=to_str) for strategy_dict in report_dict["strategy_list"]] if view_str == "performance" else [],
     )
+
+
+def _financial_notice_list(report_dict, client_dict):
+    """Short visible causes; full diagnostic evidence remains in the report."""
+    notice_list = list(report_dict.get("nav_issue_list", []))
+    if local_workspace_bool() and not report_dict["scope_complete_bool"]:
+        window_dict = {(account_dict["pod_id"], account_dict["account_route"]): account_dict for account_dict in client_dict["accounts"]}
+        for identity_dict in _local_workspace_dict()["valuation_account_list"]:
+            account_dict = window_dict.get((identity_dict["pod_id"], identity_dict["account_route"]))
+            prefix_str = f"{identity_dict['pod_id']} / {identity_dict['account_route']}"
+            if account_dict is None:
+                notice_list.append(f"{prefix_str}: no verified strategy performance window yet. Account NAV is checked separately.")
+            elif account_dict.get("effective_to") and account_dict["effective_to"] < report_dict["requested_to_date_str"]:
+                notice_list.append(f"{prefix_str}: strategy history ends {account_dict['effective_to']}; this does not mean the account was closed.")
+            elif account_dict["effective_from"] > report_dict["requested_from_date_str"]:
+                notice_list.append(f"{prefix_str}: strategy history starts {account_dict['effective_from']}; earlier account NAV is checked separately.")
+    if report_dict["pnl_float"] is None and not client_dict.get("nav_bridge"):
+        notice_list.append("Profit / loss: a verified breakdown of IBKR capital movements is not available.")
+    return list(dict.fromkeys(notice_list))

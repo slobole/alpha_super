@@ -85,6 +85,31 @@ def test_local_missing_or_invalid_state_keeps_flow_not_holdings(timestamp_str):
     assert strategy_dict["severity_str"] != "green"
     assert strategy_dict["evidence_dict"]["position_exposure_dict_list"] == []
     assert strategy_dict["evidence_dict"]["lifecycle_step_dict_list"]
+    assert strategy_dict["issue_list"].count("Pod state unavailable.") == 1
+    assert "Pod state: Latest persisted" not in str(strategy_dict["issue_list"])
+
+
+def test_issue_dedup_preserves_distinct_causes_and_raw_evidence():
+    from alpha.live.dashboard_v3.client_operations import _deduplicated_issue_list
+    issue_list = ["Review Norgate data: Snapshot missing", "Norgate: Snapshot missing",
+        "Snapshot missing", "EOD Snapshot: Row missing", "Broker ACK missing", "Broker ACK missing"]
+    assert _deduplicated_issue_list(issue_list) == ["Review Norgate data: Snapshot missing",
+        "EOD Snapshot: Row missing", "Broker ACK missing"]
+    assert len(issue_list) == 6
+
+
+def test_compact_summary_prioritizes_red_broker_failure_over_yellow_data():
+    registry_dict, _, _, summary_dict = fixture_tuple()
+    row_dict = summary_dict["pod_row_dict_list"][0]
+    norgate_dict = next(item_dict for item_dict in row_dict["data_freshness_dict"]["item_dict_list"] if item_dict["label_str"] == "Norgate")
+    norgate_dict.update(severity_str="yellow", detail_str="Snapshot missing")
+    row_dict["required_action_dict"] = {"severity_str": "red", "detail_str": "Broker ACK missing"}
+    original_dict = deepcopy(summary_dict)
+    result_dict = build_client_operations_dict(registry_dict["clients"][0], summary_dict, as_of_ts=AS_OF_TS)
+    strategy_dict = result_dict["strategy_list"][0]
+    assert strategy_dict["severity_str"] == "red" and strategy_dict["summary_str"] == "Broker ACK missing"
+    assert any("Snapshot missing" in issue_str for issue_str in strategy_dict["issue_list"])
+    assert summary_dict == original_dict
 
 
 def test_retired_and_future_periods_do_not_enter_current_scope():
@@ -303,7 +328,8 @@ def test_diagnostics_preserves_nonblocking_next_cycle_source_warning(monkeypatch
     html_str = app_obj.test_client().get("/clients/demo-owner/diagnostics").get_data(as_text=True)
     assert "No action required" in html_str
     assert "Sync failed: next DecisionPlan needs review" in html_str
-    assert html_str.index("Sync failed: next DecisionPlan needs review") < html_str.index('class="ops-panel client-diagnostic"')
+    assert html_str.count("Sync failed: next DecisionPlan needs review") == 1
+    assert "Sync failed: next DecisionPlan needs review" in html_str.split("Saved checks and lifecycle", 1)[1]
     assert "PRIVATE" not in html_str
 
 
@@ -325,13 +351,14 @@ def test_visible_pod_flow_preserves_recorded_not_complete_fill_and_cycle_role(mo
     card_str = html_str.split('<h2>Tactical allocation</h2>', 1)[1].split('</section>', 1)[0]
     flow_str = card_str.split('<ol class="client-pod-flow"', 1)[1].split('</ol>', 1)[0]
     assert card_str.index('class="client-pod-flow"') < card_str.index('<details')
-    assert '<strong>Fill</strong><small>recorded</small>' in flow_str
-    assert '<strong>ACK</strong><small>complete</small>' in flow_str
-    assert '<strong>VPlan</strong><small>submitted</small>' in flow_str
+    assert '<strong>Fill</strong><small>Recorded</small>' in flow_str
+    assert '<strong>ACK</strong><small>Complete</small>' in flow_str
+    assert '<strong>VPlan</strong><small>Submitted</small>' in flow_str
+    assert 'title="recorded ' in flow_str
     assert 'Live vs Backtest' not in flow_str
     assert 'Live vs Backtest' in card_str.split('<details', 1)[1]
     assert flow_str.count('<li ') == 7
-    assert 'Next <strong>post_execution_reconcile</strong>' in card_str
+    assert 'Next <strong>Post execution reconcile</strong>' in card_str
     assert ('Execution steps: previous cycle' in card_str) is (previous_role_str != "current")
     assert html_str.count('class="client-pod-flow"') == 2
 

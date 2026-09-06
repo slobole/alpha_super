@@ -46,6 +46,21 @@ async function main() {
         assert.equal(await pageObj.locator('nav a[href^="/clients/local/"]').count(), 7);
         assert.equal(await pageObj.getByText('Switch client', { exact: true }).count(), 0);
         assert.equal(await pageObj.getByRole('link', { name: 'Clients', exact: true }).count(), 0);
+        if (viewStr === 'overview' || viewStr === 'strategies') {
+          const statusObj = await (await fetch(originStr + '/clients/local/diagnostics?download=json')).json();
+          const summaryObj = pageObj.locator('.client-status-summary');
+          assert.equal(await summaryObj.locator('.client-exception').count(), statusObj.strategy_list.filter(rowObj => rowObj.severity_str !== 'green').length);
+          assert.equal(await summaryObj.locator('details[open]').count(), 0);
+          for (const warningObj of await summaryObj.locator('.client-exception').all()) {
+            assert.equal(await warningObj.locator('p, ul, li').count(), 0);
+            assert(await warningObj.isVisible());
+          }
+        }
+        if (viewStr === 'overview') {
+          assert(await pageObj.locator('.client-financial-notices').isVisible());
+          assert((await pageObj.locator('.client-financial-notices > p').count()) <= 2);
+          assert((await pageObj.locator('.client-financial-notices').innerText()).includes('pod_new / U300'));
+        }
         if (viewStr === 'strategies') {
           assert.equal(await pageObj.locator('.client-pod-flow').count(), 3);
           const flowObj = pageObj.locator('.client-pod-flow').first();

@@ -131,7 +131,7 @@ def account_performance_dict(row_list, *, complete_bool, from_date_str, to_date_
     return result_dict
 
 
-def validate_client_registry_dict(registry_dict: dict[str, Any]) -> dict[str, Any]:
+def validate_client_registry_dict(registry_dict: dict[str, Any], *, allow_empty_periods_bool: bool = False) -> dict[str, Any]:
     """Validate explicit, effective-dated financial ownership; never infer it.
 
     Operational enabled flags are intentionally absent. The registry contains
@@ -168,7 +168,7 @@ def validate_client_registry_dict(registry_dict: dict[str, Any]) -> dict[str, An
         if operations_source_str == "snapshot" and (not isinstance(client_dict.get("operations_snapshot_path"), str) or not client_dict["operations_snapshot_path"].strip()):
             raise ClientReportingError("Snapshot operations require a server-configured operations_snapshot_path.")
         account_list = client_dict.get("accounts")
-        if not isinstance(account_list, list) or not account_list:
+        if not isinstance(account_list, list) or (not account_list and not allow_empty_periods_bool):
             raise ClientReportingError("Configure at least one account period per client.")
         pod_period_dict: dict[str, list[tuple[str, str, str]]] = {}
         for account_dict in account_list:
@@ -404,6 +404,62 @@ def _money_float(value_decimal: Decimal | None) -> float | None:
     return None if value_decimal is None else float(value_decimal)
 
 
+def _valuation_account_list(account_list, performance_account_list):
+    """Validate local account identity separately from performance date bounds."""
+    if not isinstance(account_list, list) or not account_list:
+        raise ClientReportingError("No verified local accounts are available for valuation.")
+    result_list, route_set, pod_set = [], set(), set()
+    for account_dict in account_list:
+        if not isinstance(account_dict, dict) or any(
+            not isinstance(account_dict.get(field_str), str) or not account_dict[field_str].strip()
+            for field_str in ("account_route", "pod_id", "display_name")
+        ):
+            raise ClientReportingError("Invalid local valuation account identity.")
+        if account_dict["account_route"] in route_set or account_dict["pod_id"] in pod_set:
+            raise ClientReportingError("Duplicate local valuation account or Pod.")
+        route_set.add(account_dict["account_route"])
+        pod_set.add(account_dict["pod_id"])
+        result_list.append({field_str: account_dict[field_str] for field_str in ("account_route", "pod_id", "display_name")})
+    pair_set = {(account_dict["account_route"], account_dict["pod_id"]) for account_dict in result_list}
+    if any((account_dict["account_route"], account_dict["pod_id"]) not in pair_set for account_dict in performance_account_list):
+        raise ClientReportingError("Valuation and performance account identities disagree.")
+    return sorted(result_list, key=lambda account_dict: account_dict["account_route"])
+
+
+def _local_nav_dict(account_list, row_by_key_dict, session_list, *, from_str, to_str, today_str):
+    """NAV_D = sum(official account NAV_i,D), only when every account is present.
+
+    *** CRITICAL *** retrospective EOD valuation, not strategy membership:
+    no filling missing days, no zero assumed before/after a Pod history window.
+    D+1 finalization applies separately to each date, including endpoint values.
+    """
+    route_set = {account_dict["account_route"] for account_dict in account_list}
+    date_list = sorted(set(session_list) | {date_str for account_str, date_str in row_by_key_dict
+        if account_str in route_set and from_str <= date_str <= to_str})
+    daily_list, reason_list, source_row_list = [], [], []
+    opening_decimal, closing_decimal = None, None
+    for index_int, date_str in enumerate(date_list):
+        missing_list = [account_dict for account_dict in account_list if (account_dict["account_route"], date_str) not in row_by_key_dict]
+        complete_bool = not missing_list and date_str < today_str
+        row_list = [row_by_key_dict[(account_str, date_str)] for account_str in sorted(route_set) if (account_str, date_str) in row_by_key_dict]
+        source_row_list.extend(row_list)
+        if index_int == 0 and complete_bool:
+            opening_decimal = sum((row_obj.opening_nav_decimal for row_obj in row_list), Decimal(0))
+        closing_decimal = sum((row_obj.closing_nav_decimal for row_obj in row_list), Decimal(0)) if complete_bool else None
+        daily_list.append({"market_date_str": date_str, "nav_float": _money_float(closing_decimal),
+            "account_count_int": len(route_set), "coverage_complete_bool": complete_bool})
+        for account_dict in missing_list:
+            reason_list.append(f"{account_dict['pod_id']} / {account_dict['account_route']}: missing IBKR NAV for {date_str}.")
+        if date_str >= today_str:
+            reason_list.append(f"IBKR NAV for {date_str} is not finalized yet.")
+    if not date_list:
+        reason_list.append("No broker valuation days in the selected period.")
+    return {"opening_nav_float": _money_float(opening_decimal), "closing_nav_float": _money_float(closing_decimal),
+        "opening_date_str": date_list[0] if date_list else None, "closing_date_str": date_list[-1] if date_list else None,
+        "daily_list": daily_list, "issue_list": reason_list, "source_row_list": source_row_list,
+        "complete_bool": bool(daily_list) and all(row_dict["coverage_complete_bool"] for row_dict in daily_list)}
+
+
 def _client_daily_twr_dict(day_list, *, complete_bool, from_date_str):
     """Daily EOD convention, not official broker or exact intraday TWR.
 
@@ -445,6 +501,7 @@ def build_client_report_dict(
     client_dict: dict[str, Any], snapshot_obj: BrokerReportingSnapshot, *,
     from_date_str: str, to_date_str: str, as_of_ts: datetime, benchmark_snapshot_obj=None,
     scope_complete_bool: bool = True,
+    valuation_account_list: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """One selected-period projection for screens and immutable report exports.
 
@@ -458,7 +515,9 @@ def build_client_report_dict(
     No account-TWR average or adjusted-base composite becomes client TWR.
     The date alignment below is an EOD valuation join, never a signal input.
     """
-    client_dict = validate_client_registry_dict({"schema_version": 1, "clients": [client_dict]})["clients"][0]
+    client_dict = validate_client_registry_dict({"schema_version": 1, "clients": [client_dict]},
+        allow_empty_periods_bool=valuation_account_list is not None)["clients"][0]
+    local_valuation_list = None if valuation_account_list is None else _valuation_account_list(valuation_account_list, client_dict["accounts"])
     from_date_str, to_date_str = _date_str(from_date_str), _date_str(to_date_str)
     if from_date_str > to_date_str or as_of_ts.tzinfo is None:
         raise ClientReportingError("Select an ordered date range and timezone-aware report timestamp.")
@@ -476,6 +535,8 @@ def build_client_report_dict(
         raise ClientReportingError("Reporting range is outside the supported exchange calendar.") from exception_obj
     account_list = client_dict["accounts"]
     owned_account_set = {account_dict["account_route"] for account_dict in account_list}
+    if local_valuation_list is not None:
+        owned_account_set.update(account_dict["account_route"] for account_dict in local_valuation_list)
     row_by_key_dict: dict[tuple[str, str], BrokerNavRow] = {}
     for row_obj in snapshot_obj.row_tuple:
         if row_obj.account_route_str not in owned_account_set:
@@ -564,9 +625,15 @@ def build_client_report_dict(
                 from_date_str=max(from_date_str, account_dict["effective_from"]), to_date_str=min(to_date_str, account_dict.get("effective_to") or to_date_str), session_date_set=set(session_list)),
         })
         issue_list.extend(f"{account_dict['display_name']}: {issue_str}" for issue_str in dict.fromkeys(account_issue_list))
+    if local_valuation_list is not None:
+        # NAV-only identities cannot unlock a return calculated on fewer accounts.
+        scope_complete_bool = scope_complete_bool and all(any(
+            account_dict["account_route"] == identity_dict["account_route"] and account_dict["pod_id"] == identity_dict["pod_id"]
+            and account_dict["effective_from"] <= from_date_str and (account_dict.get("effective_to") or "9999-12-31") >= to_date_str
+            for account_dict in account_list) for identity_dict in local_valuation_list)
     all_coverage_bool = scope_complete_bool and bool(strategy_result_list) and all(row_dict["coverage_complete_bool"] for row_dict in strategy_result_list)
     if not scope_complete_bool:
-        issue_list.append("Some local strategies have no verified reporting window yet. Book totals are unavailable; verified account returns remain separate.")
+        issue_list.append("Strategy history does not prove complete client capital coverage for this period. Profit and client return remain unavailable; account valuations are checked separately.")
     if any((account_dict["account_route"], date_str) not in row_by_key_dict for date_str in report_date_list for account_dict in account_list if _account_active_bool(account_dict, date_str)):
         all_coverage_bool = False
         issue_list.append("Client NAV aggregation needs all active accounts on each reporting date; independent account returns may still be available.")
@@ -650,6 +717,11 @@ def build_client_report_dict(
         client_twr_method_str = "Calculated client daily TWR; end-of-day flow convention, not official consolidated IBKR TWR."
         if twr_result_dict["twr_reason_str"]:
             issue_list.append("Client TWR: " + twr_result_dict["twr_reason_str"])
+    nav_dict = None
+    if local_valuation_list is not None:
+        nav_dict = _local_nav_dict(local_valuation_list, row_by_key_dict, session_list,
+            from_str=from_date_str, to_str=to_date_str, today_str=market_today_str)
+        contributing_row_list.extend(nav_dict["source_row_list"])
     used_import_set = {row_obj.source_import_id_int for row_obj in contributing_row_list}
     source_field_tuple = (
         "import_id_int", "checksum_str", "imported_timestamp_str", "query_name_str",
@@ -700,6 +772,21 @@ def build_client_report_dict(
             "Fee coverage is exactly the stated fee basis; unreported external fees are not invented.",
         ],
     }
+    if nav_dict is not None:
+        # One canonical result for dashboard, JSON and investor PDF. Availability
+        # of point-in-time NAV does not unlock flow/TWR coverage or report FINAL.
+        result_dict.update({field_str: nav_dict[field_str] for field_str in (
+            "opening_nav_float", "closing_nav_float", "opening_date_str", "closing_date_str")})
+        result_dict["valuation_basis_str"] = "Sum of finalized IBKR account NAV; independent of strategy performance windows"
+        result_dict["nav_coverage_complete_bool"] = nav_dict["complete_bool"]
+        result_dict["nav_issue_list"] = nav_dict["issue_list"]
+        result_dict["valuation_account_list"] = local_valuation_list
+        result_dict["scope_hash_str"] = content_hash_str({"client": client_dict, "valuation_accounts": local_valuation_list})
+        performance_day_dict = {row_dict["market_date_str"]: row_dict for row_dict in daily_book_list}
+        result_dict["daily_book_list"] = [{**row_dict,
+            "pnl_float": performance_day_dict.get(row_dict["market_date_str"], {}).get("pnl_float") if all_flows_bool else None,
+            "cumulative_pnl_float": performance_day_dict.get(row_dict["market_date_str"], {}).get("cumulative_pnl_float") if all_flows_bool else None,
+        } for row_dict in nav_dict["daily_list"]]
     # Source/config/result hash is stable across view refreshes. The frozen
     # export keeps generated_at separately; corrections produce a new hash.
     result_dict["report_hash_str"] = content_hash_str({key_str: value_obj for key_str, value_obj in result_dict.items() if key_str != "generated_at_str"})

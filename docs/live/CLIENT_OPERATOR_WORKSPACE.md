@@ -76,10 +76,15 @@ Enabled releases determine current operational scope. Saved performance bindings
 retain retired history; disabled foreign-client templates do not hide current Pods.
 Missing/corrupt financial sources never block operational pages or earlier local logs.
 
-Financial dates mean **available performance history**, not mandate inception,
-funding or first fill. An inferred reporting endpoint does not prove a withdrawal.
-Book totals are withheld if any local account's verified reporting window does not
-cover the selected period; independently verified account NAV/TWR remains available.
+Financial dates include **available raw IBKR NAV history**, not just strategy returns;
+they do not establish mandate inception, funding or first fill. Account values use
+all verified local account identities, including retired or not-yet-started strategies.
+For each date, `local NAV = sum(official account NAV)` only when every required
+account has a finalized row. Missing values are not zero or carried forward.
+Valid opening/closing values survive a missing middle date; the chart retains a gap.
+Strategy history endpoints do not prove deposits, withdrawals or account closure.
+Incomplete strategy history still withholds client P&L/TWR, but no longer suppresses
+independently verified book NAV. Official strategy TWR and its date windows are unchanged.
 Old NAV/TWR-only Flex imports do not prove cash movements or dollar profit. No MTM
 field review or consolidated TWR method is invented to fill those gaps.
 
@@ -153,6 +158,11 @@ Duplicate/missing/incorrect identities, pre-mandate or future state, missing
 freshness fields and a missing/future/older-than-120-second assessment cannot
 produce green. Global Inspector/book totals are not carried into a client view.
 Calendar missed-cycle findings affect the same headline as strategy status.
+The status summary shows one compact line per affected Pod, prioritizing its
+highest-severity cause. Deduplicated causes remain under Details; saved Pod flow
+stays visible. Friendly stage labels do not turn a recorded fill into a completed
+execution. Financial source errors name the missing/invalid evidence and preserve
+current operations, including when a previously selectable NAV date loses its source.
 
 The assessment time is **not** a process heartbeat. These views do not prove
 that a Windows process is alive merely because rendering succeeded. The existing
