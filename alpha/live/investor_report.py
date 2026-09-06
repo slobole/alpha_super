@@ -20,7 +20,7 @@ PUBLIC_REPORT_FIELD_TUPLE = (
     "scope_movement_float", "pnl_float", "twr_float", "twr_method_str",
     "coverage_complete_bool", "flows_complete_bool", "generated_at_str", "method_version_str",
     "report_hash_str", "scope_hash_str", "limitations_list",
-    "is_demo_bool",
+    "is_demo_bool", "client_twr_configured_bool", "twr_method_id_str",
 )
 PUBLIC_STRATEGY_FIELD_TUPLE = (
     "display_name_str", "from_date_str", "to_date_str", "opening_nav_float", "closing_nav_float",
@@ -43,10 +43,12 @@ def build_investor_snapshot_dict(report_dict):
     ]
     snapshot_dict["source_checksum_list"] = sorted({source_dict["checksum_str"] for source_dict in report_dict["source_list"]})
     # Owner-approved policy: finality covers the verified facts displayed, not
-    # an unavailable consolidated TWR. Accounting remains client_nav_bridge_v2.
+    # an unavailable unconfigured consolidated TWR. An explicitly configured
+    # client method must have a valid result before that report can be FINAL.
     final_evidence_bool = (
         report_dict["coverage_complete_bool"] is True
         and report_dict["flows_complete_bool"] is True
+        and (not report_dict["client_twr_configured_bool"] or report_dict["twr_float"] is not None)
         and bool(report_dict["strategy_list"])
         and all(
             strategy_dict["coverage_complete_bool"] is True
@@ -59,7 +61,7 @@ def build_investor_snapshot_dict(report_dict):
         "demonstration" if report_dict["is_demo_bool"] else "final" if final_evidence_bool else "draft"
     )
     snapshot_dict = json.loads(json.dumps(snapshot_dict, allow_nan=False))
-    snapshot_dict["renderer_version_str"] = "investor_pdf_v5"
+    snapshot_dict["renderer_version_str"] = "investor_pdf_v6"
     # Issued-document identity includes the printed issuance time. The separate
     # accounting report_hash stays stable across refreshes of unchanged facts.
     # This is a hash of the issued snapshot, not a hash of PDF bytes.
@@ -114,7 +116,7 @@ def render_investor_pdf_bytes(snapshot_dict):
     if snapshot_dict["twr_float"] is None:
         story_list.append(paragraph_obj("Returns are shown separately for each account; a combined return is not available.", muted_style))
     story_list.append(paragraph_obj("Period at a glance", heading_style))
-    kpi_row_list = [["Starting value", "Ending value", "Profit / loss", "Overall return"], [
+    kpi_row_list = [["Starting value", "Ending value", "Profit / loss", "Return (TWR)"], [
         _money_str(snapshot_dict["opening_nav_float"]), _money_str(snapshot_dict["closing_nav_float"]),
         _money_str(snapshot_dict["pnl_float"]), "Not reported" if snapshot_dict["twr_float"] is None else _return_str(snapshot_dict["twr_float"]),
     ]]
@@ -124,7 +126,11 @@ def render_investor_pdf_bytes(snapshot_dict):
         ("TOPPADDING", (0, 0), (-1, -1), 10), ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
     ]))
-    story_list.extend([kpi_table_obj, Spacer(1, 10), paragraph_obj("How the balance changed", heading_style)])
+    story_list.append(kpi_table_obj)
+    if snapshot_dict["client_twr_configured_bool"]:
+        source_str = "synthetic data" if snapshot_dict["is_demo_bool"] else "IBKR data"
+        story_list.append(paragraph_obj(f"Client TWR calculated from {source_str} using an end-of-day cash-flow convention.", muted_style))
+    story_list.extend([Spacer(1, 10), paragraph_obj("How the balance changed", heading_style)])
     bridge_row_list = [
         ("Starting value", "opening_nav_float"), ("Net transfers and owner payments", "capital_movement_float"),
         ("Broker adjustments", "linking_adjustment_float"),

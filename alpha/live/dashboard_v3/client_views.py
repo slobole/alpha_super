@@ -277,6 +277,7 @@ def financial_route_fn(client_id_str, view_str):
     return render_template(
         "client_financial.html", client_list=registry_dict["clients"], client_dict=client_dict,
         report_dict=report_dict, view_str=view_str, chart_dict=nav_chart_dict(report_dict["daily_book_list"]),
+        client_return_chart_dict=nav_chart_dict([{"nav_float": point_dict["cumulative_return_float"]} for point_dict in report_dict["return_path_list"]]),
         investor_dict=build_investor_snapshot_dict(report_dict) if view_str == "report" else None,
         operations_dict=_operations_dict(client_dict, as_of_ts) if view_str == "overview" else None,
         activity_dict=_activity_dict(client_dict, from_str, to_str) if view_str == "overview" else None,

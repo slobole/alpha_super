@@ -103,6 +103,8 @@ def build_demo_fixture_tuple():
             "client_id": client_id_str, "display_name": display_name_str, "base_currency": "USD",
             "mandate_start_date": DEMO_START_STR, "is_demo": True, "query_name": "DEMO_NAV",
             "operations_source": "local",
+            "client_twr": {"method": "daily_nav_eod_v1", "reviewed_by": "Synthetic fixture",
+                           "evidence_ref": "Deterministic demo: complete EOD flows, no internal transfers"},
             "fee_basis": "Synthetic demonstration only. Not actual broker performance or an investor statement.",
             "accounts": [], "nav_bridge": {
                 "profile_id": "DEMO_ONLY", "evidence_ref": "Deterministic in-memory demonstration",

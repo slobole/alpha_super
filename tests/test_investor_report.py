@@ -35,7 +35,7 @@ def test_losing_report_uses_standard_negative_money_and_readable_issued_time(tmp
     text_str = "\n".join(page_obj.extract_text() for page_obj in PdfReader(BytesIO(pdf_bytes)).pages)
     assert "-$10.00" in text_str and "$-" not in text_str
     assert "Prepared: 2026-09-08 23:00 UTC" in text_str
-    assert investor_dict["renderer_version_str"] == "investor_pdf_v5"
+    assert investor_dict["renderer_version_str"] == "investor_pdf_v6"
     assert investor_dict["pnl_float"] == -10
 
 
@@ -209,7 +209,7 @@ def test_friendly_pdf_source_copy_preserves_frozen_evidence(is_demo_bool):
     for field_str in ("fee_basis_str", "twr_method_str", "limitations_list", "report_hash_str", "scope_hash_str"):
         assert investor_dict[field_str] == result_dict[field_str]
     assert investor_dict["source_checksum_list"] == sorted({item_dict["checksum_str"] for item_dict in result_dict["source_list"]})
-    assert investor_dict["renderer_version_str"] == "investor_pdf_v5"
+    assert investor_dict["renderer_version_str"] == "investor_pdf_v6"
     prior_renderer_dict = {key_str: value_obj for key_str, value_obj in investor_dict.items() if key_str != "document_hash_str"}
     prior_renderer_dict["renderer_version_str"] = "investor_pdf_v3"
     assert content_hash_str(prior_renderer_dict) != investor_dict["document_hash_str"]

@@ -139,5 +139,7 @@ def test_benchmark_shared_result_hash_changes_but_account_money_does_not():
     compared_dict = build_client_report_dict(client_dict, source_dict["demo-owner"], benchmark_snapshot_obj=build_demo_benchmark_snapshot(), **argument_dict)
     assert plain_dict["report_hash_str"] != compared_dict["report_hash_str"]
     assert plain_dict["pnl_float"] == compared_dict["pnl_float"]
-    assert plain_dict["twr_float"] is compared_dict["twr_float"] is None
+    assert plain_dict["twr_float"] is not None
+    assert plain_dict["twr_float"] == compared_dict["twr_float"]
+    assert plain_dict["return_path_list"] == compared_dict["return_path_list"]
     assert all(row_dict["benchmark_dict"]["status_str"] == "ready" for row_dict in compared_dict["strategy_list"])

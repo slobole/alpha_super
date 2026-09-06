@@ -76,7 +76,8 @@ async function main() {
         if (['overview', 'performance'].includes(viewStr)) {
           assert.equal(await pageObj.locator('.client-source-details').getAttribute('open'), null);
           assert(!(await pageObj.locator('main').innerText()).includes('Unavailable: daily account NAV/TWR'));
-          assert(await pageObj.getByText('Not available · see accounts below', { exact: true }).isVisible());
+          assert(await pageObj.locator('[data-client-twr]').getByText('Calculated · daily', { exact: true }).isVisible());
+          assert(await pageObj.locator('.client-return-panel svg').isVisible());
         }
         if (viewStr !== 'performance') {
           assert(await pageObj.getByText('Saved check ·', { exact: false }).isVisible());

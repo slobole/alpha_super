@@ -216,6 +216,15 @@ non-overlapping `economic_fields`/optional `informational_fields`. Do not copy t
 demo's synthetic `mtm` profile into production. Validate the actual expanded Flex
 XML against the [IBKR Change in NAV reference](https://www.ibkrguides.com/reportingreference/reportguide/changeinnav_fq.htm).
 
+An optional reviewed `client_twr` enables the headline daily consolidated return
+and return chart. Its single supported method is `daily_nav_eod_v1`; see
+[Client TWR contract](CLIENT_TWR.md) for exact formulas, transfer restrictions,
+configuration and pre-deployment evidence. It uses the same client method for
+one or multiple accounts, while strategy returns remain official IBKR TWR.
+It is off for existing registries and on only in the synthetic demo. Configured
+but unavailable client TWR makes that report DRAFT. The legacy behavior below
+applies to registries without `client_twr`.
+
 Activity Flex uses D+1: current-day values and metrics remain pending. Production
 onboarding must prove that each imported source is a qualifying finalized daily
 statement, not an old intraday/manual snapshot that merely aged past midnight.

@@ -28,7 +28,8 @@ from alpha.live.scheduler_utils import get_exchange_calendar_obj
 from alpha.live.client_benchmark import account_benchmark_dict, validate_benchmark_config
 
 
-METHOD_VERSION_STR = "client_nav_bridge_v2"
+METHOD_VERSION_STR = "client_nav_bridge_v3"
+CLIENT_TWR_METHOD_STR = "daily_nav_eod_v1"
 BRIDGE_TOLERANCE_DECIMAL = Decimal("0.01")
 CAPITAL_FIELD_TUPLE = (
     "depositsWithdrawals", "internalCashTransfers", "assetTransfers",
@@ -189,6 +190,15 @@ def validate_client_registry_dict(registry_dict: dict[str, Any]) -> dict[str, An
         bridge_dict = client_dict.get("nav_bridge")
         if bridge_dict is not None:
             _validate_bridge_profile(bridge_dict)
+        twr_dict = client_dict.get("client_twr")
+        if twr_dict is not None:
+            if not isinstance(twr_dict, dict) or twr_dict.get("method") != CLIENT_TWR_METHOD_STR:
+                raise ClientReportingError("Client TWR requires the explicit daily_nav_eod_v1 method.")
+            if bridge_dict is None:
+                raise ClientReportingError("Client TWR requires a reviewed NAV bridge.")
+            for field_str in ("reviewed_by", "evidence_ref"):
+                if not isinstance(twr_dict.get(field_str), str) or not twr_dict[field_str].strip():
+                    raise ClientReportingError(f"Client TWR requires {field_str}.")
     _reject_overlap(ownership_dict, "account")
     # Return a detached copy, preventing a caller's edits from rewriting a report.
     return json.loads(json.dumps(registry_dict, allow_nan=False))
@@ -394,6 +404,43 @@ def _money_float(value_decimal: Decimal | None) -> float | None:
     return None if value_decimal is None else float(value_decimal)
 
 
+def _client_daily_twr_dict(day_list, *, complete_bool, from_date_str):
+    """Daily EOD convention, not official broker or exact intraday TWR.
+
+    r_D = independently bridged P&L_D / active-account SOD NAV_D.
+    TWR = product(1+r_D)-1. Scope entries are SOD; flows are EOD.
+    See docs/live/CLIENT_TWR.md. Any failed day withholds the whole path.
+    """
+    unavailable_dict = {"twr_float": None, "return_path_list": [], "twr_daily_list": []}
+    if not complete_bool or not day_list:
+        return {**unavailable_dict, "twr_reason_str": "Complete finalized NAV and capital data are required."}
+    growth_decimal = Decimal(1)
+    path_list = [{"market_date_str": from_date_str + " SOD", "cumulative_return_float": 0.0}]
+    daily_list = []
+    # *** CRITICAL *** Retrospective reporting only. The denominator includes
+    # entrants at SOD, excludes exited accounts, and never uses future NAV.
+    # Internal cash in transit must not silently reduce invested capital.
+    for date_str, opening_decimal, pnl_decimal, boundary_decimal, internal_decimal in day_list:
+        reason_str = None
+        if boundary_decimal != 0:
+            reason_str = "Broker linking adjustment timing is unresolved."
+        elif internal_decimal != 0:
+            reason_str = "Internal transfer or cash-in-transit evidence is unresolved."
+        elif opening_decimal <= 0:
+            reason_str = "Positive opening client capital is required on every reporting day."
+        if reason_str:
+            return {**unavailable_dict, "twr_reason_str": f"{date_str}: {reason_str}"}
+        return_decimal = pnl_decimal / opening_decimal
+        if return_decimal <= -1:
+            return {**unavailable_dict, "twr_reason_str": f"{date_str}: Total-loss or negative return base is unsupported."}
+        growth_decimal *= 1 + return_decimal
+        daily_list.append({"market_date_str": date_str, "opening_nav_float": float(opening_decimal),
+                           "pnl_float": float(pnl_decimal), "return_float": float(return_decimal)})
+        path_list.append({"market_date_str": date_str, "cumulative_return_float": float(growth_decimal - 1)})
+    return {"twr_float": float(growth_decimal - 1), "return_path_list": path_list,
+            "twr_daily_list": daily_list, "twr_reason_str": None}
+
+
 def build_client_report_dict(
     client_dict: dict[str, Any], snapshot_obj: BrokerReportingSnapshot, *,
     from_date_str: str, to_date_str: str, as_of_ts: datetime, benchmark_snapshot_obj=None,
@@ -527,6 +574,7 @@ def build_client_report_dict(
         issue_list.append("Current-day Activity Flex values are not finalized; reporting uses D+1 confirmation.")
     all_flows_bool = all_coverage_bool and all(row_dict["flows_complete_bool"] for row_dict in strategy_result_list)
     daily_book_list: list[dict[str, Any]] = []
+    twr_day_list = []
     previous_active_set: set[str] = set()
     previous_row_dict: dict[str, BrokerNavRow] = {}
     scope_total_decimal = Decimal(0)
@@ -553,12 +601,19 @@ def build_client_report_dict(
                     all_flows_bool = False
         day_pnl_decimal = Decimal(0)
         if all_flows_bool:
+            day_boundary_decimal = day_internal_decimal = Decimal(0)
             for account_str, row_obj in current_row_dict.items():
                 bridge_dict = bridge_by_key_dict[(account_str, market_date_str)]
                 capital_total_decimal += bridge_dict["capital_decimal"]
                 linking_total_decimal += bridge_dict["boundary_decimal"]
                 day_pnl_decimal += bridge_dict["pnl_decimal"]
+                # Absolute linking activity must not cancel across accounts.
+                day_boundary_decimal += abs(bridge_dict["boundary_decimal"])
+                day_internal_decimal += _decimal_value(row_obj.attribute_dict, "internalCashTransfers")
             pnl_total_decimal += day_pnl_decimal
+            twr_day_list.append((market_date_str,
+                sum((row_obj.opening_nav_decimal for row_obj in current_row_dict.values()), Decimal(0)),
+                day_pnl_decimal, day_boundary_decimal, day_internal_decimal))
         daily_book_list.append({
             "market_date_str": market_date_str, "nav_float": _money_float(nav_decimal),
             "pnl_float": _money_float(day_pnl_decimal) if all_flows_bool else None,
@@ -584,6 +639,14 @@ def build_client_report_dict(
         if report_date_list and strategy_dict["from_date_str"] == report_date_list[0] and strategy_dict["to_date_str"] == report_date_list[-1]:
             client_twr_float = strategy_dict["twr_float"]
             client_twr_method_str = "Official IBKR account TWR (single account covers the whole selected period)"
+    twr_result_dict = {"return_path_list": [], "twr_daily_list": [], "twr_reason_str": None}
+    client_twr_configured_bool = client_dict.get("client_twr") is not None
+    if client_twr_configured_bool:
+        twr_result_dict = _client_daily_twr_dict(twr_day_list, complete_bool=all_flows_bool, from_date_str=from_date_str)
+        client_twr_float = twr_result_dict.pop("twr_float")
+        client_twr_method_str = "Calculated client daily TWR; end-of-day flow convention, not official consolidated IBKR TWR."
+        if twr_result_dict["twr_reason_str"]:
+            issue_list.append("Client TWR: " + twr_result_dict["twr_reason_str"])
     used_import_set = {row_obj.source_import_id_int for row_obj in contributing_row_list}
     source_field_tuple = (
         "import_id_int", "checksum_str", "imported_timestamp_str", "query_name_str",
@@ -618,8 +681,11 @@ def build_client_report_dict(
         "scope_movement_float": _money_float(scope_total_decimal) if all_coverage_bool else None,
         "pnl_float": _money_float(pnl_total_decimal) if all_flows_bool else None,
         "twr_float": client_twr_float, "twr_method_str": client_twr_method_str,
+        "client_twr_configured_bool": client_twr_configured_bool,
+        "twr_method_id_str": CLIENT_TWR_METHOD_STR if client_twr_configured_bool else "official_account_only",
+        **twr_result_dict,
         "coverage_complete_bool": all_coverage_bool, "flows_complete_bool": all_flows_bool,
-        "status_str": "ready" if all_flows_bool else "draft",
+        "status_str": "ready" if all_flows_bool and (not client_twr_configured_bool or client_twr_float is not None) else "draft",
         "strategy_list": strategy_result_list, "daily_book_list": daily_book_list,
         "source_list": source_list,
         "issue_list": list(dict.fromkeys(issue_list)),
