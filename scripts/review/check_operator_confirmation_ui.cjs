@@ -1,13 +1,11 @@
 // Synthetic loopback QA. Real command executors/broker/config.env are never used.
 const { chromium } = require('playwright');
 const { spawn } = require('node:child_process');
-const { randomBytes } = require('node:crypto');
 const { mkdir } = require('node:fs/promises');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 
 async function main() {
-  const tokenStr = randomBytes(32).toString('hex');
   const originStr = 'http://127.0.0.1:18765';
   const outputStr = path.resolve('.codex_tmp/operator-ui');
   await mkdir(outputStr, { recursive: true });
@@ -31,20 +29,19 @@ def calls_fn():
 app_obj.run(host='127.0.0.1', port=18765, debug=False, use_reloader=False)
 `;
   const serverObj = spawn(path.resolve('.venv/Scripts/python.exe'), ['-c', codeStr], {
-    env: { ...process.env, ALPHA_OPS_OPERATOR_ACCESS_TOKEN_STR: tokenStr },
+    env: process.env,
     windowsHide: true, stdio: 'ignore',
   });
   let browserObj;
   try {
-    const headersDict = { Authorization: 'Basic ' + Buffer.from('operator:' + tokenStr).toString('base64') };
     let readyBool = false;
     for (let retryInt = 0; retryInt < 80; retryInt++) {
-      try { if ((await fetch(originStr + '/qa/calls', { headers: headersDict })).ok) { readyBool = true; break; } } catch {}
+      try { if ((await fetch(originStr + '/qa/calls')).ok) { readyBool = true; break; } } catch {}
       await new Promise(resolveFn => setTimeout(resolveFn, 200));
     }
     assert(readyBool, 'Synthetic server failed to start');
     browserObj = await chromium.launch({ channel: 'msedge', headless: true });
-    const contextObj = await browserObj.newContext({ extraHTTPHeaders: headersDict });
+    const contextObj = await browserObj.newContext();
     const pageObj = await contextObj.newPage();
     await pageObj.route('**/*', routeObj => routeObj.request().url().startsWith(originStr)
       ? routeObj.continue() : routeObj.abort());

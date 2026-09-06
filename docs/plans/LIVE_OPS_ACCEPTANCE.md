@@ -191,9 +191,9 @@ are not claimed as implemented by this review-fix commit.
 - Windows paths, source-read failures and missing/old evidence have explicit
   unknown/error states. Those states must not be interpreted as a broker outage
   or as green simply because a page rendered.
-- Supported startup is the documented credential-required CLI. Direct factory
-  use without an operator credential intentionally retains legacy non-client
-  route compatibility and is **not** covered by the operator-only startup claim.
+- Owner-approved startup has no application login. Host/tailnet access is the
+  operator boundary; the old credential environment setting is ignored. Prior
+  authenticated-browser results below/above are historical, not current policy.
 - The CLI defaults to read-only; `--enable-actions` is explicit and incompatible
   with demo mode. Confirmation state is in-memory and single-process: restarts,
   expiry, cancellation, replay and changed target/state fail closed. This is not

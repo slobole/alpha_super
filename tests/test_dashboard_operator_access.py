@@ -1,78 +1,73 @@
-from base64 import b64encode
-
 import pytest
 
 from alpha.live.dashboard_v3.app import create_app
 
 
-TEST_ACCESS_STR = "synthetic-test-operator-access-123456"
-
-
-def auth_headers_dict(password_str=TEST_ACCESS_STR, username_str="operator"):
-    return {"Authorization": "Basic " + b64encode(f"{username_str}:{password_str}".encode()).decode()}
-
-
 class ForbiddenProvider:
     def get_summary_dict(self):
-        raise AssertionError("Unauthenticated request accessed operational data")
+        raise AssertionError("Request unexpectedly accessed operational data")
 
 
-@pytest.mark.parametrize("path_str", ["/", "/performance", "/clients", "/clients/sample/overview", "/diagnostics", "/api/action-token", "/healthz"])
-def test_configured_console_requires_operator_before_any_data_access(path_str):
-    app_obj = create_app(ForbiddenProvider(), operator_access_token_str=TEST_ACCESS_STR)
-    response_obj = app_obj.test_client().get(path_str)
-    assert response_obj.status_code == 401
+@pytest.mark.parametrize("access_token_str", [None, "short", "obsolete-operator-credential-123456"])
+def test_health_available_without_login_even_with_stale_env(monkeypatch, access_token_str):
+    if access_token_str is None:
+        monkeypatch.delenv("ALPHA_OPS_OPERATOR_ACCESS_TOKEN_STR", raising=False)
+    else:
+        monkeypatch.setenv("ALPHA_OPS_OPERATOR_ACCESS_TOKEN_STR", access_token_str)
+    response_obj = create_app(ForbiddenProvider()).test_client().get("/healthz")
+    assert response_obj.status_code == 200
+    assert "WWW-Authenticate" not in response_obj.headers
     assert response_obj.headers["Cache-Control"] == "no-store"
     assert response_obj.headers["X-Frame-Options"] == "DENY"
 
 
-def test_client_reporting_fails_closed_without_access_configuration(monkeypatch):
-    monkeypatch.delenv("ALPHA_OPS_OPERATOR_ACCESS_TOKEN_STR", raising=False)
+def test_missing_client_registry_is_not_a_password_error(monkeypatch):
+    monkeypatch.delenv("ALPHA_CLIENT_REPORTING_CONFIG_PATH_STR", raising=False)
     response_obj = create_app(ForbiddenProvider()).test_client().get("/clients")
-    assert response_obj.status_code == 503
+    assert response_obj.status_code == 200
+    assert "WWW-Authenticate" not in response_obj.headers
+    assert "Operator access must be configured" not in response_obj.get_data(as_text=True)
 
 
-@pytest.mark.parametrize("password_str,username_str", [("bad", "operator"), (TEST_ACCESS_STR, "client"), ("סיסמה", "operator")])
-def test_wrong_operator_credential_rejected(password_str, username_str):
-    response_obj = create_app(ForbiddenProvider(), operator_access_token_str=TEST_ACCESS_STR).test_client().get("/", headers=auth_headers_dict(password_str, username_str))
-    assert response_obj.status_code == 401
-
-
-def test_remote_plain_http_rejected_even_with_valid_credential():
-    response_obj = create_app(ForbiddenProvider(), operator_access_token_str=TEST_ACCESS_STR).test_client().get("/", headers=auth_headers_dict(), environ_overrides={"REMOTE_ADDR": "192.0.2.10"})
+@pytest.mark.parametrize("forwarded_proto_str", ["http", "https"])
+def test_remote_plain_http_rejected_without_trusting_proxy_headers(forwarded_proto_str):
+    response_obj = create_app(ForbiddenProvider()).test_client().get(
+        "/healthz", headers={"X-Forwarded-Proto": forwarded_proto_str},
+        environ_overrides={"REMOTE_ADDR": "192.0.2.10"},
+    )
     assert response_obj.status_code == 426
 
 
-def test_authentication_does_not_bypass_read_only_actions():
-    client_obj = create_app(ForbiddenProvider(), operator_access_token_str=TEST_ACCESS_STR, read_only_bool=True).test_client()
-    for path_str in ("/api/pods/any/actions/tick", "/api/pods/any/manual-order", "/api/pods/any/diff/run"):
-        response_obj = client_obj.post(path_str, headers=auth_headers_dict())
-        assert response_obj.status_code == 403
-
-
-def test_authenticated_healthz_is_available_without_financial_data():
-    response_obj = create_app(ForbiddenProvider(), operator_access_token_str=TEST_ACCESS_STR).test_client().get("/healthz", headers=auth_headers_dict())
+def test_remote_https_does_not_require_application_login():
+    response_obj = create_app(ForbiddenProvider()).test_client().get(
+        "/healthz", base_url="https://localhost",
+        environ_overrides={"REMOTE_ADDR": "192.0.2.10"},
+    )
     assert response_obj.status_code == 200
 
 
-def test_weak_operator_credential_rejected():
-    with pytest.raises(ValueError, match="24 characters"):
-        create_app(ForbiddenProvider(), operator_access_token_str="short")
+def test_no_login_does_not_bypass_read_only_actions():
+    client_obj = create_app(ForbiddenProvider(), read_only_bool=True).test_client()
+    for path_str in ("/api/pods/any/actions/tick", "/api/pods/any/manual-order", "/api/pods/any/diff/run"):
+        assert client_obj.post(path_str).status_code == 403
+    for path_str in ("/api/action-token", "/fragments/action-preview/any/tick",
+                     "/fragments/manual-order-ticket/any", "/api/pods/any/trade-sheet"):
+        assert client_obj.get(path_str).status_code == 403
 
 
 @pytest.mark.parametrize("path_str", ["/fragments/command-catalog/ambiguous", "/api/pods/ambiguous/trade-sheet"])
-@pytest.mark.parametrize("read_only_bool,authenticated_bool,status_int", [(False, True, 409), (True, True, 403), (False, False, 401)])
-def test_ambiguous_target_is_controlled_and_never_reaches_export_or_actions(path_str, read_only_bool, authenticated_bool, status_int):
+@pytest.mark.parametrize("read_only_bool,status_int", [(False, 409), (True, 403)])
+def test_ambiguous_target_is_controlled_and_never_reaches_export_or_actions(path_str, read_only_bool, status_int):
     class AmbiguousProvider(ForbiddenProvider):
         def get_target_for_pod(self, pod_id_str):
-            assert status_int == 409, "Authorization/read-only must reject before lookup"
+            assert status_int == 409, "Read-only must reject before lookup"
             raise ValueError("PRIVATE_PATH duplicate target")
 
         def export_trade_sheet_path_str(self, target_obj):
             pytest.fail("Ambiguous target must not export a file")
 
-    app_obj = create_app(AmbiguousProvider(), read_only_bool=read_only_bool, operator_access_token_str=TEST_ACCESS_STR)
-    response_obj = app_obj.test_client().get(path_str, headers=auth_headers_dict() if authenticated_bool else {})
+    app_obj = create_app(AmbiguousProvider(), read_only_bool=read_only_bool)
+    response_obj = app_obj.test_client().get(path_str)
     assert response_obj.status_code == status_int
     assert "PRIVATE_PATH" not in response_obj.get_data(as_text=True)
     if status_int == 409:

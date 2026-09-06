@@ -9,7 +9,7 @@ import pytest
 from alpha.live.dashboard_v3.app import create_app
 from alpha.live.dashboard_v3.client_views import local_strategy_name_str
 from test_client_reporting import client_config_dict
-from test_dashboard_operator_access import ForbiddenProvider, TEST_ACCESS_STR
+from test_dashboard_operator_access import ForbiddenProvider
 
 
 @pytest.mark.parametrize("case_str", ["match", "wrong_account", "paper", "snapshot", "unconfigured", "retired", "future", "duplicate", "missing", "invalid"])
@@ -31,7 +31,7 @@ def test_friendly_names_require_unique_current_local_live_owner(case_str):
     if case_str == "missing": registry_dict = None
     original_dict = deepcopy(row_dict)
     app_obj = create_app(ForbiddenProvider(), client_registry_dict=registry_dict,
-        operator_access_token_str=TEST_ACCESS_STR, read_only_bool=True)
+        read_only_bool=True)
     with app_obj.test_request_context(), patch("alpha.live.dashboard_v3.client_views.datetime") as clock_mock:
         clock_mock.now.return_value = datetime(2026, 9, 6, 12, tzinfo=UTC)
         assert local_strategy_name_str(row_dict) == ("Strategy A" if case_str == "match" else "Fallback")
@@ -45,8 +45,7 @@ def test_same_pod_in_different_accounts_does_not_share_name():
     second_dict = deepcopy(first_dict)
     second_dict.update(client_id="another", display_name="Another client")
     second_dict["accounts"][0].update(account_route="U_TEST_B", display_name="Other strategy")
-    app_obj = create_app(ForbiddenProvider(), client_registry_dict={"schema_version": 1, "clients": [first_dict, second_dict]},
-        operator_access_token_str=TEST_ACCESS_STR)
+    app_obj = create_app(ForbiddenProvider(), client_registry_dict={"schema_version": 1, "clients": [first_dict, second_dict]})
     with app_obj.test_request_context(), patch("alpha.live.dashboard_v3.client_views.datetime") as clock_mock:
         clock_mock.now.return_value = datetime(2026, 9, 6, 12, tzinfo=UTC)
         for route_str, expected_str in [("U_TEST_A", "Strategy A"), ("U_TEST_B", "Other strategy")]:

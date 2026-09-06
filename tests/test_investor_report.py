@@ -8,7 +8,6 @@ from pypdf import PdfReader
 from alpha.live.investor_report import build_investor_snapshot_dict, render_investor_pdf_bytes
 from test_client_reporting import client_config_dict, nav_attributes_dict, report_dict, snapshot_obj
 from test_client_views import financial_client_obj
-from test_dashboard_operator_access import auth_headers_dict
 
 
 def test_pdf_contains_same_financial_values_and_no_operator_identifiers():
@@ -114,14 +113,14 @@ def test_missing_flow_or_unfinalized_source_cannot_issue_final_report():
 
 def test_export_rejects_stale_or_missing_preview_confirmation(financial_client_obj):
     for expected_str in ("", "&expected=old-hash"):
-        response_obj = financial_client_obj.get("/clients/sample/report?from=2026-09-01&to=2026-09-01&download=pdf" + expected_str, headers=auth_headers_dict())
+        response_obj = financial_client_obj.get("/clients/sample/report?from=2026-09-01&to=2026-09-01&download=pdf" + expected_str)
         assert response_obj.status_code == 409
 
 
 def test_pdf_bundle_freezes_public_snapshot_and_matching_pdf(financial_client_obj):
     prefix_str = "/clients/sample/report?from=2026-09-01&to=2026-09-01"
-    result_dict = financial_client_obj.get(prefix_str + "&download=json", headers=auth_headers_dict()).get_json()
-    response_obj = financial_client_obj.get(prefix_str + "&download=bundle&expected=" + result_dict["report_hash_str"], headers=auth_headers_dict())
+    result_dict = financial_client_obj.get(prefix_str + "&download=json").get_json()
+    response_obj = financial_client_obj.get(prefix_str + "&download=bundle&expected=" + result_dict["report_hash_str"])
     assert response_obj.status_code == 200
     assert response_obj.mimetype == "application/zip"
     with ZipFile(BytesIO(response_obj.data)) as zip_obj:
@@ -145,10 +144,10 @@ def test_pdf_html_markup_in_client_names_is_literal_text():
 
 def test_actual_source_revision_after_preview_prevents_export(financial_client_obj, monkeypatch):
     prefix_str = "/clients/sample/report?from=2026-09-01&to=2026-09-01"
-    prior_dict = financial_client_obj.get(prefix_str + "&download=json", headers=auth_headers_dict()).get_json()
+    prior_dict = financial_client_obj.get(prefix_str + "&download=json").get_json()
     financial_client_obj.application.config["client_reporting_snapshot_fn"] = lambda client_id_str: snapshot_obj([nav_attributes_dict(closing_str="1011", mtm="11")], import_id_int=2)
     monkeypatch.setattr("alpha.live.dashboard_v3.client_views.render_investor_pdf_bytes", lambda report_obj: (_ for _ in ()).throw(AssertionError("Stale preview reached PDF renderer")))
-    response_obj = financial_client_obj.get(prefix_str + "&download=pdf&expected=" + prior_dict["report_hash_str"], headers=auth_headers_dict())
+    response_obj = financial_client_obj.get(prefix_str + "&download=pdf&expected=" + prior_dict["report_hash_str"])
     assert response_obj.status_code == 409
 
 

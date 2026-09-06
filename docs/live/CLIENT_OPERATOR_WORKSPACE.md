@@ -34,18 +34,19 @@ enabled-Pod list. The same selected-period event projection supplies Overview.
 
 ## Access and launch
 
-Use a private operator credential of at least 24 characters in
-`ALPHA_OPS_OPERATOR_ACCESS_TOKEN_STR`, with username `operator`. Load it from a
-protected process environment or ignored `config.env`, not from a command-line
-argument. The real-data CLI loads `config.env` before reading the credential;
-`--demo` deliberately does not load that file. Every non-static console route is
-authenticated in this configured CLI path, including `/healthz` and exports.
+No application login is required. The former
+`ALPHA_OPS_OPERATOR_ACCESS_TOKEN_STR` setting is ignored and may be removed.
+The real-data CLI still loads `config.env` for data-source settings;
+`--demo` deliberately does not load that file. Access is controlled by the
+host/tailnet: anyone who can reach the console can view financial data and,
+if advanced actions are explicitly enabled, operate those controls. Restrict
+access to operators; do not expose the service publicly or through Funnel.
 
 Keep port 8080 on loopback and use Tailscale Serve HTTPS remotely. The application
 does not trust browser-supplied proxy headers as proof of TLS. A direct remote
 HTTP request is rejected. See `DASHBOARD_V3_RUNBOOK.md` for the proxy boundary.
 
-With the credential already set, a local synthetic preview is:
+A local synthetic preview is:
 
 ```powershell
 uv run --locked python -m alpha.live.dashboard_v3 --demo --port 8080
@@ -363,7 +364,7 @@ saved status screen for strictly read-only inspection. No generic shell runs in 
 
 ## Verification and remaining acceptance work
 
-`scripts/review/check_client_reporting_ui.cjs` runs an authenticated, synthetic
+`scripts/review/check_client_reporting_ui.cjs` runs a no-login, synthetic
 loopback server, blocks external resources, visits every client tab at 390/768/1440
 pixels, checks client isolation/date form/PDF download, saves screenshots and stops
 its own child. `tests/test_client_operations.py`, `test_client_reporting.py`,

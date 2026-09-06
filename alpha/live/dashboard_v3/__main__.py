@@ -14,7 +14,6 @@ per refresh retrying NDU even when the operator opted into snapshots.
 from __future__ import annotations
 
 import argparse
-import os
 
 from alpha.live.dashboard_v3.app import create_app
 from scripts.norgate_config_env import load_config_env_file
@@ -63,27 +62,18 @@ def main() -> int:
     if not parsed_args_obj.skip_env_file and not parsed_args_obj.demo:
         load_config_env_file(override_existing_bool=True)
 
-    operator_access_token_str = os.getenv("ALPHA_OPS_OPERATOR_ACCESS_TOKEN_STR", "")
-    if len(operator_access_token_str) < 24:
-        arg_parser_obj.error(
-            "Set ALPHA_OPS_OPERATOR_ACCESS_TOKEN_STR to a private operator credential "
-            "of at least 24 characters. Login username: operator. Keep the listener "
-            "on loopback and use HTTPS for remote access."
-        )
     if parsed_args_obj.demo:
         from alpha.live.dashboard_v3.demo import DemoOperationsProvider, build_demo_fixture_tuple
 
         registry_dict, snapshot_dict = build_demo_fixture_tuple()
         flask_app_obj = create_app(
             DemoOperationsProvider(), read_only_bool=True, demo_mode_bool=True,
-            operator_access_token_str=operator_access_token_str,
             client_registry_dict=registry_dict,
             client_reporting_snapshot_fn=lambda client_id_str: snapshot_dict[client_id_str],
         )
     else:
         flask_app_obj = create_app(
             read_only_bool=parsed_args_obj.read_only,
-            operator_access_token_str=operator_access_token_str,
             client_reporting_config_path_str=parsed_args_obj.client_registry,
         )
     flask_app_obj.run(

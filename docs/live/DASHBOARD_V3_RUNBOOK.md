@@ -11,15 +11,12 @@ no build step. Lives on the trading VPS, reached over Tailscale only.
 
 ## Bring it up
 
-Startup now requires `ALPHA_OPS_OPERATOR_ACCESS_TOKEN_STR`: a private credential
-of at least 24 characters, supplied in protected `config.env` or the service
-environment. Login username is `operator`. Never put the credential in a URL,
-shell argument, shared screenshot, repository file or operator report. The
-credential protects the entire console, including `/healthz`, artifacts and
-action endpoints. This is an explicit startup compatibility change.
-
-Keep the listener on loopback. Use Tailscale Serve HTTPS for another machine;
-do not send HTTP Basic credentials to a remote plain-HTTP listener.
+No application username/password is required. The former
+`ALPHA_OPS_OPERATOR_ACCESS_TOKEN_STR` setting is ignored and may be removed.
+Keep the listener on loopback. For another machine, use Tailscale Serve HTTPS
+with operator-only tailnet access. Do not publish the service publicly or use
+Tailscale Funnel. Anyone allowed to reach it can view its financial data;
+with `--enable-actions`, they can also operate its advanced controls.
 
 ```bash
 cd /srv/alpha
@@ -27,7 +24,7 @@ uv sync --locked
 uv run python -m alpha.live.dashboard_v3 --host 127.0.0.1 --port 8080 --read-only
 ```
 
-On the VPS itself, open `http://127.0.0.1:8080/` and authenticate. For a laptop,
+On the VPS itself, open `http://127.0.0.1:8080/`. For a laptop,
 first configure the HTTPS proxy below; a loopback listener is not directly
 reachable at `http://<vps-hostname>:8080/`.
 
@@ -178,7 +175,7 @@ From the VPS:
 
 ```bash
 ss -tlnp | grep 8080      # should show 127.0.0.1:8080 only
-curl --user operator http://127.0.0.1:8080/healthz  # prompts for the private credential
+curl http://127.0.0.1:8080/healthz
 ```
 
 From a non-tailnet machine on the VPS's public IP:
@@ -216,7 +213,7 @@ If that returns HTML, fix the bind before logging off.
 ## Where things live
 
 Supported startup defaults to **read-only**. Enabling advanced operations requires
-the explicit `--enable-actions` flag plus the operator credential. Keep that flag
+the explicit `--enable-actions` flag and trusted operator network access. Keep that flag
 out of the read-only service template and demo. Preview approval lasts 120 seconds,
 is bound to the exact target/release/saved state and cannot be reused after dispatch.
 Tick can create new plans; direct submit/reconcile are bound to captured plan intent.

@@ -6,7 +6,7 @@ import pytest
 from alpha.live.dashboard_v3.app import create_app
 from alpha.live.dashboard_v3.client_operations import load_client_activity_dict, safe_client_event_list
 from alpha.live.dashboard_v3.demo import DemoOperationsProvider, build_demo_fixture_tuple
-from test_dashboard_operator_access import TEST_ACCESS_STR, ForbiddenProvider, auth_headers_dict
+from test_dashboard_operator_access import ForbiddenProvider
 
 
 AS_OF_TS = datetime(2026, 9, 5, 12, tzinfo=UTC)
@@ -87,10 +87,10 @@ def snapshot_client_dict(tmp_path, event_list, **summary_override_dict):
 
 def test_remote_history_retired_only_client_works_without_local_provider(tmp_path):
     config_dict = snapshot_client_dict(tmp_path, [event_dict(), event_dict(account_id_str="OTHER", message_str="OTHER_CLIENT_PRIVATE")])
-    app_obj = create_app(ForbiddenProvider(), read_only_bool=True, operator_access_token_str=TEST_ACCESS_STR,
+    app_obj = create_app(ForbiddenProvider(), read_only_bool=True,
         client_registry_dict={"schema_version": 1, "clients": [config_dict]},
         client_reporting_snapshot_fn=lambda client_id_str: pytest.fail("Activity must not read finances"))
-    response_obj = app_obj.test_client().get("/clients/demo-owner/activity?from=2026-06-01&to=2026-06-30", headers=auth_headers_dict())
+    response_obj = app_obj.test_client().get("/clients/demo-owner/activity?from=2026-06-01&to=2026-06-30")
     html_str = response_obj.get_data(as_text=True)
     assert response_obj.status_code == 200
     assert "Reconciliation recorded" in html_str and "Tactical allocation" in html_str
@@ -138,15 +138,15 @@ def test_overview_shows_three_material_events_with_same_activity_dates(monkeypat
         row_dict = original_fn(pod_id_str)[0]
         return [dict(row_dict, event_timestamp_str=f"2026-09-0{day_int}T13:40:00Z") for day_int in (1, 2, 3)] + [dict(row_dict, event_name_str="heartbeat", message_str="HEARTBEAT_NOISE")]
     monkeypatch.setattr(provider_obj, "get_pod_event_dict_list", history_list)
-    app_obj = create_app(provider_obj, read_only_bool=True, operator_access_token_str=TEST_ACCESS_STR,
+    app_obj = create_app(provider_obj, read_only_bool=True,
         client_registry_dict=registry_dict, client_reporting_snapshot_fn=lambda client_id_str: snapshot_dict[client_id_str])
     client_obj = app_obj.test_client()
-    html_str = client_obj.get("/clients/demo-owner/overview?from=2026-09-01&to=2026-09-02", headers=auth_headers_dict()).get_data(as_text=True)
+    html_str = client_obj.get("/clients/demo-owner/overview?from=2026-09-01&to=2026-09-02").get_data(as_text=True)
     assert html_str.count('class="client-event"') == 3
     assert "HEARTBEAT_NOISE" not in html_str
     assert "/clients/demo-owner/activity?from=2026-09-01&amp;to=2026-09-02" in html_str
     assert "Recorded changes" in html_str
-    activity_html_str = client_obj.get("/clients/demo-owner/activity?from=2026-09-01&to=2026-09-02", headers=auth_headers_dict()).get_data(as_text=True)
+    activity_html_str = client_obj.get("/clients/demo-owner/activity?from=2026-09-01&to=2026-09-02").get_data(as_text=True)
     assert activity_html_str.count('class="client-event"') == 6
     assert "HEARTBEAT_NOISE" in activity_html_str
 
@@ -184,9 +184,9 @@ def test_remote_display_cap_is_explicit_and_material_excerpt_remains_bounded(tmp
 @pytest.mark.parametrize("level_str,expanded_bool", [("info", False), ("WARN", True), ("warning", True), ("error", True), ("critical", True), ("fatal", True)])
 def test_compact_activity_keeps_warning_and_error_messages_expanded(tmp_path, level_str, expanded_bool):
     config_dict = snapshot_client_dict(tmp_path, [event_dict(level_str=level_str, message_str="Review execution evidence")])
-    app_obj = create_app(ForbiddenProvider(), read_only_bool=True, operator_access_token_str=TEST_ACCESS_STR,
+    app_obj = create_app(ForbiddenProvider(), read_only_bool=True,
         client_registry_dict={"schema_version": 1, "clients": [config_dict]})
-    html_str = app_obj.test_client().get("/clients/demo-owner/activity?from=2026-06-01&to=2026-06-30", headers=auth_headers_dict()).get_data(as_text=True)
+    html_str = app_obj.test_client().get("/clients/demo-owner/activity?from=2026-06-01&to=2026-06-30").get_data(as_text=True)
     event_tag_str = html_str.split('<details class="client-event"', 1)[1].split(">", 1)[0]
     assert ("open" in event_tag_str) is expanded_bool
     assert "Review execution evidence" in html_str

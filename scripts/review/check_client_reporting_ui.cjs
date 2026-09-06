@@ -1,21 +1,18 @@
 // Local synthetic end-to-end/visual QA. Requires Playwright in NODE_PATH.
-// A temporary operator credential is generated in memory and never logged.
+// Private loopback preview; no application login or real data.
 const { chromium } = require('playwright');
 const { spawn } = require('node:child_process');
-const { randomBytes } = require('node:crypto');
 const { mkdir } = require('node:fs/promises');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 
 async function main() {
-  const accessTokenStr = randomBytes(32).toString('hex');
   const portInt = 18764;
   const originStr = `http://127.0.0.1:${portInt}`;
-  const authStr = 'Basic ' + Buffer.from('operator:' + accessTokenStr).toString('base64');
   // The demo CLI never loads config.env or the real data provider.
   const serverObj = spawn(path.resolve('.venv/Scripts/python.exe'), [
     '-m', 'alpha.live.dashboard_v3', '--demo', '--port', String(portInt),
-  ], { env: { ...process.env, ALPHA_OPS_OPERATOR_ACCESS_TOKEN_STR: accessTokenStr }, windowsHide: true, stdio: 'pipe' });
+  ], { env: process.env, windowsHide: true, stdio: 'pipe' });
   let browserObj;
   let serverErrorStr = '';
   serverObj.stderr.on('data', chunkObj => { serverErrorStr += chunkObj.toString(); });
@@ -24,15 +21,15 @@ async function main() {
     for (let attemptInt = 0; attemptInt < 60; attemptInt++) {
       if (serverObj.exitCode !== null) throw new Error('Demo server exited: ' + serverErrorStr);
       try {
-        const responseObj = await fetch(originStr + '/clients', { headers: { Authorization: authStr } });
+        const responseObj = await fetch(originStr + '/clients');
         if (responseObj.ok) { readyBool = true; break; }
       } catch {}
       await new Promise(resolveFn => setTimeout(resolveFn, 250));
     }
     assert(readyBool, 'Demo server not ready: ' + serverErrorStr);
-    assert.equal((await fetch(originStr + '/clients')).status, 401);
+    assert.equal((await fetch(originStr + '/clients')).status, 200);
     browserObj = await chromium.launch({ channel: 'msedge', headless: true });
-    const contextObj = await browserObj.newContext({ httpCredentials: { username: 'operator', password: accessTokenStr } });
+    const contextObj = await browserObj.newContext();
     const pageObj = await contextObj.newPage();
     const pageErrorList = [];
     const remoteRequestList = [];
@@ -176,7 +173,7 @@ async function main() {
     }
     assert.deepEqual(remoteRequestList, []);
     assert.deepEqual(pageErrorList, []);
-    console.log(JSON.stringify({ result: 'PASS', viewports: [1440, 768, 390], clientViews: clientViewList.concat('report'), advancedPaths: advancedPathList, strategies: 4, secondClientIsolation: 'PASS', periodForm: 'PASS', authenticatedPdfDownload: 'PASS', remoteAssetsBlocked: true, outputDir: outputDirStr }));
+    console.log(JSON.stringify({ result: 'PASS', viewports: [1440, 768, 390], clientViews: clientViewList.concat('report'), advancedPaths: advancedPathList, strategies: 4, secondClientIsolation: 'PASS', periodForm: 'PASS', noLoginPdfDownload: 'PASS', remoteAssetsBlocked: true, outputDir: outputDirStr }));
   } finally {
     if (browserObj) await browserObj.close();
     serverObj.kill(); // Only the child created by this QA invocation.

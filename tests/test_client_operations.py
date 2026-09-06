@@ -12,7 +12,7 @@ from alpha.live.dashboard_v3.client_operations import (
 )
 from alpha.live.dashboard_v3.demo import DemoOperationsProvider, build_demo_fixture_tuple
 from alpha.live.dashboard_v3.schedule import TradingWindow, build_trading_window_list
-from test_dashboard_operator_access import TEST_ACCESS_STR, auth_headers_dict, ForbiddenProvider
+from test_dashboard_operator_access import ForbiddenProvider, ForbiddenProvider
 
 
 AS_OF_TS = datetime(2026, 9, 5, 12, tzinfo=UTC)
@@ -167,8 +167,8 @@ def test_compact_status_shows_red_reason_even_after_an_unranked_calendar_issue(m
     summary_dict["pod_row_dict_list"][0].update(session_calendar_id_str="UNKNOWN", required_action_dict={"severity_str": "red", "detail_str": "Rejected order"})
     summary_dict["as_of_timestamp_str"] = datetime.now(UTC).isoformat()
     monkeypatch.setattr(provider_obj, "get_summary_dict", lambda: summary_dict)
-    app_obj = create_app(provider_obj, read_only_bool=True, operator_access_token_str=TEST_ACCESS_STR, client_registry_dict=registry_dict)
-    html_str = app_obj.test_client().get("/clients/demo-owner/strategies", headers=auth_headers_dict()).get_data(as_text=True)
+    app_obj = create_app(provider_obj, read_only_bool=True, client_registry_dict=registry_dict)
+    html_str = app_obj.test_client().get("/clients/demo-owner/strategies").get_data(as_text=True)
     banner_str = html_str.split('aria-label="Current client operations">', 1)[1].split('</section>', 1)[0]
     assert "Rejected order" in banner_str.split('<details', 1)[0]
     assert "Saved check" in banner_str
@@ -212,15 +212,14 @@ def test_snapshot_requires_exact_schema_and_client(tmp_path, envelope_dict):
 
 
 @pytest.mark.parametrize("view_str", ["overview", "strategies", "exposure", "activity", "diagnostics"])
-def test_client_routes_keep_scope_and_dates_and_are_operator_only(view_str):
+def test_client_routes_keep_scope_and_dates_without_login(view_str):
     registry_dict, snapshot_dict, provider_obj, _ = fixture_tuple()
-    app_obj = create_app(provider_obj, read_only_bool=True, operator_access_token_str=TEST_ACCESS_STR,
+    app_obj = create_app(provider_obj, read_only_bool=True,
                          client_registry_dict=registry_dict, client_reporting_snapshot_fn=lambda client_id_str: snapshot_dict[client_id_str])
     app_obj.config["TESTING"] = True
     client_obj = app_obj.test_client()
     path_str = f"/clients/demo-owner/{view_str}?from=2026-06-01&to=2026-09-04"
-    assert client_obj.get(path_str).status_code == 401
-    response_obj = client_obj.get(path_str, headers=auth_headers_dict())
+    response_obj = client_obj.get(path_str)
     assert response_obj.status_code == 200
     html_str = response_obj.get_data(as_text=True)
     assert "DEMO_1_" not in html_str
@@ -228,15 +227,15 @@ def test_client_routes_keep_scope_and_dates_and_are_operator_only(view_str):
     assert 'to=2026-09-04' in html_str
     assert "cdn.tailwindcss.com" not in html_str
     assert response_obj.headers["Cache-Control"] == "no-store"
-    assert client_obj.get("/", headers=auth_headers_dict()).location == "/clients"
+    assert client_obj.get("/").location == "/clients"
 
 
 def test_financial_filter_never_changes_current_operations():
     registry_dict, snapshot_dict, provider_obj, _ = fixture_tuple()
-    app_obj = create_app(provider_obj, read_only_bool=True, operator_access_token_str=TEST_ACCESS_STR, client_registry_dict=registry_dict,
+    app_obj = create_app(provider_obj, read_only_bool=True, client_registry_dict=registry_dict,
                          client_reporting_snapshot_fn=lambda client_id_str: snapshot_dict[client_id_str])
     client_obj = app_obj.test_client()
-    result_list = [client_obj.get(f"/clients/demo-owner/diagnostics?from={from_str}&to=2026-09-04&download=json", headers=auth_headers_dict()).get_json() for from_str in ("2026-06-01", "2026-09-01")]
+    result_list = [client_obj.get(f"/clients/demo-owner/diagnostics?from={from_str}&to=2026-09-04&download=json").get_json() for from_str in ("2026-06-01", "2026-09-01")]
     assert [row_dict["pod_id_str"] for row_dict in result_list[0]["strategy_list"]] == [row_dict["pod_id_str"] for row_dict in result_list[1]["strategy_list"]]
     assert all(result_dict["severity_str"] == "green" for result_dict in result_list)
 
@@ -244,9 +243,9 @@ def test_financial_filter_never_changes_current_operations():
 def test_unconfigured_ops_never_calls_provider_or_financial_loader():
     registry_dict, _, _, _ = fixture_tuple()
     registry_dict["clients"][0]["operations_source"] = "unconfigured"
-    app_obj = create_app(ForbiddenProvider(), read_only_bool=True, operator_access_token_str=TEST_ACCESS_STR, client_registry_dict=registry_dict,
+    app_obj = create_app(ForbiddenProvider(), read_only_bool=True, client_registry_dict=registry_dict,
                          client_reporting_snapshot_fn=lambda client_id_str: pytest.fail("Operations must not read financial data"))
-    response_obj = app_obj.test_client().get("/clients/demo-owner/diagnostics?from=2026-06-01&to=2026-09-04", headers=auth_headers_dict())
+    response_obj = app_obj.test_client().get("/clients/demo-owner/diagnostics?from=2026-06-01&to=2026-09-04")
     assert response_obj.status_code == 200
     assert "Cannot verify operations" in response_obj.get_data(as_text=True)
 
@@ -266,13 +265,13 @@ def test_operations_accessible_on_mandate_day_without_financial_read(monkeypatch
             return AS_OF_TS
 
     monkeypatch.setattr("alpha.live.dashboard_v3.client_views.datetime", FixedDatetime)
-    app_obj = create_app(provider_obj, read_only_bool=True, operator_access_token_str=TEST_ACCESS_STR, client_registry_dict=registry_dict,
+    app_obj = create_app(provider_obj, read_only_bool=True, client_registry_dict=registry_dict,
                          client_reporting_snapshot_fn=lambda client_id_str: pytest.fail("Operations must not read financial data"))
     rendered_period_list = []
     def capture_period(sender_obj, template, context, **extra_dict):
         rendered_period_list.append(context["report_dict"])
     with template_rendered.connected_to(capture_period, app_obj):
-        response_obj = app_obj.test_client().get(f"/clients/demo-owner/{view_str}{query_str}", headers=auth_headers_dict())
+        response_obj = app_obj.test_client().get(f"/clients/demo-owner/{view_str}{query_str}")
     assert response_obj.status_code == 200
     html_str = response_obj.get_data(as_text=True)
     assert rendered_period_list == [{"requested_from_date_str": "2026-09-05", "requested_to_date_str": "2026-09-05"}]
@@ -287,8 +286,8 @@ def test_diagnostics_preserves_nonblocking_next_cycle_source_warning(monkeypatch
     norgate_dict["sub_detail_str_list"] = ["Sync failed: next DecisionPlan needs review; token=PRIVATE"]
     summary_dict["as_of_timestamp_str"] = datetime.now(UTC).isoformat()
     monkeypatch.setattr(provider_obj, "get_summary_dict", lambda: summary_dict)
-    app_obj = create_app(provider_obj, read_only_bool=True, operator_access_token_str=TEST_ACCESS_STR, client_registry_dict=registry_dict)
-    html_str = app_obj.test_client().get("/clients/demo-owner/diagnostics", headers=auth_headers_dict()).get_data(as_text=True)
+    app_obj = create_app(provider_obj, read_only_bool=True, client_registry_dict=registry_dict)
+    html_str = app_obj.test_client().get("/clients/demo-owner/diagnostics").get_data(as_text=True)
     assert "No action required" in html_str
     assert "Sync failed: next DecisionPlan needs review" in html_str
     assert html_str.index("Sync failed: next DecisionPlan needs review") < html_str.index('class="ops-panel client-diagnostic"')
@@ -308,8 +307,8 @@ def test_visible_pod_flow_preserves_recorded_not_complete_fill_and_cycle_role(mo
     row_dict["lifecycle_step_dict_list"] = _build_lifecycle_step_dict_list(row_dict)
     summary_dict["as_of_timestamp_str"] = datetime.now(UTC).isoformat()
     monkeypatch.setattr(provider_obj, "get_summary_dict", lambda: summary_dict)
-    app_obj = create_app(provider_obj, read_only_bool=True, operator_access_token_str=TEST_ACCESS_STR, client_registry_dict=registry_dict)
-    html_str = app_obj.test_client().get("/clients/demo-owner/strategies", headers=auth_headers_dict()).get_data(as_text=True)
+    app_obj = create_app(provider_obj, read_only_bool=True, client_registry_dict=registry_dict)
+    html_str = app_obj.test_client().get("/clients/demo-owner/strategies").get_data(as_text=True)
     card_str = html_str.split('<h2>Tactical allocation</h2>', 1)[1].split('</section>', 1)[0]
     flow_str = card_str.split('<ol class="client-pod-flow"', 1)[1].split('</ol>', 1)[0]
     assert card_str.index('class="client-pod-flow"') < card_str.index('<details')
@@ -330,8 +329,8 @@ def test_visible_pod_flow_does_not_invent_missing_stage_evidence(monkeypatch, st
     summary_dict["pod_row_dict_list"][0]["lifecycle_step_dict_list"] = stage_list
     summary_dict["as_of_timestamp_str"] = datetime.now(UTC).isoformat()
     monkeypatch.setattr(provider_obj, "get_summary_dict", lambda: summary_dict)
-    app_obj = create_app(provider_obj, read_only_bool=True, operator_access_token_str=TEST_ACCESS_STR, client_registry_dict=registry_dict)
-    html_str = app_obj.test_client().get("/clients/demo-owner/strategies", headers=auth_headers_dict()).get_data(as_text=True)
+    app_obj = create_app(provider_obj, read_only_bool=True, client_registry_dict=registry_dict)
+    html_str = app_obj.test_client().get("/clients/demo-owner/strategies").get_data(as_text=True)
     flow_str = html_str.split('<ol class="client-pod-flow"', 1)[1].split('</ol>', 1)[0]
     assert ('unverified' if stage_list and stage_list[0]["label_str"] == "ACK" else 'Flow unavailable') in flow_str
     assert 'data-severity="gray"' in flow_str

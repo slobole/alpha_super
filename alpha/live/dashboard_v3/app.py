@@ -15,7 +15,6 @@ import csv
 import json
 import math
 import os
-import secrets
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -145,17 +144,12 @@ def create_app(
     notification_webhook_url_str: str | None = None,
     notification_webhook_poster_fn=None,
     read_only_bool: bool = False,
-    operator_access_token_str: str | None = None,
     client_reporting_config_path_str: str | None = None,
     client_registry_dict: dict[str, Any] | None = None,
     client_reporting_snapshot_fn=None,
     demo_mode_bool: bool = False,
 ) -> Flask:
     flask_app_obj = Flask(__name__)
-    access_token_str = operator_access_token_str or os.getenv("ALPHA_OPS_OPERATOR_ACCESS_TOKEN_STR", "")
-    if access_token_str and len(access_token_str) < 24:
-        raise ValueError("Operator access token must contain at least 24 characters.")
-    flask_app_obj.config["operator_access_token_str"] = access_token_str
     flask_app_obj.config["read_only_bool"] = read_only_bool
     flask_app_obj.config["confirmation_store_obj"] = ConfirmationStore()
     flask_app_obj.config["demo_mode_bool"] = demo_mode_bool
@@ -190,42 +184,22 @@ def create_app(
     flask_app_obj.jinja_env.filters["strategy_name"] = local_strategy_name_str
 
     @flask_app_obj.before_request
-    def protect_operator_access_fn():
-        # Financial routes fail closed even before client configuration exists.
-        # When configured, the same operator credential protects the entire
-        # console (not just buttons). Keep legacy factory callers compatible;
-        # the operator launcher supplies this credential for deployed use.
-        token_str = flask_app_obj.config["operator_access_token_str"]
+    def protect_remote_transport_fn():
+        # Access is controlled by the host/tailnet, not an application login.
+        # Preserve HTTPS for remote requests; forwarded headers are not proof.
         if request.endpoint == "static":
             return None
-        if not token_str and not request.path.startswith("/clients"):
-            return None
-        if not token_str:
-            return Response("Operator access must be configured before client reporting is available.", status=503, headers={"Cache-Control": "no-store"})
-        # Basic credentials must travel over TLS outside this host. The standard
-        # deployment binds to loopback behind Tailscale Serve HTTPS, never a
-        # publicly bound plain-HTTP listener. Do not trust forwarded headers.
         if request.remote_addr not in {None, "127.0.0.1", "::1"} and not request.is_secure:
             return Response("HTTPS is required for remote operator access.", status=426)
-        authorization_obj = request.authorization
-        if authorization_obj is None or authorization_obj.type.lower() != "basic" or not (
-            secrets.compare_digest((authorization_obj.username or "").encode("utf-8"), b"operator")
-            and secrets.compare_digest((authorization_obj.password or "").encode("utf-8"), token_str.encode("utf-8"))
-        ):
-            return Response("Operator authentication required.", status=401, headers={
-                "WWW-Authenticate": 'Basic realm="Alpha Ops operator", charset="UTF-8"',
-                "Cache-Control": "no-store",
-            })
         return None
 
     @flask_app_obj.after_request
     def prevent_sensitive_response_caching_fn(response_obj):
-        if flask_app_obj.config["operator_access_token_str"] or request.path.startswith("/clients"):
+        if request.endpoint != "static":
             response_obj.headers["Cache-Control"] = "no-store"
             response_obj.headers["X-Content-Type-Options"] = "nosniff"
             response_obj.headers["Referrer-Policy"] = "same-origin"
             response_obj.headers["X-Frame-Options"] = "DENY"
-            response_obj.vary.add("Authorization")
         return response_obj
 
     @flask_app_obj.before_request

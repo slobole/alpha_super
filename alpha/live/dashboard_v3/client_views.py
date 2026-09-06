@@ -1,7 +1,6 @@
-"""Operator-authenticated, read-only client financial screens.
+"""Private-network, read-only client financial screens.
 
-The app's protect_operator_access_fn gates every /clients request before this
-blueprint runs, and fails closed when no operator credential is configured.
+Access is limited by host/tailnet policy, without an application login.
 Only server-configured paths/identities can select financial sources.
 """
 

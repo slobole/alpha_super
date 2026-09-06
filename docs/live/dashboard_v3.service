@@ -28,8 +28,7 @@ ExecStart=/srv/alpha/.venv/bin/python -m alpha.live.dashboard_v3 \
 # rather set them inline, uncomment the lines below and add --skip-env-file
 # to ExecStart.
 # Environment=ALPHA_USE_NORGATE_SNAPSHOT_BOOL=true
-# ALPHA_OPS_OPERATOR_ACCESS_TOKEN_STR (24+ characters) is required in protected
-# config.env or the service environment. Do not put its value in this template.
+# No application login: keep access restricted to operators on the host/tailnet.
 # Actions require replacing --read-only with --enable-actions, only under a
 # separately approved operational rollout; removing --read-only alone is inert.
 

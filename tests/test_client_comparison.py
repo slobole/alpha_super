@@ -8,7 +8,7 @@ from alpha.live.dashboard_v3.app import create_app
 from alpha.live.dashboard_v3.client_comparison import saved_comparison_dict
 from flask import render_template
 from test_client_reporting import client_config_dict, nav_attributes_dict, snapshot_obj
-from test_dashboard_operator_access import TEST_ACCESS_STR, ForbiddenProvider, auth_headers_dict
+from test_dashboard_operator_access import ForbiddenProvider
 
 
 def summary_dict(**override_dict):
@@ -97,16 +97,16 @@ def test_pinned_path_is_server_config_only_and_not_in_investor_export(tmp_path):
     config_dict = client_config_dict()
     account_dict = pinned_account_dict(tmp_path, summary_dict(pod_id_str=config_dict["accounts"][0]["pod_id"], account_route_str=config_dict["accounts"][0]["account_route"]))
     config_dict["accounts"][0]["reference_summary_path"] = account_dict["reference_summary_path"]
-    app_obj = create_app(ForbiddenProvider(), read_only_bool=True, operator_access_token_str=TEST_ACCESS_STR,
+    app_obj = create_app(ForbiddenProvider(), read_only_bool=True,
         client_registry_dict={"schema_version": 1, "clients": [config_dict]}, client_reporting_snapshot_fn=lambda client_id_str: snapshot_obj([nav_attributes_dict()]))
     client_obj = app_obj.test_client()
     path_str = "/clients/sample/performance?from=2026-09-01&to=2026-09-01"
-    html_str = client_obj.get(path_str, headers=auth_headers_dict()).get_data(as_text=True)
+    html_str = client_obj.get(path_str).get_data(as_text=True)
     assert "LIVE versus saved simulation" in html_str and "historic-release" in html_str
     assert "Not proven" in html_str and "NEVER_EXPOSE" not in html_str
     assert str(tmp_path) not in html_str
-    assert client_obj.get(path_str + "&reference_summary_path=C:/secret.json", headers=auth_headers_dict()).status_code == 400
-    report_html_str = client_obj.get("/clients/sample/report?from=2026-09-01&to=2026-09-01", headers=auth_headers_dict()).get_data(as_text=True)
+    assert client_obj.get(path_str + "&reference_summary_path=C:/secret.json").status_code == 400
+    report_html_str = client_obj.get("/clients/sample/report?from=2026-09-01&to=2026-09-01").get_data(as_text=True)
     assert "LIVE versus saved simulation" not in report_html_str
     assert "historic-release" not in report_html_str
 
@@ -157,9 +157,9 @@ def test_reused_route_and_weekend_start_select_distinct_historical_pins(tmp_path
     new_path_obj.write_text(json.dumps(summary_dict(pod_id_str=original_dict["pod_id"], account_route_str=original_dict["account_route"], release_id_str="new-period")), encoding="utf-8")
     config_dict["accounts"] = [dict(original_dict, effective_from="2026-08-01", effective_to="2026-08-31", reference_summary_path=str(old_path_obj)),
         dict(original_dict, effective_from="2026-09-01", reference_summary_path=str(new_path_obj))]
-    app_obj = create_app(ForbiddenProvider(), read_only_bool=True, operator_access_token_str=TEST_ACCESS_STR,
+    app_obj = create_app(ForbiddenProvider(), read_only_bool=True,
         client_registry_dict={"schema_version": 1, "clients": [config_dict]}, client_reporting_snapshot_fn=lambda client_id_str: snapshot_obj([nav_attributes_dict()]))
-    response_obj = app_obj.test_client().get("/clients/sample/performance?from=2026-08-29&to=2026-09-01", headers=auth_headers_dict())
+    response_obj = app_obj.test_client().get("/clients/sample/performance?from=2026-08-29&to=2026-09-01")
     assert response_obj.status_code == 200
     html_str = response_obj.get_data(as_text=True)
     assert "old-period" in html_str and "new-period" in html_str

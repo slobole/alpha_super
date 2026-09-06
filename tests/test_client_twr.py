@@ -222,27 +222,27 @@ def test_demo_pdf_does_not_claim_calculated_return_uses_real_ibkr_data():
 
 def test_configured_client_headline_is_identical_across_views_and_export():
     from alpha.live.dashboard_v3.app import create_app
-    from test_dashboard_operator_access import TEST_ACCESS_STR, ForbiddenProvider, auth_headers_dict
+    from test_dashboard_operator_access import ForbiddenProvider
 
     config_dict = twr_config_dict()
     source_obj = snapshot_obj([nav_attributes_dict(),
         nav_attributes_dict("U_TEST_B", opening_str="10000", closing_str="10050", mtm="50", twr_str=".5")])
-    app_obj = create_app(ForbiddenProvider(), read_only_bool=True, operator_access_token_str=TEST_ACCESS_STR,
+    app_obj = create_app(ForbiddenProvider(), read_only_bool=True,
         client_registry_dict={"schema_version": 1, "clients": [config_dict]},
         client_reporting_snapshot_fn=lambda client_id_str: source_obj)
     client_obj = app_obj.test_client()
     result_list = []
     for view_str in ("overview", "performance", "report"):
         path_str = f"/clients/sample/{view_str}?from=2026-09-01&to=2026-09-01"
-        response_obj = client_obj.get(path_str, headers=auth_headers_dict())
+        response_obj = client_obj.get(path_str)
         assert response_obj.status_code == 200
         html_str = response_obj.get_data(as_text=True)
         assert 'data-client-twr><p>Return · TWR</p><strong>0.55%' in html_str
         assert 'aria-label="Calculated daily client TWR including opening zero baseline"' in html_str
-        result_list.append(client_obj.get(path_str + "&download=json", headers=auth_headers_dict()).get_json())
+        result_list.append(client_obj.get(path_str + "&download=json").get_json())
     assert len({result_dict["report_hash_str"] for result_dict in result_list}) == 1
     assert all(result_dict["twr_float"] == pytest.approx(60 / 11000) for result_dict in result_list)
-    response_obj = client_obj.get("/clients/sample/report?from=2026-09-01&to=2026-09-01&download=pdf&expected=" + result_list[0]["report_hash_str"], headers=auth_headers_dict())
+    response_obj = client_obj.get("/clients/sample/report?from=2026-09-01&to=2026-09-01&download=pdf&expected=" + result_list[0]["report_hash_str"])
     assert response_obj.status_code == 200
     text_str = "\n".join(page_obj.extract_text() for page_obj in PdfReader(BytesIO(response_obj.data)).pages)
     assert "0.55%" in text_str
