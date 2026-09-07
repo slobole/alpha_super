@@ -102,12 +102,12 @@ def test_pinned_path_is_server_config_only_and_not_in_investor_export(tmp_path):
     client_obj = app_obj.test_client()
     path_str = "/clients/sample/performance?from=2026-09-01&to=2026-09-01"
     html_str = client_obj.get(path_str).get_data(as_text=True)
-    assert "LIVE versus saved simulation" in html_str and "historic-release" in html_str
+    assert "Live vs simulation" in html_str and "historic-release" in html_str
     assert "Not proven" in html_str and "NEVER_EXPOSE" not in html_str
     assert str(tmp_path) not in html_str
     assert client_obj.get(path_str + "&reference_summary_path=C:/secret.json").status_code == 400
     report_html_str = client_obj.get("/clients/sample/report?from=2026-09-01&to=2026-09-01").get_data(as_text=True)
-    assert "LIVE versus saved simulation" not in report_html_str
+    assert "Live vs simulation" not in report_html_str
     assert "historic-release" not in report_html_str
 
 
@@ -135,7 +135,8 @@ def test_render_preserves_full_original_mark_time_without_guessing_zone(tmp_path
         html_str = render_template("_client_comparison.html", comparison_result_dict=result_dict)
     assert timestamp_str in html_str
     assert "09-01 16:10:00 ET" not in html_str
-    assert "a missing offset remains ambiguous" in html_str
+    assert "Actual mark time · as recorded" in html_str
+    assert "missing or mismatched" in html_str  # Invalid timestamp still prevents a valid comparison.
 
 
 @pytest.mark.parametrize("override_dict", [{"actual_equity_timestamp_str": None}, {"actual_equity_timestamp_str": "2026-09-02T20:10:00Z"},
@@ -163,5 +164,6 @@ def test_reused_route_and_weekend_start_select_distinct_historical_pins(tmp_path
     assert response_obj.status_code == 200
     html_str = response_obj.get_data(as_text=True)
     assert "old-period" in html_str and "new-period" in html_str
-    assert "Selected account interval 2026-08-29" in html_str
+    assert '2026-08-29 → 2026-08-31' in html_str
+    assert '2026-09-01 → 2026-09-01' in html_str
     assert str(tmp_path) not in html_str

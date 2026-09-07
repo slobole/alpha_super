@@ -609,6 +609,16 @@ def build_client_report_dict(
         contributing_row_list.extend(selected_row_list)
         opening_row_obj = row_by_key_dict.get((account_dict["account_route"], expected_date_list[0]))
         closing_row_obj = row_by_key_dict.get((account_dict["account_route"], expected_date_list[-1]))
+        # Display the existing official daily return / validated dollar bridge.
+        # *** CRITICAL *** retrospective selected-period facts only: retain the
+        # same coverage and D+1 gates, never infer return or profit from NAV.
+        daily_result_list = []
+        for date_str in expected_date_list:
+            row_obj = row_by_key_dict.get((account_dict["account_route"], date_str))
+            daily_result_list.append({"market_date_str": date_str,
+                "return_float": float(row_obj.twr_decimal) if row_obj and account_complete_bool else None,
+                "pnl_float": _money_float(bridge_by_key_dict[(row_obj.account_route_str, date_str)]["pnl_decimal"])
+                    if row_obj and flows_complete_bool else None})
         strategy_result_list.append({
             "account_route_str": account_dict["account_route"], "pod_id_str": account_dict["pod_id"],
             "display_name_str": account_dict["display_name"],
@@ -618,6 +628,7 @@ def build_client_report_dict(
             "twr_float": float(growth_decimal - 1) if account_complete_bool else None,
             "twr_method_str": "Geometrically linked official IBKR daily account TWR",
             "pnl_float": _money_float(account_pnl_decimal) if flows_complete_bool else None,
+            "daily_list": daily_result_list,
             "coverage_complete_bool": account_complete_bool, "flows_complete_bool": flows_complete_bool,
             "expected_day_count_int": len(expected_date_list), "observed_day_count_int": len(selected_row_list),
             "issue_list": list(dict.fromkeys(account_issue_list)),

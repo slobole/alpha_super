@@ -24,6 +24,7 @@ from alpha.live.dashboard_v3.client_operations import (
 )
 from alpha.live.dashboard_v3.operator_tools import redact_diagnostic_value, strategy_display_name_str
 from alpha.live.dashboard_v3.client_comparison import saved_comparison_dict
+from alpha.live.dashboard_v3.client_charts import daily_history_list, nav_chart_dict
 from alpha.live.dashboard_v3.local_workspace import (
     LocalReportingError, build_local_workspace_dict, local_financial_scope_complete_bool, validate_local_bindings_unchanged,
 )
@@ -201,28 +202,6 @@ def _period_tuple(client_dict, as_of_ts, *, operational_bool=False):
     return start_str, end_day_obj.isoformat()
 
 
-def nav_chart_dict(daily_list):
-    nav_list = [row_dict["nav_float"] for row_dict in daily_list if row_dict["nav_float"] is not None]
-    if not nav_list:
-        return None
-    low_float, high_float = min(nav_list), max(nav_list)
-    span_float = high_float - low_float
-    segment_list, current_list = [], []
-    for index_int, daily_dict in enumerate(daily_list):
-        value_float = daily_dict["nav_float"]
-        if value_float is None:
-            if current_list:
-                segment_list.append(" ".join(current_list))
-                current_list = []
-            continue
-        horizontal_float = 20 + index_int / max(1, len(daily_list) - 1) * 860
-        vertical_float = 110 if span_float == 0 else 195 - (value_float - low_float) / span_float * 170
-        current_list.append(f"{horizontal_float:.2f},{vertical_float:.2f}")
-    if current_list:
-        segment_list.append(" ".join(current_list))
-    return {"segment_list": segment_list, "min_float": low_float, "max_float": high_float}
-
-
 @client_blueprint_obj.get("/clients")
 def directory_route_fn():
     if local_workspace_bool():
@@ -354,13 +333,14 @@ def financial_route_fn(client_id_str, view_str):
     return render_template(
         "client_financial.html", client_list=registry_dict["clients"], client_dict=client_dict,
         report_dict=report_dict, view_str=view_str, chart_dict=nav_chart_dict(report_dict["daily_book_list"]),
-        client_return_chart_dict=nav_chart_dict([{"nav_float": point_dict["cumulative_return_float"]} for point_dict in report_dict["return_path_list"]]),
+        client_return_chart_dict=nav_chart_dict(report_dict["return_path_list"], value_field_str="cumulative_return_float", unit_str="pct"),
         investor_dict=build_investor_snapshot_dict(report_dict) if view_str == "report" else None,
         operations_dict=_operations_dict(client_dict, as_of_ts) if view_str == "overview" else None,
         activity_dict=_activity_dict(client_dict, from_str, to_str) if view_str == "overview" else None,
         period_max_date_str=period_max_date_str,
         financial_notice_list=_financial_notice_list(report_dict, client_dict),
-        performance_chart_list=[nav_chart_dict([{"nav_float": point_dict["cumulative_return_float"]} for point_dict in strategy_dict["performance_dict"]["return_path_list"]]) for strategy_dict in report_dict["strategy_list"]] if view_str == "performance" else [],
+        performance_chart_list=[nav_chart_dict(strategy_dict["performance_dict"]["return_path_list"], value_field_str="cumulative_return_float", unit_str="pct") for strategy_dict in report_dict["strategy_list"]] if view_str == "performance" else [],
+        daily_scope_list=daily_history_list(report_dict) if view_str != "report" else [],
         comparison_list=[saved_comparison_dict(next(
             account_dict for account_dict in client_dict["accounts"]
             if (account_dict["pod_id"], account_dict["account_route"]) == (strategy_dict["pod_id_str"], strategy_dict["account_route_str"])

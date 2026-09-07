@@ -29,7 +29,8 @@ async function main() {
     assert(readyBool, 'Demo server not ready: ' + serverErrorStr);
     assert.equal((await fetch(originStr + '/clients')).status, 200);
     browserObj = await chromium.launch({ channel: 'msedge', headless: true });
-    const contextObj = await browserObj.newContext();
+    // The workspace is light-only even when the operator's OS prefers dark.
+    const contextObj = await browserObj.newContext({ colorScheme: 'dark' });
     const pageObj = await contextObj.newPage();
     const pageErrorList = [];
     const remoteRequestList = [];
@@ -52,11 +53,13 @@ async function main() {
       await pageObj.goto(originStr + '/clients/demo-client/report?from=2026-06-01&to=2026-09-04');
       await pageObj.getByRole('heading', { name: 'Report preview', exact: true }).waitFor();
       await pageObj.evaluate(() => document.fonts.ready);
+      assert.equal(await pageObj.locator('body').evaluate(elementObj => getComputedStyle(elementObj).colorScheme), 'light');
       assert(await pageObj.getByText('Demo data', { exact: true }).isVisible());
       assert.equal(await pageObj.locator('tbody tr').count(), 4);
       assert(await pageObj.getByRole('heading', { name: 'Market comparison', exact: true }).isVisible());
       assert(await pageObj.getByRole('link', { name: 'Download investor PDF', exact: true }).isVisible());
-      assert.equal(await pageObj.locator('.client-source-details').getAttribute('open'), null);
+      assert(await pageObj.locator('.client-evidence-strip').isVisible());
+      assert.equal(await pageObj.locator('.client-source-details').count(), 0);
       const layoutObj = await pageObj.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth }));
       assert(layoutObj.scrollWidth <= layoutObj.width, `Horizontal page overflow: ${JSON.stringify(layoutObj)}`);
       await pageObj.screenshot({ path: path.join(outputDirStr, `client-report-${widthInt}.png`), fullPage: true });
@@ -68,13 +71,60 @@ async function main() {
         const responseObj = await pageObj.goto(originStr + `/clients/demo-client/${viewStr}?from=2026-06-01&to=2026-09-04`);
         assert.equal(responseObj.status(), 200, viewStr);
         await pageObj.evaluate(() => document.fonts.ready);
+        const paletteObj = await pageObj.evaluate(() => ({
+          scheme: getComputedStyle(document.body).colorScheme,
+          background: getComputedStyle(document.body).backgroundColor,
+          panel: getComputedStyle(document.querySelector('.ops-panel')).backgroundColor,
+          input: document.querySelector('input[type="date"]') ? getComputedStyle(document.querySelector('input[type="date"]')).colorScheme : 'light',
+        }));
+        assert.deepEqual(paletteObj, { scheme: 'light', background: 'rgb(246, 247, 249)', panel: 'rgb(255, 255, 255)', input: 'light' });
         assert(await pageObj.getByText('Demo data', { exact: true }).isVisible());
         assert(!(await pageObj.locator('main').innerText()).includes('financial selection never changes trading state'));
         if (['overview', 'performance'].includes(viewStr)) {
-          assert.equal(await pageObj.locator('.client-source-details').getAttribute('open'), null);
+          assert(await pageObj.locator('.client-evidence-strip').isVisible());
+          assert.equal(await pageObj.locator('.client-source-details').count(), 0);
           assert(!(await pageObj.locator('main').innerText()).includes('Unavailable: daily account NAV/TWR'));
           assert(await pageObj.locator('[data-client-twr]').getByText('Calculated · daily', { exact: true }).isVisible());
           assert(await pageObj.locator('.client-return-panel svg').isVisible());
+          for (const chartObj of await pageObj.locator('.client-chart:visible').all()) {
+            const tickList = await chartObj.locator('.client-y-axis span').all();
+            assert.equal(tickList.length, 3);
+            for (const tickObj of tickList) {
+              assert(await tickObj.isVisible());
+              assert((await tickObj.innerText()).includes('%'));
+              const labelObj = await tickObj.evaluate(elementObj => ({ font: parseFloat(getComputedStyle(elementObj).fontSize), width: elementObj.getBoundingClientRect().width, left: elementObj.getBoundingClientRect().left }));
+              assert(labelObj.font >= 10 && labelObj.width > 0 && labelObj.left >= 0, 'Y-axis must remain legible in screen pixels');
+            }
+            const axisAlignedBool = await chartObj.evaluate(elementObj => {
+              const labelList = [...elementObj.querySelectorAll('.client-y-axis span')];
+              const gridList = [...elementObj.querySelectorAll('.client-chart-grid')];
+              return labelList.every((labelObj, indexInt) => {
+                const labelRectObj = labelObj.getBoundingClientRect();
+                const gridRectObj = gridList[indexInt].getBoundingClientRect();
+                return Math.abs(labelRectObj.top + labelRectObj.height / 2 - gridRectObj.top) < 1;
+              });
+            });
+            assert(axisAlignedBool, 'Y-axis labels must align with their gridlines');
+          }
+          const dailyObj = pageObj.locator('[data-daily-panel]');
+          assert(await dailyObj.isVisible());
+          assert((await dailyObj.locator('[data-daily-scope="0"] .client-bar').count()) > 0);
+          assert.equal(await dailyObj.locator('[data-daily-select] option').count(), 5);
+          for (const scopeStr of ['0', '1']) {
+            await dailyObj.locator('[data-daily-select]').selectOption(scopeStr);
+            const scopeObj = dailyObj.locator(`[data-daily-scope="${scopeStr}"]`);
+            assert(await scopeObj.isVisible());
+            const dayCountInt = await scopeObj.locator('tbody tr').count();
+            assert(dayCountInt > 1);
+            assert(!(await scopeObj.locator('tbody').innerText()).includes('SOD'));
+            await dailyObj.locator('[data-daily-unit="usd"]').click();
+            assert(await scopeObj.locator('[data-daily-chart="usd"]').isVisible());
+            assert(!(await scopeObj.locator('[data-daily-chart="pct"]').isVisible()));
+            assert((await scopeObj.locator('[data-daily-chart="usd"] .client-y-axis').innerText()).includes('$'));
+            assert.equal(await scopeObj.locator('tbody tr').count(), dayCountInt);
+            await dailyObj.locator('[data-daily-unit="pct"]').click();
+          }
+          await dailyObj.locator('[data-daily-select]').selectOption('0');
         }
         if (viewStr !== 'performance') {
           assert(await pageObj.getByText('Saved check ·', { exact: false }).isVisible());

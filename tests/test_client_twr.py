@@ -237,7 +237,7 @@ def test_configured_client_headline_is_identical_across_views_and_export():
         response_obj = client_obj.get(path_str)
         assert response_obj.status_code == 200
         html_str = response_obj.get_data(as_text=True)
-        assert 'data-client-twr><p>Return · TWR</p><strong>0.55%' in html_str
+        assert 'data-client-twr><p>Return · TWR</p><strong data-sign="positive">0.55%' in html_str
         assert 'aria-label="Calculated daily client TWR including opening zero baseline"' in html_str
         result_list.append(client_obj.get(path_str + "&download=json").get_json())
     assert len({result_dict["report_hash_str"] for result_dict in result_list}) == 1

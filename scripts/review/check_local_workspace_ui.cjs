@@ -40,6 +40,16 @@ async function main() {
     assert(pageObj.url().endsWith('/clients/local/overview'));
     for (const widthInt of [1440, 768, 390]) {
       await pageObj.setViewportSize({ width: widthInt, height: 1000 });
+      await pageObj.goto(originStr + '/__fixture_chart_gap');
+      const markerList = await pageObj.locator('.client-chart-point').all();
+      assert.equal(markerList.length, 2);
+      for (const markerObj of markerList) {
+        assert.equal(await markerObj.getAttribute('data-isolated'), 'true');
+        assert.equal(await markerObj.evaluate(elementObj => getComputedStyle(elementObj).opacity), '1');
+      }
+      const segmentList = await pageObj.locator('.client-chart-line').all();
+      assert.equal(segmentList.length, 2);
+      for (const segmentObj of segmentList) assert(!(await segmentObj.getAttribute('points')).includes(' '));
       for (const viewStr of viewList) {
         const responseObj = await pageObj.goto(originStr + `/clients/local/${viewStr}?from=2026-09-01&to=2026-09-01`);
         assert.equal(responseObj.status(), 200, viewStr);
@@ -57,9 +67,26 @@ async function main() {
           }
         }
         if (viewStr === 'overview') {
-          assert(await pageObj.locator('.client-financial-notices').isVisible());
-          assert((await pageObj.locator('.client-financial-notices > p').count()) <= 2);
-          assert((await pageObj.locator('.client-financial-notices').innerText()).includes('pod_new / U300'));
+          assert(await pageObj.locator('.client-data-issues').isVisible());
+          assert.equal(await pageObj.locator('.client-data-issues').getAttribute('open'), null);
+          await pageObj.locator('.client-data-issues summary').click();
+          assert((await pageObj.locator('.client-data-issues').innerText()).includes('pod_new / U300'));
+          await pageObj.locator('.client-data-issues summary').click();
+        }
+        if (viewStr === 'overview' || viewStr === 'performance') {
+          const dailyObj = pageObj.locator('[data-daily-panel]');
+          assert(await dailyObj.isVisible());
+          assert.equal(await dailyObj.locator('[data-daily-scope="0"] .client-bar').count(), 0);
+          await dailyObj.locator('[data-daily-select]').selectOption('1');
+          const accountObj = dailyObj.locator('[data-daily-scope="1"]');
+          assert(await accountObj.isVisible());
+          assert((await accountObj.locator('tbody').innerText()).includes('1.00%'));
+          assert.equal(await accountObj.locator('[data-daily-chart="pct"] .client-bar').count(), 1);
+          await dailyObj.locator('[data-daily-unit="usd"]').click();
+          assert.equal(await accountObj.locator('[data-daily-chart="usd"] .client-bar').count(), 0);
+          assert(await accountObj.locator('[data-daily-chart="usd"] .client-chart-empty').isVisible());
+          await dailyObj.locator('[data-daily-unit="pct"]').click();
+          await dailyObj.locator('[data-daily-select]').selectOption('0');
         }
         if (viewStr === 'strategies') {
           assert.equal(await pageObj.locator('.client-pod-flow').count(), 3);

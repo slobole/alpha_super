@@ -200,6 +200,26 @@ valuation or a same-date book allocation. No weight divides these references by
 finalized Flex NAV. ETF dollar notional is not embedded leverage, look-through
 exposure or beta; those remain unmeasured without an explicit instrument contract.
 
+## Display contract
+
+The operator pages use a compact, locally served light-only theme. Status and each Pod's
+seven-stage flow remain visible; detailed causes and provenance are expandable.
+Overview and Performance have numeric `%`/USD axes and a daily bar chart plus table,
+with a Portfolio/strategy selector and `%`/`$` display toggle. Names are unchanged.
+
+Strategy daily `%` is the selected official IBKR account return. Daily dollars use
+the existing validated NAV bridge; portfolio rows use the existing daily book and
+configured consolidated-return series (or existing single-account fallback).
+The same completeness and D+1 gates apply. No averaging, NAV differencing, date
+filling or synthetic opening-day bar is introduced. Zero and unavailable differ;
+line charts break at missing dates and retain visible isolated observations.
+Strategy charts use their own labeled scales. JS toggles existing markup only.
+
+Canonical `strategy_list[].daily_list` is additive evidence and enters the report
+hash before export. Its addition changes hashes across this release, not financial
+formulas or investor-export fields. The full method remains in downloadable JSON;
+only a short source label appears on the main financial screens.
+
 ## Money and performance contract
 
 ### Saved LIVE/reference diagnostics
@@ -409,8 +429,8 @@ saved status screen for strictly read-only inspection. No generic shell runs in 
 `scripts/review/check_local_workspace_ui.cjs` uses the actual DashboardDataProvider
 with temporary production-format releases, config overrides, ledgers and saved Flex
 imports. It exercises the non-demo launcher without a registry, all seven pages at
-390/768/1440 pixels, visible Pod flow, historical Activity forms and the advanced
-routes. It asserts unchanged fixture bytes/mtimes and zero outgoing connection
+390/768/1440 pixels, visible Pod flow, historical Activity forms, daily scope/unit
+selection, isolated-point opacity and the advanced routes. It asserts unchanged fixture bytes/mtimes and zero outgoing connection
 attempts. Its synthetic warnings are not a production health assessment.
 
 Single-VPS wiring live-impact check: order/next-open timing, sizing amount/target
@@ -423,7 +443,8 @@ unverified history remain explicit rather than causing a setup prerequisite.
 
 `scripts/review/check_client_reporting_ui.cjs` runs a no-login, synthetic
 loopback server, blocks external resources, visits every client tab at 390/768/1440
-pixels, checks client isolation/date form/PDF download, saves screenshots and stops
+pixels, checks client isolation/date form/PDF download, Y-axis readability/gridline
+alignment and daily scope/unit selection, saves screenshots and stops
 its own child. `tests/test_client_operations.py`, `test_client_reporting.py`,
 `test_client_views.py`, `test_investor_report.py` cover independent contracts.
 

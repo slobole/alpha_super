@@ -95,7 +95,8 @@ def test_remote_history_retired_only_client_works_without_local_provider(tmp_pat
     assert response_obj.status_code == 200
     assert "Reconciliation recorded" in html_str and "Tactical allocation" in html_str
     assert "OTHER_CLIENT_PRIVATE" not in html_str
-    assert "including retired history" in html_str
+    assert "2026-06-01 → 2026-06-30" in html_str
+    assert "including retired history" not in html_str  # Retired events remain; redundant prose does not.
     assert "partial" in html_str
 
 

@@ -1,0 +1,26 @@
+{% macro financial_chart(chart_dict, label_str, bars_bool=false) -%}
+{% if chart_dict %}
+<div class="client-chart" data-unit="{{ chart_dict.unit_str }}" aria-label="{{ label_str }}">
+  <div class="client-chart-body">
+    <div class="client-y-axis" style="width:{{ chart_dict.tick_list|map(attribute='label_str')|map('length')|max }}ch" aria-label="{{ 'Percent' if chart_dict.unit_str == 'pct' else 'US dollars' }} axis">
+      {% for tick_dict in chart_dict.tick_list %}<span style="top:{{ tick_dict.top_percent_float }}%" data-value="{{ tick_dict.value_float }}">{{ tick_dict.label_str }}</span>{% endfor %}
+    </div>
+    <svg class="client-nav-chart" viewBox="0 0 {{ chart_dict.width_int }} {{ chart_dict.height_int }}" preserveAspectRatio="none" role="img" aria-label="{{ label_str }}">
+      {% for tick_dict in chart_dict.tick_list %}<line class="client-chart-grid" x1="0" x2="{{ chart_dict.width_int }}" y1="{{ tick_dict.y_float }}" y2="{{ tick_dict.y_float }}"/>{% endfor %}
+      {% if chart_dict.zero_y_float is not none %}<line class="client-chart-zero" x1="0" x2="{{ chart_dict.width_int }}" y1="{{ chart_dict.zero_y_float }}" y2="{{ chart_dict.zero_y_float }}"/>{% endif %}
+      {% if bars_bool %}
+        {% for bar_dict in chart_dict.bar_list %}
+        {% if bar_dict.missing_bool %}<line class="client-bar-missing" x1="{{ bar_dict.x_float - 2 }}" x2="{{ bar_dict.x_float + 2 }}" y1="{{ chart_dict.zero_y_float }}" y2="{{ chart_dict.zero_y_float }}"><title>{{ bar_dict.market_date_str }} · Unavailable</title></line>
+        {% elif bar_dict.sign_str == 'zero' %}<line class="client-bar-zero" x1="{{ bar_dict.x_float - bar_dict.width_float / 2 }}" x2="{{ bar_dict.x_float + bar_dict.width_float / 2 }}" y1="{{ chart_dict.zero_y_float }}" y2="{{ chart_dict.zero_y_float }}"><title>{{ bar_dict.market_date_str }} · {{ bar_dict.label_str }}</title></line>
+        {% else %}<rect class="client-bar" data-sign="{{ bar_dict.sign_str }}" data-value="{{ bar_dict.value_float }}" x="{{ bar_dict.x_float - bar_dict.width_float / 2 }}" y="{{ bar_dict.top_float }}" width="{{ bar_dict.width_float }}" height="{{ bar_dict.height_float }}"><title>{{ bar_dict.market_date_str }} · {{ bar_dict.label_str }}</title></rect>{% endif %}
+        {% endfor %}
+      {% else %}
+        {% for points_str in chart_dict.segment_list %}<polyline class="client-chart-line" points="{{ points_str }}" vector-effect="non-scaling-stroke"/>{% endfor %}
+        {% for point_dict in chart_dict.point_list %}<circle class="client-chart-point" data-isolated="{{ 'true' if point_dict.isolated_bool else 'false' }}" cx="{{ point_dict.x_float }}" cy="{{ point_dict.y_float }}" r="{{ 3 if point_dict.isolated_bool else 2 }}"><title>{{ point_dict.market_date_str }} · {{ point_dict.label_str }}</title></circle>{% endfor %}
+      {% endif %}
+    </svg>
+  </div>
+  <div class="client-chart-dates"><span>{{ chart_dict.from_str }}</span><span>{{ chart_dict.to_str }}</span></div>
+</div>
+{% else %}<div class="client-chart-empty" aria-label="{{ label_str }} unavailable">Unavailable</div>{% endif %}
+{%- endmacro %}

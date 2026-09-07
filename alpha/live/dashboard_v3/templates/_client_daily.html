@@ -1,0 +1,21 @@
+{% from '_client_chart.html' import financial_chart %}
+<section class="ops-panel client-daily-panel" data-daily-panel aria-label="Daily performance">
+  <div class="ops-panel-heading"><h2>Daily performance</h2>
+    <div class="client-daily-controls">
+      <select aria-label="Daily performance scope" data-daily-select>{% for scope_dict in daily_scope_list %}<option value="{{ loop.index0 }}">{{ scope_dict.display_name_str }}</option>{% endfor %}</select>
+      <div class="client-unit-toggle" role="group" aria-label="Daily chart unit"><button type="button" data-daily-unit="pct" aria-pressed="true">%</button><button type="button" data-daily-unit="usd" aria-pressed="false">$</button></div>
+    </div>
+  </div>
+  {% for scope_dict in daily_scope_list %}<div data-daily-scope="{{ loop.index0 }}" {% if not loop.first %}hidden{% endif %}>
+    <div class="client-daily-grid">
+      <div>
+        <div data-daily-chart="pct">{{ financial_chart(scope_dict.return_chart_dict, 'Daily return (%)', true) }}</div>
+        <div data-daily-chart="usd" hidden>{{ financial_chart(scope_dict.pnl_chart_dict, 'Daily P&L (USD)', true) }}</div>
+      </div>
+      <div class="client-daily-table-wrap"><table class="ops-table client-daily-table" aria-label="{{ scope_dict.display_name_str }} daily history">
+        <thead><tr><th>Date</th><th class="client-number">P&amp;L · $</th><th class="client-number">Return · %</th></tr></thead>
+        <tbody>{% for day_dict in scope_dict.daily_list|reverse %}<tr><td>{{ day_dict.market_date_str }}</td><td class="client-number" data-sign="{{ 'positive' if day_dict.pnl_float is not none and day_dict.pnl_float > 0 else 'negative' if day_dict.pnl_float is not none and day_dict.pnl_float < 0 else 'neutral' }}">{{ money(day_dict.pnl_float) }}</td><td class="client-number" data-sign="{{ 'positive' if day_dict.return_float is not none and day_dict.return_float > 0 else 'negative' if day_dict.return_float is not none and day_dict.return_float < 0 else 'neutral' }}">{{ day_dict.return_float|percent }}</td></tr>{% else %}<tr><td colspan="3">No daily data</td></tr>{% endfor %}</tbody>
+      </table></div>
+    </div>
+  </div>{% endfor %}
+</section>

@@ -7,6 +7,7 @@ import sys
 from tempfile import TemporaryDirectory
 
 import pytest
+from flask import render_template_string
 
 ROOT_PATH_OBJ = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT_PATH_OBJ))
@@ -14,6 +15,7 @@ sys.path.insert(0, str(ROOT_PATH_OBJ / "tests"))
 
 from test_dashboard_local_workspace import build_fixture_app, file_snapshot_dict
 from alpha.live.dashboard_v3 import __main__ as launcher_module
+from alpha.live.dashboard_v3.client_charts import nav_chart_dict
 
 
 def main():
@@ -37,6 +39,22 @@ def main():
         def fixture_integrity_fn():
             return {"unchanged_bool": file_snapshot_dict(root_path_obj) == initial_dict,
                 "network_attempt_count_int": len(network_attempt_list)}
+
+        @app_obj.get("/__fixture_chart_gap")
+        def fixture_chart_gap_fn():
+            # Isolated observations must remain visible without joining missing days.
+            chart_dict = nav_chart_dict([
+                {"market_date_str": f"2026-09-0{index_int + 1}", "nav_float": value_float}
+                for index_int, value_float in enumerate((100, None, 120))
+            ])
+            return render_template_string("""<!doctype html><html><head>
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+                <link rel="stylesheet" href="/static/custom.css">
+                <link rel="stylesheet" href="/static/client_terminal.css"></head>
+                <body class="client-workspace"><main class="client-content">
+                {% from '_client_chart.html' import financial_chart %}
+                {{ financial_chart(chart_dict, 'Synthetic gap regression') }}
+                </main></body></html>""", chart_dict=chart_dict)
 
         # Exercise the normal (non-demo) launcher, substituting only isolated
         # provider paths. No real config.env, NDU, broker or external data.

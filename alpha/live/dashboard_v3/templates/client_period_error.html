@@ -2,11 +2,11 @@
 {% block title %}{{ client_dict.display_name }} · Correct reporting dates{% endblock %}
 {% block content %}
 <div class="ops-page-heading"><p class="ops-eyebrow">{{ client_dict.display_name }} / {{ view_str }}</p><h1>Correct the selected period</h1></div>
-<div class="ops-note" role="alert"><strong>Dates need review.</strong> {{ error_str }} No dates or results have been silently substituted.</div>
+<div class="ops-note" role="alert">{{ error_str }}</div>
 <form class="ops-toolbar" method="get">
   <label>From · ET<input name="from" type="date" value="{{ report_dict.requested_from_date_str }}" min="{{ client_dict.mandate_start_date }}" max="{{ period_max_date_str }}" required></label>
   <label>Through · ET<input name="to" type="date" value="{{ report_dict.requested_to_date_str }}" min="{{ client_dict.mandate_start_date }}" max="{{ period_max_date_str }}" required></label>
   <button class="ops-button" type="submit">Apply period</button>
-  <a class="ops-text-link" href="{{ url_for('clients.financial_route_fn', client_id_str=client_dict.client_id, view_str=view_str) }}">Reset to this client's default period</a>
+  <a class="ops-text-link" href="{{ url_for('clients.financial_route_fn', client_id_str=client_dict.client_id, view_str=view_str) }}">Reset dates</a>
 </form>
 {% endblock %}

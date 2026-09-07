@@ -38,7 +38,9 @@ def test_financial_views_share_dates_numbers_and_local_style(financial_client_ob
     assert '<span class="client-badge">Read-only</span>' in html_str
     assert "Investors do not access this workspace" not in html_str
     assert "Broker value, capital movements and investment results" not in html_str
-    assert '<details class="client-details client-source-details">' in html_str
+    assert '<footer class="client-evidence-strip">' in html_str
+    assert 'Source: IBKR' in html_str and 'Data · JSON' in html_str
+    assert 'Net capital movements do not establish' not in html_str
     assert response_obj.headers["Cache-Control"] == "no-store"
 
 
@@ -68,13 +70,17 @@ def test_compact_data_badge_never_calls_missing_capital_data_complete(financial_
     assert report_dict["strategy_list"][0]["flows_complete_bool"] is False
     html_str = financial_client_obj.get(path_str).get_data(as_text=True)
     assert 'data-label="Data">Incomplete' in html_str
-    assert "1/1 observed days · incomplete capital data" in html_str
+    assert report_dict["strategy_list"][0]["observed_day_count_int"] == 1
+    assert 'Data issues' in html_str and 'billPay' in html_str
 
 
 @pytest.mark.parametrize("view_str", ["overview", "performance", "report"])
-def test_compact_chart_labels_extrema_as_range_not_endpoint_return(financial_client_obj, view_str):
+def test_charts_have_numbered_y_axes_instead_of_range_paragraph(financial_client_obj, view_str):
     html_str = financial_client_obj.get(f"/clients/sample/{view_str}?from=2026-09-01&to=2026-09-01").get_data(as_text=True)
-    assert "Range:" in html_str
+    assert "Range:" not in html_str
+    axis_list = re.findall(r'<div class="client-y-axis"[^>]*>(.*?)</div>', html_str, re.S)
+    assert axis_list and all(axis_str.count('data-value=') == 3 for axis_str in axis_list)
+    assert any('%' in axis_str for axis_str in axis_list) if view_str == "performance" else any('$' in axis_str for axis_str in axis_list)
     if view_str == "performance":
         assert "own scale" in html_str
         assert "Period-end drawdown" in html_str
@@ -100,7 +106,7 @@ def test_invalid_period_preserves_client_dates_and_editable_form(financial_clien
     assert f'value="{from_str}"' in html_str and f'value="{to_str}"' in html_str
     assert 'name="from" type="date"' in html_str
     assert "/clients/sample/" in html_str
-    assert "No dates or results have been silently substituted" in html_str
+    assert "No dates or results have been silently substituted" not in html_str
     assert financial_client_obj.get(f"/clients/sample/{view_str}?from=2026-09-01&to=2026-09-01").status_code == 200
 
 
