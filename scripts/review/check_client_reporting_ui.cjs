@@ -85,7 +85,16 @@ async function main() {
           assert.equal(await pageObj.locator('.client-source-details').count(), 0);
           assert(!(await pageObj.locator('main').innerText()).includes('Unavailable: daily account NAV/TWR'));
           assert(await pageObj.locator('[data-client-twr]').getByText('Calculated · daily', { exact: true }).isVisible());
-          assert(await pageObj.locator('.client-return-panel svg').isVisible());
+          assert(await pageObj.locator('.client-return-panel svg:visible').isVisible());
+          if (viewStr === 'overview') {
+            const accountObj = pageObj.locator('[data-account-panel]');
+            assert(await accountObj.locator('[data-account-unit="pct"]').isEnabled());
+            await accountObj.locator('[data-account-unit="usd"]').click();
+            assert((await accountObj.locator('.client-chart:visible .client-y-axis').innerText()).includes('$'));
+            assert(await accountObj.getByRole('heading', { name: 'Account value', exact: true }).isVisible());
+            await accountObj.locator('[data-account-unit="pct"]').click();
+            assert((await accountObj.locator('.client-chart:visible .client-y-axis').innerText()).includes('%'));
+          }
           for (const chartObj of await pageObj.locator('.client-chart:visible').all()) {
             const tickList = await chartObj.locator('.client-y-axis span').all();
             assert.equal(tickList.length, 3);
@@ -133,6 +142,12 @@ async function main() {
         assert(await pageObj.locator(`nav a[aria-current="page"]`).getAttribute('href').then(hrefStr => hrefStr.includes('/' + viewStr)));
         assert(!(await pageObj.locator('main').innerText()).includes('DEMO_0_'), 'Another client account leaked');
         if (viewStr === 'overview') {
+          assert.equal(await pageObj.locator('.client-schedule-card').count(), 4);
+          for (const cardObj of await pageObj.locator('.client-schedule-card').all()) {
+            assert(await cardObj.isVisible());
+            assert.equal(await cardObj.locator('time').count(), 3);
+            assert.equal(await cardObj.locator('time[datetime]').count(), 3);
+          }
           assert(await pageObj.getByRole('heading', { name: 'Recorded changes', exact: true }).isVisible());
           assert.equal(await pageObj.locator('.client-activity-panel .client-event').count(), 3);
           const activityHrefStr = await pageObj.getByRole('link', { name: 'View selected-period activity', exact: true }).getAttribute('href');

@@ -190,6 +190,10 @@ def build_client_operations_dict(client_dict, summary_dict, *, as_of_ts, local_a
     # Verify each Pod independently: one malformed calendar must neither hide
     # another Pod's next cycle nor leave the affected Pod falsely green.
     for strategy_dict in result_list:
+        strategy_dict["trading_window_list"] = [TradingWindow(
+            detail_str="No verified calendar evidence for this strategy.",
+            pod_id_str_list=[strategy_dict["pod_id_str"]],
+        ).as_dict()]
         if not strategy_dict["matched_bool"]:
             continue
         try:
@@ -205,6 +209,8 @@ def build_client_operations_dict(client_dict, summary_dict, *, as_of_ts, local_a
             failed_window_list.extend(pod_window_list)
         else:
             resolved_evidence_list.append(strategy_dict["evidence_dict"])
+        # Keep the independent Pod result before shared-window wording is merged.
+        strategy_dict["trading_window_list"] = redact_diagnostic_value(pod_window_list)
         individual_window_list.extend(pod_window_list)
         for window_dict in pod_window_list:
             # Gray is also used for a valid idle/future window. Only missing

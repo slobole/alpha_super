@@ -21,7 +21,16 @@
 {% if report_dict.issue_list or financial_notice_list %}<details class="client-data-issues"><summary>Data issues</summary><ul>{% for issue_str in (financial_notice_list + report_dict.issue_list)|unique %}<li>{{ issue_str }}</li>{% endfor %}</ul></details>{% endif %}
 {% if view_str == 'report' %}<div class="ops-toolbar client-report-actions"><span class="client-badge">{{ investor_dict.document_status_str|upper }}</span><a class="ops-button" href="{{ url_for('clients.financial_route_fn', client_id_str=client_dict.client_id, view_str='report', download='pdf', expected=report_dict.report_hash_str, **{'from':report_dict.requested_from_date_str, 'to':report_dict.requested_to_date_str}) }}">Download investor PDF</a><a class="ops-text-link" href="{{ url_for('clients.financial_route_fn', client_id_str=client_dict.client_id, view_str='report', download='bundle', expected=report_dict.report_hash_str, **{'from':report_dict.requested_from_date_str, 'to':report_dict.requested_to_date_str}) }}">PDF + data</a></div>{% endif %}
 {% if view_str == 'overview' %}<div class="client-overview-grid">{% endif %}
-{% if report_dict.client_twr_configured_bool %}
+{% if view_str == 'overview' %}
+<section class="ops-panel client-return-panel client-value-panel" data-account-panel>
+  <div class="ops-panel-heading"><h2><span data-account-series="usd" {% if client_return_chart_dict %}hidden{% endif %}>Account value</span><span data-account-series="pct" {% if not client_return_chart_dict %}hidden{% endif %}>Portfolio return</span></h2>
+    <div class="client-unit-toggle" role="group" aria-label="Account chart unit"><button type="button" data-account-unit="usd" aria-pressed="{{ 'false' if client_return_chart_dict else 'true' }}">$</button><button type="button" data-account-unit="pct" aria-pressed="{{ 'true' if client_return_chart_dict else 'false' }}" {% if not client_return_chart_dict %}disabled title="{{ return_unavailable_str }}"{% endif %}>%</button></div>
+  </div>
+  <div data-account-series="usd" {% if client_return_chart_dict %}hidden{% endif %}><div class="client-chart-basis">USD · includes transfers</div>{{ financial_chart(chart_dict, 'Account value (USD)') }}</div>
+  <div data-account-series="pct" {% if not client_return_chart_dict %}hidden{% endif %}><div class="client-chart-basis">Cumulative TWR · %</div>{{ financial_chart(client_return_chart_dict, 'Portfolio cumulative return (%)') }}</div>
+  {% if not client_return_chart_dict %}<small class="client-missing-reason">% · {{ return_unavailable_str }}</small>{% endif %}
+</section>
+{% elif report_dict.client_twr_configured_bool %}
 <section class="ops-panel client-return-panel"><div class="ops-panel-heading"><h2>Portfolio return</h2><span class="client-muted">Cumulative · %</span></div>{{ financial_chart(client_return_chart_dict, 'Calculated daily client TWR including opening zero baseline') }}</section>
 {% elif view_str != 'performance' %}
 <section class="ops-panel client-value-panel"><div class="ops-panel-heading"><h2>Account value</h2><span class="client-muted">USD · includes transfers</span></div>{{ financial_chart(chart_dict, 'Account value (USD)') }}</section>

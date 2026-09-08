@@ -330,10 +330,16 @@ def financial_route_fn(client_id_str, view_str):
         response_obj = Response(json.dumps(report_dict, indent=2, allow_nan=False), mimetype="application/json")
         response_obj.headers["Content-Disposition"] = f'attachment; filename="operator-report-{client_id_str}-{report_dict["report_hash_str"][:12]}.json"'
         return response_obj
+    return_path_list = report_dict["return_path_list"]
+    if not report_dict["client_twr_configured_bool"] and report_dict["twr_float"] is not None and len(report_dict["strategy_list"]) == 1:
+        # Same verified one-account fallback as the headline and daily panel.
+        return_path_list = report_dict["strategy_list"][0]["performance_dict"]["return_path_list"]
     return render_template(
         "client_financial.html", client_list=registry_dict["clients"], client_dict=client_dict,
         report_dict=report_dict, view_str=view_str, chart_dict=nav_chart_dict(report_dict["daily_book_list"]),
-        client_return_chart_dict=nav_chart_dict(report_dict["return_path_list"], value_field_str="cumulative_return_float", unit_str="pct"),
+        client_return_chart_dict=nav_chart_dict(return_path_list, value_field_str="cumulative_return_float", unit_str="pct"),
+        pnl_unavailable_str="IBKR cash-flow setup required" if not client_dict.get("nav_bridge") else "Incomplete IBKR data",
+        return_unavailable_str="Portfolio return setup required" if not report_dict["client_twr_configured_bool"] and len(report_dict["strategy_list"]) > 1 else "Incomplete IBKR return data",
         investor_dict=build_investor_snapshot_dict(report_dict) if view_str == "report" else None,
         operations_dict=_operations_dict(client_dict, as_of_ts) if view_str == "overview" else None,
         activity_dict=_activity_dict(client_dict, from_str, to_str) if view_str == "overview" else None,
@@ -364,5 +370,5 @@ def _financial_notice_list(report_dict, client_dict):
             elif account_dict["effective_from"] > report_dict["requested_from_date_str"]:
                 notice_list.append(f"{prefix_str}: strategy history starts {account_dict['effective_from']}; earlier account NAV is checked separately.")
     if report_dict["pnl_float"] is None and not client_dict.get("nav_bridge"):
-        notice_list.append("Profit / loss: a verified breakdown of IBKR capital movements is not available.")
+        notice_list.append("P&L setup: IBKR capital movements are not mapped. Check the saved Flex fields before configuring the mapping.")
     return list(dict.fromkeys(notice_list))

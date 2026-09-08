@@ -21,10 +21,11 @@ from alpha.live.dashboard_v3.client_charts import nav_chart_dict
 def main():
     parser_obj = argparse.ArgumentParser(description=__doc__)
     parser_obj.add_argument("--port", type=int, default=18766)
+    parser_obj.add_argument("--expanded", action="store_true", help="Synthetic expanded financial source; no real accounts")
     args_obj = parser_obj.parse_args()
     with TemporaryDirectory(prefix="alpha-local-workspace-qa-", ignore_cleanup_errors=True) as directory_str, pytest.MonkeyPatch.context() as patch_obj:
         root_path_obj = Path(directory_str)
-        app_obj = build_fixture_app(root_path_obj, patch_obj)
+        app_obj = build_fixture_app(root_path_obj, patch_obj, new_pod_bool=not args_obj.expanded, expanded_bool=args_obj.expanded)
         initial_dict = file_snapshot_dict(root_path_obj)
         network_attempt_list = []
 

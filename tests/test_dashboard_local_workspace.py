@@ -23,7 +23,7 @@ from test_live_dashboard import (
 VIEW_TUPLE = ("overview", "performance", "strategies", "exposure", "activity", "diagnostics", "report")
 
 
-def build_fixture_app(tmp_path, monkeypatch, *, finance_bool=True, new_pod_bool=True):
+def build_fixture_app(tmp_path, monkeypatch, *, finance_bool=True, new_pod_bool=True, expanded_bool=False):
     monkeypatch.delenv("ALPHA_CLIENT_REPORTING_CONFIG_PATH_STR", raising=False)
     monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "true")
     monkeypatch.setenv("NORGATE_SNAPSHOT_ROOT", str(tmp_path / "snapshots"))
@@ -34,6 +34,8 @@ def build_fixture_app(tmp_path, monkeypatch, *, finance_bool=True, new_pod_bool=
     release_root_obj, config_path_obj = tmp_path / "releases", tmp_path / "dashboard.yaml"
     release_tuple_list = [("pod_a", "U100", "live", True), ("pod_b", "U200", "live", True),
         ("pod_retired", "U400", "live", False), ("pod_sim", "SIM_fixture", "incubation", True)]
+    if expanded_bool:
+        release_tuple_list = release_tuple_list[:2]
     if new_pod_bool:
         release_tuple_list.append(("pod_new", "U300", "live", True))
     for pod_str, account_str, mode_str, enabled_bool in release_tuple_list:
@@ -56,10 +58,30 @@ def build_fixture_app(tmp_path, monkeypatch, *, finance_bool=True, new_pod_bool=
             enabled_bool=enabled_bool) for pod_str, account_str, mode_str, enabled_bool in release_tuple_list
             if mode_str == "live" and pod_str != "pod_new"]
         PerformanceStore(str(performance_path_obj)).replace_range(
-            xml_text_str=_xml_str([(binding_obj.account_route_str, "2026-09-01", 1000, 1010, 1) for binding_obj in binding_list]),
+            xml_text_str=_xml_str([(binding_obj.account_route_str, "2026-09-01",
+                (990 if binding_obj.account_route_str == "U100" else 9990) if expanded_bool else 1000,
+                (1000 if binding_obj.account_route_str == "U100" else 10000) if expanded_bool else 1010, 1)
+                for binding_obj in binding_list]),
             query_name_str="ALPHA_DAILY_TWR", request_from_date_str="2026-09-01", request_to_date_str="2026-09-01",
             binding_obj_list=binding_list, imported_timestamp_str="2026-09-02T12:00:00+00:00",
         )
+        if expanded_bool:
+            from test_ibkr_nav_profile import expanded_nav_attributes_dict
+            from test_client_reporting import xml_text_str
+            expanded_row_list = [
+                expanded_nav_attributes_dict("U100", date_str="2026-09-02", opening_str="1000", closing_str="1110",
+                    depositsWithdrawals="100", mtm="12", commissions="-2", twr_str=".8"),
+                expanded_nav_attributes_dict("U200", date_str="2026-09-02", opening_str="10000", closing_str="10050",
+                    mtm="50", twr_str=".5"),
+                expanded_nav_attributes_dict("U100", date_str="2026-09-03", opening_str="1110", closing_str="1105",
+                    mtm="-5", twr_str="-.45045045045045"),
+                expanded_nav_attributes_dict("U200", date_str="2026-09-03", opening_str="10050", closing_str="10030",
+                    mtm="-20", twr_str="-.199004975124378"),
+            ]
+            PerformanceStore(str(performance_path_obj)).replace_range(
+                xml_text_str=xml_text_str(expanded_row_list).replace('queryName="TEST_NAV"', 'queryName="ALPHA_DAILY_TWR"'),
+                query_name_str="ALPHA_DAILY_TWR", request_from_date_str="2026-09-02", request_to_date_str="2026-09-03",
+                binding_obj_list=binding_list, imported_timestamp_str="2026-09-04T12:00:00+00:00")
     provider_obj = DashboardDataProvider(releases_root_path_str=str(release_root_obj), config_path_str=str(config_path_obj),
         results_root_path_str=str(tmp_path / "results"), event_log_path_str=str(tmp_path / "events.jsonl"))
     return create_app(provider_obj, read_only_bool=True, performance_db_path_str=str(performance_path_obj),

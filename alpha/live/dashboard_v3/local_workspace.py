@@ -2,7 +2,8 @@
 
 Releases own current operations. Existing performance bindings own historical
 reporting windows; those dates are NOT funding, mandate inception or first fills.
-No registry, database, binding or financial field contract is created here.
+No registry, database or binding is written. The versioned built-in financial
+contract is applied in memory; every source row must still pass its checks.
 """
 
 from contextlib import closing
@@ -12,6 +13,7 @@ from pathlib import Path
 import sqlite3
 
 from alpha.live.ibkr_performance import PodPerformanceBinding
+from alpha.live.ibkr_nav_profile import local_ibkr_reporting_profile_dict
 from alpha.live.client_reporting import ClientReportingError
 from alpha.live.ibkr_performance_sync import build_live_binding_obj_list
 from alpha.live.release_manifest import load_release_list, validate_enabled_deployment_for_mode
@@ -93,6 +95,7 @@ def build_local_workspace_dict(provider_obj, database_path_str, *, today_str):
         "query_name": os.getenv("IBKR_FLEX_QUERY_NAME_STR", "").strip() or "ALPHA_DAILY_TWR",
         "mandate_start_date": today_str, "accounts": [], "operations_source": "local",
         "reporting_scope": "local_available_history",
+        **local_ibkr_reporting_profile_dict(),
     }
     result_dict = {
         "client_dict": client_dict, "operations_account_list": [], "summary_dict": {},

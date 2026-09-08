@@ -16,11 +16,13 @@ configuration selects one client method regardless of the number of strategies:
 }
 ```
 
-A reviewed non-overlapping `nav_bridge` is also required. The demo enables this
-method on synthetic data only. No real-client registry is changed automatically.
-Before real use the owner must accept the EOD approximation and the reviewer
-must verify source-field coverage, fee basis and same-day internal transfers.
-Configuration records that decision; it does not prove source authenticity.
+A reviewed non-overlapping `nav_bridge` is also required. The default single-VPS
+adapter now supplies the versioned [expanded IBKR contract](IBKR_NAV_FIELDS.md)
+and this daily method in memory; no extra local setup is needed. Explicit client
+registries are not changed automatically. The demo uses synthetic data only.
+The EOD approximation remains explicit, source coverage is checked per row and
+nonzero unsupported fields (including asset transfers) block the local profile.
+Configuration does not prove source authenticity or intraday transfer timing.
 
 ## Mathematics and timing
 

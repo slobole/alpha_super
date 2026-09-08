@@ -207,6 +207,13 @@ seven-stage flow remain visible; detailed causes and provenance are expandable.
 Overview and Performance have numeric `%`/USD axes and a daily bar chart plus table,
 with a Portfolio/strategy selector and `%`/`$` display toggle. Names are unchanged.
 
+Overview's main chart also switches between account value (`$`, includes transfers)
+and verified cumulative return (`%`). The percentage button is disabled when the
+existing reporting contract provides no return; NAV change is never substituted.
+Trading schedule is visible as one card per currently scoped strategy, preserving
+each Pod's independently resolved Signal/Submit/Execute times and warnings. The
+grouped calendar JSON remains available unchanged; missing times display an em dash.
+
 Strategy daily `%` is the selected official IBKR account return. Daily dollars use
 the existing validated NAV bridge; portfolio rows use the existing daily book and
 configured consolidated-return series (or existing single-account fallback).
@@ -279,12 +286,22 @@ non-overlapping `economic_fields`/optional `informational_fields`. Do not copy t
 demo's synthetic `mtm` profile into production. Validate the actual expanded Flex
 XML against the [IBKR Change in NAV reference](https://www.ibkrguides.com/reportingreference/reportguide/changeinnav_fq.htm).
 
+The default single-VPS adapter supplies the built-in `ibkr_mtm_expanded_v1`
+bridge and `daily_nav_eod_v1` return contract. No extra local registry or environment
+configuration is required. See [expanded IBKR field contract](IBKR_NAV_FIELDS.md)
+for the eight supported economic fields and the required-zero restrictions on
+other components. Expanded saved rows can provide dollar P&L and portfolio daily
+returns after the existing scope/coverage/bridge checks. Older seven-field rows
+remain incomplete for dollars; profile activation does not repair missing history
+or silently shorten requested dates. Page reads never import or configure data.
+
 An optional reviewed `client_twr` enables the headline daily consolidated return
 and return chart. Its single supported method is `daily_nav_eod_v1`; see
 [Client TWR contract](CLIENT_TWR.md) for exact formulas, transfer restrictions,
 configuration and pre-deployment evidence. It uses the same client method for
 one or multiple accounts, while strategy returns remain official IBKR TWR.
-It is off for existing registries and on only in the synthetic demo. Configured
+Explicit registries without this object retain their old behavior; the local
+adapter and synthetic demo enable it. Configured
 but unavailable client TWR makes that report DRAFT. The legacy behavior below
 applies to registries without `client_twr`.
 
@@ -432,6 +449,12 @@ imports. It exercises the non-demo launcher without a registry, all seven pages 
 390/768/1440 pixels, visible Pod flow, historical Activity forms, daily scope/unit
 selection, isolated-point opacity and the advanced routes. It asserts unchanged fixture bytes/mtimes and zero outgoing connection
 attempts. Its synthetic warnings are not a production health assessment.
+
+Run the same checker with `--expanded` for the complete-data path: two strategies,
+a deposit day and a loss day, matching portfolio/strategy dollars, official
+strategy returns, calculated portfolio returns, chart unit toggles and PDF export.
+It also verifies that selecting mixed legacy/expanded history restores the
+unavailable state without suppressing operational status.
 
 Single-VPS wiring live-impact check: order/next-open timing, sizing amount/target
 semantics, reference-price sources, released YAML intent, state/pickle formats,

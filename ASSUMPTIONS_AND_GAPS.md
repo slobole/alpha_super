@@ -15,8 +15,11 @@ combined-book curve. Finalized financial defaults exclude today (D+1);
 operational pages may include today. Explicit dates remain explicit. Multi-account
 dollar results require the reviewed NAV bridge. Optional `daily_nav_eod_v1`
 client TWR uses an explicitly reviewed end-of-day flow convention, not exact
-intraday or official consolidated IBKR TWR. Missing configuration preserves the
-legacy account-only policy. Nonzero linking/internal-transfer imbalance, missing
+intraday or official consolidated IBKR TWR. Explicit registries without configuration
+preserve the legacy account-only policy. The default single-VPS adapter supplies
+the versioned expanded-MTM contract in `docs/live/IBKR_NAV_FIELDS.md`; unsupported
+nonzero components and missing fields block P&L rather than becoming zero.
+Old imports are not backfilled by activation. Nonzero linking/internal-transfer imbalance, missing
 evidence and nonpositive return bases withhold the full configured client return;
 unavailable configured TWR keeps its report DRAFT. Transfers in other source
 fields require reviewed same-day scope/classification; net fields cannot prove

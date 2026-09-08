@@ -6,9 +6,11 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 
 async function main() {
-  const originStr = 'http://127.0.0.1:18766';
+  const expandedBool = process.argv.includes('--expanded');
+  const portStr = expandedBool ? '18768' : '18766';
+  const originStr = 'http://127.0.0.1:' + portStr;
   const serverObj = spawn(path.resolve('.venv/Scripts/python.exe'), [
-    'scripts/review/serve_local_workspace_fixture.py', '--port', '18766',
+    'scripts/review/serve_local_workspace_fixture.py', '--port', portStr, ...(expandedBool ? ['--expanded'] : []),
   ], { env: process.env, windowsHide: true, stdio: 'pipe' });
   let browserObj;
   let errorStr = '';
@@ -33,7 +35,7 @@ async function main() {
       }
       return routeObj.continue();
     });
-    const outputDirStr = path.resolve('.codex_tmp/local-workspace-ui');
+    const outputDirStr = path.resolve('.codex_tmp/' + (expandedBool ? 'local-expanded-ui' : 'local-workspace-ui'));
     await mkdir(outputDirStr, { recursive: true });
     const viewList = ['overview', 'performance', 'strategies', 'exposure', 'activity', 'diagnostics', 'report'];
     await pageObj.goto(originStr + '/');
@@ -51,7 +53,8 @@ async function main() {
       assert.equal(segmentList.length, 2);
       for (const segmentObj of segmentList) assert(!(await segmentObj.getAttribute('points')).includes(' '));
       for (const viewStr of viewList) {
-        const responseObj = await pageObj.goto(originStr + `/clients/local/${viewStr}?from=2026-09-01&to=2026-09-01`);
+        const periodStr = expandedBool ? 'from=2026-09-02&to=2026-09-03' : 'from=2026-09-01&to=2026-09-01';
+        const responseObj = await pageObj.goto(originStr + `/clients/local/${viewStr}?${periodStr}`);
         assert.equal(responseObj.status(), 200, viewStr);
         assert.equal(await pageObj.locator('nav a[href^="/clients/local/"]').count(), 7);
         assert.equal(await pageObj.getByText('Switch client', { exact: true }).count(), 0);
@@ -67,29 +70,60 @@ async function main() {
           }
         }
         if (viewStr === 'overview') {
-          assert(await pageObj.locator('.client-data-issues').isVisible());
-          assert.equal(await pageObj.locator('.client-data-issues').getAttribute('open'), null);
-          await pageObj.locator('.client-data-issues summary').click();
-          assert((await pageObj.locator('.client-data-issues').innerText()).includes('pod_new / U300'));
-          await pageObj.locator('.client-data-issues summary').click();
+          const chartObj = pageObj.locator('[data-account-panel]');
+          assert.equal(await chartObj.locator('[data-account-unit="pct"]').isEnabled(), expandedBool);
+          if (expandedBool) {
+            assert((await chartObj.locator('.client-chart:visible .client-y-axis').innerText()).includes('%'));
+            await chartObj.locator('[data-account-unit="usd"]').click();
+            assert((await chartObj.locator('.client-chart:visible .client-y-axis').innerText()).includes('$'));
+            await chartObj.locator('[data-account-unit="pct"]').click();
+            assert.equal(await pageObj.locator('.client-data-issues').count(), 0);
+            const reportObj = await (await fetch(originStr + `/clients/local/overview?${periodStr}&download=json`)).json();
+            assert.equal(reportObj.pnl_float, 35);
+            assert.equal(reportObj.capital_movement_float, 100);
+            assert.equal(reportObj.closing_nav_float, 11135);
+            assert.equal(reportObj.status_str, 'ready');
+          } else {
+            // The new Pod intentionally has no NAV; never manufacture a book curve.
+            assert(await chartObj.locator('[data-account-series="usd"] .client-chart-empty').isVisible());
+            assert.equal(await chartObj.locator('.client-chart:visible').count(), 0);
+            assert(await pageObj.locator('.client-data-issues').isVisible());
+            assert.equal(await pageObj.locator('.client-data-issues').getAttribute('open'), null);
+            await pageObj.locator('.client-data-issues summary').click();
+            assert((await pageObj.locator('.client-data-issues').innerText()).includes('pod_new / U300'));
+            await pageObj.locator('.client-data-issues summary').click();
+          }
+          assert.equal(await pageObj.locator('.client-schedule-card').count(), expandedBool ? 2 : 3);
         }
         if (viewStr === 'overview' || viewStr === 'performance') {
           const dailyObj = pageObj.locator('[data-daily-panel]');
           assert(await dailyObj.isVisible());
-          assert.equal(await dailyObj.locator('[data-daily-scope="0"] .client-bar').count(), 0);
+          assert.equal(await dailyObj.locator('[data-daily-scope="0"] [data-daily-chart="pct"] .client-bar').count(), expandedBool ? 2 : 0);
+          if (expandedBool) {
+            const portfolioObj = dailyObj.locator('[data-daily-scope="0"]');
+            assert((await portfolioObj.locator('tbody').innerText()).includes('-$25.00'));
+            assert((await portfolioObj.locator('tbody').innerText()).includes('$60.00'));
+            await dailyObj.locator('[data-daily-unit="usd"]').click();
+            assert((await portfolioObj.locator('[data-daily-chart="usd"] .client-y-axis').innerText()).includes('$'));
+            assert.equal(await portfolioObj.locator('[data-daily-chart="usd"] .client-bar').count(), 2);
+            await dailyObj.locator('[data-daily-unit="pct"]').click();
+          }
           await dailyObj.locator('[data-daily-select]').selectOption('1');
           const accountObj = dailyObj.locator('[data-daily-scope="1"]');
           assert(await accountObj.isVisible());
-          assert((await accountObj.locator('tbody').innerText()).includes('1.00%'));
-          assert.equal(await accountObj.locator('[data-daily-chart="pct"] .client-bar').count(), 1);
+          assert((await accountObj.locator('tbody').innerText()).includes(expandedBool ? '0.80%' : '1.00%'));
+          assert.equal(await accountObj.locator('[data-daily-chart="pct"] .client-bar').count(), expandedBool ? 2 : 1);
           await dailyObj.locator('[data-daily-unit="usd"]').click();
-          assert.equal(await accountObj.locator('[data-daily-chart="usd"] .client-bar').count(), 0);
-          assert(await accountObj.locator('[data-daily-chart="usd"] .client-chart-empty').isVisible());
+          assert.equal(await accountObj.locator('[data-daily-chart="usd"] .client-bar').count(), expandedBool ? 2 : 0);
+          if (!expandedBool) {
+            assert(await accountObj.locator('[data-daily-chart="usd"] .client-chart-empty').isVisible());
+            assert.equal(await accountObj.locator('[data-daily-chart="usd"] .client-chart-empty').innerText(), 'Incomplete IBKR data');
+          }
           await dailyObj.locator('[data-daily-unit="pct"]').click();
           await dailyObj.locator('[data-daily-select]').selectOption('0');
         }
         if (viewStr === 'strategies') {
-          assert.equal(await pageObj.locator('.client-pod-flow').count(), 3);
+          assert.equal(await pageObj.locator('.client-pod-flow').count(), expandedBool ? 2 : 3);
           const flowObj = pageObj.locator('.client-pod-flow').first();
           assert((await flowObj.locator('li').count()) >= 7);
           for (const stageObj of await flowObj.locator('li').all()) assert(await stageObj.isVisible());
@@ -105,6 +139,16 @@ async function main() {
       await pageObj.getByRole('button', { name: 'Apply period' }).click();
       assert(pageObj.url().includes('from=2026-08-31'));
     }
+    if (expandedBool) {
+      await pageObj.goto(originStr + '/clients/local/overview?from=2026-09-01&to=2026-09-03');
+      assert(await pageObj.locator('[data-account-unit="pct"]').isDisabled());
+      assert.equal(await pageObj.locator('[data-daily-scope="0"] .client-bar').count(), 0);
+      assert.equal(await pageObj.locator('.client-schedule-card').count(), 2);
+      const reportObj = await (await fetch(originStr + '/clients/local/report?from=2026-09-02&to=2026-09-03&download=json')).json();
+      const pdfObj = await fetch(originStr + '/clients/local/report?from=2026-09-02&to=2026-09-03&download=pdf&expected=' + reportObj.report_hash_str);
+      assert.equal(pdfObj.status, 200);
+      assert(pdfObj.headers.get('content-type').includes('application/pdf'));
+    }
     for (const routeStr of ['/vps', '/pods/live', '/performance', '/exposure', '/events', '/diagnostics']) {
       const responseObj = await pageObj.goto(originStr + routeStr);
       assert.equal(responseObj.status(), 200, routeStr);
@@ -116,7 +160,8 @@ async function main() {
     assert.equal(integrityObj.network_attempt_count_int, 0);
     assert.equal((await fetch(originStr + '/api/pods/pod_a/actions/tick', { method: 'POST' })).status, 403);
     console.log(JSON.stringify({ result: 'PASS', provider: 'DashboardDataProvider', registry: false,
-      views: viewList, widths: [1440, 768, 390], currentPods: 3, readonly: true, outputDir: outputDirStr }));
+      views: viewList, widths: [1440, 768, 390], currentPods: expandedBool ? 2 : 3,
+      expandedFields: expandedBool, readonly: true, outputDir: outputDirStr }));
   } finally {
     if (browserObj) await browserObj.close();
     serverObj.kill(); // Only the synthetic child created above.

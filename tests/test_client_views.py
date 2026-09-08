@@ -155,6 +155,66 @@ def test_nav_chart_keeps_missing_intervals_as_separate_segments():
     assert len(chart_dict["segment_list"]) == 2
 
 
+@pytest.mark.parametrize('return_str,closing_str,profit_str', [('1', '1010', '10'), ('0', '1000', '0')])
+def test_account_chart_offers_verified_official_single_account_return(financial_client_obj, return_str, closing_str, profit_str):
+    financial_client_obj.application.config['client_reporting_snapshot_fn'] = lambda client_id_str: snapshot_obj([
+        nav_attributes_dict(twr_str=return_str, closing_str=closing_str, mtm=profit_str)])
+    html_str = financial_client_obj.get('/clients/sample/overview?from=2026-09-01&to=2026-09-01').get_data(as_text=True)
+    assert 'data-account-unit="pct" aria-pressed="true"' in html_str
+    assert 'data-account-unit="usd"' in html_str
+    assert 'Cumulative TWR' in html_str
+    assert 'USD · includes transfers' in html_str
+    assert 'aria-label="Portfolio cumulative return (%)"' in html_str
+
+
+def test_future_strategy_does_not_turn_missing_selected_history_into_setup_warning(financial_client_obj):
+    config_dict = financial_client_obj.application.config['client_registry_dict']['clients'][0]
+    config_dict['accounts'].append(dict(config_dict['accounts'][0], account_route='U_TEST_B',
+        pod_id='pod_b', display_name='Strategy B', effective_from='2026-09-03'))
+    path_str = '/clients/sample/overview?from=2026-09-01&to=2026-09-02'
+    report_dict = financial_client_obj.get(path_str + '&download=json').get_json()
+    assert len(report_dict['strategy_list']) == 1 and report_dict['twr_float'] is None
+    html_str = financial_client_obj.get(path_str).get_data(as_text=True)
+    assert 'data-account-unit="pct" aria-pressed="false" disabled' in html_str
+    assert 'Incomplete IBKR return data' in html_str
+    assert 'Portfolio return setup required' not in html_str
+
+
+def test_configured_failed_return_cannot_fall_back_to_valid_account_twr(financial_client_obj):
+    from test_client_twr import twr_config_dict
+
+    config_dict = financial_client_obj.application.config['client_registry_dict']['clients'][0]
+    config_dict['client_twr'] = twr_config_dict(False)['client_twr']
+    row_dict = nav_attributes_dict()
+    row_dict.pop('billPay')
+    financial_client_obj.application.config['client_reporting_snapshot_fn'] = lambda client_id_str: snapshot_obj([row_dict])
+    path_str = '/clients/sample/overview?from=2026-09-01&to=2026-09-01'
+    report_dict = financial_client_obj.get(path_str + '&download=json').get_json()
+    assert report_dict['twr_float'] is None and report_dict['pnl_float'] is None
+    assert report_dict['strategy_list'][0]['twr_float'] == pytest.approx(.01)
+    html_str = financial_client_obj.get(path_str).get_data(as_text=True)
+    assert 'data-account-unit="pct" aria-pressed="false" disabled' in html_str
+    assert 'aria-label="Portfolio cumulative return (%)"' not in html_str
+    assert 'Incomplete IBKR return data' in html_str and 'Incomplete IBKR data' in html_str
+    assert 'IBKR cash-flow setup required' not in html_str
+
+
+def test_missing_mapping_never_turns_nav_change_into_return_or_profit(financial_client_obj):
+    config_dict = financial_client_obj.application.config['client_registry_dict']['clients'][0]
+    config_dict.pop('nav_bridge')
+    config_dict['accounts'].append(dict(config_dict['accounts'][0], account_route='U_TEST_B', pod_id='pod_b', display_name='Strategy B'))
+    financial_client_obj.application.config['client_reporting_snapshot_fn'] = lambda client_id_str: snapshot_obj([
+        nav_attributes_dict(), nav_attributes_dict('U_TEST_B')])
+    path_str = '/clients/sample/overview?from=2026-09-01&to=2026-09-01'
+    report_dict = financial_client_obj.get(path_str + '&download=json').get_json()
+    html_str = financial_client_obj.get(path_str).get_data(as_text=True)
+    assert report_dict['pnl_float'] is None and report_dict['twr_float'] is None
+    assert 'data-account-unit="pct" aria-pressed="false" disabled' in html_str
+    assert 'IBKR cash-flow setup required' in html_str
+    assert 'Portfolio return setup required' in html_str
+    assert 'a verified breakdown of IBKR capital movements is not available' not in html_str
+
+
 @pytest.mark.parametrize("access_token_str", [None, "short", "obsolete-operator-credential-123456"])
 @pytest.mark.parametrize("demo_bool", [False, True])
 def test_launcher_serves_without_operator_credential(monkeypatch, access_token_str, demo_bool):

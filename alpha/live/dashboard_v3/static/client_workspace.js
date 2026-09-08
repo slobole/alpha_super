@@ -14,3 +14,12 @@ document.querySelectorAll('[data-daily-panel]').forEach(panelObj => {
     });
   });
 });
+
+document.querySelectorAll('[data-account-panel]').forEach(panelObj => {
+  panelObj.querySelectorAll('[data-account-unit]').forEach(buttonObj => {
+    buttonObj.addEventListener('click', () => {
+      panelObj.querySelectorAll('[data-account-unit]').forEach(peerObj => peerObj.setAttribute('aria-pressed', String(peerObj === buttonObj)));
+      panelObj.querySelectorAll('[data-account-series]').forEach(seriesObj => { seriesObj.hidden = seriesObj.dataset.accountSeries !== buttonObj.dataset.accountUnit; });
+    });
+  });
+});

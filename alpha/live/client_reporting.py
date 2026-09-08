@@ -232,6 +232,11 @@ def _validate_bridge_profile(bridge_dict: dict) -> None:
         raise ClientReportingError("NAV bridge fields overlap or include capital/NAV totals.")
     if {"realized", "changeInUnrealized"} & set(field_list):
         raise ClientReportingError("Do not mix realized/unrealized fields with an MTM bridge.")
+    zero_only_list = bridge_dict.get("zero_only_fields", [])
+    if not isinstance(zero_only_list, list) or any(not isinstance(field_str, str) or not field_str for field_str in zero_only_list):
+        raise ClientReportingError("NAV bridge zero-only fields must be a list of field names.")
+    if len(set(zero_only_list)) != len(zero_only_list) or set(zero_only_list) & (set(field_list) | NAV_METADATA_FIELD_SET):
+        raise ClientReportingError("NAV bridge zero-only fields overlap or include NAV metadata.")
 
 
 def load_client_registry_dict(config_path_str: str) -> dict[str, Any]:
@@ -374,6 +379,9 @@ def _daily_bridge_dict(row_obj: BrokerNavRow, bridge_dict: dict | None) -> dict[
     if bridge_dict is None:
         return {"complete_bool": False, "reason_str": "A reviewed complete NAV-flow contract is not configured."}
     try:
+        for field_str in bridge_dict.get("zero_only_fields", []):
+            if _decimal_value(row_obj.attribute_dict, field_str) != 0:
+                raise ClientReportingError(f"Unsupported nonzero NAV component: {field_str}; accounting profile review required.")
         capital_decimal = sum((_decimal_value(row_obj.attribute_dict, field_str) for field_str in CAPITAL_FIELD_TUPLE), Decimal(0))
         boundary_decimal = _decimal_value(row_obj.attribute_dict, BOUNDARY_FIELD_STR)
         economic_decimal = sum((_decimal_value(row_obj.attribute_dict, field_str) for field_str in bridge_dict["economic_fields"]), Decimal(0))

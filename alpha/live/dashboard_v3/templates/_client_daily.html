@@ -9,8 +9,8 @@
   {% for scope_dict in daily_scope_list %}<div data-daily-scope="{{ loop.index0 }}" {% if not loop.first %}hidden{% endif %}>
     <div class="client-daily-grid">
       <div>
-        <div data-daily-chart="pct">{{ financial_chart(scope_dict.return_chart_dict, 'Daily return (%)', true) }}</div>
-        <div data-daily-chart="usd" hidden>{{ financial_chart(scope_dict.pnl_chart_dict, 'Daily P&L (USD)', true) }}</div>
+        <div data-daily-chart="pct">{% if scope_dict.return_chart_dict %}{{ financial_chart(scope_dict.return_chart_dict, 'Daily return (%)', true) }}{% else %}<div class="client-chart-empty">{{ return_unavailable_str if loop.first else 'Incomplete IBKR return data' }}</div>{% endif %}</div>
+        <div data-daily-chart="usd" hidden>{% if scope_dict.pnl_chart_dict %}{{ financial_chart(scope_dict.pnl_chart_dict, 'Daily P&L (USD)', true) }}{% else %}<div class="client-chart-empty">{{ pnl_unavailable_str }}</div>{% endif %}</div>
       </div>
       <div class="client-daily-table-wrap"><table class="ops-table client-daily-table" aria-label="{{ scope_dict.display_name_str }} daily history">
         <thead><tr><th>Date</th><th class="client-number">P&amp;L · $</th><th class="client-number">Return · %</th></tr></thead>
