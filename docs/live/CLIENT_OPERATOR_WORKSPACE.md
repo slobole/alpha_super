@@ -202,6 +202,30 @@ exposure or beta; those remain unmeasured without an explicit instrument contrac
 
 ## Display contract
 
+Financial defaults end on the latest finalized date with complete saved NAV for
+every required account. Local mode requires all valuation identities, including
+retired accounts and accounts without strategy history. Explicit registries use
+their actual ownership windows. Selection never depends on successful P&L/TWR:
+bad accounting on the newest covered day remains visible, and earlier gaps or
+legacy imports are not removed. Exact dates are unchanged. MTD/YTD/1W retain their
+current-calendar starts; a stale endpoint outside that window does not turn a
+current preset into an old period. Operations still default through today.
+
+A separate compact source-delay line compares the latest complete date with the
+last XNYS session before today and any newer observed non-session activity. A
+partial weekend import cannot look current merely because Friday is complete.
+D+1 excludes today, and no common date means unavailable, not a partial book.
+This changes automatic date selection only, not formulas, source validation,
+scope, report finality or any selected-period accounting result.
+
+Repeated dated errors are grouped by account and reason with day counts and date
+ranges. Unrecognized messages remain visible and raw JSON diagnostics are intact.
+The daily table marks individually reported nonzero capital fields, including
+offsetting fields/accounts; it never derives movements from NAV. A marker is not
+an external-flow classification, proof of gross completeness or permission to
+calculate a return. The portfolio-method note expands on hover/keyboard focus;
+canonical `SOD` dates display as `Start` without changing report keys or hashes.
+
 The operator pages use a compact, locally served light-only theme. Status and each Pod's
 seven-stage flow remain visible; detailed causes and provenance are expandable.
 Overview and Performance have numeric `%`/USD axes and a daily bar chart plus table,
@@ -442,6 +466,16 @@ and do not inherit the dashboard approval. Even `status` writes metadata; use th
 saved status screen for strictly read-only inspection. No generic shell runs in the UI.
 
 ## Verification and remaining acceptance work
+
+Polish acceptance (2026-09-08): 1,230 focused reporting/dashboard/live regression
+tests passed, plus 88 final targeted checks after the tooltip markup adjustment.
+The expanded-local, legacy-local and explicit-registry demo browser matrices
+passed all seven client pages at 1440/768/390; desktop/mobile screenshots were
+inspected. The demo's seven advanced routes also passed. Tier 3 quant,
+parity/failure-mode and coverage reviews found no remaining blocker. This is not
+a full research-suite claim or VPS deployment. Existing live-impact invariants
+below remain unchanged; missing history and unsupported financial facts still
+withhold results.
 
 `scripts/review/check_local_workspace_ui.cjs` uses the actual DashboardDataProvider
 with temporary production-format releases, config overrides, ledgers and saved Flex

@@ -25,6 +25,7 @@ from alpha.live.dashboard_v3.client_operations import (
 from alpha.live.dashboard_v3.operator_tools import redact_diagnostic_value, strategy_display_name_str
 from alpha.live.dashboard_v3.client_comparison import saved_comparison_dict
 from alpha.live.dashboard_v3.client_charts import daily_history_list, nav_chart_dict
+from alpha.live.dashboard_v3.client_financial_display import capital_day_key_set, financial_dates_dict, summarized_issue_list
 from alpha.live.dashboard_v3.local_workspace import (
     LocalReportingError, build_local_workspace_dict, local_financial_scope_complete_bool, validate_local_bindings_unchanged,
 )
@@ -172,7 +173,7 @@ def _snapshot_obj(client_dict):
     return snapshot_obj
 
 
-def _period_tuple(client_dict, as_of_ts, *, operational_bool=False):
+def _period_tuple(client_dict, as_of_ts, *, operational_bool=False, default_end_str=None):
     from_str, to_str = request.args.get("from"), request.args.get("to")
     if bool(from_str) != bool(to_str):
         raise ClientReportingError("Choose both the start and end date.")
@@ -195,6 +196,9 @@ def _period_tuple(client_dict, as_of_ts, *, operational_bool=False):
         start_str = max(start_str, market_day_obj.replace(month=1, day=1).isoformat())
     elif window_str == "1w":
         start_str = max(start_str, (end_day_obj - timedelta(days=6)).isoformat())
+    # Presets stay in the current calendar window, even when imports are older.
+    if not operational_bool and default_end_str and default_end_str >= start_str:
+        end_day_obj = min(end_day_obj, date.fromisoformat(default_end_str))
     if start_str > end_day_obj.isoformat():
         # Keep a new mandate/current MTD or YTD accessible. The accounting
         # builder explicitly withholds today's unfinalized financial figures.
@@ -276,6 +280,11 @@ def financial_route_fn(client_id_str, view_str):
         snapshot_obj = _snapshot_obj(client_dict)
         if local_workspace_bool() and snapshot_obj.unavailable_reason_str:
             raise LocalReportingError(snapshot_obj.unavailable_reason_str)
+        dates_dict = financial_dates_dict(client_dict, snapshot_obj, as_of_ts=as_of_ts,
+            valuation_account_list=_local_workspace_dict()["valuation_account_list"] if local_workspace_bool() else None)
+        # Exact dates bypass the default. Never move the start, skip a middle
+        # gap or retreat from a covered day whose accounting fails validation.
+        from_str, to_str = _period_tuple(client_dict, as_of_ts, default_end_str=dates_dict["latest_complete_str"])
         if current_app.config.get("demo_mode_bool"):
             from alpha.live.dashboard_v3.demo import build_demo_benchmark_snapshot
             benchmark_snapshot_obj = build_demo_benchmark_snapshot()
@@ -344,9 +353,10 @@ def financial_route_fn(client_id_str, view_str):
         operations_dict=_operations_dict(client_dict, as_of_ts) if view_str == "overview" else None,
         activity_dict=_activity_dict(client_dict, from_str, to_str) if view_str == "overview" else None,
         period_max_date_str=period_max_date_str,
-        financial_notice_list=_financial_notice_list(report_dict, client_dict),
+        financial_issue_list=summarized_issue_list(report_dict, _financial_notice_list(report_dict, client_dict)),
+        financial_dates_dict=dates_dict,
         performance_chart_list=[nav_chart_dict(strategy_dict["performance_dict"]["return_path_list"], value_field_str="cumulative_return_float", unit_str="pct") for strategy_dict in report_dict["strategy_list"]] if view_str == "performance" else [],
-        daily_scope_list=daily_history_list(report_dict) if view_str != "report" else [],
+        daily_scope_list=daily_history_list(report_dict, movement_key_set=capital_day_key_set(snapshot_obj)) if view_str != "report" else [],
         comparison_list=[saved_comparison_dict(next(
             account_dict for account_dict in client_dict["accounts"]
             if (account_dict["pod_id"], account_dict["account_route"]) == (strategy_dict["pod_id_str"], strategy_dict["account_route_str"])

@@ -66,6 +66,11 @@
 .client-workspace .client-row-dates { display: block; color: var(--desk-muted); font-size: 9px; white-space: nowrap; margin-top: 4px; }
 .client-workspace .client-data-issues { color: var(--desk-warning); font-size: 11px; margin: -4px 0 14px; }
 .client-workspace .client-data-issues ul { color: var(--desk-muted); max-height: 240px; overflow: auto; }
+.client-workspace .client-source-delay { color: var(--desk-warning); font-size: 11px; margin: 0 0 12px; }
+.client-workspace .client-method-note { position: relative; width: fit-content; cursor: help; border-bottom: 1px dotted var(--desk-muted); }
+.client-workspace .client-method-note [role="tooltip"] { display: none; position: absolute; right: 0; top: 100%; z-index: 5; width: 260px; max-width: 65vw; padding: 10px; background: var(--desk-panel); border: 1px solid var(--desk-rule); color: var(--desk-text); line-height: 1.5; box-shadow: 0 3px 12px #142d4e18; }
+.client-workspace .client-method-note:hover [role="tooltip"], .client-workspace .client-method-note:focus [role="tooltip"] { display: block; }
+.client-workspace .client-movement { font-size: 9px; color: var(--desk-muted); border: 1px solid var(--desk-rule); padding: 1px 3px; cursor: help; }
 .client-workspace .client-details, .client-workspace .client-details p { font-size: 11px; }
 .client-workspace .client-details > summary { color: var(--desk-muted); }
 .client-workspace .client-inline-facts { font-size: 11px; gap: 6px 18px; margin: 8px 0; }

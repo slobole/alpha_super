@@ -40,6 +40,14 @@ async function main() {
     const viewList = ['overview', 'performance', 'strategies', 'exposure', 'activity', 'diagnostics', 'report'];
     await pageObj.goto(originStr + '/');
     assert(pageObj.url().endsWith('/clients/local/overview'));
+    if (expandedBool) {
+      assert.equal(await pageObj.locator('input[name="to"]').inputValue(), '2026-09-03');
+      assert((await pageObj.locator('.client-source-delay').innerText()).includes('complete through 2026-09-03'));
+      // Legacy Sep1 remains selected: a good final NAV must not unlock ALL returns.
+      assert(await pageObj.locator('[data-account-unit="pct"]').isDisabled());
+      await pageObj.locator('.client-data-issues summary').click();
+      assert.equal(await pageObj.locator('.client-data-issues li').filter({ hasText: 'mtmAtPaxos' }).count(), 2);
+    }
     for (const widthInt of [1440, 768, 390]) {
       await pageObj.setViewportSize({ width: widthInt, height: 1000 });
       await pageObj.goto(originStr + '/__fixture_chart_gap');
@@ -83,6 +91,16 @@ async function main() {
             assert.equal(reportObj.capital_movement_float, 100);
             assert.equal(reportObj.closing_nav_float, 11135);
             assert.equal(reportObj.status_str, 'ready');
+            assert((await chartObj.locator('.client-chart-dates:visible').innerText()).includes('Start'));
+            assert(!(await chartObj.locator('.client-chart-dates:visible').innerText()).includes('SOD'));
+            const methodObj = pageObj.locator('.client-method-note');
+            await methodObj.focus();
+            const tooltipObj = methodObj.locator('[role="tooltip"]');
+            assert(await tooltipObj.isVisible());
+            assert((await tooltipObj.innerText()).includes('end-of-day'));
+            const tooltipBoxObj = await tooltipObj.boundingBox();
+            assert(tooltipBoxObj.x >= 0 && tooltipBoxObj.x + tooltipBoxObj.width <= widthInt);
+            await methodObj.evaluate(elementObj => elementObj.blur());
           } else {
             // The new Pod intentionally has no NAV; never manufacture a book curve.
             assert(await chartObj.locator('[data-account-series="usd"] .client-chart-empty').isVisible());
@@ -103,6 +121,8 @@ async function main() {
             const portfolioObj = dailyObj.locator('[data-daily-scope="0"]');
             assert((await portfolioObj.locator('tbody').innerText()).includes('-$25.00'));
             assert((await portfolioObj.locator('tbody').innerText()).includes('$60.00'));
+            assert.equal(await portfolioObj.locator('.client-movement').count(), 1);
+            assert((await portfolioObj.locator('tr').filter({ hasText: '2026-09-02' }).innerText()).includes('Movement'));
             await dailyObj.locator('[data-daily-unit="usd"]').click();
             assert((await portfolioObj.locator('[data-daily-chart="usd"] .client-y-axis').innerText()).includes('$'));
             assert.equal(await portfolioObj.locator('[data-daily-chart="usd"] .client-bar').count(), 2);
@@ -112,6 +132,7 @@ async function main() {
           const accountObj = dailyObj.locator('[data-daily-scope="1"]');
           assert(await accountObj.isVisible());
           assert((await accountObj.locator('tbody').innerText()).includes(expandedBool ? '0.80%' : '1.00%'));
+          assert.equal(await accountObj.locator('.client-movement').count(), expandedBool ? 1 : 0);
           assert.equal(await accountObj.locator('[data-daily-chart="pct"] .client-bar').count(), expandedBool ? 2 : 1);
           await dailyObj.locator('[data-daily-unit="usd"]').click();
           assert.equal(await accountObj.locator('[data-daily-chart="usd"] .client-bar').count(), expandedBool ? 2 : 0);

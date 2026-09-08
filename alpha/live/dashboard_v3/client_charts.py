@@ -9,6 +9,10 @@ PLOT_TOP_INT = 10
 PLOT_BOTTOM_INT = 170
 
 
+def _display_date_str(date_str):
+    return date_str[:-4] + " · Start" if date_str.endswith(" SOD") else date_str
+
+
 def _axis_label_str(value_float, unit_str, span_float):
     display_float = value_float * 100 if unit_str == "pct" else value_float
     step_float = span_float / 2 * (100 if unit_str == "pct" else 1)
@@ -56,6 +60,7 @@ def nav_chart_dict(daily_list, *, value_field_str="nav_float", unit_str="usd", b
             continue
         point_dict = {"x_float": horizontal_float, "y_float": vertical_float(value_float),
             "value_float": value_float, "market_date_str": date_str,
+            "display_date_str": _display_date_str(date_str),
             "label_str": _axis_label_str(value_float, unit_str, min(span_float, .02 if unit_str == "pct" else 2))}
         point_list.append(point_dict)
         current_list.append(f"{horizontal_float:.2f},{point_dict['y_float']:.2f}")
@@ -73,10 +78,12 @@ def nav_chart_dict(daily_list, *, value_field_str="nav_float", unit_str="usd", b
         "tick_list": tick_list, "zero_y_float": zero_y_float, "unit_str": unit_str,
         "width_int": CHART_WIDTH_INT, "height_int": CHART_HEIGHT_INT,
         "min_float": low_float, "max_float": high_float,
-        "from_str": daily_list[0].get("market_date_str", ""), "to_str": daily_list[-1].get("market_date_str", "")}
+        "from_str": daily_list[0].get("market_date_str", ""), "to_str": daily_list[-1].get("market_date_str", ""),
+        "from_label_str": _display_date_str(daily_list[0].get("market_date_str", "")),
+        "to_label_str": _display_date_str(daily_list[-1].get("market_date_str", ""))}
 
 
-def daily_history_list(report_dict):
+def daily_history_list(report_dict, *, movement_key_set=None):
     """Exact-date display projection; never average accounts or difference NAV."""
     return_by_date_dict = {row_dict["market_date_str"]: row_dict["return_float"] for row_dict in report_dict["twr_daily_list"]}
     if not report_dict["client_twr_configured_bool"] and report_dict["twr_float"] is not None and len(report_dict["strategy_list"]) == 1:
@@ -88,6 +95,20 @@ def daily_history_list(report_dict):
     scope_list = [{"display_name_str": "Portfolio", "daily_list": portfolio_list}]
     scope_list.extend({"display_name_str": strategy_dict["display_name_str"], "daily_list": strategy_dict["daily_list"]}
         for strategy_dict in report_dict["strategy_list"])
+    if movement_key_set is not None:
+        for index_int, scope_dict in enumerate(scope_list):
+            daily_list = []
+            for day_dict in scope_dict["daily_list"]:
+                date_str = day_dict["market_date_str"]
+                if index_int:
+                    route_set = {report_dict["strategy_list"][index_int - 1]["account_route_str"]}
+                elif "valuation_account_list" in report_dict:
+                    route_set = {account_dict["account_route"] for account_dict in report_dict["valuation_account_list"]}
+                else:
+                    route_set = {strategy_dict["account_route_str"] for strategy_dict in report_dict["strategy_list"]
+                        if strategy_dict["from_date_str"] <= date_str <= strategy_dict["to_date_str"]}
+                daily_list.append({**day_dict, "capital_movement_bool": any((route_str, date_str) in movement_key_set for route_str in route_set)})
+            scope_dict["daily_list"] = daily_list
     return [{**scope_dict,
         "return_chart_dict": nav_chart_dict(scope_dict["daily_list"], value_field_str="return_float", unit_str="pct", bars_bool=True),
         "pnl_chart_dict": nav_chart_dict(scope_dict["daily_list"], value_field_str="pnl_float", bars_bool=True)} for scope_dict in scope_list]
