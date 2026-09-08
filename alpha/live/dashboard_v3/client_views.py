@@ -27,7 +27,7 @@ from alpha.live.dashboard_v3.client_comparison import saved_comparison_dict
 from alpha.live.dashboard_v3.client_charts import daily_history_list, nav_chart_dict
 from alpha.live.dashboard_v3.client_financial_display import capital_day_key_set, financial_dates_dict, summarized_issue_list
 from alpha.live.dashboard_v3.local_workspace import (
-    LocalReportingError, build_local_workspace_dict, local_financial_scope_complete_bool, validate_local_bindings_unchanged,
+    LocalReportingError, build_local_workspace_dict, validate_local_bindings_unchanged,
 )
 
 
@@ -236,14 +236,23 @@ def financial_route_fn(client_id_str, view_str):
         as_of_ts = datetime.now(UTC)
         period_max_date_str = as_of_ts.astimezone(ZoneInfo("America/New_York")).date().isoformat()
         local_source_unavailable_bool = False
+        valuation_account_list = None
         if local_workspace_bool() and view_str not in OPERATION_VIEW_SET:
-            # Available broker NAV may precede the first strategy return. This
-            # changes the selectable history, not inferred funding/entry dates.
+            workspace_dict = _local_workspace_dict()
+            # Known windows define the measured portfolio on each day. Use the
+            # canonical date-varying book for NAV, P&L, TWR and investor exports.
+            # Unknown windows / not-yet-started installations retain NAV-only
+            # evidence; raw broker history must never unlock partial returns.
+            if not workspace_dict["financial_scope_complete_bool"] or client_dict["mandate_start_date"] > period_max_date_str:
+                valuation_account_list = workspace_dict["valuation_account_list"]
+                # A baseline can exist before the first return session, even
+                # before any Flex import. Keep today's operations accessible.
+                client_dict["mandate_start_date"] = min(client_dict["mandate_start_date"], period_max_date_str)
             snapshot_obj = _snapshot_obj(client_dict)
             local_source_unavailable_bool = bool(snapshot_obj.unavailable_reason_str)
             broker_date_list = [row_obj.market_date_str for row_obj in snapshot_obj.row_tuple
                 if row_obj.market_date_str <= period_max_date_str]
-            if broker_date_list:
+            if broker_date_list and valuation_account_list is not None:
                 client_dict["mandate_start_date"] = min(client_dict["mandate_start_date"], min(broker_date_list))
         from_str, to_str = _period_tuple(client_dict, as_of_ts, operational_bool=view_str in OPERATION_VIEW_SET)
         if any(date.fromisoformat(value_str).isoformat() != value_str for value_str in (from_str, to_str)):
@@ -281,7 +290,7 @@ def financial_route_fn(client_id_str, view_str):
         if local_workspace_bool() and snapshot_obj.unavailable_reason_str:
             raise LocalReportingError(snapshot_obj.unavailable_reason_str)
         dates_dict = financial_dates_dict(client_dict, snapshot_obj, as_of_ts=as_of_ts,
-            valuation_account_list=_local_workspace_dict()["valuation_account_list"] if local_workspace_bool() else None)
+            valuation_account_list=valuation_account_list)
         # Exact dates bypass the default. Never move the start, skip a middle
         # gap or retreat from a covered day whose accounting fails validation.
         from_str, to_str = _period_tuple(client_dict, as_of_ts, default_end_str=dates_dict["latest_complete_str"])
@@ -294,8 +303,8 @@ def financial_route_fn(client_id_str, view_str):
             client_dict, snapshot_obj,
             from_date_str=from_str, to_date_str=to_str, as_of_ts=as_of_ts,
             benchmark_snapshot_obj=benchmark_snapshot_obj,
-            scope_complete_bool=local_financial_scope_complete_bool(_local_workspace_dict(), from_str, to_str) if local_workspace_bool() else True,
-            valuation_account_list=_local_workspace_dict()["valuation_account_list"] if local_workspace_bool() else None,
+            scope_complete_bool=_local_workspace_dict()["financial_scope_complete_bool"] if local_workspace_bool() else True,
+            valuation_account_list=valuation_account_list,
         )
     except (ClientReportingError, ValueError, OSError) as exception_obj:
         # A financial-source failure must not remove current operations or the

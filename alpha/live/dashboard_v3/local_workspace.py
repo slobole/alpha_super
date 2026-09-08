@@ -78,15 +78,6 @@ def validate_local_bindings_unchanged(workspace_dict, database_path_str):
         raise LocalReportingError("IBKR account mapping changed during this read. Refresh the page before exporting.") from exception_obj
 
 
-def local_financial_scope_complete_bool(workspace_dict, from_str, to_str):
-    # Coverage boundaries are NOT client capital entry/exit. Never value an
-    # absent account as zero before its first or after its last trusted EOD.
-    return workspace_dict["financial_scope_complete_bool"] and all(
-        account_dict["effective_from"] <= from_str and (account_dict.get("effective_to") or "9999-12-31") >= to_str
-        for account_dict in workspace_dict["client_dict"]["accounts"]
-    )
-
-
 def build_local_workspace_dict(provider_obj, database_path_str, *, today_str):
     """Use the same release/config paths as the running dashboard provider."""
     client_dict = {

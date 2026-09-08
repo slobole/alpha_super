@@ -76,15 +76,14 @@ Enabled releases determine current operational scope. Saved performance bindings
 retain retired history; disabled foreign-client templates do not hide current Pods.
 Missing/corrupt financial sources never block operational pages or earlier local logs.
 
-Financial dates include **available raw IBKR NAV history**, not just strategy returns;
-they do not establish mandate inception, funding or first fill. Account values use
-all verified local account identities, including retired or not-yet-started strategies.
-For each date, `local NAV = sum(official account NAV)` only when every required
-account has a finalized row. Missing values are not zero or carried forward.
-Valid opening/closing values survive a missing middle date; the chart retains a gap.
-Strategy history endpoints do not prove deposits, withdrawals or account closure.
-Incomplete strategy history still withholds client P&L/TWR, but no longer suppresses
-independently verified book NAV. Official strategy TWR and its date windows are unchanged.
+With verified strategy windows, financial dates and account values describe the
+**measured portfolio**: each strategy joins on its trusted return start date and
+leaves after its last measured EOD. NAV, P&L, daily TWR and exports share this scope.
+Entry/exit capital is separate from profit and broker deposits/withdrawals; it does
+not prove physical account opening/closure. Official strategy TWR dates are unchanged.
+Unknown windows or a not-yet-started installation retain the raw all-account NAV-only
+fallback, with P&L/TWR unavailable. Missing values are never zero or carried forward.
+Valid NAV endpoints survive a missing middle date; the chart retains a gap.
 Old NAV/TWR-only Flex imports do not prove cash movements or dollar profit. No MTM
 field review or consolidated TWR method is invented to fill those gaps.
 
@@ -203,9 +202,9 @@ exposure or beta; those remain unmeasured without an explicit instrument contrac
 ## Display contract
 
 Financial defaults end on the latest finalized date with complete saved NAV for
-every required account. Local mode requires all valuation identities, including
-retired accounts and accounts without strategy history. Explicit registries use
-their actual ownership windows. Selection never depends on successful P&L/TWR:
+every account in that day's measured scope. The local NAV-only fallback instead
+requires all valuation identities. Explicit registries retain their configured
+ownership windows. Selection never depends on successful P&L/TWR:
 bad accounting on the newest covered day remains visible, and earlier gaps or
 legacy imports are not removed. Exact dates are unchanged. MTD/YTD/1W retain their
 current-calendar starts; a stale endpoint outside that window does not turn a

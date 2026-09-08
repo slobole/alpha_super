@@ -631,8 +631,8 @@ def build_client_report_dict(
             "account_route_str": account_dict["account_route"], "pod_id_str": account_dict["pod_id"],
             "display_name_str": account_dict["display_name"],
             "from_date_str": expected_date_list[0], "to_date_str": expected_date_list[-1],
-            "opening_nav_float": _money_float(opening_row_obj.opening_nav_decimal) if opening_row_obj else None,
-            "closing_nav_float": _money_float(closing_row_obj.closing_nav_decimal) if closing_row_obj else None,
+            "opening_nav_float": _money_float(opening_row_obj.opening_nav_decimal) if opening_row_obj and opening_row_obj.market_date_str < market_today_str else None,
+            "closing_nav_float": _money_float(closing_row_obj.closing_nav_decimal) if closing_row_obj and closing_row_obj.market_date_str < market_today_str else None,
             "twr_float": float(growth_decimal - 1) if account_complete_bool else None,
             "twr_method_str": "Geometrically linked official IBKR daily account TWR",
             "pnl_float": _money_float(account_pnl_decimal) if flows_complete_bool else None,
@@ -675,7 +675,9 @@ def build_client_report_dict(
     for date_index_int, market_date_str in enumerate(report_date_list):
         active_set = {account_dict["account_route"] for account_dict in account_list if _account_active_bool(account_dict, market_date_str)}
         current_row_dict = {account_str: row_by_key_dict[(account_str, market_date_str)] for account_str in active_set if (account_str, market_date_str) in row_by_key_dict}
-        day_complete_bool = scope_complete_bool and len(current_row_dict) == len(active_set)
+        # *** CRITICAL *** Activity Flex is finalized D+1 for NAV as well as
+        # returns. Explicit through-today requests must not expose pending NAV.
+        day_complete_bool = scope_complete_bool and market_date_str < market_today_str and len(current_row_dict) == len(active_set)
         nav_decimal = sum((row_obj.closing_nav_decimal for row_obj in current_row_dict.values()), Decimal(0)) if day_complete_bool else None
         if date_index_int == 0:
             opening_book_decimal = sum((row_obj.opening_nav_decimal for row_obj in current_row_dict.values()), Decimal(0)) if day_complete_bool else None
@@ -767,7 +769,7 @@ def build_client_report_dict(
         "requested_from_date_str": from_date_str, "requested_to_date_str": to_date_str,
         "opening_date_str": report_date_list[0] if report_date_list else None,
         "closing_date_str": report_date_list[-1] if report_date_list else None,
-        "valuation_basis_str": "Broker daily starting NAV through ending NAV; not first fill or intraday live NetLiq",
+        "valuation_basis_str": "IBKR NAV of strategies within their measured dates; entries at SOD, exits after last measured EOD",
         "generated_at_str": as_of_ts.isoformat(), "scope_hash_str": content_hash_str(client_dict),
         "opening_nav_float": _money_float(opening_book_decimal), "closing_nav_float": _money_float(closing_book_decimal),
         "capital_movement_float": _money_float(capital_total_decimal) if all_flows_bool else None,

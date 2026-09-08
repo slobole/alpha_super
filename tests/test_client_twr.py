@@ -96,6 +96,22 @@ def test_exit_preserves_last_owned_profit_but_removes_next_day_capital():
     assert result_dict["pnl_float"] == 30
 
 
+def test_weekend_exit_without_boundary_nav_remains_fail_closed():
+    config_dict = twr_config_dict()
+    config_dict["accounts"][1]["effective_to"] = "2026-09-04"
+    row_list = [nav_attributes_dict(account_str, date_str=f"2026-09-0{day_int}",
+        opening_str=str(1000 + (day_int - 1) * 10), closing_str=str(1000 + day_int * 10))
+        for account_str in ("U_TEST_A", "U_TEST_B") for day_int in (1, 2, 3, 4)]
+    row_list.append(nav_attributes_dict(date_str="2026-09-08", opening_str="1040", closing_str="1050"))
+    result_dict = report_dict(row_list, config_dict=config_dict, to_str="2026-09-08")
+    # The existing calendar-boundary contract requires Saturday NAV for the
+    # continuing account. This fix must not invent it or conceal the gap.
+    assert result_dict["twr_float"] is None and result_dict["pnl_float"] is None
+    assert result_dict["return_path_list"] == []
+    assert next(row_dict for row_dict in result_dict["daily_book_list"]
+        if row_dict["market_date_str"] == "2026-09-05")["nav_float"] is None
+
+
 @pytest.mark.parametrize("case_str", ["missing_row", "missing_field", "bad_bridge", "zero_base", "linking", "opposite_linking", "continuity"])
 def test_invalid_daily_evidence_never_leaves_partial_twr(case_str):
     row_list = [nav_attributes_dict(), nav_attributes_dict("U_TEST_B")]

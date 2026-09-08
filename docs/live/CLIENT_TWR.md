@@ -48,6 +48,32 @@ Scope entries join at SOD with their opening NAV; departures leave after their
 last owned EOD. Their capital is neither profit nor a reset of client history.
 There is no intersection-only truncation or average of strategy-period returns.
 
+### Default single-VPS measured portfolio
+
+Trusted local performance bindings define membership, not the date the physical
+broker account was opened or funded. The first trusted Pod EOD remains the
+baseline; measurement starts on the following exchange session. This rule and
+the saved bindings are unchanged.
+
+With all windows verified, the default dashboard uses the same dated membership
+for opening/closing NAV, P&L, daily rows, cumulative TWR and investor exports.
+For example, a strategy measured from June 1 contributes alone until a second
+strategy joins on June 17. Its June 17 opening NAV is scope capital, not profit.
+Earlier raw broker values/returns of that entrant stay in the source archive but
+are excluded from the measured portfolio. ALL begins at the earliest measured
+start, not the latest strategy start or the first raw broker row.
+
+A missing day or field inside an admitted strategy's window still blocks the
+selected-period result. A strategy with no verified window does not silently
+disappear: the existing NAV-only, unavailable-return fallback remains. That
+fallback also keeps a not-yet-started installation accessible to the operator.
+Current-day NAV and performance remain pending until D+1. This adapter change
+does not fetch data, change sync/binding rules, or affect trading.
+
+Existing boundary limitation: an exit immediately before a non-session day can
+require that day's NAV for continuing accounts under the calendar-date scope
+contract. If absent, the period stays unavailable; no synthetic NAV is inserted.
+
 Same-day internal transfers between included accounts net to zero. Daily net
 zero is not proof of matched transfer events. Nonzero daily aggregate
 `internalCashTransfers` blocks the entire client return: cash in transit or an

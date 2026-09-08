@@ -91,9 +91,9 @@ version. Profile configuration already enters scope/report hashes.
 Older seven-field exports still support their original NAV/account TWR facts,
 but cannot prove P&L. Activating this profile does not backfill old imports.
 Mixed old/new periods remain incomplete; selecting a complete period is allowed,
-but the dashboard never silently trims the requested dates. Complete account
-ownership history is also required; the first saved performance row is not
-automatically funding inception. D+1 finalization gates remain unchanged.
+but the dashboard never silently trims the requested dates. Verified measured
+strategy windows are also required; strategies may join on different dates.
+Their first performance dates are not funding inception. D+1 gates remain unchanged.
 
 Local acceptance does not deploy code or import history on a VPS. A page read
 performs neither action. No live-readiness or broker-parity certification is

@@ -197,7 +197,8 @@ def test_disabled_foreign_release_never_hides_local_pods_or_pools_money(tmp_path
 def test_retired_reporting_endpoint_does_not_claim_client_cash_withdrawal(tmp_path, monkeypatch):
     app_obj = build_fixture_app(tmp_path, monkeypatch, new_pod_bool=False)
     report_dict = app_obj.test_client().get("/clients/local/performance?from=2026-09-01&to=2026-09-02&download=json").json
-    assert report_dict["scope_complete_bool"] is False
+    assert report_dict["scope_complete_bool"] is True
+    assert report_dict["coverage_complete_bool"] is False  # Active Sep2 rows are absent.
     assert report_dict["closing_nav_float"] is None
     assert report_dict["scope_movement_float"] is None
     retired_dict = next(row_dict for row_dict in report_dict["strategy_list"] if row_dict["pod_id_str"] == "pod_retired")
@@ -269,25 +270,33 @@ def import_nav_day(app_obj, date_str, *, retired_closing_int=1020):
         binding_obj_list=binding_list, imported_timestamp_str="2026-09-04T12:00:00+00:00")
 
 
-@pytest.mark.parametrize("date_str", ["2026-08-31", "2026-09-02"])
-def test_local_raw_nav_outside_strategy_windows_matches_screen_and_pdf(tmp_path, monkeypatch, date_str):
+def test_local_raw_nav_before_measured_start_is_not_a_portfolio_period(tmp_path, monkeypatch):
+    app_obj = build_fixture_app(tmp_path, monkeypatch, new_pod_bool=False)
+    import_nav_day(app_obj, "2026-08-31")
+    before_dict = file_snapshot_dict(tmp_path)
+    client_obj = app_obj.test_client()
+    assert client_obj.get("/clients/local/report?from=2026-08-31&to=2026-08-31&download=json").status_code == 400
+    assert client_obj.get("/clients/local/activity?from=2026-08-31&to=2026-08-31").status_code == 200
+    assert file_snapshot_dict(tmp_path) == before_dict
+
+
+def test_local_measured_nav_excludes_retired_account_on_screen_and_pdf(tmp_path, monkeypatch):
+    date_str = "2026-09-02"
     app_obj = build_fixture_app(tmp_path, monkeypatch, new_pod_bool=False)
     import_nav_day(app_obj, date_str)
     client_obj = app_obj.test_client()
     route_str = f"/clients/local/report?from={date_str}&to={date_str}"
     before_dict = file_snapshot_dict(tmp_path)
     report_dict = client_obj.get(route_str + "&download=json").json
-    assert report_dict["opening_nav_float"] == 3030 and report_dict["closing_nav_float"] == 3060
-    assert report_dict["scope_complete_bool"] is False and report_dict["twr_float"] is None
+    assert report_dict["opening_nav_float"] == 2020 and report_dict["closing_nav_float"] == 2040
+    assert report_dict["scope_complete_bool"] is True and report_dict["twr_float"] is None
     assert report_dict["pnl_float"] is None
     html_str = client_obj.get(route_str).get_data(as_text=True)
-    assert "$3,060.00" in html_str
-    if date_str == "2026-08-31":
-        assert 'min="2026-08-31"' in html_str
+    assert "$2,040.00" in html_str and "$3,060.00" not in html_str
     pdf_response_obj = client_obj.get(route_str + "&download=pdf&expected=" + report_dict["report_hash_str"])
     assert pdf_response_obj.status_code == 200
     pdf_text_str = " ".join(page_obj.extract_text() for page_obj in PdfReader(BytesIO(pdf_response_obj.data)).pages)
-    assert "3,060" in pdf_text_str and "DRAFT" in pdf_text_str
+    assert "2,040" in pdf_text_str and "DRAFT" in pdf_text_str
     assert file_snapshot_dict(tmp_path) == before_dict
 
 
@@ -343,7 +352,7 @@ def test_nav_only_revision_invalidates_previously_viewed_export(tmp_path, monkey
     original_dict = client_obj.get(route_str + "&download=json").json
     import_nav_day(app_obj, "2026-09-02", retired_closing_int=1030)
     corrected_dict = client_obj.get(route_str + "&download=json").json
-    assert corrected_dict["closing_nav_float"] == 3070
+    assert corrected_dict["closing_nav_float"] == original_dict["closing_nav_float"] == 2040
     assert corrected_dict["report_hash_str"] != original_dict["report_hash_str"]
     for export_str in ("pdf", "bundle"):
         assert client_obj.get(route_str + f"&download={export_str}&expected=" + original_dict["report_hash_str"]).status_code == 409
