@@ -551,6 +551,8 @@ def build_pod_detail_dict(
         if latest_vplan_row_dict is None:
             return _finalize_pod_detail_debug_story_dict(detail_dict)
         vplan_id_int = int(latest_vplan_row_dict["vplan_id_int"])
+        # Saved reconciliation evidence for scoped client display; read-only.
+        detail_dict["latest_reconciliation_dict"] = _fetch_latest_reconciliation_row_dict(connection_obj, pod_id_str)
         latest_vplan_row_dict["vplan_row_dict_list"] = _fetch_all_dict_list(
             connection_obj,
             """

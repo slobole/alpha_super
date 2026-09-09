@@ -140,7 +140,7 @@ def test_overview_shows_three_material_events_with_same_activity_dates(monkeypat
         return [dict(row_dict, event_timestamp_str=f"2026-09-0{day_int}T13:40:00Z") for day_int in (1, 2, 3)] + [dict(row_dict, event_name_str="heartbeat", message_str="HEARTBEAT_NOISE")]
     monkeypatch.setattr(provider_obj, "get_pod_event_dict_list", history_list)
     app_obj = create_app(provider_obj, read_only_bool=True,
-        client_registry_dict=registry_dict, client_reporting_snapshot_fn=lambda client_id_str: snapshot_dict[client_id_str])
+        client_registry_dict={**registry_dict, "clients": registry_dict["clients"][:1]}, client_reporting_snapshot_fn=lambda client_id_str: snapshot_dict[client_id_str])
     client_obj = app_obj.test_client()
     html_str = client_obj.get("/clients/demo-owner/overview?from=2026-09-01&to=2026-09-02").get_data(as_text=True)
     assert html_str.count('class="client-event"') == 3

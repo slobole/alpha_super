@@ -48,6 +48,7 @@ ROW_FIELD_TUPLE = (
     "latest_decision_norgate_snapshot_date_str", "latest_decision_norgate_profile_str",
     "latest_vplan_is_for_latest_decision_bool", "latest_vplan_cycle_role_str",
     "missed_target_execution_timestamp_str", "health_str",
+    "latest_submit_ack_status_str", "missing_ack_count_int", "broker_ack_count_int", "fill_count_int",
 )
 
 

@@ -1,16 +1,18 @@
 /* Operator workspace only. State meanings and advanced action guards are unchanged. */
 .client-workspace {
-  --desk-bg: #f6f7f9; --desk-panel: #ffffff; --desk-hover: #edf2f7;
-  --desk-rule: #d9e0e8; --desk-text: #17212f; --desk-muted: #526173;
-  --desk-accent: #2457a7; --desk-positive: #13795b; --desk-negative: #b42336;
+  --desk-font: "Segoe UI", -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+  --desk-bg: #f7f8fa; --desk-panel: #ffffff; --desk-hover: #edf2f7;
+  --desk-rule: #e6e9ee; --desk-text: #17212f; --desk-muted: #526173;
+  --desk-accent: #426794; --desk-positive: #13795b; --desk-negative: #b42336;
   --desk-warning: #946200;
   background: var(--desk-bg); color: var(--desk-text); color-scheme: light;
-  font-size: 13px; line-height: 1.45;
+  font-family: var(--desk-font); font-size: 14px; line-height: 1.5; font-variant-numeric: tabular-nums;
 }
+
 .client-workspace [hidden] { display: none !important; }
 .client-workspace :focus-visible { outline-color: var(--desk-accent); }
 .client-workspace a:hover { color: var(--desk-accent); }
-.client-workspace .client-rail { width: 180px; flex-basis: 180px; padding: 22px 14px; background: var(--desk-panel); border-color: var(--desk-rule); }
+.client-workspace .client-rail { width: 208px; flex-basis: 208px; padding: 22px 14px; background: var(--desk-panel); border-color: var(--desk-rule); }
 .client-workspace .client-brand { font-size: 12px; gap: 8px; margin-bottom: 30px; letter-spacing: .03em; }
 .client-workspace .client-brand span { color: var(--desk-accent); border-color: var(--desk-accent); }
 .client-workspace .client-rail nav a { padding: 8px 10px; color: var(--desk-muted); font-size: 12px; }
@@ -20,15 +22,15 @@
 .client-workspace .client-header { padding: 12px 24px; background: var(--desk-panel); border-color: var(--desk-rule); font-size: 12px; min-height: 48px; }
 .client-workspace .client-content { padding: 22px 24px; max-width: 1680px; }
 .client-workspace .ops-page-heading { margin-bottom: 16px; }
-.client-workspace .ops-page-heading h1 { font-size: 23px; font-weight: 500; letter-spacing: -.025em; }
+.client-workspace .ops-page-heading h1 { font-size: 28px; font-weight: 600; letter-spacing: -.025em; }
 .client-workspace .client-muted, .client-workspace .ops-context, .client-workspace .ops-facts dt,
 .client-workspace .ops-panel p, .client-workspace .client-inline-facts, .client-workspace .ops-toolbar label { color: var(--desk-muted); }
-.client-workspace .ops-panel { background: var(--desk-panel); border-color: var(--desk-rule); padding: 16px; margin-bottom: 16px; }
+.client-workspace .ops-panel { background: var(--desk-panel); border-color: var(--desk-rule); padding: 22px; margin-bottom: 20px; border-radius: 10px; }
 .client-workspace .ops-panel-heading { gap: 10px; margin-bottom: 10px; }
-.client-workspace .ops-panel h2 { font-size: 13px; font-weight: 600; letter-spacing: .01em; }
+.client-workspace .ops-panel h2 { font-size: 16px; font-weight: 600; letter-spacing: .01em; }
 .client-workspace .ops-panel h3 { font-size: 13px; }
 .client-workspace .ops-panel .ops-status-title { color: var(--desk-text); }
-.client-workspace .client-badge { color: var(--desk-muted); border-color: var(--desk-rule); font-size: 10px; }
+.client-workspace .client-badge { color: var(--desk-muted); border-color: var(--desk-rule); font-size: 12px; }
 .client-workspace .client-status-summary { padding: 10px 14px; }
 .client-workspace .client-status-summary .ops-status-title { font-size: 13px; }
 .client-workspace .client-exception { margin-top: 5px; font-size: 12px; }
@@ -39,59 +41,59 @@
 .client-workspace .ops-toolbar { margin: 14px 0; gap: 10px; }
 .client-workspace .ops-toolbar input, .client-workspace select {
   color: var(--desk-text); background: var(--desk-panel); border: 1px solid var(--desk-rule);
-  min-height: 32px; padding: 6px 9px; font: 12px 'IBM Plex Sans', sans-serif; max-width: 100%;
+  min-height: 32px; padding: 6px 9px; font: 12px var(--desk-font); max-width: 100%;
 }
 .client-workspace .ops-button { background: var(--desk-accent); border-color: var(--desk-accent); color: #fff; min-height: 32px; padding: 6px 12px; font-size: 12px; font-weight: 600; }
 .client-workspace .ops-button:hover { background: #1d478a; color: #fff; }
 .client-workspace .ops-text-link { color: var(--desk-muted); text-decoration: none; font-size: 12px; }
 .client-workspace .client-period-presets { display: flex; gap: 2px; padding-bottom: 1px; }
-.client-workspace .client-period-presets a { font: 11px 'IBM Plex Mono', monospace; color: var(--desk-muted); padding: 7px 8px; }
+.client-workspace .client-period-presets a { font: 12px var(--desk-font); color: var(--desk-muted); padding: 7px 8px; }
 .client-workspace .client-period-presets a:hover { background: var(--desk-hover); color: var(--desk-accent); }
-.client-workspace .ops-context { font-size: 11px; justify-content: space-between; }
+.client-workspace .ops-context { font-size: 12px; justify-content: space-between; }
 .client-workspace .ops-context strong { color: var(--desk-warning); font-weight: 500; }
 .client-workspace .client-kpis { background: var(--desk-panel); border-color: var(--desk-rule); margin: 10px 0 16px; }
 .client-workspace .client-kpis > div { padding: 14px 18px; border-color: var(--desk-rule); }
-.client-workspace .client-kpis p { color: var(--desk-muted); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; margin-bottom: 6px; }
-.client-workspace .client-kpis strong { font: 500 clamp(20px, 2.1vw, 30px) 'IBM Plex Mono', monospace; letter-spacing: -.055em; }
-.client-workspace .client-kpis small { margin-top: 4px; font-size: 10px; color: var(--desk-muted); }
+.client-workspace .client-kpis p { color: var(--desk-muted); font-size: 12px; text-transform: none; letter-spacing: 0; margin-bottom: 6px; }
+.client-workspace .client-kpis strong { font: 600 30px var(--desk-font); letter-spacing: -.035em; }
+.client-workspace .client-kpis small { margin-top: 4px; font-size: 12px; color: var(--desk-muted); }
 .client-workspace [data-sign=positive] { color: var(--desk-positive); }
 .client-workspace [data-sign=negative] { color: var(--desk-negative); }
-.client-workspace .client-overview-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 16px; }
+.client-workspace .client-overview-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr); gap: 16px; }
 .client-workspace .client-overview-grid > .ops-panel { min-width: 0; }
 .client-workspace .ops-table { font-size: 12px; }
 .client-workspace .ops-table th, .client-workspace .ops-table td { padding: 8px; border-color: var(--desk-rule); }
-.client-workspace .ops-table th { font-size: 10px; color: var(--desk-muted); letter-spacing: .04em; font-weight: 500; }
+.client-workspace .ops-table th { font-size: 12px; color: var(--desk-muted); letter-spacing: .04em; font-weight: 500; }
 .client-workspace .ops-table tbody tr:hover { background: var(--desk-hover); }
-.client-workspace .client-number { font-family: 'IBM Plex Mono', monospace; text-align: right !important; white-space: nowrap; }
-.client-workspace .client-row-dates { display: block; color: var(--desk-muted); font-size: 9px; white-space: nowrap; margin-top: 4px; }
-.client-workspace .client-data-issues { color: var(--desk-warning); font-size: 11px; margin: -4px 0 14px; }
+.client-workspace .client-number { font-family: var(--desk-font); text-align: right !important; white-space: nowrap; }
+.client-workspace .client-row-dates { display: block; color: var(--desk-muted); font-size: 12px; white-space: nowrap; margin-top: 4px; }
+.client-workspace .client-data-issues { color: var(--desk-warning); font-size: 12px; margin: -4px 0 14px; }
 .client-workspace .client-data-issues ul { color: var(--desk-muted); max-height: 240px; overflow: auto; }
-.client-workspace .client-source-delay { color: var(--desk-warning); font-size: 11px; margin: 0 0 12px; }
+.client-workspace .client-source-delay { color: var(--desk-warning); font-size: 12px; margin: 0 0 12px; }
 .client-workspace .client-method-note { position: relative; width: fit-content; cursor: help; border-bottom: 1px dotted var(--desk-muted); }
 .client-workspace .client-method-note [role="tooltip"] { display: none; position: absolute; right: 0; top: 100%; z-index: 5; width: 260px; max-width: 65vw; padding: 10px; background: var(--desk-panel); border: 1px solid var(--desk-rule); color: var(--desk-text); line-height: 1.5; box-shadow: 0 3px 12px #142d4e18; }
 .client-workspace .client-method-note:hover [role="tooltip"], .client-workspace .client-method-note:focus [role="tooltip"] { display: block; }
-.client-workspace .client-movement { font-size: 9px; color: var(--desk-muted); border: 1px solid var(--desk-rule); padding: 1px 3px; cursor: help; }
-.client-workspace .client-details, .client-workspace .client-details p { font-size: 11px; }
+.client-workspace .client-movement { font-size: 12px; color: var(--desk-muted); border: 1px solid var(--desk-rule); padding: 1px 3px; cursor: help; }
+.client-workspace .client-details, .client-workspace .client-details p { font-size: 12px; }
 .client-workspace .client-details > summary { color: var(--desk-muted); }
-.client-workspace .client-inline-facts { font-size: 11px; gap: 6px 18px; margin: 8px 0; }
-.client-workspace .client-inline-facts strong { color: var(--desk-text); font-family: 'IBM Plex Mono', monospace; }
+.client-workspace .client-inline-facts { font-size: 12px; gap: 6px 18px; margin: 8px 0; }
+.client-workspace .client-inline-facts strong { color: var(--desk-text); font-family: var(--desk-font); }
 .client-workspace .client-performance-grid { gap: 16px; }
 .client-workspace .client-months { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
 .client-workspace .client-months > span { border: 1px solid var(--desk-rule); padding: 5px 8px; min-width: 82px; }
-.client-workspace .client-months small { display: block; color: var(--desk-muted); font-size: 9px; }
-.client-workspace .client-months strong { font: 500 11px 'IBM Plex Mono', monospace; }
-.client-workspace .client-benchmark-line { border-color: var(--desk-rule); font-size: 11px; padding-top: 9px; }
-.client-workspace .client-chart-body { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 10px; height: 180px; }
-.client-workspace .client-y-axis { position: relative; min-width: 60px; font: 11px 'IBM Plex Mono', monospace; color: var(--desk-muted); }
+.client-workspace .client-months small { display: block; color: var(--desk-muted); font-size: 12px; }
+.client-workspace .client-months strong { font: 500 14px var(--desk-font); }
+.client-workspace .client-benchmark-line { border-color: var(--desk-rule); font-size: 12px; padding-top: 9px; }
+.client-workspace .client-chart-body { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 10px; height: 230px; }
+.client-workspace .client-y-axis { position: relative; min-width: 60px; font: 12px var(--desk-font); color: var(--desk-muted); }
 .client-workspace .client-y-axis span { display: block; position: absolute; right: 0; transform: translateY(-50%); white-space: nowrap; }
-.client-workspace .client-nav-chart { display: block; width: 100%; height: 180px; overflow: visible; }
+.client-workspace .client-nav-chart { display: block; width: 100%; height: 230px; overflow: visible; }
 .client-workspace .client-chart-grid { stroke: var(--desk-rule); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .client-workspace .client-chart-zero { stroke: #8292a4; stroke-width: 1; vector-effect: non-scaling-stroke; }
-.client-workspace .client-chart-line { fill: none; stroke: var(--desk-accent); stroke-width: 2; }
+.client-workspace .client-chart-line { fill: none; stroke: var(--desk-accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .client-workspace .client-chart-point { fill: var(--desk-accent); opacity: 0; }
 .client-workspace .client-chart-point[data-isolated=true], .client-workspace .client-chart-point:hover { opacity: 1; }
-.client-workspace .client-chart-dates { font: 10px 'IBM Plex Mono', monospace; color: var(--desk-muted); padding-left: 70px; gap: 8px; margin-top: 5px; }
-.client-workspace .client-chart-empty { display: grid; place-items: center; min-height: 180px; color: var(--desk-muted); font-size: 12px; }
+.client-workspace .client-chart-dates { font: 12px var(--desk-font); color: var(--desk-muted); padding-left: 70px; gap: 8px; margin-top: 5px; }
+.client-workspace .client-chart-empty { display: grid; place-items: center; min-height: 230px; color: var(--desk-muted); font-size: 12px; }
 .client-workspace .client-bar[data-sign=positive] { fill: var(--desk-positive); }
 .client-workspace .client-bar[data-sign=negative] { fill: var(--desk-negative); }
 .client-workspace .client-bar:hover { opacity: .7; }
@@ -100,13 +102,13 @@
 .client-workspace .client-daily-controls { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .client-workspace .client-daily-controls select { min-width: 130px; max-width: 330px; width: 100%; }
 .client-workspace .client-unit-toggle { display: flex; border: 1px solid var(--desk-rule); }
-.client-workspace .client-unit-toggle button { border: 0; background: transparent; color: var(--desk-muted); font: 12px 'IBM Plex Mono', monospace; cursor: pointer; padding: 6px 12px; min-height: 30px; }
+.client-workspace .client-unit-toggle button { border: 0; background: transparent; color: var(--desk-muted); font: 12px var(--desk-font); cursor: pointer; padding: 6px 12px; min-height: 30px; }
 .client-workspace .client-unit-toggle button[aria-pressed=true] { background: var(--desk-hover); color: var(--desk-accent); }
 .client-workspace .client-daily-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(260px, 1fr); gap: 20px; }
 .client-workspace .client-daily-table-wrap { max-height: 204px; overflow: auto; border-left: 1px solid var(--desk-rule); padding-left: 12px; }
 .client-workspace .client-daily-table thead { position: sticky; top: 0; background: var(--desk-panel); z-index: 1; }
-.client-workspace .client-daily-table td { font-size: 11px; padding: 6px 8px; }
-.client-workspace .client-evidence-strip { display: flex; justify-content: space-between; gap: 12px; font-size: 10px; color: var(--desk-muted); padding: 12px 0; border-top: 1px solid var(--desk-rule); }
+.client-workspace .client-daily-table td { font-size: 12px; padding: 6px 8px; }
+.client-workspace .client-evidence-strip { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--desk-muted); padding: 12px 0; border-top: 1px solid var(--desk-rule); }
 .client-workspace .client-event { border-color: var(--desk-rule); padding: 8px 0; }
 .client-workspace .client-event > summary { font-size: 12px; }
 .client-workspace .client-event-time { color: var(--desk-muted); }
@@ -122,24 +124,23 @@
 .client-workspace .client-bridge .client-bridge-total { color: var(--desk-text); border-color: var(--desk-rule); }
 .client-workspace .ops-note { background: var(--desk-hover); color: var(--desk-muted); }
 .client-workspace .ops-code { background: var(--desk-bg); color: var(--desk-text); }
-.client-workspace .client-switch a { color: var(--desk-accent); }
 .client-workspace .client-unit-toggle button:disabled { color: var(--desk-muted); cursor: not-allowed; opacity: .65; }
-.client-workspace .client-chart-basis { color: var(--desk-muted); font-size: 11px; margin: -3px 0 8px; }
-.client-workspace .client-missing-reason { display: block; color: var(--desk-warning); font-size: 11px; margin-top: 8px; }
+.client-workspace .client-chart-basis { color: var(--desk-muted); font-size: 12px; margin: -3px 0 8px; }
+.client-workspace .client-missing-reason { display: block; color: var(--desk-warning); font-size: 12px; margin-top: 8px; }
 .client-workspace .client-schedule { margin: 16px 0; }
 .client-workspace .client-schedule > .ops-panel-heading h2 { margin: 0; font-size: 13px; }
-.client-workspace .client-schedule > .ops-panel-heading > span { font-size: 11px; }
+.client-workspace .client-schedule > .ops-panel-heading > span { font-size: 12px; }
 .client-workspace .client-schedule-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .client-workspace .client-schedule-card { min-width: 0; margin: 0; padding: 14px; }
 .client-workspace .client-schedule-card h3 { margin: 0 0 6px; overflow-wrap: anywhere; }
-.client-workspace .client-schedule-status { font-size: 11px; color: var(--desk-muted); }
+.client-workspace .client-schedule-status { font-size: 12px; color: var(--desk-muted); }
 .client-workspace .client-schedule-status[data-severity=red] { color: var(--desk-negative); }
 .client-workspace .client-schedule-status[data-severity=yellow] { color: var(--desk-warning); }
 .client-workspace .client-schedule-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); list-style: none; padding: 0; margin: 12px 0; }
 .client-workspace .client-schedule-steps li { margin: 0; min-width: 0; padding-right: 10px; }
 .client-workspace .client-schedule-steps li + li { border-left: 1px solid var(--desk-rule); padding-left: 12px; }
-.client-workspace .client-schedule-steps span { display: block; color: var(--desk-muted); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
-.client-workspace .client-schedule-steps time { font: 11px/1.6 'IBM Plex Mono', monospace; overflow-wrap: anywhere; }
+.client-workspace .client-schedule-steps span { display: block; color: var(--desk-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
+.client-workspace .client-schedule-steps time { font: 11px/1.6 var(--desk-font); overflow-wrap: anywhere; }
 @media (max-width: 1180px) {
   .client-workspace .client-overview-grid { grid-template-columns: 1fr; }
   .client-workspace .client-daily-grid { grid-template-columns: minmax(0, 1.3fr) minmax(230px, 1fr); }
@@ -166,4 +167,100 @@
   .client-workspace .client-daily-table tr { display: table-row; }
   .client-workspace .client-daily-table th, .client-workspace .client-daily-table td { display: table-cell; }
   .client-workspace .client-daily-table td::before { content: none; }
+}
+
+/* One type family across both workspaces, including numeric and legacy SVG text. */
+.client-workspace .client-value-panel .client-nav-chart { max-height: none; }
+.client-workspace button, .client-workspace input, .client-workspace select,
+.client-workspace .font-mono, .client-workspace .client-brand,
+.client-workspace .client-badge, .client-workspace .client-flow-heading,
+.client-workspace .ops-code, .client-workspace svg text { font-family: var(--desk-font); }
+.client-workspace .client-brand { font-weight: 600; letter-spacing: .015em; }
+.client-workspace .client-rail nav a { font-size: 14px; border-radius: 6px; margin-bottom: 3px; }
+.client-workspace .client-rail nav a[aria-current=page] { background: #eef3f8; font-weight: 600; }
+.client-workspace .client-header { min-height: 60px; }
+.client-workspace .client-content { padding: 28px 32px; }
+.client-workspace .client-kpis { border-radius: 10px; overflow: visible; }
+.client-workspace .client-kpis > div { padding: 20px 22px; }
+.client-workspace .client-kpis p { font-size: 13px; }
+.client-workspace .ops-table th { text-transform: none; font-size: 12px; letter-spacing: 0; }
+.client-workspace .ops-table td { padding-top: 12px; padding-bottom: 12px; font-size: 13px; }
+.client-workspace .client-months > span { background: #f5f6f8; border: 0; border-radius: 6px; padding: 10px 14px; }
+.client-workspace .client-months > [data-sign=positive] { background: #edf6f0; }
+.client-workspace .client-months > [data-sign=negative] { background: #fcf0f0; }
+.client-workspace .client-months strong { font-size: 16px; }
+.client-workspace .client-chart-area { fill: var(--desk-accent); opacity: .055; }
+.client-workspace .client-chart-readout { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 16px; margin: 8px 0 18px; min-height: 26px; font-size: 13px; color: var(--desk-muted); }
+.client-workspace .client-chart-readout > strong { font-size: 20px; font-weight: 600; color: var(--desk-text); }
+.client-workspace .client-chart-readout > span { margin-left: auto; }
+.client-workspace .client-chart-grid { stroke-dasharray: 3 5; opacity: .8; }
+.client-workspace .client-unit-toggle { border-radius: 6px; overflow: hidden; flex-shrink: 0; }
+.client-workspace .ops-toolbar input, .client-workspace select, .client-workspace .ops-button { border-radius: 6px; }
+.client-workspace .client-allocation { display: flex; align-items: center; gap: 24px; min-height: 230px; }
+.client-workspace .client-donut { width: 156px; height: 156px; flex: 0 0 156px; }
+.client-workspace .client-donut-count { font-size: 22px; font-weight: 600; fill: var(--desk-text); }
+.client-workspace .client-donut-label { font-size: 10px; fill: var(--desk-muted); }
+.client-workspace .client-allocation-legend { list-style: none; margin: 0; padding: 0; flex: 1; min-width: 0; }
+.client-workspace .client-allocation-legend li { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--desk-rule); font-size: 13px; }
+.client-workspace .client-allocation-legend strong { font-weight: 500; }
+.client-workspace .client-allocation-legend small { display: block; font-size: 12px; color: var(--desk-muted); }
+.client-workspace .client-allocation-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; }
+.client-workspace .client-allocation-value { text-align: right; margin-left: auto; white-space: nowrap; }
+.client-workspace .client-allocation-basis { font-size: 12px; color: var(--desk-muted); margin-top: 8px; }
+.client-workspace .client-state-label { color: var(--desk-muted); font-size: 12px; font-weight: 500; }
+.client-workspace .client-state-label[data-severity=green] { color: var(--desk-positive); }
+.client-workspace .client-state-label[data-severity=yellow] { color: var(--desk-warning); }
+.client-workspace .client-state-label[data-severity=red] { color: var(--desk-negative); }
+.client-workspace .client-flow-position { background: #f4f7fa; border-radius: 6px; padding: 12px 16px; margin: 20px 0; }
+.client-workspace .client-flow-position > span { display: block; font-size: 12px; color: var(--desk-muted); }
+.client-workspace .client-flow-position > strong { display: block; font-size: 16px; font-weight: 600; }
+.client-workspace .client-flow-position p { font-size: 13px; margin: 4px 0 0; }
+.client-workspace .client-flow-heading { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 13px; margin: 14px 0; }
+.client-workspace .client-pod-flow { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; margin: 0 0 24px; padding: 0; list-style: none; }
+.client-workspace .client-pod-flow li { position: relative; min-width: 0; border: 0; border-top: 2px solid var(--desk-rule); padding: 0; background: #f8f9fb; border-radius: 0 0 6px 6px; }
+.client-workspace .client-pod-flow li::after, .client-workspace .client-pod-flow strong::before { content: none !important; }
+.client-workspace .client-pod-flow a { color: inherit; text-decoration: none; display: block; padding: 12px 10px; height: 100%; }
+.client-workspace .client-pod-flow a:hover { background: #edf2f8; }
+.client-workspace .client-pod-flow strong, .client-workspace .client-pod-flow small, .client-workspace .client-pod-flow time { display: block; }
+.client-workspace .client-pod-flow strong { font-size: 13px; font-weight: 600; margin: 4px 0; }
+.client-workspace .client-pod-flow small, .client-workspace .client-pod-flow time { font-size: 12px; }
+.client-workspace .client-pod-flow time { color: var(--desk-muted); margin-top: 8px; }
+.client-workspace .client-step-number { font-size: 12px; opacity: .65; }
+.client-workspace .client-pod-flow [data-focus=true] { outline: 2px solid var(--desk-accent); outline-offset: 2px; }
+.client-workspace .client-current-step { color: var(--desk-accent); font-weight: 600; margin-top: 6px; }
+.client-workspace .client-previous-cycle { color: var(--desk-warning); margin-top: 6px; }
+.client-workspace .client-strategy-body { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.1fr) minmax(0, .9fr); gap: 24px; }
+.client-workspace .client-strategy-body h3 { font-size: 14px; font-weight: 600; margin: 0 0 12px; }
+.client-workspace .client-stage-detail, .client-workspace .client-freshness-item { border-top: 1px solid var(--desk-rule); padding: 12px 0; scroll-margin-top: 20px; }
+.client-workspace .client-stage-detail > summary, .client-workspace .client-freshness-item > summary { cursor: pointer; display: flex; justify-content: space-between; gap: 16px; font-size: 13px; }
+.client-workspace .client-stage-detail > summary::before, .client-workspace .client-freshness-item > summary::before { content: '+'; color: var(--desk-muted); }
+.client-workspace .client-stage-detail[open] > summary::before, .client-workspace .client-freshness-item[open] > summary::before { content: '−'; }
+.client-workspace .client-stage-detail > summary > span:first-child, .client-workspace .client-freshness-item > summary > span:first-child { margin-right: auto; }
+.client-workspace .client-stage-detail p, .client-workspace .client-freshness-item p, .client-workspace .client-freshness-gate p { font-size: 13px; margin: 10px 0; }
+.client-workspace .client-freshness-gate { border-left: 2px solid var(--desk-rule); padding: 8px 12px; margin-bottom: 12px; font-size: 13px; }
+.client-workspace .client-freshness-gate[data-severity=red] { border-color: var(--desk-negative); }
+.client-workspace .client-freshness-gate[data-severity=yellow] { border-color: var(--desk-warning); }
+.client-workspace .client-holdings-allocation { margin-top: 0; }
+.client-workspace .client-holdings-allocation .client-allocation { flex-direction: column; align-items: stretch; gap: 8px; }
+.client-workspace .client-holdings-allocation .client-donut { align-self: center; }
+.client-workspace .client-stage-detail h4 { font-size: 13px; font-weight: 600; margin: 16px 0 6px; }
+.client-workspace .client-stage-detail .ops-table { min-width: 360px; }
+.client-workspace .client-freshness-item > summary { overflow-wrap: anywhere; }
+.client-workspace .client-freshness-item > summary .client-state-label { max-width: 58%; text-align: right; }
+.client-workspace .client-holdings-allocation .client-allocation { min-height: 160px; }
+.client-workspace .client-holdings-allocation .client-donut { width: 120px; height: 120px; flex-basis: 120px; }
+.client-workspace .client-strategy-card { margin-top: 24px; }
+@media (max-width: 1200px) {
+  .client-workspace .client-allocation { gap: 14px; }
+  .client-workspace .client-donut { width: 120px; height: 120px; flex-basis: 120px; }
+  .client-workspace .client-pod-flow { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 1000px) {
+  .client-workspace .client-overview-grid, .client-workspace .client-strategy-body { grid-template-columns: 1fr; }
+}
+@media (max-width: 700px) {
+  .client-workspace .client-content { padding: 20px 16px; }
+  .client-workspace .client-pod-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .client-workspace .client-allocation { min-height: 180px; }
+  .client-workspace .client-chart-readout > span { margin-left: 0; }
 }

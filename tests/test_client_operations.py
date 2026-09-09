@@ -205,7 +205,7 @@ def test_compact_status_shows_red_reason_even_after_an_unranked_calendar_issue(m
     summary_dict["pod_row_dict_list"][0].update(session_calendar_id_str="UNKNOWN", required_action_dict={"severity_str": "red", "detail_str": "Rejected order"})
     summary_dict["as_of_timestamp_str"] = datetime.now(UTC).isoformat()
     monkeypatch.setattr(provider_obj, "get_summary_dict", lambda: summary_dict)
-    app_obj = create_app(provider_obj, read_only_bool=True, client_registry_dict=registry_dict)
+    app_obj = create_app(provider_obj, read_only_bool=True, client_registry_dict={**registry_dict, "clients": registry_dict["clients"][:1]})
     html_str = app_obj.test_client().get("/clients/demo-owner/strategies").get_data(as_text=True)
     banner_str = html_str.split('aria-label="Current client operations">', 1)[1].split('</section>', 1)[0]
     assert "Rejected order" in banner_str.split('<details', 1)[0]
@@ -253,7 +253,7 @@ def test_snapshot_requires_exact_schema_and_client(tmp_path, envelope_dict):
 def test_client_routes_keep_scope_and_dates_without_login(view_str):
     registry_dict, snapshot_dict, provider_obj, _ = fixture_tuple()
     app_obj = create_app(provider_obj, read_only_bool=True,
-                         client_registry_dict=registry_dict, client_reporting_snapshot_fn=lambda client_id_str: snapshot_dict[client_id_str])
+                         client_registry_dict={**registry_dict, "clients": registry_dict["clients"][:1]}, client_reporting_snapshot_fn=lambda client_id_str: snapshot_dict[client_id_str])
     app_obj.config["TESTING"] = True
     client_obj = app_obj.test_client()
     path_str = f"/clients/demo-owner/{view_str}?from=2026-06-01&to=2026-09-04"
@@ -270,7 +270,7 @@ def test_client_routes_keep_scope_and_dates_without_login(view_str):
 
 def test_financial_filter_never_changes_current_operations():
     registry_dict, snapshot_dict, provider_obj, _ = fixture_tuple()
-    app_obj = create_app(provider_obj, read_only_bool=True, client_registry_dict=registry_dict,
+    app_obj = create_app(provider_obj, read_only_bool=True, client_registry_dict={**registry_dict, "clients": registry_dict["clients"][:1]},
                          client_reporting_snapshot_fn=lambda client_id_str: snapshot_dict[client_id_str])
     client_obj = app_obj.test_client()
     result_list = [client_obj.get(f"/clients/demo-owner/diagnostics?from={from_str}&to=2026-09-04&download=json").get_json() for from_str in ("2026-06-01", "2026-09-01")]
@@ -281,7 +281,7 @@ def test_financial_filter_never_changes_current_operations():
 def test_unconfigured_ops_never_calls_provider_or_financial_loader():
     registry_dict, _, _, _ = fixture_tuple()
     registry_dict["clients"][0]["operations_source"] = "unconfigured"
-    app_obj = create_app(ForbiddenProvider(), read_only_bool=True, client_registry_dict=registry_dict,
+    app_obj = create_app(ForbiddenProvider(), read_only_bool=True, client_registry_dict={**registry_dict, "clients": registry_dict["clients"][:1]},
                          client_reporting_snapshot_fn=lambda client_id_str: pytest.fail("Operations must not read financial data"))
     response_obj = app_obj.test_client().get("/clients/demo-owner/diagnostics?from=2026-06-01&to=2026-09-04")
     assert response_obj.status_code == 200
@@ -303,7 +303,7 @@ def test_operations_accessible_on_mandate_day_without_financial_read(monkeypatch
             return AS_OF_TS
 
     monkeypatch.setattr("alpha.live.dashboard_v3.client_views.datetime", FixedDatetime)
-    app_obj = create_app(provider_obj, read_only_bool=True, client_registry_dict=registry_dict,
+    app_obj = create_app(provider_obj, read_only_bool=True, client_registry_dict={**registry_dict, "clients": registry_dict["clients"][:1]},
                          client_reporting_snapshot_fn=lambda client_id_str: pytest.fail("Operations must not read financial data"))
     rendered_period_list = []
     def capture_period(sender_obj, template, context, **extra_dict):
@@ -324,7 +324,7 @@ def test_diagnostics_preserves_nonblocking_next_cycle_source_warning(monkeypatch
     norgate_dict["sub_detail_str_list"] = ["Sync failed: next DecisionPlan needs review; token=PRIVATE"]
     summary_dict["as_of_timestamp_str"] = datetime.now(UTC).isoformat()
     monkeypatch.setattr(provider_obj, "get_summary_dict", lambda: summary_dict)
-    app_obj = create_app(provider_obj, read_only_bool=True, client_registry_dict=registry_dict)
+    app_obj = create_app(provider_obj, read_only_bool=True, client_registry_dict={**registry_dict, "clients": registry_dict["clients"][:1]})
     html_str = app_obj.test_client().get("/clients/demo-owner/diagnostics").get_data(as_text=True)
     assert "No action required" in html_str
     assert "Sync failed: next DecisionPlan needs review" in html_str
@@ -346,7 +346,7 @@ def test_visible_pod_flow_preserves_recorded_not_complete_fill_and_cycle_role(mo
     row_dict["lifecycle_step_dict_list"] = _build_lifecycle_step_dict_list(row_dict)
     summary_dict["as_of_timestamp_str"] = datetime.now(UTC).isoformat()
     monkeypatch.setattr(provider_obj, "get_summary_dict", lambda: summary_dict)
-    app_obj = create_app(provider_obj, read_only_bool=True, client_registry_dict=registry_dict)
+    app_obj = create_app(provider_obj, read_only_bool=True, client_registry_dict={**registry_dict, "clients": registry_dict["clients"][:1]})
     html_str = app_obj.test_client().get("/clients/demo-owner/strategies").get_data(as_text=True)
     card_str = html_str.split('<h2>Tactical allocation</h2>', 1)[1].split('</section>', 1)[0]
     flow_str = card_str.split('<ol class="client-pod-flow"', 1)[1].split('</ol>', 1)[0]
@@ -354,11 +354,14 @@ def test_visible_pod_flow_preserves_recorded_not_complete_fill_and_cycle_role(mo
     assert '<strong>Fill</strong><small>Recorded</small>' in flow_str
     assert '<strong>ACK</strong><small>Complete</small>' in flow_str
     assert '<strong>VPlan</strong><small>Submitted</small>' in flow_str
-    assert 'title="recorded ' in flow_str
+    assert '<time>' in flow_str
+    assert 'Stage details' in card_str
+    assert 'data-focus="true"' in flow_str
     assert 'Live vs Backtest' not in flow_str
     assert 'Live vs Backtest' in card_str.split('<details', 1)[1]
     assert flow_str.count('<li ') == 7
-    assert 'Next <strong>Post execution reconcile</strong>' in card_str
+    assert 'Saved next action' in card_str
+    assert 'Data freshness' in card_str
     assert ('Execution steps: previous cycle' in card_str) is (previous_role_str != "current")
     assert html_str.count('class="client-pod-flow"') == 2
 
@@ -369,9 +372,9 @@ def test_visible_pod_flow_does_not_invent_missing_stage_evidence(monkeypatch, st
     summary_dict["pod_row_dict_list"][0]["lifecycle_step_dict_list"] = stage_list
     summary_dict["as_of_timestamp_str"] = datetime.now(UTC).isoformat()
     monkeypatch.setattr(provider_obj, "get_summary_dict", lambda: summary_dict)
-    app_obj = create_app(provider_obj, read_only_bool=True, client_registry_dict=registry_dict)
+    app_obj = create_app(provider_obj, read_only_bool=True, client_registry_dict={**registry_dict, "clients": registry_dict["clients"][:1]})
     html_str = app_obj.test_client().get("/clients/demo-owner/strategies").get_data(as_text=True)
     flow_str = html_str.split('<ol class="client-pod-flow"', 1)[1].split('</ol>', 1)[0]
-    assert ('unverified' if stage_list and stage_list[0]["label_str"] == "ACK" else 'Flow unavailable') in flow_str
+    assert ('Unverified' if stage_list and stage_list[0]["label_str"] == "ACK" else 'Flow unavailable') in flow_str
     assert 'data-severity="gray"' in flow_str
     assert 'data-severity="green"' not in flow_str

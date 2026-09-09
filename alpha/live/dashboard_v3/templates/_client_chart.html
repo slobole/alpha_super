@@ -1,6 +1,9 @@
 {% macro financial_chart(chart_dict, label_str, bars_bool=false) -%}
 {% if chart_dict %}
 <div class="client-chart" data-unit="{{ chart_dict.unit_str }}" aria-label="{{ label_str }}">
+  {% set last_dict = chart_dict.point_list[-1] %}
+  <div class="client-chart-readout" aria-live="polite"><time data-chart-date>{{ last_dict.display_date_str }}</time><strong data-chart-value>{{ last_dict.label_str }}</strong><span>Daily <strong data-chart-pnl data-sign="{{ last_dict.pnl_sign_str }}">{{ last_dict.pnl_label_str }}</strong></span></div>
+  <script type="application/json" data-chart-points>{{ chart_dict.point_list|tojson }}</script>
   <div class="client-chart-body">
     <div class="client-y-axis" style="width:{{ chart_dict.tick_list|map(attribute='label_str')|map('length')|max }}ch" aria-label="{{ 'Percent' if chart_dict.unit_str == 'pct' else 'US dollars' }} axis">
       {% for tick_dict in chart_dict.tick_list %}<span style="top:{{ tick_dict.top_percent_float }}%" data-value="{{ tick_dict.value_float }}">{{ tick_dict.label_str }}</span>{% endfor %}
@@ -15,7 +18,7 @@
         {% else %}<rect class="client-bar" data-sign="{{ bar_dict.sign_str }}" data-value="{{ bar_dict.value_float }}" x="{{ bar_dict.x_float - bar_dict.width_float / 2 }}" y="{{ bar_dict.top_float }}" width="{{ bar_dict.width_float }}" height="{{ bar_dict.height_float }}"><title>{{ bar_dict.market_date_str }} · {{ bar_dict.label_str }}</title></rect>{% endif %}
         {% endfor %}
       {% else %}
-        {% for points_str in chart_dict.segment_list %}<polyline class="client-chart-line" points="{{ points_str }}" vector-effect="non-scaling-stroke"/>{% endfor %}
+        {% for points_str in chart_dict.segment_list %}{% if ' ' in points_str %}<polygon class="client-chart-area" points="{{ points_str.split(' ')[0].split(',')[0] }},{{ chart_dict.height_int }} {{ points_str }} {{ points_str.split(' ')[-1].split(',')[0] }},{{ chart_dict.height_int }}"/>{% endif %}<polyline class="client-chart-line" points="{{ points_str }}" vector-effect="non-scaling-stroke"/>{% endfor %}
         {% for point_dict in chart_dict.point_list %}<circle class="client-chart-point" data-isolated="{{ 'true' if point_dict.isolated_bool else 'false' }}" cx="{{ point_dict.x_float }}" cy="{{ point_dict.y_float }}" r="{{ 3 if point_dict.isolated_bool else 2 }}"><title>{{ point_dict.display_date_str }} · {{ point_dict.label_str }}</title></circle>{% endfor %}
       {% endif %}
     </svg>

@@ -23,7 +23,11 @@ def _axis_label_str(value_float, unit_str, span_float):
     return f"{sign_str}${abs(display_float):,.{precision_int}f}"
 
 
-def nav_chart_dict(daily_list, *, value_field_str="nav_float", unit_str="usd", bars_bool=False):
+def nav_chart_dict(daily_list, *, value_field_str="nav_float", unit_str="usd", bars_bool=False, daily_fact_list=None):
+    # *** CRITICAL *** retrospective exact-date annotation only; SOD baselines
+    # never inherit the day's subsequent P&L. No NAV differencing or filling.
+    pnl_by_date_dict = {row_dict.get("market_date_str"): row_dict.get("pnl_float")
+        for row_dict in (daily_list if daily_fact_list is None else daily_fact_list)}
     value_list = [row_dict.get(value_field_str) for row_dict in daily_list
         if row_dict.get(value_field_str) is not None and math.isfinite(row_dict[value_field_str])]
     if not value_list:
@@ -62,6 +66,9 @@ def nav_chart_dict(daily_list, *, value_field_str="nav_float", unit_str="usd", b
             "value_float": value_float, "market_date_str": date_str,
             "display_date_str": _display_date_str(date_str),
             "label_str": _axis_label_str(value_float, unit_str, min(span_float, .02 if unit_str == "pct" else 2))}
+        pnl_float = pnl_by_date_dict.get(date_str)
+        point_dict["pnl_label_str"] = f"{'-' if pnl_float < 0 else ''}${abs(pnl_float):,.2f}" if type(pnl_float) in {int, float} and math.isfinite(pnl_float) else "Unavailable"
+        point_dict["pnl_sign_str"] = "positive" if type(pnl_float) in {int, float} and pnl_float > 0 else "negative" if type(pnl_float) in {int, float} and pnl_float < 0 else "neutral"
         point_list.append(point_dict)
         current_list.append(f"{horizontal_float:.2f},{point_dict['y_float']:.2f}")
         if bars_bool:

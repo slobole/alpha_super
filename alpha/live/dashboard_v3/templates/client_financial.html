@@ -1,5 +1,6 @@
 {% extends 'client_layout.html' %}
 {% from '_client_chart.html' import financial_chart %}
+{% from '_client_allocation.html' import allocation_chart %}
 {% macro money(value_obj) -%}{% if value_obj is none %}—{% else %}{{ '-' if value_obj < 0 else '' }}${{ '{:,.2f}'.format(value_obj|abs) }}{% endif %}{%- endmacro %}
 {% block title %}{{ client_dict.display_name }}{% endblock %}
 {% block content %}
@@ -36,6 +37,7 @@
 {% elif view_str != 'performance' %}
 <section class="ops-panel client-value-panel"><div class="ops-panel-heading"><h2>Account value</h2><span class="client-muted">USD · includes transfers</span></div>{{ financial_chart(chart_dict, 'Account value (USD)') }}</section>
 {% endif %}
+{% if view_str == 'overview' %}<section class="ops-panel client-allocation-panel"><div class="ops-panel-heading"><h2>Portfolio allocation</h2></div>{{ allocation_chart(allocation_dict, 'Portfolio allocation') }}</section></div>{% endif %}
 {% if view_str != 'performance' %}
 <section class="ops-panel client-strategy-results"><div class="ops-panel-heading"><h2>Strategy results</h2><span class="client-muted">{{ report_dict.strategy_list|length }} strategies</span></div>
   <div class="client-table-scroll"><table class="ops-table"><thead><tr><th>Strategy</th><th class="client-number">Value</th><th class="client-number">P&amp;L</th><th class="client-number">Return</th><th>Data</th></tr></thead><tbody>
@@ -47,7 +49,7 @@
   </tr>{% else %}<tr><td colspan="5">No strategy valuation rows are available for these dates.</td></tr>{% endfor %}</tbody></table></div>
 </section>
 {% endif %}
-{% if view_str == 'overview' %}</div>{% endif %}
+
 {% if view_str == 'performance' %}
 <div class="ops-two-column client-performance-grid">
 {% for strategy_dict in report_dict.strategy_list %}{% set performance_dict = strategy_dict.performance_dict %}{% set benchmark_dict = strategy_dict.benchmark_dict %}
@@ -63,7 +65,7 @@
 </div>
 {% endif %}
 {% if daily_scope_list %}{% include '_client_daily.html' %}{% endif %}
-{% if view_str == 'overview' %}{% include '_client_activity.html' %}{% endif %}
+{% if view_str == 'overview' %}{% include '_client_schedule.html' %}{% include '_client_activity.html' %}{% endif %}
 {% if view_str == 'report' %}
 <details class="client-details"><summary>Balance details</summary><dl class="client-bridge"><dt>Starting value</dt><dd>{{ money(report_dict.opening_nav_float) }}</dd><dt>Net transfers and owner payments</dt><dd>{{ money(report_dict.capital_movement_float) }}</dd><dt>Broker adjustments</dt><dd>{{ money(report_dict.linking_adjustment_float) }}</dd><dt>Capital from strategies added / removed</dt><dd>{{ money(report_dict.scope_movement_float) }}</dd><dt>Profit / loss</dt><dd>{{ money(report_dict.pnl_float) }}</dd><dt class="client-bridge-total">Ending value</dt><dd class="client-bridge-total">{{ money(report_dict.closing_nav_float) }}</dd></dl></details>
 {% if report_dict.strategy_list|selectattr('benchmark_dict.status_str', 'equalto', 'ready')|list %}<section class="ops-panel"><h2>Market comparison</h2><div class="ops-two-column">{% for strategy_dict in report_dict.strategy_list %}{% set benchmark_dict = strategy_dict.benchmark_dict %}<div><h3>{{ strategy_dict.display_name_str }}</h3>{% if benchmark_dict.status_str == 'ready' %}<p>{{ benchmark_dict.label_str }} <strong>{{ benchmark_dict.return_float|percent }}</strong> · gap <strong>{{ '{:+.2f}'.format(benchmark_dict.difference_pp_float) }} pp</strong></p><small class="client-muted">{{ benchmark_dict.from_date_str }} → {{ benchmark_dict.to_date_str }}{% if benchmark_dict.is_demo_bool %} · Demo{% endif %}</small>{% else %}<span class="client-muted">Benchmark unavailable</span>{% endif %}</div>{% endfor %}</div></section>{% endif %}

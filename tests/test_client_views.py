@@ -96,6 +96,58 @@ def test_unknown_client_or_view_never_falls_back_to_another(financial_client_obj
     assert financial_client_obj.get("/clients/sample/shell").status_code == 404
 
 
+def test_single_client_entry_opens_overview_without_client_selection(financial_client_obj):
+    response_obj = financial_client_obj.get("/clients?from=2026-09-01&to=2026-09-01")
+    assert response_obj.status_code == 302
+    assert response_obj.location == "/clients/sample/overview?from=2026-09-01&to=2026-09-01"
+    response_obj = financial_client_obj.get("/", follow_redirects=True)
+    assert response_obj.status_code == 200
+    assert response_obj.request.path == "/clients/sample/overview"
+    html_str = response_obj.get_data(as_text=True)
+    assert ">Clients<" not in html_str and "Switch client" not in html_str
+
+
+@pytest.mark.parametrize("source_str", ["in_memory", "config_file"])
+def test_multiple_client_setup_is_rejected_before_evidence_reads(tmp_path, source_str):
+    import json
+
+    registry_dict, _ = build_demo_fixture_tuple()
+    argument_dict = {"client_registry_dict": registry_dict}
+    if source_str == "config_file":
+        config_path_obj = tmp_path / "clients.json"
+        config_path_obj.write_text(json.dumps(registry_dict), encoding="utf-8")
+        argument_dict = {"client_reporting_config_path_str": str(config_path_obj)}
+    client_obj = create_app(ForbiddenProvider(), read_only_bool=True,
+        client_reporting_snapshot_fn=lambda _: pytest.fail("Ambiguous client must not load financial evidence"),
+        **argument_dict).test_client()
+    for path_str in ("/clients", "/clients/demo-owner/overview", "/clients/demo-client/strategies",
+                     "/clients/demo-client/report?download=json"):
+        response_obj = client_obj.get(path_str)
+        assert response_obj.status_code == (200 if path_str == "/clients" else 503)
+        html_str = response_obj.get_data(as_text=True)
+        assert "exactly one configured client" in html_str
+        assert "Switch client" not in html_str and ">Clients<" not in html_str
+
+
+@pytest.mark.parametrize("invalid_str", ["encoding", "nonfinite"])
+def test_invalid_config_shows_setup_without_loading_evidence(tmp_path, invalid_str):
+    config_path_obj = tmp_path / "private-client-config.json"
+    argument_dict = {"client_reporting_config_path_str": str(config_path_obj)}
+    if invalid_str == "encoding":
+        config_path_obj.write_bytes(b"\xff")
+    else:
+        argument_dict = {"client_registry_dict": {"schema_version": 1, "clients": [client_config_dict()], "unused_float": float("nan")}}
+    client_obj = create_app(ForbiddenProvider(), read_only_bool=True,
+        client_reporting_snapshot_fn=lambda _: pytest.fail("Invalid config must not load evidence"),
+        **argument_dict).test_client()
+    for path_str in ("/clients", "/clients/sample/overview", "/clients/sample/report?download=json"):
+        response_obj = client_obj.get(path_str)
+        assert response_obj.status_code == (200 if path_str == "/clients" else 503)
+        html_str = response_obj.get_data(as_text=True)
+        assert "configuration could not be read or validated" in html_str
+        assert str(config_path_obj) not in html_str and "codec" not in html_str
+
+
 @pytest.mark.parametrize("from_str,to_str", [("2026-09-02", "2026-09-01"), ("2026-08-01", "2026-09-01"), ("20260901", "2026-09-01")])
 @pytest.mark.parametrize("view_str", ["overview", "activity", "report"])
 def test_invalid_period_preserves_client_dates_and_editable_form(financial_client_obj, from_str, to_str, view_str):
@@ -124,7 +176,7 @@ def test_owned_weekend_without_valuation_rows_does_not_claim_no_ownership(financ
 def test_client_pages_and_report_exports_do_not_require_login(financial_client_obj):
     for path_str in ("/clients", "/clients/sample/overview?from=2026-09-01&to=2026-09-01",
                      "/clients/sample/report?from=2026-09-01&to=2026-09-01&download=json"):
-        response_obj = financial_client_obj.get(path_str)
+        response_obj = financial_client_obj.get(path_str, follow_redirects=True)
         assert response_obj.status_code == 200
         assert "WWW-Authenticate" not in response_obj.headers
         assert response_obj.headers["Cache-Control"] == "no-store"
@@ -297,7 +349,7 @@ def test_operation_navigation_keeps_selection_not_its_today_default(monkeypatch,
     monkeypatch.setattr("alpha.live.dashboard_v3.client_views.datetime", FixedDatetime)
     registry_dict, snapshot_dict = build_demo_fixture_tuple()
     app_obj = create_app(DemoOperationsProvider(), read_only_bool=True, demo_mode_bool=True,
-        client_registry_dict=registry_dict,
+        client_registry_dict={**registry_dict, "clients": registry_dict["clients"][1:]},
         client_reporting_snapshot_fn=lambda client_id_str: snapshot_dict[client_id_str])
     client_obj = app_obj.test_client()
     for view_str in ("strategies", "diagnostics", "exposure", "activity"):

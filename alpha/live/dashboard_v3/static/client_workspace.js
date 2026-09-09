@@ -23,3 +23,44 @@ document.querySelectorAll('[data-account-panel]').forEach(panelObj => {
     });
   });
 });
+
+// The backend supplies every date/value. Pointer and keyboard only select a point.
+document.querySelectorAll('.client-chart').forEach(chartObj => {
+  const sourceObj = chartObj.querySelector('[data-chart-points]');
+  if (!sourceObj) return;
+  const pointList = JSON.parse(sourceObj.textContent);
+  const plotObj = chartObj.querySelector('svg');
+  let pointIndexInt = pointList.length - 1;
+  const showFn = indexInt => {
+    pointIndexInt = indexInt;
+    const pointObj = pointList[indexInt];
+    chartObj.querySelector('[data-chart-date]').textContent = pointObj.display_date_str;
+    chartObj.querySelector('[data-chart-value]').textContent = pointObj.label_str;
+    chartObj.querySelector('[data-chart-pnl]').textContent = pointObj.pnl_label_str;
+    chartObj.querySelector('[data-chart-pnl]').dataset.sign = pointObj.pnl_sign_str;
+  };
+  plotObj.tabIndex = 0;
+  plotObj.setAttribute('aria-label', plotObj.getAttribute('aria-label') + '. Use left and right arrows to inspect dates.');
+  plotObj.addEventListener('pointermove', eventObj => {
+    const boundsObj = plotObj.getBoundingClientRect();
+    const horizontalFloat = (eventObj.clientX - boundsObj.left) / boundsObj.width * plotObj.viewBox.baseVal.width;
+    let nearestInt = 0;
+    pointList.forEach((pointObj, indexInt) => {
+      if (Math.abs(pointObj.x_float - horizontalFloat) < Math.abs(pointList[nearestInt].x_float - horizontalFloat)) nearestInt = indexInt;
+    });
+    showFn(nearestInt);
+  });
+  plotObj.addEventListener('pointerleave', () => showFn(pointList.length - 1));
+  plotObj.addEventListener('keydown', eventObj => {
+    if (!['ArrowLeft', 'ArrowRight'].includes(eventObj.key)) return;
+    eventObj.preventDefault();
+    showFn(Math.max(0, Math.min(pointList.length - 1, pointIndexInt + (eventObj.key === 'ArrowLeft' ? -1 : 1))));
+  });
+});
+
+document.querySelectorAll('[data-flow-link]').forEach(linkObj => {
+  linkObj.addEventListener('click', () => {
+    const detailObj = document.getElementById(linkObj.hash.slice(1));
+    if (detailObj) detailObj.open = true;
+  });
+});

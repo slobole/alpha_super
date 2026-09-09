@@ -67,6 +67,9 @@ async function main() {
         assert.equal(await pageObj.locator('nav a[href^="/clients/local/"]').count(), 7);
         assert.equal(await pageObj.getByText('Switch client', { exact: true }).count(), 0);
         assert.equal(await pageObj.getByRole('link', { name: 'Clients', exact: true }).count(), 0);
+        for (const selectorStr of ['body', 'h1', '.client-brand', '.client-rail nav a']) {
+          assert((await pageObj.locator(selectorStr).first().evaluate(elementObj => getComputedStyle(elementObj).fontFamily)).includes('Segoe UI'), selectorStr);
+        }
         if (viewStr === 'overview' || viewStr === 'strategies') {
           const statusObj = await (await fetch(originStr + '/clients/local/diagnostics?download=json')).json();
           const summaryObj = pageObj.locator('.client-status-summary');
@@ -78,6 +81,28 @@ async function main() {
           }
         }
         if (viewStr === 'overview') {
+          const allocationReportObj = await (await fetch(originStr + `/clients/local/overview?${periodStr}&download=json`)).json();
+          const allocationReadyBool = allocationReportObj.closing_nav_float !== null;
+          assert.equal(await pageObj.locator('.client-allocation-panel .client-donut').count(), allocationReadyBool ? 1 : 0);
+          assert.equal(await pageObj.locator('.client-allocation-panel .client-allocation-legend li').count(), allocationReadyBool ? allocationReportObj.valuation_account_list.length : 0);
+          const axisObj = pageObj.locator('[data-account-panel] .client-chart:visible .client-y-axis');
+          const plotObj = pageObj.locator('[data-account-panel] .client-chart:visible svg');
+          if (await plotObj.count()) {
+            assert(Math.abs((await axisObj.boundingBox()).height - (await plotObj.boundingBox()).height) < 1, 'Chart axis must match plotted height');
+          } else {
+            assert(await pageObj.locator('[data-account-panel] .client-chart-empty:visible').isVisible());
+          }
+          if (expandedBool) {
+            const pnlObj = pageObj.locator('[data-account-panel] .client-chart:visible [data-chart-pnl]');
+            assert.equal(await pnlObj.innerText(), '-$25.00');
+            await plotObj.focus();
+            await plotObj.press('ArrowLeft');
+            assert.equal(await pnlObj.innerText(), '$60.00');
+            await plotObj.press('ArrowLeft');
+            assert.equal(await pnlObj.innerText(), 'Unavailable');
+            await plotObj.press('ArrowRight');
+            await plotObj.press('ArrowRight');
+          }
           const chartObj = pageObj.locator('[data-account-panel]');
           assert.equal(await chartObj.locator('[data-account-unit="pct"]').isEnabled(), expandedBool);
           if (expandedBool) {
@@ -144,6 +169,14 @@ async function main() {
           await dailyObj.locator('[data-daily-select]').selectOption('0');
         }
         if (viewStr === 'strategies') {
+          assert.equal(await pageObj.getByRole('heading', { name: 'Data freshness', exact: true }).count(), expandedBool ? 2 : 3);
+          assert.equal(await pageObj.locator('.client-holdings-allocation .client-donut').count(), 2);
+          const stageLinkObj = pageObj.locator('[data-flow-link]').filter({ hasText: 'ACK' }).first();
+          const targetStr = await stageLinkObj.getAttribute('href');
+          await stageLinkObj.click();
+          assert(await pageObj.locator(targetStr).evaluate(elementObj => elementObj.open));
+          assert(await pageObj.locator(targetStr).innerText().then(textStr => textStr.includes('Broker acknowledgements')));
+          await pageObj.locator(targetStr + ' > summary').click();
           assert.equal(await pageObj.locator('.client-pod-flow').count(), expandedBool ? 2 : 3);
           const flowObj = pageObj.locator('.client-pod-flow').first();
           assert((await flowObj.locator('li').count()) >= 7);

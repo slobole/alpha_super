@@ -66,8 +66,11 @@ def main() -> int:
         from alpha.live.dashboard_v3.demo import DemoOperationsProvider, build_demo_fixture_tuple
 
         registry_dict, snapshot_dict = build_demo_fixture_tuple()
+        # One client per VPS, including the synthetic preview and Advanced views.
+        registry_dict["clients"] = [client_dict for client_dict in registry_dict["clients"] if client_dict["client_id"] == "demo-client"]
+        snapshot_dict = {"demo-client": snapshot_dict["demo-client"]}
         flask_app_obj = create_app(
-            DemoOperationsProvider(), read_only_bool=True, demo_mode_bool=True,
+            DemoOperationsProvider(registry_dict), read_only_bool=True, demo_mode_bool=True,
             client_registry_dict=registry_dict,
             client_reporting_snapshot_fn=lambda client_id_str: snapshot_dict[client_id_str],
         )

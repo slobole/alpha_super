@@ -32,9 +32,10 @@ class DemoOperationsProvider:
 
     results_root_path_str = ".codex_tmp/nonexistent-demo-artifacts"
 
-    def __init__(self):
+    def __init__(self, registry_dict=None):
         self.row_list = []
-        registry_dict, _ = build_demo_fixture_tuple()
+        if registry_dict is None:
+            registry_dict, _ = build_demo_fixture_tuple()
         for client_dict in registry_dict["clients"]:
             for index_int, account_dict in enumerate(client_dict["accounts"]):
                 severity_str = "yellow" if client_dict["client_id"] == "demo-client" and index_int == 3 else "green"
@@ -97,7 +98,7 @@ def build_demo_fixture_tuple():
     client_list, snapshot_dict = [], {}
     for client_index_int, (client_id_str, display_name_str, strategy_name_list) in enumerate([
         ("demo-owner", "DEMO - Operator's book", ["Tactical allocation", "Nasdaq momentum"]),
-        ("demo-client", "DEMO - Additional client", ["Tactical allocation", "Nasdaq momentum", "Defensive rotation", "Equity mean reversion"]),
+        ("demo-client", "DEMO - Client portfolio", ["Tactical allocation", "Nasdaq momentum", "Defensive rotation", "Equity mean reversion"]),
     ]):
         client_dict = {
             "client_id": client_id_str, "display_name": display_name_str, "base_currency": "USD",

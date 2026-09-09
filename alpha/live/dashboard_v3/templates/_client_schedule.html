@@ -1,0 +1,19 @@
+{% if operations_dict.strategy_list and view_str in ['overview', 'strategies'] %}
+<section class="client-schedule" aria-label="Trading schedule">
+  <div class="ops-panel-heading"><h2>Trading schedule</h2><span class="client-muted">Scheduled times · New York</span></div>
+  <div class="client-schedule-grid">
+  {% for strategy_dict in operations_dict.strategy_list %}<article class="ops-panel client-schedule-card" data-pod="{{ strategy_dict.pod_id_str }}">
+    <h3>{{ strategy_dict.display_name_str }}</h3>
+    {% for window_dict in strategy_dict.trading_window_list %}
+    <div class="client-schedule-status" data-severity="{{ window_dict.severity_str }}">{{ window_dict.status_label_str }}</div>
+    <ol class="client-schedule-steps">
+      {% for label_str, timestamp_str in [('Signal', window_dict.signal_timestamp_str), ('Submit', window_dict.submission_timestamp_str), ('Execute', window_dict.target_timestamp_str)] %}
+      <li><span>{{ label_str }}</span><time {% if timestamp_str %}datetime="{{ timestamp_str }}"{% endif %}>{{ (timestamp_str|clock) or '—' }}</time></li>
+      {% endfor %}
+    </ol>
+    <details class="client-details" {% if window_dict.severity_str in ['red', 'yellow'] %}open{% endif %}><summary>Details</summary><p>{{ window_dict.detail_str }}</p></details>
+    {% endfor %}
+  </article>{% endfor %}
+  </div>
+</section>
+{% endif %}

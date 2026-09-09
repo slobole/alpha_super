@@ -1,21 +1,11 @@
 {% extends 'client_layout.html' %}
 {% block content %}
 <div class="ops-page-heading">
-  <h1>Clients</h1>
+  <h1>Workspace setup</h1>
 </div>
 {% if error_str %}
 <section class="ops-panel"><h2>Reporting setup needed</h2><p>{{ error_str }}</p>
 <p>Configure the client identity, mandate start, currency and dated account-to-strategy mapping. Keep retired strategies in the history. No client or inception date is guessed.</p>
 <p>Operational monitoring is still available under <a class="ops-text-link" href="/vps">This VPS · operations</a>.</p></section>
 {% endif %}
-<div class="ops-two-column">
-{% for candidate_dict in client_list %}
-<a class="ops-panel client-card" href="{{ url_for('clients.client_route_fn', client_id_str=candidate_dict.client_id) }}">
-  <p class="ops-eyebrow">{{ candidate_dict.base_currency }} · mandate {{ candidate_dict.mandate_start_date }}</p>
-  <h2>{{ candidate_dict.display_name }}</h2>
-  <p>{{ candidate_dict.accounts|length }} strategy periods</p>
-  <span class="ops-text-link">Open client →</span>
-</a>
-{% endfor %}
-</div>
 {% endblock %}

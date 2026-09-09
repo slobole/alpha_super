@@ -15,7 +15,7 @@ from test_dashboard_operator_access import ForbiddenProvider
 def render_schedule_str(operations_dict):
     app_obj = create_app(ForbiddenProvider(), read_only_bool=True)
     with app_obj.test_request_context():
-        return render_template('_client_operations_summary.html', operations_dict=operations_dict, view_str='overview')
+        return render_template('_client_schedule.html', operations_dict=operations_dict, view_str='overview')
 
 
 def test_each_strategy_retains_its_independent_schedule_and_exact_timestamps():

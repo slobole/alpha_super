@@ -12,7 +12,6 @@
   <aside class="client-rail">
     <a class="client-brand" href="/"><span>A</span> ALPHA / OPS</a>
     <nav aria-label="Workspace">
-      {% if not local_workspace_bool %}<a href="/clients" {% if not client_dict %}aria-current="page"{% endif %}>Clients</a>{% endif %}
       {% if client_dict %}
         {% for key_str, label_str in [('overview', 'Overview'), ('performance', 'Performance'), ('strategies', 'Strategies'), ('exposure', 'Exposure'), ('activity', 'Activity'), ('diagnostics', 'Diagnostics'), ('report', 'Investor report')] %}
         <a href="{{ url_for('clients.financial_route_fn', client_id_str=client_dict.client_id, view_str=key_str, **client_period_query_dict) }}" {% if view_str == key_str %}aria-current="page"{% endif %}>{{ label_str }}</a>
@@ -26,7 +25,6 @@
     <header class="client-header">
       <span>{% if client_dict %}{{ client_dict.display_name }} <span class="client-muted">/ LIVE / {{ client_dict.base_currency }}</span>{% else %}Client workspace{% endif %}</span>
       <span class="client-badge">{{ 'Read-only' if read_only_bool else 'Actions enabled' }}</span>
-      {% if client_dict and not local_workspace_bool %}<details class="client-switch"><summary>Switch client</summary>{% for candidate_dict in client_list %}<a href="{{ url_for('clients.client_route_fn', client_id_str=candidate_dict.client_id) }}">{{ candidate_dict.display_name }}</a>{% endfor %}</details>{% endif %}
     </header>
     <main class="client-content">{% block content %}{% endblock %}</main>
   </div>

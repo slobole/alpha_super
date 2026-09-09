@@ -7,6 +7,7 @@ Only server-configured paths/identities can select financial sources.
 from datetime import UTC, date, datetime, timedelta
 from io import BytesIO
 import json
+import sqlite3
 from zipfile import ZipFile, ZIP_DEFLATED
 from zoneinfo import ZoneInfo
 
@@ -25,6 +26,7 @@ from alpha.live.dashboard_v3.client_operations import (
 from alpha.live.dashboard_v3.operator_tools import redact_diagnostic_value, strategy_display_name_str
 from alpha.live.dashboard_v3.client_comparison import saved_comparison_dict
 from alpha.live.dashboard_v3.client_charts import daily_history_list, nav_chart_dict
+from alpha.live.dashboard_v3.client_presentation import portfolio_allocation_dict, holdings_allocation_dict, flow_dict, saved_stage_table_dict
 from alpha.live.dashboard_v3.client_financial_display import capital_day_key_set, financial_dates_dict, summarized_issue_list
 from alpha.live.dashboard_v3.local_workspace import (
     LocalReportingError, build_local_workspace_dict, validate_local_bindings_unchanged,
@@ -85,6 +87,24 @@ def _operations_dict(client_dict, as_of_ts):
     return result_dict
 
 
+def _strategy_display_list(operations_dict):
+    result_list = []
+    for strategy_dict in operations_dict["strategy_list"]:
+        table_dict = {}
+        if operations_dict["source_str"] == "local" and strategy_dict["matched_bool"]:
+            try:
+                detail_dict = current_app.config["data_provider_obj"].get_pod_detail_dict(strategy_dict["pod_id_str"])
+                table_dict = saved_stage_table_dict(detail_dict, strategy_dict, local_workspace_bool=local_workspace_bool())
+            except (OSError, ValueError, KeyError, TypeError, AttributeError, sqlite3.Error):
+                # A missing/replaced detail never hides the saved flow or triggers
+                # an alternate source, broker request or trading action.
+                table_dict = {}
+        result_list.append({**strategy_dict, "stage_table_dict": table_dict,
+            "flow_dict": flow_dict(strategy_dict["evidence_dict"], source_fresh_bool=operations_dict["source_fresh_bool"]),
+            "allocation_dict": holdings_allocation_dict(strategy_dict["evidence_dict"])})
+    return result_list
+
+
 def _query_dict():
     if set(request.args) - {"from", "to", "window", "download", "expected"} or any(len(request.args.getlist(key_str)) != 1 for key_str in request.args):
         abort(400)
@@ -109,11 +129,15 @@ def _activity_dict(client_dict, from_str, to_str):
 def _registry_dict():
     registry_dict = current_app.config.get("client_registry_dict")
     if registry_dict is not None:
-        return validate_client_registry_dict(registry_dict)
-    config_path_str = current_app.config.get("client_reporting_config_path_str")
-    if not config_path_str:
-        return {"schema_version": 1, "clients": [_local_workspace_dict()["client_dict"]]}
-    return load_client_registry_dict(config_path_str)
+        registry_dict = validate_client_registry_dict(registry_dict)
+    else:
+        config_path_str = current_app.config.get("client_reporting_config_path_str")
+        if not config_path_str:
+            return {"schema_version": 1, "clients": [_local_workspace_dict()["client_dict"]]}
+        registry_dict = load_client_registry_dict(config_path_str)
+    if len(registry_dict["clients"]) != 1:
+        raise ClientReportingError("This VPS must have exactly one configured client.")
+    return registry_dict
 
 
 def local_strategy_name_str(row_dict):
@@ -212,9 +236,10 @@ def directory_route_fn():
         return redirect(url_for("clients.financial_route_fn", client_id_str="local", view_str="overview", **_query_dict()))
     try:
         registry_dict = _registry_dict()
-    except ClientReportingError as exception_obj:
-        return render_template("client_directory.html", client_list=[], error_str=str(exception_obj)), 200
-    return render_template("client_directory.html", client_list=registry_dict["clients"], error_str=None)
+    except (ClientReportingError, ValueError) as exception_obj:
+        error_str = str(exception_obj) if isinstance(exception_obj, ClientReportingError) else "Client reporting configuration could not be read or validated."
+        return render_template("client_directory.html", client_list=[], error_str=error_str), 200
+    return redirect(url_for("clients.financial_route_fn", client_id_str=registry_dict["clients"][0]["client_id"], view_str="overview", **_query_dict()))
 
 
 @client_blueprint_obj.get("/clients/<client_id_str>")
@@ -227,9 +252,15 @@ def financial_route_fn(client_id_str, view_str):
     _query_dict()
     if view_str not in {"overview", "performance", "report"} | OPERATION_VIEW_SET:
         abort(404)
-    client_dict = None
     try:
         registry_dict = _registry_dict()
+    except (ClientReportingError, ValueError) as exception_obj:
+        error_str = str(exception_obj) if isinstance(exception_obj, ClientReportingError) else "Client reporting configuration could not be read or validated."
+        if request.args.get("download"):
+            return Response(error_str, status=503)
+        return render_template("client_directory.html", client_list=[], error_str=error_str), 503
+    client_dict = None
+    try:
         client_dict = next((candidate_dict for candidate_dict in registry_dict["clients"] if candidate_dict["client_id"] == client_id_str), None)
         if client_dict is None:
             abort(404)
@@ -272,6 +303,7 @@ def financial_route_fn(client_id_str, view_str):
                 "client_operations.html", client_list=registry_dict["clients"], client_dict=client_dict, view_str=view_str,
                 report_dict={"requested_from_date_str": from_str, "requested_to_date_str": to_str},
                 operations_dict=operations_dict, exposure_list=build_reference_exposure_list(operations_dict),
+                strategy_display_list=_strategy_display_list(operations_dict) if view_str == "strategies" else [],
                 activity_dict=_activity_dict(client_dict, from_str, to_str) if view_str == "activity" else None,
                 period_max_date_str=period_max_date_str,
             )
@@ -355,7 +387,8 @@ def financial_route_fn(client_id_str, view_str):
     return render_template(
         "client_financial.html", client_list=registry_dict["clients"], client_dict=client_dict,
         report_dict=report_dict, view_str=view_str, chart_dict=nav_chart_dict(report_dict["daily_book_list"]),
-        client_return_chart_dict=nav_chart_dict(return_path_list, value_field_str="cumulative_return_float", unit_str="pct"),
+        client_return_chart_dict=nav_chart_dict(return_path_list, value_field_str="cumulative_return_float", unit_str="pct", daily_fact_list=report_dict["daily_book_list"]),
+        allocation_dict=portfolio_allocation_dict(report_dict, snapshot_obj) if view_str == "overview" else None,
         pnl_unavailable_str="IBKR cash-flow setup required" if not client_dict.get("nav_bridge") else "Incomplete IBKR data",
         return_unavailable_str="Portfolio return setup required" if not report_dict["client_twr_configured_bool"] and len(report_dict["strategy_list"]) > 1 else "Incomplete IBKR return data",
         investor_dict=build_investor_snapshot_dict(report_dict) if view_str == "report" else None,
@@ -364,7 +397,7 @@ def financial_route_fn(client_id_str, view_str):
         period_max_date_str=period_max_date_str,
         financial_issue_list=summarized_issue_list(report_dict, _financial_notice_list(report_dict, client_dict)),
         financial_dates_dict=dates_dict,
-        performance_chart_list=[nav_chart_dict(strategy_dict["performance_dict"]["return_path_list"], value_field_str="cumulative_return_float", unit_str="pct") for strategy_dict in report_dict["strategy_list"]] if view_str == "performance" else [],
+        performance_chart_list=[nav_chart_dict(strategy_dict["performance_dict"]["return_path_list"], value_field_str="cumulative_return_float", unit_str="pct", daily_fact_list=strategy_dict["daily_list"]) for strategy_dict in report_dict["strategy_list"]] if view_str == "performance" else [],
         daily_scope_list=daily_history_list(report_dict, movement_key_set=capital_day_key_set(snapshot_obj)) if view_str != "report" else [],
         comparison_list=[saved_comparison_dict(next(
             account_dict for account_dict in client_dict["accounts"]

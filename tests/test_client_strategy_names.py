@@ -39,7 +39,7 @@ def test_friendly_names_require_unique_current_local_live_owner(case_str):
     assert row_dict == original_dict
 
 
-def test_same_pod_in_different_accounts_does_not_share_name():
+def test_multiple_client_registry_never_assigns_a_local_strategy_name():
     first_dict = client_config_dict()
     first_dict["operations_source"] = "local"
     second_dict = deepcopy(first_dict)
@@ -48,5 +48,5 @@ def test_same_pod_in_different_accounts_does_not_share_name():
     app_obj = create_app(ForbiddenProvider(), client_registry_dict={"schema_version": 1, "clients": [first_dict, second_dict]})
     with app_obj.test_request_context(), patch("alpha.live.dashboard_v3.client_views.datetime") as clock_mock:
         clock_mock.now.return_value = datetime(2026, 9, 6, 12, tzinfo=UTC)
-        for route_str, expected_str in [("U_TEST_A", "Strategy A"), ("U_TEST_B", "Other strategy")]:
+        for route_str, expected_str in [("U_TEST_A", "strategy a"), ("U_TEST_B", "strategy a")]:
             assert local_strategy_name_str({"pod_id_str": "strategy_a", "account_route_str": route_str, "mode_str": "live"}) == expected_str

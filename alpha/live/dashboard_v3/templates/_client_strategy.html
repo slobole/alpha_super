@@ -1,0 +1,58 @@
+{% from '_client_allocation.html' import allocation_chart %}
+{% set evidence_dict = strategy_dict.evidence_dict %}
+{% set flow_dict = strategy_dict.flow_dict %}
+<section class="ops-panel client-strategy-card" id="strategy-{{ strategy_dict.pod_id_str }}">
+  <div class="ops-panel-heading"><div><h2>{{ strategy_dict.display_name_str }}</h2><span class="client-muted">{{ strategy_dict.account_route_str }} · {{ evidence_dict.release_id_str or 'Release unavailable' }}</span></div><span class="client-state-label" data-severity="{{ strategy_dict.severity_str }}">{{ strategy_dict.status_label_str }}</span></div>
+  <div class="client-flow-position" data-severity="{{ strategy_dict.severity_str }}">
+    <span>{{ 'Saved next action' if flow_dict.source_fresh_bool else 'Last saved assessment · refresh required' }}</span>
+    <strong>{{ flow_dict.headline_str }}</strong>
+    {% if strategy_dict.summary_str %}<p>{{ strategy_dict.summary_str }}</p>{% endif %}
+  </div>
+  <div class="client-flow-heading"><span>Execution flow <span class="client-muted">· open a stage for evidence</span></span>{% if flow_dict.previous_bool %}<strong>Execution steps: previous cycle</strong>{% endif %}</div>
+  <ol class="client-pod-flow" aria-label="Saved stages for {{ strategy_dict.display_name_str }}">
+  {% for step_dict in flow_dict.step_list %}
+    <li data-severity="{{ step_dict.severity_str or 'gray' }}" data-focus="{{ 'true' if step_dict.focus_bool else 'false' }}">
+      <a data-flow-link href="#stage-{{ strategy_dict.pod_id_str }}-{{ loop.index }}" {% if step_dict.focus_bool %}aria-current="step"{% endif %}>
+        <span class="client-step-number">{{ loop.index }}</span><strong>{{ step_dict.label_str }}</strong><small>{{ (step_dict.status_str or 'unverified')|flow_status }}</small>
+        <time>{{ step_dict.timestamp_str|clock or 'No timestamp' }}</time>
+        {% if step_dict.previous_bool %}<small class="client-previous-cycle">Previous cycle evidence</small>{% endif %}{% if step_dict.focus_bool %}<small class="client-current-step">Action here</small>{% endif %}
+      </a>
+    </li>
+  {% else %}<li data-severity="gray"><strong>Flow unavailable</strong><small>No saved stages</small></li>{% endfor %}
+  </ol>
+  <div class="client-strategy-body">
+    <div>
+      <h3>Stage details</h3>
+      {% for step_dict in flow_dict.step_list %}
+      <details class="client-stage-detail" id="stage-{{ strategy_dict.pod_id_str }}-{{ loop.index }}">
+        <summary><span>{{ step_dict.label_str }}</span><span class="client-state-label" data-severity="{{ step_dict.severity_str or 'gray' }}">{{ step_dict.status_str|flow_status }}</span></summary>
+        {% if step_dict.previous_bool %}<p class="client-missing-reason">This evidence belongs to the previous execution cycle.</p>{% endif %}
+        <p>{{ (step_dict.detail_str|humanize_reason) or 'No additional saved explanation.' }}</p>
+        {% if step_dict.evidence_str %}<p>{{ step_dict.evidence_str }}</p>{% endif %}
+        <div class="client-inline-facts"><span>Recorded <strong>{{ step_dict.timestamp_str|clock or 'Unavailable' }}</strong></span></div>
+        {% if step_dict.step_key_str == 'decision' %}<dl class="ops-facts"><dt>Decision</dt><dd>{{ evidence_dict.latest_decision_plan_id_int or 'Unavailable' }}</dd><dt>Signal</dt><dd>{{ evidence_dict.latest_decision_signal_timestamp_str|clock or 'Unavailable' }}</dd><dt>Target execution</dt><dd>{{ evidence_dict.latest_decision_plan_target_execution_timestamp_str|clock or 'Unavailable' }}</dd><dt>Norgate snapshot</dt><dd>{{ evidence_dict.latest_decision_norgate_profile_str or 'Unknown' }} · {{ evidence_dict.latest_decision_norgate_snapshot_date_str or 'Unknown' }}</dd></dl>{% endif %}
+        {% if step_dict.step_key_str == 'vplan' %}<dl class="ops-facts"><dt>Execution plan</dt><dd>{{ evidence_dict.latest_vplan_id_int or 'Unavailable' }}</dd><dt>Submission</dt><dd>{{ evidence_dict.latest_vplan_submission_timestamp_str|clock or 'Unavailable' }}</dd><dt>Target execution</dt><dd>{{ evidence_dict.latest_vplan_target_execution_timestamp_str|clock or 'Unavailable' }}</dd></dl>{% endif %}
+        {% if step_dict.step_key_str == 'reconcile' %}<p>{{ evidence_dict.latest_reconciliation_status_str|flow_status }} · {{ evidence_dict.latest_reconciliation_timestamp_str|clock or 'Unavailable' }}</p>{% endif %}
+        {% for table_dict in strategy_dict.stage_table_dict.get(step_dict.step_key_str, []) %}
+        <h4>{{ table_dict.label_str }}</h4><div class="client-table-scroll"><table class="ops-table"><thead><tr>{% for label_str in table_dict.column_list %}<th>{{ label_str }}</th>{% endfor %}</tr></thead><tbody>
+          {% for value_list in table_dict.row_list %}<tr>{% for value_obj in value_list %}<td>{{ value_obj if value_obj is not none else 'Unavailable' }}</td>{% endfor %}</tr>{% else %}<tr><td colspan="{{ table_dict.column_list|length }}">No matched saved records</td></tr>{% endfor %}
+        </tbody></table></div>
+        {% endfor %}
+        {% if step_dict.step_key_str in ['decision', 'vplan', 'ack', 'fill', 'reconcile'] and not strategy_dict.stage_table_dict.get(step_dict.step_key_str) %}<p class="client-muted">Detailed records unavailable for this saved assessment.</p>{% endif %}
+      </details>
+      {% endfor %}
+    </div>
+    <div class="client-strategy-inputs">
+      <h3>Data freshness</h3>
+      {% set freshness_dict = evidence_dict.data_freshness_dict or {} %}
+      {% set gate_dict = freshness_dict.norgate_current_cycle_gate_dict or {} %}
+      {% if gate_dict.gate_enabled_bool %}<div class="client-freshness-gate" data-severity="{{ gate_dict.severity_str or 'gray' }}"><strong>DecisionPlan gate · {{ gate_dict.status_label_str or 'Unknown' }}</strong><p>{{ gate_dict.detail_str }}</p></div>{% endif %}
+      {% for item_dict in freshness_dict.item_dict_list or [] %}
+      <details class="client-freshness-item"><summary><span>{{ item_dict.label_str }}</span><span class="client-state-label" data-severity="{{ item_dict.severity_str or 'gray' }}">{{ item_dict.value_str or 'Unknown' }}</span></summary><p>{{ item_dict.detail_str }}</p>{% for detail_str in item_dict.sub_detail_str_list or [] %}<p>{{ detail_str }}</p>{% endfor %}</details>
+      {% else %}<p class="client-muted">No saved source checks.</p>{% endfor %}
+    </div>
+    <div class="client-holdings-allocation"><h3>Holdings allocation</h3>{{ allocation_chart(strategy_dict.allocation_dict, 'Holdings allocation for ' ~ strategy_dict.display_name_str) }}</div>
+  </div>
+  {% for step_dict in evidence_dict.lifecycle_step_dict_list or [] if step_dict.step_key_str == 'diff' or step_dict.label_str == 'Live vs Backtest' %}<details class="client-details"><summary>Live vs Backtest · {{ step_dict.status_str or 'unverified' }}</summary><p>{{ step_dict.detail_str or 'No additional saved comparison details.' }}</p></details>{% endfor %}
+  {% if strategy_dict.issue_list %}<details class="client-details"><summary>All operational checks</summary><ul>{% for issue_str in strategy_dict.issue_list %}<li>{{ issue_str }}</li>{% endfor %}</ul></details>{% endif %}
+</section>

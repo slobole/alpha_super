@@ -1,0 +1,26 @@
+{% macro allocation_chart(allocation_dict, label_str) -%}
+<div class="client-allocation" aria-label="{{ label_str }}">
+  {% if allocation_dict.item_list %}
+  <svg viewBox="0 0 120 120" class="client-donut" role="img" aria-label="{{ label_str }}">
+    <circle cx="60" cy="60" r="46" fill="none" stroke="#eef1f5" stroke-width="16"/>
+    {% for item_dict in allocation_dict.item_list if item_dict.weight_float > 0 %}
+    <circle cx="60" cy="60" r="46" fill="none" stroke="{{ item_dict.color_str }}" stroke-width="16" pathLength="100" stroke-dasharray="{{ item_dict.weight_float * 100 }} {{ 100 - item_dict.weight_float * 100 }}" stroke-dashoffset="{{ -item_dict.offset_float }}" transform="rotate(-90 60 60)"><title>{{ item_dict.label_str }} · {{ '%.1f'|format(item_dict.weight_float * 100) }}%</title></circle>
+    {% endfor %}
+    <text x="60" y="58" text-anchor="middle" class="client-donut-count">{{ allocation_dict.item_list|length }}</text>
+    <text x="60" y="73" text-anchor="middle" class="client-donut-label">{{ 'holdings' if allocation_dict.position_timestamp_str is defined else 'strategies' }}</text>
+  </svg>
+  <ul class="client-allocation-legend">
+    {% for item_dict in allocation_dict.item_list %}<li>
+      <span class="client-allocation-dot" style="background:{{ item_dict.color_str }}"></span>
+      <span><strong>{{ item_dict.label_str }}</strong><small>{{ item_dict.detail_str }}</small></span>
+      <span class="client-allocation-value"><strong>{{ '%.1f'|format(item_dict.weight_float * 100) }}%</strong><small>{{ '-' if (item_dict.signed_value_float if item_dict.signed_value_float is defined else item_dict.value_float) < 0 else '' }}${{ '{:,.2f}'.format(item_dict.value_float) }}</small></span>
+    </li>{% endfor %}
+  </ul>
+  {% else %}<p class="client-muted">{{ allocation_dict.reason_str }}</p>{% endif %}
+</div>
+<div class="client-allocation-basis">{{ allocation_dict.basis_str }}{% if allocation_dict.date_str %} · {{ allocation_dict.date_str }}{% endif %}</div>
+{% if allocation_dict.position_timestamp_str is defined %}
+<div class="client-allocation-basis">Positions {{ allocation_dict.position_timestamp_str|clock or 'Unknown' }} · Prices {{ allocation_dict.price_timestamp_str|clock or 'Unknown' }}</div>
+{% if allocation_dict.missing_list %}<p class="client-missing-reason">Unpriced holdings excluded: {{ allocation_dict.missing_list|join(', ') }}</p>{% endif %}
+{% endif %}
+{%- endmacro %}

@@ -49,7 +49,10 @@ async function main() {
       await pageObj.setViewportSize({ width: widthInt, height: 1000 });
       await pageObj.goto(originStr + '/clients');
       await pageObj.evaluate(() => document.fonts.ready);
-      await pageObj.screenshot({ path: path.join(outputDirStr, `client-directory-${widthInt}.png`), fullPage: true });
+      assert.equal(new URL(pageObj.url()).pathname, '/clients/demo-client/overview');
+      assert.equal(await pageObj.getByRole('link', { name: 'Clients', exact: true }).count(), 0);
+      assert.equal(await pageObj.getByText('Switch client', { exact: true }).count(), 0);
+      await pageObj.screenshot({ path: path.join(outputDirStr, `client-landing-${widthInt}.png`), fullPage: true });
       await pageObj.goto(originStr + '/clients/demo-client/report?from=2026-06-01&to=2026-09-04');
       await pageObj.getByRole('heading', { name: 'Report preview', exact: true }).waitFor();
       await pageObj.evaluate(() => document.fonts.ready);
@@ -77,7 +80,7 @@ async function main() {
           panel: getComputedStyle(document.querySelector('.ops-panel')).backgroundColor,
           input: document.querySelector('input[type="date"]') ? getComputedStyle(document.querySelector('input[type="date"]')).colorScheme : 'light',
         }));
-        assert.deepEqual(paletteObj, { scheme: 'light', background: 'rgb(246, 247, 249)', panel: 'rgb(255, 255, 255)', input: 'light' });
+        assert.deepEqual(paletteObj, { scheme: 'light', background: 'rgb(247, 248, 250)', panel: 'rgb(255, 255, 255)', input: 'light' });
         assert(await pageObj.getByText('Demo data', { exact: true }).isVisible());
         assert(!(await pageObj.locator('main').innerText()).includes('financial selection never changes trading state'));
         if (['overview', 'performance'].includes(viewStr)) {
@@ -183,14 +186,14 @@ async function main() {
         await pageObj.screenshot({ path: path.join(outputDirStr, `client-${viewStr}-${widthInt}.png`), fullPage: true });
       }
     }
-    await pageObj.goto(originStr + '/clients/demo-owner/overview?from=2026-06-01&to=2026-09-04');
-    assert(await pageObj.getByRole('heading', { name: 'No action required', exact: true }).isVisible());
+    assert.equal((await contextObj.request.get(originStr + '/clients/demo-owner/overview')).status(), 404);
+    await pageObj.goto(originStr + '/clients/demo-client/overview?from=2026-06-01&to=2026-09-04');
     await pageObj.getByRole('link', { name: 'View selected-period activity', exact: true }).click();
     await pageObj.waitForURL('**/activity?from=2026-06-01&to=2026-09-04');
-    await pageObj.goto(originStr + '/clients/demo-owner/activity?from=2026-08-01&to=2026-08-31');
+    await pageObj.goto(originStr + '/clients/demo-client/activity?from=2026-08-01&to=2026-08-31');
     assert(await pageObj.getByText('No saved events for these dates.', { exact: true }).isVisible());
     for (const fromStr of ['2026-09-02', '2026-05-01']) {
-      const responseObj = await pageObj.goto(originStr + `/clients/demo-owner/activity?from=${fromStr}&to=2026-09-01`);
+      const responseObj = await pageObj.goto(originStr + `/clients/demo-client/activity?from=${fromStr}&to=2026-09-01`);
       assert.equal(responseObj.status(), 400);
       assert(await pageObj.getByRole('alert').isVisible());
       assert.equal(await pageObj.locator('input[name="from"]').inputValue(), fromStr);
@@ -221,9 +224,9 @@ async function main() {
         assert.equal(await pageObj.getByRole('link', { name: 'VPS overview', exact: true }).getAttribute('href'), '/vps');
         if (pathStr === '/pods/live') {
           assert.equal(await pageObj.locator('.advanced-attention li').first().getAttribute('data-severity'), 'yellow');
-          assert.equal(await pageObj.locator('.advanced-attention li').first().evaluate(elementObj => getComputedStyle(elementObj).borderLeftColor), 'rgb(183, 121, 9)');
+          assert.equal(await pageObj.locator('.advanced-attention li').first().evaluate(elementObj => getComputedStyle(elementObj).borderLeftColor), 'rgb(148, 98, 0)');
           assert.equal(await pageObj.locator('.advanced-attention a').first().innerText(), 'Equity mean reversion');
-          assert.equal(await pageObj.locator('.advanced-stage-strip').count(), 6);
+          assert.equal(await pageObj.locator('.advanced-stage-strip').count(), 4);
           assert.equal(await pageObj.locator('.advanced-stage-strip').first().evaluate(elementObj => getComputedStyle(elementObj).display), 'flex');
           for (const flowObj of await pageObj.locator('.advanced-stage-strip').all()) {
             assert.equal(await flowObj.locator('span').count(), 7);
@@ -238,7 +241,7 @@ async function main() {
     }
     assert.deepEqual(remoteRequestList, []);
     assert.deepEqual(pageErrorList, []);
-    console.log(JSON.stringify({ result: 'PASS', viewports: [1440, 768, 390], clientViews: clientViewList.concat('report'), advancedPaths: advancedPathList, strategies: 4, secondClientIsolation: 'PASS', periodForm: 'PASS', noLoginPdfDownload: 'PASS', remoteAssetsBlocked: true, outputDir: outputDirStr }));
+    console.log(JSON.stringify({ result: 'PASS', viewports: [1440, 768, 390], clientViews: clientViewList.concat('report'), advancedPaths: advancedPathList, strategies: 4, singleClientWorkspace: 'PASS', periodForm: 'PASS', noLoginPdfDownload: 'PASS', remoteAssetsBlocked: true, outputDir: outputDirStr }));
   } finally {
     if (browserObj) await browserObj.close();
     serverObj.kill(); // Only the child created by this QA invocation.
