@@ -50,6 +50,16 @@ async function main() {
     }
     for (const widthInt of [1440, 768, 390]) {
       await pageObj.setViewportSize({ width: widthInt, height: 1000 });
+      await pageObj.goto(originStr + '/__fixture_cash_difference');
+      const cashRingObj = pageObj.locator('[data-allocation-source="broker_eod"]');
+      assert.equal(await cashRingObj.locator('.client-donut-count').textContent(), '6.9%');
+      assert.equal(await cashRingObj.locator('[data-allocation-kind="cash"]').count(), 2);
+      assert.equal(await pageObj.getByText('Cash unavailable', { exact: true }).count(), 0);
+      assert((await cashRingObj.getAttribute('title')).includes('2026-09-11'));
+      assert((await cashRingObj.locator('.client-allocation-value').allInnerTexts()).join(' ').includes('$20,608.33'));
+      assert((await cashRingObj.locator('.client-allocation-value').allInnerTexts()).join(' ').includes('$12,104.40'));
+      assert(await pageObj.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+      await pageObj.screenshot({ path: path.join(outputDirStr, `cash-difference-${widthInt}.png`), fullPage: true });
       await pageObj.goto(originStr + '/__fixture_chart_gap');
       const markerList = await pageObj.locator('.client-chart-point').all();
       assert.equal(markerList.length, 2);

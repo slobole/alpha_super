@@ -43,10 +43,11 @@ def portfolio_account_list(report_dict):
 
 
 def portfolio_allocation_dict(report_dict, snapshot_obj, *, cash_snapshot_list=()):
-    """NAV weights, split by same-date broker cash without changing accounting.
+    """Use one valuation source for the whole ring; never change accounting.
 
-    cash_share_i = cash_i / total_NAV; invested_share_i = (NAV_i-cash_i)/total_NAV.
-    Missing or margin cash stays unknown; never clamp or infer it from holdings.
+    With complete EOD equity: cash_share_i = cash_i / sum(EOD_equity_i),
+    invested_share_i = (EOD_equity_i-cash_i) / sum(EOD_equity_i).
+    Otherwise retain the entire finalized NAV ring with cash unknown.
     """
     date_str = report_dict.get("closing_date_str") or ""
     account_list = portfolio_account_list(report_dict)
@@ -59,24 +60,36 @@ def portfolio_allocation_dict(report_dict, snapshot_obj, *, cash_snapshot_list=(
         item_list.append({"label_str": account_dict.get("display_name") or account_dict.get("pod_id") or account_dict["account_route"],
             "detail_str": account_dict["account_route"],
             "value_float": float(row_list[0].closing_nav_decimal) if len(row_list) == 1 else None})
-    result_dict = allocation_dict(item_list, date_str=date_str, basis_str="IBKR account value · selected period end")
+    result_dict = allocation_dict(item_list, date_str=date_str, basis_str="Finalized IBKR account value")
     route_list = [item_dict["account_route"] for item_dict in account_list]
     expected_float = report_dict.get("closing_nav_float")
     scope_complete_bool = True if "valuation_account_list" in report_dict else report_dict.get("scope_complete_bool", False)
     if (len(set(route_list)) != len(route_list) or expected_float is None or not scope_complete_bool
             or result_dict["total_float"] is None or abs(result_dict["total_float"] - expected_float) > .01):
         result_dict.update(item_list=[], reason_str="Complete, matching account values are required.")
-    result_dict.update(cash_weight_float=None, cash_complete_bool=False)
-    for account_dict, item_dict in zip(account_list, result_dict["item_list"]):
-        item_dict["show_identity_bool"] = sum(candidate_dict["label_str"] == item_dict["label_str"] for candidate_dict in result_dict["item_list"]) > 1
+    result_dict.update(source_str="flex_nav", cash_weight_float=None, cash_complete_bool=False)
+    if not result_dict["item_list"]:
+        return result_dict
+    matched_cash_list = []
+    for account_dict in account_list:
         cash_list = [cash_dict for cash_dict in cash_snapshot_list
             if cash_dict.get("account_route_str") == account_dict["account_route"]
             and cash_dict.get("pod_id_str") == account_dict.get("pod_id")
             and cash_dict.get("market_date_str") == date_str]
-        cash_dict = cash_list[0] if len(cash_list) == 1 else {}
-        cash_float, equity_float = cash_dict.get("cash_float"), cash_dict.get("equity_float")
-        cash_valid_bool = (all(type(value_obj) in {int, float} and math.isfinite(value_obj) for value_obj in (cash_float, equity_float))
-            and abs(equity_float - item_dict["value_float"]) <= .01 and 0 <= cash_float <= item_dict["value_float"])
+        matched_cash_list.append(cash_list[0] if len(cash_list) == 1 else {})
+    # *** CRITICAL *** retrospective display basis: broker cash and equity must
+    # come from the same saved EOD row. Never mix any sleeve with Flex NAV.
+    eod_dict = allocation_dict([{**item_dict, "value_float": cash_dict.get("equity_float")}
+        for item_dict, cash_dict in zip(item_list, matched_cash_list)],
+        date_str=date_str, basis_str="Saved broker end-of-day snapshot; financial totals use finalized Flex")
+    if eod_dict["item_list"]:
+        result_dict = {**eod_dict, "source_str": "broker_eod", "cash_weight_float": None, "cash_complete_bool": False}
+    for item_dict, cash_dict in zip(result_dict["item_list"], matched_cash_list):
+        item_dict["show_identity_bool"] = sum(candidate_dict["label_str"] == item_dict["label_str"] for candidate_dict in result_dict["item_list"]) > 1
+        cash_float = cash_dict.get("cash_float")
+        cash_valid_bool = (result_dict["source_str"] == "broker_eod"
+            and type(cash_float) in {int, float} and math.isfinite(cash_float)
+            and 0 <= cash_float <= item_dict["value_float"])
         item_dict.update(cash_float=cash_float if cash_valid_bool else None,
             cash_weight_float=cash_float / result_dict["total_float"] if cash_valid_bool else None,
             invested_weight_float=(item_dict["value_float"] - cash_float) / result_dict["total_float"] if cash_valid_bool else None)

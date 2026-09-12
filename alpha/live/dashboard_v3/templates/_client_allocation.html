@@ -1,7 +1,8 @@
 {% macro allocation_chart(allocation_dict, label_str) -%}
-<div class="client-allocation{{ ' client-cash-allocation' if allocation_dict.cash_complete_bool is defined else '' }}" aria-label="{{ label_str }}">
+{% set description_str = label_str ~ (' · ' ~ allocation_dict.basis_str ~ ' · ' ~ allocation_dict.date_str if allocation_dict.source_str is defined else '') %}
+<div class="client-allocation{{ ' client-cash-allocation' if allocation_dict.cash_complete_bool is defined else '' }}" aria-label="{{ description_str }}"{% if allocation_dict.source_str is defined %} title="{{ allocation_dict.basis_str }} · {{ allocation_dict.date_str }}" data-allocation-source="{{ allocation_dict.source_str }}"{% endif %}>
   {% if allocation_dict.item_list %}
-  <svg viewBox="0 0 120 120" class="client-donut" role="img" aria-label="{{ label_str }}">
+  <svg viewBox="0 0 120 120" class="client-donut" role="img" aria-label="{{ description_str }}">
     <circle cx="60" cy="60" r="46" fill="none" stroke="#eef1f5" stroke-width="16"/>
     {% for item_dict in allocation_dict.item_list if item_dict.weight_float > 0 %}
     {% if item_dict.cash_weight_float is defined and item_dict.cash_weight_float is not none %}

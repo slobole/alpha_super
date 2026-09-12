@@ -15,23 +15,35 @@ the TWR label's tooltip. Calculations, financial defaults and exports are unchan
 
 Portfolio allocation uses one ring, with each strategy's invested and cash
 segments adjacent. Cash uses a lighter shade of the strategy color. Percentages
-use total portfolio NAV as the denominator; the center shows aggregate cash.
-Repeated strategy names retain visible account identities.
+use total saved broker EOD equity as the denominator; the center shows aggregate
+cash. Repeated strategy names retain visible account identities. The source and
+selected date appear in a tooltip and accessible label, without a new caption.
 
 ```text
-[Selected-date IBKR NAV] + [Same-date saved broker EOD cash]
-                          |
-              [Account / Pod / date / NAV match]
-                          |
-         [Invested segment + cash segment in one ring]
+[Validated selected-date account scope]
+                  |
+[Complete saved EOD equity for every account?]
+           / yes                  \ no
+[EOD equity + cash ring]    [Whole Flex NAV ring; cash unknown]
 ```
 
-For strategy i: `cash_share_i = cash_i / sum(NAV_i)` and
-`invested_share_i = (NAV_i - cash_i) / sum(NAV_i)`. Matching requires finite
-values, `0 <= cash_i <= NAV_i`, and broker EOD equity within $0.01 of canonical
-NAV. Missing, negative, over-NAV or ambiguous cash leaves that strategy's full
-NAV slice unsplit with cash unavailable; total cash is withheld until every
-strategy is verified. Missing cash is never zero-filled.
+For strategy i: `cash_share_i = cash_i / sum(EOD_equity_i)` and
+`invested_share_i = (EOD_equity_i - cash_i) / sum(EOD_equity_i)`. All ring dollar
+labels, weights and offsets use that same EOD basis. Every account must have one
+same-date finite nonnegative EOD equity, with a finite positive portfolio total.
+Any missing/invalid/ambiguous equity restores the entire finalized Flex NAV ring
+with all cash unknown; sources are never mixed within the ring. Invalid cash
+(`0 <= cash_i <= EOD_equity_i` is required) leaves only that EOD slice unsplit;
+aggregate cash is withheld until every cash value is verified. Missing cash is
+never zero-filled. Headline NAV, P&L, TWR, report hashes and exports remain Flex-based.
+
+The original $0.01 cross-source equality requirement was incorrect: a 16:10
+broker NetLiquidation observation need not equal finalized Flex NAV. The Sep 11
+production values reproduce it: EOD equity 20,608.33 and 12,104.40 with cash
+287.08 and 1,969.23, versus Flex NAV 20,603.785969295 and 12,111.235842935.
+The corrected ring totals 32,712.73 with 2,256.31 cash (6.8973%); the finalized
+financial headline remains 32,715.02. No tolerance increase or residual-cash
+estimate is used. The current saved Flex report has no cash balance section.
 
 Local cash comes only from the configured Pod database opened with `mode=ro`,
 filtered by Pod, account, user, broker source and EOD stage. The selected ET date
@@ -66,6 +78,16 @@ Verification for September 12 (Tier 3; tests/browser tools/docs are Tier 0):
 - Scoped triage and `git diff --check` passed. Unrelated research files remain
   untouched. Cash availability remains limited by saved broker evidence.
 
+Cash-source correction verification: the exact broker/Flex mismatch regression
+failed before the fix. The affected client/dashboard/reporting suites then passed
+273 tests; the final strengthened cash suite passed 44 tests. The real-provider
+browser suite passed all seven views at 1440/768/390, including a 6.9% cash
+regression with the observed dollar values, source tooltip and no overflow.
+Fixture files remained unchanged and no outbound connection was attempted.
+Parity/quant, failure-mode and coverage reviews found no remaining blockers.
+The live-impact checklist above still applies; only display projections and
+their template changed, with no runtime data or operational action.
+
 Each VPS serves exactly one client. Entry opens that client's Overview directly;
 there is no client directory or switcher. Remote viewing uses the same workspace.
 The dashboard rejects a reporting registry containing multiple clients without
@@ -78,7 +100,7 @@ four separate synthetic strategy accounts, including in Advanced views.
 | Requirement | Implemented behavior | Verification |
 |---|---|---|
 | Consistent minimal type | Segoe UI/system sans for text, figures and SVG; restrained size hierarchy | Browser computed-font assertions; desktop/mobile screenshots |
-| Portfolio allocation on Overview | Same-date account NAV donut, account identities and percentages | Exact scope/duplicate/missing/retired-account unit tests; rendered 2- and 4-account examples |
+| Portfolio allocation on Overview | Same-date broker EOD equity/cash donut, or whole Flex NAV fallback; identities and percentages | Exact scope/duplicate/missing/retired-account tests; real EOD/Flex mismatch and rendered 2- and 4-account examples |
 | Per-strategy allocation | Priced holdings composition with signed values, source dates and unpriced exclusions | Long/short/missing/nonfinite tests; real-format synthetic holdings render |
 | Daily dollars beside charts | Exact-date P&L readout, pointer/keyboard inspection, including losses | SOD/missing P&L regression; browser checks -$25, +$60 and unavailable baseline |
 | Monthly green/red | Subtle gain/loss backgrounds and colored values | Positive and negative months visually inspected on long-history Performance |
@@ -103,12 +125,13 @@ available if financial-source loading fails.
 
 ## Data contracts
 
-Portfolio allocation is `weight_i = account_NAV_i,D / sum(account_NAV_D)` at the
-displayed closing date D. Every account must have exactly one finite,
-nonnegative value; their sum must match the displayed NAV within $0.01.
-NAV-only account scope remains independent of performance-window completeness.
-No earlier exited strategy NAV, missing cash estimate, or global VPS total is
-substituted into a selected client's allocation.
+The Flex fallback allocation is `weight_i = account_NAV_i,D / sum(account_NAV_D)`
+at the displayed closing date D. Its account values must be unique, finite and
+nonnegative, and their sum must match headline NAV within $0.01. Complete saved
+broker EOD equity replaces the entire ring's valuation basis as described above;
+the broker total is not required to equal finalized Flex NAV. Selected account
+scope remains independent of performance-window completeness. No earlier exited
+strategy, cash estimate or global VPS total is substituted into this scope.
 
 Holdings composition is `abs(shares_i * reference_price_i) / sum(abs(priced_values))`.
 This is explicitly a reference composition of priced holdings, excluding cash;

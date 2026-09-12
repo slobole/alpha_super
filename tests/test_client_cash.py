@@ -38,20 +38,73 @@ def test_each_fifteen_percent_cash_contribution_sums_to_thirty_percent():
     assert report_dict == before_dict
 
 
+def test_real_broker_flex_difference_uses_one_eod_basis_for_the_whole_ring():
+    report_dict, snapshot_obj, cash_list = allocation_fixture_tuple()
+    flex_nav_list = [20603.785969295, 12111.235842935]
+    broker_nav_list = [20608.33, 12104.40]
+    broker_cash_list = [287.08, 1969.23]
+    report_dict["closing_nav_float"] = sum(flex_nav_list)
+    for row_obj, flex_nav_float, cash_dict, equity_float, cash_float in zip(
+            snapshot_obj.row_tuple, flex_nav_list, cash_list, broker_nav_list, broker_cash_list):
+        row_obj.closing_nav_decimal = Decimal(str(flex_nav_float))
+        cash_dict.update(equity_float=equity_float, cash_float=cash_float)
+    before_dict = deepcopy(report_dict)
+    result_dict = portfolio_allocation_dict(report_dict, snapshot_obj, cash_snapshot_list=cash_list)
+    assert result_dict["cash_complete_bool"] is True
+    assert result_dict["source_str"] == "broker_eod"
+    assert result_dict["total_float"] == pytest.approx(32712.73)
+    assert result_dict["cash_weight_float"] == pytest.approx(2256.31 / 32712.73)
+    for item_dict, equity_float, cash_float in zip(result_dict["item_list"], broker_nav_list, broker_cash_list):
+        assert item_dict["value_float"] == equity_float
+        assert item_dict["weight_float"] == pytest.approx(equity_float / 32712.73)
+        assert item_dict["cash_weight_float"] == pytest.approx(cash_float / 32712.73)
+        assert item_dict["invested_weight_float"] == pytest.approx((equity_float - cash_float) / 32712.73)
+    assert sum(item_dict["weight_float"] for item_dict in result_dict["item_list"]) == pytest.approx(1)
+    assert report_dict == before_dict
+    assert [float(row_obj.closing_nav_decimal) for row_obj in snapshot_obj.row_tuple] == flex_nav_list
+
+
 @pytest.mark.parametrize("override_dict", [
     {"cash_float": None}, {"cash_float": -1}, {"cash_float": 101}, {"cash_float": True},
-    {"cash_float": float("nan")}, {"cash_float": float("inf")}, {"equity_float": 101},
-    {"equity_float": float("inf")}, {"equity_float": True}, {"account_route_str": "OTHER"},
-    {"pod_id_str": "OTHER"}, {"market_date_str": "2026-09-02"},
+    {"cash_float": float("nan")}, {"cash_float": float("inf")},
 ])
-def test_missing_invalid_or_mismatched_cash_never_changes_nav_or_becomes_zero(override_dict):
+def test_invalid_cash_keeps_eod_equity_and_never_becomes_zero(override_dict):
     report_dict, snapshot_obj, cash_list = allocation_fixture_tuple()
+    cash_list[0]["equity_float"] = 80
+    cash_list[1]["equity_float"] = 120
     cash_list[0].update(override_dict)
     result_dict = portfolio_allocation_dict(report_dict, snapshot_obj, cash_snapshot_list=cash_list)
+    assert result_dict["source_str"] == "broker_eod"
     assert result_dict["cash_weight_float"] is None and not result_dict["cash_complete_bool"]
-    assert [item_dict["weight_float"] for item_dict in result_dict["item_list"]] == [.5, .5]
+    assert [item_dict["value_float"] for item_dict in result_dict["item_list"]] == [80, 120]
+    assert [item_dict["weight_float"] for item_dict in result_dict["item_list"]] == [.4, .6]
     assert result_dict["item_list"][0]["cash_float"] is None
     assert result_dict["item_list"][1]["cash_float"] == 30
+
+
+@pytest.mark.parametrize("override_dict", [
+    {"equity_float": None}, {"equity_float": -1}, {"equity_float": float("inf")},
+    {"equity_float": float("nan")}, {"equity_float": True}, {"account_route_str": "OTHER"},
+    {"pod_id_str": "OTHER"}, {"market_date_str": "2026-09-02"},
+])
+def test_incomplete_eod_equity_keeps_entire_flex_ring_without_mixing_cash(override_dict):
+    report_dict, snapshot_obj, cash_list = allocation_fixture_tuple()
+    cash_list[0].update(override_dict)
+    cash_list[1]["equity_float"] = 150
+    result_dict = portfolio_allocation_dict(report_dict, snapshot_obj, cash_snapshot_list=cash_list)
+    assert result_dict["source_str"] == "flex_nav"
+    assert [item_dict["value_float"] for item_dict in result_dict["item_list"]] == [100, 100]
+    assert all(item_dict["cash_float"] is None for item_dict in result_dict["item_list"])
+    assert not result_dict["cash_complete_bool"]
+
+
+def test_cash_limits_use_its_own_eod_equity_even_when_above_flex_nav():
+    report_dict, snapshot_obj, cash_list = allocation_fixture_tuple()
+    cash_list[0].update(equity_float=200, cash_float=150)
+    result_dict = portfolio_allocation_dict(report_dict, snapshot_obj, cash_snapshot_list=cash_list)
+    assert result_dict["cash_complete_bool"]
+    assert result_dict["total_float"] == 300
+    assert result_dict["cash_weight_float"] == pytest.approx(.6)
 
 
 @pytest.mark.parametrize("cash_float", [0, 100])
@@ -175,7 +228,8 @@ def test_snapshot_cash_uses_owned_date_and_never_calls_local_provider():
     assert load_portfolio_cash_list({"operations_source": "snapshot"}, report_dict, ForbiddenProvider(), operations_dict, as_of_ts=AS_OF_TS) == []
 
 
-def test_real_local_cash_matches_saved_nav_and_does_not_change_report_hash(tmp_path, monkeypatch):
+@pytest.mark.parametrize("broker_difference_float", [0, 4.54])
+def test_real_local_cash_uses_own_equity_without_changing_report(tmp_path, monkeypatch, broker_difference_float):
     from test_dashboard_local_workspace import build_fixture_app, file_snapshot_dict
     from test_live_dashboard import _seed_eod_pod_state
 
@@ -183,7 +237,7 @@ def test_real_local_cash_matches_saved_nav_and_does_not_change_report_hash(tmp_p
     client_obj = app_obj.test_client()
     path_str = "/clients/local/overview?from=2026-09-02&to=2026-09-03"
     before_report_dict = client_obj.get(path_str + "&download=json").get_json()
-    for pod_str, nav_float in [("pod_a", 1105), ("pod_b", 10030)]:
+    for pod_str, nav_float in [("pod_a", 1105 + broker_difference_float), ("pod_b", 10030)]:
         target_obj = app_obj.config["data_provider_obj"].get_target_for_pod(pod_str)
         _seed_eod_pod_state(tmp_path / (pod_str + ".sqlite3"), target_obj.release_obj,
             total_value_float=nav_float, cash_float=nav_float * .3, updated_timestamp_ts=datetime(2026, 9, 3, 20, 10, tzinfo=UTC))
@@ -191,8 +245,13 @@ def test_real_local_cash_matches_saved_nav_and_does_not_change_report_hash(tmp_p
     html_str = client_obj.get(path_str).get_data(as_text=True)
     assert 'class="client-donut-count">30.0%</text>' in html_str
     assert html_str.count('data-allocation-kind="cash"') == 2
+    assert 'data-allocation-source="broker_eod"' in html_str
+    assert 'Saved broker end-of-day snapshot; financial totals use finalized Flex · 2026-09-03' in html_str
+    assert '${:,.2f}'.format(1105 + broker_difference_float) in html_str
     assert 'IBKR update pending' not in html_str and 'Source: IBKR' not in html_str
-    assert client_obj.get(path_str + "&download=json").get_json()["report_hash_str"] == before_report_dict["report_hash_str"]
+    after_report_dict = client_obj.get(path_str + "&download=json").get_json()
+    for key_str in ["report_hash_str", "closing_nav_float", "pnl_float", "twr_float"]:
+        assert after_report_dict[key_str] == before_report_dict[key_str]
     assert file_snapshot_dict(tmp_path) == before_files_dict
 
 
