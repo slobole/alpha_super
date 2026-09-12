@@ -42,7 +42,7 @@ async function main() {
     assert(pageObj.url().endsWith('/clients/local/overview'));
     if (expandedBool) {
       assert.equal(await pageObj.locator('input[name="to"]').inputValue(), '2026-09-03');
-      assert((await pageObj.locator('.client-source-delay').innerText()).includes('complete through 2026-09-03'));
+      assert.equal(await pageObj.locator('.client-source-delay, .client-evidence-strip').count(), 0);
       // Legacy Sep1 remains selected: a good final NAV must not unlock ALL returns.
       assert(await pageObj.locator('[data-account-unit="pct"]').isDisabled());
       await pageObj.locator('.client-data-issues summary').click();
@@ -84,7 +84,8 @@ async function main() {
           const allocationReportObj = await (await fetch(originStr + `/clients/local/overview?${periodStr}&download=json`)).json();
           const allocationReadyBool = allocationReportObj.closing_nav_float !== null;
           assert.equal(await pageObj.locator('.client-allocation-panel .client-donut').count(), allocationReadyBool ? 1 : 0);
-          assert.equal(await pageObj.locator('.client-allocation-panel .client-allocation-legend li').count(), allocationReadyBool ? allocationReportObj.valuation_account_list.length : 0);
+          const allocationScopeList = allocationReportObj.valuation_account_list ?? allocationReportObj.strategy_list.filter(rowObj => rowObj.to_date_str === allocationReportObj.closing_date_str);
+          assert.equal(await pageObj.locator('.client-allocation-panel .client-allocation-legend li').count(), allocationReadyBool ? allocationScopeList.length : 0);
           const axisObj = pageObj.locator('[data-account-panel] .client-chart:visible .client-y-axis');
           const plotObj = pageObj.locator('[data-account-panel] .client-chart:visible svg');
           if (await plotObj.count()) {
@@ -118,14 +119,8 @@ async function main() {
             assert.equal(reportObj.status_str, 'ready');
             assert((await chartObj.locator('.client-chart-dates:visible').innerText()).includes('Start'));
             assert(!(await chartObj.locator('.client-chart-dates:visible').innerText()).includes('SOD'));
-            const methodObj = pageObj.locator('.client-method-note');
-            await methodObj.focus();
-            const tooltipObj = methodObj.locator('[role="tooltip"]');
-            assert(await tooltipObj.isVisible());
-            assert((await tooltipObj.innerText()).includes('end-of-day'));
-            const tooltipBoxObj = await tooltipObj.boundingBox();
-            assert(tooltipBoxObj.x >= 0 && tooltipBoxObj.x + tooltipBoxObj.width <= widthInt);
-            await methodObj.evaluate(elementObj => elementObj.blur());
+            assert((await pageObj.locator('[data-client-twr] p').getAttribute('title')).includes('end-of-day'));
+            assert.equal(await pageObj.locator('.client-method-note').count(), 0);
           } else {
             // The new Pod intentionally has no NAV; never manufacture a book curve.
             assert(await chartObj.locator('[data-account-series="usd"] .client-chart-empty').isVisible());

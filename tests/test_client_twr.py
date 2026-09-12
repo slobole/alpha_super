@@ -253,7 +253,7 @@ def test_configured_client_headline_is_identical_across_views_and_export():
         response_obj = client_obj.get(path_str)
         assert response_obj.status_code == 200
         html_str = response_obj.get_data(as_text=True)
-        assert 'data-client-twr><p>Return · TWR</p><strong data-sign="positive">0.55%' in html_str
+        assert 'Return · TWR</p><strong data-sign="positive">0.55%' in html_str.split('data-client-twr>', 1)[1]
         chart_label_str = "Portfolio cumulative return (%)" if view_str == "overview" else "Calculated daily client TWR including opening zero baseline"
         assert f'aria-label="{chart_label_str}"' in html_str
         result_list.append(client_obj.get(path_str + "&download=json").get_json())

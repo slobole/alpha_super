@@ -101,7 +101,8 @@ def test_default_route_uses_common_date_explicit_dates_do_not_and_hash_is_shared
     explicit_dict = client_obj.get("/clients/sample/overview?from=2026-09-01&to=2026-09-02&download=json").get_json()
     assert explicit_dict["report_hash_str"] == result_list[0]["report_hash_str"]
     html_str = client_obj.get("/clients/sample/overview").get_data(as_text=True)
-    assert "IBKR update pending · complete through 2026-09-02 · expected 2026-09-03" in html_str
+    assert "IBKR update pending" not in html_str
+    assert 'value="2026-09-02"' in html_str
     incomplete_dict = client_obj.get("/clients/sample/overview?from=2026-09-01&to=2026-09-03&download=json").get_json()
     assert incomplete_dict["requested_to_date_str"] == "2026-09-03" and incomplete_dict["pnl_float"] is None
 

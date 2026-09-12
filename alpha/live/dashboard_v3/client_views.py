@@ -26,6 +26,7 @@ from alpha.live.dashboard_v3.client_operations import (
 from alpha.live.dashboard_v3.operator_tools import redact_diagnostic_value, strategy_display_name_str
 from alpha.live.dashboard_v3.client_comparison import saved_comparison_dict
 from alpha.live.dashboard_v3.client_charts import daily_history_list, nav_chart_dict
+from alpha.live.dashboard_v3.client_cash import load_portfolio_cash_list
 from alpha.live.dashboard_v3.client_presentation import portfolio_allocation_dict, holdings_allocation_dict, flow_dict, saved_stage_table_dict
 from alpha.live.dashboard_v3.client_financial_display import capital_day_key_set, financial_dates_dict, summarized_issue_list
 from alpha.live.dashboard_v3.local_workspace import (
@@ -384,15 +385,18 @@ def financial_route_fn(client_id_str, view_str):
     if not report_dict["client_twr_configured_bool"] and report_dict["twr_float"] is not None and len(report_dict["strategy_list"]) == 1:
         # Same verified one-account fallback as the headline and daily panel.
         return_path_list = report_dict["strategy_list"][0]["performance_dict"]["return_path_list"]
+    operations_dict = _operations_dict(client_dict, as_of_ts) if view_str == "overview" else None
+    cash_snapshot_list = load_portfolio_cash_list(client_dict, report_dict, current_app.config["data_provider_obj"],
+        operations_dict, as_of_ts=datetime.now(UTC)) if view_str == "overview" else []
     return render_template(
         "client_financial.html", client_list=registry_dict["clients"], client_dict=client_dict,
         report_dict=report_dict, view_str=view_str, chart_dict=nav_chart_dict(report_dict["daily_book_list"]),
         client_return_chart_dict=nav_chart_dict(return_path_list, value_field_str="cumulative_return_float", unit_str="pct", daily_fact_list=report_dict["daily_book_list"]),
-        allocation_dict=portfolio_allocation_dict(report_dict, snapshot_obj) if view_str == "overview" else None,
+        allocation_dict=portfolio_allocation_dict(report_dict, snapshot_obj, cash_snapshot_list=cash_snapshot_list) if view_str == "overview" else None,
         pnl_unavailable_str="IBKR cash-flow setup required" if not client_dict.get("nav_bridge") else "Incomplete IBKR data",
         return_unavailable_str="Portfolio return setup required" if not report_dict["client_twr_configured_bool"] and len(report_dict["strategy_list"]) > 1 else "Incomplete IBKR return data",
         investor_dict=build_investor_snapshot_dict(report_dict) if view_str == "report" else None,
-        operations_dict=_operations_dict(client_dict, as_of_ts) if view_str == "overview" else None,
+        operations_dict=operations_dict,
         activity_dict=_activity_dict(client_dict, from_str, to_str) if view_str == "overview" else None,
         period_max_date_str=period_max_date_str,
         financial_issue_list=summarized_issue_list(report_dict, _financial_notice_list(report_dict, client_dict)),

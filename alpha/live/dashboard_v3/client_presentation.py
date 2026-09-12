@@ -32,14 +32,24 @@ def allocation_dict(item_list, *, date_str="", basis_str=""):
     return result_dict
 
 
-def portfolio_allocation_dict(report_dict, snapshot_obj):
-    """Exact report-end account NAV. Missing/negative/duplicate scope hides pie."""
+def portfolio_account_list(report_dict):
+    """The same end-date ownership scope for NAV and cash display."""
     date_str = report_dict.get("closing_date_str") or ""
     if "valuation_account_list" in report_dict:
-        account_list = report_dict["valuation_account_list"]
-    else:
-        account_list = [{"account_route": item_dict["account_route_str"], "display_name": item_dict["display_name_str"]}
-            for item_dict in report_dict["strategy_list"] if item_dict["to_date_str"] == date_str]
+        return report_dict["valuation_account_list"]
+    return [{"account_route": item_dict["account_route_str"], "pod_id": item_dict.get("pod_id_str"),
+             "display_name": item_dict["display_name_str"]}
+        for item_dict in report_dict["strategy_list"] if item_dict["to_date_str"] == date_str]
+
+
+def portfolio_allocation_dict(report_dict, snapshot_obj, *, cash_snapshot_list=()):
+    """NAV weights, split by same-date broker cash without changing accounting.
+
+    cash_share_i = cash_i / total_NAV; invested_share_i = (NAV_i-cash_i)/total_NAV.
+    Missing or margin cash stays unknown; never clamp or infer it from holdings.
+    """
+    date_str = report_dict.get("closing_date_str") or ""
+    account_list = portfolio_account_list(report_dict)
     item_list = []
     for account_dict in account_list:
         # *** CRITICAL *** retrospective same-date display only. Never borrow
@@ -56,6 +66,22 @@ def portfolio_allocation_dict(report_dict, snapshot_obj):
     if (len(set(route_list)) != len(route_list) or expected_float is None or not scope_complete_bool
             or result_dict["total_float"] is None or abs(result_dict["total_float"] - expected_float) > .01):
         result_dict.update(item_list=[], reason_str="Complete, matching account values are required.")
+    result_dict.update(cash_weight_float=None, cash_complete_bool=False)
+    for account_dict, item_dict in zip(account_list, result_dict["item_list"]):
+        item_dict["show_identity_bool"] = sum(candidate_dict["label_str"] == item_dict["label_str"] for candidate_dict in result_dict["item_list"]) > 1
+        cash_list = [cash_dict for cash_dict in cash_snapshot_list
+            if cash_dict.get("account_route_str") == account_dict["account_route"]
+            and cash_dict.get("pod_id_str") == account_dict.get("pod_id")
+            and cash_dict.get("market_date_str") == date_str]
+        cash_dict = cash_list[0] if len(cash_list) == 1 else {}
+        cash_float, equity_float = cash_dict.get("cash_float"), cash_dict.get("equity_float")
+        cash_valid_bool = (all(type(value_obj) in {int, float} and math.isfinite(value_obj) for value_obj in (cash_float, equity_float))
+            and abs(equity_float - item_dict["value_float"]) <= .01 and 0 <= cash_float <= item_dict["value_float"])
+        item_dict.update(cash_float=cash_float if cash_valid_bool else None,
+            cash_weight_float=cash_float / result_dict["total_float"] if cash_valid_bool else None,
+            invested_weight_float=(item_dict["value_float"] - cash_float) / result_dict["total_float"] if cash_valid_bool else None)
+    if result_dict["item_list"] and all(item_dict["cash_float"] is not None for item_dict in result_dict["item_list"]):
+        result_dict.update(cash_complete_bool=True, cash_weight_float=sum(item_dict["cash_weight_float"] for item_dict in result_dict["item_list"]))
     return result_dict
 
 

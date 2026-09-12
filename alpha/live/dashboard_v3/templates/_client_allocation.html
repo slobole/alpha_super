@@ -1,24 +1,30 @@
 {% macro allocation_chart(allocation_dict, label_str) -%}
-<div class="client-allocation" aria-label="{{ label_str }}">
+<div class="client-allocation{{ ' client-cash-allocation' if allocation_dict.cash_complete_bool is defined else '' }}" aria-label="{{ label_str }}">
   {% if allocation_dict.item_list %}
   <svg viewBox="0 0 120 120" class="client-donut" role="img" aria-label="{{ label_str }}">
     <circle cx="60" cy="60" r="46" fill="none" stroke="#eef1f5" stroke-width="16"/>
     {% for item_dict in allocation_dict.item_list if item_dict.weight_float > 0 %}
-    <circle cx="60" cy="60" r="46" fill="none" stroke="{{ item_dict.color_str }}" stroke-width="16" pathLength="100" stroke-dasharray="{{ item_dict.weight_float * 100 }} {{ 100 - item_dict.weight_float * 100 }}" stroke-dashoffset="{{ -item_dict.offset_float }}" transform="rotate(-90 60 60)"><title>{{ item_dict.label_str }} · {{ '%.1f'|format(item_dict.weight_float * 100) }}%</title></circle>
+    {% if item_dict.cash_weight_float is defined and item_dict.cash_weight_float is not none %}
+    {% for kind_str, weight_float, offset_float in [('invested', item_dict.invested_weight_float, item_dict.offset_float), ('cash', item_dict.cash_weight_float, item_dict.offset_float + item_dict.invested_weight_float * 100)] if weight_float > 0 %}
+    <circle cx="60" cy="60" r="46" fill="none" stroke="{{ item_dict.color_str }}" stroke-opacity="{{ '.3' if kind_str == 'cash' else '1' }}" stroke-width="16" pathLength="100" stroke-dasharray="{{ weight_float * 100 }} {{ 100 - weight_float * 100 }}" stroke-dashoffset="{{ -offset_float }}" transform="rotate(-90 60 60)" data-allocation-kind="{{ kind_str }}" data-weight="{{ weight_float }}"><title>{{ item_dict.label_str }} · {{ kind_str|capitalize }} · {{ '%.1f'|format(weight_float * 100) }}%</title></circle>
     {% endfor %}
-    <text x="60" y="58" text-anchor="middle" class="client-donut-count">{{ allocation_dict.item_list|length }}</text>
-    <text x="60" y="73" text-anchor="middle" class="client-donut-label">{{ 'holdings' if allocation_dict.position_timestamp_str is defined else 'strategies' }}</text>
+    {% else %}
+    <circle cx="60" cy="60" r="46" fill="none" stroke="{{ item_dict.color_str }}" stroke-width="16" pathLength="100" stroke-dasharray="{{ item_dict.weight_float * 100 }} {{ 100 - item_dict.weight_float * 100 }}" stroke-dashoffset="{{ -item_dict.offset_float }}" transform="rotate(-90 60 60)" data-allocation-kind="unsplit"><title>{{ item_dict.label_str }} · {{ '%.1f'|format(item_dict.weight_float * 100) }}%{% if allocation_dict.cash_complete_bool is defined %} · Cash unavailable{% endif %}</title></circle>
+    {% endif %}
+    {% endfor %}
+    <text x="60" y="58" text-anchor="middle" class="client-donut-count">{% if allocation_dict.cash_complete_bool is defined %}{{ ('%.1f'|format(allocation_dict.cash_weight_float * 100) ~ '%') if allocation_dict.cash_complete_bool else '—' }}{% else %}{{ allocation_dict.item_list|length }}{% endif %}</text>
+    <text x="60" y="73" text-anchor="middle" class="client-donut-label">{{ 'Cash' if allocation_dict.cash_complete_bool is defined else 'holdings' }}</text>
   </svg>
   <ul class="client-allocation-legend">
     {% for item_dict in allocation_dict.item_list %}<li>
       <span class="client-allocation-dot" style="background:{{ item_dict.color_str }}"></span>
-      <span><strong>{{ item_dict.label_str }}</strong><small>{{ item_dict.detail_str }}</small></span>
+      <span class="client-allocation-name"><strong title="{{ item_dict.detail_str }}">{{ item_dict.label_str }}</strong>{% if item_dict.show_identity_bool %}<small>{{ item_dict.detail_str }}</small>{% endif %}{% if item_dict.cash_float is defined %}<small class="client-cash-breakdown">{% if item_dict.cash_float is not none %}<span>Invested {{ '%.1f'|format(item_dict.invested_weight_float * 100) }}%</span><span><i style="background:{{ item_dict.color_str }}"></i>Cash {{ '%.1f'|format(item_dict.cash_weight_float * 100) }}%</span>{% else %}Cash unavailable{% endif %}</small>{% else %}<small>{{ item_dict.detail_str }}</small>{% endif %}</span>
       <span class="client-allocation-value"><strong>{{ '%.1f'|format(item_dict.weight_float * 100) }}%</strong><small>{{ '-' if (item_dict.signed_value_float if item_dict.signed_value_float is defined else item_dict.value_float) < 0 else '' }}${{ '{:,.2f}'.format(item_dict.value_float) }}</small></span>
     </li>{% endfor %}
   </ul>
   {% else %}<p class="client-muted">{{ allocation_dict.reason_str }}</p>{% endif %}
 </div>
-<div class="client-allocation-basis">{{ allocation_dict.basis_str }}{% if allocation_dict.date_str %} · {{ allocation_dict.date_str }}{% endif %}</div>
+{% if allocation_dict.position_timestamp_str is defined %}<div class="client-allocation-basis">{{ allocation_dict.basis_str }}</div>{% endif %}
 {% if allocation_dict.position_timestamp_str is defined %}
 <div class="client-allocation-basis">Positions {{ allocation_dict.position_timestamp_str|clock or 'Unknown' }} · Prices {{ allocation_dict.price_timestamp_str|clock or 'Unknown' }}</div>
 {% if allocation_dict.missing_list %}<p class="client-missing-reason">Unpriced holdings excluded: {{ allocation_dict.missing_list|join(', ') }}</p>{% endif %}

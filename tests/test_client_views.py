@@ -38,8 +38,8 @@ def test_financial_views_share_dates_numbers_and_local_style(financial_client_ob
     assert '<span class="client-badge">Read-only</span>' in html_str
     assert "Investors do not access this workspace" not in html_str
     assert "Broker value, capital movements and investment results" not in html_str
-    assert '<footer class="client-evidence-strip">' in html_str
-    assert 'Source: IBKR' in html_str and 'Data · JSON' in html_str
+    assert '<footer class="client-evidence-strip">' not in html_str
+    assert 'Source: IBKR' not in html_str and 'Data · JSON' not in html_str
     assert 'Net capital movements do not establish' not in html_str
     assert response_obj.headers["Cache-Control"] == "no-store"
 
@@ -48,6 +48,17 @@ def test_all_views_export_same_period_result_hash(financial_client_obj):
     report_list = [financial_client_obj.get(f"/clients/sample/{view_str}?from=2026-09-01&to=2026-09-01&download=json").get_json() for view_str in ("overview", "performance", "report")]
     assert len({report_dict["report_hash_str"] for report_dict in report_list}) == 1
     assert all(report_dict["pnl_float"] == 10 for report_dict in report_list)
+
+
+def test_financial_exports_never_load_optional_cash_evidence(financial_client_obj, monkeypatch):
+    monkeypatch.setattr("alpha.live.dashboard_v3.client_views.load_portfolio_cash_list",
+        lambda *args, **kwargs: pytest.fail("Exports must not read optional cash evidence"))
+    path_str = "/clients/sample/report?from=2026-09-01&to=2026-09-01"
+    report_dict = financial_client_obj.get(path_str + "&download=json").get_json()
+    for view_str in ("overview", "performance", "report"):
+        result_dict = financial_client_obj.get(path_str.replace('/report?', '/' + view_str + '?') + "&download=json").get_json()
+        assert result_dict["report_hash_str"] == report_dict["report_hash_str"]
+    assert financial_client_obj.get(path_str + "&download=pdf&expected=" + report_dict["report_hash_str"]).status_code == 200
 
 
 @pytest.mark.parametrize("view_str", ["overview", "performance", "report"])
@@ -82,7 +93,7 @@ def test_charts_have_numbered_y_axes_instead_of_range_paragraph(financial_client
     assert axis_list and all(axis_str.count('data-value=') == 3 for axis_str in axis_list)
     assert any('%' in axis_str for axis_str in axis_list) if view_str == "performance" else any('$' in axis_str for axis_str in axis_list)
     if view_str == "performance":
-        assert "own scale" in html_str
+        assert "Starting value" in html_str and "Ending value" in html_str
         assert "Period-end drawdown" in html_str
 
 
@@ -214,8 +225,8 @@ def test_account_chart_offers_verified_official_single_account_return(financial_
     html_str = financial_client_obj.get('/clients/sample/overview?from=2026-09-01&to=2026-09-01').get_data(as_text=True)
     assert 'data-account-unit="pct" aria-pressed="true"' in html_str
     assert 'data-account-unit="usd"' in html_str
-    assert 'Cumulative TWR' in html_str
-    assert 'USD · includes transfers' in html_str
+    assert 'Portfolio cumulative return (%)' in html_str
+    assert 'Account value in USD, including transfers' in html_str
     assert 'aria-label="Portfolio cumulative return (%)"' in html_str
 
 

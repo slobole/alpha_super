@@ -34,10 +34,13 @@ class DemoOperationsProvider:
 
     def __init__(self, registry_dict=None):
         self.row_list = []
+        fixture_registry_dict, snapshot_dict = build_demo_fixture_tuple()
         if registry_dict is None:
-            registry_dict, _ = build_demo_fixture_tuple()
+            registry_dict = fixture_registry_dict
         for client_dict in registry_dict["clients"]:
             for index_int, account_dict in enumerate(client_dict["accounts"]):
+                nav_float = float(next(row_obj.closing_nav_decimal for row_obj in snapshot_dict[client_dict["client_id"]].row_tuple
+                    if row_obj.account_route_str == account_dict["account_route"] and row_obj.market_date_str == DEMO_END_STR))
                 severity_str = "yellow" if client_dict["client_id"] == "demo-client" and index_int == 3 else "green"
                 self.row_list.append({
                     "pod_id_str": account_dict["pod_id"], "account_route_str": account_dict["account_route"],
@@ -54,6 +57,9 @@ class DemoOperationsProvider:
                     "latest_vplan_is_for_latest_decision_bool": True, "latest_vplan_cycle_role_str": "current_cycle",
                     "latest_pod_state_timestamp_str": "2026-09-04T20:10:00+00:00",
                     "latest_broker_snapshot_timestamp_str": "2026-09-04T20:10:00+00:00",
+                    "eod_snapshot_dict": {"source_str": "broker", "latest_market_date_str": DEMO_END_STR,
+                        "latest_timestamp_str": "2026-09-04T20:10:00+00:00", "equity_float": nav_float,
+                        "cash_float": round(nav_float * .3, 2)},
                     "latest_live_reference_snapshot_timestamp_str": "2026-09-01T13:23:00+00:00",
                     "latest_live_reference_source_str": "DEMO saved pre-submit reference",
                     "latest_decision_norgate_profile_str": "DEMO-profile", "latest_decision_norgate_snapshot_date_str": "2026-08-31",

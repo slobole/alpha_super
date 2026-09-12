@@ -68,10 +68,6 @@
 .client-workspace .client-row-dates { display: block; color: var(--desk-muted); font-size: 12px; white-space: nowrap; margin-top: 4px; }
 .client-workspace .client-data-issues { color: var(--desk-warning); font-size: 12px; margin: -4px 0 14px; }
 .client-workspace .client-data-issues ul { color: var(--desk-muted); max-height: 240px; overflow: auto; }
-.client-workspace .client-source-delay { color: var(--desk-warning); font-size: 12px; margin: 0 0 12px; }
-.client-workspace .client-method-note { position: relative; width: fit-content; cursor: help; border-bottom: 1px dotted var(--desk-muted); }
-.client-workspace .client-method-note [role="tooltip"] { display: none; position: absolute; right: 0; top: 100%; z-index: 5; width: 260px; max-width: 65vw; padding: 10px; background: var(--desk-panel); border: 1px solid var(--desk-rule); color: var(--desk-text); line-height: 1.5; box-shadow: 0 3px 12px #142d4e18; }
-.client-workspace .client-method-note:hover [role="tooltip"], .client-workspace .client-method-note:focus [role="tooltip"] { display: block; }
 .client-workspace .client-movement { font-size: 12px; color: var(--desk-muted); border: 1px solid var(--desk-rule); padding: 1px 3px; cursor: help; }
 .client-workspace .client-details, .client-workspace .client-details p { font-size: 12px; }
 .client-workspace .client-details > summary { color: var(--desk-muted); }
@@ -108,7 +104,6 @@
 .client-workspace .client-daily-table-wrap { max-height: 204px; overflow: auto; border-left: 1px solid var(--desk-rule); padding-left: 12px; }
 .client-workspace .client-daily-table thead { position: sticky; top: 0; background: var(--desk-panel); z-index: 1; }
 .client-workspace .client-daily-table td { font-size: 12px; padding: 6px 8px; }
-.client-workspace .client-evidence-strip { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--desk-muted); padding: 12px 0; border-top: 1px solid var(--desk-rule); }
 .client-workspace .client-event { border-color: var(--desk-rule); padding: 8px 0; }
 .client-workspace .client-event > summary { font-size: 12px; }
 .client-workspace .client-event-time { color: var(--desk-muted); }
@@ -181,8 +176,11 @@
 .client-workspace .client-header { min-height: 60px; }
 .client-workspace .client-content { padding: 28px 32px; }
 .client-workspace .client-kpis { border-radius: 10px; overflow: visible; }
+.client-workspace .client-kpis[data-view=overview] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .client-workspace .client-kpis > div { padding: 20px 22px; }
 .client-workspace .client-kpis p { font-size: 13px; }
+.client-workspace .client-strategy-values { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+.client-workspace .client-strategy-values strong { display: block; margin-top: 4px; font-size: 15px; font-weight: 500; }
 .client-workspace .ops-table th { text-transform: none; font-size: 12px; letter-spacing: 0; }
 .client-workspace .ops-table td { padding-top: 12px; padding-bottom: 12px; font-size: 13px; }
 .client-workspace .client-months > span { background: #f5f6f8; border: 0; border-radius: 6px; padding: 10px 14px; }
@@ -207,6 +205,12 @@
 .client-workspace .client-allocation-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; }
 .client-workspace .client-allocation-value { text-align: right; margin-left: auto; white-space: nowrap; }
 .client-workspace .client-allocation-basis { font-size: 12px; color: var(--desk-muted); margin-top: 8px; }
+.client-workspace .client-cash-allocation .client-allocation-legend li { align-items: flex-start; }
+.client-workspace .client-cash-allocation .client-allocation-dot { margin-top: 6px; }
+.client-workspace .client-allocation-name { min-width: 0; }
+.client-workspace .client-cash-breakdown { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 5px; }
+.client-workspace .client-cash-breakdown > span { white-space: nowrap; }
+.client-workspace .client-cash-breakdown i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; opacity: .3; margin-right: 4px; }
 .client-workspace .client-state-label { color: var(--desk-muted); font-size: 12px; font-weight: 500; }
 .client-workspace .client-state-label[data-severity=green] { color: var(--desk-positive); }
 .client-workspace .client-state-label[data-severity=yellow] { color: var(--desk-warning); }
@@ -263,4 +267,11 @@
   .client-workspace .client-pod-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .client-workspace .client-allocation { min-height: 180px; }
   .client-workspace .client-chart-readout > span { margin-left: 0; }
+  .client-workspace .client-kpis[data-view=overview] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .client-workspace .client-kpis[data-view=overview] > div { padding: 14px 12px; }
+  .client-workspace .client-kpis[data-view=overview] > div:first-child { grid-column: 1 / -1; border-right: 0; }
+  .client-workspace .client-kpis[data-view=overview] strong { font-size: clamp(16px, 4.5vw, 23px); }
+  .client-workspace .client-kpis[data-view=overview] > div:first-child strong { font-size: 26px; }
+  .client-workspace .client-strategy-values { gap: 8px; }
+  .client-workspace .client-strategy-values strong { font-size: 13px; }
 }

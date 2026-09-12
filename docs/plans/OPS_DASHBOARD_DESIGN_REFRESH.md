@@ -4,6 +4,68 @@ Local implementation, September 2026. User scope: retain the new workspace,
 restore useful allocations and operational evidence from the old screens, and
 make navigation, typography, charts and current flow position simple to read.
 
+## September 12: minimal financial view and cash allocation
+
+Overview shows account value, P&L and TWR. Strategy results and Performance show
+each strategy's starting and ending values for the selected period. Repeated
+source/date captions, the pending-import line, chart-basis captions and the JSON
+footer are removed. The date inputs still state the selected period; missing
+figures and collapsed data issues remain. The return-method description is on
+the TWR label's tooltip. Calculations, financial defaults and exports are unchanged.
+
+Portfolio allocation uses one ring, with each strategy's invested and cash
+segments adjacent. Cash uses a lighter shade of the strategy color. Percentages
+use total portfolio NAV as the denominator; the center shows aggregate cash.
+Repeated strategy names retain visible account identities.
+
+```text
+[Selected-date IBKR NAV] + [Same-date saved broker EOD cash]
+                          |
+              [Account / Pod / date / NAV match]
+                          |
+         [Invested segment + cash segment in one ring]
+```
+
+For strategy i: `cash_share_i = cash_i / sum(NAV_i)` and
+`invested_share_i = (NAV_i - cash_i) / sum(NAV_i)`. Matching requires finite
+values, `0 <= cash_i <= NAV_i`, and broker EOD equity within $0.01 of canonical
+NAV. Missing, negative, over-NAV or ambiguous cash leaves that strategy's full
+NAV slice unsplit with cash unavailable; total cash is withheld until every
+strategy is verified. Missing cash is never zero-filled.
+
+Local cash comes only from the configured Pod database opened with `mode=ro`,
+filtered by Pod, account, user, broker source and EOD stage. The selected ET date
+must match exactly, and timestamp evidence must be timezone-aware, no later
+than the read and after the exchange close plus the existing 10-minute buffer.
+The latest valid capture on that date is used; duplicate latest timestamps are
+ambiguous. Malformed old timestamps are skipped individually. Snapshot clients
+remain on their scoped saved source; synthetic demo cash is separate from
+ChangeInNAV. No cash read occurs for financial exports or other financial views.
+
+Live-impact checklist: order timing, sizing, reference-price semantics,
+state/pickle/SQLite schemas, config formats, logs and released YAMLs are
+unchanged. Optional missing/locked cash sources preserve financial NAV. The
+existing broker capture defaults a missing TotalCashValue tag to zero and does
+not retain tag-presence provenance; this display change does not alter capture.
+The UI uses stored cash facts and cannot independently establish raw-tag presence.
+No broker, scheduler, release or deployment action is part of this change.
+
+Verification for September 12 (Tier 3; tests/browser tools/docs are Tier 0):
+
+- Broad client/dashboard/live regression run: 979 passed; one old exact-markup
+  assertion was updated for the tooltip attribute and passed on rerun.
+- Final TWR and cash regression suites: 69 passed, including report-hash parity,
+  real-provider same-date cash and unchanged stored files.
+- Demo and both real-provider synthetic browser suites passed all seven views
+  at 1440/768/390 pixels, plus Advanced, cash extremes/unknown HTML states and
+  large mobile values. A refreshed loopback demo returns 200 with 30% cash and
+  without the removed source/footer lines.
+- Parity/quant, failure-mode and coverage reviews have no remaining findings.
+  Fixed malformed old timestamps, summary/history duplicate-check inconsistency,
+  repeated-name identity and mobile KPI width concerns.
+- Scoped triage and `git diff --check` passed. Unrelated research files remain
+  untouched. Cash availability remains limited by saved broker evidence.
+
 Each VPS serves exactly one client. Entry opens that client's Overview directly;
 there is no client directory or switcher. Remote viewing uses the same workspace.
 The dashboard rejects a reporting registry containing multiple clients without

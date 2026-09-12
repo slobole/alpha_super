@@ -61,7 +61,7 @@ async function main() {
       assert.equal(await pageObj.locator('tbody tr').count(), 4);
       assert(await pageObj.getByRole('heading', { name: 'Market comparison', exact: true }).isVisible());
       assert(await pageObj.getByRole('link', { name: 'Download investor PDF', exact: true }).isVisible());
-      assert(await pageObj.locator('.client-evidence-strip').isVisible());
+      assert.equal(await pageObj.locator('.client-evidence-strip, .client-source-delay').count(), 0);
       assert.equal(await pageObj.locator('.client-source-details').count(), 0);
       const layoutObj = await pageObj.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth }));
       assert(layoutObj.scrollWidth <= layoutObj.width, `Horizontal page overflow: ${JSON.stringify(layoutObj)}`);
@@ -84,12 +84,16 @@ async function main() {
         assert(await pageObj.getByText('Demo data', { exact: true }).isVisible());
         assert(!(await pageObj.locator('main').innerText()).includes('financial selection never changes trading state'));
         if (['overview', 'performance'].includes(viewStr)) {
-          assert(await pageObj.locator('.client-evidence-strip').isVisible());
+          assert.equal(await pageObj.locator('.client-evidence-strip, .client-source-delay').count(), 0);
           assert.equal(await pageObj.locator('.client-source-details').count(), 0);
           assert(!(await pageObj.locator('main').innerText()).includes('Unavailable: daily account NAV/TWR'));
-          assert(await pageObj.locator('[data-client-twr]').getByText('Calculated · daily', { exact: true }).isVisible());
+          assert.equal(await pageObj.getByText('Calculated · daily', { exact: true }).count(), 0);
           assert(await pageObj.locator('.client-return-panel svg:visible').isVisible());
           if (viewStr === 'overview') {
+            assert.equal(await pageObj.locator('.client-kpis > div').count(), 3);
+            assert.equal(await pageObj.locator('.client-allocation-panel [data-allocation-kind="cash"]').count(), 4);
+            assert.equal(await pageObj.locator('.client-allocation-panel .client-donut-count').textContent(), '30.0%');
+            assert.equal(await pageObj.locator('.client-strategy-results th').filter({ hasText: 'Starting value' }).count(), 1);
             const accountObj = pageObj.locator('[data-account-panel]');
             assert(await accountObj.locator('[data-account-unit="pct"]').isEnabled());
             await accountObj.locator('[data-account-unit="usd"]').click();
@@ -164,6 +168,7 @@ async function main() {
           await pageObj.locator('.client-event summary').first().click();
         }
         if (viewStr === 'performance') {
+          assert.equal(await pageObj.locator('.client-strategy-values').count(), 4);
           assert.equal(await pageObj.locator('.client-comparison').count(), 4);
           assert.equal(await pageObj.locator('.client-comparison[open]').count(), 0);
           await pageObj.locator('.client-comparison summary').first().click();
@@ -241,6 +246,15 @@ async function main() {
     }
     assert.deepEqual(remoteRequestList, []);
     assert.deepEqual(pageErrorList, []);
+    await pageObj.setViewportSize({ width: 390, height: 1000 });
+    await pageObj.goto(originStr + '/clients/demo-client/overview?from=2026-06-01&to=2026-09-04');
+    const largeValuesFitBool = await pageObj.locator('.client-kpis').evaluate(elementObj => {
+      const valueList = elementObj.querySelectorAll(':scope > div > strong');
+      valueList[0].textContent = '$1,000,000.00';
+      valueList[1].textContent = '-$100,000.00';
+      return [...valueList].every(valueObj => valueObj.scrollWidth <= valueObj.clientWidth);
+    });
+    assert(largeValuesFitBool, 'Large financial values must fit mobile KPI cards');
     console.log(JSON.stringify({ result: 'PASS', viewports: [1440, 768, 390], clientViews: clientViewList.concat('report'), advancedPaths: advancedPathList, strategies: 4, singleClientWorkspace: 'PASS', periodForm: 'PASS', noLoginPdfDownload: 'PASS', remoteAssetsBlocked: true, outputDir: outputDirStr }));
   } finally {
     if (browserObj) await browserObj.close();
