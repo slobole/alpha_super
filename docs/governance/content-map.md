@@ -19,7 +19,9 @@ This is a routing map, not a claim that every document has been audited. “Publ
 | `ASSUMPTIONS_AND_GAPS.md` | Canonical | Reference | Keep path; add audited wrapper later |
 | `LIVE_START_HERE.md` | Canonical LIVE entry | Operations / Reference | Publish only after LIVE audit |
 | `COMMANDS.md` | Reference candidate | Reference | Audit commands before publication |
-| `AGENTS.md`, `CLAUDE.md` | Canonical agent guidance | Reference | Keep paths; do not present as user tutorials |
+| `AGENTS.md` | Canonical shared agent guidance | Reference | Keep the entry point concise |
+| `CLAUDE.md` | Agent entry point | Reference | Point to the shared AGENTS.md rules |
+| `docs/ai/PROJECT_GUIDE.md` | Canonical verification policy; technical reference | Repository only | Read relevant sections; not published in the portal |
 | `docs/ai/KARPATHY_GUIDELINES.md` | Canonical engineering guidance | Reference | Keep path |
 
 ## LIVE and operations

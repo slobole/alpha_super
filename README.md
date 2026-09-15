@@ -8,11 +8,11 @@ This README is the index. It answers "where do I find X" — the content lives i
 
 | You want to... | Go to |
 |---|---|
-| Understand the house rules before touching code | [QUANT_PHILOSOPHY.md](QUANT_PHILOSOPHY.md), then [ASSUMPTIONS_AND_GAPS.md](ASSUMPTIONS_AND_GAPS.md) |
+| Find the rules relevant to a change | [AGENTS.md](AGENTS.md); for quantitative work, [QUANT_PHILOSOPHY.md](QUANT_PHILOSOPHY.md) and relevant [gap records](ASSUMPTIONS_AND_GAPS.md) |
 | Run research: backtests, analyses, portfolios | [COMMANDS.md](COMMANDS.md), or the Bench web UI (`uv run python -m alpha.bench`) |
 | Operate live trading | [LIVE_START_HERE.md](LIVE_START_HERE.md) |
 | Diagnose a live red alert | [docs/live/DEBUGGING_RUNBOOK.md](docs/live/DEBUGGING_RUNBOOK.md) |
-| Work on the code as an AI agent | [CLAUDE.md](CLAUDE.md) (Claude Code) / [AGENTS.md](AGENTS.md) (Codex) |
+| Work on the code as an AI agent | [AGENTS.md](AGENTS.md) (shared agreements); [CLAUDE.md](CLAUDE.md) points Claude Code to the same rules |
 
 ## Repository Map
 
@@ -35,12 +35,14 @@ results/           run artifacts (gitignored)
 
 ## Document Index
 
-### Doctrine — read first
+### Doctrine and working agreements
 
 | Document | Purpose |
 |---|---|
 | [QUANT_PHILOSOPHY.md](QUANT_PHILOSOPHY.md) | House doctrine: causality, execution realism, pod model, what good quant work looks like. |
 | [ASSUMPTIONS_AND_GAPS.md](ASSUMPTIONS_AND_GAPS.md) | The gaps register: every known realism limit, its impact, mitigation, and status. |
+| [AGENTS.md](AGENTS.md) | Shared working agreements and task-specific reading map. |
+| [docs/ai/PROJECT_GUIDE.md](docs/ai/PROJECT_GUIDE.md) | Shared verification policy, review roles, commands, and technical structure. |
 | [docs/ai/KARPATHY_GUIDELINES.md](docs/ai/KARPATHY_GUIDELINES.md) | Engineering guardrails: think before coding, simplicity first, surgical changes. |
 
 ### Operations
@@ -80,4 +82,4 @@ Strategy-specific notes live next to the strategy file (for example `strategies/
 
 ![System design](system_design.png)
 
-The sketch above is the original high-level design (2025). The current authoritative architecture description is the [Architecture section of CLAUDE.md](CLAUDE.md#architecture); for the live layer, [docs/live/LIVE_TECHNICAL_REFERENCE.md](docs/live/LIVE_TECHNICAL_REFERENCE.md).
+The sketch above is the original high-level design (2025). The current authoritative architecture description is the [Architecture section of Project Guide](docs/ai/PROJECT_GUIDE.md#architecture); for the live layer, [docs/live/LIVE_TECHNICAL_REFERENCE.md](docs/live/LIVE_TECHNICAL_REFERENCE.md).

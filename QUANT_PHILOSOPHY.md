@@ -1,22 +1,14 @@
 ﻿# Quant Philosophy
 
-This document is the house doctrine for this repository. If you are an AI agent or an engineer, read this before changing the engine, adding strategies, or modifying research logic.
+This document is the authority for the repository's quantitative principles and contracts. Read it before changing strategies, data, quantitative calculations, or execution semantics. Follow [AGENTS.md](AGENTS.md) for the shared working agreements.
+
+Our guiding principle is **Simplicity & Correctness**. Quantitative correctness and robustness take priority; choose the simplest explanation and implementation that preserve reliability, auditability, and required safeguards.
 
 ## Operating Context
 
-This repository is not a toy backtester and not an academic notebook collection. It represents a hedge fund quant research and engineering stack for a multi-strategy, pod-based platform.
+This repository contains a multi-strategy quantitative research and trading platform, including backtests, portfolio analysis, and an IBKR execution layer. Changes can affect systems that trade real capital.
 
-Today:
-
-- We research and backtest systematic strategies.
-- We combine them as pods inside a multi-strategy portfolio.
-- We care about institutional quantitative correctness, not just good-looking charts.
-
-Target state:
-
-- A live multi-strategy stack with pod-level capital allocation.
-- A future execution layer connected to IBKR.
-- A research environment that makes bad quant work hard to express.
+Keep durable principles here. Use dated operational evidence to establish current readiness, and use [Assumptions and Gaps](ASSUMPTIONS_AND_GAPS.md) for modeling limits and differences between research and execution.
 
 ## Governing Equations
 
@@ -122,7 +114,7 @@ For live deployment, prefer a deterministic order-clerk model: simple, explicit,
 
 ## What Good Quant Work Looks Like
 
-### Simplicity and readability are quantitative controls
+### Simplicity & Correctness
 
 Simple code is not just style. It is a defense against hidden assumptions and hidden bugs.
 
@@ -132,7 +124,7 @@ Simple code is not just style. It is a defense against hidden assumptions and hi
 - Prefer readable intermediate variables over compressed one-liners.
 - Prefer a strategy with a small number of justified rules over a parameter-heavy ruleset.
 
-If a reader cannot explain the logic quickly, the implementation is too complicated.
+Simplification must preserve causal timing, data lineage, execution realism, required tests and reviews, and operational safeguards. When complexity is necessary for correctness, explain why and break it into clear steps.
 
 Code is accepted only if a human owner can read it later without needing the
 agent or engineer who wrote it. Prefer code that looks like the obvious next
@@ -142,11 +134,26 @@ step a careful human would have written.
 
 Keep the logic rigorous, but keep the explanation simple, precise, and easy for a human to follow quickly.
 
+The owner is not continuously involved in the project. Restore the context needed to understand the work without relying on memory of earlier conversations.
+
 Default explanation order:
 
-- plain-language intuition
-- exact rule
+- a short summary of the goal, essential context, and conclusion
+- plain-language intuition: what we are doing and why it matters
+- the exact rule and relevant details
 - formula only if it materially improves correctness, auditability, or semantic precision
+- what was verified, what the result means, what remains uncertain, and any decision needed
+
+Use familiar words, short sections, and small examples when helpful. Explain necessary technical terms when first used.
+
+Keep explanations complete:
+
+- For strategies and features, state every relevant assumption, rule, parameter, data dependency, formula, and timing detail needed to understand and assess the behavior.
+- For changes, explain the current situation, what changed, why, and how it was checked.
+- Distinguish verified facts from assumptions, estimates, and untested claims. Preserve material limitations, risks, and unfavorable results.
+- Put caveats that affect the conclusion beside that conclusion. Supporting details may follow in clear sections; links supplement the explanation rather than replace essential information.
+
+Remove jargon, repetition, and unnecessary complexity to make the message easier to read. Preserve the information needed to understand it and make an informed decision.
 
 Write the formula when the code implements a non-trivial quantitative transformation that a reviewer must audit.
 
@@ -204,7 +211,9 @@ Examples:
 - rebalance-date mapping
 - feature sampling at month-end or quarter-end
 
-The purpose of the comment is to force a second audit pass by future readers and AI agents.
+The comment must identify the pitfall and the exact decision/execution boundary so future readers can audit the operation.
+
+Verify direction and lag, rolling-window endpoints, fill boundaries, chronological train/test separation, training-only fitting, the meaning of "latest", and observation/publication timestamps in joins. Document the evidence. Investigate unresolved questions within the approved phase; ask the owner when material uncertainty remains or the intended contract must change.
 
 ### Dangerous assumptions must fail loud
 
@@ -220,6 +229,12 @@ When a risk is identified, document at minimum:
 - `mitigation_str`
 
 If the impact cannot yet be quantified exactly, bound it qualitatively and say so plainly. When uncertain, do not silently choose the prettier implementation. Choose the more explicit implementation and state the uncertainty.
+
+### Price adjustments must match their role
+
+Use `CAPITALSPECIAL` for fills, marks, traded OHLC, and level- or scale-sensitive features. `TOTALRETURN` is allowed only for explicitly causal return-space signals and performance benchmarks; never use it as a fill or mark price. Declare the adjustment role and provenance in saved artifacts.
+
+Retain each strategy's approved price basis. Any change is a separate quantitative decision, with the old behavior, new behavior, and consequence made explicit. This preserves the role separation recorded in the [July 2026 decision](docs/research/ENGINE_REALISM_TOTAL_RETURN_DIVIDENDS_AND_CASH_DECISION.md#joint-verdict).
 
 ## What Backtests Are For
 
@@ -267,7 +282,7 @@ $$
 \mathcal{U}_t \neq \mathcal{U}_{today}
 $$
 
-Never backtest on a static list of current survivors when the live strategy would have traded delisted or removed names historically.
+Never backtest on a static list of current survivors when the live strategy would have traded delisted or removed names historically. Use point-in-time constituent membership, such as Norgate's `index_constituent_timeseries`, for historical universes.
 
 ### 3. Storytelling bias
 
@@ -313,6 +328,14 @@ Do not assume frictionless liquidity, effortless execution, or operational simpl
 - Capacity is strategy logic, not an afterthought.
 - Execution difficulty is part of the expected return distribution.
 - If the live workflow would be materially harder than the simulation implies, the result is overstated.
+
+### 9. Statistical honesty and validation
+
+Report metrics over the full out-of-sample period without selecting favorable dates or excluding drawdowns. Sharpe uses a zero risk-free rate; keep the calculation basis explicit.
+
+Base strategies on an explainable mechanism with few justified parameters. Keep training and validation chronological, fit transformations only on training data, and disclose the full search. Freeze each hypothesis and its evaluation before inspecting its results; post-result changes are new hypotheses.
+
+Judge regime dependence, sample size, corporate actions, costs, liquidity, and execution constraints before making stronger claims. Passing implementation tests does not independently validate an investment edge.
 
 ## Engine Order Is Part Of The Model
 

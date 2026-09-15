@@ -34,7 +34,7 @@ Do not silently assume semantics.
 - State assumptions explicitly before implementation when the behavior is ambiguous.
 - If multiple interpretations exist, surface them instead of choosing one silently.
 - If a simpler approach exists, say so.
-- If something is unclear, stop and name the uncertainty.
+- Investigate technical uncertainty using code, documentation, and tests within the approved scope. Follow [AGENTS.md](../../AGENTS.md) when a material uncertainty or scope change requires the owner's decision.
 
 ## 2. Simplicity First
 

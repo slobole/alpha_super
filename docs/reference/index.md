@@ -15,7 +15,9 @@ risk_scope: none
 |---|---|
 | What quantitative principles govern the project? | `QUANT_PHILOSOPHY.md` |
 | Which assumptions and realism gaps are currently accepted? | `ASSUMPTIONS_AND_GAPS.md` |
-| How should AI and engineers change the repository? | `AGENTS.md`, `CLAUDE.md`, `docs/ai/KARPATHY_GUIDELINES.md` |
+| How should AI and engineers change the repository? | `AGENTS.md` (shared); `CLAUDE.md` points to the same rules |
+| Which checks, reviewers, and technical reference apply? | `docs/ai/PROJECT_GUIDE.md` |
+| Where are the engineering conventions? | `docs/ai/KARPATHY_GUIDELINES.md` |
 | Where does LIVE operation begin? | `LIVE_START_HERE.md` |
 | What is the detailed LIVE contract? | `docs/live/LIVE_TECHNICAL_REFERENCE.md` |
 | How is LIVE architecture organized? | `docs/live/LIVE_TRADING_ARCHITECTURE.md` |
