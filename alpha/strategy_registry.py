@@ -60,6 +60,9 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     "strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy": MaturityTier.WIRED,
     "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy": MaturityTier.WIRED,
     # ── pm-ready: may join a book, not connected to live ────────────────────
+    # Five analyzers and capital/benchmark/determinism checks passed 2026-09-13.
+    # MOC and fixed TLT borrow remain research execution assumptions.
+    "strategies.taa_beyond_6040.strategy_taa_month_end_rebalancing_flow": MaturityTier.PM_READY,
     # Frozen hedge rules. Capital, total-return benchmark and deterministic
     # reruns passed 2026-09-05; eligibility is plumbing, not allocation approval.
     "strategies.tail_hedge.strategy_crisis_trend_core": MaturityTier.PM_READY,

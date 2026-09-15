@@ -728,6 +728,24 @@ def _build_mr_us_sector_etf_ibs_downshock_vox_iyr_strategy_obj(
     return build_stress_test_strategy_obj(context_dict)
 
 
+def _load_taa_month_end_rebalancing_flow_context_dict() -> dict[str, object]:
+    from strategies.taa_beyond_6040.strategy_taa_month_end_rebalancing_flow import (
+        build_stress_test_context_dict,
+    )
+
+    return build_stress_test_context_dict()
+
+
+def _build_taa_month_end_rebalancing_flow_strategy_obj(
+    context_dict: dict[str, object],
+) -> Strategy:
+    from strategies.taa_beyond_6040.strategy_taa_month_end_rebalancing_flow import (
+        build_stress_test_strategy_obj,
+    )
+
+    return build_stress_test_strategy_obj(context_dict)
+
+
 def _load_mo_atr_normalized_ndx_context_dict() -> dict[str, object]:
     from strategies.momentum.strategy_mo_atr_normalized_ndx import (
         DEFAULT_CONFIG,
@@ -884,6 +902,12 @@ SUPPORTED_CRISIS_STRATEGY_SPEC_MAP: dict[str, CrisisStrategySpec] = {
         strategy_key_str="strategy_taa_tactical_fixed_income_ief_lqd",
         load_context_fn=_load_taa_tactical_fixed_income_ief_lqd_context_dict,
         build_strategy_fn=_build_taa_tactical_fixed_income_ief_lqd_strategy_obj,
+        full_history_replay_bool=True,
+    ),
+    "strategy_taa_month_end_rebalancing_flow": CrisisStrategySpec(
+        strategy_key_str="strategy_taa_month_end_rebalancing_flow",
+        load_context_fn=_load_taa_month_end_rebalancing_flow_context_dict,
+        build_strategy_fn=_build_taa_month_end_rebalancing_flow_strategy_obj,
         full_history_replay_bool=True,
     ),
     "strategy_mr_us_sector_etf_ibs_downshock_vox_iyr": CrisisStrategySpec(

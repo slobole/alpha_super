@@ -138,12 +138,22 @@ def test_catalog_lists_strategies_and_flags_wired():
     assert vox_iyr_entry.has_run_variant_bool is True
     assert vox_iyr_entry.has_capacity_analysis_bool is True
 
+    flow_entry_obj = catalog.get_strategy_by_module(
+        "strategies.taa_beyond_6040.strategy_taa_month_end_rebalancing_flow"
+    )
+    assert flow_entry_obj is not None
+    assert flow_entry_obj.is_pm_ready_bool is True
+    assert flow_entry_obj.is_wired_bool is False
+    assert flow_entry_obj.has_run_variant_bool is True
+    assert flow_entry_obj.has_capacity_analysis_bool is True
+    assert flow_entry_obj.has_timing_analysis_bool is True
+
     capacity_entry_list = [
         entry_obj
         for entry_obj in strategy_entry_list
         if entry_obj.has_capacity_analysis_bool
     ]
-    assert len(capacity_entry_list) == 39
+    assert len(capacity_entry_list) == 40
     assert (
         "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi"
         in {entry_obj.module_import_str for entry_obj in capacity_entry_list}

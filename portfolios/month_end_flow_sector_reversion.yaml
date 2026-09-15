@@ -1,0 +1,20 @@
+# Research Vanilla: two independent sleeves, initially 50/50; weights drift.
+# Each sleeve retains its own execution timing, costs and full signal warmup.
+name_str: month_end_flow_sector_reversion
+capital_base_float: 100000.0
+backtest_start_date_str: "2004-11-26"
+end_date_str: "2026-09-11"
+allocation_policy_str: fixed
+max_workers_int: 2
+rebalance: null
+save_pod_artifacts_bool: true
+regression_benchmark_symbol_str: "$SPX"
+
+pods:
+  - pod_id_str: pod_month_end_flow
+    strategy_import_str: strategies.taa_beyond_6040.strategy_taa_month_end_rebalancing_flow
+    weight_float: 0.5
+
+  - pod_id_str: pod_sector_reversion
+    strategy_import_str: strategies.mean_reversion.strategy_mr_us_sector_etf_ibs_downshock_vox_iyr
+    weight_float: 0.5

@@ -1,0 +1,19 @@
+{
+  "source_study_str": "rj_macro_etf_flow_edges_study",
+  "source_frozen_date_str": "2026-09-11",
+  "scope_str": "reduced local verification fixtures; TOTALRETURN diagnostics only",
+  "source_sha256_dict": {
+    "C_MAIN_IMPLEMENTATION_SPEC.md": "4da0c9ed50484f5f91e466042fdc4fe8c576e111b449f5b598709f12bc13c2a9",
+    "data/spy_tlt_ief_daily.csv": "f31bd4f0de67f6b9aad0bc63cf6040519910d2b03d7f1ea3dc67c3205ed7edd0",
+    "data/input_metadata.json": "1e24169ef93c6dd1968c50503a41a77630e99dc5ec99fe7514566431febe1558",
+    "tables/month_table_w5_lag1.csv": "191a1fc4d9b19a3528d1f1f69d00c6b5357636999c10e16b32986f045b48ac45",
+    "tables/positions_C_main_moc_lag1.csv": "014f06c7076a5faeb0c97108416e8c7eb63dcb1a1312e6e635c4c4509fe35a87",
+    "tables/candidate_daily_returns_10bps.csv": "ca011d6724c91104f3fe5797ec28af11ea868015eaca484ffaa1d8a31622d91e"
+  },
+  "fixture_sha256_dict": {
+    "daily_reference.csv": "a7411af147d49f9bed66aeb6afc5db8ae60a1c63633ca80091790393ba24f882",
+    "hold_targets.csv": "014f06c7076a5faeb0c97108416e8c7eb63dcb1a1312e6e635c4c4509fe35a87",
+    "monthly_reference.csv": "6236439b75ab20c9d8159f995c7535fd9a23fc59f058b5e79f130c9fd7b3cc05",
+    "total_return_closes.csv": "7cf683022062664e3fb2f6513a0c6ff758bcf38c696d6e8532caf0acaea0423b"
+  }
+}

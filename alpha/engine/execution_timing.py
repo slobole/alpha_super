@@ -1565,6 +1565,17 @@ class ExecutionTimingAnalyzer:
             if order_kind_str == "flat":
                 continue
 
+            # *** CRITICAL*** A reversal can submit a long close followed by a
+            # distinct short entry before either fills. Both have negative deltas
+            # against the still-long position. Honor explicitly declared roles
+            # so the new short uses ENTRY timing; unannotated orders retain the
+            # existing position/delta classifier without a behavior change.
+            declared_kind_str = getattr(order_obj, "timing_order_kind_str", None)
+            if declared_kind_str is not None:
+                if declared_kind_str not in {"entry", "exit"}:
+                    raise ValueError("timing_order_kind_str must be 'entry' or 'exit'.")
+                order_kind_str = declared_kind_str
+
             timing_rule = get_execution_timing_rule(
                 entry_timing_str if order_kind_str == "entry" else exit_timing_str
             )
