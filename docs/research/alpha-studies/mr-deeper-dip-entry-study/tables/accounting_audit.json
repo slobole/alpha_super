@@ -1,0 +1,20 @@
+[
+  {
+    "strategy": "dv2",
+    "native_transaction_parity": true,
+    "native_dividend_event_parity": true,
+    "dividend_events": 424
+  },
+  {
+    "strategy": "hpi235",
+    "native_transaction_parity": true,
+    "native_dividend_event_parity": true,
+    "dividend_events": 390
+  },
+  {
+    "strategy": "sector",
+    "native_transaction_parity": true,
+    "native_dividend_event_parity": true,
+    "dividend_events": 158
+  }
+]

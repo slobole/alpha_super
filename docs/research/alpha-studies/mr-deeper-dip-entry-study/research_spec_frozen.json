@@ -1,0 +1,153 @@
+{
+  "schema_version": "quant-research-spec-v1",
+  "study_id": "mr_deeper_dip_entry_study",
+  "status": "frozen_before_new_full_results",
+  "initial_frozen_at": "2026-09-15 15:58:52 UTC",
+  "research_only": true,
+  "objective": "Does waiting 0.5%, 1%, or 2% below next open improve DV2, HPI235 vote, and sector VOX/IYR after missed opportunities, portfolio state and costs?",
+  "sources": [
+    {
+      "path": "C:/Users/User/Downloads/Where to Buy the (Deeper) Dip.pdf",
+      "role": "entry-policy inspiration; its separate 10-day-low signal is not replicated",
+      "read_complete": true,
+      "pages": 15,
+      "limitation": "some right margins clipped",
+      "sha256": "779b6656a0b9d43f0ea8839dbe3b54c8b3ce53becaf86a250230c7a8bdd3ad6a"
+    }
+  ],
+  "data": {
+    "vendor": "Norgate local direct",
+    "history_start": "1998-01-01",
+    "requested_execution_start": "2010-01-01",
+    "execution_end": "2026-09-14",
+    "capital_per_strategy": 100000,
+    "adjustment": "CAPITALSPECIAL traded OHLC and marks; TOTALRETURN SPXTR benchmark",
+    "membership": "native DV2 former-member 5-positive-row tail exclusion; HPI exact PIT; sector fixed 11 ETF basket",
+    "padding": "native loader contracts retained: DV2/sector ALLMARKETDAYS; HPI NONE with valuation-only Close forward fill",
+    "lineage": "data/<strategy>/input_manifest.json hashes exact prices/universe/calendar before execution",
+    "data_asof": "2026-09-14 Final edition observed in native database metadata",
+    "intraday": "not available in bounded local search"
+  },
+  "timing": {
+    "decision": "Close_T",
+    "baseline_entry": "Open_T+1",
+    "limit_entry": "ideal immediate-after-open activation, L=O*(1-d), eligible Low<=L",
+    "stress_eligibility": "Low<=L*(1-0.0005)",
+    "expiry": "same regular session only",
+    "exit": "original Close_T trigger; Open_T+1 market fill",
+    "no_fill": "cash; no late market fallback, no intraday replacement; next close re-evaluates original signal",
+    "critical_boundary": "Low is observed only in execution evaluator, never selection, ranking or sizing",
+    "terminal": "mark residual holdings at final Close; show separately from completed trades"
+  },
+  "signal": {
+    "dv2": "original DVO2Strategy: DV2_126<10, C>SMA200, Return126>0.05; NATR14 descending; exit C_T>High_T-1",
+    "hpi235": "at least2 of3 horizons2,3,5 have negative return and HPI<30; IBS<0.1,C>SMA200; turnover descending; exit IBS>.9 OR RSI2>90 OR lost PIT membership",
+    "sector": "IBS<.05 and (C_T-C_T-1)/ATR14_T-1<-.5; priorNATR14 descending; exit IBS>.9 and log(H/L)>prior21session median; basket XLB XLE XLF XLI XLK XLP XLU XLV XLY VOX IYR"
+  },
+  "feature_roles": {
+    "depth": "entry execution/selection policy only"
+  },
+  "portfolio": {
+    "state": "independent native state per arm",
+    "quantities": "original prior-close quantity rules; DV2/HPI floor(V/10/C); sector fractional V*(1.5/11)/C",
+    "slots": "10 DV2/HPI;5sector",
+    "cash_return": 0,
+    "financing": "native unmodeled negative cash; disclose counts/minimum",
+    "rank_and_exit": "unchanged",
+    "cash_constraints": "native may go negative after gaps; do not select fillable candidates retrospectively",
+    "paired": "same native selected opportunity, same quantity, same original exit or terminal mark; misses zero; allocate commission/friction/dividends"
+  },
+  "evaluation": {
+    "window": "common native calendars after2010 with no results-dependent truncation",
+    "subperiods": [
+      "2010-2014",
+      "2015-2019",
+      "2020-2022",
+      "2023-2026-09-14"
+    ],
+    "holdout": "none claimed; historic source and internal research already seen",
+    "metrics": [
+      "CAGR",
+      "all-days Sharpe rf0",
+      "maxDD",
+      "volatility",
+      "exposure",
+      "cash",
+      "positions",
+      "fills",
+      "turnover",
+      "correlation",
+      "beta",
+      "trade-tail",
+      "missed-opportunity PnL"
+    ],
+    "inference": "paired daily-return HAC lag5, Holm across9 central differences; descriptive known-history only",
+    "prior_exposure": "paper aggregate2010-May2026 seen; prior internal studies on these systems; read-only agent incidentally saw old dividend/cash diagnostics, no new policy results"
+  },
+  "costs": {
+    "central": {
+      "market_price_slippage_per_side": 0.00025,
+      "limit_fill_price": "L never above limit",
+      "limit_cash_friction": 0.00025,
+      "commission_per_share": 0.005,
+      "commission_minimum": 1,
+      "dividend_withholding": 0.25
+    },
+    "stress": {
+      "additional_cash_friction_every_executed_side": 0.001,
+      "limit_penetration": 0.0005
+    },
+    "paper_like": "gross paired opportunity decomposition; not literal source reproduction",
+    "capacity": "selected order ADV63 participation at100k per independent sleeve and same-symbol aggregate diagnostic; no calibrated impact/AUM promotion",
+    "components_excluded": [
+      "queue",
+      "latency",
+      "partial_fills",
+      "empirical_spread",
+      "borrow not applicable long only",
+      "FX",
+      "financing"
+    ]
+  },
+  "search_space": {
+    "strategies": 3,
+    "entry_policies": 4,
+    "depths": [
+      0.005,
+      0.01,
+      0.02
+    ],
+    "cost_layers": 2,
+    "total_economic_cells": 24,
+    "primary_comparisons": 9,
+    "native_parity_checks": 3,
+    "adaptive_rounds": 0,
+    "no_additional_thresholds": true
+  },
+  "promotion_rule": "No operational promotion. Describe economic changes per system. Candidate follow-up needs positive central and stress delta, broad period support, sufficient fills, and no decisive data or timing gap; full family always reported.",
+  "known_limits": [
+    "Open activation time unknown from daily OHLC",
+    "Touch not fill proof",
+    "Native DV2 membership tail uses retrospective noncurrent status",
+    "Native DV2/sector padded feature clocks",
+    "No untouched holdout",
+    "Native missing-price liquidation convention and financing gaps"
+  ],
+  "outputs": [
+    "REPORT.md",
+    "REPORT_FULL.md",
+    "tables",
+    "charts",
+    "executed decision notebook",
+    "source/test hashes",
+    "knowledge_record.json",
+    "run_manifest.json"
+  ],
+  "evidence_waivers": {
+    "literal_article_replication": "user asked transfer into existing systems, not a fourth signal",
+    "unseen_validation": "none established",
+    "full_capacity_sweep": "small execution experiment,100k only",
+    "portfolio_allocation": "out of scope",
+    "same_close_attribution": "paired source diagnostic only; never executable promotion"
+  }
+}

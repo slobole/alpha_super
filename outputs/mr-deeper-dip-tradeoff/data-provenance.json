@@ -1,0 +1,15 @@
+{
+  "source_study": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\results\\research\\mr_deeper_dip_entry_study",
+  "scope": "Presentation-only reuse of the9 central comparisons; no new backtests or thresholds",
+  "units": {
+    "paired": "equal-weight original opportunity returns; shared original opening notional denominator",
+    "portfolio": "independently evolving portfolios; CAGR, drawdown magnitude and average exposure"
+  },
+  "source_sha256": {
+    "paired_summary.csv": "dc9b2d60b87f0f6c8580af7ab1135cc6f1744e9e56ee84e70b0993f031a4e981",
+    "summary.csv": "1e08bcbcb0f2ff269755f7e1fe1f85f292fdfbf67350dd4bef882a3238ac2d14",
+    "entry_path_comparison.csv": "912f5d1ff2dd4dadba8c7da03a9490e25b218c4211a56ce5c85a80ae4805f05b",
+    "paired_opportunities.csv": "20035c9f9641fa0a2fc293188e50b9ba23bee76ab44af7563a831ddddb47bc86"
+  },
+  "checks": "All9 waterfall identities verified against individual original-opportunity rows to1e-12"
+}

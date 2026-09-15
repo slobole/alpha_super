@@ -1,0 +1,9 @@
+layer,policy,selected,selected_prior200_native_only,filled_prior200_native_only,selected_unknown_reference,executions_native_only_ohlc,executions_without_exact_ohlc,forced_liquidations
+central,moo,8067,8,8,0,0,1,1
+central,limit_0.5pct,9566,12,9,0,0,0,0
+central,limit_1pct,11684,12,7,0,0,0,0
+central,limit_2pct,16973,18,6,0,0,0,0
+stress,moo,8067,8,8,0,0,1,1
+stress,limit_0.5pct,9755,12,9,0,0,0,0
+stress,limit_1pct,11911,12,6,0,0,0,0
+stress,limit_2pct,17223,18,6,0,0,0,0

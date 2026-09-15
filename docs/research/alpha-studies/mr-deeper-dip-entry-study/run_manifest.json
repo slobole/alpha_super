@@ -1,0 +1,2403 @@
+{
+  "schema_version": "quant-research-manifest-v1",
+  "created_at": "2026-09-15T18:00:58.161472+00:00",
+  "study_id": "mr_deeper_dip_entry_study",
+  "unique_economic_cells": 24,
+  "scope_note": "smoke/ and logs include technical tests/reruns; only runs/*/{central,stress}_*/complete.json are economic cells.",
+  "self_exclusion": "run_manifest.json only",
+  "files": [
+    {
+      "path": "charts/cost_sensitivity.png",
+      "bytes": 114436,
+      "sha256": "dbdee2828188148e3d9c590c6f0cda79970bb73e5fd5bafe7dd6f8dac10b3cba"
+    },
+    {
+      "path": "charts/equity_drawdown.png",
+      "bytes": 643693,
+      "sha256": "b5d1fff321d8951bbdd0d904b8118fe6e9f2648f6fee5269dc9c5f92d7915673"
+    },
+    {
+      "path": "charts/fills_exposure.png",
+      "bytes": 43159,
+      "sha256": "8ec56078d0d8949d771de8fcb3a87c6e31cc528685c68c6be138e07860232262"
+    },
+    {
+      "path": "charts/rolling_correlation.png",
+      "bytes": 215296,
+      "sha256": "59ebd8963a2656a953fc80898019515868eea2dc0d3ab40ee649ca9c465cb413"
+    },
+    {
+      "path": "data/dv2/calendar.csv",
+      "bytes": 50382,
+      "sha256": "628256905a5d60b6a0f98d9315941de0e3b24d3b27057b5ede2d2148ffb46fe4"
+    },
+    {
+      "path": "data/dv2/input_manifest.json",
+      "bytes": 43768,
+      "sha256": "c00f52b01e144080f55ca84f056c3bdc39bf1e5db12ba1894e78fafe54ffcf10"
+    },
+    {
+      "path": "data/dv2/pricing.pkl",
+      "bytes": 279765469,
+      "sha256": "84835f4c6e644ffe4af75b5a2e52a1326e81bbb25783b83f5da49b0408339386"
+    },
+    {
+      "path": "data/dv2/universe.pkl",
+      "bytes": 96278296,
+      "sha256": "ddb455bb48ff0052653e8c53fa3867763021b395cb1acbcb27fe0eb73e8104b5"
+    },
+    {
+      "path": "data/hpi235/calendar.csv",
+      "bytes": 50382,
+      "sha256": "628256905a5d60b6a0f98d9315941de0e3b24d3b27057b5ede2d2148ffb46fe4"
+    },
+    {
+      "path": "data/hpi235/input_manifest.json",
+      "bytes": 42144,
+      "sha256": "adfb727d105225462e905ccdba810dc9854c3f91e05bb3280d7086860173e434"
+    },
+    {
+      "path": "data/hpi235/pricing.pkl",
+      "bytes": 270652687,
+      "sha256": "54ebc96629c99a91c9b347cf0c6f8043cb62185d7d01f2e7ec3d9b1a427453c6"
+    },
+    {
+      "path": "data/hpi235/universe.pkl",
+      "bytes": 67630192,
+      "sha256": "3f697c06b5b3feb50f3102df3a91f439455067770805579e95dceefa33d601de"
+    },
+    {
+      "path": "data/sector/calendar.csv",
+      "bytes": 50382,
+      "sha256": "628256905a5d60b6a0f98d9315941de0e3b24d3b27057b5ede2d2148ffb46fe4"
+    },
+    {
+      "path": "data/sector/input_manifest.json",
+      "bytes": 1069,
+      "sha256": "15fc2d93df5c09c30f8945c6b152c20ee408231a96f9fed70b0c18bf3e7c8097"
+    },
+    {
+      "path": "data/sector/pricing.pkl",
+      "bytes": 2773444,
+      "sha256": "d4a7d64f9932b4f364233203d7ad2c059898f0323883d19c5099d42977cddb45"
+    },
+    {
+      "path": "DATA_AUDIT.md",
+      "bytes": 7442,
+      "sha256": "6019537b423666cbde2591ae0c51e708bb2ab436f246121bd81496ba0bc2ae40"
+    },
+    {
+      "path": "decision_log.jsonl",
+      "bytes": 2047,
+      "sha256": "110b8dc633074ee9c8bff9590dbb6d4b3f96c5121409e52dfbaa4950f99f6be1"
+    },
+    {
+      "path": "decision_notebook.ipynb",
+      "bytes": 1415981,
+      "sha256": "9d613b1c88f806b202e20d8f5f6cacfe0a8fffeb9189fbb3ca6fb06a4b8af0c5"
+    },
+    {
+      "path": "dv2_fast_run.log",
+      "bytes": 1889,
+      "sha256": "2d65a06ef1cc224bf3df080ead29811b5239baccbf64c91550b71cb3ba867f13"
+    },
+    {
+      "path": "dv2_run.log",
+      "bytes": 475,
+      "sha256": "e37cf03d5b533a284c416d62af1578ade10b2071a15a1a0480892933baa121fc"
+    },
+    {
+      "path": "experiment_ledger.jsonl",
+      "bytes": 9270,
+      "sha256": "370b0a537d8ee00a55fb4053644a2b92053fd4aacf300d743501d28a3fdf7732"
+    },
+    {
+      "path": "hpi235_fast_run.log",
+      "bytes": 3060,
+      "sha256": "df3dc23ca7a617c10d69cf81139784d79ab4d38444fee8230e313bb1231e0b26"
+    },
+    {
+      "path": "hpi235_run.log",
+      "bytes": 910,
+      "sha256": "8ff9956d074fd5288a9134d519e27ff0b5849aedb12a693cfc5561c9e3aa013c"
+    },
+    {
+      "path": "hypothesis_registry.json",
+      "bytes": 4725,
+      "sha256": "43b5ea7c747d9622fc27789a36b28f59ee7e7ada98d6fca9b290cd8ba63b7234"
+    },
+    {
+      "path": "knowledge_record.json",
+      "bytes": 57835,
+      "sha256": "d80ebd0f3e4956f3e304f5d7c127e2898821f853a733b8f8aed9446cb8296a02"
+    },
+    {
+      "path": "lineage_events/D0002.json",
+      "bytes": 911,
+      "sha256": "ba50d9dc44c43369a08a39fb8b08f4a4608a1522841aa49c7b20f15e13e85a72"
+    },
+    {
+      "path": "lineage_events/D0003.json",
+      "bytes": 878,
+      "sha256": "d64cd7b05dacffb9e0431a7880e069a566f59550c8623591069014532a37a13d"
+    },
+    {
+      "path": "lineage_events/dv2_H0.json",
+      "bytes": 973,
+      "sha256": "cfa8ccf9d69e0eda07db9907a90d14d6c0de38213ba9795d33878954f2d6f6e1"
+    },
+    {
+      "path": "lineage_events/dv2_H0_results.json",
+      "bytes": 117,
+      "sha256": "d5ffa6684c64061f7494c332c164e7b6c5ad69870d7dd6ddfe78bb36ebc9c297"
+    },
+    {
+      "path": "lineage_events/dv2_H1.json",
+      "bytes": 1081,
+      "sha256": "f2391c8c5cc5ca9c5e6dec971a5e5125ae47197d360fe25ff2dcc3704b5938b3"
+    },
+    {
+      "path": "lineage_events/dv2_H1_results.json",
+      "bytes": 364,
+      "sha256": "43d2b56cb1af074bc2d27ae112e52367a7f0f05c7d0967053d7f8c09fdc6b571"
+    },
+    {
+      "path": "lineage_events/dv2_H2.json",
+      "bytes": 1122,
+      "sha256": "3c5b4d9ee49714ba009ea70d7c4c040ee05f1d5617a0313c01cf8f783337a702"
+    },
+    {
+      "path": "lineage_events/dv2_H2_results.json",
+      "bytes": 472,
+      "sha256": "43fe7ae93504aefaff9dd8534d9683f162364e35b0ab9ed48bae84bc1c35f6ed"
+    },
+    {
+      "path": "lineage_events/hpi235_H0.json",
+      "bytes": 982,
+      "sha256": "9ab4a376e27f47c6804fd16cc20973ef66d7ffcc971f89b4b07629f55496d761"
+    },
+    {
+      "path": "lineage_events/hpi235_H0_results.json",
+      "bytes": 120,
+      "sha256": "fdd45e9894322704a7bba45a602a5dbf93c59ce1cfb3e74cb42f921698ffc1ae"
+    },
+    {
+      "path": "lineage_events/hpi235_H1.json",
+      "bytes": 1096,
+      "sha256": "ed2b02f43d7c10c76c9c7393a7cd6890d8a13f1b50989f39c63696fc035144f7"
+    },
+    {
+      "path": "lineage_events/hpi235_H1_results.json",
+      "bytes": 373,
+      "sha256": "05e5738a1098562b6eb13fbe03236e788f418d71190ee7d675f076899b0ce28d"
+    },
+    {
+      "path": "lineage_events/hpi235_H2.json",
+      "bytes": 1140,
+      "sha256": "6ff2e71b46d5c20fd9eaa6f56dd27b9ce038a5c9a5e84bd4e571aa2f07f868e5"
+    },
+    {
+      "path": "lineage_events/hpi235_H2_results.json",
+      "bytes": 484,
+      "sha256": "0565f64f1f4f6f714fdc6647a9addb7b3e61f4236f94df1e573d12dc78a1d2c6"
+    },
+    {
+      "path": "lineage_events/sector_H0.json",
+      "bytes": 982,
+      "sha256": "da1d36f628210b8ca04e3c35942ac9eeca67dcd0575cf002da6c670fc2eeadbb"
+    },
+    {
+      "path": "lineage_events/sector_H0_results.json",
+      "bytes": 120,
+      "sha256": "2c9b05f72bd560c657ce6f898e2cb0aa24503905b05ef1dd53f9e303f4a0c70a"
+    },
+    {
+      "path": "lineage_events/sector_H1.json",
+      "bytes": 1096,
+      "sha256": "991be1df1ca85bea4a4c17c66de8e43c81e6dfe7da61dba6f954316241bc9792"
+    },
+    {
+      "path": "lineage_events/sector_H1_results.json",
+      "bytes": 373,
+      "sha256": "18ca9bf23f01373fd8a7814e1c85c370b6116c80d3bade8429eabd2f56184387"
+    },
+    {
+      "path": "lineage_events/sector_H2.json",
+      "bytes": 1140,
+      "sha256": "c1bbe8d5b6d516c8a6f1459ba6732e3c0f9d172c67c35d83eb9075d8fc23791c"
+    },
+    {
+      "path": "lineage_events/sector_H2_results.json",
+      "bytes": 484,
+      "sha256": "00c98bc48c7d6fa68b5c43c271cff26ab781b8dff287cbd8cc2ecdc23b9d70c1"
+    },
+    {
+      "path": "pre_run_calendar_note.json",
+      "bytes": 165,
+      "sha256": "2aa8a03e23d6e8db84924826a76137eafb7fa1635bf83b7af82cace33909542c"
+    },
+    {
+      "path": "REPORT.md",
+      "bytes": 21899,
+      "sha256": "6e4e7f1bd38919bc5fc7cf54eea66e55ccc92b88a60590bee6cf510bb5c732bd"
+    },
+    {
+      "path": "REPORT_FULL.md",
+      "bytes": 46234,
+      "sha256": "fc4512664001980d6a2bb4c50c427d1e30704a041036956b414b584e2c08d184"
+    },
+    {
+      "path": "research_spec_frozen.json",
+      "bytes": 6667,
+      "sha256": "a4c4798684b45133c009761bb63c645e23975c02ab80345f6b2d095f5def16cd"
+    },
+    {
+      "path": "research_spec_normalized_view.json",
+      "bytes": 24137,
+      "sha256": "846c23909a9e63878010a63ee8057fa5243cc9455b36bfcce1906c250b424d62"
+    },
+    {
+      "path": "research_state.json",
+      "bytes": 3594,
+      "sha256": "87c65f49dfd86e9fe7de3d569c586a8f2efb5925276f79db22dcb1fc41d3749e"
+    },
+    {
+      "path": "runs/dv2/central_limit_0.5pct/all_in_trades.csv",
+      "bytes": 1079717,
+      "sha256": "e84631b257f2396f428d9ec000d0fe2084f0f8d0d8973e2831470bea34a008f8"
+    },
+    {
+      "path": "runs/dv2/central_limit_0.5pct/complete.json",
+      "bytes": 637,
+      "sha256": "a0e05e581be036f024a5e7c0c2599924a17df30abcc85bbc21ffe95e156af73e"
+    },
+    {
+      "path": "runs/dv2/central_limit_0.5pct/daily.csv",
+      "bytes": 350488,
+      "sha256": "d2cfd5ef100a01c0f34a1815df0b2c85091705c8e066f56f30e9fde2b75bf258"
+    },
+    {
+      "path": "runs/dv2/central_limit_0.5pct/dividends.csv",
+      "bytes": 37367,
+      "sha256": "d2119b5bda1e375fc0822712b6d837e0387f25fe4787432bc9d88a8949ac73a3"
+    },
+    {
+      "path": "runs/dv2/central_limit_0.5pct/entries.csv",
+      "bytes": 1661169,
+      "sha256": "f387d5fd565bcf49a6e4b2e93b57f4809dff404f3706bccd8b2faa63e6f84627"
+    },
+    {
+      "path": "runs/dv2/central_limit_0.5pct/friction.csv",
+      "bytes": 980760,
+      "sha256": "8d48680b5917102fa8be36e5f9c73379addac6be54036da826582adb155be204"
+    },
+    {
+      "path": "runs/dv2/central_limit_0.5pct/native_results.csv",
+      "bytes": 1106951,
+      "sha256": "617be2f0564bcf8be9f4d260c3add55d3cfba8a0632fe398e2f79a18875f911a"
+    },
+    {
+      "path": "runs/dv2/central_limit_0.5pct/transactions.csv",
+      "bytes": 1086529,
+      "sha256": "32fd7ce009de9db5cbf7846781110e4ec50bd48cf68595822db20e5bc1551adf"
+    },
+    {
+      "path": "runs/dv2/central_limit_1pct/all_in_trades.csv",
+      "bytes": 901451,
+      "sha256": "be382e222e256500daf09c80f57b0cb45c844f69235ef87e5ef5a37aebc62d5f"
+    },
+    {
+      "path": "runs/dv2/central_limit_1pct/complete.json",
+      "bytes": 634,
+      "sha256": "255617d6e7088b207c63b226500b40d2045bdfd18fa2c929e53815995a3b5858"
+    },
+    {
+      "path": "runs/dv2/central_limit_1pct/daily.csv",
+      "bytes": 344488,
+      "sha256": "91cc99f842e2503bed342429b4dddb47aa583bb65a4293d196f6211925b2007c"
+    },
+    {
+      "path": "runs/dv2/central_limit_1pct/dividends.csv",
+      "bytes": 33498,
+      "sha256": "d8ed9ad284dcb3623bbb2e2c8a124fc2febd10a9b19a2291ec9d7c827a4b5c3e"
+    },
+    {
+      "path": "runs/dv2/central_limit_1pct/entries.csv",
+      "bytes": 1982899,
+      "sha256": "d184e536f01ce616bbe22dc8f501b16307f8e23f076b88c9724d5912006d7e37"
+    },
+    {
+      "path": "runs/dv2/central_limit_1pct/friction.csv",
+      "bytes": 819824,
+      "sha256": "c1a6cb179fd0b3e0b7f959652f0da7096967cea847e9efb9906170876c35af80"
+    },
+    {
+      "path": "runs/dv2/central_limit_1pct/native_results.csv",
+      "bytes": 1108642,
+      "sha256": "932017373ccc6836b4bc7c770832c8f8cda4db2dfef881cc96729f7f44892ba1"
+    },
+    {
+      "path": "runs/dv2/central_limit_1pct/transactions.csv",
+      "bytes": 907811,
+      "sha256": "f703c94260b015a33049e0d74bd17d7a08cf9b521527925f832513d1d9f6527c"
+    },
+    {
+      "path": "runs/dv2/central_limit_2pct/all_in_trades.csv",
+      "bytes": 585152,
+      "sha256": "b8803f40d833cb4d9a3fa1cb450297c303dbe7c2bfa030d4e79aebc50f679c52"
+    },
+    {
+      "path": "runs/dv2/central_limit_2pct/complete.json",
+      "bytes": 636,
+      "sha256": "b91dbf8d49c3c2f96eaf5609203cef29b465b18eac9ac92a6ac1be542d227e9d"
+    },
+    {
+      "path": "runs/dv2/central_limit_2pct/daily.csv",
+      "bytes": 329505,
+      "sha256": "d3cb67790c41383195243c42aa48deb7de900e4805d4488467400420299c60a0"
+    },
+    {
+      "path": "runs/dv2/central_limit_2pct/dividends.csv",
+      "bytes": 22329,
+      "sha256": "8a2a7878115a133d9fc433d46c3bf41d313898599d598bc952514d8cfa8509f5"
+    },
+    {
+      "path": "runs/dv2/central_limit_2pct/entries.csv",
+      "bytes": 2803299,
+      "sha256": "2a3a15c0cd5ad0abff6d1e349d9189a6f69633c05e429fc99d743f396365ebf0"
+    },
+    {
+      "path": "runs/dv2/central_limit_2pct/friction.csv",
+      "bytes": 533409,
+      "sha256": "7e3221a0438c1f2842567b818a4dca8eee2f2880d9d28f29da9f3cc9c3659fc9"
+    },
+    {
+      "path": "runs/dv2/central_limit_2pct/native_results.csv",
+      "bytes": 1097039,
+      "sha256": "3f1ea7f5e1be01da2a69a90887eb9ff2c8d05e7e3912214fa269c29d767f185b"
+    },
+    {
+      "path": "runs/dv2/central_limit_2pct/transactions.csv",
+      "bytes": 589761,
+      "sha256": "0eaf059e1a12e5bee3aca7bb27d7be4fb19df651ea1d9fffe9fa42cb0cd4aff7"
+    },
+    {
+      "path": "runs/dv2/central_moo/all_in_trades.csv",
+      "bytes": 1142942,
+      "sha256": "8c9d458e6c47fd499f95e91c4041518c76130cec0672d6b8f6b7e67d7006cf10"
+    },
+    {
+      "path": "runs/dv2/central_moo/complete.json",
+      "bytes": 627,
+      "sha256": "c220bdcfd0d1ef02ffa460aabcc451da868ad7f5c985d230a0abe9f3daa48c69"
+    },
+    {
+      "path": "runs/dv2/central_moo/daily.csv",
+      "bytes": 310637,
+      "sha256": "c432bd03824e53b1113a7f7ed15d6df4c057607be7886f502d70374b3b1fd2eb"
+    },
+    {
+      "path": "runs/dv2/central_moo/dividends.csv",
+      "bytes": 44759,
+      "sha256": "d2be6b83ba26e135e900fa0033567f2551782940ae518d9043bedff825179296"
+    },
+    {
+      "path": "runs/dv2/central_moo/entries.csv",
+      "bytes": 1332074,
+      "sha256": "3c799c38f367d4a0ea9c003d34882b99891f9e93be6970502119acf0c037b246"
+    },
+    {
+      "path": "runs/dv2/central_moo/friction.csv",
+      "bytes": 1029297,
+      "sha256": "702777cf372e9f708b283fc9ed887acd1fbe8d2ec25cb7056881f8ce8dccba08"
+    },
+    {
+      "path": "runs/dv2/central_moo/native_results.csv",
+      "bytes": 1111613,
+      "sha256": "dc9c40a9135a9a0d87964d35f19eb84fe9d446fbbdfc4283852ab4f7dcd23655"
+    },
+    {
+      "path": "runs/dv2/central_moo/transactions.csv",
+      "bytes": 1266194,
+      "sha256": "4351968bffba171cd850636c7bc6a430c7bc2ecb0ddfb57d73a43acf13dfdfaf"
+    },
+    {
+      "path": "runs/dv2/native_equity.csv",
+      "bytes": 1111613,
+      "sha256": "dc9c40a9135a9a0d87964d35f19eb84fe9d446fbbdfc4283852ab4f7dcd23655"
+    },
+    {
+      "path": "runs/dv2/native_parity.json",
+      "bytes": 295,
+      "sha256": "ce3bf1039740912a961b67c38accf797a4164fd841d8116744713408673e6026"
+    },
+    {
+      "path": "runs/dv2/native_transactions.csv",
+      "bytes": 1255088,
+      "sha256": "ec34dd75224347e52ed9d665b7c174c6c1145884dba23c946aeb80e341916a28"
+    },
+    {
+      "path": "runs/dv2/original_native_reference/native_equity.csv",
+      "bytes": 1111613,
+      "sha256": "dc9c40a9135a9a0d87964d35f19eb84fe9d446fbbdfc4283852ab4f7dcd23655"
+    },
+    {
+      "path": "runs/dv2/original_native_reference/native_parity.json",
+      "bytes": 295,
+      "sha256": "1a7612c54d891be9b476bf4b0b7c2b25488b1385b7ade4d34aaddaed0a2762ce"
+    },
+    {
+      "path": "runs/dv2/original_native_reference/native_transactions.csv",
+      "bytes": 1255088,
+      "sha256": "ec34dd75224347e52ed9d665b7c174c6c1145884dba23c946aeb80e341916a28"
+    },
+    {
+      "path": "runs/dv2/runtime_acceleration.json",
+      "bytes": 1665,
+      "sha256": "f1f2f3bb6a7757c13e0412737ea4d6065d8037cefb6935785d186d580176187f"
+    },
+    {
+      "path": "runs/dv2/signal_prefix_audit.json",
+      "bytes": 161,
+      "sha256": "4de62ea8271102d1bebb9307a2f0215cf5d89e552dab8cce0c45cb7b22b1b5ba"
+    },
+    {
+      "path": "runs/dv2/stress_limit_0.5pct/all_in_trades.csv",
+      "bytes": 1055004,
+      "sha256": "fabc0e9cdca9903403be52cac395b1f558225eee8c8ebedbf5e45dd19d8da0e1"
+    },
+    {
+      "path": "runs/dv2/stress_limit_0.5pct/complete.json",
+      "bytes": 638,
+      "sha256": "2f6b32504f9a6b50ef502463f74daf7a165e82e414384ce492c2951dc30a0df6"
+    },
+    {
+      "path": "runs/dv2/stress_limit_0.5pct/daily.csv",
+      "bytes": 358198,
+      "sha256": "7b6af0bf96c0c0ed29ccae88bde1415a2de9acf3aa576f70f2ccdc03bcf61933"
+    },
+    {
+      "path": "runs/dv2/stress_limit_0.5pct/dividends.csv",
+      "bytes": 36719,
+      "sha256": "64495b3877465130833fd68c88532aedb1a54163dc85e1ce77106e69bbd14cb2"
+    },
+    {
+      "path": "runs/dv2/stress_limit_0.5pct/entries.csv",
+      "bytes": 1691771,
+      "sha256": "647900c9319340017db1a861ff50d6b98e5a2e1ea8fd79a5819f00220ded80b9"
+    },
+    {
+      "path": "runs/dv2/stress_limit_0.5pct/friction.csv",
+      "bytes": 1056474,
+      "sha256": "e23b865fff779717b6570177f0e173b5f7192ea4ef4bf5b3b9725d1c10df65ee"
+    },
+    {
+      "path": "runs/dv2/stress_limit_0.5pct/native_results.csv",
+      "bytes": 1123665,
+      "sha256": "6594a2d99bb3a1d3c83c2d0230f39ee0f25646ce864fd8517e44c740044a2ecc"
+    },
+    {
+      "path": "runs/dv2/stress_limit_0.5pct/transactions.csv",
+      "bytes": 1059750,
+      "sha256": "5f8a24e1dd214933603363a23878ec736036b884bd0b47fca3a41c39acd39b49"
+    },
+    {
+      "path": "runs/dv2/stress_limit_1pct/all_in_trades.csv",
+      "bytes": 879365,
+      "sha256": "7593c2036039ee43aeedd62483e557cb5bb06ffef35b8f1847cb74f313d0d780"
+    },
+    {
+      "path": "runs/dv2/stress_limit_1pct/complete.json",
+      "bytes": 635,
+      "sha256": "aa974c2720a650189849d89091c77a5f8d05981c1b672a1ddfdb33eb22cb07dc"
+    },
+    {
+      "path": "runs/dv2/stress_limit_1pct/daily.csv",
+      "bytes": 355848,
+      "sha256": "f8bf44944e8f671465c7cd3b535847846cd987f8fd35316c3c819dab9ee6ea35"
+    },
+    {
+      "path": "runs/dv2/stress_limit_1pct/dividends.csv",
+      "bytes": 32618,
+      "sha256": "7fdfd882ed59da9c681b6ca9fc8b5853ad6fff729e538eb2cc6122ccf5be4ea8"
+    },
+    {
+      "path": "runs/dv2/stress_limit_1pct/entries.csv",
+      "bytes": 2024457,
+      "sha256": "b3c87601a06734e5f92ba02235a54140886f7ab5635e41ac43bf99c209de3913"
+    },
+    {
+      "path": "runs/dv2/stress_limit_1pct/friction.csv",
+      "bytes": 884159,
+      "sha256": "69d93fc8ea336d1bb10024c7f9a1ff2f67bb1709edeedfcfff905812ecbd6475"
+    },
+    {
+      "path": "runs/dv2/stress_limit_1pct/native_results.csv",
+      "bytes": 1114538,
+      "sha256": "11afbb395d95b6bccdbf157abe4f120912480db22e6111fc6ed6a33d2b0a9789"
+    },
+    {
+      "path": "runs/dv2/stress_limit_1pct/transactions.csv",
+      "bytes": 887857,
+      "sha256": "30f5a4681364df1e83e411175ce167b6f52511a9db8f7eabf18c6c6d91c10a8c"
+    },
+    {
+      "path": "runs/dv2/stress_limit_2pct/all_in_trades.csv",
+      "bytes": 571578,
+      "sha256": "c7167c5387932b7bec1425cfd12f92c0d83a06dec54722f4dd34a12532c38556"
+    },
+    {
+      "path": "runs/dv2/stress_limit_2pct/complete.json",
+      "bytes": 634,
+      "sha256": "7403040b996742be7d267b55f547305e7b7d11636939ef00dc94f7cd79ce2cdd"
+    },
+    {
+      "path": "runs/dv2/stress_limit_2pct/daily.csv",
+      "bytes": 343719,
+      "sha256": "85340fefdfa07b4b4b9f2fb12f11633ecb8599f11edee7e8bfa06f85b9927381"
+    },
+    {
+      "path": "runs/dv2/stress_limit_2pct/dividends.csv",
+      "bytes": 21339,
+      "sha256": "57f93f25c5339d8af322bc78910e18839e2fd5ab106d147af1a25d51bc060bb5"
+    },
+    {
+      "path": "runs/dv2/stress_limit_2pct/entries.csv",
+      "bytes": 2858829,
+      "sha256": "cde3adb8926fb5be82d47e745de52889c8f8c8f26e7788fff491921af5de0cd0"
+    },
+    {
+      "path": "runs/dv2/stress_limit_2pct/friction.csv",
+      "bytes": 578034,
+      "sha256": "d3feeb06ce66426c41970fd129814c05deae15d3a86c085bbc9a3ec46e4dd7a5"
+    },
+    {
+      "path": "runs/dv2/stress_limit_2pct/native_results.csv",
+      "bytes": 1106913,
+      "sha256": "fa3e232c40ac9d896a9d46c489b4931f6ced10b10f180412095f9338825e8e4f"
+    },
+    {
+      "path": "runs/dv2/stress_limit_2pct/transactions.csv",
+      "bytes": 581191,
+      "sha256": "83b1eeee62d801063260b1c04463d5267fb446c98d18bf42e90dc25c9ec1e889"
+    },
+    {
+      "path": "runs/dv2/stress_moo/all_in_trades.csv",
+      "bytes": 1249825,
+      "sha256": "1a4a49745118a657a02d8c5f7d361f867b06e4b39368e5518e9d428daf3fae6f"
+    },
+    {
+      "path": "runs/dv2/stress_moo/complete.json",
+      "bytes": 625,
+      "sha256": "0096804a1c7b5a7b6c2e65097c82f5814a6264c5456816ba87543d000b2fee7d"
+    },
+    {
+      "path": "runs/dv2/stress_moo/daily.csv",
+      "bytes": 359270,
+      "sha256": "3c0544c2468db65e2b3c1e5daf73ebeae077bd679592db62cdd9cbccbfed6037"
+    },
+    {
+      "path": "runs/dv2/stress_moo/dividends.csv",
+      "bytes": 44577,
+      "sha256": "2a1244a8dcf956f5b724cf89eeb9f160692cdec3aecde12eb8a4bafd45add584"
+    },
+    {
+      "path": "runs/dv2/stress_moo/entries.csv",
+      "bytes": 1440793,
+      "sha256": "44d3b15cd887dc39945d41d5077641681a187313293e4d953f3cfeae6fe08a9d"
+    },
+    {
+      "path": "runs/dv2/stress_moo/friction.csv",
+      "bytes": 1244248,
+      "sha256": "3b1dce61f20ad0ed433c23060f8822c3ebe25aac86c3ba69ca8ac640ca1376a2"
+    },
+    {
+      "path": "runs/dv2/stress_moo/native_results.csv",
+      "bytes": 1122872,
+      "sha256": "f18b8ac2a44382ac83eaa6d9121fa9a79943c7927794f99a2e84e77467024eac"
+    },
+    {
+      "path": "runs/dv2/stress_moo/transactions.csv",
+      "bytes": 1251350,
+      "sha256": "43220fa1e43fa8bf4254c0e9692d144eb81dc242fb86cca20ae1f27fa4270b4c"
+    },
+    {
+      "path": "runs/hpi235/central_limit_0.5pct/all_in_trades.csv",
+      "bytes": 631608,
+      "sha256": "df643a030526ded5909c7be3aeadba4c6d1fd0ef232f6d32246dcc227881e2ca"
+    },
+    {
+      "path": "runs/hpi235/central_limit_0.5pct/complete.json",
+      "bytes": 640,
+      "sha256": "8beda4bd79b03a601533c825882321b008b82bd83bc996a7aafcfd6281427201"
+    },
+    {
+      "path": "runs/hpi235/central_limit_0.5pct/daily.csv",
+      "bytes": 333984,
+      "sha256": "7b2afac4cf95eea59bbc98e038f09ae7c96a9ae12432dc58038f191badf60324"
+    },
+    {
+      "path": "runs/hpi235/central_limit_0.5pct/dividends.csv",
+      "bytes": 34476,
+      "sha256": "6d426aa4bd033aae0db532bc925074b1f9dbcd3316180df5cf13e0bfe49c3dc0"
+    },
+    {
+      "path": "runs/hpi235/central_limit_0.5pct/entries.csv",
+      "bytes": 994953,
+      "sha256": "7bc4c0734af68bfab14478d1fae4fc2b086f9ad325ced59be9831aea7cde92c9"
+    },
+    {
+      "path": "runs/hpi235/central_limit_0.5pct/friction.csv",
+      "bytes": 569837,
+      "sha256": "6991ef862a374768381f0c5fa97a4f4e322a5161a19ca53764a176934f854ff0"
+    },
+    {
+      "path": "runs/hpi235/central_limit_0.5pct/native_results.csv",
+      "bytes": 1098771,
+      "sha256": "47930b04053c610ed7e101b66bc0dc7c2e4a0443c729501a013f5cc4356ff5ff"
+    },
+    {
+      "path": "runs/hpi235/central_limit_0.5pct/transactions.csv",
+      "bytes": 631749,
+      "sha256": "958e18f343caafb4136f0b485f9f37f6d6b2ffcace2d28e2782bd29a9b6b14c4"
+    },
+    {
+      "path": "runs/hpi235/central_limit_1pct/all_in_trades.csv",
+      "bytes": 505185,
+      "sha256": "e0cc9b351e828ba2a8125621c7c760743916581ec75ea9cb5e95feb5b98809e5"
+    },
+    {
+      "path": "runs/hpi235/central_limit_1pct/complete.json",
+      "bytes": 637,
+      "sha256": "3b0dacd539c6392651283f7b3e957f49360b0ccacb6115cd0d78506f30a2cf0a"
+    },
+    {
+      "path": "runs/hpi235/central_limit_1pct/daily.csv",
+      "bytes": 328331,
+      "sha256": "52a5ff6c89e6d917cc302649819c7708212ba0b4dfd72bb754f510a020ca19c5"
+    },
+    {
+      "path": "runs/hpi235/central_limit_1pct/dividends.csv",
+      "bytes": 29802,
+      "sha256": "2b22d11dbd121067261383d92a1197381cc8997eda2749744ca469829a51797b"
+    },
+    {
+      "path": "runs/hpi235/central_limit_1pct/entries.csv",
+      "bytes": 1182614,
+      "sha256": "e0d4851113e235e4af3c55528b362c1c98522d2da874d7799ee2a72c87aab524"
+    },
+    {
+      "path": "runs/hpi235/central_limit_1pct/friction.csv",
+      "bytes": 455750,
+      "sha256": "9fe7d6859a4e910ce26fca9781c881b72ff8a7285adcf6026730dbf47bb52097"
+    },
+    {
+      "path": "runs/hpi235/central_limit_1pct/native_results.csv",
+      "bytes": 1102068,
+      "sha256": "a01e886f071f06cc0d9f99fe965b8db95343c6cdc52eba7d1133f261d0ea18c9"
+    },
+    {
+      "path": "runs/hpi235/central_limit_1pct/transactions.csv",
+      "bytes": 505140,
+      "sha256": "0be7e75990bebbd512b773ff8dfdd8d23050f19894f05f9cc765a1ec3c9ec8da"
+    },
+    {
+      "path": "runs/hpi235/central_limit_2pct/all_in_trades.csv",
+      "bytes": 295547,
+      "sha256": "cbd3b7dabe00f7137eb6cf1fb2cf5d2f6fa1a2bdde1a80646556f19d47581504"
+    },
+    {
+      "path": "runs/hpi235/central_limit_2pct/complete.json",
+      "bytes": 637,
+      "sha256": "2c627666978a9fe0ee2c0dadec5865e8557fb81bdbf1ebd0b29a2a6d03d6fb24"
+    },
+    {
+      "path": "runs/hpi235/central_limit_2pct/daily.csv",
+      "bytes": 314735,
+      "sha256": "58e77f9a43233f0f69ca3f6657486272ac729034884db3eafd08c449a49941c3"
+    },
+    {
+      "path": "runs/hpi235/central_limit_2pct/dividends.csv",
+      "bytes": 15806,
+      "sha256": "2214eff3c2cc62c6548a6fa15d1585cbec581766bf709ec88f65527d264c5377"
+    },
+    {
+      "path": "runs/hpi235/central_limit_2pct/entries.csv",
+      "bytes": 1592278,
+      "sha256": "65ea8f8e6eb3d65507be2f477759bde570611a85462245fddac470ced97e0cbd"
+    },
+    {
+      "path": "runs/hpi235/central_limit_2pct/friction.csv",
+      "bytes": 265279,
+      "sha256": "4c21c9c9a4b652bb49d0f3eabf6810280ab7fac5b90de6a854b37d17e6f6c391"
+    },
+    {
+      "path": "runs/hpi235/central_limit_2pct/native_results.csv",
+      "bytes": 1094897,
+      "sha256": "7230610a38477a8aa6c5cb2c97e7464d965678f87328926af96e6e75f4ac3132"
+    },
+    {
+      "path": "runs/hpi235/central_limit_2pct/transactions.csv",
+      "bytes": 294106,
+      "sha256": "14d46782ae5b234efb54002d18e3a4bfdea1a71c32d4dae21a770aa91879a329"
+    },
+    {
+      "path": "runs/hpi235/central_moo/all_in_trades.csv",
+      "bytes": 665724,
+      "sha256": "2c59ffa105a6d80a289cf33f7cf514d4f713b5d18bde5273efccbc9a54036e9d"
+    },
+    {
+      "path": "runs/hpi235/central_moo/complete.json",
+      "bytes": 629,
+      "sha256": "ffb8bb3e0d0c0dc75e2f204cf62d12467f80f170bcec2fa7f9679c375049bcef"
+    },
+    {
+      "path": "runs/hpi235/central_moo/daily.csv",
+      "bytes": 307719,
+      "sha256": "3789654faf642ee5841d05654c7bf5ab8a8d7d75d8e2ccb3115ebc92e8ce707f"
+    },
+    {
+      "path": "runs/hpi235/central_moo/dividends.csv",
+      "bytes": 41249,
+      "sha256": "11a08b804e13f7dee8f76023ff6a9e58ceae56dc8e439e15fb8726370926709e"
+    },
+    {
+      "path": "runs/hpi235/central_moo/entries.csv",
+      "bytes": 773926,
+      "sha256": "fdcbf58373127103aa8e71e42dd63e0e244ce8a13752c17b59c6dbfb75ac2ff8"
+    },
+    {
+      "path": "runs/hpi235/central_moo/friction.csv",
+      "bytes": 590957,
+      "sha256": "442e6e6c16d2f6b6b24a155dbd5155ea2f72876c3d8183ac2e753bccf5ba901b"
+    },
+    {
+      "path": "runs/hpi235/central_moo/native_results.csv",
+      "bytes": 1106480,
+      "sha256": "fb09d998e8b5237ddb01e581db39970dcff1100381b5316827ac6f6a6fa10f3a"
+    },
+    {
+      "path": "runs/hpi235/central_moo/transactions.csv",
+      "bytes": 729220,
+      "sha256": "301eb0795807715267c547fe7ad18f7b038b5d9eaccbcc5376fdf0b736df2599"
+    },
+    {
+      "path": "runs/hpi235/native_equity.csv",
+      "bytes": 1106480,
+      "sha256": "fb09d998e8b5237ddb01e581db39970dcff1100381b5316827ac6f6a6fa10f3a"
+    },
+    {
+      "path": "runs/hpi235/native_parity.json",
+      "bytes": 294,
+      "sha256": "8854a5fcad74a3bd1d4df13bf784ac6ae4431839722043160879208bfe8ca126"
+    },
+    {
+      "path": "runs/hpi235/native_transactions.csv",
+      "bytes": 719272,
+      "sha256": "bb9afb81669f88c25dc00d38cfafa421a1102ffc8d9d4890aa4b5de5bc23f95a"
+    },
+    {
+      "path": "runs/hpi235/original_native_reference/native_equity.csv",
+      "bytes": 1106480,
+      "sha256": "fb09d998e8b5237ddb01e581db39970dcff1100381b5316827ac6f6a6fa10f3a"
+    },
+    {
+      "path": "runs/hpi235/original_native_reference/native_parity.json",
+      "bytes": 296,
+      "sha256": "d44c3ffb3e14259a34df29011e666d993af7388aa5f9e92f15566249e9535364"
+    },
+    {
+      "path": "runs/hpi235/original_native_reference/native_transactions.csv",
+      "bytes": 719272,
+      "sha256": "bb9afb81669f88c25dc00d38cfafa421a1102ffc8d9d4890aa4b5de5bc23f95a"
+    },
+    {
+      "path": "runs/hpi235/runtime_acceleration.json",
+      "bytes": 1664,
+      "sha256": "ce67351c368e4c1267d494f17d88adeada877cb0faf292b09c2ec08df8f424f1"
+    },
+    {
+      "path": "runs/hpi235/signal_prefix_audit.json",
+      "bytes": 161,
+      "sha256": "4de62ea8271102d1bebb9307a2f0215cf5d89e552dab8cce0c45cb7b22b1b5ba"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_0.5pct/all_in_trades.csv",
+      "bytes": 617904,
+      "sha256": "924e3236f9511ce57fe50472243e5fee82203712325b7cafd6ff85f03d5895d8"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_0.5pct/complete.json",
+      "bytes": 637,
+      "sha256": "a69ee3b258914c9e380814ad746116d59bfe09ab44c9fd3e4b2f6b69ca8433ff"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_0.5pct/daily.csv",
+      "bytes": 349229,
+      "sha256": "2fc9a8acfa424e697b3f51a7220f2b6aab9a2c1843ca33b8c1ee604693979ad8"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_0.5pct/dividends.csv",
+      "bytes": 33628,
+      "sha256": "1f31bbcadfc3a9700fda13baacbd9245cc81cf3c060fff0d9c0009a0511842ae"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_0.5pct/entries.csv",
+      "bytes": 1010566,
+      "sha256": "a9c3e0b271701e8b51f11ffefb0ec665c446519b14029947016b4fe72543bdd2"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_0.5pct/friction.csv",
+      "bytes": 609876,
+      "sha256": "fa2ef853f605779d09fc15059807312b24be74f3d83eb8665ddb8ed827cb809d"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_0.5pct/native_results.csv",
+      "bytes": 1110360,
+      "sha256": "de3b4dd8d1108baf3490dabbe9013db442878674b963a5d3fcdcbd6f1608719c"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_0.5pct/transactions.csv",
+      "bytes": 613063,
+      "sha256": "6cdf78b451be534e1a92579535ae1a34c626834388cdf9e4784e8e7c27fcc43b"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_1pct/all_in_trades.csv",
+      "bytes": 492105,
+      "sha256": "82ff9602ca49130ff942b1d75cbbcd1aaaf2b53e7ab1da7d94546b427fe1e31f"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_1pct/complete.json",
+      "bytes": 636,
+      "sha256": "791ec4ec50bdc23cad6899293a2944ad8e24511a409e5cc20f86c8bfdf369219"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_1pct/daily.csv",
+      "bytes": 344420,
+      "sha256": "ec33b49dcf73cd48937410476fbff6011572d41f5e14dd4ddc2dfda705c1e948"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_1pct/dividends.csv",
+      "bytes": 29025,
+      "sha256": "f9c5a9dd82abf33979827a5528474c1fa53877d57d9e1fce5f4b7bc61f2872cc"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_1pct/entries.csv",
+      "bytes": 1206256,
+      "sha256": "f47bec6f95c078f07cc6f6c4e62d0ba758d1aa15214879de8642d4e02f80023b"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_1pct/friction.csv",
+      "bytes": 485422,
+      "sha256": "305d19299071ac0a1a3c250895906e570eeab01b517d36337e1b958039ced40a"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_1pct/native_results.csv",
+      "bytes": 1105540,
+      "sha256": "f83454c8a1a7fba4fd9eb1d4ae049d232a1e464778c036c9a290fca0bbbb8306"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_1pct/transactions.csv",
+      "bytes": 487914,
+      "sha256": "2956f61552cbe2d06e06b6d5efc461a778c43461694bd626b39c251b24520290"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_2pct/all_in_trades.csv",
+      "bytes": 286412,
+      "sha256": "37de05d8c8c3cb2596e4ca2d2be03aec3c322e59f361edd54eba98b54c80cb77"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_2pct/complete.json",
+      "bytes": 637,
+      "sha256": "d2d44bad494e84c07a3a49e65bf4b0ffdb4534673e7f6caa00e05f68503772cd"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_2pct/daily.csv",
+      "bytes": 326282,
+      "sha256": "a88487342316f4388c517d19fa22cadb182355686c0ff2b93c73b9d18c37787e"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_2pct/dividends.csv",
+      "bytes": 15599,
+      "sha256": "ddb570329192acfd2426f33c15f80fe0ba9ae25c939c70392d3cdfc2588757b5"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_2pct/entries.csv",
+      "bytes": 1612861,
+      "sha256": "6be0319f90c85ede4117b04845651cffda61c3ad791223bd33641ed253f7e945"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_2pct/friction.csv",
+      "bytes": 282437,
+      "sha256": "5ee47b7a1b2b91f5dff9e8fb4817c61212859841486cdb8d8e72bd9dde88c3e0"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_2pct/native_results.csv",
+      "bytes": 1096220,
+      "sha256": "f2632e2baebb3f6e1b02e08950c273d0fa1486d2aaa643b781adbf2a81de0763"
+    },
+    {
+      "path": "runs/hpi235/stress_limit_2pct/transactions.csv",
+      "bytes": 283731,
+      "sha256": "f55652ddecdf6c2303deb411a57253e8643fadd8f7ffbe69147ca63645a7a647"
+    },
+    {
+      "path": "runs/hpi235/stress_moo/all_in_trades.csv",
+      "bytes": 729965,
+      "sha256": "4090999e9aeae1ff13548faf823790beeec955456db490e790b5418ea7736799"
+    },
+    {
+      "path": "runs/hpi235/stress_moo/complete.json",
+      "bytes": 630,
+      "sha256": "2fc5b4294125cfdcbd4fc8e054427f99e5fa59e2a47ba50628300803ca615951"
+    },
+    {
+      "path": "runs/hpi235/stress_moo/daily.csv",
+      "bytes": 351787,
+      "sha256": "738fb49dc652d93110c8e7c5bbf502220c639e757428b3d78b19020f5a0a3879"
+    },
+    {
+      "path": "runs/hpi235/stress_moo/dividends.csv",
+      "bytes": 41139,
+      "sha256": "575c43abf54ce75c72d918a5c8e5c9dd887f98afa20d0d12f26bf7b00eb25dbd"
+    },
+    {
+      "path": "runs/hpi235/stress_moo/entries.csv",
+      "bytes": 838813,
+      "sha256": "8e7338af4fa97de25c4ec92ae0294d9ba26092f29b63d78fc2c3d6a948cc73c4"
+    },
+    {
+      "path": "runs/hpi235/stress_moo/friction.csv",
+      "bytes": 719387,
+      "sha256": "40b724322cd9310485360283aacca63e3c1a1557a929ca809fd6bd5a90872f9e"
+    },
+    {
+      "path": "runs/hpi235/stress_moo/native_results.csv",
+      "bytes": 1113555,
+      "sha256": "2f52a7b411a5226ce478cb0a5102e722634e35a0b813038ea152c3fb177f59fb"
+    },
+    {
+      "path": "runs/hpi235/stress_moo/transactions.csv",
+      "bytes": 723581,
+      "sha256": "d6bc2c7073ec756ebd6160f44c86dbdc10af1620a35df82a5e7305f7e592863d"
+    },
+    {
+      "path": "runs/sector/central_limit_0.5pct/all_in_trades.csv",
+      "bytes": 116538,
+      "sha256": "da44d5d7657b98a6400ec9a0dce6405cc92a893d946da96db342e1c9be5926a2"
+    },
+    {
+      "path": "runs/sector/central_limit_0.5pct/complete.json",
+      "bytes": 639,
+      "sha256": "02639dabc3cffa8432ee252cd625d9c5fa3d479a24bf023b0dbfcbcaa9e194ae"
+    },
+    {
+      "path": "runs/sector/central_limit_0.5pct/daily.csv",
+      "bytes": 296915,
+      "sha256": "da4ec0c07b7df14c2c1ca99c9adad2f5b032a0afaafa1f8d71ab9f8c5213aa62"
+    },
+    {
+      "path": "runs/sector/central_limit_0.5pct/dividends.csv",
+      "bytes": 14194,
+      "sha256": "30f4ab79f110926594dcf7c9f84298a36fa6b9579321bf29ac10af3047cb9c07"
+    },
+    {
+      "path": "runs/sector/central_limit_0.5pct/entries.csv",
+      "bytes": 211824,
+      "sha256": "f8fc88187f2cf083df927ac789928b13de1bf9fc027d7678fa3a6df9b9994d50"
+    },
+    {
+      "path": "runs/sector/central_limit_0.5pct/friction.csv",
+      "bytes": 118233,
+      "sha256": "d240f346472e804a527729548e0c606c8a897f8163434e9cfa11cb4c15daf730"
+    },
+    {
+      "path": "runs/sector/central_limit_0.5pct/native_results.csv",
+      "bytes": 1080570,
+      "sha256": "f5cc68cce8b843cc3806f34b19b7c431bb8e52e788b6733e5ee50030c60dbdd4"
+    },
+    {
+      "path": "runs/sector/central_limit_0.5pct/transactions.csv",
+      "bytes": 128691,
+      "sha256": "516401f28658528972d0742b1dc9ecc404ba0deeca05a7ad13b60f73819589b1"
+    },
+    {
+      "path": "runs/sector/central_limit_1pct/all_in_trades.csv",
+      "bytes": 72565,
+      "sha256": "d5c99eca0102dbbbefcf05968b8ec43b060d83dfc03a4a39ad5b002a3f8f5867"
+    },
+    {
+      "path": "runs/sector/central_limit_1pct/complete.json",
+      "bytes": 638,
+      "sha256": "6e1ecdde8cefd840ca19d13aa99ca3e4b4f09421a792279697d8a93a4beb3b32"
+    },
+    {
+      "path": "runs/sector/central_limit_1pct/daily.csv",
+      "bytes": 283101,
+      "sha256": "73272d2f7ecb35b744b6d87911883984be35bae45bf1135532e27664c6760c6c"
+    },
+    {
+      "path": "runs/sector/central_limit_1pct/dividends.csv",
+      "bytes": 8557,
+      "sha256": "863b177180d9831d364c6931db114e055673889cebe9f1ebf578577d83492ff5"
+    },
+    {
+      "path": "runs/sector/central_limit_1pct/entries.csv",
+      "bytes": 236844,
+      "sha256": "c32a0ee0898751b2281309ea4980aa7afb0563e4dc18d3f6d2241106e2570f12"
+    },
+    {
+      "path": "runs/sector/central_limit_1pct/friction.csv",
+      "bytes": 72793,
+      "sha256": "87b6a5523ad8a46490072da9808ed09982ef7017ebefaf783074629f3d72a697"
+    },
+    {
+      "path": "runs/sector/central_limit_1pct/native_results.csv",
+      "bytes": 1060009,
+      "sha256": "94531293504c716e570dbbd5321729171310f39f9e30258681c849ea46e65398"
+    },
+    {
+      "path": "runs/sector/central_limit_1pct/transactions.csv",
+      "bytes": 79373,
+      "sha256": "162549c6a02178af8545fa2a0041e21812b44246aef18ecc1d16f23c54908a62"
+    },
+    {
+      "path": "runs/sector/central_limit_2pct/all_in_trades.csv",
+      "bytes": 23655,
+      "sha256": "2264a776da2ad090cbcbadae3b29e6e008222d4f447c5474b4fd48d1d92edf98"
+    },
+    {
+      "path": "runs/sector/central_limit_2pct/complete.json",
+      "bytes": 635,
+      "sha256": "4e67b20545c165df85fb99e0aca3e2f83a246768fd37203e1f2998c724e22853"
+    },
+    {
+      "path": "runs/sector/central_limit_2pct/daily.csv",
+      "bytes": 259331,
+      "sha256": "07bff0c804365c9fb54dc14e3f6f7d451e77172b2520f064a5909dcd4e53ee75"
+    },
+    {
+      "path": "runs/sector/central_limit_2pct/dividends.csv",
+      "bytes": 2308,
+      "sha256": "8e163fac2c3ea75926a1d4a408d0c7c1e1a5e2fdc08dc4c0acf03ee53dc2a27b"
+    },
+    {
+      "path": "runs/sector/central_limit_2pct/entries.csv",
+      "bytes": 265562,
+      "sha256": "78acae8cdfc0abc4e1efd176c99720aa832eb1445a64d58dad95483ca86bee63"
+    },
+    {
+      "path": "runs/sector/central_limit_2pct/friction.csv",
+      "bytes": 23635,
+      "sha256": "890804e1bce78882c5a15b814dae66df8a5d98f1f6a5b11ed849f41469df8768"
+    },
+    {
+      "path": "runs/sector/central_limit_2pct/native_results.csv",
+      "bytes": 1012309,
+      "sha256": "9f650e4bf16ec54161f598ff3f4e447f16e9a6de48125b4040df9d3809c293c5"
+    },
+    {
+      "path": "runs/sector/central_limit_2pct/transactions.csv",
+      "bytes": 25786,
+      "sha256": "d281c21f298defa5033d84ec3842899596b44d1eefbfe4dac25e9f6fae12fc24"
+    },
+    {
+      "path": "runs/sector/central_moo/all_in_trades.csv",
+      "bytes": 155874,
+      "sha256": "bd82a3695ba39e613ac4e683b60957258b18f317e9f9f8727716ef01770a3a13"
+    },
+    {
+      "path": "runs/sector/central_moo/complete.json",
+      "bytes": 627,
+      "sha256": "ca41c7dd1903c26754dfe16c636c341c0f47a70a0e8b20e7b02e6ffa90971e18"
+    },
+    {
+      "path": "runs/sector/central_moo/daily.csv",
+      "bytes": 298411,
+      "sha256": "826797c5e05bcebcb8ef77dbae6e5e82028376331adbdb86a0e5615ea0e93bc6"
+    },
+    {
+      "path": "runs/sector/central_moo/dividends.csv",
+      "bytes": 19080,
+      "sha256": "4b977c84a229b881119a036b0326ac66e692855bfbc7e0447a1f0b8895c086f3"
+    },
+    {
+      "path": "runs/sector/central_moo/entries.csv",
+      "bytes": 175915,
+      "sha256": "a2b2dd40ac4c6592f04eee1a122a2caab9ba2da12771329496c522839580aa38"
+    },
+    {
+      "path": "runs/sector/central_moo/friction.csv",
+      "bytes": 158402,
+      "sha256": "368883f9beb06b1922665a11e6c4f6c2895a415e9e5507037021d26b0df10a91"
+    },
+    {
+      "path": "runs/sector/central_moo/native_results.csv",
+      "bytes": 1095968,
+      "sha256": "d91e0d6b0fdacf920a384bfc0e7146648033dcf0d299b1e7853c2e74c086c923"
+    },
+    {
+      "path": "runs/sector/central_moo/transactions.csv",
+      "bytes": 186647,
+      "sha256": "d9f3b50f51038d4b5b68d1b9a08d8a7596a01713f00183770d538d1a9835d4ec"
+    },
+    {
+      "path": "runs/sector/native_equity.csv",
+      "bytes": 1095968,
+      "sha256": "d91e0d6b0fdacf920a384bfc0e7146648033dcf0d299b1e7853c2e74c086c923"
+    },
+    {
+      "path": "runs/sector/native_parity.json",
+      "bytes": 295,
+      "sha256": "2df0fef7e3ec5e34e03ae292e90f7b89bdfa9f1f42e42cc1f533ab6a26198597"
+    },
+    {
+      "path": "runs/sector/native_transactions.csv",
+      "bytes": 185540,
+      "sha256": "daa017e822d7755210906812f5c95537dbc15e5e737e2333d358b627695a82c5"
+    },
+    {
+      "path": "runs/sector/signal_prefix_audit.json",
+      "bytes": 161,
+      "sha256": "3959dbf8d2df13c4cd5f7965f9076e44b5f525a2b8ec4571303578d7145af0bc"
+    },
+    {
+      "path": "runs/sector/stress_limit_0.5pct/all_in_trades.csv",
+      "bytes": 110512,
+      "sha256": "61e9c7531fafd7e0300bbd10a1159b9e41cf0f3a49e54a51a68ca93d394e5a25"
+    },
+    {
+      "path": "runs/sector/stress_limit_0.5pct/complete.json",
+      "bytes": 639,
+      "sha256": "6c5003940a985e8b9f12e59a6c59fe07934b2f2117ef9cd0b6dfc6fa9c3f14a7"
+    },
+    {
+      "path": "runs/sector/stress_limit_0.5pct/daily.csv",
+      "bytes": 301920,
+      "sha256": "79df7935de9319fc679cb92db6d5e08dfa65271a8c97407ad4f9e010aa78705f"
+    },
+    {
+      "path": "runs/sector/stress_limit_0.5pct/dividends.csv",
+      "bytes": 13079,
+      "sha256": "70e2d63f0c92a5aecf623894ca58c530a49df224c5af86572a35d25f7e65ed1c"
+    },
+    {
+      "path": "runs/sector/stress_limit_0.5pct/entries.csv",
+      "bytes": 215629,
+      "sha256": "e6ac57dcc1785c7761d1545ec064b95982d6bc8e09a490e7bf3ef49ddc86e364"
+    },
+    {
+      "path": "runs/sector/stress_limit_0.5pct/friction.csv",
+      "bytes": 121902,
+      "sha256": "181dcaccbdc901b956c1d311b90ae565b586e5f9e09e7414daca9b882b9b8176"
+    },
+    {
+      "path": "runs/sector/stress_limit_0.5pct/native_results.csv",
+      "bytes": 1083628,
+      "sha256": "53a51905a05810e9279b13346bb1f9291c42d807c941f4b763ac768b0ede5a47"
+    },
+    {
+      "path": "runs/sector/stress_limit_0.5pct/transactions.csv",
+      "bytes": 122537,
+      "sha256": "f74b1c76c6332ab2a7f81abcd85203511d045ad89f4e851c57dbeb27cab40468"
+    },
+    {
+      "path": "runs/sector/stress_limit_1pct/all_in_trades.csv",
+      "bytes": 69795,
+      "sha256": "6ed6d2bc5d0117d08fc814defc95b1f6d9c3d8cdd156677c6ebcce4fcdb80f6f"
+    },
+    {
+      "path": "runs/sector/stress_limit_1pct/complete.json",
+      "bytes": 635,
+      "sha256": "949efa753fadf16f2e19d406c9ccfcf42ff1700d742b014e126afc69520de688"
+    },
+    {
+      "path": "runs/sector/stress_limit_1pct/daily.csv",
+      "bytes": 283790,
+      "sha256": "5a2f5f8fd0608ffb23ad051d632fc756bbf5a74e7722dd44af1be063e8e7ba2b"
+    },
+    {
+      "path": "runs/sector/stress_limit_1pct/dividends.csv",
+      "bytes": 8071,
+      "sha256": "6d346b24f24bd66cef0e7834aad5df913dd2af0c4142be806865efebd1e23db4"
+    },
+    {
+      "path": "runs/sector/stress_limit_1pct/entries.csv",
+      "bytes": 241590,
+      "sha256": "bb2b0cc2d4aa07d3f783605f62dd8038aef69c0244450a88d3120af70362791f"
+    },
+    {
+      "path": "runs/sector/stress_limit_1pct/friction.csv",
+      "bytes": 76541,
+      "sha256": "201ff33a8cf6daa0779ea0eeec1673d81d27967a1f28bc14c3e7f6349e67dc84"
+    },
+    {
+      "path": "runs/sector/stress_limit_1pct/native_results.csv",
+      "bytes": 1058737,
+      "sha256": "d2086372afed78348e0ab277d03698d0754ae03236303695a3901ac2486b9b8c"
+    },
+    {
+      "path": "runs/sector/stress_limit_1pct/transactions.csv",
+      "bytes": 76935,
+      "sha256": "cbfcf0b9408df7aa9ae631729e28f36414a198aafa44143f96d919534891b512"
+    },
+    {
+      "path": "runs/sector/stress_limit_2pct/all_in_trades.csv",
+      "bytes": 22550,
+      "sha256": "b062c89625fba31d3244b0b6da0519585f14542a7e587624cd92a7cf84cd3fcf"
+    },
+    {
+      "path": "runs/sector/stress_limit_2pct/complete.json",
+      "bytes": 636,
+      "sha256": "26facce889e57b4d4875a4bba7289bb6dc6e5b31f091267776e850a0ac4f3d07"
+    },
+    {
+      "path": "runs/sector/stress_limit_2pct/daily.csv",
+      "bytes": 260093,
+      "sha256": "a0e61e20afbc7dd80784b367dc7be90ee1083b9e51f230de3f7267617ed7658e"
+    },
+    {
+      "path": "runs/sector/stress_limit_2pct/dividends.csv",
+      "bytes": 2305,
+      "sha256": "3f7acc6162d53495f72c4792a67cc4e3b916595865dc1ba247e21bcf2199ab95"
+    },
+    {
+      "path": "runs/sector/stress_limit_2pct/entries.csv",
+      "bytes": 267814,
+      "sha256": "58ceb8d5627cc89b9e98a07b49432931618400654d555f115ae7e995b31bb4dd"
+    },
+    {
+      "path": "runs/sector/stress_limit_2pct/friction.csv",
+      "bytes": 24617,
+      "sha256": "15629f28f78b29df5f5e089095bb201495bda4b3ea7fd60f926b01d0ab699760"
+    },
+    {
+      "path": "runs/sector/stress_limit_2pct/native_results.csv",
+      "bytes": 1024952,
+      "sha256": "2e1f9e919ebf1bd159aa82003b5836afbaffcb2e497b5e85d84127e6d65dc68b"
+    },
+    {
+      "path": "runs/sector/stress_limit_2pct/transactions.csv",
+      "bytes": 24755,
+      "sha256": "1f5e7f2790839df8678cb2c5d87116d903a985b329303a59d20d9e5fd51a3f75"
+    },
+    {
+      "path": "runs/sector/stress_moo/all_in_trades.csv",
+      "bytes": 169112,
+      "sha256": "d722ee6e9c7061261c3b5f864b59b12a9230798db3e57cd4189c81fb37a1a5d6"
+    },
+    {
+      "path": "runs/sector/stress_moo/complete.json",
+      "bytes": 628,
+      "sha256": "d74fde6a73d91ae37865b135da343c3600460057cf4abc552469cb7d177d7f68"
+    },
+    {
+      "path": "runs/sector/stress_moo/daily.csv",
+      "bytes": 315397,
+      "sha256": "47e10de968fe328a44a9a0da4ef5d59484935787aac7714d8ecaf7c41e2f5321"
+    },
+    {
+      "path": "runs/sector/stress_moo/dividends.csv",
+      "bytes": 19100,
+      "sha256": "079d78a0fad05ddcc6ed87248b7d6bed7f90ea972e6f644ca58aec2efb244299"
+    },
+    {
+      "path": "runs/sector/stress_moo/entries.csv",
+      "bytes": 189983,
+      "sha256": "80b244f915580c1c435276b34c2506a77e2e89d2766ab7f97fef5bfb0836bdeb"
+    },
+    {
+      "path": "runs/sector/stress_moo/friction.csv",
+      "bytes": 186219,
+      "sha256": "c871fb4597ce41eb07a1872c1b4a173f63d5fda229a092316863bc0c59d86ab9"
+    },
+    {
+      "path": "runs/sector/stress_moo/native_results.csv",
+      "bytes": 1100753,
+      "sha256": "44ff359b06a32d039f37af90d3ca7e652f25a3a5213f3a71a7299bacaddcb18f"
+    },
+    {
+      "path": "runs/sector/stress_moo/transactions.csv",
+      "bytes": 187138,
+      "sha256": "d3001a66e9e610dc4ef95e40854913f01f9a3dbc0e8f4d12da34c1c30f902141"
+    },
+    {
+      "path": "sector_run.log",
+      "bytes": 1497,
+      "sha256": "c115084e96a71e6dac1731544a6c26ecba8f0e3ebe94efeb0b5e0082ce95fdb3"
+    },
+    {
+      "path": "smoke/dv2/central_limit_0.5pct/complete.json",
+      "bytes": 531,
+      "sha256": "1a5937530c83034ee8578ec737ada28c2ec632752ccdcca33c937397da475d2c"
+    },
+    {
+      "path": "smoke/dv2/central_limit_0.5pct/daily.csv",
+      "bytes": 2883,
+      "sha256": "1f95b3151c80a4e0e5201c9efcd1435e7776ea54d64549aec8a0446aeb406f07"
+    },
+    {
+      "path": "smoke/dv2/central_limit_0.5pct/dividends.csv",
+      "bytes": 604,
+      "sha256": "7b2422bd4e92e62add689bf938b6c58ca40d4ba2f9ad3d5e8ab137bb71dd78a4"
+    },
+    {
+      "path": "smoke/dv2/central_limit_0.5pct/entries.csv",
+      "bytes": 13260,
+      "sha256": "1b84849e4dbf6f0ecc0132a87c1c61bb0745542dfcd06b82e745b2b74d2c0c53"
+    },
+    {
+      "path": "smoke/dv2/central_limit_0.5pct/friction.csv",
+      "bytes": 7405,
+      "sha256": "b8b45f09847bab4a8f4a1279755eb172fdf331b730f2bb96cf3e215e2bbc0cfc"
+    },
+    {
+      "path": "smoke/dv2/central_limit_0.5pct/native_results.csv",
+      "bytes": 9365,
+      "sha256": "e329d529d4b120302532fbe608440ef6457fdbb1028335da23fd3b4119d387b4"
+    },
+    {
+      "path": "smoke/dv2/central_limit_0.5pct/transactions.csv",
+      "bytes": 8104,
+      "sha256": "13a96804b1376c406fce60ec148fed84c2a3bb2e2fa5a80da284104c8ccfbba1"
+    },
+    {
+      "path": "smoke/dv2/central_limit_1pct/complete.json",
+      "bytes": 529,
+      "sha256": "d8061ff83c8b176458c7a892be5334409b9eadef7e0d712a6f00927d73ebd3e7"
+    },
+    {
+      "path": "smoke/dv2/central_limit_1pct/daily.csv",
+      "bytes": 2927,
+      "sha256": "0db9542bdecc85f9bc3fce823e6c378dc1aaefa1ab34d0b00c8a8dc59641638f"
+    },
+    {
+      "path": "smoke/dv2/central_limit_1pct/dividends.csv",
+      "bytes": 604,
+      "sha256": "764c748b3bae9e1147e704c358540c1580cb944be02907538d965eac3e33a3a8"
+    },
+    {
+      "path": "smoke/dv2/central_limit_1pct/entries.csv",
+      "bytes": 14185,
+      "sha256": "d39ca4cfb0bd7f27524ba9aa101481568a1c6eaac9644e64b26fa90a59665e4e"
+    },
+    {
+      "path": "smoke/dv2/central_limit_1pct/friction.csv",
+      "bytes": 7077,
+      "sha256": "735875b53db8072e46387c46d745fea31fdc9dae6463001bb688d1dd2bdc98e9"
+    },
+    {
+      "path": "smoke/dv2/central_limit_1pct/native_results.csv",
+      "bytes": 9318,
+      "sha256": "3cdc29844149d13f28f78a11a04ef69bbce01722d529bbae186f0ceae63b2572"
+    },
+    {
+      "path": "smoke/dv2/central_limit_1pct/transactions.csv",
+      "bytes": 7746,
+      "sha256": "17638268cb703fc427c3f2f4207cda7c255ed30289024f8af993dfdd9cd3d5af"
+    },
+    {
+      "path": "smoke/dv2/central_limit_2pct/complete.json",
+      "bytes": 531,
+      "sha256": "ca940da191f8904b19e246450d86dc884986bb26d023716d23ae687b73de9252"
+    },
+    {
+      "path": "smoke/dv2/central_limit_2pct/daily.csv",
+      "bytes": 2854,
+      "sha256": "51848791325d72f4fdce91ea31d71c5a89bd945bf117741b1b475be7270ff611"
+    },
+    {
+      "path": "smoke/dv2/central_limit_2pct/dividends.csv",
+      "bytes": 707,
+      "sha256": "f30d8fcfe14d36ad33a8a37e937e6fa36664411e4a842829746a2d5835e5e4f5"
+    },
+    {
+      "path": "smoke/dv2/central_limit_2pct/entries.csv",
+      "bytes": 18076,
+      "sha256": "e3d9bc4d6a9a0579ced3feed7cbe872847394073faed963bba5523c8078db67a"
+    },
+    {
+      "path": "smoke/dv2/central_limit_2pct/friction.csv",
+      "bytes": 5292,
+      "sha256": "9c40cf8e1cf73a99b1c9524c4c495b6df90e908dc7d934f3124f3b2827ee9353"
+    },
+    {
+      "path": "smoke/dv2/central_limit_2pct/native_results.csv",
+      "bytes": 9054,
+      "sha256": "556ab8e793e0d8f95959d8b511927362eff783ea5a54ffbb3117286441419911"
+    },
+    {
+      "path": "smoke/dv2/central_limit_2pct/transactions.csv",
+      "bytes": 5797,
+      "sha256": "f76f81e6f2f4a6575ffe694d1f4a59dbe12e735a2066c4a67c64cf119a37fd90"
+    },
+    {
+      "path": "smoke/dv2/central_moo/complete.json",
+      "bytes": 521,
+      "sha256": "1ce5cbac70da8597009ce45d59f0b53a966c5cbcdac47210e47971e7c41ecd61"
+    },
+    {
+      "path": "smoke/dv2/central_moo/daily.csv",
+      "bytes": 2606,
+      "sha256": "c272a326beed215cbc5bc24e5f83aef7eab3d7e87fe7ae3884d82e5cf10fbacc"
+    },
+    {
+      "path": "smoke/dv2/central_moo/dividends.csv",
+      "bytes": 602,
+      "sha256": "6c7c99017a7017d75375cfb148b44603503079f46686c903ba0896948fed6cd4"
+    },
+    {
+      "path": "smoke/dv2/central_moo/entries.csv",
+      "bytes": 10406,
+      "sha256": "3c343f3ad5276ccfb2849afbba6dd98b46df47e7f4f7a71eb5c38bd50f21366f"
+    },
+    {
+      "path": "smoke/dv2/central_moo/friction.csv",
+      "bytes": 7172,
+      "sha256": "7936b169914c81f1e1c62f3a9dfc5788b1644c64599fbd2180432fa135d69cc2"
+    },
+    {
+      "path": "smoke/dv2/central_moo/native_results.csv",
+      "bytes": 9365,
+      "sha256": "1ee3018081af60cd2408e7f5d241f483a4e1259bcf0e8b30764a478eb7de40ef"
+    },
+    {
+      "path": "smoke/dv2/central_moo/transactions.csv",
+      "bytes": 8850,
+      "sha256": "25ab1ceda06e05d65dbdcf4d50e61a1155175a3954b60f8e4393c0a7b783875e"
+    },
+    {
+      "path": "smoke/dv2/native_equity.csv",
+      "bytes": 9365,
+      "sha256": "1ee3018081af60cd2408e7f5d241f483a4e1259bcf0e8b30764a478eb7de40ef"
+    },
+    {
+      "path": "smoke/dv2/native_parity.json",
+      "bytes": 294,
+      "sha256": "ca67283aa112740356bd1f15e04701321d0070f9cdd495e24b68da399c374f83"
+    },
+    {
+      "path": "smoke/dv2/native_transactions.csv",
+      "bytes": 8742,
+      "sha256": "51561397874f2d4014f524eaddd4fe83cfbf399917d564ca6d385495f2f6c6e2"
+    },
+    {
+      "path": "smoke/dv2/signal_prefix_audit.json",
+      "bytes": 161,
+      "sha256": "4de62ea8271102d1bebb9307a2f0215cf5d89e552dab8cce0c45cb7b22b1b5ba"
+    },
+    {
+      "path": "smoke/hpi235/central_limit_0.5pct/complete.json",
+      "bytes": 636,
+      "sha256": "4d6cdb55439b2ba4c3232cdf808b639f18f6af8fd1323163970298db2ccb9532"
+    },
+    {
+      "path": "smoke/hpi235/central_limit_0.5pct/daily.csv",
+      "bytes": 2849,
+      "sha256": "62894eecebbe7fcaaeadb3d0829e79a28917090fa9d1a6e0edace269b2f61a13"
+    },
+    {
+      "path": "smoke/hpi235/central_limit_0.5pct/dividends.csv",
+      "bytes": 487,
+      "sha256": "4e553f1c96060256d23d52569e2f0da09da2ac3a3a5b5f2aada2482478562824"
+    },
+    {
+      "path": "smoke/hpi235/central_limit_0.5pct/entries.csv",
+      "bytes": 8194,
+      "sha256": "c9115744aa0297016203eb87c9212a6c8ada1d87814e2502eb5369d9560adf90"
+    },
+    {
+      "path": "smoke/hpi235/central_limit_0.5pct/friction.csv",
+      "bytes": 4719,
+      "sha256": "f8a083fa950ce79ea4bfd01847a3cb4dba9d9abcbed9d85db37f0d0a6a2fb549"
+    },
+    {
+      "path": "smoke/hpi235/central_limit_0.5pct/native_results.csv",
+      "bytes": 9381,
+      "sha256": "3f2b4a71acfb31c7d4affae37d3fcf41a3cfd82913ee895c4454872bd31bad3c"
+    },
+    {
+      "path": "smoke/hpi235/central_limit_0.5pct/transactions.csv",
+      "bytes": 5160,
+      "sha256": "78ceea98174e59d2d00732940e5dde6652da2de1ee1dd33f2a9b7134424e2721"
+    },
+    {
+      "path": "smoke/hpi235/central_limit_1pct/complete.json",
+      "bytes": 633,
+      "sha256": "bcf6174efa70efabf45d8ff2fefbfd6ecd18b2f6c192e7f707606a9a43c950a1"
+    },
+    {
+      "path": "smoke/hpi235/central_limit_1pct/daily.csv",
+      "bytes": 2849,
+      "sha256": "fdb12a1b963342148cff8b3ea22a65418d31036df81a0acf4a261c26f22c7fec"
+    },
+    {
+      "path": "smoke/hpi235/central_limit_1pct/dividends.csv",
+      "bytes": 376,
+      "sha256": "a2a783ad13d9de8e4753a6ccd196404f41b8ebb8fad2274f3b7dd8b532b7a24f"
+    },
+    {
+      "path": "smoke/hpi235/central_limit_1pct/entries.csv",
+      "bytes": 8630,
+      "sha256": "07748b0ceac17d7cd4ddb6e5539c0b03135820372ae8dc67b801c8463027816b"
+    },
+    {
+      "path": "smoke/hpi235/central_limit_1pct/friction.csv",
+      "bytes": 4234,
+      "sha256": "596f1859f65f840a017269a18c4dff175f1bd37a40d3cbe78ff22e2517f1820a"
+    },
+    {
+      "path": "smoke/hpi235/central_limit_1pct/native_results.csv",
+      "bytes": 9395,
+      "sha256": "e15df3ba9baca9e541f94be1307b6e9a8e11a76e6f301e8f29c2db8f4ebd9ee7"
+    },
+    {
+      "path": "smoke/hpi235/central_limit_1pct/transactions.csv",
+      "bytes": 4659,
+      "sha256": "81a8c0d33f47486374f706be6b392f88239715a209ae0f52edab34ffc8f5b67d"
+    },
+    {
+      "path": "smoke/hpi235/central_limit_2pct/complete.json",
+      "bytes": 633,
+      "sha256": "29368f8b3ea18e0cd9dcda2679741316529d97410e6effb3f617dd8f4e28cde3"
+    },
+    {
+      "path": "smoke/hpi235/central_limit_2pct/daily.csv",
+      "bytes": 2674,
+      "sha256": "ed915a73158604a6856a6733c50ba65518af71144baea92c7238ec2e714d5cfe"
+    },
+    {
+      "path": "smoke/hpi235/central_limit_2pct/dividends.csv",
+      "bytes": 263,
+      "sha256": "df57b70cc70a8a0786d2032344d4fa57bd0dc74e11e2332f0cd4d185b5fec4d2"
+    },
+    {
+      "path": "smoke/hpi235/central_limit_2pct/entries.csv",
+      "bytes": 12053,
+      "sha256": "3181f5ebc4c7a6502507187e954c7ff6ed0b362b09b7fd70aded8d02dc59ae48"
+    },
+    {
+      "path": "smoke/hpi235/central_limit_2pct/friction.csv",
+      "bytes": 2847,
+      "sha256": "81430c415f75a65fe1f91391259d09de380c72c6af372546d6c06292ab030021"
+    },
+    {
+      "path": "smoke/hpi235/central_limit_2pct/native_results.csv",
+      "bytes": 9181,
+      "sha256": "fa029f8593f8cead325e399224e71efdf1ada8fa2b107da37e35efd818d6ebbf"
+    },
+    {
+      "path": "smoke/hpi235/central_limit_2pct/transactions.csv",
+      "bytes": 3133,
+      "sha256": "71f618807c2a1a548b3498d517cdfc886e5b54f81ffe1bcc32f5ad66fd771967"
+    },
+    {
+      "path": "smoke/hpi235/central_moo/complete.json",
+      "bytes": 623,
+      "sha256": "20c7165d652f3050dd6f6ed4a6f016bbaa56dcec544f460d23de9950178106fc"
+    },
+    {
+      "path": "smoke/hpi235/central_moo/daily.csv",
+      "bytes": 2588,
+      "sha256": "a9d399f9541a8b7372cda5dcb14b39b8d74e8e9a420e43a85c2969cfec695273"
+    },
+    {
+      "path": "smoke/hpi235/central_moo/dividends.csv",
+      "bytes": 703,
+      "sha256": "1badf25326d714cbdd7c29c20714bf3b73a0a7d7614edde8b842c6a07d392dc3"
+    },
+    {
+      "path": "smoke/hpi235/central_moo/entries.csv",
+      "bytes": 7779,
+      "sha256": "7e0888d6cecbe1b0346824461a4c2d620df269641cf3c96e2e6e4e05eeb0a7e9"
+    },
+    {
+      "path": "smoke/hpi235/central_moo/friction.csv",
+      "bytes": 5324,
+      "sha256": "e94de0acb45fa4f057e5e0cf8590f0f9fb230b6318d7cb899bb82e40be6f302a"
+    },
+    {
+      "path": "smoke/hpi235/central_moo/native_results.csv",
+      "bytes": 9322,
+      "sha256": "57baf3ce22f7bdf8adcaf09a4a7d43a3d04d53757cf87525657b2770d17c575a"
+    },
+    {
+      "path": "smoke/hpi235/central_moo/transactions.csv",
+      "bytes": 6534,
+      "sha256": "2ea2d1c56846e0e045981ae5d5ecbdd47e2b50fd64a046470494dd9dc95628a6"
+    },
+    {
+      "path": "smoke/hpi235/native_equity.csv",
+      "bytes": 9322,
+      "sha256": "57baf3ce22f7bdf8adcaf09a4a7d43a3d04d53757cf87525657b2770d17c575a"
+    },
+    {
+      "path": "smoke/hpi235/native_parity.json",
+      "bytes": 295,
+      "sha256": "6592a49fc4acb2c241bab0f01bfc6cff4167db8c2cfb177d1a14618a91c25b8b"
+    },
+    {
+      "path": "smoke/hpi235/native_transactions.csv",
+      "bytes": 6449,
+      "sha256": "65545b36f5671e22e0e13ecf520497827f5fbc543d8b2c237ef05f1c789cf57e"
+    },
+    {
+      "path": "smoke/hpi235/signal_prefix_audit.json",
+      "bytes": 161,
+      "sha256": "4de62ea8271102d1bebb9307a2f0215cf5d89e552dab8cce0c45cb7b22b1b5ba"
+    },
+    {
+      "path": "smoke/sector/central_limit_0.5pct/complete.json",
+      "bytes": 534,
+      "sha256": "11928e3cbbc350eaf69963e07f8fe69dd0f2451d1ad45ef764caed2c87b94b28"
+    },
+    {
+      "path": "smoke/sector/central_limit_0.5pct/daily.csv",
+      "bytes": 2368,
+      "sha256": "871d8329e48adbf85c55d7c90caf4009fafe47843c00303bac26da44502ee548"
+    },
+    {
+      "path": "smoke/sector/central_limit_0.5pct/dividends.csv",
+      "bytes": 155,
+      "sha256": "64ac62b3ac8b29b453d130cadbb07ddbcaa5e7163eb1529ec617678505ca7e8a"
+    },
+    {
+      "path": "smoke/sector/central_limit_0.5pct/entries.csv",
+      "bytes": 2456,
+      "sha256": "ec1b49bdd1c4c02ed05e43ea881a2027ccf3cf7d38524da25325f14ef2af772f"
+    },
+    {
+      "path": "smoke/sector/central_limit_0.5pct/friction.csv",
+      "bytes": 1777,
+      "sha256": "040d481538ee52c06c1339d673558f59d25bbbedd99494682de51890693f71be"
+    },
+    {
+      "path": "smoke/sector/central_limit_0.5pct/native_results.csv",
+      "bytes": 8229,
+      "sha256": "bbc189519f44fc349019ee2a628735be905e12c4fc817f1d9b919808e28a5a81"
+    },
+    {
+      "path": "smoke/sector/central_limit_0.5pct/transactions.csv",
+      "bytes": 1900,
+      "sha256": "7d07662e2fe32001eeb811c09fc03b221e9bc5fc42426d3b7715d509527a017f"
+    },
+    {
+      "path": "smoke/sector/central_limit_1pct/complete.json",
+      "bytes": 534,
+      "sha256": "f02088b416666c459ca0032728d0bf119a4cc66554bda99596d4c0a4ec788935"
+    },
+    {
+      "path": "smoke/sector/central_limit_1pct/daily.csv",
+      "bytes": 2271,
+      "sha256": "47a034258b5b569f263f138e8207b1ebf85ad384f07875c97c309125edde7342"
+    },
+    {
+      "path": "smoke/sector/central_limit_1pct/dividends.csv",
+      "bytes": 155,
+      "sha256": "64ac62b3ac8b29b453d130cadbb07ddbcaa5e7163eb1529ec617678505ca7e8a"
+    },
+    {
+      "path": "smoke/sector/central_limit_1pct/entries.csv",
+      "bytes": 3069,
+      "sha256": "207042090d33cebfe1731827c3efafaa8e5cbc1356288f5ebb30f0443b13241e"
+    },
+    {
+      "path": "smoke/sector/central_limit_1pct/friction.csv",
+      "bytes": 1494,
+      "sha256": "eeaffbcf2c30fdbfceb88aa82eed4348c691e36ae6bca61f937e9e1e6c46fe25"
+    },
+    {
+      "path": "smoke/sector/central_limit_1pct/native_results.csv",
+      "bytes": 8022,
+      "sha256": "74503b87099fb12674402820af15b65800aaf9fddf2aac7655cbc974ad56304d"
+    },
+    {
+      "path": "smoke/sector/central_limit_1pct/transactions.csv",
+      "bytes": 1602,
+      "sha256": "23c0709569dce8d81303056668ee3edf94e47a15ea06f3c2776174dc968af8a3"
+    },
+    {
+      "path": "smoke/sector/central_limit_2pct/complete.json",
+      "bytes": 531,
+      "sha256": "6044c2e65d18705a5fb9436e30d921bc3cf6e10350dd4d25a930035c0f71f2cb"
+    },
+    {
+      "path": "smoke/sector/central_limit_2pct/daily.csv",
+      "bytes": 2095,
+      "sha256": "0deff6f425b90cff525abe42a8207bec76e2b42d4db674f1f8dc87b1d4f22cb9"
+    },
+    {
+      "path": "smoke/sector/central_limit_2pct/dividends.csv",
+      "bytes": 155,
+      "sha256": "64ac62b3ac8b29b453d130cadbb07ddbcaa5e7163eb1529ec617678505ca7e8a"
+    },
+    {
+      "path": "smoke/sector/central_limit_2pct/entries.csv",
+      "bytes": 3630,
+      "sha256": "5c5b4193378a3da64ae0d49a9f1f91a6ba12199e29d05a72552fc839e9a06fb4"
+    },
+    {
+      "path": "smoke/sector/central_limit_2pct/friction.csv",
+      "bytes": 618,
+      "sha256": "c9bf66f531898a2cce17b5f494cac32b26c0f23bb4dcbf883aded34ef08ab9a2"
+    },
+    {
+      "path": "smoke/sector/central_limit_2pct/native_results.csv",
+      "bytes": 7624,
+      "sha256": "46ace3d687e5919aa6ee93cab4eb7e16887e80333d79db67ea6d718d5469586c"
+    },
+    {
+      "path": "smoke/sector/central_limit_2pct/transactions.csv",
+      "bytes": 647,
+      "sha256": "8885ef21149a3a42f93943f765953c542dca14c365175fe8c2324ac93b63c48e"
+    },
+    {
+      "path": "smoke/sector/central_moo/complete.json",
+      "bytes": 524,
+      "sha256": "e9d189161b38b9db0d2f59e84d7a597ecaba0d3c8f13efec76a6cd73c35b4406"
+    },
+    {
+      "path": "smoke/sector/central_moo/daily.csv",
+      "bytes": 2446,
+      "sha256": "bcd1df68189eb281cb47ad7a85f41b598764c6837454ed44a18ec24878188048"
+    },
+    {
+      "path": "smoke/sector/central_moo/dividends.csv",
+      "bytes": 155,
+      "sha256": "64ac62b3ac8b29b453d130cadbb07ddbcaa5e7163eb1529ec617678505ca7e8a"
+    },
+    {
+      "path": "smoke/sector/central_moo/entries.csv",
+      "bytes": 2351,
+      "sha256": "de9df83f8dd33fede732d777defe5ef29eeb7e388b9b6f1dda70925e2f933003"
+    },
+    {
+      "path": "smoke/sector/central_moo/friction.csv",
+      "bytes": 1941,
+      "sha256": "eb930822b3217df3fb078c7ba9eea7a8736631c228c6d8704daac0f2b9ccfee8"
+    },
+    {
+      "path": "smoke/sector/central_moo/native_results.csv",
+      "bytes": 9197,
+      "sha256": "ad1617f8bdf96370ddd288dc9de47e19eba12b0c545966433334ea187cbfabcb"
+    },
+    {
+      "path": "smoke/sector/central_moo/transactions.csv",
+      "bytes": 2273,
+      "sha256": "732ec6b5304139559e6d3936e11966ad36b222791f08bd8fed680150f6c83951"
+    },
+    {
+      "path": "smoke/sector/native_equity.csv",
+      "bytes": 9197,
+      "sha256": "ad1617f8bdf96370ddd288dc9de47e19eba12b0c545966433334ea187cbfabcb"
+    },
+    {
+      "path": "smoke/sector/native_parity.json",
+      "bytes": 294,
+      "sha256": "6cdc9a6b6117ad781d70c42bf1e727390a88e4d99470165257aef2b7472ef98b"
+    },
+    {
+      "path": "smoke/sector/native_transactions.csv",
+      "bytes": 2264,
+      "sha256": "2e040233838a9b66d81c7104e72e3e81c388142481f3036199b307e7330d8d52"
+    },
+    {
+      "path": "smoke/sector/signal_prefix_audit.json",
+      "bytes": 161,
+      "sha256": "3959dbf8d2df13c4cd5f7965f9076e44b5f525a2b8ec4571303578d7145af0bc"
+    },
+    {
+      "path": "source_code_manifest.json",
+      "bytes": 2968,
+      "sha256": "912ad45b56dd0edf839511852ebdb4e38db47a4f3280258127f4b1b88f87a91b"
+    },
+    {
+      "path": "SOURCE_RULE_MAP.md",
+      "bytes": 1558,
+      "sha256": "38c666a3bb51e47abdc488948a1c2131c3678c4a44588c0841f58bb4d841a90b"
+    },
+    {
+      "path": "tables/accounting_audit.json",
+      "bytes": 449,
+      "sha256": "627a90e0b6f31b69faefa6f2b733abcf56fa6c035d31d81f8530251eb2f1d051"
+    },
+    {
+      "path": "tables/annual_returns.csv",
+      "bytes": 20217,
+      "sha256": "f0ede50f24a00e3596134b0319ba8e6deb788f9979fdbe17c6e172036559fd5f"
+    },
+    {
+      "path": "tables/capacity_orders.csv",
+      "bytes": 8291739,
+      "sha256": "5cdfa786fed844de6e27a5aa6db9d34e2238bc4fb74f8ca13984c5f187dcf211"
+    },
+    {
+      "path": "tables/capacity_pooled_demand.csv",
+      "bytes": 8647157,
+      "sha256": "5ca0ec1df937e4e8a42748d3f0c66c8f12f7fc036064cc33193d8fd46c3a8067"
+    },
+    {
+      "path": "tables/capacity_summary.csv",
+      "bytes": 1366,
+      "sha256": "35c45e5746472a349497d87b1ab5f2d5b189b62d358530b2617225ce520c6c89"
+    },
+    {
+      "path": "tables/daily_returns.csv",
+      "bytes": 1952983,
+      "sha256": "7c48cb90aa8420859521df1bd3eb3082e0dd93efeda929cf38d1622687be1ff8"
+    },
+    {
+      "path": "tables/decision_summary.csv",
+      "bytes": 627,
+      "sha256": "ce017d73e80dbd49c8e1740be0d05627a87ffb88c153564611752ed3483a4796"
+    },
+    {
+      "path": "tables/dv2_benchmark.json",
+      "bytes": 222,
+      "sha256": "f542fa819d827a11e33bb5b27aa4a406f7501aa6e0b3402d8c91df24bf2021ee"
+    },
+    {
+      "path": "tables/dv2_input_exposure_orders.csv",
+      "bytes": 8151541,
+      "sha256": "f201aa7b297476c63eb3c28a402e683168adf9f9679b93874b780bad167888d7"
+    },
+    {
+      "path": "tables/dv2_input_exposure_summary.csv",
+      "bytes": 478,
+      "sha256": "c0ea04f8596653e977eec387c0b759d2e423837ceb077630cbd0539177e2e9ac"
+    },
+    {
+      "path": "tables/dv2_input_exposure_transactions.csv",
+      "bytes": 6646845,
+      "sha256": "1ff4efb50f3abefac8f4e35ed036bf85ad0d4aa6e99ba6ad01ff1d996eda4a10"
+    },
+    {
+      "path": "tables/entry_path_comparison.csv",
+      "bytes": 710,
+      "sha256": "912f5d1ff2dd4dadba8c7da03a9490e25b218c4211a56ce5c85a80ae4805f05b"
+    },
+    {
+      "path": "tables/hpi235_benchmark.json",
+      "bytes": 222,
+      "sha256": "f542fa819d827a11e33bb5b27aa4a406f7501aa6e0b3402d8c91df24bf2021ee"
+    },
+    {
+      "path": "tables/inference.csv",
+      "bytes": 1562,
+      "sha256": "7bebb865ac60aaa1103b2d474106ff86ca181818f110a641c1219adda8d91c81"
+    },
+    {
+      "path": "tables/paired_opportunities.csv",
+      "bytes": 11210992,
+      "sha256": "20035c9f9641fa0a2fc293188e50b9ba23bee76ab44af7563a831ddddb47bc86"
+    },
+    {
+      "path": "tables/paired_summary.csv",
+      "bytes": 3171,
+      "sha256": "dc9b2d60b87f0f6c8580af7ab1135cc6f1744e9e56ee84e70b0993f031a4e981"
+    },
+    {
+      "path": "tables/sector_benchmark.json",
+      "bytes": 222,
+      "sha256": "f542fa819d827a11e33bb5b27aa4a406f7501aa6e0b3402d8c91df24bf2021ee"
+    },
+    {
+      "path": "tables/subperiods.csv",
+      "bytes": 14898,
+      "sha256": "637eb022be3b5611e956e11b326bf3fa7f941e4bdf9484881fa86594ffa8d12e"
+    },
+    {
+      "path": "tables/summary.csv",
+      "bytes": 16389,
+      "sha256": "1e08bcbcb0f2ff269755f7e1fe1f85f292fdfbf67350dd4bef882a3238ac2d14"
+    },
+    {
+      "path": "tables/timing_attribution.csv",
+      "bytes": 328,
+      "sha256": "2fc6a78ef15879f26c824fa0c5db97486bf4de6ea23f2f86d78011dc67e39a43"
+    },
+    {
+      "path": "verification/artifact_qa.json",
+      "bytes": 395,
+      "sha256": "85d529c250a5c84377282dacd3a659a937f16069500ad2478be0af21308d6fef"
+    },
+    {
+      "path": "verification/bundle_validation.log",
+      "bytes": 130,
+      "sha256": "ac46600f4b7a41b67396170f3faabb47f55e8eb965b737cad6d25325dc0d03df"
+    },
+    {
+      "path": "verification/final_verification.json",
+      "bytes": 720,
+      "sha256": "25a5bf7ed9c2102e9ca7644281de4d4f6d0b32122475fcdfeb635aaa0eb482ff"
+    },
+    {
+      "path": "verification/focused_tests.log",
+      "bytes": 101,
+      "sha256": "5e465e55f8e6275dabd6778f86038103fb6a113926991045db19a53fd2d4368b"
+    },
+    {
+      "path": "verification/full_accounting_analysis.log",
+      "bytes": 2306,
+      "sha256": "5e6880f7dc7d2e41214980f5ac6c51fd1150eec3a6125730d345abae51056728"
+    },
+    {
+      "path": "verification/mkdocs_strict.log",
+      "bytes": 9900,
+      "sha256": "69d2e949d806d5fe4feb953866e83de64bef5ff5344c435ec43893831757d0f8"
+    },
+    {
+      "path": "verification/review_record.json",
+      "bytes": 2675,
+      "sha256": "399e98f96ae628f33ef26b1b44cb7819e129fc436b2c7679bd9a80f2a651b5a1"
+    },
+    {
+      "path": "verification/triage_owned.txt",
+      "bytes": 1327,
+      "sha256": "daf1b993d7576d245c42956f1e73d8b8749fe8bd32491ee5594a97b5c1885943"
+    },
+    {
+      "path": "verification/triage_owned_final.log",
+      "bytes": 1205,
+      "sha256": "2f19a112ff6ffbdfab0e29fba11124533fe8df99bf652bece7c18b6aa3c6c6de"
+    },
+    {
+      "path": "verification/triage_workspace.txt",
+      "bytes": 26922,
+      "sha256": "2e08e9960b4515e9f421d91ad5bb3843fd973ac3be941074eb19867a9023d2b5"
+    }
+  ],
+  "external_deliverables_and_sources": [
+    {
+      "path": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\scripts\\research\\run_mr_deeper_dip_study.py",
+      "bytes": 23687,
+      "sha256": "4689af56e90cd4dcf833b896b1a28217d0b54ca9cd785162e5e020579e435a19"
+    },
+    {
+      "path": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\scripts\\research\\run_mr_deeper_dip_fast.py",
+      "bytes": 6531,
+      "sha256": "7572afe6906386f89e3b27d81de74f306055cf1f7ed152c70539914bab0295de"
+    },
+    {
+      "path": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\scripts\\research\\analyze_mr_deeper_dip_study.py",
+      "bytes": 44907,
+      "sha256": "e7c6f8c6b710baeeda56b10b5f397d6bc22e75bb2632af93cd82bf1a9c779a29"
+    },
+    {
+      "path": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\scripts\\research\\report_mr_deeper_dip_study.py",
+      "bytes": 63873,
+      "sha256": "bfd5be07c72a69c9ddbb3b7dec42befac8c8beefd1ca1d5ac70fd592a35cc6ff"
+    },
+    {
+      "path": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\tests\\test_mr_deeper_dip_study.py",
+      "bytes": 15292,
+      "sha256": "4897f293f1cb0f103b9ce2804a57e339d5fa624ecadb6b0d2f4e69d2d0bd55b2"
+    },
+    {
+      "path": "C:\\Users\\User\\Downloads\\Where to Buy the (Deeper) Dip.pdf",
+      "bytes": 2583804,
+      "sha256": "779b6656a0b9d43f0ea8839dbe3b54c8b3ce53becaf86a250230c7a8bdd3ad6a"
+    }
+  ],
+  "files_sha256": {
+    "charts\\cost_sensitivity.png": "dbdee2828188148e3d9c590c6f0cda79970bb73e5fd5bafe7dd6f8dac10b3cba",
+    "charts\\equity_drawdown.png": "b5d1fff321d8951bbdd0d904b8118fe6e9f2648f6fee5269dc9c5f92d7915673",
+    "charts\\fills_exposure.png": "8ec56078d0d8949d771de8fcb3a87c6e31cc528685c68c6be138e07860232262",
+    "charts\\rolling_correlation.png": "59ebd8963a2656a953fc80898019515868eea2dc0d3ab40ee649ca9c465cb413",
+    "data\\dv2\\calendar.csv": "628256905a5d60b6a0f98d9315941de0e3b24d3b27057b5ede2d2148ffb46fe4",
+    "data\\dv2\\input_manifest.json": "c00f52b01e144080f55ca84f056c3bdc39bf1e5db12ba1894e78fafe54ffcf10",
+    "data\\dv2\\pricing.pkl": "84835f4c6e644ffe4af75b5a2e52a1326e81bbb25783b83f5da49b0408339386",
+    "data\\dv2\\universe.pkl": "ddb455bb48ff0052653e8c53fa3867763021b395cb1acbcb27fe0eb73e8104b5",
+    "data\\hpi235\\calendar.csv": "628256905a5d60b6a0f98d9315941de0e3b24d3b27057b5ede2d2148ffb46fe4",
+    "data\\hpi235\\input_manifest.json": "adfb727d105225462e905ccdba810dc9854c3f91e05bb3280d7086860173e434",
+    "data\\hpi235\\pricing.pkl": "54ebc96629c99a91c9b347cf0c6f8043cb62185d7d01f2e7ec3d9b1a427453c6",
+    "data\\hpi235\\universe.pkl": "3f697c06b5b3feb50f3102df3a91f439455067770805579e95dceefa33d601de",
+    "data\\sector\\calendar.csv": "628256905a5d60b6a0f98d9315941de0e3b24d3b27057b5ede2d2148ffb46fe4",
+    "data\\sector\\input_manifest.json": "15fc2d93df5c09c30f8945c6b152c20ee408231a96f9fed70b0c18bf3e7c8097",
+    "data\\sector\\pricing.pkl": "d4a7d64f9932b4f364233203d7ad2c059898f0323883d19c5099d42977cddb45",
+    "DATA_AUDIT.md": "6019537b423666cbde2591ae0c51e708bb2ab436f246121bd81496ba0bc2ae40",
+    "decision_log.jsonl": "110b8dc633074ee9c8bff9590dbb6d4b3f96c5121409e52dfbaa4950f99f6be1",
+    "decision_notebook.ipynb": "9d613b1c88f806b202e20d8f5f6cacfe0a8fffeb9189fbb3ca6fb06a4b8af0c5",
+    "dv2_fast_run.log": "2d65a06ef1cc224bf3df080ead29811b5239baccbf64c91550b71cb3ba867f13",
+    "dv2_run.log": "e37cf03d5b533a284c416d62af1578ade10b2071a15a1a0480892933baa121fc",
+    "experiment_ledger.jsonl": "370b0a537d8ee00a55fb4053644a2b92053fd4aacf300d743501d28a3fdf7732",
+    "hpi235_fast_run.log": "df3dc23ca7a617c10d69cf81139784d79ab4d38444fee8230e313bb1231e0b26",
+    "hpi235_run.log": "8ff9956d074fd5288a9134d519e27ff0b5849aedb12a693cfc5561c9e3aa013c",
+    "hypothesis_registry.json": "43b5ea7c747d9622fc27789a36b28f59ee7e7ada98d6fca9b290cd8ba63b7234",
+    "knowledge_record.json": "d80ebd0f3e4956f3e304f5d7c127e2898821f853a733b8f8aed9446cb8296a02",
+    "lineage_events\\D0002.json": "ba50d9dc44c43369a08a39fb8b08f4a4608a1522841aa49c7b20f15e13e85a72",
+    "lineage_events\\D0003.json": "d64cd7b05dacffb9e0431a7880e069a566f59550c8623591069014532a37a13d",
+    "lineage_events\\dv2_H0.json": "cfa8ccf9d69e0eda07db9907a90d14d6c0de38213ba9795d33878954f2d6f6e1",
+    "lineage_events\\dv2_H0_results.json": "d5ffa6684c64061f7494c332c164e7b6c5ad69870d7dd6ddfe78bb36ebc9c297",
+    "lineage_events\\dv2_H1.json": "f2391c8c5cc5ca9c5e6dec971a5e5125ae47197d360fe25ff2dcc3704b5938b3",
+    "lineage_events\\dv2_H1_results.json": "43d2b56cb1af074bc2d27ae112e52367a7f0f05c7d0967053d7f8c09fdc6b571",
+    "lineage_events\\dv2_H2.json": "3c5b4d9ee49714ba009ea70d7c4c040ee05f1d5617a0313c01cf8f783337a702",
+    "lineage_events\\dv2_H2_results.json": "43fe7ae93504aefaff9dd8534d9683f162364e35b0ab9ed48bae84bc1c35f6ed",
+    "lineage_events\\hpi235_H0.json": "9ab4a376e27f47c6804fd16cc20973ef66d7ffcc971f89b4b07629f55496d761",
+    "lineage_events\\hpi235_H0_results.json": "fdd45e9894322704a7bba45a602a5dbf93c59ce1cfb3e74cb42f921698ffc1ae",
+    "lineage_events\\hpi235_H1.json": "ed2b02f43d7c10c76c9c7393a7cd6890d8a13f1b50989f39c63696fc035144f7",
+    "lineage_events\\hpi235_H1_results.json": "05e5738a1098562b6eb13fbe03236e788f418d71190ee7d675f076899b0ce28d",
+    "lineage_events\\hpi235_H2.json": "6ff2e71b46d5c20fd9eaa6f56dd27b9ce038a5c9a5e84bd4e571aa2f07f868e5",
+    "lineage_events\\hpi235_H2_results.json": "0565f64f1f4f6f714fdc6647a9addb7b3e61f4236f94df1e573d12dc78a1d2c6",
+    "lineage_events\\sector_H0.json": "da1d36f628210b8ca04e3c35942ac9eeca67dcd0575cf002da6c670fc2eeadbb",
+    "lineage_events\\sector_H0_results.json": "2c9b05f72bd560c657ce6f898e2cb0aa24503905b05ef1dd53f9e303f4a0c70a",
+    "lineage_events\\sector_H1.json": "991be1df1ca85bea4a4c17c66de8e43c81e6dfe7da61dba6f954316241bc9792",
+    "lineage_events\\sector_H1_results.json": "18ca9bf23f01373fd8a7814e1c85c370b6116c80d3bade8429eabd2f56184387",
+    "lineage_events\\sector_H2.json": "c1bbe8d5b6d516c8a6f1459ba6732e3c0f9d172c67c35d83eb9075d8fc23791c",
+    "lineage_events\\sector_H2_results.json": "00c98bc48c7d6fa68b5c43c271cff26ab781b8dff287cbd8cc2ecdc23b9d70c1",
+    "pre_run_calendar_note.json": "2aa8a03e23d6e8db84924826a76137eafb7fa1635bf83b7af82cace33909542c",
+    "REPORT.md": "6e4e7f1bd38919bc5fc7cf54eea66e55ccc92b88a60590bee6cf510bb5c732bd",
+    "REPORT_FULL.md": "fc4512664001980d6a2bb4c50c427d1e30704a041036956b414b584e2c08d184",
+    "research_spec_frozen.json": "a4c4798684b45133c009761bb63c645e23975c02ab80345f6b2d095f5def16cd",
+    "research_spec_normalized_view.json": "846c23909a9e63878010a63ee8057fa5243cc9455b36bfcce1906c250b424d62",
+    "research_state.json": "87c65f49dfd86e9fe7de3d569c586a8f2efb5925276f79db22dcb1fc41d3749e",
+    "runs\\dv2\\central_limit_0.5pct\\all_in_trades.csv": "e84631b257f2396f428d9ec000d0fe2084f0f8d0d8973e2831470bea34a008f8",
+    "runs\\dv2\\central_limit_0.5pct\\complete.json": "a0e05e581be036f024a5e7c0c2599924a17df30abcc85bbc21ffe95e156af73e",
+    "runs\\dv2\\central_limit_0.5pct\\daily.csv": "d2cfd5ef100a01c0f34a1815df0b2c85091705c8e066f56f30e9fde2b75bf258",
+    "runs\\dv2\\central_limit_0.5pct\\dividends.csv": "d2119b5bda1e375fc0822712b6d837e0387f25fe4787432bc9d88a8949ac73a3",
+    "runs\\dv2\\central_limit_0.5pct\\entries.csv": "f387d5fd565bcf49a6e4b2e93b57f4809dff404f3706bccd8b2faa63e6f84627",
+    "runs\\dv2\\central_limit_0.5pct\\friction.csv": "8d48680b5917102fa8be36e5f9c73379addac6be54036da826582adb155be204",
+    "runs\\dv2\\central_limit_0.5pct\\native_results.csv": "617be2f0564bcf8be9f4d260c3add55d3cfba8a0632fe398e2f79a18875f911a",
+    "runs\\dv2\\central_limit_0.5pct\\transactions.csv": "32fd7ce009de9db5cbf7846781110e4ec50bd48cf68595822db20e5bc1551adf",
+    "runs\\dv2\\central_limit_1pct\\all_in_trades.csv": "be382e222e256500daf09c80f57b0cb45c844f69235ef87e5ef5a37aebc62d5f",
+    "runs\\dv2\\central_limit_1pct\\complete.json": "255617d6e7088b207c63b226500b40d2045bdfd18fa2c929e53815995a3b5858",
+    "runs\\dv2\\central_limit_1pct\\daily.csv": "91cc99f842e2503bed342429b4dddb47aa583bb65a4293d196f6211925b2007c",
+    "runs\\dv2\\central_limit_1pct\\dividends.csv": "d8ed9ad284dcb3623bbb2e2c8a124fc2febd10a9b19a2291ec9d7c827a4b5c3e",
+    "runs\\dv2\\central_limit_1pct\\entries.csv": "d184e536f01ce616bbe22dc8f501b16307f8e23f076b88c9724d5912006d7e37",
+    "runs\\dv2\\central_limit_1pct\\friction.csv": "c1a6cb179fd0b3e0b7f959652f0da7096967cea847e9efb9906170876c35af80",
+    "runs\\dv2\\central_limit_1pct\\native_results.csv": "932017373ccc6836b4bc7c770832c8f8cda4db2dfef881cc96729f7f44892ba1",
+    "runs\\dv2\\central_limit_1pct\\transactions.csv": "f703c94260b015a33049e0d74bd17d7a08cf9b521527925f832513d1d9f6527c",
+    "runs\\dv2\\central_limit_2pct\\all_in_trades.csv": "b8803f40d833cb4d9a3fa1cb450297c303dbe7c2bfa030d4e79aebc50f679c52",
+    "runs\\dv2\\central_limit_2pct\\complete.json": "b91dbf8d49c3c2f96eaf5609203cef29b465b18eac9ac92a6ac1be542d227e9d",
+    "runs\\dv2\\central_limit_2pct\\daily.csv": "d3cb67790c41383195243c42aa48deb7de900e4805d4488467400420299c60a0",
+    "runs\\dv2\\central_limit_2pct\\dividends.csv": "8a2a7878115a133d9fc433d46c3bf41d313898599d598bc952514d8cfa8509f5",
+    "runs\\dv2\\central_limit_2pct\\entries.csv": "2a3a15c0cd5ad0abff6d1e349d9189a6f69633c05e429fc99d743f396365ebf0",
+    "runs\\dv2\\central_limit_2pct\\friction.csv": "7e3221a0438c1f2842567b818a4dca8eee2f2880d9d28f29da9f3cc9c3659fc9",
+    "runs\\dv2\\central_limit_2pct\\native_results.csv": "3f1ea7f5e1be01da2a69a90887eb9ff2c8d05e7e3912214fa269c29d767f185b",
+    "runs\\dv2\\central_limit_2pct\\transactions.csv": "0eaf059e1a12e5bee3aca7bb27d7be4fb19df651ea1d9fffe9fa42cb0cd4aff7",
+    "runs\\dv2\\central_moo\\all_in_trades.csv": "8c9d458e6c47fd499f95e91c4041518c76130cec0672d6b8f6b7e67d7006cf10",
+    "runs\\dv2\\central_moo\\complete.json": "c220bdcfd0d1ef02ffa460aabcc451da868ad7f5c985d230a0abe9f3daa48c69",
+    "runs\\dv2\\central_moo\\daily.csv": "c432bd03824e53b1113a7f7ed15d6df4c057607be7886f502d70374b3b1fd2eb",
+    "runs\\dv2\\central_moo\\dividends.csv": "d2be6b83ba26e135e900fa0033567f2551782940ae518d9043bedff825179296",
+    "runs\\dv2\\central_moo\\entries.csv": "3c799c38f367d4a0ea9c003d34882b99891f9e93be6970502119acf0c037b246",
+    "runs\\dv2\\central_moo\\friction.csv": "702777cf372e9f708b283fc9ed887acd1fbe8d2ec25cb7056881f8ce8dccba08",
+    "runs\\dv2\\central_moo\\native_results.csv": "dc9c40a9135a9a0d87964d35f19eb84fe9d446fbbdfc4283852ab4f7dcd23655",
+    "runs\\dv2\\central_moo\\transactions.csv": "4351968bffba171cd850636c7bc6a430c7bc2ecb0ddfb57d73a43acf13dfdfaf",
+    "runs\\dv2\\native_equity.csv": "dc9c40a9135a9a0d87964d35f19eb84fe9d446fbbdfc4283852ab4f7dcd23655",
+    "runs\\dv2\\native_parity.json": "ce3bf1039740912a961b67c38accf797a4164fd841d8116744713408673e6026",
+    "runs\\dv2\\native_transactions.csv": "ec34dd75224347e52ed9d665b7c174c6c1145884dba23c946aeb80e341916a28",
+    "runs\\dv2\\original_native_reference\\native_equity.csv": "dc9c40a9135a9a0d87964d35f19eb84fe9d446fbbdfc4283852ab4f7dcd23655",
+    "runs\\dv2\\original_native_reference\\native_parity.json": "1a7612c54d891be9b476bf4b0b7c2b25488b1385b7ade4d34aaddaed0a2762ce",
+    "runs\\dv2\\original_native_reference\\native_transactions.csv": "ec34dd75224347e52ed9d665b7c174c6c1145884dba23c946aeb80e341916a28",
+    "runs\\dv2\\runtime_acceleration.json": "f1f2f3bb6a7757c13e0412737ea4d6065d8037cefb6935785d186d580176187f",
+    "runs\\dv2\\signal_prefix_audit.json": "4de62ea8271102d1bebb9307a2f0215cf5d89e552dab8cce0c45cb7b22b1b5ba",
+    "runs\\dv2\\stress_limit_0.5pct\\all_in_trades.csv": "fabc0e9cdca9903403be52cac395b1f558225eee8c8ebedbf5e45dd19d8da0e1",
+    "runs\\dv2\\stress_limit_0.5pct\\complete.json": "2f6b32504f9a6b50ef502463f74daf7a165e82e414384ce492c2951dc30a0df6",
+    "runs\\dv2\\stress_limit_0.5pct\\daily.csv": "7b6af0bf96c0c0ed29ccae88bde1415a2de9acf3aa576f70f2ccdc03bcf61933",
+    "runs\\dv2\\stress_limit_0.5pct\\dividends.csv": "64495b3877465130833fd68c88532aedb1a54163dc85e1ce77106e69bbd14cb2",
+    "runs\\dv2\\stress_limit_0.5pct\\entries.csv": "647900c9319340017db1a861ff50d6b98e5a2e1ea8fd79a5819f00220ded80b9",
+    "runs\\dv2\\stress_limit_0.5pct\\friction.csv": "e23b865fff779717b6570177f0e173b5f7192ea4ef4bf5b3b9725d1c10df65ee",
+    "runs\\dv2\\stress_limit_0.5pct\\native_results.csv": "6594a2d99bb3a1d3c83c2d0230f39ee0f25646ce864fd8517e44c740044a2ecc",
+    "runs\\dv2\\stress_limit_0.5pct\\transactions.csv": "5f8a24e1dd214933603363a23878ec736036b884bd0b47fca3a41c39acd39b49",
+    "runs\\dv2\\stress_limit_1pct\\all_in_trades.csv": "7593c2036039ee43aeedd62483e557cb5bb06ffef35b8f1847cb74f313d0d780",
+    "runs\\dv2\\stress_limit_1pct\\complete.json": "aa974c2720a650189849d89091c77a5f8d05981c1b672a1ddfdb33eb22cb07dc",
+    "runs\\dv2\\stress_limit_1pct\\daily.csv": "f8bf44944e8f671465c7cd3b535847846cd987f8fd35316c3c819dab9ee6ea35",
+    "runs\\dv2\\stress_limit_1pct\\dividends.csv": "7fdfd882ed59da9c681b6ca9fc8b5853ad6fff729e538eb2cc6122ccf5be4ea8",
+    "runs\\dv2\\stress_limit_1pct\\entries.csv": "b3c87601a06734e5f92ba02235a54140886f7ab5635e41ac43bf99c209de3913",
+    "runs\\dv2\\stress_limit_1pct\\friction.csv": "69d93fc8ea336d1bb10024c7f9a1ff2f67bb1709edeedfcfff905812ecbd6475",
+    "runs\\dv2\\stress_limit_1pct\\native_results.csv": "11afbb395d95b6bccdbf157abe4f120912480db22e6111fc6ed6a33d2b0a9789",
+    "runs\\dv2\\stress_limit_1pct\\transactions.csv": "30f5a4681364df1e83e411175ce167b6f52511a9db8f7eabf18c6c6d91c10a8c",
+    "runs\\dv2\\stress_limit_2pct\\all_in_trades.csv": "c7167c5387932b7bec1425cfd12f92c0d83a06dec54722f4dd34a12532c38556",
+    "runs\\dv2\\stress_limit_2pct\\complete.json": "7403040b996742be7d267b55f547305e7b7d11636939ef00dc94f7cd79ce2cdd",
+    "runs\\dv2\\stress_limit_2pct\\daily.csv": "85340fefdfa07b4b4b9f2fb12f11633ecb8599f11edee7e8bfa06f85b9927381",
+    "runs\\dv2\\stress_limit_2pct\\dividends.csv": "57f93f25c5339d8af322bc78910e18839e2fd5ab106d147af1a25d51bc060bb5",
+    "runs\\dv2\\stress_limit_2pct\\entries.csv": "cde3adb8926fb5be82d47e745de52889c8f8c8f26e7788fff491921af5de0cd0",
+    "runs\\dv2\\stress_limit_2pct\\friction.csv": "d3feeb06ce66426c41970fd129814c05deae15d3a86c085bbc9a3ec46e4dd7a5",
+    "runs\\dv2\\stress_limit_2pct\\native_results.csv": "fa3e232c40ac9d896a9d46c489b4931f6ced10b10f180412095f9338825e8e4f",
+    "runs\\dv2\\stress_limit_2pct\\transactions.csv": "83b1eeee62d801063260b1c04463d5267fb446c98d18bf42e90dc25c9ec1e889",
+    "runs\\dv2\\stress_moo\\all_in_trades.csv": "1a4a49745118a657a02d8c5f7d361f867b06e4b39368e5518e9d428daf3fae6f",
+    "runs\\dv2\\stress_moo\\complete.json": "0096804a1c7b5a7b6c2e65097c82f5814a6264c5456816ba87543d000b2fee7d",
+    "runs\\dv2\\stress_moo\\daily.csv": "3c0544c2468db65e2b3c1e5daf73ebeae077bd679592db62cdd9cbccbfed6037",
+    "runs\\dv2\\stress_moo\\dividends.csv": "2a1244a8dcf956f5b724cf89eeb9f160692cdec3aecde12eb8a4bafd45add584",
+    "runs\\dv2\\stress_moo\\entries.csv": "44d3b15cd887dc39945d41d5077641681a187313293e4d953f3cfeae6fe08a9d",
+    "runs\\dv2\\stress_moo\\friction.csv": "3b1dce61f20ad0ed433c23060f8822c3ebe25aac86c3ba69ca8ac640ca1376a2",
+    "runs\\dv2\\stress_moo\\native_results.csv": "f18b8ac2a44382ac83eaa6d9121fa9a79943c7927794f99a2e84e77467024eac",
+    "runs\\dv2\\stress_moo\\transactions.csv": "43220fa1e43fa8bf4254c0e9692d144eb81dc242fb86cca20ae1f27fa4270b4c",
+    "runs\\hpi235\\central_limit_0.5pct\\all_in_trades.csv": "df643a030526ded5909c7be3aeadba4c6d1fd0ef232f6d32246dcc227881e2ca",
+    "runs\\hpi235\\central_limit_0.5pct\\complete.json": "8beda4bd79b03a601533c825882321b008b82bd83bc996a7aafcfd6281427201",
+    "runs\\hpi235\\central_limit_0.5pct\\daily.csv": "7b2afac4cf95eea59bbc98e038f09ae7c96a9ae12432dc58038f191badf60324",
+    "runs\\hpi235\\central_limit_0.5pct\\dividends.csv": "6d426aa4bd033aae0db532bc925074b1f9dbcd3316180df5cf13e0bfe49c3dc0",
+    "runs\\hpi235\\central_limit_0.5pct\\entries.csv": "7bc4c0734af68bfab14478d1fae4fc2b086f9ad325ced59be9831aea7cde92c9",
+    "runs\\hpi235\\central_limit_0.5pct\\friction.csv": "6991ef862a374768381f0c5fa97a4f4e322a5161a19ca53764a176934f854ff0",
+    "runs\\hpi235\\central_limit_0.5pct\\native_results.csv": "47930b04053c610ed7e101b66bc0dc7c2e4a0443c729501a013f5cc4356ff5ff",
+    "runs\\hpi235\\central_limit_0.5pct\\transactions.csv": "958e18f343caafb4136f0b485f9f37f6d6b2ffcace2d28e2782bd29a9b6b14c4",
+    "runs\\hpi235\\central_limit_1pct\\all_in_trades.csv": "e0cc9b351e828ba2a8125621c7c760743916581ec75ea9cb5e95feb5b98809e5",
+    "runs\\hpi235\\central_limit_1pct\\complete.json": "3b0dacd539c6392651283f7b3e957f49360b0ccacb6115cd0d78506f30a2cf0a",
+    "runs\\hpi235\\central_limit_1pct\\daily.csv": "52a5ff6c89e6d917cc302649819c7708212ba0b4dfd72bb754f510a020ca19c5",
+    "runs\\hpi235\\central_limit_1pct\\dividends.csv": "2b22d11dbd121067261383d92a1197381cc8997eda2749744ca469829a51797b",
+    "runs\\hpi235\\central_limit_1pct\\entries.csv": "e0d4851113e235e4af3c55528b362c1c98522d2da874d7799ee2a72c87aab524",
+    "runs\\hpi235\\central_limit_1pct\\friction.csv": "9fe7d6859a4e910ce26fca9781c881b72ff8a7285adcf6026730dbf47bb52097",
+    "runs\\hpi235\\central_limit_1pct\\native_results.csv": "a01e886f071f06cc0d9f99fe965b8db95343c6cdc52eba7d1133f261d0ea18c9",
+    "runs\\hpi235\\central_limit_1pct\\transactions.csv": "0be7e75990bebbd512b773ff8dfdd8d23050f19894f05f9cc765a1ec3c9ec8da",
+    "runs\\hpi235\\central_limit_2pct\\all_in_trades.csv": "cbd3b7dabe00f7137eb6cf1fb2cf5d2f6fa1a2bdde1a80646556f19d47581504",
+    "runs\\hpi235\\central_limit_2pct\\complete.json": "2c627666978a9fe0ee2c0dadec5865e8557fb81bdbf1ebd0b29a2a6d03d6fb24",
+    "runs\\hpi235\\central_limit_2pct\\daily.csv": "58e77f9a43233f0f69ca3f6657486272ac729034884db3eafd08c449a49941c3",
+    "runs\\hpi235\\central_limit_2pct\\dividends.csv": "2214eff3c2cc62c6548a6fa15d1585cbec581766bf709ec88f65527d264c5377",
+    "runs\\hpi235\\central_limit_2pct\\entries.csv": "65ea8f8e6eb3d65507be2f477759bde570611a85462245fddac470ced97e0cbd",
+    "runs\\hpi235\\central_limit_2pct\\friction.csv": "4c21c9c9a4b652bb49d0f3eabf6810280ab7fac5b90de6a854b37d17e6f6c391",
+    "runs\\hpi235\\central_limit_2pct\\native_results.csv": "7230610a38477a8aa6c5cb2c97e7464d965678f87328926af96e6e75f4ac3132",
+    "runs\\hpi235\\central_limit_2pct\\transactions.csv": "14d46782ae5b234efb54002d18e3a4bfdea1a71c32d4dae21a770aa91879a329",
+    "runs\\hpi235\\central_moo\\all_in_trades.csv": "2c59ffa105a6d80a289cf33f7cf514d4f713b5d18bde5273efccbc9a54036e9d",
+    "runs\\hpi235\\central_moo\\complete.json": "ffb8bb3e0d0c0dc75e2f204cf62d12467f80f170bcec2fa7f9679c375049bcef",
+    "runs\\hpi235\\central_moo\\daily.csv": "3789654faf642ee5841d05654c7bf5ab8a8d7d75d8e2ccb3115ebc92e8ce707f",
+    "runs\\hpi235\\central_moo\\dividends.csv": "11a08b804e13f7dee8f76023ff6a9e58ceae56dc8e439e15fb8726370926709e",
+    "runs\\hpi235\\central_moo\\entries.csv": "fdcbf58373127103aa8e71e42dd63e0e244ce8a13752c17b59c6dbfb75ac2ff8",
+    "runs\\hpi235\\central_moo\\friction.csv": "442e6e6c16d2f6b6b24a155dbd5155ea2f72876c3d8183ac2e753bccf5ba901b",
+    "runs\\hpi235\\central_moo\\native_results.csv": "fb09d998e8b5237ddb01e581db39970dcff1100381b5316827ac6f6a6fa10f3a",
+    "runs\\hpi235\\central_moo\\transactions.csv": "301eb0795807715267c547fe7ad18f7b038b5d9eaccbcc5376fdf0b736df2599",
+    "runs\\hpi235\\native_equity.csv": "fb09d998e8b5237ddb01e581db39970dcff1100381b5316827ac6f6a6fa10f3a",
+    "runs\\hpi235\\native_parity.json": "8854a5fcad74a3bd1d4df13bf784ac6ae4431839722043160879208bfe8ca126",
+    "runs\\hpi235\\native_transactions.csv": "bb9afb81669f88c25dc00d38cfafa421a1102ffc8d9d4890aa4b5de5bc23f95a",
+    "runs\\hpi235\\original_native_reference\\native_equity.csv": "fb09d998e8b5237ddb01e581db39970dcff1100381b5316827ac6f6a6fa10f3a",
+    "runs\\hpi235\\original_native_reference\\native_parity.json": "d44c3ffb3e14259a34df29011e666d993af7388aa5f9e92f15566249e9535364",
+    "runs\\hpi235\\original_native_reference\\native_transactions.csv": "bb9afb81669f88c25dc00d38cfafa421a1102ffc8d9d4890aa4b5de5bc23f95a",
+    "runs\\hpi235\\runtime_acceleration.json": "ce67351c368e4c1267d494f17d88adeada877cb0faf292b09c2ec08df8f424f1",
+    "runs\\hpi235\\signal_prefix_audit.json": "4de62ea8271102d1bebb9307a2f0215cf5d89e552dab8cce0c45cb7b22b1b5ba",
+    "runs\\hpi235\\stress_limit_0.5pct\\all_in_trades.csv": "924e3236f9511ce57fe50472243e5fee82203712325b7cafd6ff85f03d5895d8",
+    "runs\\hpi235\\stress_limit_0.5pct\\complete.json": "a69ee3b258914c9e380814ad746116d59bfe09ab44c9fd3e4b2f6b69ca8433ff",
+    "runs\\hpi235\\stress_limit_0.5pct\\daily.csv": "2fc9a8acfa424e697b3f51a7220f2b6aab9a2c1843ca33b8c1ee604693979ad8",
+    "runs\\hpi235\\stress_limit_0.5pct\\dividends.csv": "1f31bbcadfc3a9700fda13baacbd9245cc81cf3c060fff0d9c0009a0511842ae",
+    "runs\\hpi235\\stress_limit_0.5pct\\entries.csv": "a9c3e0b271701e8b51f11ffefb0ec665c446519b14029947016b4fe72543bdd2",
+    "runs\\hpi235\\stress_limit_0.5pct\\friction.csv": "fa2ef853f605779d09fc15059807312b24be74f3d83eb8665ddb8ed827cb809d",
+    "runs\\hpi235\\stress_limit_0.5pct\\native_results.csv": "de3b4dd8d1108baf3490dabbe9013db442878674b963a5d3fcdcbd6f1608719c",
+    "runs\\hpi235\\stress_limit_0.5pct\\transactions.csv": "6cdf78b451be534e1a92579535ae1a34c626834388cdf9e4784e8e7c27fcc43b",
+    "runs\\hpi235\\stress_limit_1pct\\all_in_trades.csv": "82ff9602ca49130ff942b1d75cbbcd1aaaf2b53e7ab1da7d94546b427fe1e31f",
+    "runs\\hpi235\\stress_limit_1pct\\complete.json": "791ec4ec50bdc23cad6899293a2944ad8e24511a409e5cc20f86c8bfdf369219",
+    "runs\\hpi235\\stress_limit_1pct\\daily.csv": "ec33b49dcf73cd48937410476fbff6011572d41f5e14dd4ddc2dfda705c1e948",
+    "runs\\hpi235\\stress_limit_1pct\\dividends.csv": "f9c5a9dd82abf33979827a5528474c1fa53877d57d9e1fce5f4b7bc61f2872cc",
+    "runs\\hpi235\\stress_limit_1pct\\entries.csv": "f47bec6f95c078f07cc6f6c4e62d0ba758d1aa15214879de8642d4e02f80023b",
+    "runs\\hpi235\\stress_limit_1pct\\friction.csv": "305d19299071ac0a1a3c250895906e570eeab01b517d36337e1b958039ced40a",
+    "runs\\hpi235\\stress_limit_1pct\\native_results.csv": "f83454c8a1a7fba4fd9eb1d4ae049d232a1e464778c036c9a290fca0bbbb8306",
+    "runs\\hpi235\\stress_limit_1pct\\transactions.csv": "2956f61552cbe2d06e06b6d5efc461a778c43461694bd626b39c251b24520290",
+    "runs\\hpi235\\stress_limit_2pct\\all_in_trades.csv": "37de05d8c8c3cb2596e4ca2d2be03aec3c322e59f361edd54eba98b54c80cb77",
+    "runs\\hpi235\\stress_limit_2pct\\complete.json": "d2d44bad494e84c07a3a49e65bf4b0ffdb4534673e7f6caa00e05f68503772cd",
+    "runs\\hpi235\\stress_limit_2pct\\daily.csv": "a88487342316f4388c517d19fa22cadb182355686c0ff2b93c73b9d18c37787e",
+    "runs\\hpi235\\stress_limit_2pct\\dividends.csv": "ddb570329192acfd2426f33c15f80fe0ba9ae25c939c70392d3cdfc2588757b5",
+    "runs\\hpi235\\stress_limit_2pct\\entries.csv": "6be0319f90c85ede4117b04845651cffda61c3ad791223bd33641ed253f7e945",
+    "runs\\hpi235\\stress_limit_2pct\\friction.csv": "5ee47b7a1b2b91f5dff9e8fb4817c61212859841486cdb8d8e72bd9dde88c3e0",
+    "runs\\hpi235\\stress_limit_2pct\\native_results.csv": "f2632e2baebb3f6e1b02e08950c273d0fa1486d2aaa643b781adbf2a81de0763",
+    "runs\\hpi235\\stress_limit_2pct\\transactions.csv": "f55652ddecdf6c2303deb411a57253e8643fadd8f7ffbe69147ca63645a7a647",
+    "runs\\hpi235\\stress_moo\\all_in_trades.csv": "4090999e9aeae1ff13548faf823790beeec955456db490e790b5418ea7736799",
+    "runs\\hpi235\\stress_moo\\complete.json": "2fc5b4294125cfdcbd4fc8e054427f99e5fa59e2a47ba50628300803ca615951",
+    "runs\\hpi235\\stress_moo\\daily.csv": "738fb49dc652d93110c8e7c5bbf502220c639e757428b3d78b19020f5a0a3879",
+    "runs\\hpi235\\stress_moo\\dividends.csv": "575c43abf54ce75c72d918a5c8e5c9dd887f98afa20d0d12f26bf7b00eb25dbd",
+    "runs\\hpi235\\stress_moo\\entries.csv": "8e7338af4fa97de25c4ec92ae0294d9ba26092f29b63d78fc2c3d6a948cc73c4",
+    "runs\\hpi235\\stress_moo\\friction.csv": "40b724322cd9310485360283aacca63e3c1a1557a929ca809fd6bd5a90872f9e",
+    "runs\\hpi235\\stress_moo\\native_results.csv": "2f52a7b411a5226ce478cb0a5102e722634e35a0b813038ea152c3fb177f59fb",
+    "runs\\hpi235\\stress_moo\\transactions.csv": "d6bc2c7073ec756ebd6160f44c86dbdc10af1620a35df82a5e7305f7e592863d",
+    "runs\\sector\\central_limit_0.5pct\\all_in_trades.csv": "da44d5d7657b98a6400ec9a0dce6405cc92a893d946da96db342e1c9be5926a2",
+    "runs\\sector\\central_limit_0.5pct\\complete.json": "02639dabc3cffa8432ee252cd625d9c5fa3d479a24bf023b0dbfcbcaa9e194ae",
+    "runs\\sector\\central_limit_0.5pct\\daily.csv": "da4ec0c07b7df14c2c1ca99c9adad2f5b032a0afaafa1f8d71ab9f8c5213aa62",
+    "runs\\sector\\central_limit_0.5pct\\dividends.csv": "30f4ab79f110926594dcf7c9f84298a36fa6b9579321bf29ac10af3047cb9c07",
+    "runs\\sector\\central_limit_0.5pct\\entries.csv": "f8fc88187f2cf083df927ac789928b13de1bf9fc027d7678fa3a6df9b9994d50",
+    "runs\\sector\\central_limit_0.5pct\\friction.csv": "d240f346472e804a527729548e0c606c8a897f8163434e9cfa11cb4c15daf730",
+    "runs\\sector\\central_limit_0.5pct\\native_results.csv": "f5cc68cce8b843cc3806f34b19b7c431bb8e52e788b6733e5ee50030c60dbdd4",
+    "runs\\sector\\central_limit_0.5pct\\transactions.csv": "516401f28658528972d0742b1dc9ecc404ba0deeca05a7ad13b60f73819589b1",
+    "runs\\sector\\central_limit_1pct\\all_in_trades.csv": "d5c99eca0102dbbbefcf05968b8ec43b060d83dfc03a4a39ad5b002a3f8f5867",
+    "runs\\sector\\central_limit_1pct\\complete.json": "6e1ecdde8cefd840ca19d13aa99ca3e4b4f09421a792279697d8a93a4beb3b32",
+    "runs\\sector\\central_limit_1pct\\daily.csv": "73272d2f7ecb35b744b6d87911883984be35bae45bf1135532e27664c6760c6c",
+    "runs\\sector\\central_limit_1pct\\dividends.csv": "863b177180d9831d364c6931db114e055673889cebe9f1ebf578577d83492ff5",
+    "runs\\sector\\central_limit_1pct\\entries.csv": "c32a0ee0898751b2281309ea4980aa7afb0563e4dc18d3f6d2241106e2570f12",
+    "runs\\sector\\central_limit_1pct\\friction.csv": "87b6a5523ad8a46490072da9808ed09982ef7017ebefaf783074629f3d72a697",
+    "runs\\sector\\central_limit_1pct\\native_results.csv": "94531293504c716e570dbbd5321729171310f39f9e30258681c849ea46e65398",
+    "runs\\sector\\central_limit_1pct\\transactions.csv": "162549c6a02178af8545fa2a0041e21812b44246aef18ecc1d16f23c54908a62",
+    "runs\\sector\\central_limit_2pct\\all_in_trades.csv": "2264a776da2ad090cbcbadae3b29e6e008222d4f447c5474b4fd48d1d92edf98",
+    "runs\\sector\\central_limit_2pct\\complete.json": "4e67b20545c165df85fb99e0aca3e2f83a246768fd37203e1f2998c724e22853",
+    "runs\\sector\\central_limit_2pct\\daily.csv": "07bff0c804365c9fb54dc14e3f6f7d451e77172b2520f064a5909dcd4e53ee75",
+    "runs\\sector\\central_limit_2pct\\dividends.csv": "8e163fac2c3ea75926a1d4a408d0c7c1e1a5e2fdc08dc4c0acf03ee53dc2a27b",
+    "runs\\sector\\central_limit_2pct\\entries.csv": "78acae8cdfc0abc4e1efd176c99720aa832eb1445a64d58dad95483ca86bee63",
+    "runs\\sector\\central_limit_2pct\\friction.csv": "890804e1bce78882c5a15b814dae66df8a5d98f1f6a5b11ed849f41469df8768",
+    "runs\\sector\\central_limit_2pct\\native_results.csv": "9f650e4bf16ec54161f598ff3f4e447f16e9a6de48125b4040df9d3809c293c5",
+    "runs\\sector\\central_limit_2pct\\transactions.csv": "d281c21f298defa5033d84ec3842899596b44d1eefbfe4dac25e9f6fae12fc24",
+    "runs\\sector\\central_moo\\all_in_trades.csv": "bd82a3695ba39e613ac4e683b60957258b18f317e9f9f8727716ef01770a3a13",
+    "runs\\sector\\central_moo\\complete.json": "ca41c7dd1903c26754dfe16c636c341c0f47a70a0e8b20e7b02e6ffa90971e18",
+    "runs\\sector\\central_moo\\daily.csv": "826797c5e05bcebcb8ef77dbae6e5e82028376331adbdb86a0e5615ea0e93bc6",
+    "runs\\sector\\central_moo\\dividends.csv": "4b977c84a229b881119a036b0326ac66e692855bfbc7e0447a1f0b8895c086f3",
+    "runs\\sector\\central_moo\\entries.csv": "a2b2dd40ac4c6592f04eee1a122a2caab9ba2da12771329496c522839580aa38",
+    "runs\\sector\\central_moo\\friction.csv": "368883f9beb06b1922665a11e6c4f6c2895a415e9e5507037021d26b0df10a91",
+    "runs\\sector\\central_moo\\native_results.csv": "d91e0d6b0fdacf920a384bfc0e7146648033dcf0d299b1e7853c2e74c086c923",
+    "runs\\sector\\central_moo\\transactions.csv": "d9f3b50f51038d4b5b68d1b9a08d8a7596a01713f00183770d538d1a9835d4ec",
+    "runs\\sector\\native_equity.csv": "d91e0d6b0fdacf920a384bfc0e7146648033dcf0d299b1e7853c2e74c086c923",
+    "runs\\sector\\native_parity.json": "2df0fef7e3ec5e34e03ae292e90f7b89bdfa9f1f42e42cc1f533ab6a26198597",
+    "runs\\sector\\native_transactions.csv": "daa017e822d7755210906812f5c95537dbc15e5e737e2333d358b627695a82c5",
+    "runs\\sector\\signal_prefix_audit.json": "3959dbf8d2df13c4cd5f7965f9076e44b5f525a2b8ec4571303578d7145af0bc",
+    "runs\\sector\\stress_limit_0.5pct\\all_in_trades.csv": "61e9c7531fafd7e0300bbd10a1159b9e41cf0f3a49e54a51a68ca93d394e5a25",
+    "runs\\sector\\stress_limit_0.5pct\\complete.json": "6c5003940a985e8b9f12e59a6c59fe07934b2f2117ef9cd0b6dfc6fa9c3f14a7",
+    "runs\\sector\\stress_limit_0.5pct\\daily.csv": "79df7935de9319fc679cb92db6d5e08dfa65271a8c97407ad4f9e010aa78705f",
+    "runs\\sector\\stress_limit_0.5pct\\dividends.csv": "70e2d63f0c92a5aecf623894ca58c530a49df224c5af86572a35d25f7e65ed1c",
+    "runs\\sector\\stress_limit_0.5pct\\entries.csv": "e6ac57dcc1785c7761d1545ec064b95982d6bc8e09a490e7bf3ef49ddc86e364",
+    "runs\\sector\\stress_limit_0.5pct\\friction.csv": "181dcaccbdc901b956c1d311b90ae565b586e5f9e09e7414daca9b882b9b8176",
+    "runs\\sector\\stress_limit_0.5pct\\native_results.csv": "53a51905a05810e9279b13346bb1f9291c42d807c941f4b763ac768b0ede5a47",
+    "runs\\sector\\stress_limit_0.5pct\\transactions.csv": "f74b1c76c6332ab2a7f81abcd85203511d045ad89f4e851c57dbeb27cab40468",
+    "runs\\sector\\stress_limit_1pct\\all_in_trades.csv": "6ed6d2bc5d0117d08fc814defc95b1f6d9c3d8cdd156677c6ebcce4fcdb80f6f",
+    "runs\\sector\\stress_limit_1pct\\complete.json": "949efa753fadf16f2e19d406c9ccfcf42ff1700d742b014e126afc69520de688",
+    "runs\\sector\\stress_limit_1pct\\daily.csv": "5a2f5f8fd0608ffb23ad051d632fc756bbf5a74e7722dd44af1be063e8e7ba2b",
+    "runs\\sector\\stress_limit_1pct\\dividends.csv": "6d346b24f24bd66cef0e7834aad5df913dd2af0c4142be806865efebd1e23db4",
+    "runs\\sector\\stress_limit_1pct\\entries.csv": "bb2b0cc2d4aa07d3f783605f62dd8038aef69c0244450a88d3120af70362791f",
+    "runs\\sector\\stress_limit_1pct\\friction.csv": "201ff33a8cf6daa0779ea0eeec1673d81d27967a1f28bc14c3e7f6349e67dc84",
+    "runs\\sector\\stress_limit_1pct\\native_results.csv": "d2086372afed78348e0ab277d03698d0754ae03236303695a3901ac2486b9b8c",
+    "runs\\sector\\stress_limit_1pct\\transactions.csv": "cbfcf0b9408df7aa9ae631729e28f36414a198aafa44143f96d919534891b512",
+    "runs\\sector\\stress_limit_2pct\\all_in_trades.csv": "b062c89625fba31d3244b0b6da0519585f14542a7e587624cd92a7cf84cd3fcf",
+    "runs\\sector\\stress_limit_2pct\\complete.json": "26facce889e57b4d4875a4bba7289bb6dc6e5b31f091267776e850a0ac4f3d07",
+    "runs\\sector\\stress_limit_2pct\\daily.csv": "a0e61e20afbc7dd80784b367dc7be90ee1083b9e51f230de3f7267617ed7658e",
+    "runs\\sector\\stress_limit_2pct\\dividends.csv": "3f7acc6162d53495f72c4792a67cc4e3b916595865dc1ba247e21bcf2199ab95",
+    "runs\\sector\\stress_limit_2pct\\entries.csv": "58ceb8d5627cc89b9e98a07b49432931618400654d555f115ae7e995b31bb4dd",
+    "runs\\sector\\stress_limit_2pct\\friction.csv": "15629f28f78b29df5f5e089095bb201495bda4b3ea7fd60f926b01d0ab699760",
+    "runs\\sector\\stress_limit_2pct\\native_results.csv": "2e1f9e919ebf1bd159aa82003b5836afbaffcb2e497b5e85d84127e6d65dc68b",
+    "runs\\sector\\stress_limit_2pct\\transactions.csv": "1f5e7f2790839df8678cb2c5d87116d903a985b329303a59d20d9e5fd51a3f75",
+    "runs\\sector\\stress_moo\\all_in_trades.csv": "d722ee6e9c7061261c3b5f864b59b12a9230798db3e57cd4189c81fb37a1a5d6",
+    "runs\\sector\\stress_moo\\complete.json": "d74fde6a73d91ae37865b135da343c3600460057cf4abc552469cb7d177d7f68",
+    "runs\\sector\\stress_moo\\daily.csv": "47e10de968fe328a44a9a0da4ef5d59484935787aac7714d8ecaf7c41e2f5321",
+    "runs\\sector\\stress_moo\\dividends.csv": "079d78a0fad05ddcc6ed87248b7d6bed7f90ea972e6f644ca58aec2efb244299",
+    "runs\\sector\\stress_moo\\entries.csv": "80b244f915580c1c435276b34c2506a77e2e89d2766ab7f97fef5bfb0836bdeb",
+    "runs\\sector\\stress_moo\\friction.csv": "c871fb4597ce41eb07a1872c1b4a173f63d5fda229a092316863bc0c59d86ab9",
+    "runs\\sector\\stress_moo\\native_results.csv": "44ff359b06a32d039f37af90d3ca7e652f25a3a5213f3a71a7299bacaddcb18f",
+    "runs\\sector\\stress_moo\\transactions.csv": "d3001a66e9e610dc4ef95e40854913f01f9a3dbc0e8f4d12da34c1c30f902141",
+    "sector_run.log": "c115084e96a71e6dac1731544a6c26ecba8f0e3ebe94efeb0b5e0082ce95fdb3",
+    "smoke\\dv2\\central_limit_0.5pct\\complete.json": "1a5937530c83034ee8578ec737ada28c2ec632752ccdcca33c937397da475d2c",
+    "smoke\\dv2\\central_limit_0.5pct\\daily.csv": "1f95b3151c80a4e0e5201c9efcd1435e7776ea54d64549aec8a0446aeb406f07",
+    "smoke\\dv2\\central_limit_0.5pct\\dividends.csv": "7b2422bd4e92e62add689bf938b6c58ca40d4ba2f9ad3d5e8ab137bb71dd78a4",
+    "smoke\\dv2\\central_limit_0.5pct\\entries.csv": "1b84849e4dbf6f0ecc0132a87c1c61bb0745542dfcd06b82e745b2b74d2c0c53",
+    "smoke\\dv2\\central_limit_0.5pct\\friction.csv": "b8b45f09847bab4a8f4a1279755eb172fdf331b730f2bb96cf3e215e2bbc0cfc",
+    "smoke\\dv2\\central_limit_0.5pct\\native_results.csv": "e329d529d4b120302532fbe608440ef6457fdbb1028335da23fd3b4119d387b4",
+    "smoke\\dv2\\central_limit_0.5pct\\transactions.csv": "13a96804b1376c406fce60ec148fed84c2a3bb2e2fa5a80da284104c8ccfbba1",
+    "smoke\\dv2\\central_limit_1pct\\complete.json": "d8061ff83c8b176458c7a892be5334409b9eadef7e0d712a6f00927d73ebd3e7",
+    "smoke\\dv2\\central_limit_1pct\\daily.csv": "0db9542bdecc85f9bc3fce823e6c378dc1aaefa1ab34d0b00c8a8dc59641638f",
+    "smoke\\dv2\\central_limit_1pct\\dividends.csv": "764c748b3bae9e1147e704c358540c1580cb944be02907538d965eac3e33a3a8",
+    "smoke\\dv2\\central_limit_1pct\\entries.csv": "d39ca4cfb0bd7f27524ba9aa101481568a1c6eaac9644e64b26fa90a59665e4e",
+    "smoke\\dv2\\central_limit_1pct\\friction.csv": "735875b53db8072e46387c46d745fea31fdc9dae6463001bb688d1dd2bdc98e9",
+    "smoke\\dv2\\central_limit_1pct\\native_results.csv": "3cdc29844149d13f28f78a11a04ef69bbce01722d529bbae186f0ceae63b2572",
+    "smoke\\dv2\\central_limit_1pct\\transactions.csv": "17638268cb703fc427c3f2f4207cda7c255ed30289024f8af993dfdd9cd3d5af",
+    "smoke\\dv2\\central_limit_2pct\\complete.json": "ca940da191f8904b19e246450d86dc884986bb26d023716d23ae687b73de9252",
+    "smoke\\dv2\\central_limit_2pct\\daily.csv": "51848791325d72f4fdce91ea31d71c5a89bd945bf117741b1b475be7270ff611",
+    "smoke\\dv2\\central_limit_2pct\\dividends.csv": "f30d8fcfe14d36ad33a8a37e937e6fa36664411e4a842829746a2d5835e5e4f5",
+    "smoke\\dv2\\central_limit_2pct\\entries.csv": "e3d9bc4d6a9a0579ced3feed7cbe872847394073faed963bba5523c8078db67a",
+    "smoke\\dv2\\central_limit_2pct\\friction.csv": "9c40cf8e1cf73a99b1c9524c4c495b6df90e908dc7d934f3124f3b2827ee9353",
+    "smoke\\dv2\\central_limit_2pct\\native_results.csv": "556ab8e793e0d8f95959d8b511927362eff783ea5a54ffbb3117286441419911",
+    "smoke\\dv2\\central_limit_2pct\\transactions.csv": "f76f81e6f2f4a6575ffe694d1f4a59dbe12e735a2066c4a67c64cf119a37fd90",
+    "smoke\\dv2\\central_moo\\complete.json": "1ce5cbac70da8597009ce45d59f0b53a966c5cbcdac47210e47971e7c41ecd61",
+    "smoke\\dv2\\central_moo\\daily.csv": "c272a326beed215cbc5bc24e5f83aef7eab3d7e87fe7ae3884d82e5cf10fbacc",
+    "smoke\\dv2\\central_moo\\dividends.csv": "6c7c99017a7017d75375cfb148b44603503079f46686c903ba0896948fed6cd4",
+    "smoke\\dv2\\central_moo\\entries.csv": "3c343f3ad5276ccfb2849afbba6dd98b46df47e7f4f7a71eb5c38bd50f21366f",
+    "smoke\\dv2\\central_moo\\friction.csv": "7936b169914c81f1e1c62f3a9dfc5788b1644c64599fbd2180432fa135d69cc2",
+    "smoke\\dv2\\central_moo\\native_results.csv": "1ee3018081af60cd2408e7f5d241f483a4e1259bcf0e8b30764a478eb7de40ef",
+    "smoke\\dv2\\central_moo\\transactions.csv": "25ab1ceda06e05d65dbdcf4d50e61a1155175a3954b60f8e4393c0a7b783875e",
+    "smoke\\dv2\\native_equity.csv": "1ee3018081af60cd2408e7f5d241f483a4e1259bcf0e8b30764a478eb7de40ef",
+    "smoke\\dv2\\native_parity.json": "ca67283aa112740356bd1f15e04701321d0070f9cdd495e24b68da399c374f83",
+    "smoke\\dv2\\native_transactions.csv": "51561397874f2d4014f524eaddd4fe83cfbf399917d564ca6d385495f2f6c6e2",
+    "smoke\\dv2\\signal_prefix_audit.json": "4de62ea8271102d1bebb9307a2f0215cf5d89e552dab8cce0c45cb7b22b1b5ba",
+    "smoke\\hpi235\\central_limit_0.5pct\\complete.json": "4d6cdb55439b2ba4c3232cdf808b639f18f6af8fd1323163970298db2ccb9532",
+    "smoke\\hpi235\\central_limit_0.5pct\\daily.csv": "62894eecebbe7fcaaeadb3d0829e79a28917090fa9d1a6e0edace269b2f61a13",
+    "smoke\\hpi235\\central_limit_0.5pct\\dividends.csv": "4e553f1c96060256d23d52569e2f0da09da2ac3a3a5b5f2aada2482478562824",
+    "smoke\\hpi235\\central_limit_0.5pct\\entries.csv": "c9115744aa0297016203eb87c9212a6c8ada1d87814e2502eb5369d9560adf90",
+    "smoke\\hpi235\\central_limit_0.5pct\\friction.csv": "f8a083fa950ce79ea4bfd01847a3cb4dba9d9abcbed9d85db37f0d0a6a2fb549",
+    "smoke\\hpi235\\central_limit_0.5pct\\native_results.csv": "3f2b4a71acfb31c7d4affae37d3fcf41a3cfd82913ee895c4454872bd31bad3c",
+    "smoke\\hpi235\\central_limit_0.5pct\\transactions.csv": "78ceea98174e59d2d00732940e5dde6652da2de1ee1dd33f2a9b7134424e2721",
+    "smoke\\hpi235\\central_limit_1pct\\complete.json": "bcf6174efa70efabf45d8ff2fefbfd6ecd18b2f6c192e7f707606a9a43c950a1",
+    "smoke\\hpi235\\central_limit_1pct\\daily.csv": "fdb12a1b963342148cff8b3ea22a65418d31036df81a0acf4a261c26f22c7fec",
+    "smoke\\hpi235\\central_limit_1pct\\dividends.csv": "a2a783ad13d9de8e4753a6ccd196404f41b8ebb8fad2274f3b7dd8b532b7a24f",
+    "smoke\\hpi235\\central_limit_1pct\\entries.csv": "07748b0ceac17d7cd4ddb6e5539c0b03135820372ae8dc67b801c8463027816b",
+    "smoke\\hpi235\\central_limit_1pct\\friction.csv": "596f1859f65f840a017269a18c4dff175f1bd37a40d3cbe78ff22e2517f1820a",
+    "smoke\\hpi235\\central_limit_1pct\\native_results.csv": "e15df3ba9baca9e541f94be1307b6e9a8e11a76e6f301e8f29c2db8f4ebd9ee7",
+    "smoke\\hpi235\\central_limit_1pct\\transactions.csv": "81a8c0d33f47486374f706be6b392f88239715a209ae0f52edab34ffc8f5b67d",
+    "smoke\\hpi235\\central_limit_2pct\\complete.json": "29368f8b3ea18e0cd9dcda2679741316529d97410e6effb3f617dd8f4e28cde3",
+    "smoke\\hpi235\\central_limit_2pct\\daily.csv": "ed915a73158604a6856a6733c50ba65518af71144baea92c7238ec2e714d5cfe",
+    "smoke\\hpi235\\central_limit_2pct\\dividends.csv": "df57b70cc70a8a0786d2032344d4fa57bd0dc74e11e2332f0cd4d185b5fec4d2",
+    "smoke\\hpi235\\central_limit_2pct\\entries.csv": "3181f5ebc4c7a6502507187e954c7ff6ed0b362b09b7fd70aded8d02dc59ae48",
+    "smoke\\hpi235\\central_limit_2pct\\friction.csv": "81430c415f75a65fe1f91391259d09de380c72c6af372546d6c06292ab030021",
+    "smoke\\hpi235\\central_limit_2pct\\native_results.csv": "fa029f8593f8cead325e399224e71efdf1ada8fa2b107da37e35efd818d6ebbf",
+    "smoke\\hpi235\\central_limit_2pct\\transactions.csv": "71f618807c2a1a548b3498d517cdfc886e5b54f81ffe1bcc32f5ad66fd771967",
+    "smoke\\hpi235\\central_moo\\complete.json": "20c7165d652f3050dd6f6ed4a6f016bbaa56dcec544f460d23de9950178106fc",
+    "smoke\\hpi235\\central_moo\\daily.csv": "a9d399f9541a8b7372cda5dcb14b39b8d74e8e9a420e43a85c2969cfec695273",
+    "smoke\\hpi235\\central_moo\\dividends.csv": "1badf25326d714cbdd7c29c20714bf3b73a0a7d7614edde8b842c6a07d392dc3",
+    "smoke\\hpi235\\central_moo\\entries.csv": "7e0888d6cecbe1b0346824461a4c2d620df269641cf3c96e2e6e4e05eeb0a7e9",
+    "smoke\\hpi235\\central_moo\\friction.csv": "e94de0acb45fa4f057e5e0cf8590f0f9fb230b6318d7cb899bb82e40be6f302a",
+    "smoke\\hpi235\\central_moo\\native_results.csv": "57baf3ce22f7bdf8adcaf09a4a7d43a3d04d53757cf87525657b2770d17c575a",
+    "smoke\\hpi235\\central_moo\\transactions.csv": "2ea2d1c56846e0e045981ae5d5ecbdd47e2b50fd64a046470494dd9dc95628a6",
+    "smoke\\hpi235\\native_equity.csv": "57baf3ce22f7bdf8adcaf09a4a7d43a3d04d53757cf87525657b2770d17c575a",
+    "smoke\\hpi235\\native_parity.json": "6592a49fc4acb2c241bab0f01bfc6cff4167db8c2cfb177d1a14618a91c25b8b",
+    "smoke\\hpi235\\native_transactions.csv": "65545b36f5671e22e0e13ecf520497827f5fbc543d8b2c237ef05f1c789cf57e",
+    "smoke\\hpi235\\signal_prefix_audit.json": "4de62ea8271102d1bebb9307a2f0215cf5d89e552dab8cce0c45cb7b22b1b5ba",
+    "smoke\\sector\\central_limit_0.5pct\\complete.json": "11928e3cbbc350eaf69963e07f8fe69dd0f2451d1ad45ef764caed2c87b94b28",
+    "smoke\\sector\\central_limit_0.5pct\\daily.csv": "871d8329e48adbf85c55d7c90caf4009fafe47843c00303bac26da44502ee548",
+    "smoke\\sector\\central_limit_0.5pct\\dividends.csv": "64ac62b3ac8b29b453d130cadbb07ddbcaa5e7163eb1529ec617678505ca7e8a",
+    "smoke\\sector\\central_limit_0.5pct\\entries.csv": "ec1b49bdd1c4c02ed05e43ea881a2027ccf3cf7d38524da25325f14ef2af772f",
+    "smoke\\sector\\central_limit_0.5pct\\friction.csv": "040d481538ee52c06c1339d673558f59d25bbbedd99494682de51890693f71be",
+    "smoke\\sector\\central_limit_0.5pct\\native_results.csv": "bbc189519f44fc349019ee2a628735be905e12c4fc817f1d9b919808e28a5a81",
+    "smoke\\sector\\central_limit_0.5pct\\transactions.csv": "7d07662e2fe32001eeb811c09fc03b221e9bc5fc42426d3b7715d509527a017f",
+    "smoke\\sector\\central_limit_1pct\\complete.json": "f02088b416666c459ca0032728d0bf119a4cc66554bda99596d4c0a4ec788935",
+    "smoke\\sector\\central_limit_1pct\\daily.csv": "47a034258b5b569f263f138e8207b1ebf85ad384f07875c97c309125edde7342",
+    "smoke\\sector\\central_limit_1pct\\dividends.csv": "64ac62b3ac8b29b453d130cadbb07ddbcaa5e7163eb1529ec617678505ca7e8a",
+    "smoke\\sector\\central_limit_1pct\\entries.csv": "207042090d33cebfe1731827c3efafaa8e5cbc1356288f5ebb30f0443b13241e",
+    "smoke\\sector\\central_limit_1pct\\friction.csv": "eeaffbcf2c30fdbfceb88aa82eed4348c691e36ae6bca61f937e9e1e6c46fe25",
+    "smoke\\sector\\central_limit_1pct\\native_results.csv": "74503b87099fb12674402820af15b65800aaf9fddf2aac7655cbc974ad56304d",
+    "smoke\\sector\\central_limit_1pct\\transactions.csv": "23c0709569dce8d81303056668ee3edf94e47a15ea06f3c2776174dc968af8a3",
+    "smoke\\sector\\central_limit_2pct\\complete.json": "6044c2e65d18705a5fb9436e30d921bc3cf6e10350dd4d25a930035c0f71f2cb",
+    "smoke\\sector\\central_limit_2pct\\daily.csv": "0deff6f425b90cff525abe42a8207bec76e2b42d4db674f1f8dc87b1d4f22cb9",
+    "smoke\\sector\\central_limit_2pct\\dividends.csv": "64ac62b3ac8b29b453d130cadbb07ddbcaa5e7163eb1529ec617678505ca7e8a",
+    "smoke\\sector\\central_limit_2pct\\entries.csv": "5c5b4193378a3da64ae0d49a9f1f91a6ba12199e29d05a72552fc839e9a06fb4",
+    "smoke\\sector\\central_limit_2pct\\friction.csv": "c9bf66f531898a2cce17b5f494cac32b26c0f23bb4dcbf883aded34ef08ab9a2",
+    "smoke\\sector\\central_limit_2pct\\native_results.csv": "46ace3d687e5919aa6ee93cab4eb7e16887e80333d79db67ea6d718d5469586c",
+    "smoke\\sector\\central_limit_2pct\\transactions.csv": "8885ef21149a3a42f93943f765953c542dca14c365175fe8c2324ac93b63c48e",
+    "smoke\\sector\\central_moo\\complete.json": "e9d189161b38b9db0d2f59e84d7a597ecaba0d3c8f13efec76a6cd73c35b4406",
+    "smoke\\sector\\central_moo\\daily.csv": "bcd1df68189eb281cb47ad7a85f41b598764c6837454ed44a18ec24878188048",
+    "smoke\\sector\\central_moo\\dividends.csv": "64ac62b3ac8b29b453d130cadbb07ddbcaa5e7163eb1529ec617678505ca7e8a",
+    "smoke\\sector\\central_moo\\entries.csv": "de9df83f8dd33fede732d777defe5ef29eeb7e388b9b6f1dda70925e2f933003",
+    "smoke\\sector\\central_moo\\friction.csv": "eb930822b3217df3fb078c7ba9eea7a8736631c228c6d8704daac0f2b9ccfee8",
+    "smoke\\sector\\central_moo\\native_results.csv": "ad1617f8bdf96370ddd288dc9de47e19eba12b0c545966433334ea187cbfabcb",
+    "smoke\\sector\\central_moo\\transactions.csv": "732ec6b5304139559e6d3936e11966ad36b222791f08bd8fed680150f6c83951",
+    "smoke\\sector\\native_equity.csv": "ad1617f8bdf96370ddd288dc9de47e19eba12b0c545966433334ea187cbfabcb",
+    "smoke\\sector\\native_parity.json": "6cdc9a6b6117ad781d70c42bf1e727390a88e4d99470165257aef2b7472ef98b",
+    "smoke\\sector\\native_transactions.csv": "2e040233838a9b66d81c7104e72e3e81c388142481f3036199b307e7330d8d52",
+    "smoke\\sector\\signal_prefix_audit.json": "3959dbf8d2df13c4cd5f7965f9076e44b5f525a2b8ec4571303578d7145af0bc",
+    "source_code_manifest.json": "912ad45b56dd0edf839511852ebdb4e38db47a4f3280258127f4b1b88f87a91b",
+    "SOURCE_RULE_MAP.md": "38c666a3bb51e47abdc488948a1c2131c3678c4a44588c0841f58bb4d841a90b",
+    "tables\\accounting_audit.json": "627a90e0b6f31b69faefa6f2b733abcf56fa6c035d31d81f8530251eb2f1d051",
+    "tables\\annual_returns.csv": "f0ede50f24a00e3596134b0319ba8e6deb788f9979fdbe17c6e172036559fd5f",
+    "tables\\capacity_orders.csv": "5cdfa786fed844de6e27a5aa6db9d34e2238bc4fb74f8ca13984c5f187dcf211",
+    "tables\\capacity_pooled_demand.csv": "5ca0ec1df937e4e8a42748d3f0c66c8f12f7fc036064cc33193d8fd46c3a8067",
+    "tables\\capacity_summary.csv": "35c45e5746472a349497d87b1ab5f2d5b189b62d358530b2617225ce520c6c89",
+    "tables\\daily_returns.csv": "7c48cb90aa8420859521df1bd3eb3082e0dd93efeda929cf38d1622687be1ff8",
+    "tables\\decision_summary.csv": "ce017d73e80dbd49c8e1740be0d05627a87ffb88c153564611752ed3483a4796",
+    "tables\\dv2_benchmark.json": "f542fa819d827a11e33bb5b27aa4a406f7501aa6e0b3402d8c91df24bf2021ee",
+    "tables\\dv2_input_exposure_orders.csv": "f201aa7b297476c63eb3c28a402e683168adf9f9679b93874b780bad167888d7",
+    "tables\\dv2_input_exposure_summary.csv": "c0ea04f8596653e977eec387c0b759d2e423837ceb077630cbd0539177e2e9ac",
+    "tables\\dv2_input_exposure_transactions.csv": "1ff4efb50f3abefac8f4e35ed036bf85ad0d4aa6e99ba6ad01ff1d996eda4a10",
+    "tables\\entry_path_comparison.csv": "912f5d1ff2dd4dadba8c7da03a9490e25b218c4211a56ce5c85a80ae4805f05b",
+    "tables\\hpi235_benchmark.json": "f542fa819d827a11e33bb5b27aa4a406f7501aa6e0b3402d8c91df24bf2021ee",
+    "tables\\inference.csv": "7bebb865ac60aaa1103b2d474106ff86ca181818f110a641c1219adda8d91c81",
+    "tables\\paired_opportunities.csv": "20035c9f9641fa0a2fc293188e50b9ba23bee76ab44af7563a831ddddb47bc86",
+    "tables\\paired_summary.csv": "dc9b2d60b87f0f6c8580af7ab1135cc6f1744e9e56ee84e70b0993f031a4e981",
+    "tables\\sector_benchmark.json": "f542fa819d827a11e33bb5b27aa4a406f7501aa6e0b3402d8c91df24bf2021ee",
+    "tables\\subperiods.csv": "637eb022be3b5611e956e11b326bf3fa7f941e4bdf9484881fa86594ffa8d12e",
+    "tables\\summary.csv": "1e08bcbcb0f2ff269755f7e1fe1f85f292fdfbf67350dd4bef882a3238ac2d14",
+    "tables\\timing_attribution.csv": "2fc6a78ef15879f26c824fa0c5db97486bf4de6ea23f2f86d78011dc67e39a43",
+    "verification\\artifact_qa.json": "85d529c250a5c84377282dacd3a659a937f16069500ad2478be0af21308d6fef",
+    "verification\\bundle_validation.log": "ac46600f4b7a41b67396170f3faabb47f55e8eb965b737cad6d25325dc0d03df",
+    "verification\\final_verification.json": "25a5bf7ed9c2102e9ca7644281de4d4f6d0b32122475fcdfeb635aaa0eb482ff",
+    "verification\\focused_tests.log": "5e465e55f8e6275dabd6778f86038103fb6a113926991045db19a53fd2d4368b",
+    "verification\\full_accounting_analysis.log": "5e6880f7dc7d2e41214980f5ac6c51fd1150eec3a6125730d345abae51056728",
+    "verification\\mkdocs_strict.log": "69d2e949d806d5fe4feb953866e83de64bef5ff5344c435ec43893831757d0f8",
+    "verification\\review_record.json": "399e98f96ae628f33ef26b1b44cb7819e129fc436b2c7679bd9a80f2a651b5a1",
+    "verification\\triage_owned.txt": "daf1b993d7576d245c42956f1e73d8b8749fe8bd32491ee5594a97b5c1885943",
+    "verification\\triage_owned_final.log": "2f19a112ff6ffbdfab0e29fba11124533fe8df99bf652bece7c18b6aa3c6c6de",
+    "verification\\triage_workspace.txt": "2e08e9960b4515e9f421d91ad5bb3843fd973ac3be941074eb19867a9023d2b5"
+  },
+  "code_sha256": {
+    "scripts/research/run_mr_deeper_dip_study.py": "4689af56e90cd4dcf833b896b1a28217d0b54ca9cd785162e5e020579e435a19",
+    "scripts/research/run_mr_deeper_dip_fast.py": "7572afe6906386f89e3b27d81de74f306055cf1f7ed152c70539914bab0295de",
+    "scripts/research/analyze_mr_deeper_dip_study.py": "e7c6f8c6b710baeeda56b10b5f397d6bc22e75bb2632af93cd82bf1a9c779a29",
+    "scripts/research/report_mr_deeper_dip_study.py": "bfd5be07c72a69c9ddbb3b7dec42befac8c8beefd1ca1d5ac70fd592a35cc6ff",
+    "tests/test_mr_deeper_dip_study.py": "4897f293f1cb0f103b9ce2804a57e339d5fa624ecadb6b0d2f4e69d2d0bd55b2"
+  }
+}

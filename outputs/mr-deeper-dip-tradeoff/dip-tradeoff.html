@@ -1,0 +1,250 @@
+<div id="dip-tradeoff-v1" dir="rtl">
+  <style>
+    #dip-tradeoff-v1 { color: var(--foreground); }
+    #dip-tradeoff-v1 section { margin-block: 1.5rem; }
+    #dip-tradeoff-v1 .chart-host { min-width: 0; }
+    #dip-tradeoff-v1 svg { width: 100%; display: block; overflow: visible; direction: ltr; }
+    #dip-tradeoff-v1 svg text { fill: var(--foreground); font-size: 12px; }
+    #dip-tradeoff-v1 .metric-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 1rem; }
+    #dip-tradeoff-v1 .label-row { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+    #dip-tradeoff-v1 .swatch { width: .75rem; height: .75rem; display: inline-block; margin-inline-end: .4rem; }
+    #dip-tradeoff-v1 .sample-label { margin-block: .35rem; }
+    @media (max-width: 620px) { #dip-tradeoff-v1 .metric-grid { grid-template-columns: 1fr; } }
+  </style>
+  <h2>לקנות בזול יותר — ולהחמיץ חלק מהעליות</h2>
+  <div class="viz-controls">
+    <label class="form-label">מערכת
+      <select class="form-select" id="dip-strategy">
+        <option value="sector">סקטורים VOX/IYR</option>
+        <option value="hpi235">HPI בהצבעת 2/3/5</option>
+        <option value="dv2">DV2</option>
+      </select>
+    </label>
+    <label class="form-label">לימיט מתחת לפתיחה
+      <select class="form-select" id="dip-depth">
+        <option value="limit_0.5pct">0.5%</option>
+        <option value="limit_1pct" selected>1%</option>
+        <option value="limit_2pct">2%</option>
+      </select>
+    </label>
+  </div>
+  <div class="text-small text-muted">עלויות בסיסיות · 05.01.2010–14.09.2026 · מודל מילוי לפי נרות יומיים</div>
+
+  <section aria-labelledby="dip-fill-heading">
+    <h3 id="dip-fill-heading">1. כמה הזדמנויות מקוריות נשארות?</h3>
+    <div class="label-row tabular-nums">
+      <span><i class="swatch" style="background:var(--viz-series-2)"></i><span id="dip-filled-label"></span></span>
+      <span><i class="swatch" style="background:var(--viz-series-3)"></i><span id="dip-missed-label"></span></span>
+    </div>
+    <div class="chart-host" id="dip-fill-chart"></div>
+    <div id="dip-sample" class="text-small text-muted sample-label"></div>
+  </section>
+
+  <section aria-labelledby="dip-waterfall-heading">
+    <h3 id="dip-waterfall-heading">2. ההנחה במחיר מול הרווח שהוחמץ</h3>
+    <div class="chart-host" id="dip-waterfall-chart"></div>
+    <div class="text-small text-muted">אותן הזדמנויות, כמויות ויציאות · תשואה ממוצעת להזדמנות, לא לשנה</div>
+    <div class="text-small text-muted">התחלה וסוף: אחוזים · תוספת והפחתה: נקודות אחוז · המכנה: סכום הקנייה המקורי בפתיחה</div>
+  </section>
+
+  <section aria-labelledby="dip-portfolio-heading">
+    <h3 id="dip-portfolio-heading">3. מה קרה בתיק שמתפתח לאורך השנים?</h3>
+    <div class="metric-grid">
+      <div>
+        <div>תשואה שנתית · גבוה עדיף</div>
+        <div class="chart-host" id="dip-cagr-chart"></div>
+      </div>
+      <div>
+        <div>ירידה מרבית · נמוך עדיף</div>
+        <div class="chart-host" id="dip-drawdown-chart"></div>
+      </div>
+      <div>
+        <div>חשיפה ממוצעת</div>
+        <div class="chart-host" id="dip-exposure-chart"></div>
+      </div>
+    </div>
+    <div id="dip-path-detail" class="text-small" aria-live="polite"></div>
+  </section>
+  <div id="dip-accessible-summary" class="sr-only" aria-live="polite"></div>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+  <script>
+  (() => {
+    const root = document.getElementById('dip-tradeoff-v1');
+    const records = [{"strategy": "dv2", "policy": "limit_0.5pct", "name": "DV2", "depth_label": "0.5%", "opportunities": 8067, "fills": 5870, "fill_pct": 72.76558819883476, "baseline_mean": 0.4021613835029016, "limit_mean": 0.3553870751534498, "entry_gain": 0.363918897979429, "missed_return": 0.4106932063288806, "actual_entries": 6966, "different_entries": 1537, "base": {"cagr": 19.48686989009163, "drawdown": 30.867801440371558, "exposure": 86.15457191526461}, "limit": {"cagr": 18.226290487692353, "drawdown": 28.371767168941542, "exposure": 77.85254627228488}}, {"strategy": "dv2", "policy": "limit_1pct", "name": "DV2", "depth_label": "1%", "opportunities": 8067, "fills": 4082, "fill_pct": 50.60121482583364, "baseline_mean": 0.4021613835029016, "limit_mean": 0.2826179994253478, "entry_gain": 0.5061386512954058, "missed_return": 0.6256820353729595, "actual_entries": 5809, "different_entries": 2087, "base": {"cagr": 19.48686989009163, "drawdown": 30.867801440371558, "exposure": 86.15457191526461}, "limit": {"cagr": 19.349641319233335, "drawdown": 27.127115162669035, "exposure": 67.30429192475484}}, {"strategy": "dv2", "policy": "limit_2pct", "name": "DV2", "depth_label": "2%", "opportunities": 8067, "fills": 1928, "fill_pct": 23.899838849634314, "baseline_mean": 0.4021613835029016, "limit_mean": 0.16409139636993908, "entry_gain": 0.4781162761869369, "missed_return": 0.7161862633198994, "actual_entries": 3767, "different_entries": 1975, "base": {"cagr": 19.48686989009163, "drawdown": 30.867801440371558, "exposure": 86.15457191526461}, "limit": {"cagr": 16.052744105536142, "drawdown": 21.845756417555318, "exposure": 45.01553697711507}}, {"strategy": "hpi235", "policy": "limit_0.5pct", "name": "HPI בהצבעת 2/3/5", "depth_label": "0.5%", "opportunities": 4714, "fills": 3344, "fill_pct": 70.93763258379295, "baseline_mean": 0.5580754547954919, "limit_mean": 0.5040349664945136, "entry_gain": 0.3547768349597008, "missed_return": 0.4088173232606792, "actual_entries": 4075, "different_entries": 884, "base": {"cagr": 16.03436162486338, "drawdown": 17.713033341610018, "exposure": 71.88396819894126}, "limit": {"cagr": 18.282929701852126, "drawdown": 17.021163664802728, "exposure": 63.10099228582015}}, {"strategy": "hpi235", "policy": "limit_1pct", "name": "HPI בהצבעת 2/3/5", "depth_label": "1%", "opportunities": 4714, "fills": 2212, "fill_pct": 46.92405600339414, "baseline_mean": 0.5580754547954919, "limit_mean": 0.4047938903965613, "entry_gain": 0.4693578701739542, "missed_return": 0.6226394345728848, "actual_entries": 3256, "different_entries": 1139, "base": {"cagr": 16.03436162486338, "drawdown": 17.713033341610018, "exposure": 71.88396819894126}, "limit": {"cagr": 16.615632274906922, "drawdown": 17.312076849703327, "exposure": 52.44494628384968}}, {"strategy": "hpi235", "policy": "limit_2pct", "name": "HPI בהצבעת 2/3/5", "depth_label": "2%", "opportunities": 4714, "fills": 1015, "fill_pct": 21.531607976240984, "baseline_mean": 0.5580754547954919, "limit_mean": 0.2794024679141544, "entry_gain": 0.43073981756470314, "missed_return": 0.7094128044460406, "actual_entries": 1918, "different_entries": 925, "base": {"cagr": 16.03436162486338, "drawdown": 17.713033341610018, "exposure": 71.88396819894126}, "limit": {"cagr": 12.05008629709521, "drawdown": 17.345456200932784, "exposure": 31.089226056772794}}, {"strategy": "sector", "policy": "limit_0.5pct", "name": "סקטורים VOX/IYR", "depth_label": "0.5%", "opportunities": 943, "fills": 552, "fill_pct": 58.536585365853654, "baseline_mean": 0.9458834669548095, "limit_mean": 0.6448718869828656, "entry_gain": 0.29275609756098087, "missed_return": 0.5937676775329249, "actual_entries": 651, "different_entries": 103, "base": {"cagr": 7.342175213995716, "drawdown": 10.426934566865043, "exposure": 32.31517447034738}, "limit": {"cagr": 5.474766924301155, "drawdown": 9.840614221802346, "exposure": 21.91861873687478}}, {"strategy": "sector", "policy": "limit_1pct", "name": "סקטורים VOX/IYR", "depth_label": "1%", "opportunities": 943, "fills": 304, "fill_pct": 32.237539766702014, "baseline_mean": 0.9458834669548095, "limit_mean": 0.38552635365150156, "entry_gain": 0.3224559915164399, "missed_return": 0.8828131048197478, "actual_entries": 410, "different_entries": 109, "base": {"cagr": 7.342175213995716, "drawdown": 10.426934566865043, "exposure": 32.31517447034738}, "limit": {"cagr": 3.82930501903469, "drawdown": 8.439713347986654, "exposure": 12.863548904879016}}, {"strategy": "sector", "policy": "limit_2pct", "name": "סקטורים VOX/IYR", "depth_label": "2%", "opportunities": 943, "fills": 86, "fill_pct": 9.11983032873807, "baseline_mean": 0.9458834669548095, "limit_mean": 0.11989400513004939, "entry_gain": 0.18244220572640604, "missed_return": 1.0084316675511662, "actual_entries": 134, "different_entries": 49, "base": {"cagr": 7.342175213995716, "drawdown": 10.426934566865043, "exposure": 32.31517447034738}, "limit": {"cagr": 1.56357238336029, "drawdown": 8.934911025291258, "exposure": 3.5528789675770867}}];
+    if (typeof d3 === 'undefined') {
+      root.querySelector('#dip-accessible-summary').classList.remove('sr-only');
+      root.querySelector('#dip-accessible-summary').textContent = 'הגרפים לא נטענו. נדרשת טעינה מחדש.';
+      return;
+    }
+    const strategyControl = root.querySelector('#dip-strategy');
+    const depthControl = root.querySelector('#dip-depth');
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const color = { base: 'var(--viz-series-1)', limit: 'var(--viz-series-2)', missed: 'var(--viz-series-3)' };
+    const pct = value => Number(value).toFixed(2) + '%';
+    const count = value => Number(value).toLocaleString('en-US');
+    const chartAudit = [];
+    let hasDrawn = false;
+
+    function surface(id, height, accessibleText) {
+      const host = root.querySelector('#' + id);
+      const width = Math.max(1, Math.floor(host.getBoundingClientRect().width));
+      const svg = d3.select(host).selectAll('svg').data([null]).join('svg')
+        .attr('viewBox', '0 0 ' + width + ' ' + height).attr('height', height)
+        .attr('role', 'img').attr('aria-label', accessibleText);
+      svg.selectAll('title').data([accessibleText]).join('title').text(accessibleText);
+      return { svg, width, height };
+    }
+
+    function axisLabel(svg, axis, text, x, y, rotate) {
+      svg.selectAll('text.axis-title-' + axis).data([text]).join('text')
+        .attr('class', 'axis-title axis-title-' + axis).attr('data-axis', axis)
+        .attr('text-anchor', 'middle').attr('x', x).attr('y', y)
+        .attr('transform', rotate ? 'rotate(-90,' + x + ',' + y + ')' : null).text(text);
+    }
+
+    function frame(svg, left, top, width, height) {
+      svg.selectAll('rect[data-chart-frame]').data([null]).join('rect')
+        .attr('data-chart-frame', '').attr('x', left).attr('y', top)
+        .attr('width', width).attr('height', height)
+        .attr('fill', 'none').attr('stroke', 'var(--border)').attr('stroke-width', 1);
+    }
+
+    function wrapLabels(selection, maxWidth) {
+      selection.each(function() {
+        const element = d3.select(this);
+        const words = element.text().split(' ');
+        element.text(null);
+        let line = [];
+        let row = 0;
+        let span = element.append('tspan').attr('x', 0).attr('dy', '0.8em');
+        words.forEach(word => {
+          line.push(word);
+          span.text(line.join(' '));
+          if (span.node().getComputedTextLength() > maxWidth && line.length > 1) {
+            line.pop(); span.text(line.join(' ')); line = [word]; row++;
+            span = element.append('tspan').attr('x', 0).attr('dy', '1.1em').text(word);
+          }
+        });
+      });
+    }
+
+    function labelAudit(svg, width, height) {
+      const boxes = [];
+      svg.selectAll('text').each(function() {
+        const rect = this.getBoundingClientRect();
+        if (rect.width && rect.height) boxes.push({ text: this.textContent, x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+      });
+      chartAudit.push({ id: svg.node().parentElement.id, width, height, labels: boxes });
+    }
+
+    function fillChart(record, animate) {
+      const { svg, width, height } = surface('dip-fill-chart', 125, 'מתוך100הזדמנויות: ' + record.fill_pct.toFixed(1) + ' מתמלאות');
+      const left = 64, right = 18, top = 18, bottom = 64;
+      const x = d3.scaleLinear().domain([0, 100]).range([left, width-right]);
+      frame(svg, left, top, width-left-right, 30);
+      const segments = [
+        { key: 'filled', from: 0, to: record.fill_pct, fill: color.limit },
+        { key: 'missed', from: record.fill_pct, to: 100, fill: color.missed }
+      ];
+      const bars = svg.selectAll('rect.segment').data(segments, value => value.key).join('rect')
+        .attr('class', 'segment').attr('y', top).attr('height', 30).attr('fill', value => value.fill);
+      const movement = animate ? bars.transition().duration(350) : bars;
+      movement.attr('x', value => x(value.from)).attr('width', value => x(value.to)-x(value.from));
+      const axis = svg.selectAll('g.x-axis').data([null]).join('g').attr('class', 'x-axis').attr('transform', 'translate(0,48)');
+      axis.call(d3.axisBottom(x).tickValues(width<400 ? [0, 50, 100] : [0, 25, 50, 75, 100]).tickSize(3));
+      axis.selectAll('path,line').attr('stroke', 'var(--border)');
+      axisLabel(svg, 'x', 'הזדמנויות מתוך 100', (left+width-right)/2, 105, false);
+      axisLabel(svg, 'y', 'אותות', 28, 35, true);
+      labelAudit(svg, width, height);
+    }
+
+    function waterfall(record, animate) {
+      const { svg, width, height } = surface('dip-waterfall-chart', 305, 'פירוק הממוצע: ' + pct(record.baseline_mean) + ' בפתיחה לעומת ' + pct(record.limit_mean) + ' בלימיט');
+      const left = 64, right = 18, top = 30, bottom = 84;
+      const barsData = [
+        { key: 'base', label: 'כניסה בפתיחה', low: 0, high: record.baseline_mean, value: record.baseline_mean, fill: color.base, total: true },
+        { key: 'gain', label: 'חיסכון במחיר', low: record.baseline_mean, high: record.baseline_mean+record.entry_gain, value: record.entry_gain, fill: color.limit },
+        { key: 'missed', label: 'רווח שהוחמץ', low: record.limit_mean, high: record.baseline_mean+record.entry_gain, value: -record.missed_return, fill: color.missed },
+        { key: 'limit', label: 'לימיט כולל החמצות', low: 0, high: record.limit_mean, value: record.limit_mean, fill: color.limit, total: true }
+      ];
+      const bounds = d3.extent(barsData.flatMap(value => [value.low, value.high, 0]));
+      const span = bounds[1]-bounds[0] || 1;
+      const y = d3.scaleLinear().domain([Math.min(0,bounds[0]), bounds[1]+span*.20]).nice(4).range([height-bottom,top]);
+      const x = d3.scaleBand().domain(barsData.map(value => value.key)).range([left+6,width-right-6]).padding(.34);
+      frame(svg,left,top,width-left-right,height-top-bottom);
+      const yAxis = svg.selectAll('g.y-axis').data([null]).join('g').attr('class','y-axis').attr('transform','translate('+left+',0)');
+      yAxis.call(d3.axisLeft(y).ticks(4).tickSize(3).tickFormat(value => value.toFixed(2)));
+      yAxis.selectAll('path,line').attr('stroke','var(--border)');
+      const xAxis = svg.selectAll('g.x-axis').data([null]).join('g').attr('class','x-axis').attr('transform','translate(0,'+(height-bottom)+')');
+      xAxis.call(d3.axisBottom(x).tickSize(0).tickFormat(key => barsData.find(value => value.key===key).label));
+      xAxis.selectAll('path').attr('stroke','var(--border)');
+      xAxis.selectAll('text').call(wrapLabels, x.step()-6);
+      const marks = svg.selectAll('rect.waterfall-bar').data(barsData,value=>value.key).join('rect')
+        .attr('class','waterfall-bar').attr('fill',value=>value.fill).attr('x',value=>x(value.key)).attr('width',x.bandwidth());
+      const movement = animate ? marks.transition().duration(350) : marks;
+      movement.attr('y',value=>y(value.high)).attr('height',value=>Math.max(0,y(value.low)-y(value.high)));
+      svg.selectAll('text.bar-value').data(barsData,value=>value.key).join('text').attr('class','bar-value')
+        .attr('text-anchor','middle').attr('x',value=>x(value.key)+x.bandwidth()/2).attr('y',value=>y(value.high)-8)
+        .text(value=>value.total ? pct(value.value) : (value.value>=0?'+':'−')+Math.abs(value.value).toFixed(2));
+      axisLabel(svg,'y','תשואה ממוצעת להזדמנות (%)',16,(top+height-bottom)/2,true);
+      axisLabel(svg,'x','פירוק השינוי', (left+width-right)/2,height-8,false);
+      labelAudit(svg,width,height);
+    }
+
+    function metricChart(id, metric, record, animate) {
+      const captions = { cagr: 'תשואה שנתית (%)', drawdown: 'ירידה מהשיא (%)', exposure: 'הון מושקע (%)' };
+      const { svg, width, height } = surface(id,230,captions[metric]+': פתיחה '+pct(record.base[metric])+', לימיט '+pct(record.limit[metric]));
+      const left=64,right=14,top=26,bottom=56;
+      const values=[{key:'base',label:'פתיחה',value:record.base[metric],fill:color.base},{key:'limit',label:'לימיט',value:record.limit[metric],fill:color.limit}];
+      const extent=d3.extent(values,value=>value.value);
+      const upper=Math.max(extent[1],0);
+      const y=d3.scaleLinear().domain([0,upper+Math.max(upper*.22,1)]).nice(3).range([height-bottom,top]);
+      const x=d3.scaleBand().domain(['base','limit']).range([left+5,width-right-5]).padding(.35);
+      frame(svg,left,top,width-left-right,height-top-bottom);
+      const yAxis=svg.selectAll('g.y-axis').data([null]).join('g').attr('class','y-axis').attr('transform','translate('+left+',0)');
+      yAxis.call(d3.axisLeft(y).ticks(3).tickSize(3));
+      yAxis.selectAll('path,line').attr('stroke','var(--border)');
+      const xAxis=svg.selectAll('g.x-axis').data([null]).join('g').attr('class','x-axis').attr('transform','translate(0,'+(height-bottom)+')');
+      xAxis.call(d3.axisBottom(x).tickSize(0).tickFormat(key=>key==='base'?'פתיחה':'לימיט'));
+      xAxis.selectAll('path').attr('stroke','var(--border)');
+      const bars=svg.selectAll('rect.metric-bar').data(values,value=>value.key).join('rect').attr('class','metric-bar')
+        .attr('x',value=>x(value.key)).attr('width',x.bandwidth()).attr('fill',value=>value.fill);
+      const movement=animate ? bars.transition().duration(350) : bars;
+      movement.attr('y',value=>y(value.value)).attr('height',value=>y(0)-y(value.value));
+      svg.selectAll('text.bar-value').data(values,value=>value.key).join('text').attr('class','bar-value')
+        .attr('x',value=>x(value.key)+x.bandwidth()/2).attr('y',value=>y(value.value)-8).attr('text-anchor','middle').text(value=>pct(value.value));
+      axisLabel(svg,'y',captions[metric],16,(top+height-bottom)/2,true);
+      axisLabel(svg,'x','מדיניות כניסה',(left+width-right)/2,height-6,false);
+      labelAudit(svg,width,height);
+    }
+
+    function draw(animate) {
+      const record=records.find(value=>value.strategy===strategyControl.value && value.policy===depthControl.value);
+      chartAudit.length=0;
+      root.querySelector('#dip-filled-label').textContent='מתמלאות: '+record.fill_pct.toFixed(1)+'%';
+      root.querySelector('#dip-missed-label').textContent='מוחמצות: '+(100-record.fill_pct).toFixed(1)+'%';
+      root.querySelector('#dip-sample').textContent=count(record.fills)+' מתוך '+count(record.opportunities)+' כניסות הבסיס היו מגיעות ללימיט';
+      root.querySelector('#dip-path-detail').textContent='כניסות במניה ובתאריך שאינם בבסיס: '+count(record.different_entries)+' מתוך '+count(record.actual_entries)+' כניסות הלימיט בפועל';
+      root.querySelector('#dip-accessible-summary').textContent=record.name+'; '+record.depth_label+' מתחת לפתיחה. ממוצע להזדמנות: '+pct(record.baseline_mean)+' לעומת '+pct(record.limit_mean)+'. תשואה שנתית בתיק: '+pct(record.base.cagr)+' לעומת '+pct(record.limit.cagr);
+      fillChart(record,animate); waterfall(record,animate);
+      metricChart('dip-cagr-chart','cagr',record,animate);
+      metricChart('dip-drawdown-chart','drawdown',record,animate);
+      metricChart('dip-exposure-chart','exposure',record,animate);
+      root.dataset.selected=record.strategy+'/'+record.policy;
+      root.dataset.pairedIdentityError=String(record.baseline_mean+record.entry_gain-record.missed_return-record.limit_mean);
+      root._chartAudit=chartAudit;
+      hasDrawn=true;
+    }
+    strategyControl.addEventListener('change',()=>draw(hasDrawn && !reduceMotion));
+    depthControl.addEventListener('change',()=>draw(hasDrawn && !reduceMotion));
+    let resizePending=false;
+    const observer=new ResizeObserver(()=>{
+      if (resizePending) return;
+      resizePending=true;
+      requestAnimationFrame(()=>{resizePending=false;draw(false);});
+    });
+    root.querySelectorAll('.chart-host').forEach(element=>observer.observe(element));
+    draw(false);
+  })();
+  </script>
+</div>

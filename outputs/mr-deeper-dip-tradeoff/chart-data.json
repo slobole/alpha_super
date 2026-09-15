@@ -1,0 +1,227 @@
+[
+  {
+    "strategy": "dv2",
+    "policy": "limit_0.5pct",
+    "name": "DV2",
+    "depth_label": "0.5%",
+    "opportunities": 8067,
+    "fills": 5870,
+    "fill_pct": 72.76558819883476,
+    "baseline_mean": 0.4021613835029016,
+    "limit_mean": 0.3553870751534498,
+    "entry_gain": 0.363918897979429,
+    "missed_return": 0.4106932063288806,
+    "actual_entries": 6966,
+    "different_entries": 1537,
+    "base": {
+      "cagr": 19.48686989009163,
+      "drawdown": 30.867801440371558,
+      "exposure": 86.15457191526461
+    },
+    "limit": {
+      "cagr": 18.226290487692353,
+      "drawdown": 28.371767168941542,
+      "exposure": 77.85254627228488
+    }
+  },
+  {
+    "strategy": "dv2",
+    "policy": "limit_1pct",
+    "name": "DV2",
+    "depth_label": "1%",
+    "opportunities": 8067,
+    "fills": 4082,
+    "fill_pct": 50.60121482583364,
+    "baseline_mean": 0.4021613835029016,
+    "limit_mean": 0.2826179994253478,
+    "entry_gain": 0.5061386512954058,
+    "missed_return": 0.6256820353729595,
+    "actual_entries": 5809,
+    "different_entries": 2087,
+    "base": {
+      "cagr": 19.48686989009163,
+      "drawdown": 30.867801440371558,
+      "exposure": 86.15457191526461
+    },
+    "limit": {
+      "cagr": 19.349641319233335,
+      "drawdown": 27.127115162669035,
+      "exposure": 67.30429192475484
+    }
+  },
+  {
+    "strategy": "dv2",
+    "policy": "limit_2pct",
+    "name": "DV2",
+    "depth_label": "2%",
+    "opportunities": 8067,
+    "fills": 1928,
+    "fill_pct": 23.899838849634314,
+    "baseline_mean": 0.4021613835029016,
+    "limit_mean": 0.16409139636993908,
+    "entry_gain": 0.4781162761869369,
+    "missed_return": 0.7161862633198994,
+    "actual_entries": 3767,
+    "different_entries": 1975,
+    "base": {
+      "cagr": 19.48686989009163,
+      "drawdown": 30.867801440371558,
+      "exposure": 86.15457191526461
+    },
+    "limit": {
+      "cagr": 16.052744105536142,
+      "drawdown": 21.845756417555318,
+      "exposure": 45.01553697711507
+    }
+  },
+  {
+    "strategy": "hpi235",
+    "policy": "limit_0.5pct",
+    "name": "HPI בהצבעת 2/3/5",
+    "depth_label": "0.5%",
+    "opportunities": 4714,
+    "fills": 3344,
+    "fill_pct": 70.93763258379295,
+    "baseline_mean": 0.5580754547954919,
+    "limit_mean": 0.5040349664945136,
+    "entry_gain": 0.3547768349597008,
+    "missed_return": 0.4088173232606792,
+    "actual_entries": 4075,
+    "different_entries": 884,
+    "base": {
+      "cagr": 16.03436162486338,
+      "drawdown": 17.713033341610018,
+      "exposure": 71.88396819894126
+    },
+    "limit": {
+      "cagr": 18.282929701852126,
+      "drawdown": 17.021163664802728,
+      "exposure": 63.10099228582015
+    }
+  },
+  {
+    "strategy": "hpi235",
+    "policy": "limit_1pct",
+    "name": "HPI בהצבעת 2/3/5",
+    "depth_label": "1%",
+    "opportunities": 4714,
+    "fills": 2212,
+    "fill_pct": 46.92405600339414,
+    "baseline_mean": 0.5580754547954919,
+    "limit_mean": 0.4047938903965613,
+    "entry_gain": 0.4693578701739542,
+    "missed_return": 0.6226394345728848,
+    "actual_entries": 3256,
+    "different_entries": 1139,
+    "base": {
+      "cagr": 16.03436162486338,
+      "drawdown": 17.713033341610018,
+      "exposure": 71.88396819894126
+    },
+    "limit": {
+      "cagr": 16.615632274906922,
+      "drawdown": 17.312076849703327,
+      "exposure": 52.44494628384968
+    }
+  },
+  {
+    "strategy": "hpi235",
+    "policy": "limit_2pct",
+    "name": "HPI בהצבעת 2/3/5",
+    "depth_label": "2%",
+    "opportunities": 4714,
+    "fills": 1015,
+    "fill_pct": 21.531607976240984,
+    "baseline_mean": 0.5580754547954919,
+    "limit_mean": 0.2794024679141544,
+    "entry_gain": 0.43073981756470314,
+    "missed_return": 0.7094128044460406,
+    "actual_entries": 1918,
+    "different_entries": 925,
+    "base": {
+      "cagr": 16.03436162486338,
+      "drawdown": 17.713033341610018,
+      "exposure": 71.88396819894126
+    },
+    "limit": {
+      "cagr": 12.05008629709521,
+      "drawdown": 17.345456200932784,
+      "exposure": 31.089226056772794
+    }
+  },
+  {
+    "strategy": "sector",
+    "policy": "limit_0.5pct",
+    "name": "סקטורים VOX/IYR",
+    "depth_label": "0.5%",
+    "opportunities": 943,
+    "fills": 552,
+    "fill_pct": 58.536585365853654,
+    "baseline_mean": 0.9458834669548095,
+    "limit_mean": 0.6448718869828656,
+    "entry_gain": 0.29275609756098087,
+    "missed_return": 0.5937676775329249,
+    "actual_entries": 651,
+    "different_entries": 103,
+    "base": {
+      "cagr": 7.342175213995716,
+      "drawdown": 10.426934566865043,
+      "exposure": 32.31517447034738
+    },
+    "limit": {
+      "cagr": 5.474766924301155,
+      "drawdown": 9.840614221802346,
+      "exposure": 21.91861873687478
+    }
+  },
+  {
+    "strategy": "sector",
+    "policy": "limit_1pct",
+    "name": "סקטורים VOX/IYR",
+    "depth_label": "1%",
+    "opportunities": 943,
+    "fills": 304,
+    "fill_pct": 32.237539766702014,
+    "baseline_mean": 0.9458834669548095,
+    "limit_mean": 0.38552635365150156,
+    "entry_gain": 0.3224559915164399,
+    "missed_return": 0.8828131048197478,
+    "actual_entries": 410,
+    "different_entries": 109,
+    "base": {
+      "cagr": 7.342175213995716,
+      "drawdown": 10.426934566865043,
+      "exposure": 32.31517447034738
+    },
+    "limit": {
+      "cagr": 3.82930501903469,
+      "drawdown": 8.439713347986654,
+      "exposure": 12.863548904879016
+    }
+  },
+  {
+    "strategy": "sector",
+    "policy": "limit_2pct",
+    "name": "סקטורים VOX/IYR",
+    "depth_label": "2%",
+    "opportunities": 943,
+    "fills": 86,
+    "fill_pct": 9.11983032873807,
+    "baseline_mean": 0.9458834669548095,
+    "limit_mean": 0.11989400513004939,
+    "entry_gain": 0.18244220572640604,
+    "missed_return": 1.0084316675511662,
+    "actual_entries": 134,
+    "different_entries": 49,
+    "base": {
+      "cagr": 7.342175213995716,
+      "drawdown": 10.426934566865043,
+      "exposure": 32.31517447034738
+    },
+    "limit": {
+      "cagr": 1.56357238336029,
+      "drawdown": 8.934911025291258,
+      "exposure": 3.5528789675770867
+    }
+  }
+]

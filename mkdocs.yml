@@ -58,6 +58,7 @@ nav:
       - Set Up IBKR Flex Performance: operations/ibkr-flex-performance-setup.md
   - Research:
       - Overview: research/index.md
+      - Deeper Dip Entry Study: research/alpha-studies/mr-deeper-dip-entry-study/index.md
       - Knowledge Base:
           - Home: research/knowledge-base/index.md
           - All Studies: research/knowledge-base/studies.md
@@ -97,6 +98,8 @@ exclude_docs: |
   live_flow_images/
   research/*
   !research/index.md
+  !research/alpha-studies/**
+  !research/alpha-studies/
   !research/knowledge-base/
   !research/knowledge-base/**
 

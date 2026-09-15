@@ -1,0 +1,173 @@
+{
+  "schema_version": "research-portal-copy-v1",
+  "created_at": "2026-09-15T18:00:58.217472+00:00",
+  "source_study_path": "C:\\Users\\User\\Documents\\workspace\\alpha_super\\results\\research\\mr_deeper_dip_entry_study",
+  "source_manifest_sha256": "307104ede974b6b3abcb2117c6eaaeb748751100371fbf3d39a830b3bd5c69da",
+  "files": [
+    {
+      "path": "charts/cost_sensitivity.png",
+      "bytes": 114436,
+      "sha256": "dbdee2828188148e3d9c590c6f0cda79970bb73e5fd5bafe7dd6f8dac10b3cba"
+    },
+    {
+      "path": "charts/equity_drawdown.png",
+      "bytes": 643693,
+      "sha256": "b5d1fff321d8951bbdd0d904b8118fe6e9f2648f6fee5269dc9c5f92d7915673"
+    },
+    {
+      "path": "charts/fills_exposure.png",
+      "bytes": 43159,
+      "sha256": "8ec56078d0d8949d771de8fcb3a87c6e31cc528685c68c6be138e07860232262"
+    },
+    {
+      "path": "charts/rolling_correlation.png",
+      "bytes": 215296,
+      "sha256": "59ebd8963a2656a953fc80898019515868eea2dc0d3ab40ee649ca9c465cb413"
+    },
+    {
+      "path": "DATA_AUDIT.md",
+      "bytes": 7797,
+      "sha256": "76f65e2a134f679089ba931f868a8b99fcce730df69d9ba960a012e115914d49"
+    },
+    {
+      "path": "decision_notebook.ipynb",
+      "bytes": 1415981,
+      "sha256": "9d613b1c88f806b202e20d8f5f6cacfe0a8fffeb9189fbb3ca6fb06a4b8af0c5"
+    },
+    {
+      "path": "full.md",
+      "bytes": 46582,
+      "sha256": "b6b2189ae76f60b79c6262d467031829ba637677717831f0bee5788711dd8a27"
+    },
+    {
+      "path": "index.md",
+      "bytes": 22247,
+      "sha256": "d2bbb14ce6a258bc18c84ce1bcf8539b9fd958415bf7bb0044dc2d969631d62c"
+    },
+    {
+      "path": "knowledge_record.json",
+      "bytes": 57835,
+      "sha256": "d80ebd0f3e4956f3e304f5d7c127e2898821f853a733b8f8aed9446cb8296a02"
+    },
+    {
+      "path": "research_spec_frozen.json",
+      "bytes": 6667,
+      "sha256": "a4c4798684b45133c009761bb63c645e23975c02ab80345f6b2d095f5def16cd"
+    },
+    {
+      "path": "research_spec_normalized_view.json",
+      "bytes": 24137,
+      "sha256": "846c23909a9e63878010a63ee8057fa5243cc9455b36bfcce1906c250b424d62"
+    },
+    {
+      "path": "run_manifest.json",
+      "bytes": 119004,
+      "sha256": "307104ede974b6b3abcb2117c6eaaeb748751100371fbf3d39a830b3bd5c69da"
+    },
+    {
+      "path": "SOURCE_RULE_MAP.md",
+      "bytes": 1913,
+      "sha256": "c7b0474d0db9f312b1d89c750741d7b5dd55ec6c8895261c0c18ff3dcef034fd"
+    },
+    {
+      "path": "tables/accounting_audit.json",
+      "bytes": 449,
+      "sha256": "627a90e0b6f31b69faefa6f2b733abcf56fa6c035d31d81f8530251eb2f1d051"
+    },
+    {
+      "path": "tables/annual_returns.csv",
+      "bytes": 20217,
+      "sha256": "f0ede50f24a00e3596134b0319ba8e6deb788f9979fdbe17c6e172036559fd5f"
+    },
+    {
+      "path": "tables/capacity_orders.csv",
+      "bytes": 8291739,
+      "sha256": "5cdfa786fed844de6e27a5aa6db9d34e2238bc4fb74f8ca13984c5f187dcf211"
+    },
+    {
+      "path": "tables/capacity_pooled_demand.csv",
+      "bytes": 8647157,
+      "sha256": "5ca0ec1df937e4e8a42748d3f0c66c8f12f7fc036064cc33193d8fd46c3a8067"
+    },
+    {
+      "path": "tables/capacity_summary.csv",
+      "bytes": 1366,
+      "sha256": "35c45e5746472a349497d87b1ab5f2d5b189b62d358530b2617225ce520c6c89"
+    },
+    {
+      "path": "tables/daily_returns.csv",
+      "bytes": 1952983,
+      "sha256": "7c48cb90aa8420859521df1bd3eb3082e0dd93efeda929cf38d1622687be1ff8"
+    },
+    {
+      "path": "tables/decision_summary.csv",
+      "bytes": 627,
+      "sha256": "ce017d73e80dbd49c8e1740be0d05627a87ffb88c153564611752ed3483a4796"
+    },
+    {
+      "path": "tables/dv2_benchmark.json",
+      "bytes": 222,
+      "sha256": "f542fa819d827a11e33bb5b27aa4a406f7501aa6e0b3402d8c91df24bf2021ee"
+    },
+    {
+      "path": "tables/dv2_input_exposure_orders.csv",
+      "bytes": 8151541,
+      "sha256": "f201aa7b297476c63eb3c28a402e683168adf9f9679b93874b780bad167888d7"
+    },
+    {
+      "path": "tables/dv2_input_exposure_summary.csv",
+      "bytes": 478,
+      "sha256": "c0ea04f8596653e977eec387c0b759d2e423837ceb077630cbd0539177e2e9ac"
+    },
+    {
+      "path": "tables/dv2_input_exposure_transactions.csv",
+      "bytes": 6646845,
+      "sha256": "1ff4efb50f3abefac8f4e35ed036bf85ad0d4aa6e99ba6ad01ff1d996eda4a10"
+    },
+    {
+      "path": "tables/entry_path_comparison.csv",
+      "bytes": 710,
+      "sha256": "912f5d1ff2dd4dadba8c7da03a9490e25b218c4211a56ce5c85a80ae4805f05b"
+    },
+    {
+      "path": "tables/hpi235_benchmark.json",
+      "bytes": 222,
+      "sha256": "f542fa819d827a11e33bb5b27aa4a406f7501aa6e0b3402d8c91df24bf2021ee"
+    },
+    {
+      "path": "tables/inference.csv",
+      "bytes": 1562,
+      "sha256": "7bebb865ac60aaa1103b2d474106ff86ca181818f110a641c1219adda8d91c81"
+    },
+    {
+      "path": "tables/paired_opportunities.csv",
+      "bytes": 11210992,
+      "sha256": "20035c9f9641fa0a2fc293188e50b9ba23bee76ab44af7563a831ddddb47bc86"
+    },
+    {
+      "path": "tables/paired_summary.csv",
+      "bytes": 3171,
+      "sha256": "dc9b2d60b87f0f6c8580af7ab1135cc6f1744e9e56ee84e70b0993f031a4e981"
+    },
+    {
+      "path": "tables/sector_benchmark.json",
+      "bytes": 222,
+      "sha256": "f542fa819d827a11e33bb5b27aa4a406f7501aa6e0b3402d8c91df24bf2021ee"
+    },
+    {
+      "path": "tables/subperiods.csv",
+      "bytes": 14898,
+      "sha256": "637eb022be3b5611e956e11b326bf3fa7f941e4bdf9484881fa86594ffa8d12e"
+    },
+    {
+      "path": "tables/summary.csv",
+      "bytes": 16389,
+      "sha256": "1e08bcbcb0f2ff269755f7e1fe1f85f292fdfbf67350dd4bef882a3238ac2d14"
+    },
+    {
+      "path": "tables/timing_attribution.csv",
+      "bytes": 328,
+      "sha256": "2fc6a78ef15879f26c824fa0c5db97486bf4de6ea23f2f86d78011dc67e39a43"
+    }
+  ]
+}
