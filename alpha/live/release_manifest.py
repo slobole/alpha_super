@@ -8,8 +8,9 @@ import yaml
 
 from alpha.live import scheduler_utils
 from alpha.live.models import LiveRelease
+from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR, validate_core5_release
 from alpha.live.order_clerk import validate_account_route_matches_mode
-from data.norgate_snapshot_store import HPI_SP500_PROFILE_STR
+from data.norgate_snapshot_store import CORE5_PROFILE_STR, HPI_SP500_PROFILE_STR
 
 
 HPI_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = (
@@ -17,6 +18,7 @@ HPI_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = (
     "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit",
 )
 SUPPORTED_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = (
+    CORE5_STRATEGY_IMPORT_STR,
     "strategies.dv2.strategy_mr_dv2:DVO2Strategy",
     "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy",
     *HPI_STRATEGY_IMPORT_TUPLE,
@@ -35,6 +37,7 @@ SUPPORTED_EXECUTION_POLICY_TUPLE: tuple[str, ...] = (
 SUPPORTED_MODE_TUPLE: tuple[str, ...] = ("incubation", "paper", "live")
 SUPPORTED_SIGNAL_CLOCK_TUPLE: tuple[str, ...] = scheduler_utils.SUPPORTED_SIGNAL_CLOCK_TUPLE
 SUPPORTED_DATA_PROFILE_TUPLE: tuple[str, ...] = (
+    CORE5_PROFILE_STR,
     "norgate_eod_sp500_pit",
     HPI_SP500_PROFILE_STR,
     "norgate_eod_etf_plus_vix_helper",
@@ -216,6 +219,10 @@ def parse_release_manifest(manifest_path_str: str) -> LiveRelease:
 
 
 def validate_release_manifest(release_obj: LiveRelease) -> None:
+    if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
+        validate_core5_release(release_obj)
+    elif release_obj.data_profile_str == CORE5_PROFILE_STR:
+        raise ValueError("The CORE5 data profile is reserved for Adaptive Macro CORE5.")
     if release_obj.strategy_import_str not in SUPPORTED_STRATEGY_IMPORT_TUPLE:
         raise ValueError(
             "Unsupported strategy_import_str "

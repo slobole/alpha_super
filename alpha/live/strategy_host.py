@@ -67,6 +67,7 @@ import pandas as pd
 from alpha.data import LIVE_FRED_STALE_WARNING_BUSINESS_DAYS_INT
 from alpha.engine.strategy import Strategy
 from alpha.live import scheduler_utils
+from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR, build_core5_decision_plan
 from alpha.live.models import DecisionPlan, LiveRelease, PodState
 from data.norgate_loader import build_data_source_metadata_dict, use_norgate_data_profile
 
@@ -82,6 +83,7 @@ INCREMENTAL_DECISION_STRATEGY_IMPORT_SET: set[str] = {
     "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit",
 }
 FULL_TARGET_DECISION_STRATEGY_IMPORT_SET: set[str] = {
+    CORE5_STRATEGY_IMPORT_STR,
     "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash",
     "strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash",
     "strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash",
@@ -1289,6 +1291,8 @@ def build_decision_plan_for_release(
     pod_state_obj: PodState | None,
 ) -> DecisionPlan:
     with use_norgate_data_profile(release_obj.data_profile_str):
+        if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
+            return build_core5_decision_plan(release_obj, as_of_ts, pod_state_obj)
         if release_obj.strategy_import_str == "strategies.dv2.strategy_mr_dv2:DVO2Strategy":
             return _build_dv2_decision_plan(release_obj, as_of_ts, pod_state_obj)
         if release_obj.strategy_import_str == "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy":

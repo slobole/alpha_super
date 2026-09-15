@@ -38,6 +38,7 @@ RELEASE_TEMPLATE_PATH_TUPLE: tuple[Path, ...] = (
         "pod_taa_btal_linearity_1n_fallback_qqq_vix_cash_monthly_open.yaml.example"
     ),
     Path("docs/live/release_templates/pod_ndx_atr_normalized_monthly_open.yaml.example"),
+    Path("docs/live/release_templates/pod_taa_adaptive_macro_core5_daily_moo.yaml.example"),
     Path(
         "docs/live/release_templates/"
         "pod_ndx_atr_normalized_vxn_scaled_monthly_open.yaml.example"
@@ -189,7 +190,8 @@ def test_release_template_parses_and_starts_disabled(template_path_obj: Path):
     assert release_obj.broker_client_id_int == 31
     assert release_obj.broker_timeout_seconds_float == 4.0
     assert release_obj.session_calendar_id_str == "XNYS"
-    assert release_obj.pod_budget_fraction_float == 0.03
+    expected_budget_float = 1.0 if release_obj.strategy_import_str == "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5" else 0.03
+    assert release_obj.pod_budget_fraction_float == expected_budget_float
     assert release_obj.params_dict["capital_base_float"] == 100000.0
 
 

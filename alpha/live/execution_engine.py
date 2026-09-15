@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
+
+from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR, validated_core5_target_share_dict
 
 from alpha.live.models import (
     BrokerOrderRequest,
@@ -152,10 +155,19 @@ def _build_full_target_weight_vplan(
     broker_snapshot_obj: BrokerSnapshot,
     live_price_snapshot_obj: LivePriceSnapshot,
 ) -> VPlan:
+    fixed_target_share_dict = (
+        validated_core5_target_share_dict(decision_plan_obj, release_obj, broker_snapshot_obj.position_amount_map)
+        if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR else None
+    )
     touched_asset_list = get_touched_asset_list_for_decision_plan(
         decision_plan_obj,
         broker_position_map_dict=broker_snapshot_obj.position_amount_map,
     )
+    if fixed_target_share_dict is not None:
+        touched_asset_list = sorted(
+            asset_str for asset_str, amount_float in fixed_target_share_dict.items()
+            if amount_float != 0.0 or broker_snapshot_obj.position_amount_map.get(asset_str, 0.0) != 0.0
+        )
     missing_asset_list = sorted(
         asset_str
         for asset_str in touched_asset_list
@@ -167,7 +179,11 @@ def _build_full_target_weight_vplan(
             f"{missing_asset_list}."
         )
 
-    pod_budget_float = float(broker_snapshot_obj.net_liq_float) * float(release_obj.pod_budget_fraction_float)
+    pod_budget_float = (
+        float(decision_plan_obj.snapshot_metadata_dict["sizing_close_nav_float"])
+        if fixed_target_share_dict is not None else
+        float(broker_snapshot_obj.net_liq_float) * float(release_obj.pod_budget_fraction_float)
+    )
     target_share_map: dict[str, float] = {}
     order_delta_map: dict[str, float] = {}
     vplan_row_list: list[VPlanRow] = []
@@ -183,17 +199,18 @@ def _build_full_target_weight_vplan(
                 live_price_snapshot_obj.price_source_str,
             )
         )
-        if live_reference_price_float <= 0.0:
+        if not math.isfinite(live_reference_price_float) or live_reference_price_float <= 0.0:
             raise ValueError(
                 f"Live reference price must be positive for asset '{asset_str}'."
             )
 
         target_weight_float = float(decision_plan_obj.full_target_weight_map_dict.get(asset_str, 0.0))
-        # TargetDollar_i = FullTargetWeight_i * PodBudget
-        # TargetShares_i = floor(TargetDollar_i / P_i^{live_ref})
+        # Existing books: TargetShares_i = floor(Weight_i * PodBudget / live_ref).
+        # *** CRITICAL*** CORE5 uses already frozen trunc(NAV_Close_T*w/Close_T)
+        # shares; the current quote only estimates execution notional.
         target_share_float = float(
             math.floor((target_weight_float * pod_budget_float) / live_reference_price_float)
-        )
+        ) if fixed_target_share_dict is None else fixed_target_share_dict[asset_str]
         estimated_target_notional_float = target_share_float * live_reference_price_float
         order_delta_share_float = target_share_float - current_share_float
         target_share_map[asset_str] = target_share_float
@@ -210,6 +227,14 @@ def _build_full_target_weight_vplan(
                 live_reference_source_str=live_reference_source_str,
             )
         )
+        if fixed_target_share_dict is not None and current_share_float * target_share_float < 0.0:
+            # Preserve the research close-old/open-new legs and their distinct
+            # request IDs/commissions. Aggregate maps above keep the final book.
+            final_row_obj = vplan_row_list.pop()
+            vplan_row_list.extend([
+                replace(final_row_obj, target_share_float=0.0, order_delta_share_float=-current_share_float, estimated_target_notional_float=0.0),
+                replace(final_row_obj, current_share_float=0.0, order_delta_share_float=target_share_float),
+            ])
 
     return VPlan(
         release_id_str=decision_plan_obj.release_id_str,

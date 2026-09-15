@@ -9,6 +9,7 @@ import contextlib
 import io
 import json
 from collections import Counter
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Callable
@@ -16,6 +17,9 @@ import uuid
 
 from alpha.data import FredSeriesLoadError
 from alpha.live import reference_compare, scheduler_utils, strategy_host
+from alpha.live.core5_adapter import (
+    CORE5_STRATEGY_IMPORT_STR, is_core5_decision_bool, require_core5_position_match,
+)
 from alpha.live.execution_engine import (
     build_broker_order_request_list_from_vplan,
     build_vplan,
@@ -1594,6 +1598,13 @@ def _build_execution_row_dict_list(
             },
         )
         unresolved_bool = abs(residual_share_float) > tolerance_float
+        terminal_leg_failure_bool = (
+            sum(row_obj.asset_str == asset_str for row_obj in vplan_obj.vplan_row_list) > 1
+            and any(
+                order_dict.get("asset_str") == asset_str and order_dict.get("status_str") in PARKED_TERMINAL_ORDER_STATUS_SET
+                for order_dict in broker_order_row_dict_list
+            )
+        )
         exit_breach_bool = abs(target_share_float) <= tolerance_float and unresolved_bool
         direction_reference_amount_float = float(vplan_obj.order_delta_map.get(asset_str, 0.0))
         if abs(direction_reference_amount_float) <= tolerance_float:
@@ -1632,6 +1643,7 @@ def _build_execution_row_dict_list(
                 ),
                 "live_reference_price_float": live_reference_price_float,
                 "unresolved_bool": unresolved_bool,
+                **({"terminal_leg_failure_bool": True} if terminal_leg_failure_bool else {}),
                 "exit_breach_bool": exit_breach_bool,
                 "problem_bool": unresolved_bool,
                 **execution_quality_dict,
@@ -1665,7 +1677,7 @@ def _build_terminal_unresolved_row_dict_list(
         if not bool(execution_row_dict["unresolved_bool"]):
             continue
         latest_broker_order_status_str = execution_row_dict["latest_broker_order_status_str"]
-        if latest_broker_order_status_str not in PARKED_TERMINAL_ORDER_STATUS_SET:
+        if latest_broker_order_status_str not in PARKED_TERMINAL_ORDER_STATUS_SET and not execution_row_dict.get("terminal_leg_failure_bool", False):
             continue
         terminal_unresolved_row_dict_list.append(execution_row_dict)
     return terminal_unresolved_row_dict_list
@@ -2487,11 +2499,21 @@ def expire_stale_decision_plans(
     del releases_root_path_str
     expired_decision_plan_count_int = 0
     reason_counter_obj: Counter[str] = Counter()
-    for decision_plan_obj in state_store_obj.get_expirable_decision_plan_list(as_of_ts):
+    candidate_plan_dict = {plan_obj.decision_plan_id_int: plan_obj for plan_obj in state_store_obj.get_expirable_decision_plan_list(as_of_ts)}
+    for release_obj in state_store_obj.get_enabled_release_list():
+        if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
+            plan_obj = state_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str)
+            if is_core5_decision_bool(plan_obj) and plan_obj.status_str == "planned" and plan_obj.snapshot_metadata_dict.get("no_order_bool"):
+                candidate_plan_dict[plan_obj.decision_plan_id_int] = plan_obj
+    for decision_plan_obj in candidate_plan_dict.values():
         if pod_id_str is not None and decision_plan_obj.pod_id_str != pod_id_str:
             continue
         release_obj = state_store_obj.get_release_by_id(decision_plan_obj.release_id_str)
         if env_mode_str is not None and release_obj.mode_str != env_mode_str:
+            continue
+        if is_core5_decision_bool(decision_plan_obj) and decision_plan_obj.status_str == "planned" and decision_plan_obj.snapshot_metadata_dict.get("no_order_bool"):
+            state_store_obj.complete_core5_cycle(int(decision_plan_obj.decision_plan_id_int))
+            reason_counter_obj["core5_no_order_cycle_recovered"] += 1
             continue
         if not scheduler_utils.is_execution_window_expired_bool(
             decision_plan_obj.execution_policy_str,
@@ -2591,6 +2613,20 @@ def build_decision_plans(
     reason_counter_obj: Counter[str] = Counter()
 
     for release_obj in due_release_list:
+        if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
+            latest_core5_plan_obj = state_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str)
+            if latest_core5_plan_obj is not None:
+                # Recover a crash between inserting a no-order decision and its
+                # atomic state commit, before considering a later signal day.
+                if latest_core5_plan_obj.status_str == "planned" and latest_core5_plan_obj.snapshot_metadata_dict.get("no_order_bool"):
+                    state_store_obj.complete_core5_cycle(int(latest_core5_plan_obj.decision_plan_id_int))
+                    latest_core5_plan_obj = state_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str)
+                signal_date_ts = scheduler_utils.get_latest_completed_session_label_ts(as_of_ts, "XNYS")
+                prior_date_ts = scheduler_utils.session_label_from_timestamp_ts(latest_core5_plan_obj.signal_timestamp_ts, "XNYS")
+                if latest_core5_plan_obj.status_str != "completed" or signal_date_ts is None or prior_date_ts >= signal_date_ts:
+                    skipped_decision_plan_count_int += 1
+                    reason_counter_obj["core5_prior_cycle_unresolved" if latest_core5_plan_obj.status_str != "completed" else "core5_signal_cycle_already_completed"] += 1
+                    continue
         pod_state_obj = _get_model_state_or_default(release_obj, state_store_obj, as_of_ts)
         try:
             decision_plan_obj = strategy_host.build_decision_plan_for_release(
@@ -2625,6 +2661,17 @@ def build_decision_plans(
             )
             continue
 
+        except (ValueError, RuntimeError) as exception_obj:
+            if release_obj.strategy_import_str != CORE5_STRATEGY_IMPORT_STR:
+                raise
+            skipped_decision_plan_count_int += 1
+            reason_counter_obj["core5_decision_blocked"] += 1
+            log_event("core5_decision_blocked", _build_release_log_payload_dict(release_obj, as_of_ts, {"error_str": str(exception_obj)}), log_path_str=log_path_str)
+            _emit_live_trace_event("decision_plan.build", release_obj=release_obj, as_of_ts=as_of_ts,
+                status_str="BLOCK", reason_code_str="core5_decision_blocked", payload_dict={"error_str": str(exception_obj)},
+                trace_enabled_bool=trace_enabled_bool, trace_log_root_path_str=trace_log_root_path_str)
+            continue
+
         if state_store_obj.has_active_decision_plan(
             pod_id_str=release_obj.pod_id_str,
             signal_timestamp_ts=decision_plan_obj.signal_timestamp_ts,
@@ -2646,6 +2693,10 @@ def build_decision_plans(
             continue
 
         inserted_decision_plan_obj = state_store_obj.insert_decision_plan(decision_plan_obj)
+        if is_core5_decision_bool(inserted_decision_plan_obj) and inserted_decision_plan_obj.snapshot_metadata_dict["no_order_bool"]:
+            state_store_obj.complete_core5_cycle(int(inserted_decision_plan_obj.decision_plan_id_int))
+            inserted_decision_plan_obj = state_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str)
+            reason_counter_obj["core5_no_order_cycle_completed"] += 1
         created_decision_plan_count_int += 1
         log_event(
             "build_decision_plan_created",
@@ -2728,6 +2779,12 @@ def build_vplans(
             continue
         if release_obj.mode_str != env_mode_str:
             reason_counter_obj["env_mode_mismatch"] += 1
+            continue
+        if is_core5_decision_bool(decision_plan_obj) and decision_plan_obj.snapshot_metadata_dict.get("no_order_bool"):
+            # Manual build-vplan calls must recover a no-order cycle just as
+            # scheduler ticks do, without creating an empty execution plan.
+            state_store_obj.complete_core5_cycle(int(decision_plan_obj.decision_plan_id_int))
+            reason_counter_obj["core5_no_order_cycle_recovered"] += 1
             continue
         provenance_block_reason_str = _decision_plan_norgate_provenance_block_reason_str(
             release_obj,
@@ -2891,6 +2948,11 @@ def build_vplans(
                 trace_enabled_bool=trace_enabled_bool,
                 trace_log_root_path_str=trace_log_root_path_str,
             )
+            if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
+                blocked_action_count_int += 1
+                reason_counter_obj["core5_frozen_position_mismatch"] += 1
+                state_store_obj.mark_decision_plan_status(int(decision_plan_obj.decision_plan_id_int), "blocked")
+                continue
         if broker_snapshot_obj.net_liq_float <= 0.0:
             blocked_action_count_int += 1
             reason_counter_obj["non_positive_net_liq"] += 1
@@ -3208,6 +3270,19 @@ def submit_ready_vplans(
                 trace_log_root_path_str=trace_log_root_path_str,
             )
             continue
+        if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
+            fresh_core5_snapshot_obj = broker_adapter_obj.get_account_snapshot(vplan_obj.account_route_str)
+            try:
+                require_core5_position_match(vplan_obj.current_broker_position_map, fresh_core5_snapshot_obj.position_amount_map)
+                if fresh_core5_snapshot_obj.open_order_id_list:
+                    raise ValueError("CORE5 account has outstanding orders before submission.")
+            except ValueError as exception_obj:
+                blocked_action_count_int += 1
+                reason_counter_obj["core5_pre_submit_account_changed"] += 1
+                state_store_obj.mark_vplan_status(int(vplan_obj.vplan_id_int), "blocked")
+                state_store_obj.mark_decision_plan_status(int(vplan_obj.decision_plan_id_int), "blocked")
+                log_event("core5_pre_submit_account_changed", _build_vplan_log_payload_dict(release_obj, vplan_obj, as_of_ts, {"error_str": str(exception_obj)}), log_path_str=log_path_str)
+                continue
         if not state_store_obj.claim_vplan_for_submission(int(vplan_obj.vplan_id_int or 0)):
             blocked_action_count_int += 1
             reason_counter_obj["submission_claim_failed"] += 1
@@ -3555,6 +3630,23 @@ def eod_snapshot(
             continue
 
         broker_snapshot_obj = broker_adapter_for_release_obj.get_account_snapshot(release_obj.account_route_str)
+        if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
+            # The broker stamps its reply after the request. Compare with the
+            # post-read clock, not the earlier scheduler invocation timestamp.
+            captured_timestamp_ts = datetime.now(UTC)
+            broker_timestamp_ts = scheduler_utils.to_market_timestamp_ts(broker_snapshot_obj.snapshot_timestamp_ts, "XNYS")
+            close_timestamp_ts = scheduler_utils.get_session_close_timestamp_ts(datetime.fromisoformat(eod_market_date_str), "XNYS")
+            if (
+                broker_timestamp_ts < close_timestamp_ts
+                or broker_timestamp_ts.date().isoformat() != eod_market_date_str
+                or broker_timestamp_ts > scheduler_utils.to_market_timestamp_ts(captured_timestamp_ts, "XNYS")
+                or broker_snapshot_obj.account_route_str != release_obj.account_route_str
+                or broker_snapshot_obj.open_order_id_list
+            ):
+                blocked_action_count_int += 1
+                reason_counter_obj["core5_eod_source_untrusted"] += 1
+                log_event("core5_eod_source_untrusted", _build_release_log_payload_dict(release_obj, as_of_ts, {"broker_snapshot_timestamp_str": broker_snapshot_obj.snapshot_timestamp_ts.isoformat(), "open_order_id_list": broker_snapshot_obj.open_order_id_list}), log_path_str=log_path_str)
+                continue
         state_store_obj.upsert_broker_snapshot_cache(broker_snapshot_obj)
         previous_pod_state_obj = state_store_obj.get_pod_state(release_obj.pod_id_str)
         strategy_state_dict = (
@@ -3569,7 +3661,7 @@ def eod_snapshot(
                 cash_float=broker_snapshot_obj.cash_float,
                 total_value_float=broker_snapshot_obj.net_liq_float,
                 strategy_state_dict=strategy_state_dict,
-                updated_timestamp_ts=as_of_ts,
+                updated_timestamp_ts=broker_snapshot_obj.snapshot_timestamp_ts if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR else as_of_ts,
             ),
             snapshot_stage_str="eod",
             snapshot_source_str=snapshot_source_str,
@@ -3783,6 +3875,22 @@ def post_execution_reconcile(
             broker_snapshot_obj=broker_snapshot_obj,
             tolerance_float=tolerance_float,
         )
+        if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
+            persisted_order_list = state_store_obj.get_broker_order_row_dict_list_for_vplan(int(vplan_obj.vplan_id_int))
+            persisted_fill_list = state_store_obj.get_fill_row_dict_list_for_vplan(int(vplan_obj.vplan_id_int), include_order_identity_bool=True)
+            complete_order_evidence_bool = not broker_snapshot_obj.open_order_id_list
+            for request_obj in build_broker_order_request_list_from_vplan(vplan_obj):
+                matching_order_list = [order_dict for order_dict in persisted_order_list if order_dict.get("order_request_key_str") == request_obj.order_request_key_str]
+                if len(matching_order_list) != 1:
+                    complete_order_evidence_bool = False
+                    continue
+                broker_order_id_str = matching_order_list[0]["broker_order_id_str"]
+                filled_amount_float = sum(float(fill_dict["fill_amount_float"]) for fill_dict in persisted_fill_list if fill_dict["broker_order_id_str"] == broker_order_id_str)
+                if abs(filled_amount_float - request_obj.amount_float) > tolerance_float:
+                    complete_order_evidence_bool = False
+            if not complete_order_evidence_bool:
+                reconciliation_result_obj = replace(reconciliation_result_obj, passed_bool=False, status_str="blocked",
+                    mismatch_dict={**reconciliation_result_obj.mismatch_dict, "core5_incomplete_order_evidence_bool": True})
         state_store_obj.insert_vplan_reconciliation_snapshot(
             pod_id_str=vplan_obj.pod_id_str,
             decision_plan_id_int=int(vplan_obj.decision_plan_id_int),
@@ -3791,6 +3899,9 @@ def post_execution_reconcile(
             reconciliation_result_obj=reconciliation_result_obj,
         )
         strategy_state_dict = {} if decision_plan_obj is None else dict(decision_plan_obj.strategy_state_dict)
+        if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
+            prior_core5_state_obj = state_store_obj.get_pod_state(release_obj.pod_id_str)
+            strategy_state_dict = {} if prior_core5_state_obj is None else dict(prior_core5_state_obj.strategy_state_dict)
         state_store_obj.upsert_pod_state(
             PodState(
                 pod_id_str=vplan_obj.pod_id_str,
@@ -3902,8 +4013,11 @@ def post_execution_reconcile(
             )
         completed_bool = bool(reconciliation_result_obj.passed_bool)
         if completed_bool:
-            state_store_obj.mark_vplan_status(int(vplan_obj.vplan_id_int or 0), "completed")
-            state_store_obj.mark_decision_plan_status(int(vplan_obj.decision_plan_id_int), "completed")
+            if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
+                state_store_obj.complete_core5_cycle(int(vplan_obj.decision_plan_id_int), int(vplan_obj.vplan_id_int))
+            else:
+                state_store_obj.mark_vplan_status(int(vplan_obj.vplan_id_int or 0), "completed")
+                state_store_obj.mark_decision_plan_status(int(vplan_obj.decision_plan_id_int), "completed")
             completed_vplan_count_int += 1
             log_event(
                 "post_execution_reconcile_completed",

@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from alpha.live import runner, scheduler_utils
+from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR, is_core5_decision_bool
 from alpha.live.logging_utils import (
     DEFAULT_LOG_PATH_STR,
     DEFAULT_POD_TRACE_LOG_ROOT_PATH_STR,
@@ -178,6 +179,30 @@ def get_scheduler_decision(
         latest_decision_plan_obj = state_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str)
         current_vplan_obj = _get_current_cycle_vplan_obj(state_store_obj, latest_decision_plan_obj)
         build_gate_dict = scheduler_utils.evaluate_build_gate_dict(release_obj, as_of_ts)
+        if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
+            if is_core5_decision_bool(latest_decision_plan_obj) and latest_decision_plan_obj.status_str == "planned" and latest_decision_plan_obj.snapshot_metadata_dict.get("no_order_bool"):
+                immediate_candidate_list.append(_build_candidate_dict(
+                    priority_int=0, due_timestamp_ts=as_of_ts, next_phase_str="expire_stale",
+                    reason_code_str="core5_complete_no_order_cycle", pod_id_str=release_obj.pod_id_str, active_poll_bool=False,
+                ))
+                continue
+            if latest_decision_plan_obj is not None and latest_decision_plan_obj.status_str in {"expired", "blocked"}:
+                parked_manual_review_pod_id_list.append(release_obj.pod_id_str)
+                continue
+            required_signal_ts = scheduler_utils.get_latest_completed_session_label_ts(as_of_ts, "XNYS")
+            state_obj = state_store_obj.get_pod_state(release_obj.pod_id_str)
+            same_session_eod_bool = (
+                required_signal_ts is not None and state_obj is not None and state_obj.snapshot_stage_str == "eod"
+                and scheduler_utils.session_label_from_timestamp_ts(state_obj.updated_timestamp_ts, "XNYS") == required_signal_ts
+            )
+            already_completed_bool = (
+                latest_decision_plan_obj is not None and latest_decision_plan_obj.status_str == "completed"
+                and scheduler_utils.session_label_from_timestamp_ts(latest_decision_plan_obj.signal_timestamp_ts, "XNYS") == required_signal_ts
+            )
+            if not same_session_eod_bool or already_completed_bool:
+                # CORE5 freezes Close_T account equity. Its EOD prerequisite
+                # must run before a build, and a completed day must stay idle.
+                build_gate_dict = {**build_gate_dict, "due_bool": False}
         eod_due_timestamp_ts = runner._eod_snapshot_due_timestamp_ts(
             release_obj=release_obj,
             as_of_ts=as_of_ts,
@@ -206,7 +231,7 @@ def get_scheduler_decision(
                 if eod_due_timestamp_ts <= as_of_ts:
                     immediate_candidate_list.append(
                         _build_candidate_dict(
-                            priority_int=5,
+                            priority_int=3 if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR else 5,
                             due_timestamp_ts=as_of_ts,
                             next_phase_str="eod_snapshot",
                             reason_code_str="eod_snapshot_due",

@@ -36,6 +36,13 @@ from alpha.engine.backtest import run_daily
 from alpha.engine.report import save_results
 from alpha.engine.strategy import Strategy
 from data.norgate_loader import load_raw_prices
+from data.norgate_snapshot_store import (
+    CORE5_PROFILE_STR,
+    NorgateSnapshotValidationError,
+    is_snapshot_mode_enabled_bool,
+    load_valid_snapshot_manifest,
+    use_norgate_data_profile,
+)
 
 
 STRATEGY_NAME_STR = "strategy_taa_adaptive_macro_core5"
@@ -387,18 +394,32 @@ def get_adaptive_macro_core5_data(
 ) -> pd.DataFrame:
     """Load CAPITALSPECIAL execution data and TOTALRETURN signal closes."""
 
-    execution_price_df = load_raw_prices(
-        symbols=list(config_obj.risk_asset_tuple) + [config_obj.reserve_asset_str],
-        benchmarks=list(config_obj.benchmark_list),
-        start_date=config_obj.history_start_date_str,
-        end_date=config_obj.end_date_str,
-    )
-    total_return_signal_df = load_raw_prices(
-        symbols=[],
-        benchmarks=list(config_obj.risk_asset_tuple),
-        start_date=config_obj.history_start_date_str,
-        end_date=config_obj.end_date_str,
-    )
+    with use_norgate_data_profile(CORE5_PROFILE_STR):
+        initial_manifest_obj = (
+            load_valid_snapshot_manifest(CORE5_PROFILE_STR)
+            if is_snapshot_mode_enabled_bool() else None
+        )
+        execution_price_df = load_raw_prices(
+            symbols=list(config_obj.risk_asset_tuple) + [config_obj.reserve_asset_str],
+            benchmarks=list(config_obj.benchmark_list),
+            start_date=config_obj.history_start_date_str,
+            end_date=config_obj.end_date_str,
+        )
+        total_return_signal_df = load_raw_prices(
+            symbols=[],
+            benchmarks=list(config_obj.risk_asset_tuple),
+            start_date=config_obj.history_start_date_str,
+            end_date=config_obj.end_date_str,
+        )
+        if initial_manifest_obj is not None:
+            final_manifest_obj = load_valid_snapshot_manifest(CORE5_PROFILE_STR)
+            # *** CRITICAL*** A publication during these two reads must not mix
+            # execution prices from one data vintage with signals from another.
+            if (
+                initial_manifest_obj.snapshot_dir_path_obj != final_manifest_obj.snapshot_dir_path_obj
+                or initial_manifest_obj.manifest_hash_str != final_manifest_obj.manifest_hash_str
+            ):
+                raise NorgateSnapshotValidationError("CORE5 snapshot changed during the combined data load; retry with one complete snapshot.")
     signal_close_df = total_return_signal_df.loc[
         :,
         [(asset_str, "Close") for asset_str in config_obj.risk_asset_tuple],

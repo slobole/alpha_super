@@ -1,9 +1,32 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from contextlib import closing
 
 from alpha.live.models import LiveRelease, PodState
 from alpha.live.state_store import LiveStateStore, SHARED_CORE_TABLE_NAME_TUPLE, V1_EXECUTION_TABLE_NAME_TUPLE
+
+
+def test_pod_state_respects_caller_owned_transaction_and_metadata(tmp_path):
+    store_obj = LiveStateStore(str(tmp_path / "transaction.sqlite3"))
+    state_obj = PodState("pod", "user", "SIM_pod", {"SPY": 1.0}, 100.0, 200.0,
+                         {}, datetime(2026, 9, 14, 14, tzinfo=UTC),
+                         snapshot_stage_str="eod", snapshot_source_str="virtual_broker")
+    with closing(store_obj._connect()) as connection_obj:
+        connection_obj.execute("BEGIN IMMEDIATE")
+        store_obj.upsert_pod_state(state_obj, connection_obj=connection_obj)
+        assert connection_obj.in_transaction
+        assert connection_obj.execute("SELECT COUNT(*) FROM pod_state_history").fetchone()[0] == 1
+        connection_obj.rollback()
+    assert store_obj.get_pod_state("pod") is None
+    assert store_obj.get_pod_state_history_row_dict_list("pod") == []
+    store_obj.upsert_pod_state(state_obj)
+    assert store_obj.get_pod_state("pod").snapshot_stage_str == "eod"
+    assert store_obj.get_pod_state("pod").snapshot_source_str == "virtual_broker"
+    assert len(store_obj.get_pod_state_history_row_dict_list("pod")) == 1
+    store_obj.upsert_pod_state(state_obj, snapshot_stage_str="post_execution", snapshot_source_str="test_source")
+    assert store_obj.get_pod_state("pod").snapshot_stage_str == "post_execution"
+    assert store_obj.get_pod_state("pod").snapshot_source_str == "test_source"
 
 
 def test_state_store_bootstraps_shared_core_tables_and_release_roundtrip(tmp_path):

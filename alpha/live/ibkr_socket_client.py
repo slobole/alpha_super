@@ -1347,14 +1347,33 @@ class IBKRSocketClient:
         if len(asset_str_list) == 0:
             return []
 
-        # *** CRITICAL*** Resolve the target execution timestamp into the exchange
-        # session before labeling the open price; using local/current dates here
-        # would silently settle the wrong trading session.
+        # *** CRITICAL*** ticker.open is a current field, not a historical query.
+        # Only read it during the requested exchange session, after its real open.
         market_open_timestamp_ts = scheduler_utils.to_market_timestamp_ts(
             session_open_timestamp_ts,
             session_calendar_id_str,
         )
+        session_label_ts = scheduler_utils.session_label_from_timestamp_ts(
+            market_open_timestamp_ts, session_calendar_id_str,
+        )
+        if session_label_ts is None:
+            raise ValueError("IBKR tick-open request must name a trading session.")
+        canonical_open_ts = scheduler_utils.get_session_open_timestamp_ts(session_label_ts, session_calendar_id_str)
+        if market_open_timestamp_ts != canonical_open_ts:
+            raise ValueError("IBKR tick-open request must use the exchange session open.")
         session_date_str = market_open_timestamp_ts.date().isoformat()
+
+        def checked_observation_timestamp_ts() -> datetime:
+            observed_ts = datetime.now(tz=UTC)
+            market_observed_ts = scheduler_utils.to_market_timestamp_ts(observed_ts, session_calendar_id_str)
+            if market_observed_ts.date() != market_open_timestamp_ts.date() or observed_ts < canonical_open_ts:
+                raise RuntimeError(
+                    f"Uncached IBKR tick-open is available only during target session {session_date_str} "
+                    "after its open; a different day requires a saved target-session price."
+                )
+            return observed_ts
+
+        checked_observation_timestamp_ts()
         normalized_asset_str_list = sorted({str(asset_str) for asset_str in asset_str_list})
         with self.connect() as ib_obj:
             contract_map_dict = self._build_stock_contract_map(ib_obj, normalized_asset_str_list)
@@ -1370,6 +1389,10 @@ class IBKRSocketClient:
                     continue
                 ticker_open_map_dict[str(ticker_obj.contract.symbol)] = official_open_price_float
 
+        # Check again after I/O, so a request crossing the session date cannot
+        # relabel a new day's value. This is capture time, not exchange print time.
+        observed_ts = checked_observation_timestamp_ts()
+
         session_open_price_list: list[SessionOpenPrice] = []
         for asset_str in normalized_asset_str_list:
             official_open_price_float = ticker_open_map_dict.get(asset_str)
@@ -1384,7 +1407,7 @@ class IBKRSocketClient:
                         if official_open_price_float is not None
                         else None
                     ),
-                    snapshot_timestamp_ts=datetime.now(tz=UTC),
+                    snapshot_timestamp_ts=observed_ts,
                     raw_payload_dict=(
                         {"ticker_open_float": official_open_price_float}
                         if official_open_price_float is not None

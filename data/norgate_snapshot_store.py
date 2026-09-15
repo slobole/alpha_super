@@ -11,6 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Sequence
 
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -29,6 +30,15 @@ PRICE_FILE_NAME_STR = "prices.parquet"
 UNIVERSE_FILE_NAME_STR = "universe.parquet"
 CAPITALSPECIAL_ADJUSTMENT_STR = "CAPITALSPECIAL"
 TOTALRETURN_ADJUSTMENT_STR = "TOTALRETURN"
+CORE5_PROFILE_STR = "norgate_eod_core5"
+CORE5_HISTORY_START_DATE_STR = "1990-01-01"
+CORE5_CAPITAL_SYMBOL_TUPLE = ("SPY", "IEF", "GLD", "DBC", "UUP", "BIL")
+CORE5_TOTAL_RETURN_SYMBOL_TUPLE = ("SPY", "IEF", "GLD", "DBC", "UUP", "$SPX", "$SPXTR")
+CORE5_DATA_CONTRACT_DICT = {
+    "price_padding_setting_str": "ALLMARKETDAYS",
+    "past_member_tail_policy_str": "exact",
+    "history_start_date_str": CORE5_HISTORY_START_DATE_STR,
+}
 HPI_SP500_PROFILE_STR = "norgate_eod_sp500_hpi_pit"
 HPI_SP500_DATA_CONTRACT_DICT: dict[str, str] = {
     "price_padding_setting_str": "NONE",
@@ -276,6 +286,128 @@ def _load_manifest_from_dir(snapshot_dir_path_obj: Path) -> tuple[dict[str, Any]
     return manifest_dict, manifest_hash_str
 
 
+def core5_price_coverage_dict(
+    price_df: pd.DataFrame,
+    snapshot_date_ts: pd.Timestamp,
+) -> dict[str, dict[str, object]]:
+    """Validate CORE5 rows and describe the complete exported source history."""
+    required_field_set = {
+        "date", "symbol_str", "adjustment_str", "Open", "High", "Low", "Close", "Dividend",
+    }
+    if not required_field_set.issubset(price_df.columns):
+        raise NorgateSnapshotValidationError("CORE5 prices are missing required fields.")
+    price_df = price_df.copy()
+    price_df["date"] = pd.to_datetime(price_df["date"])
+    if (
+        price_df["date"].isna().any()
+        or not price_df["date"].equals(price_df["date"].dt.normalize())
+        or price_df["date"].gt(snapshot_date_ts).any()
+        or price_df["date"].lt(pd.Timestamp(CORE5_HISTORY_START_DATE_STR)).any()
+        or price_df.duplicated(["date", "symbol_str", "adjustment_str"]).any()
+    ):
+        raise NorgateSnapshotValidationError("CORE5 prices contain invalid, future or duplicate dates.")
+    required_pair_set = {(symbol_str, CAPITALSPECIAL_ADJUSTMENT_STR) for symbol_str in CORE5_CAPITAL_SYMBOL_TUPLE}
+    required_pair_set.update((symbol_str, TOTALRETURN_ADJUSTMENT_STR) for symbol_str in CORE5_TOTAL_RETURN_SYMBOL_TUPLE)
+    price_group_dict = dict(tuple(price_df.groupby(["symbol_str", "adjustment_str"], sort=False)))
+    if set(price_group_dict) != required_pair_set:
+        raise NorgateSnapshotValidationError("CORE5 symbol/adjustment pairs do not match the frozen profile.")
+    benchmark_date_idx = pd.DatetimeIndex(
+        price_group_dict[("$SPXTR", TOTALRETURN_ADJUSTMENT_STR)]["date"]
+    ).sort_values()
+    coverage_dict: dict[str, dict[str, object]] = {}
+    for (symbol_str, adjustment_str), series_price_df in price_group_dict.items():
+        series_price_df = series_price_df.sort_values("date")
+        observed_price_df = series_price_df.loc[series_price_df["Close"].notna()]
+        if observed_price_df.empty:
+            raise NorgateSnapshotValidationError(f"CORE5 has no observed prices for {symbol_str}/{adjustment_str}.")
+        numeric_price_mat = observed_price_df[["Open", "High", "Low", "Close", "Dividend"]].to_numpy(dtype=float)
+        if not np.isfinite(numeric_price_mat).all() or (numeric_price_mat[:, :4] <= 0.0).any():
+            raise NorgateSnapshotValidationError(f"CORE5 has unusable prices/dividends for {symbol_str}/{adjustment_str}.")
+        first_observed_ts = pd.Timestamp(observed_price_df["date"].iloc[0])
+        last_observed_ts = pd.Timestamp(observed_price_df["date"].iloc[-1])
+        # *** CRITICAL*** Preserve pre-inception unavailability. After inception,
+        # every benchmark session through Close_T must have a usable source row;
+        # never repair a gap with a carried price at this validation boundary.
+        expected_date_idx = benchmark_date_idx[benchmark_date_idx >= first_observed_ts]
+        if (
+            last_observed_ts != snapshot_date_ts
+            or not pd.DatetimeIndex(observed_price_df["date"]).equals(expected_date_idx)
+        ):
+            raise NorgateSnapshotValidationError(f"CORE5 has stale or incomplete history for {symbol_str}/{adjustment_str}.")
+        coverage_dict[f"{symbol_str}|{adjustment_str}"] = {
+            "first_observed_date_str": first_observed_ts.date().isoformat(),
+            "last_observed_date_str": last_observed_ts.date().isoformat(),
+            "observed_row_count_int": len(observed_price_df),
+            "row_count_int": len(series_price_df),
+        }
+    return coverage_dict
+
+
+def _validate_core5_snapshot_contract(
+    snapshot_dir_path_obj: Path,
+    manifest_dict: dict[str, Any],
+    snapshot_date_ts: pd.Timestamp,
+) -> None:
+    if int(manifest_dict["schema_version"]) != SNAPSHOT_SCHEMA_VERSION_INT:
+        raise NorgateSnapshotValidationError("CORE5 requires snapshot schema v2 with native dividends.")
+    data_contract_dict = manifest_dict.get("data_contract", {})
+    if any(data_contract_dict.get(field_str) != value_obj for field_str, value_obj in CORE5_DATA_CONTRACT_DICT.items()):
+        raise NorgateSnapshotValidationError("CORE5 padding/history data contract mismatch.")
+    required_symbol_set = set(CORE5_CAPITAL_SYMBOL_TUPLE + CORE5_TOTAL_RETURN_SYMBOL_TUPLE)
+    declared_adjustment_dict = manifest_dict.get("adjustment_modes", {})
+    if set(manifest_dict.get("required_symbols", [])) != required_symbol_set:
+        raise NorgateSnapshotValidationError("CORE5 manifest symbols are incomplete.")
+    for symbol_str in required_symbol_set:
+        expected_adjustment_set = set()
+        if symbol_str in CORE5_CAPITAL_SYMBOL_TUPLE:
+            expected_adjustment_set.add(CAPITALSPECIAL_ADJUSTMENT_STR)
+        if symbol_str in CORE5_TOTAL_RETURN_SYMBOL_TUPLE:
+            expected_adjustment_set.add(TOTALRETURN_ADJUSTMENT_STR)
+        declared_adjustment_obj = declared_adjustment_dict.get(symbol_str)
+        declared_adjustment_list = declared_adjustment_obj if isinstance(declared_adjustment_obj, list) else [declared_adjustment_obj]
+        if set(declared_adjustment_list) != expected_adjustment_set:
+            raise NorgateSnapshotValidationError(f"CORE5 manifest adjustments are incomplete for {symbol_str}.")
+    expected_endpoint_dict = {symbol_str: snapshot_date_ts.date().isoformat() for symbol_str in required_symbol_set}
+    if data_contract_dict.get("observed_endpoint_date_by_symbol_dict") != expected_endpoint_dict:
+        raise NorgateSnapshotValidationError("CORE5 requires unpadded source observations through the snapshot session.")
+    price_df = pd.read_parquet(snapshot_dir_path_obj / PRICE_FILE_NAME_STR)
+    actual_coverage_dict = core5_price_coverage_dict(price_df, snapshot_date_ts)
+    if data_contract_dict.get("series_coverage_dict") != actual_coverage_dict:
+        raise NorgateSnapshotValidationError("CORE5 exported history differs from declared source coverage.")
+    source_field_dict = data_contract_dict.get("source_field_by_pair_dict", {})
+    source_dtype_dict = data_contract_dict.get("source_dtype_by_pair_dict", {})
+    if set(source_field_dict) != set(actual_coverage_dict) or set(source_dtype_dict) != set(actual_coverage_dict):
+        raise NorgateSnapshotValidationError("CORE5 native source field provenance is incomplete.")
+    for pair_str, source_field_list in source_field_dict.items():
+        required_field_set = {"Open", "High", "Low", "Close"}
+        if pair_str.split("|")[0] in CORE5_CAPITAL_SYMBOL_TUPLE:
+            required_field_set.add("Dividend")
+        if (
+            not isinstance(source_field_list, list)
+            or not required_field_set.issubset(source_field_list)
+            or not set(source_field_list).issubset(set(price_df.columns) - {"date", "symbol_str", "adjustment_str"})
+            or len(set(source_field_list)) != len(source_field_list)
+        ):
+            raise NorgateSnapshotValidationError(f"CORE5 native source fields are invalid for {pair_str}.")
+        if set(source_dtype_dict[pair_str]) != set(source_field_list):
+            raise NorgateSnapshotValidationError(f"CORE5 native source dtypes are incomplete for {pair_str}.")
+        symbol_str, adjustment_str = pair_str.split("|")
+        source_price_df = price_df.loc[
+            price_df["symbol_str"].eq(symbol_str) & price_df["adjustment_str"].eq(adjustment_str),
+            source_field_list,
+        ]
+        for field_str, dtype_str in source_dtype_dict[pair_str].items():
+            try:
+                dtype_obj = np.dtype(dtype_str)
+                if dtype_obj.kind not in "fiu":
+                    raise ValueError("Native price fields must be numeric.")
+                restored_value_vec = source_price_df[field_str].to_numpy().astype(dtype_obj)
+                if not np.array_equal(source_price_df[field_str].to_numpy(), restored_value_vec, equal_nan=True):
+                    raise ValueError("Restoring the native dtype would change values.")
+            except (TypeError, ValueError, OverflowError) as error_obj:
+                raise NorgateSnapshotValidationError(f"CORE5 native dtype is invalid or lossy for {pair_str}/{field_str}.") from error_obj
+
+
 @lru_cache(maxsize=128)
 def _load_valid_snapshot_manifest_cached(
     snapshot_root_str: str,
@@ -353,6 +485,8 @@ def _load_valid_snapshot_manifest_cached(
         schema_version_int,
         profile_str,
     )
+    if profile_str == CORE5_PROFILE_STR:
+        _validate_core5_snapshot_contract(snapshot_dir_path_obj, manifest_dict, snapshot_date_ts)
     files_dict = manifest_dict.get("files", {})
     file_hashes_dict = manifest_dict.get("file_hashes", {})
     has_universe_entry_bool = (
@@ -379,9 +513,17 @@ def load_valid_snapshot_manifest(
     *,
     snapshot_date_str: str | None = None,
     minimum_snapshot_date_str: str | None = None,
+    snapshot_root_str: str | None = None,
 ) -> NorgateSnapshotManifest:
-    snapshot_root_str = str(get_snapshot_root_path_obj())
-    return _load_valid_snapshot_manifest_cached(
+    snapshot_root_str = snapshot_root_str or str(get_snapshot_root_path_obj())
+    # CORE5 is small. Recheck immutable file bytes on every public validation so
+    # replacing/corrupting a previously read artifact cannot reuse a green cache.
+    manifest_loader_fn = (
+        _load_valid_snapshot_manifest_cached.__wrapped__
+        if profile_str == CORE5_PROFILE_STR
+        else _load_valid_snapshot_manifest_cached
+    )
+    return manifest_loader_fn(
         snapshot_root_str,
         profile_str,
         snapshot_date_str,
@@ -482,6 +624,14 @@ def load_price_timeseries_df(
 
     symbol_price_df = symbol_price_df.set_index("date").sort_index()
     symbol_price_df.index.name = None
+    if profile_str == CORE5_PROFILE_STR:
+        symbol_price_df.index.name = snapshot_manifest_obj.manifest_dict["data_contract"].get("source_index_name_str")
+        field_name_list = snapshot_manifest_obj.manifest_dict["data_contract"]["source_field_by_pair_dict"][
+            f"{symbol_str}|{normalized_adjustment_str}"
+        ]
+        return symbol_price_df[field_name_list].astype(
+            snapshot_manifest_obj.manifest_dict["data_contract"]["source_dtype_by_pair_dict"][f"{symbol_str}|{normalized_adjustment_str}"]
+        )
     return symbol_price_df[field_name_list]
 
 
@@ -519,8 +669,17 @@ def load_raw_prices_df(
         )
         for symbol_str in symbol_list
     }
+    # CORE5 alone uses the same true total-return benchmark as the direct
+    # loader. Existing live profiles retain their historical loading contract.
+    data_symbol_dict = {
+        symbol_str: (
+            "$SPXTR" if profile_str == CORE5_PROFILE_STR and symbol_str == "$SPX"
+            and symbol_str in benchmark_set else symbol_str
+        )
+        for symbol_str in symbol_list
+    }
     requested_pair_set = {
-        (symbol_str, adjustment_by_symbol_dict[symbol_str])
+        (data_symbol_dict[symbol_str], adjustment_by_symbol_dict[symbol_str])
         for symbol_str in symbol_list
     }
     available_pair_set = set(
@@ -559,7 +718,7 @@ def load_raw_prices_df(
     price_frame_list: list[pd.DataFrame] = []
     for symbol_str in symbol_list:
         adjustment_str = adjustment_by_symbol_dict[symbol_str]
-        pair_tuple = (symbol_str, adjustment_str)
+        pair_tuple = (data_symbol_dict[symbol_str], adjustment_str)
         symbol_price_df = price_group_dict.get(pair_tuple)
         if symbol_price_df is None:
             if (
@@ -585,7 +744,17 @@ def load_raw_prices_df(
             .sort_index()
         )
         symbol_price_df.index.name = None
-        symbol_price_df = symbol_price_df[field_name_list]
+        symbol_field_list = field_name_list
+        if profile_str == CORE5_PROFILE_STR:
+            symbol_price_df.index.name = snapshot_manifest_obj.manifest_dict["data_contract"].get("source_index_name_str")
+            symbol_field_list = snapshot_manifest_obj.manifest_dict["data_contract"]["source_field_by_pair_dict"][
+                f"{data_symbol_dict[symbol_str]}|{adjustment_str}"
+            ]
+        symbol_price_df = symbol_price_df[symbol_field_list]
+        if profile_str == CORE5_PROFILE_STR:
+            symbol_price_df = symbol_price_df.astype(
+                snapshot_manifest_obj.manifest_dict["data_contract"]["source_dtype_by_pair_dict"][f"{data_symbol_dict[symbol_str]}|{adjustment_str}"]
+            )
         symbol_price_df.columns = pd.MultiIndex.from_tuples(
             [(symbol_str, field_str) for field_str in symbol_price_df.columns]
         )

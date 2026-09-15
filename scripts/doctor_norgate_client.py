@@ -22,6 +22,7 @@ if repo_root_str not in sys.path:
 
 from alpha.live.scheduler_utils import load_latest_norgate_heartbeat_session_label_ts
 from data.norgate_snapshot_store import (
+    CORE5_PROFILE_STR,
     ALPHA_USE_NORGATE_SNAPSHOT_ENV_STR,
     CAPITALSPECIAL_ADJUSTMENT_STR,
     HPI_SP500_PROFILE_STR,
@@ -404,6 +405,7 @@ def _check_profile_smoke(
     printer_fn: PrinterFn,
 ) -> None:
     smoke_map_dict: dict[str, list[tuple[str, str]]] = {
+        CORE5_PROFILE_STR: [("symbol", "IEF"), ("symbol", "BIL"), ("symbol", "$SPXTR")],
         "norgate_eod_etf_plus_vix_helper": [("symbol", "SPY"), ("symbol", "$VIX")],
         "norgate_eod_sp500_pit": [("index", "S&P 500")],
         HPI_SP500_PROFILE_STR: [
@@ -421,7 +423,7 @@ def _check_profile_smoke(
                         adjustment_str = (
                             TOTALRETURN_ADJUSTMENT_STR
                             if (
-                                profile_str == HPI_SP500_PROFILE_STR
+                                profile_str in (HPI_SP500_PROFILE_STR, CORE5_PROFILE_STR)
                                 and value_str == "$SPXTR"
                             )
                             else CAPITALSPECIAL_ADJUSTMENT_STR

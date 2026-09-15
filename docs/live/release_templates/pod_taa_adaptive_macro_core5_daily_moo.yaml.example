@@ -1,0 +1,31 @@
+# Disabled local forward-test template. This is not a deployed release.
+# Dedicated account only. CORE5 mode=live is blocked pending qualification.
+identity:
+  release_id: your_user.core5.daily_moo.v1
+  user_id: your_user
+  pod_id: pod_core5_01
+deployment:
+  mode: incubation
+  enabled_bool: false
+broker:
+  account_route: SIM_CORE5
+  host_str: 127.0.0.1
+  port_int: 7497
+  client_id_int: 31
+  timeout_seconds_float: 4.0
+strategy:
+  strategy_import_str: strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5
+  data_profile_str: norgate_eod_core5
+  params: {}
+market:
+  session_calendar_id_str: XNYS
+schedule:
+  signal_clock_str: eod_snapshot_ready
+  execution_policy_str: next_open_moo
+execution:
+  pod_budget_fraction_float: 1.0
+  auto_submit_enabled_bool: false
+bootstrap:
+  initial_cash_float: 100000.0
+risk:
+  risk_profile_str: core5_forward_qualification

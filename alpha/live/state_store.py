@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -469,8 +470,10 @@ class LiveStateStore:
         pod_state_obj: PodState,
         snapshot_stage_str: str | None = None,
         snapshot_source_str: str | None = None,
+        *,
+        connection_obj: sqlite3.Connection | None = None,
     ) -> None:
-        with self._connect() as connection_obj:
+        with (nullcontext(connection_obj) if connection_obj is not None else self._connect()) as connection_obj:
             position_json_str = json.dumps(pod_state_obj.position_amount_map, sort_keys=True)
             strategy_state_json_str = json.dumps(pod_state_obj.strategy_state_dict, sort_keys=True)
             updated_timestamp_str = _serialize_timestamp_str(pod_state_obj.updated_timestamp_ts)

@@ -394,6 +394,7 @@ uv run python -m alpha.live.runner status `
 norgate_eod_sp500_pit
 norgate_eod_sp500_hpi_pit
 norgate_eod_etf_plus_vix_helper
+norgate_eod_core5
 norgate_eod_ndx_pit
 norgate_eod_ndx_pit_plus_vxn_helper
 ```
@@ -404,6 +405,10 @@ the exact raw point-in-time membership tail. Changing those semantics changes
 strict HPI features and order intent.
 
 `intraday_1m_plus_daily_pit` is intentionally unsupported in Snapshot V1.
+
+`norgate_eod_core5` supplies the dedicated Adaptive Macro CORE5 data contract.
+Its addition qualifies local data transport; the strategy is not enabled in
+the LIVE strategy allowlist. See [CORE5 data qualification](CORE5_DATA_QUALIFICATION.md).
 
 ## Verification
 

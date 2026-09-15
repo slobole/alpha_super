@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import shutil
 import sys
@@ -18,10 +19,17 @@ if repo_root_str not in sys.path:
 
 from data.norgate_snapshot_store import (
     CAPITALSPECIAL_ADJUSTMENT_STR,
+    CORE5_CAPITAL_SYMBOL_TUPLE,
+    CORE5_DATA_CONTRACT_DICT,
+    CORE5_HISTORY_START_DATE_STR,
+    CORE5_PROFILE_STR,
+    CORE5_TOTAL_RETURN_SYMBOL_TUPLE,
     HPI_SP500_DATA_CONTRACT_DICT,
     HPI_SP500_PROFILE_STR,
     SNAPSHOT_SCHEMA_VERSION_INT,
     TOTALRETURN_ADJUSTMENT_STR,
+    core5_price_coverage_dict,
+    load_valid_snapshot_manifest,
     write_snapshot_files,
 )
 
@@ -37,6 +45,11 @@ class NorgateExportProfileSpec:
 
 
 PROFILE_EXPORT_SPEC_DICT: dict[str, NorgateExportProfileSpec] = {
+    CORE5_PROFILE_STR: NorgateExportProfileSpec(
+        capital_symbol_tuple=CORE5_CAPITAL_SYMBOL_TUPLE,
+        total_return_symbol_tuple=CORE5_TOTAL_RETURN_SYMBOL_TUPLE,
+        trim_past_member_tail_bool=False,
+    ),
     "norgate_eod_sp500_pit": NorgateExportProfileSpec(
         indexname_str="S&P 500",
         total_return_symbol_tuple=("$SPX",),
@@ -159,6 +172,7 @@ def _load_price_frame_df(
         raise RuntimeError(f"Norgate returned no price data for {symbol_str} ({adjustment_str}).")
 
     price_df = raw_price_df.reset_index()
+    source_field_list = list(raw_price_df.columns)
     price_df = price_df.rename(columns={price_df.columns[0]: "date"})
     if "Dividend" not in price_df.columns:
         if symbol_str not in NON_DISTRIBUTING_INDEX_SYMBOL_SET:
@@ -169,6 +183,9 @@ def _load_price_frame_df(
         price_df["Dividend"] = 0.0
     price_df.insert(1, "symbol_str", symbol_str)
     price_df.insert(2, "adjustment_str", adjustment_str)
+    price_df.attrs["source_field_list"] = source_field_list
+    price_df.attrs["source_index_name_str"] = raw_price_df.index.name
+    price_df.attrs["source_dtype_dict"] = {field_str: str(dtype_obj) for field_str, dtype_obj in raw_price_df.dtypes.items()}
     return price_df
 
 
@@ -203,7 +220,17 @@ def _build_price_snapshot_df(
         )
     if len(price_frame_list) == 0:
         raise RuntimeError("No price rows were exported.")
-    return pd.concat(price_frame_list, axis=0, ignore_index=True)
+    price_df = pd.concat(price_frame_list, axis=0, ignore_index=True)
+    price_df.attrs["source_field_by_pair_dict"] = {
+        f"{frame_df['symbol_str'].iloc[0]}|{frame_df['adjustment_str'].iloc[0]}": frame_df.attrs["source_field_list"]
+        for frame_df in price_frame_list
+    }
+    price_df.attrs["source_index_name_str"] = price_frame_list[0].attrs["source_index_name_str"]
+    price_df.attrs["source_dtype_by_pair_dict"] = {
+        f"{frame_df['symbol_str'].iloc[0]}|{frame_df['adjustment_str'].iloc[0]}": frame_df.attrs["source_dtype_dict"]
+        for frame_df in price_frame_list
+    }
+    return price_df
 
 
 def _build_adjustment_mode_map_dict(
@@ -237,6 +264,10 @@ def _export_profile_to_root_path(
     overwrite_bool: bool,
 ) -> Path:
     validate_export_profile(profile_str)
+    if profile_str == CORE5_PROFILE_STR and (
+        start_date_str != CORE5_HISTORY_START_DATE_STR or end_date_str != snapshot_date_str
+    ):
+        raise ValueError("CORE5 export must request history from 1990-01-01 through the snapshot date.")
     profile_spec_obj = PROFILE_EXPORT_SPEC_DICT[profile_str]
     universe_df: pd.DataFrame | None = None
     pit_symbol_list: list[str] = []
@@ -274,6 +305,34 @@ def _export_profile_to_root_path(
             else "exact"
         ),
     }
+    if profile_str == CORE5_PROFILE_STR:
+        data_contract_dict.update(CORE5_DATA_CONTRACT_DICT)
+        data_contract_dict["source_field_by_pair_dict"] = price_df.attrs["source_field_by_pair_dict"]
+        data_contract_dict["source_index_name_str"] = price_df.attrs["source_index_name_str"]
+        data_contract_dict["source_dtype_by_pair_dict"] = price_df.attrs["source_dtype_by_pair_dict"]
+        data_contract_dict["series_coverage_dict"] = core5_price_coverage_dict(
+            price_df, pd.Timestamp(snapshot_date_str)
+        )
+        observed_endpoint_dict: dict[str, str] = {}
+        for symbol_str in required_symbol_list:
+            # *** CRITICAL*** ALLMARKETDAYS is retained for historical parity,
+            # but a carried Close_T cannot certify today's provider freshness.
+            observed_price_df = _load_price_frame_df(
+                symbol_str=symbol_str,
+                adjustment_str=(CAPITALSPECIAL_ADJUSTMENT_STR if symbol_str in symbol_list else TOTALRETURN_ADJUSTMENT_STR),
+                start_date_str=snapshot_date_str,
+                end_date_str=snapshot_date_str,
+                padding_type_name_str="NONE",
+            )
+            if (
+                len(observed_price_df) != 1
+                or pd.Timestamp(observed_price_df["date"].iloc[0]) != pd.Timestamp(snapshot_date_str)
+                or not math.isfinite(float(observed_price_df["Close"].iloc[0]))
+                or not float(observed_price_df["Close"].iloc[0]) > 0.0
+            ):
+                raise ValueError(f"CORE5 has no unpadded source observation at {snapshot_date_str} for {symbol_str}.")
+            observed_endpoint_dict[symbol_str] = snapshot_date_str
+        data_contract_dict["observed_endpoint_date_by_symbol_dict"] = observed_endpoint_dict
     if (
         profile_str == HPI_SP500_PROFILE_STR
         and data_contract_dict != HPI_SP500_DATA_CONTRACT_DICT
@@ -281,6 +340,9 @@ def _export_profile_to_root_path(
         raise RuntimeError(
             "HPI snapshot export contract drifted from the strict HPI data contract."
         )
+    # Transport-only field provenance belongs in the CORE5 manifest, not in
+    # pandas attrs propagated to strategy inputs or existing profile payloads.
+    price_df.attrs.clear()
     return write_snapshot_files(
         snapshot_root_str=snapshot_root_str,
         profile_str=profile_str,
@@ -308,11 +370,20 @@ def export_profile_snapshot(
     validate_export_profile(profile_str)
     resolved_snapshot_date_str = snapshot_date_str or _latest_norgate_session_date_str()
     resolved_end_date_str = str(end_date_str or resolved_snapshot_date_str)
+    if profile_str == CORE5_PROFILE_STR and (
+        start_date_str != CORE5_HISTORY_START_DATE_STR or resolved_end_date_str != resolved_snapshot_date_str
+    ):
+        raise ValueError("CORE5 export must request history from 1990-01-01 through the snapshot date.")
     snapshot_root_path_obj = Path(snapshot_root_str).expanduser()
     final_snapshot_dir_path_obj = snapshot_root_path_obj / profile_str / resolved_snapshot_date_str
     if final_snapshot_dir_path_obj.exists() and not overwrite_bool:
         manifest_path_obj = final_snapshot_dir_path_obj / "manifest.json"
         if manifest_path_obj.exists():
+            if profile_str == CORE5_PROFILE_STR:
+                load_valid_snapshot_manifest(
+                    profile_str, snapshot_date_str=resolved_snapshot_date_str,
+                    snapshot_root_str=str(snapshot_root_path_obj),
+                )
             return final_snapshot_dir_path_obj
         raise FileExistsError(
             f"Snapshot directory exists without a manifest; remove or overwrite it: {final_snapshot_dir_path_obj}"
@@ -334,6 +405,11 @@ def export_profile_snapshot(
             end_date_str=resolved_end_date_str,
             overwrite_bool=False,
         )
+        if profile_str == CORE5_PROFILE_STR:
+            load_valid_snapshot_manifest(
+                profile_str, snapshot_date_str=resolved_snapshot_date_str,
+                snapshot_root_str=str(staging_root_path_obj),
+            )
 
         final_profile_dir_path_obj = final_snapshot_dir_path_obj.parent
         final_profile_dir_path_obj.mkdir(parents=True, exist_ok=True)

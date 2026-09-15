@@ -75,6 +75,10 @@ auctionPrice (generic tick 225)
 
 This means incubation target shares can differ from the research/backtest target shares when the IBKR reference price differs from the prior close. That is intentional rehearsal evidence. The SIM ledger still settles at the target-session IBKR open tick; paper fills remain outside official rehearsal P&L.
 
+CORE5 is an explicit exception to generic quote-based sizing: its validated
+adapter freezes whole-share targets from signal-day closing NAV and prices.
+Later IBKR references do not resize those quantities.
+
 For close-execution:
 
 ```text
@@ -85,6 +89,25 @@ fill_price = official same-session Close
 `same_day_moc` must fail loud until a real pre-close snapshot source exists. Official close must not be used as the sizing reference because that would leak the final auction price into the decision.
 
 Open fills are still SIM ledger fills. IBKR is only a price/reference source in incubation, using a separate price-read client ID by default. Paper fills must not be imported into the SIM ledger.
+
+## Settlement Integrity And Opening-Price Dates
+
+Incubation saves opening references, order records/events, fills, cash entries,
+portfolio state and history in one transaction. An interrupted write rolls back
+the complete group; concurrent or repeated settlement cannot apply it twice.
+The existing fill JSON records versioned atomic-settlement evidence. Pending
+legacy fills without that evidence require accounting review; the runner does
+not automatically repair or replay potentially partial old settlements.
+
+An uncached IBKR tick-open can only be read during its target exchange date,
+after the canonical session open. The date is checked before and after I/O.
+Valid saved target-session prices can be reused later. Account, source, session,
+value and capture-time validation prevents a current open being relabelled as
+an earlier day's fill. Capture time is not independent proof of the vendor's
+opening print. No historical-price fallback was added.
+
+See [CORE5 incubation qualification](CORE5_INCUBATION_QUALIFICATION.md) for
+regressions, compatibility details and the remaining forward-run requirements.
 
 ## Account Model
 

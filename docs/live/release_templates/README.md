@@ -57,8 +57,15 @@ alpha/live/releases/<client_id>/*.yaml
 
 ## Wired Templates
 
+CORE5 is a qualification-only exception to the generic workflow above: its
+template uses `incubation` with a dedicated `SIM_` route, full account budget
+`1.0`, and disabled submission. `paper` requires its own paper account. Physical
+`live` is rejected pending forward/account qualification. See
+[CORE5 adapter qualification](../CORE5_ADAPTER_QUALIFICATION.md).
+
 | Template | Wired strategy | Data profile |
 |---|---|---|
+| `pod_taa_adaptive_macro_core5_daily_moo.yaml.example` | `strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5` | `norgate_eod_core5` |
 | `pod_dv2_daily_moo.yaml.example` | `strategies.dv2.strategy_mr_dv2:DVO2Strategy` | `norgate_eod_sp500_pit` |
 | `pod_qpi_daily_moo.yaml.example` | `strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy` | `norgate_eod_sp500_pit` |
 | `pod_hpi_sp500_2_3_5_vote_daily_moo.yaml.example` | `strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote` | `norgate_eod_sp500_hpi_pit` |

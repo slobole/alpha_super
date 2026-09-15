@@ -155,7 +155,17 @@ class _FakeIBTickOpen:
         raise AssertionError("tick-open provider must not use historical bars")
 
 
+def _freeze_tick_clock(monkeypatch, timestamp_list):
+    class ClockDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            timestamp_ts = timestamp_list.pop(0) if len(timestamp_list) > 1 else timestamp_list[0]
+            return timestamp_ts.astimezone(tz or UTC)
+    monkeypatch.setattr("alpha.live.ibkr_socket_client.datetime", ClockDateTime)
+
+
 def test_ibkr_socket_client_tick_open_reads_only_ticker_open(monkeypatch):
+    _freeze_tick_clock(monkeypatch, [datetime(2024, 1, 3, 14, 35, tzinfo=UTC)])
     _FakeIBTickOpen.connected_client_id_int = None
     _FakeIBTickOpen.historical_call_count_int = 0
     monkeypatch.setattr("alpha.live.ibkr_socket_client.IB", _FakeIBTickOpen)
@@ -173,7 +183,7 @@ def test_ibkr_socket_client_tick_open_reads_only_ticker_open(monkeypatch):
     session_open_price_list = socket_client_obj.get_tick_open_price_list(
         account_route_str="SIM_pod",
         asset_str_list=["MSFT", "AAPL", "NEG"],
-        session_open_timestamp_ts=datetime(2024, 1, 3, 9, 30, tzinfo=UTC),
+        session_open_timestamp_ts=datetime(2024, 1, 3, 14, 30, tzinfo=UTC),
         session_calendar_id_str="XNYS",
     )
 
@@ -189,3 +199,39 @@ def test_ibkr_socket_client_tick_open_reads_only_ticker_open(monkeypatch):
     assert session_open_price_by_asset_map_dict["MSFT"].open_price_source_str is None
     assert session_open_price_by_asset_map_dict["NEG"].official_open_price_float is None
     assert session_open_price_by_asset_map_dict["NEG"].open_price_source_str is None
+
+
+@pytest.mark.parametrize("observed_ts", [
+    datetime(2024, 1, 3, 14, 29, tzinfo=UTC),
+    datetime(2024, 1, 4, 15, 0, tzinfo=UTC),
+    datetime(2024, 1, 2, 15, 0, tzinfo=UTC),
+])
+def test_uncached_tick_open_rejects_wrong_day_or_preopen_before_connect(monkeypatch, observed_ts):
+    _freeze_tick_clock(monkeypatch, [observed_ts])
+    def unexpected_connect(*args, **kwargs):
+        raise AssertionError("Invalid historical/pre-open request must not connect")
+    monkeypatch.setattr(IBKRSocketClient, "connect", unexpected_connect)
+    with pytest.raises(RuntimeError, match="Uncached IBKR tick-open"):
+        IBKRSocketClient().get_tick_open_price_list(
+            "SIM_pod", ["AAPL"], datetime(2024, 1, 3, 14, 30, tzinfo=UTC), "XNYS")
+
+
+def test_tick_open_rejects_date_rollover_during_fetch(monkeypatch):
+    _freeze_tick_clock(monkeypatch, [datetime(2024, 1, 4, 4, 59, tzinfo=UTC),
+                                    datetime(2024, 1, 4, 5, 0, tzinfo=UTC)])
+    monkeypatch.setattr("alpha.live.ibkr_socket_client.IB", _FakeIBTickOpen)
+    monkeypatch.setattr("alpha.live.ibkr_socket_client.Stock",
+                        lambda symbol_str, exchange_str, currency_str: _FakeContract(symbol_str))
+    with pytest.raises(RuntimeError, match="Uncached IBKR tick-open"):
+        IBKRSocketClient().get_tick_open_price_list(
+            "SIM_pod", ["AAPL"], datetime(2024, 1, 3, 14, 30, tzinfo=UTC), "XNYS")
+
+
+@pytest.mark.parametrize("target_ts", [datetime(2024, 1, 3, 9, 30, tzinfo=UTC),
+                                       datetime(2024, 1, 6, 14, 30, tzinfo=UTC)])
+def test_tick_open_requires_canonical_trading_session_open(monkeypatch, target_ts):
+    def unexpected_connect(*args, **kwargs):
+        raise AssertionError("Invalid session request must not connect")
+    monkeypatch.setattr(IBKRSocketClient, "connect", unexpected_connect)
+    with pytest.raises(ValueError, match="session"):
+        IBKRSocketClient().get_tick_open_price_list("SIM_pod", ["AAPL"], target_ts, "XNYS")

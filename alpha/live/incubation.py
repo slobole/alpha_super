@@ -442,6 +442,13 @@ class IncubationBrokerAdapter(BrokerAdapter):
             session_open_timestamp_ts,
             session_calendar_id_str,
         ).date().isoformat()
+        session_label_ts = scheduler_utils.session_label_from_timestamp_ts(
+            session_open_timestamp_ts, session_calendar_id_str,
+        )
+        if session_label_ts is None or session_open_timestamp_ts != scheduler_utils.get_session_open_timestamp_ts(
+            session_label_ts, session_calendar_id_str,
+        ):
+            raise ValueError("Incubation tick-open request must use the exchange session open.")
         existing_session_open_price_map_dict = self.state_store_obj.get_session_open_price_map_dict(
             account_route_str=account_route_str,
             session_date_str=session_date_str,
@@ -450,19 +457,14 @@ class IncubationBrokerAdapter(BrokerAdapter):
         missing_asset_str_list: list[str] = []
         for asset_str in normalized_asset_str_list:
             existing_session_open_price_obj = existing_session_open_price_map_dict.get(asset_str)
-            if (
-                existing_session_open_price_obj is not None
-                and existing_session_open_price_obj.official_open_price_float is not None
-                and str(existing_session_open_price_obj.open_price_source_str) == IBKR_TICK_OPEN_SOURCE_STR
-            ):
+            if existing_session_open_price_obj is not None and existing_session_open_price_obj.official_open_price_float is not None:
                 session_open_price_list.append(existing_session_open_price_obj)
                 continue
             missing_asset_str_list.append(asset_str)
 
         if len(missing_asset_str_list) == 0:
-            return session_open_price_list
-
-        if self.ibkr_tick_open_lookup_func is not None:
+            fetched_session_open_price_list = []
+        elif self.ibkr_tick_open_lookup_func is not None:
             fetched_session_open_price_list = self.ibkr_tick_open_lookup_func(
                 account_route_str,
                 missing_asset_str_list,
@@ -476,7 +478,38 @@ class IncubationBrokerAdapter(BrokerAdapter):
                 session_open_timestamp_ts=session_open_timestamp_ts,
                 session_calendar_id_str=session_calendar_id_str,
             )
-        return session_open_price_list + fetched_session_open_price_list
+        result_price_list = session_open_price_list + fetched_session_open_price_list
+        # *** CRITICAL*** A stored open remains usable later only with evidence
+        # that it was captured for this account/session after the target open.
+        # Use a fresh post-read clock: self.as_of_ts precedes network I/O.
+        validation_ts = datetime.now(tz=UTC)
+        seen_asset_set: set[str] = set()
+        for price_obj in result_price_list:
+            capture_ts = price_obj.snapshot_timestamp_ts
+            identity_valid_bool = (
+                price_obj.account_route_str == account_route_str
+                and price_obj.session_date_str == session_date_str
+                and price_obj.asset_str in normalized_asset_str_list
+                and price_obj.asset_str not in seen_asset_set
+            )
+            if not identity_valid_bool:
+                raise RuntimeError("Incubation opening-price identity/session is invalid or duplicated.")
+            seen_asset_set.add(price_obj.asset_str)
+            if capture_ts.tzinfo is None or capture_ts.utcoffset() is None:
+                raise RuntimeError("Incubation opening-price capture time must include a timezone.")
+            if (
+                capture_ts < session_open_timestamp_ts or capture_ts > validation_ts
+                or scheduler_utils.to_market_timestamp_ts(capture_ts, session_calendar_id_str).date().isoformat() != session_date_str
+            ):
+                raise RuntimeError("Incubation opening-price capture does not belong to the target session after open.")
+            if price_obj.official_open_price_float is not None:
+                if (
+                    price_obj.open_price_source_str != IBKR_TICK_OPEN_SOURCE_STR
+                    or not math.isfinite(float(price_obj.official_open_price_float))
+                    or float(price_obj.official_open_price_float) <= 0.0
+                ):
+                    raise RuntimeError("Incubation opening-price source or value is invalid.")
+        return result_price_list
 
     def _require_ibkr_tick_open_price_map_dict(
         self,
@@ -637,7 +670,7 @@ class IncubationBrokerAdapter(BrokerAdapter):
             if self.as_of_ts < vplan_obj.target_execution_timestamp_ts:
                 continue
             vplan_id_int = int(vplan_obj.vplan_id_int or 0)
-            if len(self.state_store_obj.get_fill_row_dict_list_for_vplan(vplan_id_int)) > 0:
+            if self.state_store_obj.has_committed_incubation_settlement(vplan_id_int):
                 continue
             self._settle_vplan(vplan_obj)
 
@@ -790,6 +823,7 @@ class IncubationBrokerAdapter(BrokerAdapter):
                     raw_payload_dict={
                         "price_field_str": fill_price_field_str,
                         "price_source_str": fill_price_source_str,
+                        "incubation_settlement_version_int": 1,
                     },
                 )
             )
@@ -873,16 +907,10 @@ class IncubationBrokerAdapter(BrokerAdapter):
             float(share_float) * float(settlement_mark_price_map_dict[asset_str])
             for asset_str, share_float in updated_position_map_dict.items()
         )
-        if len(session_open_price_by_asset_map_dict) > 0:
-            self.state_store_obj.upsert_session_open_price_list(
-                session_open_price_by_asset_map_dict.values()
-            )
-        self.state_store_obj.upsert_vplan_broker_order_record_list(broker_order_record_list)
-        self.state_store_obj.insert_vplan_broker_order_event_list(broker_order_event_list)
-        self.state_store_obj.upsert_vplan_fill_list(broker_order_fill_list)
-        self.state_store_obj.insert_cash_ledger_entry_list(cash_ledger_entry_list)
-        self.state_store_obj.upsert_pod_state(
-            PodState(
+        committed_bool = self.state_store_obj.persist_incubation_settlement(
+            vplan_obj=vplan_obj,
+            baseline_pod_state_obj=pod_state_obj,
+            settled_pod_state_obj=PodState(
                 pod_id_str=vplan_obj.pod_id_str,
                 user_id_str=vplan_obj.user_id_str,
                 account_route_str=vplan_obj.account_route_str,
@@ -892,14 +920,18 @@ class IncubationBrokerAdapter(BrokerAdapter):
                 strategy_state_dict=dict(pod_state_obj.strategy_state_dict),
                 updated_timestamp_ts=self.as_of_ts,
             ),
-            snapshot_stage_str="post_execution",
-            snapshot_source_str="virtual_broker",
+            session_open_price_list=list(session_open_price_by_asset_map_dict.values()),
+            broker_order_record_list=broker_order_record_list,
+            broker_order_event_list=broker_order_event_list,
+            broker_order_fill_list=broker_order_fill_list,
+            cash_ledger_entry_list=cash_ledger_entry_list,
         )
-        self._settled_state_by_vplan_id_dict[int(vplan_obj.vplan_id_int or 0)] = (
-            broker_order_record_list,
-            broker_order_event_list,
-            broker_order_fill_list,
-        )
+        if committed_bool:
+            self._settled_state_by_vplan_id_dict[int(vplan_obj.vplan_id_int or 0)] = (
+                broker_order_record_list,
+                broker_order_event_list,
+                broker_order_fill_list,
+            )
 
     def _compute_commission_float(
         self,

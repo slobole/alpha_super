@@ -10,6 +10,7 @@ benchmark is declared truthfully, and runs are deterministic — lives in
 from __future__ import annotations
 
 import ast
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -85,15 +86,28 @@ def test_portfolio_manager_allowlist_is_the_registry():
 
 
 def test_release_manifest_allowlist_matches_the_registry():
-    """The live list is still declared in its own module, so assert they agree.
-
-    Deriving it there is a follow-up; until then this test is what catches a
-    strategy being wired for live without being registered, which is exactly
-    how the two lists drifted apart in the first place.
-    """
-    assert set(release_manifest.SUPPORTED_STRATEGY_IMPORT_TUPLE) == set(
-        WIRED_IMPORT_TUPLE
+    """Keep physical LIVE wiring distinct from the explicit forward-only pod."""
+    forward_only_import_set = {release_manifest.CORE5_STRATEGY_IMPORT_STR}
+    assert forward_only_import_set <= set(PM_READY_IMPORT_TUPLE)
+    assert forward_only_import_set.isdisjoint(WIRED_IMPORT_TUPLE)
+    assert set(release_manifest.SUPPORTED_STRATEGY_IMPORT_TUPLE) == (
+        set(WIRED_IMPORT_TUPLE) | forward_only_import_set
     )
+
+
+def test_forward_only_core5_remains_pm_ready_and_rejects_physical_live():
+    assert strategy_registry.tier_for(
+        release_manifest.CORE5_STRATEGY_IMPORT_STR
+    ) is MaturityTier.PM_READY
+    release_obj = release_manifest.parse_release_manifest(str(
+        REPO_ROOT_PATH / "docs/live/release_templates/"
+        "pod_taa_adaptive_macro_core5_daily_moo.yaml.example"
+    ))
+    release_manifest.validate_release_manifest(release_obj)
+    with pytest.raises(ValueError, match="physical LIVE activation requires"):
+        release_manifest.validate_release_manifest(replace(
+            release_obj, mode_str="live", account_route_str="U1234567"
+        ))
 
 
 @pytest.mark.parametrize("strategy_import_str", PM_READY_IMPORT_TUPLE)

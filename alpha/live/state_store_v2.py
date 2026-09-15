@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing, nullcontext
 from typing import Iterable
 
 from alpha.live.models import (
@@ -13,6 +14,7 @@ from alpha.live.models import (
     CashLedgerEntry,
     DecisionPlan,
     LiveRelease,
+    PodState,
     ReconciliationResult,
     SessionOpenPrice,
     VPlan,
@@ -657,6 +659,80 @@ class LiveStateStore(CoreLiveStateStore):
             ).fetchone()
         return int(row_obj["active_count_int"]) > 0
 
+    def complete_core5_cycle(self, decision_plan_id_int: int, vplan_id_int: int | None = None) -> None:
+        """Atomically commit CORE5 strategy memory with the completed cycle.
+
+        Account cash/positions retain their independently observed timestamps.
+        A no-order cycle needs no broker operation. An executed cycle requires
+        persisted successful reconciliation and already refreshed account state.
+        """
+        from alpha.live.core5_adapter import CORE5_CONTRACT_STR, require_core5_position_match
+
+        with self._connect() as connection_obj:
+            connection_obj.execute("BEGIN IMMEDIATE")
+            decision_row_obj = connection_obj.execute(
+                "SELECT * FROM decision_plan WHERE decision_plan_id_int = ?", (int(decision_plan_id_int),),
+            ).fetchone()
+            if decision_row_obj is None:
+                raise ValueError("CORE5 completion requires a persisted decision.")
+            metadata_dict = json.loads(decision_row_obj["snapshot_metadata_json_str"])
+            if metadata_dict.get("sizing_contract_str") != CORE5_CONTRACT_STR:
+                raise ValueError("CORE5 completion cannot update another strategy.")
+            if decision_row_obj["status_str"] == "completed":
+                return
+            state_row_obj = connection_obj.execute(
+                "SELECT * FROM pod_state WHERE pod_id_str = ?", (decision_row_obj["pod_id_str"],),
+            ).fetchone()
+            if state_row_obj is None or state_row_obj["account_route_str"] != decision_row_obj["account_route_str"]:
+                raise ValueError("CORE5 completion requires the matching saved account state.")
+            if json.loads(state_row_obj["strategy_state_json_str"]) != metadata_dict["base_strategy_state_dict"]:
+                raise ValueError("CORE5 committed strategy state changed while this cycle was pending.")
+            if vplan_id_int is None:
+                if not metadata_dict.get("no_order_bool") or decision_row_obj["status_str"] != "planned":
+                    raise ValueError("Only a planned no-order CORE5 cycle can complete without a VPlan.")
+                expected_position_dict = json.loads(decision_row_obj["decision_base_position_json_str"])
+            else:
+                vplan_row_obj = connection_obj.execute(
+                    "SELECT * FROM vplan WHERE vplan_id_int = ? AND decision_plan_id_int = ?",
+                    (int(vplan_id_int), int(decision_plan_id_int)),
+                ).fetchone()
+                reconciliation_row_obj = connection_obj.execute(
+                    "SELECT status_str FROM vplan_reconciliation_snapshot WHERE vplan_id_int = ? AND stage_str = 'post_execution' ORDER BY vplan_reconciliation_snapshot_id_int DESC LIMIT 1",
+                    (int(vplan_id_int),),
+                ).fetchone()
+                if (
+                    vplan_row_obj is None or vplan_row_obj["status_str"] not in {"submitted", "submitting"}
+                    or reconciliation_row_obj is None or reconciliation_row_obj["status_str"] != "passed"
+                ):
+                    raise ValueError("CORE5 cannot commit an unexecuted or unreconciled VPlan.")
+                expected_position_dict = metadata_dict["fixed_target_share_map_dict"]
+            require_core5_position_match(expected_position_dict, json.loads(state_row_obj["position_json_str"]))
+            completed_timestamp_str = _serialize_timestamp_str(_utc_now_ts())
+            connection_obj.execute(
+                "UPDATE pod_state SET strategy_state_json_str = ? WHERE pod_id_str = ?",
+                (decision_row_obj["strategy_state_json_str"], decision_row_obj["pod_id_str"]),
+            )
+            connection_obj.execute(
+                """INSERT INTO pod_state_history (
+                    pod_id_str, user_id_str, account_route_str, position_json_str,
+                    cash_float, total_value_float, strategy_state_json_str,
+                    snapshot_stage_str, snapshot_source_str, updated_timestamp_str, recorded_timestamp_str
+                ) SELECT pod_id_str, user_id_str, account_route_str, position_json_str,
+                    cash_float, total_value_float, strategy_state_json_str,
+                    'strategy_commit', 'decision_plan', updated_timestamp_str, ?
+                  FROM pod_state WHERE pod_id_str = ?""",
+                (completed_timestamp_str, decision_row_obj["pod_id_str"]),
+            )
+            connection_obj.execute(
+                "UPDATE decision_plan SET status_str = 'completed', updated_timestamp_str = ? WHERE decision_plan_id_int = ?",
+                (completed_timestamp_str, int(decision_plan_id_int)),
+            )
+            if vplan_id_int is not None:
+                connection_obj.execute(
+                    "UPDATE vplan SET status_str = 'completed', updated_timestamp_str = ? WHERE vplan_id_int = ?",
+                    (completed_timestamp_str, int(vplan_id_int)),
+                )
+
     def insert_decision_plan(self, decision_plan_obj: DecisionPlan) -> DecisionPlan:
         created_timestamp_str = _serialize_timestamp_str(_utc_now_ts())
         with self._connect() as connection_obj:
@@ -1200,8 +1276,10 @@ class LiveStateStore(CoreLiveStateStore):
     def upsert_vplan_broker_order_record_list(
         self,
         broker_order_record_list: Iterable[BrokerOrderRecord],
+        *,
+        connection_obj: sqlite3.Connection | None = None,
     ) -> None:
-        with self._connect() as connection_obj:
+        with (nullcontext(connection_obj) if connection_obj is not None else self._connect()) as connection_obj:
             for broker_order_record_obj in broker_order_record_list:
                 submission_key_str = (
                     broker_order_record_obj.submission_key_str
@@ -1213,6 +1291,23 @@ class LiveStateStore(CoreLiveStateStore):
                     if broker_order_record_obj.order_request_key_str is not None
                     else broker_order_record_obj.raw_payload_dict.get("order_request_key_str")
                 )
+                leg_count_int = connection_obj.execute(
+                    "SELECT COUNT(*) FROM vplan_row WHERE vplan_id_int = ? AND asset_str = ?",
+                    (broker_order_record_obj.vplan_id_int, broker_order_record_obj.asset_str),
+                ).fetchone()[0]
+                if leg_count_int > 1:
+                    exact_order_row_obj = connection_obj.execute(
+                        "SELECT order_request_key_str, submission_key_str FROM vplan_broker_order WHERE vplan_id_int = ? AND broker_order_id_str = ?",
+                        (broker_order_record_obj.vplan_id_int, broker_order_record_obj.broker_order_id_str),
+                    ).fetchone()
+                    if exact_order_row_obj is not None:
+                        known_request_str = exact_order_row_obj["order_request_key_str"]
+                        if known_request_str and order_request_key_str and known_request_str != order_request_key_str:
+                            raise ValueError("Broker order identity conflicts with its saved execution leg.")
+                        order_request_key_str = known_request_str or order_request_key_str
+                        submission_key_str = exact_order_row_obj["submission_key_str"] or submission_key_str
+                    if not order_request_key_str:
+                        raise ValueError("Ambiguous broker refresh for multiple execution legs; an exact order identity is required.")
                 if order_request_key_str is not None:
                     existing_row_obj = connection_obj.execute(
                         """
@@ -1385,8 +1480,10 @@ class LiveStateStore(CoreLiveStateStore):
     def insert_vplan_broker_order_event_list(
         self,
         broker_order_event_list: Iterable[BrokerOrderEvent],
+        *,
+        connection_obj: sqlite3.Connection | None = None,
     ) -> None:
-        with self._connect() as connection_obj:
+        with (nullcontext(connection_obj) if connection_obj is not None else self._connect()) as connection_obj:
             for broker_order_event_obj in broker_order_event_list:
                 event_timestamp_ts = (
                     broker_order_event_obj.event_timestamp_ts
@@ -1497,8 +1594,10 @@ class LiveStateStore(CoreLiveStateStore):
     def upsert_session_open_price_list(
         self,
         session_open_price_list: Iterable[SessionOpenPrice],
+        *,
+        connection_obj: sqlite3.Connection | None = None,
     ) -> None:
-        with self._connect() as connection_obj:
+        with (nullcontext(connection_obj) if connection_obj is not None else self._connect()) as connection_obj:
             for session_open_price_obj in session_open_price_list:
                 connection_obj.execute(
                     """
@@ -1530,8 +1629,110 @@ class LiveStateStore(CoreLiveStateStore):
                     ),
                 )
 
-    def upsert_vplan_fill_list(self, fill_list: Iterable[BrokerOrderFill]) -> None:
-        with self._connect() as connection_obj:
+    def has_committed_incubation_settlement(
+        self, vplan_id_int: int, *, connection_obj: sqlite3.Connection | None = None,
+    ) -> bool:
+        with (nullcontext(connection_obj) if connection_obj is not None else closing(self._connect())) as connection_obj:
+            fill_row_list = connection_obj.execute(
+                "SELECT raw_payload_json_str FROM vplan_fill WHERE vplan_id_int = ?",
+                (int(vplan_id_int),),
+            ).fetchall()
+        if not fill_row_list:
+            return False
+        # This marker is written with cash and PodState in ONE transaction.
+        # Legacy fills alone cannot prove that the old multi-commit flow finished.
+        if not all(
+            json.loads(row_obj["raw_payload_json_str"]).get("incubation_settlement_version_int") == 1
+            for row_obj in fill_row_list
+        ):
+            raise RuntimeError(
+                f"Incubation VPlan {vplan_id_int} has unverified legacy settlement fills; "
+                "review its cash ledger and portfolio state before continuing."
+            )
+        return True
+
+    def persist_incubation_settlement(
+        self,
+        *,
+        vplan_obj: VPlan,
+        baseline_pod_state_obj: PodState,
+        settled_pod_state_obj: PodState,
+        session_open_price_list: Iterable[SessionOpenPrice],
+        broker_order_record_list: Iterable[BrokerOrderRecord],
+        broker_order_event_list: Iterable[BrokerOrderEvent],
+        broker_order_fill_list: list[BrokerOrderFill],
+        cash_ledger_entry_list: Iterable[CashLedgerEntry],
+    ) -> bool:
+        """Commit one complete SIM settlement; a concurrent completed attempt is a no-op."""
+        vplan_id_int = int(vplan_obj.vplan_id_int or 0)
+        with closing(self._connect()) as connection_obj, connection_obj:
+            connection_obj.execute("BEGIN IMMEDIATE")
+            stored_vplan_row_obj = connection_obj.execute(
+                "SELECT v.*, r.mode_str, r.params_json_str FROM vplan v "
+                "JOIN live_release r ON r.release_id_str = v.release_id_str "
+                "WHERE v.vplan_id_int = ?", (vplan_id_int,),
+            ).fetchone()
+            identity_tuple = (vplan_obj.pod_id_str, vplan_obj.user_id_str, vplan_obj.account_route_str)
+            if stored_vplan_row_obj is None or stored_vplan_row_obj["mode_str"] != "incubation":
+                raise RuntimeError("Incubation settlement requires a saved SIM plan.")
+            stored_identity_tuple = tuple(
+                stored_vplan_row_obj[field_str] for field_str in ("pod_id_str", "user_id_str", "account_route_str")
+            )
+            if stored_identity_tuple != identity_tuple or any(
+                (state_obj.pod_id_str, state_obj.user_id_str, state_obj.account_route_str) != identity_tuple
+                for state_obj in (baseline_pod_state_obj, settled_pod_state_obj)
+            ):
+                raise RuntimeError("Incubation settlement identity does not match the saved SIM plan.")
+            if self.has_committed_incubation_settlement(vplan_id_int, connection_obj=connection_obj):
+                return False
+            if stored_vplan_row_obj["status_str"] not in {"submitted", "submitting"}:
+                raise RuntimeError("Incubation settlement requires a submitted plan.")
+            if (
+                json.loads(stored_vplan_row_obj["order_delta_json_str"]) != vplan_obj.order_delta_map
+                or stored_vplan_row_obj["release_id_str"] != vplan_obj.release_id_str
+                or stored_vplan_row_obj["execution_policy_str"] != vplan_obj.execution_policy_str
+                or _deserialize_timestamp_ts(stored_vplan_row_obj["target_execution_timestamp_str"]) != vplan_obj.target_execution_timestamp_ts
+            ):
+                raise RuntimeError("Incubation plan changed while preparing settlement.")
+            current_state_row_obj = connection_obj.execute(
+                "SELECT * FROM pod_state WHERE pod_id_str = ?", (vplan_obj.pod_id_str,),
+            ).fetchone()
+            if current_state_row_obj is None:
+                cash_float = float(json.loads(stored_vplan_row_obj["params_json_str"]).get("capital_base_float", 100_000.0))
+                position_dict, strategy_dict = {}, {}
+            else:
+                if (current_state_row_obj["user_id_str"], current_state_row_obj["account_route_str"]) != identity_tuple[1:]:
+                    raise RuntimeError("Incubation portfolio identity changed before settlement.")
+                cash_float = float(current_state_row_obj["cash_float"])
+                position_dict = json.loads(current_state_row_obj["position_json_str"])
+                strategy_dict = json.loads(current_state_row_obj["strategy_state_json_str"])
+            if (
+                cash_float != baseline_pod_state_obj.cash_float
+                or position_dict != baseline_pod_state_obj.position_amount_map
+                or strategy_dict != baseline_pod_state_obj.strategy_state_dict
+                or settled_pod_state_obj.strategy_state_dict != strategy_dict
+            ):
+                raise RuntimeError("Incubation cash, positions or strategy state changed before settlement; retry from current state.")
+            if not broker_order_fill_list or any(
+                fill_obj.raw_payload_dict.get("incubation_settlement_version_int") != 1
+                for fill_obj in broker_order_fill_list
+            ):
+                raise ValueError("Incubation settlement requires versioned fill evidence.")
+            # *** CRITICAL*** No partial execution evidence may survive a crash:
+            # prices, fills, cash and portfolio/history commit or roll back together.
+            self.upsert_session_open_price_list(session_open_price_list, connection_obj=connection_obj)
+            self.upsert_vplan_broker_order_record_list(broker_order_record_list, connection_obj=connection_obj)
+            self.insert_vplan_broker_order_event_list(broker_order_event_list, connection_obj=connection_obj)
+            self.upsert_vplan_fill_list(broker_order_fill_list, connection_obj=connection_obj)
+            self.insert_cash_ledger_entry_list(cash_ledger_entry_list, connection_obj=connection_obj)
+            self.upsert_pod_state(settled_pod_state_obj, snapshot_stage_str="post_execution",
+                                  snapshot_source_str="virtual_broker", connection_obj=connection_obj)
+        return True
+
+    def upsert_vplan_fill_list(
+        self, fill_list: Iterable[BrokerOrderFill], *, connection_obj: sqlite3.Connection | None = None,
+    ) -> None:
+        with (nullcontext(connection_obj) if connection_obj is not None else self._connect()) as connection_obj:
             for fill_obj in fill_list:
                 connection_obj.execute(
                     """
@@ -1589,8 +1790,10 @@ class LiveStateStore(CoreLiveStateStore):
     def insert_cash_ledger_entry_list(
         self,
         cash_ledger_entry_list: Iterable[CashLedgerEntry],
+        *,
+        connection_obj: sqlite3.Connection | None = None,
     ) -> None:
-        with self._connect() as connection_obj:
+        with (nullcontext(connection_obj) if connection_obj is not None else self._connect()) as connection_obj:
             for cash_ledger_entry_obj in cash_ledger_entry_list:
                 connection_obj.execute(
                     """
@@ -1666,11 +1869,12 @@ class LiveStateStore(CoreLiveStateStore):
             ).fetchone()
         return float(row_obj["cash_delta_sum_float"])
 
-    def get_fill_row_dict_list_for_vplan(self, vplan_id_int: int) -> list[dict]:
+    def get_fill_row_dict_list_for_vplan(self, vplan_id_int: int, *, include_order_identity_bool: bool = False) -> list[dict]:
         with self._connect() as connection_obj:
             row_list = connection_obj.execute(
                 """
                 SELECT
+                    broker_order_id_str,
                     asset_str,
                     fill_amount_float,
                     fill_price_float,
@@ -1685,6 +1889,7 @@ class LiveStateStore(CoreLiveStateStore):
             ).fetchall()
         return [
             {
+                **({"broker_order_id_str": str(row_obj["broker_order_id_str"])} if include_order_identity_bool else {}),
                 "asset_str": row_obj["asset_str"],
                 "fill_amount_float": float(row_obj["fill_amount_float"]),
                 "fill_price_float": float(row_obj["fill_price_float"]),

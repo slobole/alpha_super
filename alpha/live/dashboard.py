@@ -4572,6 +4572,16 @@ def _build_execution_report_from_vplan_dict(
         str(row_dict.get("asset_str")): row_dict
         for row_dict in vplan_dict.get("vplan_row_dict_list", [])
     }
+    for asset_str, row_dict in list(vplan_row_map_dict.items()):
+        if sum(str(leg_dict.get("asset_str")) == asset_str for leg_dict in vplan_dict.get("vplan_row_dict_list", [])) > 1:
+            # A CORE5 close/open transition has two order legs. The asset-level
+            # report must show the original account position and total delta.
+            vplan_row_map_dict[asset_str] = {
+                **row_dict,
+                "current_share_float": current_share_map_dict[asset_str],
+                "target_share_float": target_share_map_dict[asset_str],
+                "order_delta_share_float": order_delta_map_dict[asset_str],
+            }
     latest_broker_order_map_dict: dict[str, dict[str, Any]] = {}
     for broker_order_row_dict in vplan_dict.get("broker_order_row_dict_list", []):
         asset_str = str(broker_order_row_dict.get("asset_str"))
