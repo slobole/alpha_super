@@ -1,2 +1,7 @@
 *.pdf binary
 *.png binary
+
+# Preserve exact bytes used by frozen artifact manifests.
+/docs/research/knowledge-base/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+/docs/research/alpha-studies/mr-deeper-dip-entry-study/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+/tests/fixtures/month_end_rebalancing_flow/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
