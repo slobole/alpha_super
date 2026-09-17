@@ -56,6 +56,7 @@ def _run_watchdog(
     extra_argv_list: list[str] | None = None,
     heartbeat_env_url_str: str | None = None,
     discord_webhook_url_str: str | None = None,
+    discord_delivery_bool: bool = True,
 ) -> tuple[int, list[tuple[str, dict[str, object]]], list[tuple[str, dict[str, object]]], Path]:
     # Without this stub the real config.env would clobber test env vars via
     # override_existing_bool=True.
@@ -88,7 +89,7 @@ def _run_watchdog(
 
     def fake_post_discord_webhook_bool(url_str, payload_dict):
         webhook_call_list.append((url_str, payload_dict))
-        return True
+        return discord_delivery_bool
 
     monkeypatch.setattr(
         notifications_module,
@@ -229,6 +230,27 @@ def test_watchdog_red_transition_fires_webhook_once_across_runs(
     assert len(webhook_total_call_list) == 1
     state_dict = json.loads(state_path_obj.read_text(encoding="utf-8"))
     assert state_dict["pod_severity_map_dict"]["pod_taa_live_01"] == "red"
+
+
+def test_watchdog_retries_failed_discord_without_changing_red_heartbeat(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    webhook_total_call_list = []
+    for delivery_bool, expected_attempt_count_int in [(False, 1), (True, 1), (True, 0)]:
+        return_code_int, heartbeat_call_list, webhook_call_list, output_path_obj = _run_watchdog(
+            monkeypatch, tmp_path, summary_dict=_summary_dict(severity_str="red"),
+            discord_webhook_url_str="https://discord.example/webhook",
+            discord_delivery_bool=delivery_bool, heartbeat_env_url_str=HEARTBEAT_URL_STR,
+        )
+        assert return_code_int == 1
+        assert len(webhook_call_list) == expected_attempt_count_int
+        assert [url_str for url_str, payload_dict in heartbeat_call_list] == [HEARTBEAT_URL_STR + "/fail"]
+        assert json.loads(output_path_obj.read_text(encoding="utf-8"))["overall_severity_str"] == "red"
+        result_dict = json.loads(capsys.readouterr().out)
+        assert result_dict["notification_fired_count_int"] == expected_attempt_count_int
+        assert result_dict["heartbeat_status_str"] == "sent"
+        webhook_total_call_list.extend(webhook_call_list)
+    assert len(webhook_total_call_list) == 2
 
 
 def test_watchdog_yellow_norgate_waiting_does_not_fire_discord(

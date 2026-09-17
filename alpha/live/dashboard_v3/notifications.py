@@ -1,10 +1,9 @@
 """Red-transition Discord notifications for Dashboard V3.
 
-A pod's severity moving from {gray, green, yellow} → red fires exactly one
-webhook. Subsequent polls re-read the persisted severity state; no second
-notification is sent until the pod recovers to non-red and then turns red
-again. Operators can close the laptop and trust the system to surface
-genuine new problems.
+A pod's severity moving from {gray, green, yellow} → red attempts a webhook.
+Failed deliveries are persisted and retried once per monitoring pass while
+the subject remains red. Confirmed delivery suppresses further attempts until
+recovery and a new red transition. Pod and Inspector alerts use the same rule.
 
 Stdlib-only HTTP — no `requests` dep added. Missing webhook URL → silent.
 """
@@ -34,11 +33,13 @@ INSPECTOR_NOTIFICATION_KEY_STR = "__inspector__"
 class NotificationState:
     pod_severity_map_dict: dict[str, str] = field(default_factory=dict)
     last_updated_str: str = ""
+    pending_red_previous_severity_map_dict: dict[str, str] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "pod_severity_map_dict": dict(self.pod_severity_map_dict),
             "last_updated_str": self.last_updated_str,
+            "pending_red_previous_severity_map_dict": dict(self.pending_red_previous_severity_map_dict),
         }
 
 
@@ -60,9 +61,16 @@ class NotificationStateStore:
         raw_map_obj = payload_obj.get("pod_severity_map_dict") or {}
         if not isinstance(raw_map_obj, dict):
             raw_map_obj = {}
+        # Legacy state has no delivery evidence: do not replay old red alerts.
+        raw_pending_map_obj = payload_obj.get("pending_red_previous_severity_map_dict") or {}
+        if not isinstance(raw_pending_map_obj, dict):
+            raw_pending_map_obj = {}
         return NotificationState(
             pod_severity_map_dict={str(k): str(v) for k, v in raw_map_obj.items()},
             last_updated_str=str(payload_obj.get("last_updated_str") or ""),
+            pending_red_previous_severity_map_dict={
+                str(key_str): str(severity_str) for key_str, severity_str in raw_pending_map_obj.items()
+            },
         )
 
     def save_state(self, state_obj: NotificationState) -> None:
@@ -116,24 +124,29 @@ def check_and_notify_for_red_transitions(
     webhook_poster_fn: WebhookPosterFn = post_discord_webhook_bool,
 ) -> list[NotificationFiredRecord]:
     """Compare each pod's current severity against the persisted last-known
-    severity. Fire a webhook for every pod that just transitioned to red.
-    Always update the state file even when the webhook URL is empty so the
-    first time the operator configures the env var we don't fire a flood of
-    backfilled alerts.
+    severity. Attempt new red alerts and retry known failed deliveries while
+    still red. Keep observed severity separate from delivery state. A missing
+    URL remains disabled without backfill, but preserves an existing retry.
     """
     fired_list: list[NotificationFiredRecord] = []
     state_obj = state_store_obj.load_state()
     new_severity_map_dict: dict[str, str] = {}
+    new_pending_map_dict: dict[str, str] = {}
     for row_dict in summary_dict.get("pod_row_dict_list") or []:
         pod_id_str = str(row_dict.get("pod_id_str") or "")
         if not pod_id_str:
             continue
         current_severity_str = _effective_severity_str(row_dict)
         new_severity_map_dict[pod_id_str] = current_severity_str
-        previous_severity_str = state_obj.pod_severity_map_dict.get(pod_id_str, "")
-        if current_severity_str == "red" and previous_severity_str != "red":
+        pending_retry_bool = pod_id_str in state_obj.pending_red_previous_severity_map_dict
+        previous_severity_str = state_obj.pending_red_previous_severity_map_dict.get(
+            pod_id_str, state_obj.pod_severity_map_dict.get(pod_id_str, "")
+        )
+        if current_severity_str == "red" and (previous_severity_str != "red" or pending_retry_bool):
             payload_dict = _build_discord_payload_dict(row_dict, previous_severity_str)
             delivered_bool = bool(webhook_url_str) and webhook_poster_fn(webhook_url_str, payload_dict)
+            if not delivered_bool and (webhook_url_str or pending_retry_bool):
+                new_pending_map_dict[pod_id_str] = previous_severity_str
             fired_list.append(
                 NotificationFiredRecord(
                     pod_id_str=pod_id_str,
@@ -157,16 +170,19 @@ def check_and_notify_for_red_transitions(
     inspector_severity_str = str(inspector_report_dict.get("overall_severity_str") or "")
     if inspector_severity_str:
         new_severity_map_dict[INSPECTOR_NOTIFICATION_KEY_STR] = inspector_severity_str
-        previous_severity_str = state_obj.pod_severity_map_dict.get(
+        pending_retry_bool = INSPECTOR_NOTIFICATION_KEY_STR in state_obj.pending_red_previous_severity_map_dict
+        previous_severity_str = state_obj.pending_red_previous_severity_map_dict.get(
             INSPECTOR_NOTIFICATION_KEY_STR,
-            "",
+            state_obj.pod_severity_map_dict.get(INSPECTOR_NOTIFICATION_KEY_STR, ""),
         )
-        if inspector_severity_str == "red" and previous_severity_str != "red":
+        if inspector_severity_str == "red" and (previous_severity_str != "red" or pending_retry_bool):
             payload_dict = _build_inspector_payload_dict(
                 inspector_report_dict,
                 previous_severity_str,
             )
             delivered_bool = bool(webhook_url_str) and webhook_poster_fn(webhook_url_str, payload_dict)
+            if not delivered_bool and (webhook_url_str or pending_retry_bool):
+                new_pending_map_dict[INSPECTOR_NOTIFICATION_KEY_STR] = previous_severity_str
             fired_list.append(
                 NotificationFiredRecord(
                     pod_id_str=INSPECTOR_NOTIFICATION_KEY_STR,
@@ -177,6 +193,8 @@ def check_and_notify_for_red_transitions(
                 )
             )
     state_obj.pod_severity_map_dict = new_severity_map_dict
+    # Recovered/removed subjects and confirmed deliveries leave no retry backlog.
+    state_obj.pending_red_previous_severity_map_dict = new_pending_map_dict
     state_obj.last_updated_str = str(summary_dict.get("as_of_timestamp_str") or "")
     state_store_obj.save_state(state_obj)
     return fired_list

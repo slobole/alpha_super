@@ -104,6 +104,18 @@ per Pod/Inspector transition to red. It is browser-driven, not a background
 monitor. Its state is `alpha/live/logs/notification_state.json`. Missing webhook
 means silent. Recovery permits a later red transition to alert again.
 
+With a configured webhook, failed deliveries retry once on each monitoring pass
+while the Pod or Inspector remains red. The scheduled watchdog normally retries
+on its next 5-minute run; an actions-enabled dashboard retries on its next
+top-bar poll. Confirmed delivery stops retries. Recovery or removal clears the
+pending alert. Current severity stays red even when delivery fails.
+
+Retry state survives process restarts in an optional JSON field. Legacy red
+states without delivery evidence are not replayed on upgrade. A missing webhook
+still disables new alerts without later backfill; an already failed delivery
+remains pending if its webhook is temporarily removed. A timeout after Discord
+accepted a message, or a process exit before state is saved, can cause a duplicate.
+
 ## Live OPS Inspector
 
 Dashboard V3 surfaces the Inspector verdict near the top of each mode page. The

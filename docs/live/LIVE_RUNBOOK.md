@@ -283,6 +283,13 @@ in `alpha/live/logs/watchdog_notification_state.json`; if the dashboard also has
 `ALPHA_DISCORD_WEBHOOK_URL` set, the same red transition can alert twice —
 harmless, accepted.
 
+Failed Discord deliveries with a configured webhook are remembered and retried
+once on the next watchdog run while the same Pod/Inspector remains red.
+Confirmed delivery stops retries; recovery clears the pending alert. This does
+not change report severity, heartbeat `/fail` behavior, or the task schedule.
+See [Discord notifications](DASHBOARD_V3_RUNBOOK.md#discord-red-alert-notifications-optional)
+for restart, legacy-state, and missing-webhook behavior.
+
 The low-level building block `scripts/live_ops_heartbeat.py` still exists for
 ad-hoc pings, but the watchdog is the supported scheduled path: the heartbeat
 must be emitted by the inspector run itself, otherwise the dead-man switch
