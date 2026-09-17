@@ -675,6 +675,13 @@ class IncubationBrokerAdapter(BrokerAdapter):
             self._settle_vplan(vplan_obj)
 
     def _settle_vplan(self, vplan_obj: VPlan) -> None:
+        if all(abs(float(row_obj.order_delta_share_float)) <= 1e-9 for row_obj in vplan_obj.vplan_row_list) and all(
+            abs(float(quantity_float)) <= 1e-9 for quantity_float in vplan_obj.order_delta_map.values()
+        ):
+            # No orders means no fills or cash movement to settle. Normal runner
+            # reconciliation still checks holdings and completes the cycle.
+            # Check each leg too: opposite orders can have a zero net delta.
+            return
         release_obj = self.state_store_obj.get_release_by_id(vplan_obj.release_id_str)
         pod_state_obj = self._get_pod_state_or_default(release_obj)
         fill_price_field_str = "Close" if vplan_obj.execution_policy_str == "same_day_moc" else "Open"
