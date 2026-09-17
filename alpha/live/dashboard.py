@@ -691,6 +691,7 @@ def build_pod_row_dict(
         "exception_count_int": 0,
         "latest_reconciliation_status_str": None,
         "latest_reconciliation_timestamp_str": None,
+        "reconcile_read_failure_dict": None,
         "latest_diff_status_str": str(latest_diff_dict.get("comparison_state_str", "not_run")),
         "latest_diff_timestamp_str": latest_diff_dict.get("artifact_timestamp_str"),
         "latest_diff_equity_tracking_error_float": latest_diff_dict.get(
@@ -939,6 +940,9 @@ def build_pod_row_dict(
         if reconciliation_row_dict.get("status_str") != "passed":
             base_row_dict["exception_count_int"] = 1
 
+    base_row_dict["reconcile_read_failure_dict"] = _active_reconcile_read_failure_dict(
+        base_row_dict, reconciliation_row_dict, event_log_path_str, as_of_ts,
+    )
     next_action_dict = _derive_next_action_dict(
         release_obj=release_obj,
         latest_decision_plan_row_dict=latest_decision_plan_row_dict,
@@ -1143,6 +1147,75 @@ def _iter_event_dict_reverse(log_path_obj: Path):
                     yield event_dict
     finally:
         file_obj.close()
+
+
+def _active_reconcile_read_failure_dict(
+    row_dict: dict[str, Any],
+    reconciliation_row_dict: dict[str, Any] | None,
+    log_path_str: str | None,
+    as_of_ts: datetime,
+) -> dict[str, Any] | None:
+    # This is monitoring evidence, not an execution exception or a new gate.
+    if (
+        row_dict.get("mode_str") != "live"
+        or row_dict.get("latest_vplan_status_str") not in {"submitted", "submitting"}
+        or _latest_vplan_is_for_latest_decision_bool(row_dict) is not True
+        or log_path_str is None
+    ):
+        return None
+    cycle_identity_dict = {
+        "mode_str": "live",
+        "pod_id_str": row_dict.get("pod_id_str"),
+        "account_route_str": row_dict.get("account_route_str"),
+        "release_id_str": row_dict.get("latest_decision_release_id_str"),
+        "decision_plan_id_int": row_dict.get("latest_decision_plan_id_int"),
+        "vplan_id_int": row_dict.get("latest_vplan_id_int"),
+    }
+    submission_ts = parse_timestamp_ts(row_dict.get("latest_vplan_submission_timestamp_str"))
+    target_ts = parse_timestamp_ts(row_dict.get("latest_vplan_target_execution_timestamp_str"))
+    if submission_ts is None or target_ts is None or as_of_ts < target_ts:
+        return None
+    reconciliation_ts = None
+    if (
+        reconciliation_row_dict is not None
+        and reconciliation_row_dict.get("vplan_id_int") == row_dict.get("latest_vplan_id_int")
+        and reconciliation_row_dict.get("stage_str") == "post_execution"
+    ):
+        reconciliation_ts = parse_timestamp_ts(reconciliation_row_dict.get("created_timestamp_str"))
+    for candidate_path_obj in reversed(_event_log_path_obj_list(Path(log_path_str))):
+        for event_dict in _iter_event_dict_reverse(candidate_path_obj):
+            event_name_str = event_dict.get("event_name_str")
+            if event_name_str not in {"post_execution_reconcile_failed", "build_vplan_created", "submit_vplan_completed"}:
+                continue
+            if any(event_dict.get(key_str) != value_obj for key_str, value_obj in cycle_identity_dict.items()):
+                continue
+            if (
+                parse_timestamp_ts(event_dict.get("submission_timestamp_str")) != submission_ts
+                or parse_timestamp_ts(event_dict.get("target_execution_timestamp_str")) != target_ts
+            ):
+                continue
+            failure_ts = parse_timestamp_ts(_event_timestamp_str(event_dict))
+            # A matching creation/pre-execution submission is an append-order
+            # boundary: this cycle cannot have a read failure before it. Avoid
+            # parsing retained history on every healthy monitoring refresh.
+            if failure_ts is not None and failure_ts <= as_of_ts and (
+                event_name_str == "build_vplan_created"
+                or (event_name_str == "submit_vplan_completed" and failure_ts < target_ts)
+            ):
+                return None
+            if event_name_str != "post_execution_reconcile_failed":
+                continue
+            if failure_ts is None or not target_ts <= failure_ts <= as_of_ts:
+                continue
+            # A new real observation clears the read failure, even if the
+            # resulting position comparison has its own independent blocker.
+            if reconciliation_ts is not None and reconciliation_ts > failure_ts:
+                return None
+            return {
+                "error_str": str(event_dict.get("error_str") or "Reconciliation read failed."),
+                "timestamp_str": failure_ts.isoformat(),
+            }
+    return None
 
 
 def _latest_event_timestamp_str(log_path_str: str | None, pod_id_str: str) -> str | None:
@@ -2505,6 +2578,8 @@ def _resolve_health_str(row_dict: dict[str, Any]) -> str:
         return "red"
     if int(row_dict.get("exception_count_int") or 0) > 0:
         return "red"
+    if row_dict.get("reconcile_read_failure_dict"):
+        return "red"
     if row_dict.get("next_action_str") == "missed_decision_cycle":
         return "red"
     if row_dict.get("next_action_str") in {
@@ -2694,6 +2769,11 @@ def _build_required_action_base_dict(row_dict: dict[str, Any]) -> dict[str, Any]
             "red",
             f"Missing ACK count: {int(row_dict.get('missing_ack_count_int') or 0)}.",
             "show_vplan",
+        )
+    if row_dict.get("reconcile_read_failure_dict"):
+        return _required_action_dict(
+            "Review reconcile read", "red",
+            str(row_dict["reconcile_read_failure_dict"]["error_str"]), "status",
         )
     if int(row_dict.get("exception_count_int") or 0) > 0:
         return _required_action_dict(
@@ -3069,6 +3149,12 @@ def _build_fill_step_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
 
 
 def _build_reconcile_step_dict(row_dict: dict[str, Any]) -> dict[str, Any]:
+    failure_dict = row_dict.get("reconcile_read_failure_dict")
+    if failure_dict:
+        return _lifecycle_step_dict(
+            "reconcile", "Reconcile", "read_failed", "red",
+            str(failure_dict["error_str"]), failure_dict["timestamp_str"],
+        )
     status_str = str(row_dict.get("latest_reconciliation_status_str") or "none")
     if status_str == "none":
         severity_str = "yellow" if row_dict.get("next_action_str") == "post_execution_reconcile" else "gray"
@@ -3861,6 +3947,19 @@ def _build_debug_candidate_dict_list(row_dict: dict[str, Any]) -> list[dict[str,
                 evidence_str=f"missing_ack_count={missing_ack_count_int}, submit_ack_status={row_dict.get('latest_submit_ack_status_str')}, vplan_cycle={row_dict.get('latest_vplan_cycle_role_str')}",
                 inspect_command_name_str="show_vplan",
                 timestamp_str=row_dict.get("latest_vplan_submission_timestamp_str"),
+            )
+        )
+    failure_dict = row_dict.get("reconcile_read_failure_dict")
+    if failure_dict:
+        candidate_dict_list.append(
+            _debug_candidate_dict(
+                priority_int=35,
+                severity_str="red",
+                label_str="Reconcile read failed",
+                reason_str=str(failure_dict["error_str"]),
+                evidence_str=f"vplan_id={row_dict.get('latest_vplan_id_int')}; required reconciliation read failed",
+                inspect_command_name_str="status",
+                timestamp_str=failure_dict["timestamp_str"],
             )
         )
     if int(row_dict.get("exception_count_int") or 0) > 0:

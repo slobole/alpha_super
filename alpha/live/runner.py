@@ -3765,47 +3765,65 @@ def post_execution_reconcile(
         release_obj = state_store_obj.get_release_by_id(vplan_obj.release_id_str)
         if release_obj.mode_str != env_mode_str:
             continue
-        broker_adapter_obj = broker_adapter_resolver_obj.get_adapter(release_obj)
-        decision_plan_obj = state_store_obj.get_decision_plan_by_id(int(vplan_obj.decision_plan_id_int))
-        broker_snapshot_obj = broker_adapter_obj.get_account_snapshot(vplan_obj.account_route_str)
-        state_store_obj.upsert_broker_snapshot_cache(broker_snapshot_obj)
-        existing_broker_order_row_dict_list = state_store_obj.get_broker_order_row_dict_list_for_vplan(
-            int(vplan_obj.vplan_id_int or 0)
-        )
-        known_broker_order_id_set = {
-            str(broker_order_row_dict["broker_order_id_str"])
-            for broker_order_row_dict in existing_broker_order_row_dict_list
-        }
-        broker_order_record_list, broker_order_event_list, broker_fill_list = (
-            broker_adapter_obj.get_recent_order_state_snapshot(
+        try:
+            broker_adapter_obj = broker_adapter_resolver_obj.get_adapter(release_obj)
+            decision_plan_obj = state_store_obj.get_decision_plan_by_id(int(vplan_obj.decision_plan_id_int))
+            broker_snapshot_obj = broker_adapter_obj.get_account_snapshot(vplan_obj.account_route_str)
+            state_store_obj.upsert_broker_snapshot_cache(broker_snapshot_obj)
+            existing_broker_order_row_dict_list = state_store_obj.get_broker_order_row_dict_list_for_vplan(
+                int(vplan_obj.vplan_id_int or 0)
+            )
+            known_broker_order_id_set = {
+                str(broker_order_row_dict["broker_order_id_str"])
+                for broker_order_row_dict in existing_broker_order_row_dict_list
+            }
+            broker_order_record_list, broker_order_event_list, broker_fill_list = (
+                broker_adapter_obj.get_recent_order_state_snapshot(
+                    account_route_str=vplan_obj.account_route_str,
+                    since_timestamp_ts=vplan_obj.submission_timestamp_ts,
+                    submission_key_str=(
+                        str(vplan_obj.submission_key_str)
+                        if vplan_obj.submission_key_str is not None
+                        else f"vplan:{vplan_obj.decision_plan_id_int}"
+                    ),
+                    allowed_broker_order_id_set=known_broker_order_id_set,
+                )
+            )
+            session_open_context_dict = _session_open_context_dict(
+                release_obj=release_obj,
+                reference_timestamp_ts=vplan_obj.target_execution_timestamp_ts,
+            )
+            open_universe_asset_set = set(broker_snapshot_obj.position_amount_map) | set(
+                get_touched_asset_list_for_decision_plan(
+                    decision_plan_obj,
+                    broker_position_map_dict=broker_snapshot_obj.position_amount_map,
+                )
+            )
+            # *** CRITICAL*** Session-open lookup must be anchored to the target execution session,
+            # never a later timestamp, or fill-vs-open slippage would leak future session context.
+            session_open_price_list = broker_adapter_obj.get_session_open_price_list(
                 account_route_str=vplan_obj.account_route_str,
-                since_timestamp_ts=vplan_obj.submission_timestamp_ts,
-                submission_key_str=(
-                    str(vplan_obj.submission_key_str)
-                    if vplan_obj.submission_key_str is not None
-                    else f"vplan:{vplan_obj.decision_plan_id_int}"
-                ),
-                allowed_broker_order_id_set=known_broker_order_id_set,
+                asset_str_list=sorted(open_universe_asset_set),
+                session_open_timestamp_ts=session_open_context_dict["session_open_timestamp_ts"],
+                session_calendar_id_str=release_obj.session_calendar_id_str,
             )
-        )
-        session_open_context_dict = _session_open_context_dict(
-            release_obj=release_obj,
-            reference_timestamp_ts=vplan_obj.target_execution_timestamp_ts,
-        )
-        open_universe_asset_set = set(broker_snapshot_obj.position_amount_map) | set(
-            get_touched_asset_list_for_decision_plan(
-                decision_plan_obj,
-                broker_position_map_dict=broker_snapshot_obj.position_amount_map,
-            )
-        )
-        # *** CRITICAL*** Session-open lookup must be anchored to the target execution session,
-        # never a later timestamp, or fill-vs-open slippage would leak future session context.
-        session_open_price_list = broker_adapter_obj.get_session_open_price_list(
-            account_route_str=vplan_obj.account_route_str,
-            asset_str_list=sorted(open_universe_asset_set),
-            session_open_timestamp_ts=session_open_context_dict["session_open_timestamp_ts"],
-            session_calendar_id_str=release_obj.session_calendar_id_str,
-        )
+        except Exception as exception_obj:
+            # Record the actual failed Pod/VPlan; a shared scheduler tick may
+            # contain several Pods. Preserve its existing exception/retry path.
+            try:
+                log_event(
+                    "post_execution_reconcile_failed",
+                    _build_vplan_log_payload_dict(
+                        release_obj, vplan_obj, as_of_ts,
+                        {"error_str": str(exception_obj) or type(exception_obj).__name__, "severity_str": "error"},
+                    ),
+                    log_path_str=log_path_str,
+                )
+            except OSError:
+                # The scheduler must still receive the original failure if
+                # the event log cannot be written (for example a full disk).
+                pass
+            raise
         state_store_obj.upsert_session_open_price_list(session_open_price_list)
         session_open_price_map_dict = state_store_obj.get_session_open_price_map_dict(
             account_route_str=vplan_obj.account_route_str,

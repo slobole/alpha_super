@@ -104,6 +104,27 @@ per Pod/Inspector transition to red. It is browser-driven, not a background
 monitor. Its state is `alpha/live/logs/notification_state.json`. Missing webhook
 means silent. Recovery permits a later red transition to alert again.
 
+For LIVE Pods, an actual broker-read failure during post-execution reconciliation
+now appears as **Reconcile read failed** and reaches the same red-alert path.
+The runner records the exact Pod and order-plan identity, then preserves the
+existing exception and scheduler retry behavior. Normal waiting without a
+failed read stays unchanged; no new timeout or retry-count threshold is added.
+The normal scheduler still uses its configured reconciliation grace period
+(default 300 seconds). A directly invoked reconciliation can also report a
+failed read after execution time.
+
+The read-failure alert survives process restarts while its event remains in
+the retained JSONL logs. A newer real post-execution observation for that order
+plan clears it; a position mismatch in that observation remains independently
+red. Completed or superseded cycles do not inherit old read failures. This
+monitoring rule is LIVE-only and changes no order, sizing, or completion gate.
+Keep the existing event logs available: missing or unwritable logs cannot
+provide this evidence. Older errors without the new event appear only if a
+subsequent read fails after upgrade.
+Normal scans stop at the current plan's creation/submission marker. If that
+marker is missing or aged out, finding evidence can require scanning all
+retained event files; this is not a fixed-cost lookup.
+
 With a configured webhook, failed deliveries retry once on each monitoring pass
 while the Pod or Inspector remains red. The scheduled watchdog normally retries
 on its next 5-minute run; an actions-enabled dashboard retries on its next
