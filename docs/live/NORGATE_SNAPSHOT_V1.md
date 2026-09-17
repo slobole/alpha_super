@@ -333,6 +333,10 @@ after the latest sync success/attempt timestamp.
 
 ## Operator Commands
 
+For the Git-managed background task and upgrade procedure, see
+[Norgate server deployment](NORGATE_SERVER_DEPLOYMENT.md). Pulling alone does not
+restart the API or retarget an existing task.
+
 Start the Norgate server on the Windows Norgate node:
 
 ```powershell
