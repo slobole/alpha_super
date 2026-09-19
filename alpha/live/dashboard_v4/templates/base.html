@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="htmx-config" content='{"selfRequestsOnly":true,"allowEval":false,"allowScriptTags":false,"historyCacheSize":0}'>
+  <title>ALPHA / OPS V4 · {% block title %}Overview{% endblock %}</title>
+  <style>
+    @font-face { font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 100 700; font-display: block; src: url('{{ url_for("assets", filename="fonts/IBMPlexSans-latin.woff2") }}') format('woff2'); }
+    @font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 400; font-display: block; src: url('{{ url_for("assets", filename="fonts/IBMPlexMono-400-latin.woff2") }}') format('woff2'); }
+    @font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500; font-display: block; src: url('{{ url_for("assets", filename="fonts/IBMPlexMono-500-latin.woff2") }}') format('woff2'); }
+  </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='ops.css') }}">
+  <script src="{{ url_for('assets', filename='htmx.min.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='overview.js') }}" defer></script>
+</head>
+<body hx-history="false">
+  {% block content %}{% endblock %}
+</body>
+</html>

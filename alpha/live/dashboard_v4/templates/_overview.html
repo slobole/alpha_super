@@ -1,0 +1,117 @@
+{% from "_icons.html" import icon %}
+{% set state_label_dict = {'done': 'Done', 'now': 'Now', 'next': 'Planned', 'late': 'Late', 'fail': 'Failed', 'skip': 'None', 'unk': 'Unknown'} %}
+{% set pill_class_dict = {'done': 'ok', 'now': 'work', 'next': 'idle', 'late': 'late', 'fail': 'act', 'skip': 'idle', 'unk': 'unk'} %}
+{% macro mark(state_str, label_str='') -%}
+<span class="st st-{{ state_str if state_str in state_label_dict else 'unk' }}" data-observed-state title="{{ label_str }}{{ ' · ' if label_str else '' }}{{ state_label_dict.get(state_str, 'Unknown') }}" role="img" aria-label="{{ label_str }}{{ ' · ' if label_str else '' }}{{ state_label_dict.get(state_str, 'Unknown') }}"></span>
+{%- endmacro %}
+<div class="frame" id="overview-shell" hx-get="{{ overview_dict.refresh_url_str }}" hx-trigger="every {{ overview_dict.refresh_seconds_int }}s" hx-swap="outerHTML" hx-target="this" hx-request='{"timeout":10000}' data-last-update="{{ overview_dict.updated_str }}" data-source-valid-ms="{{ overview_dict.source_valid_ms_int }}">
+  <div class="app">
+    <aside class="rail rail-c">
+      <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark">A</span>ALPHA / OPS</a>
+      <nav class="nav" aria-label="Main">
+        <a class="on" href="{{ url_for('index') }}" aria-current="page">{{ icon('overview') }}Overview</a>
+        <div class="navhead">{{ icon('pods') }}Pods</div>
+        {% for pod_dict in overview_dict.pod_list %}
+        <a class="sub kid" aria-disabled="true" title="Pod page is not available yet">{{ mark(pod_dict.state_str) }}<span class="pod-nav-name">{{ pod_dict.name_str }}</span><span class="cad" title="{{ pod_dict.cadence_str }}">{{ pod_dict.cadence_short_str }}</span></a>
+        {% endfor %}
+        <div class="nav-label">Book</div>
+        {% for icon_str, label_str in [('positions', 'Positions'), ('performance', 'Performance'), ('activity', 'Activity'), ('system', 'System health'), ('tools', 'Tools')] %}
+        <a aria-disabled="true" title="{{ label_str }} is not available yet">{{ icon(icon_str) }}{{ label_str }}</a>
+        {% endfor %}
+      </nav>
+      <div class="rail-foot">V4{% if overview_dict.demo_bool %} · sample data{% endif %}</div>
+    </aside>
+    <div class="main">
+      <div class="m-top">
+        <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark">A</span>ALPHA / OPS</a>
+        <div class="clock"><span class="t">{{ overview_dict.clock_str }} ET</span><span class="d">{{ overview_dict.date_str }} · <span data-status-label>{{ overview_dict.market_dict.label_str }}</span></span></div>
+      </div>
+      <header class="top">
+        <nav class="modes" aria-label="Mode">
+          <a class="on" href="{{ url_for('index') }}" aria-current="true" title="LIVE">{{ mark(overview_dict.live_state_str) }}LIVE</a>
+          <a aria-disabled="true" title="PAPER is not available in V4 yet"><span class="st st-disabled" aria-hidden="true"></span>PAPER</a>
+          <a aria-disabled="true" title="INCUBATION is not available in V4 yet"><span class="st st-disabled" aria-hidden="true"></span>INCUBATION</a>
+        </nav>
+        <div class="market">{{ mark(overview_dict.market_dict.state_str) }}<span><b data-status-label>{{ overview_dict.market_dict.label_str }}</b>{% if overview_dict.market_dict.detail_str %} · <span data-status-detail>{{ overview_dict.market_dict.detail_str }}</span>{% endif %}</span></div>
+        <div class="grow"></div>
+        <span class="syslight" title="System health page is not available yet">{{ mark(overview_dict.system_dict.state_str) }}<span><b data-status-label>{{ overview_dict.system_dict.label_str }}</b>{% if overview_dict.system_dict.detail_str %} · {{ overview_dict.system_dict.detail_str }}{% endif %}</span></span>
+        <span class="tag">READ-ONLY</span>
+        <div class="clock desktop-clock"><span class="t">{{ overview_dict.clock_str }} ET</span><span class="d">{{ overview_dict.date_str }} · updated <span data-update-time>{{ overview_dict.updated_str }}</span></span></div>
+      </header>
+      <main class="page calm" id="overview-content">
+        <div class="refresh-error" role="status" hidden>Unknown · <span data-refresh-reason>Update failed.</span> Last successful update <span>{{ overview_dict.updated_str }}</span>.</div>
+        <div class="page-head"><div><h1 class="h1i">{{ icon('overview') }}Overview</h1><p class="verdict"><b data-verdict>{{ overview_dict.verdict_str }}</b>{% if overview_dict.verdict_detail_str %} <span data-verdict-detail>{{ overview_dict.verdict_detail_str }}</span>{% endif %}</p></div><div class="asof">{{ overview_dict.money_asof_str }}</div></div>
+        {% if overview_dict.attention_list %}
+        <section class="attn" aria-label="Needs attention">
+          {% for attention_dict in overview_dict.attention_list %}
+          <div class="attn-row">{{ mark(attention_dict.state_str) }}<span class="row"><span class="tag tag-live">LIVE</span><span class="sname">{{ attention_dict.pod_name_str }}</span></span><span class="what"><b>{{ attention_dict.title_str }}</b>{% if attention_dict.detail_str %} {{ attention_dict.detail_str }}{% endif %}</span><span class="muted">{{ attention_dict.age_str }}</span><button class="btn btn-sm" disabled title="Pod page is not available yet">Open</button></div>
+          {% endfor %}
+        </section>
+        {% endif %}
+        <section class="tiles tiles-4" aria-label="Money at last close">
+          {% for tile_dict in overview_dict.tile_list %}
+          <div class="tile"><div class="l">{{ tile_dict.label_str }}</div><div class="v {{ tile_dict.tone_str if tile_dict.tone_str in ['pos', 'neg'] else '' }}">{{ tile_dict.value_str }}</div><div class="s">{{ tile_dict.detail_str }}</div></div>
+          {% endfor %}
+        </section>
+        <section class="panel pods-panel" aria-label="Pod cycles">
+          <div class="shead"><span>Pod</span><span>Cycle</span><span>Now</span><span>Next</span></div>
+          {% for pod_dict in overview_dict.pod_list %}
+          <div class="srow" data-pod-id="{{ pod_dict.pod_id_str }}">
+            <div class="who"><span class="row"><span class="sname" title="Pod page is not available yet">{{ pod_dict.name_str }}</span><span class="pill pill-{{ pill_class_dict.get(pod_dict.state_str, 'unk') }}" data-pod-pill>{{ mark(pod_dict.state_str) }}<span data-pill-label>{{ pod_dict.pill_str }}</span></span></span><span class="muted">{{ pod_dict.cadence_str }}</span></div>
+            <div class="cycle-cell"><span class="track{{ ' is-idle' if pod_dict.state_str == 'skip' else '' }}" aria-label="{{ pod_dict.name_str }} cycle">
+              {% for step_dict in pod_dict.step_list %}
+              <span class="tk{{ ' plan' if step_dict.state_str in ['next', 'skip', 'unk'] else '' }}{{ ' f-' + step_dict.state_str if step_dict.state_str in ['fail', 'late', 'now'] else '' }}" title="{{ step_dict.name_str }} · {{ state_label_dict.get(step_dict.state_str, 'Unknown') }}{% if step_dict.detail_str %} · {{ step_dict.detail_str }}{% endif %}{% if step_dict.time_str %} · {{ step_dict.time_str }}{% endif %}">{{ mark(step_dict.state_str, step_dict.name_str) }}<span class="tl">{{ step_dict.name_str }}</span></span>
+              {% endfor %}
+            </span></div>
+            <div class="now-cell"><div class="big{{ ' neg' if pod_dict.state_str == 'fail' else ' amb' if pod_dict.state_str == 'late' else '' }}" data-pod-now>{{ pod_dict.now_str }}</div><div class="sub" data-now-detail>{{ pod_dict.now_detail_str }}</div></div>
+            <div class="next-cell"><div class="big{{ ' neg' if pod_dict.state_str == 'fail' else '' }}" data-pod-next>{{ pod_dict.next_str }}{% if pod_dict.next_time_str %} <span class="mono">{{ pod_dict.next_time_str }}</span>{% endif %}</div><div class="sub mono" data-next-detail>{{ pod_dict.next_detail_str }}</div></div>
+          </div>
+          {% else %}
+          <div class="empty-state">No LIVE pods found.</div>
+          {% endfor %}
+        </section>
+        <div class="cols c-6-6 finance-panels">
+          <section class="panel"><div class="panel-h"><span class="panel-t">Account value</span><nav class="seg" aria-label="Account value period">
+            {% for option_dict in overview_dict.period_option_list %}
+            <a href="{{ option_dict.url_str }}" class="{{ 'on' if option_dict.selected_bool else '' }}" data-period="{{ option_dict.label_str }}"{% if option_dict.selected_bool %} aria-current="true"{% endif %}>{{ option_dict.label_str }}</a>
+            {% endfor %}
+          </nav></div>
+          <div class="panel-b">
+            {% set chart_dict = overview_dict.chart_dict %}
+            {% if chart_dict.available_bool %}
+            <svg class="chart" viewBox="0 0 560 238" role="img" aria-label="Account value · {{ overview_dict.period_str }}"><title>Account value · {{ overview_dict.period_str }}</title>
+              {% for tick_dict in chart_dict.y_tick_list %}<line class="grid" x1="40" y1="{{ tick_dict.y_float }}" x2="496" y2="{{ tick_dict.y_float }}"></line><text class="ta-e" x="34" y="{{ tick_dict.y_float + 3.5 }}">{{ tick_dict.label_str }}</text>{% endfor %}
+              <line class="axis" x1="40" y1="216" x2="496" y2="216"></line>
+              {% for tick_dict in chart_dict.x_tick_list %}<text x="{{ tick_dict.x_float }}" y="231">{{ tick_dict.label_str }}</text>{% endfor %}
+              {% for segment_dict in chart_dict.segment_list %}<polygon class="area" points="{{ segment_dict.area_str }}"></polygon><polyline class="line" points="{{ segment_dict.point_str }}"></polyline>{% endfor %}
+              {% for point_dict in chart_dict.isolated_point_list %}<circle class="end" cx="{{ point_dict.x_float }}" cy="{{ point_dict.y_float }}" r="3"><title>{{ point_dict.label_str }}</title></circle>{% endfor %}
+              <circle class="end" cx="{{ chart_dict.end_x_float }}" cy="{{ chart_dict.end_y_float }}" r="4.5"></circle><text class="lbl" x="{{ chart_dict.end_x_float + 9 }}" y="{{ chart_dict.end_y_float + 4 }}">{{ chart_dict.end_label_str }}</text>
+            </svg>
+            {% else %}<div class="empty-state chart-empty">{{ chart_dict.empty_str }}</div>{% endif %}
+          </div>{% if chart_dict.source_str %}<div class="finance-source">{{ chart_dict.source_str }}{% if chart_dict.date_str %} · {{ chart_dict.date_str }}{% endif %}</div>{% endif %}</section>
+          <section class="panel"><div class="panel-h"><span class="panel-t">Allocation</span></div>
+            {% set allocation_dict = overview_dict.allocation_dict %}
+            {% if allocation_dict.available_bool or allocation_dict.row_list %}
+            <div class="alloc">
+              {% if allocation_dict.available_bool %}<svg class="chart donut" viewBox="0 0 300 250" role="img" aria-label="Allocation · Cash {{ allocation_dict.cash_percent_str }}"><title>Allocation. Cash {{ allocation_dict.cash_percent_str }}.</title>
+              {% for slice_dict in allocation_dict.slice_list %}<path class="slice" fill="{{ slice_dict.color_str }}" d="{{ slice_dict.path_str }}"><title>{{ slice_dict.label_str }}</title></path>{% endfor %}
+              {% for label_dict in allocation_dict.label_list %}<text class="ink" x="{{ label_dict.x_float }}" y="{{ label_dict.y_float }}">{{ label_dict.label_str }}</text>{% endfor %}
+              <text class="c1 ta-m" x="116" y="127">{{ allocation_dict.cash_percent_str }}</text><text class="c2 ta-m" x="116" y="144">cash</text></svg>
+              {% else %}<div class="empty-state allocation-empty">{{ allocation_dict.empty_str }}</div>{% endif %}
+              <table class="tbl dense"><thead><tr><th scope="col"><span class="sr-only">Pod</span></th><th class="num" scope="col">{{ allocation_dict.invested_heading_str }}</th><th class="num" scope="col">Cash</th></tr></thead><tbody>
+                {% for row_dict in allocation_dict.row_list %}<tr><td><i class="dotk" style="background: {{ row_dict.color_str }}"></i>{{ row_dict.name_str }}</td><td class="num">{{ row_dict.invested_str }}</td><td class="num">{{ row_dict.cash_str }}</td></tr>{% endfor %}
+                <tr class="tot"><td><b>Total</b></td><td class="num">{{ allocation_dict.total_invested_str }}</td><td class="num">{{ allocation_dict.total_cash_str }}</td></tr>
+              </tbody></table>
+            </div>
+            {% else %}<div class="empty-state allocation-empty">{{ allocation_dict.empty_str }}</div>{% endif %}
+          </section>
+        </div>
+      </main>
+      {% if overview_dict.demo_bool %}<div class="sample">Sample data. Not a real account.</div>{% endif %}
+      <nav class="m-tabs" aria-label="Main on mobile">
+        <a class="on" href="{{ url_for('index') }}" aria-current="page">{{ icon('overview') }}Overview</a>
+        {% for icon_str, label_str in [('positions', 'Positions'), ('performance', 'Results'), ('activity', 'Activity'), ('system', 'System')] %}<a aria-disabled="true" title="{{ label_str }} is not available yet">{{ icon(icon_str) }}{{ label_str }}</a>{% endfor %}
+      </nav>
+    </div>
+  </div>
+</div>

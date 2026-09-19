@@ -1,0 +1,63 @@
+"""Reuse V3 readers while excluding non-LIVE targets before state acquisition."""
+
+from datetime import datetime
+
+from alpha.live.client_reporting import (
+    BrokerReportingSnapshot,
+    ClientReportingError,
+    load_broker_reporting_snapshot,
+)
+from alpha.live.dashboard import DashboardApp
+from alpha.live.dashboard_v3.data import DashboardDataProvider
+from alpha.live.dashboard_v3.filters import MARKET_TIMEZONE_OBJ
+from alpha.live.dashboard_v3.local_workspace import (
+    build_local_workspace_dict,
+    validate_local_bindings_unchanged,
+)
+
+
+class LiveReadOnlyApp(DashboardApp):
+    def __post_init__(self) -> None:
+        # Only get_target_list/load_config are needed. Do not create executors.
+        pass
+
+    def get_target_list(self):
+        # V3 owns release/config validation and DB path resolution. Filtering
+        # targets here prevents summary/cash readers opening PAPER/SIM state.
+        return [target_obj for target_obj in super().get_target_list()
+                if target_obj.release_obj.mode_str == "live"]
+
+
+class LiveDataProvider(DashboardDataProvider):
+    def app_obj(self) -> LiveReadOnlyApp:
+        if self._app_obj is None:
+            self._app_obj = LiveReadOnlyApp(
+                releases_root_path_str=self.releases_root_path_str,
+                config_path_str=self.config_path_str,
+                results_root_path_str=self.results_root_path_str,
+                event_log_path_str=self.event_log_path_str,
+            )
+        return self._app_obj
+
+
+def load_workspace_snapshot_tuple(provider_obj, database_path_str: str, *, as_of_ts: datetime):
+    """One local owner, one immutable Flex snapshot, unchanged V3 identity checks."""
+    workspace_dict = build_local_workspace_dict(
+        provider_obj, database_path_str,
+        today_str=as_of_ts.astimezone(MARKET_TIMEZONE_OBJ).date().isoformat(),
+    )
+    if workspace_dict["financial_error_str"]:
+        return workspace_dict, BrokerReportingSnapshot(
+            unavailable_reason_str=workspace_dict["financial_error_str"])
+    try:
+        snapshot_obj = load_broker_reporting_snapshot(
+            database_path_str,
+            allowed_account_set={account_dict["account_route"]
+                                 for account_dict in workspace_dict["valuation_account_list"]},
+            query_name_str=workspace_dict["client_dict"]["query_name"],
+        )
+        validate_local_bindings_unchanged(workspace_dict, database_path_str)
+    except (ClientReportingError, ValueError, OSError):
+        snapshot_obj = BrokerReportingSnapshot(
+            unavailable_reason_str="Saved account report could not be verified.")
+    return workspace_dict, snapshot_obj

@@ -1,0 +1,210 @@
+"""V4 uses saved LIVE evidence and cannot expose executable V3 routes."""
+
+from copy import deepcopy
+from datetime import timedelta
+from types import SimpleNamespace
+
+import pytest
+
+from alpha.live.client_reporting import BrokerReportingSnapshot
+from alpha.live.dashboard_v4.app import create_app
+from alpha.live.dashboard_v4.data import LiveDataProvider, LiveReadOnlyApp
+from alpha.live.dashboard_v4.demo import DEMO_NOW_TS, build_demo_workspace_tuple, create_demo_app
+from alpha.live.dashboard_v4.overview import build_overview_dict
+from test_dashboard_local_workspace import build_fixture_app, file_snapshot_dict
+
+
+@pytest.fixture
+def fixture_tuple():
+    return build_demo_workspace_tuple()
+
+
+def _view_dict(fixture_tuple):
+    workspace_dict, snapshot_obj, provider_obj = fixture_tuple
+    return build_overview_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=DEMO_NOW_TS)
+
+
+def test_demo_renders_native_d_shell_and_seven_step_rows(fixture_tuple):
+    app_obj = create_demo_app()
+    html_str = app_obj.test_client().get("/").get_data(as_text=True)
+    for label_str in ("ALPHA / OPS", "Overview", "Positions", "Performance", "Activity", "System health", "Tools",
+                      "Account value", "Allocation", "READ-ONLY", "Sample data. Not a real account."):
+        assert label_str in html_str
+    assert html_str.count('class="srow"') == 4
+    assert html_str.count('class="tl"') == 28
+    assert 'title="PAPER is not available in V4 yet"' in html_str
+    assert 'title="INCUBATION is not available in V4 yet"' in html_str
+    assert "2026-09-08T" not in html_str
+    assert '09:41:07 ET' in html_str
+    assert 'hx-history="false"' in html_str and '"historyCacheSize":0' in html_str
+    assert "hx-push-url" not in html_str
+    assert html_str.count('hx-get="') == 1  # One acquisition, no competing period polls.
+    partial_obj = app_obj.test_client().get("/overview/refresh?period=All")
+    assert partial_obj.status_code == 200
+    assert '<html' not in partial_obj.get_data(as_text=True)
+    assert 'data-period="All" aria-current="true"' in partial_obj.get_data(as_text=True)
+    hx_obj = app_obj.test_client().get("/?period=1M", headers={"HX-Request": "true"})
+    assert '<html' not in hx_obj.get_data(as_text=True)
+
+
+def test_healthy_monthly_idle_is_known_not_unknown(fixture_tuple, monkeypatch):
+    workspace_dict = fixture_tuple[0]
+    workspace_dict["operations_account_list"] = workspace_dict["operations_account_list"][2:]
+    monkeypatch.setattr("alpha.live.dashboard_v4.overview.build_health_rollup", lambda *args, **kwargs: SimpleNamespace(severity_str="green"))
+    view_dict = _view_dict(fixture_tuple)
+    assert {pod_dict["state_str"] for pod_dict in view_dict["pod_list"]} == {"skip"}
+    assert view_dict["live_state_str"] == "done"
+    assert view_dict["attention_list"] == []
+    assert view_dict["verdict_str"] == "No action needed."
+
+
+def test_planned_wait_is_not_an_attention_item(fixture_tuple):
+    workspace_dict = fixture_tuple[0]
+    workspace_dict["operations_account_list"] = workspace_dict["operations_account_list"][:1]
+    row_dict = workspace_dict["summary_dict"]["pod_row_dict_list"][0]
+    row_dict.update(latest_vplan_status_str="submitted", latest_reconciliation_status_str="", latest_reconciliation_timestamp_str=None,
+                    latest_vplan_target_execution_timestamp_str="2026-09-08T13:40:00+00:00",
+                    required_action_dict={"severity_str": "yellow", "label_str": "Waiting reconcile", "reason_str": "waiting_for_post_execution_reconcile"})
+    view_dict = _view_dict(fixture_tuple)
+    assert view_dict["attention_list"] == []
+    assert view_dict["pod_list"][0]["state_str"] == "now"
+
+
+@pytest.mark.parametrize("database_str", ["missing", "error"])
+def test_missing_db_is_red_attention_even_with_gray_v3_action(fixture_tuple, database_str):
+    workspace_dict = fixture_tuple[0]
+    workspace_dict["operations_account_list"] = workspace_dict["operations_account_list"][:1]
+    row_dict = workspace_dict["summary_dict"]["pod_row_dict_list"][0]
+    row_dict.update(db_status_str=database_str, required_action_dict={"severity_str": "gray", "label_str": "Setup DB"})
+    view_dict = _view_dict(fixture_tuple)
+    assert view_dict["attention_list"][0]["state_str"] == "fail"
+    assert view_dict["system_dict"]["state_str"] == "fail"
+    assert "needs action" in view_dict["verdict_str"]
+    assert {step_dict["state_str"] for step_dict in view_dict["pod_list"][0]["step_list"]} == {"unk"}
+
+
+def test_attention_preserves_real_v3_reason_field(fixture_tuple):
+    row_dict = fixture_tuple[0]["summary_dict"]["pod_row_dict_list"][1]
+    row_dict["required_action_dict"] = {"severity_str": "red", "label_str": "Review broker ACK", "reason_str": "Missing ACK count: 1."}
+    assert _view_dict(fixture_tuple)["attention_list"][0]["detail_str"] == "Missing ACK count: 1."
+
+
+def test_header_formats_norgate_timestamp_fallback_to_et_seconds(fixture_tuple):
+    for row_dict in fixture_tuple[0]["summary_dict"]["pod_row_dict_list"]:
+        row_dict["data_freshness_dict"]["item_dict_list"][0]["value_str"] = "2026-09-08T12:10:00.053574+00:00"
+    assert _view_dict(fixture_tuple)["system_dict"]["detail_str"] == "Data 09-08 08:10:00"
+
+
+def test_source_expiry_budget_uses_remaining_assessment_age(fixture_tuple):
+    fixture_tuple[0]["summary_dict"]["as_of_timestamp_str"] = (DEMO_NOW_TS - timedelta(seconds=119)).isoformat()
+    assert _view_dict(fixture_tuple)["source_valid_ms_int"] == 1000
+
+
+@pytest.mark.parametrize("age_int", [121, -1, None])
+def test_stale_future_missing_source_never_reuses_green(fixture_tuple, age_int):
+    summary_dict = fixture_tuple[0]["summary_dict"]
+    summary_dict["as_of_timestamp_str"] = (DEMO_NOW_TS - timedelta(seconds=age_int)).isoformat() if age_int is not None else None
+    view_dict = _view_dict(fixture_tuple)
+    assert view_dict["verdict_str"] == "Status unknown."
+    assert view_dict["live_state_str"] == "unk"
+    assert {step_dict["state_str"] for pod_dict in view_dict["pod_list"] for step_dict in pod_dict["step_list"]} == {"unk"}
+    assert view_dict["attention_list"] == []
+
+
+@pytest.mark.parametrize("change_str", ["account", "duplicate", "mode"])
+def test_ambiguous_or_foreign_pod_evidence_is_unknown(fixture_tuple, change_str):
+    summary_dict = fixture_tuple[0]["summary_dict"]
+    row_dict = summary_dict["pod_row_dict_list"][0]
+    if change_str == "account":
+        row_dict["account_route_str"] = "FOREIGN"
+    elif change_str == "mode":
+        row_dict["mode_str"] = "paper"
+    else:
+        summary_dict["pod_row_dict_list"].append(deepcopy(row_dict))
+    assert _view_dict(fixture_tuple)["pod_list"][0]["state_str"] == "unk"
+
+
+def test_finance_failure_keeps_operations_and_no_demo_fallback(fixture_tuple):
+    workspace_dict, _, provider_obj = fixture_tuple
+    view_dict = build_overview_dict(workspace_dict, BrokerReportingSnapshot(unavailable_reason_str="bad source"), provider_obj, as_of_ts=DEMO_NOW_TS)
+    assert len(view_dict["pod_list"]) == 4
+    assert view_dict["attention_list"]
+    assert all(tile_dict["value_str"] == "—" for tile_dict in view_dict["tile_list"])
+
+
+@pytest.mark.parametrize("path_str", ["/", "/overview/refresh"])
+@pytest.mark.parametrize("query_str", ["mode=paper", "mode=incubation", "period=bad", "period=1M&period=All", "client=foreign"])
+def test_invalid_scope_rejected_before_acquisition(path_str, query_str):
+    def forbidden_fn():
+        raise AssertionError("Provider must not be called")
+    client_obj = create_app(workspace_snapshot_fn=forbidden_fn).test_client()
+    assert client_obj.get(path_str + "?" + query_str).status_code == 400
+
+
+@pytest.mark.parametrize("method_str", ["POST", "PUT", "PATCH", "DELETE"])
+@pytest.mark.parametrize("path_str", ["/", "/actions/run", "/api/actions", "/tools/execute", "/advanced/pods/test/action", "/overview/refresh"])
+def test_all_mutations_denied_before_any_reader(method_str, path_str):
+    client_obj = create_app(workspace_snapshot_fn=lambda: pytest.fail("Unexpected read")).test_client()
+    assert client_obj.open(path_str, method=method_str).status_code == 403
+
+
+def test_read_only_routes_assets_and_remote_boundary():
+    client_obj = create_app(workspace_snapshot_fn=lambda: pytest.fail("Unexpected read")).test_client()
+    assert client_obj.get("/healthz").json == {"service": "dashboard_v4", "scope": "live", "read_only": True}
+    for path_str in ("/actions", "/actions/token", "/api/actions", "/export", "/advanced", "/assets/../app.py", "/assets/ops.css"):
+        assert client_obj.get(path_str).status_code == 404
+    response_obj = client_obj.get("/assets/fonts/IBMPlexSans-latin.woff2")
+    assert response_obj.status_code == 200
+    assert response_obj.headers["Cache-Control"] == "no-store"
+    assert "default-src 'self'" in response_obj.headers["Content-Security-Policy"]
+    assert client_obj.get("/", environ_overrides={"REMOTE_ADDR": "203.0.113.8"}, headers={"X-Forwarded-Proto": "https"}).status_code == 426
+
+
+def test_live_filter_before_summary_state_acquisition(monkeypatch):
+    target_list = [SimpleNamespace(release_obj=SimpleNamespace(mode_str=mode_str)) for mode_str in ("live", "paper", "incubation")]
+    monkeypatch.setattr("alpha.live.dashboard.DashboardApp.get_target_list", lambda self: target_list)
+    app_obj = LiveReadOnlyApp()
+    assert app_obj.get_target_list() == target_list[:1]
+    assert app_obj.diff_job_manager_obj is None
+    assert app_obj.action_job_manager_obj is None
+    assert app_obj.pod_job_gate_obj is None
+
+
+@pytest.mark.parametrize("finance_bool", [True, False])
+def test_real_saved_source_routes_never_modify_files_or_read_non_live(tmp_path, monkeypatch, finance_bool):
+    v3_app_obj = build_fixture_app(tmp_path, monkeypatch, finance_bool=finance_bool)
+    source_obj = v3_app_obj.config["data_provider_obj"]
+    provider_obj = LiveDataProvider(releases_root_path_str=source_obj.releases_root_path_str,
+        config_path_str=source_obj.config_path_str, results_root_path_str=source_obj.results_root_path_str,
+        event_log_path_str=source_obj.event_log_path_str)
+    from alpha.live import dashboard
+    original_fn = dashboard.build_pod_row_dict
+    seen_list = []
+    def live_row_fn(pod_target_obj, *args, **kwargs):
+        assert pod_target_obj.release_obj.mode_str == "live"
+        seen_list.append(pod_target_obj.release_obj.pod_id_str)
+        return original_fn(pod_target_obj, *args, **kwargs)
+    monkeypatch.setattr(dashboard, "build_pod_row_dict", live_row_fn)
+    app_obj = create_app(provider_obj, performance_db_path_str=v3_app_obj.config["performance_db_path_str"])
+    before_dict = file_snapshot_dict(tmp_path)
+    client_obj = app_obj.test_client()
+    for path_str in ("/", "/overview/refresh?period=All"):
+        response_obj = client_obj.get(path_str)
+        assert response_obj.status_code == 200
+        html_str = response_obj.get_data(as_text=True)
+        assert 'data-pod-id="pod_a"' in html_str and 'data-pod-id="pod_new"' in html_str
+        assert "pod_sim" not in html_str and "demo_" not in html_str
+        assert "Sample data" not in html_str
+    assert set(seen_list) == {"pod_a", "pod_b", "pod_new"}
+    assert client_obj.post("/actions/run").status_code == 403
+    assert file_snapshot_dict(tmp_path) == before_dict
+
+
+def test_empty_installation_renders_unknown_without_creating_files(tmp_path):
+    provider_obj = LiveDataProvider(releases_root_path_str=str(tmp_path / "releases"),
+        config_path_str=str(tmp_path / "config.yaml"), results_root_path_str=str(tmp_path / "results"),
+        event_log_path_str=str(tmp_path / "events.jsonl"))
+    response_obj = create_app(provider_obj, performance_db_path_str=str(tmp_path / "missing.sqlite3")).test_client().get("/")
+    assert response_obj.status_code == 200
+    assert "No LIVE pods" in response_obj.get_data(as_text=True)
+    assert list(tmp_path.iterdir()) == []
