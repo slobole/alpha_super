@@ -9,10 +9,10 @@
     <aside class="rail rail-c">
       <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark">A</span>ALPHA / OPS</a>
       <nav class="nav" aria-label="Main">
-        <a class="on" href="{{ url_for('index') }}" aria-current="page">{{ icon('overview') }}Overview</a>
+        <a class="{{ 'on' if pod_page_dict is not defined else '' }}" href="{{ url_for('index') }}"{% if pod_page_dict is not defined %} aria-current="page"{% endif %}>{{ icon('overview') }}Overview</a>
         <div class="navhead">{{ icon('pods') }}Pods</div>
         {% for pod_dict in overview_dict.pod_list %}
-        <a class="sub kid" aria-disabled="true" title="Pod page is not available yet">{{ mark(pod_dict.state_str) }}<span class="pod-nav-name">{{ pod_dict.name_str }}</span><span class="cad" title="{{ pod_dict.cadence_str }}">{{ pod_dict.cadence_short_str }}</span></a>
+        <a class="sub kid{{ ' on' if pod_page_dict is defined and pod_page_dict.pod_id_str == pod_dict.pod_id_str else '' }}" href="{{ url_for('pod', pod_id_str=pod_dict.pod_id_str) }}"{% if pod_page_dict is defined and pod_page_dict.pod_id_str == pod_dict.pod_id_str %} aria-current="page"{% endif %}>{{ mark(pod_dict.state_str) }}<span class="pod-nav-name">{{ pod_dict.name_str }}</span><span class="cad" title="{{ pod_dict.cadence_str }}">{{ pod_dict.cadence_short_str }}</span></a>
         {% endfor %}
         <div class="nav-label">Book</div>
         {% for icon_str, label_str in [('positions', 'Positions'), ('performance', 'Performance'), ('activity', 'Activity'), ('system', 'System health'), ('tools', 'Tools')] %}
@@ -38,13 +38,16 @@
         <span class="tag">READ-ONLY</span>
         <div class="clock desktop-clock"><span class="t">{{ overview_dict.clock_str }} ET</span><span class="d">{{ overview_dict.date_str }} · updated <span data-update-time>{{ overview_dict.updated_str }}</span></span></div>
       </header>
-      <main class="page calm" id="overview-content">
+      <main class="page calm{{ ' pod-page' if pod_page_dict is defined else '' }}" id="overview-content">
         <div class="refresh-error" role="status" hidden>Unknown · <span data-refresh-reason>Update failed.</span> Last successful update <span>{{ overview_dict.updated_str }}</span>.</div>
+        {% if pod_page_dict is defined %}
+        {% include '_pod.html' %}
+        {% else %}
         <div class="page-head"><div><h1 class="h1i">{{ icon('overview') }}Overview</h1><p class="verdict"><b data-verdict>{{ overview_dict.verdict_str }}</b>{% if overview_dict.verdict_detail_str %} <span data-verdict-detail>{{ overview_dict.verdict_detail_str }}</span>{% endif %}</p></div><div class="asof">{{ overview_dict.money_asof_str }}</div></div>
         {% if overview_dict.attention_list %}
         <section class="attn" aria-label="Needs attention">
           {% for attention_dict in overview_dict.attention_list %}
-          <div class="attn-row">{{ mark(attention_dict.state_str) }}<span class="row"><span class="tag tag-live">LIVE</span><span class="sname">{{ attention_dict.pod_name_str }}</span></span><span class="what"><b>{{ attention_dict.title_str }}</b>{% if attention_dict.detail_str %} {{ attention_dict.detail_str }}{% endif %}</span><span class="muted">{{ attention_dict.age_str }}</span><button class="btn btn-sm" disabled title="Pod page is not available yet">Open</button></div>
+          <div class="attn-row">{{ mark(attention_dict.state_str) }}<span class="row"><span class="tag tag-live">LIVE</span><span class="sname">{{ attention_dict.pod_name_str }}</span></span><span class="what"><b>{{ attention_dict.title_str }}</b>{% if attention_dict.detail_str %} {{ attention_dict.detail_str }}{% endif %}</span><span class="muted">{{ attention_dict.age_str }}</span><a class="btn btn-sm" href="{{ url_for('pod', pod_id_str=attention_dict.pod_id_str) }}">Open</a></div>
           {% endfor %}
         </section>
         {% endif %}
@@ -57,7 +60,7 @@
           <div class="shead"><span>Pod</span><span>Cycle</span><span>Now</span><span>Next</span></div>
           {% for pod_dict in overview_dict.pod_list %}
           <div class="srow" data-pod-id="{{ pod_dict.pod_id_str }}">
-            <div class="who"><span class="row"><span class="sname" title="Pod page is not available yet">{{ pod_dict.name_str }}</span><span class="pill pill-{{ pill_class_dict.get(pod_dict.state_str, 'unk') }}" data-pod-pill>{{ mark(pod_dict.state_str) }}<span data-pill-label>{{ pod_dict.pill_str }}</span></span></span><span class="muted">{{ pod_dict.cadence_str }}</span></div>
+            <div class="who"><span class="row"><a class="sname" href="{{ url_for('pod', pod_id_str=pod_dict.pod_id_str) }}">{{ pod_dict.name_str }}</a><span class="pill pill-{{ pill_class_dict.get(pod_dict.state_str, 'unk') }}" data-pod-pill>{{ mark(pod_dict.state_str) }}<span data-pill-label>{{ pod_dict.pill_str }}</span></span></span><span class="muted">{{ pod_dict.cadence_str }}</span></div>
             <div class="cycle-cell"><span class="track{{ ' is-idle' if pod_dict.state_str == 'skip' else '' }}" aria-label="{{ pod_dict.name_str }} cycle">
               {% for step_dict in pod_dict.step_list %}
               <span class="tk{{ ' plan' if step_dict.state_str in ['next', 'skip', 'unk'] else '' }}{{ ' f-' + step_dict.state_str if step_dict.state_str in ['fail', 'late', 'now'] else '' }}" title="{{ step_dict.name_str }} · {{ state_label_dict.get(step_dict.state_str, 'Unknown') }}{% if step_dict.detail_str %} · {{ step_dict.detail_str }}{% endif %}{% if step_dict.time_str %} · {{ step_dict.time_str }}{% endif %}">{{ mark(step_dict.state_str, step_dict.name_str) }}<span class="tl">{{ step_dict.name_str }}</span></span>
@@ -106,6 +109,7 @@
             {% else %}<div class="empty-state allocation-empty">{{ allocation_dict.empty_str }}</div>{% endif %}
           </section>
         </div>
+        {% endif %}
       </main>
       {% if overview_dict.demo_bool %}<div class="sample">Sample data. Not a real account.</div>{% endif %}
       <nav class="m-tabs" aria-label="Main on mobile">

@@ -1,9 +1,9 @@
-# Dashboard V4 — shell and LIVE Overview
+# Dashboard V4 — LIVE Overview and Pods
 
-Native Flask/Jinja implementation of `CLAUDE_MOCKUPS/v4d/index.html`, following
-`docs/plans/DASHBOARD_V4_HANDOFF.md`. This phase implements the shared shell and
-Overview only. The later Pod, Positions, Performance, Activity, System health and
-Tools pages are visibly disabled. PAPER and INCUBATION are deferred.
+Native Flask/Jinja implementation of Mockup D's Overview and Pod pages, following
+`docs/plans/DASHBOARD_V4_HANDOFF.md`. Select a Pod from the sidebar or Overview
+to open `/pods/<pod_id>`. Positions, Performance, Activity, System health and
+Tools pages remain disabled. PAPER and INCUBATION are deferred.
 
 ## Run beside V3
 
@@ -37,7 +37,7 @@ cutover is part of this phase.
                                               |
 [Saved IBKR reports + bindings] ---> [Canonical V3 finance]
                                               |
-                               [One Overview response / 15s]
+                              [Overview or Pod response / 15s]
 ```
 
 - LIVE targets are filtered before runtime/state acquisition. Release/config
@@ -88,12 +88,46 @@ No orders requires finite zero intent in both aggregate and per-leg plan rows,
 with no contradictory orders, fills or ACKs. Reconciliation remains independent.
 A completed DecisionPlan without a VPlan is not a verified LIVE no-order cycle.
 Actual decision/plan/submit times remain unavailable in the summary; they are not
-manufactured from scheduled times. The later Pod evidence page is outside scope.
+manufactured from scheduled times. Pod detail additionally reads saved decision
+and plan creation times.
+
+## Pod detail
+
+The selected cycle sits above financial context: history picker, seven steps,
+then Plan vs actual, Decision, Orders, Fills, Reconcile, Events and Files tabs.
+Failed cycles show their evidence and short read-only tool guidance.
+
+- History reads up to 60 recent cycles, plus the selected or unresolved cycle.
+  Saved historical LIVE releases must match the current release's owner, Pod
+  and account. The selected release supplies its own calendar and data profile.
+  Each detail table is bounded to 2,000 records; an exceeded limit is Unknown.
+- A SQLite `mode=ro` transaction reads DecisionPlan, VPlan and their scoped
+  children. Current operating gates are overlaid only when decision, plan and
+  release identities match. Historical views are labelled Saved cycle.
+- Plan vs actual preserves each canonical order request. Before uses the
+  selected VPlan's broker snapshot; After uses that cycle's post-execution
+  reconciliation, never today's position cache. Display fill price is
+  `sum(abs(fill shares) * fill price) / sum(abs(fill shares))` per broker order.
+- ACK rows require a matching request, asset and broker order, positive broker
+  response, recorded response time and `broker_acked` status. Contradictions
+  cannot leave Submit green. Stale or failed refreshes clear step and table
+  status together. Slow detail reads cannot extend the 120-second source life.
+- Value, Day, Month and Since start use the selected Pod's official account
+  report and existing accounting checks. The chart shows account NAV, including
+  cash flows; Day P&L is flow-adjusted and is not a NAV difference. These panels
+  keep their own dated sources when browsing historical trading cycles.
+- Positions are saved shares at saved reference prices, labelled explicitly.
+  Composition weights exclude cash; unavailable prices withhold values/weights.
+  These values are not presented as current market marks or account NAV weights.
+- Slip bps and Live vs backtest remain unavailable without verified comparison
+  evidence. Files has no connected artifact reader yet. Trade sheet export and
+  executable tools remain disabled; the V3 exporter writes state and is not used.
+  Events currently contains only the selected VPlan's saved broker order events.
 
 ## Verification
 
 ```powershell
-.venv\Scripts\python.exe -B -m pytest tests/test_dashboard_v4_cycle.py tests/test_dashboard_v4_evidence.py tests/test_dashboard_v4_finance.py tests/test_dashboard_v4_routes.py tests/test_dashboard_local_workspace.py --capture=sys -p no:cacheprovider -q
+.venv\Scripts\python.exe -B -m pytest tests/test_dashboard_v4_cycle.py tests/test_dashboard_v4_evidence.py tests/test_dashboard_v4_finance.py tests/test_dashboard_v4_routes.py tests/test_dashboard_v4_pod.py tests/test_dashboard_v4_pod_data.py tests/test_dashboard_v4_pod_finance.py tests/test_dashboard_v4_pod_integration.py tests/test_dashboard_local_workspace.py --capture=sys -p no:cacheprovider -q
 node --test tests/dashboard_v4_refresh.test.cjs
 ```
 
@@ -102,12 +136,16 @@ regressions for idle/wait classification, missing DB, alert reasons, unsupported
 fill completion, prior-session EOD, ET timestamp fallback, private browser history
 and stale-page recovery. Follow-up reviews cover quantity proof, poll allowances,
 ACK failures on no-order claims, alert titles and unavailable optional readers.
-Production-format temporary databases verify that GETs
-and refreshes do not change file bytes or modification times.
+Pod reviews additionally cover historical release identity, selected-cycle
+provenance, ACK contradictions, stale table states, and current-failure retention
+across tab navigation. Production-format temporary databases verify that GETs
+and refreshes, including historical Pod tabs, do not change file bytes or
+modification times.
 
 Visual checks compare the native page with Mockup D at 1440px, and verify layout
 at 768px and 390px. Browser checks cover period navigation and failed-refresh
-state. No production data, broker session or VPS is used for these checks.
+state, Pod evidence tabs and history. No production data, broker session or VPS
+is used for these checks.
 
 ## Live-impact checklist
 
@@ -117,5 +155,6 @@ state. No production data, broker session or VPS is used for these checks.
 - Existing state, pickle, SQL schema, configuration and released YAML: unchanged.
 - Existing logging fields and V3 routes: unchanged.
 - Windows paths/locks: existing read-only readers; file-preservation tests pass.
-  The new UI runs as a separate local process. No restart/deployment is performed.
+  The new UI runs as a separate local process. No production restart or deployment
+  is performed.
 - Changes are confined to this package and its tests. No V3 code is modified.

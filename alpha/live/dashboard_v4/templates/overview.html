@@ -1,2 +1,3 @@
 {% extends "base.html" %}
+{% block title %}{{ pod_page_dict.name_str if pod_page_dict is defined else 'Overview' }}{% endblock %}
 {% block content %}{% include "_overview.html" %}{% endblock %}

@@ -1,0 +1,9 @@
+{% if chart_dict.available_bool %}
+<svg class="chart" viewBox="0 0 560 238" role="img" aria-label="Pod value"><title>Pod value</title>
+  {% for tick_dict in chart_dict.y_tick_list %}<line class="grid" x1="40" y1="{{ tick_dict.y_float }}" x2="496" y2="{{ tick_dict.y_float }}"></line><text class="ta-e" x="34" y="{{ tick_dict.y_float + 3.5 }}">{{ tick_dict.label_str }}</text>{% endfor %}
+  <line class="axis" x1="40" y1="216" x2="496" y2="216"></line>
+  {% for tick_dict in chart_dict.x_tick_list %}<text x="{{ tick_dict.x_float }}" y="231">{{ tick_dict.label_str }}</text>{% endfor %}
+  {% for segment_dict in chart_dict.segment_list %}<polygon class="area" points="{{ segment_dict.area_str }}"></polygon><polyline class="line" points="{{ segment_dict.point_str }}"></polyline>{% endfor %}
+  {% for point_dict in chart_dict.isolated_point_list %}<circle class="end" cx="{{ point_dict.x_float }}" cy="{{ point_dict.y_float }}" r="3"><title>{{ point_dict.label_str }}</title></circle>{% endfor %}
+  <circle class="end" cx="{{ chart_dict.end_x_float }}" cy="{{ chart_dict.end_y_float }}" r="4.5"></circle><text class="lbl" x="{{ chart_dict.end_x_float + 9 }}" y="{{ chart_dict.end_y_float + 4 }}">{{ chart_dict.end_label_str }}</text>
+</svg>{% else %}<div class="empty-state chart-empty">{{ chart_dict.empty_str }}</div>{% endif %}

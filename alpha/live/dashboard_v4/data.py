@@ -1,5 +1,6 @@
 """Reuse V3 readers while excluding non-LIVE targets before state acquisition."""
 
+from dataclasses import replace
 from datetime import datetime
 
 from alpha.live.client_reporting import (
@@ -15,6 +16,7 @@ from alpha.live.dashboard_v3.local_workspace import (
     validate_local_bindings_unchanged,
 )
 from alpha.live.dashboard_v4.evidence import load_cycle_evidence_dict
+from alpha.live.dashboard_v4.pod_data import load_pod_cycles_dict
 
 
 class LiveReadOnlyApp(DashboardApp):
@@ -30,6 +32,24 @@ class LiveReadOnlyApp(DashboardApp):
 
 
 class LiveDataProvider(DashboardDataProvider):
+    def get_pod_cycles_dict(self, pod_id_str, *, as_of_ts, decision_plan_id_int=None, vplan_id_int=None):
+        try:
+            target_obj = self.get_target_for_pod(pod_id_str)
+        except (ValueError, OSError):
+            target_obj = None
+        result_dict = load_pod_cycles_dict(target_obj, as_of_ts=as_of_ts,
+            decision_plan_id_int=decision_plan_id_int, vplan_id_int=vplan_id_int)
+        if result_dict.get("status_str") == "ok":
+            # The history reader validates saved LIVE releases against the
+            # current owner/Pod/account. Keep the same DB; only select the
+            # validated release whose DecisionPlan and VPlan we are displaying.
+            selected_release_dict = result_dict["selected_release_dict"]
+            evidence_target_obj = replace(target_obj,
+                release_obj=replace(target_obj.release_obj, **selected_release_dict))
+            result_dict["cycle_evidence_dict"] = load_cycle_evidence_dict(
+                evidence_target_obj, result_dict["pod_row_dict"], as_of_ts=as_of_ts)
+        return result_dict
+
     def get_cycle_evidence_dict(self, pod_row_dict, *, as_of_ts):
         try:
             target_obj = self.get_target_for_pod(pod_row_dict["pod_id_str"])

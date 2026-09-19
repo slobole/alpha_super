@@ -22,17 +22,21 @@ function snapshot_obj(valid_ms = 120000) {
   const selector_dict = {};
   for (const selector_str of ['.refresh-error', '[data-refresh-reason]', '[data-observed-state]', '.tk',
     '[data-pod-pill]', '[data-pill-label]', '[data-pod-now]', '[data-status-label]', '[data-now-detail]',
-    '[data-next-detail]', '[data-pod-next]', '[data-status-detail]', '[data-verdict-detail]', '[data-verdict]']) {
+    '[data-next-detail]', '[data-pod-next]', '[data-status-detail]', '[data-verdict-detail]', '[data-verdict]',
+    '.step', '[data-step-fact]', '[data-evidence-status]']) {
     selector_dict[selector_str] = element_obj('Current', 'st st-done');
   }
   selector_dict['[data-observed-state]'].setAttribute('aria-label', 'Fill · Done');
   selector_dict['.tk'].querySelector = () => element_obj('Fill');
+  selector_dict['.step'].className = 'step is-done is-sel';
+  selector_dict['[data-step-fact]'].textContent = '9 of 9';
+  selector_dict['[data-evidence-status]'].textContent = 'Acked';
   const shell_obj = element_obj();
   shell_obj.id = 'overview-shell';
   shell_obj.setAttribute('data-source-valid-ms', String(valid_ms));
   shell_obj.setAttribute('data-last-update', '09:41:07');
   shell_obj.querySelector = (selector_str) => selector_dict[selector_str] || null;
-  shell_obj.querySelectorAll = (selector_str) => selector_str.split(', ').flatMap((item_str) => selector_dict[item_str] ? [selector_dict[item_str]] : []);
+  shell_obj.querySelectorAll = (selector_str) => selector_str.split(', ').flatMap((item_str) => selector_dict[item_str] || []);
   return {shell_obj, selector_dict};
 }
 
@@ -71,6 +75,9 @@ test('source expires at remaining lifetime, before next poll; update time is ret
   assert.equal(env_obj.current_obj.selector_dict['[data-observed-state]'].getAttribute('aria-label'), 'Fill · Unknown');
   assert.equal(env_obj.current_obj.selector_dict['[data-verdict]'].textContent, 'Status unknown.');
   assert.equal(env_obj.current_obj.selector_dict['[data-refresh-reason]'].textContent, 'Saved status is out of date.');
+  assert.equal(env_obj.current_obj.selector_dict['.step'].className, 'step is-unk');
+  assert.equal(env_obj.current_obj.selector_dict['[data-step-fact]'].textContent, 'Unknown');
+  assert.equal(env_obj.current_obj.selector_dict['[data-evidence-status]'].textContent, 'Unknown');
   assert.equal(env_obj.current_obj.shell_obj.getAttribute('data-last-update'), '09:41:07');
 });
 
@@ -89,7 +96,37 @@ for (const event_str of ['htmx:responseError', 'htmx:sendError', 'htmx:timeout',
     assert.equal(env_obj.current_obj.selector_dict['.tk'].title, 'Fill · Unknown');
     assert.equal(env_obj.current_obj.selector_dict['[data-refresh-reason]'].textContent, 'Update failed.');
     assert.equal(env_obj.current_obj.selector_dict['[data-next-detail]'].textContent, 'Last saved plan');
+    assert.equal(env_obj.current_obj.selector_dict['.step'].className, 'step is-unk');
+    assert.equal(env_obj.current_obj.selector_dict['[data-step-fact]'].textContent, 'Unknown');
+    assert.equal(env_obj.current_obj.selector_dict['[data-evidence-status]'].textContent, 'Unknown');
     assert.equal(env_obj.current_obj.shell_obj.getAttribute('data-source-stale'), 'true');
+    assert.equal(env_obj.current_obj.shell_obj.getAttribute('data-last-update'), '09:41:07');
+  });
+}
+
+for (const trigger_str of ['expiry', 'htmx:responseError', 'htmx:sendError', 'htmx:timeout', 'htmx:swapError']) {
+  test('Pod ' + trigger_str + ' clears all seven steps and every visible evidence status', () => {
+    const env_obj = environment_obj(1000);
+    const selector_dict = env_obj.current_obj.selector_dict;
+    const step_list = ['done', 'now', 'next', 'late', 'fail', 'skip', 'unk'].map(
+      (state_str) => element_obj('', 'step is-' + state_str + ' is-sel'));
+    const fact_list = ['Data ready', '10 targets', '9 orders', '9 sent · 9 ack', '9 of 9', '0 diffs', 'Captured'].map(
+      (fact_str) => element_obj(fact_str));
+    const evidence_list = ['Acked', 'No ack', 'Unknown'].map((status_str) => element_obj(status_str));
+    selector_dict['.step'] = step_list;
+    selector_dict['[data-step-fact]'] = fact_list;
+    selector_dict['[data-evidence-status]'] = evidence_list;
+    if (trigger_str === 'expiry') {
+      env_obj.advance(999); env_obj.timer();
+      assert.equal(fact_list[4].textContent, '9 of 9');
+      assert.equal(evidence_list[0].textContent, 'Acked');
+      env_obj.advance(1); env_obj.timer();
+    } else {
+      env_obj.fire(trigger_str);
+    }
+    assert.ok(step_list.every((step_obj) => step_obj.className === 'step is-unk'));
+    assert.ok(fact_list.every((fact_obj) => fact_obj.textContent === 'Unknown'));
+    assert.ok(evidence_list.every((status_obj) => status_obj.textContent === 'Unknown'));
     assert.equal(env_obj.current_obj.shell_obj.getAttribute('data-last-update'), '09:41:07');
   });
 }
@@ -112,8 +149,14 @@ test('new response replaces error state; round-trip latency is deducted from ren
   env_obj.replace(3000);
   env_obj.fire('htmx:afterSwap');
   assert.equal(env_obj.current_obj.selector_dict['.refresh-error'].hidden, true);
+  assert.equal(env_obj.current_obj.selector_dict['.step'].className, 'step is-done is-sel');
+  assert.equal(env_obj.current_obj.selector_dict['[data-step-fact]'].textContent, '9 of 9');
+  assert.equal(env_obj.current_obj.selector_dict['[data-evidence-status]'].textContent, 'Acked');
   env_obj.advance(999); env_obj.timer();
   assert.equal(env_obj.current_obj.selector_dict['[data-status-label]'].textContent, 'Current');
   env_obj.advance(1); env_obj.timer();
   assert.equal(env_obj.current_obj.selector_dict['[data-status-label]'].textContent, 'Unknown');
+  assert.equal(env_obj.current_obj.selector_dict['.step'].className, 'step is-unk');
+  assert.equal(env_obj.current_obj.selector_dict['[data-step-fact]'].textContent, 'Unknown');
+  assert.equal(env_obj.current_obj.selector_dict['[data-evidence-status]'].textContent, 'Unknown');
 });

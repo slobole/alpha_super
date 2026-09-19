@@ -27,6 +27,12 @@
       const name_obj = step_obj.querySelector('.tl');
       step_obj.title = (name_obj ? name_obj.textContent : 'Step') + ' · Unknown';
     });
+    shell_obj.querySelectorAll('.step').forEach((step_obj) => {
+      step_obj.className = 'step is-unk';
+    });
+    shell_obj.querySelectorAll('[data-step-fact], [data-evidence-status]').forEach((label_obj) => {
+      label_obj.textContent = 'Unknown';
+    });
     shell_obj.querySelectorAll('[data-pod-pill]').forEach((pill_obj) => {
       pill_obj.className = 'pill pill-unk';
     });

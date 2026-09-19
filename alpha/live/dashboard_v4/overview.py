@@ -53,7 +53,7 @@ def _action_required_bool(row_dict, cycle_dict):
 
 
 def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts: datetime,
-                        period_str="3M", demo_bool=False):
+                        period_str="3M", demo_bool=False, include_finance_bool=True):
     client_dict = workspace_dict["client_dict"]
     source_dict = workspace_dict.get("summary_dict") or {}
     source_ts = parse_timestamp_ts(source_dict.get("as_of_timestamp_str"))
@@ -129,6 +129,7 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
             attention_list.append({
                 "state_str": "fail" if database_failed_bool or required_dict.get("severity_str") == "red" or pod_state_str == "fail" else "late",
                 "pod_name_str": name_str,
+                "pod_id_str": pod_id_str,
                 "title_str": "State DB unavailable." if database_failed_bool else (required_dict.get("label_str") or cycle_dict["now_str"]) if action_required_bool else cycle_dict["now_str"],
                 "detail_str": "Cycle evidence cannot be read." if database_failed_bool else (required_dict.get("reason_str") or required_dict.get("detail_str") or "") if action_required_bool else cycle_dict["now_detail_str"],
                 "age_str": age_str,
@@ -180,6 +181,7 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
     # Reuse the same scoped assessment for cash; foreign mode rows never enter
     # either the operating state or the financial view adapter.
     finance_workspace_dict = {**workspace_dict, "summary_dict": scoped_summary_dict}
-    overview_dict.update(build_financial_overview_dict(
-        finance_workspace_dict, snapshot_obj, provider_obj, period_str=period_str, as_of_ts=as_of_ts))
+    if include_finance_bool:
+        overview_dict.update(build_financial_overview_dict(
+            finance_workspace_dict, snapshot_obj, provider_obj, period_str=period_str, as_of_ts=as_of_ts))
     return overview_dict

@@ -4,6 +4,7 @@ from copy import deepcopy
 from datetime import UTC, datetime
 
 from alpha.live.dashboard_v3.demo import DemoOperationsProvider, build_demo_fixture_tuple
+from alpha.live.dashboard_v4.pod_demo import build_demo_pod_source_dict
 
 
 DEMO_NOW_TS = datetime(2026, 9, 8, 13, 41, 7, tzinfo=UTC)
@@ -67,6 +68,7 @@ def build_demo_workspace_tuple():
                 debug_summary_dict={"severity_str": "red"},
             )
     summary_dict = provider_obj.get_summary_dict()
+    provider_obj.get_pod_cycles_dict = lambda pod_id_str, **options_dict: build_demo_pod_source_dict(provider_obj.row_list, pod_id_str, **options_dict)
     summary_dict["as_of_timestamp_str"] = DEMO_NOW_TS.isoformat()
     workspace_dict = {
         "client_dict": client_dict, "operations_account_list": client_dict["accounts"],

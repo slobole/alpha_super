@@ -1,4 +1,4 @@
-/* Approved Mockup D: shell and Overview only. Vendored fonts load in base.html. */
+/* Approved Mockup D. Vendored fonts load in base.html. */
 :root {
   --bg: #f5f6f8; --panel: #ffffff; --ink: #16181d; --ink-2: #424957;
   --ink-3: #5f6775; --rule: #dde1e7; --rule-2: #c6ccd5;
@@ -7,6 +7,90 @@
   --red: #b91c1c; --red-bg: #fdebeb; --gray-bg: #eef0f3;
   --sans: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
   --mono: 'IBM Plex Mono', 'Cascadia Mono', Consolas, monospace;
+}
+
+/* Pod: one selected cycle and its saved evidence. */
+.c-7-5 { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
+.pod-identity { margin-top: 5px; flex-wrap: wrap; }
+.pod-identity .mono { overflow-wrap: anywhere; }
+.pod-head .verdict { margin-top: 10px; }
+.cyc-head { display: flex; align-items: center; gap: 12px; padding: 16px 20px 14px; flex-wrap: wrap; }
+.picker { display: flex; align-items: stretch; border: 1px solid var(--rule-2); font-size: 12px; }
+.picker a, .picker > span { padding: 4px 10px; color: var(--ink-2); border-right: 1px solid var(--rule-2); }
+.picker > :last-child { border-right: 0; }
+.picker .on { background: var(--ink); color: var(--panel); font-weight: 600; }
+.picker [aria-disabled] { color: var(--ink-3); }
+.cycle { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border-top: 1px solid var(--rule); }
+.step { display: flex; flex-direction: column; gap: 5px; padding: 16px 16px 18px; border-right: 1px solid var(--rule); border-top: 2px solid transparent; min-height: 104px; color: var(--ink); min-width: 0; }
+.step:last-child { border-right: 0; }
+.step:hover { background: var(--bg); text-decoration: none; }
+.step .nm { display: flex; align-items: center; gap: 7px; font-weight: 600; font-size: 13px; }
+.step .fact { font-size: 12.5px; color: var(--ink-2); min-height: 18px; overflow-wrap: anywhere; }
+.step .act { font-family: var(--mono); font-size: 12px; color: var(--ink); }
+.step .pln { font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
+.step .dl { margin-left: 7px; font-size: 11px; color: var(--ink-3); }
+.step.is-now { border-top-color: var(--blue); background: var(--blue-bg); }
+.step.is-fail { border-top-color: var(--red); background: var(--red-bg); }
+.step.is-late { border-top-color: var(--amber); background: var(--amber-bg); }
+.step.is-next .nm, .step.is-next .fact, .step.is-unk .nm, .step.is-unk .fact { color: var(--ink-3); }
+.step.is-sel { outline: 2px solid var(--ink); outline-offset: -2px; }
+.tabs { display: flex; flex-wrap: wrap; border-block: 1px solid var(--rule); padding: 0 12px; }
+.tabs a { padding: 9px 10px 8px; font-size: 12.5px; color: var(--ink-2); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tabs a.on { color: var(--ink); font-weight: 600; border-bottom-color: var(--ink); }
+.tabs a:hover { text-decoration: none; color: var(--ink); }
+.tabs .cnt { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); margin-left: 3px; }
+.evidence-note { padding: 10px 20px; font-size: 12px; color: var(--ink-3); }
+.evidence-table { table-layout: auto; }
+.evidence-table td { overflow-wrap: anywhere; }
+.evidence-table .plan { color: var(--ink-3); }
+.evidence-table .hl td { background: var(--red-bg); }
+.evidence-table .num { white-space: normal; }
+.issue { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 16px 20px; background: var(--red-bg); border: 1px solid var(--rule); border-left: 3px solid var(--red); }
+.issue h3 { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.issue p { margin-top: 3px; color: var(--ink-2); }
+.tool-hint { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 10px 0; border-top: 1px solid var(--rule); }
+.tool-hint:first-of-type { margin-top: 12px; }
+.tool-hint > :last-child { color: var(--ink-3); }
+.reference-note { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--rule); color: var(--ink-3); }
+.bar { position: relative; height: 10px; background: var(--gray-bg); min-width: 60px; }
+.bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--blue); max-width: 100%; }
+.bar em { position: absolute; top: -3px; bottom: -3px; border-left: 2px solid var(--ink); }
+.pod-money-date { margin-top: -12px; }
+.frame[data-source-stale="true"] .issue, .frame[data-source-stale="true"] .evidence-table .hl td { background: var(--gray-bg); border-left-color: var(--rule-2); }
+@media (max-width: 1200px) {
+  .pod-page .c-7-5 { grid-template-columns: minmax(0, 1fr); }
+  .step { padding: 12px 8px; }
+  .step .nm { gap: 4px; font-size: 12px; }
+}
+@media (max-width: 800px) {
+  .pod-head { flex-wrap: wrap; }
+  .cycle { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .step { border-bottom: 1px solid var(--rule); }
+  .issue { grid-template-columns: minmax(0, 1fr); }
+  .pod-page .evidence-table th { font-size: 9px; padding-inline: 6px; }
+  .pod-page .evidence-table td { font-size: 12px; padding-inline: 6px; }
+}
+@media (max-width: 600px) {
+  .pod-page .pod-head h1 { display: block; }
+  .pod-page [data-verdict-detail] { display: inline; }
+  .pod-page .cyc-head { padding: 12px; gap: 8px; }
+  .picker { width: 100%; }
+  .picker > * { flex: 1; text-align: center; padding: 5px; }
+  .cyc-head > .grow { display: none; }
+  .cycle { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .step { padding: 12px 10px; min-height: 94px; }
+  .tabs { padding: 0 5px; }
+  .tabs a { padding-inline: 8px; }
+  .pod-page .tile:nth-child(n+3) { display: block; border-top: 1px solid var(--rule); }
+  .pod-page .tile:nth-child(even) { border-right: 0; }
+  .pod-page .evidence-table, .pod-page .evidence-table tbody { display: block; }
+  .pod-page .evidence-table thead { display: none; }
+  .pod-page .evidence-table tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); padding: 8px 12px; border-bottom: 1px solid var(--rule); }
+  .pod-page .evidence-table td { display: block; text-align: left; padding: 4px 0; border: 0; }
+  .pod-page .evidence-table td:first-child { grid-column: 1 / -1; font-size: 14px; }
+  .pod-page .evidence-table td[data-column]::before { content: attr(data-column); display: block; color: var(--ink-3); font-size: 10px; margin-bottom: 2px; }
+  .pod-page .evidence-table td:first-child::before { display: none; }
+  .pod-money-date { display: block; margin-top: -6px; text-align: left; }
 }
 * { box-sizing: border-box; }
 html { color-scheme: light; }
