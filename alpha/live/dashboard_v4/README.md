@@ -51,6 +51,12 @@ cutover is part of this phase.
 - Missing DB is a red attention item. Normal scheduled waiting and healthy
   monthly idle are distinct from late, failed and unknown. EOD runs independently
   of whether the strategy traded; a missing prior EOD identifies the missing day.
+- Scheduled timestamps mean eligibility. Submit stays Working through 60 seconds
+  after eligibility; Reconcile and EOD through 30 seconds. Reconcile eligibility
+  already includes the scheduler's 300-second grace. These display allowances
+  use scheduler default constants, not inspected process/CLI overrides. Late
+  requires a saved assessment after the allowance; a cached earlier assessment
+  cannot by itself prove a missed poll. Explicit failures remain visible.
 - Source validity is 120 seconds, inherited from V3. Server and browser both
   enforce it. Transport failure or expiry clears operational state to Unknown
   and preserves the last successful update. Restored pages reacquire evidence.
@@ -68,24 +74,35 @@ cutover is part of this phase.
 
 ## Evidence limits
 
-V3 summary rows do not contain actual decision/plan/submit/fill timestamps or
-per-order filled quantities. Fill-record counts can include partial executions;
-a completed VPlan can follow position reconciliation with a tolerance. Therefore
-the UI does not infer full fills or a no-order decision from these summaries.
-Unsupported completion remains Unknown. The later Pod evidence page can consume
-the detailed saved order records; it is outside this phase.
+V3 summary counts and completed status do not prove full fills. V4 additionally
+reads the selected LIVE VPlan, plan rows, orders, ACK count and executions in one
+SQLite `mode=ro` transaction. The canonical request builder preserves separate
+entry/exit legs, even for the same asset. For every request i, completion requires
+`abs(sum(signed execution shares_i) - requested shares_i) <= 1e-9`.
+Release, Pod, account, DecisionPlan and VPlan identities must agree. Duplicate,
+future, partial, ambiguous retry or changed evidence cannot prove completion.
+The summary assessment time is the read cutoff. Unsupported completion remains
+Unknown; a verified fill shows the latest actual execution time and `N of N filled`.
+
+No orders requires finite zero intent in both aggregate and per-leg plan rows,
+with no contradictory orders, fills or ACKs. Reconciliation remains independent.
+A completed DecisionPlan without a VPlan is not a verified LIVE no-order cycle.
+Actual decision/plan/submit times remain unavailable in the summary; they are not
+manufactured from scheduled times. The later Pod evidence page is outside scope.
 
 ## Verification
 
 ```powershell
-.venv\Scripts\python.exe -B -m pytest tests/test_dashboard_v4_cycle.py tests/test_dashboard_v4_finance.py tests/test_dashboard_v4_routes.py tests/test_dashboard_local_workspace.py --capture=sys -p no:cacheprovider -q
+.venv\Scripts\python.exe -B -m pytest tests/test_dashboard_v4_cycle.py tests/test_dashboard_v4_evidence.py tests/test_dashboard_v4_finance.py tests/test_dashboard_v4_routes.py tests/test_dashboard_local_workspace.py --capture=sys -p no:cacheprovider -q
 node --test tests/dashboard_v4_refresh.test.cjs
 ```
 
 Tier 3. Independent parity, failure-mode and coverage reviews found and drove
 regressions for idle/wait classification, missing DB, alert reasons, unsupported
 fill completion, prior-session EOD, ET timestamp fallback, private browser history
-and stale-page recovery. Production-format temporary databases verify that GETs
+and stale-page recovery. Follow-up reviews cover quantity proof, poll allowances,
+ACK failures on no-order claims, alert titles and unavailable optional readers.
+Production-format temporary databases verify that GETs
 and refreshes do not change file bytes or modification times.
 
 Visual checks compare the native page with Mockup D at 1440px, and verify layout

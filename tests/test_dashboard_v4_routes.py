@@ -1,7 +1,7 @@
 """V4 uses saved LIVE evidence and cannot expose executable V3 routes."""
 
 from copy import deepcopy
-from datetime import timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -68,6 +68,114 @@ def test_planned_wait_is_not_an_attention_item(fixture_tuple):
     view_dict = _view_dict(fixture_tuple)
     assert view_dict["attention_list"] == []
     assert view_dict["pod_list"][0]["state_str"] == "now"
+
+
+def test_completed_daily_pod_with_quantity_proof_needs_no_action(fixture_tuple):
+    fixture_tuple[0]["operations_account_list"] = fixture_tuple[0]["operations_account_list"][:1]
+    view_dict = _view_dict(fixture_tuple)
+    assert view_dict["pod_list"][0]["pill_str"] == "On track"
+    assert view_dict["pod_list"][0]["now_detail_str"] == "3 of 3 filled"
+    assert view_dict["verdict_str"] == "No action needed."
+
+
+@pytest.mark.parametrize("stage_str,due_str,allowance_int", [
+    ("Submit", "2026-09-08T13:23:30+00:00", 60),
+    ("Plan", "2026-09-08T13:23:30+00:00", 60),
+    ("Reconcile", "2026-09-08T13:35:00+00:00", 30),
+    ("EOD", "2026-09-08T20:10:00+00:00", 30),
+])
+@pytest.mark.parametrize("late_bool", [False, True])
+def test_overview_attention_obeys_scheduler_allowance(fixture_tuple, stage_str, due_str, allowance_int, late_bool):
+    workspace_dict, snapshot_obj, provider_obj = fixture_tuple
+    workspace_dict["operations_account_list"] = workspace_dict["operations_account_list"][:1]
+    summary_dict = workspace_dict["summary_dict"]
+    row_dict = summary_dict["pod_row_dict_list"][0]
+    now_dt = datetime.fromisoformat(due_str) + timedelta(seconds=allowance_int + 1 if late_bool else 5)
+    summary_dict["as_of_timestamp_str"] = row_dict["as_of_timestamp_str"] = now_dt.isoformat()
+    if stage_str in {"Submit", "Plan"}:
+        row_dict.update(latest_vplan_status_str="ready", latest_decision_plan_status_str="vplan_ready",
+                        latest_submit_ack_status_str="not_checked", broker_order_count_int=0, broker_ack_count_int=0, fill_count_int=0,
+                        latest_reconciliation_timestamp_str=None, latest_reconciliation_status_str="",
+                        next_action_str="submit_vplan", required_action_dict={"severity_str": "yellow", "label_str": "VPlan ready"})
+        if stage_str == "Plan":
+            row_dict.update(latest_vplan_id_int=None, latest_decision_plan_status_str="planned", next_action_str="build_vplan",
+                            latest_decision_plan_submission_timestamp_str=due_str,
+                            latest_decision_plan_target_execution_timestamp_str="2026-09-08T13:30:00+00:00",
+                            required_action_dict={"severity_str": "yellow", "label_str": "Build VPlan"})
+    elif stage_str == "Reconcile":
+        row_dict.update(latest_vplan_status_str="submitted", latest_reconciliation_timestamp_str=None, latest_reconciliation_status_str="",
+                        next_action_str="post_execution_reconcile", required_action_dict={"severity_str": "yellow", "label_str": "Waiting reconcile"})
+        row_dict["cycle_evidence_dict"]["vplan_status_str"] = "submitted"
+    else:
+        row_dict["eod_snapshot_dict"].update(status_str="due_missing", last_required_market_date_str="2026-09-08", last_required_eod_present_bool=False)
+        for item_dict in row_dict["data_freshness_dict"]["item_dict_list"]:
+            if item_dict["label_str"] == "EOD Snapshot":
+                item_dict["severity_str"] = "yellow"
+    original_dict = deepcopy(workspace_dict)
+    view_dict = build_overview_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=now_dt)
+    assert bool(view_dict["attention_list"]) is late_bool
+    assert view_dict["pod_list"][0]["state_str"] == ("late" if late_bool else "now")
+    assert view_dict["verdict_str"] == ("1 pod needs action." if late_bool else "No action needed.")
+    if late_bool:
+        assert view_dict["attention_list"][0]["title_str"] not in {"No action", "Waiting reconcile"}
+    assert workspace_dict == original_dict
+
+
+@pytest.mark.parametrize("action_str,label_str,severity_str", [
+    ("review_vplan", "Review VPlan", "yellow"), ("submit_vplan", "VPlan ready", "red"),
+])
+def test_submit_allowance_does_not_hide_manual_or_red_actions(fixture_tuple, action_str, label_str, severity_str):
+    workspace_dict, snapshot_obj, provider_obj = fixture_tuple
+    workspace_dict["operations_account_list"] = workspace_dict["operations_account_list"][:1]
+    row_dict = workspace_dict["summary_dict"]["pod_row_dict_list"][0]
+    row_dict.update(latest_vplan_status_str="ready", latest_submit_ack_status_str="not_checked",
+                    latest_vplan_submission_timestamp_str=DEMO_NOW_TS.isoformat(), next_action_str=action_str,
+                    required_action_dict={"label_str": label_str, "severity_str": severity_str})
+    view_dict = build_overview_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=DEMO_NOW_TS)
+    assert view_dict["attention_list"][0]["title_str"] == label_str
+
+
+@pytest.mark.parametrize("invalid_str", ["stale", "account", "mode"])
+def test_evidence_reader_never_receives_stale_or_foreign_rows(fixture_tuple, monkeypatch, invalid_str):
+    workspace_dict, _, provider_obj = fixture_tuple
+    workspace_dict["operations_account_list"] = workspace_dict["operations_account_list"][:1]
+    row_dict = workspace_dict["summary_dict"]["pod_row_dict_list"][0]
+    if invalid_str == "stale":
+        workspace_dict["summary_dict"]["as_of_timestamp_str"] = (DEMO_NOW_TS - timedelta(seconds=121)).isoformat()
+    else:
+        row_dict["account_route_str" if invalid_str == "account" else "mode_str"] = "foreign"
+    def unexpected_read(*args, **kwargs):
+        raise AssertionError("must scope and freshness-check before evidence acquisition")
+    monkeypatch.setattr(provider_obj, "get_cycle_evidence_dict", unexpected_read, raising=False)
+    _view_dict(fixture_tuple)
+
+
+def test_evidence_reader_uses_summary_cutoff_not_response_clock(fixture_tuple, monkeypatch):
+    workspace_dict, _, provider_obj = fixture_tuple
+    workspace_dict["operations_account_list"] = workspace_dict["operations_account_list"][:1]
+    cutoff_dt = DEMO_NOW_TS - timedelta(seconds=7)
+    workspace_dict["summary_dict"]["as_of_timestamp_str"] = cutoff_dt.isoformat()
+    call_list = []
+    def capture_read(row_dict, *, as_of_ts):
+        call_list.append((row_dict["pod_id_str"], as_of_ts))
+        return {}
+    monkeypatch.setattr(provider_obj, "get_cycle_evidence_dict", capture_read, raising=False)
+    _view_dict(fixture_tuple)
+    assert call_list == [(workspace_dict["operations_account_list"][0]["pod_id"], cutoff_dt)]
+
+
+@pytest.mark.parametrize("error_type", [ValueError, OSError])
+def test_optional_evidence_lookup_failure_keeps_overview_available(fixture_tuple, monkeypatch, error_type):
+    workspace_dict, snapshot_obj, _ = fixture_tuple
+    workspace_dict["operations_account_list"] = workspace_dict["operations_account_list"][:1]
+    provider_obj = LiveDataProvider()
+    def failed_lookup(pod_id_str):
+        raise error_type("Configuration changed")
+    monkeypatch.setattr(provider_obj, "get_target_for_pod", failed_lookup)
+    monkeypatch.setattr("alpha.live.dashboard_v4.overview.build_financial_overview_dict", lambda *args, **kwargs: {})
+    view_dict = build_overview_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=DEMO_NOW_TS)
+    assert view_dict["pod_list"][0]["pill_str"] == "Unknown"
+    assert view_dict["verdict_str"] == "Status needs review."
 
 
 @pytest.mark.parametrize("database_str", ["missing", "error"])

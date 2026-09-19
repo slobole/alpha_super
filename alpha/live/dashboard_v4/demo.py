@@ -43,6 +43,17 @@ def build_demo_workspace_tuple():
             expected_due_timestamp_str="2026-09-08T20:10:00+00:00",
             last_required_eod_present_bool=True, same_session_bool=False,
         )
+        if index_int == 0:
+            # Synthetic counterpart of the read-only per-order evidence reader.
+            row_dict["cycle_evidence_dict"] = {
+                "state_str": "complete", "pod_id_str": row_dict["pod_id_str"],
+                "account_route_str": row_dict["account_route_str"],
+                "vplan_id_int": row_dict["latest_vplan_id_int"],
+                "decision_plan_id_int": row_dict["latest_vplan_decision_plan_id_int"],
+                "vplan_status_str": row_dict["latest_vplan_status_str"],
+                "order_count_int": 3, "filled_order_count_int": 3,
+                "actual_fill_timestamp_str": "2026-09-08T13:30:02+00:00",
+            }
         if index_int == 1:
             row_dict.update(
                 health_str="red", latest_vplan_status_str="submitted",

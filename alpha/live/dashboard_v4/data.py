@@ -14,6 +14,7 @@ from alpha.live.dashboard_v3.local_workspace import (
     build_local_workspace_dict,
     validate_local_bindings_unchanged,
 )
+from alpha.live.dashboard_v4.evidence import load_cycle_evidence_dict
 
 
 class LiveReadOnlyApp(DashboardApp):
@@ -29,6 +30,13 @@ class LiveReadOnlyApp(DashboardApp):
 
 
 class LiveDataProvider(DashboardDataProvider):
+    def get_cycle_evidence_dict(self, pod_row_dict, *, as_of_ts):
+        try:
+            target_obj = self.get_target_for_pod(pod_row_dict["pod_id_str"])
+        except (ValueError, OSError):
+            return {"state_str": "unknown", "reason_str": "Fill source unavailable"}
+        return load_cycle_evidence_dict(target_obj, pod_row_dict, as_of_ts=as_of_ts)
+
     def app_obj(self) -> LiveReadOnlyApp:
         if self._app_obj is None:
             self._app_obj = LiveReadOnlyApp(

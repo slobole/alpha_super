@@ -12,7 +12,11 @@ from typing import Any
 
 from alpha.live.dashboard_v3.client_operations import SOURCE_MAX_AGE_SECONDS_INT
 from alpha.live.dashboard_v3.filters import MARKET_TIMEZONE_OBJ
-from alpha.live.scheduler_service import DEFAULT_RECONCILE_GRACE_SECONDS_INT
+from alpha.live.scheduler_service import (
+    DEFAULT_ACTIVE_POLL_SECONDS_INT,
+    DEFAULT_RECONCILE_GRACE_SECONDS_INT,
+    DEFAULT_SUBMIT_STUCK_SECONDS_INT,
+)
 
 
 STEP_LABEL_TUPLE = ("Data", "Decide", "Plan", "Submit", "Fill", "Reconcile", "EOD")
@@ -64,10 +68,15 @@ def _step_dict(
     }
 
 
-def _due_state_str(planned_dt: datetime | None, now_dt: datetime) -> str:
+def _due_state_str(planned_dt: datetime | None, now_dt: datetime,
+                   source_dt: datetime, *, submit_bool: bool = False) -> str:
     if planned_dt is None or now_dt < planned_dt:
         return "Planned"
-    return "Late" if now_dt > planned_dt else "Now"
+    allowance_int = max(DEFAULT_ACTIVE_POLL_SECONDS_INT, DEFAULT_SUBMIT_STUCK_SECONDS_INT) if submit_bool else DEFAULT_ACTIVE_POLL_SECONDS_INT
+    late_dt = planned_dt + timedelta(seconds=allowance_int)
+    # Eligibility is not a completion deadline. A cached pre-deadline summary
+    # cannot prove the scheduler missed its next opportunity to do the work.
+    return "Late" if min(now_dt, source_dt) > late_dt else "Now"
 
 
 def _count_int(value_obj: Any) -> int | None:
@@ -78,7 +87,7 @@ def _count_int(value_obj: Any) -> int | None:
     return count_int if count_int >= 0 else None
 
 
-def _eod_step_dict(eod_dict: dict[str, Any], now_dt: datetime) -> dict[str, str]:
+def _eod_step_dict(eod_dict: dict[str, Any], now_dt: datetime, source_dt: datetime) -> dict[str, str]:
     status_str = str(eod_dict.get("status_str") or "")
     planned_dt = _timestamp_dt(eod_dict.get("expected_due_timestamp_str"))
     actual_dt = None
@@ -96,13 +105,14 @@ def _eod_step_dict(eod_dict: dict[str, Any], now_dt: datetime) -> dict[str, str]
         if not valid_bool:
             actual_dt = None
     elif status_str in {"waiting", "due_missing", "blocked_by_execution"}:
-        state_str = "Late" if status_str in {"due_missing", "blocked_by_execution"} else _due_state_str(planned_dt, now_dt)
+        state_str = _due_state_str(planned_dt, now_dt, source_dt) if planned_dt else "Unknown"
         fact_str = "Waiting for reconcile" if status_str == "blocked_by_execution" else "Snapshot due"
         last_required_str = eod_dict.get("last_required_market_date_str")
         if status_str == "due_missing" and eod_dict.get("last_required_eod_present_bool") is False and last_required_str:
             fact_str = f"Missing snapshot · {last_required_str}"
             # Today's future capture is not the deadline for yesterday's gap.
             if last_required_str != eod_dict.get("expected_market_date_str"):
+                state_str = "Late"
                 planned_dt = None
     elif status_str == "not_applicable" and eod_dict.get("last_required_eod_present_bool") is True:
         state_str, fact_str = "None", "Not due today"
@@ -199,17 +209,45 @@ def build_cycle_view_dict(
         elif vplan_status_str in {"submitting", "submitted"}:
             submit_state_str = "Now"
         else:
-            submit_state_str = _due_state_str(submission_dt, now_dt)
+            submit_state_str = _due_state_str(submission_dt, now_dt, source_dt, submit_bool=True)
             submit_fact_str = "Waiting to submit"
         step_dict_list.append(_step_dict("Submit", submit_state_str, submit_fact_str, now_dt, planned_dt=submission_dt))
 
         fill_count_int = _count_int(pod_row_dict.get("fill_count_int"))
         fill_fact_str = "Fill count not available" if fill_count_int is None else f"{fill_count_int} fill records" if fill_count_int else "No fills recorded"
-        # Generic VPlan completion follows position reconciliation, which can
-        # accept tolerance. Neither that status nor execution-record counts
-        # prove every order filled. The summary has no per-order quantity proof.
+        # Completion requires scoped per-order quantity proof from saved state.
+        # Summary counts and reconciled positions alone remain insufficient.
         fill_state_str = "Unknown" if vplan_status_str == "completed" or fill_count_int is None else "Now" if vplan_status_str in {"submitting", "submitted"} and target_dt is not None and now_dt >= target_dt else "Planned"
-        step_dict_list.append(_step_dict("Fill", fill_state_str, fill_fact_str, now_dt, planned_dt=target_dt))
+        fill_dt = None
+        evidence_dict = pod_row_dict.get("cycle_evidence_dict") or {}
+        evidence_matches_bool = all(
+            evidence_dict.get(evidence_key_str) is not None
+            and evidence_dict[evidence_key_str] == pod_row_dict.get(row_key_str)
+            for evidence_key_str, row_key_str in (
+                ("pod_id_str", "pod_id_str"), ("account_route_str", "account_route_str"),
+                ("vplan_id_int", "latest_vplan_id_int"),
+                ("decision_plan_id_int", "latest_vplan_decision_plan_id_int"),
+                ("vplan_status_str", "latest_vplan_status_str"),
+            )
+        )
+        if evidence_matches_bool:
+            evidence_state_str = evidence_dict.get("state_str")
+            if evidence_state_str in {"complete", "partial"}:
+                filled_int = _count_int(evidence_dict.get("filled_order_count_int"))
+                requested_int = _count_int(evidence_dict.get("order_count_int"))
+                if filled_int is not None and requested_int and 0 <= filled_int <= requested_int:
+                    fill_fact_str = f"{filled_int} of {requested_int} filled"
+                    fill_dt = _timestamp_dt(evidence_dict.get("actual_fill_timestamp_str"))
+                    if evidence_state_str == "complete" and filled_int == requested_int and fill_dt is not None and target_dt is not None and target_dt <= fill_dt <= source_dt:
+                        fill_state_str = "Done"
+                    else:
+                        fill_dt = None
+                        fill_state_str = "Unknown" if vplan_status_str == "completed" else fill_state_str
+            elif evidence_state_str == "no_orders":
+                if submit_state_str != "Failed":
+                    step_dict_list[-1] = _step_dict("Submit", "None", "No orders", now_dt)
+                fill_state_str, fill_fact_str = "None", "No orders"
+        step_dict_list.append(_step_dict("Fill", fill_state_str, fill_fact_str, now_dt, actual_dt=fill_dt, planned_dt=target_dt if fill_state_str != "None" else None))
 
         reconcile_status_str = str(pod_row_dict.get("latest_reconciliation_status_str") or "")
         reconcile_dt = _timestamp_dt(pod_row_dict.get("latest_reconciliation_timestamp_str"))
@@ -227,15 +265,17 @@ def build_cycle_view_dict(
         elif reconcile_status_str == "blocked" and post_target_bool:
             reconcile_state_str, reconcile_fact_str = "Failed", "Position check blocked"
         else:
-            reconcile_state_str = _due_state_str(reconcile_due_dt, now_dt)
+            reconcile_state_str = _due_state_str(reconcile_due_dt, now_dt, source_dt)
             reconcile_fact_str, reconcile_dt = "Waiting for check", None
         step_dict_list.append(_step_dict("Reconcile", reconcile_state_str, reconcile_fact_str, now_dt, actual_dt=reconcile_dt, planned_dt=reconcile_due_dt))
     else:
-        identity_unknown_bool = vplan_id_obj is not None and match_obj is None
+        identity_unknown_bool = (vplan_id_obj is not None and match_obj is None) or decision_status_str == "completed"
         for label_str in STEP_LABEL_TUPLE[2:6]:
             state_str = "Unknown" if identity_unknown_bool else "Planned"
-            fact_str = "Cycle not verified" if identity_unknown_bool else "Waiting for plan"
+            fact_str = "Plan evidence missing" if decision_status_str == "completed" else "Cycle not verified" if identity_unknown_bool else "Waiting for plan"
             planned_dt = submission_dt if label_str == "Submit" else target_dt if label_str == "Fill" else reconcile_due_dt if label_str == "Reconcile" else None
+            if not identity_unknown_bool and label_str in {"Plan", "Submit"}:
+                state_str = _due_state_str(submission_dt, now_dt, source_dt, submit_bool=True)
             step_dict_list.append(_step_dict(label_str, state_str, fact_str, now_dt, planned_dt=planned_dt))
 
     idle_bool = (
@@ -250,7 +290,7 @@ def build_cycle_view_dict(
     )
     if idle_bool:
         step_dict_list = [_step_dict(label_str, "None", "No trade today", now_dt) for label_str in STEP_LABEL_TUPLE[:-1]]
-    step_dict_list.append(_eod_step_dict(pod_row_dict.get("eod_snapshot_dict") or {}, now_dt))
+    step_dict_list.append(_eod_step_dict(pod_row_dict.get("eod_snapshot_dict") or {}, now_dt, source_dt))
     return _cycle_dict(step_dict_list, False, cycle_role_str)
 
 
@@ -276,7 +316,10 @@ def _cycle_dict(step_dict_list: list[dict[str, str]], stale_bool: bool, cycle_ro
         now_str = "Fill not verified" if priority_str == "Unknown" else "Filling"
         now_detail_str = focus_dict["fact_str"]
     if pill_str == "On track":
-        now_str = f"Waiting for {next_dict['label_str']}" if next_dict else "Cycle complete"
+        if step_dict_list[5]["state_str"] == "Done":
+            now_str, now_detail_str = "Reconciled", step_dict_list[4]["fact_str"]
+        else:
+            now_str = f"Waiting for {next_dict['label_str']}" if next_dict else "Cycle complete"
     return {
         "step_dict_list": step_dict_list,
         "pill_str": pill_str,

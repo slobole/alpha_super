@@ -40,6 +40,18 @@ def _data_time_str(value_str):
     return timestamp_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%m-%d %H:%M:%S") if timestamp_ts else "unknown"
 
 
+def _action_required_bool(row_dict, cycle_dict):
+    required_dict = row_dict.get("required_action_dict") or {}
+    if (required_dict.get("severity_str") == "yellow"
+        and (row_dict.get("next_action_str"), required_dict.get("label_str")) in {
+            ("submit_vplan", "VPlan ready"), ("build_vplan", "Build VPlan"),
+        }):
+        submit_dict = cycle_dict["step_dict_list"][3]
+        if submit_dict["planned_timestamp_str"] and submit_dict["state_str"] in {"Planned", "Now"}:
+            return False
+    return _operator_action_required_bool(required_dict)
+
+
 def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts: datetime,
                         period_str="3M", demo_bool=False):
     client_dict = workspace_dict["client_dict"]
@@ -52,7 +64,7 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
         account_list = active_account_list(client_dict, as_of_ts)
     raw_row_list = [row_dict for row_dict in source_dict.get("pod_row_dict_list") or []
                     if isinstance(row_dict, dict) and row_dict.get("mode_str") == "live"]
-    pod_list, attention_list, scoped_row_list = [], [], []
+    pod_list, attention_list, scoped_row_list, health_row_list = [], [], [], []
     for account_dict in account_list:
         pod_id_str = account_dict["pod_id"]
         matches_list = [row_dict for row_dict in raw_row_list if row_dict.get("pod_id_str") == pod_id_str]
@@ -62,8 +74,21 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
         }
         row_dict["source_stale_bool"] = not fresh_bool or not matched_bool
         row_dict.setdefault("as_of_timestamp_str", source_dict.get("as_of_timestamp_str"))
+        if fresh_bool and matched_bool and hasattr(provider_obj, "get_cycle_evidence_dict"):
+            row_dict["cycle_evidence_dict"] = provider_obj.get_cycle_evidence_dict(row_dict, as_of_ts=source_ts)
         scoped_row_list.append(row_dict)
         cycle_dict = build_cycle_view_dict(row_dict, now_ts=as_of_ts)
+        action_required_bool = _action_required_bool(row_dict, cycle_dict)
+        # Normalize only the expected current-session EOD wait for the health
+        # roll-up. Keep the original saved assessment for all other consumers.
+        health_row_dict = deepcopy(row_dict)
+        eod_step_dict = cycle_dict["step_dict_list"][-1]
+        eod_dict = row_dict.get("eod_snapshot_dict") or {}
+        if eod_step_dict["state_str"] == "Now" and eod_dict.get("status_str") in {"due_missing", "blocked_by_execution"}:
+            for item_dict in (health_row_dict.get("data_freshness_dict") or {}).get("item_dict_list") or []:
+                if item_dict.get("label_str") == "EOD Snapshot" and item_dict.get("severity_str") == "yellow":
+                    item_dict.update(severity_str="green", detail_str="Waiting for scheduled capture")
+        health_row_list.append(health_row_dict)
         pod_state_str = "skip" if cycle_dict["pill_str"] == "Idle" else _state_str(cycle_dict.get("tone_str"))
         policy_str = row_dict.get("execution_policy_str") or ""
         monthly_bool = policy_str == "next_month_first_open" or row_dict.get("signal_clock_str") == "month_end_snapshot_ready"
@@ -85,7 +110,7 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
         if pod_state_str in {"fail", "late"}:
             if row_dict.get("latest_submit_ack_status_str") == "missing_critical" or (row_dict.get("missing_ack_count_int") or 0) > 0:
                 now_str, now_detail_str = "ACK missing", cycle_dict["now_str"]
-            next_str = required_dict.get("label_str") if _operator_action_required_bool(required_dict) else "Review " + next_str
+            next_str = required_dict.get("label_str") if action_required_bool else "Review " + next_str
             next_time_str, next_detail_str = "", "you · now"
         pod_list.append({
             "pod_id_str": pod_id_str, "name_str": name_str,
@@ -98,19 +123,19 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
         })
         database_failed_bool = row_dict.get("db_status_str") in {"missing", "error"}
         if fresh_bool and matched_bool and (database_failed_bool
-            or _operator_action_required_bool(required_dict) or pod_state_str in {"fail", "late"}):
+            or action_required_bool or pod_state_str in {"fail", "late"}):
             event_ts = parse_timestamp_ts(required_dict.get("timestamp_str") or row_dict.get("latest_event_timestamp_str"))
             age_str = "—" if event_ts is None or event_ts > as_of_ts else _duration_str((as_of_ts - event_ts).total_seconds())
             attention_list.append({
                 "state_str": "fail" if database_failed_bool or required_dict.get("severity_str") == "red" or pod_state_str == "fail" else "late",
                 "pod_name_str": name_str,
-                "title_str": "State DB unavailable." if database_failed_bool else required_dict.get("label_str") or cycle_dict["now_str"],
-                "detail_str": "Cycle evidence cannot be read." if database_failed_bool else required_dict.get("reason_str") or required_dict.get("detail_str") or "",
+                "title_str": "State DB unavailable." if database_failed_bool else (required_dict.get("label_str") or cycle_dict["now_str"]) if action_required_bool else cycle_dict["now_str"],
+                "detail_str": "Cycle evidence cannot be read." if database_failed_bool else (required_dict.get("reason_str") or required_dict.get("detail_str") or "") if action_required_bool else cycle_dict["now_detail_str"],
                 "age_str": age_str,
             })
 
     scoped_summary_dict = {**source_dict, "pod_row_dict_list": scoped_row_list}
-    health_obj = build_health_rollup(scoped_summary_dict, mode_str="live")
+    health_obj = build_health_rollup({**source_dict, "pod_row_dict_list": health_row_list}, mode_str="live")
     system_state_str = _state_str(health_obj.severity_str) if fresh_bool and pod_list else "unk"
     if fresh_bool and any(row_dict.get("db_status_str") in {"missing", "error"} for row_dict in scoped_row_list):
         system_state_str = "fail"

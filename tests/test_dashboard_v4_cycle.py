@@ -1,7 +1,7 @@
 """Cycle projections must not turn missing or different-cycle evidence green."""
 
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -11,7 +11,7 @@ from alpha.live.dashboard_v4.cycle import build_cycle_view_dict
 @pytest.fixture
 def pod_row_dict():
     return {
-        "mode_str": "live", "pod_id_str": "test_daily", "db_status_str": "ok",
+        "mode_str": "live", "pod_id_str": "test_daily", "account_route_str": "TEST_ACCOUNT", "db_status_str": "ok",
         "as_of_timestamp_str": "2026-09-18T13:32:00+00:00",
         "norgate_snapshot_status_dict": {
             "status_str": "ready", "snapshot_date_str": "2026-09-17",
@@ -157,6 +157,8 @@ def test_completed_previous_cycle_does_not_green_new_plan(pod_row_dict):
         latest_decision_plan_id_int=11, latest_decision_plan_status_str="planned",
         latest_vplan_status_str="completed", latest_vplan_is_for_latest_decision_bool=False,
         latest_vplan_cycle_role_str="previous", next_action_str="build_vplan",
+        latest_decision_plan_submission_timestamp_str="2026-09-21T13:23:30+00:00",
+        latest_decision_plan_target_execution_timestamp_str="2026-09-21T13:30:00+00:00",
     )
     view_dict = _view_dict(pod_row_dict)
     assert _step_dict(view_dict, "Decide")["state_str"] == "Done"
@@ -262,3 +264,91 @@ def test_other_modes_rejected(pod_row_dict, mode_str):
     pod_row_dict["mode_str"] = mode_str
     with pytest.raises(ValueError, match="LIVE only"):
         _view_dict(pod_row_dict)
+
+
+@pytest.mark.parametrize("stage_str,due_str,allowance_int", [
+    ("Submit", "2026-09-18T13:23:30+00:00", 60),
+    ("Reconcile", "2026-09-18T13:35:00+00:00", 30),
+    ("EOD", "2026-09-18T20:10:00+00:00", 30),
+])
+@pytest.mark.parametrize("point_str", ["before", "eligible", "within", "boundary", "late", "cached"])
+def test_stage_eligibility_allows_scheduler_poll(pod_row_dict, stage_str, due_str, allowance_int, point_str):
+    due_dt = datetime.fromisoformat(due_str)
+    offset_int = {"before": -1, "eligible": 0, "within": 5, "boundary": allowance_int,
+                  "late": allowance_int + 1, "cached": allowance_int + 5}[point_str]
+    now_dt = due_dt + timedelta(seconds=offset_int)
+    pod_row_dict["as_of_timestamp_str"] = (due_dt if point_str == "cached" else now_dt).isoformat()
+    if stage_str == "Submit":
+        pod_row_dict.update(latest_vplan_status_str="ready", latest_submit_ack_status_str="not_checked", broker_order_count_int=0, broker_ack_count_int=0)
+    elif stage_str == "EOD":
+        pod_row_dict["eod_snapshot_dict"].update(status_str="due_missing", last_required_market_date_str="2026-09-18", last_required_eod_present_bool=False)
+    step_dict = _step_dict(_view_dict(pod_row_dict, now_dt.isoformat()), stage_str)
+    assert step_dict["state_str"] == ("Planned" if point_str == "before" else "Late" if point_str == "late" else "Now")
+
+
+def _complete_evidence_dict(pod_row_dict):
+    return {
+        "pod_id_str": pod_row_dict["pod_id_str"], "account_route_str": pod_row_dict["account_route_str"],
+        "vplan_id_int": 20, "decision_plan_id_int": 10, "vplan_status_str": "completed",
+        "state_str": "complete", "order_count_int": 3, "filled_order_count_int": 3,
+        "actual_fill_timestamp_str": "2026-09-18T13:30:02+00:00",
+    }
+
+
+def test_completed_cycle_with_per_order_proof_is_on_track(pod_row_dict):
+    pod_row_dict.update(latest_vplan_status_str="completed", latest_decision_plan_status_str="completed",
+        latest_reconciliation_timestamp_str="2026-09-18T13:35:01+00:00", as_of_timestamp_str="2026-09-18T13:36:00+00:00")
+    pod_row_dict["cycle_evidence_dict"] = _complete_evidence_dict(pod_row_dict)
+    view_dict = _view_dict(pod_row_dict, "2026-09-18T13:36:00+00:00")
+    assert _step_dict(view_dict, "Fill")["state_str"] == "Done"
+    assert _step_dict(view_dict, "Fill")["actual_time_str"] == "09:30:02"
+    assert view_dict["pill_str"] == "On track"
+    assert view_dict["now_str"] == "Reconciled"
+    assert view_dict["now_detail_str"] == "3 of 3 filled"
+
+
+@pytest.mark.parametrize("field_str,value_obj", [
+    ("account_route_str", "FOREIGN"), ("pod_id_str", "other"), ("vplan_id_int", 21),
+    ("decision_plan_id_int", 11), ("vplan_status_str", "submitted"),
+    ("actual_fill_timestamp_str", "2026-09-18T13:33:00+00:00"),
+    ("actual_fill_timestamp_str", "2026-09-18T13:29:00+00:00"),
+    ("filled_order_count_int", 2),
+])
+def test_wrong_cycle_or_incomplete_quantity_proof_cannot_complete_fill(pod_row_dict, field_str, value_obj):
+    pod_row_dict["latest_vplan_status_str"] = "completed"
+    evidence_dict = _complete_evidence_dict(pod_row_dict)
+    evidence_dict[field_str] = value_obj
+    pod_row_dict["cycle_evidence_dict"] = evidence_dict
+    assert _step_dict(_view_dict(pod_row_dict), "Fill")["state_str"] == "Unknown"
+
+
+def test_proven_no_orders_still_requires_reconciliation(pod_row_dict):
+    evidence_dict = _complete_evidence_dict(pod_row_dict)
+    evidence_dict.update(state_str="no_orders", vplan_status_str="submitted", order_count_int=0, filled_order_count_int=0, actual_fill_timestamp_str=None)
+    pod_row_dict.update(cycle_evidence_dict=evidence_dict, broker_order_count_int=0, broker_ack_count_int=0, fill_count_int=0)
+    view_dict = _view_dict(pod_row_dict)
+    assert _step_dict(view_dict, "Submit")["state_str"] == "None"
+    assert _step_dict(view_dict, "Fill")["fact_str"] == "No orders"
+    assert _step_dict(view_dict, "Reconcile")["state_str"] == "Planned"
+
+
+def test_completed_decision_without_vplan_is_unknown_not_waiting(pod_row_dict):
+    pod_row_dict.update(latest_decision_plan_status_str="completed", latest_vplan_id_int=None)
+    view_dict = _view_dict(pod_row_dict)
+    assert view_dict["pill_str"] == "Unknown"
+    assert _step_dict(view_dict, "Plan")["fact_str"] == "Plan evidence missing"
+
+
+def test_missing_vplan_after_submit_allowance_is_late(pod_row_dict):
+    pod_row_dict.update(latest_decision_plan_status_str="planned", latest_vplan_id_int=None, next_action_str="build_vplan")
+    assert _step_dict(_view_dict(pod_row_dict), "Submit")["state_str"] == "Late"
+
+
+def test_no_order_claim_cannot_erase_ack_failure(pod_row_dict):
+    pod_row_dict.update(latest_vplan_status_str="completed", missing_ack_count_int=1, latest_submit_ack_status_str="missing_critical")
+    evidence_dict = _complete_evidence_dict(pod_row_dict)
+    evidence_dict.update(state_str="no_orders", order_count_int=0)
+    pod_row_dict["cycle_evidence_dict"] = evidence_dict
+    view_dict = _view_dict(pod_row_dict)
+    assert _step_dict(view_dict, "Submit")["state_str"] == "Failed"
+    assert view_dict["pill_str"] == "Action needed"
