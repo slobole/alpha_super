@@ -27,7 +27,7 @@ def build_next_operation_dict(row_dict, cycle_dict, *, now_ts, action_required_b
     next_time_str = cycle_dict["next_time_str"]
     next_timestamp_str = cycle_dict["next_timestamp_str"]
     if next_str == "—":
-        next_str = "Time unknown" if cycle_dict["pill_str"] == "Unknown" else "Not scheduled"
+        next_str = "Time unknown" if cycle_dict["pill_str"] in {"Unknown", "Not verified"} else "Not scheduled"
     elif not next_time_str:
         next_time_str = "Time unknown"
     result_dict = {"next_str": next_str, "next_time_str": next_time_str,

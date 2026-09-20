@@ -1,0 +1,10 @@
+{% set table_dict = pod_page_dict.table_dict %}
+{% if table_dict.row_list %}
+<table class="tbl dense evidence-table position-changes" data-selection-key="evidence:plan"><thead><tr><th scope="col">Symbol</th><th scope="col" class="num">Position</th><th scope="col" class="num">Broker = model</th></tr></thead><tbody>
+{% for row_dict in table_dict.row_list %}<tr>
+  <td data-column="Symbol"><b>{{ row_dict.symbol_str }}</b></td>
+  <td data-column="Position" class="num"><span class="position-order">{{ row_dict.order_str }}</span><span class="position-flow" title="Before → After"><span class="sr-only">Before </span>{{ row_dict.before_str }} <span aria-hidden="true">→</span><span class="sr-only"> After </span> {{ row_dict.after_str }}</span></td>
+  <td data-column="Broker = model" class="num">{{ mark(row_dict.match_str, 'Broker = model') }}</td>
+</tr>{% endfor %}
+</tbody></table>
+{% else %}<div class="empty-state">{{ table_dict.empty_str }}</div>{% endif %}

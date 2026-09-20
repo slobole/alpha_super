@@ -178,7 +178,11 @@ def test_optional_evidence_lookup_failure_keeps_overview_available(fixture_tuple
     monkeypatch.setattr(provider_obj, "get_target_for_pod", failed_lookup)
     monkeypatch.setattr("alpha.live.dashboard_v4.overview.build_financial_overview_dict", lambda *args, **kwargs: {})
     view_dict = build_overview_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=DEMO_NOW_TS)
-    assert view_dict["pod_list"][0]["pill_str"] == "Unknown"
+    assert view_dict["pod_list"][0]["pill_str"] == "Not verified"
+    assert view_dict["pod_list"][0]["state_str"] == "unk"
+    assert view_dict["pod_list"][0]["now_str"] == "Reconciled · Fill details not verified"
+    assert view_dict["pod_list"][0]["step_list"][4]["state_str"] == "unk"
+    assert "Configuration changed" not in str(view_dict)
     assert view_dict["verdict_str"] == "Status needs review."
 
 

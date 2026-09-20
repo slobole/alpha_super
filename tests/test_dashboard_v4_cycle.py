@@ -312,6 +312,25 @@ def test_completed_cycle_with_per_order_proof_is_on_track(pod_row_dict):
     assert view_dict["now_detail_str"] == "3 of 3 filled"
 
 
+def test_reconciled_cycle_explains_unverified_fills_without_turning_green(pod_row_dict):
+    pod_row_dict.update(latest_vplan_status_str="completed", latest_decision_plan_status_str="completed",
+        latest_reconciliation_timestamp_str="2026-09-18T13:35:01+00:00", as_of_timestamp_str="2026-09-18T13:36:00+00:00")
+    evidence_dict = _complete_evidence_dict(pod_row_dict)
+    evidence_dict.update(state_str="unknown", actual_fill_timestamp_str=None,
+        reason_str="A fill cannot be matched to its order, account or symbol.")
+    pod_row_dict["cycle_evidence_dict"] = evidence_dict
+    view_dict = _view_dict(pod_row_dict, "2026-09-18T13:36:00+00:00")
+    assert view_dict["pill_str"] == "Not verified"
+    assert view_dict["tone_str"] == "gray"
+    assert view_dict["now_str"] == "Reconciled · Fill details not verified"
+    assert view_dict["now_detail_str"] == evidence_dict["reason_str"]
+    assert _step_dict(view_dict, "Fill")["state_str"] == "Unknown"
+    assert _step_dict(view_dict, "Fill")["actual_time_str"] == ""
+    assert _step_dict(view_dict, "Reconcile")["state_str"] == "Done"
+    pod_row_dict["latest_submit_ack_status_str"] = "not_checked"
+    assert _view_dict(pod_row_dict, "2026-09-18T13:36:00+00:00")["pill_str"] == "Unknown"
+
+
 @pytest.mark.parametrize("ack_status_str", ["not_checked", "", None, "unrecognized"])
 def test_completed_cycle_without_verified_ack_is_unknown_not_late(pod_row_dict, ack_status_str):
     pod_row_dict.update(latest_vplan_status_str="completed", latest_decision_plan_status_str="completed",
@@ -340,7 +359,10 @@ def test_wrong_cycle_or_incomplete_quantity_proof_cannot_complete_fill(pod_row_d
     evidence_dict = _complete_evidence_dict(pod_row_dict)
     evidence_dict[field_str] = value_obj
     pod_row_dict["cycle_evidence_dict"] = evidence_dict
-    assert _step_dict(_view_dict(pod_row_dict), "Fill")["state_str"] == "Unknown"
+    fill_step_dict = _step_dict(_view_dict(pod_row_dict), "Fill")
+    assert fill_step_dict["state_str"] == "Unknown"
+    if field_str == "actual_fill_timestamp_str":
+        assert fill_step_dict["detail_str"] == "Fill completion time could not be verified for this cycle."
 
 
 @pytest.mark.parametrize("vplan_status_str", ["submitted", "completed"])

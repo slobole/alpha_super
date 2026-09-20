@@ -125,11 +125,11 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
                     source_dict = {"status_str": "unknown", "reason_str": "Cycle identity not verified"}
                 elif source_dict.get("status_str") == "ok" and all(selected_row_dict.get(key_str) == row_dict.get(key_str)
                     for key_str in ("latest_decision_plan_id_int", "latest_vplan_id_int", "release_id_str")):
-                    # Current cycle shares the same operating gate and failures
-                    # as Overview; history keeps its own saved provenance.
-                    for key_str in ("norgate_snapshot_status_dict", "reconcile_read_failure_dict"):
-                        if key_str in row_dict:
-                            selected_row_dict[key_str] = row_dict[key_str]
+                    # The latest monthly cycle may still be weeks old. Its Data
+                    # stage keeps the decision's saved snapshot; current data
+                    # readiness remains in Overview and the Pod header.
+                    if "reconcile_read_failure_dict" in row_dict:
+                        selected_row_dict["reconcile_read_failure_dict"] = row_dict["reconcile_read_failure_dict"]
         pod_finance_dict = build_pod_finance_dict(workspace_dict, snapshot_obj, provider_obj,
             pod_id_str=pod_id_str, as_of_ts=clock_fn(), period_str=period_str)
         render_ts = clock_fn()

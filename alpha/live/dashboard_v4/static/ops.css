@@ -48,6 +48,8 @@
 .evidence-table .plan { color: var(--ink-3); }
 .evidence-table .hl td { background: var(--red-bg); }
 .evidence-table .num { white-space: normal; }
+.position-order { display: block; color: var(--ink-3); font-size: 11px; }
+.position-flow { display: block; margin-top: 2px; }
 .issue { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 16px 20px; background: var(--red-bg); border: 1px solid var(--rule); border-left: 3px solid var(--red); }
 .issue h3 { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
 .issue p { margin-top: 3px; color: var(--ink-2); }

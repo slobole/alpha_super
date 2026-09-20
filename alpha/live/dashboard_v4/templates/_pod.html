@@ -36,7 +36,7 @@
       {% elif step_dict.planned_time_str %}<span class="pln">{{ 'planned' if step_dict.state_str == 'Done' else 'due' }} {{ step_dict.planned_time_str }}</span>{% else %}<span class="pln">—</span>{% endif %}
     </a>{% endfor %}</div>
   <nav id="evidence" class="tabs" aria-label="Cycle evidence">{% for tab_dict in pod_page_dict.tab_list %}<a class="{{ 'on' if tab_dict.key_str == pod_page_dict.tab_str else '' }}" href="{{ tab_dict.url_str }}#evidence"{% if tab_dict.key_str == pod_page_dict.tab_str %} aria-current="page"{% endif %}>{{ tab_dict.label_str }}{% if tab_dict.count_int is not none %}<span class="cnt">{{ tab_dict.count_int }}</span>{% endif %}</a>{% endfor %}</nav>
-  {{ evidence_table(pod_page_dict.table_dict, 'evidence:' + pod_page_dict.tab_str) }}
+  {% if pod_page_dict.tab_str == 'plan' %}{% include '_position_changes.html' %}{% else %}{{ evidence_table(pod_page_dict.table_dict, 'evidence:' + pod_page_dict.tab_str) }}{% endif %}
   {% if pod_page_dict.history_truncated_bool %}<p class="evidence-note">Showing the latest 60 saved cycles.</p>{% endif %}
 </section>
 

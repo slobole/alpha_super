@@ -26,12 +26,13 @@ def test_request_join_preserves_same_symbol_entry_and_exit(pod_fixture_tuple):
             row_dict["asset_str"] = "SPY"
     source_dict["vplan_dict"]["current_broker_position_map_dict"] = {"SPY": 100}
     source_dict["reconciliation_dict"].update(model_position_map_dict={"SPY": 104}, broker_position_map_dict={"SPY": 104})
-    table_dict = build_evidence_tables_dict(source_dict, as_of_ts=DEMO_NOW_TS, fresh_bool=True)["plan"]
+    tables_dict = build_evidence_tables_dict(source_dict, as_of_ts=DEMO_NOW_TS, fresh_bool=True)
+    table_dict = tables_dict["plan"]
     assert len(table_dict["row_list"]) == 3
-    assert [row_dict["cell_list"][2] for row_dict in table_dict["row_list"]] == ["BUY 31", "BUY 17", "SELL 44"]
-    assert [row_dict["cell_list"][4] for row_dict in table_dict["row_list"]] == ["158.42", "291.05", "112.80"]
-    assert {row_dict["cell_list"][1] for row_dict in table_dict["row_list"]} == {"100"}
-    assert {row_dict["cell_list"][5] for row_dict in table_dict["row_list"]} == {"104"}
+    assert [row_dict["order_str"] for row_dict in table_dict["row_list"]] == ["Order +31", "Order +17", "Order -44"]
+    assert [row_dict["cell_list"][6] for row_dict in tables_dict["orders"]["row_list"]] == ["158.42", "291.05", "112.80"]
+    assert {row_dict["before_str"] for row_dict in table_dict["row_list"]} == {"100"}
+    assert {row_dict["after_str"] for row_dict in table_dict["row_list"]} == {"104"}
 
 
 def test_partial_execution_prices_are_weighted_within_order_only(pod_fixture_tuple):
@@ -39,8 +40,8 @@ def test_partial_execution_prices_are_weighted_within_order_only(pod_fixture_tup
     first_dict = source_dict["fill_list"][0]
     first_dict.update(fill_amount_float=10, fill_price_float=100)
     source_dict["fill_list"].append({**first_dict, "fill_amount_float": 21, "fill_price_float": 200})
-    table_dict = build_evidence_tables_dict(source_dict, as_of_ts=DEMO_NOW_TS, fresh_bool=True)["plan"]
-    assert table_dict["row_list"][0]["cell_list"][4] == "167.74"
+    table_dict = build_evidence_tables_dict(source_dict, as_of_ts=DEMO_NOW_TS, fresh_bool=True)["orders"]
+    assert table_dict["row_list"][0]["cell_list"][6] == "167.74"
     assert "Slip bps" not in table_dict["column_list"]  # No verified comparison source.
 
 
@@ -55,13 +56,94 @@ def test_missing_or_ambiguous_evidence_never_manufactures_values(pod_fixture_tup
         source_dict["vplan_dict"] = {}
     else:
         source_dict["order_list"].append(deepcopy(source_dict["order_list"][0]))
-    table_dict = build_evidence_tables_dict(source_dict, as_of_ts=DEMO_NOW_TS, fresh_bool=True)["plan"]
+    tables_dict = build_evidence_tables_dict(source_dict, as_of_ts=DEMO_NOW_TS, fresh_bool=True)
+    table_dict = tables_dict["plan"]
     if missing_str == "reconcile":
         assert {row_dict["match_str"] for row_dict in table_dict["row_list"]} == {"unk"}
-        assert {row_dict["cell_list"][5] for row_dict in table_dict["row_list"]} == {"—"}
+        assert {row_dict["after_str"] for row_dict in table_dict["row_list"]} == {"—"}
+    elif missing_str == "before":
+        assert table_dict["row_list"][0]["before_str"] == "—"
     else:
-        index_int = 1 if missing_str == "before" else 3
-        assert table_dict["row_list"][0]["cell_list"][index_int] == "—"
+        assert tables_dict["orders"]["row_list"][0]["cell_list"][5:7] == ["—", "—"]
+
+
+def test_compact_position_uses_saved_broker_result_not_order_target_or_fill_total():
+    source_dict = {
+        "plan_row_list": [{"asset_str": "ABC", "order_delta_share_float": 19}],
+        "vplan_dict": {"current_broker_position_map_dict": {"ABC": 7}, "target_share_map_dict": {"ABC": 26}},
+        "reconciliation_dict": {"broker_position_map_dict": {"ABC": 18}, "model_position_map_dict": {"ABC": 26}},
+        "fill_list": [{"asset_str": "ABC", "fill_amount_float": 19, "fill_price_float": 100}],
+    }
+    before_dict = deepcopy(source_dict)
+    table_dict = build_evidence_tables_dict(source_dict, as_of_ts=DEMO_NOW_TS, fresh_bool=True)["plan"]
+    assert table_dict["column_list"] == ["Symbol", "Position", "Broker = model"]
+    assert table_dict["row_list"] == [{"symbol_str": "ABC", "order_str": "Order +19",
+        "before_str": "7", "after_str": "18", "match_str": "fail"}]
+    assert source_dict == before_dict
+
+
+@pytest.mark.parametrize("before_map,broker_map,model_map,before_str,after_str,match_str", [
+    (None, {"ABC": 18}, {"ABC": 18}, "—", "18", "done"),
+    ({"ABC": 7}, None, {"ABC": 26}, "7", "—", "unk"),
+    ({"ABC": 7}, {"ABC": 18}, None, "7", "18", "unk"),
+    ({}, {}, {}, "0", "0", "done"),
+])
+def test_compact_positions_preserve_independent_snapshot_availability(before_map, broker_map, model_map,
+        before_str, after_str, match_str):
+    source_dict = {"plan_row_list": [{"asset_str": "ABC", "order_delta_share_float": 19}],
+        "vplan_dict": {"current_broker_position_map_dict": before_map, "target_share_map_dict": {"ABC": 26}},
+        "reconciliation_dict": {"broker_position_map_dict": broker_map, "model_position_map_dict": model_map}}
+    row_dict = build_evidence_tables_dict(source_dict, as_of_ts=DEMO_NOW_TS, fresh_bool=True)["plan"]["row_list"][0]
+    assert (row_dict["before_str"], row_dict["after_str"], row_dict["match_str"]) == (before_str, after_str, match_str)
+
+
+@pytest.mark.parametrize("amount_obj,order_str", [(0, "No order"), (-5, "Order -5"),
+    (0.125, "Order +0.125"), (None, "Order —"), (float("nan"), "Order —")])
+def test_compact_requested_shares_do_not_invent_an_order(amount_obj, order_str):
+    tables_dict = build_evidence_tables_dict({"plan_row_list": [{"asset_str": "ABC", "order_delta_share_float": amount_obj}]},
+        as_of_ts=DEMO_NOW_TS, fresh_bool=True)
+    assert tables_dict["plan"]["row_list"][0]["order_str"] == order_str
+    if amount_obj == 0:
+        assert tables_dict["orders"]["row_list"] == []
+
+
+def test_compact_table_escapes_symbols_and_keeps_mobile_and_selection_fields(pod_fixture_tuple, monkeypatch):
+    workspace_dict, snapshot_obj, provider_obj, source_dict, pod_id_str = pod_fixture_tuple
+    source_dict["plan_row_list"][0]["asset_str"] = '<img src=x onerror="alert(1)">'
+    monkeypatch.setattr(provider_obj, "get_pod_cycles_dict", lambda *args, **kwargs: deepcopy(source_dict))
+    app_obj = create_app(provider_obj, demo_bool=True, workspace_snapshot_fn=lambda: (deepcopy(workspace_dict), snapshot_obj), now_fn=lambda: DEMO_NOW_TS)
+    html_str = app_obj.test_client().get(f"/pods/{pod_id_str}?tab=plan").get_data(as_text=True)
+    table_html_str = html_str.split('data-selection-key="evidence:plan"')[1].split('</table>')[0]
+    assert '<img src=x' not in table_html_str and '&lt;img src=x' in table_html_str
+    assert table_html_str.count('scope="col"') == 3
+    assert all(f'data-column="{label_str}"' in table_html_str for label_str in ("Symbol", "Position", "Broker = model"))
+    assert '<span class="sr-only">Before </span>' in table_html_str
+    assert '<span class="sr-only"> After </span>' in table_html_str
+    assert 'data-observed-state' in table_html_str
+    assert 'Fill px' not in table_html_str and 'Filled' not in table_html_str
+
+
+@pytest.mark.parametrize("fresh_bool,reason_str", [(True, "Order ownership could not be checked."), (True, ""), (False, "")])
+def test_unverified_fill_records_remain_visible_without_verified_order_totals(pod_fixture_tuple, fresh_bool, reason_str):
+    source_dict = pod_fixture_tuple[3]
+    source_dict["cycle_evidence_dict"] = {"state_str": "unknown", "reason_str": reason_str, "order_list": []}
+    tables_dict = build_evidence_tables_dict(source_dict, as_of_ts=DEMO_NOW_TS, fresh_bool=fresh_bool)
+    assert len(tables_dict["fills"]["row_list"]) == len(source_dict["fill_list"])
+    assert all(row_dict["cell_list"][5:7] == ["—", "—"] for row_dict in tables_dict["orders"]["row_list"])
+    assert tables_dict["fills"]["note_str"] == (
+        "Not verified. " + (reason_str or "Fill details could not be checked.") if fresh_bool else
+        "Saved fill records; current verification unavailable.")
+
+
+def test_unverified_fill_reason_is_escaped_with_saved_fill_rows(pod_fixture_tuple, monkeypatch):
+    workspace_dict, snapshot_obj, provider_obj, source_dict, pod_id_str = pod_fixture_tuple
+    source_dict["cycle_evidence_dict"] = {"state_str": "unknown", "reason_str": '<script>alert("reason")</script>', "order_list": []}
+    monkeypatch.setattr(provider_obj, "get_pod_cycles_dict", lambda *args, **kwargs: deepcopy(source_dict))
+    app_obj = create_app(provider_obj, demo_bool=True, workspace_snapshot_fn=lambda: (deepcopy(workspace_dict), snapshot_obj), now_fn=lambda: DEMO_NOW_TS)
+    html_str = app_obj.test_client().get(f"/pods/{pod_id_str}?tab=fills").get_data(as_text=True)
+    assert 'Not verified. &lt;script&gt;' in html_str and '<script>alert("reason")</script>' not in html_str
+    assert 'data-selection-key="evidence:fills"' in html_str
+    assert '158.42' in html_str
 
 
 def test_stale_cycle_never_keeps_green_states(pod_fixture_tuple):

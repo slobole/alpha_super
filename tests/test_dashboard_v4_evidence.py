@@ -86,6 +86,28 @@ def update_db(target_obj, sql_str, params_tuple=()):
         connection_obj.execute(sql_str, params_tuple)
 
 
+def _sparse_fixture_tuple(tmp_path, *, amount_list=None, mixed_bool=False):
+    """A legacy zero summary still needs exact ACK and execution identities."""
+    target_obj, row_dict = build_fixture_tuple(tmp_path, amount_list=amount_list or [19.0, -5.0])
+    ack_ts = SUBMIT_TS + timedelta(seconds=1)
+    with sqlite3.connect(target_obj.db_path_str) as connection_obj:
+        connection_obj.execute("""INSERT INTO vplan_broker_ack
+            (decision_plan_id_int,vplan_id_int,account_route_str,order_request_key_str,
+             asset_str,broker_order_type_str,local_submit_ack_bool,broker_response_ack_bool,
+             ack_status_str,ack_source_str,broker_order_id_str,response_timestamp_str,raw_payload_json_str)
+            SELECT decision_plan_id_int,vplan_id_int,account_route_str,order_request_key_str,
+                   asset_str,broker_order_type_str,1,1,'broker_acked','test',broker_order_id_str,?,'{}'
+            FROM vplan_broker_order""", (ack_ts.isoformat(),))
+        connection_obj.execute("""UPDATE vplan SET submit_ack_status_str='complete',
+            missing_ack_count_int=0,submit_ack_checked_timestamp_str=?""", (ack_ts.isoformat(),))
+        connection_obj.execute("""UPDATE vplan_broker_order SET
+            amount_float=0,filled_amount_float=0,remaining_amount_float=0
+            WHERE ?=0 OR broker_order_id_str='order-0'""", (int(mixed_bool),))
+    row_dict.update(latest_submit_ack_status_str="complete", missing_ack_count_int=0,
+        broker_ack_count_int=row_dict["broker_order_count_int"])
+    return target_obj, row_dict
+
+
 def test_complete_signed_fills_for_same_asset_exit_and_entry_are_independent(tmp_path):
     target_obj, row_dict = build_fixture_tuple(tmp_path)
     before_bytes = (tmp_path / "pod.sqlite3").read_bytes()
@@ -97,6 +119,169 @@ def test_complete_signed_fills_for_same_asset_exit_and_entry_are_independent(tmp
     assert [order_dict["filled_share_float"] for order_dict in evidence_dict["order_list"]] == [10.0, -8.0]
     assert (tmp_path / "pod.sqlite3").read_bytes() == before_bytes
     assert (tmp_path / "pod.sqlite3").stat().st_mtime_ns == before_ns_int
+
+
+@pytest.mark.parametrize("amount_list", [[10.0, -8.0], [19.0, -5.0]])
+@pytest.mark.parametrize("mixed_bool", [False, True])
+def test_zero_summary_fallback_proves_each_signed_request_without_writes(tmp_path, amount_list, mixed_bool):
+    target_obj, row_dict = _sparse_fixture_tuple(tmp_path, amount_list=amount_list, mixed_bool=mixed_bool)
+    db_path_obj = tmp_path / "pod.sqlite3"
+    before_bytes, before_mtime_int = db_path_obj.read_bytes(), db_path_obj.stat().st_mtime_ns
+    evidence_dict = load_cycle_evidence_dict(target_obj, row_dict, as_of_ts=NOW_TS)
+    assert evidence_dict["state_str"] == "complete"
+    assert evidence_dict["filled_order_count_int"] == evidence_dict["order_count_int"] == 2
+    assert evidence_dict["fill_record_count_int"] == 2
+    assert [order_dict["requested_share_float"] for order_dict in evidence_dict["order_list"]] == amount_list
+    assert [order_dict["filled_share_float"] for order_dict in evidence_dict["order_list"]] == amount_list
+    assert evidence_dict["actual_fill_timestamp_str"] == FILL_TS.isoformat()
+    assert db_path_obj.read_bytes() == before_bytes
+    assert db_path_obj.stat().st_mtime_ns == before_mtime_int
+
+
+def test_zeroed_order_summary_without_ack_proof_remains_unknown(tmp_path):
+    target_obj, row_dict = build_fixture_tuple(tmp_path)
+    update_db(target_obj, "UPDATE vplan_broker_order SET amount_float=0, filled_amount_float=0, remaining_amount_float=0")
+    before_bytes = (tmp_path / "pod.sqlite3").read_bytes()
+    row_dict["latest_reconciliation_status_str"] = "passed"
+    evidence_dict = load_cycle_evidence_dict(target_obj, row_dict, as_of_ts=NOW_TS)
+    assert evidence_dict["state_str"] == "unknown"
+    assert evidence_dict["fill_record_count_int"] == 2
+    assert evidence_dict["order_list"] == []
+    assert evidence_dict["actual_fill_timestamp_str"] is None
+    assert (tmp_path / "pod.sqlite3").read_bytes() == before_bytes
+
+
+@pytest.mark.parametrize("sql_str,params_tuple", [
+    ("UPDATE vplan_broker_order SET amount_float=1 WHERE broker_order_id_str='order-0'", ()),
+    ("UPDATE vplan_broker_order SET filled_amount_float=1 WHERE broker_order_id_str='order-0'", ()),
+    ("UPDATE vplan_broker_order SET remaining_amount_float=1 WHERE broker_order_id_str='order-0'", ()),
+    ("UPDATE vplan_broker_order SET remaining_amount_float=NULL WHERE broker_order_id_str='order-0'", ()),
+    ("UPDATE vplan_broker_order SET filled_amount_float=0.000000000001 WHERE broker_order_id_str='order-0'", ()),
+    ("UPDATE vplan_broker_order SET status_str='Submitted' WHERE broker_order_id_str='order-0'", ()),
+    ("UPDATE vplan_broker_order SET status_str='Cancelled' WHERE broker_order_id_str='order-0'", ()),
+    ("UPDATE vplan_fill SET fill_amount_float=-fill_amount_float WHERE broker_order_id_str='order-0'", ()),
+    ("UPDATE vplan_fill SET fill_amount_float=20 WHERE broker_order_id_str='order-0'", ()),
+    ("UPDATE vplan_fill SET fill_amount_float=18 WHERE broker_order_id_str='order-0'", ()),
+    ("DELETE FROM vplan_fill WHERE broker_order_id_str='order-0'", ()),
+    ("UPDATE vplan_fill SET raw_payload_json_str='{}' WHERE broker_order_id_str='order-0'", ()),
+    ("UPDATE vplan_fill SET raw_payload_json_str='{\"exec_id_str\":\"\"}' WHERE broker_order_id_str='order-0'", ()),
+    ("UPDATE vplan_fill SET raw_payload_json_str='{\"exec_id_str\":\"repeated\"}'", ()),
+])
+def test_zero_summary_never_rescues_conflicting_or_incomplete_execution(tmp_path, sql_str, params_tuple):
+    target_obj, row_dict = _sparse_fixture_tuple(tmp_path)
+    update_db(target_obj, sql_str, params_tuple)
+    # Test the execution proof itself, not merely a changed summary row count.
+    if sql_str.startswith("DELETE FROM vplan_fill"):
+        row_dict["fill_count_int"] = 1
+    evidence_dict = load_cycle_evidence_dict(target_obj, row_dict, as_of_ts=NOW_TS)
+    assert evidence_dict["state_str"] == "unknown"
+    assert evidence_dict["order_list"] == []
+    assert evidence_dict["actual_fill_timestamp_str"] is None
+
+
+def test_zero_summary_fallback_requires_a_completed_plan(tmp_path):
+    target_obj, row_dict = _sparse_fixture_tuple(tmp_path)
+    update_db(target_obj, "UPDATE vplan SET status_str='submitted'")
+    row_dict["latest_vplan_status_str"] = "submitted"
+    assert load_cycle_evidence_dict(target_obj, row_dict, as_of_ts=NOW_TS)["state_str"] == "unknown"
+
+
+@pytest.mark.parametrize("sql_str,params_tuple", [
+    ("UPDATE vplan_broker_ack SET order_request_key_str='wrong' WHERE broker_order_id_str='order-0'", ()),
+    ("UPDATE vplan_broker_ack SET broker_order_id_str='wrong' WHERE broker_order_id_str='order-0'", ()),
+    ("UPDATE vplan_broker_ack SET decision_plan_id_int=999 WHERE broker_order_id_str='order-0'", ()),
+    ("UPDATE vplan_broker_ack SET vplan_id_int=999 WHERE broker_order_id_str='order-0'", ()),
+    ("UPDATE vplan_broker_ack SET account_route_str='U999' WHERE broker_order_id_str='order-0'", ()),
+    ("UPDATE vplan_broker_ack SET asset_str='QQQ' WHERE broker_order_id_str='order-0'", ()),
+    ("UPDATE vplan_broker_ack SET broker_order_type_str='MOC' WHERE broker_order_id_str='order-0'", ()),
+    ("UPDATE vplan_broker_ack SET broker_response_ack_bool=0 WHERE broker_order_id_str='order-0'", ()),
+    ("UPDATE vplan_broker_ack SET ack_status_str='missing_critical' WHERE broker_order_id_str='order-0'", ()),
+    ("UPDATE vplan_broker_ack SET response_timestamp_str=NULL WHERE broker_order_id_str='order-0'", ()),
+    ("UPDATE vplan_broker_ack SET response_timestamp_str=? WHERE broker_order_id_str='order-0'", ((SUBMIT_TS - timedelta(seconds=1)).isoformat(),)),
+    ("UPDATE vplan_broker_ack SET response_timestamp_str=? WHERE broker_order_id_str='order-0'", ((NOW_TS + timedelta(seconds=1)).isoformat(),)),
+])
+def test_zero_summary_requires_exact_positive_current_ack_identity(tmp_path, sql_str, params_tuple):
+    target_obj, row_dict = _sparse_fixture_tuple(tmp_path)
+    update_db(target_obj, sql_str, params_tuple)
+    evidence_dict = load_cycle_evidence_dict(target_obj, row_dict, as_of_ts=NOW_TS)
+    assert evidence_dict["state_str"] == "unknown"
+    assert evidence_dict["order_list"] == []
+    assert evidence_dict["actual_fill_timestamp_str"] is None
+
+
+@pytest.mark.parametrize("order_id_str", ["order-0", "order-1"])
+def test_mixed_summary_fallback_requires_ack_for_normal_and_sparse_orders(tmp_path, order_id_str):
+    target_obj, row_dict = _sparse_fixture_tuple(tmp_path, mixed_bool=True)
+    update_db(target_obj, "DELETE FROM vplan_broker_ack WHERE broker_order_id_str=?", (order_id_str,))
+    row_dict["broker_ack_count_int"] = 1
+    assert load_cycle_evidence_dict(target_obj, row_dict, as_of_ts=NOW_TS)["state_str"] == "unknown"
+
+
+def test_zero_summary_rejects_duplicate_ack_in_legacy_schema(tmp_path):
+    target_obj, row_dict = _sparse_fixture_tuple(tmp_path)
+    with sqlite3.connect(target_obj.db_path_str) as connection_obj:
+        connection_obj.execute("DROP INDEX vplan_broker_ack_unique_idx")
+        connection_obj.execute("""INSERT INTO vplan_broker_ack
+            (decision_plan_id_int,vplan_id_int,account_route_str,order_request_key_str,
+             asset_str,broker_order_type_str,local_submit_ack_bool,broker_response_ack_bool,
+             ack_status_str,ack_source_str,broker_order_id_str,response_timestamp_str,raw_payload_json_str)
+            SELECT decision_plan_id_int,vplan_id_int,account_route_str,order_request_key_str,
+                   asset_str,broker_order_type_str,local_submit_ack_bool,broker_response_ack_bool,
+                   ack_status_str,ack_source_str,broker_order_id_str,response_timestamp_str,raw_payload_json_str
+            FROM vplan_broker_ack WHERE broker_order_id_str='order-0'""")
+    assert load_cycle_evidence_dict(target_obj, row_dict, as_of_ts=NOW_TS)["state_str"] == "unknown"
+
+
+def test_zero_summary_allows_ack_at_planned_submission_boundary(tmp_path):
+    target_obj, row_dict = _sparse_fixture_tuple(tmp_path)
+    update_db(target_obj, "UPDATE vplan_broker_ack SET response_timestamp_str=?", (SUBMIT_TS.isoformat(),))
+    assert load_cycle_evidence_dict(target_obj, row_dict, as_of_ts=NOW_TS)["state_str"] == "complete"
+
+
+def test_zero_summary_ack_cannot_precede_plan_when_saved_order_time_is_earlier(tmp_path):
+    target_obj, row_dict = _sparse_fixture_tuple(tmp_path)
+    update_db(target_obj, "UPDATE vplan_broker_order SET submitted_timestamp_str=?", ((SUBMIT_TS - timedelta(minutes=2)).isoformat(),))
+    update_db(target_obj, "UPDATE vplan_broker_ack SET response_timestamp_str=?", ((SUBMIT_TS - timedelta(minutes=1)).isoformat(),))
+    assert load_cycle_evidence_dict(target_obj, row_dict, as_of_ts=NOW_TS)["state_str"] == "unknown"
+
+
+@pytest.mark.parametrize("submission_str", ["", "invalid", (NOW_TS + timedelta(seconds=1)).isoformat()])
+def test_zero_summary_requires_verified_planned_submission_time(tmp_path, submission_str):
+    target_obj, row_dict = _sparse_fixture_tuple(tmp_path)
+    update_db(target_obj, "UPDATE vplan SET submission_timestamp_str=?", (submission_str,))
+    assert load_cycle_evidence_dict(target_obj, row_dict, as_of_ts=NOW_TS)["state_str"] == "unknown"
+
+
+def test_zero_summary_sums_distinct_signed_executions_per_request(tmp_path):
+    target_obj, row_dict = _sparse_fixture_tuple(tmp_path)
+    with sqlite3.connect(target_obj.db_path_str) as connection_obj:
+        connection_obj.execute("UPDATE vplan_fill SET fill_amount_float=12 WHERE broker_order_id_str='order-0'")
+        connection_obj.execute("""INSERT INTO vplan_fill
+            (broker_order_id_str,decision_plan_id_int,vplan_id_int,account_route_str,asset_str,
+             fill_amount_float,fill_price_float,fill_timestamp_str,raw_payload_json_str)
+            VALUES ('order-0',1,1,'U111','SPY',7,100,?,'{"exec_id_str":"exec-next"}')""",
+            ((FILL_TS + timedelta(seconds=1)).isoformat(),))
+    row_dict["fill_count_int"] = 3
+    evidence_dict = load_cycle_evidence_dict(target_obj, row_dict, as_of_ts=NOW_TS)
+    assert evidence_dict["state_str"] == "complete"
+    assert [order_dict["filled_share_float"] for order_dict in evidence_dict["order_list"]] == [19.0, -5.0]
+    assert evidence_dict["fill_record_count_int"] == 3
+    assert evidence_dict["actual_fill_timestamp_str"] == (FILL_TS + timedelta(seconds=1)).isoformat()
+
+
+@pytest.mark.parametrize("sql_str,reason_str", [
+    ("UPDATE vplan_fill SET broker_order_id_str='orphan'", "A fill cannot be matched to its order, account or symbol."),
+    ("UPDATE vplan_fill SET fill_amount_float=-fill_amount_float", "A fill's buy or sell direction differs from the order."),
+    ("UPDATE vplan_broker_order SET amount_float='private-token-example'", "Saved fill details could not be read or checked."),
+    ("UPDATE vplan_fill SET raw_payload_json_str='private-token-example'", "Saved fill details could not be read or checked."),
+])
+def test_fill_failure_reason_is_specific_and_never_exposes_raw_source_values(tmp_path, sql_str, reason_str):
+    target_obj, row_dict = build_fixture_tuple(tmp_path)
+    update_db(target_obj, sql_str)
+    evidence_dict = load_cycle_evidence_dict(target_obj, row_dict, as_of_ts=NOW_TS)
+    assert evidence_dict["state_str"] == "unknown"
+    assert evidence_dict["reason_str"] == reason_str
+    assert "private-token-example" not in json.dumps(evidence_dict)
 
 
 @pytest.mark.parametrize("field_str,value_obj", [("missing_ack_count_int", 1), ("latest_submit_ack_status_str", "missing_critical")])

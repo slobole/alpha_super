@@ -116,7 +116,7 @@ cutover is part of this phase.
 ## Evidence limits
 
 V3 summary counts and completed status do not prove full fills. V4 additionally
-reads the selected LIVE VPlan, plan rows, orders, ACK count and executions in one
+reads the selected LIVE VPlan, plan rows, orders, ACKs and executions in one
 SQLite `mode=ro` transaction. The canonical request builder preserves separate
 entry/exit legs, even for the same asset. For every request i, completion requires
 `abs(sum(signed execution shares_i) - requested shares_i) <= 1e-9`.
@@ -124,6 +124,16 @@ Release, Pod, account, DecisionPlan and VPlan identities must agree. Duplicate,
 future, partial, ambiguous retry or changed evidence cannot prove completion.
 The summary assessment time is the read cutoff. Unsupported completion remains
 Unknown; a verified fill shows the latest actual execution time and `N of N filled`.
+
+A completed plan may contain terminal `Filled` order summaries whose requested,
+filled and remaining quantities are all zero. For that
+exact case, the dashboard checks quantities against the canonical saved requests.
+It requires a unique matching broker ACK for every order, valid ACK times, and
+unique nonempty execution IDs with signed quantities fully covering each affected
+request. Conflicting nonzero summaries, partial quantities or missing identities
+remain unverified. No saved execution data is repaired or written. A failed proof
+shows a short, safe reason above the raw Fills table; passed reconciliation remains
+separate from fill verification.
 
 No orders requires finite zero intent in both aggregate and per-leg plan rows,
 with no contradictory orders, fills or ACKs. Reconciliation remains independent.
@@ -147,9 +157,15 @@ and database failures. The selected cycle has a separate badge and verdict.
 - A SQLite `mode=ro` transaction reads DecisionPlan, VPlan and their scoped
   children. Current operating gates are overlaid only when decision, plan and
   release identities match. Historical views are labelled Saved cycle.
-- Plan vs actual preserves each canonical order request. Before uses the
+- The selected cycle's Data date comes only from its saved decision snapshot.
+  Current data readiness stays in the current header and Overview, even when
+  the latest monthly cycle is several weeks old.
+- Plan vs actual preserves each canonical order request in three columns:
+  Symbol, Position, and Broker = model. The signed requested order sits above
+  Before → After; it is not presented as the actual filled amount. Before uses the
   selected VPlan's broker snapshot; After uses that cycle's post-execution
-  reconciliation, never today's position cache. Display fill price is
+  reconciliation, never today's position cache. Verified fill quantities and
+  prices stay in Orders; individual executions stay in Fills. Display fill price is
   `sum(abs(fill shares) * fill price) / sum(abs(fill shares))` per broker order.
 - ACK rows require a matching request, asset and broker order, positive broker
   response, recorded response time and `broker_acked` status. Contradictions

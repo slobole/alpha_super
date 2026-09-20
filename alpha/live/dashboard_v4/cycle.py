@@ -251,6 +251,12 @@ def build_cycle_view_dict(
                     step_dict_list[-1] = _step_dict("Submit", "None", "No orders", now_dt)
                 fill_state_str, fill_fact_str = "None", "No orders"
         step_dict_list.append(_step_dict("Fill", fill_state_str, fill_fact_str, now_dt, actual_dt=fill_dt, planned_dt=target_dt if fill_state_str != "None" else None))
+        if fill_state_str == "Unknown" and evidence_matches_bool:
+            step_dict_list[-1]["detail_str"] = (
+                "Fill completion time could not be verified for this cycle."
+                if evidence_dict.get("state_str") == "complete"
+                else evidence_dict.get("reason_str") or "Fill details could not be checked."
+            )
 
         reconcile_status_str = str(pod_row_dict.get("latest_reconciliation_status_str") or "")
         reconcile_dt = _timestamp_dt(pod_row_dict.get("latest_reconciliation_timestamp_str"))
@@ -319,7 +325,11 @@ def _cycle_dict(step_dict_list: list[dict[str, str]], stale_bool: bool, cycle_ro
         now_str, now_detail_str = "Waiting", "No trade scheduled"
     if focus_dict["label_str"] == "Fill" and priority_str in {"Unknown", "Now"}:
         now_str = "Fill not verified" if priority_str == "Unknown" else "Filling"
-        now_detail_str = focus_dict["fact_str"]
+        now_detail_str = focus_dict.get("detail_str") or focus_dict["fact_str"]
+        if priority_str == "Unknown" and state_list.count("Unknown") == 1 and step_dict_list[5]["state_str"] == "Done":
+            # Keep the unverified status gray while retaining the independent
+            # fact that broker positions were reconciled for this cycle.
+            pill_str, now_str = "Not verified", "Reconciled · Fill details not verified"
     if pill_str == "On track":
         if step_dict_list[5]["state_str"] == "Done":
             now_str, now_detail_str = "Reconciled", step_dict_list[4]["fact_str"]

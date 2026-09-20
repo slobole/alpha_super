@@ -124,16 +124,17 @@ def build_evidence_tables_dict(source_dict, *, as_of_ts, fresh_bool):
                 gross_float = sum(abs(value_float) for value_float in quantity_list)
                 if gross_float:
                     price_float = sum(abs(quantity_float) * fill_price_float for quantity_float, fill_price_float in zip(quantity_list, price_list)) / gross_float
-        after_float, match_str = None, "unk"
+        after_float = _number_float(broker_map.get(plan_dict.get("asset_str"), 0)) if isinstance(broker_map, dict) else None
+        match_str = "unk"
         if isinstance(broker_map, dict) and isinstance(model_map, dict):
-            after_float = _number_float(broker_map.get(plan_dict.get("asset_str"), 0))
             model_float = _number_float(model_map.get(plan_dict.get("asset_str"), 0))
             if fresh_bool and after_float is not None and model_float is not None:
                 match_str = "done" if abs(after_float - model_float) <= 1e-9 else "fail"
         before_float = before_map.get(plan_dict.get("asset_str"), 0) if isinstance(before_map, dict) else None
-        plan_rows.append(_row_dict([symbol_str, _number_str(before_float), order_str,
-            _number_str(abs(filled_float)) if filled_float is not None else "—", _number_str(price_float, price_bool=True),
-            _number_str(after_float)], match_str=match_str))
+        position_order_str = "Order —" if amount_float is None else "No order" if abs(amount_float) <= 1e-9 else (
+            "Order " + ("+" if amount_float > 0 else "-") + _number_str(abs(amount_float)))
+        plan_rows.append({"symbol_str": symbol_str, "order_str": position_order_str,
+            "before_str": _number_str(before_float), "after_str": _number_str(after_float), "match_str": match_str})
         if amount_float is not None and abs(amount_float) <= 1e-9:
             continue
         ack_dict = ack_evidence_dict["ack_dict"]
@@ -144,7 +145,8 @@ def build_evidence_tables_dict(source_dict, *, as_of_ts, fresh_bool):
             and submit_ts is not None and response_ts > submit_ts) else "—"
         order_rows.append(_row_dict([symbol_str, order_str, ack_label_str if fresh_bool else "Unknown",
             _text_str(ack_dict.get("ack_source_str")), ack_time_str,
-            _number_str(abs(filled_float)) if filled_float is not None else "—", _text_str(order_id_str) or "—"],
+            _number_str(abs(filled_float)) if filled_float is not None else "—", _number_str(price_float, price_bool=True),
+            _text_str(order_id_str) or "—"],
             state_str="fail" if ack_label_str == "No ack" and fresh_bool else ""))
     decision_dict = source_dict.get("decision_dict") or {}
     target_map = decision_dict.get("display_target_weight_map_dict") or decision_dict.get("target_weight_map_dict") or {}
@@ -170,9 +172,9 @@ def build_evidence_tables_dict(source_dict, *, as_of_ts, fresh_bool):
         event_rows.append(_row_dict([_time_str(item_dict.get("timestamp_str") or item_dict.get("event_timestamp_str"), as_of_ts),
             _text_str(item_dict.get("asset_str")), label_str]))
     result_dict = {
-        "plan": _table_dict(["Symbol", "Before", "Order", "Filled", "Fill px", "After", "Broker = model"], plan_rows),
+        "plan": _table_dict(["Symbol", "Position", "Broker = model"], plan_rows),
         "decision": _table_dict(["Symbol", "Target"], decision_rows, note_str="Entry and exit targets" if decision_dict.get("decision_book_type_str") == "incremental_entry_exit_book" else "Full portfolio targets" if decision_dict.get("decision_book_type_str") == "full_target_weight_book" else "Saved decision targets"),
-        "orders": _table_dict(["Symbol", "Order", "Ack", "Source", "Ack time", "Filled", "Broker id"], order_rows),
+        "orders": _table_dict(["Symbol", "Order", "Ack", "Source", "Ack time", "Filled", "Fill px", "Broker id"], order_rows),
         "fills": _table_dict(["Symbol", "Shares", "Fill px", "Time", "Broker id"], [
             _row_dict([_text_str(item_dict.get("asset_str")), _number_str(item_dict.get("fill_amount_float")),
                        _number_str(item_dict.get("fill_price_float"), price_bool=True), _time_str(item_dict.get("fill_timestamp_str"), as_of_ts),
@@ -183,6 +185,11 @@ def build_evidence_tables_dict(source_dict, *, as_of_ts, fresh_bool):
                                                    for item_dict in source_dict.get("file_list") or []]),
     }
     result_dict["files"]["empty_str"] = "No cycle-linked files available here."
+    if fill_list:
+        if not fresh_bool:
+            result_dict["fills"]["note_str"] = "Saved fill records; current verification unavailable."
+        elif proof_dict.get("state_str", "unknown") == "unknown":
+            result_dict["fills"]["note_str"] = "Not verified. " + (proof_dict.get("reason_str") or "Fill details could not be checked.")
     return result_dict
 
 

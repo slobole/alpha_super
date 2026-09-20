@@ -135,6 +135,20 @@ def test_missing_calendar_is_time_unknown_without_guessing_xnys(pod_row_dict):
     assert result_dict["next_timestamp_str"] == "" and not result_dict["next_forecast_bool"]
 
 
+def test_unverified_fills_after_eod_do_not_claim_nothing_is_scheduled(pod_row_dict):
+    pod_row_dict.update(as_of_timestamp_str="2026-09-18T21:00:00+00:00", next_action_str="wait",
+        latest_vplan_status_str="completed", latest_decision_plan_status_str="completed",
+        latest_reconciliation_timestamp_str="2026-09-18T13:36:00+00:00",
+        required_action_dict={"severity_str": "green"})
+    pod_row_dict["eod_snapshot_dict"].update(status_str="completed", same_session_bool=True,
+        latest_market_date_str="2026-09-18", latest_timestamp_str="2026-09-18T20:10:00+00:00")
+    cycle_dict = build_cycle_view_dict(pod_row_dict, now_ts=datetime.fromisoformat(pod_row_dict["as_of_timestamp_str"]))
+    assert cycle_dict["pill_str"] == "Not verified"
+    result_dict = _next_dict(pod_row_dict)
+    assert result_dict["next_str"] == "Time unknown"
+    assert result_dict["next_timestamp_str"] == "" and not result_dict["next_forecast_bool"]
+
+
 @pytest.mark.parametrize("no_orders_bool", [False, True])
 def test_completed_daily_cycle_forecasts_next_decision_without_changing_fill_facts(pod_row_dict, no_orders_bool):
     pod_row_dict.update(as_of_timestamp_str="2026-09-18T15:00:00+00:00", next_action_str="wait",
