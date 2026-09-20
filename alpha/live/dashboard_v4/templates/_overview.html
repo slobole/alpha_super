@@ -4,7 +4,7 @@
 {% macro mark(state_str, label_str='') -%}
 <span class="st st-{{ state_str if state_str in state_label_dict else 'unk' }}" data-observed-state title="{{ label_str }}{{ ' · ' if label_str else '' }}{{ state_label_dict.get(state_str, 'Unknown') }}" role="img" aria-label="{{ label_str }}{{ ' · ' if label_str else '' }}{{ state_label_dict.get(state_str, 'Unknown') }}"></span>
 {%- endmacro %}
-<div class="frame" id="overview-shell" hx-get="{{ overview_dict.refresh_url_str }}" hx-trigger="every {{ overview_dict.refresh_seconds_int }}s" hx-swap="outerHTML" hx-target="this" hx-request='{"timeout":10000}' data-last-update="{{ overview_dict.updated_str }}" data-source-valid-ms="{{ overview_dict.source_valid_ms_int }}" data-clock-timestamp="{{ overview_dict.clock_timestamp_str }}">
+<div class="frame" id="overview-shell" hx-get="{{ overview_dict.refresh_url_str }}" hx-trigger="every {{ overview_dict.refresh_seconds_int }}s" hx-swap="outerHTML" hx-target="this" hx-request='{"timeout":10000}' data-last-update="{{ overview_dict.updated_str }}" data-source-valid-ms="{{ overview_dict.source_valid_ms_int }}" data-clock-timestamp="{{ overview_dict.clock_timestamp_str }}" data-selection-scope="{% if pod_page_dict is defined %}pod:{{ pod_page_dict.pod_id_str }}:{{ pod_page_dict.selected_cycle_dict.get('cycle_key_str', 'unavailable') }}:{{ pod_page_dict.tab_str }}{% else %}overview{% endif %}:{{ overview_dict.period_str }}">
   <div class="app">
     <aside class="rail rail-c">
       <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark">A</span>ALPHA / OPS</a>
@@ -34,7 +34,7 @@
         </nav>
         <div class="market">{{ mark(overview_dict.market_dict.state_str) }}<span><b data-status-label>{{ overview_dict.market_dict.label_str }}</b>{% if overview_dict.market_dict.detail_str %} · <span data-status-detail>{{ overview_dict.market_dict.detail_str }}</span>{% endif %}</span></div>
         <div class="grow"></div>
-        <span class="syslight" title="System health page is not available yet">{{ mark(overview_dict.system_dict.state_str) }}<span><b data-status-label>{{ overview_dict.system_dict.label_str }}</b>{% if overview_dict.system_dict.detail_str %} · {{ overview_dict.system_dict.detail_str }}{% endif %}</span></span>
+        <span class="syslight" title="System health page is not available yet">{{ mark(overview_dict.system_dict.state_str) }}<span><b data-status-label>{{ overview_dict.system_dict.label_str }}</b>{% if overview_dict.system_dict.detail_str %} · <span data-status-detail>{{ overview_dict.system_dict.detail_str }}</span>{% endif %}</span></span>
         <span class="tag">READ-ONLY</span>
         <div class="clock desktop-clock"><span class="t" data-live-clock>{{ overview_dict.clock_str }} ET</span><span class="d">{{ overview_dict.date_str }} · updated <span data-update-time>{{ overview_dict.updated_str }}</span></span></div>
       </header>
@@ -43,7 +43,7 @@
         {% if pod_page_dict is defined %}
         {% include '_pod.html' %}
         {% else %}
-        <div class="page-head"><div><h1 class="h1i">{{ icon('overview') }}Overview</h1><p class="verdict"><b data-verdict>{{ overview_dict.verdict_str }}</b>{% if overview_dict.verdict_detail_str %} <span data-verdict-detail>{{ overview_dict.verdict_detail_str }}</span>{% endif %}</p></div><div class="asof">{{ overview_dict.money_asof_str }}</div></div>
+        <div class="page-head"><div><h1 class="h1i">{{ icon('overview') }}Overview</h1><p class="verdict" data-selection-key="overview-verdict"><b data-verdict>{{ overview_dict.verdict_str }}</b>{% if overview_dict.verdict_detail_str %} <span data-verdict-detail>{{ overview_dict.verdict_detail_str }}</span>{% endif %}</p></div><div class="asof" data-selection-key="money-asof">{{ overview_dict.money_asof_str }}</div></div>
         {% if overview_dict.attention_list %}
         <section class="attn" aria-label="Needs attention">
           {% for attention_dict in overview_dict.attention_list %}
@@ -53,21 +53,21 @@
         {% endif %}
         <section class="tiles tiles-4" aria-label="Money at last close">
           {% for tile_dict in overview_dict.tile_list %}
-          <div class="tile"><div class="l">{{ tile_dict.label_str }}</div><div class="v {{ tile_dict.tone_str if tile_dict.tone_str in ['pos', 'neg'] else '' }}">{{ tile_dict.value_str }}</div><div class="s">{{ tile_dict.detail_str }}</div></div>
+          <div class="tile" data-selection-key="money:{{ tile_dict.label_str }}"><div class="l">{{ tile_dict.label_str }}</div><div class="v {{ tile_dict.tone_str if tile_dict.tone_str in ['pos', 'neg'] else '' }}">{{ tile_dict.value_str }}</div><div class="s">{{ tile_dict.detail_str }}</div></div>
           {% endfor %}
         </section>
         <section class="panel pods-panel" aria-label="Pod cycles">
           <div class="shead"><span>Pod</span><span>Cycle</span><span>Now</span><span>Next</span></div>
           {% for pod_dict in overview_dict.pod_list %}
           <div class="srow" data-pod-id="{{ pod_dict.pod_id_str }}">
-            <div class="who"><span class="row"><a class="sname" href="{{ url_for('pod', pod_id_str=pod_dict.pod_id_str) }}">{{ pod_dict.name_str }}</a><span class="pill pill-{{ pill_class_dict.get(pod_dict.state_str, 'unk') }}" data-pod-pill>{{ mark(pod_dict.state_str) }}<span data-pill-label>{{ pod_dict.pill_str }}</span></span></span><span class="muted">{{ pod_dict.cadence_str }}</span></div>
+            <div class="who"><span class="row"><a class="sname" data-selection-key="pod:{{ pod_dict.pod_id_str }}:name" href="{{ url_for('pod', pod_id_str=pod_dict.pod_id_str) }}">{{ pod_dict.name_str }}</a><span class="pill pill-{{ pill_class_dict.get(pod_dict.state_str, 'unk') }}" data-pod-pill>{{ mark(pod_dict.state_str) }}<span data-pill-label>{{ pod_dict.pill_str }}</span></span></span><span class="muted" data-selection-key="pod:{{ pod_dict.pod_id_str }}:cadence">{{ pod_dict.cadence_str }}</span></div>
             <div class="cycle-cell"><span class="track{{ ' is-idle' if pod_dict.state_str == 'skip' else '' }}" aria-label="{{ pod_dict.name_str }} cycle">
               {% for step_dict in pod_dict.step_list %}
               <span class="tk{{ ' plan' if step_dict.state_str in ['next', 'skip', 'unk'] else '' }}{{ ' f-' + step_dict.state_str if step_dict.state_str in ['fail', 'late', 'now'] else '' }}" title="{{ step_dict.name_str }} · {{ state_label_dict.get(step_dict.state_str, 'Unknown') }}{% if step_dict.detail_str %} · {{ step_dict.detail_str }}{% endif %}{% if step_dict.time_str %} · {{ step_dict.time_str }}{% endif %}">{{ mark(step_dict.state_str, step_dict.name_str) }}<span class="tl">{{ step_dict.name_str }}</span></span>
               {% endfor %}
             </span></div>
-            <div class="now-cell"><div class="big{{ ' neg' if pod_dict.state_str == 'fail' else ' amb' if pod_dict.state_str == 'late' else '' }}" data-pod-now>{{ pod_dict.now_str }}</div><div class="sub" data-now-detail>{{ pod_dict.now_detail_str }}</div></div>
-            <div class="next-cell"><div class="big{{ ' neg' if pod_dict.state_str == 'fail' else '' }}" data-pod-next>{{ pod_dict.next_str }}{% if pod_dict.next_time_str %} <span class="mono">{{ pod_dict.next_time_str }}</span>{% endif %}</div><div class="sub mono" data-next-detail>{{ pod_dict.next_detail_str }}</div></div>
+            <div class="now-cell" data-selection-key="pod:{{ pod_dict.pod_id_str }}:now"><div class="big{{ ' neg' if pod_dict.state_str == 'fail' else ' amb' if pod_dict.state_str == 'late' else '' }}" data-pod-now>{{ pod_dict.now_str }}</div><div class="sub" data-now-detail>{{ pod_dict.now_detail_str }}</div></div>
+            <div class="next-cell" data-selection-key="pod:{{ pod_dict.pod_id_str }}:next"><div class="big{{ ' neg' if pod_dict.state_str == 'fail' else '' }}" data-pod-next>{{ pod_dict.next_str }}{% if pod_dict.next_time_str %} <span class="mono">{{ pod_dict.next_time_str }}</span>{% endif %}</div><div class="sub mono" data-next-detail>{{ pod_dict.next_detail_str }}</div></div>
           </div>
           {% else %}
           <div class="empty-state">No LIVE pods found.</div>

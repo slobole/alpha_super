@@ -17,6 +17,7 @@ from alpha.live.dashboard_v3.local_workspace import (
 )
 from alpha.live.dashboard_v4.evidence import load_cycle_evidence_dict
 from alpha.live.dashboard_v4.pod_data import load_pod_cycles_dict
+from alpha.live.dashboard_v4.scheduler_status import load_scheduler_status_dict
 
 
 class LiveReadOnlyApp(DashboardApp):
@@ -32,6 +33,24 @@ class LiveReadOnlyApp(DashboardApp):
 
 
 class LiveDataProvider(DashboardDataProvider):
+    def get_scheduler_status_dict(self, pod_id_str, *, as_of_ts):
+        try:
+            target_obj = self.get_target_for_pod(pod_id_str)
+        except (ValueError, OSError):
+            target_obj = None
+        if (target_obj is None or target_obj.release_obj.mode_str != "live"
+                or not target_obj.release_obj.enabled_bool):
+            return {"state_str": "unknown", "alive_bool": None}
+        status_dict = load_scheduler_status_dict(self.event_log_path_str, pod_id_str, as_of_ts=as_of_ts)
+        if status_dict["state_str"] in {"late", "stopped", "error"}:
+            # Copy-only diagnostic, never invoked by the dashboard. next_due
+            # synchronizes local release metadata when the operator runs it.
+            argument_list = ["uv", "run", "python", "-m", "alpha.live.scheduler_service", "next_due",
+                "--mode", "live", "--pod-id", pod_id_str, "--releases-root", self.releases_root_path_str,
+                "--db-path", target_obj.db_path_str]
+            status_dict["check_command_str"] = "& " + " ".join("'" + str(argument_str).replace("'", "''") + "'" for argument_str in argument_list)
+        return status_dict
+
     def get_pod_cycles_dict(self, pod_id_str, *, as_of_ts, decision_plan_id_int=None, vplan_id_int=None):
         try:
             target_obj = self.get_target_for_pod(pod_id_str)

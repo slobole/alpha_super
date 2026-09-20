@@ -47,7 +47,7 @@ def test_monthly_idle_header_does_not_become_a_completed_cycle_status():
     overview_dict = build_overview_dict(workspace_dict, snapshot_obj, provider_obj, as_of_ts=DEMO_NOW_TS)
     source_dict = provider_obj.get_pod_cycles_dict(pod_id_str, as_of_ts=DEMO_NOW_TS)
     view_dict = build_pod_page_dict(overview_dict, source_dict, {}, pod_id_str=pod_id_str, as_of_ts=DEMO_NOW_TS)
-    assert view_dict["pill_str"] == "Idle"
+    assert view_dict["pill_str"] == "Waiting"
     assert view_dict["cycle_pill_str"] == "On track"
 
 
@@ -60,6 +60,8 @@ def test_current_critical_ack_can_weaken_an_idle_header():
     view_dict = build_pod_page_dict(overview_dict, source_dict, {}, pod_id_str=pod_id_str, as_of_ts=DEMO_NOW_TS)
     assert view_dict["state_str"] == "fail" and view_dict["pill_str"] == "Action needed"
     assert view_dict["attention_dict"]["title_str"] == "Review broker ACK"
+    assert view_dict["header_dict"]["next_str"] == "Review saved evidence"
+    assert view_dict["header_dict"]["next_forecast_bool"] is False
 
 
 def test_submit_time_is_last_verified_broker_ack_not_mutable_order_time():
@@ -73,6 +75,7 @@ def test_submit_time_is_last_verified_broker_ack_not_mutable_order_time():
     view_dict = build_pod_page_dict(overview_dict, source_dict, {}, pod_id_str=pod_id_str, as_of_ts=DEMO_NOW_TS)
     assert view_dict["step_list"][3]["actual_time_str"] == "09:40:07"
     assert view_dict["step_list"][3]["fact_str"] == "All orders acknowledged"
+    assert view_dict["verdict_detail_str"].startswith("Cycle next: EOD")
 
 
 def test_event_table_keeps_symbol_and_latest_first():

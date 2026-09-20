@@ -54,6 +54,38 @@ cutover is part of this phase.
 - Missing DB is a red attention item. Normal scheduled waiting and healthy
   monthly idle are distinct from late, failed and unknown. EOD runs independently
   of whether the strategy traded; a missing prior EOD identifies the missing day.
+- Healthy monthly waits show `Waiting` and `No trade scheduled`. Current
+  `Next` also considers the next EOD and decision window using the existing
+  exchange-calendar and V3 schedule helpers. Calendar forecasts are marked
+  `Scheduled`; decision times say `after` close and `when data is ready`, with
+  no readiness countdown. Missing timing is `Time unknown`. These projections
+  do not prove scheduler liveness or alter the selected historical cycle.
+- Scheduler evidence is read from bounded tails of the configured event log
+  and its per-Pod LIVE trace files, including fixed rotation names. Nothing
+  probes processes or connects to a broker. Healthy schedulers add no widget.
+  A problem uses the existing System light, Pod mark, Now/Next and one attention
+  row; previous order issues remain in that row. Historical cycle results keep
+  their original meaning. Unverified automation changes future Planned marks
+  to Unknown, without downgrading the Pod merely because logs are unavailable.
+- Sleep liveness uses the actual event write time plus its recorded sleep,
+  including intentional 3600-second sleeps. Display thresholds are 60 seconds
+  overdue (review) and 300 seconds overdue (action). These are heuristics:
+  `Scheduler not responding` does not claim the process is confirmed stopped.
+  Recent one-shot `run_once` activity alone cannot prove a continuous service.
+  Activity without a wake promise expires after 120 seconds. Unattributed
+  global errors are ignored; per-Pod errors use generic safe wording.
+  A long data sync before the next scoped scheduler event can also overrun the
+  promised wake. Its global sync event has no mode identity, so it cannot safely
+  certify LIVE liveness. The warning asks for a check, never a blind restart.
+- Missing or unreadable scheduler evidence weakens the System light to Unknown
+  unless an existing failure is more severe. It does not invent a Pod action.
+  A verified live scheduler is mentioned only inside an existing Pod issue,
+  with holding/data/reconcile wording from its recorded state. No System health
+  page, watchdog change, notification, scheduler control or auto-restart is added.
+- The issue can expose a selectable, quoted, Pod-scoped `next_due` command.
+  The dashboard never executes it. Running that command may update local release
+  metadata; its copy text says so. No restart command is fabricated from unknown
+  process overrides, and the operator is told to check the existing process.
 - Scheduled timestamps mean eligibility. Submit stays Working through 60 seconds
   after eligibility; Reconcile and EOD through 30 seconds. Reconcile eligibility
   already includes the scheduler's 300-second grace. These display allowances
@@ -138,14 +170,17 @@ and database failures. The selected cycle has a separate badge and verdict.
   controls are hidden. The V3 exporter writes state and is not used. Events
   shows the selected VPlan's broker order events, with symbols and newest first.
 - The ET clock ticks locally each second, independently of operational health.
-  Selecting text inside the page postpones replacement until a later poll;
-  it cannot extend the displayed source's freshness lifetime. Historical pages
-  still poll so current Pod warnings stay up to date.
+  Selecting text does not delay refreshes. A selection within one uniquely
+  identified field or evidence table is restored only if its complete text and
+  page/Pod/cycle/tab/period identity are unchanged. Changed or ambiguous content
+  drops the selection. This never extends the source's freshness lifetime;
+  stale Next labels say `Not current`, including calculated forecasts.
+  Historical pages still poll so current Pod warnings stay up to date.
 
 ## Verification
 
 ```powershell
-.venv\Scripts\python.exe -B -m pytest tests/test_dashboard_v4_cycle.py tests/test_dashboard_v4_evidence.py tests/test_dashboard_v4_finance.py tests/test_dashboard_v4_return_chart.py tests/test_dashboard_v4_routes.py tests/test_dashboard_v4_pod.py tests/test_dashboard_v4_pod_data.py tests/test_dashboard_v4_pod_finance.py tests/test_dashboard_v4_pod_integration.py tests/test_dashboard_v4_pod_review.py tests/test_dashboard_v4_pod_demo.py tests/test_dashboard_local_workspace.py --capture=sys -p no:cacheprovider -q
+.venv\Scripts\python.exe -B -m pytest tests/test_dashboard_v4_cycle.py tests/test_dashboard_v4_evidence.py tests/test_dashboard_v4_finance.py tests/test_dashboard_v4_return_chart.py tests/test_dashboard_v4_routes.py tests/test_dashboard_v4_pod.py tests/test_dashboard_v4_pod_data.py tests/test_dashboard_v4_pod_finance.py tests/test_dashboard_v4_pod_integration.py tests/test_dashboard_v4_pod_review.py tests/test_dashboard_v4_pod_demo.py tests/test_dashboard_v4_next_operation.py tests/test_dashboard_v4_selection_markup.py tests/test_dashboard_local_workspace.py --capture=sys -p no:cacheprovider -q
 node --test tests/dashboard_v4_refresh.test.cjs
 ```
 
@@ -172,7 +207,9 @@ is used for these checks.
 - Reference price sources and close/open boundaries: unchanged.
 - Existing state, pickle, SQL schema, configuration and released YAML: unchanged.
 - Existing logging fields and V3 routes: unchanged.
-- Windows paths/locks: existing read-only readers; file-preservation tests pass.
+- Windows paths/locks: bounded binary log tails close files after each read;
+  missing, corrupt, rotated or unavailable evidence fails to Unknown. Existing
+  read-only DB readers retain their file-preservation tests.
   The new UI runs as a separate local process. No production restart or deployment
   is performed.
 - Changes are confined to this package and its tests. No V3 code is modified.

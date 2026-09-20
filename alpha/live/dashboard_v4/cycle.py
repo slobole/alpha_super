@@ -292,7 +292,7 @@ def build_cycle_view_dict(
         and not any(step_dict["state_str"] == "Failed" for step_dict in step_dict_list)
     )
     if idle_bool:
-        step_dict_list = [_step_dict(label_str, "None", "No trade today", now_dt) for label_str in STEP_LABEL_TUPLE[:-1]]
+        step_dict_list = [_step_dict(label_str, "None", "No trade scheduled", now_dt) for label_str in STEP_LABEL_TUPLE[:-1]]
     step_dict_list.append(_eod_step_dict(pod_row_dict.get("eod_snapshot_dict") or {}, now_dt, source_dt))
     return _cycle_dict(step_dict_list, False, cycle_role_str)
 
@@ -308,13 +308,15 @@ def _cycle_dict(step_dict_list: list[dict[str, str]], stale_bool: bool, cycle_ro
     elif "Now" in state_list:
         pill_str, tone_str, priority_str = "Working", "blue", "Now"
     elif all(state_str == "None" for state_str in state_list[:-1]):
-        pill_str, tone_str, priority_str = "Idle", "gray", "None"
+        pill_str, tone_str, priority_str = "Waiting", "gray", "None"
     else:
         pill_str, tone_str, priority_str = "On track", "green", "Done"
     focus_dict = next((step_dict for step_dict in step_dict_list if step_dict["state_str"] == priority_str), step_dict_list[-1])
     next_dict = next((step_dict for step_dict in step_dict_list if step_dict["state_str"] in {"Planned", "Now", "Late", "Failed"}), {})
     now_str = focus_dict["fact_str"]
     now_detail_str = ""
+    if pill_str == "Waiting":
+        now_str, now_detail_str = "Waiting", "No trade scheduled"
     if focus_dict["label_str"] == "Fill" and priority_str in {"Unknown", "Now"}:
         now_str = "Fill not verified" if priority_str == "Unknown" else "Filling"
         now_detail_str = focus_dict["fact_str"]

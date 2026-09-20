@@ -51,6 +51,10 @@
 .issue { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 16px 20px; background: var(--red-bg); border: 1px solid var(--rule); border-left: 3px solid var(--red); }
 .issue h3 { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
 .issue p { margin-top: 3px; color: var(--ink-2); }
+.scheduler-check { margin-top: 10px; }
+.scheduler-check summary { cursor: pointer; }
+.scheduler-check code { display: block; margin: 8px 0; overflow-wrap: anywhere; white-space: pre-wrap; font-size: 12px; }
+.frame[data-source-stale="true"] .scheduler-check { display: none; }
 .pod-money-date { margin-top: -12px; }
 .frame[data-source-stale="true"] .issue, .frame[data-source-stale="true"] .evidence-table .hl td { background: var(--gray-bg); border-left-color: var(--rule-2); }
 @media (max-width: 1200px) {

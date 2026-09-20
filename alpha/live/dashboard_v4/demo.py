@@ -61,6 +61,17 @@ def build_demo_workspace_tuple():
     provider_obj.pod_store_obj = DemoPodStore(provider_obj.row_list, as_of_ts=DEMO_NOW_TS)
     for method_str in ("get_pod_cycles_dict", "get_cycle_evidence_dict", "get_target_for_pod", "get_target_list", "close"):
         setattr(provider_obj, method_str, getattr(provider_obj.pod_store_obj, method_str))
+    def demo_scheduler_status_dict(pod_id_str, *, as_of_ts):
+        # Synthetic preview evidence only; never fall back to workstation logs.
+        if pod_id_str not in {row_dict["pod_id_str"] for row_dict in provider_obj.row_list}:
+            return {"state_str": "unknown", "alive_bool": None}
+        return {"state_str": "sleeping", "alive_bool": True,
+            "last_seen_timestamp_str": as_of_ts.isoformat(),
+            "promised_wake_timestamp_str": (as_of_ts + timedelta(seconds=30)).isoformat(),
+            "checked_timestamp_str": as_of_ts.isoformat(),
+            "next_phase_str": "post_execution_reconcile" if pod_id_str == "demo_1_1" else "eod_snapshot",
+            "reason_code_str": "waiting_for_post_execution_reconcile" if pod_id_str == "demo_1_1" else "waiting_for_eod_snapshot"}
+    provider_obj.get_scheduler_status_dict = demo_scheduler_status_dict
     summary_dict = provider_obj.get_summary_dict()
     summary_dict["as_of_timestamp_str"] = DEMO_NOW_TS.isoformat()
     workspace_dict = {

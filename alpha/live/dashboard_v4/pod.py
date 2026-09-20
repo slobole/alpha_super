@@ -7,6 +7,7 @@ from alpha.live.dashboard_v3.client_operations import EVENT_LABEL_DICT, SOURCE_M
 from alpha.live.dashboard_v3.filters import MARKET_TIMEZONE_OBJ
 from alpha.live.dashboard_v3.operator_tools import redact_diagnostic_value
 from alpha.live.dashboard_v4.cycle import build_cycle_view_dict
+from alpha.live.dashboard_v4.scheduler_view import apply_scheduler_to_steps, scheduler_issue_dict, scheduler_note_str
 from alpha.live.dashboard_v4.overview import STATE_RANK_DICT, _state_str
 from alpha.live.ops_report import parse_timestamp_ts
 
@@ -223,12 +224,20 @@ def build_pod_page_dict(overview_dict, source_dict, finance_dict, *, pod_id_str,
     tables_dict = build_evidence_tables_dict(source_dict, as_of_ts=as_of_ts, fresh_bool=fresh_bool)
     selected_dict = source_dict.get("selected_cycle_dict") or {}
     historical_bool = bool(selected_dict) and not selected_dict.get("current_bool", False)
+    scheduler_dict = pod_summary_dict.get("scheduler_dict") or {}
+    scheduler_attention_dict = scheduler_issue_dict(scheduler_dict, now_ts=as_of_ts)
+    pending_scheduler_bool = False
+    if fresh_bool and selected_dict.get("current_bool"):
+        pending_scheduler_bool = any(step_dict["state_str"] == "Planned" for step_dict in step_list)
+        apply_scheduler_to_steps(step_list, scheduler_dict)
+        for step_dict in step_list:
+            step_dict["class_str"] = _state_str(step_dict["state_str"])
     saved_wording_bool = historical_bool and (source_dict.get("selected_explicit_bool", True) or not selected_dict.get("unresolved_bool", False))
     account_str = str(row_dict.get("account_route_str") or "")
     issue_bool = fresh_bool and cycle_dict["tone_str"] in {"red", "amber"}
     missing_ack_bool = (row_dict.get("missing_ack_count_int") or 0) > 0 or row_dict.get("latest_submit_ack_status_str") == "missing_critical"
     verdict_str = cycle_dict["now_str"] + "."
-    verdict_detail_str = ("Next: " + cycle_dict["next_str"] + " " + cycle_dict["next_time_str"]).strip() if cycle_dict["next_str"] != "—" else ""
+    verdict_detail_str = ("Cycle next: " + cycle_dict["next_str"] + " " + cycle_dict["next_time_str"]).strip() if cycle_dict["next_str"] != "—" else ""
     issue_title_str = "Review broker ACK" if missing_ack_bool else cycle_dict["now_str"]
     issue_detail_str = "Check the order plan and the broker connection. Do not resubmit blindly." if missing_ack_bool else "Check the saved evidence before taking action."
     if issue_bool:
@@ -238,20 +247,30 @@ def build_pod_page_dict(overview_dict, source_dict, finance_dict, *, pod_id_str,
         verdict_detail_str = "Saved status for " + (selected_dict.get("session_date_str") or "this cycle") + "."
         issue_title_str = "Saved cycle · Missing broker ACK" if missing_ack_bool else "Saved cycle · " + cycle_dict["now_str"]
         issue_detail_str = "Review the saved records for " + (selected_dict.get("session_date_str") or "this cycle") + "."
+    elif pending_scheduler_bool and scheduler_attention_dict:
+        verdict_detail_str = "Next: Check scheduler"
+        cycle_dict.update(tone_str="red" if scheduler_attention_dict["state_str"] == "fail" else "amber",
+            pill_str="Action needed" if scheduler_attention_dict["state_str"] == "fail" else "Needs review")
     header_dict = {"state_str": pod_summary_dict["state_str"], "pill_str": pod_summary_dict["pill_str"],
-        "verdict_str": pod_summary_dict["now_str"].rstrip(".") + ".", "detail_str": pod_summary_dict["now_detail_str"]}
+        "verdict_str": pod_summary_dict["now_str"].rstrip(".") + ".", "detail_str": pod_summary_dict["now_detail_str"],
+        **{key_str: pod_summary_dict[key_str] for key_str in ("next_str", "next_time_str", "next_detail_str", "next_forecast_bool")}}
     attention_dict = next((deepcopy(item_dict) for item_dict in overview_dict["attention_list"] if item_dict["pod_id_str"] == pod_id_str), {})
     cycle_state_str = _state_str(cycle_dict["tone_str"])
     if (source_dict.get("status_str") != "ok" and source_dict.get("selected_current_bool")
         and header_dict["state_str"] not in {"fail", "late"}):
-        header_dict.update(state_str="unk", pill_str="Unknown", verdict_str="Current cycle unavailable.", detail_str="")
+        header_dict.update(state_str="unk", pill_str="Unknown", verdict_str="Current cycle unavailable.", detail_str="",
+            next_str="Time unknown", next_time_str="", next_detail_str="", next_forecast_bool=False)
     # Selected current-cycle contradictions may weaken current status. A saved
-    # historical result must never replace today's Pod warning or Idle state.
+    # historical result must never replace today's Pod warning or Waiting state.
     if (selected_dict.get("current_bool") and STATE_RANK_DICT[cycle_state_str] < STATE_RANK_DICT[header_dict["state_str"]]
-        and (header_dict["pill_str"] != "Idle" or cycle_state_str == "fail")):
+        and (header_dict["pill_str"] != "Waiting" or cycle_state_str == "fail")):
         header_dict.update(state_str=cycle_state_str, pill_str=cycle_dict["pill_str"], verdict_str=verdict_str, detail_str=verdict_detail_str)
+        header_dict.update(next_str="Review saved evidence" if issue_bool else "Time unknown",
+            next_time_str="", next_detail_str="you · now" if issue_bool else "", next_forecast_bool=False)
         if issue_bool and not attention_dict:
             attention_dict = {"state_str": cycle_state_str, "title_str": issue_title_str, "detail_str": issue_detail_str}
+    if attention_dict and not scheduler_attention_dict:
+        attention_dict["scheduler_note_str"] = scheduler_note_str(scheduler_dict)
     return {
         **finance_dict, "pod_id_str": pod_id_str, "name_str": pod_summary_dict["name_str"],
         "account_str": (account_str[:1] + "···" + account_str[-3:]) if len(account_str) >= 4 else "—",

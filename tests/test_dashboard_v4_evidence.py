@@ -1,6 +1,7 @@
 """Production-format saved evidence: no broker and no runtime DB writes."""
 
 import sqlite3
+import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
@@ -11,6 +12,7 @@ from alpha.live.dashboard_v4.evidence import load_cycle_evidence_dict
 from alpha.live.execution_engine import build_broker_order_request_list_from_vplan
 from alpha.live.models import BrokerOrderFill, BrokerOrderRecord, DecisionPlan, LiveRelease, VPlan, VPlanRow
 from alpha.live.state_store_v2 import LiveStateStore
+from alpha.live.logging_utils import build_structured_event_record_dict
 
 
 NOW_TS = datetime(2026, 9, 18, 14, 0, tzinfo=UTC)
@@ -142,7 +144,13 @@ def test_saved_quantities_reach_overview_through_live_provider(tmp_path, monkeyp
         broker_ack_count_int=2, missing_ack_count_int=0)
     row_dict["eod_snapshot_dict"].update(expected_market_date_str="2026-09-18", expected_due_timestamp_str="2026-09-18T20:10:00+00:00")
     summary_dict.update(as_of_timestamp_str=NOW_TS.isoformat(), pod_row_dict_list=[row_dict])
-    provider_obj = LiveDataProvider()
+    log_path_obj = tmp_path / "events.jsonl"
+    scheduler_record_dict = build_structured_event_record_dict("scheduler_sleeping", {
+        "env_mode_str": "live", "related_pod_id_list": ["pod"], "next_phase_str": "eod_snapshot",
+        "reason_code_str": "waiting_for_eod_snapshot", "sleep_seconds_float": 3600}, timestamp_obj=NOW_TS)
+    log_path_obj.write_text(json.dumps(scheduler_record_dict) + "\n", encoding="utf-8")
+    before_log_bytes = log_path_obj.read_bytes()
+    provider_obj = LiveDataProvider(event_log_path_str=str(log_path_obj))
     monkeypatch.setattr(provider_obj, "get_target_for_pod", lambda pod_id_str: target_obj)
     monkeypatch.setattr("alpha.live.dashboard_v4.overview.build_financial_overview_dict", lambda *args, **kwargs: {})
     before_bytes = (tmp_path / "pod.sqlite3").read_bytes()
@@ -151,6 +159,7 @@ def test_saved_quantities_reach_overview_through_live_provider(tmp_path, monkeyp
     assert view_dict["pod_list"][0]["now_detail_str"] == "2 of 2 filled"
     assert view_dict["verdict_str"] == "No action needed."
     assert (tmp_path / "pod.sqlite3").read_bytes() == before_bytes
+    assert log_path_obj.read_bytes() == before_log_bytes
 
 
 def test_complete_fill_does_not_require_reconciliation_or_completed_plan(tmp_path):

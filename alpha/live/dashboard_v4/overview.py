@@ -10,6 +10,8 @@ from alpha.live.dashboard_v3.operator_tools import strategy_display_name_str
 from alpha.live.dashboard_v3.schedule import build_market_status, _operator_action_required_bool
 from alpha.live.dashboard_v4.cycle import build_cycle_view_dict
 from alpha.live.dashboard_v4.finance import build_financial_overview_dict
+from alpha.live.dashboard_v4.next_operation import build_next_operation_dict
+from alpha.live.dashboard_v4.scheduler_view import apply_scheduler_to_steps, scheduler_issue_dict, scheduler_note_str
 from alpha.live.ops_report import parse_timestamp_ts
 
 
@@ -76,6 +78,9 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
         row_dict.setdefault("as_of_timestamp_str", source_dict.get("as_of_timestamp_str"))
         if fresh_bool and matched_bool and hasattr(provider_obj, "get_cycle_evidence_dict"):
             row_dict["cycle_evidence_dict"] = provider_obj.get_cycle_evidence_dict(row_dict, as_of_ts=source_ts)
+        scheduler_dict = {"state_str": "unknown", "alive_bool": None}
+        if fresh_bool and matched_bool and hasattr(provider_obj, "get_scheduler_status_dict"):
+            scheduler_dict = provider_obj.get_scheduler_status_dict(pod_id_str, as_of_ts=as_of_ts)
         scoped_row_list.append(row_dict)
         cycle_dict = build_cycle_view_dict(row_dict, now_ts=as_of_ts)
         action_required_bool = _action_required_bool(row_dict, cycle_dict)
@@ -89,23 +94,30 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
                 if item_dict.get("label_str") == "EOD Snapshot" and item_dict.get("severity_str") == "yellow":
                     item_dict.update(severity_str="green", detail_str="Waiting for scheduled capture")
         health_row_list.append(health_row_dict)
-        pod_state_str = "skip" if cycle_dict["pill_str"] == "Idle" else _state_str(cycle_dict.get("tone_str"))
+        pod_state_str = "skip" if cycle_dict["pill_str"] == "Waiting" else _state_str(cycle_dict.get("tone_str"))
         policy_str = row_dict.get("execution_policy_str") or ""
         monthly_bool = policy_str == "next_month_first_open" or row_dict.get("signal_clock_str") == "month_end_snapshot_ready"
         cadence_str = ("Monthly" if monthly_bool else "Daily") if policy_str else "—"
         session_str = "Close" if policy_str == "same_day_moc" else "First open" if monthly_bool else "Open"
         name_str = account_dict.get("display_name") or strategy_display_name_str(row_dict)
         required_dict = row_dict.get("required_action_dict") or {}
+        next_dict = build_next_operation_dict(row_dict, cycle_dict, now_ts=as_of_ts, action_required_bool=action_required_bool)
+        apply_scheduler_to_steps(cycle_dict["step_dict_list"], scheduler_dict)
         step_list = [{
             "name_str": step_dict["label_str"], "state_str": _state_str(step_dict["state_str"]),
             "detail_str": step_dict.get("fact_str") or "—",
             "time_str": step_dict.get("actual_time_str") or (
                 "due " + step_dict["planned_time_str"] if step_dict.get("planned_time_str") else ""),
         } for step_dict in cycle_dict["step_dict_list"]]
-        next_time_str = cycle_dict.get("next_time_str") or ""
-        next_ts = parse_timestamp_ts(cycle_dict.get("next_timestamp_str"))
-        next_detail_str = "in " + _duration_str((next_ts - as_of_ts).total_seconds()) if next_ts and next_ts > as_of_ts else ""
-        next_str = cycle_dict.get("next_str") or "—"
+        if next_dict.get("schedule_action_dict"):
+            required_dict = next_dict["schedule_action_dict"]
+            action_required_bool = True
+            pod_state_str = _state_str(required_dict["severity_str"])
+        next_time_str, next_detail_str = next_dict["next_time_str"], next_dict["next_detail_str"]
+        next_ts = parse_timestamp_ts(next_dict["next_timestamp_str"])
+        if next_ts and next_ts > as_of_ts:
+            next_detail_str = (next_detail_str + " · " if next_detail_str else "") + "in " + _duration_str((next_ts - as_of_ts).total_seconds())
+        next_str = next_dict["next_str"]
         now_str, now_detail_str = cycle_dict.get("now_str") or "Unknown", cycle_dict.get("now_detail_str") or ""
         if pod_state_str in {"fail", "late"}:
             if row_dict.get("latest_submit_ack_status_str") == "missing_critical" or (row_dict.get("missing_ack_count_int") or 0) > 0:
@@ -119,7 +131,9 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
             "pill_str": cycle_dict["pill_str"], "state_str": pod_state_str,
             "now_str": now_str, "now_detail_str": now_detail_str,
             "next_str": next_str, "next_time_str": next_time_str, "next_detail_str": next_detail_str,
+            "next_forecast_bool": next_dict["next_forecast_bool"], "next_timestamp_str": next_dict["next_timestamp_str"],
             "step_list": step_list,
+            "scheduler_dict": scheduler_dict,
         })
         database_failed_bool = row_dict.get("db_status_str") in {"missing", "error"}
         if fresh_bool and matched_bool and (database_failed_bool
@@ -141,12 +155,45 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
                 pill_str="Action needed" if attention_dict["state_str"] == "fail" else "Needs review",
                 now_str=attention_dict["title_str"].rstrip("."), now_detail_str=attention_dict["detail_str"],
                 next_str="Review saved evidence", next_time_str="", next_detail_str="you · now")
+            pod_list[-1].update(next_forecast_bool=False, next_timestamp_str="")
+
+        scheduler_attention_dict = scheduler_issue_dict(scheduler_dict, now_ts=as_of_ts)
+        if fresh_bool and matched_bool and scheduler_attention_dict:
+            existing_dict = next((item_dict for item_dict in attention_list if item_dict["pod_id_str"] == pod_id_str), None)
+            if existing_dict:
+                scheduler_attention_dict["detail_str"] += " " + existing_dict["title_str"].rstrip(".") + ". " + existing_dict["detail_str"]
+                if existing_dict["state_str"] == "fail":
+                    scheduler_attention_dict["state_str"] = "fail"
+                attention_list.remove(existing_dict)
+            last_seen_ts = parse_timestamp_ts(scheduler_dict.get("last_seen_timestamp_str"))
+            scheduler_attention_dict.update(pod_id_str=pod_id_str, pod_name_str=name_str,
+                age_str=_duration_str((as_of_ts - last_seen_ts).total_seconds()) if last_seen_ts else "—",
+                check_command_str=scheduler_dict.get("check_command_str") or "")
+            attention_list.append(scheduler_attention_dict)
+            pod_list[-1].update(state_str=scheduler_attention_dict["state_str"],
+                pill_str="Action needed" if scheduler_attention_dict["state_str"] == "fail" else "Needs review",
+                now_str=scheduler_attention_dict["title_str"], now_detail_str=scheduler_attention_dict["detail_str"],
+                next_str="Check scheduler", next_time_str="", next_detail_str="you · now",
+                next_forecast_bool=False, next_timestamp_str="")
+        elif fresh_bool and matched_bool:
+            existing_dict = next((item_dict for item_dict in attention_list if item_dict["pod_id_str"] == pod_id_str), None)
+            if existing_dict:
+                existing_dict["scheduler_note_str"] = scheduler_note_str(scheduler_dict)
 
     scoped_summary_dict = {**source_dict, "pod_row_dict_list": scoped_row_list}
     health_obj = build_health_rollup({**source_dict, "pod_row_dict_list": health_row_list}, mode_str="live")
     system_state_str = _state_str(health_obj.severity_str) if fresh_bool and pod_list else "unk"
     if fresh_bool and any(row_dict.get("db_status_str") in {"missing", "error"} for row_dict in scoped_row_list):
         system_state_str = "fail"
+    scheduler_state_list = [pod_dict["scheduler_dict"].get("state_str", "unknown") for pod_dict in pod_list]
+    scheduler_problem_bool = fresh_bool and any(state_str in {"late", "stopped", "error"} for state_str in scheduler_state_list)
+    scheduler_unknown_bool = any(pod_dict["scheduler_dict"].get("alive_bool") is not True for pod_dict in pod_list)
+    if fresh_bool and any(state_str in {"stopped", "error"} for state_str in scheduler_state_list):
+        system_state_str = "fail"
+    elif scheduler_problem_bool and system_state_str != "fail":
+        system_state_str = "late"
+    elif scheduler_unknown_bool and system_state_str not in {"fail", "late"}:
+        system_state_str = "unk"
     system_label_str = {"done": "System OK", "fail": "System needs action", "late": "System needs review"}.get(system_state_str, "System unknown")
     market_obj = build_market_status(now_dt=as_of_ts)
     transition_ts = parse_timestamp_ts(market_obj.next_transition_timestamp_str)
@@ -181,7 +228,8 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
         "market_dict": {"state_str": "now" if market_obj.status_label_str == "Market open" else "skip",
                         "label_str": market_obj.status_label_str, "detail_str": market_detail_str},
         "system_dict": {"state_str": system_state_str, "label_str": system_label_str,
-                        "detail_str": "Data " + _data_time_str(min(data_session_list)) if data_session_list else "Data unknown"},
+                        "detail_str": "Scheduler" if scheduler_problem_bool else "Scheduler unknown" if scheduler_unknown_bool and system_state_str == "unk" else
+                            "Data " + _data_time_str(min(data_session_list)) if data_session_list else "Data unknown"},
         "live_state_str": live_state_str, "verdict_str": verdict_str, "verdict_detail_str": verdict_detail_str,
         "attention_list": attention_list, "pod_list": pod_list,
     }

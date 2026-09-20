@@ -239,7 +239,9 @@ def test_idle_monthly_still_has_eod_due(pod_row_dict):
     view_dict = _view_dict(pod_row_dict)
     assert all(step_dict["state_str"] == "None" for step_dict in view_dict["step_dict_list"][:-1])
     assert _step_dict(view_dict, "EOD")["state_str"] == "Planned"
-    assert view_dict["pill_str"] == "Idle"
+    assert view_dict["pill_str"] == "Waiting"
+    assert view_dict["now_str"] == "Waiting"
+    assert view_dict["now_detail_str"] == "No trade scheduled"
     assert view_dict["next_str"] == "EOD"
 
 
