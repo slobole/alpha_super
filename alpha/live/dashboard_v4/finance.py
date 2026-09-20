@@ -40,14 +40,19 @@ def _tone_str(value_float):
 
 
 def _empty_chart_dict():
-    return {"available_bool": False, "empty_str": "Account value unavailable", "point_str": "", "area_str": "",
+    return {"available_bool": False, "empty_str": "Return unavailable", "point_str": "", "area_str": "",
         "segment_list": [], "isolated_point_list": [], "y_tick_list": [], "x_tick_list": [],
-        "end_x_float": None, "end_y_float": None, "end_label_str": "—"}
+        "end_x_float": None, "end_y_float": None, "end_label_str": "—", "zero_y_float": None,
+        "source_str": "", "detail_str": ""}
 
 
 def _chart_dict(daily_list):
-    """Rescale V3 geometry only; keep its gaps and exact-date financial facts."""
-    source_dict = nav_chart_dict(daily_list)
+    """Plot canonical linked returns; never normalize NAV or remove flows here.
+
+    The reporting layer owns R_t = product(1 + r_d) - 1, including the opening
+    zero baseline. V4 only rescales its already-validated percentage geometry.
+    """
+    source_dict = nav_chart_dict(daily_list, value_field_str="cumulative_return_float", unit_str="pct")
     result_dict = _empty_chart_dict()
     if source_dict is None:
         return result_dict
@@ -58,6 +63,8 @@ def _chart_dict(daily_list):
     def vertical_float(value_float):
         return 18 + (value_float - 10) / 160 * 198
 
+    zero_y_float = vertical_float(source_dict["zero_y_float"]) if source_dict["zero_y_float"] is not None else None
+    baseline_float = zero_y_float if zero_y_float is not None else 216
     segment_list = []
     for point_str in source_dict["segment_list"]:
         coordinate_list = [tuple(float(value_str) for value_str in pair_str.split(",")) for pair_str in point_str.split()]
@@ -66,7 +73,7 @@ def _chart_dict(daily_list):
         point_str = " ".join(f"{horizontal_value_float:.2f},{vertical_value_float:.2f}"
             for horizontal_value_float, vertical_value_float in coordinate_list)
         segment_list.append({"point_str": point_str,
-            "area_str": f"{coordinate_list[0][0]:.2f},216 {point_str} {coordinate_list[-1][0]:.2f},216"})
+            "area_str": f"{coordinate_list[0][0]:.2f},{baseline_float:.2f} {point_str} {coordinate_list[-1][0]:.2f},{baseline_float:.2f}"})
     point_list = source_dict["point_list"]
     end_dict = point_list[-1]
     tick_index_list = sorted({0, len(point_list) // 2, len(point_list) - 1})
@@ -77,7 +84,7 @@ def _chart_dict(daily_list):
             "y_float": vertical_float(point_dict["y_float"]), "label_str": point_dict["label_str"]}
             for point_dict in point_list if point_dict["isolated_bool"]],
         end_x_float=horizontal_float(end_dict["x_float"]), end_y_float=vertical_float(end_dict["y_float"]),
-        end_label_str=f"{end_dict['value_float'] / 1000:,.1f}k" if abs(end_dict["value_float"]) >= 1000 else _money_str(end_dict["value_float"]),
+        end_label_str=_percent_str(end_dict["value_float"], signed_bool=True), zero_y_float=zero_y_float,
         y_tick_list=[{"y_float": vertical_float(tick_dict["y_float"]), "label_str": tick_dict["label_str"]}
             for tick_dict in source_dict["tick_list"]],
         x_tick_list=[{"x_float": horizontal_float(point_list[index_int]["x_float"]),
@@ -241,9 +248,22 @@ def build_financial_overview_dict(workspace_dict, snapshot_obj, provider_obj, *,
                 value_str=_money_str(pnl_float, signed_bool=True) if index_int == 1 else _percent_str(return_float, signed_bool=True),
                 detail_str=_percent_str(return_float, signed_bool=True) if index_int == 1 else _money_str(pnl_float, signed_bool=True),
                 tone_str=_tone_str(pnl_float if index_int == 1 else return_float))
+        return_path_list = []
+        if chart_report_dict and chart_report_dict["twr_float"] is not None:
+            return_path_list = chart_report_dict["return_path_list"]
+            if not chart_report_dict["client_twr_configured_bool"] and len(chart_report_dict["strategy_list"]) == 1:
+                return_path_list = chart_report_dict["strategy_list"][0]["performance_dict"]["return_path_list"]
+        chart_dict = _chart_dict(return_path_list)
+        if chart_dict["available_bool"]:
+            calculated_bool = chart_report_dict["client_twr_configured_bool"]
+            chart_dict.update(source_str="Calculated return · End-of-day cash flows" if calculated_bool else
+                "Demo account return" if demo_bool else "IBKR account return",
+                detail_str="Cumulative return for the selected period. " + chart_report_dict["twr_method_str"])
+        elif chart_report_dict:
+            chart_dict["detail_str"] = chart_report_dict.get("twr_reason_str") or "Complete, verified return history is required."
         result_dict.update(money_asof_str=("Demo · " if demo_bool else "") + "Money as of close " + closing_str
             + (" · Data delayed" if dates_dict["delayed_bool"] else ""), delayed_bool=dates_dict["delayed_bool"],
-            chart_dict=_chart_dict(chart_report_dict["daily_book_list"]) if chart_report_dict else _empty_chart_dict())
+            chart_dict=chart_dict)
     except (ClientReportingError, ValueError, OSError, KeyError, TypeError):
         result_dict["financial_error_str"] = "Saved financial data could not be verified."
         return result_dict

@@ -101,7 +101,7 @@ def test_unknown_local_scope_keeps_nav_but_never_unlocks_returns():
     result_dict = build_financial_overview_dict(workspace_dict, source_obj, provider_obj, as_of_ts=AS_OF_TS)
     assert result_dict["tile_list"][0]["value_str"] != "—"
     assert all(tile_dict["value_str"] == "—" for tile_dict in result_dict["tile_list"][1:])
-    assert result_dict["chart_dict"]["available_bool"] is True
+    assert result_dict["chart_dict"]["available_bool"] is False
 
 
 def test_today_is_withheld_and_newer_partial_book_does_not_replace_last_common_close():
@@ -126,9 +126,8 @@ def test_old_history_gap_withholds_month_but_does_not_hide_valid_day():
     result_dict = build_financial_overview_dict(workspace_dict, source_obj, ForbiddenProvider(), as_of_ts=AS_OF_TS)
     assert result_dict["tile_list"][1]["value_str"] == "+$10.00"
     assert result_dict["tile_list"][2]["value_str"] == "—"
-    assert len(result_dict["chart_dict"]["segment_list"]) == 2
-    assert result_dict["chart_dict"]["point_str"] == ""
-    assert result_dict["chart_dict"]["isolated_point_list"]
+    assert result_dict["chart_dict"]["available_bool"] is False
+    assert result_dict["chart_dict"]["segment_list"] == []
 
 
 def test_cash_fallback_never_changes_flex_headline_or_invents_cash():
@@ -184,8 +183,8 @@ def test_cash_zero_all_missing_and_invalid_never_generate_invalid_geometry(cash_
 
 def test_chart_missing_flat_single_and_zero_values_are_finite_and_visible():
     assert _chart_dict([])["available_bool"] is False
-    for value_float in (0, -100, 100, .0001):
-        result_dict = _chart_dict([{"market_date_str": "2026-09-04", "nav_float": value_float}])
+    for value_float in (0, -.1, .1, .0001):
+        result_dict = _chart_dict([{"market_date_str": "2026-09-04", "cumulative_return_float": value_float}])
         assert result_dict["available_bool"] is True
         assert result_dict["isolated_point_list"]
         assert len({tick_dict["label_str"] for tick_dict in result_dict["y_tick_list"]}) == 3

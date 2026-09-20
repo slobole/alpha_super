@@ -22,6 +22,13 @@ weights, target/New markers, slippage or reference comparison are manufactured.
 Account NAV/P&L/TWR retain the existing reporting contracts. Full closing-value
 holdings require a separately verified account/date-specific marks source.
 
+V4 charts display the existing cumulative return paths, not normalized NAV.
+Overview retains the configured client end-of-day flow convention and labels
+the return as calculated. Pod charts retain official account TWR. Capital
+movements and dated Pod membership follow the reporting contract below; no
+new aggregate-return model or intraday-flow claim is introduced. Missing return
+coverage withholds the curve while independently valid NAV remains visible.
+
 Legacy completed VPlans with unverified ACK history show Unknown. Recorded ACK
 times can contain a planned-time fallback; V4 withholds that fallback from the
 actual-time display and does not derive submission latency from it. Scheduler

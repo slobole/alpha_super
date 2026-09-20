@@ -101,7 +101,7 @@ def test_unknown_start_keeps_saved_account_nav_but_no_returns():
     result_dict = _view(workspace_dict, snapshot_obj, provider_obj, pod_id_str)
     assert result_dict["tile_list"][0]["value_str"] != "—"
     assert all(tile_dict["value_str"] == "—" for tile_dict in result_dict["tile_list"][1:])
-    assert result_dict["chart_dict"]["available_bool"] is True
+    assert result_dict["chart_dict"]["available_bool"] is False
 
 
 def test_closed_history_does_not_present_a_partial_month_as_current_period():

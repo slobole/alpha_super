@@ -165,9 +165,18 @@ def build_pod_finance_dict(workspace_dict, snapshot_obj, provider_obj, *, pod_id
                 detail_str=_percent_str(return_float, signed_bool=True) if index_int == 1 else (
                     "From " + account_dict["from_date_str"] if index_int == 3 and account_dict else _money_str(pnl_float, signed_bool=True)),
                 tone_str=_tone_str(pnl_float if index_int == 1 else return_float))
+        chart_account_list = chart_report_dict["strategy_list"] if chart_report_dict else []
+        chart_account_dict = chart_account_list[0] if len(chart_account_list) == 1 and chart_account_list[0]["to_date_str"] == closing_str else {}
+        return_path_list = chart_account_dict["performance_dict"]["return_path_list"] if chart_account_dict.get("twr_float") is not None else []
+        chart_dict = _chart_dict(return_path_list)
+        if chart_dict["available_bool"]:
+            chart_dict.update(source_str="Demo account return" if client_dict.get("is_demo") else "IBKR account return",
+                detail_str="Cumulative account return for the selected period, adjusted for cash flows.")
+        else:
+            chart_dict["detail_str"] = "Complete, verified account return history is required."
         result_dict.update(money_asof_str=("Demo · " if client_dict.get("is_demo") else "") + "Money as of close " + closing_str
             + (" · Data delayed" if dates_dict["delayed_bool"] else ""), delayed_bool=dates_dict["delayed_bool"],
-            chart_dict=_chart_dict(chart_report_dict["daily_book_list"]) if chart_report_dict else _empty_chart_dict())
+            chart_dict=chart_dict)
     except (ClientReportingError, ValueError, TypeError, KeyError, OSError):
         result_dict["financial_error_str"] = "Saved financial data could not be verified."
         return result_dict

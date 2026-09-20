@@ -67,7 +67,13 @@ cutover is part of this phase.
   Month/Year use current ET calendar periods and show TWR with P&L beneath.
   Canonical V3 accounting retains flow adjustments, coverage, ownership and
   finalization checks. Changing chart range does not change these tiles.
-- The account-value chart preserves missing-data gaps. Allocation uses one
+- The main charts show selected-period cumulative return, starting at 0%, rather
+  than account NAV. Overview uses the canonical calculated client path and its
+  explicit end-of-day cash-flow convention; the existing verified single-account
+  fallback remains. Pod charts use official IBKR account TWR independently of
+  the client method. Linking stays in the reporting layer: `R = product(1+r) - 1`.
+  Missing return evidence withholds the curve, never substitutes NAV growth or
+  averages Pods. Account value remains a separate dollar tile. Allocation uses one
   same-date source: validated broker EOD, or complete finalized IBKR values.
   Unknown cash is not estimated; no residual
   "Free cash" is manufactured.
@@ -122,8 +128,8 @@ and database failures. The selected cycle has a separate badge and verdict.
   ACK timestamp, explicitly labelled ACK, only when all timestamps are later
   than the planned boundary; equality may be a broker-refresh fallback.
 - Value, Day, Month and Since start use the selected Pod's official account
-  report and existing accounting checks. The chart shows account NAV, including
-  cash flows; Day P&L is flow-adjusted and is not a NAV difference. These panels
+  report and existing accounting checks. The chart uses that account's official
+  return path; Day P&L is flow-adjusted and is not a NAV difference. These panels
   keep their own dated sources when browsing historical trading cycles.
 - Positions show saved quantities and their own timestamp. Cash has its own
   financial date. Existing sources do not prove closing marks for every symbol,
@@ -139,7 +145,7 @@ and database failures. The selected cycle has a separate badge and verdict.
 ## Verification
 
 ```powershell
-.venv\Scripts\python.exe -B -m pytest tests/test_dashboard_v4_cycle.py tests/test_dashboard_v4_evidence.py tests/test_dashboard_v4_finance.py tests/test_dashboard_v4_routes.py tests/test_dashboard_v4_pod.py tests/test_dashboard_v4_pod_data.py tests/test_dashboard_v4_pod_finance.py tests/test_dashboard_v4_pod_integration.py tests/test_dashboard_v4_pod_review.py tests/test_dashboard_v4_pod_demo.py tests/test_dashboard_local_workspace.py --capture=sys -p no:cacheprovider -q
+.venv\Scripts\python.exe -B -m pytest tests/test_dashboard_v4_cycle.py tests/test_dashboard_v4_evidence.py tests/test_dashboard_v4_finance.py tests/test_dashboard_v4_return_chart.py tests/test_dashboard_v4_routes.py tests/test_dashboard_v4_pod.py tests/test_dashboard_v4_pod_data.py tests/test_dashboard_v4_pod_finance.py tests/test_dashboard_v4_pod_integration.py tests/test_dashboard_v4_pod_review.py tests/test_dashboard_v4_pod_demo.py tests/test_dashboard_local_workspace.py --capture=sys -p no:cacheprovider -q
 node --test tests/dashboard_v4_refresh.test.cjs
 ```
 
