@@ -256,8 +256,8 @@ def build_financial_overview_dict(workspace_dict, snapshot_obj, provider_obj, *,
         chart_dict = _chart_dict(return_path_list)
         if chart_dict["available_bool"]:
             calculated_bool = chart_report_dict["client_twr_configured_bool"]
-            chart_dict.update(source_str="Calculated return · End-of-day cash flows" if calculated_bool else
-                "Demo account return" if demo_bool else "IBKR account return",
+            chart_dict.update(source_str="Calculated TWR · End-of-day cash flows" if calculated_bool else
+                "Demo account TWR" if demo_bool else "IBKR account TWR",
                 detail_str="Cumulative return for the selected period. " + chart_report_dict["twr_method_str"])
         elif chart_report_dict:
             chart_dict["detail_str"] = chart_report_dict.get("twr_reason_str") or "Complete, verified return history is required."

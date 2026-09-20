@@ -1,5 +1,5 @@
 {% if chart_dict.available_bool %}
-<svg class="chart" viewBox="0 0 560 238" role="img" aria-label="Pod return"><title>Pod return</title>
+<svg class="chart" viewBox="-24 0 584 238" role="img" aria-label="Pod return"><title>Pod return</title>
   {% for tick_dict in chart_dict.y_tick_list %}<line class="grid" x1="40" y1="{{ tick_dict.y_float }}" x2="496" y2="{{ tick_dict.y_float }}"></line><text class="ta-e" x="34" y="{{ tick_dict.y_float + 3.5 }}">{{ tick_dict.label_str }}</text>{% endfor %}
   <line class="axis" x1="40" y1="216" x2="496" y2="216"></line>
   {% if chart_dict.zero_y_float is not none %}<line class="axis" x1="40" y1="{{ chart_dict.zero_y_float }}" x2="496" y2="{{ chart_dict.zero_y_float }}"></line>{% endif %}
