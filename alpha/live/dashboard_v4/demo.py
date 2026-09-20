@@ -6,6 +6,7 @@ from time import monotonic
 
 from alpha.live.dashboard_v3.demo import DemoOperationsProvider, build_demo_fixture_tuple
 from alpha.live.dashboard_v4.pod_demo import DemoPodStore
+from alpha.live.dashboard_v4.positions_data import load_positions_dict
 
 
 DEMO_NOW_TS = datetime(2026, 9, 8, 13, 41, 7, tzinfo=UTC)
@@ -61,6 +62,15 @@ def build_demo_workspace_tuple():
     provider_obj.pod_store_obj = DemoPodStore(provider_obj.row_list, as_of_ts=DEMO_NOW_TS)
     for method_str in ("get_pod_cycles_dict", "get_cycle_evidence_dict", "get_target_for_pod", "get_target_list", "close"):
         setattr(provider_obj, method_str, getattr(provider_obj.pod_store_obj, method_str))
+    pod_store_obj = provider_obj.pod_store_obj
+
+    def demo_positions_dict(pod_id_str, *, as_of_ts):
+        # Only owned synthetic state is read. Saved execution prices are not
+        # closing marks, so this quantity reader adds no price or P&L fixture.
+        return load_positions_dict(pod_store_obj.get_target_for_pod(pod_id_str), as_of_ts=as_of_ts)
+
+    provider_obj.get_positions_dict = demo_positions_dict
+
     def demo_scheduler_status_dict(pod_id_str, *, as_of_ts):
         # Synthetic preview evidence only; never fall back to workstation logs.
         if pod_id_str not in {row_dict["pod_id_str"] for row_dict in provider_obj.row_list}:

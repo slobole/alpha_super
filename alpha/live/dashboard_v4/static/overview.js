@@ -10,6 +10,7 @@
   let clock_observed_ms = 0;
   let selection_snapshot_obj = null;
   let scheduler_check_snapshot_obj = null;
+  let positions_search_snapshot_obj = null;
   const clock_formatter_obj = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
   });
@@ -162,11 +163,31 @@
     return target_obj && (target_obj.id === 'overview-shell' || target_obj.closest('#overview-shell'));
   }
 
+  function filter_positions(shell_obj) {
+    const input_obj = shell_obj && shell_obj.querySelector('[data-positions-search]');
+    if (!input_obj) return;
+    const search_str = input_obj.value.trim().toUpperCase();
+    let visible_int = 0;
+    shell_obj.querySelectorAll('[data-position-row]').forEach((row_obj) => {
+      row_obj.hidden = !row_obj.getAttribute('data-position-symbol').toUpperCase().includes(search_str);
+      if (!row_obj.hidden) visible_int += 1;
+    });
+    const empty_obj = shell_obj.querySelector('[data-position-search-empty]');
+    if (empty_obj) empty_obj.hidden = visible_int !== 0;
+  }
+
+  document.addEventListener('input', (event_obj) => {
+    if (event_obj.target && event_obj.target.getAttribute('data-positions-search') !== null) {
+      filter_positions(document.getElementById('overview-shell'));
+    }
+  });
+
   ['htmx:responseError', 'htmx:sendError', 'htmx:timeout', 'htmx:swapError'].forEach((event_str) => {
     document.addEventListener(event_str, (event_obj) => {
       if (overview_event(event_obj)) {
         selection_snapshot_obj = null;
         scheduler_check_snapshot_obj = null;
+        positions_search_snapshot_obj = null;
         mark_unknown();
       }
     });
@@ -186,6 +207,10 @@
     const command_obj = check_obj && check_obj.querySelector('code');
     scheduler_check_snapshot_obj = check_obj && check_obj.getAttribute('open') !== null && command_obj
       ? {scope_str: shell_obj.getAttribute('data-selection-scope'), command_str: command_obj.textContent} : null;
+    const input_obj = shell_obj && shell_obj.querySelector('[data-positions-search]');
+    positions_search_snapshot_obj = input_obj ? {scope_str: shell_obj.getAttribute('data-selection-scope'),
+      value_str: input_obj.value, focused_bool: document.activeElement === input_obj,
+      start_int: input_obj.selectionStart, end_int: input_obj.selectionEnd} : null;
   });
   document.addEventListener('htmx:afterSwap', (event_obj) => {
     if (!overview_event(event_obj)) return;
@@ -197,6 +222,17 @@
         && shell_obj.getAttribute('data-selection-scope') === scheduler_check_snapshot_obj.scope_str
         && command_obj.textContent === scheduler_check_snapshot_obj.command_str) check_obj.setAttribute('open', '');
     scheduler_check_snapshot_obj = null;
+    const input_obj = shell_obj && shell_obj.querySelector('[data-positions-search]');
+    if (input_obj && positions_search_snapshot_obj
+        && shell_obj.getAttribute('data-selection-scope') === positions_search_snapshot_obj.scope_str) {
+      input_obj.value = positions_search_snapshot_obj.value_str;
+      if (positions_search_snapshot_obj.focused_bool) {
+        input_obj.focus({preventScroll: true});
+        input_obj.setSelectionRange(positions_search_snapshot_obj.start_int, positions_search_snapshot_obj.end_int);
+      }
+    }
+    positions_search_snapshot_obj = null;
+    filter_positions(shell_obj);
     restore_selection();
   });
   document.addEventListener('selectionchange', () => {
@@ -217,6 +253,7 @@
   // Subtract the whole acquisition interval, conservatively, so transport or
   // a sleeping tab cannot extend the server's 120-second evidence lifetime.
   observe_snapshot(performance.now());
+  filter_positions(document.getElementById('overview-shell'));
   setInterval(() => {
     check_expiry();
     update_clock();

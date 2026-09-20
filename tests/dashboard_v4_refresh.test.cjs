@@ -161,6 +161,7 @@ function environment_obj(valid_ms = 120000, initial_latency_ms = 0, clock_timest
       return event_obj;
     },
     select: (selection_obj) => { window_obj.getSelection = () => selection_obj; },
+    focus: (element_obj) => { document_obj.activeElement = element_obj; },
     replace: (remaining_ms = 120000, next_clock_str) => {
       current_obj.shell_obj.isConnected = false;
       const selected_obj = window_obj.getSelection ? window_obj.getSelection() : null;
@@ -170,6 +171,79 @@ function environment_obj(valid_ms = 120000, initial_latency_ms = 0, clock_timest
       current_obj = snapshot_obj(remaining_ms, next_clock_str);
     },
   };
+}
+
+function positions_search_obj(env_obj, value_str = '') {
+  const input_obj = element_obj();
+  input_obj.setAttribute('data-positions-search', '');
+  input_obj.value = value_str;
+  input_obj.selectionStart = input_obj.selectionEnd = value_str.length;
+  input_obj.focused_bool = false;
+  input_obj.focus = () => { input_obj.focused_bool = true; env_obj.focus(input_obj); };
+  input_obj.setSelectionRange = (start_int, end_int) => {
+    input_obj.selectionStart = start_int; input_obj.selectionEnd = end_int;
+  };
+  const selector_dict = env_obj.current_obj.selector_dict;
+  selector_dict['[data-positions-search]'] = input_obj;
+  selector_dict['[data-position-row]'] = ['BKR', 'NVDA', 'SGOV'].map((symbol_str) => {
+    const row_obj = element_obj();
+    row_obj.hidden = false;
+    row_obj.setAttribute('data-position-symbol', symbol_str);
+    return row_obj;
+  });
+  selector_dict['[data-position-search-empty]'] = element_obj('No matching symbols.');
+  return input_obj;
+}
+
+test('symbol search filters locally, handles case/whitespace, clears and shows an empty match', () => {
+  const env_obj = environment_obj();
+  const input_obj = positions_search_obj(env_obj, '  nv  ');
+  const selector_dict = env_obj.current_obj.selector_dict;
+  env_obj.fire('input', {target: input_obj});
+  assert.deepEqual(selector_dict['[data-position-row]'].map((row_obj) => row_obj.hidden), [true, false, true]);
+  assert.equal(selector_dict['[data-position-search-empty]'].hidden, true);
+  input_obj.value = '<script>';
+  env_obj.fire('input', {target: input_obj});
+  assert.equal(selector_dict['[data-position-search-empty]'].hidden, false);
+  input_obj.value = '';
+  env_obj.fire('input', {target: input_obj});
+  assert.deepEqual(selector_dict['[data-position-row]'].map((row_obj) => row_obj.hidden), [false, false, false]);
+});
+
+test('Positions polling preserves latest search text, caret and focus without delaying source expiry', () => {
+  const env_obj = environment_obj(1000);
+  const input_obj = positions_search_obj(env_obj, 'NV');
+  env_obj.focus(input_obj);
+  env_obj.fire('htmx:beforeRequest');
+  input_obj.value = 'SGOV';
+  input_obj.selectionStart = 1; input_obj.selectionEnd = 3;
+  env_obj.advance(1000); env_obj.timer();
+  assert.equal(env_obj.current_obj.selector_dict['[data-verdict]'].textContent, 'Status unknown.');
+  env_obj.fire('htmx:beforeSwap');
+  env_obj.replace();
+  const refreshed_obj = positions_search_obj(env_obj);
+  env_obj.fire('htmx:afterSwap');
+  assert.equal(refreshed_obj.value, 'SGOV');
+  assert.equal(refreshed_obj.focused_bool, true);
+  assert.deepEqual([refreshed_obj.selectionStart, refreshed_obj.selectionEnd], [1, 3]);
+  assert.deepEqual(env_obj.current_obj.selector_dict['[data-position-row]'].map((row_obj) => row_obj.hidden), [true, true, false]);
+});
+
+for (const change_str of ['scope', 'error', 'clear', 'blur']) {
+  test(`Positions search refresh respects ${change_str}`, () => {
+    const env_obj = environment_obj();
+    const input_obj = positions_search_obj(env_obj, 'BKR');
+    if (change_str !== 'blur') env_obj.focus(input_obj);
+    if (change_str === 'clear') input_obj.value = '';
+    env_obj.fire('htmx:beforeSwap');
+    if (change_str === 'error') env_obj.fire('htmx:responseError');
+    env_obj.replace();
+    const refreshed_obj = positions_search_obj(env_obj);
+    if (change_str === 'scope') env_obj.current_obj.shell_obj.setAttribute('data-selection-scope', 'positions:all:other');
+    env_obj.fire('htmx:afterSwap');
+    assert.equal(refreshed_obj.value, change_str === 'blur' ? 'BKR' : '');
+    if (change_str !== 'clear') assert.equal(refreshed_obj.focused_bool, false);
+  });
 }
 
 test('source expires at remaining lifetime, before next poll; update time is retained', () => {

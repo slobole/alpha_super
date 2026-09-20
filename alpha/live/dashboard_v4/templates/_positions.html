@@ -1,0 +1,44 @@
+<div class="page-head positions-head"><div>
+  <h1 class="h1i">{{ icon('positions') }}Positions</h1>
+  <p class="verdict" data-selection-key="positions-verdict"><b data-verdict>{{ positions_page_dict.verdict_str }}</b>{% if positions_page_dict.verdict_detail_str %} <span data-verdict-detail>{{ positions_page_dict.verdict_detail_str }}</span>{% endif %}</p>
+</div><div class="positions-asof" data-selection-key="positions-asof">{{ icon('calendar') }}<span>{{ positions_page_dict.asof_str }}</span></div></div>
+
+<section class="tiles tiles-4" aria-label="Book at last close">{% for tile_dict in positions_page_dict.tile_list %}
+  <div class="tile" data-selection-key="positions-tile:{{ tile_dict.label_str }}"><div class="l">{{ tile_dict.label_str }}</div><div class="v {{ tile_dict.tone_str }}">{{ tile_dict.value_str }}</div>
+    {% if tile_dict.get('bar_percent_float') is not none %}<div class="mini" aria-hidden="true"><i style="width: {{ [[tile_dict.bar_percent_float|float, 0]|max, 100]|min }}%"></i></div>{% endif %}
+    <div class="s">{{ tile_dict.detail_str }}{% if loop.first and positions_page_dict.financial_asof_str %}<br>{{ positions_page_dict.financial_asof_str }}{% endif %}</div>
+  </div>{% endfor %}
+</section>
+
+<section class="panel" aria-label="Positions">
+  <div class="panel-h positions-controls"><div class="positions-toolbar">
+    <nav class="seg" aria-label="Position view">{% for filter_dict in positions_page_dict.filter_list %}
+      {% if filter_dict.get('disabled_bool', false) %}<span aria-disabled="true" title="{{ filter_dict.detail_str }}">{{ filter_dict.label_str }}</span>{% else %}<a href="{{ filter_dict.url_str }}" class="{{ 'on' if filter_dict.selected_bool else '' }}"{% if filter_dict.selected_bool %} aria-current="page"{% endif %}>{{ filter_dict.label_str }}</a>{% endif %}
+    {% endfor %}</nav>
+    <nav class="positions-pod-filters" aria-label="Filter by pod">{% for filter_dict in positions_page_dict.pod_filter_list %}<a class="podchip{{ ' on' if filter_dict.selected_bool else '' }}" href="{{ filter_dict.url_str }}"{% if filter_dict.selected_bool %} aria-current="page"{% endif %}>{% if filter_dict.get('color_str') %}<i style="background: {{ filter_dict.color_str }}" aria-hidden="true"></i>{% endif %}{{ filter_dict.label_str }}</a>{% endfor %}</nav>
+  </div><div class="positions-find" role="search">
+    <label for="positions-search">Find</label><input id="positions-search" data-positions-search type="search" name="q" value="{{ positions_page_dict.search_str }}" maxlength="80" placeholder="symbol…" aria-label="Find symbol" autocomplete="off">
+  </div></div>
+  {% if positions_page_dict.note_str %}<p class="evidence-note">{{ positions_page_dict.note_str }}</p>{% endif %}
+  {% if positions_page_dict.row_list %}
+  <table class="tbl dense positions-table" data-selection-key="positions-table"><thead><tr><th scope="col">Symbol</th><th scope="col">Pods</th><th scope="col" class="num">Shares</th><th scope="col" class="num">Value $</th><th scope="col">Weight</th><th scope="col" class="num">P&amp;L since entry</th><th scope="col">Today</th></tr></thead><tbody>
+  {% for row_dict in positions_page_dict.row_list %}<tr data-position-row data-position-symbol="{{ row_dict.symbol_str }}" class="{{ 'hl' if row_dict.off_target_bool else '' }}">
+    <td data-column="Symbol"><span class="sym"><b>{{ row_dict.symbol_str }}</b>{% if row_dict.name_str %}<span>{{ row_dict.name_str }}</span>{% endif %}</span></td>
+    <td data-column="Pods"><div class="position-pods">{% for pod_dict in row_dict.pod_list %}<a class="podchip" href="{{ pod_dict.url_str }}" title="{{ pod_dict.share_str }} shares · {{ pod_dict.position_asof_str }}"><i style="background: {{ pod_dict.color_str }}" aria-hidden="true"></i>{{ pod_dict.name_str }}{% if row_dict.offset_bool %} · {{ pod_dict.share_str }}{% endif %}</a>{% endfor %}</div></td>
+    <td data-column="Shares" class="num">{% if row_dict.offset_bool %}<span class="muted">Net </span>{% endif %}{{ row_dict.share_str }}</td><td data-column="Value $" class="num">{{ row_dict.value_str }}</td>
+    <td data-column="Weight"><div class="wbar">{% if row_dict.weight_percent_float is not none %}<div class="bar" aria-hidden="true"><i style="width: {{ [[row_dict.weight_percent_float|float, 0]|max, 100]|min }}%"></i></div>{% endif %}<span class="num">{{ row_dict.weight_str }}</span></div></td>
+    <td data-column="P&amp;L since entry" class="num"><span class="pl {{ row_dict.pl_tone_str }}"><b>{{ row_dict.pl_str }}</b>{% if row_dict.pl_percent_str and row_dict.pl_percent_str != '—' %}<span>{{ row_dict.pl_percent_str }}</span>{% endif %}{% if row_dict.pl_detail_str %}<span class="muted">{{ row_dict.pl_detail_str }}</span>{% endif %}</span></td>
+    <td data-column="Today">{% if row_dict.today_str %}<span class="position-today">{{ mark(row_dict.today_state_str, row_dict.today_str) }}<span data-evidence-status>{{ row_dict.today_str }}</span></span>{% endif %}</td>
+  </tr>{% endfor %}</tbody></table>
+  <div class="empty-state" data-position-search-empty hidden>No matching symbols.</div>
+  {% else %}<div class="empty-state" data-selection-key="positions-table">{{ positions_page_dict.empty_str }}</div>{% endif %}
+</section>
+
+<section class="panel" aria-label="Positions by pod"><div class="panel-h"><span class="panel-t">By pod · Portfolio</span><span class="muted" title="{{ positions_page_dict.financial_basis_str }}">{{ positions_page_dict.financial_asof_str or positions_page_dict.financial_error_str }}</span></div>
+  <table class="tbl dense positions-table positions-by-pod" data-selection-key="positions-by-pod"><thead><tr><th scope="col">Pod</th><th scope="col" class="num">Positions</th><th scope="col" class="num">Invested $</th><th scope="col" class="num">Cash $</th><th scope="col" class="num">Open P&amp;L $</th><th scope="col" class="num">Book</th></tr></thead><tbody>
+  {% for row_dict in positions_page_dict.pod_row_list %}<tr>
+    <td data-column="Pod"><i class="dotk" style="background: {{ row_dict.color_str }}" aria-hidden="true"></i>{% if row_dict.url_str %}<a class="sname" href="{{ row_dict.url_str }}">{{ row_dict.name_str }}</a>{% else %}<span class="sname">{{ row_dict.name_str }}</span>{% endif %}<div class="muted">{{ row_dict.get('position_asof_str', 'Saved positions unavailable') }}</div></td><td data-column="Positions" class="num">{{ row_dict.count_str }}</td><td data-column="Invested $" class="num">{{ row_dict.invested_str }}</td><td data-column="Cash $" class="num">{{ row_dict.cash_str }}</td><td data-column="Open P&amp;L $" class="num {{ row_dict.pnl_tone_str }}">{{ row_dict.pnl_str }}</td><td data-column="Book" class="num">{{ row_dict.weight_str }}</td>
+  </tr>{% endfor %}
+  {% if positions_page_dict.total_dict %}{% set total_dict = positions_page_dict.total_dict %}<tr class="tot"><td data-column="Pod"><b>{{ total_dict.name_str }}</b></td><td data-column="Positions" class="num">{{ total_dict.count_str }}</td><td data-column="Invested $" class="num">{{ total_dict.invested_str }}</td><td data-column="Cash $" class="num">{{ total_dict.cash_str }}</td><td data-column="Open P&amp;L $" class="num {{ total_dict.pnl_tone_str }}">{{ total_dict.pnl_str }}</td><td data-column="Book" class="num">{{ total_dict.weight_str }}</td></tr>{% endif %}
+  </tbody></table>
+</section>

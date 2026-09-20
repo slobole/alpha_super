@@ -117,6 +117,34 @@ def test_summary_holdings_and_times_match_actual_saved_pod_state(demo_fixture_tu
     assert {row_dict["asset_str"] for row_dict in workspace_dict["summary_dict"]["pod_row_dict_list"][0]["position_exposure_dict_list"]} == {"AMD", "CRM", "SGOV"}
 
 
+def test_positions_preview_uses_owned_broker_evidence_without_prices_or_writes(demo_fixture_tuple, monkeypatch):
+    workspace_dict, _, provider_obj = demo_fixture_tuple
+    before_dict = _files_dict(provider_obj)
+    monkeypatch.setattr("alpha.live.dashboard_v4.pod_demo._DemoStateStore.__init__",
+        lambda *args, **kwargs: pytest.fail("Writer created during a positions read"))
+    for row_dict in workspace_dict["summary_dict"]["pod_row_dict_list"]:
+        source_dict = provider_obj.get_positions_dict(row_dict["pod_id_str"], as_of_ts=DEMO_NOW_TS)
+        target_obj = provider_obj.get_target_for_pod(row_dict["pod_id_str"])
+        assert source_dict["available_bool"] is True
+        assert source_dict["source_str"] == "broker_reconciliation"
+        assert source_dict["timestamp_basis_str"] == "recorded"
+        for field_str in ("release_id_str", "user_id_str", "pod_id_str", "account_route_str", "mode_str"):
+            assert source_dict[field_str] == getattr(target_obj.release_obj, field_str)
+        assert source_dict["position_map_dict"] == {
+            position_dict["asset_str"]: position_dict["share_float"] for position_dict in row_dict["position_exposure_dict_list"]}
+        with closing(sqlite3.connect(Path(target_obj.db_path_str).as_uri() + "?mode=ro", uri=True)) as connection_obj:
+            timestamp_str = connection_obj.execute(
+                "SELECT MAX(created_timestamp_str) FROM vplan_reconciliation_snapshot WHERE pod_id_str=?",
+                (row_dict["pod_id_str"],)).fetchone()[0]
+        assert source_dict["position_timestamp_str"] == timestamp_str
+        assert not any("price" in key_str or "value" in key_str or "cost" in key_str for key_str in source_dict)
+        if row_dict["strategy_name_str"] == "QPI":
+            assert source_dict["position_timestamp_str"] < row_dict["latest_vplan_target_execution_timestamp_str"]
+            assert set(source_dict["position_map_dict"]) == {"NVDA", "SGOV"}
+    assert provider_obj.get_positions_dict("not_a_demo_pod", as_of_ts=DEMO_NOW_TS)["available_bool"] is False
+    assert _files_dict(provider_obj) == before_dict
+
+
 def test_cycle_cash_matches_before_after_positions_and_latest_state(demo_fixture_tuple):
     provider_obj = demo_fixture_tuple[2]
     for target_obj in provider_obj.get_target_list():
@@ -162,6 +190,7 @@ def test_fixture_setup_and_reads_never_connect_to_network(monkeypatch):
     try:
         for target_obj in provider_obj.get_target_list():
             assert provider_obj.get_pod_cycles_dict(target_obj.release_obj.pod_id_str, as_of_ts=DEMO_NOW_TS)["status_str"] == "ok"
+            assert provider_obj.get_positions_dict(target_obj.release_obj.pod_id_str, as_of_ts=DEMO_NOW_TS)["available_bool"] is True
     finally:
         provider_obj.close()
 

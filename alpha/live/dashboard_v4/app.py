@@ -1,4 +1,4 @@
-"""LIVE Overview and Pod evidence. No actions, executors or notifications."""
+"""LIVE Overview, Pods and Positions. No actions, executors or notifications."""
 
 from datetime import UTC, datetime
 from pathlib import Path
@@ -10,6 +10,7 @@ from alpha.live.dashboard_v4.data import LiveDataProvider, load_workspace_snapsh
 from alpha.live.dashboard_v4.overview import build_overview_dict
 from alpha.live.dashboard_v4.pod import TAB_TUPLE, build_pod_page_dict
 from alpha.live.dashboard_v4.pod_finance import build_pod_finance_dict
+from alpha.live.dashboard_v4.positions import build_positions_page_dict
 from alpha.live.dashboard_v3.client_operations import SOURCE_MAX_AGE_SECONDS_INT
 from alpha.live.dashboard_v3.filters import MARKET_TIMEZONE_OBJ
 from alpha.live.ops_report import parse_timestamp_ts
@@ -55,8 +56,8 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         )
         return response_obj
 
-    def context_dict(pod_id_str=None):
-        allowed_set = {"period", "cycle", "tab"} if pod_id_str is not None else {"period"}
+    def context_dict(pod_id_str=None, *, positions_bool=False):
+        allowed_set = {"view", "pod"} if positions_bool else ({"period", "cycle", "tab"} if pod_id_str is not None else {"period"})
         if set(request.args) - allowed_set or any(len(request.args.getlist(key_str)) > 1 for key_str in allowed_set):
             abort(400)
         period_str = request.args.get("period", "3M")
@@ -67,6 +68,9 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             abort(400)
         cycle_match_obj = re.fullmatch(r"(decision|vplan):([1-9][0-9]{0,9})", cycle_str) if cycle_str else None
         if cycle_str and cycle_match_obj is None:
+            abort(400)
+        view_str, selected_pod_str = request.args.get("view", "all"), request.args.get("pod", "all")
+        if positions_bool and (view_str not in {"all", "changed", "off_target"} or not selected_pod_str or len(selected_pod_str) > 200):
             abort(400)
         acquisition_ts = clock_fn()
         if workspace_snapshot_fn is None:
@@ -79,7 +83,7 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         overview_dict = build_overview_dict(
             workspace_dict, snapshot_obj, provider_obj,
             as_of_ts=clock_fn(), period_str=period_str, demo_bool=demo_bool,
-            include_finance_bool=pod_id_str is None,
+            include_finance_bool=pod_id_str is None and not positions_bool,
         )
         overview_dict.update(
             refresh_url_str=url_for("refresh", period=period_str),
@@ -89,6 +93,51 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
                 "selected_bool": option_str == period_str,
             } for option_str in PERIOD_TUPLE],
         )
+        if positions_bool:
+            positions_page_dict = build_positions_page_dict(workspace_dict, snapshot_obj, provider_obj,
+                as_of_ts=clock_fn(), view_str=view_str, pod_str=selected_pod_str)
+            pod_option_list = positions_page_dict["pod_filter_list"]
+            if selected_pod_str != "all" and not any(item_dict["pod_id_str"] == selected_pod_str for item_dict in pod_option_list):
+                abort(404)
+            active_pod_set = {item_dict["pod_id_str"] for item_dict in overview_dict["pod_list"]}
+            count_available_bool = positions_page_dict["holdings_complete_bool"] or any(
+                item_dict["pod_id_str"] == selected_pod_str and item_dict["positions_available_bool"]
+                for item_dict in positions_page_dict["pod_row_list"])
+            for item_dict in positions_page_dict["pod_row_list"]:
+                item_dict["url_str"] = url_for("pod", pod_id_str=item_dict["pod_id_str"]) if item_dict["pod_id_str"] in active_pod_set else ""
+            for row_dict in positions_page_dict["row_list"]:
+                for item_dict in row_dict["pod_list"]:
+                    item_dict["url_str"] = url_for("pod", pod_id_str=item_dict["pod_id_str"])
+            positions_page_dict.update(view_str=view_str, pod_str=selected_pod_str, search_str="",
+                filter_list=[{
+                    "label_str": label_str + (" " + str(positions_page_dict[count_key_str]) if available_bool and count_available_bool else ""),
+                    "url_str": url_for("positions", view=key_str, pod=selected_pod_str),
+                    "selected_bool": key_str == view_str, "disabled_bool": not available_bool,
+                    "detail_str": detail_str,
+                } for key_str, label_str, count_key_str, available_bool, detail_str in (
+                    ("all", "All", "all_count_int", True, ""),
+                    ("changed", "Changed today", "changed_count_int", positions_page_dict["changed_available_bool"], "Today's changes are not verified yet."),
+                    ("off_target", "Off target", "off_target_count_int", positions_page_dict["off_target_available_bool"], "Target comparison is not available yet."),
+                )],
+                pod_filter_list=[{"label_str": "All pods", "selected_bool": selected_pod_str == "all",
+                    "url_str": url_for("positions", view=view_str)}] + [{
+                    **item_dict, "label_str": item_dict["name_str"], "selected_bool": item_dict["pod_id_str"] == selected_pod_str,
+                    "url_str": url_for("positions", view=view_str, pod=item_dict["pod_id_str"]),
+                } for item_dict in pod_option_list])
+            render_ts = clock_fn()
+            # Positions reads may be slow; never renew the header's source lifetime.
+            elapsed_float = max(0, (render_ts - parse_timestamp_ts(overview_dict["clock_timestamp_str"])).total_seconds())
+            remaining_int = max(0, overview_dict["source_valid_ms_int"] - int(elapsed_float * 1000))
+            if remaining_int == 0 and overview_dict["source_fresh_bool"]:
+                overview_dict = build_overview_dict(workspace_dict, snapshot_obj, provider_obj,
+                    as_of_ts=render_ts, period_str=period_str, demo_bool=demo_bool, include_finance_bool=False)
+                overview_dict["refresh_seconds_int"] = 15
+            overview_dict.update(refresh_url_str=url_for("positions_refresh", view=view_str, pod=selected_pod_str),
+                source_valid_ms_int=remaining_int,
+                clock_timestamp_str=render_ts.isoformat(),
+                clock_str=render_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%H:%M:%S"),
+                date_str=render_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%a %m-%d"))
+            return {"overview_dict": overview_dict, "positions_page_dict": positions_page_dict}
         if pod_id_str is None:
             return {"overview_dict": overview_dict}
         if not any(item_dict["pod_id_str"] == pod_id_str for item_dict in overview_dict["pod_list"]):
@@ -191,6 +240,15 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
     @flask_app_obj.get("/pods/<pod_id_str>/refresh")
     def pod_refresh(pod_id_str):
         return render_template("_overview.html", **context_dict(pod_id_str))
+
+    @flask_app_obj.get("/positions")
+    def positions():
+        template_str = "_overview.html" if request.headers.get("HX-Request") == "true" else "overview.html"
+        return render_template(template_str, **context_dict(positions_bool=True))
+
+    @flask_app_obj.get("/positions/refresh")
+    def positions_refresh():
+        return render_template("_overview.html", **context_dict(positions_bool=True))
 
     @flask_app_obj.get("/assets/<path:filename>")
     def assets(filename):

@@ -22,6 +22,16 @@ weights, target/New markers, slippage or reference comparison are manufactured.
 Account NAV/P&L/TWR retain the existing reporting contracts. Full closing-value
 holdings require a separately verified account/date-specific marks source.
 
+The Positions page merges saved broker quantities by symbol and preserves
+opposing Pod legs. A Pod filter narrows that table to the selected Pod; account
+totals remain at portfolio scope. Broker cache timestamps are observations;
+reconciliation timestamps are recording times and are labeled accordingly.
+Missing owned accounts make holdings incomplete. The page does not reconstruct
+average cost from fills or use execution reference prices for Value, Weight or
+entry P&L. Changed today and Off target remain unavailable until their evidence
+contracts are implemented. This is a quantities-first page, not a complete
+implementation of the Mockup D valuation fields.
+
 V4 charts display the existing cumulative return paths, not normalized NAV.
 Overview retains the configured client end-of-day flow convention and labels
 the return as calculated. Pod charts retain official account TWR. Capital
