@@ -41,7 +41,7 @@ def test_live_demo_tiles_match_canonical_periods_and_do_not_mutate_source():
     assert result_dict["tile_list"][1]["value_str"].replace("−", "-") == f"{'-' if day_dict['pnl_float'] < 0 else '+'}${abs(day_dict['pnl_float']):,.2f}"
     for index_int, period_dict in ((2, month_dict), (3, year_dict)):
         assert result_dict["tile_list"][index_int]["value_str"] == f"{period_dict['twr_float']:+.2%}"
-    assert result_dict["money_asof_str"] == "Demo · Money as of close 2026-09-04"
+    assert result_dict["money_asof_str"] == "Demo · Close 2026-09-04"
     assert result_dict["allocation_dict"]["cash_percent_str"] == "30.0%"
     assert result_dict["allocation_dict"]["total_invested_str"] == "70.0%"
     assert len(result_dict["allocation_dict"]["row_list"]) == 2

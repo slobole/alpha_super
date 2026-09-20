@@ -261,7 +261,7 @@ def build_financial_overview_dict(workspace_dict, snapshot_obj, provider_obj, *,
                 detail_str="Cumulative return for the selected period. " + chart_report_dict["twr_method_str"])
         elif chart_report_dict:
             chart_dict["detail_str"] = chart_report_dict.get("twr_reason_str") or "Complete, verified return history is required."
-        result_dict.update(money_asof_str=("Demo · " if demo_bool else "") + "Money as of close " + closing_str
+        result_dict.update(money_asof_str=("Demo · " if demo_bool else "") + "Close " + closing_str
             + (" · Data delayed" if dates_dict["delayed_bool"] else ""), delayed_bool=dates_dict["delayed_bool"],
             chart_dict=chart_dict)
     except (ClientReportingError, ValueError, OSError, KeyError, TypeError):

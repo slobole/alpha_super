@@ -29,8 +29,9 @@ def test_demo_renders_native_d_shell_and_seven_step_rows(fixture_tuple):
     app_obj = create_demo_app()
     html_str = app_obj.test_client().get("/").get_data(as_text=True)
     for label_str in ("ALPHA / OPS", "Overview", "Positions", "Performance", "Activity", "System health", "Tools",
-                      "Account value", "Allocation", "READ-ONLY", "Sample data. Not a real account."):
+                      "Account value", "Allocation", "Sample data. Not a real account."):
         assert label_str in html_str
+    assert "READ-ONLY" not in html_str
     assert html_str.count('class="srow"') == 4
     assert 'aria-label="Portfolio return · 3M"' in html_str
     assert 'Calculated return · End-of-day cash flows' in html_str

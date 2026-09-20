@@ -174,7 +174,7 @@ def build_pod_finance_dict(workspace_dict, snapshot_obj, provider_obj, *, pod_id
                 detail_str="Cumulative account return for the selected period, adjusted for cash flows.")
         else:
             chart_dict["detail_str"] = "Complete, verified account return history is required."
-        result_dict.update(money_asof_str=("Demo · " if client_dict.get("is_demo") else "") + "Money as of close " + closing_str
+        result_dict.update(money_asof_str=("Demo · " if client_dict.get("is_demo") else "") + "Close " + closing_str
             + (" · Data delayed" if dates_dict["delayed_bool"] else ""), delayed_bool=dates_dict["delayed_bool"],
             chart_dict=chart_dict)
     except (ClientReportingError, ValueError, TypeError, KeyError, OSError):

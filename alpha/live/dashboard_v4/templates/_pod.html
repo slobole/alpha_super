@@ -44,7 +44,7 @@
 {% if pod_page_dict.tab_str != 'events' and pod_page_dict.tables_dict.events.row_list %}<section class="panel"><div class="panel-h"><span class="panel-t">Events · this cycle</span></div>{{ evidence_table(pod_page_dict.tables_dict.events, 'evidence:events') }}</section>{% endif %}
 {% else %}
 <section class="tiles tiles-4" aria-label="Pod money at last close">{% for tile_dict in pod_page_dict.tile_list %}<div class="tile" data-selection-key="money:{{ tile_dict.label_str }}"><div class="l">{{ tile_dict.label_str }}</div><div class="v {{ tile_dict.tone_str }}">{{ tile_dict.value_str }}</div><div class="s">{{ tile_dict.detail_str }}</div></div>{% endfor %}</section>
-<div class="asof pod-money-date" data-selection-key="money-asof">{{ pod_page_dict.money_asof_str }}</div>
+<div class="asof pod-money-date" data-selection-key="money-asof">{% if 'Close ' in pod_page_dict.money_asof_str %}{{ icon('calendar') }}{% endif %}{{ pod_page_dict.money_asof_str }}</div>
 <div class="cols c-7-5 pod-finance">
   <section class="panel"><div class="panel-h"><span class="panel-t">Positions · {{ pod_page_dict.position_list|length }}</span></div>
     <div class="evidence-note">{{ pod_page_dict.positions_basis_str }} · {{ pod_page_dict.position_asof_str }}</div>

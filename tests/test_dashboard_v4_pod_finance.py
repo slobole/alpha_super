@@ -124,7 +124,7 @@ def test_saved_share_quantities_keep_their_own_date_and_no_price_claims():
     assert result_dict["positions_basis_str"] == "Saved positions"
     assert result_dict["position_asof_str"] == "2026-09-08 09:36:12"
     assert "price_asof_str" not in result_dict
-    assert result_dict["money_asof_str"] == "Demo · Money as of close 2026-09-04"
+    assert result_dict["money_asof_str"] == "Demo · Close 2026-09-04"
     assert result_dict["cash_asof_str"] == "Close 2026-09-04"
     assert result_dict["cash_str"] != "—"
 
