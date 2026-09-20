@@ -206,6 +206,9 @@ def build_cycle_view_dict(
         elif ack_status_str == "complete" and vplan_status_str in {"submitting", "submitted", "completed"}:
             complete_bool = order_count_int is not None and order_count_int > 0 and ack_count_int is not None and ack_count_int >= order_count_int and missing_count_int == 0
             submit_state_str = "Done" if complete_bool else "Unknown"
+        elif vplan_status_str == "completed":
+            # Legacy completed plans default missing ACK history to not_checked.
+            submit_state_str, submit_fact_str = "Unknown", "ACK not verified"
         elif vplan_status_str in {"submitting", "submitted"}:
             submit_state_str = "Now"
         else:

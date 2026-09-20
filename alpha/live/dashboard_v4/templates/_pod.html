@@ -12,23 +12,24 @@
 <div class="page-head pod-head"><div>
   <div class="row"><h1>{{ pod_page_dict.name_str }}</h1><span class="pill pill-{{ pill_class_dict.get(pod_page_dict.state_str, 'unk') }}" data-pod-pill>{{ mark(pod_page_dict.state_str) }}<span data-pill-label>{{ pod_page_dict.pill_str }}</span></span></div>
   <div class="row muted pod-identity"><span class="tag tag-live">LIVE</span><span>{{ pod_page_dict.cadence_str }}</span><span class="mono">{{ pod_page_dict.pod_id_str }} · {{ pod_page_dict.account_str }}</span></div>
-  <p class="verdict"><b data-verdict>{{ pod_page_dict.verdict_str }}</b> <span data-verdict-detail>{{ pod_page_dict.verdict_detail_str }}</span></p>
-</div><div class="row"><button class="btn" disabled title="Trade sheet export is not available in V4 yet">Trade sheet</button><button class="btn" disabled title="Tools page is not available yet">{{ icon('tools') }}Tools</button></div></div>
+  {% if not pod_page_dict.attention_dict %}<p class="verdict"><b data-verdict>{{ pod_page_dict.header_dict.verdict_str }}</b> <span data-verdict-detail>{{ pod_page_dict.header_dict.detail_str }}</span></p>{% endif %}
+</div></div>
 
-{% if pod_page_dict.issue_bool %}<section class="issue" aria-label="Cycle needs attention"><div><h3>{{ mark(pod_page_dict.state_str) }}<span data-pod-now>{{ pod_page_dict.issue_title_str }}</span></h3><p data-now-detail>{{ pod_page_dict.issue_detail_str }}</p></div><div class="row"><a class="btn" href="#pod-runbook">Runbook ↘</a><button class="btn" disabled title="Tools page is not available yet">Open tools</button></div></section>{% endif %}
+{% if pod_page_dict.attention_dict %}<section class="issue" aria-label="Pod needs attention"><div><h3>{{ mark(pod_page_dict.attention_dict.state_str) }}<span data-pod-now>{{ pod_page_dict.attention_dict.title_str }}</span></h3><p data-now-detail>{{ pod_page_dict.attention_dict.detail_str }}</p></div></section>{% endif %}
 
 <section class="panel" aria-label="Selected cycle">
   <div class="cyc-head"><span class="panel-t">{{ 'Saved cycle' if pod_page_dict.historical_bool else 'Cycle' }}</span><nav class="picker" aria-label="Cycle history">
     {% if pod_page_dict.previous_cycle_dict %}<a href="{{ pod_page_dict.previous_cycle_dict.url_str }}" aria-label="Previous cycle">‹ {{ pod_page_dict.previous_cycle_dict.session_date_str }}</a>{% else %}<span aria-disabled="true">‹ Previous</span>{% endif %}
     <span class="on">{{ pod_page_dict.cycle_label_str }}</span>
     {% if pod_page_dict.next_cycle_dict %}<a href="{{ pod_page_dict.next_cycle_dict.url_str }}" aria-label="Next cycle">{{ pod_page_dict.next_cycle_dict.session_date_str }} ›</a>{% else %}<span aria-disabled="true">Next ›</span>{% endif %}
-  </nav><span class="grow"></span><span class="panel-m">Black = actual · gray = plan</span></div>
+  </nav><span class="pill pill-{{ pill_class_dict.get(pod_page_dict.cycle_state_str, 'unk') }}" data-pod-pill>{{ mark(pod_page_dict.cycle_state_str) }}<span data-pill-label>{{ pod_page_dict.cycle_pill_str }}</span></span><span class="grow"></span><span class="panel-m">Black = actual · gray = plan</span></div>
+  <div class="cycle-verdict"><b data-cycle-verdict>{{ pod_page_dict.verdict_str }}</b> <span data-verdict-detail>{{ pod_page_dict.verdict_detail_str }}</span>{% if pod_page_dict.issue_bool %}<p data-now-detail>{{ pod_page_dict.issue_detail_str }}</p>{% endif %}</div>
   <div class="cycle" aria-label="Seven cycle steps">{% for step_dict in pod_page_dict.step_list %}
     <a class="step is-{{ step_dict.class_str }}{{ ' is-sel' if step_dict.tab_str == pod_page_dict.tab_str and step_dict.class_str == 'fail' else '' }}" href="{{ step_dict.url_str }}#evidence" aria-label="{{ step_dict.label_str }} evidence">
       <span class="nm">{{ mark(step_dict.class_str, step_dict.label_str) }}{{ step_dict.label_str }}</span>
       <span class="fact" data-step-fact>{{ step_dict.fact_str }}</span>
-      {% if step_dict.actual_time_str %}<span class="act">{{ step_dict.actual_time_str }}{% if step_dict.delta_str %}<span class="dl">{{ step_dict.delta_str }}</span>{% endif %}</span>
-      {% elif step_dict.planned_time_str %}<span class="pln">due {{ step_dict.planned_time_str }}</span>{% else %}<span class="pln">—</span>{% endif %}
+      {% if step_dict.actual_time_str %}<span class="act">{% if step_dict.time_kind_str %}{{ step_dict.time_kind_str }} {% endif %}{{ step_dict.actual_time_str }}{% if step_dict.delta_str %}<span class="dl">{{ step_dict.delta_str }}</span>{% endif %}</span>
+      {% elif step_dict.planned_time_str %}<span class="pln">{{ 'planned' if step_dict.state_str == 'Done' else 'due' }} {{ step_dict.planned_time_str }}</span>{% else %}<span class="pln">—</span>{% endif %}
     </a>{% endfor %}</div>
   <nav id="evidence" class="tabs" aria-label="Cycle evidence">{% for tab_dict in pod_page_dict.tab_list %}<a class="{{ 'on' if tab_dict.key_str == pod_page_dict.tab_str else '' }}" href="{{ tab_dict.url_str }}#evidence"{% if tab_dict.key_str == pod_page_dict.tab_str %} aria-current="page"{% endif %}>{{ tab_dict.label_str }}{% if tab_dict.count_int is not none %}<span class="cnt">{{ tab_dict.count_int }}</span>{% endif %}</a>{% endfor %}</nav>
   {{ evidence_table(pod_page_dict.table_dict) }}
@@ -36,26 +37,19 @@
 </section>
 
 {% if pod_page_dict.issue_bool %}
-<div class="cols c-7-5"><section class="panel"><div class="panel-h"><span class="panel-t">Events · this cycle</span></div>{{ evidence_table(pod_page_dict.tables_dict.events) }}</section>
-<section class="panel" id="pod-runbook"><div class="panel-h"><span class="panel-t">Tools for this step</span></div><div class="panel-b">
-<p class="muted">{{ pod_page_dict.issue_detail_str }}</p>
-<div class="tool-hint"><span class="mono">show_vplan</span><span>What was sent</span></div>
-<div class="tool-hint"><span class="mono">doctor</span><span>Broker connection</span></div>
-<div class="tool-hint"><span class="mono">post_execution_reconcile</span><span>Compare positions</span></div>
-</div></section></div>
+{% if pod_page_dict.tab_str != 'events' and pod_page_dict.tables_dict.events.row_list %}<section class="panel"><div class="panel-h"><span class="panel-t">Events · this cycle</span></div>{{ evidence_table(pod_page_dict.tables_dict.events) }}</section>{% endif %}
 {% else %}
 <section class="tiles tiles-4" aria-label="Pod money at last close">{% for tile_dict in pod_page_dict.tile_list %}<div class="tile"><div class="l">{{ tile_dict.label_str }}</div><div class="v {{ tile_dict.tone_str }}">{{ tile_dict.value_str }}</div><div class="s">{{ tile_dict.detail_str }}</div></div>{% endfor %}</section>
 <div class="asof pod-money-date">{{ pod_page_dict.money_asof_str }}</div>
 <div class="cols c-7-5 pod-finance">
   <section class="panel"><div class="panel-h"><span class="panel-t">Positions · {{ pod_page_dict.position_list|length }}</span></div>
-    <div class="evidence-note">{{ pod_page_dict.positions_basis_str }}<br>Shares {{ pod_page_dict.position_asof_str }} · Prices {{ pod_page_dict.price_asof_str }}</div>
-    <table class="tbl dense evidence-table"><thead><tr><th scope="col">Symbol</th><th class="num" scope="col">Shares</th><th class="num" scope="col">Value $</th><th scope="col">Weight</th><th class="num" scope="col">%</th></tr></thead><tbody>
-    {% for position_dict in pod_page_dict.position_list %}<tr><td data-column="Symbol"><b>{{ position_dict.symbol_str }}</b></td><td data-column="Shares" class="num">{{ position_dict.shares_str }}</td><td data-column="Value $" class="num">{{ position_dict.value_str }}</td><td data-column="Weight">{% if position_dict.weight_percent_float is not none %}<div class="bar"><i style="width: {{ position_dict.weight_percent_float }}%"></i>{% if position_dict.target_percent_float is not none %}<em style="left: {{ position_dict.target_percent_float }}%"></em>{% endif %}</div>{% else %}—{% endif %}</td><td data-column="%" class="num">{{ position_dict.weight_str }}</td></tr>{% else %}<tr><td colspan="5">Positions unavailable.</td></tr>{% endfor %}
-    <tr class="tot"><td data-column="Symbol"><b>Cash</b></td><td></td><td class="num" data-column="Value $">{{ pod_page_dict.cash_str }}</td><td colspan="2" class="muted">{{ pod_page_dict.cash_asof_str }}</td></tr></tbody></table>
+    <div class="evidence-note">{{ pod_page_dict.positions_basis_str }} · {{ pod_page_dict.position_asof_str }}</div>
+    <table class="tbl dense evidence-table"><thead><tr><th scope="col">Symbol</th><th class="num" scope="col">Shares</th></tr></thead><tbody>
+    {% for position_dict in pod_page_dict.position_list %}<tr><td data-column="Symbol"><b>{{ position_dict.symbol_str }}</b></td><td data-column="Shares" class="num">{{ position_dict.shares_str }}</td></tr>{% else %}<tr><td colspan="2">Positions unavailable.</td></tr>{% endfor %}
+    </tbody></table><div class="pod-cash"><b>Cash <span class="mono">{{ pod_page_dict.cash_str }}</span></b><span class="muted">{{ pod_page_dict.cash_asof_str }}</span></div>
   </section>
   <section class="panel"><div class="panel-h"><span class="panel-t">Value</span><nav class="seg" aria-label="Pod value period">{% for option_dict in pod_page_dict.period_option_list %}<a href="{{ option_dict.url_str }}" class="{{ 'on' if option_dict.selected_bool else '' }}" data-period="{{ option_dict.label_str }}">{{ option_dict.label_str }}</a>{% endfor %}</nav></div><div class="panel-b">
     {% set chart_dict = pod_page_dict.chart_dict %}{% include '_value_chart.html' %}
-    <div class="reference-note">{{ pod_page_dict.reference_summary_str }}</div>
   </div></section>
 </div>
 {% endif %}

@@ -31,7 +31,7 @@ def test_request_join_preserves_same_symbol_entry_and_exit(pod_fixture_tuple):
     assert [row_dict["cell_list"][2] for row_dict in table_dict["row_list"]] == ["BUY 31", "BUY 17", "SELL 44"]
     assert [row_dict["cell_list"][4] for row_dict in table_dict["row_list"]] == ["158.42", "291.05", "112.80"]
     assert {row_dict["cell_list"][1] for row_dict in table_dict["row_list"]} == {"100"}
-    assert {row_dict["cell_list"][6] for row_dict in table_dict["row_list"]} == {"104"}
+    assert {row_dict["cell_list"][5] for row_dict in table_dict["row_list"]} == {"104"}
 
 
 def test_partial_execution_prices_are_weighted_within_order_only(pod_fixture_tuple):
@@ -41,7 +41,7 @@ def test_partial_execution_prices_are_weighted_within_order_only(pod_fixture_tup
     source_dict["fill_list"].append({**first_dict, "fill_amount_float": 21, "fill_price_float": 200})
     table_dict = build_evidence_tables_dict(source_dict, as_of_ts=DEMO_NOW_TS, fresh_bool=True)["plan"]
     assert table_dict["row_list"][0]["cell_list"][4] == "167.74"
-    assert table_dict["row_list"][0]["cell_list"][5] == "—"  # No saved open benchmark.
+    assert "Slip bps" not in table_dict["column_list"]  # No verified comparison source.
 
 
 @pytest.mark.parametrize("missing_str", ["reconcile", "quantities", "before", "duplicate_order"])
@@ -58,7 +58,7 @@ def test_missing_or_ambiguous_evidence_never_manufactures_values(pod_fixture_tup
     table_dict = build_evidence_tables_dict(source_dict, as_of_ts=DEMO_NOW_TS, fresh_bool=True)["plan"]
     if missing_str == "reconcile":
         assert {row_dict["match_str"] for row_dict in table_dict["row_list"]} == {"unk"}
-        assert {row_dict["cell_list"][6] for row_dict in table_dict["row_list"]} == {"—"}
+        assert {row_dict["cell_list"][5] for row_dict in table_dict["row_list"]} == {"—"}
     else:
         index_int = 1 if missing_str == "before" else 3
         assert table_dict["row_list"][0]["cell_list"][index_int] == "—"
@@ -104,10 +104,10 @@ def test_history_navigation_changes_evidence_and_survives_poll(pod_fixture_tuple
 def test_issue_defaults_to_orders_and_preserves_ack_warning(pod_fixture_tuple):
     pod_id_str = pod_fixture_tuple[0]["operations_account_list"][1]["pod_id"]
     html_str = create_demo_app().test_client().get(f"/pods/{pod_id_str}").get_data(as_text=True)
-    assert 'aria-label="Cycle needs attention"' in html_str
+    assert 'aria-label="Pod needs attention"' in html_str
     assert "No ack" in html_str and "Do not resubmit blindly." in html_str
     assert "Next: Review broker ACK" in html_str and "Next: Submit" not in html_str
-    assert "Tools for this step" in html_str
+    assert "Tools for this step" not in html_str
     assert 'class="step is-fail is-sel"' in html_str
 
 
@@ -161,7 +161,9 @@ def test_old_cycle_does_not_borrow_current_failure(pod_fixture_tuple):
     workspace_dict["summary_dict"]["pod_row_dict_list"][0]["reconcile_read_failure_dict"] = {"timestamp_str": DEMO_NOW_TS.isoformat(), "error_str": "Read failed"}
     app_obj = create_app(provider_obj, demo_bool=True, workspace_snapshot_fn=lambda: (deepcopy(workspace_dict), snapshot_obj), now_fn=lambda: DEMO_NOW_TS)
     html_str = app_obj.test_client().get(f"/pods/{pod_id_str}?cycle=vplan:1").get_data(as_text=True)
-    assert "Broker read failed" not in html_str and "Saved cycle" in html_str
+    assert "Broker read failed" in html_str  # The current Pod warning stays visible.
+    cycle_html_str = html_str.split('aria-label="Selected cycle"')[1].split('</section>')[0]
+    assert "Broker read failed" not in cycle_html_str and "Saved cycle" in cycle_html_str
 
 
 def test_slow_detail_read_cannot_extend_fresh_source_lifetime(pod_fixture_tuple, monkeypatch):

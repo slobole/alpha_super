@@ -313,7 +313,9 @@ def load_pod_cycles_dict(target_obj, *, as_of_ts: datetime, decision_plan_id_int
                     latest_vplan_submission_timestamp_str=vplan_dict["submission_timestamp_str"],
                     latest_vplan_target_execution_timestamp_str=vplan_dict["target_execution_timestamp_str"],
                     latest_submit_ack_status_str=vplan_dict["submit_ack_status_str"], missing_ack_count_int=vplan_dict["missing_ack_count_int"],
-                    broker_order_count_int=len(detail_dict["order_list"]), broker_ack_count_int=len(detail_dict["ack_list"]), fill_count_int=len(detail_dict["fill_list"]))
+                    broker_order_count_int=len(detail_dict["order_list"]),
+                    broker_ack_count_int=sum(ack_dict.get("broker_response_ack_bool") in (True, 1) and ack_dict.get("ack_status_str") == "broker_acked" for ack_dict in detail_dict["ack_list"]),
+                    fill_count_int=len(detail_dict["fill_list"]))
             target_ts = parse_timestamp_ts(selected_cycle_dict["target_execution_timestamp_str"])
             eod_dict = _eod_dict(connection_obj, selected_release_obj, target_ts, as_of_ts)
             pod_row_dict["eod_snapshot_dict"] = eod_dict

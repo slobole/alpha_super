@@ -91,8 +91,11 @@ def test_stale_or_missing_source_never_green(pod_row_dict, change_dict):
     assert view_dict["next_time_str"] == ""
 
 
-def test_missing_ack_is_failure_not_filled_or_late(pod_row_dict):
-    pod_row_dict.update(latest_submit_ack_status_str="missing_critical", missing_ack_count_int=1, broker_ack_count_int=2)
+@pytest.mark.parametrize("vplan_status_str", ["submitted", "completed"])
+@pytest.mark.parametrize("ack_status_str,missing_count_int", [("missing_critical", 0), ("not_checked", 1)])
+def test_missing_ack_is_failure_not_filled_or_late(pod_row_dict, vplan_status_str, ack_status_str, missing_count_int):
+    pod_row_dict.update(latest_vplan_status_str=vplan_status_str, latest_submit_ack_status_str=ack_status_str,
+        missing_ack_count_int=missing_count_int, broker_ack_count_int=2)
     view_dict = _view_dict(pod_row_dict)
     assert _step_dict(view_dict, "Submit")["state_str"] == "Failed"
     assert view_dict["pill_str"] == "Action needed"
@@ -307,6 +310,22 @@ def test_completed_cycle_with_per_order_proof_is_on_track(pod_row_dict):
     assert view_dict["now_detail_str"] == "3 of 3 filled"
 
 
+@pytest.mark.parametrize("ack_status_str", ["not_checked", "", None, "unrecognized"])
+def test_completed_cycle_without_verified_ack_is_unknown_not_late(pod_row_dict, ack_status_str):
+    pod_row_dict.update(latest_vplan_status_str="completed", latest_decision_plan_status_str="completed",
+        latest_submit_ack_status_str=ack_status_str, broker_ack_count_int=0,
+        latest_reconciliation_timestamp_str="2026-09-18T13:35:01+00:00", as_of_timestamp_str="2026-09-18T13:36:00+00:00")
+    pod_row_dict["cycle_evidence_dict"] = _complete_evidence_dict(pod_row_dict)
+    view_dict = _view_dict(pod_row_dict, "2026-09-18T13:36:00+00:00")
+    submit_step_dict = _step_dict(view_dict, "Submit")
+    assert submit_step_dict["state_str"] == "Unknown"
+    assert submit_step_dict["fact_str"] == "ACK not verified"
+    assert submit_step_dict["actual_time_str"] == ""
+    assert _step_dict(view_dict, "Fill")["state_str"] == "Done"
+    assert _step_dict(view_dict, "Reconcile")["state_str"] == "Done"
+    assert view_dict["pill_str"] == "Unknown"
+
+
 @pytest.mark.parametrize("field_str,value_obj", [
     ("account_route_str", "FOREIGN"), ("pod_id_str", "other"), ("vplan_id_int", 21),
     ("decision_plan_id_int", 11), ("vplan_status_str", "submitted"),
@@ -322,10 +341,12 @@ def test_wrong_cycle_or_incomplete_quantity_proof_cannot_complete_fill(pod_row_d
     assert _step_dict(_view_dict(pod_row_dict), "Fill")["state_str"] == "Unknown"
 
 
-def test_proven_no_orders_still_requires_reconciliation(pod_row_dict):
+@pytest.mark.parametrize("vplan_status_str", ["submitted", "completed"])
+def test_proven_no_orders_still_requires_reconciliation(pod_row_dict, vplan_status_str):
     evidence_dict = _complete_evidence_dict(pod_row_dict)
-    evidence_dict.update(state_str="no_orders", vplan_status_str="submitted", order_count_int=0, filled_order_count_int=0, actual_fill_timestamp_str=None)
-    pod_row_dict.update(cycle_evidence_dict=evidence_dict, broker_order_count_int=0, broker_ack_count_int=0, fill_count_int=0)
+    evidence_dict.update(state_str="no_orders", vplan_status_str=vplan_status_str, order_count_int=0, filled_order_count_int=0, actual_fill_timestamp_str=None)
+    pod_row_dict.update(cycle_evidence_dict=evidence_dict, latest_vplan_status_str=vplan_status_str,
+        latest_submit_ack_status_str="not_checked", broker_order_count_int=0, broker_ack_count_int=0, fill_count_int=0)
     view_dict = _view_dict(pod_row_dict)
     assert _step_dict(view_dict, "Submit")["state_str"] == "None"
     assert _step_dict(view_dict, "Fill")["fact_str"] == "No orders"

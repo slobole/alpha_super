@@ -9,7 +9,6 @@ from alpha.live.client_reporting import ClientReportingError, build_client_repor
 from alpha.live.dashboard_v3.client_cash import load_portfolio_cash_list
 from alpha.live.dashboard_v3.client_financial_display import financial_dates_dict
 from alpha.live.dashboard_v3.client_operations import build_client_operations_dict
-from alpha.live.dashboard_v3.client_presentation import holdings_allocation_dict
 from alpha.live.dashboard_v4.finance import (
     PERIOD_TUPLE, _chart_dict, _empty_chart_dict, _money_str, _months_before_date,
     _percent_str, _tone_str,
@@ -68,9 +67,8 @@ def _scope_tuple(workspace_dict, pod_id_str):
 
 def _positions_dict(evidence_dict, as_of_ts):
     position_time_str = _saved_time_str(evidence_dict.get("latest_pod_state_timestamp_str"), as_of_ts)
-    price_time_str = _saved_time_str(evidence_dict.get("latest_live_reference_snapshot_timestamp_str"), as_of_ts)
-    result_dict = {"position_list": [], "position_asof_str": position_time_str, "price_asof_str": price_time_str,
-        "positions_basis_str": "Reference values · excludes cash", "positions_available_bool": position_time_str != "—"}
+    result_dict = {"position_list": [], "position_asof_str": position_time_str,
+        "positions_basis_str": "Saved positions", "positions_available_bool": position_time_str != "—"}
     if not result_dict["positions_available_bool"]:
         return result_dict
     position_list = evidence_dict.get("position_exposure_dict_list") or []
@@ -78,22 +76,12 @@ def _positions_dict(evidence_dict, as_of_ts):
     if len(symbol_list) != len(set(symbol_list)) or any(not isinstance(symbol_str, str) or not symbol_str for symbol_str in symbol_list):
         result_dict["positions_available_bool"] = False
         return result_dict
-    allocation_dict = holdings_allocation_dict(evidence_dict) if price_time_str != "—" else {"item_list": [], "missing_list": symbol_list}
-    valued_dict = {item_dict["label_str"]: item_dict for item_dict in allocation_dict["item_list"]}
     for position_dict in position_list:
         share_float = position_dict.get("share_float")
         if _finite_bool(share_float) and share_float == 0:
             continue
-        item_dict = valued_dict.get(position_dict["asset_str"], {})
-        weight_float = item_dict.get("weight_float") if not allocation_dict["missing_list"] else None
         result_dict["position_list"].append({"symbol_str": position_dict["asset_str"],
-            "shares_str": f"{share_float:,.6f}".rstrip("0").rstrip(".") if _finite_bool(share_float) else "—",
-            "value_str": _money_str(item_dict.get("signed_value_float")),
-            "weight_str": _percent_str(weight_float),
-            "weight_percent_float": weight_float * 100 if weight_float is not None else None,
-            # Reference-composition weights cannot be compared with NAV targets.
-            # Current holdings alone do not prove a position was newly opened.
-            "target_percent_float": None, "new_bool": False})
+            "shares_str": f"{share_float:,.6f}".rstrip("0").rstrip(".") if _finite_bool(share_float) else "—"})
     return result_dict
 
 
@@ -102,15 +90,16 @@ def build_pod_finance_dict(workspace_dict, snapshot_obj, provider_obj, *, pod_id
 
     The complete acquired mapping is checked before selecting one account. A
     missing history boundary can expose finalized NAV but cannot unlock returns.
-    Holdings are saved shares valued at saved reference prices, not live marks.
+    Holdings show saved quantities at their own timestamp, independently of the
+    financial close. Submission reference prices cannot supply position values.
     """
     if period_str not in PERIOD_TUPLE or as_of_ts.tzinfo is None:
         raise ValueError("Choose a supported period and a timezone-aware clock.")
     result_dict = {"tile_list": [{"label_str": label_str, "value_str": "—", "detail_str": "Data unavailable", "tone_str": ""}
         for label_str in ("Value", "Day", "Month", "Since start")],
         "chart_dict": _empty_chart_dict(), "money_asof_str": "Financial data unavailable",
-        "cash_str": "—", "cash_asof_str": "—", "position_list": [], "position_asof_str": "—", "price_asof_str": "—",
-        "positions_basis_str": "Reference values · excludes cash", "positions_available_bool": False,
+        "cash_str": "—", "cash_asof_str": "—", "position_list": [], "position_asof_str": "—",
+        "positions_basis_str": "Saved positions", "positions_available_bool": False,
         "reference_summary_str": "Live vs backtest unavailable", "financial_error_str": "", "delayed_bool": True}
     try:
         client_dict, identity_dict = _scope_tuple(workspace_dict, pod_id_str)

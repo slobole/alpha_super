@@ -4,7 +4,7 @@
 {% macro mark(state_str, label_str='') -%}
 <span class="st st-{{ state_str if state_str in state_label_dict else 'unk' }}" data-observed-state title="{{ label_str }}{{ ' · ' if label_str else '' }}{{ state_label_dict.get(state_str, 'Unknown') }}" role="img" aria-label="{{ label_str }}{{ ' · ' if label_str else '' }}{{ state_label_dict.get(state_str, 'Unknown') }}"></span>
 {%- endmacro %}
-<div class="frame" id="overview-shell" hx-get="{{ overview_dict.refresh_url_str }}" hx-trigger="every {{ overview_dict.refresh_seconds_int }}s" hx-swap="outerHTML" hx-target="this" hx-request='{"timeout":10000}' data-last-update="{{ overview_dict.updated_str }}" data-source-valid-ms="{{ overview_dict.source_valid_ms_int }}">
+<div class="frame" id="overview-shell" hx-get="{{ overview_dict.refresh_url_str }}" hx-trigger="every {{ overview_dict.refresh_seconds_int }}s" hx-swap="outerHTML" hx-target="this" hx-request='{"timeout":10000}' data-last-update="{{ overview_dict.updated_str }}" data-source-valid-ms="{{ overview_dict.source_valid_ms_int }}" data-clock-timestamp="{{ overview_dict.clock_timestamp_str }}">
   <div class="app">
     <aside class="rail rail-c">
       <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark">A</span>ALPHA / OPS</a>
@@ -24,7 +24,7 @@
     <div class="main">
       <div class="m-top">
         <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark">A</span>ALPHA / OPS</a>
-        <div class="clock"><span class="t">{{ overview_dict.clock_str }} ET</span><span class="d">{{ overview_dict.date_str }} · <span data-status-label>{{ overview_dict.market_dict.label_str }}</span></span></div>
+        <div class="clock"><span class="t" data-live-clock>{{ overview_dict.clock_str }} ET</span><span class="d">{{ overview_dict.date_str }} · <span data-status-label>{{ overview_dict.market_dict.label_str }}</span></span></div>
       </div>
       <header class="top">
         <nav class="modes" aria-label="Mode">
@@ -36,7 +36,7 @@
         <div class="grow"></div>
         <span class="syslight" title="System health page is not available yet">{{ mark(overview_dict.system_dict.state_str) }}<span><b data-status-label>{{ overview_dict.system_dict.label_str }}</b>{% if overview_dict.system_dict.detail_str %} · {{ overview_dict.system_dict.detail_str }}{% endif %}</span></span>
         <span class="tag">READ-ONLY</span>
-        <div class="clock desktop-clock"><span class="t">{{ overview_dict.clock_str }} ET</span><span class="d">{{ overview_dict.date_str }} · updated <span data-update-time>{{ overview_dict.updated_str }}</span></span></div>
+        <div class="clock desktop-clock"><span class="t" data-live-clock>{{ overview_dict.clock_str }} ET</span><span class="d">{{ overview_dict.date_str }} · updated <span data-update-time>{{ overview_dict.updated_str }}</span></span></div>
       </header>
       <main class="page calm{{ ' pod-page' if pod_page_dict is defined else '' }}" id="overview-content">
         <div class="refresh-error" role="status" hidden>Unknown · <span data-refresh-reason>Update failed.</span> Last successful update <span>{{ overview_dict.updated_str }}</span>.</div>
@@ -113,7 +113,7 @@
       </main>
       {% if overview_dict.demo_bool %}<div class="sample">Sample data. Not a real account.</div>{% endif %}
       <nav class="m-tabs" aria-label="Main on mobile">
-        <a class="on" href="{{ url_for('index') }}" aria-current="page">{{ icon('overview') }}Overview</a>
+        <a{% if pod_page_dict is not defined %} class="on" aria-current="page"{% endif %} href="{{ url_for('index') }}">{{ icon('overview') }}Overview</a>
         {% for icon_str, label_str in [('positions', 'Positions'), ('performance', 'Results'), ('activity', 'Activity'), ('system', 'System')] %}<a aria-disabled="true" title="{{ label_str }} is not available yet">{{ icon(icon_str) }}{{ label_str }}</a>{% endfor %}
       </nav>
     </div>

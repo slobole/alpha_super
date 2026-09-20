@@ -94,6 +94,7 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         if not any(item_dict["pod_id_str"] == pod_id_str for item_dict in overview_dict["pod_list"]):
             abort(404)
         source_dict = {"status_str": "unknown", "reason_str": "Saved cycle unavailable"}
+        selected_current_bool = not cycle_str
         if overview_dict["source_fresh_bool"]:
             summary_dict = workspace_dict.get("summary_dict") or {}
             matched_list = [item_dict for item_dict in summary_dict.get("pod_row_dict_list") or []
@@ -102,6 +103,9 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             identity_list = [item_dict for item_dict in account_list if item_dict.get("pod_id") == pod_id_str]
             if len(matched_list) == len(identity_list) == 1 and matched_list[0].get("account_route_str") == identity_list[0]["account_route"]:
                 row_dict = matched_list[0]
+                if cycle_match_obj:
+                    selected_current_bool = int(cycle_match_obj[2]) == row_dict.get(
+                        "latest_decision_plan_id_int" if cycle_match_obj[1] == "decision" else "latest_vplan_id_int")
                 selected_id_dict = {}
                 if cycle_match_obj:
                     selected_id_dict["decision_plan_id_int" if cycle_match_obj[1] == "decision" else "vplan_id_int"] = int(cycle_match_obj[2])
@@ -139,9 +143,11 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         remaining_float = min((SOURCE_MAX_AGE_SECONDS_INT - (render_ts - timestamp_ts).total_seconds()
                               for timestamp_ts in (source_ts, selected_ts) if timestamp_ts is not None), default=0)
         overview_dict.update(source_valid_ms_int=max(0, int(remaining_float * 1000)),
+            clock_timestamp_str=render_ts.isoformat(),
             clock_str=render_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%H:%M:%S"),
             date_str=render_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%a %m-%d"))
         source_dict["selected_explicit_bool"] = bool(cycle_str)
+        source_dict["selected_current_bool"] = selected_current_bool
         pod_page_dict = build_pod_page_dict(overview_dict, source_dict, pod_finance_dict,
             pod_id_str=pod_id_str, as_of_ts=render_ts, tab_str=tab_str)
         selected_cycle_str = (source_dict.get("selected_cycle_dict") or {}).get("cycle_key_str") or cycle_str

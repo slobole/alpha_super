@@ -7,7 +7,7 @@ from alpha.live.dashboard_v3.client_operations import EVENT_LABEL_DICT, SOURCE_M
 from alpha.live.dashboard_v3.filters import MARKET_TIMEZONE_OBJ
 from alpha.live.dashboard_v3.operator_tools import redact_diagnostic_value
 from alpha.live.dashboard_v4.cycle import build_cycle_view_dict
-from alpha.live.dashboard_v4.overview import _state_str
+from alpha.live.dashboard_v4.overview import STATE_RANK_DICT, _state_str
 from alpha.live.ops_report import parse_timestamp_ts
 
 
@@ -132,13 +132,17 @@ def build_evidence_tables_dict(source_dict, *, as_of_ts, fresh_bool):
         before_float = before_map.get(plan_dict.get("asset_str"), 0) if isinstance(before_map, dict) else None
         plan_rows.append(_row_dict([symbol_str, _number_str(before_float), order_str,
             _number_str(abs(filled_float)) if filled_float is not None else "—", _number_str(price_float, price_bool=True),
-            "—", _number_str(after_float)], match_str=match_str))
+            _number_str(after_float)], match_str=match_str))
         if amount_float is not None and abs(amount_float) <= 1e-9:
             continue
         ack_dict = ack_evidence_dict["ack_dict"]
         ack_label_str = ack_evidence_dict["label_str"]
+        response_ts = parse_timestamp_ts(ack_dict.get("response_timestamp_str"))
+        submit_ts = parse_timestamp_ts((source_dict.get("vplan_dict") or {}).get("submission_timestamp_str"))
+        ack_time_str = _time_str(response_ts.isoformat(), as_of_ts) if (ack_label_str == "Acked" and response_ts is not None
+            and submit_ts is not None and response_ts > submit_ts) else "—"
         order_rows.append(_row_dict([symbol_str, order_str, ack_label_str if fresh_bool else "Unknown",
-            _text_str(ack_dict.get("ack_source_str")), _time_str(ack_dict.get("response_timestamp_str"), as_of_ts),
+            _text_str(ack_dict.get("ack_source_str")), ack_time_str,
             _number_str(abs(filled_float)) if filled_float is not None else "—", _text_str(order_id_str) or "—"],
             state_str="fail" if ack_label_str == "No ack" and fresh_bool else ""))
     decision_dict = source_dict.get("decision_dict") or {}
@@ -153,12 +157,19 @@ def build_evidence_tables_dict(source_dict, *, as_of_ts, fresh_bool):
             difference_float = broker_float - model_float if model_float is not None and broker_float is not None else None
             reconcile_rows.append(_row_dict([_text_str(symbol_str), _number_str(model_float), _number_str(broker_float), _number_str(difference_float)]))
     event_rows = []
-    for item_dict in source_dict.get("event_list") or []:
+    event_list = sorted(source_dict.get("event_list") or [],
+        key=lambda item_dict: parse_timestamp_ts(item_dict.get("timestamp_str") or item_dict.get("event_timestamp_str")) or as_of_ts, reverse=True)
+    for item_dict in event_list:
         code_str = item_dict.get("event_type_str") or item_dict.get("event_str") or ""
-        label_str = EVENT_LABEL_DICT.get(code_str, _text_str(code_str).replace("_", " ")) if code_str else "Order " + _text_str(item_dict.get("status_str"))
-        event_rows.append(_row_dict([_time_str(item_dict.get("timestamp_str") or item_dict.get("event_timestamp_str"), as_of_ts), label_str]))
+        status_str = item_dict.get("status_str") or ""
+        label_str = EVENT_LABEL_DICT.get(code_str, _text_str(code_str).replace("_", " ")) if code_str else {
+            "Submitted": "Order sent", "PreSubmitted": "Order accepted", "Filled": "Order filled",
+            "Cancelled": "Order cancelled", "Inactive": "Order inactive", "PendingSubmit": "Waiting for broker",
+        }.get(status_str, "Order " + _text_str(status_str))
+        event_rows.append(_row_dict([_time_str(item_dict.get("timestamp_str") or item_dict.get("event_timestamp_str"), as_of_ts),
+            _text_str(item_dict.get("asset_str")), label_str]))
     result_dict = {
-        "plan": _table_dict(["Symbol", "Before", "Order", "Filled", "Fill px", "Slip bps", "After", "Broker = model"], plan_rows),
+        "plan": _table_dict(["Symbol", "Before", "Order", "Filled", "Fill px", "After", "Broker = model"], plan_rows),
         "decision": _table_dict(["Symbol", "Target"], decision_rows, note_str="Entry and exit targets" if decision_dict.get("decision_book_type_str") == "incremental_entry_exit_book" else "Full portfolio targets" if decision_dict.get("decision_book_type_str") == "full_target_weight_book" else "Saved decision targets"),
         "orders": _table_dict(["Symbol", "Order", "Ack", "Source", "Ack time", "Filled", "Broker id"], order_rows),
         "fills": _table_dict(["Symbol", "Shares", "Fill px", "Time", "Broker id"], [
@@ -166,7 +177,7 @@ def build_evidence_tables_dict(source_dict, *, as_of_ts, fresh_bool):
                        _number_str(item_dict.get("fill_price_float"), price_bool=True), _time_str(item_dict.get("fill_timestamp_str"), as_of_ts),
                        _text_str(item_dict.get("broker_order_id_str"))]) for item_dict in fill_list]),
         "reconcile": _table_dict(["Symbol", "Model", "Broker", "Difference"], reconcile_rows),
-        "events": _table_dict(["Time", "What"], event_rows),
+        "events": _table_dict(["Time", "Symbol", "What"], event_rows),
         "files": _table_dict(["File", "Recorded"], [_row_dict([_text_str(item_dict.get("name_str")), _time_str(item_dict.get("timestamp_str"), as_of_ts)])
                                                    for item_dict in source_dict.get("file_list") or []]),
     }
@@ -197,6 +208,16 @@ def build_pod_page_dict(overview_dict, source_dict, finance_dict, *, pod_id_str,
                 time_str = _time_str((source_dict.get(source_key_str) or {}).get("created_timestamp_str"), as_of_ts)
                 if time_str != "—":
                     step_list[index_int]["actual_time_str"] = time_str
+        if step_list[3]["state_str"] == "Done" and source_dict.get("ack_list"):
+            # This proves broker acknowledgement completion, not when the
+            # request was transmitted. Order submitted timestamps are mutable.
+            ack_time_list = [parse_timestamp_ts(item_dict["response_timestamp_str"]) for item_dict in source_dict["ack_list"]]
+            submit_ts = parse_timestamp_ts(row_dict.get("latest_vplan_submission_timestamp_str"))
+            step_list[3]["fact_str"] = "All orders acknowledged"
+            # Legacy broker refresh may use the planned boundary as fallback.
+            # Do not display that value as the actual acknowledgement time.
+            if submit_ts is not None and all(ack_ts > submit_ts for ack_ts in ack_time_list):
+                step_list[3].update(actual_time_str=_time_str(max(ack_time_list).isoformat(), as_of_ts), delta_str="", time_kind_str="ACK")
     failed_step_dict = next((step_dict for step_dict in step_list if step_dict["state_str"] == "Failed"), {})
     tab_str = tab_str or failed_step_dict.get("tab_str") or "plan"
     tables_dict = build_evidence_tables_dict(source_dict, as_of_ts=as_of_ts, fresh_bool=fresh_bool)
@@ -217,15 +238,30 @@ def build_pod_page_dict(overview_dict, source_dict, finance_dict, *, pod_id_str,
         verdict_detail_str = "Saved status for " + (selected_dict.get("session_date_str") or "this cycle") + "."
         issue_title_str = "Saved cycle · Missing broker ACK" if missing_ack_bool else "Saved cycle · " + cycle_dict["now_str"]
         issue_detail_str = "Review the saved records for " + (selected_dict.get("session_date_str") or "this cycle") + "."
+    header_dict = {"state_str": pod_summary_dict["state_str"], "pill_str": pod_summary_dict["pill_str"],
+        "verdict_str": pod_summary_dict["now_str"].rstrip(".") + ".", "detail_str": pod_summary_dict["now_detail_str"]}
+    attention_dict = next((deepcopy(item_dict) for item_dict in overview_dict["attention_list"] if item_dict["pod_id_str"] == pod_id_str), {})
+    cycle_state_str = _state_str(cycle_dict["tone_str"])
+    if (source_dict.get("status_str") != "ok" and source_dict.get("selected_current_bool")
+        and header_dict["state_str"] not in {"fail", "late"}):
+        header_dict.update(state_str="unk", pill_str="Unknown", verdict_str="Current cycle unavailable.", detail_str="")
+    # Selected current-cycle contradictions may weaken current status. A saved
+    # historical result must never replace today's Pod warning or Idle state.
+    if (selected_dict.get("current_bool") and STATE_RANK_DICT[cycle_state_str] < STATE_RANK_DICT[header_dict["state_str"]]
+        and (header_dict["pill_str"] != "Idle" or cycle_state_str == "fail")):
+        header_dict.update(state_str=cycle_state_str, pill_str=cycle_dict["pill_str"], verdict_str=verdict_str, detail_str=verdict_detail_str)
+        if issue_bool and not attention_dict:
+            attention_dict = {"state_str": cycle_state_str, "title_str": issue_title_str, "detail_str": issue_detail_str}
     return {
         **finance_dict, "pod_id_str": pod_id_str, "name_str": pod_summary_dict["name_str"],
         "account_str": (account_str[:1] + "···" + account_str[-3:]) if len(account_str) >= 4 else "—",
-        "cadence_str": pod_summary_dict["cadence_str"], "pill_str": cycle_dict["pill_str"],
-        "state_str": _state_str(cycle_dict["tone_str"]), "verdict_str": verdict_str,
+        "cadence_str": pod_summary_dict["cadence_str"], "pill_str": header_dict["pill_str"],
+        "state_str": header_dict["state_str"], "header_dict": header_dict, "attention_dict": attention_dict,
+        "cycle_state_str": cycle_state_str, "cycle_pill_str": cycle_dict["pill_str"], "verdict_str": verdict_str,
         "verdict_detail_str": verdict_detail_str,
         "issue_bool": issue_bool, "issue_title_str": issue_title_str, "issue_detail_str": issue_detail_str,
         "step_list": step_list, "tab_str": tab_str, "table_dict": tables_dict[tab_str], "tables_dict": tables_dict,
-        "tab_list": [{"key_str": key_str, "label_str": label_str, "count_int": len(tables_dict[key_str]["row_list"]) if key_str in {"orders", "fills"} else None} for key_str, label_str in TAB_TUPLE],
+        "tab_list": [{"key_str": key_str, "label_str": label_str, "count_int": len(tables_dict[key_str]["row_list"]) if key_str in {"orders", "fills"} else None} for key_str, label_str in TAB_TUPLE if key_str != "files" or tables_dict["files"]["row_list"]],
         "cycle_list": source_dict.get("cycle_list") or [], "selected_cycle_dict": selected_dict,
         "history_truncated_bool": source_dict.get("history_truncated_bool", False),
         "historical_bool": historical_bool,

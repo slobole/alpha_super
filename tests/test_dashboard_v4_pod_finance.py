@@ -1,8 +1,10 @@
 """Pod finance retains official account facts and exact LIVE ownership."""
 
 from copy import deepcopy
+from contextlib import closing
 from dataclasses import replace
 from datetime import UTC, datetime
+import sqlite3
 
 import pytest
 
@@ -111,37 +113,54 @@ def test_closed_history_does_not_present_a_partial_month_as_current_period():
     assert all(tile_dict["value_str"] == "—" for tile_dict in result_dict["tile_list"][1:])
 
 
-def test_positions_are_saved_reference_composition_never_current_nav_weights():
+def test_saved_share_quantities_keep_their_own_date_and_no_price_claims():
     workspace_dict, snapshot_obj, provider_obj, pod_id_str = _fixture_tuple()
+    row_dict = workspace_dict["summary_dict"]["pod_row_dict_list"][0]
+    row_dict.update(latest_pod_state_timestamp_str="2026-09-08T13:36:12+00:00",
+        position_exposure_dict_list=[{"asset_str": "AMD", "share_float": 31, "price_float": 999},
+            {"asset_str": "CRM", "share_float": 17, "price_float": None}])
     result_dict = _view(workspace_dict, snapshot_obj, provider_obj, pod_id_str)
-    assert result_dict["position_list"] == [{"symbol_str": "TQQQ", "shares_str": "20", "value_str": "$1,400.00",
-        "weight_str": "100.00%", "weight_percent_float": 100.0, "target_percent_float": None, "new_bool": False}]
-    assert result_dict["positions_basis_str"] == "Reference values · excludes cash"
-    assert result_dict["position_asof_str"] == "2026-09-04 16:10:00"
-    assert result_dict["price_asof_str"] == "2026-09-01 09:23:00"
+    assert result_dict["position_list"] == [{"symbol_str": "AMD", "shares_str": "31"}, {"symbol_str": "CRM", "shares_str": "17"}]
+    assert result_dict["positions_basis_str"] == "Saved positions"
+    assert result_dict["position_asof_str"] == "2026-09-08 09:36:12"
+    assert "price_asof_str" not in result_dict
+    assert result_dict["money_asof_str"] == "Demo · Money as of close 2026-09-04"
     assert result_dict["cash_asof_str"] == "Close 2026-09-04"
     assert result_dict["cash_str"] != "—"
 
 
 @pytest.mark.parametrize("timestamp_str", [None, "not-time", "2027-01-01T00:00:00+00:00", "2026-09-04T20:10:00"])
-def test_unknown_or_future_price_time_retains_shares_but_withholds_value(timestamp_str):
+def test_old_or_invalid_reference_prices_cannot_change_quantities_or_finance(timestamp_str):
     workspace_dict, snapshot_obj, provider_obj, pod_id_str = _fixture_tuple()
-    workspace_dict["summary_dict"]["pod_row_dict_list"][0]["latest_live_reference_snapshot_timestamp_str"] = timestamp_str
+    baseline_dict = _view(workspace_dict, snapshot_obj, provider_obj, pod_id_str)
+    row_dict = workspace_dict["summary_dict"]["pod_row_dict_list"][0]
+    row_dict["latest_live_reference_snapshot_timestamp_str"] = timestamp_str
+    for position_dict in row_dict["position_exposure_dict_list"]:
+        position_dict["price_float"] = float("nan")
     result_dict = _view(workspace_dict, snapshot_obj, provider_obj, pod_id_str)
-    assert result_dict["position_list"][0]["shares_str"] == "20"
-    assert result_dict["position_list"][0]["value_str"] == "—"
-    assert result_dict["position_list"][0]["weight_percent_float"] is None
+    assert result_dict["position_list"] == baseline_dict["position_list"]
+    assert result_dict["tile_list"] == baseline_dict["tile_list"]
+    assert all(set(position_dict) == {"symbol_str", "shares_str"} for position_dict in result_dict["position_list"])
 
 
-def test_unpriced_positions_do_not_disappear_or_inflate_other_weight():
+def test_unpriced_and_short_quantities_remain_visible_without_allocations():
     workspace_dict, snapshot_obj, provider_obj, pod_id_str = _fixture_tuple()
-    workspace_dict["summary_dict"]["pod_row_dict_list"][0]["position_exposure_dict_list"].append(
-        {"asset_str": "UNPRICED", "share_float": 3, "price_float": None})
+    workspace_dict["summary_dict"]["pod_row_dict_list"][0]["position_exposure_dict_list"] = [
+        {"asset_str": "SHORT", "share_float": -1.25, "price_float": 100},
+        {"asset_str": "UNPRICED", "share_float": 3, "price_float": None},
+        {"asset_str": "EXITED", "share_float": 0, "price_float": 999}]
     result_dict = _view(workspace_dict, snapshot_obj, provider_obj, pod_id_str)
-    assert len(result_dict["position_list"]) == 2
-    assert result_dict["position_list"][1]["shares_str"] == "3"
-    assert result_dict["position_list"][1]["value_str"] == "—"
-    assert all(position_dict["weight_percent_float"] is None for position_dict in result_dict["position_list"])
+    assert result_dict["position_list"] == [{"symbol_str": "SHORT", "shares_str": "-1.25"},
+        {"symbol_str": "UNPRICED", "shares_str": "3"}]
+
+
+@pytest.mark.parametrize("timestamp_str", [None, "not-time", "2027-01-01T00:00:00+00:00", "2026-09-04T20:10:00"])
+def test_unknown_or_future_position_time_withholds_quantities(timestamp_str):
+    workspace_dict, snapshot_obj, provider_obj, pod_id_str = _fixture_tuple()
+    workspace_dict["summary_dict"]["pod_row_dict_list"][0]["latest_pod_state_timestamp_str"] = timestamp_str
+    result_dict = _view(workspace_dict, snapshot_obj, provider_obj, pod_id_str)
+    assert result_dict["position_list"] == []
+    assert not result_dict["positions_available_bool"]
 
 
 def test_duplicate_symbols_are_ambiguous_and_future_state_is_hidden():
@@ -157,6 +176,10 @@ def test_duplicate_symbols_are_ambiguous_and_future_state_is_hidden():
 def test_cash_does_not_borrow_another_date_and_old_import_keeps_current_month_blank():
     workspace_dict, snapshot_obj, provider_obj, pod_id_str = _fixture_tuple()
     workspace_dict["summary_dict"]["pod_row_dict_list"][0]["eod_snapshot_dict"]["latest_market_date_str"] = "2026-09-03"
+    # The SQLite-backed demo also has authoritative local EOD history. Remove
+    # the selected date from that synthetic source, not only from its summary.
+    with closing(sqlite3.connect(provider_obj.get_target_for_pod(pod_id_str).db_path_str)) as connection_obj, connection_obj:
+        connection_obj.execute("UPDATE pod_state_history SET updated_timestamp_str='2026-09-03T20:10:01+00:00' WHERE snapshot_stage_str='eod'")
     result_dict = _view(workspace_dict, snapshot_obj, provider_obj, pod_id_str,
         as_of_ts=datetime(2026, 10, 10, 12, tzinfo=UTC))
     assert result_dict["cash_str"] == "—"

@@ -134,6 +134,13 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
                 "detail_str": "Cycle evidence cannot be read." if database_failed_bool else (required_dict.get("reason_str") or required_dict.get("detail_str") or "") if action_required_bool else cycle_dict["now_detail_str"],
                 "age_str": age_str,
             })
+            # A Pod-level gate or unreadable DB is part of its current state,
+            # even when the last trading cycle completed successfully.
+            attention_dict = attention_list[-1]
+            pod_list[-1].update(state_str=attention_dict["state_str"],
+                pill_str="Action needed" if attention_dict["state_str"] == "fail" else "Needs review",
+                now_str=attention_dict["title_str"].rstrip("."), now_detail_str=attention_dict["detail_str"],
+                next_str="Review saved evidence", next_time_str="", next_detail_str="you · now")
 
     scoped_summary_dict = {**source_dict, "pod_row_dict_list": scoped_row_list}
     health_obj = build_health_rollup({**source_dict, "pod_row_dict_list": health_row_list}, mode_str="live")
@@ -167,7 +174,7 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
     local_ts = as_of_ts.astimezone(MARKET_TIMEZONE_OBJ)
     overview_dict = {
         "demo_bool": demo_bool, "period_str": period_str,
-        "clock_str": local_ts.strftime("%H:%M:%S"), "date_str": local_ts.strftime("%a %m-%d"),
+        "clock_str": local_ts.strftime("%H:%M:%S"), "clock_timestamp_str": as_of_ts.isoformat(), "date_str": local_ts.strftime("%a %m-%d"),
         "updated_str": source_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%H:%M:%S") if source_ts else "—",
         "source_fresh_bool": fresh_bool,
         "source_valid_ms_int": max(0, int((SOURCE_MAX_AGE_SECONDS_INT - (as_of_ts - source_ts).total_seconds()) * 1000)) if fresh_bool else 0,

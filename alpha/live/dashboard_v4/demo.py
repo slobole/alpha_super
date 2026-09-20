@@ -1,10 +1,11 @@
-"""Synthetic V4 preview. No configuration, state DB, or broker fallback."""
+"""Synthetic V4 preview with owned temporary state; no real-source fallback."""
 
 from copy import deepcopy
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from time import monotonic
 
 from alpha.live.dashboard_v3.demo import DemoOperationsProvider, build_demo_fixture_tuple
-from alpha.live.dashboard_v4.pod_demo import build_demo_pod_source_dict
+from alpha.live.dashboard_v4.pod_demo import DemoPodStore
 
 
 DEMO_NOW_TS = datetime(2026, 9, 8, 13, 41, 7, tzinfo=UTC)
@@ -44,17 +45,6 @@ def build_demo_workspace_tuple():
             expected_due_timestamp_str="2026-09-08T20:10:00+00:00",
             last_required_eod_present_bool=True, same_session_bool=False,
         )
-        if index_int == 0:
-            # Synthetic counterpart of the read-only per-order evidence reader.
-            row_dict["cycle_evidence_dict"] = {
-                "state_str": "complete", "pod_id_str": row_dict["pod_id_str"],
-                "account_route_str": row_dict["account_route_str"],
-                "vplan_id_int": row_dict["latest_vplan_id_int"],
-                "decision_plan_id_int": row_dict["latest_vplan_decision_plan_id_int"],
-                "vplan_status_str": row_dict["latest_vplan_status_str"],
-                "order_count_int": 3, "filled_order_count_int": 3,
-                "actual_fill_timestamp_str": "2026-09-08T13:30:02+00:00",
-            }
         if index_int == 1:
             row_dict.update(
                 health_str="red", latest_vplan_status_str="submitted",
@@ -67,8 +57,11 @@ def build_demo_workspace_tuple():
                                       "reason_str": "1 of 3 orders has no saved broker ACK."},
                 debug_summary_dict={"severity_str": "red"},
             )
+    # One owned fixture store per provider, retained until provider cleanup.
+    provider_obj.pod_store_obj = DemoPodStore(provider_obj.row_list, as_of_ts=DEMO_NOW_TS)
+    for method_str in ("get_pod_cycles_dict", "get_cycle_evidence_dict", "get_target_for_pod", "get_target_list", "close"):
+        setattr(provider_obj, method_str, getattr(provider_obj.pod_store_obj, method_str))
     summary_dict = provider_obj.get_summary_dict()
-    provider_obj.get_pod_cycles_dict = lambda pod_id_str, **options_dict: build_demo_pod_source_dict(provider_obj.row_list, pod_id_str, **options_dict)
     summary_dict["as_of_timestamp_str"] = DEMO_NOW_TS.isoformat()
     workspace_dict = {
         "client_dict": client_dict, "operations_account_list": client_dict["accounts"],
@@ -82,6 +75,18 @@ def create_demo_app():
     from alpha.live.dashboard_v4.app import create_app
 
     workspace_dict, snapshot_obj, provider_obj = build_demo_workspace_tuple()
+    start_float = monotonic()
+
+    def demo_now_ts():
+        return DEMO_NOW_TS + timedelta(seconds=monotonic() - start_float)
+
+    def workspace_snapshot_tuple():
+        current_ts = demo_now_ts()
+        current_dict = deepcopy(workspace_dict)
+        current_dict["summary_dict"]["as_of_timestamp_str"] = current_ts.isoformat()
+        for row_dict in current_dict["summary_dict"]["pod_row_dict_list"]:
+            row_dict["as_of_timestamp_str"] = current_ts.isoformat()
+        return current_dict, snapshot_obj
+
     return create_app(provider_obj, demo_bool=True,
-                      workspace_snapshot_fn=lambda: (deepcopy(workspace_dict), snapshot_obj),
-                      now_fn=lambda: DEMO_NOW_TS)
+                      workspace_snapshot_fn=workspace_snapshot_tuple, now_fn=demo_now_ts)

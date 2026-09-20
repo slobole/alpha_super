@@ -1,6 +1,7 @@
 """V4 uses saved LIVE evidence and cannot expose executable V3 routes."""
 
 from copy import deepcopy
+import re
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
@@ -34,7 +35,7 @@ def test_demo_renders_native_d_shell_and_seven_step_rows(fixture_tuple):
     assert html_str.count('class="tl"') == 28
     assert 'title="PAPER is not available in V4 yet"' in html_str
     assert 'title="INCUBATION is not available in V4 yet"' in html_str
-    assert "2026-09-08T" not in html_str
+    assert "2026-09-08T" not in re.sub(r"<[^>]+>", "", html_str)
     assert '09:41:07 ET' in html_str
     assert 'hx-history="false"' in html_str and '"historyCacheSize":0' in html_str
     assert "hx-push-url" not in html_str

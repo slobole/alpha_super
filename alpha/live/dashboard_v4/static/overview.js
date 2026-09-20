@@ -6,6 +6,11 @@
   let observed_shell_obj = null;
   let valid_until_ms = 0;
   let request_start_ms = Date.now();
+  let clock_anchor_ms = NaN;
+  let clock_observed_ms = 0;
+  const clock_formatter_obj = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  });
 
   function mark_unknown(reason_str = 'Update failed.') {
     const shell_obj = document.getElementById('overview-shell');
@@ -52,20 +57,43 @@
     shell_obj.querySelectorAll('[data-status-detail], [data-verdict-detail]').forEach((label_obj) => {
       label_obj.textContent = '';
     });
-    const verdict_obj = shell_obj.querySelector('[data-verdict]');
-    if (verdict_obj) verdict_obj.textContent = 'Status unknown.';
+    shell_obj.querySelectorAll('[data-verdict], [data-cycle-verdict]').forEach((verdict_obj) => {
+      verdict_obj.textContent = 'Status unknown.';
+    });
   }
 
   function check_expiry() {
     if (observed_shell_obj && Date.now() >= valid_until_ms) mark_unknown('Saved status is out of date.');
   }
 
+  function update_clock() {
+    // Display time only: never renew saved operational evidence from this ticker.
+    if (!observed_shell_obj || !Number.isFinite(clock_anchor_ms)) return;
+    const clock_str = clock_formatter_obj.format(clock_anchor_ms + Math.max(0, Date.now() - clock_observed_ms)) + ' ET';
+    observed_shell_obj.querySelectorAll('[data-live-clock]').forEach((clock_obj) => {
+      if (clock_obj.textContent !== clock_str) clock_obj.textContent = clock_str;
+    });
+  }
+
   function observe_snapshot(elapsed_ms) {
-    observed_shell_obj = document.getElementById('overview-shell');
-    if (!observed_shell_obj) return;
+    const shell_obj = document.getElementById('overview-shell');
+    if (!shell_obj || shell_obj === observed_shell_obj) return;
+    observed_shell_obj = shell_obj;
     const remaining_ms = Number(observed_shell_obj.getAttribute('data-source-valid-ms'));
     valid_until_ms = Date.now() + Math.max(0, (Number.isFinite(remaining_ms) ? remaining_ms : 0) - elapsed_ms);
+    clock_anchor_ms = Date.parse(observed_shell_obj.getAttribute('data-clock-timestamp'));
+    clock_observed_ms = Date.now();
+    update_clock();
     check_expiry();
+  }
+
+  function has_shell_selection(shell_obj) {
+    const selection_obj = typeof window.getSelection === 'function' ? window.getSelection() : null;
+    if (!selection_obj || selection_obj.isCollapsed) return false;
+    for (let range_int = 0; range_int < selection_obj.rangeCount; range_int += 1) {
+      if (selection_obj.getRangeAt(range_int).intersectsNode(shell_obj)) return true;
+    }
+    return false;
   }
 
   function overview_event(event_obj) {
@@ -84,6 +112,14 @@
     const active_obj = document.activeElement;
     focus_period_str = active_obj ? active_obj.getAttribute('data-period') || '' : '';
   });
+  document.addEventListener('htmx:beforeSwap', (event_obj) => {
+    if (!overview_event(event_obj) || event_obj.detail.shouldSwap === false || event_obj.detail.isError) return;
+    const shell_obj = document.getElementById('overview-shell');
+    if (!shell_obj || !has_shell_selection(shell_obj)) return;
+    event_obj.detail.shouldSwap = false;
+    event_obj.preventDefault();
+    check_expiry();
+  });
   document.addEventListener('htmx:afterSwap', (event_obj) => {
     if (overview_event(event_obj)) observe_snapshot(Math.max(0, Date.now() - request_start_ms));
   });
@@ -101,7 +137,10 @@
   // Subtract the whole acquisition interval, conservatively, so transport or
   // a sleeping tab cannot extend the server's 120-second evidence lifetime.
   observe_snapshot(performance.now());
-  setInterval(check_expiry, 1000);
+  setInterval(() => {
+    check_expiry();
+    update_clock();
+  }, 1000);
   document.addEventListener('visibilitychange', check_expiry);
   window.addEventListener('pageshow', (event_obj) => {
     if (event_obj.persisted) mark_unknown('Refresh saved status.');

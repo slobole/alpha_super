@@ -8,6 +8,28 @@ This file is part of the live-first control system. Recording a gap does not mak
 
 ## Register
 
+### Dashboard V4 operator display
+
+V4 keeps the current Pod state separate from a selected saved trading cycle.
+Current gates and unreadable state remain visible while browsing history. Its
+demo reads isolated synthetic SQLite through the production read-only readers;
+synthetic success is not VPS or broker validation.
+
+Saved Pod state and finalized account reports do not contain per-position close
+marks. Pod holdings therefore show dated quantities only, with independently
+dated cash. Reference prices are not substituted for closing marks, and no NAV
+weights, target/New markers, slippage or reference comparison are manufactured.
+Account NAV/P&L/TWR retain the existing reporting contracts. Full closing-value
+holdings require a separately verified account/date-specific marks source.
+
+Legacy completed VPlans with unverified ACK history show Unknown. Recorded ACK
+times can contain a planned-time fallback; V4 withholds that fallback from the
+actual-time display and does not derive submission latency from it. Scheduler
+poll allowances use default constants; multi-Pod queue delays and VPS overrides
+have not been measured by this UI change. A malformed or future cycle record
+still invalidates that detail read conservatively instead of showing partial
+evidence as healthy.
+
 ### Client reporting boundary
 
 The operator workspace uses saved IBKR account facts, not the operational

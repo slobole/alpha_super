@@ -14,7 +14,10 @@ From the repository root:
 ```
 
 Open `http://127.0.0.1:8084/`. Demo mode uses fixed, clearly labelled synthetic
-data. It does not load `config.env`, a real account database or a broker session.
+data. Each demo provider builds isolated temporary SQLite databases once through
+`LiveStateStore`; Pod and fill evidence use the production read-only readers.
+The server advances a simulated clock from its fixed scenario time. It does not
+load `config.env`, a real account database or a broker session.
 
 To use the existing local saved-data configuration:
 
@@ -94,8 +97,10 @@ and plan creation times.
 ## Pod detail
 
 The selected cycle sits above financial context: history picker, seven steps,
-then Plan vs actual, Decision, Orders, Fills, Reconcile, Events and Files tabs.
-Failed cycles show their evidence and short read-only tool guidance.
+then Plan vs actual, Decision, Orders, Fills, Reconcile and Events tabs.
+Failed cycles show their evidence and a short review instruction.
+The Pod heading always shows the current Pod state, including non-cycle gates
+and database failures. The selected cycle has a separate badge and verdict.
 
 - History reads up to 60 recent cycles, plus the selected or unresolved cycle.
   Saved historical LIVE releases must match the current release's owner, Pod
@@ -112,22 +117,29 @@ Failed cycles show their evidence and short read-only tool guidance.
   response, recorded response time and `broker_acked` status. Contradictions
   cannot leave Submit green. Stale or failed refreshes clear step and table
   status together. Slow detail reads cannot extend the 120-second source life.
+  Completed plans with legacy `not_checked` ACK history remain Unknown rather
+  than claiming submission is late. A completed Submit may show the last saved
+  ACK timestamp, explicitly labelled ACK, only when all timestamps are later
+  than the planned boundary; equality may be a broker-refresh fallback.
 - Value, Day, Month and Since start use the selected Pod's official account
   report and existing accounting checks. The chart shows account NAV, including
   cash flows; Day P&L is flow-adjusted and is not a NAV difference. These panels
   keep their own dated sources when browsing historical trading cycles.
-- Positions are saved shares at saved reference prices, labelled explicitly.
-  Composition weights exclude cash; unavailable prices withhold values/weights.
-  These values are not presented as current market marks or account NAV weights.
-- Slip bps and Live vs backtest remain unavailable without verified comparison
-  evidence. Files has no connected artifact reader yet. Trade sheet export and
-  executable tools remain disabled; the V3 exporter writes state and is not used.
-  Events currently contains only the selected VPlan's saved broker order events.
+- Positions show saved quantities and their own timestamp. Cash has its own
+  financial date. Existing sources do not prove closing marks for every symbol,
+  so symbol values, weights, target/New markers are omitted.
+- Unconnected Slip bps, Files, Trade sheet, Tools buttons and Live vs backtest
+  controls are hidden. The V3 exporter writes state and is not used. Events
+  shows the selected VPlan's broker order events, with symbols and newest first.
+- The ET clock ticks locally each second, independently of operational health.
+  Selecting text inside the page postpones replacement until a later poll;
+  it cannot extend the displayed source's freshness lifetime. Historical pages
+  still poll so current Pod warnings stay up to date.
 
 ## Verification
 
 ```powershell
-.venv\Scripts\python.exe -B -m pytest tests/test_dashboard_v4_cycle.py tests/test_dashboard_v4_evidence.py tests/test_dashboard_v4_finance.py tests/test_dashboard_v4_routes.py tests/test_dashboard_v4_pod.py tests/test_dashboard_v4_pod_data.py tests/test_dashboard_v4_pod_finance.py tests/test_dashboard_v4_pod_integration.py tests/test_dashboard_local_workspace.py --capture=sys -p no:cacheprovider -q
+.venv\Scripts\python.exe -B -m pytest tests/test_dashboard_v4_cycle.py tests/test_dashboard_v4_evidence.py tests/test_dashboard_v4_finance.py tests/test_dashboard_v4_routes.py tests/test_dashboard_v4_pod.py tests/test_dashboard_v4_pod_data.py tests/test_dashboard_v4_pod_finance.py tests/test_dashboard_v4_pod_integration.py tests/test_dashboard_v4_pod_review.py tests/test_dashboard_v4_pod_demo.py tests/test_dashboard_local_workspace.py --capture=sys -p no:cacheprovider -q
 node --test tests/dashboard_v4_refresh.test.cjs
 ```
 
