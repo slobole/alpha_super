@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from alpha.live.dashboard_v4.system import build_system_page_dict
+from alpha.live.dashboard_v4.system import build_system_page_dict, system_scope_matches_bool
 
 
 NOW_TS = datetime(2026, 9, 21, 14, 0, tzinfo=timezone.utc)
@@ -13,7 +13,8 @@ NOW_TS = datetime(2026, 9, 21, 14, 0, tzinfo=timezone.utc)
 
 @pytest.fixture
 def source_tuple():
-    overview_dict = {"source_fresh_bool": True, "health_list": [{"label_str": "Disk", "severity_str": "green", "value_str": "50% used"}],
+    overview_dict = {"source_fresh_bool": True, "system_dict": {"state_str": "done", "detail_str": "Data 2026-09-18"},
+        "health_list": [{"label_str": "Disk", "severity_str": "green", "value_str": "50% used"}],
         "pod_list": [{"pod_id_str": "pod1", "name_str": "First strategy", "scheduler_dict": {
             "state_str": "sleeping", "alive_bool": True, "checked_timestamp_str": NOW_TS.isoformat(),
             "last_seen_timestamp_str": (NOW_TS - timedelta(seconds=30)).isoformat(),
@@ -48,9 +49,9 @@ def test_saved_evidence_never_claims_live_gateway_or_missing_receipts(source_tup
     assert [group_dict["label_str"] for group_dict in view_dict["group_list"]] == ["Runs all the time", "Runs on a schedule", "Data and space"]
     assert rows_dict["schedulers"]["state_str"] == "done"
     assert rows_dict["schedulers"]["now_str"] == "1 of 1 alive"
-    assert rows_dict["gateway"]["state_str"] == "unk"
-    assert rows_dict["gateway"]["now_str"] == "Connection unverified · 1 of 1 saved reads"
-    assert rows_dict["gateway"]["last_str"] == "09-18 16:10:00"
+    assert rows_dict["gateway"]["state_str"] == "skip" and rows_dict["gateway"]["checked_bool"] is False
+    assert rows_dict["gateway"]["now_str"] == "Not checked here"
+    assert rows_dict["gateway"]["last_str"] == "1 of 1 saved reads · 09-18 16:10:00"
     assert rows_dict["alerts"]["state_str"] == rows_dict["deadman"]["state_str"] == "unk"
     assert rows_dict["dashboard"]["state_str"] == "done" and rows_dict["dashboard"]["expected_str"] == "Refresh every 15 s"
     assert view_dict["state_str"] == "unk" and "unverified" in view_dict["verdict_str"]
@@ -73,8 +74,8 @@ def test_scheduler_states_use_saved_actual_state(source_tuple, state_str, alive_
     view_dict = _view_dict(source_tuple)
     assert view_dict["pod_list"][0]["scheduler_state_str"] == tone_str
     assert view_dict["pod_list"][0]["scheduler_str"] == label_str
-    assert view_dict["pod_list"][0]["wake_str"] == "09-21 10:59:30"
-    assert _rows_dict(view_dict)["schedulers"]["state_str"] == tone_str
+    assert view_dict["pod_list"][0]["wake_str"] == "10:59:30"
+    assert _rows_dict(view_dict)["schedulers"]["state_str"] == ("done" if state_str == "holding" else tone_str)
     if tone_str in {"late", "fail"}:
         assert view_dict["state_str"] == tone_str
 
@@ -181,13 +182,15 @@ def test_data_requirement_and_fred_status_are_not_invented(source_tuple):
     rows_dict = _rows_dict(_view_dict(source_tuple))
     assert rows_dict["market_data"]["now_str"] == "Have 2026-09-18"
     assert rows_dict["market_data"]["expected_str"] == "Needed 2026-09-18"
-    assert rows_dict["fred"]["state_str"] == "unk"
-    assert rows_dict["fred"]["now_str"] == "Last decision used 2026-09-18 · current feed unverified"
+    assert rows_dict["fred"]["state_str"] == "skip" and rows_dict["fred"]["checked_bool"] is False
+    assert rows_dict["fred"]["now_str"] == "Not checked here"
+    assert rows_dict["fred"]["last_str"] == "Last decision used 2026-09-18"
     saved_dict = source_tuple[1]["summary_dict"]["pod_row_dict_list"][0]
     saved_dict["norgate_snapshot_status_dict"]["required_snapshot_date_by_release_dict"] = {}
     saved_dict["dtb3_latest_observation_date_str"] = None
     rows_dict = _rows_dict(_view_dict(source_tuple))
-    assert rows_dict["market_data"]["state_str"] == rows_dict["fred"]["state_str"] == "unk"
+    assert rows_dict["market_data"]["state_str"] == "unk"
+    assert rows_dict["fred"]["state_str"] == "skip" and rows_dict["fred"]["last_str"] == "—"
 
 
 @pytest.mark.parametrize("contradiction_str", ["older_than_required", "explicitly_not_fresh"])
@@ -267,19 +270,18 @@ def test_saved_rows_require_one_exact_current_enabled_live_release(source_tuple,
     assert pod_dict["data_str"] == pod_dict["broker_str"] == "—"
 
 
-@pytest.mark.parametrize("severity_str,state_str,prefix_str", [
-    ("green", "unk", "Last decision used"), ("yellow", "late", "Saved warning"), ("red", "fail", "Saved failure"),
+@pytest.mark.parametrize("severity_str,prefix_str", [
+    ("green", "Last decision used"), ("yellow", "Saved warning"), ("red", "Saved failure"),
 ])
-def test_fred_decision_metadata_is_historical_not_current_feed_proof(source_tuple, severity_str, state_str, prefix_str):
+def test_fred_decision_metadata_is_historical_not_current_feed_proof(source_tuple, severity_str, prefix_str):
     saved_dict = source_tuple[1]["summary_dict"]["pod_row_dict_list"][0]
     saved_dict["dtb3_latest_observation_date_str"] = "2026-08-31"
     saved_dict["data_freshness_dict"]["item_dict_list"][0]["severity_str"] = severity_str
     row_dict = _rows_dict(_view_dict(source_tuple))["fred"]
-    assert row_dict["state_str"] == state_str
-    assert row_dict["now_str"].startswith(prefix_str)
-    assert "Last decision used 2026-08-31" in row_dict["now_str"]
-    assert "current feed unverified" in row_dict["now_str"]
-    assert row_dict["last_str"] == "—"
+    assert row_dict["state_str"] == "skip" and row_dict["checked_bool"] is False
+    assert row_dict["now_str"] == "Not checked here"
+    assert row_dict["last_str"].startswith(prefix_str)
+    assert "Last decision used 2026-08-31" in row_dict["last_str"]
 
 
 @pytest.mark.parametrize("state_str,expected_str", [("ok", "done"), ("warning", "late"), ("error", "fail"), ("unknown", "unk"), ("invented", "unk")])
@@ -315,3 +317,211 @@ def test_live_release_projection_and_disk_are_allowlisted(source_tuple):
 def test_naive_assessment_clock_is_rejected(source_tuple):
     with pytest.raises(ValueError, match="aware"):
         _view_dict(source_tuple, as_of_ts=NOW_TS.replace(tzinfo=None))
+
+
+def _unsupported_receipts(source_tuple):
+    for key_str in ("alerts", "deadman"):
+        source_tuple[2][key_str + "_dict"] = {"checked_bool": False, "state_str": "unknown"}
+
+
+@pytest.mark.parametrize("scheduler_state_str", ["sleeping", "holding"])
+def test_all_supported_checks_can_be_healthy_with_unsupported_checks_neutral(source_tuple, scheduler_state_str):
+    _unsupported_receipts(source_tuple)
+    source_tuple[0]["pod_list"][0]["scheduler_dict"]["state_str"] = scheduler_state_str
+    view_dict = _view_dict(source_tuple)
+    rows_dict = _rows_dict(view_dict)
+    assert view_dict["state_str"] == "done"
+    assert view_dict["detail_str"] == ""
+    assert view_dict["problem_list"] == [] and view_dict["problem_count_int"] == 0
+    for key_str in ("gateway", "fred", "alerts", "deadman"):
+        assert rows_dict[key_str]["checked_bool"] is False
+        assert rows_dict[key_str]["state_str"] == "skip" and rows_dict[key_str]["now_str"] == "Not checked here"
+    assert all(row_dict["state_str"] == "done" for row_dict in rows_dict.values() if row_dict["checked_bool"])
+
+
+@pytest.mark.parametrize("change_str", ["expired", "rejected_scope", "future", "corrupt"])
+def test_unsupported_checks_stay_neutral_when_assessment_cannot_be_used(source_tuple, change_str):
+    _unsupported_receipts(source_tuple)
+    source_dict = source_tuple[2]
+    if change_str == "rejected_scope":
+        source_dict["scope_verified_bool"] = False
+    else:
+        source_dict["checked_timestamp_str"] = {"expired": (NOW_TS - timedelta(seconds=120)).isoformat(),
+            "future": (NOW_TS + timedelta(seconds=1)).isoformat(), "corrupt": "bad"}[change_str]
+    view_dict = _view_dict(source_tuple)
+    rows_dict = _rows_dict(view_dict)
+    for key_str in ("gateway", "fred", "alerts", "deadman"):
+        assert rows_dict[key_str]["state_str"] == "skip" and rows_dict[key_str]["checked_bool"] is False
+    assert rows_dict["database"]["state_str"] == "unk" and rows_dict["database"]["checked_bool"] is True
+    assert view_dict["state_str"] == "unk"
+    assert all(row_dict["key_str"] not in {"gateway", "fred", "alerts", "deadman"} for row_dict in view_dict["problem_list"])
+
+
+@pytest.mark.parametrize("record_obj", [None, {}, {"checked_bool": True}, {"checked_bool": 0},
+    {"checked_bool": "false"}, {"checked_bool": True, "state_str": "error", "last_timestamp_str": "bad"}])
+def test_missing_or_corrupt_expected_evidence_stays_checked_and_unknown(source_tuple, record_obj):
+    _unsupported_receipts(source_tuple)
+    source_tuple[2]["watchdog_dict"] = record_obj
+    view_dict = _view_dict(source_tuple)
+    row_dict = _rows_dict(view_dict)["watchdog"]
+    assert row_dict["state_str"] == "unk" and row_dict["checked_bool"] is True
+    assert view_dict["state_str"] == "unk"
+    assert view_dict["problem_count_int"] == 1 and view_dict["problem_list"][0]["key_str"] == "watchdog"
+
+
+@pytest.mark.parametrize("phase_str,label_str", [("eod_snapshot", "Sleeping · next EOD"),
+    ("build_decision_plan", "Sleeping · next Decision"), ("invented", "Sleeping"), ("", "Sleeping")])
+def test_sleeping_next_phase_is_a_label_not_a_due_time(source_tuple, phase_str, label_str):
+    source_tuple[0]["pod_list"][0]["scheduler_dict"]["next_phase_str"] = phase_str
+    pod_dict = _view_dict(source_tuple)["pod_list"][0]
+    assert pod_dict["scheduler_str"] == label_str
+    assert pod_dict["wake_str"] == "10:59:30"
+
+
+@pytest.mark.parametrize("wake_str,expected_str", [("2026-09-21T23:59:00+00:00", "19:59:00"),
+    ("2026-09-22T04:00:00+00:00", "09-22 00:00:00")])
+def test_wake_date_is_only_shown_when_et_day_differs(source_tuple, wake_str, expected_str):
+    source_tuple[0]["pod_list"][0]["scheduler_dict"]["promised_wake_timestamp_str"] = wake_str
+    assert _view_dict(source_tuple)["pod_list"][0]["wake_str"] == expected_str
+
+
+def test_main_problems_are_worst_first_specific_and_bounded(source_tuple):
+    _unsupported_receipts(source_tuple)
+    source_tuple[2]["database_dict"].update(state_str="error", now_str="Saved state unavailable")
+    source_tuple[0]["health_list"][0].update(severity_str="yellow", value_str="76% used")
+    source_tuple[1]["summary_dict"]["pod_row_dict_list"][0]["eod_snapshot_dict"].update(status_str="due_missing", severity_str="yellow")
+    source_tuple[2]["watchdog_dict"].update(state_str="unknown", now_str="Report unavailable")
+    source_tuple[2]["flex_dict"].update(state_str="unknown", now_str="Report unavailable")
+    source_tuple[0]["system_dict"] = {"state_str": "fail", "detail_str": "State DB unavailable · Disk 76% used · EOD Snapshot needs review"}
+    view_dict = _view_dict(source_tuple)
+    assert view_dict["state_str"] == "fail"
+    assert [row_dict["key_str"] for row_dict in view_dict["problem_list"]] == ["database", "disk", "eod:pod1"]
+    assert view_dict["problem_count_int"] == 5
+    assert view_dict["detail_str"] == "Database Saved state unavailable · Disk 76% used · First strategy EOD Due snapshot missing · 09-18 16:10:00 · and 2 more"
+    assert all(row_dict["key_str"] != "system" for row_dict in view_dict["problem_list"])
+
+
+def test_uncovered_base_system_cause_is_named_and_sorted_before_unknown(source_tuple):
+    source_tuple[0]["system_dict"] = {"state_str": "fail", "detail_str": "Pod state needs action"}
+    view_dict = _view_dict(source_tuple)
+    assert view_dict["problem_list"][0] == {"key_str": "system", "label_str": "System", "state_str": "fail", "detail_str": "Pod state needs action"}
+    assert view_dict["detail_str"].startswith("System Pod state needs action")
+    assert view_dict["problem_count_int"] == 3
+
+
+def test_norgate_same_source_problem_is_not_counted_twice(source_tuple):
+    _unsupported_receipts(source_tuple)
+    source_tuple[1]["summary_dict"]["pod_row_dict_list"][0]["norgate_snapshot_status_dict"]["severity_str"] = "red"
+    source_tuple[0]["system_dict"] = {"state_str": "fail", "detail_str": "Norgate needs action"}
+    view_dict = _view_dict(source_tuple)
+    assert view_dict["problem_count_int"] == 1
+    assert view_dict["problem_list"][0]["key_str"] == "norgate"
+
+
+def test_public_scope_check_is_pure_identity_only(source_tuple):
+    original_tuple = deepcopy(source_tuple)
+    assert system_scope_matches_bool(*source_tuple) is True
+    assert source_tuple == original_tuple
+    source_tuple[2]["checked_timestamp_str"] = "bad"
+    assert system_scope_matches_bool(*source_tuple) is True  # Caller separately checks age.
+    assert _view_dict(source_tuple)["pod_list"][0]["scheduler_state_str"] == "unk"
+
+
+@pytest.mark.parametrize("change_str", ["release_changed", "release_empty", "release_missing", "release_duplicate", "release_added",
+    "overview_removed", "overview_duplicate", "account_empty", "account_changed", "account_missing", "account_duplicate",
+    "row_duplicate", "row_missing", "row_paper", "scope_rejected"])
+def test_public_scope_check_rejects_changed_or_ambiguous_live_identity(source_tuple, change_str):
+    overview_dict, workspace_dict, source_dict = source_tuple
+    account_list = workspace_dict["operations_account_list"]
+    raw_list = workspace_dict["summary_dict"]["pod_row_dict_list"]
+    release_list = source_dict["release_list"]
+    if change_str == "release_changed":
+        release_list[0]["release_id_str"] = "replacement"
+    elif change_str == "release_empty":
+        release_list[0]["release_id_str"] = ""
+    elif change_str == "release_missing":
+        source_dict["release_list"] = []
+    elif change_str == "release_duplicate":
+        release_list.append(deepcopy(release_list[0]))
+    elif change_str == "release_added":
+        release_list.append({**release_list[0], "pod_id_str": "new_pod", "release_id_str": "new_release"})
+    elif change_str == "overview_removed":
+        overview_dict["pod_list"] = []
+    elif change_str == "overview_duplicate":
+        overview_dict["pod_list"].append(deepcopy(overview_dict["pod_list"][0]))
+    elif change_str == "account_empty":
+        account_list[0]["account_route"] = raw_list[0]["account_route_str"] = ""
+    elif change_str == "account_changed":
+        account_list[0]["account_route"] = "OTHER"
+    elif change_str == "account_missing":
+        workspace_dict["operations_account_list"] = []
+    elif change_str == "account_duplicate":
+        account_list.append(deepcopy(account_list[0]))
+    elif change_str == "row_duplicate":
+        raw_list.append(deepcopy(raw_list[0]))
+    elif change_str == "row_missing":
+        workspace_dict["summary_dict"]["pod_row_dict_list"] = []
+    elif change_str == "row_paper":
+        raw_list[0]["mode_str"] = "paper"
+    else:
+        source_dict["scope_verified_bool"] = False
+    assert system_scope_matches_bool(*source_tuple) is False
+    view_dict = _view_dict(source_tuple)
+    assert view_dict["state_str"] == "unk"
+    if change_str == "scope_rejected":
+        assert view_dict["release_list"] == []
+    assert all(pod_dict["scheduler_state_str"] == pod_dict["data_state_str"] == pod_dict["eod_state_str"] == "unk" for pod_dict in view_dict["pod_list"])
+
+
+def test_public_scope_check_ignores_disabled_and_non_live_release_metadata(source_tuple):
+    source_tuple[2]["release_list"].extend([
+        {"pod_id_str": "old_pod", "mode_str": "live", "enabled_bool": False, "release_id_str": "old_release"},
+        {"pod_id_str": "paper_pod", "mode_str": "paper", "enabled_bool": True, "release_id_str": "paper_release"}])
+    assert system_scope_matches_bool(*source_tuple) is True
+
+
+def test_public_scope_check_allows_verified_disabled_only_metadata_without_runtime_rows(source_tuple):
+    source_tuple[0]["pod_list"] = []
+    source_tuple[1].clear()
+    source_tuple[2]["release_list"][0]["enabled_bool"] = False
+    assert system_scope_matches_bool(*source_tuple) is True
+    view_dict = _view_dict(source_tuple)
+    assert view_dict["pod_list"] == [] and len(view_dict["release_list"]) == 1
+    source_tuple[2]["scope_verified_bool"] = False
+    assert system_scope_matches_bool(*source_tuple) is False
+
+
+def test_public_scope_check_rejects_two_pods_sharing_one_account(source_tuple):
+    overview_dict, workspace_dict, source_dict = source_tuple
+    overview_dict["pod_list"].append({**overview_dict["pod_list"][0], "pod_id_str": "second_pod"})
+    workspace_dict["operations_account_list"].append({**workspace_dict["operations_account_list"][0], "pod_id": "second_pod"})
+    workspace_dict["summary_dict"]["pod_row_dict_list"].append({**workspace_dict["summary_dict"]["pod_row_dict_list"][0],
+        "pod_id_str": "second_pod", "release_id_str": "second_release"})
+    source_dict["release_list"].append({**source_dict["release_list"][0], "pod_id_str": "second_pod", "release_id_str": "second_release"})
+    assert system_scope_matches_bool(*source_tuple) is False
+
+
+@pytest.mark.parametrize("change_str", ["changed_release", "stale_operations", "stale_overview", "operations_error"])
+def test_auxiliary_results_require_the_same_fresh_operations_scope(source_tuple, change_str):
+    _unsupported_receipts(source_tuple)
+    overview_dict, workspace_dict, source_dict = source_tuple
+    source_dict["watchdog_dict"].update(state_str="error", now_str="Current report failed")
+    if change_str == "changed_release":
+        source_dict["release_list"][0]["release_id_str"] = "new_release"
+    elif change_str == "stale_operations":
+        workspace_dict["summary_dict"]["as_of_timestamp_str"] = (NOW_TS - timedelta(seconds=120)).isoformat()
+    elif change_str == "stale_overview":
+        overview_dict["source_fresh_bool"] = False
+    else:
+        workspace_dict["operations_error_str"] = "Unavailable"
+    original_tuple = deepcopy(source_tuple)
+    view_dict = _view_dict(source_tuple)
+    rows_dict = _rows_dict(view_dict)
+    assert view_dict["state_str"] == "unk"
+    for key_str in ("watchdog", "flex", "database", "event_log"):
+        assert rows_dict[key_str]["state_str"] == "unk" and rows_dict[key_str]["now_str"] == "Unknown"
+    for key_str in ("gateway", "fred", "alerts", "deadman"):
+        assert rows_dict[key_str]["state_str"] == "skip" and rows_dict[key_str]["checked_bool"] is False
+    assert len(view_dict["release_list"]) == 1  # Verified configuration remains useful when runtime evidence is unavailable.
+    assert view_dict["release_list"][0]["release_id_str"] == source_dict["release_list"][0]["release_id_str"]
+    assert source_tuple == original_tuple

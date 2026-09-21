@@ -41,9 +41,12 @@ def _time_str(value_obj, as_of_ts):
     return local_ts.strftime("%H:%M:%S" if local_ts.date() == as_of_ts.astimezone(MARKET_TIMEZONE_OBJ).date() else "%m-%d %H:%M:%S")
 
 
-def _wake_str(value_obj):
+def _wake_str(value_obj, as_of_ts):
     timestamp_ts = _timestamp_ts(value_obj)
-    return timestamp_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%m-%d %H:%M:%S") if timestamp_ts else "—"
+    if timestamp_ts is None:
+        return "—"
+    local_ts = timestamp_ts.astimezone(MARKET_TIMEZONE_OBJ)
+    return local_ts.strftime("%H:%M:%S" if local_ts.date() == as_of_ts.astimezone(MARKET_TIMEZONE_OBJ).date() else "%m-%d %H:%M:%S")
 
 
 def _date_str(value_obj, as_of_ts):
@@ -71,9 +74,9 @@ def _norgate_state_str(norgate_dict, have_str, need_str):
     return state_str
 
 
-def _row_dict(key_str, label_str, state_str="unk", now_str="Unknown", last_str="—", expected_str="Not verified"):
+def _row_dict(key_str, label_str, state_str="unk", now_str="Unknown", last_str="—", expected_str="Not verified", *, checked_bool=True):
     return {"key_str": key_str, "label_str": label_str, "state_str": state_str,
-        "now_str": now_str, "last_str": last_str, "expected_str": expected_str}
+        "now_str": now_str, "last_str": last_str, "expected_str": expected_str, "checked_bool": checked_bool}
 
 
 def _scheduler_dict(status_dict, *, fresh_bool, as_of_ts):
@@ -105,17 +108,22 @@ def _scheduler_dict(status_dict, *, fresh_bool, as_of_ts):
         else:
             label_str = "Sleeping" if state_str == "sleeping" else "Running"
             phase_str = PHASE_LABEL_DICT.get(status_dict.get("next_phase_str"))
-            if state_str == "running" and phase_str:
-                label_str += " · " + phase_str
+            if phase_str:
+                label_str += " · " + ("next " if state_str == "sleeping" else "") + phase_str
     else:
         tone_str, label_str = "unk", "Unknown · recent activity only"
     return {"state_str": tone_str, "label_str": label_str, "last_str": last_str,
-        "wake_str": _wake_str(status_dict.get("promised_wake_timestamp_str")),
+        "wake_str": _wake_str(status_dict.get("promised_wake_timestamp_str"), as_of_ts),
         "alive_bool": known_bool and state_str not in {"late", "stopped"}}
 
 
 def _aux_row_dict(source_dict, key_str, label_str, *, as_of_ts):
     row_dict = source_dict.get(key_str + "_dict") or {}
+    # Unsupported checks remain neutral even when this assessment expires.
+    # A missing expected record has no explicit opt-out and remains Unknown.
+    if isinstance(row_dict, dict) and row_dict.get("checked_bool") is False:
+        return _row_dict(key_str, label_str, "skip", "Not checked here",
+            expected_str="Not checked here", checked_bool=False)
     if (source_dict.get("scope_verified_bool") is not True
         or not _fresh_bool(source_dict.get("checked_timestamp_str"), as_of_ts) or not isinstance(row_dict, dict)):
         return _row_dict(key_str, label_str)
@@ -132,36 +140,103 @@ def _aux_row_dict(source_dict, key_str, label_str, *, as_of_ts):
         str(row_dict.get("expected_str") or "Not verified")[:200])
 
 
+def _problems_list(group_list, pod_list, system_dict):
+    problem_list = []
+    row_map_dict = {row_dict["key_str"]: row_dict for group_dict in group_list for row_dict in group_dict["row_list"]}
+    for row_dict in row_map_dict.values():
+        if not row_dict["checked_bool"] or row_dict["state_str"] not in {"fail", "late", "unk"}:
+            continue
+        if row_dict["key_str"] == "market_data" and row_dict["state_str"] == row_map_dict["norgate"]["state_str"]:
+            continue  # Both rows describe the same saved Norgate evidence.
+        problem_list.append({"key_str": row_dict["key_str"], "label_str": row_dict["label_str"],
+            "state_str": row_dict["state_str"], "detail_str": row_dict["now_str"]})
+    for pod_dict in pod_list:
+        if pod_dict["eod_state_str"] in {"fail", "late", "unk"}:
+            problem_list.append({"key_str": "eod:" + pod_dict["pod_id_str"], "label_str": pod_dict["name_str"] + " EOD",
+                "state_str": pod_dict["eod_state_str"], "detail_str": pod_dict["eod_str"] if pod_dict["eod_str"] != "—" else "Unknown"})
+    base_state_str = system_dict.get("state_str", "unk")
+    if base_state_str in {"fail", "late", "unk"}:
+        covered_key_set = {row_dict["key_str"] for row_dict in problem_list}
+        cause_list = []
+        for cause_str in str(system_dict.get("detail_str") or "").split(" · "):
+            cause_str = cause_str.strip().rstrip(".")
+            key_str = next((key_str for prefix_str, key_str in (("Disk", "disk"), ("Scheduler", "schedulers"),
+                ("State DB", "database"), ("Norgate", "norgate"), ("EOD Snapshot", "eod")) if cause_str.startswith(prefix_str)), "")
+            covered_bool = key_str in covered_key_set or (key_str == "eod" and any(item_str.startswith("eod:") for item_str in covered_key_set))
+            if cause_str and not covered_bool:
+                cause_list.append(cause_str)
+        if cause_list or not any(STATE_RANK_DICT[row_dict["state_str"]] <= STATE_RANK_DICT[base_state_str] for row_dict in problem_list):
+            problem_list.append({"key_str": "system", "label_str": "System", "state_str": base_state_str,
+                "detail_str": " · ".join(cause_list) or {"fail": "Needs action", "late": "Needs review", "unk": "Unknown"}[base_state_str]})
+    return sorted(problem_list, key=lambda row_dict: STATE_RANK_DICT[row_dict["state_str"]])
+
+
+def _system_scoped_rows_dict(overview_dict, workspace_dict, source_dict):
+    if source_dict.get("scope_verified_bool") is not True:
+        return None
+    pod_list = overview_dict.get("pod_list") or []
+    release_list = source_dict.get("release_list") or []
+    if (not isinstance(pod_list, list) or not isinstance(release_list, list)
+        or any(not isinstance(item_dict, dict) for item_dict in pod_list + release_list)):
+        return None
+    pod_id_list = [pod_dict.get("pod_id_str") for pod_dict in pod_list]
+    enabled_list = [release_dict for release_dict in release_list
+        if release_dict.get("mode_str") == "live" and release_dict.get("enabled_bool") is True]
+    release_pod_list = [release_dict.get("pod_id_str") for release_dict in enabled_list]
+    if (any(not isinstance(pod_str, str) or not pod_str for pod_str in pod_id_list + release_pod_list)
+        or len(set(pod_id_list)) != len(pod_id_list) or len(set(release_pod_list)) != len(release_pod_list)
+        or set(pod_id_list) != set(release_pod_list)):
+        return None
+    if not pod_id_list:
+        return {}  # Valid disabled-only metadata does not require runtime rows.
+    account_list = workspace_dict.get("operations_account_list") or []
+    raw_list = (workspace_dict.get("summary_dict") or {}).get("pod_row_dict_list") or []
+    if (not isinstance(account_list, list) or not isinstance(raw_list, list)
+        or any(not isinstance(item_dict, dict) for item_dict in account_list + raw_list)):
+        return None
+    scoped_dict, account_set = {}, set()
+    for release_dict in enabled_list:
+        pod_id_str = release_dict["pod_id_str"]
+        account_match_list = [account_dict for account_dict in account_list if account_dict.get("pod_id") == pod_id_str]
+        row_match_list = [row_dict for row_dict in raw_list if row_dict.get("pod_id_str") == pod_id_str]
+        if len(account_match_list) != 1 or len(row_match_list) != 1:
+            return None
+        account_str = account_match_list[0].get("account_route")
+        release_str = release_dict.get("release_id_str")
+        row_dict = row_match_list[0]
+        if (not isinstance(account_str, str) or not account_str or account_str in account_set
+            or not isinstance(release_str, str) or not release_str
+            or row_dict.get("mode_str") != "live" or row_dict.get("release_id_str") != release_str
+            or row_dict.get("account_route_str") != account_str):
+            return None
+        account_set.add(account_str)
+        scoped_dict[pod_id_str] = row_dict
+    return scoped_dict
+
+
+def system_scope_matches_bool(overview_dict, workspace_dict, source_dict):
+    """Match current LIVE identities only; callers separately check source ages."""
+    return _system_scoped_rows_dict(overview_dict, workspace_dict, source_dict) is not None
+
+
 def build_system_page_dict(overview_dict, workspace_dict, source_dict, *, as_of_ts: datetime):
     if as_of_ts.tzinfo is None or as_of_ts.utcoffset() is None:
         raise ValueError("System health requires an aware clock.")
     summary_dict = workspace_dict.get("summary_dict") or {}
-    scope_verified_bool = (source_dict.get("scope_verified_bool") is True
+    scoped_dict = _system_scoped_rows_dict(overview_dict, workspace_dict, source_dict)
+    config_verified_bool = (source_dict.get("scope_verified_bool") is True
         and _fresh_bool(source_dict.get("checked_timestamp_str"), as_of_ts))
+    scope_verified_bool = scoped_dict is not None and config_verified_bool
     fresh_bool = (overview_dict.get("source_fresh_bool") is True
         and _fresh_bool(summary_dict.get("as_of_timestamp_str"), as_of_ts)
         and not workspace_dict.get("operations_error_str") and scope_verified_bool)
-    account_list = workspace_dict.get("operations_account_list") or []
-    account_map_dict = {}
-    for account_dict in account_list:
-        if isinstance(account_dict, dict):
-            account_map_dict.setdefault(account_dict.get("pod_id"), []).append(account_dict)
-    raw_list = summary_dict.get("pod_row_dict_list") or []
+    aux_source_dict = source_dict if fresh_bool else {**source_dict, "scope_verified_bool": False}
     pod_list, saved_list, scheduler_list, eod_state_list = [], [], [], []
     for pod_dict in overview_dict.get("pod_list") or []:
         pod_id_str = pod_dict["pod_id_str"]
-        account_match_list = account_map_dict.get(pod_id_str, [])
-        match_list = [row_dict for row_dict in raw_list if isinstance(row_dict, dict) and row_dict.get("pod_id_str") == pod_id_str]
-        release_match_list = [release_dict for release_dict in source_dict.get("release_list") or []
-            if isinstance(release_dict, dict) and release_dict.get("pod_id_str") == pod_id_str
-            and release_dict.get("mode_str") == "live" and release_dict.get("enabled_bool") is True]
-        saved_dict = match_list[0] if (fresh_bool and len(account_match_list) == len(match_list) == len(release_match_list) == 1
-            and match_list[0].get("mode_str") == "live"
-            and bool(release_match_list[0].get("release_id_str"))
-            and match_list[0].get("release_id_str") == release_match_list[0]["release_id_str"]
-            and isinstance(account_match_list[0].get("account_route"), str) and bool(account_match_list[0]["account_route"])
-            and match_list[0].get("account_route_str") == account_match_list[0].get("account_route")
-            and _fresh_bool(match_list[0].get("as_of_timestamp_str", summary_dict.get("as_of_timestamp_str")), as_of_ts)) else {}
+        saved_dict = (scoped_dict or {}).get(pod_id_str) or {}
+        if not fresh_bool or not _fresh_bool(saved_dict.get("as_of_timestamp_str", summary_dict.get("as_of_timestamp_str")), as_of_ts):
+            saved_dict = {}
         saved_list.append(saved_dict)
         scheduler_dict = _scheduler_dict(pod_dict.get("scheduler_dict") or {}, fresh_bool=bool(saved_dict), as_of_ts=as_of_ts)
         scheduler_list.append(scheduler_dict)
@@ -192,7 +267,8 @@ def build_system_page_dict(overview_dict, workspace_dict, source_dict, *, as_of_
             "eod_str": eod_str, "eod_state_str": eod_state_str})
     total_int = len(pod_list)
     alive_int = sum(item_dict["alive_bool"] for item_dict in scheduler_list)
-    scheduler_row_dict = _row_dict("schedulers", "Schedulers · LIVE", _worst_str([item_dict["state_str"] for item_dict in scheduler_list]),
+    scheduler_row_dict = _row_dict("schedulers", "Schedulers · LIVE", _worst_str([
+        "done" if item_dict["state_str"] == "skip" and item_dict["alive_bool"] else item_dict["state_str"] for item_dict in scheduler_list]),
         f"{alive_int} of {total_int} alive" if total_int else "No enabled LIVE Pods verified",
         "—", "One per Pod · wakes when promised")
     seen_list = [item_dict["last_str"] for item_dict in scheduler_list if item_dict["last_str"] != "—"]
@@ -200,11 +276,12 @@ def build_system_page_dict(overview_dict, workspace_dict, source_dict, *, as_of_
         scheduler_row_dict["last_str"] = "See Pods below"
     broker_time_list = [row_dict.get("latest_broker_snapshot_timestamp_str") for row_dict in saved_list
         if _time_str(row_dict.get("latest_broker_snapshot_timestamp_str"), as_of_ts) != "—"]
-    gateway_row_dict = _row_dict("gateway", "Broker gateway", now_str=f"Connection unverified · {len(broker_time_list)} of {total_int} saved reads",
-        last_str=_time_str(max(broker_time_list, key=_timestamp_ts), as_of_ts) if broker_time_list else "—",
-        expected_str="Saved reads do not prove a current connection")
+    broker_last_str = _time_str(max(broker_time_list, key=_timestamp_ts), as_of_ts) if broker_time_list else "—"
+    gateway_row_dict = _row_dict("gateway", "Broker gateway", "skip", "Not checked here",
+        last_str=f"{len(broker_time_list)} of {total_int} saved reads · {broker_last_str}" if broker_time_list else "—",
+        expected_str="Saved reads do not prove a current connection", checked_bool=False)
     continuous_list = [scheduler_row_dict, gateway_row_dict,
-        _aux_row_dict(source_dict, "alerts", "Alerts · Discord", as_of_ts=as_of_ts),
+        _aux_row_dict(aux_source_dict, "alerts", "Alerts · Discord", as_of_ts=as_of_ts),
         _row_dict("dashboard", "Dashboard", "done", "Responding", _time_str(as_of_ts.isoformat(), as_of_ts), "Refresh every 15 s")]
 
     norgate_state_list, sync_time_list, have_list, need_list, fred_state_list, fred_date_list = [], [], [], [], [], []
@@ -235,24 +312,23 @@ def build_system_page_dict(overview_dict, workspace_dict, source_dict, *, as_of_
     if sync_row_dict["state_str"] in {"fail", "late"}:
         sync_row_dict["now_str"] = ("Needs action" if sync_row_dict["state_str"] == "fail" else "Needs review") + " · " + (
             sync_data_str if have_str != "—" else "Data date unknown")
-    scheduled_list = [_aux_row_dict(source_dict, "watchdog", "Watchdog", as_of_ts=as_of_ts),
-        _aux_row_dict(source_dict, "deadman", "Dead-man ping", as_of_ts=as_of_ts), sync_row_dict,
-        _aux_row_dict(source_dict, "flex", "Flex import", as_of_ts=as_of_ts)]
+    scheduled_list = [_aux_row_dict(aux_source_dict, "watchdog", "Watchdog", as_of_ts=as_of_ts),
+        _aux_row_dict(aux_source_dict, "deadman", "Dead-man ping", as_of_ts=as_of_ts), sync_row_dict,
+        _aux_row_dict(aux_source_dict, "flex", "Flex import", as_of_ts=as_of_ts)]
     market_state_str = _worst_str(norgate_state_list)
     if market_state_str not in {"fail", "late"} and (not need_list or "—" in need_list):
         market_state_str = "unk"
     market_row_dict = _row_dict("market_data", "Market data", market_state_str,
         "Dates vary by Pod" if have_str == "See Pods below" else "Have " + have_str, sync_last_str, "Needed " + need_str)
-    fred_str = ("Last decision used " + min(fred_date_list) + " · current feed unverified"
-        if fred_date_list and "—" not in fred_date_list else "Current feed unverified")
+    fred_str = "Last decision used " + min(fred_date_list) if fred_date_list and "—" not in fred_date_list else "—"
     fred_state_str = _worst_str(fred_state_list)
     if fred_state_str in {"fail", "late"}:
         fred_str = ("Saved failure" if fred_state_str == "fail" else "Saved warning") + " · " + fred_str
-    fred_row_dict = _row_dict("fred", "Rates · FRED", fred_state_str, fred_str,
-        "—", "Current feed status is not saved")
-    event_row_dict = _aux_row_dict(source_dict, "event_log", "Event log", as_of_ts=as_of_ts)
+    fred_row_dict = _row_dict("fred", "Rates · FRED", "skip", "Not checked here",
+        fred_str, "Current feed status is not saved", checked_bool=False)
+    event_row_dict = _aux_row_dict(aux_source_dict, "event_log", "Event log", as_of_ts=as_of_ts)
     event_row_dict["expected_str"] = f"Idle scheduler may sleep {DEFAULT_IDLE_MAX_SLEEP_SECONDS_INT // 60} min · {LATE_AFTER_SECONDS_INT} s grace"
-    database_row_dict = _aux_row_dict(source_dict, "database", "Database", as_of_ts=as_of_ts)
+    database_row_dict = _aux_row_dict(aux_source_dict, "database", "Database", as_of_ts=as_of_ts)
     disk_list = [cell_dict for cell_dict in overview_dict.get("health_list") or [] if cell_dict.get("label_str") == "Disk"]
     disk_dict = disk_list[0] if len(disk_list) == 1 else {}
     disk_state_str = STATE_MAP_DICT.get(disk_dict.get("severity_str"), "unk") if fresh_bool else "unk"
@@ -265,13 +341,16 @@ def build_system_page_dict(overview_dict, workspace_dict, source_dict, *, as_of_
         {"label_str": "Runs on a schedule", "row_list": scheduled_list},
         {"label_str": "Data and space", "row_list": [market_row_dict, fred_row_dict, event_row_dict, database_row_dict, disk_row_dict]}]
     existing_state_str = (overview_dict.get("system_dict") or {}).get("state_str", "unk")
-    state_str = _worst_str([row_dict["state_str"] for group_dict in group_list for row_dict in group_dict["row_list"]]
+    state_str = _worst_str([row_dict["state_str"] for group_dict in group_list for row_dict in group_dict["row_list"] if row_dict["checked_bool"]]
         + eod_state_list + ([existing_state_str] if existing_state_str in STATE_RANK_DICT else ["unk"]))
     verdict_str = {"fail": "System needs action.", "late": "System needs review.",
         "unk": "Some system checks are unverified."}.get(state_str, "Saved system checks are current.")
-    detail_str = "Review failed or overdue checks." if state_str in {"fail", "late"} else "Saved evidence only. A current broker connection is not checked."
+    problem_list = _problems_list(group_list, pod_list, overview_dict.get("system_dict") or {})
+    detail_str = " · ".join(row_dict["label_str"] + " " + row_dict["detail_str"] for row_dict in problem_list[:3])
+    if len(problem_list) > 3:
+        detail_str += f" · and {len(problem_list) - 3} more"
     release_list = []
-    if scope_verified_bool:
+    if config_verified_bool:
         for release_dict in source_dict.get("release_list") or []:
             if release_dict.get("mode_str") != "live":
                 continue
@@ -279,5 +358,6 @@ def build_system_page_dict(overview_dict, workspace_dict, source_dict, *, as_of_
                 ("pod_id_str", "name_str", "mode_str", "enabled_bool", "release_id_str", "account_str")})
             release_list[-1]["trades_str"] = POLICY_LABEL_DICT.get(release_dict.get("execution_policy_str"), "Unknown")
     return {"verdict_str": verdict_str, "detail_str": detail_str, "state_str": state_str,
+        "problem_list": problem_list[:3], "problem_count_int": len(problem_list),
         "group_list": group_list, "pod_list": pod_list, "release_list": release_list,
         "as_of_timestamp_str": as_of_ts.isoformat()}

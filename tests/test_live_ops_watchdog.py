@@ -1,8 +1,12 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from copy import deepcopy
+from datetime import UTC, datetime, timedelta
+import hashlib
 import json
 from pathlib import Path
+
+import pytest
 
 import alpha.live.dashboard as dashboard_module
 import alpha.live.dashboard_v3.notifications as notifications_module
@@ -20,6 +24,8 @@ def _summary_dict(*, severity_str: str = "green") -> dict[str, object]:
         "pod_row_dict_list": [
             {
                 "pod_id_str": "pod_taa_live_01",
+                "user_id_str": "owner_one",
+                "release_id_str": "release_one",
                 "mode_str": "live",
                 "account_route_str": "U1",
                 "strategy_import_str": "strategies.taa_df.strategy_taa_df",
@@ -57,6 +63,8 @@ def _run_watchdog(
     heartbeat_env_url_str: str | None = None,
     discord_webhook_url_str: str | None = None,
     discord_delivery_bool: bool = True,
+    heartbeat_delivery_bool: bool = True,
+    step_list: list[str] | None = None,
 ) -> tuple[int, list[tuple[str, dict[str, object]]], list[tuple[str, dict[str, object]]], Path]:
     # Without this stub the real config.env would clobber test env vars via
     # override_existing_bool=True.
@@ -80,14 +88,18 @@ def _run_watchdog(
     heartbeat_call_list: list[tuple[str, dict[str, object]]] = []
 
     def fake_post_heartbeat_bool(url_str, payload_dict, *, timeout_seconds_float=3.0):
+        if step_list is not None:
+            step_list.append("heartbeat")
         heartbeat_call_list.append((url_str, payload_dict))
-        return True
+        return heartbeat_delivery_bool
 
     monkeypatch.setattr(ops_report_module, "post_heartbeat_bool", fake_post_heartbeat_bool)
 
     webhook_call_list: list[tuple[str, dict[str, object]]] = []
 
     def fake_post_discord_webhook_bool(url_str, payload_dict):
+        if step_list is not None:
+            step_list.append("discord")
         webhook_call_list.append((url_str, payload_dict))
         return discord_delivery_bool
 
@@ -343,3 +355,181 @@ def test_watchdog_heartbeat_url_flag_overrides_env(monkeypatch, tmp_path) -> Non
 
     assert return_code_int == 0
     assert heartbeat_call_list[0][0] == flag_url_str
+
+
+def test_run_receipt_is_saved_after_report_alert_state_and_heartbeat(monkeypatch, tmp_path, capsys):
+    step_list = []
+    original_report_fn = watchdog_module.write_report_atomic
+    original_state_fn = notifications_module.NotificationStateStore.save_state
+    original_receipt_fn = watchdog_module._write_run_receipt_atomic
+    completion_ts = AS_OF_TS + timedelta(seconds=17)
+    def report_fn(report_dict, output_path_str):
+        original_report_fn(report_dict, output_path_str)
+        step_list.append("report")
+    def state_fn(store_obj, state_obj):
+        original_state_fn(store_obj, state_obj)
+        step_list.append("state")
+    def receipt_fn(receipt_dict, output_path_str):
+        assert step_list == ["report", "discord", "state", "heartbeat"]
+        original_receipt_fn(receipt_dict, output_path_str)
+        step_list.append("receipt")
+    monkeypatch.setattr(watchdog_module, "write_report_atomic", report_fn)
+    monkeypatch.setattr(notifications_module.NotificationStateStore, "save_state", state_fn)
+    monkeypatch.setattr(watchdog_module, "_write_run_receipt_atomic", receipt_fn)
+    monkeypatch.setattr(ops_report_module, "utc_now_ts", lambda: completion_ts)
+    return_code_int, _heartbeat_list, _webhook_list, output_path_obj = _run_watchdog(
+        monkeypatch, tmp_path, summary_dict=_summary_dict(severity_str="red"), step_list=step_list,
+        heartbeat_env_url_str=HEARTBEAT_URL_STR, discord_webhook_url_str="https://discord.example/private-webhook")
+    assert return_code_int == 1
+    assert step_list == ["report", "discord", "state", "heartbeat", "receipt"]
+    receipt_dict = json.loads(output_path_obj.with_suffix(".run.json").read_text(encoding="utf-8"))
+    report_dict = json.loads(output_path_obj.read_text(encoding="utf-8"))
+    assert receipt_dict == {"schema_version_str": "live_ops_watchdog_run.v1",
+        "completed_at_utc_str": completion_ts.isoformat(), "report_generated_at_utc_str": AS_OF_TS.isoformat(),
+        "report_sha256_str": hashlib.sha256(json.dumps(report_dict, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")).hexdigest(),
+        "mode_str": "all", "scope_list": [{"mode_str": "live", "user_id_str": "owner_one",
+            "pod_id_str": "pod_taa_live_01", "account_route_str": "U1", "release_id_str": "release_one"}],
+        "heartbeat_status_str": "sent", "heartbeat_fail_signal_bool": True,
+        "notification_configured_bool": True, "notification_pending_live_count_int": 0}
+    assert json.loads(capsys.readouterr().out)["run_receipt_status_str"] == "saved"
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+@pytest.mark.parametrize("status_str,severity_str,url_str,delivered_bool,exit_int,fail_bool", [
+    ("sent", "green", HEARTBEAT_URL_STR, True, 0, False),
+    ("sent", "red", HEARTBEAT_URL_STR, True, 1, True),
+    ("failed", "green", HEARTBEAT_URL_STR, False, 0, False),
+    ("failed", "red", HEARTBEAT_URL_STR, False, 1, True),
+    ("disabled", "green", None, True, 0, False),
+    ("disabled", "red", None, True, 1, False),
+])
+def test_run_receipt_heartbeat_results_preserve_existing_exit_contract(monkeypatch, tmp_path, capsys,
+        status_str, severity_str, url_str, delivered_bool, exit_int, fail_bool):
+    return_code_int, heartbeat_list, _webhook_list, output_path_obj = _run_watchdog(monkeypatch, tmp_path,
+        summary_dict=_summary_dict(severity_str=severity_str), heartbeat_env_url_str=url_str,
+        heartbeat_delivery_bool=delivered_bool)
+    receipt_dict = json.loads(output_path_obj.with_suffix(".run.json").read_text(encoding="utf-8"))
+    result_dict = json.loads(capsys.readouterr().out)
+    assert return_code_int == exit_int
+    assert receipt_dict["heartbeat_status_str"] == result_dict["heartbeat_status_str"] == status_str
+    assert receipt_dict["heartbeat_fail_signal_bool"] is result_dict["heartbeat_fail_signal_bool"] is fail_bool
+    assert len(heartbeat_list) == (0 if url_str is None else 1)
+
+
+def test_run_receipt_failed_live_count_tracks_saved_pending_state_excludes_other_modes(monkeypatch, tmp_path, capsys):
+    summary_dict = _summary_dict(severity_str="red")
+    paper_dict = {**deepcopy(summary_dict["pod_row_dict_list"][0]), "pod_id_str": "paper_one",
+        "mode_str": "paper", "account_route_str": "DU1", "release_id_str": "release_paper"}
+    summary_dict["pod_row_dict_list"].append(paper_dict)
+    for delivery_bool, pending_int in [(False, 1), (True, 0), (True, 0)]:
+        _run_watchdog(monkeypatch, tmp_path, summary_dict=summary_dict, discord_delivery_bool=delivery_bool,
+            discord_webhook_url_str="https://discord.example/private-webhook", extra_argv_list=["--mode", "live"])
+        receipt_dict = json.loads((tmp_path / "ops_report_latest.run.json").read_text(encoding="utf-8"))
+        state_dict = json.loads((tmp_path / "watchdog_notification_state.json").read_text(encoding="utf-8"))
+        assert receipt_dict["notification_pending_live_count_int"] == pending_int
+        assert len([pod_str for pod_str in state_dict["pending_red_previous_severity_map_dict"] if pod_str == "pod_taa_live_01"]) == pending_int
+        assert {row_dict["mode_str"] for row_dict in receipt_dict["scope_list"]} == {"live"}
+        assert json.loads(capsys.readouterr().out)["run_receipt_status_str"] == "saved"
+
+
+def test_run_receipt_missing_webhook_keeps_pending_unknown_not_zero(monkeypatch, tmp_path, capsys):
+    summary_dict = _summary_dict(severity_str="red")
+    _run_watchdog(monkeypatch, tmp_path, summary_dict=summary_dict, discord_delivery_bool=False,
+        discord_webhook_url_str="https://discord.example/private-webhook")
+    capsys.readouterr()
+    _run_watchdog(monkeypatch, tmp_path, summary_dict=summary_dict)
+    receipt_dict = json.loads((tmp_path / "ops_report_latest.run.json").read_text(encoding="utf-8"))
+    state_dict = json.loads((tmp_path / "watchdog_notification_state.json").read_text(encoding="utf-8"))
+    assert receipt_dict["notification_configured_bool"] is False
+    assert receipt_dict["notification_pending_live_count_int"] is None
+    assert "pod_taa_live_01" in state_dict["pending_red_previous_severity_map_dict"]
+
+
+@pytest.mark.parametrize("phase_str", ["summary", "report", "notification"])
+def test_run_receipt_fatal_earlier_phase_keeps_prior_receipt_without_heartbeat(monkeypatch, tmp_path, capsys, phase_str):
+    receipt_path_obj = tmp_path / "ops_report_latest.run.json"
+    receipt_path_obj.write_text('{"prior_receipt":true}', encoding="utf-8")
+    def failure_fn(*argument_list, **argument_dict):
+        raise RuntimeError("Private failure")
+    if phase_str == "report":
+        monkeypatch.setattr(watchdog_module, "write_report_atomic", failure_fn)
+    elif phase_str == "notification":
+        monkeypatch.setattr(notifications_module, "check_and_notify_for_red_transitions", failure_fn)
+    return_code_int, heartbeat_list, _webhook_list, output_path_obj = _run_watchdog(monkeypatch, tmp_path,
+        summary_builder_fn=failure_fn if phase_str == "summary" else None, heartbeat_env_url_str=HEARTBEAT_URL_STR)
+    assert return_code_int == 2 and heartbeat_list == []
+    assert receipt_path_obj.read_text(encoding="utf-8") == '{"prior_receipt":true}'
+    assert output_path_obj.exists() is (phase_str == "notification")
+    assert json.loads(capsys.readouterr().out)["reason_code_str"] == "watchdog_fatal_error"
+
+
+def test_run_receipt_prior_success_hash_cannot_match_report_from_later_fatal_pass(monkeypatch, tmp_path, capsys):
+    _run_watchdog(monkeypatch, tmp_path, heartbeat_env_url_str=HEARTBEAT_URL_STR)
+    capsys.readouterr()
+    receipt_path_obj = tmp_path / "ops_report_latest.run.json"
+    before_bytes = receipt_path_obj.read_bytes()
+    def failed_notification_fn(*argument_list, **argument_dict):
+        raise OSError("state write failed")
+    monkeypatch.setattr(notifications_module, "check_and_notify_for_red_transitions", failed_notification_fn)
+    return_code_int, heartbeat_list, _webhook_list, output_path_obj = _run_watchdog(monkeypatch, tmp_path,
+        summary_dict=_summary_dict(severity_str="red"), heartbeat_env_url_str=HEARTBEAT_URL_STR)
+    report_dict = json.loads(output_path_obj.read_text(encoding="utf-8"))
+    assert return_code_int == 2 and heartbeat_list == [] and receipt_path_obj.read_bytes() == before_bytes
+    assert hashlib.sha256(json.dumps(report_dict, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")).hexdigest() != json.loads(before_bytes)["report_sha256_str"]
+
+
+@pytest.mark.parametrize("severity_str,expected_exit_int", [("green", 0), ("red", 1)])
+def test_run_receipt_atomic_replace_failure_preserves_previous_file_network_and_exit(monkeypatch, tmp_path, capsys, severity_str, expected_exit_int):
+    receipt_path_obj = tmp_path / "ops_report_latest.run.json"
+    receipt_path_obj.write_text('{"prior_receipt":true}', encoding="utf-8")
+    original_replace_fn = watchdog_module.os.replace
+    def replacement_fn(source_obj, target_obj):
+        if Path(target_obj) == receipt_path_obj:
+            raise PermissionError("secret filesystem path and token")
+        return original_replace_fn(source_obj, target_obj)
+    monkeypatch.setattr(watchdog_module.os, "replace", replacement_fn)
+    return_code_int, heartbeat_list, webhook_list, _output_obj = _run_watchdog(monkeypatch, tmp_path,
+        summary_dict=_summary_dict(severity_str=severity_str), heartbeat_env_url_str=HEARTBEAT_URL_STR,
+        discord_webhook_url_str="https://discord.example/private-webhook")
+    result_dict = json.loads(capsys.readouterr().out)
+    assert return_code_int == expected_exit_int and len(heartbeat_list) == 1
+    assert len(webhook_list) == (1 if severity_str == "red" else 0)
+    assert result_dict["heartbeat_status_str"] == "sent"
+    assert result_dict["run_receipt_status_str"] == "unavailable"
+    assert result_dict["run_receipt_reason_code_str"] == "watchdog_run_receipt_unavailable"
+    assert "secret" not in str(result_dict)
+    assert receipt_path_obj.read_text(encoding="utf-8") == '{"prior_receipt":true}'
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+@pytest.mark.parametrize("problem_str", ["missing_owner", "invalid_release", "duplicate", "bad_mode", "oversized"])
+def test_run_receipt_invalid_scope_is_withheld_after_existing_actions_complete(monkeypatch, tmp_path, capsys, problem_str):
+    summary_dict = _summary_dict()
+    row_dict = summary_dict["pod_row_dict_list"][0]
+    if problem_str == "missing_owner":
+        del row_dict["user_id_str"]
+    elif problem_str == "invalid_release":
+        row_dict["release_id_str"] = "C:/private/path"
+    elif problem_str == "duplicate":
+        summary_dict["pod_row_dict_list"].append(deepcopy(row_dict))
+    elif problem_str == "bad_mode":
+        row_dict["mode_str"] = "other"
+    else:
+        summary_dict["pod_row_dict_list"] = [deepcopy(row_dict)] * 129
+    return_code_int, heartbeat_list, _webhook_list, output_obj = _run_watchdog(monkeypatch, tmp_path,
+        summary_dict=summary_dict, heartbeat_env_url_str=HEARTBEAT_URL_STR)
+    assert return_code_int == 0 and len(heartbeat_list) == 1 and output_obj.exists()
+    assert not output_obj.with_suffix(".run.json").exists()
+    result_dict = json.loads(capsys.readouterr().out)
+    assert result_dict["run_receipt_reason_code_str"] == "watchdog_run_receipt_unavailable"
+
+
+def test_run_receipt_contains_only_identity_time_and_result_not_private_payloads(monkeypatch, tmp_path):
+    summary_dict = _summary_dict()
+    summary_dict["pod_row_dict_list"][0]["private_dict"] = {"token": "TOP-SECRET", "path": "C:/private/state.sqlite"}
+    summary_dict["pod_row_dict_list"][0]["debug_summary_dict"]["primary_reason_str"] = "TOP-SECRET"
+    _run_watchdog(monkeypatch, tmp_path, summary_dict=summary_dict,
+        heartbeat_env_url_str="https://secret.example/private-heartbeat", discord_webhook_url_str="https://secret.example/private-discord")
+    receipt_str = (tmp_path / "ops_report_latest.run.json").read_text(encoding="utf-8")
+    for private_str in ("TOP-SECRET", "C:/private", "secret.example", "private-heartbeat", "private-discord", "vps_01", "primary_reason_str"):
+        assert private_str not in receipt_str

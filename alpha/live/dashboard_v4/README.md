@@ -241,8 +241,9 @@ and notification delivery needs an explicit saved receipt.
 The Operator category includes saved V3 dashboard requests and manual-order
 request/submission/failure events. CLI commands are not comprehensively recorded
 in the operator journal. A completed manual submission is not proof of a fill.
-The current engine does not write notification delivery receipts, so the demo
-does not invent delivered-alert rows. Unknown routine events fold into per-day,
+The activity log has no per-alert delivery receipts, so the demo does not invent
+delivered-alert rows. The separate watchdog run receipt supplies System health
+only. Unknown routine events fold into per-day,
 per-Pod Other events groups with each original record available; warnings,
 failures, alert and operator families remain individual rows. Missing descriptions
 never imply success. PAPER and INCUBATION records remain excluded.
@@ -269,32 +270,61 @@ scheduler, last observed activity, promised wake, saved data, broker read and EO
 What should run lists the current LIVE release metadata, including disabled
 releases. Accounts are masked. The shared System light links to this page.
 
-The page uses the existing operations workspace and scheduler reader. It adds
-bounded reads of the saved watchdog report, file metadata and the bound Flex
-import dates; it does not connect to a broker, scan full logs, build financial
+All V4 pages use the same System assessment, including the lightweight
+Performance status refresh. The reader adds bounded reads of the saved watchdog
+report/receipts, file metadata and bound Flex coverage/sync-attempt metadata;
+it does not connect to a broker, scan full logs, build financial
 reports, inspect Windows task registration, or start any operation. Scope is
 validated before runtime reads: one owner, unique enabled LIVE Pod/account
 identities, and matching current releases. Disabled-only metadata causes no
 runtime reads. Missing, contradictory, stale or future evidence cannot be green.
 
-Saved broker snapshots prove an earlier read, not a connection now. The watchdog
-report is saved before notification delivery and can also be produced manually,
-so it does not prove the scheduled task or delivery succeeded. Discord/dead-man
-delivery remains unverified without receipts. Flex shows the latest saved close
-and import time, not a claimed daily job success. FRED dates come from a saved
-decision and do not prove the feed is current. No cadence is guessed from the
-mockup. The Event log check uses the existing scheduler idle ceiling (60 minutes)
-and 60-second wake allowance; the watchdog report age policy is 900 seconds,
-not a claim about its task schedule.
+Checks without a supported current observation say `Not checked here`, remain
+neutral through refresh failures, and do not affect the verdict. This applies
+to the broker connection and FRED feed: saved broker reads and decision dates
+remain visible as history. Missing, stale or invalid evidence for a supported
+check remains Unknown/Late and affects the verdict. The summary names up to
+three problems, worst first; mobile shows problem rows before other checks.
 
-The System page header includes these additional service assessments; other
-pages retain their existing operations health assessment. The page refreshes
-every 15 seconds. Failed refreshes and the existing 120-second source expiry
-clear current status labels and icons while retaining expected configuration.
+A fresh, scoped watchdog report proves `Report saved`; the report can also be
+produced manually and is written before notification delivery. The watchdog now
+atomically writes a final sibling receipt (`ops_report_latest.run.json` by
+default) after its existing heartbeat attempt. The receipt carries the actual
+completion time, exact LIVE scope, canonical report SHA256 and heartbeat result.
+Only a matching fresh pair proves `Run completed`. Missing legacy receipts are
+neutral for the ping; malformed, mismatched or stale receipts are not accepted.
+Receipt failure leaves prior alert/ping behavior and exit codes unchanged.
+`Fail signal sent` means the failure heartbeat was delivered successfully.
+It does not mean the saved report was healthy. This dashboard cannot detect a
+dead VPS while running on that VPS; the already-configured external dead-man
+service must detect missing pings. No external monitoring service is configured
+by this change.
+
+Alerts show the saved count of LIVE alerts pending retry, never invent a
+delivery acknowledgement from an empty map. Old notification files without a
+pending map remain Unknown. Flex uses the existing account binding, daily
+coverage and `sync_attempt` receipt; a failure can be shown even before the first
+import. Coverage follows the existing daily 08:00 ET rule, including weekends,
+so a newly closed market does not immediately create a false Late. No financial
+history or return calculation is rebuilt by these health reads.
+
+The Event log check uses the existing scheduler idle ceiling (60 minutes) and
+60-second wake allowance; the watchdog report age policy is 900 seconds, not a
+claim about its task schedule. Scheduler evidence uses bounded 64 KiB log tails
+and the exact per-Pod trace file. Busy shared logs may evict that Pod's event;
+without its trace evidence the state is Unknown. Reason codes may contain digits;
+an unsupported reason label is omitted without hiding a valid failure event.
+
+Pages refresh status every 15 seconds. Failed refreshes and the existing
+120-second source expiry clear current status labels and icons while retaining
+expected configuration and unsupported neutral rows. Time spent reading service
+evidence consumes that same lifetime; changed releases invalidate current claims
+across all pages. PAPER and INCUBATION health remain deferred, as elsewhere in V4.
 Status JSON and Diagnostic JSON download only the sanitized view model, never
 raw reports, paths, account numbers, webhook addresses or exception messages.
 No export file is written on the server. The demo provides explicit synthetic
-service evidence and never falls back to real service sources.
+service evidence and a fixed 78% disk warning; it never probes the host disk or
+falls back to real service sources.
 
 ## Verification
 
@@ -349,4 +379,7 @@ were inspected; this does not verify real Pod coverage or VPS performance.
   read-only DB readers retain their file-preservation tests.
   The new UI runs as a separate local process. No production restart or deployment
   is performed.
-- Changes are confined to this package and its tests. No V3 code is modified.
+- Dashboard changes are confined to this package and its tests. No V3 code is
+  modified. The watchdog adds only a final atomic JSON receipt and two stdout
+  receipt-status fields; its notification order, heartbeat calls and exit codes
+  are unchanged. Existing receipt/state/report consumers remain compatible.

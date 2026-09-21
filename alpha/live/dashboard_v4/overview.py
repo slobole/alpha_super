@@ -182,7 +182,11 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
                 existing_dict["scheduler_note_str"] = scheduler_note_str(scheduler_dict)
 
     scoped_summary_dict = {**source_dict, "pod_row_dict_list": scoped_row_list}
-    health_obj = build_health_rollup({**source_dict, "pod_row_dict_list": health_row_list}, mode_str="live")
+    if demo_bool:
+        from alpha.live.dashboard_v4.system_demo import build_demo_health_rollup
+        health_obj = build_demo_health_rollup({"pod_row_dict_list": health_row_list})
+    else:
+        health_obj = build_health_rollup({**source_dict, "pod_row_dict_list": health_row_list}, mode_str="live")
     system_state_str = _state_str(health_obj.severity_str) if fresh_bool and pod_list else "unk"
     database_failed_bool = fresh_bool and any(row_dict.get("db_status_str") in {"missing", "error"} for row_dict in scoped_row_list)
     if database_failed_bool:

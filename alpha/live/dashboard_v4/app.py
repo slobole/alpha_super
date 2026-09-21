@@ -7,7 +7,7 @@ import re
 from flask import Flask, Response, abort, jsonify, render_template, request, send_from_directory, url_for
 
 from alpha.live.dashboard_v4.data import LiveDataProvider, load_workspace_snapshot_tuple
-from alpha.live.dashboard_v4.overview import build_overview_dict
+from alpha.live.dashboard_v4.overview import STATE_RANK_DICT, build_overview_dict
 from alpha.live.dashboard_v4.pod import TAB_TUPLE, build_pod_page_dict
 from alpha.live.dashboard_v4.pod_finance import build_pod_finance_dict
 from alpha.live.dashboard_v4.positions import build_positions_page_dict
@@ -17,7 +17,7 @@ from alpha.live.dashboard_v4.status import load_operations_workspace_dict
 from alpha.live.dashboard_v4.activity import build_activity_page_dict
 from alpha.live.dashboard_v4.activity_data import load_activity_source_dict
 from alpha.live.dashboard_v4.activity_cycles import build_activity_cycles_dict
-from alpha.live.dashboard_v4.system import build_system_page_dict
+from alpha.live.dashboard_v4.system import build_system_page_dict, system_scope_matches_bool
 from alpha.live.dashboard_v4.system_data import load_system_source_dict
 from alpha.live.dashboard_v3.client_operations import SOURCE_MAX_AGE_SECONDS_INT
 from alpha.live.dashboard_v3.filters import MARKET_TIMEZONE_OBJ
@@ -150,8 +150,15 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
                 clock_timestamp_str=render_ts.isoformat(),
                 clock_str=render_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%H:%M:%S"),
                 date_str=render_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%a %m-%d"))
+            finalize_system_dict(overview_dict, workspace_dict)
+            if not overview_dict["source_fresh_bool"]:
+                positions_page_dict["source_fresh_bool"] = False
+                for row_dict in positions_page_dict["row_list"]:
+                    if row_dict["today_pending_bool"]:
+                        row_dict["today_detail_str"] = "Unknown"
             return {"overview_dict": overview_dict, "positions_page_dict": positions_page_dict}
         if pod_id_str is None:
+            finalize_system_dict(overview_dict, workspace_dict)
             return {"overview_dict": overview_dict}
         if not any(item_dict["pod_id_str"] == pod_id_str for item_dict in overview_dict["pod_list"]):
             abort(404)
@@ -210,8 +217,9 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             date_str=render_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%a %m-%d"))
         source_dict["selected_explicit_bool"] = bool(cycle_str)
         source_dict["selected_current_bool"] = selected_current_bool
+        finalize_system_dict(overview_dict, workspace_dict)
         pod_page_dict = build_pod_page_dict(overview_dict, source_dict, pod_finance_dict,
-            pod_id_str=pod_id_str, as_of_ts=render_ts, tab_str=tab_str)
+            pod_id_str=pod_id_str, as_of_ts=clock_fn(), tab_str=tab_str)
         selected_cycle_str = (source_dict.get("selected_cycle_dict") or {}).get("cycle_key_str") or cycle_str
         def pod_url_str(**options_dict):
             return url_for("pod", pod_id_str=pod_id_str, period=options_dict.get("period", period_str),
@@ -284,6 +292,7 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         overview_dict = build_overview_dict(workspace_dict, None, provider_obj,
             as_of_ts=render_ts, demo_bool=demo_bool, include_finance_bool=False)
         overview_dict.update(refresh_url_str=url_for("activity_refresh", days=days_int), refresh_seconds_int=15)
+        finalize_system_dict(overview_dict, workspace_dict)
         activity_page_dict = build_activity_page_dict(overview_dict, source_dict, cycle_dict,
             as_of_ts=acquisition_ts, days_int=days_int)
         next_days_int = next((value_int for value_int in (14, 30, 90) if value_int > days_int), None)
@@ -300,6 +309,55 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
     def activity_refresh():
         return activity_response(refresh_bool=True)
 
+    def finalize_system_dict(overview_dict, workspace_dict, source_dict=None):
+        """One saved-service assessment for every page and status refresh."""
+        acquisition_ts = clock_fn()
+        if source_dict is None:
+            source_dict = (provider_obj.get_system_source_dict(workspace_dict, as_of_ts=acquisition_ts)
+                if hasattr(provider_obj, "get_system_source_dict") else load_system_source_dict(
+                    provider_obj, workspace_dict, as_of_ts=acquisition_ts, performance_db_path_str=database_path_str))
+        completed_ts = clock_fn()
+        render_ts = parse_timestamp_ts(overview_dict["clock_timestamp_str"])
+        # All reads consume the lifetime; this does not reacquire cycle evidence.
+        elapsed_ms_int = max(0, int((completed_ts - render_ts).total_seconds() * 1000))
+        overview_dict["source_valid_ms_int"] = max(0, overview_dict["source_valid_ms_int"] - elapsed_ms_int)
+        try:
+            checked_ts = datetime.fromisoformat(source_dict.get("checked_timestamp_str", "").replace("Z", "+00:00"))
+            checked_age_float = (completed_ts - checked_ts).total_seconds() if checked_ts.tzinfo is not None else -1
+        except (TypeError, ValueError, AttributeError, OverflowError):
+            checked_age_float = -1
+        source_remaining_ms_int = (int((SOURCE_MAX_AGE_SECONDS_INT - checked_age_float) * 1000)
+            if 0 <= checked_age_float <= SOURCE_MAX_AGE_SECONDS_INT else 0)
+        overview_dict["source_valid_ms_int"] = min(overview_dict["source_valid_ms_int"], source_remaining_ms_int)
+        overview_dict["source_fresh_bool"] = bool(overview_dict["source_fresh_bool"]
+            and overview_dict["source_valid_ms_int"] > 0
+            and system_scope_matches_bool(overview_dict, workspace_dict, source_dict))
+        if not overview_dict["source_fresh_bool"]:
+            overview_dict["source_valid_ms_int"] = 0
+            overview_dict["live_state_str"] = "unk"
+            overview_dict["system_dict"] = {"state_str": "unk", "label_str": "System unknown", "detail_str": ""}
+            overview_dict["attention_list"] = []
+            for pod_dict in overview_dict["pod_list"]:
+                pod_dict.update(state_str="unk", pill_str="Unknown", now_str="Unknown",
+                    now_detail_str="Saved status is out of date.", next_str="—", next_time_str="",
+                    next_detail_str="Not current", next_timestamp_str="", next_forecast_bool=False)
+                for step_dict in pod_dict["step_list"]:
+                    step_dict["state_str"] = "unk"
+        system_page_dict = build_system_page_dict(overview_dict, workspace_dict, source_dict, as_of_ts=completed_ts)
+        overview_dict["system_dict"] = {"state_str": system_page_dict["state_str"],
+            "label_str": {"fail": "System needs action", "late": "System needs review",
+                          "unk": "System unknown"}.get(system_page_dict["state_str"], "System OK"),
+            "detail_str": system_page_dict["detail_str"]}
+        overview_dict["live_state_str"] = min(
+            [pod_dict["state_str"] for pod_dict in overview_dict["pod_list"]] + [system_page_dict["state_str"]],
+            key=STATE_RANK_DICT.get)
+        if not overview_dict["attention_list"] and system_page_dict["state_str"] in {"fail", "late", "unk"}:
+            overview_dict.update(verdict_str=system_page_dict["verdict_str"], verdict_detail_str=system_page_dict["detail_str"])
+        overview_dict.update(clock_timestamp_str=completed_ts.isoformat(),
+            clock_str=completed_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%H:%M:%S"),
+            date_str=completed_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%a %m-%d"))
+        return system_page_dict
+
     def system_response(*, refresh_bool=False):
         allowed_set = set() if refresh_bool else {"download"}
         if set(request.args) - allowed_set or any(len(request.args.getlist(key_str)) != 1 for key_str in request.args):
@@ -313,37 +371,10 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         source_dict = (provider_obj.get_system_source_dict(workspace_dict, as_of_ts=acquisition_ts)
             if hasattr(provider_obj, "get_system_source_dict") else load_system_source_dict(
                 provider_obj, workspace_dict, as_of_ts=acquisition_ts, performance_db_path_str=database_path_str))
-        render_ts = clock_fn()
         overview_dict = build_overview_dict(workspace_dict, None, provider_obj,
-            as_of_ts=render_ts, demo_bool=demo_bool, include_finance_bool=False)
-        completed_ts = clock_fn()
-        # Saved cycle/scheduler reads also consume the source lifetime.
-        elapsed_ms_int = max(0, int((completed_ts - render_ts).total_seconds() * 1000))
-        overview_dict["source_valid_ms_int"] = max(0, overview_dict["source_valid_ms_int"] - elapsed_ms_int)
-        try:
-            checked_ts = datetime.fromisoformat(source_dict.get("checked_timestamp_str", "").replace("Z", "+00:00"))
-            checked_age_float = (completed_ts - checked_ts).total_seconds() if checked_ts.tzinfo is not None else -1
-        except (TypeError, ValueError, AttributeError, OverflowError):
-            checked_age_float = -1
-        source_remaining_ms_int = (int((SOURCE_MAX_AGE_SECONDS_INT - checked_age_float) * 1000)
-            if 0 <= checked_age_float <= SOURCE_MAX_AGE_SECONDS_INT else 0)
-        overview_dict["source_valid_ms_int"] = min(overview_dict["source_valid_ms_int"], source_remaining_ms_int)
-        overview_dict["source_fresh_bool"] = bool(overview_dict["source_fresh_bool"]
-            and overview_dict["source_valid_ms_int"] > 0 and source_dict.get("scope_verified_bool") is True)
-        if not overview_dict["source_fresh_bool"]:
-            overview_dict["source_valid_ms_int"] = 0
-            overview_dict["live_state_str"] = "unk"
-            overview_dict["system_dict"] = {"state_str": "unk", "label_str": "System unknown", "detail_str": ""}
-            for pod_dict in overview_dict["pod_list"]:
-                pod_dict["state_str"] = "unk"
+            as_of_ts=clock_fn(), demo_bool=demo_bool, include_finance_bool=False)
         overview_dict.update(refresh_url_str=url_for("system_refresh"), refresh_seconds_int=15)
-        system_page_dict = build_system_page_dict(overview_dict, workspace_dict, source_dict, as_of_ts=completed_ts)
-        # This page reads additional service evidence. Its header must not say
-        # System OK beside an overdue or unverified check in the same response.
-        overview_dict["system_dict"] = {"state_str": system_page_dict["state_str"],
-            "label_str": {"fail": "System needs action", "late": "System needs review",
-                          "unk": "System unknown"}.get(system_page_dict["state_str"], "System OK"),
-            "detail_str": ""}
+        system_page_dict = finalize_system_dict(overview_dict, workspace_dict, source_dict)
         if download_str:
             # Export the same allowlisted presentation, never raw reports, logs,
             # config, account routes, webhook addresses or diagnostic exceptions.
@@ -440,6 +471,7 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         for row_dict in performance_page_dict["pod_row_list"]:
             row_dict["url_str"] = url_for("pod", pod_id_str=row_dict["pod_id_str"]) if row_dict["pod_id_str"] in active_pod_set else ""
         overview_dict.update(refresh_url_str=url_for("performance_status"), refresh_seconds_int=15)
+        finalize_system_dict(overview_dict, workspace_dict)
         template_str = "_overview.html" if refresh_bool or request.headers.get("HX-Request") == "true" else "overview.html"
         return render_template(template_str, overview_dict=overview_dict, performance_page_dict=performance_page_dict)
 
@@ -455,12 +487,12 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
     def performance_status():
         if request.args:
             abort(400)
-        # This path never reads Flex imports, performance bindings or financial
-        # history. Demo/status injection is separate from financial acquisition.
+        # Read operations and small service receipts, never build financial history.
         workspace_dict = (load_operations_workspace_dict(provider_obj, as_of_ts=clock_fn())
             if operations_workspace_fn is None else operations_workspace_fn())
         overview_dict = build_overview_dict(workspace_dict, None, provider_obj,
             as_of_ts=clock_fn(), demo_bool=demo_bool, include_finance_bool=False)
+        finalize_system_dict(overview_dict, workspace_dict)
         return render_template("_performance_status.html", overview_dict=overview_dict)
 
     @flask_app_obj.get("/assets/<path:filename>")

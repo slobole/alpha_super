@@ -15,6 +15,8 @@
 .system-releases th:first-child { width: 24%; }
 .system-releases th:nth-child(4) { width: 30%; }
 .system-downloads { display: flex; flex-wrap: wrap; gap: 8px; }
+.system-priority-title { display: none; }
+.system-page tbody tr:last-child th { border-bottom: 0; }
 @media (max-width: 900px) {
   .system-page .page-head .h1i { display: flex; }
   .system-page .page-head .asof { display: block; }
@@ -30,5 +32,13 @@
   .system-page .tag { justify-self: start; }
   .system-page .system-group { padding: 8px 12px; background: var(--gray-bg); }
   .system-page .system-group th { margin-bottom: 0; }
+  .system-page .system-table tbody { display: flex; flex-direction: column; }
+  .system-table tbody > tr { order: 1; }
+  .system-table tbody > .system-problem { order: 0; }
+  .system-table tbody > .system-problem:has(.st-unk) { order: -1; }
+  .system-table tbody > .system-problem:has(.st-late) { order: -2; }
+  .system-table tbody > .system-problem:has(.st-fail) { order: -3; }
+  .system-page .system-priority-title { order: -4; padding: 8px 12px; background: var(--gray-bg); }
+  .system-page .system-group-empty { display: none; }
   .system-pods th:first-child, .system-pods th:nth-child(2), .system-releases th:first-child, .system-releases th:nth-child(4) { width: auto; }
 }

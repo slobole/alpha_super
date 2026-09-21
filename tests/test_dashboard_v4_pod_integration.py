@@ -20,8 +20,11 @@ def test_historical_release_provider_and_all_page_reads_preserve_database(tmp_pa
     target_obj = _upgrade_target_obj(target_obj)
     _decision_only_int(target_obj, release_id_str="release-v2", status_str="planned")
     now_ts = NOW_TS + timedelta(days=1)
-    provider_obj = LiveDataProvider()
+    provider_obj = LiveDataProvider(releases_root_path_str="", event_log_path_str=str(tmp_path / "events.jsonl"))
     monkeypatch.setattr(provider_obj, "get_target_for_pod", lambda pod_id_str: target_obj)
+    # The shared System assessment must see this same temporary release, not
+    # the workstation's real release directory or event log.
+    monkeypatch.setattr(provider_obj, "get_target_list", lambda: [target_obj], raising=False)
     db_path_obj = tmp_path / "pod.sqlite3"
     before_bytes, before_mtime_int = db_path_obj.read_bytes(), db_path_obj.stat().st_mtime_ns
     source_dict = provider_obj.get_pod_cycles_dict("pod", as_of_ts=now_ts, vplan_id_int=1)
@@ -37,7 +40,8 @@ def test_historical_release_provider_and_all_page_reads_preserve_database(tmp_pa
     current_dict = provider_obj.get_pod_cycles_dict("pod", as_of_ts=now_ts)
     workspace_dict["summary_dict"].update(as_of_timestamp_str=now_ts.isoformat(),
         pod_row_dict_list=[current_dict["pod_row_dict"]])
-    app_obj = create_app(provider_obj, workspace_snapshot_fn=lambda: (deepcopy(workspace_dict), snapshot_obj), now_fn=lambda: now_ts)
+    app_obj = create_app(provider_obj, workspace_snapshot_fn=lambda: (deepcopy(workspace_dict), snapshot_obj),
+        performance_db_path_str=str(tmp_path / "performance.sqlite3"), now_fn=lambda: now_ts)
     for tab_str in ("plan", "decision", "orders", "fills", "reconcile", "events", "files"):
         for suffix_str in ("", "/refresh"):
             response_obj = app_obj.test_client().get(f"/pods/pod{suffix_str}?cycle=vplan:1&tab={tab_str}")

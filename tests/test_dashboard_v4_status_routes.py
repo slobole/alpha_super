@@ -32,6 +32,9 @@ def test_explicit_status_callback_never_calls_financial_callback_or_default_load
     monkeypatch.setattr("alpha.live.dashboard_v4.app.load_workspace_snapshot_tuple", _forbidden_finance)
     monkeypatch.setattr("alpha.live.dashboard_v4.app.load_operations_workspace_dict", _forbidden_finance)
     monkeypatch.setattr("alpha.live.dashboard_v4.app.build_performance_page_dict", _forbidden_finance)
+    # The shared System light reads bounded service receipts, not financial history.
+    monkeypatch.setattr("alpha.live.dashboard_v4.app.load_system_source_dict", lambda *args_tuple, **kwargs_dict:
+        {"scope_verified_bool": True, "checked_timestamp_str": AS_OF_TS.isoformat()})
     app_obj = create_app(object(), workspace_snapshot_fn=_forbidden_finance,
         operations_workspace_fn=operations_fn, now_fn=lambda: AS_OF_TS)
     response_obj = app_obj.test_client().get("/performance/status")
@@ -42,7 +45,9 @@ def test_explicit_status_callback_never_calls_financial_callback_or_default_load
     for element_str in ("performance-status", "operator-rail", "operator-header", "operator-mobile-header"):
         assert f'id="{element_str}"' in html_str
     assert "Owned pod" in html_str and "U_PRIVATE" not in html_str
-    assert 'data-source-valid-ms="120000"' in html_str
+    # This minimal fixture has no matching saved LIVE row/release. It may
+    # render the owned navigation, but cannot assert fresh operating status.
+    assert 'data-source-valid-ms="0"' in html_str
     assert 'id="overview-shell"' not in html_str and 'data-performance-dates' not in html_str
     assert 'Monthly return' not in html_str and 'Investor PDF' not in html_str
     assert response_obj.headers["Cache-Control"] == "no-store"

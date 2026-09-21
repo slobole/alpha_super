@@ -119,8 +119,13 @@ def _event_dict(record_dict, pod_id_str):
         raise ValueError("Conflicting scheduler timestamps")
     phase_str = field_dict.get("next_phase_str", decision_dict.get("next_phase_str", ""))
     reason_str = field_dict.get("reason_code_str", decision_dict.get("reason_code_str", ""))
-    if phase_str not in PHASE_TUPLE or not isinstance(reason_str, str) or not re.fullmatch(r"[a-z_]{0,100}", reason_str):
+    if phase_str not in PHASE_TUPLE:
         raise ValueError("Invalid scheduler state")
+    # Reason codes are diagnostic text, not identity or liveness evidence.
+    # Keep the validated event (especially a newer error) if its reason cannot
+    # be shown safely; never skip it and revive an older healthy observation.
+    if not isinstance(reason_str, str) or not re.fullmatch(r"[a-z0-9_]{0,100}", reason_str):
+        reason_str = ""
     return {**decision_dict, **field_dict, "event_name_str": event_name_str,
         "event_ts": event_ts, "next_phase_str": phase_str, "reason_code_str": reason_str}
 
@@ -203,6 +208,9 @@ def load_scheduler_status_dict(event_log_path_str, pod_id_str, *, as_of_ts, trac
 
     Trace paths match scheduler_service's fixed per-phase run ids. Missing logs
     yield Unknown. A custom trace root must stay inside the event log directory.
+    Busy shared logs can push a sleeping Pod outside every bounded tail. Its
+    per-Pod trace must then retain the sleep promise; without it return Unknown,
+    never infer that the scheduler is stopped or scan unbounded history.
     """
     checked_ts = _timestamp_ts(as_of_ts)
     if checked_ts is None:

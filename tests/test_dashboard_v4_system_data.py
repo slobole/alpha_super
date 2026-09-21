@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -81,12 +82,15 @@ def test_safe_evidence_has_no_paths_accounts_secrets_or_delivery_claim(tmp_path)
         "pod_severity_map_dict": {"pod_one": "green"}, "pending_red_previous_severity_map_dict": {}}))
     result_dict = _load_dict(provider_obj, workspace_dict, performance_db_path_str=_flex_path_str(tmp_path, target_list))
     assert result_dict["scope_verified_bool"] is True
-    assert result_dict["watchdog_dict"]["now_str"] == "Report saved · run not verified"
-    assert result_dict["watchdog_dict"]["state_str"] == "unknown"
+    assert result_dict["watchdog_dict"]["now_str"] == "Report saved"
+    assert result_dict["watchdog_dict"]["state_str"] == "ok"
     assert result_dict["database_dict"]["state_str"] == result_dict["event_log_dict"]["state_str"] == "ok"
-    assert result_dict["alerts_dict"]["state_str"] == result_dict["deadman_dict"]["state_str"] == "unknown"
-    assert result_dict["flex_dict"]["now_str"] == "Report close 2026-09-18 · run not verified"
-    assert result_dict["flex_dict"]["state_str"] == "unknown"
+    assert result_dict["alerts_dict"]["state_str"] == "ok"
+    assert result_dict["alerts_dict"]["now_str"] == "No saved undelivered alerts"
+    assert result_dict["deadman_dict"]["state_str"] == "skip"
+    assert result_dict["deadman_dict"]["checked_bool"] is False
+    assert result_dict["flex_dict"]["now_str"] == "Report close 2026-09-18"
+    assert result_dict["flex_dict"]["state_str"] == "ok"
     assert result_dict["release_list"][0]["account_str"] == "•••456"
     serialized_str = json.dumps(result_dict)
     for private_str in (str(tmp_path), "U123456", "owner_one", "private-hostname", "secret-token", "password.txt", "SECRET RAW ACCOUNT XML"):
@@ -141,7 +145,9 @@ def test_missing_sources_do_not_create_files_or_claim_health(tmp_path):
     provider_obj, workspace_dict, _target_list = _fixture_tuple(tmp_path)
     result_dict = _load_dict(provider_obj, workspace_dict, performance_db_path_str=str(tmp_path / "missing.sqlite"))
     assert all(result_dict[key_str]["state_str"] == "unknown" for key_str in
-        ("event_log_dict", "database_dict", "watchdog_dict", "flex_dict", "alerts_dict", "deadman_dict"))
+        ("event_log_dict", "database_dict", "watchdog_dict", "flex_dict", "alerts_dict"))
+    assert result_dict["deadman_dict"]["state_str"] == "skip"
+    assert result_dict["deadman_dict"]["checked_bool"] is False
     assert list(tmp_path.iterdir()) == []
 
 
@@ -153,7 +159,7 @@ def test_corrupt_or_oversized_watchdog_is_unknown(tmp_path, text_str):
     assert _load_dict(provider_obj, workspace_dict)["watchdog_dict"]["state_str"] == "unknown"
 
 
-@pytest.mark.parametrize("seconds_int,state_str", [(0, "unknown"), (-900, "unknown"), (-901, "warning"), (1, "unknown")])
+@pytest.mark.parametrize("seconds_int,state_str", [(0, "ok"), (-900, "ok"), (-901, "warning"), (1, "unknown")])
 def test_watchdog_age_boundary_uses_report_time(tmp_path, seconds_int, state_str):
     provider_obj, workspace_dict, target_list = _fixture_tuple(tmp_path)
     _save_report(tmp_path, target_list, generated_at_utc_str=(BASE_TS + timedelta(seconds=seconds_int)).isoformat())
@@ -228,8 +234,8 @@ def test_flex_filters_foreign_accounts_without_reading_raw_xml(tmp_path, monkeyp
         return connection_obj
     monkeypatch.setattr(sqlite3, "connect", readonly_connect)
     result_dict = _load_dict(provider_obj, workspace_dict, performance_db_path_str=path_str)
-    assert result_dict["flex_dict"]["now_str"] == "Report close 2026-09-18 · run not verified"
-    assert all("raw_xml" not in statement_str and "sync_attempt" not in statement_str for statement_str in statement_list)
+    assert result_dict["flex_dict"]["now_str"] == "Report close 2026-09-18"
+    assert all("raw_xml" not in statement_str and "detail_str" not in statement_str for statement_str in statement_list)
     assert any("query_only=ON" in statement_str for statement_str in statement_list)
 
 
@@ -254,7 +260,7 @@ def test_flex_writer_lock_fails_closed_and_recovers(tmp_path):
         connection_obj.execute("BEGIN EXCLUSIVE")
         assert _load_dict(provider_obj, workspace_dict, performance_db_path_str=path_str)["flex_dict"]["now_str"] == "No verified saved report"
         connection_obj.rollback()
-    assert _load_dict(provider_obj, workspace_dict, performance_db_path_str=path_str)["flex_dict"]["now_str"] == "Report close 2026-09-18 · run not verified"
+    assert _load_dict(provider_obj, workspace_dict, performance_db_path_str=path_str)["flex_dict"]["now_str"] == "Report close 2026-09-18"
 
 
 def test_naive_request_clock_rejected(tmp_path):
@@ -357,3 +363,215 @@ def test_all_pods_must_have_flex_coverage_and_output_uses_oldest_covered_date(tm
     with sqlite3.connect(path_str) as connection_obj:
         connection_obj.execute("DELETE FROM daily_performance WHERE account_route_str='U999'")
     assert _load_dict(provider_obj, workspace_dict, performance_db_path_str=path_str)["flex_dict"]["now_str"] == "No verified saved report"
+
+
+def _save_run(tmp_path, target_list, **override_dict):
+    report_dict = json.loads((tmp_path / "ops_report_latest.json").read_text(encoding="utf-8"))
+    receipt_dict = {"schema_version_str": "live_ops_watchdog_run.v1", "completed_at_utc_str": BASE_TS.isoformat(),
+        "report_generated_at_utc_str": report_dict["generated_at_utc_str"], "mode_str": report_dict["mode_str"],
+        "report_sha256_str": hashlib.sha256(json.dumps(report_dict, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")).hexdigest(),
+        "scope_list": [{key_str: getattr(target_obj.release_obj, key_str) for key_str in system_data.IDENTITY_FIELD_TUPLE}
+            for target_obj in target_list], "heartbeat_status_str": "sent", "heartbeat_fail_signal_bool": False,
+        "notification_configured_bool": True, "notification_pending_live_count_int": 0}
+    receipt_dict.update(override_dict)
+    (tmp_path / "ops_report_latest.run.json").write_text(json.dumps(receipt_dict), encoding="utf-8")
+
+
+def _save_alerts(tmp_path, *, pending_dict=None, **override_dict):
+    state_dict = {"last_updated_str": BASE_TS.isoformat(), "pod_severity_map_dict": {"pod_one": "red"},
+        "pending_red_previous_severity_map_dict": pending_dict if pending_dict is not None else {}}
+    state_dict.update(override_dict)
+    (tmp_path / "watchdog_notification_state.json").write_text(json.dumps(state_dict), encoding="utf-8")
+
+
+@pytest.mark.parametrize("status_str,fail_signal_bool,state_str,label_str", [
+    ("sent", False, "ok", "Ping sent"), ("sent", True, "ok", "Fail signal sent"),
+    ("failed", False, "error", "Ping failed"), ("disabled", False, "skip", "Not configured")])
+def test_paired_watchdog_receipt_proves_completion_and_delivery_outcome(tmp_path, status_str, fail_signal_bool, state_str, label_str):
+    provider_obj, workspace_dict, target_list = _fixture_tuple(tmp_path)
+    _save_report(tmp_path, target_list, generated_at_utc_str=(BASE_TS - timedelta(seconds=5)).isoformat())
+    _save_run(tmp_path, target_list, heartbeat_status_str=status_str, heartbeat_fail_signal_bool=fail_signal_bool)
+    result_dict = _load_dict(provider_obj, workspace_dict)
+    assert result_dict["watchdog_dict"]["now_str"] == "Run completed"
+    assert result_dict["watchdog_dict"]["last_timestamp_str"] == BASE_TS.isoformat()
+    assert result_dict["deadman_dict"]["state_str"] == state_str
+    assert result_dict["deadman_dict"]["now_str"] == label_str
+    assert result_dict["deadman_dict"]["checked_bool"] is (status_str != "disabled")
+
+
+@pytest.mark.parametrize("change_str", ["hash", "release", "owner", "account", "missing_pod", "duplicate_pod", "mode",
+    "future", "naive", "before_report", "report_time", "pending_bool", "negative_pending", "unknown_status", "boolean_type"])
+def test_malformed_or_mismatched_existing_receipt_never_turns_neutral_or_completed(tmp_path, change_str):
+    provider_obj, workspace_dict, target_list = _fixture_tuple(tmp_path)
+    _save_report(tmp_path, target_list)
+    _save_run(tmp_path, target_list)
+    path_obj = tmp_path / "ops_report_latest.run.json"
+    receipt_dict = json.loads(path_obj.read_text(encoding="utf-8"))
+    if change_str in {"release", "owner", "account"}:
+        receipt_dict["scope_list"][0][{"release": "release_id_str", "owner": "user_id_str", "account": "account_route_str"}[change_str]] = "foreign"
+    elif change_str == "missing_pod":
+        receipt_dict["scope_list"] = []
+    elif change_str == "duplicate_pod":
+        receipt_dict["scope_list"] *= 2
+    else:
+        field_str, value_obj = {"hash": ("report_sha256_str", "0" * 64), "mode": ("mode_str", "paper"),
+            "future": ("completed_at_utc_str", (BASE_TS + timedelta(seconds=1)).isoformat()),
+            "naive": ("completed_at_utc_str", BASE_TS.replace(tzinfo=None).isoformat()),
+            "before_report": ("completed_at_utc_str", (BASE_TS - timedelta(seconds=1)).isoformat()),
+            "report_time": ("report_generated_at_utc_str", (BASE_TS - timedelta(seconds=1)).isoformat()),
+            "pending_bool": ("notification_pending_live_count_int", True), "negative_pending": ("notification_pending_live_count_int", -1),
+            "unknown_status": ("heartbeat_status_str", "success"), "boolean_type": ("notification_configured_bool", "true")}[change_str]
+        receipt_dict[field_str] = value_obj
+    path_obj.write_text(json.dumps(receipt_dict), encoding="utf-8")
+    result_dict = _load_dict(provider_obj, workspace_dict)
+    assert result_dict["deadman_dict"]["state_str"] == "unknown"
+    assert result_dict["deadman_dict"]["checked_bool"] is True
+    assert result_dict["watchdog_dict"]["now_str"] == "Report saved"
+
+
+def test_old_receipt_and_new_report_cannot_reuse_an_old_heartbeat(tmp_path):
+    provider_obj, workspace_dict, target_list = _fixture_tuple(tmp_path)
+    old_ts = BASE_TS - timedelta(seconds=901)
+    _save_report(tmp_path, target_list, generated_at_utc_str=old_ts.isoformat())
+    _save_run(tmp_path, target_list, completed_at_utc_str=old_ts.isoformat())
+    result_dict = _load_dict(provider_obj, workspace_dict)
+    assert result_dict["watchdog_dict"]["state_str"] == result_dict["deadman_dict"]["state_str"] == "warning"
+    _save_report(tmp_path, target_list)
+    result_dict = _load_dict(provider_obj, workspace_dict)
+    assert result_dict["watchdog_dict"]["now_str"] == "Report saved"
+    assert result_dict["deadman_dict"]["state_str"] == "unknown"
+
+
+@pytest.mark.parametrize("report_age_int,watchdog_state_str,label_str", [(900, "ok", "Run completed"),
+    (901, "warning", "Report over 15 min old")])
+def test_recent_completion_cannot_renew_a_historical_watchdog_report(tmp_path, report_age_int, watchdog_state_str, label_str):
+    provider_obj, workspace_dict, target_list = _fixture_tuple(tmp_path)
+    _save_report(tmp_path, target_list, generated_at_utc_str=(BASE_TS - timedelta(seconds=report_age_int)).isoformat())
+    _save_run(tmp_path, target_list)
+    result_dict = _load_dict(provider_obj, workspace_dict)
+    assert result_dict["watchdog_dict"]["state_str"] == watchdog_state_str
+    assert result_dict["watchdog_dict"]["now_str"] == label_str
+    assert result_dict["deadman_dict"]["state_str"] == "ok"
+    assert result_dict["deadman_dict"]["now_str"] == "Ping sent"
+    assert result_dict["deadman_dict"]["last_timestamp_str"] == BASE_TS.isoformat()
+
+
+@pytest.mark.parametrize("configured_bool,pending_int,state_str", [(True, 0, "ok"), (True, 1, "warning"), (False, None, "skip")])
+def test_receipt_alert_evidence_when_old_notification_file_is_absent(tmp_path, configured_bool, pending_int, state_str):
+    provider_obj, workspace_dict, target_list = _fixture_tuple(tmp_path)
+    _save_report(tmp_path, target_list)
+    _save_run(tmp_path, target_list, notification_configured_bool=configured_bool, notification_pending_live_count_int=pending_int)
+    result_dict = _load_dict(provider_obj, workspace_dict)["alerts_dict"]
+    assert result_dict["state_str"] == state_str
+    assert result_dict["checked_bool"] is configured_bool
+    assert "delivered" not in result_dict["now_str"].lower() or result_dict["now_str"] == "No saved undelivered alerts"
+
+
+def test_explicit_live_alert_backlog_is_scoped_and_does_not_claim_active_retry(tmp_path):
+    provider_obj, workspace_dict, target_list = _fixture_tuple(tmp_path)
+    paper_obj = _target_obj(tmp_path, "paper", "DU999", mode_str="paper")
+    _save_report(tmp_path, target_list + [paper_obj])
+    _save_alerts(tmp_path, pending_dict={"pod_one": "green", "paper": "green", "__inspector__": "green"},
+        pod_severity_map_dict={"pod_one": "red", "paper": "red", "__inspector__": "red"})
+    result_dict = _load_dict(provider_obj, workspace_dict)["alerts_dict"]
+    assert result_dict["state_str"] == "warning"
+    assert result_dict["now_str"] == "1 alert pending retry"
+    assert "retrying" not in result_dict["now_str"]
+    _save_alerts(tmp_path, pending_dict={"paper": "green"}, pod_severity_map_dict={"pod_one": "green", "paper": "red"})
+    assert _load_dict(provider_obj, workspace_dict)["alerts_dict"]["now_str"] == "No saved undelivered alerts"
+
+
+def test_filtered_live_report_does_not_attribute_all_mode_inspector_failure_to_live(tmp_path):
+    provider_obj, workspace_dict, target_list = _fixture_tuple(tmp_path)
+    _save_report(tmp_path, target_list, mode_str="live")
+    _save_alerts(tmp_path, pending_dict={"__inspector__": "green", "paper": "green"},
+        pod_severity_map_dict={"pod_one": "green", "__inspector__": "red", "paper": "red"})
+    result_dict = _load_dict(provider_obj, workspace_dict)["alerts_dict"]
+    assert result_dict["state_str"] == "ok"
+    assert result_dict["now_str"] == "No saved undelivered alerts"
+
+
+@pytest.mark.parametrize("change_str", ["legacy", "wrong_time", "future", "wrong_type", "missing_live", "contradiction"])
+def test_unproven_alert_state_does_not_infer_empty_backlog(tmp_path, change_str):
+    provider_obj, workspace_dict, target_list = _fixture_tuple(tmp_path)
+    _save_report(tmp_path, target_list)
+    _save_alerts(tmp_path)
+    path_obj = tmp_path / "watchdog_notification_state.json"
+    state_dict = json.loads(path_obj.read_text(encoding="utf-8"))
+    if change_str == "legacy":
+        state_dict.pop("pending_red_previous_severity_map_dict")
+        _save_run(tmp_path, target_list)
+    elif change_str in {"wrong_time", "future"}:
+        state_dict["last_updated_str"] = (BASE_TS + timedelta(seconds=1 if change_str == "future" else -1)).isoformat()
+    elif change_str == "wrong_type":
+        state_dict["pending_red_previous_severity_map_dict"] = []
+    elif change_str == "missing_live":
+        state_dict["pod_severity_map_dict"] = {"foreign": "green"}
+    else:
+        state_dict["pod_severity_map_dict"] = {"pod_one": "green"}
+        state_dict["pending_red_previous_severity_map_dict"] = {"pod_one": "green"}
+    path_obj.write_text(json.dumps(state_dict), encoding="utf-8")
+    assert _load_dict(provider_obj, workspace_dict)["alerts_dict"]["state_str"] == "unknown"
+
+
+def _save_attempt(path_str, *, status_str="success", timestamp_str="2026-09-21T10:15:00+00:00", from_str="2026-09-01", to_str="2026-09-18"):
+    with sqlite3.connect(path_str) as connection_obj:
+        connection_obj.execute("CREATE TABLE IF NOT EXISTS sync_attempt(attempt_id_int INTEGER PRIMARY KEY,attempted_timestamp_str,status_str,request_from_date_str,request_to_date_str,detail_str)")
+        connection_obj.execute("INSERT INTO sync_attempt(attempted_timestamp_str,status_str,request_from_date_str,request_to_date_str,detail_str) VALUES(?,?,?,?,?)",
+            (timestamp_str, status_str, from_str, to_str, "PRIVATE exception token C:/private/file"))
+
+
+def test_repeated_success_and_failed_flex_attempts_use_actual_receipt_time(tmp_path):
+    provider_obj, workspace_dict, target_list = _fixture_tuple(tmp_path)
+    path_str = _flex_path_str(tmp_path, target_list)
+    _save_attempt(path_str)
+    result_dict = _load_dict(provider_obj, workspace_dict, performance_db_path_str=path_str)["flex_dict"]
+    assert result_dict["state_str"] == "ok"
+    assert result_dict["last_timestamp_str"] == "2026-09-21T10:15:00+00:00"
+    _save_attempt(path_str, status_str="failed", timestamp_str="2026-09-21T11:00:00+00:00")
+    result_dict = _load_dict(provider_obj, workspace_dict, performance_db_path_str=path_str)["flex_dict"]
+    assert result_dict["state_str"] == "error" and result_dict["now_str"].startswith("Latest sync failed")
+    assert "PRIVATE" not in json.dumps(result_dict)
+    _save_attempt(path_str, timestamp_str="2026-09-21T11:15:00+00:00")
+    assert _load_dict(provider_obj, workspace_dict, performance_db_path_str=path_str)["flex_dict"]["state_str"] == "ok"
+
+
+def test_failed_first_sync_is_visible_even_without_account_history(tmp_path):
+    provider_obj, workspace_dict, target_list = _fixture_tuple(tmp_path)
+    path_str = _flex_path_str(tmp_path, target_list)
+    with sqlite3.connect(path_str) as connection_obj:
+        connection_obj.execute("DELETE FROM daily_performance")
+    _save_attempt(path_str, status_str="failed")
+    result_dict = _load_dict(provider_obj, workspace_dict, performance_db_path_str=path_str)["flex_dict"]
+    assert result_dict["state_str"] == "error"
+    assert result_dict["now_str"] == "Latest sync failed · coverage unavailable"
+    _save_attempt(path_str, timestamp_str="2026-09-21T11:00:00+00:00")
+    assert _load_dict(provider_obj, workspace_dict, performance_db_path_str=path_str)["flex_dict"]["state_str"] == "unknown"
+
+
+@pytest.mark.parametrize("asof_str,coverage_str,state_str", [
+    ("2026-09-21T21:00:00+00:00", "2026-09-18", "ok"),
+    ("2026-09-22T11:59:00+00:00", "2026-09-18", "now"),
+    ("2026-09-22T12:00:00+00:00", "2026-09-18", "warning"),
+    ("2026-09-19T11:59:00+00:00", "2026-09-17", "now"),
+    ("2026-09-19T12:00:00+00:00", "2026-09-17", "warning"),
+    ("2026-09-08T12:00:00+00:00", "2026-09-04", "ok"),
+])
+def test_flex_uses_existing_next_day_eight_et_sla_not_immediate_market_close(tmp_path, asof_str, coverage_str, state_str):
+    provider_obj, workspace_dict, target_list = _fixture_tuple(tmp_path)
+    path_str = _flex_path_str(tmp_path, target_list, market_date_str=coverage_str, imported_str=coverage_str + "T23:00:00+00:00")
+    result_dict = system_data.load_system_source_dict(provider_obj, workspace_dict,
+        as_of_ts=datetime.fromisoformat(asof_str), performance_db_path_str=path_str)["flex_dict"]
+    assert result_dict["state_str"] == state_str
+    assert result_dict["checked_bool"] is True
+
+
+@pytest.mark.parametrize("override_dict", [{"timestamp_str": "2026-09-21T16:00:01+00:00"},
+    {"timestamp_str": "2026-09-21T10:15:00"}, {"from_str": "2026-09-20"}, {"to_str": "invalid"}, {"status_str": "running"}])
+def test_invalid_flex_attempt_receipt_is_not_ignored(tmp_path, override_dict):
+    provider_obj, workspace_dict, target_list = _fixture_tuple(tmp_path)
+    path_str = _flex_path_str(tmp_path, target_list)
+    _save_attempt(path_str, **override_dict)
+    result_dict = _load_dict(provider_obj, workspace_dict, performance_db_path_str=path_str)["flex_dict"]
+    assert result_dict["state_str"] == "unknown"
+    assert result_dict["now_str"] == "Saved sync receipt unavailable"

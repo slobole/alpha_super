@@ -2,6 +2,19 @@
 
 from datetime import timedelta
 
+from alpha.live.dashboard_v3.health import HealthCellDict, HealthRollup, _roll_up_freshness_cell
+
+
+def build_demo_health_rollup(summary_dict):
+    """Keep real saved-data rollup rules, with a synthetic disk warning."""
+    row_list = [row_dict for row_dict in summary_dict.get("pod_row_dict_list", []) if row_dict.get("mode_str") == "live"]
+    cell_list = [_roll_up_freshness_cell(row_list, label_str)
+                 for label_str in ("Norgate", "Pod state", "EOD Snapshot")]
+    cell_list.append(HealthCellDict("Disk", "78% used", "yellow", "41.0 GB free"))
+    severity_str = min((cell_obj.severity_str for cell_obj in cell_list),
+                       key={"red": 0, "yellow": 1, "gray": 2, "green": 3}.get)
+    return HealthRollup(severity_str=severity_str, cell_dict_list=cell_list)
+
 
 def attach_demo_system(provider_obj):
     for row_dict in provider_obj.row_list:
@@ -27,14 +40,14 @@ def attach_demo_system(provider_obj):
                 "execution_policy_str": release_obj.execution_policy_str,
                 "account_str": release_obj.account_route_str[:1] + "···" + release_obj.account_route_str[-3:]})
         return {"checked_timestamp_str": as_of_ts.isoformat(), "scope_verified_bool": True, "release_list": release_list,
-            "watchdog_dict": {"state_str": "unk", "now_str": "Report saved · run not verified",
-                "last_timestamp_str": (as_of_ts - timedelta(seconds=64)).isoformat(), "expected_str": "Task schedule not saved"},
-            "deadman_dict": {"state_str": "unk", "now_str": "No saved delivery receipt",
-                "last_timestamp_str": "", "expected_str": "External check of watchdog liveness"},
-            "alerts_dict": {"state_str": "unk", "now_str": "No saved delivery receipt",
-                "last_timestamp_str": "", "expected_str": "When a Pod needs action"},
-            "flex_dict": {"state_str": "unk", "now_str": "Report close 2026-09-04 · run not verified",
-                "last_timestamp_str": "2026-09-08T11:12:30+00:00", "expected_str": "Task schedule not saved"},
+            "watchdog_dict": {"state_str": "done", "now_str": "Run completed",
+                "last_timestamp_str": (as_of_ts - timedelta(seconds=64)).isoformat(), "expected_str": "Report within 15 min"},
+            "deadman_dict": {"state_str": "done", "now_str": "Fail signal sent",
+                "last_timestamp_str": (as_of_ts - timedelta(seconds=64)).isoformat(), "expected_str": "After each watchdog run"},
+            "alerts_dict": {"state_str": "done", "now_str": "No saved undelivered alerts",
+                "last_timestamp_str": (as_of_ts - timedelta(seconds=65)).isoformat(), "expected_str": "When a Pod needs action"},
+            "flex_dict": {"state_str": "done", "now_str": "Report close 2026-09-04",
+                "last_timestamp_str": "2026-09-08T11:12:30+00:00", "expected_str": "Prior session by 08:00 ET"},
             "event_log_dict": {"state_str": "done", "now_str": "38 MB · recent file write",
                 "last_timestamp_str": (as_of_ts - timedelta(seconds=12)).isoformat(), "expected_str": "A write at least every 60 min"},
             "database_dict": {"state_str": "done", "now_str": "4 of 4 readable · 212 MB",

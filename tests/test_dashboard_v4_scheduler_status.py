@@ -79,6 +79,46 @@ def test_truncation_cannot_reuse_a_cached_green_status(tmp_path):
     assert _read_dict(path_obj)["state_str"] == "unknown"
 
 
+@pytest.mark.parametrize("followed_bool", [False, True])
+def test_digit_reason_code_and_following_valid_live_event_remain_usable(tmp_path, followed_bool):
+    path_obj = tmp_path / "events.jsonl"
+    record_list = [_record_dict(next_phase_str="expire_stale", reason_code_str="core5_complete_no_order_cycle")]
+    if followed_bool:
+        record_list.append(_record_dict(event_ts=BASE_TS + timedelta(seconds=5)))
+    _write_records(path_obj, *record_list)
+    result_dict = _read_dict(path_obj, 10)
+    assert result_dict["state_str"] == "sleeping" and result_dict["alive_bool"] is True
+    assert result_dict["reason_code_str"] == ("no_due_work" if followed_bool else "core5_complete_no_order_cycle")
+
+
+@pytest.mark.parametrize("reason_obj", [None, "contains-dash", "private account / secret", "x" * 101,
+    {"secret": "private"}, ["private"]])
+def test_unsupported_reason_is_omitted_without_hiding_newer_error(tmp_path, reason_obj):
+    path_obj = tmp_path / "events.jsonl"
+    _write_records(path_obj, _record_dict(), _record_dict("scheduler.error_retry", trace_bool=True,
+        event_ts=BASE_TS + timedelta(seconds=5), reason_code_str=reason_obj, error_retry_seconds_int=30))
+    result_dict = _read_dict(path_obj, 10)
+    assert result_dict["state_str"] == "error"
+    assert result_dict["last_seen_timestamp_str"] == (BASE_TS + timedelta(seconds=5)).isoformat()
+    assert result_dict["reason_code_str"] == ""
+    assert "private" not in str(result_dict) and "secret" not in str(result_dict)
+
+
+@pytest.mark.parametrize("conflict_str", ["pod", "timestamp", "phase"])
+def test_unsupported_reason_does_not_relax_evidence_validation(tmp_path, conflict_str):
+    path_obj = tmp_path / "events.jsonl"
+    newest_dict = _record_dict("scheduler.error_retry", trace_bool=True,
+        event_ts=BASE_TS + timedelta(seconds=5), reason_code_str="unsupported reason", error_retry_seconds_int=30)
+    if conflict_str == "pod":
+        newest_dict["payload_dict"]["pod_id_str"] = "other_pod"
+    elif conflict_str == "timestamp":
+        newest_dict["ts_utc"] = BASE_TS.isoformat()
+    else:
+        newest_dict["payload_dict"]["payload_dict"]["next_phase_str"] = "unknown_phase"
+    _write_records(path_obj, _record_dict(), newest_dict)
+    assert _read_dict(path_obj, 10)["state_str"] == "unknown"
+
+
 def test_unscoped_long_sync_cannot_certify_live_scheduler_or_remove_overdue_warning(tmp_path):
     path_obj = tmp_path / "events.jsonl"
     # The actual sync writer has Pod/release lists but no mode identity. A
@@ -301,6 +341,27 @@ def test_tail_bound_does_not_read_older_evidence_or_directory_walk(tmp_path, mon
     with path_obj.open("ab") as source_file_obj:
         source_file_obj.write((json.dumps(_record_dict()) + "\n").encode())
     assert _read_dict(path_obj)["state_str"] == "sleeping"
+
+
+@pytest.mark.parametrize("trace_bool", [False, True])
+def test_busy_shared_tail_needs_per_pod_trace_for_sleeping_scheduler(tmp_path, monkeypatch, trace_bool):
+    path_obj = tmp_path / "events.jsonl"
+    _write_records(path_obj, _record_dict())
+    other_record_dict = _record_dict(event_ts=BASE_TS + timedelta(seconds=60),
+        related_pod_id_list=["busy_other_pod"], sleep_seconds_float=30)
+    other_line_bytes = (json.dumps(other_record_dict) + "\n").encode()
+    with path_obj.open("ab") as source_file_obj:
+        source_file_obj.write(other_line_bytes * (scheduler_status.TAIL_BYTES_INT // len(other_line_bytes) + 2))
+    if trace_bool:
+        _write_records(_trace_path_obj(tmp_path), _record_dict("scheduler.sleeping", trace_bool=True))
+    def forbidden_fn(*argument_list, **keyword_dict):
+        raise AssertionError("Reader must not search unbounded history")
+    monkeypatch.setattr(Path, "rglob", forbidden_fn)
+    result_dict = _read_dict(path_obj, 1800)
+    assert result_dict["state_str"] == ("sleeping" if trace_bool else "unknown")
+    assert result_dict["alive_bool"] is (True if trace_bool else None)
+    assert result_dict["last_seen_timestamp_str"] == (BASE_TS.isoformat() if trace_bool else None)
+    assert result_dict["promised_wake_timestamp_str"] == ((BASE_TS + timedelta(hours=1)).isoformat() if trace_bool else None)
 
 
 def test_symlink_escape_returns_unknown(tmp_path):
