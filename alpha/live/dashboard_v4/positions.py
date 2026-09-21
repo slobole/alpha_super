@@ -214,6 +214,10 @@ def build_positions_page_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         verdict_detail_str=(f"{len(missing_list)} pod(s) unavailable." if missing_list else "")
             + (" Refresh unavailable." if not result_dict["source_fresh_bool"] else ""),
         empty_str="No saved positions" if complete_bool else "Saved positions unavailable")
+    if pod_str != "all":
+        name_str = next(account_dict["display_name"] for account_dict in owned_list if account_dict["pod_id"] == pod_str)
+        count_str = f"{len(all_row_list)} of {len(symbol_dict)} positions" if complete_bool else f"{len(all_row_list)} saved positions"
+        result_dict["verdict_str"] = ("Positions unavailable" if pod_str in missing_list else count_str) + " · " + name_str
     if timestamp_list:
         first_str = min(timestamp_list).astimezone(MARKET_TIMEZONE_OBJ).strftime("%Y-%m-%d %H:%M:%S")
         last_str = max(timestamp_list).astimezone(MARKET_TIMEZONE_OBJ).strftime("%Y-%m-%d %H:%M:%S")

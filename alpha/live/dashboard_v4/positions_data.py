@@ -52,6 +52,8 @@ def load_positions_dict(target_obj, *, as_of_ts):
     Cache times are broker sample times. Reconciliation times are recording
     times, disclosed separately. A failed reconciliation still contains actual
     broker quantities; its model map and target quantities are never substituted.
+    The caller validates current configured ownership. Saved release flags are
+    historical; account-only caches additionally require unambiguous ownership.
     """
     result_dict = {"available_bool": False, "reason_str": "Saved broker positions unavailable",
         "position_map_dict": {}, "position_timestamp_str": None, "source_str": "",
@@ -80,8 +82,8 @@ def load_positions_dict(target_obj, *, as_of_ts):
             connection_obj.execute("BEGIN")
             release_list = connection_obj.execute(
                 "SELECT release_id_str,user_id_str,pod_id_str,account_route_str,mode_str FROM live_release "
-                "WHERE pod_id_str=? OR account_route_str=? LIMIT ?",
-                (release_obj.pod_id_str, release_obj.account_route_str, RELEASE_LIMIT_INT + 1)).fetchall()
+                "WHERE pod_id_str=? LIMIT ?",
+                (release_obj.pod_id_str, RELEASE_LIMIT_INT + 1)).fetchall()
             if not release_list or len(release_list) > RELEASE_LIMIT_INT:
                 raise ValueError("Missing or excessive ownership history")
             if any(row_obj["mode_str"] != "live" or any(row_obj[field_str] != identity_dict[field_str]
@@ -90,10 +92,17 @@ def load_positions_dict(target_obj, *, as_of_ts):
             release_id_set = {row_obj["release_id_str"] for row_obj in release_list}
             if len(release_id_set) != len(release_list) or release_obj.release_id_str not in release_id_set:
                 raise ValueError("Release identity mismatch")
+            # A former Pod's release may remain enabled in this history table.
+            # It cannot invalidate this Pod's scoped reconciliation, but the
+            # cache has only an account key and cannot prove which Pod owned it.
+            cache_owner_conflict_bool = connection_obj.execute(
+                "SELECT 1 FROM live_release WHERE account_route_str=? "
+                "AND (pod_id_str<>? OR user_id_str<>? OR mode_str<>'live') LIMIT 1",
+                (release_obj.account_route_str, release_obj.pod_id_str, release_obj.user_id_str)).fetchone() is not None
             table_set = {row_obj[0] for row_obj in connection_obj.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
                 "('broker_snapshot_cache','vplan_reconciliation_snapshot')")}
-            if "broker_snapshot_cache" in table_set:
+            if "broker_snapshot_cache" in table_set and not cache_owner_conflict_bool:
                 cache_list = connection_obj.execute(
                     "SELECT snapshot_timestamp_str,CASE WHEN length(CAST(position_json_str AS BLOB))<=? THEN position_json_str END AS position_json_str "
                     "FROM broker_snapshot_cache WHERE account_route_str=? LIMIT 2",

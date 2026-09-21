@@ -126,23 +126,58 @@ def test_positions_preview_uses_owned_broker_evidence_without_prices_or_writes(d
         source_dict = provider_obj.get_positions_dict(row_dict["pod_id_str"], as_of_ts=DEMO_NOW_TS)
         target_obj = provider_obj.get_target_for_pod(row_dict["pod_id_str"])
         assert source_dict["available_bool"] is True
-        assert source_dict["source_str"] == "broker_reconciliation"
-        assert source_dict["timestamp_basis_str"] == "recorded"
         for field_str in ("release_id_str", "user_id_str", "pod_id_str", "account_route_str", "mode_str"):
             assert source_dict[field_str] == getattr(target_obj.release_obj, field_str)
         assert source_dict["position_map_dict"] == {
             position_dict["asset_str"]: position_dict["share_float"] for position_dict in row_dict["position_exposure_dict_list"]}
         with closing(sqlite3.connect(Path(target_obj.db_path_str).as_uri() + "?mode=ro", uri=True)) as connection_obj:
-            timestamp_str = connection_obj.execute(
+            reconcile_timestamp_str = connection_obj.execute(
                 "SELECT MAX(created_timestamp_str) FROM vplan_reconciliation_snapshot WHERE pod_id_str=?",
                 (row_dict["pod_id_str"],)).fetchone()[0]
-        assert source_dict["position_timestamp_str"] == timestamp_str
+            cache_timestamp_str = connection_obj.execute(
+                "SELECT snapshot_timestamp_str FROM broker_snapshot_cache WHERE account_route_str=?",
+                (row_dict["account_route_str"],)).fetchone()[0]
+        newer_reconcile_bool = reconcile_timestamp_str > cache_timestamp_str
+        assert source_dict["source_str"] == ("broker_reconciliation" if newer_reconcile_bool else "broker_snapshot")
+        assert source_dict["timestamp_basis_str"] == ("recorded" if newer_reconcile_bool else "observed")
+        assert source_dict["position_timestamp_str"] == max(reconcile_timestamp_str, cache_timestamp_str)
         assert not any("price" in key_str or "value" in key_str or "cost" in key_str for key_str in source_dict)
         if row_dict["strategy_name_str"] == "QPI":
             assert source_dict["position_timestamp_str"] < row_dict["latest_vplan_target_execution_timestamp_str"]
             assert set(source_dict["position_map_dict"]) == {"NVDA", "SGOV"}
     assert provider_obj.get_positions_dict("not_a_demo_pod", as_of_ts=DEMO_NOW_TS)["available_bool"] is False
     assert _files_dict(provider_obj) == before_dict
+
+
+def test_demo_broker_cache_is_the_same_eod_observation_and_newer_reconcile_wins(demo_fixture_tuple):
+    workspace_dict, _, provider_obj = demo_fixture_tuple
+    for row_dict in workspace_dict["summary_dict"]["pod_row_dict_list"]:
+        target_obj = provider_obj.get_target_for_pod(row_dict["pod_id_str"])
+        with closing(sqlite3.connect(Path(target_obj.db_path_str).as_uri() + "?mode=ro", uri=True)) as connection_obj:
+            connection_obj.row_factory = sqlite3.Row
+            cache_list = connection_obj.execute("SELECT * FROM broker_snapshot_cache").fetchall()
+            assert len(cache_list) == 1
+            cache_obj = cache_list[0]
+            eod_obj = connection_obj.execute("""SELECT * FROM pod_state_history
+                WHERE pod_id_str=? AND account_route_str=? AND snapshot_stage_str='eod'
+                AND snapshot_source_str='broker' AND updated_timestamp_str=?
+                ORDER BY pod_state_history_id_int DESC LIMIT 1""",
+                (row_dict["pod_id_str"], row_dict["account_route_str"], row_dict["eod_snapshot_dict"]["latest_timestamp_str"])).fetchone()
+        assert cache_obj["account_route_str"] == eod_obj["account_route_str"]
+        assert json.loads(cache_obj["position_json_str"]) == json.loads(eod_obj["position_json_str"])
+        assert cache_obj["cash_float"] == eod_obj["cash_float"]
+        assert cache_obj["net_liq_float"] == cache_obj["total_value_float"] == eod_obj["total_value_float"]
+        assert cache_obj["snapshot_timestamp_str"] == cache_obj["updated_timestamp_str"] == eod_obj["updated_timestamp_str"]
+        assert row_dict["latest_broker_snapshot_timestamp_str"] == cache_obj["snapshot_timestamp_str"]
+        source_dict = provider_obj.get_positions_dict(row_dict["pod_id_str"], as_of_ts=DEMO_NOW_TS)
+        if row_dict["strategy_name_str"] == "DVO2":
+            assert source_dict["source_str"] == "broker_reconciliation"
+            assert source_dict["position_timestamp_str"] > cache_obj["snapshot_timestamp_str"]
+            assert source_dict["position_map_dict"] != json.loads(cache_obj["position_json_str"])
+            assert set(source_dict["position_map_dict"]) == {"AMD", "CRM", "SGOV"}
+        else:
+            assert source_dict["source_str"] == "broker_snapshot"
+            assert source_dict["position_timestamp_str"] == cache_obj["snapshot_timestamp_str"]
 
 
 def test_cycle_cash_matches_before_after_positions_and_latest_state(demo_fixture_tuple):

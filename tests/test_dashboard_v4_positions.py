@@ -88,7 +88,8 @@ def test_all_filter_count_follows_selected_pod_but_portfolio_count_does_not(fixt
     assert selected_dict["all_count_int"] == len(selected_dict["row_list"])
     assert selected_dict["all_count_int"] < full_dict["all_count_int"]
     assert selected_dict["total_dict"] == full_dict["total_dict"]
-    assert selected_dict["verdict_str"] == full_dict["verdict_str"]
+    assert selected_dict["verdict_str"] == "3 of 8 positions · DVO2"
+    assert full_dict["verdict_str"] == "8 saved positions"
 
 
 def test_account_totals_use_exact_canonical_eod_allocation_independent_of_share_dates(fixture_tuple):

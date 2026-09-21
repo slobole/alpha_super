@@ -29,8 +29,16 @@ reconciliation timestamps are recording times and are labeled accordingly.
 Missing owned accounts make holdings incomplete. The page does not reconstruct
 average cost from fills or use execution reference prices for Value, Weight or
 entry P&L. Changed today and Off target remain unavailable until their evidence
-contracts are implemented. This is a quantities-first page, not a complete
-implementation of the Mockup D valuation fields.
+contracts are implemented. The owner chose to hide these unconnected fields and
+filters pending a separate marks-source decision. Multi-Pod rows show each Pod's
+quantity inline, and the verdict follows the selected Pod while account totals
+retain portfolio scope.
+
+On shared or legacy databases, another Pod's historical release cannot suppress
+this Pod's fully attributed reconciliation. Account-only broker cache rows still
+require unambiguous saved account ownership; old enabled flags do not prove it.
+Same-Pod conflicting ownership remains unavailable. This is a quantities-first
+page, not a complete implementation of the Mockup D valuation fields.
 
 V4 charts display the existing cumulative return paths, not normalized NAV.
 Overview retains the configured client end-of-day flow convention and labels

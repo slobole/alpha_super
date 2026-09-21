@@ -11,7 +11,7 @@ from alpha.live.dashboard_v4.evidence import load_cycle_evidence_dict
 from alpha.live.dashboard_v4.pod_data import load_pod_cycles_dict
 from alpha.live.execution_engine import build_broker_order_request_list_from_vplan
 from alpha.live.models import (
-    BrokerOrderAck, BrokerOrderEvent, BrokerOrderFill, BrokerOrderRecord,
+    BrokerOrderAck, BrokerOrderEvent, BrokerOrderFill, BrokerOrderRecord, BrokerSnapshot,
     DecisionPlan, LiveRelease, PodState, ReconciliationResult, VPlan, VPlanRow,
 )
 from alpha.live.state_store_v2 import LiveStateStore
@@ -156,6 +156,10 @@ class DemoPodStore:
         store_obj.upsert_pod_state(PodState(release_obj.pod_id_str, release_obj.user_id_str,
             release_obj.account_route_str, dict(eod_position_dict), cash_float, equity_float, {}, eod_ts,
             snapshot_stage_str="eod", snapshot_source_str="broker"))
+        store_obj.upsert_broker_snapshot_cache(BrokerSnapshot(
+            account_route_str=release_obj.account_route_str, snapshot_timestamp_ts=eod_ts,
+            cash_float=cash_float, total_value_float=equity_float, net_liq_float=equity_float,
+            position_amount_map=dict(eod_position_dict)))
         position_ts, position_dict = eod_ts, eod_position_dict
         if index_int == 0:
             position_ts, position_dict = current_target_ts + timedelta(minutes=6, seconds=12), current_after_dict
@@ -170,6 +174,7 @@ class DemoPodStore:
             connection_obj.execute("PRAGMA journal_mode=MEMORY")
             connection_obj.execute("UPDATE live_release SET updated_timestamp_str=?", (as_of_ts.isoformat(),))
             connection_obj.execute("UPDATE pod_state_history SET recorded_timestamp_str=updated_timestamp_str")
+            connection_obj.execute("UPDATE broker_snapshot_cache SET updated_timestamp_str=snapshot_timestamp_str")
         source_dict = self.get_pod_cycles_dict(release_obj.pod_id_str, as_of_ts=as_of_ts)
         if source_dict["status_str"] != "ok" or source_dict["cycle_evidence_dict"]["state_str"] not in {"complete", "partial"}:
             raise ValueError("Synthetic database failed the real evidence reader")
@@ -178,7 +183,7 @@ class DemoPodStore:
                 row_dict[key_str] = value_obj
         row_dict.update(cycle_evidence_dict=source_dict["cycle_evidence_dict"],
             user_id_str=release_obj.user_id_str, signal_clock_str=release_obj.signal_clock_str,
-            latest_pod_state_timestamp_str=position_ts.isoformat(), latest_broker_snapshot_timestamp_str=position_ts.isoformat(),
+            latest_pod_state_timestamp_str=position_ts.isoformat(), latest_broker_snapshot_timestamp_str=eod_ts.isoformat(),
             latest_live_reference_snapshot_timestamp_str=(current_target_ts - timedelta(minutes=7)).isoformat(),
             latest_live_reference_source_str="DEMO saved reference",
             position_exposure_dict_list=[{"asset_str": asset_str, "share_float": share_float, "price_float": price_map_dict[asset_str]}

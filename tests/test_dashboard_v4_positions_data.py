@@ -8,6 +8,7 @@ import sqlite3
 import pytest
 
 from alpha.live.dashboard_v4.positions_data import POSITION_LIMIT_INT, load_positions_dict
+from alpha.live.state_store_v2 import LiveStateStore
 from test_dashboard_v4_evidence import FILL_TS, NOW_TS, SUBMIT_TS, build_fixture_tuple, update_db
 from test_dashboard_v4_pod_data import _reconcile
 
@@ -75,6 +76,72 @@ def test_newer_cache_supersedes_reconciliation(tmp_path):
     _reconcile(target_obj)
     _cache(target_obj, {"SPY": 9}, timestamp_ts=NOW_TS)
     assert load_positions_dict(target_obj, as_of_ts=NOW_TS)["position_map_dict"] == {"SPY": 9}
+
+
+@pytest.mark.parametrize("enabled_bool", [False, True])
+def test_historical_other_pod_does_not_hide_scoped_reconciliation(tmp_path, enabled_bool):
+    target_obj, _ = build_fixture_tuple(tmp_path)
+    LiveStateStore(target_obj.db_path_str).upsert_release(replace(target_obj.release_obj,
+        release_id_str="previous-release", pod_id_str="previous-pod", enabled_bool=enabled_bool))
+    _reconcile(target_obj)
+    # A newer account-only cache cannot establish which Pod owned this sample.
+    _cache(target_obj, {"SPY": 999}, timestamp_ts=NOW_TS)
+    path_obj = tmp_path / "pod.sqlite3"
+    before_bytes, before_mtime_int = path_obj.read_bytes(), path_obj.stat().st_mtime_ns
+    result_dict = load_positions_dict(target_obj, as_of_ts=NOW_TS)
+    assert result_dict["available_bool"] is True
+    assert result_dict["position_map_dict"] == {"SPY": 2}
+    assert result_dict["source_str"] == "broker_reconciliation"
+    assert result_dict["timestamp_basis_str"] == "recorded"
+    assert result_dict["pod_id_str"] == "pod"
+    assert path_obj.read_bytes() == before_bytes
+    assert path_obj.stat().st_mtime_ns == before_mtime_int
+
+
+@pytest.mark.parametrize("enabled_bool", [False, True])
+@pytest.mark.parametrize("mode_str", ["live", "paper"])
+def test_account_cache_alone_cannot_be_reassigned_from_historical_other_pod(tmp_path, enabled_bool, mode_str):
+    target_obj, _ = build_fixture_tuple(tmp_path)
+    LiveStateStore(target_obj.db_path_str).upsert_release(replace(target_obj.release_obj,
+        release_id_str="previous-release", pod_id_str="previous-pod", user_id_str="previous-owner",
+        enabled_bool=enabled_bool, mode_str=mode_str))
+    _cache(target_obj, {"SPY": 999}, timestamp_ts=NOW_TS)
+    result_dict = load_positions_dict(target_obj, as_of_ts=NOW_TS)
+    assert result_dict["available_bool"] is False
+    assert result_dict["position_map_dict"] == {}
+
+
+def test_unrelated_other_pod_account_history_does_not_affect_current_cache(tmp_path):
+    target_obj, _ = build_fixture_tuple(tmp_path)
+    LiveStateStore(target_obj.db_path_str).upsert_release(replace(target_obj.release_obj,
+        release_id_str="unrelated-release", pod_id_str="unrelated-pod", user_id_str="unrelated-owner",
+        account_route_str="U999", mode_str="paper", enabled_bool=True))
+    _cache(target_obj, {"SPY": 3})
+    result_dict = load_positions_dict(target_obj, as_of_ts=NOW_TS)
+    assert result_dict["available_bool"] is True
+    assert result_dict["position_map_dict"] == {"SPY": 3}
+    assert result_dict["source_str"] == "broker_snapshot"
+
+
+@pytest.mark.parametrize("change_dict", [{"user_id_str": "previous-owner"},
+    {"account_route_str": "U999"}, {"mode_str": "paper"}])
+def test_same_pod_conflicting_history_remains_unavailable(tmp_path, change_dict):
+    target_obj, _ = build_fixture_tuple(tmp_path)
+    LiveStateStore(target_obj.db_path_str).upsert_release(replace(target_obj.release_obj,
+        release_id_str="previous-release", enabled_bool=False, **change_dict))
+    _reconcile(target_obj)
+    _cache(target_obj)
+    assert load_positions_dict(target_obj, as_of_ts=NOW_TS)["available_bool"] is False
+
+
+def test_other_pod_release_never_authorizes_current_reconciliation(tmp_path):
+    target_obj, _ = build_fixture_tuple(tmp_path)
+    LiveStateStore(target_obj.db_path_str).upsert_release(replace(target_obj.release_obj,
+        release_id_str="previous-release", pod_id_str="previous-pod", enabled_bool=False))
+    _reconcile(target_obj)
+    for table_str in ("decision_plan", "vplan"):
+        update_db(target_obj, f"UPDATE {table_str} SET release_id_str='previous-release',pod_id_str='previous-pod'")
+    assert load_positions_dict(target_obj, as_of_ts=NOW_TS)["available_bool"] is False
 
 
 @pytest.mark.parametrize("json_str", ["", "null", "[]", "{broken}", '{"SPY":2,"SPY":3}',
