@@ -179,7 +179,7 @@ def _months_before_date(today_obj, months_int):
     return date(year_int, month_int, min(today_obj.day, calendar.monthrange(year_int, month_int)[1]))
 
 
-def build_financial_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, period_str="3M", as_of_ts):
+def build_financial_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, period_str="All", as_of_ts):
     """Read-only presentation of one acquired, scoped LIVE reporting snapshot.
 
     V3 owns NAV, flow-adjusted P&L, TWR and cash validation. Each tile uses its

@@ -99,17 +99,48 @@ totals remain at portfolio scope. Broker cache timestamps are observations;
 reconciliation timestamps are recording times and are labeled accordingly.
 Missing owned accounts make holdings incomplete. The page does not reconstruct
 average cost from fills or use execution reference prices for Value, Weight or
-entry P&L. Changed today and Off target remain unavailable until their evidence
-contracts are implemented. The owner chose to hide these unconnected fields and
-filters pending a separate marks-source decision. Multi-Pod rows show each Pod's
+entry P&L. Off target remains hidden until its comparison contract is approved.
+Multi-Pod rows show each Pod's
 quantity inline, and the verdict follows the selected Pod while account totals
 retain portfolio scope.
 
 On shared or legacy databases, another Pod's historical release cannot suppress
 this Pod's fully attributed reconciliation. Account-only broker cache rows still
 require unambiguous saved account ownership; old enabled flags do not prove it.
-Same-Pod conflicting ownership remains unavailable. This is a quantities-first
-page, not a complete implementation of the Mockup D valuation fields.
+Same-Pod conflicting ownership remains unavailable.
+
+Positions now optionally uses the saved IBKR portfolio sample for Value, Weight
+and Open P&L. The existing EOD callback also records `averageCost` and
+`unrealizedPNL`, without another broker request. Both are optional: finite cost
+must be nonnegative and P&L must agree with `value - signed shares * average cost`
+within `max($0.05, max(abs(value), abs(cost)) * 0.000001)`. A bad or missing pair
+withholds only P&L; legacy saved values remain readable. Open P&L is the saved
+unrealized result, not today's return. Its percentage is summed P&L divided by
+summed absolute position cost; zero cost has no percentage. Best/Worst rank
+merged symbols by open dollar P&L, with symbol ordering for ties.
+
+Each value is displayed only while its saved shares match the independently
+read current broker shares. No current quantity is multiplied by an old mark.
+Portfolio totals and weights require all owned Pods, matching full quantity
+maps and one ET observation date. Weight is signed holding value divided by
+the whole book's saved holding values plus cash, not finalized Flex NAV.
+Pod filters do not change that denominator or portfolio summary tiles.
+Missing Pods, changed quantities or mixed dates withhold complete totals;
+valid individual values remain explicitly dated. Shorts and negative cash stay
+signed, and visual bars are clamped only for drawing. If no values exist, the
+previous dated canonical account-total fallback remains and money columns stay
+hidden. Official Overview NAV, account TWR and return calculations are unchanged.
+
+Today and Changed today use a bounded read-only projection of VPlan requests,
+orders, acknowledgements and actual executions on the current ET date, including
+late fills of earlier plans. Gross buys/sells count as activity even when net
+shares are unchanged. Pending orders alone do not qualify as changed. New/Closed
+labels additionally require coherent same-day pre/post broker observations and
+agreement with the displayed shares. Closed symbols remain visible that day.
+Unverified or excessive evidence disables the filter for that Pod scope; expired
+status becomes Unknown. No operation, submit, cancel, new route or schema
+migration is added by the page. Synthetic demos verify display contracts; real
+IBKR cost/P&L availability still requires a successful scheduled EOD capture.
 
 V4 charts display the existing cumulative return paths, not normalized NAV.
 Overview retains the configured client end-of-day flow convention and labels

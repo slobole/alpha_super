@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from math import isfinite
 from time import monotonic
 
@@ -554,11 +555,25 @@ class IBKRSocketClient:
             ):
                 return unavailable_dict
             valuation_shares_map[symbol_str] = shares_float
-            position_list.append({
+            position_dict = {
                 "symbol_str": symbol_str, "conid_int": conid_int, "currency_str": "USD",
                 "shares_float": shares_float, "market_price_float": market_price_float,
                 "value_float": value_float,
-            })
+            }
+            average_cost_obj = getattr(portfolio_item_obj, "averageCost", None)
+            unrealized_pnl_obj = getattr(portfolio_item_obj, "unrealizedPNL", None)
+            if (all(type(number_obj) in {int, float} and abs(number_obj) < 1e15 and isfinite(number_obj)
+                    for number_obj in (average_cost_obj, unrealized_pnl_obj)) and average_cost_obj >= 0):
+                cost_decimal = Decimal(str(shares_float)) * Decimal(str(average_cost_obj))
+                value_decimal = Decimal(str(value_float))
+                # Optional display evidence: P&L = value - signed shares * average cost.
+                # Accept five cents or one ppm of value/cost for IB rounding;
+                # a missing/inconsistent cost must not suppress valid marks.
+                tolerance_decimal = max(Decimal(".05"), max(abs(value_decimal), abs(cost_decimal)) * Decimal(".000001"))
+                if abs(Decimal(str(unrealized_pnl_obj)) - (value_decimal - cost_decimal)) <= tolerance_decimal:
+                    position_dict.update(average_cost_float=float(average_cost_obj),
+                        unrealized_pnl_float=float(unrealized_pnl_obj))
+            position_list.append(position_dict)
         expected_shares_map = {
             symbol_str: shares_float for symbol_str, shares_float in position_amount_map.items()
             if shares_float != 0

@@ -55,7 +55,7 @@ def _action_required_bool(row_dict, cycle_dict):
 
 
 def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts: datetime,
-                        period_str="3M", demo_bool=False, include_finance_bool=True):
+                        period_str="All", demo_bool=False, include_finance_bool=True):
     client_dict = workspace_dict["client_dict"]
     source_dict = workspace_dict.get("summary_dict") or {}
     source_ts = parse_timestamp_ts(source_dict.get("as_of_timestamp_str"))

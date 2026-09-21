@@ -1,7 +1,7 @@
 """Owned temporary SQLite fixtures, read through the production V4 readers."""
 
 from contextlib import closing
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import sqlite3
 from tempfile import TemporaryDirectory, gettempdir
@@ -58,7 +58,7 @@ class DemoPodStore:
     deterministic application/test cleanup. No writer survives setup.
     """
 
-    def __init__(self, row_list, *, as_of_ts):
+    def __init__(self, row_list, *, as_of_ts, include_portfolio_valuation_bool=False):
         if len(row_list) != len(DEMO_ASSET_TUPLE) or any(
             row_dict.get("mode_str") != "live"
             or not str(row_dict.get("pod_id_str", "")).startswith("demo_")
@@ -69,6 +69,7 @@ class DemoPodStore:
         self._temp_obj = TemporaryDirectory(prefix="alpha-super-v4-demo-")
         self.directory_path_obj = Path(self._temp_obj.name).resolve()
         self.target_dict = {}
+        self._include_portfolio_valuation_bool = include_portfolio_valuation_bool
         try:
             for index_int, row_dict in enumerate(row_list):
                 database_path_obj = (self.directory_path_obj / f"pod-{index_int}.sqlite3").resolve()
@@ -178,16 +179,64 @@ class DemoPodStore:
         source_dict = self.get_pod_cycles_dict(release_obj.pod_id_str, as_of_ts=as_of_ts)
         if source_dict["status_str"] != "ok" or source_dict["cycle_evidence_dict"]["state_str"] not in {"complete", "partial"}:
             raise ValueError("Synthetic database failed the real evidence reader")
+        broker_timestamp_ts = eod_ts
+        if self._include_portfolio_valuation_bool:
+            broker_timestamp_ts = self._seed_portfolio_valuation(
+                store_obj, release_obj, source_dict, index_int, equity_float, as_of_ts)
         for key_str, value_obj in source_dict["pod_row_dict"].items():
             if key_str not in {"eod_snapshot_dict", "required_action_dict"}:
                 row_dict[key_str] = value_obj
         row_dict.update(cycle_evidence_dict=source_dict["cycle_evidence_dict"],
             user_id_str=release_obj.user_id_str, signal_clock_str=release_obj.signal_clock_str,
-            latest_pod_state_timestamp_str=position_ts.isoformat(), latest_broker_snapshot_timestamp_str=eod_ts.isoformat(),
+            latest_pod_state_timestamp_str=position_ts.isoformat(), latest_broker_snapshot_timestamp_str=broker_timestamp_ts.isoformat(),
             latest_live_reference_snapshot_timestamp_str=(current_target_ts - timedelta(minutes=7)).isoformat(),
             latest_live_reference_source_str="DEMO saved reference",
             position_exposure_dict_list=[{"asset_str": asset_str, "share_float": share_float, "price_float": price_map_dict[asset_str]}
                 for asset_str, share_float in sorted(position_dict.items())])
+
+    @staticmethod
+    def _seed_portfolio_valuation(store_obj, release_obj, source_dict, index_int, equity_float, as_of_ts):
+        """Synthetic present observation, separate from the synthetic Sep 4 close.
+
+        Filled quantities come from the real evidence reader above; an unfilled
+        QPI order does not become a holding. Zero-fee cash conserves the seeded
+        fills. Invented marks/costs exercise P&L display, not market-data access.
+        """
+        observed_ts = as_of_ts.astimezone(UTC) - timedelta(seconds=2)
+        plan_dict = source_dict["vplan_dict"]
+        price_map_dict = plan_dict["live_reference_price_map_dict"]
+        position_map_dict = dict(plan_dict["current_broker_position_map_dict"])
+        before_value_float = sum(shares_float * price_map_dict[symbol_str]
+            for symbol_str, shares_float in position_map_dict.items())
+        for order_dict in source_dict["cycle_evidence_dict"]["order_list"]:
+            symbol_str = order_dict["asset_str"]
+            position_map_dict[symbol_str] = position_map_dict.get(symbol_str, 0.0) + order_dict["filled_share_float"]
+        position_map_dict = {symbol_str: shares_float for symbol_str, shares_float in position_map_dict.items() if shares_float != 0}
+        filled_value_float = sum(fill_dict["fill_amount_float"] * fill_dict["fill_price_float"]
+            for fill_dict in source_dict["fill_list"])
+        cash_float = round(equity_float - before_value_float - filled_value_float, 2)
+        conid_map_dict = {symbol_str: 10000 + symbol_int for symbol_int, symbol_str in
+            enumerate(sorted({symbol_str for asset_tuple in DEMO_ASSET_TUPLE for symbol_str in asset_tuple} | {"SGOV"}))}
+        position_list = []
+        for symbol_int, (symbol_str, shares_float) in enumerate(sorted(position_map_dict.items())):
+            cost_float = price_map_dict[symbol_str]
+            change_float = 0.0 if symbol_str == "SGOV" else (.025 if (index_int + symbol_int) % 2 == 0 else -.015)
+            price_float = round(cost_float * (1 + change_float), 4)
+            position_list.append({"symbol_str": symbol_str, "conid_int": conid_map_dict[symbol_str],
+                "currency_str": "USD", "shares_float": shares_float, "market_price_float": price_float,
+                "value_float": round(shares_float * price_float, 2), "average_cost_float": cost_float,
+                "unrealized_pnl_float": round(shares_float * (price_float - cost_float), 2)})
+        nav_float = round(sum(position_dict["value_float"] for position_dict in position_list) + cash_float, 2)
+        valuation_dict = {"available_bool": True, "reason_str": "", "account_route_str": release_obj.account_route_str,
+            "observed_timestamp_str": observed_ts.isoformat(), "source_str": "IBKR portfolio", "currency_str": "USD",
+            "cash_float": cash_float, "broker_nav_float": nav_float, "position_list": position_list}
+        store_obj.upsert_broker_snapshot_cache(BrokerSnapshot(
+            account_route_str=release_obj.account_route_str, snapshot_timestamp_ts=observed_ts,
+            cash_float=cash_float, total_value_float=nav_float, net_liq_float=nav_float,
+            position_amount_map=position_map_dict, portfolio_valuation_dict=valuation_dict), release_obj=release_obj)
+        with store_obj._connect() as connection_obj:
+            connection_obj.execute("UPDATE broker_snapshot_cache SET updated_timestamp_str=snapshot_timestamp_str")
+        return observed_ts
 
     @staticmethod
     def _seed_cycle(store_obj, release_obj, target_ts, signal_ts, before_dict, after_dict,

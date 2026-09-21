@@ -95,7 +95,7 @@ def _positions_dict(evidence_dict, as_of_ts):
     return result_dict
 
 
-def _build_report_finance_dict(workspace_dict, snapshot_obj, provider_obj, *, pod_id_str, as_of_ts, period_str="3M", performance_db_path_str=None):
+def _build_report_finance_dict(workspace_dict, snapshot_obj, provider_obj, *, pod_id_str, as_of_ts, period_str="All", performance_db_path_str=None):
     """Use official account TWR and the canonical dollar bridge, never NAV delta.
 
     The complete acquired mapping is checked before selecting one account. A
@@ -245,7 +245,7 @@ def _build_report_finance_dict(workspace_dict, snapshot_obj, provider_obj, *, po
     return result_dict
 
 
-def build_pod_finance_dict(workspace_dict, snapshot_obj, provider_obj, *, pod_id_str, as_of_ts, period_str="3M", performance_db_path_str=None):
+def build_pod_finance_dict(workspace_dict, snapshot_obj, provider_obj, *, pod_id_str, as_of_ts, period_str="All", performance_db_path_str=None):
     """Keep reported money intact; display a self-contained saved IBKR portfolio.
 
     Allocation weights are saved IBKR position value / (sum(values) + saved

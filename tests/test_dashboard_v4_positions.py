@@ -26,7 +26,11 @@ def base_tuple():
 
 
 @pytest.fixture
-def fixture_tuple(base_tuple):
+def fixture_tuple(base_tuple, monkeypatch):
+    # These tests replace saved holdings; the demo's unrelated trades are not
+    # evidence for those replacement quantities.
+    monkeypatch.setattr("alpha.live.dashboard_v4.positions_enrichment.load_position_activity_dict",
+        lambda *args, **kwargs: {"available_bool": False, "symbol_dict": {}})
     workspace_dict, snapshot_obj, provider_obj, original_dict = base_tuple
     source_dict = deepcopy(original_dict)
     wrapper_obj = SimpleNamespace(get_target_for_pod=provider_obj.get_target_for_pod,
@@ -52,7 +56,7 @@ def test_saved_demo_rows_have_shares_but_no_reference_values_or_position_pnl(fix
     for row_dict in result_dict["row_list"]:
         assert row_dict["value_str"] == row_dict["weight_str"] == row_dict["pl_str"] == row_dict["pl_percent_str"] == "—"
         assert row_dict["weight_percent_float"] is None
-        assert row_dict["today_str"] == ""
+        assert row_dict["today_str"] == "Unknown"
         assert row_dict["name_str"] == ""
         assert all("ET" in holder_dict["position_asof_str"] for holder_dict in row_dict["pod_list"])
     assert workspace_dict == before_dict

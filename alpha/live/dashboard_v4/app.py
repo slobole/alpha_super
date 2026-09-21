@@ -60,7 +60,7 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         allowed_set = {"view", "pod"} if positions_bool else ({"period", "cycle", "tab"} if pod_id_str is not None else {"period"})
         if set(request.args) - allowed_set or any(len(request.args.getlist(key_str)) > 1 for key_str in allowed_set):
             abort(400)
-        period_str = request.args.get("period", "3M")
+        period_str = request.args.get("period", "All")
         if period_str not in PERIOD_TUPLE:
             abort(400)
         tab_str, cycle_str = request.args.get("tab", ""), request.args.get("cycle", "")
@@ -132,6 +132,11 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
                 overview_dict = build_overview_dict(workspace_dict, snapshot_obj, provider_obj,
                     as_of_ts=render_ts, period_str=period_str, demo_bool=demo_bool, include_finance_bool=False)
                 overview_dict["refresh_seconds_int"] = 15
+            if remaining_int == 0:
+                positions_page_dict["source_fresh_bool"] = False
+                for row_dict in positions_page_dict["row_list"]:
+                    if row_dict["today_pending_bool"]:
+                        row_dict["today_detail_str"] = "Unknown"
             overview_dict.update(refresh_url_str=url_for("positions_refresh", view=view_str, pod=selected_pod_str),
                 source_valid_ms_int=remaining_int,
                 clock_timestamp_str=render_ts.isoformat(),

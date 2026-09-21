@@ -62,7 +62,8 @@ def build_demo_workspace_tuple(*, include_holdings_bool=False):
                 debug_summary_dict={"severity_str": "red"},
             )
     # One owned fixture store per provider, retained until provider cleanup.
-    provider_obj.pod_store_obj = DemoPodStore(provider_obj.row_list, as_of_ts=DEMO_NOW_TS)
+    provider_obj.pod_store_obj = DemoPodStore(provider_obj.row_list, as_of_ts=DEMO_NOW_TS,
+        include_portfolio_valuation_bool=include_holdings_bool)
     for method_str in ("get_pod_cycles_dict", "get_cycle_evidence_dict", "get_target_for_pod", "get_target_list", "close"):
         setattr(provider_obj, method_str, getattr(provider_obj.pod_store_obj, method_str))
     pod_store_obj = provider_obj.pod_store_obj

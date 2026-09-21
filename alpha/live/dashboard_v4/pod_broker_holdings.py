@@ -103,6 +103,7 @@ def load_broker_holdings_dict(target_obj, *, as_of_ts):
         if not isinstance(position_list, list) or len(position_list) > POSITION_LIMIT_INT:
             raise ValueError("Incomplete portfolio rows")
         symbol_set, conid_set = set(), set()
+        verified_position_list = []
         for position_dict in position_list:
             if not isinstance(position_dict, dict):
                 raise ValueError("Invalid portfolio row")
@@ -124,9 +125,25 @@ def load_broker_holdings_dict(target_obj, *, as_of_ts):
                 raise ValueError("Portfolio value does not match quantity and mark")
             symbol_set.add(symbol_str)
             conid_set.add(conid_int)
+            verified_position_dict = {field_str: position_dict[field_str] for field_str in (
+                "symbol_str", "conid_int", "currency_str", "shares_float", "market_price_float", "value_float")}
+            average_cost_obj, unrealized_pnl_obj = (position_dict.get(field_str)
+                for field_str in ("average_cost_float", "unrealized_pnl_float"))
+            if (all(_finite_bool(number_obj) and abs(number_obj) < 1e15
+                    for number_obj in (average_cost_obj, unrealized_pnl_obj)) and average_cost_obj >= 0):
+                cost_decimal = Decimal(str(shares_float)) * Decimal(str(average_cost_obj))
+                # P&L = value - signed shares * average cost. Cost/P&L are an
+                # optional pair; older records and bad P&L retain valid marks.
+                # Five cents or one ppm of value/cost allows broker rounding.
+                tolerance_decimal = max(Decimal(".05"), max(abs(value_decimal), abs(cost_decimal)) * Decimal(".000001"))
+                if abs(Decimal(str(unrealized_pnl_obj)) - (value_decimal - cost_decimal)) <= tolerance_decimal:
+                    verified_position_dict.update(average_cost_float=float(average_cost_obj),
+                        unrealized_pnl_float=float(unrealized_pnl_obj))
+            if shares_float != 0:
+                verified_position_list.append(verified_position_dict)
         result_dict.update(available_bool=True, reason_str="", cash_float=cash_float,
             broker_nav_float=nav_float, observed_timestamp_str=timestamp_ts.isoformat(),
-            position_list=[dict(position_dict) for position_dict in position_list if position_dict["shares_float"] != 0])
+            position_list=verified_position_list)
     except (AttributeError, IndexError, KeyError, TypeError, ValueError, OverflowError, ArithmeticError, RecursionError, OSError, sqlite3.Error):
         result_dict["reason_str"] = "Saved IBKR position values could not be verified"
     return result_dict

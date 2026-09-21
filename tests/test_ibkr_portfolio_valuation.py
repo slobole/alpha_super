@@ -27,11 +27,12 @@ def _contract_obj(symbol_str="AAA", conid_int=1, **attribute_dict):
 
 def _portfolio_tuple(
     symbol_str="AAA", conid_int=1, shares_float=2.0,
-    mark_float=25.0, value_float=50.0, account_str=ACCOUNT_STR, **attribute_dict,
+    mark_float=25.0, value_float=50.0, account_str=ACCOUNT_STR,
+    average_cost_obj=20.0, unrealized_pnl_obj=10.0, **attribute_dict,
 ):
     return (
         _contract_obj(symbol_str, conid_int, **attribute_dict), shares_float,
-        mark_float, value_float, 20.0, 10.0, 0.0, account_str,
+        mark_float, value_float, average_cost_obj, unrealized_pnl_obj, 0.0, account_str,
     )
 
 
@@ -159,6 +160,7 @@ def test_complete_target_download_adds_values_without_changing_base(capture_case
     assert valuation_dict["position_list"] == [{
         "symbol_str": "AAA", "conid_int": 1, "currency_str": "USD",
         "shares_float": 2.0, "market_price_float": 25.0, "value_float": 50.0,
+        "average_cost_float": 20.0, "unrealized_pnl_float": 10.0,
     }]
     before_dict, after_dict = asdict(before_snapshot_obj), asdict(snapshot_obj)
     for field_str in ("snapshot_timestamp_ts", "portfolio_valuation_dict"):
@@ -409,3 +411,69 @@ def test_ib_rounding_tolerance_does_not_recompute_saved_market_value(capture_cas
     valuation_dict = _capture(capture_case).portfolio_valuation_dict
     assert valuation_dict["available_bool"] is True
     assert valuation_dict["position_list"][0]["value_float"] == 50.01
+
+
+@pytest.mark.parametrize("average_cost_obj,unrealized_pnl_obj", [
+    (None, 10.0), (20.0, None), (-1.0, 52.0), (float("nan"), 10.0),
+    (20.0, float("nan")), (float("inf"), 10.0), (20.0, float("inf")),
+    (True, 48.0), (20.0, True), ("20", 10.0), (20.0, "10"),
+    (1e308, -1e308), (10 ** 500, 10.0), (20.0, 10 ** 500),
+    (20.0, 0.0), (20.0, 9.0), (0.0, 0.0),
+])
+def test_missing_invalid_or_inconsistent_pnl_does_not_hide_valid_marks(
+    capture_case, average_cost_obj, unrealized_pnl_obj,
+):
+    capture_case.portfolio_list = [_portfolio_tuple(
+        average_cost_obj=average_cost_obj, unrealized_pnl_obj=unrealized_pnl_obj)]
+    valuation_dict = _capture(capture_case).portfolio_valuation_dict
+    assert valuation_dict["available_bool"] is True
+    row_dict = valuation_dict["position_list"][0]
+    assert row_dict["shares_float"] == 2.0 and row_dict["value_float"] == 50.0
+    assert "average_cost_float" not in row_dict and "unrealized_pnl_float" not in row_dict
+
+
+@pytest.mark.parametrize("shares_float,value_float,cost_float,pnl_float", [
+    (2.0, 50.0, 30.0, -10.0), (-2.0, -50.0, 30.0, 10.0),
+    (-2.0, -50.0, 20.0, -10.0), (2.0, 50.0, 0.0, 50.0),
+    (2.0, 50.0, 25.0, 0.0),
+])
+def test_pnl_keeps_broker_sign_and_zero_cost_without_inventing_percentage(
+    capture_case, shares_float, value_float, cost_float, pnl_float,
+):
+    capture_case.ib_obj.wrapper.position(ACCOUNT_STR, _contract_obj(), shares_float, cost_float)
+    capture_case.portfolio_list = [_portfolio_tuple(shares_float=shares_float,
+        value_float=value_float, average_cost_obj=cost_float, unrealized_pnl_obj=pnl_float)]
+    row_dict = _capture(capture_case).portfolio_valuation_dict["position_list"][0]
+    assert row_dict["average_cost_float"] == cost_float
+    assert row_dict["unrealized_pnl_float"] == pnl_float
+    assert not any("percent" in key_str for key_str in row_dict)
+
+
+@pytest.mark.parametrize("pnl_float,accepted_bool", [(10.05, True), (10.051, False)])
+def test_pnl_five_cent_rounding_boundary(capture_case, pnl_float, accepted_bool):
+    capture_case.portfolio_list = [_portfolio_tuple(unrealized_pnl_obj=pnl_float)]
+    valuation_dict = _capture(capture_case).portfolio_valuation_dict
+    assert valuation_dict["available_bool"] is True
+    row_dict = valuation_dict["position_list"][0]
+    assert ("unrealized_pnl_float" in row_dict) is accepted_bool
+    if accepted_bool:
+        assert row_dict["unrealized_pnl_float"] == pnl_float
+
+
+@pytest.mark.parametrize("pnl_float,accepted_bool", [(200001.0, True), (200001.01, False)])
+def test_pnl_rounding_relative_branch(capture_case, pnl_float, accepted_bool):
+    capture_case.ib_obj.wrapper.position(ACCOUNT_STR, _contract_obj(), 20.0, 40000.0)
+    capture_case.portfolio_list = [_portfolio_tuple(shares_float=20.0, mark_float=50000.0,
+        value_float=1000000.0, average_cost_obj=40000.0, unrealized_pnl_obj=pnl_float)]
+    valuation_dict = _capture(capture_case).portfolio_valuation_dict
+    assert valuation_dict["available_bool"] is True
+    assert ("unrealized_pnl_float" in valuation_dict["position_list"][0]) is accepted_bool
+
+
+def test_missing_pnl_on_one_holding_does_not_drop_another_holdings_pnl(capture_case):
+    capture_case.ib_obj.wrapper.position(ACCOUNT_STR, _contract_obj("BBB", 2), 2.0, 20.0)
+    capture_case.portfolio_list.append(_portfolio_tuple("BBB", 2, unrealized_pnl_obj=None))
+    valuation_dict = _capture(capture_case).portfolio_valuation_dict
+    assert valuation_dict["available_bool"] is True
+    assert valuation_dict["position_list"][0]["unrealized_pnl_float"] == 10.0
+    assert "unrealized_pnl_float" not in valuation_dict["position_list"][1]

@@ -63,6 +63,18 @@ def test_read_uses_only_original_payload_and_does_not_write(broker_source_tuple)
     assert path_obj.read_bytes() == original_bytes and path_obj.stat().st_mtime_ns == original_mtime_int
 
 
+def test_extra_row_fields_cannot_override_dashboard_identity_or_shares(broker_source_tuple):
+    target_obj, payload_dict = broker_source_tuple
+    payload_dict["position_list"][0].update(pod_id_str="foreign", share_float=999,
+        url_str="https://example.invalid", name_str="Wrong Pod", color_str="red")
+    _save_payload(target_obj, payload_dict)
+    result_dict = _read_dict(broker_source_tuple)
+    assert result_dict["available_bool"]
+    row_dict = result_dict["position_list"][0]
+    assert set(row_dict) == {"symbol_str", "conid_int", "currency_str", "shares_float", "market_price_float", "value_float"}
+    assert row_dict["shares_float"] == 3.125
+
+
 @pytest.mark.parametrize("legacy_str", ["column", "null", "table"])
 def test_legacy_missing_values_are_expected_not_fabricated(broker_source_tuple, legacy_str):
     target_obj, _ = broker_source_tuple
@@ -206,3 +218,85 @@ def test_missing_database_is_not_created(tmp_path, broker_source_tuple):
     target_obj = replace(broker_source_tuple[0], db_path_str=str(tmp_path / "missing.sqlite3"))
     assert not load_broker_holdings_dict(target_obj, as_of_ts=NOW_TS)["available_bool"]
     assert not Path(target_obj.db_path_str).exists()
+
+
+def test_optional_broker_cost_and_pnl_are_preserved_for_long_and_short(broker_source_tuple):
+    target_obj, payload_dict = broker_source_tuple
+    payload_dict["position_list"][0].update(average_cost_float=80.0, unrealized_pnl_float=62.5)
+    payload_dict["position_list"][1].update(average_cost_float=25.0, unrealized_pnl_float=5.0)
+    _save_payload(target_obj, payload_dict)
+    result_dict = _read_dict(broker_source_tuple)
+    assert result_dict["available_bool"] is True
+    assert result_dict["position_list"] == payload_dict["position_list"]
+    assert result_dict["cash_float"] == payload_dict["cash_float"]
+
+
+def test_legacy_schema_one_rows_have_no_invented_cost_or_pnl(broker_source_tuple):
+    result_dict = _read_dict(broker_source_tuple)
+    assert result_dict["available_bool"] is True
+    assert all("average_cost_float" not in row_dict and "unrealized_pnl_float" not in row_dict
+        for row_dict in result_dict["position_list"])
+
+
+@pytest.mark.parametrize("optional_dict", [
+    {"average_cost_float": 80.0}, {"unrealized_pnl_float": 62.5},
+    {"average_cost_float": None, "unrealized_pnl_float": 62.5},
+    {"average_cost_float": 80.0, "unrealized_pnl_float": None},
+    {"average_cost_float": -80.0, "unrealized_pnl_float": 562.5},
+    {"average_cost_float": float("nan"), "unrealized_pnl_float": 62.5},
+    {"average_cost_float": 80.0, "unrealized_pnl_float": float("inf")},
+    {"average_cost_float": True, "unrealized_pnl_float": 309.375},
+    {"average_cost_float": 80.0, "unrealized_pnl_float": False},
+    {"average_cost_float": "80", "unrealized_pnl_float": 62.5},
+    {"average_cost_float": 80.0, "unrealized_pnl_float": "62.5"},
+    {"average_cost_float": 1e308, "unrealized_pnl_float": -1e308},
+    {"average_cost_float": 10 ** 500, "unrealized_pnl_float": 62.5},
+    {"average_cost_float": 80.0, "unrealized_pnl_float": 10 ** 500},
+    {"average_cost_float": 80.0, "unrealized_pnl_float": 0.0},
+    {"average_cost_float": 0.0, "unrealized_pnl_float": 0.0},
+])
+def test_bad_optional_pnl_is_removed_without_hiding_verified_marks(broker_source_tuple, optional_dict):
+    target_obj, payload_dict = broker_source_tuple
+    payload_dict["position_list"][0].update(optional_dict)
+    payload_dict["position_list"][1].update(average_cost_float=25.0, unrealized_pnl_float=5.0)
+    _save_payload(target_obj, payload_dict)
+    result_dict = _read_dict(broker_source_tuple)
+    assert result_dict["available_bool"] is True
+    row_dict = result_dict["position_list"][0]
+    assert row_dict["shares_float"] == 3.125 and row_dict["value_float"] == 312.5
+    assert "average_cost_float" not in row_dict and "unrealized_pnl_float" not in row_dict
+    assert result_dict["position_list"][1]["unrealized_pnl_float"] == 5.0
+
+
+@pytest.mark.parametrize("cost_float,pnl_float", [(0.0, 312.5), (100.0, 0.0), (120.0, -62.5)])
+def test_zero_cost_zero_pnl_and_loss_are_distinct_valid_facts(broker_source_tuple, cost_float, pnl_float):
+    target_obj, payload_dict = broker_source_tuple
+    payload_dict["position_list"][0].update(average_cost_float=cost_float, unrealized_pnl_float=pnl_float)
+    _save_payload(target_obj, payload_dict)
+    row_dict = _read_dict(broker_source_tuple)["position_list"][0]
+    assert row_dict["average_cost_float"] == cost_float
+    assert row_dict["unrealized_pnl_float"] == pnl_float
+    assert not any("percent" in key_str for key_str in row_dict)
+
+
+@pytest.mark.parametrize("pnl_float,accepted_bool", [(62.55, True), (62.551, False)])
+def test_optional_pnl_rounding_boundary_preserves_reported_amount(broker_source_tuple, pnl_float, accepted_bool):
+    target_obj, payload_dict = broker_source_tuple
+    payload_dict["position_list"][0].update(average_cost_float=80.0, unrealized_pnl_float=pnl_float)
+    _save_payload(target_obj, payload_dict)
+    result_dict = _read_dict(broker_source_tuple)
+    assert result_dict["available_bool"] is True
+    assert ("unrealized_pnl_float" in result_dict["position_list"][0]) is accepted_bool
+    if accepted_bool:
+        assert result_dict["position_list"][0]["unrealized_pnl_float"] == pnl_float
+
+
+@pytest.mark.parametrize("pnl_float,accepted_bool", [(200001.0, True), (200001.01, False)])
+def test_optional_pnl_relative_rounding_boundary(broker_source_tuple, pnl_float, accepted_bool):
+    target_obj, payload_dict = broker_source_tuple
+    payload_dict["position_list"][0].update(shares_float=20.0, market_price_float=50000.0,
+        value_float=1000000.0, average_cost_float=40000.0, unrealized_pnl_float=pnl_float)
+    _save_payload(target_obj, payload_dict)
+    result_dict = _read_dict(broker_source_tuple)
+    assert result_dict["available_bool"] is True
+    assert ("unrealized_pnl_float" in result_dict["position_list"][0]) is accepted_bool

@@ -1,7 +1,6 @@
 """LIVE Positions display over saved broker quantities and canonical account facts."""
 
 from copy import deepcopy
-import math
 import sqlite3
 from zoneinfo import ZoneInfo
 
@@ -11,6 +10,7 @@ from alpha.live.dashboard_v3.client_financial_display import financial_dates_dic
 from alpha.live.dashboard_v3.client_operations import active_account_list, build_client_operations_dict
 from alpha.live.dashboard_v3.client_presentation import portfolio_allocation_dict
 from alpha.live.dashboard_v4.finance import POD_COLOR_TUPLE, _money_str, _share_str
+from alpha.live.dashboard_v4.positions_enrichment import enrich_positions_dict
 from alpha.live.dashboard_v4.positions_data import (
     IDENTITY_FIELD_TUPLE, load_positions_dict, observed_timestamp_ts, validated_position_map_dict,
 )
@@ -127,7 +127,7 @@ def _financial_dict(workspace_dict, snapshot_obj, provider_obj, client_dict, own
 
 def build_positions_page_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts,
                              view_str="all", pod_str="all", search_str=""):
-    """Merge saved quantities without inventing current marks or position P&L.
+    """Merge saved quantities, attributed broker values and verified daily fills.
 
     Filters affect the position rows only. The account tiles and By pod table
     retain the complete owned portfolio scope, including unavailable accounts.
@@ -159,7 +159,7 @@ def build_positions_page_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         + (" · delayed" if financial_dict["delayed_bool"] else "") if financial_dict["closing_str"] else ""),
         financial_delayed_bool=financial_dict["delayed_bool"],
         financial_basis_str=financial_dict["basis_str"], financial_error_str=financial_dict["error_str"])
-    symbol_dict, timestamp_list, missing_list = {}, [], []
+    symbol_dict, timestamp_list, missing_list, source_by_pod_dict = {}, [], [], {}
     for index_int, account_dict in enumerate(owned_list):
         pod_id_str = account_dict["pod_id"]
         identity_dict = {"name_str": account_dict["display_name"], "pod_id_str": pod_id_str,
@@ -188,6 +188,9 @@ def build_positions_page_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
                 position_asof_str=source_dict["position_ts"].astimezone(MARKET_TIMEZONE_OBJ).strftime("%Y-%m-%d %H:%M:%S ET")
                     + (" (recorded)" if source_dict["timestamp_basis_str"] == "recorded" else ""))
             timestamp_list.append(source_dict["position_ts"])
+            source_by_pod_dict[pod_id_str] = {**source_dict, "position_map_dict": position_dict,
+                "target_obj": provider_obj.get_target_for_pod(pod_id_str), "identity_dict": identity_dict,
+                "position_asof_str": pod_row_dict["position_asof_str"]}
             for symbol_str, share_float in position_dict.items():
                 symbol_dict.setdefault(symbol_str, []).append({**identity_dict, "share_float": share_float,
                     "share_str": _shares_str(share_float), "position_timestamp_str": source_dict["position_timestamp_str"],
@@ -196,27 +199,17 @@ def build_positions_page_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
         except (ValueError, TypeError, KeyError, AttributeError, OSError, sqlite3.Error):
             missing_list.append(pod_id_str)
         result_dict["pod_row_list"].append(pod_row_dict)
-    all_row_list = []
-    for symbol_str, full_holder_list in sorted(symbol_dict.items()):
-        holder_list = [holder_dict for holder_dict in full_holder_list if pod_str == "all" or holder_dict["pod_id_str"] == pod_str]
-        if not holder_list:
-            continue
-        share_float = sum(holder_dict["share_float"] for holder_dict in holder_list)
-        all_row_list.append({"symbol_str": symbol_str, "name_str": "", "pod_list": holder_list,
-            "share_str": _shares_str(share_float) if math.isfinite(share_float) else "—", "value_str": "—",
-            "weight_str": "—", "weight_percent_float": None, "pl_str": "—", "pl_percent_str": "—",
-            "pl_tone_str": "", "pl_detail_str": "", "today_str": "", "today_state_str": "",
-            "changed_bool": None, "off_target_bool": None, "offset_bool": any(holder_dict["share_float"] > 0 for holder_dict in holder_list)
-                and any(holder_dict["share_float"] < 0 for holder_dict in holder_list)})
+    selected_count_int = sum(any(pod_str == "all" or holder_dict["pod_id_str"] == pod_str
+        for holder_dict in holder_list) for holder_list in symbol_dict.values())
     complete_bool = not missing_list and bool(owned_list)
-    result_dict.update(all_count_int=len(all_row_list), missing_pod_list=missing_list, holdings_complete_bool=complete_bool,
+    result_dict.update(all_count_int=selected_count_int, missing_pod_list=missing_list, holdings_complete_bool=complete_bool,
         verdict_str=(f"{len(symbol_dict)} saved positions" if complete_bool else "Positions incomplete"),
         verdict_detail_str=(f"{len(missing_list)} pod(s) unavailable." if missing_list else "")
             + (" Refresh unavailable." if not result_dict["source_fresh_bool"] else ""),
         empty_str="No saved positions" if complete_bool else "Saved positions unavailable")
     if pod_str != "all":
         name_str = next(account_dict["display_name"] for account_dict in owned_list if account_dict["pod_id"] == pod_str)
-        count_str = f"{len(all_row_list)} of {len(symbol_dict)} positions" if complete_bool else f"{len(all_row_list)} saved positions"
+        count_str = f"{selected_count_int} of {len(symbol_dict)} positions" if complete_bool else f"{selected_count_int} saved positions"
         result_dict["verdict_str"] = ("Positions unavailable" if pod_str in missing_list else count_str) + " · " + name_str
     if timestamp_list:
         first_str = min(timestamp_list).astimezone(MARKET_TIMEZONE_OBJ).strftime("%Y-%m-%d %H:%M:%S")
@@ -231,10 +224,14 @@ def build_positions_page_dict(workspace_dict, snapshot_obj, provider_obj, *, as_
     result_dict["total_dict"].update(count_str=str(len(symbol_dict)) if complete_bool else "—",
         invested_str=_money_str(invested_float), cash_str=_money_str(financial_dict["cash_float"]),
         weight_str="100.0%" if financial_dict["complete_bool"] else "—")
+    all_row_list = enrich_positions_dict(result_dict, source_by_pod_dict, pod_str=pod_str, as_of_ts=as_of_ts)
     search_key_str = search_str.strip().casefold()
     result_dict["row_list"] = [row_dict for row_dict in all_row_list
-        if not search_key_str or search_key_str in row_dict["symbol_str"].casefold()] if view_str == "all" else []
-    if view_str != "all":
+        if (not search_key_str or search_key_str in row_dict["symbol_str"].casefold())
+        and (view_str == "all" or view_str == "changed" and result_dict["changed_available_bool"] and row_dict["changed_bool"])]
+    if view_str == "changed" and result_dict["changed_available_bool"]:
+        result_dict["empty_str"] = "No verified changes today"
+    elif view_str != "all":
         result_dict["empty_str"] = "Changed-today evidence unavailable" if view_str == "changed" else "Target comparison unavailable"
     elif pod_str in missing_list:
         result_dict["empty_str"] = "Saved positions unavailable for this pod"

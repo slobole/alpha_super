@@ -33,7 +33,7 @@ def test_demo_renders_native_d_shell_and_seven_step_rows(fixture_tuple):
         assert label_str in html_str
     assert "READ-ONLY" not in html_str
     assert html_str.count('class="srow"') == 4
-    assert 'aria-label="Portfolio return · 3M"' in html_str
+    assert 'aria-label="Portfolio return · All"' in html_str
     assert 'Calculated TWR · End-of-day cash flows' in html_str
     assert html_str.count('class="tl"') == 28
     assert 'title="PAPER is not available in V4 yet"' in html_str
