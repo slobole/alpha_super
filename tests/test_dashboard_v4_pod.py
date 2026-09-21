@@ -2,6 +2,8 @@
 
 from copy import deepcopy
 from datetime import timedelta
+from html import unescape
+import re
 
 import pytest
 
@@ -29,7 +31,7 @@ def test_request_join_preserves_same_symbol_entry_and_exit(pod_fixture_tuple):
     tables_dict = build_evidence_tables_dict(source_dict, as_of_ts=DEMO_NOW_TS, fresh_bool=True)
     table_dict = tables_dict["plan"]
     assert len(table_dict["row_list"]) == 3
-    assert [row_dict["order_str"] for row_dict in table_dict["row_list"]] == ["Order +31", "Order +17", "Order -44"]
+    assert [row_dict["order_str"] for row_dict in table_dict["row_list"]] == ["+31", "+17", "-44"]
     assert [row_dict["cell_list"][6] for row_dict in tables_dict["orders"]["row_list"]] == ["158.42", "291.05", "112.80"]
     assert {row_dict["before_str"] for row_dict in table_dict["row_list"]} == {"100"}
     assert {row_dict["after_str"] for row_dict in table_dict["row_list"]} == {"104"}
@@ -72,12 +74,12 @@ def test_compact_position_uses_saved_broker_result_not_order_target_or_fill_tota
         "plan_row_list": [{"asset_str": "ABC", "order_delta_share_float": 19}],
         "vplan_dict": {"current_broker_position_map_dict": {"ABC": 7}, "target_share_map_dict": {"ABC": 26}},
         "reconciliation_dict": {"broker_position_map_dict": {"ABC": 18}, "model_position_map_dict": {"ABC": 26}},
-        "fill_list": [{"asset_str": "ABC", "fill_amount_float": 19, "fill_price_float": 100}],
+        "fill_list": [{"asset_str": "ABC", "fill_amount_float": 2, "fill_price_float": 100}],
     }
     before_dict = deepcopy(source_dict)
     table_dict = build_evidence_tables_dict(source_dict, as_of_ts=DEMO_NOW_TS, fresh_bool=True)["plan"]
-    assert table_dict["column_list"] == ["Symbol", "Position", "Broker = model"]
-    assert table_dict["row_list"] == [{"symbol_str": "ABC", "order_str": "Order +19",
+    assert table_dict["column_list"] == ["Symbol", "Order", "Position", "Broker = model"]
+    assert table_dict["row_list"] == [{"symbol_str": "ABC", "order_str": "+19",
         "before_str": "7", "after_str": "18", "match_str": "fail"}]
     assert source_dict == before_dict
 
@@ -97,8 +99,8 @@ def test_compact_positions_preserve_independent_snapshot_availability(before_map
     assert (row_dict["before_str"], row_dict["after_str"], row_dict["match_str"]) == (before_str, after_str, match_str)
 
 
-@pytest.mark.parametrize("amount_obj,order_str", [(0, "No order"), (-5, "Order -5"),
-    (0.125, "Order +0.125"), (None, "Order —"), (float("nan"), "Order —")])
+@pytest.mark.parametrize("amount_obj,order_str", [(0, "0"), (-5, "-5"),
+    (0.125, "+0.125"), (None, "—"), (float("nan"), "—")])
 def test_compact_requested_shares_do_not_invent_an_order(amount_obj, order_str):
     tables_dict = build_evidence_tables_dict({"plan_row_list": [{"asset_str": "ABC", "order_delta_share_float": amount_obj}]},
         as_of_ts=DEMO_NOW_TS, fresh_bool=True)
@@ -115,12 +117,98 @@ def test_compact_table_escapes_symbols_and_keeps_mobile_and_selection_fields(pod
     html_str = app_obj.test_client().get(f"/pods/{pod_id_str}?tab=plan").get_data(as_text=True)
     table_html_str = html_str.split('data-selection-key="evidence:plan"')[1].split('</table>')[0]
     assert '<img src=x' not in table_html_str and '&lt;img src=x' in table_html_str
-    assert table_html_str.count('scope="col"') == 3
-    assert all(f'data-column="{label_str}"' in table_html_str for label_str in ("Symbol", "Position", "Broker = model"))
+    assert table_html_str.count('scope="col"') == 4
+    assert all(f'data-column="{label_str}"' in table_html_str for label_str in ("Symbol", "Order", "Position", "Broker = model"))
     assert '<span class="sr-only">Before </span>' in table_html_str
     assert '<span class="sr-only"> After </span>' in table_html_str
     assert 'data-observed-state' in table_html_str
     assert 'Fill px' not in table_html_str and 'Filled' not in table_html_str
+
+
+def test_order_has_its_own_cell_and_cannot_rederive_saved_position(pod_fixture_tuple, monkeypatch):
+    workspace_dict, snapshot_obj, provider_obj, source_dict, pod_id_str = pod_fixture_tuple
+    source_dict["plan_row_list"] = [{"asset_str": "ABC", "order_delta_share_float": 19}]
+    source_dict["vplan_dict"].update(current_broker_position_map_dict={"ABC": 7}, target_share_map_dict={"ABC": 999})
+    source_dict["reconciliation_dict"].update(broker_position_map_dict={"ABC": 18}, model_position_map_dict={"ABC": 999})
+    source_dict["fill_list"] = [{"asset_str": "ABC", "fill_amount_float": 2, "fill_price_float": 100}]
+    original_dict = deepcopy(source_dict)
+    monkeypatch.setattr(provider_obj, "get_pod_cycles_dict", lambda *args, **kwargs: deepcopy(source_dict))
+    app_obj = create_app(provider_obj, demo_bool=True, workspace_snapshot_fn=lambda: (deepcopy(workspace_dict), snapshot_obj), now_fn=lambda: DEMO_NOW_TS)
+    html_str = app_obj.test_client().get(f"/pods/{pod_id_str}?tab=plan").get_data(as_text=True)
+    table_str = html_str.split('data-selection-key="evidence:plan"')[1].split('</table>')[0]
+    order_str = re.search(r'<td\b[^>]*data-column="Order"[^>]*>(.*?)</td>', table_str, re.S)[1]
+    position_str = re.search(r'<td\b[^>]*data-column="Position"[^>]*>(.*?)</td>', table_str, re.S)[1]
+    assert unescape(re.sub(r"<[^>]+>", "", order_str)).strip() == "+19"
+    visible_position_str = " ".join(unescape(re.sub(r"<[^>]+>", " ", position_str)).split())
+    assert visible_position_str == "Before 7 → After 18"
+    assert "+19" not in position_str and "Order" not in position_str
+    assert source_dict == original_dict
+
+
+@pytest.mark.parametrize("book_str,note_str", [
+    ("incremental_entry_exit_book", "Entry and exit targets"), ("unknown_book", "Saved decision targets"),
+])
+def test_decision_notes_preserve_incremental_meaning_and_target_precision(book_str, note_str):
+    source_dict = {"decision_dict": {"decision_book_type_str": book_str,
+        "target_weight_map_dict": {"HELD": .75}, "display_target_weight_map_dict": {"NEW": .12345678},
+        "exit_asset_list": ["OLD"]}}
+    original_dict = deepcopy(source_dict)
+    table_dict = build_evidence_tables_dict(source_dict, as_of_ts=DEMO_NOW_TS, fresh_bool=True)["decision"]
+    assert table_dict["column_list"] == ["Symbol", "Target"]
+    assert [row_dict["cell_list"] for row_dict in table_dict["row_list"]] == [["NEW", "12.345678%"], ["OLD", "Exit"]]
+    assert table_dict["note_str"] == note_str
+    assert source_dict == original_dict
+
+
+@pytest.mark.parametrize("book_str", ["full_target_weight_book", "incremental_entry_exit_book"])
+def test_decision_hides_only_full_portfolio_note_and_cycle_legend(pod_fixture_tuple, monkeypatch, book_str):
+    workspace_dict, snapshot_obj, provider_obj, source_dict, pod_id_str = pod_fixture_tuple
+    source_dict["decision_dict"].update(decision_book_type_str=book_str,
+        display_target_weight_map_dict={"NEW": .12345678}, exit_asset_list=["OLD"])
+    monkeypatch.setattr(provider_obj, "get_pod_cycles_dict", lambda *args, **kwargs: deepcopy(source_dict))
+    app_obj = create_app(provider_obj, demo_bool=True, workspace_snapshot_fn=lambda: (deepcopy(workspace_dict), snapshot_obj), now_fn=lambda: DEMO_NOW_TS)
+    html_str = app_obj.test_client().get(f"/pods/{pod_id_str}?tab=decision").get_data(as_text=True)
+    assert "Black = actual" not in html_str and "gray = plan" not in html_str
+    assert "Full portfolio targets" not in html_str
+    assert ("Entry and exit targets" in html_str) is (book_str == "incremental_entry_exit_book")
+    table_tag_str = re.search(r'<table\b[^>]*data-selection-key="evidence:decision"[^>]*>', html_str)[0]
+    assert "decision-table" in table_tag_str
+    table_str = html_str.split('data-selection-key="evidence:decision"')[1].split('</table>')[0]
+    assert table_str.count('scope="col"') == 2
+    assert "12.345678%" in table_str and "Exit" in table_str
+
+
+@pytest.mark.parametrize("position_time_available_bool", [True, False])
+def test_pod_stamp_markup_keeps_positions_time_separate_from_cash_close(pod_fixture_tuple, position_time_available_bool):
+    workspace_dict, snapshot_obj, provider_obj, _, pod_id_str = pod_fixture_tuple
+    if not position_time_available_bool:
+        workspace_dict["summary_dict"]["pod_row_dict_list"][0]["latest_pod_state_timestamp_str"] = None
+    app_obj = create_app(provider_obj, demo_bool=True, workspace_snapshot_fn=lambda: (deepcopy(workspace_dict), snapshot_obj), now_fn=lambda: DEMO_NOW_TS)
+    html_str = app_obj.test_client().get(f"/pods/{pod_id_str}?tab=plan").get_data(as_text=True)
+    position_header_str = re.search(r'<div\b[^>]*class="panel-h pod-positions-head"[^>]*>(.*?)</div>', html_str, re.S)[1]
+    cash_header_str = re.search(r'<div\b[^>]*class="pod-cash"[^>]*>(.*?)</div>', html_str, re.S)[1]
+    position_visible_str = re.sub(r'<span class="sr-only">.*?</span>', "", position_header_str, flags=re.S)
+    cash_visible_str = re.sub(r'<span class="sr-only">.*?</span>', "", cash_header_str, flags=re.S)
+    position_text_str = " ".join(unescape(re.sub(r"<[^>]+>", " ", position_visible_str)).split())
+    cash_text_str = " ".join(unescape(re.sub(r"<[^>]+>", " ", cash_visible_str)).split())
+    assert 'class="pod-stamp"' in position_header_str and 'class="pod-stamp"' in cash_header_str
+    assert '<svg class="ic"' in position_header_str and '<svg class="ic"' in cash_header_str
+    assert "2026-09-04 close" in cash_text_str and "09:36:12" not in cash_text_str
+    assert 'title="Demo · Cash · broker end-of-day · 2026-09-04"' in cash_header_str
+    assert '<span class="sr-only">Demo · Cash · broker end-of-day · 2026-09-04</span>' in cash_header_str
+    assert '<span aria-hidden="true">2026-09-04 close</span>' in cash_header_str
+    if position_time_available_bool:
+        assert "2026-09-08 09:36:12 ET" in position_text_str
+        assert 'title="Saved positions · 2026-09-08 09:36:12 ET"' in position_header_str
+        assert '<span class="sr-only">Saved positions · 2026-09-08 09:36:12 ET</span>' in position_header_str
+        assert '<span aria-hidden="true">2026-09-08 09:36:12 ET</span>' in position_header_str
+    else:
+        assert "—" in position_text_str and "2026-09-04" not in position_text_str
+        assert 'title="Saved positions time unavailable"' in position_header_str
+        assert '<span class="sr-only">Saved positions time unavailable</span>' in position_header_str
+        assert '<span aria-hidden="true">—</span>' in position_header_str
+    assert "Saved positions" not in position_text_str
+    assert "broker end-of-day" not in cash_text_str
 
 
 @pytest.mark.parametrize("fresh_bool,reason_str", [(True, "Order ownership could not be checked."), (True, ""), (False, "")])

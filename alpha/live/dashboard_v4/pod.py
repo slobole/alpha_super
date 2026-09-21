@@ -131,8 +131,8 @@ def build_evidence_tables_dict(source_dict, *, as_of_ts, fresh_bool):
             if fresh_bool and after_float is not None and model_float is not None:
                 match_str = "done" if abs(after_float - model_float) <= 1e-9 else "fail"
         before_float = before_map.get(plan_dict.get("asset_str"), 0) if isinstance(before_map, dict) else None
-        position_order_str = "Order —" if amount_float is None else "No order" if abs(amount_float) <= 1e-9 else (
-            "Order " + ("+" if amount_float > 0 else "-") + _number_str(abs(amount_float)))
+        position_order_str = "—" if amount_float is None else "0" if abs(amount_float) <= 1e-9 else (
+            ("+" if amount_float > 0 else "-") + _number_str(abs(amount_float)))
         plan_rows.append({"symbol_str": symbol_str, "order_str": position_order_str,
             "before_str": _number_str(before_float), "after_str": _number_str(after_float), "match_str": match_str})
         if amount_float is not None and abs(amount_float) <= 1e-9:
@@ -172,8 +172,8 @@ def build_evidence_tables_dict(source_dict, *, as_of_ts, fresh_bool):
         event_rows.append(_row_dict([_time_str(item_dict.get("timestamp_str") or item_dict.get("event_timestamp_str"), as_of_ts),
             _text_str(item_dict.get("asset_str")), label_str]))
     result_dict = {
-        "plan": _table_dict(["Symbol", "Position", "Broker = model"], plan_rows),
-        "decision": _table_dict(["Symbol", "Target"], decision_rows, note_str="Entry and exit targets" if decision_dict.get("decision_book_type_str") == "incremental_entry_exit_book" else "Full portfolio targets" if decision_dict.get("decision_book_type_str") == "full_target_weight_book" else "Saved decision targets"),
+        "plan": _table_dict(["Symbol", "Order", "Position", "Broker = model"], plan_rows),
+        "decision": _table_dict(["Symbol", "Target"], decision_rows, note_str="Entry and exit targets" if decision_dict.get("decision_book_type_str") == "incremental_entry_exit_book" else "" if decision_dict.get("decision_book_type_str") == "full_target_weight_book" else "Saved decision targets"),
         "orders": _table_dict(["Symbol", "Order", "Ack", "Source", "Ack time", "Filled", "Fill px", "Broker id"], order_rows),
         "fills": _table_dict(["Symbol", "Shares", "Fill px", "Time", "Broker id"], [
             _row_dict([_text_str(item_dict.get("asset_str")), _number_str(item_dict.get("fill_amount_float")),

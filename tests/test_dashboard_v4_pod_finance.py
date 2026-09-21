@@ -91,6 +91,8 @@ def test_ambiguous_or_nonlive_identity_withholds_everything_without_io(conflict_
     assert all(tile_dict["value_str"] == "—" for tile_dict in result_dict["tile_list"])
     assert result_dict["position_list"] == []
     assert result_dict["cash_str"] == "—"
+    assert result_dict["positions_stamp_dict"]["label_str"] == "—"
+    assert result_dict["cash_stamp_dict"]["label_str"] == "—"
     assert result_dict["financial_error_str"]
 
 
@@ -123,10 +125,48 @@ def test_saved_share_quantities_keep_their_own_date_and_no_price_claims():
     assert result_dict["position_list"] == [{"symbol_str": "AMD", "shares_str": "31"}, {"symbol_str": "CRM", "shares_str": "17"}]
     assert result_dict["positions_basis_str"] == "Saved positions"
     assert result_dict["position_asof_str"] == "2026-09-08 09:36:12"
+    assert result_dict["positions_stamp_dict"] == {"label_str": "2026-09-08 09:36:12 ET",
+        "title_str": "Saved positions · 2026-09-08 09:36:12 ET"}
     assert "price_asof_str" not in result_dict
     assert result_dict["money_asof_str"] == "Demo · Close 2026-09-04"
     assert result_dict["cash_asof_str"] == "Close 2026-09-04"
+    assert result_dict["cash_stamp_dict"] == {"label_str": "2026-09-04 close",
+        "title_str": "Demo · Cash · broker end-of-day · 2026-09-04"}
     assert result_dict["cash_str"] != "—"
+
+
+@pytest.mark.parametrize("timestamp_str, expected_str", [
+    ("2026-01-08T14:36:12.053574+00:00", "2026-01-08 09:36:12 ET"),
+    ("2026-09-08T13:36:12.053574+00:00", "2026-09-08 09:36:12 ET")])
+def test_position_stamp_uses_et_seconds_in_winter_and_summer(timestamp_str, expected_str):
+    workspace_dict, snapshot_obj, provider_obj, pod_id_str = _fixture_tuple()
+    baseline_dict = _view(workspace_dict, snapshot_obj, provider_obj, pod_id_str)
+    workspace_dict["summary_dict"]["pod_row_dict_list"][0]["latest_pod_state_timestamp_str"] = timestamp_str
+    result_dict = _view(workspace_dict, snapshot_obj, provider_obj, pod_id_str)
+    assert result_dict["positions_stamp_dict"]["label_str"] == expected_str
+    assert result_dict["positions_stamp_dict"]["title_str"] == "Saved positions · " + expected_str
+    assert result_dict["tile_list"] == baseline_dict["tile_list"]
+    assert result_dict["cash_stamp_dict"] == baseline_dict["cash_stamp_dict"]
+
+
+def test_same_day_positions_and_cash_keep_independent_snapshot_labels():
+    workspace_dict, snapshot_obj, provider_obj, pod_id_str = _fixture_tuple()
+    workspace_dict["summary_dict"]["pod_row_dict_list"][0]["latest_pod_state_timestamp_str"] = "2026-09-04T19:59:12+00:00"
+    result_dict = _view(workspace_dict, snapshot_obj, provider_obj, pod_id_str)
+    assert result_dict["positions_stamp_dict"]["label_str"] == "2026-09-04 15:59:12 ET"
+    assert result_dict["cash_stamp_dict"]["label_str"] == "2026-09-04 close"
+    assert "Saved positions" in result_dict["positions_stamp_dict"]["title_str"]
+    assert "broker end-of-day" in result_dict["cash_stamp_dict"]["title_str"]
+
+
+def test_delayed_cash_stamp_keeps_its_verified_close_date_and_context():
+    workspace_dict, snapshot_obj, provider_obj, pod_id_str = _fixture_tuple()
+    result_dict = _view(workspace_dict, snapshot_obj, provider_obj, pod_id_str,
+        as_of_ts=datetime(2026, 10, 10, 12, tzinfo=UTC))
+    assert result_dict["cash_stamp_dict"] == {"label_str": "2026-09-04 close",
+        "title_str": "Demo · Cash · broker end-of-day · 2026-09-04 · Data delayed"}
+    assert result_dict["cash_str"] != "—"
+    assert result_dict["delayed_bool"] is True
 
 
 @pytest.mark.parametrize("timestamp_str", [None, "not-time", "2027-01-01T00:00:00+00:00", "2026-09-04T20:10:00"])
@@ -161,6 +201,8 @@ def test_unknown_or_future_position_time_withholds_quantities(timestamp_str):
     result_dict = _view(workspace_dict, snapshot_obj, provider_obj, pod_id_str)
     assert result_dict["position_list"] == []
     assert not result_dict["positions_available_bool"]
+    assert result_dict["positions_stamp_dict"] == {"label_str": "—", "title_str": "Saved positions time unavailable"}
+    assert result_dict["cash_stamp_dict"]["label_str"] == "2026-09-04 close"
 
 
 def test_duplicate_symbols_are_ambiguous_and_future_state_is_hidden():
@@ -183,6 +225,7 @@ def test_cash_does_not_borrow_another_date_and_old_import_keeps_current_month_bl
     result_dict = _view(workspace_dict, snapshot_obj, provider_obj, pod_id_str,
         as_of_ts=datetime(2026, 10, 10, 12, tzinfo=UTC))
     assert result_dict["cash_str"] == "—"
+    assert result_dict["cash_stamp_dict"] == {"label_str": "—", "title_str": "Cash close unavailable"}
     assert result_dict["tile_list"][2]["value_str"] == "—"
     assert result_dict["tile_list"][0]["value_str"] != "—"
     assert result_dict["delayed_bool"] is True

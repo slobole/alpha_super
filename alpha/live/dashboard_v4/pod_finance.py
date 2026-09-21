@@ -68,6 +68,8 @@ def _scope_tuple(workspace_dict, pod_id_str):
 def _positions_dict(evidence_dict, as_of_ts):
     position_time_str = _saved_time_str(evidence_dict.get("latest_pod_state_timestamp_str"), as_of_ts)
     result_dict = {"position_list": [], "position_asof_str": position_time_str,
+        "positions_stamp_dict": {"label_str": position_time_str + " ET" if position_time_str != "—" else "—",
+            "title_str": "Saved positions · " + position_time_str + " ET" if position_time_str != "—" else "Saved positions time unavailable"},
         "positions_basis_str": "Saved positions", "positions_available_bool": position_time_str != "—"}
     if not result_dict["positions_available_bool"]:
         return result_dict
@@ -99,6 +101,8 @@ def build_pod_finance_dict(workspace_dict, snapshot_obj, provider_obj, *, pod_id
         for label_str in ("Value", "Day", "Month", "Since start")],
         "chart_dict": _empty_chart_dict(), "money_asof_str": "Financial data unavailable",
         "cash_str": "—", "cash_asof_str": "—", "position_list": [], "position_asof_str": "—",
+        "positions_stamp_dict": {"label_str": "—", "title_str": "Saved positions time unavailable"},
+        "cash_stamp_dict": {"label_str": "—", "title_str": "Cash close unavailable"},
         "positions_basis_str": "Saved positions", "positions_available_bool": False,
         "reference_summary_str": "Live vs backtest unavailable", "financial_error_str": "", "delayed_bool": True}
     try:
@@ -183,7 +187,12 @@ def build_pod_finance_dict(workspace_dict, snapshot_obj, provider_obj, *, pod_id
     try:
         cash_list = load_portfolio_cash_list(client_dict, day_dict, provider_obj, operations_dict, as_of_ts=as_of_ts)
         if len(cash_list) == 1 and _finite_bool(cash_list[0].get("cash_float")):
-            result_dict.update(cash_str=_money_str(cash_list[0]["cash_float"]), cash_asof_str="Close " + closing_str)
+            # A shared date does not prove these positions and cash came from one snapshot.
+            result_dict.update(cash_str=_money_str(cash_list[0]["cash_float"]), cash_asof_str="Close " + closing_str,
+                cash_stamp_dict={"label_str": closing_str + " close",
+                    "title_str": ("Demo · " if client_dict.get("is_demo") else "")
+                        + "Cash · broker end-of-day · " + closing_str
+                        + (" · Data delayed" if dates_dict["delayed_bool"] else "")})
     except (ValueError, TypeError, KeyError, OSError, AttributeError):
         pass
     return result_dict
