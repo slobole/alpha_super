@@ -1,6 +1,6 @@
 {% set allocation_dict = pod_page_dict.holdings_allocation_dict %}
-<section class="panel pod-holdings" data-pod-allocation data-close-date="{{ allocation_dict.close_date_str }}">
-  <div class="panel-h pod-positions-head"><span class="panel-t">Positions · {{ allocation_dict.row_list|length }}</span><span class="pod-stamp" title="{{ allocation_dict.basis_detail_str or 'Shares, values and weights at this close' }}">{% if allocation_dict.estimated_bool %}Estimated · {% endif %}{{ icon('calendar') }}Close {{ allocation_dict.close_date_str }}</span></div>
+<section class="panel pod-holdings" data-pod-allocation data-close-date="{{ allocation_dict.observed_timestamp_str or allocation_dict.close_date_str }}">
+  <div class="panel-h pod-positions-head"><span class="panel-t">Positions · {{ allocation_dict.row_list|length }}</span><span class="pod-stamp" title="{{ allocation_dict.basis_detail_str or 'Shares, values and weights at this close' }}">{{ icon('calendar') }}{% if allocation_dict.broker_observation_bool %}IBKR · {{ allocation_dict.observed_time_str }}{% else %}Close {{ allocation_dict.close_date_str }}{% endif %}</span></div>
   {% if allocation_dict.holdings_note_str %}<p class="evidence-note" title="{{ allocation_dict.comparison_basis_str }}">{{ allocation_dict.holdings_note_str }}</p>{% endif %}
   {% if allocation_dict.reason_str %}<p class="evidence-note">{{ allocation_dict.reason_str }}</p>{% endif %}
   <div class="pod-alloc{{ ' table-only' if not allocation_dict.donut_available_bool else '' }}">

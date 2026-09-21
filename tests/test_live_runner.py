@@ -400,6 +400,38 @@ def test_eod_snapshot_updates_cache_pod_state_and_history(tmp_path: Path):
     assert second_detail_dict["reason_count_map_dict"]["eod_snapshot_already_exists"] == 1
 
 
+@pytest.mark.parametrize("mode_str, account_str", [("live", "U1"), ("paper", "DU1")])
+def test_portfolio_capture_is_live_eod_only_and_keeps_daily_idempotency(tmp_path, monkeypatch, mode_str, account_str):
+    from dataclasses import replace
+
+    _write_guardrail_manifest(tmp_path, user_id_str="user_001", pod_id_str="pod_test_01",
+        release_id_str="release_1", mode_str=mode_str, enabled_bool=True, account_route_str=account_str)
+    store_obj = LiveStateStore(str(tmp_path / "live.sqlite3"))
+    broker_obj = StubBrokerAdapter()
+    as_of_ts = datetime(2024, 2, 1, 16, 15, tzinfo=MARKET_TIMEZONE_OBJ)
+    broker_obj.seed_account_snapshot(account_route_str=account_str, cash_float=9200.0,
+        total_value_float=10125.0, net_liq_float=10125.0, position_amount_map={"AAPL": 9.0},
+        snapshot_timestamp_ts=as_of_ts, session_mode_str=mode_str)
+    call_list = []
+
+    def capture_snapshot(account_route_str):
+        call_list.append(account_route_str)
+        return replace(broker_obj.get_account_snapshot(account_route_str), portfolio_valuation_dict={
+            "available_bool": False, "reason_str": "test missing mark"})
+
+    monkeypatch.setattr(broker_obj, "get_eod_account_snapshot", capture_snapshot)
+    kwargs_dict = dict(state_store_obj=store_obj, broker_adapter_obj=broker_obj, as_of_ts=as_of_ts,
+        releases_root_path_str=str(tmp_path / "releases"), env_mode_str=mode_str,
+        log_path_str=str(tmp_path / "ops.log"), trace_enabled_bool=False)
+    assert eod_snapshot(**kwargs_dict)["eod_snapshot_count_int"] == 1
+    assert eod_snapshot(**kwargs_dict)["eod_snapshot_count_int"] == 0
+    assert call_list == ([account_str] if mode_str == "live" else [])
+    assert store_obj.get_pod_state("pod_test_01").total_value_float == 10125.0
+    with store_obj._connect() as connection_obj:
+        payload_str = connection_obj.execute("SELECT portfolio_valuation_json_str FROM broker_snapshot_cache").fetchone()[0]
+    assert (payload_str is not None) == (mode_str == "live")
+
+
 def test_eod_snapshot_does_not_overwrite_unresolved_submitted_vplan(tmp_path: Path):
     _write_manifest(tmp_path, auto_submit_enabled_bool=True)
     state_store_obj = LiveStateStore(str((tmp_path / "live.sqlite3").resolve()))

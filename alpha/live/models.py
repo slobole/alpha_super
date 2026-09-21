@@ -202,6 +202,8 @@ class BrokerSnapshot:
     excess_liquidity_float: float | None = None  # Broker ExcessLiquidity value.
     cushion_float: float | None = None  # Broker cushion ratio, if available.
     open_order_id_list: list[str] = field(default_factory=list)  # Broker open order ids.
+    # Optional display-only account-update sample; never an execution price source.
+    portfolio_valuation_dict: dict[str, object] | None = None
 
 
 BrokerPositionSnapshot = BrokerSnapshot

@@ -392,7 +392,12 @@ class IBKRSocketClient:
         with self.connect() as ib_obj:
             return set(ib_obj.managedAccounts())
 
-    def get_account_snapshot(self, account_route_str: str) -> BrokerSnapshot:
+    def get_account_snapshot(
+        self,
+        account_route_str: str,
+        *,
+        include_portfolio_valuation_bool: bool = False,
+    ) -> BrokerSnapshot:
         with self.connect() as ib_obj:
             account_value_list = ib_obj.accountSummary(account=account_route_str)
             account_value_map = {
@@ -409,10 +414,15 @@ class IBKRSocketClient:
                 for trade_obj in ib_obj.reqOpenOrders()
                 if str(trade_obj.order.account) == account_route_str
             ]
+            snapshot_timestamp_ts = datetime.now(tz=UTC) if include_portfolio_valuation_bool else None
+            portfolio_valuation_dict = (
+                self._capture_portfolio_valuation_dict(ib_obj, account_route_str, position_amount_map)
+                if include_portfolio_valuation_bool else None
+            )
 
         return BrokerSnapshot(
             account_route_str=account_route_str,
-            snapshot_timestamp_ts=datetime.now(tz=UTC),
+            snapshot_timestamp_ts=snapshot_timestamp_ts or datetime.now(tz=UTC),
             cash_float=float(account_value_map.get("TotalCashValue", 0.0)),
             total_value_float=float(account_value_map.get("NetLiquidation", 0.0)),
             net_liq_float=float(account_value_map.get("NetLiquidation", 0.0)),
@@ -425,7 +435,141 @@ class IBKRSocketClient:
             cushion_float=float(account_value_map["Cushion"]) if "Cushion" in account_value_map else None,
             position_amount_map=position_amount_map,
             open_order_id_list=open_order_id_list,
+            portfolio_valuation_dict=portfolio_valuation_dict,
         )
+
+    def _capture_portfolio_valuation_dict(
+        self,
+        ib_obj: IB,
+        account_route_str: str,
+        position_amount_map: dict[str, float],
+    ) -> dict[str, object]:
+        """Optional EOD display values; never replace the trading snapshot.
+
+        connect() owns a new IB instance per call. No shared subscriptions or
+        callbacks are replaced, and the enclosing context still disconnects it.
+        """
+        valuation_dict: dict[str, object] = {
+            "available_bool": False,
+            "reason_str": "IBKR portfolio unavailable",
+            "account_route_str": account_route_str,
+            "source_str": "IBKR portfolio",
+            "currency_str": "USD",
+        }
+        try:
+            account_list = ib_obj.managedAccounts()
+            if not account_route_str or account_route_str not in account_list:
+                return valuation_dict
+            # ib_async 2.1's single-account startup awaits accountValues. A
+            # timeout cancels its Future but leaves this key until the full
+            # accountDownloadEnd arrives. Reading the key never changes it.
+            if "accountValues" in ib_obj.wrapper._futures:
+                return valuation_dict
+            if account_list == [account_route_str]:
+                portfolio_item_list = ib_obj.portfolio(account=account_route_str)
+                account_value_list = ib_obj.accountValues(account=account_route_str)
+            else:
+                # Multi-account startup only uses accountUpdatesMulti (no
+                # portfolio marks). This is the sole classic account download
+                # on this dedicated connection. Collect fresh target rows;
+                # the SDK's unscoped completion alone is not completeness proof.
+                portfolio_item_list: list[object] = []
+                account_value_list: list[object] = []
+
+                def collect_portfolio_item(portfolio_item_obj):
+                    if portfolio_item_obj.account == account_route_str:
+                        portfolio_item_list.append(portfolio_item_obj)
+
+                def collect_account_value(account_value_obj):
+                    if account_value_obj.account == account_route_str:
+                        account_value_list.append(account_value_obj)
+
+                ib_obj.updatePortfolioEvent += collect_portfolio_item
+                ib_obj.accountValueEvent += collect_account_value
+                try:
+                    ib_obj.run(
+                        ib_obj.reqAccountUpdatesAsync(account_route_str),
+                        timeout=max(0.1, min(self.timeout_seconds_float, 10.0)),
+                    )
+                finally:
+                    ib_obj.updatePortfolioEvent -= collect_portfolio_item
+                    ib_obj.accountValueEvent -= collect_account_value
+            valuation_dict.update(self._build_portfolio_valuation_values_dict(
+                portfolio_item_list, account_value_list, position_amount_map
+            ))
+        except TimeoutError:
+            valuation_dict["reason_str"] = "IBKR portfolio request timed out"
+        except Exception:
+            # A missing display value must not fail the existing EOD capture.
+            pass
+        finally:
+            valuation_dict["observed_timestamp_str"] = datetime.now(tz=UTC).isoformat()
+        return valuation_dict
+
+    @staticmethod
+    def _build_portfolio_valuation_values_dict(
+        portfolio_item_list: list[object],
+        account_value_list: list[object],
+        position_amount_map: dict[str, float],
+    ) -> dict[str, object]:
+        unavailable_dict = {"available_bool": False, "reason_str": "IBKR portfolio incomplete"}
+        account_value_map = {
+            (account_value_obj.tag, account_value_obj.currency): account_value_obj.value
+            for account_value_obj in account_value_list if not account_value_obj.modelCode
+        }
+        if any(
+            account_value_obj.tag == "accountReady"
+            and str(account_value_obj.value).lower() != "true"
+            for account_value_obj in account_value_list
+        ):
+            return {"available_bool": False, "reason_str": "IBKR account not ready"}
+        # Never infer that an unlabelled BASE total is USD from stock currency.
+        cash_float = float(account_value_map[("TotalCashValue", "USD")])
+        broker_nav_float = float(account_value_map[("NetLiquidation", "USD")])
+        if not all(isfinite(value_float) and abs(value_float) < 1e15
+                   for value_float in (cash_float, broker_nav_float)) or broker_nav_float <= 0:
+            return unavailable_dict
+        portfolio_item_map = {
+            int(portfolio_item_obj.contract.conId): portfolio_item_obj
+            for portfolio_item_obj in portfolio_item_list
+        }
+        position_list: list[dict[str, object]] = []
+        valuation_shares_map: dict[str, float] = {}
+        for conid_int, portfolio_item_obj in portfolio_item_map.items():
+            contract_obj = portfolio_item_obj.contract
+            symbol_str = str(contract_obj.symbol).strip()
+            shares_float = float(portfolio_item_obj.position)
+            if shares_float == 0:
+                continue
+            market_price_float = float(portfolio_item_obj.marketPrice)
+            value_float = float(portfolio_item_obj.marketValue)
+            if (
+                not symbol_str or symbol_str in valuation_shares_map or conid_int <= 0
+                or contract_obj.secType != "STK" or contract_obj.currency != "USD"
+                or str(contract_obj.multiplier or "1") != "1"
+                or not all(isfinite(number_float) and abs(number_float) < 1e15
+                           for number_float in (shares_float, market_price_float, value_float))
+                or market_price_float <= 0 or shares_float * value_float <= 0
+                or abs(shares_float * market_price_float - value_float) > max(.02, abs(value_float) * 1e-6)
+            ):
+                return unavailable_dict
+            valuation_shares_map[symbol_str] = shares_float
+            position_list.append({
+                "symbol_str": symbol_str, "conid_int": conid_int, "currency_str": "USD",
+                "shares_float": shares_float, "market_price_float": market_price_float,
+                "value_float": value_float,
+            })
+        expected_shares_map = {
+            symbol_str: shares_float for symbol_str, shares_float in position_amount_map.items()
+            if shares_float != 0
+        }
+        if valuation_shares_map != expected_shares_map:
+            return {"available_bool": False, "reason_str": "IBKR holdings changed or incomplete"}
+        return {
+            "available_bool": True, "reason_str": "", "cash_float": cash_float,
+            "broker_nav_float": broker_nav_float,
+            "position_list": sorted(position_list, key=lambda position_dict: position_dict["symbol_str"]),
+        }
 
     def get_live_price_snapshot(
         self,

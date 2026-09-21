@@ -123,6 +123,7 @@ class LiveStateStore(CoreLiveStateStore):
                     cushion_float REAL,
                     position_json_str TEXT NOT NULL,
                     open_order_id_json_str TEXT NOT NULL,
+                    portfolio_valuation_json_str TEXT,
                     updated_timestamp_str TEXT NOT NULL
                 );
 
@@ -302,6 +303,11 @@ class LiveStateStore(CoreLiveStateStore):
                 )
                 """
             )
+
+            broker_cache_column_name_list = [row_obj["name"] for row_obj in
+                connection_obj.execute("PRAGMA table_info(broker_snapshot_cache)").fetchall()]
+            if "portfolio_valuation_json_str" not in broker_cache_column_name_list:
+                connection_obj.execute("ALTER TABLE broker_snapshot_cache ADD COLUMN portfolio_valuation_json_str TEXT")
 
             live_release_column_name_list = [
                 row_obj["name"]
@@ -1146,7 +1152,29 @@ class LiveStateStore(CoreLiveStateStore):
             ).fetchall()
         return [self._row_to_vplan(row_obj) for row_obj in row_list]
 
-    def upsert_broker_snapshot_cache(self, broker_snapshot_obj: BrokerSnapshot) -> None:
+    def upsert_broker_snapshot_cache(self, broker_snapshot_obj: BrokerSnapshot, *, release_obj: LiveRelease | None = None) -> None:
+        # This independent display sample carries its own quantities/cash/time.
+        # Ordinary execution snapshots must not refresh or erase its provenance.
+        valuation_json_str = None
+        if release_obj is not None:
+            unavailable_dict = {"available_bool": False, "reason_str": "IBKR position values were not captured",
+                "account_route_str": broker_snapshot_obj.account_route_str,
+                "observed_timestamp_str": _serialize_timestamp_str(broker_snapshot_obj.snapshot_timestamp_ts),
+                "source_str": "IBKR portfolio"}
+            owner_dict = {
+                field_str: getattr(release_obj, field_str) for field_str in
+                ("release_id_str", "user_id_str", "pod_id_str", "account_route_str", "mode_str")}
+            try:
+                valuation_dict = dict(broker_snapshot_obj.portfolio_valuation_dict or unavailable_dict)
+                if release_obj.account_route_str != broker_snapshot_obj.account_route_str:
+                    valuation_dict = unavailable_dict
+                valuation_dict.update(schema_version_int=1, owner_dict=owner_dict)
+                valuation_json_str = json.dumps(valuation_dict, sort_keys=True, allow_nan=False)
+                if len(valuation_json_str.encode("utf-8")) > 262144:
+                    raise ValueError("Oversized portfolio valuation")
+            except (TypeError, ValueError, OverflowError):
+                valuation_json_str = json.dumps({**unavailable_dict, "schema_version_int": 1,
+                    "owner_dict": owner_dict}, sort_keys=True)
         with self._connect() as connection_obj:
             connection_obj.execute(
                 """
@@ -1161,8 +1189,9 @@ class LiveStateStore(CoreLiveStateStore):
                     cushion_float,
                     position_json_str,
                     open_order_id_json_str,
+                    portfolio_valuation_json_str,
                     updated_timestamp_str
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(account_route_str) DO UPDATE SET
                     snapshot_timestamp_str = excluded.snapshot_timestamp_str,
                     cash_float = excluded.cash_float,
@@ -1173,6 +1202,7 @@ class LiveStateStore(CoreLiveStateStore):
                     cushion_float = excluded.cushion_float,
                     position_json_str = excluded.position_json_str,
                     open_order_id_json_str = excluded.open_order_id_json_str,
+                    portfolio_valuation_json_str = COALESCE(excluded.portfolio_valuation_json_str, broker_snapshot_cache.portfolio_valuation_json_str),
                     updated_timestamp_str = excluded.updated_timestamp_str
                 """,
                 (
@@ -1186,6 +1216,7 @@ class LiveStateStore(CoreLiveStateStore):
                     None if broker_snapshot_obj.cushion_float is None else float(broker_snapshot_obj.cushion_float),
                     json.dumps(broker_snapshot_obj.position_amount_map, sort_keys=True),
                     json.dumps(list(broker_snapshot_obj.open_order_id_list)),
+                    valuation_json_str,
                     _serialize_timestamp_str(_utc_now_ts()),
                 ),
             )

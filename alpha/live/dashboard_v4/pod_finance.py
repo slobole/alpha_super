@@ -16,9 +16,8 @@ from alpha.live.dashboard_v4.finance import (
 )
 from alpha.live.dashboard_v4.pod_allocation import build_pod_allocation_dict
 from alpha.live.dashboard_v4.pod_holdings import load_close_holdings_dict
-from alpha.live.dashboard_v4.pod_eod_holdings import load_eod_holdings_dict
-from alpha.live.dashboard_v4.pod_close_prices import load_close_prices_dict
-from alpha.live.dashboard_v4.positions_data import validated_position_map_dict
+from alpha.live.dashboard_v4.pod_broker_holdings import load_broker_holdings_dict
+from alpha.live.dashboard_v4.positions_data import observed_timestamp_ts, validated_position_map_dict
 
 
 def _saved_time_str(timestamp_str, as_of_ts):
@@ -32,7 +31,10 @@ def _saved_time_str(timestamp_str, as_of_ts):
 
 
 def _finite_bool(value_obj):
-    return type(value_obj) in {float, int} and math.isfinite(value_obj)
+    try:
+        return type(value_obj) in {float, int} and math.isfinite(value_obj)
+    except OverflowError:
+        return False
 
 
 def _scope_tuple(workspace_dict, pod_id_str):
@@ -244,11 +246,11 @@ def _build_report_finance_dict(workspace_dict, snapshot_obj, provider_obj, *, po
 
 
 def build_pod_finance_dict(workspace_dict, snapshot_obj, provider_obj, *, pod_id_str, as_of_ts, period_str="3M", performance_db_path_str=None):
-    """Keep reported money intact; independently value saved EOD holdings.
+    """Keep reported money intact; display a self-contained saved IBKR portfolio.
 
-    The optional market estimate does not require a Flex report. Its denominator
-    is sum(broker EOD shares * same-date unadjusted close) + broker EOD cash,
-    not reported NAV. It is labelled Estimated and never feeds return/P&L tiles.
+    Allocation weights are saved IBKR position value / (sum(values) + saved
+    cash), not reported NAV. Observation time is explicit; no prices are fetched
+    and these operational marks never feed the official account return/P&L tiles.
     """
     result_dict = _build_report_finance_dict(workspace_dict, snapshot_obj, provider_obj,
         pod_id_str=pod_id_str, as_of_ts=as_of_ts, period_str=period_str,
@@ -265,55 +267,36 @@ def build_pod_finance_dict(workspace_dict, snapshot_obj, provider_obj, *, pod_id
         if target_obj is None or (target_obj.release_obj.pod_id_str, target_obj.release_obj.account_route_str) != (
                 pod_id_str, identity_dict["account_route"]):
             return result_dict
-        eod_dict = load_eod_holdings_dict(target_obj, close_date_str=None, as_of_ts=as_of_ts)
-        if not eod_dict["available_bool"]:
-            result_dict["holdings_allocation_dict"]["reason_str"] = eod_dict["reason_str"]
+        holdings_dict = load_broker_holdings_dict(target_obj, as_of_ts=as_of_ts)
+        if not holdings_dict["available_bool"]:
+            result_dict["holdings_allocation_dict"]["reason_str"] = holdings_dict["reason_str"]
             return result_dict
-        position_map_dict = validated_position_map_dict(eod_dict["position_map_dict"])
-        position_map_dict = {symbol_str: shares_float for symbol_str, shares_float in position_map_dict.items() if shares_float != 0}
-        prices_dict = load_close_prices_dict(sorted(position_map_dict),
-            profile_str=target_obj.release_obj.data_profile_str,
-            close_date_str=eod_dict["close_date_str"], as_of_ts=as_of_ts) if position_map_dict else {
-                "available_bool": True, "close_date_str": eod_dict["close_date_str"],
-                "price_map_dict": {}, "source_str": "Saved broker cash"}
-        if not prices_dict["available_bool"]:
-            result_dict["holdings_allocation_dict"]["reason_str"] = prices_dict["reason_str"]
-            return result_dict
-        if prices_dict["close_date_str"] != eod_dict["close_date_str"] or set(prices_dict["price_map_dict"]) != set(position_map_dict):
-            raise ValueError("Incomplete or mixed-date closing prices")
-        cash_float = eod_dict["cash_float"]
-        if not _finite_bool(cash_float):
-            raise ValueError("Invalid EOD cash")
-        position_list = []
-        for symbol_str, shares_float in position_map_dict.items():
-            price_float = prices_dict["price_map_dict"][symbol_str]
-            if not _finite_bool(price_float) or price_float <= 0:
-                raise ValueError("Invalid closing price")
-            # *** CRITICAL *** retrospective valuation: quantities and raw
-            # prices must share date D. No current quantities, adjusted prices,
-            # forward filling or execution-reference prices enter this value.
-            value_decimal = Decimal(str(shares_float)) * Decimal(str(price_float))
-            position_list.append({"symbol_str": symbol_str, "shares_float": shares_float,
-                "value_float": float(value_decimal.quantize(Decimal(".01")))})
+        timestamp_ts = observed_timestamp_ts(holdings_dict["observed_timestamp_str"], as_of_ts)
+        observed_time_str = _saved_time_str(holdings_dict["observed_timestamp_str"], as_of_ts)
+        # *** CRITICAL *** observation boundary: all shares, values and cash
+        # come from this payload. Never join newer cache quantities to old marks.
+        position_list, cash_float = holdings_dict["position_list"], holdings_dict["cash_float"]
+        position_map_dict = {row_dict["symbol_str"]: row_dict["shares_float"] for row_dict in position_list}
         total_decimal = sum((Decimal(str(row_dict["value_float"])) for row_dict in position_list), Decimal(str(cash_float)))
         color_account_list = workspace_dict.get("valuation_account_list") or client_dict["accounts"]
         color_index_int = next((index_int for index_int, account_dict in enumerate(color_account_list)
             if account_dict["pod_id"] == pod_id_str), 0)
         allocation_dict = build_pod_allocation_dict({"available_bool": True,
-            "close_date_str": eod_dict["close_date_str"], "cash_float": cash_float,
+            "close_date_str": observed_time_str[:10], "cash_float": cash_float,
             "nav_float": float(total_decimal), "position_list": position_list},
             color_str=POD_COLOR_TUPLE[color_index_int % len(POD_COLOR_TUPLE)])
-        allocation_dict.update(estimated_bool=True, source_str=prices_dict["source_str"],
-            basis_detail_str=prices_dict["source_str"] + ". Estimated values: saved broker shares × unadjusted closing prices. "
-                "Weights use holdings value plus saved cash; account NAV and returns remain broker-reported.",
+        allocation_dict.update(broker_observation_bool=True, source_str="IBKR portfolio",
+            observed_timestamp_str=timestamp_ts.isoformat(), observed_time_str=observed_time_str + " ET",
+            basis_detail_str="Saved IBKR portfolio values and cash at this observation. "
+                "Weights use holdings value plus cash; account NAV and returns remain unchanged.",
             holdings_note_str="", comparison_basis_str="",
-            broker_nav_float=eod_dict["broker_nav_float"], estimated_total_float=float(total_decimal))
+            broker_nav_float=holdings_dict["broker_nav_float"], holdings_total_float=float(total_decimal))
         raw_row_dict = next(row_dict for row_dict in workspace_dict["summary_dict"]["pod_row_dict_list"]
             if row_dict["pod_id_str"] == pod_id_str)
         raw_position_list = raw_row_dict.get("position_exposure_dict_list")
         if isinstance(raw_position_list, list):
             current_time_str = _saved_time_str(raw_row_dict.get("latest_pod_state_timestamp_str"), as_of_ts)
-            if (current_time_str != "—" and current_time_str[:10] > eod_dict["close_date_str"]
+            if (current_time_str != "—" and observed_timestamp_ts(raw_row_dict["latest_pod_state_timestamp_str"], as_of_ts) > timestamp_ts
                     and all(isinstance(row_dict, dict) and _finite_bool(row_dict.get("share_float")) for row_dict in raw_position_list)):
                 try:
                     current_map_dict = validated_position_map_dict({row_dict["asset_str"]: row_dict["share_float"] for row_dict in raw_position_list})
@@ -321,9 +304,9 @@ def build_pod_finance_dict(workspace_dict, snapshot_obj, provider_obj, *, pod_id
                     current_map_dict = None
                 if current_map_dict is not None and len(current_map_dict) == len(raw_position_list) and {
                         symbol_str: shares_float for symbol_str, shares_float in current_map_dict.items() if shares_float != 0} != position_map_dict:
-                    allocation_dict.update(holdings_changed_bool=True, holdings_note_str="Holdings changed since this close.",
+                    allocation_dict.update(holdings_changed_bool=True, holdings_note_str="Holdings changed since this snapshot.",
                         comparison_basis_str="Compared with saved positions at " + current_time_str + " ET")
         result_dict["holdings_allocation_dict"] = allocation_dict
     except (ClientReportingError, ValueError, TypeError, KeyError, OSError, AttributeError, ArithmeticError):
-        result_dict["holdings_allocation_dict"]["reason_str"] = "Closing holdings could not be valued."
+        result_dict["holdings_allocation_dict"]["reason_str"] = "Saved IBKR position values could not be verified"
     return result_dict

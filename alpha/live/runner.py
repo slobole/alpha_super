@@ -3629,7 +3629,10 @@ def eod_snapshot(
             )
             continue
 
-        broker_snapshot_obj = broker_adapter_for_release_obj.get_account_snapshot(release_obj.account_route_str)
+        broker_snapshot_obj = (
+            broker_adapter_for_release_obj.get_eod_account_snapshot(release_obj.account_route_str)
+            if release_obj.mode_str == "live"
+            else broker_adapter_for_release_obj.get_account_snapshot(release_obj.account_route_str))
         if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
             # The broker stamps its reply after the request. Compare with the
             # post-read clock, not the earlier scheduler invocation timestamp.
@@ -3647,7 +3650,8 @@ def eod_snapshot(
                 reason_counter_obj["core5_eod_source_untrusted"] += 1
                 log_event("core5_eod_source_untrusted", _build_release_log_payload_dict(release_obj, as_of_ts, {"broker_snapshot_timestamp_str": broker_snapshot_obj.snapshot_timestamp_ts.isoformat(), "open_order_id_list": broker_snapshot_obj.open_order_id_list}), log_path_str=log_path_str)
                 continue
-        state_store_obj.upsert_broker_snapshot_cache(broker_snapshot_obj)
+        state_store_obj.upsert_broker_snapshot_cache(
+            broker_snapshot_obj, release_obj=release_obj if release_obj.mode_str == "live" else None)
         previous_pod_state_obj = state_store_obj.get_pod_state(release_obj.pod_id_str)
         strategy_state_dict = (
             {} if previous_pod_state_obj is None else dict(previous_pod_state_obj.strategy_state_dict)

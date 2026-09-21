@@ -19,7 +19,7 @@ Pod closing allocation optionally reads Open Positions from the exact saved Flex
 import used by that account's finalized NAV (account, date, query, import ID and
 checksum checked). This dashboard-only reader adds no importer table or migration.
 It supports whole-account USD stock/ETF SUMMARY rows with unit multipliers. When
-that source is unavailable, the panel independently attempts the market estimate
+that source is unavailable, the panel independently reads the saved IBKR sample
 described below. Ambiguous ownership still blocks both sources.
 
 Display weights are signed position value / account NAV; IBKR percentOfNAV is
@@ -42,43 +42,56 @@ A real expanded export is still needed to verify that optional Flex format's
 production compatibility; it is no longer a prerequisite for a valued Pod panel.
 The visual demo explicitly supplies synthetic 4- and 10-holding close reports.
 
-The market estimate uses one saved broker EOD row for actual shares and cash,
-and the same date's Norgate unadjusted closing prices for every held symbol:
+The alternative uses one saved IBKR account-update download, captured on the
+existing dedicated EOD connection for LIVE accounts. Shares, market values,
+market prices, USD cash and broker NAV belong to that observation:
 
-    estimated_value_i = round(EOD_shares_i * unadjusted_close_i, 2)
-    estimated_total = sum(estimated_value_i) + EOD_cash
-    estimated_weight_i = estimated_value_i / estimated_total
+    component_total = sum(IBKR_position_value_i) + IBKR_cash
+    displayed_weight_i = IBKR_position_value_i / component_total
+    displayed_cash_weight = IBKR_cash / component_total
 
-The panel visibly says Estimated and shows its close date. Its denominator is
-the estimated holdings-plus-cash total, not reported NAV. Broker accruals and
-other NAV differences do not become invented cash. Official account NAV, P&L
-and TWR are unchanged, even when no Flex report exists. A complete official
-allocation has priority over the estimate, retaining its own stated close date.
+These are operational portfolio marks, not official closing prices. The header
+says IBKR and prints the actual observation time in ET, including seconds. The
+timestamp records when the complete download was observed, not the exchange
+time of each price. No backfill is manufactured for an older EOD. Same-day
+samples are eligible immediately; there is no midnight wait. Broker accruals
+and other NAV differences do not become cash. Official NAV, P&L and TWR remain
+unchanged. A complete existing Flex closing allocation retains priority and its
+own explicit close date.
 
-EOD observations must belong to the configured LIVE owner/Pod/account, be after
-the exchange close plus the existing ten-minute buffer, and precede the current
-ET date. The latest eligible observation is used; malformed or ambiguous latest
-quantities cannot revive an older healthy row. Cash and shares come from the
-same row, not separate current observations. This conservative prior-day policy
-means a new evening EOD becomes eligible after ET midnight.
+The optional capture supports USD stocks/ETFs with unit multipliers. Every
+nonzero broker position must match the downloaded quantities, with positive
+finite marks. abs(shares * mark - value) must be <= max($0.02, abs(value) * 1e-6)
+to allow IBKR display rounding. Shorts and negative cash keep the value table
+without a donut. Unsupported currencies/contracts or incomplete downloads keep
+the quantities-only panel. This is whole-account display: one account = one Pod.
 
-When configured, display valuation first uses the local profile's exact dated,
-hash-checked artifact and its Unadjusted Close column, never adjusted Close. Positive volume,
-an explicit unpadded endpoint or a NONE-padding contract must establish a real
-source observation. If the dated directory is absent, the dashboard alone can
-read the same date from the installed local Norgate Updater. An existing invalid
-or incomplete directory still fails closed. This covers monthly Pods whose
-trading snapshots advance only before a new DecisionPlan; it does not change
-the trading snapshot mode or schedule. Direct local reads use the Updater's
-loopback API with NONE adjustment/padding and USD stock/ETF metadata checks;
-bounded requests avoid the Python package's version-check side effects. No
-dashboard request contacts a broker, downloads a snapshot, or changes mode.
-Prices and copies of cached results are bounded; complete symbol coverage is
-required. A newly available exact-date artifact takes priority over cached local
-prices. Without a valid artifact or same-host Norgate prices, values remain
-unavailable with a short source-specific reason. Snapshot-only client machines
-without local Norgate still need the exact-date artifact.
-The estimated path needs neither Flex Open Positions nor a database migration.
+For a single managed account, ib_async 2.1 startup already downloads its
+portfolio on the newly constructed connection. Capture requires completion;
+the read-only accountValues future guard rejects pending/cancelled startup
+downloads. An offline test exercises this installed SDK contract. For multiple
+accounts, capture requests one account-scoped download and collects fresh
+account/portfolio events; native completion alone is insufficient without all
+matching shares and USD totals. The extra wait is bounded by the configured
+broker timeout, clamped to 0.1–10 seconds. No callbacks or subscriptions are
+replaced or cancelled. Timeout/error leaves the ordinary EOD snapshot intact.
+
+An additive nullable portfolio_valuation_json_str column in broker_snapshot_cache
+holds the complete display sample and exact release/user/Pod/account identity.
+Ordinary sizing/reconcile cache updates preserve its original shares/cash/time;
+a failed new EOD attempt replaces prior success with unavailable. The dashboard
+reads this column read-only with size, ownership and timestamp checks, and never
+joins newer quantities to older values. Changed holdings are labeled separately.
+Legacy databases without the column remain readable; the existing state-store
+initializer adds it when the updated runner starts. The dashboard performs no
+schema migration, broker connection, Norgate access or price download.
+
+Only LIVE EOD opts in. PAPER, incubation, order timing, sizing/reference prices
+and scheduler cadence are unchanged. Existing daily EOD idempotency is retained,
+so an already-completed EOD is not re-run for display marks. After deployment the
+first successful scheduled capture supplies values. SDK/mocked tests establish
+behavior locally; a real target-account observation is still required to verify
+production account permissions, currencies and mark availability.
 
 The Positions page merges saved broker quantities by symbol and preserves
 opposing Pod legs. A Pod filter narrows that table to the selected Pod; account

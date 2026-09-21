@@ -140,6 +140,10 @@ class BrokerAdapter(ABC):
     def get_account_snapshot(self, account_route_str: str) -> BrokerSnapshot:
         raise NotImplementedError
 
+    def get_eod_account_snapshot(self, account_route_str: str) -> BrokerSnapshot:
+        """Adapters without portfolio marks keep their existing account snapshot."""
+        return self.get_account_snapshot(account_route_str)
+
     @abstractmethod
     def get_live_price_snapshot(
         self,
@@ -223,6 +227,10 @@ class IBKRGatewayBrokerAdapter(BrokerAdapter):
 
     def get_account_snapshot(self, account_route_str: str) -> BrokerSnapshot:
         return self.socket_client_obj.get_account_snapshot(account_route_str)
+
+    def get_eod_account_snapshot(self, account_route_str: str) -> BrokerSnapshot:
+        return self.socket_client_obj.get_account_snapshot(
+            account_route_str, include_portfolio_valuation_bool=True)
 
     def get_live_price_snapshot(
         self,
