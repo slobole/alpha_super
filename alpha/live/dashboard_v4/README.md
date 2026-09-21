@@ -33,6 +33,15 @@ cutover is part of this phase.
 
 ## Data and display contract
 
+The shared desktop/mobile market header shows `Premarket` (04:00 to core open),
+`Market open` (normally 09:30–16:00), `Post-market` (core close to 20:00), or
+`Market closed`, all in New York time. It uses the existing XNYS session calendar
+for holidays, DST and early core closes. The extended session ends at 17:00 on
+early-close days, following [NYSE Arca hours](https://www.nyse.com/trade/hours-calendars).
+The phase and countdown refresh with the existing 15-second status refresh.
+This is a scheduled equity-session indicator, not a live halt feed, broker
+availability check, or permission to trade. It changes no scheduler or order gate.
+
 ```text
 [Current LIVE release metadata] ----> [Scoped saved operations]
                                               |
@@ -202,13 +211,24 @@ the late/failed filter work on the returned rows. Each row has inline evidence;
 an exact saved cycle identity also links to the Pod evidence tab.
 
 The reader validates one enabled LIVE owner and unique Pod/account identities
-before opening files. It reads bounded tails of the configured event log,
+before opening files. It scans backwards in chunks through the configured event log,
 `live_critical_events.jsonl`, their ten numbered rotations, and
-`operator_journal.jsonl`: at most 23 files, 4 MiB, 20,000 lines and 1,000 events.
-The timeline displays at most 500 rows. Limits and unreadable sources are shown;
+`operator_journal.jsonl`, stopping at the selected date boundary or safety limits.
+Routine scheduler polls and benign data-sync skips do not consume the material
+event budget. Each request is limited to 23 fixed files, 128 MiB, 200,000 lines,
+4,000 distinct material records and a cooperative five-second scan deadline;
+records above 32 KiB are rejected. The newest 1,000 events feed the presenter,
+which displays at most 500 top-level rows. Limits and
+unreadable sources are shown, with the actual scanned log span when incomplete;
 Load older cannot recover records outside retained files or scan limits. Raw
 paths, account IDs, free-form errors and unapproved payload fields are withheld.
 No dynamic trace-directory scan or broker call is added.
+An in-memory cache reuses only unchanged files with matching scope, selected
+date boundary, identity, size and modification metadata. It holds at most 32
+file entries and 4,000 events. Appends/rotation invalidate affected entries;
+incomplete, invalid or future evidence is not cached. No sidecar file is written.
+Coverage is based on the main-log scan, not an older isolated critical record.
+Retained-history limits, rotation gaps and scan/display limits remain explicit.
 
 Healthy cycles reuse the Pod page's saved ACK, fill and reconciliation proof.
 Only matching Pod, release and decision/plan identities can fold routine success
@@ -218,6 +238,15 @@ current header does not alter independently verified historical facts. Planned
 times do not become actual event times; operator requests do not imply completion,
 and notification delivery needs an explicit saved receipt.
 
+The Operator category includes saved V3 dashboard requests and manual-order
+request/submission/failure events. CLI commands are not comprehensively recorded
+in the operator journal. A completed manual submission is not proof of a fill.
+The current engine does not write notification delivery receipts, so the demo
+does not invent delivered-alert rows. Unknown routine events fold into per-day,
+per-Pod Other events groups with each original record available; warnings,
+failures, alert and operator families remain individual rows. Missing descriptions
+never imply success. PAPER and INCUBATION records remain excluded.
+
 The page polls every 15 seconds and preserves filters, search focus and expanded
 rows. A browser-local last-looked timestamp is scoped to the saved-data source
 and enabled LIVE identities. It records successful visible observations, never
@@ -225,6 +254,12 @@ an unavailable/stale refresh or an earlier timestamp from a slower tab. First
 visit says Recent activity; subsequent visits count only events after that
 browser's prior visit. This is a navigation aid, not an acknowledgement or an
 audit receipt. Demo events are synthetic and do not write operational logs.
+
+V4 retains the existing host-disk warning thresholds (75% review, 90% action).
+The header names a disk problem explicitly, without exposing paths. Disk-only
+warnings do not claim saved trading evidence is missing. Tests of unrelated
+status behavior substitute a fixed disk reading; dedicated health tests exercise
+the real rollup at both thresholds, probe errors and stale operations.
 
 ## Verification
 
@@ -248,6 +283,12 @@ Visual checks compare the native page with Mockup D at 1440px, and verify layout
 at 768px and 390px. Browser checks cover period navigation and failed-refresh
 state, Pod evidence tabs and history. No production data, broker session or VPS
 is used for these checks.
+
+Activity follow-up: a read-only scan of the existing 41.8 MiB local log, using
+a synthetic scope that excluded all real Pod records, reached the seven-day
+boundary after 6 MiB in 0.084s, and the 90-day boundary after 29.5 MiB in 0.363s.
+An unchanged repeat used the memory cache in 0.001s. Only aggregate scan metrics
+were inspected; this does not verify real Pod coverage or VPS performance.
 
 ## Live-impact checklist
 

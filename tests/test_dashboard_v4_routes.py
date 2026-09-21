@@ -15,6 +15,12 @@ from alpha.live.dashboard_v4.overview import build_overview_dict
 from test_dashboard_local_workspace import build_fixture_app, file_snapshot_dict
 
 
+@pytest.fixture(autouse=True)
+def healthy_host_disk(monkeypatch):
+    monkeypatch.setattr("alpha.live.dashboard_v3.health.shutil.disk_usage",
+        lambda path_str: SimpleNamespace(total=100, used=50, free=50))
+
+
 @pytest.fixture
 def fixture_tuple():
     return build_demo_workspace_tuple()

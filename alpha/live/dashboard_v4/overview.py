@@ -7,9 +7,10 @@ from alpha.live.dashboard_v3.client_operations import SOURCE_MAX_AGE_SECONDS_INT
 from alpha.live.dashboard_v3.filters import MARKET_TIMEZONE_OBJ
 from alpha.live.dashboard_v3.health import build_health_rollup
 from alpha.live.dashboard_v3.operator_tools import strategy_display_name_str
-from alpha.live.dashboard_v3.schedule import build_market_status, _operator_action_required_bool
+from alpha.live.dashboard_v3.schedule import _operator_action_required_bool
 from alpha.live.dashboard_v4.cycle import build_cycle_view_dict
 from alpha.live.dashboard_v4.finance import build_financial_overview_dict
+from alpha.live.dashboard_v4.market import build_market_view_dict
 from alpha.live.dashboard_v4.next_operation import build_next_operation_dict
 from alpha.live.dashboard_v4.scheduler_view import apply_scheduler_to_steps, scheduler_issue_dict, scheduler_note_str
 from alpha.live.ops_report import parse_timestamp_ts
@@ -183,7 +184,8 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
     scoped_summary_dict = {**source_dict, "pod_row_dict_list": scoped_row_list}
     health_obj = build_health_rollup({**source_dict, "pod_row_dict_list": health_row_list}, mode_str="live")
     system_state_str = _state_str(health_obj.severity_str) if fresh_bool and pod_list else "unk"
-    if fresh_bool and any(row_dict.get("db_status_str") in {"missing", "error"} for row_dict in scoped_row_list):
+    database_failed_bool = fresh_bool and any(row_dict.get("db_status_str") in {"missing", "error"} for row_dict in scoped_row_list)
+    if database_failed_bool:
         system_state_str = "fail"
     scheduler_state_list = [pod_dict["scheduler_dict"].get("state_str", "unknown") for pod_dict in pod_list]
     scheduler_problem_bool = fresh_bool and any(state_str in {"late", "stopped", "error"} for state_str in scheduler_state_list)
@@ -194,12 +196,29 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
         system_state_str = "late"
     elif scheduler_unknown_bool and system_state_str not in {"fail", "late"}:
         system_state_str = "unk"
+    system_cause_list = []
+    if database_failed_bool:
+        system_cause_list.append(("fail", "State DB unavailable"))
+    if scheduler_problem_bool:
+        system_cause_list.append(("fail" if any(state_str in {"stopped", "error"} for state_str in scheduler_state_list) else "late", "Scheduler"))
+    if fresh_bool and pod_list:
+        for cell_obj in getattr(health_obj, "cell_dict_list", []):
+            if cell_obj.label_str == "Disk" and cell_obj.severity_str in {"yellow", "red", "gray"}:
+                # Keep V3's thresholds and probe. Its detail contains a local
+                # path; only the safe value belongs in the compact V4 header.
+                system_cause_list.append((_state_str(cell_obj.severity_str),
+                    "Disk usage unavailable" if cell_obj.severity_str == "gray" else "Disk " + cell_obj.value_str))
+            elif cell_obj.label_str in {"Norgate", "Pod state", "EOD Snapshot"} and cell_obj.severity_str in {"yellow", "red", "gray"}:
+                # These labels are fixed by the rollup; source details and
+                # values may contain private paths or identifiers.
+                cause_state_str = _state_str(cell_obj.severity_str)
+                system_cause_list.append((cause_state_str, cell_obj.label_str + " " + {
+                    "fail": "needs action", "late": "needs review", "unk": "unknown",
+                }[cause_state_str]))
+    system_cause_list.sort(key=lambda cause_tuple: STATE_RANK_DICT[cause_tuple[0]])
+    system_cause_str = " · ".join(cause_tuple[1] for cause_tuple in system_cause_list)
     system_label_str = {"done": "System OK", "fail": "System needs action", "late": "System needs review"}.get(system_state_str, "System unknown")
-    market_obj = build_market_status(now_dt=as_of_ts)
-    transition_ts = parse_timestamp_ts(market_obj.next_transition_timestamp_str)
-    market_detail_str = market_obj.reason_label_str
-    if market_obj.status_label_str == "Market open" and transition_ts:
-        market_detail_str = "closes in " + _duration_str((transition_ts - as_of_ts).total_seconds())
+    market_dict = build_market_view_dict(now_ts=as_of_ts)
     live_state_str = min([pod_dict["state_str"] for pod_dict in pod_list] + [system_state_str], key=STATE_RANK_DICT.get)
     if not fresh_bool:
         verdict_str, verdict_detail_str = "Status unknown.", "Saved operations are missing or out of date."
@@ -209,10 +228,13 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
         count_int = len(attention_list)
         verdict_str = f"{count_int} pod{'s' if count_int != 1 else ''} need{'s' if count_int == 1 else ''} action."
         verdict_detail_str = "Review the saved evidence."
+    elif system_cause_str:
+        verdict_str = "System needs action." if system_state_str == "fail" else "Status needs review."
+        verdict_detail_str = system_cause_str + "."
     elif system_state_str != "done" or any(pod_dict["state_str"] == "unk" for pod_dict in pod_list):
         verdict_str, verdict_detail_str = "Status needs review.", "Some saved evidence is unavailable."
     else:
-        verdict_str, verdict_detail_str = "No action needed.", market_obj.reason_label_str if market_obj.status_label_str == "Market closed" else "Pods are on track."
+        verdict_str, verdict_detail_str = "No action needed.", market_dict["detail_str"] if market_dict["label_str"] == "Market closed" else "Pods are on track."
     data_session_list = []
     for row_dict in scoped_row_list:
         for item_dict in (row_dict.get("data_freshness_dict") or {}).get("item_dict_list", []):
@@ -225,11 +247,10 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
         "updated_str": source_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%H:%M:%S") if source_ts else "—",
         "source_fresh_bool": fresh_bool,
         "source_valid_ms_int": max(0, int((SOURCE_MAX_AGE_SECONDS_INT - (as_of_ts - source_ts).total_seconds()) * 1000)) if fresh_bool else 0,
-        "market_dict": {"state_str": "now" if market_obj.status_label_str == "Market open" else "skip",
-                        "label_str": market_obj.status_label_str, "detail_str": market_detail_str},
+        "market_dict": market_dict,
         "system_dict": {"state_str": system_state_str, "label_str": system_label_str,
-                        "detail_str": "Scheduler" if scheduler_problem_bool else "Scheduler unknown" if scheduler_unknown_bool and system_state_str == "unk" else
-                            "Data " + _data_time_str(min(data_session_list)) if data_session_list else "Data unknown"},
+                        "detail_str": system_cause_str or ("Scheduler unknown" if scheduler_unknown_bool and system_state_str == "unk" else
+                            "Data " + _data_time_str(min(data_session_list)) if data_session_list else "Data unknown")},
         "live_state_str": live_state_str, "verdict_str": verdict_str, "verdict_detail_str": verdict_detail_str,
         "attention_list": attention_list, "pod_list": pod_list,
     }

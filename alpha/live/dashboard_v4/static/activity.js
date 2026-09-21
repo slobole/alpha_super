@@ -85,7 +85,7 @@
     const marker_obj = page_obj.querySelector('[data-activity-marker]');
     marker_obj.hidden = !visible_list.length || !Number.isFinite(baseline_ms) || (!previous_visit_bool && !new_list.length);
     if (!marker_obj.hidden) {
-      page_obj.querySelector('[data-activity-marker-label]').textContent = 'You last looked here · ' + marker_formatter_obj.format(new Date(baseline_ms)).replaceAll(',', '') + ' ET';
+      page_obj.querySelector('[data-activity-marker-label]').textContent = 'You last looked here · ' + marker_formatter_obj.format(new Date(baseline_ms)).replaceAll(',', '').replaceAll('/', '-') + ' ET';
       const older_dict = visible_list.find(row_dict => row_dict.timestamp_ms <= baseline_ms);
       page_obj.querySelector('[data-activity-body]').insertBefore(marker_obj, older_dict ? older_dict.element_obj : empty_obj);
     }

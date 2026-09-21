@@ -38,6 +38,8 @@ def test_demo_activity_is_scoped_read_only_and_finance_free(monkeypatch):
         assert "Broker acknowledgement missing." in html_str
         assert "Scheduler error. Retry scheduled." in html_str
         assert "Trade sheet export requested." in html_str
+        assert "Manual order requested." in html_str
+        assert "Alert delivered." not in html_str
         assert "Open cycle completed." in html_str
         assert "Load older" in html_str or "days=90" in path_str
         assert "action_token" not in html_str and "DEMO-owner" not in html_str

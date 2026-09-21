@@ -15,6 +15,12 @@ from test_live_dashboard import _write_release_manifest
 AS_OF_TS = datetime(2026, 9, 21, 14, tzinfo=UTC)
 
 
+@pytest.fixture(autouse=True)
+def healthy_host_disk(monkeypatch):
+    monkeypatch.setattr("alpha.live.dashboard_v3.health.shutil.disk_usage",
+        lambda path_str: SimpleNamespace(total=100, used=50, free=50))
+
+
 @pytest.fixture
 def source_tuple(tmp_path):
     release_root_obj = tmp_path / "releases"

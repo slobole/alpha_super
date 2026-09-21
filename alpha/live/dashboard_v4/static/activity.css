@@ -1,4 +1,6 @@
 /* Mockup D Activity: one timeline, with evidence kept beside each event. */
+.activity-page .page-head .asof { display: block; overflow-wrap: anywhere; }
+.activity-coverage { display: block; margin-top: 3px; }
 .activity-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 14px; }
 .activity-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
 .activity-field { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 9px; border: 1px solid var(--rule-2); background: var(--panel); font-size: 12px; min-width: 0; }
@@ -48,6 +50,8 @@
 .activity-more { display: block; padding: 12px 20px; text-align: center; font-size: 12.5px; border-top: 1px solid var(--rule); }
 @media (max-width: 900px) { .activity-pod-col { width: 130px; } }
 @media (max-width: 600px) {
+  .activity-page .page-head { flex-wrap: wrap; }
+  .activity-page .page-head .asof { width: 100%; text-align: left; }
   .activity-filters, .activity-search { width: 100%; }
   .activity-field select { max-width: 245px; }
   .activity-field input { width: 100%; }

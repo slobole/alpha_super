@@ -35,7 +35,7 @@ def _row_dict(pod_dict, cycle_dict, *, stage_str, timestamp_ts, title_str, detai
         "day_label_str": market_ts.strftime("%a %Y-%m-%d") if market_ts else "",
         "pod_id_str": pod_dict["pod_id_str"], "pod_name_str": pod_dict["name_str"],
         "type_str": "cycles", "state_str": "done", "title_str": title_str,
-        "detail_str": detail_str, "code_str": "", "stage_str": stage_str,
+        "detail_str": detail_str, "code_str": cycle_dict["cycle_key_str"] + " · " + stage_str, "stage_str": stage_str,
         "evidence_list": [{"label_str": "Cycle", "value_str": cycle_dict["cycle_key_str"]}],
         "evidence_url_str": "/pods/" + quote(pod_dict["pod_id_str"], safe="") + "?" +
             urlencode({"cycle": cycle_dict["cycle_key_str"], "tab": tab_str}) + "#evidence",

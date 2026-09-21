@@ -1,21 +1,31 @@
 """Bounded saved-log Activity evidence. Never opens a writer or a broker."""
 
 from datetime import date, datetime, timedelta, timezone
+from collections import OrderedDict
+from copy import deepcopy
 import hashlib
 import json
 import math
 from pathlib import Path
 import re
+from threading import Lock
+import time
 from zoneinfo import ZoneInfo
 
 
 TARGET_LIMIT_INT = 32
 EVENT_LIMIT_INT = 1000
-TOTAL_BYTES_INT = 4 * 1024 * 1024
-FILE_BYTES_INT = 512 * 1024
+TOTAL_BYTES_INT = 128 * 1024 * 1024
+CHUNK_BYTES_INT = 256 * 1024
 LINE_BYTES_INT = 32 * 1024
-LINE_LIMIT_INT = 20000
+LINE_LIMIT_INT = 200000
+MATERIAL_LIMIT_INT = 4000
+SCAN_SECONDS_FLOAT = 5.0
 BACKUP_COUNT_INT = 10
+CACHE_FILE_LIMIT_INT = 32
+CACHE_EVENT_LIMIT_INT = 4000
+FILE_CACHE_DICT = OrderedDict()
+CACHE_LOCK_OBJ = Lock()
 MARKET_TIMEZONE_OBJ = ZoneInfo("America/New_York")
 QUIET_EVENT_SET = {"scheduler_sleeping", "scheduler_woke", "scheduler_due_now", "scheduler_phase_idle",
     "scheduler_tick_invoked", "scheduler.sleeping", "scheduler.decision", "scheduler.tick_result"}
@@ -99,10 +109,20 @@ def _event_dict(record_dict, identity_dict, *, source_str, as_of_ts, from_date_s
         raise ValueError("Invalid Activity code")
     level_rank_dict = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 4}
     level_list = [str(value_obj).upper() for value_obj in _values_list(layer_list, ("level_str", "severity_str"))]
-    level_list = ["WARNING" if value_str == "WARN" else value_str for value_str in level_list]
+    level_list = [{"WARN": "WARNING", "FATAL": "CRITICAL"}.get(value_str, value_str) for value_str in level_list]
     level_str = max((value_str for value_str in level_list if value_str in level_rank_dict),
         key=level_rank_dict.get, default="INFO")
-    if event_type_str in QUIET_EVENT_SET and level_str not in {"WARNING", "ERROR", "CRITICAL"}:
+    status_list = _values_list(layer_list, ("status_str", "initial_status_str", "reconciliation_status_str",
+        "vplan_status_str", "decision_plan_status_str", "submit_ack_status_str"))
+    issue_bool = any(str(value_obj).lower() in {"failed", "blocked", "error", "missing_critical", "expired", "late"}
+        for value_obj in status_list) or any(type(value_obj) is int and value_obj > 0
+            for value_obj in _values_list(layer_list, ("missing_ack_count_int",)))
+    quiet_bool = level_str not in {"WARNING", "ERROR", "CRITICAL"} and not issue_bool
+    if event_type_str in QUIET_EVENT_SET and quiet_bool:
+        return None
+    if event_type_str == "norgate_snapshot_sync_skipped" and quiet_bool and (
+        field_dict.get("reason_code_str"), field_dict.get("status_str")) in {
+            ("direct_norgate_mode", "direct"), ("no_enabled_releases", "ready"), ("local_snapshot_ready", "ready")}:
         return None
     mode_list = _values_list(layer_list, MODE_FIELD_TUPLE)
     if any(mode_str != "live" for mode_str in mode_list):
@@ -122,6 +142,19 @@ def _event_dict(record_dict, identity_dict, *, source_str, as_of_ts, from_date_s
     related_set = set(related_list)
     pod_id_str = pod_list[0] if pod_list else next(iter(related_set)) if len(related_set) == 1 else ""
     selected_set = related_set | ({pod_id_str} if pod_id_str else set())
+    if not mode_list and selected_set and event_type_str.startswith("norgate_snapshot_sync_"):
+        sync_pod_list = field_dict.get("pod_id_list")
+        sync_release_list = field_dict.get("release_id_list")
+        if (isinstance(sync_pod_list, list) and isinstance(sync_release_list, list)
+            and len(sync_pod_list) == len(sync_release_list) == len(selected_set)
+            and set(sync_pod_list) == selected_set and selected_set <= identity_dict.keys()
+            and all(layer_dict.get("pod_id_list", sync_pod_list) == sync_pod_list
+                and layer_dict.get("release_id_list", sync_release_list) == sync_release_list for layer_dict in layer_list)
+            and all(release_str == identity_dict[pod_str]["release_id_str"]
+                for pod_str, release_str in zip(sync_pod_list, sync_release_list))
+            and all(pod_id_str and release_str == identity_dict[pod_id_str]["release_id_str"]
+                for release_str in _values_list(layer_list, ("release_id_str",)))):
+            mode_list = ["live"]
     if selected_set and (not mode_list or not selected_set <= identity_dict.keys()):
         return None
     if pod_id_str and related_set and related_set != {pod_id_str}:
@@ -160,7 +193,7 @@ def _event_dict(record_dict, identity_dict, *, source_str, as_of_ts, from_date_s
         value_ts = _timestamp_ts(field_dict.get(field_str))
         if value_ts is not None:
             payload_dict[field_str] = value_ts.isoformat()
-    for field_str in ("release_id_str", "job_id_str"):
+    for field_str in ("release_id_str", "job_id_str", "ticket_id_str"):
         value_obj = field_dict.get(field_str)
         if isinstance(value_obj, str) and IDENTITY_PATTERN_OBJ.fullmatch(value_obj):
             payload_dict[field_str] = value_obj
@@ -173,6 +206,13 @@ def _event_dict(record_dict, identity_dict, *, source_str, as_of_ts, from_date_s
     asset_str = field_dict.get("asset_str")
     if isinstance(asset_str, str) and re.fullmatch(r"[A-Z0-9][A-Z0-9.^_-]{0,19}", asset_str):
         payload_dict["asset_str"] = asset_str
+    for field_str, allowed_set in (("side_str", {"BUY", "SELL"}),
+            ("broker_order_type_str", {"MKT", "LMT", "MOO", "MOC", "LOO", "LOC", "STP", "STP LMT"})):
+        if isinstance(field_dict.get(field_str), str) and field_dict[field_str] in allowed_set:
+            payload_dict[field_str] = field_dict[field_str]
+    quantity_int = field_dict.get("quantity_int")
+    if type(quantity_int) is int and 0 < quantity_int <= 1000000000:
+        payload_dict["quantity_int"] = quantity_int
     if related_set:
         payload_dict["related_pod_id_list"] = sorted(related_set)
     for field_str in ("decision_plan_id_int", "vplan_id_int"):
@@ -193,67 +233,97 @@ def _event_dict(record_dict, identity_dict, *, source_str, as_of_ts, from_date_s
         "source_str": source_str, "notification_delivery_str": delivery_str}
 
 
-def load_activity_source_dict(provider_obj, *, as_of_ts, days_int):
-    """Read at most 23 files, 4 MiB and 20,000 lines; return at most 1,000 rows.
+def _stat_tuple(path_obj):
+    stat_obj = path_obj.stat()
+    return stat_obj.st_dev, stat_obj.st_ino, stat_obj.st_size, stat_obj.st_mtime_ns, stat_obj.st_ctime_ns
 
-    The main log contains material runner/scheduler events. Critical is its
-    mirror; journal adds operator requests. No trace-directory walk or delivery
-    inference from a current notification-state snapshot is performed.
-    """
-    if not isinstance(as_of_ts, datetime) or as_of_ts.tzinfo is None or type(days_int) is not int or not 1 <= days_int <= 365:
-        raise ValueError("Activity needs an aware clock and a bounded day range")
-    as_of_ts = as_of_ts.astimezone(timezone.utc)
-    result_dict = {"event_list": [], "warning_list": [], "scope_key_str": "", "feed_available_bool": False}
-    warning_set = set()
-    try:
-        identity_dict, event_path_obj, result_dict["scope_key_str"] = _scope_dict(provider_obj)
-        if not identity_dict:
-            result_dict["warning_list"] = ["No enabled LIVE Pods are available for Activity."]
-            return result_dict
-        root_path_obj = event_path_obj.parent.resolve()
-    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
-        result_dict["warning_list"] = ["Activity scope could not be verified."]
-        return result_dict
-    critical_path_obj = root_path_obj / "live_critical_events.jsonl"
-    source_list = [(event_path_obj, "Event log", True), (critical_path_obj, "Critical log", False),
-        (root_path_obj / "operator_journal.jsonl", "Operator journal", False)]
-    for index_int in range(1, BACKUP_COUNT_INT + 1):
-        source_list.extend((path_obj.with_name(path_obj.name + f".{index_int}"), label_str, False)
-            for path_obj, label_str in ((event_path_obj, "Event log"), (critical_path_obj, "Critical log")))
-    from_date_str = (as_of_ts.astimezone(MARKET_TIMEZONE_OBJ).date() - timedelta(days=days_int - 1)).isoformat()
-    bytes_left_int, lines_left_int, seen_set, main_read_bool = TOTAL_BYTES_INT, LINE_LIMIT_INT, set(), False
-    for path_obj, source_str, required_bool in source_list:
-        if bytes_left_int <= 0 or lines_left_int <= 0:
-            warning_set.add("Activity history reached its scan limit.")
-            break
-        try:
-            resolved_path_obj = path_obj.resolve()
-            resolved_path_obj.relative_to(root_path_obj)
-            with resolved_path_obj.open("rb") as file_obj:
-                file_obj.seek(0, 2)
-                size_int = file_obj.tell()
-                read_int = min(size_int, FILE_BYTES_INT, bytes_left_int)
-                offset_int = size_int - read_int
-                file_obj.seek(offset_int)
-                content_bytes = file_obj.read(read_int)
-                bytes_left_int -= read_int
-                if len(content_bytes) != read_int:
-                    raise ValueError("Log changed during read")
-            if required_bool:
-                main_read_bool = True
-            if offset_int:
-                content_bytes = content_bytes.partition(b"\n")[2]
-                warning_set.add("Activity history reached its scan limit.")
-                if required_bool and not content_bytes:
-                    warning_set.add("Some Activity records are incomplete or invalid.")
-            if content_bytes and not content_bytes.endswith(b"\n"):
-                warning_set.add("Some Activity records are incomplete or invalid.")
-            line_list = content_bytes.split(b"\n")[:-1]
+
+def _cache_file_dict(key_tuple, as_of_ts):
+    with CACHE_LOCK_OBJ:
+        cached_dict = FILE_CACHE_DICT.get(key_tuple)
+        if cached_dict is None or cached_dict["as_of_ts"] > as_of_ts:
+            return None
+        FILE_CACHE_DICT.move_to_end(key_tuple)
+        return deepcopy(cached_dict)
+
+
+def _save_cache(key_tuple, result_dict):
+    if result_dict["reason_set"]:
+        return
+    with CACHE_LOCK_OBJ:
+        # Appends/replacements invalidate the previous entry for this path,
+        # scope and selected boundary. There is no age-only cache reuse.
+        for old_key_tuple in list(FILE_CACHE_DICT):
+            if old_key_tuple[:-1] == key_tuple[:-1]:
+                del FILE_CACHE_DICT[old_key_tuple]
+        FILE_CACHE_DICT[key_tuple] = deepcopy(result_dict)
+        while len(FILE_CACHE_DICT) > CACHE_FILE_LIMIT_INT or sum(len(value_dict["event_list"]) for value_dict in FILE_CACHE_DICT.values()) > CACHE_EVENT_LIMIT_INT:
+            FILE_CACHE_DICT.popitem(last=False)
+
+
+def _limit_str(budget_dict):
+    if budget_dict["bytes_int"] >= TOTAL_BYTES_INT:
+        return "byte_limit"
+    if budget_dict["lines_int"] >= LINE_LIMIT_INT:
+        return "line_limit"
+    if budget_dict["material_int"] >= MATERIAL_LIMIT_INT:
+        return "material_limit"
+    if time.monotonic() >= budget_dict["deadline_float"]:
+        return "time_limit"
+    return ""
+
+
+def _read_file_dict(path_obj, identity_dict, *, source_str, as_of_ts, from_ts, budget_dict, seen_set):
+    """Reverse complete lines in fixed chunks, keeping at most one short prefix."""
+    result_dict = {"event_list": [], "reason_set": set(), "oldest_ts": None, "newest_ts": None,
+        "boundary_bool": False, "complete_records_int": 0, "as_of_ts": as_of_ts}
+    local_seen_set, previous_ts, pending_bytes, discard_bool = set(), None, b"", False
+    with path_obj.open("rb") as file_obj:
+        file_obj.seek(0, 2)
+        offset_int = file_obj.tell()
+        first_bool = True
+        while offset_int > 0:
+            limit_str = _limit_str(budget_dict)
+            if limit_str:
+                result_dict["reason_set"].add(limit_str)
+                break
+            read_int = min(offset_int, CHUNK_BYTES_INT, TOTAL_BYTES_INT - budget_dict["bytes_int"])
+            offset_int -= read_int
+            file_obj.seek(offset_int)
+            chunk_bytes = file_obj.read(read_int)
+            budget_dict["bytes_int"] += len(chunk_bytes)
+            if len(chunk_bytes) != read_int:
+                raise ValueError("Log changed during read")
+            if discard_bool:
+                prefix_bytes, separator_bytes, _suffix_bytes = chunk_bytes.rpartition(b"\n")
+                if not separator_bytes:
+                    continue
+                chunk_bytes, discard_bool = prefix_bytes, False
+            part_list = (chunk_bytes + pending_bytes).split(b"\n")
+            pending_bytes, line_list = part_list[0], part_list[1:]
+            if first_bool:
+                if line_list and line_list[-1]:
+                    result_dict["reason_set"].add("invalid_records")
+                if not line_list and pending_bytes:
+                    result_dict["reason_set"].add("invalid_records")
+                    discard_bool, pending_bytes = True, b""
+                line_list = line_list[:-1]
+                first_bool = False
+            if offset_int == 0:
+                line_list.insert(0, pending_bytes)
+                pending_bytes = b""
+            if len(pending_bytes) > LINE_BYTES_INT:
+                pending_bytes, discard_bool = b"", True
+                result_dict["reason_set"].add("invalid_records")
+            chunk_time_list = []
             for line_bytes in reversed(line_list):
-                if lines_left_int <= 0:
-                    warning_set.add("Activity history reached its scan limit.")
+                # The bytes of this chunk were already read. Only CPU/material
+                # limits can interrupt its parsing; a byte limit stops the next read.
+                limit_str = _limit_str({**budget_dict, "bytes_int": 0})
+                if limit_str:
+                    result_dict["reason_set"].add(limit_str)
                     break
-                lines_left_int -= 1
+                budget_dict["lines_int"] += 1
                 if not line_bytes.strip():
                     continue
                 try:
@@ -262,26 +332,147 @@ def load_activity_source_dict(provider_obj, *, as_of_ts, days_int):
                     record_dict = json.loads(line_bytes)
                     if not isinstance(record_dict, dict):
                         raise ValueError("Invalid record")
-                    identity_str = hashlib.sha256(json.dumps(record_dict, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-                    identity_tuple = (source_str == "Operator journal", identity_str)
-                    if identity_tuple in seen_set:
+                    event_ts = _timestamp_ts(record_dict.get("event_timestamp_str") or record_dict.get("ts_utc")
+                        or record_dict.get("timestamp_str") or record_dict.get("created_timestamp_str"))
+                    if event_ts is None or event_ts > as_of_ts or (record_dict.get("event_timestamp_str")
+                        and record_dict.get("ts_utc") and _timestamp_ts(record_dict["ts_utc"]) != event_ts):
+                        raise ValueError("Invalid occurrence time")
+                    result_dict["complete_records_int"] += 1
+                    chunk_time_list.append(event_ts)
+                    if previous_ts is not None and event_ts > previous_ts:
+                        result_dict["reason_set"].add("unordered_records")
+                    previous_ts = event_ts
+                    result_dict["oldest_ts"] = min(result_dict["oldest_ts"] or event_ts, event_ts)
+                    result_dict["newest_ts"] = max(result_dict["newest_ts"] or event_ts, event_ts)
+                    if event_ts < from_ts:
                         continue
-                    seen_set.add(identity_tuple)
-                    event_dict = _event_dict(record_dict, identity_dict, source_str=source_str, as_of_ts=as_of_ts, from_date_str=from_date_str)
-                    if event_dict is not None:
-                        result_dict["event_list"].append(event_dict)
+                    event_dict = _event_dict(record_dict, identity_dict, source_str=source_str,
+                        as_of_ts=as_of_ts, from_date_str=from_ts.astimezone(MARKET_TIMEZONE_OBJ).date().isoformat())
+                    if event_dict is None:
+                        continue
+                    identity_str = str(source_str == "Operator journal") + hashlib.sha256(
+                        json.dumps(record_dict, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+                    if identity_str in local_seen_set:
+                        continue
+                    local_seen_set.add(identity_str)
+                    result_dict["event_list"].append((identity_str, event_dict))
+                    if identity_str not in seen_set:
+                        budget_dict["material_int"] += 1
                 except (ValueError, TypeError, KeyError, UnicodeError, OverflowError, RecursionError):
-                    warning_set.add("Some Activity records are incomplete or invalid.")
+                    result_dict["reason_set"].add("invalid_records")
+            # *** CRITICAL *** use the logger's append-time occurrence, never
+            # a planned/as-of timestamp. A whole old chunk crosses the ET
+            # boundary; one delayed/backdated line cannot stop the scan.
+            if chunk_time_list and max(chunk_time_list) < from_ts and not result_dict["reason_set"]:
+                result_dict["boundary_bool"] = True
+                break
+            if result_dict["reason_set"] & {"line_limit", "material_limit", "time_limit"}:
+                break
+        if offset_int == 0 and result_dict["oldest_ts"] is not None and result_dict["oldest_ts"] < from_ts and not result_dict["reason_set"]:
+            result_dict["boundary_bool"] = True
+    return result_dict
+
+
+def load_activity_source_dict(provider_obj, *, as_of_ts, days_int):
+    """Read saved history to its ET boundary, subject to explicit resource caps.
+
+    At most 23 fixed files, 128 MiB, 200,000 lines, 4,000 material records and
+    a cooperative 5-second deadline. Quiet polling uses no material-row budget.
+    Unchanged files can reuse a bounded memory cache; nothing writes to disk.
+    """
+    if not isinstance(as_of_ts, datetime) or as_of_ts.tzinfo is None or type(days_int) is not int or not 1 <= days_int <= 365:
+        raise ValueError("Activity needs an aware clock and a bounded day range")
+    as_of_ts = as_of_ts.astimezone(timezone.utc)
+    from_ts = as_of_ts.astimezone(MARKET_TIMEZONE_OBJ).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days_int - 1)
+    coverage_dict = {"requested_from_timestamp_str": from_ts.isoformat(), "scanned_from_timestamp_str": None,
+        "complete_bool": False, "reason_list": [], "read_bytes_int": 0, "parsed_lines_int": 0, "cache_hit_count_int": 0}
+    result_dict = {"event_list": [], "warning_list": [], "scope_key_str": "", "feed_available_bool": False, "coverage_dict": coverage_dict}
+    warning_set, reason_set = set(), set()
+    try:
+        identity_dict, event_path_obj, result_dict["scope_key_str"] = _scope_dict(provider_obj)
+        if not identity_dict:
+            result_dict["warning_list"] = ["No enabled LIVE Pods are available for Activity."]
+            coverage_dict["reason_list"] = ["scope_unavailable"]
+            return result_dict
+        root_path_obj = event_path_obj.parent.resolve()
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        result_dict["warning_list"] = ["Activity scope could not be verified."]
+        coverage_dict["reason_list"] = ["scope_unavailable"]
+        return result_dict
+    critical_path_obj = root_path_obj / "live_critical_events.jsonl"
+    source_list = [(event_path_obj, "Event log", 0), (critical_path_obj, "Critical log", 0),
+        (root_path_obj / "operator_journal.jsonl", "Operator journal", 0)]
+    for index_int in range(1, BACKUP_COUNT_INT + 1):
+        source_list.extend((path_obj.with_name(path_obj.name + f".{index_int}"), label_str, index_int)
+            for path_obj, label_str in ((event_path_obj, "Event log"), (critical_path_obj, "Critical log")))
+    budget_dict = {"bytes_int": 0, "lines_int": 0, "material_int": 0, "deadline_float": time.monotonic() + SCAN_SECONDS_FLOAT}
+    seen_set, finished_set, missing_set = set(), set(), set()
+    main_read_bool, main_oldest_ts, main_contiguous_bool = False, None, True
+    for path_obj, source_str, rotation_int in source_list:
+        if source_str in finished_set:
+            continue
+        limit_str = _limit_str(budget_dict)
+        if limit_str:
+            reason_set.add(limit_str)
+            break
+        required_bool = source_str == "Event log" and rotation_int == 0
+        try:
+            resolved_path_obj = path_obj.resolve()
+            resolved_path_obj.relative_to(root_path_obj)
+            stat_tuple = _stat_tuple(resolved_path_obj)
+            key_tuple = (result_dict["scope_key_str"], from_ts.isoformat(), source_str, str(resolved_path_obj), stat_tuple)
+            file_dict = _cache_file_dict(key_tuple, as_of_ts)
+            if file_dict is not None:
+                coverage_dict["cache_hit_count_int"] += 1
+                budget_dict["material_int"] += sum(identity_str not in seen_set for identity_str, _event_dict in file_dict["event_list"])
+                if budget_dict["material_int"] > MATERIAL_LIMIT_INT:
+                    reason_set.add("material_limit")
+                    break
+            else:
+                file_dict = _read_file_dict(resolved_path_obj, identity_dict, source_str=source_str,
+                    as_of_ts=as_of_ts, from_ts=from_ts, budget_dict=budget_dict, seen_set=seen_set)
+                if _stat_tuple(resolved_path_obj) == stat_tuple:
+                    _save_cache(key_tuple, file_dict)
+                else:
+                    file_dict["reason_set"].add("source_changed")
+            if required_bool:
+                main_read_bool = stat_tuple[2] == 0 or file_dict["complete_records_int"] > 0
+            reason_set.update(file_dict["reason_set"])
+            if rotation_int and source_str in missing_set:
+                reason_set.add("rotation_gap")
+            if source_str == "Event log" and main_contiguous_bool and file_dict["oldest_ts"] is not None:
+                main_oldest_ts = min(main_oldest_ts or file_dict["oldest_ts"], file_dict["oldest_ts"])
+            if file_dict["boundary_bool"]:
+                finished_set.add(source_str)
+            for identity_str, event_dict in file_dict["event_list"]:
+                if identity_str not in seen_set:
+                    seen_set.add(identity_str)
+                    result_dict["event_list"].append(event_dict)
         except FileNotFoundError:
+            missing_set.add(source_str)
+            if source_str == "Event log":
+                main_contiguous_bool = False
             if required_bool:
                 warning_set.add("The Activity event log is unavailable.")
+                reason_set.add("source_unavailable")
         except (OSError, ValueError, RuntimeError):
             warning_set.add("An Activity source could not be read safely.")
+            reason_set.add("source_unavailable")
+    if "Event log" not in finished_set and not reason_set:
+        reason_set.add("retained_history")
+    if reason_set & {"byte_limit", "line_limit", "material_limit", "time_limit"}:
+        warning_set.add("Activity history reached its scan limit.")
+    if reason_set & {"invalid_records", "unordered_records", "source_changed", "rotation_gap"}:
+        warning_set.add("Some Activity records are incomplete or invalid.")
     result_dict["event_list"].sort(key=lambda event_dict: (event_dict["timestamp_str"], event_dict["event_type_str"]), reverse=True)
     if len(result_dict["event_list"]) > EVENT_LIMIT_INT:
         warning_set.add("Activity history reached its display limit.")
+        reason_set.add("display_limit")
         result_dict["event_list"] = result_dict["event_list"][:EVENT_LIMIT_INT]
     result_dict["warning_list"] = sorted(warning_set)
-    result_dict["feed_available_bool"] = main_read_bool and warning_set <= {
-        "Activity history reached its scan limit.", "Activity history reached its display limit."}
+    result_dict["feed_available_bool"] = main_read_bool and not reason_set & {
+        "invalid_records", "unordered_records", "source_changed", "source_unavailable", "rotation_gap"}
+    coverage_dict.update(scanned_from_timestamp_str=main_oldest_ts.isoformat() if main_oldest_ts else None,
+        complete_bool="Event log" in finished_set and not reason_set, reason_list=sorted(reason_set),
+        read_bytes_int=budget_dict["bytes_int"], parsed_lines_int=budget_dict["lines_int"])
     return result_dict

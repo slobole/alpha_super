@@ -74,7 +74,9 @@ function environment_obj(options_dict = {}) {
       }
       const row_obj = body_obj.append(element_obj('tr', {'data-activity-row': row_dict.id, 'data-activity-parent': row_dict.parent || '',
         'data-timestamp': row_dict.time, 'data-day': next_day_str, 'data-pod': row_dict.pod, 'data-related-pods': JSON.stringify(row_dict.related || []), 'data-type': row_dict.type, 'data-state': row_dict.state}, row_dict.text));
-      const code_obj = row_obj.append(element_obj('code', {'data-activity-code': ''}, 'RAW_' + row_dict.id)); code_obj.hidden = true;
+      if (row_dict.code !== '') {
+        const code_obj = row_obj.append(element_obj('code', {'data-activity-code': ''}, row_dict.code || 'RAW_' + row_dict.id)); code_obj.hidden = true;
+      }
       row_map.set(row_dict.id, row_obj);
       if (rows_list.some(child_dict => child_dict.parent === row_dict.id)) cycle_button_map.set(row_dict.id, row_obj.append(element_obj('button', {'data-activity-cycle': row_dict.id})));
       evidence_button_map.set(row_dict.id, row_obj.append(element_obj('button', {'data-activity-evidence': row_dict.id})));
@@ -112,7 +114,7 @@ test('counts only new top-level failures and late events and places the ET bound
   const env_obj = environment_obj();
   assert.equal(env_obj.verdict_str, '1 failed, 1 late');
   assert.equal(env_obj.marker_obj.hidden, false);
-  assert.match(env_obj.marker_obj.textContent, /You last looked here.*09:00:00 ET/);
+  assert.equal(env_obj.marker_obj.textContent, 'You last looked here · Mon 09-21 09:00:00 ET');
   assert.equal(env_obj.body_obj.children_list.indexOf(env_obj.marker_obj) + 1, env_obj.body_obj.children_list.indexOf(env_obj.row_map.get('old')));
   assert.equal(env_obj.store_map.get(KEY_STR), '2026-09-21T14:00:00.000Z');
 });
@@ -161,6 +163,25 @@ test('cycle steps and inline evidence retain their open state through refresh an
   env_obj.click_type('alerts'); assert.equal(env_obj.proof_map.get('step').hidden, true);
   env_obj.click_type('all'); assert.equal(env_obj.proof_map.get('step').hidden, false);
   env_obj.expand('cycle'); assert.equal(env_obj.proof_map.get('step').hidden, true);
+});
+
+test('Show codes reveals supplied saved codes on the cycle and expanded steps through refresh', () => {
+  const rows_list = DEFAULT_ROWS.map(row_dict => ({...row_dict,
+    code: row_dict.id === 'cycle' ? 'post_execution_reconcile_completed' : row_dict.id === 'step' ? 'build_vplan_created' : ''}));
+  const env_obj = environment_obj({rows: rows_list});
+  assert.equal(env_obj.row_map.get('cycle').querySelector('[data-activity-code]').hidden, true);
+  assert.equal(env_obj.row_map.get('fail').querySelector('[data-activity-code]'), null);
+  env_obj.click('data-activity-codes');
+  assert.equal(env_obj.row_map.get('cycle').querySelector('[data-activity-code]').textContent, 'post_execution_reconcile_completed');
+  assert.equal(env_obj.row_map.get('cycle').querySelector('[data-activity-code]').hidden, false);
+  assert.equal(env_obj.row_map.get('step').hidden, true);
+  env_obj.expand('cycle'); env_obj.swap(rows_list);
+  assert.equal(env_obj.row_map.get('step').hidden, false);
+  assert.equal(env_obj.row_map.get('step').querySelector('[data-activity-code]').hidden, false);
+  assert.equal(env_obj.row_map.get('step').querySelector('[data-activity-code]').textContent, 'build_vplan_created');
+  env_obj.click('data-activity-codes');
+  assert.equal(env_obj.row_map.get('cycle').querySelector('[data-activity-code]').hidden, true);
+  assert.equal(env_obj.row_map.get('step').querySelector('[data-activity-code]').hidden, true);
 });
 
 test('search finds evidence and nested steps without inventing extra top-level counts', () => {

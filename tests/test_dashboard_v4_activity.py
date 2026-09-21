@@ -81,8 +81,59 @@ def test_no_future_foreign_or_out_of_period_rows_and_newest_first():
 
 def test_unknown_event_is_not_reported_as_success():
     row_dict = _page_dict([_event_dict("new_future_code")])["row_list"][0]
-    assert row_dict["title_str"] == "new_future_code"
-    assert row_dict["state_str"] == "unk"
+    assert row_dict["title_str"] == "Other events (1)."
+    assert row_dict["state_str"] == "now"
+    assert row_dict["child_list"][0]["state_str"] == "unk"
+    assert row_dict["child_list"][0]["code_str"] == "new_future_code"
+
+
+def test_unmapped_routine_groups_preserve_pod_day_and_child_evidence():
+    event_list = [_event_dict("new_one"), _event_dict("new_two", timestamp_str="2026-09-08T14:00:00Z"),
+        _event_dict("new_one", pod_id_str=""), _event_dict("new_one", timestamp_str="2026-09-07T14:00:00Z")]
+    saved_list = deepcopy(event_list)
+    row_list = _page_dict(event_list)["row_list"]
+    assert len(row_list) == 3 and sum(len(row_dict["child_list"]) for row_dict in row_list) == 4
+    group_dict = next(row_dict for row_dict in row_list if len(row_dict["child_list"]) == 2)
+    assert group_dict["pod_id_str"] == "own" and group_dict["day_str"] == "2026-09-08"
+    assert group_dict["child_label_str"] == "events"
+    assert all(row_dict["evidence_list"] for row_dict in group_dict["child_list"])
+    assert event_list == saved_list
+
+
+def test_unknown_warnings_failures_and_alert_operator_families_stay_individual():
+    for code_str, level_str, payload_dict in (("future_warning", "warning", {}), ("future_error", "error", {}),
+            ("future_late", "info", {"status_str": "late"}), ("notification_new_code", "info", {}),
+            ("operator_new_code", "info", {}), ("manual_order_new_code", "info", {})):
+        row_dict = _page_dict([_event_dict(code_str, level_str=level_str, payload_dict=payload_dict)])["row_list"][0]
+        assert not row_dict["child_list"] and row_dict["code_str"] == code_str
+        assert row_dict["state_str"] != "done" and row_dict["type_str"] in {"alerts", "operator"}
+
+
+def test_manual_order_messages_are_operator_records_not_fill_claims():
+    for code_str, expected_str in (("manual_order_submit_requested", "Manual order requested."),
+            ("manual_order_submit_completed", "Manual order submission recorded."),
+            ("manual_order_submit_failed", "Manual order submission failed.")):
+        row_dict = _page_dict([_event_dict(code_str, level_str="warning", payload_dict={
+            "asset_str": "GIS", "side_str": "SELL", "quantity_int": 2, "ticket_id_str": "ticket-1",
+            "broker_order_type_str": "MKT", "operator_id_str": "private-operator", "reason_str": "private free text"})])["row_list"][0]
+        assert row_dict["title_str"] == expected_str and row_dict["type_str"] == "operator"
+        assert row_dict["state_str"] == ("fail" if code_str.endswith("failed") else "now")
+        assert "private" not in str(row_dict) and "GIS" in str(row_dict["evidence_list"])
+    row_dict = _page_dict([_event_dict("manual_order_submit_completed", payload_dict={"submit_ack_status_str": "missing_critical"})])["row_list"][0]
+    assert row_dict["state_str"] == "fail"
+
+
+def test_failed_sync_cooldown_is_not_presented_as_routine_skip():
+    row_dict = _page_dict([_event_dict("norgate_snapshot_sync_skipped", pod_id_str="",
+        payload_dict={"status_str": "waiting", "reason_code_str": "sync_failure_cooldown"})])["row_list"][0]
+    assert row_dict["state_str"] == "fail" and row_dict["title_str"] == "Data sync waiting after a failure."
+
+
+def test_partial_log_history_exposes_actual_scanned_et_span():
+    page_dict = build_activity_page_dict(OVERVIEW_DICT, {"coverage_dict": {"complete_bool": False,
+        "scanned_from_timestamp_str": "2026-09-08T13:38:00+00:00"}}, {}, as_of_ts=NOW_TS, days_int=90)
+    assert page_dict["coverage_label_str"] == "Partial log history · scanned to 09-08 09:38 ET"
+    assert page_dict["history_complete_bool"] is False
 
 
 def test_global_events_have_inline_evidence_without_dead_system_link():

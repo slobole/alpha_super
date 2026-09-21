@@ -19,9 +19,10 @@ def attach_demo_activity(provider_obj, *, as_of_ts):
                 "pod_id_str": pod_id_str, "decision_plan_id_int": 2, "vplan_id_int": 2, "source_str": "Demo event log",
                 "payload_dict": {"release_id_str": row_dict["release_id_str"], "missing_ack_count_int": 1}})
             event_list.append({"timestamp_str": as_of_ts.replace(hour=13, minute=35, second=41).isoformat(),
-                "event_type_str": "notification_delivered", "level_str": "info", "mode_str": "live",
-                "pod_id_str": pod_id_str, "decision_plan_id_int": 2, "vplan_id_int": 2, "source_str": "Demo notification receipt",
-                "notification_delivery_str": "delivered", "payload_dict": {"delivery_status_str": "delivered"}})
+                "event_type_str": "manual_order_submit_requested", "level_str": "warning", "mode_str": "live",
+                "pod_id_str": pod_id_str, "source_str": "Demo event log",
+                "payload_dict": {"release_id_str": row_dict["release_id_str"], "ticket_id_str": "demo-manual-1",
+                    "asset_str": "GIS", "side_str": "SELL", "quantity_int": 2, "broker_order_type_str": "MKT"}})
     event_list.extend([
         {"timestamp_str": as_of_ts.replace(hour=13, minute=40, second=3).isoformat(), "event_type_str": "scheduler_error_retry",
             "level_str": "error", "mode_str": "live", "pod_id_str": "", "source_str": "Demo event log", "payload_dict": {}},

@@ -4,6 +4,7 @@ import sqlite3
 import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
@@ -18,6 +19,12 @@ from alpha.live.logging_utils import build_structured_event_record_dict
 NOW_TS = datetime(2026, 9, 18, 14, 0, tzinfo=UTC)
 SUBMIT_TS = NOW_TS - timedelta(minutes=36)
 FILL_TS = NOW_TS - timedelta(minutes=30)
+
+
+@pytest.fixture(autouse=True)
+def healthy_host_disk(monkeypatch):
+    monkeypatch.setattr("alpha.live.dashboard_v3.health.shutil.disk_usage",
+        lambda path_str: SimpleNamespace(total=100, used=50, free=50))
 
 
 def build_fixture_tuple(tmp_path, *, amount_list=None, filled_fraction_float=1.0):

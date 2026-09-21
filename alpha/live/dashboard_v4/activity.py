@@ -31,12 +31,16 @@ EVENT_DICT = {
     "core5_eod_source_untrusted": ("alerts", "fail", "Closing snapshot source could not be verified.", "events"),
     "core5_pre_submit_account_changed": ("alerts", "fail", "Account changed before submission. Orders blocked.", "orders"),
     "scheduler_started": ("system", "done", "Scheduler started.", "events"),
-    "scheduler_stopped": ("system", "unk", "Scheduler stopped.", "events"),
     "scheduler_error_retry": ("system", "fail", "Scheduler error. Retry scheduled.", "events"),
-    "scheduler.error_retry": ("system", "fail", "Scheduler error. Retry scheduled.", "events"),
     "operator_action_requested": ("operator", "now", "Operator action requested.", "events"),
-    "notification_delivered": ("alerts", "done", "Alert delivered.", "events"),
-    "notification_failed": ("alerts", "fail", "Alert delivery failed.", "events"),
+    "manual_order_submit_requested": ("operator", "now", "Manual order requested.", "events"),
+    "manual_order_submit_completed": ("operator", "now", "Manual order submission recorded.", "events"),
+    "manual_order_submit_failed": ("operator", "fail", "Manual order submission failed.", "events"),
+    "norgate_snapshot_sync_started": ("system", "now", "Data sync started.", "events"),
+    "norgate_snapshot_sync_ready": ("system", "done", "Data sync completed.", "events"),
+    "norgate_snapshot_sync_failed": ("system", "fail", "Data sync failed.", "events"),
+    "norgate_snapshot_sync_waiting": ("system", "unk", "Data sync is waiting.", "events"),
+    "norgate_snapshot_sync_skipped": ("system", "unk", "Data sync skipped.", "events"),
 }
 FOLDABLE_EVENT_SET = {"build_decision_plan_created", "build_vplan_created", "submit_vplan_completed", "post_execution_reconcile_completed"}
 ACTION_LABEL_DICT = {"tick": "Trading check", "submit_vplan": "Order submission", "post_execution_reconcile": "Position check",
@@ -47,7 +51,9 @@ EVIDENCE_LABEL_DICT = {"decision_plan_id_int": "Decision", "vplan_id_int": "Plan
     "broker_order_ack_count_int": "Acknowledgements", "initial_status_str": "Initial status", "reconciliation_status_str": "Position check",
     "missing_ack_count_int": "Missing acknowledgements", "fill_count_int": "Fill records", "status_str": "Saved status",
     "reason_code_str": "Reason", "action_name_str": "Action", "delivery_status_str": "Delivery",
-    "snapshot_date_str": "Data date", "market_date_str": "Session", "eod_market_date_str": "Session", "source_str": "Source"}
+    "snapshot_date_str": "Data date", "market_date_str": "Session", "eod_market_date_str": "Session", "source_str": "Source",
+    "ticket_id_str": "Ticket", "asset_str": "Symbol", "side_str": "Side", "quantity_int": "Shares",
+    "broker_order_type_str": "Order type", "submit_ack_status_str": "Broker acknowledgement"}
 
 
 def _cycle_matches_bool(event_dict, cycle_dict):
@@ -68,7 +74,7 @@ def _event_row_dict(event_dict, pod_map_dict, verified_cycle_list):
         code_str = "unknown_event"
     pod_id_str = event_dict.get("pod_id_str") or ""
     payload_dict = event_dict.get("payload_dict") or {}
-    type_str, state_str, title_str, tab_str = EVENT_DICT.get(code_str, ("system" if not pod_id_str else "cycles", "unk", code_str, "events"))
+    type_str, state_str, title_str, tab_str = EVENT_DICT.get(code_str, ("system" if not pod_id_str else "cycles", "unk", "Saved event.", "events"))
     level_str = str(event_dict.get("level_str") or "").lower()
     status_set = {str(payload_dict.get(key_str) or "").lower() for key_str in
         ("status_str", "initial_status_str", "reconciliation_status_str", "vplan_status_str", "decision_plan_status_str", "submit_ack_status_str")}
@@ -78,6 +84,14 @@ def _event_row_dict(event_dict, pod_map_dict, verified_cycle_list):
         state_str = "late"
     elif level_str in {"warning", "warn"} and state_str == "done":
         state_str = "unk"
+    if code_str not in EVENT_DICT and (level_str in {"warning", "warn", "critical", "error", "fatal"} or state_str in {"fail", "late"}):
+        type_str, title_str = "alerts", "Event needs review."
+    if code_str not in EVENT_DICT and code_str.startswith(("notification_", "notification.", "alert_", "discord_")):
+        type_str, title_str = "alerts", "Alert event recorded."
+    if code_str not in EVENT_DICT and code_str.startswith(("operator_", "manual_order_")):
+        type_str, title_str = "operator", "Operator event recorded."
+    if code_str == "norgate_snapshot_sync_skipped" and payload_dict.get("reason_code_str") == "sync_failure_cooldown":
+        state_str, title_str = "fail", "Data sync waiting after a failure."
     if code_str == "operator_action_requested":
         action_str = payload_dict.get("action_name_str") or payload_dict.get("action_str")
         title_str = ACTION_LABEL_DICT.get(action_str, "Operator action") + " requested."
@@ -109,7 +123,29 @@ def _event_row_dict(event_dict, pod_map_dict, verified_cycle_list):
         "pod_id_str": pod_id_str, "pod_name_str": pod_map_dict.get(pod_id_str, "System"), "type_str": type_str,
         "related_pod_id_list": payload_dict.get("related_pod_id_list", []),
         "state_str": state_str, "title_str": title_str, "detail_str": " · ".join(detail_list), "code_str": code_str,
-        "evidence_list": evidence_list, "evidence_url_str": evidence_url_str, "child_list": []}
+        "evidence_list": evidence_list, "evidence_url_str": evidence_url_str, "child_list": [],
+        "other_event_bool": code_str not in EVENT_DICT and level_str not in {"warning", "warn", "critical", "error", "fatal"}
+            and state_str == "unk" and type_str not in {"alerts", "operator"}}
+
+
+def _group_other_events_list(row_list):
+    """Keep unclassified routine rows compact without burying warnings/failures."""
+    result_list, group_map_dict = [], {}
+    for row_dict in row_list:
+        if not row_dict.get("other_event_bool"):
+            result_list.append(row_dict)
+            continue
+        key_tuple = (row_dict["day_str"], row_dict["pod_id_str"], tuple(row_dict["related_pod_id_list"]), row_dict["type_str"])
+        group_map_dict.setdefault(key_tuple, []).append(row_dict)
+    for key_tuple, child_list in group_map_dict.items():
+        child_list.sort(key=lambda row_dict: (row_dict["timestamp_str"], row_dict["id_str"]))
+        count_int = len(child_list)
+        result_list.append({**child_list[-1], "id_str": "other-" + sha256(repr(key_tuple).encode()).hexdigest()[:20],
+            "state_str": "now", "title_str": f"Other events ({count_int}).", "detail_str": "",
+            "code_str": " · ".join(sorted({row_dict["code_str"] for row_dict in child_list})),
+            "evidence_url_str": "", "evidence_list": [{"label_str": "Saved events", "value_str": str(count_int)}],
+            "child_list": child_list, "child_label_str": "events"})
+    return result_list
 
 
 def build_activity_page_dict(overview_dict, source_dict, cycle_dict, *, as_of_ts, days_int):
@@ -142,12 +178,22 @@ def build_activity_page_dict(overview_dict, source_dict, cycle_dict, *, as_of_ts
         if row_dict["code_str"] in FOLDABLE_EVENT_SET and row_dict["state_str"] == "done" and any(_cycle_matches_bool(event_dict, group_dict) for group_dict in folded_list):
             continue
         row_list.append(row_dict)
+    row_list = _group_other_events_list(row_list)
     row_list.sort(key=lambda row_dict: (row_dict["timestamp_str"], row_dict["id_str"]), reverse=True)
     warning_list = list(dict.fromkeys([*source_dict.get("warning_list", []), *cycle_dict.get("warning_list", [])]))
     if len(row_list) > 500:
         warning_list.append("Showing the newest 500 events. Older records are outside this view.")
         row_list = row_list[:500]
+    coverage_dict = source_dict.get("coverage_dict") or {}
+    coverage_label_str = ""
+    if coverage_dict and not coverage_dict.get("complete_bool"):
+        oldest_ts = parse_timestamp_ts(coverage_dict.get("scanned_from_timestamp_str"))
+        coverage_label_str = "Partial log history"
+        if oldest_ts is not None:
+            coverage_label_str += " · scanned to " + oldest_ts.astimezone(MARKET_TIMEZONE_OBJ).strftime("%m-%d %H:%M ET")
     return {"row_list": row_list, "days_int": days_int, "as_of_timestamp_str": as_of_ts.isoformat(),
+        "coverage_label_str": coverage_label_str,
+        "history_complete_bool": not warning_list and coverage_dict.get("complete_bool", True),
         "feed_available_bool": source_dict.get("feed_available_bool", not source_dict.get("warning_list")),
         "storage_key_str": "alpha.ops.v4.activity.live." + source_dict.get("scope_key_str", "unavailable"),
         "pod_filter_list": [{"pod_id_str": pod_id_str, "name_str": name_str} for pod_id_str, name_str in pod_map_dict.items()],
