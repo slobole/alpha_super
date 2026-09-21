@@ -1,0 +1,20 @@
+{% set allocation_dict = pod_page_dict.holdings_allocation_dict %}
+<section class="panel pod-holdings" data-pod-allocation data-close-date="{{ allocation_dict.close_date_str }}">
+  <div class="panel-h pod-positions-head"><span class="panel-t">Positions · {{ allocation_dict.row_list|length }}</span><span class="pod-stamp" title="{{ allocation_dict.basis_detail_str or 'Shares, values and weights at this close' }}">{% if allocation_dict.estimated_bool %}Estimated · {% endif %}{{ icon('calendar') }}Close {{ allocation_dict.close_date_str }}</span></div>
+  {% if allocation_dict.holdings_note_str %}<p class="evidence-note" title="{{ allocation_dict.comparison_basis_str }}">{{ allocation_dict.holdings_note_str }}</p>{% endif %}
+  {% if allocation_dict.reason_str %}<p class="evidence-note">{{ allocation_dict.reason_str }}</p>{% endif %}
+  <div class="pod-alloc{{ ' table-only' if not allocation_dict.donut_available_bool else '' }}">
+    {% if allocation_dict.donut_available_bool %}<div class="pod-donut">
+      {% set donut_interactive_bool = true %}{% include '_donut.html' %}
+      <div class="donut-key"><span><i style="background: {{ allocation_dict.color_str }}"></i>Holdings</span><span><i class="cash-key"></i>Cash</span></div>
+    </div>{% endif %}
+    <table class="tbl dense holdings-table" data-selection-key="positions-close"><thead><tr><th scope="col">Symbol</th><th scope="col" class="num">Shares</th><th scope="col" class="num">Value $</th><th scope="col" class="num">Weight</th></tr></thead><tbody>
+    {% for row_dict in allocation_dict.row_list %}<tr data-allocation-key="{{ row_dict.key_str }}" tabindex="0">
+      <td><b>{{ row_dict.symbol_str }}</b>{% if row_dict.new_bool %} <span class="tag">New</span>{% endif %}</td>
+      <td class="num">{{ row_dict.shares_str }}</td><td class="num">{{ row_dict.value_str }}</td>
+      <td class="num"><span class="holding-weight">{% if row_dict.bar_width_float is not none %}<span class="weight-bar" aria-hidden="true"><i style="width: {{ row_dict.bar_width_float }}%; background: {{ allocation_dict.color_str }}"></i>{% if row_dict.target_percent_float is not none %}<em style="left: {{ row_dict.target_percent_float }}%"></em>{% endif %}</span>{% endif %}<span>{{ row_dict.weight_str }}</span></span></td>
+    </tr>{% endfor %}
+    <tr class="tot" data-allocation-key="{{ allocation_dict.cash_row_dict.key_str }}" tabindex="0"><td><b>Cash</b></td><td></td><td class="num">{{ allocation_dict.cash_row_dict.value_str }}</td><td class="num">{{ allocation_dict.cash_row_dict.weight_str }}</td></tr>
+    </tbody></table>
+  </div>
+</section>

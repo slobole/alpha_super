@@ -99,10 +99,7 @@
             {% set allocation_dict = overview_dict.allocation_dict %}
             {% if allocation_dict.available_bool or allocation_dict.row_list %}
             <div class="alloc">
-              {% if allocation_dict.available_bool %}<svg class="chart donut" viewBox="0 0 300 250" role="img" aria-label="Allocation · Cash {{ allocation_dict.cash_percent_str }}"><title>Allocation. Cash {{ allocation_dict.cash_percent_str }}.</title>
-              {% for slice_dict in allocation_dict.slice_list %}<path class="slice" fill="{{ slice_dict.color_str }}" d="{{ slice_dict.path_str }}"><title>{{ slice_dict.label_str }}</title></path>{% endfor %}
-              {% for label_dict in allocation_dict.label_list %}<text class="ink" x="{{ label_dict.x_float }}" y="{{ label_dict.y_float }}">{{ label_dict.label_str }}</text>{% endfor %}
-              <text class="c1 ta-m" x="116" y="127">{{ allocation_dict.cash_percent_str }}</text><text class="c2 ta-m" x="116" y="144">cash</text></svg>
+              {% if allocation_dict.available_bool %}{% include '_donut.html' %}
               {% else %}<div class="empty-state allocation-empty">{{ allocation_dict.empty_str }}</div>{% endif %}
               <table class="tbl dense"><thead><tr><th scope="col"><span class="sr-only">Pod</span></th><th class="num" scope="col">{{ allocation_dict.invested_heading_str }}</th><th class="num" scope="col">Cash</th></tr></thead><tbody>
                 {% for row_dict in allocation_dict.row_list %}<tr><td><i class="dotk" style="background: {{ row_dict.color_str }}"></i>{{ row_dict.name_str }}</td><td class="num">{{ row_dict.invested_str }}</td><td class="num">{{ row_dict.cash_str }}</td></tr>{% endfor %}

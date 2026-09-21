@@ -1,0 +1,6 @@
+<svg class="chart donut" viewBox="{{ '6 15 220 220' if donut_interactive_bool|default(false) else '0 0 300 250' }}" role="{{ 'group' if donut_interactive_bool|default(false) else 'img' }}" aria-label="Allocation · Cash {{ allocation_dict.cash_percent_str }}">
+<title>Allocation. Cash {{ allocation_dict.cash_percent_str }}.</title>
+{% for slice_dict in allocation_dict.slice_list %}<path class="slice" fill="{{ slice_dict.color_str }}" d="{{ slice_dict.path_str }}"{% if donut_interactive_bool|default(false) %} data-allocation-key="{{ slice_dict.key_str }}" tabindex="0" role="img" aria-label="{{ slice_dict.label_str }} · {{ slice_dict.weight_str }} · ${{ slice_dict.value_str }}"{% endif %}><title>{{ slice_dict.label_str }}{% if donut_interactive_bool|default(false) %} · {{ slice_dict.weight_str }} · ${{ slice_dict.value_str }}{% endif %}</title></path>{% endfor %}
+{% for label_dict in allocation_dict.label_list %}<text class="ink{{ ' ta-m' if donut_interactive_bool|default(false) else '' }}" x="{{ label_dict.x_float }}" y="{{ label_dict.y_float }}">{{ label_dict.label_str }}</text>{% endfor %}
+<text class="c1 ta-m" x="116" y="127">{{ allocation_dict.cash_percent_str }}</text><text class="c2 ta-m" x="116" y="144">cash</text>
+</svg>

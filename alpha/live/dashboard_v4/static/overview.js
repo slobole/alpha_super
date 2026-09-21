@@ -2,6 +2,26 @@
    Failed transport must never leave the previous observation looking current. */
 (() => {
   'use strict';
+  // Delegation also covers the next atomic refresh without rebinding listeners.
+  function highlight_allocation(event_obj) {
+    const item_obj = event_obj.target.closest && event_obj.target.closest('[data-allocation-key]');
+    const panel_obj = item_obj && item_obj.closest('[data-pod-allocation]');
+    if (!panel_obj) return;
+    const leaving_bool = event_obj.type === 'pointerout' || event_obj.type === 'focusout';
+    const related_obj = event_obj.relatedTarget;
+    if (leaving_bool && related_obj && item_obj.contains(related_obj)) return;
+    const active_obj = document.activeElement && document.activeElement.closest
+      && document.activeElement.closest('[data-allocation-key]');
+    const selected_obj = leaving_bool ? (active_obj && panel_obj.contains(active_obj)
+      && (event_obj.type === 'pointerout' || active_obj !== item_obj) ? active_obj : null) : item_obj;
+    const key_str = selected_obj ? selected_obj.getAttribute('data-allocation-key') : null;
+    for (const peer_obj of panel_obj.querySelectorAll('[data-allocation-key]')) {
+      peer_obj.classList.toggle('is-highlighted', key_str !== null && peer_obj.getAttribute('data-allocation-key') === key_str);
+    }
+  }
+  for (const event_str of ['pointerover', 'pointerout', 'focusin', 'focusout']) {
+    document.addEventListener(event_str, highlight_allocation);
+  }
   let focus_period_str = '';
   let observed_shell_obj = null;
   let valid_until_ms = 0;
@@ -11,6 +31,7 @@
   let selection_snapshot_obj = null;
   let scheduler_check_snapshot_obj = null;
   let positions_search_snapshot_obj = null;
+  let allocation_focus_snapshot_obj = null;
   const clock_formatter_obj = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
   });
@@ -176,6 +197,36 @@
     if (empty_obj) empty_obj.hidden = visible_int !== 0;
   }
 
+  function allocation_focus_match_list(shell_obj, snapshot_obj) {
+    return Array.from(shell_obj.querySelectorAll('[data-allocation-key]')).filter((item_obj) => {
+      const panel_obj = item_obj.closest('[data-pod-allocation]');
+      return panel_obj && panel_obj.getAttribute('data-close-date') === snapshot_obj.close_date_str
+        && item_obj.getAttribute('data-allocation-key') === snapshot_obj.key_str && item_obj.tagName === snapshot_obj.tag_str;
+    });
+  }
+
+  function capture_allocation_focus(shell_obj) {
+    const active_obj = document.activeElement;
+    const panel_obj = active_obj && active_obj.closest && active_obj.closest('[data-pod-allocation]');
+    if (!shell_obj || !panel_obj || !shell_obj.contains(active_obj)) return null;
+    const snapshot_obj = {shell_obj, active_obj, scope_str: shell_obj.getAttribute('data-selection-scope'),
+      close_date_str: panel_obj.getAttribute('data-close-date'), key_str: active_obj.getAttribute('data-allocation-key'), tag_str: active_obj.tagName};
+    return snapshot_obj.scope_str && snapshot_obj.close_date_str && snapshot_obj.key_str && snapshot_obj.tag_str
+      && allocation_focus_match_list(shell_obj, snapshot_obj).length === 1 ? snapshot_obj : null;
+  }
+
+  function restore_allocation_focus(shell_obj) {
+    const snapshot_obj = allocation_focus_snapshot_obj;
+    allocation_focus_snapshot_obj = null;
+    if (!snapshot_obj || !shell_obj || shell_obj === snapshot_obj.shell_obj
+        || shell_obj.getAttribute('data-selection-scope') !== snapshot_obj.scope_str) return;
+    // DOM removal normally returns focus to the body. Do not replace new user focus.
+    const active_obj = document.activeElement;
+    if (active_obj && active_obj !== document.body && active_obj !== snapshot_obj.active_obj) return;
+    const match_list = allocation_focus_match_list(shell_obj, snapshot_obj);
+    if (match_list.length === 1) match_list[0].focus({preventScroll: true});
+  }
+
   document.addEventListener('input', (event_obj) => {
     if (event_obj.target && event_obj.target.getAttribute('data-positions-search') !== null) {
       filter_positions(document.getElementById('overview-shell'));
@@ -188,6 +239,7 @@
         selection_snapshot_obj = null;
         scheduler_check_snapshot_obj = null;
         positions_search_snapshot_obj = null;
+        allocation_focus_snapshot_obj = null;
         mark_unknown();
       }
     });
@@ -211,6 +263,8 @@
     positions_search_snapshot_obj = input_obj ? {scope_str: shell_obj.getAttribute('data-selection-scope'),
       value_str: input_obj.value, focused_bool: document.activeElement === input_obj,
       start_int: input_obj.selectionStart, end_int: input_obj.selectionEnd} : null;
+    allocation_focus_snapshot_obj = capture_allocation_focus(shell_obj);
+    if (allocation_focus_snapshot_obj) focus_period_str = '';
   });
   document.addEventListener('htmx:afterSwap', (event_obj) => {
     if (!overview_event(event_obj)) return;
@@ -234,6 +288,7 @@
     positions_search_snapshot_obj = null;
     filter_positions(shell_obj);
     restore_selection();
+    restore_allocation_focus(shell_obj);
   });
   document.addEventListener('selectionchange', () => {
     if (selection_snapshot_obj && selection_snapshot_obj.shell_obj.isConnected

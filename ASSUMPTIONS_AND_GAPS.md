@@ -15,12 +15,64 @@ Current gates and unreadable state remain visible while browsing history. Its
 demo reads isolated synthetic SQLite through the production read-only readers;
 synthetic success is not VPS or broker validation.
 
-Saved Pod state and finalized account reports do not contain per-position close
-marks. Pod holdings therefore show dated quantities only, with independently
-dated cash. Reference prices are not substituted for closing marks, and no NAV
-weights, target/New markers, slippage or reference comparison are manufactured.
-Account NAV/P&L/TWR retain the existing reporting contracts. Full closing-value
-holdings require a separately verified account/date-specific marks source.
+Pod closing allocation optionally reads Open Positions from the exact saved Flex
+import used by that account's finalized NAV (account, date, query, import ID and
+checksum checked). This dashboard-only reader adds no importer table or migration.
+It supports whole-account USD stock/ETF SUMMARY rows with unit multipliers. When
+that source is unavailable, the panel independently attempts the market estimate
+described below. Ambiguous ownership still blocks both sources.
+
+Display weights are signed position value / account NAV; IBKR percentOfNAV is
+not used because its denominator is the asset class. Saved broker EOD cash must
+have the same market date. Values are displayed only when
+abs(sum(position values) + cash - NAV) <= $0.01 using decimal sums. Unexplained
+accruals/residuals do not become cash. Donut geometry may close an accepted penny
+rounding gap using component totals; the displayed weights still use NAV. Shorts,
+negative cash or weights outside [0, 1] retain the value table without a donut.
+Visual bars scale against the largest positive holding weight; their numeric
+labels retain the actual NAV fraction.
+
+The table uses close-snapshot shares, never current shares with an older mark.
+Differences from verified saved quantities are labeled separately. Execution
+reference prices are not closing marks. Target/New markers remain withheld until
+their cycle, budget and date attribution can be proved. Account NAV/P&L/TWR retain
+the existing reporting contracts. Parser acceptance is covered by synthetic XML
+and published IBKR field documentation; available local exports were NAV-only.
+A real expanded export is still needed to verify that optional Flex format's
+production compatibility; it is no longer a prerequisite for a valued Pod panel.
+The visual demo explicitly supplies synthetic 4- and 10-holding close reports.
+
+The market estimate uses one saved broker EOD row for actual shares and cash,
+and the same date's Norgate unadjusted closing prices for every held symbol:
+
+    estimated_value_i = round(EOD_shares_i * unadjusted_close_i, 2)
+    estimated_total = sum(estimated_value_i) + EOD_cash
+    estimated_weight_i = estimated_value_i / estimated_total
+
+The panel visibly says Estimated and shows its close date. Its denominator is
+the estimated holdings-plus-cash total, not reported NAV. Broker accruals and
+other NAV differences do not become invented cash. Official account NAV, P&L
+and TWR are unchanged, even when no Flex report exists. A complete official
+allocation has priority over the estimate, retaining its own stated close date.
+
+EOD observations must belong to the configured LIVE owner/Pod/account, be after
+the exchange close plus the existing ten-minute buffer, and precede the current
+ET date. The latest eligible observation is used; malformed or ambiguous latest
+quantities cannot revive an older healthy row. Cash and shares come from the
+same row, not separate current observations. This conservative prior-day policy
+means a new evening EOD becomes eligible after ET midnight.
+
+Snapshot mode uses only the configured local profile's exact dated, hash-checked
+artifact and its Unadjusted Close column, never adjusted Close. Positive volume,
+an explicit unpadded endpoint or a NONE-padding contract must establish a real
+source observation. Direct local mode uses the installed Norgate Updater's
+loopback read API with NONE adjustment/padding and USD stock/ETF metadata checks;
+bounded requests avoid the Python package's version-check side effects. No
+dashboard request contacts a broker, downloads a snapshot, or changes mode.
+Prices and copies of cached results are bounded; complete symbol coverage is
+required. Missing exact-date snapshots therefore still withhold values, including
+on a monthly VPS whose market-data snapshots have not advanced to the EOD date.
+The estimated path needs neither Flex Open Positions nor a database migration.
 
 The Positions page merges saved broker quantities by symbol and preserves
 opposing Pod legs. A Pod filter narrows that table to the selected Pod; account

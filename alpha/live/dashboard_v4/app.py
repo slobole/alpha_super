@@ -180,7 +180,7 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
                     if "reconcile_read_failure_dict" in row_dict:
                         selected_row_dict["reconcile_read_failure_dict"] = row_dict["reconcile_read_failure_dict"]
         pod_finance_dict = build_pod_finance_dict(workspace_dict, snapshot_obj, provider_obj,
-            pod_id_str=pod_id_str, as_of_ts=clock_fn(), period_str=period_str)
+            pod_id_str=pod_id_str, as_of_ts=clock_fn(), period_str=period_str, performance_db_path_str=database_path_str)
         render_ts = clock_fn()
         source_ts = parse_timestamp_ts((workspace_dict.get("summary_dict") or {}).get("as_of_timestamp_str"))
         selected_ts = parse_timestamp_ts((source_dict.get("pod_row_dict") or {}).get("as_of_timestamp_str"))

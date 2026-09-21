@@ -46,11 +46,13 @@
 <section class="tiles tiles-4" aria-label="Pod money at last close">{% for tile_dict in pod_page_dict.tile_list %}<div class="tile" data-selection-key="money:{{ tile_dict.label_str }}"><div class="l">{{ tile_dict.label_str }}</div><div class="v {{ tile_dict.tone_str }}">{{ tile_dict.value_str }}</div><div class="s">{{ tile_dict.detail_str }}</div></div>{% endfor %}</section>
 <div class="asof pod-money-date" data-selection-key="money-asof">{% if 'Close ' in pod_page_dict.money_asof_str %}{{ icon('calendar') }}{% endif %}{{ pod_page_dict.money_asof_str }}</div>
 <div class="cols c-7-5 pod-finance">
+  {% if pod_page_dict.holdings_allocation_dict.available_bool %}{% include '_pod_holdings.html' %}{% else %}
   <section class="panel"><div class="panel-h pod-positions-head"><span class="panel-t">Positions · {{ pod_page_dict.position_list|length }}</span><span class="pod-stamp" title="{{ pod_page_dict.positions_stamp_dict.title_str }}">{{ icon('calendar') }}<span class="sr-only">{{ pod_page_dict.positions_stamp_dict.title_str }}</span><span aria-hidden="true">{{ pod_page_dict.positions_stamp_dict.label_str }}</span></span></div>
+    {% if pod_page_dict.holdings_allocation_dict.reason_str %}<p class="evidence-note">{{ pod_page_dict.holdings_allocation_dict.reason_str }}</p>{% endif %}
     <table class="tbl dense evidence-table" data-selection-key="positions"><thead><tr><th scope="col">Symbol</th><th class="num" scope="col">Shares</th></tr></thead><tbody>
     {% for position_dict in pod_page_dict.position_list %}<tr><td data-column="Symbol"><b>{{ position_dict.symbol_str }}</b></td><td data-column="Shares" class="num">{{ position_dict.shares_str }}</td></tr>{% else %}<tr><td colspan="2">Positions unavailable.</td></tr>{% endfor %}
     </tbody></table><div class="pod-cash"><b>Cash <span class="mono">{{ pod_page_dict.cash_str }}</span></b><span class="pod-stamp" title="{{ pod_page_dict.cash_stamp_dict.title_str }}">{{ icon('calendar') }}<span class="sr-only">{{ pod_page_dict.cash_stamp_dict.title_str }}</span><span aria-hidden="true">{{ pod_page_dict.cash_stamp_dict.label_str }}</span></span></div>
-  </section>
+  </section>{% endif %}
   <section class="panel"><div class="panel-h"><span class="panel-t">Return</span><nav class="seg" aria-label="Pod return period">{% for option_dict in pod_page_dict.period_option_list %}<a href="{{ option_dict.url_str }}" class="{{ 'on' if option_dict.selected_bool else '' }}" data-period="{{ option_dict.label_str }}">{{ option_dict.label_str }}</a>{% endfor %}</nav></div><div class="panel-b">
     {% set chart_dict = pod_page_dict.chart_dict %}{% include '_value_chart.html' %}
   </div>{% if chart_dict.source_str %}<div class="finance-source" title="{{ chart_dict.detail_str }}">{{ chart_dict.source_str }}</div>{% endif %}</section>

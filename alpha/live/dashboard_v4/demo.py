@@ -12,7 +12,7 @@ from alpha.live.dashboard_v4.positions_data import load_positions_dict
 DEMO_NOW_TS = datetime(2026, 9, 8, 13, 41, 7, tzinfo=UTC)
 
 
-def build_demo_workspace_tuple():
+def build_demo_workspace_tuple(*, include_holdings_bool=False):
     registry_dict, snapshot_dict = build_demo_fixture_tuple()
     client_dict = deepcopy(next(item_dict for item_dict in registry_dict["clients"]
                                if item_dict["client_id"] == "demo-client"))
@@ -21,6 +21,9 @@ def build_demo_workspace_tuple():
         account_dict["display_name"] = name_str
     provider_obj = DemoOperationsProvider({"clients": [client_dict]})
     for index_int, row_dict in enumerate(provider_obj.row_list):
+        if include_holdings_bool:
+            # Explicit visual-fixture cash, also seeded into the demo EOD DB.
+            row_dict["eod_snapshot_dict"]["cash_float"] = round(row_dict["eod_snapshot_dict"]["equity_float"] * .066, 2)
         daily_bool = index_int < 2
         row_dict.update(
             as_of_timestamp_str=DEMO_NOW_TS.isoformat(),
@@ -89,13 +92,16 @@ def build_demo_workspace_tuple():
         "valuation_account_list": client_dict["accounts"], "summary_dict": summary_dict,
         "financial_scope_complete_bool": True, "financial_error_str": "", "operations_error_str": "",
     }
+    if include_holdings_bool:
+        from alpha.live.dashboard_v4.demo_holdings import attach_demo_holdings
+        attach_demo_holdings(provider_obj)
     return workspace_dict, snapshot_dict[client_dict["client_id"]], provider_obj
 
 
 def create_demo_app():
     from alpha.live.dashboard_v4.app import create_app
 
-    workspace_dict, snapshot_obj, provider_obj = build_demo_workspace_tuple()
+    workspace_dict, snapshot_obj, provider_obj = build_demo_workspace_tuple(include_holdings_bool=True)
     start_float = monotonic()
 
     def demo_now_ts():

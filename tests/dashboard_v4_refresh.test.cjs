@@ -587,3 +587,212 @@ test('failed refresh cannot replay a captured selection or renew evidence lifeti
   env_obj.advance(1000); env_obj.timer();
   assert.equal(env_obj.current_obj.selector_dict['[data-refresh-reason]'].textContent, 'Saved status is out of date.');
 });
+
+function allocation_panel_obj(env_obj, close_date_str = '2026-09-18') {
+  const panel_obj = element_obj();
+  panel_obj.parentElement = env_obj.current_obj.shell_obj;
+  panel_obj.setAttribute('data-close-date', close_date_str);
+  panel_obj.closest = (selector_str) => selector_str === '[data-pod-allocation]' ? panel_obj : panel_obj.parentElement.closest(selector_str);
+  const item_list = [];
+  panel_obj.childNodes = item_list;
+  panel_obj.querySelectorAll = (selector_str) => selector_str === '[data-allocation-key]' ? item_list : [];
+  function add_item_obj(key_str, tag_str = 'TR') {
+    const item_obj = element_obj();
+    item_obj.tagName = tag_str;
+    item_obj.parentElement = panel_obj;
+    item_obj.setAttribute('data-allocation-key', key_str);
+    item_obj.closest = (selector_str) => selector_str === '[data-allocation-key]' ? item_obj : panel_obj.closest(selector_str);
+    item_obj.classList.toggle = (class_str, enabled_bool) => {
+      const class_set = new Set(item_obj.className.split(' ').filter(Boolean));
+      if (enabled_bool) class_set.add(class_str); else class_set.delete(class_str);
+      item_obj.className = [...class_set].join(' ');
+    };
+    item_obj.focused_int = 0;
+    item_obj.focus = (options_obj) => {
+      item_obj.focused_int += 1;
+      item_obj.focus_options_obj = options_obj;
+      env_obj.focus(item_obj);
+      env_obj.fire('focusin', {type: 'focusin', target: item_obj});
+    };
+    item_list.push(item_obj);
+    const selector_dict = env_obj.current_obj.selector_dict;
+    if (!selector_dict['[data-allocation-key]']) selector_dict['[data-allocation-key]'] = [];
+    selector_dict['[data-allocation-key]'].push(item_obj);
+    return item_obj;
+  }
+  const row_dict = {}, slice_dict = {};
+  for (const key_str of ['position:AAA', 'position:BBB', 'cash']) {
+    row_dict[key_str] = add_item_obj(key_str);
+    slice_dict[key_str] = add_item_obj(key_str, 'path');
+  }
+  return {panel_obj, row_dict, slice_dict, add_item_obj};
+}
+
+function assert_allocation_highlight(panel_obj, key_str) {
+  for (const item_obj of panel_obj.querySelectorAll('[data-allocation-key]')) {
+    assert.equal(item_obj.className.split(' ').includes('is-highlighted'),
+      key_str !== null && item_obj.getAttribute('data-allocation-key') === key_str);
+  }
+}
+
+for (const kind_str of ['row_dict', 'slice_dict']) {
+  for (const event_str of ['pointerover', 'focusin']) {
+    test(`allocation ${event_str} on ${kind_str} marks only its pair and clears on leaving`, () => {
+      const env_obj = environment_obj();
+      const allocation_obj = allocation_panel_obj(env_obj);
+      const item_obj = allocation_obj[kind_str]['position:AAA'];
+      if (event_str === 'focusin') env_obj.focus(item_obj);
+      env_obj.fire(event_str, {type: event_str, target: item_obj});
+      assert_allocation_highlight(allocation_obj.panel_obj, 'position:AAA');
+      env_obj.focus(null);
+      const leaving_str = event_str === 'focusin' ? 'focusout' : 'pointerout';
+      env_obj.fire(leaving_str, {type: leaving_str, target: item_obj, relatedTarget: null});
+      assert_allocation_highlight(allocation_obj.panel_obj, null);
+    });
+  }
+}
+
+test('allocation highlights stay inside their panel and unknown keys never match another holding', () => {
+  const env_obj = environment_obj();
+  const first_obj = allocation_panel_obj(env_obj);
+  const second_obj = allocation_panel_obj(env_obj);
+  env_obj.fire('pointerover', {type: 'pointerover', target: second_obj.row_dict['position:BBB']});
+  env_obj.fire('pointerover', {type: 'pointerover', target: first_obj.slice_dict.cash});
+  assert_allocation_highlight(first_obj.panel_obj, 'cash');
+  assert_allocation_highlight(second_obj.panel_obj, 'position:BBB');
+  const unknown_obj = first_obj.add_item_obj('position:UNKNOWN');
+  env_obj.fire('pointerover', {type: 'pointerover', target: unknown_obj});
+  assert_allocation_highlight(first_obj.panel_obj, 'position:UNKNOWN');
+  assert_allocation_highlight(second_obj.panel_obj, 'position:BBB');
+  env_obj.fire('pointerout', {type: 'pointerout', target: unknown_obj, relatedTarget: null});
+  env_obj.fire('pointerover', {type: 'pointerover', target: element_obj()});
+  assert_allocation_highlight(first_obj.panel_obj, null);
+  assert_allocation_highlight(second_obj.panel_obj, 'position:BBB');
+});
+
+test('allocation descendant pointer movement does not clear the row and slice pair', () => {
+  const env_obj = environment_obj();
+  const allocation_obj = allocation_panel_obj(env_obj);
+  const row_obj = allocation_obj.row_dict['position:AAA'];
+  const child_obj = element_obj('AAA');
+  child_obj.parentElement = row_obj;
+  env_obj.fire('pointerover', {type: 'pointerover', target: child_obj});
+  env_obj.fire('pointerout', {type: 'pointerout', target: row_obj, relatedTarget: child_obj});
+  assert_allocation_highlight(allocation_obj.panel_obj, 'position:AAA');
+});
+
+test('allocation keyboard focus survives pointerout and is restored after hovering another holding', () => {
+  const env_obj = environment_obj();
+  const allocation_obj = allocation_panel_obj(env_obj);
+  const focused_obj = allocation_obj.row_dict['position:AAA'];
+  const hovered_obj = allocation_obj.slice_dict['position:BBB'];
+  env_obj.focus(focused_obj);
+  env_obj.fire('focusin', {type: 'focusin', target: focused_obj});
+  env_obj.fire('pointerover', {type: 'pointerover', target: focused_obj});
+  env_obj.fire('pointerout', {type: 'pointerout', target: focused_obj, relatedTarget: null});
+  assert_allocation_highlight(allocation_obj.panel_obj, 'position:AAA');
+  env_obj.fire('pointerover', {type: 'pointerover', target: hovered_obj});
+  assert_allocation_highlight(allocation_obj.panel_obj, 'position:BBB');
+  env_obj.fire('pointerout', {type: 'pointerout', target: hovered_obj, relatedTarget: null});
+  assert_allocation_highlight(allocation_obj.panel_obj, 'position:AAA');
+  env_obj.focus(null);
+  env_obj.fire('focusout', {type: 'focusout', target: focused_obj, relatedTarget: null});
+  assert_allocation_highlight(allocation_obj.panel_obj, null);
+});
+
+test('allocation delegation works on replaced rows and slices after atomic refresh', () => {
+  const env_obj = environment_obj();
+  const old_obj = allocation_panel_obj(env_obj);
+  env_obj.fire('pointerover', {type: 'pointerover', target: old_obj.row_dict['position:AAA']});
+  env_obj.fire('htmx:beforeSwap');
+  env_obj.replace();
+  const refreshed_obj = allocation_panel_obj(env_obj);
+  env_obj.fire('htmx:afterSwap');
+  assert_allocation_highlight(refreshed_obj.panel_obj, null);
+  env_obj.fire('pointerover', {type: 'pointerover', target: refreshed_obj.slice_dict['position:BBB']});
+  assert_allocation_highlight(refreshed_obj.panel_obj, 'position:BBB');
+  env_obj.focus(refreshed_obj.row_dict.cash);
+  env_obj.fire('focusin', {type: 'focusin', target: refreshed_obj.row_dict.cash});
+  assert_allocation_highlight(refreshed_obj.panel_obj, 'cash');
+});
+
+for (const kind_str of ['row_dict', 'slice_dict']) {
+  test(`allocation refresh restores the same ${kind_str} and its paired highlight without scrolling`, () => {
+    const env_obj = environment_obj();
+    const old_obj = allocation_panel_obj(env_obj);
+    env_obj.focus(old_obj[kind_str]['position:AAA']);
+    env_obj.fire('htmx:beforeSwap');
+    env_obj.replace();
+    const refreshed_obj = allocation_panel_obj(env_obj);
+    env_obj.focus(null);
+    env_obj.fire('htmx:afterSwap');
+    assert.equal(refreshed_obj[kind_str]['position:AAA'].focused_int, 1);
+    assert.equal(refreshed_obj[kind_str]['position:AAA'].focus_options_obj.preventScroll, true);
+    const other_kind_str = kind_str === 'row_dict' ? 'slice_dict' : 'row_dict';
+    assert.equal(refreshed_obj[other_kind_str]['position:AAA'].focused_int, 0);
+    assert_allocation_highlight(refreshed_obj.panel_obj, 'position:AAA');
+  });
+}
+
+for (const change_str of ['fallback', 'key', 'tag', 'date', 'scope', 'missing_date', 'duplicate', 'duplicate_panel',
+  'initial_duplicate', 'initial_missing_date', 'error']) {
+  test(`allocation focus is not restored after ${change_str} makes the source absent or ambiguous`, () => {
+    const env_obj = environment_obj();
+    const old_obj = allocation_panel_obj(env_obj);
+    env_obj.focus(old_obj.row_dict['position:AAA']);
+    if (change_str === 'initial_duplicate') old_obj.add_item_obj('position:AAA');
+    if (change_str === 'initial_missing_date') old_obj.panel_obj.setAttribute('data-close-date', '');
+    env_obj.fire('htmx:beforeSwap');
+    if (change_str === 'error') env_obj.fire('htmx:responseError');
+    env_obj.replace();
+    env_obj.focus(null);
+    const refreshed_obj = change_str === 'fallback' ? null : allocation_panel_obj(env_obj);
+    if (change_str === 'key') refreshed_obj.row_dict['position:AAA'].setAttribute('data-allocation-key', 'position:OTHER');
+    if (change_str === 'tag') refreshed_obj.row_dict['position:AAA'].tagName = 'SPAN';
+    if (change_str === 'date') refreshed_obj.panel_obj.setAttribute('data-close-date', '2026-09-21');
+    if (change_str === 'scope') env_obj.current_obj.shell_obj.setAttribute('data-selection-scope', 'pod:other');
+    if (change_str === 'missing_date') refreshed_obj.panel_obj.setAttribute('data-close-date', '');
+    if (change_str === 'duplicate') refreshed_obj.add_item_obj('position:AAA');
+    if (change_str === 'duplicate_panel') allocation_panel_obj(env_obj);
+    env_obj.fire('htmx:afterSwap');
+    for (const item_obj of env_obj.current_obj.selector_dict['[data-allocation-key]'] || []) {
+      assert.equal(item_obj.focused_int, 0);
+    }
+    if (refreshed_obj) assert_allocation_highlight(refreshed_obj.panel_obj, null);
+  });
+}
+
+test('allocation refresh captures the latest focused holding at replacement time', () => {
+  const env_obj = environment_obj();
+  const old_obj = allocation_panel_obj(env_obj);
+  env_obj.focus(old_obj.row_dict['position:AAA']);
+  env_obj.fire('htmx:beforeRequest');
+  env_obj.focus(old_obj.slice_dict['position:BBB']);
+  env_obj.fire('htmx:beforeSwap');
+  env_obj.replace();
+  const refreshed_obj = allocation_panel_obj(env_obj);
+  env_obj.focus(null);
+  env_obj.fire('htmx:afterSwap');
+  assert.equal(refreshed_obj.row_dict['position:AAA'].focused_int, 0);
+  assert.equal(refreshed_obj.slice_dict['position:BBB'].focused_int, 1);
+});
+
+for (const change_str of ['before_swap', 'after_capture', 'hover_only']) {
+  test(`allocation refresh does not steal focus after ${change_str}`, () => {
+    const env_obj = environment_obj();
+    const old_obj = allocation_panel_obj(env_obj);
+    if (change_str === 'hover_only') {
+      env_obj.fire('pointerover', {type: 'pointerover', target: old_obj.row_dict['position:AAA']});
+    } else env_obj.focus(old_obj.row_dict['position:AAA']);
+    env_obj.fire('htmx:beforeRequest');
+    const outside_obj = element_obj();
+    if (change_str === 'before_swap') env_obj.focus(outside_obj);
+    env_obj.fire('htmx:beforeSwap');
+    env_obj.replace();
+    const refreshed_obj = allocation_panel_obj(env_obj);
+    if (change_str === 'after_capture') env_obj.focus(outside_obj);
+    env_obj.fire('htmx:afterSwap');
+    assert.equal(refreshed_obj.row_dict['position:AAA'].focused_int, 0);
+    assert_allocation_highlight(refreshed_obj.panel_obj, null);
+  });
+}
