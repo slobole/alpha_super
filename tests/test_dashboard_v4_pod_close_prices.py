@@ -90,9 +90,58 @@ def test_wrong_manifest_endpoint_does_not_prove_observation(tmp_path):
     assert not _read_dict()["available_bool"]
 
 
-def test_exact_artifact_is_required_even_when_later_snapshot_contains_requested_date(tmp_path):
+def test_missing_exact_artifact_uses_local_prices_not_another_snapshot(tmp_path, monkeypatch):
+    call_list = _local_fixture(monkeypatch)
+    monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "true")
     _snapshot_path(tmp_path, close_str="2026-08-10", override_dict={"date": pd.Timestamp(CLOSE_STR)})
-    assert not _read_dict()["available_bool"]
+    result_dict = _read_dict()
+    assert result_dict["price_map_dict"] == {"SPY": 123.5}
+    assert result_dict["source_str"] == "Norgate local" and call_list
+    assert norgate_snapshot_store.is_snapshot_mode_enabled_bool()
+
+
+def test_monthly_snapshot_fallback_is_cached_and_new_exact_snapshot_takes_priority(tmp_path, monkeypatch):
+    call_list = _local_fixture(monkeypatch)
+    monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "true")
+    _snapshot_path(tmp_path, close_str="2026-07-31")
+    before_list = sorted(str(path_obj) for path_obj in tmp_path.rglob("*"))
+    result_dict = _read_dict()
+    assert result_dict["available_bool"] and result_dict["source_str"] == "Norgate local"
+    count_int = len(call_list)
+    result_dict["price_map_dict"]["SPY"] = -1
+    assert _read_dict()["price_map_dict"] == {"SPY": 123.5} and len(call_list) == count_int
+    assert sorted(str(path_obj) for path_obj in tmp_path.rglob("*")) == before_list
+    _snapshot_path(tmp_path)
+    assert _read_dict()["source_str"] == "Norgate snapshot"
+    assert _read_dict()["price_map_dict"] == {"SPY": 100}
+    assert len(call_list) == count_int
+
+
+@pytest.mark.parametrize("missing_file_str", ["manifest.json", "prices.parquet"])
+def test_partial_existing_snapshot_does_not_probe_local_source(tmp_path, missing_file_str):
+    snapshot_path = _snapshot_path(tmp_path)
+    (snapshot_path / missing_file_str).unlink()
+    result_dict = _read_dict()
+    assert not result_dict["available_bool"]
+    assert result_dict["reason_str"] == "Closing price snapshot could not be read"
+
+
+def test_missing_snapshot_and_local_failure_give_reason_and_recover(monkeypatch):
+    monkeypatch.setattr(pod_close_prices, "_local_response_tuple", lambda *args, **kwargs: (_ for _ in ()).throw(requests.ConnectionError()))
+    result_dict = _read_dict()
+    assert not result_dict["available_bool"] and result_dict["price_map_dict"] == {}
+    assert result_dict["reason_str"] == "No saved closing prices; local prices unavailable"
+    _local_fixture(monkeypatch)
+    monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "true")
+    assert _read_dict()["price_map_dict"] == {"SPY": 123.5}
+
+
+@pytest.mark.parametrize("price_override_dict", [{"date_str": "2026-08-06"}, {"count_str": "0"}])
+def test_missing_snapshot_cannot_use_stale_or_missing_local_record(monkeypatch, price_override_dict):
+    _local_fixture(monkeypatch, price_override_dict=price_override_dict)
+    monkeypatch.setenv("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", "true")
+    result_dict = _read_dict()
+    assert not result_dict["available_bool"] and result_dict["price_map_dict"] == {}
 
 
 def test_no_partial_map_when_one_symbol_missing_or_source_contains_duplicate(tmp_path):

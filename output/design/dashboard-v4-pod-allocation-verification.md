@@ -209,3 +209,55 @@ older than the latest EOD account row. The dashboard does not silently reuse
 stale marks or initiate a data sync; it reports missing prices and keeps saved
 quantities. Direct mode requires the existing local Norgate Updater service.
 The code is implemented locally; no VPS restart or deployment was performed.
+
+## Missing daily snapshot fix (2026-09-21)
+
+The owner reported Closing prices unavailable on the real VPS. Read-only SSH
+inspection verified production at 726f5cc, snapshot mode enabled, and the exact
+2026-09-18 client manifest absent. The same VPS's installed Norgate Updater
+returned all 13 distinct held symbols for that date in 0.375 seconds. Waiting
+for another market close was not the solution: the reader was tied to monthly
+trading-artifact creation despite daily broker EOD observations.
+
+The display-only reader now uses exact-date local Norgate prices when the dated
+snapshot directory is absent. Valid snapshots still take priority; existing
+corrupted or incomplete directories fail closed. The source is Norgate local,
+and Estimated remains visible. A snapshot appearing later immediately overrides
+the local-source cache. Failures explain whether the saved price artifact or
+local prices could not be read. No trading setting or source is changed.
+
+The candidate module was executed in memory in a separate read-only process on
+the real VPS. Production files and the running dashboard process were untouched.
+Both complete public finance-builder calls changed from unavailable to valued:
+
+| Pod | Close | Holdings | Saved cash | Estimated total | Cash weight |
+| --- | --- | ---: | ---: | ---: | ---: |
+| NDX | 2026-09-18 | 9 | $1,971.43 | $12,287.16 | 16.0% |
+| TAA | 2026-09-18 | 4 | $287.08 | $20,727.95 | 1.4% |
+
+Each returned donut_available_bool=true in under 0.2 seconds. Official money
+tiles, account chart, money date and cash display compared equal before/after.
+The global trading snapshot flag remained true. This validates current real
+inputs and the candidate behavior, not deployment of the running dashboard.
+
+Both real Pod pages were also rendered by an isolated Flask test client on the
+VPS: HTTP 200, allocation SVG/table present, Estimated and Norgate local present,
+missing-price message absent, unchanged GET-only CSP. No server was started.
+
+Verification: 93 focused source/finance/integration tests passed. The broader
+Dashboard V4 plus LIVE runner/scheduler/reconcile/release suite passed all 1,093
+tests in 226.50 seconds (the focused cases overlap this run). Scoped whitespace
+checks passed. No JavaScript, styles or templates changed in this follow-up.
+
+Risk: Tier 3. Independent coverage and parity: price_fallback_coverage; failure
+and quantitative boundary review: price_fallback_failures. Both passed. The
+initial source-options review was price_source_review. Snapshot-only wording
+found by review was corrected in the accounting assumptions and source contract.
+
+Live-impact checklist: order timing, sizing, execution reference prices,
+schemas, release YAMLs and consumed logging are unchanged. Only the existing
+bounded loopback read service is used; no broker connection, snapshot sync,
+source write or process restart is introduced. Windows path containment and
+existing artifact integrity checks remain in force. A machine without local
+Norgate still needs a valid dated snapshot; missing data never becomes a stale
+price or a partial donut.

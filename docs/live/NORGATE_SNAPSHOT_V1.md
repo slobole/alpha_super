@@ -100,7 +100,15 @@ Live trading state stays local to the client VPS:
 - DecisionPlan semantics stay unchanged.
 - VPlan sizing stays unchanged.
 - IBKR adapters, submit, fills, reconciliation, and POD sqlite stay local.
-- Snapshot mode never falls back to direct Norgate.
+- Trading snapshot mode never falls back to direct Norgate.
+
+Dashboard V4 closing-position valuation is a separate, display-only reader. It
+prefers a valid exact-date local snapshot, but when that dated directory is
+absent it can read the same date's unadjusted prices from the existing Norgate
+Updater on the same host. Existing invalid or incomplete artifacts still fail
+closed. This does not change snapshot mode, create or sync files, contact a
+broker, or supply prices to DecisionPlan/VPlan logic. Snapshot-only clients
+without a local Updater still require a valid exact-date artifact for this view.
 
 ## Modes
 

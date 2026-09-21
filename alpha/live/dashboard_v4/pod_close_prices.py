@@ -1,8 +1,9 @@
 """Exact-date raw closing prices for display, from local Norgate sources only.
 
-Snapshot mode never contacts NDU or downloads artifacts. Direct mode uses the
-installed NDU package's loopback protocol without importing its updater/version
-checker. Nothing here values an account, changes data, or contacts a broker.
+Prefer an exact-date snapshot when configured. If its dated directory is absent,
+display valuation can read the installed NDU's loopback service independently of
+the trading snapshot schedule. Never download artifacts or change trading mode.
+Nothing here changes data or contacts a broker.
 """
 
 from collections import OrderedDict
@@ -38,8 +39,8 @@ _cache_dict = OrderedDict()
 _cache_lock = Lock()
 
 
-def _unavailable_dict():
-    return {"available_bool": False, "reason_str": "Closing prices unavailable",
+def _unavailable_dict(reason_str="Closing prices unavailable"):
+    return {"available_bool": False, "reason_str": reason_str,
         "price_map_dict": {}, "source_str": "", "close_date_str": ""}
 
 
@@ -64,6 +65,8 @@ def _snapshot_context_tuple(profile_str, close_date_str):
     directory_obj = (root_obj / profile_str / close_date_str).resolve()
     if not directory_obj.is_relative_to(root_obj):
         raise ValueError("Snapshot escaped configured root")
+    if not directory_obj.exists():
+        return None
     manifest_obj, prices_obj = (directory_obj / "manifest.json").resolve(), (directory_obj / "prices.parquet").resolve()
     if not manifest_obj.is_relative_to(root_obj) or not prices_obj.is_relative_to(root_obj):
         raise ValueError("Snapshot file escaped configured root")
@@ -189,9 +192,12 @@ def load_close_prices_dict(symbol_list, *, profile_str, close_date_str, as_of_ts
     The six existing snapshot profiles are US equity/ETF profiles; helper symbols
     are excluded. Direct NDU additionally verifies currency and instrument type.
     Cache contents are bounded and copied; source errors never return partial
-    prices or switch modes. Account identity and EOD quantities belong to caller.
+    prices. A missing dated snapshot may use same-host NDU for display only;
+    existing invalid snapshots fail closed. Trading mode remains unchanged.
+    Account identity and EOD quantities belong to caller.
     """
     result_dict = _unavailable_dict()
+    reason_str = "Closing prices unavailable"
     try:
         if (profile_str not in PROFILE_SET or not isinstance(symbol_list, (list, tuple))
                 or len(symbol_list) > SYMBOL_LIMIT_INT or len(set(symbol_list)) != len(symbol_list)
@@ -207,21 +213,24 @@ def load_close_prices_dict(symbol_list, *, profile_str, close_date_str, as_of_ts
             return {"available_bool": True, "reason_str": "", "price_map_dict": {}, "source_str": "No holdings", "close_date_str": close_date_str}
         with _cache_lock:
             snapshot_bool = norgate_snapshot_store.is_snapshot_mode_enabled_bool()
+            reason_str = "Closing price snapshot could not be read" if snapshot_bool else "Local closing prices unavailable"
             context_tuple = _snapshot_context_tuple(profile_str, close_date_str) if snapshot_bool else None
+            if context_tuple is None:
+                reason_str = "No saved closing prices; local prices unavailable" if snapshot_bool else reason_str
             cache_key_tuple = (snapshot_bool, profile_str, close_date_str, symbol_tuple, context_tuple[2] if context_tuple else None)
             cached_tuple = _cache_dict.get(cache_key_tuple)
             if cached_tuple and time.monotonic() - cached_tuple[0] < CACHE_SECONDS_FLOAT and as_of_ts >= cached_tuple[2]:
                 _cache_dict.move_to_end(cache_key_tuple)
                 return deepcopy(cached_tuple[1])
             price_map_dict = (_snapshot_prices_dict(symbol_tuple, profile_str, close_date_str, as_of_ts, *context_tuple)
-                if snapshot_bool else _direct_prices_dict(symbol_tuple, close_date_str))
+                if context_tuple is not None else _direct_prices_dict(symbol_tuple, close_date_str))
             result_dict = {"available_bool": True, "reason_str": "", "price_map_dict": price_map_dict,
-                "source_str": "Norgate snapshot" if snapshot_bool else "Norgate local", "close_date_str": close_date_str}
+                "source_str": "Norgate snapshot" if context_tuple is not None else "Norgate local", "close_date_str": close_date_str}
             _cache_dict[cache_key_tuple] = (time.monotonic(), deepcopy(result_dict), as_of_ts)
             _cache_dict.move_to_end(cache_key_tuple)
             while len(_cache_dict) > CACHE_LIMIT_INT:
                 _cache_dict.popitem(last=False)
     except (AttributeError, KeyError, TypeError, ValueError, OverflowError, OSError, requests.RequestException,
             norgate_snapshot_store.NorgateSnapshotError, pa.ArrowException):
-        return _unavailable_dict()
+        return _unavailable_dict(reason_str)
     return result_dict

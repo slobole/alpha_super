@@ -62,16 +62,22 @@ quantities cannot revive an older healthy row. Cash and shares come from the
 same row, not separate current observations. This conservative prior-day policy
 means a new evening EOD becomes eligible after ET midnight.
 
-Snapshot mode uses only the configured local profile's exact dated, hash-checked
-artifact and its Unadjusted Close column, never adjusted Close. Positive volume,
+When configured, display valuation first uses the local profile's exact dated,
+hash-checked artifact and its Unadjusted Close column, never adjusted Close. Positive volume,
 an explicit unpadded endpoint or a NONE-padding contract must establish a real
-source observation. Direct local mode uses the installed Norgate Updater's
-loopback read API with NONE adjustment/padding and USD stock/ETF metadata checks;
+source observation. If the dated directory is absent, the dashboard alone can
+read the same date from the installed local Norgate Updater. An existing invalid
+or incomplete directory still fails closed. This covers monthly Pods whose
+trading snapshots advance only before a new DecisionPlan; it does not change
+the trading snapshot mode or schedule. Direct local reads use the Updater's
+loopback API with NONE adjustment/padding and USD stock/ETF metadata checks;
 bounded requests avoid the Python package's version-check side effects. No
 dashboard request contacts a broker, downloads a snapshot, or changes mode.
 Prices and copies of cached results are bounded; complete symbol coverage is
-required. Missing exact-date snapshots therefore still withhold values, including
-on a monthly VPS whose market-data snapshots have not advanced to the EOD date.
+required. A newly available exact-date artifact takes priority over cached local
+prices. Without a valid artifact or same-host Norgate prices, values remain
+unavailable with a short source-specific reason. Snapshot-only client machines
+without local Norgate still need the exact-date artifact.
 The estimated path needs neither Flex Open Positions nor a database migration.
 
 The Positions page merges saved broker quantities by symbol and preserves
