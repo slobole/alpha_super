@@ -9,7 +9,8 @@
     <div class="nav-label">Book</div>
     <a class="{{ 'on' if positions_page_dict is defined else '' }}" href="{{ url_for('positions') }}"{% if positions_page_dict is defined %} aria-current="page"{% endif %}>{{ icon('positions') }}Positions</a>
     <a class="{{ 'on' if performance_page_dict is defined else '' }}" href="{{ url_for('performance') }}"{% if performance_page_dict is defined %} aria-current="page"{% endif %}>{{ icon('performance') }}Performance</a>
-    {% for icon_str, label_str in [('activity', 'Activity'), ('system', 'System health'), ('tools', 'Tools')] %}
+    <a class="{{ 'on' if activity_page_dict is defined else '' }}" href="{{ url_for('activity') }}"{% if activity_page_dict is defined %} aria-current="page"{% endif %}>{{ icon('activity') }}Activity</a>
+    {% for icon_str, label_str in [('system', 'System health'), ('tools', 'Tools')] %}
     <a aria-disabled="true" title="{{ label_str }} is not available yet">{{ icon(icon_str) }}{{ label_str }}</a>
     {% endfor %}
   </nav>

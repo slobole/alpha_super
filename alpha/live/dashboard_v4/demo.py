@@ -86,6 +86,8 @@ def build_demo_workspace_tuple(*, include_holdings_bool=False):
             "next_phase_str": "post_execution_reconcile" if pod_id_str == "demo_1_1" else "eod_snapshot",
             "reason_code_str": "waiting_for_post_execution_reconcile" if pod_id_str == "demo_1_1" else "waiting_for_eod_snapshot"}
     provider_obj.get_scheduler_status_dict = demo_scheduler_status_dict
+    from alpha.live.dashboard_v4.activity_demo import attach_demo_activity
+    attach_demo_activity(provider_obj, as_of_ts=DEMO_NOW_TS)
     summary_dict = provider_obj.get_summary_dict()
     summary_dict["as_of_timestamp_str"] = DEMO_NOW_TS.isoformat()
     workspace_dict = {

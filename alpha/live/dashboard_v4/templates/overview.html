@@ -1,3 +1,3 @@
 {% extends "base.html" %}
-{% block title %}{{ 'Performance' if performance_page_dict is defined else 'Positions' if positions_page_dict is defined else pod_page_dict.name_str if pod_page_dict is defined else 'Overview' }}{% endblock %}
+{% block title %}{{ 'Activity' if activity_page_dict is defined else 'Performance' if performance_page_dict is defined else 'Positions' if positions_page_dict is defined else pod_page_dict.name_str if pod_page_dict is defined else 'Overview' }}{% endblock %}
 {% block content %}{% include "_overview.html" %}{% endblock %}

@@ -1,9 +1,9 @@
-# Dashboard V4 — LIVE Overview and Pods
+# Dashboard V4 — LIVE operations
 
-Native Flask/Jinja implementation of Mockup D's Overview and Pod pages, following
+Native Flask/Jinja implementation of Mockup D's operator pages, following
 `docs/plans/DASHBOARD_V4_HANDOFF.md`. Select a Pod from the sidebar or Overview
-to open `/pods/<pod_id>`. Positions, Performance, Activity, System health and
-Tools pages remain disabled. PAPER and INCUBATION are deferred.
+to open `/pods/<pod_id>`. Positions, Performance and Activity are also available.
+System health and Tools remain disabled. PAPER and INCUBATION are deferred.
 
 ## Run beside V3
 
@@ -192,6 +192,39 @@ and database failures. The selected cycle has a separate badge and verdict.
   drops the selection. This never extends the source's freshness lifetime;
   stale Next labels say `Not current`, including calculated forecasts.
   Historical pages still poll so current Pod warnings stay up to date.
+
+## Activity
+
+`/activity` shows saved LIVE events and mode-less system events, newest first,
+grouped by New York date. It defaults to seven calendar days; Load older extends
+the same view to 14, 30 and 90 days. Pod/type filters, search, technical codes and
+the late/failed filter work on the returned rows. Each row has inline evidence;
+an exact saved cycle identity also links to the Pod evidence tab.
+
+The reader validates one enabled LIVE owner and unique Pod/account identities
+before opening files. It reads bounded tails of the configured event log,
+`live_critical_events.jsonl`, their ten numbered rotations, and
+`operator_journal.jsonl`: at most 23 files, 4 MiB, 20,000 lines and 1,000 events.
+The timeline displays at most 500 rows. Limits and unreadable sources are shown;
+Load older cannot recover records outside retained files or scan limits. Raw
+paths, account IDs, free-form errors and unapproved payload fields are withheld.
+No dynamic trace-directory scan or broker call is added.
+
+Healthy cycles reuse the Pod page's saved ACK, fill and reconciliation proof.
+Only matching Pod, release and decision/plan identities can fold routine success
+events into a cycle. Failed, late, alert and operator events stay separate. Cycle
+reads are capped at 32 Pods, 12 reads per Pod and 60 reads per response. A stale
+current header does not alter independently verified historical facts. Planned
+times do not become actual event times; operator requests do not imply completion,
+and notification delivery needs an explicit saved receipt.
+
+The page polls every 15 seconds and preserves filters, search focus and expanded
+rows. A browser-local last-looked timestamp is scoped to the saved-data source
+and enabled LIVE identities. It records successful visible observations, never
+an unavailable/stale refresh or an earlier timestamp from a slower tab. First
+visit says Recent activity; subsequent visits count only events after that
+browser's prior visit. This is a navigation aid, not an acknowledgement or an
+audit receipt. Demo events are synthetic and do not write operational logs.
 
 ## Verification
 

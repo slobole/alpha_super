@@ -1,0 +1,40 @@
+{% from '_icons.html' import icon %}
+{% set activity_dict = activity_page_dict %}
+{% macro chevron() -%}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6l6 6-6 6"></path></svg>{%- endmacro %}
+{% macro event_rows(row_dict, parent_str='') -%}
+{% set state_dict = {'done': 'Done', 'fail': 'Failed', 'late': 'Late', 'unk': 'Unknown', 'skip': 'None', 'now': 'Recorded'} %}
+<tr class="activity-event{{ ' activity-step' if parent_str else '' }}{{ ' activity-failed' if row_dict.state_str == 'fail' else '' }}" id="activity-row-{{ row_dict.id_str }}" data-activity-row="{{ row_dict.id_str }}" data-activity-parent="{{ parent_str }}" data-timestamp="{{ row_dict.timestamp_str }}" data-day="{{ row_dict.day_str }}" data-pod="{{ row_dict.pod_id_str }}" data-related-pods='{{ row_dict.get("related_pod_id_list", []) | tojson }}' data-type="{{ row_dict.type_str }}" data-state="{{ row_dict.state_str }}"{% if parent_str %} hidden{% endif %}>
+  <td class="activity-time mono">{% if row_dict.cross_day_str %}<span class="activity-cross-day">{{ row_dict.cross_day_str }}</span>{% endif %}<time datetime="{{ row_dict.timestamp_str }}" title="{{ row_dict.day_label_str }} {{ row_dict.time_str }} ET">{{ row_dict.time_str }}</time></td>
+  <td class="activity-pod{{ ' muted' if not row_dict.pod_id_str else '' }}">{{ row_dict.pod_name_str }}</td>
+  <td class="activity-message"><div class="activity-sentence"><span class="st st-{{ row_dict.state_str if row_dict.state_str in state_dict else 'unk' }}" role="img" aria-label="{{ state_dict.get(row_dict.state_str, 'Unknown') }}" title="{{ state_dict.get(row_dict.state_str, 'Unknown') }}"></span><span><b>{{ row_dict.title_str }}</b>{% if row_dict.detail_str %} {{ row_dict.detail_str }}{% endif %}<code class="activity-code" data-activity-code hidden>{{ row_dict.code_str }}</code></span>
+    {% if row_dict.child_list %}<button type="button" class="activity-fold" data-activity-cycle="{{ row_dict.id_str }}" aria-expanded="false" aria-controls="{% for child_dict in row_dict.child_list %}activity-row-{{ child_dict.id_str }}{{ ' ' if not loop.last else '' }}{% endfor %}">{{ chevron() }}{{ row_dict.child_list | length }} steps</button>{% endif %}</div></td>
+  <td class="activity-open"><button type="button" class="activity-rowlink" data-activity-evidence="{{ row_dict.id_str }}" aria-expanded="false" aria-controls="activity-proof-{{ row_dict.id_str }}" aria-label="Open evidence: {{ row_dict.title_str }}">{{ chevron() }}</button></td>
+</tr>
+<tr class="activity-proof" id="activity-proof-{{ row_dict.id_str }}" data-activity-proof="{{ row_dict.id_str }}" hidden><td colspan="4"><div class="activity-proof-body" role="region" aria-label="Evidence: {{ row_dict.title_str }}">
+  <dl>{% for item_dict in row_dict.evidence_list %}<div><dt>{{ item_dict.label_str }}</dt><dd>{{ item_dict.value_str }}</dd></div>{% endfor %}</dl>
+  {% if row_dict.evidence_url_str %}<a href="{{ row_dict.evidence_url_str }}">Open pod evidence →</a>{% endif %}
+</div></td></tr>
+{%- endmacro %}
+<section class="activity-page" data-activity-page data-as-of="{{ activity_dict.as_of_timestamp_str }}" data-storage-key="{{ activity_dict.storage_key_str }}" data-complete="{{ 'false' if activity_dict.warning_list else 'true' }}" data-feed-available="{{ 'true' if activity_dict.get('feed_available_bool', not activity_dict.warning_list) else 'false' }}">
+  <div class="page-head"><div><h1 class="h1i">{{ icon('activity') }}Activity</h1><p class="verdict"><b data-activity-verdict>Recent activity.</b><span data-activity-verdict-detail></span></p></div><div class="asof">LIVE and system · last {{ activity_dict.days_int }} days · ET</div></div>
+  <div class="activity-toolbar">
+    <div class="activity-filters">
+      <label class="activity-field"><span class="muted">Pod</span><select data-activity-pod aria-label="Activity pod"><option value="">All</option>{% for pod_dict in activity_dict.pod_filter_list %}<option value="{{ pod_dict.pod_id_str }}">{{ pod_dict.name_str }}</option>{% endfor %}</select></label>
+      <div class="seg activity-types" role="group" aria-label="Activity type">{% for value_str, label_str in [('all', 'All'), ('cycles', 'Cycles'), ('alerts', 'Alerts'), ('operator', 'Operator'), ('system', 'System')] %}<button type="button" data-activity-type="{{ value_str }}" class="{{ 'on' if loop.first else '' }}" aria-pressed="{{ 'true' if loop.first else 'false' }}">{{ label_str }}</button>{% endfor %}</div>
+      <button type="button" class="activity-chip" data-activity-late aria-pressed="false">Late + failed only</button><button type="button" class="activity-chip" data-activity-codes aria-pressed="false">Show codes</button>
+    </div>
+    <label class="activity-field activity-search"><span class="muted">Find</span><input type="search" data-activity-search aria-label="Find activity" placeholder="text…" autocomplete="off"></label>
+  </div>
+  {% for warning_str in activity_dict.warning_list %}<div class="activity-warning" role="status">{{ warning_str }}</div>{% endfor %}
+  <section class="panel activity-panel" aria-label="Activity timeline">
+    <table class="tbl dense activity-table"><colgroup><col class="activity-time-col"><col class="activity-pod-col"><col><col class="activity-open-col"></colgroup><thead><tr><th scope="col">Time</th><th scope="col">Pod</th><th scope="col">What</th><th scope="col"><span class="sr-only">Evidence</span></th></tr></thead><tbody data-activity-body>
+      {% set day_namespace = namespace(previous_str='') %}{% for row_dict in activity_dict.row_list %}
+      {% if row_dict.day_str != day_namespace.previous_str %}<tr class="activity-day" data-activity-day="{{ row_dict.day_str }}"><th colspan="4" scope="rowgroup">{{ row_dict.day_label_str }}</th></tr>{% set day_namespace.previous_str = row_dict.day_str %}{% endif %}
+      {{ event_rows(row_dict) }}{% for child_dict in row_dict.child_list | reverse %}{{ event_rows(child_dict, row_dict.id_str) }}{% endfor %}
+      {% endfor %}
+      <tr class="activity-marker" data-activity-marker hidden><td colspan="4"><div data-activity-marker-label></div></td></tr>
+      <tr class="activity-empty" data-activity-empty{% if activity_dict.row_list %} hidden{% endif %}><td colspan="4">No saved activity for this period.</td></tr>
+    </tbody></table>
+    {% if activity_dict.load_older_url_str %}<a class="activity-more" href="{{ activity_dict.load_older_url_str }}" hx-get="{{ activity_dict.load_older_url_str }}" hx-target="#overview-shell" hx-swap="outerHTML" hx-push-url="true">Load older · showing {{ activity_dict.days_int }} days</a>{% endif %}
+  </section>
+</section>

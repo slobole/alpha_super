@@ -1,6 +1,6 @@
 """LIVE operator views. No actions, executors or notifications."""
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 import re
 
@@ -14,6 +14,9 @@ from alpha.live.dashboard_v4.positions import build_positions_page_dict
 from alpha.live.dashboard_v4.performance import build_performance_page_dict
 from alpha.live.dashboard_v4.performance_exports import export_performance_csv_str, export_performance_pdf_bytes
 from alpha.live.dashboard_v4.status import load_operations_workspace_dict
+from alpha.live.dashboard_v4.activity import build_activity_page_dict
+from alpha.live.dashboard_v4.activity_data import load_activity_source_dict
+from alpha.live.dashboard_v4.activity_cycles import build_activity_cycles_dict
 from alpha.live.dashboard_v3.client_operations import SOURCE_MAX_AGE_SECONDS_INT
 from alpha.live.dashboard_v3.filters import MARKET_TIMEZONE_OBJ
 from alpha.live.ops_report import parse_timestamp_ts
@@ -257,6 +260,43 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
     @flask_app_obj.get("/positions/refresh")
     def positions_refresh():
         return render_template("_overview.html", **context_dict(positions_bool=True))
+
+    def activity_response(*, refresh_bool=False):
+        if set(request.args) - {"days"} or len(request.args.getlist("days")) > 1:
+            abort(400)
+        days_str = request.args.get("days", "7")
+        if days_str not in {"7", "14", "30", "90"}:
+            abort(400)
+        days_int = int(days_str)
+        acquisition_ts = clock_fn()
+        workspace_dict = (load_operations_workspace_dict(provider_obj, as_of_ts=acquisition_ts)
+            if operations_workspace_fn is None else operations_workspace_fn())
+        overview_dict = build_overview_dict(workspace_dict, None, provider_obj,
+            as_of_ts=clock_fn(), demo_bool=demo_bool, include_finance_bool=False)
+        from_ts = acquisition_ts.astimezone(MARKET_TIMEZONE_OBJ).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days_int - 1)
+        source_dict = (provider_obj.get_activity_source_dict(as_of_ts=acquisition_ts, days_int=days_int)
+            if hasattr(provider_obj, "get_activity_source_dict") else load_activity_source_dict(provider_obj, as_of_ts=acquisition_ts, days_int=days_int))
+        cycle_dict = build_activity_cycles_dict(provider_obj, overview_dict, as_of_ts=acquisition_ts, from_ts=from_ts)
+        render_ts = clock_fn()
+        # Reading historical evidence cannot renew live shell health.
+        overview_dict = build_overview_dict(workspace_dict, None, provider_obj,
+            as_of_ts=render_ts, demo_bool=demo_bool, include_finance_bool=False)
+        overview_dict.update(refresh_url_str=url_for("activity_refresh", days=days_int), refresh_seconds_int=15)
+        activity_page_dict = build_activity_page_dict(overview_dict, source_dict, cycle_dict,
+            as_of_ts=acquisition_ts, days_int=days_int)
+        next_days_int = next((value_int for value_int in (14, 30, 90) if value_int > days_int), None)
+        if next_days_int is not None:
+            activity_page_dict["load_older_url_str"] = url_for("activity", days=next_days_int)
+        template_str = "_overview.html" if refresh_bool or request.headers.get("HX-Request") == "true" else "overview.html"
+        return render_template(template_str, overview_dict=overview_dict, activity_page_dict=activity_page_dict)
+
+    @flask_app_obj.get("/activity")
+    def activity():
+        return activity_response()
+
+    @flask_app_obj.get("/activity/refresh")
+    def activity_refresh():
+        return activity_response(refresh_bool=True)
 
     def performance_response(*, refresh_bool=False):
         allowed_set = {"level", "period", "from", "to", "unit"}

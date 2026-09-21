@@ -1,7 +1,7 @@
 {% from "_icons.html" import icon %}
 {% set state_label_dict = {'done': 'Done', 'now': 'Now', 'next': 'Planned', 'late': 'Late', 'fail': 'Failed', 'skip': 'None', 'unk': 'Unknown'} %}
 {% set pill_class_dict = {'done': 'ok', 'now': 'work', 'next': 'idle', 'late': 'late', 'fail': 'act', 'skip': 'idle', 'unk': 'unk'} %}
-{% set is_overview_bool = pod_page_dict is not defined and positions_page_dict is not defined and performance_page_dict is not defined %}
+{% set is_overview_bool = pod_page_dict is not defined and positions_page_dict is not defined and performance_page_dict is not defined and activity_page_dict is not defined %}
 {% from "_state.html" import mark %}
 <div class="frame" id="overview-shell" hx-get="{{ overview_dict.refresh_url_str }}" hx-trigger="every {{ overview_dict.refresh_seconds_int }}s" hx-swap="{{ 'none' if performance_page_dict is defined else 'outerHTML' }}" hx-target="this" hx-request='{"timeout":10000}' data-last-update="{{ overview_dict.updated_str }}" data-source-valid-ms="{{ overview_dict.source_valid_ms_int }}" data-clock-timestamp="{{ overview_dict.clock_timestamp_str }}" data-selection-scope="{% if performance_page_dict is defined %}performance:{{ performance_page_dict.level_str }}:{{ performance_page_dict.period_str }}:{{ performance_page_dict.from_date_str }}:{{ performance_page_dict.to_date_str }}:{{ performance_page_dict.unit_str }}{% elif positions_page_dict is defined %}positions:{{ positions_page_dict.view_str }}:{{ positions_page_dict.pod_str }}{% elif pod_page_dict is defined %}pod:{{ pod_page_dict.pod_id_str }}:{{ pod_page_dict.selected_cycle_dict.get('cycle_key_str', 'unavailable') }}:{{ pod_page_dict.tab_str }}:{{ overview_dict.period_str }}{% else %}overview:{{ overview_dict.period_str }}{% endif %}">
   {% if performance_page_dict is defined %}{% include '_status_stamp.html' %}{% endif %}
@@ -9,9 +9,11 @@
     {% include '_shell_rail.html' %}
     <div class="main">
       {% include '_shell_header.html' %}
-      <main class="page calm{{ ' performance-page' if performance_page_dict is defined else ' positions-page' if positions_page_dict is defined else ' pod-page' if pod_page_dict is defined else '' }}" id="overview-content">
+      <main class="page calm{{ ' activity-page' if activity_page_dict is defined else ' performance-page' if performance_page_dict is defined else ' positions-page' if positions_page_dict is defined else ' pod-page' if pod_page_dict is defined else '' }}" id="overview-content">
         <div class="refresh-error" role="status" hidden>Unknown · <span data-refresh-reason>Update failed.</span> Last successful update <span data-update-time>{{ overview_dict.updated_str }}</span>.</div>
-        {% if performance_page_dict is defined %}
+        {% if activity_page_dict is defined %}
+        {% include '_activity.html' %}
+        {% elif performance_page_dict is defined %}
         {% include '_performance.html' %}
         {% elif positions_page_dict is defined %}
         {% include '_positions.html' %}
