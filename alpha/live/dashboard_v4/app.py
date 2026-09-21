@@ -1,6 +1,6 @@
-"""LIVE Overview, Pods and Positions. No actions, executors or notifications."""
+"""LIVE operator views. No actions, executors or notifications."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 import re
 
@@ -11,6 +11,8 @@ from alpha.live.dashboard_v4.overview import build_overview_dict
 from alpha.live.dashboard_v4.pod import TAB_TUPLE, build_pod_page_dict
 from alpha.live.dashboard_v4.pod_finance import build_pod_finance_dict
 from alpha.live.dashboard_v4.positions import build_positions_page_dict
+from alpha.live.dashboard_v4.performance import build_performance_page_dict
+from alpha.live.dashboard_v4.performance_exports import export_performance_csv_str, export_performance_pdf_bytes
 from alpha.live.dashboard_v3.client_operations import SOURCE_MAX_AGE_SECONDS_INT
 from alpha.live.dashboard_v3.filters import MARKET_TIMEZONE_OBJ
 from alpha.live.ops_report import parse_timestamp_ts
@@ -254,6 +256,83 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
     @flask_app_obj.get("/positions/refresh")
     def positions_refresh():
         return render_template("_overview.html", **context_dict(positions_bool=True))
+
+    def performance_response(*, refresh_bool=False):
+        allowed_set = {"level", "period", "from", "to", "unit"}
+        if not refresh_bool:
+            allowed_set.update({"download", "expected"})
+        if set(request.args) - allowed_set or any(len(request.args.getlist(key_str)) != 1 for key_str in request.args):
+            abort(400)
+        level_str = request.args.get("level", "portfolio")
+        period_str = request.args.get("period", "All")
+        unit_str = request.args.get("unit", "pct")
+        if level_str not in {"portfolio", "pods"} or period_str not in {"1W", "MTD", "YTD", "All"} or unit_str not in {"pct", "usd"}:
+            abort(400)
+        acquisition_ts = clock_fn()
+        from_date_str, to_date_str = request.args.get("from"), request.args.get("to")
+        if "from" in request.args or "to" in request.args:
+            try:
+                if not all(re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value_str or "") for value_str in (from_date_str, to_date_str)):
+                    raise ValueError("Invalid dates")
+                if not date.fromisoformat(from_date_str) <= date.fromisoformat(to_date_str) <= acquisition_ts.astimezone(MARKET_TIMEZONE_OBJ).date():
+                    raise ValueError("Invalid interval")
+            except ValueError:
+                abort(400)
+        download_str, expected_str = request.args.get("download"), request.args.get("expected")
+        if "download" in request.args or "expected" in request.args:
+            if download_str not in {"csv", "pdf"} or re.fullmatch(r"[0-9a-f]{64}", expected_str or "") is None:
+                abort(400)
+        if workspace_snapshot_fn is None:
+            workspace_dict, snapshot_obj = load_workspace_snapshot_tuple(provider_obj, database_path_str, as_of_ts=acquisition_ts)
+        else:
+            workspace_dict, snapshot_obj = workspace_snapshot_fn()
+        performance_page_dict = build_performance_page_dict(workspace_dict, snapshot_obj,
+            as_of_ts=acquisition_ts, period_str=period_str, from_date_str=from_date_str,
+            to_date_str=to_date_str, unit_str=unit_str, level_str=level_str)
+        report_dict = performance_page_dict.get("report_dict") or {}
+        if download_str:
+            if expected_str != report_dict.get("report_hash_str"):
+                return Response("The report changed. Refresh Performance and download again.", status=409)
+            content_obj = export_performance_csv_str(report_dict, level_str=level_str) if download_str == "csv" else export_performance_pdf_bytes(report_dict)
+            filename_str = f"performance-{level_str if download_str == 'csv' else 'portfolio'}-{performance_page_dict['from_date_str']}-{performance_page_dict['to_date_str']}.{download_str}"
+            return Response(content_obj, mimetype="text/csv" if download_str == "csv" else "application/pdf",
+                headers={"Content-Disposition": f'attachment; filename="{filename_str}"'})
+        # Assess operational freshness after the financial read. A slow report
+        # must not renew the header's saved observation lifetime.
+        overview_dict = build_overview_dict(workspace_dict, snapshot_obj, provider_obj,
+            as_of_ts=clock_fn(), demo_bool=demo_bool, include_finance_bool=False)
+        selection_dict = {"level": level_str, "period": period_str, "unit": unit_str}
+        if from_date_str is not None:
+            selection_dict.update({"from": from_date_str, "to": to_date_str})
+
+        def performance_url_str(**override_dict):
+            return url_for("performance", **{**selection_dict, **override_dict})
+
+        performance_page_dict.update(
+            level_option_list=[{"label_str": label_str, "selected_bool": level_str == option_str,
+                "url_str": performance_url_str(level=option_str)} for option_str, label_str in (("portfolio", "Portfolio"), ("pods", "Pods"))],
+            period_option_list=[{"label_str": option_str, "selected_bool": from_date_str is None and period_str == option_str,
+                "url_str": url_for("performance", level=level_str, period=option_str, unit=unit_str)} for option_str in ("1W", "MTD", "YTD", "All")],
+            unit_option_list=[{"label_str": label_str, "selected_bool": unit_str == option_str,
+                "url_str": performance_url_str(unit=option_str)} for option_str, label_str in (("usd", "$"), ("pct", "%"))],
+            date_url_str=url_for("performance", level=level_str, unit=unit_str),
+            csv_url_str=performance_url_str(download="csv", expected=report_dict["report_hash_str"]) if report_dict else "",
+            pdf_url_str=performance_url_str(download="pdf", expected=report_dict["report_hash_str"]) if report_dict else "",
+        )
+        active_pod_set = {item_dict["pod_id_str"] for item_dict in overview_dict["pod_list"]}
+        for row_dict in performance_page_dict["pod_row_list"]:
+            row_dict["url_str"] = url_for("pod", pod_id_str=row_dict["pod_id_str"]) if row_dict["pod_id_str"] in active_pod_set else ""
+        overview_dict.update(refresh_url_str=url_for("performance_refresh", **selection_dict), refresh_seconds_int=15)
+        template_str = "_overview.html" if refresh_bool or request.headers.get("HX-Request") == "true" else "overview.html"
+        return render_template(template_str, overview_dict=overview_dict, performance_page_dict=performance_page_dict)
+
+    @flask_app_obj.get("/performance")
+    def performance():
+        return performance_response()
+
+    @flask_app_obj.get("/performance/refresh")
+    def performance_refresh():
+        return performance_response(refresh_bool=True)
 
     @flask_app_obj.get("/assets/<path:filename>")
     def assets(filename):

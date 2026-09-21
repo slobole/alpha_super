@@ -1,22 +1,24 @@
 {% from "_icons.html" import icon %}
 {% set state_label_dict = {'done': 'Done', 'now': 'Now', 'next': 'Planned', 'late': 'Late', 'fail': 'Failed', 'skip': 'None', 'unk': 'Unknown'} %}
 {% set pill_class_dict = {'done': 'ok', 'now': 'work', 'next': 'idle', 'late': 'late', 'fail': 'act', 'skip': 'idle', 'unk': 'unk'} %}
+{% set is_overview_bool = pod_page_dict is not defined and positions_page_dict is not defined and performance_page_dict is not defined %}
 {% macro mark(state_str, label_str='') -%}
 <span class="st st-{{ state_str if state_str in state_label_dict else 'unk' }}" data-observed-state title="{{ label_str }}{{ ' · ' if label_str else '' }}{{ state_label_dict.get(state_str, 'Unknown') }}" role="img" aria-label="{{ label_str }}{{ ' · ' if label_str else '' }}{{ state_label_dict.get(state_str, 'Unknown') }}"></span>
 {%- endmacro %}
-<div class="frame" id="overview-shell" hx-get="{{ overview_dict.refresh_url_str }}" hx-trigger="every {{ overview_dict.refresh_seconds_int }}s" hx-swap="outerHTML" hx-target="this" hx-request='{"timeout":10000}' data-last-update="{{ overview_dict.updated_str }}" data-source-valid-ms="{{ overview_dict.source_valid_ms_int }}" data-clock-timestamp="{{ overview_dict.clock_timestamp_str }}" data-selection-scope="{% if positions_page_dict is defined %}positions:{{ positions_page_dict.view_str }}:{{ positions_page_dict.pod_str }}{% elif pod_page_dict is defined %}pod:{{ pod_page_dict.pod_id_str }}:{{ pod_page_dict.selected_cycle_dict.get('cycle_key_str', 'unavailable') }}:{{ pod_page_dict.tab_str }}:{{ overview_dict.period_str }}{% else %}overview:{{ overview_dict.period_str }}{% endif %}">
+<div class="frame" id="overview-shell" hx-get="{{ overview_dict.refresh_url_str }}" hx-trigger="every {{ overview_dict.refresh_seconds_int }}s" hx-swap="outerHTML" hx-target="this" hx-request='{"timeout":10000}' data-last-update="{{ overview_dict.updated_str }}" data-source-valid-ms="{{ overview_dict.source_valid_ms_int }}" data-clock-timestamp="{{ overview_dict.clock_timestamp_str }}" data-selection-scope="{% if performance_page_dict is defined %}performance:{{ performance_page_dict.level_str }}:{{ performance_page_dict.period_str }}:{{ performance_page_dict.from_date_str }}:{{ performance_page_dict.to_date_str }}:{{ performance_page_dict.unit_str }}{% elif positions_page_dict is defined %}positions:{{ positions_page_dict.view_str }}:{{ positions_page_dict.pod_str }}{% elif pod_page_dict is defined %}pod:{{ pod_page_dict.pod_id_str }}:{{ pod_page_dict.selected_cycle_dict.get('cycle_key_str', 'unavailable') }}:{{ pod_page_dict.tab_str }}:{{ overview_dict.period_str }}{% else %}overview:{{ overview_dict.period_str }}{% endif %}">
   <div class="app">
     <aside class="rail rail-c">
       <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark">A</span>ALPHA / OPS</a>
       <nav class="nav" aria-label="Main">
-        <a class="{{ 'on' if pod_page_dict is not defined and positions_page_dict is not defined else '' }}" href="{{ url_for('index') }}"{% if pod_page_dict is not defined and positions_page_dict is not defined %} aria-current="page"{% endif %}>{{ icon('overview') }}Overview</a>
+        <a class="{{ 'on' if is_overview_bool else '' }}" href="{{ url_for('index') }}"{% if is_overview_bool %} aria-current="page"{% endif %}>{{ icon('overview') }}Overview</a>
         <div class="navhead">{{ icon('pods') }}Pods</div>
         {% for pod_dict in overview_dict.pod_list %}
         <a class="sub kid{{ ' on' if pod_page_dict is defined and pod_page_dict.pod_id_str == pod_dict.pod_id_str else '' }}" href="{{ url_for('pod', pod_id_str=pod_dict.pod_id_str) }}"{% if pod_page_dict is defined and pod_page_dict.pod_id_str == pod_dict.pod_id_str %} aria-current="page"{% endif %}>{{ mark(pod_dict.state_str) }}<span class="pod-nav-name">{{ pod_dict.name_str }}</span><span class="cad" title="{{ pod_dict.cadence_str }}">{{ pod_dict.cadence_short_str }}</span></a>
         {% endfor %}
         <div class="nav-label">Book</div>
         <a class="{{ 'on' if positions_page_dict is defined else '' }}" href="{{ url_for('positions') }}"{% if positions_page_dict is defined %} aria-current="page"{% endif %}>{{ icon('positions') }}Positions</a>
-        {% for icon_str, label_str in [('performance', 'Performance'), ('activity', 'Activity'), ('system', 'System health'), ('tools', 'Tools')] %}
+        <a class="{{ 'on' if performance_page_dict is defined else '' }}" href="{{ url_for('performance') }}"{% if performance_page_dict is defined %} aria-current="page"{% endif %}>{{ icon('performance') }}Performance</a>
+        {% for icon_str, label_str in [('activity', 'Activity'), ('system', 'System health'), ('tools', 'Tools')] %}
         <a aria-disabled="true" title="{{ label_str }} is not available yet">{{ icon(icon_str) }}{{ label_str }}</a>
         {% endfor %}
       </nav>
@@ -38,9 +40,11 @@
         <span class="syslight" title="System health page is not available yet">{{ mark(overview_dict.system_dict.state_str) }}<span><b data-status-label>{{ overview_dict.system_dict.label_str }}</b>{% if overview_dict.system_dict.detail_str %} · <span data-status-detail>{{ overview_dict.system_dict.detail_str }}</span>{% endif %}</span></span>
         <div class="clock desktop-clock"><span class="t" data-live-clock>{{ overview_dict.clock_str }} ET</span><span class="d">{{ overview_dict.date_str }} · updated <span data-update-time>{{ overview_dict.updated_str }}</span></span></div>
       </header>
-      <main class="page calm{{ ' positions-page' if positions_page_dict is defined else ' pod-page' if pod_page_dict is defined else '' }}" id="overview-content">
+      <main class="page calm{{ ' performance-page' if performance_page_dict is defined else ' positions-page' if positions_page_dict is defined else ' pod-page' if pod_page_dict is defined else '' }}" id="overview-content">
         <div class="refresh-error" role="status" hidden>Unknown · <span data-refresh-reason>Update failed.</span> Last successful update <span>{{ overview_dict.updated_str }}</span>.</div>
-        {% if positions_page_dict is defined %}
+        {% if performance_page_dict is defined %}
+        {% include '_performance.html' %}
+        {% elif positions_page_dict is defined %}
         {% include '_positions.html' %}
         {% elif pod_page_dict is defined %}
         {% include '_pod.html' %}
@@ -113,9 +117,10 @@
       </main>
       {% if overview_dict.demo_bool %}<div class="sample">Sample data. Not a real account.</div>{% endif %}
       <nav class="m-tabs" aria-label="Main on mobile">
-        <a{% if pod_page_dict is not defined and positions_page_dict is not defined %} class="on" aria-current="page"{% endif %} href="{{ url_for('index') }}">{{ icon('overview') }}Overview</a>
+        <a{% if is_overview_bool %} class="on" aria-current="page"{% endif %} href="{{ url_for('index') }}">{{ icon('overview') }}Overview</a>
         <a{% if positions_page_dict is defined %} class="on" aria-current="page"{% endif %} href="{{ url_for('positions') }}">{{ icon('positions') }}Positions</a>
-        {% for icon_str, label_str in [('performance', 'Results'), ('activity', 'Activity'), ('system', 'System')] %}<a aria-disabled="true" title="{{ label_str }} is not available yet">{{ icon(icon_str) }}{{ label_str }}</a>{% endfor %}
+        <a{% if performance_page_dict is defined %} class="on" aria-current="page"{% endif %} href="{{ url_for('performance') }}">{{ icon('performance') }}Results</a>
+        {% for icon_str, label_str in [('activity', 'Activity'), ('system', 'System')] %}<a aria-disabled="true" title="{{ label_str }} is not available yet">{{ icon(icon_str) }}{{ label_str }}</a>{% endfor %}
       </nav>
     </div>
   </div>

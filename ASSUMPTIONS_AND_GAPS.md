@@ -10,6 +10,34 @@ This file is part of the live-first control system. Recording a gap does not mak
 
 ### Dashboard V4 operator display
 
+Performance uses one canonical saved Flex report for the selected interval and
+defaults to All. Portfolio TWR retains the configured daily NAV/end-of-day-flow
+contract; Pod TWR remains IBKR account TWR. Historical membership includes retired
+Pods. Missing portfolio coverage does not erase independently valid Pod history.
+No live broker, price download, state write or new accounting method is involved.
+
+The display-only calculations use complete canonical return history:
+`index_t = 100 * (1 + cumulative_return_t)`,
+`drawdown_t = index_t / max(index_0 ... index_t) - 1`, and
+`monthly_return = product(1 + daily_return_t) - 1`.
+The opening index is 100, so a first-day loss is included. Drawdowns and highs
+refer to the selected interval, not inception or the current trading session.
+Each Pod's line begins at its own verified effective start on a common calendar
+axis; absent history is never backfilled. Partial month/year cells are marked.
+Volatility uses the sample standard deviation of the last 20 complete XNYS
+session returns in the selection, multiplied by sqrt(252), and is withheld with
+fewer than 20 sessions. Daily P&L bars show the last 30 reporting days, including
+non-session account activity. Neither calculation is a forecast or alpha claim.
+
+Pod contributions are dollar P&L, not additive return percentages. The complete
+Pod sum must match canonical portfolio P&L within $0.01 before a decomposition is
+shown. Portfolio endpoints are never sums of mismatched Pod endpoints; membership
+movements retain their own Balance row. Unsupported backtest comparisons stay
+hidden. CSV and the existing investor PDF export saved report facts in memory,
+require the displayed report hash, preserve withholding and exclude private
+account identifiers. The shared financial loader still replays full saved import
+history; no truncation or alternative performance cache was introduced.
+
 V4 keeps the current Pod state separate from a selected saved trading cycle.
 Current gates and unreadable state remain visible while browsing history. Its
 demo reads isolated synthetic SQLite through the production read-only readers;
