@@ -1,35 +1,8 @@
+{% from '_chart.html' import financial_chart %}
 {% macro history_chart(chart_dict, label_str, bars_bool=False) -%}
-{% if chart_dict and chart_dict.point_list %}
-<svg class="chart performance-chart" viewBox="-118 -6 970 292" role="img" aria-label="{{ label_str }}">
-  <title>{{ label_str }} · {{ chart_dict.from_label_str }} to {{ chart_dict.to_label_str }}</title>
-  {% for tick_dict in chart_dict.tick_list %}
-  <line class="grid" x1="0" x2="800" y1="{{ tick_dict.y_float * 1.4 }}" y2="{{ tick_dict.y_float * 1.4 }}"></line>
-  <text class="ta-e" x="-15" y="{{ tick_dict.y_float * 1.4 + 6 }}">{{ tick_dict.label_str }}</text>
-  {% endfor %}
-  {% if chart_dict.zero_y_float is not none %}<line class="axis" x1="0" x2="800" y1="{{ chart_dict.zero_y_float * 1.4 }}" y2="{{ chart_dict.zero_y_float * 1.4 }}"></line>{% endif %}
-  {% if bars_bool %}
-  {% for bar_dict in chart_dict.bar_list if not bar_dict.missing_bool %}
-  <rect class="pnl-bar {{ 'gain' if bar_dict.sign_str == 'positive' else 'loss' if bar_dict.sign_str == 'negative' else '' }}" x="{{ bar_dict.x_float - bar_dict.width_float / 2 }}" y="{{ bar_dict.top_float * 1.4 }}" width="{{ bar_dict.width_float }}" height="{{ [bar_dict.height_float * 1.4, 1] | max }}"><title>{{ bar_dict.display_date_str }} · {{ bar_dict.label_str }}</title></rect>
-  {% endfor %}
-  {% else %}
-  {% for segment_str in chart_dict.segment_list %}<polyline class="line" transform="scale(1 1.4)" points="{{ segment_str }}"></polyline>{% endfor %}
-  {% for point_dict in chart_dict.point_list %}<circle class="{{ 'end' if point_dict.isolated_bool or loop.last else 'chart-hit' }}" cx="{{ point_dict.x_float }}" cy="{{ point_dict.y_float * 1.4 }}" r="{{ 5 if point_dict.isolated_bool or loop.last else 7 }}"><title>{{ point_dict.display_date_str }} · {{ point_dict.label_str }}</title></circle>{% endfor %}
-  {% endif %}
-  <text x="0" y="278">{{ chart_dict.from_str[:10] }}</text><text class="ta-e" x="800" y="278">{{ chart_dict.to_str[:10] }}</text>
-</svg>
-{% else %}<div class="empty-state chart-empty">No verified history for this period.</div>{% endif %}
+{{ financial_chart(chart_dict.drawing_dict if chart_dict else none, label_str) }}
 {%- endmacro %}
 
 {% macro pod_chart(chart_dict) -%}
-{% if chart_dict.available_bool %}
-<svg class="chart performance-chart" viewBox="-118 -6 970 292" role="img" aria-label="Return by pod, indexed to 100">
-  <title>Return by pod · each pod starts at 100</title>
-  {% for tick_dict in chart_dict.tick_list %}<line class="grid" x1="0" x2="800" y1="{{ tick_dict.y_float * 1.4 }}" y2="{{ tick_dict.y_float * 1.4 }}"></line><text class="ta-e" x="-15" y="{{ tick_dict.y_float * 1.4 + 6 }}">{{ tick_dict.label_str }}</text>{% endfor %}
-  {% for series_dict in chart_dict.series_list %}
-  {% for segment_str in series_dict.segment_list %}<polyline class="line" transform="scale(1 1.4)" style="stroke: {{ series_dict.color_str }}" points="{{ segment_str }}"><title>{{ series_dict.name_str }}</title></polyline>{% endfor %}
-  {% for point_dict in series_dict.point_list %}<circle class="{{ 'pod-end' if loop.last or point_dict.isolated_bool else 'chart-hit' }}" style="{{ 'fill: ' + series_dict.color_str if loop.last or point_dict.isolated_bool else '' }}" cx="{{ point_dict.x_float }}" cy="{{ point_dict.y_float * 1.4 }}" r="{{ 4 if loop.last or point_dict.isolated_bool else 6 }}"><title>{{ series_dict.name_str }} · {{ point_dict.market_date_str }} · {{ point_dict.label_str }}</title></circle>{% endfor %}
-  {% endfor %}
-  <text x="0" y="278">{{ chart_dict.from_str[:10] }}</text><text class="ta-e" x="800" y="278">{{ chart_dict.to_str[:10] }}</text>
-</svg>
-{% else %}<div class="empty-state chart-empty">No verified pod returns for this period.</div>{% endif %}
+{{ financial_chart(chart_dict.drawing_dict if chart_dict else none, 'Return by pod, indexed to 100') }}
 {%- endmacro %}

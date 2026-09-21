@@ -9,13 +9,13 @@
 </nav>
 <div class="performance-toolbar">
   <div class="performance-dates" data-performance-dates data-date-url="{{ performance_dict.date_url_str }}">
-    <label>From<input type="date" name="from" aria-label="Performance from date" value="{{ performance_dict.from_date_str }}" min="{{ performance_dict.min_date_str }}" max="{{ performance_dict.max_date_str }}" required></label>
-    <label>To<input type="date" name="to" aria-label="Performance to date" value="{{ performance_dict.to_date_str }}" min="{{ performance_dict.min_date_str }}" max="{{ performance_dict.max_date_str }}" required></label>
+    <label>From<input type="text" name="from" aria-label="Performance from date" value="{{ performance_dict.from_date_str }}" placeholder="YYYY-MM-DD" pattern="[0-9]{4}-[0-9]{2}-[0-9]{2}" maxlength="10" data-min-date="{{ performance_dict.min_date_str }}" data-max-date="{{ performance_dict.max_date_str }}" autocomplete="off" required></label>
+    <label>To<input type="text" name="to" aria-label="Performance to date" value="{{ performance_dict.to_date_str }}" placeholder="YYYY-MM-DD" pattern="[0-9]{4}-[0-9]{2}-[0-9]{2}" maxlength="10" data-min-date="{{ performance_dict.min_date_str }}" data-max-date="{{ performance_dict.max_date_str }}" autocomplete="off" required></label>
     <button class="btn btn-sm" type="button" data-performance-apply>Apply</button>
   </div>
   <nav class="seg" aria-label="Performance period">{% for option_dict in performance_dict.period_option_list %}<a href="{{ option_dict.url_str }}" data-period="{{ option_dict.label_str }}" class="{{ 'on' if option_dict.selected_bool else '' }}"{% if option_dict.selected_bool %} aria-current="true"{% endif %}>{{ option_dict.label_str }}</a>{% endfor %}</nav>
   {% if performance_dict.level_str == 'portfolio' %}<nav class="seg" aria-label="Chart unit">{% for option_dict in performance_dict.unit_option_list %}<a href="{{ option_dict.url_str }}" class="{{ 'on' if option_dict.selected_bool else '' }}"{% if option_dict.selected_bool %} aria-current="true"{% endif %}>{{ option_dict.label_str }}</a>{% endfor %}</nav>{% endif %}
-  {% if performance_dict.report_dict %}<div class="performance-exports"><a class="btn btn-sm secondary" href="{{ performance_dict.csv_url_str }}">CSV ↓</a><a class="btn btn-sm" href="{{ performance_dict.pdf_url_str }}">Investor PDF ↓</a></div>{% endif %}
+  <div class="performance-exports"><a class="btn btn-sm secondary" href="{{ performance_dict.refresh_report_url_str }}" title="Refresh report">Refresh</a>{% if performance_dict.report_dict %}<a class="btn btn-sm secondary" href="{{ performance_dict.csv_url_str }}">CSV ↓</a><a class="btn btn-sm" href="{{ performance_dict.pdf_url_str }}">Investor PDF ↓</a>{% endif %}</div>
 </div>
 {% if performance_dict.error_str %}<div class="performance-notice" role="status">{{ performance_dict.error_str }}</div>{% endif %}
 {% if performance_dict.level_str == 'portfolio' %}
@@ -23,16 +23,16 @@
   {% for tile_dict in performance_dict.tile_list %}<div class="tile" data-selection-key="performance:{{ tile_dict.label_str }}"><div class="l">{{ tile_dict.label_str }}</div><div class="v {{ tile_dict.tone_str if tile_dict.tone_str in ['pos', 'neg'] else '' }}">{{ tile_dict.value_str }}</div><div class="s">{{ tile_dict.detail_str }}</div></div>{% endfor %}
 </section>
 <div class="cols c-7-5 performance-panels">
-  <section class="panel"><div class="panel-h"><span class="panel-t">{{ performance_dict.chart_title_str }}</span><span class="muted">{{ performance_dict.chart_basis_str }}</span></div><div class="panel-b">{{ history_chart(performance_dict.chart_dict, performance_dict.chart_title_str) }}</div></section>
+  <section class="panel"><div class="panel-h"><span class="panel-t">{{ performance_dict.chart_title_str }}</span>{% if performance_dict.unit_str == 'usd' %}<span class="muted">{{ performance_dict.chart_basis_str }}</span>{% endif %}</div><div class="panel-b">{{ history_chart(performance_dict.chart_dict, performance_dict.chart_title_str) }}</div></section>
   <section class="panel"><div class="panel-h"><span class="panel-t">Balance</span><span class="muted">Same period</span></div><table class="tbl dense performance-balance"><thead><tr><th scope="col">Line</th><th class="num" scope="col">$</th></tr></thead><tbody>{% for row_dict in performance_dict.bridge_row_list %}<tr class="{{ 'tot' if row_dict.total_bool else '' }}"><td>{{ row_dict.label_str }}</td><td class="num">{{ row_dict.value_str }}</td></tr>{% endfor %}</tbody></table></section>
 </div>
 {% else %}
 <div class="cols c-7-5 performance-panels">
-  <section class="panel"><div class="panel-h"><span class="panel-t">Return by pod</span><span class="muted">Start = 100</span></div><div class="panel-b">{{ pod_chart(performance_dict.pod_chart_dict) }}<div class="performance-legend">{% for row_dict in performance_dict.pod_row_list %}<span><i class="dotk" style="background: {{ row_dict.color_str }}"></i><span>{{ row_dict.name_str }}</span><b>{{ row_dict.return_str }}</b></span>{% endfor %}</div></div></section>
+  <section class="panel"><div class="panel-h"><span class="panel-t">Return by pod</span><span class="muted">Start = 100</span></div><div class="panel-b"><div class="performance-legend">{% for row_dict in performance_dict.pod_row_list %}<span><i class="performance-line-key" style="border-color: {{ row_dict.color_str }}" aria-hidden="true"></i><span>{{ row_dict.name_str }}</span><b>{{ row_dict.return_str }}</b></span>{% endfor %}</div>{{ pod_chart(performance_dict.pod_chart_dict) }}</div></section>
   <section class="panel"><div class="panel-h"><span class="panel-t">Adds to P&amp;L · $</span><span class="muted">Same period</span></div>
-    {% if performance_dict.contribution_dict.available_bool %}<table class="tbl dense performance-contributions"><thead><tr><th scope="col">Pod</th><th class="num" scope="col">Profit / loss</th></tr></thead><tbody>
-      {% for row_dict in performance_dict.contribution_dict.row_list %}<tr><td><i class="dotk" style="background: {{ row_dict.color_str }}"></i>{{ row_dict.name_str }}</td><td class="num"><b>{{ row_dict.value_str }}</b><span class="contribution-bar"><i style="width: {{ row_dict.bar_percent_float }}%; background: {{ row_dict.color_str }}"></i></span></td></tr>{% endfor %}
-      <tr class="tot"><td>Portfolio</td><td class="num">{{ performance_dict.contribution_dict.total_str }}</td></tr>
+    {% if performance_dict.contribution_dict.available_bool %}<table class="tbl dense performance-contributions"><thead><tr><th scope="col">Pod</th><th scope="col" aria-label="Contribution"></th><th class="num" scope="col">Profit / loss</th></tr></thead><tbody>
+      {% for row_dict in performance_dict.contribution_dict.row_list %}<tr><td><i class="dotk" style="background: {{ row_dict.color_str }}"></i>{{ row_dict.name_str }}</td><td class="contribution-plot-cell"><span class="contribution-plot" aria-hidden="true" style="--contribution-zero: {{ performance_dict.contribution_dict.zero_percent_float }}%"><i class="{{ 'contribution-negative' if row_dict.value_float < 0 else 'contribution-positive' }}" style="left: {{ row_dict.bar_left_percent_float }}%; width: {{ row_dict.bar_width_percent_float }}%; background: {{ row_dict.color_str }}"></i></span></td><td class="num"><b>{{ row_dict.value_str }}</b></td></tr>{% endfor %}
+      <tr class="tot"><td>Portfolio</td><td></td><td class="num">{{ performance_dict.contribution_dict.total_str }}</td></tr>
     </tbody></table>{% else %}<div class="empty-state">{{ performance_dict.contribution_dict.reason_str }}</div>{% endif %}
   </section>
 </div>
@@ -48,13 +48,13 @@
 </section>
 {% endif %}
 <section class="panel performance-monthly"><div class="panel-h"><span class="panel-t">Monthly return %{{ ' by pod' if performance_dict.level_str == 'pods' else '' }}</span><span class="muted">* Partial period</span></div>
-  {% if performance_dict.monthly_row_list %}<div class="performance-scroll" tabindex="0" role="region" aria-label="Monthly returns table"><table class="tbl performance-month-grid"><thead><tr><th scope="col">{{ 'Pod / year' if performance_dict.level_str == 'pods' else 'Year' }}</th>{% for month_str in ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'] %}<th scope="col" class="num">{{ month_str }}</th>{% endfor %}<th scope="col" class="num">Year</th></tr></thead><tbody>
-  {% for row_dict in performance_dict.monthly_row_list %}<tr><th scope="row">{% if performance_dict.level_str == 'pods' %}{{ row_dict.name_str }}<br>{% endif %}{{ row_dict.year_int }}</th>{% for cell_dict in row_dict.cell_list %}<td class="num {{ 'month-gain' if cell_dict.tone_str == 'pos' else 'month-loss' if cell_dict.tone_str == 'neg' else '' }}">{{ cell_dict.value_str }}{{ '*' if cell_dict.partial_bool else '' }}</td>{% endfor %}<td class="num month-year">{{ row_dict.year_str }}{{ '*' if row_dict.partial_bool else '' }}</td></tr>{% endfor %}
+  {% if performance_dict.monthly_row_list %}<div class="performance-scroll" tabindex="0" role="region" aria-label="Monthly returns table"><table class="tbl performance-month-grid"><thead><tr><th scope="col">{{ ('Pod / year' if performance_dict.has_multiple_years_bool else 'Pod') if performance_dict.level_str == 'pods' else 'Year' }}</th>{% for month_str in ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'] %}<th scope="col" class="num">{{ month_str }}</th>{% endfor %}<th scope="col" class="num">Year</th></tr></thead><tbody>
+  {% for row_dict in performance_dict.monthly_row_list %}<tr><th scope="row">{% if performance_dict.level_str == 'pods' %}{{ row_dict.name_str }}{% if performance_dict.has_multiple_years_bool %}<br>{{ row_dict.year_int }}{% endif %}{% else %}{{ row_dict.year_int }}{% endif %}</th>{% for cell_dict in row_dict.cell_list %}<td class="num {{ cell_dict.heat_class_str }}">{{ cell_dict.value_str }}{{ '*' if cell_dict.partial_bool else '' }}</td>{% endfor %}<td class="num month-year {{ row_dict.heat_class_str }}">{{ row_dict.year_str }}{{ '*' if row_dict.partial_bool else '' }}</td></tr>{% endfor %}
   </tbody></table></div>{% else %}<div class="empty-state">No verified monthly returns for this period.</div>{% endif %}
 </section>
 {% if performance_dict.level_str == 'portfolio' %}
 <div class="cols c-7-5 performance-panels">
-  <section class="panel"><div class="panel-h"><span class="panel-t">Daily P&amp;L · $</span><span class="muted">{{ performance_dict.daily_basis_str }}</span></div><div class="panel-b">{{ history_chart(performance_dict.daily_chart_dict, 'Daily profit and loss', True) }}</div></section>
+  {% include '_daily_pnl.html' %}
   <section class="panel"><div class="panel-h"><span class="panel-t">Risk</span><span class="muted">Daily close</span></div><dl class="performance-facts">{% for row_dict in performance_dict.risk_row_list %}<div><dt>{{ row_dict.label_str }}</dt><dd>{{ row_dict.value_str }}</dd></div>{% endfor %}</dl></section>
 </div>
 {% endif %}

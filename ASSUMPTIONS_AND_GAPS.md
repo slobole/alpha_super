@@ -26,8 +26,16 @@ Each Pod's line begins at its own verified effective start on a common calendar
 axis; absent history is never backfilled. Partial month/year cells are marked.
 Volatility uses the sample standard deviation of the last 20 complete XNYS
 session returns in the selection, multiplied by sqrt(252), and is withheld with
-fewer than 20 sessions. Daily P&L bars show the last 30 reporting days, including
-non-session account activity. Neither calculation is a forecast or alpha claim.
+fewer than 20 sessions. Daily P&L bars and the weekly number grid cover the full
+selected interval. Both use identical canonical daily P&L facts; week and period
+totals sum those dollars, never daily percentages. Missing sessions remain unknown
+and withhold totals; holidays are closed, not zero-return observations. Nonzero
+non-session account activity is retained explicitly, including weekend entries.
+Daily heat direction follows dollar P&L; intensity uses the magnitude of the
+canonical daily return at the monthly heat thresholds, or the lightest shade if
+return is unavailable. Missing dollar values and zero P&L remain unfilled.
+Compact grid/bar labels are rounded; the readout retains cents and return percent.
+Neither calculation is a forecast or alpha claim.
 
 Pod contributions are dollar P&L, not additive return percentages. The complete
 Pod sum must match canonical portfolio P&L within $0.01 before a decomposition is
@@ -36,7 +44,14 @@ movements retain their own Balance row. Unsupported backtest comparisons stay
 hidden. CSV and the existing investor PDF export saved report facts in memory,
 require the displayed report hash, preserve withholding and exclude private
 account identifiers. The shared financial loader still replays full saved import
-history; no truncation or alternative performance cache was introduced.
+history; no truncation or alternative performance cache was introduced. On
+Performance, that financial report stays fixed until navigation or Refresh.
+Only the operational header/rail refresh every 15 seconds, using a separate
+read-only source that cannot load financial history; the original 120-second
+observation expiry still applies. Display charts use round axes and unchanged
+observations, without smoothing, interpolation of missing history or new returns.
+CSV money is rounded to two decimals and percentage returns to six decimals;
+canonical report precision and the summary-only export scope are unchanged.
 
 V4 keeps the current Pod state separate from a selected saved trading cycle.
 Current gates and unreadable state remain visible while browsing history. Its

@@ -132,7 +132,9 @@ def test_default_page_has_live_shell_active_navigation_and_financial_provenance(
     assert "<html" in html_str and "ALPHA / OPS V4 · Performance" in html_str
     assert 'class="page calm performance-page"' in html_str
     assert html_str.count('hx-get="') == 1
-    assert _query_dict(context_dict["overview_dict"]["refresh_url_str"]) == {
+    assert context_dict["overview_dict"]["refresh_url_str"] == "/performance/status"
+    assert 'hx-swap="none"' in html_str
+    assert _query_dict(page_dict["refresh_report_url_str"]) == {
         "level": ["portfolio"], "period": ["All"], "unit": ["pct"]}
     nav_str = re.search(r'<nav\b[^>]*aria-label="Main"[^>]*>(.*?)</nav>', html_str, re.S)[1]
     performance_anchor_str = re.search(r'<a\b[^>]*href="/performance"[^>]*>(.*?)</a>', nav_str, re.S)[0]
@@ -163,7 +165,8 @@ def test_custom_dates_override_preset_and_survive_tabs_units_and_refresh(perform
     assert page_dict["report_dict"]["requested_from_date_str"] == "2026-08-20"
     assert page_dict["report_dict"]["requested_to_date_str"] == "2026-09-04"
     assert not any(option_dict["selected_bool"] for option_dict in page_dict["period_option_list"])
-    assert _query_dict(context_dict["overview_dict"]["refresh_url_str"]) == {
+    assert context_dict["overview_dict"]["refresh_url_str"] == "/performance/status"
+    assert _query_dict(page_dict["refresh_report_url_str"]) == {
         key_str: [value_str] for key_str, value_str in selection_dict.items()}
     assert 'data-selection-scope="performance:pods:MTD:2026-08-20:2026-09-04:usd"' in html_str
     for option_dict in page_dict["level_option_list"] + page_dict["unit_option_list"]:
@@ -292,8 +295,9 @@ def test_slow_financial_read_expires_operational_header(performance_fixture_tupl
     assert overview_dict["source_valid_ms_int"] == 0
     assert all(pod_dict["state_str"] == "unk" for pod_dict in overview_dict["pod_list"])
     assert 'data-source-valid-ms="0"' in response_obj.get_data(as_text=True)
-    assert "/performance/refresh" in overview_dict["refresh_url_str"]
-    assert _query_dict(overview_dict["refresh_url_str"]) == {"level": ["pods"], "period": ["MTD"], "unit": ["usd"]}
+    assert overview_dict["refresh_url_str"] == "/performance/status"
+    assert _query_dict(context_dict["performance_page_dict"]["refresh_report_url_str"]) == {
+        "level": ["pods"], "period": ["MTD"], "unit": ["usd"]}
     assert context_dict["performance_page_dict"]["report_dict"]["requested_to_date_str"] == "2026-09-04"
 
 
@@ -332,7 +336,7 @@ def test_csv_download_matches_selected_canonical_report(performance_fixture_tupl
         if expected_dict["twr_float"] is None:
             assert record_dict["Return TWR (%)"] == ""
         else:
-            assert float(record_dict["Return TWR (%)"]) == pytest.approx(100 * expected_dict["twr_float"])
+            assert float(record_dict["Return TWR (%)"]) == pytest.approx(100 * expected_dict["twr_float"], abs=0.0000005)
     for account_dict in workspace_dict["operations_account_list"]:
         assert account_dict["account_route"] not in csv_str
         assert account_dict["pod_id"] not in csv_str

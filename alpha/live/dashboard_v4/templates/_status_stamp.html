@@ -1,0 +1,1 @@
+<div id="performance-status" hidden data-last-update="{{ overview_dict.updated_str }}" data-source-valid-ms="{{ overview_dict.source_valid_ms_int }}" data-clock-timestamp="{{ overview_dict.clock_timestamp_str }}"{% if status_only_bool | default(false) %} hx-swap-oob="outerHTML"{% endif %}></div>

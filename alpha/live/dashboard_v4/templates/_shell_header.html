@@ -1,0 +1,15 @@
+<div class="m-top" id="operator-mobile-header"{% if status_only_bool | default(false) %} hx-swap-oob="outerHTML"{% endif %}>
+  <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark">A</span>ALPHA / OPS</a>
+  <div class="clock"><span class="t" data-live-clock>{{ overview_dict.clock_str }} ET</span><span class="d">{{ overview_dict.date_str }} · <span data-status-label>{{ overview_dict.market_dict.label_str }}</span></span></div>
+</div>
+<header class="top" id="operator-header"{% if status_only_bool | default(false) %} hx-swap-oob="outerHTML"{% endif %}>
+  <nav class="modes" aria-label="Mode">
+    <a class="on" href="{{ url_for('index') }}" aria-current="true" title="LIVE">{{ mark(overview_dict.live_state_str) }}LIVE</a>
+    <a aria-disabled="true" title="PAPER is not available in V4 yet"><span class="st st-disabled" aria-hidden="true"></span>PAPER</a>
+    <a aria-disabled="true" title="INCUBATION is not available in V4 yet"><span class="st st-disabled" aria-hidden="true"></span>INCUBATION</a>
+  </nav>
+  <div class="market">{{ mark(overview_dict.market_dict.state_str) }}<span><b data-status-label>{{ overview_dict.market_dict.label_str }}</b>{% if overview_dict.market_dict.detail_str %} · <span data-status-detail>{{ overview_dict.market_dict.detail_str }}</span>{% endif %}</span></div>
+  <div class="grow"></div>
+  <span class="syslight" title="System health page is not available yet">{{ mark(overview_dict.system_dict.state_str) }}<span><b data-status-label>{{ overview_dict.system_dict.label_str }}</b>{% if overview_dict.system_dict.detail_str %} · <span data-status-detail>{{ overview_dict.system_dict.detail_str }}</span>{% endif %}</span></span>
+  <div class="clock desktop-clock"><span class="t" data-live-clock>{{ overview_dict.clock_str }} ET</span><span class="d">{{ overview_dict.date_str }} · updated <span data-update-time>{{ overview_dict.updated_str }}</span></span></div>
+</header>

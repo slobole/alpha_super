@@ -70,7 +70,7 @@ def test_csv_quotes_commas_and_newlines_without_changing_negative_numbers():
     source_dict["strategy_list"][0]["display_name_str"] = 'A, "quoted"\nPod'
     row_dict = _rows_list(source_dict, "pods")[0]
     assert row_dict["Name"] == 'A, "quoted"\nPod'
-    assert row_dict["Profit / loss"] == "-10.0"
+    assert row_dict["Profit / loss"] == "-10.00"
     assert float(row_dict["Return TWR (%)"]) == -1
     assert float(row_dict["Max drawdown (%)"]) == -1
 
@@ -83,6 +83,21 @@ def test_csv_allowlist_excludes_account_ids_paths_and_arbitrary_fields(level_str
     csv_str = export_performance_csv_str(source_dict, level_str=level_str)
     for private_str in ("U_TEST_A", "strategy_a", "TEST_NAV", "do-not-export", "operator.log"):
         assert private_str not in csv_str
+
+
+def test_csv_uses_fixed_precision_without_changing_canonical_facts():
+    source_dict = report_dict([nav_attributes_dict()])
+    source_dict.update(opening_nav_float=1000.005, pnl_float=-.005, twr_float=.05043440911073083)
+    before_dict = deepcopy(source_dict)
+    row_dict = _rows_list(source_dict)[0]
+    assert row_dict["Start value"] == "1000.01"
+    assert row_dict["Profit / loss"] == "-0.01"
+    assert row_dict["Return TWR (%)"] == "5.043441"
+    assert source_dict == before_dict
+    source_dict.update(pnl_float=-.00001, twr_float=-.0000000001)
+    row_dict = _rows_list(source_dict)[0]
+    assert row_dict["Profit / loss"] == "0.00"
+    assert row_dict["Return TWR (%)"] == "0.000000"
 
 
 @pytest.mark.parametrize("number_obj", [True, "10", float("nan"), float("inf"), -float("inf")])

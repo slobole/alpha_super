@@ -13,6 +13,7 @@ from alpha.live.dashboard_v4.pod_finance import build_pod_finance_dict
 from alpha.live.dashboard_v4.positions import build_positions_page_dict
 from alpha.live.dashboard_v4.performance import build_performance_page_dict
 from alpha.live.dashboard_v4.performance_exports import export_performance_csv_str, export_performance_pdf_bytes
+from alpha.live.dashboard_v4.status import load_operations_workspace_dict
 from alpha.live.dashboard_v3.client_operations import SOURCE_MAX_AGE_SECONDS_INT
 from alpha.live.dashboard_v3.filters import MARKET_TIMEZONE_OBJ
 from alpha.live.ops_report import parse_timestamp_ts
@@ -27,7 +28,7 @@ ASSET_SET = {
 
 
 def create_app(data_provider_obj=None, *, performance_db_path_str=None,
-               workspace_snapshot_fn=None, now_fn=None, demo_bool=False) -> Flask:
+               workspace_snapshot_fn=None, operations_workspace_fn=None, now_fn=None, demo_bool=False) -> Flask:
     flask_app_obj = Flask(__name__)
     provider_obj = data_provider_obj if data_provider_obj is not None else LiveDataProvider()
     clock_fn = now_fn or (lambda: datetime.now(UTC))
@@ -316,13 +317,14 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             unit_option_list=[{"label_str": label_str, "selected_bool": unit_str == option_str,
                 "url_str": performance_url_str(unit=option_str)} for option_str, label_str in (("usd", "$"), ("pct", "%"))],
             date_url_str=url_for("performance", level=level_str, unit=unit_str),
+            refresh_report_url_str=performance_url_str(),
             csv_url_str=performance_url_str(download="csv", expected=report_dict["report_hash_str"]) if report_dict else "",
             pdf_url_str=performance_url_str(download="pdf", expected=report_dict["report_hash_str"]) if report_dict else "",
         )
         active_pod_set = {item_dict["pod_id_str"] for item_dict in overview_dict["pod_list"]}
         for row_dict in performance_page_dict["pod_row_list"]:
             row_dict["url_str"] = url_for("pod", pod_id_str=row_dict["pod_id_str"]) if row_dict["pod_id_str"] in active_pod_set else ""
-        overview_dict.update(refresh_url_str=url_for("performance_refresh", **selection_dict), refresh_seconds_int=15)
+        overview_dict.update(refresh_url_str=url_for("performance_status"), refresh_seconds_int=15)
         template_str = "_overview.html" if refresh_bool or request.headers.get("HX-Request") == "true" else "overview.html"
         return render_template(template_str, overview_dict=overview_dict, performance_page_dict=performance_page_dict)
 
@@ -333,6 +335,18 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
     @flask_app_obj.get("/performance/refresh")
     def performance_refresh():
         return performance_response(refresh_bool=True)
+
+    @flask_app_obj.get("/performance/status")
+    def performance_status():
+        if request.args:
+            abort(400)
+        # This path never reads Flex imports, performance bindings or financial
+        # history. Demo/status injection is separate from financial acquisition.
+        workspace_dict = (load_operations_workspace_dict(provider_obj, as_of_ts=clock_fn())
+            if operations_workspace_fn is None else operations_workspace_fn())
+        overview_dict = build_overview_dict(workspace_dict, None, provider_obj,
+            as_of_ts=clock_fn(), demo_bool=demo_bool, include_finance_bool=False)
+        return render_template("_performance_status.html", overview_dict=overview_dict)
 
     @flask_app_obj.get("/assets/<path:filename>")
     def assets(filename):

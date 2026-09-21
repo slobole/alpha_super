@@ -1,4 +1,4 @@
-/* A single HTMX response replaces the whole observation atomically.
+/* HTMX replaces operational observations; Performance keeps its dated report.
    Failed transport must never leave the previous observation looking current. */
 (() => {
   'use strict';
@@ -24,6 +24,7 @@
   }
   let focus_period_str = '';
   let observed_shell_obj = null;
+  let observed_source_obj = null;
   let valid_until_ms = 0;
   let request_start_ms = Date.now();
   let clock_anchor_ms = NaN;
@@ -101,12 +102,23 @@
 
   function observe_snapshot(elapsed_ms) {
     const shell_obj = document.getElementById('overview-shell');
-    if (!shell_obj || shell_obj === observed_shell_obj) return;
+    if (!shell_obj) return;
+    const source_obj = shell_obj.querySelector('#performance-status') || shell_obj;
+    if (shell_obj === observed_shell_obj && source_obj === observed_source_obj) return;
     observed_shell_obj = shell_obj;
-    const remaining_ms = Number(observed_shell_obj.getAttribute('data-source-valid-ms'));
+    observed_source_obj = source_obj;
+    const remaining_ms = Number(source_obj.getAttribute('data-source-valid-ms'));
     valid_until_ms = Date.now() + Math.max(0, (Number.isFinite(remaining_ms) ? remaining_ms : 0) - elapsed_ms);
-    clock_anchor_ms = Date.parse(observed_shell_obj.getAttribute('data-clock-timestamp'));
+    clock_anchor_ms = Date.parse(source_obj.getAttribute('data-clock-timestamp'));
     clock_observed_ms = Date.now();
+    if (source_obj !== shell_obj && valid_until_ms > Date.now()) {
+      shell_obj.removeAttribute('data-source-stale');
+      const failure_obj = shell_obj.querySelector('.refresh-error');
+      if (failure_obj) failure_obj.hidden = true;
+      shell_obj.querySelectorAll('[data-update-time]').forEach((label_obj) => {
+        label_obj.textContent = source_obj.getAttribute('data-last-update');
+      });
+    }
     update_clock();
     check_expiry();
   }
@@ -289,6 +301,13 @@
     filter_positions(shell_obj);
     restore_selection();
     restore_allocation_focus(shell_obj);
+  });
+  document.addEventListener('htmx:afterRequest', (event_obj) => {
+    // hx-swap=none still applies the header/rail out-of-band fragments. Only
+    // a newly replaced stamp can renew freshness; errors cannot renew it.
+    if (overview_event(event_obj) && event_obj.detail.successful) {
+      observe_snapshot(Math.max(0, Date.now() - request_start_ms));
+    }
   });
   document.addEventListener('selectionchange', () => {
     if (selection_snapshot_obj && selection_snapshot_obj.shell_obj.isConnected

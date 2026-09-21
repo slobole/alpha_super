@@ -1,0 +1,27 @@
+/* One responsive drawing style; HTML labels keep their size on small screens. */
+.v4-chart { --chart-height: 216px; --chart-gutter: 40px; margin: 2px 0 0; padding-bottom: 24px; }
+.v4-chart-frame { display: grid; grid-template-columns: var(--chart-gutter) minmax(0, 1fr) 68px; height: var(--chart-height); }
+.v4-chart-pods .v4-chart-frame, .v4-chart-bars .v4-chart-frame { grid-template-columns: var(--chart-gutter) minmax(0, 1fr) 5px; }
+.v4-chart-plot, .v4-chart-yaxis { position: relative; min-width: 0; }
+.v4-chart-svg { display: block; width: 100%; height: var(--chart-height); overflow: visible; }
+.v4-chart-svg .grid { stroke: var(--rule); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.v4-chart-svg .axis { stroke: var(--rule-2); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.v4-chart-svg .index-baseline { stroke: var(--ink-3); stroke-width: 1.5; }
+.v4-chart-svg .line { fill: none; stroke: var(--blue); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.v4-chart-svg .area { fill: var(--blue); opacity: .09; }
+.v4-chart-svg .chart-hit { fill: transparent; stroke: none; }
+.v4-chart-svg .pnl-bar.gain { fill: var(--green); }
+.v4-chart-svg .pnl-bar.loss { fill: var(--red); }
+.v4-chart-yaxis span, .v4-chart-xaxis span, .v4-chart-end { position: absolute; white-space: nowrap; font-family: var(--sans); font-size: 11px; line-height: 16px; font-variant-numeric: tabular-nums; color: var(--ink-3); }
+.v4-chart-yaxis span { right: 8px; transform: translateY(-50%); }
+.v4-chart-xaxis { position: absolute; top: 100%; left: 0; right: 0; height: 24px; }
+.v4-chart-xaxis span { top: 4px; transform: translateX(-50%); }
+.v4-chart-xaxis span.first { transform: none; }
+.v4-chart-xaxis span.last { transform: translateX(-100%); }
+.v4-chart-end { margin-left: 10px; transform: translateY(-50%); color: var(--ink); font-weight: 600; }
+.v4-chart-dot { position: absolute; width: 8px; height: 8px; box-sizing: content-box; border: 2px solid var(--surface, #fff); border-radius: 50%; background: var(--blue); transform: translate(-50%, -50%); pointer-events: none; }
+.v4-chart-pods .v4-chart-dot { width: 6px; height: 6px; }
+@media (max-width: 600px) {
+  .v4-chart-frame { grid-template-columns: var(--chart-gutter) minmax(0, 1fr) 67px; }
+  .v4-chart-xaxis .wide-only { display: none; }
+}

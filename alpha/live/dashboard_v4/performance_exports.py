@@ -1,7 +1,7 @@
 """In-memory, selected-period exports of canonical saved reporting facts."""
 
 import csv
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from io import StringIO
 import math
 
@@ -26,8 +26,13 @@ def _number_str(value_obj, *, percent_bool=False):
         return ""
     if type(value_obj) not in {int, float} or not math.isfinite(value_obj):
         raise ValueError("Invalid report number")
-    # Presentation only: percent = 100 * the already verified return fraction.
-    return str(Decimal(str(value_obj)) * 100) if percent_bool else str(value_obj)
+    # Presentation only: money has 2 decimals and return percentages have 6,
+    # rounded half up. The canonical report and its hash retain full precision.
+    number_decimal = Decimal(str(value_obj)) * (100 if percent_bool else 1)
+    number_decimal = number_decimal.quantize(Decimal(".000001") if percent_bool else Decimal(".01"), rounding=ROUND_HALF_UP)
+    if number_decimal == 0:
+        number_decimal = abs(number_decimal)
+    return format(number_decimal, ".6f" if percent_bool else ".2f")
 
 
 def _flag_str(value_obj):

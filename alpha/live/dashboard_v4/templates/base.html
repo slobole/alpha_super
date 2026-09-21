@@ -11,6 +11,8 @@
     @font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500; font-display: block; src: url('{{ url_for("assets", filename="fonts/IBMPlexMono-500-latin.woff2") }}') format('woff2'); }
   </style>
   <link rel="stylesheet" href="{{ url_for('static', filename='ops.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='performance_charts.css') }}">
+  {% if performance_page_dict is defined %}<link rel="stylesheet" href="{{ url_for('static', filename='performance_display.css') }}">{% endif %}
   <script src="{{ url_for('assets', filename='htmx.min.js') }}" defer></script>
   <script src="{{ url_for('static', filename='overview.js') }}" defer></script>
   {% if performance_page_dict is defined %}<script src="{{ url_for('static', filename='performance.js') }}" defer></script>{% endif %}

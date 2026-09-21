@@ -1,0 +1,82 @@
+/* Mockup D heat colours and display-only Performance geometry. */
+:root {
+  --performance-heat-positive-1: #e4f3ea;
+  --performance-heat-positive-2: #c6e6d3;
+  --performance-heat-positive-3: #9fd5b6;
+  --performance-heat-negative-1: #fbe6e6;
+  --performance-heat-negative-2: #f5c9c9;
+}
+.performance-month-grid td,
+.performance-month-grid tbody tr:hover td {
+  background: var(--month-fill, transparent);
+  color: var(--ink);
+  font-size: 12px;
+}
+.performance-month-grid th[scope="row"] { font-size: 12px; }
+.performance-month-grid .heat-pos-1 { --month-fill: var(--performance-heat-positive-1); }
+.performance-month-grid .heat-pos-2 { --month-fill: var(--performance-heat-positive-2); }
+.performance-month-grid .heat-pos-3 { --month-fill: var(--performance-heat-positive-3); }
+.performance-month-grid .heat-neg-1 { --month-fill: var(--performance-heat-negative-1); }
+.performance-month-grid .heat-neg-2 { --month-fill: var(--performance-heat-negative-2); }
+.performance-legend { padding: 0 0 14px; }
+.performance-line-key { display: inline-block; flex: 0 0 18px; width: 18px; border-top: 2px solid; }
+.performance-contributions .contribution-plot-cell { width: 38%; }
+.contribution-plot { display: block; position: relative; height: 10px; min-width: 90px; background: var(--gray-bg); }
+.contribution-plot::before { content: ""; position: absolute; left: var(--contribution-zero); top: -3px; bottom: -3px; border-left: 1px solid var(--rule-2); z-index: 1; }
+.contribution-plot i { position: absolute; top: 0; height: 10px; }
+.contribution-plot .contribution-positive { border-radius: 0 3px 3px 0; }
+.contribution-plot .contribution-negative { border-radius: 3px 0 0 3px; }
+.daily-panel {
+  --daily-gain: #008000;
+  --daily-loss: #982727;
+  border-radius: 12px;
+  border-color: #e2e2e2;
+}
+.daily-panel .daily-head { align-items: center; padding: 12px 16px; border-color: #e2e2e2; }
+.daily-panel .panel-t { font-size: 14px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+.daily-switch { display: inline-flex; border: 1px solid #d2d2d2; border-radius: 9px; }
+.daily-switch button { border: 1px solid transparent; border-radius: 8px; background: var(--panel); color: var(--ink); padding: 8px 16px; font: inherit; font-size: 14px; cursor: pointer; }
+.daily-switch button.on { border-color: #d2d2d2; box-shadow: 0 1px 2px #00000012; font-weight: 600; }
+.daily-readout { margin-left: auto; color: #595959; font-size: 12px; font-variant-numeric: tabular-nums; }
+.daily-readout [data-daily-date] { color: var(--ink); }
+.daily-readout .pos { color: var(--daily-gain); }
+.daily-readout .neg { color: var(--daily-loss); }
+.daily-panel .pnl-bar.gain { fill: var(--daily-gain); }
+.daily-panel .pnl-bar.loss { fill: var(--daily-loss); }
+.daily-panel .v4-chart-yaxis span, .daily-panel .v4-chart-xaxis span { color: #767676; }
+.daily-column { position: absolute; top: 0; bottom: 0; border: 0; padding: 0; background: transparent; cursor: crosshair; }
+.daily-column:focus-visible, .daily-cell:focus-visible, .daily-switch button:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.daily-chart.is-active .pnl-bar:not(.is-active) { opacity: .25; }
+.daily-extreme { position: absolute; font-size: 11px; line-height: 14px; font-weight: 600; white-space: nowrap; pointer-events: none; }
+.daily-extreme.above { transform: translate(-50%, -110%); }
+.daily-extreme.below { transform: translate(-50%, 10%); }
+.daily-summary { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 8px 16px 14px; font-size: 12px; }
+.daily-numbers { max-height: 420px; overflow-y: auto; padding: 12px 16px; }
+.daily-numbers table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 2px 3px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.daily-numbers thead th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.daily-numbers th { font-weight: 500; color: #767676; padding: 4px 0; }
+.daily-numbers th:first-child { width: 80px; text-align: left; }
+.daily-numbers td { padding: 0; text-align: center; }
+.daily-cell { width: 100%; min-height: 30px; padding: 4px 8px; border: 0; border-radius: 4px; font: inherit; text-align: right; color: var(--ink); background: var(--month-fill, transparent); cursor: pointer; }
+.daily-cell.is-active { box-shadow: inset 0 0 0 1px #0004; }
+.daily-panel .heat-pos-1 { --month-fill: var(--performance-heat-positive-1); }
+.daily-panel .heat-pos-2 { --month-fill: var(--performance-heat-positive-2); }
+.daily-panel .heat-pos-3 { --month-fill: var(--performance-heat-positive-3); }
+.daily-panel .heat-neg-1 { --month-fill: var(--performance-heat-negative-1); }
+.daily-panel .heat-neg-2 { --month-fill: var(--performance-heat-negative-2); }
+.daily-numbers .daily-week { font-weight: 600; text-align: right; padding-right: 8px; }
+.daily-empty { color: var(--ink-3); }
+[data-daily-view][hidden] { display: none; }
+@media (max-width: 600px) {
+  .daily-readout { width: 100%; margin-left: 0; }
+  .daily-numbers { padding: 6px 2px; }
+  .daily-numbers th:first-child { width: 42px; overflow-wrap: anywhere; }
+  .daily-numbers time { display: block; }
+  .daily-numbers table { font-size: 10.5px; }
+  .daily-cell { padding-inline: 3px; }
+  .daily-numbers .daily-week { padding-right: 3px; }
+}
+@media (max-width: 560px) {
+  .performance-contributions .contribution-plot-cell { width: 30%; }
+  .contribution-plot { min-width: 62px; }
+}

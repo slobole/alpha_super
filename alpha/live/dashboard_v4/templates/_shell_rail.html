@@ -1,0 +1,17 @@
+<aside class="rail rail-c" id="operator-rail"{% if status_only_bool | default(false) %} hx-swap-oob="outerHTML"{% endif %}>
+  <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark">A</span>ALPHA / OPS</a>
+  <nav class="nav" aria-label="Main">
+    <a class="{{ 'on' if is_overview_bool else '' }}" href="{{ url_for('index') }}"{% if is_overview_bool %} aria-current="page"{% endif %}>{{ icon('overview') }}Overview</a>
+    <div class="navhead">{{ icon('pods') }}Pods</div>
+    {% for pod_dict in overview_dict.pod_list %}
+    <a class="sub kid{{ ' on' if pod_page_dict is defined and pod_page_dict.pod_id_str == pod_dict.pod_id_str else '' }}" href="{{ url_for('pod', pod_id_str=pod_dict.pod_id_str) }}"{% if pod_page_dict is defined and pod_page_dict.pod_id_str == pod_dict.pod_id_str %} aria-current="page"{% endif %}>{{ mark(pod_dict.state_str) }}<span class="pod-nav-name">{{ pod_dict.name_str }}</span><span class="cad" title="{{ pod_dict.cadence_str }}">{{ pod_dict.cadence_short_str }}</span></a>
+    {% endfor %}
+    <div class="nav-label">Book</div>
+    <a class="{{ 'on' if positions_page_dict is defined else '' }}" href="{{ url_for('positions') }}"{% if positions_page_dict is defined %} aria-current="page"{% endif %}>{{ icon('positions') }}Positions</a>
+    <a class="{{ 'on' if performance_page_dict is defined else '' }}" href="{{ url_for('performance') }}"{% if performance_page_dict is defined %} aria-current="page"{% endif %}>{{ icon('performance') }}Performance</a>
+    {% for icon_str, label_str in [('activity', 'Activity'), ('system', 'System health'), ('tools', 'Tools')] %}
+    <a aria-disabled="true" title="{{ label_str }} is not available yet">{{ icon(icon_str) }}{{ label_str }}</a>
+    {% endfor %}
+  </nav>
+  <div class="rail-foot">V4{% if overview_dict.demo_bool %} · sample data{% endif %}</div>
+</aside>

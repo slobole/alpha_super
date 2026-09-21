@@ -514,24 +514,14 @@ a:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
 .performance-page .panel-h { border-bottom: 1px solid var(--rule); padding-block: 14px; gap: 12px; flex-wrap: wrap; }
 .performance-page .panel-h .muted { font-size: 11px; }
 .performance-page .panel-b { padding: 20px 16px 16px; }
-.performance-chart text { font-size: 17px; }
-.performance-chart .line { stroke-width: 2.5; }
-.performance-chart .chart-hit { fill: transparent; stroke: none; }
-.performance-chart .pod-end { stroke: white; stroke-width: 1.5; }
-.performance-chart .pnl-bar { fill: var(--ink-3); }
-.performance-chart .pnl-bar.gain { fill: var(--green); }
-.performance-chart .pnl-bar.loss { fill: var(--red); }
 .performance-balance td:first-child, .performance-contributions td:first-child { overflow-wrap: anywhere; }
 .performance-balance td.num { white-space: nowrap; }
 .performance-notice { padding: 10px 14px; background: var(--amber-bg); color: var(--ink-2); border-left: 3px solid var(--amber); font-size: 12px; }
 .performance-legend { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 6px 8px 0; font-size: 12px; }
 .performance-legend > span { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.performance-legend .dotk { flex: 0 0 auto; margin: 0; }
 .performance-legend > span > span { overflow-wrap: anywhere; }
 .performance-legend b { white-space: nowrap; font-weight: 500; }
 .performance-contributions .num { min-width: 115px; }
-.contribution-bar { display: block; margin-top: 5px; height: 5px; background: var(--gray-bg); border-radius: 2px; }
-.contribution-bar i { display: block; height: 100%; border-radius: 2px; }
 .performance-pods td:first-child { max-width: 270px; overflow-wrap: anywhere; }
 .performance-pods .num { white-space: nowrap; }
 .performance-row-date { margin-top: 3px; color: var(--ink-3); font-size: 10px; }
@@ -540,8 +530,6 @@ a:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
 .performance-month-grid td, .performance-month-grid th { padding: 8px 6px !important; border: 0; font-size: 11px; }
 .performance-month-grid th[scope="row"] { white-space: normal; min-width: 55px; max-width: 180px; overflow-wrap: anywhere; text-transform: none; letter-spacing: 0; }
 .performance-month-grid td { white-space: nowrap; background: var(--gray-bg); min-width: 47px; }
-.performance-month-grid .month-gain { background: #d9eee3; color: #155d38; }
-.performance-month-grid .month-loss { background: #f8dddd; color: #922828; }
 .performance-month-grid .month-year { font-weight: 600; }
 .performance-month-grid tbody tr:hover td { background: inherit; }
 .performance-facts { margin: 0; padding: 4px 20px 12px; }
@@ -581,7 +569,6 @@ a:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
   .performance-exports .btn { min-height: 32px; }
   .performance-page .panel-h { padding-inline: 14px; }
   .performance-page .panel-b { padding: 16px 8px; }
-  .performance-chart text { font-size: 24px; }
   .performance-facts { padding-inline: 14px; }
   .performance-source { font-size: 10.5px; }
 }

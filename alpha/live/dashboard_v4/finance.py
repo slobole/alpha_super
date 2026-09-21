@@ -8,7 +8,6 @@ from zoneinfo import ZoneInfo
 
 from alpha.live.client_reporting import ClientReportingError, build_client_report_dict
 from alpha.live.dashboard_v3.client_cash import load_portfolio_cash_list
-from alpha.live.dashboard_v3.client_charts import nav_chart_dict
 from alpha.live.dashboard_v3.client_financial_display import financial_dates_dict
 from alpha.live.dashboard_v3.client_operations import build_client_operations_dict
 from alpha.live.dashboard_v3.client_presentation import portfolio_allocation_dict
@@ -52,7 +51,9 @@ def _chart_dict(daily_list):
     The reporting layer owns R_t = product(1 + r_d) - 1, including the opening
     zero baseline. V4 only rescales its already-validated percentage geometry.
     """
-    source_dict = nav_chart_dict(daily_list, value_field_str="cumulative_return_float", unit_str="pct")
+    from alpha.live.dashboard_v4.charts import build_history_chart_dict
+
+    source_dict = build_history_chart_dict(daily_list, value_field_str="cumulative_return_float", unit_str="pct")
     result_dict = _empty_chart_dict()
     if source_dict is None:
         return result_dict
@@ -77,7 +78,7 @@ def _chart_dict(daily_list):
     point_list = source_dict["point_list"]
     end_dict = point_list[-1]
     tick_index_list = sorted({0, len(point_list) // 2, len(point_list) - 1})
-    result_dict.update(available_bool=True, empty_str="", segment_list=segment_list,
+    result_dict.update(available_bool=True, empty_str="", segment_list=segment_list, drawing_dict=source_dict["drawing_dict"],
         point_str=segment_list[0]["point_str"] if len(segment_list) == 1 else "",
         area_str=segment_list[0]["area_str"] if len(segment_list) == 1 else "",
         isolated_point_list=[{"x_float": horizontal_float(point_dict["x_float"]),

@@ -1,0 +1,4 @@
+{% macro mark(state_str, label_str='') -%}
+{% set label_dict = {'done': 'Done', 'now': 'Now', 'next': 'Planned', 'late': 'Late', 'fail': 'Failed', 'skip': 'None', 'unk': 'Unknown'} %}
+<span class="st st-{{ state_str if state_str in label_dict else 'unk' }}" data-observed-state title="{{ label_str }}{{ ' · ' if label_str else '' }}{{ label_dict.get(state_str, 'Unknown') }}" role="img" aria-label="{{ label_str }}{{ ' · ' if label_str else '' }}{{ label_dict.get(state_str, 'Unknown') }}"></span>
+{%- endmacro %}

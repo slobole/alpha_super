@@ -13,6 +13,7 @@ function element_obj(text_str = '', class_str = '') {
   const attribute_dict = {};
   result_obj.getAttribute = (key_str) => attribute_dict[key_str] ?? null;
   result_obj.setAttribute = (key_str, value_str) => { attribute_dict[key_str] = value_str; };
+  result_obj.removeAttribute = (key_str) => { delete attribute_dict[key_str]; };
   result_obj.closest = (selector_str) => {
     if ((selector_str === '[data-selection-key]' && result_obj.getAttribute('data-selection-key'))
         || (selector_str === '#overview-shell' && result_obj.id === 'overview-shell')) return result_obj;
@@ -172,6 +173,76 @@ function environment_obj(valid_ms = 120000, initial_latency_ms = 0, clock_timest
     },
   };
 }
+
+function performance_stamp_obj(env_obj, valid_ms) {
+  const source_obj = element_obj();
+  source_obj.setAttribute('data-source-valid-ms', String(valid_ms));
+  source_obj.setAttribute('data-last-update', '09:42:00');
+  source_obj.setAttribute('data-clock-timestamp', '2026-09-18T13:42:00+00:00');
+  const selector_dict = env_obj.current_obj.selector_dict;
+  selector_dict['#performance-status'] = source_obj;
+  // The server replaces operational header/rail fragments, not the report.
+  selector_dict['[data-status-label]'] = element_obj('System OK');
+  return source_obj;
+}
+
+function performance_response(env_obj, successful_bool = true) {
+  env_obj.fire('htmx:afterRequest', {detail: {
+    target: env_obj.current_obj.shell_obj, successful: successful_bool}});
+}
+
+test('Performance status-only refresh renews header evidence without replacing the report or date draft', () => {
+  const env_obj = environment_obj(1000);
+  const shell_obj = env_obj.current_obj.shell_obj;
+  const report_obj = element_obj('Return +5.04%');
+  const input_obj = element_obj();
+  input_obj.value = '2026-0';
+  env_obj.current_obj.selector_dict['[data-performance-report]'] = report_obj;
+  env_obj.focus(input_obj);
+  env_obj.advance(1000); env_obj.timer();
+  assert.equal(shell_obj.getAttribute('data-source-stale'), 'true');
+  env_obj.fire('htmx:beforeRequest');
+  env_obj.advance(200);
+  performance_stamp_obj(env_obj, 1000);
+  performance_response(env_obj);
+  assert.equal(env_obj.current_obj.shell_obj, shell_obj);
+  assert.equal(env_obj.current_obj.selector_dict['[data-performance-report]'], report_obj);
+  assert.equal(report_obj.textContent, 'Return +5.04%');
+  assert.equal(input_obj.value, '2026-0');
+  assert.equal(shell_obj.getAttribute('data-source-stale'), null);
+  assert.equal(env_obj.current_obj.selector_dict['.refresh-error'].hidden, true);
+  assert.equal(env_obj.current_obj.selector_dict['[data-status-label]'].textContent, 'System OK');
+  env_obj.advance(799); env_obj.timer();
+  assert.equal(shell_obj.getAttribute('data-source-stale'), null);
+  env_obj.advance(1); env_obj.timer();
+  assert.equal(shell_obj.getAttribute('data-source-stale'), 'true');
+  assert.equal(report_obj.textContent, 'Return +5.04%');
+});
+
+test('Performance duplicate successful events and failed polls cannot renew the same saved evidence', () => {
+  const env_obj = environment_obj();
+  env_obj.fire('htmx:beforeRequest');
+  performance_stamp_obj(env_obj, 1000);
+  performance_response(env_obj);
+  env_obj.advance(900);
+  env_obj.fire('htmx:beforeRequest');
+  performance_response(env_obj);
+  env_obj.advance(100); env_obj.timer();
+  assert.equal(env_obj.current_obj.shell_obj.getAttribute('data-source-stale'), 'true');
+  env_obj.fire('htmx:responseError');
+  performance_response(env_obj, false);
+  assert.equal(env_obj.current_obj.selector_dict['[data-status-label]'].textContent, 'Unknown');
+  assert.equal(env_obj.current_obj.selector_dict['.refresh-error'].hidden, false);
+});
+
+test('Performance newly delivered stale stamp stays Unknown', () => {
+  const env_obj = environment_obj();
+  env_obj.fire('htmx:beforeRequest');
+  performance_stamp_obj(env_obj, 0);
+  performance_response(env_obj);
+  assert.equal(env_obj.current_obj.shell_obj.getAttribute('data-source-stale'), 'true');
+  assert.equal(env_obj.current_obj.selector_dict['[data-status-label]'].textContent, 'Unknown');
+});
 
 function positions_search_obj(env_obj, value_str = '') {
   const input_obj = element_obj();

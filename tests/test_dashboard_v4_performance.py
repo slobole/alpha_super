@@ -278,6 +278,13 @@ def test_negative_pod_contributions_remain_signed_and_equal_portfolio_profit():
     assert contribution_dict["total_str"] == "−$5.00"
     assert [row_dict["value_float"] for row_dict in contribution_dict["row_list"]] == [5., -10.]
     assert [row_dict["bar_percent_float"] for row_dict in contribution_dict["row_list"]] == [50., 100.]
+    zero_float = contribution_dict["zero_percent_float"]
+    gain_dict, loss_dict = contribution_dict["row_list"]
+    assert gain_dict["bar_left_percent_float"] == pytest.approx(zero_float)
+    assert gain_dict["bar_left_percent_float"] + gain_dict["bar_width_percent_float"] == pytest.approx(100.)
+    assert loss_dict["bar_left_percent_float"] == 0
+    assert loss_dict["bar_left_percent_float"] + loss_dict["bar_width_percent_float"] == pytest.approx(zero_float)
+    assert loss_dict["bar_width_percent_float"] == pytest.approx(2 * gain_dict["bar_width_percent_float"])
 
 
 def test_months_compound_across_years_and_mark_selected_partial_months():
@@ -288,7 +295,73 @@ def test_months_compound_across_years_and_mark_selected_partial_months():
     assert row_list[1]["cell_list"][0]["return_float"] == pytest.approx(-.01)
     assert row_list[1]["cell_list"][0]["partial_bool"]
     assert row_list[1]["cell_list"][1]["return_float"] is None
+    assert row_list[1]["cell_list"][1]["value_str"] == "·"
+    assert row_list[1]["cell_list"][1]["heat_class_str"] == ""
     assert row_list[1]["year_str"] == "-1.00%"
+
+
+@pytest.mark.parametrize("return_float,heat_str", [
+    (None, ""), (0., ""), (.00001, "heat-pos-1"), (.0099999, "heat-pos-1"),
+    (.01, "heat-pos-2"), (.0199999, "heat-pos-2"), (.02, "heat-pos-3"),
+    (-.00001, "heat-neg-1"), (-.0099999, "heat-neg-1"), (-.01, "heat-neg-2"), (-.2, "heat-neg-2"),
+])
+def test_monthly_heat_uses_mockup_magnitude_boundaries(return_float, heat_str):
+    assert performance._heat_class_str(return_float) == heat_str
+    if return_float is not None:
+        row_list = performance._monthly_list([{"market_date_str": "2026-09-01", "return_float": return_float}],
+            name_str="Test", pod_id_str="test", from_str="2026-09-01", to_str="2026-09-30")
+        assert row_list[0]["cell_list"][8]["heat_class_str"] == heat_str
+        assert row_list[0]["heat_class_str"] == heat_str
+
+
+def test_pod_verdict_counts_verified_returns_and_verified_dollar_leader():
+    workspace_dict, source_obj = _demo_tuple()
+    result_dict = _view(workspace_dict, source_obj, level_str="pods")
+    assert result_dict["verdict_str"] == "All 4 pods are up in this period."
+    leader_dict = result_dict["contribution_dict"]["row_list"][0]
+    assert result_dict["verdict_detail_str"] == leader_dict["name_str"] + " adds the most: " + leader_dict["value_str"] + "."
+    assert result_dict["has_multiple_years_bool"] is False
+
+
+def test_pod_verdict_does_not_promote_surviving_returns_after_missing_history():
+    workspace_dict, source_obj = _demo_tuple()
+    missing_route_str = workspace_dict["client_dict"]["accounts"][0]["account_route"]
+    source_obj = replace(source_obj, row_tuple=tuple(row_obj for row_obj in source_obj.row_tuple
+        if (row_obj.account_route_str, row_obj.market_date_str) != (missing_route_str, "2026-07-02")))
+    result_dict = _view(workspace_dict, source_obj, level_str="pods")
+    assert result_dict["verdict_str"] == "Pod returns incomplete."
+    assert result_dict["verdict_detail_str"] == "3 of 4 returns verified."
+    assert not result_dict["contribution_dict"]["available_bool"]
+
+
+def test_pod_return_verdict_never_invents_a_dollar_leader_without_flow_coverage():
+    client_dict = _configured_dict()
+    attributes_dict = nav_attributes_dict()
+    attributes_dict.pop("depositsWithdrawals")
+    result_dict = _view(_workspace_dict(client_dict), snapshot_obj([attributes_dict]), level_str="pods")
+    assert result_dict["pod_row_list"][0]["return_float"] == .01
+    assert result_dict["verdict_str"] == "1 pod is up in this period."
+    assert result_dict["verdict_detail_str"] == ""
+    assert not result_dict["contribution_dict"]["available_bool"]
+
+
+def test_equal_positive_contributions_do_not_select_arbitrary_pod_leader():
+    client_dict = _configured_dict(second_bool=True)
+    source_obj = snapshot_obj([nav_attributes_dict(account_str=route_str) for route_str in ("U_TEST_A", "U_TEST_B")])
+    result_dict = _view(_workspace_dict(client_dict), source_obj, level_str="pods")
+    assert result_dict["verdict_str"] == "All 2 pods are up in this period."
+    assert result_dict["verdict_detail_str"] == "2 pods share the lead: +$10.00 each."
+
+
+def test_multiple_years_are_identified_without_extending_pod_history():
+    client_dict = _configured_dict()
+    client_dict["mandate_start_date"] = client_dict["accounts"][0]["effective_from"] = "2025-12-31"
+    source_obj = snapshot_obj([nav_attributes_dict(date_str="2025-12-31"),
+        nav_attributes_dict(date_str="2026-01-02", opening_str="1010", closing_str="1020", twr_str=".9900990099")])
+    result_dict = _view(_workspace_dict(client_dict), source_obj, level_str="pods")
+    assert result_dict["has_multiple_years_bool"] is True
+    assert [row_dict["year_int"] for row_dict in result_dict["monthly_row_list"]] == [2025, 2026]
+    assert result_dict["monthly_row_list"][0]["cell_list"][0]["value_str"] == "·"
 
 
 def test_twenty_session_risk_uses_sample_stdev_and_does_not_drop_first_return():

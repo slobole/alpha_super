@@ -108,13 +108,17 @@ def create_demo_app():
     def demo_now_ts():
         return DEMO_NOW_TS + timedelta(seconds=monotonic() - start_float)
 
-    def workspace_snapshot_tuple():
+    def operations_workspace_dict():
         current_ts = demo_now_ts()
         current_dict = deepcopy(workspace_dict)
         current_dict["summary_dict"]["as_of_timestamp_str"] = current_ts.isoformat()
         for row_dict in current_dict["summary_dict"]["pod_row_dict_list"]:
             row_dict["as_of_timestamp_str"] = current_ts.isoformat()
-        return current_dict, snapshot_obj
+        return current_dict
+
+    def workspace_snapshot_tuple():
+        return operations_workspace_dict(), snapshot_obj
 
     return create_app(provider_obj, demo_bool=True,
-                      workspace_snapshot_fn=workspace_snapshot_tuple, now_fn=demo_now_ts)
+                      workspace_snapshot_fn=workspace_snapshot_tuple,
+                      operations_workspace_fn=operations_workspace_dict, now_fn=demo_now_ts)

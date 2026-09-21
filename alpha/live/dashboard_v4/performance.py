@@ -9,8 +9,9 @@ import statistics
 from zoneinfo import ZoneInfo
 
 from alpha.live.client_reporting import ClientReportingError, build_client_report_dict
-from alpha.live.dashboard_v3.client_charts import nav_chart_dict
 from alpha.live.dashboard_v3.client_financial_display import financial_dates_dict
+from alpha.live.dashboard_v4.charts import add_pod_drawing_dict, build_history_chart_dict
+from alpha.live.dashboard_v4.daily_pnl import build_daily_pnl_dict
 from alpha.live.dashboard_v4.finance import POD_COLOR_TUPLE, _money_str, _percent_str, _tone_str
 from alpha.live.scheduler_utils import get_exchange_calendar_obj
 
@@ -36,8 +37,8 @@ def _empty_dict(period_str, level_str, unit_str):
             "reason_str": "Complete portfolio P&L is required"},
         "pod_chart_dict": {"available_bool": False, "series_list": [], "tick_list": [],
             "width_int": 800, "height_int": 180, "from_str": "", "to_str": ""},
-        "monthly_row_list": [], "month_tuple": MONTH_TUPLE, "risk_row_list": [],
-        "daily_basis_str": "Last 30 reporting days · selected period"}
+        "monthly_row_list": [], "month_tuple": MONTH_TUPLE, "has_multiple_years_bool": False, "risk_row_list": [],
+        "daily_basis_str": "Selected period", "daily_panel_dict": None}
 
 
 def _risk_dict(path_list, daily_list, session_set):
@@ -81,6 +82,19 @@ def _risk_dict(path_list, daily_list, session_set):
     return result_dict
 
 
+def _heat_class_str(return_float):
+    """Mockup D intensity thresholds; zero and absent returns stay unfilled."""
+    if return_float is None or return_float == 0:
+        return ""
+    if return_float >= .02:
+        return "heat-pos-3"
+    if return_float >= .01:
+        return "heat-pos-2"
+    if return_float > 0:
+        return "heat-pos-1"
+    return "heat-neg-2" if return_float <= -.01 else "heat-neg-1"
+
+
 def _monthly_list(daily_list, *, name_str, pod_id_str, from_str, to_str):
     if not daily_list or any(row_dict.get("return_float") is None for row_dict in daily_list):
         return []
@@ -100,14 +114,44 @@ def _monthly_list(daily_list, *, name_str, pod_id_str, from_str, to_str):
             month_end_str = f"{month_str}-{calendar.monthrange(int(year_str), month_int)[1]:02d}"
             partial_bool = growth_decimal is not None and (from_str > month_str + "-01" or to_str < month_end_str)
             cell_list.append({"month_int": month_int, "return_float": return_float,
-                "value_str": "—" if return_float is None else f"{return_float * 100:+.2f}",
-                "partial_bool": partial_bool, "tone_str": _tone_str(return_float)})
+                "value_str": "·" if return_float is None else f"{return_float * 100:+.2f}",
+                "partial_bool": partial_bool, "tone_str": _tone_str(return_float),
+                "heat_class_str": _heat_class_str(return_float)})
             if growth_decimal is not None:
                 year_growth_decimal *= growth_decimal
         result_list.append({"name_str": name_str, "pod_id_str": pod_id_str, "year_int": int(year_str),
             "cell_list": cell_list, "year_str": _percent_str(float(year_growth_decimal - 1), signed_bool=True),
+            "heat_class_str": _heat_class_str(float(year_growth_decimal - 1)),
             "partial_bool": from_str > year_str + "-01-01" or to_str < year_str + "-12-31"})
     return result_list
+
+
+def _pod_verdict_dict(pod_list, report_dict, contribution_dict):
+    if not pod_list:
+        return {"verdict_str": "Pod performance unavailable.", "verdict_detail_str": ""}
+    verified_list = [pod_dict for pod_dict in pod_list if pod_dict["return_float"] is not None]
+    complete_bool = (report_dict["scope_complete_bool"] and report_dict["coverage_complete_bool"]
+        and len(verified_list) == len(pod_list) == len({pod_dict["pod_id_str"] for pod_dict in pod_list}))
+    if not complete_bool:
+        return {"verdict_str": "Pod returns incomplete.",
+            "verdict_detail_str": f"{len(verified_list)} of {len(pod_list)} returns verified."}
+    count_dict = {"up": sum(pod_dict["return_float"] > 0 for pod_dict in pod_list),
+        "down": sum(pod_dict["return_float"] < 0 for pod_dict in pod_list),
+        "flat": sum(pod_dict["return_float"] == 0 for pod_dict in pod_list)}
+    if max(count_dict.values()) == len(pod_list):
+        direction_str = next(direction_str for direction_str, count_int in count_dict.items() if count_int)
+        verdict_str = (f"1 pod is {direction_str} in this period." if len(pod_list) == 1 else
+            f"All {len(pod_list)} pods are {direction_str} in this period.")
+    else:
+        verdict_str = " · ".join(f"{count_int} {direction_str}" for direction_str, count_int in count_dict.items() if count_int) + "."
+    detail_str = ""
+    if contribution_dict["available_bool"] and contribution_dict["row_list"]:
+        leader_dict = contribution_dict["row_list"][0]
+        if leader_dict["value_float"] > 0:
+            tied_list = [row_dict for row_dict in contribution_dict["row_list"] if row_dict["value_float"] == leader_dict["value_float"]]
+            detail_str = (leader_dict["name_str"] + " adds the most: " + leader_dict["value_str"] + "."
+                if len(tied_list) == 1 else f"{len(tied_list)} pods share the lead: {leader_dict['value_str']} each.")
+    return {"verdict_str": verdict_str, "verdict_detail_str": detail_str}
 
 
 def _pod_chart_dict(pod_list):
@@ -137,7 +181,8 @@ def _pod_chart_dict(pod_list):
                 "y_float": 170 - (value_float - low_float) / span_float * 160, "value_float": value_float,
                 "market_date_str": source_dict["market_date_str"], "label_str": f"{value_float:.2f}"})
         result_dict["series_list"].append({field_str: pod_dict[field_str] for field_str in ("pod_id_str", "name_str", "color_str")}
-            | {"point_list": point_list, "segment_list": [" ".join(f"{point_dict['x_float']:.2f},{point_dict['y_float']:.2f}" for point_dict in point_list)],
+            | {"point_list": point_list, "segment_point_list": [point_list],
+                "segment_list": [" ".join(f"{point_dict['x_float']:.2f},{point_dict['y_float']:.2f}" for point_dict in point_list)],
                 "end_str": point_list[-1]["label_str"]})
     result_dict.update(available_bool=True,
         from_str=min(point_dict["market_date_str"] for point_dict in all_point_list)[:10],
@@ -238,9 +283,12 @@ def build_performance_page_dict(workspace_dict, snapshot_obj, *, as_of_ts, perio
         ("Broker adjustments", "linking_adjustment_float"), ("Pods added / removed", "scope_movement_float"),
         ("Profit / loss", "pnl_float"), ("End", "closing_nav_float"))]
     chart_source_list = path_list if unit_str == "pct" else report_dict["daily_book_list"]
-    result_dict["chart_dict"] = nav_chart_dict(chart_source_list, value_field_str="cumulative_return_float" if unit_str == "pct" else "nav_float",
+    result_dict["chart_dict"] = build_history_chart_dict(chart_source_list, value_field_str="cumulative_return_float" if unit_str == "pct" else "nav_float",
         unit_str=unit_str, daily_fact_list=report_dict["daily_book_list"])
-    result_dict["daily_chart_dict"] = nav_chart_dict(report_dict["daily_book_list"][-30:], value_field_str="pnl_float", bars_bool=True)
+    if level_str == "portfolio":
+        result_dict["daily_panel_dict"] = build_daily_pnl_dict(report_dict["daily_book_list"], daily_return_list,
+            session_set, from_str=from_date_str, to_str=to_date_str, heat_fn=_heat_class_str)
+        result_dict["daily_chart_dict"] = result_dict["daily_panel_dict"]["chart_dict"]
     color_pair_list = list(dict.fromkeys((account_dict["account_route"], account_dict["pod_id"])
         for account_dict in [*(workspace_dict.get("valuation_account_list") or []), *client_dict["accounts"]]))
     for strategy_dict in report_dict["strategy_list"]:
@@ -253,15 +301,23 @@ def build_performance_page_dict(workspace_dict, snapshot_obj, *, as_of_ts, perio
             "pnl_str": _money_str(strategy_dict["pnl_float"], signed_bool=True), "return_str": _percent_str(strategy_dict["twr_float"], signed_bool=True),
             "drawdown_str": _percent_str(strategy_dict["performance_dict"]["max_drawdown_float"]),
             "tone_str": _tone_str(strategy_dict["pnl_float"]), "pnl_float": strategy_dict["pnl_float"],
+            "return_float": strategy_dict["twr_float"],
             "path_list": strategy_dict["performance_dict"]["return_path_list"]})
-    result_dict["pod_chart_dict"] = _pod_chart_dict(result_dict["pod_row_list"])
+    result_dict["pod_chart_dict"] = add_pod_drawing_dict(_pod_chart_dict(result_dict["pod_row_list"]))
     if report_dict["pnl_float"] is not None and report_dict["flows_complete_bool"] and report_dict["coverage_complete_bool"] and all(
             pod_dict["pnl_float"] is not None for pod_dict in result_dict["pod_row_list"]) and abs(
             sum(Decimal(str(pod_dict["pnl_float"])) for pod_dict in result_dict["pod_row_list"]) - Decimal(str(report_dict["pnl_float"]))) <= Decimal(".01"):
         bound_float = max((abs(pod_dict["pnl_float"]) for pod_dict in result_dict["pod_row_list"]), default=0.) or 1.
+        lower_float = min([0.] + [pod_dict["pnl_float"] for pod_dict in result_dict["pod_row_list"]])
+        upper_float = max([0.] + [pod_dict["pnl_float"] for pod_dict in result_dict["pod_row_list"]])
+        span_float = upper_float - lower_float or 1.
+        zero_percent_float = -lower_float / span_float * 100
         result_dict["contribution_dict"] = {"available_bool": True, "reason_str": "", "total_str": _money_str(report_dict["pnl_float"], signed_bool=True),
+            "zero_percent_float": zero_percent_float,
             "row_list": [{field_str: pod_dict[field_str] for field_str in ("pod_id_str", "name_str", "color_str")}
-                | {"value_str": pod_dict["pnl_str"], "value_float": pod_dict["pnl_float"], "bar_percent_float": 100 * abs(pod_dict["pnl_float"]) / bound_float}
+                | {"value_str": pod_dict["pnl_str"], "value_float": pod_dict["pnl_float"], "bar_percent_float": 100 * abs(pod_dict["pnl_float"]) / bound_float,
+                    "bar_left_percent_float": (min(0., pod_dict["pnl_float"]) - lower_float) / span_float * 100,
+                    "bar_width_percent_float": abs(pod_dict["pnl_float"]) / span_float * 100}
                 for pod_dict in sorted(result_dict["pod_row_list"], key=lambda pod_dict: -pod_dict["pnl_float"])]}
     if level_str == "portfolio":
         result_dict["monthly_row_list"] = _monthly_list(daily_return_list, name_str="Portfolio", pod_id_str="",
@@ -274,4 +330,6 @@ def build_performance_page_dict(workspace_dict, snapshot_obj, *, as_of_ts, perio
             result_dict["monthly_row_list"].extend(_monthly_list(strategy_dict["daily_list"], name_str=strategy_dict["display_name_str"],
                 pod_id_str=strategy_dict["pod_id_str"], from_str=max(from_date_str, account_dict["effective_from"]),
                 to_str=min(to_date_str, account_dict.get("effective_to") or to_date_str)))
+        result_dict.update(_pod_verdict_dict(result_dict["pod_row_list"], report_dict, result_dict["contribution_dict"]))
+    result_dict["has_multiple_years_bool"] = len({row_dict["year_int"] for row_dict in result_dict["monthly_row_list"]}) > 1
     return result_dict
