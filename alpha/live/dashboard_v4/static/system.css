@@ -1,0 +1,34 @@
+.system-page .panel { margin-bottom: 20px; }
+.system-table, .system-pods, .system-releases { table-layout: fixed; }
+.system-table th, .system-table td, .system-pods th, .system-pods td,
+.system-releases th, .system-releases td { overflow-wrap: anywhere; white-space: normal; vertical-align: top; }
+.system-page tbody th { color: var(--ink); text-transform: none; letter-spacing: normal; font-size: 13px; font-weight: 500; }
+.system-page .mono { font-size: 11px; }
+.system-name-col { width: 22%; }
+.system-time-col { width: 19%; }
+.system-expected-col { width: 28%; }
+.system-page .row { align-items: flex-start; flex-wrap: nowrap; }
+.system-page .st { flex-shrink: 0; margin-top: 3px; }
+.system-page .system-group th { background: var(--gray-bg); font-size: 11px; letter-spacing: .05em; text-transform: uppercase; }
+.system-pods th:first-child { width: 19%; }
+.system-pods th:nth-child(2) { width: 23%; }
+.system-releases th:first-child { width: 24%; }
+.system-releases th:nth-child(4) { width: 30%; }
+.system-downloads { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 900px) {
+  .system-page .page-head .h1i { display: flex; }
+  .system-page .page-head .asof { display: block; }
+  .system-page .page-head { gap: 8px; }
+  .system-page table, .system-page tbody, .system-page tr, .system-page td, .system-page th { display: block; width: auto; }
+  .system-page colgroup, .system-page thead { display: none; }
+  .system-page tbody tr { padding: 12px; border-bottom: 1px solid var(--rule); }
+  .system-page tbody tr:last-child { border-bottom: 0; }
+  .system-page tbody th, .system-page tbody td { padding: 3px 0; border: 0; }
+  .system-page tbody th { margin-bottom: 6px; }
+  .system-page tbody td[data-label] { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 8px; }
+  .system-page tbody td[data-label]::before { content: attr(data-label); font-family: var(--sans); color: var(--ink-3); font-size: 11px; }
+  .system-page .tag { justify-self: start; }
+  .system-page .system-group { padding: 8px 12px; background: var(--gray-bg); }
+  .system-page .system-group th { margin-bottom: 0; }
+  .system-pods th:first-child, .system-pods th:nth-child(2), .system-releases th:first-child, .system-releases th:nth-child(4) { width: auto; }
+}

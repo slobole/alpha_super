@@ -17,6 +17,8 @@ from alpha.live.dashboard_v4.status import load_operations_workspace_dict
 from alpha.live.dashboard_v4.activity import build_activity_page_dict
 from alpha.live.dashboard_v4.activity_data import load_activity_source_dict
 from alpha.live.dashboard_v4.activity_cycles import build_activity_cycles_dict
+from alpha.live.dashboard_v4.system import build_system_page_dict
+from alpha.live.dashboard_v4.system_data import load_system_source_dict
 from alpha.live.dashboard_v3.client_operations import SOURCE_MAX_AGE_SECONDS_INT
 from alpha.live.dashboard_v3.filters import MARKET_TIMEZONE_OBJ
 from alpha.live.ops_report import parse_timestamp_ts
@@ -297,6 +299,79 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
     @flask_app_obj.get("/activity/refresh")
     def activity_refresh():
         return activity_response(refresh_bool=True)
+
+    def system_response(*, refresh_bool=False):
+        allowed_set = set() if refresh_bool else {"download"}
+        if set(request.args) - allowed_set or any(len(request.args.getlist(key_str)) != 1 for key_str in request.args):
+            abort(400)
+        download_str = request.args.get("download")
+        if download_str is not None and download_str not in {"status", "diagnostic"}:
+            abort(400)
+        acquisition_ts = clock_fn()
+        workspace_dict = (load_operations_workspace_dict(provider_obj, as_of_ts=acquisition_ts)
+            if operations_workspace_fn is None else operations_workspace_fn())
+        source_dict = (provider_obj.get_system_source_dict(workspace_dict, as_of_ts=acquisition_ts)
+            if hasattr(provider_obj, "get_system_source_dict") else load_system_source_dict(
+                provider_obj, workspace_dict, as_of_ts=acquisition_ts, performance_db_path_str=database_path_str))
+        render_ts = clock_fn()
+        overview_dict = build_overview_dict(workspace_dict, None, provider_obj,
+            as_of_ts=render_ts, demo_bool=demo_bool, include_finance_bool=False)
+        completed_ts = clock_fn()
+        # Saved cycle/scheduler reads also consume the source lifetime.
+        elapsed_ms_int = max(0, int((completed_ts - render_ts).total_seconds() * 1000))
+        overview_dict["source_valid_ms_int"] = max(0, overview_dict["source_valid_ms_int"] - elapsed_ms_int)
+        try:
+            checked_ts = datetime.fromisoformat(source_dict.get("checked_timestamp_str", "").replace("Z", "+00:00"))
+            checked_age_float = (completed_ts - checked_ts).total_seconds() if checked_ts.tzinfo is not None else -1
+        except (TypeError, ValueError, AttributeError, OverflowError):
+            checked_age_float = -1
+        source_remaining_ms_int = (int((SOURCE_MAX_AGE_SECONDS_INT - checked_age_float) * 1000)
+            if 0 <= checked_age_float <= SOURCE_MAX_AGE_SECONDS_INT else 0)
+        overview_dict["source_valid_ms_int"] = min(overview_dict["source_valid_ms_int"], source_remaining_ms_int)
+        overview_dict["source_fresh_bool"] = bool(overview_dict["source_fresh_bool"]
+            and overview_dict["source_valid_ms_int"] > 0 and source_dict.get("scope_verified_bool") is True)
+        if not overview_dict["source_fresh_bool"]:
+            overview_dict["source_valid_ms_int"] = 0
+            overview_dict["live_state_str"] = "unk"
+            overview_dict["system_dict"] = {"state_str": "unk", "label_str": "System unknown", "detail_str": ""}
+            for pod_dict in overview_dict["pod_list"]:
+                pod_dict["state_str"] = "unk"
+        overview_dict.update(refresh_url_str=url_for("system_refresh"), refresh_seconds_int=15)
+        system_page_dict = build_system_page_dict(overview_dict, workspace_dict, source_dict, as_of_ts=completed_ts)
+        # This page reads additional service evidence. Its header must not say
+        # System OK beside an overdue or unverified check in the same response.
+        overview_dict["system_dict"] = {"state_str": system_page_dict["state_str"],
+            "label_str": {"fail": "System needs action", "late": "System needs review",
+                          "unk": "System unknown"}.get(system_page_dict["state_str"], "System OK"),
+            "detail_str": ""}
+        if download_str:
+            # Export the same allowlisted presentation, never raw reports, logs,
+            # config, account routes, webhook addresses or diagnostic exceptions.
+            export_dict = {"schema_str": "dashboard_v4.system." + download_str + ".v1",
+                "as_of_timestamp_str": system_page_dict["as_of_timestamp_str"],
+                "mode_str": "live", "demo_bool": demo_bool,
+                "state_str": system_page_dict["state_str"], "verdict_str": system_page_dict["verdict_str"]}
+            if download_str == "diagnostic":
+                export_dict.update(assessment_dict=system_page_dict,
+                    source_fresh_bool=overview_dict["source_fresh_bool"],
+                    source_valid_ms_int=overview_dict["source_valid_ms_int"])
+            else:
+                export_dict["check_list"] = [{key_str: row_dict[key_str] for key_str in
+                    ("key_str", "label_str", "state_str", "now_str")} for group_dict in system_page_dict["group_list"]
+                    for row_dict in group_dict["row_list"]]
+            response_obj = jsonify(export_dict)
+            response_obj.headers["Content-Disposition"] = f'attachment; filename="system-{download_str}.json"'
+            return response_obj
+        template_str = "_overview.html" if refresh_bool or request.headers.get("HX-Request") == "true" else "overview.html"
+        return render_template(template_str, overview_dict=overview_dict, system_page_dict=system_page_dict)
+
+    @flask_app_obj.get("/system")
+    def system():
+        return system_response()
+
+    @flask_app_obj.get("/system/refresh")
+    def system_refresh():
+        return system_response(refresh_bool=True)
 
     def performance_response(*, refresh_bool=False):
         allowed_set = {"level", "period", "from", "to", "unit"}

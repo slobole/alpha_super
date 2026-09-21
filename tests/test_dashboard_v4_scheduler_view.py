@@ -18,7 +18,9 @@ from alpha.live.logging_utils import build_structured_event_record_dict
 
 
 @pytest.fixture
-def fixture_tuple():
+def fixture_tuple(monkeypatch):
+    monkeypatch.setattr("alpha.live.dashboard_v3.health.shutil.disk_usage",
+        lambda path_str: SimpleNamespace(total=100, used=50, free=50))
     workspace_dict, snapshot_obj, provider_obj = build_demo_workspace_tuple()
     try:
         yield workspace_dict, snapshot_obj, provider_obj

@@ -7,6 +7,30 @@ const vm = require('node:vm');
 
 const source_str = fs.readFileSync(path.join(__dirname, '../alpha/live/dashboard_v4/static/overview.js'), 'utf8');
 
+for (const trigger_str of ['expiry', 'htmx:responseError', 'htmx:timeout']) {
+  test(`System health ${trigger_str} clears current service claims while retaining expected configuration`, () => {
+    const env_obj = environment_obj(1000);
+    env_obj.current_obj.shell_obj.setAttribute('data-selection-scope', 'system:live');
+    const selector_dict = env_obj.current_obj.selector_dict;
+    const status_list = ['4 of 4 alive', 'Sleeping', '09-08 10:35:00', '38 MB · recent file write', 'Responding']
+      .map((label_str) => element_obj(label_str));
+    const mark_list = status_list.map(() => element_obj('', 'st st-done'));
+    const expected_obj = element_obj('Each wakes when it said it would');
+    const release_obj = element_obj('owner.pod.live.v1');
+    selector_dict['[data-evidence-status]'] = status_list;
+    selector_dict['[data-observed-state]'] = mark_list;
+    selector_dict['[data-system-expected]'] = expected_obj;
+    selector_dict['[data-system-release]'] = release_obj;
+    if (trigger_str === 'expiry') { env_obj.advance(1000); env_obj.timer(); }
+    else env_obj.fire(trigger_str);
+    assert.ok(status_list.every((status_obj) => status_obj.textContent === 'Unknown'));
+    assert.ok(mark_list.every((mark_obj) => mark_obj.className === 'st st-unk'));
+    assert.equal(expected_obj.textContent, 'Each wakes when it said it would');
+    assert.equal(release_obj.textContent, 'owner.pod.live.v1');
+    assert.equal(selector_dict['[data-verdict]'].textContent, 'Status unknown.');
+  });
+}
+
 function element_obj(text_str = '', class_str = '') {
   const result_obj = {textContent: text_str, className: class_str, hidden: true, title: '',
     nodeType: 1, parentElement: null, childNodes: [], isConnected: true};

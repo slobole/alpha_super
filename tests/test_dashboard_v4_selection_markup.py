@@ -30,7 +30,7 @@ def _markup_obj(client_obj, route_str):
 
 
 @pytest.mark.parametrize("route_str", ["/", "/pods/demo_1_0?tab=orders", "/pods/demo_1_1?tab=plan",
-    "/pods/demo_1_1?cycle=vplan:1&tab=events", "/pods/demo_1_2?tab=fills"])
+    "/pods/demo_1_1?cycle=vplan:1&tab=events", "/pods/demo_1_2?tab=fills", "/system"])
 def test_copy_regions_are_unique_and_stable_across_refresh(route_str):
     client_obj = create_demo_app().test_client()
     initial_obj = _markup_obj(client_obj, route_str)

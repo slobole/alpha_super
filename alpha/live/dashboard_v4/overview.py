@@ -248,6 +248,8 @@ def build_overview_dict(workspace_dict, snapshot_obj, provider_obj, *, as_of_ts:
         "source_fresh_bool": fresh_bool,
         "source_valid_ms_int": max(0, int((SOURCE_MAX_AGE_SECONDS_INT - (as_of_ts - source_ts).total_seconds()) * 1000)) if fresh_bool else 0,
         "market_dict": market_dict,
+        "health_list": [{"label_str": cell_obj.label_str, "value_str": cell_obj.value_str,
+                         "severity_str": cell_obj.severity_str} for cell_obj in getattr(health_obj, "cell_dict_list", [])],
         "system_dict": {"state_str": system_state_str, "label_str": system_label_str,
                         "detail_str": system_cause_str or ("Scheduler unknown" if scheduler_unknown_bool and system_state_str == "unk" else
                             "Data " + _data_time_str(min(data_session_list)) if data_session_list else "Data unknown")},

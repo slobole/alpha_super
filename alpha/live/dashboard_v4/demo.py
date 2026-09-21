@@ -88,6 +88,8 @@ def build_demo_workspace_tuple(*, include_holdings_bool=False):
     provider_obj.get_scheduler_status_dict = demo_scheduler_status_dict
     from alpha.live.dashboard_v4.activity_demo import attach_demo_activity
     attach_demo_activity(provider_obj, as_of_ts=DEMO_NOW_TS)
+    from alpha.live.dashboard_v4.system_demo import attach_demo_system
+    attach_demo_system(provider_obj)
     summary_dict = provider_obj.get_summary_dict()
     summary_dict["as_of_timestamp_str"] = DEMO_NOW_TS.isoformat()
     workspace_dict = {

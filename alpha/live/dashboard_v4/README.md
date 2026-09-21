@@ -2,8 +2,8 @@
 
 Native Flask/Jinja implementation of Mockup D's operator pages, following
 `docs/plans/DASHBOARD_V4_HANDOFF.md`. Select a Pod from the sidebar or Overview
-to open `/pods/<pod_id>`. Positions, Performance and Activity are also available.
-System health and Tools remain disabled. PAPER and INCUBATION are deferred.
+to open `/pods/<pod_id>`. Positions, Performance, Activity and System health are
+also available. Tools remains disabled. PAPER and INCUBATION are deferred.
 
 ## Run beside V3
 
@@ -261,11 +261,47 @@ warnings do not claim saved trading evidence is missing. Tests of unrelated
 status behavior substitute a fixed disk reading; dedicated health tests exercise
 the real rollup at both thresholds, probe errors and stale operations.
 
+## System health
+
+`/system` groups current assessments into always-running services, scheduled
+work, and data/storage. Below those checks, each enabled LIVE Pod shows its own
+scheduler, last observed activity, promised wake, saved data, broker read and EOD.
+What should run lists the current LIVE release metadata, including disabled
+releases. Accounts are masked. The shared System light links to this page.
+
+The page uses the existing operations workspace and scheduler reader. It adds
+bounded reads of the saved watchdog report, file metadata and the bound Flex
+import dates; it does not connect to a broker, scan full logs, build financial
+reports, inspect Windows task registration, or start any operation. Scope is
+validated before runtime reads: one owner, unique enabled LIVE Pod/account
+identities, and matching current releases. Disabled-only metadata causes no
+runtime reads. Missing, contradictory, stale or future evidence cannot be green.
+
+Saved broker snapshots prove an earlier read, not a connection now. The watchdog
+report is saved before notification delivery and can also be produced manually,
+so it does not prove the scheduled task or delivery succeeded. Discord/dead-man
+delivery remains unverified without receipts. Flex shows the latest saved close
+and import time, not a claimed daily job success. FRED dates come from a saved
+decision and do not prove the feed is current. No cadence is guessed from the
+mockup. The Event log check uses the existing scheduler idle ceiling (60 minutes)
+and 60-second wake allowance; the watchdog report age policy is 900 seconds,
+not a claim about its task schedule.
+
+The System page header includes these additional service assessments; other
+pages retain their existing operations health assessment. The page refreshes
+every 15 seconds. Failed refreshes and the existing 120-second source expiry
+clear current status labels and icons while retaining expected configuration.
+Status JSON and Diagnostic JSON download only the sanitized view model, never
+raw reports, paths, account numbers, webhook addresses or exception messages.
+No export file is written on the server. The demo provides explicit synthetic
+service evidence and never falls back to real service sources.
+
 ## Verification
 
 ```powershell
 .venv\Scripts\python.exe -B -m pytest tests/test_dashboard_v4_cycle.py tests/test_dashboard_v4_evidence.py tests/test_dashboard_v4_finance.py tests/test_dashboard_v4_return_chart.py tests/test_dashboard_v4_routes.py tests/test_dashboard_v4_pod.py tests/test_dashboard_v4_pod_data.py tests/test_dashboard_v4_pod_finance.py tests/test_dashboard_v4_pod_integration.py tests/test_dashboard_v4_pod_review.py tests/test_dashboard_v4_pod_demo.py tests/test_dashboard_v4_next_operation.py tests/test_dashboard_v4_selection_markup.py tests/test_dashboard_local_workspace.py --capture=sys -p no:cacheprovider -q
 node --test tests/dashboard_v4_refresh.test.cjs
+uv run python -m pytest tests/test_dashboard_v4_system.py tests/test_dashboard_v4_system_data.py tests/test_dashboard_v4_system_routes.py -q
 ```
 
 Tier 3. Independent parity, failure-mode and coverage reviews found and drove
@@ -283,6 +319,17 @@ Visual checks compare the native page with Mockup D at 1440px, and verify layout
 at 768px and 390px. Browser checks cover period navigation and failed-refresh
 state, Pod evidence tabs and history. No production data, broker session or VPS
 is used for these checks.
+
+System health adds strict scope/release, report age, per-Pod timestamp, missing
+receipt, future/corrupt evidence, locked-Flex recovery, masked export and
+disabled-only metadata tests. A final response clock consumes time spent reading
+cycle and scheduler evidence; the browser lifetime is capped by both workspace
+and auxiliary assessment ages. Independent parity, failure-mode and coverage
+reviews drove regressions for changed releases, historical FRED dates, source
+expiry, contradictory market-data dates and duplicate release selection keys.
+At 768px and 390px, health tables become labelled cards. Browser verification
+includes a stopped local demo server: current claims become Unknown on failure
+and recover when polling succeeds again.
 
 Activity follow-up: a read-only scan of the existing 41.8 MiB local log, using
 a synthetic scope that excluded all real Pod records, reached the seven-day

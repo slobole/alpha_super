@@ -10,6 +10,6 @@
   </nav>
   <div class="market">{{ mark(overview_dict.market_dict.state_str) }}<span><b data-status-label>{{ overview_dict.market_dict.label_str }}</b>{% if overview_dict.market_dict.detail_str %} · <span data-status-detail>{{ overview_dict.market_dict.detail_str }}</span>{% endif %}</span></div>
   <div class="grow"></div>
-  <span class="syslight" title="System health page is not available yet">{{ mark(overview_dict.system_dict.state_str) }}<span><b data-status-label>{{ overview_dict.system_dict.label_str }}</b>{% if overview_dict.system_dict.detail_str %} · <span data-status-detail>{{ overview_dict.system_dict.detail_str }}</span>{% endif %}</span></span>
+  <a class="syslight" href="{{ url_for('system') }}">{{ mark(overview_dict.system_dict.state_str) }}<span><b data-status-label>{{ overview_dict.system_dict.label_str }}</b>{% if overview_dict.system_dict.detail_str %} · <span data-status-detail>{{ overview_dict.system_dict.detail_str }}</span>{% endif %}</span></a>
   <div class="clock desktop-clock"><span class="t" data-live-clock>{{ overview_dict.clock_str }} ET</span><span class="d">{{ overview_dict.date_str }} · updated <span data-update-time>{{ overview_dict.updated_str }}</span></span></div>
 </header>

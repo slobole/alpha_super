@@ -1,0 +1,28 @@
+<div class="page-head"><div><h1 class="h1i">{{ icon('system') }}System health</h1><p class="verdict" data-selection-key="system:verdict"><b data-verdict>{{ system_page_dict.verdict_str }}</b>{% if system_page_dict.detail_str %} <span data-verdict-detail>{{ system_page_dict.detail_str }}</span>{% endif %}</p></div><div class="asof">LIVE · ET</div></div>
+<section class="panel" aria-label="System checks">
+  <table class="tbl dense system-table"><colgroup><col class="system-name-col"><col><col class="system-time-col"><col class="system-expected-col"></colgroup><thead><tr><th scope="col">Component</th><th scope="col">Now</th><th scope="col">Last sign of life</th><th scope="col">Expected</th></tr></thead><tbody>
+  {% for group_dict in system_page_dict.group_list %}
+    <tr class="system-group"><th colspan="4" scope="rowgroup">{{ group_dict.label_str }}</th></tr>
+    {% for row_dict in group_dict.row_list %}
+    <tr data-system-check="{{ row_dict.key_str }}"><th scope="row"><span class="row">{{ mark(row_dict.state_str) }}<b>{{ row_dict.label_str }}</b></span></th><td data-label="Now" data-selection-key="system:{{ row_dict.key_str }}:now"><span data-evidence-status>{{ row_dict.now_str }}</span></td><td class="mono" data-label="Last sign of life" data-selection-key="system:{{ row_dict.key_str }}:last">{{ row_dict.last_str }}</td><td class="muted" data-label="Expected" data-selection-key="system:{{ row_dict.key_str }}:expected">{{ row_dict.expected_str }}</td></tr>
+    {% endfor %}
+  {% endfor %}
+  </tbody></table>
+</section>
+<section class="panel" id="scheduler" aria-label="Pod health">
+  <div class="panel-h"><span class="panel-t">Pods · LIVE</span></div>
+  <table class="tbl dense system-pods"><thead><tr><th scope="col">Pod</th><th scope="col">Its scheduler</th><th scope="col">Last sign of life</th><th scope="col">Wakes</th><th scope="col">Data</th><th scope="col">Broker read</th><th scope="col">Last EOD</th></tr></thead><tbody>
+  {% for pod_dict in system_page_dict.pod_list %}
+    <tr><th scope="row"><a class="sname" href="{{ url_for('pod', pod_id_str=pod_dict.pod_id_str) }}" data-selection-key="system:pod:{{ pod_dict.pod_id_str }}:name">{{ pod_dict.name_str }}</a></th><td data-label="Its scheduler" data-selection-key="system:pod:{{ pod_dict.pod_id_str }}:scheduler"><span class="row">{{ mark(pod_dict.scheduler_state_str) }}<span data-evidence-status>{{ pod_dict.scheduler_str }}</span></span></td><td class="mono" data-label="Last sign of life" data-selection-key="system:pod:{{ pod_dict.pod_id_str }}:last">{{ pod_dict.last_str }}</td><td class="mono" data-label="Wakes" data-selection-key="system:pod:{{ pod_dict.pod_id_str }}:wake"><span data-evidence-status>{{ pod_dict.wake_str }}</span></td><td data-label="Data" data-selection-key="system:pod:{{ pod_dict.pod_id_str }}:data"><span class="row">{{ mark(pod_dict.data_state_str) }}<span data-evidence-status>{{ pod_dict.data_str }}</span></span></td><td class="mono" data-label="Broker read" data-selection-key="system:pod:{{ pod_dict.pod_id_str }}:broker">{{ pod_dict.broker_str }}</td><td class="mono" data-label="Last EOD" data-selection-key="system:pod:{{ pod_dict.pod_id_str }}:eod"><span class="row">{{ mark(pod_dict.eod_state_str) }}<span data-evidence-status>{{ pod_dict.eod_str }}</span></span></td></tr>
+  {% else %}<tr class="system-empty"><td colspan="7">No enabled LIVE Pods verified.</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+<section class="panel" aria-label="Expected releases">
+  <div class="panel-h"><span class="panel-t">What should run</span></div>
+  <table class="tbl dense system-releases"><thead><tr><th scope="col">Pod</th><th scope="col">Mode</th><th scope="col">Enabled</th><th scope="col">Release</th><th scope="col">Trades</th><th scope="col">Account</th></tr></thead><tbody>
+  {% for release_dict in system_page_dict.release_list %}
+    <tr><th scope="row" data-selection-key="system:release:{{ release_dict.pod_id_str }}:{{ release_dict.release_id_str }}:name">{{ release_dict.name_str }}</th><td data-label="Mode"><span class="tag tag-live">LIVE</span></td><td data-label="Enabled">{{ 'Yes' if release_dict.enabled_bool else 'No' }}</td><td class="mono" data-label="Release" data-selection-key="system:release:{{ release_dict.pod_id_str }}:{{ release_dict.release_id_str }}:id">{{ release_dict.release_id_str }}</td><td data-label="Trades">{{ release_dict.trades_str }}</td><td class="mono" data-label="Account">{{ release_dict.account_str }}</td></tr>
+  {% else %}<tr class="system-empty"><td colspan="6">Release configuration unavailable.</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+<div class="toolbar system-downloads"><a class="btn btn-q" href="{{ url_for('system', download='status') }}">Status JSON ↓</a><a class="btn btn-q" href="{{ url_for('system', download='diagnostic') }}">Diagnostic JSON ↓</a></div>
