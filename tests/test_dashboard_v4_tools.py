@@ -1,9 +1,11 @@
 """Catalog identity and CLI contracts; no live state or broker access."""
 
 from copy import deepcopy
+from datetime import UTC, datetime, timedelta
 import argparse
 import ast
 from pathlib import Path
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
@@ -201,7 +203,13 @@ def test_generated_commands_parse_against_actual_cli_declarations_without_runnin
                         keyword_dict[keyword_obj.arg] = ast.literal_eval(keyword_obj.value)
                 parser_obj.add_argument(*names_list, **keyword_dict)
             parser_map_dict[module_str] = parser_obj
-        parser_map_dict[module_str].parse_args(argument_list[5:])
+        populated_argument_list = [*argument_list]
+        for parameter_dict in row_dict["parameter_list"]:
+            if parameter_dict["required_bool"]:
+                populated_argument_list.extend([parameter_dict["flag_str"], "41"])
+        parsed_obj = parser_map_dict[module_str].parse_args(populated_argument_list[5:])
+        if row_dict["key_str"] == "submit_vplan":
+            assert parsed_obj.vplan_id_int == 41
 
 
 def test_commands_use_the_real_cli_modules_and_supported_flags(context_tuple):
@@ -229,7 +237,7 @@ def test_required_client_id_is_declared_never_invented(context_tuple):
     assert doctor_dict["parameter_list"][0]["flag_str"] == "--broker-client-id"
     assert "--broker-client-id" not in doctor_dict["argument_list"]
     assert row_map_dict["show_vplan"]["parameter_list"][0]["required_bool"] is False
-    assert row_map_dict["submit_vplan"]["parameter_list"] == []
+    assert row_map_dict["submit_vplan"]["parameter_list"][0]["required_bool"] is True
     assert row_map_dict["compare_reference"]["parameter_list"] == []
 
 
@@ -253,3 +261,95 @@ def test_demo_commands_are_explicitly_synthetic_and_do_not_leak_host_paths(conte
         assert "state/pod-one.sqlite3'" not in row_dict["command_str"].replace("DEMO/state/pod-one.sqlite3'", "")
     assert "DEMO/releases" in _row_map_dict(page_dict)["tick"]["command_str"]
     assert workspace_dict == unchanged_dict
+
+
+@pytest.fixture
+def ready_context_tuple(context_tuple):
+    workspace_dict, provider_obj, target_obj, _ = context_tuple
+    as_of_ts = datetime(2026, 9, 22, 13, 23, 40, tzinfo=UTC)
+    workspace_dict["summary_dict"]["as_of_timestamp_str"] = as_of_ts.isoformat()
+    workspace_dict["summary_dict"]["pod_row_dict_list"][0].update(
+        latest_vplan_id_int=41, latest_vplan_status_str="ready")
+    target_obj.release_obj.auto_submit_enabled_bool = False
+    identity_dict = {field_str: getattr(target_obj.release_obj, field_str) for field_str
+        in ("release_id_str", "user_id_str", "pod_id_str", "account_route_str")}
+    source_dict = {"status_str": "ok", "selected_cycle_dict": {"current_bool": True, "vplan_id_int": 41},
+        "vplan_dict": {**identity_dict, "vplan_id_int": 41, "status_str": "ready"},
+        "selected_release_dict": {**identity_dict, "mode_str": "live"}}
+    read_list = []
+    def read_cycles_dict(pod_id_str, **kwargs_dict):
+        read_list.append((pod_id_str, kwargs_dict))
+        return deepcopy(source_dict)
+    provider_obj.get_pod_cycles_dict = read_cycles_dict
+    return workspace_dict, provider_obj, as_of_ts, source_dict, read_list
+
+
+def test_submit_copy_pins_ready_plan_even_with_auto_submit_disabled(ready_context_tuple):
+    workspace_dict, provider_obj, as_of_ts, _, read_list = ready_context_tuple
+    unchanged_dict = deepcopy(workspace_dict)
+    row_dict = _row_map_dict(build_tools_page_dict(workspace_dict, provider_obj,
+        selected_pod_str="pod-one", as_of_ts=as_of_ts))["submit_vplan"]
+    assert row_dict["label_str"] == "submit_vplan" and row_dict["class_str"] == "ACTIVE"
+    assert row_dict["parameter_list"][0]["required_bool"] is True
+    assert row_dict["parameter_list"][0]["value_str"] == "41"
+    assert row_dict["command_str"].endswith("'--vplan-id' '41'")
+    assert row_dict["command_str"].count("--vplan-id") == 1
+    assert "'--pod-id' 'pod-one'" in row_dict["command_str"]
+    assert read_list == [("pod-one", {"as_of_ts": as_of_ts, "vplan_id_int": 41})]
+    assert workspace_dict == unchanged_dict
+    assert not row_dict["runnable_bool"]
+
+
+@pytest.mark.parametrize("section_str,field_str,value_obj", [
+    ("", "status_str", "unknown"), ("", "status_str", "not_found"),
+    ("selected_cycle_dict", "current_bool", False), ("selected_cycle_dict", "current_bool", None),
+    ("selected_cycle_dict", "vplan_id_int", 42), ("vplan_dict", "vplan_id_int", 42),
+    ("vplan_dict", "status_str", "submitted"), ("vplan_dict", "status_str", "completed"),
+    ("vplan_dict", "status_str", "blocked"), ("selected_release_dict", "mode_str", "paper"),
+    *[(section_str, field_str, "foreign") for section_str in ("vplan_dict", "selected_release_dict")
+      for field_str in ("release_id_str", "user_id_str", "pod_id_str", "account_route_str")],
+])
+def test_submit_never_prefills_unverified_or_noncurrent_plan(ready_context_tuple, section_str, field_str, value_obj):
+    workspace_dict, provider_obj, as_of_ts, source_dict, _ = ready_context_tuple
+    (source_dict[section_str] if section_str else source_dict)[field_str] = value_obj
+    row_map_dict = _row_map_dict(build_tools_page_dict(workspace_dict, provider_obj,
+        selected_pod_str="pod-one", as_of_ts=as_of_ts))
+    assert row_map_dict["submit_vplan"]["parameter_list"][0]["value_str"] == ""
+    assert row_map_dict["submit_vplan"]["command_str"] == ""
+    assert row_map_dict["submit_vplan"]["copy_available_bool"]
+    assert row_map_dict["status"]["command_str"]
+
+
+@pytest.mark.parametrize("field_str,value_obj", [
+    ("latest_vplan_id_int", None), ("latest_vplan_id_int", True), ("latest_vplan_id_int", "41"),
+    ("latest_vplan_id_int", 0), ("latest_vplan_id_int", -1), ("latest_vplan_id_int", 2147483648),
+    ("latest_vplan_status_str", "completed"),
+])
+def test_submit_invalid_summary_never_reads_a_plan(ready_context_tuple, field_str, value_obj):
+    workspace_dict, provider_obj, as_of_ts, _, read_list = ready_context_tuple
+    workspace_dict["summary_dict"]["pod_row_dict_list"][0][field_str] = value_obj
+    row_dict = _row_map_dict(build_tools_page_dict(workspace_dict, provider_obj,
+        selected_pod_str="pod-one", as_of_ts=as_of_ts))["submit_vplan"]
+    assert row_dict["command_str"] == "" and read_list == []
+
+
+@pytest.mark.parametrize("age_int", [-1, 120, 121])
+def test_submit_stale_or_future_summary_never_prefills(ready_context_tuple, age_int):
+    workspace_dict, provider_obj, as_of_ts, _, read_list = ready_context_tuple
+    workspace_dict["summary_dict"]["as_of_timestamp_str"] = (as_of_ts - timedelta(seconds=age_int)).isoformat()
+    row_dict = _row_map_dict(build_tools_page_dict(workspace_dict, provider_obj,
+        selected_pod_str="pod-one", as_of_ts=as_of_ts))["submit_vplan"]
+    assert row_dict["command_str"] == "" and read_list == []
+
+
+@pytest.mark.parametrize("error_type", [OSError, sqlite3.OperationalError])
+def test_submit_unavailable_reader_keeps_required_manual_id_and_diagnostic_copy(ready_context_tuple, error_type):
+    workspace_dict, provider_obj, as_of_ts, _, _ = ready_context_tuple
+    def unavailable_dict(*args_tuple, **kwargs_dict):
+        raise error_type("saved state unavailable")
+    provider_obj.get_pod_cycles_dict = unavailable_dict
+    row_map_dict = _row_map_dict(build_tools_page_dict(workspace_dict, provider_obj,
+        selected_pod_str="pod-one", as_of_ts=as_of_ts))
+    assert not row_map_dict["submit_vplan"]["command_str"]
+    assert row_map_dict["submit_vplan"]["parameter_list"][0]["required_bool"]
+    assert row_map_dict["status"]["command_str"]

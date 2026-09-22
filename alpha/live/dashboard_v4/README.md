@@ -38,6 +38,14 @@ cutover is part of this phase.
 panels. Selecting an enabled LIVE Pod scopes copyable PowerShell commands to its
 current release and configured state path. Required arguments are entered before
 copying. Copying does not run a command. Pod and System pages link to Tools.
+Run copied commands from the repository folder. `submit_vplan` requires an
+explicit `--vplan-id`, including when auto-submit is disabled. The existing
+parameter field is prefilled only when the Pod reader verifies a current ready
+plan for the selected release and account; otherwise the ID must be entered.
+The runner retains its existing execution-window, readiness and ownership checks.
+The chosen ID is also bound to the synthetic preview and its one-use confirmation.
+A `?tool=` link
+opens and scrolls to that tool once; status refreshes do not move the page.
 Diagnostics remain copyable when the saved database is unavailable, provided the
 current release identity is verified. No credentials or environment-file contents
 are rendered.

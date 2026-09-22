@@ -81,7 +81,7 @@ def test_enabling_non_demo_or_non_synthetic_provider_is_rejected():
 @pytest.mark.parametrize("action_str", ["tick", "submit_vplan", "post_execution_reconcile", "eod_snapshot", "compare_reference"])
 def test_preview_confirm_poll_simulates_and_journals_only(harness_tuple, action_str):
     client_obj, service_obj, provider_obj, _, _ = harness_tuple
-    preview_dict = _preview_dict(harness_tuple, action_str)
+    preview_dict = _preview_dict(harness_tuple, action_str, **({"vplan_id_int": 41} if action_str == "submit_vplan" else {}))
     assert preview_dict["expires_in_seconds_int"] == 120
     assert preview_dict["demo_bool"] is True
     assert "U1234567" not in json.dumps(preview_dict)
@@ -96,6 +96,31 @@ def test_preview_confirm_poll_simulates_and_journals_only(harness_tuple, action_
     assert service_obj.demo_event_list[0]["timestamp_str"] == "2026-09-22T13:00:00+00:00"
     assert _confirm_obj(harness_tuple, preview_dict, action_str).status_code == 409
     assert len(provider_obj.job_dict) == 1
+
+
+@pytest.mark.parametrize("vplan_id_obj", [None, True, "41", 0, -1, 1.5, 2147483648])
+def test_submit_preview_requires_positive_integer_plan_id(harness_tuple, vplan_id_obj):
+    client_obj, _, provider_obj, _, headers_dict = harness_tuple
+    body_dict = {"confirmed_bool": True}
+    if vplan_id_obj is not None:
+        body_dict["vplan_id_int"] = vplan_id_obj
+    response_obj = client_obj.post("/api/demo-tools/demo-pod/submit_vplan/preview", json=body_dict, headers=headers_dict)
+    assert response_obj.status_code == 409
+    assert not provider_obj.job_dict and not provider_obj.journal_list
+
+
+def test_submit_confirmation_uses_only_the_previewed_id(harness_tuple):
+    client_obj, _, provider_obj, _, headers_dict = harness_tuple
+    preview_dict = _preview_dict(harness_tuple, "submit_vplan", vplan_id_int=41)
+    assert "Simulated VPlan ID: 41" in preview_dict["preview_line_list"]
+    changed_obj = client_obj.post("/api/demo-tools/demo-pod/submit_vplan/confirm", json={
+        "confirmed_bool": True, "browser_confirmed_bool": True,
+        "confirmation_nonce_str": preview_dict["confirmation_nonce_str"], "vplan_id_int": 42}, headers=headers_dict)
+    assert changed_obj.status_code == 400
+    assert not provider_obj.job_dict
+    assert _confirm_obj(harness_tuple, preview_dict, "submit_vplan").status_code == 202
+    assert [job_dict["vplan_id_int"] for job_dict in provider_obj.job_dict.values()] == [41]
+    assert _confirm_obj(harness_tuple, preview_dict, "submit_vplan").status_code == 409
 
 
 @pytest.mark.parametrize("raw_str", [

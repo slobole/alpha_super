@@ -89,6 +89,14 @@ class ToolsActionService:
         for key_str, label_str in (("decision_plan_id_int", "Decision"), ("vplan_id_int", "VPlan")):
             if isinstance(context_dict.get(key_str), int):
                 preview_line_list.append(f"{label_str}: {context_dict[key_str]}")
+        if action_name_str == "submit_vplan":
+            vplan_id_int = body_dict.get("vplan_id_int")
+            if type(vplan_id_int) is not int or not 1 <= vplan_id_int <= 2147483647:
+                raise ValueError("A positive VPlan ID is required.")
+            # This is the operator's simulated selection, not saved broker
+            # evidence. Confirm takes it only from this one-use preview.
+            context_dict["requested_vplan_id_int"] = vplan_id_int
+            preview_line_list.append(f"Simulated VPlan ID: {vplan_id_int}")
         if action_name_str == "manual_order":
             manual_dict = body_dict.get("manual_order_dict")
             if not isinstance(manual_dict, dict) or set(manual_dict) - MANUAL_FIELD_SET:
@@ -272,7 +280,8 @@ def register_tools_action_routes(app_obj, service_obj):
 
     @app_obj.post("/api/demo-tools/<pod_id_str>/<action_name_str>/preview", endpoint="tools_action_preview")
     def preview(pod_id_str, action_name_str):
-        allowed_set = {"confirmed_bool", "manual_order_dict"} if action_name_str == "manual_order" else {"confirmed_bool"}
+        allowed_set = ({"confirmed_bool", "manual_order_dict"} if action_name_str == "manual_order" else
+            {"confirmed_bool", "vplan_id_int"} if action_name_str == "submit_vplan" else {"confirmed_bool"})
         body_dict, error_obj = guarded_body(action_name_str, allowed_set)
         if error_obj is not None:
             return error_obj

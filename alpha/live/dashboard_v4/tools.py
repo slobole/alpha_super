@@ -4,8 +4,13 @@ Building the page resolves current release identities but never invokes a tool,
 opens state for writing, reads environment secrets, or accepts shell text.
 """
 
+from datetime import UTC, datetime
 from pathlib import Path
+import sqlite3
 from urllib.parse import quote
+
+from alpha.live.dashboard_v3.client_operations import SOURCE_MAX_AGE_SECONDS_INT
+from alpha.live.ops_report import parse_timestamp_ts
 
 
 EXECUTABLE_ACTION_SET = frozenset({"tick", "submit_vplan", "post_execution_reconcile",
@@ -27,7 +32,7 @@ TOOL_CATALOG_TUPLE = (
     ("tick", "act", "Run the cycle", "ACTIVE", "Run one lifecycle pass; may sync data, build plans and send orders.", "runner", "pod"),
     ("run_once", "act", "Run the cycle", "ACTIVE", "Run one scheduler pass; may send orders when due.", "scheduler", "pod"),
     ("serve", "act", "Run the cycle", "ACTIVE", "Start the Pod scheduler. Never start a second scheduler for this Pod.", "scheduler", "pod"),
-    ("submit_vplan", "act", "Submit and confirm execution", "ACTIVE", "Submit the ready plan using the existing execution guards.", "runner", "pod"),
+    ("submit_vplan", "act", "Submit and confirm execution", "ACTIVE", "Send orders for the specified VPlan ID using the existing execution guards. The ID pins the plan.", "runner", "pod"),
     ("post_execution_reconcile", "act", "Submit and confirm execution", "ACTIVE", "Query the broker and save the position check.", "runner", "pod"),
     ("eod_snapshot", "act", "Submit and confirm execution", "ACTIVE", "Query the broker and save the end-of-day account observation.", "runner", "pod"),
     ("live_ops_watchdog", "act", "Data and watchdog", "ACTIVE", "Refresh LIVE health across this installation; may send alerts.", "watchdog", "system"),
@@ -137,17 +142,58 @@ def resolve_tools_target_obj(workspace_dict, provider_obj, pod_id_str):
 def _parameter_dict(name_str, label_str, flag_str, *, required_bool=False):
     return {"name_str": name_str, "label_str": label_str, "flag_str": flag_str,
         "type_str": "number", "required_bool": required_bool, "placeholder_str": "",
-        "min_int": 1, "max_int": 2147483647}
+        "value_str": "", "min_int": 1, "max_int": 2147483647}
 
 
-def _parameters_list(key_str):
+def _parameters_list(key_str, ready_vplan_id_int=None):
     if key_str == "doctor":
         return [_parameter_dict("broker_client_id_int", "Unused broker client ID", "--broker-client-id", required_bool=True)]
     if key_str == "show_decision_plan":
         return [_parameter_dict("decision_plan_id_int", "Decision ID (optional; latest by default)", "--decision-plan-id")]
     if key_str in {"show_vplan", "execution_report", "export_trade_sheet"}:
         return [_parameter_dict("vplan_id_int", "Plan ID (optional; latest by default)", "--vplan-id")]
+    if key_str == "submit_vplan":
+        parameter_dict = _parameter_dict("vplan_id_int", "VPlan ID", "--vplan-id", required_bool=True)
+        parameter_dict["value_str"] = str(ready_vplan_id_int) if ready_vplan_id_int is not None else ""
+        return [parameter_dict]
     return []
+
+
+def _ready_vplan_id_int(workspace_dict, provider_obj, target_obj, as_of_ts):
+    """Suggest only this release's current ready plan, using the Pod page reader.
+
+    A copied ID is a selection, not permission to submit. The runner still
+    checks readiness, timing and ownership when the operator runs the command.
+    """
+    try:
+        summary_dict = workspace_dict.get("summary_dict") or {}
+        source_ts = parse_timestamp_ts(summary_dict.get("as_of_timestamp_str"))
+        if source_ts is None or not 0 <= (as_of_ts - source_ts).total_seconds() < SOURCE_MAX_AGE_SECONDS_INT:
+            return None
+        release_obj = target_obj.release_obj
+        row_dict = next(row_dict for row_dict in summary_dict.get("pod_row_dict_list", [])
+            if row_dict.get("pod_id_str") == release_obj.pod_id_str)
+        vplan_id_int = row_dict.get("latest_vplan_id_int")
+        if (row_dict.get("latest_vplan_status_str") != "ready" or type(vplan_id_int) is not int
+                or not 1 <= vplan_id_int <= 2147483647):
+            return None
+        source_dict = provider_obj.get_pod_cycles_dict(release_obj.pod_id_str,
+            as_of_ts=as_of_ts, vplan_id_int=vplan_id_int)
+        cycle_dict = source_dict.get("selected_cycle_dict") or {}
+        plan_dict = source_dict.get("vplan_dict") or {}
+        saved_release_dict = source_dict.get("selected_release_dict") or {}
+        if (source_dict.get("status_str") != "ok" or cycle_dict.get("current_bool") is not True
+                or cycle_dict.get("vplan_id_int") != vplan_id_int
+                or plan_dict.get("vplan_id_int") != vplan_id_int or plan_dict.get("status_str") != "ready"
+                or saved_release_dict.get("mode_str") != "live"):
+            return None
+        if any(evidence_dict.get(field_str) != getattr(release_obj, field_str)
+                for evidence_dict in (plan_dict, saved_release_dict)
+                for field_str in ("release_id_str", "user_id_str", "pod_id_str", "account_route_str")):
+            return None
+        return vplan_id_int
+    except (ValueError, OSError, sqlite3.Error, AttributeError, TypeError, KeyError, StopIteration):
+        return None  # Diagnostics remain copyable; the operator can enter an ID.
 
 
 def _arguments_list(key_str, family_str, scope_str, target_obj, path_dict):
@@ -182,7 +228,7 @@ def _arguments_list(key_str, family_str, scope_str, target_obj, path_dict):
 
 
 def build_tools_page_dict(workspace_dict, provider_obj, *, selected_pod_str="",
-                          actions_enabled_bool=False, demo_bool=False):
+                          actions_enabled_bool=False, demo_bool=False, as_of_ts=None):
     """Build copyable fixed commands and expose only the existing execution allowlist."""
     error_str, scope_verified_bool, execution_verified_bool, target_obj = "", False, False, None
     account_list = []
@@ -201,6 +247,8 @@ def build_tools_page_dict(workspace_dict, provider_obj, *, selected_pod_str="",
             execution_verified_bool = True
         except (ValueError, OSError, AttributeError, TypeError, KeyError):
             pass  # Copy diagnostics can help restore missing saved evidence.
+    ready_vplan_id_int = (_ready_vplan_id_int(workspace_dict, provider_obj, target_obj, as_of_ts or datetime.now(UTC))
+        if execution_verified_bool else None)
     path_dict = {"releases_root_str": str(getattr(provider_obj, "releases_root_path_str", "") or ""),
         "config_path_str": str(getattr(provider_obj, "config_path_str", "") or ""),
         "results_root_str": str(getattr(provider_obj, "results_root_path_str", "") or ""),
@@ -225,13 +273,21 @@ def build_tools_page_dict(workspace_dict, provider_obj, *, selected_pod_str="",
         reason_str = ("Choose a LIVE Pod." if not selected_pod_str and scope_str == "pod" else
             "LIVE scope or command paths could not be verified.") if not available_bool else ""
         if family_str == "manual":
-            reason_str = reason_str or "Use the dashboard ticket; no standalone CLI is provided."
+            reason_str = reason_str or ("Use the demo ticket; no standalone CLI is provided." if demo_bool
+                else "Manual order entry is available in Dashboard V3 only; no standalone CLI is provided.")
+        parameter_list = _parameters_list(key_str, ready_vplan_id_int)
+        command_argument_list = [*argument_list]
+        for parameter_dict in parameter_list:
+            if parameter_dict["value_str"]:
+                command_argument_list.extend([parameter_dict["flag_str"], parameter_dict["value_str"]])
+        complete_bool = all(not parameter_dict["required_bool"] or parameter_dict["value_str"]
+            for parameter_dict in parameter_list)
         row_dict = {"key_str": key_str, "label_str": "Saved watchdog report" if family_str == "saved" else key_str,
             "class_str": class_str, "effect_str": effect_str,
             "scope_str": "Installation · all configured releases" if family_str == "norgate" else
                 "Installation · all LIVE Pods" if scope_str == "system" else "Selected LIVE Pod",
-            "command_str": powershell_command_str(argument_list) if argument_list else "",
-            "argument_list": argument_list, "parameter_list": _parameters_list(key_str),
+            "command_str": powershell_command_str(command_argument_list) if argument_list and complete_bool else "",
+            "argument_list": argument_list, "parameter_list": parameter_list,
             "runnable_bool": bool(available_bool and execution_verified_bool
                 and actions_enabled_bool and key_str in EXECUTABLE_ACTION_SET),
             "action_str": key_str if key_str in EXECUTABLE_ACTION_SET else "",

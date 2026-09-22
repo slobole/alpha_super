@@ -540,7 +540,8 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
                 for account_dict in workspace_dict.get("operations_account_list", [])):
             abort(404)
         tools_page_dict = build_tools_page_dict(workspace_dict, provider_obj,
-            selected_pod_str=selected_pod_str, actions_enabled_bool=demo_tools_bool, demo_bool=demo_bool)
+            selected_pod_str=selected_pod_str, actions_enabled_bool=demo_tools_bool, demo_bool=demo_bool,
+            as_of_ts=clock_fn())
         tool_key_set = {row_dict["key_str"] for block_dict in tools_page_dict["block_list"]
             for group_dict in block_dict["group_list"] for row_dict in group_dict["row_list"]}
         if "tool" in request.args and selected_tool_str not in tool_key_set:

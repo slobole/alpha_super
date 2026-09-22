@@ -14,6 +14,7 @@ from alpha.live.dashboard_v4.overview import build_overview_dict
 from alpha.live.dashboard_v4.pod import build_pod_page_dict
 from alpha.live.dashboard_v4.scheduler_view import apply_scheduler_to_steps, scheduler_note_str
 from alpha.live.dashboard_v4.scheduler_status import load_scheduler_status_dict
+from alpha.live.dashboard_v4.tools import build_tools_page_dict
 from alpha.live.logging_utils import build_structured_event_record_dict
 
 
@@ -155,21 +156,39 @@ def test_healthy_pages_have_no_scheduler_widget_and_issue_has_only_sentence(fixt
     assert "Last check" not in html_str and "Next check" not in html_str
 
 
-def test_scheduler_command_is_scoped_quoted_and_copy_only(monkeypatch):
-    provider_obj = LiveDataProvider(releases_root_path_str="C:/owner's releases", event_log_path_str="C:/logs/events.jsonl")
-    target_obj = SimpleNamespace(release_obj=SimpleNamespace(mode_str="live", enabled_bool=True), db_path_str="C:/state/pod.sqlite3")
+@pytest.mark.parametrize("state_str", ["late", "stopped", "error"])
+@pytest.mark.parametrize("log_path_str", ["C:/owner's logs/$events`1.jsonl", ""])
+def test_scheduler_command_is_scoped_quoted_and_matches_tools(monkeypatch, state_str, log_path_str):
+    provider_obj = LiveDataProvider(releases_root_path_str="C:/owner's releases", event_log_path_str=log_path_str)
+    row_dict = {"pod_id_str": "pod_one", "account_route_str": "DEMO-account",
+        "user_id_str": "DEMO-owner", "release_id_str": "DEMO-release", "mode_str": "live"}
+    target_obj = SimpleNamespace(release_obj=SimpleNamespace(**row_dict, enabled_bool=True), db_path_str="C:/state/pod.sqlite3")
     monkeypatch.setattr(provider_obj, "get_target_for_pod", lambda pod_id_str: target_obj)
     captured_list = []
     def load_status(event_log_path_str, pod_id_str, *, as_of_ts):
         captured_list.append((event_log_path_str, pod_id_str, as_of_ts))
-        return _status_dict("stopped")
+        return _status_dict(state_str)
     monkeypatch.setattr("alpha.live.dashboard_v4.data.load_scheduler_status_dict", load_status)
     status_dict = provider_obj.get_scheduler_status_dict("pod_one", as_of_ts=DEMO_NOW_TS)
-    assert captured_list == [("C:/logs/events.jsonl", "pod_one", DEMO_NOW_TS)]
-    assert "'next_due' '--mode' 'live' '--pod-id' 'pod_one'" in status_dict["check_command_str"]
+    assert captured_list == [(log_path_str, "pod_one", DEMO_NOW_TS)]
+    assert "'next_due' '--mode' 'live'" in status_dict["check_command_str"]
+    assert "'--pod-id' 'pod_one'" in status_dict["check_command_str"]
     assert "'C:/owner''s releases'" in status_dict["check_command_str"]
     assert "'--db-path' 'C:/state/pod.sqlite3'" in status_dict["check_command_str"]
+    if log_path_str:
+        assert "'--log-path' 'C:/owner''s logs/$events`1.jsonl'" in status_dict["check_command_str"]
+    else:
+        assert "--log-path" not in status_dict["check_command_str"]
+    assert status_dict["check_command_str"].endswith("'--json'")
     assert "serve" not in status_dict["check_command_str"]
+    workspace_dict = {"operations_account_list": [{"pod_id": "pod_one", "account_route": "DEMO-account"}],
+        "summary_dict": {"pod_row_dict_list": [row_dict]}}
+    page_dict = build_tools_page_dict(workspace_dict, provider_obj, selected_pod_str="pod_one", as_of_ts=DEMO_NOW_TS)
+    tools_row_dict = next(row_dict for block_dict in page_dict["block_list"]
+        for group_dict in block_dict["group_list"] for row_dict in group_dict["row_list"]
+        if row_dict["key_str"] == "next_due")
+    assert status_dict["check_command_str"] == tools_row_dict["command_str"]
+    assert provider_obj._app_obj is None
 
 
 @pytest.mark.parametrize("mode_str,enabled_bool", [("paper", True), ("incubation", True), ("live", False)])

@@ -1,7 +1,9 @@
 """Tools integration: copy in production, isolated simulation only in demo."""
 
 from copy import deepcopy
+from dataclasses import asdict
 from datetime import timedelta
+from html.parser import HTMLParser
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -72,6 +74,46 @@ def test_production_catalog_and_status_need_no_financial_snapshot(workspace_tupl
     assert client_obj.get("/tools/status?pod=demo_1_0").status_code == 400
     assert client_obj.get("/tools?pod=foreign-pod").status_code == 404
     assert client_obj.get("/tools?tool=arbitrary_shell").status_code == 400
+    assert "Manual order entry is available in Dashboard V3 only" in html_str
+
+
+@pytest.mark.parametrize("ready_bool", [True, False])
+def test_rendered_submit_input_and_command_match_verified_plan(workspace_tuple, monkeypatch, ready_bool):
+    workspace_dict, provider_obj = workspace_tuple
+    pod_id_str = "demo_1_0"
+    target_obj = provider_obj.get_target_for_pod(pod_id_str)
+    summary_row_dict = next(row_dict for row_dict in workspace_dict["summary_dict"]["pod_row_dict_list"]
+        if row_dict["pod_id_str"] == pod_id_str)
+    summary_row_dict.update(latest_vplan_id_int=41, latest_vplan_status_str="ready")
+    read_list = []
+    release_dict = asdict(target_obj.release_obj)
+    source_dict = {"status_str": "ok", "selected_cycle_dict": {"current_bool": True, "vplan_id_int": 41},
+        "vplan_dict": {**release_dict, "vplan_id_int": 41, "status_str": "ready" if ready_bool else "submitted"},
+        "selected_release_dict": release_dict}
+    unchanged_dict = deepcopy(source_dict)
+    def read_cycles_dict(selected_pod_str, **kwargs_dict):
+        read_list.append((selected_pod_str, kwargs_dict))
+        return source_dict
+    monkeypatch.setattr(provider_obj, "get_pod_cycles_dict", read_cycles_dict)
+    html_str = _app_obj(workspace_tuple).test_client().get("/tools?pod=demo_1_0&tool=submit_vplan").get_data(as_text=True)
+    assert read_list == [(pod_id_str, {"as_of_ts": DEMO_NOW_TS, "vplan_id_int": 41})]
+    assert source_dict == unchanged_dict
+    section_str = html_str.split('id="tool-body-submit_vplan"', 1)[1].split('data-tool="post_execution_reconcile"', 1)[0]
+    element_list = []
+    class Parser(HTMLParser):
+        def handle_starttag(self, tag_str, attributes_list):
+            element_list.append((tag_str, dict(attributes_list)))
+    Parser().feed(section_str)
+    input_dict = next(attributes_dict for tag_str, attributes_dict in element_list if tag_str == "input")
+    assert input_dict["name"] == "vplan_id_int" and "required" in input_dict
+    assert input_dict["value"] == ("41" if ready_bool else "")
+    copy_dict = next(attributes_dict for tag_str, attributes_dict in element_list
+        if tag_str == "button" and "data-tool-copy-button" in attributes_dict)
+    assert ("disabled" not in copy_dict) is ready_bool
+    command_str = section_str.split('spellcheck="false">', 1)[1].split('</textarea>', 1)[0]
+    assert ("--vplan-id" in command_str) is ready_bool
+    if not ready_bool:
+        assert command_str == ""
 
 
 def test_simulation_cannot_be_enabled_without_demo():
@@ -99,6 +141,8 @@ def test_demo_flow_only_changes_memory_and_activity(workspace_tuple, monkeypatch
     assert "synthetic results" in html_str
     headers_dict = {"Origin": "http://localhost", "X-Alpha-Action-Token": service_obj.action_token_str}
     preview_body_dict = {"confirmed_bool": True}
+    if action_str == "submit_vplan":
+        preview_body_dict["vplan_id_int"] = 41
     if action_str == "manual_order":
         preview_body_dict["manual_order_dict"] = {"asset_str": "AAPL", "side_str": "BUY",
             "broker_order_type_str": "LMT", "quantity_int": 1, "limit_price_float": 100.0,

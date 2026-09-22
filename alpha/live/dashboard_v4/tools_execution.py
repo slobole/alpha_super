@@ -38,6 +38,8 @@ class SyntheticToolsActionProvider:
         result_dict = {"job_id_str": job_id_str, "pod_id_str": target_obj.release_obj.pod_id_str,
             "mode_str": "live", "action_name_str": action_name_str, "status_str": "succeeded",
             "completed_timestamp_str": datetime.now(UTC).isoformat()}
+        if action_name_str == "submit_vplan":
+            result_dict["vplan_id_int"] = target_obj.operator_confirmation_dict["requested_vplan_id_int"]
         if len(self.job_dict) >= 200:
             self.job_dict.pop(next(iter(self.job_dict)))
         self.job_dict[job_id_str] = result_dict

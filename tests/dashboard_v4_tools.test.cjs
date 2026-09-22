@@ -6,13 +6,16 @@ const vm = require('node:vm');
 const source_str = fs.readFileSync(path.join(__dirname, '../alpha/live/dashboard_v4/static/tools.js'), 'utf8');
 
 async function flush() { for (let index_int = 0; index_int < 12; index_int += 1) await Promise.resolve(); }
-function environment_obj({demo_bool = true, clipboard_fail_bool = false, selected_tool_str = ''} = {}) {
+function environment_obj({demo_bool = true, clipboard_fail_bool = false, selected_tool_str = '', vplan_id_str = '42',
+  ready_state_str = 'complete', auto_frame_bool = true} = {}) {
   const handler_dict = {};
   const timer_map = new Map();
   const request_list = [];
   const copied_list = [];
   const navigation_list = [];
   const popup_list = [];
+  const scroll_list = [];
+  const frame_list = [];
   let popup_fn = () => true;
   let timer_int = 0;
   let now_int = 1000000;
@@ -20,7 +23,8 @@ function environment_obj({demo_bool = true, clipboard_fail_bool = false, selecte
     const event_obj = {target: target_obj, preventDefault() {}, ...extra_dict};
     for (const callback_fn of handler_dict[name_str] || []) callback_fn(event_obj);
   }
-  const document_obj = {activeElement: null, addEventListener(name_str, callback_fn) { (handler_dict[name_str] ||= []).push(callback_fn); }};
+  const document_obj = {activeElement: null, readyState: ready_state_str,
+    addEventListener(name_str, callback_fn) { (handler_dict[name_str] ||= []).push(callback_fn); }};
   function element_obj(tag_str, attribute_dict = {}, parent_obj = null) {
     const node_obj = {tagName: tag_str.toUpperCase(), attribute_dict, parent_obj, children_list: [], hidden: false, disabled: false,
       required: false, value: '', textContent: '', selected_bool: false,
@@ -35,10 +39,17 @@ function environment_obj({demo_bool = true, clipboard_fail_bool = false, selecte
         ...(child_obj.matches(selector_str) ? [child_obj] : []), ...child_obj.querySelectorAll(selector_str)]); },
       querySelector(selector_str) { return this.querySelectorAll(selector_str)[0] || null; },
       appendChild(child_obj) { this.children_list.push(child_obj); }, replaceChildren() { this.children_list = []; },
+      scrollIntoView(options_dict) { scroll_list.push({element_obj: this, block_str: options_dict.block}); },
       focus() { document_obj.activeElement = this; }, select() { this.selected_bool = true; },
-      checkValidity() { return this.valid_bool !== false; },
+      checkValidity() {
+        if (this.valid_bool === false || (this.required && !this.value.trim())) return false;
+        if (attribute_dict.type !== 'number' || !this.value) return true;
+        const value_float = Number(this.value);
+        return Number.isFinite(value_float) && Number.isInteger(value_float)
+          && value_float >= Number(attribute_dict.min) && value_float <= Number(attribute_dict.max);
+      },
       reportValidity() { return this.querySelectorAll('[data-manual-field]').every(input_obj => input_obj.disabled || !input_obj.required || input_obj.value.trim())
-        && this.querySelectorAll('[data-tool-parameter]').every(input_obj => !input_obj.required || input_obj.value.trim()); }};
+        && this.querySelectorAll('[data-tool-parameter]').every(input_obj => input_obj.checkValidity()); }};
     if (parent_obj) parent_obj.children_list.push(node_obj);
     return node_obj;
   }
@@ -65,6 +76,11 @@ function environment_obj({demo_bool = true, clipboard_fail_bool = false, selecte
     const label_obj = element_obj('b', {'data-tool-result-label': ''}, result_obj);
     const message_obj = element_obj('p', {'data-tool-result-message': ''}, result_obj);
     const field_dict = {};
+    if (key_str === 'submit_vplan') {
+      const field_obj = element_obj('input', {name: 'vplan_id_int', type: 'number', min: '1', max: '2147483647',
+        'data-tool-parameter': '', 'data-flag': '--vplan-id'}, form_obj);
+      field_obj.value = vplan_id_str; field_obj.required = true; field_dict.vplan_id_int = field_obj;
+    }
     if (manual_bool) for (const [name_str, value_str] of Object.entries({asset_str: 'AAPL', side_str: 'BUY', broker_order_type_str: 'MKT',
       quantity_int: '4', limit_price_float: '', operator_id_str: 'operator', reason_str: 'demo ticket', confirmation_text_str: 'SUBMIT MANUAL ORDER'})) {
       const field_obj = element_obj('input', {name: name_str, 'data-manual-field': ''}, form_obj); field_obj.value = value_str;
@@ -75,12 +91,14 @@ function environment_obj({demo_bool = true, clipboard_fail_bool = false, selecte
   }
   const tick_obj = row_obj('tick');
   const eod_obj = row_obj('eod_snapshot');
+  const submit_obj = row_obj('submit_vplan');
   const manual_obj = row_obj('manual_order', true);
   let current_page_obj = page_obj;
   document_obj.querySelector = () => current_page_obj;
   document_obj.createElement = tag_str => element_obj(tag_str);
   const window_obj = {location: {origin: 'http://127.0.0.1:8114', assign(value_str) { navigation_list.push(value_str); }},
     confirm(message_str) { popup_list.push(message_str); return popup_fn(message_str); },
+    requestAnimationFrame(callback_fn) { frame_list.push(callback_fn); return frame_list.length; },
     addEventListener: document_obj.addEventListener,
     setTimeout(callback_fn, delay_int) { const key_int = ++timer_int; timer_map.set(key_int, {callback_fn, delay_int}); return key_int; },
     clearTimeout(key_int) { timer_map.delete(key_int); },
@@ -88,6 +106,8 @@ function environment_obj({demo_bool = true, clipboard_fail_bool = false, selecte
   class Clock extends Date { static now() { return now_int; } }
   vm.runInNewContext(source_str, {document: document_obj, window: window_obj, Date: Clock, URL, URLSearchParams, AbortController,
     navigator: {clipboard: {async writeText(value_str) { if (clipboard_fail_bool) throw new Error('denied'); copied_list.push(value_str); }}}});
+  function flush_frame() { for (const callback_fn of frame_list.splice(0)) callback_fn(); }
+  if (auto_frame_bool) flush_frame();
   function resolve(index_int, payload_dict, ok_bool = true) {
     request_list[index_int].resolve_fn({ok: ok_bool, async json() { return payload_dict; }});
   }
@@ -99,7 +119,7 @@ function environment_obj({demo_bool = true, clipboard_fail_bool = false, selecte
     return {demo_bool: true, pod_id_str: 'demo_1_0', action_name_str: 'tick', job_id_str: 'job_1', status_str, message_str: 'Synthetic response',
       poll_url_str: '/api/demo-tools/demo_1_0/jobs/job_1', ...overrides_dict};
   }
-  return {emit, page_obj, tick_obj, eod_obj, manual_obj, document_obj, request_list, copied_list, navigation_list, popup_list,
+  return {emit, page_obj, tick_obj, eod_obj, submit_obj, manual_obj, document_obj, request_list, copied_list, navigation_list, popup_list, scroll_list, flush_frame,
     set_popup(callback_fn) { popup_fn = callback_fn; }, pod_form_obj, pod_select_obj, timer_map, resolve, preview_response,
     job_response, element_obj, set_page(next_obj) { current_page_obj = next_obj; }, advance(milliseconds_int) { now_int += milliseconds_int; },
     run_timer(delay_int) { const entry_obj = [...timer_map.entries()].find(([, value_dict]) => value_dict.delay_int === delay_int);
@@ -258,8 +278,42 @@ test('selected tool deep link opens its row without requesting a preview and sur
   const env_obj = environment_obj({selected_tool_str: 'eod_snapshot'});
   assert.equal(env_obj.eod_obj.body_obj.hidden, false); assert.equal(env_obj.tick_obj.body_obj.hidden, true);
   assert.equal(env_obj.eod_obj.open_obj.getAttribute('aria-expanded'), 'true'); assert.equal(env_obj.request_list.length, 0);
+  assert.equal(env_obj.scroll_list.length, 1);
+  assert.equal(env_obj.scroll_list[0].element_obj, env_obj.eod_obj.root_obj);
+  assert.equal(env_obj.scroll_list[0].block_str, 'start');
   env_obj.pod_select_obj.value = 'demo_1_1'; env_obj.emit('submit', env_obj.pod_form_obj);
   assert.equal(env_obj.navigation_list[0], '/tools?pod=demo_1_1&tool=eod_snapshot');
+});
+
+test('status refresh and page resume never repeat the deep-link scroll', () => {
+  const env_obj = environment_obj({selected_tool_str: 'eod_snapshot'});
+  env_obj.emit('htmx:afterSwap', env_obj.page_obj);
+  env_obj.emit('htmx:afterSwap', env_obj.page_obj);
+  env_obj.emit('pageshow', env_obj.page_obj, {persisted: true});
+  env_obj.emit('visibilitychange', env_obj.page_obj);
+  env_obj.flush_frame();
+  assert.equal(env_obj.scroll_list.length, 1);
+  assert.equal(env_obj.eod_obj.body_obj.hidden, false);
+  assert.equal(env_obj.request_list.length, 0);
+});
+
+test('manually opening another tool does not scroll the page', () => {
+  const env_obj = environment_obj({selected_tool_str: 'eod_snapshot'});
+  env_obj.emit('click', env_obj.tick_obj.open_obj);
+  env_obj.emit('click', env_obj.tick_obj.open_obj);
+  env_obj.emit('click', env_obj.eod_obj.open_obj);
+  assert.equal(env_obj.scroll_list.length, 1);
+});
+
+test('missing or invalid tool selection never opens or scrolls a row', () => {
+  for (const selected_tool_str of ['', 'unknown_tool']) {
+    const env_obj = environment_obj({selected_tool_str});
+    assert.equal(env_obj.scroll_list.length, 0);
+    assert.equal(env_obj.tick_obj.body_obj.hidden, true);
+    assert.equal(env_obj.eod_obj.body_obj.hidden, true);
+    assert.equal(env_obj.manual_obj.body_obj.hidden, true);
+    assert.equal(env_obj.request_list.length, 0);
+  }
 });
 
 test('wrong job identity never becomes a completed result', async () => {
@@ -345,4 +399,104 @@ test('navigation during a pending cancellation cannot dispatch the waiting previ
   env_obj.resolve(1, {cancelled_bool: true}); await flush();
   assert.equal(env_obj.request_list.some(request_obj => /\/eod_snapshot\/preview$/.test(request_obj.url_str)), false);
   assert.equal(env_obj.eod_obj.box_obj.hidden, true);
+});
+
+test('submit Copy pins the prefilled VPlan once and editing replaces its ID without production requests', async () => {
+  const env_obj = environment_obj({demo_bool: false}); const row_obj = env_obj.submit_obj;
+  env_obj.emit('click', row_obj.copy_obj); await flush();
+  assert.match(env_obj.copied_list[0], /'--vplan-id' '42'$/);
+  assert.equal(env_obj.copied_list[0].match(/'--vplan-id'/g).length, 1);
+  row_obj.field_dict.vplan_id_int.value = '77'; env_obj.emit('input', row_obj.field_dict.vplan_id_int);
+  env_obj.emit('click', row_obj.copy_obj); await flush();
+  assert.match(env_obj.copied_list[1], /'--vplan-id' '77'$/);
+  assert.doesNotMatch(env_obj.copied_list[1], /'42'/);
+  assert.equal(env_obj.copied_list[1].match(/'--vplan-id'/g).length, 1);
+  assert.equal(env_obj.request_list.length, 0); assert.equal(env_obj.popup_list.length, 0);
+});
+
+test('cleared and invalid VPlan IDs block Copy and never send production requests', async () => {
+  const env_obj = environment_obj({demo_bool: false}); const row_obj = env_obj.submit_obj;
+  for (const value_str of ['', '0', '-1', '1.5', '2147483648', 'NaN', '1; bad']) {
+    row_obj.field_dict.vplan_id_int.value = value_str; env_obj.emit('input', row_obj.field_dict.vplan_id_int);
+    env_obj.emit('click', row_obj.copy_obj); await flush();
+    assert.equal(row_obj.copy_obj.disabled, true, value_str); assert.equal(row_obj.command_obj.value, '', value_str);
+  }
+  assert.equal(env_obj.copied_list.length, 0); assert.equal(env_obj.request_list.length, 0);
+});
+
+test('submit preview sends the exact numeric VPlan ID and editing it cancels the old preview', async () => {
+  const env_obj = environment_obj(); const row_obj = env_obj.submit_obj;
+  env_obj.emit('click', row_obj.open_obj); env_obj.emit('submit', row_obj.form_obj); await flush();
+  assert.deepEqual(JSON.parse(env_obj.request_list[0].options_dict.body), {confirmed_bool: true, vplan_id_int: 42});
+  assert.match(env_obj.request_list[0].url_str, /\/submit_vplan\/preview$/);
+  env_obj.resolve(0, env_obj.preview_response('submit_vplan', {preview_line_list: ['VPlan: 42']})); await flush();
+  row_obj.field_dict.vplan_id_int.value = '77'; env_obj.emit('input', row_obj.field_dict.vplan_id_int); await flush();
+  assert.equal(row_obj.box_obj.hidden, true); assert.equal(row_obj.confirm_obj.disabled, true);
+  assert.match(env_obj.request_list[1].url_str, /\/submit_vplan\/cancel$/);
+  env_obj.emit('click', row_obj.confirm_obj); await flush(); assert.equal(env_obj.request_list.length, 2);
+  env_obj.emit('submit', row_obj.form_obj); env_obj.resolve(1, {cancelled_bool: true}); await flush();
+  assert.deepEqual(JSON.parse(env_obj.request_list[2].options_dict.body), {confirmed_bool: true, vplan_id_int: 77});
+  assert.equal(env_obj.popup_list.length, 0);
+});
+
+test('invalid submit IDs never request even a synthetic preview', async () => {
+  for (const vplan_id_str of ['', '0', '-1', '2.5', '2147483648']) {
+    const env_obj = environment_obj({vplan_id_str});
+    env_obj.emit('click', env_obj.submit_obj.open_obj); env_obj.emit('submit', env_obj.submit_obj.form_obj); await flush();
+    assert.equal(env_obj.request_list.length, 0, vplan_id_str);
+  }
+});
+
+test('integral decimal and exponent IDs copy the same canonical integer sent to preview', async () => {
+  for (const [vplan_id_str, expected_int] of [['42.0', 42], ['4e1', 40], ['2147483647', 2147483647]]) {
+    const env_obj = environment_obj({vplan_id_str}); const row_obj = env_obj.submit_obj;
+    env_obj.emit('click', row_obj.copy_obj); await flush();
+    assert.ok(env_obj.copied_list[0].endsWith("'--vplan-id' '" + expected_int + "'"));
+    assert.equal(env_obj.copied_list[0].match(/'--vplan-id'/g).length, 1);
+    env_obj.emit('click', row_obj.open_obj); env_obj.emit('submit', row_obj.form_obj); await flush();
+    assert.equal(JSON.parse(env_obj.request_list[0].options_dict.body).vplan_id_int, expected_int);
+  }
+});
+
+test('VPlan range validation blocks Copy even if native input validity is bypassed', async () => {
+  const env_obj = environment_obj({demo_bool: false}); const row_obj = env_obj.submit_obj;
+  row_obj.field_dict.vplan_id_int.checkValidity = () => true;
+  for (const value_str of ['0', '2147483648', '4.2e-1', 'NaN']) {
+    row_obj.field_dict.vplan_id_int.value = value_str; env_obj.emit('input', row_obj.field_dict.vplan_id_int);
+    env_obj.emit('click', row_obj.copy_obj); await flush();
+    assert.equal(row_obj.copy_obj.disabled, true); assert.equal(row_obj.command_obj.value, '');
+  }
+  assert.equal(env_obj.copied_list.length, 0); assert.equal(env_obj.request_list.length, 0);
+});
+
+test('initial deep link waits until the frame after pageshow and history restoration', () => {
+  const env_obj = environment_obj({selected_tool_str: 'eod_snapshot', ready_state_str: 'interactive'});
+  assert.equal(env_obj.eod_obj.body_obj.hidden, false); assert.equal(env_obj.scroll_list.length, 0);
+  env_obj.document_obj.readyState = 'complete'; env_obj.emit('load', env_obj.page_obj); env_obj.flush_frame();
+  assert.equal(env_obj.scroll_list.length, 0);
+  env_obj.emit('pageshow', env_obj.page_obj, {persisted: false});
+  assert.equal(env_obj.scroll_list.length, 0);
+  env_obj.flush_frame();
+  assert.equal(env_obj.scroll_list.length, 1); assert.equal(env_obj.scroll_list[0].element_obj, env_obj.eod_obj.root_obj);
+  env_obj.emit('pageshow', env_obj.page_obj, {persisted: false}); env_obj.flush_frame();
+  assert.equal(env_obj.scroll_list.length, 1);
+});
+
+test('manual selection before page display cancels the delayed deep-link scroll', () => {
+  const env_obj = environment_obj({selected_tool_str: 'eod_snapshot', ready_state_str: 'interactive'});
+  env_obj.emit('click', env_obj.tick_obj.open_obj);
+  env_obj.document_obj.readyState = 'complete'; env_obj.emit('pageshow', env_obj.page_obj, {persisted: false}); env_obj.flush_frame();
+  assert.equal(env_obj.scroll_list.length, 0); assert.equal(env_obj.tick_obj.body_obj.hidden, false);
+});
+
+test('a queued deep-link frame cannot scroll after a manual choice, page replacement or resume', () => {
+  for (const change_str of ['manual', 'page', 'resume']) {
+    const env_obj = environment_obj({selected_tool_str: 'eod_snapshot', auto_frame_bool: false});
+    assert.equal(env_obj.scroll_list.length, 0);
+    if (change_str === 'manual') env_obj.emit('click', env_obj.tick_obj.open_obj);
+    else if (change_str === 'resume') { env_obj.emit('pagehide', env_obj.page_obj); env_obj.emit('pageshow', env_obj.page_obj, {persisted: true}); }
+    else { env_obj.set_page(null); env_obj.emit('htmx:afterSwap', env_obj.page_obj); }
+    env_obj.flush_frame();
+    assert.equal(env_obj.scroll_list.length, 0);
+  }
 });

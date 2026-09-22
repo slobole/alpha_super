@@ -8,6 +8,7 @@
   const cancellation_map = new Map();
   let page_obj = null;
   let active_obj = null;
+  let pending_scroll_dict = null;
 
   function state_dict(row_obj) {
     if (!state_map.has(row_obj)) state_map.set(row_obj, {generation_int: 0, phase_str: 'idle', nonce_str: '',
@@ -60,7 +61,13 @@
     for (const input_obj of row_obj.querySelectorAll('[data-tool-parameter]')) {
       const value_str = input_obj.value.trim();
       if ((input_obj.required && !value_str) || (value_str && !input_obj.checkValidity())) valid_bool = false;
-      if (value_str) parameter_list.push(input_obj.getAttribute('data-flag'), value_str);
+      let argument_str = value_str;
+      if (value_str && input_obj.name === 'vplan_id_int') {
+        const vplan_id_int = Number(value_str);
+        if (!Number.isInteger(vplan_id_int) || vplan_id_int < 1 || vplan_id_int > 2147483647) valid_bool = false;
+        argument_str = String(vplan_id_int);
+      }
+      if (value_str) parameter_list.push(input_obj.getAttribute('data-flag'), argument_str);
     }
     command_obj.value = valid_bool ? '& ' + [...argument_list, ...parameter_list].map(quote_str).join(' ') : '';
     copy_obj.disabled = !valid_bool || row_obj.getAttribute('data-tool-copy') !== 'true';
@@ -122,6 +129,12 @@
     const row_state_dict = state_dict(row_obj);
     if (!enabled_bool(row_obj) || row_obj.querySelector('[data-tool-preview]')?.disabled || !row_obj.querySelector('[data-tool-form]').reportValidity()) return;
     const body_dict = {confirmed_bool: true};
+    if (row_obj.getAttribute('data-tool-action') === 'submit_vplan') {
+      const input_obj = [...row_obj.querySelectorAll('[data-tool-parameter]')].find(item_obj => item_obj.name === 'vplan_id_int');
+      const vplan_id_int = Number(input_obj?.value);
+      if (!input_obj || !Number.isInteger(vplan_id_int) || vplan_id_int < 1 || vplan_id_int > 2147483647) return;
+      body_dict.vplan_id_int = vplan_id_int;
+    }
     if (row_obj.getAttribute('data-tool-action') === 'manual_order') {
       body_dict.manual_order_dict = manual_dict(row_obj);
       if (body_dict.manual_order_dict.confirmation_text_str !== 'SUBMIT MANUAL ORDER') {
@@ -276,6 +289,7 @@
     controls(row_obj);
   }
   function open_row(row_obj) {
+    pending_scroll_dict = null;
     if (active_obj === row_obj) {
       cancel_preview(row_obj, false); row_obj.querySelector('[data-tool-open]').setAttribute('aria-expanded', 'false');
       row_obj.querySelector('[data-tool-body]').hidden = true; active_obj = null; return;
@@ -289,16 +303,34 @@
     const row_state_dict = state_dict(row_obj);
     if (running_set.has(row_state_dict.phase_str) && row_state_dict.poll_url_str) poll_job(row_obj, row_state_dict.generation_int);
   }
+  function scroll_selected_row() {
+    const selection_dict = pending_scroll_dict;
+    if (!selection_dict) return;
+    // Native history restoration can run after deferred scripts. Wait for the
+    // first displayed frame after pageshow, while keeping later visits still.
+    window.requestAnimationFrame(() => {
+      if (pending_scroll_dict !== selection_dict) return;
+      pending_scroll_dict = null;
+      if (page_obj === selection_dict.page_obj && active_obj === selection_dict.row_obj) {
+        selection_dict.row_obj.scrollIntoView({block: 'start'});
+      }
+    });
+  }
   function install_page() {
     const next_obj = document.querySelector('[data-tools-page]');
     if (next_obj === page_obj) return;
+    pending_scroll_dict = null;
     if (active_obj) cancel_preview(active_obj, false);
     active_obj = null; page_obj = next_obj;
     if (page_obj) {
       const row_list = [...page_obj.querySelectorAll('[data-tool]')];
       for (const row_obj of row_list) { update_command(row_obj); update_manual(row_obj); controls(row_obj); }
       const selected_obj = row_list.find(row_obj => row_obj.getAttribute('data-tool') === page_obj.getAttribute('data-selected-tool'));
-      if (selected_obj) open_row(selected_obj);
+      if (selected_obj) {
+        open_row(selected_obj);
+        pending_scroll_dict = {page_obj, row_obj: selected_obj};
+        if (document.readyState === 'complete') scroll_selected_row();
+      }
     }
   }
   document.addEventListener('click', event_obj => {
@@ -331,6 +363,7 @@
     }
   });
   document.addEventListener('htmx:afterSwap', install_page);
-  window.addEventListener('pagehide', () => { if (active_obj) cancel_preview(active_obj, false); });
+  window.addEventListener('pageshow', event_obj => { if (!event_obj.persisted) scroll_selected_row(); });
+  window.addEventListener('pagehide', () => { pending_scroll_dict = null; if (active_obj) cancel_preview(active_obj, false); });
   install_page();
 })();

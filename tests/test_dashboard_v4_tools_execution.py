@@ -53,6 +53,8 @@ def test_all_synthetic_tools_without_database_subprocess_executor_or_broker(monk
     service_obj = _service_obj()
     for action_str in ("tick", "submit_vplan", "post_execution_reconcile", "eod_snapshot", "compare_reference", "manual_order"):
         body_dict = {"confirmed_bool": True}
+        if action_str == "submit_vplan":
+            body_dict["vplan_id_int"] = 41
         if action_str == "manual_order":
             body_dict["manual_order_dict"] = {"asset_str": "MSFT", "side_str": "SELL", "quantity_int": 2,
                 "broker_order_type_str": "MKT", "time_in_force_str": "DAY", "operator_id_str": "demo",

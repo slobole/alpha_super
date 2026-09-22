@@ -18,6 +18,7 @@ from alpha.live.dashboard_v3.local_workspace import (
 from alpha.live.dashboard_v4.evidence import load_cycle_evidence_dict
 from alpha.live.dashboard_v4.pod_data import load_pod_cycles_dict
 from alpha.live.dashboard_v4.scheduler_status import load_scheduler_status_dict
+from alpha.live.dashboard_v4.tools import _arguments_list, powershell_command_str
 
 
 class LiveReadOnlyApp(DashboardApp):
@@ -45,10 +46,11 @@ class LiveDataProvider(DashboardDataProvider):
         if status_dict["state_str"] in {"late", "stopped", "error"}:
             # Copy-only diagnostic, never invoked by the dashboard. next_due
             # synchronizes local release metadata when the operator runs it.
-            argument_list = ["uv", "run", "python", "-m", "alpha.live.scheduler_service", "next_due",
-                "--mode", "live", "--pod-id", pod_id_str, "--releases-root", self.releases_root_path_str,
-                "--db-path", target_obj.db_path_str]
-            status_dict["check_command_str"] = "& " + " ".join("'" + str(argument_str).replace("'", "''") + "'" for argument_str in argument_list)
+            argument_list = _arguments_list("next_due", "scheduler", "pod", target_obj, {
+                "releases_root_str": str(self.releases_root_path_str or ""),
+                "db_path_str": str(target_obj.db_path_str or ""),
+                "log_path_str": str(self.event_log_path_str or "")})
+            status_dict["check_command_str"] = powershell_command_str(argument_list)
         return status_dict
 
     def get_pod_cycles_dict(self, pod_id_str, *, as_of_ts, decision_plan_id_int=None, vplan_id_int=None):
