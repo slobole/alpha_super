@@ -147,7 +147,7 @@ function environment_obj(valid_ms = 120000, initial_latency_ms = 0, clock_timest
   const document_obj = {
     activeElement: null,
     getElementById: () => current_obj.shell_obj,
-    querySelectorAll: () => [],
+    querySelectorAll: (selector_str) => current_obj.selector_dict[selector_str] || [],
     addEventListener: (name_str, handler_fn) => { handler_dict[name_str] = handler_fn; },
     createRange: () => {
       let root_obj, end_obj, end_int;
@@ -208,6 +208,51 @@ function performance_stamp_obj(env_obj, valid_ms) {
   // The server replaces operational header/rail fragments, not the report.
   selector_dict['[data-status-label]'] = element_obj('System OK');
   return source_obj;
+}
+
+function period_link_obj(env_obj) {
+  const result_obj = element_obj();
+  result_obj.setAttribute('data-period', 'All');
+  result_obj.focused_int = 0;
+  result_obj.focus = (options_obj) => { result_obj.focused_int += 1; result_obj.focus_options_obj = options_obj; env_obj.focus(result_obj); };
+  env_obj.current_obj.selector_dict['#overview-shell [data-period]'] = [result_obj];
+  return result_obj;
+}
+
+test('a period link still focused at replacement is restored once without scrolling', () => {
+  const env_obj = environment_obj();
+  env_obj.focus(period_link_obj(env_obj));
+  env_obj.fire('htmx:beforeRequest');
+  env_obj.fire('htmx:beforeSwap');
+  env_obj.replace();
+  env_obj.focus(null);
+  const refreshed_obj = period_link_obj(env_obj);
+  env_obj.fire('htmx:afterSwap');
+  env_obj.fire('htmx:afterSettle');
+  assert.equal(refreshed_obj.focused_int, 1);
+  assert.equal(refreshed_obj.focus_options_obj.preventScroll, true);
+  env_obj.fire('htmx:afterSettle');
+  assert.equal(refreshed_obj.focused_int, 1);
+});
+
+for (const moved_str of ['during request', 'after swap']) {
+  test(`period restoration cannot override chart focus moved ${moved_str}`, () => {
+    const env_obj = environment_obj();
+    env_obj.focus(period_link_obj(env_obj));
+    env_obj.fire('htmx:beforeRequest');
+    const chart_day_obj = element_obj();
+    chart_day_obj.setAttribute('data-chart-day', '2026-09-18');
+    if (moved_str === 'during request') env_obj.focus(chart_day_obj);
+    env_obj.fire('htmx:beforeSwap');
+    env_obj.replace();
+    env_obj.focus(null);
+    const refreshed_obj = period_link_obj(env_obj);
+    env_obj.fire('htmx:afterSwap');
+    // The chart handler restores focus here, or the user moves it before settle.
+    env_obj.focus(chart_day_obj);
+    env_obj.fire('htmx:afterSettle');
+    assert.equal(refreshed_obj.focused_int, 0);
+  });
 }
 
 function performance_response(env_obj, successful_bool = true) {

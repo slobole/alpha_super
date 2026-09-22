@@ -103,10 +103,39 @@ def _x_ticks_list(start_float, end_float, *, bars_bool):
         for index_int, tick_obj in enumerate(date_list)]
 
 
+def _interaction_list(series_list, date_list, *, start_float, end_float, unit_str):
+    # *** CRITICAL *** exact retrospective date lookup only. A missing saved
+    # value stays missing; SOD never inherits the same day's closing value.
+    ordered_list = sorted(set(date_list), key=_date_float)
+    horizontal_list = [(_date_float(date_str) - start_float) / max(.75, end_float - start_float) * 100
+        for date_str in ordered_list]
+    point_map_list = [{point_dict["market_date_str"]: point_dict for point_dict in series_dict["point_list"]}
+        for series_dict in series_list]
+    result_list = []
+    for index_int, date_str in enumerate(ordered_list):
+        horizontal_float = horizontal_list[index_int]
+        left_float = (horizontal_list[index_int - 1] + horizontal_float) / 2 if index_int else 0.
+        right_float = (horizontal_float + horizontal_list[index_int + 1]) / 2 if index_int + 1 < len(ordered_list) else 100.
+        value_list = []
+        for series_dict, point_map_dict in zip(series_list, point_map_list):
+            point_dict = point_map_dict.get(date_str)
+            value_list.append({"name_str": series_dict["name_str"] or {"pct": "Return", "usd": "Value"}.get(unit_str, "Index"),
+                "color_str": series_dict["color_str"] or "var(--blue)",
+                "label_str": point_dict["label_str"] if point_dict else "—",
+                "x_percent_float": point_dict["x_percent_float"] if point_dict else horizontal_float,
+                "y_percent_float": point_dict["y_percent_float"] if point_dict else None,
+                "available_bool": point_dict is not None})
+        result_list.append({"date_str": date_str, "date_label_str": date_str[:-4] + " · Start" if date_str.endswith(" SOD") else date_str,
+            "x_percent_float": horizontal_float, "hit_left_float": left_float, "hit_width_float": right_float - left_float,
+            "value_list": value_list})
+    return result_list
+
+
 def _drawing_dict(series_list, date_list, *, unit_str, bars_bool=False, pods_bool=False):
     result_dict = {"available_bool": False, "series_list": [], "tick_list": [], "x_tick_list": [], "bar_list": [],
         "height_int": 235 if pods_bool else 216, "width_int": WIDTH_INT, "bars_bool": bars_bool,
-        "pods_bool": pods_bool, "baseline_y_float": None, "end_dict": None, "gutter_int": 40}
+        "pods_bool": pods_bool, "baseline_y_float": None, "end_dict": None, "gutter_int": 40,
+        "interaction_list": [], "default_dict": None}
     all_point_list = [point_dict for series_dict in series_list for segment_list in series_dict["segment_list"] for point_dict in segment_list]
     if not all_point_list:
         return result_dict
@@ -169,6 +198,10 @@ def _drawing_dict(series_list, date_list, *, unit_str, bars_bool=False, pods_boo
             value_float = end_dict["value_float"]
             divisor_float, suffix_str = (1_000_000., "m") if abs(value_float) >= 1_000_000 else (1_000., "k")
             result_dict["end_dict"]["label_str"] = ("−" if value_float < 0 else "") + f"${abs(value_float) / divisor_float:.1f}" + suffix_str
+    if not bars_bool:
+        result_dict["interaction_list"] = _interaction_list(result_dict["series_list"], date_list,
+            start_float=start_float, end_float=end_float, unit_str=unit_str)
+        result_dict["default_dict"] = result_dict["interaction_list"][-1]
     return result_dict
 
 
@@ -195,7 +228,7 @@ def build_history_chart_dict(daily_list, *, value_field_str="nav_float", unit_st
 
 def add_pod_drawing_dict(chart_dict):
     """Reuse existing dated Pod values and their exact segment boundaries."""
-    series_list, date_list = [], []
+    series_list, date_list = [], list(chart_dict.get("date_list", []))
     for source_dict in chart_dict.get("series_list", []):
         # Dated points are evidence; rounded SVG coordinates are never identity.
         segment_list = source_dict["segment_point_list"]

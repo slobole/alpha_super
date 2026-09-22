@@ -160,6 +160,15 @@ availability check, or permission to trade. It changes no scheduler or order gat
   same-date source: validated broker EOD, or complete finalized IBKR values.
   Unknown cash is not estimated; no residual
   "Free cash" is manufactured.
+- Every history curve supports pointer, tap and keyboard inspection of its saved
+  observations. The readout defaults to the latest date; a selected date adds a
+  crosshair and matching series markers. Return by pod retains its existing
+  index-100 units and Pod colors. Missing observations display a dash, with no
+  marker or interpolation. Start-of-day and that day's close stay separate.
+  Arrow keys and Home/End move between dates; Escape returns to the latest date.
+  Same-scope refreshes preserve a focused date using the newly returned values.
+  Allocation donuts expose their existing slice labels, including cash, on
+  hover, tap or focus. These interactions do not fetch prices or calculate returns.
 - Production has no executable action or export routes. Non-read methods return
   403 before acquisition; only the explicitly enabled synthetic demo allows
   its fixed preview, confirmation and cancellation requests.

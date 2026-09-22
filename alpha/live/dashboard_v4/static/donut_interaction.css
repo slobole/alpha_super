@@ -1,0 +1,7 @@
+/* Saved allocation values only; keep the original slice colours and geometry. */
+.donut-inspector { min-width: 0; }
+.donut-inspector .donut text { pointer-events: none; }
+.donut-inspector .slice { cursor: pointer; }
+.donut-inspector .slice.is-donut-active,
+.donut-inspector .slice:focus-visible { stroke: var(--ink); stroke-width: 3; outline: none; }
+.donut-readout { min-height: 2.6em; padding: 0 8px; color: var(--ink); font-size: 12px; line-height: 1.3; text-align: center; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }

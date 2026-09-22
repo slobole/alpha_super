@@ -259,13 +259,13 @@
   document.addEventListener('htmx:beforeRequest', (event_obj) => {
     if (!overview_event(event_obj)) return;
     request_start_ms = Date.now();
-    const active_obj = document.activeElement;
-    focus_period_str = active_obj ? active_obj.getAttribute('data-period') || '' : '';
   });
   document.addEventListener('htmx:beforeSwap', (event_obj) => {
     if (!overview_event(event_obj) || event_obj.detail.shouldSwap === false || event_obj.detail.isError) return;
     const shell_obj = document.getElementById('overview-shell');
     // Capture at replacement time, not request start: a cleared selection stays cleared.
+    const active_obj = document.activeElement;
+    focus_period_str = active_obj ? active_obj.getAttribute('data-period') || '' : '';
     selection_snapshot_obj = shell_obj ? capture_selection(shell_obj) : null;
     const check_obj = shell_obj && shell_obj.querySelector('.scheduler-check');
     const command_obj = check_obj && check_obj.querySelector('code');
@@ -315,14 +315,17 @@
   });
   document.addEventListener('htmx:afterSettle', (event_obj) => {
     if (!overview_event(event_obj) || !focus_period_str) return;
+    const period_str = focus_period_str;
+    focus_period_str = '';
+    const active_obj = document.activeElement;
+    if (active_obj && active_obj !== document.body) return;
     const period_list = document.querySelectorAll('#overview-shell [data-period]');
     for (const period_obj of period_list) {
-      if (period_obj.getAttribute('data-period') === focus_period_str) {
+      if (period_obj.getAttribute('data-period') === period_str) {
         period_obj.focus({preventScroll: true});
         break;
       }
     }
-    focus_period_str = '';
   });
   // Subtract the whole acquisition interval, conservatively, so transport or
   // a sleeping tab cannot extend the server's 120-second evidence lifetime.

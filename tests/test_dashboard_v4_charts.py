@@ -2,6 +2,8 @@
 
 from copy import deepcopy
 from datetime import date, timedelta
+from html.parser import HTMLParser
+import json
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
@@ -150,3 +152,136 @@ def test_shared_template_uses_unscaled_html_labels_and_soft_area():
     assert '<text' not in html_str
     assert 'preserveAspectRatio="none"' in html_str
     assert "+5.10%" in html_str
+
+
+def _render_str(drawing_dict, label_str="Portfolio return", daily_dict=None):
+    template_root_obj = Path(__file__).parents[1] / "alpha/live/dashboard_v4/templates"
+    environment_obj = Environment(loader=FileSystemLoader(template_root_obj), undefined=StrictUndefined, autoescape=True)
+    return environment_obj.get_template("_chart.html").module.financial_chart(drawing_dict, label_str, daily_dict)
+
+
+def _elements_list(html_str):
+    class ChartParser(HTMLParser):
+        def handle_starttag(self, tag_str, attribute_list):
+            element_list.append((tag_str, dict(attribute_list)))
+
+    element_list = []
+    ChartParser().feed(html_str)
+    return element_list
+
+
+@pytest.mark.parametrize("unit_str,value_float,label_str,name_str", [
+    ("usd", 1234567.891, "$1,234,567.89", "Value"),
+    ("usd", -10.126, "−$10.13", "Value"),
+    ("pct", .1234567, "+12.35%", "Return"),
+    ("index", 112.34567, "112.35", "Index")])
+def test_interaction_retains_exact_saved_point_and_existing_unit_format(unit_str, value_float, label_str, name_str):
+    drawing_dict = _drawing_dict([value_float], unit_str=unit_str)
+    day_dict = drawing_dict["default_dict"]
+    point_dict = drawing_dict["series_list"][0]["point_list"][0]
+    value_dict = day_dict["value_list"][0]
+    assert point_dict["value_float"] == value_float
+    assert value_dict == {"name_str": name_str, "color_str": "var(--blue)", "label_str": label_str,
+        "x_percent_float": point_dict["x_percent_float"], "y_percent_float": point_dict["y_percent_float"], "available_bool": True}
+    assert day_dict["hit_left_float"] == 0 and day_dict["hit_width_float"] == 100
+
+
+def test_all_saved_dates_remain_selectable_including_internal_and_latest_gaps():
+    drawing_dict = _drawing_dict([10., None, 20., None])
+    day_list = drawing_dict["interaction_list"]
+    assert [day_dict["date_str"] for day_dict in day_list] == ["2026-06-01", "2026-06-02", "2026-06-03", "2026-06-04"]
+    assert [day_dict["value_list"][0]["label_str"] for day_dict in day_list] == ["$10.00", "—", "$20.00", "—"]
+    assert drawing_dict["default_dict"] == day_list[-1]
+    assert drawing_dict["end_dict"]["market_date_str"] == "2026-06-03"
+    assert len(drawing_dict["series_list"][0]["segment_list"]) == 2
+    for day_dict in (day_list[1], day_list[3]):
+        assert day_dict["value_list"][0]["available_bool"] is False
+        assert day_dict["value_list"][0]["y_percent_float"] is None
+    assert sum(day_dict["hit_width_float"] for day_dict in day_list) == pytest.approx(100.)
+    for left_dict, right_dict in zip(day_list, day_list[1:]):
+        assert left_dict["hit_left_float"] + left_dict["hit_width_float"] == pytest.approx(right_dict["hit_left_float"])
+
+
+def test_interaction_sorts_unique_date_keys_without_merging_start_and_close():
+    daily_list = [{"market_date_str": "2026-06-01 SOD", "nav_float": 100.},
+        {"market_date_str": "2026-06-01", "nav_float": 90.}]
+    drawing_dict = build_history_chart_dict(daily_list)["drawing_dict"]
+    start_dict, close_dict = drawing_dict["interaction_list"]
+    assert start_dict["date_label_str"] == "2026-06-01 · Start"
+    assert close_dict["date_label_str"] == "2026-06-01"
+    assert start_dict["x_percent_float"] == 0 and close_dict["x_percent_float"] == 100
+    assert start_dict["value_list"][0]["label_str"] == "$100.00"
+    assert close_dict["value_list"][0]["label_str"] == "$90.00"
+    assert start_dict["hit_width_float"] == close_dict["hit_width_float"] == 50
+
+
+def test_pod_date_union_preserves_individual_gaps_and_full_date_input():
+    first_list = [{"market_date_str": "2026-06-01 SOD", "value_float": 100.},
+        {"market_date_str": "2026-06-03", "value_float": 110.}]
+    second_list = [{"market_date_str": "2026-06-02", "value_float": 100.},
+        {"market_date_str": "2026-06-03", "value_float": 95.}]
+    chart_dict = {"date_list": ["2026-06-04", "2026-06-03", "2026-06-02"], "series_list": [
+        {"name_str": "Long Pod A name", "color_str": "#228855", "point_list": first_list, "segment_point_list": [[first_list[0]], [first_list[1]]]},
+        {"name_str": "Pod B", "color_str": "#225588", "point_list": second_list, "segment_point_list": [second_list]}]}
+    before_dict = deepcopy(chart_dict)
+    drawing_dict = add_pod_drawing_dict(chart_dict)["drawing_dict"]
+    assert chart_dict == before_dict
+    day_list = drawing_dict["interaction_list"]
+    assert [day_dict["date_str"] for day_dict in day_list] == ["2026-06-01 SOD", "2026-06-02", "2026-06-03", "2026-06-04"]
+    assert [[value_dict["label_str"] for value_dict in day_dict["value_list"]] for day_dict in day_list] == [
+        ["100.00", "—"], ["—", "100.00"], ["110.00", "95.00"], ["—", "—"]]
+    assert len(drawing_dict["series_list"][0]["segment_list"]) == 2
+    assert [value_dict["color_str"] for value_dict in day_list[-1]["value_list"]] == ["#228855", "#225588"]
+    assert [value_dict["name_str"] for value_dict in day_list[-1]["value_list"]] == ["Long Pod A name", "Pod B"]
+
+
+def test_line_markup_has_exact_date_columns_reusable_markers_and_safe_series_names():
+    name_str = 'Pod "A" <script>alert(1)</script> & a very long identity'
+    point_list = [{"market_date_str": "2026-06-01 SOD", "value_float": 100.},
+        {"market_date_str": "2026-06-02", "value_float": 105.}]
+    chart_dict = {"series_list": [{"name_str": name_str, "color_str": "#228855", "point_list": point_list, "segment_point_list": [point_list]}]}
+    drawing_dict = add_pod_drawing_dict(chart_dict)["drawing_dict"]
+    html_str = _render_str(drawing_dict, 'Return by pod "selected"')
+    element_list = _elements_list(html_str)
+    root_dict = next(attribute_dict for _, attribute_dict in element_list if "data-history-chart" in attribute_dict)
+    assert root_dict["role"] == "group"
+    assert root_dict["data-chart-id"] == 'Return by pod "selected"'
+    assert root_dict["data-chart-default"] == "2026-06-02"
+    button_list = [attribute_dict for tag_str, attribute_dict in element_list if tag_str == "button"]
+    assert [attribute_dict["tabindex"] for attribute_dict in button_list] == ["-1", "0"]
+    assert [attribute_dict["data-chart-day"] for attribute_dict in button_list] == ["2026-06-01 SOD", "2026-06-02"]
+    for button_dict, day_dict in zip(button_list, drawing_dict["interaction_list"]):
+        assert json.loads(button_dict["data-chart-values"]) == day_dict["value_list"]
+        assert button_dict["aria-label"] == day_dict["date_label_str"] + " · " + name_str + " " + day_dict["value_list"][0]["label_str"]
+        assert float(button_dict["data-chart-x"]) == day_dict["x_percent_float"]
+    marker_list = [attribute_dict for _, attribute_dict in element_list if "data-chart-marker" in attribute_dict]
+    assert len(marker_list) == 1 and marker_list[0]["data-series-index"] == "0" and "hidden" in marker_list[0]
+    assert any("data-chart-crosshair" in attribute_dict and "hidden" in attribute_dict for _, attribute_dict in element_list)
+    assert any("data-chart-value" in attribute_dict and attribute_dict["data-series-index"] == "0" for _, attribute_dict in element_list)
+    assert not any(tag_str == "script" for tag_str, _ in element_list)
+    assert not any(attribute_dict.get("class") == "chart-hit" for _, attribute_dict in element_list)
+    assert any(attribute_dict.get("class") == "v4-chart-dot" for _, attribute_dict in element_list)
+    assert 'data-chart-number>105.00' in html_str
+
+
+def test_empty_and_bar_drawing_do_not_add_line_interaction_markup():
+    empty_dict = add_pod_drawing_dict({"series_list": []})["drawing_dict"]
+    assert empty_dict["interaction_list"] == [] and empty_dict["default_dict"] is None
+    assert "data-history-chart" not in _render_str(empty_dict)
+    drawing_dict = _drawing_dict([-12.3, 20.], bars_bool=True)
+    assert drawing_dict["interaction_list"] == [] and drawing_dict["default_dict"] is None
+    day_list = [{"date_str": "2026-06-01", "date_label_str": "2026-06-01", "pnl_str": "−$12.30", "return_str": "−1.00%",
+        "tone_str": "negative", "readout_str": "2026-06-01 · −$12.30 · −1.00%", "hit_left_float": 0., "hit_width_float": 50., "extreme_bool": False},
+        {"date_str": "2026-06-02", "date_label_str": "2026-06-02", "pnl_str": "+$20.00", "return_str": "+2.00%",
+        "tone_str": "positive", "readout_str": "2026-06-02 · +$20.00 · +2.00%", "hit_left_float": 50., "hit_width_float": 50., "extreme_bool": False}]
+    html_str = _render_str(drawing_dict, "Daily P&L", {"day_list": day_list, "last_dict": day_list[-1]})
+    assert "data-history-chart" not in html_str and "data-chart-day" not in html_str
+    button_list = [attribute_dict for tag_str, attribute_dict in _elements_list(html_str) if tag_str == "button"]
+    assert len(button_list) == 2
+    for button_dict, day_dict in zip(button_list, day_list):
+        assert button_dict["data-daily-day"] == day_dict["date_str"]
+        assert button_dict["data-pnl"] == day_dict["pnl_str"]
+        assert button_dict["data-return"] == day_dict["return_str"]
+        assert button_dict["data-tone"] == day_dict["tone_str"]
+        assert button_dict["aria-label"] == day_dict["readout_str"]
+    assert [button_dict["tabindex"] for button_dict in button_list] == ["-1", "0"]
