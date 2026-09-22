@@ -125,7 +125,9 @@ def test_page_and_refresh_use_operations_only_and_preserve_shared_shell(monkeypa
     assert any(tag_str == "a" and attribute_dict.get("href") == "/system"
         and "syslight" in attribute_dict.get("class", "").split()
         for tag_str, attribute_dict in page_obj.element_list)
-    assert not any(attribute_dict.get("href") in {"#", "/tools", "tools.html"}
+    assert any(attribute_dict.get("href") == "/tools"
+        for _, attribute_dict in page_obj.element_list)
+    assert not any(attribute_dict.get("href") in {"#", "tools.html"}
         for _, attribute_dict in page_obj.element_list)
     for label_str in ("Runs all the time", "Runs on a schedule", "Data and space", "What should run"):
         assert label_str in html_str

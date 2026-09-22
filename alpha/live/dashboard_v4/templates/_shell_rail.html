@@ -11,7 +11,7 @@
     <a class="{{ 'on' if performance_page_dict is defined else '' }}" href="{{ url_for('performance') }}"{% if performance_page_dict is defined %} aria-current="page"{% endif %}>{{ icon('performance') }}Performance</a>
     <a class="{{ 'on' if activity_page_dict is defined else '' }}" href="{{ url_for('activity') }}"{% if activity_page_dict is defined %} aria-current="page"{% endif %}>{{ icon('activity') }}Activity</a>
     <a class="{{ 'on' if system_page_dict is defined else '' }}" href="{{ url_for('system') }}"{% if system_page_dict is defined %} aria-current="page"{% endif %}>{{ icon('system') }}System health</a>
-    <a aria-disabled="true" title="Tools is not available yet">{{ icon('tools') }}Tools</a>
+    <a class="{{ 'on' if tools_page_dict is defined else '' }}" href="{{ url_for('tools') }}"{% if tools_page_dict is defined %} aria-current="page"{% endif %}>{{ icon('tools') }}Tools</a>
   </nav>
   <div class="rail-foot">V4{% if overview_dict.demo_bool %} · sample data{% endif %}</div>
 </aside>

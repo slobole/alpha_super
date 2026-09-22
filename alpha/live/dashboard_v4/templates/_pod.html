@@ -14,7 +14,7 @@
   <div class="row muted pod-identity" data-selection-key="pod-identity"><span class="tag tag-live">LIVE</span><span>{{ pod_page_dict.cadence_str }}</span><span class="mono">{{ pod_page_dict.pod_id_str }} · {{ pod_page_dict.account_str }}</span></div>
   {% if not pod_page_dict.attention_dict %}<p class="verdict"><b data-verdict>{{ pod_page_dict.header_dict.verdict_str }}</b> <span data-verdict-detail>{{ pod_page_dict.header_dict.detail_str }}</span></p>{% endif %}
   {% if not pod_page_dict.attention_dict %}<p class="muted" data-selection-key="current-next">Next: <b data-pod-next>{{ pod_page_dict.header_dict.next_str }}{% if pod_page_dict.header_dict.next_time_str %} <span class="mono">{{ pod_page_dict.header_dict.next_time_str }}</span>{% endif %}</b>{% if pod_page_dict.header_dict.next_detail_str %} · <span data-next-detail>{{ pod_page_dict.header_dict.next_detail_str }}</span>{% endif %}</p>{% endif %}
-</div></div>
+</div><a class="btn btn-sm" href="{{ url_for('tools', pod=pod_page_dict.pod_id_str) }}">{{ icon('tools') }}Tools</a></div>
 
 {% if pod_page_dict.attention_dict %}<section class="issue" aria-label="Pod needs attention"><div><h3>{{ mark(pod_page_dict.attention_dict.state_str) }}<span data-pod-now>{{ pod_page_dict.attention_dict.title_str }}</span></h3><p data-now-detail>{{ pod_page_dict.attention_dict.detail_str }}</p>
 {% if pod_page_dict.attention_dict.scheduler_note_str %}<p data-status-detail>{{ pod_page_dict.attention_dict.scheduler_note_str }}</p>{% endif %}

@@ -11,15 +11,18 @@ def main() -> int:
     parser_obj.add_argument("--host", default="127.0.0.1")
     parser_obj.add_argument("--port", type=int, default=8084)
     parser_obj.add_argument("--demo", action="store_true", help="Synthetic local preview; no live data or config.env.")
+    parser_obj.add_argument("--demo-tools", action="store_true", help="Simulate Tools actions in memory; requires --demo.")
     parser_obj.add_argument("--read-only", action="store_true", default=True, help="Always enforced in this release.")
     parser_obj.add_argument("--skip-env-file", action="store_true")
     parser_obj.add_argument("--releases-root")
     parser_obj.add_argument("--config")
     parser_obj.add_argument("--performance-db")
     args_obj = parser_obj.parse_args()
+    if args_obj.demo_tools and not args_obj.demo:
+        parser_obj.error("--demo-tools requires --demo; production execution is not connected.")
     if args_obj.demo:
         from alpha.live.dashboard_v4.demo import create_demo_app
-        flask_app_obj = create_demo_app()
+        flask_app_obj = create_demo_app(demo_tools_bool=args_obj.demo_tools)
     else:
         if not args_obj.skip_env_file:
             from scripts.norgate_config_env import load_config_env_file

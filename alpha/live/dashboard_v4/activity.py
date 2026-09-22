@@ -33,6 +33,7 @@ EVENT_DICT = {
     "scheduler_started": ("system", "done", "Scheduler started.", "events"),
     "scheduler_error_retry": ("system", "fail", "Scheduler error. Retry scheduled.", "events"),
     "operator_action_requested": ("operator", "now", "Operator action requested.", "events"),
+    "operator_demo_action": ("operator", "skip", "Simulated tool action. No real command was run.", "events"),
     "manual_order_submit_requested": ("operator", "now", "Manual order requested.", "events"),
     "manual_order_submit_completed": ("operator", "now", "Manual order submission recorded.", "events"),
     "manual_order_submit_failed": ("operator", "fail", "Manual order submission failed.", "events"),

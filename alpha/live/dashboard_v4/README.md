@@ -3,7 +3,8 @@
 Native Flask/Jinja implementation of Mockup D's operator pages, following
 `docs/plans/DASHBOARD_V4_HANDOFF.md`. Select a Pod from the sidebar or Overview
 to open `/pods/<pod_id>`. Positions, Performance, Activity and System health are
-also available. Tools remains disabled. PAPER and INCUBATION are deferred.
+also available. Tools lists scoped commands for copying. PAPER and INCUBATION
+are deferred.
 
 ## Run beside V3
 
@@ -30,6 +31,39 @@ Optional paths: `--releases-root`, `--config`, `--performance-db`.
 localhost. There is no flag that enables trading or other executable actions.
 This command starts a local development server; no service deployment or V3
 cutover is part of this phase.
+
+## Tools
+
+`/tools` lists saved-state inspection and commands that can change state in two
+panels. Selecting an enabled LIVE Pod scopes copyable PowerShell commands to its
+current release and configured state path. Required arguments are entered before
+copying. Copying does not run a command. Pod and System pages link to Tools.
+Diagnostics remain copyable when the saved database is unavailable, provided the
+current release identity is verified. No credentials or environment-file contents
+are rendered.
+
+Production execution is not connected. There is no production enable-actions flag.
+For a reviewable, isolated demonstration only:
+
+```powershell
+.venv\Scripts\python.exe -B -m alpha.live.dashboard_v4 --demo --demo-tools --port 8114
+```
+
+This adds simulated previews, a 120-second one-use confirmation, and in-memory
+results for Tick, Submit, Reconcile, EOD, Reference comparison and Manual order.
+Confirm opens a native "Are you sure?" dialog with the action, Pod, account and
+preview details. Cancel sends no execution request and keeps an unexpired preview.
+Accept rechecks the selected tool and expiry before sending the one-use request;
+an unavailable dialog never counts as consent. The server also requires the
+explicit browser-confirmation field.
+The `/api/demo-tools/` routes accept only the synthetic provider. They never invoke
+the trading runner, connect to IBKR, or write trading state. Demo Activity labels
+these records as simulated; restarting the demo clears them. `--demo-tools`
+without `--demo` is rejected. Connecting these actions to production requires
+separate, specific owner approval and is not implemented here.
+
+The header and sidebar refresh every 15 seconds through `/tools/status`; this
+does not replace typed fields, previews, or results.
 
 ## Data and display contract
 
@@ -118,8 +152,10 @@ availability check, or permission to trade. It changes no scheduler or order gat
   same-date source: validated broker EOD, or complete finalized IBKR values.
   Unknown cash is not estimated; no residual
   "Free cash" is manufactured.
-- No action/token/export/executor routes are registered. Non-read methods return
-  403 before acquisition. Fonts, HTMX and scripts are served locally. HTMX history
+- Production has no executable action or export routes. Non-read methods return
+  403 before acquisition; only the explicitly enabled synthetic demo allows
+  its fixed preview, confirmation and cancellation requests.
+  Fonts, HTMX and scripts are served locally. HTMX history
   storage is disabled; period changes are normal page navigation.
 
 ## Evidence limits
@@ -191,7 +227,7 @@ and database failures. The selected cycle has a separate badge and verdict.
 - Positions show saved quantities and their own timestamp. Cash has its own
   financial date. Existing sources do not prove closing marks for every symbol,
   so symbol values, weights, target/New markers are omitted.
-- Unconnected Slip bps, Files, Trade sheet, Tools buttons and Live vs backtest
+- Unconnected Slip bps, Files, Trade sheet and Live vs backtest
   controls are hidden. The V3 exporter writes state and is not used. Events
   shows the selected VPlan's broker order events, with symbols and newest first.
 - The ET clock ticks locally each second, independently of operational health.

@@ -1,4 +1,4 @@
-"""LIVE operator views. No actions, executors or notifications."""
+"""LIVE read-only operator views, with isolated synthetic Tools demonstrations."""
 
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -19,6 +19,9 @@ from alpha.live.dashboard_v4.activity_data import load_activity_source_dict
 from alpha.live.dashboard_v4.activity_cycles import build_activity_cycles_dict
 from alpha.live.dashboard_v4.system import build_system_page_dict, system_scope_matches_bool
 from alpha.live.dashboard_v4.system_data import load_system_source_dict
+from alpha.live.dashboard_v4.tools import build_tools_page_dict, resolve_tools_target_obj
+from alpha.live.dashboard_v4.tools_actions import ToolsActionService, register_tools_action_routes
+from alpha.live.dashboard_v4.tools_execution import SyntheticToolsActionProvider
 from alpha.live.dashboard_v3.client_operations import SOURCE_MAX_AGE_SECONDS_INT
 from alpha.live.dashboard_v3.filters import MARKET_TIMEZONE_OBJ
 from alpha.live.ops_report import parse_timestamp_ts
@@ -33,19 +36,44 @@ ASSET_SET = {
 
 
 def create_app(data_provider_obj=None, *, performance_db_path_str=None,
-               workspace_snapshot_fn=None, operations_workspace_fn=None, now_fn=None, demo_bool=False) -> Flask:
+               workspace_snapshot_fn=None, operations_workspace_fn=None, now_fn=None, demo_bool=False,
+               demo_tools_bool=False) -> Flask:
+    if demo_tools_bool and not demo_bool:
+        raise ValueError("Tools simulation requires the isolated demo.")
     flask_app_obj = Flask(__name__)
     provider_obj = data_provider_obj if data_provider_obj is not None else LiveDataProvider()
     clock_fn = now_fn or (lambda: datetime.now(UTC))
     database_path_str = performance_db_path_str or resolve_performance_db_path_str()
     flask_app_obj.config.update(read_only_bool=True, demo_bool=demo_bool)
 
+    def tools_workspace_dict():
+        if operations_workspace_fn is not None:
+            return operations_workspace_fn()
+        if demo_bool and workspace_snapshot_fn is not None:
+            return workspace_snapshot_fn()[0]
+        return load_operations_workspace_dict(provider_obj, as_of_ts=clock_fn())
+
+    def tools_target_obj(pod_id_str):
+        workspace_dict = tools_workspace_dict()
+        target_obj = resolve_tools_target_obj(workspace_dict, provider_obj, pod_id_str)
+        source_ts = parse_timestamp_ts((workspace_dict.get("summary_dict") or {}).get("as_of_timestamp_str"))
+        if source_ts is None or not 0 <= (clock_fn() - source_ts).total_seconds() < SOURCE_MAX_AGE_SECONDS_INT:
+            raise ValueError("Saved operations are not current. Refresh before opening a preview.")
+        return target_obj
+
+    # This provider simulates results in memory. No production executor exists.
+    tools_service_obj = ToolsActionService(SyntheticToolsActionProvider(tools_target_obj),
+        target_scope_fn=tools_target_obj, enabled_bool=demo_tools_bool, demo_bool=demo_bool, now_fn=clock_fn)
+    flask_app_obj.config["tools_action_service_obj"] = tools_service_obj
+
     @flask_app_obj.before_request
     def read_only_boundary():
-        # This runs before route dispatch/provider access, including unknown
-        # legacy paths. There is no flag to enable executable actions in V4.
+        # Production rejects every write. Only explicitly enabled synthetic
+        # demonstrations can accept the fixed Tools preview/confirm/cancel POSTs.
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
-            return jsonify(error="read_only", message="This console is read-only."), 403
+            if (not demo_tools_bool or request.method != "POST" or request.endpoint not in {
+                    "tools_action_preview", "tools_action_confirm", "tools_action_cancel"}):
+                return jsonify(error="read_only", message="This console is read-only."), 403
         if request.endpoint not in {"static", "assets"} and (
             request.remote_addr not in {None, "127.0.0.1", "::1"} and not request.is_secure
         ):
@@ -63,6 +91,8 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
         )
         return response_obj
+
+    register_tools_action_routes(flask_app_obj, tools_service_obj)
 
     def context_dict(pod_id_str=None, *, positions_bool=False):
         allowed_set = {"view", "pod"} if positions_bool else ({"period", "cycle", "tab"} if pod_id_str is not None else {"period"})
@@ -286,6 +316,9 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
         from_ts = acquisition_ts.astimezone(MARKET_TIMEZONE_OBJ).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days_int - 1)
         source_dict = (provider_obj.get_activity_source_dict(as_of_ts=acquisition_ts, days_int=days_int)
             if hasattr(provider_obj, "get_activity_source_dict") else load_activity_source_dict(provider_obj, as_of_ts=acquisition_ts, days_int=days_int))
+        if demo_tools_bool:
+            source_dict = {**source_dict, "event_list": [*source_dict.get("event_list", []),
+                *tools_service_obj.demo_event_list]}
         cycle_dict = build_activity_cycles_dict(provider_obj, overview_dict, as_of_ts=acquisition_ts, from_ts=from_ts)
         render_ts = clock_fn()
         # Reading historical evidence cannot renew live shell health.
@@ -494,6 +527,41 @@ def create_app(data_provider_obj=None, *, performance_db_path_str=None,
             as_of_ts=clock_fn(), demo_bool=demo_bool, include_finance_bool=False)
         finalize_system_dict(overview_dict, workspace_dict)
         return render_template("_performance_status.html", overview_dict=overview_dict)
+
+    @flask_app_obj.get("/tools")
+    def tools():
+        if set(request.args) - {"pod", "tool"} or any(len(request.args.getlist(key_str)) > 1 for key_str in request.args):
+            abort(400)
+        selected_pod_str, selected_tool_str = request.args.get("pod", ""), request.args.get("tool", "")
+        if len(selected_pod_str) > 200 or len(selected_tool_str) > 80 or ("pod" in request.args and not selected_pod_str):
+            abort(400)
+        workspace_dict = tools_workspace_dict()
+        if selected_pod_str and not any(account_dict.get("pod_id") == selected_pod_str
+                for account_dict in workspace_dict.get("operations_account_list", [])):
+            abort(404)
+        tools_page_dict = build_tools_page_dict(workspace_dict, provider_obj,
+            selected_pod_str=selected_pod_str, actions_enabled_bool=demo_tools_bool, demo_bool=demo_bool)
+        tool_key_set = {row_dict["key_str"] for block_dict in tools_page_dict["block_list"]
+            for group_dict in block_dict["group_list"] for row_dict in group_dict["row_list"]}
+        if "tool" in request.args and selected_tool_str not in tool_key_set:
+            abort(400)
+        tools_page_dict.update(action_token_str=tools_service_obj.action_token_str,
+            selected_tool_str=selected_tool_str)
+        overview_dict = build_overview_dict(workspace_dict, None, provider_obj,
+            as_of_ts=clock_fn(), demo_bool=demo_bool, include_finance_bool=False)
+        overview_dict.update(refresh_url_str=url_for("tools_status"), refresh_seconds_int=15)
+        finalize_system_dict(overview_dict, workspace_dict)
+        return render_template("overview.html", overview_dict=overview_dict, tools_page_dict=tools_page_dict)
+
+    @flask_app_obj.get("/tools/status")
+    def tools_status():
+        if request.args:
+            abort(400)
+        workspace_dict = tools_workspace_dict()
+        overview_dict = build_overview_dict(workspace_dict, None, provider_obj,
+            as_of_ts=clock_fn(), demo_bool=demo_bool, include_finance_bool=False)
+        finalize_system_dict(overview_dict, workspace_dict)
+        return render_template("_tools_status.html", overview_dict=overview_dict)
 
     @flask_app_obj.get("/assets/<path:filename>")
     def assets(filename):

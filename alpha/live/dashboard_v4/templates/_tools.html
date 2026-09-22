@@ -1,0 +1,40 @@
+<div data-tools-page data-pod-id="{{ tools_page_dict.selected_pod_str }}" data-pod-label="{{ tools_page_dict.selected_pod_dict.label_str }}" data-pod-account="{{ tools_page_dict.selected_pod_dict.account_str }}" data-selected-tool="{{ tools_page_dict.selected_tool_str }}" data-actions-enabled="{{ 'true' if tools_page_dict.actions_enabled_bool else 'false' }}" data-action-token="{{ tools_page_dict.action_token_str }}" data-demo="{{ 'true' if tools_page_dict.demo_bool else 'false' }}">
+  <div class="page-head tools-head"><div><h1 class="h1i">{{ icon('tools') }}Tools</h1><p class="verdict"><b>Copy or run an operator command.</b></p></div>
+    <form method="get" action="{{ url_for('tools') }}" class="tools-pod-form" data-tools-pod-form><label for="tools-pod">Pod</label><select id="tools-pod" name="pod" data-tools-pod><option value="">Choose a LIVE Pod</option>{% for option_dict in tools_page_dict.pod_option_list %}<option value="{{ option_dict.pod_id_str }}"{% if option_dict.pod_id_str == tools_page_dict.selected_pod_str %} selected{% endif %}>{{ option_dict.label_str }}</option>{% endfor %}</select><button type="submit" class="btn btn-q">Select</button></form>
+  </div>
+  {% if tools_page_dict.selected_pod_str %}<p class="tools-selected-pod"><b>{{ tools_page_dict.selected_pod_dict.label_str }}</b><span class="mono">{{ tools_page_dict.selected_pod_dict.pod_id_str }} · {{ tools_page_dict.selected_pod_dict.account_str }}</span></p>{% endif %}
+  <div class="tools-legend"><span><b>READ</b> Report only</span><span><b>INSPECT</b> No orders · may save diagnostic records</span><span><b class="tools-active">ACTIVE</b> Changes state, data or services</span></div>
+  {% if tools_page_dict.demo_bool and tools_page_dict.actions_enabled_bool %}<p class="tools-mode">Demo · runs return synthetic results. No broker connection.</p>{% elif tools_page_dict.demo_bool %}<p class="tools-mode">Demo · sample commands. Simulation is disabled.</p>{% else %}<p class="tools-mode">Copy is available. Execution is not connected.</p>{% endif %}
+  {% if tools_page_dict.error_str %}<p class="tools-notice" role="status">{{ tools_page_dict.error_str }}</p>{% endif %}
+  <div class="tools-columns">{% for block_dict in tools_page_dict.block_list %}<section class="panel" aria-label="{{ block_dict.label_str }}"><div class="panel-h"><h2 class="panel-t">{{ block_dict.label_str }}</h2></div>
+    {% for group_dict in block_dict.group_list %}<h3 class="tools-group">{{ group_dict.label_str }}</h3>
+      {% for tool_dict in group_dict.row_list %}<div class="tool-item" data-tool="{{ tool_dict.key_str }}" data-tool-action="{{ tool_dict.action_str }}" data-tool-argv='{{ tool_dict.argument_list | tojson }}' data-tool-copy="{{ 'true' if tool_dict.copy_available_bool else 'false' }}">
+        <button type="button" class="tool-open" data-tool-open aria-expanded="false" aria-controls="tool-body-{{ tool_dict.key_str }}"><span class="tool-row-main"><span class="tool-row-title"><b class="mono">{{ tool_dict.label_str }}</b><span class="tool-class{{ ' tools-active' if tool_dict.class_str == 'ACTIVE' else '' }}">{{ tool_dict.class_str }}</span></span><span class="tool-description">{{ tool_dict.effect_str }}</span></span><span class="tool-chevron" aria-hidden="true">›</span></button>
+        <div class="tool-body" id="tool-body-{{ tool_dict.key_str }}" data-tool-body hidden>
+          {% if tool_dict.scope_str %}<p class="tool-scope muted">{{ tool_dict.scope_str }}</p>{% endif %}
+          {% if tool_dict.unavailable_reason_str %}<p class="tools-notice">{{ tool_dict.unavailable_reason_str }}</p>{% endif %}
+          <form data-tool-form>
+          {% if tool_dict.parameter_list %}<div class="tools-fields">{% for parameter_dict in tool_dict.parameter_list %}<label><span>{{ parameter_dict.label_str }}</span><input type="{{ 'number' if parameter_dict.type_str in ['integer', 'int', 'number'] else 'text' }}" name="{{ parameter_dict.name_str }}" data-tool-parameter data-flag="{{ parameter_dict.flag_str }}" placeholder="{{ parameter_dict.placeholder_str }}" autocomplete="off"{% if parameter_dict.required_bool %} required{% endif %}{% if parameter_dict.type_str in ['integer', 'int', 'number'] %} min="{{ parameter_dict.min_int }}" max="{{ parameter_dict.max_int }}" step="1"{% endif %}></label>{% endfor %}</div>{% endif %}
+          {% if tool_dict.action_str == 'manual_order' and tools_page_dict.demo_bool and tools_page_dict.actions_enabled_bool %}
+            <div class="tools-fields manual-fields">
+              <label><span>Symbol</span><input name="asset_str" data-manual-field autocomplete="off" placeholder="AAPL" required></label>
+              <label><span>Side</span><select name="side_str" data-manual-field><option value="BUY">BUY</option><option value="SELL">SELL</option></select></label>
+              <label><span>Order type</span><select name="broker_order_type_str" data-manual-field><option value="MKT">MARKET</option><option value="LMT">LIMIT</option></select></label>
+              <label><span>Shares</span><input name="quantity_int" data-manual-field type="number" min="1" step="1" inputmode="numeric" required></label>
+              <label><span>Limit price</span><input name="limit_price_float" data-manual-field type="number" min="0.000001" step="any" inputmode="decimal" disabled></label>
+              <label><span>Operator</span><input name="operator_id_str" data-manual-field autocomplete="off" required></label>
+              <label class="tools-wide"><span>Reason</span><input name="reason_str" data-manual-field autocomplete="off" required></label>
+              <label class="tools-wide"><span>Type <b class="mono">SUBMIT MANUAL ORDER</b></span><input name="confirmation_text_str" data-manual-field autocomplete="off" required></label>
+            </div>
+            <p class="tool-scope">DAY order. Sends one broker order; it does not update strategy state.</p>
+          {% endif %}
+          {% if tool_dict.copy_available_bool %}<div class="tools-command"><label class="sr-only" for="tool-command-{{ tool_dict.key_str }}">PowerShell command for {{ tool_dict.label_str }}</label><textarea id="tool-command-{{ tool_dict.key_str }}" data-tool-command readonly rows="3" spellcheck="false">{{ tool_dict.command_str }}</textarea><button type="button" class="btn btn-q" data-tool-copy-button>Copy</button></div><p class="tools-copy-status muted" data-tool-copy-status role="status">PowerShell · Copy does not run the command.</p>{% endif %}
+          <div class="tools-controls">{% if tool_dict.href_str %}<a class="btn btn-q" href="{{ tool_dict.href_str }}">Open saved information ↗</a>{% endif %}{% if tool_dict.runnable_bool and tools_page_dict.actions_enabled_bool and tools_page_dict.demo_bool %}<button type="submit" class="btn" data-tool-preview>Preview{{ ' exact ticket' if tool_dict.action_str == 'manual_order' else '' }}</button>{% elif tool_dict.copy_available_bool %}<span class="muted">Copy only{{ ' in this dashboard' if tool_dict.runnable_bool else '' }}.</span>{% endif %}</div>
+          </form>
+          <div class="tools-preview" data-tool-preview-box hidden><div class="tools-preview-head"><b>Preview · nothing has run yet</b><span class="mono" data-tool-expires></span></div><ul data-tool-preview-lines></ul><div class="tools-controls"><button type="button" class="btn tools-confirm" data-tool-confirm>Confirm and simulate</button><button type="button" class="btn btn-q" data-tool-cancel>Cancel</button></div></div>
+          <div class="tools-result" data-tool-result hidden role="status" aria-live="polite"><b data-tool-result-label></b><p data-tool-result-message></p><a href="{{ url_for('activity') }}" class="tools-activity">Activity ↗</a></div>
+        </div>
+      </div>{% endfor %}
+    {% endfor %}</section>{% endfor %}
+  </div>
+</div>

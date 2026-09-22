@@ -67,6 +67,8 @@ def build_demo_workspace_tuple(*, include_holdings_bool=False):
     for method_str in ("get_pod_cycles_dict", "get_cycle_evidence_dict", "get_target_for_pod", "get_target_list", "close"):
         setattr(provider_obj, method_str, getattr(provider_obj.pod_store_obj, method_str))
     pod_store_obj = provider_obj.pod_store_obj
+    for row_dict in provider_obj.row_list:
+        row_dict["user_id_str"] = pod_store_obj.get_target_for_pod(row_dict["pod_id_str"]).release_obj.user_id_str
 
     def demo_positions_dict(pod_id_str, *, as_of_ts):
         # Only owned synthetic state is read. Saved execution prices are not
@@ -103,7 +105,7 @@ def build_demo_workspace_tuple(*, include_holdings_bool=False):
     return workspace_dict, snapshot_dict[client_dict["client_id"]], provider_obj
 
 
-def create_demo_app():
+def create_demo_app(*, demo_tools_bool=False):
     from alpha.live.dashboard_v4.app import create_app
 
     workspace_dict, snapshot_obj, provider_obj = build_demo_workspace_tuple(include_holdings_bool=True)
@@ -123,6 +125,6 @@ def create_demo_app():
     def workspace_snapshot_tuple():
         return operations_workspace_dict(), snapshot_obj
 
-    return create_app(provider_obj, demo_bool=True,
+    return create_app(provider_obj, demo_bool=True, demo_tools_bool=demo_tools_bool,
                       workspace_snapshot_fn=workspace_snapshot_tuple,
                       operations_workspace_fn=operations_workspace_dict, now_fn=demo_now_ts)

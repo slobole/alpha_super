@@ -1,3 +1,3 @@
 {% extends "base.html" %}
-{% block title %}{{ 'System health' if system_page_dict is defined else 'Activity' if activity_page_dict is defined else 'Performance' if performance_page_dict is defined else 'Positions' if positions_page_dict is defined else pod_page_dict.name_str if pod_page_dict is defined else 'Overview' }}{% endblock %}
+{% block title %}{{ 'Tools' if tools_page_dict is defined else 'System health' if system_page_dict is defined else 'Activity' if activity_page_dict is defined else 'Performance' if performance_page_dict is defined else 'Positions' if positions_page_dict is defined else pod_page_dict.name_str if pod_page_dict is defined else 'Overview' }}{% endblock %}
 {% block content %}{% include "_overview.html" %}{% endblock %}
