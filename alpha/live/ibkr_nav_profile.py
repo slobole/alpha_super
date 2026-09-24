@@ -8,6 +8,7 @@ See docs/live/IBKR_NAV_FIELDS.md for classification and supported boundaries.
 IBKR_MTM_ECONOMIC_FIELD_TUPLE = (
     "mtm", "dividends", "withholdingTax", "changeInDividendAccruals",
     "interest", "changeInInterestAccruals", "commissions", "otherFees",
+    "fxTranslation",
 )
 
 # These fields must be explicitly reported as zero. Their future nonzero
@@ -23,7 +24,7 @@ IBKR_MTM_ZERO_ONLY_FIELD_TUPLE = (
     "otherIncome", "feesReceivables", "commissionsAtPaxos", "referralFee",
     "commissionCreditsRedemption", "commissionReceivables", "forexCommissions",
     "transactionTax", "taxReceivables", "salesTax", "billableSalesTax",
-    "softDollars", "netFxTrading", "fxTranslation", "other", "corporateActionProceeds",
+    "softDollars", "netFxTrading", "other", "corporateActionProceeds",
 )
 
 
@@ -31,9 +32,9 @@ def local_ibkr_reporting_profile_dict():
     """Fresh per-request defaults; explicit client registries are not changed."""
     return {
         "nav_bridge": {
-            "profile_id": "ibkr_mtm_expanded_v1",
-            "evidence_ref": "docs/live/IBKR_NAV_FIELDS.md#ibkr-mtm-expanded-v1",
-            "reviewed_by": "Alpha Super source-contract review 2026-09-08",
+            "profile_id": "ibkr_mtm_expanded_v2",
+            "evidence_ref": "docs/live/IBKR_NAV_FIELDS.md#ibkr-mtm-expanded-v2",
+            "reviewed_by": "Alpha Super source-contract review 2026-09-24",
             "mode": "MTM", "nonoverlap_confirmed": True,
             "economic_fields": list(IBKR_MTM_ECONOMIC_FIELD_TUPLE),
             "informational_fields": [],

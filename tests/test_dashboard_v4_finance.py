@@ -13,6 +13,7 @@ from alpha.live.dashboard_v4.finance import build_financial_overview_dict, _allo
 from test_client_cash import allocation_fixture_tuple
 from test_client_reporting import client_config_dict, nav_attributes_dict, snapshot_obj
 from test_dashboard_operator_access import ForbiddenProvider
+from test_ibkr_nav_profile import expanded_config_dict, expanded_nav_attributes_dict
 
 
 AS_OF_TS = datetime(2026, 9, 5, 12, tzinfo=UTC)
@@ -47,6 +48,24 @@ def test_live_demo_tiles_match_canonical_periods_and_do_not_mutate_source():
     assert len(result_dict["allocation_dict"]["row_list"]) == 2
     assert not any("Free cash" in row_dict["name_str"] for row_dict in result_dict["allocation_dict"]["row_list"])
     assert workspace_dict == before_dict
+
+
+def test_final_day_fx_translation_restores_overview_periods_and_chart():
+    client_dict = expanded_config_dict()
+    source_obj = snapshot_obj([
+        expanded_nav_attributes_dict(date_str="2026-09-01", opening_str="1000", closing_str="1010"),
+        expanded_nav_attributes_dict(date_str="2026-09-02", opening_str="1010", closing_str="1020"),
+        expanded_nav_attributes_dict(date_str="2026-09-03", opening_str="1020", closing_str="1030"),
+        expanded_nav_attributes_dict(date_str="2026-09-04", opening_str="1030", closing_str="1040.01",
+            mtm="10", fxTranslation=".01"),
+    ])
+    workspace_dict = {"client_dict": client_dict, "financial_scope_complete_bool": True, "summary_dict": {}}
+    result_dict = build_financial_overview_dict(workspace_dict, source_obj, ForbiddenProvider(), as_of_ts=AS_OF_TS)
+    assert result_dict["tile_list"][0]["value_str"] == "$1,040.01"
+    assert result_dict["tile_list"][1]["value_str"] == "+$10.01"
+    assert result_dict["tile_list"][2]["value_str"] == "+4.00%"
+    assert result_dict["tile_list"][3]["value_str"] == "+4.00%"
+    assert result_dict["chart_dict"]["available_bool"]
 
 
 @pytest.mark.parametrize("period_str", ["1M", "3M", "YTD", "All"])

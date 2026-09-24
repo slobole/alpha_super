@@ -309,10 +309,10 @@ non-overlapping `economic_fields`/optional `informational_fields`. Do not copy t
 demo's synthetic `mtm` profile into production. Validate the actual expanded Flex
 XML against the [IBKR Change in NAV reference](https://www.ibkrguides.com/reportingreference/reportguide/changeinnav_fq.htm).
 
-The default single-VPS adapter supplies the built-in `ibkr_mtm_expanded_v1`
+The default single-VPS adapter supplies the built-in `ibkr_mtm_expanded_v2`
 bridge and `daily_nav_eod_v1` return contract. No extra local registry or environment
 configuration is required. See [expanded IBKR field contract](IBKR_NAV_FIELDS.md)
-for the eight supported economic fields and the required-zero restrictions on
+for the nine supported economic fields and the required-zero restrictions on
 other components. Expanded saved rows can provide dollar P&L and portfolio daily
 returns after the existing scope/coverage/bridge checks. Older seven-field rows
 remain incomplete for dollars; profile activation does not repair missing history

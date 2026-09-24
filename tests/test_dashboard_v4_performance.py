@@ -4,16 +4,21 @@ from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
+from io import BytesIO, StringIO
+import csv
 import math
 import statistics
 
 import pytest
+from pypdf import PdfReader
 
 from alpha.live.client_reporting import BrokerReportingSnapshot, build_client_report_dict
 from alpha.live.dashboard_v3.demo import build_demo_fixture_tuple
 from alpha.live.dashboard_v4 import performance
 from alpha.live.dashboard_v4.performance import build_performance_page_dict
+from alpha.live.dashboard_v4.performance_exports import export_performance_csv_str, export_performance_pdf_bytes
 from test_client_reporting import client_config_dict, nav_attributes_dict, snapshot_obj
+from test_ibkr_nav_profile import expanded_config_dict, expanded_nav_attributes_dict
 
 
 AS_OF_TS = datetime(2026, 9, 8, 13, 41, tzinfo=UTC)
@@ -63,6 +68,38 @@ def test_default_all_uses_one_canonical_report_and_does_not_mutate(monkeypatch):
     assert result_dict["contribution_dict"]["available_bool"]
     assert sum(row_dict["value_float"] for row_dict in result_dict["contribution_dict"]["row_list"]) == pytest.approx(expected_dict["pnl_float"])
     assert workspace_dict == before_dict
+
+
+def test_final_day_fx_translation_restores_two_account_performance_and_exports():
+    client_dict = expanded_config_dict(second_bool=True)
+    source_obj = snapshot_obj([
+        expanded_nav_attributes_dict(date_str="2026-09-01", opening_str="1000",
+            closing_str="1010", twr_str="1", mtm="10"),
+        expanded_nav_attributes_dict(date_str="2026-09-02", opening_str="1010",
+            closing_str="1020", twr_str=".99009900990099", mtm="10"),
+        expanded_nav_attributes_dict("U_TEST_B", date_str="2026-09-01",
+            opening_str="2000", closing_str="2020", twr_str="1", mtm="20"),
+        expanded_nav_attributes_dict("U_TEST_B", date_str="2026-09-02",
+            opening_str="2020", closing_str="2015.01", twr_str="-.247029702970297",
+            mtm="-5", fxTranslation=".01"),
+    ])
+    result_dict = _view(_workspace_dict(client_dict), source_obj)
+    report_dict = result_dict["report_dict"]
+    assert report_dict["status_str"] == "ready"
+    assert report_dict["pnl_float"] == pytest.approx(35.01)
+    assert report_dict["twr_float"] == pytest.approx(.01167)
+    assert [day_dict["pnl_float"] for day_dict in report_dict["daily_book_list"]] == pytest.approx([30, 5.01])
+    assert result_dict["tile_list"][2]["value_str"] == "+$35.01"
+    assert result_dict["tile_list"][3]["value_str"] == "+1.17%"
+    assert result_dict["chart_dict"] is not None
+    assert result_dict["daily_chart_dict"] is not None
+    assert result_dict["contribution_dict"]["available_bool"]
+    csv_row_dict = next(csv.DictReader(StringIO(export_performance_csv_str(report_dict))))
+    assert csv_row_dict["Profit / loss"] == "35.01"
+    assert float(csv_row_dict["Return TWR (%)"]) == pytest.approx(1.167)
+    pdf_bytes = export_performance_pdf_bytes(report_dict)
+    pdf_text_str = "\n".join(page_obj.extract_text() for page_obj in PdfReader(BytesIO(pdf_bytes)).pages)
+    assert "35.01" in pdf_text_str
 
 
 @pytest.mark.parametrize("period_str,from_str", [("1W", "2026-09-01"), ("MTD", "2026-09-01"), ("YTD", "2026-06-01"), ("All", "2026-06-01")])

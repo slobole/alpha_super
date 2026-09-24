@@ -6,9 +6,10 @@ the broker. Explicit client registries keep their own existing configuration.
 
 ## ibkr-mtm-expanded-v1
 
-`alpha/live/ibkr_nav_profile.py` supplies this versioned profile and the existing
-`daily_nav_eod_v1` client-return method in memory. No additional registry or
-environment variable is required for the normal local dashboard.
+This is the original expanded-field profile. The default single-VPS adapter now
+supplies `ibkr_mtm_expanded_v2` below and the existing `daily_nav_eod_v1`
+client-return method in memory. No additional registry or environment variable
+is required for the normal local dashboard.
 
 ### Source and supported fields
 
@@ -31,9 +32,10 @@ The existing capital fields remain separate: `depositsWithdrawals`,
 requires `assetTransfers` to be zero: nonzero assets need a reviewed counterparty
 and in-transit accounting contract before support can be extended.
 
-All other 36 expanded monetary fields, including `assetTransfers`, must be
-present, finite and exactly zero. Their authoritative list is
-`IBKR_MTM_ZERO_ONLY_FIELD_TUPLE`. Their nonzero meaning is not inferred from a
+All other 36 expanded monetary fields, including `assetTransfers` and
+`fxTranslation`, must be present, finite and exactly zero under v1. The current
+`IBKR_MTM_ZERO_ONLY_FIELD_TUPLE` represents v2's 35-field list; the v1 list is
+that tuple plus `fxTranslation`. Their nonzero meaning is not inferred from a
 zero-valued sample. In particular, broker/advisor/client fees, FX components,
 alternative realized/unrealized totals and corporate-action proceeds cannot
 silently enter the calculation. An unrecognized nonzero field also blocks P&L.
@@ -85,6 +87,37 @@ separately check deposits, withdrawals, owner payments, matching/unmatched cash
 transfers, accruals, fees, missing fields and source revisions. Extending the
 supported field set requires source evidence, regression tests and a new profile
 version. Profile configuration already enters scope/report hashes.
+
+## ibkr-mtm-expanded-v2
+
+The default local profile adds `fxTranslation` as a ninth economic component.
+The other 35 expanded zero-only fields retain the v1 rule. Capital fields,
+linking adjustments, source finality, account scope, USD 0.01 bridge tolerance
+and the `daily_nav_eod_v1` return convention are unchanged.
+
+IBKR describes `fxTranslation` as the change in base-currency value caused by
+exchange-rate translation. Its NAV documentation distinguishes FX translation
+already included in MTM on cash/positions from other FX translation on accruals.
+The saved 2026-09-23 ChangeInNAV row had a separate +USD 0.01 `fxTranslation`
+and +USD 6.78 dividend-accrual change. All required source fields were present;
+capital and linking adjustments were zero. The independent NAV bridge had a
++USD 0.01 residual without `fxTranslation` and zero residual when it was counted
+once. Both residuals are within the existing USD 0.01 tolerance, so this row
+alone does not prove that the field is non-overlapping. The classification also
+uses IBKR's separate field definition. The field was zero in the preceding 82
+saved rows for that account. The source does not identify the underlying
+currency or security.
+
+Every row must still reconcile independently. A nonzero unsupported field, a
+missing or non-finite field, or a bridge residual above USD 0.01 still blocks
+portfolio P&L and return. Synthetic tests cover a separate one-cent translation
+and a duplicated two-cent translation that fails the bridge. A one-cent overlap
+can remain within the existing tolerance; accepted P&L is derived from NAV
+change, not from summing the components. The profile ID change enters the report
+hash so old and new accounting results are distinct.
+
+Sources: [IBKR Change in NAV Flex fields](https://www.ibkrguides.com/reportingreference/reportguide/changeinnav_fq.htm)
+and [IBKR Net Asset Value field descriptions](https://www.ibkrguides.com/reportingreference/reportguide/netassetvalue_modelstatement.htm).
 
 ### History and deployment boundary
 

@@ -70,7 +70,7 @@ def test_every_monetary_field_must_be_explicit_and_finite(field_str, invalid_str
     "changeInIncentiveCouponAccruals", "brokerFees", "changeInBrokerFeeAccruals", "advisorFees", "clientFees",
     "otherIncome", "feesReceivables", "commissionsAtPaxos", "referralFee", "commissionCreditsRedemption",
     "commissionReceivables", "forexCommissions", "transactionTax", "taxReceivables", "salesTax",
-    "billableSalesTax", "softDollars", "netFxTrading", "fxTranslation", "other", "corporateActionProceeds",
+    "billableSalesTax", "softDollars", "netFxTrading", "other", "corporateActionProceeds",
     "newBrokerComponent",
 ])
 def test_unsupported_components_cannot_silently_become_profit(field_str):
@@ -134,6 +134,29 @@ def test_expanded_profile_does_not_relax_cent_tolerance():
 def test_supported_other_fees_are_deducted_from_profit():
     result_dict = report_dict([expanded_nav_attributes_dict(mtm="12", otherFees="-2")], config_dict=expanded_config_dict())
     assert result_dict["pnl_float"] == 10 and result_dict["twr_float"] == pytest.approx(.01)
+
+
+def test_fx_translation_is_supported_with_matching_nav_delta():
+    config_dict = expanded_config_dict()
+    assert config_dict["nav_bridge"]["profile_id"] == "ibkr_mtm_expanded_v2"
+    assert "fxTranslation" in config_dict["nav_bridge"]["economic_fields"]
+    assert "fxTranslation" not in config_dict["nav_bridge"]["zero_only_fields"]
+    result_dict = report_dict([expanded_nav_attributes_dict(
+        closing_str="1007.01", twr_str=".701", mtm="0",
+        changeInDividendAccruals="7", fxTranslation=".01",
+    )], config_dict=config_dict)
+    assert result_dict["status_str"] == "ready"
+    assert result_dict["pnl_float"] == pytest.approx(7.01)
+    assert result_dict["twr_float"] == pytest.approx(.00701)
+
+
+def test_fx_translation_overlap_above_bridge_tolerance_is_rejected():
+    result_dict = report_dict([expanded_nav_attributes_dict(
+        closing_str="1007", mtm="0", changeInDividendAccruals="7",
+        fxTranslation=".02",
+    )], config_dict=expanded_config_dict())
+    assert result_dict["pnl_float"] is None and result_dict["twr_float"] is None
+    assert any("NAV bridge" in issue_str for issue_str in result_dict["issue_list"])
 
 
 @pytest.mark.parametrize("field_list", [None, "assetTransfers", [""], [1], ["assetTransfers", "assetTransfers"], ["mtm"], ["startingValue"]])
