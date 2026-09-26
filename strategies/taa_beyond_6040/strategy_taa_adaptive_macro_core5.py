@@ -30,6 +30,7 @@ from typing import Sequence
 
 import numpy as np
 import pandas as pd
+import exchange_calendars as exchange_calendar_module
 from IPython.display import display
 
 from alpha.engine.backtest import run_daily
@@ -443,16 +444,24 @@ def get_adaptive_macro_core5_data(
 
 
 def _month_end_rebalance_ser(execution_index: pd.DatetimeIndex) -> pd.Series:
-    month_period_idx = execution_index.to_period("M")
-    # *** CRITICAL*** This shift uses only the known exchange-session calendar,
-    # never a future price or signal. It identifies the final session of month T.
-    next_month_period_ser = pd.Series(month_period_idx, index=execution_index).shift(-1)
-    return pd.Series(
-        next_month_period_ser.isna().to_numpy()
-        | (month_period_idx != next_month_period_ser.to_numpy()),
-        index=execution_index,
-        dtype=bool,
+    if len(execution_index) == 0:
+        return pd.Series(index=execution_index, dtype=bool)
+
+    # *** CRITICAL *** The data cutoff is not a month-end observation.
+    # month_end(T) = [T == last XNYS session in calendar month(T)].
+    # Extend the known exchange calendar to the end of the terminal month;
+    # never consult future prices or infer month-end from the next data row.
+    first_month_ts = execution_index.min().to_period("M").start_time.normalize()
+    last_month_ts = execution_index.max().to_period("M").end_time.normalize()
+    exchange_calendar_obj = exchange_calendar_module.get_calendar(
+        "XNYS", start=first_month_ts, end=last_month_ts,
     )
+    session_idx = exchange_calendar_obj.sessions.tz_localize(None)
+    month_end_ser = pd.Series(session_idx, index=session_idx).groupby(
+        session_idx.to_period("M")
+    ).max()
+    return pd.Series(execution_index.isin(month_end_ser), index=execution_index, dtype=bool)
+
 
 
 def build_execution_calendar_idx(

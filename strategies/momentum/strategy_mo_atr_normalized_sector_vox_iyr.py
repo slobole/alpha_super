@@ -61,6 +61,7 @@ from strategies.momentum.strategy_mo_atr_normalized_ndx import (
     compute_atr_normalized_signal_tables,
     configure_total_return_benchmark_provenance,
     get_asof_universe_membership_ser,
+    get_unadjusted_close_df,
     map_month_end_decision_dates_to_rebalance_schedule_df,
 )
 from strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled import (
@@ -295,6 +296,7 @@ def get_atr_normalized_sector_data(
             price_low_df=price_low_df,
             regime_close_ser=regime_close_ser,
             config=config_obj,
+            price_unadjusted_close_df=get_unadjusted_close_df(pricing_data_df, sector_symbol_list),
         )
     )
     rebalance_schedule_df = map_month_end_decision_dates_to_rebalance_schedule_df(
@@ -415,11 +417,15 @@ class AtrNormalizedSectorStrategy(AtrNormalizedNdxStrategy):
             price_low_df=price_low_df,
             regime_close_ser=regime_close_ser,
             config=self.config_obj,
+            price_unadjusted_close_df=get_unadjusted_close_df(signal_data_df, sector_symbol_list),
         )
 
         # *** CRITICAL*** Both score variants use only Close_T and the trailing
         # ATR20 ending at T. No T+1 open enters selection or sizing.
-        natr_decision_df = atr_decision_df / monthly_decision_close_df
+        # ATR is now in decision-date nominal units; use the same price units.
+        natr_decision_df = atr_decision_df / get_unadjusted_close_df(
+            signal_data_df, sector_symbol_list,
+        ).reindex(monthly_decision_close_df.index)
         dimensionless_score_df = monthly_roc_df / natr_decision_df
         dimensionless_score_df = dimensionless_score_df.replace(
             [np.inf, -np.inf],

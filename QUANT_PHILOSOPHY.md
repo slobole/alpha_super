@@ -234,6 +234,17 @@ If the impact cannot yet be quantified exactly, bound it qualitatively and say s
 
 Use `CAPITALSPECIAL` for fills, marks, traded OHLC, and level- or scale-sensitive features. `TOTALRETURN` is allowed only for explicitly causal return-space signals and performance benchmarks; never use it as a fill or mark price. Declare the adjustment role and provenance in saved artifacts.
 
+`CAPITALSPECIAL` alone is not point-in-time safety. Future corporate actions
+rescale historical OHLC and Volume. Cross-asset features must either be invariant
+to independent symbol price scaling or restore nominal units at each decision.
+For historical dollar ATR, multiply the entire adjusted ATR by
+`UnadjustedClose_T / AdjustedClose_T`; never build ATR from raw bar-by-bar prices
+across splits. Missing or invalid decision anchors must fail closed. Use native
+`Turnover` for historical dollar liquidity: raw Close times adjusted Volume is
+not dollar turnover. Whole-share rounding and per-share costs also require
+explicit unit conversion. A prefix-only signal audit cannot detect revised
+historical values; add independent-symbol future-action invariance tests.
+
 Retain each strategy's approved price basis. Any change is a separate quantitative decision, with the old behavior, new behavior, and consequence made explicit. This preserves the role separation recorded in the [July 2026 decision](docs/research/ENGINE_REALISM_TOTAL_RETURN_DIVIDENDS_AND_CASH_DECISION.md#joint-verdict).
 
 ## What Backtests Are For

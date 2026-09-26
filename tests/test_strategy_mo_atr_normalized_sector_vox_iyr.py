@@ -244,8 +244,9 @@ def test_one_point_five_is_close_sized_target_not_realized_open_cap() -> None:
     )
     close_price_ser = pd.Series(
         {
-            (symbol_str, "Close"): 100.0
+            (symbol_str, field_str): 100.0
             for symbol_str in SECTOR_SYMBOL_TUPLE
+            for field_str in ("Close", "Unadjusted Close")
         },
         dtype=float,
     )

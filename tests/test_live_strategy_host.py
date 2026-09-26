@@ -1570,6 +1570,8 @@ def test_strategy_host_builds_full_target_atr_decision_plan(monkeypatch):
         ]
     )
     pricing_data_df = make_price_df(["AAPL", "MSFT", "SPY"], date_index)
+    for symbol_str in ["AAPL", "MSFT"]:
+        pricing_data_df[(symbol_str, "Unadjusted Close")] = pricing_data_df[(symbol_str, "Close")]
     universe_df = pd.DataFrame(1, index=date_index, columns=["AAPL", "MSFT"])
     monthly_decision_close_df = pd.DataFrame(
         {"AAPL": [100.0], "MSFT": [200.0]},
@@ -1584,7 +1586,7 @@ def test_strategy_host_builds_full_target_atr_decision_plan(monkeypatch):
     monkeypatch.setattr(
         atr_module,
         "compute_atr_normalized_signal_tables",
-        lambda price_close_df, price_high_df, price_low_df, regime_close_ser, config: (
+        lambda price_close_df, price_high_df, price_low_df, regime_close_ser, config, price_unadjusted_close_df: (
             monthly_decision_close_df,
             monthly_decision_close_df.copy(),
             monthly_decision_close_df.copy(),
@@ -1649,6 +1651,8 @@ def test_strategy_host_builds_full_target_vxn_scaled_atr_decision_plan(monkeypat
         ]
     )
     pricing_data_df = make_price_df(["AAPL", "MSFT", "SPY"], date_index)
+    for symbol_str in ["AAPL", "MSFT"]:
+        pricing_data_df[(symbol_str, "Unadjusted Close")] = pricing_data_df[(symbol_str, "Close")]
     universe_df = pd.DataFrame(1, index=date_index, columns=["AAPL", "MSFT"])
     monthly_decision_close_df = pd.DataFrame(
         {"AAPL": [100.0], "MSFT": [200.0]},
@@ -1691,7 +1695,7 @@ def test_strategy_host_builds_full_target_vxn_scaled_atr_decision_plan(monkeypat
     monkeypatch.setattr(
         vxn_module,
         "compute_atr_normalized_signal_tables",
-        lambda price_close_df, price_high_df, price_low_df, regime_close_ser, config: (
+        lambda price_close_df, price_high_df, price_low_df, regime_close_ser, config, price_unadjusted_close_df: (
             monthly_decision_close_df,
             monthly_decision_close_df.copy(),
             monthly_decision_close_df.copy(),

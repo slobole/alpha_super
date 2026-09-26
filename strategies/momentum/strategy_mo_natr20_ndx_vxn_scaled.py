@@ -1,5 +1,14 @@
 """
-Monthly ATR-adjusted momentum rotation for point-in-time Nasdaq 100 members.
+Independent NATR20 Nasdaq-100 momentum with monthly VXN position scaling.
+
+Full strategy implementation: no imports or inheritance from sibling strategies.
+Research/BENCH only. One requested variant; no parameter search. History through
+2026 has already been examined and is not an untouched holdout.
+Cash earns 0%; negative cash financing is unmodeled. Ordinary cash dividends
+use the shared 25% withholding contract. Historical-equivalent whole-share
+sizing and commissions are enabled; CAPITALSPECIAL is not a physical replay
+of special-distribution shares. Costs: 2.5 bps/side, $0.005/share, $1 minimum.
+Unused stock slots and VXN-reduced exposure remain in cash; no ROC>0 filter.
 
 Core formulas
 -------------
@@ -32,7 +41,9 @@ For stock i on month-end decision date t:
         = 1[SPY_t > SMA200_t]
 
     risk_adj_score_{i,t}
-        = monthly_roc_{i,t}^{(L)} / ATR20_{i,t}
+        = monthly_roc_{i,t}^{(L)} / (ATR20_{i,t} / UnadjustedClose_{i,t})
+
+    NATR20_pct_{i,t} = 100 * ATR20_{i,t} / UnadjustedClose_{i,t}
 
 Selection on decision date t:
 
@@ -43,7 +54,7 @@ Selection on decision date t:
         = top max_positions eligible symbols by risk_adj_score_{i,t}
 
     target_weight_{i,t}
-        = 1 / max_positions    if i in selected_t
+        = clip(22 / VXN_asof_t, 0.25, 1.0) / max_positions    if i in selected_t
         = 0                    otherwise
 
 Execution mapping:
@@ -69,13 +80,14 @@ from IPython.display import display
 from alpha.engine.backtest import run_daily
 from alpha.engine.report import save_results
 from alpha.engine.strategy import Strategy
-from data.norgate_loader import build_index_constituent_matrix, load_raw_prices
+from data.norgate_loader import build_index_constituent_matrix, load_raw_prices, load_price_timeseries
 from data.norgate_snapshot_store import (
     CAPITALSPECIAL_ADJUSTMENT_STR,
     TOTALRETURN_ADJUSTMENT_STR,
 )
 
 
+STRATEGY_NAME_STR = "strategy_mo_natr20_ndx_vxn_scaled"
 ATR_WINDOW_INT = 20
 
 
@@ -103,7 +115,7 @@ def get_asof_universe_membership_ser(
 
 
 @dataclass(frozen=True)
-class AtrNormalizedNdxConfig:
+class Natr20VxnScaledNdxConfig:
     indexname_str: str = "Nasdaq 100"
     regime_symbol_str: str = "SPY"
     performance_benchmark_symbol_str: str = "$SPX"
@@ -119,8 +131,18 @@ class AtrNormalizedNdxConfig:
     slippage_float: float = 0.00025
     commission_per_share_float: float = 0.005
     commission_minimum_float: float = 1.0
+    vxn_symbol_str: str = "$VXN"
+    target_vxn_pct_float: float = 22.0
+    min_exposure_scale_float: float = 0.25
+    max_exposure_scale_float: float = 1.0
 
     def __post_init__(self) -> None:
+        if not self.vxn_symbol_str:
+            raise ValueError("vxn_symbol_str must not be empty.")
+        if not np.isfinite(self.target_vxn_pct_float) or self.target_vxn_pct_float <= 0.0:
+            raise ValueError("target_vxn_pct_float must be finite and positive.")
+        if not (0.0 <= self.min_exposure_scale_float <= self.max_exposure_scale_float <= 1.0):
+            raise ValueError("VXN exposure bounds must satisfy 0 <= min <= max <= 1.")
         if not self.indexname_str:
             raise ValueError("indexname_str must not be empty.")
         if not self.regime_symbol_str:
@@ -149,28 +171,128 @@ class AtrNormalizedNdxConfig:
             raise ValueError("commission_minimum_float must be non-negative.")
 
 
-DEFAULT_CONFIG = AtrNormalizedNdxConfig()
+DEFAULT_CONFIG = Natr20VxnScaledNdxConfig()
 
 __all__ = [
     "ATR_WINDOW_INT",
-    "AtrNormalizedNdxConfig",
-    "AtrNormalizedNdxStrategy",
+    "Natr20VxnScaledNdxConfig",
+    "Natr20VxnScaledNdxStrategy",
     "DEFAULT_CONFIG",
     "append_total_return_benchmark_data_df",
     "audit_pit_universe_df",
     "build_execution_timing_analysis_inputs",
-    "compute_atr_normalized_signal_tables",
+    "compute_natr20_signal_tables",
     "configure_total_return_benchmark_provenance",
-    "get_atr_normalized_ndx_data",
+    "get_natr20_vxn_scaled_ndx_data",
     "get_monthly_decision_close_df",
     "map_month_end_decision_dates_to_rebalance_schedule_df",
     "run_variant",
 ]
 
 
+def load_vxn_close_ser(
+    symbol_str: str,
+    start_date_str: str,
+    end_date_str: str | None,
+) -> pd.Series:
+    """
+    Load the VXN close series from Norgate.
+    """
+    vxn_price_df = load_price_timeseries(
+        symbol_str,
+        adjustment_str=CAPITALSPECIAL_ADJUSTMENT_STR,
+        start_date_str=start_date_str,
+        end_date_str=end_date_str,
+    )
+    if len(vxn_price_df) == 0:
+        raise RuntimeError(f"{symbol_str} returned no VXN helper data.")
+
+    vxn_close_ser = vxn_price_df["Close"].astype(float).sort_index()
+    vxn_close_ser.name = symbol_str
+    return vxn_close_ser
+
+
+def compute_vxn_scale_signal_df(
+    vxn_close_ser: pd.Series,
+    target_vxn_pct_float: float = DEFAULT_CONFIG.target_vxn_pct_float,
+    min_exposure_scale_float: float = DEFAULT_CONFIG.min_exposure_scale_float,
+    max_exposure_scale_float: float = DEFAULT_CONFIG.max_exposure_scale_float,
+) -> pd.DataFrame:
+    """
+    Compute the daily VXN exposure scale.
+
+    Formula:
+
+        vxn_scale_t = clip(target_vxn_pct / VXN_t, min_scale, max_scale)
+    """
+    if target_vxn_pct_float <= 0.0:
+        raise ValueError("target_vxn_pct_float must be positive.")
+    if min_exposure_scale_float < 0.0:
+        raise ValueError("min_exposure_scale_float must be non-negative.")
+    if min_exposure_scale_float > max_exposure_scale_float:
+        raise ValueError("min_exposure_scale_float must be <= max_exposure_scale_float.")
+    if max_exposure_scale_float > 1.0:
+        raise ValueError("max_exposure_scale_float must be <= 1.0 for this no-leverage variant.")
+
+    if not isinstance(vxn_close_ser.index, pd.DatetimeIndex) or not vxn_close_ser.index.is_unique:
+        raise ValueError("VXN must have a unique DatetimeIndex.")
+    if not np.isfinite(target_vxn_pct_float):
+        raise ValueError("target_vxn_pct_float must be finite.")
+    clean_vxn_close_ser = vxn_close_ser.astype(float).sort_index().dropna()
+    if (~np.isfinite(clean_vxn_close_ser) | clean_vxn_close_ser.le(0.0)).any():
+        raise ValueError("Observed VXN closes must be finite and positive.")
+    if len(clean_vxn_close_ser) == 0:
+        raise ValueError("vxn_close_ser must contain at least one non-null close.")
+
+    vxn_scale_signal_df = pd.DataFrame({"vxn_close": clean_vxn_close_ser})
+
+    # *** CRITICAL*** VXN scaling uses only the VXN close observed on or before
+    # the month-end decision close. No future VXN value may enter this series.
+    raw_exposure_scale_ser = float(target_vxn_pct_float) / vxn_scale_signal_df["vxn_close"]
+    exposure_scale_ser = raw_exposure_scale_ser.replace([np.inf, -np.inf], np.nan).clip(
+        lower=float(min_exposure_scale_float),
+        upper=float(max_exposure_scale_float),
+    )
+    vxn_scale_signal_df["vxn_exposure_scale_float"] = exposure_scale_ser
+    return vxn_scale_signal_df.dropna(subset=["vxn_exposure_scale_float"])
+
+
+def get_asof_vxn_scale_float(
+    vxn_scale_signal_df: pd.DataFrame,
+    decision_date_ts: pd.Timestamp,
+) -> float:
+    """
+    Return the latest VXN exposure scale known on or before decision_date_ts.
+    """
+    if len(vxn_scale_signal_df) == 0:
+        raise RuntimeError("vxn_scale_signal_df must not be empty.")
+    if "vxn_exposure_scale_float" not in vxn_scale_signal_df.columns:
+        raise RuntimeError("vxn_scale_signal_df must contain vxn_exposure_scale_float.")
+
+    sorted_vxn_scale_signal_df = vxn_scale_signal_df.sort_index()
+    if sorted_vxn_scale_signal_df.index.has_duplicates:
+        raise RuntimeError("vxn_scale_signal_df index must not contain duplicates.")
+
+    # *** CRITICAL*** This is an as-of lookup. If VXN has no row on the exact
+    # stock decision date, use only the latest prior VXN close, never a later
+    # row that would leak future volatility information into the rebalance.
+    vxn_row_int = int(
+        sorted_vxn_scale_signal_df.index.searchsorted(pd.Timestamp(decision_date_ts), side="right")
+    ) - 1
+    if vxn_row_int < 0:
+        raise RuntimeError(f"No VXN scale exists on or before decision date {decision_date_ts}.")
+
+    exposure_scale_float = float(
+        sorted_vxn_scale_signal_df.iloc[vxn_row_int]["vxn_exposure_scale_float"]
+    )
+    if not np.isfinite(exposure_scale_float) or not 0.0 <= exposure_scale_float <= 1.0:
+        raise RuntimeError(f"Invalid VXN exposure scale for decision date {decision_date_ts}.")
+    return exposure_scale_float
+
+
 def append_total_return_benchmark_data_df(
     pricing_data_df: pd.DataFrame,
-    config_obj: AtrNormalizedNdxConfig,
+    config_obj: Natr20VxnScaledNdxConfig,
 ) -> pd.DataFrame:
     total_return_benchmark_df = load_raw_prices(
         symbols=[],
@@ -225,7 +347,7 @@ def append_total_return_benchmark_data_df(
 
 def configure_total_return_benchmark_provenance(
     strategy_obj: Strategy,
-    config_obj: AtrNormalizedNdxConfig,
+    config_obj: Natr20VxnScaledNdxConfig,
 ) -> None:
     benchmark_data_symbol_str = config_obj.performance_benchmark_data_symbol_str
     strategy_obj._benchmark_data_symbol_map_dict = {
@@ -245,7 +367,7 @@ def configure_total_return_benchmark_provenance(
 
 def audit_pit_universe_df(
     universe_df: pd.DataFrame,
-    execution_index: pd.DatetimeIndex,
+    execution_idx: pd.DatetimeIndex,
     tradeable_symbol_list: Sequence[str],
 ) -> pd.DataFrame:
     if not universe_df.index.is_monotonic_increasing:
@@ -262,7 +384,7 @@ def audit_pit_universe_df(
     # *** CRITICAL*** Align PIT membership to every price date by causal
     # forward-fill only. This supports Norgate universe matrices that lag the
     # latest price date while preserving member_{i,t} = member_{i,max(s <= t)}.
-    aligned_universe_df = universe_df.loc[:, aligned_symbol_list].reindex(execution_index).ffill()
+    aligned_universe_df = universe_df.loc[:, aligned_symbol_list].reindex(execution_idx).ffill()
     missing_execution_index = aligned_universe_df.index[aligned_universe_df.isna().any(axis=1)]
     if len(missing_execution_index) > 0:
         missing_date_preview_list = [pd.Timestamp(date_ts).strftime("%Y-%m-%d") for date_ts in missing_execution_index[:5]]
@@ -332,12 +454,12 @@ def get_unadjusted_close_df(
     ).astype(float)
 
 
-def compute_atr_normalized_signal_tables(
+def compute_natr20_signal_tables(
     price_close_df: pd.DataFrame,
     price_high_df: pd.DataFrame,
     price_low_df: pd.DataFrame,
     regime_close_ser: pd.Series,
-    config: AtrNormalizedNdxConfig = DEFAULT_CONFIG,
+    config_obj: Natr20VxnScaledNdxConfig = DEFAULT_CONFIG,
     *,
     price_unadjusted_close_df: pd.DataFrame,
 ) -> tuple[
@@ -354,7 +476,7 @@ def compute_atr_normalized_signal_tables(
     # *** CRITICAL*** Monthly ROC must use only actual month-end decision
     # closes and trailing month-end history.
     monthly_roc_df = (
-        monthly_decision_close_df / monthly_decision_close_df.shift(config.lookback_month_int)
+        monthly_decision_close_df / monthly_decision_close_df.shift(config_obj.lookback_month_int)
     ) - 1.0
 
     # *** CRITICAL*** prior close alignment for true range must use shift(1)
@@ -399,8 +521,8 @@ def compute_atr_normalized_signal_tables(
     # *** CRITICAL*** The stock trend filter must remain a trailing rolling
     # average on past closes only.
     stock_trend_sma_df = price_close_df.rolling(
-        window=config.stock_trend_window_int,
-        min_periods=config.stock_trend_window_int,
+        window=config_obj.stock_trend_window_int,
+        min_periods=config_obj.stock_trend_window_int,
     ).mean()
     stock_trend_pass_df = (price_close_df > stock_trend_sma_df).reindex(monthly_decision_close_df.index)
 
@@ -408,32 +530,36 @@ def compute_atr_normalized_signal_tables(
     # average on past SPY closes only.
     regime_close_decision_ser = regime_close_ser.reindex(monthly_decision_close_df.index)
     regime_sma_ser = regime_close_ser.rolling(
-        window=config.index_trend_window_int,
-        min_periods=config.index_trend_window_int,
+        window=config_obj.index_trend_window_int,
+        min_periods=config_obj.index_trend_window_int,
     ).mean().reindex(monthly_decision_close_df.index)
     regime_pass_ser = regime_close_decision_ser > regime_sma_ser
 
-    risk_adj_score_df = monthly_roc_df / atr_decision_df
+    # *** CRITICAL *** Both ATR and raw close are in decision-date units.
+    # Score_T = (ROC12_T / ATR_nominal_T) * RawClose_T
+    #         = ROC12_T / (ATR_adjusted_T / AdjustedClose_T).
+    # A later split rescales both adjusted terms and cancels out.
+    risk_adj_score_df = (monthly_roc_df / atr_decision_df) * unadjusted_decision_close_df
     risk_adj_score_df = risk_adj_score_df.replace([np.inf, -np.inf], np.nan)
 
     valid_monthly_roc_bool_ser = monthly_roc_df.notna().any(axis=1)
     valid_atr_bool_ser = atr_decision_df.notna().any(axis=1)
     valid_stock_trend_bool_ser = stock_trend_pass_df.notna().any(axis=1)
     valid_regime_bool_ser = regime_close_decision_ser.notna() & regime_sma_ser.notna()
-    valid_decision_index = monthly_decision_close_df.index[
+    valid_decision_idx = monthly_decision_close_df.index[
         valid_monthly_roc_bool_ser
         & valid_atr_bool_ser
         & valid_stock_trend_bool_ser
         & valid_regime_bool_ser
     ]
 
-    monthly_decision_close_df = monthly_decision_close_df.reindex(valid_decision_index)
-    monthly_roc_df = monthly_roc_df.reindex(valid_decision_index)
-    atr_decision_df = atr_decision_df.reindex(valid_decision_index)
-    stock_trend_pass_df = stock_trend_pass_df.reindex(valid_decision_index)
-    regime_sma_ser = regime_sma_ser.reindex(valid_decision_index)
-    regime_pass_ser = regime_pass_ser.reindex(valid_decision_index)
-    risk_adj_score_df = risk_adj_score_df.reindex(valid_decision_index)
+    monthly_decision_close_df = monthly_decision_close_df.reindex(valid_decision_idx)
+    monthly_roc_df = monthly_roc_df.reindex(valid_decision_idx)
+    atr_decision_df = atr_decision_df.reindex(valid_decision_idx)
+    stock_trend_pass_df = stock_trend_pass_df.reindex(valid_decision_idx)
+    regime_sma_ser = regime_sma_ser.reindex(valid_decision_idx)
+    regime_pass_ser = regime_pass_ser.reindex(valid_decision_idx)
+    risk_adj_score_df = risk_adj_score_df.reindex(valid_decision_idx)
     return (
         monthly_decision_close_df,
         monthly_roc_df,
@@ -446,36 +572,36 @@ def compute_atr_normalized_signal_tables(
 
 
 def map_month_end_decision_dates_to_rebalance_schedule_df(
-    decision_date_index: pd.DatetimeIndex,
-    execution_index: pd.DatetimeIndex,
+    decision_date_idx: pd.DatetimeIndex,
+    execution_idx: pd.DatetimeIndex,
 ) -> pd.DataFrame:
     """
     Map each month-end decision close to the next tradable open.
     """
-    if len(execution_index) < 2:
-        raise ValueError("execution_index must contain at least two trading dates.")
-    if len(decision_date_index) == 0:
-        raise ValueError("decision_date_index must not be empty.")
+    if len(execution_idx) < 2:
+        raise ValueError("execution_idx must contain at least two trading dates.")
+    if len(decision_date_idx) == 0:
+        raise ValueError("decision_date_idx must not be empty.")
 
-    execution_index = pd.DatetimeIndex(execution_index).sort_values()
-    decision_date_index = pd.DatetimeIndex(decision_date_index).sort_values()
+    execution_idx = pd.DatetimeIndex(execution_idx).sort_values()
+    decision_date_idx = pd.DatetimeIndex(decision_date_idx).sort_values()
 
-    rebalance_schedule_map: dict[pd.Timestamp, pd.Timestamp] = {}
-    for decision_date_ts in decision_date_index:
-        execution_insert_int = int(execution_index.searchsorted(pd.Timestamp(decision_date_ts), side="right"))
-        if execution_insert_int >= len(execution_index):
+    rebalance_schedule_dict: dict[pd.Timestamp, pd.Timestamp] = {}
+    for decision_date_ts in decision_date_idx:
+        execution_insert_int = int(execution_idx.searchsorted(pd.Timestamp(decision_date_ts), side="right"))
+        if execution_insert_int >= len(execution_idx):
             continue
 
         # *** CRITICAL*** Month-end decisions must execute strictly on the
         # next tradable open after the decision close, never on the same bar.
-        execution_date_ts = pd.Timestamp(execution_index[execution_insert_int])
-        rebalance_schedule_map[execution_date_ts] = pd.Timestamp(decision_date_ts)
+        execution_date_ts = pd.Timestamp(execution_idx[execution_insert_int])
+        rebalance_schedule_dict[execution_date_ts] = pd.Timestamp(decision_date_ts)
 
-    if len(rebalance_schedule_map) == 0:
+    if len(rebalance_schedule_dict) == 0:
         raise RuntimeError("No month-end rebalance dates were generated.")
 
     rebalance_schedule_df = pd.DataFrame.from_dict(
-        rebalance_schedule_map,
+        rebalance_schedule_dict,
         orient="index",
         columns=["decision_date_ts"],
     ).sort_index()
@@ -483,31 +609,31 @@ def map_month_end_decision_dates_to_rebalance_schedule_df(
     return rebalance_schedule_df
 
 
-def get_atr_normalized_ndx_data(
-    config: AtrNormalizedNdxConfig = DEFAULT_CONFIG,
+def get_natr20_vxn_scaled_ndx_data(
+    config_obj: Natr20VxnScaledNdxConfig = DEFAULT_CONFIG,
     *,
     include_total_return_benchmark_bool: bool = False,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    _, raw_universe_df = build_index_constituent_matrix(indexname=config.indexname_str)
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    _, raw_universe_df = build_index_constituent_matrix(indexname=config_obj.indexname_str)
 
-    history_start_ts = pd.Timestamp(config.history_start_date_str)
-    backtest_start_ts = pd.Timestamp(config.backtest_start_date_str)
+    history_start_ts = pd.Timestamp(config_obj.history_start_date_str)
+    backtest_start_ts = pd.Timestamp(config_obj.backtest_start_date_str)
     filtered_universe_df = raw_universe_df.loc[raw_universe_df.index >= history_start_ts].copy()
     active_universe_df = filtered_universe_df.loc[filtered_universe_df.index >= backtest_start_ts].copy()
-    if config.end_date_str is not None:
-        end_date_ts = pd.Timestamp(config.end_date_str)
+    if config_obj.end_date_str is not None:
+        end_date_ts = pd.Timestamp(config_obj.end_date_str)
         active_universe_df = active_universe_df.loc[active_universe_df.index <= end_date_ts]
 
     active_symbol_list = active_universe_df.columns[active_universe_df.sum(axis=0) > 0].tolist()
     if len(active_symbol_list) == 0:
         raise RuntimeError("No active Nasdaq-100 universe symbols were found for the requested backtest window.")
 
-    price_symbol_list = list(dict.fromkeys(active_symbol_list + [config.regime_symbol_str]))
+    price_symbol_list = list(dict.fromkeys(active_symbol_list + [config_obj.regime_symbol_str]))
     pricing_data_df = load_raw_prices(
         symbols=price_symbol_list,
         benchmarks=[],
-        start_date=config.history_start_date_str,
-        end_date=config.end_date_str,
+        start_date=config_obj.history_start_date_str,
+        end_date=config_obj.end_date_str,
     )
     loaded_symbol_list = [
         symbol_str
@@ -516,11 +642,11 @@ def get_atr_normalized_ndx_data(
     ]
     audited_universe_df = audit_pit_universe_df(
         universe_df=filtered_universe_df,
-        execution_index=pricing_data_df.index,
+        execution_idx=pricing_data_df.index,
         tradeable_symbol_list=loaded_symbol_list,
     )
 
-    keep_symbol_set = set(audited_universe_df.columns.tolist() + [config.regime_symbol_str])
+    keep_symbol_set = set(audited_universe_df.columns.tolist() + [config_obj.regime_symbol_str])
     pricing_data_df = pricing_data_df.loc[
         :,
         pricing_data_df.columns.get_level_values(0).isin(keep_symbol_set),
@@ -528,7 +654,7 @@ def get_atr_normalized_ndx_data(
     if include_total_return_benchmark_bool:
         pricing_data_df = append_total_return_benchmark_data_df(
             pricing_data_df=pricing_data_df,
-            config_obj=config,
+            config_obj=config_obj,
         )
 
     close_symbol_list = audited_universe_df.columns.tolist()
@@ -544,7 +670,7 @@ def get_atr_normalized_ndx_data(
         {symbol_str: pricing_data_df[(symbol_str, "Low")] for symbol_str in close_symbol_list},
         index=pricing_data_df.index,
     ).astype(float)
-    regime_close_ser = pricing_data_df[(config.regime_symbol_str, "Close")].astype(float)
+    regime_close_ser = pricing_data_df[(config_obj.regime_symbol_str, "Close")].astype(float)
 
     (
         monthly_decision_close_df,
@@ -554,19 +680,24 @@ def get_atr_normalized_ndx_data(
         _regime_sma_ser,
         _regime_pass_ser,
         _risk_adj_score_df,
-    ) = compute_atr_normalized_signal_tables(
+    ) = compute_natr20_signal_tables(
         price_close_df=price_close_df,
         price_high_df=price_high_df,
         price_low_df=price_low_df,
         regime_close_ser=regime_close_ser,
-        config=config,
+        config_obj=config_obj,
         price_unadjusted_close_df=get_unadjusted_close_df(pricing_data_df, loaded_symbol_list),
     )
     rebalance_schedule_df = map_month_end_decision_dates_to_rebalance_schedule_df(
-        decision_date_index=pd.DatetimeIndex(monthly_decision_close_df.index),
-        execution_index=pricing_data_df.index,
+        decision_date_idx=pd.DatetimeIndex(monthly_decision_close_df.index),
+        execution_idx=pricing_data_df.index,
     )
-    return pricing_data_df, audited_universe_df, rebalance_schedule_df
+    vxn_close_ser = load_vxn_close_ser(config_obj.vxn_symbol_str, config_obj.history_start_date_str, config_obj.end_date_str)
+    vxn_scale_signal_df = compute_vxn_scale_signal_df(
+        vxn_close_ser, config_obj.target_vxn_pct_float,
+        config_obj.min_exposure_scale_float, config_obj.max_exposure_scale_float,
+    )
+    return pricing_data_df, audited_universe_df, rebalance_schedule_df, vxn_scale_signal_df
 
 
 def _map_rebalance_schedule_to_decision_close_schedule_df(
@@ -607,9 +738,9 @@ def build_execution_timing_analysis_inputs() -> dict[str, object]:
         entry_fill = decision_t + entry_lag at entry_price_field
         exit_fill  = decision_t + exit_lag  at exit_price_field
     """
-    config = DEFAULT_CONFIG
-    pricing_data_df, universe_df, rebalance_schedule_df = get_atr_normalized_ndx_data(
-        config,
+    config_obj = DEFAULT_CONFIG
+    pricing_data_df, universe_df, rebalance_schedule_df, vxn_scale_signal_df = get_natr20_vxn_scaled_ndx_data(
+        config_obj,
         include_total_return_benchmark_bool=True,
     )
     decision_close_schedule_df = _map_rebalance_schedule_to_decision_close_schedule_df(
@@ -617,31 +748,32 @@ def build_execution_timing_analysis_inputs() -> dict[str, object]:
     )
 
     def strategy_factory_fn():
-        strategy_obj = AtrNormalizedNdxStrategy(
-            name="strategy_mo_atr_normalized_ndx",
-            benchmarks=[config.performance_benchmark_symbol_str],
+        strategy_obj = Natr20VxnScaledNdxStrategy(
+            name="strategy_mo_natr20_ndx_vxn_scaled",
+            benchmarks=[config_obj.performance_benchmark_symbol_str],
             rebalance_schedule_df=decision_close_schedule_df,
-            regime_symbol_str=config.regime_symbol_str,
-            capital_base=config.capital_base_float,
-            slippage=config.slippage_float,
-            commission_per_share=config.commission_per_share_float,
-            commission_minimum=config.commission_minimum_float,
-            lookback_month_int=config.lookback_month_int,
-            index_trend_window_int=config.index_trend_window_int,
-            stock_trend_window_int=config.stock_trend_window_int,
-            max_positions_int=config.max_positions_int,
+            vxn_scale_signal_df=vxn_scale_signal_df,
+            regime_symbol_str=config_obj.regime_symbol_str,
+            capital_base=config_obj.capital_base_float,
+            slippage=config_obj.slippage_float,
+            commission_per_share=config_obj.commission_per_share_float,
+            commission_minimum=config_obj.commission_minimum_float,
+            lookback_month_int=config_obj.lookback_month_int,
+            index_trend_window_int=config_obj.index_trend_window_int,
+            stock_trend_window_int=config_obj.stock_trend_window_int,
+            max_positions_int=config_obj.max_positions_int,
         )
         strategy_obj.universe_df = universe_df
         configure_total_return_benchmark_provenance(
             strategy_obj=strategy_obj,
-            config_obj=config,
+            config_obj=config_obj,
         )
         strategy_obj.trade_id_int = 0
         strategy_obj.current_trade_map = defaultdict(default_trade_id_int)
         return strategy_obj
 
     calendar_idx = pricing_data_df.index[
-        pricing_data_df.index >= pd.Timestamp(config.backtest_start_date_str)
+        pricing_data_df.index >= pd.Timestamp(config_obj.backtest_start_date_str)
     ]
 
     return {
@@ -657,14 +789,16 @@ def build_execution_timing_analysis_inputs() -> dict[str, object]:
     }
 
 
-class AtrNormalizedNdxStrategy(Strategy):
+class Natr20VxnScaledNdxStrategy(Strategy):
     """
     Long-only monthly Nasdaq-100 momentum rotation with fixed slot sizing.
 
     For selected stock i at rebalance open t:
 
         q^{intent}_{i,t}
-            = floor(V_{t-1} * (1 / max_positions) / Close_{i,t-1})
+            = floor(V_{t-1} * vxn_scale_T / max_positions / RawClose_{i,t-1})
+
+    The engine maps these nominal shares to adjusted economic share units.
     """
 
     enable_signal_audit = True
@@ -675,6 +809,7 @@ class AtrNormalizedNdxStrategy(Strategy):
         name: str,
         benchmarks: Sequence[str],
         rebalance_schedule_df: pd.DataFrame,
+        vxn_scale_signal_df: pd.DataFrame,
         regime_symbol_str: str = "SPY",
         capital_base: float = 100_000.0,
         slippage: float = 0.00025,
@@ -709,6 +844,14 @@ class AtrNormalizedNdxStrategy(Strategy):
         if max_positions_int <= 0:
             raise ValueError("max_positions_int must be positive.")
 
+        if vxn_scale_signal_df.empty or "vxn_exposure_scale_float" not in vxn_scale_signal_df:
+            raise ValueError("VXN exposure scale data is required.")
+        if not isinstance(vxn_scale_signal_df.index, pd.DatetimeIndex) or not vxn_scale_signal_df.index.is_unique:
+            raise ValueError("VXN exposure scales require unique dated observations.")
+        exposure_scale_ser = vxn_scale_signal_df["vxn_exposure_scale_float"].astype(float)
+        if (~np.isfinite(exposure_scale_ser) | ~exposure_scale_ser.between(0.0, 1.0)).any():
+            raise ValueError("VXN exposure scales must be finite and within [0, 1].")
+        self.vxn_scale_signal_df = vxn_scale_signal_df.copy().sort_index()
         self.rebalance_schedule_df = rebalance_schedule_df.copy().sort_index()
         self.regime_symbol_str = str(regime_symbol_str)
         self.lookback_month_int = int(lookback_month_int)
@@ -722,13 +865,13 @@ class AtrNormalizedNdxStrategy(Strategy):
         self.current_trade_map: defaultdict[str, int] = defaultdict(default_trade_id_int)
         self.universe_df: pd.DataFrame | None = None
 
-    def get_tradeable_symbol_list(self, pricing_data: pd.DataFrame) -> list[str]:
+    def get_tradeable_symbol_list(self, pricing_data_df: pd.DataFrame) -> list[str]:
         benchmark_data_symbol_set = set(
             self._benchmark_data_symbol_map_dict.values()
         )
         tradeable_symbol_list = [
             str(symbol_str)
-            for symbol_str in pricing_data.columns.get_level_values(0).unique()
+            for symbol_str in pricing_data_df.columns.get_level_values(0).unique()
             if (
                 str(symbol_str) not in self._benchmarks
                 and str(symbol_str) != self.regime_symbol_str
@@ -736,11 +879,11 @@ class AtrNormalizedNdxStrategy(Strategy):
             )
         ]
         if len(tradeable_symbol_list) == 0:
-            raise RuntimeError("No tradeable stock symbols were found in pricing_data.")
+            raise RuntimeError("No tradeable stock symbols were found in pricing_data_df.")
         return tradeable_symbol_list
 
-    def compute_signals(self, pricing_data: pd.DataFrame) -> pd.DataFrame:
-        signal_data_df = pricing_data.copy()
+    def compute_signals(self, pricing_data_df: pd.DataFrame) -> pd.DataFrame:
+        signal_data_df = pricing_data_df.copy()
         tradeable_symbol_list = self.get_tradeable_symbol_list(signal_data_df)
 
         price_close_df = pd.DataFrame(
@@ -756,12 +899,12 @@ class AtrNormalizedNdxStrategy(Strategy):
             index=signal_data_df.index,
         ).astype(float)
 
-        regime_close_key = (self.regime_symbol_str, "Close")
-        if regime_close_key not in signal_data_df.columns:
+        regime_close_key_tuple = (self.regime_symbol_str, "Close")
+        if regime_close_key_tuple not in signal_data_df.columns:
             raise RuntimeError(f"Missing regime close data for {self.regime_symbol_str}.")
-        regime_close_ser = signal_data_df[regime_close_key].astype(float)
+        regime_close_ser = signal_data_df[regime_close_key_tuple].astype(float)
 
-        helper_config = AtrNormalizedNdxConfig(
+        helper_config_obj = Natr20VxnScaledNdxConfig(
             regime_symbol_str=self.regime_symbol_str,
             lookback_month_int=self.lookback_month_int,
             index_trend_window_int=self.index_trend_window_int,
@@ -776,12 +919,12 @@ class AtrNormalizedNdxStrategy(Strategy):
             regime_sma_ser,
             regime_pass_ser,
             risk_adj_score_df,
-        ) = compute_atr_normalized_signal_tables(
+        ) = compute_natr20_signal_tables(
             price_close_df=price_close_df,
             price_high_df=price_high_df,
             price_low_df=price_low_df,
             regime_close_ser=regime_close_ser,
-            config=helper_config,
+            config_obj=helper_config_obj,
             price_unadjusted_close_df=get_unadjusted_close_df(signal_data_df, tradeable_symbol_list),
         )
 
@@ -793,14 +936,14 @@ class AtrNormalizedNdxStrategy(Strategy):
         regime_pass_aligned_ser = regime_pass_ser.reindex(signal_data_df.index)
 
         feature_frame_list: list[pd.DataFrame] = []
-        feature_map: dict[str, pd.DataFrame] = {
+        feature_map_dict: dict[str, pd.DataFrame] = {
             f"monthly_roc_{self.lookback_month_int}_ser": monthly_roc_aligned_df,
             f"atr_{ATR_WINDOW_INT}_ser": atr_aligned_df,
             "stock_trend_pass_bool": stock_trend_pass_aligned_df,
             "risk_adj_score_ser": risk_adj_score_aligned_df,
         }
 
-        for field_str, field_df in feature_map.items():
+        for field_str, field_df in feature_map_dict.items():
             feature_df = field_df.copy()
             feature_df.columns = pd.MultiIndex.from_tuples(
                 [(symbol_str, field_str) for symbol_str in feature_df.columns]
@@ -817,6 +960,20 @@ class AtrNormalizedNdxStrategy(Strategy):
         regime_feature_df.columns = pd.MultiIndex.from_tuples(regime_feature_df.columns)
         feature_frame_list.append(regime_feature_df)
 
+        # *** CRITICAL *** NATR uses matching decision-date units only.
+        # NATR20_pct_T = 100 * ATR_nominal_T / RawClose_T.
+        raw_close_df = get_unadjusted_close_df(signal_data_df, tradeable_symbol_list)
+        natr_feature_df = 100.0 * atr_aligned_df / raw_close_df
+        natr_feature_df.columns = pd.MultiIndex.from_tuples(
+            [(symbol_str, "natr_20_pct_ser") for symbol_str in natr_feature_df.columns]
+        )
+        feature_frame_list.append(natr_feature_df)
+        self._data_adjustment_policy_dict.update({
+            "ranking_formula_str": "ROC12 / (SMA20_TRUE_RANGE / Close)",
+            "atr_smoothing_str": "simple_20_session_mean",
+            "exposure_overlay_str": "clip(target_vxn_pct / asof_VXN_close, min_scale, max_scale)",
+            "research_history_status_str": "previously_seen_2000_2026_not_untouched_holdout",
+        })
         return pd.concat([signal_data_df] + feature_frame_list, axis=1)
 
     def get_ranked_candidate_feature_df(self, close_row_ser: pd.Series) -> pd.DataFrame:
@@ -836,8 +993,8 @@ class AtrNormalizedNdxStrategy(Strategy):
         empty_candidate_feature_df = pd.DataFrame(
             columns=["risk_adj_score_float", "stock_trend_pass_bool", "symbol_str"]
         )
-        regime_pass_value = candidate_feature_df.loc[self.regime_symbol_str].get("regime_pass_bool", np.nan)
-        if pd.isna(regime_pass_value) or not bool(regime_pass_value):
+        regime_pass_value_obj = candidate_feature_df.loc[self.regime_symbol_str].get("regime_pass_bool", np.nan)
+        if pd.isna(regime_pass_value_obj) or not bool(regime_pass_value_obj):
             return empty_candidate_feature_df
 
         required_field_list = ["stock_trend_pass_bool", "risk_adj_score_ser"]
@@ -889,7 +1046,12 @@ class AtrNormalizedNdxStrategy(Strategy):
             index=selected_feature_df.index,
             dtype=float,
         )
-        return target_weight_ser
+        # *** CRITICAL *** At Close_T select the latest VXN observation <= T;
+        # do not read the execution-day or terminal dataset VXN value.
+        exposure_scale_float = get_asof_vxn_scale_float(
+            self.vxn_scale_signal_df, pd.Timestamp(self.previous_bar),
+        )
+        return target_weight_ser * exposure_scale_float
 
     def get_target_share_int_map(
         self,
@@ -922,14 +1084,14 @@ class AtrNormalizedNdxStrategy(Strategy):
 
         return target_share_amount_dict
 
-    def iterate(self, data: pd.DataFrame, close: pd.Series, open_prices: pd.Series):
-        if close is None or data is None:
+    def iterate(self, data_df: pd.DataFrame, close_ser: pd.Series, open_price_ser: pd.Series):
+        if close_ser is None or data_df is None:
             return
         if self.current_bar not in self.rebalance_schedule_df.index:
             return
 
         decision_date_ts = pd.Timestamp(self.rebalance_schedule_df.loc[self.current_bar, "decision_date_ts"])
-        # *** CRITICAL*** The scheduled month-end decision close must equal
+        # *** CRITICAL*** The scheduled month-end decision close_ser must equal
         # previous_bar exactly, otherwise signals and next-open execution drift.
         if pd.Timestamp(self.previous_bar) != decision_date_ts:
             raise RuntimeError(
@@ -937,10 +1099,10 @@ class AtrNormalizedNdxStrategy(Strategy):
                 f"decision_date_ts={decision_date_ts}, previous_bar={self.previous_bar}."
             )
 
-        target_weight_ser = self.get_target_weight_ser(close_row_ser=close)
+        target_weight_ser = self.get_target_weight_ser(close_row_ser=close_ser)
         target_share_amount_dict = self.get_target_share_int_map(
             target_weight_ser=target_weight_ser,
-            close_row_ser=close,
+            close_row_ser=close_ser,
         )
         target_symbol_set = set(target_share_amount_dict)
 
@@ -979,7 +1141,7 @@ def run_variant(
     backtest_start_date_str: str | None = None,
     capital_base_float: float | None = None,
     end_date_str: str | None = None,
-) -> AtrNormalizedNdxStrategy:
+) -> Natr20VxnScaledNdxStrategy:
     config_obj = DEFAULT_CONFIG
     if (
         backtest_start_date_str is not None
@@ -1000,15 +1162,16 @@ def run_variant(
             ),
             end_date_str=end_date_str,
         )
-    pricing_data_df, universe_df, rebalance_schedule_df = get_atr_normalized_ndx_data(
+    pricing_data_df, universe_df, rebalance_schedule_df, vxn_scale_signal_df = get_natr20_vxn_scaled_ndx_data(
         config_obj,
         include_total_return_benchmark_bool=True,
     )
 
-    strategy_obj = AtrNormalizedNdxStrategy(
-        name="strategy_mo_atr_normalized_ndx",
+    strategy_obj = Natr20VxnScaledNdxStrategy(
+        name="strategy_mo_natr20_ndx_vxn_scaled",
         benchmarks=[config_obj.performance_benchmark_symbol_str],
         rebalance_schedule_df=rebalance_schedule_df,
+        vxn_scale_signal_df=vxn_scale_signal_df,
         regime_symbol_str=config_obj.regime_symbol_str,
         capital_base=config_obj.capital_base_float,
         slippage=config_obj.slippage_float,
@@ -1078,15 +1241,16 @@ def build_capacity_analysis_inputs(
             ),
             end_date_str=end_date_str,
         )
-    pricing_data_df, universe_df, rebalance_schedule_df = get_atr_normalized_ndx_data(
+    pricing_data_df, universe_df, rebalance_schedule_df, vxn_scale_signal_df = get_natr20_vxn_scaled_ndx_data(
         config_obj,
         include_total_return_benchmark_bool=True,
     )
 
-    strategy_obj = AtrNormalizedNdxStrategy(
-        name="strategy_mo_atr_normalized_ndx",
+    strategy_obj = Natr20VxnScaledNdxStrategy(
+        name="strategy_mo_natr20_ndx_vxn_scaled",
         benchmarks=[config_obj.performance_benchmark_symbol_str],
         rebalance_schedule_df=rebalance_schedule_df,
+        vxn_scale_signal_df=vxn_scale_signal_df,
         regime_symbol_str=config_obj.regime_symbol_str,
         capital_base=config_obj.capital_base_float,
         slippage=config_obj.slippage_float,

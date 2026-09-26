@@ -99,6 +99,7 @@ class ScheduledOrder:
     fill_phase_str: str
     sizing_price_float: float
     sizing_portfolio_value_float: float
+    sizing_ledger_amount_float: float | None = None
 
 
 @dataclass
@@ -398,7 +399,9 @@ def _liquidate_missing_close_positions(
 
         for trade_id_obj, open_amount_float in open_trade_amount_ser.items():
             liquidation_amount_float = -float(open_amount_float)
-            commission_float = float(strategy_obj._compute_commission(liquidation_amount_float))
+            commission_float = float(strategy_obj._compute_execution_commission_float(
+                signal_data_df, asset_str, liquidation_amount_float, prior_close_ser.index[-1],
+            ))
             transaction_value_float = float(liquidation_amount_float * liquidation_price_float)
             strategy_obj.add_transaction(
                 trade_id_obj,
@@ -462,10 +465,12 @@ def _sizing_price_float(
     return float(fallback_price_float)
 
 
-def _classify_order_kind_str(position_float: float, amount_float: float) -> str:
-    if np.isclose(amount_float, 0.0, atol=1e-12):
+def _classify_order_kind_str(
+    position_float: float, amount_float: float, exact_zero_bool: bool = False,
+) -> str:
+    if amount_float == 0.0 if exact_zero_bool else np.isclose(amount_float, 0.0, atol=1e-12):
         return "flat"
-    if np.isclose(position_float, 0.0, atol=1e-12):
+    if position_float == 0.0 if exact_zero_bool else np.isclose(position_float, 0.0, atol=1e-12):
         return "entry"
     if np.sign(position_float) == np.sign(amount_float):
         return "entry"
@@ -547,14 +552,26 @@ def _execute_scheduled_order(
         raise RuntimeError(f"Missing fill price column {fill_key_tuple}.")
 
     current_position_float = float(strategy_obj.get_position(order_obj.asset))
-    amount_float = float(
-        order_obj.amount_in_shares(
+    if strategy_obj.historical_share_units_bool:
+        if scheduled_order_obj.sizing_ledger_amount_float is None:
+            raise ValueError("Historical timing orders require decision-date ledger sizing.")
+        # *** CRITICAL *** q_target = trunc(value_T / rawClose_T) * k_T was
+        # fixed when this order was scheduled. The fill date may only subtract
+        # the then-current holding; it must not re-round at k_fill or Open_fill.
+        amount_float = scheduled_order_obj.sizing_ledger_amount_float - (
+            current_position_float if order_obj.target else 0.0
+        )
+    else:
+        amount_float = float(order_obj.amount_in_shares(
             scheduled_order_obj.sizing_price_float,
             scheduled_order_obj.sizing_portfolio_value_float,
             current_position_float,
-        )
+        ))
+    zero_amount_bool = (
+        amount_float == 0.0 if strategy_obj.historical_share_units_bool
+        else np.isclose(amount_float, 0.0, atol=1e-12)
     )
-    if np.isclose(amount_float, 0.0, atol=1e-12):
+    if zero_amount_bool:
         return
 
     raw_fill_price_float = float(signal_data_df.loc[scheduled_order_obj.fill_bar_ts, fill_key_tuple])
@@ -565,7 +582,9 @@ def _execute_scheduled_order(
         # missing executable exit can materially change path risk.
         if (
             scheduled_order_obj.order_kind_str == "entry"
-            and np.isclose(current_position_float, 0.0, atol=1e-12)
+            and (current_position_float == 0.0 if strategy_obj.historical_share_units_bool
+                 else np.isclose(current_position_float, 0.0, atol=1e-12))
+            and (np.isnan(raw_fill_price_float) if strategy_obj.historical_share_units_bool else True)
         ):
             return
         raise RuntimeError(
@@ -578,7 +597,9 @@ def _execute_scheduled_order(
     # cells so they are not mistaken for live-clean timing.
     penalty_float = 1.0 + float(np.sign(amount_float)) * float(strategy_obj._slippage)
     fill_price_float = float(raw_fill_price_float * penalty_float)
-    commission_float = float(strategy_obj._compute_commission(amount_float))
+    commission_float = float(strategy_obj._compute_execution_commission_float(
+        signal_data_df, order_obj.asset, amount_float, scheduled_order_obj.fill_bar_ts,
+    ))
     transaction_value_float = float(fill_price_float * amount_float)
 
     strategy_obj.add_transaction(
@@ -595,6 +616,27 @@ def _execute_scheduled_order(
     strategy_obj.cash -= commission_float
 
 
+def _validate_scheduled_historical_anchors(
+    strategy_obj: Strategy,
+    signal_data_df: pd.DataFrame,
+    scheduled_order_list: list[ScheduledOrder],
+) -> None:
+    if not strategy_obj.historical_share_units_bool:
+        return
+    for scheduled_order_obj in scheduled_order_list:
+        if scheduled_order_obj.sizing_ledger_amount_float is None:
+            raise ValueError("Historical timing orders require decision-date ledger sizing.")
+        fill_key_tuple = (scheduled_order_obj.order_obj.asset, scheduled_order_obj.fill_price_field_str)
+        fill_price_float = float(signal_data_df.loc[scheduled_order_obj.fill_bar_ts, fill_key_tuple])
+        if np.isnan(fill_price_float):
+            continue
+        if not np.isfinite(fill_price_float) or fill_price_float <= 0.0:
+            raise ValueError(f"Invalid historical timing fill price for {fill_key_tuple}.")
+        strategy_obj._historical_price_scale_float(
+            signal_data_df, scheduled_order_obj.order_obj.asset, scheduled_order_obj.fill_bar_ts,
+        )
+
+
 def _process_scheduled_order_list(
     strategy_obj: Strategy,
     signal_data_df: pd.DataFrame,
@@ -606,6 +648,9 @@ def _process_scheduled_order_list(
         if preserve_sequence_bool
         else sorted(scheduled_order_list, key=_scheduled_order_sort_key_tuple)
     )
+    # Validate every present fill and fee conversion before the batch mutates
+    # cash. Missing NaN fills retain their existing modeled behavior.
+    _validate_scheduled_historical_anchors(strategy_obj, signal_data_df, ordered_scheduled_order_list)
     for scheduled_order_obj in ordered_scheduled_order_list:
         _execute_scheduled_order(
             strategy_obj=strategy_obj,
@@ -1289,6 +1334,15 @@ class ExecutionTimingAnalyzer:
             bar_ts = pd.Timestamp(bar_ts)
             strategy_obj.current_bar = bar_ts
             strategy_obj.previous_bar = _previous_bar_ts(full_index, bar_ts)
+            cash_before_dividend_float = float(strategy_obj.cash)
+            if strategy_obj.historical_share_units_bool:
+                strategy_obj._validate_historical_share_anchors(self.pricing_data_df)
+                # Queued intents are kept outside Strategy._orders and must
+                # join held-asset validation before dividend cash is posted.
+                _validate_scheduled_historical_anchors(
+                    strategy_obj, signal_data_df,
+                    open_schedule_map.get(bar_ts, []) + close_schedule_map.get(bar_ts, []),
+                )
             # *** CRITICAL*** Match Vanilla's entitlement transition before
             # any current-bar open fill. A next-open buyer must not receive the
             # prior session's dividend, while a next-open seller keeps it.
@@ -1315,7 +1369,12 @@ class ExecutionTimingAnalyzer:
                         previous_close_price_ser,
                     )
                     pre_open_total_value_float = float(
-                        strategy_obj.cash + pre_open_portfolio_value_float
+                        # *** CRITICAL *** Vanilla fixes percent targets from
+                        # prior-close NAV, before the dividend cash transition
+                        # at this open. The credited cash remains in cash for
+                        # fills and marking, but cannot enlarge this intent.
+                        (cash_before_dividend_float if strategy_obj.historical_share_units_bool
+                         else strategy_obj.cash) + pre_open_portfolio_value_float
                     )
                     strategy_obj.portfolio_value = pre_open_portfolio_value_float
                     strategy_obj.total_value = pre_open_total_value_float
@@ -1555,13 +1614,17 @@ class ExecutionTimingAnalyzer:
             )
             current_position_float = float(strategy_obj.get_position(order_obj.asset))
             amount_float = float(
-                order_obj.amount_in_shares(
+                strategy_obj._order_amount_in_ledger_units_float(
+                    order_obj,
+                    signal_data_df,
                     sizing_price_float,
                     float(strategy_obj.total_value),
                     current_position_float,
                 )
             )
-            order_kind_str = _classify_order_kind_str(current_position_float, amount_float)
+            order_kind_str = _classify_order_kind_str(
+                current_position_float, amount_float, strategy_obj.historical_share_units_bool,
+            )
             if order_kind_str == "flat":
                 continue
 
@@ -1594,6 +1657,12 @@ class ExecutionTimingAnalyzer:
                     fill_phase_str=timing_rule.fill_phase_str,
                     sizing_price_float=float(sizing_price_float),
                     sizing_portfolio_value_float=float(strategy_obj.total_value),
+                    sizing_ledger_amount_float=(
+                        float(strategy_obj._order_amount_in_ledger_units_float(
+                            order_obj, signal_data_df, sizing_price_float,
+                            float(strategy_obj.total_value), 0.0,
+                        )) if strategy_obj.historical_share_units_bool else None
+                    ),
                 )
             )
 

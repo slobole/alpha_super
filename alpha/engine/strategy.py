@@ -72,6 +72,10 @@ def dividend_cash_ledger_disabled_context() -> Iterator[None]:
 
 
 class Strategy(ABC):
+    # Older persisted strategies bypass __init__ when unpickled. They retain
+    # legacy execution unless the research caller explicitly opts in.
+    historical_share_units_bool = False
+
     def __init__(self, name: str, benchmarks: list | tuple, capital_base = 10_000, slippage: float = 0.00025,
                  commission_per_share: float = 0.005, commission_minimum: float = 1.0,
                  performance_benchmark_symbol_str: str | None = None,
@@ -87,6 +91,8 @@ class Strategy(ABC):
         self._slippage = slippage  # slippage percentage applied to orders
         self._commission_per_share = commission_per_share  # IBKR default: $0.005/share
         self._commission_minimum = commission_minimum  # IBKR default: $1.00 minimum per order
+        # Research opt-in only. SHARE orders always denote adjusted ledger units.
+        self.historical_share_units_bool = False
         self._benchmarks = benchmarks  # list of benchmark assets for performance comparison
         self._benchmark_data_symbol_map_dict: dict[str, str] = {
             str(benchmark_str): str(benchmark_str) for benchmark_str in self._benchmarks
@@ -345,7 +351,10 @@ class Strategy(ABC):
         position_or_order_asset_set = {
             str(asset_str)
             for asset_str, position_share_float in self.get_positions().items()
-            if not np.isclose(float(position_share_float), 0.0)
+            if (
+                float(position_share_float) != 0.0 if self.historical_share_units_bool
+                else not np.isclose(float(position_share_float), 0.0)
+            )
         }
         position_or_order_asset_set.update(
             str(order_obj.asset) for order_obj in self.get_orders()
@@ -431,8 +440,11 @@ class Strategy(ABC):
         # Positions are sampled before T+1 open orders, so an ex-date buyer gets
         # nothing and an ex-date seller keeps the distribution earned at T close.
         preopen_position_ser = self.get_positions().astype(float)
+        # *** CRITICAL*** Reciprocal price/share rescaling can make either
+        # factor tiny while their dollar dividend product remains material.
         active_position_ser = preopen_position_ser.loc[
-            ~np.isclose(preopen_position_ser, 0.0)
+            preopen_position_ser.ne(0.0) if self.historical_share_units_bool
+            else ~np.isclose(preopen_position_ser, 0.0)
         ]
 
         pending_ledger_row_dict_list: list[dict[str, object]] = []
@@ -462,7 +474,10 @@ class Strategy(ABC):
                     f"{asset_str} on entitlement date "
                     f"{entitlement_date_ts.date()}."
                 )
-            if np.isclose(dividend_per_share_float, 0.0):
+            if (
+                dividend_per_share_float == 0.0 if self.historical_share_units_bool
+                else np.isclose(dividend_per_share_float, 0.0)
+            ):
                 continue
 
             gross_dividend_cash_float = (
@@ -714,6 +729,119 @@ class Strategy(ABC):
             return 0.0
         return max(self._commission_minimum, self._commission_per_share * abs(shares))
 
+    @staticmethod
+    def historical_share_amount_float(
+        target_value_float: float,
+        adjusted_close_float: float,
+        unadjusted_close_float: float,
+    ) -> float:
+        """Quantize historical dollars, then express shares in economic ledger units.
+
+        k_T = UnadjustedClose_T / AdjustedClose_T
+        q_ledger = trunc(target_value / UnadjustedClose_T) * k_T
+
+        CAPITALSPECIAL also embeds special distributions. This mapping preserves
+        that economic ledger; it is not exact physical-share accounting across
+        special distributions or their embedded reinvestment.
+        """
+        if not np.isfinite(target_value_float):
+            raise ValueError("Historical share sizing requires a finite target value.")
+        if (
+            not np.isfinite(adjusted_close_float) or adjusted_close_float <= 0.0
+            or not np.isfinite(unadjusted_close_float) or unadjusted_close_float <= 0.0
+        ):
+            raise ValueError("Historical share sizing requires positive finite price anchors.")
+        price_scale_float = unadjusted_close_float / adjusted_close_float
+        if not np.isfinite(price_scale_float) or price_scale_float <= 0.0:
+            raise ValueError("Historical share price scale must be positive and finite.")
+        return float(int(target_value_float / unadjusted_close_float) * price_scale_float)
+
+    def _historical_price_scale_float(self, prices_df, asset_str, anchor_bar_ts) -> float:
+        if anchor_bar_ts is None or anchor_bar_ts not in prices_df.index:
+            raise ValueError(f"Missing historical share anchor date for {asset_str}: {anchor_bar_ts}.")
+        anchor_key_list = [(asset_str, 'Close'), (asset_str, 'Unadjusted Close')]
+        if any(anchor_key_tuple not in prices_df.columns for anchor_key_tuple in anchor_key_list):
+            raise ValueError(f"Missing historical share price anchors for {asset_str}.")
+        adjusted_close_float, unadjusted_close_float = (
+            float(prices_df.loc[anchor_bar_ts, anchor_key_tuple])
+            for anchor_key_tuple in anchor_key_list
+        )
+        # Reuse the price validation; one raw share maps to exactly k_T units.
+        return self.historical_share_amount_float(
+            unadjusted_close_float, adjusted_close_float, unadjusted_close_float,
+        )
+
+    def _order_amount_in_ledger_units_float(
+        self, order_obj, prices_df, sizing_price_float,
+        portfolio_value_float, current_position_float,
+    ) -> float:
+        if not self.historical_share_units_bool or order_obj.unit == 'shares':
+            return order_obj.amount_in_shares(
+                sizing_price_float, portfolio_value_float, current_position_float,
+            )
+        if order_obj.unit not in ('value', 'percent'):
+            raise ValueError(f"Unknown unit {order_obj.unit}")
+        # *** CRITICAL*** Decision Close_T alone fixes raw whole-share intent.
+        # Open_(T+1) and its split factor must never size the order.
+        self._historical_price_scale_float(prices_df, order_obj.asset, self.previous_bar)
+        target_value_float = float(order_obj.amount) * (
+            portfolio_value_float if order_obj.unit == 'percent' else 1.0
+        )
+        target_share_float = self.historical_share_amount_float(
+            target_value_float,
+            float(prices_df.loc[self.previous_bar, (order_obj.asset, 'Close')]),
+            float(prices_df.loc[self.previous_bar, (order_obj.asset, 'Unadjusted Close')]),
+        )
+        return target_share_float - current_position_float if order_obj.target else target_share_float
+
+    def _compute_execution_commission_float(
+        self, prices_df, asset_str, amount_float, anchor_bar_ts,
+    ) -> float:
+        if not self.historical_share_units_bool:
+            return self._compute_commission(amount_float)
+        # *** CRITICAL*** Execution-date scale only converts the already fixed
+        # ledger quantity into fee-paying units: q_fee = q_ledger / k_execution.
+        # The price level at this date cannot change prior-close order sizing.
+        price_scale_float = self._historical_price_scale_float(prices_df, asset_str, anchor_bar_ts)
+        return self._compute_commission(amount_float / price_scale_float)
+
+    def _validate_historical_share_anchors(self, prices_df) -> None:
+        """Fail before dividends, orders, or positions mutate in an opted-in run."""
+        pending_order_list = list(self.get_orders())
+        relevant_asset_set = {order_obj.asset for order_obj in pending_order_list}
+        relevant_asset_set.update(
+            asset_str for asset_str, share_float in self.get_positions().items()
+            if share_float != 0.0
+        )
+        for asset_str in relevant_asset_set:
+            current_price_list = [
+                float(prices_df.loc[self.current_bar, (asset_str, field_str)])
+                if (asset_str, field_str) in prices_df.columns else np.nan
+                for field_str in ('Open', 'Close')
+            ]
+            current_open_float = current_price_list[0]
+            # NaN retains the existing missing-open cancellation/liquidation
+            # model. A present but invalid price must never produce a fill.
+            if not np.isnan(current_open_float) and (
+                not np.isfinite(current_open_float) or current_open_float <= 0.0
+            ):
+                raise ValueError(f"Invalid historical execution Open for {asset_str} on {self.current_bar}.")
+            anchor_bar_ts = self.current_bar
+            if not np.isfinite(current_price_list).all() and (
+                self.get_position(asset_str) != 0.0 or np.isnan(current_price_list[0])
+            ):
+                anchor_bar_ts = self._get_last_available_close_before_current_bar(prices_df, asset_str)[0]
+            self._historical_price_scale_float(prices_df, asset_str, anchor_bar_ts)
+        for order_obj in pending_order_list:
+            if order_obj.unit in ('value', 'percent'):
+                self._historical_price_scale_float(prices_df, order_obj.asset, self.previous_bar)
+        self._accounting_policy_dict.update({
+            'historical_share_units_bool': True,
+            'share_sizing_policy_str': 'decision_raw_whole_shares_mapped_to_adjusted_economic_units',
+            'commission_share_policy_str': 'execution_date_raw_equivalent_shares',
+            'special_distribution_share_policy_str': 'embedded_adjusted_reinvestment_not_physical_share_replay',
+        })
+
     def _cancel_zero_share_fill_bool(self, order, amount_float) -> bool:
         """Cancel an order that would fill zero shares. True when cancelled.
 
@@ -727,7 +855,11 @@ class Strategy(ABC):
         round-trip trade whose return is profit / 0, which is not finite and
         silently corrupts every statistic derived from trade returns.
         """
-        if not np.isclose(float(amount_float), 0.0):
+        zero_amount_bool = (
+            float(amount_float) == 0.0 if self.historical_share_units_bool
+            else np.isclose(float(amount_float), 0.0)
+        )
+        if not zero_amount_bool:
             return False
 
         self.log_audit_event(
@@ -1023,7 +1155,7 @@ class Strategy(ABC):
         open_trade_mask_vec = ~np.isclose(
             open_trade_amount_ser.to_numpy(dtype=float),
             0.0,
-            atol=1e-12,
+            atol=0.0 if self.historical_share_units_bool else 1e-12,
         )
         open_trade_amount_ser = open_trade_amount_ser.loc[open_trade_mask_vec]
         open_trade_amount_ser.name = 'open_trade_amount_ser'
@@ -1107,7 +1239,9 @@ class Strategy(ABC):
 
             for trade_id_obj, open_amount_float in open_trade_amount_ser.items():
                 liquidation_amount_float = -float(open_amount_float)
-                commission_float = float(self._compute_commission(liquidation_amount_float))
+                commission_float = float(self._compute_execution_commission_float(
+                    prices, asset_str, liquidation_amount_float, liquidation_bar_ts,
+                ))
                 liquidation_value_float = float(liquidation_amount_float * liquidation_price_float)
                 self.add_transaction(
                     trade_id_obj,
@@ -1143,6 +1277,9 @@ class Strategy(ABC):
         # ensure the current bar exist in the prices data
         if self.current_bar not in prices.index:
             return
+
+        if self.historical_share_units_bool:
+            self._validate_historical_share_anchors(prices)
 
         latest_close_price_ser = prices.loc[self.current_bar, (slice(None), 'Close')]
         latest_close_price_ser.index = latest_close_price_ser.index.get_level_values(0)
@@ -1201,7 +1338,9 @@ class Strategy(ABC):
                 self.remove_order(order)
                 continue
 
-            amount_approx = order.amount_in_shares(sizing_price_float, portfolio_value_float, position)
+            amount_approx = self._order_amount_in_ledger_units_float(
+                order, prices, sizing_price_float, portfolio_value_float, position,
+            )
             if self._cancel_zero_share_fill_bool(order, amount_approx):
                 continue
             # apply slippage (penalty) to execution price
@@ -1212,8 +1351,10 @@ class Strategy(ABC):
                 # market orders execute at the **opening price** of the current day
                 # (liquidity/cash constraints are ignored here; this can be improved)
                 price = current_open * penalty
-                amount = order.amount_in_shares(sizing_price_float, portfolio_value_float, position)
-                commission = self._compute_commission(amount)
+                amount = self._order_amount_in_ledger_units_float(
+                    order, prices, sizing_price_float, portfolio_value_float, position,
+                )
+                commission = self._compute_execution_commission_float(prices, order.asset, amount, self.current_bar)
                 self.add_transaction(order.trade_id, self.current_bar, order.asset, amount, price,
                                     price * amount, order.id, commission)
                 executed_orders.append(order)
@@ -1232,8 +1373,10 @@ class Strategy(ABC):
                         price = max(order.limit_price,
                                     current_open) * penalty  # sell at the best valid price
 
-                    amount_exact = order.amount_in_shares(sizing_price_float, portfolio_value_float, position)
-                    commission = self._compute_commission(amount_exact)
+                    amount_exact = self._order_amount_in_ledger_units_float(
+                        order, prices, sizing_price_float, portfolio_value_float, position,
+                    )
+                    commission = self._compute_execution_commission_float(prices, order.asset, amount_exact, self.current_bar)
                     self.add_transaction(order.trade_id, self.current_bar, order.asset,
                                         amount_exact, price, price * amount_exact, order.id, commission)
                     executed_orders.append(order)
@@ -1262,8 +1405,10 @@ class Strategy(ABC):
                         price = min(order.stop_price,
                                     current_open) * penalty  # sell at stop or worse
 
-                    amount_exact = order.amount_in_shares(sizing_price_float, portfolio_value_float, position)
-                    commission = self._compute_commission(amount_exact)
+                    amount_exact = self._order_amount_in_ledger_units_float(
+                        order, prices, sizing_price_float, portfolio_value_float, position,
+                    )
+                    commission = self._compute_execution_commission_float(prices, order.asset, amount_exact, self.current_bar)
                     self.add_transaction(order.trade_id, self.current_bar, order.asset,
                                         amount_exact, price, price * amount_exact, order.id, commission)
                     executed_orders.append(order)

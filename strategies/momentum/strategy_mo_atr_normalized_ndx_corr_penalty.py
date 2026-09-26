@@ -272,18 +272,20 @@ class CorrPenaltyAtrNormalizedNdxStrategy(AtrNormalizedNdxStrategy):
         if self.min_dollar_adv_float > 0.0:
             dollar_volume_frame_map: dict[str, pd.Series] = {}
             for symbol_str in tradeable_symbol_list:
-                volume_key = (symbol_str, "Volume")
-                unadjusted_close_key = (symbol_str, "Unadjusted Close")
-                if volume_key not in pricing_data.columns or unadjusted_close_key not in pricing_data.columns:
+                turnover_key = (symbol_str, "Turnover")
+                if turnover_key not in pricing_data.columns:
                     # Missing liquidity fields -> ADV stays NaN -> candidate is
                     # never eligible. Conservative by construction.
                     dollar_volume_frame_map[symbol_str] = pd.Series(
                         np.nan, index=pricing_data.index
                     )
                     continue
-                dollar_volume_frame_map[symbol_str] = (
-                    pricing_data[volume_key].astype(float)
-                    * pricing_data[unadjusted_close_key].astype(float)
+                # *** CRITICAL *** CAPITALSPECIAL Volume is split-adjusted.
+                # Raw Close * adjusted Volume leaks future split factors.
+                # Native Turnover is historical dollar trading value at T.
+                turnover_ser = pricing_data[turnover_key].astype(float)
+                dollar_volume_frame_map[symbol_str] = turnover_ser.where(
+                    np.isfinite(turnover_ser) & (turnover_ser >= 0.0)
                 )
             dollar_volume_df = pd.DataFrame(dollar_volume_frame_map, index=pricing_data.index)
             # *** CRITICAL*** The ADV gate is a trailing rolling median of past

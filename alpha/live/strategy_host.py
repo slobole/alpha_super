@@ -1180,6 +1180,9 @@ def _build_atr_normalized_ndx_decision_plan(
         price_low_df=price_low_df,
         regime_close_ser=regime_close_ser,
         config=config_obj,
+        price_unadjusted_close_df=atr_module.get_unadjusted_close_df(
+            pricing_data_df, tradeable_symbol_list,
+        ),
     )
     if len(monthly_decision_close_df.index) == 0:
         raise RuntimeError("ATR-normalized NDX live host produced no valid monthly decision dates.")

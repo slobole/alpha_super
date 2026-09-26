@@ -799,3 +799,31 @@ def test_stress_factory_preserves_vanilla_strategy_contract():
     assert context_dict["calendar_idx"].equals(
         core5_module.build_execution_calendar_idx(pricing_data_df)
     )
+
+
+
+@pytest.mark.parametrize("cutoff_str, expected_bool", [
+    ("2013-10-22", False), ("2013-10-31", True),
+    ("2024-03-27", False), ("2024-03-28", True),
+    ("2026-09-25", False), ("2026-09-30", True),
+])
+def test_month_end_uses_exchange_calendar_not_terminal_data_row(cutoff_str, expected_bool):
+    session_idx = core5_module.exchange_calendar_module.get_calendar(
+        "XNYS", start="2013-01-01", end="2026-10-31"
+    ).sessions.tz_localize(None)
+    prefix_idx = session_idx[session_idx <= pd.Timestamp(cutoff_str)]
+    full_flag_ser = core5_module._month_end_rebalance_ser(session_idx)
+    prefix_flag_ser = core5_module._month_end_rebalance_ser(prefix_idx)
+    assert bool(prefix_flag_ser.loc[pd.Timestamp(cutoff_str)]) is expected_bool
+    pd.testing.assert_series_equal(prefix_flag_ser, full_flag_ser.loc[prefix_idx])
+
+
+def test_missing_month_end_price_cannot_promote_prior_day_to_month_end():
+    sparse_idx = pd.to_datetime(["2024-02-27", "2024-02-28", "2024-03-01"])
+    assert not core5_module._month_end_rebalance_ser(sparse_idx).any()
+
+
+def test_month_end_empty_calendar_is_empty_boolean_series():
+    empty_idx = pd.DatetimeIndex([])
+    expected_ser = pd.Series(index=empty_idx, dtype=bool)
+    pd.testing.assert_series_equal(core5_module._month_end_rebalance_ser(empty_idx), expected_ser)

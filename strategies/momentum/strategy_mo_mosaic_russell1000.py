@@ -14,13 +14,15 @@ research-validated configuration locked:
     universe          Russell 1000 point-in-time members (Norgate)
     regime gate       $RUI close > SMA200, else 100% cash
     stock gates       close > SMA100, trailing 20d median dollar ADV >= $5M
-    score             ROC12 / ATR20
+    score             ROC12 / ATR20 in decision-date nominal dollar units
     selection         greedy, adjusted = score - 0.75 * avg_corr * |score|,
                       correlation window 126d (robust across 63-252)
     positions         20, equal weight 1/20, shortfall stays in cash
     execution         month-end decision close -> next tradable open (MOO)
 
-Validation record (2026-07-31, results/research/strategy/
+Legacy validation record (INVALIDATED by the 2026-09-26 future corporate-action
+audit; requires corrected reruns, not usable allocation evidence):
+2026-07-31, results/research/strategy/
 mo_atr_normalized_russell_1000_corr_penalty_sweep/): monotone improvement in
 lambda, stable across 2000-2012/2013-2026 halves, robust to the correlation
 window, replicated on S&P 500, cross-confirmed by a GICS sector-cap arm, and
