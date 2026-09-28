@@ -97,7 +97,9 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5": MaturityTier.PM_READY,
     # Monthly four-regime Inflation Compass using SPY SMA200, FRED T5YIE,
     # sector-ratio confirmation, and causal next-open ETF rebalancing. PM-only:
-    # current-vintage FRED data is not PAPER/LIVE release evidence.
+    # current-vintage FRED data is not PAPER/LIVE release evidence. Re-checked
+    # 2026-09-28 after the T5YIE publication-lag fix: capital, total-return
+    # benchmark and deterministic reruns passed; plumbing, not allocation approval.
     "strategies.taa_df.strategy_taa_inflation_compass": MaturityTier.PM_READY,
     # Frozen Pakal L14 tactical-yield rule: publication-safe FRED term/credit
     # spreads, IEF/LQD sleeves, causal DGS3MO cash, and next-open fills. The

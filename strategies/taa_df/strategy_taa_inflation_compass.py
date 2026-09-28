@@ -5,11 +5,31 @@ The strategy classifies each month-end into one of four regimes:
     growth_up_T = 1[SPY_T > SMA200_T]
 
     inflation_on_T
-        = 1[T5YIE_T > 2.0]
+        = 1[T5YIE_pub_T > 2.0]
           AND (
-              1[T5YIE_T > T5YIE_(T-60 sessions)]
+              1[T5YIE_pub_T > T5YIE_dated_(T-60 sessions)]
               OR 1[OLS_slope_60(asset_ratio)_T > 0]
           )
+
+    T5YIE_pub_T              = last observation dated strictly before T
+    T5YIE_dated_(T-60)       = last observation dated on or before T-60
+
+FRED publishes the T5YIE observation dated T on T+1, so it is not known at
+Close_T. ``T5YIE_pub_T`` is therefore normally the value dated T-1. Like the
+Tactical Fixed Income module, this assumes the H.15-derived value dated T-1
+appears around 17:00 ET on T, so the month-end decision is an evening
+decision (after about 17:15 ET on T, before Open_(T+1)). An earlier cutoff
+or a late FRED update would leave only the value dated T-2; no live rule for
+that case exists because the strategy is not wired.
+
+The 60-session anchor keeps its own observation date: the value dated T-60
+was published at T-59, well before Close_T. The comparison thus spans 59
+sessions of published history. This follows the 2026-09-27 leakage audit's
+causal re-run (2003-05..2026-08: CAGR 21.07%, Sharpe 1.085). Lagging the
+anchor by one more session is equally causal and gives 20.17% / 1.046; the
+whole gap is one exact two-decimal tie (2023-04-28: 2.29 vs 2.29 under the
+strict ``>``). Quote both when citing Compass numbers (see
+docs/research/LEAKAGE_HUNT_BOOKS_20260927.md).
 
 where ``asset_ratio`` is the cumulative wealth of the inflation-positive
 basket divided by the cumulative wealth of the inflation-negative basket:
@@ -24,8 +44,9 @@ The regime map is literal:
     growth down, inflation on -> 100% XLU
     growth down, inflation off -> 50% XLP + 50% IEF
 
-Every decision uses final month-end Close_T information. The existing TAA
-engine sizes from that close and fills at the first Open_(T+1). The old sleeve
+Every decision uses only information known after the final month-end Close_T:
+ETF closes through Close_T and T5YIE observations published by then. The
+existing TAA engine sizes from that close and fills at the first Open_(T+1). The old sleeve
 remains invested through the overnight interval; there is no month-end cash
 gap and no target-weight leverage.
 
@@ -41,7 +62,9 @@ Data roles are deliberately separate:
 3. The benchmark uses the explicit total-return index series.
 4. T5YIE uses the shared FRED loader and a current-vintage local cache.
 
-The FRED series is not an ALFRED vintage archive. This module is PM_READY
+The FRED series is not an ALFRED vintage archive (the 2026-09-27 audit found
+0 T5YIE revisions across ALFRED vintages since 2014; earlier vintages do not
+exist). This module is PM_READY
 research plumbing only and is deliberately absent from LIVE release wiring.
 """
 
@@ -170,8 +193,16 @@ def align_fred_to_session_ser(
     fred_value_ser: pd.Series,
     session_date_index: pd.DatetimeIndex,
     tolerance_day_int: int = FRED_ALIGNMENT_TOLERANCE_DAY_INT,
+    include_same_date_bool: bool = False,
 ) -> tuple[pd.Series, pd.Series]:
-    """Backward as-of alignment; a session never sees a later FRED date."""
+    """Backward as-of alignment of FRED observations to sessions.
+
+    By default session T sees only observations dated strictly before T,
+    because FRED publishes the value dated T on T+1. With
+    ``include_same_date_bool=True`` the result is the observation-dated
+    series (dated on or before T); it may be read only through a positive
+    session lag, never at T itself.
+    """
     session_date_index = pd.DatetimeIndex(session_date_index).tz_localize(None).normalize()
     session_df = pd.DataFrame({"session_date": session_date_index}).sort_values("session_date")
     fred_df = fred_value_ser.dropna().rename("fred_value_float").reset_index()
@@ -179,9 +210,11 @@ def align_fred_to_session_ser(
     fred_df["observation_date"] = pd.to_datetime(fred_df["observation_date"]).dt.normalize()
     fred_df = fred_df.sort_values("observation_date")
 
-    # *** CRITICAL*** lookahead-sensitive: direction='backward' and exact
-    # matches are mandatory. Date-T T5YIE is treated as known after Close_T,
-    # while any observation dated after T is forbidden.
+    # *** CRITICAL*** lookahead-sensitive: FRED publishes the observation
+    # dated T on T+1, so at Close_T only observations dated strictly before T
+    # exist (allow_exact_matches=False). The same-date mode builds the
+    # observation-dated series for lagged reads only; any date after T is
+    # always forbidden.
     aligned_df = pd.merge_asof(
         session_df,
         fred_df,
@@ -189,14 +222,16 @@ def align_fred_to_session_ser(
         right_on="observation_date",
         direction="backward",
         tolerance=pd.Timedelta(days=tolerance_day_int),
-        allow_exact_matches=True,
+        allow_exact_matches=include_same_date_bool,
     ).set_index("session_date")
 
-    future_observation_bool_ser = aligned_df["observation_date"].notna() & aligned_df[
-        "observation_date"
-    ].gt(aligned_df.index.to_series())
-    if future_observation_bool_ser.any():
-        raise AssertionError("FRED as-of alignment selected a future observation.")
+    session_date_ser = aligned_df.index.to_series()
+    if include_same_date_bool:
+        unpublished_observation_bool_ser = aligned_df["observation_date"].gt(session_date_ser)
+    else:
+        unpublished_observation_bool_ser = aligned_df["observation_date"].ge(session_date_ser)
+    if unpublished_observation_bool_ser.any():
+        raise AssertionError("FRED as-of alignment selected an unpublished observation.")
 
     aligned_value_ser = aligned_df["fred_value_float"].astype(float)
     aligned_value_ser.name = str(fred_value_ser.name or "T5YIE")
@@ -274,9 +309,19 @@ def compute_month_end_signal_and_weight_df(
 
     signal_close_df = signal_close_df.loc[:, list(config_obj.signal_asset_tuple)].astype(float)
     session_date_index = pd.DatetimeIndex(signal_close_df.index)
-    aligned_t5yie_ser, t5yie_age_day_ser = align_fred_to_session_ser(
+    # *** CRITICAL*** lookahead-sensitive: the level and current change use
+    # only T5YIE published by Close_T, i.e. dated strictly before T.
+    published_t5yie_ser, t5yie_age_day_ser = align_fred_to_session_ser(
         fred_value_ser=t5yie_value_ser,
         session_date_index=session_date_index,
+        include_same_date_bool=False,
+    )
+    # Observation-dated series; read below only through the positive
+    # 60-session shift, never at T.
+    dated_t5yie_ser, _dated_age_day_ser = align_fred_to_session_ser(
+        fred_value_ser=t5yie_value_ser,
+        session_date_index=session_date_index,
+        include_same_date_bool=True,
     )
 
     signal_return_df = signal_close_df.pct_change(fill_method=None)
@@ -307,12 +352,14 @@ def compute_month_end_signal_and_weight_df(
         min_periods=config_obj.growth_sma_session_int,
     ).mean()
     growth_on_ser = signal_close_df["SPY"].gt(growth_sma_ser)
-    inflation_level_on_ser = aligned_t5yie_ser.gt(config_obj.inflation_threshold_float)
+    inflation_level_on_ser = published_t5yie_ser.gt(config_obj.inflation_threshold_float)
 
-    # *** CRITICAL*** lookahead-sensitive: shift(+60) reads T-60 sessions.
-    # A negative shift would leak future T5YIE observations into Close_T.
-    prior_t5yie_ser = aligned_t5yie_ser.shift(config_obj.breakeven_lookback_session_int)
-    breakeven_up_ser = aligned_t5yie_ser.gt(prior_t5yie_ser)
+    # *** CRITICAL*** lookahead-sensitive: shift(+60) reads the observation
+    # dated on or before session T-60, which FRED published by T-59 and is
+    # therefore known at Close_T. A zero or negative shift of the dated
+    # series would leak an unpublished T5YIE value into Close_T.
+    prior_t5yie_ser = dated_t5yie_ser.shift(config_obj.breakeven_lookback_session_int)
+    breakeven_up_ser = published_t5yie_ser.gt(prior_t5yie_ser)
     asset_up_ser = asset_slope_ser.gt(0.0)
     inflation_on_ser = inflation_level_on_ser & (breakeven_up_ser | asset_up_ser)
 
@@ -321,7 +368,7 @@ def compute_month_end_signal_and_weight_df(
             "spy_close_float": signal_close_df["SPY"],
             "growth_sma_float": growth_sma_ser,
             "growth_on_bool": growth_on_ser,
-            "t5yie_float": aligned_t5yie_ser,
+            "t5yie_float": published_t5yie_ser,
             "t5yie_observation_age_day_float": t5yie_age_day_ser,
             "t5yie_prior_float": prior_t5yie_ser,
             "inflation_level_on_bool": inflation_level_on_ser,

@@ -175,7 +175,7 @@ def test_regime_map_is_literal_and_always_fully_invested():
         assert target_weight_ser[target_weight_ser > 0.0].to_dict() == nonzero_weight_dict
 
 
-def test_fred_alignment_is_backward_as_of_and_never_uses_future_value():
+def test_fred_alignment_defaults_to_published_values_dated_before_session():
     fred_value_ser = pd.Series(
         [1.90, 2.10],
         index=pd.DatetimeIndex(["2023-01-06", "2023-01-10"]),
@@ -188,8 +188,178 @@ def test_fred_alignment_is_backward_as_of_and_never_uses_future_value():
         session_date_index=session_date_index,
     )
 
+    # FRED publishes date-T T5YIE on T+1, so the session never sees its own date.
+    assert np.isnan(aligned_value_ser.iloc[0])
+    assert aligned_value_ser.iloc[1:].tolist() == [1.90, 1.90]
+    assert observation_age_day_ser.iloc[1:].astype(float).tolist() == [3.0, 4.0]
+
+
+def test_fred_same_date_alignment_is_backward_as_of_and_never_uses_future_value():
+    fred_value_ser = pd.Series(
+        [1.90, 2.10],
+        index=pd.DatetimeIndex(["2023-01-06", "2023-01-10"]),
+        name="T5YIE",
+    )
+    session_date_index = pd.DatetimeIndex(["2023-01-06", "2023-01-09", "2023-01-10"])
+
+    aligned_value_ser, observation_age_day_ser = variant_module.align_fred_to_session_ser(
+        fred_value_ser=fred_value_ser,
+        session_date_index=session_date_index,
+        include_same_date_bool=True,
+    )
+
     assert aligned_value_ser.tolist() == [1.90, 1.90, 2.10]
     assert observation_age_day_ser.astype(float).tolist() == [0.0, 3.0, 0.0]
+
+
+def _breakeven_only_decision_setup():
+    """Growth on, basket slope down: the regime hinges on T5YIE alone."""
+    signal_close_df = make_signal_close_df()
+    for asset_str in variant_module.POSITIVE_BASKET_WEIGHT_DICT:
+        signal_close_df[asset_str] = 100.0 * np.cumprod(
+            np.full(len(signal_close_df), 0.9990)
+        )
+    for asset_str in variant_module.NEGATIVE_BASKET_WEIGHT_DICT:
+        signal_close_df[asset_str] = 100.0 * np.cumprod(
+            np.full(len(signal_close_df), 1.0010)
+        )
+    config_obj = variant_module.InflationCompassConfig(
+        growth_sma_session_int=20,
+        breakeven_lookback_session_int=5,
+        asset_slope_lookback_session_int=5,
+    )
+    session_date_index = signal_close_df.index
+    decision_date_ts = get_complete_month_end_ts(session_date_index)
+    return signal_close_df, config_obj, session_date_index, decision_date_ts
+
+
+def get_complete_month_end_ts(session_date_index: pd.DatetimeIndex) -> pd.Timestamp:
+    # The final month in the fixture is partial; use the month-end before it.
+    month_end_index = variant_module.get_month_end_session_index(session_date_index)
+    return pd.Timestamp(month_end_index[-2])
+
+
+def _decision_row(signal_close_df, t5yie_value_ser, config_obj, decision_date_ts):
+    month_end_feature_df, month_end_weight_df = (
+        variant_module.compute_month_end_signal_and_weight_df(
+            signal_close_df=signal_close_df,
+            t5yie_value_ser=t5yie_value_ser,
+            config_obj=config_obj,
+        )
+    )
+    return month_end_feature_df.loc[decision_date_ts], month_end_weight_df.loc[decision_date_ts]
+
+
+def test_t5yie_dated_on_decision_date_cannot_change_that_decision():
+    signal_close_df, config_obj, session_date_index, decision_date_ts = (
+        _breakeven_only_decision_setup()
+    )
+    decision_pos_int = session_date_index.get_loc(decision_date_ts)
+    flat_t5yie_ser = pd.Series(2.20, index=session_date_index, name="T5YIE")
+
+    base_feature_ser, base_weight_ser = _decision_row(
+        signal_close_df, flat_t5yie_ser, config_obj, decision_date_ts
+    )
+    assert not bool(base_feature_ser["breakeven_up_bool"])
+    assert base_weight_ser["XLK"] == 1.0
+
+    # Date-T T5YIE is published on T+1: a jump dated T must be invisible at Close_T.
+    same_date_t5yie_ser = flat_t5yie_ser.copy()
+    same_date_t5yie_ser.iloc[decision_pos_int] = 2.50
+    same_date_feature_ser, same_date_weight_ser = _decision_row(
+        signal_close_df, same_date_t5yie_ser, config_obj, decision_date_ts
+    )
+    assert same_date_feature_ser["t5yie_float"] == 2.20
+    prior_session_age_day_float = float(
+        (decision_date_ts - session_date_index[decision_pos_int - 1]).days
+    )
+    assert (
+        same_date_feature_ser["t5yie_observation_age_day_float"]
+        == prior_session_age_day_float
+    )
+    pd.testing.assert_series_equal(same_date_weight_ser, base_weight_ser)
+
+    # The same jump dated T-1 was published by Close_T and must flip the regime.
+    prior_day_t5yie_ser = flat_t5yie_ser.copy()
+    prior_day_t5yie_ser.iloc[decision_pos_int - 1] = 2.50
+    prior_day_feature_ser, prior_day_weight_ser = _decision_row(
+        signal_close_df, prior_day_t5yie_ser, config_obj, decision_date_ts
+    )
+    assert prior_day_feature_ser["t5yie_float"] == 2.50
+    assert bool(prior_day_feature_ser["breakeven_up_bool"])
+    assert prior_day_weight_ser["XLE"] == 1.0
+
+
+def test_missing_prior_day_t5yie_falls_back_to_older_published_value():
+    signal_close_df, config_obj, session_date_index, decision_date_ts = (
+        _breakeven_only_decision_setup()
+    )
+    decision_pos_int = session_date_index.get_loc(decision_date_ts)
+    t5yie_ser = pd.Series(2.20, index=session_date_index, name="T5YIE")
+    t5yie_ser.iloc[decision_pos_int - 2] = 2.50
+    t5yie_ser.iloc[decision_pos_int] = 1.50
+    # A FRED holiday on T-1: the latest published value is the one dated T-2.
+    holiday_t5yie_ser = t5yie_ser.drop(session_date_index[decision_pos_int - 1])
+
+    feature_ser, weight_ser = _decision_row(
+        signal_close_df, holiday_t5yie_ser, config_obj, decision_date_ts
+    )
+
+    assert feature_ser["t5yie_float"] == 2.50
+    assert feature_ser["t5yie_observation_age_day_float"] == float(
+        (decision_date_ts - session_date_index[decision_pos_int - 2]).days
+    )
+    assert weight_ser["XLE"] == 1.0
+
+
+def test_t5yie_level_gate_ignores_same_date_crossing_of_two_percent():
+    signal_close_df, config_obj, session_date_index, decision_date_ts = (
+        _breakeven_only_decision_setup()
+    )
+    decision_pos_int = session_date_index.get_loc(decision_date_ts)
+    low_t5yie_ser = pd.Series(1.90, index=session_date_index, name="T5YIE")
+
+    same_date_t5yie_ser = low_t5yie_ser.copy()
+    same_date_t5yie_ser.iloc[decision_pos_int] = 2.50
+    same_date_feature_ser, same_date_weight_ser = _decision_row(
+        signal_close_df, same_date_t5yie_ser, config_obj, decision_date_ts
+    )
+    assert not bool(same_date_feature_ser["inflation_level_on_bool"])
+    assert same_date_weight_ser["XLK"] == 1.0
+
+    prior_day_t5yie_ser = low_t5yie_ser.copy()
+    prior_day_t5yie_ser.iloc[decision_pos_int - 1] = 2.50
+    prior_day_feature_ser, prior_day_weight_ser = _decision_row(
+        signal_close_df, prior_day_t5yie_ser, config_obj, decision_date_ts
+    )
+    assert bool(prior_day_feature_ser["inflation_level_on_bool"])
+    assert prior_day_weight_ser["XLE"] == 1.0
+
+
+def test_breakeven_anchor_is_the_observation_dated_lookback_sessions_before_decision():
+    signal_close_df, config_obj, session_date_index, decision_date_ts = (
+        _breakeven_only_decision_setup()
+    )
+    decision_pos_int = session_date_index.get_loc(decision_date_ts)
+    lookback_int = config_obj.breakeven_lookback_session_int
+    t5yie_ser = pd.Series(2.20, index=session_date_index, name="T5YIE")
+    t5yie_ser.iloc[decision_pos_int - 1] = 2.30
+
+    rising_feature_ser, rising_weight_ser = _decision_row(
+        signal_close_df, t5yie_ser, config_obj, decision_date_ts
+    )
+    assert rising_feature_ser["t5yie_prior_float"] == 2.20
+    assert rising_weight_ser["XLE"] == 1.0
+
+    # The anchor dated exactly T-L (published by T-L+1) is known at Close_T.
+    anchor_t5yie_ser = t5yie_ser.copy()
+    anchor_t5yie_ser.iloc[decision_pos_int - lookback_int] = 2.40
+    anchor_feature_ser, anchor_weight_ser = _decision_row(
+        signal_close_df, anchor_t5yie_ser, config_obj, decision_date_ts
+    )
+    assert anchor_feature_ser["t5yie_prior_float"] == 2.40
+    assert not bool(anchor_feature_ser["breakeven_up_bool"])
+    assert anchor_weight_ser["XLK"] == 1.0
 
 
 def test_stale_fred_after_signal_warmup_fails_loud_instead_of_holding_old_sleeve():
