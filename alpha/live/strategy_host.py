@@ -74,6 +74,8 @@ from data.norgate_loader import build_data_source_metadata_dict, use_norgate_dat
 
 HPI_MINIMUM_READY_MEMBER_COUNT_INT = 400
 HPI_MINIMUM_READY_MEMBER_RATIO_FLOAT = 0.80
+# Tradability flag passed as the HPI "open" of each held name. Never a price.
+HPI_LIVE_TRADABLE_OPEN_MARKER_FLOAT = 1.0
 
 
 INCREMENTAL_DECISION_STRATEGY_IMPORT_SET: set[str] = {
@@ -660,27 +662,31 @@ def _run_hpi_strategy_for_live_decision(
     )
     current_data_df = full_signal_df.loc[: pd.Timestamp(signal_date_ts)]
 
-    # *** CRITICAL*** Live cannot know whether Open-(T+1) will print. Keep the
-    # open series empty so iterate() does not free a slot based on an uncertain
-    # exit fill. Pending exits are converted to MOO intents immediately after
-    # candidate selection, without using or inventing an execution price.
+    held_position_ser = strategy_obj.get_positions()
+    held_symbol_list = sorted(
+        str(symbol_obj)
+        for symbol_obj in held_position_ser[held_position_ser > 0.0].index
+    )
+    # *** CRITICAL*** Same-open slot reuse (owner decisions 2026-09-28).
+    # The backtest frees an exit's slot at Open_(T+1) when that open prints
+    # and refills it in the same auction. Live cannot know at Close_T whether
+    # the open will print, so, like live DV2, it assumes every held name
+    # trades: exits and replacement entries go into one MOO basket. The marker
+    # is a tradability flag, not a price; iterate() reads open_price_ser only
+    # through isfinite(). If an exit does not fill while its replacement does,
+    # the pod holds one extra name and the runner parks it for manual review
+    # (exit_residual_detected). iterate() counts slots from actual holdings,
+    # so held names never exceed max_positions_int plus the failed exits.
+    tradable_open_marker_ser = pd.Series(
+        HPI_LIVE_TRADABLE_OPEN_MARKER_FLOAT,
+        index=held_symbol_list,
+        dtype=float,
+    )
     strategy_obj.iterate(
         current_data_df,
         close_row_ser,
-        pd.Series(dtype=float),
+        tradable_open_marker_ser,
     )
-    held_position_ser = strategy_obj.get_positions()
-    held_symbol_set = set(
-        held_position_ser[held_position_ser > 0.0].index.astype(str)
-    )
-    for symbol_str in sorted(
-        strategy_obj.pending_exit_symbol_set.intersection(held_symbol_set)
-    ):
-        strategy_obj.order_target_value(
-            symbol_str,
-            0.0,
-            trade_id=strategy_obj.current_trade_map[symbol_str],
-        )
     return signal_date_ts, strategy_obj
 
 
@@ -794,6 +800,7 @@ def _build_hpi_decision_plan(
             "strategy_family_str": strategy_family_str,
             "hpi_observation_clock_str": "norgate_padding_none",
             "hpi_membership_contract_str": "exact_pit",
+            "hpi_exit_slot_reuse_str": "same_open_moo_batch",
         },
     )
 

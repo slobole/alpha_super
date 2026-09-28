@@ -574,8 +574,9 @@ class HPIStatefulLongStrategy(Strategy):
                 )
                 # *** CRITICAL*** Backtests know this Open-(T+1) is finite and
                 # therefore model the exit fill before reusing the slot. The
-                # live host passes no open here because the future auction fill
-                # is unknown; live conservatively waits for broker confirmation.
+                # live host passes a tradability marker for every held name,
+                # so it reuses the slot in the same MOO batch, assuming the
+                # open prints (it cannot know the auction result at Close_T).
                 long_slots_int += 1
 
         capital_per_trade_float = self.previous_total_value / float(

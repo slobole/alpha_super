@@ -238,11 +238,13 @@ def test_strategy_host_builds_mixed_qpi_decision_plan(monkeypatch):
             True,
             0.1,
         ),
+        # Full one-slot book: OLD's exit frees its slot at the same open, so
+        # NEW is bought in the same MOO basket (same-open refill).
         (
-            "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit",
-            "baseline",
+            "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote",
+            "hpi_2_3_5_vote",
             1,
-            {},
+            {"NEW": 1.0},
             True,
             0.1,
         ),
@@ -250,7 +252,15 @@ def test_strategy_host_builds_mixed_qpi_decision_plan(monkeypatch):
             "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit",
             "baseline",
             1,
-            {},
+            {"NEW": 1.0},
+            True,
+            0.1,
+        ),
+        (
+            "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit",
+            "baseline",
+            1,
+            {"NEW": 1.0},
             False,
             0.95,
         ),
@@ -355,7 +365,9 @@ def test_strategy_host_builds_hpi_decision_plan_with_pending_exit(
         assert self.entry_mode_str == expected_entry_mode_str
         assert self.previous_bar == pd.Timestamp("2023-12-29")
         assert self.current_bar == pd.Timestamp("2024-01-02")
-        assert open_price_ser.empty
+        # Same-open refill: every held name is flagged as tradable.
+        assert open_price_ser.index.tolist() == ["OLD"]
+        assert np.isfinite(open_price_ser.to_numpy()).all()
         original_iterate_func(
             self,
             data_df,
@@ -434,6 +446,9 @@ def test_strategy_host_builds_hpi_decision_plan_with_pending_exit(
     assert decision_plan_obj.snapshot_metadata_dict[
         "hpi_membership_contract_str"
     ] == "exact_pit"
+    assert decision_plan_obj.snapshot_metadata_dict[
+        "hpi_exit_slot_reuse_str"
+    ] == "same_open_moo_batch"
 
 
 def test_hpi_live_readiness_rejects_short_history_features():
