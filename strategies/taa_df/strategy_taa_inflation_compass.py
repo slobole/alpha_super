@@ -143,6 +143,10 @@ class InflationCompassConfig:
     slippage_per_side_float: float = SLIPPAGE_PER_SIDE_FLOAT
     commission_per_share_float: float = COMMISSION_PER_SHARE_FLOAT
     commission_minimum_float: float = COMMISSION_MINIMUM_FLOAT
+    # The growth-up / inflation-off holding. XLK is the literal source rule;
+    # variant modules may swap it (e.g. QQQ) without touching the signal.
+    goldilocks_asset_str: str = "XLK"
+    strategy_name_str: str = STRATEGY_NAME_STR
 
     def __post_init__(self) -> None:
         if self.growth_sma_session_int < 2:
@@ -155,6 +159,14 @@ class InflationCompassConfig:
             raise ValueError("signal_asset_tuple contains duplicate symbols.")
         if len(set(self.tradeable_asset_tuple)) != len(self.tradeable_asset_tuple):
             raise ValueError("tradeable_asset_tuple contains duplicate symbols.")
+        if self.goldilocks_asset_str in {"XLE", "XLU", "XLP", "IEF"}:
+            raise ValueError("goldilocks_asset_str must differ from the other regime sleeves.")
+        required_asset_set = {"XLE", "XLU", "XLP", "IEF", self.goldilocks_asset_str}
+        if set(self.tradeable_asset_tuple) != required_asset_set:
+            raise ValueError(
+                "tradeable_asset_tuple must hold exactly the four regime sleeves: "
+                f"{sorted(required_asset_set)}."
+            )
         if not np.isclose(sum(POSITIVE_BASKET_WEIGHT_DICT.values()), 1.0, atol=1e-12):
             raise ValueError("Positive basket weights must sum to one.")
         if not np.isclose(sum(NEGATIVE_BASKET_WEIGHT_DICT.values()), 1.0, atol=1e-12):
@@ -278,14 +290,18 @@ def get_month_end_session_index(session_date_index: pd.DatetimeIndex) -> pd.Date
 def _regime_target_weight_ser(
     growth_on_bool: bool,
     inflation_on_bool: bool,
+    tradeable_asset_tuple: tuple[str, ...] = TRADEABLE_ASSET_TUPLE,
+    goldilocks_asset_str: str = "XLK",
 ) -> tuple[str, pd.Series]:
-    target_weight_ser = pd.Series(0.0, index=list(TRADEABLE_ASSET_TUPLE), dtype=float)
+    if goldilocks_asset_str not in tradeable_asset_tuple:
+        raise ValueError(f"{goldilocks_asset_str} is not in tradeable_asset_tuple.")
+    target_weight_ser = pd.Series(0.0, index=list(tradeable_asset_tuple), dtype=float)
     if growth_on_bool and inflation_on_bool:
         regime_label_str = "growth_up__inflation_on"
         target_weight_ser.loc["XLE"] = 1.0
     elif growth_on_bool and not inflation_on_bool:
         regime_label_str = "growth_up__inflation_off"
-        target_weight_ser.loc["XLK"] = 1.0
+        target_weight_ser.loc[goldilocks_asset_str] = 1.0
     elif not growth_on_bool and inflation_on_bool:
         regime_label_str = "growth_down__inflation_on"
         target_weight_ser.loc["XLU"] = 1.0
@@ -425,6 +441,8 @@ def compute_month_end_signal_and_weight_df(
         regime_label_str, target_weight_ser = _regime_target_weight_ser(
             growth_on_bool=bool(feature_row_ser["growth_on_bool"]),
             inflation_on_bool=bool(feature_row_ser["inflation_on_bool"]),
+            tradeable_asset_tuple=config_obj.tradeable_asset_tuple,
+            goldilocks_asset_str=config_obj.goldilocks_asset_str,
         )
         target_record_dict: dict[str, object] = {
             "decision_date": pd.Timestamp(decision_date_ts),
@@ -552,7 +570,7 @@ def _build_strategy_obj(
     strategy_class_obj: type[InflationCompassStrategy] = InflationCompassStrategy,
 ) -> InflationCompassStrategy:
     return strategy_class_obj(
-        name=STRATEGY_NAME_STR,
+        name=config_obj.strategy_name_str,
         benchmarks=config_obj.benchmark_tuple,
         rebalance_weight_df=rebalance_weight_df,
         tradeable_asset_list=config_obj.tradeable_asset_tuple,
@@ -665,9 +683,10 @@ def build_capacity_analysis_inputs(
     backtest_start_date_str: str | None = None,
     capital_base_float: float = DEFAULT_CONFIG.capital_base_float,
     end_date_str: str | None = None,
+    config_obj: InflationCompassConfig = DEFAULT_CONFIG,
 ) -> dict[str, object]:
     config_obj = replace(
-        DEFAULT_CONFIG,
+        config_obj,
         capital_base_float=capital_base_float,
         end_date_str=end_date_str,
     )
@@ -697,8 +716,9 @@ def build_capacity_analysis_inputs(
     }
 
 
-def build_execution_timing_analysis_inputs() -> dict[str, object]:
-    config_obj = DEFAULT_CONFIG
+def build_execution_timing_analysis_inputs(
+    config_obj: InflationCompassConfig = DEFAULT_CONFIG,
+) -> dict[str, object]:
     (
         execution_price_df,
         month_end_feature_df,
@@ -749,8 +769,9 @@ def build_execution_timing_analysis_inputs() -> dict[str, object]:
     }
 
 
-def build_stress_test_context_dict() -> dict[str, object]:
-    config_obj = DEFAULT_CONFIG
+def build_stress_test_context_dict(
+    config_obj: InflationCompassConfig = DEFAULT_CONFIG,
+) -> dict[str, object]:
     (
         execution_price_df,
         month_end_feature_df,
@@ -764,7 +785,7 @@ def build_stress_test_context_dict() -> dict[str, object]:
         backtest_start_date_str=None,
     )
     return {
-        "strategy_name_str": STRATEGY_NAME_STR,
+        "strategy_name_str": config_obj.strategy_name_str,
         "capital_base_float": float(config_obj.capital_base_float),
         "config_obj": config_obj,
         "pricing_data_df": execution_price_df,

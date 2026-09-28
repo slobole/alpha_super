@@ -47,6 +47,16 @@ Recommended actions (owner decisions): (a) take Compass out of the menu books or
 numbers quoted beside the 21-day and parameter-grid ranges; (c) update the book numbers — the menu figures that
 include Compass quote the lucky-peak sleeve.
 
+## Implementation of the QQQ shadow candidate (2026-09-28, owner request)
+
+`strategies/taa_df/strategy_taa_inflation_compass_qqq.py` implements candidate C2: the same module and data path
+with QQQ in the growth-up / inflation-off cell (the parent gained a `goldilocks_asset_str` config field, default
+XLK, with no change to its results: 21.072% / 1.0850 reproduced). Engine run 2003-05-01 → 2026-08-19: CAGR
+22.07%, Sharpe 1.138, max DD −23.4% (research replica: 22.06% / 1.138). Registered PM_READY after the capital,
+benchmark and determinism checks. PM_READY is plumbing only: the verdict above (lucky-peak parameters, holdout
+fail, coin flip against T-bills in the books, C2's p-value uncorrected) applies unchanged. The Stress analyzer is
+not registered for it.
+
 ## How it was tested
 
 - **Instrument.** A fast share-accounting replica of the Vanilla engine (next-open fills sized from the prior

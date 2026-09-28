@@ -101,6 +101,11 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     # 2026-09-28 after the T5YIE publication-lag fix: capital, total-return
     # benchmark and deterministic reruns passed; plumbing, not allocation approval.
     "strategies.taa_df.strategy_taa_inflation_compass": MaturityTier.PM_READY,
+    # Same Compass rule with QQQ instead of XLK in the growth-up / inflation-off
+    # cell (research candidate C2). Capital, total-return benchmark and
+    # deterministic reruns passed 2026-09-28; plumbing, not allocation approval.
+    # The research verdict is forward-shadow only; nothing here enforces that.
+    "strategies.taa_df.strategy_taa_inflation_compass_qqq": MaturityTier.PM_READY,
     # Frozen Pakal L14 tactical-yield rule: publication-safe FRED term/credit
     # spreads, IEF/LQD sleeves, causal DGS3MO cash, and next-open fills. The
     # research verdict remains diagnostic; PM_READY certifies plumbing only.
