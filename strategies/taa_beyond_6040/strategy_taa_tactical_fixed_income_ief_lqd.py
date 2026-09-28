@@ -32,6 +32,23 @@ Alpha Super translates the research path into the house execution contract:
 4. Five basis points of slippage are charged on each executed ETF side.
 5. Target shares are sized from Close_T and filled at Open_(T+1).
 
+FRED data modes (``TacticalYieldConfig.fred_data_mode_str``):
+
+- ``frozen_current_vintage`` (default): the hash-locked current-vintage files
+  above. They contain later backfills, e.g. Moody's DAAA/DBAA for the
+  2016-10..2017-03 FRED outage, so they are not point in time.
+- ``alfred_point_in_time``: every decision from 2014-04-30 is recomputed from
+  the ALFRED vintage published by its vintage date (T, or session T-1 with
+  ``alfred_vintage_policy_str="previous_session"``). Earlier decisions have no
+  Moody's vintage and keep their frozen rows, labelled as unverifiable. Cash
+  accrual uses the frozen DGS3MO file in both modes.
+
+Stale-input rule (both modes): a decision whose common FRED observation is
+more than MAX_OBSERVATION_AGE_SESSIONS_INT sessions older than session T-1 is
+stale and produces no target. ``stale_input_policy_str="raise"`` stops the run;
+``"block_and_hold"`` places no order and keeps the existing positions. The
+frozen files have no stale decision, so the frozen contract is unchanged.
+
 This is PM_READY research plumbing, not proof of edge and not PAPER/LIVE
 approval. The Pakal verdict remains diagnostic/inconclusive because the frozen
 stability gate failed and no untouched historical confirmation exists.
@@ -50,6 +67,11 @@ import numpy as np
 import pandas as pd
 from IPython.display import display
 
+from alpha.data.alfred_snapshot import (
+    AlfredVintageSnapshot,
+    load_alfred_snapshot_manifest,
+    load_alfred_vintage_snapshot,
+)
 from alpha.engine.backtest import run_daily
 from alpha.engine.report import save_results
 from strategies.taa_df.strategy_taa_df import (
@@ -101,6 +123,53 @@ FROZEN_NORGATE_SHA256_BY_SYMBOL_DICT = {
 FROZEN_SIGNAL_CONTRACT_SHA256_STR = (
     "85f16e7376977f7ab762fd907c4d3edf3d863760edbe09a2a887b6e13e56a3b6"
 )
+
+# FRED data modes. The frozen current-vintage files remain the governed default.
+# The ALFRED mode replays each decision from 2014-04-30 onward with the values
+# FRED had published by the vintage date; see
+# docs/research/TACTICAL_FI_ALFRED_POINT_IN_TIME_HANDOFF.md.
+FRED_DATA_MODE_FROZEN_STR = "frozen_current_vintage"
+FRED_DATA_MODE_ALFRED_PIT_STR = "alfred_point_in_time"
+SUPPORTED_FRED_DATA_MODE_TUPLE = (FRED_DATA_MODE_FROZEN_STR, FRED_DATA_MODE_ALFRED_PIT_STR)
+ALFRED_VINTAGE_DECISION_DATE_STR = "decision_date"
+ALFRED_VINTAGE_PREVIOUS_SESSION_STR = "previous_session"
+SUPPORTED_ALFRED_VINTAGE_POLICY_TUPLE = (
+    ALFRED_VINTAGE_DECISION_DATE_STR,
+    ALFRED_VINTAGE_PREVIOUS_SESSION_STR,
+)
+STALE_INPUT_POLICY_BLOCK_AND_HOLD_STR = "block_and_hold"
+STALE_INPUT_POLICY_RAISE_STR = "raise"
+SUPPORTED_STALE_INPUT_POLICY_TUPLE = (
+    STALE_INPUT_POLICY_BLOCK_AND_HOLD_STR,
+    STALE_INPUT_POLICY_RAISE_STR,
+)
+# Sessions between the common observation used and the prior session T-1.
+# Normal publication gives 0 (observation T-1); a bond-market holiday or a
+# one-day FRED delay gives 1. The 2014-2026 ALFRED vintages show 0 or 1 on every
+# usable decision and 15-96 during the 2016-17 Moody's outage. The value 2 also
+# matches the forward-shadow research gate (tactical_fi_forward_snapshot.py,
+# not yet committed). Under the previous-session vintage the normal age is
+# already 1, so the effective tolerance there is one session.
+MAX_OBSERVATION_AGE_SESSIONS_INT = 2
+# First archived ALFRED vintage of DAAA/DBAA is 2014-04-02; this is the first
+# month-end decision whose own and previous-session vintages both exist.
+FIRST_ALFRED_DECISION_DATE_STR = "2014-04-30"
+DEFAULT_ALFRED_SNAPSHOT_DIR_PATH = DEFAULT_FRED_DATA_DIR_PATH / "alfred_pit_20260928"
+FROZEN_ALFRED_MANIFEST_SHA256_STR = (
+    "eb29d05e06d953c9177090635b97530d54a359f3e75af46443f7c9a65be436db"
+)
+FROZEN_ALFRED_PIT_SIGNAL_CONTRACT_SHA256_BY_VINTAGE_POLICY_DICT = {
+    ALFRED_VINTAGE_DECISION_DATE_STR: (
+        "4f74d479bd5f0d2d3ed09fb3cc73ab7d0c44c2023f28a974510aedbafe1de040"
+    ),
+    ALFRED_VINTAGE_PREVIOUS_SESSION_STR: (
+        "e98b104bff149e62c2ec5c32405188ba6e3480e0bd5d02cf660f2986e488867d"
+    ),
+}
+
+
+class StaleMacroInputError(RuntimeError):
+    """A decision would have used a macro observation older than the stale limit."""
 
 
 def canonical_dataframe_sha256_str(data_df: pd.DataFrame) -> str:
@@ -166,8 +235,26 @@ class TacticalYieldConfig:
     slippage_per_side_float: float = SLIPPAGE_PER_SIDE_FLOAT
     commission_per_share_float: float = COMMISSION_PER_SHARE_FLOAT
     commission_minimum_float: float = COMMISSION_MINIMUM_FLOAT
+    fred_data_mode_str: str = FRED_DATA_MODE_FROZEN_STR
+    alfred_vintage_policy_str: str = ALFRED_VINTAGE_DECISION_DATE_STR
+    stale_input_policy_str: str = STALE_INPUT_POLICY_BLOCK_AND_HOLD_STR
+    alfred_snapshot_dir_path_str: str = str(DEFAULT_ALFRED_SNAPSHOT_DIR_PATH)
 
     def __post_init__(self) -> None:
+        if self.fred_data_mode_str not in SUPPORTED_FRED_DATA_MODE_TUPLE:
+            raise ValueError(
+                f"fred_data_mode_str must be one of {SUPPORTED_FRED_DATA_MODE_TUPLE}."
+            )
+        if self.alfred_vintage_policy_str not in SUPPORTED_ALFRED_VINTAGE_POLICY_TUPLE:
+            raise ValueError(
+                "alfred_vintage_policy_str must be one of "
+                f"{SUPPORTED_ALFRED_VINTAGE_POLICY_TUPLE}."
+            )
+        if self.stale_input_policy_str not in SUPPORTED_STALE_INPUT_POLICY_TUPLE:
+            raise ValueError(
+                "stale_input_policy_str must be one of "
+                f"{SUPPORTED_STALE_INPUT_POLICY_TUPLE}."
+            )
         if tuple(self.tradeable_asset_tuple) != TRADEABLE_ASSET_TUPLE:
             raise ValueError("The frozen L14 tradeable assets must be exactly IEF and LQD.")
         if tuple(self.benchmark_tuple) != BENCHMARK_TUPLE:
@@ -549,6 +636,238 @@ def build_month_end_signal_and_weight_df(
     return signal_df, month_end_weight_df
 
 
+def observation_age_sessions_int(
+    observation_date_ts: pd.Timestamp,
+    decision_date_ts: pd.Timestamp,
+    session_index: pd.DatetimeIndex,
+) -> int:
+    """Sessions after the observation date, up to and including session T-1.
+
+    Observation T-1 gives 0. Each missing publication day adds one.
+    """
+    prior_session_ts = previous_session(decision_date_ts, session_index)
+    newer_session_bool_arr = (session_index > pd.Timestamp(observation_date_ts)) & (
+        session_index <= prior_session_ts
+    )
+    return int(newer_session_bool_arr.sum())
+
+
+def apply_stale_input_rule(
+    signal_df: pd.DataFrame,
+    rebalance_weight_df: pd.DataFrame,
+    session_index: pd.DatetimeIndex,
+    stale_input_policy_str: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Fail closed when the common FRED row behind a decision is stale.
+
+    A decision is stale when its observation is more than
+    MAX_OBSERVATION_AGE_SESSIONS_INT sessions older than session T-1. A stale
+    decision never produces a target:
+
+    - ``raise`` stops the run with StaleMacroInputError (PAPER/LIVE semantics);
+    - ``block_and_hold`` records the block and emits no rebalance row, so no
+      order is placed and the pod keeps its existing positions until the next
+      non-stale decision (historical replay semantics).
+    """
+    if stale_input_policy_str not in SUPPORTED_STALE_INPUT_POLICY_TUPLE:
+        raise ValueError(f"Unsupported stale-input policy: {stale_input_policy_str}.")
+    checked_signal_df = signal_df.copy()
+    age_value_list = [
+        observation_age_sessions_int(
+            pd.Timestamp(checked_signal_df.loc[decision_date_ts, "observation_date"]),
+            pd.Timestamp(decision_date_ts),
+            session_index,
+        )
+        for decision_date_ts in checked_signal_df.index
+    ]
+    checked_signal_df["observation_age_sessions_int"] = age_value_list
+    checked_signal_df["stale_input_blocked_bool"] = (
+        checked_signal_df["observation_age_sessions_int"] > MAX_OBSERVATION_AGE_SESSIONS_INT
+    )
+    stale_signal_df = checked_signal_df.loc[checked_signal_df["stale_input_blocked_bool"]]
+    if not stale_signal_df.empty and stale_input_policy_str == STALE_INPUT_POLICY_RAISE_STR:
+        first_decision_ts = pd.Timestamp(stale_signal_df.index[0])
+        raise StaleMacroInputError(
+            f"Stale FRED input for decision {first_decision_ts.date()}: common "
+            f"observation {pd.Timestamp(stale_signal_df.iloc[0]['observation_date']).date()} "
+            f"is {int(stale_signal_df.iloc[0]['observation_age_sessions_int'])} sessions "
+            f"older than session T-1 (limit {MAX_OBSERVATION_AGE_SESSIONS_INT}). "
+            f"{len(stale_signal_df)} stale decision(s) in total; no target was produced."
+        )
+    blocked_decision_index = pd.DatetimeIndex(stale_signal_df.index)
+    checked_weight_df = rebalance_weight_df.loc[
+        ~pd.DatetimeIndex(rebalance_weight_df["decision_date"]).isin(blocked_decision_index)
+    ].copy()
+    return checked_signal_df, checked_weight_df
+
+
+def alfred_yield_panel_as_of(
+    alfred_snapshot_by_series_dict: dict[str, AlfredVintageSnapshot],
+    vintage_date_ts: pd.Timestamp,
+) -> pd.DataFrame:
+    """All four FRED series exactly as published on one sampled vintage date."""
+    yield_df = pd.concat(
+        [
+            alfred_snapshot_by_series_dict[series_id_str].value_ser_as_of(vintage_date_ts)
+            for series_id_str in FRED_SERIES_ID_TUPLE
+        ],
+        axis=1,
+    ).sort_index()
+    # *** CRITICAL*** publication boundary: a vintage dated v contains nothing
+    # dated after v, and v <= decision date T by construction of the caller.
+    if len(yield_df.index) and pd.Timestamp(yield_df.index[-1]) > pd.Timestamp(vintage_date_ts):
+        raise AssertionError("ALFRED panel contains an observation after its vintage date.")
+    return yield_df
+
+
+def build_point_in_time_signal_and_weight_df(
+    frozen_signal_df: pd.DataFrame,
+    frozen_weight_df: pd.DataFrame,
+    alfred_snapshot_by_series_dict: dict[str, AlfredVintageSnapshot],
+    session_index: pd.DatetimeIndex,
+    alfred_vintage_policy_str: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Recompute each decision from 2014-04-30 onward from its ALFRED vintage.
+
+    For decision T the vintage date v is T itself (``decision_date``) or the
+    session before T (``previous_session``, conservative about time of day).
+    The unchanged frozen rule is re-run from scratch on the panel published by
+    v, and only row T is kept. Its spread, its expanding-median threshold and
+    all earlier monthly spreads in that median therefore use only values FRED
+    had published by v <= T. Earlier decisions have no Moody's vintage and keep
+    their frozen current-vintage rows, labelled as such.
+
+    The stale-input rule is applied afterwards by apply_stale_input_rule().
+    """
+    if alfred_vintage_policy_str not in SUPPORTED_ALFRED_VINTAGE_POLICY_TUPLE:
+        raise ValueError(f"Unsupported ALFRED vintage policy: {alfred_vintage_policy_str}.")
+    first_alfred_decision_ts = pd.Timestamp(FIRST_ALFRED_DECISION_DATE_STR)
+    signal_row_list: list[pd.Series] = []
+    weight_row_list: list[pd.Series] = []
+    frozen_weight_by_decision_df = frozen_weight_df.reset_index().set_index("decision_date")
+    for decision_date_ts in frozen_signal_df.index:
+        decision_date_ts = pd.Timestamp(decision_date_ts)
+        if decision_date_ts < first_alfred_decision_ts:
+            signal_row_ser = frozen_signal_df.loc[decision_date_ts].copy()
+            signal_row_ser["fred_data_source_str"] = "frozen_current_vintage_before_alfred_archive"
+            signal_row_ser["vintage_date"] = pd.NaT
+            signal_row_list.append(signal_row_ser)
+            weight_row_list.append(frozen_weight_by_decision_df.loc[decision_date_ts].copy())
+            continue
+
+        if alfred_vintage_policy_str == ALFRED_VINTAGE_DECISION_DATE_STR:
+            vintage_date_ts = decision_date_ts
+        else:
+            vintage_date_ts = previous_session(decision_date_ts, session_index)
+        vintage_yield_df = alfred_yield_panel_as_of(
+            alfred_snapshot_by_series_dict,
+            vintage_date_ts,
+        )
+        # *** CRITICAL*** point-in-time recompute: the whole rule, including
+        # every earlier monthly spread inside the expanding median, is rebuilt
+        # from the vintage published by v <= T. Only row T is kept.
+        vintage_signal_df, vintage_weight_df = build_month_end_signal_and_weight_df(
+            yield_df=vintage_yield_df,
+            session_index=session_index,
+            last_complete_signal_month_str=str(decision_date_ts.to_period("M")),
+        )
+        if pd.Timestamp(vintage_signal_df.index[-1]) != decision_date_ts:
+            raise AssertionError(
+                f"ALFRED recompute for {decision_date_ts.date()} ended on "
+                f"{vintage_signal_df.index[-1].date()}."
+            )
+        history_age_ser = pd.Series(
+            [
+                observation_age_sessions_int(
+                    pd.Timestamp(history_row_ser["observation_date"]),
+                    pd.Timestamp(history_decision_ts),
+                    session_index,
+                )
+                for history_decision_ts, history_row_ser in vintage_signal_df.iterrows()
+            ],
+            index=vintage_signal_df.index,
+        )
+        # A usable decision whose median still contains a month that is stale
+        # in this vintage would need an unapproved rule (drop or keep that
+        # month). It does not occur in the 2014-2026 snapshot; fail loud if a
+        # new snapshot produces it.
+        if history_age_ser.iloc[-1] <= MAX_OBSERVATION_AGE_SESSIONS_INT and bool(
+            (history_age_ser.iloc[:-1] > MAX_OBSERVATION_AGE_SESSIONS_INT).any()
+        ):
+            raise AssertionError(
+                f"ALFRED median history for {decision_date_ts.date()} contains a stale month; "
+                "the median-composition rule for this case is not approved."
+            )
+        signal_row_ser = vintage_signal_df.loc[decision_date_ts].copy()
+        signal_row_ser["fred_data_source_str"] = f"alfred_vintage_{alfred_vintage_policy_str}"
+        signal_row_ser["vintage_date"] = vintage_date_ts
+        signal_row_list.append(signal_row_ser)
+        weight_row_ser = (
+            vintage_weight_df.reset_index().set_index("decision_date").loc[decision_date_ts].copy()
+        )
+        weight_row_list.append(weight_row_ser)
+
+    signal_df = pd.DataFrame(signal_row_list)
+    signal_df.index = pd.DatetimeIndex(signal_df.index, name="decision_date")
+    signal_df["observation_date"] = pd.to_datetime(signal_df["observation_date"])
+    signal_df["vintage_date"] = pd.to_datetime(signal_df["vintage_date"])
+    weight_df = pd.DataFrame(weight_row_list)
+    weight_df.index = pd.DatetimeIndex(weight_df.index, name="decision_date")
+    weight_df = weight_df.reset_index().set_index("rebalance_date")
+    weight_df.index = pd.DatetimeIndex(weight_df.index, name="rebalance_date")
+    weight_df = weight_df.loc[:, list(frozen_weight_df.columns)]
+    for column_str in ("IEF", "LQD", "Cash"):
+        weight_df[column_str] = weight_df[column_str].astype(float)
+    return signal_df, weight_df
+
+
+def build_point_in_time_contract_df(
+    signal_df: pd.DataFrame,
+    rebalance_weight_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Every decision row, including blocked ones, with its executable target."""
+    contract_df = signal_df.loc[
+        :,
+        [
+            "fred_data_source_str",
+            "vintage_date",
+            "observation_date",
+            "observation_age_sessions_int",
+            "stale_input_blocked_bool",
+            "term_spread_float",
+            "credit_spread_float",
+            "term_threshold_float",
+            "credit_threshold_float",
+            "term_state_float",
+            "credit_state_float",
+        ],
+    ].copy()
+    contract_df.index.name = "decision_date"
+    target_df = rebalance_weight_df.loc[:, ["decision_date", "IEF", "LQD", "Cash"]].copy()
+    target_df.index.name = "fill_date"
+    target_df = target_df.reset_index().set_index("decision_date")
+    return contract_df.join(target_df, how="left", validate="one_to_one")
+
+
+def load_alfred_point_in_time_snapshots(
+    config_obj: TacticalYieldConfig,
+) -> tuple[dict[str, object], dict[str, AlfredVintageSnapshot]]:
+    snapshot_dir_path = Path(config_obj.alfred_snapshot_dir_path_str)
+    manifest_dict = load_alfred_snapshot_manifest(
+        snapshot_dir_path,
+        FROZEN_ALFRED_MANIFEST_SHA256_STR,
+    )
+    snapshot_by_series_dict = {
+        series_id_str: load_alfred_vintage_snapshot(
+            snapshot_dir_path,
+            series_id_str,
+            manifest_dict,
+        )
+        for series_id_str in FRED_SERIES_ID_TUPLE
+    }
+    return manifest_dict, snapshot_by_series_dict
+
+
 def build_causal_cash_return_ser(
     session_index: pd.DatetimeIndex,
     dgs3mo_value_ser: pd.Series,
@@ -626,6 +945,42 @@ def get_tactical_yield_data(
         raise RuntimeError(
             "Frozen 289-row signal/target contract fingerprint mismatch."
         )
+    if config_obj.fred_data_mode_str == FRED_DATA_MODE_ALFRED_PIT_STR:
+        _manifest_dict, alfred_snapshot_by_series_dict = load_alfred_point_in_time_snapshots(
+            config_obj
+        )
+        signal_df, rebalance_weight_df = build_point_in_time_signal_and_weight_df(
+            frozen_signal_df=signal_df,
+            frozen_weight_df=rebalance_weight_df,
+            alfred_snapshot_by_series_dict=alfred_snapshot_by_series_dict,
+            session_index=common_session_index,
+            alfred_vintage_policy_str=config_obj.alfred_vintage_policy_str,
+        )
+    signal_df, rebalance_weight_df = apply_stale_input_rule(
+        signal_df,
+        rebalance_weight_df,
+        common_session_index,
+        config_obj.stale_input_policy_str,
+    )
+    if config_obj.fred_data_mode_str == FRED_DATA_MODE_ALFRED_PIT_STR:
+        point_in_time_contract_sha256_str = canonical_dataframe_sha256_str(
+            build_point_in_time_contract_df(signal_df, rebalance_weight_df)
+        )
+        expected_point_in_time_sha256_str = (
+            FROZEN_ALFRED_PIT_SIGNAL_CONTRACT_SHA256_BY_VINTAGE_POLICY_DICT[
+                config_obj.alfred_vintage_policy_str
+            ]
+        )
+        if point_in_time_contract_sha256_str != expected_point_in_time_sha256_str:
+            raise RuntimeError(
+                "ALFRED point-in-time signal/target contract fingerprint mismatch: "
+                f"expected {expected_point_in_time_sha256_str}, "
+                f"found {point_in_time_contract_sha256_str}."
+            )
+    elif bool(signal_df["stale_input_blocked_bool"].any()):
+        # The frozen files are hash-locked and measured stale-free (all 289
+        # observations are T-1). A block here would mean the contract changed.
+        raise AssertionError("The frozen current-vintage contract must have no stale decision.")
     dgs3mo_snapshot_obj = next(
         snapshot_obj
         for snapshot_obj in fred_snapshot_tuple
@@ -818,11 +1173,86 @@ class TacticalYieldTimingStrategy(TacticalYieldStrategy):
                 ]
 
 
+def strategy_name_for_config_str(config_obj: TacticalYieldConfig) -> str:
+    """Point-in-time runs save under their own results folder."""
+    if config_obj.fred_data_mode_str == FRED_DATA_MODE_FROZEN_STR:
+        return STRATEGY_NAME_STR
+    return f"{STRATEGY_NAME_STR}__alfred_pit_{config_obj.alfred_vintage_policy_str}"
+
+
+def fred_data_mode_record_dict(
+    config_obj: TacticalYieldConfig,
+    signal_df: pd.DataFrame,
+) -> dict[str, object]:
+    """What FRED data a run used, for metadata.json and run_info.json."""
+    blocked_date_list = [
+        pd.Timestamp(decision_date_ts).date().isoformat()
+        for decision_date_ts in signal_df.index[
+            signal_df.get("stale_input_blocked_bool", pd.Series(False, index=signal_df.index))
+            .astype(bool)
+            .to_numpy()
+        ]
+    ]
+    record_dict: dict[str, object] = {
+        "fred_data_mode_str": config_obj.fred_data_mode_str,
+        "stale_input_policy_str": config_obj.stale_input_policy_str,
+        "max_observation_age_sessions_int": MAX_OBSERVATION_AGE_SESSIONS_INT,
+        "stale_input_blocked_decision_count_int": len(blocked_date_list),
+        "stale_input_blocked_decision_date_list": blocked_date_list,
+        "cash_rate_vintage_policy_str": "frozen_current_vintage_DGS3MO_in_every_fred_data_mode",
+    }
+    if config_obj.fred_data_mode_str == FRED_DATA_MODE_ALFRED_PIT_STR:
+        record_dict.update(
+            {
+                "alfred_vintage_policy_str": config_obj.alfred_vintage_policy_str,
+                "alfred_first_decision_date_str": FIRST_ALFRED_DECISION_DATE_STR,
+                "alfred_snapshot_dir_str": config_obj.alfred_snapshot_dir_path_str,
+                "alfred_manifest_sha256_str": FROZEN_ALFRED_MANIFEST_SHA256_STR,
+                "alfred_point_in_time_contract_sha256_str": (
+                    FROZEN_ALFRED_PIT_SIGNAL_CONTRACT_SHA256_BY_VINTAGE_POLICY_DICT[
+                        config_obj.alfred_vintage_policy_str
+                    ]
+                ),
+                "pre_alfred_decisions_str": "frozen_current_vintage_unverifiable",
+            }
+        )
+    return record_dict
+
+
+def _record_fred_data_mode_in_run_info(
+    output_path: Path,
+    record_dict: dict[str, object],
+) -> None:
+    """Add the FRED data mode to run_info.json parameters so Bench shows it."""
+    run_info_path = Path(output_path) / "run_info.json"
+    run_info_dict = json.loads(run_info_path.read_text(encoding="utf-8"))
+    parameter_dict = dict(run_info_dict.get("parameters") or {})
+    parameter_dict.update(
+        {
+            key_str: value_obj
+            for key_str, value_obj in record_dict.items()
+            if key_str != "stale_input_blocked_decision_date_list"
+        }
+    )
+    run_info_dict["parameters"] = parameter_dict
+    run_info_path.write_text(
+        json.dumps(run_info_dict, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+
 def _attach_fred_provenance(
     strategy_obj: TacticalYieldStrategy,
     fred_snapshot_tuple: tuple[FrozenFredSnapshot, ...],
+    config_obj: TacticalYieldConfig = DEFAULT_CONFIG,
 ) -> None:
     strategy_obj.fred_snapshot_tuple = fred_snapshot_tuple
+    signal_df = getattr(strategy_obj, "month_end_signal_df", None)
+    strategy_obj.fred_data_mode_record_dict = fred_data_mode_record_dict(
+        config_obj,
+        signal_df if isinstance(signal_df, pd.DataFrame) else pd.DataFrame(),
+    )
+    strategy_obj._data_adjustment_policy_dict.update(strategy_obj.fred_data_mode_record_dict)
     strategy_obj._data_adjustment_policy_dict["fred_series_provenance_list"] = [
         {
             "series_id_str": snapshot_obj.series_id_str,
@@ -859,7 +1289,7 @@ def _build_strategy_obj(
     strategy_class_obj: type[TacticalYieldStrategy] = TacticalYieldStrategy,
 ) -> TacticalYieldStrategy:
     return strategy_class_obj(
-        name=STRATEGY_NAME_STR,
+        name=strategy_name_for_config_str(config_obj),
         benchmarks=config_obj.benchmark_tuple,
         rebalance_weight_df=rebalance_weight_df,
         cash_return_ser=cash_return_ser,
@@ -921,7 +1351,7 @@ def _run_strategy(
     strategy_obj.show_taa_weights_report = True
     strategy_obj.month_end_signal_df = effective_signal_df
     strategy_obj.month_end_weight_df = effective_rebalance_weight_df
-    _attach_fred_provenance(strategy_obj, fred_snapshot_tuple)
+    _attach_fred_provenance(strategy_obj, fred_snapshot_tuple, config_obj)
     # *** CRITICAL*** Forward fill is report-only. Execution reads only the
     # discrete rebalance rows inside iterate().
     strategy_obj.daily_target_weights = (
@@ -986,14 +1416,38 @@ def run_variant(
     capital_base_float: float = DEFAULT_CONFIG.capital_base_float,
     end_date_str: str | None = None,
     config_obj: TacticalYieldConfig = DEFAULT_CONFIG,
+    fred_data_mode_str: str | None = None,
+    alfred_vintage_policy_str: str | None = None,
+    stale_input_policy_str: str | None = None,
 ) -> TacticalYieldStrategy:
+    """Run the frozen L14 backtest.
+
+    ``fred_data_mode_str`` selects the FRED inputs: ``frozen_current_vintage``
+    (governed default, reproduces the 289-row contract) or
+    ``alfred_point_in_time`` (decisions from 2014-04-30 use only values FRED had
+    published by the ALFRED vintage date). ``alfred_vintage_policy_str`` picks
+    that vintage date: ``decision_date`` or the conservative
+    ``previous_session``. ``stale_input_policy_str`` is ``block_and_hold`` (a
+    stale decision places no order) or ``raise`` (a stale decision stops the
+    run). A keyword left at None keeps the value in ``config_obj`` (defaults:
+    ``frozen_current_vintage``, ``decision_date``, ``block_and_hold``). The
+    mode is written to metadata.json and run_info.json.
+    """
     if end_date_str is not None and pd.Timestamp(end_date_str) > pd.Timestamp(
         config_obj.end_date_str
     ):
         raise ValueError(
             "The frozen L14 PM_READY module cannot run beyond 2026-08-19."
         )
-    config_obj = replace(config_obj, capital_base_float=capital_base_float)
+    config_obj = replace(
+        config_obj,
+        capital_base_float=capital_base_float,
+        fred_data_mode_str=fred_data_mode_str or config_obj.fred_data_mode_str,
+        alfred_vintage_policy_str=(
+            alfred_vintage_policy_str or config_obj.alfred_vintage_policy_str
+        ),
+        stale_input_policy_str=stale_input_policy_str or config_obj.stale_input_policy_str,
+    )
     (
         execution_price_df,
         _yield_df,
@@ -1020,7 +1474,11 @@ def run_variant(
         display(strategy_obj.summary)
         display(strategy_obj.summary_trades)
     if save_results_bool:
-        save_results(strategy_obj, output_dir=output_dir_str)
+        output_path = save_results(strategy_obj, output_dir=output_dir_str)
+        _record_fred_data_mode_in_run_info(
+            output_path,
+            strategy_obj.fred_data_mode_record_dict,
+        )
     return strategy_obj
 
 

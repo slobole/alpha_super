@@ -5,3 +5,4 @@
 /docs/research/knowledge-base/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 /docs/research/alpha-studies/mr-deeper-dip-entry-study/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 /tests/fixtures/month_end_rebalancing_flow/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+/data/research/tactical_yield_tbill_spread/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
