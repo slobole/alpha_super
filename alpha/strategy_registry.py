@@ -63,10 +63,10 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     # Five analyzers and capital/benchmark/determinism checks passed 2026-09-13.
     # MOC and fixed TLT borrow remain research execution assumptions.
     "strategies.taa_beyond_6040.strategy_taa_month_end_rebalancing_flow": MaturityTier.PM_READY,
-    # Frozen hedge rules. Capital, total-return benchmark and deterministic
-    # reruns passed 2026-09-05; eligibility is plumbing, not allocation approval.
-    "strategies.tail_hedge.strategy_crisis_trend_core": MaturityTier.PM_READY,
-    "strategies.tail_hedge.strategy_vixm_backwardation": MaturityTier.PM_READY,
+    # Crisis Trend Core and VIXM backwardation were demoted to RESEARCH on
+    # 2026-09-28 by owner decision after the readiness audit
+    # (docs/research/STRATEGY_READINESS_AUDIT_20260928.md, section 10): CTC no
+    # longer ran at HEAD, and VIXM was not tradable as modelled.
     # The 2x fallback pair. Promoted because their fallback ETFs date to
     # 2006-06 rather than 2010, so a book built on them carries the 2008
     # crisis that no 3x variant can reach. Both passed the readiness checks:
@@ -107,15 +107,14 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     # The research verdict is forward-shadow only; nothing here enforces that.
     "strategies.taa_df.strategy_taa_inflation_compass_qqq": MaturityTier.PM_READY,
     # Frozen Pakal L14 tactical-yield rule: publication-safe FRED term/credit
-    # spreads, IEF/LQD sleeves, causal DGS3MO cash, and next-open fills. The
+    # spreads, IEF/LQD sleeves, a BIL cash sleeve (25% withholding, from
+    # 2026-09-28; legacy DGS3MO accrual selectable), and next-open fills. The
     # research verdict remains diagnostic; PM_READY certifies plumbing only.
     "strategies.taa_beyond_6040.strategy_taa_tactical_fixed_income_ief_lqd": MaturityTier.PM_READY,
-    # MOSAIC: correlation-penalized Russell 1000 momentum (N=20, lambda=0.75,
-    # corr window 126d, ADV >= $5M). Promoted 2026-07-31 after the four-part
-    # validation cycle: monotone lambda effect, sub-period stability,
-    # corr-window robustness, S&P 500 replication, GICS cross-check, and the
-    # liquidity gate. Deliberately NOT wired — no live account route yet.
-    "strategies.momentum.strategy_mo_mosaic_russell1000:MosaicRussell1000Strategy": MaturityTier.PM_READY,
+    # MOSAIC was demoted to RESEARCH on 2026-09-28 by owner decision: its
+    # 2026-07-31 validation was invalidated by the split-price fix and it left
+    # the recommended books (readiness audit, section 10). Committed YAMLs that
+    # still hold it (ladder_4_growth*, attemp6) are now refused by the manager.
 }
 
 

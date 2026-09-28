@@ -65,11 +65,13 @@ class MosaicContractTests(unittest.TestCase):
             [],
         )
 
-    def test_registered_pm_ready(self):
+    def test_demoted_to_research(self):
+        """Owner decision 2026-09-28: the validation behind PM_READY was
+        invalidated by the split-price fix, so MOSAIC may not join a book."""
         tier_obj = strategy_registry.tier_for(
             "strategies.momentum.strategy_mo_mosaic_russell1000:MosaicRussell1000Strategy"
         )
-        self.assertIs(tier_obj, strategy_registry.MaturityTier.PM_READY)
+        self.assertIs(tier_obj, strategy_registry.MaturityTier.RESEARCH)
 
 
 if __name__ == "__main__":

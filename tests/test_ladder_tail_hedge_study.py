@@ -108,16 +108,18 @@ def test_run_variant_forwards_allocated_capital_and_dates(monkeypatch, strategy_
     assert captured_list[0].end_date_str == "2026-08-31"
 
 
-def test_hedges_are_pm_only_never_live_wired():
+def test_hedges_are_research_only_never_live_wired():
+    # Owner decision 2026-09-28 (readiness audit, section 10): both hedges were
+    # demoted from PM_READY; Crisis Trend Core no longer ran at HEAD and VIXM
+    # was not tradable as modelled.
     for module_str in (core_module.__name__, vixm_module.__name__):
-        assert tier_for(module_str) == MaturityTier.PM_READY
+        assert tier_for(module_str) == MaturityTier.RESEARCH
         assert module_str not in wired_import_tuple()
 
 
 @pytest.mark.parametrize("book_str", ["ladder_3_growth", "ladder_3b_growth_2x", "ladder_3c_growth_2x_btal", "ladder_4_growth"])
-def test_research_candidate_configs_parse_with_real_funding_floors(book_str):
-    candidate_obj = PortfolioManager.from_yaml(Path("portfolios") / f"{book_str}_tail_vixm_10_research.yaml")
-    assert candidate_obj.config.end_date_str == "2026-08-31"
-    assert candidate_obj.config.rebalance is None
-    assert candidate_obj.config.pod_config_list[-1].weight_float == .10
-    assert sum(candidate_obj.config.weight_list) == pytest.approx(1.)
+def test_vixm_research_books_are_refused_after_demotion(book_str):
+    # ladder_4_growth also holds MOSAIC (demoted the same day), which may be the
+    # first pod refused; any demoted pod must make the book unloadable.
+    with pytest.raises(ValueError, match="strategy_vixm_backwardation|strategy_mo_mosaic_russell1000"):
+        PortfolioManager.from_yaml(Path("portfolios") / f"{book_str}_tail_vixm_10_research.yaml")

@@ -4,6 +4,7 @@ import pytest
 
 from alpha.engine.crisis import SUPPORTED_CRISIS_STRATEGY_SPEC_MAP
 from alpha.strategy_registry import MaturityTier, tier_for
+import strategies.taa_beyond_6040.strategy_taa_tactical_fixed_income_ief_lqd as tfi
 from strategies.taa_beyond_6040.strategy_taa_tactical_fixed_income_ief_lqd import (
     DEFAULT_CONFIG,
     FROZEN_FRED_SHA256_BY_SERIES_DICT,
@@ -194,12 +195,21 @@ def test_causal_cash_return_uses_t_minus_two_observation_and_act_365() -> None:
     assert cash_return_ser.iloc[2] == pytest.approx(0.0730 * 1.0 / 365.0)
 
 
-def _strategy_obj(cash_return_ser: pd.Series) -> TacticalYieldStrategy:
+def _strategy_obj(
+    cash_return_ser: pd.Series,
+    cash_vehicle_str: str = tfi.CASH_VEHICLE_BIL_STR,
+    weight_dict: dict[str, float] | None = None,
+) -> TacticalYieldStrategy:
     return TacticalYieldStrategy(
         name="test_tactical_yield",
         benchmarks=(),
         rebalance_weight_df=pd.DataFrame(
-            {"IEF": [0.5], "LQD": [0.5], "Cash": [0.0]},
+            {
+                key_str: [value_float]
+                for key_str, value_float in (
+                    weight_dict or {"IEF": 0.5, "LQD": 0.5, "Cash": 0.0}
+                ).items()
+            },
             index=[pd.Timestamp("2026-01-05")],
         ),
         cash_return_ser=cash_return_ser,
@@ -208,12 +218,17 @@ def _strategy_obj(cash_return_ser: pd.Series) -> TacticalYieldStrategy:
         slippage=0.0005,
         commission_per_share=0.0,
         commission_minimum=0.0,
+        cash_vehicle_str=cash_vehicle_str,
     )
 
 
 def test_cash_interest_is_positive_cash_only_and_idempotent() -> None:
+    # Legacy ledger only (kept to reproduce pre-2026-09-28 artifacts).
     current_bar_ts = pd.Timestamp("2026-01-05")
-    strategy_obj = _strategy_obj(pd.Series([0.001], index=[current_bar_ts]))
+    strategy_obj = _strategy_obj(
+        pd.Series([0.001], index=[current_bar_ts]),
+        cash_vehicle_str=tfi.CASH_VEHICLE_DGS3MO_ACCRUAL_STR,
+    )
     strategy_obj.current_bar = current_bar_ts
 
     assert strategy_obj._accrue_positive_cash_interest_float() == pytest.approx(100.0)
@@ -252,6 +267,88 @@ def test_iterate_uses_close_t_budget_and_creates_two_target_value_orders() -> No
     assert [order_obj.amount for order_obj in order_list] == pytest.approx(
         [50_000.0, 50_000.0]
     )
+
+
+def test_bil_vehicle_never_credits_dgs3mo_and_withholds_25pct() -> None:
+    current_bar_ts = pd.Timestamp("2026-01-05")
+    strategy_obj = _strategy_obj(pd.Series([0.001], index=[current_bar_ts]))
+    strategy_obj.current_bar = current_bar_ts
+
+    assert strategy_obj._accrue_positive_cash_interest_float() == 0.0
+    assert strategy_obj.cash == pytest.approx(100_000.0)
+    assert strategy_obj.dividend_withholding_rate_float == pytest.approx(0.25)
+    assert strategy_obj._accounting_policy_dict["cash_vehicle_str"] == tfi.CASH_VEHICLE_BIL_STR
+    assert strategy_obj._accounting_policy_dict["positive_cash_rate_policy_str"] == "zero_house_ledger"
+    assert tfi.DEFAULT_CONFIG.cash_vehicle_str == tfi.CASH_VEHICLE_BIL_STR
+    assert tfi.DEFAULT_CONFIG.dividend_withholding_rate_float == pytest.approx(0.25)
+
+
+def test_bil_vehicle_buys_the_cash_sleeve_from_close_t_budget() -> None:
+    current_bar_ts = pd.Timestamp("2026-01-05")
+    strategy_obj = _strategy_obj(
+        pd.Series([0.0], index=[current_bar_ts]),
+        weight_dict={"IEF": 0.5, "LQD": 0.0, "Cash": 0.5},
+    )
+    strategy_obj.current_bar = current_bar_ts
+    strategy_obj.previous_bar = pd.Timestamp("2026-01-02")
+    strategy_obj._total_value_history_list = [100_000.0]
+    close_row_ser = pd.Series(
+        {("IEF", "Close"): 100.0, ("LQD", "Close"): 125.0, ("BIL", "Close"): 91.5}
+    )
+
+    strategy_obj.iterate(pd.DataFrame(), close_row_ser, pd.Series(dtype=float))
+
+    order_by_asset_dict = {order_obj.asset: order_obj for order_obj in strategy_obj.get_orders()}
+    assert set(order_by_asset_dict) == {"IEF", "BIL"}
+    assert order_by_asset_dict["BIL"].amount == pytest.approx(50_000.0)
+    assert order_by_asset_dict["BIL"].target and order_by_asset_dict["BIL"].unit == "value"
+
+
+def test_bil_vehicle_keeps_zero_rate_cash_before_bil_exists() -> None:
+    current_bar_ts = pd.Timestamp("2026-01-05")
+    strategy_obj = _strategy_obj(
+        pd.Series([0.001], index=[current_bar_ts]),
+        weight_dict={"IEF": 0.0, "LQD": 0.0, "Cash": 1.0},
+    )
+    strategy_obj.current_bar = current_bar_ts
+    strategy_obj.previous_bar = pd.Timestamp("2026-01-02")
+    strategy_obj._total_value_history_list = [100_000.0]
+    close_row_ser = pd.Series(
+        {("IEF", "Close"): 100.0, ("LQD", "Close"): 125.0, ("BIL", "Close"): float("nan")}
+    )
+
+    strategy_obj.iterate(pd.DataFrame(), close_row_ser, pd.Series(dtype=float))
+
+    assert strategy_obj.get_orders() == []
+    assert strategy_obj.cash == pytest.approx(100_000.0)
+
+
+def test_bil_vehicle_sells_bil_when_cash_sleeve_goes_to_zero() -> None:
+    current_bar_ts = pd.Timestamp("2026-01-05")
+    strategy_obj = _strategy_obj(
+        pd.Series([0.0], index=[current_bar_ts]),
+        weight_dict={"IEF": 0.5, "LQD": 0.5, "Cash": 0.0},
+    )
+    strategy_obj.current_bar = current_bar_ts
+    strategy_obj.previous_bar = pd.Timestamp("2026-01-02")
+    strategy_obj._total_value_history_list = [100_000.0]
+    strategy_obj._position_amount_map = {"BIL": 1_000.0}
+    close_row_ser = pd.Series(
+        {("IEF", "Close"): 100.0, ("LQD", "Close"): 125.0, ("BIL", "Close"): 91.5}
+    )
+
+    strategy_obj.iterate(pd.DataFrame(), close_row_ser, pd.Series(dtype=float))
+
+    order_by_asset_dict = {order_obj.asset: order_obj for order_obj in strategy_obj.get_orders()}
+    assert set(order_by_asset_dict) == {"IEF", "LQD", "BIL"}
+    assert order_by_asset_dict["BIL"].target and order_by_asset_dict["BIL"].amount == 0.0
+
+
+def test_legacy_config_restores_both_legacy_fields() -> None:
+    assert tfi.LEGACY_DGS3MO_CASH_CONFIG.cash_vehicle_str == tfi.CASH_VEHICLE_DGS3MO_ACCRUAL_STR
+    assert tfi.LEGACY_DGS3MO_CASH_CONFIG.dividend_withholding_rate_float == 0.0
+    with pytest.raises(ValueError):
+        tfi.TacticalYieldConfig(cash_vehicle_str="treasury_direct")
 
 
 def test_registry_and_stress_support_are_pm_ready_without_live_claim() -> None:

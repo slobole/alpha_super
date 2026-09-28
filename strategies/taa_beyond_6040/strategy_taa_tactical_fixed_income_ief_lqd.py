@@ -27,10 +27,22 @@ target decisions relative to those legacy artifacts.
 Alpha Super translates the research path into the house execution contract:
 
 1. IEF/LQD fills and marks use Norgate CAPITALSPECIAL prices.
-2. Gross dividends are credited explicitly with zero withholding.
-3. Positive residual cash earns causal DGS3MO ACT/365 interest.
+2. Dividends are credited net of the house 25% withholding.
+3. The cash sleeve is held as a real BIL position (SPDR 1-3 Month T-Bill ETF),
+   bought and sold like IEF/LQD: target shares from Close_T, fill at
+   Open_(T+1). Residual cash earns 0% (house ledger). Before BIL existed
+   (first bar 2007-05-30) the cash sleeve stays in 0% cash.
 4. Five basis points of slippage are charged on each executed ETF side.
 5. Target shares are sized from Close_T and filled at Open_(T+1).
+
+Cash-vehicle change (owner decision 2026-09-28, readiness audit B-TFI-01/02):
+old behavior credited positive cash with causal DGS3MO ACT/365 interest and
+withheld 0% of dividends; new behavior holds BIL and withholds 25%. The old
+behavior stays available as ``cash_vehicle_str="dgs3mo_accrual"`` together
+with ``dividend_withholding_rate_float=0.0`` to reproduce earlier artifacts.
+Quantitative consequence: the old accrual paid the full T-bill yield with no
+fund cost, no withholding and no execution; it was the largest P&L source
+(about 71% since 2012-10). The signal/target contract is unchanged.
 
 FRED data modes (``TacticalYieldConfig.fred_data_mode_str``):
 
@@ -40,8 +52,9 @@ FRED data modes (``TacticalYieldConfig.fred_data_mode_str``):
 - ``alfred_point_in_time``: every decision from 2014-04-30 is recomputed from
   the ALFRED vintage published by its vintage date (T, or session T-1 with
   ``alfred_vintage_policy_str="previous_session"``). Earlier decisions have no
-  Moody's vintage and keep their frozen rows, labelled as unverifiable. Cash
-  accrual uses the frozen DGS3MO file in both modes.
+  Moody's vintage and keep their frozen rows, labelled as unverifiable. In the
+  legacy cash ledger, cash accrual uses the frozen DGS3MO file in both modes;
+  with the default BIL cash vehicle DGS3MO feeds only the research excess metric.
 
 Stale-input rule (both modes): a decision whose common FRED observation is
 more than MAX_OBSERVATION_AGE_SESSIONS_INT sessions older than session T-1 is
@@ -95,6 +108,13 @@ TREASURY_RELEASE_MINUTE_INT = 17 * 60
 CORPORATE_RELEASE_MINUTE_INT = 12 * 60
 
 SLIPPAGE_PER_SIDE_FLOAT = 0.0005
+# Cash sleeve vehicles. BIL is the governed default; the DGS3MO accrual is the
+# legacy research ledger kept only to reproduce pre-2026-09-28 artifacts.
+CASH_VEHICLE_BIL_STR = "bil_position"
+CASH_VEHICLE_DGS3MO_ACCRUAL_STR = "dgs3mo_accrual"
+SUPPORTED_CASH_VEHICLE_TUPLE = (CASH_VEHICLE_BIL_STR, CASH_VEHICLE_DGS3MO_ACCRUAL_STR)
+CASH_VEHICLE_SYMBOL_STR = "BIL"
+HOUSE_DIVIDEND_WITHHOLDING_RATE_FLOAT = 0.25
 COMMISSION_PER_SHARE_FLOAT = 0.0
 COMMISSION_MINIMUM_FLOAT = 0.0
 
@@ -120,6 +140,10 @@ FROZEN_NORGATE_SHA256_BY_SYMBOL_DICT = {
     # Checked 2026-09-24 after Norgate benchmark revision; ETF hashes and NAV match.
     "$SPXTR": "ecf9e3f8aa3fa6e1718f99b6fcd36f808a48fe5efa7238e9c3817c3b0b1f5dee",
 }
+# BIL on the frozen IEF/LQD session index through 2026-08-19 (checked 2026-09-28).
+FROZEN_CASH_VEHICLE_NORGATE_SHA256_STR = (
+    "0f92279e47e34b52c4e0c08603d4df9bdb17b5b36595fec2ef1fea0f9ce4ac67"
+)
 FROZEN_SIGNAL_CONTRACT_SHA256_STR = (
     "85f16e7376977f7ab762fd907c4d3edf3d863760edbe09a2a887b6e13e56a3b6"
 )
@@ -239,8 +263,16 @@ class TacticalYieldConfig:
     alfred_vintage_policy_str: str = ALFRED_VINTAGE_DECISION_DATE_STR
     stale_input_policy_str: str = STALE_INPUT_POLICY_BLOCK_AND_HOLD_STR
     alfred_snapshot_dir_path_str: str = str(DEFAULT_ALFRED_SNAPSHOT_DIR_PATH)
+    cash_vehicle_str: str = CASH_VEHICLE_BIL_STR
+    dividend_withholding_rate_float: float = HOUSE_DIVIDEND_WITHHOLDING_RATE_FLOAT
 
     def __post_init__(self) -> None:
+        if self.cash_vehicle_str not in SUPPORTED_CASH_VEHICLE_TUPLE:
+            raise ValueError(
+                f"cash_vehicle_str must be one of {SUPPORTED_CASH_VEHICLE_TUPLE}."
+            )
+        if not 0.0 <= float(self.dividend_withholding_rate_float) <= 1.0:
+            raise ValueError("dividend_withholding_rate_float must be between 0 and 1.")
         if self.fred_data_mode_str not in SUPPORTED_FRED_DATA_MODE_TUPLE:
             raise ValueError(
                 f"fred_data_mode_str must be one of {SUPPORTED_FRED_DATA_MODE_TUPLE}."
@@ -279,6 +311,12 @@ class TacticalYieldConfig:
 
 
 DEFAULT_CONFIG = TacticalYieldConfig()
+# The pre-2026-09-28 ledger (DGS3MO accrual on cash, 0% withholding). Use it only
+# to reproduce earlier artifacts; setting just one of the two fields mixes ledgers.
+LEGACY_DGS3MO_CASH_CONFIG = TacticalYieldConfig(
+    cash_vehicle_str=CASH_VEHICLE_DGS3MO_ACCRUAL_STR,
+    dividend_withholding_rate_float=0.0,
+)
 
 
 @dataclass(frozen=True)
@@ -906,6 +944,43 @@ def build_causal_cash_return_ser(
     return cash_return_ser
 
 
+def _attach_cash_vehicle_price_df(
+    execution_price_df: pd.DataFrame,
+    config_obj: TacticalYieldConfig,
+) -> pd.DataFrame:
+    """Add BIL CAPITALSPECIAL bars on the frozen IEF/LQD session index.
+
+    BIL does not change the session index or the signal: it is reindexed onto
+    the IEF/LQD sessions, and rows before its first bar (2007-05-30) stay NaN,
+    which the strategy treats as "no cash vehicle yet, hold 0% cash".
+    """
+    cash_vehicle_price_df = load_execution_price_df(
+        tradeable_asset_list=[CASH_VEHICLE_SYMBOL_STR],
+        benchmark_list=[],
+        start_date_str=config_obj.price_start_date_str,
+        end_date_str=config_obj.end_date_str,
+    ).reindex(execution_price_df.index)
+    actual_cash_vehicle_sha256_str = canonical_dataframe_sha256_str(
+        cash_vehicle_price_df[CASH_VEHICLE_SYMBOL_STR]
+    )
+    if actual_cash_vehicle_sha256_str != FROZEN_CASH_VEHICLE_NORGATE_SHA256_STR:
+        raise RuntimeError(
+            "Frozen BIL price fingerprint mismatch. Review vendor revisions "
+            "before changing the governed snapshot."
+        )
+    adjustment_by_symbol_dict = {
+        **dict(execution_price_df.attrs.get("norgate_adjustment_by_symbol_dict", {})),
+        **dict(cash_vehicle_price_df.attrs.get("norgate_adjustment_by_symbol_dict", {})),
+    }
+    combined_price_df = pd.concat(
+        [execution_price_df, cash_vehicle_price_df],
+        axis=1,
+    )
+    combined_price_df.attrs = dict(execution_price_df.attrs)
+    combined_price_df.attrs["norgate_adjustment_by_symbol_dict"] = adjustment_by_symbol_dict
+    return combined_price_df
+
+
 def get_tactical_yield_data(
     config_obj: TacticalYieldConfig = DEFAULT_CONFIG,
 ) -> TacticalYieldDataTuple:
@@ -931,6 +1006,11 @@ def get_tactical_yield_data(
         raise RuntimeError(
             "Frozen Norgate price fingerprint mismatch. Review vendor revisions "
             "before changing the governed snapshot."
+        )
+    if config_obj.cash_vehicle_str == CASH_VEHICLE_BIL_STR:
+        execution_price_df = _attach_cash_vehicle_price_df(
+            execution_price_df,
+            config_obj,
         )
     yield_df, fred_snapshot_tuple = load_frozen_yield_panel(config_obj)
     signal_df, rebalance_weight_df = build_month_end_signal_and_weight_df(
@@ -1001,7 +1081,11 @@ def get_tactical_yield_data(
 
 
 class TacticalYieldStrategy(DefenseFirstStrategy):
-    """Monthly L14 allocator plus causal positive-cash accrual."""
+    """Monthly L14 allocator; the cash sleeve is BIL (default) or DGS3MO accrual.
+
+    ``cash_return_ser`` is the causal DGS3MO series. With the BIL vehicle it is
+    kept only for the research excess-return metric and is never credited.
+    """
 
     def __init__(
         self,
@@ -1015,31 +1099,56 @@ class TacticalYieldStrategy(DefenseFirstStrategy):
         slippage: float,
         commission_per_share: float,
         commission_minimum: float,
+        cash_vehicle_str: str = CASH_VEHICLE_BIL_STR,
+        dividend_withholding_rate_float: float = HOUSE_DIVIDEND_WITHHOLDING_RATE_FLOAT,
     ) -> None:
+        if cash_vehicle_str not in SUPPORTED_CASH_VEHICLE_TUPLE:
+            raise ValueError(
+                f"cash_vehicle_str must be one of {SUPPORTED_CASH_VEHICLE_TUPLE}."
+            )
+        strategy_asset_list = list(tradeable_asset_list)
+        if (
+            cash_vehicle_str == CASH_VEHICLE_BIL_STR
+            and CASH_VEHICLE_SYMBOL_STR not in strategy_asset_list
+        ):
+            strategy_asset_list.append(CASH_VEHICLE_SYMBOL_STR)
         super().__init__(
             name=name,
             benchmarks=benchmarks,
             rebalance_weight_df=rebalance_weight_df,
-            tradeable_asset_list=tradeable_asset_list,
+            tradeable_asset_list=strategy_asset_list,
             capital_base=capital_base,
             slippage=slippage,
             commission_per_share=commission_per_share,
             commission_minimum=commission_minimum,
         )
+        self.cash_vehicle_str = str(cash_vehicle_str)
         self.cash_return_ser = cash_return_ser.astype(float).copy()
         self.cash_interest_processed_date_set: set[pd.Timestamp] = set()
         self.cash_interest_ledger_row_dict_list: list[dict[str, object]] = []
         self.cash_interest_total_float = 0.0
         self.configure_dividend_cash_ledger(
             enabled_bool=True,
-            withholding_rate_float=0.0,
+            withholding_rate_float=float(dividend_withholding_rate_float),
         )
+        if self.cash_vehicle_str == CASH_VEHICLE_BIL_STR:
+            cash_policy_dict = {
+                "cash_vehicle_str": CASH_VEHICLE_BIL_STR,
+                "cash_sleeve_instrument_str": CASH_VEHICLE_SYMBOL_STR,
+                "positive_cash_rate_policy_str": "zero_house_ledger",
+                "pre_cash_vehicle_inception_policy_str": "zero_rate_cash_before_BIL_first_bar",
+            }
+        else:
+            cash_policy_dict = {
+                "cash_vehicle_str": CASH_VEHICLE_DGS3MO_ACCRUAL_STR,
+                "positive_cash_rate_policy_str": "causal_DGS3MO_ACT_365",
+                "cash_rate_publication_lag_str": "one_Norgate_session",
+            }
         self._accounting_policy_dict.update(
             {
-                "positive_cash_rate_policy_str": "causal_DGS3MO_ACT_365",
+                **cash_policy_dict,
                 "negative_cash_financing_policy_str": "not_modeled",
-                "cash_rate_publication_lag_str": "one_Norgate_session",
-                "dividend_withholding_rate_float": 0.0,
+                "dividend_withholding_rate_float": float(dividend_withholding_rate_float),
                 "research_status_str": "diagnostic_inconclusive",
                 "paper_live_authorized_bool": False,
             }
@@ -1049,6 +1158,10 @@ class TacticalYieldStrategy(DefenseFirstStrategy):
         )
 
     def _accrue_positive_cash_interest_float(self) -> float:
+        # With the BIL vehicle the T-bill return arrives through the BIL price
+        # and distributions; residual cash earns 0% as in the house ledger.
+        if self.cash_vehicle_str != CASH_VEHICLE_DGS3MO_ACCRUAL_STR:
+            return 0.0
         current_bar_ts = pd.Timestamp(self.current_bar)
         if current_bar_ts in self.cash_interest_processed_date_set:
             return 0.0
@@ -1075,6 +1188,30 @@ class TacticalYieldStrategy(DefenseFirstStrategy):
         )
         return cash_interest_float
 
+    def _execution_target_weight_ser(
+        self,
+        target_weight_ser: pd.Series,
+        close_row_ser: pd.Series,
+    ) -> pd.Series:
+        """Map the frozen Cash sleeve to BIL when BIL has a Close_T price.
+
+        w_BIL,T = w_Cash,T  if Close_BIL,T is finite and positive, else 0
+        (before the first BIL bar the sleeve stays in 0% cash).
+        """
+        execution_weight_ser = target_weight_ser.copy()
+        if self.cash_vehicle_str != CASH_VEHICLE_BIL_STR:
+            return execution_weight_ser
+        cash_vehicle_close_float = float(
+            close_row_ser.get((CASH_VEHICLE_SYMBOL_STR, "Close"), np.nan)
+        )
+        cash_vehicle_available_bool = (
+            np.isfinite(cash_vehicle_close_float) and cash_vehicle_close_float > 0.0
+        )
+        execution_weight_ser[CASH_VEHICLE_SYMBOL_STR] = (
+            float(target_weight_ser.get("Cash", 0.0)) if cash_vehicle_available_bool else 0.0
+        )
+        return execution_weight_ser
+
     def iterate(
         self,
         data_df: pd.DataFrame,
@@ -1089,7 +1226,10 @@ class TacticalYieldStrategy(DefenseFirstStrategy):
         if self.current_bar not in self.rebalance_weight_df.index:
             return
 
-        target_weight_ser = self.rebalance_weight_df.loc[self.current_bar].fillna(0.0)
+        target_weight_ser = self._execution_target_weight_ser(
+            self.rebalance_weight_df.loc[self.current_bar].fillna(0.0),
+            close_row_ser,
+        )
         # The causal cash accrual belongs to the just-finished close-to-close
         # interval and is available before the current rebalance order budget.
         budget_value_float = float(self.previous_total_value) + cash_interest_float
@@ -1199,7 +1339,13 @@ def fred_data_mode_record_dict(
         "max_observation_age_sessions_int": MAX_OBSERVATION_AGE_SESSIONS_INT,
         "stale_input_blocked_decision_count_int": len(blocked_date_list),
         "stale_input_blocked_decision_date_list": blocked_date_list,
-        "cash_rate_vintage_policy_str": "frozen_current_vintage_DGS3MO_in_every_fred_data_mode",
+        "cash_vehicle_str": config_obj.cash_vehicle_str,
+        "dividend_withholding_rate_float": float(config_obj.dividend_withholding_rate_float),
+        "cash_rate_vintage_policy_str": (
+            "frozen_current_vintage_DGS3MO_in_every_fred_data_mode"
+            if config_obj.cash_vehicle_str == CASH_VEHICLE_DGS3MO_ACCRUAL_STR
+            else "not_credited_BIL_position_holds_cash_sleeve"
+        ),
     }
     if config_obj.fred_data_mode_str == FRED_DATA_MODE_ALFRED_PIT_STR:
         record_dict.update(
@@ -1280,6 +1426,10 @@ def _attach_fred_provenance(
             "signal_contract_sha256_str": FROZEN_SIGNAL_CONTRACT_SHA256_STR,
         }
     )
+    if config_obj.cash_vehicle_str == CASH_VEHICLE_BIL_STR:
+        strategy_obj._data_adjustment_policy_dict[
+            "cash_vehicle_norgate_sha256_str"
+        ] = FROZEN_CASH_VEHICLE_NORGATE_SHA256_STR
 
 
 def _build_strategy_obj(
@@ -1298,6 +1448,8 @@ def _build_strategy_obj(
         slippage=config_obj.slippage_per_side_float,
         commission_per_share=config_obj.commission_per_share_float,
         commission_minimum=config_obj.commission_minimum_float,
+        cash_vehicle_str=config_obj.cash_vehicle_str,
+        dividend_withholding_rate_float=config_obj.dividend_withholding_rate_float,
     )
 
 
@@ -1354,8 +1506,26 @@ def _run_strategy(
     _attach_fred_provenance(strategy_obj, fred_snapshot_tuple, config_obj)
     # *** CRITICAL*** Forward fill is report-only. Execution reads only the
     # discrete rebalance rows inside iterate().
+    report_weight_df = effective_rebalance_weight_df.loc[:, ["IEF", "LQD", "Cash"]].copy()
+    if config_obj.cash_vehicle_str == CASH_VEHICLE_BIL_STR:
+        # Report-only mirror of _execution_target_weight_ser(): the Cash sleeve is
+        # BIL wherever BIL had a Close on the decision date.
+        cash_vehicle_close_ser = effective_execution_price_df[
+            (CASH_VEHICLE_SYMBOL_STR, "Close")
+        ].reindex(pd.DatetimeIndex(effective_rebalance_weight_df["decision_date"]))
+        cash_vehicle_available_arr = (
+            np.isfinite(cash_vehicle_close_ser.to_numpy(dtype=float))
+            & (cash_vehicle_close_ser.to_numpy(dtype=float) > 0.0)
+        )
+        report_weight_df[CASH_VEHICLE_SYMBOL_STR] = np.where(
+            cash_vehicle_available_arr, report_weight_df["Cash"].to_numpy(dtype=float), 0.0
+        )
+        report_weight_df["Cash"] = report_weight_df["Cash"] - report_weight_df[CASH_VEHICLE_SYMBOL_STR]
+    strategy_obj.cash_sleeve_target_weight_ser = (
+        effective_rebalance_weight_df["Cash"].reindex(effective_execution_price_df.index).ffill().dropna()
+    )
     strategy_obj.daily_target_weights = (
-        effective_rebalance_weight_df.loc[:, ["IEF", "LQD", "Cash"]]
+        report_weight_df
         .reindex(effective_execution_price_df.index)
         .ffill()
         .dropna()
@@ -1392,8 +1562,16 @@ def _run_strategy(
         "alpha_headline_sharpe_float": float(
             strategy_obj.summary.loc["Sharpe Ratio", "Strategy"]
         ),
+        # Cash sleeve = BIL plus residual cash (unchanged meaning across ledgers).
         "average_target_cash_weight_float": float(
-            strategy_obj.daily_target_weights["Cash"].mean()
+            strategy_obj.cash_sleeve_target_weight_ser.mean()
+        ),
+        "cash_vehicle_str": config_obj.cash_vehicle_str,
+        "excess_metric_note_str": (
+            "before 2007-05-30 the BIL ledger holds 0% cash while the metric subtracts DGS3MO; "
+            "quote the excess metric from 2007-06 for the BIL ledger"
+            if config_obj.cash_vehicle_str == CASH_VEHICLE_BIL_STR
+            else "legacy ledger credits DGS3MO on positive cash"
         ),
         "negative_cash_day_count_int": int(
             (strategy_obj.results["cash"].astype(float) < 0.0).sum()
@@ -1546,7 +1724,7 @@ def build_execution_timing_analysis_inputs() -> dict[str, object]:
         )
         strategy_obj.month_end_signal_df = signal_df.copy()
         strategy_obj.month_end_weight_df = rebalance_weight_df.copy()
-        _attach_fred_provenance(strategy_obj, fred_snapshot_tuple)
+        _attach_fred_provenance(strategy_obj, fred_snapshot_tuple, config_obj)
         return strategy_obj
 
     return {
@@ -1612,6 +1790,7 @@ def build_stress_test_strategy_obj(
     _attach_fred_provenance(
         strategy_obj,
         context_dict["fred_snapshot_tuple"],
+        context_dict["config_obj"],
     )
     return strategy_obj
 

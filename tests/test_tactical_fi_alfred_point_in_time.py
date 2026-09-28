@@ -550,12 +550,19 @@ def test_real_snapshot_reproduces_the_leakage_hunt_flips_and_metrics(real_pit_da
     assert flip_df["term_state_frozen"].tolist() == [1.0, 0.0]
     assert flip_df["term_state_candidate"].tolist() == [0.0, 1.0]
 
-    # Numbers from results/research/leakage_hunt_20260927/def/tfi_vintage_metrics.csv.
+    # Numbers from results/research/leakage_hunt_20260927/def/tfi_vintage_metrics.csv,
+    # which used the legacy DGS3MO-accrual ledger with 0% withholding.
+    legacy_config_obj = replace(
+        tfi.DEFAULT_CONFIG,
+        cash_vehicle_str=tfi.CASH_VEHICLE_DGS3MO_ACCRUAL_STR,
+        dividend_withholding_rate_float=0.0,
+    )
+    legacy_price_df = price_df.loc[:, price_df.columns.get_level_values(0) != tfi.CASH_VEHICLE_SYMBOL_STR]
     frozen_strategy_obj = run_backtest(
-        tfi.DEFAULT_CONFIG, price_df, frozen_signal_df, frozen_weight_df, cash_ser, fred_tuple
+        legacy_config_obj, legacy_price_df, frozen_signal_df, frozen_weight_df, cash_ser, fred_tuple
     )
     reproduction_strategy_obj = run_backtest(
-        tfi.DEFAULT_CONFIG, price_df, frozen_signal_df, reproduction_weight_df, cash_ser, fred_tuple
+        legacy_config_obj, legacy_price_df, frozen_signal_df, reproduction_weight_df, cash_ser, fred_tuple
     )
     frozen_book_dict = return_metric_dict(
         frozen_strategy_obj.results["daily_returns"], "2012-10-02", "2026-08-19"
