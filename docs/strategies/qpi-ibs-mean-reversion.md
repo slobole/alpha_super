@@ -64,6 +64,19 @@ flowchart LR
 !!! warning "What WIRED does — and does not — mean"
     `WIRED` is a plumbing status. It does not prove profitability, an enabled release, or a currently due order.
 
+## Known caveats
+
+Recorded from the [readiness audit 2026-09-28](../research/STRATEGY_READINESS_AUDIT_20260928.md). *Direction* says whether the published backtest is **conservative** (reality should be better), **optimistic** (reality should be worse), or neutral. Update this table whenever a caveat is measured again or fixed.
+
+| Caveat | Direction | Size | Evidence |
+|---|---|---|---|
+| Commission and share rounding use split-adjusted share counts | Conservative | +0.36 pp/yr CAGR if charged on real shares | `mr_dv2_qpi/DV2_QPI_FINDINGS.md` A-QPI-01 |
+| 5-session membership trim | Optimistic (recent) | -0.24 pp/yr last 3 years | A-QPI-02 |
+| A held name with no bar or a NaN IBS is never exited, silently | Live risk | 0 historical cases | A-QPI-05; fix #9 |
+| Selection lineage undocumented | Selection | 14 QPI modules; last-3y Sharpe 0.78 vs 0.98 full sample | A-QPI-08 |
+| Small-account friction | Size-dependent | -1.8 pp/yr at USD 30K over the last 3 years | A-QPI-06 |
+| Owner decision 2026-09-28: to be removed from the wired set (HPI covers the role) | Status | Not running live | Pending change |
+
 ## Sources of truth
 
 - Maturity: `alpha/strategy_registry.py`

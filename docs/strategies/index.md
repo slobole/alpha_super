@@ -82,6 +82,12 @@ source_paths:
 
 </div>
 
+## Known caveats
+
+Every wired page ends with a **Known caveats** table: what is conservative, what is optimistic, capacity, margin,
+and selection. The PM_READY and research strategies used in portfolio books have theirs on
+[Book Strategy Caveats](book-strategy-caveats.md).
+
 ## Publication rule
 
 Every page must name its governing source and state the exact universe, data, rules, timing, sizing, cash behavior, costs, and limitations. Use the [strategy template](../governance/templates/strategy.md) for future additions.

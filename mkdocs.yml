@@ -50,6 +50,7 @@ nav:
           - TAA Linearity + QQQ: strategies/taa-linearity-qqq.md
           - NDX ATR Momentum: strategies/ndx-atr-momentum.md
           - NDX ATR + VXN: strategies/ndx-atr-vxn-scaled.md
+      - Book Strategy Caveats: strategies/book-strategy-caveats.md
   - Operations:
       - Overview: operations/index.md
       - New Client Onboarding: operations/client-onboarding.md

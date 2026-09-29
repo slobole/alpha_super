@@ -66,6 +66,18 @@ flowchart LR
 !!! warning "What WIRED does — and does not — mean"
     `WIRED` confirms a LIVE route exists. It does not establish research quality, release enablement, or current runtime health.
 
+## Known caveats
+
+Recorded from the [readiness audit 2026-09-28](../research/STRATEGY_READINESS_AUDIT_20260928.md). *Direction* says whether the published backtest is **conservative** (reality should be better), **optimistic** (reality should be worse), or neutral. Update this table whenever a caveat is measured again or fixed.
+
+| Caveat | Direction | Size | Evidence |
+|---|---|---|---|
+| Commission and share rounding use split-adjusted share counts | Conservative | +0.37 pp/yr CAGR if charged on real shares | `hpi/HPI_FINDINGS.md` A-HPI-01 |
+| Idle cash earns 0% while about 28-30% of NAV is idle | Conservative | About +0.41 pp/yr at T-bill rates | A-HPI-02 |
+| Same-open refill needs margin | Account requirement | Up to 60% of NAV beyond cash on refill days | A-HPI-06 |
+| A missed daily cycle loses exit signals with no alert | Live risk | See the vote page | Fix #8 |
+| Capacity at USD 10M | Limit | p99 order 5.16% of ADV over the full history (passes over the last 3 years) | A-HPI-12 |
+
 ## Sources of truth
 
 - Maturity: `alpha/strategy_registry.py`

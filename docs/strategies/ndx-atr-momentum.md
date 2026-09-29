@@ -66,6 +66,17 @@ flowchart LR
 !!! warning "What WIRED does — and does not — mean"
     `WIRED` confirms a LIVE route exists. It does not prove an edge, release enablement, or current runtime health.
 
+## Known caveats
+
+Recorded from the [readiness audit 2026-09-28](../research/STRATEGY_READINESS_AUDIT_20260928.md). *Direction* says whether the published backtest is **conservative** (reality should be better), **optimistic** (reality should be worse), or neutral. Update this table whenever a caveat is measured again or fixed.
+
+| Caveat | Direction | Size | Evidence |
+|---|---|---|---|
+| 5-session membership trim (as the VXN variant) | Optimistic (recent) | About 0 full history; -0.59 pp/yr last 3 years | Fix #7 |
+| Score favours low-priced shares (as the VXN variant) | Design | See the VXN page | Audit section 3.2 |
+| Live-parity replay covered only 12 informative month-ends | Coverage | Below the 24 the audit protocol asks for | Protocol amendment AM-04 |
+| Small-account friction and zero-share names (as the VXN variant) | Size-dependent | See the VXN page | Audit section 5b |
+
 ## Sources of truth
 
 - Maturity: `alpha/strategy_registry.py`

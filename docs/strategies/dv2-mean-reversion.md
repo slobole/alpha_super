@@ -63,6 +63,19 @@ flowchart LR
 !!! warning "What WIRED does — and does not — mean"
     `WIRED` means the strategy has a LIVE account route in the registry. It does not prove an edge, guarantee that a release is enabled, or prove that an order is currently scheduled.
 
+## Known caveats
+
+Recorded from the [readiness audit 2026-09-28](../research/STRATEGY_READINESS_AUDIT_20260928.md). *Direction* says whether the published backtest is **conservative** (reality should be better), **optimistic** (reality should be worse), or neutral. Update this table whenever a caveat is measured again or fixed.
+
+| Caveat | Direction | Size | Evidence |
+|---|---|---|---|
+| Commission and share rounding use split-adjusted share counts | Conservative | +0.87 pp/yr CAGR if charged on real shares | `mr_dv2_qpi/DV2_QPI_FINDINGS.md` A-DV2-01 |
+| 5-session membership trim | Optimistic (recent) | About 0 full history; -0.22 pp/yr last 3 years | A-DV2-02; fix #7 |
+| Small-account friction (USD 1 minimum commission, whole shares) | Size-dependent | -4.5 pp/yr at USD 30K vs USD 10M over the last 3 years; best run at USD 100K or more | A-DV2-06 |
+| Exits and refills share one MOO basket | Account requirement | Margin needed on 78% of entry days, up to 97% of NAV | A-DV2-08 |
+| Held name without a price column raises (blocks the pod for the day) | Live risk (loud) | 1 merger case in 22.7 years | A-DV2-04; fix #9 |
+| Class-share tickers (BRK.B, BF.B) are sent to IBKR unmapped | Live risk | 2 entries in the last 3 years | A-DV2-05; fix #9 |
+
 ## Sources of truth
 
 - Maturity: `alpha/strategy_registry.py`

@@ -72,6 +72,21 @@ flowchart LR
 !!! warning "What WIRED does — and does not — mean"
     `WIRED` confirms a LIVE route exists. It does not prove an edge, an enabled release, or current runtime health.
 
+## Known caveats
+
+Recorded from the [readiness audit 2026-09-28](../research/STRATEGY_READINESS_AUDIT_20260928.md). *Direction* says whether the published backtest is **conservative** (reality should be better), **optimistic** (reality should be worse), or neutral. Update this table whenever a caveat is measured again or fixed.
+
+| Caveat | Direction | Size | Evidence |
+|---|---|---|---|
+| Commission and share rounding use split-adjusted share counts (TQQQ split 8 times) | Conservative | +0.38 pp/yr CAGR if charged on real shares | Audit section 3.1; `review_quant/rq_taa_fee_and_hurdle_margin.json` |
+| BTAL and the TQQQ fallback were chosen after seeing 2012-2026 results | Selection | Same family search as TAA 3x | Leakage hunt 2026-09-27 |
+| Unfinanced negative cash from sizing at Close_T and filling at the open | Optimistic, negligible | Min about -1.8% of NAV; < 0.01 pp/yr | `taa/bc_checks_*.json` |
+| Live re-prices targets at the opening-auction price; the backtest freezes shares at Close_T | Neutral | -0.20 pp/yr; needs margin up to about 2.8% of NAV | Fix #4 in the audit fix list |
+| Opening-auction (MOO) execution vs the modelled 2.5 bp slippage is not verified on IBKR fills | Unknown | House model: +0.1 pp/yr at USD 30K, +0.9 pp/yr at USD 1M, about +2 pp/yr at USD 5M (mostly BTAL) | `review_bc_trade/rbt04_capacity_at_todays_adv.json` |
+| Capacity at today's volume (MOO, p99 order at or below 5% of ADV) | Limit | About USD 1.8M; BTAL is the binding name | Audit section 7b |
+| Live data-freshness guard missing for $VIX / SPY at month-end | Live risk | One-day-stale $VIX would flip the TQQQ gate in 4 of 169 months | Fix #3 |
+| Live XNYS calendar window starts 20 years back | Live risk | Host raises from about 2031-09 (loud, no wrong order) | Fix #17 |
+
 ## Sources of truth
 
 - Maturity: `alpha/strategy_registry.py`
