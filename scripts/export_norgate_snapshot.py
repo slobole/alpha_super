@@ -41,7 +41,10 @@ class NorgateExportProfileSpec:
     total_return_symbol_tuple: tuple[str, ...] = ()
     helper_symbol_tuple: tuple[str, ...] = ()
     padding_type_name_str: str = "ALLMARKETDAYS"
-    trim_past_member_tail_bool: bool = True
+    # *** CRITICAL*** Exact membership by default (readiness audit 2026-09-28,
+    # fix #7). Trimming the last 5 sessions of past members used future removal
+    # knowledge; current members were never affected, so live decisions do not change.
+    trim_past_member_tail_bool: bool = False
 
 
 PROFILE_EXPORT_SPEC_DICT: dict[str, NorgateExportProfileSpec] = {
@@ -109,7 +112,7 @@ def _latest_norgate_session_date_str() -> str:
 def _load_index_constituent_matrix_df(
     indexname_str: str,
     *,
-    trim_past_member_tail_bool: bool = True,
+    trim_past_member_tail_bool: bool = False,
 ) -> tuple[list[str], pd.DataFrame]:
     norgatedata_module = _load_direct_norgate_module()
     symbol_list = norgatedata_module.watchlist_symbols(f"{indexname_str} Current & Past")

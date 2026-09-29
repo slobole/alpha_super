@@ -629,3 +629,38 @@ withheld at 0%.
 exemption for non-residents. Under that exemption the book result would sit between 2.5% and 1.9%.
 
 **Books.** Defensive books that hold Tactical FI are restated downward when re-run. They are not re-run here.
+
+## 15. Fix #7 applied: exact index membership by default (owner decision, 2026-09-29)
+
+**Change.**
+- `build_index_constituent_matrix` (`data/norgate_loader.py`) and the snapshot exporter (`scripts/export_norgate_snapshot.py`) no longer drop the last 5 constituent sessions of past index members.
+- The legacy trim remains opt-in (`trim_past_member_tail_bool=True`) for reproducing old artifacts. It is direct mode only, and raises in snapshot mode.
+- A member that stops trading is liquidated by the engine at its last available close.
+
+**Evidence** (`scripts/research/strategy_readiness_audit_20260928/common/trim_fix_before_after.py`):
+
+| Strategy | Full-history CAGR change | Last-3-year CAGR change |
+|---|---|---|
+| NDX ATR VXN | +0.004 pp | -0.475 pp |
+| NDX ATR | -0.007 pp | -0.586 pp |
+
+- The NDX backtest now takes the live answer on all 8 of 320 month-ends that used to differ (for example 2026-07-31: EA instead of MRVL).
+- DV2 is measured separately (expected about +0.02 pp full history and -0.22 pp over the last 3 years).
+
+**Live impact: none on the decision date.**
+- Current members were never trimmed.
+- A read-only build today gives identical Nasdaq-100 last rows under both policies (101 members).
+- Clients validate the membership contract only for HPI and CORE5, which were already exact.
+- Snapshots already exported on the server keep the old policy until they are re-exported.
+
+**Reviews and tests.**
+- Two reviewers approved: quant pitfalls and coverage; live parity and failure modes (Tier 3 checklist answered).
+- `tests/test_norgate_snapshot_store.py`: 36/36 pass, including four new tests.
+- The full suite has 26 failures, all unrelated to this change: 25 pre-existing frozen-hash and Bench-UI failures, and one synthetic PTA test whose month ends on Good Friday 2024.
+
+**Follow-ups for Codex.**
+- Re-export the three PIT index profiles on the Norgate server.
+- Optionally record the membership policy in the data-source metadata.
+- The `scripts/research/run_hpi_snapshot_parity.py` reconstruction assumes the old trim.
+- The research-only copy of the trim in `strategies/momentum/adaptive_moving_average_factor.py:616-621` should follow the same flag.
+- Re-run the published DV2, QPI and NDX artifacts and the books that hold them.

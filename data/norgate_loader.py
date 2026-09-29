@@ -80,12 +80,29 @@ def load_price_timeseries(
     )
 
 
-def build_index_constituent_matrix(indexname: str = "S&P 500") -> Tuple[List[str], pd.DataFrame]:
+def build_index_constituent_matrix(
+    indexname: str = "S&P 500",
+    *,
+    trim_past_member_tail_bool: bool = False,
+) -> Tuple[List[str], pd.DataFrame]:
     """
     Builds a survivorship-bias-free universe matrix for backtesting.
     Snapshot mode preserves the same return shape as direct Norgate mode.
+
+    *** CRITICAL*** Membership is exact by default: a past member keeps every
+    session Norgate marks it as a constituent. The legacy option
+    ``trim_past_member_tail_bool=True`` drops the last 5 member sessions of every
+    past member; that uses knowledge of a future removal that live cannot have
+    (readiness audit 2026-09-28, fix #7), so it exists only to reproduce old
+    artifacts. A member that stops trading is liquidated by the engine at its last
+    available close (``Strategy._liquidate_missing_price_positions``).
     """
     if is_snapshot_mode_enabled_bool():
+        if trim_past_member_tail_bool:
+            raise ValueError(
+                "The legacy past-member tail trim is available only in direct Norgate mode; "
+                "a snapshot universe carries the policy it was exported with."
+            )
         return norgate_snapshot_store.load_index_constituent_matrix_df(indexname)
 
     norgatedata_module = _load_direct_norgate_module()
@@ -103,7 +120,7 @@ def build_index_constituent_matrix(indexname: str = "S&P 500") -> Tuple[List[str
         if idx["Index Constituent"].sum() > 0:
             idx = idx.rename(columns={"Index Constituent": symbol})
             idx = idx.loc[idx[symbol] == 1]
-            if last_trading_day != idx.index[-1]:
+            if trim_past_member_tail_bool and last_trading_day != idx.index[-1]:
                 idx = idx.iloc[:-5]
             universe_df.append(idx)
 

@@ -438,6 +438,69 @@ def test_hpi_export_requests_no_padding():
     )
 
 
+def test_every_export_profile_uses_exact_past_member_membership():
+    from scripts import export_norgate_snapshot as export_module
+
+    for profile_str, profile_spec_obj in export_module.PROFILE_EXPORT_SPEC_DICT.items():
+        assert profile_spec_obj.trim_past_member_tail_bool is False, profile_str
+
+
+def test_direct_loader_membership_is_exact_by_default_and_legacy_trim_is_opt_in():
+    from data import norgate_loader
+
+    date_idx = pd.bdate_range("2024-01-02", periods=10)
+    membership_df = pd.DataFrame({"Index Constituent": 1}, index=date_idx)
+    heartbeat_df = pd.DataFrame(index=pd.bdate_range("2024-01-02", periods=15))
+    direct_norgate_mock = mock.Mock()
+    direct_norgate_mock.watchlist_symbols.return_value = ["OLD"]
+    direct_norgate_mock.price_timeseries.return_value = heartbeat_df
+    direct_norgate_mock.index_constituent_timeseries.return_value = membership_df
+
+    with mock.patch.object(
+        norgate_loader, "_load_direct_norgate_module", return_value=direct_norgate_mock
+    ), mock.patch.object(norgate_loader, "is_snapshot_mode_enabled_bool", return_value=False):
+        _, exact_universe_df = norgate_loader.build_index_constituent_matrix("S&P 500")
+        _, legacy_universe_df = norgate_loader.build_index_constituent_matrix(
+            "S&P 500", trim_past_member_tail_bool=True
+        )
+
+    assert len(exact_universe_df.index) == 10
+    assert len(legacy_universe_df.index) == 5
+
+
+def test_exporter_membership_is_exact_by_default_and_current_members_never_trim():
+    from scripts import export_norgate_snapshot as export_module
+
+    heartbeat_df = pd.DataFrame(index=pd.bdate_range("2024-01-02", periods=15))
+    past_member_df = pd.DataFrame({"Index Constituent": 1}, index=pd.bdate_range("2024-01-02", periods=10))
+    current_member_df = pd.DataFrame({"Index Constituent": 1}, index=heartbeat_df.index)
+    direct_norgate_mock = mock.Mock()
+    direct_norgate_mock.watchlist_symbols.return_value = ["OLD", "NOW"]
+    direct_norgate_mock.price_timeseries.return_value = heartbeat_df
+    direct_norgate_mock.index_constituent_timeseries.side_effect = lambda symbol_str, *args, **kwargs: (
+        past_member_df.copy() if symbol_str == "OLD" else current_member_df.copy()
+    )
+
+    with mock.patch.object(export_module, "_load_direct_norgate_module", return_value=direct_norgate_mock):
+        _, default_universe_df = export_module._load_index_constituent_matrix_df("S&P 500")
+        _, legacy_universe_df = export_module._load_index_constituent_matrix_df(
+            "S&P 500", trim_past_member_tail_bool=True
+        )
+
+    assert int(default_universe_df["OLD"].sum()) == 10
+    assert int(legacy_universe_df["OLD"].sum()) == 5
+    assert int(default_universe_df["NOW"].sum()) == 15
+    assert int(legacy_universe_df["NOW"].sum()) == 15
+
+
+def test_legacy_trim_is_rejected_in_snapshot_mode():
+    from data import norgate_loader
+
+    with mock.patch.object(norgate_loader, "is_snapshot_mode_enabled_bool", return_value=True):
+        with pytest.raises(ValueError, match="direct Norgate mode"):
+            norgate_loader.build_index_constituent_matrix("S&P 500", trim_past_member_tail_bool=True)
+
+
 def test_hpi_export_does_not_trim_past_member_tail():
     from scripts import export_norgate_snapshot as export_module
 

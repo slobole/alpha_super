@@ -70,7 +70,7 @@ Recorded from the [readiness audit 2026-09-28](../research/STRATEGY_READINESS_AU
 
 | Caveat | Direction | Size | Evidence |
 |---|---|---|---|
-| 5-session membership trim removes index leavers early, using knowledge live does not have | Optimistic (recent) | About 0 over 2000-2026; -0.47 pp/yr over the last 3 years; 8 of 320 picks differ from live | Fix #7; `review_quant/rq_ndx_untrimmed.json` |
+| 5-session membership trim removes index leavers early, using knowledge live does not have | Fixed 2026-09-29 (exact membership is now the default; fix #7) | About 0 over 2000-2026; -0.47 pp/yr over the last 3 years; 8 of 320 picks differ from live (applies to backtests re-run after 2026-09-29) | Fix #7; `review_quant/rq_ndx_untrimmed.json` |
 | Score divides momentum by ATR in dollars, so it favours low-priced shares | Design | Median pick price USD 68 vs USD 198 for a price-free NATR ranking; NATR20 was not better risk-adjusted | Audit sections 3.2 and 5b |
 | Parameters chosen on 2000-2026 data | Selection | 151 configurations; Reality Check p = 0.61 | NDX parameter robustness study |
 | Small-account friction (USD 1 minimum commission, whole shares) | Size-dependent | About -1.0 to -1.4 pp/yr at a USD 12K pod on IBKR Fixed, about half on Tiered; below 0.3 pp/yr from about USD 100K | Audit section 5b |

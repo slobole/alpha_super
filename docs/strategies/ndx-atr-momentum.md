@@ -72,7 +72,7 @@ Recorded from the [readiness audit 2026-09-28](../research/STRATEGY_READINESS_AU
 
 | Caveat | Direction | Size | Evidence |
 |---|---|---|---|
-| 5-session membership trim (as the VXN variant) | Optimistic (recent) | About 0 full history; -0.59 pp/yr last 3 years | Fix #7 |
+| 5-session membership trim (as the VXN variant) | Fixed 2026-09-29 (exact membership is now the default; fix #7) | About 0 full history; -0.59 pp/yr last 3 years (applies to backtests re-run after 2026-09-29) | Fix #7 |
 | Score favours low-priced shares (as the VXN variant) | Design | See the VXN page | Audit section 3.2 |
 | Live-parity replay covered only 12 informative month-ends | Coverage | Below the 24 the audit protocol asks for | Protocol amendment AM-04 |
 | Small-account friction and zero-share names (as the VXN variant) | Size-dependent | See the VXN page | Audit section 5b |
