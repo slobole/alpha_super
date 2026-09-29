@@ -1,30 +1,32 @@
 # Amended 2026-09-28 (owner decision): removed MOSAIC (corrected Sharpe 0.62 after the fb81e86
 # leak fix, never leakage-audited); its weight was spread pro rata over the other pods.
-name_str: "ladder_4_growth_rebalance"
+name_str: "0_allin"
 capital_base_float: 1e+06
 backtest_start_date_str: "2004-01-01"
 end_date_str: null
 allocation_policy_str: fixed
 max_workers_int: null
-rebalance:
-  frequency_str: annually
-  policy_str: fixed
+rebalance: {"frequency_str": "annually", "policy_str": "equal"}
 save_pod_artifacts_bool: true
 regression_benchmark_symbol_str: "$SPX"
 
 pods:
-  - pod_id_str: pod_mr_dv2
-    strategy_import_str: strategies.dv2.strategy_mr_dv2:DVO2Strategy
-    weight_float: 0.17
+  - pod_id_str: pod_taa_df_btal_fallback_tqqq_vix_cash
+    strategy_import_str: strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash
+    weight_float: 0.2
+
+  - pod_id_str: pod_taa_adaptive_macro_core5
+    strategy_import_str: strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5
+    weight_float: 0.2
 
   - pod_id_str: pod_mr_hpi_sp500_2_3_5_vote
     strategy_import_str: strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote
-    weight_float: 0.19
+    weight_float: 0.2
 
   - pod_id_str: pod_mo_atr_normalized_ndx_vxn_scaled
     strategy_import_str: strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy
-    weight_float: 0.27
+    weight_float: 0.2
 
-  - pod_id_str: pod_taa_df_btal_fallback_tqqq_vix_cash
-    strategy_import_str: strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash
-    weight_float: 0.37
+  - pod_id_str: pod_mr_dv2
+    strategy_import_str: strategies.dv2.strategy_mr_dv2:DVO2Strategy
+    weight_float: 0.2

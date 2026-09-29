@@ -1,0 +1,22 @@
+name_str: "00_0"
+capital_base_float: 1e+06
+backtest_start_date_str: "2004-01-01"
+end_date_str: null
+allocation_policy_str: fixed
+max_workers_int: null
+rebalance: {"frequency_str": "annually", "policy_str": "fixed"}
+save_pod_artifacts_bool: true
+regression_benchmark_symbol_str: "$SPX"
+
+pods:
+  - pod_id_str: pod_taa_df_btal_linearity_1n_fallback_qqq_vix_cash
+    strategy_import_str: strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash
+    weight_float: 0.3334
+
+  - pod_id_str: pod_taa_adaptive_macro_core5
+    strategy_import_str: strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5
+    weight_float: 0.3333
+
+  - pod_id_str: pod_taa_tactical_fixed_income_ief_lqd
+    strategy_import_str: strategies.taa_beyond_6040.strategy_taa_tactical_fixed_income_ief_lqd
+    weight_float: 0.3333

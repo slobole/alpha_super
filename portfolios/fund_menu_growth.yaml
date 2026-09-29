@@ -1,0 +1,47 @@
+# Growth — fund product menu 2026-09 (results/research/portfolio/fund_product_menu_20260923).
+# Two-bucket capital template from the frozen spec (return engines at equal capital,
+# CORE5-anchored stabilizers); volatility target 10.0%, drawdown budget 20%. Annual reset to target weights.
+# Pods holding Tactical FI cannot run fresh until its frozen Norgate fingerprint is
+# re-frozen (a benchmark-only revision; IEF and LQD are unchanged).
+# Research configuration only: not an allocation approval and not wired to LIVE.
+# Amended 2026-09-28 (owner decision): removed mosaic (corrected Sharpe 0.62 after the fb81e86
+# leak fix, never leakage-audited); the other pods scaled up pro rata, rounded to 1% by largest
+# remainder with equal-weight pods moving together (the A1 rule). Not yet in
+# scripts/research/fund_menu_20260923/amendments.yaml: regenerating with write_product_yamls.py
+# would restore mosaic until the menu re-freeze records this drop.
+name_str: fund_menu_growth
+capital_base_float: 1000000.0
+backtest_start_date_str: '2012-10-02'
+end_date_str: '2026-08-19'
+allocation_policy_str: fixed
+max_workers_int: null
+rebalance:
+  frequency_str: annually
+  policy_str: fixed
+save_pod_artifacts_bool: true
+regression_benchmark_symbol_str: $SPX
+pods:
+- pod_id_str: pod_hpi_vote
+  strategy_import_str: strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote
+  weight_float: 0.14
+- pod_id_str: pod_dv2
+  strategy_import_str: strategies.dv2.strategy_mr_dv2:DVO2Strategy
+  weight_float: 0.14
+- pod_id_str: pod_disp_kie_ihi_sma
+  strategy_import_str: strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_asset_sma200
+  weight_float: 0.14
+- pod_id_str: pod_sector_vox_iyr
+  strategy_import_str: strategies.mean_reversion.strategy_mr_us_sector_etf_ibs_downshock_vox_iyr
+  weight_float: 0.12
+- pod_id_str: pod_ndx_vxn
+  strategy_import_str: strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy
+  weight_float: 0.12
+- pod_id_str: pod_taa_btal_tqqq
+  strategy_import_str: strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash
+  weight_float: 0.12
+- pod_id_str: pod_infl_compass
+  strategy_import_str: strategies.taa_df.strategy_taa_inflation_compass
+  weight_float: 0.12
+- pod_id_str: pod_core5
+  strategy_import_str: strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5
+  weight_float: 0.10
