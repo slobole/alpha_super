@@ -46,10 +46,10 @@ SUPPORTED_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = strategy_registry.pm_ready_im
 # and whole-share rounding eat the edge the strategy is supposed to earn. The
 # HPI pair was missing while DV2 and QPI were listed, which meant swapping QPI
 # for HPI — the same strategy by correlation — silently removed the funding
-# floor from a book.
+# floor from a book. QPI left this table on 2026-09-28 when it was demoted to
+# RESEARCH: no book can hold it, so a floor for it would never apply.
 POD_MINIMUM_ALLOCATED_CAPITAL_FLOAT_DICT: dict[str, float] = {
     "strategies.dv2.strategy_mr_dv2:DVO2Strategy": 25_000.0,
-    "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy": 25_000.0,
     "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote": 25_000.0,
     "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit": 25_000.0,
 }

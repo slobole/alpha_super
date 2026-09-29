@@ -30,7 +30,7 @@ Tracked template source:
 
 ```text
 docs/live/release_templates/
-  pod_qpi_daily_moo.yaml.example
+  pod_hpi_sp500_2_3_5_vote_daily_moo.yaml.example
   pod_taa_btal_fallback_tqqq_vix_cash_monthly_open.yaml.example
   pod_ndx_atr_normalized_vxn_scaled_monthly_open.yaml.example
 ```
@@ -39,8 +39,8 @@ Runtime local copy example:
 
 ```powershell
 New-Item -ItemType Directory -Force alpha\live\releases\client_001
-Copy-Item docs\live\release_templates\pod_qpi_daily_moo.yaml.example `
-  alpha\live\releases\client_001\pod_qpi_01.yaml
+Copy-Item docs\live\release_templates\pod_hpi_sp500_2_3_5_vote_daily_moo.yaml.example `
+  alpha\live\releases\client_001\pod_hpi_sp500_2_3_5_vote_01.yaml
 ```
 
 Each local YAML should point at a different linked IBKR account/subaccount route.
@@ -49,9 +49,9 @@ Minimal local YAML shape:
 
 ```yaml
 identity:
-  release_id: client_001.pod_qpi.daily_moo.v1
+  release_id: client_001.pod_hpi_sp500_2_3_5_vote.daily_moo.v1
   user_id: client_001
-  pod_id: pod_qpi_01
+  pod_id: pod_hpi_sp500_2_3_5_vote_01
 
 deployment:
   mode: paper
@@ -61,8 +61,8 @@ broker:
   account_route: DU1234567
 
 strategy:
-  strategy_import_str: strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy
-  data_profile_str: norgate_eod_sp500_pit
+  strategy_import_str: strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote
+  data_profile_str: norgate_eod_sp500_hpi_pit
   params:
     max_positions_int: 10
 ```

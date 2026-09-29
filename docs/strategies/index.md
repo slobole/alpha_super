@@ -11,7 +11,7 @@ source_paths:
 # Strategy Catalog
 
 !!! abstract "What is included"
-    This catalog contains all **9 strategies currently marked `WIRED`** in the central registry. Each page explains the mechanics, timing, sizing, and governing source without making a performance claim.
+    This catalog contains all **8 strategies currently marked `WIRED`** in the central registry. Each page explains the mechanics, timing, sizing, and governing source without making a performance claim.
 
 !!! warning "WIRED is plumbing, not proof"
     `WIRED` means a strategy is connected to a LIVE account route. It does **not** mean the strategy is profitable, its release is enabled, its data is healthy, or an order is currently due. Verify releases and runtime evidence separately.
@@ -26,12 +26,6 @@ source_paths:
 
     [:octicons-arrow-right-24: Open](dv2-mean-reversion.md)
 
--   :material-chart-timeline-variant: **QPI + IBS Mean Reversion**
-
-    QPI and IBS pullback entry with IBS or RSI2 exits.
-
-    [:octicons-arrow-right-24: Open](qpi-ibs-mean-reversion.md)
-
 -   :material-history: **HPI 3-Day Mean Reversion**
 
     Negative 3-day moves ranked against 1,260 prior observations.
@@ -45,6 +39,9 @@ source_paths:
     [:octicons-arrow-right-24: Open](hpi-235-vote.md)
 
 </div>
+
+!!! note "Retired from live"
+    [QPI + IBS Mean Reversion](qpi-ibs-mean-reversion.md) was demoted to `RESEARCH` on 2026-09-28. The HPI pods cover its role.
 
 ## Monthly allocation and momentum
 

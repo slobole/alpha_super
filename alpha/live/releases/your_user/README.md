@@ -13,8 +13,8 @@ Copy a template into a client folder:
 
 ```powershell
 New-Item -ItemType Directory -Force alpha\live\releases\<client_id>
-Copy-Item docs\live\release_templates\pod_qpi_daily_moo.yaml.example `
-  alpha\live\releases\<client_id>\pod_qpi_01.yaml
+Copy-Item docs\live\release_templates\pod_hpi_sp500_2_3_5_vote_daily_moo.yaml.example `
+  alpha\live\releases\<client_id>\pod_hpi_sp500_2_3_5_vote_01.yaml
 ```
 
 Then edit the local copy:

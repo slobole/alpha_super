@@ -16,7 +16,6 @@ from alpha.live.release_manifest import (
 
 RELEASE_TEMPLATE_PATH_TUPLE: tuple[Path, ...] = (
     Path("docs/live/release_templates/pod_dv2_daily_moo.yaml.example"),
-    Path("docs/live/release_templates/pod_qpi_daily_moo.yaml.example"),
     Path(
         "docs/live/release_templates/"
         "pod_hpi_sp500_2_3_5_vote_daily_moo.yaml.example"
@@ -95,9 +94,17 @@ def test_release_templates_cover_every_wired_strategy():
     assert template_strategy_import_set == set(SUPPORTED_STRATEGY_IMPORT_TUPLE)
 
 
+def test_release_template_directory_matches_the_template_list():
+    """A template left behind for a retired strategy would be copied by an operator."""
+    template_dir_path_obj = Path("docs/live/release_templates")
+    assert set(template_dir_path_obj.glob("*.yaml.example")) == set(
+        RELEASE_TEMPLATE_PATH_TUPLE
+    )
+
+
 def test_hpi_release_requires_dedicated_snapshot_profile():
     release_obj = parse_release_manifest(
-        str(RELEASE_TEMPLATE_PATH_TUPLE[2].resolve())
+        str(RELEASE_TEMPLATE_PATH_TUPLE[1].resolve())
     )
 
     with pytest.raises(ValueError, match="strict snapshot profile"):
@@ -136,7 +143,7 @@ def test_hpi_release_preserves_close_to_next_open_contract(
     invalid_value_str,
 ):
     release_obj = parse_release_manifest(
-        str(RELEASE_TEMPLATE_PATH_TUPLE[2].resolve())
+        str(RELEASE_TEMPLATE_PATH_TUPLE[1].resolve())
     )
 
     with pytest.raises(ValueError, match="Strict HPI releases require"):
@@ -163,7 +170,7 @@ def test_hpi_release_preserves_named_strategy_parameters(
     invalid_value_obj,
 ):
     release_obj = parse_release_manifest(
-        str(RELEASE_TEMPLATE_PATH_TUPLE[2].resolve())
+        str(RELEASE_TEMPLATE_PATH_TUPLE[1].resolve())
     )
     params_dict = dict(release_obj.params_dict)
     params_dict[param_name_str] = invalid_value_obj
@@ -195,18 +202,42 @@ def test_release_template_parses_and_starts_disabled(template_path_obj: Path):
     assert release_obj.params_dict["capital_base_float"] == 100000.0
 
 
-def test_release_template_qpi_exposes_strategy_knobs():
+def test_retired_qpi_release_is_rejected():
+    """QPI was demoted to RESEARCH on 2026-09-28; a leftover YAML must fail loud."""
+    qpi_import_str = "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy"
+    assert qpi_import_str not in SUPPORTED_STRATEGY_IMPORT_TUPLE
+    assert not Path("docs/live/release_templates/pod_qpi_daily_moo.yaml.example").exists()
+
     release_obj = parse_release_manifest(
-        str(Path("docs/live/release_templates/pod_qpi_daily_moo.yaml.example").resolve())
+        str(RELEASE_TEMPLATE_PATH_TUPLE[0].resolve())
+    )
+    with pytest.raises(ValueError, match="Unsupported strategy_import_str"):
+        validate_release_manifest(
+            replace(release_obj, strategy_import_str=qpi_import_str)
+        )
+
+
+def test_disabled_qpi_release_blocks_the_whole_releases_root(tmp_path):
+    """The loader parses every YAML, enabled or not, so it refuses the root.
+
+    This is the operator hazard the retirement note in the templates README
+    warns about: remove any pod_qpi*.yaml before updating a VPS.
+    """
+    dv2_template_text = RELEASE_TEMPLATE_PATH_TUPLE[0].read_text(encoding="utf-8")
+    assert dv2_template_text.count("strategies.dv2.strategy_mr_dv2:DVO2Strategy") == 1
+    (tmp_path / "pod_dv2_01.yaml").write_text(dv2_template_text, encoding="utf-8")
+    (tmp_path / "pod_qpi_01.yaml").write_text(
+        dv2_template_text.replace(
+            "strategies.dv2.strategy_mr_dv2:DVO2Strategy",
+            "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy",
+        ).replace("pod_dv2", "pod_qpi"),
+        encoding="utf-8",
     )
 
-    assert release_obj.strategy_import_str == "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy"
-    assert release_obj.data_profile_str == "norgate_eod_sp500_pit"
-    assert release_obj.signal_clock_str == "eod_snapshot_ready"
-    assert release_obj.execution_policy_str == "next_open_moo"
-    assert release_obj.params_dict["qpi_threshold_float"] == 30.0
-    assert release_obj.params_dict["max_entry_ibs_float"] == 0.1
-    assert release_obj.params_dict["exit_rsi2_threshold_float"] == 90.0
+    with pytest.raises(ValueError, match="strategy_mr_qpi_ibs_rsi_exit") as exc_info:
+        load_release_list(str(tmp_path))
+    # The operator must be told which file to remove.
+    assert "pod_qpi_01.yaml" in str(exc_info.value)
 
 
 def test_release_template_vxn_scaled_ndx_exposes_vxn_knobs():
