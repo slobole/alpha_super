@@ -709,6 +709,7 @@ def _portfolio_metadata_dict(portfolio, pickle_path: Path) -> dict:
             None,
         ),
         'source_config_path': portfolio.source_config_path,
+        'source_config_dict': getattr(portfolio, 'source_config_dict', None),
         'common_start': portfolio._common_start,
         'common_end': portfolio._common_end,
         'pods': portfolio.pod_info_list,

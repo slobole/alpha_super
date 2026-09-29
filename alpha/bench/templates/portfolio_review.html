@@ -43,6 +43,8 @@
     </div>
   </div>
 
+  {% include '_portfolio_rebalance.html' %}
+
   {% if diagnostics.notice_list %}
   <div class="section section-flush">
     <h2 class="section-title">Checks</h2>
@@ -151,9 +153,6 @@
     <div class="builder-field">
       <label for="filename">Write to portfolios/</label>
       <input id="filename" name="filename" value="{{ diagnostics.suggested_filename_str }}">
-    </div>
-    <div class="builder-field builder-field-check">
-      <label><input type="checkbox" name="overwrite" value="1"> Overwrite if it exists</label>
     </div>
     <div class="builder-actions">
       {% if diagnostics.has_block_bool %}

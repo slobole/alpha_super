@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% set active_nav = "portfolios" %}
+{% block title %}{{ action_str|title }} portfolio{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1 class="page-title">{{ action_str|title }} · {{ name_str }}</h1><p class="page-sub">{{ config_rel_path_str }} · {{ 'Fresh pod runs' if manager_bool else 'Combine saved pod runs' }}</p></div></header>
+<form method="post" class="portfolio-editor">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token_str }}">
+  <input type="hidden" name="config" value="{{ config_rel_path_str }}">
+  <input type="hidden" name="revision" value="{{ revision_str }}">
+  {% if action_str == 'delete' %}
+  <div class="panel notice notice-warn"><div class="notice-title">Delete this portfolio config?</div><p>Only {{ config_rel_path_str }} will be deleted. Historical runs and reports remain on disk. This does not delete or stop any live pod.</p></div>
+  {% else %}
+  <div class="panel builder-head">
+    <div class="builder-field"><label for="name">Name</label><input id="name" name="name" value="{{ name_str }}" required></div>
+    {% if action_str == 'clone' %}<div class="builder-field"><label for="filename">New filename</label><input id="filename" name="filename" value="{{ filename_str }}" required></div>{% endif %}
+    <div class="builder-field"><label for="capital">Capital{{ ' (blank = derive)' if not manager_bool }}</label><input id="capital" name="capital" value="{{ capital_obj if capital_obj is not none else '' }}" inputmode="decimal" {{ 'required' if manager_bool }}></div>
+    <div class="builder-field"><label for="benchmark">Benchmark</label><input id="benchmark" name="benchmark" value="{{ benchmark_str }}"></div>
+    {% if manager_bool %}
+    <div class="builder-field"><label for="start">Start date</label><input id="start" name="start" type="date" value="{{ start_str }}" required></div>
+    <div class="builder-field"><label for="end">End date (blank = latest)</label><input id="end" name="end" type="date" value="{{ end_str }}"></div>
+    <div class="builder-field"><label for="allocation">Initial allocation</label><select id="allocation" name="allocation"><option value="fixed" {{ 'selected' if allocation_str == 'fixed' }}>Configured weights</option><option value="equal" {{ 'selected' if allocation_str == 'equal' }}>Equal weights</option></select></div>
+    {% endif %}
+  </div>
+  {% include '_portfolio_rebalance.html' %}
+  <div class="panel"><table class="table"><thead><tr><th>Pod / strategy</th><th>Weight (0–1)</th><th>Remove</th></tr></thead><tbody>
+    {% for pod in pod_list %}
+    <tr><td><b>{{ pod.get('pod_id_str', pod.get('strategy')) }}</b><div class="mono muted-2">{{ pod.get('strategy_import_str', '') }}</div>{% if pod.get('pkl') %}<div class="mono muted-2">Pinned run: {{ pod.pkl }}</div>{% endif %}<input type="hidden" name="row_id" value="{{ loop.index0 }}"></td><td><input name="weight_{{ loop.index0 }}" value="{{ pod.get('weight_float', pod.get('weight', 0)) }}" inputmode="decimal" required></td><td><input type="checkbox" name="remove_pod" value="{{ loop.index0 }}" aria-label="Remove {{ pod.get('pod_id_str', pod.get('strategy')) }}"></td></tr>
+    {% endfor %}
+  </tbody></table></div>
+  <div class="panel builder-head">
+    <div class="builder-field"><label for="add_strategy">Add strategy (optional)</label>{% if manager_bool %}<select id="add_strategy" name="add_strategy"><option value="">No addition</option>{% for import_str in strategy_import_tuple %}<option value="{{ import_str }}">{{ import_str }}</option>{% endfor %}</select>{% else %}<input id="add_strategy" name="add_strategy" placeholder="Saved strategy name">{% endif %}</div>
+    {% if manager_bool %}<div class="builder-field"><label for="add_pod_id">New pod ID</label><input id="add_pod_id" name="add_pod_id"></div>{% endif %}
+    <div class="builder-field"><label for="add_weight">New pod weight</label><input id="add_weight" name="add_weight" value="0" inputmode="decimal"></div>
+  </div>
+  <p class="table-caption">Configured weights must sum to 1 for fixed allocation. Equal initial allocation uses 1/N. Other saved settings and retained pod fields are preserved. YAML comments are not retained. Saving does not start a run.</p>
+  {% endif %}
+  <div class="btn-row"><a class="btn" href="{{ url_for('portfolio_detail_page_fn', config=config_rel_path_str) }}">Cancel</a><button class="btn btn-primary" type="submit">Review {{ 'deletion' if action_str == 'delete' else 'changes' }}</button></div>
+</form>
+{% endblock %}

@@ -21,6 +21,7 @@
 
 {% if not overview_list %}
 <div class="empty">No portfolio configs found under <span class="mono">portfolios/</span>.</div>
+<a class="btn btn-primary" href="{{ url_for('portfolio_new_page_fn') }}">New portfolio</a>
 {% else %}
 
 <div class="catalog-toolbar" id="pf-filter-bar">
@@ -47,7 +48,7 @@
     <a class="btn btn-sm btn-primary" id="pf-compare-link" href="#">Compare</a>
     <button class="btn btn-sm btn-ghost" id="pf-compare-clear" type="button">Clear</button>
   </div>
-  <p class="table-caption">Tick 2&ndash;5 measured books to compare them on their shared window. A book's figures are only as fresh as the pod runs it was built from. <b>Stale</b> means a pod has been re-run since — rebuild before quoting it.</p>
+  <p class="table-caption">Tick 2&ndash;5 measured books to compare their recorded runs on a shared window. <b>Config changed</b> or newer pod runs mean a rebuild is needed. <b>Config unverified</b> means the historical run has no complete settings snapshot.</p>
   <div class="panel">
     <table class="table" id="pf-table">
       <thead>
@@ -87,7 +88,7 @@
             {% if v.has_run_bool %}<input type="checkbox" class="pf-cmp-check" value="{{ p.rel_path_str }}">{% endif %}
           </td>
           <td>
-            <div><b>{{ p.config_name_str }}</b>
+            <div><a href="{{ url_for('portfolio_detail_page_fn', config=p.rel_path_str) }}"><b>{{ p.config_name_str }}</b></a>
               {% if p.error_str %}<span class="badge badge-norun">YAML error</span>{% endif %}
             </div>
             <div class="mono muted-2">{{ p.rel_path_str }}</div>
@@ -99,6 +100,11 @@
             </div>
             {% endif %}
             {% if p.error_str %}<div class="cell-note">{{ p.error_str }}</div>{% endif %}
+            <div class="btn-row">
+              <a class="btn btn-sm btn-ghost" href="{{ url_for('portfolio_manage_page_fn', action_str='edit', config=p.rel_path_str) }}">Edit</a>
+              <a class="btn btn-sm btn-ghost" href="{{ url_for('portfolio_manage_page_fn', action_str='clone', config=p.rel_path_str) }}">Duplicate</a>
+              <a class="btn btn-sm btn-ghost" href="{{ url_for('portfolio_manage_page_fn', action_str='delete', config=p.rel_path_str) }}">Delete</a>
+            </div>
           </td>
           <td>
             {% if p.is_wired_bool %}<span class="maturity maturity-wired">WIRED</span>
@@ -106,7 +112,7 @@
             {% else %}<span class="maturity maturity-research">RESEARCH</span>{% endif %}
           </td>
           <td><span class="badge badge-cat">{{ 'fresh run' if p.schema_str == 'manager' else 'combine pkls' }}</span>
-            {% if p.rebalance_str %}<div class="cell-note">{{ p.rebalance_str }}</div>{% endif %}
+            <div class="cell-note">{{ v.rebalance_label_str }}</div>
           </td>
           <td class="num">{{ p.pod_tuple|length }}</td>
           <td class="num">{% if p.capital_float is not none %}${{ '{:,.0f}'.format(p.capital_float) }}{% else %}&mdash;{% endif %}</td>
@@ -122,7 +128,8 @@
               {{ (v.latest_metric_run or v.run_entry_list[0]).display_timestamp_str[:16] }}
               <div class="cell-note">{{ v.run_entry_list|length }} run{{ 's' if v.run_entry_list|length != 1 }}</div>
               {% if not v.latest_metric_run %}<div class="cell-note">no metrics recorded</div>{% endif %}
-              {% if v.is_stale_bool %}
+              <div class="cell-note {{ 'stale-flag' if v.config_status_str == 'Config changed' }}">{{ v.config_status_str }}{{ ' — rebuild required' if v.config_status_str == 'Config changed' }}</div>
+              {% if v.stale_pod_list %}
               <div class="stale-flag" title="{% for s in v.stale_pod_list %}{{ s.strategy_name_str }}: used {{ s.used_timestamp_str }}, latest {{ s.latest_timestamp_str }}&#10;{% endfor %}">
                 ▲ {{ v.stale_pod_list|length }} pod{{ 's' if v.stale_pod_list|length != 1 }} re-run since
               </div>

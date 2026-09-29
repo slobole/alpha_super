@@ -90,6 +90,30 @@ def recording_client():
     return app.test_client(), recording_job_manager, token_str
 
 
+@pytest.fixture()
+def portfolio_schema_root(monkeypatch, tmp_path):
+    """One config per schema; the repo no longer ships a simple-schema book."""
+    portfolios_path = tmp_path / "portfolios"
+    portfolios_path.mkdir()
+    (portfolios_path / "multipod.yaml").write_text(
+        "name: multipod\n"
+        "capital: 100000\n"
+        "pods:\n"
+        "  - strategy: strategy_mr_dv2\n"
+        "    weight: 0.5\n"
+        "  - strategy: strategy_mo_atr_normalized_ndx\n"
+        "    weight: 0.5\n",
+        encoding="utf-8",
+    )
+    ladder_path = catalog.PORTFOLIOS_ROOT_PATH / "ladder_3_growth.yaml"
+    (portfolios_path / ladder_path.name).write_text(
+        ladder_path.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    monkeypatch.setattr(catalog, "REPO_ROOT_PATH", tmp_path.resolve())
+    monkeypatch.setattr(catalog, "PORTFOLIOS_ROOT_PATH", portfolios_path)
+    return portfolios_path
+
+
 # ── catalog ────────────────────────────────────────────────────────────────
 
 
@@ -153,11 +177,33 @@ def test_catalog_lists_strategies_and_flags_wired():
         for entry_obj in strategy_entry_list
         if entry_obj.has_capacity_analysis_bool
     ]
-    assert len(capacity_entry_list) == 40
+    # 41 + the five modules added with the corporate-action fix (fb81e86):
+    # two NATR20 NDX variants and three DV2 liquidity/industry-ETF variants.
+    assert len(capacity_entry_list) == 46
     assert (
         "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi"
         in {entry_obj.module_import_str for entry_obj in capacity_entry_list}
     )
+
+
+def test_dv2_liquidity_floor_has_bench_wired_badge_without_live_maturity(recording_client):
+    strategy_module_str = "strategies.dv2.strategy_mr_dv2_liquidity_floor"
+    strategy_entry_obj = catalog.get_strategy_by_module(strategy_module_str)
+    assert strategy_entry_obj is not None
+    assert strategy_entry_obj.display_is_wired_bool
+    assert not strategy_entry_obj.is_wired_bool
+
+    client_obj, _, _ = recording_client
+    catalog_html_str = client_obj.get("/").get_data(as_text=True)
+    assert re.search(
+        rf'<tr[^>]*data-module="{re.escape(strategy_module_str)}"[^>]*data-maturity="wired"',
+        catalog_html_str,
+    )
+    response_obj = client_obj.get(f"/strategy/{strategy_module_str}")
+    assert response_obj.status_code == 200
+    html_str = response_obj.get_data(as_text=True)
+    assert "Bench WIRED designation" in html_str
+    assert "Bench designation only; no LIVE release" in html_str
 
 
 def test_catalog_handles_non_utf8_sources_without_crashing():
@@ -206,7 +252,7 @@ def test_momentum_subcategories_cover_the_live_catalog():
     assert dv2_entry_obj.subcategory_label_str is None
 
 
-def test_catalog_parses_both_portfolio_schemas():
+def test_catalog_parses_both_portfolio_schemas(portfolio_schema_root):
     portfolio_by_name = {entry.name_str: entry for entry in catalog.list_portfolios()}
 
     simple_entry = portfolio_by_name["multipod"]
@@ -1282,7 +1328,7 @@ def test_run_api_rejects_foreign_origin(recording_client):
     assert job_manager.call_list == []
 
 
-def test_portfolio_api_routes_by_schema(recording_client):
+def test_portfolio_api_routes_by_schema(recording_client, portfolio_schema_root):
     client, job_manager, token_str = recording_client
 
     client.post("/api/run-portfolio", data={"csrf_token": token_str, "config_rel_path": "portfolios/multipod.yaml"})

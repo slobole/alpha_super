@@ -11,6 +11,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
 import importlib
+import copy
 import inspect
 import json
 import os
@@ -545,15 +546,19 @@ class PortfolioManager:
         self,
         config: PortfolioManagerConfig,
         source_config_path_str: str | None = None,
+        source_config_dict: dict | None = None,
     ):
         self.config = config
         self.source_config_path_str = source_config_path_str
+        self.source_config_dict = json.loads(json.dumps(source_config_dict, default=str))
 
     @classmethod
     def from_yaml(cls, config_path: Path) -> "PortfolioManager":
         config_path = config_path.resolve()
-        config_obj = load_portfolio_manager_config(config_path)
-        return cls(config=config_obj, source_config_path_str=str(config_path))
+        with config_path.open(encoding="utf-8") as file_obj:
+            source_config_dict = yaml.safe_load(file_obj)
+        config_obj = build_portfolio_manager_config(source_config_dict)
+        return cls(config=config_obj, source_config_path_str=str(config_path), source_config_dict=source_config_dict)
 
     def run(
         self,
@@ -719,6 +724,9 @@ class PortfolioManager:
             ),
         )
         portfolio.source_config_path = self.source_config_path_str
+        # Capture the config consumed at load time, never reread a file after a
+        # long run: the operator may have edited it while the pods were running.
+        portfolio.source_config_dict = copy.deepcopy(self.source_config_dict)
 
         portfolio_output_dir_path = None
         manager_metadata_path = None

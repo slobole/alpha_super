@@ -165,6 +165,10 @@ class RunPortfolioTests(unittest.TestCase):
 
             self.assertEqual(portfolio._rebalance, 'monthly')
             self.assertEqual(portfolio.source_config_path, str(config_path.resolve()))
+            self.assertEqual(portfolio.source_config_dict, config_dict)
+            config_path.write_text(yaml.safe_dump(dict(config_dict, capital=200000)), encoding='utf-8')
+            from alpha.engine.report import _portfolio_metadata_dict
+            self.assertEqual(_portfolio_metadata_dict(portfolio, temp_dir / 'book.pkl')['source_config_dict'], config_dict)
             self.assertEqual(len(portfolio.pod_info_list), 2)
             self.assertEqual(portfolio.pod_info_list[0]['source_pkl'], str(pickle_a))
             self.assertEqual(portfolio.pod_info_list[1]['source_pkl'], str(pickle_b))

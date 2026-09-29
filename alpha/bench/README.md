@@ -96,6 +96,89 @@ of one strategy over different windows as identical.
 
 ## How a run button maps to a command
 
+### Portfolio management
+
+Each portfolio row offers **Edit**, **Duplicate**, and **Delete**, and its name
+opens a detail page with current settings, recorded equity/drawdown charts,
+pod contribution, and run history. The existing maturity toolbar is preserved.
+
+- Edit preserves the schema, retained pod IDs, pinned pickle paths, worker
+  limits, and other settings not exposed by the form. YAML comments are not
+  preserved. Add/remove pods and change weights, capital, benchmark and dates
+  (dates apply to fresh-run books). Initial equal allocation writes no explicit
+  pod weights, as required by PortfolioManager.
+- New and Edit expose no periodic rebalance, monthly, quarterly or annual
+  rebalance. Fresh-run books support fixed targets, equal targets and inverse
+  volatility with an explicit trailing completed-day lookback (default 60).
+  Combine-pickles books retain their existing fixed-target-only contract.
+- Changes are reviewed before saving. A server-signed, expiring review binds
+  the exact proposal to the source revision. A newer edit invalidates an old
+  review. Queued, running or unresolved BENCH jobs block edit/delete; job
+  submission shares the mutation lock. This is a single-process local UI;
+  jobs launched outside BENCH are not tracked by this guard.
+- Duplicate writes a new file exclusively and records a source link for
+  **Compare with source**. Output names, filename stems and previous names are
+  reserved across current books to prevent mixed result histories. Rename
+  aliases and clone lineage live in `portfolios/.bench/<stem>.json`, outside
+  the runner configuration. Existing duplicate-name runs are filtered by their
+  recorded source-config filename when that evidence is present.
+- Delete removes only the selected config after a separate review. Saved
+  reports and results remain on disk. No live account, pod or service is
+  modified. New creation cannot overwrite a config; use Edit instead.
+
+Both runners capture the source settings when loading the config and save
+`source_config_dict` in the pickle and `metadata.json`. BENCH compares that
+snapshot to the current config. **Current config** confirms settings only,
+not current data/code freshness. **Config changed** labels results belonging
+to an earlier definition. **Config unverified** is used for legacy runs with
+no full snapshot; BENCH never backfills a historical snapshot from today's
+file. Comparison uses recorded pod weights and rebalance policy, not current
+config composition. Snapshot identity is conservative: changes to optional
+settings or their representation may require a new run.
+
+#### Attribution contract
+
+Attribution is computed by `alpha.engine.portfolio_attribution` from saved
+overlap-aligned pod returns, sleeve equity, NAV and applied rebalance targets.
+The first observation is the capital anchor, with no attributed return.
+
+For each subsequent date `t`, opening allocated capital is:
+
+```text
+C[i,t] = E[i,t-1]                         ordinary date
+C[i,t] = V[t-1] * saved_target_weight[i,t] applied rebalance date
+PnL[i,t] = C[i,t] * saved_pod_return[i,t]
+E[i,t] = C[i,t] + PnL[i,t]
+sum_i PnL[i,t] = V[t] - V[t-1]
+```
+
+Both per-sleeve equity and portfolio P&L must reconcile (numerical tolerance
+`rtol=1e-9`, `atol=1e-6`) before attribution is displayed. No capital transfer
+is classified as profit. Full-window contribution percentage points equal
+`100 * sum_t PnL[i,t] / starting_NAV`. Worst-drawdown contribution uses the
+first deepest trough and the last preceding occurrence of its high-water
+mark: sum P&L for `peak < t <= trough`, divided by peak NAV, times 100. The
+unweighted pod return over that episode is a separate column.
+
+This is retrospective path explanation, not an alpha or diversification
+claim. Missing/inconsistent saved inputs, including legacy rebalanced books
+without applied targets, produce an explicit unavailable message. The new
+view does not reuse old `tail_contribution.csv`: that diagnostic may use
+drifted prior-day weights on a rebalance day and is not exact attribution for
+the rebalanced path. Existing reports/artifacts are not rewritten.
+
+Portfolio rebalancing uses prior-close total capital at the first trading day
+of each period, then compounds pod returns. It does not replay additional
+transfer trades, commissions, slippage, capacity or borrow effects. Source
+pod return costs and data assumptions are inherited unchanged. These
+controls configure research simulation, not broker rebalancing.
+
+```text
+Create / Edit / Duplicate → Validate and review → Save config
+  → Build (existing runner; capture consumed settings)
+  → Recorded detail / attribution / shared-window comparison
+```
+
 | Button | Command |
 |---|---|
 | Vanilla | `python scripts/research/run_strategy_analysis.py <module> --analysis vanilla` |

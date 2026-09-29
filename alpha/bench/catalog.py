@@ -8,8 +8,8 @@ This module answers two product questions with cheap filesystem reads:
 Discovery is convention-based, exactly like the existing runners:
 
   * a strategy is any ``strategies/**/strategy_*.py`` file,
-  * a strategy is *wired* when its dotted module path appears in
-    ``alpha.live.release_manifest.SUPPORTED_STRATEGY_IMPORT_TUPLE``,
+  * a strategy's maturity comes from ``alpha.strategy_registry``; a separate
+    Bench-only badge may display WIRED without changing operational maturity,
   * a strategy is *runnable* when it exposes a top-level ``run_variant`` def
     (that is the hook the generic runner calls).
 
@@ -34,6 +34,16 @@ from alpha.strategy_registry import MaturityTier
 REPO_ROOT_PATH = Path(__file__).resolve().parents[2]
 STRATEGIES_ROOT_PATH = REPO_ROOT_PATH / "strategies"
 PORTFOLIOS_ROOT_PATH = REPO_ROOT_PATH / "portfolios"
+
+# Display-only label requested for the standalone DV2 floor. It does not
+# change registry maturity, portfolio eligibility, or LIVE release support.
+BENCH_WIRED_BADGE_MODULE_SET = frozenset(
+    {
+        "strategies.dv2.strategy_mr_dv2_liquidity_floor",
+        "strategies.dv2.strategy_mr_dv2_liquidity_floor_adv_rank",
+        "strategies.dv2.strategy_mr_dv2_industry_etf",
+    }
+)
 
 # Friendly labels for the strategy sub-folders. Unknown folders fall back to a
 # title-cased version of the folder name, so a brand-new family still renders.
@@ -158,6 +168,17 @@ class StrategyEntry:
         """Connected to a live account route. Derived so callers predating the
         tiers keep working unchanged."""
         return self.tier_int >= int(MaturityTier.WIRED)
+
+    @property
+    def has_bench_wired_badge_bool(self) -> bool:
+        return (
+            self.module_import_str in BENCH_WIRED_BADGE_MODULE_SET
+            and not self.is_wired_bool
+        )
+
+    @property
+    def display_is_wired_bool(self) -> bool:
+        return self.is_wired_bool or self.has_bench_wired_badge_bool
 
     @property
     def is_pm_ready_bool(self) -> bool:
@@ -414,11 +435,15 @@ def list_strategies() -> list[StrategyEntry]:
             )
         )
 
-    # Most mature first, so the strategies carrying real money lead the catalog
-    # and the promoted-but-not-live ones sit directly under them.
+    # Keep the Bench-only display badge with the other WIRED rows, while the
+    # stored maturity tier remains the operational registry value.
     entry_list.sort(
         key=lambda entry_obj: (
-            -entry_obj.tier_int,
+            -(
+                int(MaturityTier.WIRED)
+                if entry_obj.display_is_wired_bool
+                else entry_obj.tier_int
+            ),
             entry_obj.category_label_str.lower(),
             entry_obj.stem_str.lower(),
         )

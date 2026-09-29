@@ -94,6 +94,21 @@ def two_books(monkeypatch):
     return portfolio_by_path_dict, overview_list
 
 
+def test_comparison_uses_recorded_composition_after_config_edit(two_books):
+    from types import SimpleNamespace
+
+    portfolio_by_path_dict, overview_list = two_books
+    saved_obj = portfolio_by_path_dict["portfolios/long.yaml"]
+    saved_obj.strategies = [SimpleNamespace(name="RecordedPod")]
+    saved_obj.weights = [1.0]
+    saved_obj._rebalance = "annually"
+    result_obj = portfolio_compare.compare_books(["portfolios/long.yaml", "portfolios/short.yaml"])
+    column_obj = result_obj.column_list[0]
+    assert column_obj.pod_label_list == ["RecordedPod 100.0%"]
+    assert "Annually" in column_obj.rebalance_label_str
+    assert column_obj.run_timestamp_str == overview_list[0].latest_metric_run.display_timestamp_str
+
+
 def test_columns_are_measured_on_the_shared_window(two_books):
     """The whole point: a later-starting book is judged on the same days."""
     result_obj = portfolio_compare.compare_books(

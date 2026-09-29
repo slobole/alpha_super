@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% set active_nav = "portfolios" %}
+{% set p = overview.portfolio %}
+{% block title %}{{ p.config_name_str }}{% endblock %}
+{% block content %}
+<header class="page-head"><div><h1 class="page-title">{{ p.config_name_str }}</h1><p class="page-sub">{{ p.rel_path_str }} · {{ p.tier_label_str }} · {{ rebalance_label_str }}</p></div></header>
+<div class="btn-row">
+  <a class="btn" href="{{ url_for('portfolios_page_fn') }}">All portfolios</a>
+  <a class="btn" href="{{ url_for('portfolio_manage_page_fn', action_str='edit', config=p.rel_path_str) }}">Edit</a>
+  <a class="btn" href="{{ url_for('portfolio_manage_page_fn', action_str='clone', config=p.rel_path_str) }}">Duplicate</a>
+  <a class="btn" href="{{ url_for('portfolio_manage_page_fn', action_str='delete', config=p.rel_path_str) }}">Delete</a>
+  <form class="inline" method="post" action="{{ url_for('run_portfolio_api_fn') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token_str }}"><input type="hidden" name="config_rel_path" value="{{ p.rel_path_str }}"><button class="btn btn-primary" {{ 'disabled' if p.error_str }}>Build</button></form>
+  {% if parent_path_str %}<a class="btn" href="{{ url_for('compare_portfolios_page_fn', p=[parent_path_str, p.rel_path_str]) }}">Compare with source</a>{% endif %}
+</div>
+<div class="panel notice {{ 'notice-warn' if overview.config_status_str != 'Current config' else 'notice-info' }}">
+  <div class="notice-title">{{ overview.config_status_str }}</div>
+  <div class="notice-detail">{% if overview.config_status_str == 'Config changed' %}The saved results below describe an earlier configuration. Build again to measure the current settings.{% elif overview.config_status_str == 'Config unverified' %}This historical run has no configuration snapshot. Its match to the current settings cannot be verified.{% elif overview.config_status_str == 'Never run' %}No measured results yet.{% else %}The configuration matches the saved run. This checks settings, not current data or code freshness.{% endif %}</div>
+  {% if overview.stale_pod_list %}<p>{{ overview.stale_pod_list|length }} pod(s) have newer saved runs. Rebuild to use them.</p>{% endif %}
+</div>
+<section class="section"><h2 class="section-title">Current configuration</h2>
+<div class="panel"><table class="table"><thead><tr><th>Pod</th><th>Configured weight</th></tr></thead><tbody>{% for pod in p.pod_tuple %}<tr><td>{{ pod.strategy_str }}</td><td>{{ '%.2f%%'|format(pod.weight_float * 100) }}</td></tr>{% endfor %}</tbody></table></div>
+<p class="table-caption">Capital: {{ p.capital_float if p.capital_float is not none else 'Derived from saved pods' }} · Initial allocation: {{ config_dict.get('allocation_policy_str', 'fixed') }} · {{ rebalance_label_str }}. Portfolio rebalancing redistributes prior-close capital in the simulation; additional transfer trades and costs are not modeled.</p>
+<details><summary>Full settings</summary><pre class="mono yaml-preview">{{ config_dict|tojson(indent=2) }}</pre></details>
+</section>
+{% if overview.latest_metric_run %}
+<section class="section"><h2 class="section-title">Recorded results · {{ overview.latest_metric_run.display_timestamp_str }}</h2>
+<p class="page-sub">{{ overview.window_str }} · Results belong to this recorded run.</p>
+<div class="stat-row"><div class="stat"><div class="stat-value">{{ overview.ann_return_float|signed_pct }}</div><div class="stat-label">CAGR</div></div><div class="stat"><div class="stat-value">{{ overview.sharpe_float|ratio }}</div><div class="stat-label">Sharpe</div></div><div class="stat"><div class="stat-value">{{ overview.max_drawdown_float|pct }}</div><div class="stat-label">Max drawdown</div></div></div>
+{% if saved_config_dict %}<details><summary>Settings used for this run</summary><pre class="mono yaml-preview">{{ saved_config_dict|tojson(indent=2) }}</pre></details>{% endif %}
+{% for chart in chart_list %}
+<div class="panel"><h3>{{ chart.label_str }}</h3><svg viewBox="0 0 1000 250" role="img" aria-label="{{ chart.label_str }} from {{ chart.start_str }} to {{ chart.end_str }}" style="width:100%;max-height:290px"><line x1="60" y1="210" x2="960" y2="210" stroke="currentColor" opacity=".25"/><polyline points="{{ chart.point_str }}" fill="none" stroke="currentColor" stroke-width="1.7" vector-effect="non-scaling-stroke"/><text x="0" y="24" fill="currentColor" font-size="12">{{ '{:,.1f}'.format(chart.high_float) }}</text><text x="0" y="212" fill="currentColor" font-size="12">{{ '{:,.1f}'.format(chart.low_float) }}</text><text x="60" y="240" fill="currentColor" font-size="12">{{ chart.start_str }}</text><text x="960" y="240" text-anchor="end" fill="currentColor" font-size="12">{{ chart.end_str }}</text></svg></div>
+{% endfor %}
+</section>
+{% endif %}
+<section class="section"><h2 class="section-title">Pod contribution</h2>
+{% if attribution_error_str %}<div class="panel notice notice-info">Attribution unavailable: {{ attribution_error_str }}</div>{% endif %}
+{% if contribution_list %}
+<p class="page-sub">{{ observation_count_int }} return observations. Investment P&amp;L excludes capital transfers and reconciles to the saved portfolio NAV. Return contributions are percentage points of starting portfolio capital.</p>
+<div class="panel scroll"><table class="table"><thead><tr><th>Pod</th><th class="num">P&amp;L ($)</th><th class="num">Return contribution (pp)</th>{% if episode_str %}<th class="num">Drawdown P&amp;L ($)</th><th class="num">Drawdown contribution (pp)</th><th class="num">Pod return in episode</th>{% endif %}</tr></thead><tbody>{% for row in contribution_list %}<tr><td>{{ row.name_str }}</td><td class="num">{{ '{:+,.2f}'.format(row.pnl) }}</td><td class="num">{{ '%+.2f'|format(row.return_pp) }}</td>{% if episode_str %}<td class="num">{{ '{:+,.2f}'.format(row.drawdown_pnl) }}</td><td class="num">{{ '%+.2f'|format(row.drawdown_pp) }}</td><td class="num">{{ '%+.2f%%'|format(row.episode_standalone_pct) }}</td>{% endif %}</tr>{% endfor %}</tbody></table></div>
+<p class="table-caption">{% if episode_str %}Worst portfolio drawdown: {{ episode_str }}. Drawdown contributions use portfolio value at the peak; the separate pod return is unweighted.{% else %}No negative drawdown in this saved path.{% endif %} This explains realized history and inherits the source runs' cost and data assumptions.</p>
+{% endif %}
+</section>
+<section class="section"><h2 class="section-title">Run history</h2><div class="panel"><table class="table"><thead><tr><th>Run</th><th>Analysis</th><th>Configuration evidence</th><th>Report</th></tr></thead><tbody>{% for row in run_history_list %}<tr><td>{{ row.run_obj.display_timestamp_str }}</td><td>{{ row.run_obj.analysis_label_str }}</td><td>{{ 'Snapshot saved' if row.snapshot_bool else 'Unverified legacy run' }}</td><td>{% if row.run_obj.has_report_bool %}<a href="{{ url_for('artifact_fn', rel_path_str=row.run_obj.report_artifact_str) }}" target="_blank" rel="noopener">Open report</a>{% else %}No report{% endif %}</td></tr>{% else %}<tr><td colspan="4">No runs yet.</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}

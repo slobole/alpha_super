@@ -36,6 +36,7 @@
             {{ column.label_str }}
             {% if column.is_benchmark_bool %}<div class="cell-note">benchmark</div>
             {% elif column.is_stale_bool %}<div class="stale-flag">▲ stale</div>{% endif %}
+            {% if not column.is_benchmark_bool %}<div class="cell-note">{{ column.config_status_str }}</div>{% endif %}
           </th>
           {% endfor %}
         </tr>
@@ -60,8 +61,10 @@
           <td class="num mono muted-2 {{ 'compare-benchmark-col' if column.is_benchmark_bool }}">{{ column.full_window_str or '—' }}</td>
           {% endfor %}
         </tr>
+        <tr><td class="metric">Recorded run</td>{% for column in comparison.column_list %}<td class="mono muted-2">{{ column.run_timestamp_str or '—' }}</td>{% endfor %}</tr>
+        <tr><td class="metric">Recorded rebalance</td>{% for column in comparison.column_list %}<td>{{ column.rebalance_label_str or '—' }}</td>{% endfor %}</tr>
         <tr>
-          <td class="metric">Pods</td>
+          <td class="metric">Recorded pods</td>
           {% for column in comparison.column_list %}
           <td class="{{ 'compare-benchmark-col' if column.is_benchmark_bool }}">
             {% if column.pod_label_list %}

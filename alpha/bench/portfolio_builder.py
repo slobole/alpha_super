@@ -322,6 +322,7 @@ def render_yaml_text(
     backtest_start_date_str: str,
     end_date_str: str | None,
     pod_pair_list: list[tuple[str, str, float]],
+    rebalance_dict: dict | None = None,
 ) -> str:
     """Render a fresh-run config accepted by ``PortfolioManager``."""
     end_date_value_str = json.dumps(end_date_str) if end_date_str else "null"
@@ -332,7 +333,7 @@ def render_yaml_text(
         f"end_date_str: {end_date_value_str}",
         "allocation_policy_str: fixed",
         "max_workers_int: null",
-        "rebalance: null",
+        "rebalance: " + json.dumps(rebalance_dict),
         "save_pod_artifacts_bool: true",
     ]
     if benchmark_str:
@@ -397,6 +398,7 @@ def analyze_selection(
     benchmark_override_str: str | None = None,
     backtest_start_date_str: str = DEFAULT_BACKTEST_START_DATE_STR,
     end_date_str: str | None = None,
+    rebalance_dict: dict | None = None,
 ) -> SelectionDiagnostics:
     """Diagnose one candidate book and render its YAML.
 
@@ -405,6 +407,10 @@ def analyze_selection(
     reported rather than applied silently.
     """
     diagnostics_obj = SelectionDiagnostics()
+    if rebalance_dict is not None:
+        from alpha.engine.portfolio_manager import _coerce_rebalance_config
+        from alpha.bench.portfolio_config import rebalance_config_dict
+        rebalance_dict = rebalance_config_dict(_coerce_rebalance_config(rebalance_dict))
     candidate_dict = candidate_by_stem_dict()
 
     known_pair_list = [
@@ -514,6 +520,7 @@ def analyze_selection(
         backtest_start_date_str=backtest_start_date_str,
         end_date_str=end_date_str,
         pod_pair_list=pod_config_tuple_list,
+        rebalance_dict=rebalance_dict,
     )
     diagnostics_obj.suggested_filename_str = f"{slugify_filename_str(name_str)}.yaml"
     return diagnostics_obj
@@ -809,5 +816,6 @@ def write_portfolio_yaml(
     if write_path.exists() and not overwrite_bool:
         raise FileExistsError(f"{write_path.name} already exists.")
     write_path.parent.mkdir(parents=True, exist_ok=True)
-    write_path.write_text(yaml_text_str, encoding="utf-8")
+    with write_path.open("w" if overwrite_bool else "x", encoding="utf-8") as file_obj:
+        file_obj.write(yaml_text_str)
     return write_path

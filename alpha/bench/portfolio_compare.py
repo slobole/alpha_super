@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from alpha.bench import portfolio_overview, runs
+from alpha.bench import portfolio_overview, runs, portfolio_config
 from alpha.engine.metrics import cross_correlation_matrix, generate_overall_metrics
 
 
@@ -62,6 +62,9 @@ class BookColumn:
     full_window_str: str | None = None
     is_stale_bool: bool = False
     is_benchmark_bool: bool = False
+    config_status_str: str = ""
+    rebalance_label_str: str = ""
+    run_timestamp_str: str = ""
 
 
 @dataclass
@@ -212,12 +215,16 @@ def compare_books(rel_path_list: list[str]) -> ComparisonResult:
                 label_str=label_str,
                 rel_path_str=rel_path_str,
                 metric_by_name_dict=_metric_dict(total_value_ser, benchmark_return_ser),
-                pod_label_list=[
-                    f"{pod_obj.strategy_str} {pod_obj.weight_float:.0%}"
-                    for pod_obj in overview_obj.portfolio.pod_tuple
-                ],
+                pod_label_list=_saved_pod_label_list(portfolio_obj),
                 full_window_str=overview_obj.window_str,
                 is_stale_bool=overview_obj.is_stale_bool,
+                config_status_str=overview_obj.config_status_str,
+                run_timestamp_str=overview_obj.latest_metric_run.display_timestamp_str,
+                rebalance_label_str=portfolio_config.rebalance_label_str({
+                    "frequency_str": getattr(portfolio_obj, "_rebalance", None),
+                    "policy_str": getattr(portfolio_obj, "_rebalance_policy", "fixed"),
+                    "lookback_day_int": getattr(portfolio_obj, "_rebalance_inverse_volatility_lookback_day_int", 60),
+                }) if getattr(portfolio_obj, "_rebalance", None) else "No periodic rebalance",
             )
         )
 
@@ -237,6 +244,12 @@ def compare_books(rel_path_list: list[str]) -> ComparisonResult:
     _append_stale_notice(result_obj)
     _append_correlation(result_obj, return_ser_by_label_dict)
     return result_obj
+
+
+def _saved_pod_label_list(portfolio_obj) -> list[str]:
+    strategy_list = getattr(portfolio_obj, "strategies", [])
+    weight_list = getattr(portfolio_obj, "weights", [])
+    return [f"{strategy_obj.name} {weight_float:.1%}" for strategy_obj, weight_float in zip(strategy_list, weight_list)]
 
 
 def _shared_benchmark(
@@ -342,7 +355,7 @@ def _append_stale_notice(result_obj: ComparisonResult) -> None:
             title_str="Stale books in this comparison",
             detail_str=(
                 ", ".join(stale_label_list)
-                + " were built from pod runs that have since been superseded. Rebuild before "
+                + " have changed configurations or newer source pod runs. Rebuild before "
                 "quoting these figures."
             ),
         )

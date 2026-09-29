@@ -560,6 +560,11 @@ def build_portfolio(config_path: Path, name_override=None, capital_override=None
     """Build a portfolio object from a validated YAML configuration."""
     config_path = config_path.resolve()
     config_dict = load_portfolio_config(config_path)
+    source_config_dict = json.loads(json.dumps(config_dict, default=str))
+    if name_override is not None:
+        source_config_dict['name'] = name_override
+    if capital_override is not None:
+        source_config_dict['capital'] = capital_override
     config_dict = validate_portfolio_config(config_dict, config_path)
 
     portfolio_name = name_override or config_dict['name']
@@ -592,6 +597,7 @@ def build_portfolio(config_path: Path, name_override=None, capital_override=None
         regression_benchmark_adjustment_str=benchmark_adjustment_str,
     )
     portfolio.source_config_path = str(config_path)
+    portfolio.source_config_dict = source_config_dict
     return portfolio
 
 

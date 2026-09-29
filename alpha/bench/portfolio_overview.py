@@ -21,8 +21,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import PureWindowsPath
 
-from alpha.bench import catalog, runs
+from alpha.bench import catalog, runs, portfolio_config
 
 
 VANILLA_ANALYSIS_DIR_STR = "vanilla_backtest"
@@ -44,6 +45,7 @@ class PortfolioOverview:
     latest_metric_run: runs.RunEntry | None
     run_entry_list: list[runs.RunEntry]
     stale_pod_list: list[StalePod]
+    config_status_str: str = "Config unverified"
 
     @property
     def ann_return_float(self) -> float | None:
@@ -98,7 +100,11 @@ class PortfolioOverview:
 
     @property
     def is_stale_bool(self) -> bool:
-        return len(self.stale_pod_list) > 0
+        return len(self.stale_pod_list) > 0 or self.config_status_str == "Config changed"
+
+    @property
+    def rebalance_label_str(self) -> str:
+        return portfolio_config.rebalance_label_str(self.portfolio.rebalance_str)
 
     @property
     def search_text_str(self) -> str:
@@ -218,10 +224,19 @@ def list_portfolio_overviews() -> list[PortfolioOverview]:
     """Every configured book with its latest measured run and staleness."""
     overview_list: list[PortfolioOverview] = []
     for portfolio_entry_obj in catalog.list_portfolios():
+        try:
+            config_path, _config_dict, _revision_str = portfolio_config.read_config_tuple(portfolio_entry_obj.rel_path_str)
+            previous_name_list = portfolio_config.lineage_dict_for(config_path).get("previous_name_list", [])
+        except (OSError, ValueError, TypeError):
+            previous_name_list = []
         run_entry_list = runs.scan_portfolio_runs(
             portfolio_entry_obj.name_str,
             portfolio_entry_obj.config_name_str,
+            *previous_name_list,
         )
+        # Names are discovery hints; a recorded source path identifies the
+        # owning config even when legacy books reused another book's name.
+        run_entry_list = [run_obj for run_obj in run_entry_list if _run_owned_bool(portfolio_entry_obj, run_obj)]
         latest_report_run_obj = next(
             (run_obj for run_obj in run_entry_list if run_obj.has_report_bool), None
         )
@@ -245,6 +260,20 @@ def list_portfolio_overviews() -> list[PortfolioOverview]:
                 latest_metric_run=latest_metric_run_obj,
                 run_entry_list=run_entry_list,
                 stale_pod_list=_stale_pod_list(latest_metric_run_obj, latest_by_name_dict),
+                config_status_str=_config_status_str(portfolio_entry_obj, latest_metric_run_obj),
             )
         )
     return overview_list
+
+
+def _run_owned_bool(portfolio_entry_obj, run_obj) -> bool:
+    source_str = run_obj.metadata_dict.get("source_config_path") or run_obj.metadata_dict.get("source_config_path_str")
+    return not source_str or PureWindowsPath(str(source_str)).name.casefold() == PureWindowsPath(portfolio_entry_obj.rel_path_str).name.casefold()
+
+
+def _config_status_str(portfolio_entry_obj, run_obj) -> str:
+    try:
+        _config_path, config_dict, _revision_str = portfolio_config.read_config_tuple(portfolio_entry_obj.rel_path_str)
+        return portfolio_config.run_config_status_str(config_dict, run_obj)
+    except (OSError, ValueError, TypeError):
+        return "Config unverified"

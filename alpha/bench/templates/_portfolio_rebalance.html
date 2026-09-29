@@ -1,0 +1,41 @@
+<div class="panel builder-head">
+  <div class="builder-field">
+    <label for="rebalance_frequency">Rebalance frequency</label>
+    <select id="rebalance_frequency" name="rebalance_frequency">
+      {% for key, label in [('', 'None — let weights drift'), ('monthly', 'Monthly'), ('quarterly', 'Quarterly'), ('annually', 'Annually')] %}
+      <option value="{{ key }}" {{ 'selected' if (rebalance_frequency_str|default('')) == key }}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="builder-field">
+    <label for="rebalance_policy">Rebalance target</label>
+    <select id="rebalance_policy" name="rebalance_policy">
+      <option value="fixed" {{ 'selected' if (rebalance_policy_str|default('fixed')) == 'fixed' }}>Configured weights</option>
+      {% if manager_bool|default(true) %}
+      <option value="equal" {{ 'selected' if (rebalance_policy_str|default('fixed')) == 'equal' }}>Equal weights</option>
+      <option value="inverse_volatility" {{ 'selected' if (rebalance_policy_str|default('fixed')) in ['inverse_volatility', 'risk_parity'] }}>Inverse volatility</option>
+      {% endif %}
+    </select>
+  </div>
+  {% if manager_bool|default(true) %}
+  <div class="builder-field" id="rebalance-lookback-field">
+    <label for="rebalance_lookback">Volatility lookback (completed days)</label>
+    <input id="rebalance_lookback" name="rebalance_lookback" type="number" min="2" step="1" value="{{ rebalance_lookback_int|default(60, true) }}">
+  </div>
+  {% endif %}
+</div>
+<p class="table-caption">Portfolio-level simulation: redistribute prior-close capital on the first trading day of each period. Pod trading schedules stay unchanged. Additional trades, costs and execution required to transfer capital are not simulated. Inverse volatility uses only completed days and skips dates with insufficient history.</p>
+<script>
+  (function () {
+    const frequencyEl = document.getElementById('rebalance_frequency');
+    const policyEl = document.getElementById('rebalance_policy');
+    const lookbackEl = document.getElementById('rebalance-lookback-field');
+    function refresh() {
+      policyEl.disabled = !frequencyEl.value;
+      if (lookbackEl) lookbackEl.classList.toggle('hidden', !frequencyEl.value || policyEl.value !== 'inverse_volatility');
+    }
+    frequencyEl.addEventListener('change', refresh);
+    policyEl.addEventListener('change', refresh);
+    refresh();
+  })();
+</script>

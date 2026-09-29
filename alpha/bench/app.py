@@ -43,6 +43,7 @@ from alpha.bench import (
     knowledge,
     portfolio_builder,
     portfolio_compare,
+    portfolio_config,
     portfolio_overview,
     runs,
 )
@@ -500,6 +501,9 @@ def create_app(
             last_audit_str=last_audit_str,
         )
 
+    from alpha.bench.portfolio_pages import register_routes
+    register_routes(flask_app_obj, _csrf_failure_response_fn)
+
     @flask_app_obj.route("/portfolios")
     def portfolios_page_fn() -> str:
         overview_list = portfolio_overview.list_portfolio_overviews()
@@ -605,6 +609,10 @@ def create_app(
             backtest_start_date_str,
             end_date_str,
         ) = _submitted_selection_tuple()
+        try:
+            rebalance_dict = portfolio_config.rebalance_dict_from_form(request.form)
+        except (ValueError, TypeError) as exception_obj:
+            abort(400, description=str(exception_obj))
         diagnostics_obj = portfolio_builder.analyze_selection(
             selection_pair_list=selection_pair_list,
             name_str=name_str,
@@ -612,6 +620,7 @@ def create_app(
             benchmark_override_str=benchmark_str or None,
             backtest_start_date_str=backtest_start_date_str,
             end_date_str=end_date_str or None,
+            rebalance_dict=rebalance_dict,
         )
         return render_template(
             "portfolio_review.html",
@@ -622,16 +631,18 @@ def create_app(
             backtest_start_date_str=backtest_start_date_str,
             end_date_str=end_date_str,
             selection_pair_list=selection_pair_list,
+            rebalance_frequency_str=(rebalance_dict or {}).get("frequency_str", ""),
+            rebalance_policy_str=(rebalance_dict or {}).get("policy_str", "fixed"),
+            rebalance_lookback_int=(rebalance_dict or {}).get("lookback_day_int", 60),
         )
 
     @flask_app_obj.route("/api/portfolios/new", methods=["POST"])
     def portfolio_create_api_fn() -> Response:
         """Write the reviewed config into ``portfolios/``.
 
-        The only Bench route that writes to the repo. It re-derives the YAML
-        from the submitted selection rather than trusting posted text, refuses
-        to write outside ``portfolios/``, and will not clobber an existing file
-        unless the operator explicitly said so.
+        Re-derive the YAML from the selection rather than trusting posted
+        text, validate with the runner, and create exclusively inside
+        ``portfolios/``. Existing configs use the reviewed Edit route.
         """
         csrf_failure_obj = _csrf_failure_response_fn()
         if csrf_failure_obj is not None:
@@ -645,6 +656,10 @@ def create_app(
             backtest_start_date_str,
             end_date_str,
         ) = _submitted_selection_tuple()
+        try:
+            rebalance_dict = portfolio_config.rebalance_dict_from_form(request.form)
+        except (ValueError, TypeError) as exception_obj:
+            abort(400, description=str(exception_obj))
         diagnostics_obj = portfolio_builder.analyze_selection(
             selection_pair_list=selection_pair_list,
             name_str=name_str,
@@ -652,6 +667,7 @@ def create_app(
             benchmark_override_str=benchmark_str or None,
             backtest_start_date_str=backtest_start_date_str,
             end_date_str=end_date_str or None,
+            rebalance_dict=rebalance_dict,
         )
         if diagnostics_obj.has_block_bool:
             abort(400, description="This selection cannot be written; see the review page.")
@@ -659,15 +675,21 @@ def create_app(
         filename_str = (
             request.form.get("filename") or diagnostics_obj.suggested_filename_str
         ).strip()
-        overwrite_bool = request.form.get("overwrite") == "1"
+        if request.form.get("overwrite") == "1":
+            abort(409, description="Use Edit on the existing portfolio to review and save changes.")
         try:
-            portfolio_builder.write_portfolio_yaml(
-                filename_str=filename_str,
-                yaml_text_str=diagnostics_obj.yaml_text_str,
-                overwrite_bool=overwrite_bool,
-            )
+            with portfolio_config.MUTATION_LOCK:
+                import yaml
+                portfolio_config.validate_config(
+                    yaml.safe_load(diagnostics_obj.yaml_text_str),
+                    portfolio_builder.resolve_write_path(filename_str),
+                )
+                portfolio_builder.write_portfolio_yaml(
+                    filename_str=filename_str,
+                    yaml_text_str=diagnostics_obj.yaml_text_str,
+                )
         except FileExistsError as exception_obj:
-            abort(409, description=f"{exception_obj} Tick overwrite to replace it.")
+            abort(409, description=f"{exception_obj} Use Edit on the existing portfolio.")
         except ValueError as exception_obj:
             abort(400, description=str(exception_obj))
         return redirect(url_for("portfolios_page_fn"))
@@ -939,24 +961,21 @@ def create_app(
             return csrf_failure_obj
 
         config_rel_path_str = request.form.get("config_rel_path", "")
-        portfolio_entry_obj = catalog.get_portfolio_by_rel_path(config_rel_path_str)
-        if portfolio_entry_obj is None:
-            abort(400, description="Unknown portfolio config.")
-
-        # The two YAML schemas are built by two different scripts — route by schema.
-        script_path = (
-            RUN_PORTFOLIO_MANAGER_SCRIPT_PATH
-            if portfolio_entry_obj.schema_str == catalog.SCHEMA_MANAGER_STR
-            else RUN_PORTFOLIO_SCRIPT_PATH
-        )
-        command_list = [
-            sys.executable,
-            str(script_path),
-            str(REPO_ROOT_PATH / portfolio_entry_obj.rel_path_str),
-        ]
-        label_str = f"Portfolio · {portfolio_entry_obj.config_name_str}"
-        job_manager = flask_app_obj.config["job_manager_obj"]
-        job_manager.submit(label_str, portfolio_entry_obj.name_str, "portfolio", command_list)
+        with portfolio_config.MUTATION_LOCK:
+            portfolio_entry_obj = catalog.get_portfolio_by_rel_path(config_rel_path_str)
+            if portfolio_entry_obj is None:
+                abort(400, description="Unknown portfolio config.")
+            # Submission and config mutations share the lock: no edit/delete
+            # can pass the idle check while a job is being queued.
+            script_path = (
+                RUN_PORTFOLIO_MANAGER_SCRIPT_PATH
+                if portfolio_entry_obj.schema_str == catalog.SCHEMA_MANAGER_STR
+                else RUN_PORTFOLIO_SCRIPT_PATH
+            )
+            command_list = [sys.executable, str(script_path), str(REPO_ROOT_PATH / portfolio_entry_obj.rel_path_str)]
+            label_str = f"Portfolio · {portfolio_entry_obj.config_name_str}"
+            job_manager = flask_app_obj.config["job_manager_obj"]
+            job_manager.submit(label_str, portfolio_entry_obj.name_str, "portfolio", command_list)
         return redirect(url_for("jobs_page_fn"))
 
     # ── artifacts ────────────────────────────────────────────────────────
