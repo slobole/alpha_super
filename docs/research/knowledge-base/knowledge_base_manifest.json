@@ -276,6 +276,36 @@
       "sha256": "7e0f23a30adb25fc964c469e91f1acc0d993d1eff8847544e0dc716f33bf700e"
     },
     {
+      "bytes": 89567,
+      "path": "assets/gics_residual_reversal_momentum_study/01-h0_sector_etf_equity.png",
+      "sha256": "9a5d44eda10dde3b2c11617aaa7f30970b79d44c648d6b3ed39d82b2cdaf0f81"
+    },
+    {
+      "bytes": 49840,
+      "path": "assets/gics_residual_reversal_momentum_study/02-books_sharpe_by_period.png",
+      "sha256": "743379bca8f85c4d1967432fd8f3fa6a8efb402149590a043550ea6967e49319"
+    },
+    {
+      "bytes": 234694,
+      "path": "assets/growth_inflation_sector_timing_study/01-equity_drawdown_relative.png",
+      "sha256": "cbc579337869924343f6fff85efa44a85232dd24ba024704424872353bfe4a9b"
+    },
+    {
+      "bytes": 96876,
+      "path": "assets/growth_inflation_sector_timing_study/02-post_publication_oos.png",
+      "sha256": "12e46e7ae5800c467ba1f84b17d4225c3e1509115e9270cb9385b674f190a1b9"
+    },
+    {
+      "bytes": 200134,
+      "path": "assets/hgt_strategy6_atr_mean_reversion_audit/01-equity_drawdown.png",
+      "sha256": "20eb4e080f4ef3ebcad408a31a75b19070029bf20acaa8e2bbdd1a6133ad615d"
+    },
+    {
+      "bytes": 58702,
+      "path": "assets/hgt_strategy6_atr_mean_reversion_audit/02-claim_vs_reproduction.png",
+      "sha256": "0c3ec8e105107ab49199faf64b93e771caf6a881fea225a4106ab245f57ffc71"
+    },
+    {
       "bytes": 344281,
       "path": "assets/hpi_more_bets_cvar_study/01-entry_timing_2x2_equity_drawdown.png",
       "sha256": "376e54139e7cd2bb3cf27a0fdbd5779bd6facf7f515a357d96559879a987333f"
@@ -336,6 +366,11 @@
       "sha256": "309de0453d59926eb8b5e5875a5cd838253806a93d807948fbeb582fc77532bd"
     },
     {
+      "bytes": 327071,
+      "path": "assets/inflation_compass_adaptive_growth_study/01-equity_and_drawdown.png",
+      "sha256": "d6ca7cb64ba6a6a795abce3fdbb9e620e003d5619b0c6edaeb40ff1d7d0a37e0"
+    },
+    {
       "bytes": 230242,
       "path": "assets/inflation_compass_model_study/01-equity_and_drawdown.png",
       "sha256": "086695a3d6c951ec74b6176401244a37e85474f11fcb8f6574c1903ee5a80e15"
@@ -344,6 +379,11 @@
       "bytes": 128489,
       "path": "assets/inflation_compass_model_study/02-robustness_and_capacity.png",
       "sha256": "43be7f69d65a2e794fda37aa15d89277ebe521b7f8acda6b5d7895901534f8e3"
+    },
+    {
+      "bytes": 359920,
+      "path": "assets/inflation_compass_qqq_blend_study/01-qqq_blend_equity_and_drawdown.png",
+      "sha256": "35f769251278c41f0f5c66a2e69676d97f87767e2354bf13f40d93df1fdc5627"
     },
     {
       "bytes": 169570,
@@ -441,6 +481,16 @@
       "sha256": "f0a4d52df7b538d6302c329699f4e8c7d219ddc9e16d52d8854482ea8b7d1ead"
     },
     {
+      "bytes": 127721,
+      "path": "assets/momentum_trend_universe_search/01-equity_curves.png",
+      "sha256": "77ed758b83c7c66c5592cffbe389c4e01d8b99a4361c4ec3677c1ef8ed2e6af6"
+    },
+    {
+      "bytes": 31824,
+      "path": "assets/momentum_trend_universe_search/02-book_sharpe_by_period.png",
+      "sha256": "d6fe3e94f09c9472aaa0bc5e995bf4ef192a12301fb32b74f7094bfd6b5707b3"
+    },
+    {
       "bytes": 79805,
       "path": "assets/ndx_variance_ratio_overlay_study/01-primary_equity.png",
       "sha256": "759ca5ea17a81fdeb16fea6fa2ba1832a43d8d69faf099caa401fad5f2aee317"
@@ -491,6 +541,16 @@
       "sha256": "b29ed1699c0839c5b65c2f696942174aaf371b588abf5ac4b3895ecfcd2fb92c"
     },
     {
+      "bytes": 408124,
+      "path": "assets/pput_spx_sizing_diagnostic/01-equity_drawdown_5bps.png",
+      "sha256": "97ca0dda71c1c45113abf62aa132caba9b249e0338e44bd931c64d18e42c6c61"
+    },
+    {
+      "bytes": 83409,
+      "path": "assets/pput_spx_sizing_diagnostic/02-crisis_returns_5bps.png",
+      "sha256": "ca6887b3fb2a8ee3c461a7c188dae86b858b0ffa7a782b9e8f3493fc0357eb6a"
+    },
+    {
       "bytes": 132004,
       "path": "assets/practical_factor_momentum_research/01-central_equity.png",
       "sha256": "6d673b988b05be9ff640cb831abaab77f65e74b4246f715cfbea7b994dda6243"
@@ -519,6 +579,36 @@
       "bytes": 41620,
       "path": "assets/price_path_convexity_5d_liq30_long_short/02-capacity_participation.png",
       "sha256": "a4b142b824b6288e5762707385dc28ac6588547e49cab31a746e8535185b34b4"
+    },
+    {
+      "bytes": 363280,
+      "path": "assets/price_path_convexity_multi_horizon_smoke/01-primary_equity_drawdown.png",
+      "sha256": "599f6b06c54ad03fb289e3b1c852f0243c549864cfc7041eecd66a18287c3d23"
+    },
+    {
+      "bytes": 180906,
+      "path": "assets/price_path_convexity_multi_horizon_smoke/02-primary_monotonicity_curve.png",
+      "sha256": "dc7f28d6a1d1a512e4fbbf719a3469075ebbc23e0d0e18a78ea23fa091885ae8"
+    },
+    {
+      "bytes": 475530,
+      "path": "assets/price_path_convexity_multi_horizon_study/01-primary_equity_drawdown.png",
+      "sha256": "8c54d1d0f23f90aa7dce8ad697c4f67514a48c6a4535d77ac290c971db6d3898"
+    },
+    {
+      "bytes": 147820,
+      "path": "assets/price_path_convexity_multi_horizon_study/02-primary_monotonicity_curve.png",
+      "sha256": "ea97118d4613a186c018fecc421d131b2e676d8e844263192987c06282ec23fe"
+    },
+    {
+      "bytes": 208877,
+      "path": "assets/price_path_convexity_signal_study/01-primary_long_short_equity.png",
+      "sha256": "94cc84666f5a9f1e15f7951a1b58292164c086735096f285bcae070ef5d52c6c"
+    },
+    {
+      "bytes": 155767,
+      "path": "assets/price_path_convexity_signal_study/02-primary_quintile_curve.png",
+      "sha256": "ca947e98d01bf66cec61dea76a91c05a80aa01bb3fac5a057c2f85ffbab225c0"
     },
     {
       "bytes": 322900,
@@ -581,6 +671,16 @@
       "sha256": "2204c63e46c5d067ec0f68446293ffacdfdf14dfe1ef1e6c47b9f2961bdbb3b7"
     },
     {
+      "bytes": 266868,
+      "path": "assets/quick5_vol_normalized_signal_positioning_study/01-equity_drawdown.png",
+      "sha256": "743cf08ee198571e7f604a26b43ac72f8b1b4485aea044b08d592944402facd7"
+    },
+    {
+      "bytes": 53645,
+      "path": "assets/quick5_vol_normalized_signal_positioning_study/02-ic_and_risk.png",
+      "sha256": "3c0e44b7431d34f907633e28234d0f49314869795522335b4b680d022cb4ab06"
+    },
+    {
       "bytes": 125356,
       "path": "assets/rebalancing_front_run_signal_study/01-equity_curve.png",
       "sha256": "04a82454ab6372964cc40d20d12ba9dfc6b4b32612d0a238bbcdb106324b2f51"
@@ -621,6 +721,116 @@
       "sha256": "2789c251850dec3669e2ae34d56bb2ef4efef416cf8a4b52f3ece9d41673a263"
     },
     {
+      "bytes": 336191,
+      "path": "assets/setupalpha_etf_rotation_monthly_audit/01-equity_drawdown_vs_vendor.png",
+      "sha256": "38b3fa85c4fcd4690b87581dac757e7a4ebd3b6de646f6d4e91e216369b87b9f"
+    },
+    {
+      "bytes": 66399,
+      "path": "assets/setupalpha_etf_rotation_monthly_audit/02-drawdown_sources.png",
+      "sha256": "155b6a1e9fdfffead591e9af72ffd86e22ea9c46a0eb8fd65afa94bbb08f1ed0"
+    },
+    {
+      "bytes": 215985,
+      "path": "assets/setupalpha_ndx_low_drawdown_mr_audit/01-equity_drawdown_vs_vendor.png",
+      "sha256": "e030712a2e8c2109542fa70fee8d1a13825a41457a7316bcff6709668b969c9b"
+    },
+    {
+      "bytes": 90993,
+      "path": "assets/setupalpha_ndx_low_drawdown_mr_audit/02-family_vs_vendor_claim.png",
+      "sha256": "b0397fe67c197db2a7ef2a3760613ec3931f21d10ce03938200b5d09f096e6e3"
+    },
+    {
+      "bytes": 211987,
+      "path": "assets/setupalpha_ndx_mean_reversion_audit/01-equity_drawdown_vs_vendor.png",
+      "sha256": "81e867cdd1f06a28016f2af0e751074587dfd95e089432628d67bda026b48a5d"
+    },
+    {
+      "bytes": 98828,
+      "path": "assets/setupalpha_ndx_mean_reversion_audit/02-event_edge_and_timing.png",
+      "sha256": "354ace30648cf9effe469251e731eb3c282d8211a1b5403b2299c68b3cdac9a9"
+    },
+    {
+      "bytes": 282701,
+      "path": "assets/setupalpha_ndx_momentum_rotation_audit/01-equity_drawdown_vs_vendor.png",
+      "sha256": "e0061a5e1951f35b82478afae2a82301973ef3280cc6b11b739748c173b24db8"
+    },
+    {
+      "bytes": 138327,
+      "path": "assets/setupalpha_ndx_momentum_rotation_audit/02-cost_capacity_timing.png",
+      "sha256": "16aec6f2f4b9ca812893faf3abcef2389383f6164ced1bf85a24a3505ee94b4a"
+    },
+    {
+      "bytes": 274991,
+      "path": "assets/setupalpha_r1000_parabolic_short_audit/01-equity_drawdown_vs_vendor.png",
+      "sha256": "e120e2acf89efe6ef87d06b92da0c1bf8c3ba9ead6d5b8de616cd38896c65de0"
+    },
+    {
+      "bytes": 122923,
+      "path": "assets/setupalpha_r1000_parabolic_short_audit/02-cost_and_capacity.png",
+      "sha256": "f5ec2c90eca7978739e3fb3758efdd1722d6a0ed3df599f40ad12e17932e400d"
+    },
+    {
+      "bytes": 283885,
+      "path": "assets/setupalpha_r3000_ath_pullback_audit/01-equity_drawdown_vs_vendor.png",
+      "sha256": "9aa86d0680733bae07c6a2a30568469861154d6a54e089df0f4774d7ab95ff7f"
+    },
+    {
+      "bytes": 66099,
+      "path": "assets/setupalpha_r3000_ath_pullback_audit/02-cost_and_capacity.png",
+      "sha256": "890a1e62a957ea132c416214d3d6e779082bdc110d6e4b122c923b12eeead0d3"
+    },
+    {
+      "bytes": 361497,
+      "path": "assets/setupalpha_sp500_connors_alvarez_audit/01-equity_drawdown_vs_vendor.png",
+      "sha256": "71c92f7422280ba12141de825dc56fd0196aac1d8e435035be26e8593fa9bd4c"
+    },
+    {
+      "bytes": 88134,
+      "path": "assets/setupalpha_sp500_connors_alvarez_audit/02-family_vs_vendor_claim.png",
+      "sha256": "0614f8a6aa75fc0ccead15bdf15ebe169b33c52ec215c1d39fb2b11260e44dc4"
+    },
+    {
+      "bytes": 371485,
+      "path": "assets/setupalpha_sp500_modern_breakout_audit/01-equity_drawdown_vs_vendor.png",
+      "sha256": "e2ca23ab1fbf2018156ecd7966331071fe00ca3be7faa32f0be2b17c03ca5d37"
+    },
+    {
+      "bytes": 96650,
+      "path": "assets/setupalpha_sp500_modern_breakout_audit/02-cost_and_capacity.png",
+      "sha256": "f51f4adf582af95adeab9cb5475485d1a577523dab71343120d5c557cacbc824"
+    },
+    {
+      "bytes": 286439,
+      "path": "assets/setupalpha_sp500_mr2025_audit/01-equity_drawdown_vs_vendor.png",
+      "sha256": "68ee9d980316f7ffbbe816999af58adfd1a1628b32573bedf8a390c5620cf75b"
+    },
+    {
+      "bytes": 97157,
+      "path": "assets/setupalpha_sp500_mr2025_audit/02-family_vs_vendor_claim.png",
+      "sha256": "ea78324eb85d5bfc457beaeda0f9a750aec41c07d96251a7c13f2630dbef5e55"
+    },
+    {
+      "bytes": 294706,
+      "path": "assets/setupalpha_sp500_rate_of_decline_audit/01-equity_drawdown_vs_vendor.png",
+      "sha256": "439e483f336b3bed01b0e3a8e0d2a454f25eb5681607356bc7dbc1dded229131"
+    },
+    {
+      "bytes": 82428,
+      "path": "assets/setupalpha_sp500_rate_of_decline_audit/02-family_vs_vendor_claim.png",
+      "sha256": "4389ea29fdb6b1dece9e5dd1c3c3a98defe9449a7719de38bc97fdf629a5d76c"
+    },
+    {
+      "bytes": 320040,
+      "path": "assets/setupalpha_sp500_weekly_pullback_audit/01-equity_drawdown_vs_vendor.png",
+      "sha256": "3b64db64ac7f3abb335cad14991553be73a607719c8e983431572721f74729c3"
+    },
+    {
+      "bytes": 74372,
+      "path": "assets/setupalpha_sp500_weekly_pullback_audit/02-family_vs_vendor_claim.png",
+      "sha256": "688d2374ca5f5c12330fffbc6632e3d2e07393c32499f14ddda6a54f526ab0c8"
+    },
+    {
       "bytes": 201286,
       "path": "assets/shorting_leveraged_etfs_empirical_study/01-common_period_equity.png",
       "sha256": "7b28092bc359b4c9cafdc10fb418bebcd49918cb08c959d89036cc72228f1499"
@@ -659,6 +869,16 @@
       "bytes": 78184,
       "path": "assets/spy_rsi20_short_only_followup/02-cost_sensitivity_full.png",
       "sha256": "2094e712a8bee6742076e5ec218e6f2d4c262c15cce509a3f5775e531ddca990"
+    },
+    {
+      "bytes": 328804,
+      "path": "assets/spy_rsi20_vixy_tail_risk_control_study/01-equity_drawdown_10bps.png",
+      "sha256": "4217ef86f7967acdad5503dc833a6fc26cfee2b2fc150ecf451cbbaa61889099"
+    },
+    {
+      "bytes": 82105,
+      "path": "assets/spy_rsi20_vixy_tail_risk_control_study/02-crisis_attribution_10bps.png",
+      "sha256": "9bf1ad1348994cfeb604ab2f7c24564cf4f1e96482cf6a5ff9e4579ba11007dd"
     },
     {
       "bytes": 216482,
@@ -951,6 +1171,16 @@
       "sha256": "1d7135e5ed7a81c2317c5e0c463528ad674c222d7b16557c57bf587ffd18ba4d"
     },
     {
+      "bytes": 102858,
+      "path": "assets/varadi_adaptive_momentum_study/01-spy_equity_executable.png",
+      "sha256": "53dc00577fa25383140e0eb2322098bea92541b9a55bba615148b1341e1d5a4e"
+    },
+    {
+      "bytes": 111887,
+      "path": "assets/varadi_adaptive_momentum_study/02-spy_equity_oos.png",
+      "sha256": "f36f8d38557fdf7061c2ab11992e1c6a84c6682b190b39b96ca0e5472368bce4"
+    },
+    {
       "bytes": 184837,
       "path": "assets/varadi_quant_etf_rotation_study/01-discovery_equity_drawdown.png",
       "sha256": "56f6f6022a17d41509f419610dddd22d98d3229dde5fb6ce50482243e61a1a4f"
@@ -1021,6 +1251,26 @@
       "sha256": "edad7fa4070e63285846a3ffa911f8b48fcb1223f7b825d014e37e61621825eb"
     },
     {
+      "bytes": 202815,
+      "path": "assets/vardi_core5_robustness_qualification_study/01-equity_comparison.png",
+      "sha256": "09daba8127d01d25986d143982aba3de4999ebfd373d8c34ef31fe8fb0753fe8"
+    },
+    {
+      "bytes": 233591,
+      "path": "assets/vardi_core5_robustness_qualification_study/02-drawdown_comparison.png",
+      "sha256": "a5cff59171af87bd869b1244c4d4d99e897968767d15f5ce145eb7d944906ea3"
+    },
+    {
+      "bytes": 397176,
+      "path": "assets/vardi_core5_sleeve_drift_rebalance_study/01-equity_drawdown_comparison.png",
+      "sha256": "b4f0c42aa4f23a586902645f468e7040cfa37861006f5261b647ffdb54885009"
+    },
+    {
+      "bytes": 264206,
+      "path": "assets/vardi_core5_sleeve_drift_rebalance_study/02-sleeve_weight_drift.png",
+      "sha256": "b392667bb0e776e715fa143ff6bb93d742fb089f276f9e2dfbea413e30167e8c"
+    },
+    {
       "bytes": 281665,
       "path": "assets/vardi_core5_spy_qqq_early_sample_study/01-equity_and_drawdown.png",
       "sha256": "d7b176c7b6cf4d7aad6871d8233aff0e9045284e3223518a19fab74a1ffdfc14"
@@ -1061,9 +1311,29 @@
       "sha256": "342e4474ee32b5dd7bafa8e631c668c694b22b5d58f55dfd34e26fe162a73fbf"
     },
     {
-      "bytes": 125963,
+      "bytes": 520619,
+      "path": "assets/vardi_spy_dbc_trend_mean_reversion_diagnostic_study/01-stateful_equity_drawdown.png",
+      "sha256": "0405562636aac65e131bff676aac228b994bf94dab0d2572304a6f497accb1ad"
+    },
+    {
+      "bytes": 59625,
+      "path": "assets/vardi_spy_dbc_trend_mean_reversion_diagnostic_study/02-episode_return_distributions.png",
+      "sha256": "a9049493754e87a2ac36a638ef8c915513c68a880bb9828f3008aaa4e9af02bd"
+    },
+    {
+      "bytes": 38415,
+      "path": "assets/vix_gated_etf_industry_reversal_study/01-ic_by_vix.png",
+      "sha256": "9f387b30831d971035e6743f29cecc98554c29936fa718fdc0d703b3d9e5ca2d"
+    },
+    {
+      "bytes": 49063,
+      "path": "assets/vix_gated_etf_industry_reversal_study/02-sharpe_by_period.png",
+      "sha256": "766a38d865c690e9b0d602b90cddd533bdb8913160b434b44ebd28955050a037"
+    },
+    {
+      "bytes": 151073,
       "path": "features.md",
-      "sha256": "4cd356b0683e01077be8cc86bc9db621ad97925863e3f6b4dc28ee5d41bed3d3"
+      "sha256": "f474f62c12dee2b69bd8fb14e4c2327ca3abef1fa1c03eb6eb7bd17f64735f4c"
     },
     {
       "bytes": 2639,
@@ -1071,24 +1341,24 @@
       "sha256": "7eeaa19f7fa717dd8dfb5c6eeb22459c1f5da3a75ba1a15da4aff6ac45a5afb5"
     },
     {
-      "bytes": 9996,
+      "bytes": 12410,
       "path": "index.md",
-      "sha256": "9bbb9f3f24acf9dc0fab27aa64f80898620abe5a10ae232a5c5ae77bb114e2ea"
+      "sha256": "fcb9174feb3e4eb9b20bac1baad362ac0a663e36017a96ea21a9ee481b9effa4"
     },
     {
-      "bytes": 1745515,
+      "bytes": 2053578,
       "path": "knowledge_base_registry.json",
-      "sha256": "2f09804b5981e1cf35733e7f38d10ae6539e62583959f8540f0f0e7c5e52fa29"
+      "sha256": "81a401e50e7f1545d6b0ef51c9b479d15de6f78584a5bdd921e6d7735c1f9c84"
     },
     {
-      "bytes": 4475,
+      "bytes": 1144,
       "path": "needs-audit.md",
-      "sha256": "fafd016191504fddb9bad7fefcf6c35b04241f4eeb8fad0d862c75ead29501d6"
+      "sha256": "2be3964878e488a5d2c30e77f74ad65d699c60773d3e2c61cdbb7c02e63f1e14"
     },
     {
-      "bytes": 94349,
+      "bytes": 110014,
       "path": "sources.md",
-      "sha256": "86be375be7838fc48d29a15e647740662e4514accd7aa8931a88be7a410ea054"
+      "sha256": "03d13c12d9bb8742b1b922d08d65fe23f0a3106ebafeeda01d3b4314605901b9"
     },
     {
       "bytes": 8197,
@@ -1226,9 +1496,24 @@
       "sha256": "30201749d30297c5d2bb36b8ad0e4ed5a5165c15774140c85a43a92e3a65ec0a"
     },
     {
-      "bytes": 8111,
+      "bytes": 11403,
+      "path": "studies/gics_residual_reversal_momentum_study.md",
+      "sha256": "a6a48575f6e91dd2b778713a14331ba5e0f89b9bb306d930ccd8e6a75de8c52a"
+    },
+    {
+      "bytes": 9451,
+      "path": "studies/growth_inflation_sector_timing_study.md",
+      "sha256": "9777ddcf87a6dce925d7a46800593a17b58b5a5b5c886f7f21f93e2fc46a7cb9"
+    },
+    {
+      "bytes": 11046,
+      "path": "studies/hgt_strategy6_atr_mean_reversion_audit.md",
+      "sha256": "4420f47b7d6d20d8fa8e97c90d08ad964814456921fff06ab122b99e609df8ad"
+    },
+    {
+      "bytes": 8351,
       "path": "studies/hpi_more_bets_cvar_study.md",
-      "sha256": "a408f2942225db88a5dfebe7da25992575a39f084bc4267b82472360fc79ae1e"
+      "sha256": "98d0a7623c8457fa46065b8a26a3c18451e9691b64aea67ee7ff5b3230b36dc6"
     },
     {
       "bytes": 7621,
@@ -1256,9 +1541,19 @@
       "sha256": "dd8c7d62df3d93369b02daccf983e0cd743e3347f53927dfa251d408aaefbd6a"
     },
     {
+      "bytes": 5637,
+      "path": "studies/inflation_compass_adaptive_growth_study.md",
+      "sha256": "ead964113db5ebca0885ad243a5617c3f26805042e2c0aa80ff227f2f0e0ba84"
+    },
+    {
       "bytes": 10237,
       "path": "studies/inflation_compass_model_study.md",
       "sha256": "fc3ec352b8676ce004c5313489ba7a53a31493832a2e30209921f5a12b310f41"
+    },
+    {
+      "bytes": 5747,
+      "path": "studies/inflation_compass_qqq_blend_study.md",
+      "sha256": "c5a194c40cba3a8de32fdc15b0bae8889351b4b89e27fff3ac5d78ea688c6774"
     },
     {
       "bytes": 5931,
@@ -1311,6 +1606,11 @@
       "sha256": "1bb9540e8377644982d95eb398bc5fb085b81a59cbeb83772f314c994329e34d"
     },
     {
+      "bytes": 11094,
+      "path": "studies/momentum_trend_universe_search.md",
+      "sha256": "d9a55b4dbf76c0697cbb7d74f2316d7f02b1861a49af01d74a1d4558e65469de"
+    },
+    {
       "bytes": 11816,
       "path": "studies/ndx_variance_ratio_overlay_study.md",
       "sha256": "70e5d3cdb764b22991773a4b53af6b6bf51364d0ffab00065cff6e491908d88d"
@@ -1336,6 +1636,11 @@
       "sha256": "c18de5f64cb16979a0a5ee900adc69849b806bedfc934e9fd3a5dfee1ce5d919"
     },
     {
+      "bytes": 5171,
+      "path": "studies/pput_spx_sizing_diagnostic.md",
+      "sha256": "350f1075a39979aa3f5ea9ac03610cc774b78dc86aed67cccb5b132225f1ae30"
+    },
+    {
       "bytes": 6918,
       "path": "studies/practical_factor_momentum_research.md",
       "sha256": "5e3891efdb42d039305f9e6551f6880d4338c0258a43f6994a70cea60a82a0d5"
@@ -1349,6 +1654,21 @@
       "bytes": 9762,
       "path": "studies/price_path_convexity_5d_liq30_long_short.md",
       "sha256": "732ed739ef8a4b96a4a0e7880234e771541a64eac812821a5d40e6e2070abc15"
+    },
+    {
+      "bytes": 5583,
+      "path": "studies/price_path_convexity_multi_horizon_smoke.md",
+      "sha256": "ecd6e196c9ebba246b321648dc1ba65f9d1eb07d3b1d124d4b3e1a856bbb4006"
+    },
+    {
+      "bytes": 5985,
+      "path": "studies/price_path_convexity_multi_horizon_study.md",
+      "sha256": "ac01ad6180199977235e5079a2b09162dede869130477e24aff3e310237b7e89"
+    },
+    {
+      "bytes": 5502,
+      "path": "studies/price_path_convexity_signal_study.md",
+      "sha256": "90c5e872e6ff01b2c7a2e8263876d33b32e8a5db439cd1587db14fd37425ca7f"
     },
     {
       "bytes": 7714,
@@ -1381,6 +1701,11 @@
       "sha256": "b6558b8d13aba081791f2fb58f2f4a29b3b9fb7614044a6695d21951f7ccb2bb"
     },
     {
+      "bytes": 8064,
+      "path": "studies/quick5_vol_normalized_signal_positioning_study.md",
+      "sha256": "940e1487d285aaca06eb470e475be0168da7122a3693854de59b5c77cce1037b"
+    },
+    {
       "bytes": 12579,
       "path": "studies/rebalancing_front_run_signal_study.md",
       "sha256": "d1d6b912fdd6155d475539037b80b05f0c3c20af96471ffc7161c6cc9fb4ea8a"
@@ -1401,6 +1726,61 @@
       "sha256": "49e4f59f10fdbe933a4dba8090426edfbf8bc74dec5eed86113e6356ed0bdb8a"
     },
     {
+      "bytes": 9341,
+      "path": "studies/setupalpha_etf_rotation_monthly_audit.md",
+      "sha256": "1a5f8faafdd211a546bad2d12e8c77f59ef70b0abe29bf6ae4f7ff04a3edac6a"
+    },
+    {
+      "bytes": 10364,
+      "path": "studies/setupalpha_ndx_low_drawdown_mr_audit.md",
+      "sha256": "cd3ea9d260cc8241a65b753b4b41d8d0e1598e93dca46a5ee160bbc0407a0b5a"
+    },
+    {
+      "bytes": 8638,
+      "path": "studies/setupalpha_ndx_mean_reversion_audit.md",
+      "sha256": "d80fd7569d202a856ec80e2056ff1a778fdc19dfd2cbbb8428cbe02ad53d619d"
+    },
+    {
+      "bytes": 9038,
+      "path": "studies/setupalpha_ndx_momentum_rotation_audit.md",
+      "sha256": "467eb8740b59f785000f52eecb9fa24318d00e6c60ec5737951c849773ff3549"
+    },
+    {
+      "bytes": 10354,
+      "path": "studies/setupalpha_r1000_parabolic_short_audit.md",
+      "sha256": "7e4d26f9f5e6da281c486a5a9c00a3fd03eec8f18c410cfd077ba2f8a3bc07eb"
+    },
+    {
+      "bytes": 10263,
+      "path": "studies/setupalpha_r3000_ath_pullback_audit.md",
+      "sha256": "ddb0ab1062870a6e201b030a2b9bf904eb3e5a6ff66f1f720b7c7f162c81b1b9"
+    },
+    {
+      "bytes": 9056,
+      "path": "studies/setupalpha_sp500_connors_alvarez_audit.md",
+      "sha256": "72ac7de295f016b5e2b0f04b23af019583f9510957f34078bce97f8165f00b61"
+    },
+    {
+      "bytes": 10365,
+      "path": "studies/setupalpha_sp500_modern_breakout_audit.md",
+      "sha256": "28234a8d7700ebdd55842f6faac15a008c8497a3e9ddd2f8c39137ad9c5ba8b8"
+    },
+    {
+      "bytes": 8295,
+      "path": "studies/setupalpha_sp500_mr2025_audit.md",
+      "sha256": "a0188aa44ed1e24db7256bf1a7bb1788889820f08af0cd2e91c60e09bbe997a8"
+    },
+    {
+      "bytes": 8076,
+      "path": "studies/setupalpha_sp500_rate_of_decline_audit.md",
+      "sha256": "a485983ce6156871312e132cb8e2ab52c5c82ce08c4269a002355fa50799057e"
+    },
+    {
+      "bytes": 8944,
+      "path": "studies/setupalpha_sp500_weekly_pullback_audit.md",
+      "sha256": "5fa43bdbf5e8744d27527e7fa4e290251bd9507f6c7bc2b0c356d68bd36aa88c"
+    },
+    {
       "bytes": 12255,
       "path": "studies/shorting_leveraged_etfs_empirical_study.md",
       "sha256": "01f80b0c70fab60b01a27d7e46e5f1f5a04c03565ef265dd5f436efc4249d7f0"
@@ -1419,6 +1799,11 @@
       "bytes": 6778,
       "path": "studies/spy_rsi20_short_only_followup.md",
       "sha256": "75f677ddc93f3d4d87e968c45a693f86b6eee016e7a3ecb6f379cb7e311c7b55"
+    },
+    {
+      "bytes": 7776,
+      "path": "studies/spy_rsi20_vixy_tail_risk_control_study.md",
+      "sha256": "605c1db2a8a46287d661271f17043be81877b627d99d58d04dcb0dabb36ee57e"
     },
     {
       "bytes": 5639,
@@ -1596,6 +1981,11 @@
       "sha256": "dc2926f2737e19d4ffbe56254827b79d44e067701f5b86c5e3d36ba502c53dc7"
     },
     {
+      "bytes": 12120,
+      "path": "studies/varadi_adaptive_momentum_study.md",
+      "sha256": "6b77438e79a3d82da2f29840eada6d87ea957fa86266021ce5387d4f0ca08352"
+    },
+    {
       "bytes": 7505,
       "path": "studies/varadi_quant_etf_rotation_study.md",
       "sha256": "82322b3c32d3b8829199875b8b2016dd2c1ad260412be29b2ee50b4fe0b78152"
@@ -1631,6 +2021,16 @@
       "sha256": "055df07726d1bec1d13d0fb0be83514b7014c72857dc4180dafbbcae81205a48"
     },
     {
+      "bytes": 8787,
+      "path": "studies/vardi_core5_robustness_qualification_study.md",
+      "sha256": "1ba3c4edfb32b9f3d53fb9af8de7c9daef6349e75917299154b6970e9f56c69d"
+    },
+    {
+      "bytes": 6902,
+      "path": "studies/vardi_core5_sleeve_drift_rebalance_study.md",
+      "sha256": "2aeeda1410babe479f5cd620f15b8cf2204e00a86b5a8096d5c59c0bbe3840ed"
+    },
+    {
       "bytes": 6794,
       "path": "studies/vardi_core5_spy_qqq_early_sample_study.md",
       "sha256": "bdcb42ce7ae01b63e0bcd94ca274aea8747f64ba9c73b8b5e352ff5d2c1a95a6"
@@ -1651,9 +2051,19 @@
       "sha256": "1bd2f95986360beee96169647929200e8825de385967190db3ded242a2a6af8a"
     },
     {
-      "bytes": 72281,
+      "bytes": 8744,
+      "path": "studies/vardi_spy_dbc_trend_mean_reversion_diagnostic_study.md",
+      "sha256": "b348b5490d88e6249c5b403a52329791449ba47f2efa3a4e83bee08b91d23c8a"
+    },
+    {
+      "bytes": 7176,
+      "path": "studies/vix_gated_etf_industry_reversal_study.md",
+      "sha256": "c62643ed831ff86ab17691eaa5fd8f38c01255e4ed906cc1bbf6e4ffc4f172de"
+    },
+    {
+      "bytes": 90153,
       "path": "studies.md",
-      "sha256": "afb947f35bbed6b9cf8546634096b3b08d745b46aff5f79765eea913a6b9c6c3"
+      "sha256": "e382176a7be823d603ebef8e159809948635966ec6d3bc4d683ba6f4a38ea210"
     }
   ],
   "schema_version": "quant-research-knowledge-base-manifest-v1"

@@ -134,8 +134,8 @@ If final `Close_T` data formed the signal, a hypothetical `Close_T` entry is dia
 | Primary Source Code | `["pakal-research/hpi_more_bets_cvar_study.py", "pakal-research/hpi_more_bets_execute.py", "pakal-research/hpi_more_bets_parity_compare.py", "pakal-research/hpi_more_bets_timing_diagnostic.py"]` |
 | Primary Tables | `["pakal-research/reports/hpi_more_bets_cvar_study/tables/frozen_gate_results.csv", "pakal-research/reports/hpi_more_bets_cvar_study/tables/decision_summary.csv", "pakal-research/reports/hpi_more_bets_cvar_study/tables/overall_metrics.csv", "pakal-research/reports/hpi_more_bets_cvar_study/tables/subperiod_metrics.csv", "pakal-research/reports/hpi_more_bets_cvar_study/tables/entry_timing_2x2_metrics.csv", "pakal-research/reports/hpi_more_bets_cvar_study/tables/entry_timing_2x2_subperiods.csv", "pakal-research/reports/hpi_more_bets_cvar_study/tables/entry_timing_2x2_contrasts.csv"]` |
 | Primary Charts | `["pakal-research/reports/hpi_more_bets_cvar_study/charts/primary_equity_drawdown.png", "pakal-research/reports/hpi_more_bets_cvar_study/charts/subperiod_cagr_deltas.png", "pakal-research/reports/hpi_more_bets_cvar_study/charts/capacity_impact_cagr.png", "pakal-research/reports/hpi_more_bets_cvar_study/charts/entry_timing_2x2_equity_drawdown.png"]` |
-| Research State | `research_state.json` |
-| Hypothesis Registry | `hypothesis_registry.json` |
-| Experiment Ledger | `experiment_ledger.jsonl` |
-| Decision Log | `decision_log.jsonl` |
-| Source Rule Map | `SOURCE_RULE_MAP.md` |
+| Research State | `pakal-research/reports/hpi_more_bets_cvar_study/research_state.json` |
+| Hypothesis Registry | `pakal-research/reports/hpi_more_bets_cvar_study/hypothesis_registry.json` |
+| Experiment Ledger | `pakal-research/reports/hpi_more_bets_cvar_study/experiment_ledger.jsonl` |
+| Decision Log | `pakal-research/reports/hpi_more_bets_cvar_study/decision_log.jsonl` |
+| Source Rule Map | `pakal-research/reports/hpi_more_bets_cvar_study/SOURCE_RULE_MAP.md` |
