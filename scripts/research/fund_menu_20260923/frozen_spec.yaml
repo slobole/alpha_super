@@ -1,0 +1,102 @@
+# Fund product menu — frozen construction and evaluation spec.
+# Written after inspecting ONLY sleeve-level facts (standalone stats, cadence,
+# correlations) and the covariance-based feasibility map (construction/feasibility*.csv).
+# No book was built or evaluated before this file was hashed (see experiment_ledger.jsonl).
+
+study_id_str: fund_product_menu_20260923
+end_date_str: "2026-08-19"
+rounding_step_float: 0.01
+minimum_pod_weight_float: 0.05
+
+# ─── engines (mechanism first; correlation only as a cross-check) ─────────────
+# Representative rules, applied mechanically:
+#  R1 near-duplicates (daily corr >= 0.90) keep one: QPI ~ HPI IBS/RSI (0.997) ~ HPI vote (0.94);
+#     NDX unscaled ~ VXN-scaled (0.95); BTAL 3x rank ~ BTAL 3x equal slots (0.93).
+#  R2 prefer WIRED; R3 prefer longer history; R4 keep a second implementation in an
+#     engine only if daily corr with the primary < 0.75 and its history covers the
+#     exact window: DV2 vs HPI 0.73, MOSAIC vs NDX 0.72, industry dispersion vs
+#     sector dips 0.53, Inflation Compass vs Nasdaq TAA 0.41.
+#  Inflation Compass is equity-like (beta 0.71) and is grouped with the Nasdaq TAA
+#  as the second "tactical allocation" implementation, not as a diversifier.
+#  CORE5 is the stabilizer anchor by owner designation (2026-09-23).
+engines:
+  MR_S:  {bucket_str: return,     label_str: "Single-stock mean reversion", primary_str: hpi_vote,       secondary_str: dv2}
+  MR_X:  {bucket_str: return,     label_str: "ETF mean reversion",          primary_str: sector_vox_iyr, secondary_str: disp_kie_ihi_sma}
+  MOM:   {bucket_str: return,     label_str: "US equity momentum",          primary_str: ndx_vxn,        secondary_str: mosaic}
+  TAA:   {bucket_str: return,     label_str: "Tactical allocation",         primary_str: taa_btal_tqqq,  secondary_str: infl_compass}
+  MACRO: {bucket_str: stabilizer, label_str: "Multi-asset macro (CORE5)",   primary_str: core5}
+  BOND:  {bucket_str: stabilizer, label_str: "Tactical bonds",              primary_str: tactical_fi}
+  FLOW:  {bucket_str: stabilizer, label_str: "Month-end rebalancing flow",  primary_str: eom_flow}
+  HEDGE: {bucket_str: overlay,    label_str: "Crisis hedges (test only)",   primary_str: vixm, secondary_str: crisis_trend}
+
+# Long window (2008+): the BTAL-based TAA has no history before 2012-10; its
+# no-BTAL sibling with the highest daily correlation on the overlap (taa_1n_qld, 0.89)
+# stands in, at the same capital weight.
+long_window_alias_swap: {taa_btal_tqqq: taa_1n_qld}
+
+# Lines. Low-touch = sleeves that trade on about three days a month or fewer
+# (<= 36 trade days/yr measured) AND need no closing-auction orders. That admits
+# NDX, MOSAIC, both TAA sleeves, CORE5 (29/yr) and Tactical FI (6/yr); it excludes
+# the mean-reversion sleeves (73-199/yr) and month-end flow (market-on-close).
+lines:
+  main:
+    return_engines: [MR_S, MR_X, MOM, TAA]
+    stabilizer_capital: {core5: 0.50, tactical_fi: 0.25, eom_flow: 0.25}
+    stabilizer_anchor_str: core5
+  low_touch:
+    return_engines: [MOM, TAA]
+    stabilizer_capital: {core5: 0.6667, tactical_fi: 0.3333}
+    stabilizer_anchor_str: core5
+
+# Products: volatility targets are the product definition (ex-ante, weekly covariance
+# on the exact window). 5 / 7.5 / 10% span the main line's feasible range (3.4-10.7%);
+# Aggressive exists only where the catalog can reach it without leverage: the
+# low-touch return engines alone (~13%). Drawdown budgets: Defensive at the owner's
+# band (-10%), then -15 / -20 / -30%.
+products:
+  - {product_id_str: DEF,    display_name_str: "Defensive",            line_str: main,      rung_label_str: "Main line · rung 1",       target_volatility_float: 0.05,  max_drawdown_budget_float: 0.10, yaml_name_str: fund_menu_defensive,            color_var_str: "--p-def"}
+  - {product_id_str: BAL,    display_name_str: "Balanced",             line_str: main,      rung_label_str: "Main line · rung 2",       target_volatility_float: 0.075, max_drawdown_budget_float: 0.15, yaml_name_str: fund_menu_balanced,             color_var_str: "--p-bal"}
+  - {product_id_str: GRO,    display_name_str: "Growth",               line_str: main,      rung_label_str: "Main line · rung 3",       target_volatility_float: 0.10,  max_drawdown_budget_float: 0.20, yaml_name_str: fund_menu_growth,               color_var_str: "--p-gro"}
+  - {product_id_str: LT_DEF, display_name_str: "Low-touch Defensive",  line_str: low_touch, rung_label_str: "Low-touch line · rung 1",  target_volatility_float: 0.05,  max_drawdown_budget_float: 0.10, yaml_name_str: fund_menu_low_touch_defensive,  color_var_str: "--p-def"}
+  - {product_id_str: LT_BAL, display_name_str: "Low-touch Balanced",   line_str: low_touch, rung_label_str: "Low-touch line · rung 2",  target_volatility_float: 0.075, max_drawdown_budget_float: 0.15, yaml_name_str: fund_menu_low_touch_balanced,   color_var_str: "--p-bal"}
+  - {product_id_str: LT_GRO, display_name_str: "Low-touch Growth",     line_str: low_touch, rung_label_str: "Low-touch line · rung 3",  target_volatility_float: 0.10,  max_drawdown_budget_float: 0.20, yaml_name_str: fund_menu_low_touch_growth,     color_var_str: "--p-gro"}
+  - {product_id_str: AGG,    display_name_str: "Aggressive",           line_str: low_touch, rung_label_str: "Low-touch line · rung 4",  return_share_float: 1.0,        max_drawdown_budget_float: 0.30, yaml_name_str: fund_menu_aggressive,           color_var_str: "--p-agg"}
+
+rebalance_policy_str: annual   # product policy; 'none' (drift) is reported as a sensitivity
+
+legacy_books:
+  ladder_1_defensive: {taa_btal_lin_qqq: 0.55, sector_vox_iyr: 0.45}
+  ladder_2_balanced:  {taa_btal_lin_qqq: 0.45, sector_vox_iyr: 0.25, ndx_vxn: 0.30}
+  ladder_3_growth:    {taa_btal_tqqq: 0.32, ndx_vxn: 0.32, dv2: 0.18, hpi_vote: 0.18}
+  ladder_4_growth:    {dv2: 0.16, hpi_vote: 0.17, ndx_vxn: 0.25, mosaic: 0.08, taa_btal_tqqq: 0.34}
+
+named_windows:
+  - {label_str: "Taper tantrum (bond sell-off)", start_str: "2013-05-02", end_str: "2013-09-05"}
+
+tests:
+  bootstrap: {replications_int: 2000, mean_block_days_float: 63}
+  perturbation: {draws_int: 400, seed_int: 20260923, dirichlet_concentration_float: 5.0}
+  stress:
+    extra_slippage_per_side_float: 0.0005
+    financing_spread_over_tbill_float: 0.015
+    cash_rate_haircut_float: 0.005
+    cash_already_accrues_alias_list: [tactical_fi]
+  macro_basket_capital: {core5: 0.25, trinity: 0.25, tactical_fi: 0.25, eom_flow: 0.25}
+  flagged_secondaries_disabled: [MR_S, TAA]   # DV2 and Inflation Compass carry negative knowledge-base verdicts
+  hedge_overlays:
+    - {alias_str: vixm,         weight_float: 0.10, product_id_list: [GRO, AGG]}
+    - {alias_str: crisis_trend, weight_float: 0.10, product_id_list: [GRO, AGG]}
+
+gates:
+  min_prob_excess_cagr_positive_float: 0.90
+  max_adjacent_daily_corr_float: 0.95
+  plateau_min_share_within_budget_float: 0.80
+  plateau_sharpe_band_float: 0.15
+  plateau_min_share_within_sharpe_band_float: 0.70
+  ladder_order_by_line:
+    - [DEF, BAL, GRO]
+    - [LT_DEF, LT_BAL, LT_GRO, AGG]
+  cross_line_pairs:
+    - {main_str: DEF, monthly_str: LT_DEF}
+    - {main_str: BAL, monthly_str: LT_BAL}
+    - {main_str: GRO, monthly_str: LT_GRO}

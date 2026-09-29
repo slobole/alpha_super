@@ -1,0 +1,306 @@
+# Narrative for the report. Written AFTER the frozen build; interpretation is marked as such.
+# 2026-09-24: tightened throughout at the owner's request; defensive shelf, capacity and amendment A1 added.
+
+eyebrow: "Alpha Super · research memo · 23 September 2026 · updated 24 September: defensive shelf, capacity, amendment A1"
+title: "Fund product menu"
+page_title: "Alpha Super Product Menu"
+page_description: "Seven candidate fund portfolios built from all 25 PM_READY and WIRED sleeves with one rule frozen before any result, tested 2008–2026 against the current ladder, 60/40 and T-bills."
+
+lede: >-
+  Seven portfolios built from your 25 PM_READY and WIRED sleeves with one rule frozen before any result: a
+  <strong>return bucket</strong> and a <strong>stabilizer bucket</strong>, mixed to a volatility target. From October 2012
+  to August 2026 every product beat T-bills, matched or beat 60/40 with far less risk, and stayed inside its drawdown
+  budget through 2008. This is a well-controlled backtest of sleeves designed on the same history: expect live results
+  to be materially lower.
+
+toc_html: >-
+  <a href="#menu">Menu</a><a href="#performance">Performance</a><a href="#crises">Stress episodes</a>
+  <a href="#defensive">Defensive shelf</a><a href="#capacity">Capacity</a><a href="#construction">Inside each product</a>
+  <a href="#method">Method</a><a href="#building-blocks">Building blocks</a><a href="#trust">How much to trust it</a>
+  <a href="#vs-ladder">Versus the current ladder</a><a href="#limits">Limitations</a><a href="#appendix">Appendix</a>
+
+menu_intro_html: |
+  <p>Two lines at three risk levels, plus Aggressive. The <strong>main line</strong> uses all seven engines, including daily mean reversion and the month-end flow. The <strong>low-touch line</strong> uses only sleeves that trade about three days a month or fewer, with no closing-auction orders.</p>
+  <p>Card numbers cover October 2012 to August 2026 with a yearly reset; the second drawdown line reaches back to March 2008 through a stand-in sleeve.</p>
+
+product_jobs:
+  DEF: "Capital first. Anchored on CORE5, about 5% volatility. For money that should not fall more than about 10%."
+  BAL: "Steady growth with a firm limit on bad years. About 8% volatility."
+  GRO: "The return engines do most of the work, with CORE5 as ballast. About 11% volatility."
+  LT_DEF: "The defensive rung with low-touch trading: CORE5 and tactical bonds plus a thin slice of momentum and the Nasdaq TAA."
+  LT_BAL: "Balanced risk with six pods, trading on a few days a month."
+  LT_GRO: "Growth risk on the simplest engine set. It matched the main line with smaller drawdowns."
+  AGG: "Momentum and tactical allocation only, no stabilizers. For clients who accept deeper falls; offer on request."
+
+amendment_card_notes:
+  LT_DEF: 'Inflation Compass removed on 24 Sep 2026, the other pods scaled up pro rata: an owner decision taken after the results (<a href="#amendment-a1">amendment A1</a>).'
+
+recommendation_html: |
+  <div class="callout key">
+    <h3>What I recommend</h3>
+    <ul>
+      <li><strong>Sell three risk levels, not seven strategies.</strong> Defensive, Balanced and Growth hold the same engines in different doses (neighbouring rungs correlate 0.92–0.997): one strategy family at three risk settings.</li>
+      <li><strong>Launch on the low-touch line.</strong> Five or six monthly pods, no closing-auction orders, and almost no damage from cost stress (−0.3 to −0.4 points a year against −1.0 to −1.6 on the main line). It matches the main line at Balanced and Growth with smaller drawdowns and gives up about 2 points a year at Defensive.</li>
+      <li><strong>Main-line Defensive is the best defensive book</strong> (10.6% a year, 5.4% volatility, −4.6% worst drawdown), but it needs closing-auction orders that are not wired (G-013).</li>
+      <li><strong>Small defensive accounts need only two ETF pods:</strong> CORE5 + BTAL_QQQ returned 9.8% a year, fell −7.8% at worst including 2008, and needs about $20K (see <a href="#defensive">the defensive shelf</a>).</li>
+      <li><strong>Aggressive replaces ladder 4 with four monthly pods</strong> (21.7% against 21.8%, drawdown −11.9% against −12.9%). Offer it on request: including 2008 its drawdown is −15%.</li>
+      <li><strong>Simplify where it costs nothing.</strong> DV2 and Inflation Compass can go (Low-touch Defensive already dropped Inflation Compass, amendment A1). CORE5 alone beat a CORE5-plus-Trinity anchor. A 10% VIXM overlay is an option for crash-averse clients.</li>
+      <li><strong>Before any money goes in:</strong> wire CORE5 and Tactical FI, re-freeze the Tactical FI fingerprint, keep the annual reset, and plan for live results well below these numbers.</li>
+    </ul>
+  </div>
+
+performance_intro_html: |
+  <p>Per line: growth of $1 and drawdowns on the exact window, and growth of $1 from March 2008. The long-window chart replaces the 3x BTAL TAA with its 2x no-BTAL sibling for the whole period, because BTAL only launched in 2011. After 2012 that stand-in fell further than the real sleeve in crashes (COVID −12% against −1%), so the long-window figures are conservative. All figures are net of each sleeve's modeled costs; idle cash earns 0%; books reset yearly.</p>
+
+headline_table_note_html: >-
+  Over T-bills = CAGR minus the 3-month T-bill CAGR. Sharpe uses a zero risk-free rate (house convention). Down capture =
+  average return in the S&amp;P 500's down months divided by the S&amp;P's. The current ladders are rebuilt from the same sleeve
+  runs, exactly as defined in <span class="mono">portfolios/ladder_*.yaml</span> (no reset).
+
+crises_intro_html: |
+  <p>Every S&amp;P 500 decline of 10% or more since March 2008, peak to trough, plus the 2013 taper tantrum. Long-window books, with the 2x stand-in TAA throughout.</p>
+
+crises_note_html: >-
+  Fast crashes hurt more than slow bear markets. In February 2018 the S&amp;P fell 10% in two weeks and Defensive lost 4.5%, its worst
+  drawdown of the window; in slow declines (2008, 2022) the trend-gated sleeves step aside.
+
+years_note_html: >-
+  2008 starts in March. Every year uses the 2x no-BTAL TAA in place of the 3x BTAL sleeve. 2026 runs to 19 August.
+
+construction_intro_html: |
+  <p>Each product is one number, the <strong>share of capital in return engines</strong>, set so the book's expected volatility hits its target. Engines get equal capital, split 50/50 between two implementations when both clear a 5% minimum. Stabilizers are fixed: CORE5 half, then Tactical FI and month-end flow on the main line, or Tactical FI alone on the low-touch line. They take much of the capital but little of the risk: in Defensive, 67% of the money and about a third of the risk.</p>
+
+construction_after_html: |
+  <h4>Your two questions from the brief</h4>
+  <p><strong>How much CORE5?</strong> It follows from the risk level: 33%, 18% and 9% on the main line; 55% (after A1), 35% and 19% on the low-touch line. CORE5 anchors the stabilizers because it is broad, trend-gated and nearly independent of stocks (beta 0.06, worst drawdown −6.8%). Swapping half of it for Trinity made Defensive worse (Sharpe 1.80 against 1.88).</p>
+  <p><strong>NDX 25% versus MOSAIC 8%?</strong> They are one momentum engine (correlation 0.72), split 50/50. Reshuffling every split at random moved Growth's Sharpe only between 1.46 and 1.56: the split is not where the value is.</p>
+
+method_html: |
+  <div class="prose">
+  <p>Every weight has a reason, and none was tuned to the backtest.</p>
+  <ol>
+    <li><strong>One data snapshot.</strong> All 25 sleeves rerun on the 2026-09-23 Norgate data to 19 August 2026, Tactical FI's frozen limit. Tactical FI and Crisis Trend use their governed saved runs.</li>
+    <li><strong>Engines by mechanism.</strong> Seven: single-stock and ETF mean reversion, momentum, tactical allocation, multi-asset macro, tactical bonds and month-end flow. Correlation is only a check.</li>
+    <li><strong>Representatives by written rules.</strong> Near-duplicates (correlation ≥ 0.90) keep one, WIRED first, then longer history. A second implementation only below 0.75. CORE5 anchors the stabilizers by your designation.</li>
+    <li><strong>One discarded design.</strong> Pure risk budgeting was dropped on covariance alone: mostly idle sleeves looked "low risk" and absorbed the capital.</li>
+    <li><strong>Two buckets, one dial.</strong> Return engines at equal capital, stabilizers at fixed shares, and one return share per product solved from a 5%, 7.5% or 10% volatility target. No expected return is used anywhere.</li>
+    <li><strong>Freeze, then look.</strong> The spec was hashed (sha256 <span class="mono">b99d7937…</span>) before any book existed; the ledger records every step.</li>
+    <li><strong>Amend in the open.</strong> Later owner decisions live in <span class="mono">amendments.yaml</span>: applied after the template, checked, logged and labelled. One so far: A1, Inflation Compass out of Low-touch Defensive.</li>
+  </ol>
+  <p>The low-touch line is defined by operations: at most about 36 trade days a year per sleeve and no closing-auction orders. That admits momentum, tactical allocation, CORE5 and Tactical FI.</p>
+  </div>
+  <figure class="diagram" aria-label="How a product is built">
+    <svg viewBox="0 0 860 250" width="100%" role="img" aria-label="Sleeves feed engines, engines feed two buckets, the buckets are mixed by one share into a product">
+      <rect x="8" y="30" width="180" height="190" rx="10" fill="var(--surface-2)" stroke="var(--rule)"/>
+      <text x="98" y="55" text-anchor="middle" fill="var(--ink)" font-size="13" font-weight="600">25 sleeves</text>
+      <text x="98" y="80" text-anchor="middle" fill="var(--ink-2)" font-size="12">9 WIRED · 16 PM_READY</text>
+      <text x="98" y="112" text-anchor="middle" fill="var(--ink-2)" font-size="12">duplicates removed</text>
+      <text x="98" y="132" text-anchor="middle" fill="var(--ink-2)" font-size="12">(corr ≥ 0.90)</text>
+      <text x="98" y="164" text-anchor="middle" fill="var(--ink-2)" font-size="12">11 in the menu,</text>
+      <text x="98" y="184" text-anchor="middle" fill="var(--ink-2)" font-size="12">2 hedges tested</text>
+      <path d="M190 125 L240 125" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#arrowhead)"/>
+      <rect x="242" y="20" width="250" height="100" rx="10" fill="var(--surface)" stroke="var(--rule)"/>
+      <text x="367" y="44" text-anchor="middle" fill="var(--ink)" font-size="13" font-weight="600">Return bucket (equal capital)</text>
+      <circle cx="262" cy="66" r="5" fill="var(--e-1)"/><text x="273" y="70" fill="var(--ink-2)" font-size="12">Single-stock MR</text>
+      <circle cx="392" cy="66" r="5" fill="var(--e-2)"/><text x="403" y="70" fill="var(--ink-2)" font-size="12">ETF MR</text>
+      <circle cx="262" cy="94" r="5" fill="var(--e-3)"/><text x="273" y="98" fill="var(--ink-2)" font-size="12">Momentum</text>
+      <circle cx="392" cy="94" r="5" fill="var(--e-4)"/><text x="403" y="98" fill="var(--ink-2)" font-size="12">Tactical alloc.</text>
+      <rect x="242" y="132" width="250" height="100" rx="10" fill="var(--surface)" stroke="var(--rule)"/>
+      <text x="367" y="156" text-anchor="middle" fill="var(--ink)" font-size="13" font-weight="600">Stabilizer bucket (fixed shares)</text>
+      <circle cx="262" cy="180" r="5" fill="var(--e-5)"/><text x="273" y="184" fill="var(--ink-2)" font-size="12">CORE5 anchor 50%</text>
+      <circle cx="262" cy="206" r="5" fill="var(--e-6)"/><text x="273" y="210" fill="var(--ink-2)" font-size="12">Tactical FI</text>
+      <circle cx="392" cy="206" r="5" fill="var(--e-7)"/><text x="403" y="210" fill="var(--ink-2)" font-size="12">Month-end flow</text>
+      <path d="M494 70 L560 118" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#arrowhead)"/>
+      <path d="M494 182 L560 134" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#arrowhead)"/>
+      <rect x="562" y="86" width="120" height="78" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+      <text x="622" y="112" text-anchor="middle" fill="var(--ink)" font-size="13" font-weight="600">one share s</text>
+      <text x="622" y="132" text-anchor="middle" fill="var(--ink-2)" font-size="12">solved from the</text>
+      <text x="622" y="150" text-anchor="middle" fill="var(--ink-2)" font-size="12">volatility target</text>
+      <path d="M684 125 L730 125" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#arrowhead)"/>
+      <rect x="732" y="60" width="120" height="130" rx="10" fill="var(--surface)" stroke="var(--rule)"/>
+      <text x="792" y="86" text-anchor="middle" fill="var(--ink)" font-size="13" font-weight="600">Product</text>
+      <text x="792" y="110" text-anchor="middle" fill="var(--ink-2)" font-size="12">Defensive 5%</text>
+      <text x="792" y="132" text-anchor="middle" fill="var(--ink-2)" font-size="12">Balanced 7.5%</text>
+      <text x="792" y="154" text-anchor="middle" fill="var(--ink-2)" font-size="12">Growth 10%</text>
+      <text x="792" y="176" text-anchor="middle" fill="var(--ink-2)" font-size="12">annual reset</text>
+      <defs><marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"/></marker></defs>
+    </svg>
+  </figure>
+
+blocks_intro_html: |
+  <p>Twenty-five sleeves, but far fewer independent bets: four <strong>return engines</strong> that all lean on US stocks (0.33–0.73 correlation with each other), and three <strong>stabilizers</strong> that genuinely diversify: Tactical FI (−0.07 to +0.06 with every other sleeve), month-end flow (−0.06 to 0.17) and CORE5 (0.30–0.53).</p>
+
+sleeve_table_note_html: >-
+  Full-history columns start at each sleeve's first position; "2012+" columns start on 2 October 2012. Idle cash = average cash share,
+  which earns 0% in the engine. Evidence notes summarise the knowledge base and gap register; they were reported, not used to filter,
+  except in the test that drops DV2 and Inflation Compass.
+
+correlation_intro_html: "Monthly return correlations on the common window (October 2012 to August 2026). Darker blue means more alike."
+
+correlation_note_html: >-
+  On the S&amp;P 500's worst 10% of days the dip buyers correlate less with momentum (0.11–0.35) and CORE5 more (0.39–0.46).
+  Only the two hedges move against the stock engines on those days.
+
+trust_intro_html: |
+  <p>Three things could flatter these numbers: <strong>luck</strong>, <strong>judgment</strong> and <strong>the sample</strong>. The tests below address the first two. Nothing here removes the third, because every sleeve was designed on data that overlaps this window.</p>
+
+gates_note_html: >-
+  All seven products passed four of the five gates: drawdown budget on both windows, beating T-bills, weight plateau, and a positive
+  return over T-bills in every third of the window. <strong>The distinctness gate (G4) failed for three of five adjacent pairs</strong>
+  (four before A1). It suits a menu of different strategies, not a ladder of the same engines at different doses; presenting the rungs
+  as one family is an interpretation made after seeing this result.
+
+bootstrap_intro_html: >-
+  A stationary block bootstrap (three-month blocks, 2,000 draws, all series moving together): every product beat T-bills in 100% of
+  draws and 60/40's Sharpe in at least 98.8%. It cannot tell Growth apart from ladder 4.
+
+perturbation_intro_html: >-
+  Four hundred random versions of each product, with engine, 50/50 and stabilizer splits redrawn and the return share re-solved each time.
+  Every version stayed inside its drawdown budget, and the chosen books sit between the 54th and 80th percentile of Sharpe: on a plateau,
+  not a peak.
+
+alternatives_intro_html: >-
+  Same sleeves, other simple rules. <strong>Without the flagged sleeves</strong> (DV2 and Inflation Compass out, their engines held in the
+  primary sleeve) every product is essentially unchanged. The <strong>macro basket</strong> (half of the CORE5 anchor moved to Trinity) is
+  worse for Defensive.
+
+stress_intro_html: >-
+  The <strong>stress case</strong> adds 5 bps a side on every traded dollar and finances negative cash at T-bills + 1.5%. The
+  <strong>cash upside</strong> pays T-bills − 0.5% on idle cash (Tactical FI excluded, since its cash already earns T-bills). Daily mean
+  reversion is the cost-sensitive part: 5 bps a side costs DV2 4.9 and HPI 2.9 points a year.
+
+overlay_intro_html: >-
+  A 10% crisis-hedge slice on Growth and Aggressive. VIXM cut Growth's COVID loss from −10.9% to −2.3% and raised its Sharpe;
+  Crisis Trend helped less. Both cost 1.4–2.2 points a year.
+
+legacy_html: |
+  <div class="prose">
+  <p>The current ladders, rebuilt from the same sleeve runs on the same window:</p>
+  <ul>
+    <li><strong>Defensive vs ladder 1:</strong> the same return (10.6% against 10.7%) at three-quarters of the volatility and half the drawdown (−4.6% against −8.5%).</li>
+    <li><strong>Balanced vs ladder 2:</strong> 2 points less return for two-thirds of the volatility; worst 12 months −1.5% against −9.8%.</li>
+    <li><strong>Growth vs ladder 4:</strong> a lower-risk book (10.8% against 13.8% volatility) with the same efficiency. <strong>Aggressive</strong> is the like-for-like replacement.</li>
+  </ul>
+  <p>The biggest difference is 2022: the new books were flat to positive while ladders 2–4 lost 7–10%, thanks to what the ladders never held (CORE5, tactical bonds, the month-end flow, Inflation Compass). The fast method matches the real PortfolioManager: ladder 4 at 21.824% against 21.827% CAGR.</p>
+  </div>
+
+limits_html: |
+  <div class="prose">
+  <ul>
+    <li><strong>In-sample sleeves.</strong> Freezing the construction limits portfolio-level search, not sleeve-level. Plan for roughly half of the backtest's excess return and Sharpe live; published anomalies lose more than half of their returns after publication (McLean and Pontiff, 2016).</li>
+    <li><strong>Engine simplifications.</strong> The yearly reset is frictionless, idle cash earns 0% and negative cash is free; the stress and upside cases bound the effect at −0.3 to −1.6 and +0.1 to +0.5 points a year.</li>
+    <li><strong>Not live-ready.</strong> Only 12–50% of each product sits in WIRED sleeves. CORE5, Tactical FI, MOSAIC, Inflation Compass, the month-end flow and the ETF dip buyers are PM_READY. The month-end flow needs closing-auction orders (G-013, G-032); CORE5 assumes a fixed 1% DBC borrow (G-030).</li>
+    <li><strong>Data guards.</strong> Tactical FI cannot run fresh until its fingerprint is re-frozen (a benchmark-only revision); Crisis Trend fails a SHY endpoint check.</li>
+    <li><strong>Account size.</strong> Smallest workable accounts run from about $160K (Aggressive) to $667K (Low-touch Defensive, where MOSAIC sits at 6%); floors other than DV2's and HPI's are estimates. For the upper end see <a href="#capacity">capacity</a>.</li>
+    <li><strong>Volatility targets are estimates.</strong> Re-solving from either half of the history moved realised volatility by up to 2 points.</li>
+  </ul>
+  <h3>Decisions for you</h3>
+  <ol>
+    <li>Launch line: low-touch (recommended) or main.</li>
+    <li>Drop DV2 and Inflation Compass from the other products too, or keep them for breadth.</li>
+    <li>CORE5 + BTAL_QQQ as a separate two-pod product for small defensive accounts, with or without Tactical FI?</li>
+    <li>A VIXM overlay for crash-averse Growth and Aggressive clients?</li>
+    <li>Re-freeze the Tactical FI fingerprint, then wire CORE5 and Tactical FI first.</li>
+    <li>Execution: when to move from MOO to MOC, and when to take DBC, UUP and BTAL out of the auctions.</li>
+  </ol>
+  </div>
+
+appendix_html: |
+  <div class="prose small">
+  <p><strong>Where everything is.</strong> Scripts in <span class="mono">scripts/research/fund_menu_20260923/</span> (sleeve runs, inventory, feasibility maps, <span class="mono">frozen_spec.yaml</span> and its hash, <span class="mono">amendments.yaml</span>, <span class="mono">build_books.py</span>, <span class="mono">pm_parity.py</span>, <span class="mono">build_report.py</span>). Outputs in <span class="mono">results/research/portfolio/fund_product_menu_20260923/</span>, including <span class="mono">experiment_ledger.jsonl</span>; the books as first frozen are in <span class="mono">books_before_A1/</span>. Defensive shelf: <span class="mono">scripts/research/simple_defensive_20260924/</span>. Capacity: <span class="mono">scripts/research/defensive_capacity_20260924/</span>. Product configurations: <span class="mono">portfolios/fund_menu_*.yaml</span>.</p>
+  <p><strong>Data.</strong> Norgate snapshot of 2026-09-23 (history through 2026-08-19 verified unchanged); FRED DTB3 for T-bills; benchmarks are the S&amp;P 500 Total Return ($SPXTR) and 60/40 = SPY and AGG total return, reset monthly. Code at HEAD <span class="mono">bbee42c</span> with the owner's uncommitted Bench and PortfolioManager edits (config capture only).</p>
+  <p><strong>Definitions.</strong> CAGR uses calendar time. Volatility is the daily standard deviation × √252. Max drawdown is peak to trough on daily closes. ES / CVaR 95% 21d is the average of the worst 5% of rolling 21-day returns. Beta is the daily regression on the S&amp;P 500 TR. Risk share = Cov(w<sub>i,t−1</sub>·r<sub>i,t</sub>, r<sub>book</sub>) / Var(r<sub>book</sub>).</p>
+  <p>Research only: not an allocation approval, not investment advice, and not an authorisation to trade.</p>
+  </div>
+
+parity_intro_html: >-
+  Every book here is built from sleeves run once at $1M; the real PortfolioManager runs each pod at its own capital, starting in cash.
+  Two ladders run both ways differ by a few hundredths of a percent a year, so the fast method can be trusted for comparing books.
+
+defensive_intro_html: |
+  <p>Main-line Defensive needs seven pods and closing-auction orders. <strong>How few easy pods does a good defensive book need?</strong> The benchmark is CORE5 alone. The candidates were your list: BTAL_QQQ (WIRED) or BTAL_SPY (research), sector downshock, industry dispersion and Tactical FI. All 23 combinations with CORE5 were built at equal capital and reset yearly. The rules were set before any book existed: beat CORE5 on Sharpe (whole window and each half) and on return, stay within −10% including 2008, and still beat it after 5 bps a side of extra cost. Among those that pass, the fewest pods wins.</p>
+
+defensive_verdict_html: |
+  <div class="callout key">
+    <h3>What the defensive work found</h3>
+    <ul>
+      <li><strong>Two pods beat CORE5 alone: CORE5 + BTAL_QQQ, 50/50.</strong> 9.8% a year against 6.8%, Sharpe 1.44 against 1.30, better in both halves, −7.8% at worst including 2008. It trades on the same monthly calendar as CORE5 (about 29 days a year), needs about $20K, and BTAL_QQQ is already WIRED.</li>
+      <li><strong>It adds return, not diversification.</strong> The two pods correlate 0.65 (0.54 on the S&amp;P's worst days). Worst episode: February 2018, −5.5%.</li>
+      <li><strong>A third pod buys calmer tails, not return.</strong> Tactical FI keeps the calendar and improves the 21-day CVaR from −3.0% to −2.2% and the worst crisis from −5.5% to −3.7%, for about 2 points a year; it is close to cash plus one point. Dispersion helps less and needs about 100 trading days a year.</li>
+      <li><strong>Sector downshock is equity in disguise</strong> (0.60 correlation with the S&amp;P on crisis days, −20% in 2008–09); it is why ladder 1 falls −12.3% including 2008. <strong>BTAL_SPY</strong> lost to BTAL_QQQ on every count.</li>
+      <li><strong>Low-touch Defensive stays the best book without closing-auction orders</strong>, now without Inflation Compass (A1): Sharpe 1.70, −3.8% worst drawdown (−5.7% including 2008), 21-day CVaR −2.0% and crisis correlation 0.03. Its cost is size: about $667K minimum.</li>
+      <li><strong>Use</strong> CORE5 + BTAL_QQQ, optionally with Tactical FI, for small and mid-sized accounts, and Low-touch Defensive for large ones.</li>
+    </ul>
+  </div>
+
+defensive_table_note_html: >-
+  CAGR, Sharpe and Max DD cover the exact window with a yearly reset. The incl.-2008 columns, CVaR, worst crisis and crisis correlation
+  start in March 2008, with no-BTAL twins used only before October 2012 (so they differ slightly from the menu tables). CVaR = average
+  of the worst 5% of rolling 21-day returns. Crisis correlation = daily correlation with the S&amp;P 500 inside its declines of 10% or
+  more. Minimum account uses the menu's pod floors. ladder 1 is shown as defined, without reset.
+
+defensive_crises_intro_html: |
+  <p>The objective equity list above, plus four bond sell-offs, which are crises for books that hold bonds and gold.</p>
+
+defensive_crises_note_html: >-
+  The classic crashes (2008, COVID, 2022) cost these books little or nothing. The damage came when stocks and bonds fell together:
+  February 2018, the 2025 tariff shock and the 2023 long-bond rout. Explain that scenario to defensive clients in advance.
+
+defensive_corr_intro_html: "Daily correlations since March 2008. Above the diagonal: all days. Below it: the S&amp;P 500's worst 10% of days."
+
+defensive_corr_note_html: >-
+  CORE5 and BTAL_QQQ stay close even under stress, because they hold the same defensive assets. Tactical FI is near zero with
+  everything, in every regime. In the S&amp;P's declines of 10% or more, Inflation Compass correlated 0.50–0.54 with the two dip buyers,
+  which is why removing it cut Low-touch Defensive's crisis correlation.
+
+defensive_2008_html: |
+  <p>BTAL only trades from 2011, so the BTAL sleeves reach 2008 through their no-BTAL twins, used <strong>only before October 2012</strong>. The SPY twin was built on the same code path, which reproduces the QQQ twin exactly. BTAL tends to gain in sell-offs, so the stand-ins probably understate the real sleeves. CORE5 gained in 2008 (+2.9%). Sector downshock and Inflation Compass were the casualties (−15.7% and −17.0% from May 2008 to March 2009). Tactical FI dipped −11.4% into October 2008 with LQD and recovered by December.</p>
+
+defensive_amendment_html: |
+  <p><strong>Owner decision of 24 September 2026, taken after seeing the results; the frozen spec is unchanged.</strong> Inflation Compass (6%) was removed and the other pods scaled up pro rata, rounded to 1%. All three ways of removing it kept the Sharpe ratio and cut the book's link to stocks in crises; the chosen one trades about a point a year of return for a shallower drawdown and the best tail.</p>
+  <p>The reasons: no measured cost in risk-adjusted terms and one pod fewer; −17% in 2008–09 and most of the book's crisis correlation (0.18 before, 0.03 after); and it is not live-eligible as it stands (negative knowledge-base verdict, current-vintage FRED data).</p>
+
+defensive_amendment_note_html: >-
+  Applied from amendments.yaml after the frozen template, checked against its stated rule and logged in the ledger. Every Low-touch
+  Defensive number in this report is the amended book; the pre-amendment outputs are in books_before_A1/. It was not re-solved to its
+  target: ex-ante volatility is 4.5% against 5%. All other products are identical to the frozen build.
+
+defensive_search_note_html: >-
+  Equal capital and annual reset, exact window except the last column (incl. 2008). Passed = all four pre-declared rules against
+  CORE5 alone.
+
+capacity_intro_html: |
+  <p>How much money can the defensive products take? Measured on <strong>today's market</strong>: the last three years of trades, each against the volume in the weeks before it, with orders from all pods in the same ETF on the same day added together. Early years are left out on purpose: BTAL traded about $0.04M a day in 2013 and about $9M a day over the last year.</p>
+
+capacity_verdict_html: |
+  <div class="callout key">
+    <h3>What limits the money</h3>
+    <ul>
+      <li><strong>Market-on-open is not the limit it first looked like.</strong> The first version of this chapter applied the house auction caps, which forbid any order above 0.05–0.10% of an instrument's daily volume. Those caps were calibrated on single stocks. In an ETF, market makers hold the opening price near fair value and hedge in the underlying basket, so the caps turned a $5K BTAL order into a breach and produced "$50K". That figure was wrong and is withdrawn.</li>
+      <li><strong>In plain order sizes, MOO holds a long way.</strong> Orders in the big ETFs and the stocks stay under 1% of daily volume up to about $8–43M, and the typical order in DBC, UUP and BTAL up to about $70–110M.</li>
+      <li><strong>Only a handful of orders need care: the big rebalances in DBC, UUP and BTAL.</strong> Switching a whole slot in one of them reaches about 5% of that ETF's daily volume at $1.4–6.7M, and 10% at $3–13M. From there, send just those orders as a limit order after the open, a market-maker quote or over two or three days, and keep everything else on MOO. MOC, with its deeper auction, moves that point further out.</li>
+      <li><strong>At fund scale, work the orders:</strong> $25–100M for CORE5 and both Defensives, at 0.6–1.4 points a year of impact at $100M; CORE5 + BTAL_QQQ nearer $5–25M because of BTAL. Dealing the thin three as blocks against their futures or stock baskets reaches $100–250M.</li>
+      <li><strong>The wall is ownership.</strong> At about $270M (CORE5 + BTAL_QQQ) to $440M (Low-touch Defensive) the fund would own 10% of BTAL or UUP. Beyond that, trade the underlying futures and an in-house anti-beta basket.</li>
+      <li><strong>Capacity is shared:</strong> products that trade the same ETFs draw on the same liquidity.</li>
+    </ul>
+  </div>
+
+capacity_moo_note_html: >-
+  Last three years of trades. Each day's order in each ETF or stock is compared with that instrument's 20-session median dollar volume
+  before the trade; orders grow in proportion to product size. "Typical" is the median order, then the 95th-percentile and the largest
+  order; the ticker in brackets holds the largest. How much an order moves the open depends on the auction and the market maker. As a
+  rule of thumb, orders well under 1% of daily volume go unnoticed, and around 5–10% is where big orders are better worked or quoted
+  than sent to the auction.
+
+capacity_table_note_html: >-
+  Each cell: the largest product size within the limits, outer bound in brackets. Worked orders: at most 5% of daily volume for 95% of
+  orders and 20% for any order (outer 10% and 30%), square-root impact scaled by each ETF's volatility, and impact at most a quarter of
+  the product's return over T-bills (outer: half). Over up to 5 days keeps each day at or under 10% of volume. Blocks: 15 bps assumed
+  for DBC, UUP and BTAL, no volume limit. Wall: product size at which the fund would own 10% of an ETF. Pre-TCA estimates without broker
+  quotes; your own fills are the best calibration.
+
+capacity_etf_note_html: >-
+  Median daily dollar volume by year (Norgate) and fund assets (issuer and press figures, March to August 2026). All three are wrappers:
+  their real liquidity is the futures or the stock basket they hold, which is what a block trade or a creation and redemption taps.
+
+footer_html: "Research memo · not an allocation approval or LIVE authorisation · generated from saved study outputs by scripts/research/fund_menu_20260923/build_report.py"

@@ -1,0 +1,49 @@
+# Result-independent narrative: method, engine map, sleeve roles. Merged into the report text.
+
+sleeve_order: [hpi_vote, dv2, qpi, hpi_ibs_rsi, sector_vox_iyr, disp_kie_ihi_sma, disp_kie_ihi_xlc, disp_kie_ihi_xlc_sma,
+  ndx_vxn, mosaic, ndx_atr, taa_btal_tqqq, infl_compass, taa_btal_1n_tqqq, taa_btal_lin_qqq, taa_btal_1n_qld, taa_1n_qld,
+  taa_1n_sso, taa_lin_qqq, core5, trinity, tactical_fi, eom_flow, vixm, crisis_trend]
+
+correlation_sleeves: [hpi_vote, dv2, sector_vox_iyr, disp_kie_ihi_sma, ndx_vxn, mosaic, taa_btal_tqqq, infl_compass, core5, tactical_fi, eom_flow, trinity, vixm, crisis_trend]
+
+sleeve_roles:
+  hpi_vote: "Single-stock mean reversion · primary"
+  dv2: "Single-stock mean reversion · second implementation (corr 0.73 with HPI)"
+  qpi: "Not used · same trade as HPI (0.94–0.997)"
+  hpi_ibs_rsi: "Not used · near-duplicate of QPI/HPI"
+  sector_vox_iyr: "ETF mean reversion · primary"
+  disp_kie_ihi_sma: "ETF mean reversion · second implementation (corr 0.53)"
+  disp_kie_ihi_xlc: "Not used · history starts 2018"
+  disp_kie_ihi_xlc_sma: "Not used · history starts 2019"
+  ndx_vxn: "Momentum · primary"
+  mosaic: "Momentum · second implementation (corr 0.72 with NDX)"
+  ndx_atr: "Not used · unscaled twin of NDX VXN (0.95)"
+  taa_btal_tqqq: "Tactical allocation · primary"
+  infl_compass: "Tactical allocation · second implementation (corr 0.41)"
+  taa_btal_1n_tqqq: "Not used · equal-slot twin (0.93)"
+  taa_btal_lin_qqq: "Not used in the menu · current ladder 1–2 sleeve"
+  taa_btal_1n_qld: "Not used · 2x twin"
+  taa_1n_qld: "2008 stand-in for the 3x BTAL TAA (corr 0.89)"
+  taa_1n_sso: "Not used · S&P 2x twin"
+  taa_lin_qqq: "Not used · no-BTAL linearity twin"
+  core5: "Stabilizer · anchor (owner designation)"
+  trinity: "Tested as an alternative stabilizer"
+  tactical_fi: "Stabilizer"
+  eom_flow: "Stabilizer (main line only: needs close-auction orders)"
+  vixm: "Hedge overlay test only"
+  crisis_trend: "Hedge overlay test only"
+
+engine_table_html: |
+  <div class="table-wrap"><table>
+  <thead><tr><th class="l">Engine</th><th class="l">What it earns</th><th class="l">Sleeves in the menu</th><th class="l">Bucket</th><th>Trades / yr</th></tr></thead>
+  <tbody>
+  <tr><td class="l"><span class="swatch" style="background:var(--e-1)"></span>Single-stock mean reversion</td><td class="l wrap-cell">Buys S&amp;P 500 stocks after sharp short-term drops inside an uptrend; exits on the rebound (days).</td><td class="l">HPI 2-3-5 vote, DV2</td><td class="l">Return</td><td>180–199</td></tr>
+  <tr><td class="l"><span class="swatch" style="background:var(--e-2)"></span>ETF mean reversion</td><td class="l wrap-cell">The same dip-buying on sector and industry ETFs; mostly in cash, in the market only after a shock.</td><td class="l">Sector ETF dips, industry dispersion</td><td class="l">Return</td><td>73–76</td></tr>
+  <tr><td class="l"><span class="swatch" style="background:var(--e-3)"></span>US equity momentum</td><td class="l wrap-cell">Monthly rotation into the strongest large-cap stocks per unit of volatility, off when the index is below its 200-day average.</td><td class="l">NDX VXN-scaled, MOSAIC R1000</td><td class="l">Return</td><td>10–13</td></tr>
+  <tr><td class="l"><span class="swatch" style="background:var(--e-4)"></span>Tactical allocation</td><td class="l wrap-cell">Monthly switching between risk assets and defensive assets by trend or macro regime.</td><td class="l">Nasdaq TAA (BTAL, 3x fallback), Inflation Compass</td><td class="l">Return</td><td>10–12</td></tr>
+  <tr><td class="l"><span class="swatch" style="background:var(--e-5)"></span>Multi-asset macro</td><td class="l wrap-cell">Five macro sleeves (stocks, Treasuries, gold, commodities, dollar), each held only in its uptrend, otherwise T-bills.</td><td class="l">CORE5</td><td class="l">Stabilizer (anchor)</td><td>29</td></tr>
+  <tr><td class="l"><span class="swatch" style="background:var(--e-6)"></span>Tactical bonds</td><td class="l wrap-cell">Holds 7–10y Treasuries when the curve is steep and corporate bonds when credit spreads are wide; T-bills otherwise.</td><td class="l">Tactical fixed income</td><td class="l">Stabilizer</td><td>6</td></tr>
+  <tr><td class="l"><span class="swatch" style="background:var(--e-7)"></span>Month-end rebalancing flow</td><td class="l wrap-cell">Trades the predictable stock/bond flows of 60/40 funds rebalancing into month-end (long or short Treasuries).</td><td class="l">Month-end flow</td><td class="l">Stabilizer</td><td>34</td></tr>
+  </tbody></table></div>
+
+pod_floor_note_html: "Funding floors used for the smallest workable account: DV2 and HPI $25K each (repository rule); MOSAIC $40K and NDX $20K (our estimate for 20- and 10-name baskets at about $2K per name); $10K for every ETF sleeve (our estimate)."

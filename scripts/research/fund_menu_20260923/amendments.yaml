@@ -1,0 +1,26 @@
+# Post-freeze amendments to the fund product menu.
+# frozen_spec.yaml stays untouched and sha-checked; build_books.py applies each amendment AFTER the
+# frozen template has produced its weights, and records the application in experiment_ledger.jsonl.
+# Every amendment here is an owner decision taken after seeing results, and is labelled as such
+# in the report.
+
+amendments:
+  - amendment_id_str: A1_LT_DEF_WITHOUT_INFLATION_COMPASS
+    decided_date_str: "2026-09-24"
+    decided_by_str: owner
+    product_id_str: LT_DEF
+    drop_alias_list: [infl_compass]
+    # Rule: remove the sleeve, scale every other pod up pro rata, round to 1% by largest remainder,
+    # moving equal-weight pods together (the three 6% return sleeves stay equal, so the spare point
+    # goes to the next remainder, CORE5). build_books.py checks each weight is within one step of
+    # the pro-rata value and that the sum is exactly 1.
+    final_weight_dict: {core5: 0.55, tactical_fi: 0.27, ndx_vxn: 0.06, mosaic: 0.06, taa_btal_tqqq: 0.06}
+    evidence_str: >-
+      scripts/research/simple_defensive_20260924/crisis_cvar_corr.py (2026-09-24): three pre-declared ways to remove
+      Inflation Compass from Low-touch Defensive (pro rata, the frozen template's disabled-secondary rule, and a swap
+      to the unlevered BTAL TAA) all kept the Sharpe ratio (1.55 from 2008, about 1.70 from 2012) and cut the book's
+      correlation with the S&P 500 on crisis days from 0.18 to 0.05-0.08. Pro rata kept the drawdown and gave the
+      best 21-day CVaR; the template rule kept the return but deepened the drawdown.
+    reason_str: >-
+      One pod fewer at no measured cost in risk-adjusted terms; the sleeve behaves like an equity sleeve in crises;
+      it carries a negative knowledge-base verdict and uses current-vintage FRED data, so it is not live-eligible as is.

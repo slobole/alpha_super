@@ -1,0 +1,38 @@
+# Young-client small account study — plan written BEFORE any result of this study.
+# Question (owner, 2026-09-23): an 80,000 ILS account for a young client; which TAA_DF variant,
+# and should it be mixed with something like CORE5?
+
+account:
+  ils_float: 80000
+  usdils_2026_09_22_float: 3.0024          # Norgate USDILS close
+  usd_capital_float: 26645.0               # 80,000 / 3.0024, rounded
+
+end_date_str: "2026-09-22"
+windows:
+  w1: {start_str: "2012-10-02", note_str: "every candidate has data (BTAL variants start 2012-10)"}
+  w2: {start_str: "2008-03-04", note_str: "no-BTAL variants and CORE5 only; includes 2008"}
+
+candidates:
+  taa_variants: [taa_btal_tqqq, taa_btal_1n_tqqq, taa_btal_lin_qqq, taa_btal_1n_qld, taa_1n_qld, taa_1n_sso, taa_lin_qqq]
+  partner_str: core5
+  core5_capital_share_list: [0.0, 0.20, 0.35, 0.50]
+  rebalance_str: annual                    # two pods reset to target weights each year-end
+
+execution_realism:
+  # Every pod runs at its REAL dollar size: whole shares and the $1 minimum commission are modeled
+  # by the sleeves themselves. The same sleeves at $1M give the frictionless reference; the gap is
+  # the small-account drag.
+  pod_capitals_usd: {taa: [26645, 21316, 17319, 13322], core5: [26645, 5329, 9326, 13322]}
+  reference_capital_usd: 1000000
+
+decision_rules:
+  variant:
+    - "must be WIRED today (can trade live now): taa_btal_tqqq, taa_btal_1n_tqqq, taa_btal_lin_qqq"
+    - "small-account drag (CAGR at $1M minus CAGR at $26.6K, window w1) must be <= 1.0 point a year"
+    - "max drawdown on w1 no worse than -25% (young client, first managed account)"
+    - "among those, the highest CAGR on w1; the non-WIRED variants are shown for context only"
+  core5_mix:
+    - "CORE5 is PM_READY, not wired: any mix is a phase-2 recommendation, not something to trade today"
+    - "a CORE5 pod must hold at least $8,000 (below that, whole-share rounding on SPY/GLD distorts its five 20% sleeves)"
+    - "among the executable mixes, recommend the smallest CORE5 share that cuts the w1 max drawdown by at least a quarter versus TAA alone while costing no more than 3 points of CAGR a year; if none qualifies, recommend TAA alone"
+reported_context: [SPY buy-and-hold (TR), QQQ buy-and-hold (TR), 60/40 SPY/AGG, T-bills, returns in ILS via USDILS]

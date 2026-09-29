@@ -1,0 +1,21 @@
+# DRAFT — not frozen. Used only for the covariance-based feasibility map.
+study_id_str: fund_product_menu_20260923
+end_date_str: "2026-08-19"
+
+engines:
+  MR_S:   {group_str: equity,      label_str: "Single-stock mean reversion", members: {hpi_vote: 0.5, dv2: 0.5}}
+  MR_X:   {group_str: equity,      label_str: "ETF mean reversion",          members: {sector_vox_iyr: 0.5, disp_kie_ihi_sma: 0.5}}
+  MOM:    {group_str: equity,      label_str: "US equity momentum",          members: {ndx_vxn: 0.5, mosaic: 0.5}}
+  TAA_N:  {group_str: equity,      label_str: "Nasdaq trend with defensive fallback", members: {taa_btal_tqqq: 1.0}, long_members: {taa_1n_qld: 1.0}}
+  REGIME: {group_str: equity,      label_str: "Macro-regime sector rotation", members: {infl_compass: 1.0}}
+  MACRO:  {group_str: diversifier, label_str: "Multi-asset macro (CORE5)",   members: {core5: 1.0}}
+  BOND:   {group_str: diversifier, label_str: "Tactical bonds",              members: {tactical_fi: 1.0}}
+  FLOW:   {group_str: diversifier, label_str: "Month-end rebalancing flow",  members: {eom_flow: 1.0}}
+
+group_engine_share:
+  equity:      {MR_S: 0.2, MR_X: 0.2, MOM: 0.2, TAA_N: 0.2, REGIME: 0.2}
+  diversifier: {MACRO: 0.50, BOND: 0.25, FLOW: 0.25}
+
+lines_for_feasibility:
+  main: [MR_S, MR_X, MOM, TAA_N, REGIME, MACRO, BOND, FLOW]
+  low_touch: [MOM, TAA_N, REGIME, MACRO, BOND]

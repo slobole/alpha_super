@@ -1,0 +1,96 @@
+# Static reference text for the report (names, floors, evidence notes).
+# Narrative that interprets results lives in report_text.yaml and is written after the build.
+
+sleeve_names:
+  dv2: "DV2 S&P 500 dips"
+  qpi: "QPI S&P 500 dips"
+  hpi_vote: "HPI S&P 500 dips (2-3-5 vote)"
+  hpi_ibs_rsi: "HPI S&P 500 dips (IBS/RSI exit)"
+  taa_btal_tqqq: "Nasdaq TAA · BTAL, 3x fallback"
+  taa_btal_1n_tqqq: "Nasdaq TAA · BTAL equal slots, 3x"
+  taa_btal_lin_qqq: "Nasdaq TAA · BTAL linearity, 1x"
+  ndx_atr: "NDX momentum"
+  ndx_vxn: "NDX momentum · VXN-scaled"
+  eom_flow: "Month-end flow (SPY/TLT)"
+  crisis_trend: "Crisis trend core"
+  vixm: "VIXM backwardation"
+  taa_1n_qld: "Nasdaq TAA · equal slots, 2x (no BTAL)"
+  taa_1n_sso: "S&P TAA · equal slots, 2x (no BTAL)"
+  taa_btal_1n_qld: "Nasdaq TAA · BTAL equal slots, 2x"
+  sector_vox_iyr: "Sector ETF dips"
+  taa_lin_qqq: "Nasdaq TAA · linearity, 1x (no BTAL)"
+  disp_kie_ihi_xlc: "Industry ETF dispersion (with XLC)"
+  disp_kie_ihi_xlc_sma: "Industry ETF dispersion + SMA200 (with XLC)"
+  disp_kie_ihi_sma: "Industry ETF dispersion + SMA200"
+  trinity: "Trinity 8% vol control"
+  core5: "CORE5 adaptive macro"
+  infl_compass: "Inflation Compass"
+  tactical_fi: "Tactical fixed income"
+  mosaic: "MOSAIC R1000 momentum"
+
+short_names:
+  dv2: "DV2"
+  hpi_vote: "HPI"
+  sector_vox_iyr: "Sector"
+  disp_kie_ihi_sma: "Disp"
+  ndx_vxn: "NDX"
+  mosaic: "MOSAIC"
+  taa_btal_tqqq: "TAA"
+  core5: "CORE5"
+  tactical_fi: "TFI"
+  eom_flow: "EOM"
+  trinity: "Trinity"
+  infl_compass: "InflC"
+  crisis_trend: "Crisis"
+  vixm: "VIXM"
+
+pod_floor_usd:
+  default: 10000
+  dv2: 25000
+  qpi: 25000
+  hpi_vote: 25000
+  hpi_ibs_rsi: 25000
+  mosaic: 40000
+  ndx_vxn: 20000
+  ndx_atr: 20000
+
+evidence_notes:
+  dv2: "WIRED. The Pakal knowledge base classifies DV2 as 'not a deployment candidate' (diagnostic); same S&P 500 universe and timing as HPI."
+  qpi: "WIRED. The same trade as HPI (correlation near 1.0) - hold one, not both."
+  hpi_vote: "WIRED. HPI variant studies in the knowledge base are diagnostic or forward hypotheses."
+  hpi_ibs_rsi: "WIRED. Near-identical to QPI."
+  taa_btal_tqqq: "WIRED. 3x TQQQ fallback; BTAL starts 2011, so no 2008 record."
+  taa_btal_1n_tqqq: "WIRED. Equal-slot version of the rank-weighted sleeve."
+  taa_btal_lin_qqq: "WIRED. 1x QQQ fallback, linearity score; the current ladder's defensive TAA."
+  ndx_atr: "WIRED. Unscaled twin of the VXN-scaled sleeve."
+  ndx_vxn: "WIRED. Holds cash when VXN is high; engine cash earns 0% (G-023)."
+  eom_flow: "PM_READY. Market-on-close orders on a research path (G-013, G-032); shorts TLT; knowledge base: research candidate."
+  crisis_trend: "PM_READY. Knowledge base: forward hypothesis; about +1% a year standalone, a cost outside crises."
+  vixm: "PM_READY. Holds VIXM only in VIX backwardation; overnight gaps matter (G-031)."
+  taa_1n_qld: "PM_READY. No-BTAL 2x sibling; reaches 2008, used as the long-window proxy candidate."
+  taa_1n_sso: "PM_READY. S&P 500 2x twin of the QLD sleeve."
+  taa_btal_1n_qld: "PM_READY. 2x version of the BTAL equal-slot sleeve."
+  sector_vox_iyr: "PM_READY. Knowledge base: forward hypothesis; the source rule used a 3:45 pm / close entry, the engine uses the next open."
+  taa_lin_qqq: "PM_READY. No-BTAL 1x sibling; reaches 2008."
+  disp_kie_ihi_xlc: "PM_READY. Starts 2018 (XLC); related SPDR-sector study failed two frozen gates (diagnostic)."
+  disp_kie_ihi_xlc_sma: "PM_READY. Starts 2018 (XLC)."
+  disp_kie_ihi_sma: "PM_READY. Industry ETFs (SOXX, IGV, IBB, KIE, IHI); diagnostic family."
+  trinity: "PM_READY. VTI/GLD/TLT inverse-volatility with an 8% volatility control; BIL reserve."
+  core5: "PM_READY. Owner-designated defensive anchor; fixed 1% DBC borrow baseline (G-030); the knowledge base rejected the DBC short as a stand-alone addition; local incubation integrity check passed 2026-09-16."
+  infl_compass: "PM_READY. Knowledge base: forward hypothesis (fails the 2013-2019 Sharpe gate); current-vintage FRED data (G-027, G-028)."
+  tactical_fi: "PM_READY. Frozen through 2026-08-19; idle cash accrues T-bills; knowledge base: diagnostic; current-vintage FRED data (G-029)."
+  mosaic: "PM_READY. Passed walk-forward validation (2026-07-31); not wired."
+
+legacy_labels:
+  ladder_1_defensive: "Current ladder 1 · defensive"
+  ladder_2_balanced: "Current ladder 2 · balanced"
+  ladder_3_growth: "Current ladder 3 · growth"
+  ladder_4_growth: "Current ladder 4 · growth"
+
+alternative_labels:
+  equal_risk_engines: "return engines at equal risk (not equal capital)"
+  without_flagged: "without DV2 and Inflation Compass"
+  equal_capital: "equal capital per sleeve (1/N)"
+  inverse_volatility: "inverse volatility per sleeve"
+  macro_basket: "stabilizer anchor split between CORE5 and Trinity"
+  core5_anchor_same_window: "chosen, on the macro-basket window"

@@ -1,0 +1,30 @@
+// Render the local artifact and verify its desktop/mobile layout with Chromium.
+const { chromium } = require('C:/Users/User/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const fs = require('fs');
+const path = require('path');
+const studyPath = path.resolve(__dirname, '../../../results/research/portfolio_family_20260923');
+(async () => {
+  const browserObj = await chromium.launch({headless:true,executablePath:'C:/Users/User/AppData/Local/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-win64/chrome-headless-shell.exe'});
+  const pageObj = await browserObj.newPage({viewport:{width:1440,height:1000},deviceScaleFactor:1});
+  const errorList=[];pageObj.on('pageerror',errorObj=>errorList.push(errorObj.message));
+  await pageObj.goto('file:///'+studyPath.replaceAll('\\','/')+'/REPORT.html');
+  await pageObj.waitForLoadState('load');
+  const verificationPath=path.join(studyPath,'verification');fs.mkdirSync(verificationPath,{recursive:true});
+  await pageObj.screenshot({path:path.join(verificationPath,'report_desktop.png')});
+  await pageObj.getByRole('heading',{name:'מה קרה בהיסטוריה',exact:true}).scrollIntoViewIfNeeded();
+  await pageObj.screenshot({path:path.join(verificationPath,'report_results.png')});
+  const desktopState=await pageObj.evaluate(()=>({width:innerWidth,scrollWidth:document.documentElement.scrollWidth,imageCount:document.images.length,brokenImages:[...document.images].filter(i=>!i.complete||!i.naturalWidth).length,formulaCount:document.querySelectorAll('.formula').length,hebrewChars:(document.body.innerText.match(/[\u0590-\u05ff]/g)||[]).length}));
+  await pageObj.setViewportSize({width:430,height:932});
+  await pageObj.evaluate(()=>window.scrollTo(0,0));
+  await pageObj.screenshot({path:path.join(verificationPath,'report_mobile.png')});
+  const mobileState=await pageObj.evaluate(()=>({width:innerWidth,scrollWidth:document.documentElement.scrollWidth}));
+  await pageObj.getByRole('heading',{name:'מה קרה בהיסטוריה',exact:true}).scrollIntoViewIfNeeded();
+  await pageObj.screenshot({path:path.join(verificationPath,'report_mobile_results.png')});
+  await pageObj.setViewportSize({width:1440,height:1000});
+  await pageObj.goto('file:///'+studyPath.replaceAll('\\','/')+'/REPORT_FULL.html');
+  await pageObj.screenshot({path:path.join(verificationPath,'appendix_desktop.png')});
+  const appendixState=await pageObj.evaluate(()=>({width:innerWidth,scrollWidth:document.documentElement.scrollWidth,sourceDetails:document.querySelectorAll('details').length}));
+  const resultObj={desktopState,mobileState,appendixState,pageErrors:errorList,pass:desktopState.brokenImages===0&&desktopState.formulaCount===2&&desktopState.scrollWidth<=desktopState.width&&mobileState.scrollWidth<=mobileState.width&&appendixState.scrollWidth<=appendixState.width&&appendixState.sourceDetails===25&&errorList.length===0};
+  fs.writeFileSync(path.join(verificationPath,'html_render_check.json'),JSON.stringify(resultObj,null,2));
+  console.log(JSON.stringify(resultObj));await browserObj.close();if(!resultObj.pass)process.exitCode=1;
+})();

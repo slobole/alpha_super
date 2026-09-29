@@ -1,0 +1,32 @@
+# Young-client study, part 2 — written BEFORE the part-2 runs.
+# Owner's sharpened question (2026-09-23): default is TAA (rank-weighted, TQQQ) or the riskier 1/N variant;
+# should a second sleeve be added at all - any sleeve, CORE5 was only an example?
+
+account_usd_float: 26645.0
+analysis_window: {start_str: "2012-10-02", end_str: "2026-08-19"}   # common to every candidate incl. Tactical FI
+
+taa_choice:
+  candidates: [taa_btal_tqqq, taa_btal_1n_tqqq]
+  tests:
+    - "return decomposition against QQQ: beta and alpha (daily regression, annualised)"
+    - "equal-risk check: the riskier variant mixed with T-bills down to the other's volatility - which compounds faster?"
+    - "average and maximum TQQQ weight after each rebalance, and the one-week crash arithmetic it implies"
+    - "stress episodes and calendar years"
+
+partner_sleeve:
+  # Every catalog sleeve that can run in a $5K-$13K pod (ETF-based or a small stock basket), plus the WIRED ones.
+  # Excluded by construction: DV2/HPI/QPI ($25K floor each), MOSAIC (20 names, ~$250-650 a name),
+  # Crisis Trend (shorts 11 ETFs - not workable in a few thousand dollars).
+  candidates: [core5, trinity, tactical_fi, infl_compass, sector_vox_iyr, disp_kie_ihi_sma, vixm, eom_flow, taa_btal_lin_qqq, ndx_vxn]
+  partner_capital_shares: [0.20, 0.35, 0.50]
+  pod_capitals_usd: {partner: [5329, 9326, 13322], taa: [21316, 17319, 13322]}
+  rebalance_str: annual
+  tests:
+    - "marginal-Sharpe test: adding a little of P raises the book's Sharpe only if Sharpe(P) > corr(P, TAA) x Sharpe(TAA) (excess over T-bills)"
+    - "T-bill test: each blend versus TAA mixed with T-bills at the SAME volatility; value-add = CAGR difference"
+    - "both halves of the window must agree in sign"
+    - "small-pod executability: return lost at the pod size versus the $26.6K run"
+  decision_rule: >-
+    Recommend a second sleeve only if, at the 35% blend, it beats the equal-volatility T-bill mix by at least
+    1 point a year over the whole window AND in each half, runs in its pod with less than 0.5 point a year of
+    small-pod drag, and is either live now or plausibly wireable. Otherwise: TAA alone.
