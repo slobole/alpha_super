@@ -326,17 +326,11 @@ def test_config_defaults_pm_performance_benchmark_to_spx():
 @pytest.mark.parametrize(
     'config_path_str',
     [
-        'portfolios/current_multipod_monthly.yaml',
-        'portfolios/current_multipod_yearly_inverse_volatility.yaml',
-        'portfolios/current_multipod_yearly_rebalanced.yaml',
-        'portfolios/multipod_low_risk.yaml',
-        'portfolios/multipod_monthly.yaml',
         'portfolios/ladder_3_growth.yaml',
         'portfolios/ladder_3b_growth_2x.yaml',
         'portfolios/ladder_3c_growth_2x_btal.yaml',
         'portfolios/ladder_1_defensive.yaml',
         'portfolios/ladder_2_balanced.yaml',
-        'portfolios/multipod.yaml',
     ],
 )
 def test_tracked_current_pm_configs_do_not_require_benchmark_declaration(
@@ -440,9 +434,55 @@ def test_manager_continues_with_explicit_na_when_pm_benchmark_load_fails(
     assert 'N/A — PM performance benchmark data is unavailable' in report_html_str
 
 
-def test_monthly_multipod_config_accepts_sector_dispersion_raw_pod():
+def write_two_pod_config_path(
+    tmp_path, name_str, start_date_str, pod_pair_list
+) -> Path:
+    """Minimal fresh-run config (the multipod books were retired 2026-09-29)."""
+    config_path = tmp_path / f"{name_str}.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "name_str": name_str,
+                "capital_base_float": 100000.0,
+                "backtest_start_date_str": start_date_str,
+                "end_date_str": None,
+                "allocation_policy_str": "fixed",
+                "max_workers_int": None,
+                "rebalance": None,
+                "save_pod_artifacts_bool": True,
+                "pods": [
+                    {
+                        "pod_id_str": pod_id_str,
+                        "strategy_import_str": import_str,
+                        "weight_float": 0.5,
+                    }
+                    for pod_id_str, import_str in pod_pair_list
+                ],
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    return config_path
+
+
+def test_monthly_multipod_config_accepts_sector_dispersion_raw_pod(tmp_path):
     config_obj = portfolio_manager.load_portfolio_manager_config(
-        Path("portfolios/multipod_monthly.yaml")
+        write_two_pod_config_path(
+            tmp_path,
+            "multipod_monthly",
+            "2004-01-01",
+            [
+                (
+                    "pod_taa",
+                    "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash",
+                ),
+                (
+                    "pod_sector_dispersion_kie_ihi_xlc",
+                    SECTOR_DISPERSION_KIE_IHI_XLC_IMPORT_STR,
+                ),
+            ],
+        )
     )
     strategy_import_by_pod_id_dict = {
         pod_config.pod_id_str: pod_config.strategy_import_str
@@ -455,9 +495,23 @@ def test_monthly_multipod_config_accepts_sector_dispersion_raw_pod():
     )
 
 
-def test_low_risk_no_xlc_config_uses_full_history_sma200_sector_pod():
+def test_low_risk_no_xlc_config_uses_full_history_sma200_sector_pod(tmp_path):
     config_obj = portfolio_manager.load_portfolio_manager_config(
-        Path("portfolios/multipod_low_risk_noXLC.yaml")
+        write_two_pod_config_path(
+            tmp_path,
+            "multipod_low_risk_no_xlc",
+            "2012-10-01",
+            [
+                (
+                    "pod_taa_df_btal_linearity_1n_fallback_qqq_vix_cash",
+                    "strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash",
+                ),
+                (
+                    "pod_mr_sector_dispersion_ibs_kie_ihi_asset_sma200",
+                    SECTOR_DISPERSION_KIE_IHI_ASSET_SMA200_IMPORT_STR,
+                ),
+            ],
+        )
     )
     strategy_import_by_pod_id_dict = {
         pod_config.pod_id_str: pod_config.strategy_import_str
