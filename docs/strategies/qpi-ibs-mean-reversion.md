@@ -78,7 +78,7 @@ Recorded from the [readiness audit 2026-09-28](../research/STRATEGY_READINESS_AU
 | A held name with no bar or a NaN IBS is never exited, silently | Live risk | 0 historical cases | A-QPI-05; fix #9 |
 | Selection lineage undocumented | Selection | 14 QPI modules; last-3y Sharpe 0.78 vs 0.98 full sample | A-QPI-08 |
 | Small-account friction | Size-dependent | -1.8 pp/yr at USD 30K over the last 3 years | A-QPI-06 |
-| Owner decision 2026-09-28: to be removed from the wired set (HPI covers the role) | Status | Not running live | Pending change |
+| Demoted from WIRED to RESEARCH on 2026-09-28 (HPI covers the role) | Status | Not running live | Commit 40675e9 |
 
 ## Sources of truth
 

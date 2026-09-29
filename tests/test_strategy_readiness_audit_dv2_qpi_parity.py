@@ -183,13 +183,14 @@ def test_documents_risk_one_missing_close_disables_qpi_for_a_full_lookback():
 
 
 # --------------------------------------------------------------------------- live host replay (B1)
-@pytest.mark.parametrize("fam", ["dv2", "qpi"])
+# QPI lost its live route on 2026-09-28 (commit 40675e9), so the live-host replay
+# tests run for DV2 only; the QPI backtest-side tests above still apply.
+@pytest.mark.parametrize("fam", ["dv2"])
 def test_live_host_reproduces_backtest_orders_on_every_decision(monkeypatch, fam):
     prices, universe = synthetic_panel()
     bt = run_backtest(fam, prices, universe)
-    mod = dv2_mod if fam == "dv2" else qpi_mod
-    run_fn = (strategy_host._run_dv2_strategy_for_live_decision if fam == "dv2"
-              else strategy_host._run_qpi_ibs_rsi_exit_strategy_for_live_decision)
+    mod = dv2_mod
+    run_fn = strategy_host._run_dv2_strategy_for_live_decision
     with_orders = [r for r in bt.decision_log if r["orders"]]
     assert len(with_orders) >= 20
     assert any(any(o[2] for o in r["orders"]) and any(not o[2] for o in r["orders"]) for r in with_orders)
@@ -202,13 +203,13 @@ def test_live_host_reproduces_backtest_orders_on_every_decision(monkeypatch, fam
         assert live_orders == rec["orders"], T
 
 
-@pytest.mark.parametrize("fam", ["dv2", "qpi"])
+@pytest.mark.parametrize("fam", ["dv2"])
 def test_live_plan_entry_weight_is_exactly_one_over_max_positions(monkeypatch, fam):
     prices, universe = synthetic_panel()
     bt = run_backtest(fam, prices, universe)
     rec = next(r for r in bt.decision_log if any(not o[2] for o in r["orders"]))
-    mod = dv2_mod if fam == "dv2" else qpi_mod
-    builder = strategy_host._build_dv2_decision_plan if fam == "dv2" else strategy_host._build_qpi_ibs_rsi_exit_decision_plan
+    mod = dv2_mod
+    builder = strategy_host._build_dv2_decision_plan
     patch_loaders(monkeypatch, mod, prices, universe, rec["T"])
     plan = builder(release(fam), datetime(rec["T"].year, rec["T"].month, rec["T"].day, 20), pod_state(rec))
     assert plan.decision_book_type_str == "incremental_entry_exit_book"
@@ -232,15 +233,6 @@ def test_documents_risk_dv2_host_raises_when_held_symbol_has_no_price_column(mon
     with pytest.raises(KeyError):
         strategy_host._run_dv2_strategy_for_live_decision(release("dv2"), datetime(T.year, T.month, T.day, 20),
                                                           _held_state("GONE"))
-
-
-def test_documents_risk_qpi_host_silently_keeps_held_symbol_without_prices(monkeypatch):
-    prices, universe = synthetic_panel()
-    T = prices.index[-1]
-    patch_loaders(monkeypatch, qpi_mod, prices, universe, T)
-    _, live = strategy_host._run_qpi_ibs_rsi_exit_strategy_for_live_decision(
-        release("qpi"), datetime(T.year, T.month, T.day, 20), _held_state("GONE"))
-    assert "GONE" not in [o.asset for o in live.get_orders()]  # no exit, no error: the slot stays occupied
 
 
 def test_documents_risk_strategy_never_exits_a_held_name_without_a_bar_on_T():
