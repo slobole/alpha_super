@@ -12,6 +12,36 @@
       "runtimeExecutable": "uv",
       "runtimeArgs": ["run", "python", "-m", "alpha.bench", "--skip-env-file", "--port", "8766"],
       "port": 8766
+    },
+    {
+      "name": "v4-mockup",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8790", "--bind", "127.0.0.1", "--directory", "../_mockups"],
+      "port": 8790
+    },
+    {
+      "name": "site-mockup",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8917", "--bind", "127.0.0.1", "--directory", "../_mockups/CLAUDE_MOCKUPS/site_v1"],
+      "port": 8917
+    },
+    {
+      "name": "v4-demo",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "python", "-B", "-m", "alpha.live.dashboard_v4", "--demo", "--port", "8084"],
+      "port": 8084
+    },
+    {
+      "name": "v4-demo-review",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "python", "-B", "-m", "alpha.live.dashboard_v4", "--demo", "--port", "8085"],
+      "port": 8085
+    },
+    {
+      "name": "v4-demo-tools-review",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "python", "-B", "-m", "alpha.live.dashboard_v4", "--demo", "--demo-tools", "--port", "8086"],
+      "port": 8086
     }
   ]
 }

@@ -56,6 +56,9 @@ tmpnu*/
 /image.png
 /image-*.png
 
+# Design mockups live outside the repo (workspace/_mockups/), never in git
+/*MOCKUPS*/
+
 # Generated backtest artifacts
 results/
 
