@@ -10,8 +10,8 @@ TL;DR: these files are safe examples only. Real client release YAMLs live under
 
 ```powershell
 New-Item -ItemType Directory -Force alpha\live\releases\<client_id>
-Copy-Item docs\live\release_templates\pod_qpi_daily_moo.yaml.example `
-  alpha\live\releases\<client_id>\pod_qpi_01.yaml
+Copy-Item docs\live\release_templates\pod_hpi_sp500_2_3_5_vote_daily_moo.yaml.example `
+  alpha\live\releases\<client_id>\pod_hpi_sp500_2_3_5_vote_01.yaml
 ```
 
 3. Edit the local copy:
@@ -67,7 +67,6 @@ template uses `incubation` with a dedicated `SIM_` route, full account budget
 |---|---|---|
 | `pod_taa_adaptive_macro_core5_daily_moo.yaml.example` | `strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5` | `norgate_eod_core5` |
 | `pod_dv2_daily_moo.yaml.example` | `strategies.dv2.strategy_mr_dv2:DVO2Strategy` | `norgate_eod_sp500_pit` |
-| `pod_qpi_daily_moo.yaml.example` | `strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy` | `norgate_eod_sp500_pit` |
 | `pod_hpi_sp500_2_3_5_vote_daily_moo.yaml.example` | `strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote` | `norgate_eod_sp500_hpi_pit` |
 | `pod_hpi_sp500_ibs_rsi_exit_daily_moo.yaml.example` | `strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit` | `norgate_eod_sp500_hpi_pit` |
 | `pod_taa_btal_fallback_tqqq_vix_cash_monthly_open.yaml.example` | `strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash` | `norgate_eod_etf_plus_vix_helper` |
@@ -75,3 +74,11 @@ template uses `incubation` with a dedicated `SIM_` route, full account budget
 | `pod_taa_btal_linearity_1n_fallback_qqq_vix_cash_monthly_open.yaml.example` | `strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash` | `norgate_eod_etf_plus_vix_helper` |
 | `pod_ndx_atr_normalized_monthly_open.yaml.example` | `strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy` | `norgate_eod_ndx_pit` |
 | `pod_ndx_atr_normalized_vxn_scaled_monthly_open.yaml.example` | `strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy` | `norgate_eod_ndx_pit_plus_vxn_helper` |
+
+QPI (`strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy`) was
+retired from live on 2026-09-28 and its template was removed. A local QPI
+release YAML now fails validation. The loader reads every `*.yaml` under the
+releases root, including subfolders and disabled releases, so one such file
+stops every POD in that root from loading. Before updating a VPS or this
+workstation, delete any `pod_qpi*.yaml`, move it outside `alpha/live/releases`,
+or rename it to a non-`.yaml` extension. A `retired/` subfolder is not enough.

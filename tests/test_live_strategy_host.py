@@ -142,74 +142,30 @@ def test_strategy_host_accepts_zero_share_target_exit_for_dv2(monkeypatch):
     assert decision_plan_obj.entry_priority_list == []
 
 
-def test_strategy_host_builds_mixed_qpi_decision_plan(monkeypatch):
+def test_strategy_host_refuses_retired_qpi_release(monkeypatch):
+    """QPI was demoted to RESEARCH on 2026-09-28 and lost its live route.
+
+    The host must refuse before loading any data, never fall back to a
+    different decision-book family.
+    """
     import strategies.qpi.strategy_mr_qpi_ibs_rsi_exit as qpi_module
 
-    date_index = pd.bdate_range("2023-01-02", periods=260)
-    pricing_data_df = make_price_df(["OLD", "NEW", "$SPX"], date_index)
-    universe_df = pd.DataFrame(1, index=date_index, columns=["OLD", "NEW"])
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("retired QPI route must not load data")
 
-    def compute_signals_stub(self, pricing_data_df):
-        signal_data_df = pricing_data_df.copy()
-        feature_df = pd.DataFrame(
-            {
-                ("OLD", "ibs_value_ser"): pd.Series(0.95, index=date_index),
-                ("OLD", "rsi2_value_ser"): pd.Series(95.0, index=date_index),
-                ("NEW", "ibs_value_ser"): pd.Series(0.05, index=date_index),
-                ("NEW", "rsi2_value_ser"): pd.Series(10.0, index=date_index),
-            },
-            index=date_index,
-        )
-        feature_df.columns = pd.MultiIndex.from_tuples(feature_df.columns)
-        return pd.concat([signal_data_df, feature_df], axis=1)
-
-    monkeypatch.setattr(qpi_module, "build_index_constituent_matrix", lambda indexname: (["OLD", "NEW"], universe_df))
-    monkeypatch.setattr(
-        qpi_module,
-        "get_prices",
-        lambda symbol_list, benchmark_list, start_date_str, end_date_str: pricing_data_df,
-    )
-    monkeypatch.setattr(qpi_module.QPIIbsRsiExitStrategy, "compute_signals", compute_signals_stub)
-    monkeypatch.setattr(qpi_module.QPIIbsRsiExitStrategy, "get_opportunity_list", lambda self, close_row_ser: ["NEW"])
-    original_iterate_func = qpi_module.QPIIbsRsiExitStrategy.iterate
-
-    def iterate_with_timing_assertion(self, data_df, close_row_ser, open_price_ser):
-        assert self.previous_bar == pd.Timestamp("2023-12-29")
-        assert self.current_bar == pd.Timestamp("2024-01-02")
-        assert data_df.index[-1] == pd.Timestamp("2023-12-29")
-        assert close_row_ser.name == pd.Timestamp("2023-12-29")
-        original_iterate_func(self, data_df, close_row_ser, open_price_ser)
-
-    monkeypatch.setattr(qpi_module.QPIIbsRsiExitStrategy, "iterate", iterate_with_timing_assertion)
+    monkeypatch.setattr(qpi_module, "build_index_constituent_matrix", fail_if_called)
+    monkeypatch.setattr(qpi_module, "get_prices", fail_if_called)
 
     release_obj = make_release(
         strategy_import_str="strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy",
-        params_dict={"capital_base_float": 100000.0, "max_positions_int": 1},
-    )
-    pod_state_obj = PodState(
-        pod_id_str=release_obj.pod_id_str,
-        user_id_str=release_obj.user_id_str,
-        account_route_str=release_obj.account_route_str,
-        position_amount_map={"OLD": 12.0},
-        cash_float=1000.0,
-        total_value_float=100000.0,
-        strategy_state_dict={"trade_id_int": 7, "current_trade_map": {"OLD": 7}},
-        updated_timestamp_ts=datetime(2024, 1, 30, 16, 0, tzinfo=MARKET_TIMEZONE_OBJ),
     )
 
-    decision_plan_obj = build_decision_plan_for_release(
-        release_obj=release_obj,
-        as_of_ts=datetime(2024, 1, 31, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
-        pod_state_obj=pod_state_obj,
-    )
-
-    assert decision_plan_obj.decision_base_position_map == {"OLD": 12.0}
-    assert decision_plan_obj.exit_asset_set == {"OLD"}
-    assert decision_plan_obj.entry_target_weight_map_dict == {"NEW": 1.0}
-    assert decision_plan_obj.entry_priority_list == ["NEW"]
-    assert decision_plan_obj.signal_timestamp_ts == datetime(2023, 12, 29, 16, 0, tzinfo=MARKET_TIMEZONE_OBJ)
-    assert decision_plan_obj.submission_timestamp_ts == datetime(2024, 1, 2, 9, 23, 30, tzinfo=MARKET_TIMEZONE_OBJ)
-    assert decision_plan_obj.target_execution_timestamp_ts == datetime(2024, 1, 2, 9, 30, tzinfo=MARKET_TIMEZONE_OBJ)
+    with pytest.raises(NotImplementedError):
+        build_decision_plan_for_release(
+            release_obj=release_obj,
+            as_of_ts=datetime(2024, 1, 31, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
+            pod_state_obj=None,
+        )
 
 
 @pytest.mark.parametrize(

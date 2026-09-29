@@ -51,7 +51,13 @@ TIER_LABEL_DICT: dict[MaturityTier, str] = {
 STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     # ── wired: live account routes ──────────────────────────────────────────
     "strategies.dv2.strategy_mr_dv2:DVO2Strategy": MaturityTier.WIRED,
-    "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy": MaturityTier.WIRED,
+    # QPI (strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy)
+    # was demoted from WIRED to RESEARCH on 2026-09-28 by owner decision; it
+    # was not running live on any VPS. HPI covers the same role. The readiness
+    # audit (docs/research/STRATEGY_READINESS_AUDIT_20260928.md, sections 3.4
+    # and 10) found a held name with no bar or a NaN IBS is never exited
+    # (A-QPI-05), an undocumented selection among 14 variants, and -1.8 pp/yr
+    # small-account friction. Its live host route was removed with it.
     "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote": MaturityTier.WIRED,
     "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit": MaturityTier.WIRED,
     "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash": MaturityTier.WIRED,

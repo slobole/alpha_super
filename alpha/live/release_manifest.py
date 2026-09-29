@@ -20,7 +20,6 @@ HPI_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = (
 SUPPORTED_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = (
     CORE5_STRATEGY_IMPORT_STR,
     "strategies.dv2.strategy_mr_dv2:DVO2Strategy",
-    "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy",
     *HPI_STRATEGY_IMPORT_TUPLE,
     "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash",
     "strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash",
@@ -371,7 +370,12 @@ def load_release_list(releases_root_path_str: str) -> list[LiveRelease]:
 
     release_list: list[LiveRelease] = []
     for manifest_path_obj in sorted(releases_root_path_obj.rglob("*.yaml")):
-        release_list.append(parse_release_manifest(str(manifest_path_obj)))
+        # Every YAML under the root is parsed, enabled or not, so one bad file
+        # refuses the whole root. Name it, or the operator cannot find it.
+        try:
+            release_list.append(parse_release_manifest(str(manifest_path_obj)))
+        except ValueError as exc:
+            raise ValueError(f"{manifest_path_obj}: {exc}") from exc
 
     validate_release_list(release_list)
     return release_list

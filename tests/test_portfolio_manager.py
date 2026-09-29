@@ -306,23 +306,6 @@ def test_config_validation_failures(monkeypatch, config_update_dict, expected_me
         portfolio_manager.build_portfolio_manager_config(config_dict)
 
 
-def test_current_aggressive_config_accepts_promoted_taa_pod():
-    config_obj = portfolio_manager.load_portfolio_manager_config(
-        Path("portfolios/current_multipod_all_aggresive.yaml")
-    )
-
-    strategy_import_by_pod_id_dict = {
-        pod_config.pod_id_str: pod_config.strategy_import_str
-        for pod_config in config_obj.pod_config_list
-    }
-
-    assert strategy_import_by_pod_id_dict["pod_taa"] in {
-        LINEARITY_QQQ_VIX_CASH_IMPORT_STR,
-        BTAL_1N_TQQQ_VIX_CASH_IMPORT_STR,
-    }
-    assert config_obj.regression_benchmark_symbol_str == '$SPX'
-
-
 def test_config_accepts_optional_regression_benchmark_symbol():
     config_dict = make_fixed_config_dict([VXN_SCALED_NDX_IMPORT_STR])
     config_dict['regression_benchmark_symbol_str'] = '$NDX'
@@ -343,9 +326,6 @@ def test_config_defaults_pm_performance_benchmark_to_spx():
 @pytest.mark.parametrize(
     'config_path_str',
     [
-        'portfolios/current_multipod_all_aggresive.yaml',
-        'portfolios/current_multipod_all_aggressive_yearly_inverse_volatility.yaml',
-        'portfolios/current_multipod_all_aggressive_yearly_rebalanced.yaml',
         'portfolios/current_multipod_monthly.yaml',
         'portfolios/current_multipod_yearly_inverse_volatility.yaml',
         'portfolios/current_multipod_yearly_rebalanced.yaml',

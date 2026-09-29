@@ -41,7 +41,6 @@ nav:
       - Catalog: strategies/index.md
       - Daily Mean Reversion:
           - DV2: strategies/dv2-mean-reversion.md
-          - QPI + IBS: strategies/qpi-ibs-mean-reversion.md
           - HPI 3-Day: strategies/hpi-3d-mean-reversion.md
           - HPI 2/3/5 Vote: strategies/hpi-235-vote.md
       - Monthly Allocation:
@@ -59,6 +58,8 @@ nav:
   - Research:
       - Overview: research/index.md
       - Deeper Dip Entry Study: research/alpha-studies/mr-deeper-dip-entry-study/index.md
+      - Retired from Live:
+          - QPI + IBS: strategies/qpi-ibs-mean-reversion.md
       - Knowledge Base:
           - Home: research/knowledge-base/index.md
           - All Studies: research/knowledge-base/studies.md

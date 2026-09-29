@@ -155,6 +155,27 @@ def test_unregistered_strategy_defaults_to_research():
     )
 
 
+def test_retired_qpi_is_research_tier():
+    """Owner decision 2026-09-28: QPI left the live set; HPI covers its role."""
+    qpi_import_str = "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy"
+    assert strategy_registry.tier_for(qpi_import_str) is MaturityTier.RESEARCH
+    assert (
+        strategy_registry.tier_for("strategies.qpi.strategy_mr_qpi_ibs_rsi_exit")
+        is MaturityTier.RESEARCH
+    )
+
+
+def test_live_host_decision_sets_equal_the_release_allowlist():
+    """A route the manifest refuses, or a release the host cannot build, is drift."""
+    from alpha.live import strategy_host
+
+    host_import_set = (
+        strategy_host.INCREMENTAL_DECISION_STRATEGY_IMPORT_SET
+        | strategy_host.FULL_TARGET_DECISION_STRATEGY_IMPORT_SET
+    )
+    assert host_import_set == set(release_manifest.SUPPORTED_STRATEGY_IMPORT_TUPLE)
+
+
 def test_tier_resolves_from_the_module_path_alone():
     """Bench discovers files, so it knows the module but not the class."""
     assert (

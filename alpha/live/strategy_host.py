@@ -80,7 +80,6 @@ HPI_LIVE_TRADABLE_OPEN_MARKER_FLOAT = 1.0
 
 INCREMENTAL_DECISION_STRATEGY_IMPORT_SET: set[str] = {
     "strategies.dv2.strategy_mr_dv2:DVO2Strategy",
-    "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy",
     "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote",
     "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit",
 }
@@ -498,87 +497,6 @@ def _build_dv2_decision_plan(
         signal_date_ts=signal_date_ts,
         strategy_obj=strategy_obj,
         snapshot_metadata_dict={"strategy_family_str": "dv2"},
-    )
-
-
-def _run_qpi_ibs_rsi_exit_strategy_for_live_decision(
-    release_obj: LiveRelease,
-    as_of_ts: datetime,
-    pod_state_obj: PodState | None,
-) -> tuple[datetime, Strategy]:
-    qpi_module = import_module("strategies.qpi.strategy_mr_qpi_ibs_rsi_exit")
-    benchmark_list = release_obj.params_dict.get("benchmark_list_str", ["$SPX"])
-    start_date_str = str(release_obj.params_dict.get("start_date_str", "1998-01-01"))
-    indexname_str = str(release_obj.params_dict.get("indexname_str", "S&P 500"))
-
-    _, universe_df = qpi_module.build_index_constituent_matrix(indexname=indexname_str)
-    pricing_data_df = qpi_module.get_prices(
-        universe_df.columns.tolist(),
-        benchmark_list,
-        start_date_str=start_date_str,
-        end_date_str=pd.Timestamp(as_of_ts).strftime("%Y-%m-%d"),
-    )
-    if len(pricing_data_df.index) == 0:
-        raise RuntimeError("QPI IBS RSI exit live host loaded no pricing data.")
-
-    strategy_obj = qpi_module.QPIIbsRsiExitStrategy(
-        name=release_obj.pod_id_str,
-        benchmarks=list(benchmark_list),
-        capital_base=float(release_obj.params_dict.get("capital_base_float", 100_000.0)),
-        slippage=float(release_obj.params_dict.get("slippage_float", 0.00025)),
-        commission_per_share=float(release_obj.params_dict.get("commission_per_share_float", 0.005)),
-        commission_minimum=float(release_obj.params_dict.get("commission_minimum_float", 1.0)),
-        max_positions_int=int(release_obj.params_dict.get("max_positions_int", 10)),
-        qpi_threshold_float=float(release_obj.params_dict.get("qpi_threshold_float", 30.0)),
-        sma_window_int=int(release_obj.params_dict.get("sma_window_int", 200)),
-        qpi_window_int=int(release_obj.params_dict.get("qpi_window_int", 3)),
-        qpi_lookback_years_int=int(release_obj.params_dict.get("qpi_lookback_years_int", 5)),
-        return_lookback_days_int=int(release_obj.params_dict.get("return_lookback_days_int", 3)),
-        max_entry_ibs_float=float(release_obj.params_dict.get("max_entry_ibs_float", 0.1)),
-        exit_ibs_threshold_float=float(release_obj.params_dict.get("exit_ibs_threshold_float", 0.90)),
-        rsi_window_int=int(release_obj.params_dict.get("rsi_window_int", 2)),
-        exit_rsi2_threshold_float=float(release_obj.params_dict.get("exit_rsi2_threshold_float", 90.0)),
-    )
-    strategy_obj.universe_df = universe_df.loc[universe_df.index.isin(pricing_data_df.index)].copy()
-    _seed_strategy_state(strategy_obj, pod_state_obj)
-
-    full_signal_df = strategy_obj.compute_signals(pricing_data_df.copy())
-    signal_date_ts = pd.Timestamp(pricing_data_df.index[-1]).to_pydatetime()
-    strategy_obj.previous_bar = pd.Timestamp(signal_date_ts)
-    # *** CRITICAL*** The live host must map the signal session to the true next tradable session on the pod calendar.
-    strategy_obj.current_bar = pd.Timestamp(
-        scheduler_utils.next_business_day_timestamp_ts(
-            signal_date_ts,
-            session_calendar_id_str=release_obj.session_calendar_id_str,
-        ).date()
-    )
-    close_row_ser = full_signal_df.loc[pd.Timestamp(signal_date_ts)]
-    current_data_df = full_signal_df.loc[: pd.Timestamp(signal_date_ts)]
-    strategy_obj.iterate(
-        current_data_df,
-        close_row_ser,
-        pd.Series(dtype=float),
-    )
-
-    return signal_date_ts, strategy_obj
-
-
-def _build_qpi_ibs_rsi_exit_decision_plan(
-    release_obj: LiveRelease,
-    as_of_ts: datetime,
-    pod_state_obj: PodState | None,
-) -> DecisionPlan:
-    signal_date_ts, strategy_obj = _run_qpi_ibs_rsi_exit_strategy_for_live_decision(
-        release_obj=release_obj,
-        as_of_ts=as_of_ts,
-        pod_state_obj=pod_state_obj,
-    )
-
-    return _build_decision_plan_from_orders(
-        release_obj=release_obj,
-        signal_date_ts=signal_date_ts,
-        strategy_obj=strategy_obj,
-        snapshot_metadata_dict={"strategy_family_str": "qpi_ibs_rsi_exit"},
     )
 
 
@@ -1305,8 +1223,6 @@ def build_decision_plan_for_release(
             return build_core5_decision_plan(release_obj, as_of_ts, pod_state_obj)
         if release_obj.strategy_import_str == "strategies.dv2.strategy_mr_dv2:DVO2Strategy":
             return _build_dv2_decision_plan(release_obj, as_of_ts, pod_state_obj)
-        if release_obj.strategy_import_str == "strategies.qpi.strategy_mr_qpi_ibs_rsi_exit:QPIIbsRsiExitStrategy":
-            return _build_qpi_ibs_rsi_exit_decision_plan(release_obj, as_of_ts, pod_state_obj)
         if (
             release_obj.strategy_import_str
             == "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote"
