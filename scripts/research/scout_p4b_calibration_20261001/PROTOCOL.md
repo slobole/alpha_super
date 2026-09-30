@@ -85,3 +85,19 @@ The 7.0% bound is 5% plus two binomial standard errors at 400 seeds (1.1% each).
 
 **Expected:** Z9 is known dead after publication, so a pass here counts against the gate's power to stop hindsight
 lists, not against its size. It is reported, not a decision input.
+
+## Amendment 1 (2026-10-01, before any Part B calibration result)
+
+A smoke run of the Part B searches on a few seeds, without MCPT, showed that the planted edges as registered do not
+measure power:
+- **Reversal:** too strong. At +0.05% a day the search scored about 1.0 Sharpe above its baseline, so power would be
+  about 100%.
+- **Momentum:** too weak. At a coefficient of 0.10 the score was barely above the null seeds'.
+
+The edges were re-sized by scanning 6-8 seeds of the searches alone, to about 0.4-0.5 Sharpe above the null, the
+range P2 used:
+- **Reversal:** +0.02% a day for 5 sessions.
+- **Momentum:** a coefficient of 0.15.
+
+This changes only the power runs. The null seeds, the nulls, the families, the decision rules and the Part A
+results are unchanged.
