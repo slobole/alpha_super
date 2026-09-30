@@ -13,14 +13,15 @@ from alpha.scout import features as F
 from alpha.scout import panel as panel_module
 from alpha.scout.features import Feature, trailing_return
 from alpha.scout.ledger import Ledger
+from alpha.scout.null import permuted_panel
 from alpha.scout.panel import FIELD_TUPLE, Panel
 from alpha.scout.stations.s1_causality import (
     membership_integrity,
     non_member_share,
     run_s1,
 )
-from alpha.scout.stations.s2_indicator import run_s2
-from alpha.scout.stations.s3_edge import forward_return_df, run_s3
+from alpha.scout.stations.s2_indicator import masters_battery, run_s2, sup_wald_break
+from alpha.scout.stations.s3_edge import add_replication, forward_return_df, run_s3
 
 DATE_INDEX = pd.bdate_range("2014-01-01", "2022-12-30")
 SYMBOL_LIST = [f"S{i:02d}" for i in range(40)]
@@ -148,6 +149,18 @@ def test_s3_finds_a_planted_edge_and_not_noise():
     noise_report_list = [_study(_synthetic_panel(seed_int=seed_int)) for seed_int in range(10, 16)]
     assert all(abs(report.headline_dict["nw_t_float"]) < 3 for report in noise_report_list)
     assert all(report.headline_dict["nw_lag_int"] == 4 for report in noise_report_list)
+    assert edge_report.headline_dict["placebo_p_float"] <= 0.02
+    assert np.mean([report.headline_dict["placebo_p_float"] <= 0.05 for report in noise_report_list]) <= 1 / 3
+
+
+def test_replication_is_a_soft_check_on_the_sibling_sign():
+    report = _study(_synthetic_panel(seed_int=1, edge_float=0.002))
+    sibling = _study(_synthetic_panel(seed_int=5, edge_float=-0.002))
+    sibling.name_str = "sibling"
+    add_replication(report, [sibling])
+    assert report.table_dict["replication"][0]["universe_str"] == "sibling"
+    assert ("same sign in >= 1 sibling universe", False, "soft") in report.check_list
+    assert report.verdict_str == "WATCHLIST (soft fail)"
 
 
 def test_s3_rejects_only_on_evidence_against():
@@ -179,7 +192,44 @@ def test_s3_lag_decay_and_eras_are_reported():
     assert [row["era_str"] for row in report.table_dict["eras"]][-1] == "2016-2022"
 
 
+# ---------------------------------------------------------------- the per-asset null
+def test_permuted_panel_keeps_structure_and_moves_whole_bars():
+    panel = _synthetic_panel()
+    close_df = panel.field("Close").copy()
+    close_df.iloc[:300, 7] = np.nan  # a late listing
+    member_df = panel.member_df.copy()
+    member_df.iloc[:1000, 10] = 0  # joins the index later
+    panel = replace(panel, field_dict={**panel.field_dict, "Close": close_df}, member_df=member_df)
+    permuted = permuted_panel(panel, np.random.default_rng(0))
+    new_close_df = permuted.field("Close")
+    assert (new_close_df.isna() == close_df.isna()).all().all() and permuted.member_df.equals(panel.member_df)
+    first_row_vec = close_df.notna().to_numpy().argmax(axis=0)
+    np.testing.assert_allclose(new_close_df.to_numpy()[first_row_vec, range(len(SYMBOL_LIST))], close_df.to_numpy()[first_row_vec, range(len(SYMBOL_LIST))])
+    for column_int in (3, 10):
+        body_vec = np.log(close_df.iloc[:, column_int] / panel.field("Open").iloc[:, column_int]).dropna().to_numpy()[1:]
+        new_body_vec = np.log(new_close_df.iloc[:, column_int] / permuted.field("Open").iloc[:, column_int]).dropna().to_numpy()[1:]
+        np.testing.assert_allclose(np.sort(new_body_vec), np.sort(body_vec), atol=1e-12)  # whole bars moved, none invented
+        assert not np.allclose(new_body_vec, body_vec)
+    member_mask = (panel.member_df.iloc[1:, 10] == 1).to_numpy()
+    real_member_body_vec = np.log(close_df.iloc[1:, 10] / panel.field("Open").iloc[1:, 10]).to_numpy()[member_mask]
+    new_member_body_vec = np.log(new_close_df.iloc[1:, 10] / permuted.field("Open").iloc[1:, 10]).to_numpy()[member_mask]
+    np.testing.assert_allclose(np.sort(new_member_body_vec), np.sort(real_member_body_vec), atol=1e-12)  # member bars stay member bars
+    assert (permuted.field("High") >= np.maximum(permuted.field("Open"), new_close_df) * (1 - 1e-12))[new_close_df.notna()].fillna(True).all().all()
+
+
 # ---------------------------------------------------------------- S2
+def test_masters_battery_flags_breaks_tails_and_finds_information():
+    rng_obj = np.random.default_rng(0)
+    assert sup_wald_break(np.concatenate([rng_obj.normal(0, 1, 150), rng_obj.normal(1.0, 1, 150)]))["warn_bool"]
+    assert not sup_wald_break(rng_obj.normal(0, 1, 300))["warn_bool"]
+    panel = _synthetic_panel(seed_int=1, edge_float=0.002)
+    eligible_df = pd.DataFrame(True, index=DATE_INDEX, columns=SYMBOL_LIST)
+    forward_df = forward_return_df(panel, 5)
+    excess_df = forward_df.sub(forward_df.mean(axis=1), axis=0)
+    informative = masters_battery(trailing_return(3).compute_fn(panel), eligible_df, excess_df)
+    assert informative["mutual_information"]["bits_float"] > informative["mutual_information"]["shuffled_max_float"]
+    heavy_df = trailing_return(3).compute_fn(panel) ** 3  # cubing piles most values into the middle bins
+    assert any("entropy" in warn_str or "tails" in warn_str for warn_str in masters_battery(heavy_df, eligible_df)["warn_list"])
 def test_s2_flags_an_indicator_in_disguise():
     panel = _synthetic_panel()
     disguised_df = trailing_return(3).compute_fn(panel) * 100 + 7  # a monotone transform of the 3-day return

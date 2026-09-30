@@ -123,16 +123,21 @@ def non_member_share(event_mask_df: pd.DataFrame, panel: Panel) -> float:
     return int((event_df & (member_df != 1)).to_numpy().sum()) / event_count_int if event_count_int else float("nan")
 
 
-def membership_integrity(panel: Panel, recent_window_int: int = 20, max_trimmed_share_float: float = 0.2) -> dict:
-    """Stocks that stopped trading while in the index must be members on their last bar (no tail trim).
+def membership_integrity(panel: Panel, recent_window_int: int = 20) -> dict:
+    """Stocks that stopped trading while in the index must not show a fixed tail trim in their membership.
 
     Looks at symbols whose last bar is before the panel's last date and that were members at some point in their
-    last `recent_window_int` bars (they left by delisting or acquisition, or shortly before). Among those, the
-    share whose membership ends before their last bar is the trimmed share; a tail-trimmed mask puts it near 1.
+    last `recent_window_int` bars (they left by delisting or acquisition, or shortly before). For those whose
+    membership ends before their last bar, the gap is the number of listed sessions after the last member session.
+    Real indexes remove a stock a few sessions before an acquisition closes, at scattered gaps, mostly one session
+    (S&P 500: 31 of 355, NDX: 17 of 52, modal gap 1). A hindsight trim of k sessions gives every such stock the same
+    gap k. Fail when at least 5 stocks share one gap of 2 or more and that gap covers at least half of the trimmed
+    stocks, or when more than 60% of the checked stocks are trimmed. A one-session trim is indistinguishable from
+    real early removals and is not caught.
     """
     close_df, member_df = panel.field("Close"), panel.member_df == 1
     last_date_ts = panel.date_index[-1]
-    checked_int, trimmed_int, example_list = 0, 0, []
+    checked_int, gap_list, example_list = 0, [], []
     for symbol_str in panel.symbol_list:
         valid_index = close_df.index[close_df[symbol_str].notna()]
         if valid_index.empty or valid_index[-1] >= last_date_ts:
@@ -142,14 +147,21 @@ def membership_integrity(panel: Panel, recent_window_int: int = 20, max_trimmed_
             continue
         checked_int += 1
         if not tail_member_ser.iloc[-1]:
-            trimmed_int += 1
+            last_member_ts = tail_member_ser[tail_member_ser].index[-1]
+            gap_list.append(int((valid_index > last_member_ts).sum()))
             if len(example_list) < 5:
-                example_list.append(f"{symbol_str} (last bar {valid_index[-1].date()}, last member {tail_member_ser[tail_member_ser].index[-1].date()})")
-    trimmed_share_float = trimmed_int / checked_int if checked_int else float("nan")
+                example_list.append(f"{symbol_str} (last bar {valid_index[-1].date()}, last member {last_member_ts.date()})")
+    gap_count_ser = pd.Series(gap_list, dtype=int).value_counts()
+    modal_gap_int = int(gap_count_ser.index[0]) if gap_list else 0
+    modal_count_int = int(gap_count_ser.iloc[0]) if gap_list else 0
+    fixed_trim_bool = modal_gap_int >= 2 and modal_count_int >= 5 and modal_count_int >= 0.5 * len(gap_list)
+    trimmed_share_float = len(gap_list) / checked_int if checked_int else float("nan")
     return {
         "checked_int": checked_int,
-        "trimmed_int": trimmed_int,
+        "trimmed_int": len(gap_list),
         "trimmed_share_float": trimmed_share_float,
-        "pass_bool": bool(checked_int >= 5 and trimmed_share_float <= max_trimmed_share_float),
+        "modal_gap_sessions_int": modal_gap_int,
+        "modal_gap_count_int": modal_count_int,
+        "pass_bool": bool(checked_int >= 5 and not fixed_trim_bool and trimmed_share_float <= 0.6),
         "example_list": example_list,
     }

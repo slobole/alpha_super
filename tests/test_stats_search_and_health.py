@@ -15,7 +15,13 @@ from alpha.stats.health import (
     cusum_alarm_bool,
     lower_cusum_path,
 )
-from alpha.stats.mcpt import mcpt, volatility_strata_vec
+from alpha.stats.mcpt import (
+    live_span_source_index_mat,
+    mcpt,
+    mcpt_live_spans,
+    permute_live_spans,
+    volatility_strata_vec,
+)
 from alpha.stats.walk_forward import (
     DESIGN_GRID_TUPLE,
     WalkForwardDesign,
@@ -109,6 +115,46 @@ def test_mcpt_input_errors():
         mcpt(lambda mat: float("nan"), np.zeros((50, 1)), permutation_count_int=5, random_seed_int=0)
     with pytest.raises(ValueError):
         volatility_strata_vec(np.zeros(30), window_int=63)
+
+
+def test_live_span_null_keeps_each_asset_and_stratum_and_the_shared_cross_section():
+    rng_obj = np.random.default_rng(7)
+    return_mat = rng_obj.normal(0, 0.01, (400, 4))
+    return_mat[:150, 2] = np.nan  # lists late
+    return_mat[300:, 3] = np.nan  # delists
+    strata_mat = np.zeros((400, 4), dtype=int)
+    strata_mat[200:, 0] = strata_mat[200:, 1] = 1  # e.g. index members from day 200
+    source_mat = live_span_source_index_mat(np.isfinite(return_mat), np.random.default_rng(0), strata_mat)
+    permuted_mat = permute_live_spans(return_mat, source_mat)
+    np.testing.assert_array_equal(np.isnan(permuted_mat), np.isnan(return_mat))
+    for column_int in range(4):
+        for stratum_int in (0, 1):
+            cell_mask = np.isfinite(return_mat[:, column_int]) & (strata_mat[:, column_int] == stratum_int)
+            # A bijection of the asset's own rows inside the stratum.
+            np.testing.assert_array_equal(np.sort(source_mat[cell_mask, column_int]), np.flatnonzero(cell_mask))
+    np.testing.assert_array_equal(source_mat[:, 0], source_mat[:, 1])  # same rows and strata: same shuffle
+    assert not np.array_equal(source_mat[:, 0], np.arange(400))
+
+
+def test_mcpt_live_spans_finds_structure_and_stays_quiet_on_noise():
+    def trend_score(return_mat):
+        filled_mat = np.nan_to_num(return_mat)
+        # *** CRITICAL*** yesterday's sign decides today's position.
+        return float(np.nanmean(np.sign(filled_mat[:-1]) * filled_mat[1:]))
+
+    rng_obj = np.random.default_rng(3)
+    trending_mat = np.empty((1200, 5))
+    trending_mat[0] = rng_obj.normal(0, 0.01, 5)
+    for t_int in range(1, 1200):
+        trending_mat[t_int] = 0.3 * trending_mat[t_int - 1] + rng_obj.normal(0, 0.01, 5)
+    trending_mat[:400, 4] = np.nan
+    assert mcpt_live_spans(trend_score, trending_mat, 200, 1).p_value_float <= 0.01
+    noise_p_list = []
+    for seed_int in range(30):
+        noise_mat = np.random.default_rng(50 + seed_int).normal(0, 0.01, (300, 3))
+        noise_mat[:100, 2] = np.nan
+        noise_p_list.append(mcpt_live_spans(trend_score, noise_mat, 60, seed_int).p_value_float)
+    assert stats.kstest(noise_p_list, "uniform").pvalue > 0.01
 
 
 def test_volatility_strata_are_trailing_and_balanced():

@@ -7,9 +7,17 @@ The owner's Pakal edge notebooks, kept in structure and corrected in three ways:
    persistent signals and sector co-movement; the date-level test held 5%.
    A second estimator weights every event equally (a ratio of sums over dates, with the same date-level Newey-West
    error, so dependence within a date is still respected). It is more powerful when event counts vary a lot, but
-   its size is not yet calibrated (P4b). Both are reported; a hard fail needs both to point against the idea.
+   P4b measured 9.5% false positives at nominal 5% with sector factors and a persistent signal, so it is
+   informational: it can save an idea from a hard fail, never cause one.
 3. Everything is broken down: eras, years, volatility regimes, liquidity terciles, lag decay, crisis windows, the
    most extreme event-dates removed, and costs.
+
+4. Placebo: the event mask is shifted in time by random offsets of at least a year, which keeps its persistence and
+   date clustering and breaks its link with returns; p = the share of shifted date-mean excesses at least as good
+   as the real one. P4b calibrated it at 4.3-4.5% false positives on panels where every stock is eligible; here the
+   shifted events are re-intersected with eligibility (regime and membership), which thins them, so its size on
+   real panels is not calibrated. Diagnostic.
+5. Replication (`add_replication`): the same sign in at least one sibling universe (soft check).
 
 Diagnostics, not trading rules: the volatility terciles and indicator deciles use full-sample cut points.
 
@@ -46,6 +54,7 @@ class EdgeReport:
     table_dict: dict = field(default_factory=dict)
     check_list: list = field(default_factory=list)
     verdict_str: str = ""
+    expected_sign_int: int = 1
 
 
 def forward_return_df(panel: Panel, horizon_int: int, lag_int: int = 0) -> pd.DataFrame:
@@ -82,6 +91,51 @@ def _per_event_nw(value_df: pd.DataFrame, mask_df: pd.DataFrame, horizon_int: in
     return {"mean_float": mean_float, "t_float": mean_float * float(count_ser.mean()) / residual_nw.standard_error_float}
 
 
+def _shift_placebo_p(
+    excess_df: pd.DataFrame, event_mask_df: pd.DataFrame, eligible_mask_df: pd.DataFrame, expected_sign_int: int,
+    draw_count_int: int = 200, min_shift_int: int = 252, random_seed_int: int = 0,
+) -> float:
+    date_count_int = len(event_mask_df.index)
+    if date_count_int <= 2 * min_shift_int:
+        return float("nan")
+    excess_mat, eligible_mat = excess_df.to_numpy(), eligible_mask_df.to_numpy()
+    event_mat = event_mask_df.to_numpy()
+
+    def statistic(mask_mat: np.ndarray) -> float:
+        count_vec = (mask_mat & np.isfinite(excess_mat)).sum(axis=1)
+        sum_vec = np.where(mask_mat, np.nan_to_num(excess_mat), 0.0).sum(axis=1)
+        return float(np.mean(sum_vec[count_vec > 0] / count_vec[count_vec > 0])) if (count_vec > 0).any() else float("nan")
+
+    observed_float = expected_sign_int * statistic(event_mat)
+    rng_obj = np.random.default_rng(random_seed_int)
+    shift_vec = rng_obj.integers(min_shift_int, date_count_int - min_shift_int, draw_count_int)
+    null_vec = np.array([expected_sign_int * statistic(np.roll(event_mat, shift_int, axis=0) & eligible_mat) for shift_int in shift_vec])
+    null_vec = null_vec[np.isfinite(null_vec)]
+    return float((1 + np.sum(null_vec >= observed_float)) / (1 + null_vec.size))
+
+
+def _set_verdict(report: EdgeReport) -> None:
+    hard_fail_bool = any(not passed for _, passed, kind in report.check_list if kind == "hard")
+    soft_fail_bool = any(not passed for _, passed, kind in report.check_list if kind == "soft")
+    report.verdict_str = "REJECTED (hard fail)" if hard_fail_bool else ("WATCHLIST (soft fail)" if soft_fail_bool else "PASS")
+
+
+def add_replication(report: EdgeReport, sibling_report_list: list[EdgeReport]) -> EdgeReport:
+    """Design S3 replication: the same sign (date-level mean excess) in at least one sibling universe. Soft check."""
+    expected_sign_int = report.expected_sign_int
+    row_list = [
+        {"universe_str": sibling.name_str, "date_mean_excess_float": sibling.headline_dict["date_mean_excess_float"],
+         "nw_t_float": sibling.headline_dict["nw_t_float"], "events_int": sibling.headline_dict["events_int"]}
+        for sibling in sibling_report_list
+    ]
+    report.table_dict["replication"] = row_list
+    replicated_bool = any(expected_sign_int * row["date_mean_excess_float"] > 0 for row in row_list)
+    report.check_list = [row for row in report.check_list if row[0] != "same sign in >= 1 sibling universe"]
+    report.check_list.append(("same sign in >= 1 sibling universe", replicated_bool, "soft"))
+    _set_verdict(report)
+    return report
+
+
 def run_s3(
     name_str: str,
     panel: Panel,
@@ -113,6 +167,7 @@ def run_s3(
     report = EdgeReport(
         name_str=name_str,
         horizon_int=horizon_int,
+        expected_sign_int=expected_sign_int,
         headline_dict={
             "events_int": int(event_excess_vec.size),
             "event_dates_int": headline_nw["dates_int"],
@@ -210,7 +265,7 @@ def run_s3(
             not (expected_sign_int * value > 0) for value in tercile_mean_list[1:]
         )
     # D22: a hard fail needs evidence against the idea: the sign is wrong under both estimators, or the calibrated
-    # date-level test says the effect is significantly the wrong way (the per-event t is not calibrated yet).
+    # date-level test says the effect is significantly the wrong way (the per-event t is over-sized, P4b).
     signed_t_list = [expected_sign_int * headline_nw["t_float"], expected_sign_int * per_event_nw["t_float"]]
     report.check_list = [
         ("sign as expected under at least one estimator", any(t_float > 0 for t_float in signed_t_list if np.isfinite(t_float)), "hard"),
@@ -227,7 +282,6 @@ def run_s3(
         "cost_coverage_float": cost_coverage_float,
         "decile_spearman_float": decile_spearman_float,
     })
-    hard_fail_bool = any(not passed for _, passed, kind in report.check_list if kind == "hard")
-    soft_fail_bool = any(not passed for _, passed, kind in report.check_list if kind == "soft")
-    report.verdict_str = "REJECTED (hard fail)" if hard_fail_bool else ("WATCHLIST (soft fail)" if soft_fail_bool else "PASS")
+    report.headline_dict["placebo_p_float"] = _shift_placebo_p(excess_df, event_mask_df, eligible_mask_df, expected_sign_int)
+    _set_verdict(report)
     return report

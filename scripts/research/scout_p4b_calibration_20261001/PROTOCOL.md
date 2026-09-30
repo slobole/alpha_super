@@ -101,3 +101,33 @@ range P2 used:
 
 This changes only the power runs. The null seeds, the nulls, the families, the decision rules and the Part A
 results are unchanged.
+
+## Amendment 2 (2026-10-01, after an independent code review, before any Part B result)
+
+**Why.** The review showed that the per-asset null keeps co-movement only where two stocks are live, and in the
+same membership state, on both dates.
+- On the S&P 500 a stock is a member for about a third of its listed life. One null draw cut the equal-weight
+  member market's volatility from 1.34% to 0.94%.
+- With market drift, the calmer null baseline gains Sharpe, so a score of the form "selected Sharpe minus baseline
+  Sharpe" is shifted against the null by about 0.3 of its standard deviation. That is roughly 9% false passes at a
+  nominal 5%.
+- The Part B panel as registered could not see this: it had zero drift and a member tenure of 0.75.
+
+The first Part B launch was stopped with no results read.
+
+**Changes:**
+1. **Score:** the Sharpe of the daily active return of the configuration over the baseline, the equal-weight members.
+   Plateau selection runs on these active Sharpes. Drift and common moves cancel inside the active return. A paired
+   check at 8 bp a day of drift moved the observed-minus-null gap by −0.07 (se 0.05) for momentum and −0.05 (0.06)
+   for reversal: no bias toward false passes.
+2. **Panel realism:**
+   - market drift of +0.04% a day on every stock;
+   - 50 index members out of 150 stocks. Member tenure is now 0.41 (S&P 500: 0.37), and the null keeps 77-81% of
+     the equal-weight member volatility (S&P 500: 71%).
+3. **Timing:** the baseline decides at the close of t and earns from t+2, like the strategies.
+4. **Planted momentum drift:** uses only listed returns.
+5. **`permuted_panel`:**
+   - Volume and Turnover stay on their real dates. Liquidity is structural, like membership.
+   - High and Low are clipped so that they bracket Open and Close exactly.
+
+The decision rules are unchanged.
