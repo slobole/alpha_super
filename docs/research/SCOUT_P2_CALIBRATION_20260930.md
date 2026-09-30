@@ -16,9 +16,28 @@ Code in `scripts/research/scout_p2_calibration_20260930/`. Results in `results/s
   - False pass on realistic noise: 4.4% on a varied grid, 4.5% on a grid of near-duplicate configurations (2,000
     histories each).
   - Power at Sharpe 0.52: 62% and 75%. At Sharpe 0.79: 93% and 95%.
-  - Its size is exact by construction and does not depend on estimating how many independent trials were run.
+  - It does not depend on estimating how many independent trials were run.
+  - Its size is not exact by construction on GARCH data (dates are not exchangeable). The 4.4-4.5% is an empirical
+    result.
+  - **Three conditions from the review of amendment 1 (binding for P4/P5):**
+    1. **Panels whose membership changes over time** (every point-in-time stock universe): MCPT cannot run there
+       until P4 builds a per-asset null, so S5 cannot pass and such families go to WATCHLIST. Cutting to a common
+       live span is not allowed: it keeps only survivors and invents serial structure. The harness now refuses such
+       panels, also when zero-filled gaps are declared with an availability mask.
+    2. **The search must score the selected Sharpe minus a registered baseline on the same permuted path**
+       (buy-and-hold, or volatility-targeted buy-and-hold). Scoring raw Sharpe, plain MCPT passed 38% of a family of
+       volatility-sized positions with drift but no signal (reviewer's simulation). The baseline-relative score has
+       to be calibrated before P5 relies on it.
+    3. **The search re-run inside MCPT is the union of every registered grid of the family,** so re-registering a
+       grid does not buy a fresh 5% chance.
 - **DSR with a correlation-aware benchmark ("DSR-corr") becomes a WARN-level check, not a gate.**
-  - It is sound (2.2% and 3.5% false pass) but more conservative (power 53% and 73% at Sharpe 0.52).
+  - It is sound (2.2% and 3.5% false pass) but more conservative (power 53% and 73% at Sharpe 0.52). It is
+    conservative because PSR compares with the null MEAN but uses one estimate's spread.
+  - It will be computed as the exact p-value against the simulated null draws (`null_selected_sharpe_p_value`,
+    p ≤ 0.05). The reviewer's estimate is about 5% size and power 66% / 76% at Sharpe 0.52; this is not yet
+    re-calibrated here.
+  - The earlier grids' return columns go into the correlation matrix. Counting them as independent draws overstates
+    the benchmark when they are near-duplicates (0.23 → 0.58 annual Sharpe with 100 such draws).
   - It is kept because it is the only test that also counts the family's earlier trials from the ledger. MCPT only
     sees the grid it re-runs.
   - A miss needs a written owner note before promotion. It does not stop the family.
@@ -144,9 +163,13 @@ and the grid's own correlation matrix.
 | Alpha101 long-short, **gross**, 2000-2011 | 97 | 0.17 | 2.01 | 0.98 pass (51) | 1.00 pass (0.65) | 0.82 gross |
 
 - **Z8 and Z9 on the neutral list** never beat equal weight in sample. Any test rejects them.
-- **Z9 on its 2017 list** was passed by the old DSR because the 24 variants counted as one trial. The correlation-aware
-  benchmark (0.41 annual Sharpe of pure selection luck) rejects it. Choosing the list after its sectors had won is a
-  further, unrecorded search that no statistic on the grid can see; that is S0's job.
+- **Z9 on its 2017 list** was passed by the old DSR because the 24 variants counted as one trial.
+  - The correlation-aware benchmark (0.41 annual Sharpe of pure selection luck) rejects it. But under A5 that is a
+    WARN, not the gate.
+  - MCPT, the gate, was not run here. The reviewer's rough estimate is p ≈ 0.07, borderline.
+  - So this study does not show that Scout's gate would have stopped Z9. It shows the WARN would have flagged it.
+  - Choosing the list after its sectors had won is a further, unrecorded search that no statistic on the grid can see;
+    that is S0's job. MCPT on Z9 is to be run in P4.
 - **Alpha101's gross edge was real in 2000-2011 and stayed positive gross afterwards (0.82).** It died of costs: the
   median break-even fell to about 1 bp per side. S5 is right to pass it gross. S4's cost stress is the guard.
 - MCPT could not be run here, because re-running these searches needs their full simulators.
@@ -167,9 +190,13 @@ did not change that run's decision.
 
 1. **S3 significance:** the date-level Newey-West t, whose p-value feeds the ledger-level Benjamini–Yekutieli FDR.
    The within-date permutation is a diagnostic until P4 calibrates a persistence-preserving version.
-2. **S5 gate:** MCPT, plain date shuffle, p ≤ 0.05, re-running the full search including plateau selection.
-3. **S5 WARN:** DSR-corr ≥ 0.95, with the benchmark simulated from the family's correlation matrix and the ledger's
-   earlier trials of the same family added as independent draws. A miss needs a written owner note.
+2. **S5 gate:** MCPT, plain date shuffle, p ≤ 0.05, under the three conditions in the verdict:
+   - no point-in-time panels until P4 (WATCHLIST meanwhile);
+   - a baseline-relative search score;
+   - the union of the family's registered grids.
+3. **S5 WARN:** DSR-corr as an exact null p-value ≤ 0.05, simulated from the correlation matrix of this grid and the
+   family's earlier grids. Earlier trials without stored series are added as independent draws. A miss needs a
+   written owner note.
 4. **S5 printed diagnostics:** walk-forward efficiency and the 8-design strip, PBO, and the old DSR (for reference
    only).
 5. **Every S5 miss is a soft fail (WATCHLIST, D22).**

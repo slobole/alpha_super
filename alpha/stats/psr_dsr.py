@@ -141,14 +141,51 @@ def null_selected_sharpe_benchmark(
     never collapses to 0 when the configurations are highly correlated, and it does not need the cross-sectional
     Sharpe variance, which mixes true Sharpe differences into the null.
     """
+    return float(
+        null_selected_sharpe_draws(
+            correlation_mat, observation_count_int, select_index_fn, prior_independent_trial_count_int, draw_count_int,
+            random_seed_int,
+        ).mean()
+    )
+
+
+def _unit_correlation_root(correlation_mat) -> np.ndarray:
     correlation_arr = np.atleast_2d(np.asarray(correlation_mat, dtype=float))
+    if correlation_arr.shape[0] != correlation_arr.shape[1] or not np.all(np.isfinite(correlation_arr)):
+        raise ValueError(
+            "correlation_mat must be a finite square matrix; drop constant (never-trading) configurations first "
+            "and count them as prior trials."
+        )
+    symmetric_arr = (correlation_arr + correlation_arr.T) / 2.0
+    eigenvalue_vec, eigenvector_mat = np.linalg.eigh(symmetric_arr)
+    repaired_arr = (eigenvector_mat * np.clip(eigenvalue_vec, 0.0, None)) @ eigenvector_mat.T
+    # Rescale to a unit diagonal after clipping negative eigenvalues (pairwise-complete matrices need not be PSD).
+    inverse_scale_vec = 1.0 / np.sqrt(np.clip(np.diag(repaired_arr), 1e-12, None))
+    repaired_arr = repaired_arr * inverse_scale_vec[:, None] * inverse_scale_vec[None, :]
+    eigenvalue_vec, eigenvector_mat = np.linalg.eigh(repaired_arr)
+    return eigenvector_mat * np.sqrt(np.clip(eigenvalue_vec, 0.0, None))
+
+
+def null_selected_sharpe_draws(
+    correlation_mat,
+    observation_count_int: int,
+    select_index_fn=None,
+    prior_independent_trial_count_int: int = 0,
+    draw_count_int: int = 20000,
+    random_seed_int: int = 0,
+) -> np.ndarray:
+    """Draws of the per-period Sharpe the search would select under the null (see `null_selected_sharpe_benchmark`).
+
+    Returning draws rather than only their mean allows an exact null p-value. When the earlier grids of the family
+    have stored return series, put their columns into `correlation_mat` (their true correlation) instead of counting
+    them as independent prior trials, which overstates the benchmark when they are near-duplicates.
+    """
     if observation_count_int < 2:
         raise ValueError("observation_count_int must be >= 2.")
-    eigenvalue_vec, eigenvector_mat = np.linalg.eigh((correlation_arr + correlation_arr.T) / 2.0)
-    root_mat = eigenvector_mat * np.sqrt(np.clip(eigenvalue_vec, 0.0, None))
+    root_mat = _unit_correlation_root(correlation_mat)
     rng_obj = np.random.default_rng(random_seed_int)
     scale_float = 1.0 / np.sqrt(observation_count_int - 1.0)
-    draw_mat = rng_obj.standard_normal((draw_count_int, correlation_arr.shape[0])) @ root_mat.T * scale_float
+    draw_mat = rng_obj.standard_normal((draw_count_int, root_mat.shape[0])) @ root_mat.T * scale_float
     if select_index_fn is None:
         selected_vec = draw_mat.max(axis=1)
     else:
@@ -156,7 +193,17 @@ def null_selected_sharpe_benchmark(
     if prior_independent_trial_count_int > 0:
         prior_max_vec = rng_obj.standard_normal((draw_count_int, prior_independent_trial_count_int)).max(axis=1) * scale_float
         selected_vec = np.maximum(selected_vec, prior_max_vec)
-    return float(selected_vec.mean())
+    return selected_vec
+
+
+def null_selected_sharpe_p_value(observed_sharpe_float: float, null_draw_vec) -> float:
+    """Exact one-sided p-value of the selected per-period Sharpe against its simulated null (+1 correction).
+
+    Preferred over PSR(mean benchmark) >= 0.95, which compares with the MEAN of the null but uses one estimate's
+    spread and so runs below its nominal size (P2 review: 2.2-3.5% at nominal 5%).
+    """
+    null_arr = np.asarray(null_draw_vec, dtype=float)
+    return float((1.0 + np.sum(null_arr >= observed_sharpe_float)) / (1.0 + null_arr.size))
 
 
 @dataclass(frozen=True)

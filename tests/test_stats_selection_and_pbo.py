@@ -131,3 +131,45 @@ def test_pbo_uses_the_selector_and_counts_the_median_as_overfit():
     oracle_result = probability_of_backtest_overfitting(return_mat, 2, select_fn=lambda sharpe_vec: int(np.argmin(sharpe_vec)))
     assert oracle_result.pbo_float == 0.0
     assert np.allclose(oracle_result.logit_vec, np.log(0.75 / 0.25))
+
+
+def test_null_p_value_and_matrix_validation():
+    from alpha.stats.psr_dsr import null_selected_sharpe_draws, null_selected_sharpe_p_value
+
+    null_vec = null_selected_sharpe_draws(np.eye(5), 1001, draw_count_int=50_000)
+    median_float = float(np.median(null_vec))
+    assert null_selected_sharpe_p_value(median_float, null_vec) == pytest.approx(0.5, abs=0.01)
+    assert null_selected_sharpe_p_value(1.0, null_vec) == pytest.approx(1 / 50_001)
+    bad_mat = np.eye(3)
+    bad_mat[0, 1] = bad_mat[1, 0] = np.nan
+    with pytest.raises(ValueError, match="finite square"):
+        null_selected_sharpe_draws(bad_mat, 1001)
+    # A non-PSD pairwise matrix is repaired to a valid unit-diagonal correlation.
+    from alpha.stats.psr_dsr import _unit_correlation_root
+
+    root_mat = _unit_correlation_root(np.array([[1.0, 0.9, -0.9], [0.9, 1.0, 0.9], [-0.9, 0.9, 1.0]]))
+    np.testing.assert_allclose(np.diag(root_mat @ root_mat.T), 1.0, atol=1e-9)
+
+
+def test_plateau_refuses_lone_configurations_and_nan_rows():
+    from alpha.stats.selection import plateau_choice_index_mat
+
+    sharpe_grid = np.array([[np.nan, 3.0, np.nan], [np.nan, np.nan, np.nan], [0.5, 0.6, 0.4]])
+    choice = plateau_choice(sharpe_grid.reshape(-1), (3, 3))  # the lone 3.0 has no finite neighbour
+    assert choice.flat_index_int in (6, 7, 8)
+    with pytest.raises(ValueError, match="no plateau"):
+        plateau_choice(np.array([np.nan, 3.0, np.nan, 2.0]), (4,))
+    with pytest.raises(ValueError, match="finite"):
+        plateau_choice_index_mat(np.array([[0.1, np.nan, 0.2]]), (3,))
+
+
+def test_mcpt_refuses_zero_filled_listings_when_the_mask_is_given():
+    from alpha.stats.mcpt import mcpt
+
+    return_mat = np.random.default_rng(0).normal(0, 0.01, (200, 2))
+    return_mat[:100, 1] = 0.0  # zero-filled before listing: invisible without a mask
+    mcpt(lambda mat: 0.0, return_mat, permutation_count_int=3, random_seed_int=0)
+    mask_mat = np.ones_like(return_mat, dtype=bool)
+    mask_mat[:100, 1] = False
+    with pytest.raises(ValueError, match="S5 cannot pass"):
+        mcpt(lambda mat: 0.0, return_mat, permutation_count_int=3, random_seed_int=0, availability_mask_mat=mask_mat)

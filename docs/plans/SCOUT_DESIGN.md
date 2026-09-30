@@ -64,7 +64,7 @@ walk-forward) are affordable. Speed is never the goal.
 | D16 | Capacity is judged on today's volumes, separately from small-account friction | Owner rule (tradability from today) |
 | D17 | Shadow (S8) kill and confirm rules are written before shadow starts | Otherwise the forward test becomes another tuning loop |
 | D18 | The statistics live in a shared `alpha/stats/` package, not inside `alpha/scout/` | Pakal, Scout and the live pod-health report use one implementation; `alpha/live` may import `alpha.stats` but never `alpha.scout` (A1) |
-| D19 | S5 gates on **MCPT alone** (plain date shuffle, p ≤ 0.05, full search re-run); DSR with a correlation-aware benchmark (plus the ledger's earlier family trials) is a WARN; walk-forward, PBO, CPCV and the haircut are printed diagnostics | P2 calibration (amendment 1): MCPT held 4.4-4.5% false pass with 93-95% power at Sharpe 0.79 in both a varied and a near-duplicate grid; the clustered-N_eff DSR reached 11.8% false pass; requiring every test rejected 44% of real edges (A1, A5) |
+| D19 | S5 gates on **MCPT alone** (plain date shuffle, p ≤ 0.05; full search over the union of the family's registered grids; score = selected Sharpe minus a registered baseline on the same path; not runnable on point-in-time panels until P4, so they WATCHLIST); DSR as an exact correlation-aware null p-value is a WARN; walk-forward, PBO, CPCV and the haircut are printed diagnostics | P2 calibration (amendment 1): MCPT held 4.4-4.5% false pass with 93-95% power at Sharpe 0.79 in a varied and a near-duplicate grid; the clustered-N_eff DSR reached 11.8% false pass; requiring MCPT, DSR and walk-forward together rejected 16-26% of Sharpe-0.79 edges and 43-61% of Sharpe-0.52 edges (A1, A5) |
 | D20 | A calibration study on known cases decides which tests gate, before the pipeline is built | A test earns a gate only if it separates noise and dead strategies from planted edges better than the gates already in place (A1) |
 | D21 | A pod-health monitor for the live pods (Cold Blood Index with block bootstrap, plus CUSUM) is built first | It protects real money now and needs only the shared stats package; it is the S8 machinery pointed at LIVE pods (A1) |
 | D22 | **Reject on evidence against, not on missing proof.** Only causality violations (S1), a wrong-sign or absent edge (S3), and a negative net result at double costs (S4) end a family. A borderline statistical result goes to `WATCHLIST` with cheap forward tracking, not to `REJECTED` | Our history has one sample; strict conjunctions of tests on it throw away real edges. Forward data after registration is clean, so borderline ideas can earn their way in over time (A2) |
@@ -463,10 +463,19 @@ All tests run on the family's registered grid. The whole selection procedure fro
 re-applied inside every resample, so the tests judge the *process*, not a single picked configuration.
 
 **A5 (P2 calibration) supersedes the gate list below.**
-- **The only S5 gate is MCPT:** plain date shuffle, p ≤ 0.05, re-running the full search including plateau selection.
-- **DSR is a WARN,** not a gate. Its benchmark is `null_selected_sharpe_benchmark`: the expected Sharpe of the
-  configuration the search would select with no edge, simulated from the family's own correlation matrix, with the
-  ledger's earlier trials of the family as extra independent draws. PASS ≥ 0.95. A miss needs a written owner note.
+- **The only S5 gate is MCPT:** plain date shuffle, p ≤ 0.05, re-running the full search including plateau selection,
+  under three conditions:
+  - **Search space:** it re-runs the union of every registered grid of the family.
+  - **Score:** the selected Sharpe minus a registered baseline (buy-and-hold or volatility-targeted buy-and-hold) on
+    the same permuted path. The P2 review showed raw scoring passes volatility-sized families with drift but no
+    signal 38% of the time; calibrate before P5 relies on it.
+  - **Point-in-time panels:** it is not runnable on panels whose membership changes over time until P4 builds a
+    per-asset null; such families cannot pass S5 and go to WATCHLIST.
+  - Its 4.4-4.5% size is empirical, not exact, on GARCH data.
+- **DSR is a WARN,** not a gate. It is an exact null p-value (`null_selected_sharpe_draws` +
+  `null_selected_sharpe_p_value`, p ≤ 0.05): where the selected Sharpe falls among the Sharpes the search would select
+  with no edge, simulated from the correlation matrix of this grid and the family's earlier grids. Earlier trials
+  without stored series count as independent draws. A miss needs a written owner note.
 - **Printed diagnostics:** walk-forward (efficiency and the 8-design strip) and PBO.
 - **The clustered-N_eff SR*_0 formula below is retired** for gating: its deflation vanishes when N_eff collapses.
 
@@ -848,8 +857,10 @@ alpha/stats/pod_monitor.py). Choices and findings:
   and the within-date permutation 11%. Only the date-level Newey-West t held 5%, so it is S3's significance test and
   the permutation is a diagnostic until P4 calibrates a persistence-preserving version (the panel is exploratory and
   labelled so).
-- **Real dead cases:** the correlation-aware DSR rejects Zorro Z9 on its hindsight-picked list, which the old DSR
-  passed. It passes Alpha101 gross, whose edge was real and was killed by costs (S4's job).
+- **Real dead cases:**
+  - The correlation-aware DSR (now a WARN) flags Zorro Z9 on its hindsight-picked list, which the old DSR passed.
+  - MCPT, the gate, was not run on it; the reviewer's rough estimate is p ≈ 0.07. MCPT on Z9 is to be run in P4.
+  - The correlation-aware DSR passes Alpha101 gross, whose edge was real and was killed by costs (S4's job).
 - **The first run's "DSR alone" is withdrawn.** It sat on the sampling boundary, used the flawed DSR, and had edge
   labels that were too high.
 - **S0** must record how a universe or asset list was chosen and whether results had been seen (P4).

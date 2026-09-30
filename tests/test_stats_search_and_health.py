@@ -94,7 +94,7 @@ def test_volatility_strata_match_a_trailing_rolling_std():
 def test_mcpt_refuses_a_moving_nan_pattern():
     return_mat = np.random.default_rng(0).normal(0, 0.01, (200, 3))
     return_mat[:100, 2] = np.nan  # asset 2 lists halfway through
-    with pytest.raises(ValueError, match="NaN pattern"):
+    with pytest.raises(ValueError, match="availability changes"):
         mcpt(lambda mat: 0.0, return_mat, permutation_count_int=5, random_seed_int=0)
     return_mat[:, 2] = np.nan  # a column that is missing everywhere is a fixed pattern
     mcpt(lambda mat: 0.0, return_mat, permutation_count_int=5, random_seed_int=0)

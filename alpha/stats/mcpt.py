@@ -89,16 +89,25 @@ def mcpt(
     permutation_count_int: int,
     random_seed_int: int,
     strata_vec=None,
+    availability_mask_mat=None,
 ) -> McptResult:
-    """Run the search on the real history and on `permutation_count_int` date-shuffled histories."""
+    """Run the search on the real history and on `permutation_count_int` date-shuffled histories.
+
+    `availability_mask_mat` (dates x assets, True where the asset is listed / a member) must be passed whenever
+    missing data were filled (for example zeros before a listing); a mask that changes over time is refused just
+    like a changing NaN pattern, because zero-filled spans would enter the null as fake flat days.
+    """
     return_arr = np.asarray(return_mat, dtype=float)
     if permutation_count_int < 1:
         raise ValueError("permutation_count_int must be >= 1.")
     missing_mask_mat = np.isnan(return_arr).reshape(return_arr.shape[0], -1)
+    if availability_mask_mat is not None:
+        missing_mask_mat = missing_mask_mat | ~np.asarray(availability_mask_mat, dtype=bool).reshape(missing_mask_mat.shape)
     if missing_mask_mat.any() and not (missing_mask_mat == missing_mask_mat[0]).all():
         raise ValueError(
-            "return_mat has a NaN pattern that changes over time (point-in-time membership or late listings); "
-            "row shuffling would scatter it. Use a common live span until the per-asset null (P4) exists."
+            "The panel's availability changes over time (point-in-time membership or late listings); row shuffling "
+            "would scatter it. Do NOT cut to a common live span (that keeps only survivors and invents serial "
+            "structure). MCPT cannot run on this panel until the per-asset null (P4) exists; S5 cannot pass meanwhile."
         )
     date_count_int = return_arr.shape[0]
     group_vec = np.zeros(date_count_int, dtype=int) if strata_vec is None else np.asarray(strata_vec)

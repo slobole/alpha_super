@@ -60,7 +60,15 @@ def plateau_choice(sharpe_vec, grid_shape_tuple: tuple[int, ...]) -> PlateauChoi
     if not np.isfinite(sharpe_arr).any():
         raise ValueError("No configuration has a finite Sharpe.")
     median_arr = neighbourhood_median_vec(sharpe_arr, grid_shape_tuple)
-    score_arr = np.where(np.isfinite(median_arr) & np.isfinite(sharpe_arr), median_arr, -np.inf)
+    # A configuration whose neighbours are all undefined has no plateau to stand on: its "median" would be its own
+    # Sharpe, which is exactly the lone peak the rule exists to avoid.
+    finite_neighbour_count_vec = np.array(
+        [np.isfinite(sharpe_arr[member_idx[1:]]).sum() for member_idx in _neighbour_index_list(grid_shape_tuple)]
+    )
+    has_plateau_vec = (finite_neighbour_count_vec > 0) | (sharpe_arr.size == 1)
+    score_arr = np.where(np.isfinite(median_arr) & np.isfinite(sharpe_arr) & has_plateau_vec, median_arr, -np.inf)
+    if not np.isfinite(score_arr).any():
+        raise ValueError("No configuration has a finite Sharpe with a finite neighbour: there is no plateau to choose.")
     own_arr = np.where(np.isfinite(sharpe_arr), sharpe_arr, -np.inf)
     # lexsort: last key is primary. Highest median, then highest own Sharpe, then lowest index.
     order_arr = np.lexsort((np.arange(sharpe_arr.size), -own_arr, -score_arr))
@@ -97,6 +105,8 @@ def plateau_choice_index_mat(sharpe_mat, grid_shape_tuple: tuple[int, ...]) -> n
     Same rule and tie-breaks as `plateau_choice`; rows must be finite (used for null simulations).
     """
     sharpe_arr = np.asarray(sharpe_mat, dtype=float)
+    if not np.all(np.isfinite(sharpe_arr)):
+        raise ValueError("plateau_choice_index_mat needs finite rows; use plateau_choice for grids with NaN.")
     median_mat = np.column_stack(
         [np.median(sharpe_arr[:, member_idx], axis=1) for member_idx in _neighbour_index_list(grid_shape_tuple)]
     )
