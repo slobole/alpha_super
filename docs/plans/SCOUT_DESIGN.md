@@ -798,6 +798,32 @@ reference implementations, test coverage with mutation experiments) led to these
   run inside the lock, the default ledger is always the main checkout's (worktree writes would vanish),
   trials outside the frozen grid are refused, and every trial row carries station, mode and code commit.
 
+**A4 (2026-09-30, P1 build: live pod health).** `python -m alpha.scout health` (alpha/scout/pod_health.py, maths in
+alpha/stats/pod_monitor.py). Choices and findings:
+- **Inputs.** Realised = IBKR Flex daily TWR (flow-neutral, dividends included), read through the pure
+  `client_reporting` parser or the `mode=ro` store reader, from a pinned monitoring start (2026-07-01 for both pods);
+  non-session postings fold into the next session, and a missing session stops the report instead of hiding returns.
+  Expected = backtest returns that END before the monitoring start. NDX VXN: worst of the 21 rebalance offsets of the
+  parity-checked replica, chosen on pre-live data (Sharpe 0.69); TAA 3x: latest vanilla backtest (no offset study yet).
+  Both include dividends, like the TWR; each report records the source file and its sha256.
+- **Calibration.** CBI table of 20,000 reference paths (block length 20); drawdowns within 1e-7 of a reference path
+  count as ties (a float32 tie-break had pushed TAA's RED cut to the resolution floor, found in review). RED / AMBER
+  cuts set so a healthy pod evaluated every session from session 21 crosses them within 252 sessions with 5% / 15%
+  probability. Simulated pods (calibration and detection power) carry a 1e-4 relative jitter: exact bootstrap
+  copies tie with reference paths far more than continuous live data do, which had understated TAA's real false
+  alarms by half (second review). CUSUM on completed calendar months (a month counts only when its first and last sessions are in the
+  data), k = 0.5, h for 5% per 12 months. The combined RED rate of both detectors is 8-10% a year and is printed.
+- **Status.** RED > STALE (data more than 5 sessions behind the report date) > TOO_EARLY > AMBER > GREEN; an
+  earlier RED is kept. Lookups beyond the table length raise instead of clamping.
+- **Finding: returns see a dead edge only slowly.** Within one year the monitor flags "edge died (zero drift)"
+  38% of the time for TAA 3x and 17% for NDX VXN, against 10% and 8% false alarms. Confirming it at 80% power needs
+  about 2.5 years (TAA 3x) and 12 years (NDX VXN) of data. Large breaks are caught within months. The fast guard
+  against implementation breaks is the decision-level live-vs-backtest comparison, which the report points to.
+- **Model limits (printed).** The rates hold for a pod that behaves like the bootstrap of its backtest. Higher
+  volatility than the backtest, or crash clustering longer than 20 sessions, raises real false alarms (1-year
+  historical windows containing the 2020 crash went RED often). The CBI is blunter after year one.
+- **Gap recorded:** G-034 in `ASSUMPTIONS_AND_GAPS.md`. Wiring into the watchdog stays an owner decision.
+
 **Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
 It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about
 performance. A performance kill rule is a separate, currently unrecorded gap, and P1 should add it to

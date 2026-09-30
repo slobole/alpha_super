@@ -48,7 +48,8 @@ def _main_checkout_root_path() -> Path:
     return Path(result.stdout.strip()).parent
 
 
-DEFAULT_LEDGER_PATH = _main_checkout_root_path() / LEDGER_RELATIVE_PATH
+MAIN_CHECKOUT_ROOT_PATH = _main_checkout_root_path()
+DEFAULT_LEDGER_PATH = MAIN_CHECKOUT_ROOT_PATH / LEDGER_RELATIVE_PATH
 GENESIS_HASH_STR = "0" * 64
 
 ROW_TYPE_TUPLE = (

@@ -259,4 +259,5 @@ matters: [LIVE_RUNBOOK.md](docs/live/LIVE_RUNBOOK.md#live-ops-watchdog-scheduled
 | `uv run python scripts/benchmark_fast_indicators.py` | Benchmark reference vs Numba indicators (DV2/QPI). No args. |
 | `uv run python scripts/research/export_finhacker_sp500_top20_market_cap.py` | Scrape S&P 500 top-20 market-cap history. Flags: `--refresh`, `--annual-only`. |
 | `uv run python -m alpha.scout verify` | Walk the Scout research ledger hash chain (`research_ledger/scout_ledger.jsonl`); fails loudly on any edited, removed or reordered row. |
+| `uv run python -m alpha.scout health --flex-db C:/alpha/live_ops/ibkr_performance.sqlite3` | Live pod health report (TAA 3x, NDX VXN): Cold Blood Index + CUSUM against each pod's expected process, with calibrated RED/AMBER cuts. Report only, read-only. On the workstation use `--flex-xml <ALPHA_DAILY_TWR*.xml ...>` instead. Output: `results/scout/pod_health/<date>/`. |
 | `uv run python -m alpha.scout summary` | Ledger rows per type and trials per mechanism family. Design: `docs/plans/SCOUT_DESIGN.md`. |
