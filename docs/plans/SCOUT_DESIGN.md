@@ -3,6 +3,10 @@
 Date: 2026-09-29. Base: `main` @ `cb29d4f`. Author: Claude. The owner delegated every design decision
 in this document to Claude ("you decide the catalog / pipe in full"). No code was changed.
 
+**Amendment A1 (2026-09-30)** is folded into the text below. It follows an independent critique of v1
+(Pakal session "Z Systems research", 2026-09-30) and the Zorro / Financial Hacker concept review from the
+same session. Section 16 lists what changed and why.
+
 This is a plan. It grants no permission to change live code, strategies, the VPS, or capital allocation.
 `AGENTS.md`, `QUANT_PHILOSOPHY.md` and the verification policy in `docs/ai/PROJECT_GUIDE.md` apply to all
 work here. Where this document and `QUANT_PHILOSOPHY.md` disagree, `QUANT_PHILOSOPHY.md` wins, and this
@@ -26,8 +30,8 @@ $$
 $$
 
 Stations S1 and the identity gate attack **bias** and **implementation error**. Stations S3–S5 and the
-vault attack **luck**. Speed exists only so the luck tests (permutation, CSCV, walk-forward) are
-affordable. Speed is never the goal.
+vault attack **luck**. Speed exists only so the luck tests (the permutation test of the whole search,
+walk-forward) are affordable. Speed is never the goal.
 
 ### Non-goals (v1)
 
@@ -49,16 +53,21 @@ affordable. Speed is never the goal.
 | D5 | Two engines: a weights engine (X, W) and a path engine (E) | X and W reduce to target weights; E needs slots, exits and stops |
 | D6 | Parity mode by default: Scout reproduces the real engine, known biases included | The gate is only meaningful against the engine as it is; biases are measured separately |
 | D7 | Identity gate before any Scout number is quoted for an existing strategy | Two implementations drift; the gate catches drift in CI |
-| D8 | Vault = 2023-01-01 to today, sealed at the data layer | A single honest out-of-sample test per family |
+| D8 | Vault = 2023-01-01 to today, sealed at the data layer, **clean only for families with no prior research on post-2022 data**; every registration also gets a true forward period that starts at its ledger timestamp | The owner has already seen 2023–2026 for most mainstream families; only data that did not exist yet is truly unseen (A1) |
 | D9 | Unit of inference in edge studies = the date, not the event | Overlapping holds and same-day clustering make events far from independent |
 | D10 | Append-only, hash-chained trial ledger, committed to git | Every trial counts; tampering is visible |
 | D11 | Trials are counted per mechanism family, with an effective-N correction | 100 variants of one idea are not 100 independent trials |
-| D12 | Default significance bar t ≥ 3 for new ideas | Harvey–Liu–Zhu; our own search history shows how many ideas die |
+| D12 | Multiple testing is corrected **once**, by the ledger (BY-FDR across families at S3, DSR with family N_eff at S5), not again by a fixed t ≥ 3 bar | t ≥ 3 is itself a multiple-testing haircut; stacking it on top of DSR and FDR double-counts and rejects real edges (A1) |
 | D13 | Parameter choice = centre of the best plateau, never the peak | Peaks are where luck lives |
 | D14 | Reported strategy numbers are the median of the rebalance-day luck band | The best offset is luck |
 | D15 | Every candidate must beat T-bills in its own book slot (S6) | This is the bar every recent study used; it is the real opportunity cost |
 | D16 | Capacity is judged on today's volumes, separately from small-account friction | Owner rule (tradability from today) |
 | D17 | Shadow (S8) kill and confirm rules are written before shadow starts | Otherwise the forward test becomes another tuning loop |
+| D18 | The statistics live in a shared `alpha/stats/` package, not inside `alpha/scout/` | Pakal, Scout and the live pod-health report use one implementation; `alpha/live` may import `alpha.stats` but never `alpha.scout` (A1) |
+| D19 | S5 gates on three tests only (MCPT of the whole search, DSR with family N_eff, walk-forward with design sensitivity); PBO, CPCV and the haircut are printed diagnostics | The seven v1 tests overlap heavily; requiring all of them rejects almost everything, and each extra threshold is another knob (A1) |
+| D20 | A calibration study on known cases decides which tests gate, before the pipeline is built | A test earns a gate only if it separates noise and dead strategies from planted edges better than the gates already in place (A1) |
+| D21 | A pod-health monitor for the live pods (Cold Blood Index with block bootstrap, plus CUSUM) is built first | It protects real money now and needs only the shared stats package; it is the S8 machinery pointed at LIVE pods (A1) |
+| D22 | **Reject on evidence against, not on missing proof.** Only causality violations (S1), a wrong-sign or absent edge (S3), and a negative net result at double costs (S4) end a family. A borderline statistical result goes to `WATCHLIST` with cheap forward tracking, not to `REJECTED` | Our history has one sample; strict conjunctions of tests on it throw away real edges. Forward data after registration is clean, so borderline ideas can earn their way in over time (A2) |
 
 ## 3. Package layout
 
@@ -70,13 +79,17 @@ alpha/scout/
   families/    one module per mechanism family (specs live here, with their registration)
   engines/     weights.py (X, W), path.py (E, numba), costs.py, execution.py
   gate/        identity.py (Scout vs real engine), deviations.py (known-engine-bias registry)
-  ledger/      ledger.py (append-only JSONL, hash chain), trials.py (effective N)
-  stats/       newey_west.py, bootstrap.py, permutation.py, psr_dsr.py, pbo_cscv.py,
-               cpcv.py, walk_forward.py, spa.py, mcpt.py, fdr.py, mintrl.py
+  ledger.py    append-only JSONL with hash chain (P0, built)
+  registration.py, families.py, trials.py   S0, mechanism families, effective N (P0, built)
   stations/    s0_register.py ... s8_shadow.py
   card/        research card (HTML), reused by a Bench page
   cli.py       python -m alpha.scout <command>
-tests/scout/   unit tests per module + the import-boundary test + gate tests
+alpha/stats/   shared statistics, no dependency on alpha.scout (D18). Built in P0:
+               newey_west.py, bootstrap.py (same algorithm as the RiskAnalysis stationary
+               bootstrap, vectorised; RiskAnalysis unchanged), permutation.py, psr_dsr.py
+               (PSR, DSR, MinTRL), mcpt.py, walk_forward.py, fdr.py, health.py (Cold Blood
+               Index, CUSUM). Later, as diagnostics: pbo_cscv.py, cpcv.py, spa.py
+tests/test_stats_*.py, tests/test_scout_*.py   flat, like the rest of tests/
 research_ledger/scout_ledger.jsonl    committed ledger (small rows only)
 results/scout/                        heavy artefacts (return series, cards), gitignored, backed up
 ```
@@ -122,9 +135,19 @@ and every card shows its measured effect.
   so labels near the boundary cannot leak (purge at the seal).
 - **Opening tokens** are issued only by station S7, once per family, and are written to the ledger
   before any data is returned. A second opening for the same family is refused.
-- **Contamination flag.** If the idea's source (paper, book, talk) was published on or after the seal
-  date, its vault test is marked `CONTAMINATED`: the author may have known the period. Such a family
-  needs shadow evidence (S8) before promotion.
+- **Contamination flag.** The vault test of a family is marked `CONTAMINATED` when either:
+  - the idea's source (paper, book, talk) was published on or after the seal date, so its author may
+    have known the period; or
+  - **the owner has already looked at that family on post-2022 data.** Evidence: prior ledger rows,
+    `docs/research/`, `scripts/research/`, Pakal reports. When in doubt, it is contaminated.
+
+  As of 2026-09-30 this covers most mainstream families: short-term mean reversion, momentum and
+  rotation, TAA, trend and breakout, month-end flow, the Alpha101 set, IPO/ATH and the Zorro Z systems.
+  A contaminated vault result is printed as a diagnostic only, and promotion requires forward evidence.
+- **Forward period from registration (A1).** Data dated after a registration's ledger timestamp did not
+  exist when the hypothesis was frozen. For every family it is the one period that is clean by
+  construction. S7 and S8 read it automatically from the ledger. This makes the vault honest about our
+  own eyes: from today, every day of new data is a clean holdout for everything registered before it.
 - **In-sample windows:** US equities from 1998-01-01 (reliable PIT membership), ETFs from inception, macro
   from the first ALFRED vintage. All end on 2022-12-30.
 - **Power warning.** The vault holds about 3.75 years. For a monthly strategy that is about 45
@@ -279,16 +302,37 @@ A registration may not be edited. A change after seeing any result is a **new re
 - **Families are defined by mechanism, not by indicator.** For example, "short-term mean reversion in US
   large-cap stocks" is one family whether it uses DV2, QPI, RSI(2) or IBS. The family taxonomy is a
   maintained list in `families/__init__.py`.
-- **Effective number of trials:** trials in a family are clustered on the correlation distance
-  `d = √(½(1 − ρ))` of their daily return series (hierarchical clustering, number of clusters chosen by
-  silhouette score, as in López de Prado's ONC). The number of clusters is `N_eff`, used by DSR.
+- **Effective number of trials:** the number of correlation clusters among the family's trial return
+  series: distance `d = √((1 − ρ)/2)`, average-linkage hierarchical clustering, cut at ρ = 0.5.
+  N identical trials give 1, N uncorrelated trials give N, and lopsided grids count correctly
+  (80 + 5 + 5 + 5 + 5 near-identical trials give 5). This replaces the v1 silhouette-chosen cut (one fixed
+  cut, no tuning) and a participation-ratio estimate tried during P0, which under-counted lopsided grids
+  (90 + 10 gave 1.23) and so under-deflated. Without stored return series, every recorded trial counts as
+  independent (the conservative fallback). Retro `prior_trials` are added as independent.
+- **Trial variance fallback:** with fewer than two recorded trials the family's Sharpe dispersion is
+  unknown; the DSR then uses the null sampling variance of a Sharpe estimate, 1 / (T − 1), so prior
+  trials still deflate.
+- **Frozen grid:** a trial whose configuration is not in its registration's grid is refused.
 - **Global count:** a ledger report applies Benjamini–Yekutieli FDR at q = 0.05 across all families' S3
   p-values, so the whole research program is controlled, not only each family.
 
 ## 9. The pipeline: stations S0–S8
 
-Each station returns **PASS**, **WARN** or **FAIL** per check. A FAIL on a hard check stops the family.
-A WARN is printed on the card and needs a written owner note before promotion. The station sequence is
+Each station returns **PASS**, **WARN** or **FAIL** per check. A WARN is printed on the card and needs a
+written owner note before promotion.
+
+**Two kinds of error cost money (A2, D22).** Passing a lucky rule loses capital; rejecting a real edge
+loses the business. So a FAIL has two meanings:
+- **Hard FAIL, the family stops:** only the S1 causality checks, an S3 edge with the wrong sign or none at
+  all (mean excess return ≤ 0 or q > 0.5), and S4 net Sharpe ≤ 0 at double costs.
+- **Soft FAIL, the family goes to `WATCHLIST`:** any other S3, S5 or S6 threshold missed. The frozen
+  configuration is tracked forward at no cost from its registration timestamp. It returns to S5–S6 when
+  the forward period reaches its MinTRL, or earlier if the forward evidence is strong, and it is judged
+  again on in-sample plus forward data.
+
+P2 calibration measures both error rates: the false-pass rate on noise and dead strategies, and the
+false-reject rate on planted edges. A gate set that rejects more than 30% of planted Sharpe-0.8 edges is
+too strict and must be loosened. The station sequence is
 enforced by the runner: a later station refuses to run until the earlier station has a ledger verdict.
 
 ### S0 — Registration
@@ -373,8 +417,8 @@ $\bar{x}_t = \text{mean}_i\, x_{i,t}$, and then test the time series $\{\bar{x}_
 
 | Criterion | Threshold |
 |---|---|
-| Newey–West t, date-clustered, registered horizon | ≥ 3.0 |
-| Within-date permutation p (E and X), block-of-dates p (W) | ≤ 0.01 |
+| Newey–West t, date-clustered, registered horizon | ≥ 2.0 (sanity; the multiple-testing bar is the next row) |
+| Within-date permutation p (E and X), block-of-dates p (W) | Benjamini–Yekutieli q ≤ 0.05 across all S3 p-values in the ledger (D12) |
 | Era sign | correct sign in ≥ 2 of 3 eras |
 | Positive years | ≥ 60% |
 | Concentration | t ≥ 2.0 with the top 1% of event-dates removed |
@@ -397,7 +441,13 @@ t ≥ 2.0. The burden moves to S5 and S6.
   - **Plateau ratio** = neighbourhood median of the chosen configuration ÷ peak Sharpe of the grid.
     PASS ≥ 0.7, WARN 0.5–0.7, FAIL < 0.5.
 - **Luck band.** Run every rebalance offset: 21 for monthly, 5 for weekly. The card shows min, median and
-  max. **The reported number is the median.** WARN if the median is below 70% of the best offset.
+  max. **The reported number is the median.** WARN if the median is below 70% of the best offset. The
+  **worst** offset is the planning case for drawdown expectations and for the S8 health monitor. This is
+  the Zorro "execution-day luck" point: in the Z9 audit the rebalance day alone moved Sharpe from 0.62
+  to 0.89.
+- **Losing-streak test.** The longest run of losing trades or months, compared with the distribution
+  expected if outcomes were independent (runs test). A much longer streak means losses cluster, and the
+  drawdown estimates are too kind. WARN only.
 - **Timing variants.** Next open (default); MOC only if the spec registered it and a decision-time price
   model exists (the DV2 study showed 15:45 decisions lose; do not assume MOC).
 - **Cost stress.** Twice the costs, plus 10 bps slippage per side, and the **breakeven cost** (the cost
@@ -412,9 +462,37 @@ t ≥ 2.0. The burden moves to S5 and S6.
 All tests run on the family's registered grid. The whole selection procedure from S4 (plateau rule) is
 re-applied inside every resample, so the tests judge the *process*, not a single picked configuration.
 
-**1. Probabilistic and Deflated Sharpe (Bailey & López de Prado).** Here $\widehat{SR}$ is per-period
-(not annualised), $T$ is the number of return observations, and $\gamma_3$, $\gamma_4$ are the skewness
-and kurtosis of returns.
+S5 asks two questions, and each question has its own gate (D19):
+
+| Question | Gate | Why this test |
+|---|---|---|
+| Is the search manufacturing winners? | **MCPT** of the whole search + **DSR** with family N_eff | MCPT covers this registration's grid exactly; DSR is the only test that also counts the family's *earlier* studies from the ledger |
+| Does the chosen rule hold up out of sample? | **Walk-forward** with design sensitivity | Tests re-selection through time, the way the rule would actually be run |
+
+Everything else in this station is a printed diagnostic. A diagnostic becomes a gate only if the
+calibration study (P2, section 13) shows it catches failures that the three gates miss.
+
+**Gate 1. Monte Carlo permutation test of the whole process (Masters, *Permutation and Randomization Tests*).**
+- **How:** permute the price changes and rebuild prices, then re-run the **full** grid search and
+  plateau selection on each permuted history. Compare the real selected result with the distribution of
+  permuted winners.
+- **Null construction:** for multi-asset panels, permute whole dates' cross-sectional return vectors, so
+  the correlation between assets survives. Exogenous inputs (VIX, VXN, T5YIE) are passed as extra columns
+  so they move with their dates. **Plain date shuffling is the default.** Shuffling within volatility
+  strata keeps volatility clustering, but it also keeps any volatility-timing edge in place (P0 review:
+  power 0.60 plain vs 0.33 stratified on a planted regime edge), which matters for TAA, trend and
+  VXN-scaled pods. P2 decides between them on planted cases.
+- **Point-in-time panels:** a panel whose NaN pattern changes over time (membership, late listings) is
+  refused by the P0 harness; shuffling it scatters NaN and weakens the null (review: 10.7% false positives
+  at p ≤ 0.05 on noise). P4 adds a null that permutes returns inside each asset's live span.
+- **What it answers:** "Could this search procedure have found something this good in data with no
+  temporal structure?"
+- **Draws:** 500 minimum, 1,000 for promotion.
+- **Thresholds:** PASS p ≤ 0.01. WARN 0.01–0.05. FAIL > 0.05.
+
+**Gate 2. Probabilistic and Deflated Sharpe (Bailey & López de Prado).** Here $\widehat{SR}$ is
+per-period (not annualised), $T$ is the number of return observations, and $\gamma_3$, $\gamma_4$ are the
+skewness and kurtosis of returns.
 
 $$
 \text{PSR}(SR^{*}) = \Phi\!\left(\frac{(\widehat{SR}-SR^{*})\sqrt{T-1}}{\sqrt{1-\gamma_3\widehat{SR}+\frac{\gamma_4-1}{4}\widehat{SR}^{2}}}\right)
@@ -429,46 +507,40 @@ $$
 $$
 
 $V[\widehat{SR}_n]$ is the variance of the Sharpe ratios across the family's trials, and $N_{\text{eff}}$
-comes from section 8.3. **PASS: DSR ≥ 0.95. WARN: 0.90–0.95. FAIL: < 0.90.**
+comes from section 8.3. The bracket is the paper's approximation of E[max of N standard normals]; Scout
+computes that expectation exactly by numerical integration (A3), because the approximation turns negative
+for N < 1.28. **PASS: DSR ≥ 0.95. WARN: 0.90–0.95. FAIL: < 0.90.**
 
-**2. Probability of Backtest Overfitting, CSCV (Bailey, Borwein, López de Prado, Zhu).**
-1. Split the in-sample period into S = 16 contiguous blocks.
-2. For each of the C(16, 8) = 12,870 ways to choose half of the blocks as the training set, pick the
-   best configuration on the training half (by the plateau rule).
-3. Find that configuration's relative rank ω̄ on the other half, and compute λ = ln(ω̄ / (1 − ω̄)).
-4. PBO is the share of splits with λ ≤ 0.
+**Gate 3. Walk-forward (anchored), with design sensitivity.**
+- **Registered design.** Refit the plateau choice on the first trading day of every January on all data
+  up to the prior December (first refit once 5 years of history exist), trade the following year, and
+  stitch the out-of-sample years together. A configuration needs 252 finite training returns to be
+  selectable, and a NaN inside a chosen configuration's test window is an error, not a silent drop.
+- **Walk-forward efficiency** = OOS Sharpe ÷ mean in-sample Sharpe of the chosen configurations.
+- **Design sensitivity (from Lotter / Financial Hacker).** Re-run the walk-forward under a small, fixed
+  grid of 8 designs: anchored (5-year minimum history) and rolling 3-, 5- and 8-year windows, each
+  refitting every 6 or 12 months (January / July). Anchored designs with different minimum histories were
+  dropped at build time: they make the same selections, so they would count one piece of evidence
+  several times. The card shows the share of designs with positive stitched OOS Sharpe.
+  (Lotter built a placebo strategy with no edge that looked excellent at exactly 9 walk-forward cycles
+  and fell apart at every other count.)
+- **PASS** if the registered design has efficiency ≥ 0.5 and stitched OOS Sharpe > 0 after costs,
+  **and** at least 6 of the 8 designs are positive.
 
-**PASS: ≤ 0.20. WARN: 0.20–0.50. FAIL: > 0.50.**
+**Diagnostics (printed, not gated, until P2 says otherwise):**
+- **PBO by CSCV (Bailey, Borwein, López de Prado, Zhu).** Split the in-sample period into S blocks. For
+  every choice of half the blocks as training, pick the best configuration by the plateau rule and find
+  its relative rank ω̄ on the other half. λ = ln(ω̄ / (1 − ω̄)), and PBO is the share of splits with
+  λ ≤ 0. Use S = 10 (252 splits) by default. S = 16 (12,870 splits) is optional; it is heavy and adds
+  little.
+- **CPCV (López de Prado).** N = 10 groups, k = 2 test groups: 45 splits and 9 OOS paths. Purge = max
+  holding period + label horizon; embargo = 1% of observations after each test group. The card shows the
+  5th percentile of OOS Sharpe and the share of negative paths.
+- **Haircut Sharpe (Harvey & Liu).** One "what the Sharpe is really worth after the search" number.
 
-**3. Monte Carlo permutation test of the whole process (Masters, *Permutation and Randomization Tests*).**
-- **How:** permute the price changes and rebuild prices. For multi-asset panels, permute whole dates'
-  cross-sectional return vectors, so the correlation between assets survives. Then re-run the **full**
-  grid search and plateau selection on each permuted history. Compare the real selected result with the
-  distribution of permuted winners.
-- **What it answers:** "Could this search procedure have found something this good in data with no
-  temporal structure?"
-- **Draws:** 500 minimum, 1,000 for promotion.
-- **Thresholds:** PASS p ≤ 0.01. WARN 0.01–0.05. FAIL > 0.05.
-
-**4. Walk-forward (anchored).** Refit the plateau choice every January on all data up to the prior
-December, trade the following year, and stitch the out-of-sample years together.
-- Walk-forward efficiency = OOS Sharpe ÷ mean in-sample Sharpe of the chosen configurations.
-- PASS if efficiency is ≥ 0.5 and the stitched OOS Sharpe is > 0 after costs.
-
-**5. Combinatorial purged cross-validation (López de Prado).**
-- **Splits:** N = 10 groups, k = 2 test groups. That gives 45 splits and 9 full OOS paths.
-- **Leak control:** purge = max holding period + label horizon; embargo = 1% of observations after each
-  test group.
-- **Output:** a distribution of OOS Sharpe. The card shows its 5th percentile and the share of paths
-  with Sharpe below zero.
-- **Thresholds:** WARN if more than 20% of paths are negative, FAIL if more than 40%.
-
-**6. Best-of-family claims.** When the claim is "the chosen variant beats benchmark B", run Hansen's SPA
-test (stationary bootstrap, 5,000 draws) over all family configurations against B. When several variants
-are promoted together, use Romano–Wolf stepdown. Pass: p ≤ 0.05.
-
-**7. Haircut Sharpe (Harvey & Liu).** Printed, not gated. It gives the owner a single "what the Sharpe is
-really worth after the search" number.
+**Conditional test: best-of-family claims.** This runs only when the claim is "the chosen variant beats
+benchmark B": Hansen's SPA test (stationary bootstrap, 5,000 draws) over all family configurations
+against B, or Romano–Wolf stepdown when several variants are promoted together. Pass: p ≤ 0.05.
 
 ### S6 — Value to the book
 
@@ -501,14 +573,15 @@ really worth after the search" number.
    - PASS if net return > T-bills over the vault period, **and** the vault Sharpe is at or above the
      5th percentile of the in-sample stationary-bootstrap distribution of Sharpe over windows of the
      same length.
-   - FAIL is final for that family. A new family needs a genuinely new mechanism.
-   - `CONTAMINATED` if the source was published after the seal (section 4.2); this goes to S8 before
-     any promotion.
+   - FAIL is final for that family when the vault is clean. A new family needs a genuinely new mechanism.
+   - `CONTAMINATED` (section 4.2): the result is printed as a diagnostic, and promotion waits for S8
+     forward evidence from the registration timestamp onward. In practice this is the normal path for
+     most families today.
 4. **Real engine and gate.** The idea is implemented in the real engine (Codex) and must pass the
    identity gate against the Scout spec.
 5. **Final numbers** are produced by the real engine, and the research card is issued.
-6. **Grade.** Scout grades are `REJECTED`, `WATCHLIST` (passed S3, failed later), `CANDIDATE` (passed
-   S0–S6) and `PROMOTED` (vault pass plus gate). A `PROMOTED` strategy enters the existing maturity
+6. **Grade.** Scout grades are `REJECTED` (hard FAIL only, D22), `WATCHLIST` (soft FAIL anywhere; tracked
+   forward and re-judged), `CANDIDATE` (passed S0–S6) and `PROMOTED` (vault or forward pass plus gate). A `PROMOTED` strategy enters the existing maturity
    tiers in `alpha/strategy_registry.py`. Scout grades do not replace those tiers; they are a separate
    claim about edge, not plumbing.
 
@@ -526,9 +599,24 @@ $$
 
   with $SR^{*}$ = the T-bill-slot Sharpe. The card states MinTRL in months, honestly, even if it is
   years.
-- **Kill rule:** a one-sided CUSUM on (realised − expected) monthly returns, with the threshold set so
-  that the false-kill rate is 5% a year under the expected distribution. The kill is automatic in the
-  sense that the card turns red; retiring the pod stays the owner's decision.
+- **Kill rule, two detectors** (both in `alpha/stats/health.py`; either one turns the card red):
+  - **Mean shift: CUSUM.** A one-sided CUSUM on (realised − expected) monthly returns, with the
+    threshold set so that the false-kill rate is 5% a year under the expected distribution.
+  - **Abnormal drawdown: Cold Blood Index (Lotter / Zorro), block version.** When the pod is in a
+    drawdown of depth D that has lasted L sessions, estimate how often a drawdown at least that deep
+    occurs within L sessions in the expected return process. Zorro counts overlapping backtest windows
+    as independent samples, which overstates confidence. Here the probability comes from a stationary
+    block bootstrap of the worst-offset (S4) daily returns. A single evaluation is a probability, not an
+    alert: re-evaluated every day on the drawdown the data chose, a fixed "RED below 5%" goes RED for a
+    healthy pod about a third of the time in a year (P0 review simulation). The RED and AMBER cuts are
+    therefore calibrated on the monitoring procedure itself: simulate healthy paths, run the same daily
+    evaluation, and set RED so that P(any RED within 252 sessions) = 5% (AMBER at 15%), with a minimum
+    observation length before the first evaluation. P1 does this calibration.
+  - The CUSUM alarm latches (it is the minimum over the whole history), so a healthy pod's chance of ever
+    alarming grows with time (about 9% by 24 months, 24% by 60 months). The card says so.
+
+  The kill is automatic only in the sense that the card turns red. Retiring the pod stays the owner's
+  decision.
 - **Parity check:** every month, Scout re-runs the frozen spec on the latest data and compares its
   decisions with the shadow or live decisions. Any difference is an implementation incident, not
   "noise".
@@ -549,10 +637,11 @@ Every LIVE and PM_READY strategy goes through S0–S6 and S8, with three differe
 
 **Order** (the gate needs each strategy's post-audit-fix version, see section 13):
 - **Money today:** TAA 3x, NDX VXN.
-- **Wired pods:** TAA 1/N, BTAL_QQQ, CORE5, QPI.
+- **Wired pods:** TAA 1/N, BTAL_QQQ, CORE5. (QPI was demoted to RESEARCH on 2026-09-29 and is re-run
+  in P4 as an S3 edge study, not a re-audition.)
 - **Book pods:** Compass (both variants), TFI, EOM, sector IBS, NDX NATR20.
 - **Remaining PM_READY:** hedges, 2x variants, Trinity.
-- **Class E strategies (need the path engine, phase P6):** DV2 (and the ETF-DV2 candidate), HPI.
+- **Class E strategies (need the path engine, phase P7):** DV2 (and the ETF-DV2 candidate), HPI.
 
 ## 11. Research card and Bench page
 
@@ -565,8 +654,9 @@ header.
    liquidity-tercile bars.
 4. **S4 charts:** parameter surface heat map with the chosen plateau outlined, luck band, cost-stress
    table.
-5. **S5 charts:** DSR with its inputs, PBO logit histogram, MCPT null histogram with the real value
-   marked, walk-forward stitched curve, CPCV Sharpe distribution.
+5. **S5 charts:** the three gates first (MCPT null histogram with the real value marked, DSR with its
+   inputs, walk-forward stitched curve with the 8-design sensitivity strip), then the diagnostics (PBO
+   logit histogram, CPCV Sharpe distribution, haircut).
 6. **S6:** spanning table, T-bill slot result, crisis table, capacity table.
 7. **Known engine deviations,** with the measured effect of each.
 8. **What was not tested and why.**
@@ -581,12 +671,18 @@ the explanation order of `QUANT_PHILOSOPHY.md`: conclusion first, then intuition
 | Fractional differentiation | López de Prado, AFML ch. 5 | For ML feature stationarity; our features are already stationary oscillators or ranks |
 | Microstructure features (VPIN, Kyle λ), dollar and volume bars | AFML ch. 2, 19 | Intraday data and horizons we do not trade |
 | Random forests and MDI/MDA feature importance | AFML ch. 8, MLAM | Rule-based pods with 1–3 features; importance ranking adds search without adding evidence |
-| Triple-barrier labels, meta-labeling | AFML ch. 3 | Parked: revisit only as a filter layer on DV2 after P6 |
+| Triple-barrier labels, meta-labeling | AFML ch. 3 | Parked: revisit only as a filter layer on DV2 after P7 |
 | Structural-break tests (SADF, CUSUM on prices) | AFML ch. 17 | Era and regime splits in S3 answer our question more simply |
 | Synthetic OU "optimal trading rules" | AFML ch. 13 | Produces more tunable parameters, the opposite of what we need |
 | HRP, NCO, bet sizing | AFML ch. 10, 16; MLAM | Portfolio construction, a separate project |
 | Genetic or automated rule search | various | A mining engine by design; S5 would reject its output anyway |
 | Masters' prediction-model machinery (committees, neural nets) | *Assessing and Improving Prediction* | ML models are a non-goal for v1 |
+| Zorro as a platform (engine, IB bridge) | Zorro project | C/C++ second codebase, no Norgate support, unstable IB reconnects per its own forum; our stack already does PIT data, deterministic IB execution and reconciliation |
+| Zorro Evaluation Shell, RangerZ | Zorro project, Pardo | Mass combination search with eyeball curve filtering and a final-result-only reality check; the vendor itself warns of selection bias |
+| OptimalF sizing | Zorro | Computed on the full sample (look-ahead), as the author acknowledges |
+| Equity-curve on/off switching | Zorro "phantom trading" | Adds a rule tuned on the same history; only as a pre-registered S0 hypothesis of its own |
+| Inverted-price test | Zorro | Meaningful only for symmetric long/short rules; our pods are long-only |
+| Zorro performance metrics (AR, in-market Sharpe) | Zorro | Not comparable with our metric definitions in `metrics.py` |
 
 Kept from each source:
 - **López de Prado:** registration-first research, PSR, DSR, MinTRL, CSCV/PBO, CPCV with purge and
@@ -594,7 +690,11 @@ Kept from each source:
 - **Masters:** indicator quality (S2), MCPT of the whole process, walk-forward, and the idea that the
   selection bias of the search is part of the result.
 - **Aronson:** placebo and detrending logic, data-mining bias.
-- **Harvey–Liu–Zhu:** the t ≥ 3 bar and haircut Sharpe.
+- **Harvey–Liu–Zhu:** the multiple-testing logic behind the ledger-level FDR, and haircut Sharpe (the
+  fixed t ≥ 3 bar itself was dropped in A1, D12).
+- **Lotter (Zorro, Financial Hacker):** the Cold Blood Index (in block form), walk-forward design
+  sensitivity, execution-day luck as a planning case, the losing-streak test, and Z8 / Alpha101 as known
+  dead controls for calibration.
 - **White, Hansen, Romano–Wolf:** best-of-family tests.
 - **McLean–Pontiff:** before and after publication.
 - **Carver:** replication across instruments and preference for few rules.
@@ -602,20 +702,23 @@ Kept from each source:
 
 ## 13. Build phases
 
-Each phase has a goal, scope and completion criteria, per `AGENTS.md`. Phases P0 and P1 do not touch
-strategies and can start now. P2 gates each strategy only after the readiness-audit fix list
+Each phase has a goal, scope and completion criteria, per `AGENTS.md`. The order was changed in A1 so
+that the cheapest parts, and the ones that protect real money, come first, and so that the calibration
+study decides the gate set before the expensive parts are built. Phases P0–P2 and P4 do not touch
+strategies and can start now. P3 gates each strategy only after the readiness-audit fix list
 (2026-09-28) has landed for that strategy, so no gate is built twice.
 
 | Phase | Scope | Done when |
 |---|---|---|
-| **P0 Foundation** | panels + snapshot hash, vault seal, ledger with hash chain, `ScoutSpec`, feature library with contracts, S0 and S1 stations, import-boundary test | S1 catches seeded leaks in tests (a future-peeking feature, a split-sensitive feature, a non-PIT member); vault refusal tested; chain tamper tested |
-| **P1 Edge toolkit** | S2 and S3 in full, card sections for them, CLI | The Pakal DV2-S&P 500 and QPI studies re-run through S3 with PIT membership; the card shows the old-vs-new difference |
-| **P2 Weights engine + gate** | `engines/weights.py`, costs, both account modes, identity gate, deviations registry, CI job | TAA 3x, NDX VXN and CORE5 pass the gate on full history; CI blocks a deliberately broken strategy |
-| **P3 Overfitting toolbox** | S4 and S5 (surface, plateau, luck band, cost stress, DSR, PBO, MCPT, WFA, CPCV, SPA, haircut) | Each statistic matches a published worked example or an independent implementation; MCPT on a pure-noise strategy gives a uniform p-value over 200 seeds |
-| **P4 Book and card** | S6, full research card, Bench page | Full cards for the three P2 strategies |
-| **P5 Re-audition, classes W and X** | Retro registrations, prior-trial counts, cards for all W and X strategies in section 10 order | One card per strategy, owner summary in Hebrew |
-| **P6 Path engine** | `engines/path.py`, gates for DV2 and HPI, then their re-audition | DV2 and HPI pass the gate; cards issued |
-| **P7 Discovery and shadow** | S7 vault opening, S8 shadow monitor, BY-FDR ledger report | First new family run end-to-end; the vault is opened only through S7 |
+| **P0 Stats + ledger** | `alpha/stats/` (Newey–West, bootstrap wrapper, permutation, PSR/DSR, MinTRL, MCPT harness, walk-forward, FDR, health), the ledger with hash chain, registration (S0), families, effective N, import-boundary tests | Each statistic matches a published worked example or an independent implementation; chain tamper tested; `alpha/live` imports of `alpha.scout` fail the test suite |
+| **P1 Live pod health (report only)** | Cold Blood Index (block) + CUSUM for TAA 3x and NDX VXN from their reference backtests and live ledgers; a daily research-side report | False-alarm rate measured on history (target ≤ 5% a year); detection delay measured on a synthetic "edge died" path; **wiring into the watchdog is a separate live change that needs the owner's explicit authorisation** |
+| **P2 Calibration study** | Run the candidate S3 and S5 tests on known cases: pure noise (many seeds), planted edges of known Sharpe (0.3, 0.5, 0.8) inside noise, known dead strategies (Z8 after July 2016, Alpha101 after 2011, IPO/ATH after 1999, MOSAIC), and plain vs volatility-stratified MCPT nulls | A table of false-pass rate and detection power per test; the gate set of S3/S5 is confirmed or changed from that table (D20), and this document is amended |
+| **P3 Weights engine + gate** | `engines/weights.py`, costs, both account modes, identity gate, deviations registry, CI job | TAA 3x and NDX VXN (then CORE5) pass the gate on full history; CI blocks a deliberately broken strategy |
+| **P4 Edge toolkit** | panels + snapshot hash, vault seal and contamination record, feature library with contracts, S1, S2 and S3, CLI | S1 catches seeded leaks (future-peeking feature, split-sensitive feature, non-PIT member); the Pakal DV2-S&P 500 and QPI studies re-run through S3 with PIT membership, and the card shows the old-vs-new difference |
+| **P5 Strategy, luck, book and card** | S4, the three S5 gates and their diagnostics, S6, the research card, re-audition cards for TAA 3x and NDX VXN | Full cards for the two live pods, owner summary in Hebrew |
+| **P6 Re-audition, classes W and X** | Retro registrations, prior-trial counts, cards for the remaining W and X strategies in section 10 order, Bench page | One card per strategy |
+| **P7 Path engine** | `engines/path.py`, gates for DV2 and HPI, then their re-audition | DV2 and HPI pass the gate; cards issued |
+| **P8 Discovery and shadow** | S7 vault opening with contamination rules, S8 monitor for new candidates, BY-FDR ledger report | First new family run end-to-end; the vault is opened only through S7 |
 
 ## 14. Known limitations of this design
 
@@ -626,7 +729,12 @@ strategies and can start now. P2 gates each strategy only after the readiness-au
   second question.
 - **Retro-registered strategies are optimistic by construction.** The `prior_trials` estimate is a floor,
   not the true number of things the owner once looked at.
-- **The vault is short.** It can catch a collapse; it cannot confirm an edge. Only S8 time confirms.
+- **The vault is short, and mostly already seen.** It can catch a collapse; it cannot confirm an edge,
+  and for families the owner has studied on 2023+ data it is only a diagnostic. Only forward time after
+  registration confirms.
+- **The gate set is provisional until P2.** The thresholds in S3 and S5 are reasoned defaults. The
+  calibration study may tighten, loosen or drop them, and that change is recorded here as an amendment,
+  never as a quiet edit.
 - **Our history is one history.** Every test here resamples the same 25 years. Replication across
   universes is the only partial remedy.
 
@@ -649,3 +757,48 @@ strategies and can start now. P2 gates each strategy only after the readiness-au
 - R. Carver, *Systematic Trading* (2015). R. Pardo, *The Evaluation and Optimization of Trading
   Strategies* (2008).
 - Y. Benjamini and D. Yekutieli, "The Control of the False Discovery Rate under Dependency" (2001).
+- J. C. Lotter, Financial Hacker: "The Cold Blood Index" (2015), "White's Reality Check" (2016), "Why 90%
+  of Backtests Fail" (2019); Zorro manual (zorro-project.com/manual).
+- Pakal report `reports/zorro_zsystems_daily_audit/REPORT.md` (2026-09-29): the Z8/Z9/Z13 audit used as
+  dead and fragile controls.
+
+## 16. Amendment log
+
+**A1 (2026-09-30).** Source: an independent critique of v1 and a Zorro / Financial Hacker concept review
+(Pakal session "Z Systems research", 2026-09-30). Decided by Claude under the owner's delegation.
+
+| Change | v1 | A1 | Why |
+|---|---|---|---|
+| Luck tests | Seven tests, most gated | Three gates (MCPT, DSR, walk-forward); PBO, CPCV, haircut as diagnostics; SPA conditional | Overlapping tests on one history; conjunction rejects real edges; each threshold is a knob (D19) |
+| Significance bar | t ≥ 3 at S3 plus DSR plus FDR | Ledger-level BY-FDR at S3, DSR at S5; t ≥ 2 as sanity | t ≥ 3 is already a multiple-testing haircut; stacking double-counts (D12) |
+| Vault | Contaminated only if the source was published after 2023 | Also contaminated when the owner studied the family on post-2022 data; forward data after each registration is the clean holdout | Most families were already studied on 2023–2026 (D8) |
+| Statistics location | `alpha/scout/stats/` | `alpha/stats/`, shared with Pakal and the live health report | One implementation instead of two or three (D18) |
+| Build order | Kill rule last (P7) | Stats + ledger, then live pod health, then calibration, then gates | Cheapest, money-protecting parts first; calibration before building expensive tests (D20, D21) |
+| Calibration | None | P2 study on noise, planted edges and dead strategies | A test earns a gate by evidence, not by reputation |
+| Zorro ideas | Not considered | Cold Blood Index (block version) in S8 and P1; walk-forward design sensitivity; worst rebalance offset as planning case; losing-streak test; volatility-stratified MCPT null | The useful Zorro ideas are monitoring and robustness checks, not its search tools |
+| PBO cost | S = 16 (12,870 splits) | S = 10 (252 splits) by default | Same information at a fraction of the cost |
+
+**A2 (2026-09-30).** Owner direction: lean, and do not reject too eagerly. Hard FAIL narrowed to
+evidence against the idea; every other miss sends the family to `WATCHLIST` with forward tracking; P2
+calibration must also measure the false-reject rate (D22).
+
+**A3 (2026-09-30, P0 build).** Three independent reviews of the P0 code (quant pitfalls, parity against
+reference implementations, test coverage with mutation experiments) led to these design changes:
+- **Exact E[max] in the DSR.** The paper's closed-form approximation is negative for N < 1.28, which would
+  turn a deflation into a bonus for highly correlated families; E[max] is now integrated exactly (the
+  paper example is still reproduced with the approximation in the tests).
+- **Effective N by clustering at ρ = 0.5** (section 8.3), after a participation-ratio estimate
+  under-counted lopsided grids.
+- **DSR variance fallback** 1 / (T − 1) when fewer than two trials are recorded.
+- **Plain MCPT null by default;** stratified is a P2 option. Point-in-time panels refused until P4.
+- **Walk-forward:** January / July calendar refits, 252-observation minimum, NaN in test windows is an
+  error, 8 distinct designs with a 6-of-8 rule.
+- **Cold Blood Index thresholds** are calibrated on the daily monitoring procedure in P1, not fixed.
+- **Ledger:** non-string keys refused (they would have broken the chain permanently), duplicate checks
+  run inside the lock, the default ledger is always the main checkout's (worktree writes would vanish),
+  trials outside the frozen grid are refused, and every trial row carries station, mode and code commit.
+
+**Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
+It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about
+performance. A performance kill rule is a separate, currently unrecorded gap, and P1 should add it to
+`ASSUMPTIONS_AND_GAPS.md`.

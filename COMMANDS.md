@@ -258,3 +258,5 @@ matters: [LIVE_RUNBOOK.md](docs/live/LIVE_RUNBOOK.md#live-ops-watchdog-scheduled
 | `uv run python scripts/archive_research_results.py --dry-run` | Move old `results/` folders into a timestamped archive. `--dry-run` previews first. |
 | `uv run python scripts/benchmark_fast_indicators.py` | Benchmark reference vs Numba indicators (DV2/QPI). No args. |
 | `uv run python scripts/research/export_finhacker_sp500_top20_market_cap.py` | Scrape S&P 500 top-20 market-cap history. Flags: `--refresh`, `--annual-only`. |
+| `uv run python -m alpha.scout verify` | Walk the Scout research ledger hash chain (`research_ledger/scout_ledger.jsonl`); fails loudly on any edited, removed or reordered row. |
+| `uv run python -m alpha.scout summary` | Ledger rows per type and trials per mechanism family. Design: `docs/plans/SCOUT_DESIGN.md`. |

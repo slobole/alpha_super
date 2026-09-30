@@ -83,3 +83,6 @@ alpha/live/incubation_state.sqlite3-shm
 alpha/live/incubation_state.sqlite3-wal
 alpha/live/state/
 alpha/live/logs/
+
+# Scout ledger lock (transient)
+research_ledger/*.lock
