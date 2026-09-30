@@ -9,7 +9,9 @@ registered order, flattened in C order, the order of
 
 The chosen configuration has the highest neighbourhood median; ties go to the
 higher own Sharpe, then to the lower flat index. A lone lucky peak surrounded by
-poor neighbours scores its neighbours' level, not its own.
+poor neighbours scores its neighbours' level, not its own. A configuration whose
+own Sharpe is undefined (NaN, e.g. too little history) can never be chosen,
+whatever its neighbours score.
 
     plateau ratio = neighbourhood median of the chosen configuration / peak Sharpe of the grid
 """
@@ -58,7 +60,7 @@ def plateau_choice(sharpe_vec, grid_shape_tuple: tuple[int, ...]) -> PlateauChoi
     if not np.isfinite(sharpe_arr).any():
         raise ValueError("No configuration has a finite Sharpe.")
     median_arr = neighbourhood_median_vec(sharpe_arr, grid_shape_tuple)
-    score_arr = np.where(np.isfinite(median_arr), median_arr, -np.inf)
+    score_arr = np.where(np.isfinite(median_arr) & np.isfinite(sharpe_arr), median_arr, -np.inf)
     own_arr = np.where(np.isfinite(sharpe_arr), sharpe_arr, -np.inf)
     # lexsort: last key is primary. Highest median, then highest own Sharpe, then lowest index.
     order_arr = np.lexsort((np.arange(sharpe_arr.size), -own_arr, -score_arr))
@@ -71,6 +73,37 @@ def plateau_choice(sharpe_vec, grid_shape_tuple: tuple[int, ...]) -> PlateauChoi
         peak_sharpe_float=peak_float,
         plateau_ratio_float=float(median_arr[chosen_int] / peak_float) if peak_float > 0 else float("nan"),
     )
+
+
+def _neighbour_index_list(grid_shape_tuple: tuple[int, ...]) -> list[np.ndarray]:
+    neighbour_list = []
+    for flat_idx_int in range(int(np.prod(grid_shape_tuple))):
+        index_tuple = np.unravel_index(flat_idx_int, grid_shape_tuple)
+        member_list = [flat_idx_int]
+        for axis_int, axis_size_int in enumerate(grid_shape_tuple):
+            for step_int in (-1, 1):
+                position_int = index_tuple[axis_int] + step_int
+                if 0 <= position_int < axis_size_int:
+                    neighbour_index_list = list(index_tuple)
+                    neighbour_index_list[axis_int] = position_int
+                    member_list.append(int(np.ravel_multi_index(tuple(neighbour_index_list), grid_shape_tuple)))
+        neighbour_list.append(np.array(member_list))
+    return neighbour_list
+
+
+def plateau_choice_index_mat(sharpe_mat, grid_shape_tuple: tuple[int, ...]) -> np.ndarray:
+    """Vectorised `plateau_choice(...).flat_index_int` for every row of a draws x configurations matrix.
+
+    Same rule and tie-breaks as `plateau_choice`; rows must be finite (used for null simulations).
+    """
+    sharpe_arr = np.asarray(sharpe_mat, dtype=float)
+    median_mat = np.column_stack(
+        [np.median(sharpe_arr[:, member_idx], axis=1) for member_idx in _neighbour_index_list(grid_shape_tuple)]
+    )
+    best_score_vec = median_mat.max(axis=1, keepdims=True)
+    own_on_best_mat = np.where(median_mat == best_score_vec, sharpe_arr, -np.inf)
+    # argmax returns the first (lowest index) maximum, matching the scalar tie-break.
+    return own_on_best_mat.argmax(axis=1)
 
 
 def column_sharpe_vec(return_mat) -> np.ndarray:

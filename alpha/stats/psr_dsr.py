@@ -120,6 +120,45 @@ def expected_max_sharpe_ratio(trial_sharpe_variance_float: float, effective_tria
     return float(np.sqrt(trial_sharpe_variance_float) * exact_expected_max_z(effective_trial_count_float))
 
 
+def null_selected_sharpe_benchmark(
+    correlation_mat,
+    observation_count_int: int,
+    select_index_fn=None,
+    prior_independent_trial_count_int: int = 0,
+    draw_count_int: int = 20000,
+    random_seed_int: int = 0,
+) -> float:
+    """Expected per-period Sharpe of the configuration the search would select if NO configuration had an edge.
+
+    Correlation-aware replacement for the SR*_0 formula (P2 review): under the null every configuration's true
+    Sharpe is 0 and the estimates are jointly normal,
+
+        SR_hat ~ N(0, C / (T − 1)),   C = correlation matrix of the configurations' returns,
+
+    so the benchmark is E[ SR_hat[select(SR_hat)] ], simulated with the search's own selection rule (default: the
+    maximum). Earlier trials of the same family recorded in the ledger compete as independent draws:
+    benchmark = E[ max(selected, max of the prior draws) ]. Unlike the closed form with a clustered N_eff, this
+    never collapses to 0 when the configurations are highly correlated, and it does not need the cross-sectional
+    Sharpe variance, which mixes true Sharpe differences into the null.
+    """
+    correlation_arr = np.atleast_2d(np.asarray(correlation_mat, dtype=float))
+    if observation_count_int < 2:
+        raise ValueError("observation_count_int must be >= 2.")
+    eigenvalue_vec, eigenvector_mat = np.linalg.eigh((correlation_arr + correlation_arr.T) / 2.0)
+    root_mat = eigenvector_mat * np.sqrt(np.clip(eigenvalue_vec, 0.0, None))
+    rng_obj = np.random.default_rng(random_seed_int)
+    scale_float = 1.0 / np.sqrt(observation_count_int - 1.0)
+    draw_mat = rng_obj.standard_normal((draw_count_int, correlation_arr.shape[0])) @ root_mat.T * scale_float
+    if select_index_fn is None:
+        selected_vec = draw_mat.max(axis=1)
+    else:
+        selected_vec = draw_mat[np.arange(draw_count_int), select_index_fn(draw_mat)]
+    if prior_independent_trial_count_int > 0:
+        prior_max_vec = rng_obj.standard_normal((draw_count_int, prior_independent_trial_count_int)).max(axis=1) * scale_float
+        selected_vec = np.maximum(selected_vec, prior_max_vec)
+    return float(selected_vec.mean())
+
+
 @dataclass(frozen=True)
 class DeflatedSharpeResult:
     deflated_sharpe_float: float

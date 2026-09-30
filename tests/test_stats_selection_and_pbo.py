@@ -73,3 +73,61 @@ def test_pbo_input_errors():
     bad_mat[5, 1] = np.nan
     with pytest.raises(ValueError):
         probability_of_backtest_overfitting(bad_mat)
+
+
+def test_a_configuration_without_its_own_sharpe_is_never_chosen():
+    sharpe_grid = np.full((3, 3), 0.2)
+    sharpe_grid[1, 1] = np.nan  # neighbours are strong, own Sharpe undefined
+    sharpe_grid[0, 1] = sharpe_grid[1, 0] = sharpe_grid[1, 2] = sharpe_grid[2, 1] = 1.0
+    choice = plateau_choice(sharpe_grid.reshape(-1), (3, 3))
+    assert choice.flat_index_int != 4 and np.isfinite(choice.own_sharpe_float)
+
+
+def test_vectorised_plateau_matches_the_scalar_rule():
+    from alpha.stats.selection import plateau_choice_index_mat
+
+    draw_mat = np.random.default_rng(3).normal(0, 1, (2000, 21))
+    draw_mat[:50] = np.round(draw_mat[:50], 1)  # force ties
+    vector_idx = plateau_choice_index_mat(draw_mat, (7, 3))
+    scalar_idx = np.array([plateau_choice(row, (7, 3)).flat_index_int for row in draw_mat])
+    np.testing.assert_array_equal(vector_idx, scalar_idx)
+
+
+def test_selector_ignores_configurations_with_too_little_history():
+    rng_obj = np.random.default_rng(0)
+    frame = pd.DataFrame(rng_obj.normal(0, 0.01, (400, 3)), columns=["a", "b", "c"])
+    frame["c"] = np.nan
+    frame.loc[frame.index[-50:], "c"] = 0.05  # spectacular but only 50 days
+    assert make_plateau_selector((3,), min_observation_int=252)(frame) != "c"
+
+
+def test_null_benchmark_known_cases():
+    from alpha.stats.psr_dsr import exact_expected_max_z, null_selected_sharpe_benchmark
+
+    observation_count_int = 1001
+    scale_float = 1 / np.sqrt(observation_count_int - 1)
+    independent_float = null_selected_sharpe_benchmark(np.eye(10), observation_count_int, draw_count_int=100_000)
+    assert independent_float == pytest.approx(exact_expected_max_z(10) * scale_float, rel=0.01)
+    identical_float = null_selected_sharpe_benchmark(np.ones((10, 10)), observation_count_int, draw_count_int=100_000)
+    assert identical_float == pytest.approx(0.0, abs=0.01 * scale_float)
+    with_prior_float = null_selected_sharpe_benchmark(np.ones((10, 10)), observation_count_int, prior_independent_trial_count_int=9)
+    assert with_prior_float == pytest.approx(exact_expected_max_z(10) * scale_float, rel=0.02)
+    # Highly correlated but not identical configurations still deflate (the clustered N_eff would say 1).
+    correlated_mat = np.full((24, 24), 0.9) + 0.1 * np.eye(24)
+    assert null_selected_sharpe_benchmark(correlated_mat, observation_count_int) > 0.3 * independent_float
+
+
+def test_pbo_uses_the_selector_and_counts_the_median_as_overfit():
+    # Two blocks -> two splits. Three configurations with fixed per-block means.
+    block_mean_mat = np.array([[0.01, 0.00, -0.01], [-0.01, 0.00, 0.01]])  # config 0 wins block 0, config 2 wins block 1
+    rng_obj = np.random.default_rng(0)
+    return_mat = np.vstack([block_mean_mat[b] + rng_obj.normal(0, 1e-4, (200, 3)) for b in range(2)])
+    # Max selection: the in-sample winner is the out-of-sample loser in both splits -> PBO = 1.
+    assert probability_of_backtest_overfitting(return_mat, 2).pbo_float == 1.0
+    # Always choosing config 1 (the middle in both halves) gives w = 2/4 = 0.5, logit 0, counted as overfit.
+    middle_result = probability_of_backtest_overfitting(return_mat, 2, select_fn=lambda sharpe_vec: 1)
+    assert middle_result.pbo_float == 1.0 and np.allclose(middle_result.logit_vec, 0.0)
+    # Choosing the out-of-sample winner (config 2 on block 1, config 0 on block 0) is never overfit.
+    oracle_result = probability_of_backtest_overfitting(return_mat, 2, select_fn=lambda sharpe_vec: int(np.argmin(sharpe_vec)))
+    assert oracle_result.pbo_float == 0.0
+    assert np.allclose(oracle_result.logit_vec, np.log(0.75 / 0.25))
