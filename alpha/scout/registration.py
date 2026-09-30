@@ -43,6 +43,11 @@ class Registration:
     prior_trials_int: int | None = None
     parent_id_str: str | None = None
     grid_justification_str: str = ""
+    # How the universe or asset list was chosen, and whether that choice was made after seeing results
+    # (P2: Zorro Z9's list was picked from sectors that had just won; no statistic on the grid can see that).
+    # A list chosen after seeing results makes the family a retro family: S5 then also requires MCPT (A5).
+    universe_choice_str: str = ""
+    universe_chosen_after_results_bool: bool = False
 
     @property
     def grid_size_int(self) -> int:
@@ -80,6 +85,7 @@ class Registration:
             "primary_metric_str": self.primary_metric_str,
             "kill_criteria_str": self.kill_criteria_str,
             "source_str": self.source_str,
+            "universe_choice_str": self.universe_choice_str,
         }
         missing_list = [name_str for name_str, text_str in required_text_dict.items() if not text_str.strip()]
         if missing_list:

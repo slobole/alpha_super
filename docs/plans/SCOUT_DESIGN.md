@@ -921,6 +921,60 @@ alpha/stats/pod_monitor.py). Choices and findings:
   - CORE5's spec, which goes to P6 with the other re-auditions;
   - truth-mode runs, which come with the research card in P5.
 
+**A7 (2026-10-01, P4 build: edge toolkit).**
+- **Built:**
+  - `alpha/scout/panel.py`: point-in-time panels with exact membership, a parquet cache kept per snapshot (never
+    overwritten), a content snapshot id, and the vault seal applied at load. Only the id of a `vault_opening` row
+    for the family, found in the verified ledger chain, opens it.
+  - `alpha/scout/features.py`: features with declared lookback and basis; QPI and DV2 reuse the engine's fast
+    indicators.
+  - `stations/s1_causality.py`: prefix invariance at random cutoffs and a simulated future 2:1 split, on a symbol
+    sample (about 8 s per feature), plus a panel-level membership integrity check (no tail trim).
+  - `stations/s2_indicator.py`: per-block quantiles, threshold drift and Spearman novelty.
+  - `stations/s3_edge.py`: excess over the same-date eligible mean, date-level Newey-West, eras, years, volatility
+    regimes, liquidity terciles, lag decay, concentration, crisis windows, cost coverage and per-date deciles;
+    D22 verdicts.
+  - A `universe_choice_str` field in S0 registration, and `python -m alpha.scout panel`.
+- **Evidence:** S1 catches seeded leaks (next-day close, a centred window, a full-sample z-score, a mislabelled
+  dollar threshold) and passes the whole feature library; the membership check fails a tail-trimmed mask. S3 finds
+  a planted reversal, stays quiet on noise, rejects a planted wrong-sign effect, and puts an edge planted in liquid
+  names in the top liquidity tercile.
+- **First real use** (`docs/research/SCOUT_P4_EDGE_RERUN_20261001.md`): the owner's Pakal notebooks re-run.
+  - **QPI pullback:** notebook method t 10.0, Scout −1.3 (per event +1.8). WATCHLIST by the rule, no edge of its
+    own: most of the apparent edge came from stocks outside the index on the event date, and QPI is the 3-day
+    return in disguise (Spearman 0.94). QPI is not studied again as its own family; reversal ideas go to the
+    3-day-return family with these runs as prior trials.
+  - **DV2 oversold:** notebook method t 27, Scout 3.3 (per event 5.5), WATCHLIST. The per-date deciles fall in
+    perfect order, but the edge sits in stress, has faded from 19 bp (1998-2007) to 0.6 bp (2016-2022), and does
+    not cover costs (0.9 against 2).
+- **Changes from the independent review (2026-10-01):**
+  - **S3 concentration check:** trims the most extreme 1% of event-dates on BOTH sides. Trimming only the favourable
+    tail gives t ≈ −3 on pure noise, because date means are fat-tailed.
+  - **S3 estimators and hard fail:** a per-event estimator (ratio of sums, date-level Newey-West error) is reported
+    beside the date-level one. A hard fail needs the sign wrong under both, or a date-level t of −2 or lower. The
+    per-event estimator is not calibrated yet, so it can save an idea from a hard fail but not cause one.
+  - **Point-in-time membership:** the old "no PIT violation" check could never fail, because S3 filters non-members
+    first. It is replaced by the reported non-member share and the panel-level tail-trim check.
+  - **Snapshots:** the id also hashes symbol and field names; each snapshot keeps its own cache folder.
+- **Deviations from section 9, recorded:**
+  - S1 uses 20 cutoffs (design: 50) on a 40-symbol sample, at a relative tolerance of 1e-12. A check with fewer
+    than 200 finite comparisons counts as not tested (fail). S1 cannot see leaks in the data itself (revised
+    Turnover, a symbol list holding future joiners); the membership check covers the one known case.
+  - S3 does not yet have: the replication criterion in a sibling universe (needs the Nasdaq-100 panel), bootstrap
+    intervals, placebo dates, up/down-market splits, extra horizons, or VIX terciles (it uses the realised
+    volatility of the member universe). Volatility terciles and deciles use full-sample cut points (diagnostics).
+  - `universe_chosen_after_results_bool` is recorded at S0 but read only from P5, where S5 requires MCPT for such a
+    family.
+- **Deferred to P4b, before S5 runs on stock families:**
+  - the per-asset MCPT null for point-in-time panels (until then, stock families cannot pass S5);
+  - a persistence-preserving permutation for S3 diagnostics;
+  - MCPT on the Zorro Z9 grid;
+  - a Nasdaq-100 panel cache (built on first use) and the S3 replication criterion that needs it;
+  - calibration of the per-event S3 estimator on the P2 synthetic panels;
+  - Masters' per-indicator battery in S2 (range/IQR, relative entropy, mutual information against a shuffled
+    baseline, a serially-correlated mean-break test). Threshold optimisation stays out of S2: it is a search, so it
+    belongs in S4/S5 where trials are counted.
+
 **Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
 It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about
 performance. A performance kill rule is a separate, currently unrecorded gap, and P1 should add it to

@@ -35,6 +35,7 @@ def _registration(**override_dict) -> Registration:
         primary_metric_str="date-clustered mean excess return at 5 sessions",
         kill_criteria_str="S3 hard fail",
         source_str="own idea (Pakal notebook)",
+        universe_choice_str="S&P 500 point-in-time members, fixed before looking at results",
     )
     field_dict.update(override_dict)
     return Registration(**field_dict)
@@ -232,6 +233,7 @@ def test_register_writes_a_frozen_hashed_row(tmp_path):
         ({"retro_bool": True}, "prior_trials_int"),
         ({"source_published_date_str": "2023-13-40"}, "month"),
         ({"registration_id_str": "has space"}, "slug"),
+        ({"universe_choice_str": ""}, "missing required text"),
         ({"registration_id_str": "קוד"}, "slug"),
         ({"registration_id_str": ""}, "slug"),
         ({"prior_trials_int": -1}, "prior_trials_int"),

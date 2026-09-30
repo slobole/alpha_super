@@ -6,6 +6,7 @@
     uv run python -m alpha.scout health --flex-db C:/alpha/live_ops/ibkr_performance.sqlite3
                                             # live pod health report (report only)
     uv run python -m alpha.scout gate taa_3x [--fresh]   # identity gate: Scout spec vs the real engine
+    uv run python -m alpha.scout panel "S&P 500"          # build / refresh a point-in-time panel cache
 """
 
 from __future__ import annotations
@@ -42,8 +43,8 @@ def _ledger_command(command_str: str, ledger_path_str: str) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m alpha.scout")
-    parser.add_argument("command", choices=("verify", "summary", "health", "gate"))
-    parser.add_argument("spec", nargs="?", default=None, help="gate: taa_3x or ndx_vxn")
+    parser.add_argument("command", choices=("verify", "summary", "health", "gate", "panel"))
+    parser.add_argument("spec", nargs="?", default=None, help="gate: taa_3x or ndx_vxn; panel: index name, e.g. \"S&P 500\"")
     parser.add_argument("--fresh", action="store_true", help="gate: run the engine now instead of the newest saved run")
     parser.add_argument("--ledger", default=str(DEFAULT_LEDGER_PATH), help="ledger path (default: main-checkout ledger)")
     parser.add_argument("--flex-xml", nargs="+", default=None, help="health: IBKR Flex ALPHA_DAILY_TWR XML files")
@@ -53,6 +54,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command in ("verify", "summary"):
         return _ledger_command(args.command, args.ledger)
+    if args.command == "panel":
+        from alpha.scout.panel import build_panel
+
+        if not args.spec:
+            parser.error('panel needs an index name, e.g. "S&P 500" or "Nasdaq 100".')
+        print(f"Built {build_panel(args.spec)}")
+        return 0
     if args.command == "gate":
         from alpha.scout.gate.run import GATED_SPEC_DICT, run_gate
 
