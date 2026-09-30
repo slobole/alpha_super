@@ -1,9 +1,10 @@
 """B1/B4 live-host replay for both HPI pods on REAL Norgate data (direct mode; the VPS snapshot profile is not
 available on this workstation).
 
-For each selected signal session T, the production entry point
-    alpha.live.strategy_host.build_decision_plan_for_release(release, as_of=T 18:00 ET, pod_state)
-is called WITHOUT any monkeypatch of compute_signals or of the loader: the host itself calls
+For each selected signal session T, the production entry point is used for the
+vote variant. Since the 2026-09-30 IBS/RSI demotion, the historical baseline
+replay calls the shared HPI plan builder directly. Neither path monkeypatches
+compute_signals or the loader: the host itself calls
 load_exact_hpi_inputs(end_date_str=T), computes signals on that truncated load, runs the 400/80% readiness gate
 and builds the DecisionPlan. The pod state is the backtest's own state at Close_T (positions, pending exits, trade
 ids, previous total value, cash) recorded by the full production-path backtest (hpi_full_runs.py base arm).
@@ -38,6 +39,7 @@ from strategies.hpi import stateful_long as hpi_mod
 os.environ.pop("ALPHA_USE_NORGATE_SNAPSHOT_BOOL", None)
 from alpha.live import strategy_host  # noqa: E402
 from alpha.live.models import LiveRelease, PodState  # noqa: E402
+from data.norgate_loader import use_norgate_data_profile  # noqa: E402
 
 ET = ZoneInfo("America/New_York")
 _REAL_LOADER = hpi_mod.load_exact_hpi_inputs
@@ -173,7 +175,16 @@ def part_replay() -> None:
                 continue
             t0 = time.time()
             try:
-                plan = strategy_host.build_decision_plan_for_release(release(v), as_of(d), pod_state(v, rec))
+                if v == "baseline":
+                    release_obj = release(v)
+                    with use_norgate_data_profile(release_obj.data_profile_str):
+                        plan = strategy_host._build_hpi_decision_plan(
+                            release_obj, as_of(d), pod_state(v, rec),
+                            entry_mode_str=hpi_mod.ENTRY_BASELINE_STR,
+                            strategy_family_str="hpi_sp500_ibs_rsi_exit",
+                        )
+                else:
+                    plan = strategy_host.build_decision_plan_for_release(release(v), as_of(d), pod_state(v, rec))
                 row = {"date": str(d.date()), "variant": v, "tags": sorted(classify(rec)),
                        "n_held": len(rec["positions"]), **compare(plan, rec)}
             except Exception as exc:

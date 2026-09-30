@@ -884,8 +884,11 @@ def test_bench_discovers_hpi_variants_with_expected_wired_scope():
     }
     assert wired_module_set == {
         "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote",
-        "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit",
     }
+    assert next(
+        entry_obj for entry_obj in hpi_entry_list
+        if entry_obj.module_import_str == "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit"
+    ).is_pm_ready_bool
 
 
 @pytest.mark.parametrize(

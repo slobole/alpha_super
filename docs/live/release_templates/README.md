@@ -68,7 +68,6 @@ template uses `incubation` with a dedicated `SIM_` route, full account budget
 | `pod_taa_adaptive_macro_core5_daily_moo.yaml.example` | `strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5` | `norgate_eod_core5` |
 | `pod_dv2_daily_moo.yaml.example` | `strategies.dv2.strategy_mr_dv2:DVO2Strategy` | `norgate_eod_sp500_pit` |
 | `pod_hpi_sp500_2_3_5_vote_daily_moo.yaml.example` | `strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote` | `norgate_eod_sp500_hpi_pit` |
-| `pod_hpi_sp500_ibs_rsi_exit_daily_moo.yaml.example` | `strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit` | `norgate_eod_sp500_hpi_pit` |
 | `pod_taa_btal_fallback_tqqq_vix_cash_monthly_open.yaml.example` | `strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash` | `norgate_eod_etf_plus_vix_helper` |
 | `pod_taa_btal_1n_fallback_tqqq_vix_cash_monthly_open.yaml.example` | `strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash` | `norgate_eod_etf_plus_vix_helper` |
 | `pod_taa_btal_linearity_1n_fallback_qqq_vix_cash_monthly_open.yaml.example` | `strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash` | `norgate_eod_etf_plus_vix_helper` |
@@ -82,3 +81,9 @@ releases root, including subfolders and disabled releases, so one such file
 stops every POD in that root from loading. Before updating a VPS or this
 workstation, delete any `pod_qpi*.yaml`, move it outside `alpha/live/releases`,
 or rename it to a non-`.yaml` extension. A `retired/` subfolder is not enough.
+
+HPI IBS/RSI exit (`strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit`) moved from
+WIRED to PM_READY on 2026-09-30. Its release template and host route were
+removed. A local release YAML for this variant, including a disabled one, now
+fails validation and blocks that releases root. Move it outside the releases
+root or give it a non-`.yaml` extension before updating an operator checkout.

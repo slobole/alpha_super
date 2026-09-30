@@ -165,6 +165,14 @@ def test_retired_qpi_is_research_tier():
     )
 
 
+def test_hpi_ibs_rsi_exit_is_pm_ready_but_not_wired():
+    hpi_import_str = "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit"
+    assert strategy_registry.tier_for(hpi_import_str) is MaturityTier.PM_READY
+    assert hpi_import_str in PM_READY_IMPORT_TUPLE
+    assert hpi_import_str not in WIRED_IMPORT_TUPLE
+    assert "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote" in WIRED_IMPORT_TUPLE
+
+
 def test_live_host_decision_sets_equal_the_release_allowlist():
     """A route the manifest refuses, or a release the host cannot build, is drift."""
     from alpha.live import strategy_host

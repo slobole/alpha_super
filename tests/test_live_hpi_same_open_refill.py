@@ -1,11 +1,11 @@
-"""Live HPI same-open slot refill for both HPI pods (owner decisions 2026-09-28).
+"""HPI same-open slot refill for the wired vote pod and shared baseline helper.
 
 The backtest frees an exit's slot at Open_(T+1) and refills it in the same
 auction. These tests pin the live decision plan to that rule and cover the
 edge cases around it: several exits and candidates, a candidate that is being
 exited, an exit that did not fill, partial exit fills, a held name without a
 bar on T, idempotent re-runs, the MOO basket order and the release kill
-switch. Every plan test runs for the 2/3/5-vote pod and the baseline pod.
+switch. Baseline helper coverage remains after its 2026-09-30 PM_READY demotion.
 """
 
 from __future__ import annotations
@@ -185,11 +185,14 @@ def _build_plan(
             position_amount_map,
             pending_exit_symbol_list or [],
         )
-    return build_decision_plan_for_release(
-        release_obj=release_obj,
-        as_of_ts=datetime(2024, 1, 2, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
-        pod_state_obj=pod_state_obj,
-    )
+    as_of_ts = datetime(2024, 1, 2, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ)
+    if strategy_import_str == BASELINE_IMPORT_STR:
+        return strategy_host_module._build_hpi_decision_plan(
+            release_obj, as_of_ts, pod_state_obj,
+            entry_mode_str="baseline",
+            strategy_family_str="hpi_sp500_ibs_rsi_exit",
+        )
+    return build_decision_plan_for_release(release_obj, as_of_ts, pod_state_obj)
 
 
 def _full_book_features() -> tuple[dict[str, dict[str, float]], dict[str, float]]:

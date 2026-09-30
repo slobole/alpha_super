@@ -22,10 +22,6 @@ RELEASE_TEMPLATE_PATH_TUPLE: tuple[Path, ...] = (
     ),
     Path(
         "docs/live/release_templates/"
-        "pod_hpi_sp500_ibs_rsi_exit_daily_moo.yaml.example"
-    ),
-    Path(
-        "docs/live/release_templates/"
         "pod_taa_btal_fallback_tqqq_vix_cash_monthly_open.yaml.example"
     ),
     Path(
@@ -215,6 +211,38 @@ def test_retired_qpi_release_is_rejected():
         validate_release_manifest(
             replace(release_obj, strategy_import_str=qpi_import_str)
         )
+
+
+def test_hpi_ibs_rsi_exit_release_is_rejected():
+    hpi_import_str = "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit"
+    assert hpi_import_str not in SUPPORTED_STRATEGY_IMPORT_TUPLE
+    assert not Path(
+        "docs/live/release_templates/"
+        "pod_hpi_sp500_ibs_rsi_exit_daily_moo.yaml.example"
+    ).exists()
+    vote_release_obj = parse_release_manifest(
+        str(RELEASE_TEMPLATE_PATH_TUPLE[1].resolve())
+    )
+    with pytest.raises(ValueError, match="Unsupported strategy_import_str"):
+        validate_release_manifest(
+            replace(vote_release_obj, strategy_import_str=hpi_import_str)
+        )
+
+
+def test_disabled_hpi_ibs_rsi_exit_release_blocks_the_releases_root(tmp_path):
+    vote_template_text = RELEASE_TEMPLATE_PATH_TUPLE[1].read_text(encoding="utf-8")
+    (tmp_path / "pod_hpi_vote.yaml").write_text(vote_template_text, encoding="utf-8")
+    (tmp_path / "pod_hpi_ibs_rsi_exit.yaml").write_text(
+        vote_template_text.replace(
+            "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote",
+            "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit",
+        ).replace("pod_hpi_sp500_2_3_5_vote", "pod_hpi_sp500_ibs_rsi_exit"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="strategy_mr_hpi_sp500_ibs_rsi_exit") as exc_info:
+        load_release_list(str(tmp_path))
+    assert "pod_hpi_ibs_rsi_exit.yaml" in str(exc_info.value)
 
 
 def test_disabled_qpi_release_blocks_the_whole_releases_root(tmp_path):

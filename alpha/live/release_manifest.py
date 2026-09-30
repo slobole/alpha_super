@@ -15,7 +15,6 @@ from data.norgate_snapshot_store import CORE5_PROFILE_STR, HPI_SP500_PROFILE_STR
 
 HPI_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = (
     "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote",
-    "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit",
 )
 SUPPORTED_STRATEGY_IMPORT_TUPLE: tuple[str, ...] = (
     CORE5_STRATEGY_IMPORT_STR,

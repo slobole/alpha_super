@@ -15,7 +15,7 @@ source_paths:
     Buy liquid S&P 500 stocks after a sharp short-term pullback, but only while the stock remains above its 200-day trend. Exit when the stock becomes short-term overbought.
 
 !!! info "Retired from live on 2026-09-28"
-    By owner decision, QPI was demoted from `WIRED` to `RESEARCH`. It was not running live on any VPS, and the HPI pods ([HPI 3-Day](hpi-3d-mean-reversion.md), [HPI 2/3/5 Vote](hpi-235-vote.md)) cover the same role. Its live host route and release template were removed. A leftover `pod_qpi*.yaml` in a releases root now fails validation. The [readiness audit](../research/STRATEGY_READINESS_AUDIT_20260928.md) (sections 3.4 and 10) found three problems: a held name with no bar or a NaN IBS is never exited (A-QPI-05); the choice among 14 QPI variants is undocumented (last-3-year Sharpe 0.78 vs 0.98 over the full sample); and small-account friction costs -1.8 pp/yr. The strategy module stays for research.
+    By owner decision, QPI was demoted from `WIRED` to `RESEARCH`. It was not running live on any VPS. [HPI 2/3/5 Vote](hpi-235-vote.md) remains WIRED in the same broad strategy area; [HPI 3-Day](hpi-3d-mean-reversion.md) was demoted to PM_READY on 2026-09-30. QPI's live host route and release template were removed. A leftover `pod_qpi*.yaml` in a releases root now fails validation. The [readiness audit](../research/STRATEGY_READINESS_AUDIT_20260928.md) (sections 3.4 and 10) found three problems: a held name with no bar or a NaN IBS is never exited (A-QPI-05); the choice among 14 QPI variants is undocumented (last-3-year Sharpe 0.78 vs 0.98 over the full sample); and small-account friction costs -1.8 pp/yr. The strategy module stays for research.
 
 <div class="grid cards" markdown>
 

@@ -59,13 +59,14 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     # (A-QPI-05), an undocumented selection among 14 variants, and -1.8 pp/yr
     # small-account friction. Its live host route was removed with it.
     "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote": MaturityTier.WIRED,
-    "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit": MaturityTier.WIRED,
     "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash": MaturityTier.WIRED,
     "strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash": MaturityTier.WIRED,
     "strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash": MaturityTier.WIRED,
     "strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy": MaturityTier.WIRED,
     "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy": MaturityTier.WIRED,
     # ── pm-ready: may join a book, not connected to live ────────────────────
+    # Owner demotion 2026-09-30: retain portfolio eligibility without a live route.
+    "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit": MaturityTier.PM_READY,
     # Five analyzers and capital/benchmark/determinism checks passed 2026-09-13.
     # MOC and fixed TLT borrow remain research execution assumptions.
     "strategies.taa_beyond_6040.strategy_taa_month_end_rebalancing_flow": MaturityTier.PM_READY,

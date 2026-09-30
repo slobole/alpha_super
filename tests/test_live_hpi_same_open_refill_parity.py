@@ -1,4 +1,4 @@
-"""Real-data parity: live HPI plans (2/3/5-vote and baseline pods) versus the backtest.
+"""Real-data parity: wired HPI vote and shared baseline helper versus backtest.
 
 For every session T in each window, the backtest's own state at Close_T
 (positions, pending exits, trade ids, previous total value) is seeded into the
@@ -214,7 +214,7 @@ def _build_live_plan(
     pod_import_str: str,
     old_host_rule_bool: bool = False,
 ):
-    from alpha.live.strategy_host import build_decision_plan_for_release
+    import alpha.live.strategy_host as strategy_host_module
     import strategies.hpi.stateful_long as hpi_module
     from alpha.live.models import LiveRelease, PodState
 
@@ -263,8 +263,20 @@ def _build_live_plan(
         updated_timestamp_ts=datetime(2000, 1, 1, tzinfo=MARKET_TIMEZONE_OBJ),
     )
     as_of_ts = datetime(2030, 1, 1, tzinfo=MARKET_TIMEZONE_OBJ)
+
+    def build_plan():
+        if pod_import_str == BASELINE_IMPORT_STR:
+            return strategy_host_module._build_hpi_decision_plan(
+                release_obj, as_of_ts, pod_state_obj,
+                entry_mode_str="baseline",
+                strategy_family_str="hpi_sp500_ibs_rsi_exit",
+            )
+        return strategy_host_module.build_decision_plan_for_release(
+            release_obj, as_of_ts, pod_state_obj
+        )
+
     if not old_host_rule_bool:
-        return build_decision_plan_for_release(release_obj, as_of_ts, pod_state_obj)
+        return build_plan()
 
     # Replica of the pre-2026-09-28 host: iterate() with no opens (no slot
     # freed), then an exit for every pending name still held.
@@ -283,7 +295,7 @@ def _build_live_plan(
             "iterate",
             old_host_iterate,
         )
-        return build_decision_plan_for_release(release_obj, as_of_ts, pod_state_obj)
+        return build_plan()
 
 
 def _is_expected_missing_open_mismatch_bool(decision_plan_obj, record_dict: dict) -> bool:
