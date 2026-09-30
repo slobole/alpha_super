@@ -226,6 +226,10 @@ Speed targets on the workstation:
 
 ### 7.1 What it compares
 
+**A6 supersedes the thresholds below for parity mode:** in parity mode the gate is exact. Daily returns and daily
+weights must agree within 1e-9 on every date, the trade dates must be identical, and the comparison must cover the
+engine's whole run. The table below is the informational tolerance tier, used for truth mode.
+
 For a strategy that exists in the real engine, the gate runs the real engine and the Scout spec on the
 same data snapshot over full history, in parity mode, and compares:
 
@@ -864,6 +868,58 @@ alpha/stats/pod_monitor.py). Choices and findings:
 - **The first run's "DSR alone" is withdrawn.** It sat on the sampling boundary, used the flawed DSR, and had edge
   labels that were too high.
 - **S0** must record how a universe or asset list was chosen and whether results had been seen (P4).
+
+**A6 (2026-09-30, P3 build: weights engine and identity gate).**
+- **Layout:** specs live in `alpha/scout/specs/` (`taa_3x.py`, `ndx_vxn.py`), not `families/`, because
+  `alpha/scout/families.py` is the mechanism taxonomy. The shared execution engine is `alpha/scout/engines/weights.py`;
+  the gate is `alpha/scout/gate/` (`identity.py` comparator, `run.py` runner, `deviations.py` registry).
+- **The engine contract was mapped line by line** for the full-target monthly pods:
+  - sizing from the previous close's total value and T prices, truncated whole shares;
+  - fills at Open(t) with slippage, and a per-share fee with a minimum;
+  - no cash check;
+  - dividends net of 25% withholding, credited before the next open;
+  - missing-price liquidation at the last close;
+  - two share-unit modes: adjusted (TAA 3x) and historical raw shares (NDX VXN, after fix fb81e86).
+- **Gate results against the saved engine runs of 2026-09-30:**
+
+  | Pod | Return difference | Daily correlation | Drawdown difference | Holdings cells matched | Scout time | Engine time |
+  |---|---|---|---|---|---|---|
+  | TAA 3x | 0.00 bps | 1.000 | 0.000 pp | 610 of 610 | 3 s | 22 s |
+  | NDX VXN | 0.00 bps | 1.000 | 0.000 pp | 2,329 of 2,329 | 13 s | 274 s |
+
+- **CI substitute:** there is no CI in the repo, so the gate runs in the local test suite
+  (`tests/test_scout_weights_engine.py`). It includes a deliberately broken spec (reversed rank weights) that the gate
+  must fail. `python -m alpha.scout gate <spec> [--fresh]` exits 1 on failure.
+- **Deviations registry:** the membership tail trim is retired (fix #7). The split-adjusted share units deviation
+  applies to TAA 3x only. The DTB3 publication lag (0 of 168 decisions) is registered.
+- **Review of P3 → exact parity tier.** The independent review showed that the section 7.1 tolerances (5 bps,
+  0.999, 99.5% of cells) let real bugs pass while parity is exact to about 1e-16:
+  - membership read one session early (4 bps, 99.7% of cells);
+  - the $1 minimum fee dropped;
+  - dividends credited a day early;
+  - a Scout run shortened by years.
+
+  The gate is now `identity.compare_exact`: in parity mode every one of these must hold, or the gate fails —
+  - daily returns and daily weights within 1e-9 on every date;
+  - identical trade dates;
+  - the same first date;
+  - no engine date missing inside the span;
+  - at most 5 sessions missing at the end.
+
+  The 7.1 tolerances remain an informational tier for truth mode.
+  - Result: TAA 3x 4e-16 / 3e-16 over 3,518 days; NDX VXN 4e-16 / 1e-16 over 6,725 days.
+  - The tests include two near-miss mutants that must fail (membership one session early; no minimum fee).
+  - The engine now runs before Scout: fresh mode refreshes DTB3 first, and capital comes from the engine run.
+  - Scout is cut at the engine's last date.
+  - DTB3 is read from the main checkout and refused if older than the last executed decision.
+  - Real-data tests skip only when `norgatedata.status()` is false.
+  - Limitation: saved mode compares today's data with an older run, so a future split can fail it falsely in
+    TAA's split-adjusted units; `--fresh` is authoritative.
+- **Deferred:**
+  - an institutional (fractional-share) account mode, which belongs to S4 in P5; parity mode's capital parameter covers
+    the $30K case;
+  - CORE5's spec, which goes to P6 with the other re-auditions;
+  - truth-mode runs, which come with the research card in P5.
 
 **Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
 It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about
