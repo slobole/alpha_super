@@ -116,7 +116,7 @@ def test_live_never_reaches_scout():
 
 
 def test_stats_package_stays_light():
-    allowed_root_set = {"__future__", "dataclasses", "typing", "numpy", "pandas", "scipy", "alpha"}
+    allowed_root_set = {"__future__", "dataclasses", "typing", "itertools", "math", "numpy", "pandas", "scipy", "alpha"}
     graph_dict = _import_graph(REPO_ROOT_PATH)
     stats_module_list = [name for name in graph_dict if name.startswith("alpha.stats")]
     assert len(stats_module_list) >= 8

@@ -64,7 +64,7 @@ def main() -> None:
 
     # Decision 2: gate set.
     set_table = _rate_table(frame, gate_set_columns(frame, mcpt_column_str))
-    set_table["admissible"] = (set_table["noise_garch"] <= 0.05) & (1 - set_table["edge_080"] <= 0.30)
+    set_table["admissible"] = (set_table["noise_garch"] <= 0.05) & (set_table["edge_080"] >= 0.70 - 1e-9)  # float-safe (fixed after the review; the first run used 1 - x <= 0.30)
     set_table["test_count"] = [label.count("+") + 1 if not label.startswith("any") else 3 for label in set_table.index]
     print("\nGate sets: pass rate by case")
     print(set_table.round(3).to_string())

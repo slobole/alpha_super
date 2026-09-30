@@ -64,7 +64,7 @@ walk-forward) are affordable. Speed is never the goal.
 | D16 | Capacity is judged on today's volumes, separately from small-account friction | Owner rule (tradability from today) |
 | D17 | Shadow (S8) kill and confirm rules are written before shadow starts | Otherwise the forward test becomes another tuning loop |
 | D18 | The statistics live in a shared `alpha/stats/` package, not inside `alpha/scout/` | Pakal, Scout and the live pod-health report use one implementation; `alpha/live` may import `alpha.stats` but never `alpha.scout` (A1) |
-| D19 | S5 gates on three tests only (MCPT of the whole search, DSR with family N_eff, walk-forward with design sensitivity); PBO, CPCV and the haircut are printed diagnostics | The seven v1 tests overlap heavily; requiring all of them rejects almost everything, and each extra threshold is another knob (A1) |
+| D19 | S5 gates on **MCPT alone** (plain date shuffle, p ≤ 0.05, full search re-run); DSR with a correlation-aware benchmark (plus the ledger's earlier family trials) is a WARN; walk-forward, PBO, CPCV and the haircut are printed diagnostics | P2 calibration (amendment 1): MCPT held 4.4-4.5% false pass with 93-95% power at Sharpe 0.79 in both a varied and a near-duplicate grid; the clustered-N_eff DSR reached 11.8% false pass; requiring every test rejected 44% of real edges (A1, A5) |
 | D20 | A calibration study on known cases decides which tests gate, before the pipeline is built | A test earns a gate only if it separates noise and dead strategies from planted edges better than the gates already in place (A1) |
 | D21 | A pod-health monitor for the live pods (Cold Blood Index with block bootstrap, plus CUSUM) is built first | It protects real money now and needs only the shared stats package; it is the S8 machinery pointed at LIVE pods (A1) |
 | D22 | **Reject on evidence against, not on missing proof.** Only causality violations (S1), a wrong-sign or absent edge (S3), and a negative net result at double costs (S4) end a family. A borderline statistical result goes to `WATCHLIST` with cheap forward tracking, not to `REJECTED` | Our history has one sample; strict conjunctions of tests on it throw away real edges. Forward data after registration is clean, so borderline ideas can earn their way in over time (A2) |
@@ -417,8 +417,8 @@ $\bar{x}_t = \text{mean}_i\, x_{i,t}$, and then test the time series $\{\bar{x}_
 
 | Criterion | Threshold |
 |---|---|
-| Newey–West t, date-clustered, registered horizon | ≥ 2.0 (sanity; the multiple-testing bar is the next row) |
-| Within-date permutation p (E and X), block-of-dates p (W) | Benjamini–Yekutieli q ≤ 0.05 across all S3 p-values in the ledger (D12) |
+| Newey–West t, date-clustered, registered horizon | ≥ 2.0, and its p-value enters the ledger-level Benjamini–Yekutieli FDR at q ≤ 0.05 (D12; A5: the only calibrated S3 test) |
+| Within-date permutation p (E and X), block-of-dates p (W) | Diagnostic only (A5: the within-date shuffle over-rejects when signals persist and cluster by sector, 11% at nominal 5%); a persistence-preserving permutation is calibrated in P4 |
 | Era sign | correct sign in ≥ 2 of 3 eras |
 | Positive years | ≥ 60% |
 | Concentration | t ≥ 2.0 with the top 1% of event-dates removed |
@@ -462,7 +462,17 @@ t ≥ 2.0. The burden moves to S5 and S6.
 All tests run on the family's registered grid. The whole selection procedure from S4 (plateau rule) is
 re-applied inside every resample, so the tests judge the *process*, not a single picked configuration.
 
-S5 asks two questions, and each question has its own gate (D19):
+**A5 (P2 calibration) supersedes the gate list below.**
+- **The only S5 gate is MCPT:** plain date shuffle, p ≤ 0.05, re-running the full search including plateau selection.
+- **DSR is a WARN,** not a gate. Its benchmark is `null_selected_sharpe_benchmark`: the expected Sharpe of the
+  configuration the search would select with no edge, simulated from the family's own correlation matrix, with the
+  ledger's earlier trials of the family as extra independent draws. PASS ≥ 0.95. A miss needs a written owner note.
+- **Printed diagnostics:** walk-forward (efficiency and the 8-design strip) and PBO.
+- **The clustered-N_eff SR*_0 formula below is retired** for gating: its deflation vanishes when N_eff collapses.
+
+Evidence: `docs/research/SCOUT_P2_CALIBRATION_20260930.md`. The text below is kept as the pre-calibration design.
+
+S5 asks two questions, and each question has its own gate (D19, pre-calibration):
 
 | Question | Gate | Why this test |
 |---|---|---|
@@ -823,6 +833,26 @@ alpha/stats/pod_monitor.py). Choices and findings:
   volatility than the backtest, or crash clustering longer than 20 sessions, raises real false alarms (1-year
   historical windows containing the 2020 crash went RED often). The CBI is blunter after year one.
 - **Gap recorded:** G-034 in `ASSUMPTIONS_AND_GAPS.md`. Wiring into the watchdog stays an owner decision.
+
+**A5 (2026-09-30, P2 calibration).** Two pre-registered runs (`PROTOCOL.md` 5660232; `PROTOCOL_AMENDMENT_1.md`
+52e961b, written after an independent review of the first run), in `docs/research/SCOUT_P2_CALIBRATION_20260930.md`.
+
+- **Decisive run:** 7,000 synthetic histories, two grid families (varied; near-duplicates), plateau selection.
+  - **MCPT plain at p ≤ 0.05:** 4.4 / 4.5% false pass and 62 / 75% power at Sharpe 0.52 (93 / 95% at 0.79). The frozen
+    rule chose it as the only S5 gate.
+  - **DSR with a correlation-aware benchmark:** 2.2 / 3.5% false pass, power 53 / 73%. It is a WARN, because it alone
+    counts the ledger's earlier trials.
+  - **The old clustered-N_eff DSR:** 11.8% false pass when N_eff collapsed to 1. It is retired.
+  - **Walk-forward (21-25% false pass) and PBO (blind to shared edges):** diagnostics.
+- **S3:** with sector factors and a persistent signal, the naive per-event t-test rejected a true null 19% of the time
+  and the within-date permutation 11%. Only the date-level Newey-West t held 5%, so it is S3's significance test and
+  the permutation is a diagnostic until P4 calibrates a persistence-preserving version (the panel is exploratory and
+  labelled so).
+- **Real dead cases:** the correlation-aware DSR rejects Zorro Z9 on its hindsight-picked list, which the old DSR
+  passed. It passes Alpha101 gross, whose edge was real and was killed by costs (S4's job).
+- **The first run's "DSR alone" is withdrawn.** It sat on the sampling boundary, used the flawed DSR, and had edge
+  labels that were too high.
+- **S0** must record how a universe or asset list was chosen and whether results had been seen (P4).
 
 **Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
 It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about
