@@ -6,6 +6,9 @@ up to the vault seal (2022-12-30). MCPT components (A8, A9):
     "taa"  plain date shuffle of [TR returns of the traded ETFs, SPY return, VIX, DTB3]; score SD
     "ndx"  stock selection: per-asset null on the Nasdaq-100 panel, active return over overlay x EW members;
            timing overlay: plain date shuffle of [EW members return, SPY return, VXN]; score SD
+    "spec" any ETF pod whose spec module provides the pod contract (P6b): `mcpt_matrix` (traded assets' TR returns
+           first, then every exogenous series) and `fast_daily_list`; plain date shuffle; score SD over the
+           vol-targeted EW of the traded assets
 """
 
 from __future__ import annotations
@@ -112,6 +115,47 @@ def taa_mcpt(plan: PodPlan, family: FamilyRunner, inputs) -> list[McptComponent]
         null_vec = np.concatenate(pool_obj.map(_taa_chunk, [(matrix, 7_000 + i, chunk_int, state) for i in range(WORKER_COUNT_INT)]))[:PERMUTATION_COUNT_INT]
     return [McptComponent("whole strategy", "date shuffle", f"SD: active Sharpe over vol-targeted EW of {len(asset_tuple)} ETFs", observed_float,
                           null_vec, _p_value(observed_float, null_vec), note_str="ETF timing family (A9 calibration: 2.0-7.0% false passes)")]
+
+
+# ---------------------------------------------------------------- spec-contract MCPT (P6b)
+def _spec_hooks(state: dict):
+    """The spec module that carries the pod contract (`fast_daily_list`)."""
+    import importlib
+
+    return importlib.import_module(state["module_str"])
+
+
+def _spec_search(matrix: np.ndarray) -> float:
+    state = _STATE
+    module = _spec_hooks(state)
+    daily_list = module.fast_daily_list(matrix, state["date_index"], state["config_list"], **state["fast_kwarg_dict"])
+    return sd_score(daily_list, matrix[:, : state["asset_count_int"]].mean(axis=1), state["grid_shape_tuple"], 260)
+
+
+def _spec_chunk(args) -> np.ndarray:
+    matrix, seed_int, count_int, state = args
+    _STATE.update(state)
+    return mcpt(_spec_search, matrix, count_int, seed_int).null_score_vec
+
+
+def spec_mcpt(plan: PodPlan, family: FamilyRunner, inputs) -> list[McptComponent]:
+    import importlib
+
+    option_dict = plan.option_dict["spec"]
+    module = importlib.import_module(option_dict["module_str"])
+    date_index, matrix = option_dict["matrix_fn"](module, inputs)
+    keep_vec = date_index <= pd.Timestamp(SEAL_END_STR)
+    date_index, matrix = date_index[keep_vec], matrix[keep_vec]
+    state = {"module_str": option_dict["module_str"], "date_index": date_index, "config_list": family.config_list(),
+             "grid_shape_tuple": family.grid_shape_tuple, "asset_count_int": option_dict["asset_count_int"],
+             "fast_kwarg_dict": option_dict.get("fast_kwarg_dict", {})}
+    _STATE.update(state)
+    observed_float = _spec_search(matrix)
+    chunk_int = PERMUTATION_COUNT_INT // WORKER_COUNT_INT + 1
+    with Pool(WORKER_COUNT_INT) as pool_obj:
+        null_vec = np.concatenate(pool_obj.map(_spec_chunk, [(matrix, 7_500 + i, chunk_int, state) for i in range(WORKER_COUNT_INT)]))[:PERMUTATION_COUNT_INT]
+    return [McptComponent("whole strategy", "date shuffle", f"SD: active Sharpe over vol-targeted EW of {option_dict['asset_count_int']} assets",
+                          observed_float, null_vec, _p_value(observed_float, null_vec), note_str="ETF timing family (A9 calibration: 2.0-7.0% false passes)")]
 
 
 # ---------------------------------------------------------------- NDX MCPT
@@ -244,7 +288,8 @@ def reaudit(plan: PodPlan, live_net_dict: dict[str, pd.Series], factor_df: pd.Da
     inputs = plan.inputs_fn()
     family = plan.family_fn(inputs)
     s4 = run_s4(family, tbill_ser)
-    mcpt_list = taa_mcpt(plan, family, inputs) if plan.mcpt_kind_str == "taa" else ndx_mcpt(plan, family, inputs)
+    mcpt_fn = {"taa": taa_mcpt, "ndx": ndx_mcpt, "spec": spec_mcpt}[plan.mcpt_kind_str]
+    mcpt_list = mcpt_fn(plan, family, inputs)
     s5 = run_s5(s4.grid_df.loc[:SEAL_END_STR], family.grid_shape_tuple, s4.chosen_label_str, s4.live_label_str, mcpt_list, plan.prior_trial_count_int)
 
     net_ser = s4.grid_df[s4.live_label_str].loc[:SEAL_END_STR]
