@@ -80,6 +80,40 @@ def plan_dict() -> dict[str, tuple[PodPlan, Registration]]:
             universe_chosen_after_results_bool=True,
         )
         out_dict[variant_str] = (plan, registration)
+
+    from alpha.scout.family import CORE5_GRID_DICT, core5_family
+    from alpha.scout.specs import core5
+
+    def core5_s3():
+        score_df, next_return_df, threshold_ser = core5.s3_inputs()
+        return "W", ("Class W: CORE5 does not rank; each sleeve is its own trend signal (SMA / adaptive MA - 1 at month end, > 0 = long) "
+                     "against its next-month return over BIL. Only the on/off spread and per-asset slopes test the idea; the "
+                     "cross-sectional slope is reported for completeness."), predictive_tests(score_df, next_return_df, threshold_ser)
+
+    out_dict["core5"] = (
+        PodPlan(
+            name_str="CORE5", family_fn=lambda inputs: core5_family(inputs), inputs_fn=core5.load_inputs, mcpt_kind_str="spec",
+            adoption_date_str="2026-09-28", prior_trial_count_int=50, slot_str="NDX VXN", s3_fn=core5_s3,
+            option_dict={"spec": {"module_str": "alpha.scout.specs.core5", "matrix_fn": lambda module, inputs: module.mcpt_matrix(inputs),
+                                  "asset_count_int": len(core5.TRADED_TUPLE)}},
+            strategy_module_str=core5.STRATEGY_IMPORT_STR,
+        ),
+        Registration(
+            registration_id_str="core5_reaudition_20261002", family_id_str="time_series_trend_and_breakout",
+            hypothesis_str="CORE5: each of SPY, IEF, GLD, DBC and UUP is held while its short price average is above an adaptive moving "
+                           "average (speed set by its drawdown percentile), DBC is shorted when below, idle weight goes to BIL; it beats a "
+                           "volatility-targeted equal weight of the six ETFs.",
+            mechanism_str="Time-series trend across asset classes, with an adaptive average that speeds up in drawdowns.",
+            expected_sign_and_location_str="Positive active return, mostly in sustained trends and crisis exits.",
+            hypothesis_class_str="W", universe_str="SPY, IEF, GLD, DBC, UUP; reserve BIL", horizon_str="month-end and state changes",
+            schedule_str="month end", execution_str="next session's open (shorts with a borrow fee)",
+            param_grid_dict={k: tuple(v) for k, v in CORE5_GRID_DICT.items()},
+            primary_metric_str="S5 MCPT (score SD); S6 T-bill slot", kill_criteria_str="S8 CUSUM or Cold Blood Index red",
+            source_str=core5.STRATEGY_IMPORT_STR, retro_bool=True, prior_trials_int=50,
+            universe_choice_str="A five-asset macro ETF set from the owner's adaptive-macro design; documented variants not counted, so N = 50 (rule).",
+            universe_chosen_after_results_bool=False,
+        ),
+    )
     return out_dict
 
 
