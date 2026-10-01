@@ -30,7 +30,9 @@ Null construction:
   biased: the calmer baseline gains Sharpe in the null (review: about 9% false
   passes at nominal 5% with market drift). Searches on these panels must score
   the Sharpe of the daily ACTIVE return (strategy minus baseline, same days), in
-  which drift and common moves cancel (P4b amendment 2).
+  which drift and common moves cancel (P4b amendment 2). Calibration (P4b, S&P-like
+  synthetic panel): momentum 8.0% and reversal 2.0% false passes at p <= 0.05,
+  power 67% and 40%; momentum-like families with 0.025 < p <= 0.05 are "marginal".
 - Exogenous inputs (VIX, VXN, T5YIE, ...) must be passed as extra COLUMNS of
   `return_mat` so they move with their dates. Left outside, their link with
   same-day returns is broken and volatility-scaled rules face a null that is too

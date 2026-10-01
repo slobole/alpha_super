@@ -171,5 +171,5 @@ def test_mcpt_refuses_zero_filled_listings_when_the_mask_is_given():
     mcpt(lambda mat: 0.0, return_mat, permutation_count_int=3, random_seed_int=0)
     mask_mat = np.ones_like(return_mat, dtype=bool)
     mask_mat[:100, 1] = False
-    with pytest.raises(ValueError, match="S5 cannot pass"):
+    with pytest.raises(ValueError, match="mcpt_live_spans"):
         mcpt(lambda mat: 0.0, return_mat, permutation_count_int=3, random_seed_int=0, availability_mask_mat=mask_mat)

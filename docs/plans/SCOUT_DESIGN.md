@@ -422,7 +422,7 @@ $\bar{x}_t = \text{mean}_i\, x_{i,t}$, and then test the time series $\{\bar{x}_
 | Criterion | Threshold |
 |---|---|
 | Newey–West t, date-clustered, registered horizon | ≥ 2.0, and its p-value enters the ledger-level Benjamini–Yekutieli FDR at q ≤ 0.05 (D12; A5: the only calibrated S3 test) |
-| Within-date permutation p (E and X), block-of-dates p (W) | Diagnostic only (A5: the within-date shuffle over-rejects when signals persist and cluster by sector, 11% at nominal 5%); a persistence-preserving permutation is calibrated in P4 |
+| Within-date permutation p (E and X), block-of-dates p (W) | Diagnostic only (A5: the within-date shuffle over-rejects when signals persist and cluster by sector, 11% at nominal 5%). A8: the persistence-preserving placebo (event mask shifted ≥ 1 year) holds 4.3-4.5% and is reported as a diagnostic |
 | Era sign | correct sign in ≥ 2 of 3 eras |
 | Positive years | ≥ 60% |
 | Concentration | t ≥ 2.0 with the top 1% of event-dates removed |
@@ -473,8 +473,10 @@ re-applied inside every resample, so the tests judge the *process*, not a single
   - **Score:** the selected Sharpe minus a registered baseline (buy-and-hold or volatility-targeted buy-and-hold) on
     the same permuted path. The P2 review showed raw scoring passes volatility-sized families with drift but no
     signal 38% of the time; calibrate before P5 relies on it.
-  - **Point-in-time panels:** it is not runnable on panels whose membership changes over time until P4 builds a
-    per-asset null; such families cannot pass S5 and go to WATCHLIST.
+  - **Point-in-time panels (A8):** they use the per-asset null (`mcpt_live_spans` / `alpha.scout.null.mcpt_panel`,
+    membership strata). The score is the Sharpe of the daily ACTIVE return over the baseline, not a difference of
+    Sharpes. Calibrated at 8.0% (momentum) and 2.0% (reversal) false passes. A cross-sectional ranking family with
+    0.025 < p ≤ 0.05 passes with a "marginal" flag on its card.
   - Its 4.4-4.5% size is empirical, not exact, on GARCH data.
 - **DSR is a WARN,** not a gate. It is an exact null p-value (`null_selected_sharpe_draws` +
   `null_selected_sharpe_p_value`, p ≤ 0.05): where the selected Sharpe falls among the Sharpes the search would select
@@ -507,7 +509,7 @@ calibration study (P2, section 13) shows it catches failures that the three gate
   VXN-scaled pods. P2 decides between them on planted cases.
 - **Point-in-time panels:** a panel whose NaN pattern changes over time (membership, late listings) is
   refused by the P0 harness; shuffling it scatters NaN and weakens the null (review: 10.7% false positives
-  at p ≤ 0.05 on noise). P4 adds a null that permutes returns inside each asset's live span.
+  at p ≤ 0.05 on noise). Such panels use the per-asset null built in P4b (A8).
 - **What it answers:** "Could this search procedure have found something this good in data with no
   temporal structure?"
 - **Draws:** 500 minimum, 1,000 for promotion.
@@ -737,6 +739,7 @@ strategies and can start now. P3 gates each strategy only after the readiness-au
 | **P1 Live pod health (report only)** | Cold Blood Index (block) + CUSUM for TAA 3x and NDX VXN from their reference backtests and live ledgers; a daily research-side report | False-alarm rate measured on history (target ≤ 5% a year); detection delay measured on a synthetic "edge died" path; **wiring into the watchdog is a separate live change that needs the owner's explicit authorisation** |
 | **P2 Calibration study** | Run the candidate S3 and S5 tests on known cases: pure noise (many seeds), planted edges of known Sharpe (0.3, 0.5, 0.8) inside noise, known dead strategies (Z8 after July 2016, Alpha101 after 2011, IPO/ATH after 1999, MOSAIC), and plain vs volatility-stratified MCPT nulls | A table of false-pass rate and detection power per test; the gate set of S3/S5 is confirmed or changed from that table (D20), and this document is amended |
 | **P3 Weights engine + gate** | `engines/weights.py`, costs, both account modes, identity gate, deviations registry, CI job | TAA 3x and NDX VXN (then CORE5) pass the gate on full history; CI blocks a deliberately broken strategy |
+| **P4b Null + calibration** | per-asset MCPT null, S3 per-event and placebo calibration, Masters' S2 battery, Nasdaq-100 panel + replication, MCPT on Z9 | Done 2026-10-01 (A8): the null passes its frozen calibration; stock families can pass S5 |
 | **P4 Edge toolkit** | panels + snapshot hash, vault seal and contamination record, feature library with contracts, S1, S2 and S3, CLI | S1 catches seeded leaks (future-peeking feature, split-sensitive feature, non-PIT member); the Pakal DV2-S&P 500 and QPI studies re-run through S3 with PIT membership, and the card shows the old-vs-new difference |
 | **P5 Strategy, luck, book and card** | S4, the three S5 gates and their diagnostics, S6, the research card, re-audition cards for TAA 3x and NDX VXN | Full cards for the two live pods, owner summary in Hebrew |
 | **P6 Re-audition, classes W and X** | Retro registrations, prior-trial counts, cards for the remaining W and X strategies in section 10 order, Bench page | One card per strategy |
@@ -936,7 +939,7 @@ alpha/stats/pod_monitor.py). Choices and findings:
     D22 verdicts.
   - A `universe_choice_str` field in S0 registration, and `python -m alpha.scout panel`.
 - **Evidence:** S1 catches seeded leaks (next-day close, a centred window, a full-sample z-score, a mislabelled
-  dollar threshold) and passes the whole feature library; the membership check fails a tail-trimmed mask. S3 finds
+  dollar threshold) and passes the whole feature library; the membership check fails a tail-trimmed mask (a fixed gap). S3 finds
   a planted reversal, stays quiet on noise, rejects a planted wrong-sign effect, and puts an edge planted in liquid
   names in the top liquidity tercile.
 - **First real use** (`docs/research/SCOUT_P4_EDGE_RERUN_20261001.md`): the owner's Pakal notebooks re-run.
@@ -974,6 +977,41 @@ alpha/stats/pod_monitor.py). Choices and findings:
   - Masters' per-indicator battery in S2 (range/IQR, relative entropy, mutual information against a shuffled
     baseline, a serially-correlated mean-break test). Threshold optimisation stays out of S2: it is a search, so it
     belongs in S4/S5 where trials are counted.
+
+**A8 (2026-10-01, P4b: the per-asset null and S2/S3 calibration).** Report:
+`docs/research/SCOUT_P4B_CALIBRATION_20261001.md`; protocol frozen in df76c34, with amendments 1-2 recorded before
+any Part B result.
+
+- **The per-asset MCPT null, adopted as S5's null for point-in-time panels:**
+  - **How it works:** one global date permutation. Each stock follows it wherever the source date is its own
+    listed date in the same membership state; its leftover dates fill the remaining slots in the order of a global
+    key. Bars move whole (Masters), chained from each stock's first bar. Membership, Volume and Turnover stay on
+    their real dates.
+  - **Score:** the Sharpe of the daily active return over the baseline. A "Sharpe minus Sharpe" score was biased
+    toward false passes, because the null keeps only part of the co-movement (independent review).
+  - **Calibration** on an S&P-like synthetic panel (tenure 0.41, drift +0.04% a day):
+    - momentum: 8.0% false passes, 67% power;
+    - reversal: 2.0% false passes, 40% power;
+    - the frozen bar was ≤ 8.0% and power ≥ twice the false passes.
+  - **Flag:** momentum-like families with 0.025 < p ≤ 0.05 pass as "marginal".
+  - **Not calibrated:** market-timing families inside stock panels.
+- **S3:**
+  - The per-event estimator over-rejects with sector factors and a persistent signal (9.5%). It stays
+    informational: it can save an idea from a hard fail, never cause one.
+  - The shift placebo (4.3-4.5%) is added as a diagnostic.
+  - The replication check in a sibling universe is a soft check. The Nasdaq-100 panel was built for it: DV2
+    replicates (+17 bp, t 3.3, cost coverage 1.7); QPI fails it with a hard fail on the Nasdaq-100.
+- **S2:** Masters' battery (tails, relative entropy, mutual information against within-date shuffles, a
+  single-break test with Andrews' automatic lag: 0-3.8% false warnings up to autocorrelation 0.95). Diagnostic.
+- **S1:** the membership check now looks for the fingerprint of a fixed tail trim (many stocks sharing one gap of 2
+  or more sessions). A share bar wrongly flagged the Nasdaq-100, where real removals before acquisitions are
+  scattered and mostly one session.
+- **Zorro Z9, a known dead case:** the MCPT stops it in sample (p 0.11 on its 2017 list, 0.15 on a neutral list).
+- **Still open after P4b:**
+  - **The persistence-preserving permutation for S3:** replaced by the shift placebo, which keeps persistence and
+    clustering. No further permutation is planned.
+  - **The weights engine:** reads Close and Open only, so liquidity filters in a search must come from the real
+    panel, like membership.
 
 **Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
 It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about

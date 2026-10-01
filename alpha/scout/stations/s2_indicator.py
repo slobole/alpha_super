@@ -14,8 +14,10 @@
     with the forward excess shuffled within each date (20 shuffles; WARN when not above the shuffles' maximum):
     it catches non-linear information that a decile table can miss;
   - a mean break: the sup-Wald statistic of a single break in the monthly median of the indicator, splits in the
-    middle 70%, Newey-West variance (Andrews 1993 5% critical value 8.68; WARN above): the indicator's level
-    moved, so a fixed threshold means different things in different eras.
+    middle 70%, Newey-West variance with Andrews' (1991) AR(1) automatic lag (Andrews 1993 5% critical value 8.68;
+    WARN above; P4b simulation: 0-3.8% false warnings on break-free AR(1) series with phi 0 to 0.95, 96% power for
+    a half-standard-deviation shift at mid-sample): the indicator's level moved, so a fixed threshold means
+    different things in different eras.
   Threshold optimisation is deliberately NOT here: choosing a threshold is a search, so it belongs to S4/S5 where
   every trial is counted.
 All of S2 is diagnostic (WARN only).
@@ -66,7 +68,12 @@ def sup_wald_break(series_vec, trim_float: float = 0.15) -> dict:
     count_int = value_vec.size
     if count_int < 40:
         return {"sup_wald_float": float("nan"), "break_index_int": -1, "warn_bool": False}
-    lag_int = int(np.floor(4 * (count_int / 100.0) ** (2 / 9)))
+    # Andrews (1991) AR(1) plug-in bandwidth for the Bartlett kernel: persistent series get a long lag (a fixed
+    # 4(n/100)^(2/9) rule warned on 51% of break-free AR(1) series with phi = 0.9, review 2026-10-01).
+    demeaned_vec = value_vec - value_vec.mean()
+    rho_float = float(np.clip(demeaned_vec[1:] @ demeaned_vec[:-1] / (demeaned_vec[:-1] @ demeaned_vec[:-1]), -0.97, 0.97))
+    alpha_float = 4 * rho_float**2 / ((1 - rho_float) ** 2 * (1 + rho_float) ** 2)
+    lag_int = int(min(np.floor(1.1447 * (alpha_float * count_int) ** (1 / 3)), count_int // 4))
     long_run_variance_float = newey_west_mean_t_stat(value_vec, lag_int).standard_error_float ** 2 * count_int
     cumulative_vec = np.cumsum(value_vec)
     best_float, best_int = 0.0, -1

@@ -214,7 +214,10 @@ def test_permuted_panel_keeps_structure_and_moves_whole_bars():
     real_member_body_vec = np.log(close_df.iloc[1:, 10] / panel.field("Open").iloc[1:, 10]).to_numpy()[member_mask]
     new_member_body_vec = np.log(new_close_df.iloc[1:, 10] / permuted.field("Open").iloc[1:, 10]).to_numpy()[member_mask]
     np.testing.assert_allclose(np.sort(new_member_body_vec), np.sort(real_member_body_vec), atol=1e-12)  # member bars stay member bars
-    assert (permuted.field("High") >= np.maximum(permuted.field("Open"), new_close_df) * (1 - 1e-12))[new_close_df.notna()].fillna(True).all().all()
+    listed_df = new_close_df.notna()
+    assert (permuted.field("High") >= np.maximum(permuted.field("Open"), new_close_df))[listed_df].fillna(True).all().all()
+    assert (permuted.field("Low") <= np.minimum(permuted.field("Open"), new_close_df))[listed_df].fillna(True).all().all()
+    assert permuted.field("Volume").equals(panel.field("Volume")) and permuted.field("Turnover").equals(panel.field("Turnover"))
 
 
 # ---------------------------------------------------------------- S2

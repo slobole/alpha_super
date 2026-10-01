@@ -134,6 +134,17 @@ def test_live_span_null_keeps_each_asset_and_stratum_and_the_shared_cross_sectio
             np.testing.assert_array_equal(np.sort(source_mat[cell_mask, column_int]), np.flatnonzero(cell_mask))
     np.testing.assert_array_equal(source_mat[:, 0], source_mat[:, 1])  # same rows and strata: same shuffle
     assert not np.array_equal(source_mat[:, 0], np.arange(400))
+    # Leftover rows must not keep their real date order (that would leak the real sequence into the null): an asset
+    # live on 10% of the dates follows the global permutation rarely, so almost all of its rows are leftovers.
+    short_mask_mat = np.zeros((1000, 1), dtype=bool)
+    short_mask_mat[:100, 0] = True
+    short_source_vec = live_span_source_index_mat(short_mask_mat, np.random.default_rng(1))[:100, 0]
+    assert 0.35 < np.mean(np.diff(short_source_vec) > 0) < 0.65
+    # Assets live on overlapping dates share most of the permuted cross-section.
+    overlap_mask = np.isfinite(return_mat[:, 2]) & np.isfinite(return_mat[:, 3]) & (strata_mat[:, 2] == strata_mat[:, 3])
+    assert np.mean(source_mat[overlap_mask, 2] == source_mat[overlap_mask, 3]) > 0.3
+    with pytest.raises(ValueError):
+        live_span_source_index_mat(np.isfinite(return_mat), np.random.default_rng(0), np.full((400, 4), 0.5))
 
 
 def test_mcpt_live_spans_finds_structure_and_stays_quiet_on_noise():
