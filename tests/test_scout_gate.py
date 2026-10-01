@@ -136,13 +136,53 @@ def test_ndx_variant_switches_move_only_ranking_units_and_the_vxn_scale():
         assert (weight_df[symbol_str] == weight_float).all() and (weight_df.drop(columns=symbol_str) == 0.0).all().all()
 
 
-def _norgate_running_bool() -> bool:
+
+# ---------------------------------------------------------------------------------------------- TAA family spec
+def test_taa_linearity_score_matches_a_per_window_regression():
+    """The vectorised linearity score equals R2adj x OLS slope window by window, with NaN and flat windows."""
+    from alpha.scout.specs.taa_3x import _linearity_lookback_df
+
+    log_close_ser = pd.Series(np.cumsum(np.random.default_rng(3).normal(0.0003, 0.01, 120)), index=DATE_INDEX[:120])
+    log_close_ser.iloc[40] = np.nan  # windows covering row 40 are NaN
+    log_close_ser.iloc[70:95] = 1.5  # a flat stretch: windows inside it score 0
+    lookback_int = 21
+    score_ser = _linearity_lookback_df(log_close_ser.to_frame("A"), lookback_int)["A"]
+    for end_int in range(len(log_close_ser)):
+        window_vec = log_close_ser.iloc[max(0, end_int - lookback_int + 1): end_int + 1].to_numpy()
+        if len(window_vec) < lookback_int or np.isnan(window_vec).any():
+            assert np.isnan(score_ser.iloc[end_int])
+        elif np.ptp(window_vec) == 0.0:
+            assert score_ser.iloc[end_int] == 0.0
+        else:
+            slope_float, _intercept_float = np.polyfit(np.arange(lookback_int), window_vec, 1)
+            r2_float = np.corrcoef(np.arange(lookback_int), window_vec)[0, 1] ** 2
+            expected_float = (1.0 - (1.0 - r2_float) * (lookback_int - 1) / (lookback_int - 2)) * slope_float
+            assert score_ser.iloc[end_int] == pytest.approx(expected_float, rel=1e-9, abs=1e-15)
+
+
+def test_taa_variants_are_gated_and_the_live_default_is_unchanged():
+    from alpha.scout.family import TAA_FAMILY_NAME_DICT
+    from alpha.scout.gate.run import GATED_SPEC_DICT
+    from alpha.scout.specs.taa_3x import VARIANT_DICT, TaaConfig
+
+    assert VARIANT_DICT["taa_3x"].config == TaaConfig()
+    assert TaaConfig().traded_tuple == ("GLD", "UUP", "TLT", "DBC", "BTAL", "TQQQ") and TaaConfig().slot_weight_str == "rank"
+    for name_str, variant in VARIANT_DICT.items():
+        assert GATED_SPEC_DICT[name_str].strategy_import_str == variant.strategy_import_str
+        assert name_str in TAA_FAMILY_NAME_DICT
+
+
+def _norgate_ready() -> bool:
     try:
         import norgatedata
 
         return bool(norgatedata.status())
     except Exception:  # noqa: BLE001
         return False
+
+
+def _norgate_running_bool() -> bool:
+    return _norgate_ready()
 
 
 EXACT_MEMBERSHIP_DEFAULT_TS = pd.Timestamp("2026-09-29 10:31")  # 9afc293: older engine runs used the member tail trim
@@ -159,5 +199,19 @@ def test_ndx_sibling_gate_passes_against_the_saved_engine_run(spec_name_str):
     path_list = sorted(Path(MAIN_CHECKOUT_ROOT_PATH).glob(GATED_SPEC_DICT[spec_name_str].pickle_glob_str))
     if not path_list or pd.Timestamp.fromtimestamp(path_list[-1].stat().st_mtime) < EXACT_MEMBERSHIP_DEFAULT_TS:
         pytest.skip("No saved engine run with exact membership; run `python -m alpha.scout gate <name> --fresh`.")
+    report = run_gate(spec_name_str)
+    assert report.passed_bool, report.summary_str()
+
+
+@pytest.mark.skipif("not _norgate_ready()")
+@pytest.mark.parametrize("spec_name_str", ["taa_3x_1n", "taa_lin_1n_qqq", "taa_2x_1n_qld", "taa_nobtal_2x_1n_qld", "taa_nobtal_2x_1n_sso"])
+def test_taa_variant_gate_passes_against_the_saved_engine_run(spec_name_str):
+    from pathlib import Path
+
+    from alpha.scout.gate.run import GATED_SPEC_DICT, run_gate
+    from alpha.scout.ledger import MAIN_CHECKOUT_ROOT_PATH
+
+    if not any(Path(MAIN_CHECKOUT_ROOT_PATH).glob(GATED_SPEC_DICT[spec_name_str].pickle_glob_str)):
+        pytest.skip("No saved engine run")
     report = run_gate(spec_name_str)
     assert report.passed_bool, report.summary_str()

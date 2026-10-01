@@ -6,6 +6,7 @@ the plateau grid shape is `grid_shape_tuple`. `decision_offset_int` is not a gri
 
 The two LIVE pods are wired here (P5): TAA 3x and NDX VXN, executed exactly as the identity gate executes them.
 The gated NDX siblings (plain ATR, NATR20, NATR20 VXN) reuse the NDX grid around their own engine config.
+The gated TAA engine variants (1/N, linearity, 2x) are wired through `taa_variant_family` the same way.
 """
 
 from __future__ import annotations
@@ -46,7 +47,7 @@ class FamilyRunner:
     def label_str(self, config_dict: dict) -> str:
         return "|".join(f"{name_str}={_value_str(config_dict[name_str])}" for name_str in self.name_list)
 
-    def run_config(self, config_dict: dict, cost_model: CostModel = DEFAULT_COST_MODEL,capital_float: float = 100_000.0) -> WeightsResult:
+    def run_config(self, config_dict: dict, cost_model: CostModel = DEFAULT_COST_MODEL, capital_float: float = 100_000.0) -> WeightsResult:
         return self.simulate_fn(config_dict, cost_model, capital_float)
 
 
@@ -63,22 +64,50 @@ TAA_GRID_DICT = {
 }
 
 
-def taa_3x_family(inputs=None) -> FamilyRunner:
+# The linearity variant replaces the momentum months by regression lookbacks (sessions): the same five horizon sets
+# as TAA_GRID_DICT at about 21 sessions a month, ordered by mean horizon, the live set in the middle. The threshold
+# (daily log slope x adjusted R2) is centred on the live 0.0; +-0.0001 (about +-2.5% a year of R2-weighted trend) moves
+# the share of passing defensive slots from 56% to 65% / 46% (2012-2026 month ends), a material but local change.
+TAA_LINEARITY_GRID_DICT = {
+    "linearity_day_tuple": ((21, 63), (21, 63, 126), (21, 63, 126, 252), (63, 126, 252), (126, 252)),
+    "linearity_threshold_float": (-0.0001, 0.0, 0.0001),
+    "realized_vol_window_int": (10, 20, 40, 63),
+}
+TAA_FAMILY_NAME_DICT = {
+    "taa_3x": "TAA 3x",
+    "taa_3x_1n": "TAA 3x 1/N",
+    "taa_lin_1n_qqq": "TAA linearity 1/N QQQ",
+    "taa_2x_1n_qld": "TAA 2x 1/N QLD",
+    "taa_nobtal_2x_1n_qld": "TAA no-BTAL 2x 1/N QLD",
+    "taa_nobtal_2x_1n_sso": "TAA no-BTAL 2x 1/N SSO",
+}
+
+
+def taa_variant_family(variant_name_str: str, inputs=None) -> FamilyRunner:
+    """A gated TAA variant (alpha/scout/specs/taa_3x.py VARIANT_DICT) as a family: grid axes vary around its config."""
+    from dataclasses import replace
+
     from alpha.scout.specs import taa_3x
 
-    inputs = inputs or taa_3x.load_inputs()
+    base_config = taa_3x.VARIANT_DICT[variant_name_str].config
+    inputs = inputs or taa_3x.load_inputs(config=base_config)
 
     def simulate_fn(config_dict: dict, cost_model: CostModel, capital_float: float) -> WeightsResult:
-        weight_df = taa_3x.rebalance_weight_df(inputs, taa_3x.TaaConfig(**config_dict))
+        weight_df = taa_3x.rebalance_weight_df(inputs, replace(base_config, **config_dict))
         return simulate(
             inputs.open_df, inputs.close_df, inputs.dividend_df, weight_df, start_date=weight_df.index[0],
             capital_float=capital_float, share_unit_mode_str="adjusted", cost_model=cost_model,
         )
 
+    grid_dict = TAA_LINEARITY_GRID_DICT if base_config.score_str == "linearity" else TAA_GRID_DICT
     return FamilyRunner(
-        name_str="TAA 3x", family_id_str="tactical_asset_allocation", param_grid_dict=TAA_GRID_DICT,
-        live_config_dict={"momentum_month_tuple": (1, 3, 6, 12), "realized_vol_window_int": 20}, simulate_fn=simulate_fn,
+        name_str=TAA_FAMILY_NAME_DICT[variant_name_str], family_id_str="tactical_asset_allocation", param_grid_dict=grid_dict,
+        live_config_dict={name_str: getattr(base_config, name_str) for name_str in grid_dict}, simulate_fn=simulate_fn,
     )
+
+
+def taa_3x_family(inputs=None) -> FamilyRunner:
+    return taa_variant_family("taa_3x", inputs)
 
 
 # ---------------------------------------------------------------- NDX VXN
@@ -127,7 +156,7 @@ def ndx_natr20_vxn_family(inputs=None) -> FamilyRunner:
     return _ndx_family("ndx_natr20_vxn", "NDX NATR20 VXN", inputs)
 
 
-def grid_return_df(family: FamilyRunner, cost_model: CostModel = DEFAULT_COST_MODEL,capital_float: float = 100_000.0) -> pd.DataFrame:
+def grid_return_df(family: FamilyRunner, cost_model: CostModel = DEFAULT_COST_MODEL, capital_float: float = 100_000.0) -> pd.DataFrame:
     """Daily net returns of every grid configuration (columns in grid order)."""
     return pd.DataFrame(
         {family.label_str(config_dict): family.run_config(config_dict, cost_model, capital_float).daily_return_ser for config_dict in family.config_list()}

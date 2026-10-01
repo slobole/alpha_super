@@ -13,6 +13,7 @@ as information only.
 
 from __future__ import annotations
 
+import functools
 import importlib
 import pickle
 import time
@@ -40,16 +41,28 @@ class GatedSpec:
     run_scout_fn: Callable[[float], tuple[WeightsResult, pd.DataFrame]]  # capital -> (result, close panel)
 
 
-def _run_taa_3x(capital_float: float):
+def _run_taa(variant_name_str: str, capital_float: float):
     from alpha.scout.specs import taa_3x
 
-    inputs = taa_3x.load_inputs()
-    weight_df = taa_3x.rebalance_weight_df(inputs)
+    config = taa_3x.VARIANT_DICT[variant_name_str].config
+    inputs = taa_3x.load_inputs(config=config)
+    weight_df = taa_3x.rebalance_weight_df(inputs, config)
     result = simulate(
         inputs.open_df, inputs.close_df, inputs.dividend_df, weight_df, start_date=weight_df.index[0],
         capital_float=capital_float, share_unit_mode_str="adjusted", cost_model=COST_MODEL,
     )
     return result, inputs.close_df
+
+
+def _taa_gated_spec(variant_name_str: str) -> GatedSpec:
+    from alpha.scout.specs.taa_3x import VARIANT_DICT
+
+    import_str = VARIANT_DICT[variant_name_str].strategy_import_str
+    module_str = import_str.rsplit(".", 1)[-1]
+    return GatedSpec(
+        variant_name_str, import_str, f"results/research/strategy/{module_str}/vanilla_backtest/*/{module_str}.pkl",
+        functools.partial(_run_taa, variant_name_str),
+    )
 
 
 def _ndx_runner(variant_name_str: str) -> Callable[[float], tuple[WeightsResult, pd.DataFrame]]:
@@ -78,14 +91,13 @@ def _ndx_gated_spec(variant_name_str: str) -> GatedSpec:
 
 
 GATED_SPEC_DICT = {
-    "taa_3x": GatedSpec(
-        "taa_3x", "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash",
-        "results/research/strategy/strategy_taa_df_btal_fallback_tqqq_vix_cash/vanilla_backtest/*/strategy_taa_df_btal_fallback_tqqq_vix_cash.pkl",
-        _run_taa_3x,
-    ),
     # The NDX momentum siblings (ndx_vxn is the LIVE pod); see alpha/scout/specs/ndx_vxn.py.
     **{name_str: _ndx_gated_spec(name_str) for name_str in NDX_VARIANT_DICT},
 }
+# TAA family: the LIVE pod and the engine variants the spec reproduces exactly (alpha/scout/specs/taa_3x.py).
+GATED_SPEC_DICT.update({name_str: _taa_gated_spec(name_str) for name_str in (
+    "taa_3x", "taa_3x_1n", "taa_lin_1n_qqq", "taa_2x_1n_qld", "taa_nobtal_2x_1n_qld", "taa_nobtal_2x_1n_sso",
+)})
 
 
 def _engine_strategy(spec: GatedSpec, fresh_bool: bool, root_path: Path):
