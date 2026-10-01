@@ -7,8 +7,9 @@ profile credits dividends with 25% withholding and pays 0% on residual cash.
 The Tactical-FI-matched profile credits gross dividends and applies the same
 causal DGS3MO ACT/365 cash return. Negative cash financing is never modeled.
 
-This module is deliberately research-only. It is absent from the strategy
-registry and every LIVE, broker, scheduler, allocation, and release surface.
+The strategy registry lists it as PM_READY (2026-10-01) so a portfolio book
+can hold a fixed T-bill sleeve. It stays absent from every LIVE, broker,
+scheduler, allocation, and release surface.
 """
 
 from __future__ import annotations
