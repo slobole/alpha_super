@@ -151,6 +151,26 @@ ENGINE_DEVIATION_TUPLE = ENGINE_DEVIATION_TUPLE + (
     ),
 )
 
+# DV2 (2026-10-01, alpha/scout/specs/dv2.py). Not a look-ahead: a precision quirk on a threshold.
+ENGINE_DEVIATION_TUPLE = ENGINE_DEVIATION_TUPLE + (
+    EngineDeviation(
+        deviation_id_str="float32_momentum_threshold",
+        issue_description_str=(
+            "Norgate prices load as float32 and pandas keeps them, so DV2's `p126d_return = close / close.shift(126) - 1` "
+            "rounds in float32 before the `> 0.05` (S&P 500) / `> 0.25` (Nasdaq-100) test: a ratio within about 1e-7 of "
+            "the bar can land on the other side (MCIP on 2005-02-11: 0.25 exactly in float32, 0.2500000368 in float64)."
+        ),
+        expected_bias_direction_str="Unsigned rounding at the momentum bar; no look-ahead.",
+        impact_level_str=(
+            "2026-10-01, Scout truth mode (float64 closes), engine costs, $100K, 2004-01..2026-09: S&P 500 pod 125 "
+            "threshold cells flip, 0 of 21,452 trades change, CAGR identical; Nasdaq-100 variant 104 cells, 6 of 13,530 "
+            "trades change, CAGR 13.53% -> 13.57% (+3.3 bp/yr; +3.8 bp/yr to 2022-12-30)."
+        ),
+        mitigation_str="Parity mode reproduces it (the spec keeps the loader's dtype); immaterial, no engine fix proposed.",
+        affected_strategy_list=("strategy_mr_dv2", "strategy_mr_dv2_nasdaq100", "legacy_dv2_ndx"),  # the last: the restored gate engine
+    ),
+)
+
 # Retired deviations, kept for the record.
 RETIRED_DEVIATION_DICT = {
     "membership_tail_trim": (

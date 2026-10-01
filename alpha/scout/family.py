@@ -12,6 +12,8 @@ CORE5 adaptive macro (PM_READY, gated 2026-10-01) is `core5_family`.
 The PM_READY pods TFI and Trinity (2026-10-01) are wired through `tfi_family` and `trinity_family`.
 The month-end rebalancing flow (PM_READY, MOC execution) is `eom_family` (no luck band: offset_count_int = 1).
 The PM_READY sector ETF IBS event pods (2026-10-02) are `sector_ibs_family` and `dispersion_ibs_family`.
+The WIRED DV2 mean-reversion pod on point-in-time S&P 500 members is `dv2_family`, its Nasdaq-100 variant `dv2_ndx_family`
+(no luck band: offset_count_int = 1).
 """
 
 from __future__ import annotations
@@ -358,6 +360,52 @@ def dispersion_ibs_family(variant_name_str: str, inputs=None) -> FamilyRunner:
         param_grid_dict=DISPERSION_IBS_GRID_DICT, live_config_dict={k: getattr(base_config, k) for k in DISPERSION_IBS_GRID_DICT},
         simulate_fn=simulate_fn, offset_count_int=1,  # a daily event rule: no rebalance offset
     )
+
+
+# ---------------------------------------------------------------- DV2 mean reversion (WIRED, 2026-10-01)
+# A daily event rule on point-in-time S&P 500 members: no rebalance schedule, so no luck band (offset_count_int = 1).
+# The axes are the rule's three decisions, one step either side of the live value (27 configurations):
+# - entry_dv2_max_float: how oversold the stock must be to buy, the DV2 percentile bar halved / doubled (5 / 10 / 20);
+# - exit_rule_str: how strong the rebound must be to sell, ordered by strength: any up close (Close_T > Close_(T-1)), the
+#   live close above the previous high, a close above both of the last two highs;
+# - max_positions_int: the number of equal slots, each V / n of the book (5 / 10 / 20), i.e. concentration vs breadth.
+# The indicator windows (DV2 126, NATR 14 ranking), the regime filters (SMA200, 126-session return > 5%) and the universe
+# are the rule's identity and stay fixed.
+DV2_GRID_DICT = {
+    "entry_dv2_max_float": (5.0, 10.0, 20.0),
+    "exit_rule_str": ("prev_close", "prev_high", "high_2d"),
+    "max_positions_int": (5, 10, 20),
+}
+# The Nasdaq-100 variant: the same axes around its own rule (DV2 < 20, so the bar is 10 / 20 / 40).
+DV2_NDX_GRID_DICT = {**DV2_GRID_DICT, "entry_dv2_max_float": (10.0, 20.0, 40.0)}
+DV2_FAMILY_NAME_DICT = {"dv2": ("DV2", DV2_GRID_DICT), "dv2_ndx": ("DV2 Nasdaq 100", DV2_NDX_GRID_DICT)}
+
+
+def dv2_variant_family(variant_name_str: str, inputs=None) -> FamilyRunner:
+    """A DV2 variant (alpha/scout/specs/dv2.py VARIANT_DICT) as a family; the grid moves around the variant's config.
+    The cost model is the caller's; the identity gate uses the variant's engine costs."""
+    from alpha.scout.specs import dv2
+
+    base_config = dv2.VARIANT_DICT[variant_name_str].config
+    name_str, grid_dict = DV2_FAMILY_NAME_DICT[variant_name_str]
+    inputs = inputs or dv2.load_inputs(variant_name_str=variant_name_str)
+
+    def simulate_fn(config_dict: dict, cost_model: CostModel, capital_float: float) -> WeightsResult:
+        return dv2.simulate_config(inputs, dataclasses.replace(base_config, **config_dict), cost_model, capital_float)
+
+    return FamilyRunner(
+        name_str=name_str, family_id_str="us_equity_short_term_reversal", param_grid_dict=grid_dict,
+        live_config_dict={k: getattr(base_config, k) for k in grid_dict}, simulate_fn=simulate_fn,
+        offset_count_int=1,  # a daily event rule: no rebalance offset
+    )
+
+
+def dv2_family(inputs=None) -> FamilyRunner:
+    return dv2_variant_family("dv2", inputs)
+
+
+def dv2_ndx_family(inputs=None) -> FamilyRunner:
+    return dv2_variant_family("dv2_ndx", inputs)
 
 
 def grid_return_df(family: FamilyRunner, cost_model: CostModel = DEFAULT_COST_MODEL, capital_float: float = 100_000.0) -> pd.DataFrame:

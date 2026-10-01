@@ -202,6 +202,23 @@ for _name_str, _import_str in (
     GATED_SPEC_DICT[_name_str] = GatedSpec(_name_str, _import_str, _pickle_glob_str(_import_str), functools.partial(_run_dispersion_ibs, _name_str))
 
 
+def _run_dv2(variant_name_str: str, capital_float: float):
+    from alpha.scout.specs import dv2
+
+    variant = dv2.VARIANT_DICT[variant_name_str]
+    inputs = dv2.load_inputs(variant_name_str=variant_name_str)
+    return dv2.simulate_config(inputs, variant.config, variant.cost_model, capital_float), inputs.close_df
+
+
+# DV2 mean reversion on point-in-time index members (2026-10-01): alpha/scout/specs/dv2.py, whole adjusted shares, held
+# positions never resized, at the engine's own costs. "dv2" is the WIRED S&P 500 pod; "dv2_ndx" the Nasdaq-100 variant,
+# whose strategies/ module is a stub: its engine side is the restored 300ca70 code (alpha/scout/gate/legacy_dv2_ndx.py).
+GATED_SPEC_DICT["dv2"] = GatedSpec("dv2", "strategies.dv2.strategy_mr_dv2", _pickle_glob_str("strategies.dv2.strategy_mr_dv2"),
+                                   functools.partial(_run_dv2, "dv2"))
+GATED_SPEC_DICT["dv2_ndx"] = GatedSpec("dv2_ndx", "alpha.scout.gate.legacy_dv2_ndx", _pickle_glob_str("strategies.dv2.strategy_mr_dv2_nasdaq100"),
+                                       functools.partial(_run_dv2, "dv2_ndx"))
+
+
 def _engine_strategy(spec: GatedSpec, fresh_bool: bool, root_path: Path):
     if fresh_bool:
         module = importlib.import_module(spec.strategy_import_str)
