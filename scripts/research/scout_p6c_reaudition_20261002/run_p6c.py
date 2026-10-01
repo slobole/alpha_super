@@ -9,6 +9,7 @@ from __future__ import annotations
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
@@ -22,7 +23,8 @@ from alpha.scout.stations.s3_allocation import predictive_tests
 
 
 def _registration(name_str: str, family_id_str: str, label_str: str, module, grid_dict: dict, hypothesis_str: str, mechanism_str: str,
-                  class_str: str, universe_str: str, schedule_str: str, execution_str: str, prior_int: int, choice_str: str) -> Registration:
+                  class_str: str, universe_str: str, schedule_str: str, execution_str: str, prior_int: int, choice_str: str,
+                  after_results_bool: bool = False) -> Registration:
     return Registration(
         registration_id_str=f"{name_str}_reaudition_20261002", family_id_str=family_id_str, hypothesis_str=hypothesis_str,
         mechanism_str=mechanism_str, expected_sign_and_location_str="Positive active return over the volatility-targeted equal weight.",
@@ -30,7 +32,7 @@ def _registration(name_str: str, family_id_str: str, label_str: str, module, gri
         execution_str=execution_str, param_grid_dict={k: tuple(v) for k, v in grid_dict.items()},
         primary_metric_str="S5 MCPT (score SD); S6 T-bill slot", kill_criteria_str="S8 CUSUM or Cold Blood Index red",
         source_str=module.STRATEGY_IMPORT_STR if hasattr(module, "STRATEGY_IMPORT_STR") else label_str, retro_bool=True,
-        prior_trials_int=prior_int, universe_choice_str=choice_str, universe_chosen_after_results_bool=False,
+        prior_trials_int=prior_int, universe_choice_str=choice_str, universe_chosen_after_results_bool=after_results_bool,
     )
 
 
@@ -62,6 +64,52 @@ def plan_dict() -> dict[str, tuple[PodPlan, Registration]]:
             "SPY/TLT from the owner's month-end-flow research (2026-09); documented variants not counted, so N = 50 (rule).",
         ),
     )
+    from alpha.scout.family import (
+        DISPERSION_IBS_GRID_DICT,
+        DISPERSION_IBS_NAME_DICT,
+        SECTOR_IBS_GRID_DICT,
+        dispersion_ibs_family,
+        sector_ibs_family,
+    )
+    from alpha.scout.specs import sector_dispersion_ibs, sector_ibs
+
+    event_note_str = ("Class E: the raw entry signal as events among ETFs with a valid bar, excess over the same-date basket mean, "
+                      "date-level Newey-West t; S3's hard and soft criteria count toward the grade.")
+    ibs_hypothesis_str = ("Buying a sector ETF after a close near its low on a down-shock day and selling on a strong rebound close "
+                          "beats a volatility-targeted equal weight of the basket.")
+    out_dict["sector_ibs_vox_iyr"] = (
+        PodPlan(
+            name_str="Sector IBS VOX IYR", family_fn=lambda inputs: sector_ibs_family(inputs), inputs_fn=sector_ibs.load_inputs,
+            mcpt_kind_str="spec", adoption_date_str="2026-09-30", prior_trial_count_int=50, slot_str="NDX VXN",
+            s3_fn=lambda: ("E", event_note_str, sector_ibs.s3_result(sector_ibs.s3_inputs())),
+            option_dict={"spec": {"module_str": "alpha.scout.specs.sector_ibs", "matrix_fn": lambda m, inputs: m.mcpt_matrix(inputs),
+                                  "asset_count_int": len(sector_ibs.TRADED_TUPLE)}},
+            strategy_module_str=sector_ibs.STRATEGY_IMPORT_STR,
+        ),
+        _registration("sector_ibs_vox_iyr", "etf_short_term_reversal", "Sector IBS VOX IYR", sector_ibs, SECTOR_IBS_GRID_DICT,
+                      ibs_hypothesis_str, "Liquidity provision after sharp intraday selling in sector ETFs.", "E",
+                      ", ".join(sector_ibs.TRADED_TUPLE), "daily close decision", "next session's open", 50,
+                      "The 11 US sector ETFs with VOX/IYR for the late-listed sectors; documented variants not counted, so N = 50 (rule)."),
+    )
+    for variant_str, label_str in DISPERSION_IBS_NAME_DICT.items():
+        variant = sector_dispersion_ibs.VARIANT_DICT[variant_str]
+        out_dict[variant_str] = (
+            PodPlan(
+                name_str=label_str, family_fn=lambda inputs, v=variant_str: dispersion_ibs_family(v, inputs),
+                inputs_fn=lambda v=variant_str: sector_dispersion_ibs.load_inputs(v), mcpt_kind_str="spec",
+                adoption_date_str="2026-09-30", prior_trial_count_int=50, slot_str="NDX VXN",
+                s3_fn=lambda v=variant_str: ("E", event_note_str, sector_ibs.s3_result(sector_dispersion_ibs.s3_inputs(v))),
+                option_dict={"spec": {"module_str": "alpha.scout.specs.sector_dispersion_ibs", "matrix_fn": lambda m, inputs: m.mcpt_matrix(inputs),
+                                      "asset_count_int": len(variant.symbol_tuple), "fast_kwarg_dict": {"base_config": variant.config}}},
+                strategy_module_str=variant.strategy_import_str,
+            ),
+            _registration(variant_str, "etf_short_term_reversal", label_str, SimpleNamespace(STRATEGY_IMPORT_STR=variant.strategy_import_str), DISPERSION_IBS_GRID_DICT,
+                          ibs_hypothesis_str.replace("on a down-shock day", "on a wide-range day"),
+                          "Liquidity provision in dispersed industry ETFs.", "E", ", ".join(variant.symbol_tuple),
+                          "daily close decision", "next session's open", 50,
+                          "Industry ETF basket picked by the owner's combination and market-correlation studies (after results); N = 50.",
+                          after_results_bool=True),
+        )
     return out_dict
 
 

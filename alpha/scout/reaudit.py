@@ -59,6 +59,7 @@ class PodPlan:
     slot_str: str  # the LIVE pod whose slot it takes in the reference book
     s3_fn: Callable | None = None  # () -> (class_str, note_str, result_dict)
     strategy_module_str: str = ""  # the engine module (the card lists only the deviations that affect it)
+    book_weight_dict: dict | None = None  # a custom reference book incl. this pod (e.g. a 10% sleeve); None = take the slot
     option_dict: dict = field(default_factory=dict)  # MCPT options: ndx_config (NdxConfig) / taa options
 
 
@@ -297,15 +298,19 @@ def reaudit(plan: PodPlan, live_net_dict: dict[str, pd.Series], factor_df: pd.Da
     net_ser = s4.grid_df[s4.live_label_str].loc[:SEAL_END_STR]
     gross_cost = CostModel(slippage_float=0.0, fee_per_share_float=0.0, min_fee_float=0.0)
     gross_ser = family.run_config(family.live_config_dict, gross_cost).daily_return_ser.loc[:SEAL_END_STR]
-    other_str = next(p for p in BOOK_WEIGHT_DICT if p != plan.slot_str)
+    other_str = next(p for p in BOOK_WEIGHT_DICT if p != plan.slot_str) if plan.book_weight_dict is None else "TAA 3x"
     spanning_list = spanning_table(net_ser, gross_ser, factor_df.assign(OTHER_POD=live_net_dict[other_str]), tbill_ser, {
         "QQQ": ["QQQ"],
         "ETF mix (SPY QQQ IEF GLD)": ["SPY", "QQQ", "IEF", "GLD"],
         "ETF mix + trend": ["SPY", "QQQ", "IEF", "GLD", "TREND"],
         f"ETF mix + trend + {other_str}": ["SPY", "QQQ", "IEF", "GLD", "TREND", "OTHER_POD"],
     })
-    book_weight_dict = {(plan.name_str if p == plan.slot_str else p): w for p, w in BOOK_WEIGHT_DICT.items()}
-    slot_dict = tbill_slot_test(net_ser, book_weight_dict, {other_str: live_net_dict[other_str].loc[:SEAL_END_STR]}, plan.name_str, tbill_ser)
+    if plan.book_weight_dict is None:
+        book_weight_dict = {(plan.name_str if p == plan.slot_str else p): w for p, w in BOOK_WEIGHT_DICT.items()}
+    else:
+        book_weight_dict = dict(plan.book_weight_dict)
+    component_dict = {p: live_net_dict[p].loc[:SEAL_END_STR] for p in book_weight_dict if p != plan.name_str}
+    slot_dict = tbill_slot_test(net_ser, book_weight_dict, component_dict, plan.name_str, tbill_ser)
     book_df = pd.DataFrame(live_net_dict).loc[:SEAL_END_STR].dropna()
     book_ser = sum(BOOK_WEIGHT_DICT[p] * book_df[p] for p in BOOK_WEIGHT_DICT)
     reference_dict = {**{p: s for p, s in live_net_dict.items() if p != plan.name_str}, "SPY": factor_df["SPY"], "QQQ": factor_df["QQQ"]}

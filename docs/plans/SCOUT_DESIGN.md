@@ -1085,6 +1085,24 @@ Report: `docs/research/SCOUT_P6B_REAUDITION_20261002.md`.
 - **In NDX VXN's book slot:** CORE5 (P 0.85) and Compass QQQ (P 0.81) beat T-bills; NDX variants, TFI and Trinity
   do not.
 
+**A12 (2026-10-02, P6c: EOM, sector IBS, and a first discovery family).**
+Report: `docs/research/SCOUT_P6C_REAUDITION_20261002.md`.
+
+- **Weights engine, opt-in:** MOC fills, close-and-reopen orders, fractional shares, and hold-NaN.
+- **Gated exactly:** EOM and the four sector IBS pods.
+- **Grade rule:** an S3 hard fail grades REJECTED (D22).
+- **Walk-forward:** not runnable on short histories, and said so.
+- **Grades:**
+  - EOM: CANDIDATE (MCPT p 0.001, alpha t 3.50, book 1.21 → 1.46).
+  - Sector IBS VOX IYR and Dispersion KIE IHI XLC: WATCHLIST.
+  - The two SMA200 dispersion variants: REJECTED. Their relative edge is negative, although their timing value
+    passes S5 and S6.
+- **Discovery: Bitcoin + gold** (`specs/btc_gold.py`, the GQResearch rule; registered before results, with 866
+  prior trials).
+  - The trend rule passes the MCPT (p 0.03); a fixed 50/50 does not.
+  - A 10% sleeve nudges the book (P 0.77 in sample, 0.95 over a contaminated full period).
+  - Grade: WATCHLIST.
+
 **Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
 It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about
 performance. A performance kill rule is a separate, currently unrecorded gap, and P1 should add it to

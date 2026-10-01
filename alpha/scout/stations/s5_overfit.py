@@ -85,14 +85,20 @@ def run_s5(in_sample_grid_df: pd.DataFrame, grid_shape_tuple: tuple, chosen_labe
 
     # Diagnostics: walk-forward and PBO, plateau selection.
     selector_fn = make_plateau_selector(grid_shape_tuple)
-    registered = run_walk_forward(filled_df, selector_fn, REGISTERED_DESIGN)
+    try:
+        registered = run_walk_forward(filled_df, selector_fn, REGISTERED_DESIGN)
+        oos_sharpe_float, efficiency_float = registered.oos_sharpe_float, registered.efficiency_float
+        oos_return_ser, refit_df = registered.oos_return_ser, registered.refit_df
+    except ValueError:  # history shorter than the registered design's training window: not runnable, said so on the card
+        oos_sharpe_float, efficiency_float = float("nan"), float("nan")
+        oos_return_ser, refit_df = pd.Series(dtype=float), pd.DataFrame()
     sensitivity_df = design_sensitivity_df(filled_df, selector_fn)
     runnable_df = sensitivity_df.dropna(subset=["oos_sharpe_float"])
     report.walk_forward_dict = {
-        "oos_sharpe_float": registered.oos_sharpe_float,
-        "efficiency_float": registered.efficiency_float,
-        "oos_return_ser": registered.oos_return_ser,
-        "refit_df": registered.refit_df,
+        "oos_sharpe_float": oos_sharpe_float,
+        "efficiency_float": efficiency_float,
+        "oos_return_ser": oos_return_ser,
+        "refit_df": refit_df,
         "design_df": sensitivity_df,
         "positive_design_share_float": float(runnable_df["oos_positive_bool"].astype(bool).mean()) if len(runnable_df) else float("nan"),
     }
@@ -106,7 +112,7 @@ def run_s5(in_sample_grid_df: pd.DataFrame, grid_shape_tuple: tuple, chosen_labe
         ("MCPT of the whole search (gate)", gate_str, "; ".join(f"{c.name_str} p {c.p_value_float:.3f}" for c in mcpt_list)),
         ("correlation-aware DSR p <= 0.05, live configuration (warn)", report.dsr_dict["live"]["verdict_str"],
          f"p {report.dsr_dict['live']['p_value_float']:.3f} (plateau choice p {report.dsr_dict['chosen']['p_value_float']:.3f})"),
-        ("walk-forward (diagnostic)", "INFO", (f"OOS Sharpe {registered.oos_sharpe_float:.2f}, efficiency {registered.efficiency_float:.2f}, "
+        ("walk-forward (diagnostic)", "INFO", (f"OOS Sharpe {oos_sharpe_float:.2f}, efficiency {efficiency_float:.2f}, "
                                                f"{report.walk_forward_dict['positive_design_share_float']:.0%} of designs positive")),
         ("PBO (diagnostic)", "INFO", f"{pbo.pbo_float:.2f}"),
     ]

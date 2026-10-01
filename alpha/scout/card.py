@@ -70,7 +70,9 @@ def s3_check_list(bundle: dict) -> list:
 
 def grade_str(bundle: dict) -> str:
     s4, s5, s6 = bundle["s4"], bundle["s5"], bundle["s6"]
-    if s4.cost_dict["live"]["fail_bool"]:
+    # D22: a hard fail is evidence against the idea: a live configuration that loses money at twice the costs, or an
+    # S3 hard criterion (class E / X) that fails (wrong sign, or significantly against).
+    if s4.cost_dict["live"]["fail_bool"] or any(v == "FAIL" for _, v, _ in s3_check_list(bundle)):
         return "REJECTED"
     verdict_list = [v for _, v, _ in s3_check_list(bundle) + s4.check_list + s5.check_list + s6.check_list if v != "INFO"]
     if any(v.startswith(("FAIL", "WARN")) for v in verdict_list):
