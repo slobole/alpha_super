@@ -100,6 +100,29 @@ GATED_SPEC_DICT.update({name_str: _taa_gated_spec(name_str) for name_str in (
 )})
 
 
+def _run_beyond_6040_spec(spec_module_str: str, capital_float: float):
+    """TFI and Trinity: the spec simulates with the engine's own cost model (their engines differ from CostModel())."""
+    spec_module = importlib.import_module(f"alpha.scout.specs.{spec_module_str}")
+    inputs = spec_module.load_inputs()
+    result = spec_module.simulate_config(inputs, spec_module.LIVE_CONFIG, spec_module.ENGINE_COST_MODEL, capital_float)
+    return result, inputs.close_df
+
+
+def _beyond_6040_gated_spec(name_str: str, spec_module_str: str, strategy_import_str: str) -> GatedSpec:
+    module_str = strategy_import_str.rsplit(".", 1)[-1]
+    return GatedSpec(
+        name_str, strategy_import_str, f"results/research/strategy/{module_str}/vanilla_backtest/*/{module_str}.pkl",
+        functools.partial(_run_beyond_6040_spec, spec_module_str),
+    )
+
+
+# PM_READY "beyond 60/40" pods (2026-10-01): alpha/scout/specs/tfi.py and alpha/scout/specs/trinity.py.
+GATED_SPEC_DICT.update({
+    "tfi": _beyond_6040_gated_spec("tfi", "tfi", "strategies.taa_beyond_6040.strategy_taa_tactical_fixed_income_ief_lqd"),
+    "trinity": _beyond_6040_gated_spec("trinity", "trinity", "strategies.taa_beyond_6040.strategy_taa_trinity_vol_control_8_bil"),
+})
+
+
 def _engine_strategy(spec: GatedSpec, fresh_bool: bool, root_path: Path):
     if fresh_bool:
         module = importlib.import_module(spec.strategy_import_str)
@@ -127,6 +150,9 @@ def run_gate(name_str: str, fresh_bool: bool = False, root_path: Path = MAIN_CHE
     engine_results_df.index = pd.DatetimeIndex(engine_results_df.index)
     engine_total_ser = engine_results_df["total_value"].astype(float)
     engine_return_ser = engine_total_ser / engine_total_ser.shift(1).fillna(capital_float) - 1.0
+    if len(getattr(engine_obj, "realized_weight_df", ())) == 0 and getattr(engine_obj, "_realized_weight_snapshot_row_dict_list", None):
+        # Beyond6040Strategy.summarize() skips this step; the daily snapshots are recorded all the same (read-only use).
+        engine_obj._materialize_realized_weight_df()
     engine_weight_df = engine_obj.realized_weight_df.drop(columns=["Cash"], errors="ignore")
     engine_weight_df.index = pd.DatetimeIndex(engine_weight_df.index)
     transaction_df = engine_obj.get_transactions() if hasattr(engine_obj, "get_transactions") else engine_obj._transactions
