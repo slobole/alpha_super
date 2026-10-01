@@ -168,6 +168,40 @@ GATED_SPEC_DICT.update({
 })
 
 
+def _run_sector_ibs(capital_float: float):
+    from alpha.scout.specs import sector_ibs
+
+    inputs = sector_ibs.load_inputs()
+    return sector_ibs.simulate_config(inputs, sector_ibs.LIVE_CONFIG, sector_ibs.ENGINE_COST_MODEL, capital_float), inputs.close_df
+
+
+def _run_dispersion_ibs(variant_name_str: str, capital_float: float):
+    from alpha.scout.specs import sector_dispersion_ibs
+
+    inputs = sector_dispersion_ibs.load_inputs(variant_name_str)
+    config = sector_dispersion_ibs.VARIANT_DICT[variant_name_str].config
+    return sector_dispersion_ibs.simulate_config(inputs, config, sector_dispersion_ibs.ENGINE_COST_MODEL, capital_float), inputs.close_df
+
+
+def _pickle_glob_str(strategy_import_str: str) -> str:
+    module_str = strategy_import_str.rsplit(".", 1)[-1]
+    return f"results/research/strategy/{module_str}/vanilla_backtest/*/{module_str}.pkl"
+
+
+# PM_READY sector ETF IBS event pods (2026-10-02): alpha/scout/specs/sector_ibs.py and sector_dispersion_ibs.py, each at
+# its engine's own costs (fractional entries, held positions never resized).
+GATED_SPEC_DICT["sector_ibs_vox_iyr"] = GatedSpec(
+    "sector_ibs_vox_iyr", "strategies.mean_reversion.strategy_mr_us_sector_etf_ibs_downshock_vox_iyr",
+    _pickle_glob_str("strategies.mean_reversion.strategy_mr_us_sector_etf_ibs_downshock_vox_iyr"), _run_sector_ibs,
+)
+for _name_str, _import_str in (
+    ("dispersion_ibs_kie_ihi_xlc", "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc"),
+    ("dispersion_ibs_kie_ihi_xlc_sma200", "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_xlc_asset_sma200"),
+    ("dispersion_ibs_kie_ihi_sma200", "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi_asset_sma200"),
+):
+    GATED_SPEC_DICT[_name_str] = GatedSpec(_name_str, _import_str, _pickle_glob_str(_import_str), functools.partial(_run_dispersion_ibs, _name_str))
+
+
 def _engine_strategy(spec: GatedSpec, fresh_bool: bool, root_path: Path):
     if fresh_bool:
         module = importlib.import_module(spec.strategy_import_str)

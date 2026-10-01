@@ -612,3 +612,165 @@ def test_eom_gate_passes_and_blocks_the_hindsight_free_calendar(monkeypatch):
     # Truth mode moves the October 2012 entry by two sessions (deviation xnys_closure_hindsight): the gate must see it.
     monkeypatch.setattr(eom, "LIVE_CONFIG", replace(eom.LIVE_CONFIG, notice_time_calendar_bool=True))
     assert not run_gate("eom").passed_bool
+
+
+# ---------------------------------------------------------------------------------------------- Sector ETF IBS event pods
+def _synthetic_sector_inputs(symbol_tuple, seed_int: int = 10, row_count_int: int = 700):
+    from alpha.scout.specs.sector_ibs import SectorEtfInputs
+
+    session_index = pd.bdate_range("2015-01-01", periods=row_count_int)
+    rng_obj = np.random.default_rng(seed_int)
+    shape_tuple = (row_count_int, len(symbol_tuple))
+    market_vec = rng_obj.normal(0.0, 0.010, (row_count_int, 1))
+    close_mat = 50.0 * np.exp(np.cumsum(market_vec + rng_obj.normal(0.0003, 0.008, shape_tuple), axis=0))
+    open_mat = np.vstack([close_mat[:1], close_mat[:-1]]) * np.exp(rng_obj.normal(0.0, 0.004, shape_tuple))
+    high_mat = np.maximum(open_mat, close_mat) * np.exp(np.abs(rng_obj.normal(0.0, 0.006, shape_tuple)))
+    low_mat = np.minimum(open_mat, close_mat) * np.exp(-np.abs(rng_obj.normal(0.0, 0.006, shape_tuple)))
+    frame = lambda mat: pd.DataFrame(mat, index=session_index, columns=list(symbol_tuple))
+    return SectorEtfInputs(open_df=frame(open_mat), high_df=frame(high_mat), low_df=frame(low_mat), close_df=frame(close_mat),
+                           dividend_df=frame(close_mat * 0.0), total_return_close_df=frame(close_mat), backtest_start_str="2015-01-01")
+
+def test_sector_ibs_atr_matches_talib_and_features_are_causal():
+    import talib
+
+    from alpha.scout.specs import sector_ibs
+
+    inputs = _synthetic_sector_inputs(sector_ibs.TRADED_TUPLE)
+    high_vec, low_vec, close_vec = (frame["XLB"].to_numpy() for frame in (inputs.high_df, inputs.low_df, inputs.close_df))
+    np.testing.assert_array_equal(sector_ibs.wilder_atr_vec(high_vec, low_vec, close_vec, 14), talib.ATR(high_vec, low_vec, close_vec, timeperiod=14))
+    full_dict = sector_ibs.feature_dict(inputs)
+    cut_ts = inputs.close_df.index[400]
+    cut_inputs = dataclasses.replace(inputs, **{name: getattr(inputs, name).loc[:cut_ts] for name in ("open_df", "high_df", "low_df", "close_df")})
+    for name_str, cut_df in sector_ibs.feature_dict(cut_inputs).items():  # a feature at T never changes when later bars arrive
+        pd.testing.assert_frame_equal(cut_df, full_dict[name_str].loc[:cut_ts])
+    assert full_dict["prior_natr_df"].notna().sum().min() > 600
+
+def test_sector_ibs_event_rule_slots_ranking_and_untouched_holdings():
+    from alpha.scout.engines.weights import CostModel, simulate
+    from alpha.scout.specs import sector_ibs
+
+    inputs = _synthetic_sector_inputs(sector_ibs.TRADED_TUPLE)
+    config = dataclasses.replace(sector_ibs.LIVE_CONFIG, entry_ibs_max_float=0.25, downshock_atr_max_float=-0.2, exit_ibs_min_float=0.75)
+    result = sector_ibs.simulate_config(inputs, config, CostModel())
+    position_df = result.daily_position_df
+    assert len(result.trade_df) > 100 and (position_df > 0).sum(axis=1).max() == config.max_positions_int
+    # A held ETF is never resized: its trades alternate one entry and one full exit.
+    for _asset_str, frame in result.trade_df.groupby("asset"):
+        delta_vec = frame["delta_float"].to_numpy()
+        exit_count_int = len(delta_vec) // 2
+        assert (delta_vec[::2] > 0).all() and np.array_equal(delta_vec[1::2], -delta_vec[: 2 * exit_count_int: 2])
+    # Entries on a day are the highest prior-NATR flat candidates.
+    entry_mat, _, rank_mat = sector_ibs.signal_mats(sector_ibs.feature_dict(inputs, config), config)
+    session_index = inputs.close_df.index
+    held_before_df = position_df.shift(1).fillna(0.0)
+    checked_int = 0
+    for date, row in result.decided_weight_df.iterrows():
+        if date == position_df.index[0]:
+            continue
+        p_int = session_index.get_loc(date) - 1
+        entered_vec = np.flatnonzero(row.to_numpy() > 0.0)
+        flat_vec = np.flatnonzero((held_before_df.loc[date].to_numpy() == 0.0) & entry_mat[p_int])
+        if entered_vec.size and entered_vec.size < flat_vec.size:
+            assert rank_mat[p_int, entered_vec].min() >= rank_mat[p_int, np.setdiff1d(flat_vec, entered_vec)].max()
+            checked_int += 1
+    assert checked_int > 5
+    replay = simulate(inputs.open_df, inputs.close_df, inputs.dividend_df, result.decided_weight_df, start_date=result.total_value_ser.index[0],
+                      cost_model=CostModel(), fractional_shares_bool=True, hold_nan_bool=True)
+    assert np.array_equal(replay.total_value_ser.to_numpy(), result.total_value_ser.to_numpy())
+
+def test_sector_ibs_specs_match_their_engines_and_are_gated():
+    import importlib
+
+    from alpha.scout.families import validate_family_id
+    from alpha.scout.family import dispersion_ibs_family, sector_ibs_family
+    from alpha.scout.gate.run import GATED_SPEC_DICT
+    from alpha.scout.specs import sector_dispersion_ibs, sector_ibs
+    from strategies.mean_reversion import (
+        strategy_mr_sector_dispersion_ibs_kie_ihi_xlc_asset_sma200 as sma_engine,
+    )
+    from strategies.mean_reversion import (
+        strategy_mr_us_sector_etf_ibs_downshock_vox_iyr as downshock_engine,
+    )
+
+    engine_config = downshock_engine.DEFAULT_CONFIG
+    assert sector_ibs.TRADED_TUPLE == engine_config.symbol_tuple and sector_ibs.HISTORY_START_STR == engine_config.history_start_date_str
+    for spec_str, engine_str in (("entry_ibs_max_float", "entry_ibs_max_float"), ("downshock_atr_max_float", "downshock_atr_max_float"),
+                                 ("exit_ibs_min_float", "exit_ibs_min_float"), ("atr_lookback_int", "atr_lookback_day_int"),
+                                 ("range_median_lookback_int", "range_median_lookback_day_int"), ("max_positions_int", "max_positions_int"),
+                                 ("sizing_multiplier_float", "sizing_multiplier_float"), ("sizing_universe_count_int", "sizing_universe_count_int")):
+        assert getattr(sector_ibs.LIVE_CONFIG, spec_str) == getattr(engine_config, engine_str)
+    assert sector_ibs.ENGINE_COST_MODEL.slippage_float == 0.00025 and sector_ibs.ENGINE_COST_MODEL.min_fee_float == 1.0
+    assert sma_engine.ASSET_SMA_LOOKBACK_DAY_INT == sector_dispersion_ibs.VARIANT_DICT["dispersion_ibs_kie_ihi_xlc_sma200"].config.asset_sma_int
+    for name_str, variant in sector_dispersion_ibs.VARIANT_DICT.items():
+        engine_config = importlib.import_module(variant.strategy_import_str).DEFAULT_CONFIG
+        assert variant.symbol_tuple == engine_config.symbol_tuple and GATED_SPEC_DICT[name_str].strategy_import_str == variant.strategy_import_str
+        assert (variant.config.entry_ibs_max_float, variant.config.exit_ibs_min_float, variant.config.min_relative_range_float,
+                variant.config.range_vol_lookback_int, variant.config.portfolio_leverage_float) == (
+            engine_config.entry_ibs_max_float, engine_config.exit_ibs_min_float, engine_config.min_relative_range_float,
+            engine_config.range_vol_lookback_day_int, engine_config.portfolio_leverage_float)
+        cost_model = sector_dispersion_ibs.ENGINE_COST_MODEL
+        assert (cost_model.slippage_float, cost_model.fee_per_share_float, cost_model.min_fee_float) == (
+            engine_config.slippage_float, engine_config.commission_per_share_float, engine_config.commission_minimum_float)
+    assert GATED_SPEC_DICT["sector_ibs_vox_iyr"].strategy_import_str == sector_ibs.STRATEGY_IMPORT_STR
+    for family in (sector_ibs_family(inputs=object()), *(dispersion_ibs_family(n, inputs=object()) for n in sector_dispersion_ibs.VARIANT_DICT)):
+        validate_family_id(family.family_id_str)
+        assert family.family_id_str == "etf_short_term_reversal" and family.offset_count_int == 1
+        assert len(family.config_list()) == 27 and family.live_config_dict in family.config_list()
+    with pytest.raises(ValueError, match="offset"):
+        dataclasses.replace(sector_ibs.LIVE_CONFIG, decision_offset_int=1)
+
+def test_sector_ibs_replicas_track_the_spec_and_run_on_a_shuffle():
+    from alpha.scout.engines.weights import CostModel
+    from alpha.scout.specs import sector_dispersion_ibs, sector_ibs
+
+    gross_cost = CostModel(slippage_float=0.0, fee_per_share_float=0.0, min_fee_float=0.0)
+    rng_obj = np.random.default_rng(12)
+    dispersion_config = sector_dispersion_ibs.DispersionIbsConfig(asset_sma_int=200, entry_ibs_max_float=0.2)
+    for spec_module, symbol_tuple, config, config_dict, kwarg_dict in (
+        (sector_ibs, sector_ibs.TRADED_TUPLE, dataclasses.replace(sector_ibs.LIVE_CONFIG, entry_ibs_max_float=0.25, downshock_atr_max_float=-0.2),
+         {"entry_ibs_max_float": 0.25, "downshock_atr_max_float": -0.2}, {}),
+        (sector_dispersion_ibs, sector_dispersion_ibs.KIE_IHI_TUPLE, dispersion_config, {}, {"base_config": dispersion_config}),
+    ):
+        inputs = _synthetic_sector_inputs(symbol_tuple, row_count_int=900)
+        date_index, matrix = spec_module.mcpt_matrix(inputs, end_date_str="2030-01-01")
+        assert matrix.shape == (len(date_index), 5 * len(symbol_tuple))
+        fast_vec = spec_module.fast_daily_list(matrix, date_index, [config_dict], **kwarg_dict)[0]
+        engine_ser = spec_module.simulate_config(inputs, config, gross_cost).daily_return_ser
+        assert np.corrcoef(engine_ser, pd.Series(fast_vec, index=date_index).reindex(engine_ser.index))[0, 1] > 0.99
+        shuffled_vec = spec_module.fast_daily_list(matrix[rng_obj.permutation(len(date_index))], date_index, [config_dict], **kwarg_dict)[0]
+        assert np.isfinite(shuffled_vec).all() and (shuffled_vec != 0.0).sum() > 100
+
+def test_sector_ibs_s3_inputs_feed_the_class_e_station():
+    from alpha.scout.specs import sector_ibs
+
+    inputs = _synthetic_sector_inputs(sector_ibs.TRADED_TUPLE, row_count_int=900)
+    input_dict = sector_ibs.s3_inputs(inputs, end_date_str="2030-01-01")
+    assert input_dict["horizon_int"] in sector_ibs.S3_HORIZON_TUPLE and input_dict["event_mask_df"].to_numpy().sum() > 50
+    result_dict = sector_ibs.s3_result(input_dict)
+    assert len(result_dict["check_list"]) == 8 and {v for _, v, _ in result_dict["check_list"]} <= {"PASS", "WARN", "FAIL"}
+
+@pytest.mark.skipif("not _norgate_ready()")
+@pytest.mark.parametrize("spec_name_str", ["sector_ibs_vox_iyr","dispersion_ibs_kie_ihi_xlc", "dispersion_ibs_kie_ihi_xlc_sma200", "dispersion_ibs_kie_ihi_sma200"])
+def test_sector_ibs_gate_passes_against_the_saved_engine_run(spec_name_str):
+    from pathlib import Path
+
+    from alpha.scout.gate.run import GATED_SPEC_DICT, run_gate
+    from alpha.scout.ledger import MAIN_CHECKOUT_ROOT_PATH
+
+    if not any(Path(MAIN_CHECKOUT_ROOT_PATH).glob(GATED_SPEC_DICT[spec_name_str].pickle_glob_str)):
+        pytest.skip("No saved engine run")
+    report = run_gate(spec_name_str)
+    assert report.passed_bool, report.summary_str()
+
+@pytest.mark.skipif("not _norgate_ready()")
+def test_sector_ibs_mcpt_replica_tracks_the_engine():
+    from alpha.scout.family import sector_ibs_family
+    from alpha.scout.specs import sector_ibs
+
+    inputs = sector_ibs.load_inputs()
+    family = sector_ibs_family(inputs)
+    date_index, matrix = sector_ibs.mcpt_matrix(inputs)
+    assert matrix.shape == (len(date_index), 5 * len(sector_ibs.TRADED_TUPLE)) and date_index[-1] <= pd.Timestamp("2022-12-30")
+    fast_ser = pd.Series(sector_ibs.fast_daily_list(matrix, date_index, [family.live_config_dict])[0], index=date_index)
+    engine_ser = family.run_config(family.live_config_dict).daily_return_ser.loc[:"2022-12-30"]
+    assert np.corrcoef(engine_ser, fast_ser.reindex(engine_ser.index))[0, 1] > 0.99  # 0.999 on 2026-10-02 (27-config min 0.998)

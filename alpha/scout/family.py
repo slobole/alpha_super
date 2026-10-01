@@ -11,6 +11,7 @@ Inflation Compass and its QQQ variant (PM_READY) are wired through `compass_fami
 CORE5 adaptive macro (PM_READY, gated 2026-10-01) is `core5_family`.
 The PM_READY pods TFI and Trinity (2026-10-01) are wired through `tfi_family` and `trinity_family`.
 The month-end rebalancing flow (PM_READY, MOC execution) is `eom_family` (no luck band: offset_count_int = 1).
+The PM_READY sector ETF IBS event pods (2026-10-02) are `sector_ibs_family` and `dispersion_ibs_family`.
 """
 
 from __future__ import annotations
@@ -302,6 +303,61 @@ def eom_family(inputs=None) -> FamilyRunner:
     family = _spec_family("eom", "EOM flow", "calendar_and_flow", EOM_GRID_DICT, inputs)
     family.offset_count_int = 1
     return family
+
+
+# ---------------------------------------------------------------- Sector ETF IBS event pods (PM_READY, 2026-10-02)
+# Daily event rules: there is no rebalance schedule, so there is no luck band (offset_count_int = 1; the configs refuse a
+# non-zero decision_offset_int). The axes are the rule's three decisions, each one step either side of the live value
+# (27 configurations each):
+# - entry_ibs_max_float: how deep in the day's range the close must be to buy, halved / doubled around the live value
+#   (downshock 0.025 / 0.05 / 0.10; dispersion 0.05 / 0.10 / 0.20);
+# - exit_ibs_min_float: how strong the rebound close must be to sell, its distance to the top of the range halved /
+#   doubled (0.80 / 0.90 / 0.95);
+# - downshock: max_positions_int 3 / 5 / 7 at the fixed 1.5 / 11 of AUM per entry (gross cap 41% / 68% / 95%);
+#   dispersion (no slot cap, a 1/N sleeve per ETF): min_relative_range_float, the "wide day" bar of both entry and exit,
+#   halved / doubled (0.5 / 1.0 / 2.0 x the trailing standard deviation of the log range).
+# The windows (ATR 14, range 21), the downshock bar and the SMA200 gate are the variants' identity and stay fixed.
+SECTOR_IBS_GRID_DICT = {
+    "entry_ibs_max_float": (0.025, 0.05, 0.10),
+    "exit_ibs_min_float": (0.80, 0.90, 0.95),
+    "max_positions_int": (3, 5, 7),
+}
+DISPERSION_IBS_GRID_DICT = {
+    "entry_ibs_max_float": (0.05, 0.10, 0.20),
+    "exit_ibs_min_float": (0.80, 0.90, 0.95),
+    "min_relative_range_float": (0.5, 1.0, 2.0),
+}
+DISPERSION_IBS_NAME_DICT = {
+    "dispersion_ibs_kie_ihi_xlc": "Dispersion IBS KIE IHI XLC",
+    "dispersion_ibs_kie_ihi_xlc_sma200": "Dispersion IBS KIE IHI XLC SMA200",
+    "dispersion_ibs_kie_ihi_sma200": "Dispersion IBS KIE IHI SMA200",
+}
+
+
+def sector_ibs_family(inputs=None) -> FamilyRunner:
+    """US sector ETF IBS downshock, VOX/IYR basket (alpha/scout/specs/sector_ibs.py). The cost model is the caller's; the
+    identity gate uses the engine's, `sector_ibs.ENGINE_COST_MODEL` (= CostModel())."""
+    family = _spec_family("sector_ibs", "Sector IBS VOX IYR", "etf_short_term_reversal", SECTOR_IBS_GRID_DICT, inputs)
+    family.offset_count_int = 1  # a daily event rule: no rebalance offset
+    return family
+
+
+def dispersion_ibs_family(variant_name_str: str, inputs=None) -> FamilyRunner:
+    """A sector-dispersion IBS variant (alpha/scout/specs/sector_dispersion_ibs.py VARIANT_DICT). The cost model is the
+    caller's; the identity gate uses the pod's own, `sector_dispersion_ibs.ENGINE_COST_MODEL`."""
+    from alpha.scout.specs import sector_dispersion_ibs
+
+    base_config = sector_dispersion_ibs.VARIANT_DICT[variant_name_str].config
+    inputs = inputs or sector_dispersion_ibs.load_inputs(variant_name_str)
+
+    def simulate_fn(config_dict: dict, cost_model: CostModel, capital_float: float) -> WeightsResult:
+        return sector_dispersion_ibs.simulate_config(inputs, dataclasses.replace(base_config, **config_dict), cost_model, capital_float)
+
+    return FamilyRunner(
+        name_str=DISPERSION_IBS_NAME_DICT[variant_name_str], family_id_str="etf_short_term_reversal",
+        param_grid_dict=DISPERSION_IBS_GRID_DICT, live_config_dict={k: getattr(base_config, k) for k in DISPERSION_IBS_GRID_DICT},
+        simulate_fn=simulate_fn, offset_count_int=1,  # a daily event rule: no rebalance offset
+    )
 
 
 def grid_return_df(family: FamilyRunner, cost_model: CostModel = DEFAULT_COST_MODEL, capital_float: float = 100_000.0) -> pd.DataFrame:

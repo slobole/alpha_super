@@ -250,3 +250,29 @@ def test_identity_gate_blocks_a_one_session_membership_look_ahead(monkeypatch):
     monkeypatch.setattr(ndx_vxn, "load_inputs", look_ahead_inputs)
     report = run_gate("ndx_vxn")
     assert not report.passed_bool
+
+
+def test_fractional_entries_and_untouched_holdings():
+    """The sector IBS contract (opt-in): untruncated share targets, NaN = leave the asset alone, tiny deltas cancelled."""
+    open_df, close_df, dividend_df = _frames([[10, 20]] * 6, [[10, 20], [11, 20], [12, 20], [12, 20], [12, 20], [12, 20]])
+    # Day 1: A 0.5, B 0.25. Day 3: A untouched (NaN), B sold. Day 4: A at exactly its current weight (no order).
+    weight_df = pd.DataFrame({"A": [0.5, np.nan, 50.0 * 12.0 / 1100.0], "B": [0.25, 0.0, np.nan]}, index=DATE_INDEX[[1, 3, 4]])
+    kwarg_dict = {"capital_float": 1000.0, "cost_model": NO_COST}
+    result = simulate(open_df, close_df, dividend_df, weight_df, DATE_INDEX[1], fractional_shares_bool=True, hold_nan_bool=True, **kwarg_dict)
+    # Day 1: 1000 x 0.5 / 10 = 50 A and 1000 x 0.25 / 20 = 12.5 B (whole shares would give 12); cash 250.
+    # Close day 1: 550 + 250 + 250 = 1050; day 2: 1100; day 3: B sold at 20 -> cash 500, A still 50 -> 1100.
+    np.testing.assert_allclose(result.position_after_rebalance_df.loc[DATE_INDEX[1]], [50.0, 12.5])
+    np.testing.assert_allclose(result.daily_position_df["A"], [50.0] * 5)
+    np.testing.assert_allclose(result.total_value_ser.to_numpy(), [1050.0, 1100.0, 1100.0, 1100.0, 1100.0])
+    assert result.trade_df["date"].tolist() == [DATE_INDEX[1], DATE_INDEX[1], DATE_INDEX[3]]  # nothing on day 4
+    # Without the flags: trunc(12.5) = 12 B, and the NaN cell is a 0 weight, so A is sold on day 3.
+    plain_result = simulate(open_df, close_df, dividend_df, weight_df.iloc[:2], DATE_INDEX[1], **kwarg_dict)
+    assert plain_result.position_after_rebalance_df.loc[DATE_INDEX[1], "B"] == 12.0
+    assert plain_result.position_after_rebalance_df.loc[DATE_INDEX[3], "A"] == 0.0
+    # A NaN from a decision hook without hold_nan_bool still fails loudly; fractional needs adjusted units.
+    with pytest.raises(ValueError):
+        simulate(open_df, close_df, dividend_df, weight_df.iloc[:0], DATE_INDEX[1], **kwarg_dict,
+                 decision_fn=lambda t_idx_int, position_vec, total_float: np.array([np.nan, 0.5]))
+    with pytest.raises(ValueError, match="adjusted"):
+        simulate(open_df, close_df, dividend_df, weight_df, DATE_INDEX[1], share_unit_mode_str="historical",
+                 unadjusted_close_df=close_df, fractional_shares_bool=True)

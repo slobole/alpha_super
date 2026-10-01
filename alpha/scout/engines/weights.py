@@ -56,6 +56,15 @@ called at the top of session t, before step 1, with the ledger state at the clos
 also runs before `process_orders()`), and returns a target weight vector for a rebalance at t or None. Its decisions
 are returned as `WeightsResult.decided_weight_df`; re-running `simulate` with that frame as `rebalance_weight_df`
 reproduces the same path exactly.
+
+Event rules that never resize a held position (opt-in; added 2026-10-02 for the sector ETF IBS pods,
+strategy_mr_us_sector_etf_ibs_downshock.py and strategy_mr_sector_dispersion_ibs.py, which call
+`order_target(asset, V_T x w / Close_T)` in SHARES):
+- `fractional_shares_bool`: target_i = V × w_i / Close_i(T) with no truncation (adjusted units only); a delta with
+  |Δ| <= 1e-8 is no order, as the engine's zero-share cancellation (np.isclose(amount, 0));
+- `hold_nan_bool`: a NaN target weight leaves that asset untouched (no order, whatever it holds); in
+  `rebalance_weight_df` a NaN cell or a missing column then means "untouched" too, so `decided_weight_df` replays.
+Without these flags every path is unchanged (a NaN weight still raises when it is sized).
 """
 
 from __future__ import annotations
@@ -116,9 +125,13 @@ def simulate(
     decision_fn: Callable[[int, np.ndarray, float], np.ndarray | None] | None = None,
     fill_at_close_bool: bool = False,
     close_and_reopen_bool: bool = False,
+    fractional_shares_bool: bool = False,  # opt-in (sector IBS): untruncated share targets
+    hold_nan_bool: bool = False,  # opt-in (sector IBS): a NaN target weight = leave the asset untouched
 ) -> WeightsResult:
     if share_unit_mode_str not in SHARE_UNIT_MODE_TUPLE:
         raise ValueError(f"share_unit_mode_str must be one of {SHARE_UNIT_MODE_TUPLE}.")
+    if fractional_shares_bool and share_unit_mode_str != "adjusted":
+        raise ValueError("fractional_shares_bool needs adjusted share units.")
     if share_unit_mode_str == "historical" and unadjusted_close_df is None:
         raise ValueError("Historical share units need unadjusted_close_df.")
 
@@ -136,7 +149,8 @@ def simulate(
     else:
         factor_mat = np.ones_like(close_mat)
     rebalance_lookup_dict = {
-        pd.Timestamp(date): row.reindex(asset_list).fillna(0.0).to_numpy(dtype=float)
+        # hold_nan_bool (opt-in): NaN stays NaN = untouched; otherwise a missing weight is 0.
+        pd.Timestamp(date): (row.reindex(asset_list) if hold_nan_bool else row.reindex(asset_list).fillna(0.0)).to_numpy(dtype=float)
         for date, row in rebalance_weight_df.iterrows()
     }
     if not allow_short_bool and any((weight_vec < 0.0).any() for weight_vec in rebalance_lookup_dict.values()):
@@ -192,8 +206,15 @@ def simulate(
         weight_vec = rebalance_lookup_dict.get(t_date)
         if weight_vec is not None:
             target_vec = np.zeros(len(asset_list))
-            for asset_idx_int in np.flatnonzero(weight_vec != 0.0):
-                if share_unit_mode_str == "adjusted":
+            sized_mask = weight_vec != 0.0
+            if hold_nan_bool:  # opt-in: an untouched asset keeps its position (target = position, so no order)
+                hold_mask = np.isnan(weight_vec)
+                target_vec[hold_mask] = position_vec[hold_mask]
+                sized_mask &= ~hold_mask
+            for asset_idx_int in np.flatnonzero(sized_mask):
+                if fractional_shares_bool:  # opt-in: the engine's order_target(V_T x w / Close_T) in shares
+                    target_vec[asset_idx_int] = previous_total_float * weight_vec[asset_idx_int] / close_mat[previous_idx_int, asset_idx_int]
+                elif share_unit_mode_str == "adjusted":
                     price_float = close_mat[previous_idx_int, asset_idx_int]
                     target_vec[asset_idx_int] = float(int(previous_total_float * weight_vec[asset_idx_int] / price_float))
                 else:
@@ -214,6 +235,8 @@ def simulate(
                     else:
                         leg_list.append((asset_idx_int, target_float - current_float))
             for asset_idx_int, leg_delta_float in leg_list:
+                if fractional_shares_bool and abs(leg_delta_float) <= 1e-8:
+                    continue  # opt-in: the engine cancels a zero-share fill (np.isclose(amount, 0))
                 open_float = open_mat[t_idx_int, asset_idx_int]
                 if not np.isfinite(open_float):
                     continue  # cancelled: no bar to fill on
