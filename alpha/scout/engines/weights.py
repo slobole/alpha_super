@@ -35,10 +35,17 @@ Without `allow_short_bool` a negative weight raises: a long-only spec must never
 
 *** CRITICAL*** Sizing reads prices of T only; fills use Open(t). The engine's order of operations is part of the
 model (QUANT_PHILOSOPHY.md "Engine Order Is Part Of The Model").
+
+Path-dependent rules (added 2026-10-01 for Trinity's no-trade band): `decision_fn(t_idx, position_vec, total_T)` is
+called at the top of session t, before step 1, with the ledger state at the close of T (the engine's `iterate()`
+also runs before `process_orders()`), and returns a target weight vector for a rebalance at t or None. Its decisions
+are returned as `WeightsResult.decided_weight_df`; re-running `simulate` with that frame as `rebalance_weight_df`
+reproduces the same path exactly.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -53,6 +60,9 @@ class CostModel:
     fee_per_share_float: float = 0.005
     min_fee_float: float = 1.0
     dividend_withholding_float: float = 0.25
+
+
+DEFAULT_COST_MODEL = CostModel()
 
 
 @dataclass(frozen=True)
@@ -72,6 +82,7 @@ class WeightsResult:
     trade_df: pd.DataFrame
     daily_position_df: pd.DataFrame  # ledger units held at each close
     borrow_fee_df: pd.DataFrame | None = None  # short borrow fees (borrow_model only)
+    decided_weight_df: pd.DataFrame | None = None  # rebalance rows chosen by `decision_fn` (None without one)
 
 
 def simulate(
@@ -83,10 +94,11 @@ def simulate(
     capital_float: float = 100_000.0,
     share_unit_mode_str: str = "adjusted",
     unadjusted_close_df: pd.DataFrame | None = None,
-    cost_model: CostModel = CostModel(),
+    cost_model: CostModel = DEFAULT_COST_MODEL,
     allow_short_bool: bool = False,
     split_sign_flip_bool: bool = False,
     borrow_model: BorrowModel | None = None,
+    decision_fn: Callable[[int, np.ndarray, float], np.ndarray | None] | None = None,
 ) -> WeightsResult:
     if share_unit_mode_str not in SHARE_UNIT_MODE_TUPLE:
         raise ValueError(f"share_unit_mode_str must be one of {SHARE_UNIT_MODE_TUPLE}.")
@@ -118,6 +130,7 @@ def simulate(
     cash_float = float(capital_float)
     previous_total_float = float(capital_float)
     total_list, trade_list, position_row_dict, daily_position_list, borrow_fee_list = [], [], {}, [], []
+    decided_row_dict: dict = {}
 
     def _fee(delta_float: float, factor_float: float) -> float:
         return max(cost_model.min_fee_float, cost_model.fee_per_share_float * abs(delta_float) / factor_float)
@@ -125,6 +138,15 @@ def simulate(
     for t_idx_int in range(start_idx_int, len(date_index)):
         t_date = date_index[t_idx_int]
         previous_idx_int = t_idx_int - 1
+
+        # 0. A path-dependent rule decides after the close of T, on the ledger as it stood then.
+        if decision_fn is not None:
+            decided_vec = decision_fn(t_idx_int, position_vec.copy(), previous_total_float)
+            if decided_vec is not None:
+                if t_date in rebalance_lookup_dict:
+                    raise ValueError(f"Both rebalance_weight_df and decision_fn set a target for {t_date.date()}.")
+                rebalance_lookup_dict[t_date] = np.asarray(decided_vec, dtype=float)
+                decided_row_dict[t_date] = rebalance_lookup_dict[t_date]
 
         # 1. Dividends of T, credited before the open of t.
         held_mask = position_vec != 0.0
@@ -159,7 +181,7 @@ def simulate(
                     raw_price_float = unadjusted_mat[previous_idx_int, asset_idx_int]
                     raw_share_int = int(previous_total_float * weight_vec[asset_idx_int] / raw_price_float)
                     target_vec[asset_idx_int] = float(raw_share_int * factor_mat[previous_idx_int, asset_idx_int])
-            for asset_idx_int in np.flatnonzero((target_vec != position_vec)):
+            for asset_idx_int in np.flatnonzero(target_vec != position_vec):
                 delta_float = target_vec[asset_idx_int] - position_vec[asset_idx_int]
                 open_float = open_mat[t_idx_int, asset_idx_int]
                 if not np.isfinite(open_float):
@@ -203,4 +225,7 @@ def simulate(
         trade_df=pd.DataFrame(trade_list, columns=["date", "asset", "delta_float", "price_float", "fee_float", "kind_str"]),
         daily_position_df=pd.DataFrame(daily_position_list, index=date_index[start_idx_int:], columns=asset_list),
         borrow_fee_df=pd.DataFrame(borrow_fee_list, columns=["date", "asset", "fee_float"]),
+        decided_weight_df=(
+            pd.DataFrame(decided_row_dict, index=asset_list).T if decision_fn is not None else None
+        ),
     )

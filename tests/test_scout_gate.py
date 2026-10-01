@@ -9,6 +9,7 @@ import pytest
 from alpha.scout.gate.identity import compare, compare_exact
 
 DATE_INDEX = pd.bdate_range("2010-01-04", periods=2520)
+import dataclasses
 
 
 def _returns(seed_int: int = 0) -> pd.Series:
@@ -403,3 +404,129 @@ def test_core5_mcpt_replica_tracks_the_engine():
     fast_ser = pd.Series(core5.fast_daily_list(matrix, date_index, [family.live_config_dict])[0], index=date_index)
     engine_ser = family.run_config(family.live_config_dict).daily_return_ser.loc["2008-01-01":"2022-12-30"]
     assert np.corrcoef(engine_ser, fast_ser.reindex(engine_ser.index))[0, 1] > 0.97  # 0.983 on 2026-10-01
+
+
+# ---------------------------------------------------------------------------------------------- TFI and Trinity specs
+def _synthetic_tfi_inputs():
+    from alpha.scout.specs.tfi import TfiInputs
+
+    session_index = pd.bdate_range("2001-06-01", "2003-12-31")
+    rng_obj = np.random.default_rng(4)
+    close_df = pd.DataFrame(100.0 * np.cumprod(1.0 + rng_obj.normal(0.0002, 0.003, (len(session_index), 3)), axis=0),
+                            index=session_index, columns=["IEF", "LQD", "BIL"])
+    close_df.loc[:"2002-09-30", "BIL"] = np.nan  # the cash vehicle lists later
+    yield_index = pd.bdate_range("1999-01-01", "2003-12-31")
+    step_vec = np.arange(len(yield_index), dtype=float)
+    yield_df = pd.DataFrame({"DGS10": 5.0 + np.sin(step_vec / 40.0), "DGS3MO": 2.0, "DAAA": 6.0 + np.cos(step_vec / 55.0), "DBAA": 7.0},
+                            index=yield_index)
+    return TfiInputs(open_df=close_df, close_df=close_df, dividend_df=close_df * 0.0, total_return_close_df=close_df, yield_df=yield_df)
+
+def test_tfi_signal_reads_t_minus_one_includes_the_current_spread_and_maps_cash_to_bil():
+    from alpha.scout.specs import tfi
+
+    inputs = _synthetic_tfi_inputs()
+    frame = tfi.signal_df(inputs)
+    session_index = inputs.open_df.index
+    for decision_ts, row in frame.iterrows():
+        assert row["observation_date"] == session_index[session_index.get_loc(decision_ts) - 1]  # never the decision day
+    # A planted extreme spread on one observation day enters its own decision's median (current spread included).
+    planted_ts = frame["observation_date"].iloc[20]
+    planted_dgs10_ser = inputs.yield_df["DGS10"].where(inputs.yield_df.index != planted_ts, 50.0)
+    planted_inputs = dataclasses.replace(inputs, yield_df=inputs.yield_df.assign(DGS10=planted_dgs10_ser))
+    planted_frame = tfi.signal_df(planted_inputs)
+    prehistory_list = tfi._prehistory_list(planted_inputs.yield_df, tfi.TERM_SERIES_TUPLE, tfi.term_spread, frame.index[0])
+    assert planted_frame["term_float"].iloc[20] == 48.0 and planted_frame["term_state_float"].iloc[20] == 1.0
+    expected_float = np.median(prehistory_list + planted_frame["term_float"].iloc[:21].tolist())
+    assert planted_frame["term_threshold_float"].iloc[20] == expected_float
+    assert planted_frame["term_threshold_float"].iloc[21:].equals(
+        pd.Series([np.median(prehistory_list + planted_frame["term_float"].iloc[: i + 1].tolist()) for i in range(21, len(frame))],
+                  index=frame.index[21:], name="term_threshold_float")
+    )
+    weight_df = tfi.rebalance_weight_df(inputs)
+    assert np.allclose(weight_df.loc["2002-11-01":].sum(axis=1), 1.0) and (weight_df.loc[:"2002-09-30", "BIL"] == 0.0).all()
+    assert set(weight_df["IEF"].unique()) <= {0.0, 0.5}
+
+def _synthetic_trinity_inputs():
+    from alpha.scout.specs.trinity import TrinityInputs
+
+    session_index = pd.bdate_range("2015-01-01", "2018-12-31")
+    rng_obj = np.random.default_rng(6)
+    return_mat = rng_obj.normal(0.0003, [0.012, 0.009, 0.010, 0.0002], (len(session_index), 4))
+    return_mat[500:560, 0] *= 4.0  # a volatile spell: the overlay must scale down and trade inside the month
+    close_df = pd.DataFrame(50.0 * np.cumprod(1.0 + return_mat, axis=0), index=session_index, columns=["VTI", "GLD", "TLT", "BIL"])
+    return TrinityInputs(open_df=close_df, close_df=close_df, dividend_df=close_df * 0.0, total_return_close_df=close_df)
+
+def test_trinity_decisions_replay_exactly_and_the_band_trades_between_months():
+    from alpha.scout.engines.weights import simulate
+    from alpha.scout.specs import trinity
+
+    inputs = _synthetic_trinity_inputs()
+    result = trinity.simulate_config(inputs)
+    weight_df = result.decided_weight_df
+    replay = simulate(inputs.open_df, inputs.close_df, inputs.dividend_df, weight_df, start_date=weight_df.index[0],
+                      cost_model=trinity.ENGINE_COST_MODEL)
+    assert np.array_equal(replay.total_value_ser.to_numpy(), result.total_value_ser.to_numpy())
+    assert np.allclose(weight_df.sum(axis=1), 1.0) and (weight_df.to_numpy() >= 0.0).all() and (weight_df["BIL"] > 0.0).any()
+    first_session_set = set(pd.Series(inputs.open_df.index).groupby(inputs.open_df.index.to_period("M")).min())
+    assert any(date not in first_session_set for date in weight_df.index)  # the band trades inside a month
+    assert len(weight_df) < 0.5 * len(result.total_value_ser)  # but not every day
+
+def test_tfi_and_trinity_defaults_match_their_engines_and_are_gated():
+    from alpha.scout.families import validate_family_id
+    from alpha.scout.family import tfi_family, trinity_family
+    from alpha.scout.gate.run import GATED_SPEC_DICT
+    from alpha.scout.specs import tfi, trinity
+    from strategies.taa_beyond_6040 import (
+        strategy_taa_tactical_fixed_income_ief_lqd as tfi_engine,
+    )
+    from strategies.taa_beyond_6040 import (
+        strategy_taa_trinity_vol_control_8_bil as trinity_engine,
+    )
+
+    assert tfi.FRED_SHA256_DICT == tfi_engine.FROZEN_FRED_SHA256_BY_SERIES_DICT
+    assert tfi.ENGINE_COST_MODEL.slippage_float == tfi_engine.SLIPPAGE_PER_SIDE_FLOAT
+    assert tfi.ENGINE_COST_MODEL.fee_per_share_float == tfi_engine.COMMISSION_PER_SHARE_FLOAT == 0.0
+    engine_config = trinity_engine.DEFAULT_CONFIG
+    live_config = trinity.LIVE_CONFIG
+    assert live_config.vol_target_tuple == (engine_config.target_portfolio_vol_float, engine_config.trigger_portfolio_vol_float)
+    assert (live_config.asset_vol_lookback_int, live_config.portfolio_vol_lookback_int) == (engine_config.asset_vol_lookback_int, engine_config.portfolio_vol_lookback_int)
+    assert live_config.exposure_band_float == trinity_engine.EXPOSURE_REBALANCE_BAND_FLOAT
+    assert trinity.ENGINE_COST_MODEL.slippage_float == engine_config.slippage_float
+    assert trinity.ENGINE_COST_MODEL.fee_per_share_float == engine_config.commission_per_share_float
+    for name_str, spec_module, family_fn, size_int in (("tfi", tfi, tfi_family, 12), ("trinity", trinity, trinity_family, 27)):
+        assert GATED_SPEC_DICT[name_str].strategy_import_str == spec_module.STRATEGY_IMPORT_STR
+        family = family_fn(inputs=object())  # the factory loads data only when no inputs are given
+        validate_family_id(family.family_id_str)
+        assert len(family.config_list()) == size_int and family.live_config_dict in family.config_list()
+
+def test_tfi_and_trinity_replicas_run_on_a_shuffled_matrix():
+    from alpha.scout.specs import tfi, trinity
+
+    rng_obj = np.random.default_rng(8)
+    date_index = pd.bdate_range("2010-01-01", "2013-12-31")
+    row_count_int = len(date_index)
+    tfi_matrix = np.column_stack([
+        rng_obj.normal(0.0002, 0.004, (row_count_int, 3)), 4.0 + rng_obj.normal(0, 0.5, row_count_int),
+        np.full(row_count_int, 1.0), 6.0 + rng_obj.normal(0, 0.5, (row_count_int, 2)),
+    ])
+    trinity_matrix = rng_obj.normal(0.0003, 0.01, (row_count_int, 7))
+    for spec_module, matrix, config_list in (
+        (tfi, tfi_matrix, [{"history_month_int": 0, "threshold_quantile_float": 0.5}]),
+        (trinity, trinity_matrix, [{"asset_vol_lookback_int": 63, "portfolio_vol_lookback_int": 63}]),
+    ):
+        for candidate_mat in (matrix, matrix[rng_obj.permutation(row_count_int)]):
+            daily_vec = spec_module.fast_daily_list(candidate_mat, date_index, config_list)[0]
+            assert daily_vec.shape == (row_count_int,) and np.isfinite(daily_vec).all() and (daily_vec != 0.0).sum() > 200
+
+@pytest.mark.skipif("not _norgate_ready()")
+@pytest.mark.parametrize("spec_name_str", ["tfi", "trinity"])
+def test_beyond_6040_gate_passes_against_the_saved_engine_run(spec_name_str):
+    from pathlib import Path
+
+    from alpha.scout.gate.run import GATED_SPEC_DICT, run_gate
+    from alpha.scout.ledger import MAIN_CHECKOUT_ROOT_PATH
+
+    if not any(Path(MAIN_CHECKOUT_ROOT_PATH).glob(GATED_SPEC_DICT[spec_name_str].pickle_glob_str)):
+        pytest.skip("No saved engine run")
+    report = run_gate(spec_name_str)
+    assert report.passed_bool, report.summary_str()
