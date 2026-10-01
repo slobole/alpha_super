@@ -16,16 +16,18 @@ from __future__ import annotations
 import importlib
 import pickle
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable
 
 import pandas as pd
 
 from alpha.scout.engines.weights import CostModel, WeightsResult, simulate
 from alpha.scout.gate.identity import GateReport, compare, compare_exact
 from alpha.scout.ledger import MAIN_CHECKOUT_ROOT_PATH
+from alpha.scout.specs import ndx_vxn
+from alpha.scout.specs.ndx_vxn import NDX_VARIANT_DICT
 
 COST_MODEL = CostModel()  # module-level so tests can plant a deliberately wrong cost model
 
@@ -50,18 +52,29 @@ def _run_taa_3x(capital_float: float):
     return result, inputs.close_df
 
 
-def _run_ndx_vxn(capital_float: float):
-    from alpha.scout.specs import ndx_vxn
+def _ndx_runner(variant_name_str: str) -> Callable[[float], tuple[WeightsResult, pd.DataFrame]]:
+    def run_fn(capital_float: float):
+        inputs = ndx_vxn.load_inputs()
+        weight_df = ndx_vxn.rebalance_weight_df(inputs, NDX_VARIANT_DICT[variant_name_str].config)
+        stock_list = list(weight_df.columns)
+        result = simulate(
+            inputs.open_df[stock_list], inputs.close_df[stock_list], inputs.dividend_df[stock_list], weight_df,
+            start_date=ndx_vxn.TRADING_START_STR, capital_float=capital_float, share_unit_mode_str="historical",
+            unadjusted_close_df=inputs.raw_close_df[stock_list], cost_model=COST_MODEL,
+        )
+        return result, inputs.close_df[stock_list]
 
-    inputs = ndx_vxn.load_inputs()
-    weight_df = ndx_vxn.rebalance_weight_df(inputs)
-    stock_list = list(weight_df.columns)
-    result = simulate(
-        inputs.open_df[stock_list], inputs.close_df[stock_list], inputs.dividend_df[stock_list], weight_df,
-        start_date=ndx_vxn.TRADING_START_STR, capital_float=capital_float, share_unit_mode_str="historical",
-        unadjusted_close_df=inputs.raw_close_df[stock_list], cost_model=COST_MODEL,
+    return run_fn
+
+
+def _ndx_gated_spec(variant_name_str: str) -> GatedSpec:
+    strategy_module_str = NDX_VARIANT_DICT[variant_name_str].strategy_module_str
+    strategy_name_str = strategy_module_str.rsplit(".", 1)[-1]
+    return GatedSpec(
+        variant_name_str, strategy_module_str,
+        f"results/research/strategy/{strategy_name_str}/vanilla_backtest/*/{strategy_name_str}.pkl",
+        _ndx_runner(variant_name_str),
     )
-    return result, inputs.close_df[stock_list]
 
 
 GATED_SPEC_DICT = {
@@ -70,11 +83,8 @@ GATED_SPEC_DICT = {
         "results/research/strategy/strategy_taa_df_btal_fallback_tqqq_vix_cash/vanilla_backtest/*/strategy_taa_df_btal_fallback_tqqq_vix_cash.pkl",
         _run_taa_3x,
     ),
-    "ndx_vxn": GatedSpec(
-        "ndx_vxn", "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled",
-        "results/research/strategy/strategy_mo_atr_normalized_ndx_vxn_scaled/vanilla_backtest/*/strategy_mo_atr_normalized_ndx_vxn_scaled.pkl",
-        _run_ndx_vxn,
-    ),
+    # The NDX momentum siblings (ndx_vxn is the LIVE pod); see alpha/scout/specs/ndx_vxn.py.
+    **{name_str: _ndx_gated_spec(name_str) for name_str in NDX_VARIANT_DICT},
 }
 
 
@@ -87,7 +97,7 @@ def _engine_strategy(spec: GatedSpec, fresh_bool: bool, root_path: Path):
         raise FileNotFoundError(f"No saved engine run for {spec.name_str}; use fresh mode.")
     with path_list[-1].open("rb") as file_obj:
         engine_obj = pickle.load(file_obj)
-    saved_str = datetime.fromtimestamp(path_list[-1].stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+    saved_str = datetime.fromtimestamp(path_list[-1].stat().st_mtime, tz=UTC).astimezone().strftime("%Y-%m-%d %H:%M")
     return engine_obj, f"saved {path_list[-1].relative_to(root_path).as_posix()} (written {saved_str})"
 
 

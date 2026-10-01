@@ -5,10 +5,12 @@ the grid order is `Registration.grid_config_list` order (parameter names sorted,
 the plateau grid shape is `grid_shape_tuple`. `decision_offset_int` is not a grid axis: it is the luck band (S4).
 
 The two LIVE pods are wired here (P5): TAA 3x and NDX VXN, executed exactly as the identity gate executes them.
+The gated NDX siblings (plain ATR, NATR20, NATR20 VXN) reuse the NDX grid around their own engine config.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import itertools
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -16,6 +18,8 @@ from dataclasses import dataclass
 import pandas as pd
 
 from alpha.scout.engines.weights import CostModel, WeightsResult, simulate
+
+DEFAULT_COST_MODEL = CostModel()
 
 
 @dataclass
@@ -42,7 +46,7 @@ class FamilyRunner:
     def label_str(self, config_dict: dict) -> str:
         return "|".join(f"{name_str}={_value_str(config_dict[name_str])}" for name_str in self.name_list)
 
-    def run_config(self, config_dict: dict, cost_model: CostModel = CostModel(), capital_float: float = 100_000.0) -> WeightsResult:
+    def run_config(self, config_dict: dict, cost_model: CostModel = DEFAULT_COST_MODEL,capital_float: float = 100_000.0) -> WeightsResult:
         return self.simulate_fn(config_dict, cost_model, capital_float)
 
 
@@ -85,13 +89,15 @@ NDX_GRID_DICT = {
 }
 
 
-def ndx_vxn_family(inputs=None) -> FamilyRunner:
+def _ndx_family(variant_name_str: str, name_str: str, inputs=None) -> FamilyRunner:
+    """One NDX momentum sibling (alpha/scout/specs/ndx_vxn.py NDX_VARIANT_DICT); the grid moves around its config."""
     from alpha.scout.specs import ndx_vxn
 
     inputs = inputs or ndx_vxn.load_inputs()
+    base_config = ndx_vxn.NDX_VARIANT_DICT[variant_name_str].config
 
     def simulate_fn(config_dict: dict, cost_model: CostModel, capital_float: float) -> WeightsResult:
-        weight_df = ndx_vxn.rebalance_weight_df(inputs, ndx_vxn.NdxConfig(**config_dict))
+        weight_df = ndx_vxn.rebalance_weight_df(inputs, dataclasses.replace(base_config, **config_dict))
         stock_list = list(weight_df.columns)
         return simulate(
             inputs.open_df[stock_list], inputs.close_df[stock_list], inputs.dividend_df[stock_list], weight_df,
@@ -100,12 +106,28 @@ def ndx_vxn_family(inputs=None) -> FamilyRunner:
         )
 
     return FamilyRunner(
-        name_str="NDX VXN", family_id_str="equity_cross_sectional_momentum", param_grid_dict=NDX_GRID_DICT,
+        name_str=name_str, family_id_str="equity_cross_sectional_momentum", param_grid_dict=NDX_GRID_DICT,
         live_config_dict={"roc_month_int": 12, "stock_sma_int": 100, "top_count_int": 10}, simulate_fn=simulate_fn,
     )
 
 
-def grid_return_df(family: FamilyRunner, cost_model: CostModel = CostModel(), capital_float: float = 100_000.0) -> pd.DataFrame:
+def ndx_vxn_family(inputs=None) -> FamilyRunner:
+    return _ndx_family("ndx_vxn", "NDX VXN", inputs)
+
+
+def ndx_atr_family(inputs=None) -> FamilyRunner:
+    return _ndx_family("ndx_atr", "NDX ATR", inputs)
+
+
+def ndx_natr20_family(inputs=None) -> FamilyRunner:
+    return _ndx_family("ndx_natr20", "NDX NATR20", inputs)
+
+
+def ndx_natr20_vxn_family(inputs=None) -> FamilyRunner:
+    return _ndx_family("ndx_natr20_vxn", "NDX NATR20 VXN", inputs)
+
+
+def grid_return_df(family: FamilyRunner, cost_model: CostModel = DEFAULT_COST_MODEL,capital_float: float = 100_000.0) -> pd.DataFrame:
     """Daily net returns of every grid configuration (columns in grid order)."""
     return pd.DataFrame(
         {family.label_str(config_dict): family.run_config(config_dict, cost_model, capital_float).daily_return_ser for config_dict in family.config_list()}
