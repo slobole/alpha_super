@@ -118,6 +118,11 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     # 2026-09-28; legacy DGS3MO accrual selectable), and next-open fills. The
     # research verdict remains diagnostic; PM_READY certifies plumbing only.
     "strategies.taa_beyond_6040.strategy_taa_tactical_fixed_income_ief_lqd": MaturityTier.PM_READY,
+    # Passive BIL (T-bills) as a cash pod, so a fund book can hold a fixed cash
+    # sleeve in the Portfolio Manager (owner request 2026-10-01, fund products
+    # study). Buy-and-hold BIL, 25% dividend withholding, 0% on residual cash.
+    # PM-only: never a live route; cash in a live account is simply unallocated.
+    "strategies.portfolio_controls.strategy_passive_bil": MaturityTier.PM_READY,
     # MOSAIC was demoted to RESEARCH on 2026-09-28 by owner decision: its
     # 2026-07-31 validation was invalidated by the split-price fix and it left
     # the recommended books (readiness audit, section 10). Committed YAMLs that
