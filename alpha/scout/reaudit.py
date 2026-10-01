@@ -58,6 +58,7 @@ class PodPlan:
     prior_trial_count_int: int
     slot_str: str  # the LIVE pod whose slot it takes in the reference book
     s3_fn: Callable | None = None  # () -> (class_str, note_str, result_dict)
+    strategy_module_str: str = ""  # the engine module (the card lists only the deviations that affect it)
     option_dict: dict = field(default_factory=dict)  # MCPT options: ndx_config (NdxConfig) / taa options
 
 
@@ -318,6 +319,7 @@ def reaudit(plan: PodPlan, live_net_dict: dict[str, pd.Series], factor_df: pd.Da
         "pod_str": plan.name_str,
         "family": {"grid": family.param_grid_dict, "live": family.live_config_dict, "family_id_str": family.family_id_str},
         "prior_trial_count_int": plan.prior_trial_count_int, "s4": s4, "s5": s5, "s6": s6,
+        "strategy_module_str": plan.strategy_module_str,
         "post_adoption": {
             "adoption_date_str": plan.adoption_date_str, "sessions_int": len(adoption_ser),
             "performance": performance_dict(adoption_ser, tbill_ser) if len(adoption_ser) > 20 else {},

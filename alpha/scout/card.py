@@ -245,7 +245,9 @@ def render_card(bundle: dict) -> str:
 
     # ---- deviations, untested, post-adoption
     deviation_rows_str = "".join(f"<tr><td class='l'>{d.deviation_id_str}</td><td class='l'>{html.escape(d.expected_bias_direction_str)}</td><td class='l'>{html.escape(d.impact_level_str)}</td></tr>"
-                                 for d in ENGINE_DEVIATION_TUPLE)
+                                 for d in ENGINE_DEVIATION_TUPLE
+                                 if not bundle.get("strategy_module_str") or bundle["strategy_module_str"].rsplit(".", 1)[-1] in d.affected_strategy_list
+                                 or bundle["strategy_module_str"] in d.affected_strategy_list)
     part_list.append(f"<h2>Known engine deviations</h2><table><tr><th class='l'>Deviation</th><th class='l'>Bias</th><th class='l'>Impact</th></tr>{deviation_rows_str}</table>")
     part_list.append("<h2>What was not tested, and why</h2><ul>"
                      + ("" if bundle.get("s3") else "<li>S3 edge study: scheduled with P6.</li>")
