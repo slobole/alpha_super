@@ -774,3 +774,239 @@ def test_sector_ibs_mcpt_replica_tracks_the_engine():
     fast_ser = pd.Series(sector_ibs.fast_daily_list(matrix, date_index, [family.live_config_dict])[0], index=date_index)
     engine_ser = family.run_config(family.live_config_dict).daily_return_ser.loc[:"2022-12-30"]
     assert np.corrcoef(engine_ser, fast_ser.reindex(engine_ser.index))[0, 1] > 0.99  # 0.999 on 2026-10-02 (27-config min 0.998)
+
+
+# ---------------------------------------------------------------------------------------------- DV2 mean reversion (WIRED)
+DV2_SYMBOL_TUPLE = tuple(f"S{i:02d}" for i in range(12))
+
+
+def _synthetic_dv2_frames(seed_int: int = 21, row_count_int: int = 900):
+    """(pricing_df in load_raw_prices layout incl. a $SPX benchmark, universe_df): S10 delists at row 700, S11 lists at
+    row 250 (NaN before), S09 is never a member, S08 leaves the index at row 500; the universe ends 20 rows early."""
+    session_index = pd.bdate_range("2012-01-02", periods=row_count_int)
+    rng_obj = np.random.default_rng(seed_int)
+    shape_tuple = (row_count_int, len(DV2_SYMBOL_TUPLE))
+    close_mat = 50.0 * np.exp(np.cumsum(rng_obj.normal(0.0, 0.008, (row_count_int, 1)) + rng_obj.normal(0.0008, 0.015, shape_tuple), axis=0))
+    open_mat = np.vstack([close_mat[:1], close_mat[:-1]]) * np.exp(rng_obj.normal(0.0, 0.006, shape_tuple))
+    high_mat = np.maximum(open_mat, close_mat) * np.exp(np.abs(rng_obj.normal(0.0, 0.008, shape_tuple)))
+    low_mat = np.minimum(open_mat, close_mat) * np.exp(-np.abs(rng_obj.normal(0.0, 0.008, shape_tuple)))
+    for mat in (open_mat, high_mat, low_mat, close_mat):
+        mat[700:, 10] = np.nan
+        mat[:250, 11] = np.nan
+    field_dict = {"Open": open_mat, "High": high_mat, "Low": low_mat, "Close": close_mat, "Volume": np.where(np.isfinite(close_mat), 1e6, np.nan),
+                  "Unadjusted Close": close_mat, "Dividend": np.where(np.isfinite(close_mat), 0.0, np.nan)}
+    field_dict["Turnover"] = field_dict["Volume"] * close_mat
+    column_dict = {(s, f): mat[:, i] for i, s in enumerate(DV2_SYMBOL_TUPLE) for f, mat in field_dict.items()}
+    column_dict.update({("$SPX", f): close_mat.mean(axis=1) for f in ("Open", "High", "Low", "Close", "Volume", "Turnover")})
+    pricing_df = pd.DataFrame(column_dict, index=session_index)
+    member_mat = np.ones(shape_tuple, dtype=int)
+    member_mat[:, 9] = 0
+    member_mat[500:, 8] = 0
+    member_mat[700:, 10] = 0
+    member_mat[:250, 11] = 0
+    universe_df = pd.DataFrame(member_mat, index=session_index, columns=list(DV2_SYMBOL_TUPLE)).iloc[:-20]
+    return pricing_df, universe_df
+
+
+def _synthetic_dv2_inputs():
+    from alpha.scout.specs import dv2
+
+    pricing_df, universe_df = _synthetic_dv2_frames()
+    return dv2.inputs_from_frames(pricing_df, universe_df, backtest_start_str=str(pricing_df.index[300].date()))
+
+
+def _synthetic_dv2_panel():
+    from alpha.scout.panel import Panel
+
+    pricing_df, universe_df = _synthetic_dv2_frames()
+    field_dict = {f: pd.DataFrame({s: pricing_df[(s, f)] for s in DV2_SYMBOL_TUPLE}) for f in
+                  ("Open", "High", "Low", "Close", "Volume", "Turnover", "Unadjusted Close", "Dividend")}
+    member_df = universe_df.reindex(pricing_df.index).ffill().astype(np.int8)
+    return Panel(name_str="synthetic DV2", field_dict=field_dict, member_df=member_df, snapshot_id_str="synthetic", sealed_bool=True)
+
+
+def test_dv2_features_match_the_engine_indicators_and_are_causal():
+    import talib
+
+    from alpha.indicators import dv2_indicator
+    from alpha.scout.specs import dv2
+
+    inputs = _synthetic_dv2_inputs()
+    high_df, low_df, close_df = inputs.high_df.copy(), inputs.low_df.copy(), inputs.close_df.copy()
+    for frame in (high_df, low_df, close_df):
+        frame.iloc[400, 3] = np.nan  # a NaN inside a history: TA-Lib's ATR stays NaN after it, DV2 recovers
+    features = dv2.feature_dict(close_df, high_df, low_df)
+    for i_int, symbol_str in enumerate(close_df.columns):
+        c, h, l = close_df[symbol_str], high_df[symbol_str], low_df[symbol_str]
+        np.testing.assert_array_equal(features["natr_mat"][:, i_int], talib.NATR(h, l, c, timeperiod=14).to_numpy())
+        np.testing.assert_array_equal(features["dv2_mat"][:, i_int], dv2_indicator(c, h, l, length_int=126).to_numpy())
+        np.testing.assert_array_equal(features["sma_mat"][:, i_int], c.rolling(200).mean().to_numpy())
+    assert np.isnan(features["natr_mat"][401:, 3]).all() and np.isfinite(features["dv2_mat"][600:, 3]).all()
+    cut_int = 500
+    cut = dv2.feature_dict(close_df.iloc[:cut_int], high_df.iloc[:cut_int], low_df.iloc[:cut_int])
+    for name_str, value_mat in cut.items():  # a feature at T never changes when later bars arrive
+        np.testing.assert_array_equal(value_mat, features[name_str][:cut_int])
+    # Norgate prices are float32 and the engine's p126d_return stays float32 (pandas): the spec computes it the same way
+    close32_df = close_df.astype(np.float32)
+    features32 = dv2.feature_dict(close32_df, high_df.astype(np.float32), low_df.astype(np.float32))
+    engine32_mat = np.column_stack([(close32_df[s] / close32_df[s].shift(126) - 1).to_numpy() for s in close32_df.columns]).astype(float)
+    np.testing.assert_array_equal(features32["momentum_mat"], engine32_mat)
+    assert np.nanmax(np.abs(features32["momentum_mat"] - (close32_df.astype(float) / close32_df.astype(float).shift(126) - 1).to_numpy())) > 0.0
+
+
+def test_dv2_inputs_read_membership_as_of_t_and_need_complete_rows():
+    from alpha.scout.specs import dv2
+
+    pricing_df, universe_df = _synthetic_dv2_frames()
+    pricing_df.loc[pricing_df.index[600], ("S04", "Volume")] = np.nan
+    inputs = dv2.inputs_from_frames(pricing_df, universe_df)
+    assert list(inputs.close_df.columns) == sorted(DV2_SYMBOL_TUPLE)  # $SPX only widens the index
+    # the universe ends 20 rows early: the last row dated <= T is used, never a later one
+    assert inputs.member_df.iloc[-1].equals(inputs.member_df.loc[universe_df.index[-1]])
+    assert not inputs.member_df["S09"].any() and not inputs.member_df["S08"].iloc[500:].any() and inputs.member_df["S08"].iloc[:500].all()
+    assert not inputs.complete_df.iloc[600]["S04"] and inputs.complete_df.iloc[599]["S04"]
+    assert not inputs.complete_df["S11"].iloc[:250].any()
+
+
+def test_dv2_event_rule_slots_ranking_exits_and_replay():
+    from alpha.scout.engines.weights import CostModel, simulate
+    from alpha.scout.specs import dv2
+
+    inputs = _synthetic_dv2_inputs()
+    config = dataclasses.replace(dv2.LIVE_CONFIG, entry_dv2_max_float=30.0, max_positions_int=4)
+    result = dv2.simulate_config(inputs, config, CostModel())
+    position_df = result.daily_position_df
+    assert len(result.trade_df) > 200 and (position_df > 0).sum(axis=1).max() == config.max_positions_int
+    assert np.array_equal(position_df.to_numpy(), np.round(position_df.to_numpy()))  # whole shares
+    assert (position_df["S09"] == 0).all()  # never a member
+    mats = dv2.signal_mats(inputs, config)
+    session_index = inputs.close_df.index
+    held_before_df = position_df.shift(1).fillna(0.0)
+    checked_int = 0
+    for date, row in result.decided_weight_df.iterrows():
+        if date == position_df.index[0]:
+            continue
+        p_int = session_index.get_loc(date) - 1
+        held_vec = held_before_df.loc[date].to_numpy() > 0
+        exited_vec = row.to_numpy() == 0.0
+        assert np.array_equal(exited_vec, held_vec & mats["exit_signal"][p_int])  # every held stock with the signal, nothing else
+        entered_vec = np.flatnonzero(row.to_numpy() > 0.0)
+        flat_vec = np.flatnonzero(~held_vec & mats["qualify"][p_int] & mats["member"][p_int])
+        assert set(entered_vec) <= set(flat_vec)
+        assert len(entered_vec) <= config.max_positions_int - held_vec.sum() + exited_vec.sum()
+        if entered_vec.size and entered_vec.size < flat_vec.size:  # the highest-NATR flat members enter
+            assert mats["natr"][p_int, entered_vec].min() >= mats["natr"][p_int, np.setdiff1d(flat_vec, entered_vec)].max()
+            checked_int += 1
+    assert checked_int > 5
+    # a held stock is never resized: one entry, then one full exit
+    for _asset_str, frame in result.trade_df.groupby("asset"):
+        delta_vec = frame["delta_float"].to_numpy()
+        assert (delta_vec[::2] > 0).all() and np.array_equal(delta_vec[1::2], -delta_vec[: 2 * (len(delta_vec) // 2): 2])
+    replay = simulate(inputs.open_df, inputs.close_df, inputs.dividend_df, result.decided_weight_df, start_date=result.total_value_ser.index[0],
+                      cost_model=CostModel(), hold_nan_bool=True)
+    assert np.array_equal(replay.total_value_ser.to_numpy(), result.total_value_ser.to_numpy())
+
+
+def test_dv2_family_grid_config_and_gate_registration():
+    import inspect
+
+    from alpha.scout.families import validate_family_id
+    from alpha.scout.family import dv2_family, dv2_ndx_family
+    from alpha.scout.gate.legacy_dv2_ndx import LegacyDvo2NasdaqStrategy
+    from alpha.scout.gate.run import GATED_SPEC_DICT
+    from alpha.scout.specs import dv2
+    from strategies.dv2.strategy_mr_dv2 import DVO2Strategy
+
+    # the spec defaults are the engines' hard-coded rules
+    for strategy_cls, variant in ((DVO2Strategy, dv2.VARIANT_DICT["dv2"]), (LegacyDvo2NasdaqStrategy, dv2.VARIANT_DICT["dv2_ndx"])):
+        source_str = inspect.getsource(strategy_cls.get_opportunities)
+        assert f"(df['dv2'] < {variant.config.entry_dv2_max_float:g})" in source_str
+        assert f"(df['p126d_return'] > {variant.config.momentum_min_float:g})" in source_str
+        assert variant.config.max_positions_int == strategy_cls.max_positions
+        assert GATED_SPEC_DICT[next(k for k, v in dv2.VARIANT_DICT.items() if v is variant)].strategy_import_str == variant.strategy_import_str
+    assert dv2.VARIANT_DICT["dv2"].config == dv2.LIVE_CONFIG and dv2.VARIANT_DICT["dv2_ndx"].cost_model.slippage_float == 0.0001
+    assert (dv2.ENGINE_COST_MODEL.slippage_float, dv2.ENGINE_COST_MODEL.fee_per_share_float, dv2.ENGINE_COST_MODEL.min_fee_float) == (0.00025, 0.005, 1.0)
+    for family in (dv2_family(inputs=object()), dv2_ndx_family(inputs=object())):
+        validate_family_id(family.family_id_str)
+        assert family.family_id_str == "us_equity_short_term_reversal" and family.offset_count_int == 1
+        assert len(family.config_list()) == 27 and family.live_config_dict in family.config_list()
+    with pytest.raises(ValueError, match="offset"):
+        dataclasses.replace(dv2.LIVE_CONFIG, decision_offset_int=1)
+    with pytest.raises(ValueError, match="exit_rule_str"):
+        dataclasses.replace(dv2.LIVE_CONFIG, exit_rule_str="tomorrow")
+
+
+def test_dv2_panel_replica_tracks_the_spec_and_runs_on_a_permuted_panel():
+    from alpha.scout.engines.weights import CostModel
+    from alpha.scout.null import permuted_panel
+    from alpha.scout.specs import dv2
+
+    inputs, panel = _synthetic_dv2_inputs(), _synthetic_dv2_panel()
+    config_dict = {"entry_dv2_max_float": 30.0, "max_positions_int": 4}
+    gross_cost = CostModel(slippage_float=0.0, fee_per_share_float=0.0, min_fee_float=0.0)
+    spec_ser = dv2.simulate_config(inputs, dataclasses.replace(dv2.LIVE_CONFIG, **config_dict), gross_cost).daily_return_ser.iloc[5:]
+    daily_list, baseline_vec = dv2.fast_daily_list_panel(panel, [config_dict, {"exit_rule_str": "high_2d"}])
+    fast_ser = pd.Series(daily_list[0], index=panel.date_index).reindex(spec_ser.index)
+    assert np.corrcoef(spec_ser, fast_ser)[0, 1] > 0.95  # whole vs fractional shares and the start state differ
+    # baseline: members at T held from the close of T+1
+    close_df = panel.field("Close")
+    t_int = 400
+    member_vec = (panel.member_df.iloc[t_int - 2] == 1) & close_df.iloc[t_int - 2].notna()
+    expected_float = (close_df.iloc[t_int] / close_df.iloc[t_int - 1] - 1.0)[member_vec].fillna(0.0).mean()
+    assert baseline_vec[t_int] == pytest.approx(expected_float, rel=1e-12)
+    permuted_list, permuted_baseline_vec = dv2.fast_daily_list_panel(permuted_panel(panel, np.random.default_rng(3)), [config_dict])
+    assert np.isfinite(permuted_list[0]).all() and (permuted_list[0] != 0.0).sum() > 100 and np.isfinite(permuted_baseline_vec).all()
+
+
+@pytest.mark.parametrize("variant_name_str", ["dv2", "dv2_ndx"])
+def test_dv2_s3_inputs_feed_the_class_e_station(variant_name_str):
+    from alpha.scout.specs import dv2
+
+    input_dict = dv2.s3_inputs(_synthetic_dv2_panel(), variant_name_str)
+    assert input_dict["horizon_int"] in dv2.S3_HORIZON_TUPLE and input_dict["event_mask_df"].to_numpy().sum() > 50
+    assert not (input_dict["regime_mask_df"]["S11"].iloc[:250]).any()
+    result_dict = dv2.s3_result(input_dict)
+    assert len(result_dict["check_list"]) == 8 and {v for _, v, _ in result_dict["check_list"]} <= {"PASS", "WARN", "FAIL"}
+
+
+@pytest.mark.skipif("not _norgate_ready()")
+@pytest.mark.parametrize("variant_name_str", ["dv2", "dv2_ndx"])
+def test_dv2_gate_passes_against_a_fresh_engine_run_and_blocks_a_near_miss(monkeypatch, variant_name_str):
+    # A fresh engine run to 2005-03-31 (about 2 minutes): with about 1,200 stocks a Norgate revision often changes one
+    # early decision, so a saved run fails falsely (the 2026-09-30 pickle bought HAL on 2006-03-21; the 2026-10-01 engine
+    # buys AMD a day later). The full-history `python -m alpha.scout gate dv2 --fresh` is authoritative.
+    import importlib
+
+    import alpha.scout.gate.run as gate_run
+    from alpha.scout.specs import dv2
+
+    engine_module = importlib.import_module(gate_run.GATED_SPEC_DICT[variant_name_str].strategy_import_str)
+    engine_obj = engine_module.run_variant(show_display_bool=False, save_results_bool=False, end_date_str="2005-03-31")
+    monkeypatch.setattr(gate_run, "_engine_strategy", lambda spec, fresh_bool, root_path: (engine_obj, "fresh run_variant to 2005-03-31"))
+    report = gate_run.run_gate(variant_name_str)
+    assert report.passed_bool, report.summary_str()
+    # The P4 notebook's momentum bar (> 0 instead of the rule's > 5% / > 25%) must fail the exact tier.
+    variant = dv2.VARIANT_DICT[variant_name_str]
+    monkeypatch.setitem(dv2.VARIANT_DICT, variant_name_str, dataclasses.replace(variant, config=dataclasses.replace(variant.config, momentum_min_float=0.0)))
+    assert not gate_run.run_gate(variant_name_str).passed_bool
+
+
+@pytest.mark.skipif("not _norgate_ready()")
+@pytest.mark.parametrize("variant_name_str", ["dv2", "dv2_ndx"])
+def test_dv2_panel_replica_tracks_the_engine(variant_name_str):
+    from alpha.scout.engines.weights import CostModel
+    from alpha.scout.family import dv2_variant_family
+    from alpha.scout.panel import load_panel
+    from alpha.scout.specs import dv2
+
+    variant = dv2.VARIANT_DICT[variant_name_str]
+    try:
+        panel = load_panel(variant.index_name_str)
+    except FileNotFoundError:
+        pytest.skip(f"No cached {variant.index_name_str} panel")
+    family = dv2_variant_family(variant_name_str, dv2.load_inputs(variant_name_str=variant_name_str))
+    gross_cost = CostModel(slippage_float=0.0, fee_per_share_float=0.0, min_fee_float=0.0)
+    engine_ser = family.run_config(family.live_config_dict, gross_cost).daily_return_ser.loc[:"2022-12-30"]
+    fast_ser = pd.Series(dv2.fast_daily_list_panel(panel, [{}], base_config=variant.config)[0][0], index=panel.date_index)
+    # 2026-10-01: S&P 500 0.9993 (27-config min 0.998), Nasdaq-100 0.9999 (min 0.999)
+    assert np.corrcoef(engine_ser, fast_ser.reindex(engine_ser.index))[0, 1] > 0.99
