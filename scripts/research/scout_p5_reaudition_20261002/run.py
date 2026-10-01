@@ -1,0 +1,305 @@
+"""P5 re-audition of the two LIVE pods, TAA 3x and NDX VXN, through S4-S6 (design section 10).
+
+In sample = up to the vault seal (2022-12-30). The years since are shown separately: seen, so contaminated.
+MCPT components (A9):
+    TAA 3x       plain date shuffle of [TR returns of the six ETFs, SPY return, VIX, DTB3]; score SD
+    NDX VXN      selection: per-asset null on the Nasdaq-100 panel; active return over overlay x EW members
+                 overlay:   plain date shuffle of [EW members return, SPY return, VXN]; score SD
+Outputs: results/scout/reaudition/<pod>/ (pickle + JSON summary); cards are rendered by alpha.scout.card.
+
+    uv run python scripts/research/scout_p5_reaudition_20261002/run.py
+"""
+
+from __future__ import annotations
+
+import json
+import pickle
+import sys
+import time
+from multiprocessing import Pool
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+
+from alpha.scout import searches
+from alpha.scout.engines.weights import CostModel
+from alpha.scout.family import FamilyRunner, ndx_vxn_family, taa_3x_family
+from alpha.scout.ledger import MAIN_CHECKOUT_ROOT_PATH
+from alpha.scout.metrics import (
+    performance_dict,
+    sharpe_float,
+    tbill_daily_ser,
+)
+from alpha.scout.stations.s4_strategy import SEAL_END_STR, run_s4
+from alpha.scout.stations.s5_overfit import McptComponent, run_s5
+from alpha.scout.stations.s6_book import (
+    capacity,
+    diversification,
+    finish_s6,
+    spanning_table,
+    tbill_slot_test,
+)
+from alpha.stats.mcpt import mcpt
+from alpha.stats.psr_dsr import (
+    minimum_track_record_length,
+    sharpe_moments,
+)
+from alpha.stats.selection import plateau_choice
+
+OUTPUT_DIR_PATH = MAIN_CHECKOUT_ROOT_PATH / "results" / "scout" / "reaudition"
+PERMUTATION_COUNT_INT, WORKER_COUNT_INT = 1000, 14
+ADOPTION_DATE_DICT = {"TAA 3x": "2026-04-04", "NDX VXN": "2026-05-15"}  # first commit of the current rule on main
+PRIOR_TRIAL_DICT = {"TAA 3x": 103, "NDX VXN": 150}
+BOOK_WEIGHT_DICT = {"TAA 3x": 0.6, "NDX VXN": 0.4}  # the live account, about $18K and $12K
+OVERLAY_GRID = ((100, 150, 200, 250), (18.0, 22.0, 26.0))  # SPY regime average x VXN reference
+
+
+# ---------------------------------------------------------------- SD score helpers (A9)
+def vol_targeted_vec(daily_vec: np.ndarray) -> np.ndarray:
+    realized_vec = pd.Series(daily_vec).rolling(20).std().shift(1).to_numpy() * np.sqrt(252.0)
+    scale_vec = np.where(np.isfinite(realized_vec) & (realized_vec > 0), np.minimum(1.0, 0.10 / realized_vec), 0.0)
+    return scale_vec * daily_vec
+
+
+def sd_score(config_daily_list: list[np.ndarray], baseline_vec: np.ndarray, grid_shape_tuple: tuple, warm_int: int) -> float:
+    targeted_vec = vol_targeted_vec(baseline_vec)
+    sharpe_vec = np.array([sharpe_float(pd.Series((v - targeted_vec)[warm_int:])) for v in config_daily_list])
+    return plateau_choice(np.nan_to_num(sharpe_vec, nan=-9.0), grid_shape_tuple).own_sharpe_float
+
+
+# ---------------------------------------------------------------- TAA 3x MCPT
+_TAA_STATE: dict = {}
+
+
+def _taa_search(matrix: np.ndarray) -> float:
+    state = _TAA_STATE
+    daily_list = searches.taa_config_daily_list(matrix, state["date_index"], state["config_list"])
+    return sd_score(daily_list, matrix[:, :6].mean(axis=1), state["grid_shape_tuple"], 260)
+
+
+def _taa_null_chunk(args) -> np.ndarray:
+    matrix, seed_int, count_int, state = args
+    _TAA_STATE.update(state)
+    return mcpt(_taa_search, matrix, count_int, seed_int).null_score_vec
+
+
+def taa_mcpt(family: FamilyRunner, inputs) -> McptComponent:
+    from data.norgate_loader import load_price_timeseries
+
+    tqqq_ser = load_price_timeseries("TQQQ", adjustment_str="TOTALRETURN", start_date_str="2011-09-13")["Close"]
+    date_index = inputs.open_df.index[(inputs.open_df.index >= "2012-01-03") & (inputs.open_df.index <= SEAL_END_STR)]
+    matrix = searches.taa_matrix(date_index, inputs.total_return_close_df.assign(TQQQ=tqqq_ser), inputs.spy_close_ser, inputs.vix_close_ser, inputs.dtb3_ser)
+    state = {"date_index": date_index, "config_list": family.config_list(), "grid_shape_tuple": family.grid_shape_tuple}
+    _TAA_STATE.update(state)
+    observed_float = _taa_search(matrix)
+    chunk_int = PERMUTATION_COUNT_INT // WORKER_COUNT_INT + 1
+    with Pool(WORKER_COUNT_INT) as pool_obj:
+        null_vec = np.concatenate(pool_obj.map(_taa_null_chunk, [(matrix, 7_000 + i, chunk_int, state) for i in range(WORKER_COUNT_INT)]))[:PERMUTATION_COUNT_INT]
+    p_float = float((1 + np.sum(null_vec >= observed_float)) / (1 + null_vec.size))
+    return McptComponent("whole strategy", "date shuffle", "SD: active Sharpe over vol-targeted EW of the six ETFs", observed_float, null_vec, p_float,
+                         note_str="ETF timing family (A9 calibration: 2.0-7.0% false passes)")
+
+
+# ---------------------------------------------------------------- NDX VXN MCPT
+_NDX_STATE: dict = {}
+
+
+def _ndx_selection_score(panel) -> float:
+    state = _NDX_STATE
+    f = lambda n: panel.field(n).to_numpy(dtype=float)
+    daily_list, baseline_vec = searches.ndx_selection_daily(
+        f("Open"), f("High"), f("Low"), f("Close"), f("Unadjusted Close"), (panel.member_df == 1).to_numpy(),
+        panel.date_index, state["overlay_ser"], state["config_list"],
+    )
+    sharpe_vec = np.array([sharpe_float(pd.Series((v - baseline_vec)[state["warm_int"]:])) for v in daily_list])
+    return plateau_choice(np.nan_to_num(sharpe_vec, nan=-9.0), state["grid_shape_tuple"]).own_sharpe_float
+
+
+def _ndx_null_chunk(args) -> np.ndarray:
+    seed_int, count_int, state = args
+    from alpha.scout.null import permuted_panel
+    from alpha.scout.panel import load_panel
+
+    _NDX_STATE.update(state)
+    panel = load_panel("Nasdaq 100")
+    rng_obj, cache_dict = np.random.default_rng(seed_int), {}
+    return np.array([_ndx_selection_score(permuted_panel(panel, rng_obj, cache_dict)) for _ in range(count_int)])
+
+
+def _overlay_scale_ser(spy_close_ser: pd.Series, vxn_close_ser: pd.Series, date_index, regime_sma_int: int, reference_float: float) -> pd.Series:
+    spy_ser = spy_close_ser.reindex(date_index).ffill()
+    vxn_ser = vxn_close_ser.reindex(vxn_close_ser.index.union(date_index)).ffill().reindex(date_index)
+    on_ser = spy_ser > spy_ser.rolling(regime_sma_int, min_periods=regime_sma_int).mean()
+    return pd.Series(np.where(on_ser, np.clip(reference_float / vxn_ser, 0.25, 1.0), 0.0), index=date_index)
+
+
+def _overlay_search(matrix: np.ndarray) -> float:
+    state = _NDX_STATE
+    date_index = state["overlay_date_index"]
+    index_vec, spy_vec, vxn_vec = matrix[:, 0], matrix[:, 1], matrix[:, 2]
+    spy_price_ser = pd.Series(np.cumprod(1.0 + spy_vec), index=date_index)
+    vxn_ser = pd.Series(vxn_vec, index=date_index)
+    position_ser = pd.Series(np.arange(len(date_index)), index=date_index)
+    decision_row_vec = position_ser.groupby(date_index.to_period("M")).max().to_numpy()[:-1]
+    daily_list = []
+    for sma_int in OVERLAY_GRID[0]:
+        for reference_float in OVERLAY_GRID[1]:
+            scale_vec = _overlay_scale_ser(spy_price_ser, vxn_ser, date_index, sma_int, reference_float).to_numpy()[decision_row_vec]
+            daily_list.append(searches._hold_daily(scale_vec[:, None], decision_row_vec, index_vec[:, None]))
+    return sd_score(daily_list, index_vec, (len(OVERLAY_GRID[0]), len(OVERLAY_GRID[1])), 260)
+
+
+def _overlay_null_chunk(args) -> np.ndarray:
+    matrix, seed_int, count_int, state = args
+    _NDX_STATE.update(state)
+    return mcpt(_overlay_search, matrix, count_int, seed_int).null_score_vec
+
+
+def ndx_mcpt(family: FamilyRunner, inputs) -> list[McptComponent]:
+    from alpha.scout.panel import load_panel
+
+    panel = load_panel("Nasdaq 100")
+    overlay_ser = _overlay_scale_ser(inputs.close_df["SPY"], inputs.vxn_close_ser, panel.date_index, 200, 22.0)
+    state = {"overlay_ser": overlay_ser, "config_list": family.config_list(), "grid_shape_tuple": family.grid_shape_tuple, "warm_int": 520}
+    _NDX_STATE.update(state)
+    observed_float = _ndx_selection_score(panel)
+    chunk_int = PERMUTATION_COUNT_INT // WORKER_COUNT_INT + 1
+    with Pool(WORKER_COUNT_INT) as pool_obj:
+        null_vec = np.concatenate(pool_obj.map(_ndx_null_chunk, [(8_000 + i, chunk_int, state) for i in range(WORKER_COUNT_INT)]))[:PERMUTATION_COUNT_INT]
+    selection = McptComponent(
+        "stock selection", "per-asset", "active Sharpe over overlay x EW members", observed_float, null_vec,
+        float((1 + np.sum(null_vec >= observed_float)) / (1 + null_vec.size)), ranking_family_bool=True,
+        note_str="cross-sectional momentum (A8 calibration: 8.0% false passes; 0.025 < p <= 0.05 is marginal)",
+    )
+
+    # Overlay: the SPY regime and VXN scale applied to the equal-weight member index.
+    close_df = panel.field("Close")
+    member_return_ser = (close_df / close_df.shift(1) - 1.0).where((panel.member_df == 1).shift(1, fill_value=False)).mean(axis=1).fillna(0.0)
+    date_index = panel.date_index[panel.date_index >= "2000-01-03"]
+    spy_return_ser = inputs.close_df["SPY"].reindex(date_index).ffill().pct_change().fillna(0.0)
+    vxn_ser = inputs.vxn_close_ser.reindex(inputs.vxn_close_ser.index.union(date_index)).ffill().reindex(date_index).bfill()
+    matrix = np.column_stack([member_return_ser.reindex(date_index).to_numpy(), spy_return_ser.to_numpy(), vxn_ser.to_numpy()])
+    state["overlay_date_index"] = date_index
+    _NDX_STATE.update(state)
+    observed_float = _overlay_search(matrix)
+    with Pool(WORKER_COUNT_INT) as pool_obj:
+        null_vec = np.concatenate(pool_obj.map(_overlay_null_chunk, [(matrix, 9_000 + i, chunk_int, state) for i in range(WORKER_COUNT_INT)]))[:PERMUTATION_COUNT_INT]
+    overlay = McptComponent(
+        "timing overlay (SPY regime x VXN scale)", "date shuffle", "SD: active Sharpe over vol-targeted EW members", observed_float, null_vec,
+        float((1 + np.sum(null_vec >= observed_float)) / (1 + null_vec.size)), note_str="timing family (A9 calibration)",
+    )
+    return [selection, overlay]
+
+
+# ---------------------------------------------------------------- S6 inputs
+def factor_daily_df(date_index: pd.DatetimeIndex, tbill_ser: pd.Series) -> pd.DataFrame:
+    from data.norgate_loader import load_price_timeseries
+
+    def tr(symbol_str):
+        return load_price_timeseries(symbol_str, adjustment_str="TOTALRETURN", start_date_str="1998-01-01")["Close"]
+
+    frame = pd.DataFrame({s: tr(s) for s in ("SPY", "QQQ", "IEF", "GLD")}).reindex(date_index).ffill().pct_change()
+    trend_close_df = pd.DataFrame({s: tr(s) for s in ("SPY", "EFA", "EEM", "IEF", "TLT", "GLD", "DBC", "UUP")})
+    month_close_df = trend_close_df.resample("ME").last()
+    # 12-1 time-series momentum: the signal labelled at month-end m uses closes m-1 and m-12, and the forward fill
+    # applies it from the next session on (no extra shift: review 2026-10-02 found one month of over-lag).
+    signal_df = np.sign(month_close_df.shift(1) / month_close_df.shift(12) - 1.0)
+    daily_signal_df = signal_df.reindex(trend_close_df.index.union(date_index)).ffill().reindex(date_index).shift(1)
+    daily_excess_df = trend_close_df.reindex(date_index).ffill().pct_change().sub(tbill_ser.reindex(date_index), axis=0)
+    # Factor = sign x (r - rf) + rf, so that the regression's "factor - rf" is the long-short excess.
+    frame["TREND"] = (daily_signal_df * daily_excess_df).mean(axis=1) + tbill_ser.reindex(date_index)
+    return frame
+
+
+def dollar_volume_df(symbol_list: list[str]) -> pd.DataFrame:
+    from data.norgate_loader import load_price_timeseries
+
+    column_dict = {}
+    for symbol_str in symbol_list:
+        try:
+            frame = load_price_timeseries(symbol_str, adjustment_str="CAPITALSPECIAL", start_date_str="1999-01-01")
+        except Exception:  # noqa: BLE001, S112 - a delisted symbol without data simply has no capacity estimate
+            continue
+        column_dict[symbol_str] = frame["Turnover"] if "Turnover" in frame else frame["Close"] * frame["Volume"]
+    return pd.DataFrame(column_dict)
+
+
+def main() -> None:
+    from alpha.scout.specs import ndx_vxn, taa_3x
+
+    OUTPUT_DIR_PATH.mkdir(parents=True, exist_ok=True)
+    started_float = time.time()
+    taa_inputs, ndx_inputs = taa_3x.load_inputs(), ndx_vxn.load_inputs()
+    family_dict = {"TAA 3x": taa_3x_family(taa_inputs), "NDX VXN": ndx_vxn_family(ndx_inputs)}
+    full_index = ndx_inputs.close_df.index.union(taa_inputs.open_df.index)
+    tbill_ser = tbill_daily_ser(taa_inputs.dtb3_ser, full_index)
+    factor_df = factor_daily_df(full_index, tbill_ser)
+
+    s4_dict = {}
+    for pod_str, family in family_dict.items():
+        s4_dict[pod_str] = run_s4(family, tbill_ser)
+        print(pod_str, "S4 done", f"{time.time() - started_float:.0f}s", s4_dict[pod_str].plateau_dict["chosen_label_str"], flush=True)
+    live_net_dict = {pod_str: s4.grid_df[s4.live_label_str] for pod_str, s4 in s4_dict.items()}
+    gross_cost = CostModel(slippage_float=0.0, fee_per_share_float=0.0, min_fee_float=0.0)
+    live_gross_dict = {pod_str: family_dict[pod_str].run_config(family_dict[pod_str].live_config_dict, gross_cost).daily_return_ser for pod_str in family_dict}
+
+    mcpt_dict = {"TAA 3x": [taa_mcpt(family_dict["TAA 3x"], taa_inputs)]}
+    print("TAA MCPT", f"p {mcpt_dict['TAA 3x'][0].p_value_float:.3f}", f"{time.time() - started_float:.0f}s", flush=True)
+    mcpt_dict["NDX VXN"] = ndx_mcpt(family_dict["NDX VXN"], ndx_inputs)
+    print("NDX MCPT", [f"{c.name_str} p {c.p_value_float:.3f}" for c in mcpt_dict["NDX VXN"]], f"{time.time() - started_float:.0f}s", flush=True)
+
+    book_in_sample_df = pd.DataFrame(live_net_dict).loc[:SEAL_END_STR].dropna()
+    book_ser = sum(BOOK_WEIGHT_DICT[p] * book_in_sample_df[p] for p in BOOK_WEIGHT_DICT)
+    for pod_str, family in family_dict.items():
+        s4 = s4_dict[pod_str]
+        s5 = run_s5(s4.grid_df.loc[:SEAL_END_STR], family.grid_shape_tuple, s4.chosen_label_str, s4.live_label_str, mcpt_dict[pod_str], PRIOR_TRIAL_DICT[pod_str])
+        other_str = next(p for p in family_dict if p != pod_str)
+        net_ser, gross_ser = live_net_dict[pod_str].loc[:SEAL_END_STR], live_gross_dict[pod_str].loc[:SEAL_END_STR]
+        factor_with_other_df = factor_df.assign(OTHER_POD=live_net_dict[other_str])
+        spanning_list = spanning_table(net_ser, gross_ser, factor_with_other_df, tbill_ser, {
+            "QQQ": ["QQQ"],
+            "ETF mix (SPY QQQ IEF GLD)": ["SPY", "QQQ", "IEF", "GLD"],
+            "ETF mix + trend": ["SPY", "QQQ", "IEF", "GLD", "TREND"],
+            f"ETF mix + trend + {other_str}": ["SPY", "QQQ", "IEF", "GLD", "TREND", "OTHER_POD"],
+        })
+        slot_dict = tbill_slot_test(net_ser, BOOK_WEIGHT_DICT, {other_str: live_net_dict[other_str].loc[:SEAL_END_STR]}, pod_str, tbill_ser)
+        diversification_dict = diversification(net_ser, {other_str: live_net_dict[other_str], "SPY": factor_df["SPY"], "QQQ": factor_df["QQQ"]}, book_ser)
+        live_result = family.run_config(family.live_config_dict)
+        capacity_dict = capacity(live_result.trade_df, live_result.total_value_ser, dollar_volume_df(sorted(live_result.trade_df["asset"].unique())))
+        s6 = finish_s6(spanning_list, slot_dict, diversification_dict, capacity_dict)
+
+        moments = sharpe_moments(net_ser.loc[net_ser.ne(0).idxmax():].to_numpy())
+        adoption_ser = live_net_dict[pod_str].loc[ADOPTION_DATE_DICT[pod_str]:]
+        post_adoption_dict = {
+            "adoption_date_str": ADOPTION_DATE_DICT[pod_str],
+            "sessions_int": len(adoption_ser),
+            "performance": performance_dict(adoption_ser, tbill_ser) if len(adoption_ser) > 20 else {},
+            "min_track_record_months_float": float(minimum_track_record_length(moments.sharpe_float, moments.skewness_float, moments.kurtosis_float) / 21.0),
+        }
+        bundle = {"pod_str": pod_str, "family": {"grid": family.param_grid_dict, "live": family.live_config_dict, "family_id_str": family.family_id_str},
+                  "prior_trial_count_int": PRIOR_TRIAL_DICT[pod_str], "s4": s4, "s5": s5, "s6": s6, "post_adoption": post_adoption_dict}
+        pod_dir_path = OUTPUT_DIR_PATH / pod_str.replace(" ", "_")
+        pod_dir_path.mkdir(parents=True, exist_ok=True)
+        with (pod_dir_path / "bundle.pkl").open("wb") as file_obj:
+            pickle.dump(bundle, file_obj)
+        summary_dict = {
+            "s4": s4.check_list, "s5": s5.check_list, "s6": s6.check_list,
+            "plateau": s4.plateau_dict, "live": s4.live_dict, "spanning": spanning_list, "slot": slot_dict,
+            "capacity": capacity_dict, "post_adoption": {k: v for k, v in post_adoption_dict.items() if k != "performance"},
+            "mcpt": [{"name": c.name_str, "p": c.p_value_float, "observed": c.observed_float, "null_95": float(np.quantile(c.null_score_vec, 0.95)), "verdict": c.verdict_str} for c in s5.mcpt_list],
+            "dsr": s5.dsr_dict, "walk_forward": {k: v for k, v in s5.walk_forward_dict.items() if k not in ("oos_return_ser", "refit_df", "design_df")},
+            "pbo": s5.pbo_dict["pbo_float"],
+        }
+        (pod_dir_path / "summary.json").write_text(json.dumps(summary_dict, indent=2, default=str), encoding="utf-8")
+        print("\n==", pod_str)
+        for station_str, check_list in (("S4", s4.check_list), ("S5", s5.check_list), ("S6", s6.check_list)):
+            for name_str, verdict_str, detail_str in check_list:
+                print(f"  {station_str} {verdict_str:16s} {name_str}: {detail_str}")
+    print("done", f"{time.time() - started_float:.0f}s")
+
+
+if __name__ == "__main__":
+    main()

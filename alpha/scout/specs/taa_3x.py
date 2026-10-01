@@ -22,6 +22,12 @@ refuses a cache whose last observation is older than the last executed decision 
 
 Known shared deviation (both engine and spec): the DTB3 value dated T is used at the T close although FRED
 publishes it on T+1 (0 of 168 decisions change; registered in alpha/scout/gate/deviations.py).
+
+Family parameters (P5, `TaaConfig`; the default is the LIVE pod and the identity gate runs on it):
+    momentum_month_tuple      the k-month returns averaged into the score
+    realized_vol_window_int   the SPY realised-volatility window of the VIX cash gate
+    decision_offset_int       luck band: decide k sessions before the month's last session and execute on the
+                              next session (0 = the live month-end rule)
 """
 
 from __future__ import annotations
@@ -46,6 +52,13 @@ def default_dtb3_csv_path() -> Path:
     from alpha.scout.ledger import MAIN_CHECKOUT_ROOT_PATH
 
     return MAIN_CHECKOUT_ROOT_PATH.parent / "1_data" / "DTB3.csv"
+
+
+@dataclass(frozen=True)
+class TaaConfig:
+    momentum_month_tuple: tuple = MOMENTUM_MONTH_TUPLE
+    realized_vol_window_int: int = REALIZED_VOL_WINDOW_INT
+    decision_offset_int: int = 0
 
 
 @dataclass(frozen=True)
@@ -84,21 +97,40 @@ def load_inputs(dtb3_csv_path: Path | None = None) -> TaaInputs:
     )
 
 
-def month_end_weight_df(inputs: TaaInputs) -> pd.DataFrame:
+def offset_decision_index(date_index: pd.DatetimeIndex, decision_offset_int: int) -> pd.DatetimeIndex:
+    """Per calendar month, the session `decision_offset_int` sessions before the month's last session."""
+    position_ser = pd.Series(np.arange(len(date_index)), index=date_index)
+    last_position_ser = position_ser.groupby(date_index.to_period("M")).max() - decision_offset_int
+    first_position_ser = position_ser.groupby(date_index.to_period("M")).min()
+    return date_index[last_position_ser[last_position_ser >= first_position_ser].to_numpy()]
+
+
+def _monthly_last(frame, decision_offset_int: int, reference_index: pd.DatetimeIndex):
+    """Month-end values (offset 0, the live rule) or the values on each month's offset decision session."""
+    if decision_offset_int == 0:
+        return frame.resample("ME").last()
+    decision_index = offset_decision_index(reference_index, decision_offset_int)
+    sampled = frame.reindex(frame.index.union(decision_index)).ffill().reindex(decision_index)
+    sampled.index = decision_index.to_period("M").to_timestamp("M")
+    return sampled
+
+
+def month_end_weight_df(inputs: TaaInputs, config: TaaConfig = TaaConfig()) -> pd.DataFrame:
     """Target weights per calendar month-end label (before mapping to execution dates)."""
-    monthly_close_df = inputs.total_return_close_df.resample("ME").last()
-    cash_hurdle_ser = ((1.0 + inputs.dtb3_ser / 100.0) ** (1.0 / 12.0) - 1.0).resample("ME").last()
+    reference_index = inputs.open_df.index
+    monthly_close_df = _monthly_last(inputs.total_return_close_df, config.decision_offset_int, reference_index)
+    cash_hurdle_ser = _monthly_last((1.0 + inputs.dtb3_ser / 100.0) ** (1.0 / 12.0) - 1.0, config.decision_offset_int, reference_index)
     # *** CRITICAL*** k-month returns over month-end closes; the score for month m uses closes up to m only.
-    momentum_df = sum(monthly_close_df.pct_change(k, fill_method=None) for k in MOMENTUM_MONTH_TUPLE) / len(MOMENTUM_MONTH_TUPLE)
+    momentum_df = sum(monthly_close_df.pct_change(k, fill_method=None) for k in config.momentum_month_tuple) / len(config.momentum_month_tuple)
     combined_df = pd.concat([momentum_df, cash_hurdle_ser.rename("cash_hurdle")], axis=1).dropna()
 
     helper_df = pd.concat([inputs.spy_close_ser, inputs.vix_close_ser], axis=1, join="inner").dropna()
     helper_df.columns = ["spy", "vix"]
     spy_return_ser = helper_df["spy"] / helper_df["spy"].shift(1) - 1.0
     # *** CRITICAL*** trailing window of the last 20 daily returns, population std (ddof = 0), as the engine.
-    realized_vol_ser = spy_return_ser.rolling(REALIZED_VOL_WINDOW_INT).std(ddof=0) * np.sqrt(252.0) * 100.0
+    realized_vol_ser = spy_return_ser.rolling(config.realized_vol_window_int).std(ddof=0) * np.sqrt(252.0) * 100.0
     gate_df = pd.DataFrame({"rv": realized_vol_ser, "vix": helper_df["vix"]}).dropna()
-    gate_month_ser = (gate_df["rv"] < gate_df["vix"]).resample("ME").last().dropna()
+    gate_month_ser = _monthly_last((gate_df["rv"] < gate_df["vix"]).astype(float), config.decision_offset_int, reference_index).dropna().astype(bool)
 
     weight_row_dict = {}
     for month_end, row in combined_df.iterrows():
@@ -117,16 +149,27 @@ def month_end_weight_df(inputs: TaaInputs) -> pd.DataFrame:
     return pd.DataFrame(weight_row_dict).T
 
 
-def rebalance_weight_df(inputs: TaaInputs) -> pd.DataFrame:
-    """Target weights indexed by execution date: the first session of the month after each decision."""
+def rebalance_weight_df(inputs: TaaInputs, config: TaaConfig = TaaConfig()) -> pd.DataFrame:
+    """Target weights indexed by execution date: the first session of the month after each decision (offset 0), or
+    the session after the offset decision session."""
     execution_index = inputs.open_df.index
     first_session_ser = pd.Series(execution_index, index=execution_index.to_period("M")).groupby(level=0).min()
+    decision_ser = pd.Series(offset_decision_index(execution_index, config.decision_offset_int))
+    decision_ser.index = pd.DatetimeIndex(decision_ser).to_period("M")
     row_dict, last_executed_month_end = {}, None
-    for month_end, weight_ser in month_end_weight_df(inputs).iterrows():
-        next_month_period = (month_end + pd.offsets.MonthBegin(1)).to_period("M")
-        if next_month_period in first_session_ser.index:
-            row_dict[first_session_ser[next_month_period]] = weight_ser
-            last_executed_month_end = month_end
+    for month_end, weight_ser in month_end_weight_df(inputs, config).iterrows():
+        if config.decision_offset_int == 0:
+            next_month_period = (month_end + pd.offsets.MonthBegin(1)).to_period("M")
+            if next_month_period not in first_session_ser.index:
+                continue
+            execution_ts = first_session_ser[next_month_period]
+        else:
+            decision_position_int = int(execution_index.get_loc(decision_ser[month_end.to_period("M")]))
+            if decision_position_int + 1 >= len(execution_index):
+                continue
+            execution_ts = execution_index[decision_position_int + 1]
+        row_dict[execution_ts] = weight_ser
+        last_executed_month_end = month_end
     # A stale DTB3 cache would silently take an earlier month's hurdle for the last executed decision.
     if last_executed_month_end is not None and inputs.dtb3_ser.index[-1] < last_executed_month_end - pd.Timedelta(days=7):
         raise ValueError(

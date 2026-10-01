@@ -18,6 +18,10 @@ For each stock i at T (prices CAPITALSPECIAL unless marked raw):
     top 10 by score (ties: symbol ascending), weight = 0.1 × clip(22 / VXN(T), 0.25, 1.0)
 
 *** CRITICAL*** Every input is read at T or earlier; VXN is the last close dated <= T. Fills happen at Open(T+1).
+
+Family parameters (P5, `NdxConfig`; the default is the LIVE pod and the identity gate runs on it): the ROC length in
+month-ends, the number of stocks held, the stock trend average, the ATR window, the SPY regime average, the VXN
+reference level, and decision_offset_int (luck band: decide k sessions before the month's last session).
 """
 
 from __future__ import annotations
@@ -42,6 +46,17 @@ VXN_FLOOR_FLOAT = 0.25
 
 
 @dataclass(frozen=True)
+class NdxConfig:
+    roc_month_int: int = ROC_MONTH_INT
+    top_count_int: int = TOP_COUNT_INT
+    stock_sma_int: int = STOCK_SMA_INT
+    atr_window_int: int = ATR_WINDOW_INT
+    regime_sma_int: int = REGIME_SMA_INT
+    vxn_reference_float: float = VXN_REFERENCE_FLOAT
+    decision_offset_int: int = 0
+
+
+@dataclass(frozen=True)
 class NdxInputs:
     open_df: pd.DataFrame
     high_df: pd.DataFrame
@@ -54,7 +69,11 @@ class NdxInputs:
 
 
 def load_inputs() -> NdxInputs:
-    from data.norgate_loader import build_index_constituent_matrix, load_price_timeseries, load_raw_prices
+    from data.norgate_loader import (
+        build_index_constituent_matrix,
+        load_price_timeseries,
+        load_raw_prices,
+    )
 
     _, universe_df = build_index_constituent_matrix(INDEX_NAME_STR)
     universe_df = universe_df.loc[universe_df.index >= pd.Timestamp(HISTORY_START_STR)]
@@ -85,8 +104,9 @@ def load_inputs() -> NdxInputs:
     )
 
 
-def decision_dates(date_index: pd.DatetimeIndex) -> pd.DatetimeIndex:
-    """The last session of each calendar month; the running month counts only if it ended on the XNYS month-end."""
+def decision_dates(date_index: pd.DatetimeIndex, decision_offset_int: int = 0) -> pd.DatetimeIndex:
+    """The last session of each calendar month (or `decision_offset_int` sessions before it); the running month counts
+    only if it ended on the XNYS month-end."""
     import exchange_calendars
 
     last_session_ser = pd.Series(date_index, index=date_index.to_period("M")).groupby(level=0).max()
@@ -98,10 +118,14 @@ def decision_dates(date_index: pd.DatetimeIndex) -> pd.DatetimeIndex:
     expected_month_end_ts = pd.Timestamp(session_index[-1]).tz_localize(None) if session_index.tz is not None else pd.Timestamp(session_index[-1])
     if expected_month_end_ts.normalize() != last_available_ts.normalize():
         last_session_ser = last_session_ser.iloc[:-1]
-    return pd.DatetimeIndex(last_session_ser.to_numpy())
+    month_end_index = pd.DatetimeIndex(last_session_ser.to_numpy())
+    if decision_offset_int == 0:
+        return month_end_index
+    position_vec = date_index.get_indexer(month_end_index) - decision_offset_int
+    return date_index[position_vec[position_vec >= 0]]
 
 
-def rebalance_weight_df(inputs: NdxInputs) -> pd.DataFrame:
+def rebalance_weight_df(inputs: NdxInputs, config: NdxConfig = NdxConfig()) -> pd.DataFrame:
     """Target weights indexed by execution date (the session after each decision date)."""
     close_df, date_index = inputs.close_df, inputs.close_df.index
     stock_list = [s for s in close_df.columns if s != REGIME_SYMBOL_STR]
@@ -111,15 +135,15 @@ def rebalance_weight_df(inputs: NdxInputs) -> pd.DataFrame:
         np.maximum((inputs.high_df - previous_close_df).abs(), (inputs.low_df - previous_close_df).abs()),
     )
     # NaN anywhere in the three terms propagates (np.maximum keeps NaN), as in the engine.
-    atr_adjusted_df = true_range_df.rolling(ATR_WINDOW_INT, min_periods=ATR_WINDOW_INT).mean()
-    stock_sma_df = close_df.rolling(STOCK_SMA_INT, min_periods=STOCK_SMA_INT).mean()
+    atr_adjusted_df = true_range_df.rolling(config.atr_window_int, min_periods=config.atr_window_int).mean()
+    stock_sma_df = close_df.rolling(config.stock_sma_int, min_periods=config.stock_sma_int).mean()
     regime_close_ser = close_df[REGIME_SYMBOL_STR]
-    regime_sma_ser = regime_close_ser.rolling(REGIME_SMA_INT, min_periods=REGIME_SMA_INT).mean()
+    regime_sma_ser = regime_close_ser.rolling(config.regime_sma_int, min_periods=config.regime_sma_int).mean()
 
-    decision_index = decision_dates(date_index)
+    decision_index = decision_dates(date_index, config.decision_offset_int)
     vxn_index = inputs.vxn_close_ser.index
     row_dict = {}
-    for decision_pos_int in range(ROC_MONTH_INT, len(decision_index)):
+    for decision_pos_int in range(config.roc_month_int, len(decision_index)):
         decision_ts = decision_index[decision_pos_int]
         execution_pos_int = int(date_index.get_loc(decision_ts)) + 1
         if execution_pos_int >= len(date_index):
@@ -132,7 +156,7 @@ def rebalance_weight_df(inputs: NdxInputs) -> pd.DataFrame:
             continue  # the engine skips a decision whose regime average is not warm yet
         regime_on_bool = bool(regime_close_ser.loc[decision_ts] > regime_sma_ser.loc[decision_ts])
         if regime_on_bool:
-            lookback_ts = decision_index[decision_pos_int - ROC_MONTH_INT]
+            lookback_ts = decision_index[decision_pos_int - config.roc_month_int]
             close_now_ser = close_df.loc[decision_ts, stock_list]
             roc_ser = close_now_ser / close_df.loc[lookback_ts, stock_list] - 1.0
             anchor_ser = inputs.raw_close_df.loc[decision_ts, stock_list] / close_now_ser
@@ -147,11 +171,11 @@ def rebalance_weight_df(inputs: NdxInputs) -> pd.DataFrame:
             eligible_ser = score_ser[member_mask & trend_mask & score_ser.notna()]
             ranked_frame = pd.DataFrame({"score": eligible_ser, "symbol": eligible_ser.index})
             ranked_frame = ranked_frame.sort_values(["score", "symbol"], ascending=[False, True], kind="mergesort")
-            selected_list = list(ranked_frame["symbol"].iloc[:TOP_COUNT_INT])
+            selected_list = list(ranked_frame["symbol"].iloc[: config.top_count_int])
             if selected_list:
                 # *** CRITICAL*** last VXN close dated <= T; no later information.
                 vxn_float = float(inputs.vxn_close_ser.iloc[int(vxn_index.searchsorted(decision_ts, side="right")) - 1])
-                scale_float = min(max(VXN_REFERENCE_FLOAT / vxn_float, VXN_FLOOR_FLOAT), 1.0)
-                weight_ser.loc[selected_list] = (1.0 / TOP_COUNT_INT) * scale_float
+                scale_float = min(max(config.vxn_reference_float / vxn_float, VXN_FLOOR_FLOAT), 1.0)
+                weight_ser.loc[selected_list] = (1.0 / config.top_count_int) * scale_float
         row_dict[execution_ts] = weight_ser
     return pd.DataFrame(row_dict).T.sort_index()

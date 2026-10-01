@@ -470,9 +470,11 @@ re-applied inside every resample, so the tests judge the *process*, not a single
 - **The only S5 gate is MCPT:** plain date shuffle, p ≤ 0.05, re-running the full search including plateau selection,
   under three conditions:
   - **Search space:** it re-runs the union of every registered grid of the family.
-  - **Score:** the selected Sharpe minus a registered baseline (buy-and-hold or volatility-targeted buy-and-hold) on
-    the same permuted path. The P2 review showed raw scoring passes volatility-sized families with drift but no
-    signal 38% of the time; calibrate before P5 relies on it.
+  - **Score (A9):** the Sharpe of the daily ACTIVE return of each configuration over the volatility-targeted
+    equal weight of the family's traded assets (10% target, 20-session realised volatility, lagged one session);
+    plateau selection runs on these active Sharpes. P5 calibration: 2.0% / 7.0% false passes on volatility-timed
+    families. "Selected Sharpe minus baseline Sharpe" failed (8.5%), and so did the active return over plain equal
+    weight (8.5%).
   - **Point-in-time panels (A8):** they use the per-asset null (`mcpt_live_spans` / `alpha.scout.null.mcpt_panel`,
     membership strata). The score is the Sharpe of the daily ACTIVE return over the baseline, not a difference of
     Sharpes. Calibrated at 8.0% (momentum) and 2.0% (reversal) false passes. A cross-sectional ranking family with
@@ -741,7 +743,7 @@ strategies and can start now. P3 gates each strategy only after the readiness-au
 | **P3 Weights engine + gate** | `engines/weights.py`, costs, both account modes, identity gate, deviations registry, CI job | TAA 3x and NDX VXN (then CORE5) pass the gate on full history; CI blocks a deliberately broken strategy |
 | **P4b Null + calibration** | per-asset MCPT null, S3 per-event and placebo calibration, Masters' S2 battery, Nasdaq-100 panel + replication, MCPT on Z9 | Done 2026-10-01 (A8): the null passes its frozen calibration; stock families can pass S5 |
 | **P4 Edge toolkit** | panels + snapshot hash, vault seal and contamination record, feature library with contracts, S1, S2 and S3, CLI | S1 catches seeded leaks (future-peeking feature, split-sensitive feature, non-PIT member); the Pakal DV2-S&P 500 and QPI studies re-run through S3 with PIT membership, and the card shows the old-vs-new difference |
-| **P5 Strategy, luck, book and card** | S4, the three S5 gates and their diagnostics, S6, the research card, re-audition cards for TAA 3x and NDX VXN | Full cards for the two live pods, owner summary in Hebrew |
+| **P5 Strategy, luck, book and card** | S4, the three S5 gates and their diagnostics, S6, the research card, re-audition cards for TAA 3x and NDX VXN | Done 2026-10-02 (A9): cards issued; TAA 3x CANDIDATE (S3 pending), NDX VXN WATCHLIST |
 | **P6 Re-audition, classes W and X** | Retro registrations, prior-trial counts, cards for the remaining W and X strategies in section 10 order, Bench page | One card per strategy |
 | **P7 Path engine** | `engines/path.py`, gates for DV2 and HPI, then their re-audition | DV2 and HPI pass the gate; cards issued |
 | **P8 Discovery and shadow** | S7 vault opening with contamination rules, S8 monitor for new candidates, BY-FDR ledger report | First new family run end-to-end; the vault is opened only through S7 |
@@ -1012,6 +1014,48 @@ any Part B result.
     clustering. No further permutation is planned.
   - **The weights engine:** reads Close and Open only, so liquidity filters in a search must come from the real
     panel, like membership.
+
+**A9 (2026-10-02, P5: S4-S6, the research card, the live pods re-audited).**
+Report: `docs/research/SCOUT_P5_REAUDITION_20261002.md`. Calibration protocol: `scout_p5_calibration_20261002`
+(frozen 9ab5bb9, amendment 1 before any result).
+
+- **MCPT score for ETF and timing families:**
+  - **The score:** the Sharpe of the daily active return over the volatility-targeted equal weight of the
+    family's traded assets.
+  - **Calibration:** 2.0% / 7.0% false passes; power 6% (TAA-like) and 36% (trend).
+  - **Rejected:** "Sharpe minus Sharpe" (8.5%) and the active return over plain equal weight (8.5%).
+  - **Composite pods** are split into components. For NDX VXN these are stock selection (per-asset null, active
+    return over the overlay × equal-weight members) and the timing overlay (date shuffle). The gate needs every
+    component.
+- **Built:**
+  - `alpha/scout/family.py`: specs as parameter families; the default is the live pod, and the identity gate still
+    passes.
+  - `metrics.py`.
+  - `searches.py`: fast MCPT replicas, checked against the engine.
+  - The stations `s4_strategy.py`, `s5_overfit.py` and `s6_book.py`.
+  - `card.py`: an HTML research card.
+  - Two RETRO ledger registrations.
+- **S4 deviations, recorded:**
+  - **Luck band:** decision offsets 0-15 (21 would skip short months).
+  - **Common window:** one in-sample window shared by every configuration.
+  - **Planning number:** the card quotes the median decision day.
+- **S6 as built:**
+  - **Spanning:** ETF factors (QQQ; SPY QQQ IEF GLD; + 12-1 trend; + the other live pod) stand in for
+    Fama-French, and months before a factor exists are dropped.
+  - **T-bill slot:** on the live book only (60% TAA 3x / 40% NDX VXN).
+  - **Capacity:** a simplified estimate (95th-percentile order at 1% of the 63-session ADV).
+- **Results:**
+  - **TAA 3x: CANDIDATE (S3 pending).**
+    - MCPT p 0.010.
+    - Net alpha +13.2% a year, t 2.71.
+    - T-bill slot P 0.92.
+    - Plan with Sharpe about 0.9: the live month-end day is the best of 16.
+    - Capacity about $0.8M (BTAL).
+  - **NDX VXN: WATCHLIST.**
+    - MCPT FAIL (selection p 0.18, overlay p 0.09).
+    - Alpha t 1.25 once TAA 3x is a factor.
+    - T-bill slot P 0.47.
+    - No demotion (section 10): the owner decides.
 
 **Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
 It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about

@@ -1,0 +1,112 @@
+"""A strategy family as Scout runs it: a registered grid around a spec, executed by the parity weights engine.
+
+`FamilyRunner.run_config(config_dict, cost_model, capital_float)` returns the engine result of one configuration;
+the grid order is `Registration.grid_config_list` order (parameter names sorted, values in registered order), so
+the plateau grid shape is `grid_shape_tuple`. `decision_offset_int` is not a grid axis: it is the luck band (S4).
+
+The two LIVE pods are wired here (P5): TAA 3x and NDX VXN, executed exactly as the identity gate executes them.
+"""
+
+from __future__ import annotations
+
+import itertools
+from collections.abc import Callable
+from dataclasses import dataclass
+
+import pandas as pd
+
+from alpha.scout.engines.weights import CostModel, WeightsResult, simulate
+
+
+@dataclass
+class FamilyRunner:
+    name_str: str
+    family_id_str: str
+    param_grid_dict: dict  # name -> tuple of values, in registered order
+    live_config_dict: dict
+    simulate_fn: Callable[[dict, CostModel, float], WeightsResult]
+    offset_count_int: int = 16  # monthly rebalance: offsets 0-15 (a month always has more than 16 sessions)
+
+    @property
+    def name_list(self) -> list[str]:
+        return sorted(self.param_grid_dict)
+
+    @property
+    def grid_shape_tuple(self) -> tuple[int, ...]:
+        return tuple(len(self.param_grid_dict[name_str]) for name_str in self.name_list)
+
+    def config_list(self) -> list[dict]:
+        value_list_list = [list(self.param_grid_dict[name_str]) for name_str in self.name_list]
+        return [dict(zip(self.name_list, combo_tuple)) for combo_tuple in itertools.product(*value_list_list)]
+
+    def label_str(self, config_dict: dict) -> str:
+        return "|".join(f"{name_str}={_value_str(config_dict[name_str])}" for name_str in self.name_list)
+
+    def run_config(self, config_dict: dict, cost_model: CostModel = CostModel(), capital_float: float = 100_000.0) -> WeightsResult:
+        return self.simulate_fn(config_dict, cost_model, capital_float)
+
+
+def _value_str(value_obj) -> str:
+    if isinstance(value_obj, tuple):
+        return "-".join(str(v) for v in value_obj)
+    return str(value_obj)
+
+
+# ---------------------------------------------------------------- TAA 3x
+TAA_GRID_DICT = {
+    "momentum_month_tuple": ((1, 3), (1, 3, 6), (1, 3, 6, 12), (3, 6, 12), (6, 12)),  # ordered by mean horizon
+    "realized_vol_window_int": (10, 20, 40, 63),
+}
+
+
+def taa_3x_family(inputs=None) -> FamilyRunner:
+    from alpha.scout.specs import taa_3x
+
+    inputs = inputs or taa_3x.load_inputs()
+
+    def simulate_fn(config_dict: dict, cost_model: CostModel, capital_float: float) -> WeightsResult:
+        weight_df = taa_3x.rebalance_weight_df(inputs, taa_3x.TaaConfig(**config_dict))
+        return simulate(
+            inputs.open_df, inputs.close_df, inputs.dividend_df, weight_df, start_date=weight_df.index[0],
+            capital_float=capital_float, share_unit_mode_str="adjusted", cost_model=cost_model,
+        )
+
+    return FamilyRunner(
+        name_str="TAA 3x", family_id_str="tactical_asset_allocation", param_grid_dict=TAA_GRID_DICT,
+        live_config_dict={"momentum_month_tuple": (1, 3, 6, 12), "realized_vol_window_int": 20}, simulate_fn=simulate_fn,
+    )
+
+
+# ---------------------------------------------------------------- NDX VXN
+NDX_GRID_DICT = {
+    "roc_month_int": (6, 9, 12, 15),
+    "stock_sma_int": (50, 100, 200),
+    "top_count_int": (5, 10, 15),
+}
+
+
+def ndx_vxn_family(inputs=None) -> FamilyRunner:
+    from alpha.scout.specs import ndx_vxn
+
+    inputs = inputs or ndx_vxn.load_inputs()
+
+    def simulate_fn(config_dict: dict, cost_model: CostModel, capital_float: float) -> WeightsResult:
+        weight_df = ndx_vxn.rebalance_weight_df(inputs, ndx_vxn.NdxConfig(**config_dict))
+        stock_list = list(weight_df.columns)
+        return simulate(
+            inputs.open_df[stock_list], inputs.close_df[stock_list], inputs.dividend_df[stock_list], weight_df,
+            start_date=ndx_vxn.TRADING_START_STR, capital_float=capital_float, share_unit_mode_str="historical",
+            unadjusted_close_df=inputs.raw_close_df[stock_list], cost_model=cost_model,
+        )
+
+    return FamilyRunner(
+        name_str="NDX VXN", family_id_str="equity_cross_sectional_momentum", param_grid_dict=NDX_GRID_DICT,
+        live_config_dict={"roc_month_int": 12, "stock_sma_int": 100, "top_count_int": 10}, simulate_fn=simulate_fn,
+    )
+
+
+def grid_return_df(family: FamilyRunner, cost_model: CostModel = CostModel(), capital_float: float = 100_000.0) -> pd.DataFrame:
+    """Daily net returns of every grid configuration (columns in grid order)."""
+    return pd.DataFrame(
+        {family.label_str(config_dict): family.run_config(config_dict, cost_model, capital_float).daily_return_ser for config_dict in family.config_list()}
+    )

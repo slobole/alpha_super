@@ -18,8 +18,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from alpha.scout.ledger import MAIN_CHECKOUT_ROOT_PATH  # noqa: E402
-from alpha.stats.selection import plateau_choice  # noqa: E402
+from alpha.scout.ledger import MAIN_CHECKOUT_ROOT_PATH
+from alpha.stats.selection import plateau_choice
 
 OUTPUT_DIR_PATH = MAIN_CHECKOUT_ROOT_PATH / "results" / "scout" / "p5_calibration"
 SESSION_COUNT_INT, MONTH_INT, WARM_UP_MONTH_INT = 3780, 21, 13
