@@ -96,3 +96,68 @@ def test_exact_tier_requires_full_coverage_and_the_same_trade_dates():
     assert trailing_ok.check_dict["coverage"]["pass_bool"]
     skipped_report = compare_exact(engine_ser, engine_ser, weight_df, weight_df, TRADE_DATES, TRADE_DATES[1:])
     assert not skipped_report.check_dict["same trade dates"]["pass_bool"]
+
+
+# ---------------------------------------------------------------- NDX momentum siblings (alpha/scout/specs/ndx_vxn.py)
+def _synthetic_ndx_inputs():
+    """A ($10, 5% daily range) and B ($100, 2% range) rise alike: dollar ATR ranks A first, NATR ranks B first."""
+    from alpha.scout.specs.ndx_vxn import NdxInputs
+
+    date_index = pd.bdate_range("2018-01-01", "2020-12-31")
+    growth_vec = 1.001 ** np.arange(len(date_index))
+    close_df = pd.DataFrame({"A": 10.0 * growth_vec, "B": 100.0 * growth_vec, "SPY": 50.0 * growth_vec}, index=date_index)
+    range_df = close_df * pd.Series({"A": 0.05, "B": 0.02, "SPY": 0.01})
+    return NdxInputs(
+        open_df=close_df, high_df=close_df + range_df / 2, low_df=close_df - range_df / 2, close_df=close_df,
+        raw_close_df=close_df, dividend_df=close_df * 0.0,
+        member_df=pd.DataFrame(1, index=date_index, columns=["A", "B"]),
+        vxn_close_ser=pd.Series(44.0, index=date_index),  # scale = clip(22 / 44, 0.25, 1) = 0.5
+    )
+
+
+def test_ndx_variant_switches_move_only_ranking_units_and_the_vxn_scale():
+    from alpha.scout.gate.run import GATED_SPEC_DICT
+    from alpha.scout.specs.ndx_vxn import (
+        NDX_VARIANT_DICT,
+        NdxConfig,
+        rebalance_weight_df,
+    )
+
+    assert NDX_VARIANT_DICT["ndx_vxn"].config == NdxConfig()  # the LIVE pod stays the default
+    assert set(NDX_VARIANT_DICT) <= set(GATED_SPEC_DICT)
+    with pytest.raises(ValueError, match="atr_unit_str"):
+        NdxConfig(atr_unit_str="natr")
+    inputs = _synthetic_ndx_inputs()
+    small_dict = {"roc_month_int": 1, "stock_sma_int": 5, "atr_window_int": 3, "regime_sma_int": 5, "top_count_int": 1}
+    expected_dict = {("dollar", True): ("A", 0.5), ("dollar", False): ("A", 1.0), ("percent", True): ("B", 0.5), ("percent", False): ("B", 1.0)}
+    for (unit_str, vxn_bool), (symbol_str, weight_float) in expected_dict.items():
+        weight_df = rebalance_weight_df(inputs, NdxConfig(atr_unit_str=unit_str, vxn_scaled_bool=vxn_bool, **small_dict))
+        assert len(weight_df) > 20
+        assert (weight_df[symbol_str] == weight_float).all() and (weight_df.drop(columns=symbol_str) == 0.0).all().all()
+
+
+def _norgate_running_bool() -> bool:
+    try:
+        import norgatedata
+
+        return bool(norgatedata.status())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+EXACT_MEMBERSHIP_DEFAULT_TS = pd.Timestamp("2026-09-29 10:31")  # 9afc293: older engine runs used the member tail trim
+
+
+@pytest.mark.skipif(not _norgate_running_bool(), reason="Norgate data not available")
+@pytest.mark.parametrize("spec_name_str", ["ndx_atr", "ndx_natr20", "ndx_natr20_vxn"])
+def test_ndx_sibling_gate_passes_against_the_saved_engine_run(spec_name_str):
+    from pathlib import Path
+
+    from alpha.scout.gate.run import GATED_SPEC_DICT, run_gate
+    from alpha.scout.ledger import MAIN_CHECKOUT_ROOT_PATH
+
+    path_list = sorted(Path(MAIN_CHECKOUT_ROOT_PATH).glob(GATED_SPEC_DICT[spec_name_str].pickle_glob_str))
+    if not path_list or pd.Timestamp.fromtimestamp(path_list[-1].stat().st_mtime) < EXACT_MEMBERSHIP_DEFAULT_TS:
+        pytest.skip("No saved engine run with exact membership; run `python -m alpha.scout gate <name> --fresh`.")
+    report = run_gate(spec_name_str)
+    assert report.passed_bool, report.summary_str()

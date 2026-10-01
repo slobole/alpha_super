@@ -22,11 +22,34 @@ For each stock i at T (prices CAPITALSPECIAL unless marked raw):
 Family parameters (P5, `NdxConfig`; the default is the LIVE pod and the identity gate runs on it): the ROC length in
 month-ends, the number of stocks held, the stock trend average, the ATR window, the SPY regime average, the VXN
 reference level, and decision_offset_int (luck band: decide k sessions before the month's last session).
+
+Engine siblings (mapped 2026-10-01; `NDX_VARIANT_DICT` holds one gated config per engine strategy). They share the
+NDX VXN data loader, decision calendar, membership, filters, ranking (ties: symbol ascending), historical-share sizing
+and execution line for line; only two switches move:
+
+- `vxn_scaled_bool=False` -> weight = 1 / top_count, no VXN read.
+    strategy_mo_atr_normalized_ndx.AtrNormalizedNdxStrategy.get_target_weight_ser: `1.0 / float(max_positions_int)`.
+    The VXN pod subclasses it and only multiplies that series by the as-of scale, so 0.1 × 1.0 is bit-identical.
+- `atr_unit_str="percent"` (NATR20) -> score = (ROC12 / ATR20$) × RawClose(T) = ROC12 / (ATR20 / Close), ±inf -> NaN.
+    strategy_mo_natr20_ndx.Natr20NdxStrategy.compute_signals: `risk_adj_score_ser *= raw_close_ser`, applied to the
+    base score `(roc / atr_dollar).replace(±inf, NaN)`;
+    strategy_mo_natr20_ndx_vxn_scaled.compute_natr20_signal_tables: `((roc / atr_dollar) * raw_close).replace(±inf,
+    NaN)`. Both orders give the same floats: RawClose(T) is checked finite and positive wherever Close(T) exists,
+    and ±inf × RawClose stays ±inf. Only the ranking changes; the weights stay 1 / top_count (× the VXN scale).
+  The NATR20 VXN module is a stand-alone copy (no inheritance) of the same rules; its one extra guard (VXN closes
+  must be finite and positive, else raise) is the filter `load_inputs` already applies.
+
+| Gate name | Engine strategy | vxn_scaled_bool | atr_unit_str |
+|---|---|---|---|
+| ndx_vxn | strategy_mo_atr_normalized_ndx_vxn_scaled (LIVE) | True | dollar |
+| ndx_atr | strategy_mo_atr_normalized_ndx (WIRED) | False | dollar |
+| ndx_natr20 | strategy_mo_natr20_ndx (research) | False | percent |
+| ndx_natr20_vxn | strategy_mo_natr20_ndx_vxn_scaled (research) | True | percent |
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -43,6 +66,7 @@ STOCK_SMA_INT = 100
 REGIME_SMA_INT = 200
 VXN_REFERENCE_FLOAT = 22.0
 VXN_FLOOR_FLOAT = 0.25
+ATR_UNIT_TUPLE = ("dollar", "percent")
 
 
 @dataclass(frozen=True)
@@ -54,6 +78,29 @@ class NdxConfig:
     regime_sma_int: int = REGIME_SMA_INT
     vxn_reference_float: float = VXN_REFERENCE_FLOAT
     decision_offset_int: int = 0
+    vxn_scaled_bool: bool = True  # False: plain 1 / top_count slots (strategy_mo_atr_normalized_ndx, NATR20 plain)
+    atr_unit_str: str = "dollar"  # "percent": NATR20 ranking, score = ROC / (ATR20 / Close)
+
+    def __post_init__(self) -> None:
+        if self.atr_unit_str not in ATR_UNIT_TUPLE:
+            raise ValueError(f"atr_unit_str must be one of {ATR_UNIT_TUPLE}.")
+
+
+LIVE_CONFIG = NdxConfig()
+
+
+@dataclass(frozen=True)
+class NdxVariant:
+    strategy_module_str: str  # the engine module whose run_variant() the identity gate runs
+    config: NdxConfig = field(default_factory=NdxConfig)
+
+
+NDX_VARIANT_DICT = {
+    "ndx_vxn": NdxVariant(STRATEGY_IMPORT_STR),
+    "ndx_atr": NdxVariant("strategies.momentum.strategy_mo_atr_normalized_ndx", NdxConfig(vxn_scaled_bool=False)),
+    "ndx_natr20": NdxVariant("strategies.momentum.strategy_mo_natr20_ndx", NdxConfig(vxn_scaled_bool=False, atr_unit_str="percent")),
+    "ndx_natr20_vxn": NdxVariant("strategies.momentum.strategy_mo_natr20_ndx_vxn_scaled", NdxConfig(atr_unit_str="percent")),
+}
 
 
 @dataclass(frozen=True)
@@ -125,7 +172,7 @@ def decision_dates(date_index: pd.DatetimeIndex, decision_offset_int: int = 0) -
     return date_index[position_vec[position_vec >= 0]]
 
 
-def rebalance_weight_df(inputs: NdxInputs, config: NdxConfig = NdxConfig()) -> pd.DataFrame:
+def rebalance_weight_df(inputs: NdxInputs, config: NdxConfig = LIVE_CONFIG) -> pd.DataFrame:
     """Target weights indexed by execution date (the session after each decision date)."""
     close_df, date_index = inputs.close_df, inputs.close_df.index
     stock_list = [s for s in close_df.columns if s != REGIME_SYMBOL_STR]
@@ -165,7 +212,11 @@ def rebalance_weight_df(inputs: NdxInputs, config: NdxConfig = NdxConfig()) -> p
             if bad_anchor_mask.any():
                 raise ValueError(f"Invalid raw/adjusted anchor at {decision_ts.date()}: {list(anchor_ser[bad_anchor_mask].index)}")
             atr_dollar_ser = atr_adjusted_df.loc[decision_ts, stock_list] * anchor_ser
-            score_ser = (roc_ser / atr_dollar_ser).replace([np.inf, -np.inf], np.nan)
+            score_ser = roc_ser / atr_dollar_ser
+            if config.atr_unit_str == "percent":
+                # NATR20: ROC / (ATR$ / RawClose(T)), computed as the engine does: (ROC / ATR$) × RawClose(T).
+                score_ser = score_ser * inputs.raw_close_df.loc[decision_ts, stock_list]
+            score_ser = score_ser.replace([np.inf, -np.inf], np.nan)
             trend_mask = (close_now_ser > stock_sma_df.loc[decision_ts, stock_list]).fillna(False)
             member_mask = inputs.member_df.loc[decision_ts, stock_list] == 1
             eligible_ser = score_ser[member_mask & trend_mask & score_ser.notna()]
@@ -173,9 +224,11 @@ def rebalance_weight_df(inputs: NdxInputs, config: NdxConfig = NdxConfig()) -> p
             ranked_frame = ranked_frame.sort_values(["score", "symbol"], ascending=[False, True], kind="mergesort")
             selected_list = list(ranked_frame["symbol"].iloc[: config.top_count_int])
             if selected_list:
-                # *** CRITICAL*** last VXN close dated <= T; no later information.
-                vxn_float = float(inputs.vxn_close_ser.iloc[int(vxn_index.searchsorted(decision_ts, side="right")) - 1])
-                scale_float = min(max(config.vxn_reference_float / vxn_float, VXN_FLOOR_FLOAT), 1.0)
+                scale_float = 1.0
+                if config.vxn_scaled_bool:
+                    # *** CRITICAL*** last VXN close dated <= T; no later information.
+                    vxn_float = float(inputs.vxn_close_ser.iloc[int(vxn_index.searchsorted(decision_ts, side="right")) - 1])
+                    scale_float = min(max(config.vxn_reference_float / vxn_float, VXN_FLOOR_FLOAT), 1.0)
                 weight_ser.loc[selected_list] = (1.0 / config.top_count_int) * scale_float
         row_dict[execution_ts] = weight_ser
     return pd.DataFrame(row_dict).T.sort_index()

@@ -44,7 +44,7 @@ def _ledger_command(command_str: str, ledger_path_str: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m alpha.scout")
     parser.add_argument("command", choices=("verify", "summary", "health", "gate", "panel"))
-    parser.add_argument("spec", nargs="?", default=None, help="gate: taa_3x or ndx_vxn; panel: index name, e.g. \"S&P 500\"")
+    parser.add_argument("spec", nargs="?", default=None, help="gate: taa_3x, ndx_vxn, ndx_atr, ndx_natr20 or ndx_natr20_vxn; panel: index name, e.g. \"S&P 500\"")
     parser.add_argument("--fresh", action="store_true", help="gate: run the engine now instead of the newest saved run")
     parser.add_argument("--ledger", default=str(DEFAULT_LEDGER_PATH), help="ledger path (default: main-checkout ledger)")
     parser.add_argument("--flex-xml", nargs="+", default=None, help="health: IBKR Flex ALPHA_DAILY_TWR XML files")
