@@ -215,3 +215,80 @@ def test_taa_variant_gate_passes_against_the_saved_engine_run(spec_name_str):
         pytest.skip("No saved engine run")
     report = run_gate(spec_name_str)
     assert report.passed_bool, report.summary_str()
+
+
+# ---------------------------------------------------------------------------------------------- CORE5 (alpha/scout/specs/core5.py)
+def test_core5_spec_signal_targets_and_rebalance_dates():
+    """Mid-rank percentile with ties; long/BIL/short targets; rebalances only at the start and XNYS month ends."""
+    import exchange_calendars
+
+    from alpha.scout.specs import core5
+
+    severity_vec = np.array([0.0, 0.0, 0.1, 0.3, 0.1, 0.0, 0.2, 0.1])
+    percentile_vec = core5._midrank_percentile_vec(severity_vec, 4)
+    for end_int in range(3, len(severity_vec)):
+        window_vec = severity_vec[end_int - 3 : end_int + 1]
+        expected_float = ((window_vec < window_vec[-1]).sum() + ((window_vec == window_vec[-1]).sum() + 1) / 2) / 4
+        assert percentile_vec[end_int] == expected_float
+    assert np.isnan(percentile_vec[:3]).all()
+
+    weight_vec = core5.target_weight_vec(np.array([1.0, 0.0, 1.0, 0.0, 1.0]), True, 0.5, core5.LIVE_CONFIG)
+    np.testing.assert_allclose(weight_vec, [0.2, 0.0, 0.2, -0.05, 0.2, 0.4])  # DBC -min(10%, 2.5% / 50%)
+    assert core5.target_weight_vec(np.ones(5), False, np.nan, core5.LIVE_CONFIG)[-1] == pytest.approx(0.0)
+
+    # Four steady risers and a falling, choppy DBC: states never change after warm-up, so only month ends rebalance.
+    session_index = exchange_calendars.get_calendar("XNYS", start="2015-01-02", end="2016-12-30").sessions.tz_localize(None)
+    step_vec = np.arange(len(session_index))
+    rising_vec = 100.0 * 1.001**step_vec
+    dbc_vec = 100.0 * np.cumprod(1.0 - 0.003 + 0.005 * (-1.0) ** step_vec)
+    close_df = pd.DataFrame({s: rising_vec for s in core5.RISK_ASSET_TUPLE}, index=session_index).assign(DBC=dbc_vec, BIL=50.0)
+    inputs = core5.Core5Inputs(
+        signal_close_df=close_df[list(core5.RISK_ASSET_TUPLE)], reserve_total_return_close_ser=close_df["BIL"],
+        open_df=close_df, close_df=close_df, dividend_df=close_df * 0.0,
+    )
+    weight_df = core5.rebalance_weight_df(inputs)
+    assert weight_df.index[0] == session_index[core5.LIVE_CONFIG.percentile_lookback_int]  # the first defined decision + 1
+    # The AMA starts at the close, so the risers' states settle in the first weeks; from August 2015 nothing changes.
+    settled_df = weight_df.loc["2015-08-01":]
+    month_end_index = session_index[core5.month_end_flag_vec(session_index)][:-1]  # the last one has no next session
+    expected_index = session_index[session_index.get_indexer(month_end_index) + 1]
+    assert settled_df.index.equals(expected_index[expected_index >= "2015-08-01"])
+    assert (settled_df[["SPY", "IEF", "GLD", "UUP"]] == 0.2).all().all() and np.allclose(settled_df["BIL"], 0.2)
+    assert (settled_df["DBC"] < 0).all() and (settled_df["DBC"] >= -0.10).all()
+    offset_df = core5.rebalance_weight_df(inputs, core5.Core5Config(decision_offset_int=3)).loc["2015-08-01":]
+    offset_decision_index = session_index[core5.month_end_flag_vec(session_index, 3)]
+    assert offset_decision_index[:-1].equals(session_index[session_index.get_indexer(month_end_index) - 3])
+    offset_expected_index = session_index[session_index.get_indexer(offset_decision_index) + 1]
+    assert offset_df.index.equals(offset_expected_index[offset_expected_index >= "2015-08-01"])  # 3 sessions earlier
+
+
+@pytest.mark.skipif("not _norgate_ready()")
+def test_core5_gate_passes_and_blocks_a_spec_without_the_borrow_fee(monkeypatch):
+    from dataclasses import replace
+    from pathlib import Path
+
+    from alpha.scout.gate.run import GATED_SPEC_DICT, run_gate
+    from alpha.scout.ledger import MAIN_CHECKOUT_ROOT_PATH
+    from alpha.scout.specs import core5
+
+    assert GATED_SPEC_DICT["core5"].strategy_import_str == core5.STRATEGY_IMPORT_STR
+    if not any(Path(MAIN_CHECKOUT_ROOT_PATH).glob(GATED_SPEC_DICT["core5"].pickle_glob_str)):
+        pytest.skip("No saved engine run; run `python -m alpha.scout gate core5 --fresh`.")
+    report = run_gate("core5")
+    assert report.passed_bool, report.summary_str()
+    monkeypatch.setattr(core5, "LIVE_CONFIG", replace(core5.LIVE_CONFIG, annual_borrow_rate_float=0.0))
+    assert not run_gate("core5").passed_bool  # the DBC borrow fee is about 6e-5 of NAV on a short day
+
+
+@pytest.mark.skipif("not _norgate_ready()")
+def test_core5_mcpt_replica_tracks_the_engine():
+    from alpha.scout.family import core5_family
+    from alpha.scout.specs import core5
+
+    inputs = core5.load_inputs()
+    family = core5_family(inputs)
+    date_index, matrix = core5.mcpt_matrix(inputs)
+    assert matrix.shape == (len(date_index), len(core5.TRADED_TUPLE)) and date_index[-1] <= pd.Timestamp("2022-12-30")
+    fast_ser = pd.Series(core5.fast_daily_list(matrix, date_index, [family.live_config_dict])[0], index=date_index)
+    engine_ser = family.run_config(family.live_config_dict).daily_return_ser.loc["2008-01-01":"2022-12-30"]
+    assert np.corrcoef(engine_ser, fast_ser.reindex(engine_ser.index))[0, 1] > 0.97  # 0.983 on 2026-10-01

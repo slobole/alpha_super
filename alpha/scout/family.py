@@ -7,6 +7,7 @@ the plateau grid shape is `grid_shape_tuple`. `decision_offset_int` is not a gri
 The two LIVE pods are wired here (P5): TAA 3x and NDX VXN, executed exactly as the identity gate executes them.
 The gated NDX siblings (plain ATR, NATR20, NATR20 VXN) reuse the NDX grid around their own engine config.
 The gated TAA engine variants (1/N, linearity, 2x) are wired through `taa_variant_family` the same way.
+CORE5 adaptive macro (PM_READY, gated 2026-10-01) is `core5_family`.
 """
 
 from __future__ import annotations
@@ -154,6 +155,36 @@ def ndx_natr20_family(inputs=None) -> FamilyRunner:
 
 def ndx_natr20_vxn_family(inputs=None) -> FamilyRunner:
     return _ndx_family("ndx_natr20_vxn", "NDX NATR20 VXN", inputs)
+
+
+# ---------------------------------------------------------------- CORE5 adaptive macro
+# The decision is SMA_n > AMA per sleeve, with the AMA's speed blended between EMA(fast) and EMA(slow) by the drawdown
+# percentile. The three horizons ARE the trend rule, so they are the axes: the filter n (5, 10, 20 sessions), the fast
+# end (25, 50, 100) and the slow end (150, 200, 300), each halving / doubling around the live (10, 50, 200) and ordered
+# ascending; every slow value exceeds every fast value. 27 configurations. The adaptation (126-session percentile,
+# power 2) and the DBC short sizing (2.5% / vol, cap 10%) stay at the live values: they shape how the AMA moves and
+# how big the short is, not which trend horizon the rule follows.
+CORE5_GRID_DICT = {
+    "price_filter_lookback_int": (5, 10, 20),
+    "fast_lookback_int": (25, 50, 100),
+    "slow_lookback_int": (150, 200, 300),
+}
+
+
+def core5_family(inputs=None) -> FamilyRunner:
+    """CORE5 adaptive macro (alpha/scout/specs/core5.py) as a family; the live config is the gated engine default."""
+    from alpha.scout.specs import core5
+
+    inputs = inputs or core5.load_inputs()
+
+    def simulate_fn(config_dict: dict, cost_model: CostModel, capital_float: float) -> WeightsResult:
+        config = dataclasses.replace(core5.LIVE_CONFIG, **config_dict)
+        return core5.simulate_config(inputs, config, cost_model=cost_model, capital_float=capital_float)
+
+    return FamilyRunner(
+        name_str="CORE5", family_id_str="macro_regime_allocation", param_grid_dict=CORE5_GRID_DICT,
+        live_config_dict={name_str: getattr(core5.LIVE_CONFIG, name_str) for name_str in CORE5_GRID_DICT}, simulate_fn=simulate_fn,
+    )
 
 
 def grid_return_df(family: FamilyRunner, cost_model: CostModel = DEFAULT_COST_MODEL, capital_float: float = 100_000.0) -> pd.DataFrame:
