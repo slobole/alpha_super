@@ -12,6 +12,7 @@ CORE5 adaptive macro (PM_READY, gated 2026-10-01) is `core5_family`.
 The PM_READY pods TFI and Trinity (2026-10-01) are wired through `tfi_family` and `trinity_family`.
 The month-end rebalancing flow (PM_READY, MOC execution) is `eom_family` (no luck band: offset_count_int = 1).
 The PM_READY sector ETF IBS event pods (2026-10-02) are `sector_ibs_family` and `dispersion_ibs_family`.
+The HPI S&P 500 pods (2/3/5 vote WIRED, IBS RSI exit PM_READY; 2026-10-01) are `hpi_family`.
 """
 
 from __future__ import annotations
@@ -357,6 +358,48 @@ def dispersion_ibs_family(variant_name_str: str, inputs=None) -> FamilyRunner:
         name_str=DISPERSION_IBS_NAME_DICT[variant_name_str], family_id_str="etf_short_term_reversal",
         param_grid_dict=DISPERSION_IBS_GRID_DICT, live_config_dict={k: getattr(base_config, k) for k in DISPERSION_IBS_GRID_DICT},
         simulate_fn=simulate_fn, offset_count_int=1,  # a daily event rule: no rebalance offset
+    )
+
+
+# ---------------------------------------------------------------- HPI S&P 500 event pods (2026-10-01)
+# Daily event rules: no rebalance schedule, so no luck band (offset_count_int = 1). The axes are the rule's three
+# decisions, one step either side of the live value (27 configurations per variant):
+# - hpi_threshold_float: how rare the pullback must be against the stock's own last five years of w-day returns to
+#   count (HPI 20 / 30 / 40; in the vote it moves all three horizons' bar together);
+# - entry_ibs_max_float: how deep in the day's range the close must be to buy, halved / doubled (0.05 / 0.10 / 0.20);
+# - exit_ibs_min_float: how strong the rebound close must be to sell, its distance to the top of the range halved /
+#   doubled (0.80 / 0.90 / 0.95); the RSI2 > 90 exit stays as the second, independent exit.
+# The 1,260-session reference set, the horizons and the 2-of-3 vote, the SMA200 gate, the RSI2 exit, Turnover ranking
+# and the 10 slots (each V / 10) are the variants' identity and stay fixed. Every axis is a threshold, so the S5
+# replica computes the features once per permuted panel and only re-runs the slot ledger per configuration.
+HPI_GRID_DICT = {
+    "hpi_threshold_float": (20.0, 30.0, 40.0),
+    "entry_ibs_max_float": (0.05, 0.10, 0.20),
+    "exit_ibs_min_float": (0.80, 0.90, 0.95),
+}
+HPI_FAMILY_NAME_DICT = {"hpi_vote": "HPI 2/3/5 vote", "hpi_ibs_rsi": "HPI IBS RSI exit"}
+
+
+def hpi_family(variant_name_str: str, inputs=None) -> FamilyRunner:
+    """An HPI variant (alpha/scout/specs/hpi.py VARIANT_DICT) as a family. The cost model is the caller's; the identity
+    gate uses the engine's, `hpi.ENGINE_COST_MODEL` (= CostModel()). The features do not depend on the grid's
+    thresholds, so they are computed once and shared by every configuration."""
+    from alpha.scout.specs import hpi
+
+    base_config = hpi.VARIANT_DICT[variant_name_str].config
+    inputs = inputs or hpi.load_inputs()
+    feature_cache_dict: dict = {}
+
+    def simulate_fn(config_dict: dict, cost_model: CostModel, capital_float: float) -> WeightsResult:
+        config = dataclasses.replace(base_config, **config_dict)
+        if "features" not in feature_cache_dict:
+            feature_cache_dict["features"] = hpi.feature_dict(inputs, base_config)
+        return hpi.simulate_config(inputs, config, cost_model, capital_float, features=feature_cache_dict["features"])
+
+    return FamilyRunner(
+        name_str=HPI_FAMILY_NAME_DICT[variant_name_str], family_id_str="us_equity_short_term_reversal", param_grid_dict=HPI_GRID_DICT,
+        live_config_dict={k: getattr(base_config, k) for k in HPI_GRID_DICT}, simulate_fn=simulate_fn,
+        offset_count_int=1,  # a daily event rule: no rebalance offset
     )
 
 

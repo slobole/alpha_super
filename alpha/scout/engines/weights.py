@@ -65,6 +65,12 @@ strategy_mr_us_sector_etf_ibs_downshock.py and strategy_mr_sector_dispersion_ibs
 - `hold_nan_bool`: a NaN target weight leaves that asset untouched (no order, whatever it holds); in
   `rebalance_weight_df` a NaN cell or a missing column then means "untouched" too, so `decided_weight_df` replays.
 Without these flags every path is unchanged (a NaN weight still raises when it is sized).
+
+Held through a missing open (opt-in `missing_open_hold_df`; added 2026-10-01 for the HPI pods,
+strategies/hpi/stateful_long.py `_liquidate_missing_price_positions`, which liquidates a held name with no Open(t) only
+when it is no longer an index member at t): where the boolean frame is True at (t, asset), step 2 skips a held asset
+whose Open(t) is NaN while its Close(t) is finite (the pod's forward-filled close); it stays held, any order for it at
+t is cancelled (no open), and it is marked at Close(t). Without the frame step 2 is unchanged.
 """
 
 from __future__ import annotations
@@ -127,6 +133,7 @@ def simulate(
     close_and_reopen_bool: bool = False,
     fractional_shares_bool: bool = False,  # opt-in (sector IBS): untruncated share targets
     hold_nan_bool: bool = False,  # opt-in (sector IBS): a NaN target weight = leave the asset untouched
+    missing_open_hold_df: pd.DataFrame | None = None,  # opt-in (HPI): True = a held asset with no Open(t) is kept
 ) -> WeightsResult:
     if share_unit_mode_str not in SHARE_UNIT_MODE_TUPLE:
         raise ValueError(f"share_unit_mode_str must be one of {SHARE_UNIT_MODE_TUPLE}.")
@@ -148,6 +155,9 @@ def simulate(
             factor_mat = unadjusted_mat / close_mat  # k = UnadjClose / Close
     else:
         factor_mat = np.ones_like(close_mat)
+    # opt-in (HPI): cells where a held asset survives a missing open (missing cells = False = the usual liquidation).
+    keep_mat = None if missing_open_hold_df is None else (
+        missing_open_hold_df.reindex(index=date_index, columns=asset_list).fillna(False).to_numpy(dtype=bool))
     rebalance_lookup_dict = {
         # hold_nan_bool (opt-in): NaN stays NaN = untouched; otherwise a missing weight is 0.
         pd.Timestamp(date): (row.reindex(asset_list) if hold_nan_bool else row.reindex(asset_list).fillna(0.0)).to_numpy(dtype=float)
@@ -194,6 +204,8 @@ def simulate(
         for asset_idx_int in np.flatnonzero(position_vec != 0.0):
             if np.isfinite(open_mat[t_idx_int, asset_idx_int]) and np.isfinite(close_mat[t_idx_int, asset_idx_int]):
                 continue
+            if keep_mat is not None and keep_mat[t_idx_int, asset_idx_int] and np.isfinite(close_mat[t_idx_int, asset_idx_int]):
+                continue  # opt-in (HPI): held through the missing open, marked at Close(t)
             finite_idx_arr = np.flatnonzero(np.isfinite(close_mat[:t_idx_int, asset_idx_int]))
             last_idx_int = int(finite_idx_arr[-1])
             delta_float = -position_vec[asset_idx_int]

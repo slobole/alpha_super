@@ -774,3 +774,189 @@ def test_sector_ibs_mcpt_replica_tracks_the_engine():
     fast_ser = pd.Series(sector_ibs.fast_daily_list(matrix, date_index, [family.live_config_dict])[0], index=date_index)
     engine_ser = family.run_config(family.live_config_dict).daily_return_ser.loc[:"2022-12-30"]
     assert np.corrcoef(engine_ser, fast_ser.reindex(engine_ser.index))[0, 1] > 0.99  # 0.999 on 2026-10-02 (27-config min 0.998)
+
+
+# ---------------------------------------------------------------------------------------------- HPI S&P 500 event pods
+def _synthetic_hpi_inputs(row_count_int: int = 700, symbol_count_int: int = 14, seed_int: int = 5):
+    """Stocks with idiosyncratic mean reversion, a few missing bars, and staggered index membership."""
+    from alpha.scout.specs.hpi import HpiInputs
+
+    rng_obj = np.random.default_rng(seed_int)
+    session_index = pd.bdate_range("2003-01-01", periods=row_count_int)
+    shape_tuple = (row_count_int, symbol_count_int)
+    noise_mat = rng_obj.normal(0.0, 0.015, shape_tuple)
+    log_close_mat = np.cumsum(rng_obj.normal(0.0, 0.008, (row_count_int, 1)) + noise_mat - 0.5 * np.vstack([np.zeros((1, symbol_count_int)), noise_mat[:-1]]), axis=0)
+    close_mat = 40.0 * np.exp(log_close_mat + 0.0006 * np.arange(row_count_int)[:, None])
+    open_mat = np.vstack([close_mat[:1], close_mat[:-1]]) * np.exp(rng_obj.normal(0.0, 0.004, shape_tuple))
+    high_mat = np.maximum(open_mat, close_mat) * np.exp(np.abs(rng_obj.normal(0.0, 0.006, shape_tuple)))
+    low_mat = np.minimum(open_mat, close_mat) * np.exp(-np.abs(rng_obj.normal(0.0, 0.006, shape_tuple)))
+    gap_mat = rng_obj.random(shape_tuple) < 0.004  # halted sessions: no bar at all
+    gap_mat[:5] = False
+    member_mat = np.ones(shape_tuple, dtype=bool)
+    member_mat[: row_count_int // 3, :3] = False  # late joiners
+    member_mat[row_count_int // 2:, 3:5] = False  # removed names
+    frame = lambda mat: pd.DataFrame(mat, index=session_index, columns=[f"S{i:02d}" for i in range(symbol_count_int)])
+    with_gaps = lambda mat: frame(np.where(gap_mat, np.nan, mat))
+    return HpiInputs(open_df=with_gaps(open_mat), high_df=with_gaps(high_mat), low_df=with_gaps(low_mat),
+                     close_df=with_gaps(close_mat).ffill(), turnover_df=with_gaps(close_mat * rng_obj.uniform(1e5, 1e6, shape_tuple)),
+                     dividend_df=frame(np.zeros(shape_tuple)), member_df=frame(member_mat), backtest_start_str="2003-06-02")
+
+
+def _hpi_small_config(variant_name_str: str):
+    from alpha.scout.specs import hpi
+
+    return dataclasses.replace(hpi.VARIANT_DICT[variant_name_str].config, hpi_lookback_int=60, sma_window_int=50, max_positions_int=4)
+
+
+def test_hpi_features_match_the_engine_compute_signals():
+    from alpha.scout.specs import hpi
+    from strategies.hpi.stateful_long import (
+        ENTRY_HORIZON_VOTE_STR,
+        HPIStatefulLongStrategy,
+    )
+
+    inputs = _synthetic_hpi_inputs(row_count_int=1_420, symbol_count_int=3)
+    price_df = pd.concat({(s, f): getattr(inputs, a)[s] for s in inputs.close_df.columns
+                          for f, a in (("Open", "open_df"), ("High", "high_df"), ("Low", "low_df"), ("Close", "close_df"))}, axis=1)
+    engine_df = HPIStatefulLongStrategy(name="x", benchmarks=["$SPXTR"], ranking_field_str="Turnover",
+                                        entry_mode_str=ENTRY_HORIZON_VOTE_STR).compute_signals(price_df)
+    feature_dict = hpi.feature_dict(inputs, hpi.VARIANT_DICT["hpi_vote"].config)
+    name_dict = {"ibs": "ibs_value_ser", "sma": "sma_200_price_ser", "rsi": "rsi2_value_ser", "return_2": "return_2d_ser",
+                 "return_3": "return_3d_ser", "return_5": "return_5d_ser", "hpi_2": "hpi_2d_ser", "hpi_3": "hpi_value_ser", "hpi_5": "hpi_5d_ser"}
+    for spec_str, engine_str in name_dict.items():
+        engine_mat = np.column_stack([engine_df[(s, engine_str)].to_numpy(float) for s in inputs.close_df.columns])
+        np.testing.assert_array_equal(feature_dict[spec_str], engine_mat, err_msg=spec_str)  # bit for bit, gaps skipped
+    assert np.isfinite(feature_dict["hpi_5"]).sum() > 300
+
+
+def test_hpi_decision_keeps_pending_exits_and_refills_slots_in_the_same_open():
+    from alpha.scout.specs import hpi
+
+    # Four names, two slots: names 0 and 1 held; name 0 hits its exit at T but has no open at T+1.
+    entry_mat = np.array([[False, False, True, True]] * 3)
+    exit_mat = np.array([[True, False, False, False], [False, False, False, False], [False, False, False, False]])
+    member_mat = np.ones((3, 4), dtype=bool)
+    rank_mat = np.array([[0.0, 0.0, 2.0, 1.0]] * 3)
+    open_mat = np.array([[1.0] * 4, [np.nan, 1.0, 1.0, 1.0], [1.0] * 4])
+    position_vec = np.array([5.0, 3.0, 0.0, 0.0])
+    engine_fn = hpi.hpi_decision_fn(entry_mat, exit_mat, rank_mat, member_mat, open_mat, 2, "engine")
+    assert engine_fn(1, position_vec, 100.0) is None  # no open: no exit order, so no free slot
+    # Next session the exit signal is gone but the exit stays pending; it fills and its slot buys the top-Turnover name.
+    np.testing.assert_array_equal(engine_fn(2, position_vec, 100.0), [0.0, np.nan, 0.5, np.nan])
+    live_fn = hpi.hpi_decision_fn(entry_mat, exit_mat, rank_mat, member_mat, open_mat, 2, "live")
+    np.testing.assert_array_equal(live_fn(1, position_vec, 100.0), [0.0, np.nan, 0.5, np.nan])  # live: assumes the open prints
+    member_mat[0, 1] = False  # a held name that leaves the index at T is exited too
+    np.testing.assert_array_equal(hpi.hpi_decision_fn(entry_mat, exit_mat * False, rank_mat, member_mat, open_mat * 0 + 1, 2)(1, position_vec, 100.0),
+                                  [np.nan, 0.0, 0.5, np.nan])
+
+
+def test_hpi_event_rule_slots_and_whole_share_entries_replay():
+    from alpha.scout.engines.weights import simulate
+    from alpha.scout.specs import hpi
+
+    inputs = _synthetic_hpi_inputs()
+    config = _hpi_small_config("hpi_vote")
+    result = hpi.simulate_config(inputs, config)
+    position_df = result.daily_position_df
+    assert len(result.trade_df) > 80 and (position_df > 0).sum(axis=1).max() == config.max_positions_int
+    assert np.array_equal(position_df.to_numpy(), np.round(position_df.to_numpy()))  # whole (split-adjusted) shares
+    for _asset_str, frame in result.trade_df.groupby("asset"):  # one entry, then one full exit: never resized
+        delta_vec = frame["delta_float"].to_numpy()
+        assert (delta_vec[::2] > 0).all() and np.array_equal(delta_vec[1::2], -delta_vec[: 2 * (len(delta_vec) // 2): 2])
+    replay = simulate(inputs.open_df, inputs.close_df, inputs.dividend_df, result.decided_weight_df, start_date=result.total_value_ser.index[0],
+                      cost_model=hpi.ENGINE_COST_MODEL, hold_nan_bool=True, missing_open_hold_df=inputs.member_df)
+    assert np.array_equal(replay.total_value_ser.to_numpy(), result.total_value_ser.to_numpy())
+    single = hpi.simulate_config(inputs, _hpi_small_config("hpi_ibs_rsi"))
+    assert len(single.trade_df) > 40 and not single.trade_df.equals(result.trade_df)
+    # The replica's shortcut (oversold score < threshold) is exactly the vote / single rule.
+    for name_str in ("hpi_vote", "hpi_ibs_rsi"):
+        small_config = _hpi_small_config(name_str)
+        features = hpi.feature_dict(inputs, small_config)
+        args = (features, inputs.close_df.to_numpy(float), inputs.turnover_df.to_numpy(float), inputs.member_df.to_numpy(bool), small_config)
+        with np.errstate(invalid="ignore"):
+            shortcut_mat = (hpi.regime_mat(*args) & (hpi.oversold_score_mat(features, small_config) < small_config.hpi_threshold_float)
+                            & (features["ibs"] < small_config.entry_ibs_max_float))
+        entry_mat = hpi.signal_mats(*args)[0]
+        assert entry_mat.sum() > 50 and np.array_equal(shortcut_mat, entry_mat)
+
+
+def test_hpi_variants_match_the_engine_constants_family_and_gate():
+    from alpha.scout.families import validate_family_id
+    from alpha.scout.family import hpi_family
+    from alpha.scout.gate.run import GATED_SPEC_DICT
+    from alpha.scout.specs import hpi
+    from strategies.hpi import stateful_long as engine
+
+    for name_str, variant in hpi.VARIANT_DICT.items():
+        config = variant.config
+        assert GATED_SPEC_DICT[name_str].strategy_import_str == variant.strategy_import_str
+        assert (config.hpi_lookback_int, config.hpi_threshold_float, config.entry_ibs_max_float, config.sma_window_int,
+                config.exit_ibs_min_float, config.rsi_window_int, config.exit_rsi_min_float, config.max_positions_int) == (
+            engine.HPI_LOOKBACK_INT, engine.HPI_THRESHOLD_FLOAT, engine.MAX_ENTRY_IBS_FLOAT, engine.SMA_WINDOW_INT,
+            engine.EXIT_IBS_THRESHOLD_FLOAT, engine.RSI_WINDOW_INT, engine.EXIT_RSI2_THRESHOLD_FLOAT, engine.MAX_POSITIONS_INT)
+        family = hpi_family(name_str, inputs=object())
+        validate_family_id(family.family_id_str)
+        assert family.family_id_str == "us_equity_short_term_reversal" and family.offset_count_int == 1
+        assert len(family.config_list()) == 27 and family.live_config_dict in family.config_list()
+    assert hpi.VARIANT_DICT["hpi_ibs_rsi"].config.single_horizon_int == engine.RETURN_LOOKBACK_INT
+    with pytest.raises(ValueError, match="offset"):
+        dataclasses.replace(hpi.VARIANT_DICT["hpi_vote"].config, decision_offset_int=1)
+
+
+def test_hpi_panel_replica_tracks_the_spec_and_runs_on_a_permuted_panel():
+    from alpha.scout.engines.weights import CostModel
+    from alpha.scout.null import permuted_panel
+    from alpha.scout.panel import Panel
+    from alpha.scout.specs import hpi
+
+    inputs = _synthetic_hpi_inputs()
+    raw_close_df = inputs.close_df.where(inputs.open_df.notna())
+    field_dict = {"Open": inputs.open_df, "High": inputs.high_df, "Low": inputs.low_df, "Close": raw_close_df, "Volume": raw_close_df * 0 + 1e6,
+                  "Turnover": inputs.turnover_df, "Unadjusted Close": raw_close_df, "Dividend": raw_close_df * 0.0}
+    panel = Panel("synthetic", field_dict, inputs.member_df.astype(int), "synthetic", True)
+    config = _hpi_small_config("hpi_vote")
+    config_list = [{}, {"entry_ibs_max_float": 0.2}]
+    daily_list, baseline_vec = hpi.fast_daily_list_panel(panel, config_list, config)
+    gross_cost = CostModel(slippage_float=0.0, fee_per_share_float=0.0, min_fee_float=0.0)
+    for config_dict, fast_vec in zip(config_list, daily_list):
+        engine_ser = hpi.simulate_config(inputs, dataclasses.replace(config, **config_dict), gross_cost).daily_return_ser
+        assert np.corrcoef(engine_ser, pd.Series(fast_vec, index=panel.date_index).reindex(engine_ser.index))[0, 1] > 0.99
+    member_return_ser = (raw_close_df.ffill().pct_change(fill_method=None)).where(inputs.member_df.shift(2, fill_value=False)).mean(axis=1)
+    assert np.corrcoef(baseline_vec[3:], member_return_ser.fillna(0.0).to_numpy()[3:])[0, 1] > 0.99
+    shuffled_list, shuffled_baseline_vec = hpi.fast_daily_list_panel(permuted_panel(panel, np.random.default_rng(3)), config_list, config)
+    assert all(np.isfinite(v).all() and (v != 0.0).sum() > 50 for v in shuffled_list) and np.isfinite(shuffled_baseline_vec).all()
+
+
+@pytest.mark.skipif("not _norgate_ready()")
+@pytest.mark.parametrize("spec_name_str", ["hpi_vote", "hpi_ibs_rsi"])
+def test_hpi_gate_passes_against_the_saved_engine_run(spec_name_str):
+    from pathlib import Path
+
+    from alpha.scout.gate.run import GATED_SPEC_DICT, run_gate
+    from alpha.scout.ledger import MAIN_CHECKOUT_ROOT_PATH
+
+    if not any(Path(MAIN_CHECKOUT_ROOT_PATH).glob(GATED_SPEC_DICT[spec_name_str].pickle_glob_str)):
+        pytest.skip("No saved engine run; run `python -m alpha.scout gate <name> --fresh`.")
+    report = run_gate(spec_name_str)
+    assert report.passed_bool, report.summary_str()
+
+
+@pytest.mark.skipif("not _norgate_ready()")
+def test_hpi_panel_replica_tracks_the_engine_on_the_sealed_panel():
+    from alpha.scout.engines.weights import CostModel
+    from alpha.scout.family import hpi_family
+    from alpha.scout.panel import load_panel
+    from alpha.scout.specs import hpi
+
+    try:
+        panel = load_panel("S&P 500")
+    except FileNotFoundError:
+        pytest.skip("No cached S&P 500 panel")
+    family = hpi_family("hpi_vote")
+    assert panel.date_index[-1] <= pd.Timestamp("2022-12-30")
+    daily_list, baseline_vec = hpi.fast_daily_list_panel(panel, [family.live_config_dict], hpi.VARIANT_DICT["hpi_vote"].config)
+    gross_cost = CostModel(slippage_float=0.0, fee_per_share_float=0.0, min_fee_float=0.0)
+    engine_ser = family.run_config(family.live_config_dict, gross_cost).daily_return_ser.loc[:"2022-12-30"]
+    fast_ser = pd.Series(daily_list[0], index=panel.date_index).reindex(engine_ser.index)
+    assert np.isfinite(baseline_vec).all() and fast_ser.notna().all()
+    assert np.corrcoef(engine_ser, fast_ser)[0, 1] > 0.99  # 0.9995 on 2026-10-01 (27-config min 0.998, Sharpe Spearman 0.99)
