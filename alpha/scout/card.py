@@ -55,14 +55,28 @@ def _pct(value_float: float, digits_int: int = 1) -> str:
     return f"{value_float:+.{digits_int}%}" if np.isfinite(value_float) else "n/a"
 
 
+def s3_check_list(bundle: dict) -> list:
+    """S3 rows for the verdict strip. Class W: diagnostics (design S3: "the burden moves to S5 and S6"); class X:
+    soft checks."""
+    s3_dict = bundle.get("s3")
+    if not s3_dict:
+        return []
+    row_list = list(s3_dict["result"]["check_list"]) + ([s3_dict["result"]["vix_gate"]["check"]] if "vix_gate" in s3_dict["result"] else [])
+    if s3_dict["class_str"] == "W":
+        return [(name_str, "INFO" if verdict_str != "PASS" else "PASS", detail_str + (" (diagnostic for class W)" if verdict_str != "PASS" else ""))
+                for name_str, verdict_str, detail_str in row_list]
+    return row_list
+
+
 def grade_str(bundle: dict) -> str:
     s4, s5, s6 = bundle["s4"], bundle["s5"], bundle["s6"]
     if s4.cost_dict["live"]["fail_bool"]:
         return "REJECTED"
-    verdict_list = [v for _, v, _ in s4.check_list + s5.check_list + s6.check_list if v != "INFO"]
+    verdict_list = [v for _, v, _ in s3_check_list(bundle) + s4.check_list + s5.check_list + s6.check_list if v != "INFO"]
     if any(v.startswith(("FAIL", "WARN")) for v in verdict_list):
         return "WATCHLIST"
-    return "CANDIDATE (S3 pending)"  # CANDIDATE means S0-S6 passed; the re-audition S3 comes with P6
+    # CANDIDATE means S0-S6 passed.
+    return "CANDIDATE" if bundle.get("s3") else "CANDIDATE (S3 pending)"
 
 
 def _surface_html(s4) -> str:
@@ -108,7 +122,7 @@ def render_card(bundle: dict) -> str:
 
     strip_str = "".join(
         f"<tr><td class='l'>{station_str}</td><td class='l'>{html.escape(name_str)}</td><td class='l {_verdict_class(v)}'>{html.escape(v)}</td><td class='l'>{html.escape(d)}</td></tr>"
-        for station_str, check_list in (("S4", s4.check_list), ("S5", s5.check_list), ("S6", s6.check_list))
+        for station_str, check_list in (("S3", s3_check_list(bundle)), ("S4", s4.check_list), ("S5", s5.check_list), ("S6", s6.check_list))
         for name_str, v, d in check_list
     )
     part_list.append(f"<h2>Verdict strip</h2><table><tr><th class='l'>Station</th><th class='l'>Check</th><th class='l'>Verdict</th><th class='l'>Key number</th></tr>{strip_str}</table>")
@@ -124,6 +138,21 @@ def render_card(bundle: dict) -> str:
         + f"Since the current rule was adopted ({post_dict['adoption_date_str']}): {post_dict['sessions_int']} sessions; a live record would need about "
         f"{post_dict['min_track_record_months_float']:.0f} months to show, at 95% confidence, that the in-sample Sharpe is above zero.</div>"
     )
+
+    # ---- S3
+    if bundle.get("s3"):
+        s3_result = bundle["s3"]["result"]
+        part_list.append("<h2>S3: does the signal carry information?</h2>")
+        part_list.append(f"<p>{html.escape(bundle['s3']['note_str'])}</p>")
+        if "per_asset_list" in s3_result:
+            asset_rows_str = "".join(f"<tr><td class='l'>{r['asset_str']}</td><td>{r['slope_float'] * 100:+.2f}%</td><td>{r['t_float']:.2f}</td><td>{r['months_int']}</td></tr>"
+                                     for r in s3_result["per_asset_list"])
+            part_list.append("<p>Per asset: next-month excess return per standard deviation of the score.</p>"
+                             f"<table><tr><th class='l'>Asset</th><th>Slope / month</th><th>t</th><th>Months</th></tr>{asset_rows_str}</table>")
+        if "vix_gate" in s3_result:
+            gate = s3_result["vix_gate"]
+            part_list.append(f"<p>Gate: next-month volatility {gate['vol_on_float']:.0%} when on ({gate['months_on_int']} months) vs {gate['vol_off_float']:.0%} when off "
+                             f"({gate['months_off_int']} months); mean return {gate['mean_on_float']:+.2%} vs {gate['mean_off_float']:+.2%} a month.</p>")
 
     # ---- S4
     part_list.append("<h2>S4: the strategy in full reality</h2>")
@@ -219,8 +248,8 @@ def render_card(bundle: dict) -> str:
                                  for d in ENGINE_DEVIATION_TUPLE)
     part_list.append(f"<h2>Known engine deviations</h2><table><tr><th class='l'>Deviation</th><th class='l'>Bias</th><th class='l'>Impact</th></tr>{deviation_rows_str}</table>")
     part_list.append("<h2>What was not tested, and why</h2><ul>"
-                     "<li>S3 edge study: class W/X re-auditions need per-asset predictive regressions (W) or an event definition (X); scheduled with P6.</li>"
-                     "<li>S7 vault: contaminated (2023 on was seen); replaced by the post-adoption period, too short to judge.</li>"
+                     + ("" if bundle.get("s3") else "<li>S3 edge study: scheduled with P6.</li>")
+                     + "<li>S7 vault: contaminated (2023 on was seen); replaced by the post-adoption period, too short to judge.</li>"
                      "<li>Fama-French factors (not stored offline); capacity v2 study (the estimate here is simplified).</li>"
                      "<li>The MCPT search is a fast replica of the engine (daily correlation 0.98-0.995, gross, constant weights within the month). Its plateau "
                      "pick can differ from the engine's (NDX: roc 15 vs roc 6); the verdicts were checked against every configuration's replica score.</li>"
