@@ -27,7 +27,13 @@ from alpha.scout.ledger import MAIN_CHECKOUT_ROOT_PATH
 from alpha.scout.metrics import performance_dict, sharpe_float
 from alpha.scout.stations.s4_strategy import SEAL_END_STR, run_s4
 from alpha.scout.stations.s5_overfit import McptComponent, run_s5
-from alpha.scout.stations.s6_book import capacity, diversification, finish_s6, spanning_table, tbill_slot_test
+from alpha.scout.stations.s6_book import (
+    capacity,
+    diversification,
+    finish_s6,
+    spanning_table,
+    tbill_slot_test,
+)
 from alpha.stats.mcpt import mcpt
 from alpha.stats.psr_dsr import minimum_track_record_length, sharpe_moments
 from alpha.stats.selection import plateau_choice
@@ -92,9 +98,11 @@ def taa_mcpt(plan: PodPlan, family: FamilyRunner, inputs) -> list[McptComponent]
     asset_tuple = taa_option_dict.get("asset_tuple", searches.TAA_ASSET_TUPLE)
     extra_close_dict = {s: load_price_timeseries(s, adjustment_str="TOTALRETURN", start_date_str="2006-01-01")["Close"]
                         for s in asset_tuple if s not in inputs.total_return_close_df.columns}
-    date_index = inputs.open_df.index[(inputs.open_df.index >= "2012-01-03") & (inputs.open_df.index <= SEAL_END_STR)]
-    matrix = searches.taa_matrix(date_index, inputs.total_return_close_df.assign(**extra_close_dict), inputs.spy_close_ser,
-                                 inputs.vix_close_ser, inputs.dtb3_ser, asset_tuple=asset_tuple)
+    close_df = inputs.total_return_close_df.assign(**extra_close_dict)
+    # Start once every traded ETF has a price (zero-filled pre-listing days would be fake flat days in the null).
+    first_ts = max(close_df[s].first_valid_index() for s in asset_tuple) + pd.Timedelta(days=1)
+    date_index = inputs.open_df.index[(inputs.open_df.index >= first_ts) & (inputs.open_df.index <= SEAL_END_STR)]
+    matrix = searches.taa_matrix(date_index, close_df, inputs.spy_close_ser, inputs.vix_close_ser, inputs.dtb3_ser, asset_tuple=asset_tuple)
     state = {"date_index": date_index, "config_list": family.config_list(), "grid_shape_tuple": family.grid_shape_tuple,
              "taa_option_dict": taa_option_dict, "asset_count_int": len(asset_tuple)}
     _STATE.update(state)
@@ -119,7 +127,7 @@ def overlay_scale_ser(spy_close_ser: pd.Series, vxn_close_ser: pd.Series, date_i
 
 def _ndx_selection_score(panel) -> float:
     state = _STATE
-    f = lambda n: panel.field(n).to_numpy(dtype=float)  # noqa: E731
+    f = lambda n: panel.field(n).to_numpy(dtype=float)
     daily_list, baseline_vec = searches.ndx_selection_daily(
         f("Open"), f("High"), f("Low"), f("Close"), f("Unadjusted Close"), (panel.member_df == 1).to_numpy(),
         panel.date_index, state["overlay_ser"], state["config_list"], state["atr_unit_str"],
@@ -266,7 +274,7 @@ def reaudit(plan: PodPlan, live_net_dict: dict[str, pd.Series], factor_df: pd.Da
         "family": {"grid": family.param_grid_dict, "live": family.live_config_dict, "family_id_str": family.family_id_str},
         "prior_trial_count_int": plan.prior_trial_count_int, "s4": s4, "s5": s5, "s6": s6,
         "post_adoption": {
-            "adoption_date_str": plan.adoption_date_str, "sessions_int": int(len(adoption_ser)),
+            "adoption_date_str": plan.adoption_date_str, "sessions_int": len(adoption_ser),
             "performance": performance_dict(adoption_ser, tbill_ser) if len(adoption_ser) > 20 else {},
             "min_track_record_months_float": float(minimum_track_record_length(moments.sharpe_float, moments.skewness_float, moments.kurtosis_float) / 21.0),
         },

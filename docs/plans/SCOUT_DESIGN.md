@@ -1057,6 +1057,22 @@ Report: `docs/research/SCOUT_P5_REAUDITION_20261002.md`. Calibration protocol: `
     - T-bill slot P 0.47.
     - No demotion (section 10): the owner decides.
 
+**A10 (2026-10-02, P6a: S3 for classes W and X; the live families' siblings).**
+Report: `docs/research/SCOUT_P6A_REAUDITION_20261002.md`.
+
+- **S3 for class W:**
+  - **Tests:** Fama-MacBeth slope, signal-on minus signal-off, and per-asset slopes (monthly, Newey-West lag 2);
+    `gate_split` for risk gates (next-month volatility on vs off, Levene test).
+  - **Status:** diagnostics. The design's own phrase applies: "the burden moves to S5 and S6".
+- **S3 for class X:** the monthly rank IC and the top-N spread over the eligible mean. These are soft checks.
+- **Re-audition runner:** `alpha/scout/reaudit.py`.
+- **Siblings gated exactly:** the TAA 1/N, linearity and 2x variants, and NDX ATR / NATR20 / NATR20 VXN.
+- **Findings:**
+  - **TAA:** the edge is the gated leveraged fallback. The defensive rotation predicts nothing.
+  - **NDX, the live score:** it divides by dollar ATR, so it ranks partly by share price (Spearman −0.46). The
+    NATR20 ranking passes the selection MCPT at p 0.001.
+  - **NDX in the book:** no NDX rule adds value to the live book (2012-2022).
+
 **Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
 It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about
 performance. A performance kill rule is a separate, currently unrecorded gap, and P1 should add it to

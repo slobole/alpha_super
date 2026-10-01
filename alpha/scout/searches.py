@@ -44,41 +44,63 @@ def _hold_daily(weight_mat: np.ndarray, decision_row_vec: np.ndarray, return_mat
 TAA_ASSET_TUPLE = ("GLD", "UUP", "TLT", "DBC", "BTAL", "TQQQ")
 
 
-def taa_matrix(date_index: pd.DatetimeIndex, total_return_close_df: pd.DataFrame, spy_close_ser: pd.Series, vix_close_ser: pd.Series, dtb3_ser: pd.Series) -> np.ndarray:
-    return_df = total_return_close_df[list(TAA_ASSET_TUPLE)].reindex(date_index).ffill().pct_change().fillna(0.0)
+def taa_matrix(date_index: pd.DatetimeIndex, total_return_close_df: pd.DataFrame, spy_close_ser: pd.Series, vix_close_ser: pd.Series,
+               dtb3_ser: pd.Series, asset_tuple: tuple = TAA_ASSET_TUPLE) -> np.ndarray:
+    """Columns: TR daily returns of `asset_tuple` (defensive ETFs, then the fallback last), SPY return, VIX, DTB3."""
+    return_df = total_return_close_df[list(asset_tuple)].reindex(date_index).ffill().pct_change().fillna(0.0)
     spy_return_ser = spy_close_ser.reindex(date_index).ffill().pct_change().fillna(0.0)
     vix_ser = vix_close_ser.reindex(date_index).ffill()
     dtb3_level_ser = dtb3_ser.reindex(dtb3_ser.index.union(date_index)).ffill().reindex(date_index)
     return np.column_stack([return_df.to_numpy(), spy_return_ser.to_numpy(), vix_ser.to_numpy(), dtb3_level_ser.to_numpy()])
 
 
-def taa_config_daily_list(matrix: np.ndarray, date_index: pd.DatetimeIndex, grid_config_list: list[dict]) -> list[np.ndarray]:
-    return_mat, spy_return_vec, vix_vec, dtb3_vec = matrix[:, :6], matrix[:, 6], matrix[:, 7], matrix[:, 8]
-    price_mat = np.cumprod(1.0 + return_mat[:, :5], axis=0)
+def taa_config_daily_list(matrix: np.ndarray, date_index: pd.DatetimeIndex, grid_config_list: list[dict], asset_tuple: tuple = TAA_ASSET_TUPLE,
+                          slot_weight_str: str = "rank", score_str: str = "momentum") -> list[np.ndarray]:
+    """Daily gross returns of each configuration. The TAA family (alpha/scout/specs/taa_3x.py): defensive slots by
+    momentum (vs the DTB3 hurdle) or linearity (vs a threshold), rank (5..1)/15 or equal 1/N slot weights, failed
+    slots to the fallback (last asset), the fallback gated to cash unless SPY realised volatility < VIX."""
+    from alpha.scout.specs.taa_3x import _linearity_lookback_df
+
+    asset_count_int = len(asset_tuple)
+    defensive_count_int = asset_count_int - 1
+    return_mat = matrix[:, :asset_count_int]
+    spy_return_vec, vix_vec, dtb3_vec = matrix[:, asset_count_int], matrix[:, asset_count_int + 1], matrix[:, asset_count_int + 2]
+    price_mat = np.cumprod(1.0 + return_mat[:, :defensive_count_int], axis=0)
     position_ser = pd.Series(np.arange(len(date_index)), index=date_index)
     decision_row_vec = position_ser.groupby(date_index.to_period("M")).max().to_numpy()[:-1]  # last month: no next fill
     month_price_mat = price_mat[decision_row_vec]
     hurdle_vec = (1.0 + dtb3_vec[decision_row_vec] / 100.0) ** (1.0 / 12.0) - 1.0
+    slot_weight_vec = np.arange(defensive_count_int, 0, -1) / (defensive_count_int * (defensive_count_int + 1) / 2) if slot_weight_str == "rank" else np.full(defensive_count_int, 1.0 / defensive_count_int)
+    linearity_cache_dict: dict = {}
     daily_list = []
     for config_dict in grid_config_list:
-        k_tuple = config_dict["momentum_month_tuple"]
-        score_mat = np.full(month_price_mat.shape, np.nan)
-        first_int = max(k_tuple)
-        score_mat[first_int:] = np.mean([month_price_mat[first_int:] / month_price_mat[first_int - k : len(month_price_mat) - k] - 1.0 for k in k_tuple], axis=0)
+        if score_str == "momentum":
+            k_tuple = config_dict["momentum_month_tuple"]
+            first_int = max(k_tuple)
+            score_mat = np.full(month_price_mat.shape, np.nan)
+            score_mat[first_int:] = np.mean([month_price_mat[first_int:] / month_price_mat[first_int - k : len(month_price_mat) - k] - 1.0 for k in k_tuple], axis=0)
+            threshold_vec = hurdle_vec
+        else:
+            day_tuple = tuple(config_dict["linearity_day_tuple"])
+            for day_int in day_tuple:
+                if day_int not in linearity_cache_dict:
+                    linearity_cache_dict[day_int] = _linearity_lookback_df(pd.DataFrame(np.log(price_mat)), day_int).to_numpy()[decision_row_vec]
+            score_mat = np.mean([linearity_cache_dict[d] for d in day_tuple], axis=0)
+            first_int = int(np.argmax(np.isfinite(score_mat).all(axis=1)))
+            threshold_vec = np.full(decision_row_vec.size, float(config_dict.get("linearity_threshold_float", 0.0)))
         window_int = config_dict["realized_vol_window_int"]
         realized_vec = pd.Series(spy_return_vec).rolling(window_int).std(ddof=0).to_numpy() * np.sqrt(DAYS_INT) * 100.0
-        weight_mat = np.zeros((decision_row_vec.size, 6))
+        weight_mat = np.zeros((decision_row_vec.size, asset_count_int))
         for m_int in range(first_int, decision_row_vec.size):
             order_vec = np.argsort(-score_mat[m_int], kind="stable")
             for slot_int, asset_int in enumerate(order_vec):
-                rank_weight_float = (5 - slot_int) / 15.0
-                if score_mat[m_int, asset_int] > hurdle_vec[m_int]:
-                    weight_mat[m_int, asset_int] = rank_weight_float
+                if score_mat[m_int, asset_int] > threshold_vec[m_int]:
+                    weight_mat[m_int, asset_int] = slot_weight_vec[slot_int]
                 else:
-                    weight_mat[m_int, 5] += rank_weight_float
+                    weight_mat[m_int, -1] += slot_weight_vec[slot_int]
             row_int = decision_row_vec[m_int]
             if not realized_vec[row_int] < vix_vec[row_int]:
-                weight_mat[m_int, 5] = 0.0
+                weight_mat[m_int, -1] = 0.0
         daily_list.append(_hold_daily(weight_mat, decision_row_vec, return_mat))
     return daily_list
 
