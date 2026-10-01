@@ -86,9 +86,12 @@ def taa_config_daily_list(matrix: np.ndarray, date_index: pd.DatetimeIndex, grid
 # ---------------------------------------------------------------- NDX VXN selection
 def ndx_selection_daily(
     open_mat, high_mat, low_mat, close_mat, raw_close_mat, member_mat,
-    date_index: pd.DatetimeIndex, overlay_scale_ser: pd.Series, grid_config_list: list[dict],
+    date_index: pd.DatetimeIndex, overlay_scale_ser: pd.Series, grid_config_list: list[dict], atr_unit_str: str = "dollar",
 ) -> tuple[list[np.ndarray], np.ndarray]:
-    """(daily return per configuration, overlay × equal-weight members baseline). Arrays are dates × stocks."""
+    """(daily return per configuration, overlay × equal-weight members baseline). Arrays are dates × stocks.
+
+    atr_unit_str "dollar": score = ROC / ATR20 in dollars of day T (NDX VXN, NDX ATR); "percent": score = ROC / (ATR20 /
+    Close), the NATR20 siblings (unit-free, so adjusted and raw prices give the same number)."""
     position_ser = pd.Series(np.arange(len(date_index)), index=date_index)
     decision_row_vec = position_ser.groupby(date_index.to_period("M")).max().to_numpy()[:-1]
     with np.errstate(invalid="ignore", divide="ignore"):
@@ -96,7 +99,10 @@ def ndx_selection_daily(
         previous_close_mat = np.vstack([np.full(close_mat.shape[1], np.nan), close_mat[:-1]])
         true_range_mat = np.maximum(high_mat - low_mat, np.maximum(np.abs(high_mat - previous_close_mat), np.abs(low_mat - previous_close_mat)))
         atr_mat = pd.DataFrame(true_range_mat).rolling(20, min_periods=20).mean().to_numpy()
-        atr_dollar_mat = atr_mat[decision_row_vec] * (raw_close_mat[decision_row_vec] / close_mat[decision_row_vec])
+        if atr_unit_str == "dollar":
+            atr_dollar_mat = atr_mat[decision_row_vec] * (raw_close_mat[decision_row_vec] / close_mat[decision_row_vec])
+        else:
+            atr_dollar_mat = atr_mat[decision_row_vec] / close_mat[decision_row_vec]  # NATR: the "denominator" is ATR / Close
     scale_vec = overlay_scale_ser.reindex(date_index[decision_row_vec]).fillna(0.0).to_numpy()
     member_decision_mat = member_mat[decision_row_vec] & np.isfinite(close_mat[decision_row_vec])
     baseline_weight_mat = np.where(member_decision_mat, 1.0, 0.0)
