@@ -48,3 +48,23 @@ Written 2026-10-02 before any result below was computed.
 - **If none qualifies:** ETF timing families cannot pass S5 (WATCHLIST), and that is reported.
 - **Bound:** 7.0% is 5% plus about 1.4 binomial standard errors at 200 seeds. It is stricter than P4b's 8%,
   because these families run on a plain shuffle, which is exact up to the volatility structure.
+
+## Amendment 1 (2026-10-02, before any calibration result)
+
+A smoke run of the searches alone, without MCPT, showed that the registered planted edge (each asset's drift gains
+0.05 × its own 126-session mean) mostly raises the average drift of every asset. That helps the equal-weight
+baseline as much as the families, so it does not measure the mechanisms the families claim.
+
+**Replacement edges.** Neither changes the average drift; both use returns up to t − 2:
+- **F1:** relative momentum. Each asset's drift gains c × (its own 126-session mean − the six assets' mean).
+- **F2:** time-series momentum of asset 6. Its drift gains c × (its own 126-session mean − the base drift).
+
+**Strength:** c = 0.30, chosen from a paired scan of 8 seeds.
+- **F2:** the scores rise by 0.25-0.35 Sharpe.
+- **F1:** they barely move at any c up to 0.3 (−0.05 to +0.02, se 0.02-0.04). F1's risk is dominated by the
+  leveraged fallback asset (β 3), so ranking the five defensive assets hardly changes its Sharpe; that is true of
+  the real TAA 3x as well.
+- **Consequence:** F1's power will be near its size under every score. The power comparison therefore rests on F2,
+  and F1 is a size test.
+
+Nulls, families, scores and decision rules are unchanged.
