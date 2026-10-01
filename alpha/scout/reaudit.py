@@ -6,6 +6,9 @@ up to the vault seal (2022-12-30). MCPT components (A8, A9):
     "taa"  plain date shuffle of [TR returns of the traded ETFs, SPY return, VIX, DTB3]; score SD
     "ndx"  stock selection: per-asset null on the Nasdaq-100 panel, active return over overlay x EW members;
            timing overlay: plain date shuffle of [EW members return, SPY return, VXN]; score SD
+    "panel" a point-in-time stock pod whose spec provides `fast_daily_list_panel(panel, config_list, **kw)` (P7): the
+           per-asset null of P4b on a Scout panel, score = Sharpe of the daily active return over the equal-weight
+           members (A8; calibrated for short-term reversal at 2.0% false passes)
     "spec" any ETF pod whose spec module provides the pod contract (P6b): `mcpt_matrix` (traded assets' TR returns
            first, then every exogenous series) and `fast_daily_list`; plain date shuffle; score SD over the
            vol-targeted EW of the traded assets
@@ -161,6 +164,44 @@ def spec_mcpt(plan: PodPlan, family: FamilyRunner, inputs) -> list[McptComponent
                           observed_float, null_vec, _p_value(observed_float, null_vec), note_str="ETF timing family (A9 calibration: 2.0-7.0% false passes)")]
 
 
+# ---------------------------------------------------------------- panel-contract MCPT (P7)
+def _panel_score(panel) -> float:
+    import importlib
+
+    state = _STATE
+    module = importlib.import_module(state["module_str"])
+    daily_list, baseline_vec = module.fast_daily_list_panel(panel, state["config_list"], **state["fast_kwarg_dict"])
+    sharpe_vec = np.array([sharpe_float(pd.Series((v - baseline_vec)[state["warm_int"]:])) for v in daily_list])
+    return plateau_choice(np.nan_to_num(sharpe_vec, nan=-9.0), state["grid_shape_tuple"]).own_sharpe_float
+
+
+def _panel_chunk(args) -> np.ndarray:
+    seed_int, count_int, state = args
+    from alpha.scout.null import permuted_panel
+    from alpha.scout.panel import load_panel
+
+    _STATE.update(state)
+    panel = load_panel(state["panel_name_str"])
+    rng_obj, cache_dict = np.random.default_rng(seed_int), {}
+    return np.array([_panel_score(permuted_panel(panel, rng_obj, cache_dict)) for _ in range(count_int)])
+
+
+def panel_mcpt(plan: PodPlan, family: FamilyRunner, inputs) -> list[McptComponent]:
+    from alpha.scout.panel import load_panel
+
+    option_dict = plan.option_dict["panel"]
+    state = {"module_str": option_dict["module_str"], "panel_name_str": option_dict.get("panel_name_str", "S&P 500"),
+             "config_list": family.config_list(), "grid_shape_tuple": family.grid_shape_tuple,
+             "fast_kwarg_dict": option_dict.get("fast_kwarg_dict", {}), "warm_int": option_dict.get("warm_int", 260)}
+    _STATE.update(state)
+    observed_float = _panel_score(load_panel(state["panel_name_str"]))
+    chunk_int = PERMUTATION_COUNT_INT // WORKER_COUNT_INT + 1
+    with Pool(WORKER_COUNT_INT) as pool_obj:
+        null_vec = np.concatenate(pool_obj.map(_panel_chunk, [(8_500 + i, chunk_int, state) for i in range(WORKER_COUNT_INT)]))[:PERMUTATION_COUNT_INT]
+    return [McptComponent("whole strategy", "per-asset", "active Sharpe over EW members", observed_float, null_vec,
+                          _p_value(observed_float, null_vec), note_str="short-term reversal on a point-in-time panel (A8 calibration: 2.0% false passes)")]
+
+
 # ---------------------------------------------------------------- NDX MCPT
 def overlay_scale_ser(spy_close_ser: pd.Series, vxn_close_ser: pd.Series, date_index, regime_sma_int: int, reference_float: float | None) -> pd.Series:
     """SPY regime (on -> 1) times the VXN scale clip(reference / VXN, 0.25, 1); reference None = no VXN scaling."""
@@ -291,7 +332,7 @@ def reaudit(plan: PodPlan, live_net_dict: dict[str, pd.Series], factor_df: pd.Da
     inputs = plan.inputs_fn()
     family = plan.family_fn(inputs)
     s4 = run_s4(family, tbill_ser)
-    mcpt_fn = {"taa": taa_mcpt, "ndx": ndx_mcpt, "spec": spec_mcpt}[plan.mcpt_kind_str]
+    mcpt_fn = {"taa": taa_mcpt, "ndx": ndx_mcpt, "spec": spec_mcpt, "panel": panel_mcpt}[plan.mcpt_kind_str]
     mcpt_list = mcpt_fn(plan, family, inputs)
     s5 = run_s5(s4.grid_df.loc[:SEAL_END_STR], family.grid_shape_tuple, s4.chosen_label_str, s4.live_label_str, mcpt_list, plan.prior_trial_count_int)
 
