@@ -276,3 +276,28 @@ def test_fractional_entries_and_untouched_holdings():
     with pytest.raises(ValueError, match="adjusted"):
         simulate(open_df, close_df, dividend_df, weight_df, DATE_INDEX[1], share_unit_mode_str="historical",
                  unadjusted_close_df=close_df, fractional_shares_bool=True)
+
+
+def test_a_held_member_survives_a_missing_open():
+    """The HPI contract (opt-in `missing_open_hold_df`): a held asset with no Open(t) but a (filled) Close(t) is kept and
+    marked where the mask is True; elsewhere it is liquidated at its last close, as before; its order is cancelled."""
+    nan = np.nan
+    open_df, close_df, dividend_df = _frames([[10, 20], [10, 20], [nan, 20], [11, 20], [12, 20], [12, 20]],
+                                             [[10, 20], [10, 20], [10, 20], [11, 20], [12, 20], [12, 20]])
+    weight_df = pd.DataFrame({"A": [0.5, 0.0], "B": [0.0, np.nan]}, index=DATE_INDEX[[1, 2]])  # day 2: try to sell A
+    cost_model = CostModel(slippage_float=0.0, fee_per_share_float=0.005, min_fee_float=1.0)
+    kwarg_dict = {"capital_float": 1000.0, "cost_model": cost_model, "hold_nan_bool": True}
+    keep_df = pd.DataFrame(True, index=DATE_INDEX, columns=["A", "B"])
+    kept = simulate(open_df, close_df, dividend_df, weight_df, DATE_INDEX[1], missing_open_hold_df=keep_df, **kwarg_dict)
+    # Day 1: 50 A at 10, fee 1 -> cash 499. Day 2: no open: the sell is cancelled, A held and marked at 10 -> 999.
+    # Day 3: 11 -> 1049; nothing traded after day 1.
+    np.testing.assert_allclose(kept.daily_position_df["A"], [50.0] * 5)
+    np.testing.assert_allclose(kept.total_value_ser.to_numpy()[:3], [999.0, 999.0, 1049.0])
+    assert kept.trade_df["date"].tolist() == [DATE_INDEX[1]]
+    # Mask False on day 2 (not a member at t): liquidated at the last close (10), fee 1 -> 998 and flat afterwards.
+    dropped = simulate(open_df, close_df, dividend_df, weight_df, DATE_INDEX[1], missing_open_hold_df=keep_df.assign(A=False), **kwarg_dict)
+    assert dropped.trade_df["kind_str"].tolist() == ["rebalance", "liquidation"]
+    np.testing.assert_allclose(dropped.total_value_ser.to_numpy()[:3], [999.0, 998.0, 998.0])
+    # Without the frame the old rule holds (a missing open liquidates).
+    plain = simulate(open_df, close_df, dividend_df, weight_df, DATE_INDEX[1], **kwarg_dict)
+    np.testing.assert_allclose(plain.total_value_ser.to_numpy(), dropped.total_value_ser.to_numpy())

@@ -39,7 +39,12 @@ ENGINE_DEVIATION_TUPLE = (
             "CORE5 -0.013 pp/yr (optimistic): BIL's 1-for-2 consolidation (UnadjClose / Close = 0.5 before 2017-11-30) halves its earlier ledger share counts "
             "(Scout truth-mode run, 2026-10-01: CAGR 7.061% adjusted vs 7.048% historical units, 2007-09 to 2026-09). "
             "Trinity (VTI 2:1 split, BIL 1:2): fees $1,465 adjusted vs $1,492 historical on $100K over 2007-2026, CAGR "
-            "7.049% both (2026-10-01). TFI pays no commission, so only whole-share rounding moves (not listed)."
+            "7.049% both (2026-10-01). TFI pays no commission, so only whole-share rounding moves (not listed). "
+            "HPI (both S&P 500 pods, 2004-2026): besides the fees, a candidate whose reverse-split-adjusted Close_T exceeds "
+            "V / 10 rounds to 0 shares, is cancelled, and still uses its slot (the engine decrements the slot before the "
+            "zero-share cancellation): 4 of 6,225 vote entries and 3 of 6,458 single-rule entries, all WFRD (the old "
+            "Weatherford history, about $45,800 a share adjusted, 2008-2009; Norgate data to 2026-09-30). Not measured in "
+            "historical units (the HPI inputs carry no unadjusted close); expected immaterial."
         ),
         mitigation_str="Parity mode reproduces it; truth mode uses raw historical share units. Engine fix #15 is paused.",
         affected_strategy_list=(
@@ -47,7 +52,7 @@ ENGINE_DEVIATION_TUPLE = (
             "strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash", "strategy_taa_df_btal_1n_fallback_qld_vix_cash",
             "strategy_taa_df_1n_fallback_qld_vix_cash", "strategy_taa_df_1n_fallback_sso_vix_cash",
             "strategy_taa_inflation_compass", "strategy_taa_inflation_compass_qqq", "strategy_taa_adaptive_macro_core5",
-            "strategy_taa_trinity_vol_control_8_bil",
+            "strategy_taa_trinity_vol_control_8_bil", "strategy_mr_hpi_sp500_2_3_5_vote", "strategy_mr_hpi_sp500_ibs_rsi_exit",
         ),  # every gated TAA variant (fee impact measured for TAA 3x), both Compass modules, CORE5 and Trinity
     ),
 )
@@ -168,6 +173,31 @@ ENGINE_DEVIATION_TUPLE = ENGINE_DEVIATION_TUPLE + (
         ),
         mitigation_str="Parity mode reproduces it (the spec keeps the loader's dtype); immaterial, no engine fix proposed.",
         affected_strategy_list=("strategy_mr_dv2", "strategy_mr_dv2_nasdaq100", "legacy_dv2_ndx"),  # the last: the restored gate engine
+    ),
+)
+
+ENGINE_DEVIATION_TUPLE = ENGINE_DEVIATION_TUPLE + (
+    EngineDeviation(
+        deviation_id_str="hpi_open_known_slot_refill",
+        issue_description_str=(
+            "The HPI pods (strategies/hpi/stateful_long.py iterate, same-open refill 8b21a2e) place a pending exit, and "
+            "free its slot for a replacement bought in the same MOO basket, only when the held name's Open(T+1) is "
+            "finite: the decision after Close_T reads whether tomorrow's open prints. The live host passes a tradability "
+            "marker for every held name instead (it assumes the open prints). A held name with no Open(t) is kept only "
+            "while it is an index member at t (otherwise liquidated at its last close, as both models do)."
+        ),
+        expected_bias_direction_str=(
+            "Tradability hindsight on halted holdings: the backtest never runs 11 names, live could (an exit that does "
+            "not fill while its replacement does). Direction unclear, magnitude bounded by halted-member events."
+        ),
+        impact_level_str=(
+            "2026-10-01, Scout truth mode (`hpi.simulate_config(..., slot_rule_str='live')`), engine costs, $100K, "
+            "2004-01-02..2026-09-30: zero sessions differ for either pod (vote CAGR 16.19%, Sharpe 1.04; single rule "
+            "15.40%, 0.99, both modes). In that span one held name lost its open (a non-member, liquidated in both "
+            "models); no current member was ever held through a missing open."
+        ),
+        mitigation_str="Parity mode reproduces it; immaterial on history, no engine fix proposed.",
+        affected_strategy_list=("strategy_mr_hpi_sp500_2_3_5_vote", "strategy_mr_hpi_sp500_ibs_rsi_exit"),
     ),
 )
 

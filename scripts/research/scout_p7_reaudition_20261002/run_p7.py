@@ -60,6 +60,38 @@ def plan_dict() -> dict[str, tuple[PodPlan, Registration]]:
                 universe_chosen_after_results_bool=not is_live_bool,
             ),
         )
+    from alpha.scout.family import HPI_FAMILY_NAME_DICT, HPI_GRID_DICT, hpi_family
+    from alpha.scout.specs import hpi
+
+    for variant_str, label_str in HPI_FAMILY_NAME_DICT.items():
+        variant = hpi.VARIANT_DICT[variant_str]
+        is_live_bool = variant_str == "hpi_vote"
+        out_dict[variant_str] = (
+            PodPlan(
+                name_str=label_str, family_fn=lambda inputs, v=variant_str: hpi_family(v, inputs), inputs_fn=hpi.load_inputs,
+                mcpt_kind_str="panel", adoption_date_str="2026-04-04", prior_trial_count_int=100, slot_str="NDX VXN",
+                s3_fn=lambda v=variant_str: ("E", EVENT_NOTE_STR, sector_ibs.s3_result(hpi.s3_inputs(v))),
+                option_dict={"panel": {"module_str": "alpha.scout.specs.hpi", "panel_name_str": "S&P 500",
+                                       "fast_kwarg_dict": {"base_config": variant.config}}},
+                strategy_module_str=variant.strategy_import_str,
+            ),
+            Registration(
+                registration_id_str=f"{variant_str}_reaudition_20261002", family_id_str="us_equity_short_term_reversal",
+                hypothesis_str=(f"{label_str}: buying uptrending S&P 500 members whose recent pullback is rare against their own "
+                                "five-year history (HPI) and whose close sits low in the day's range, selling on a rebound close, "
+                                "beats the equal-weight members."),
+                mechanism_str="Liquidity provision to impatient sellers in uptrending large caps (short-term reversal).",
+                expected_sign_and_location_str="Positive active return over the equal-weight members, concentrated in stress.",
+                hypothesis_class_str="E", universe_str="S&P 500 point-in-time members", horizon_str="days",
+                schedule_str="daily close decision", execution_str="next session's open (exit slots refilled in the same open)",
+                param_grid_dict={k: tuple(v) for k, v in HPI_GRID_DICT.items()}, primary_metric_str="S5 MCPT (per-asset null); S6 T-bill slot",
+                kill_criteria_str="S8 CUSUM or Cold Blood Index red", source_str=variant.strategy_import_str, retro_bool=True,
+                prior_trials_int=100, parent_id_str=None if is_live_bool else "hpi_vote_reaudition_20261002",
+                universe_choice_str="The S&P 500 was the pods' universe from the start; HPI variants documented in strategies/hpi and "
+                                    "Pakal (counted: 100, an estimate above the 50 floor).",
+                universe_chosen_after_results_bool=False,
+            ),
+        )
     return out_dict
 
 

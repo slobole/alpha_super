@@ -219,6 +219,24 @@ GATED_SPEC_DICT["dv2_ndx"] = GatedSpec("dv2_ndx", "alpha.scout.gate.legacy_dv2_n
                                        functools.partial(_run_dv2, "dv2_ndx"))
 
 
+def _run_hpi(variant_name_str: str, capital_float: float):
+    from alpha.scout.specs import hpi
+
+    inputs = hpi.load_inputs()
+    config = hpi.VARIANT_DICT[variant_name_str].config
+    return hpi.simulate_config(inputs, config, hpi.ENGINE_COST_MODEL, capital_float), inputs.close_df
+
+
+# HPI S&P 500 event pods (2026-10-01; alpha/scout/specs/hpi.py): the 2/3/5 vote (WIRED, live account) and the
+# single-horizon IBS/RSI-exit rule (PM_READY), at the engine's own costs (whole shares, held names never resized, a
+# halted member kept, an exit's slot refilled in the same open).
+for _name_str, _import_str in (
+    ("hpi_vote", "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote"),
+    ("hpi_ibs_rsi", "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit"),
+):
+    GATED_SPEC_DICT[_name_str] = GatedSpec(_name_str, _import_str, _pickle_glob_str(_import_str), functools.partial(_run_hpi, _name_str))
+
+
 def _engine_strategy(spec: GatedSpec, fresh_bool: bool, root_path: Path):
     if fresh_bool:
         module = importlib.import_module(spec.strategy_import_str)
