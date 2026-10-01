@@ -215,3 +215,116 @@ def test_taa_variant_gate_passes_against_the_saved_engine_run(spec_name_str):
         pytest.skip("No saved engine run")
     report = run_gate(spec_name_str)
     assert report.passed_bool, report.summary_str()
+
+
+# ---------------------------------------------------------------------------------------------- Inflation Compass spec
+def test_compass_t5yie_alignment_and_slope_match_the_engine_helpers():
+    """Published = dated strictly before T, observation-dated = on or before T, both NaN past 7 days; OLS slope as polyfit."""
+    from alpha.scout.specs.compass import asof_value_ser, rolling_slope_vec
+    from strategies.taa_df.strategy_taa_inflation_compass import (
+        align_fred_to_session_ser,
+        compute_rolling_ols_slope_ser,
+    )
+
+    session_index = DATE_INDEX[:200]
+    observation_index = session_index.delete(list(range(50, 62)) + [100, 101, 140])  # a 12-session gap (> 7 days) and holidays
+    value_ser = pd.Series(np.round(2.0 + np.random.default_rng(4).normal(0, 0.1, len(observation_index)), 2), index=observation_index)
+    for same_date_bool in (False, True):
+        expected_ser, _age_ser = align_fred_to_session_ser(value_ser, session_index, include_same_date_bool=same_date_bool)
+        spec_ser = asof_value_ser(value_ser, session_index, include_same_date_bool=same_date_bool)
+        pd.testing.assert_series_equal(spec_ser, expected_ser, check_names=False, check_freq=False, check_index_type=False)
+    assert np.isnan(asof_value_ser(value_ser, session_index, False).iloc[61])  # the newest observation is 12 sessions old
+    ratio_ser = pd.Series(np.cumprod(1.0 + np.random.default_rng(5).normal(0, 0.01, 150)))
+    ratio_ser.iloc[30] = np.nan
+    np.testing.assert_allclose(rolling_slope_vec(ratio_ser.to_numpy(), 20), compute_rolling_ols_slope_ser(ratio_ser, 20).to_numpy(), rtol=1e-9, atol=1e-15)
+
+
+def test_compass_variants_family_and_regime_map():
+    from alpha.scout.family import COMPASS_GRID_DICT, compass_family
+    from alpha.scout.gate.run import GATED_SPEC_DICT
+    from alpha.scout.specs.compass import (
+        VARIANT_DICT,
+        CompassConfig,
+        config_from_dict,
+        regime_weight_mat,
+    )
+
+    assert VARIANT_DICT["compass"].config == CompassConfig()
+    assert CompassConfig().traded_tuple == ("XLE", "XLK", "XLU", "XLP", "IEF")
+    assert VARIANT_DICT["compass_qqq"].config.traded_tuple == ("XLE", "QQQ", "XLU", "XLP", "IEF")
+    for name_str, variant in VARIANT_DICT.items():
+        assert GATED_SPEC_DICT[name_str].strategy_import_str == variant.strategy_import_str
+    with pytest.raises(ValueError, match="goldilocks"):
+        CompassConfig(goldilocks_str="XLE")
+    tied = config_from_dict(CompassConfig(), {"trend_lookback_int": 40, "growth_sma_int": 150})
+    assert (tied.breakeven_lookback_int, tied.asset_slope_lookback_int, tied.growth_sma_int) == (40, 40, 150)
+    family = compass_family("compass", inputs=object())  # inputs are only read when a configuration runs
+    assert family.family_id_str == "macro_regime_allocation" and len(family.config_list()) == 27
+    assert family.live_config_dict in family.config_list() and set(family.param_grid_dict) == set(COMPASS_GRID_DICT)
+    weight_mat = regime_weight_mat(np.array([True, True, False, False]), np.array([True, False, True, False]))
+    np.testing.assert_array_equal(weight_mat, [[1, 0, 0, 0, 0], [0, 1, 0, 0, 0], [0, 0, 1, 0, 0], [0, 0, 0, 0.5, 0.5]])
+
+
+def test_compass_fast_replica_holds_the_planted_regime_and_runs_on_a_shuffle():
+    """SPY rising and T5YIE high and rising: growth up + inflation on -> XLE, held from the close after each decision."""
+    from alpha.scout.specs.compass import fast_daily_list, mcpt_column_list
+
+    rng_obj = np.random.default_rng(6)
+    date_index = DATE_INDEX[:600]
+    column_list = mcpt_column_list()
+    matrix = np.column_stack([rng_obj.normal(0.0002, 0.01, len(date_index)) for _ in column_list])
+    matrix[:, column_list.index("SPY")] = 0.001
+    matrix[:, column_list.index("T5YIE_published")] = 3.0 + 0.001 * np.arange(len(date_index))
+    matrix[:, column_list.index("T5YIE_dated")] = 3.0 + 0.001 * (np.arange(len(date_index)) + 1)
+    small_dict = {"growth_sma_int": 50, "trend_lookback_int": 20, "inflation_threshold_float": 2.0}
+    (daily_vec,) = fast_daily_list(matrix, date_index, [small_dict])
+    first_decision_int = date_index.get_loc(date_index[date_index.to_period("M") == date_index[49].to_period("M")][-1])
+    np.testing.assert_allclose(daily_vec[first_decision_int + 2:], matrix[first_decision_int + 2:, 0])
+    assert (daily_vec[: first_decision_int + 2] == 0.0).all()
+    shuffled_list = fast_daily_list(matrix[rng_obj.permutation(len(date_index))], date_index, [small_dict, {**small_dict, "growth_sma_int": 100}])
+    assert all(np.isfinite(v).all() for v in shuffled_list)
+
+
+@pytest.mark.skipif("not _norgate_ready()")
+@pytest.mark.parametrize("spec_name_str", ["compass", "compass_qqq"])
+def test_compass_gate_passes_against_the_saved_engine_run(spec_name_str):
+    from pathlib import Path
+
+    from alpha.scout.gate.run import GATED_SPEC_DICT, run_gate
+    from alpha.scout.ledger import MAIN_CHECKOUT_ROOT_PATH
+
+    if not any(Path(MAIN_CHECKOUT_ROOT_PATH).glob(GATED_SPEC_DICT[spec_name_str].pickle_glob_str)):
+        pytest.skip("No saved engine run")
+    report = run_gate(spec_name_str)
+    assert report.passed_bool, report.summary_str()
+
+
+@pytest.mark.skipif("not _norgate_ready()")
+def test_compass_gate_fails_the_old_same_date_t5yie_leak(monkeypatch):
+    """Near-miss mutant: reading the T5YIE value dated T at the T close (the leak fixed on 2026-09-28) must fail."""
+    from pathlib import Path
+
+    from alpha.scout.gate.run import GATED_SPEC_DICT, run_gate
+    from alpha.scout.ledger import MAIN_CHECKOUT_ROOT_PATH
+    from alpha.scout.specs import compass
+
+    if not any(Path(MAIN_CHECKOUT_ROOT_PATH).glob(GATED_SPEC_DICT["compass"].pickle_glob_str)):
+        pytest.skip("No saved engine run")
+    honest_fn = compass.asof_value_ser
+    monkeypatch.setattr(compass, "asof_value_ser", lambda value_ser, session_index, include_same_date_bool: honest_fn(value_ser, session_index, True))
+    assert not run_gate("compass").passed_bool
+
+
+@pytest.mark.skipif("not _norgate_ready()")
+def test_compass_fast_replica_tracks_the_engine():
+    from alpha.scout.family import compass_family
+    from alpha.scout.specs import compass
+
+    inputs = compass.load_inputs()
+    family = compass_family("compass", inputs)
+    date_index, matrix = compass.mcpt_matrix(inputs, end_date_str="2022-12-30")
+    (fast_vec,) = compass.fast_daily_list(matrix, date_index, [family.live_config_dict])
+    engine_ser = family.run_config(family.live_config_dict, compass.ENGINE_COST_MODEL).daily_return_ser.loc[:"2022-12-30"]
+    fast_ser = pd.Series(fast_vec, index=date_index).reindex(engine_ser.index)
+    start_ts = max(engine_ser.index[0], fast_ser.ne(0).idxmax())
+    assert np.corrcoef(engine_ser.loc[start_ts:], fast_ser.loc[start_ts:])[0, 1] > 0.98

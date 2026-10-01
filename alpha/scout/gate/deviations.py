@@ -29,13 +29,18 @@ ENGINE_DEVIATION_TUPLE = (
             "stock that later split 10:1 is modelled with 10x the historical share count."
         ),
         expected_bias_direction_str="Overstates historical per-share fees; results are conservative (readiness audit fix #15).",
-        impact_level_str="TAA 3x about +0.32 pp/yr of fees (2026-09-28 readiness audit). NDX VXN already uses historical units.",
+        impact_level_str=(
+            "TAA 3x about +0.32 pp/yr of fees (2026-09-28 readiness audit). NDX VXN already uses historical units. "
+            "Inflation Compass (both variants): 0.000 pp/yr on 2003-04..2026-09 (2026-10-01): no per-share commission, "
+            "so the XLE / XLK / XLU 2:1 splits change whole-share rounding only."
+        ),
         mitigation_str="Parity mode reproduces it; truth mode uses raw historical share units. Engine fix #15 is paused.",
         affected_strategy_list=(
             "strategy_taa_df_btal_fallback_tqqq_vix_cash", "strategy_taa_df_btal_1n_fallback_tqqq_vix_cash",
             "strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash", "strategy_taa_df_btal_1n_fallback_qld_vix_cash",
             "strategy_taa_df_1n_fallback_qld_vix_cash", "strategy_taa_df_1n_fallback_sso_vix_cash",
-        ),  # every gated TAA variant (2026-10-01); impact measured for TAA 3x only
+            "strategy_taa_inflation_compass", "strategy_taa_inflation_compass_qqq",
+        ),  # every gated TAA variant (2026-10-01; fee impact measured for TAA 3x only) and both Compass modules
     ),
 )
 
@@ -54,6 +59,35 @@ ENGINE_DEVIATION_TUPLE = ENGINE_DEVIATION_TUPLE + (
             "strategy_taa_df_btal_1n_fallback_qld_vix_cash", "strategy_taa_df_1n_fallback_qld_vix_cash",
             "strategy_taa_df_1n_fallback_sso_vix_cash",
         ),  # momentum-score TAA variants only: the linearity score has no DTB3 hurdle
+    ),
+    EngineDeviation(
+        deviation_id_str="t5yie_evening_publication",
+        issue_description_str=(
+            "Inflation Compass reads, at the month-end decision T, the T5YIE value dated T-1 (published values are dated "
+            "strictly before T since the 2026-09-28 fix). That assumes FRED posts it by about 17:15 ET on T, an evening "
+            "decision before the T+1 open. With an earlier cutoff or a late FRED update only the value dated T-2 exists."
+        ),
+        expected_bias_direction_str="Timing assumption, not a leak of an unpublished value; measured as not flattering.",
+        impact_level_str=(
+            "Reading T5YIE one session later (spec `t5yie_extra_lag_int=1`, 2026-10-01, engine costs, 2003-04..2026-09): "
+            "6 of 282 decisions change; Compass Sharpe 1.073 -> 1.078 (CAGR 20.81% -> 20.93%), QQQ variant 1.123 -> 1.128."
+        ),
+        mitigation_str="Parity mode reproduces it; no live rule exists for the T-2 case (the strategy is not wired).",
+        affected_strategy_list=("strategy_taa_inflation_compass", "strategy_taa_inflation_compass_qqq"),
+    ),
+    EngineDeviation(
+        deviation_id_str="t5yie_current_vintage",
+        issue_description_str=(
+            "Inflation Compass uses the current-vintage FRED T5YIE series, not a point-in-time ALFRED vintage archive "
+            "(gap G-027)."
+        ),
+        expected_bias_direction_str="A revised value would be a look-ahead of unknown sign.",
+        impact_level_str=(
+            "0 T5YIE revisions across ALFRED vintages since 2014 (2026-09-27 leakage audit); earlier vintages do not "
+            "exist, so 2003-2013 cannot be measured."
+        ),
+        mitigation_str="Parity mode reproduces it; not fixable before 2014 with the available archives.",
+        affected_strategy_list=("strategy_taa_inflation_compass", "strategy_taa_inflation_compass_qqq"),
     ),
 )
 
