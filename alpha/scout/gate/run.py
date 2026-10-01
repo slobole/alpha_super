@@ -90,6 +90,30 @@ def _ndx_gated_spec(variant_name_str: str) -> GatedSpec:
     )
 
 
+def _run_compass(variant_name_str: str, capital_float: float):
+    from alpha.scout.specs import compass
+
+    config = compass.VARIANT_DICT[variant_name_str].config
+    inputs = compass.load_inputs(config=config)
+    weight_df = compass.rebalance_weight_df(inputs, config)
+    result = simulate(
+        inputs.open_df, inputs.close_df, inputs.dividend_df, weight_df, start_date=weight_df.index[0],
+        capital_float=capital_float, share_unit_mode_str="adjusted", cost_model=compass.ENGINE_COST_MODEL,
+    )
+    return result, inputs.close_df
+
+
+def _compass_gated_spec(variant_name_str: str) -> GatedSpec:
+    from alpha.scout.specs.compass import VARIANT_DICT
+
+    import_str = VARIANT_DICT[variant_name_str].strategy_import_str
+    module_str = import_str.rsplit(".", 1)[-1]
+    return GatedSpec(
+        variant_name_str, import_str, f"results/research/strategy/{module_str}/vanilla_backtest/*/{module_str}.pkl",
+        functools.partial(_run_compass, variant_name_str),
+    )
+
+
 GATED_SPEC_DICT = {
     # The NDX momentum siblings (ndx_vxn is the LIVE pod); see alpha/scout/specs/ndx_vxn.py.
     **{name_str: _ndx_gated_spec(name_str) for name_str in NDX_VARIANT_DICT},
@@ -98,6 +122,8 @@ GATED_SPEC_DICT = {
 GATED_SPEC_DICT.update({name_str: _taa_gated_spec(name_str) for name_str in (
     "taa_3x", "taa_3x_1n", "taa_lin_1n_qqq", "taa_2x_1n_qld", "taa_nobtal_2x_1n_qld", "taa_nobtal_2x_1n_sso",
 )})
+# Inflation Compass and its QQQ variant (PM_READY; alpha/scout/specs/compass.py), at the engine's own costs.
+GATED_SPEC_DICT.update({name_str: _compass_gated_spec(name_str) for name_str in ("compass", "compass_qqq")})
 
 
 def _engine_strategy(spec: GatedSpec, fresh_bool: bool, root_path: Path):

@@ -7,6 +7,7 @@ the plateau grid shape is `grid_shape_tuple`. `decision_offset_int` is not a gri
 The two LIVE pods are wired here (P5): TAA 3x and NDX VXN, executed exactly as the identity gate executes them.
 The gated NDX siblings (plain ATR, NATR20, NATR20 VXN) reuse the NDX grid around their own engine config.
 The gated TAA engine variants (1/N, linearity, 2x) are wired through `taa_variant_family` the same way.
+Inflation Compass and its QQQ variant (PM_READY) are wired through `compass_family`.
 """
 
 from __future__ import annotations
@@ -154,6 +155,47 @@ def ndx_natr20_family(inputs=None) -> FamilyRunner:
 
 def ndx_natr20_vxn_family(inputs=None) -> FamilyRunner:
     return _ndx_family("ndx_natr20_vxn", "NDX NATR20 VXN", inputs)
+
+
+# ---------------------------------------------------------------- Inflation Compass
+# Three axes around the engine's values, each one step either side (27 configurations):
+# - growth_sma_int: the SPY trend window of the growth axis, 200 +- 50 sessions;
+# - inflation_threshold_float: the T5YIE level threshold, 2.0 +- 0.2 pp (the 2026-09-28 study's one-axis check);
+# - trend_lookback_int: the inflation-trend horizon, used for BOTH the T5YIE change anchor and the sector-basket slope
+#   (the source rule ties them at 60 sessions, about a quarter); 40 / 60 / 80 as in that study.
+# The 2026-09-28 study's 700-cell grid moved the two windows separately; tying them keeps the family to one concept per
+# axis and inside the 9-36 configuration budget. decision_offset_int is the luck band (S4), not an axis.
+COMPASS_GRID_DICT = {
+    "growth_sma_int": (150, 200, 250),
+    "inflation_threshold_float": (1.8, 2.0, 2.2),
+    "trend_lookback_int": (40, 60, 80),
+}
+COMPASS_FAMILY_NAME_DICT = {"compass": "Inflation Compass", "compass_qqq": "Inflation Compass QQQ"}
+
+
+def compass_family(variant_name_str: str, inputs=None) -> FamilyRunner:
+    """A gated Compass variant (alpha/scout/specs/compass.py VARIANT_DICT) as a family. The cost model is the caller's
+    (S4 passes the house parity costs); the identity gate uses the engine's own, `compass.ENGINE_COST_MODEL`."""
+    from alpha.scout.specs import compass
+
+    base_config = compass.VARIANT_DICT[variant_name_str].config
+    if base_config.breakeven_lookback_int != base_config.asset_slope_lookback_int:
+        raise ValueError("The Compass grid ties the two inflation-trend windows; the base config must too.")
+    inputs = inputs or compass.load_inputs(config=base_config)
+
+    def simulate_fn(config_dict: dict, cost_model: CostModel, capital_float: float) -> WeightsResult:
+        weight_df = compass.rebalance_weight_df(inputs, compass.config_from_dict(base_config, config_dict))
+        return simulate(
+            inputs.open_df, inputs.close_df, inputs.dividend_df, weight_df, start_date=weight_df.index[0],
+            capital_float=capital_float, share_unit_mode_str="adjusted", cost_model=cost_model,
+        )
+
+    return FamilyRunner(
+        name_str=COMPASS_FAMILY_NAME_DICT[variant_name_str], family_id_str="macro_regime_allocation",
+        param_grid_dict=COMPASS_GRID_DICT, simulate_fn=simulate_fn,
+        live_config_dict={"growth_sma_int": base_config.growth_sma_int, "inflation_threshold_float": base_config.inflation_threshold_float,
+                          "trend_lookback_int": base_config.breakeven_lookback_int},
+    )
 
 
 def grid_return_df(family: FamilyRunner, cost_model: CostModel = DEFAULT_COST_MODEL, capital_float: float = 100_000.0) -> pd.DataFrame:
