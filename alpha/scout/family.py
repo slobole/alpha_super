@@ -10,6 +10,7 @@ The gated TAA engine variants (1/N, linearity, 2x) are wired through `taa_varian
 Inflation Compass and its QQQ variant (PM_READY) are wired through `compass_family`.
 CORE5 adaptive macro (PM_READY, gated 2026-10-01) is `core5_family`.
 The PM_READY pods TFI and Trinity (2026-10-01) are wired through `tfi_family` and `trinity_family`.
+The month-end rebalancing flow (PM_READY, MOC execution) is `eom_family` (no luck band: offset_count_int = 1).
 """
 
 from __future__ import annotations
@@ -278,6 +279,29 @@ def tfi_family(inputs=None) -> FamilyRunner:
 def trinity_family(inputs=None) -> FamilyRunner:
     # Inverse-volatility weights under a volatility target: allocation by estimated risk (decided 2026-10-02, P6b).
     return _spec_family("trinity", "Trinity", "optimized_low_risk_allocation", TRINITY_GRID_DICT, inputs)
+
+
+# ---------------------------------------------------------------- Month-end rebalancing flow (PM_READY, 2026-10-01)
+# The rule bets that 60/40 rebalancers trade against the month's stock/bond drift in the last sessions and reverse
+# early next month. Three axes, one step either side of the live rule (27 configurations):
+# - entry_dtme_int: when the final leg enters (dtme 5, 6, 7); the measure stays one session before the entry;
+# - exit_session_int: how long the early-month reversal is held (sessions 3, 5, 7 of the next month);
+# - cut_tuple: how extreme the drift must be to act, as (low, high) cuts on the prior-month CDF F, from thin tails to
+#   wide ones: (0.1, 0.7), the live quintile rule (0.2, 0.6), (0.3, 0.5).
+# The leg weights (100% / 50-50 / -100%), the 60/40 reference and the 24-month warm-up are the rule's identity and stay
+# fixed. There is no luck band (offset_count_int = 1): the decision day IS the calendar hypothesis, so moving it is a
+# different rule; the two timing axes probe the day instead.
+EOM_GRID_DICT = {
+    "entry_dtme_int": (5, 6, 7),
+    "exit_session_int": (3, 5, 7),
+    "cut_tuple": ((0.1, 0.7), (0.2, 0.6), (0.3, 0.5)),
+}
+
+
+def eom_family(inputs=None) -> FamilyRunner:
+    family = _spec_family("eom", "EOM flow", "calendar_and_flow", EOM_GRID_DICT, inputs)
+    family.offset_count_int = 1
+    return family
 
 
 def grid_return_df(family: FamilyRunner, cost_model: CostModel = DEFAULT_COST_MODEL, capital_float: float = 100_000.0) -> pd.DataFrame:

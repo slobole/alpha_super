@@ -125,6 +125,32 @@ ENGINE_DEVIATION_TUPLE = ENGINE_DEVIATION_TUPLE + (
     ),
 )
 
+ENGINE_DEVIATION_TUPLE = ENGINE_DEVIATION_TUPLE + (
+    EngineDeviation(
+        deviation_id_str="xnys_closure_hindsight",
+        issue_description_str=(
+            "The month-end flow counts dtme on today's exchange_calendars XNYS list, which includes unscheduled closures "
+            "announced after the month's measure date. Hurricane Sandy (closed 2012-10-29/30, announced 2012-10-28/29) "
+            "moved the October 2012 measure from 10-23 to 10-19 and the final-leg entry from 10-24 to 10-22, days "
+            "before anyone knew. The other closures since 2002 (2004-06-11, 2007-01-02, 2018-12-05, 2025-01-09) were "
+            "announced before any schedule date they move, or move none."
+        ),
+        expected_bias_direction_str="Calendar hindsight on one month; measured mildly optimistic.",
+        impact_level_str=(
+            "2026-10-01, Scout truth mode (`EomConfig.notice_time_calendar_bool`, the October 2012 schedule built on the "
+            "pre-Sandy calendar), engine costs, $100K, 2003-01..2026-09: no month's bucket changes; the October 2012 "
+            "final leg enters two sessions later (Oct-Nov 2012 return +1.08% -> +0.65%); CAGR 10.974% -> 10.954%, "
+            "Sharpe 1.087 -> 1.086."
+        ),
+        mitigation_str=(
+            "Parity mode reproduces it (the engine's documented 'XNYS_historical_closures_not_notice_time_replay' "
+            "policy); immaterial, no engine fix proposed. A live run needs a refreshed calendar policy for future "
+            "unscheduled closures (the strategy doc says so)."
+        ),
+        affected_strategy_list=("strategy_taa_month_end_rebalancing_flow",),
+    ),
+)
+
 # Retired deviations, kept for the record.
 RETIRED_DEVIATION_DICT = {
     "membership_tail_trim": (

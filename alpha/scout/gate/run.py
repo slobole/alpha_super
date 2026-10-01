@@ -162,6 +162,9 @@ def _beyond_6040_gated_spec(name_str: str, spec_module_str: str, strategy_import
 GATED_SPEC_DICT.update({
     "tfi": _beyond_6040_gated_spec("tfi", "tfi", "strategies.taa_beyond_6040.strategy_taa_tactical_fixed_income_ief_lqd"),
     "trinity": _beyond_6040_gated_spec("trinity", "trinity", "strategies.taa_beyond_6040.strategy_taa_trinity_vol_control_8_bil"),
+    # Month-end rebalancing flow (PM_READY, 2026-10-01): MOC fills, close-and-reopen orders, a TLT short with borrow
+    # (alpha/scout/specs/eom.py).
+    "eom": _beyond_6040_gated_spec("eom", "eom", "strategies.taa_beyond_6040.strategy_taa_month_end_rebalancing_flow"),
 })
 
 

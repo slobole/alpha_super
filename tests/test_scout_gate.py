@@ -530,3 +530,85 @@ def test_beyond_6040_gate_passes_against_the_saved_engine_run(spec_name_str):
         pytest.skip("No saved engine run")
     report = run_gate(spec_name_str)
     assert report.passed_bool, report.summary_str()
+
+
+# ---------------------------------------------------------------------------------------------- month-end rebalancing flow
+def _synthetic_eom_inputs():
+    from alpha.scout.specs.eom import EomInputs, xnys_session_index
+
+    session_index = xnys_session_index(pd.Timestamp("2006-06-30"))
+    session_index = session_index[(session_index >= "2002-07-26") & (session_index <= "2006-06-30")]
+    rng_obj = np.random.default_rng(11)
+    close_df = pd.DataFrame(100.0 * np.cumprod(1.0 + rng_obj.normal(0.0003, [0.012, 0.009, 0.004], (len(session_index), 3)), axis=0),
+                            index=session_index, columns=["SPY", "TLT", "IEF"])
+    return EomInputs(open_df=close_df[["SPY", "TLT"]], close_df=close_df[["SPY", "TLT"]], dividend_df=close_df[["SPY", "TLT"]] * 0.0,
+                     total_return_close_df=close_df, session_index=xnys_session_index(session_index[-1]))
+
+
+def test_eom_month_table_and_schedule_match_the_engine():
+    from alpha.scout.specs import eom
+    from strategies.taa_beyond_6040 import (
+        strategy_taa_month_end_rebalancing_flow as engine,
+    )
+
+    inputs = _synthetic_eom_inputs()
+    spec_df = eom.month_table_df(inputs)
+    engine_df = engine.build_month_table_df(inputs.total_return_close_df[["SPY", "IEF"]])
+    assert np.array_equal(spec_df["pressure_bps_float"].to_numpy(), engine_df["pressure_ief_measure_bps_float"].to_numpy())
+    for column_str in ("measure_date", "final_fill_date", "early_fill_date", "exit_fill_date"):
+        assert (spec_df[column_str].to_numpy() == engine_df[column_str].to_numpy()).all()
+    # The (0.2, 0.6) cuts on F are the engine's quintile buckets: 1 -> low, 4-5 -> high, 2-3 -> mid, NaN -> missing.
+    bucket_vec = engine_df["bucket_ief_measure_causal_int"].to_numpy()
+    expected_list = ["missing" if np.isnan(b) else "low" if b == 1 else "high" if b >= 4 else "mid" for b in bucket_vec]
+    assert spec_df["state_str"].tolist() == expected_list and spec_df["state_str"].iloc[24:].nunique() == 3
+    weight_df = eom.rebalance_weight_df(inputs)
+    session_index = inputs.session_index
+    for month_row in spec_df.iloc[1:-1].itertuples():
+        # dtme 6 entry, month-end reversal, session-5 exit; the measure is one full session before the first fill.
+        assert session_index[session_index.get_loc(month_row.final_fill_date) - 1] == month_row.measure_date
+        assert tuple(weight_df.loc[month_row.early_fill_date]) == eom.target_weight_tuple(month_row.state_str, "early")
+        assert tuple(weight_df.loc[month_row.exit_fill_date]) == (0.0, 0.0)
+
+
+def test_eom_family_grid_and_replica_on_a_shuffle():
+    from alpha.scout.families import validate_family_id
+    from alpha.scout.family import eom_family
+    from alpha.scout.gate.run import GATED_SPEC_DICT
+    from alpha.scout.specs import eom
+
+    family = eom_family(inputs=object())  # the factory loads data only when no inputs are given
+    validate_family_id(family.family_id_str)
+    assert family.family_id_str == "calendar_and_flow" and family.offset_count_int == 1
+    assert len(family.config_list()) == 27 and family.live_config_dict in family.config_list()
+    assert GATED_SPEC_DICT["eom"].strategy_import_str == eom.STRATEGY_IMPORT_STR
+    with pytest.raises(ValueError, match="luck band"):
+        eom.EomConfig(decision_offset_int=1)
+    inputs = _synthetic_eom_inputs()
+    date_index, matrix = eom.mcpt_matrix(inputs, end_date_str=None)
+    assert date_index[0] == pd.Timestamp("2002-08-01") and matrix.shape == (len(date_index), 3)
+    rng_obj = np.random.default_rng(3)
+    for candidate_mat in (matrix, matrix[rng_obj.permutation(len(matrix))]):
+        daily_vec = eom.fast_daily_list(candidate_mat, date_index, [family.live_config_dict])[0]
+        assert np.isfinite(daily_vec).all() and 300 < (daily_vec != 0.0).sum() < 0.7 * len(daily_vec)
+    # Unshuffled, the replica tracks the engine path (gross, constant weights vs fixed shares with costs).
+    engine_ser = eom.simulate_config(inputs).daily_return_ser
+    fast_ser = pd.Series(eom.fast_daily_list(matrix, date_index, [eom.LIVE_CONFIG])[0], index=date_index).reindex(engine_ser.index)
+    assert np.corrcoef(engine_ser, fast_ser)[0, 1] > 0.99
+
+
+@pytest.mark.skipif("not _norgate_ready()")
+def test_eom_gate_passes_and_blocks_the_hindsight_free_calendar(monkeypatch):
+    from dataclasses import replace
+    from pathlib import Path
+
+    from alpha.scout.gate.run import GATED_SPEC_DICT, run_gate
+    from alpha.scout.ledger import MAIN_CHECKOUT_ROOT_PATH
+    from alpha.scout.specs import eom
+
+    if not any(Path(MAIN_CHECKOUT_ROOT_PATH).glob(GATED_SPEC_DICT["eom"].pickle_glob_str)):
+        pytest.skip("No saved engine run; run `python -m alpha.scout gate eom --fresh`.")
+    report = run_gate("eom")
+    assert report.passed_bool, report.summary_str()
+    # Truth mode moves the October 2012 entry by two sessions (deviation xnys_closure_hindsight): the gate must see it.
+    monkeypatch.setattr(eom, "LIVE_CONFIG", replace(eom.LIVE_CONFIG, notice_time_calendar_bool=True))
+    assert not run_gate("eom").passed_bool

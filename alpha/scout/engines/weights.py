@@ -36,6 +36,21 @@ Without `allow_short_bool` a negative weight raises: a long-only spec must never
 *** CRITICAL*** Sizing reads prices of T only; fills use Open(t). The engine's order of operations is part of the
 model (QUANT_PHILOSOPHY.md "Engine Order Is Part Of The Model").
 
+Same-session close execution (opt-in `fill_at_close_bool`, MOC; added 2026-10-01 for the month-end rebalancing flow,
+strategy_taa_month_end_rebalancing_flow.py `process_orders`, which copies the price frame, writes Close(t) into Open(t)
+for its traded assets and then runs the engine's ordinary `process_orders` on that copy):
+- the order of operations is unchanged: (0) decision hook, (1) dividends of T on the pre-fill position, (2)
+  missing-price liquidation, (3) orders sized on V and Close of T, (4) mark at Close(t), (5) borrow;
+- every execution price of session t is Close(t): fill = Close_i(t) × (1 + sign(Δ) × slippage), the same fee; an
+  order whose Close(t) is NaN is cancelled; a held asset is liquidated (step 2) only when Close(t) is NaN, because
+  the substituted Open(t) is Close(t);
+- the new position is marked at the same Close(t) it filled at (the fill session's return is only the slippage and
+  fee), and the dividend entitlement of t (credited before t+1) is on the post-fill position.
+Close-and-reopen orders (opt-in `close_and_reopen_bool`; the same strategy's `iterate`): every rebalance first closes
+each held position in full (one order per asset), then opens each non-zero target as a new order, even when the
+share count is unchanged; each order pays its own slippage and fee (a +100% -> -100% reversal trades 200% of NAV).
+It implies `split_sign_flip_bool` and replaces the netted delta.
+
 Path-dependent rules (added 2026-10-01 for Trinity's no-trade band): `decision_fn(t_idx, position_vec, total_T)` is
 called at the top of session t, before step 1, with the ledger state at the close of T (the engine's `iterate()`
 also runs before `process_orders()`), and returns a target weight vector for a rebalance at t or None. Its decisions
@@ -99,6 +114,8 @@ def simulate(
     split_sign_flip_bool: bool = False,
     borrow_model: BorrowModel | None = None,
     decision_fn: Callable[[int, np.ndarray, float], np.ndarray | None] | None = None,
+    fill_at_close_bool: bool = False,
+    close_and_reopen_bool: bool = False,
 ) -> WeightsResult:
     if share_unit_mode_str not in SHARE_UNIT_MODE_TUPLE:
         raise ValueError(f"share_unit_mode_str must be one of {SHARE_UNIT_MODE_TUPLE}.")
@@ -107,8 +124,10 @@ def simulate(
 
     date_index = open_df.index
     asset_list = list(open_df.columns)
-    open_mat = open_df.to_numpy(dtype=float)
     close_mat = close_df.reindex(index=date_index, columns=asset_list).to_numpy(dtype=float)
+    # *** CRITICAL*** MOC: Close(t) becomes the session's execution price (the strategy's Open := Close copy); sizing
+    # below still reads Close(T) only.
+    open_mat = close_mat if fill_at_close_bool else open_df.to_numpy(dtype=float)
     dividend_mat = dividend_df.reindex(index=date_index, columns=asset_list).to_numpy(dtype=float)
     if share_unit_mode_str == "historical":
         unadjusted_mat = unadjusted_close_df.reindex(index=date_index, columns=asset_list).to_numpy(dtype=float)
@@ -181,22 +200,28 @@ def simulate(
                     raw_price_float = unadjusted_mat[previous_idx_int, asset_idx_int]
                     raw_share_int = int(previous_total_float * weight_vec[asset_idx_int] / raw_price_float)
                     target_vec[asset_idx_int] = float(raw_share_int * factor_mat[previous_idx_int, asset_idx_int])
-            for asset_idx_int in np.flatnonzero(target_vec != position_vec):
-                delta_float = target_vec[asset_idx_int] - position_vec[asset_idx_int]
+            if close_and_reopen_bool:
+                # Every held position is closed, then every non-zero target opened: (asset, leg) in the engine's order.
+                leg_list = [(a, -position_vec[a]) for a in np.flatnonzero(position_vec != 0.0)]
+                leg_list += [(a, target_vec[a]) for a in np.flatnonzero(target_vec != 0.0)]
+            else:
+                leg_list = []
+                for asset_idx_int in np.flatnonzero(target_vec != position_vec):
+                    current_float, target_float = position_vec[asset_idx_int], target_vec[asset_idx_int]
+                    if split_sign_flip_bool and current_float * target_float < 0.0:
+                        # close the old leg, then open the new one
+                        leg_list += [(asset_idx_int, -current_float), (asset_idx_int, target_float)]
+                    else:
+                        leg_list.append((asset_idx_int, target_float - current_float))
+            for asset_idx_int, leg_delta_float in leg_list:
                 open_float = open_mat[t_idx_int, asset_idx_int]
                 if not np.isfinite(open_float):
                     continue  # cancelled: no bar to fill on
-                current_float, target_float = position_vec[asset_idx_int], target_vec[asset_idx_int]
-                if split_sign_flip_bool and current_float * target_float < 0.0:
-                    leg_delta_tuple = (-current_float, target_float)  # close the old leg, then open the new one
-                else:
-                    leg_delta_tuple = (delta_float,)
-                for leg_delta_float in leg_delta_tuple:
-                    fill_float = open_float * (1.0 + np.sign(leg_delta_float) * cost_model.slippage_float)
-                    fee_float = _fee(leg_delta_float, factor_mat[t_idx_int, asset_idx_int])
-                    cash_float -= leg_delta_float * fill_float + fee_float
-                    position_vec[asset_idx_int] += leg_delta_float
-                    trade_list.append((t_date, asset_list[asset_idx_int], leg_delta_float, fill_float, fee_float, "rebalance"))
+                fill_float = open_float * (1.0 + np.sign(leg_delta_float) * cost_model.slippage_float)
+                fee_float = _fee(leg_delta_float, factor_mat[t_idx_int, asset_idx_int])
+                cash_float -= leg_delta_float * fill_float + fee_float
+                position_vec[asset_idx_int] += leg_delta_float
+                trade_list.append((t_date, asset_list[asset_idx_int], leg_delta_float, fill_float, fee_float, "rebalance"))
             position_row_dict[t_date] = position_vec.copy()
 
         # 4. Mark to market at the close of t.

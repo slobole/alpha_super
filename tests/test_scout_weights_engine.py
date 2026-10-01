@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 
 import numpy as np
@@ -138,6 +137,41 @@ def test_short_split_sign_flip_and_borrow_fee():
     assert one_leg_result.total_value_ser.loc[DATE_INDEX[5]] == pytest.approx(994.74)  # one +34 order, one fee
 
 
+def test_moc_close_and_reopen_short_dividend_and_borrow():
+    """The month-end flow's contract: MOC fills at Close(t) sized on T, every held leg closed and every target reopened
+    (each order paying slippage and fee), the short paying its dividend in full and the borrow fee after the mark."""
+    from alpha.scout.engines.weights import BorrowModel
+
+    open_rows = [[100.0, 100.0]] * 6
+    open_rows[1] = [np.nan, 100.0]  # a missing Open is irrelevant to a closing-auction fill
+    close_rows = [[10, 20], [11, 20], [12, 20], [12, 21], [12, 20], [12, 20]]
+    dividend_rows = [[0, 0], [0, 0], [0, 0], [0, 0.5], [0, 0], [0, 0]]
+    open_df, close_df, dividend_df = _frames(open_rows, close_rows, dividend_rows)
+    weight_df = pd.DataFrame({"A": [0.5, 0.5, 0.0], "B": [0.0, -0.5, 0.0]}, index=DATE_INDEX[[1, 3, 5]])
+    kwarg_dict = {"capital_float": 1000.0, "cost_model": CostModel(slippage_float=0.001, fee_per_share_float=0.005, min_fee_float=1.0),
+                  "allow_short_bool": True, "borrow_model": BorrowModel(annual_rate_float=0.36)}
+    result = simulate(open_df, close_df, dividend_df, weight_df, DATE_INDEX[1], fill_at_close_bool=True, close_and_reopen_bool=True, **kwarg_dict)
+    total_ser = result.total_value_ser
+    # Tue: A = trunc(1000 x 0.5 / 10) = 50 bought at Close 11 x 1.001 = 11.011, fee 1: cash 448.45, mark 550 -> 998.45.
+    assert total_ser.iloc[0] == pytest.approx(998.45) and result.daily_return_ser.iloc[0] == pytest.approx(-0.00155)
+    assert total_ser.iloc[1] == pytest.approx(1048.45)  # Wed: 50 x 12
+    # Thu, from V = 1048.45 and Wed closes: A trunc(524.225 / 12) = 43, B trunc(-524.225 / 20) = -26. Close A -50 at
+    # 11.988 (+599.40 - 1), reopen A +43 at 12.012 (-516.516 - 1), short B -26 at 21 x 0.999 = 20.979 (+545.454 - 1):
+    # cash 1073.788; mark 43 x 12 - 26 x 21 = -30 -> 1043.788; borrow 26 x ceil(21.42) x 0.36 / 360 x 1 day = 0.572.
+    assert result.trade_df.loc[result.trade_df["date"] == DATE_INDEX[3], "delta_float"].tolist() == [-50.0, 43.0, -26.0]
+    assert total_ser.iloc[2] == pytest.approx(1043.216)
+    # Fri: B's Thursday dividend 0.5 is paid in full by the short (-13) before the auction; mark 516 - 520; borrow over
+    # the weekend 26 x 21 x 0.36 / 360 x 3 = 1.638.
+    assert total_ser.iloc[3] == pytest.approx(1054.578)
+    assert result.borrow_fee_df["fee_float"].tolist() == pytest.approx([0.572, 1.638])
+    # Mon: both legs closed at Close: A -43 at 11.988 (+515.484 - 1), B +26 at 20.02 (-520.52 - 1).
+    assert total_ser.iloc[4] == pytest.approx(1051.542)
+    netted_result = simulate(open_df, close_df, dividend_df, weight_df, DATE_INDEX[1], fill_at_close_bool=True, **kwarg_dict)
+    assert netted_result.trade_df.loc[netted_result.trade_df["date"] == DATE_INDEX[3], "delta_float"].tolist() == [-7.0, -26.0]
+    open_result = simulate(open_df, close_df, dividend_df, weight_df, DATE_INDEX[1], **kwarg_dict)
+    assert open_result.trade_df.loc[open_result.trade_df["date"] == DATE_INDEX[1]].empty  # the default path needs Open(t)
+
+
 # ---------------------------------------------------------------------------------------------- real-data gates
 def _norgate_running_bool() -> bool:
     """True only when the Norgate Data Updater is running (the package alone is always installed)."""
@@ -145,7 +179,7 @@ def _norgate_running_bool() -> bool:
         import norgatedata
 
         return bool(norgatedata.status())
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
 
 
