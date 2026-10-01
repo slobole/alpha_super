@@ -126,6 +126,22 @@ GATED_SPEC_DICT.update({name_str: _taa_gated_spec(name_str) for name_str in (
 GATED_SPEC_DICT.update({name_str: _compass_gated_spec(name_str) for name_str in ("compass", "compass_qqq")})
 
 
+def _run_core5(capital_float: float):
+    from alpha.scout.specs import core5
+
+    inputs = core5.load_inputs()
+    result = core5.simulate_config(inputs, core5.LIVE_CONFIG, cost_model=COST_MODEL, capital_float=capital_float)
+    return result, inputs.close_df[list(core5.TRADED_TUPLE)]
+
+
+# CORE5 adaptive macro (PM_READY): five absolute-trend sleeves, BIL and a DBC short (alpha/scout/specs/core5.py).
+GATED_SPEC_DICT["core5"] = GatedSpec(
+    "core5", "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5",
+    "results/research/strategy/strategy_taa_adaptive_macro_core5/vanilla_backtest/*/strategy_taa_adaptive_macro_core5.pkl",
+    _run_core5,
+)
+
+
 def _engine_strategy(spec: GatedSpec, fresh_bool: bool, root_path: Path):
     if fresh_bool:
         module = importlib.import_module(spec.strategy_import_str)

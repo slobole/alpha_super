@@ -28,19 +28,24 @@ ENGINE_DEVIATION_TUPLE = (
             "shares that were actually tradable on the day (`historical_share_units_bool` is False by default). A "
             "stock that later split 10:1 is modelled with 10x the historical share count."
         ),
-        expected_bias_direction_str="Overstates historical per-share fees; results are conservative (readiness audit fix #15).",
+        expected_bias_direction_str=(
+            "A later forward split overstates historical per-share fees (conservative, readiness audit fix #15); a later "
+            "reverse split or share consolidation understates them (optimistic)."
+        ),
         impact_level_str=(
             "TAA 3x about +0.32 pp/yr of fees (2026-09-28 readiness audit). NDX VXN already uses historical units. "
             "Inflation Compass (both variants): 0.000 pp/yr on 2003-04..2026-09 (2026-10-01): no per-share commission, "
-            "so the XLE / XLK / XLU 2:1 splits change whole-share rounding only."
+            "so the XLE / XLK / XLU 2:1 splits change whole-share rounding only. "
+            "CORE5 -0.013 pp/yr (optimistic): BIL's 1-for-2 consolidation (UnadjClose / Close = 0.5 before 2017-11-30) halves its earlier ledger share counts "
+            "(Scout truth-mode run, 2026-10-01: CAGR 7.061% adjusted vs 7.048% historical units, 2007-09 to 2026-09)."
         ),
         mitigation_str="Parity mode reproduces it; truth mode uses raw historical share units. Engine fix #15 is paused.",
         affected_strategy_list=(
             "strategy_taa_df_btal_fallback_tqqq_vix_cash", "strategy_taa_df_btal_1n_fallback_tqqq_vix_cash",
             "strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash", "strategy_taa_df_btal_1n_fallback_qld_vix_cash",
             "strategy_taa_df_1n_fallback_qld_vix_cash", "strategy_taa_df_1n_fallback_sso_vix_cash",
-            "strategy_taa_inflation_compass", "strategy_taa_inflation_compass_qqq",
-        ),  # every gated TAA variant (2026-10-01; fee impact measured for TAA 3x only) and both Compass modules
+            "strategy_taa_inflation_compass", "strategy_taa_inflation_compass_qqq", "strategy_taa_adaptive_macro_core5",
+        ),  # every gated TAA variant (2026-10-01; fee impact measured for TAA 3x only), both Compass modules and CORE5
     ),
 )
 

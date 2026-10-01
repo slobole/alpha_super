@@ -30,11 +30,11 @@ FAMILY_DESCRIPTION_DICT: dict[str, str] = {
     ),
     "macro_regime_allocation": (
         "Allocating by a macro or yield-curve regime read from economic data. Examples: Inflation Compass, "
-        "CORE5 adaptive macro, Tactical Fixed Income."
+        "Tactical Fixed Income."
     ),
     "time_series_trend_and_breakout": (
         "Following an asset's own trend or breakouts, paid for by slow-moving capital and crisis convexity. "
-        "Examples: SMA filters, channel breakouts, crisis trend core."
+        "Examples: SMA filters, channel breakouts, crisis trend core, CORE5 adaptive macro (per-asset trend)."
     ),
     "calendar_and_flow": (
         "Predictable flows tied to the calendar. Examples: month-end rebalancing flow, turn of the month, "

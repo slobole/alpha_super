@@ -115,6 +115,29 @@ def test_monthly_drift_is_traded_back_to_target():
     np.testing.assert_allclose(result.position_after_rebalance_df.loc[DATE_INDEX[3]], [37, 75])
 
 
+def test_short_split_sign_flip_and_borrow_fee():
+    """CORE5's short contract: truncation toward zero, a flip as two fee-paying legs, borrow accrued on calendar days."""
+    from alpha.scout.engines.weights import BorrowModel
+
+    open_df, close_df, dividend_df = _frames([[10, 20]] * 6, [[10, 20]] * 6)
+    weight_df = pd.DataFrame({"A": [0.5, 0.0], "B": [-0.2, 0.5]}, index=[DATE_INDEX[1], DATE_INDEX[5]])
+    cost_model = CostModel(slippage_float=0.0, fee_per_share_float=0.005, min_fee_float=1.0)
+    with pytest.raises(ValueError, match="allow_short_bool"):
+        simulate(open_df, close_df, dividend_df, weight_df, DATE_INDEX[1], capital_float=1000.0, cost_model=cost_model)
+    kwarg_dict = {"capital_float": 1000.0, "cost_model": cost_model, "allow_short_bool": True, "borrow_model": BorrowModel(annual_rate_float=0.36)}
+    result = simulate(open_df, close_df, dividend_df, weight_df, DATE_INDEX[1], split_sign_flip_bool=True, **kwarg_dict)
+    # Tue: +50 A, -10 B, fees 1 + 1 -> 998. Borrow per calendar day: 10 x ceil(1.02 x 20) = 210 x 0.36 / 360 = 0.21;
+    # Tue, Wed, Thu 1 day each, Fri 3 days (to Mon) -> 1.26, so Fri closes at 996.74.
+    np.testing.assert_allclose(result.position_after_rebalance_df.loc[DATE_INDEX[1]], [50, -10])
+    assert result.total_value_ser.loc[DATE_INDEX[4]] == pytest.approx(996.74)
+    assert result.borrow_fee_df["fee_float"].tolist() == pytest.approx([0.21, 0.21, 0.21, 0.63])
+    # Mon: B goes -10 -> trunc(996.74 x 0.5 / 20) = 24 as two legs (+10, +24), each paying the $1 minimum; A sold (fee 1).
+    assert result.trade_df.loc[result.trade_df["date"] == DATE_INDEX[5], "delta_float"].tolist() == [-50.0, 10.0, 24.0]
+    assert result.total_value_ser.loc[DATE_INDEX[5]] == pytest.approx(993.74)
+    one_leg_result = simulate(open_df, close_df, dividend_df, weight_df, DATE_INDEX[1], **kwarg_dict)
+    assert one_leg_result.total_value_ser.loc[DATE_INDEX[5]] == pytest.approx(994.74)  # one +34 order, one fee
+
+
 # ---------------------------------------------------------------------------------------------- real-data gates
 def _norgate_running_bool() -> bool:
     """True only when the Norgate Data Updater is running (the package alone is always installed)."""
