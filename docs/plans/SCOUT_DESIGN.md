@@ -1073,6 +1073,18 @@ Report: `docs/research/SCOUT_P6A_REAUDITION_20261002.md`.
     NATR20 ranking passes the selection MCPT at p 0.001.
   - **NDX in the book:** no NDX rule adds value to the live book (2012-2022).
 
+**A11 (2026-10-02, P6b: macro and allocation pods).**
+Report: `docs/research/SCOUT_P6B_REAUDITION_20261002.md`.
+
+- **Gated exactly:** Compass, Compass QQQ, CORE5, TFI and Trinity.
+- **Weights engine:** opt-in shorts, borrow fee, sign-flip orders, and a path-dependent `decision_fn` hook.
+- **Runner:** MCPT kind "spec", where the spec module carries its validated replica.
+- **Family placement:** CORE5 moves to the trend family, Trinity to low-risk allocation.
+- **Grades:** CORE5 CANDIDATE; Compass and Compass QQQ WATCHLIST (real timing, MCPT p 0.003-0.005, but no
+  independent alpha after TAA 3x); TFI and Trinity WATCHLIST.
+- **In NDX VXN's book slot:** CORE5 (P 0.85) and Compass QQQ (P 0.81) beat T-bills; NDX variants, TFI and Trinity
+  do not.
+
 **Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
 It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about
 performance. A performance kill rule is a separate, currently unrecorded gap, and P1 should add it to

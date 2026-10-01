@@ -276,7 +276,8 @@ def tfi_family(inputs=None) -> FamilyRunner:
 
 
 def trinity_family(inputs=None) -> FamilyRunner:
-    return _spec_family("trinity", "Trinity", "tactical_asset_allocation", TRINITY_GRID_DICT, inputs)
+    # Inverse-volatility weights under a volatility target: allocation by estimated risk (decided 2026-10-02, P6b).
+    return _spec_family("trinity", "Trinity", "optimized_low_risk_allocation", TRINITY_GRID_DICT, inputs)
 
 
 def grid_return_df(family: FamilyRunner, cost_model: CostModel = DEFAULT_COST_MODEL, capital_float: float = 100_000.0) -> pd.DataFrame:

@@ -149,7 +149,8 @@ def spec_mcpt(plan: PodPlan, family: FamilyRunner, inputs) -> list[McptComponent
     date_index, matrix = date_index[keep_vec], matrix[keep_vec]
     state = {"module_str": option_dict["module_str"], "date_index": date_index, "config_list": family.config_list(),
              "grid_shape_tuple": family.grid_shape_tuple, "asset_count_int": option_dict["asset_count_int"],
-             "fast_kwarg_dict": option_dict.get("fast_kwarg_dict", {})}
+             "fast_kwarg_dict": {**option_dict.get("fast_kwarg_dict", {}),
+                                 **(option_dict["fast_kwarg_fn"](module, inputs, date_index) if "fast_kwarg_fn" in option_dict else {})}}
     _STATE.update(state)
     observed_float = _spec_search(matrix)
     chunk_int = PERMUTATION_COUNT_INT // WORKER_COUNT_INT + 1

@@ -131,6 +131,10 @@ def base_weight_decision_df(inputs: TrinityInputs, config: TrinityConfig = LIVE_
     else:
         decision_index = offset_decision_index(session_index, config.decision_offset_int)
         decision_index = decision_index[position_ser.reindex(decision_index).to_numpy() + 1 < len(session_index)]
+        # Luck band only: an offset decision before every traded asset has a price (BIL lists in late May 2007) is
+        # not actionable; the live month-end path never meets one.
+        close_mat = inputs.close_df[list(TRADED_TUPLE)].reindex(decision_index).to_numpy(dtype=float)
+        decision_index = decision_index[(np.isfinite(close_mat) & (close_mat > 0.0)).all(axis=1)]
         month_vol_df = vol_df.reindex(decision_index)
     inverse_df = 1.0 / month_vol_df.where(month_vol_df > 0.0)
     weight_df = inverse_df.div(inverse_df.sum(axis=1), axis=0)

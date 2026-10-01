@@ -114,6 +114,57 @@ def plan_dict() -> dict[str, tuple[PodPlan, Registration]]:
             universe_chosen_after_results_bool=False,
         ),
     )
+    from alpha.scout.family import (
+        TFI_GRID_DICT,
+        TRINITY_GRID_DICT,
+        tfi_family,
+        trinity_family,
+    )
+    from alpha.scout.specs import tfi, trinity
+
+    def tfi_s3():
+        input_dict = tfi.s3_inputs()
+        result_dict = predictive_tests(**input_dict["predictive_tests"])
+        result_dict["vix_gate"] = gate_split(**input_dict["gate_split"]["IEF"])
+        lqd_gate_dict = gate_split(**input_dict["gate_split"]["LQD"])
+        result_dict["check_list"] = [*result_dict["check_list"], ("LQD " + lqd_gate_dict["check"][0], *lqd_gate_dict["check"][1:])]
+        return "W", ("Class W: TFI holds IEF when the term spread is above its typical level and LQD when the credit spread is, "
+                     "else BIL. Per-asset slopes are the meaningful part with two assets; the IEF and LQD gates are also tested "
+                     "as risk gates (next-month volatility off vs on)."), result_dict
+
+    def trinity_s3():
+        gate_dict = gate_split(**trinity.s3_inputs()["gate_split"])
+        return "W", ("Class W: Trinity's weights are a risk model (inverse volatility), not a score; its exposure overlay is a "
+                     "risk gate, tested on the next month's volatility of the base portfolio."), {"check_list": [], "vix_gate": gate_dict}
+
+    for name_str, module, family_fn, grid_dict, family_id_str, label_str, s3_fn, extra_dict in (
+        ("tfi", tfi, tfi_family, TFI_GRID_DICT, "macro_regime_allocation", "TFI", tfi_s3,
+         {"fast_kwarg_fn": lambda module, inputs, date_index: {"prehistory_dict": module.mcpt_prehistory_dict(inputs, date_index)}}),
+        ("trinity", trinity, trinity_family, TRINITY_GRID_DICT, "optimized_low_risk_allocation", "Trinity", trinity_s3, {}),
+    ):
+        out_dict[name_str] = (
+            PodPlan(
+                name_str=label_str, family_fn=lambda inputs, f=family_fn: f(inputs), inputs_fn=module.load_inputs, mcpt_kind_str="spec",
+                adoption_date_str="2026-09-28", prior_trial_count_int=50, slot_str="NDX VXN", s3_fn=s3_fn,
+                option_dict={"spec": {"module_str": module.__name__, "matrix_fn": lambda m, inputs: m.mcpt_matrix(inputs),
+                                      "asset_count_int": len(module.TRADED_TUPLE), **extra_dict}},
+                strategy_module_str=module.STRATEGY_IMPORT_STR,
+            ),
+            Registration(
+                registration_id_str=f"{name_str}_reaudition_20261002", family_id_str=family_id_str,
+                hypothesis_str=f"{label_str} ({module.STRATEGY_IMPORT_STR.rsplit('.', 1)[-1]}) beats a volatility-targeted equal weight of "
+                               f"its traded ETFs ({', '.join(module.TRADED_TUPLE)}) through its timing rule.",
+                mechanism_str=("Term and credit spreads above their typical level predict excess bond returns."
+                               if name_str == "tfi" else "Inverse-volatility weights with a volatility target exploit volatility clustering."),
+                expected_sign_and_location_str="Positive active return, risk reduction in stress.", hypothesis_class_str="W",
+                universe_str=", ".join(module.TRADED_TUPLE), horizon_str="one month", schedule_str="month end (Trinity: with a no-trade band)",
+                execution_str="next session's open", param_grid_dict={k: tuple(v) for k, v in grid_dict.items()},
+                primary_metric_str="S5 MCPT (score SD); S6 T-bill slot", kill_criteria_str="S8 CUSUM or Cold Blood Index red",
+                source_str=module.STRATEGY_IMPORT_STR, retro_bool=True, prior_trials_int=50,
+                universe_choice_str="The owner's published-design ETF set; documented variants not counted, so N = 50 (rule).",
+                universe_chosen_after_results_bool=False,
+            ),
+        )
     return out_dict
 
 

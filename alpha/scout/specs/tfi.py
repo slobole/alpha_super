@@ -174,6 +174,8 @@ def signal_df(inputs: TfiInputs, config: TfiConfig = LIVE_CONFIG) -> pd.DataFram
     for decision_ts in decision_index(session_index, config.decision_offset_int):
         position_int = int(session_index.get_loc(decision_ts))
         if position_int == 0:
+            if config.decision_offset_int:
+                continue  # luck band only: an offset decision on the data's first session has no T-1 to read
             raise ValueError(f"No session before the decision {decision_ts.date()}.")
         previous_ts = session_index[position_int - 1]
         # *** CRITICAL*** publication-safe: the newest common observation dated T-1 or earlier, never T.
