@@ -1012,6 +1012,199 @@ def test_dv2_panel_replica_tracks_the_engine(variant_name_str):
     assert np.corrcoef(engine_ser, fast_ser.reindex(engine_ser.index))[0, 1] > 0.99
 
 
+# ---------------------------------------------------------------------------------------------- DV2 industry ETF (RESEARCH)
+DV2_ETF_TUPLE = tuple(f"E{i}" for i in range(8))
+
+
+def _synthetic_dv2_etf_frame(seed_int: int = 31, row_count_int: int = 1000) -> pd.DataFrame:
+    """A load_raw_prices-layout frame of 8 ETFs and a $SPX benchmark. Turnover sits above the $50M floor except: E6
+    always below (never eligible), E7 ramps from $20M to $100M (crosses the floor), E5 has a zero Turnover cell at row
+    600 (voids the 63 ADV windows that hold it), E4 lists at row 300 (eligible only after 252 closes), E3 has an invalid
+    raw close at row 700."""
+    session_index = pd.bdate_range("2012-01-02", periods=row_count_int)
+    rng_obj = np.random.default_rng(seed_int)
+    shape_tuple = (row_count_int, len(DV2_ETF_TUPLE))
+    close_mat = 40.0 * np.exp(np.cumsum(rng_obj.normal(0.0, 0.008, (row_count_int, 1)) + rng_obj.normal(0.0008, 0.014, shape_tuple), axis=0))
+    open_mat = np.vstack([close_mat[:1], close_mat[:-1]]) * np.exp(rng_obj.normal(0.0, 0.005, shape_tuple))
+    high_mat = np.maximum(open_mat, close_mat) * np.exp(np.abs(rng_obj.normal(0.0, 0.007, shape_tuple)))
+    low_mat = np.minimum(open_mat, close_mat) * np.exp(-np.abs(rng_obj.normal(0.0, 0.007, shape_tuple)))
+    for mat in (open_mat, high_mat, low_mat, close_mat):
+        mat[:300, 4] = np.nan
+    turnover_mat = np.exp(rng_obj.normal(np.log(8e7), 0.3, shape_tuple))
+    turnover_mat[:, 6] = 3e7
+    turnover_mat[:, 7] = np.linspace(2e7, 1e8, row_count_int)
+    turnover_mat[600, 5] = 0.0
+    turnover_mat[~np.isfinite(close_mat)] = np.nan
+    raw_close_mat = close_mat.copy()
+    raw_close_mat[700, 3] = 0.0
+    field_dict = {"Open": open_mat, "High": high_mat, "Low": low_mat, "Close": close_mat, "Volume": turnover_mat / close_mat,
+                  "Turnover": turnover_mat, "Unadjusted Close": raw_close_mat, "Dividend": np.where(np.isfinite(close_mat), 0.0, np.nan)}
+    field_dict["Dividend"][450::63, :] = 0.1  # quarterly ETF distributions
+    field_dict["Dividend"][~np.isfinite(close_mat)] = np.nan
+    column_dict = {(s, f): mat[:, i].astype(np.float32) for i, s in enumerate(DV2_ETF_TUPLE) for f, mat in field_dict.items()}
+    column_dict.update({("$SPX", f): np.nanmean(close_mat, axis=1).astype(np.float32) for f in ("Open", "High", "Low", "Close", "Volume", "Turnover")})
+    return pd.DataFrame(column_dict, index=session_index)
+
+
+def test_dv2_industry_etf_eligibility_is_causal_and_matches_the_engine_fields():
+    from alpha.scout.specs import dv2_industry_etf
+    from strategies.dv2.strategy_mr_dv2_industry_etf import (
+        DVO2IndustryEtfStrategy,
+        build_history_universe_df,
+    )
+
+    pricing_df = _synthetic_dv2_etf_frame()
+    inputs = dv2_industry_etf.inputs_from_frames(pricing_df, backtest_start_str=str(pricing_df.index[300].date()))
+    universe_df = build_history_universe_df(pricing_df)
+    assert np.array_equal(inputs.base.member_df.to_numpy(), (universe_df[list(inputs.base.close_df.columns)] == 1).to_numpy())
+    signal_df = DVO2IndustryEtfStrategy(name="t", benchmarks=["$SPX"], capital_base=1.0).compute_signals(pricing_df)
+    for symbol_str in DV2_ETF_TUPLE:  # the engine's own ADV63 and raw-price fields, bit for bit
+        np.testing.assert_array_equal(inputs.adv_df[symbol_str].to_numpy(), signal_df[(symbol_str, "adv_63")].to_numpy())
+        assert np.array_equal(inputs.raw_price_ok_df[symbol_str].to_numpy(), signal_df[(symbol_str, "raw_price")].notna().to_numpy())
+    eligible_df = pd.DataFrame(dv2_industry_etf.eligible_mat(inputs), index=inputs.base.close_df.index, columns=inputs.base.close_df.columns)
+    assert not eligible_df["E6"].any() and not eligible_df["E7"].iloc[:300].any() and eligible_df["E7"].iloc[-100:].all()
+    assert not eligible_df["E5"].iloc[600:663].any() and eligible_df["E5"].iloc[663:].any()
+    assert not eligible_df["E4"].iloc[:300 + 251].any() and eligible_df["E4"].iloc[300 + 251:].any()
+    assert not eligible_df["E3"].iloc[700] and eligible_df["E3"].iloc[[699, 701]].all()
+    # *** CRITICAL*** eligibility at T never changes when later bars arrive
+    cut_int = 650
+    cut_inputs = dv2_industry_etf.inputs_from_frames(pricing_df.iloc[:cut_int], backtest_start_str=str(pricing_df.index[300].date()))
+    assert np.array_equal(dv2_industry_etf.eligible_mat(cut_inputs), eligible_df.to_numpy()[:cut_int])
+
+
+def test_dv2_industry_etf_spec_matches_the_engine_exactly_on_synthetic_data():
+    from alpha.engine.backtest import run_daily
+    from alpha.scout.gate.identity import compare_exact
+    from alpha.scout.gate.run import _daily_weight_df
+    from alpha.scout.specs import dv2_industry_etf
+    from strategies.dv2 import strategy_mr_dv2_industry_etf as engine_module
+
+    pricing_df = _synthetic_dv2_etf_frame()
+    start_str = str(pricing_df.index[300].date())
+    strategy_obj = engine_module._new_strategy_obj(100_000.0, engine_module.build_history_universe_df(pricing_df))
+    run_daily(strategy_obj, pricing_df, pricing_df.index[pricing_df.index >= start_str], show_progress=False, show_signal_progress_bool=False)
+    inputs = dv2_industry_etf.inputs_from_frames(pricing_df, backtest_start_str=start_str)
+    result = dv2_industry_etf.simulate_config(inputs)
+    engine_total_ser = strategy_obj.results["total_value"].astype(float)
+    engine_total_ser.index = pd.DatetimeIndex(engine_total_ser.index)
+    engine_weight_df = strategy_obj.realized_weight_df.drop(columns=["Cash"], errors="ignore")
+    engine_weight_df.index = pd.DatetimeIndex(engine_weight_df.index)
+    engine_trade_index = pd.DatetimeIndex(pd.to_datetime(strategy_obj.get_transactions()["bar"]).unique())
+    report = compare_exact(engine_total_ser / engine_total_ser.shift(1).fillna(100_000.0) - 1.0, result.daily_return_ser, engine_weight_df,
+                           _daily_weight_df(result, inputs.base.close_df), engine_trade_index, pd.DatetimeIndex(result.trade_df["date"].unique()))
+    assert report.passed_bool, report.summary_str()
+    traded_set = set(result.trade_df["asset"])
+    assert len(result.trade_df) > 100 and "E6" not in traded_set and {"E4", "E7"} <= traded_set
+    assert (result.daily_position_df > 0).sum(axis=1).max() >= 4  # several ETFs held at once (7 can ever be eligible)
+    entry_df = result.trade_df[result.trade_df["delta_float"] > 0]
+    eligible_df = pd.DataFrame(dv2_industry_etf.eligible_mat(inputs), index=inputs.base.close_df.index, columns=inputs.base.close_df.columns)
+    session_index = inputs.base.close_df.index
+    assert all(eligible_df.iloc[session_index.get_loc(d) - 1][a] for d, a in zip(entry_df["date"], entry_df["asset"]))
+
+
+def test_dv2_industry_etf_family_and_gate_registration():
+    import inspect
+
+    from alpha.scout.families import validate_family_id
+    from alpha.scout.family import DV2_GRID_DICT, dv2_industry_family
+    from alpha.scout.gate.run import GATED_SPEC_DICT
+    from alpha.scout.specs import dv2, dv2_industry_etf
+    from strategies.dv2 import strategy_mr_dv2_industry_etf as engine_module
+
+    assert dv2_industry_etf.ETF_TUPLE == engine_module.INDUSTRY_ETF_SYMBOL_TUPLE
+    assert (dv2_industry_etf.MIN_ADV_DOLLAR_FLOAT, dv2_industry_etf.MIN_HISTORY_SESSION_INT) == (engine_module.MIN_ADV_DOLLAR_FLOAT, engine_module.MIN_HISTORY_SESSION_INT)
+    assert (dv2_industry_etf.HISTORY_START_STR, dv2_industry_etf.BACKTEST_START_STR) == (
+        engine_module.DEFAULT_HISTORY_START_DATE_STR, engine_module.DEFAULT_BACKTEST_START_DATE_STR)
+    source_str = inspect.getsource(engine_module.DVO2IndustryEtfStrategy.get_opportunities)
+    for fragment_str in ('(member_df["dv2"] < 10)', '(member_df["p126d_return"] > 0.05)', 'member_df["adv_63"] > MIN_ADV_DOLLAR_FLOAT',
+                         'sort_values("natr", ascending=False)'):
+        assert fragment_str in source_str
+    assert dv2_industry_etf.LIVE_CONFIG == dv2.LIVE_CONFIG and engine_module.DVO2IndustryEtfStrategy.max_positions == 10
+    strategy_obj = engine_module._new_strategy_obj(1.0, None)
+    cost_model = dv2_industry_etf.ENGINE_COST_MODEL
+    assert (cost_model.slippage_float, cost_model.fee_per_share_float, cost_model.min_fee_float) == (
+        strategy_obj._slippage, strategy_obj._commission_per_share, strategy_obj._commission_minimum)
+    assert GATED_SPEC_DICT["dv2_industry_etf"].strategy_import_str == dv2_industry_etf.STRATEGY_IMPORT_STR
+    family = dv2_industry_family(inputs=object())
+    validate_family_id(family.family_id_str)
+    assert family.family_id_str == "etf_short_term_reversal" and family.offset_count_int == 1
+    assert len(family.config_list()) == 27 and family.live_config_dict in family.config_list()
+    assert family.live_config_dict == {"entry_dv2_max_float": 10.0, "exit_rule_str": "prev_high", "max_positions_int": 10}
+    assert family.param_grid_dict["entry_dv2_max_float"] == DV2_GRID_DICT["entry_dv2_max_float"]
+    assert max(family.param_grid_dict["max_positions_int"]) < len(dv2_industry_etf.ETF_TUPLE)  # every slot count can fill
+
+
+def test_dv2_industry_etf_replica_tracks_the_spec_and_runs_on_a_shuffle():
+    from alpha.scout.engines.weights import CostModel
+    from alpha.scout.specs import dv2_industry_etf
+
+    pricing_df = _synthetic_dv2_etf_frame()
+    inputs = dv2_industry_etf.inputs_from_frames(pricing_df, total_return_close_df=pd.DataFrame(
+        {s: pricing_df[(s, "Close")].astype(float) for s in DV2_ETF_TUPLE}), backtest_start_str=str(pricing_df.index[300].date()))
+    date_index, matrix = dv2_industry_etf.mcpt_matrix(inputs, end_date_str="2030-01-01")
+    assert date_index[0] == pricing_df.index[301] and matrix.shape == (len(date_index), 5 * len(DV2_ETF_TUPLE))  # after E4's first bar
+    kwarg_dict = dv2_industry_etf.mcpt_fast_kwarg_dict(inputs, date_index)
+    assert kwarg_dict["eligible_mat"].shape == (len(date_index), len(DV2_ETF_TUPLE))
+    config_dict = {"entry_dv2_max_float": 20.0, "max_positions_int": 4}
+    gross_cost = CostModel(slippage_float=0.0, fee_per_share_float=0.0, min_fee_float=0.0)
+    spec_ser = dv2_industry_etf.simulate_config(inputs, dataclasses.replace(dv2_industry_etf.LIVE_CONFIG, **config_dict), gross_cost).daily_return_ser
+    fast_ser = pd.Series(dv2_industry_etf.fast_daily_list(matrix, date_index, [config_dict], **kwarg_dict)[0], index=date_index)
+    window = date_index[260:]  # the S5 score's warm-up: the replica's features start at the matrix's first row
+    assert np.corrcoef(spec_ser.reindex(window), fast_ser.reindex(window))[0, 1] > 0.97  # whole vs fractional shares, dividends
+    shuffled_vec = dv2_industry_etf.fast_daily_list(matrix[np.random.default_rng(4).permutation(len(date_index))], date_index, [config_dict],
+                                                    **kwarg_dict)[0]
+    assert np.isfinite(shuffled_vec).all() and (shuffled_vec != 0.0).sum() > 50
+
+
+def test_dv2_industry_etf_s3_inputs_feed_the_class_e_station():
+    from alpha.scout.specs import dv2_industry_etf
+
+    pricing_df = _synthetic_dv2_etf_frame()
+    inputs = dv2_industry_etf.inputs_from_frames(pricing_df, backtest_start_str=str(pricing_df.index[300].date()))
+    input_dict = dv2_industry_etf.s3_inputs(inputs, end_date_str="2030-01-01")
+    assert input_dict["horizon_int"] in dv2_industry_etf.S3_HORIZON_TUPLE and input_dict["event_mask_df"].to_numpy().sum() > 50
+    assert not input_dict["regime_mask_df"]["E6"].any() and not (input_dict["event_mask_df"] & ~input_dict["regime_mask_df"]).to_numpy().any()
+    result_dict = dv2_industry_etf.s3_result(input_dict)
+    assert len(result_dict["check_list"]) == 8 and {v for _, v, _ in result_dict["check_list"]} <= {"PASS", "WARN", "FAIL"}
+
+
+@pytest.mark.skipif("not _norgate_ready()")
+def test_dv2_industry_etf_gate_passes_against_a_fresh_engine_run_and_blocks_a_near_miss(monkeypatch):
+    # A fresh engine run to 2016-12-30 (about 10 s); the full `python -m alpha.scout gate dv2_industry_etf --fresh` is
+    # authoritative (PASS on 2026-10-02: 3,708 sessions, largest return difference 4e-16).
+    import alpha.scout.gate.run as gate_run
+    from alpha.scout.specs import dv2_industry_etf
+    from strategies.dv2 import strategy_mr_dv2_industry_etf as engine_module
+
+    engine_obj = engine_module.run_variant(show_display_bool=False, save_results_bool=False, end_date_str="2016-12-30")
+    monkeypatch.setattr(gate_run, "_engine_strategy", lambda spec, fresh_bool, root_path: (engine_obj, "fresh run_variant to 2016-12-30"))
+    report = gate_run.run_gate("dv2_industry_etf")
+    assert report.passed_bool, report.summary_str()
+    # A $40M floor admits ETFs before the engine does: the exact tier must fail.
+    monkeypatch.setattr(dv2_industry_etf, "MIN_ADV_DOLLAR_FLOAT", 40_000_000.0)
+    assert not gate_run.run_gate("dv2_industry_etf").passed_bool
+
+
+@pytest.mark.skipif("not _norgate_ready()")
+def test_dv2_industry_etf_mcpt_replica_tracks_the_engine():
+    from alpha.scout.engines.weights import CostModel
+    from alpha.scout.family import dv2_industry_family
+    from alpha.scout.specs import dv2_industry_etf
+
+    inputs = dv2_industry_etf.load_inputs()
+    family = dv2_industry_family(inputs)
+    date_index, matrix = dv2_industry_etf.mcpt_matrix(inputs)
+    assert matrix.shape == (len(date_index), 5 * len(dv2_industry_etf.ETF_TUPLE)) and date_index[-1] <= pd.Timestamp("2022-12-30")
+    gross_cost = CostModel(slippage_float=0.0, fee_per_share_float=0.0, min_fee_float=0.0)
+    config_list = [family.live_config_dict, {**family.live_config_dict, "exit_rule_str": "prev_close", "max_positions_int": 5}]
+    fast_list = dv2_industry_etf.fast_daily_list(matrix, date_index, config_list, **dv2_industry_etf.mcpt_fast_kwarg_dict(inputs, date_index))
+    window = date_index[260:]  # the S5 score window (2013-01-08 on)
+    for config_dict, fast_vec in zip(config_list, fast_list):
+        engine_ser = family.run_config(config_dict, gross_cost).daily_return_ser
+        # 2026-10-02: 0.9999 / 0.9992 (27-config min 0.9987, median 0.9998)
+        assert np.corrcoef(engine_ser.reindex(window), pd.Series(fast_vec, index=date_index).reindex(window))[0, 1] > 0.99
+
+
 # ---------------------------------------------------------------------------------------------- HPI S&P 500 event pods
 def _synthetic_hpi_inputs(row_count_int: int = 700, symbol_count_int: int = 14, seed_int: int = 5):
     """Stocks with idiosyncratic mean reversion, a few missing bars, and staggered index membership."""

@@ -44,7 +44,11 @@ ENGINE_DEVIATION_TUPLE = (
             "V / 10 rounds to 0 shares, is cancelled, and still uses its slot (the engine decrements the slot before the "
             "zero-share cancellation): 4 of 6,225 vote entries and 3 of 6,458 single-rule entries, all WFRD (the old "
             "Weatherford history, about $45,800 a share adjusted, 2008-2009; Norgate data to 2026-09-30). Not measured in "
-            "historical units (the HPI inputs carry no unadjusted close); expected immaterial."
+            "historical units (the HPI inputs carry no unadjusted close); expected immaterial. "
+            "DV2 industry ETF (2026-10-02, Scout truth mode = historical units on the same path, engine costs, $100K, "
+            "2012-01..2026-09): fees $4,005 adjusted vs $3,770 historical (IBB 3:1, IGV 5:1, IHI 6:1, IYT 4:1, SOXX 3:1 and "
+            "XBI 3:1 forward splits outweigh the OIH 1:20 and XOP 1:4 reverse splits), 0 trades change, CAGR 7.563% vs "
+            "7.577% (-1.4 bp/yr, conservative)."
         ),
         mitigation_str="Parity mode reproduces it; truth mode uses raw historical share units. Engine fix #15 is paused.",
         affected_strategy_list=(
@@ -53,7 +57,8 @@ ENGINE_DEVIATION_TUPLE = (
             "strategy_taa_df_1n_fallback_qld_vix_cash", "strategy_taa_df_1n_fallback_sso_vix_cash",
             "strategy_taa_inflation_compass", "strategy_taa_inflation_compass_qqq", "strategy_taa_adaptive_macro_core5",
             "strategy_taa_trinity_vol_control_8_bil", "strategy_mr_hpi_sp500_2_3_5_vote", "strategy_mr_hpi_sp500_ibs_rsi_exit",
-        ),  # every gated TAA variant (fee impact measured for TAA 3x), both Compass modules, CORE5 and Trinity
+            "strategy_mr_dv2_industry_etf",
+        ),  # every gated TAA variant (fee impact measured for TAA 3x), both Compass modules, CORE5, Trinity, HPI, DV2 ETF
     ),
 )
 
@@ -169,10 +174,13 @@ ENGINE_DEVIATION_TUPLE = ENGINE_DEVIATION_TUPLE + (
         impact_level_str=(
             "2026-10-01, Scout truth mode (float64 closes), engine costs, $100K, 2004-01..2026-09: S&P 500 pod 125 "
             "threshold cells flip, 0 of 21,452 trades change, CAGR identical; Nasdaq-100 variant 104 cells, 6 of 13,530 "
-            "trades change, CAGR 13.53% -> 13.57% (+3.3 bp/yr; +3.8 bp/yr to 2022-12-30)."
+            "trades change, CAGR 13.53% -> 13.57% (+3.3 bp/yr; +3.8 bp/yr to 2022-12-30). DV2 industry ETF (2026-10-02, "
+            "2012-01..2026-09): 0 threshold cells flip, 0 of 2,681 trades change."
         ),
         mitigation_str="Parity mode reproduces it (the spec keeps the loader's dtype); immaterial, no engine fix proposed.",
-        affected_strategy_list=("strategy_mr_dv2", "strategy_mr_dv2_nasdaq100", "legacy_dv2_ndx"),  # the last: the restored gate engine
+        affected_strategy_list=(  # legacy_dv2_ndx: the restored gate engine
+            "strategy_mr_dv2", "strategy_mr_dv2_nasdaq100", "legacy_dv2_ndx", "strategy_mr_dv2_industry_etf",
+        ),
     ),
 )
 
