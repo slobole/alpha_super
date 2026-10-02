@@ -55,6 +55,12 @@ Trend-filter variants (research, 2026-10-02 owner question; the defaults are the
 evaluated by the original comparison so the identity gate is untouched):
     trend_fast_sma_int > 0      the filter compares SMA(fast) with SMA(stock_sma_int) instead of the close
     trend_threshold_float != 0  the filter requires (Close or SMA(fast)) / SMA(stock_sma_int) - 1 > threshold
+    trend_filter_str = "cmma"   Masters' Close Minus Moving Average (Statistically Sound Indicators, ch. 2) with
+                                L = stock_sma_int and A = cmma_atr_int, the filter requires CMMA(T) > cmma_threshold_float:
+        x(T)    = [ln C(T) - mean(ln C(T-L), ..., ln C(T-1))] / [ATR_ln(A, T) * sqrt(L + 1)]
+        ATR_ln  = mean over the last A sessions of max(ln H - ln L, |ln H - ln C(t-1)|, |ln L - ln C(t-1)|)
+        CMMA(T) = 100 * Phi(x(T)) - 50   (bounded in (-50, 50); 0 = the close at its log average)
+      Every term ends at T and is a log difference, so a back-adjustment factor (a constant per date range) cancels.
 """
 
 from __future__ import annotations
@@ -96,6 +102,9 @@ class NdxConfig:
     # Trend-filter variants (research; the defaults are the engine rule).
     trend_fast_sma_int: int = 0  # 0 = the close
     trend_threshold_float: float = 0.0
+    trend_filter_str: str = "sma"  # "sma" (the engine rule and its variants) or "cmma"
+    cmma_atr_int: int = 252
+    cmma_threshold_float: float = 0.0
 
     def __post_init__(self) -> None:
         if self.atr_unit_str not in ATR_UNIT_TUPLE:
@@ -188,6 +197,24 @@ def decision_dates(date_index: pd.DatetimeIndex, decision_offset_int: int = 0) -
     return date_index[position_vec[position_vec >= 0]]
 
 
+def cmma_frame(inputs: NdxInputs, lookback_int: int, atr_int: int) -> pd.DataFrame:
+    """Masters' CMMA on every column (see the module docstring); NaN until both windows are full."""
+    from scipy.special import ndtr
+
+    log_close_df = np.log(inputs.close_df.where(inputs.close_df > 0))
+    log_high_df, log_low_df = np.log(inputs.high_df.where(inputs.high_df > 0)), np.log(inputs.low_df.where(inputs.low_df > 0))
+    previous_log_close_df = log_close_df.shift(1)
+    # *** CRITICAL*** the average covers the L closes BEFORE T; the ATR window ends at T.
+    mean_df = previous_log_close_df.rolling(lookback_int, min_periods=lookback_int).mean()
+    true_range_df = np.maximum(log_high_df - log_low_df,
+                               np.maximum((log_high_df - previous_log_close_df).abs(), (log_low_df - previous_log_close_df).abs()))
+    atr_df = true_range_df.rolling(atr_int, min_periods=atr_int).mean()
+    with np.errstate(divide="ignore", invalid="ignore"):
+        x_df = (log_close_df - mean_df) / (atr_df * np.sqrt(lookback_int + 1.0))
+    x_df = x_df.where(atr_df > 0)
+    return pd.DataFrame(100.0 * ndtr(x_df.to_numpy()) - 50.0, index=x_df.index, columns=x_df.columns).where(x_df.notna())
+
+
 def rebalance_weight_df(inputs: NdxInputs, config: NdxConfig = LIVE_CONFIG) -> pd.DataFrame:
     """Target weights indexed by execution date (the session after each decision date)."""
     close_df, date_index = inputs.close_df, inputs.close_df.index
@@ -202,6 +229,7 @@ def rebalance_weight_df(inputs: NdxInputs, config: NdxConfig = LIVE_CONFIG) -> p
     stock_sma_df = close_df.rolling(config.stock_sma_int, min_periods=config.stock_sma_int).mean()
     fast_sma_df = (close_df.rolling(config.trend_fast_sma_int, min_periods=config.trend_fast_sma_int).mean()
                    if config.trend_fast_sma_int > 0 else None)
+    cmma_df = cmma_frame(inputs, config.stock_sma_int, config.cmma_atr_int) if config.trend_filter_str == "cmma" else None
     regime_close_ser = close_df[REGIME_SYMBOL_STR]
     regime_sma_ser = regime_close_ser.rolling(config.regime_sma_int, min_periods=config.regime_sma_int).mean()
 
@@ -237,7 +265,9 @@ def rebalance_weight_df(inputs: NdxInputs, config: NdxConfig = LIVE_CONFIG) -> p
                 # NATR20: ROC / (ATR$ / RawClose(T)), computed as the engine does: (ROC / ATR$) × RawClose(T).
                 score_ser = score_ser * inputs.raw_close_df.loc[decision_ts, stock_list]
             score_ser = score_ser.replace([np.inf, -np.inf], np.nan)
-            if config.trend_fast_sma_int == 0 and config.trend_threshold_float == 0.0:
+            if cmma_df is not None:
+                trend_mask = (cmma_df.loc[decision_ts, stock_list] > config.cmma_threshold_float).fillna(False)
+            elif config.trend_fast_sma_int == 0 and config.trend_threshold_float == 0.0:
                 trend_mask = (close_now_ser > stock_sma_df.loc[decision_ts, stock_list]).fillna(False)
             else:
                 # *** CRITICAL*** both averages end at T (rolling windows over closes <= T).

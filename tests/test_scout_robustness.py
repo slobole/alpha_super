@@ -323,3 +323,34 @@ def test_ndx_trend_filter_variants():
         from alpha.scout.searches import refuse_ablation_switches
 
         refuse_ablation_switches([{"trend_fast_sma_int": 50}])
+
+
+def test_cmma_is_causal_scale_free_and_bounded():
+    from alpha.scout.specs import ndx_vxn
+
+    date_index = pd.bdate_range("2010-01-01", periods=400)
+    rng_obj = np.random.default_rng(11)
+    close_df = pd.DataFrame(100.0 * np.exp(np.cumsum(rng_obj.normal(0.0005, 0.02, size=(400, 2)), axis=0)), index=date_index, columns=["A", "B"])
+    high_df, low_df = close_df * 1.01, close_df * 0.99
+    empty_df = close_df * np.nan
+    inputs = ndx_vxn.NdxInputs(close_df, high_df, low_df, close_df, close_df, close_df * 0.0, close_df * 0 + 1, pd.Series(dtype=float))
+    full_df = ndx_vxn.cmma_frame(inputs, 50, 100)
+    # Causal: truncating the future changes nothing up to the cut.
+    cut_inputs = ndx_vxn.NdxInputs(*(f.loc[:date_index[250]] for f in (close_df, high_df, low_df, close_df, close_df)), (close_df * 0.0).loc[:date_index[250]],
+                                   (close_df * 0 + 1).loc[:date_index[250]], pd.Series(dtype=float))
+    np.testing.assert_allclose(ndx_vxn.cmma_frame(cut_inputs, 50, 100).to_numpy(), full_df.loc[:date_index[250]].to_numpy(), atol=1e-12)
+    # A price scale (a back-adjustment factor) cancels; bounded in (-50, 50); NaN until both windows are full.
+    scaled_inputs = ndx_vxn.NdxInputs(close_df * 7, high_df * 7, low_df * 7, close_df * 7, close_df * 7, close_df * 0.0, close_df * 0 + 1, pd.Series(dtype=float))
+    np.testing.assert_allclose(ndx_vxn.cmma_frame(scaled_inputs, 50, 100).to_numpy(), full_df.to_numpy(), atol=1e-6)
+    assert full_df.iloc[:100].isna().all().all() and full_df.iloc[101:].notna().all().all()
+    assert full_df.abs().max().max() < 50.0
+    assert empty_df.isna().all().all()
+    # Hand check at one date: x = (ln C - mean of the previous 50 ln C) / (mean of the last 100 log true ranges * sqrt(51)).
+    from scipy.special import ndtr
+
+    t = 300
+    log_close_vec = np.log(close_df["A"].to_numpy())
+    log_tr_vec = np.maximum(np.log(1.01 / 0.99), np.maximum(np.abs(np.log(close_df["A"] * 1.01).to_numpy()[1:] - log_close_vec[:-1]),
+                                                             np.abs(np.log(close_df["A"] * 0.99).to_numpy()[1:] - log_close_vec[:-1])))
+    x_float = (log_close_vec[t] - log_close_vec[t - 50:t].mean()) / (log_tr_vec[t - 100:t].mean() * np.sqrt(51.0))
+    assert full_df["A"].iloc[t] == pytest.approx(100.0 * ndtr(x_float) - 50.0, abs=1e-9)
