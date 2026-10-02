@@ -19,6 +19,9 @@ Per universe (window: 2004-01-01, or the first full year of the index's membersh
         fill) per side, engine fees on nominal shares. No dividends (the replica's convention; about -0.01 to -0.04
         Sharpe vs the engine). Active Sharpe = Sharpe of the daily return minus the equal-weight members' return
         (dv2.member_baseline_vec).
+        Both spread models are floored at half a one-cent tick over the nominal price ($0.005 / Unadjusted Close at T).
+        Membership is zeroed before the start, so the first decision is the close of the first session on or after the
+        start (the engine's is the close before it: one session later, in every universe alike).
         Nominal-share fees are capped at 1% of the trade value (2% under stress), as IBKR Fixed pricing. A book that falls to
         1% of its capital is ruined: that day is floored at -100% and it stops (ruin_date_str).
         (d) liquidity-pooled: as (c) with the ADV-bucket pooled Abdi-Ranaldo half-spread (alpha.scout.universes.
@@ -55,6 +58,7 @@ from alpha.scout.universes import (
     half_spread_mat,
     load_superset_panel,
     rule_mats,
+    tick_half_spread_mat,
     universe_panel,
 )
 from alpha.stats.newey_west import newey_west_mean_t_stat
@@ -121,7 +125,8 @@ def pooled_spread_superset(superset) -> np.ndarray:
     cached next to the superset panel."""
     from alpha.scout.universes import SUPERSET_ROOT_PATH, pooled_half_spread_mat
 
-    path = SUPERSET_ROOT_PATH / SUPERSET_NAME_STR / superset.snapshot_id_str / "pooled_half_spread.npy"
+    # The file name carries the estimator's parameters (pooled_half_spread_mat defaults), so a change cannot reuse it.
+    path = SUPERSET_ROOT_PATH / SUPERSET_NAME_STR / superset.snapshot_id_str / "pooled_half_spread_b20_w63_m500_monotone.npy"
     if not path.exists():
         eligible_mat = np.zeros(superset.field_dict["Close"].shape, dtype=bool)
         for member_mat in superset.member_dict.values():
@@ -135,11 +140,14 @@ def pooled_spread_superset(superset) -> np.ndarray:
 
 
 def spread_dict_for(superset, panel) -> dict:
-    """{"liquidity_aware": per-stock Abdi-Ranaldo, "liquidity_pooled": ADV-bucket pooled} half-spreads on the panel's axes."""
+    """{"liquidity_aware": per-stock Abdi-Ranaldo, "liquidity_pooled": ADV-bucket pooled} half-spreads on the panel's axes,
+    each floored at half a one-cent tick over the nominal price at T ($0.005 / Unadjusted Close): a stock quoted at $2
+    cannot have a half-spread below 25 bp, whatever a daily-bar estimator says."""
     position_vec = pd.Index(superset.symbol_list).get_indexer(panel.symbol_list)
     row_vec = superset.date_index.get_indexer(panel.date_index)
-    return {"liquidity_aware": half_spread_mat(*(panel.field(f).to_numpy(dtype=float) for f in ("High", "Low", "Close"))),
-            "liquidity_pooled": np.asarray(pooled_spread_superset(superset)[row_vec][:, position_vec], dtype=float)}
+    tick_half = tick_half_spread_mat(panel.field("Unadjusted Close").to_numpy(dtype=float))
+    return {"liquidity_aware": np.fmax(half_spread_mat(*(panel.field(f).to_numpy(dtype=float) for f in ("High", "Low", "Close"))), tick_half),
+            "liquidity_pooled": np.fmax(np.asarray(pooled_spread_superset(superset)[row_vec][:, position_vec], dtype=float), tick_half)}
 
 
 def run_universe_s3(panel, spread_dict: dict, masks: dict) -> dict:

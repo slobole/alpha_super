@@ -198,6 +198,14 @@ def test_costed_book_costs_and_share_units():
     assert (gross.fill_df["date"] >= panel.date_index[260]).all()
 
 
+def test_tick_half_spread_is_half_a_cent_over_the_nominal_price():
+    from alpha.scout.universes import tick_half_spread_mat
+
+    out_mat = tick_half_spread_mat(np.array([[2.0, 50.0, np.nan, 0.0]]))
+    assert out_mat[0, 0] == pytest.approx(0.0025) and out_mat[0, 1] == pytest.approx(0.0001)
+    assert np.isnan(out_mat[0, 2]) and np.isnan(out_mat[0, 3])
+
+
 def test_costed_book_fee_cap_and_ruin():
     panel = _synthetic_panel()
     start_str = str(panel.date_index[260].date())

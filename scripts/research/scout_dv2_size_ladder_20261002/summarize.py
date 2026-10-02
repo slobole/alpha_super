@@ -41,7 +41,7 @@ def main() -> None:
             "universe": name_str, "size": bucket_str, "start": result["start_str"], "members_median": result["members_median_int"],
             "events": head["events_int"], "dates": head["event_dates_int"], "bp": round(head["date_mean_excess_float"] * 1e4, 2),
             "nw_t": round(head["nw_t_float"], 2), "placebo_p": round(head["placebo_p_float"], 3),
-            "pos_years": round(head["positive_year_share_float"], 2), "cov_s3": round(head["cost_coverage_float"], 2),
+            "pos_years": round(head["positive_year_share_float"], 2), "cov_s3_within_universe_terciles": round(head["cost_coverage_float"], 2),
             "cov_liq": round(liquidity["coverage_float"], 2), "event_hs_bp": round(liquidity["event_median_half_spread_float"] * 1e4, 1),
             "cov_pooled": round(pooled["coverage_float"], 2), "event_pooled_hs_bp": round(pooled["event_median_half_spread_float"] * 1e4, 1),
             "event_adv63_musd": round(liquidity["event_median_adv63_float"] / 1e6, 1), "verdict": result["s3"]["verdict_str"],
@@ -56,6 +56,8 @@ def main() -> None:
             row[f"{short_str}_sharpe"] = round(metric["sharpe_float"], 2)
             row[f"{short_str}_maxdd"] = round(metric["max_drawdown_float"] * 100, 0)
             row[f"{short_str}_active_sharpe"] = round(metric["active_sharpe_float"], 2)
+            if metric.get("ruin_date_str"):
+                row[f"{short_str}_ruined"] = metric["ruin_date_str"]  # book fell to 1% of capital: CAGR/Sharpe not meaningful
         row["liq_slip_entry_mean_bp"] = round(pod["liquidity_slippage"]["liquidity_aware"]["entry_mean_bp_float"], 1)
         row["pool_slip_entry_mean_bp"] = round(pod["liquidity_slippage"]["liquidity_pooled"]["entry_mean_bp_float"], 1)
         row["mcpt_p"] = mcpt["p_value_float"] if mcpt else None

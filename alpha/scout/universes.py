@@ -284,6 +284,14 @@ def pooled_half_spread_mat(high_mat: np.ndarray, low_mat: np.ndarray, close_mat:
     return out_mat, bucket_half_mat
 
 
+def tick_half_spread_mat(unadjusted_close_mat: np.ndarray, tick_float: float = 0.01) -> np.ndarray:
+    """Half of one price tick as a fraction of the nominal price at T (bars <= T): the smallest possible half-spread."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        out_mat = 0.5 * tick_float / np.asarray(unadjusted_close_mat, dtype=float)
+    out_mat[~np.isfinite(out_mat) | (out_mat <= 0)] = np.nan
+    return out_mat
+
+
 def fill_slippage_mat(half_spread: np.ndarray, floor_float: float = 0.00025) -> np.ndarray:
     """Per-side slippage of a fill on row t = max(floor, half-spread of row t-1); an unknown estimate -> the floor."""
     lagged_mat = np.full(half_spread.shape, np.nan)
