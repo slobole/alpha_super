@@ -195,9 +195,11 @@ def panel_mcpt(plan: PodPlan, family: FamilyRunner, inputs) -> list[McptComponen
              "fast_kwarg_dict": option_dict.get("fast_kwarg_dict", {}), "warm_int": option_dict.get("warm_int", 260)}
     _STATE.update(state)
     observed_float = _panel_score(load_panel(state["panel_name_str"]))
-    chunk_int = PERMUTATION_COUNT_INT // WORKER_COUNT_INT + 1
-    with Pool(WORKER_COUNT_INT) as pool_obj:
-        null_vec = np.concatenate(pool_obj.map(_panel_chunk, [(8_500 + i, chunk_int, state) for i in range(WORKER_COUNT_INT)]))[:PERMUTATION_COUNT_INT]
+    # Each worker holds a full panel and its features; heavy pods (HPI) need fewer workers to fit in memory.
+    worker_count_int = option_dict.get("worker_count_int", WORKER_COUNT_INT)
+    chunk_int = PERMUTATION_COUNT_INT // worker_count_int + 1
+    with Pool(worker_count_int) as pool_obj:
+        null_vec = np.concatenate(pool_obj.map(_panel_chunk, [(8_500 + i, chunk_int, state) for i in range(worker_count_int)]))[:PERMUTATION_COUNT_INT]
     return [McptComponent("whole strategy", "per-asset", "active Sharpe over EW members", observed_float, null_vec,
                           _p_value(observed_float, null_vec), note_str="short-term reversal on a point-in-time panel (A8 calibration: 2.0% false passes)")]
 

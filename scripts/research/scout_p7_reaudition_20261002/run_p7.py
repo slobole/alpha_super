@@ -72,7 +72,7 @@ def plan_dict() -> dict[str, tuple[PodPlan, Registration]]:
                 mcpt_kind_str="panel", adoption_date_str="2026-04-04", prior_trial_count_int=100, slot_str="NDX VXN",
                 s3_fn=lambda v=variant_str: ("E", EVENT_NOTE_STR, sector_ibs.s3_result(hpi.s3_inputs(v))),
                 option_dict={"panel": {"module_str": "alpha.scout.specs.hpi", "panel_name_str": "S&P 500",
-                                       "fast_kwarg_dict": {"base_config": variant.config}}},
+                                       "fast_kwarg_dict": {"base_config": variant.config}, "worker_count_int": 6}},
                 strategy_module_str=variant.strategy_import_str,
             ),
             Registration(

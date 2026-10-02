@@ -1103,6 +1103,21 @@ Report: `docs/research/SCOUT_P6C_REAUDITION_20261002.md`.
   - A 10% sleeve nudges the book (P 0.77 in sample, 0.95 over a contaminated full period).
   - Grade: WATCHLIST.
 
+**A13 (2026-10-02, P7: point-in-time stock pods).**
+Report: `docs/research/SCOUT_P7_REAUDITION_20261002.md`.
+
+- **Gated exactly:** DV2 S&P 500 (WIRED), DV2 Nasdaq-100, HPI 2/3/5 vote (WIRED) and HPI IBS RSI exit.
+  - The DV2 Nasdaq-100 module is an empty stub, so its engine side is the restored 300ca70 code
+    (`gate/legacy_dv2_ndx.py`), a gate harness only.
+- **Weights engine, opt-in:** `missing_open_hold_df` (HPI keeps a held member through a missing open).
+- **Runner:** MCPT kind "panel" applies the A8 per-asset null to a whole stock-pod search, with a per-pod worker count.
+- **Gate practice:** a saved engine run goes stale when Norgate revises history. A gate failure is re-checked with
+  `--fresh` before it is read as a Scout defect, and a fresh run must not overlap the nightly Norgate update.
+- **Grades:** DV2 S&P 500 and DV2 Nasdaq-100: WATCHLIST (MCPT p 0.001 each; book 1.21 → 1.37 / 1.36). HPI vote and HPI IBS RSI: WATCHLIST, on soft S3 criteria only.
+  The whole rule passes S4-S6 strongly (vote: MCPT p 0.021, DSR p 0.000, alpha t 2.64, book 1.21 → 1.37), but the
+  entry event barely beats the same-date members (+3.6 bp, t 0.79). DV2 and HPI correlate 0.75 daily, so the book
+  needs one stock reversal pod, not two.
+
 **Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
 It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about
 performance. A performance kill rule is a separate, currently unrecorded gap, and P1 should add it to
