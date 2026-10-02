@@ -245,6 +245,9 @@ def render_card(bundle: dict) -> str:
                      f"(${cap['full_history_aum_float'] / 1e6:,.1f}M over the full history); binding asset {html.escape(cap['binding_asset_str'])}. "
                      "A simplified estimate, not the capacity v2 study.</p>")
 
+    if bundle.get("robustness"):
+        part_list.append(robustness_html(bundle["robustness"]))
+
     # ---- deviations, untested, post-adoption
     deviation_rows_str = "".join(f"<tr><td class='l'>{d.deviation_id_str}</td><td class='l'>{html.escape(d.expected_bias_direction_str)}</td><td class='l'>{html.escape(d.impact_level_str)}</td></tr>"
                                  for d in ENGINE_DEVIATION_TUPLE
@@ -259,3 +262,86 @@ def render_card(bundle: dict) -> str:
                      "pick can differ from the engine's (NDX: roc 15 vs roc 6); the verdicts were checked against every configuration's replica score.</li>"
                      "<li>Luck band: decision offsets 0-15 sessions before month end (offsets near the month length would skip months).</li></ul>")
     return f"<!doctype html><html><head><meta charset='utf-8'><title>{html.escape(pod_str)} Scout card</title><style>{STYLE_STR}</style></head><body>{''.join(part_list)}</body></html>"
+
+
+def robustness_html(rob: dict) -> str:
+    """The A15 diagnostics (alpha/scout/stations/robustness.py): printed, never part of the grade."""
+    part_list = ["<h2>Robustness diagnostics (A15, printed only: they do not change the grade)</h2>"]
+    contribution = rob.get("contribution")
+    if contribution:
+        share_str = ", ".join(f"top {k} {v:.0%}" for k, v in contribution["top_share_dict"].items())
+        verdict_class_str = "WARN" if contribution["verdict_str"] == "CONCENTRATED" else "PASS"
+        part_list.append(f"<p><b>Where the return came from</b> ({contribution['window_str']}, {contribution['traded_count_int']} traded assets): "
+                         f"<span class='{verdict_class_str}'>{contribution['verdict_str']}</span>. "
+                         f"Share of the summed return: {share_str}; effective number of winners {contribution['effective_winner_float']:.1f}; "
+                         f"{contribution['positive_asset_share_float']:.0%} of assets added return.</p>")
+        strip_rows = "".join(
+            f"<tr><td>{s['k_int']}</td><td class='l'>{html.escape(', '.join(s['asset_list'][:10]))}{' ...' if len(s['asset_list']) > 10 else ''}</td>"
+            f"<td>{s['sharpe_float']:.2f}</td><td>{s['annual_mean_float']:+.1%}</td></tr>" for s in contribution["strip_list"])
+        part_list.append(f"<table><tr><th>Top assets removed</th><th class='l'>Assets</th><th>Sharpe left (full {contribution['full_sharpe_float']:.2f})</th>"
+                         f"<th>Mean return / yr left</th></tr>{strip_rows}</table>")
+        contribution_ser = contribution["contribution_ser"]
+        many_bool = len(contribution_ser) > 15
+        shown_ser = contribution_ser.iloc[np.r_[0:10, len(contribution_ser) - 5:len(contribution_ser)]] if many_bool else contribution_ser
+        fig, axis_list = plt.subplots(1, 2, figsize=(11, 3.2))
+        value_vec = shown_ser.to_numpy()[::-1]
+        axis_list[0].barh(list(shown_ser.index)[::-1], value_vec * 100.0, color=["#1e7b4f" if v > 0 else "#b3261e" for v in value_vec])
+        axis_list[0].set_xlabel("summed daily contribution, %" + (" (top 10 and bottom 5)" if many_bool else ""))
+        positive_vec = np.sort(contribution_ser[contribution_ser > 0].to_numpy())[::-1]
+        if positive_vec.size:
+            axis_list[1].plot(np.arange(1, positive_vec.size + 1) / positive_vec.size * 100.0, np.cumsum(positive_vec) / positive_vec.sum() * 100.0, color="#3a5a8c")
+            axis_list[1].plot([0, 100], [0, 100], color="#d9dee7", linestyle="--")
+        axis_list[1].set_xlabel("% of winning assets, best first")
+        axis_list[1].set_ylabel("% of the winners' return")
+        part_list.append(_png(fig))
+        year_head_str = "".join(f"<td>{y['year_int']}</td>" for y in contribution["year_list"])
+        year_top_str = "".join(f"<td>{html.escape(y['top_asset_str'])}<br>{y['top_contribution_float']:+.1%} of {y['return_float']:+.1%}</td>"
+                               for y in contribution["year_list"])
+        part_list.append(f"<p>Best asset per year (its contribution, of the year's summed return):</p><table><tr>{year_head_str}</tr><tr>{year_top_str}</tr></table>")
+    timing_list = rob.get("timing")
+    if timing_list:
+        timing_rows = "".join(
+            f"<tr><td class='l'>{html.escape(t['market_str'])}</td><td>{t['month_count_int']}</td><td>{t['down_beta_float']:.2f}</td><td>{t['up_beta_float']:.2f}</td>"
+            f"<td>{t['hm_gamma_float']:.2f} (t {t['hm_gamma_t_float']:.1f})</td><td>{t['tm_c_float']:.2f} (t {t['tm_c_t_float']:.1f})</td>"
+            f"<td>{t['down_month_mean_float']:+.2%} vs {t['market_down_month_mean_float']:+.2%}</td>"
+            f"<td>{t['hm_alpha_annual_float']:+.1%} (t {t['hm_alpha_t_float']:.1f})</td><td class='l'>{t['verdict_str']}</td></tr>" for t in timing_list)
+        part_list.append("<p><b>Market-timing convexity</b> (monthly excess returns, Newey-West lag 3). Henriksson-Merton: down beta, up beta and their gap g; "
+                         "Treynor-Mazuy: the curvature c. CONVEX = the pod's beta rises with the market (g t >= 2), the shape of a protective or trend rule.</p>"
+                         "<table><tr><th class='l'>Market</th><th>Months</th><th>Down beta</th><th>Up beta</th><th>HM g</th><th>TM c</th>"
+                         f"<th>Pod vs market, down months</th><th>HM alpha / yr</th><th class='l'>Shape</th></tr>{timing_rows}</table>")
+    ablation = rob.get("ablation")
+    if ablation:
+        single_rows = "".join(
+            f"<tr><td class='l'>{html.escape(r['name_str'])}</td><td class='l'>{html.escape(r['note_str'])}</td><td>{r['sharpe_float']:.2f}</td>"
+            f"<td>{-r['delta_float']:+.2f}</td><td>{r.get('alt_sharpe_float', float('nan')):.2f}</td><td>{r['cagr_float']:+.1%}</td>"
+            f"<td>{r['max_drawdown_float']:.0%}</td><td>{r['probability_live_better_float']:.2f}</td><td class='l'>{r['verdict_str']}</td></tr>"
+            for r in ablation["single_list"])
+        live_metric = ablation["live_metric"]
+        part_list.append(f"<p><b>Component ablation</b> ({ablation['window_str']}; idle cash earns the T-bill rate). Live: Sharpe "
+                         f"{ablation['live_sharpe_float']:.2f} ({ablation.get('live_alt_sharpe_float', float('nan')):.2f} with cash at 0%), "
+                         f"CAGR {live_metric['cagr_float']:+.1%}, Max DD {live_metric['max_drawdown_float']:.0%}. Each component switched off alone; "
+                         "P = paired bootstrap probability that the live rule's Sharpe is higher.</p>"
+                         "<table><tr><th class='l'>Switched off</th><th class='l'>How</th><th>Sharpe</th><th>Change</th><th>Sharpe, cash 0%</th><th>CAGR</th>"
+                         f"<th>Max DD</th><th>P(live better)</th><th class='l'>Verdict</th></tr>{single_rows}</table>")
+        cumulative_rows = "".join(f"<tr><td class='l'>{html.escape(r['name_str'])}</td><td>{r['sharpe_float']:.2f}</td>"
+                                  f"<td>{r.get('alt_sharpe_float', float('nan')):.2f}</td><td>{r['cagr_float']:+.1%}</td>"
+                                  f"<td>{r['max_drawdown_float']:.0%}</td></tr>" for r in ablation["cumulative_list"])
+        part_list.append(f"<p>Cumulative, in the registered order. Minimum spec (every step at least 80% of the live Sharpe): "
+                         f"<b>{html.escape(ablation['min_spec_str'])}</b>.</p>"
+                         f"<table><tr><th class='l'>Switched off so far</th><th>Sharpe</th><th>Sharpe, cash 0%</th><th>CAGR</th><th>Max DD</th></tr>{cumulative_rows}</table>")
+    random_dict = rob.get("random")
+    if random_dict:
+        summary = random_dict["summary"]
+        verdict_class_str = "PASS" if summary["verdict_str"] == "ROBUST TO VALUES" else "WARN"
+        part_list.append(f"<p><b>Random parameters</b> ({summary['draw_count_int']} draws from the registered box, {summary['failed_count_int']} failed): "
+                         f"<span class='{verdict_class_str}'>{summary['verdict_str']}</span>. Live Sharpe {summary['live_sharpe_float']:.2f}; "
+                         f"{summary['share_at_or_above_live_float']:.0%} of draws at or above it; draws: median {summary['median_float']:.2f}, "
+                         f"10th percentile {summary['p10_float']:.2f}, 90th {summary['p90_float']:.2f}; {summary['positive_share_float']:.0%} positive. "
+                         f"Box: {html.escape(random_dict['box_str'])}.</p>")
+        fig, axis = plt.subplots(figsize=(7, 2.6))
+        axis.hist([v for v in random_dict["sharpe_list"] if np.isfinite(v)], bins=30, color="#d9dee7", edgecolor="#5b6475")
+        axis.axvline(summary["live_sharpe_float"], color="#b3261e", linewidth=2, label="live")
+        axis.set_xlabel("Sharpe of random-parameter draws")
+        axis.legend()
+        part_list.append(_png(fig))
+    return "".join(part_list)

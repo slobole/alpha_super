@@ -33,6 +33,13 @@ Shorts (opt-in, `allow_short_bool`; added 2026-10-01 for CORE5's DBC short, stra
   debited from cash and total(t); no fee on the last session (CORE5 `apply_post_mark_accounting`).
 Without `allow_short_bool` a negative weight raises: a long-only spec must never silently drop a short.
 
+Per-asset P&L (`asset_pnl_df`, an output only; added 2026-10-02 for the contribution diagnostic): per session t and
+asset i, in dollars,
+    pnl_i(t) = net dividend credited in step 1 − Σ (Δ × fill price + fee) of step 2 and 3 orders
+               + [position_i × Close_i(t) − the mark of i at the close of T] − borrow fee of step 5,
+so each row sums to total(t) − total(T) (cash only moves through these items). It reads nothing the path does not
+already compute and changes no decision, fill or mark.
+
 *** CRITICAL*** Sizing reads prices of T only; fills use Open(t). The engine's order of operations is part of the
 model (QUANT_PHILOSOPHY.md "Engine Order Is Part Of The Model").
 
@@ -113,6 +120,7 @@ class WeightsResult:
     daily_position_df: pd.DataFrame  # ledger units held at each close
     borrow_fee_df: pd.DataFrame | None = None  # short borrow fees (borrow_model only)
     decided_weight_df: pd.DataFrame | None = None  # rebalance rows chosen by `decision_fn` (None without one)
+    asset_pnl_df: pd.DataFrame | None = None  # dollar P&L per asset and session; each row sums to total(t) - total(T)
 
 
 def simulate(
@@ -173,6 +181,7 @@ def simulate(
     cash_float = float(capital_float)
     previous_total_float = float(capital_float)
     total_list, trade_list, position_row_dict, daily_position_list, borrow_fee_list = [], [], {}, [], []
+    asset_pnl_list, mark_vec = [], np.zeros(len(asset_list))  # mark_vec: position x Close at the previous mark
     decided_row_dict: dict = {}
 
     def _fee(delta_float: float, factor_float: float) -> float:
@@ -181,6 +190,7 @@ def simulate(
     for t_idx_int in range(start_idx_int, len(date_index)):
         t_date = date_index[t_idx_int]
         previous_idx_int = t_idx_int - 1
+        pnl_vec = np.zeros(len(asset_list))
 
         # 0. A path-dependent rule decides after the close of T, on the ledger as it stood then.
         if decision_fn is not None:
@@ -198,7 +208,9 @@ def simulate(
             if np.isnan(dividend_vec).any():
                 raise ValueError(f"NaN dividend on a held asset at {date_index[previous_idx_int].date()}.")
             gross_vec = position_vec[held_mask] * dividend_vec
-            cash_float += float(np.sum(gross_vec - cost_model.dividend_withholding_float * np.maximum(gross_vec, 0.0)))
+            net_dividend_vec = gross_vec - cost_model.dividend_withholding_float * np.maximum(gross_vec, 0.0)
+            cash_float += float(np.sum(net_dividend_vec))
+            pnl_vec[held_mask] += net_dividend_vec
 
         # 2. Missing-price liquidation at the last finite close <= T.
         for asset_idx_int in np.flatnonzero(position_vec != 0.0):
@@ -211,6 +223,7 @@ def simulate(
             delta_float = -position_vec[asset_idx_int]
             fee_float = _fee(delta_float, factor_mat[last_idx_int, asset_idx_int])
             cash_float -= delta_float * close_mat[last_idx_int, asset_idx_int] + fee_float
+            pnl_vec[asset_idx_int] -= delta_float * close_mat[last_idx_int, asset_idx_int] + fee_float
             position_vec[asset_idx_int] = 0.0
             trade_list.append((t_date, asset_list[asset_idx_int], delta_float, close_mat[last_idx_int, asset_idx_int], fee_float, "liquidation"))
 
@@ -255,6 +268,7 @@ def simulate(
                 fill_float = open_float * (1.0 + np.sign(leg_delta_float) * cost_model.slippage_float)
                 fee_float = _fee(leg_delta_float, factor_mat[t_idx_int, asset_idx_int])
                 cash_float -= leg_delta_float * fill_float + fee_float
+                pnl_vec[asset_idx_int] -= leg_delta_float * fill_float + fee_float
                 position_vec[asset_idx_int] += leg_delta_float
                 trade_list.append((t_date, asset_list[asset_idx_int], leg_delta_float, fill_float, fee_float, "rebalance"))
             position_row_dict[t_date] = position_vec.copy()
@@ -262,6 +276,10 @@ def simulate(
         # 4. Mark to market at the close of t.
         held_idx_arr = np.flatnonzero(position_vec != 0.0)
         total_float = cash_float + float(np.sum(position_vec[held_idx_arr] * close_mat[t_idx_int, held_idx_arr]))
+        new_mark_vec = np.zeros(len(asset_list))
+        new_mark_vec[held_idx_arr] = position_vec[held_idx_arr] * close_mat[t_idx_int, held_idx_arr]
+        pnl_vec += new_mark_vec - mark_vec
+        mark_vec = new_mark_vec
         # 5. Short borrow fee after the mark, accrued to the next session of the run (none on the last session).
         if borrow_model is not None and borrow_model.annual_rate_float != 0.0 and t_idx_int + 1 < len(date_index):
             day_count_int = int((date_index[t_idx_int + 1].normalize() - t_date.normalize()).days)
@@ -271,9 +289,11 @@ def simulate(
                 fee_float = float(collateral_value_float * borrow_model.annual_rate_float * day_count_int / borrow_model.day_count_int)
                 cash_float -= fee_float
                 total_float -= fee_float
+                pnl_vec[asset_idx_int] -= fee_float
                 borrow_fee_list.append((t_date, asset_list[asset_idx_int], fee_float))
         total_list.append(total_float)
         daily_position_list.append(position_vec.copy())
+        asset_pnl_list.append(pnl_vec)
         previous_total_float = total_float
 
     total_value_ser = pd.Series(total_list, index=date_index[start_idx_int:], name="total_value")
@@ -288,4 +308,5 @@ def simulate(
         decided_weight_df=(
             pd.DataFrame(decided_row_dict, index=asset_list).T if decision_fn is not None else None
         ),
+        asset_pnl_df=pd.DataFrame(asset_pnl_list, index=date_index[start_idx_int:], columns=asset_list),
     )
