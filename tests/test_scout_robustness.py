@@ -301,3 +301,25 @@ def test_fast_replicas_refuse_ablation_switches():
     for config in ({"vix_gate_bool": False}, {"cash_asset_tuple": ("BTAL",)}, Core5Config(adaptive_speed_bool=False)):
         with pytest.raises(ValueError, match="ablation switch"):
             refuse_ablation_switches([config])
+
+
+@pytest.mark.skipif(not _norgate_running_bool(), reason="Norgate data not available")
+def test_ndx_trend_filter_variants():
+    import dataclasses
+
+    from alpha.scout.specs import ndx_vxn
+
+    inputs = ndx_vxn.load_inputs()
+    live_df = ndx_vxn.rebalance_weight_df(inputs)
+
+    def weights(**override_dict):
+        return ndx_vxn.rebalance_weight_df(inputs, dataclasses.replace(ndx_vxn.LIVE_CONFIG, **override_dict))
+
+    # A threshold just below zero is the live filter up to floating-point ties; a crossover and a +10% bar change it.
+    assert (weights(trend_threshold_float=-1e-12) - live_df).abs().to_numpy().max() < 1e-12
+    strict_df, cross_df = weights(trend_threshold_float=0.10), weights(trend_fast_sma_int=50)
+    assert strict_df.index.equals(live_df.index) and not strict_df.equals(live_df) and not cross_df.equals(live_df)
+    with pytest.raises(ValueError, match="ablation switch"):
+        from alpha.scout.searches import refuse_ablation_switches
+
+        refuse_ablation_switches([{"trend_fast_sma_int": 50}])

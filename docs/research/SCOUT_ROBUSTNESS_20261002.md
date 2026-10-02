@@ -163,3 +163,51 @@ higher).**
   - Coverage: one-asset and no-trade books, timing with no down months, all draws failed, card rendering, ledger
     identity per asset. All fixed and tested.
   - Parity: see the A15 amendment.
+
+## Follow-up (2026-10-02): NDX ranking, plateaus and trend filters
+
+Scripts: `ndx_ranking_compare.py` and `ndx_plateau_filter.py` in the same folder. Results: `results/scout/robustness/ndx_*.json`.
+The plateau and filter study was registered in the ledger before any number was computed
+(`ndx_natr20_vxn_plateau_filter_20261002`, 77 configurations, a sensitivity map; nothing is promoted from it).
+
+**Rankings (live NDX VXN rule otherwise; in sample 2000-09 to 2022).**
+
+| Ranking | Sharpe | CAGR | Max DD |
+|---|---|---|---|
+| Dollar ATR (live) | 0.73 | 10.7% | −29.0% |
+| NATR20 | 0.84 | 13.7% | −23.5% |
+| ROC only | 0.82 | 14.7% | −29.0% |
+
+- **NATR20 wins robustly in sample:**
+  - It beats dollar ATR on 83% of 200 identical random parameter sets, and ROC alone on 88%.
+  - It is higher in every rebalance offset.
+- **But dollar ATR fell less in the fast crashes:**
+
+| Crash | Dollar ATR | NATR20 |
+|---|---|---|
+| Q4 2018 | −3.3% | −9.5% |
+| 2022 | −11.4% | −17.1% |
+| 2025 | −13.1% | −19.2% |
+
+- **Dollar ATR also led from 2023 on** (seen period, Sharpe 1.14 vs 0.95).
+- **Month-end luck:** in all three rankings, the month-end decision day sits near the best of 16 offsets.
+- **Recommendation:** keep NATR20 in shadow beside the live pod; do not switch on in-sample evidence alone.
+
+**Plateaus (NATR20 VXN).**
+- **The ROC x filter surface is flat:**
+  - Plateau at ROC 12 / SMA150 (neighbourhood median 0.87, peak 0.91, ratio 0.96).
+  - ROC 3 is the only weak row (0.67-0.72).
+  - Short filters (SMA20/50) are the weak columns.
+- **ROC x top count:** plateau at ROC 9 / top 15 (median 0.85, ratio 0.94).
+- **The live ROC 12 / SMA100 / top 10** is inside the plateau, not on a peak.
+
+**Trend-filter variants (17; ROC 12, top 10).**
+- They range from 0.75 (Close more than 10% above SMA100) to 0.93 (Close more than 10% above SMA200). The live filter
+  is at 0.84 and no filter at all gives 0.87.
+- **Longer or looser filters land at 0.86-0.93:** SMA150-250, SMA21 > SMA100, SMA50 > SMA100, the distance from SMA200.
+- **Short filters land at 0.81-0.83:** SMA20/50, 10/50, 21/50.
+- **Not significant after the search:** the top three are best-of-17 picks, and their paired P of 0.98-0.99 is not
+  corrected for that search. The differences (about +0.05 to +0.09) are within the noise a 17-variant search
+  produces.
+- **What the evidence supports:** the filter matters little, and short filters hurt. It does not support a specific
+  replacement.
