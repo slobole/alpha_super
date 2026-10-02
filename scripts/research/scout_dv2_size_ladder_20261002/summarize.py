@@ -21,6 +21,10 @@ def _load(path: Path) -> dict | None:
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
 
 
+def cost(row: dict, key_str: str, field_str: str) -> float:
+    return row.get("liquidity_cost", {}).get(key_str, {}).get(field_str, float("nan"))
+
+
 def main() -> None:
     table_path = OUT_PATH / "tables"
     table_path.mkdir(parents=True, exist_ok=True)
@@ -30,7 +34,8 @@ def main() -> None:
         if result is None:
             continue
         head = result["s3"]["headline"]
-        liquidity = result["s3"]["liquidity_cost"]
+        liquidity = result["s3"]["liquidity_cost"]["liquidity_aware"]
+        pooled = result["s3"]["liquidity_cost"]["liquidity_pooled"]
         mcpt = _load(OUT_PATH / "mcpt" / f"{slug(name_str)}.json")
         s3_rows.append({
             "universe": name_str, "size": bucket_str, "start": result["start_str"], "members_median": result["members_median_int"],
@@ -38,19 +43,21 @@ def main() -> None:
             "nw_t": round(head["nw_t_float"], 2), "placebo_p": round(head["placebo_p_float"], 3),
             "pos_years": round(head["positive_year_share_float"], 2), "cov_s3": round(head["cost_coverage_float"], 2),
             "cov_liq": round(liquidity["coverage_float"], 2), "event_hs_bp": round(liquidity["event_median_half_spread_float"] * 1e4, 1),
+            "cov_pooled": round(pooled["coverage_float"], 2), "event_pooled_hs_bp": round(pooled["event_median_half_spread_float"] * 1e4, 1),
             "event_adv63_musd": round(liquidity["event_median_adv63_float"] / 1e6, 1), "verdict": result["s3"]["verdict_str"],
         })
         pod = result["pod"]
         row = {"universe": name_str, "size": bucket_str, "hold_med": pod["median_hold_sessions_int"],
                "trades_yr": round(pod["engine"]["trades_per_year_float"], 0)}
         for case_str, short_str in (("gross", "gross"), ("engine", "eng"), ("engine_adjusted_units", "eng_adj"), ("stress_2x_plus_10bp", "stress"),
-                                    ("liquidity_aware", "liq")):
+                                    ("liquidity_aware", "liq"), ("liquidity_pooled", "pool")):
             metric = pod[case_str]
             row[f"{short_str}_cagr"] = round(metric["cagr_float"] * 100, 1)
             row[f"{short_str}_sharpe"] = round(metric["sharpe_float"], 2)
             row[f"{short_str}_maxdd"] = round(metric["max_drawdown_float"] * 100, 0)
             row[f"{short_str}_active_sharpe"] = round(metric["active_sharpe_float"], 2)
-        row["liq_slip_entry_med_bp"] = round(pod["liquidity_slippage"]["entry_median_bp_float"], 1)
+        row["liq_slip_entry_mean_bp"] = round(pod["liquidity_slippage"]["liquidity_aware"]["entry_mean_bp_float"], 1)
+        row["pool_slip_entry_mean_bp"] = round(pod["liquidity_slippage"]["liquidity_pooled"]["entry_mean_bp_float"], 1)
         row["mcpt_p"] = mcpt["p_value_float"] if mcpt else None
         pod_rows.append(row)
         cap_rows.append({"universe": name_str, "cap_recent3y_musd": round(pod["capacity"]["recent_3y_aum_float"] / 1e6, 2),
@@ -73,9 +80,11 @@ def main() -> None:
                              "dates": w["event_dates_int"], "bp": round(w["date_mean_excess_float"] * 1e4, 2), "nw_t": round(w["nw_t_float"], 2),
                              "placebo_p": round(w.get("placebo_p_float", float("nan")), 3), "pos_years": round(w.get("positive_year_share_float", float("nan")), 2),
                              "bp_vs_universe": round(v["date_mean_excess_float"] * 1e4, 2), "t_vs_universe": round(v["nw_t_float"], 2),
-                             "hs_bp": round(w.get("event_median_half_spread_bp_float", float("nan")), 1),
-                             "rt_cost_bp": round(w.get("liquidity_round_trip_float", float("nan")) * 1e4, 1),
-                             "cov_liq": round(w.get("liquidity_coverage_float", float("nan")), 2),
+                             "hs_bp": round(cost(w, "liquidity_aware", "event_median_half_spread_bp_float"), 1),
+                             "cov_liq": round(cost(w, "liquidity_aware", "coverage_float"), 2),
+                             "pooled_hs_bp": round(cost(w, "liquidity_pooled", "event_median_half_spread_bp_float"), 1),
+                             "pooled_rt_bp": round(cost(w, "liquidity_pooled", "round_trip_float") * 1e4, 1),
+                             "cov_pooled": round(cost(w, "liquidity_pooled", "coverage_float"), 2),
                              "adv63_musd": round(w.get("event_median_adv63_musd_float", float("nan")), 1),
                              "era_04_07": round(w.get("eras", {}).get("1998-2007", float("nan")) * 1e4, 1),
                              "era_08_15": round(w.get("eras", {}).get("2008-2015", float("nan")) * 1e4, 1),

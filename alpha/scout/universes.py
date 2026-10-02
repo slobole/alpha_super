@@ -27,6 +27,9 @@ Causal features for the ladder (each value at row T uses bars dated <= T only, u
                         least 15 finite); half-spread = S_T / 2. The published monthly estimator averages the products;
                         the median is used here (robust to gap days). `fill_slippage_mat` applies the value of row t-1 to a
                         fill on row t (lagged one day: the estimate never reads the fill bar).
+    pooled_half_spread  the same products pooled per date by ADV63 quantile bucket over 63 sessions (bars <= T): the
+                        per-stock estimator cannot resolve a 2 bp spread from daily bars (volatility noise dominates), the
+                        pooled one can (see pooled_half_spread_mat).
     adv_tercile_df      per date, terciles of ADV63 among the universe's members with a finite ADV63 that date (1 = lowest).
 
 Costed ledger (`costed_book`): the gross replica `alpha.scout.specs.dv2._dv2_book_daily` with fills priced at
@@ -229,14 +232,56 @@ def adv63_mat(turnover_mat: np.ndarray, window_int: int = ADV_WINDOW_INT) -> np.
 def half_spread_mat(high_mat: np.ndarray, low_mat: np.ndarray, close_mat: np.ndarray, window_int: int = SPREAD_WINDOW_INT,
                     min_count_int: int = SPREAD_MIN_COUNT_INT) -> np.ndarray:
     """Causal Abdi-Ranaldo half-spread at T (bars <= T): 0.5 x sqrt(max(0, 4 x rolling median of the two-day products))."""
+    product_mat = _two_day_product_mat(high_mat, low_mat, close_mat)
+    median_mat = pd.DataFrame(product_mat).rolling(window_int, min_periods=min_count_int).median().to_numpy()
+    return 0.5 * np.sqrt(np.maximum(4.0 * median_mat, 0.0))
+
+
+def _two_day_product_mat(high_mat: np.ndarray, low_mat: np.ndarray, close_mat: np.ndarray) -> np.ndarray:
+    """Abdi-Ranaldo two-day products g_k = (c_(k-1) - eta_(k-1)) x (c_(k-1) - eta_k); NaN where not computable."""
     with np.errstate(divide="ignore", invalid="ignore"):
         c_mat = np.log(np.asarray(close_mat, dtype=float))
         eta_mat = 0.5 * (np.log(np.asarray(high_mat, dtype=float)) + np.log(np.asarray(low_mat, dtype=float)))
     product_mat = np.full(c_mat.shape, np.nan)
     product_mat[1:] = (c_mat[:-1] - eta_mat[:-1]) * (c_mat[:-1] - eta_mat[1:])
     product_mat[~np.isfinite(product_mat)] = np.nan
-    median_mat = pd.DataFrame(product_mat).rolling(window_int, min_periods=min_count_int).median().to_numpy()
-    return 0.5 * np.sqrt(np.maximum(4.0 * median_mat, 0.0))
+    return product_mat
+
+
+def pooled_half_spread_mat(high_mat: np.ndarray, low_mat: np.ndarray, close_mat: np.ndarray, adv_mat: np.ndarray, eligible_mat: np.ndarray,
+                           bucket_count_int: int = 20, window_int: int = 63, min_count_int: int = 500) -> tuple[np.ndarray, np.ndarray]:
+    """Abdi-Ranaldo half-spread pooled by liquidity bucket (causal): on each date k, eligible stocks with a finite ADV63
+    are put in `bucket_count_int` ADV63 quantile buckets; a bucket's spread at T is sqrt(max(0, 4 x mean of every
+    two-day product g_k of its stocks over k in [T-62, T])) (each product counted in the bucket its stock held on k).
+    A stock's half-spread at T is half its bucket's spread at T; a listed stock without a finite ADV63 (a zero-volume day
+    in the window) takes the lowest bucket. Pooling thousands of products removes the per-stock noise that makes the
+    single-stock estimator useless for liquid stocks (its 21-day median is zero or tens of bp for a 2 bp stock). Each date
+    the bucket spreads are made non-increasing in liquidity (running minimum from the least liquid bucket).
+    Returns (half-spread matrix, bucket half-spread table date x bucket, column 0 unused)."""
+    product_mat = _two_day_product_mat(high_mat, low_mat, close_mat)
+    ranked_mat = pd.DataFrame(np.where(eligible_mat.astype(bool) & np.isfinite(adv_mat), adv_mat, np.nan)).rank(axis=1, pct=True).to_numpy()
+    bucket_mat = np.nan_to_num(np.ceil(ranked_mat * bucket_count_int), nan=0.0).clip(0, bucket_count_int).astype(np.int16)
+    del ranked_mat
+    row_count_int = product_mat.shape[0]
+    sum_mat = np.zeros((row_count_int, bucket_count_int + 1))
+    count_mat = np.zeros((row_count_int, bucket_count_int + 1))
+    row_vec, column_vec = np.nonzero((bucket_mat > 0) & np.isfinite(product_mat))
+    np.add.at(sum_mat, (row_vec, bucket_mat[row_vec, column_vec]), product_mat[row_vec, column_vec])
+    np.add.at(count_mat, (row_vec, bucket_mat[row_vec, column_vec]), 1.0)
+    del row_vec, column_vec, product_mat
+    rolling_sum_mat = pd.DataFrame(sum_mat).rolling(window_int, min_periods=1).sum().to_numpy()
+    rolling_count_mat = pd.DataFrame(count_mat).rolling(window_int, min_periods=1).sum().to_numpy()
+    with np.errstate(invalid="ignore", divide="ignore"):
+        bucket_half_mat = np.where(rolling_count_mat >= min_count_int, 0.5 * np.sqrt(np.maximum(4.0 * rolling_sum_mat / rolling_count_mat, 0.0)), np.nan)
+    # Monotone in liquidity (same date only): a more liquid bucket never costs more than a less liquid one. Below about
+    # 20 bp the pooled mean product is dominated by small systematic terms and flips sign between neighbouring buckets.
+    bucket_half_mat[:, 1:] = np.fmin.accumulate(np.where(np.isnan(bucket_half_mat[:, 1:]), np.inf, bucket_half_mat[:, 1:]), axis=1)
+    bucket_half_mat[~np.isfinite(bucket_half_mat)] = np.nan
+    listed_mat = np.isfinite(np.asarray(close_mat, dtype=float))
+    lookup_mat = np.where((bucket_mat == 0) & listed_mat, 1, bucket_mat)
+    out_mat = np.take_along_axis(bucket_half_mat, lookup_mat.astype(np.int64), axis=1)
+    out_mat[~listed_mat] = np.nan
+    return out_mat, bucket_half_mat
 
 
 def fill_slippage_mat(half_spread: np.ndarray, floor_float: float = 0.00025) -> np.ndarray:
@@ -254,11 +299,24 @@ def adv_tercile_mat(adv_mat: np.ndarray, member_mat: np.ndarray) -> np.ndarray:
 
 # ---------------------------------------------------------------- costed replica of the DV2 rule
 @njit(cache=False)
+def _fee_float(fee_share_float, value_float, fee_per_share_float, min_fee_float, max_fee_fraction_float):
+    """max(minimum, per-share x shares), capped at a fraction of the trade value when the cap is > 0 (IBKR Fixed: 1%)."""
+    if fee_per_share_float <= 0.0:
+        return 0.0
+    fee_float = max(min_fee_float, fee_per_share_float * fee_share_float)
+    if max_fee_fraction_float > 0.0:
+        fee_float = min(fee_float, max_fee_fraction_float * value_float)
+    return fee_float
+
+
+@njit(cache=False)
 def _costed_book(open_mat, close_mat, pointer_vec, candidate_vec, exit_signal_mat, max_positions_int, start_row_int,
-                 slip_mat, share_scale_mat, fee_per_share_float, min_fee_float, capital_float):
+                 slip_mat, share_scale_mat, fee_per_share_float, min_fee_float, max_fee_fraction_float, capital_float, ruin_fraction_float):
     """`alpha.scout.specs.dv2._dv2_book_daily` in dollars with costs. Same decisions, same order (exits before entries,
     a held stock skipped without a slot, a stock without Open(t)/Close(t) sold at its last close <= T with the fee).
-    Entries before `start_row_int` are not taken. Fill log: (row, asset, +1 entry / -1 exit / -2 delisting, dollar value)."""
+    Entries before `start_row_int` are not taken. Fill log: (row, asset, +1 entry / -1 exit / -2 delisting, dollar value).
+    Ruin: when the book falls to `ruin_fraction_float` of the capital or below, that day's return is floored at -100% and
+    the book stops (later returns 0): a fixed minimum fee on a vanished book would otherwise produce meaningless returns."""
     row_count_int, asset_count_int = close_mat.shape
     share_vec = np.zeros(asset_count_int)
     held_vec = np.zeros(max_positions_int, dtype=np.int64)
@@ -297,12 +355,12 @@ def _costed_book(open_mat, close_mat, pointer_vec, candidate_vec, exit_signal_ma
                 while not np.isfinite(close_mat[q_int, a_int]):
                     q_int -= 1
                 value_float = share_vec[a_int] * close_mat[q_int, a_int]
-                fee_float = max(min_fee_float, fee_per_share_float * share_vec[a_int] * share_scale_mat[q_int, a_int]) if fee_per_share_float > 0 else 0.0
+                fee_float = _fee_float(share_vec[a_int] * share_scale_mat[q_int, a_int], value_float, fee_per_share_float, min_fee_float, max_fee_fraction_float)
                 cash_float += value_float - fee_float
                 kind_int = -2
             elif exit_signal_mat[p_int, a_int]:
                 value_float = share_vec[a_int] * open_mat[t_int, a_int]
-                fee_float = max(min_fee_float, fee_per_share_float * share_vec[a_int] * share_scale_mat[p_int, a_int]) if fee_per_share_float > 0 else 0.0
+                fee_float = _fee_float(share_vec[a_int] * share_scale_mat[p_int, a_int], value_float, fee_per_share_float, min_fee_float, max_fee_fraction_float)
                 cash_float += value_float * (1.0 - slip_mat[t_int, a_int]) - fee_float
                 kind_int = -1
             else:
@@ -319,7 +377,7 @@ def _costed_book(open_mat, close_mat, pointer_vec, candidate_vec, exit_signal_ma
                 continue
             share_vec[a_int] = previous_total_float * entry_weight_float / close_mat[p_int, a_int]
             value_float = share_vec[a_int] * open_mat[t_int, a_int]
-            fee_float = max(min_fee_float, fee_per_share_float * share_vec[a_int] * share_scale_mat[p_int, a_int]) if fee_per_share_float > 0 else 0.0
+            fee_float = _fee_float(share_vec[a_int] * share_scale_mat[p_int, a_int], value_float, fee_per_share_float, min_fee_float, max_fee_fraction_float)
             cash_float -= value_float * (1.0 + slip_mat[t_int, a_int]) + fee_float
             log_row[log_int], log_asset[log_int], log_kind[log_int], log_value[log_int] = t_int, a_int, 1, value_float
             log_int += 1
@@ -331,7 +389,11 @@ def _costed_book(open_mat, close_mat, pointer_vec, candidate_vec, exit_signal_ma
         daily_vec[t_int] = total_float / previous_total_float - 1.0
         total_vec[t_int] = total_float
         previous_total_float = total_float
-    return daily_vec, total_vec, log_row[:log_int], log_asset[:log_int], log_kind[:log_int], log_value[:log_int]
+        if total_float <= ruin_fraction_float * capital_float:
+            daily_vec[t_int] = max(daily_vec[t_int], -1.0)
+            total_vec[t_int:] = max(total_float, 0.0)
+            return daily_vec, total_vec, log_row[:log_int], log_asset[:log_int], log_kind[:log_int], log_value[:log_int], t_int
+    return daily_vec, total_vec, log_row[:log_int], log_asset[:log_int], log_kind[:log_int], log_value[:log_int], -1
 
 
 @dataclass
@@ -339,6 +401,7 @@ class CostedResult:
     daily_ser: pd.Series
     total_value_ser: pd.Series
     fill_df: pd.DataFrame  # date, asset, kind_int (+1 entry, -1 exit, -2 delisting sale), value_float (pre-cost dollars)
+    ruin_date: pd.Timestamp | None = None  # the session the book fell to the ruin level (None: never)
 
 
 def rule_mats(panel: Panel, config) -> dict:
@@ -361,9 +424,11 @@ def rule_mats(panel: Panel, config) -> dict:
 
 
 def costed_book(panel: Panel, config, slippage, fee_per_share_float: float, min_fee_float: float, share_unit_str: str = "nominal",
-                start_date_str: str = "2004-01-01", capital_float: float = 100_000.0, mats: dict | None = None) -> CostedResult:
+                start_date_str: str = "2004-01-01", capital_float: float = 100_000.0, mats: dict | None = None,
+                max_fee_fraction_float: float = 0.0, ruin_fraction_float: float = 0.01) -> CostedResult:
     """The frozen DV2 rule on a panel with costs. `slippage`: a per-side float or a (date x symbol) matrix of fill rows.
-    `share_unit_str`: "adjusted" (the engine's share units for the fee) or "nominal" (adjusted shares x Close / Unadjusted Close at T)."""
+    `share_unit_str`: "adjusted" (the engine's share units for the fee) or "nominal" (adjusted shares x Close / Unadjusted Close at T).
+    `max_fee_fraction_float` > 0 caps each fee at that fraction of the trade value (IBKR Fixed caps at 1%)."""
     mats = mats if mats is not None else rule_mats(panel, config)
     shape_tuple = mats["close"].shape
     slip_mat = np.full(shape_tuple, float(slippage)) if np.isscalar(slippage) else np.asarray(slippage, dtype=float)
@@ -377,10 +442,12 @@ def costed_book(panel: Panel, config, slippage, fee_per_share_float: float, min_
         raise ValueError("share_unit_str must be 'adjusted' or 'nominal'.")
     # The first decision is the close of the last session before the start (the engine's calendar).
     start_row_int = int(np.searchsorted(panel.date_index.to_numpy(), np.datetime64(pd.Timestamp(start_date_str))))
-    daily_vec, total_vec, row_vec, asset_vec, kind_vec, value_vec = _costed_book(
+    daily_vec, total_vec, row_vec, asset_vec, kind_vec, value_vec, ruin_row_int = _costed_book(
         mats["open"], mats["close"], mats["pointer_vec"], mats["candidate_vec"], mats["exit_signal"], config.max_positions_int,
-        start_row_int, slip_mat, scale_mat, float(fee_per_share_float), float(min_fee_float), float(capital_float))
+        start_row_int, slip_mat, scale_mat, float(fee_per_share_float), float(min_fee_float), float(max_fee_fraction_float),
+        float(capital_float), float(ruin_fraction_float))
     date_index = panel.date_index
     symbol_arr = np.array(panel.symbol_list, dtype=object)
     fill_df = pd.DataFrame({"date": date_index[row_vec], "asset": symbol_arr[asset_vec], "kind_int": kind_vec, "value_float": value_vec})
-    return CostedResult(daily_ser=pd.Series(daily_vec, index=date_index), total_value_ser=pd.Series(total_vec, index=date_index), fill_df=fill_df)
+    return CostedResult(daily_ser=pd.Series(daily_vec, index=date_index), total_value_ser=pd.Series(total_vec, index=date_index), fill_df=fill_df,
+                        ruin_date=date_index[ruin_row_int] if ruin_row_int >= 0 else None)

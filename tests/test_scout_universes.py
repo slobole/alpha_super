@@ -16,6 +16,7 @@ from alpha.scout.universes import (
     fill_slippage_mat,
     half_spread_mat,
     membership_matrix,
+    pooled_half_spread_mat,
     universe_panel,
 )
 
@@ -118,6 +119,31 @@ def test_half_spread_recovers_a_planted_spread_and_fills_lag_one_day():
     assert np.allclose(slip_mat[finite_vec + 1, 0], np.maximum(estimate_vec[finite_vec], 0.00025))  # row t uses row t-1
 
 
+def _planted_spread_panel(row_count_int: int = 300, column_count_int: int = 200, seed_int: int = 5):
+    """Liquid stocks (high ADV) quote a 2 bp half-spread, illiquid ones 40 bp; mid random walk with 2% daily volatility."""
+    rng_obj = np.random.default_rng(seed_int)
+    half_vec = np.where(np.arange(column_count_int) < column_count_int // 2, 0.0040, 0.0002)
+    mid_mat = 50.0 * np.exp(np.cumsum(rng_obj.normal(0, 0.02, (row_count_int, column_count_int)), axis=0))
+    close_mat = mid_mat * (1.0 + half_vec * rng_obj.choice([-1.0, 1.0], mid_mat.shape))
+    high_mat = mid_mat * np.exp(np.abs(rng_obj.normal(0, 0.01, mid_mat.shape))) * (1.0 + half_vec)
+    low_mat = mid_mat * np.exp(-np.abs(rng_obj.normal(0, 0.01, mid_mat.shape))) * (1.0 - half_vec)
+    adv_mat = np.tile(np.where(half_vec > 0.001, 1e6, 1e9), (row_count_int, 1)) * rng_obj.uniform(0.9, 1.1, mid_mat.shape)
+    return high_mat, low_mat, close_mat, adv_mat, half_vec
+
+
+def test_pooled_half_spread_separates_liquid_from_illiquid_and_is_causal():
+    high_mat, low_mat, close_mat, adv_mat, half_vec = _planted_spread_panel()
+    eligible_mat = np.ones(close_mat.shape, dtype=bool)
+    out_mat, _ = pooled_half_spread_mat(high_mat, low_mat, close_mat, adv_mat, eligible_mat, bucket_count_int=2, min_count_int=500)
+    late_mat = out_mat[100:]
+    assert np.nanmedian(late_mat[:, half_vec > 0.001]) == pytest.approx(0.0040, rel=0.35)
+    assert np.nanmedian(late_mat[:, half_vec < 0.001]) < 0.0010  # the per-stock estimator cannot get this close
+    for t_int in (80, 150, 299):
+        prefix_mat, _ = pooled_half_spread_mat(high_mat[: t_int + 1], low_mat[: t_int + 1], close_mat[: t_int + 1], adv_mat[: t_int + 1],
+                                               eligible_mat[: t_int + 1], bucket_count_int=2, min_count_int=500)
+        np.testing.assert_array_equal(prefix_mat, out_mat[: t_int + 1])
+
+
 def test_adv_terciles_rank_members_only_per_date():
     adv_mat = np.array([[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [6.0, 5.0, 4.0, 3.0, 2.0, np.nan]])
     member_mat = np.array([[1, 1, 1, 1, 1, 1], [1, 1, 1, 0, 1, 1]], dtype=np.int8)
@@ -170,3 +196,19 @@ def test_costed_book_costs_and_share_units():
     matrix = costed_book(panel, dv2.LIVE_CONFIG, np.full(panel.member_df.shape, 0.001), 0.0, 0.0, start_date_str=start_str)
     np.testing.assert_allclose(matrix.daily_ser.to_numpy(), slipped.daily_ser.to_numpy(), atol=1e-15)
     assert (gross.fill_df["date"] >= panel.date_index[260]).all()
+
+
+def test_costed_book_fee_cap_and_ruin():
+    panel = _synthetic_panel()
+    start_str = str(panel.date_index[260].date())
+    growth = lambda r: float((1.0 + r.daily_ser).prod())
+    uncapped = costed_book(panel, dv2.LIVE_CONFIG, 0.0, 1.0, 1.0, start_date_str=start_str)
+    capped = costed_book(panel, dv2.LIVE_CONFIG, 0.0, 1.0, 1.0, start_date_str=start_str, max_fee_fraction_float=0.01)
+    assert growth(uncapped) < growth(capped) < growth(costed_book(panel, dv2.LIVE_CONFIG, 0.0, 0.0, 0.0, start_date_str=start_str))
+    assert capped.ruin_date is None
+    # A $5,000 minimum fee on a $100,000 book ruins it: floored at -100% that day, flat after.
+    ruined = costed_book(panel, dv2.LIVE_CONFIG, 0.0, 0.005, 5_000.0, start_date_str=start_str)
+    assert ruined.ruin_date is not None
+    assert ruined.daily_ser.loc[ruined.ruin_date] >= -1.0
+    assert (ruined.daily_ser.loc[ruined.ruin_date:].iloc[1:] == 0.0).all()
+    assert (ruined.total_value_ser.loc[ruined.ruin_date:] >= 0.0).all()

@@ -19,6 +19,11 @@ Per universe (window: 2004-01-01, or the first full year of the index's membersh
         fill) per side, engine fees on nominal shares. No dividends (the replica's convention; about -0.01 to -0.04
         Sharpe vs the engine). Active Sharpe = Sharpe of the daily return minus the equal-weight members' return
         (dv2.member_baseline_vec).
+        Nominal-share fees are capped at 1% of the trade value (2% under stress), as IBKR Fixed pricing. A book that falls to
+        1% of its capital is ruined: that day is floored at -100% and it stops (ruin_date_str).
+        (d) liquidity-pooled: as (c) with the ADV-bucket pooled Abdi-Ranaldo half-spread (alpha.scout.universes.
+        pooled_half_spread_mat: 20 ADV63 buckets across every ladder member, 63 sessions of products), because the
+        per-stock estimator is dominated by volatility noise for liquid stocks.
   cap   alpha.scout.stations.s6_book.capacity on the engine-cost fills: AUM at which the 5th-percentile fill is 1% of its
         63-session ADV (native Turnover, shifted one session), last three in-sample years.
 """
@@ -59,12 +64,13 @@ SUPERSET_NAME_STR = "size_ladder"
 CONFIG = dv2.LIVE_CONFIG
 HORIZON_INT = 3
 FLOOR_SLIP_FLOAT = 0.00025
-COST_CASE_DICT = {  # name -> (slippage or "liquidity", fee per share, minimum fee, share units)
-    "gross": (0.0, 0.0, 0.0, "nominal"),
-    "engine": (0.00025, 0.005, 1.0, "nominal"),
-    "engine_adjusted_units": (0.00025, 0.005, 1.0, "adjusted"),
-    "stress_2x_plus_10bp": (2 * 0.00025 + 0.0010, 0.010, 2.0, "nominal"),
-    "liquidity_aware": ("liquidity", 0.005, 1.0, "nominal"),
+COST_CASE_DICT = {  # name -> (slippage float or a spread name, fee per share, minimum fee, fee cap as a fraction of value, share units)
+    "gross": (0.0, 0.0, 0.0, 0.0, "nominal"),
+    "engine": (0.00025, 0.005, 1.0, 0.01, "nominal"),
+    "engine_adjusted_units": (0.00025, 0.005, 1.0, 0.0, "adjusted"),  # the engine's own fee units, no cap (P7 parity)
+    "stress_2x_plus_10bp": (2 * 0.00025 + 0.0010, 0.010, 2.0, 0.02, "nominal"),
+    "liquidity_aware": ("liquidity_aware", 0.005, 1.0, 0.01, "nominal"),
+    "liquidity_pooled": ("liquidity_pooled", 0.005, 1.0, 0.01, "nominal"),
 }
 log_started_float = time.time()
 
@@ -110,7 +116,33 @@ def s3_masks(panel) -> dict:
     return {"regime": regime_mat, "event": event_mat, "indicator": -features["dv2_mat"], "mats": mats}
 
 
-def run_universe_s3(panel, half_spread: np.ndarray, masks: dict) -> dict:
+def pooled_spread_superset(superset) -> np.ndarray:
+    """The ADV-bucket pooled Abdi-Ranaldo half-spread on the whole superset (eligible = member of any ladder index),
+    cached next to the superset panel."""
+    from alpha.scout.universes import SUPERSET_ROOT_PATH, pooled_half_spread_mat
+
+    path = SUPERSET_ROOT_PATH / SUPERSET_NAME_STR / superset.snapshot_id_str / "pooled_half_spread.npy"
+    if not path.exists():
+        eligible_mat = np.zeros(superset.field_dict["Close"].shape, dtype=bool)
+        for member_mat in superset.member_dict.values():
+            eligible_mat |= np.asarray(member_mat) == 1
+        field = lambda f: np.asarray(superset.field_dict[f], dtype=float)
+        out_mat, bucket_mat = pooled_half_spread_mat(field("High"), field("Low"), field("Close"), adv63_mat(field("Turnover")), eligible_mat)
+        np.save(path, out_mat.astype(np.float32))
+        pd.DataFrame(bucket_mat[:, 1:] * 1e4, index=superset.date_index, columns=[f"b{i:02d}" for i in range(1, bucket_mat.shape[1])]).to_csv(
+            OUT_PATH / "pooled_half_spread_bp_by_adv_bucket.csv")
+    return np.load(path, mmap_mode="r")
+
+
+def spread_dict_for(superset, panel) -> dict:
+    """{"liquidity_aware": per-stock Abdi-Ranaldo, "liquidity_pooled": ADV-bucket pooled} half-spreads on the panel's axes."""
+    position_vec = pd.Index(superset.symbol_list).get_indexer(panel.symbol_list)
+    row_vec = superset.date_index.get_indexer(panel.date_index)
+    return {"liquidity_aware": half_spread_mat(*(panel.field(f).to_numpy(dtype=float) for f in ("High", "Low", "Close"))),
+            "liquidity_pooled": np.asarray(pooled_spread_superset(superset)[row_vec][:, position_vec], dtype=float)}
+
+
+def run_universe_s3(panel, spread_dict: dict, masks: dict) -> dict:
     from alpha.scout import features as scout_features
     from alpha.scout.stations.s3_edge import run_s3
 
@@ -119,7 +151,7 @@ def run_universe_s3(panel, half_spread: np.ndarray, masks: dict) -> dict:
                     event_mask_df=frame(masks["event"]), horizon_int=HORIZON_INT, indicator_df=frame(masks["indicator"]),
                     liquidity_rank_df=scout_features.turnover_rank(63).compute_fn(panel), expected_sign_int=1)
     event_mat = masks["event"] & masks["regime"] & (panel.member_df.to_numpy() == 1)
-    liquidity = liquidity_coverage(panel, event_mat, half_spread, report.headline_dict["date_mean_excess_float"])
+    liquidity = {k: liquidity_coverage(panel, event_mat, hs, report.headline_dict["date_mean_excess_float"]) for k, hs in spread_dict.items()}
     return {"headline": report.headline_dict, "eras": report.table_dict["eras"], "years": report.table_dict["years"],
             "liquidity_terciles": report.table_dict.get("liquidity_terciles"), "verdict_str": report.verdict_str,
             "check_list": [list(row) for row in report.check_list], "liquidity_cost": liquidity}
@@ -155,17 +187,18 @@ def pod_metrics(result, baseline_ser: pd.Series, start_str: str) -> dict:
             "year_return_dict": performance["year_return_dict"]}
 
 
-def run_universe_pods(panel, half_spread: np.ndarray, start_str: str) -> tuple[dict, dict]:
+def run_universe_pods(panel, spread_dict: dict, start_str: str) -> tuple[dict, dict]:
     from alpha.scout.stations.s6_book import capacity
 
     mats = rule_mats(panel, CONFIG)
     baseline_ser = pd.Series(dv2.member_baseline_vec(mats["close"], mats["member"]), index=panel.date_index)
-    liquidity_slip_mat = fill_slippage_mat(half_spread, FLOOR_SLIP_FLOAT)
+    slip_mat_dict = {k: fill_slippage_mat(hs, FLOOR_SLIP_FLOAT) for k, hs in spread_dict.items()}
     out_dict, result_dict = {}, {}
-    for case_str, (slip, fee_float, min_fee_float, unit_str) in COST_CASE_DICT.items():
-        result = costed_book(panel, CONFIG, liquidity_slip_mat if slip == "liquidity" else slip, fee_float, min_fee_float,
-                             share_unit_str=unit_str, start_date_str=start_str, mats=mats)
+    for case_str, (slip, fee_float, min_fee_float, cap_float, unit_str) in COST_CASE_DICT.items():
+        result = costed_book(panel, CONFIG, slip_mat_dict[slip] if isinstance(slip, str) else slip, fee_float, min_fee_float,
+                             share_unit_str=unit_str, start_date_str=start_str, mats=mats, max_fee_fraction_float=cap_float)
         out_dict[case_str] = pod_metrics(result, baseline_ser, start_str)
+        out_dict[case_str]["ruin_date_str"] = str(result.ruin_date.date()) if result.ruin_date is not None else None
         result_dict[case_str] = result
     engine = result_dict["engine"]
     fill_df = engine.fill_df[engine.fill_df["date"] >= pd.Timestamp(start_str)]
@@ -174,10 +207,12 @@ def run_universe_pods(panel, half_spread: np.ndarray, start_str: str) -> tuple[d
     out_dict["capacity"] = capacity(trade_df, engine.total_value_ser, panel.field("Turnover").astype(float))
     entry_row_vec = panel.date_index.get_indexer(fill_df.loc[fill_df["kind_int"] == 1, "date"])
     entry_asset_vec = pd.Index(panel.symbol_list).get_indexer(fill_df.loc[fill_df["kind_int"] == 1, "asset"])
-    charged_vec = liquidity_slip_mat[entry_row_vec, entry_asset_vec]
-    out_dict["liquidity_slippage"] = {"entry_median_bp_float": float(np.median(charged_vec) * 1e4),
-                                      "entry_mean_bp_float": float(np.mean(charged_vec) * 1e4),
-                                      "entry_floor_share_float": float(np.mean(charged_vec <= FLOOR_SLIP_FLOAT))}
+    out_dict["liquidity_slippage"] = {}
+    for key_str, slip_mat in slip_mat_dict.items():
+        charged_vec = slip_mat[entry_row_vec, entry_asset_vec]
+        out_dict["liquidity_slippage"][key_str] = {"entry_median_bp_float": float(np.median(charged_vec) * 1e4),
+                                                   "entry_mean_bp_float": float(np.mean(charged_vec) * 1e4),
+                                                   "entry_floor_share_float": float(np.mean(charged_vec <= FLOOR_SLIP_FLOAT))}
     _, _, hold_list = dv2.fast_daily_list_panel(panel, [{}], base_config=CONFIG, return_hold_bool=True)
     out_dict["median_hold_sessions_int"] = int(np.median(hold_list[0])) if len(hold_list[0]) else None
     daily_frame = pd.DataFrame({k: r.daily_ser for k, r in result_dict.items()}).assign(baseline=baseline_ser).loc[start_str:SEAL_END_STR]
@@ -188,7 +223,8 @@ def run_universe(superset, index_name_str: str) -> dict:
     start_str = universe_start_str(superset, index_name_str)
     panel = universe_panel(superset, index_name_str, member_from_str=start_str)
     log(f"{index_name_str}: {len(panel.symbol_list)} symbols, start {start_str}")
-    half_spread = half_spread_mat(*(panel.field(f).to_numpy(dtype=float) for f in ("High", "Low", "Close")))
+    spread_dict = spread_dict_for(superset, panel)
+    half_spread = spread_dict["liquidity_aware"]
     masks = s3_masks(panel)
     member_count_ser = panel.member_df.loc[start_str:].sum(axis=1)
     out_dict = {"index_name_str": index_name_str, "start_str": start_str, "end_str": SEAL_END_STR, "symbol_count_int": len(panel.symbol_list),
@@ -198,14 +234,14 @@ def run_universe(superset, index_name_str: str) -> dict:
                     int(y): float(np.nanmedian(half_spread[(panel.date_index.year == y) & (panel.date_index >= start_str)][
                         (panel.member_df.to_numpy() == 1)[(panel.date_index.year == y) & (panel.date_index >= start_str)]]) * 1e4)
                     for y in sorted(set(panel.date_index[panel.date_index >= start_str].year))}}
-    out_dict["s3"] = run_universe_s3(panel, half_spread, masks)
+    out_dict["s3"] = run_universe_s3(panel, spread_dict, masks)
     del masks
     gc.collect()
     log(f"{index_name_str}: S3 done: {out_dict['s3']['headline']['date_mean_excess_float'] * 1e4:+.1f} bp t {out_dict['s3']['headline']['nw_t_float']:.2f}")
-    pods, series = run_universe_pods(panel, half_spread, start_str)
+    pods, series = run_universe_pods(panel, spread_dict, start_str)
     out_dict["pod"] = pods
     log(f"{index_name_str}: pods done: net Sharpe {pods['engine']['sharpe_float']:.2f}, stress {pods['stress_2x_plus_10bp']['sharpe_float']:.2f}, "
-        f"liquidity {pods['liquidity_aware']['sharpe_float']:.2f}")
+        f"liquidity {pods['liquidity_aware']['sharpe_float']:.2f}, pooled {pods['liquidity_pooled']['sharpe_float']:.2f}")
     folder_path = OUT_PATH / "universes"
     write_json(folder_path / f"{slug(index_name_str)}.json", out_dict)
     series["daily"].to_csv(folder_path / f"{slug(index_name_str)}_daily.csv")
@@ -215,7 +251,7 @@ def run_universe(superset, index_name_str: str) -> dict:
 
 # ---------------------------------------------------------------- size buckets inside the broad universes
 def lite_s3(forward_mat: np.ndarray, regime_mat: np.ndarray, event_mat: np.ndarray, bucket_mat: np.ndarray, date_index: pd.DatetimeIndex,
-            half_spread: np.ndarray, adv_mat: np.ndarray, baseline_mat: np.ndarray | None = None, placebo_bool: bool = True) -> dict:
+            spread_dict: dict, adv_mat: np.ndarray, baseline_mat: np.ndarray | None = None, placebo_bool: bool = True) -> dict:
     """S3's headline estimators (s3_edge: date-level mean of event excess, Newey-West lag h-1, shift placebo, positive
     years, eras) for the events inside one bucket. Excess over the same-date eligible members of the same bucket
     (`baseline_mat` None) or of `baseline_mat`'s eligible set (a whole-universe baseline)."""
@@ -238,14 +274,17 @@ def lite_s3(forward_mat: np.ndarray, regime_mat: np.ndarray, event_mat: np.ndarr
         return {**out_dict, "date_mean_excess_float": float(date_ser.mean()) if date_ser.size else float("nan"), "nw_t_float": float("nan")}
     nw = newey_west_mean_t_stat(date_vec, HORIZON_INT - 1)
     year_ser = date_ser.groupby(date_ser.index.year).mean()
-    cost_mat = np.where(use_mat, 2.0 * np.fmax(np.nan_to_num(half_spread, nan=FLOOR_SLIP_FLOAT), FLOOR_SLIP_FLOAT), 0.0)
-    date_cost_float = float((cost_mat.sum(axis=1)[date_mask_vec] / event_count_vec[date_mask_vec]).mean())
+    cost_dict = {}
+    for key_str, half_spread in spread_dict.items():
+        cost_mat = np.where(use_mat, 2.0 * np.fmax(np.nan_to_num(half_spread, nan=FLOOR_SLIP_FLOAT), FLOOR_SLIP_FLOAT), 0.0)
+        date_cost_float = float((cost_mat.sum(axis=1)[date_mask_vec] / event_count_vec[date_mask_vec]).mean())
+        cost_dict[key_str] = {"round_trip_float": date_cost_float, "coverage_float": nw.mean_float / date_cost_float,
+                              "event_median_half_spread_bp_float": float(np.nanmedian(half_spread[use_mat]) * 1e4)}
     out_dict.update({
         "date_mean_excess_float": nw.mean_float, "nw_t_float": nw.t_stat_float,
         "positive_year_share_float": float((year_ser > 0).mean()),
         "eras": {era_str: float(date_ser.loc[a:b].mean()) if date_ser.loc[a:b].size else float("nan") for era_str, a, b in ERA_TUPLE},
-        "liquidity_round_trip_float": date_cost_float, "liquidity_coverage_float": nw.mean_float / date_cost_float,
-        "event_median_half_spread_bp_float": float(np.nanmedian(half_spread[use_mat]) * 1e4),
+        "liquidity_cost": cost_dict,
         "event_median_adv63_musd_float": float(np.nanmedian(adv_mat[use_mat]) / 1e6),
     })
     if placebo_bool:
@@ -274,20 +313,20 @@ def bucket_study(superset, universe_label_str: str, union_index_list: list[str],
         forward_mat = panel.field("Close").shift(-HORIZON_INT).to_numpy(dtype=float) / panel.field("Open").shift(-1).to_numpy(dtype=float) - 1.0
     regime_mat = masks["regime"] & union_mat
     event_mat = masks["event"]
-    half_spread = half_spread_mat(*(panel.field(f).to_numpy(dtype=float) for f in ("High", "Low", "Close")))
+    spread_dict = spread_dict_for(superset, panel)
     adv_mat = adv63_mat(panel.field("Turnover").to_numpy(dtype=float))
     date_index = panel.date_index
     del masks
     gc.collect()
 
     out_dict = {"universe_str": universe_label_str, "union_index_list": union_index_list, "start_str": start_str, "horizon_int": HORIZON_INT}
-    out_dict["whole_universe"] = lite_s3(forward_mat, regime_mat, event_mat, union_mat, date_index, half_spread, adv_mat)
+    out_dict["whole_universe"] = lite_s3(forward_mat, regime_mat, event_mat, union_mat, date_index, spread_dict, adv_mat)
     log(f"buckets {universe_label_str}: whole {out_dict['whole_universe']['date_mean_excess_float'] * 1e4:+.1f} bp t {out_dict['whole_universe']['nw_t_float']:.2f}")
     membership_rows = []
     for label_str, rule_fn in bucket_rule_list:
         bucket_mat = rule_fn(flag_dict) & union_mat
-        row = {"bucket_str": label_str, "within_bucket": lite_s3(forward_mat, regime_mat, event_mat, bucket_mat, date_index, half_spread, adv_mat),
-               "vs_whole_universe": lite_s3(forward_mat, regime_mat, event_mat, bucket_mat, date_index, half_spread, adv_mat,
+        row = {"bucket_str": label_str, "within_bucket": lite_s3(forward_mat, regime_mat, event_mat, bucket_mat, date_index, spread_dict, adv_mat),
+               "vs_whole_universe": lite_s3(forward_mat, regime_mat, event_mat, bucket_mat, date_index, spread_dict, adv_mat,
                                             baseline_mat=regime_mat, placebo_bool=False),
                "members_median_int": int(np.median(bucket_mat[np.asarray(date_index >= start_str)].sum(axis=1)))}
         membership_rows.append(row)
@@ -301,8 +340,8 @@ def bucket_study(superset, universe_label_str: str, union_index_list: list[str],
     adv_rows = []
     for tercile_int, label_str in ((1, "low ADV63"), (2, "middle ADV63"), (3, "high ADV63")):
         bucket_mat = (tercile_mat == tercile_int) & adv_universe_mat
-        row = {"bucket_str": label_str, "within_bucket": lite_s3(forward_mat, regime_mat, event_mat, bucket_mat, date_index, half_spread, adv_mat),
-               "vs_whole_universe": lite_s3(forward_mat, regime_mat & adv_universe_mat, event_mat, bucket_mat, date_index, half_spread, adv_mat,
+        row = {"bucket_str": label_str, "within_bucket": lite_s3(forward_mat, regime_mat, event_mat, bucket_mat, date_index, spread_dict, adv_mat),
+               "vs_whole_universe": lite_s3(forward_mat, regime_mat & adv_universe_mat, event_mat, bucket_mat, date_index, spread_dict, adv_mat,
                                             baseline_mat=regime_mat & adv_universe_mat, placebo_bool=False)}
         adv_rows.append(row)
         log(f"  {label_str}: {row['within_bucket']['date_mean_excess_float'] * 1e4:+.1f} bp t {row['within_bucket']['nw_t_float']:.2f}")
@@ -360,9 +399,10 @@ def run_validate(superset) -> None:
     s4 = bundle["s4"]
     p7_net_ser = s4.grid_df[s4.live_label_str].loc["2004-01-01":SEAL_END_STR]
     for case_str in ("engine_adjusted_units", "engine", "stress_2x_plus_10bp"):
-        slip, fee_float, min_fee_float, unit_str = COST_CASE_DICT[case_str]
+        slip, fee_float, min_fee_float, cap_float, unit_str = COST_CASE_DICT[case_str]
         for label_str, panel in (("scout_panel", masked_scout), ("superset", mine)):
-            result = costed_book(panel, CONFIG, slip, fee_float, min_fee_float, share_unit_str=unit_str, start_date_str="2004-01-01")
+            result = costed_book(panel, CONFIG, slip, fee_float, min_fee_float, share_unit_str=unit_str, start_date_str="2004-01-01",
+                                 max_fee_fraction_float=cap_float)
             ser = result.daily_ser.loc["2004-01-01":SEAL_END_STR]
             both = pd.concat([ser, p7_net_ser], axis=1, keys=["replica", "p7"]).dropna()
             out_dict[f"{case_str}_{label_str}"] = {"sharpe_float": sharpe_float(ser), "cagr_float": performance_dict(ser)["cagr_float"],
