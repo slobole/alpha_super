@@ -354,3 +354,32 @@ def test_cmma_is_causal_scale_free_and_bounded():
                                                              np.abs(np.log(close_df["A"] * 0.99).to_numpy()[1:] - log_close_vec[:-1])))
     x_float = (log_close_vec[t] - log_close_vec[t - 50:t].mean()) / (log_tr_vec[t - 100:t].mean() * np.sqrt(51.0))
     assert full_df["A"].iloc[t] == pytest.approx(100.0 * ndtr(x_float) - 50.0, abs=1e-9)
+
+
+def test_linear_trend_matches_ols_and_is_causal():
+    from alpha.scout.specs import ndx_vxn
+
+    date_index = pd.bdate_range("2010-01-01", periods=300)
+    rng_obj = np.random.default_rng(13)
+    close_df = pd.DataFrame(100.0 * np.exp(np.cumsum(rng_obj.normal(0.001, 0.02, size=(300, 2)), axis=0)), index=date_index, columns=["A", "B"])
+    close_df.iloc[150, 1] = np.nan  # a hole: every window that holds it is NaN
+
+    def make(c_df):
+        return ndx_vxn.NdxInputs(c_df, c_df * 1.01, c_df * 0.99, c_df, c_df, c_df * 0.0, c_df * 0 + 1, pd.Series(dtype=float))
+
+    lt_df, compressed_df = ndx_vxn.linear_trend_frame(make(close_df), 60, 20)
+    y_vec = np.log(close_df["A"].to_numpy())
+    for t in (59, 120, 299):
+        slope_float, _ = np.polyfit(np.arange(60), y_vec[t - 59:t + 1], 1)
+        rsq_float = np.corrcoef(np.arange(60), y_vec[t - 59:t + 1])[0, 1] ** 2
+        previous_vec = y_vec[t - 20:t]
+        tr_vec = np.maximum(np.log(1.01 / 0.99), np.maximum(np.abs(y_vec[t - 19:t + 1] + np.log(1.01) - previous_vec),
+                                                             np.abs(y_vec[t - 19:t + 1] + np.log(0.99) - previous_vec)))
+        assert lt_df["A"].iloc[t] == pytest.approx(slope_float * 59 / tr_vec.mean() * rsq_float, rel=1e-9)
+    assert lt_df["A"].iloc[:59].isna().all() and lt_df["B"].iloc[150:210].isna().all() and np.isfinite(lt_df["B"].iloc[210])
+    assert compressed_df.abs().max().max() < 50.0
+    # Causal (a truncated future changes nothing) and scale-free (a back-adjustment factor cancels).
+    np.testing.assert_allclose(ndx_vxn.linear_trend_frame(make(close_df.iloc[:200]), 60, 20)[0].to_numpy(), lt_df.iloc[:200].to_numpy(), rtol=1e-12)
+    np.testing.assert_allclose(ndx_vxn.linear_trend_frame(make(close_df * 5.0), 60, 20)[0].to_numpy(), lt_df.to_numpy(), rtol=1e-9)
+    no_rsq_df = ndx_vxn.linear_trend_frame(make(close_df), 60, 20, rsq_bool=False)[0]
+    assert (no_rsq_df["A"].abs().iloc[59:] >= lt_df["A"].abs().iloc[59:] - 1e-12).all()

@@ -61,6 +61,15 @@ evaluated by the original comparison so the identity gate is untouched):
         ATR_ln  = mean over the last A sessions of max(ln H - ln L, |ln H - ln C(t-1)|, |ln L - ln C(t-1)|)
         CMMA(T) = 100 * Phi(x(T)) - 50   (bounded in (-50, 50); 0 = the close at its log average)
       Every term ends at T and is a log difference, so a back-adjustment factor (a constant per date range) cancels.
+
+Linear-trend ranking (research, 2026-10-03; Masters, Statistically Sound Indicators, "linear trend"):
+atr_unit_str = "linear_trend" ranks on
+    LT(T) = b(T) * (n - 1) / ATR_ln(A, T) * R2(T)        (R2 left out when lt_rsq_bool is False)
+    b, R2 = the OLS slope and R-squared of ln C on the session index over the n sessions ending at T
+  (n = lt_lookback_int, A = lt_atr_int). Masters compresses with 100 * Phi(0.6 * x) - 50; a monotone map with a
+  common constant cannot change a cross-sectional ranking, so the ranking uses LT itself (`linear_trend_frame` also
+  returns a compressed form, scaled by 1 / sqrt(n) so that it does not saturate, for the indicator battery). roc_month_int keeps its role in the decision calendar
+  (the first decision waits roc_month_int month-ends), so the start date matches the ROC variants.
 """
 
 from __future__ import annotations
@@ -82,7 +91,7 @@ STOCK_SMA_INT = 100
 REGIME_SMA_INT = 200
 VXN_REFERENCE_FLOAT = 22.0
 VXN_FLOOR_FLOAT = 0.25
-ATR_UNIT_TUPLE = ("dollar", "percent", "none")  # "none": ablation only (ROC alone)
+ATR_UNIT_TUPLE = ("dollar", "percent", "none", "linear_trend")  # "none": ablation only (ROC alone); "linear_trend": research
 
 
 @dataclass(frozen=True)
@@ -103,6 +112,9 @@ class NdxConfig:
     trend_fast_sma_int: int = 0  # 0 = the close
     trend_threshold_float: float = 0.0
     trend_filter_str: str = "sma"  # "sma" (the engine rule and its variants) or "cmma"
+    lt_lookback_int: int = 252  # linear-trend ranking (atr_unit_str = "linear_trend")
+    lt_atr_int: int = 20
+    lt_rsq_bool: bool = True
     cmma_atr_int: int = 252
     cmma_threshold_float: float = 0.0
 
@@ -215,6 +227,44 @@ def cmma_frame(inputs: NdxInputs, lookback_int: int, atr_int: int) -> pd.DataFra
     return pd.DataFrame(100.0 * ndtr(x_df.to_numpy()) - 50.0, index=x_df.index, columns=x_df.columns).where(x_df.notna())
 
 
+def linear_trend_frame(inputs: NdxInputs, lookback_int: int, atr_int: int, rsq_bool: bool = True) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(LT, 100 * Phi(0.6 * LT / sqrt(n)) - 50) on every column (see the module docstring); NaN until both windows are
+    full or when a window holds a NaN. The compressed form divides by sqrt(n) (random-walk scaling, as CMMA) so that
+    it does not saturate; it is used only by the indicator battery, never by the ranking."""
+    from scipy.special import ndtr
+
+    log_close_df = np.log(inputs.close_df.where(inputs.close_df > 0))
+    log_high_df, log_low_df = np.log(inputs.high_df.where(inputs.high_df > 0)), np.log(inputs.low_df.where(inputs.low_df > 0))
+    previous_log_close_df = log_close_df.shift(1)
+    x_centered_vec = np.arange(lookback_int, dtype=float) - (lookback_int - 1) / 2.0
+    sxx_float = float(x_centered_vec @ x_centered_vec)
+    slope_mat = np.full(log_close_df.shape, np.nan)
+    rsq_mat = np.full(log_close_df.shape, np.nan)
+    for column_int in range(log_close_df.shape[1]):
+        y_vec = log_close_df.iloc[:, column_int].to_numpy(dtype=float)
+        if len(y_vec) < lookback_int:
+            continue
+        # *** CRITICAL*** trailing windows only: window r covers rows r .. r + n - 1 and is stored at row r + n - 1.
+        window_mat = np.lib.stride_tricks.sliding_window_view(y_vec, lookback_int)
+        centered_mat = window_mat - window_mat.mean(axis=1, keepdims=True)
+        sxy_vec = centered_mat @ x_centered_vec
+        syy_vec = np.einsum("ij,ij->i", centered_mat, centered_mat)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            rsq_vec = np.where(syy_vec > 0.0, sxy_vec * sxy_vec / (sxx_float * syy_vec), 0.0)
+        slope_mat[lookback_int - 1:, column_int] = sxy_vec / sxx_float  # NaN windows stay NaN (NaN propagates)
+        rsq_mat[lookback_int - 1:, column_int] = np.clip(rsq_vec, 0.0, 1.0)
+    true_range_df = np.maximum(log_high_df - log_low_df,
+                               np.maximum((log_high_df - previous_log_close_df).abs(), (log_low_df - previous_log_close_df).abs()))
+    atr_mat = true_range_df.rolling(atr_int, min_periods=atr_int).mean().to_numpy()
+    with np.errstate(divide="ignore", invalid="ignore"):
+        lt_mat = np.where(atr_mat > 0, slope_mat * (lookback_int - 1.0) / atr_mat, np.nan)
+    if rsq_bool:
+        lt_mat = lt_mat * rsq_mat
+    lt_df = pd.DataFrame(lt_mat, index=log_close_df.index, columns=log_close_df.columns)
+    compressed_df = pd.DataFrame(100.0 * ndtr(0.6 * lt_mat / np.sqrt(lookback_int)) - 50.0, index=lt_df.index, columns=lt_df.columns).where(lt_df.notna())
+    return lt_df, compressed_df
+
+
 def rebalance_weight_df(inputs: NdxInputs, config: NdxConfig = LIVE_CONFIG) -> pd.DataFrame:
     """Target weights indexed by execution date (the session after each decision date)."""
     close_df, date_index = inputs.close_df, inputs.close_df.index
@@ -230,6 +280,8 @@ def rebalance_weight_df(inputs: NdxInputs, config: NdxConfig = LIVE_CONFIG) -> p
     fast_sma_df = (close_df.rolling(config.trend_fast_sma_int, min_periods=config.trend_fast_sma_int).mean()
                    if config.trend_fast_sma_int > 0 else None)
     cmma_df = cmma_frame(inputs, config.stock_sma_int, config.cmma_atr_int) if config.trend_filter_str == "cmma" else None
+    lt_df = (linear_trend_frame(inputs, config.lt_lookback_int, config.lt_atr_int, config.lt_rsq_bool)[0]
+             if config.atr_unit_str == "linear_trend" else None)
     regime_close_ser = close_df[REGIME_SYMBOL_STR]
     regime_sma_ser = regime_close_ser.rolling(config.regime_sma_int, min_periods=config.regime_sma_int).mean()
 
@@ -261,6 +313,8 @@ def rebalance_weight_df(inputs: NdxInputs, config: NdxConfig = LIVE_CONFIG) -> p
             score_ser = roc_ser / atr_dollar_ser
             if config.atr_unit_str == "none":
                 score_ser = roc_ser.copy()  # ablation: ROC alone
+            elif config.atr_unit_str == "linear_trend":
+                score_ser = lt_df.loc[decision_ts, stock_list].copy()  # research: Masters' linear trend
             elif config.atr_unit_str == "percent":
                 # NATR20: ROC / (ATR$ / RawClose(T)), computed as the engine does: (ROC / ATR$) × RawClose(T).
                 score_ser = score_ser * inputs.raw_close_df.loc[decision_ts, stock_list]
