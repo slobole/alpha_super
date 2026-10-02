@@ -1118,6 +1118,17 @@ Report: `docs/research/SCOUT_P7_REAUDITION_20261002.md`.
   entry event barely beats the same-date members (+3.6 bp, t 0.79). DV2 and HPI correlate 0.75 daily, so the book
   needs one stock reversal pod, not two.
 
+**A14 (2026-10-02, P7b: DV2 on industry ETFs).**
+Report: `docs/research/SCOUT_P7B_DV2_INDUSTRY_ETF_20261002.md`.
+
+- **Gated exactly:** `dv2_industry_etf`, with no engine change.
+- **MCPT:** the ETF date shuffle keeps eligibility (history, Turnover, raw price) on real dates (A8).
+- **Family:** `etf_short_term_reversal`. A registration cannot have a parent in another family, so it has no parent.
+- **Grade:** WATCHLIST on a single WARN (S3 cost coverage 1.62).
+  - MCPT p 0.001, DSR p 0.002, alpha t 3.05, slot P 0.99 (book 1.21 → 1.32).
+  - Correlation about 0.5 with DV2 and HPI.
+- **Idle cash:** a cash-heavy pod's slot test is also shown with idle cash credited at the T-bill rate (information).
+
 **Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
 It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about
 performance. A performance kill rule is a separate, currently unrecorded gap, and P1 should add it to
