@@ -219,6 +219,22 @@ GATED_SPEC_DICT["dv2_ndx"] = GatedSpec("dv2_ndx", "alpha.scout.gate.legacy_dv2_n
                                        functools.partial(_run_dv2, "dv2_ndx"))
 
 
+def _run_dv2_industry_etf(capital_float: float):
+    from alpha.scout.specs import dv2_industry_etf
+
+    inputs = dv2_industry_etf.load_inputs(total_return_bool=False)
+    result = dv2_industry_etf.simulate_config(inputs, dv2_industry_etf.LIVE_CONFIG, dv2_industry_etf.ENGINE_COST_MODEL, capital_float)
+    return result, inputs.base.close_df
+
+
+# DV2 on 19 industry ETFs (RESEARCH, 2026-10-02; alpha/scout/specs/dv2_industry_etf.py): the DV2 rule, eligibility = 252
+# sessions of closes and a 63-session native-Turnover ADV above $50M, at the engine's own costs.
+GATED_SPEC_DICT["dv2_industry_etf"] = GatedSpec(
+    "dv2_industry_etf", "strategies.dv2.strategy_mr_dv2_industry_etf", _pickle_glob_str("strategies.dv2.strategy_mr_dv2_industry_etf"),
+    _run_dv2_industry_etf,
+)
+
+
 def _run_hpi(variant_name_str: str, capital_float: float):
     from alpha.scout.specs import hpi
 

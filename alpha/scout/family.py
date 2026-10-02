@@ -13,7 +13,7 @@ The PM_READY pods TFI and Trinity (2026-10-01) are wired through `tfi_family` an
 The month-end rebalancing flow (PM_READY, MOC execution) is `eom_family` (no luck band: offset_count_int = 1).
 The PM_READY sector ETF IBS event pods (2026-10-02) are `sector_ibs_family` and `dispersion_ibs_family`.
 The WIRED DV2 mean-reversion pod on point-in-time S&P 500 members is `dv2_family`, its Nasdaq-100 variant `dv2_ndx_family`
-(no luck band: offset_count_int = 1).
+(no luck band: offset_count_int = 1); the same rule on 19 industry ETFs is `dv2_industry_family` (ETF family).
 The HPI S&P 500 pods (2/3/5 vote WIRED, IBS RSI exit PM_READY; 2026-10-01) are `hpi_family`.
 """
 
@@ -449,6 +449,31 @@ def dv2_family(inputs=None) -> FamilyRunner:
 
 def dv2_ndx_family(inputs=None) -> FamilyRunner:
     return dv2_variant_family("dv2_ndx", inputs)
+
+
+# ---------------------------------------------------------------- DV2 on 19 industry ETFs (RESEARCH, 2026-10-02)
+# The same rule on ETFs, so the same family as the sector IBS pods ("etf_short_term_reversal", whose taxonomy entry names
+# industry-ETF DV2): buying oversold industry baskets is liquidity provision on ETFs, not single-stock reversal, and its
+# trials must not dilute or be diluted by the stock family's. A daily event rule: no luck band (offset_count_int = 1).
+# The axes are DV2_GRID_DICT's, one step either side of the live value (27 configurations), except the slot count:
+# - entry_dv2_max_float 5 / 10 / 20 and exit_rule_str prev_close / prev_high / high_2d, as for the stock pod;
+# - max_positions_int 5 / 10 / 15 (each slot V / n): at most 18 of the 19 ETFs are ever eligible (about 8 in 2012, 15-17
+#   since 2018) and the live 10 slots fill on 40 of 3,708 sessions (2012-01..2026-09), so 20 slots could never fill and
+#   would only halve every position; 15 is the widest count below the eligible set, 5 the concentrated end. The ADV
+#   floor, the 252-session history rule and the ETF list are the universe's identity and stay fixed.
+DV2_INDUSTRY_GRID_DICT = {
+    "entry_dv2_max_float": (5.0, 10.0, 20.0),
+    "exit_rule_str": ("prev_close", "prev_high", "high_2d"),
+    "max_positions_int": (5, 10, 15),
+}
+
+
+def dv2_industry_family(inputs=None) -> FamilyRunner:
+    """DV2 on 19 industry ETFs (alpha/scout/specs/dv2_industry_etf.py). The cost model is the caller's; the identity
+    gate uses the engine's, `dv2_industry_etf.ENGINE_COST_MODEL`."""
+    family = _spec_family("dv2_industry_etf", "DV2 industry ETF", "etf_short_term_reversal", DV2_INDUSTRY_GRID_DICT, inputs)
+    family.offset_count_int = 1  # a daily event rule: no rebalance offset
+    return family
 
 
 def grid_return_df(family: FamilyRunner, cost_model: CostModel = DEFAULT_COST_MODEL, capital_float: float = 100_000.0) -> pd.DataFrame:
