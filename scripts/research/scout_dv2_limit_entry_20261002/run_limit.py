@@ -4,7 +4,8 @@ The DV2 signal is FROZEN (alpha/scout/specs/dv2.py LIVE_CONFIG); the execution m
 uses the size-ladder superset panel (data to 2022-12-30; alpha.scout.universes).
 
     PYTHONUTF8=1 uv run python scripts/research/scout_dv2_limit_entry_20261002/run_limit.py universe [name ...]
-    PYTHONUTF8=1 uv run python scripts/research/scout_dv2_limit_entry_20261002/run_limit.py mcpt name [workers]
+    PYTHONUTF8=1 uv run python scripts/research/scout_dv2_limit_entry_20261002/run_limit.py fillstress [name ...]
+    PYTHONUTF8=1 uv run python scripts/research/scout_dv2_limit_entry_20261002/run_limit.py mcpt name [workers] [pooled|ar] [permutations]
 
 Per universe (window 2004-01-01 .. 2022-12-30; membership zeroed before the start, as the size ladder):
   pods   the registered grid, entry {moo, k = 0, 0.25, 0.5, 1.0} x exit {moo, limit}, each under three cost cases on the
@@ -328,6 +329,44 @@ def run_universe(superset, name_str: str) -> dict:
     return out_dict
 
 
+# ---------------------------------------------------------------- fill-model stress (diagnostic, not a trial axis)
+STRESS_SPREAD_FRACTION_TUPLE = (0.1, 0.5, 1.0)  # 0.1 = the registered trade-through margin
+
+
+def run_fill_stress(superset, name_str: str) -> dict:
+    """The registered grid's limit cells re-run with a stricter trade-through margin: the price must trade through the limit
+    by max(one tick, f x the larger half-spread) for f in STRESS_SPREAD_FRACTION_TUPLE. f = 1 roughly asks the MID to reach
+    the limit, i.e. no passive fill on a print that only hit the bid. A diagnostic of fill optimism, not a selection axis."""
+    panel = build_panel(superset, name_str)
+    spread_dict = spread_dict_for(superset, panel)
+    inputs = signal_inputs(panel)
+    mats = inputs["mats"]
+    exit_limit = exit_limit_mat(mats["close"], inputs["unadjusted"])
+    slip_dict = {k: fill_slippage_mat(spread_dict[k], FLOOR_SLIP_FLOAT) for k in ("ar", "pooled")}
+    out_dict = {}
+    for fraction_float in STRESS_SPREAD_FRACTION_TUPLE:
+        margin_mat = trade_through_margin_mat(inputs["unadjusted"], [spread_dict["ar"], spread_dict["pooled"]], spread_fraction_float=fraction_float)
+        for entry in ENTRY_TUPLE:
+            entry_limit = None if entry == "moo" else entry_limit_mat(mats["close"], inputs["unadjusted"], inputs["natr"], float(entry))
+            for exit_str in EXIT_TUPLE:
+                if entry == "moo" and exit_str == "moo":
+                    continue
+                row_dict = {}
+                for case_str in ("gross", "ar", "pooled"):
+                    slip, fee, minimum, cap = (0.0, 0.0, 0.0, 0.0) if case_str == "gross" else (slip_dict[case_str], FEE_PER_SHARE_FLOAT, MIN_FEE_FLOAT, FEE_CAP_FLOAT)
+                    result = limit_book(panel.date_index, panel.symbol_list, mats, inputs["high"], inputs["low"], CONFIG.max_positions_int, START_STR,
+                                        entry_limit, exit_str, margin_mat, exit_limit, slip, inputs["scale"], fee, minimum, cap)
+                    row_dict[f"sharpe_{case_str}"] = sharpe_float(window(result.daily_ser))
+                    if case_str == "pooled":
+                        row_dict.update({k: v for k, v in order_stats(result, panel.date_index).items()
+                                         if k in ("fill_rate_float", "entry_passive_share_float", "exit_passive_share_float", "trades_per_year_float")})
+                out_dict[f"f{fraction_float:g}|{config_label(entry, exit_str)}"] = row_dict
+                log(f"  {name_str} f {fraction_float:g} {config_label(entry, exit_str):28s} fill {row_dict['fill_rate_float']:.2f} "
+                    f"gross {row_dict['sharpe_gross']:5.2f} AR {row_dict['sharpe_ar']:5.2f} pooled {row_dict['sharpe_pooled']:5.2f}")
+    write_json(OUT_PATH / "fill_stress" / f"{slug(name_str)}.json", out_dict)
+    return out_dict
+
+
 # ---------------------------------------------------------------- MCPT (per-asset null over the whole entry x exit grid)
 def mcpt_score(panel, spread_dict: dict, cost_str: str) -> tuple[float, int, list]:
     """Plateau choice (alpha.stats.selection) over the registered entry x exit grid of the net active Sharpe (daily net
@@ -410,8 +449,13 @@ def main() -> None:
         for name_str in sys.argv[2:] or list(UNIVERSE_TUPLE):
             run_universe(superset, name_str)
             gc.collect()
+    elif command_str == "fillstress":
+        for name_str in sys.argv[2:] or list(UNIVERSE_TUPLE):
+            run_fill_stress(superset, name_str)
+            gc.collect()
     elif command_str == "mcpt":
-        run_mcpt(superset, sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else 3, sys.argv[4] if len(sys.argv) > 4 else "pooled")
+        run_mcpt(superset, sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else 3, sys.argv[4] if len(sys.argv) > 4 else "pooled",
+                 int(sys.argv[5]) if len(sys.argv) > 5 else 1000)
     else:
         raise SystemExit(f"unknown command {command_str!r}")
 

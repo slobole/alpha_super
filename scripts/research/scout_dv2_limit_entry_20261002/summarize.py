@@ -82,7 +82,11 @@ def main() -> None:
     event_df.to_csv(table_path / "events.csv", index=False)
     pd.set_option("display.width", 250)
     pd.set_option("display.max_columns", 40)
-    fmt = lambda df: df.to_markdown(index=False, floatfmt=".2f")
+    def fmt(df: pd.DataFrame) -> str:  # a Markdown table without the optional tabulate dependency
+        cell = lambda v: f"{v:.2f}" if isinstance(v, float) else str(v)
+        lines = ["| " + " | ".join(df.columns) + " |", "|" + "---|" * len(df.columns)]
+        lines += ["| " + " | ".join(cell(v) for v in row) + " |" for row in df.itertuples(index=False)]
+        return "\n".join(lines)
     print("## Pods\n")
     print(fmt(pod_df[["universe", "entry", "exit", "fill_rate", "trades_yr", "mean_positions", "sharpe_gross", "sharpe_ar", "sharpe_pooled",
                       "cagr_ar", "cagr_pooled", "maxdd_ar", "maxdd_pooled", "cost_rt_bp_ar", "cost_rt_bp_pooled"]]))
