@@ -49,6 +49,15 @@ def pod_dir_str(name_str: str) -> str:
 
 
 # ---------------------------------------------------------------- building a pod
+def cash_credited(result, close_df: pd.DataFrame, tbill_ser: pd.Series) -> pd.Series:
+    """Engine net daily returns plus idle cash at the T-bill rate (see PodRunner.daily)."""
+    position_df = result.daily_position_df
+    aligned_close_df = close_df.reindex(index=position_df.index, columns=position_df.columns)
+    long_value_ser = (position_df * aligned_close_df).clip(lower=0.0).sum(axis=1, min_count=0)
+    idle_ser = (1.0 - long_value_ser / result.total_value_ser).clip(0.0, 1.0)
+    return result.daily_return_ser + idle_ser.shift(1).fillna(0.0) * tbill_ser.reindex(result.daily_return_ser.index).fillna(0.0)
+
+
 class PodRunner:
     """Runs the live rule of a planned pod with spec fields overridden. Inputs are loaded once per traded universe
     (a TAA ablation can change the defensive list or the fallback); `live_inputs` seeds the live universe's inputs
@@ -116,12 +125,7 @@ class PodRunner:
         result = result if result is not None else self.result(override_dict)
         if self.tbill_ser is None:
             raise ValueError("The cash credit needs the T-bill series.")
-        position_df = result.daily_position_df
-        close_df = self.inputs(override_dict).close_df.reindex(index=position_df.index, columns=position_df.columns)
-        long_value_ser = (position_df * close_df).clip(lower=0.0).sum(axis=1, min_count=0)
-        idle_ser = (1.0 - long_value_ser / result.total_value_ser).clip(0.0, 1.0)
-        tbill_ser = self.tbill_ser.reindex(result.daily_return_ser.index).fillna(0.0)
-        return result.daily_return_ser + idle_ser.shift(1).fillna(0.0) * tbill_ser
+        return cash_credited(result, self.inputs(override_dict).close_df, self.tbill_ser)
 
     def daily_zero_cash(self, override_dict: dict) -> pd.Series:
         return self.result(override_dict).daily_return_ser

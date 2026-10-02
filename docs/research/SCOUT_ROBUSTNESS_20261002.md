@@ -211,3 +211,60 @@ The plateau and filter study was registered in the ledger before any number was 
   produces.
 - **What the evidence supports:** the filter matters little, and short filters hurt. It does not support a specific
   replacement.
+
+## Follow-up 2 (2026-10-02): plateau ensemble, ranking blend, Masters CMMA filter
+
+Script: `ndx_ensemble_cmma.py`. Ledger registration `ndx_natr20_vxn_ensemble_cmma_20261002`, written before any number
+was computed. In sample 2000-09 to 2022, net, idle cash at T-bill.
+
+**Ensembles (luck = Sharpe over the 16 rebalance offsets: min / median / max).**
+
+| Strategy | Sharpe | CAGR | Max DD | Luck band | Names held | 2023 on (seen) |
+|---|---|---|---|---|---|---|
+| Live (dollar ATR) | 0.73 | 10.7% | −29.0% | 0.57 / 0.64 / 0.75 | 10 | 1.14 |
+| NATR20 single | 0.84 | 13.7% | −23.5% | 0.61 / 0.73 / 0.84 | 10 | 0.95 |
+| Plateau single (ROC 12, SMA150; picked after seeing the map) | 0.91 | 15.1% | −23.2% | 0.64 / 0.74 / 0.91 | 10 | 1.09 |
+| E1 plateau ensemble (9 cells) | 0.87 | 14.0% | −23.4% | 0.64 / 0.73 / 0.87 | 17 | 0.89 |
+| E2 ranking blend (dollar ATR + NATR20) | 0.81 | 12.3% | −23.4% | 0.61 / 0.69 / 0.81 | 15 | 1.07 |
+
+- **E1 delivers the plateau average without picking a cell.** The nine cells average 0.85; the ensemble earns 0.87.
+- **E1 does not narrow the luck band.** The cells hold mostly the same stocks, so parameter diversification inside
+  one ranking buys little.
+- **E2 is the balanced one.** In the fast crashes it falls between its two parents:
+
+| Crash | E2 | Dollar ATR | NATR20 |
+|---|---|---|---|
+| Q4 2018 | −6.3% | −3.3% | −9.5% |
+| 2022 | −14.2% | −11.4% | −17.1% |
+| 2025 | −16.2% | −13.1% | −19.2% |
+
+  Its 2023-on Sharpe is 1.07.
+- **Planning number:** for every NATR-based variant, the median offset sits at about 0.73. That is the planning number,
+  not the month-end figure.
+
+**CMMA as the stock filter (NATR20 VXN, ROC 12, top 10).**
+- CMMA > 0 is nearly the live filter: the same names in 95% of months, Sharpe 0.85.
+- **Loose bars** (−10 or −20; any L): 0.85-0.87, and the best after 2022 (1.11-1.17).
+- **Strict bars:**
+  - +20 hurts (0.51-0.72).
+  - The single best in-sample cell is L200 at +10 (0.92). After 2022 it drops to 1.00, against 1.15 for the loose bars.
+- **The verdict:** the filter's level matters little unless it is strict. No CMMA cell is a robust improvement.
+
+**Masters battery on members at month ends (raw distance vs CMMA).**
+- **CMMA is better shaped:**
+  - range/IQR 4.7-5.2 vs 14.1;
+  - 0% of values beyond 3 IQR vs 1.1%;
+  - relative entropy 0.82-0.85 vs 0.57.
+- **CMMA is not more stable through time here.** The share of members above a fixed +10 bar ranges from 10% to 38%
+  across the 5-year blocks, against 17-24% for the raw +10% bar. Both drop in 1998-2002, a real bear-market level
+  shift.
+- **The raw distance carries a bit more information:**
+
+| Indicator | MI (bits) | Shuffled maximum |
+|---|---|---|
+| Raw distance | 0.036 | 0.017 |
+| CMMA(200) | 0.027 | 0.015 |
+
+  The likely reason is that the raw distance also measures volatility.
+- **Use of CMMA:** it is a well-behaved continuous input, suited to ranking or combining. As a binary filter it is
+  close to the SMA rule.
