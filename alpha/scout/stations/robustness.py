@@ -1,4 +1,4 @@
-"""Robustness diagnostics (amendment A14, 2026-10-02): four printed checks from a concept review of a futures thesis
+"""Robustness diagnostics (amendment A15, 2026-10-02): four printed checks from a concept review of a futures thesis
 (github.com/Lucas-Joly-GH/trends-research, tests T23, T24, T30 and its Henriksson-Merton / Treynor-Mazuy battery).
 
 None of them is a gate and none changes a grade (D20: a test gates only after a calibration shows it adds something).

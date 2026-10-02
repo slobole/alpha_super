@@ -726,6 +726,8 @@ Kept from each source:
 - **McLean–Pontiff:** before and after publication.
 - **Carver:** replication across instruments and preference for few rules.
 - **Pardo:** the plateau and walk-forward efficiency.
+- **Joly (trends-research, A15):** component ablation with a minimum spec, the random-parameter percentile, the
+  contribution check, and Henriksson-Merton / Treynor-Mazuy convexity, all as printed diagnostics.
 
 ## 13. Build phases
 
@@ -1117,6 +1119,32 @@ Report: `docs/research/SCOUT_P7_REAUDITION_20261002.md`.
   The whole rule passes S4-S6 strongly (vote: MCPT p 0.021, DSR p 0.000, alpha t 2.64, book 1.21 → 1.37), but the
   entry event barely beats the same-date members (+3.6 bp, t 0.79). DV2 and HPI correlate 0.75 daily, so the book
   needs one stock reversal pod, not two.
+
+**A15 (2026-10-02, robustness diagnostics).**
+Report: `docs/research/SCOUT_ROBUSTNESS_20261002.md`.
+
+- **Source:** a concept review of a futures thesis (github.com/Lucas-Joly-GH/trends-research); the owner chose three of
+  its tests. The others were not adopted: GAN synthetic markets, HMM and Bayesian filters (section 12 logic), and its
+  forecast-shuffle null (shuffled forecasts churn daily, so the null measures costs, not the absence of an edge).
+- **Four printed diagnostics, never gates** (D20), in `alpha/scout/stations/robustness.py`, on the card:
+  - contribution concentration (S4): exact per-asset P&L; the share of the top assets; the Sharpe with the top asset
+    (ETF pod) or the top 1% of names (stock pod) removed;
+  - Henriksson-Merton / Treynor-Mazuy convexity against SPY and QQQ (S6);
+  - component ablation, alone and cumulative, with a paired-bootstrap P and a minimum spec (S4);
+  - the random-parameter percentile over a registered box wider than the S4 grid (S4/S5).
+- **Weights engine:** a new output `asset_pnl_df`, with no decision, fill or mark changed (parity review).
+- **Specs:** ablation switches in TAA, NDX and CORE5 (defaults = the engine rule). The fast replicas refuse them.
+- **Conventions:** idle cash is credited at the T-bill rate in the ablation and random draws, and the 0%-cash Sharpe is
+  printed beside it. Each window starts at the longest warm-up any random draw can need.
+- **Findings:**
+  - No stock pod lives on one name (DV2 0.94 → 0.78 without the top 1% of names).
+  - Every TAA variant lives on its fallback ETF (TAA 3x: TQQQ 84% of return).
+  - No pod is significantly convex; CORE5 comes closest (down beta 0.00, up beta 0.16, t 1.9).
+  - NDX: the dollar-ATR score hurts (ROC alone 0.82 vs 0.73); the VXN scaling shows no evidence; the SPY regime filter
+    earns its place.
+  - CORE5: every component earns its place.
+  - Every pod is robust to its values, but TAA 3x and CORE5 sit in the top 1% of their draws: plan on the medians
+    (0.94 and 0.80).
 
 **Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
 It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about

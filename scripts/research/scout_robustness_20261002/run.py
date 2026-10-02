@@ -1,4 +1,4 @@
-"""A14 robustness diagnostics: contribution concentration, market-timing convexity, component ablation and the
+"""A15 robustness diagnostics: contribution concentration, market-timing convexity, component ablation and the
 random-parameter percentile (alpha/scout/stations/robustness.py), on the plans fixed in plans.py.
 
     uv run python scripts/research/scout_robustness_20261002/run.py            # the five planned pods, then the rest

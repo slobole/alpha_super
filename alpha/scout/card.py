@@ -265,8 +265,8 @@ def render_card(bundle: dict) -> str:
 
 
 def robustness_html(rob: dict) -> str:
-    """The A14 diagnostics (alpha/scout/stations/robustness.py): printed, never part of the grade."""
-    part_list = ["<h2>Robustness diagnostics (A14, printed only: they do not change the grade)</h2>"]
+    """The A15 diagnostics (alpha/scout/stations/robustness.py): printed, never part of the grade."""
+    part_list = ["<h2>Robustness diagnostics (A15, printed only: they do not change the grade)</h2>"]
     contribution = rob.get("contribution")
     if contribution:
         share_str = ", ".join(f"top {k} {v:.0%}" for k, v in contribution["top_share_dict"].items())

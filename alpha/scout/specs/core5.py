@@ -330,8 +330,9 @@ def fast_daily_list(matrix: np.ndarray, date_index: pd.DatetimeIndex, config_lis
     """Gross daily return of each configuration (dicts of Core5Config fields, or Core5Config) from the matrix alone:
     signals from prices rebuilt by compounding the returns, decision at the close of T on the first defined session,
     a long-state change or the matrix's last session of a month, constant weights from the close of T+1."""
-    from alpha.scout.searches import _hold_daily
+    from alpha.scout.searches import _hold_daily, refuse_ablation_switches
 
+    refuse_ablation_switches(config_list)
     risk_count_int = len(RISK_ASSET_TUPLE)
     commodity_int = RISK_ASSET_TUPLE.index(COMMODITY_ASSET_STR)
     price_mat = np.cumprod(1.0 + matrix[:, :risk_count_int], axis=0)

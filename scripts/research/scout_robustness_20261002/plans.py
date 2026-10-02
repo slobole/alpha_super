@@ -1,4 +1,4 @@
-"""Registered plans for the A14 robustness diagnostics (alpha/scout/stations/robustness.py), fixed before any run.
+"""Registered plans for the A15 robustness diagnostics (alpha/scout/stations/robustness.py), fixed before any run.
 
 Five pods, chosen by the owner on 2026-10-02: the two LIVE pods (TAA 3x, NDX VXN), the NATR20 sibling of NDX VXN
 (A10: the live dollar-ATR score ranks partly by share price; NATR20 is the shadow candidate), and the two defensive

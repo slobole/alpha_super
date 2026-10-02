@@ -1,4 +1,4 @@
-"""A14 robustness diagnostics (alpha/scout/stations/robustness.py) and the spec ablation switches they use."""
+"""A15 robustness diagnostics (alpha/scout/stations/robustness.py) and the spec ablation switches they use."""
 
 from __future__ import annotations
 
@@ -290,3 +290,14 @@ def test_taa_cash_asset_switch_isolates_one_asset():
     assert (no_btal_df["BTAL"] == 0.0).all() and (live_df["BTAL"] > 0).any()
     other_list = [c for c in live_df.columns if c != "BTAL"]
     assert no_btal_df[other_list].equals(live_df[other_list])
+
+
+
+def test_fast_replicas_refuse_ablation_switches():
+    from alpha.scout.searches import refuse_ablation_switches
+    from alpha.scout.specs.core5 import Core5Config
+
+    refuse_ablation_switches([{"roc_month_int": 12}, {"trend_rule_bool": True}, Core5Config()])
+    for config in ({"vix_gate_bool": False}, {"cash_asset_tuple": ("BTAL",)}, Core5Config(adaptive_speed_bool=False)):
+        with pytest.raises(ValueError, match="ablation switch"):
+            refuse_ablation_switches([config])
