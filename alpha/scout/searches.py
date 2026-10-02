@@ -112,7 +112,7 @@ def taa_config_daily_list(matrix: np.ndarray, date_index: pd.DatetimeIndex, grid
 ABLATION_SWITCH_DEFAULT_DICT = {
     "cash_hurdle_bool": True, "vix_gate_bool": True, "defensive_hold_str": "assets", "fallback_hold_str": "asset",
     "cash_asset_tuple": (), "regime_filter_bool": True, "stock_trend_filter_bool": True, "adaptive_speed_bool": True,
-    "trend_rule_bool": True,
+    "trend_rule_bool": True, "trend_fast_sma_int": 0, "trend_threshold_float": 0.0,
 }
 
 

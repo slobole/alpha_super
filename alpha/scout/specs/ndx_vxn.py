@@ -50,6 +50,11 @@ Ablation switches (robustness diagnostics, 2026-10-02; no engine strategy, the d
 identity gate runs on them): regime_filter_bool=False treats the SPY regime as always on (a decision still waits for
 the regime average to be warm, so the decision months are unchanged); stock_trend_filter_bool=False drops the
 Close > SMA filter; atr_unit_str="none" ranks on ROC alone (no volatility normalisation).
+
+Trend-filter variants (research, 2026-10-02 owner question; the defaults are the engine rule Close > SMA(stock_sma_int),
+evaluated by the original comparison so the identity gate is untouched):
+    trend_fast_sma_int > 0      the filter compares SMA(fast) with SMA(stock_sma_int) instead of the close
+    trend_threshold_float != 0  the filter requires (Close or SMA(fast)) / SMA(stock_sma_int) - 1 > threshold
 """
 
 from __future__ import annotations
@@ -88,6 +93,9 @@ class NdxConfig:
     # Ablation switches (robustness diagnostics; the defaults are the engine rule).
     regime_filter_bool: bool = True
     stock_trend_filter_bool: bool = True
+    # Trend-filter variants (research; the defaults are the engine rule).
+    trend_fast_sma_int: int = 0  # 0 = the close
+    trend_threshold_float: float = 0.0
 
     def __post_init__(self) -> None:
         if self.atr_unit_str not in ATR_UNIT_TUPLE:
@@ -192,6 +200,8 @@ def rebalance_weight_df(inputs: NdxInputs, config: NdxConfig = LIVE_CONFIG) -> p
     # NaN anywhere in the three terms propagates (np.maximum keeps NaN), as in the engine.
     atr_adjusted_df = true_range_df.rolling(config.atr_window_int, min_periods=config.atr_window_int).mean()
     stock_sma_df = close_df.rolling(config.stock_sma_int, min_periods=config.stock_sma_int).mean()
+    fast_sma_df = (close_df.rolling(config.trend_fast_sma_int, min_periods=config.trend_fast_sma_int).mean()
+                   if config.trend_fast_sma_int > 0 else None)
     regime_close_ser = close_df[REGIME_SYMBOL_STR]
     regime_sma_ser = regime_close_ser.rolling(config.regime_sma_int, min_periods=config.regime_sma_int).mean()
 
@@ -227,7 +237,13 @@ def rebalance_weight_df(inputs: NdxInputs, config: NdxConfig = LIVE_CONFIG) -> p
                 # NATR20: ROC / (ATR$ / RawClose(T)), computed as the engine does: (ROC / ATR$) × RawClose(T).
                 score_ser = score_ser * inputs.raw_close_df.loc[decision_ts, stock_list]
             score_ser = score_ser.replace([np.inf, -np.inf], np.nan)
-            trend_mask = (close_now_ser > stock_sma_df.loc[decision_ts, stock_list]).fillna(False)
+            if config.trend_fast_sma_int == 0 and config.trend_threshold_float == 0.0:
+                trend_mask = (close_now_ser > stock_sma_df.loc[decision_ts, stock_list]).fillna(False)
+            else:
+                # *** CRITICAL*** both averages end at T (rolling windows over closes <= T).
+                fast_ser = fast_sma_df.loc[decision_ts, stock_list] if fast_sma_df is not None else close_now_ser
+                distance_ser = fast_ser / stock_sma_df.loc[decision_ts, stock_list] - 1.0
+                trend_mask = (distance_ser > config.trend_threshold_float).fillna(False)
             if not config.stock_trend_filter_bool:
                 trend_mask = close_now_ser.notna()  # ablation: no stock trend filter
             member_mask = inputs.member_df.loc[decision_ts, stock_list] == 1
