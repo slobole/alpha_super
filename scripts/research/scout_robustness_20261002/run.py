@@ -54,8 +54,9 @@ class PodRunner:
     (a TAA ablation can change the defensive list or the fallback); `live_inputs` seeds the live universe's inputs
     (the random-draw workers receive them from the parent instead of reading Norgate eight times at once)."""
 
-    def __init__(self, plan: RobustPlan, live_inputs=None):
-        self.plan, self.family_dict, self.inputs_dict = plan, {}, {}
+    def __init__(self, plan: RobustPlan, live_inputs=None, tbill_ser: pd.Series | None = None):
+        self.plan, self.family_dict, self.inputs_dict, self.tbill_ser = plan, {}, {}, tbill_ser
+        self.result_cache_dict, self.cache_bool = {}, live_inputs is None  # workers get live_inputs: no cache there
         if live_inputs is not None:
             self.inputs_dict[self._key({})] = live_inputs
 
@@ -96,31 +97,55 @@ class PodRunner:
         return self.family_dict[key_tuple]
 
     def result(self, override_dict: dict):
+        """The engine run; cached in the parent (ablation reads each run twice: T-bill cash and 0% cash), never in a
+        random-draw worker (each draw is new, and a stock pod's result is tens of MB)."""
+        key_str = repr(sorted(override_dict.items()))
+        if key_str in self.result_cache_dict:
+            return self.result_cache_dict[key_str]
         family = self._family(override_dict)
-        return family.run_config({**family.live_config_dict, **override_dict})
+        result = family.run_config({**family.live_config_dict, **override_dict})
+        if self.cache_bool:
+            self.result_cache_dict[key_str] = result
+        return result
 
-    def daily(self, override_dict: dict) -> pd.Series:
+    def daily(self, override_dict: dict, result=None) -> pd.Series:
+        """Net daily returns with idle cash credited at the T-bill rate (cash realism; the engine pays 0%):
+            r'(t) = r(t) + idle(t-1) x tbill(t),  idle = (V - long market value) / V, clipped to [0, 1]
+        Short proceeds are not idle (excluded); BIL held as an asset already earns its own yield. A return-level
+        credit (the extra interest is not re-invested into later sizing): a small first-order approximation."""
+        result = result if result is not None else self.result(override_dict)
+        if self.tbill_ser is None:
+            raise ValueError("The cash credit needs the T-bill series.")
+        position_df = result.daily_position_df
+        close_df = self.inputs(override_dict).close_df.reindex(index=position_df.index, columns=position_df.columns)
+        long_value_ser = (position_df * close_df).clip(lower=0.0).sum(axis=1, min_count=0)
+        idle_ser = (1.0 - long_value_ser / result.total_value_ser).clip(0.0, 1.0)
+        tbill_ser = self.tbill_ser.reindex(result.daily_return_ser.index).fillna(0.0)
+        return result.daily_return_ser + idle_ser.shift(1).fillna(0.0) * tbill_ser
+
+    def daily_zero_cash(self, override_dict: dict) -> pd.Series:
         return self.result(override_dict).daily_return_ser
 
 
 _WORKER: dict = {}
 
 
-def _worker_init(plan_key_str: str, live_inputs) -> None:
-    _WORKER["runner"] = PodRunner(PLAN_DICT[plan_key_str], live_inputs)
+def _worker_init(plan_key_str: str, live_inputs, tbill_ser: pd.Series) -> None:
+    _WORKER["runner"] = PodRunner(PLAN_DICT[plan_key_str], live_inputs, tbill_ser)
     _WORKER["plan"] = PLAN_DICT[plan_key_str]
 
 
 def _worker_draw(config_dict: dict) -> dict:
     plan = _WORKER["plan"]
     try:
-        result = _WORKER["runner"].result(config_dict)
+        runner = _WORKER["runner"]
+        result = runner.result(config_dict)
         # The first rebalance decision (an all-cash target counts: a regime-off start is a decision, not a warm-up).
         # A draw whose warm-up runs past the window start would be judged on fewer days: listed as failed instead.
         first_ts = result.position_after_rebalance_df.index.min()
         if pd.isna(first_ts) or first_ts > pd.Timestamp(plan.eval_start_str):
             return {"config": config_dict, "sharpe_float": float("nan"), "error_str": f"first decision {first_ts}, after the window start"}
-        return {"config": config_dict, "sharpe_float": sharpe_float(result.daily_return_ser.loc[plan.eval_start_str:SEAL_END_STR])}
+        return {"config": config_dict, "sharpe_float": sharpe_float(runner.daily(config_dict, result).loc[plan.eval_start_str:SEAL_END_STR])}
     except Exception as error_obj:  # noqa: BLE001 - a draw the spec refuses counts as failed, and is listed
         return {"config": config_dict, "sharpe_float": float("nan"), "error_str": repr(error_obj)[:200]}
 
@@ -134,7 +159,8 @@ def market_inputs():
     date_index = pd.bdate_range("1998-01-01", pd.Timestamp.today().normalize())
     tbill_ser = tbill_daily_ser(taa_inputs.dtb3_ser, date_index)
     factor_df = factor_daily_df(date_index, tbill_ser)
-    return {"SPY": factor_df["SPY"].fillna(0.0), "QQQ": factor_df["QQQ"].fillna(0.0)}, tbill_ser
+    # No zero-fill before a fund existed (QQQ lists 1999-03): _monthly turns those months into NaN, and they drop out.
+    return {"SPY": factor_df["SPY"], "QQQ": factor_df["QQQ"]}, tbill_ser
 
 
 def save(name_str: str, robustness_dict: dict) -> None:
@@ -171,18 +197,19 @@ def save(name_str: str, robustness_dict: dict) -> None:
 def run_plan(plan_key_str: str, market_dict: dict, tbill_ser: pd.Series) -> dict:
     plan = PLAN_DICT[plan_key_str]
     started_float = time.time()
-    runner = PodRunner(plan)
+    runner = PodRunner(plan, tbill_ser=tbill_ser)
     live_result = runner.result({})
     robustness_dict = {"plan_key_str": plan_key_str, "eval_start_str": plan.eval_start_str}
     robustness_dict["contribution"] = contribution_dict(live_result, plan.eval_start_str, SEAL_END_STR)
-    robustness_dict["timing"] = timing_dict(live_result.daily_return_ser, market_dict, tbill_ser, plan.eval_start_str, SEAL_END_STR)
+    robustness_dict["timing"] = timing_dict(runner.daily({}), market_dict, tbill_ser, plan.eval_start_str, SEAL_END_STR)
     print(f"  [{plan.name_str}] contribution + timing ({time.time() - started_float:.0f}s)", flush=True)
-    robustness_dict["ablation"] = ablation_dict(runner.daily, list(plan.ablation_list), plan.eval_start_str, SEAL_END_STR)
+    robustness_dict["ablation"] = ablation_dict(runner.daily, list(plan.ablation_list), plan.eval_start_str, SEAL_END_STR,
+                                                alt_run_fn=runner.daily_zero_cash)
     print(f"  [{plan.name_str}] ablation ({time.time() - started_float:.0f}s)", flush=True)
 
     rng_obj = np.random.default_rng(SEED_INT)
     config_list = [plan.sample_fn(rng_obj) for _ in range(DRAW_COUNT_INT)]
-    with Pool(WORKER_COUNT_INT, initializer=_worker_init, initargs=(plan_key_str, runner.inputs({}))) as pool_obj:
+    with Pool(WORKER_COUNT_INT, initializer=_worker_init, initargs=(plan_key_str, runner.inputs({}), tbill_ser)) as pool_obj:
         draw_list = pool_obj.map(_worker_draw, config_list, chunksize=max(1, DRAW_COUNT_INT // (WORKER_COUNT_INT * 4)))
     random_result = RandomParameterResult(robustness_dict["ablation"]["live_sharpe_float"], draw_list)
     robustness_dict["random"] = {
@@ -235,7 +262,11 @@ def main() -> None:
                   f"random {r['verdict_str']} (median {r['median_float']:.2f} vs live {r['live_sharpe_float']:.2f}) ({time.time() - started_float:.0f}s)", flush=True)
     if argument_list in ([], ["--all"], ["--others"]):
         for name_str, family_fn in other_family_dict().items():
-            rob = run_other(name_str, family_fn, market_dict, tbill_ser)
+            try:
+                rob = run_other(name_str, family_fn, market_dict, tbill_ser)
+            except Exception as error_obj:  # noqa: BLE001 - one failing family must not stop the others; it is printed
+                print(f"== {name_str}: FAILED {error_obj!r}"[:300], flush=True)
+                continue
             c = rob["contribution"]
             print(f"== {name_str}: contribution {c['verdict_str']} (top-1 share {c['top_share_dict'].get(1, float('nan')):.0%}, "
                   f"{c['traded_count_int']} assets); timing {[t['verdict_str'] for t in rob['timing']]} ({time.time() - started_float:.0f}s)", flush=True)

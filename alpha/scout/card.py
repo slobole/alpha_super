@@ -313,19 +313,22 @@ def robustness_html(rob: dict) -> str:
     if ablation:
         single_rows = "".join(
             f"<tr><td class='l'>{html.escape(r['name_str'])}</td><td class='l'>{html.escape(r['note_str'])}</td><td>{r['sharpe_float']:.2f}</td>"
-            f"<td>{-r['delta_float']:+.2f}</td><td>{r['cagr_float']:+.1%}</td><td>{r['max_drawdown_float']:.0%}</td>"
-            f"<td>{r['probability_live_better_float']:.2f}</td><td class='l'>{r['verdict_str']}</td></tr>" for r in ablation["single_list"])
+            f"<td>{-r['delta_float']:+.2f}</td><td>{r.get('alt_sharpe_float', float('nan')):.2f}</td><td>{r['cagr_float']:+.1%}</td>"
+            f"<td>{r['max_drawdown_float']:.0%}</td><td>{r['probability_live_better_float']:.2f}</td><td class='l'>{r['verdict_str']}</td></tr>"
+            for r in ablation["single_list"])
         live_metric = ablation["live_metric"]
-        part_list.append(f"<p><b>Component ablation</b> ({ablation['window_str']}). Live: Sharpe {ablation['live_sharpe_float']:.2f}, "
+        part_list.append(f"<p><b>Component ablation</b> ({ablation['window_str']}; idle cash earns the T-bill rate). Live: Sharpe "
+                         f"{ablation['live_sharpe_float']:.2f} ({ablation.get('live_alt_sharpe_float', float('nan')):.2f} with cash at 0%), "
                          f"CAGR {live_metric['cagr_float']:+.1%}, Max DD {live_metric['max_drawdown_float']:.0%}. Each component switched off alone; "
                          "P = paired bootstrap probability that the live rule's Sharpe is higher.</p>"
-                         "<table><tr><th class='l'>Switched off</th><th class='l'>How</th><th>Sharpe</th><th>Change</th><th>CAGR</th>"
+                         "<table><tr><th class='l'>Switched off</th><th class='l'>How</th><th>Sharpe</th><th>Change</th><th>Sharpe, cash 0%</th><th>CAGR</th>"
                          f"<th>Max DD</th><th>P(live better)</th><th class='l'>Verdict</th></tr>{single_rows}</table>")
-        cumulative_rows = "".join(f"<tr><td class='l'>{html.escape(r['name_str'])}</td><td>{r['sharpe_float']:.2f}</td><td>{r['cagr_float']:+.1%}</td>"
+        cumulative_rows = "".join(f"<tr><td class='l'>{html.escape(r['name_str'])}</td><td>{r['sharpe_float']:.2f}</td>"
+                                  f"<td>{r.get('alt_sharpe_float', float('nan')):.2f}</td><td>{r['cagr_float']:+.1%}</td>"
                                   f"<td>{r['max_drawdown_float']:.0%}</td></tr>" for r in ablation["cumulative_list"])
         part_list.append(f"<p>Cumulative, in the registered order. Minimum spec (every step at least 80% of the live Sharpe): "
                          f"<b>{html.escape(ablation['min_spec_str'])}</b>.</p>"
-                         f"<table><tr><th class='l'>Switched off so far</th><th>Sharpe</th><th>CAGR</th><th>Max DD</th></tr>{cumulative_rows}</table>")
+                         f"<table><tr><th class='l'>Switched off so far</th><th>Sharpe</th><th>Sharpe, cash 0%</th><th>CAGR</th><th>Max DD</th></tr>{cumulative_rows}</table>")
     random_dict = rob.get("random")
     if random_dict:
         summary = random_dict["summary"]

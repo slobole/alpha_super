@@ -60,7 +60,8 @@ slot_weight_str, score_str, start_date_str.
 Ablation switches (robustness diagnostics, 2026-10-02; never grid axes, the defaults are the engine rule and the
 identity gate runs on them): cash_hurdle_bool=False qualifies a momentum score against 0 instead of the DTB3 hurdle;
 vix_gate_bool=False never sends the fallback to cash; defensive_hold_str="cash" keeps a qualifying slot's weight in cash
-instead of the asset; fallback_hold_str="cash" keeps a failed slot's weight in cash instead of the fallback.
+instead of the asset; fallback_hold_str="cash" keeps a failed slot's weight in cash instead of the fallback;
+cash_asset_tuple holds only these assets' qualifying slots in cash (the ranking and the other slots unchanged).
 """
 
 from __future__ import annotations
@@ -108,6 +109,7 @@ class TaaConfig:
     vix_gate_bool: bool = True
     defensive_hold_str: str = "assets"  # "assets" or "cash"
     fallback_hold_str: str = "asset"  # "asset" or "cash"
+    cash_asset_tuple: tuple = ()  # assets whose qualifying slot is held in cash
 
     def __post_init__(self):
         if self.slot_weight_str not in ("rank", "equal") or self.score_str not in ("momentum", "linearity"):
@@ -287,7 +289,7 @@ def month_end_weight_df(inputs: TaaInputs, config: TaaConfig = LIVE_CONFIG) -> p
         weight_ser = pd.Series(0.0, index=traded_list)
         for slot_int, asset_str in enumerate(score_ser.sort_values(ascending=False).index):
             if score_ser[asset_str] > row["hurdle"]:
-                if config.defensive_hold_str == "assets":
+                if config.defensive_hold_str == "assets" and asset_str not in config.cash_asset_tuple:
                     weight_ser[asset_str] = slot_weight_vec[slot_int]
             elif config.fallback_hold_str == "asset":
                 weight_ser[fallback_str] += slot_weight_vec[slot_int]

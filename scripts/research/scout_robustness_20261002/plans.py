@@ -8,6 +8,11 @@ also run, live configuration only, on every other re-audited family.
 Per pod:
 - eval_start_str: the evaluation window starts after the longest warm-up any draw of the random box can need, and
   ends at the vault seal (2022-12-30), so the live rule, every ablation and every draw are judged on the same days.
+  Review fix (2026-10-02, before the full run completed): the first windows (TAA 2013, NDX 2002, CORE5 2009) started
+  later than any warm-up needs and cut 2000-01 and 2008 out; they now start at the true longest warm-up:
+  TAA and BTAL_QQQ 2012-11-01 (12 month-ends / 252 sessions after BTAL's 2011-09-13 start), NDX 2000-09-01 (ROC 18
+  month-ends after the 1999-01 history start: first execution 2000-08-01), CORE5 2008-04-01 (a 252-observation
+  percentile on UUP, listed 2007-02-20).
 - ablation_list: components in the order they are switched off cumulatively, overlays and details first, the core
   last (decided from the rule's structure, not from any result).
 - sample_fn: the random box, wider than the S4 grid, drawn with numpy's default_rng(seed).
@@ -77,12 +82,13 @@ TAA_3X_ABLATION = (
     AblationStep("DTB3 cash hurdle", {"cash_hurdle_bool": False}, "a defensive asset qualifies on a positive score"),
     AblationStep("VIX cash gate", {"vix_gate_bool": False}, "the fallback is never sent to cash"),
     AblationStep("defensive assets", {"defensive_hold_str": "cash"}, "a qualifying slot is held in cash"),
-    AblationStep("3x fallback leverage", {"fallback_str": "QQQ"}, "TQQQ -> QQQ"),
+    # Leverage is sizing, not a rule: Sharpe barely sees it, so it is a single drop (read its CAGR and Max DD).
+    AblationStep("3x fallback leverage", {"fallback_str": "QQQ"}, "TQQQ -> QQQ (sizing: read CAGR and Max DD)", cumulative_bool=False),
     AblationStep("fallback", {"fallback_hold_str": "cash"}, "a failed slot is held in cash (single drop only)", cumulative_bool=False),
 )
 BTAL_QQQ_ABLATION = (
     AblationStep("VIX cash gate", {"vix_gate_bool": False}, "the fallback is never sent to cash"),
-    AblationStep("BTAL", {"defensive_tuple": ("GLD", "UUP", "TLT", "DBC")}, "four defensive slots of 1/4"),
+    AblationStep("BTAL", {"cash_asset_tuple": ("BTAL",)}, "BTAL's qualifying slot held in cash (others unchanged)"),
     AblationStep("defensive assets", {"defensive_hold_str": "cash"}, "a qualifying slot is held in cash"),
     AblationStep("fallback", {"fallback_hold_str": "cash"}, "a failed slot is held in cash (single drop only)", cumulative_bool=False),
 )
@@ -99,15 +105,15 @@ def _ndx_ablation(score_name_str: str) -> tuple:
 
 CORE5_ABLATION = (
     AblationStep("DBC short", {"commodity_short_cap_float": 0.0}, "no volatility-scaled commodity short"),
-    AblationStep("adaptive speed", {"adaptive_speed_bool": False}, "a fixed blend of the 50 and 200 EMA speeds"),
+    AblationStep("adaptive speed", {"adaptive_speed_bool": False}, "one EMA at the live rule's average speed (w = 1/3)"),
     AblationStep("price smoothing", {"price_filter_lookback_int": 1}, "the close itself instead of SMA10"),
     AblationStep("trend rule", {"trend_rule_bool": False}, "static 20% sleeves, month-end rebalancing"),
 )
 
 PLAN_DICT = {
-    "taa_3x": RobustPlan("TAA 3x", "taa", "taa_3x", "2013-01-01", TAA_3X_ABLATION, taa_momentum_sample),
-    "btal_qqq": RobustPlan("TAA linearity 1/N QQQ", "taa", "taa_lin_1n_qqq", "2013-01-01", BTAL_QQQ_ABLATION, taa_linearity_sample),
-    "ndx_vxn": RobustPlan("NDX VXN", "ndx", "ndx_vxn", "2002-01-01", _ndx_ablation("dollar ATR"), ndx_sample),
-    "ndx_natr20_vxn": RobustPlan("NDX NATR20 VXN", "ndx", "ndx_natr20_vxn", "2002-01-01", _ndx_ablation("NATR20"), ndx_sample),
-    "core5": RobustPlan("CORE5", "core5", "core5", "2009-01-01", CORE5_ABLATION, core5_sample),
+    "taa_3x": RobustPlan("TAA 3x", "taa", "taa_3x", "2012-11-01", TAA_3X_ABLATION, taa_momentum_sample),
+    "btal_qqq": RobustPlan("TAA linearity 1/N QQQ", "taa", "taa_lin_1n_qqq", "2012-11-01", BTAL_QQQ_ABLATION, taa_linearity_sample),
+    "ndx_vxn": RobustPlan("NDX VXN", "ndx", "ndx_vxn", "2000-09-01", _ndx_ablation("dollar ATR"), ndx_sample),
+    "ndx_natr20_vxn": RobustPlan("NDX NATR20 VXN", "ndx", "ndx_natr20_vxn", "2000-09-01", _ndx_ablation("NATR20"), ndx_sample),
+    "core5": RobustPlan("CORE5", "core5", "core5", "2008-04-01", CORE5_ABLATION, core5_sample),
 }

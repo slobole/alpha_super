@@ -86,7 +86,7 @@ def test_ablation_verdicts_and_minimum_spec():
     assert tiny_dict["single_list"][0]["probability_live_better_float"] > 0.95 and tiny_dict["single_list"][0]["verdict_str"] == "SMALL"
     result_dict = ablation_dict(run_fn, step_list, "2005-01-01", "2015-12-31")
     useless_row, core_row = result_dict["single_list"]
-    assert useless_row["delta_float"] == pytest.approx(0.0) and useless_row["verdict_str"] == "NO EVIDENCE"
+    assert useless_row["delta_float"] == pytest.approx(0.0) and useless_row["verdict_str"] == "NEVER BINDS"
     assert core_row["verdict_str"] == "EARNS ITS PLACE" and core_row["probability_live_better_float"] > 0.95
     assert result_dict["min_spec_step_int"] == 1 and result_dict["min_spec_str"] == "useless"
     assert [r["name_str"] for r in result_dict["cumulative_list"]] == ["useless", "useless + core"]
@@ -166,3 +166,127 @@ def test_core5_switches():
     assert not fixed_df.equals(live_df)
     with pytest.raises(ValueError):
         core5.Core5Config(price_filter_lookback_int=0)
+
+
+
+# ---------------------------------------------------------------------------------------------- edge cases (review)
+def _hold(weight_dict: dict, drift_dict: dict, asset_count_int: int = 3, seed_int: int = 2):
+    date_index = pd.bdate_range("2010-01-01", periods=800)
+    columns = [f"S{i:03d}" for i in range(asset_count_int)] if asset_count_int > 3 else ["A", "B", "C"]
+    rng_obj = np.random.default_rng(seed_int)
+    return_mat = rng_obj.normal(0.0, 0.01, size=(len(date_index), len(columns)))
+    for asset_str, drift_float in drift_dict.items():
+        return_mat[:, columns.index(asset_str)] += drift_float
+    close_df = pd.DataFrame(100.0 * np.cumprod(1.0 + return_mat, axis=0), index=date_index, columns=columns)
+    weight_df = pd.DataFrame({c: [weight_dict.get(c, 0.0)] for c in columns}, index=[date_index[1]])
+    return simulate(close_df, close_df, close_df * 0.0, weight_df, date_index[1], capital_float=1e7, cost_model=NO_COST)
+
+
+def test_one_asset_no_trade_and_losing_books():
+    one = contribution_dict(_hold({"A": 1.0}, {"A": 0.002}), "2010-01-01", "2015-12-31")
+    assert one["verdict_str"] == "CONCENTRATED" and one["strip_list"][0]["asset_list"] == ["A"]
+    assert one["top_share_dict"][1] == pytest.approx(1.0)
+    assert contribution_dict(_hold({}, {}), "2010-01-01", "2015-12-31")["verdict_str"] == "NO TRADES"
+    losing = contribution_dict(_hold({"A": 0.5, "B": 0.5}, {"A": -0.002, "B": -0.002}), "2010-01-01", "2015-12-31")
+    assert losing["verdict_str"] == "NO EDGE"
+
+
+def test_stock_pod_strips_the_top_one_percent():
+    weight_dict = {f"S{i:03d}": 1.0 / 150 for i in range(150)}
+    star = contribution_dict(_hold(weight_dict, {"S007": 0.02}, asset_count_int=150), "2010-01-01", "2015-12-31")
+    assert star["pod_kind_str"] == "stock" and star["key_k_int"] == 2 and 2 in [s["k_int"] for s in star["strip_list"]]
+    assert star["verdict_str"] == "CONCENTRATED" and star["contribution_ser"].index[0] == "S007"
+    broad = contribution_dict(_hold(weight_dict, {f"S{i:03d}": 0.001 for i in range(150)}, asset_count_int=150), "2010-01-01", "2015-12-31")
+    assert broad["verdict_str"] == "SPREAD"
+
+
+def test_timing_without_down_months_is_insufficient():
+    date_index = pd.bdate_range("2010-01-01", "2014-12-31")
+    up_ser = pd.Series(0.001, index=date_index)
+    zero_ser = pd.Series(0.0, index=date_index)
+    assert timing_dict(up_ser, {"MKT": up_ser}, zero_ser, "2010-01-01", "2014-12-31")[0]["verdict_str"] == "INSUFFICIENT"
+    empty = timing_dict(up_ser, {"MKT": up_ser.loc["2020":]}, zero_ser, "2010-01-01", "2014-12-31")[0]
+    assert empty["verdict_str"] == "INSUFFICIENT" and empty["month_count_int"] == 0
+
+
+def test_all_draws_failed_first_step_fails_and_a_switch_that_never_binds():
+    failed = random_parameter_summary(RandomParameterResult(1.0, [{"config": {}, "sharpe_float": float("nan")}] * 3))
+    assert failed["verdict_str"] == "NO VALID DRAWS" and failed["failed_count_int"] == 3
+    date_index = pd.bdate_range("2005-01-01", periods=1500)
+    noise_vec = np.random.default_rng(9).normal(0.0, 0.01, size=1500)
+
+    def run_fn(override_dict: dict) -> pd.Series:
+        return pd.Series(noise_vec + (0.0 if override_dict.get("core") else 0.001), index=date_index)
+
+    result_dict = ablation_dict(run_fn, [AblationStep("core", {"core": True}), AblationStep("idle", {"idle": True})], "2005-01-01", "2012-12-31",
+                                alt_run_fn=lambda o: run_fn(o) - 0.0001)
+    assert result_dict["min_spec_step_int"] == 0 and result_dict["min_spec_str"].startswith("(none")
+    assert result_dict["single_list"][1]["verdict_str"] == "NEVER BINDS"
+    assert np.isfinite(result_dict["single_list"][0]["alt_sharpe_float"]) and np.isfinite(result_dict["live_alt_sharpe_float"])
+
+
+def test_card_renders_the_robustness_section():
+    from alpha.scout.card import robustness_html
+
+    result = _hold({f"S{i:03d}": 1.0 / 30 for i in range(30)}, {"S001": 0.002}, asset_count_int=30)
+    daily_ser = result.daily_return_ser
+    zero_ser = pd.Series(0.0, index=daily_ser.index)
+    rob = {
+        "contribution": contribution_dict(result, "2010-01-01", "2015-12-31"),
+        "timing": timing_dict(daily_ser, {"MKT": daily_ser * 0.5 + 0.0001}, zero_ser, "2010-01-01", "2015-12-31")
+                  + timing_dict(daily_ser, {"UP": pd.Series(0.001, index=daily_ser.index)}, zero_ser, "2010-01-01", "2015-12-31"),
+        "ablation": ablation_dict(lambda o: daily_ser - (0.0005 if o.get("x") else 0.0), [AblationStep("x", {"x": True}, "a test step")],
+                                  "2010-01-01", "2015-12-31"),
+        "random": {"summary": random_parameter_summary(RandomParameterResult(1.0, [{"config": {}, "sharpe_float": float("nan")}] * 2)),
+                   "sharpe_list": [float("nan")] * 2, "box_str": "test box"},
+    }
+    page_str = robustness_html(rob)
+    assert "Robustness diagnostics" in page_str and "<img" in page_str and "NO VALID DRAWS" in page_str and "INSUFFICIENT" in page_str
+    assert rob["contribution"]["verdict_str"] in page_str and "Minimum spec" in page_str
+
+
+def test_ndx_replica_refuses_an_unknown_ranking():
+    from alpha.scout.searches import ndx_selection_daily
+
+    date_index = pd.bdate_range("2020-01-01", periods=60)
+    mat = np.ones((60, 2))
+    with pytest.raises(ValueError, match="ROC / ATR"):
+        ndx_selection_daily(mat, mat, mat, mat, mat, mat.astype(bool), date_index, pd.Series(1.0, index=date_index), [], "none")
+
+
+@pytest.mark.skipif(not _norgate_running_bool(), reason="Norgate data not available")
+def test_ndx_switches():
+    import dataclasses
+
+    from alpha.scout.specs import ndx_vxn
+
+    inputs = ndx_vxn.load_inputs()
+    live_df = ndx_vxn.rebalance_weight_df(inputs)
+
+    def weights(**override_dict):
+        return ndx_vxn.rebalance_weight_df(inputs, dataclasses.replace(ndx_vxn.LIVE_CONFIG, **override_dict))
+
+    no_regime_df = weights(regime_filter_bool=False)
+    assert no_regime_df.index.equals(live_df.index)
+    cash_month_mask = live_df.sum(axis=1) == 0.0
+    assert cash_month_mask.any() and (no_regime_df.loc[cash_month_mask].sum(axis=1) > 0).all()
+    assert no_regime_df.loc[~cash_month_mask].equals(live_df.loc[~cash_month_mask])
+    no_trend_df = weights(stock_trend_filter_bool=False)
+    assert no_trend_df.index.equals(live_df.index) and not no_trend_df.equals(live_df)
+    roc_df = weights(atr_unit_str="none")
+    assert not roc_df.equals(live_df) and ((roc_df > 0).sum(axis=1) <= ndx_vxn.TOP_COUNT_INT).all()
+
+
+@pytest.mark.skipif(not _norgate_running_bool(), reason="Norgate data not available")
+def test_taa_cash_asset_switch_isolates_one_asset():
+    import dataclasses
+
+    from alpha.scout.specs import taa_3x
+
+    config = taa_3x.VARIANT_DICT["taa_lin_1n_qqq"].config
+    inputs = taa_3x.load_inputs(config=config)
+    live_df = taa_3x.month_end_weight_df(inputs, config)
+    no_btal_df = taa_3x.month_end_weight_df(inputs, dataclasses.replace(config, cash_asset_tuple=("BTAL",)))
+    assert (no_btal_df["BTAL"] == 0.0).all() and (live_df["BTAL"] > 0).any()
+    other_list = [c for c in live_df.columns if c != "BTAL"]
+    assert no_btal_df[other_list].equals(live_df[other_list])

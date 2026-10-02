@@ -50,7 +50,8 @@ Family parameters (`Core5Config`; the default is the engine's configuration and 
     decision_offset_int   luck band: the calendar (drift-correcting) rebalance moves to k sessions before the
                           month's last XNYS session; state-change rebalances are unaffected (0 = the engine rule)
 Ablation switches (robustness diagnostics, 2026-10-02; the defaults are the engine rule and the identity gate runs on
-them): adaptive_speed_bool=False fixes the speed weight w at 0.5 (the same two speeds, no drawdown adaptation);
+them): adaptive_speed_bool=False fixes the speed weight w at 1 / (1 + power), the mean of U^power for a uniform
+percentile U (the live rule's average speed, without the drawdown adaptation);
 trend_rule_bool=False holds every sleeve long and never shorts DBC (static 20% sleeves, month-end rebalancing);
 price_filter_lookback_int may be 1 (the close itself, no smoothing); commodity_short_cap_float = 0 removes the short.
 
@@ -188,7 +189,8 @@ def adaptive_moving_average_vec(price_vec: np.ndarray, config: Core5Config) -> n
     severity_vec = -(price_vec / high_vec - 1.0)
     weight_vec = np.power(_midrank_percentile_vec(severity_vec, config.percentile_lookback_int), config.percentile_power_float)
     if not config.adaptive_speed_bool:
-        weight_vec = np.where(np.isfinite(weight_vec), 0.5, np.nan)  # ablation: same warm-up, a fixed speed
+        # ablation: same warm-up, a fixed speed at the live rule's average weight E[U^p] = 1 / (1 + p)
+        weight_vec = np.where(np.isfinite(weight_vec), 1.0 / (1.0 + config.percentile_power_float), np.nan)
     fast_float, slow_float = 2.0 / float(config.fast_lookback_int + 1), 2.0 / float(config.slow_lookback_int + 1)
     alpha_vec = weight_vec * fast_float + (1.0 - weight_vec) * slow_float
     return _ama(np.ascontiguousarray(price_vec, dtype=float), np.ascontiguousarray(alpha_vec, dtype=float))
