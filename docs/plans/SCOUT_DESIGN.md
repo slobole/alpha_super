@@ -1167,6 +1167,19 @@ Report: `docs/research/SCOUT_DV2_SIZE_LADDER_20261002.md`.
 - **Correction to P7:** DV2's S3 headline included 1998-2003. The event edge decays by era: +18.2, +5.4, then +0.8 bp.
 - **S3 practice:** an S3 window must equal the pod's own backtest window, and the era table is read with the headline.
 
+**A17 (2026-10-02, DV2 limit entries).**
+Report: `docs/research/SCOUT_DV2_LIMIT_ENTRY_20261002.md`.
+
+- **Model:** the frozen DV2 signal with a day limit buy at Close × (1 − k × NATR), k 0 to 1, and a limit or
+  market-on-open exit, on 5 universes. Passive fills need a trade-through and pay no spread; marketable fills pay the
+  AR or pooled half-spread.
+- **Large caps:** cost per round trip falls by about 60%. S&P 500 net Sharpe at k 0.5 is 0.75 / 0.86 (AR / pooled),
+  against 0.26 / 0.77 for market-on-open, and the gain survives strict fills.
+- **Small caps:** net-positive only with deep limits, and about zero in 2016-2022. The fill-model stress takes 40-95%
+  of the gain. Not a pod.
+- **Practice:** daily-bar fill models are reported with a fill-stress table, and the MCPT is noted as not testing fill
+  optimism. Promotion of a limit-order change needs real or paper fill evidence.
+
 **Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
 It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about
 performance. A performance kill rule is a separate, currently unrecorded gap, and P1 should add it to
