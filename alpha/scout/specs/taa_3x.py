@@ -56,6 +56,11 @@ Family parameters (P5, `TaaConfig`; the default is the LIVE pod and the identity
     linearity_threshold_float the linearity qualification threshold (daily log slope x adjusted R2)
 The remaining fields are structural (fixed per variant, never grid axes): defensive_tuple, fallback_str,
 slot_weight_str, score_str, start_date_str.
+
+Ablation switches (robustness diagnostics, 2026-10-02; never grid axes, the defaults are the engine rule and the
+identity gate runs on them): cash_hurdle_bool=False qualifies a momentum score against 0 instead of the DTB3 hurdle;
+vix_gate_bool=False never sends the fallback to cash; defensive_hold_str="cash" keeps a qualifying slot's weight in cash
+instead of the asset; fallback_hold_str="cash" keeps a failed slot's weight in cash instead of the fallback.
 """
 
 from __future__ import annotations
@@ -98,10 +103,17 @@ class TaaConfig:
     slot_weight_str: str = "rank"  # "rank" (RANK_WEIGHT_VEC) or "equal" (1/N)
     score_str: str = "momentum"  # "momentum" (vs the DTB3 hurdle) or "linearity" (vs linearity_threshold_float)
     start_date_str: str = START_DATE_STR
+    # Ablation switches (robustness diagnostics; the defaults are the engine rule).
+    cash_hurdle_bool: bool = True
+    vix_gate_bool: bool = True
+    defensive_hold_str: str = "assets"  # "assets" or "cash"
+    fallback_hold_str: str = "asset"  # "asset" or "cash"
 
     def __post_init__(self):
         if self.slot_weight_str not in ("rank", "equal") or self.score_str not in ("momentum", "linearity"):
             raise ValueError(f"Unknown slot_weight_str {self.slot_weight_str!r} or score_str {self.score_str!r}.")
+        if self.defensive_hold_str not in ("assets", "cash") or self.fallback_hold_str not in ("asset", "cash"):
+            raise ValueError(f"Unknown defensive_hold_str {self.defensive_hold_str!r} or fallback_hold_str {self.fallback_hold_str!r}.")
         if self.slot_weight_str == "rank" and len(self.defensive_tuple) != len(RANK_WEIGHT_VEC):
             raise ValueError("Rank slot weights are defined for five defensive assets only.")
 
@@ -251,6 +263,8 @@ def month_end_weight_df(inputs: TaaInputs, config: TaaConfig = LIVE_CONFIG) -> p
         # *** CRITICAL*** k-month returns over month-end closes; the score for month m uses closes up to m only.
         momentum_df = sum(monthly_close_df.pct_change(k, fill_method=None) for k in config.momentum_month_tuple) / len(config.momentum_month_tuple)
         combined_df = pd.concat([momentum_df, cash_hurdle_ser.rename("hurdle")], axis=1).dropna()
+        if not config.cash_hurdle_bool:
+            combined_df["hurdle"] = 0.0  # ablation: the months kept are unchanged, only the bar moves
     else:
         # *** CRITICAL*** trailing daily scores sampled at the month's last session; a fixed threshold, no DTB3.
         month_score_df = _monthly_last(daily_linearity_score_df(inputs, config), config.decision_offset_int, reference_index)
@@ -273,10 +287,11 @@ def month_end_weight_df(inputs: TaaInputs, config: TaaConfig = LIVE_CONFIG) -> p
         weight_ser = pd.Series(0.0, index=traded_list)
         for slot_int, asset_str in enumerate(score_ser.sort_values(ascending=False).index):
             if score_ser[asset_str] > row["hurdle"]:
-                weight_ser[asset_str] = slot_weight_vec[slot_int]
-            else:
+                if config.defensive_hold_str == "assets":
+                    weight_ser[asset_str] = slot_weight_vec[slot_int]
+            elif config.fallback_hold_str == "asset":
                 weight_ser[fallback_str] += slot_weight_vec[slot_int]
-        if not bool(gate_month_ser.loc[month_end]):
+        if config.vix_gate_bool and not bool(gate_month_ser.loc[month_end]):
             weight_ser[fallback_str] = 0.0
         weight_row_dict[month_end] = weight_ser
     return pd.DataFrame(weight_row_dict).T

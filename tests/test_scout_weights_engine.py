@@ -301,3 +301,38 @@ def test_a_held_member_survives_a_missing_open():
     # Without the frame the old rule holds (a missing open liquidates).
     plain = simulate(open_df, close_df, dividend_df, weight_df, DATE_INDEX[1], **kwarg_dict)
     np.testing.assert_allclose(plain.total_value_ser.to_numpy(), dropped.total_value_ser.to_numpy())
+
+
+def _assert_pnl_adds_up(result, capital_float: float) -> None:
+    """Each session's per-asset P&L sums to the change in total value (cash only moves through these items)."""
+    change_vec = result.total_value_ser.to_numpy() - np.concatenate([[capital_float], result.total_value_ser.to_numpy()[:-1]])
+    np.testing.assert_allclose(result.asset_pnl_df.sum(axis=1).to_numpy(), change_vec, rtol=0.0, atol=1e-9)
+
+
+def test_asset_pnl_adds_up_on_every_path():
+    """The per-asset P&L (an output only) on the paths above: costs, dividends, liquidation, historical units, shorts
+    with a sign flip and borrow, MOC close-and-reopen, fractional shares and a missing-open hold."""
+    from alpha.scout.engines.weights import BorrowModel
+
+    cost_model = CostModel(slippage_float=0.001, fee_per_share_float=0.005, min_fee_float=1.0)
+    open_df, close_df, dividend_df = _frames(
+        [[10, 20], [10, np.nan], [10, 20], [np.nan, 20], [10, 20], [10, 20]],
+        [[10, 20], [10, np.nan], [11, 20], [9, 21], [10, 20], [10, 20]],
+        [[0, 0], [0, 0], [2, 0], [0, 0.5], [0, 0], [0, 0]],
+    )
+    weight_df = pd.DataFrame({"A": [0.5, 0.5, 0.2], "B": [0.5, -0.3, 0.4]}, index=DATE_INDEX[[1, 3, 4]])
+    short_dict = {"allow_short_bool": True, "split_sign_flip_bool": True, "borrow_model": BorrowModel(annual_rate_float=0.36)}
+    for kwarg_dict in (
+        short_dict,
+        {**short_dict, "share_unit_mode_str": "historical", "unadjusted_close_df": close_df * 3.0},
+        {**short_dict, "fill_at_close_bool": True, "close_and_reopen_bool": True},
+    ):
+        result = simulate(open_df, close_df, dividend_df, weight_df, DATE_INDEX[1], capital_float=1000.0, cost_model=cost_model, **kwarg_dict)
+        _assert_pnl_adds_up(result, 1000.0)
+        assert list(result.asset_pnl_df.columns) == ["A", "B"]
+    # Hand check: one asset, no costs. Day 1: 50 A at Open 10, Close 11 -> +50. Day 2: dividend of day 1 is 0, Close 12 -> +50.
+    open_df, close_df, dividend_df = _frames([[10, 20]] * 6, [[10, 20], [11, 20], [12, 20], [12, 20], [12, 20], [12, 20]])
+    result = simulate(open_df, close_df, dividend_df, pd.DataFrame({"A": [0.5], "B": [0.0]}, index=[DATE_INDEX[1]]), DATE_INDEX[1],
+                      capital_float=1000.0, cost_model=NO_COST)
+    np.testing.assert_allclose(result.asset_pnl_df["A"].to_numpy(), [50.0, 50.0, 0.0, 0.0, 0.0])
+    np.testing.assert_allclose(result.asset_pnl_df["B"].to_numpy(), 0.0)

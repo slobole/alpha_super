@@ -114,6 +114,8 @@ def ndx_selection_daily(
 
     atr_unit_str "dollar": score = ROC / ATR20 in dollars of day T (NDX VXN, NDX ATR); "percent": score = ROC / (ATR20 /
     Close), the NATR20 siblings (unit-free, so adjusted and raw prices give the same number)."""
+    if atr_unit_str not in ("dollar", "percent"):
+        raise ValueError(f"The NDX replica ranks by ROC / ATR in dollars or percent, not {atr_unit_str!r}.")
     position_ser = pd.Series(np.arange(len(date_index)), index=date_index)
     decision_row_vec = position_ser.groupby(date_index.to_period("M")).max().to_numpy()[:-1]
     with np.errstate(invalid="ignore", divide="ignore"):
