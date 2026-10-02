@@ -1,5 +1,9 @@
 # Scout P7: the point-in-time stock pods (DV2 S&P 500, DV2 Nasdaq-100, HPI)
 
+> **Correction (2026-10-02, size ladder):** DV2's S3 headline below (+9.1 bp, t 3.96) includes 1998-2003. From 2004,
+> the pod's own window, it is +3.8 bp, t 1.54, placebo p 0.16; by era +18.2 bp (1998-2007), +5.4 bp (2008-2015),
+> +0.8 bp (2016-2022). See `SCOUT_DV2_SIZE_LADDER_20261002.md`. The grades are unchanged.
+
 Date: 2026-10-02. Research only; nothing here changes live trading.
 - **Script:** `scripts/research/scout_p7_reaudition_20261002/run_p7.py`.
 - **Cards:** `results/scout/cards/` (not in git).

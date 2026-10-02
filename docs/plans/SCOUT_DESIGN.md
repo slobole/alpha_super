@@ -1129,6 +1129,16 @@ Report: `docs/research/SCOUT_P7B_DV2_INDUSTRY_ETF_20261002.md`.
   - Correlation about 0.5 with DV2 and HPI.
 - **Idle cash:** a cash-heavy pod's slot test is also shown with idle cash credited at the T-bill rate (information).
 
+**A15 (2026-10-02, DV2 size ladder).**
+Report: `docs/research/SCOUT_DV2_SIZE_LADDER_20261002.md`.
+
+- **The study:** the frozen DV2 rule on 12 point-in-time universes, built from one superset panel
+  (`alpha/scout/universes.py`).
+- **Result:** the gross edge sits in small and micro caps; net of costs, only the large-cap end survives. The S&P 500
+  stays the universe for the rule.
+- **Correction to P7:** DV2's S3 headline included 1998-2003. The event edge decays by era: +18.2, +5.4, then +0.8 bp.
+- **S3 practice:** an S3 window must equal the pod's own backtest window, and the era table is read with the headline.
+
 **Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
 It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about
 performance. A performance kill rule is a separate, currently unrecorded gap, and P1 should add it to
