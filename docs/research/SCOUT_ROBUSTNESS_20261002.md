@@ -268,3 +268,49 @@ was computed. In sample 2000-09 to 2022, net, idle cash at T-bill.
   The likely reason is that the raw distance also measures volatility.
 - **Use of CMMA:** it is a well-behaved continuous input, suited to ranking or combining. As a binary filter it is
   close to the SMA rule.
+
+## Follow-up 3 (2026-10-03): Masters' linear trend as the NDX ranking
+
+Script: `ndx_linear_trend.py`. Ledger registration `ndx_vxn_linear_trend_ranking_20261003`, written before any number
+was computed.
+
+The score is LT = OLS slope of ln C over n sessions × (n − 1) / ATR_ln(A) × R². Everything else is the live NDX VXN
+rule. The primary configuration, n 252 / A 20, was named before the run. All figures are in sample (2000-09 to 2022),
+net, with idle cash at T-bill.
+
+| Ranking | Sharpe | CAGR | Vol | Max DD | Luck band (min / median / max) | 2023 on (seen) |
+|---|---|---|---|---|---|---|
+| Live (dollar ATR) | 0.73 | 10.7% | 15.6% | −29.0% | 0.57 / 0.64 / 0.75 | 1.14 |
+| NATR20 | 0.84 | 13.7% | 17.0% | −23.5% | 0.61 / 0.73 / 0.84 | 0.95 |
+| LT 252/20 | 0.84 | 13.1% | 16.3% | −23.7% | 0.65 / 0.73 / 0.84 | 0.71 |
+
+- **LT ties NATR20 in sample:**
+  - The paired bootstrap gives P(LT better) = 0.47.
+  - On the same 200 random parameter sets, LT wins 56% (median 0.70 vs 0.68). After 2022 it wins only 38%.
+- **Its crash profile is smoother than NATR20's:**
+
+| Crash | LT 252/20 | NATR20 |
+|---|---|---|
+| GFC | +6.1% | +3.9% |
+| Q4 2018 | −6.1% | −9.5% |
+
+  It is not smoother in 2022 or 2025, and after 2022 it lags (0.71).
+- **The grid:**
+  - n 126 or 189 is weaker (0.72-0.80); n 252 gives 0.84-0.85.
+  - R² adds about +0.03 in sample (without it: 0.81). After 2022 the version without R² does better (0.91 vs 0.71):
+    R² penalises the jumpy 2023-24 winners.
+- **As a signal, LT is the best-shaped and most informative of the three:**
+
+| Signal | Monthly rank IC | t | Range/IQR | Entropy |
+|---|---|---|---|---|
+| LT | 0.023 | 1.9 | 7.1 | 0.77 |
+| NATR20 score | 0.020 | 1.6 | 20.5 | 0.38 |
+| ROC12 | 0.017 | 1.2 | | |
+
+  This is Masters' point confirmed on the signal, but it does not turn into a better strategy here.
+- **The verdict:** no replacement for NATR20. The three rankings win in different regimes:
+  - dollar ATR in the fast crashes and after 2022;
+  - NATR20 over the long run;
+  - LT in the slow crashes.
+
+  So a blend of rankings (E2, or E2 plus LT) is the robust direction, not choosing one ranking.
