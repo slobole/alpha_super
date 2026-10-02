@@ -61,6 +61,8 @@ def taa_config_daily_list(matrix: np.ndarray, date_index: pd.DatetimeIndex, grid
     slots to the fallback (last asset), the fallback gated to cash unless SPY realised volatility < VIX."""
     from alpha.scout.specs.taa_3x import _linearity_lookback_df
 
+    refuse_ablation_switches(grid_config_list)
+
     asset_count_int = len(asset_tuple)
     defensive_count_int = asset_count_int - 1
     return_mat = matrix[:, :asset_count_int]
@@ -105,6 +107,24 @@ def taa_config_daily_list(matrix: np.ndarray, date_index: pd.DatetimeIndex, grid
     return daily_list
 
 
+# A15 ablation switches (spec config fields) that the fast replicas do NOT implement: a replica given one would
+# silently run the live rule, so it refuses them (parity review 2026-10-02). Ablations run through the full engine.
+ABLATION_SWITCH_DEFAULT_DICT = {
+    "cash_hurdle_bool": True, "vix_gate_bool": True, "defensive_hold_str": "assets", "fallback_hold_str": "asset",
+    "cash_asset_tuple": (), "regime_filter_bool": True, "stock_trend_filter_bool": True, "adaptive_speed_bool": True,
+    "trend_rule_bool": True,
+}
+
+
+def refuse_ablation_switches(config_list: list) -> None:
+    """Raise if any configuration (a dict or a spec config) sets an A15 ablation switch away from the engine rule."""
+    for config in config_list:
+        value_dict = config if isinstance(config, dict) else {k: getattr(config, k) for k in ABLATION_SWITCH_DEFAULT_DICT if hasattr(config, k)}
+        for name_str, default_obj in ABLATION_SWITCH_DEFAULT_DICT.items():
+            if name_str in value_dict and value_dict[name_str] != default_obj:
+                raise ValueError(f"The fast replica does not implement the ablation switch {name_str}={value_dict[name_str]!r}.")
+
+
 # ---------------------------------------------------------------- NDX VXN selection
 def ndx_selection_daily(
     open_mat, high_mat, low_mat, close_mat, raw_close_mat, member_mat,
@@ -114,6 +134,9 @@ def ndx_selection_daily(
 
     atr_unit_str "dollar": score = ROC / ATR20 in dollars of day T (NDX VXN, NDX ATR); "percent": score = ROC / (ATR20 /
     Close), the NATR20 siblings (unit-free, so adjusted and raw prices give the same number)."""
+    refuse_ablation_switches(grid_config_list)
+    if atr_unit_str not in ("dollar", "percent"):
+        raise ValueError(f"The NDX replica ranks by ROC / ATR in dollars or percent, not {atr_unit_str!r}.")
     position_ser = pd.Series(np.arange(len(date_index)), index=date_index)
     decision_row_vec = position_ser.groupby(date_index.to_period("M")).max().to_numpy()[:-1]
     with np.errstate(invalid="ignore", divide="ignore"):

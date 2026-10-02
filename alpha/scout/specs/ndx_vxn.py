@@ -45,6 +45,11 @@ and execution line for line; only two switches move:
 | ndx_atr | strategy_mo_atr_normalized_ndx (WIRED) | False | dollar |
 | ndx_natr20 | strategy_mo_natr20_ndx (research) | False | percent |
 | ndx_natr20_vxn | strategy_mo_natr20_ndx_vxn_scaled (research) | True | percent |
+
+Ablation switches (robustness diagnostics, 2026-10-02; no engine strategy, the defaults are the engine rule and the
+identity gate runs on them): regime_filter_bool=False treats the SPY regime as always on (a decision still waits for
+the regime average to be warm, so the decision months are unchanged); stock_trend_filter_bool=False drops the
+Close > SMA filter; atr_unit_str="none" ranks on ROC alone (no volatility normalisation).
 """
 
 from __future__ import annotations
@@ -66,7 +71,7 @@ STOCK_SMA_INT = 100
 REGIME_SMA_INT = 200
 VXN_REFERENCE_FLOAT = 22.0
 VXN_FLOOR_FLOAT = 0.25
-ATR_UNIT_TUPLE = ("dollar", "percent")
+ATR_UNIT_TUPLE = ("dollar", "percent", "none")  # "none": ablation only (ROC alone)
 
 
 @dataclass(frozen=True)
@@ -80,6 +85,9 @@ class NdxConfig:
     decision_offset_int: int = 0
     vxn_scaled_bool: bool = True  # False: plain 1 / top_count slots (strategy_mo_atr_normalized_ndx, NATR20 plain)
     atr_unit_str: str = "dollar"  # "percent": NATR20 ranking, score = ROC / (ATR20 / Close)
+    # Ablation switches (robustness diagnostics; the defaults are the engine rule).
+    regime_filter_bool: bool = True
+    stock_trend_filter_bool: bool = True
 
     def __post_init__(self) -> None:
         if self.atr_unit_str not in ATR_UNIT_TUPLE:
@@ -201,7 +209,7 @@ def rebalance_weight_df(inputs: NdxInputs, config: NdxConfig = LIVE_CONFIG) -> p
         weight_ser = pd.Series(0.0, index=stock_list)
         if not np.isfinite(regime_sma_ser.loc[decision_ts]):
             continue  # the engine skips a decision whose regime average is not warm yet
-        regime_on_bool = bool(regime_close_ser.loc[decision_ts] > regime_sma_ser.loc[decision_ts])
+        regime_on_bool = bool(regime_close_ser.loc[decision_ts] > regime_sma_ser.loc[decision_ts]) or not config.regime_filter_bool
         if regime_on_bool:
             lookback_ts = decision_index[decision_pos_int - config.roc_month_int]
             close_now_ser = close_df.loc[decision_ts, stock_list]
@@ -213,11 +221,15 @@ def rebalance_weight_df(inputs: NdxInputs, config: NdxConfig = LIVE_CONFIG) -> p
                 raise ValueError(f"Invalid raw/adjusted anchor at {decision_ts.date()}: {list(anchor_ser[bad_anchor_mask].index)}")
             atr_dollar_ser = atr_adjusted_df.loc[decision_ts, stock_list] * anchor_ser
             score_ser = roc_ser / atr_dollar_ser
-            if config.atr_unit_str == "percent":
+            if config.atr_unit_str == "none":
+                score_ser = roc_ser.copy()  # ablation: ROC alone
+            elif config.atr_unit_str == "percent":
                 # NATR20: ROC / (ATR$ / RawClose(T)), computed as the engine does: (ROC / ATR$) × RawClose(T).
                 score_ser = score_ser * inputs.raw_close_df.loc[decision_ts, stock_list]
             score_ser = score_ser.replace([np.inf, -np.inf], np.nan)
             trend_mask = (close_now_ser > stock_sma_df.loc[decision_ts, stock_list]).fillna(False)
+            if not config.stock_trend_filter_bool:
+                trend_mask = close_now_ser.notna()  # ablation: no stock trend filter
             member_mask = inputs.member_df.loc[decision_ts, stock_list] == 1
             eligible_ser = score_ser[member_mask & trend_mask & score_ser.notna()]
             ranked_frame = pd.DataFrame({"score": eligible_ser, "symbol": eligible_ser.index})

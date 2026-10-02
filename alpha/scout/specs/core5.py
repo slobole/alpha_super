@@ -49,6 +49,11 @@ Family parameters (`Core5Config`; the default is the engine's configuration and 
     commodity_vol_lookback_int, commodity_short_vol_target_float, commodity_short_cap_float
     decision_offset_int   luck band: the calendar (drift-correcting) rebalance moves to k sessions before the
                           month's last XNYS session; state-change rebalances are unaffected (0 = the engine rule)
+Ablation switches (robustness diagnostics, 2026-10-02; the defaults are the engine rule and the identity gate runs on
+them): adaptive_speed_bool=False fixes the speed weight w at 1 / (1 + power), the mean of U^power for a uniform
+percentile U (the live rule's average speed, without the drawdown adaptation);
+trend_rule_bool=False holds every sleeve long and never shorts DBC (static 20% sleeves, month-end rebalancing);
+price_filter_lookback_int may be 1 (the close itself, no smoothing); commodity_short_cap_float = 0 removes the short.
 
 MCPT (`mcpt_matrix`, `fast_daily_list`): columns are the TR daily returns of SPY IEF GLD DBC UUP BIL; there are no
 exogenous columns. The replica rebuilds prices from the shuffled returns, starts when every ETF has a price (2007),
@@ -89,12 +94,17 @@ class Core5Config:
     sleeve_weight_float: float = 0.20
     annual_borrow_rate_float: float = 0.01
     backtest_start_date_str: str = BACKTEST_START_DATE_STR
+    # Ablation switches (robustness diagnostics; the defaults are the engine rule).
+    adaptive_speed_bool: bool = True
+    trend_rule_bool: bool = True
 
     def __post_init__(self):
         if self.slow_lookback_int <= self.fast_lookback_int:
             raise ValueError("slow_lookback_int must exceed fast_lookback_int.")
-        if min(self.percentile_lookback_int, self.fast_lookback_int, self.price_filter_lookback_int, self.commodity_vol_lookback_int) <= 1:
+        if min(self.percentile_lookback_int, self.fast_lookback_int, self.commodity_vol_lookback_int) <= 1:
             raise ValueError("Every lookback must be greater than one.")
+        if self.price_filter_lookback_int < 1:
+            raise ValueError("price_filter_lookback_int must be at least one (one = the close itself).")
         if self.decision_offset_int < 0:
             raise ValueError("decision_offset_int must be non-negative.")
 
@@ -178,6 +188,9 @@ def adaptive_moving_average_vec(price_vec: np.ndarray, config: Core5Config) -> n
     high_vec = np.maximum.accumulate(price_vec)
     severity_vec = -(price_vec / high_vec - 1.0)
     weight_vec = np.power(_midrank_percentile_vec(severity_vec, config.percentile_lookback_int), config.percentile_power_float)
+    if not config.adaptive_speed_bool:
+        # ablation: same warm-up, a fixed speed at the live rule's average weight E[U^p] = 1 / (1 + p)
+        weight_vec = np.where(np.isfinite(weight_vec), 1.0 / (1.0 + config.percentile_power_float), np.nan)
     fast_float, slow_float = 2.0 / float(config.fast_lookback_int + 1), 2.0 / float(config.slow_lookback_int + 1)
     alpha_vec = weight_vec * fast_float + (1.0 - weight_vec) * slow_float
     return _ama(np.ascontiguousarray(price_vec, dtype=float), np.ascontiguousarray(alpha_vec, dtype=float))
@@ -202,7 +215,7 @@ def asset_signal_df(close_ser: pd.Series, config: Core5Config) -> pd.DataFrame:
 
 def _signal_frame_dict(inputs: Core5Inputs, config: Core5Config) -> dict[str, pd.DataFrame]:
     key_tuple = (config.percentile_lookback_int, config.percentile_power_float, config.fast_lookback_int, config.slow_lookback_int,
-                 config.price_filter_lookback_int, config.commodity_vol_lookback_int)
+                 config.price_filter_lookback_int, config.commodity_vol_lookback_int, config.adaptive_speed_bool)
     if key_tuple not in inputs.cache_dict:
         inputs.cache_dict[key_tuple] = {s: asset_signal_df(inputs.signal_close_df[s], config) for s in RISK_ASSET_TUPLE}
     return inputs.cache_dict[key_tuple]
@@ -253,6 +266,9 @@ def rebalance_weight_df(inputs: Core5Inputs, config: Core5Config = LIVE_CONFIG) 
     long_mat = np.column_stack([signal_dict[s]["long"].to_numpy() for s in RISK_ASSET_TUPLE])
     commodity_df = signal_dict[COMMODITY_ASSET_STR]
     short_vec, volatility_vec = commodity_df["short"].to_numpy(), commodity_df["volatility"].to_numpy()
+    if not config.trend_rule_bool:  # ablation: static long sleeves once the signals are defined (same start), no short
+        long_mat = np.where(np.isfinite(long_mat), 1.0, np.nan)
+        short_vec = np.zeros_like(short_vec)
 
     # *** CRITICAL*** the state change at T compares Close_T with Close_(T-1) only (a NaN neighbour is no change).
     changed_vec = np.zeros(len(date_index), dtype=bool)
@@ -314,8 +330,9 @@ def fast_daily_list(matrix: np.ndarray, date_index: pd.DatetimeIndex, config_lis
     """Gross daily return of each configuration (dicts of Core5Config fields, or Core5Config) from the matrix alone:
     signals from prices rebuilt by compounding the returns, decision at the close of T on the first defined session,
     a long-state change or the matrix's last session of a month, constant weights from the close of T+1."""
-    from alpha.scout.searches import _hold_daily
+    from alpha.scout.searches import _hold_daily, refuse_ablation_switches
 
+    refuse_ablation_switches(config_list)
     risk_count_int = len(RISK_ASSET_TUPLE)
     commodity_int = RISK_ASSET_TUPLE.index(COMMODITY_ASSET_STR)
     price_mat = np.cumprod(1.0 + matrix[:, :risk_count_int], axis=0)
