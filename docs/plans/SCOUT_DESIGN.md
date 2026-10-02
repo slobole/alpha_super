@@ -1156,6 +1156,7 @@ Report: `docs/research/SCOUT_ROBUSTNESS_20261002.md`.
   - CORE5: every component earns its place.
   - Every pod is robust to its values, but TAA 3x and CORE5 sit in the top 1% of their draws: plan on the medians
     (0.94 and 0.80).
+
 **A16 (2026-10-02, DV2 size ladder).**
 Report: `docs/research/SCOUT_DV2_SIZE_LADDER_20261002.md`.
 
