@@ -15,8 +15,10 @@ Per universe (window 2004-01-01 .. 2022-12-30; membership zeroed before the star
   events the adverse-selection table: every DV2 event (the rule's candidates at T, before slots), its limit order worked
          on T+1 alone (no book), and the h3 forward excess over the same-date regime-eligible members (the S3 baseline)
          of filled vs unfilled vs all events: (a) entry at Open_(T+1) for every event (the S3 measure), (b) entry at the
-         fill price for filled events, (c) anchored at Close_T (pure selection, no price effect). Date-level means, Newey-
-         West t (lag 2), eras.
+         fill price for filled events, (c) anchored at Close_T, (d) the continuation after the fill day, Close_(T+1) ->
+         Close_(T+3). (a)-(c) contain the T+1 path that decides the fill, so filled < unfilled holds by construction and (b)
+         is biased up (members' baseline runs from the open, the fill comes after an intraday drop); only (d) compares
+         filled and unfilled fairly. Date-level means, Newey-West t (lag 2), eras.
   cap    alpha.scout.stations.s6_book.capacity on the pooled-case fills (5th-percentile fill at 1% of its 63-session ADV).
 """
 
@@ -265,11 +267,19 @@ def event_table(panel, inputs: dict, spread_dict: dict) -> dict:
         open_next_mat[:-1] = open_mat[1:]
         r_moo_mat = close_h_mat / open_next_mat - 1.0
         r_close_mat = close_h_mat / close_mat - 1.0
-    eligible_mat = inputs["base"] & np.isfinite(r_moo_mat) & np.isfinite(r_close_mat) & in_window_vec[:, None]
+        # continuation AFTER the fill day: Close_(T+1) -> Close_(T+3). Unlike the two labels above it does not contain the
+        # T+1 path that decides the fill, so filled vs unfilled is not biased by construction (review finding).
+        close_next_mat = np.full(close_mat.shape, np.nan)
+        close_next_mat[:-1] = close_mat[1:]
+        r_post_mat = close_h_mat / close_next_mat - 1.0
+    label_missing_mat = inputs["base"] & in_window_vec[:, None] & ~(np.isfinite(r_moo_mat) & np.isfinite(r_close_mat) & np.isfinite(r_post_mat))
+    eligible_mat = inputs["base"] & np.isfinite(r_moo_mat) & np.isfinite(r_close_mat) & np.isfinite(r_post_mat) & in_window_vec[:, None]
     count_vec = eligible_mat.sum(axis=1)
     with np.errstate(invalid="ignore"):
         baseline_moo_vec = np.where(eligible_mat, r_moo_mat, 0.0).sum(axis=1) / np.maximum(count_vec, 1)
         baseline_close_vec = np.where(eligible_mat, r_close_mat, 0.0).sum(axis=1) / np.maximum(count_vec, 1)
+        baseline_post_vec = np.where(eligible_mat, r_post_mat, 0.0).sum(axis=1) / np.maximum(count_vec, 1)
+    excess_post_mat = r_post_mat - baseline_post_vec[:, None]
     excess_moo_mat = r_moo_mat - baseline_moo_vec[:, None]
     excess_close_mat = r_close_mat - baseline_close_vec[:, None]
     event_mat = inputs["event"] & eligible_mat
@@ -277,6 +287,7 @@ def event_table(panel, inputs: dict, spread_dict: dict) -> dict:
     margin_mat = trade_through_margin_mat(inputs["unadjusted"], [spread_dict["ar"], spread_dict["pooled"]])
     out_dict = {"all_events": {"moo_entry": date_mean_stats(excess_moo_mat, event_mat, panel.date_index),
                                "close_anchor": date_mean_stats(excess_close_mat, event_mat, panel.date_index),
+                               "post_fill_day": date_mean_stats(excess_post_mat, event_mat, panel.date_index),
                                "moo_entry_net_pooled": date_mean_stats(excess_moo_mat - 2.0 * half_spread_mat_, event_mat, panel.date_index)}}
     for entry in ENTRY_TUPLE:
         if entry == "moo":
@@ -299,6 +310,13 @@ def event_table(panel, inputs: dict, spread_dict: dict) -> dict:
             "filled_close_anchor": date_mean_stats(excess_close_mat, filled_mat, panel.date_index),
             "unfilled_close_anchor": date_mean_stats(excess_close_mat, unfilled_mat, panel.date_index),
             "filled_saving_vs_open": date_mean_stats(saving_mat, filled_mat, panel.date_index),
+            "filled_post_fill_day": date_mean_stats(excess_post_mat, filled_mat, panel.date_index),
+            "unfilled_post_fill_day": date_mean_stats(excess_post_mat, unfilled_mat, panel.date_index),
+            # events dropped for a missing label (mostly delisted within 3 sessions), by fill status: a survivorship check
+            "label_missing_share_filled_float": float((label_missing_mat & inputs["event"] & (code_mat > 0)).sum()
+                                                      / max((inputs["event"] & in_window_vec[:, None] & inputs["base"] & (code_mat > 0)).sum(), 1)),
+            "label_missing_share_unfilled_float": float((label_missing_mat & inputs["event"] & (code_mat == 0)).sum()
+                                                        / max((inputs["event"] & in_window_vec[:, None] & inputs["base"] & (code_mat == 0)).sum(), 1)),
         }
     return out_dict
 

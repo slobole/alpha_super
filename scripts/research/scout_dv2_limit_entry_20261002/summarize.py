@@ -54,6 +54,7 @@ def event_rows(result: dict) -> list[dict]:
     rows = [{"universe": result["universe_str"], "order": "moo (all events)", "fill_share": 1.0,
              "all_at_open_bp": base["moo_entry"]["mean_bp_float"], "all_at_open_t": base["moo_entry"]["nw_t_float"],
              "all_net_pooled_bp": base["moo_entry_net_pooled"]["mean_bp_float"], "all_close_anchor_bp": base["close_anchor"]["mean_bp_float"],
+             "all_post_fill_day_bp": base["post_fill_day"]["mean_bp_float"], "all_post_fill_day_t": base["post_fill_day"]["nw_t_float"],
              **{f"all_{e}_bp": base["moo_entry"]["era_bp_dict"][e] for e, _, _ in ERA_TUPLE}}]
     for key_str, row in events.items():
         if key_str == "all_events":
@@ -66,6 +67,11 @@ def event_rows(result: dict) -> list[dict]:
                      "filled_from_fill_net_pooled_bp": row["filled_from_fill_price_net_pooled"]["mean_bp_float"],
                      "filled_close_anchor_bp": row["filled_close_anchor"]["mean_bp_float"], "unfilled_close_anchor_bp": row["unfilled_close_anchor"]["mean_bp_float"],
                      "saving_vs_open_bp": row["filled_saving_vs_open"]["mean_bp_float"],
+                     "filled_post_bp": row["filled_post_fill_day"]["mean_bp_float"], "filled_post_t": row["filled_post_fill_day"]["nw_t_float"],
+                     "unfilled_post_bp": row["unfilled_post_fill_day"]["mean_bp_float"], "unfilled_post_t": row["unfilled_post_fill_day"]["nw_t_float"],
+                     "label_missing_filled": row["label_missing_share_filled_float"], "label_missing_unfilled": row["label_missing_share_unfilled_float"],
+                     **{f"filled_post_{e}_bp": row["filled_post_fill_day"].get("era_bp_dict", {}).get(e) for e, _, _ in ERA_TUPLE},
+                     **{f"unfilled_post_{e}_bp": row["unfilled_post_fill_day"].get("era_bp_dict", {}).get(e) for e, _, _ in ERA_TUPLE},
                      **{f"filled_from_fill_{e}_bp": row["filled_from_fill_price"].get("era_bp_dict", {}).get(e) for e, _, _ in ERA_TUPLE},
                      **{f"filled_at_open_{e}_bp": row["filled_moo_entry"].get("era_bp_dict", {}).get(e) for e, _, _ in ERA_TUPLE},
                      **{f"unfilled_at_open_{e}_bp": row["unfilled_moo_entry"].get("era_bp_dict", {}).get(e) for e, _, _ in ERA_TUPLE}})
@@ -96,10 +102,14 @@ def main() -> None:
     print("\n## Eras (net Sharpe)\n")
     era_column_list = [f"{e}_{c}" for c in ("gross", "ar", "pooled") for e, _, _ in ERA_TUPLE]
     print(fmt(pod_df[["universe", "entry", "exit", *era_column_list]]))
-    print("\n## Adverse selection (h3 excess over same-date regime members, bp)\n")
+    print("\n## Adverse selection (h3 excess over same-date regime members, bp); filled vs unfilled here is biased BY CONSTRUCTION "
+          "(the labels contain the T+1 path that decides the fill) and the from-fill rows are biased UP\n")
     print(fmt(event_df[["universe", "order", "fill_share", "all_at_open_bp", "all_at_open_t", "filled_at_open_bp", "unfilled_at_open_bp",
                         "filled_from_fill_bp", "filled_from_fill_t", "filled_from_fill_net_pooled_bp", "all_net_pooled_bp",
                         "filled_close_anchor_bp", "unfilled_close_anchor_bp", "saving_vs_open_bp"]]))
+    print("\n## Adverse selection, unbiased by construction: continuation after the fill day (Close T+1 -> Close T+3, excess bp)\n")
+    print(fmt(event_df[["universe", "order", "fill_share", "all_post_fill_day_bp", "all_post_fill_day_t", "filled_post_bp", "filled_post_t",
+                        "unfilled_post_bp", "unfilled_post_t", "label_missing_filled", "label_missing_unfilled"]]))
     print("\n## Adverse selection by era (bp)\n")
     era_event_list = [c for c in event_df.columns if any(c.endswith(f"{e}_bp") for e, _, _ in ERA_TUPLE)]
     print(fmt(event_df[["universe", "order", *era_event_list]]))

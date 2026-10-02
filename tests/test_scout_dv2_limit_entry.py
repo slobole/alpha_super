@@ -213,6 +213,30 @@ def test_book_resting_sell_keeps_its_slot():
     assert not ((limit_log["asset"] == "B") & (limit_log["kind_int"] == 1)).any()  # the resting sell keeps it
 
 
+def test_book_forced_exit_frees_its_slot_on_the_same_session():
+    """A full book: A's resting sell never fills; after max attempts its forced market-on-open is a certain exit, so B (a
+    candidate every day) gets the slot on exactly that session, not before."""
+    row_count_int = 6
+    close_mat = np.column_stack([[10.0, 11.0, 10.9, 10.8, 10.7, 10.7], np.full(row_count_int, 20.0)])
+    open_mat = np.column_stack([[10.0, 10.0, 10.5, 10.5, 10.4, 10.7], np.full(row_count_int, 20.0)])
+    high_mat = np.column_stack([[10.0, 11.0, 10.9, 10.85, 10.7, 10.7], np.full(row_count_int, 20.0)])  # never through the limit
+    low_mat = high_mat - 0.5
+    candidate_mat = np.zeros((row_count_int, 2), dtype=bool)
+    candidate_mat[0, 0] = True
+    candidate_mat[1:, 1] = True
+    pointer_vec, candidate_vec = dv2.ranked_candidate_csr(candidate_mat, np.ones((row_count_int, 2)))
+    exit_signal = np.zeros((row_count_int, 2), dtype=bool)
+    exit_signal[1, 0] = True
+    mats = {"open": open_mat, "close": close_mat, "pointer_vec": pointer_vec, "candidate_vec": candidate_vec, "exit_signal": exit_signal}
+    date_index = pd.bdate_range("2020-01-01", periods=row_count_int)
+    log_df = limit_book(date_index, ["A", "B"], mats, high_mat, low_mat, 1, "2020-01-01", None, "limit", np.full((row_count_int, 2), 0.001),
+                        close_mat.copy(), 0.0, np.ones((row_count_int, 2)), 0.0, 0.0, 0.0, max_exit_attempt_int=2).log_df
+    a_exit = log_df[(log_df["asset"] == "A") & (log_df["kind_int"] == -1)]
+    b_entry = log_df[(log_df["asset"] == "B") & (log_df["kind_int"] == 1)]
+    assert a_exit["date"].tolist() == [date_index[4]] and a_exit["code_int"].tolist() == [3]  # attempts on rows 2 and 3, forced on 4
+    assert b_entry["date"].tolist() == [date_index[4]]
+
+
 # ---------------------------------------------------------------- parity with costed_book
 def _synthetic_panel(row_count_int: int = 700, column_count_int: int = 40, seed_int: int = 4) -> Panel:
     rng_obj = np.random.default_rng(seed_int)
