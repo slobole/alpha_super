@@ -384,3 +384,26 @@ decision rules, before any run.
   - The in-sample edge is about 1.4 standard errors over 22 years.
 - **Verdict:** the two periods disagree with similar strength, so no switch. C goes to shadow beside the live pod, as its
   rule says; forward data decides.
+
+## Decision (2026-10-03, quant architect, owner-delegated)
+
+1. **Live NDX pod: no change.**
+   - **The filter stays SMA100:** no filter survives the family-wide count.
+   - **The ranking stays dollar ATR:** the in-sample and post-2022 evidence disagree with similar strength.
+   - **C is not implementable in the live account:** at $12K, 29% of C's positions are smaller than one share (the live
+     pod: 2%). It works from about $50K (5%) and cleanly at $250K (0%).
+2. **No shadow-to-decide for C.** Forward data cannot settle the question in useful time. C and the live pod correlate
+   0.94, so the Sharpe difference has a standard error of about 0.35 per square-root year. Telling 0.1 of Sharpe apart
+   at 2 standard errors would take about 50 years.
+3. **For the fund books, C is the NDX design of record,** on structural grounds that need no forward proof:
+   - model diversification (three rankings x three horizons);
+   - 20-25 names instead of 10;
+   - lower turnover (6.6 vs 7.5);
+   - Max DD −21% vs −29% in sample.
+4. **C's known caveats, on record:**
+   - It trailed the live pod after 2022 (0.84 vs 1.14), and it loses more in fast crashes (2018, 2022, 2025).
+   - Its parts were chosen on in-sample data.
+   - The planning Sharpe is the luck-band median (about 0.70), not 0.83.
+5. **The NDX parameter, filter and ranking search is closed.** About 45 trials have been spent on one book. More search
+   on the same history buys overfitting, not information. The pod-health monitors (CUSUM, Cold Blood Index) watch the
+   live pod for breakage.
