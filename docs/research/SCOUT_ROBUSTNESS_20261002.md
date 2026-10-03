@@ -314,3 +314,73 @@ net, with idle cash at T-bill.
   - LT in the slow crashes.
 
   So a blend of rankings (E2, or E2 plus LT) is the robust direction, not choosing one ranking.
+
+## Follow-up 4 (2026-10-03): trend-filter bake-off, family-wide multiplicity, final candidate C
+
+Scripts: `ndx_filter_bakeoff.py`, `ndx_filter_family_rw.py`, `ndx_final_candidate.py`. Ledger registrations
+`ndx_natr20_vxn_filter_bakeoff_20261003` and `ndx_rank_horizon_blend_candidate_20261003` were written, with their
+decision rules, before any run.
+- **New filters in the NDX spec:**
+  - Zorro's second-order low-pass (Workshop 4a). It matches a direct transcription of Zorro's code to 2e-11.
+  - The same low-pass, rising.
+  - The CORE5 adaptive-AMA rule per stock, with CORE5's own parameters.
+- **New in the diagnostics module:** a paired Sharpe-difference bootstrap and a studentised Romano-Wolf step-down.
+
+**Bake-off (NATR20 VXN, ROC 12, top 10; in sample 2000-09 to 2022; same 200 random draws for every filter).**
+
+| Filter | Sharpe | Max DD | Luck median | Win vs F0 | RW p (9) | Eras | 2023 on | Members on | Flip rate |
+|---|---|---|---|---|---|---|---|---|---|
+| F0 Close > SMA100 (live) | 0.84 | −23.5% | 0.73 | − | − | 0.71/1.02/0.79 | 0.95 | 56% | 0.26 |
+| F1 Close > SMA200 | 0.87 | −25.6% | 0.74 | 0.83 | 0.51 | 0.71/1.05/0.85 | 1.14 | 58% | 0.17 |
+| F2 Close/SMA200 > +5% | 0.89 | −27.1% | 0.74 | 0.83 | 0.30 | 0.72/1.08/0.86 | 1.04 | 45% | 0.17 |
+| F3 Close/SMA200 > +10% | 0.93 | −26.7% | 0.76 | 0.85 | 0.08 | 0.72/1.13/0.92 | 1.00 | 33% | 0.16 |
+| F4 CMMA(200) > +10 | 0.92 | −22.3% | 0.75 | 0.88 | 0.08 | 0.80/1.06/0.89 | 1.00 | 33% | 0.15 |
+| F5 Close > LowPass(100) | 0.74 | −24.7% | 0.66 | 0.04 | 0.93 | 0.73/0.78/0.72 | 0.80 | 52% | 0.38 |
+| F6 Close > LowPass(200) | 0.85 | −25.4% | 0.72 | 0.39 | 0.58 | 0.75/0.98/0.81 | 0.85 | 52% | 0.28 |
+| F7 LowPass(200) rising | 0.88 | −24.7% | 0.74 | 0.85 | 0.32 | 0.72/1.04/0.88 | 1.04 | 57% | 0.24 |
+| F8 CORE5 adaptive AMA | 0.89 | −24.1% | 0.73 | 0.75 | 0.30 | 0.71/1.05/0.90 | 1.14 | 69% | 0.23 |
+| F9 No filter | 0.87 | −24.9% | 0.74 | 0.71 | 0.55 | 0.68/1.05/0.87 | 1.13 | 100% | 0 |
+
+- **The registered rule:**
+  - F3 and F4 pass all five checks; F4 is selected (the higher win rate).
+  - Every filter has the same exposure (0.66), so no gain comes from holding less.
+  - Walk-forward selection (the best anchored trailing filter each January) picks F4 for 2006-16 and F3 from 2017. It
+    earns 0.97 against 0.89 for F0 out of sample over 2006-22 (P 0.99), and 1.00 against 0.95 from 2023.
+- **Family-wide multiplicity:**
+  - F3 and F4 entered the list because they had topped the earlier maps on the same history.
+  - One Romano-Wolf step-down over all 38 filters tried on this base (`ndx_filter_family_rw.py`, no new ideas) gives the
+    best two t 2.24 but an adjusted p of 0.19.
+  - After counting the whole search, **no filter is significantly better than Close > SMA100**, so the registered
+    fallback holds: keep F0.
+- **What transfers:**
+  - Across the 38 filters, in-sample Sharpe predicts the 2023-on Sharpe (Spearman 0.49, p 0.002).
+  - The in-sample top 5 earn 1.02 after 2022, against 1.04 for the 24 filters in the middle, and 0.70 for the bottom 5.
+  - So the transferable signal is avoiding the bad region (strict thresholds, short or noisy filters), not picking the
+    peak.
+  - SMA100 sits at the edge of the good region (0.84 in sample, 0.95 after). The Scout plateau rule on the earlier map
+    chose SMA150 (0.91 / 1.07; family RW p 0.27).
+
+**Final candidate C (nine equal sub-books: dollar ATR, NATR20, linear trend x 9/12/15 months).**
+
+| | Sharpe | Max DD | Luck median | Eras | 2023 on | Draws vs live (in sample / after 2022) |
+|---|---|---|---|---|---|---|
+| Live (dollar ATR) | 0.73 | −29.0% | 0.64 | 0.64/0.81/0.73 | 1.14 | − |
+| C, F4 filter (registered rule) | 0.87 | −21.7% | 0.74 | 0.72/1.00/0.89 | 0.87 | C wins 98% / live wins 91% |
+| C, live filter (after the family-wide check) | 0.83 | −21.4% | 0.70 | 0.72/0.98/0.78 | 0.84 | C wins 97% / live wins 91% |
+
+- **C passes its registered rule in both versions:**
+  - Its luck-band median is above the live pod's.
+  - It beats the live pod on 97% or more of the paired draws in sample.
+- **C beats the live pod in the slow crashes** (dot-com, GFC, 2011) **and loses in the fast ones**:
+
+| Crash | C | Live pod |
+|---|---|---|
+| Q4 2018 | −6.6% | −3.3% |
+| 2022 | −14.5% | −11.4% |
+| 2025 | −18.0% | −13.1% |
+
+- **But after 2022 the live pod is better on 91% of the same draws** (median 1.01 vs 0.80).
+  - The draws share one 3.75-year path, so this is one piece of evidence, about 1.7 standard errors.
+  - The in-sample edge is about 1.4 standard errors over 22 years.
+- **Verdict:** the two periods disagree with similar strength, so no switch. C goes to shadow beside the live pod, as its
+  rule says; forward data decides.

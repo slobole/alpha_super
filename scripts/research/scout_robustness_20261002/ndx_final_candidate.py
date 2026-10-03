@@ -13,6 +13,9 @@ DECISION RULE (registered): C becomes the shadow candidate if its luck-band medi
 pod on >= 70% of the paired draws. In-sample numbers are optimistic (C's parts were chosen after seeing the data).
 
     uv run python scripts/research/scout_robustness_20261002/ndx_final_candidate.py
+    uv run python scripts/research/scout_robustness_20261002/ndx_final_candidate.py --live-filter
+        (the conservative re-run: Close > SMA100 for C and NATR20, after the family-wide Romano-Wolf over all 38 filters
+        tried, ndx_filter_family_rw.py, found no filter significant: best RW p 0.19)
 """
 
 from __future__ import annotations
@@ -57,8 +60,11 @@ def main() -> None:
     from alpha.scout.specs import ndx_vxn
 
     bakeoff_dict = json.loads(BAKEOFF_PATH.read_text(encoding="utf-8"))
-    filter_dict = bakeoff_dict["selected_override"]
-    print("filter from the bake-off rule:", bakeoff_dict["selected_filter"], filter_dict, flush=True)
+    live_filter_bool = "--live-filter" in sys.argv[1:]
+    filter_dict = {} if live_filter_bool else bakeoff_dict["selected_override"]
+    filter_name_str = "F0 Close > SMA100 (live)" if live_filter_bool else bakeoff_dict["selected_filter"]
+    output_path = OUTPUT_PATH.with_name("ndx_final_candidate_live_filter.json") if live_filter_bool else OUTPUT_PATH
+    print("filter:", filter_name_str, filter_dict, flush=True)
     _, tbill_ser = market_inputs()
     inputs = ndx_vxn.load_inputs()
     rng_obj = np.random.default_rng(SEED_INT)
@@ -94,9 +100,9 @@ def main() -> None:
     decision_dict = {"luck_median_ok": out["C (9-book blend)"]["luck"]["median"] >= out["Live (dollar ATR)"]["luck"]["median"],
                      "win_rate": win_float, "win_rate_ok": win_float >= 0.70}
     decision_dict["shadow_candidate_bool"] = decision_dict["luck_median_ok"] and decision_dict["win_rate_ok"]
-    out_dict = {"filter": bakeoff_dict["selected_filter"], "strategies": out, "draws": {"c": c_draw.tolist(), "live": live_draw.tolist(),
+    out_dict = {"filter": filter_name_str, "strategies": out, "draws": {"c": c_draw.tolist(), "live": live_draw.tolist(),
                 "c_seen": c_seen.tolist(), "live_seen": live_seen.tolist()}, "decision": decision_dict, "failed": failed_list}
-    OUTPUT_PATH.write_text(json.dumps(out_dict, default=float), encoding="utf-8")
+    output_path.write_text(json.dumps(out_dict, default=float), encoding="utf-8")
 
     print("failed", len(failed_list), [f.get("error") for f in failed_list[:3]])
     for k, r in out.items():
