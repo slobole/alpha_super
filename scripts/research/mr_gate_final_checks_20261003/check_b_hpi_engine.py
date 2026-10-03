@@ -44,23 +44,23 @@ class GatedHPI(sl.HPIStatefulLongStrategy):
         return super().get_opportunity_list(close_row_ser, member_symbol_set)
 
 
-def main(arm):
+def main(arm, cost="engine"):
     OUT.mkdir(parents=True, exist_ok=True)
     _, universe_df, pricing_df = sl.load_exact_hpi_inputs(indexname_str="S&P 500", benchmark_symbol_str="$SPXTR", start_date_str="1998-01-01", end_date_str=None)
     syms = pricing_df.columns.get_level_values(0).unique().astype(str)
     pricing_df.attrs["norgate_adjustment_by_symbol_dict"] = {s: ("TOTALRETURN" if s == "$SPXTR" else "CAPITALSPECIAL") for s in syms}
     cls = GatedHPI if arm == "gated" else sl.HPIStatefulLongStrategy
-    s = cls(name=f"hpi_vote_{arm}", benchmarks=["$SPXTR"], ranking_field_str=sl.TURNOVER_FIELD_STR, capital_base=100_000.0,
+    s = cls(name=f"hpi_vote_{arm}", benchmarks=["$SPXTR"], ranking_field_str=sl.TURNOVER_FIELD_STR, capital_base=100_000.0, slippage=(0.00075 if cost == "stress" else 0.00025),
             entry_mode_str=sl.ENTRY_HORIZON_VOTE_STR, backtest_start_date_str="2004-01-01")
     if arm == "gated":
         s.gate_ser = gate_series()
     s.universe_df = universe_df
     cal = pricing_df.index[pricing_df.index >= pd.Timestamp("2004-01-01")]
     run_daily(s, pricing_df, cal, show_progress=False, show_signal_progress_bool=False)
-    s.results[["total_value", "cash"]].to_csv(OUT / f"hpi_{arm}_nav.csv")
-    pd.DataFrame(s.get_transactions()).to_csv(OUT / f"hpi_{arm}_transactions.csv", index=False)
+    s.results[["total_value", "cash"]].to_csv(OUT / f"hpi_{arm}{'_stress' if cost == 'stress' else ''}_nav.csv")
+    pd.DataFrame(s.get_transactions()).to_csv(OUT / f"hpi_{arm}{'_stress' if cost == 'stress' else ''}_transactions.csv", index=False)
     print("done", arm, len(s.results))
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(*sys.argv[1:3])

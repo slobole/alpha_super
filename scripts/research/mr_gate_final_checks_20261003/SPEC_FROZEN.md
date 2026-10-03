@@ -64,3 +64,25 @@ Crises:
 | GFC | +7.9% | +11.2% |
 
 T-bills slot: 0.728 / 1.334 / 1.437.
+
+## Check C (added 2026-10-03, before any run): HPI vote at +5 bps per side
+Same two engine arms with slippage 0.00075 (2.5 bps engine + 5 bps stress), the book with the stored stress NDX-L.
+Reported against each other and against the T-bill slot at stress costs (C_BIL_stress_L: 0.724 / 1.326 / 1.428).
+Reading: gated is preferred in the book if its stressed book Sharpe >= ungated in G-FULL and G-LONG and >= ungated
+- 0.03 in each block.
+
+### C — result: gated preferred at +5 bps
+| HPI vote | Ungated | Gated |
+|---|---|---|
+| Standalone Sharpe | 0.900 | 0.945 |
+| Standalone CAGR | 13.7% | 12.1% |
+| Max DD | −18.4% | −17.0% |
+| Book 2008–11 | 0.798 | 0.772 (within −0.03) |
+| Book 2012–21 | 1.361 | 1.466 |
+| Book 2022–26 | 1.407 | 1.464 |
+| Book 2012–26 | 1.375 | 1.465 |
+| Book 2008–26 | 1.249 | 1.306 |
+
+T-bills slot at stress: 0.724 / 1.326 / 1.428.
+- Ungated HPI loses to T-bills in 2022–26 at stress (1.407).
+- Gated HPI beats T-bills in all three blocks at stress. This is the first MR slot in these studies to do so.
