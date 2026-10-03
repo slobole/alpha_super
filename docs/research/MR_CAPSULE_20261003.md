@@ -220,3 +220,137 @@ On the long history SPMO both + rule makes more money at a slightly lower Sharpe
   - engine parity of DV2-G (replica only so far);
   - the BIL trades of the T-bill leg;
   - small-account minimum commissions.
+
+## Build record (2026-10-04): the capsule in the real engine
+
+Research-only. Nothing live changed.
+- **Code:** `strategies/mr_capsule/` (shared gate, parking, two pods).
+- **Tests:** `tests/test_strategy_mr_capsule_gate.py`, `tests/test_strategy_mr_capsule_pods.py` (36).
+- **Checks:** `scripts/research/mr_capsule_build_20261004/run_engine.py` and `compare.py`; outputs go to `results/research/mr_capsule_build_20261004/` (gitignored).
+- **Status:** both pods are RESEARCH (absent from the registry). They have no live route and no portfolio-manager route.
+
+### Parity with the research record
+
+| Check | Result |
+|---|---|
+| HPI-G, idle cash at 0%, vs the research engine run (check B) | Identical: 5,998 of 5,998 trade events; NAV max difference 0.0 over 5,724 sessions |
+| DV2-G, idle cash at 0%, vs the research replica (first engine run of DV2-G) | 98.7% of trade events in common (9,822); daily return corr 0.9988; 2004–26 CAGR 15.91% vs 16.01%, Sharpe 0.951 vs 0.955, max DD −29.0% both |
+| Gate vs the research gate | Identical on real VIX 2004–2026 (independent review); identical on a synthetic path with 20+ openings and at the 15-session boundary (tests) |
+| Stock trades with parking on | Same as the cash-only runs: parking never changes a stock decision |
+
+### Build amendments
+These are implementation changes, not new research.
+- **B1, SPMO tradability guard.**
+  - SPMO gets a weight only if it traded on each of the last 20 sessions.
+  - In 2015–2017 SPMO had 22, 151 and 87 sessions without a trade, and a median daily turnover of USD 0–2K. Its prices there are stale.
+  - From 2018 it trades every session (median USD 0.3M a day in 2018–21, USD 250M in 2026), and the guard is inactive.
+  - So idle cash stays in BIL until 2018.
+- **B2, weekly BIL sweep.**
+  - BIL is bought only on re-target closes (week end, gate switch). It is sold whenever the day's orders need the cash.
+  - Re-targeting BIL on every close traded it 72 times a year in DV2-G, about 20× the pod one-way.
+  - The sweep halves the orders to 39 a year (11× the pod) and lifts DV2-G from 16.61% / 0.970 to 16.84% / 0.981 (2004–26).
+- **Padding.** The parking ETFs keep Norgate's market-day padding in both pods, as in DV2's own frame. HPI's removed-name rule therefore never force-sells a held ETF on a session without a trade.
+- **Statistics.** Trade statistics and exposure time count stock trades only. NAV and costs include the parking.
+
+### Engine results: capsule 50/50, annual reset
+
+CAGR / Sharpe / Max DD.
+
+| Idle cash | 2004–2026 | 2007-06 → 2026 | 2018-02 → 2026 |
+|---|---|---|---|
+| SPMO spec (gate closed SPMO + BIL; open BIL) | 15.01% / 1.034 / −23.5% | 16.90% / 1.076 / −23.5% | 22.83% / 1.276 / −23.5% |
+| BIL only | 14.31% / 1.019 / −21.4% | 16.07% / 1.058 / −21.4% | 22.20% / 1.307 / −21.4% |
+| Cash at 0% | 14.18% / 1.010 / −21.6% | 15.91% / 1.049 / −21.6% | 21.54% / 1.274 / −21.6% |
+| Research record, SPMO spec | 17.45% / 1.167 / −24.4% | 19.14% / 1.186 / −24.4% | 23.74% / 1.321 / −24.4% |
+
+From 2018-02, where both sides use the same data, the engine is 0.9 pp/yr and 0.045 Sharpe below the research record. The research did not charge the following frictions:
+- trading costs on about 16× the pod a year of BIL and SPMO (about 0.5 pp);
+- the 25% withholding on BIL (about 0.3 pp, conservative);
+- BIL's expense ratio;
+- the 1% cash buffer.
+
+Before 2018 the gap also includes 0% cash before BIL (2004–07) and the B1 guard.
+
+Capsule in the crises (engine):
+
+| Window | SPMO spec | BIL only |
+|---|---|---|
+| GFC 2007-10 → 2009-03 | +7.3% | +7.3% |
+| Aug 2011 | −10.8% | −10.8% |
+| Q4 2018 | −12.8% | −6.3% |
+| COVID 2020 | −23.5% | −21.4% |
+| 2022 | +14.3% | +15.6% |
+| Feb–Apr 2025 | −13.2% | −10.2% |
+
+### SPMO vs BIL: the parking decision needs revisiting
+
+Capsule Sharpe / book Sharpe. The book is TAA 0.5 + NDX 0.25 + capsule 0.25.
+
+| Window | Research T-bills | Research SPMO | Engine BIL | Engine SPMO |
+|---|---|---|---|---|
+| 2015-11 → 2018-01 (SPMO mostly untraded) | 1.124 / 2.254 | 2.318 / 2.540 | 1.075 / 2.243 | 1.548 / 2.312 |
+| 2018-02 → 2026-08 | 1.388 / 1.498 | 1.330 / 1.461 | 1.316 / 1.475 | 1.278 / 1.440 |
+| 2008-03 → 2026-08 (book CAGR) | 1.365 (18.79%) | 1.378 (19.34%) | 1.351 (18.57%) | 1.343 (18.78%) |
+
+**The research case for SPMO came from 2015-11 to 2018-01.** That case was "since 2015 it is higher on both money and Sharpe". But in those years SPMO did not trade on most days.
+
+**From 2018-02, research and engine agree:**
+- SPMO adds a little money: capsule +0.1 to +0.6 pp/yr, book +0.05 to +0.15 pp/yr.
+- It lowers Sharpe: capsule −0.04 to −0.06, book −0.035.
+- It deepens drawdowns: capsule −23.5% vs −21.4%.
+
+**Claude's recommendation, updated: BIL only.** The owner decides. The build keeps the owner's 2026-10-04 choice (SPMO) as the default; `spmo_parking_enabled_bool=False` runs BIL only.
+
+### Multiple testing
+
+DSR of the engine capsule on daily excess returns over T-bills. N = 110 trials, counted as independent; the null sampling variance is used.
+
+| Window | DSR | Sharpe vs deflated benchmark |
+|---|---|---|
+| 2004–26 | 0.966 | 0.92 vs 0.53 |
+| From 2007-06 | 0.962 | — |
+| From 2015-11 | 0.88 | shorter sample |
+| From 2018-02 | 0.78 | shorter sample |
+
+What counts against the record:
+- about 100 gate variants and about 10 parking forks;
+- SPMO missed its pre-registered +0.02 bar (+0.016) and was adopted by owner decision;
+- "SPMO only while the gate is closed" was chosen on the same 2015–26 window;
+- the 2022–26 block overlaps Scout's 2023+ vault.
+
+Forward paper is the only clean evidence left.
+
+### Independent review (quant-pitfalls agent, 2026-10-04)
+
+**No issues found:**
+- no lookahead or leakage;
+- no drift from the parents: an AST diff of the copied `iterate` bodies, plus parity with 10 full slots;
+- the gate is identical on real VIX.
+
+**Fixed:**
+- BIL churn (B2);
+- a vacuous gate test, now replaced, with a boundary test added;
+- no-volume ETF sessions (B1 and padding);
+- the signal-audit state: the SPMO weight is now computed per decision from the engine's data;
+- stock-only trade statistics;
+- test gaps:
+  - full-slot parity with the parking symbols in the frame;
+  - a test that the weekly re-weight happens;
+  - a test of `append_parking_prices`;
+  - the BIL-only mode.
+
+**On record, not fixed:**
+- **Negative cash.** It comes from the parents' 10 × 10% sizing, not from parking:
+  - DV2-G: 136 sessions with parking vs 133 without, minimum −8.8% of NAV;
+  - HPI-G: 128 vs 127.
+  - It is not financed (G-023).
+- **Slippage.** The engine charges 2.5 bps on BIL, against BIL's spread of about 1 bp. This is conservative.
+- **Small-pod commissions.** About 52–58 parking orders a year at the USD 1 minimum cost about 0.35–0.4 pp/yr at USD 15K per pod and about 0.1 at USD 50K.
+
+### Before any paper run (owner decisions)
+- **Parking:** SPMO spec, or BIL only (recommended).
+- **Accounts:**
+  - a margin account per pod, because entries on a gate-opening day are funded by the same auction's sales;
+  - one account per pod, because both pods hold BIL.
+- **Data:** the snapshot profiles would need SPMO, BIL and $VIX from 1990.
+- **Portfolio manager:** no manager-format book until the pods are PM_READY. The 50/50 annual reset is computed in `compare.py`.
