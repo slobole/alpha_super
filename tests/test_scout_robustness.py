@@ -401,3 +401,39 @@ def test_romano_wolf_finds_the_one_real_improvement():
     assert (np.diff(adjusted_vec[order_vec]) >= -1e-12).all()
     same_observed_vec, same_draw_mat = paired_sharpe_difference_draws(base_vec, np.column_stack([base_vec, variant_mat[:, 0]]), draw_count_int=200)
     assert romano_wolf_stepdown(same_observed_vec, same_draw_mat)[0] == 1.0
+
+
+def test_zorro_lowpass_and_bakeoff_filter_states():
+    from alpha.scout.specs import core5, ndx_vxn
+
+    rng_obj = np.random.default_rng(31)
+    price_vec = 100.0 * np.exp(np.cumsum(rng_obj.normal(0.0, 0.02, size=500)))
+
+    def zorro_lowpass(x_vec, period_int):  # a direct transcription of Workshop 4a (series initialised to the input)
+        a = 2.0 / (1 + period_int)
+        out, inp, result = [x_vec[0]] * 3, [x_vec[0]] * 3, []
+        for value in x_vec:
+            inp = [value, inp[0], inp[1]]
+            o = (a - 0.25 * a * a) * inp[0] + 0.5 * a * a * inp[1] - (a - 0.75 * a * a) * inp[2] + (2 - 2 * a) * out[0] - (1 - a) * (1 - a) * out[1]
+            out, result = [o, out[0], out[1]], result + [o]
+        return np.array(result)
+
+    np.testing.assert_allclose(ndx_vxn.lowpass_vec(price_vec, 50), zorro_lowpass(price_vec, 50), rtol=0, atol=1e-9)
+    np.testing.assert_allclose(ndx_vxn.lowpass_vec(np.full(30, 5.0), 20), 5.0, atol=1e-12)  # unit gain at zero frequency
+    # Causal and scale-free states on a small panel with a listing gap.
+    date_index = pd.bdate_range("2012-01-02", periods=500)
+    close_df = pd.DataFrame({"A": price_vec, "B": np.r_[np.full(100, np.nan), price_vec[:400] * 0.5]}, index=date_index)
+
+    def make(c_df):
+        return ndx_vxn.NdxInputs(c_df, c_df * 1.01, c_df * 0.99, c_df, c_df, c_df * 0.0, c_df * 0 + 1, pd.Series(dtype=float))
+
+    for kind_str, period_int in (("lowpass", 50), ("lowpass_rising", 50), ("adaptive_ama", 0)):
+        full_df = ndx_vxn.trend_state_frame(make(close_df), kind_str, period_int)
+        cut_df = ndx_vxn.trend_state_frame(make(close_df.iloc[:300]), kind_str, period_int)
+        scaled_df = ndx_vxn.trend_state_frame(make(close_df * 3.0), kind_str, period_int)
+        pd.testing.assert_frame_equal(cut_df, full_df.iloc[:300])
+        pd.testing.assert_frame_equal(scaled_df, full_df)
+        assert full_df["B"].iloc[:100].isna().all() and full_df["A"].dropna().isin([0.0, 1.0]).all()
+    # The CORE5 rule per stock is CORE5's own long state.
+    core5_long_ser = core5.asset_signal_df(close_df["A"], core5.Core5Config())["long"]
+    pd.testing.assert_series_equal(ndx_vxn.trend_state_frame(make(close_df), "adaptive_ama", 0)["A"], core5_long_ser, check_names=False)

@@ -297,9 +297,11 @@ _TREND_STATE_CACHE: dict = {}
 
 def trend_state_frame(inputs: NdxInputs, kind_str: str, period_int: int) -> pd.DataFrame:
     """1.0 / 0.0 trend state per stock and session for the bake-off filters (NaN until defined); cached per inputs."""
-    key_tuple = (id(inputs), inputs.close_df.shape, kind_str, period_int)
-    if key_tuple in _TREND_STATE_CACHE:
-        return _TREND_STATE_CACHE[key_tuple]
+    # The cache holds the inputs object itself, so its id cannot be reused by a new object while the entry exists.
+    key_tuple = (id(inputs), kind_str, period_int)
+    cached_tuple = _TREND_STATE_CACHE.get(key_tuple)
+    if cached_tuple is not None and cached_tuple[0] is inputs:
+        return cached_tuple[1]
     from alpha.scout.specs import core5
 
     column_dict = {}
@@ -322,7 +324,7 @@ def trend_state_frame(inputs: NdxInputs, kind_str: str, period_int: int) -> pd.D
             raise ValueError(f"Unknown trend filter {kind_str!r}.")
         column_dict[symbol_str] = state_ser.reindex(inputs.close_df.index)
     state_df = pd.DataFrame(column_dict, index=inputs.close_df.index)
-    _TREND_STATE_CACHE[key_tuple] = state_df
+    _TREND_STATE_CACHE[key_tuple] = (inputs, state_df)
     return state_df
 
 
