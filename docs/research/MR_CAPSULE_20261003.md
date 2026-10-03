@@ -144,3 +144,79 @@ Since 2015-11 (SPMO), both cost levels:
   and mechanism, not size.
 - **Implementation note:** the simulation re-weights SPMO daily (weight = min(1, 8% / 20-day realised volatility),
   rest T-bills). Live, a weekly re-weight with a tolerance band is the practical version; this was not tested.
+
+## Final parking decision (owner, 2026-10-04) — supersedes the 2026-10-03 assignment above
+
+**Both pods park in SPMO, but only while the gate is closed; while it is open, idle cash sits in T-bills. The SPMO
+weight is re-set weekly.** (Exploratory follow-ups `spmo_rebalance.py` and `spmo_gateoff.py`; SPMO trades charged
+2.5 bps per side.)
+
+### Re-weight frequency
+Weekly ≈ daily.
+
+| Re-weight | Capsule $100K | Sharpe |
+|---|---|---|
+| Daily | $963K | 1.413 |
+| Weekly | $956K | 1.408 |
+
+- Real SPMO since 2015-11, earlier assignment.
+- Crisis onsets differ by ≤ 0.6 pp.
+- A 10-point band adds nothing.
+- Monthly is worse at Q4 2018.
+
+### The gate rule
+Most SPMO trading came from the pods' own entries and exits. With SPMO held only while the gate is closed:
+- turnover halves;
+- the 2008 cost almost disappears;
+- book Sharpe is unchanged.
+
+Real SPMO, 2015-11 → 2026, weekly:
+
+| Parking | Capsule $100K | Capsule Sharpe | Capsule max DD | Book $100K | Book Sharpe | Q4 2018 | 2022 | 2025 |
+|---|---|---|---|---|---|---|---|---|
+| T-bills both (reference) | $743K | 1.311 | −21.3% | $803K | 1.593 | −6.0% | +3.0% | −10.0% |
+| DV2 SPMO / HPI T-bills | $956K | 1.408 | −23.2% | $853K | 1.603 | −9.5% | +1.9% | −12.2% |
+| DV2 SPMO / HPI T-bills + rule | $909K | 1.403 | −22.5% | $842K | 1.603 | −8.2% | +2.7% | −11.7% |
+| SPMO both, no rule | $1.16M | 1.413 | −25.2% | $894K | 1.598 | −13.0% | −0.7% | −14.2% |
+| **SPMO both + rule (chosen)** | **$1.07M** | **1.427** | −23.4% | **$877K** | **1.603** | −10.5% | +2.3% | −13.2% |
+
+2008 (PDP / synthetic proxies), whole GFC window (2007-10 → 2009-03):
+
+| Parking | Return |
+|---|---|
+| T-bills both | +7.2% |
+| SPMO both, no rule | −4.6% / −1.0% |
+| **SPMO both + rule** | **+5.5% / +5.5%** |
+
+Calendar 2008: T-bills both +14.3%; SPMO both + rule +12.8% / +12.9%.
+
+Long history (2008–26, proxy before 2015-11):
+
+| Parking | Book Sharpe | Book $100K | Book max DD |
+|---|---|---|---|
+| T-bills both | 1.365 | $2.39M | −15.1% |
+| SPMO both + rule | 1.348–1.352 | $2.63–2.65M | −15.2% |
+
+On the long history SPMO both + rule makes more money at a slightly lower Sharpe. Since 2015 it is higher on both.
+
+### Final capsule specification (for the build)
+- **Gate (shared):**
+  - After each close, VIX > expanding mean of all VIX closes since 1990-01-02 (min 500) opens the gate.
+  - Once open, it stays open at least 15 sessions from the opening.
+  - It closes on the first close at or below the threshold after that.
+- **Pods:**
+  - DV2-G: wired DV2 rules.
+  - HPI-G: HPI 2/3/5 vote rules.
+  - Both: new entries only while the gate is open; exits always by the pod's own rule.
+- **Idle cash of each pod:**
+  - Gate open: T-bills (BIL).
+  - Gate closed: SPMO at weight min(1, 8% / 20-day realised volatility), the rest BIL.
+  - Re-weight every Friday close; set it to the target at the close the gate shuts, and to 0 at the close it opens.
+  - Orders fill at the next open.
+  - New stock entries happen only while the gate is open, when SPMO is 0. So entries are funded from cash or BIL and
+    never force SPMO sales.
+- **Capsule:** 50/50 capital, two separate sub-accounts, reset to 50/50 once a year.
+- **Untested at build time (to verify):**
+  - engine parity of DV2-G (replica only so far);
+  - the BIL trades of the T-bill leg;
+  - small-account minimum commissions.
