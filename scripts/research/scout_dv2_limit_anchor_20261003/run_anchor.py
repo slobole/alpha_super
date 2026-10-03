@@ -6,6 +6,7 @@ signal is FROZEN (alpha/scout/specs/dv2.py LIVE_CONFIG); the book, fill rules an
 
     PYTHONUTF8=1 uv run python scripts/research/scout_dv2_limit_anchor_20261003/run_anchor.py universe [name ...]
     PYTHONUTF8=1 uv run python scripts/research/scout_dv2_limit_anchor_20261003/run_anchor.py moo [name ...]
+    PYTHONUTF8=1 uv run python scripts/research/scout_dv2_limit_anchor_20261003/run_anchor.py band [name ...]
     PYTHONUTF8=1 uv run python scripts/research/scout_dv2_limit_anchor_20261003/run_anchor.py mcpt [workers] [permutations]
 
 universe  per universe: the correlation of NATR14 with the other measures on signal days; then for each anchor x measure
@@ -15,6 +16,7 @@ universe  per universe: the correlation of NATR14 with the other measures on sig
           the paired stationary-bootstrap Sharpe difference against close x natr14 at the same target.
 moo       the market-on-open exit for the best two S&P 500 entries (mean of AR and pooled net Sharpe, limit exit) and for
           the baseline at the same targets, in every universe, with each universe's own calibrated parameters.
+band      diagnostic: every limit-exit cell with its calibrated parameter x 0.9 .. 1.1 (path jitter of the slot book).
 mcpt      the per-asset panel MCPT (A8 null) over the registered S&P 500 entry grid (anchor x measure x target, limit exit),
           plateau choice of the net active Sharpe; the calibrated parameters are held fixed on the null draws (calibration
           targets a fill rate, not a return).
@@ -377,6 +379,44 @@ def run_moo_exits(superset, name_str: str, entry_list: list[tuple[str, str, floa
     return out_dict
 
 
+# ---------------------------------------------------------------- parameter-jitter band (diagnostic, not new trials)
+BAND_FACTOR_TUPLE = (0.9, 0.95, 1.0, 1.05, 1.1)
+
+
+def run_band(superset, name_str: str) -> dict:
+    """Each registered limit-exit cell re-run with its calibrated parameter x 0.9 .. 1.1 (fill rate moves by a few points):
+    the slot book is path dependent, so neighbouring parameters at nearly the same fill rate differ by noise. The band
+    mean Sharpe, and the band-mean difference against the baseline's band, separate a real ordering from that jitter."""
+    prep = prepare(superset, name_str)
+    universe_dict = json.loads((OUT_PATH / "universes" / f"{parent.slug(name_str)}.json").read_text(encoding="utf-8"))
+    out_dict = {"universe_str": name_str, "factor_list": list(BAND_FACTOR_TUPLE), "cells": {}}
+    for label_str, row in universe_dict["cells"].items():
+        band_list = []
+        for factor_float in BAND_FACTOR_TUPLE:
+            param_float = row["param_float"] * factor_float
+            entry_limit = limit_for(prep, row["anchor_str"], row["measure_str"], param_float)
+            result_dict = {case_str: run_book(prep, entry_limit, "limit", case_str) for case_str in ("ar", "pooled")}
+            band_list.append({"factor_float": factor_float, "param_float": param_float,
+                              "fill_rate_float": parent.order_stats(result_dict["pooled"], prep["panel"].date_index)["fill_rate_float"],
+                              "sharpe_ar_float": sharpe_float(window(result_dict["ar"].daily_ser)),
+                              "sharpe_pooled_float": sharpe_float(window(result_dict["pooled"].daily_ser))})
+        band_df = pd.DataFrame(band_list)
+        out_dict["cells"][label_str] = {"band": band_list, "mean_sharpe_ar_float": float(band_df["sharpe_ar_float"].mean()),
+                                        "mean_sharpe_pooled_float": float(band_df["sharpe_pooled_float"].mean()),
+                                        "sd_sharpe_pooled_float": float(band_df["sharpe_pooled_float"].std(ddof=1)),
+                                        "fill_min_float": float(band_df["fill_rate_float"].min()), "fill_max_float": float(band_df["fill_rate_float"].max())}
+        cell = out_dict["cells"][label_str]
+        log(f"  band {label_str:34s} fill {cell['fill_min_float']:.2f}-{cell['fill_max_float']:.2f} mean AR {cell['mean_sharpe_ar_float']:.2f} "
+            f"pooled {cell['mean_sharpe_pooled_float']:.2f} (sd {cell['sd_sharpe_pooled_float']:.3f})")
+    for label_str, cell in out_dict["cells"].items():
+        row = universe_dict["cells"][label_str]
+        base = out_dict["cells"][cell_label(*BASELINE_TUPLE, row["fill_target_float"])]
+        cell["band_difference_ar_float"] = cell["mean_sharpe_ar_float"] - base["mean_sharpe_ar_float"]
+        cell["band_difference_pooled_float"] = cell["mean_sharpe_pooled_float"] - base["mean_sharpe_pooled_float"]
+    parent.write_json(OUT_PATH / "band" / f"{parent.slug(name_str)}.json", out_dict)
+    return out_dict
+
+
 # ---------------------------------------------------------------- MCPT over the registered S&P 500 entry grid
 def grid_entries() -> list[tuple[str, str, float]]:
     return [(a, m, t) for a in ANCHOR_TUPLE for m in MEASURE_TUPLE for t in FILL_TARGET_TUPLE]
@@ -473,6 +513,10 @@ def main() -> None:
         log(f"best two S&P 500 entries: {entry_list}")
         for name_str in sys.argv[2:] or list(UNIVERSE_TUPLE):
             run_moo_exits(superset, name_str, entry_list)
+            gc.collect()
+    elif command_str == "band":
+        for name_str in sys.argv[2:] or list(UNIVERSE_TUPLE):
+            run_band(superset, name_str)
             gc.collect()
     elif command_str == "mcpt":
         worker_count_int = int(sys.argv[2]) if len(sys.argv) > 2 else 3

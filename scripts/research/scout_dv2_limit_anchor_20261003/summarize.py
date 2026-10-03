@@ -81,11 +81,11 @@ def main() -> None:
     pd.DataFrame(correlation_rows).to_csv(OUT_PATH / "tables" / "correlation.csv", index=False)
     pd.set_option("display.width", 250)
     print("## Reference: market-on-open entry and exit\n")
-    print(pd.DataFrame(reference_rows).drop(columns="uncalibrated_quantile_fill").round(2).to_markdown(index=False))
+    print(pd.DataFrame(reference_rows).drop(columns="uncalibrated_quantile_fill").round(2).to_string(index=False))
     for row in reference_rows:
         print(row["universe"], "uncalibrated quantile event fill share:", {k: round(v, 2) for k, v in row["uncalibrated_quantile_fill"].items()})
     print("\n## Correlation with NATR14 on signal days\n")
-    print(pd.DataFrame(correlation_rows).round(2).to_markdown(index=False))
+    print(pd.DataFrame(correlation_rows).round(2).to_string(index=False))
     main_columns = ["anchor", "measure", "target", "exit", "param", "fill_cal", "fill_full", "trades_yr", "sharpe_gross", "sharpe_ar", "sharpe_pooled",
                     "cagr_pooled", "maxdd_pooled", "cost_rt_ar", "cost_rt_pooled", "post_filled_bp", "post_unfilled_bp", "stress_f1_ar",
                     "stress_f1_pooled"]
@@ -96,9 +96,9 @@ def main() -> None:
         if sub.empty:
             continue
         print(f"\n## {name_str}: cells\n")
-        print(sub[main_columns].round(3).to_markdown(index=False))
+        print(sub[main_columns].round(3).to_string(index=False))
         print(f"\n## {name_str}: paired difference vs close x natr14 at the same target (95% stationary-bootstrap CI), eras, overlap\n")
-        print(sub[compare_columns].round(3).to_markdown(index=False))
+        print(sub[compare_columns].round(3).to_string(index=False))
 
 
 if __name__ == "__main__":
