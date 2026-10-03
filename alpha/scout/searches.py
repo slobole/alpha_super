@@ -114,6 +114,7 @@ ABLATION_SWITCH_DEFAULT_DICT = {
     "cash_asset_tuple": (), "regime_filter_bool": True, "stock_trend_filter_bool": True, "adaptive_speed_bool": True,
     "trend_rule_bool": True, "trend_fast_sma_int": 0, "trend_threshold_float": 0.0, "trend_filter_str": "sma",
     "cmma_threshold_float": 0.0, "cmma_atr_int": 252, "lt_lookback_int": 252, "lt_atr_int": 20, "lt_rsq_bool": True,
+    "sector_cap_int": 0, "sector_level_int": 1,
 }
 
 
