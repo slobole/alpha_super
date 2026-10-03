@@ -121,3 +121,26 @@ Scout), and the Scout book has no dividends. **Not adopted here:** a live order-
 3. Limit execution: a paper shadow for DV2 (Scout recommendation); the evidence now says it complements the gate.
 
 Outputs: `results/research/mr_capsule_20261003/` (gitignored). Scripts: `components.py`, `evaluate.py`, `limit_axis.py`.
+
+## Owner decision (2026-10-03): parking — one pod in SPMO, the other in T-bills
+
+**Assignment chosen: DV2 parks in SPMO (8% volatility target), HPI parks in T-bills.**
+
+Since 2015-11 (SPMO), both cost levels:
+
+| Assignment | Capsule $100K | Capsule Sharpe | Book $100K | Book Sharpe | Book 2015–20 / 2021–26 | Book at +5 bps |
+|---|---|---|---|---|---|---|
+| **DV2 → SPMO, HPI → T-bills** | **$979K** | **1.423** | **$858K** | **1.608** | **1.697 / 1.568** | **1.557** |
+| DV2 → T-bills, HPI → SPMO | $944K | 1.394 | $848K | 1.599 | 1.679 / 1.565 | 1.548 |
+
+- **SPMO record:** the chosen assignment is ahead on every line, in both halves, at both cost levels, and in the crises
+  (2022: +2.0% vs +0.4%; Volmageddon −1.5% vs −2.2%).
+- **Mechanism:** idle cash is about 88–90% for both pods while the gate is closed. While it is open (stress), DV2 is
+  25% idle and HPI 35% idle. With SPMO in DV2, the momentum exposure sits mostly in calm markets, where it works, and
+  less in stress, where momentum falls with the market.
+- **Long-window proxies (2004–26):** with the SPY or QQQ 8% volatility target as the equity parking, the two
+  assignments tie in book Sharpe (1.349 vs 1.348; 1.359 vs 1.361). So nothing argues against the choice.
+- **The gap is small** (book +0.009 Sharpe, about +$10K per $100K over 11 years). The choice is made on consistency
+  and mechanism, not size.
+- **Implementation note:** the simulation re-weights SPMO daily (weight = min(1, 8% / 20-day realised volatility),
+  rest T-bills). Live, a weekly re-weight with a tolerance band is the practical version; this was not tested.
