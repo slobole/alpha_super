@@ -1180,6 +1180,18 @@ Report: `docs/research/SCOUT_DV2_LIMIT_ENTRY_20261002.md`.
 - **Practice:** daily-bar fill models are reported with a fill-stress table, and the MCPT is noted as not testing fill
   optimism. Promotion of a limit-order change needs real or paper fill evidence.
 
+**A18 (2026-10-03, DV2 limit anchor and offset).**
+Report: `docs/research/SCOUT_DV2_LIMIT_ANCHOR_20261003.md`.
+
+- **Variants:** anchor (close or open) × offset (NATR14, 21-day std, downside excursion, 63-day quantile), compared at
+  equal fill rates (calibrated on 2004-2012).
+- **Result:** the hypothesis fails. No variant beats Close − k × NATR14 after a Romano-Wolf adjustment (best adjusted
+  p 0.13). The open anchor does not replicate. The offset measures correlate 0.8-0.9 with NATR.
+- **Correction to A17:** k 0.5 sits on a lucky point (±10% in k moves Sharpe ±0.04). Plan on about 0.70 / 0.82 at a 40%
+  fill rate.
+- **Practice:** variants of an execution rule are compared at equal activity (fill rate), with a parameter-jitter band
+  and a multiplicity adjustment. The MCPT does not separate variants of a rule that already has an edge.
+
 **Not adopted from the critique.** One correction: the critique said the kill rule closes gap G-006.
 It does not. G-006's missing circuit breaker is about **repeated reconciliation failures**, not about
 performance. A performance kill rule is a separate, currently unrecorded gap, and P1 should add it to

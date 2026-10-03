@@ -1,5 +1,9 @@
 # Scout: do limit orders make DV2 cheaper to trade?
 
+> **Update (2026-10-03, limit anchor study):** k 0.5 sits on a lucky point of the parameter. Moving k by ±10% shifts
+> Sharpe by about ±0.04 (k 0.48 gives 0.82 pooled). Plan on about 0.70 / 0.82 (AR / pooled) at a 40% fill rate. No
+> anchor or offset measure beat Close − k × NATR14. See `SCOUT_DV2_LIMIT_ANCHOR_20261003.md`.
+
 Date: 2026-10-02. Research only; nothing here changes live trading.
 - **Scripts:** `scripts/research/scout_dv2_limit_entry_20261002/`.
 - **Results:** `results/scout/dv2_limit_entry/` (not in git).
