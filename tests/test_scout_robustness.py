@@ -383,3 +383,21 @@ def test_linear_trend_matches_ols_and_is_causal():
     np.testing.assert_allclose(ndx_vxn.linear_trend_frame(make(close_df * 5.0), 60, 20)[0].to_numpy(), lt_df.to_numpy(), rtol=1e-9)
     no_rsq_df = ndx_vxn.linear_trend_frame(make(close_df), 60, 20, rsq_bool=False)[0]
     assert (no_rsq_df["A"].abs().iloc[59:] >= lt_df["A"].abs().iloc[59:] - 1e-12).all()
+
+
+def test_romano_wolf_finds_the_one_real_improvement():
+    from alpha.scout.stations.robustness import paired_sharpe_difference_draws, romano_wolf_stepdown
+
+    rng_obj = np.random.default_rng(21)
+    base_vec = rng_obj.normal(0.0004, 0.01, size=3000)
+    variant_mat = np.column_stack([base_vec + rng_obj.normal(0.0, 0.004, size=3000) for _ in range(4)])
+    variant_mat[:, 0] += 0.0008  # the only real improvement (about +1.2 Sharpe on the difference)
+    observed_vec, draw_mat = paired_sharpe_difference_draws(base_vec, variant_mat, draw_count_int=1000, random_seed_int=3)
+    adjusted_vec = romano_wolf_stepdown(observed_vec, draw_mat)
+    assert draw_mat.shape == (1000, 4) and observed_vec[0] > 0.5
+    assert adjusted_vec[0] < 0.01 and (adjusted_vec[1:] > 0.10).all()
+    # Monotone in t, and a variant identical to the base gets p = 1.
+    order_vec = np.argsort(-(observed_vec / draw_mat.std(axis=0, ddof=1)))
+    assert (np.diff(adjusted_vec[order_vec]) >= -1e-12).all()
+    same_observed_vec, same_draw_mat = paired_sharpe_difference_draws(base_vec, np.column_stack([base_vec, variant_mat[:, 0]]), draw_count_int=200)
+    assert romano_wolf_stepdown(same_observed_vec, same_draw_mat)[0] == 1.0

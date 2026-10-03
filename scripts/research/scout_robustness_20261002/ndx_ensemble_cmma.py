@@ -107,7 +107,11 @@ def run_strategy(override_list: list[dict], offset_int: int = 0) -> dict:
     traded_float = float((trade_df["delta_float"].abs() * trade_df["price_float"]).sum())
     value_float = float(result.total_value_ser.loc[START_STR:SEAL_END_STR].mean())
     years_float = len(result.total_value_ser.loc[START_STR:SEAL_END_STR]) / 252.0
-    return {"daily": daily_ser, "names_held_float": float(held_ser[held_ser > 0].mean()), "turnover_float": traded_float / value_float / years_float}
+    position_df = result.daily_position_df.loc[START_STR:SEAL_END_STR]
+    long_value_ser = (position_df * inputs.close_df[stock_list].reindex(position_df.index)).clip(lower=0.0).sum(axis=1)
+    exposure_float = float((long_value_ser / result.total_value_ser.loc[position_df.index]).mean())
+    return {"daily": daily_ser, "names_held_float": float(held_ser[held_ser > 0].mean()), "turnover_float": traded_float / value_float / years_float,
+            "exposure_float": exposure_float}
 
 
 def _task(args) -> dict:

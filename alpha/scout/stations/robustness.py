@@ -264,3 +264,52 @@ def random_parameter_summary(result: RandomParameterResult) -> dict:
             "live_sharpe_float": live_float, "share_at_or_above_live_float": float(np.mean(finite_vec >= live_float)),
             "median_float": median_float, "p10_float": p10_float, "p90_float": float(np.quantile(finite_vec, 0.90)),
             "positive_share_float": float(np.mean(finite_vec > 0)), "verdict_str": verdict_str}
+
+
+# ---------------------------------------------------------------- multiplicity: Romano-Wolf step-down
+def paired_sharpe_difference_draws(base_vec: np.ndarray, variant_mat: np.ndarray, draw_count_int: int = 2000,
+                                   block_float: float = BOOTSTRAP_BLOCK_FLOAT, random_seed_int: int = 0,
+                                   chunk_int: int = 250) -> tuple[np.ndarray, np.ndarray]:
+    """Observed Sharpe(variant_k) - Sharpe(base) and its stationary-bootstrap draws (draws x K). Every draw resamples
+    the same dates for the base and all variants, so the differences keep their joint dependence."""
+    base_vec, variant_mat = np.asarray(base_vec, dtype=float), np.asarray(variant_mat, dtype=float)
+    if variant_mat.ndim == 1:
+        variant_mat = variant_mat[:, None]
+
+    def sharpe_rows(path_mat: np.ndarray) -> np.ndarray:
+        sd_vec = path_mat.std(axis=1, ddof=1)
+        return np.where(sd_vec > 0, path_mat.mean(axis=1) / np.where(sd_vec > 0, sd_vec, 1.0) * np.sqrt(252.0), 0.0)
+
+    def sharpe(value_vec: np.ndarray) -> float:
+        sd_float = value_vec.std(ddof=1)
+        return float(value_vec.mean() / sd_float * np.sqrt(252.0)) if sd_float > 0 else 0.0
+
+    observed_vec = np.array([sharpe(variant_mat[:, k]) - sharpe(base_vec) for k in range(variant_mat.shape[1])])
+    draw_list, done_int, chunk_seed_int = [], 0, random_seed_int
+    while done_int < draw_count_int:
+        size_int = min(chunk_int, draw_count_int - done_int)
+        index_mat = stationary_bootstrap_index_mat(len(base_vec), size_int, block_float, len(base_vec), chunk_seed_int)
+        base_sharpe_vec = sharpe_rows(base_vec[index_mat])
+        draw_list.append(np.column_stack([sharpe_rows(variant_mat[:, k][index_mat]) - base_sharpe_vec for k in range(variant_mat.shape[1])]))
+        done_int, chunk_seed_int = done_int + size_int, chunk_seed_int + 1
+    return observed_vec, np.vstack(draw_list)
+
+
+def romano_wolf_stepdown(observed_vec: np.ndarray, draw_mat: np.ndarray) -> np.ndarray:
+    """Family-wise adjusted one-sided p-values for H0_k: difference_k <= 0 (Romano and Wolf 2005, studentised step-down).
+    t_k = d_k / sd_k with sd_k the bootstrap standard deviation; the null of the largest remaining t is the bootstrap
+    distribution of max over the remaining hypotheses of (d*_k - d_k) / sd_k; p-values are made monotone."""
+    observed_vec, draw_mat = np.asarray(observed_vec, dtype=float), np.asarray(draw_mat, dtype=float)
+    sd_vec = draw_mat.std(axis=0, ddof=1)
+    safe_vec = np.where(sd_vec > 0, sd_vec, 1.0)
+    t_vec = np.where(sd_vec > 0, observed_vec / safe_vec, 0.0)
+    null_mat = np.where(sd_vec > 0, (draw_mat - observed_vec) / safe_vec, 0.0)
+    adjusted_vec, running_float = np.empty(observed_vec.size), 0.0
+    remaining_list = list(np.argsort(-t_vec))
+    for k_int in list(remaining_list):
+        max_null_vec = null_mat[:, remaining_list].max(axis=1)
+        p_float = float((1 + np.sum(max_null_vec >= t_vec[k_int])) / (1 + draw_mat.shape[0]))
+        running_float = max(running_float, p_float)
+        adjusted_vec[k_int] = running_float if sd_vec[k_int] > 0 else 1.0
+        remaining_list.remove(k_int)
+    return adjusted_vec
