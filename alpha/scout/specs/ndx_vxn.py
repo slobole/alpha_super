@@ -75,6 +75,12 @@ observed sessions, causal, and unchanged by a later back-adjustment factor becau
                       and EMA200 by the 126-session percentile of the drawdown from the running high, squared. The
                       running high starts at the first loaded close (1999, or the listing).
 
+Sector cap (research, 2026-10-04; as strategies/momentum/strategy_mo_atr_normalized_sector_cap.py): with
+sector_cap_int > 0 the top-N walk skips a candidate whose GICS group (level sector_level_int: 1 sector, 2 industry group)
+already holds sector_cap_int names, and the next-ranked name takes the slot. Labels are Norgate's CURRENT GICS (it keeps
+no history), so a reclassified name carries today's label back in time (a known, mild look-ahead; ASSUMPTIONS_AND_GAPS);
+unclassified names share the group "UNKNOWN", capped like any other.
+
 Linear-trend ranking (research, 2026-10-03; Masters, Statistically Sound Indicators, "linear trend"):
 atr_unit_str = "linear_trend" ranks on
     LT(T) = b(T) * (n - 1) / ATR_ln(A, T) * R2(T)        (R2 left out when lt_rsq_bool is False)
@@ -128,6 +134,8 @@ class NdxConfig:
     lt_lookback_int: int = 252  # linear-trend ranking (atr_unit_str = "linear_trend")
     lt_atr_int: int = 20
     lt_rsq_bool: bool = True
+    sector_cap_int: int = 0  # research: at most this many names per GICS group in the top-N (0 = no cap)
+    sector_level_int: int = 1
     cmma_atr_int: int = 252
     cmma_threshold_float: float = 0.0
 
@@ -293,6 +301,22 @@ def lowpass_vec(price_vec: np.ndarray, period_int: int) -> np.ndarray:
 
 
 _TREND_STATE_CACHE: dict = {}
+_SECTOR_GROUP_CACHE: dict = {}  # (symbol, level) -> current GICS group id, or "UNKNOWN"
+
+
+def sector_group_dict(symbol_list: list[str], level_int: int) -> dict[str, str]:
+    """Current GICS group per symbol at the given level (Norgate); cached, and can be pre-seeded."""
+    missing_list = [s for s in symbol_list if (s, level_int) not in _SECTOR_GROUP_CACHE]
+    if missing_list:
+        import norgatedata
+
+        for symbol_str in missing_list:
+            try:
+                group_obj = norgatedata.classification_at_level(symbol_str, "GICS", "ClassificationId", level_int)
+            except Exception:  # noqa: BLE001 - a delisted or unclassified symbol has no label
+                group_obj = None
+            _SECTOR_GROUP_CACHE[(symbol_str, level_int)] = str(group_obj) if group_obj not in (None, "") else "UNKNOWN"
+    return {s: _SECTOR_GROUP_CACHE[(s, level_int)] for s in symbol_list}
 
 
 def trend_state_frame(inputs: NdxInputs, kind_str: str, period_int: int) -> pd.DataFrame:
@@ -401,7 +425,18 @@ def rebalance_weight_df(inputs: NdxInputs, config: NdxConfig = LIVE_CONFIG) -> p
             eligible_ser = score_ser[member_mask & trend_mask & score_ser.notna()]
             ranked_frame = pd.DataFrame({"score": eligible_ser, "symbol": eligible_ser.index})
             ranked_frame = ranked_frame.sort_values(["score", "symbol"], ascending=[False, True], kind="mergesort")
-            selected_list = list(ranked_frame["symbol"].iloc[: config.top_count_int])
+            if config.sector_cap_int > 0:
+                group_dict = sector_group_dict(list(ranked_frame["symbol"]), config.sector_level_int)
+                selected_list, count_dict = [], {}
+                for symbol_str in ranked_frame["symbol"]:
+                    if len(selected_list) >= config.top_count_int:
+                        break
+                    group_str = group_dict.get(symbol_str, "UNKNOWN")
+                    if count_dict.get(group_str, 0) < config.sector_cap_int:
+                        selected_list.append(symbol_str)
+                        count_dict[group_str] = count_dict.get(group_str, 0) + 1
+            else:
+                selected_list = list(ranked_frame["symbol"].iloc[: config.top_count_int])
             if selected_list:
                 scale_float = 1.0
                 if config.vxn_scaled_bool:

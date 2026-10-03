@@ -427,3 +427,26 @@ design of record. It is simpler (two books, not nine) and at least as good:
 - **Live account:** at $12K, 15% of E2's positions are smaller than one share (live pod: 2%), so it is not clean at the
   current size. It is fine from roughly $25-50K, or with fractional shares.
 - **Live change:** none now. This is the owner's call when the account grows.
+
+**Sector cap on E2 (2026-10-04; `ndx_sector_cap.py`; registration `ndx_e2_sector_cap_20261004`, written before the run
+with its rule).** Within each of E2's books, at most 4 of the 10 names per GICS group, filled by the next-ranked name.
+Labels are Norgate's current GICS: a mild look-ahead.
+
+| 2000-09 to 2026-09 | Sharpe | CAGR | Vol | Max DD | Calmar | Luck median | 2023 on (Sharpe / CAGR) | Largest sector (mean / max) |
+|---|---|---|---|---|---|---|---|---|
+| E2, no cap | 0.85 | 14.0% | 17.1% | −24.8% | 0.56 | 0.80 | 1.07 / 24.9% | 43% / 95% |
+| **E2 + 40% sector cap (L1)** | **0.87** | 13.6% | 16.1% | **−21.5%** | **0.63** | 0.78 | 1.01 / 19.7% | 35% / 40% |
+| E2 + 40% industry-group cap (L2) | 0.85 | 14.0% | 17.1% | −24.4% | 0.57 | 0.81 | 1.07 / 25.0% | 42% / 90% |
+
+- **The L1 sector cap passes the registered rule:** Max DD 3.3 points smaller, with Sharpe and luck median within 0.05.
+- **It smooths the 2026 semiconductor episode:**
+
+| Month | No cap | Capped |
+|---|---|---|
+| May 2026 | +24.2% | +15.6% |
+| June 2026 | +15.3% | +5.3% |
+| July 2026 | −17.3% | −11.5% |
+
+- **Its cost is in technology booms:** 2023-on CAGR is 19.7% instead of 24.9%.
+- **The L2 cap does almost nothing:** the 2026 theme spread across semiconductors and hardware, two different groups.
+- **Design of record: E2 with a 40% GICS-sector cap.**
