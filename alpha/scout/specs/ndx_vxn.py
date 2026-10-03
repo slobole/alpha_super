@@ -62,6 +62,19 @@ evaluated by the original comparison so the identity gate is untouched):
         CMMA(T) = 100 * Phi(x(T)) - 50   (bounded in (-50, 50); 0 = the close at its log average)
       Every term ends at T and is a log difference, so a back-adjustment factor (a constant per date range) cancels.
 
+Trend-filter bake-off options (research, 2026-10-03; trend_filter_str, all on the adjusted closes of each stock's
+observed sessions, causal, and unchanged by a later back-adjustment factor because each is linear in price or a ratio):
+    "lowpass"         Close(T) > LP_n(T), Zorro's second-order low-pass (Workshop 4a; Ehlers), n = stock_sma_int:
+                        a = 2 / (1 + n)
+                        LP(t) = (a - a^2/4) C(t) + a^2/2 C(t-1) - (a - 3a^2/4) C(t-2) + (2 - 2a) LP(t-1) - (1 - a)^2 LP(t-2)
+                      started at steady state on the first observed close (Zorro initialises the series to the
+                      input); unit gain at zero frequency. Runs on observed closes (a missing session is skipped).
+    "lowpass_rising"  LP_n(T) > LP_n(T-1) (Zorro's rising(); peak/valley turn on its sign changes)
+    "adaptive_ama"    the CORE5 rule per stock, with CORE5's own parameters (alpha/scout/specs/core5.py
+                      asset_signal_df, Core5Config defaults): SMA10(T) > AMA(T), the AMA's speed blended between EMA50
+                      and EMA200 by the 126-session percentile of the drawdown from the running high, squared. The
+                      running high starts at the first loaded close (1999, or the listing).
+
 Linear-trend ranking (research, 2026-10-03; Masters, Statistically Sound Indicators, "linear trend"):
 atr_unit_str = "linear_trend" ranks on
     LT(T) = b(T) * (n - 1) / ATR_ln(A, T) * R2(T)        (R2 left out when lt_rsq_bool is False)
@@ -111,7 +124,7 @@ class NdxConfig:
     # Trend-filter variants (research; the defaults are the engine rule).
     trend_fast_sma_int: int = 0  # 0 = the close
     trend_threshold_float: float = 0.0
-    trend_filter_str: str = "sma"  # "sma" (the engine rule and its variants) or "cmma"
+    trend_filter_str: str = "sma"  # "sma" (the engine rule and variants), "cmma", "lowpass", "lowpass_rising", "adaptive_ama"
     lt_lookback_int: int = 252  # linear-trend ranking (atr_unit_str = "linear_trend")
     lt_atr_int: int = 20
     lt_rsq_bool: bool = True
@@ -265,6 +278,56 @@ def linear_trend_frame(inputs: NdxInputs, lookback_int: int, atr_int: int, rsq_b
     return lt_df, compressed_df
 
 
+def lowpass_vec(price_vec: np.ndarray, period_int: int) -> np.ndarray:
+    """Zorro's LowPass (see the module docstring) of one series of observed (finite) prices."""
+    from scipy.signal import lfilter, lfilter_zi
+
+    a_float = 2.0 / (1.0 + period_int)
+    b_vec = np.array([a_float - a_float * a_float / 4.0, a_float * a_float / 2.0, -(a_float - 0.75 * a_float * a_float)])
+    a_vec = np.array([1.0, -(2.0 - 2.0 * a_float), (1.0 - a_float) ** 2])
+    if price_vec.size == 0:
+        return price_vec.astype(float)
+    # Steady state on the first price: as if the input had been constant there (the output starts at that price).
+    output_vec, _ = lfilter(b_vec, a_vec, price_vec, zi=lfilter_zi(b_vec, a_vec) * price_vec[0])
+    return output_vec
+
+
+_TREND_STATE_CACHE: dict = {}
+
+
+def trend_state_frame(inputs: NdxInputs, kind_str: str, period_int: int) -> pd.DataFrame:
+    """1.0 / 0.0 trend state per stock and session for the bake-off filters (NaN until defined); cached per inputs."""
+    # The cache holds the inputs object itself, so its id cannot be reused by a new object while the entry exists.
+    key_tuple = (id(inputs), kind_str, period_int)
+    cached_tuple = _TREND_STATE_CACHE.get(key_tuple)
+    if cached_tuple is not None and cached_tuple[0] is inputs:
+        return cached_tuple[1]
+    from alpha.scout.specs import core5
+
+    column_dict = {}
+    for symbol_str in inputs.close_df.columns:
+        observed_ser = inputs.close_df[symbol_str].dropna().astype(float)
+        observed_ser = observed_ser[observed_ser > 0]
+        if observed_ser.empty:
+            column_dict[symbol_str] = pd.Series(np.nan, index=inputs.close_df.index)
+            continue
+        if kind_str == "adaptive_ama":
+            column_dict[symbol_str] = core5.asset_signal_df(inputs.close_df[symbol_str].where(inputs.close_df[symbol_str] > 0), core5.Core5Config())["long"]
+            continue
+        # *** CRITICAL*** the recursion only reads closes up to T.
+        lowpass_ser = pd.Series(lowpass_vec(observed_ser.to_numpy(), period_int), index=observed_ser.index)
+        if kind_str == "lowpass":
+            state_ser = (observed_ser > lowpass_ser).astype(float)
+        elif kind_str == "lowpass_rising":
+            state_ser = (lowpass_ser > lowpass_ser.shift(1)).astype(float).where(lowpass_ser.shift(1).notna())
+        else:
+            raise ValueError(f"Unknown trend filter {kind_str!r}.")
+        column_dict[symbol_str] = state_ser.reindex(inputs.close_df.index)
+    state_df = pd.DataFrame(column_dict, index=inputs.close_df.index)
+    _TREND_STATE_CACHE[key_tuple] = (inputs, state_df)
+    return state_df
+
+
 def rebalance_weight_df(inputs: NdxInputs, config: NdxConfig = LIVE_CONFIG) -> pd.DataFrame:
     """Target weights indexed by execution date (the session after each decision date)."""
     close_df, date_index = inputs.close_df, inputs.close_df.index
@@ -280,6 +343,8 @@ def rebalance_weight_df(inputs: NdxInputs, config: NdxConfig = LIVE_CONFIG) -> p
     fast_sma_df = (close_df.rolling(config.trend_fast_sma_int, min_periods=config.trend_fast_sma_int).mean()
                    if config.trend_fast_sma_int > 0 else None)
     cmma_df = cmma_frame(inputs, config.stock_sma_int, config.cmma_atr_int) if config.trend_filter_str == "cmma" else None
+    state_df = (trend_state_frame(inputs, config.trend_filter_str, config.stock_sma_int)
+                if config.trend_filter_str in ("lowpass", "lowpass_rising", "adaptive_ama") else None)
     lt_df = (linear_trend_frame(inputs, config.lt_lookback_int, config.lt_atr_int, config.lt_rsq_bool)[0]
              if config.atr_unit_str == "linear_trend" else None)
     regime_close_ser = close_df[REGIME_SYMBOL_STR]
@@ -321,6 +386,8 @@ def rebalance_weight_df(inputs: NdxInputs, config: NdxConfig = LIVE_CONFIG) -> p
             score_ser = score_ser.replace([np.inf, -np.inf], np.nan)
             if cmma_df is not None:
                 trend_mask = (cmma_df.loc[decision_ts, stock_list] > config.cmma_threshold_float).fillna(False)
+            elif state_df is not None:
+                trend_mask = state_df.loc[decision_ts, stock_list].fillna(False).astype(bool)
             elif config.trend_fast_sma_int == 0 and config.trend_threshold_float == 0.0:
                 trend_mask = (close_now_ser > stock_sma_df.loc[decision_ts, stock_list]).fillna(False)
             else:
