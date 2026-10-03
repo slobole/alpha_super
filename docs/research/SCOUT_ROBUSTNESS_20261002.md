@@ -407,3 +407,23 @@ decision rules, before any run.
 5. **The NDX parameter, filter and ranking search is closed.** About 45 trials have been spent on one book. More search
    on the same history buys overfitting, not information. The pod-health monitors (CUSUM, Cold Blood Index) watch the
    live pod for breakage.
+
+**Decision amendment (2026-10-03, owner question "why not just ATR + NATR?").** The two-book blend E2 (registered in
+`ndx_natr20_vxn_ensemble_cmma_20261002`; 50/50 dollar ATR + NATR20, ROC 12, SMA100, top 10) replaces C as the NDX
+design of record. It is simpler (two books, not nine) and at least as good:
+
+| Full period 2000-09 to 2026-09 | Sharpe | CAGR | Max DD | To 2022 | 2023 on |
+|---|---|---|---|---|---|
+| Live (dollar ATR) | 0.80 | 12.6% | −29.0% | 0.73 | 1.14 |
+| NATR20 | 0.85 | 15.2% | −29.3% | 0.84 | 0.95 |
+| **E2 = ATR + NATR 50/50** | **0.85** | 14.0% | **−24.8%** | 0.81 | 1.07 |
+| C (nine books) | 0.82 | 13.2% | −24.1% | 0.83 | 0.84 |
+
+- **E2 is never the worst in either period.** It has the best full-period Sharpe (tied with NATR20) and the smallest
+  drawdown of the single-ranking options.
+- **Its crash losses sit between its parents' by construction:**
+  - fast crashes: −6.3% in 2018, −14.2% in 2022, −16.2% in 2025;
+  - slow crashes: +2.8% in 2000-02, +0.9% in 2008.
+- **Live account:** at $12K, 15% of E2's positions are smaller than one share (live pod: 2%), so it is not clean at the
+  current size. It is fine from roughly $25-50K, or with fractional shares.
+- **Live change:** none now. This is the owner's call when the account grows.
