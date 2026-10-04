@@ -1,6 +1,14 @@
 # MR capsule — review handoff (for Codex)
 
-Date: 2026-10-04. Base: `main` @ `4b6da58` plus the commit that carries this file. Author: Claude, with the owner.
+Date: 2026-10-04, updated 2026-10-05. Base: `main` at the commit that carries this revision. Author: Claude, with the owner.
+
+Capsule commits:
+- `cc458bc`: build.
+- `4b6da58`: four Bench entry points.
+- `fef834a`: PM_READY, books, and the fixes from the review.
+- `d3109d4`: final owner decision, BIL main.
+
+The research scripts are in `scripts/research/mr_capsule_build_20261004/`. **The main variant is BIL**: `strategy_mr_*_bil` and `portfolios/mr_capsule_bil.yaml`. SPMO is the ready alternative.
 
 **The ask.** The owner sees the four MR capsule strategies as PM_READY now, and as WIRED later. Before that tier is
 relied on, review the build independently.
