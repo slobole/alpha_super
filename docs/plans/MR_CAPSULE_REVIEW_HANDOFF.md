@@ -119,10 +119,10 @@ Each engine run takes about 7–10 minutes. `compare.py` writes `results/researc
 
 ## 6. Open owner decisions and known caveats
 
-- **Parking (decided 2026-10-04):** SPMO is primary, and BIL is kept as an equal, ready alternative. Review both variants.
+- **Parking (final owner decision, 2026-10-04):** BIL is the main version, and SPMO is kept as a ready alternative. Review both variants, and wire BIL first. The two tie on book Sharpe since 2017-11 (1.484 BIL vs 1.464 SPMO); BIL is simpler and scales further (shared-gate SPMO switches hit one auction).
   - Since SPMO traded every day (2017-11), SPMO adds about 2 pp/yr to the capsule (0.4 to the book) at a statistically equal Sharpe (P 0.54 capsule, 0.30 book).
   - It loses more in sell-offs: Q4 2018 −12.8% vs −6.3%.
-  - Both variants need the same new live order shape, so wiring SPMO first keeps BIL one configuration away.
+  - Both variants need the same new live order shape, so wiring BIL first keeps SPMO one configuration away.
 - **Selection.** About 100 gate variants and about 10 parking forks were tried. The DSR is 0.966 (N = 110, engine capsule, 2004–26) but 0.78 from 2018.
 - **Conservative costs.** BIL dividends carry the house 25% withholding, and BIL trades pay 2.5 bps; BIL's spread is about 1 bp.
 - **Small pods.** About 52–58 parking orders a year at the USD 1 minimum commission.

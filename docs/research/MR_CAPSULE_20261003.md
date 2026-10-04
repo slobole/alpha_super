@@ -420,3 +420,13 @@ The question was whether DV2 with the liquidity floor and ADV rank belongs in th
 The BIL variant stays a maintained, equal alternative: `strategy_mr_*_bil` and `portfolios/mr_capsule_bil.yaml`, with the same tests, the same PM_READY status, and the same review and wiring readiness. The owner can switch without new work.
 
 Basis: since SPMO traded every day (2017-11), SPMO adds about 2 pp/yr to the capsule (0.4 to the book) at a statistically equal Sharpe. The price is deeper sell-offs.
+
+### Owner decision, final (2026-10-04, later the same day): BIL is the main parking
+
+**BIL is the main version:** `strategy_mr_*_bil` and `portfolios/mr_capsule_bil.yaml`. SPMO stays the maintained alternative. This supersedes the SPMO-primary note above.
+
+Reasons:
+- **The book does not tell SPMO and BIL apart.** G3 with the E2 momentum leg, since 2017-11: SPMO 21.4% / 1.464 / −11.9%, BIL 20.9% / 1.484 / −11.9%. SPMO's extra half point a year is not significant (90% range −0.4 to +1.3).
+- **BIL is simpler.** About 13 fewer orders a year per pod, and no SPMO trades at gate switches.
+- **BIL scales further.** Both pods share one gate, so a gate switch moves the SPMO of both pods in the same opening auction. At a USD 100M capsule that is about USD 48M (vol-target weight about half of idle cash), roughly 19% of SPMO's 2026 median daily dollar volume (about USD 250M). The same money in BIL is about 6% of BIL's (about USD 844M), in a T-bill fund whose price barely moves.
+- **The binding limit is elsewhere.** The capsule's capacity is set by its stock legs, DV2 first. It will be measured with the capacity hooks (separate task).
