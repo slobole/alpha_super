@@ -1,4 +1,4 @@
-"""HPI-G pod of the MR capsule: HPI 2/3/5 vote behind the shared VIX stress gate, idle cash parked (research-only).
+"""HPI-G pod of the MR capsule: HPI 2/3/5 vote behind the shared VIX stress gate, idle cash parked (PM_READY, no live route).
 
 Shared code of the Bench entry points strategy_mr_hpi_vote_vix_gated_spmo.py (the capsule spec: SPMO while the gate
 is closed, BIL otherwise) and strategy_mr_hpi_vote_vix_gated_bil.py (idle cash all in BIL).
@@ -42,7 +42,7 @@ from strategies.hpi.stateful_long import (
     load_exact_hpi_inputs,
 )
 from strategies.mr_capsule.capsule_pod import CapsulePodMixin
-from strategies.mr_capsule.parking import PARKING_SYMBOL_TUPLE
+from strategies.mr_capsule.parking import PARKING_SYMBOL_TUPLE, require_parking_dividends
 from strategies.mr_capsule.vix_stress_gate import load_vix_close_ser
 
 BENCHMARK_SYMBOL_STR = "$SPXTR"
@@ -145,6 +145,7 @@ def append_parking_prices(pricing_data_df: pd.DataFrame, start_date_str: str, en
         frame_list.append(price_df)
     combined_df = pd.concat(frame_list, axis=1)
     combined_df.attrs = dict(pricing_data_df.attrs)  # concat drops attrs; run_variant re-declares the adjustments
+    require_parking_dividends(combined_df)
     return combined_df
 
 

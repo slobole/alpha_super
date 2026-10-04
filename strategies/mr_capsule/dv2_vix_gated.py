@@ -1,4 +1,4 @@
-"""DV2-G pod of the MR capsule: DV2 (wired rules) behind the shared VIX stress gate, idle cash parked (research-only).
+"""DV2-G pod of the MR capsule: DV2 (wired rules) behind the shared VIX stress gate, idle cash parked (PM_READY, no live route).
 
 Shared code of the Bench entry points strategy_mr_dv2_vix_gated_spmo.py (the capsule spec: SPMO while the gate is
 closed, BIL otherwise) and strategy_mr_dv2_vix_gated_bil.py (idle cash all in BIL).
@@ -47,7 +47,7 @@ from alpha.engine.report import save_results
 from data.norgate_loader import TOTALRETURN_ADJUSTMENT_STR, build_index_constituent_matrix, load_raw_prices
 from strategies.dv2.strategy_mr_dv2 import DVO2Strategy, default_trade_id_int
 from strategies.mr_capsule.capsule_pod import CapsulePodMixin
-from strategies.mr_capsule.parking import PARKING_SYMBOL_TUPLE
+from strategies.mr_capsule.parking import PARKING_SYMBOL_TUPLE, require_parking_dividends
 from strategies.mr_capsule.vix_stress_gate import load_vix_close_ser
 
 BENCHMARK_LIST = ["$SPX"]
@@ -111,6 +111,7 @@ def load_pricing_data(end_date_str: str | None = None) -> tuple[pd.DataFrame, pd
     index_symbol_list, universe_df = build_index_constituent_matrix(indexname='S&P 500')
     symbol_list = list(dict.fromkeys([*index_symbol_list, *PARKING_SYMBOL_TUPLE]))
     pricing_data_df = load_raw_prices(symbol_list, BENCHMARK_LIST, start_date='1998-01-01', end_date=end_date_str)
+    require_parking_dividends(pricing_data_df)
     return pricing_data_df, universe_df
 
 

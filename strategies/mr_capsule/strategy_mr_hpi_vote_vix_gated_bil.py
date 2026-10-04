@@ -1,4 +1,4 @@
-"""HPI-G (MR capsule, HPI 2/3/5 vote) with all idle cash in BIL / T-bills (research-only).
+"""HPI-G (MR capsule, HPI 2/3/5 vote) with all idle cash in BIL / T-bills (PM_READY, no live route).
 
 HPI 2/3/5 vote rules (PIT S&P 500, HPI < 30 on >= 2 horizons, IBS < 0.10, Close > SMA200, Turnover rank, 10 slots,
 exit IBS > 0.90 or RSI2 > 90); new entries only while the shared VIX stress gate is open; exits never gated.

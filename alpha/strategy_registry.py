@@ -130,6 +130,17 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     # the live NDX pod is unchanged and these have no live route.
     "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled_sector_cap:SectorCapVxnScaledAtrNormalizedNdxStrategy": MaturityTier.PM_READY,
     "strategies.momentum.strategy_mo_natr20_ndx_vxn_scaled_sector_cap:SectorCapNatr20VxnScaledNdxStrategy": MaturityTier.PM_READY,
+    # MR capsule pods (docs/research/MR_CAPSULE_20261003.md, build record 2026-10-04): DV2 and the HPI 2/3/5
+    # vote behind one shared VIX stress gate, idle cash parked in SPMO + BIL (_spmo, the owner's 2026-10-04
+    # spec) or BIL only (_bil, Claude's recommendation); books portfolios/mr_capsule_{spmo,bil}.yaml (50/50,
+    # annual reset). Owner request 2026-10-04. Capital, total-return benchmark and determinism checks passed
+    # 2026-10-04 (results/research/pm_readiness/). PM-only: the live DV2/HPI pods are unchanged and these have
+    # no live route (the live order contract cannot yet express the parking orders; docs/plans/
+    # MR_CAPSULE_REVIEW_HANDOFF.md, section 9).
+    "strategies.mr_capsule.strategy_mr_dv2_vix_gated_spmo": MaturityTier.PM_READY,
+    "strategies.mr_capsule.strategy_mr_dv2_vix_gated_bil": MaturityTier.PM_READY,
+    "strategies.mr_capsule.strategy_mr_hpi_vote_vix_gated_spmo": MaturityTier.PM_READY,
+    "strategies.mr_capsule.strategy_mr_hpi_vote_vix_gated_bil": MaturityTier.PM_READY,
     # MOSAIC was demoted to RESEARCH on 2026-09-28 by owner decision: its
     # 2026-07-31 validation was invalidated by the split-price fix and it left
     # the recommended books (readiness audit, section 10). Committed YAMLs that

@@ -19,13 +19,14 @@ from alpha.bench import catalog  # noqa: E402
 from alpha.engine import portfolio_manager  # noqa: E402
 from alpha.engine.backtest import run_daily  # noqa: E402
 from alpha.engine.metrics import generate_trades_metrics  # noqa: E402
-from alpha.live import release_manifest  # noqa: E402
+from alpha.engine.portfolio_manager import PortfolioManager  # noqa: E402
+from alpha.live import release_manifest, strategy_host  # noqa: E402
 from alpha.strategy_registry import MaturityTier, tier_for  # noqa: E402
 from strategies.dv2.strategy_mr_dv2 import DVO2Strategy, default_trade_id_int  # noqa: E402
 from strategies.hpi.stateful_long import ENTRY_HORIZON_VOTE_STR, TURNOVER_FIELD_STR, HPIStatefulLongStrategy  # noqa: E402
 from strategies.mr_capsule import hpi_vote_vix_gated as hpi_capsule_mod  # noqa: E402
 from strategies.mr_capsule.capsule_pod import PARKING_TRADE_ID_BASE_INT  # noqa: E402
-from strategies.mr_capsule.parking import plan_parking_orders  # noqa: E402
+from strategies.mr_capsule.parking import plan_parking_orders, require_parking_dividends  # noqa: E402
 from strategies.mr_capsule.dv2_vix_gated import DV2VixGatedStrategy  # noqa: E402
 from strategies.mr_capsule.hpi_vote_vix_gated import HPIVoteVixGatedStrategy  # noqa: E402
 
@@ -240,7 +241,7 @@ def test_gate_blocks_entries_and_parking_follows_the_gate(pod):
         decision_ts = prior_bar.loc[bar_ts]
         before_ts = pricing_df.index[pricing_df.index.get_loc(decision_ts) - 1]
         week_end_bool = decision_ts.isocalendar()[:2] != bar_ts.isocalendar()[:2]
-        return week_end_bool or bool(gate_ser.loc[before_ts]) != bool(gate_ser.loc[decision_ts]) or bar_ts == calendar[0]
+        return week_end_bool or bool(gate_ser.loc[before_ts]) != bool(gate_ser.loc[decision_ts])
 
     # *** every stock entry fills after a decision close at which the gate was open; exits still happen when closed
     entry_bar_ser = stock_tx.loc[stock_tx["amount"] > 0, "bar"]
@@ -353,6 +354,60 @@ def test_gate_closed_places_no_entry_orders():
     assert strategy._gate_closed_free_slot_session_int == 1
 
 
+def _fresh_parked_dv2(pricing_df, decision_int):
+    """A new strategy object for one decision, as a live host builds it, holding SPMO and BIL at the plan's levels."""
+    strategy = _dv2(DV2VixGatedStrategy, pricing_df, gate_ser=pd.Series(False, index=pricing_df.index), parking_bool=True)
+    strategy._prepare_capsule_state()
+    decision_ts, execution_ts, open_ser = _decision_rows(pricing_df, decision_int)
+    strategy.previous_bar, strategy.current_bar = decision_ts, execution_ts
+    spmo_close, bil_close = float(pricing_df.loc[decision_ts, ("SPMO", "Close")]), float(pricing_df.loc[decision_ts, ("BIL", "Close")])
+    bil_share_int = int((99_000.0 - 100 * spmo_close) // bil_close)  # BIL already holds the rest of the idle value
+    strategy.add_transaction(1, pricing_df.index[decision_int - 1], "SPMO", 100, spmo_close, 100 * spmo_close, 1, 0.0)
+    strategy.add_transaction(2, pricing_df.index[decision_int - 1], "BIL", bil_share_int, bil_close, bil_share_int * bil_close, 2, 0.0)
+    strategy.iterate(pricing_df.loc[:decision_ts], pricing_df.loc[decision_ts], open_ser)
+    return [o.asset for o in strategy.get_orders()]
+
+
+def test_a_fresh_object_retargets_only_on_the_calendar_and_gate_triggers():
+    pricing_df = _synthetic_market(3, 300, 44, with_parking_bool=True)
+    index = pricing_df.index
+    mid_week_int = next(i for i in range(262, 290) if index[i].dayofweek == 1 and index[i + 1].dayofweek == 2)
+    week_end_int = next(i for i in range(262, 290) if index[i].dayofweek == 4)
+    assert _fresh_parked_dv2(pricing_df, mid_week_int) == []  # no stored "first decision": nothing to do mid-week
+    assert "SPMO" in _fresh_parked_dv2(pricing_df, week_end_int)  # 100 shares is off the vol target: re-weighted
+
+
+def test_dividend_ledger_is_enabled_and_fails_loud_without_dividends():
+    pricing_df = _synthetic_market(3, 300, 45, with_parking_bool=True)
+    gate_ser = pd.Series(False, index=pricing_df.index)
+    strategy = _dv2(DV2VixGatedStrategy, pricing_df, gate_ser, True)
+    assert strategy._accounting_policy_dict["dividend_cash_ledger_mode_str"] == "enabled"
+    assert _hpi(HPIVoteVixGatedStrategy, pricing_df, gate_ser, True)._accounting_policy_dict["dividend_cash_ledger_mode_str"] == "enabled"
+    no_dividend_df = pricing_df.drop(columns=[c for c in pricing_df.columns if c[1] == "Dividend"])
+    with pytest.raises(RuntimeError, match="Dividend"):
+        _run(_dv2(DV2VixGatedStrategy, no_dividend_df, gate_ser, True), no_dividend_df, no_dividend_df.index[260:])
+
+
+def test_gate_switch_is_read_from_the_gate_series():
+    index = pd.bdate_range("2020-01-01", periods=8)
+    gate_ser = pd.Series([False, False, True, True, True, False, False, False], index=index)
+    strategy = _dv2(DV2VixGatedStrategy, _synthetic_market(2, 8, 46, True), gate_ser=gate_ser, parking_bool=True)
+    strategy._prepare_capsule_state()
+    expected_list = [False, False, True, False, False, True, False, False]  # opening close, then closing close
+    for decision_ts, expected_bool in zip(index, expected_list):
+        strategy.previous_bar = decision_ts
+        assert strategy._gate_switched_at_decision(strategy._gate_open_at_decision()) is expected_bool
+    strategy.previous_bar = pd.Timestamp("2019-12-20")  # before the first gate row
+    assert strategy._gate_switched_at_decision(False) is False
+
+
+def test_parking_etfs_must_carry_dividends():
+    pricing_df = _synthetic_market(2, 30, 47, with_parking_bool=True)
+    require_parking_dividends(pricing_df)
+    with pytest.raises(RuntimeError, match="BIL"):
+        require_parking_dividends(pricing_df.drop(columns=[("BIL", "Dividend")]))
+
+
 # ----------------------------------------------------------------------------------------------- data plumbing
 def test_append_parking_prices_keeps_padding_dividends_and_attrs(monkeypatch):
     calendar = pd.bdate_range("2020-01-01", periods=8)
@@ -398,15 +453,28 @@ def test_bench_entry_points_fix_the_parking_and_the_name(monkeypatch, module_nam
 
 
 @pytest.mark.parametrize("module_name_str", [entry[0] for entry in ENTRY_POINT_LIST])
-def test_capsule_pods_are_research_only(module_name_str):
+def test_capsule_pods_are_pm_ready_but_not_wired(module_name_str):
+    """Owner request 2026-10-04: PM_READY after check_pm_readiness passed; no live route (handoff section 9)."""
     module_str = f"strategies.mr_capsule.{module_name_str}"
     entry_obj = catalog.get_strategy_by_module(module_str)
     assert entry_obj is not None and entry_obj.has_run_variant_bool and not entry_obj.is_wired_bool
     # Bench offers no parking switch: the parking is fixed by the module (and so is the results name)
     assert not {p.name_str for p in entry_obj.run_variant_param_tuple} & {"parking_enabled_bool", "spmo_parking_enabled_bool"}
-    assert tier_for(module_str) is MaturityTier.RESEARCH
+    assert tier_for(module_str) is MaturityTier.PM_READY
+    assert module_str in portfolio_manager.SUPPORTED_STRATEGY_IMPORT_TUPLE
     assert module_str not in release_manifest.SUPPORTED_STRATEGY_IMPORT_TUPLE
-    assert module_str not in portfolio_manager.SUPPORTED_STRATEGY_IMPORT_TUPLE
+    assert module_str not in strategy_host.INCREMENTAL_DECISION_STRATEGY_IMPORT_SET | strategy_host.FULL_TARGET_DECISION_STRATEGY_IMPORT_SET
+
+
+@pytest.mark.parametrize("suffix_str", ["spmo", "bil"])
+def test_capsule_books_load_in_the_portfolio_manager(suffix_str):
+    config_obj = PortfolioManager.from_yaml(Path(__file__).resolve().parents[1] / "portfolios" / f"mr_capsule_{suffix_str}.yaml").config
+    assert [pod_obj.strategy_import_str for pod_obj in config_obj.pod_config_list] == [
+        f"strategies.mr_capsule.strategy_mr_dv2_vix_gated_{suffix_str}",
+        f"strategies.mr_capsule.strategy_mr_hpi_vote_vix_gated_{suffix_str}",
+    ]
+    assert config_obj.weight_list == [0.5, 0.5]
+    assert config_obj.rebalance.frequency_str == "annually" and config_obj.max_workers_int == 1
 
 
 def test_shared_pod_modules_are_not_bench_strategies():

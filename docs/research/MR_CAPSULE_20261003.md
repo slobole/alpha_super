@@ -354,3 +354,45 @@ Forward paper is the only clean evidence left.
   - one account per pod, because both pods hold BIL.
 - **Data:** the snapshot profiles would need SPMO, BIL and $VIX from 1990.
 - **Portfolio manager:** no manager-format book until the pods are PM_READY. The 50/50 annual reset is computed in `compare.py`.
+
+### PM_READY and books (2026-10-04, owner request)
+
+**Status:**
+- The four entry points are PM_READY in `alpha/strategy_registry.py`:
+  - `strategy_mr_dv2_vix_gated_{spmo,bil}`;
+  - `strategy_mr_hpi_vote_vix_gated_{spmo,bil}`.
+- Each passed the capital, total-return benchmark and determinism checks. Each $100K result equals its build-check run to the cent.
+- The books are `portfolios/mr_capsule_spmo.yaml` and `portfolios/mr_capsule_bil.yaml`: 50/50, annual reset, USD 1M, pods run one at a time.
+- Independent review: [the Codex handoff](../plans/MR_CAPSULE_REVIEW_HANDOFF.md).
+
+**Two changes made before the checks; neither changes any result:**
+- Gate switches are read from the gate series, not from state kept between calls. A live host builds a fresh strategy object for every decision.
+- The dividend ledger is enabled explicitly. It now fails loud without a Dividend field, instead of silently earning about 0% on BIL.
+
+**WIRED is not a configuration step.** The live order contract for DV2/HPI maps only "buy for $X" and "exit to zero". The parking's "set SPMO/BIL to N shares" needs a new live intent kind (Tier 3). A gate-only first stage fits the existing contract (handoff, section 9).
+
+**Exploratory side question: DV2 with the liquidity floor and ADV rank** (`scripts/research/mr_capsule_build_20261004/adv_rank_calm.py`).
+
+Method:
+- Replica, native-Turnover ADV, 2004–26, not pre-registered.
+- A first version omitted the floor: `loc_lib.dv2_masks` ignores it, and the function now raises instead. Its conclusion is withdrawn. These are the corrected numbers.
+- Alpha per trade: trade return minus fitted beta × SPY, open to open, over the same holding. Errors come from a bootstrap over entry months.
+
+| Arm | Calm-trade alpha | Stress-trade alpha | Calm − stress (90% CI) |
+|---|---|---|---|
+| DV2 (NATR, no floor) | 13.0 ± 6.1 bps | 34.4 ± 8.7 bps | −21.5 (−39.9, −5.2) |
+| DV2-LF (floor, NATR) | 19.5 ± 6.6 | 29.7 ± 8.5 | −10.3 (−27.4, +6.0) |
+| DV2-LF-ADV (the module) | 21.4 ± 5.5 | 23.0 ± 7.7 | −1.6 (−16.8, +12.6) |
+
+| Arm | Standalone Sharpe in excess of T-bills, ungated → gated | Max DD ungated / gated | Book 2008–26, ungated → gated |
+|---|---|---|---|
+| DV2 | 0.896 → 0.924 | −30.9% / −28.7% | 1.280 → **1.371** |
+| DV2-LF | 0.917 → 0.861 | −24.1% / −25.5% | 1.269 → 1.332 |
+| DV2-LF-ADV | **0.951** → 0.848 | −22.3% / −20.9% | 1.276 → 1.328 |
+
+Reading:
+- **The floor changes the calm/stress profile, not the ADV rank.** Removing the less liquid half takes out most of DV2's stress premium. With the floor, the ADV module earns about the same alpha in calm and in stress.
+- **The ADV module has no calm-market problem.** Standalone, it is the best ungated arm, with the smallest drawdown. The gate lowers its standalone Sharpe but still lifts the book: 1.276 → 1.328, P(gated better) 0.89. The book gain comes from diversification, as with HPI.
+- **The capsule's DV2-G stays first in the book.** Paired block bootstrap P(DV2-G better): 0.87 against ADV gated (not significant), 0.96 against ADV ungated.
+- **The record favours DV2-G in sample.** The gate was selected on DV2, and the ADV rank was selected on the DV2 grid.
+- **No reason to swap.** The ADV module is a close, lower-drawdown, more liquid alternative.

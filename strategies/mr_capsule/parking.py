@@ -1,4 +1,4 @@
-"""Idle-cash parking for the MR capsule pods: SPMO while the gate is closed, BIL otherwise (research-only).
+"""Idle-cash parking for the MR capsule pods: SPMO while the gate is closed, BIL otherwise (PM_READY, no live route).
 
 Decided 2026-10-04 (docs/research/MR_CAPSULE_20261003.md, "Final parking decision"). After the pod has placed its
 stock orders for the decision close T (fills at Open_(T+1)):
@@ -29,6 +29,13 @@ import numpy as np
 from strategies.mr_capsule.vix_stress_gate import BIL_SYMBOL_STR, SPMO_SYMBOL_STR
 
 PARKING_SYMBOL_TUPLE = (SPMO_SYMBOL_STR, BIL_SYMBOL_STR)
+
+
+def require_parking_dividends(pricing_data_df) -> None:
+    """Fail loud if a parking ETF has no Dividend column: its distributions are most of its return."""
+    missing_list = [s for s in PARKING_SYMBOL_TUPLE if (s, "Dividend") not in pricing_data_df.columns]
+    if missing_list:
+        raise RuntimeError(f"Parking ETFs without a Dividend column: {missing_list}; parked cash would earn ~0%.")
 CASH_BUFFER_FRACTION_FLOAT = 0.01
 BIL_REBALANCE_BAND_FRACTION_FLOAT = 0.01
 

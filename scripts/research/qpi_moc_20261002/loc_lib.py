@@ -281,6 +281,10 @@ def summarize(res):
 
 # ----------------------------------------------------------------------------- DV2 final-state masks (wired rule)
 def dv2_masks(p, rule):
+    # The liquidity floor, the absolute ADV screen and the down-shock filter live only in replica.run: fail loud
+    # instead of silently returning unfiltered entries (2026-10-04 review of adv_rank_calm.py).
+    if rule.floor or rule.adv_min > 0 or rule.downshock is not None:
+        raise NotImplementedError("dv2_masks does not implement floor / adv_min / downshock; apply them explicitly.")
     sig, need_sig = rp.oversold_mask_and_feats(p, rule)
     trend, need_trend = rp.trend_mask(p, rule)
     score = rp.rank_score(p, rule)

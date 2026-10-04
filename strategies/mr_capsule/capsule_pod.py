@@ -1,4 +1,4 @@
-"""Shared gate-and-parking behaviour of the two MR capsule pods (research-only mixin).
+"""Shared gate-and-parking behaviour of the two MR capsule pods (PM_READY, no live route; mixin).
 
 The mixin adds, to an existing stock-reversal pod:
 - the shared VIX stress gate (strategies/mr_capsule/vix_stress_gate.py), read at the decision close;
@@ -35,6 +35,14 @@ class CapsulePodMixin:
     spmo_parking_enabled_bool: bool = True  # False: the research reference "BIL only" (idle cash all in BIL)
     gate_override_ser: pd.Series | None = None  # tests only: replaces the VIX gate
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # *** CRITICAL*** BIL's return is almost all distributions: enable the dividend ledger explicitly (house 25%
+        # withholding), as the repo's other BIL holders do, so pricing without a Dividend field fails loud instead of
+        # silently earning ~0% on the parked cash (auto mode would fall back to the price-return ledger). The frame-level
+        # check cannot see a missing per-symbol column: the loaders also require (BIL|SPMO, "Dividend") (require_parking_dividends).
+        self.configure_dividend_cash_ledger(enabled_bool=True)
+
     def _prepare_capsule_state(self) -> None:
         # The gate depends on the VIX history only (not on the pricing frame), so a truncated signal-audit
         # recompute of compute_signals rebuilds the same gate; nothing here is derived from the pricing frame.
@@ -44,7 +52,6 @@ class CapsulePodMixin:
             if self.vix_close_ser is None:
                 raise RuntimeError("The MR capsule gate needs vix_close_ser (load_vix_close_ser) before the run.")
             self.gate_open_ser = stress_gate_open_ser(self.vix_close_ser)
-        self._last_gate_open_bool: bool | None = None
         self._parking_trade_id_map: dict[str, int] = {}
         self._parking_trade_counter_int = PARKING_TRADE_ID_BASE_INT
         self._parking_order_count_dict = {SPMO_SYMBOL_STR: 0, BIL_SYMBOL_STR: 0}
@@ -74,6 +81,15 @@ class CapsulePodMixin:
         # *** CRITICAL*** the decision is taken after Close(previous_bar); read the gate state of that close only.
         return gate_state_at(self.gate_open_ser, pd.Timestamp(self.previous_bar))
 
+    def _gate_switched_at_decision(self, gate_open_bool: bool) -> bool:
+        # Read from the gate series (the session before the decision close vs the decision close), never from state
+        # kept between iterate calls: a live host builds a fresh strategy object for each decision, so stored state
+        # would turn every live decision into a re-target. Uses closes <= Close(previous_bar) only.
+        position_int = int(self.gate_open_ser.index.searchsorted(pd.Timestamp(self.previous_bar), side="right")) - 1
+        if position_int < 1:
+            return False
+        return bool(self.gate_open_ser.iloc[position_int - 1]) != bool(gate_open_bool)
+
     def _parking_trade_id(self, symbol_str: str, target_share_int: int) -> int:
         held_share_int = int(self.get_position(symbol_str))
         if held_share_int == 0 and target_share_int > 0:
@@ -84,16 +100,13 @@ class CapsulePodMixin:
     def _place_parking_orders(
         self, data_df: pd.DataFrame, close_row_ser: pd.Series, stock_value_after_orders_float: float, gate_open_bool: bool
     ) -> None:
-        previous_gate_open_bool = self._last_gate_open_bool
-        self._last_gate_open_bool = gate_open_bool
         if not self.parking_enabled_bool:
             return
         decision_ts, execution_ts = pd.Timestamp(self.previous_bar), pd.Timestamp(self.current_bar)
         # *** CRITICAL*** "last session of the ISO week" is read from the trading calendar (the execution session is
         # known in advance), never from prices after Close(previous_bar).
         week_end_bool = tuple(decision_ts.isocalendar())[:2] != tuple(execution_ts.isocalendar())[:2]
-        # The first decision of the run re-targets too, so the parking is deployed without waiting for a week end.
-        gate_switched_bool = previous_gate_open_bool is None or previous_gate_open_bool != gate_open_bool
+        gate_switched_bool = self._gate_switched_at_decision(gate_open_bool)
         spmo_close_key, spmo_volume_key = (SPMO_SYMBOL_STR, "Close"), (SPMO_SYMBOL_STR, "Volume")
         spmo_weight_float = 0.0
         if self.spmo_parking_enabled_bool and spmo_close_key in data_df.columns and spmo_volume_key in data_df.columns:

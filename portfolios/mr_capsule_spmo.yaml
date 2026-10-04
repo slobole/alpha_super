@@ -1,0 +1,26 @@
+# MR capsule, SPMO parking (docs/research/MR_CAPSULE_20261003.md, "Build record (2026-10-04)"): DV2-G and
+# HPI-G behind one shared VIX stress gate, 50/50, reset to 50/50 once a year (the capsule specification).
+# Idle cash: SPMO (8% vol target) while the gate is closed, BIL otherwise (the owner's 2026-10-04 spec).
+# Research book: the live DV2/HPI pods are unchanged and these pods have no live route. History 2004-2026 has
+# been examined many times (about 110 trials); see the caveats in docs/strategies/book-strategy-caveats.md.
+# max_workers_int 1: the two pods load Norgate one after the other (parallel loads have hung on this machine).
+name_str: "mr_capsule_spmo"
+capital_base_float: 1e+06
+backtest_start_date_str: "2004-01-01"
+end_date_str: null
+allocation_policy_str: fixed
+max_workers_int: 1
+rebalance:
+  frequency_str: annually
+  policy_str: fixed
+save_pod_artifacts_bool: true
+regression_benchmark_symbol_str: "$SPX"
+
+pods:
+  - pod_id_str: pod_mr_dv2_gated_spmo
+    strategy_import_str: strategies.mr_capsule.strategy_mr_dv2_vix_gated_spmo
+    weight_float: 0.5
+
+  - pod_id_str: pod_mr_hpi_vote_gated_spmo
+    strategy_import_str: strategies.mr_capsule.strategy_mr_hpi_vote_vix_gated_spmo
+    weight_float: 0.5

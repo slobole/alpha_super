@@ -1,4 +1,4 @@
-"""DV2-G (MR capsule) with SPMO parking while the VIX gate is closed, BIL otherwise (research-only).
+"""DV2-G (MR capsule) with SPMO parking while the VIX gate is closed, BIL otherwise (PM_READY, no live route).
 
 DV2 wired rules (S&P 500, DV2 < 10, Close > SMA200, 126-day return > 5%, NATR rank, 10 slots, exit Close > prior
 High); new entries only while the shared VIX stress gate is open; exits never gated.
