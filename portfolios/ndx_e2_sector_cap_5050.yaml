@@ -1,0 +1,25 @@
+# NDX design of record "E2 + 40% GICS-sector cap" (Scout amendment A15, 2026-10-04;
+# docs/research/SCOUT_ROBUSTNESS_20261002.md): 50% the live dollar-ATR NDX VXN rule and
+# 50% the NATR20 rule, each capped at 4 of 10 names per current-label GICS sector,
+# rebalanced back to 50/50 monthly (both books trade at month end, as in the Scout study).
+# Research book: the live NDX pod is unchanged. History through 2026 has been examined.
+name_str: "ndx_e2_sector_cap_5050"
+capital_base_float: 1e+06
+backtest_start_date_str: "2000-01-01"
+end_date_str: null
+allocation_policy_str: fixed
+max_workers_int: null
+rebalance:
+  frequency_str: monthly
+  policy_str: fixed
+save_pod_artifacts_bool: true
+regression_benchmark_symbol_str: "$SPX"
+
+pods:
+  - pod_id_str: pod_ndx_atr_vxn_sector_cap
+    strategy_import_str: strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled_sector_cap:SectorCapVxnScaledAtrNormalizedNdxStrategy
+    weight_float: 0.5
+
+  - pod_id_str: pod_ndx_natr20_vxn_sector_cap
+    strategy_import_str: strategies.momentum.strategy_mo_natr20_ndx_vxn_scaled_sector_cap:SectorCapNatr20VxnScaledNdxStrategy
+    weight_float: 0.5

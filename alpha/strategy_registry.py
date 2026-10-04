@@ -123,6 +123,13 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     # study). Buy-and-hold BIL, 25% dividend withholding, 0% on residual cash.
     # PM-only: never a live route; cash in a live account is simply unallocated.
     "strategies.portfolio_controls.strategy_passive_bil": MaturityTier.PM_READY,
+    # The two books of the NDX design of record "E2 + 40% GICS-sector cap"
+    # (Scout amendment A15, 2026-10-04): the live dollar-ATR rule and the NATR20
+    # rule, each with at most 4 of 10 names per current-label GICS sector, held
+    # 50/50 in portfolios/ndx_e2_sector_cap_5050.yaml (owner request). PM-only;
+    # the live NDX pod is unchanged and these have no live route.
+    "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled_sector_cap:SectorCapVxnScaledAtrNormalizedNdxStrategy": MaturityTier.PM_READY,
+    "strategies.momentum.strategy_mo_natr20_ndx_vxn_scaled_sector_cap:SectorCapNatr20VxnScaledNdxStrategy": MaturityTier.PM_READY,
     # MOSAIC was demoted to RESEARCH on 2026-09-28 by owner decision: its
     # 2026-07-31 validation was invalidated by the split-price fix and it left
     # the recommended books (readiness audit, section 10). Committed YAMLs that
