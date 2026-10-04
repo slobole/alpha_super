@@ -396,3 +396,19 @@ Reading:
 - **The capsule's DV2-G stays first in the book.** Paired block bootstrap P(DV2-G better): 0.87 against ADV gated (not significant), 0.96 against ADV ungated.
 - **The record favours DV2-G in sample.** The gate was selected on DV2, and the ADV rank was selected on the DV2 grid.
 - **No reason to swap.** The ADV module is a close, lower-drawdown, more liquid alternative.
+
+### Final MR slot test (frozen 2026-10-04, `SPEC_FROZEN_MR_FINAL_SLOT.md`): the capsule stays
+
+The question was whether DV2 with the liquidity floor and ADV rank belongs in the MR slot. The book is TAA 0.5 + NDX 0.25 + slot 0.25, 2008-03 → 2026-08, using the replica and the HPI engine run under research conventions.
+
+| Slot | Book Sharpe | +5 bps | 2008–11 | 2012–21 | 2022–26 | Book max DD | Slot Sharpe | Slot corr with NDX pod | P(beats M0) |
+|---|---|---|---|---|---|---|---|---|---|
+| **M0 capsule: DV2-G + HPI-G** | **1.365** | **1.326** | 0.800 | **1.560** | **1.498** | −15.1% | 1.10 | **0.39** | — |
+| M1 ADV-U + HPI-G | 1.317 | 1.263 | 0.834 | 1.468 | 1.438 | −14.0% | 1.16 | 0.52 | 0.04 |
+| M2 thirds, DV2-G + HPI-G + ADV-U | 1.340 | 1.288 | 0.818 | 1.516 | 1.455 | −14.2% | 1.16 | 0.48 | 0.07 |
+| M3 ADV-G + HPI-G | 1.341 | 1.305 | 0.838 | 1.497 | 1.485 | −14.0% | 1.07 | 0.39 | 0.10 |
+| M4 ADV-U alone | 1.276 | 1.202 | **0.850** | 1.417 | 1.348 | **−12.3%** | 1.05 | 0.55 | 0.03 |
+
+- **No challenger passes:** each wins only the 2008–11 block.
+- **Why:** DV2-LF-ADV's calm-market alpha is real standalone (slot Sharpe 1.16), but it moves with the book's own equity and momentum legs (corr 0.52–0.55 with the NDX pod vs 0.39). The gated capsule steps aside exactly when TAA and NDX carry the calm-market risk.
+- **Decision:** the MR slot is the capsule as built. DV2-LF-ADV stays a research strategy. Its case is liquidity and drawdown (fund-scale capacity), not the book's Sharpe.
