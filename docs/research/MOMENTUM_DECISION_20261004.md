@@ -120,9 +120,9 @@ The same gates and the same exposure, with the selection removed.
 - **Most of the Sharpe comes from the gates.** QQQ behind the same regime gate and VXN scale earns 0.79.
   The selection adds about 3 points of CAGR a year (12.6% to 13.6% against 10.4%) at higher volatility: about 0.5 to
   2 points a year at equal risk.
-- **The selection's gain came in two stretches:** 2000-09 to 2013-09 (CAGR 11.5% for L and 13.9% for E2 + cap,
-  against 8.9% for the control) and the last five years (16.4% and 12.0% against 8.0%). From 2013-09 to 2021-09 it
-  added nothing (12.7% and 14.6% against 15.5%).
+- **The selection's gain came in two stretches:** 2000-09 to 2013-09 (CAGR 11.0% for L and 13.6% for E2 + cap,
+  against 8.2% for the control) and 2021-10 on (16.6% and 11.9% against 8.3%). From 2013-10 to 2021-09 it added
+  nothing (12.7% and 14.6% against 15.5%). The table is in section 8.
 
 ## 4. Factor alpha
 
@@ -195,8 +195,70 @@ share / share of the intended exposure left in cash.
 | Idle cash earns 0% in the engine (mean invested 68%) | Conservative | About 0.03 Sharpe and 0.7 points of CAGR |
 | No live route for E2 + cap | Status | Needs a single-account strategy and the WIRED checks |
 
-## 8. Files
+## 8. Owner question (2026-10-04): "so is it better to simply buy QQQ?"
 
+Script `ndx_momentum_qqq_question.py`, results `results/scout/robustness/ndx_momentum_qqq_question.json`.
+Descriptive, on the series of the registered pack; no candidate was added.
+
+Two different things are called QQQ here:
+
+- **QQQ buy and hold:** always fully invested.
+- **QQQ gated:** the registered control of section 3. QQQ is held only while the pod's gates are open, at the pod's
+  own exposure (69% invested on average).
+
+The leg alone:
+
+| 2000-09 to 2026-10 | CAGR | Vol | Sharpe | Max DD | Year 2022 | CAGR 2000-09 to 2013-09 | CAGR 2013-10 to 2021-09 | CAGR 2021-10 on |
+|---|---|---|---|---|---|---|---|---|
+| QQQ buy and hold | 8.7% | 25.6% | 0.45 | −80.4% | −32.6% | −1.4% | 22.0% | 16.7% |
+| QQQ gated | 10.4% | 13.8% | 0.79 | −30.1% | −26.0% | 8.2% | 15.5% | 8.3% |
+| L live | 12.6% | 16.5% | 0.80 | −29.0% | −13.4% | 11.0% | 12.7% | 16.6% |
+| Capsule (E2 + sector cap) | 13.6% | 16.1% | 0.87 | −21.5% | −17.0% | 13.6% | 14.6% | 11.9% |
+
+Inside the live book (60% TAA 3x / 40% leg, monthly rebalance):
+
+| Leg | 2012-11 on: CAGR / Sharpe / Max DD | Book's year 2022 | 2008-03 on (TAA proxy before 2012-11): CAGR / Sharpe / Max DD |
+|---|---|---|---|
+| L live | 21.5% / 1.37 / −14.9% | −4.2% | 18.6% / 1.22 / −17.4% |
+| Capsule | 21.4% / 1.35 / −15.9% | −5.7% | 18.8% / 1.22 / −17.5% |
+| QQQ gated | 20.3% / 1.33 / −13.5% | −9.8% | 17.8% / 1.19 / −17.8% |
+| QQQ buy and hold | 23.3% / 1.37 / −17.8% | −12.7% | 20.3% / 1.21 / −24.3% |
+
+- **QQQ buy and hold is not a substitute for the pod: it has no brake.**
+  - Alone it lost 80% in 2000-2002.
+  - In the book it gives the same Sharpe as L (P 0.48 to 0.50) and 1.7 points more CAGR, but a Max DD of −24.3%
+    instead of −17.4%, and a 2022 three times worse.
+  - The book test starts in 2008, so it does not contain the dot-com bear. There a 40% QQQ leg alone would have cost
+    the book about 32 points.
+- **QQQ gated is a legitimate simpler alternative, not a better one.**
+  - Alone: the same Sharpe as L, with 2.2 points less CAGR.
+  - In the book: 0.03 to 0.04 less Sharpe, 0.8 to 1.2 points less CAGR, and 2022 at −9.8% instead of −4.2%.
+  - P(L book > gated QQQ book) is 0.64 to 0.70 (capsule: 0.64 to 0.69). That leans to the pod; it is not proof.
+  - In the last five years it earned 8.3% a year against 16.6% for L.
+- **The stock pod diversifies the book better,** because TAA 3x already holds levered QQQ (TQQQ): daily correlation
+  with TAA is 0.49 to 0.51 for L and 0.57 to 0.59 for gated QQQ.
+- **Where gated QQQ wins: friction and capacity.** It pays almost nothing at any size and has no capacity limit.
+  A pod started on 2023-01-03 (whole shares, USD 1 minimum fee):
+
+| Start size | L live: CAGR | Capsule: CAGR |
+|---|---|---|
+| USD 12K | 21.3% | 15.9% |
+| USD 25K | 23.4% | 17.6% |
+| USD 50K | 24.0% | 18.6% |
+| USD 100K | 24.2% | 19.3% |
+| USD 1M | 24.4% | 19.7% |
+
+  - L at USD 12K lost 3.1 points a year to rounding and minimum fees (the fees are USD 497 over 3.75 years). The loss
+    is this large because returns were high; the readiness audit measured 1.0 to 1.4 points over the long run.
+  - Even so, L at USD 12K (21.3%) stayed ahead of gated QQQ over the same window (17.7%).
+- **Decision: unchanged.** The pod stays. Gated QQQ is recorded as the fallback for an account too small for stocks
+  and for capacity beyond the stock pod. Adopting it as a pod would be a new strategy, with its own registration and
+  live build.
+
+## 9. Files
+
+- QQQ question: `scripts/research/scout_robustness_20261002/ndx_momentum_qqq_question.py`, results
+  `results/scout/robustness/ndx_momentum_qqq_question.json`.
 - Decision pack: `scripts/research/scout_robustness_20261002/ndx_momentum_decision.py`, tests
   `tests/test_ndx_momentum_decision_helpers.py`, results `results/scout/robustness/ndx_momentum_decision.json`.
 - Earlier record: [Scout A15 robustness report](SCOUT_ROBUSTNESS_20261002.md) (rankings, filters, ensembles, cap),
