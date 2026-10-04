@@ -412,3 +412,11 @@ The question was whether DV2 with the liquidity floor and ADV rank belongs in th
 - **No challenger passes:** each wins only the 2008–11 block.
 - **Why:** DV2-LF-ADV's calm-market alpha is real standalone (slot Sharpe 1.16), but it moves with the book's own equity and momentum legs (corr 0.52–0.55 with the NDX pod vs 0.39). The gated capsule steps aside exactly when TAA and NDX carry the calm-market risk.
 - **Decision:** the MR slot is the capsule as built. DV2-LF-ADV stays a research strategy. Its case is liquidity and drawdown (fund-scale capacity), not the book's Sharpe.
+
+### Owner decision (2026-10-04, after the engine check): SPMO parking, BIL kept ready
+
+**SPMO is the primary parking:** `strategy_mr_*_spmo` and `portfolios/mr_capsule_spmo.yaml`.
+
+The BIL variant stays a maintained, equal alternative: `strategy_mr_*_bil` and `portfolios/mr_capsule_bil.yaml`, with the same tests, the same PM_READY status, and the same review and wiring readiness. The owner can switch without new work.
+
+Basis: since SPMO traded every day (2017-11), SPMO adds about 2 pp/yr to the capsule (0.4 to the book) at a statistically equal Sharpe. The price is deeper sell-offs.
