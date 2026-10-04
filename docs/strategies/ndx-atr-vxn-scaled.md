@@ -76,6 +76,9 @@ Recorded from the [readiness audit 2026-09-28](../research/STRATEGY_READINESS_AU
 | Small-account friction (USD 1 minimum commission, whole shares) | Size-dependent | About -1.0 to -1.4 pp/yr at a USD 12K pod on IBKR Fixed, about half on Tiered; below 0.3 pp/yr from about USD 100K | Audit section 5b |
 | High-priced names get zero shares at small size, with no warning | Size-dependent | Whole slot (10% of NAV) in cash at USD 12-15K, e.g. SNDK on 2026-08-31 | Fix #6 |
 | Idle cash earns 0% (VXN scaling holds cash) | Conservative at fund size | Mean cash 32% of NAV (13% last 3y) | House ledger G-024 |
+| The stock selection is not proven against QQQ held at the same exposure | Unproven | 2000-09 to 2026-10: Sharpe 0.80 vs 0.79 (P 0.54), CAGR 12.6% vs 10.4%; it beats random picks (94th percentile) and equal weight (P 0.87) | [Momentum decision 2026-10-04](../research/MOMENTUM_DECISION_20261004.md), section 3 |
+| Alpha has faded | Decay | After QQQ and a QQQ 200-day rule: 4.9%/yr (t 2.2) full period, 2.2%/yr (t 0.7) since 2013-09 | Same record, section 4 |
+| Month-end is a lucky rebalance day | Optimistic | Sharpe 0.80 at month-end; 0.74 at the median of 16 rebalance offsets (plan on 0.75) | Same record, section 2 |
 | Live data-freshness guard missing for $VXN; no stale-plan guard in the NDX host | Live risk | One-day-stale $VXN changes exposure by up to 12% of NAV | Fixes #3 and #5 |
 
 ## Sources of truth

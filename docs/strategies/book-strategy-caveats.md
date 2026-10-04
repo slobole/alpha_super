@@ -7,6 +7,7 @@ risk_scope: research
 source_paths:
   - alpha/strategy_registry.py
   - docs/research/STRATEGY_READINESS_AUDIT_20260928.md
+  - docs/research/MOMENTUM_DECISION_20261004.md
 ---
 
 # Book Strategy Caveats
@@ -103,6 +104,25 @@ small pod size. Capacity is at today's volume with opening-auction orders.
 | Fees on split-adjusted units | Neutral today | Up to -0.17 pp/yr under a hypothetical future BIL split | `tierc_hedge/TIERC_HEDGE_FINDINGS.md` |
 | Friction at small size (daily band trades) | Size-dependent | -0.66 pp/yr at USD 12K, -0.27 at USD 30K (IBKR Fixed) | `review_bc_trade/rbt05_*.json` |
 | A live route must derive month-end from the exchange calendar | Live risk | Not wired | Fix #26 |
+
+## NDX momentum, sector-capped pair — `strategy_mo_atr_normalized_ndx_vxn_scaled_sector_cap`, `strategy_mo_natr20_ndx_vxn_scaled_sector_cap`
+
+The two books of the NDX design for pods of USD 100K and above and for fund books (book `ndx_e2_sector_cap_5050`,
+50/50). Decision record: [Momentum family: map, evidence and decision](../research/MOMENTUM_DECISION_20261004.md).
+Figures are for the 50/50 pair, 2000-09 to 2026-10, unless a row says otherwise.
+
+| Caveat | Direction | Size | Evidence |
+|---|---|---|---|
+| Design chosen on 2000-2026 data after about 45 NDX trials (rankings, 38 trend filters, ensembles, the cap) | Selection, optimistic | Plan on Sharpe 0.75 (luck-band median 0.78), not 0.87 | Decision record, sections 2 and 7 |
+| Sector labels are today's GICS, applied to all history | Optimistic, mild | Not measurable without point-in-time labels | House ledger G-025 |
+| The 40% sector cap costs return in technology booms | Design | 2023-on CAGR 19.7% vs 24.9% without the cap; 2026 to date +15.0% vs +35.3% | Decision record, section 2 |
+| The stock selection is not proven against QQQ held at the same exposure | Unproven | P 0.78, Sharpe +0.08; it beats random picks (99.5th percentile) and equal weight (P 0.98) | Registration `ndx_momentum_decision_controls_20261004` |
+| Alpha has faded | Decay | After QQQ and a QQQ 200-day rule: 5.7%/yr (t 2.8) full period, 1.2%/yr (t 0.4) since 2013-09 | Decision record, section 4 |
+| Whole shares at small size (about 15 names at 5%) | Size-dependent | Intended exposure left in cash: 22% at USD 12K, 10% at 25K, 6% at 50K, 3% at 100K, 1% at 250K | Decision record, section 6 |
+| Idle cash earns 0% in the engine (the gates hold cash; mean invested 68%) | Conservative | Sharpe 0.84 at 0% cash vs 0.87 with T-bills; CAGR 12.9% vs 13.6% | Decision record, section 2 |
+| Capacity at the opening auction | Size-dependent | House MOO model, recent five years: about USD 0.5M for the dollar-ATR book and USD 1M for the NATR20 book; the next day's close costs 0.01 to 0.02 Sharpe | `capacity_analysis` and `execution_timing_analyzer` runs of 2026-10-04 |
+| Recent five years below the S&P 500 | Performance | At 0% cash 10.0% and 9.1% a year against 14.1% (2021-10 to 2026-10) | `capacity_analysis` runs of 2026-10-04 |
+| No live route (PM_READY) | Status | A live pod needs one strategy that averages the two books, then the WIRED checks | `alpha/strategy_registry.py` |
 
 ## Research strategies used in studies
 

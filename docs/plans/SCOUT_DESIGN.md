@@ -1156,6 +1156,11 @@ Report: `docs/research/SCOUT_ROBUSTNESS_20261002.md`.
   - CORE5: every component earns its place.
   - Every pod is robust to its values, but TAA 3x and CORE5 sit in the top 1% of their draws: plan on the medians
     (0.94 and 0.80).
+  - NDX selection ablation (2026-10-04, `ndx_momentum_decision_controls_20261004`): the top-10 selection beats 200
+    turnover-matched random books (99.5th percentile for E2 + sector cap) and equal weight (P 0.98), and is not proven
+    against QQQ held at the pod's own exposure (P 0.78): UNCLEAR. Record: `docs/research/MOMENTUM_DECISION_20261004.md`.
+- **Practice (2026-10-04):** a stock pod's selection is judged against index exposure behind the pod's own gates and
+  against turnover-matched random picks, not only against buy and hold.
 
 **A16 (2026-10-02, DV2 size ladder).**
 Report: `docs/research/SCOUT_DV2_SIZE_LADDER_20261002.md`.

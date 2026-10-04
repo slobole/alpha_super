@@ -450,3 +450,30 @@ Labels are Norgate's current GICS: a mild look-ahead.
 - **Its cost is in technology booms:** 2023-on CAGR is 19.7% instead of 24.9%.
 - **The L2 cap does almost nothing:** the 2026 theme spread across semiconductors and hardware, two different groups.
 - **Design of record: E2 with a 40% GICS-sector cap.**
+
+## Follow-up 5 (2026-10-04): selection controls and the momentum decision
+
+Full record: [Momentum family: map, evidence and decision](MOMENTUM_DECISION_20261004.md). Script
+`ndx_momentum_decision.py`; registration `ndx_momentum_decision_controls_20261004`, written before the run with its
+rule. No candidate was added and nothing was re-selected.
+
+**The selection ablation** removes the stock selection and keeps the gates and the exposure (2000-09 to 2026-10, idle
+cash at T-bills):
+
+| | CAGR | Sharpe | Max DD |
+|---|---|---|---|
+| L live | 12.6% | 0.80 | −29.0% |
+| E2 + 40% sector cap | 13.6% | 0.87 | −21.5% |
+| QQQ at L's own daily exposure | 10.4% | 0.79 | −30.1% |
+| Every eligible member, equal weight | 8.8% | 0.69 | −22.3% |
+| 200 random-pick books, turnover-matched (median) | 9.5% | 0.67 | −25.6% |
+
+- **Registered verdict for the design of record: UNCLEAR.** It sits at the 99.5th percentile of the random books and
+  beats equal weight (P 0.98, +0.18), but not QQQ at the same exposure by the rule (P 0.78, +0.08; the rule asks 0.80).
+- **Most of the pod's Sharpe comes from the gates.** The selection adds about 3 points of CAGR a year at higher
+  volatility. Its alpha after QQQ and a QQQ 200-day rule is 5.7% a year (t 2.8) over the full period and 1.2% (t 0.4)
+  since 2013-09.
+- **In the live 60/40 book the NDX variant does not matter:** Sharpe 1.35 to 1.37 since 2012-11 for all four, and 1.33
+  with QQQ at the same exposure as the NDX leg.
+- **Size rule:** L below about USD 100K per pod (whole shares), E2 + sector cap from there up and in fund books.
+- **Planning numbers for the momentum slot:** Sharpe 0.75, CAGR 12%, Max DD −30%.
