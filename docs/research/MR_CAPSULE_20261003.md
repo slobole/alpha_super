@@ -224,7 +224,7 @@ On the long history SPMO both + rule makes more money at a slightly lower Sharpe
 ## Build record (2026-10-04): the capsule in the real engine
 
 Research-only. Nothing live changed.
-- **Code:** `strategies/mr_capsule/` (shared gate, parking, two pods).
+- **Code:** `strategies/mr_capsule/`. The shared gate and parking, the two pods (`dv2_vix_gated.py`, `hpi_vote_vix_gated.py`), and four Bench entry points with the parking fixed per module: `strategy_mr_{dv2_vix_gated,hpi_vote_vix_gated}_{spmo,bil}.py`.
 - **Tests:** `tests/test_strategy_mr_capsule_gate.py`, `tests/test_strategy_mr_capsule_pods.py` (36).
 - **Checks:** `scripts/research/mr_capsule_build_20261004/run_engine.py` and `compare.py`; outputs go to `results/research/mr_capsule_build_20261004/` (gitignored).
 - **Status:** both pods are RESEARCH (absent from the registry). They have no live route and no portfolio-manager route.
@@ -299,7 +299,7 @@ Capsule Sharpe / book Sharpe. The book is TAA 0.5 + NDX 0.25 + capsule 0.25.
 - It lowers Sharpe: capsule −0.04 to −0.06, book −0.035.
 - It deepens drawdowns: capsule −23.5% vs −21.4%.
 
-**Claude's recommendation, updated: BIL only.** The owner decides. The build keeps the owner's 2026-10-04 choice (SPMO) as the default; `spmo_parking_enabled_bool=False` runs BIL only.
+**Claude's recommendation, updated: BIL only.** The owner decides. Bench has both versions of each pod: `strategy_mr_dv2_vix_gated_spmo` / `_bil` and `strategy_mr_hpi_vote_vix_gated_spmo` / `_bil`.
 
 ### Multiple testing
 

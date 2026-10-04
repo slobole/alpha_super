@@ -1,4 +1,7 @@
-"""DV2 (wired rules) behind the MR capsule's VIX stress gate, idle cash parked in SPMO / BIL (research-only).
+"""DV2-G pod of the MR capsule: DV2 (wired rules) behind the shared VIX stress gate, idle cash parked (research-only).
+
+Shared code of the Bench entry points strategy_mr_dv2_vix_gated_spmo.py (the capsule spec: SPMO while the gate is
+closed, BIL otherwise) and strategy_mr_dv2_vix_gated_bil.py (idle cash all in BIL).
 
 Stock rules are those of strategies/dv2/strategy_mr_dv2.py (DVO2Strategy), unchanged:
     entry_i,T = 1[DV2(126)_i,T < 10] * 1[Close_i,T > SMA200_i,T] * 1[Return126_i,T > 0.05] * 1[i in S&P 500 at T]
@@ -18,7 +21,7 @@ MR_CAPSULE_20261003.md "Build record (2026-10-04)", and docs/strategies/book-str
   2004-2026), forward paper before capital.
 - issue: SPMO's research edge over T-bills came from 2015-11 to 2018-01, when SPMO did not trade most days; from 2018
   SPMO parking adds about 0.5 pp/yr of CAGR but costs about 0.04 Sharpe and 2 pp of drawdown (engine); bias:
-  optimistic in the research record; impact: medium; mitigation: spmo_parking_enabled_bool=False runs BIL only.
+  optimistic in the research record; impact: medium; mitigation: the *_bil entry points run BIL only.
 - issue: SPMO is used only once it traded on each of the last 20 sessions (guard B1: from 2018); BIL exists from
   2007-05-30 and idle cash earns 0% before; bias: conservative before 2018; impact: low-medium.
 - issue: BIL dividends carry the house 25% withholding (interest-related dividends may be exempt, G-029) and BIL
@@ -47,7 +50,6 @@ from strategies.mr_capsule.capsule_pod import CapsulePodMixin
 from strategies.mr_capsule.parking import PARKING_SYMBOL_TUPLE
 from strategies.mr_capsule.vix_stress_gate import load_vix_close_ser
 
-STRATEGY_NAME_STR = "strategy_mr_dv2_vix_gated"
 BENCHMARK_LIST = ["$SPX"]
 
 
@@ -112,20 +114,23 @@ def load_pricing_data(end_date_str: str | None = None) -> tuple[pd.DataFrame, pd
     return pricing_data_df, universe_df
 
 
-def run_variant(
+def run_dv2_capsule_pod(
+    *,
+    strategy_name_str: str,
+    parking_enabled_bool: bool,
+    spmo_parking_enabled_bool: bool,
     show_display_bool: bool = True,
     save_results_bool: bool = True,
     output_dir_str: str = "results",
     backtest_start_date_str: str = "2004-01-01",
     capital_base_float: float = 100_000.0,
     end_date_str: str | None = None,
-    parking_enabled_bool: bool = True,
     slippage_float: float = 0.00025,
-    spmo_parking_enabled_bool: bool = True,
-):
+) -> DV2VixGatedStrategy:
+    """Run DV2-G with the given parking (the Bench entry points fix it; parking off = idle cash at 0%)."""
     pricing_data_df, universe_df = load_pricing_data(end_date_str)
     strategy = DV2VixGatedStrategy(
-        name=STRATEGY_NAME_STR,
+        name=strategy_name_str,
         benchmarks=BENCHMARK_LIST,
         capital_base=capital_base_float,
         slippage=slippage_float,
@@ -150,7 +155,3 @@ def run_variant(
     if save_results_bool:
         save_results(strategy, output_dir=output_dir_str)
     return strategy
-
-
-if __name__ == "__main__":
-    run_variant()

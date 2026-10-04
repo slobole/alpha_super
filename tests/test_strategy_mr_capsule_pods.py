@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import os
 from collections import defaultdict
 from pathlib import Path
@@ -22,11 +23,11 @@ from alpha.live import release_manifest  # noqa: E402
 from alpha.strategy_registry import MaturityTier, tier_for  # noqa: E402
 from strategies.dv2.strategy_mr_dv2 import DVO2Strategy, default_trade_id_int  # noqa: E402
 from strategies.hpi.stateful_long import ENTRY_HORIZON_VOTE_STR, TURNOVER_FIELD_STR, HPIStatefulLongStrategy  # noqa: E402
-from strategies.mr_capsule import strategy_mr_hpi_vote_vix_gated as hpi_capsule_mod  # noqa: E402
+from strategies.mr_capsule import hpi_vote_vix_gated as hpi_capsule_mod  # noqa: E402
 from strategies.mr_capsule.capsule_pod import PARKING_TRADE_ID_BASE_INT  # noqa: E402
 from strategies.mr_capsule.parking import plan_parking_orders  # noqa: E402
-from strategies.mr_capsule.strategy_mr_dv2_vix_gated import DV2VixGatedStrategy  # noqa: E402
-from strategies.mr_capsule.strategy_mr_hpi_vote_vix_gated import HPIVoteVixGatedStrategy  # noqa: E402
+from strategies.mr_capsule.dv2_vix_gated import DV2VixGatedStrategy  # noqa: E402
+from strategies.mr_capsule.hpi_vote_vix_gated import HPIVoteVixGatedStrategy  # noqa: E402
 
 PARKING_LIST = ["SPMO", "BIL"]
 
@@ -376,18 +377,38 @@ def test_append_parking_prices_keeps_padding_dividends_and_attrs(monkeypatch):
         assert out_df[(symbol_str, "Dividend")].iloc[6] == 0.2
 
 
-# ----------------------------------------------------------------------------------------------- research-only guard
-@pytest.mark.parametrize(
-    "module_str,class_str",
-    [
-        ("strategies.mr_capsule.strategy_mr_dv2_vix_gated", "DV2VixGatedStrategy"),
-        ("strategies.mr_capsule.strategy_mr_hpi_vote_vix_gated", "HPIVoteVixGatedStrategy"),
-    ],
-)
-def test_capsule_pods_are_research_only(module_str, class_str):
+# ----------------------------------------------------------------------------------------------- Bench entry points
+ENTRY_POINT_LIST = [
+    ("strategy_mr_dv2_vix_gated_spmo", "run_dv2_capsule_pod", True),
+    ("strategy_mr_dv2_vix_gated_bil", "run_dv2_capsule_pod", False),
+    ("strategy_mr_hpi_vote_vix_gated_spmo", "run_hpi_capsule_pod", True),
+    ("strategy_mr_hpi_vote_vix_gated_bil", "run_hpi_capsule_pod", False),
+]
+
+
+@pytest.mark.parametrize("module_name_str,helper_str,spmo_bool", ENTRY_POINT_LIST)
+def test_bench_entry_points_fix_the_parking_and_the_name(monkeypatch, module_name_str, helper_str, spmo_bool):
+    module_obj = importlib.import_module(f"strategies.mr_capsule.{module_name_str}")
+    captured_dict = {}
+    monkeypatch.setattr(module_obj, helper_str, lambda **kwarg_dict: captured_dict.update(kwarg_dict) or "ran")
+    assert module_obj.run_variant(show_display_bool=False, save_results_bool=False, end_date_str="2026-01-02") == "ran"
+    assert captured_dict["parking_enabled_bool"] is True and captured_dict["spmo_parking_enabled_bool"] is spmo_bool
+    assert captured_dict["strategy_name_str"] == module_name_str == module_obj.STRATEGY_NAME_STR
+    assert captured_dict["end_date_str"] == "2026-01-02" and captured_dict["save_results_bool"] is False
+
+
+@pytest.mark.parametrize("module_name_str", [entry[0] for entry in ENTRY_POINT_LIST])
+def test_capsule_pods_are_research_only(module_name_str):
+    module_str = f"strategies.mr_capsule.{module_name_str}"
     entry_obj = catalog.get_strategy_by_module(module_str)
     assert entry_obj is not None and entry_obj.has_run_variant_bool and not entry_obj.is_wired_bool
-    for import_str in (module_str, f"{module_str}:{class_str}"):
-        assert tier_for(import_str) is MaturityTier.RESEARCH
-        assert import_str not in release_manifest.SUPPORTED_STRATEGY_IMPORT_TUPLE
-        assert import_str not in portfolio_manager.SUPPORTED_STRATEGY_IMPORT_TUPLE
+    # Bench offers no parking switch: the parking is fixed by the module (and so is the results name)
+    assert not {p.name_str for p in entry_obj.run_variant_param_tuple} & {"parking_enabled_bool", "spmo_parking_enabled_bool"}
+    assert tier_for(module_str) is MaturityTier.RESEARCH
+    assert module_str not in release_manifest.SUPPORTED_STRATEGY_IMPORT_TUPLE
+    assert module_str not in portfolio_manager.SUPPORTED_STRATEGY_IMPORT_TUPLE
+
+
+def test_shared_pod_modules_are_not_bench_strategies():
+    for module_str in ("strategies.mr_capsule.dv2_vix_gated", "strategies.mr_capsule.hpi_vote_vix_gated"):
+        assert catalog.get_strategy_by_module(module_str) is None

@@ -25,13 +25,17 @@ def main(pod_str: str, mode_str: str = "parked") -> None:
     parking_bool = mode_str != "cash"
     start_float = time.time()
     if pod_str == "dv2":
-        from strategies.mr_capsule.strategy_mr_dv2_vix_gated import run_variant
+        from strategies.mr_capsule.dv2_vix_gated import run_dv2_capsule_pod as run_pod
+        name_str = "strategy_mr_dv2_vix_gated"
     elif pod_str == "hpi":
-        from strategies.mr_capsule.strategy_mr_hpi_vote_vix_gated import run_variant
+        from strategies.mr_capsule.hpi_vote_vix_gated import run_hpi_capsule_pod as run_pod
+        name_str = "strategy_mr_hpi_vote_vix_gated"
     else:
         raise ValueError(pod_str)
-    strategy = run_variant(show_display_bool=False, save_results_bool=mode_str == "parked", parking_enabled_bool=parking_bool,
-                           spmo_parking_enabled_bool=mode_str == "parked")
+    # results names follow the Bench entry points (<pod>_spmo / <pod>_bil); the cash-only reference is not saved
+    suffix_str = {"parked": "spmo", "bil": "bil", "cash": "cash"}[mode_str]
+    strategy = run_pod(strategy_name_str=f"{name_str}_{suffix_str}", parking_enabled_bool=parking_bool,
+                       spmo_parking_enabled_bool=mode_str == "parked", show_display_bool=False, save_results_bool=mode_str != "cash")
     tag_str = f"{pod_str}_{mode_str}"
     result_df = strategy.results
     result_df[[c for c in ("total_value", "cash", "portfolio_value") if c in result_df.columns]].to_csv(OUT / f"{tag_str}_nav.csv")

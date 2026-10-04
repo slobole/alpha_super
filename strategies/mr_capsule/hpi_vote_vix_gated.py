@@ -1,4 +1,7 @@
-"""HPI 2/3/5 vote behind the MR capsule's VIX stress gate, idle cash parked in SPMO / BIL (research-only).
+"""HPI-G pod of the MR capsule: HPI 2/3/5 vote behind the shared VIX stress gate, idle cash parked (research-only).
+
+Shared code of the Bench entry points strategy_mr_hpi_vote_vix_gated_spmo.py (the capsule spec: SPMO while the gate
+is closed, BIL otherwise) and strategy_mr_hpi_vote_vix_gated_bil.py (idle cash all in BIL).
 
 Stock rules are those of strategies/hpi/strategy_mr_hpi_sp500_2_3_5_vote.py (HPIStatefulLongStrategy, vote mode,
 Turnover rank), unchanged:
@@ -10,7 +13,7 @@ Capsule additions (docs/research/MR_CAPSULE_20261003.md):
     idle cash: SPMO (8% vol target, weekly) while the gate is closed, BIL otherwise.
 Decisions after Close_T, fills at Open_(T+1). CAPITALSPECIAL fills and marks; dividends net of 25% withholding.
 
-Known caveats: as strategies/mr_capsule/strategy_mr_dv2_vix_gated.py, plus
+Known caveats: as strategies/mr_capsule/dv2_vix_gated.py, plus
 - issue: HPI's calm-market trades carry a small real edge (unlike DV2), so the gate gives up some return at engine
   costs (research: standalone Sharpe 1.05 vs 1.08 ungated; 0.95 vs 0.90 at +5 bps); bias: n/a; impact: low-medium.
 - issue: SPMO / BIL use Norgate's market-day padding (as the DV2 pod's frame), unlike HPI's unpadded stocks, so a
@@ -42,7 +45,6 @@ from strategies.mr_capsule.capsule_pod import CapsulePodMixin
 from strategies.mr_capsule.parking import PARKING_SYMBOL_TUPLE
 from strategies.mr_capsule.vix_stress_gate import load_vix_close_ser
 
-STRATEGY_NAME_STR = "strategy_mr_hpi_vote_vix_gated"
 BENCHMARK_SYMBOL_STR = "$SPXTR"
 
 
@@ -146,17 +148,20 @@ def append_parking_prices(pricing_data_df: pd.DataFrame, start_date_str: str, en
     return combined_df
 
 
-def run_variant(
+def run_hpi_capsule_pod(
+    *,
+    strategy_name_str: str,
+    parking_enabled_bool: bool,
+    spmo_parking_enabled_bool: bool,
     show_display_bool: bool = True,
     save_results_bool: bool = True,
     output_dir_str: str = "results",
     backtest_start_date_str: str = "2004-01-01",
     capital_base_float: float = 100_000.0,
     end_date_str: str | None = None,
-    parking_enabled_bool: bool = True,
     slippage_float: float = 0.00025,
-    spmo_parking_enabled_bool: bool = True,
 ) -> HPIVoteVixGatedStrategy:
+    """Run HPI-G with the given parking (the Bench entry points fix it; parking off = idle cash at 0%)."""
     _, universe_df, pricing_data_df = load_exact_hpi_inputs(
         indexname_str="S&P 500", benchmark_symbol_str=BENCHMARK_SYMBOL_STR, start_date_str="1998-01-01", end_date_str=end_date_str
     )
@@ -168,7 +173,7 @@ def run_variant(
         for symbol_str in pricing_symbol_list
     }
     strategy_obj = HPIVoteVixGatedStrategy(
-        name=STRATEGY_NAME_STR,
+        name=strategy_name_str,
         benchmarks=[BENCHMARK_SYMBOL_STR],
         ranking_field_str=TURNOVER_FIELD_STR,
         capital_base=capital_base_float,
@@ -192,6 +197,3 @@ def run_variant(
         save_results(strategy_obj, output_dir=output_dir_str)
     return strategy_obj
 
-
-if __name__ == "__main__":
-    run_variant()
