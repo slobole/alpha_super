@@ -113,3 +113,9 @@ small pod size. Capacity is at today's volume with opening-auction orders.
 | `strategy_mr_dv2_industry_etf` | Friction | Size-dependent | -2.1 pp/yr at USD 12K |
 | `strategy_mo_natr20_ndx_vxn_scaled` | Not better risk-adjusted than the live ATR rule; no live route | Note | Audit section 5b |
 | `strategy_mo_mosaic_russell1000`, `strategy_crisis_trend_core`, `strategy_vixm_backwardation` | Demoted to RESEARCH on 2026-09-28 | Status | Audit section 10 |
+| `strategy_mr_dv2_vix_gated_{spmo,bil}`, `strategy_mr_hpi_vote_vix_gated_{spmo,bil}` (MR capsule pods) | Gate and parking chosen after about 100 gate variants and about 10 parking forks on 2000-2026 data | Selection, optimistic | DSR 0.97 (N = 110, engine capsule 2004-26); 0.78 from 2018 |
+| MR capsule `_spmo` pods | SPMO parking: the research edge came from 2015-11 to 2018-01, when SPMO did not trade most days; from 2018 it adds about 0.5 pp/yr CAGR but costs about 0.04 Sharpe and 2 pp of drawdown | Optimistic (research record) | [Build record](../research/MR_CAPSULE_20261003.md) |
+| MR capsule pods | BIL leg: 25% withholding and the engine's 2.5 bps on BIL trades (spread about 1 bp) | Conservative | About +0.4 pp/yr capsule CAGR together (estimate) |
+| MR capsule pods | 0% cash before BIL (2004-07); SPMO only from 2018 (tradability guard B1) | Conservative before 2018 | Quote results from 2007-06 or 2018-02 |
+| MR capsule pods | Negative cash from the parents' 10 x 10% sizing, not financed (G-023) | Optimistic, small | DV2-G 136 sessions (133 without parking), minimum -8.8% of NAV |
+| MR capsule pods | Friction: about 52-58 parking orders a year at the USD 1 minimum | Size-dependent | -0.35 to -0.4 pp/yr at USD 15K per pod, -0.1 at USD 50K |
