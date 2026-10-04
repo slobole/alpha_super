@@ -59,13 +59,14 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     # (A-QPI-05), an undocumented selection among 14 variants, and -1.8 pp/yr
     # small-account friction. Its live host route was removed with it.
     "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote": MaturityTier.WIRED,
-    "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit": MaturityTier.WIRED,
     "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash": MaturityTier.WIRED,
     "strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash": MaturityTier.WIRED,
     "strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash": MaturityTier.WIRED,
     "strategies.momentum.strategy_mo_atr_normalized_ndx:AtrNormalizedNdxStrategy": MaturityTier.WIRED,
     "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy": MaturityTier.WIRED,
     # ── pm-ready: may join a book, not connected to live ────────────────────
+    # Owner demotion 2026-09-30: retain portfolio eligibility without a live route.
+    "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit": MaturityTier.PM_READY,
     # Five analyzers and capital/benchmark/determinism checks passed 2026-09-13.
     # MOC and fixed TLT borrow remain research execution assumptions.
     "strategies.taa_beyond_6040.strategy_taa_month_end_rebalancing_flow": MaturityTier.PM_READY,
@@ -122,6 +123,24 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     # study). Buy-and-hold BIL, 25% dividend withholding, 0% on residual cash.
     # PM-only: never a live route; cash in a live account is simply unallocated.
     "strategies.portfolio_controls.strategy_passive_bil": MaturityTier.PM_READY,
+    # The two books of the NDX design of record "E2 + 40% GICS-sector cap"
+    # (Scout amendment A15, 2026-10-04): the live dollar-ATR rule and the NATR20
+    # rule, each with at most 4 of 10 names per current-label GICS sector, held
+    # 50/50 in portfolios/ndx_e2_sector_cap_5050.yaml (owner request). PM-only;
+    # the live NDX pod is unchanged and these have no live route.
+    "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled_sector_cap:SectorCapVxnScaledAtrNormalizedNdxStrategy": MaturityTier.PM_READY,
+    "strategies.momentum.strategy_mo_natr20_ndx_vxn_scaled_sector_cap:SectorCapNatr20VxnScaledNdxStrategy": MaturityTier.PM_READY,
+    # MR capsule pods (docs/research/MR_CAPSULE_20261003.md, build record 2026-10-04): DV2 and the HPI 2/3/5
+    # vote behind one shared VIX stress gate, idle cash parked in SPMO + BIL (_spmo, the owner's 2026-10-04
+    # spec) or BIL only (_bil, Claude's recommendation); books portfolios/mr_capsule_{spmo,bil}.yaml (50/50,
+    # annual reset). Owner request 2026-10-04. Capital, total-return benchmark and determinism checks passed
+    # 2026-10-04 (results/research/pm_readiness/). PM-only: the live DV2/HPI pods are unchanged and these have
+    # no live route (the live order contract cannot yet express the parking orders; docs/plans/
+    # MR_CAPSULE_REVIEW_HANDOFF.md, section 9).
+    "strategies.mr_capsule.strategy_mr_dv2_vix_gated_spmo": MaturityTier.PM_READY,
+    "strategies.mr_capsule.strategy_mr_dv2_vix_gated_bil": MaturityTier.PM_READY,
+    "strategies.mr_capsule.strategy_mr_hpi_vote_vix_gated_spmo": MaturityTier.PM_READY,
+    "strategies.mr_capsule.strategy_mr_hpi_vote_vix_gated_bil": MaturityTier.PM_READY,
     # MOSAIC was demoted to RESEARCH on 2026-09-28 by owner decision: its
     # 2026-07-31 validation was invalidated by the split-price fix and it left
     # the recommended books (readiness audit, section 10). Committed YAMLs that

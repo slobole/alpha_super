@@ -168,6 +168,25 @@ def test_strategy_host_refuses_retired_qpi_release(monkeypatch):
         )
 
 
+def test_strategy_host_refuses_demoted_hpi_ibs_rsi_release(monkeypatch):
+    import strategies.hpi.stateful_long as hpi_module
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("demoted HPI route must not load data")
+
+    monkeypatch.setattr(hpi_module, "load_exact_hpi_inputs", fail_if_called)
+    release_obj = make_release(
+        strategy_import_str="strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit",
+    )
+
+    with pytest.raises(NotImplementedError):
+        build_decision_plan_for_release(
+            release_obj=release_obj,
+            as_of_ts=datetime(2024, 1, 31, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ),
+            pod_state_obj=None,
+        )
+
+
 @pytest.mark.parametrize(
     (
         "strategy_import_str",
@@ -371,18 +390,19 @@ def test_strategy_host_builds_hpi_decision_plan_with_pending_exit(
         ),
     )
 
-    decision_plan_obj = build_decision_plan_for_release(
-        release_obj=release_obj,
-        as_of_ts=datetime(
-            2024,
-            1,
-            31,
-            16,
-            10,
-            tzinfo=MARKET_TIMEZONE_OBJ,
-        ),
-        pod_state_obj=pod_state_obj,
-    )
+    as_of_ts = datetime(2024, 1, 31, 16, 10, tzinfo=MARKET_TIMEZONE_OBJ)
+    if strategy_import_str == "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit":
+        decision_plan_obj = strategy_host_module._build_hpi_decision_plan(
+            release_obj, as_of_ts, pod_state_obj,
+            entry_mode_str=hpi_module.ENTRY_BASELINE_STR,
+            strategy_family_str="hpi_sp500_ibs_rsi_exit",
+        )
+    else:
+        decision_plan_obj = build_decision_plan_for_release(
+            release_obj=release_obj,
+            as_of_ts=as_of_ts,
+            pod_state_obj=pod_state_obj,
+        )
 
     assert decision_plan_obj.decision_base_position_map == {"OLD": 12.0}
     assert decision_plan_obj.exit_asset_set == {"OLD"}

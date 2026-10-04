@@ -3,7 +3,7 @@ title: HPI 3-Day Mean Reversion
 description: Daily S&P 500 mean-reversion strategy using a historical percentile of negative 3-day returns.
 document_type: reference
 authority: guide
-risk_scope: live
+risk_scope: research
 source_paths:
   - alpha/strategy_registry.py
   - strategies/hpi/strategy_mr_hpi_sp500_ibs_rsi_exit.py
@@ -31,7 +31,7 @@ source_paths:
 
 -   :material-connection: **Maturity**
 
-    `WIRED` — connected to a LIVE account route
+    `PM_READY` — eligible for Portfolio Manager; no LIVE account route
 
 </div>
 
@@ -63,8 +63,8 @@ flowchart LR
 !!! danger "Timing boundary"
     The HPI reference set excludes the current observation. Decisions use `Close T`; orders execute at the modeled `Open T+1`.
 
-!!! warning "What WIRED does — and does not — mean"
-    `WIRED` confirms a LIVE route exists. It does not establish research quality, release enablement, or current runtime health.
+!!! info "Maturity changed on 2026-09-30"
+    By owner decision, this variant moved from `WIRED` to `PM_READY`. The strategy and its Vanilla backtest remain available to Portfolio Manager. Its release template and LIVE host route were removed. A leftover release YAML for this variant now fails validation, even when disabled.
 
 ## Known caveats
 

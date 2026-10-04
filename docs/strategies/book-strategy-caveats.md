@@ -7,6 +7,7 @@ risk_scope: research
 source_paths:
   - alpha/strategy_registry.py
   - docs/research/STRATEGY_READINESS_AUDIT_20260928.md
+  - docs/research/MOMENTUM_DECISION_20261004.md
 ---
 
 # Book Strategy Caveats
@@ -104,6 +105,26 @@ small pod size. Capacity is at today's volume with opening-auction orders.
 | Friction at small size (daily band trades) | Size-dependent | -0.66 pp/yr at USD 12K, -0.27 at USD 30K (IBKR Fixed) | `review_bc_trade/rbt05_*.json` |
 | A live route must derive month-end from the exchange calendar | Live risk | Not wired | Fix #26 |
 
+## NDX momentum, sector-capped pair — `strategy_mo_atr_normalized_ndx_vxn_scaled_sector_cap`, `strategy_mo_natr20_ndx_vxn_scaled_sector_cap`
+
+The two books of the NDX design for pods of USD 100K and above and for fund books (book `ndx_e2_sector_cap_5050`,
+50/50). Decision record: [Momentum family: map, evidence and decision](../research/MOMENTUM_DECISION_20261004.md).
+Figures are for the 50/50 pair, 2000-09 to 2026-10, unless a row says otherwise.
+
+| Caveat | Direction | Size | Evidence |
+|---|---|---|---|
+| Design chosen on 2000-2026 data after about 45 NDX trials (rankings, 38 trend filters, ensembles, the cap) | Selection, optimistic | Plan on Sharpe 0.75 (luck-band median 0.78), not 0.87 | Decision record, sections 2 and 7 |
+| Sector labels are today's GICS, applied to all history | Optimistic, mild | Not measurable without point-in-time labels | House ledger G-025 |
+| The 40% sector cap costs return in technology booms | Design | 2023-on CAGR 19.7% vs 24.9% without the cap; 2026 to date +15.0% vs +35.3% | Decision record, section 2 |
+| The stock selection is not proven against QQQ held at the same exposure | Unproven | P 0.78, Sharpe +0.08; it beats random picks (99.5th percentile) and equal weight (P 0.98) | Registration `ndx_momentum_decision_controls_20261004` |
+| Alpha has faded | Decay | After QQQ and a QQQ 200-day rule: 5.7%/yr (t 2.8) full period, 1.2%/yr (t 0.4) since 2013-09 | Decision record, section 4 |
+| Whole shares at small size (about 15 names at 5%) | Size-dependent | Intended exposure left in cash: 22% at USD 12K, 10% at 25K, 6% at 50K, 3% at 100K, 1% at 250K | Decision record, section 6 |
+| Small-account friction (whole shares, USD 1 minimum fee), pod started 2023-01-03 | Size-dependent | CAGR 15.9% at USD 12K, 17.6% at 25K, 18.6% at 50K, 19.3% at 100K, 19.7% at 1M: -3.8, -2.1, -1.1 and -0.4 pp/yr | Decision record, section 8 |
+| Idle cash earns 0% in the engine (the gates hold cash; mean invested 68%) | Conservative | Sharpe 0.84 at 0% cash vs 0.87 with T-bills; CAGR 12.9% vs 13.6% | Decision record, section 2 |
+| Capacity at the opening auction | Size-dependent | House MOO model, recent five years: about USD 0.5M for the dollar-ATR book and USD 1M for the NATR20 book; the next day's close costs 0.01 to 0.02 Sharpe | `capacity_analysis` and `execution_timing_analyzer` runs of 2026-10-04 |
+| Recent five years below the S&P 500 | Performance | At 0% cash 10.0% and 9.1% a year against 14.1% (2021-10 to 2026-10) | `capacity_analysis` runs of 2026-10-04 |
+| No live route (PM_READY) | Status | A live pod needs one strategy that averages the two books, then the WIRED checks | `alpha/strategy_registry.py` |
+
 ## Research strategies used in studies
 
 | Strategy | Caveat | Direction | Size |
@@ -113,3 +134,10 @@ small pod size. Capacity is at today's volume with opening-auction orders.
 | `strategy_mr_dv2_industry_etf` | Friction | Size-dependent | -2.1 pp/yr at USD 12K |
 | `strategy_mo_natr20_ndx_vxn_scaled` | Not better risk-adjusted than the live ATR rule; no live route | Note | Audit section 5b |
 | `strategy_mo_mosaic_russell1000`, `strategy_crisis_trend_core`, `strategy_vixm_backwardation` | Demoted to RESEARCH on 2026-09-28 | Status | Audit section 10 |
+| `strategy_mr_dv2_vix_gated_{spmo,bil}`, `strategy_mr_hpi_vote_vix_gated_{spmo,bil}` (MR capsule pods) | Gate and parking chosen after about 100 gate variants and about 10 parking forks on 2000-2026 data | Selection, optimistic | DSR 0.97 (N = 110, engine capsule 2004-26); 0.78 from 2018 |
+| MR capsule `_spmo` pods | SPMO parking: the research edge came from 2015-11 to 2018-01, when SPMO did not trade most days; from 2018 it adds about 0.5 pp/yr CAGR but costs about 0.04 Sharpe and 2 pp of drawdown | Optimistic (research record) | [Build record](../research/MR_CAPSULE_20261003.md) |
+| MR capsule pods | BIL leg: 25% withholding and the engine's 2.5 bps on BIL trades (spread about 1 bp) | Conservative | About +0.4 pp/yr capsule CAGR together (estimate) |
+| MR capsule pods | 0% cash before BIL (2004-07); SPMO only from 2018 (tradability guard B1) | Conservative before 2018 | Quote results from 2007-06 or 2018-02 |
+| MR capsule pods | Negative cash from the parents' 10 x 10% sizing, not financed (G-023) | Optimistic, small | DV2-G 136 sessions (133 without parking), minimum -8.8% of NAV |
+| MR capsule pods | Friction: about 52-58 parking orders a year at the USD 1 minimum | Size-dependent | -0.35 to -0.4 pp/yr at USD 15K per pod, -0.1 at USD 50K |
+| MR capsule pods | PM_READY on 2026-10-04 (books `mr_capsule_{spmo,bil}`); WIRED needs a new live order shape for the parking | Status | Handoff `docs/plans/MR_CAPSULE_REVIEW_HANDOFF.md`, section 9 |

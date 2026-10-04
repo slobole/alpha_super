@@ -81,7 +81,6 @@ HPI_LIVE_TRADABLE_OPEN_MARKER_FLOAT = 1.0
 INCREMENTAL_DECISION_STRATEGY_IMPORT_SET: set[str] = {
     "strategies.dv2.strategy_mr_dv2:DVO2Strategy",
     "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote",
-    "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit",
 }
 FULL_TARGET_DECISION_STRATEGY_IMPORT_SET: set[str] = {
     CORE5_STRATEGY_IMPORT_STR,
@@ -1234,18 +1233,6 @@ def build_decision_plan_for_release(
                 pod_state_obj,
                 entry_mode_str=hpi_module.ENTRY_HORIZON_VOTE_STR,
                 strategy_family_str="hpi_sp500_2_3_5_vote",
-            )
-        if (
-            release_obj.strategy_import_str
-            == "strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit"
-        ):
-            hpi_module = import_module("strategies.hpi.stateful_long")
-            return _build_hpi_decision_plan(
-                release_obj,
-                as_of_ts,
-                pod_state_obj,
-                entry_mode_str=hpi_module.ENTRY_BASELINE_STR,
-                strategy_family_str="hpi_sp500_ibs_rsi_exit",
             )
         if release_obj.strategy_import_str == "strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash":
             return _build_taa_btal_tqqq_vix_cash_decision_plan(release_obj, as_of_ts, pod_state_obj)

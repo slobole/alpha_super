@@ -1,6 +1,12 @@
 # HPI Same-Open Refill (Both HPI Pods): Implementation Handoff
 
-Status: implemented and tested; committed locally on branch
+> **Historical handoff, updated 2026-09-30.** The IBS/RSI baseline was
+> demoted to `PM_READY`; only HPI 2/3/5 Vote remains `WIRED`. The baseline
+> cannot be loaded as a live release or dispatched by the live host. The
+> two-pod rollout steps below are superseded; do not use this document as
+> current deployment authorization or instructions.
+
+Original 2026-09-28 status: implemented and tested; committed locally on branch
 `claude/dazzling-maxwell-837dc4`; **not pushed, not deployed**. Risk tier: 3
 (live decision plans of two LIVE/WIRED pods).
 
@@ -223,30 +229,22 @@ No account, margin, broker or scheduler setting was changed.
 
   No code defect was found in the two-pod change.
 
-## 9. Before enabling on the VPS (for each HPI pod)
+## 9. VPS rollout status
 
-1. Confirm the pod's account route is a **margin** account (not a cash account,
-   not IRA-restricted). Check that its buying power covers at least two extra
-   10% slots; the baseline pod's backtest reaches −5% cash. **If it is a cash
-   account, stop:** that is a blocker for this change on that pod.
-2. Deploy the commit. On the next signal day, run the normal build with
-   auto-submit **off** for both HPI pods, then inspect each DecisionPlan:
-   - `snapshot_metadata_dict.hpi_exit_slot_reuse_str` must be `same_open_moo_batch`;
-   - on a day with an exit while the pod is full, `entry_priority_list` must
-     contain the replacement.
-3. Inspect the VPlans: sells listed before buys, one submission key, all MOO, and
-   each entry target about 10% of the pod budget.
-4. Re-enable auto-submit. After the open, confirm all fills, a PASS reconcile,
-   no `exit_residual_detected`, and no IBKR rejection for insufficient funds.
-5. Optional: re-run the parity tests against the VPS data.
+The original two-pod enablement checklist is superseded by the 2026-09-30
+IBS/RSI demotion. Only HPI 2/3/5 Vote has a live release route. Any existing
+IBS/RSI release YAML must be retired from a releases root before loading that
+root, even if the release is disabled. Current Vote deployment requires its
+own release and broker checks; this historical handoff does not authorize it.
 
 ## 10. Book numbers
 
-Under the new rule the HPI backtest numbers stand for both pods. The option (b)
-restatement in the leakage-hunt report (HPI vote sleeve −2.6 pp CAGR; books
-−0.26 to −0.52 pp) should be withdrawn **once this runs live**. Until then, both
-live pods still use the old rule. The report never measured the baseline pod's
-old-rule gap; it is in section 1.
+The same-open refill change was tested for both variants. The IBS/RSI baseline
+is now `PM_READY` and has no live pod route, so this handoff does not establish
+current live book numbers or a completed two-pod rollout. The historical
+option (b) restatement in the leakage-hunt report (HPI vote sleeve −2.6 pp
+CAGR; books −0.26 to −0.52 pp) and the baseline old-rule gap are discussed
+above; any current book comparison needs fresh deployment evidence.
 
 ## 11. Optional follow-ups (not done)
 
