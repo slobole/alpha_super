@@ -5,8 +5,11 @@ Sources and conventions:
   25% withholding. SPMO is shown only from 2017-11-01 (it traded every session from 2017-10-02).
 - LIQ chapter: research conventions (engine-parity replica + HPI engine run, idle cash swept at the T-bill rate),
   with the capsule recomputed under the same conventions as the baseline (mr_final_slot.legs).
-- Book: G3 = TAA 0.5 + NDX 0.5 (the research G3); "G3 + slot" = TAA 0.5 + NDX 0.25 + slot 0.25. Each window is its
-  own run from target weights with an annual reset (tbc.book_window_return_ser).
+- Book: G3 = TAA 0.5 + NDX 0.5; "G3 + slot" = TAA 0.5 + NDX 0.25 + slot 0.25. Each window is its own run from target
+  weights with an annual reset (tbc.book_window_return_ser). The NDX leg is the momentum capsule E2 (owner,
+  2026-10-04: 50% dollar-ATR + 50% NATR20, VXN-scaled, 40% sector cap, monthly 50/50; the PM run of
+  portfolios/ndx_e2_sector_cap_5050.yaml). The previous leg, the live ATR rule L (trend study replica, engine parity),
+  is kept as book_L / liq[*].book_L for comparison.
 Writes results/research/mr_capsule_build_20261004/page_v2_data.json.
 """
 
@@ -54,6 +57,22 @@ def weekly(ret: pd.Series) -> dict:
     return {"d": [x.strftime("%Y-%m-%d") for x in w.index], "w": [round(float(v), 0) for v in w], "dd": [round(float(v), 4) for v in d]}
 
 
+E2_PICKLE = cmp.REPO / "results/research/portfolio/ndx_e2_sector_cap_5050/vanilla_backtest/2026-10-04_095907/ndx_e2_sector_cap_5050.pkl"
+
+
+def load_e2_ret_ser() -> pd.Series:
+    """Daily returns of the E2 momentum capsule (PortfolioManager run, $1M, 2000-01-03 on)."""
+    import pickle
+
+    with open(E2_PICKLE, "rb") as fh:
+        portfolio = pickle.load(fh)
+    total_value = portfolio.results["total_value"].astype(float)
+    total_value.index = pd.to_datetime(total_value.index)
+    ret = total_value.pct_change().dropna()
+    ret.name = "E2"
+    return ret
+
+
 def block_sharpe(ret: pd.Series) -> dict:
     return {k: float(tbc.metric_dict(ret.loc[a:b])["sharpe"]) for k, (a, b) in BLOCKS.items()}
 
@@ -70,15 +89,18 @@ def main() -> None:
     idx = runs["parked"]["dv2"][0].index
     pct = lambda nav: nav["total_value"].pct_change().reindex(idx)  # noqa: E731
     rate = st.cash_rate(idx)
-    taa, ndx = tbc.load_taa_ser(), npc.load_l_ret_ser("engine")
+    taa, ndx_l, ndx = tbc.load_taa_ser(), npc.load_l_ret_ser("engine"), load_e2_ret_ser()
     spy = npc.load_total_return_ret_ser("SPY", "SPY").reindex(idx)
+    data_ndx = {"E2": mss.stats(ndx.loc[BOOK_START:BOOK_END], rate), "L": mss.stats(ndx_l.loc[BOOK_START:BOOK_END], rate),
+                "corr_E2_L": float(pd.concat([ndx, ndx_l], axis=1).dropna().loc[BOOK_START:BOOK_END].corr().iloc[0, 1])}
     eng = {m: {"DV2": pct(runs[m]["dv2"][0]), "HPI": pct(runs[m]["hpi"][0])} for m in ("parked", "bil")}
     cap = {
         "spmo_w": ev.capsule(eng["parked"], {"DV2": .5, "HPI": .5}, start=SPMO_START, end=END),
         "bil_w": ev.capsule(eng["bil"], {"DV2": .5, "HPI": .5}, start=SPMO_START, end=END),
         "bil_full": ev.capsule(eng["bil"], {"DV2": .5, "HPI": .5}, start=FULL_START, end=END),
     }
-    data: dict = {"meta": {"spmo_start": SPMO_START, "full_start": FULL_START, "end": END, "book_start": BOOK_START, "book_end": BOOK_END}}
+    data: dict = {"meta": {"spmo_start": SPMO_START, "full_start": FULL_START, "end": END, "book_start": BOOK_START, "book_end": BOOK_END},
+                  "ndx_legs": data_ndx}
     # ---- 1-2. capsule with SPMO (2017-11 on) and with BIL (same window and full history)
     data["capsule"] = {
         "spmo_w": entry(cap["spmo_w"], rate), "bil_w": entry(cap["bil_w"], rate), "bil_full": entry(cap["bil_full"], rate),
@@ -100,14 +122,24 @@ def main() -> None:
     data["liq"] = {k: entry(v.loc[FULL_START:END], rate_r) for k, v in slots.items()}
     for k in slots:
         data["liq"][k]["book"] = entry(tbc.book_window_return_ser({"taa": taa, "L": ndx, "X": slots[k]}, npc.CANDIDATE_WEIGHT_DICT, BOOK_START, BOOK_END), rate_r, book=True)
+        data["liq"][k]["book_L"] = entry(tbc.book_window_return_ser({"taa": taa, "L": ndx_l, "X": slots[k]}, npc.CANDIDATE_WEIGHT_DICT, BOOK_START, BOOK_END), rate_r, book=True)
         data["liq"][k]["corr_ndx"] = float(pd.concat([slots[k].loc[BOOK_START:BOOK_END], ndx], axis=1).dropna().corr().iloc[0, 1])
+        data["liq"][k]["corr_ndx_L"] = float(pd.concat([slots[k].loc[BOOK_START:BOOK_END], ndx_l], axis=1).dropna().corr().iloc[0, 1])
         data["liq"][k]["corr_taa"] = float(pd.concat([slots[k].loc[BOOK_START:BOOK_END], taa], axis=1).dropna().corr().iloc[0, 1])
     data["liq_boot"] = {k: ev.bootstrap_p(tbc.book_window_return_ser({"taa": taa, "L": ndx, "X": slots[k]}, npc.CANDIDATE_WEIGHT_DICT, BOOK_START, BOOK_END),
                                           tbc.book_window_return_ser({"taa": taa, "L": ndx, "X": slots["M0"]}, npc.CANDIDATE_WEIGHT_DICT, BOOK_START, BOOK_END))
                         for k in slots if k != "M0"}
     data["charts"]["liq"] = {k: weekly(slots[k].loc[FULL_START:END]) for k in ("M0", "M4", "M2")}
-    # ---- 4. the G3 book
-    book = {}
+    # ---- 4. the G3 book (NDX leg = E2; the live ATR rule L kept for comparison)
+    book, book_l = {}, {}
+    for leg_name, leg_ser in (("L", ndx_l),):
+        for window, (a, b) in {"long": (BOOK_START, BOOK_END), "spmo": (SPMO_START, BOOK_END)}.items():
+            sl = {"G3": ({"taa": taa, "L": leg_ser}, G3),
+                  "G3 + capsule BIL": ({"taa": taa, "L": leg_ser, "X": cap["bil_full"]}, npc.CANDIDATE_WEIGHT_DICT)}
+            if window == "spmo":
+                sl["G3 + capsule SPMO"] = ({"taa": taa, "L": leg_ser, "X": cap["spmo_w"]}, npc.CANDIDATE_WEIGHT_DICT)
+            book_l[window] = {k: {"stats": mss.stats(tbc.book_window_return_ser(lg, w, a, b), rate)} for k, (lg, w) in sl.items()}
+    data["book_L"] = book_l
     for window, (a, b) in {"long": (BOOK_START, BOOK_END), "spmo": (SPMO_START, BOOK_END)}.items():
         variants = {"G3": ({"taa": taa, "L": ndx}, G3),
                     "G3 + T-bills": ({"taa": taa, "L": ndx, "X": rate}, npc.CANDIDATE_WEIGHT_DICT),
