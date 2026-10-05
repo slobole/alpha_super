@@ -1,0 +1,468 @@
+<meta charset="utf-8">
+<title>מוצרי הקרן</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Hebrew:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: a decision document (~1120px), RTL: decision cards, two option menus, then evidence sections. */
+:root {
+  --bg: #f2f3f1; --surface: #fbfbfa; --surface-2: #eceeea; --ink: #17212a; --ink-2: #45505b; --ink-3: #6b7680;
+  --rule: #d6dbd5; --accent: #0c6a60; --accent-soft: #d6ebe6; --warn: #8f5b00; --warn-soft: #f5e9d0;
+  --good: #1b7641; --good-soft: #dff0e4; --bad: #ad2a22; --bad-soft: #f6dedb;
+  --def: #2c5f9e; --def-soft: #dde8f5; --gro: #c05a2c; --gro-soft: #f6e3d8;
+  --s1: #2a78d6; --s2: #1baf7a; --s3: #eb6834; --s4: #4a3aa7; --s5: #c23a8c; --bench: #8a9199; --grid: #e2e6e0;
+  --pos-pole: #d4622f; --neg-pole: #2a78d6; --mid: #eceeea; --tip-bg: #17212a; --tip-ink: #f2f3f1;
+  --display: "Frank Ruhl Libre", "David Libre", "Times New Roman", serif;
+  --body: "IBM Plex Sans Hebrew", "Heebo", "Arial Hebrew", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1418; --surface: #151c22; --surface-2: #1c252d; --ink: #e6ebee; --ink-2: #aab5be; --ink-3: #85919b;
+    --rule: #2b3640; --accent: #47b9aa; --accent-soft: #163733; --warn: #dba644; --warn-soft: #33290f;
+    --good: #55ba7a; --good-soft: #16301f; --bad: #ee6d63; --bad-soft: #3a1b19;
+    --def: #6fa3e6; --def-soft: #1a2a40; --gro: #e07a4a; --gro-soft: #3a2519;
+    --s1: #3987e5; --s2: #199e70; --s3: #d95926; --s4: #9085e9; --s5: #e0609f; --bench: #7b848c; --grid: #25313a;
+    --pos-pole: #e07a4a; --neg-pole: #3987e5; --mid: #1c252d; --tip-bg: #e6ebee; --tip-ink: #0f1418; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1418; --surface: #151c22; --surface-2: #1c252d; --ink: #e6ebee; --ink-2: #aab5be; --ink-3: #85919b;
+  --rule: #2b3640; --accent: #47b9aa; --accent-soft: #163733; --warn: #dba644; --warn-soft: #33290f;
+  --good: #55ba7a; --good-soft: #16301f; --bad: #ee6d63; --bad-soft: #3a1b19;
+  --def: #6fa3e6; --def-soft: #1a2a40; --gro: #e07a4a; --gro-soft: #3a2519;
+  --s1: #3987e5; --s2: #199e70; --s3: #d95926; --s4: #9085e9; --s5: #e0609f; --bench: #7b848c; --grid: #25313a;
+  --pos-pole: #e07a4a; --neg-pole: #3987e5; --mid: #1c252d; --tip-bg: #e6ebee; --tip-ink: #0f1418; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 15px; line-height: 1.6; }
+main { max-width: 1120px; margin: 0 auto; padding-inline: 20px; padding-block: 34px 64px; display: grid; gap: 32px; }
+h1, h2, h3 { font-family: var(--display); margin: 0; text-wrap: balance; line-height: 1.2; }
+h1 { font-size: clamp(30px, 5vw, 46px); }
+h2 { font-size: clamp(22px, 3vw, 28px); }
+h3 { font-size: 18px; }
+p { margin: 0; max-width: 76ch; }
+header, section { display: grid; gap: 12px; min-width: 0; }
+.lede { font-size: 17px; color: var(--ink-2); }
+.eyebrow { font-size: 12.5px; color: var(--ink-3); letter-spacing: 0.05em; }
+.kicker { font-size: 12.5px; color: var(--accent); font-weight: 600; letter-spacing: 0.04em; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; white-space: nowrap; }
+.code { font-family: var(--mono); font-size: 12.5px; direction: ltr; unicode-bidi: isolate; }
+.prod { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px; }
+@media (max-width: 520px) { .prod { grid-template-columns: 1fr; } }
+.pcard { border-radius: 14px; padding: 16px 18px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.pcard.d { background: var(--def-soft); border: 1px solid color-mix(in srgb, var(--def) 35%, transparent); }
+.pcard.g { background: var(--gro-soft); border: 1px solid color-mix(in srgb, var(--gro) 35%, transparent); }
+.pcard h3 { font-size: 24px; }
+.opt { background: var(--surface); border-radius: 10px; padding: 10px 12px; display: grid; gap: 4px; }
+.opt .t { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.opt .t b { font-size: 15.5px; }
+.opt .mix { font-size: 12.5px; color: var(--ink-2); }
+.opt .kpi { font-size: 13px; color: var(--ink-2); }
+.chip { display: inline-block; font-size: 11.5px; font-weight: 600; border-radius: 999px; padding: 1px 9px; }
+.chip.go { background: var(--good-soft); color: var(--good); }
+.chip.alt { background: var(--accent-soft); color: var(--accent); }
+.chip.tgt { background: var(--warn-soft); color: var(--warn); }
+.tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { padding: 7px 9px; border-block-end: 1px solid var(--rule); text-align: start; vertical-align: top; }
+th { font-weight: 500; color: var(--ink-3); font-size: 11.5px; background: var(--surface-2); }
+thead th { white-space: nowrap; }
+td.n, th.n { text-align: left; }
+td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; white-space: nowrap; }
+tr:last-child td { border-block-end: 0; }
+tr.pick td { background: var(--good-soft); }
+tr.dim td { color: var(--ink-3); }
+tr.grp td { background: var(--surface-2); font-weight: 600; font-size: 12px; color: var(--ink-2); }
+td.nm { min-width: 200px; }
+td.when { min-width: 240px; font-size: 12.5px; color: var(--ink-2); }
+.neg { color: var(--bad); } .pos { color: var(--good); }
+.cap { font-size: 12.5px; color: var(--ink-3); }
+.callout { background: var(--surface); border: 1px solid var(--rule); border-inline-start: 3px solid var(--warn); border-radius: 8px; padding: 12px 16px; display: grid; gap: 8px; }
+.callout.acc { border-inline-start-color: var(--accent); }
+ul.plain, ol.plain { margin: 0; padding-inline-start: 20px; display: grid; gap: 6px; max-width: 80ch; }
+.heat { display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 12px; }
+@media (max-width: 520px) { .heat { grid-template-columns: 1fr; } }
+.heat td.c { text-align: center; font-family: var(--mono); font-size: 12px; direction: ltr; min-width: 42px; }
+.heat th.rot { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; font-size: 11px; text-align: start; }
+.chart { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 12px; display: grid; gap: 8px; position: relative; min-width: 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12.5px; color: var(--ink-2); }
+.legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; margin-inline-end: 6px; vertical-align: middle; }
+.sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-inline-end: 6px; vertical-align: baseline; }
+.svgwrap { direction: ltr; position: relative; }
+.svgwrap svg { display: block; width: 100%; height: auto; overflow: visible; }
+.svgwrap text { fill: var(--ink-3); font-family: var(--mono); font-size: 11px; }
+.svgwrap .gl { stroke: var(--grid); stroke-width: 1; }
+.tip { position: absolute; pointer-events: none; background: var(--tip-bg); color: var(--tip-ink); border-radius: 8px; padding: 7px 10px; font-size: 12px; direction: rtl; min-width: 180px; z-index: 3; }
+.tip .r { display: flex; justify-content: space-between; gap: 12px; }
+.tip .r b { font-family: var(--mono); font-weight: 500; direction: ltr; }
+details { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 10px 14px; }
+details > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+details[open] > summary { margin-block-end: 10px; }
+.note { background: var(--surface); border: 1px solid var(--rule); border-inline-start: 3px solid var(--bench); border-radius: 8px; padding: 12px 16px; font-size: 13px; color: var(--ink-2); display: grid; gap: 6px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<main dir="rtl" lang="he">
+<header>
+  <div class="eyebrow">מחקר מסכם · 1 באוקטובר 2026 · כל המחקרים מספטמבר מאוחדים · רישום מראש, תיקונים מתועדים, סקירה בלתי תלויה</div>
+  <h1>מוצרי הקרן: הגנתי וצמיחה</h1>
+  <p class="lede">שני מוצרים, ולכל אחד תפריט של אפשרויות עם יתרונות וחסרונות. בחרתי אפשרות אחת לכל מוצר, וסימנתי מה לעשות אם רוצים יותר תשואה, יותר שקט, או את הגרסה העתידית. כל המספרים הם סימולציה של 2008–2026 (כולל פרוקסי סינתטי לפני 2012), ברוטו, ולצדם נטו אחרי 2/20 כתוספת לעתיד.</p>
+</header>
+
+<section>
+  <div class="kicker">ההחלטה</div>
+  <h2>מה משיקים</h2>
+  <div class="prod" id="cards"></div>
+</section>
+
+<section>
+  <div class="kicker">תפריט 1</div>
+  <h2>כל האפשרויות למוצר ההגנתי</h2>
+  <div class="tbl"><table id="menu_d"></table></div>
+</section>
+
+<section>
+  <div class="kicker">תפריט 2</div>
+  <h2>כל האפשרויות למוצר הצמיחה</h2>
+  <div class="tbl"><table id="menu_g"></table></div>
+  <p class="cap">‏"סיכוי ל־X" הוא הסיכוי שהירידה המרבית תהיה עמוקה מ־X, בדגימת בלוקים (2,000 היסטוריות חלופיות, ממוצע עשרה זרעים). גודל מרבי הוא הגודל שבו עלויות הביצוע עוד סבירות, במסלול פקודות מעובדות. "צריך חיווט" הוא מה שחסר כדי להריץ את התיק בלייב. במינוף, הלווה עולה ריבית אג״ח קצר + 1.5%, והגודל המרבי קטן פי המינוף.</p>
+  <div class="callout">
+    <b>איך מגיעים ל־22%</b>
+    <p>יש שתי דרכים, והן שונות מאוד. הדרך הראשונה היא להעמיס עוד מאותו מנוע: יותר TAA, או מינוף על ההשקה. שתיהן עולות אותו דבר: ירידה של ‎−17%‎ עד ‎−19%‎, וסיכוי של כ־58% לשבור ‎−20%‎. הדרך השנייה היא לפזר קודם ולמנף אחר כך. כשמערבבים את השקת הצמיחה עם היעד ההגנתי, השארפ עולה מ־1.14 ל־1.27, ומינוף של ‎1.7×‎ על התערובת נותן 22.4% עם אותה ירידה מרבית כמו ההשקה (‎−13.4%‎ מול ‎−13.1%‎). אלפא נטו מול סל ETF עם מגמה: ‏5.0% בשנה, t של 2.9.</p>
+    <p>המחיר: צריך את EOM ו־DV2-IND מחווטים, חשבון מרג׳ין (רצוי Portfolio Margin, כי יש בתיק ETF ממונף), וזו בדיקה שנעשתה אחרי שראיתי תוצאות (תיקון A5). המינוף גם מגדיל את הטעות אם השארפ של היעד ההגנתי מוגזם, וזה התיק עם הכי הרבה סיכון מודל. לכן זה יעד לשלב השני, לא השקה. הבנץ׳ לא מריץ מינוף, ולכן אין לזה קובץ YAML.</p>
+  </div>
+</section>
+
+<section>
+  <div class="kicker">איך נפתרה בעיית ה"הרבה אסטרטגיות"</div>
+  <h2>משפחות, גרסאות, ומה נשאר</h2>
+  <p>לכל משפחה נבדק קודם אם הגרסאות שונות באמת. שתי גרסאות עם קורלציה של 0.97 ומעלה נחשבות אחת. גרסה שאחרת מנצחת אותה ב־90% מההיסטוריות נפסלת. מה שנשאר מתחלק שווה בשווה, כדי לפזר את סיכון המודל.</p>
+  <div class="tbl"><table id="fam"></table></div>
+  <div class="callout">
+    <b>הלקח המרכזי על פיצול גרסאות</b>
+    <p>פיצול בין גרסאות של אותה אסטרטגיה לא מפזר סיכון כשהן חולקות מנוע. הכלל המקורי פיצל את משפחת ה־TAA לארבע (3x בדירוג, 3x שווה, ו־2x בלי BTAL על QLD ועל SSO). בפועל זה ערבב רמות מינוף, והמוצר הפסיד לאלופים על התקופה שלא נראתה. פיצול רק בין שתי גרסאות ה־3x נראה בהתחלה כמו ניצחון, אבל הסקירה הראתה שהרווח בא מיותר משקל ל־TAA ולא מהפיצול: באותו מבנה של ההשקה, הפיצול דווקא מוריד את התשואה מ־18.1% ל־16.8%. לכן ההכרעה פשוטה: גרסה אחת לכל מנוע בהשקה, וגרסה שנייה רק כשהיא באמת מנוע אחר (EOM, ‏DV2-IND).</p>
+    <p>גם הוספת פקטור נוסף לא עזרה: מומנטום שיורי, פריצות שקטות, ‏Alpha101 ו־IPO נבדקו בספטמבר, ואף אחד מהם לא ניצח את אג״ח קצר באותה משבצת.</p>
+  </div>
+</section>
+
+<section>
+  <div class="kicker">עמידות</div>
+  <h2>האם זה מחזיק</h2>
+  <h3>מול האלופים הקודמים</h3>
+  <div class="tbl"><table id="champ"></table></div>
+  <h3>בדיקה על תקופה שלא נראתה (בונים על חצי אחד, בודקים על השני)</h3>
+  <div class="tbl"><table id="fwd"></table></div>
+  <h3>תחת הנחות אחרות</h3>
+  <div class="tbl"><table id="frames"></table></div>
+  <p class="cap">‏"בלי ריבית על מזומן" קרוב לחשבון קטן. "פער HPI" מניח שהתיקון שמיישר את HPI בלייב לבקטסט לא ייכנס (2.6% פחות בשנה לשרוול). כאן הפער מוחל רק על HPI; כשמחילים אותו גם על HPI-RSI (קורלציה 0.95), היעד המותנה יורד ל־19.5%.</p>
+  <h3>כמה עולה מסחר יומי במניות</h3>
+  <div class="tbl"><table id="costs"></table></div>
+  <p class="cap">עלות נוספת לכל צד של עסקה, מעל מה שכבר בסימולציה. בכל תא: תשואה שנתית / שארפ עודף, מההרצה החוזרת של הסוקר. שלישיית ההיפוך לממוצע לבדה יורדת מ־17.8% ל־10.0% ב־‎+10‎ נ״ב, כי היא מגלגלת כ־78 פעמים את ההון בשנה.</p>
+</section>
+
+<section>
+  <div class="kicker">אלפא</div>
+  <h2>כמה מזה יכולת, וכמה חשיפה זולה</h2>
+  <p>רגרסיה שבועית מעל אג״ח קצר, מול QQQ לבד ומול סל ETF זול עם כלל מגמה פשוט על QQQ. ערך t של 2 ומעלה נחשב מובהק. ברוטו, כל המוצרים מובהקים מול שני המדדים. נטו אחרי 2/20 ומול סל ETF עם מגמה, רק היעד ההגנתי (t 3.3) והיעד המותנה בצמיחה (t 2.6, לפני עלויות) נשארים מובהקים. להשקת הצמיחה t של 1.8, גבולי. להשקה ההגנתית t של 0.4: נטו, משקיע יכול לקבל כמעט את אותו דבר מסל ETF זול עם כלל מגמה. הוספת DV2-IND מעלה אותו ל־1.4, והמינוף על התערובת (22%) נותן את האלפא הנטו הגבוהה בצמיחה, עם t של 2.9.</p>
+  <div class="tbl"><table id="alpha"></table></div>
+</section>
+
+<section>
+  <div class="kicker">משברים</div>
+  <h2>איך כל אפשרות התנהגה בירידות</h2>
+  <div class="tbl"><table id="crises"></table></div>
+</section>
+
+<section>
+  <h2>מהלך ההון</h2>
+  <div class="chart">
+    <div class="legend" id="cl"></div>
+    <div class="svgwrap" id="nav"></div>
+    <div class="svgwrap" id="dd"></div>
+  </div>
+</section>
+
+<section>
+  <h2>שנה אחר שנה</h2>
+  <div class="tbl"><table id="years"></table></div>
+</section>
+
+<section>
+  <h2>קורלציה בין הפודים: בכל הימים, ובימי נפילה</h2>
+  <div class="heat"><div class="tbl"><table id="h_all"></table></div><div class="tbl"><table id="h_fall"></table></div></div>
+  <p class="cap">ימי נפילה הם 5% הימים הגרועים של S&amp;P 500. ‏TAA3x, ‏TAA3x-1N ו־BTAL_QQQ חולקות מנוע אחד ("הגנה קודם"): קורלציה של 0.92 בין שתי גרסאות ה־TAA, ו־0.85–0.87 מול BTAL_QQQ. המנוע הזה נושא כ־70–77% מהסיכון של מוצרי הצמיחה, ולכן כדאי לקבוע לו תקרה ותרחיש כשל משלו.</p>
+</section>
+
+<section>
+  <div class="kicker">מה נבדק ולא עזר</div>
+  <h2>מה יצא מהמדף, ולמה</h2>
+  <ul class="plain">
+    <li><b>‏Compass (אינפלציה):</b> פרמטרים מזליים. נכשל בכל מבחן תאום, ויצא.</li>
+    <li><b>‏MOSAIC, ‏QPI:</b> ירדו לדרגת מחקר אחרי תיקוני הדליפה בספטמבר.</li>
+    <li><b>‏NDX-RM (מפקל):</b> נמצא בדיעבד, והיתרון שלו נשען על 2020 ו־2026. נשאר במעקב צל בלבד.</li>
+    <li><b>‏NDX-ATR:</b> העתק של NDX-VXN (קורלציה של 0.97 ומעלה). אין טעם לפצל.</li>
+    <li><b>‏Trinity:</b> דומיננטית מבחינת שארפ, ולכן נפסלה.</li>
+    <li><b>‏TAA בגרסאות 2x בלי BTAL (QLD, SSO):</b> יצאו מהתפריטים (תיקון A5). זו רמת מינוף, לא אסטרטגיה, והן לא מחווטות. משפחת ה־TAA היא רק TAA3x, ‏TAA3x-1N ו־BTAL_QQQ.</li>
+    <li><b>"מה שהכלל בחר" בהגנתי:</b> פיזר 3% מכל גרסת TAA ועוד 50% מזומן. יצא מהתפריט: זו אותה אסטרטגיה בחמש תחפושות.</li>
+    <li><b>‏TAA3x בתוך המוצר ההגנתי:</b> צריך 15–30% מזומן כדי לעמוד בכלל, ומפסיד ב־2008. ‏BTAL_QQQ עדיף שם.</li>
+    <li><b>‏downshock כפוד שלישי במקום DV2-IND:</b> מעט יותר תשואה, אבל ‎−3.6%‎ ב־2008 במקום ‎+1.8%‎. נשאר כחלופה כי הוא כבר נטען בבנץ׳.</li>
+    <li><b>מרג׳ין ברמת התיק:</b> לא יעיל יותר מהמינוף שכבר נמצא בתוך ה־TAA, ולא נתמך.</li>
+    <li><b>בלם ירידות (הקטנת סיכון אחרי ירידה):</b> לא שיפר.</li>
+    <li><b>תקרה של 70% על TAA באסטרטגיה אחת:</b> נשארת כמדיניות. בלעדיה הכללים ממשיכים להוסיף TAA, אבל כל ההיסטוריה של 2008 שלה סינתטית.</li>
+    <li><b>‏Tactical FI:</b> לא מוכן ללייב.</li>
+    <li><b>היפוך לממוצע בקרנות ענפיות בכלל המקורי:</b> מוריד סיכון במוצר ההגנתי, אבל דורש מסחר יומי ו־13 פודים. היעד ההגנתי משיג יותר עם DV2-IND ו־EOM בלבד.</li>
+    <li><b>שתי גרסאות ה־3x במקום אחת (מה שהצעתי קודם כהשקה):</b> ‏‎+0.5‎ נקודות בשנה, אבל אותו שארפ עודף וירידה עמוקה יותר. זה מינוף, לא יכולת, ונפסל במבחן האלוף.</li>
+    <li><b>היפוך לממוצע במניות כהשקה:</b> מוסיף תשואה לפני עלויות, אבל היתרון נעלם בסביבות 8–10 נ״ב לצד. נשאר כיעד מותנה.</li>
+    <li><b>שקלול מחדש של הליבה ההגנתית:</b> אף שקלול לא ניצח את 60/40 ב־80% מהמסלולים. לכן ההשקה היא 60/40 עם מזומן, ולא משקלות חדשים.</li>
+  </ul>
+</section>
+
+<section>
+  <div class="kicker">איחוד העבודה</div>
+  <h2>כל המחקרים מספטמבר, במקום אחד</h2>
+  <div class="tbl"><table id="history"></table></div>
+</section>
+
+<section>
+  <div class="kicker">מה צריך ממך</div>
+  <h2>החלטות ופעולות</h2>
+  <ol class="plain" id="todo"></ol>
+</section>
+
+<section id="review_sec">
+  <div class="kicker">סקירה בלתי תלויה</div>
+  <h2>מה הסוקר מצא</h2>
+  <div id="review"></div>
+</section>
+
+<div class="note">
+  <b>הסתייגויות</b>
+  <p>כל המספרים הם סימולציה על נתוני עבר, לא כסף אמיתי. לפני אוקטובר 2012 רגלי ה־TAA ו־BTAL_QQQ מחושבות על נתונים סינתטיים, ורוב הירידות הגדולות של מוצרי הצמיחה נמצאות בתקופה הזו. מזומן פנוי מקבל ריבית אג״ח קצר פחות חצי אחוז. זה לא מבחן עיוור: כל השרוולים נחקרו פעמים רבות על אותה היסטוריה. כמה מהבחירות (תיקונים A1–A5) נעשו אחרי שראיתי תוצאות, והן מסומנות כך. בדיקת White על עשרת מועמדי הצמיחה לא מצאה אף אחד שעדיף על ההשקה ברמת 5% אחרי החיפוש (p של 0.06 לפני עלויות, 0.20 ב־‎+5‎ נ״ב). בנץ׳ מריץ מ־2012 בלבד, ולכן שם המספרים יהיו של 2012 והלאה.</p>
+</div>
+</main>
+
+<script type="application/json" id="d">/*DATA*/null</script>
+<script type="application/json" id="rv">/*REVIEW*/null</script>
+<script>
+(function () {
+  const D = JSON.parse(document.getElementById('d').textContent);
+  const RV = JSON.parse(document.getElementById('rv').textContent);
+  const R = D.rows;
+  const POD = {taa3x: 'TAA3x', taa3x_1n: 'TAA3x-1N', ndx_vxn: 'NDX-VXN', core5: 'CORE5', btal_qqq: 'BTAL_QQQ', tbill: 'אג״ח קצר (BIL)', dv2: 'DV2',
+    hpi_vote: 'HPI', hpi_ibs_rsi: 'HPI-RSI', eom_flow: 'EOM', etf_dv2: 'DV2-IND', taa_1n_qld: 'TAA-QLD', taa_1n_sso: 'TAA-SSO', disp: 'פיזור ענפי',
+    downshock: 'ענפי-downshock', dv2_adv: 'DV2-ADV', dv2_floor: 'DV2-FLOOR', ndx_natr20: 'NDX-NATR20'};
+  const NAME = {fund_defensive: 'הגנתי · השקה', fund_defensive_growth: 'הגנתי · יותר תשואה', ref_d0: 'הגנתי · הכי פשוט (60/40 הקודם)', 'D-SIMPLEST': 'הגנתי · הכי פשוט (60/40 הקודם)',
+    'D-LAUNCH': 'הגנתי · מה שהכלל בחר, חודשי', 'D-CALMER': 'הגנתי · רגוע במיוחד', 'D-MAIN': 'הגנתי · עם היפוך לממוצע יומי', fund_defensive_target: 'הגנתי · יעד',
+    fund_growth: 'צמיחה · השקה', fund_growth_mr: 'צמיחה · יעד מותנה (היפוך לממוצע)', fund_growth_plus: 'צמיחה · יותר סיכון',
+    growth_3x_tested: 'צמיחה · 3x מפוצל (נבדק ונפסל)', ref_growth_verdict: 'צמיחה · השקה', 'G-SIMPLEST': 'צמיחה · הכי פשוט (G3 החי)',
+    'G-TARGET': 'צמיחה · יעד (צל ו־EOM)', 'G-LAUNCH': 'צמיחה · הכלל המקורי, חודשי', 'G-MAIN': 'צמיחה · הכלל המקורי, יומי',
+    'D0+DV2IND': 'הגנתי · הצעד הבא (ליבה + DV2-IND)', 'D0+DV2IND+DOWN': 'הגנתי · ליבה + DV2-IND + downshock', 'D0+DOWN': 'הגנתי · ליבה + downshock',
+    'CORE5+TAA3X+DOWN': 'הגנתי · CORE5 + TAA3x + downshock', 'D0+EOM+DOWN': 'הגנתי · יעד עם downshock במקום DV2-IND',
+    'margin_growth|0.22': 'צמיחה · ההשקה במינוף ‎1.3×‎', 'more_taa|0.22': 'צמיחה · יותר TAA, בלי מינוף', 'margin_mr|0.22': 'צמיחה · יעד מותנה במינוף ‎1.15×‎',
+    'margin_dtarget|0.22': 'צמיחה · היעד ההגנתי במינוף ‎2.6×‎', 'margin_mix|0.22': 'צמיחה · 22% (חצי השקה, חצי יעד הגנתי, ‎1.7×‎)'};
+  const FILE = {fund_defensive: 'fund_defensive', fund_defensive_growth: 'fund_defensive_growth', fund_defensive_target: 'fund_defensive_target',
+    fund_growth: 'fund_growth', fund_growth_mr: 'fund_growth_mr', fund_growth_plus: 'fund_growth_plus', 'D0+DV2IND': 'fund_defensive_dv2ind', 'D0+DOWN': 'fund_defensive_downshock'};
+  const WHEN = {
+    fund_defensive: 'הבחירה להשקה. זה האלוף הקודם (60/40) עם 20% מזומן, כדי לעמוד בכלל: סיכוי של 1.7% לשבור ‎−10%‎. הכי פשוט שעובר, ומרוויח במשברים (2008: ‎+2.7%‎, ‏2022: ‎+1.8%‎).',
+    fund_defensive_growth: 'אם רוצים יותר תשואה: ‏9.3% בשנה (‎+1.9‎ נקודות), סיכוי של 4.4% לשבור ‎−10%‎. בפועל זו ליבה + 22% צמיחה + 30% מזומן, ותאום נאיבי נותן כמעט אותו דבר. מגן פחות במשברים (קורונה ‎−2.5%‎), ועמלה על 30% מזומן עולה ללקוח כ־0.6% בשנה.',
+    ref_d0: 'הכי פשוט: שני פודים, ‏9.0% בשנה. לא עומד בכלל: סיכוי של 11.7% לשבור ‎−10%‎. ההשקה היא בדיוק הוא, עם 20% מזומן.',
+    'D-LAUNCH': 'מה שהכלל בחר בקו החודשי: חצי מזומן, ‏7.1% בשנה, וכולל TAA ב־2x שלא מחווט. לא עדיף על ההשקה.',
+    'D-CALMER': 'אם הלקוח רוצה ירידה מרבית של 3% בלבד: ‏5.6% בשנה. בפועל זה בעיקר מזומן.',
+    'D-MAIN': 'שארפ 1.29 עם היפוך לממוצע יומי בקרנות סל, אבל 13 פודים, מסחר יומי, וחמישה פודים שלא מחווטים. היעד עושה את זה טוב יותר עם ארבעה פודים.',
+    fund_defensive_target: 'היעד: שארפ 1.60, ‏10.2% בשנה, ורווח במשברים (2008: ‎+6.3%‎, ‏2022: ‎+5.0%‎). מנצח את האלוף בכל המסלולים. אפשר רק אחרי שיחווטו EOM ו־DV2-IND.',
+    fund_growth: 'הבחירה להשקה: ההכרעה מ־30.9. חודשי, ארבעה פודים, עובר ‎$250M‎, סיכוי של 11.4% לשבור ‎−20%‎. נשארת כי אף חלופה לא עברה את מבחן האלוף אחרי עלויות.',
+    fund_growth_plus: 'אם הלקוח מוכן ליותר סיכון: ‏21.4% בשנה, ירידה מרבית ‎−16.9%‎, סיכוי של 47% לשבור ‎−20%‎ ו־11% לשבור ‎−25%‎. אותם ארבעה פודים, יותר TAA.',
+    fund_growth_mr: 'יעד מותנה: ‏20% בשנה לפני עלויות, שארפ עודף 1.22, ומנצח את ההשקה ב־96.5% מהמסלולים. אבל ב־‎+10‎ נ״ב לצד יורד ל־17.5%, כמו ההשקה, והוא דורש מסחר יומי במניות, עם גודל מרבי של ‎$10M‎. רק אחרי שתימדד עלות אמיתית של 3–4 נ״ב ויתוקן HPI.',
+    growth_3x_tested: 'מה שהצעתי קודם כהשקה. ‏‎+0.5‎ נקודות בשנה, אבל ירידה של ‎−15.8%‎ ואותו שארפ עודף, כלומר רק יותר מינוף. נכשל במבחן האלוף (סיכוי שבירה 13.5% מול 11.4%), ולכן נפסל.',
+    'D0+DV2IND': 'הצעד הבא אחרי ההשקה: שליש לכל אחד, בלי מזומן. עומד בכלל (סיכוי של 1.1% לשבור ‎−10%‎), מנצח את 60/40 ב־99% מהמסלולים לפי שארפ עודף, ומרוויח ב־2008 וב־2022. צריך לקדם את DV2-IND מצל ולחווט אותו.',
+    'D0+DV2IND+DOWN': 'השארפ הגבוה ביותר בלי EOM (1.33), והסיכון הנמוך ביותר. אבל ‎−2.6%‎ ב־2008, כי downshock קונה ירידות שממשיכות לרדת. שני פודים יומיים לחיווט.',
+    'D0+DOWN': '‏9.35% בשנה ועומד בכלל, ונטען בבנץ׳ כבר היום. אבל ‎−3.6%‎ ב־2008 (60/40 לבדו: ‎+3.0%‎), ולכן הוא פחות "הגנתי" מ־DV2-IND.',
+    'CORE5+TAA3X+DOWN': 'אם שמים TAA3x במקום BTAL_QQQ: צריך 15% מזומן כדי לעמוד בכלל, ו־2008 יוצא ‎−4.0%‎. יותר תשואה (10.8%), אבל זה כבר לא מוצר הגנתי.',
+    'D0+EOM+DOWN': 'היעד, עם downshock במקום DV2-IND: ‏10.6%, שארפ 1.55. כל ארבעת הפודים נטענים בבנץ׳ היום, אבל EOM לא סחיר בלייב כמו שהוא.',
+    'margin_growth|0.22': 'הדרך הפשוטה ל־22%: אותה השקה במינוף ‎1.3×‎. ירידה של ‎−16.8%‎, וסיכוי של 58% לשבור ‎−20%‎. מינוף ויותר TAA עולים כמעט אותו דבר.',
+    'more_taa|0.22': 'אותו יעד בלי מרג׳ין: ‏TAA3x-1N עולה לכ־70%. ירידה של ‎−18.6%‎, סיכוי של 58% לשבור ‎−20%‎ ו־17% לשבור ‎−25%‎.',
+    'margin_mr|0.22': 'היעד המותנה במינוף ‎1.15×‎: ירידה של ‎−18.2%‎, סיכוי של 28% לשבור ‎−20%‎. רגיש לעלויות: ‏21.1% ב־‎+5‎ נ״ב.',
+    'margin_dtarget|0.22': 'הסיכון הנמוך ביותר ל־22%: ירידה של ‎−14.6%‎, סיכוי של 5% לשבור ‎−20%‎, ורווח ב־2008 וב־2022. אבל מינוף ‎2.6×‎ על התיק עם הכי הרבה סיכון מודל, ו־‎+5‎ נ״ב מורידים אותו ל־19.5%.',
+    'margin_mix|0.22': 'הבחירה ל־22%: חצי השקת צמיחה, חצי יעד הגנתי, במינוף ‎1.7×‎. ירידה של ‎−13.4%‎ (כמו ההשקה), סיכוי של 14.5% לשבור ‎−20%‎, ‏21.1% ב־‎+5‎ נ״ב. צריך את EOM ו־DV2-IND מחווטים, וחשבון מרג׳ין.',
+    'G-SIMPLEST': 'הזוג החי: שני פודים, רץ היום בלי חיווט. ‏17.7% בשנה, אבל ירידה של ‎−15.2%‎ ופחות הגנה.',
+    'G-TARGET': 'הכלל המקורי עם פודי צל ו־EOM: ירידה של 13.8% ושארפ 1.27, אבל שישה פודים לא מחווטים ומסחר יומי. לעתיד.',
+    'G-LAUNCH': 'מה שהכלל המקורי בחר (TAA מפוצל לארבע). לא ניצח את האלופים. מוצג לשקיפות.',
+    'G-MAIN': 'הכלל המקורי עם היפוך לממוצע. לא ניצח את האלופים. מוצג לשקיפות.'};
+  const nm = k => NAME[k] || k;
+  const pct = (x, d = 1) => (x === null || x === undefined || Number.isNaN(x)) ? '–' : (x * 100).toFixed(d) + '%';
+  const sg = x => (x === null || x === undefined) ? '–' : (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x * 100).toFixed(1) + '%';
+  const f2 = x => (x === null || x === undefined) ? '–' : x.toFixed(2);
+  const usd = x => !x ? '–' : '$' + (x >= 1e6 ? Math.round(x / 1e6) + 'M' : Math.round(x / 1e3) + 'K');
+  const td = (v, c = '') => `<td class="n ${c}">${v}</td>`;
+  const mix = (w, L) => '‏' + Object.entries(w).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${Math.round(v * 100)}% ${POD[k] || k}`).join(' · ') + (L && L !== 1 ? ` · מינוף ‎${L.toFixed(2)}×‎` : '');
+
+  // Decision cards
+  const opt = (k, chip, cls) => { const r = R[k]; return `<div class="opt"><div class="t"><b>${nm(k)}</b><span class="chip ${cls}">${chip}</span></div>
+    <div class="mix">${mix(r.weights, r.lever)}</div>
+    <div class="kpi">‏תשואה <span class="num">${pct(r.m.cagr)}</span> (נטו <span class="num">${pct(r.m.net_cagr)}</span>) · ירידה מרבית <span class="num">${sg(r.m.maxdd)}</span> · שארפ עודף <span class="num">${f2(r.m.xsharpe)}</span> · <span class="code">${FILE[k] ? FILE[k] + '.yaml' : ''}</span></div></div>`; };
+  document.getElementById('cards').innerHTML = `
+    <div class="pcard d"><h3>הגנתי</h3>${opt('fund_defensive', 'להשקה', 'go')}${opt('D0+DV2IND', 'הצעד הבא', 'alt')}${opt('fund_defensive_target', 'יעד', 'tgt')}
+      <p style="font-size:13.5px">ההשקה היא האלוף הקודם עם 20% מזומן: הכי פשוט שעומד בכלל, ורץ ברגע ש־CORE5 מחווט. הצעד הבא הוא פוד שלישי, DV2-IND: שליש לכל אחד, בלי מזומן, יותר תשואה ושארפ (1.26 מול 1.11), ועדיין רווח ב־2008 וב־2022. היעד מוסיף את EOM ומגיע לשארפ 1.60.</p></div>
+    <div class="pcard g"><h3>צמיחה</h3>${opt('fund_growth', 'להשקה', 'go')}${opt('fund_growth_plus', 'יותר סיכון', 'alt')}${opt('margin_mix|0.22', '22% באותו סיכון', 'tgt')}
+      <p style="font-size:13.5px">ההשקה היא ההכרעה מ־30.9: חודשית, עוברת ‎$250M‎, וחסר לה רק CORE5. אם רוצים יותר עכשיו, "יותר סיכון" נותן 21.4% עם ירידה עמוקה יותר. ל־22% באותו סיכון כמו ההשקה צריך לפזר ואז למנף: חצי השקה, חצי יעד הגנתי, ‎1.7×‎. זה אפשרי רק אחרי ש־EOM ו־DV2-IND מחווטים.</p></div>`;
+
+  // Menus
+  const COLS = [['cagr', 'תשואה', pct], ['net_cagr', 'נטו 2/20', pct], ['xsharpe', 'שארפ עודף', f2], ['sortino', 'סורטינו', f2], ['maxdd', 'ירידה מרבית', sg],
+    ['calmar', 'קלמר', f2], ['cvar5_21d', 'CVaR חודשי', sg], ['worst_year', 'שנה גרועה', sg], ['beta', 'בטא', f2], ['crisis_corr', 'קורלציה בנפילות', f2]];
+  function menu(id, keys, limits) {
+    let h = `<thead><tr><th>אפשרות</th>${COLS.map(c => `<th class="n">${c[1]}</th>`).join('')}${limits.map(l => `<th class="n">סיכוי ל־${l}%−</th>`).join('')}<th class="n">+5 נ״ב</th><th class="n">פודים</th><th class="n">ימי מסחר</th><th class="n">גודל מרבי</th><th>צריך חיווט</th><th>מתי לבחור</th></tr></thead><tbody>`;
+    keys.forEach(k => { const r = R[k]; const m = r.m;
+      const pick = k === 'fund_defensive' || k === 'fund_growth';
+      h += `<tr class="${pick ? 'pick' : ''} ${k === 'growth_3x_tested' || k === 'CORE5+TAA3X+DOWN' ? 'dim' : ''}"><td class="nm"><b>${nm(k)}</b><div class="cap">${mix(r.weights, r.lever)}</div></td>` +
+        COLS.map(([c, , f]) => td(f(m[c]), (c.includes('dd') || c.includes('cvar') || c === 'worst_year') && m[c] < 0 ? 'neg' : '')).join('') +
+        limits.map(l => td(pct(r.tail['p' + l], 1))).join('') + td(pct(r.frames.s3_plus_5bps.cagr)) + td(r.ops.pods) + td(Math.round(r.ops.trade_days_per_year)) +
+        td(usd(r.capacity && r.capacity.routes['worked+blocks'].recommended)) + `<td>${r.needs_wiring.map(p => POD[p] || p).join(', ') || 'כלום'}</td><td class="when">${WHEN[k] || ''}</td></tr>`; });
+    document.getElementById(id).innerHTML = h + '</tbody>';
+  }
+  menu('menu_d', ['fund_defensive', 'D0+DV2IND', 'D0+DV2IND+DOWN', 'D0+DOWN', 'fund_defensive_target', 'D0+EOM+DOWN', 'fund_defensive_growth', 'CORE5+TAA3X+DOWN', 'ref_d0'], [7, 10]);
+  menu('menu_g', ['fund_growth', 'margin_mix|0.22', 'fund_growth_plus', 'margin_growth|0.22', 'more_taa|0.22', 'margin_dtarget|0.22', 'fund_growth_mr', 'margin_mr|0.22', 'growth_3x_tested', 'G-SIMPLEST'], [20, 25]);
+
+  // Families
+  const FL = {TAA: 'רוטציה טקטית (הגנה קודם)', NDX: 'מומנטום נאסד״ק 100', SMR: 'היפוך לממוצע במניות', EMR: 'היפוך לממוצע בקרנות סל', DEF: 'מאקרו הגנתי', EOM: 'זרימות סוף חודש'};
+  let h = `<thead><tr><th>משפחה</th><th>גרסאות</th><th>העתקים (קורלציה ≥ 0.97)</th><th>נפסלו (נוצחו ב־90%)</th><th>הבלוק (חלוקה שווה)</th><th>במוצרים הסופיים</th></tr></thead><tbody>`;
+  const FINAL = {TAA: 'TAA3x-1N בלבד בהשקה. שתי גרסאות ה־3x רק ביעד המותנה, והפיצול ביניהן אינו פיזור (קורלציה 0.92)', NDX: 'NDX-VXN בלבד (NATR20 בצל)', SMR: 'DV2 + HPI + HPI-RSI, רק ביעד המותנה של הצמיחה',
+    EMR: 'DV2-IND, רק ביעד ההגנתי', DEF: 'CORE5 + BTAL_QQQ, בכל המוצרים', EOM: 'רק ביעד ההגנתי'};
+  Object.entries(D.stage1).forEach(([f, v]) => {
+    const merged = Object.entries(v.variants).filter(([, i]) => i.merged_into).map(([k, i]) => `${POD[k] || k} ← ${POD[i.merged_into] || i.merged_into}`).join(', ');
+    h += `<tr><td><b>${FL[f]}</b></td><td>${Object.keys(v.variants).map(k => POD[k] || k).join(', ')}</td><td>${merged || '–'}</td><td>${v.dominated.map(k => POD[k] || k).join(', ') || '–'}</td><td>${(v.block_target || []).map(k => POD[k] || k).join(', ')}</td><td>${FINAL[f]}</td></tr>`; });
+  document.getElementById('fam').innerHTML = h + '</tbody>';
+
+  // Champion tests (clean books)
+  const C = D.clean;
+  h = `<thead><tr><th>מוצר</th><th>מול</th><th class="n">מנצח ב־% מהמסלולים</th><th class="n">תשואה: שלו / האלוף</th><th class="n">סיכוי שבירה: שלו / האלוף</th><th class="n">חלון מדויק 2012+: שלו / האלוף</th></tr></thead><tbody>`;
+  const CH = [['fund_defensive_growth', 'ref_d0', 10, 'xsharpe'], ['fund_defensive_target', 'ref_d0', 10, 'xsharpe'],
+    ['fund_growth_mr', 'fund_growth', 20, 'cagr'], ['growth_3x_tested', 'fund_growth', 20, 'cagr']];
+  h = `<thead><tr><th>מוצר</th><th>מול</th><th class="n">מנצח ב־% מהמסלולים</th><th class="n">שלו / האלוף</th><th class="n">סיכוי שבירה: שלו / האלוף</th><th class="n">חלון 2012+: שלו / האלוף</th><th>עובר את המבחן?</th></tr></thead><tbody>`;
+  CH.forEach(([k, c, lim, obj]) => { const a = C[k], b = C[c], f = obj === 'cagr' ? pct : f2, ka = obj === 'cagr' ? 'cagr' : 'xsharpe';
+    const ok = a.beats_champ.share >= 0.8 && a.tail['p' + lim] <= b.tail['p' + lim] && a.s6_exact[ka] > b.s6_exact[ka];
+    h += `<tr><td>${nm(k)}</td><td>${nm(c)}</td>${td(pct(a.beats_champ.share, 0))}${td(f(a[ka]) + ' / ' + f(b[ka]))}${td(pct(a.tail['p' + lim]) + ' / ' + pct(b.tail['p' + lim]))}${td(f(a.s6_exact[ka]) + ' / ' + f(b.s6_exact[ka]))}<td class="${ok ? 'pos' : 'neg'}">${ok ? (k === 'fund_growth_mr' ? 'כן, לפני עלויות' : 'כן') : 'לא'}</td></tr>`; });
+  document.getElementById('champ').innerHTML = h + `</tbody>`;
+  document.getElementById('champ').closest('.tbl').insertAdjacentHTML('afterend', '<p class="cap">כדי להחליף אלוף צריך לנצח אותו ב־80% מהמסלולים, בלי סיכוי שבירה גבוה יותר, ועם תוצאה טובה יותר בחלון 2012+. בהגנתי המדד הוא שארפ עודף, ובצמיחה תשואה. ההשקה ההגנתית היא האלוף עצמו עם 20% מזומן, ולכן אין לה מול מה להיבחן. היעד המותנה עובר רק לפני עלויות: ב־‎+5‎ נ״ב ועם פער HPI על שתי הגרסאות נשארת לו חצי נקודה בשנה מעל ההשקה, עם ירידה עמוקה יותר (‎−16.7%‎ מול ‎−13.1%‎).</p>');
+
+  // Forward
+  const FW = [['GROWTH|LOW-TOUCH', 'צמיחה חודשי, TAA מפוצל לארבע (הכלל המקורי)', D.forward, 'GROWTH_VERDICT'],
+    ['GROWTH|LOW-TOUCH|TAA3X', 'צמיחה חודשי, TAA בשתי גרסאות 3x (הגרסה שנפסלה)', D.forward_alt, 'GROWTH_VERDICT'],
+    ['GROWTH|MAIN', 'צמיחה יומי, TAA מפוצל לארבע (הכלל המקורי)', D.forward, 'GROWTH_VERDICT'],
+    ['GROWTH|MAIN|TAA3X', 'צמיחה יומי, TAA בשתי גרסאות 3x (כמו היעד המותנה)', D.forward_alt, 'GROWTH_VERDICT'],
+    ['DEFENSIVE|LOW-TOUCH', 'הגנתי חודשי', D.forward, 'D0'], ['DEFENSIVE|MAIN', 'הגנתי יומי', D.forward, 'D0']];
+  h = `<thead><tr><th>מה נבנה</th><th class="n">2017–2026 (נבנה על 2008–2017)</th><th class="n">האלוף באותה תקופה</th><th class="n">2008–2017 (נבנה על 2017–2026)</th><th class="n">האלוף באותה תקופה</th></tr></thead><tbody>`;
+  FW.forEach(([k, lab, src, ch]) => { const a = src[`${k}|select_H1_eval_H2`], b = src[`${k}|select_H2_eval_H1`]; if (!a) return;
+    const key = k.startsWith('DEF') ? 'xsharpe' : 'cagr', f = key === 'cagr' ? pct : f2;
+    const cls = (x, y) => x[key] > y[key] ? 'pos' : 'neg';
+    h += `<tr><td>${lab}</td>${td(f(a.new[key]), cls(a.new, a[ch]))}${td(f(a[ch][key]))}${td(f(b.new[key]), cls(b.new, b[ch]))}${td(f(b[ch][key]))}</tr>`; });
+  document.getElementById('fwd').innerHTML = h + `</tbody>`;
+  document.getElementById('fwd').closest('.tbl').insertAdjacentHTML('afterend', '<p class="cap">בצמיחה המדד הוא תשואה שנתית, ובהגנתי שארפ עודף. האלוף בצמיחה הוא ההשקה (38/26/18/18), ובהגנתי CORE5 60 / BTAL_QQQ 40. ירוק = ניצח את האלוף. <b>זהירות:</b> בלוק ה־3x הוגדר אחרי שהבלוקים המקוריים הפסידו כאן, ולכן השורות שלו בוחרות מחדש משקלות ולא את הבלוק. ניצחון נקי יש רק ליעד המותנה, בחצי 2017–2026 (‏23.2% מול 21.2%, שארפ 1.28 מול 1.22). בחצי 2008–2017 הוא מנצח רק בתשואה, עם ירידה של ‎−17.5%‎ שחוצה את גבול הבנייה. לגרסת ה־3x המפוצלת אין ניצחון נקי באף חצי.</p>');
+
+  // Frames
+  const FR = [['s3_plus_5bps', '+5 נ״ב לצד'], ['s1_house_cash', 'בלי ריבית על מזומן'], ['s6_exact', 'רק 2012+ (בלי פרוקסי)'], ['s5_hpi_live_gap', 'פער HPI בלייב']];
+  const FK = ['fund_defensive', 'D0+DV2IND', 'fund_defensive_target', 'fund_growth', 'fund_growth_plus', 'margin_mix|0.22', 'fund_growth_mr'];
+  h = `<thead><tr><th>מסגרת</th>${FK.map(k => `<th class="n">${nm(k)}</th>`).join('')}</tr></thead><tbody><tr class="grp"><td colspan="${FK.length + 1}">תשואה שנתית / ירידה מרבית</td></tr>`;
+  h += `<tr><td>הבסיס</td>${FK.map(k => td(pct(R[k].m.cagr) + ' / ' + sg(R[k].m.maxdd))).join('')}</tr>`;
+  FR.forEach(([f, l]) => { h += `<tr><td>${l}</td>${FK.map(k => td(pct(R[k].frames[f].cagr) + ' / ' + sg(R[k].frames[f].dd))).join('')}</tr>`; });
+  document.getElementById('frames').innerHTML = h + '</tbody>';
+
+  // Costs (reviewer rerun, main frame, LONG window)
+  const CO_ = [['‎+0‎ נ״ב', ['20.0% / 1.22', '18.6% / 1.14', '18.1% / 1.14']], ['‎+5‎ נ״ב', ['18.7% / 1.15', '18.3% / 1.13', '17.7% / 1.12']],
+    ['‎+10‎ נ״ב', ['17.5% / 1.08', '17.9% / 1.11', '17.4% / 1.10']], ['‎+5‎ נ״ב ופער HPI על שתי הגרסאות', ['18.2%', '18.3%', '17.7%']]];
+  document.getElementById('costs').innerHTML = `<thead><tr><th>עלות נוספת</th><th class="n">${nm('fund_growth_mr')}</th><th class="n">${nm('growth_3x_tested')}</th><th class="n">${nm('fund_growth')}</th></tr></thead><tbody>` +
+    CO_.map(([l, v]) => `<tr><td>${l}</td>${v.map(x => td(x)).join('')}</tr>`).join('') + '</tbody>';
+
+  // Alpha
+  const AB = ['fund_defensive', 'D0+DV2IND', 'D0+DV2IND+DOWN', 'fund_defensive_target', 'fund_growth', 'fund_growth_plus', 'margin_growth|0.22', 'margin_mix|0.22', 'margin_dtarget|0.22', 'fund_growth_mr'];
+  const ga_ = (b, basis, m) => D.alpha.find(a => a.book === b && a.basis === basis && a.model === m);
+  const ac = a => a ? `${pct(a.alpha_ann)} <span class="${a.alpha_t >= 2 ? 'pos' : a.alpha_t < 1 ? 'neg' : ''}">(t ${a.alpha_t.toFixed(1)})</span>` : '–';
+  h = `<thead><tr><th>אפשרות</th><th class="n">ברוטו מול QQQ</th><th class="n">ברוטו מול ETF + מגמה</th><th class="n">נטו מול QQQ</th><th class="n">נטו מול ETF + מגמה</th></tr></thead><tbody>`;
+  AB.forEach(b => { h += `<tr><td>${nm(b)}</td>${td(ac(ga_(b, 'gross', 'M0')))}${td(ac(ga_(b, 'gross', 'M2')))}${td(ac(ga_(b, 'net', 'M0')))}${td(ac(ga_(b, 'net', 'M2')))}</tr>`; });
+  document.getElementById('alpha').innerHTML = h + '</tbody>';
+
+  // Crises
+  const CRK = Object.keys(R.fund_defensive.m.crises);
+  const crLab = k => ({gfc: 'המשבר הפיננסי 2008–09', q4_2018: 'סוף 2018', covid: 'קורונה 2020', bear_2022: 'שוק דובי 2022', tariffs_2025: 'מכסים 2025'})[k] ||
+    (() => { const p = k.split('|'); return `נפילה משותפת <span class="num">${p[1].slice(5, 7)}/${p[1].slice(0, 4)}</span>`; })();
+  const CB = ['fund_defensive', 'D0+DV2IND', 'D0+DOWN', 'fund_defensive_target', 'fund_growth', 'fund_growth_plus', 'margin_mix|0.22'];
+  h = `<thead><tr><th>אירוע</th>${CB.map(k => `<th class="n">${nm(k)}</th>`).join('')}<th class="n">S&amp;P 500</th><th class="n">QQQ</th></tr></thead><tbody>`;
+  CRK.forEach(k => { h += `<tr><td>${crLab(k)}</td>` + CB.map(b => { const v = R[b].m.crises[k]; return td(sg(v), v < 0 ? 'neg' : 'pos'); }).join('') +
+    ['S&P 500', 'QQQ'].map(b => { const v = D.bench[b].crises[k]; return td(sg(v), v < 0 ? 'neg' : 'pos'); }).join('') + '</tr>'; });
+  document.getElementById('crises').innerHTML = h + '</tbody>';
+
+  // Chart
+  const S = [['fund_defensive', 'var(--def)'], ['fund_defensive_target', 'var(--s4)'], ['fund_growth', 'var(--gro)'], ['margin_mix|0.22', 'var(--s5)']]
+    .map(([k, c]) => [nm(k), R[k].m.nav, c, false]).concat([['S&P 500', D.bench['S&P 500'].nav, 'var(--bench)', true]]);
+  document.getElementById('cl').innerHTML = S.map(([l, , c]) => `<span><i style="background:${c}"></i>${l}</span>`).join('') + '<span style="color:var(--ink-3)">צמיחה של דולר, סולם לוגריתמי; מתחת: ירידה מהשיא</span>';
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (t, a, p) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); p && p.appendChild(e); return e; };
+  function chart(host, series, H, log, ticks, fmt) {
+    const Wd = 900, m = {l: 52, r: 12, t: 10, b: 24};
+    const svg = el('svg', {viewBox: `0 0 ${Wd} ${H}`, role: 'img', 'aria-label': 'מהלך ההון'}, host);
+    const dates = series[0][1].map(p => p[0]);
+    const f = v => log ? Math.log(v) : v;
+    let lo = Infinity, hi = -Infinity; series.forEach(s => s[1].forEach(p => { lo = Math.min(lo, f(p[1])); hi = Math.max(hi, f(p[1])); }));
+    if (!log) hi = 0;
+    const X = i => m.l + i / (dates.length - 1) * (Wd - m.l - m.r), Y = v => H - m.b - (f(v) - lo) / (hi - lo) * (H - m.t - m.b);
+    ticks.filter(v => f(v) >= lo - 1e-9 && f(v) <= hi + 1e-9).forEach(v => { el('line', {x1: m.l, x2: Wd - m.r, y1: Y(v), y2: Y(v), class: 'gl'}, svg); el('text', {x: m.l - 8, y: Y(v) + 4, 'text-anchor': 'end'}, svg).textContent = fmt(v); });
+    dates.forEach((d, i) => { if (d.endsWith('-01') && (+d.slice(0, 4)) % 3 === 2) el('text', {x: X(i), y: H - 6, 'text-anchor': 'middle'}, svg).textContent = d.slice(0, 4); });
+    series.slice().reverse().forEach(([, pts, c, dsh]) => el('path', {d: pts.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(''), fill: 'none', stroke: c, 'stroke-width': dsh ? 1.6 : 2.2, 'stroke-dasharray': dsh ? '5 4' : 'none'}, svg));
+    const tip = document.createElement('div'); tip.className = 'tip'; tip.hidden = true; host.appendChild(tip);
+    const cross = el('line', {y1: m.t, y2: H - m.b, stroke: 'var(--ink-3)', visibility: 'hidden'}, svg);
+    svg.addEventListener('pointermove', e => { const r = svg.getBoundingClientRect(); const i = Math.max(0, Math.min(dates.length - 1, Math.round(((e.clientX - r.left) / r.width * Wd - m.l) / (Wd - m.l - m.r) * (dates.length - 1))));
+      cross.setAttribute('x1', X(i)); cross.setAttribute('x2', X(i)); cross.setAttribute('visibility', 'visible');
+      tip.innerHTML = `<div><b class="num">${dates[i]}</b></div>` + series.map(([l, pts]) => `<div class="r"><span>${l}</span><b>${pts[i] ? fmt(pts[i][1]) : '–'}</b></div>`).join('');
+      tip.hidden = false; const hr = host.getBoundingClientRect(); let x = e.clientX - hr.left + 12; if (x + 230 > hr.width) x -= 250; tip.style.left = x + 'px'; tip.style.top = (e.clientY - hr.top - 10) + 'px'; });
+    svg.addEventListener('pointerleave', () => { tip.hidden = true; cross.setAttribute('visibility', 'hidden'); });
+  }
+  chart(document.getElementById('nav'), S, 330, true, [1, 2, 4, 8, 16, 32], v => v.toFixed(v < 10 ? 2 : 1) + '×');
+  const DDS = S.map(([l, pts, c, d]) => { let pk = 0; return [l, pts.map(([t, v]) => { pk = Math.max(pk, v); return [t, v / pk - 1]; }), c, d]; });
+  chart(document.getElementById('dd'), DDS, 180, false, [0, -0.1, -0.2, -0.3, -0.4, -0.5], v => Math.round(v * 100) + '%');
+
+  // Years
+  const YB = ['fund_defensive', 'D0+DV2IND', 'fund_defensive_target', 'fund_growth', 'fund_growth_plus', 'margin_mix|0.22'];
+  h = `<thead><tr><th>שנה</th>${YB.map(k => `<th class="n">${nm(k)}</th>`).join('')}<th class="n">S&amp;P 500</th></tr></thead><tbody>`;
+  Object.keys(R.fund_defensive.m.years).forEach(y => { h += `<tr><td class="n">${y}${y === '2008' || y === '2026' ? '*' : ''}</td>` +
+    YB.map(k => { const v = R[k].m.years[y]; return td(sg(v), v < 0 ? 'neg' : ''); }).join('') + td(sg(D.bench['S&P 500'].years[y]), D.bench['S&P 500'].years[y] < 0 ? 'neg' : '') + '</tr>'; });
+  document.getElementById('years').innerHTML = h + '</tbody>';
+
+  // Heatmaps
+  const CO = D.corr;
+  const css = getComputedStyle(document.documentElement);
+  const hex = v => { const s = css.getPropertyValue(v).trim(); return [1, 3, 5].map(i => parseInt(s.slice(i, i + 2), 16)); };
+  const mixc = (a, b, t) => `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * t)).join(',')})`;
+  function heat(id, M, title) { const mid = hex('--mid'), pos = hex('--pos-pole'), neg = hex('--neg-pole');
+    let h = `<thead><tr><th>${title}</th>${CO.names.map(n => `<th class="rot">${POD[n] || n}</th>`).join('')}</tr></thead><tbody>`;
+    CO.names.forEach((r, i) => { h += `<tr><td style="white-space:nowrap">${POD[r] || r}</td>` + M[i].map((v, j) => { const bg = i === j ? 'var(--surface-2)' : (v >= 0 ? mixc(mid, pos, Math.min(1, v) * 0.85) : mixc(mid, neg, Math.min(1, -v) * 0.85));
+      return `<td class="c" style="background:${bg};${Math.abs(v) > 0.6 && i !== j ? 'color:#fff' : ''}">${i === j ? '' : v.toFixed(2)}</td>`; }).join('') + '</tr>'; });
+    document.getElementById(id).innerHTML = h + '</tbody>'; }
+  heat('h_all', CO.all, 'כל הימים'); heat('h_fall', CO.falls, 'ימי נפילה');
+
+  // History
+  const HIST = [['תפריט מוצרי הקרן (23.9)', '7 מוצרים בשתי קבוצות, קובצי fund_menu_*', 'מוחלף. ‏MOSAIC ו־Compass יצאו, ו־Tactical FI לא מוכן'],
+    ['מדף הצמיחה (24.9, 26.9)', 'G3 הוא הזוג החי; פרוקסי 2008 מאומת', 'G3 נשאר "הכי פשוט" בתפריט'],
+    ['בניית המדף מחדש (29.9)', 'ליבה הגנתית CORE5 + BTAL_QQQ', 'בסיס ההגנתי'],
+    ['הגנתי v2 (29–30.9)', 'יעד של ארבעה פודים (עם EOM ו־DV2-IND)', 'הוא ליבת היעד כאן'],
+    ['צמיחה ואגרסיבי, והרחבה (30.9)', 'הכרעה: צמיחה 38/26/18/18, אגרסיבי 57/25/9/9', 'שתיהן נשארו: השקת הצמיחה ו"יותר סיכון"'],
+    ['חלוקת לקוח (30.9)', 'אגרסיבי + הגנתי בשליש ושני שלישים', 'דוגמה ללקוח, לא הגדרת מוצר'],
+    ['המחקר הזה (1.10)', 'משפחות, פיצול גרסאות, אופטימיזציה עמידה, תפריטים, וסקירה', 'ההכרעה הסופית: שני מוצרים, לכל אחד השקה, חלופה ויעד'],
+    ['שאלות ההמשך (1.10, תיקון A5)', 'רק שלוש גרסאות TAA מחווטות; פוד שלישי להגנתי; הדרך ל־22%', 'DV2-IND הוא הצעד הבא בהגנתי; 22% בפיזור ואז מינוף']];
+  document.getElementById('history').innerHTML = `<thead><tr><th>מחקר</th><th>מה הוחלט אז</th><th>איפה זה עומד עכשיו</th></tr></thead><tbody>` + HIST.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('') + '</tbody>';
+
+  // To-do
+  document.getElementById('todo').innerHTML = [
+    '<b>לאשר את שתי הבחירות להשקה:</b> <span class="code">fund_defensive</span> ו־<span class="code">fund_growth</span>. בשתיהן חסר רק חיווט CORE5.',
+    '<b>לקדם את DV2-IND מצל ולחווט אותו.</b> זה הצעד הבא בהגנתי (‏8.8%, שארפ 1.26, בלי מזומן, ‏<span class="code">fund_defensive_dv2ind</span>), והוא חצי מהדרך ל־22% בצמיחה.',
+    '<b>לחווט את EOM</b> (או למצוא לו ביצוע סחיר במקום MOC ושורט על TLT). איתו ההגנתי מגיע ליעד, ושארפ 1.60.',
+    '<b>לבנץ׳:</b> הפוד של BIL נוסף לרשימה המותרת (לא מחווט ללייב). שישה מתוך שמונה קבצים נטענים היום. ‏<span class="code">fund_defensive_target</span> ו־<span class="code">fund_defensive_dv2ind</span> ייטענו אחרי קידום DV2-IND.',
+    '<b>ל־22% בצמיחה:</b> אחרי ש־EOM ו־DV2-IND רצים בלייב תקופה מספקת, לפתוח חשבון מרג׳ין ולבדוק את חצי השקה / חצי יעד הגנתי במינוף ‎1.7×‎.',
+    '<b>לפני <span class="code">fund_growth_mr</span>:</b> למדוד בלייב עלות ביצוע של 3–4 נ״ב לצד או פחות על DV2 ו־HPI, ולהכניס את תיקון היישור של HPI.',
+    '<b>עמלות:</b> לשקול לא לגבות 2/20 על שרוול המזומן.',
+    '<b>תקרה למנוע "הגנה קודם":</b> הוא נושא כ־70–77% מסיכון הצמיחה. כדאי לקבוע תקרה ותרחיש כשל לפני כסף חיצוני.'].map(x => `<li>${x}</li>`).join('');
+
+  // Review
+  document.getElementById('review').innerHTML = RV || '<p class="cap">הסקירה עדיין רצה.</p>';
+})();
+</script>

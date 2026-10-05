@@ -1,0 +1,283 @@
+.prod5 { display: grid; grid-template-columns: repeat(auto-fit, minmax(205px, 1fr)); gap: 10px; }
+.card { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 12px 14px; display: grid; gap: 6px; align-content: start; }
+.card.d { border-top: 3px solid var(--def); } .card.g { border-top: 3px solid var(--gro); }
+.card.pick { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--good) 55%, transparent); }
+.card h3 { font-size: 17px; }
+.card .mix, .card .kpi { direction: ltr; text-align: left; font-size: 12px; color: var(--ink-2); }
+.card .kpi { display: grid; gap: 2px; font-size: 12.5px; }
+.card .kpi b { font-family: var(--mono); font-weight: 500; color: var(--ink); }
+.card .why { font-size: 12.5px; color: var(--ink-2); border-top: 1px dashed var(--rule); padding-top: 6px; }
+.chip.stage { background: var(--surface-2); color: var(--ink-2); }
+.tbl table { direction: ltr; }
+.tbl th, .tbl td { text-align: left; }
+.tbl td.nm { direction: rtl; text-align: right; }
+.tbl td.nm .cap { direction: ltr; text-align: left; }
+.yes { color: var(--good); font-weight: 600; } .no { color: var(--bad); font-weight: 600; }
+.ltr { direction: ltr; unicode-bidi: isolate; }
+</style>
+
+<main dir="rtl" lang="he">
+<header>
+  <div class="eyebrow ltr">Fund products · v4 · 2026-10-01 · pre-registered rules (A6, A6-c, A6-d, A7) · two independent reviews</div>
+  <h1>מוצרי הקרן: הגנתי וצמיחה</h1>
+  <p class="lede">/*LEDE*/</p>
+</header>
+
+<section>
+  <div class="kicker">בקצרה</div>
+  <h2>מה החלטתי</h2>
+  <ul class="plain">/*SUMMARY*/</ul>
+</section>
+
+<section>
+  <div class="kicker ltr">DEFENSIVE</div>
+  <h2>הגנתי: חמש אפשרויות</h2>
+  <p>/*DEF_INTRO*/</p>
+  <div class="prod5" id="cards_d"></div>
+  <div class="tbl"><table id="menu_d"></table></div>
+  <p class="cap">/*DEF_CAP*/</p>
+</section>
+
+<section>
+  <div class="kicker ltr">GROWTH</div>
+  <h2>צמיחה: עם ובלי מינוף</h2>
+  <p>/*GRO_INTRO*/</p>
+  <div class="prod5" id="cards_g"></div>
+  <div class="tbl"><table id="menu_g"></table></div>
+  <p class="cap">/*GRO_CAP*/</p>
+</section>
+
+<section>
+  <div class="kicker ltr">ABOVE 22%</div>
+  <h2>מעל 22%: מה זה עולה</h2>
+  <p>/*A7_INTRO*/</p>
+  <div class="tbl"><table id="a7"></table></div>
+  <ul class="plain">/*A7_NOTES*/</ul>
+</section>
+
+<section>
+  <div class="kicker ltr">ROBUSTNESS</div>
+  <h2>האם הבחירות מחזיקות</h2>
+  <p>/*ROB_INTRO*/</p>
+  <div class="tbl"><table id="chal"></table></div>
+  <div class="tbl"><table id="frames"></table></div>
+</section>
+
+<section>
+  <div class="kicker ltr">ALPHA</div>
+  <h2>אלפא</h2>
+  <p>/*ALPHA_TEXT*/</p>
+  <div class="tbl"><table id="alpha"></table></div>
+</section>
+
+<section>
+  <div class="kicker ltr">CRISES</div>
+  <h2>משברים</h2>
+  <div class="tbl"><table id="crises"></table></div>
+  <p class="cap">/*CRISES_CAP*/</p>
+</section>
+
+<section>
+  <div class="kicker ltr">EQUITY CURVE</div>
+  <div class="chart">
+    <div class="legend ltr" id="cl"></div>
+    <div class="svgwrap" id="nav"></div>
+    <div class="svgwrap" id="dd"></div>
+  </div>
+</section>
+
+<section>
+  <div class="kicker ltr">CALENDAR YEARS</div>
+  <div class="tbl"><table id="years"></table></div>
+</section>
+
+<section>
+  <div class="kicker ltr">CORRELATION</div>
+  <div class="heat"><div class="tbl"><table id="h_all"></table></div><div class="tbl"><table id="h_fall"></table></div></div>
+  <p class="cap">/*CORR_CAP*/</p>
+</section>
+
+<section>
+  <div class="kicker">מה נבדק ולא עזר</div>
+  <ul class="plain">/*DROPPED*/</ul>
+</section>
+
+<section>
+  <div class="kicker">מה צריך ממך</div>
+  <ol class="plain">/*TODO*/</ol>
+</section>
+
+<section>
+  <div class="kicker ltr">INDEPENDENT REVIEW</div>
+  <div id="review"></div>
+</section>
+
+<div class="note">
+  <b>הסתייגויות</b>
+  <p>/*CAVEATS*/</p>
+</div>
+</main>
+
+<script type="application/json" id="d">/*DATA*/null</script>
+<script type="application/json" id="a7d">/*A7*/null</script>
+<script type="application/json" id="rv">/*REVIEW*/null</script>
+<script>
+(function () {
+  const D = JSON.parse(document.getElementById('d').textContent);
+  const A7 = JSON.parse(document.getElementById('a7d').textContent);
+  const RV = JSON.parse(document.getElementById('rv').textContent);
+  const R = D.rows;
+  const META = /*META*/null;
+  const LABEL = /*LABELS*/null;
+  const POD = {taa3x: 'TAA3x', taa3x_1n: 'TAA3x-1N', ndx_vxn: 'NDX-VXN', core5: 'CORE5', btal_qqq: 'BTAL_QQQ', tbill: 'Cash (BIL)', dv2: 'DV2',
+    hpi_vote: 'HPI', hpi_ibs_rsi: 'HPI-RSI', eom_flow: 'EOM', etf_dv2: 'DV2-IND', downshock: 'downshock'};
+  const M_ = k => META.rows[k] || {};
+  const nm = k => M_(k).name || k, en = k => M_(k).en || nm(k);
+  const pct = (x, d = 1) => (x === null || x === undefined || Number.isNaN(x)) ? '–' : (x * 100).toFixed(d) + '%';
+  const sg = x => (x === null || x === undefined || Number.isNaN(x)) ? '–' : (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x * 100).toFixed(1) + '%';
+  const f2 = x => (x === null || x === undefined || Number.isNaN(x)) ? '–' : x.toFixed(2);
+  const usd = (x, top) => !x ? '–' : (top ? '≥' : '') + '$' + (x >= 1e6 ? Math.round(x / 1e6) + 'M' : Math.round(x / 1e3) + 'K');
+  const td = (v, c = '') => `<td class="n ${c}">${v}</td>`;
+  const mix = (w, L) => Object.entries(w).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${Math.round(v * 100)}% ${POD[k] || k}`).join(' · ') + (L && L !== 1 ? ` · leverage ${L.toFixed(2)}×` : '');
+  const wire = r => r.needs_wiring.length ? r.needs_wiring.map(p => POD[p] || p).join(', ') : 'none';
+  const lab = k => (k && LABEL[k.split('|')[0]]) ? LABEL[k.split('|')[0]] + (k.includes('|c') && !k.endsWith('|c0.00') ? ` + ${Math.round(parseFloat(k.split('|c')[1]) * 100)}% cash` : '') : (k || '–');
+
+  // Cards
+  function cards(id, keys, cls, lim) {
+    document.getElementById(id).innerHTML = keys.filter(k => R[k]).map(k => { const r = R[k], m = r.m, c = m.crises, M = M_(k);
+      return `<div class="card ${cls} ${M.pick ? 'pick' : ''}"><div><span class="chip ${M.chipc || 'stage'} ltr">${M.chip}</span></div><h3>${M.name}</h3>
+        <div class="mix">${mix(r.weights, r.lever)}</div>
+        <div class="kpi"><span>CAGR <b>${pct(m.cagr)}</b> · Net 2/20 <b>${pct(m.net_cagr)}</b></span><span>Max DD <b>${sg(m.maxdd)}</b> · Excess Sharpe <b>${f2(m.xsharpe)}</b></span>
+        <span>P(DD&lt;−${lim}%) <b>${pct(r.tail['p' + lim])}</b> · 2008 <b>${sg(c.gfc)}</b> · 2022 <b>${sg(c.bear_2022)}</b></span>
+        <span>Available: ${M.when}</span>${M.file ? `<span class="code">${M.file}.yaml</span>` : ''}</div>
+        <div class="why">${M.why}</div></div>`; }).join('');
+  }
+  cards('cards_d', META.def_cards, 'd', 10);
+  cards('cards_g', META.gro_cards, 'g', 20);
+
+  // Menus
+  const COLS = [['cagr', 'CAGR', pct], ['net_cagr', 'Net 2/20', pct], ['xsharpe', 'Excess Sharpe', f2], ['maxdd', 'Max DD', sg],
+    ['cvar5_21d', 'CVaR 1M', sg], ['worst_year', 'Worst year', sg], ['beta', 'Beta', f2], ['crisis_corr', 'Down-day corr', f2]];
+  function menu(id, keys, limits, lev) {
+    const ncol = 1 + COLS.length + limits.length + 2 + (lev ? 3 : 0) + 4;
+    let h = `<thead><tr><th>Option</th>${COLS.map(c => `<th>${c[1]}</th>`).join('')}${limits.map(l => `<th>P(DD&lt;−${l}%)</th>`).join('')}` +
+      `<th>CAGR +5 bps</th><th>CAGR +10 bps</th>${lev ? '<th>Leverage</th><th>Reg-T</th><th>CAGR at fin. +0.5% / +2.5%</th>' : ''}<th>Pods</th><th>Trade days/yr</th><th>Capacity</th><th>Needs wiring</th></tr></thead><tbody>`;
+    keys.forEach(k => { if (k.startsWith('#')) { h += `<tr class="grp"><td colspan="${ncol}">${k.slice(1)}</td></tr>`; return; }
+      const r = R[k]; if (!r) return; const m = r.m, M = M_(k);
+      const p10 = (r.plus10_cagr !== undefined && r.plus10_cagr !== null) ? r.plus10_cagr : r.m.cagr + 2 * (r.frames.s3_plus_5bps.cagr - r.m.cagr);
+      h += `<tr class="${M.pick ? 'pick' : ''} ${M.dim ? 'dim' : ''}"><td class="nm"><b>${nm(k)}</b><div class="cap">${mix(r.weights, r.lever)}</div></td>` +
+        COLS.map(([c, , f]) => td(f(m[c]), (c.includes('dd') || c.includes('cvar') || c === 'worst_year') && m[c] < 0 ? 'neg' : '')).join('') +
+        limits.map(l => td(pct(r.tail ? r.tail['p' + l] : null))).join('') + td(pct(r.frames.s3_plus_5bps.cagr)) + td(pct(p10)) +
+        (lev ? td(r.lever !== 1 ? r.lever.toFixed(2) + '×' : '–') + td(r.reg_t && r.lever !== 1 ? pct(r.reg_t, 0) + (r.reg_t_flag ? ' ⚠' : '') : '–', r.reg_t_flag && r.lever !== 1 ? 'neg' : '') +
+          td(r.financing && r.financing['spread_0.005'] !== undefined ? pct(r.financing['spread_0.005']) + ' / ' + pct(r.financing['spread_0.025']) : '–') : '') +
+        td(r.ops.pods) + td(Math.round(r.ops.trade_days_per_year)) + td(usd(r.capacity, r.capacity_top)) + `<td>${wire(r)}</td></tr>`; });
+    document.getElementById(id).innerHTML = h + '</tbody>';
+  }
+  menu('menu_d', META.def_menu, [7, 10], false);
+  menu('menu_g', META.gro_menu, [20, 25], true);
+
+  // Above 22%
+  const AR = A7.rows;
+  const cells = (n, kind) => { const nCols = kind === 'unlev' ? 3 : 5;
+    if (!n || !AR[n]) return kind === 'unlev' ? `<td class="n neg" colspan="${nCols}">not possible (ceiling 27.7%)</td>` : `<td class="n" colspan="${nCols}">–</td>`;
+    const r = AR[n], t = r.tails;
+    const first = kind === 'unlev' ? td(Math.round(r.t * 100) + '%') : td(r.L.toFixed(2) + '×');
+    const base = first + td(sg(r.dd), 'neg') + td(pct(t.p25, 0));
+    return kind === 'unlev' ? base : base + td(pct(r.reg_t, 0) + (r.reg_t > 0.9 ? ' ⚠' : ''), r.reg_t > 0.9 ? 'neg' : '') + td(pct(r.plus10)); };
+  let h = `<thead><tr><th></th><th colspan="3">No leverage</th><th colspan="5">Now: growth launch, levered</th><th colspan="5">After EOM + DV2-IND: 1/3 growth + 2/3 target, levered</th></tr>` +
+    `<tr><th>Target CAGR</th><th>TAA3x-1N</th><th>Max DD</th><th>P(DD&lt;−25%)</th>` +
+    ['', ''].map(() => '<th>Leverage</th><th>Max DD</th><th>P(DD&lt;−25%)</th><th>Reg-T</th><th>CAGR +10 bps</th>').join('') + `</tr></thead><tbody>`;
+  A7.targets.forEach(T => { const key = T.toFixed(2);
+    h += `<tr><td class="n"><b>${pct(T, 0)}</b></td>${cells(A7.unlevered[key], 'unlev')}${cells(A7.levered.launch_x[key], 'lev')}${cells(A7.levered.target_mix33_x[key], 'lev')}</tr>`; });
+  document.getElementById('a7').innerHTML = h + '</tbody>';
+
+  // Challenge tests
+  const CK = {share_ge_80: '≥80% paths', breach_no_worse: 'Breach', exact_xs_higher: '2012+', plus5_not_lower: '+5 bps', h1_higher: 'H1', h2_higher: 'H2'};
+  const SLOTN = {launch: 'Def · launch', next: 'Def · next step', target: 'Def · target', g22_launch: 'Growth 22% · now', g22_next: 'Growth 22% · next', g22_target: 'Growth 22% · target',
+    next_vs_launch: 'Next step vs launch'};
+  const CH = Object.assign({}, D.challenges); if (D.next_vs_launch) CH.next_vs_launch = [D.next_vs_launch];
+  h = `<thead><tr><th>Slot</th><th>Challenger</th><th>Default</th><th>Share</th>${Object.values(CK).map(c => `<th>${c}</th>`).join('')}<th>Result</th></tr></thead><tbody>`;
+  Object.entries(CH).forEach(([slot, log]) => log.forEach(c => {
+    const res = c.gated ? (c.passed ? 'passes, gated' : 'no') : (c.passed ? (slot === 'next_vs_launch' ? 'upgrade' : 'replaces') : 'no');
+    h += `<tr><td>${SLOTN[slot] || slot}</td><td>${lab(c.challenger)}</td><td>${lab(c.default)}</td>` +
+      (c.checks ? td(pct(c.share, 0)) + Object.keys(CK).map(k => `<td class="n ${c.checks[k] ? 'yes' : 'no'}">${c.checks[k] ? '✓' : '✗'}</td>`).join('') : `<td colspan="7" class="cap">no cash level passes the rule and the floor</td>`) +
+      `<td class="${res === 'replaces' || res === 'upgrade' ? 'yes' : 'no'}">${res}</td></tr>`; }));
+  document.getElementById('chal').innerHTML = h + '</tbody>';
+
+  // Frames
+  const FK = META.frames;
+  h = `<thead><tr><th>Assumption (CAGR / Max DD)</th>${FK.map(k => `<th>${en(k)}</th>`).join('')}</tr></thead><tbody>`;
+  h += `<tr><td>Base</td>${FK.map(k => td(pct(R[k].m.cagr) + ' / ' + sg(R[k].m.maxdd))).join('')}</tr>`;
+  [['s3_plus_5bps', '+5 bps per side'], ['s1_house_cash', 'No interest on cash'], ['s6_exact', '2012+ only (no proxy)'], ['s5_hpi_live_gap', 'HPI live gap (historical)']].forEach(([f, l]) => {
+    h += `<tr><td>${l}</td>${FK.map(k => td(pct(R[k].frames[f].cagr) + ' / ' + sg(R[k].frames[f].dd))).join('')}</tr>`; });
+  h += `<tr><td>Excess Sharpe, H1 / H2 (split 6/2017)</td>${FK.map(k => td(R[k].halves_xs ? f2(R[k].halves_xs[0]) + ' / ' + f2(R[k].halves_xs[1]) : '–')).join('')}</tr>`;
+  document.getElementById('frames').innerHTML = h + '</tbody>';
+
+  // Alpha
+  const ga_ = (b, basis, m) => D.alpha.find(a => a.book === b && a.basis === basis && a.model === m);
+  const ac = a => a ? `${pct(a.alpha_ann)} <span class="${a.alpha_t >= 2 ? 'pos' : a.alpha_t < 1 ? 'neg' : ''}">(t ${a.alpha_t.toFixed(1)})</span>` : '–';
+  h = `<thead><tr><th>Option</th><th>Gross vs QQQ</th><th>Gross vs ETF + trend</th><th>Net vs QQQ</th><th>Net vs ETF + trend</th></tr></thead><tbody>`;
+  META.alpha.forEach(b => { h += `<tr><td>${en(b)}</td>${td(ac(ga_(b, 'gross', 'M0')))}${td(ac(ga_(b, 'gross', 'M2')))}${td(ac(ga_(b, 'net', 'M0')))}${td(ac(ga_(b, 'net', 'M2')))}</tr>`; });
+  document.getElementById('alpha').innerHTML = h + '</tbody>';
+
+  // Crises
+  const CRN = {gfc: '2008 GFC', q4_2018: 'Q4 2018', covid: 'COVID 2020', bear_2022: '2022 bear', tariffs_2025: 'Tariffs 2025'};
+  const CB = META.crises;
+  const CRK = Object.keys(R[CB[0]].m.crises);
+  const crLab = k => CRN[k] || (() => { const p = k.split('|'); return `Co-fall ${p[1].slice(5, 7)}/${p[1].slice(0, 4)}`; })();
+  const cdd = (r, k) => (r.m.crises_dd && r.m.crises_dd[k] !== undefined) ? ` <span class="cap">(${sg(r.m.crises_dd[k])})</span>` : '';
+  h = `<thead><tr><th>Event</th>${CB.map(k => `<th>${en(k)}</th>`).join('')}<th>S&amp;P 500</th><th>QQQ</th></tr></thead><tbody>`;
+  CRK.forEach(k => { h += `<tr><td>${crLab(k)}</td>` + CB.map(b => { const v = R[b].m.crises[k]; return td(sg(v) + cdd(R[b], k), v < 0 ? 'neg' : 'pos'); }).join('') +
+    ['S&P 500', 'QQQ'].map(b => { const v = D.bench[b].crises[k]; return td(sg(v), v < 0 ? 'neg' : 'pos'); }).join('') + '</tr>'; });
+  document.getElementById('crises').innerHTML = h + '</tbody>';
+
+  // Chart
+  const S = META.chart.map(([k, c]) => [en(k), R[k].m.nav, c, false]).concat([['S&P 500', D.bench['S&P 500'].nav, 'var(--bench)', true]]);
+  document.getElementById('cl').innerHTML = S.map(([l, , c]) => `<span><i style="background:${c}"></i>${l}</span>`).join('') + '<span style="color:var(--ink-3)">Growth of $1 (log scale); below: drawdown</span>';
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (t, a, p) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); p && p.appendChild(e); return e; };
+  function chart(host, series, H, log, ticks, fmt) {
+    const Wd = 900, m = {l: 52, r: 12, t: 10, b: 24};
+    const svg = el('svg', {viewBox: `0 0 ${Wd} ${H}`, role: 'img', 'aria-label': 'equity curve'}, host);
+    const dates = series[0][1].map(p => p[0]);
+    const f = v => log ? Math.log(v) : v;
+    let lo = Infinity, hi = -Infinity; series.forEach(s => s[1].forEach(p => { lo = Math.min(lo, f(p[1])); hi = Math.max(hi, f(p[1])); }));
+    if (!log) hi = 0;
+    const X = i => m.l + i / (dates.length - 1) * (Wd - m.l - m.r), Y = v => H - m.b - (f(v) - lo) / (hi - lo) * (H - m.t - m.b);
+    ticks.filter(v => f(v) >= lo - 1e-9 && f(v) <= hi + 1e-9).forEach(v => { el('line', {x1: m.l, x2: Wd - m.r, y1: Y(v), y2: Y(v), class: 'gl'}, svg); el('text', {x: m.l - 8, y: Y(v) + 4, 'text-anchor': 'end'}, svg).textContent = fmt(v); });
+    dates.forEach((d, i) => { if (d.endsWith('-01') && (+d.slice(0, 4)) % 3 === 2) el('text', {x: X(i), y: H - 6, 'text-anchor': 'middle'}, svg).textContent = d.slice(0, 4); });
+    series.slice().reverse().forEach(([, pts, c, dsh]) => el('path', {d: pts.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(''), fill: 'none', stroke: c, 'stroke-width': dsh ? 1.6 : 2.2, 'stroke-dasharray': dsh ? '5 4' : 'none'}, svg));
+    const tip = document.createElement('div'); tip.className = 'tip'; tip.hidden = true; tip.style.direction = 'ltr'; host.appendChild(tip);
+    const cross = el('line', {y1: m.t, y2: H - m.b, stroke: 'var(--ink-3)', visibility: 'hidden'}, svg);
+    svg.addEventListener('pointermove', e => { const r = svg.getBoundingClientRect(); const i = Math.max(0, Math.min(dates.length - 1, Math.round(((e.clientX - r.left) / r.width * Wd - m.l) / (Wd - m.l - m.r) * (dates.length - 1))));
+      cross.setAttribute('x1', X(i)); cross.setAttribute('x2', X(i)); cross.setAttribute('visibility', 'visible');
+      tip.innerHTML = `<div><b class="num">${dates[i]}</b></div>` + series.map(([l, pts]) => `<div class="r"><span>${l}</span><b>${pts[i] ? fmt(pts[i][1]) : '–'}</b></div>`).join('');
+      tip.hidden = false; const hr = host.getBoundingClientRect(); let x = e.clientX - hr.left + 12; if (x + 230 > hr.width) x -= 250; tip.style.left = x + 'px'; tip.style.top = (e.clientY - hr.top - 10) + 'px'; });
+    svg.addEventListener('pointerleave', () => { tip.hidden = true; cross.setAttribute('visibility', 'hidden'); });
+  }
+  chart(document.getElementById('nav'), S, 330, true, [1, 2, 4, 8, 16, 32, 64], v => v.toFixed(v < 10 ? 2 : 1) + '×');
+  const DDS = S.map(([l, pts, c, d]) => { let pk = 0; return [l, pts.map(([t, v]) => { pk = Math.max(pk, v); return [t, v / pk - 1]; }), c, d]; });
+  chart(document.getElementById('dd'), DDS, 180, false, [0, -0.1, -0.2, -0.3, -0.4, -0.5], v => Math.round(v * 100) + '%');
+
+  // Years
+  const YB = META.years;
+  h = `<thead><tr><th>Year</th>${YB.map(k => `<th>${en(k)}</th>`).join('')}<th>S&amp;P 500</th></tr></thead><tbody>`;
+  Object.keys(R[YB[0]].m.years).forEach(y => { h += `<tr><td class="n">${y}${y === '2008' || y === '2026' ? '*' : ''}</td>` +
+    YB.map(k => { const v = R[k].m.years[y]; return td(sg(v), v < 0 ? 'neg' : ''); }).join('') + td(sg(D.bench['S&P 500'].years[y]), D.bench['S&P 500'].years[y] < 0 ? 'neg' : '') + '</tr>'; });
+  document.getElementById('years').innerHTML = h + '</tbody>';
+
+  // Heatmaps
+  const CO = D.corr;
+  const css = getComputedStyle(document.documentElement);
+  const hex = v => { const s = css.getPropertyValue(v).trim(); return [1, 3, 5].map(i => parseInt(s.slice(i, i + 2), 16)); };
+  const mixc = (a, b, t) => `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * t)).join(',')})`;
+  function heat(id, M, title) { const mid = hex('--mid'), pos = hex('--pos-pole'), neg = hex('--neg-pole');
+    let h = `<thead><tr><th>${title}</th>${CO.names.map(n => `<th class="rot">${POD[n] || n}</th>`).join('')}</tr></thead><tbody>`;
+    CO.names.forEach((r, i) => { h += `<tr><td style="white-space:nowrap">${POD[r] || r}</td>` + M[i].map((v, j) => { const bg = i === j ? 'var(--surface-2)' : (v >= 0 ? mixc(mid, pos, Math.min(1, v) * 0.85) : mixc(mid, neg, Math.min(1, -v) * 0.85));
+      return `<td class="c" style="background:${bg};${Math.abs(v) > 0.6 && i !== j ? 'color:#fff' : ''}">${i === j ? '' : v.toFixed(2)}</td>`; }).join('') + '</tr>'; });
+    document.getElementById(id).innerHTML = h + '</tbody>'; }
+  heat('h_all', CO.all, 'All days'); heat('h_fall', CO.falls, 'S&P 500 worst 5% days');
+
+  document.getElementById('review').innerHTML = RV || '';
+})();
+</script>

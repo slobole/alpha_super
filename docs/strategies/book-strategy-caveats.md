@@ -8,6 +8,7 @@ source_paths:
   - alpha/strategy_registry.py
   - docs/research/STRATEGY_READINESS_AUDIT_20260928.md
   - docs/research/MOMENTUM_DECISION_20261004.md
+  - docs/research/FUND_PRODUCTS_20261005.md
 ---
 
 # Book Strategy Caveats
@@ -141,3 +142,36 @@ Figures are for the 50/50 pair, 2000-09 to 2026-10, unless a row says otherwise.
 | MR capsule pods | Negative cash from the parents' 10 x 10% sizing, not financed (G-023) | Optimistic, small | DV2-G 136 sessions (133 without parking), minimum -8.8% of NAV |
 | MR capsule pods | Friction: about 52-58 parking orders a year at the USD 1 minimum | Size-dependent | -0.35 to -0.4 pp/yr at USD 15K per pod, -0.1 at USD 50K |
 | MR capsule pods | PM_READY on 2026-10-04 (books `mr_capsule_{spmo,bil}`); WIRED needs a new live order shape for the parking | Status | Handoff `docs/plans/MR_CAPSULE_REVIEW_HANDOFF.md`, section 9 |
+
+<!-- fund-products-20261005:start -->
+## Fund product books (growth capsules and monthly books) — `fund_growth.yaml`, `fund_growth_plus.yaml`, `fund_growth_aggressive.yaml`, `fund_growth_monthly.yaml`
+
+Books of the 2026-10-05 fund-products study ([record](../research/FUND_PRODUCTS_20261005.md)): TAA, the momentum capsule and the MR capsule at fixed capital weights (GR1 TAA 3x 40 / 30 / 30, GR2 the same with TAA 3x 1N, GR3 TAA 3x 1N 60 / 20 / 20), and one monthly book of two pods (TAA 3x 1N 60 / CORE5 40). Each pod's own caveats above still apply; these rows are about the books.
+
+| Caveat | Direction | Size | Evidence |
+|---|---|---|---|
+| Engine, Bench and YAML books pay 0% on idle cash; the headline frame credits DTB3 - 0.5% and charges DTB3 + 1.5% on negative cash | Engine conservative | CAGR gap, percentage points a year: GR1 0.13%; TAA 3x alone 0.03% (about 2% cash), momentum capsule 0.29%, MR capsule 0.10% | Fund products record 2026-10-05 |
+| The products are not fully invested | Note | about 26% of GR1 is BIL or cash on an average day | Fund products record 2026-10-05 |
+| Three cash treatments live side by side: the MR capsule's BIL is a real position (25% withholding, trade costs); TAA and momentum idle cash is credited DTB3 - 0.5% without cost; the cash leg of a book is BIL total return | Conservative for MR | about 0.6 pp of capsule CAGR; GR1 0.17% under the symmetric treatment | Fund products record 2026-10-05 |
+| TAA before 2012-10-02 is a synthetic TQQQ / BTAL proxy (a quarter of the sample, the only 2008) | Unknown | GR1 on 2012+ only: CAGR 20.3%, excess Sharpe 1.40 | Fund products record 2026-10-05 |
+| TAA commissions on split-adjusted TQQQ shares | Conservative | about 0.3 pp a year per TAA pod on average 2012-2026 (0.38 pp in the 1N variant), near zero now | Fund products record 2026-10-05 |
+| Negative cash is not financed in the engine | Optimistic, small | MR pods 167 and 168 days, to -9.6% of the pod; momentum pods about 1792 days, to -1.9%; TAA pods about 1,500 days (2012 on), to -1.8%; charged DTB3 + 1.5% in the headline frame | Fund products record 2026-10-05 |
+| Two of the three engines are long Nasdaq when risk is on (TAA through TQQQ, momentum through Nasdaq-100 stocks); no 2000-02 type bear in the sample | Optimistic | peak look-through 1.51x (GR1), 2.01x (GR3) at target weights; 1.69x and 2.20x as carried; a 10% one-day Nasdaq fall at peak exposure costs -18.0% and -22.0% | Fund products record 2026-10-05 |
+| Every engine was selected on this history; nothing is out of sample (MR: about 110 variants; momentum: about 45 trials plus a 151-configuration grid; the products: 3 of 14 books seen before the freeze) | Optimistic | the backtest is the headline (GR1 CAGR 18.3%, excess Sharpe 1.27); conservative case, 3/4 of the excess return at model costs: 13.5% / 0.95; GR1's excess Sharpe was 1.56 in 2012-2021 and 1.07 since 2022 | Fund products record 2026-10-05 |
+| The product weights were chosen by the owner after the results, from the pre-registered dial points (GR1 and GR2 at 40 / 30 / 30; the registered default was equal capital; the 40 / 30 / 30 point was not in the grid seen before the freeze) | Optimistic | GR1 against equal capital: a tie by the 80% rule on Sharpe (70% of paired paths) | Fund products record 2026-10-05 |
+| The Monthly book (TAA 3x 1N 60 / CORE5 40) was designed after the results from an exploratory grid that was not pre-registered; the owner chose the ratio | Optimistic | differences between neighbouring grid rows are small; one return engine: with TAA dead the Monthly book keeps an excess Sharpe of 0.14 (GR1 0.69) | Fund products record 2026-10-05 |
+| Breach figures are a block-63, full-edge convention | Optimistic | GR1 at -20%: 2.4% by the rule, 10.2% in the conservative case | Fund products record 2026-10-05 |
+| MR capsule cost sensitivity; no live fills; the slippage gate (4 bps per side over 200 fills) is unmet; 2020-21 are about a third of its log-wealth; stock turnover about 41 times the pod a year | Optimistic until measured | capsule alone 16.8% -> 13.7% at +5 bps; GR1 18.3% -> 17.0% | Fund products record 2026-10-05 |
+| Momentum capsule: today's GICS labels; selection unproven against QQQ at the same exposure; in a drawdown of about 18% from its June 2026 peak (at 2026-10-02) | Unknown | in the slot test BIL in its place has the higher excess Sharpe on 76% of paths and 4.0 pp less CAGR: it adds return, not risk-adjusted return | Fund products record 2026-10-05 |
+| Annual reset is a cost-free transfer on one date | Optimistic, small | GR1 CAGR over the twelve start months 18.2% to 18.6% | Fund products record 2026-10-05 |
+| Capacity is pre-TCA and route-dependent | Unknown | GR1 $2.5M at the open (modelled), up to $10M if the MR stocks trade at the close (upper bound, not modelled); binding legs: TAA / BTAL on one-day routes, MR stocks (FOX, NWS) on the worked route; Monthly $5M at the open, $235.9M (BTAL wall) worked | Fund products record 2026-10-05 |
+| The Monthly book's rung and its margin | Optimistic | The Monthly book passes GROWTH PLUS and not GROWTH (29.6% of paths beyond -20%), so it carries more risk than GR1, not less. Its rung holds down to 0.80 of the edge (GR1 0.70); in the conservative case its breach figure at -25% is 18.2% against the 15% cap. | Fund products record 2026-10-05 |
+| Leverage on GR1 (fixed 1.40x) is an alternative, not a product | Optimistic | financing at DTB3 + 1.5%, no margin calls or gap days modelled, leverage also levers the MR capsule's trading cost and divides capacity by 1.4; not available while each pod sits in its own Reg-T account | Fund products record 2026-10-05 |
+| Minimum clean size | Note | GR1 about $667K, Monthly about $75K | Fund products record 2026-10-05 |
+| Wiring | Note | wired: TAA 3x, TAA 3x 1N, BTAL_QQQ, NDX-VXN (of these only TAA 3x has a pod trading live today; TAA 3x 1N has a live route but is not running); not wired: CORE5 (PM_READY) and the four momentum and MR capsule pods (PM_READY, no live route at 5c0d48d; the MR capsule needs a new order shape and two margin accounts); the Monthly book needs only CORE5 | Fund products record 2026-10-05 |
+| Margin rows | Optimistic | DTB3 + 1.5%, no margin calls, no gap; volatility match is approximate; capacity divides by L | Fund products record 2026-10-05 |
+| Gross against net of 2/20 | Note | GR1 18.3% gross, 12.8% net; Monthly 19.8% gross, 14.0% net; no fund expenses | Fund products record 2026-10-05 |
+| Sharpe basis | Note | GR1 excess Sharpe 1.27 daily, 1.48 monthly, 1.37 at a zero rate | Fund products record 2026-10-05 |
+| The weeks after the window are not out of sample | Note | 2026-08-20 to 2026-10-02: GR1 1.1%, Monthly 3.9% | Fund products record 2026-10-05 |
+| The engine BIL pod is not BIL total return | Note | 1.08% vs 1.61% a year from 2012 (withholding, no reinvestment) | Fund products record 2026-10-05 |
+<!-- fund-products-20261005:end -->

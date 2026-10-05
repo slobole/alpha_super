@@ -1,0 +1,23 @@
+# GROWTH menu, Monthly (TAA 3x 1N 60 / CORE5 40): the monthly-only growth book (two pods, no daily trading).
+# Study (LONG 2008-03..2026-08, gross, fair cash): 19.8%/yr, max DD -16.2%, excess Sharpe 1.15, DD beyond -25% 5.6% (block-63 bootstrap yardstick, full backtest edge).
+# Source: fund products final pass (2026-10-05), amendment O3 (owner decision), scripts/research/fund_products_20261005.
+# Research configuration only: not an allocation approval and not wired to LIVE (CORE5 has no live route yet).
+# Simulation, before fees. Starts 2012-10-02 (TQQQ/BTAL real history); the engine pays 0% on idle cash.
+name_str: fund_growth_monthly
+capital_base_float: 6000000.0
+backtest_start_date_str: '2012-10-02'
+end_date_str: null
+allocation_policy_str: fixed
+max_workers_int: 1
+rebalance:
+  frequency_str: annually
+  policy_str: fixed
+save_pod_artifacts_bool: true
+regression_benchmark_symbol_str: $SPX
+pods:
+- pod_id_str: pod_taa_btal_1n_tqqq
+  strategy_import_str: strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash
+  weight_float: 0.600000
+- pod_id_str: pod_core5
+  strategy_import_str: strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5
+  weight_float: 0.400000

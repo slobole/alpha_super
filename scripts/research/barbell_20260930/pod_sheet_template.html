@@ -1,0 +1,220 @@
+<meta charset="utf-8">
+<title>הפוד האגרסיבי</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Hebrew:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: one column (~980px), RTL; three candidate cards are the hero, then comparison, chart, crises, years. */
+:root {
+  --bg: #f4f3f0; --surface: #fcfcfb; --surface-2: #edece8; --ink: #1b1f24; --ink-2: #4a5058; --ink-3: #6f767d;
+  --rule: #dcdcd6; --accent: #b4532a; --accent-soft: #f5e4da;
+  --a: #2a78d6; --b: #eb6834; --c: #1baf7a; --bench: #8a9199; --bench-2: #b4babf; --grid: #e4e4de;
+  --good: #1b7641; --bad: #ad2a22; --tip-bg: #1b1f24; --tip-ink: #f4f3f0;
+  --display: "Frank Ruhl Libre", "David Libre", "Times New Roman", serif;
+  --body: "IBM Plex Sans Hebrew", "Heebo", "Arial Hebrew", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111418; --surface: #171c21; --surface-2: #1e252c; --ink: #e8ebee; --ink-2: #adb5bd; --ink-3: #88929b;
+    --rule: #2c353e; --accent: #e3845a; --accent-soft: #3a2519; --a: #3987e5; --b: #d95926; --c: #199e70;
+    --bench: #7b848c; --bench-2: #58616a; --grid: #26303a; --good: #55ba7a; --bad: #ee6d63; --tip-bg: #e8ebee; --tip-ink: #111418;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111418; --surface: #171c21; --surface-2: #1e252c; --ink: #e8ebee; --ink-2: #adb5bd; --ink-3: #88929b;
+  --rule: #2c353e; --accent: #e3845a; --accent-soft: #3a2519; --a: #3987e5; --b: #d95926; --c: #199e70;
+  --bench: #7b848c; --bench-2: #58616a; --grid: #26303a; --good: #55ba7a; --bad: #ee6d63; --tip-bg: #e8ebee; --tip-ink: #111418;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 16px; line-height: 1.65; }
+main { max-width: 980px; margin: 0 auto; padding-inline: 20px; padding-block: 36px 64px; display: grid; gap: 34px; }
+h1, h2 { font-family: var(--display); margin: 0; text-wrap: balance; line-height: 1.2; }
+h1 { font-size: clamp(32px, 5.5vw, 48px); }
+h2 { font-size: clamp(22px, 3vw, 28px); }
+p { margin: 0; max-width: 70ch; }
+.lede { font-size: 18px; color: var(--ink-2); }
+.eyebrow { font-size: 13px; color: var(--ink-3); letter-spacing: 0.05em; }
+.draft { display: inline-block; background: var(--accent-soft); color: var(--accent); border-radius: 999px; padding: 2px 12px; font-size: 13px; font-weight: 600; justify-self: start; }
+header, section { display: grid; gap: 14px; min-width: 0; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; white-space: nowrap; }
+.engines { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.eng { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 14px 16px; display: grid; gap: 6px; align-content: start; }
+.eng b { font-size: 16px; }
+.eng p { font-size: 14.5px; color: var(--ink-2); }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 12px; }
+.card { background: var(--surface); border: 1px solid var(--rule); border-radius: 14px; padding: 16px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.card.lean { border: 2px solid var(--a); }
+.card .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.card .nm { font-family: var(--display); font-size: 22px; font-weight: 700; }
+.tag { font-size: 12px; font-weight: 600; border-radius: 999px; padding: 2px 10px; background: var(--surface-2); color: var(--ink-2); }
+.tag.lean { background: color-mix(in srgb, var(--a) 18%, transparent); color: var(--a); }
+.bar { display: flex; height: 12px; border-radius: 3px; overflow: hidden; gap: 2px; direction: ltr; }
+.bar span { display: block; height: 100%; }
+.mix { font-size: 13px; color: var(--ink-2); }
+.figs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+.fig .v { font-family: var(--mono); font-size: 20px; font-weight: 500; direction: ltr; unicode-bidi: isolate; display: inline-block; }
+.fig .l { display: block; font-size: 12px; color: var(--ink-3); }
+.sub { border-top: 1px solid var(--rule); padding-top: 8px; font-size: 13.5px; color: var(--ink-2); display: grid; gap: 4px; }
+.sub b { color: var(--ink); }
+.card p.why { font-size: 14px; color: var(--ink-2); }
+.tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { padding: 8px 11px; border-block-end: 1px solid var(--rule); text-align: start; }
+th { font-weight: 500; color: var(--ink-3); font-size: 12.5px; background: var(--surface-2); white-space: nowrap; }
+td.n, th.n { text-align: left; }
+td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; white-space: nowrap; }
+tr:last-child td { border-block-end: 0; }
+tr.dim td { color: var(--ink-3); }
+.neg { color: var(--bad); } .pos { color: var(--good); }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-inline-end: 6px; vertical-align: baseline; }
+.chart { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 12px; display: grid; gap: 8px; position: relative; min-width: 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 13px; color: var(--ink-2); }
+.legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; margin-inline-end: 6px; vertical-align: middle; }
+.svgwrap { direction: ltr; position: relative; }
+.svgwrap svg { display: block; width: 100%; height: auto; overflow: visible; }
+.svgwrap text { fill: var(--ink-3); font-family: var(--mono); font-size: 11px; }
+.svgwrap .gl { stroke: var(--grid); stroke-width: 1; }
+.tip { position: absolute; pointer-events: none; background: var(--tip-bg); color: var(--tip-ink); border-radius: 8px; padding: 7px 10px; font-size: 12.5px; direction: rtl; min-width: 170px; z-index: 3; }
+.tip .r { display: flex; justify-content: space-between; gap: 12px; }
+.tip .r b { font-family: var(--mono); font-weight: 500; direction: ltr; }
+ul.plain { margin: 0; padding-inline-start: 20px; display: grid; gap: 6px; max-width: 74ch; }
+.note { background: var(--surface); border: 1px solid var(--rule); border-inline-start: 3px solid var(--bench); border-radius: 8px; padding: 12px 16px; font-size: 13.5px; color: var(--ink-2); display: grid; gap: 6px; }
+:focus-visible { outline: 2px solid var(--a); outline-offset: 2px; }
+</style>
+
+<main dir="rtl" lang="he">
+<header>
+  <div class="eyebrow">‏$500,000 מתוך חשבון של 1.5 מיליון דולר · לצד ליבה הגנתית של מיליון דולר</div>
+  <h1>הפוד האגרסיבי</h1>
+  <p class="lede">החלק בחשבון שאחראי על הצמיחה. הוא עשוי משני מנועים, ואולי גם מכרית קטנה. ההרכב המדויק עוד בבדיקה, והדף מציג את שלוש האפשרויות שנשארו על השולחן.</p>
+  <span class="draft">טיוטה · ההרכב הסופי ייקבע אחרי בדיקות העמידות</span>
+</header>
+
+<section>
+  <h2>ממה הוא בנוי</h2>
+  <div class="engines">
+    <div class="eng"><b>מנוע 1 · רוטציה טקטית "הגנה קודם"</b><p>בכל סוף חודש המנוע בודק ארבעה נכסי הגנה (זהב, דולר, אג״ח ארוכות וסחורות) וקרן BTAL, שמרוויחה כשהשוק יורד. מי שבמגמה חיובית מקבל חלק שווה. את מה שנשאר המנוע משקיע בנאסד״ק ממונף פי 3, אבל רק כשהתנודתיות בשוק נמוכה מהצפוי. אחרת הכסף הזה נשאר במזומן.</p></div>
+    <div class="eng"><b>מנוע 2 · מומנטום בנאסד״ק 100</b><p>בכל חודש המנוע מחזיק כעשר מהמניות החזקות בנאסד״ק 100, בחלקים שווים. כשמדד הפחד של הנאסד״ק (VXN) עולה, הוא מקטין את החשיפה אוטומטית.</p></div>
+    <div class="eng"><b>כרית (אופציונלית)</b><p>חלק קטן מהפוד באותן אסטרטגיות הגנתיות שבליבה: מאקרו רב־נכסי, וגידור עם מגמה.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>שלוש האפשרויות</h2>
+  <div class="cards" id="cards"></div>
+</section>
+
+<section>
+  <h2>ההשוואה המלאה, סימולציה 2008–2026</h2>
+  <div class="tbl"><table id="cmp"></table></div>
+</section>
+
+<section>
+  <h2>מהלך ההון</h2>
+  <div class="chart">
+    <div class="legend" id="cl"></div>
+    <div class="svgwrap" id="nav"></div>
+    <div class="svgwrap" id="dd"></div>
+  </div>
+</section>
+
+<section>
+  <h2>במשברים</h2>
+  <div class="tbl"><table id="crises"></table></div>
+</section>
+
+<section>
+  <h2>שנה אחר שנה</h2>
+  <div class="tbl"><table id="years"></table></div>
+</section>
+
+<section>
+  <h2>מה עוד נבדק לפני ההחלטה</h2>
+  <ul class="plain">
+    <li>האם הכרית כדאית, כשהליבה של מיליון הדולר כבר הגנתית. בלי הכרית החשבון כולו מרוויח יותר, אבל גם יורד קצת יותר.</li>
+    <li>האם ההרכב מחזיק כשמשנים את ההנחות: עלויות מסחר גבוהות יותר, ריבית אפס על המזומן, שנים שמוצאות מהחשבון, ותאריך איזון אחר.</li>
+    <li>איך הפוד מתנהג יחד עם הליבה ההגנתית במשברים: האם הם נופלים יחד.</li>
+    <li>כמה מהתשואה היא יכולת אמיתית, ולא רק חשיפה לנאסד״ק. זה נבדק מול מדדים זולים ומול כלל מגמה פשוט.</li>
+  </ul>
+</section>
+
+<div class="note">
+  <b>חשוב לדעת</b>
+  <p>כל המספרים הם סימולציה על נתוני עבר, לא תוצאות של כסף אמיתי, ואינם הבטחה לעתיד. לפני 2012 חלק מהמנוע הראשון מחושב על נתונים סינתטיים, כי שתי קרנות הסל שהוא משתמש בהן עוד לא נסחרו אז. המספרים לפני עמלות ולפני מס. הירידות של הפוד לבדו גדולות מאלה של החשבון כולו, כי בחשבון הן מרוככות על ידי הליבה ההגנתית.</p>
+</div>
+</main>
+
+<script type="application/json" id="d">/*DATA*/null</script>
+<script>
+(function () {
+  const D = JSON.parse(document.getElementById('d').textContent);
+  const C = D.cands;
+  const pct = (x, d = 1) => (x * 100).toFixed(d) + '%';
+  const sg = x => (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x * 100).toFixed(1) + '%';
+  const PL = {taa3x_1n: ['רוטציה טקטית', 'var(--b)'], ndx_vxn: ['מומנטום נאסד״ק 100', 'color-mix(in srgb, var(--b) 55%, var(--surface))'],
+    core5: ['מאקרו רב־נכסי (כרית)', 'var(--a)'], btal_qqq: ['גידור ומגמה (כרית)', 'color-mix(in srgb, var(--a) 55%, var(--surface))']};
+  const META = {A: ['אגרסיבי עם כרית', 'var(--a)', 'הכיוון הנוכחי', 'שני המנועים ביחס 70:30, ועוד 18% כרית. זה ההרכב שנבחר כמוצר האגרסיבי במחקר הקודם, והוא הנקודה שכל חלופה צריכה לנצח.'],
+    B: ['אגרסיבי טהור', 'var(--b)', 'חלופה', 'אותם שני מנועים, בלי כרית. החשבון כולו מרוויח יותר, אבל זה בפועל אותו דבר כמו להגדיל את חלק הפוד ל־40% מהחשבון.'],
+    C: ['מתון', 'var(--c)', 'חלופה שמרנית', 'יחס 60:40 בין המנועים, ו־36% כרית. ירידות קטנות יותר, ותשואה נמוכה יותר לחשבון כולו.']};
+  const card = k => { const c = C[k], m = META[k];
+    const bar = Object.entries(c.weights).map(([p, w]) => `<span title="${PL[p][0]}" style="width:${w * 100}%;background:${PL[p][1]}"></span>`).join('');
+    const mix = '‏' + Object.entries(c.weights).map(([p, w]) => `${PL[p][0]} ${Math.round(w * 100)}%`).join(' · ');
+    return `<div class="card ${k === 'A' ? 'lean' : ''}"><div class="top"><span class="nm"><span class="sw" style="background:${m[1]}"></span>${m[0]}</span><span class="tag ${k === 'A' ? 'lean' : ''}">${m[2]}</span></div>
+      <div class="bar">${bar}</div><div class="mix">${mix}</div>
+      <div class="figs"><div class="fig"><span class="l">הפוד לבדו, תשואה שנתית</span><span class="v">${pct(c.cagr)}</span></div>
+      <div class="fig"><span class="l">הפוד לבדו, ירידה גדולה ביותר</span><span class="v">${sg(c.dd)}</span></div>
+      <div class="fig"><span class="l">השנה הגרועה</span><span class="v">${sg(c.worst_year)}</span></div>
+      <div class="fig"><span class="l">סיכוי לרדת יותר מ־20%</span><span class="v">${pct(c.p20, 0)}</span></div></div>
+      <div class="sub"><div><b>בחשבון כולו</b> (שליש פוד, שני שלישים ליבה הגנתית):</div>
+      <div>‏תשואה שנתית <span class="num">${pct(c.client.cagr)}</span> · ירידה גדולה ביותר <span class="num">${sg(c.client.dd)}</span> · בתרחיש הגרוע מתוך עשרה <span class="num">${sg(c.client.ddar10)}</span></div></div>
+      <p class="why">${m[3]}</p></div>`; };
+  document.getElementById('cards').innerHTML = ['A', 'B', 'C'].map(card).join('');
+
+  const rows = [['A', C.A, META.A[0]], ['B', C.B, META.B[0]], ['C', C.C, META.C[0]]];
+  let h = `<thead><tr><th></th><th class="n">תשואה שנתית</th><th class="n">מ־2012</th><th class="n">3 שנים אחרונות</th><th class="n">תנודתיות</th><th class="n">ירידה גדולה ביותר</th><th class="n">שנה גרועה</th><th class="n">שנים חיוביות</th><th class="n">שארפ</th></tr></thead><tbody>`;
+  rows.forEach(([k, c, l]) => { h += `<tr><td><span class="sw" style="background:${META[k][1]}"></span>${l}</td><td class="n"><b>${pct(c.cagr)}</b></td><td class="n">${pct(c.exact)}</td><td class="n">${pct(c.recent)}</td><td class="n">${pct(c.vol)}</td><td class="n neg">${sg(c.dd)}</td><td class="n ${c.worst_year < 0 ? 'neg' : ''}">${sg(c.worst_year)}</td><td class="n">${c.pos_years} / ${c.n_years}</td><td class="n">${c.sharpe.toFixed(2)}</td></tr>`; });
+  [['נאסד״ק 100 (QQQ)', D.qqq], ['מדד S&P 500', D.spx]].forEach(([l, v]) => { h += `<tr class="dim"><td>${l}</td><td class="n">${pct(v.cagr)}</td><td class="n">–</td><td class="n">–</td><td class="n">–</td><td class="n neg">${sg(v.dd)}</td><td class="n neg">${sg(v.worst_year)}</td><td class="n">–</td><td class="n">${v.sharpe.toFixed(2)}</td></tr>`; });
+  document.getElementById('cmp').innerHTML = h + '</tbody>';
+
+  const CR = [['gfc', 'המשבר הפיננסי, 2008–2009'], ['q4_2018', 'סוף 2018'], ['covid', 'קורונה, 2020'], ['bear_2022', 'שוק דובי, 2022'], ['tariffs_2025', 'המכסים, 2025']];
+  h = `<thead><tr><th>אירוע</th>${['A', 'B', 'C'].map(k => `<th class="n"><span class="sw" style="background:${META[k][1]}"></span>${META[k][0]}</th>`).join('')}<th class="n">נאסד״ק 100</th><th class="n">S&amp;P 500</th></tr></thead><tbody>`;
+  CR.forEach(([k, l]) => { h += `<tr><td>${l}</td>` + [C.A, C.B, C.C, D.qqq, D.spx].map(v => `<td class="n ${v.crises[k] < 0 ? 'neg' : 'pos'}">${sg(v.crises[k])}</td>`).join('') + '</tr>'; });
+  document.getElementById('crises').innerHTML = h + '</tbody>';
+
+  const yrs = Object.keys(C.A.years);
+  h = `<thead><tr><th>שנה</th>${['A', 'B', 'C'].map(k => `<th class="n"><span class="sw" style="background:${META[k][1]}"></span>${META[k][0]}</th>`).join('')}<th class="n">נאסד״ק 100</th><th class="n">S&amp;P 500</th></tr></thead><tbody>`;
+  yrs.forEach(y => { h += `<tr><td class="n">${y}${y === '2008' || y === '2026' ? '*' : ''}</td>` + [C.A, C.B, C.C, D.qqq, D.spx].map(v => { const x = v.years[y]; return `<td class="n ${x < 0 ? 'neg' : ''}">${sg(x)}</td>`; }).join('') + '</tr>'; });
+  document.getElementById('years').innerHTML = h + `</tbody>`;
+
+  const S = [[META.A[0], C.A.nav, 'var(--a)', false], [META.B[0], C.B.nav, 'var(--b)', false], [META.C[0], C.C.nav, 'var(--c)', false], ['נאסד״ק 100', D.qqq.nav, 'var(--bench)', true]];
+  document.getElementById('cl').innerHTML = S.map(([l, , c, dsh]) => `<span><i style="background:${c}"></i>${l}</span>`).join('') + '<span style="color:var(--ink-3)">הפוד לבדו · צמיחה של דולר אחד, סולם לוגריתמי; מתחת: ירידה מהשיא</span>';
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (t, a, p) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); p && p.appendChild(e); return e; };
+  function chart(host, series, H, log, ticks, fmt) {
+    const Wd = 900, m = {l: 52, r: 12, t: 10, b: 24};
+    const svg = el('svg', {viewBox: `0 0 ${Wd} ${H}`, role: 'img', 'aria-label': 'צמיחת הון'}, host);
+    const dates = series[0][1].map(p => p[0]);
+    const f = v => log ? Math.log(v) : v;
+    let lo = Infinity, hi = -Infinity; series.forEach(s => s[1].forEach(p => { lo = Math.min(lo, f(p[1])); hi = Math.max(hi, f(p[1])); }));
+    if (!log) hi = 0;
+    const X = i => m.l + i / (dates.length - 1) * (Wd - m.l - m.r), Y = v => H - m.b - (f(v) - lo) / (hi - lo) * (H - m.t - m.b);
+    ticks.filter(v => f(v) >= lo - 1e-9 && f(v) <= hi + 1e-9).forEach(v => { el('line', {x1: m.l, x2: Wd - m.r, y1: Y(v), y2: Y(v), class: 'gl'}, svg); el('text', {x: m.l - 8, y: Y(v) + 4, 'text-anchor': 'end'}, svg).textContent = fmt(v); });
+    dates.forEach((d, i) => { if (d.endsWith('-01') && (+d.slice(0, 4)) % 3 === 2) el('text', {x: X(i), y: H - 6, 'text-anchor': 'middle'}, svg).textContent = d.slice(0, 4); });
+    series.slice().reverse().forEach(([, pts, c, dsh]) => el('path', {d: pts.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(''), fill: 'none', stroke: c, 'stroke-width': dsh ? 1.6 : 2.2, 'stroke-dasharray': dsh ? '5 4' : 'none'}, svg));
+    const tip = document.createElement('div'); tip.className = 'tip'; tip.hidden = true; host.appendChild(tip);
+    const cross = el('line', {y1: m.t, y2: H - m.b, stroke: 'var(--ink-3)', visibility: 'hidden'}, svg);
+    svg.addEventListener('pointermove', e => { const r = svg.getBoundingClientRect(); const i = Math.max(0, Math.min(dates.length - 1, Math.round(((e.clientX - r.left) / r.width * Wd - m.l) / (Wd - m.l - m.r) * (dates.length - 1))));
+      cross.setAttribute('x1', X(i)); cross.setAttribute('x2', X(i)); cross.setAttribute('visibility', 'visible');
+      tip.innerHTML = `<div><b class="num">${dates[i]}</b></div>` + series.map(([l, pts]) => `<div class="r"><span>${l}</span><b>${fmt(pts[i][1])}</b></div>`).join('');
+      tip.hidden = false; const hr = host.getBoundingClientRect(); let x = e.clientX - hr.left + 12; if (x + 190 > hr.width) x -= 210; tip.style.left = x + 'px'; tip.style.top = (e.clientY - hr.top - 10) + 'px'; });
+    svg.addEventListener('pointerleave', () => { tip.hidden = true; cross.setAttribute('visibility', 'hidden'); });
+  }
+  chart(document.getElementById('nav'), S, 320, true, [1, 2, 4, 8, 16, 32, 64], v => v.toFixed(v < 10 ? 2 : 1) + '×');
+  const DDS = S.map(([l, pts, c, d]) => { let pk = 0; return [l, pts.map(([t, v]) => { pk = Math.max(pk, v); return [t, v / pk - 1]; }), c, d]; });
+  chart(document.getElementById('dd'), DDS, 170, false, [0, -0.1, -0.2, -0.3, -0.4, -0.5], v => Math.round(v * 100) + '%');
+})();
+</script>

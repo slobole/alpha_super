@@ -1,0 +1,196 @@
+<meta charset="utf-8">
+<title>תיק מפוצל ללקוח</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Hebrew:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: one calm client-facing column (~960px), RTL; the split is the hero, numbers and chart follow. */
+:root {
+  --bg: #f3f4f1; --surface: #fcfcfb; --surface-2: #eceee9; --ink: #17212a; --ink-2: #46515b; --ink-3: #6c7780;
+  --rule: #d8ddd6; --accent: #0c6a60; --accent-soft: #d8ece7; --growth: #c05a2c; --growth-soft: #f6e3d8;
+  --shield: #2c5f9e; --shield-soft: #dde8f5; --bench: #8a9199; --bench-2: #b4babf; --grid: #e3e7e1;
+  --good: #1b7641; --bad: #ad2a22; --tip-bg: #17212a; --tip-ink: #f3f4f1;
+  --display: "Frank Ruhl Libre", "David Libre", "Times New Roman", serif;
+  --body: "IBM Plex Sans Hebrew", "Heebo", "Arial Hebrew", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1418; --surface: #151c22; --surface-2: #1c252d; --ink: #e6ebee; --ink-2: #aab5be; --ink-3: #86919b;
+    --rule: #2b3640; --accent: #47b9aa; --accent-soft: #163733; --growth: #e07a4a; --growth-soft: #3a2519;
+    --shield: #6fa3e6; --shield-soft: #1a2a40; --bench: #7b848c; --bench-2: #58616a; --grid: #25313a;
+    --good: #55ba7a; --bad: #ee6d63; --tip-bg: #e6ebee; --tip-ink: #0f1418; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1418; --surface: #151c22; --surface-2: #1c252d; --ink: #e6ebee; --ink-2: #aab5be; --ink-3: #86919b;
+  --rule: #2b3640; --accent: #47b9aa; --accent-soft: #163733; --growth: #e07a4a; --growth-soft: #3a2519;
+  --shield: #6fa3e6; --shield-soft: #1a2a40; --bench: #7b848c; --bench-2: #58616a; --grid: #25313a;
+  --good: #55ba7a; --bad: #ee6d63; --tip-bg: #e6ebee; --tip-ink: #0f1418; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 16px; line-height: 1.65; }
+main { max-width: 960px; margin: 0 auto; padding-inline: 20px; padding-block: 36px 64px; display: grid; gap: 34px; }
+h1, h2 { font-family: var(--display); margin: 0; text-wrap: balance; line-height: 1.2; }
+h1 { font-size: clamp(32px, 5.5vw, 48px); }
+h2 { font-size: clamp(22px, 3vw, 28px); }
+p { margin: 0; max-width: 68ch; }
+.lede { font-size: 18px; color: var(--ink-2); }
+.eyebrow { font-size: 13px; color: var(--ink-3); letter-spacing: 0.05em; }
+header, section { display: grid; gap: 14px; min-width: 0; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; white-space: nowrap; }
+.split { display: grid; grid-template-columns: 1fr 2fr; gap: 12px; }
+@media (max-width: 640px) { .split { grid-template-columns: 1fr; } }
+.part { border-radius: 14px; padding: 18px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.part.g { background: var(--growth-soft); border: 1px solid color-mix(in srgb, var(--growth) 35%, transparent); }
+.part.s { background: var(--shield-soft); border: 1px solid color-mix(in srgb, var(--shield) 35%, transparent); }
+.part .amt { font-family: var(--mono); font-size: 30px; font-weight: 500; direction: ltr; unicode-bidi: isolate; }
+.part .t { font-family: var(--display); font-size: 22px; font-weight: 700; }
+.part ul { margin: 0; padding-inline-start: 18px; display: grid; gap: 4px; color: var(--ink-2); font-size: 15px; }
+.bar { display: flex; height: 14px; border-radius: 4px; overflow: hidden; gap: 2px; direction: ltr; }
+.bar span { display: block; height: 100%; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 13px; color: var(--ink-2); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-inline-end: 6px; vertical-align: baseline; }
+.principles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.pr { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 14px 16px; display: grid; gap: 6px; align-content: start; }
+.pr b { font-size: 15.5px; }
+.pr p { font-size: 14.5px; color: var(--ink-2); }
+.tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th, td { padding: 9px 12px; border-block-end: 1px solid var(--rule); text-align: start; }
+th { font-weight: 500; color: var(--ink-3); font-size: 13px; background: var(--surface-2); white-space: nowrap; }
+td.n, th.n { text-align: left; }
+td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; white-space: nowrap; }
+tr:last-child td { border-block-end: 0; }
+tr.hl td { background: var(--accent-soft); font-weight: 600; }
+.neg { color: var(--bad); } .pos { color: var(--good); }
+.chart { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 12px; display: grid; gap: 8px; position: relative; min-width: 0; }
+.svgwrap { direction: ltr; position: relative; }
+.svgwrap svg { display: block; width: 100%; height: auto; overflow: visible; }
+.svgwrap text { fill: var(--ink-3); font-family: var(--mono); font-size: 11px; }
+.svgwrap .gl { stroke: var(--grid); stroke-width: 1; }
+.tip { position: absolute; pointer-events: none; background: var(--tip-bg); color: var(--tip-ink); border-radius: 8px; padding: 7px 10px; font-size: 12.5px; direction: rtl; min-width: 150px; z-index: 3; }
+.tip .r { display: flex; justify-content: space-between; gap: 12px; }
+.tip .r b { font-family: var(--mono); font-weight: 500; direction: ltr; }
+.note { background: var(--surface); border: 1px solid var(--rule); border-inline-start: 3px solid var(--bench); border-radius: 8px; padding: 12px 16px; font-size: 13.5px; color: var(--ink-2); display: grid; gap: 6px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<main dir="rtl" lang="he">
+<header>
+  <div class="eyebrow">עיקרון ההשקעה · חשבון לדוגמה של 1.5 מיליון דולר</div>
+  <h1>שליש מנוע צמיחה, שני שלישים ליבה הגנתית</h1>
+  <p class="lede">החשבון מחולק לשני חלקים שעובדים יחד. החלק הקטן רודף אחרי צמיחה, החלק הגדול שומר על ההון. הסיכון נמדד ומנוהל ברמת החשבון כולו, לא ברמת כל חלק לחוד.</p>
+</header>
+
+<section>
+  <div class="split">
+    <div class="part g">
+      <div class="t">מנוע הצמיחה</div>
+      <div class="amt">$500,000</div>
+      <ul>
+        <li>אסטרטגיית רוטציה טקטית בין נכסים: מחזיקה נאסד״ק ממונף רק כשהמגמה חיובית, ועוברת לנכסים הגנתיים כשהיא נשברת.</li>
+        <li>מומנטום במניות נאסד״ק 100: כעשר המניות החזקות, עם הקטנת חשיפה כשהתנודתיות עולה.</li>
+        <li>פרוסה הגנתית קטנה בתוך המנוע.</li>
+      </ul>
+    </div>
+    <div class="part s">
+      <div class="t">הליבה ההגנתית</div>
+      <div class="amt">$1,000,000</div>
+      <ul>
+        <li>אסטרטגיית מאקרו רב־נכסית: מניות, אג״ח, זהב, סחורות ודולר, לפי המשטר הכלכלי.</li>
+        <li>אסטרטגיית גידור: מחזיקה קרן שמרוויחה כשהשוק נופל (BTAL), ועוברת לנאסד״ק או למזומן לפי מגמה ותנודתיות.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="bar" id="bar"></div>
+  <div class="legend" id="legend"></div>
+</section>
+
+<section>
+  <h2>חמישה עקרונות</h2>
+  <div class="principles">
+    <div class="pr"><b>הסיכון נמדד על כל החשבון</b><p>שני החלקים נבנו כך שבירידות חדות הם לא נופלים יחד. הליבה ההגנתית בולמת את המנוע.</p></div>
+    <div class="pr"><b>איזון פעם בשנה</b><p>בסוף כל שנה החשבון חוזר לשליש ושני שלישים. בלי איזון, המנוע היה גדל ומגדיל את הסיכון בלי שמישהו החליט על זה.</p></div>
+    <div class="pr"><b>מסחר חודשי ונזיל</b><p>קרנות סל גדולות ומניות נאסד״ק 100, בפקודות בפתיחת המסחר. בלי מסחר יומי.</p></div>
+    <div class="pr"><b>בלי הלוואות</b><p>אין מינוף ברמת החשבון ואין מרג׳ין. המינוף היחיד הוא בתוך קרן סל ממונפת, ורק כשהמגמה חיובית.</p></div>
+    <div class="pr"><b>כללים, לא תחושות</b><p>כל ההחלטות נקבעות מראש בקוד, ונבדקות על 18 שנות היסטוריה ועל אלפי היסטוריות חלופיות.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>איך זה נראה בסימולציה היסטורית, 2008–2026</h2>
+  <div class="tbl"><table id="stats"></table></div>
+  <div class="chart">
+    <div class="legend" id="cl"></div>
+    <div class="svgwrap" id="nav"></div>
+    <div class="svgwrap" id="dd"></div>
+  </div>
+</section>
+
+<section>
+  <h2>במשברים</h2>
+  <div class="tbl"><table id="crises"></table></div>
+</section>
+
+<div class="note">
+  <b>חשוב לדעת</b>
+  <p>כל המספרים הם סימולציה על נתוני עבר, לא תוצאות של כסף אמיתי, ואינם הבטחה לעתיד. לפני 2012 חלק ממנוע הצמיחה מחושב על נתונים סינתטיים, כי שתי קרנות הסל שהוא משתמש בהן עוד לא נסחרו אז. המספרים לפני עמלות ולפני מס. בכל אסטרטגיה יכולות להיות שנים חלשות, והירידות בפועל יכולות להיות עמוקות מאלה שבסימולציה.</p>
+</div>
+</main>
+
+<script type="application/json" id="d">/*DATA*/null</script>
+<script>
+(function () {
+  const D = JSON.parse(document.getElementById('d').textContent);
+  const pct = (x, d = 1) => (x * 100).toFixed(d) + '%';
+  const sg = x => (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x * 100).toFixed(1) + '%';
+  const W = D.plan.weights;
+  const parts = [['taa3x_1n', 'רוטציה טקטית (מנוע)', 'var(--growth)'], ['ndx_vxn', 'מומנטום נאסד״ק 100 (מנוע)', 'color-mix(in srgb, var(--growth) 60%, var(--surface))'],
+    ['core5', 'מאקרו רב־נכסי (ליבה)', 'var(--shield)'], ['btal_qqq', 'גידור ומגמה (ליבה)', 'color-mix(in srgb, var(--shield) 60%, var(--surface))']];
+  document.getElementById('bar').innerHTML = parts.map(([k, l, c]) => `<span title="${l}" style="width:${W[k] * 100}%;background:${c}"></span>`).join('');
+  document.getElementById('legend').innerHTML = parts.map(([k, l, c]) => `<span><i style="background:${c}"></i>${l} <span class="num">${Math.round(W[k] * 100)}%</span></span>`).join('');
+
+  const rows = [['התיק המפוצל', D.plan, true], ['מדד S&P 500 כולל דיבידנד', D.spx, false], ['תיק 60/40 מניות ואג״ח', D['6040'], false]];
+  let h = `<thead><tr><th></th><th class="n">תשואה שנתית ממוצעת</th><th class="n">הירידה הגדולה ביותר</th><th class="n">השנה הגרועה</th><th class="n">שארפ</th></tr></thead><tbody>`;
+  rows.forEach(([l, v, hl]) => { h += `<tr class="${hl ? 'hl' : ''}"><td>${l}</td><td class="n">${pct(v.cagr)}</td><td class="n neg">${sg(v.dd)}</td><td class="n ${v.worst_year < 0 ? 'neg' : ''}">${sg(v.worst_year)}</td><td class="n">${v.sharpe.toFixed(2)}</td></tr>`; });
+  document.getElementById('stats').innerHTML = h + `</tbody>`;
+  const cap = document.createElement('p');
+  cap.style.cssText = 'font-size:13.5px;color:var(--ink-3)';
+  cap.textContent = `התיק המפוצל: ${D.plan.pos_years} מתוך ${D.plan.n_years} שנים קלנדריות חיוביות (2008 ו־2026 חלקיות). מ־2012, בלי נתונים סינתטיים: ${pct(D.plan.exact)} בשנה. שלוש השנים האחרונות: ${pct(D.plan.recent)} בשנה.`;
+  document.getElementById('stats').closest('.tbl').after(cap);
+
+  const CR = [['gfc', 'המשבר הפיננסי, 2008–2009'], ['q4_2018', 'סוף 2018'], ['covid', 'קורונה, 2020'], ['bear_2022', 'שוק דובי, 2022'], ['tariffs_2025', 'המכסים, 2025']];
+  h = `<thead><tr><th>אירוע</th><th class="n">התיק המפוצל</th><th class="n">S&amp;P 500</th><th class="n">60/40</th></tr></thead><tbody>`;
+  CR.forEach(([k, l]) => { h += `<tr><td>${l}</td>` + [D.plan, D.spx, D['6040']].map((v, i) => `<td class="n ${v.crises[k] < 0 ? 'neg' : 'pos'}" ${i === 0 ? 'style="font-weight:600"' : ''}>${sg(v.crises[k])}</td>`).join('') + `</tr>`; });
+  document.getElementById('crises').innerHTML = h + '</tbody>';
+
+  const S = [['התיק המפוצל', D.nav_plan, 'var(--accent)', false], ['S&P 500', D.nav_spx, 'var(--bench)', false], ['60/40', D.nav_6040, 'var(--bench-2)', true]];
+  document.getElementById('cl').innerHTML = S.map(([l, , c, dsh]) => `<span><i style="background:${c}"></i>${l}</span>`).join('') + '<span style="color:var(--ink-3)">צמיחה של דולר אחד, סולם לוגריתמי; מתחת: ירידה מהשיא</span>';
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (t, a, p) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); p && p.appendChild(e); return e; };
+  function chart(host, series, H, log, ticks, fmt) {
+    const Wd = 900, m = {l: 52, r: 12, t: 10, b: 24};
+    const svg = el('svg', {viewBox: `0 0 ${Wd} ${H}`, role: 'img', 'aria-label': 'צמיחת הון'}, host);
+    const dates = series[0][1].map(p => p[0]);
+    const f = v => log ? Math.log(v) : v;
+    let lo = Infinity, hi = -Infinity; series.forEach(s => s[1].forEach(p => { lo = Math.min(lo, f(p[1])); hi = Math.max(hi, f(p[1])); }));
+    if (!log) hi = 0;
+    const X = i => m.l + i / (dates.length - 1) * (Wd - m.l - m.r), Y = v => H - m.b - (f(v) - lo) / (hi - lo) * (H - m.t - m.b);
+    ticks.filter(v => f(v) >= lo - 1e-9 && f(v) <= hi + 1e-9).forEach(v => { el('line', {x1: m.l, x2: Wd - m.r, y1: Y(v), y2: Y(v), class: 'gl'}, svg); el('text', {x: m.l - 8, y: Y(v) + 4, 'text-anchor': 'end'}, svg).textContent = fmt(v); });
+    dates.forEach((d, i) => { if (d.endsWith('-01') && (+d.slice(0, 4)) % 3 === 2) el('text', {x: X(i), y: H - 6, 'text-anchor': 'middle'}, svg).textContent = d.slice(0, 4); });
+    series.slice().reverse().forEach(([, pts, c, dsh]) => el('path', {d: pts.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(''), fill: 'none', stroke: c, 'stroke-width': dsh ? 1.6 : 2.2, 'stroke-dasharray': dsh ? '5 4' : 'none'}, svg));
+    const tip = document.createElement('div'); tip.className = 'tip'; tip.hidden = true; host.appendChild(tip);
+    const cross = el('line', {y1: m.t, y2: H - m.b, stroke: 'var(--ink-3)', visibility: 'hidden'}, svg);
+    svg.addEventListener('pointermove', e => { const r = svg.getBoundingClientRect(); const i = Math.max(0, Math.min(dates.length - 1, Math.round(((e.clientX - r.left) / r.width * Wd - m.l) / (Wd - m.l - m.r) * (dates.length - 1))));
+      cross.setAttribute('x1', X(i)); cross.setAttribute('x2', X(i)); cross.setAttribute('visibility', 'visible');
+      tip.innerHTML = `<div><b class="num">${dates[i]}</b></div>` + series.map(([l, pts]) => `<div class="r"><span>${l}</span><b>${fmt(pts[i][1])}</b></div>`).join('');
+      tip.hidden = false; const hr = host.getBoundingClientRect(); let x = e.clientX - hr.left + 12; if (x + 170 > hr.width) x -= 190; tip.style.left = x + 'px'; tip.style.top = (e.clientY - hr.top - 10) + 'px'; });
+    svg.addEventListener('pointerleave', () => { tip.hidden = true; cross.setAttribute('visibility', 'hidden'); });
+  }
+  chart(document.getElementById('nav'), S, 320, true, [1, 2, 4, 8], v => v.toFixed(v < 10 ? 2 : 1) + '×');
+  const DDS = S.map(([l, pts, c, d]) => { let pk = 0; return [l, pts.map(([t, v]) => { pk = Math.max(pk, v); return [t, v / pk - 1]; }), c, d]; });
+  chart(document.getElementById('dd'), DDS, 170, false, [0, -0.1, -0.2, -0.3, -0.4, -0.5], v => Math.round(v * 100) + '%');
+})();
+</script>

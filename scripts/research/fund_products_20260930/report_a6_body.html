@@ -1,0 +1,290 @@
+.prod5 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.card { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 12px 14px; display: grid; gap: 6px; align-content: start; }
+.card.d { border-top: 3px solid var(--def); } .card.g { border-top: 3px solid var(--gro); }
+.card.pick { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--good) 55%, transparent); }
+.card h3 { font-size: 17px; } .card .mix { font-size: 12px; color: var(--ink-2); } .card .kpi { font-size: 12.5px; color: var(--ink-2); display: grid; gap: 2px; }
+.card .kpi b { font-family: var(--mono); font-weight: 500; direction: ltr; unicode-bidi: isolate; color: var(--ink); }
+.card .why { font-size: 12.5px; color: var(--ink-2); border-top: 1px dashed var(--rule); padding-top: 6px; }
+.chip.stage { background: var(--surface-2); color: var(--ink-2); }
+.yes { color: var(--good); font-weight: 600; } .no { color: var(--bad); font-weight: 600; }
+</style>
+
+<main dir="rtl" lang="he">
+<header>
+  <div class="eyebrow">מחקר מסכם · 1 באוקטובר 2026 · גרסה 3 (תיקון A6) · כללים שנקבעו מראש והופעלו מכנית · סקירה בלתי תלויה</div>
+  <h1>מוצרי הקרן: הגנתי וצמיחה</h1>
+  <p class="lede">/*LEDE*/</p>
+</header>
+
+<section>
+  <div class="kicker">בקצרה</div>
+  <h2>מה החלטתי</h2>
+  <ul class="plain" id="summary">/*SUMMARY*/</ul>
+</section>
+
+<section>
+  <div class="kicker">מוצר 1</div>
+  <h2>הגנתי: חמש אפשרויות</h2>
+  <p>/*DEF_INTRO*/</p>
+  <div class="prod5" id="cards_d"></div>
+  <div class="tbl"><table id="menu_d"></table></div>
+  <p class="cap">חמש האפשרויות עומדות בכלל ההגנתי (ירידה מרבית עד ‎−7%‎ וסיכוי של עד 10% לשבור ‎−10%‎, גם בממוצע עשרת הזרעים וגם בזרע הגרוע), גם בעלויות המודל וגם ב־‎+5‎ נ״ב לצד, וברצפת המשברים (2008 ו־2022 לא גרועים מ־‎−1%‎ מתחילת החלון ועד סופו, ואף משבר לא גרוע מ־‎−5%‎). שורות ההשוואה לא בהכרח. "הגנתי מאוד" עומד בכלל מחמיר יותר: ירידה מרבית עד ‎−5%‎ וסיכוי של עד 10% לשבור ‎−7%‎. רצפת המשברים נמדדת כתשואה מתחילת החלון ועד סופו; הירידה הגרועה בתוך החלון מופיעה בטבלת המשברים.</p>
+  <h3>כמה רחוק אפשר למשוך את "יותר תשואה"</h3>
+  <div class="tbl"><table id="frontier"></table></div>
+  <p class="cap">שלוש הנקודות הטובות ביותר שעוברות את הכלל בשתי רמות העלות, לפי תשואה. "מרווח" הוא כמה נשאר עד כל גבול. הנקודה שנבחרה יושבת על הקצה, ולכן ציפייה סבירה היא כ־9.2%. התשואות בטבלה הזו לפי שנה של 252 ימי מסחר, ובתפריט לפי זמן קלנדרי, ולכן ייתכן הבדל של עשירית.</p>
+</section>
+
+<section>
+  <div class="kicker">השאלה על downshock</div>
+  <h2>/*DS_TITLE*/</h2>
+  <p>/*DS_TEXT*/</p>
+  <div class="tbl"><table id="profile"></table></div>
+  <div class="tbl"><table id="sweep"></table></div>
+  <p class="cap">כל שורה: downshock במשקל הנתון, והשאר יורד באופן יחסי. "מזומן נדרש" הוא המזומן המינימלי שמכניס את התיק לכלל ולרצפת המשברים; "–" אומר שאין כזה עד 60%.</p>
+</section>
+
+<section>
+  <div class="kicker">מוצר 2</div>
+  <h2>צמיחה: בלי מינוף ועם מינוף</h2>
+  <p>/*GRO_INTRO*/</p>
+  <div class="prod5" id="cards_g"></div>
+  <div class="tbl"><table id="menu_g"></table></div>
+  <p class="cap">מינוף יומי, הלוואה בריבית אג״ח קצר + 1.5%. "מימון" מראה את התשואה בריבית + 0.5% (קרן גדולה) ו־+ 2.5% (מחמיר). "Reg-T" הוא הערכה גסה של ההון הנדרש לפי כללי המרג׳ין הרגילים, בהנחה הגרועה ש־TAA מחזיק TQQQ במלואו (75%) וכל השאר 50%; מעל 90% מסומן ⚠ וכדאי Portfolio Margin, ומעל 100% הוא חובה. ההערכה מעט נמוכה, כי CORE5 מחזיק עד 10% שורט מעל 100% לונג. הגודל המרבי מחושב על התיק בלי מינוף ומחולק במינוף; "≥" מסמן את קצה הרשת.</p>
+  <div class="callout">/*CALLOUT_22*/</div>
+</section>
+
+<section>
+  <div class="kicker">עמידות</div>
+  <h2>האם הבחירות מחזיקות</h2>
+  <p>לכל משבצת נקבעה מראש ברירת מחדל פשוטה. חלופה מחליפה אותה רק אם היא עוברת את כל שש הבדיקות: מנצחת ב־80% מהמסלולים, סיכוי שבירה לא גבוה יותר, טובה יותר בחלון 2012+ (בלי נתונים סינתטיים), לא נופלת ב־‎+5‎ נ״ב, וטובה יותר בשני חצאי התקופה.</p>
+  <div class="tbl"><table id="chal"></table></div>
+  <h3>תחת הנחות אחרות</h3>
+  <div class="tbl"><table id="frames"></table></div>
+  <p class="cap">‏"בלי ריבית על מזומן" קרוב לחשבון קטן. "פער HPI" הוא תרחיש היסטורי: תיקון היישור של HPI נכנס ל־main ב־28.9, והתרחיש מוחל רק על HPI ולא על HPI-RSI. "2012+" הוא החלון בלי פרוקסי סינתטי. חצאים: שארפ עודף לפני ואחרי 30.6.2017.</p>
+</section>
+
+<section>
+  <div class="kicker">אלפא</div>
+  <h2>כמה מזה יכולת, וכמה חשיפה זולה</h2>
+  <p>רגרסיה שבועית מעל אג״ח קצר (Newey-West), מול QQQ לבד ומול סל ETF זול עם כלל מגמה על QQQ. ‏t של 2 ומעלה נחשב מובהק. /*ALPHA_TEXT*/</p>
+  <div class="tbl"><table id="alpha"></table></div>
+</section>
+
+<section>
+  <div class="kicker">משברים</div>
+  <h2>איך כל אפשרות התנהגה בירידות</h2>
+  <div class="tbl"><table id="crises"></table></div>
+  <p class="cap">בכל תא: התשואה מתחילת החלון ועד סופו, ובסוגריים הירידה הגרועה בתוך החלון. לפני אוקטובר 2012 ‏BTAL_QQQ ו־TAA הם פרוקסי סינתטי, ו־DV2-IND לפני 2010 הוא הרצת מחקר של אותם כללים (ובחודשים שבהם לא סחר הוא מרוויח 0%).</p>
+</section>
+
+<section>
+  <h2>מהלך ההון</h2>
+  <div class="chart">
+    <div class="legend" id="cl"></div>
+    <div class="svgwrap" id="nav"></div>
+    <div class="svgwrap" id="dd"></div>
+  </div>
+</section>
+
+<section>
+  <h2>שנה אחר שנה</h2>
+  <div class="tbl"><table id="years"></table></div>
+</section>
+
+<section>
+  <h2>קורלציה בין הפודים: בכל הימים, ובימי נפילה</h2>
+  <div class="heat"><div class="tbl"><table id="h_all"></table></div><div class="tbl"><table id="h_fall"></table></div></div>
+  <p class="cap">ימי נפילה הם 5% הימים הגרועים של S&amp;P 500. ‏TAA3x, ‏TAA3x-1N ו־BTAL_QQQ חולקות מנוע אחד ("הגנה קודם"), והוא נושא 66%–81% מהסיכון של מוצרי הצמיחה, תלוי בתיק.</p>
+</section>
+
+<section>
+  <div class="kicker">מה נבדק ולא עזר</div>
+  <h2>מה יצא, ולמה</h2>
+  <ul class="plain">/*DROPPED*/</ul>
+</section>
+
+<section>
+  <div class="kicker">מה צריך ממך</div>
+  <h2>החלטות ופעולות</h2>
+  <ol class="plain">/*TODO*/</ol>
+</section>
+
+<section id="review_sec">
+  <div class="kicker">סקירה בלתי תלויה</div>
+  <h2>מה הסוקר מצא</h2>
+  <div id="review"></div>
+</section>
+
+<div class="note">
+  <b>הסתייגויות</b>
+  <p>/*CAVEATS*/</p>
+</div>
+</main>
+
+<script type="application/json" id="d">/*DATA*/null</script>
+<script type="application/json" id="rv">/*REVIEW*/null</script>
+<script>
+(function () {
+  const D = JSON.parse(document.getElementById('d').textContent);
+  const RV = JSON.parse(document.getElementById('rv').textContent);
+  const R = D.rows;
+  const POD = {taa3x: 'TAA3x', taa3x_1n: 'TAA3x-1N', ndx_vxn: 'NDX-VXN', core5: 'CORE5', btal_qqq: 'BTAL_QQQ', tbill: 'מזומן (BIL)', dv2: 'DV2',
+    hpi_vote: 'HPI', hpi_ibs_rsi: 'HPI-RSI', eom_flow: 'EOM', etf_dv2: 'DV2-IND', downshock: 'downshock'};
+  const META = /*META*/null;
+  const LABEL = /*LABELS*/null;
+  const nm = k => (META.rows[k] && META.rows[k].name) || k;
+  const lab = k => (k && LABEL[k.split('|')[0]]) ? LABEL[k.split('|')[0]] + (k.includes('|c') && !k.endsWith('|c0.00') ? ` + ‏${Math.round(parseFloat(k.split('|c')[1]) * 100)}% מזומן` : '') : (k || '–');
+  const pct = (x, d = 1) => (x === null || x === undefined || Number.isNaN(x)) ? '–' : (x * 100).toFixed(d) + '%';
+  const sg = x => (x === null || x === undefined || Number.isNaN(x)) ? '–' : (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x * 100).toFixed(1) + '%';
+  const f2 = x => (x === null || x === undefined || Number.isNaN(x)) ? '–' : x.toFixed(2);
+  const usd = (x, top) => !x ? '–' : (top ? '≥' : '') + '$' + (x >= 1e6 ? Math.round(x / 1e6) + 'M' : Math.round(x / 1e3) + 'K');
+  const td = (v, c = '') => `<td class="n ${c}">${v}</td>`;
+  const mix = (w, L) => '‏' + Object.entries(w).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${Math.round(v * 100)}% ${POD[k] || k}`).join(' · ') + (L && L !== 1 ? ` · מינוף ‎${L.toFixed(2)}×‎` : '');
+  const wire = r => r.needs_wiring.length ? r.needs_wiring.map(p => POD[p] || p).join(', ') : 'כלום';
+
+  // Cards
+  function cards(id, keys, cls, lim) {
+    document.getElementById(id).innerHTML = keys.filter(k => R[k]).map(k => { const r = R[k], m = r.m, c = m.crises, M = META.rows[k];
+      return `<div class="card ${cls} ${M.pick ? 'pick' : ''}"><div><span class="chip ${M.chipc || 'stage'}">${M.chip}</span></div><h3>${M.name}</h3>
+        <div class="mix">${mix(r.weights, r.lever)}</div>
+        <div class="kpi"><span>תשואה <b>${pct(m.cagr)}</b> · נטו <b>${pct(m.net_cagr)}</b></span><span>ירידה מרבית <b>${sg(m.maxdd)}</b> · שארפ עודף <b>${f2(m.xsharpe)}</b></span>
+        <span>סיכוי לשבור ‎−${lim}%‎: <b>${pct(r.tail['p' + lim])}</b></span><span>2008 <b>${sg(c.gfc)}</b> · 2022 <b>${sg(c.bear_2022)}</b></span>
+        <span>זמין: ${M.when}</span>${M.file ? `<span class="code">${M.file}.yaml</span>` : ''}</div>
+        <div class="why">${M.why}</div></div>`; }).join('');
+  }
+  cards('cards_d', META.def_cards, 'd', 10);
+  cards('cards_g', META.gro_cards, 'g', 20);
+
+  // Menus
+  const COLS = [['cagr', 'תשואה', pct], ['net_cagr', 'נטו 2/20', pct], ['xsharpe', 'שארפ עודף', f2], ['sortino', 'סורטינו', f2], ['maxdd', 'ירידה מרבית', sg],
+    ['cvar5_21d', 'CVaR חודשי', sg], ['worst_year', 'שנה גרועה', sg], ['beta', 'בטא', f2], ['crisis_corr', 'קורלציה בנפילות', f2]];
+  function menu(id, keys, limits, lev) {
+    const ncol = 1 + COLS.length + limits.length + 2 + (lev ? 3 : 0) + 4;
+    let h = `<thead><tr><th>אפשרות</th>${COLS.map(c => `<th class="n">${c[1]}</th>`).join('')}${limits.map(l => `<th class="n">סיכוי ל־${l}%−</th>`).join('')}` +
+      `<th class="n">+5 נ״ב</th><th class="n">+10 נ״ב</th>${lev ? '<th class="n">מינוף</th><th class="n">Reg-T</th><th class="n">מימון 0.5% / 2.5%</th>' : ''}<th class="n">פודים</th><th class="n">ימי מסחר</th><th class="n">גודל מרבי</th><th>צריך חיווט</th></tr></thead><tbody>`;
+    keys.forEach(k => { if (k.startsWith('#')) { h += `<tr class="grp"><td colspan="${ncol}">${k.slice(1)}</td></tr>`; return; }
+      const r = R[k]; if (!r) return; const m = r.m, M = META.rows[k] || {};
+      const p10 = (r.plus10_cagr !== undefined && r.plus10_cagr !== null) ? r.plus10_cagr : r.m.cagr + 2 * (r.frames.s3_plus_5bps.cagr - r.m.cagr);
+      h += `<tr class="${M.pick ? 'pick' : ''} ${M.dim ? 'dim' : ''}"><td class="nm"><b>${nm(k)}</b><div class="cap">${mix(r.weights, r.lever)}</div></td>` +
+        COLS.map(([c, , f]) => td(f(m[c]), (c.includes('dd') || c.includes('cvar') || c === 'worst_year') && m[c] < 0 ? 'neg' : '')).join('') +
+        limits.map(l => td(pct(r.tail ? r.tail['p' + l] : null))).join('') + td(pct(r.frames.s3_plus_5bps.cagr)) + td(pct(p10)) +
+        (lev ? td(r.lever !== 1 ? r.lever.toFixed(2) + '×' : '–') + td(r.reg_t && r.lever !== 1 ? pct(r.reg_t, 0) + (r.reg_t_flag ? ' ⚠' : '') : '–', r.reg_t_flag && r.lever !== 1 ? 'neg' : '') +
+          td(r.financing && r.financing['spread_0.005'] !== undefined ? pct(r.financing['spread_0.005']) + ' / ' + pct(r.financing['spread_0.025']) : '–') : '') +
+        td(r.ops.pods) + td(Math.round(r.ops.trade_days_per_year)) + td(usd(r.capacity, r.capacity_top)) + `<td>${wire(r)}</td></tr>`; });
+    document.getElementById(id).innerHTML = h + '</tbody>';
+  }
+  menu('menu_d', META.def_menu, [7, 10], false);
+  menu('menu_g', META.gro_menu, [20, 25], true);
+
+  // More-return frontier
+  const RS = (D.notes || {}).rich_stage;
+  const FRN = [['rich_frontier_launch', RS === 'launch' ? 'על ליבת ההשקה (נבחר)' : 'על ליבת ההשקה (פחות מנקודה מעל ההשקה, ולכן לא)'],
+    ['rich_frontier_next', 'על ליבת הצעד הבא' + (RS === 'next' ? ' (נבחר)' : '')]];
+  let fh = `<thead><tr><th>נקודה</th><th class="n">צמיחה</th><th class="n">מזומן</th><th class="n">תשואה</th><th class="n">ירידה מרבית</th><th class="n">2022</th><th class="n">סיכוי ל־10%− (זרע גרוע): מודל / ‎+5‎ נ״ב</th><th class="n">מרווח: ירידה / 2022 / סיכוי</th></tr></thead><tbody>`;
+  FRN.forEach(([k, lab_]) => { const L = (D.notes || {})[k]; if (!L) return; fh += `<tr class="grp"><td colspan="8">${lab_}</td></tr>`;
+    L.forEach((r, i) => { fh += `<tr class="${i === 0 && k === 'rich_frontier_' + RS ? 'pick' : ''}"><td class="n">${i + 1}</td>${td(pct(r.g * (1 - r.cash), 0))}${td(pct(r.cash, 0))}${td(pct(r.cagr))}${td(sg(r.dd), 'neg')}${td(sg(r.bear_2022), r.bear_2022 < 0 ? 'neg' : '')}${td(pct(r.p10_max) + (r.p10_plus5_max !== undefined ? ' / ' + pct(r.p10_plus5_max) : ''))}` +
+      td(`${(r.slack.dd * 100).toFixed(2)} / ${(r.slack.bear_2022 * 100).toFixed(2)} / ${(r.slack.p10 * 100).toFixed(1)} נק׳`) + '</tr>'; }); });
+  document.getElementById('frontier').innerHTML = fh + '</tbody>';
+
+  // Downshock: stand-alone engines, then the sweep
+  const CRN = {gfc: '2008', q4_2018: 'סוף 2018', covid: 'קורונה', bear_2022: '2022', tariffs_2025: 'מכסים 2025'};
+  let h = `<thead><tr><th>מנוע לבדו</th><th class="n">תשואה</th><th class="n">ירידה מרבית</th><th class="n">שארפ עודף</th>${Object.values(CRN).map(c => `<th class="n">${c}</th>`).join('')}<th class="n">קורלציה עם S&amp;P בימי נפילה</th></tr></thead><tbody>`;
+  Object.entries(D.profile).forEach(([p, v]) => { h += `<tr><td>${POD[p] || p}</td>${td(pct(v.cagr))}${td(sg(v.dd), 'neg')}${td(f2(v.xs))}` +
+    Object.keys(CRN).map(c => td(sg(v.crises[c]), v.crises[c] < 0 ? 'neg' : 'pos')).join('') + td(f2(v.falls_corr), v.falls_corr > 0.2 ? 'neg' : '') + '</tr>'; });
+  document.getElementById('profile').innerHTML = h + '</tbody>';
+  const CTX = {C_L: 'בתוך ליבת ההשקה (60/40)', C_N: 'בתוך ליבת הצעד הבא (עם DV2-IND)', C_T: 'בתוך ליבת היעד (עם EOM ו־DV2-IND)'};
+  h = `<thead><tr><th>משקל downshock</th><th class="n">תשואה</th><th class="n">שארפ עודף</th><th class="n">2008</th><th class="n">2022</th><th class="n">משבר גרוע</th><th class="n">סיכוי ל־10%−</th><th class="n">מזומן נדרש</th><th class="n">תשואה עם המזומן</th></tr></thead><tbody>`;
+  Object.keys(CTX).forEach(ctx => { h += `<tr class="grp"><td colspan="9">${CTX[ctx]}</td></tr>`;
+    D.sweep.filter(s => s.context === ctx).forEach(s => { const q = s.raw.q, mc = s.min_cash;
+      h += `<tr class="${s.ds === 0 ? 'pick' : ''}"><td class="n">${Math.round(s.ds * 100)}%</td>${td(pct(q.cagr))}${td(f2(q.xs))}${td(sg(q.crises.gfc), q.crises.gfc < -0.01 ? 'neg' : '')}${td(sg(q.crises.bear_2022), q.crises.bear_2022 < -0.01 ? 'neg' : '')}` +
+        td(sg(q.worst_crisis), q.worst_crisis < -0.05 ? 'neg' : '') + td(pct(s.raw.tails ? s.raw.tails.p10 : null)) + td(mc ? pct(mc.cash, 0) : '–', mc ? '' : 'neg') + td(mc ? pct(mc.q.cagr) : '–') + '</tr>'; }); });
+  document.getElementById('sweep').innerHTML = h + '</tbody>';
+
+  // Challenge tests
+  const CK = {share_ge_80: '80% מהמסלולים', breach_no_worse: 'סיכוי שבירה', exact_xs_higher: '2012+', plus5_not_lower: '+5 נ״ב', h1_higher: 'חצי 1', h2_higher: 'חצי 2'};
+  const SLOTN = {launch: 'הגנתי · השקה', next: 'הגנתי · הצעד הבא', target: 'הגנתי · יעד', g22_launch: 'צמיחה · 22% עכשיו', g22_next: 'צמיחה · 22% אחרי הצעד הבא', g22_target: 'צמיחה · 22% ביעד',
+    next_vs_launch: 'הצעד הבא מול ההשקה (ראש בראש)'};
+  h = `<thead><tr><th>משבצת</th><th>חלופה</th><th>מול ברירת המחדל</th><th class="n">מנצחת ב־%</th>${Object.values(CK).map(c => `<th class="n">${c}</th>`).join('')}<th>מחליפה?</th></tr></thead><tbody>`;
+  const CH = Object.assign({}, D.challenges); if (D.next_vs_launch) CH.next_vs_launch = [D.next_vs_launch];
+  Object.entries(CH).forEach(([slot, log]) => log.forEach(c => {
+    h += `<tr><td>${SLOTN[slot] || slot}</td><td>${lab(c.challenger)}</td><td>${lab(c.default)}</td>` +
+      (c.checks ? td(pct(c.share, 0)) + Object.keys(CK).map(k => `<td class="n ${c.checks[k] ? 'yes' : 'no'}">${c.checks[k] ? '✓' : '✗'}</td>`).join('') : `<td colspan="7" class="cap">${c.reason === 'no passing cash level' ? 'אין רמת מזומן שעוברת את הכלל והרצפה' : (c.reason || '')}</td>`) +
+      `<td class="${c.passed && !c.gated ? 'yes' : 'no'}">${c.gated ? (c.passed ? 'עובר, אבל מותנה' : 'לא') : (c.passed ? (slot === 'next_vs_launch' ? 'משדרג' : 'כן') : 'לא')}</td></tr>`; }));
+  document.getElementById('chal').innerHTML = h + '</tbody>';
+
+  // Frames
+  const FK = META.frames;
+  h = `<thead><tr><th>הנחה</th>${FK.map(k => `<th class="n">${nm(k)}</th>`).join('')}</tr></thead><tbody><tr class="grp"><td colspan="${FK.length + 1}">תשואה שנתית / ירידה מרבית</td></tr>`;
+  h += `<tr><td>הבסיס</td>${FK.map(k => td(pct(R[k].m.cagr) + ' / ' + sg(R[k].m.maxdd))).join('')}</tr>`;
+  [['s3_plus_5bps', '+5 נ״ב לצד'], ['s1_house_cash', 'בלי ריבית על מזומן'], ['s6_exact', 'רק 2012+ (בלי פרוקסי)'], ['s5_hpi_live_gap', 'פער HPI בלייב']].forEach(([f, l]) => {
+    h += `<tr><td>${l}</td>${FK.map(k => td(pct(R[k].frames[f].cagr) + ' / ' + sg(R[k].frames[f].dd))).join('')}</tr>`; });
+  h += `<tr class="grp"><td colspan="${FK.length + 1}">שארפ עודף בשני חצאי התקופה</td></tr><tr><td>עד 6/2017 / אחרי</td>${FK.map(k => td(R[k].halves_xs ? f2(R[k].halves_xs[0]) + ' / ' + f2(R[k].halves_xs[1]) : '–')).join('')}</tr>`;
+  document.getElementById('frames').innerHTML = h + '</tbody>';
+
+  // Alpha
+  const ga_ = (b, basis, m) => D.alpha.find(a => a.book === b && a.basis === basis && a.model === m);
+  const ac = a => a ? `${pct(a.alpha_ann)} <span class="${a.alpha_t >= 2 ? 'pos' : a.alpha_t < 1 ? 'neg' : ''}">(t ${a.alpha_t.toFixed(1)})</span>` : '–';
+  h = `<thead><tr><th>אפשרות</th><th class="n">ברוטו מול QQQ</th><th class="n">ברוטו מול ETF + מגמה</th><th class="n">נטו מול QQQ</th><th class="n">נטו מול ETF + מגמה</th></tr></thead><tbody>`;
+  [...new Set(D.alpha.map(a => a.book))].forEach(b => { h += `<tr><td>${nm(b)}</td>${td(ac(ga_(b, 'gross', 'M0')))}${td(ac(ga_(b, 'gross', 'M2')))}${td(ac(ga_(b, 'net', 'M0')))}${td(ac(ga_(b, 'net', 'M2')))}</tr>`; });
+  document.getElementById('alpha').innerHTML = h + '</tbody>';
+
+  // Crises
+  const CB = META.crises;
+  const CRK = Object.keys(R[CB[0]].m.crises);
+  const crLab = k => CRN[k] || (() => { const p = k.split('|'); return `נפילה משותפת <span class="num">${p[1].slice(5, 7)}/${p[1].slice(0, 4)}</span>`; })();
+  h = `<thead><tr><th>אירוע</th>${CB.map(k => `<th class="n">${nm(k)}</th>`).join('')}<th class="n">S&amp;P 500</th><th class="n">QQQ</th></tr></thead><tbody>`;
+  const cdd = (r, k) => (r.m.crises_dd && r.m.crises_dd[k] !== undefined) ? ` <span class="cap">(${sg(r.m.crises_dd[k])})</span>` : '';
+  CRK.forEach(k => { h += `<tr><td>${crLab(k)}</td>` + CB.map(b => { const v = R[b].m.crises[k]; return td(sg(v) + cdd(R[b], k), v < 0 ? 'neg' : 'pos'); }).join('') +
+    ['S&P 500', 'QQQ'].map(b => { const v = D.bench[b].crises[k]; return td(sg(v), v < 0 ? 'neg' : 'pos'); }).join('') + '</tr>'; });
+  document.getElementById('crises').innerHTML = h + '</tbody>';
+
+  // Chart
+  const S = META.chart.map(([k, c]) => [nm(k), R[k].m.nav, c, false]).concat([['S&P 500', D.bench['S&P 500'].nav, 'var(--bench)', true]]);
+  document.getElementById('cl').innerHTML = S.map(([l, , c]) => `<span><i style="background:${c}"></i>${l}</span>`).join('') + '<span style="color:var(--ink-3)">צמיחה של דולר, סולם לוגריתמי; מתחת: ירידה מהשיא</span>';
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (t, a, p) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); p && p.appendChild(e); return e; };
+  function chart(host, series, H, log, ticks, fmt) {
+    const Wd = 900, m = {l: 52, r: 12, t: 10, b: 24};
+    const svg = el('svg', {viewBox: `0 0 ${Wd} ${H}`, role: 'img', 'aria-label': 'מהלך ההון'}, host);
+    const dates = series[0][1].map(p => p[0]);
+    const f = v => log ? Math.log(v) : v;
+    let lo = Infinity, hi = -Infinity; series.forEach(s => s[1].forEach(p => { lo = Math.min(lo, f(p[1])); hi = Math.max(hi, f(p[1])); }));
+    if (!log) hi = 0;
+    const X = i => m.l + i / (dates.length - 1) * (Wd - m.l - m.r), Y = v => H - m.b - (f(v) - lo) / (hi - lo) * (H - m.t - m.b);
+    ticks.filter(v => f(v) >= lo - 1e-9 && f(v) <= hi + 1e-9).forEach(v => { el('line', {x1: m.l, x2: Wd - m.r, y1: Y(v), y2: Y(v), class: 'gl'}, svg); el('text', {x: m.l - 8, y: Y(v) + 4, 'text-anchor': 'end'}, svg).textContent = fmt(v); });
+    dates.forEach((d, i) => { if (d.endsWith('-01') && (+d.slice(0, 4)) % 3 === 2) el('text', {x: X(i), y: H - 6, 'text-anchor': 'middle'}, svg).textContent = d.slice(0, 4); });
+    series.slice().reverse().forEach(([, pts, c, dsh]) => el('path', {d: pts.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(''), fill: 'none', stroke: c, 'stroke-width': dsh ? 1.6 : 2.2, 'stroke-dasharray': dsh ? '5 4' : 'none'}, svg));
+    const tip = document.createElement('div'); tip.className = 'tip'; tip.hidden = true; host.appendChild(tip);
+    const cross = el('line', {y1: m.t, y2: H - m.b, stroke: 'var(--ink-3)', visibility: 'hidden'}, svg);
+    svg.addEventListener('pointermove', e => { const r = svg.getBoundingClientRect(); const i = Math.max(0, Math.min(dates.length - 1, Math.round(((e.clientX - r.left) / r.width * Wd - m.l) / (Wd - m.l - m.r) * (dates.length - 1))));
+      cross.setAttribute('x1', X(i)); cross.setAttribute('x2', X(i)); cross.setAttribute('visibility', 'visible');
+      tip.innerHTML = `<div><b class="num">${dates[i]}</b></div>` + series.map(([l, pts]) => `<div class="r"><span>${l}</span><b>${pts[i] ? fmt(pts[i][1]) : '–'}</b></div>`).join('');
+      tip.hidden = false; const hr = host.getBoundingClientRect(); let x = e.clientX - hr.left + 12; if (x + 230 > hr.width) x -= 250; tip.style.left = x + 'px'; tip.style.top = (e.clientY - hr.top - 10) + 'px'; });
+    svg.addEventListener('pointerleave', () => { tip.hidden = true; cross.setAttribute('visibility', 'hidden'); });
+  }
+  chart(document.getElementById('nav'), S, 330, true, [1, 2, 4, 8, 16, 32, 64], v => v.toFixed(v < 10 ? 2 : 1) + '×');
+  const DDS = S.map(([l, pts, c, d]) => { let pk = 0; return [l, pts.map(([t, v]) => { pk = Math.max(pk, v); return [t, v / pk - 1]; }), c, d]; });
+  chart(document.getElementById('dd'), DDS, 180, false, [0, -0.1, -0.2, -0.3, -0.4, -0.5], v => Math.round(v * 100) + '%');
+
+  // Years
+  const YB = META.years;
+  h = `<thead><tr><th>שנה</th>${YB.map(k => `<th class="n">${nm(k)}</th>`).join('')}<th class="n">S&amp;P 500</th></tr></thead><tbody>`;
+  Object.keys(R[YB[0]].m.years).forEach(y => { h += `<tr><td class="n">${y}${y === '2008' || y === '2026' ? '*' : ''}</td>` +
+    YB.map(k => { const v = R[k].m.years[y]; return td(sg(v), v < 0 ? 'neg' : ''); }).join('') + td(sg(D.bench['S&P 500'].years[y]), D.bench['S&P 500'].years[y] < 0 ? 'neg' : '') + '</tr>'; });
+  document.getElementById('years').innerHTML = h + '</tbody>';
+
+  // Heatmaps
+  const CO = D.corr;
+  const css = getComputedStyle(document.documentElement);
+  const hex = v => { const s = css.getPropertyValue(v).trim(); return [1, 3, 5].map(i => parseInt(s.slice(i, i + 2), 16)); };
+  const mixc = (a, b, t) => `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * t)).join(',')})`;
+  function heat(id, M, title) { const mid = hex('--mid'), pos = hex('--pos-pole'), neg = hex('--neg-pole');
+    let h = `<thead><tr><th>${title}</th>${CO.names.map(n => `<th class="rot">${POD[n] || n}</th>`).join('')}</tr></thead><tbody>`;
+    CO.names.forEach((r, i) => { h += `<tr><td style="white-space:nowrap">${POD[r] || r}</td>` + M[i].map((v, j) => { const bg = i === j ? 'var(--surface-2)' : (v >= 0 ? mixc(mid, pos, Math.min(1, v) * 0.85) : mixc(mid, neg, Math.min(1, -v) * 0.85));
+      return `<td class="c" style="background:${bg};${Math.abs(v) > 0.6 && i !== j ? 'color:#fff' : ''}">${i === j ? '' : v.toFixed(2)}</td>`; }).join('') + '</tr>'; });
+    document.getElementById(id).innerHTML = h + '</tbody>'; }
+  heat('h_all', CO.all, 'כל הימים'); heat('h_fall', CO.falls, 'ימי נפילה');
+
+  document.getElementById('review').innerHTML = RV || '<p class="cap">הסקירה עדיין רצה.</p>';
+})();
+</script>

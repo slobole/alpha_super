@@ -1,0 +1,35 @@
+# GROWTH menu, GR1 Growth (three capsules: TAA, momentum E2 + sector cap, MR capsule with BIL parking).
+# Weights: taa3x 40.0% / ndx_atr_cap 15.0% / ndx_natr_cap 15.0% / dv2_g 15.0% / hpi_g 15.0%.
+# Study (LONG 2008-03..2026-08, gross, fair cash): 18.3%/yr, max DD -13.0%, excess Sharpe 1.27, breach figure P(DD < -20%) 2.4% (block-63 convention, full backtest edge).
+# Rung: target GROWTH; strictest passed GROWTH. See the conservative case in the report (section how much to believe) before relying on these numbers.
+# Source: fund products final pass (2026-10-05), scripts/research/fund_products_20261005/SPEC_FROZEN.md, study.py.
+# Research configuration only: not an allocation approval and not wired to LIVE. The momentum and MR capsule pods
+# have no live route yet, and the MR capsule waits for the slippage gate (<= 4 bps per side over >= 200 fills).
+# Simulation, before fees. Starts 2012-10-02 (TQQQ/BTAL real history); the engine pays 0% on idle cash.
+name_str: fund_growth
+capital_base_float: 6000000.0
+backtest_start_date_str: '2012-10-02'
+end_date_str: null
+allocation_policy_str: fixed
+max_workers_int: 1
+rebalance:
+  frequency_str: annually
+  policy_str: fixed
+save_pod_artifacts_bool: true
+regression_benchmark_symbol_str: $SPX
+pods:
+- pod_id_str: pod_taa_btal_tqqq
+  strategy_import_str: strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash
+  weight_float: 0.400000
+- pod_id_str: pod_ndx_atr_vxn_sector_cap
+  strategy_import_str: strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled_sector_cap:SectorCapVxnScaledAtrNormalizedNdxStrategy
+  weight_float: 0.150000
+- pod_id_str: pod_ndx_natr20_vxn_sector_cap
+  strategy_import_str: strategies.momentum.strategy_mo_natr20_ndx_vxn_scaled_sector_cap:SectorCapNatr20VxnScaledNdxStrategy
+  weight_float: 0.150000
+- pod_id_str: pod_mr_dv2_gated_bil
+  strategy_import_str: strategies.mr_capsule.strategy_mr_dv2_vix_gated_bil
+  weight_float: 0.150000
+- pod_id_str: pod_mr_hpi_vote_gated_bil
+  strategy_import_str: strategies.mr_capsule.strategy_mr_hpi_vote_vix_gated_bil
+  weight_float: 0.150000

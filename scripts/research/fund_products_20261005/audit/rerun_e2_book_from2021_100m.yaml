@@ -1,0 +1,22 @@
+# Audit scratch (fund products 2026-10-05, task rerun_e2): portfolios/ndx_e2_sector_cap_5050.yaml with the
+
+name_str: "ndx_e2_sector_cap_5050_from2021_100m"
+capital_base_float: 1e+08
+backtest_start_date_str: "2021-01-01"
+end_date_str: null
+allocation_policy_str: fixed
+max_workers_int: null
+rebalance:
+  frequency_str: monthly
+  policy_str: fixed
+save_pod_artifacts_bool: false
+regression_benchmark_symbol_str: "$SPX"
+
+pods:
+  - pod_id_str: pod_ndx_atr_vxn_sector_cap
+    strategy_import_str: strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled_sector_cap:SectorCapVxnScaledAtrNormalizedNdxStrategy
+    weight_float: 0.5
+
+  - pod_id_str: pod_ndx_natr20_vxn_sector_cap
+    strategy_import_str: strategies.momentum.strategy_mo_natr20_ndx_vxn_scaled_sector_cap:SectorCapNatr20VxnScaledNdxStrategy
+    weight_float: 0.5

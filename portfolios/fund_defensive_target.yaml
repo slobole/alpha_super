@@ -1,0 +1,32 @@
+# DEFENSIVE, ideal target (conditional: EOM forward test and a tradable route; DV2-IND forward test): core5 23.8% / taa_btal_lin_qqq 23.8% / eom_flow 23.7% / dv2_industry_etf 23.7% / downshock_vox_iyr 5.0%.
+# Study (LONG 2008-03..2026-08, gross): 10.1%/yr, max DD -5.3%, excess Sharpe 1.61, P(DD < -10%) 0.0%, P(DD < -20%) 0.0%.
+# Source: fund products study, amendments A6 / A6-c / A6-d (2026-10-01), scripts/research/fund_products_20260930/a6.py, a6d.py.
+# Research configuration only: not an allocation approval and not wired to LIVE. Simulation, before fees.
+# Starts 2012-10-02 (TQQQ/BTAL real history); the study's 2008 proxy is not used by the bench.
+name_str: fund_defensive_target
+capital_base_float: 1000000.0
+backtest_start_date_str: '2012-10-02'
+end_date_str: null
+allocation_policy_str: fixed
+max_workers_int: null
+rebalance:
+  frequency_str: annually
+  policy_str: fixed
+save_pod_artifacts_bool: true
+regression_benchmark_symbol_str: $SPX
+pods:
+- pod_id_str: pod_core5
+  strategy_import_str: strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5
+  weight_float: 0.238
+- pod_id_str: pod_taa_btal_lin_qqq
+  strategy_import_str: strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash
+  weight_float: 0.238
+- pod_id_str: pod_eom_flow
+  strategy_import_str: strategies.taa_beyond_6040.strategy_taa_month_end_rebalancing_flow
+  weight_float: 0.237
+- pod_id_str: pod_dv2_industry_etf
+  strategy_import_str: strategies.dv2.strategy_mr_dv2_industry_etf
+  weight_float: 0.237
+- pod_id_str: pod_downshock_vox_iyr
+  strategy_import_str: strategies.mean_reversion.strategy_mr_us_sector_etf_ibs_downshock_vox_iyr
+  weight_float: 0.05

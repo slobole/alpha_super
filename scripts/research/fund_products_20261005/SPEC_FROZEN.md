@@ -415,3 +415,164 @@ them for the capsule products, and the stored rows stay in the 2026-10-01 record
 - An independent review before the report is final.
 
 ## Amendment log
+
+Everything above this heading is the plan as frozen in commit 70f5c22 (SHA-256 of that file bc3c6521..., first line
+of the study ledger) and has not been edited. Every entry below is dated 2026-10-05 and was written **after results**.
+None changes a product, a weight, a rung limit or a decision rule; they record where the code or the report departs
+from the text above, why, and the numbers before and after where a number moved. Entries R1, I1 and C1 are the ones
+the code comments cite.
+
+- **R1 (comparison against the monthly book by cost and by block; `versus.py`).** Added after the independent review:
+  the paired comparisons of sections 3 and 4 are also run at +5 and +10 bps and inside blocks A, B, C and RECENT
+  (20,000 paths each). Reason: the first report quoted the GR1-over-monthly share only in the main frame (90.2%), and
+  the plan (5.1, 4) asked for the block evidence. Result: 90.2% / 71.4% / 42.2% at 0 / +5 / +10 bps; blocks A 52%,
+  B 99.5%, C 29%, RECENT 18%. The summary was rewritten: at the planning cost GR1 does not beat the monthly book at
+  the 80% bar, its Sharpe lead comes from 2012-2021, and the monthly book has led since 2022.
+- **I1 (exposure look-through; `exposure.py`).** (a) The look-through and the gap table cover 2012-10-02 to END only:
+  the synthetic TQQQ of the proxy era is not stored as a price series, so 2008 has no look-through. (b) Statistics are
+  daily, not month-end (TQQQ weight in TAA 3x: mean 25.6% daily against 25.8% month-end). (c) The gap table uses the
+  distribution of the joint same-day equity exposure, not Nasdaq exposure plus MR at its own peak (peak 1.67x against
+  1.70x). (d) After review, the look-through with the pod weights the book actually carried between annual resets is
+  reported beside the target-weight figure: peak 1.34x / 1.34x / 1.76x at target weights against 1.51x / 1.56x /
+  1.97x carried (reached in December 2013; since 2015 the carried maximum is 1.12x / 1.32x / 1.65x).
+- **C1 (capacity; `capacity.py`).** Three changes after the review. (a) The MR pods' BIL parking orders are left out
+  of the gates and of the cost. This departs from "BIL, in any pod, is an ETF order": those rows were about half of a
+  capsule product's ETF order rows and pulled the 95th percentile of the one-day ETF gate down, letting the BTAL
+  orders pass at twice the size. Close-auction capacity of GR1-GR3 moved from $10M to $5M; the open ($2.5M) and the
+  worked route ($10M) did not move. (b) Pod weights inside the order window are carried from the January 2023 reset
+  instead of restarted at target weights at the window start (the TAA pod's share differed by up to 3.8 pp in GR1 and
+  8.8 pp in GR3). (c) The participation screen is per leg, as 5.11 wrote it; the first build pooled the orders of all
+  legs. GR1 at the 99th-percentile order: $34.5M pooled, $3.0M per leg (binding leg TAA, symbol BTAL). The book-level
+  largest same-day order (all pods summed) is printed beside it, because the monthly book's two Defense First pods
+  send BTAL orders on the same day.
+- **5.5 (start month).** GR1's January reset lies outside the middle half of the twelve start months. The rule's
+  figure is the median, 18.01% / 1.266; the headline keeps January (17.92% / 1.260), which is conservative by 0.09 pp.
+  The table column is renamed so it is not confused with the 5.14 planning column.
+- **5.3 (edge decay).** S7 is left out of the worst-case set (the reviewer's value for it is 0.795; the "not minimax"
+  wording does not change). T4's QQQ slot is not decayed. Added after review: the scenario "Defense First dead (TAA
+  and BTAL_QQQ)", because for the monthly book "TAA dead" switched off only one of its two pods on that engine (excess
+  Sharpe 0.45 with one off, 0.31 with both); the TAA-dead scenario for the dial-map books; edge margins at every rung
+  limit. The common-shock column is labelled a regression-beta shock: a regression beta understates the time-average
+  exposure of pods that leave the market in high volatility, and the reviewer's figure with time-average exposure
+  (GR1 11.9% / 0.85) is quoted in the caption as the reviewer's, not as a study output.
+- **Battery scope.** Reset policy (5.5), the rung reading items (5.8), the after-window check (5.13) and intervals and
+  DSR (5.14) run for GR1-GR3 and the monthly book only; factor alpha (5.10) for those and the capsules. 5.6: the share
+  of windows was computed for 756-session excess Sharpe in the first build and extended after review to 1,260 sessions
+  and to CAGR. 5.8: CAGR percentiles use seed 0 only (2,000 paths). Slot-test block shares use the main frame and
+  seeds 0-2 (6,000 paths).
+- **Rung reading for GR3.** The first build printed the reading items only at -30%, the limit of the new AGGRESSIVE
+  rung. GR3 is labelled with the strictest rung it passes (GROWTH PLUS), so the items are now printed at -25% as well:
+  5.8% by the rule, edge margin 0.85 (GR2 at the same limit: 2.6%, 0.70). At the planning convention GR3 does not
+  meet the GROWTH PLUS cap and GR2 does; the report says so and does not present the fallback label as equivalent.
+- **5.14(d) (three-column rule).** The backtest / planning / floor columns are shown on the cards, the menu, the dial
+  table and the "how much to believe" table. The margin, slot, challenger, construction and stand-in tables are
+  backtest-frame comparisons between books and are labelled as such; the report's self-description was corrected.
+- **+10 bps frame.** As section 1 says, it is the linear extrapolation r0 + 2 x (r5 - r0) at book level, not 10 bps
+  charged inside each pod; the reviewer's pod-level run moves two printed percentages and the breakeven by one unit in
+  the last digit.
+- **Margin rows.** L is the ratio of the two unlevered volatilities; leverage decays between annual resets, so the
+  realised volatility of the levered book is slightly below the target's (GR1 x1.32: 16.5% against 16.8%). The rows
+  are labelled with the realised volatility and the mean leverage. The reading was rewritten after review: levered
+  GR1 is ahead of GR2 beyond the tolerance on drawdown, breach and CAGR (a tie at +5 bps and at a 2.5% spread); mixed
+  against GR3; GR2 on margin is worse than GR3 on drawdown. No winner is declared; that is a judgement, not a
+  tolerance result.
+- **5.12 (engine confirmation).** The first YAMLs of GR1 and GR2 were rejected by the PortfolioManager (six-decimal
+  weights summed to 1.000005). The weights are now normalised before rounding (GR1: 0.333332 + 4 x 0.166667). The
+  first report build ran before the three runs finished and showed "pending"; the published page was built after all
+  three were accepted (GR1 20.23% against 20.24%, GR2 22.78% / 22.79%, GR3 25.19% / 25.19%; correlation 1.0000).
+- **6(b) (old defensive study).** `a6d.py` reproduces `a6d.json` (1,011 fields, 0 different) and `report_a6.py`
+  reproduces `report_a6.json` (14,899 fields, 0 different). `a6.py` does not reproduce `a6.json` exactly: 7 fields,
+  all `crises_dd.tariffs_2025` of the old growth rows, differ by up to 0.36 pp. Cause: `a6.py` was edited at 16:28 on
+  2026-10-01 (the in-window drawdown excludes the window's start day) after `a6.json` was written at 16:05. No
+  defensive field differs beyond 2e-15.
+- **"Important to know" table.** The direction column uses a fourth value, "note", for rows that are conventions
+  without a direction.
+- **Not on the page.** Computed and in the JSON files, listed in the English record instead of printed: correlation
+  matrices for blocks B and C, each half and the five crises; rolling-correlation P10 and P90; the ten worst
+  21-session windows of GR2 and GR3; breach figures at -10, -15, -17, -22, -27 and -35% with worst-seed values; gap
+  tables of the dial-map and margin books.
+- **Provenance.** Only `build_sources.py` existed at the freeze. `g_lib.py`, `study.py`, `battery.py`, `exposure.py`,
+  `capacity.py`, `defensive.py`, `pm_confirm.py`, `versus.py` and the report builders were written after the freeze
+  and before or during the results; `battery.py`, `capacity.py`, `exposure.py`, `pm_confirm.py` and the report
+  builders were edited after first results for the items above. The ledger's last line records the SHA-256 of every
+  script as published.
+- **O1 (owner decision, 2026-10-05, after results and after the first publication): GR1 = TAA 3x 40 / momentum 30 /
+  MR 30.** Section 3 fixed GR1 at equal capital (one third each). The owner, having seen the results, chose the
+  40 / 30 / 30 point of the pre-registered dial map as the flagship: a mild tilt to the TAA engine, which is the
+  oldest and already runs live. This is a choice made after results, not a rule result, and the report says so.
+  Equal capital stays in the study as challenger S0 and as a row in the menu. Numbers: equal capital 17.92% / 1.260 /
+  -12.75% / P(DD < -20%) 2.8%; 40 / 30 / 30 18.28% / 1.269 / -12.96% / 2.4%. Paired test: 40 / 30 / 30 has the
+  higher excess Sharpe on 70% of paths (below the 80% bar: a tie) and the higher CAGR on 93%. Cost of the tilt:
+  excess Sharpe with the TAA engine dead 0.69 against 0.77, and a deeper historical drawdown on the planning column
+  (-17.0% against -15.5%; floor -20.0% against -18.5%). The breach difference (2.4% against 2.8%) is inside
+  simulation noise and is not evidence. At +5 bps 40 / 30 / 30 has the higher Sharpe on 84% of paths because it
+  trades less MR. Against the monthly book the paired share is now 94% / 80% / 54% at 0 / +5 / +10 bps (equal
+  capital: 90% / 71% / 42%). After this change the three products are no longer consecutive points of one dial:
+  GR2 (equal capital with the 1N variant) has less TAA weight than GR1. Consequences in the code (`g_lib.G1`): the slot tests,
+  the stand-ins, the plateau neighbours and S8 ("GR1 75 / DEF 25") are defined on the new GR1 weights; S0 is added
+  to the challengers (thirteen); GR2 and GR3 are unchanged. The whole pipeline and the GR1 engine confirmation were
+  re-run; the outputs of the equal-capital version are kept in `report_equal_capital_snapshot/`.
+- **O2 (owner decision, 2026-10-05, after results): GR2 = TAA 3x 1N 40 / momentum 30 / MR 30.** Section 3 fixed GR2
+  at one third each with the 1N variant. After O1 that left GR2 with less TAA weight than GR1, so the owner moved it
+  to the same 40 / 30 / 30 weights: the three products are again one ladder (a pure 3x to 1N switch, then a higher
+  TAA share). Numbers: one third each 20.3% / 1.21 / -16.3%; 40 / 30 / 30 21.1% / 1.21 / -16.3%, P(DD < -25%) 3.5%.
+  Consequence by the frozen menu rule (a higher product needs at least 1.5 pp of CAGR over the one below it): GR3
+  (22.3%) is 1.2 pp above the new GR2 and is therefore NOT offered. It stays in the study as a reference row and the
+  open question of the new AGGRESSIVE rung is moot unless the owner wants a third product anyway.
+- **O3 (owner decision, 2026-10-05, after results): two-pod monthly books.** The monthly growth book of 2026-10-01
+  (TAA 3x 1N 38.4 / NDX-VXN 25.6 / CORE5 18 / BTAL_QQQ 18) is replaced by Monthly = TAA 3x 1N 50 / CORE5 50 and
+  Monthly Plus = TAA 3x 1N 65 / CORE5 35; the old books stay as reference rows (`S13_OLD`, `OLD_PLUS_KEY`; the
+  internal keys "S9 incumbent launch" and "old growth plus" now hold the new books). The owner's reasons: NDX-VXN is
+  superseded by the momentum capsule, and BTAL_QQQ runs on the same engine as TAA 3x 1N (daily correlation 0.85).
+  `monthly.py` (exploratory, written after results, not pre-registered) then asked whether the momentum capsule earns
+  a weight in a monthly TAA + CORE5 book: over 2 TAA variants x 4 ratios x momentum 0 / 15 / 30% it never has the
+  higher Sharpe on 80% of paired paths, its CAGR is equal or lower in 12 of 16 cells, and it makes 2022 worse in all
+  16; without CORE5 the book fails the GROWTH rung. 50 / 50 was chosen for simplicity (17.7% / 1.17 / -13.9%,
+  against 18.1% / 1.14 / -13.1% for the old four-pod book: a tie, 68% of paths) and 65 / 35 as the first ladder point
+  above 20% CAGR (20.8% / 1.15 / -17.4%, GROWTH PLUS rung). Differences between neighbouring grid rows are inside
+  noise. The honest price of two pods: with the TAA engine dead the Monthly book keeps an excess Sharpe of 0.20
+  (Monthly Plus 0.11) against 0.69 for GR1, which is why GR1 stays the target. Against the new Monthly, GR1 has the
+  higher excess Sharpe on 88% / 70% / 44% of paths at 0 / +5 / +10 bps. Engine confirmation of GR2 and the two
+  monthly YAMLs: accepted (23.76% / 23.76%, 20.22% / 20.22%, 23.83% / 23.83%; correlation 1.0000).
+- **O4 (owner decision, 2026-10-05): the backtest is the headline; 5.14(d) is narrowed.** The three-column rule
+  (backtest / planning / floor beside every headline) is withdrawn from the cards and tables. The owner's argument,
+  accepted in part: the engine already charges IBKR commissions and 2.5 bps of slippage per side, so the planning
+  column's extra +5 bps double-counted costs for the TAA and momentum pods (it remains a real question for the daily
+  MR stock orders, which the paper gate measures), and the headline frame already credits idle cash. What is kept,
+  in the "how much to believe" section only: a conservative case (every engine keeps three quarters of its excess
+  return, at model costs: GR1 13.5% / 0.95) and a stress case (half the excess return and +5 bps: GR1 8.3% / 0.59).
+  Both are conventions, not forecasts. Unchanged facts: nothing is out of sample, and GR1's excess Sharpe was 1.56 in
+  2012-2021 and 1.07 since 2022.
+- **O5 (presentation, 2026-10-05): the blend dial.** The client blends of section 3 are reported at Growth shares of
+  20 / 40 / 60 / 80% with the defensive launch (was 25 / 50 / 75%) as their own section. Against Growth diluted
+  with BIL to about the same volatility (the diluted rows carry 1 to 4% more) the blend's historical max DD is
+  shallower by about 0.5 to 1.4 pp on the one historical path and its CAGR is within 0.05 pp at 40 / 60 / 80% and
+  0.5 pp lower at 20%: a small advantage, not a clear win.
+- **O6 (owner decision, 2026-10-05, after results): GR3 = TAA 3x 1N 60 / momentum 20 / MR 20.** After O2 the old GR3
+  (50 / 25 / 25) was 1.2 pp above GR2 and not offered by the menu rule. The owner moved it to the 60% point of the
+  pre-registered dial: 23.4% / 1.19 / -18.0%, 2.3 pp above GR2, so it is offered again; the ladder is 40% TAA 3x,
+  40% TAA 3x 1N, 60% TAA 3x 1N. It passes only the AGGRESSIVE rung of section 3 (max DD >= -27%, cap 15% at -30%:
+  2.0% in the main frame, edge margin 0.70, conservative case 9.6%), which the plan marked as needing the owner's
+  confirmation; choosing this book in effect uses that rung, and the confirmation is listed as an open decision.
+  Price: TAA carries 77% of the risk, excess Sharpe with the TAA engine dead 0.34, Nasdaq look-through peak 2.0x.
+- **O7 (owner request, 2026-10-05): fee income (`fees.py`, descriptive).** Income per $1M of AUM for five fee
+  schedules (2/20, 1.5/20, 1/15, 1/10, 1/5; management fee accrued daily, performance fee above the high-water mark
+  crystallised at calendar year end, no hurdle; no fund expenses), on the backtest and on the conservative case. The
+  author's recommendation (1/15 for the growth products, 1/10 for the defensive product and blends) follows a stated
+  convention: the fee takes about a quarter of the return above T-bills, about a third in the conservative case. The
+  page's header line and the net-of-2/20 rows and columns were removed at the owner's request.
+- **O8 (owner decisions, 2026-10-05, after results).** (a) The AGGRESSIVE rung is APPROVED by the owner. (b) The
+  monthly menu is one book, Monthly = TAA 3x 1N 60 / CORE5 40 (19.8% / 1.15 / -16.2%); the 50 / 50 and 65 / 35 books
+  of O3 are dropped. At 60 / 40 the book no longer passes GROWTH (29.6% of paths beyond -20%) and is read on
+  GROWTH PLUS (5.6% beyond -25%, edge margin 0.80, conservative case 18.2% against the 15% cap); with the TAA engine
+  dead its excess Sharpe is 0.14. So the book that can run first carries more risk than GR1, not less. (c) Growth
+  at a fixed leverage of 1.40 is shown as an alternative route to GR3's level of return, not as a product: 24.1% /
+  1.24 / -18.4% against 23.4% / 1.19 / -18.0% for GR3, TAA-dead Sharpe 0.66 against 0.34, slightly behind at +5 bps
+  (22.37% against 22.48%); debt at DTB3 + 1.5%, no margin calls or gap days modelled; needs one cross-margined
+  account. These later decisions (O6, O7, O8) were re-run, engine-confirmed (GR3 26.58% / 26.59%, Monthly 22.64% /
+  22.64%) and checked by the author only; the independent reviews covered the versions before them.
+- **Review of v5.2 (2026-10-05).** Two independent reviewers rebuilt Growth Plus, Monthly and Monthly Plus with
+  separate code (all figures matched) and found one gap, now on the page: the monthly books hold their rung only
+  near the full backtest edge (Monthly down to 0.95 of the edge, Monthly Plus 0.90, against 0.70 for GR1 and 0.75
+  for GR2); in the conservative case their breach figures are 30.0% and 27.3% against the 15% cap. `battery.py`
+  was extended to compute the edge margin and the after-window rows for the two monthly books.

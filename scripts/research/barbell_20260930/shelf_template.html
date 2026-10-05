@@ -1,0 +1,302 @@
+<meta charset="utf-8">
+<title>מדף הפודים</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Hebrew:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: a working reference page (~1120px), RTL; decisions first, then tables by layer, crises, correlations, charts. */
+:root {
+  --bg: #f2f3f1; --surface: #fbfbfa; --surface-2: #eceeea; --ink: #17212a; --ink-2: #45505b; --ink-3: #6b7680;
+  --rule: #d6dbd5; --accent: #0c6a60; --accent-soft: #d6ebe6; --warn: #8f5b00; --warn-soft: #f5e9d0;
+  --good: #1b7641; --good-soft: #dff0e4; --bad: #ad2a22; --bad-soft: #f6dedb;
+  --s1: #2a78d6; --s2: #1baf7a; --s3: #eb6834; --s4: #4a3aa7; --s5: #c23a8c; --bench: #8a9199; --grid: #e2e6e0;
+  --pos-pole: #d4622f; --neg-pole: #2a78d6; --mid: #eceeea; --tip-bg: #17212a; --tip-ink: #f2f3f1;
+  --display: "Frank Ruhl Libre", "David Libre", "Times New Roman", serif;
+  --body: "IBM Plex Sans Hebrew", "Heebo", "Arial Hebrew", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1418; --surface: #151c22; --surface-2: #1c252d; --ink: #e6ebee; --ink-2: #aab5be; --ink-3: #85919b;
+    --rule: #2b3640; --accent: #47b9aa; --accent-soft: #163733; --warn: #dba644; --warn-soft: #33290f;
+    --good: #55ba7a; --good-soft: #16301f; --bad: #ee6d63; --bad-soft: #3a1b19;
+    --s1: #3987e5; --s2: #199e70; --s3: #d95926; --s4: #9085e9; --s5: #e0609f; --bench: #7b848c; --grid: #25313a;
+    --pos-pole: #e07a4a; --neg-pole: #3987e5; --mid: #1c252d; --tip-bg: #e6ebee; --tip-ink: #0f1418; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1418; --surface: #151c22; --surface-2: #1c252d; --ink: #e6ebee; --ink-2: #aab5be; --ink-3: #85919b;
+  --rule: #2b3640; --accent: #47b9aa; --accent-soft: #163733; --warn: #dba644; --warn-soft: #33290f;
+  --good: #55ba7a; --good-soft: #16301f; --bad: #ee6d63; --bad-soft: #3a1b19;
+  --s1: #3987e5; --s2: #199e70; --s3: #d95926; --s4: #9085e9; --s5: #e0609f; --bench: #7b848c; --grid: #25313a;
+  --pos-pole: #e07a4a; --neg-pole: #3987e5; --mid: #1c252d; --tip-bg: #e6ebee; --tip-ink: #0f1418; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 15px; line-height: 1.6; }
+main { max-width: 1120px; margin: 0 auto; padding-inline: 20px; padding-block: 34px 64px; display: grid; gap: 30px; }
+h1, h2, h3 { font-family: var(--display); margin: 0; text-wrap: balance; line-height: 1.2; }
+h1 { font-size: clamp(30px, 5vw, 46px); }
+h2 { font-size: clamp(22px, 3vw, 28px); }
+h3 { font-size: 18px; }
+p { margin: 0; max-width: 76ch; }
+header, section { display: grid; gap: 12px; min-width: 0; }
+.lede { font-size: 17px; color: var(--ink-2); }
+.eyebrow { font-size: 12.5px; color: var(--ink-3); letter-spacing: 0.05em; }
+.kicker { font-size: 12.5px; color: var(--accent); font-weight: 600; letter-spacing: 0.04em; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; white-space: nowrap; }
+.dec { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.dcol { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 14px 16px; display: grid; gap: 8px; align-content: start; }
+.dcol h3 { font-size: 17px; }
+.dcol ul { margin: 0; padding-inline-start: 18px; display: grid; gap: 6px; font-size: 14.5px; }
+.chip { display: inline-block; font-size: 11.5px; font-weight: 600; border-radius: 999px; padding: 1px 8px; margin-inline-start: 4px; }
+.chip.ok { background: var(--good-soft); color: var(--good); }
+.chip.lean { background: var(--accent-soft); color: var(--accent); }
+.chip.open { background: var(--warn-soft); color: var(--warn); }
+.tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { padding: 7px 9px; border-block-end: 1px solid var(--rule); text-align: start; vertical-align: top; }
+th { font-weight: 500; color: var(--ink-3); font-size: 11.5px; background: var(--surface-2); }
+thead th { white-space: nowrap; }
+td.n, th.n { text-align: left; }
+td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; white-space: nowrap; }
+tr:last-child td { border-block-end: 0; }
+tr.hl td { background: var(--accent-soft); }
+tr.dim td { color: var(--ink-3); }
+tr.grp td { background: var(--surface-2); font-weight: 600; font-size: 12px; color: var(--ink-2); }
+td.nm { min-width: 190px; }
+.neg { color: var(--bad); } .pos { color: var(--good); }
+.cap { font-size: 12.5px; color: var(--ink-3); }
+.callout { background: var(--surface); border: 1px solid var(--rule); border-inline-start: 3px solid var(--warn); border-radius: 8px; padding: 12px 16px; display: grid; gap: 6px; }
+.heat { display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 12px; }
+@media (max-width: 520px) { .heat { grid-template-columns: 1fr; } }
+.heat table td.c { text-align: center; font-family: var(--mono); font-size: 12px; direction: ltr; min-width: 44px; }
+.heat th.rot { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; font-size: 11px; text-align: start; }
+.chart { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 12px; display: grid; gap: 8px; position: relative; min-width: 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12.5px; color: var(--ink-2); }
+.legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; margin-inline-end: 6px; vertical-align: middle; }
+.sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-inline-end: 6px; vertical-align: baseline; }
+.svgwrap { direction: ltr; position: relative; }
+.svgwrap svg { display: block; width: 100%; height: auto; overflow: visible; }
+.svgwrap text { fill: var(--ink-3); font-family: var(--mono); font-size: 11px; }
+.svgwrap .gl { stroke: var(--grid); stroke-width: 1; }
+.tip { position: absolute; pointer-events: none; background: var(--tip-bg); color: var(--tip-ink); border-radius: 8px; padding: 7px 10px; font-size: 12px; direction: rtl; min-width: 170px; z-index: 3; }
+.tip .r { display: flex; justify-content: space-between; gap: 12px; }
+.tip .r b { font-family: var(--mono); font-weight: 500; direction: ltr; }
+.glossary { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 6px 18px; font-size: 13px; color: var(--ink-2); }
+.note { background: var(--surface); border: 1px solid var(--rule); border-inline-start: 3px solid var(--bench); border-radius: 8px; padding: 12px 16px; font-size: 13px; color: var(--ink-2); display: grid; gap: 6px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<main dir="rtl" lang="he">
+<header>
+  <div class="eyebrow">מדף עבודה · 30 בספטמבר 2026 · סימולציה 2008-03 → 2026-08 · ברוטו (בלי עמלות), ו־2/20 כתוספת</div>
+  <h1>מדף הפודים: הגנתי, אגרסיבי, והחשבון המשולב</h1>
+  <p class="lede">כל השכבות בדף אחד: הפודים הבודדים, הליבות ההגנתיות, אפשרויות הפוד האגרסיבי, והחשבון של הלקוח (שליש אגרסיבי, שני שלישים הגנתי). בראש העמוד ההחלטות: מה סגור, מה הכיוון, ומה פתוח.</p>
+</header>
+
+<section>
+  <div class="kicker">החלטות</div>
+  <h2>על מה הולכים</h2>
+  <div class="dec">
+    <div class="dcol"><h3>סגור</h3><ul>
+      <li>מבנה החשבון: שליש פוד אגרסיבי, שני שלישים ליבה הגנתית. אצל הלקוח הראשון: ‏$500K ו־$1M. <span class="chip ok">החלטה שלך</span></li>
+      <li>איזון חזרה לשליש ושני שלישים בסוף כל שנה. בלי איזון, בחשבון שלא אוזן 18 שנה הירידה הגרועה מגיעה ל־13%. <span class="chip ok">נבדק</span></li>
+      <li>בלי מינוף ברמת החשבון ובלי מרג׳ין. <span class="chip ok">סגור</span></li>
+      <li>עד 25% מהחשבון באסטרטגיית TAA אחת, ועד 70% בתוך הפוד. <span class="chip ok">מדיניות</span></li>
+      <li>אין עמלות היום. ‏2/20 מוצג כתוספת לעתיד. <span class="chip ok">החלטה שלך</span></li>
+      <li>‏NDX-RM במעקב צל בלבד, ו־Compass בחוץ. <span class="chip ok">נבדק</span></li>
+    </ul></div>
+    <div class="dcol"><h3>הכיוון (עד סיום הבדיקות)</h3><ul>
+      <li>פוד אגרסיבי: <b>אגרסיבי עם כרית</b>. ‏57% רוטציה טקטית, ‏25% מומנטום נאסד״ק 100, ו־9% מכל אחד משני הפודים ההגנתיים. <span class="chip lean">כיוון</span></li>
+      <li>ליבה הגנתית: <b>CORE5 60 / BTAL_QQQ 40</b>. <span class="chip lean">כיוון</span></li>
+      <li>ליבת היעד, כשהפודים יחווטו: CORE5 + BTAL_QQQ + DV2-IND. היא נותנת קצת פחות תשואה ופחות סיכון, ושארפ טוב יותר. <span class="chip lean">יעד</span></li>
+      <li>אגרסיבי ולא צמיחה בשליש החשבון. באותו סיכון ללקוח שתי הבחירות שקולות, אבל עם שליש קבוע האגרסיבי נותן יותר. <span class="chip lean">כיוון</span></li>
+    </ul></div>
+    <div class="dcol"><h3>פתוח</h3><ul>
+      <li>האם להשאיר את הכרית בפוד. בלעדיה החשבון נותן ‏14.2% במקום 13.3%, בתמורה לסיכון שווה ערך להגדלת הפוד ל־40%. <span class="chip open">בבדיקה</span></li>
+      <li>הבחירה המכנית הסופית, עם עשרה זרעים, שמונה מסגרות ואימות בלתי תלוי. <span class="chip open">רצה עכשיו</span></li>
+      <li>חיווט CORE5 ללייב. בלעדיו אין ליבה הגנתית (43% מהחשבון). <span class="chip open">הנדסה</span></li>
+      <li>מבנה עמלות עתידי: 2/20 או 1/10 על החשבון כולו. <span class="chip open">עסקי</span></li>
+    </ul></div>
+  </div>
+</section>
+
+<section>
+  <div class="kicker">שכבה 1</div>
+  <h2>החשבון המשולב של הלקוח</h2>
+  <div class="tbl"><table id="t_acct"></table></div>
+  <p class="cap">‏"תרחיש גרוע 1:10" הוא הירידה שנפרצת ב־10% מההיסטוריות החלופיות (דגימת בלוקים, 2,000 מסלולים, ממוצע של עשרה זרעים). ‏"סיכוי ל־X" הוא הסיכוי שהירידה המרבית תהיה עמוקה מ־X.</p>
+</section>
+
+<section>
+  <div class="kicker">שכבה 2</div>
+  <h2>אפשרויות הפוד האגרסיבי (הפוד לבדו)</h2>
+  <div class="tbl"><table id="t_agg"></table></div>
+</section>
+
+<section>
+  <div class="kicker">שכבה 3</div>
+  <h2>הליבות ההגנתיות</h2>
+  <div class="tbl"><table id="t_def"></table></div>
+</section>
+
+<section>
+  <div class="kicker">שכבה 4</div>
+  <h2>הפודים הבודדים ומדדי ייחוס</h2>
+  <div class="tbl"><table id="t_pod"></table></div>
+</section>
+
+<section>
+  <h2>משברים ונפילות משותפות של מניות ואג״ח</h2>
+  <div class="tbl"><table id="t_cr"></table></div>
+</section>
+
+<section>
+  <h2>קורלציה: בכל הימים, ובימי הנפילה</h2>
+  <p>‏"ימי נפילה" הם 5% הימים הגרועים של S&amp;P 500 (<span class="num" id="fdays"></span> ימים). קורלציה גבוהה בימי נפילה פירושה שהשניים זזים יחד כשהשוק נופל.</p>
+  <div class="heat"><div class="tbl"><table id="h_all"></table></div><div class="tbl"><table id="h_fall"></table></div></div>
+  <div class="callout" id="pair"></div>
+</section>
+
+<section>
+  <h2>מהלך ההון</h2>
+  <div class="chart">
+    <div class="legend" id="cl"></div>
+    <div class="svgwrap" id="nav"></div>
+    <div class="svgwrap" id="dd"></div>
+  </div>
+</section>
+
+<section>
+  <h2>שנה אחר שנה</h2>
+  <div class="tbl"><table id="t_years"></table></div>
+</section>
+
+<section>
+  <h2>מילון המדדים</h2>
+  <div class="glossary">
+    <div><b>שארפ</b>: תשואה ליחידת תנודתיות (ריבית אפס). מעל 1 טוב.</div>
+    <div><b>סורטינו</b>: כמו שארפ, אבל סופר רק תנודתיות של ימי הירידה.</div>
+    <div><b>קלמר</b>: תשואה שנתית חלקי הירידה הגדולה ביותר.</div>
+    <div><b>‏CVaR 5%</b>: הממוצע של 5% הימים (או החודשים) הגרועים ביותר.</div>
+    <div><b>בטא</b>: כמה התיק זז לכל 1% תנועה של S&amp;P 500.</div>
+    <div><b>קורלציה בנפילות</b>: הקורלציה עם S&amp;P 500 ב־5% הימים הגרועים שלו.</div>
+    <div><b>תרחיש גרוע 1:10</b>: הירידה שנפרצת ב־10% מההיסטוריות החלופיות.</div>
+    <div><b>נטו 2/20</b>: אחרי 2% דמי ניהול ו־20% דמי הצלחה מעל שיא, אם ייגבו בעתיד.</div>
+  </div>
+</section>
+
+<div class="note">
+  <b>הסתייגויות</b>
+  <p>כל המספרים הם סימולציה על נתוני עבר, לא כסף אמיתי. לפני אוקטובר 2012 הרוטציה הטקטית ו־BTAL_QQQ מחושבות על נתונים סינתטיים (מאומתים), ורוב הירידות הגדולות של הפוד האגרסיבי בתקופה הזו מבוססות עליהם. ‏DV2-IND לפני 2010 מחושב במחקר קודם. מזומן פנוי מקבל ריבית אג״ח קצר פחות חצי אחוז. אלה לא בחירות מכניות סופיות: הבחירה עם עשרה זרעים, שמונה מסגרות ואימות עדיין רצה, והכיוון יכול להשתנות.</p>
+</div>
+</main>
+
+<script type="application/json" id="d">/*DATA*/null</script>
+<script>
+(function () {
+  const D = JSON.parse(document.getElementById('d').textContent);
+  const B = D.books, L = D.labels;
+  const AV = 'TAA3x-1N + NDX-VXN 70:30 | def2@18', AP = 'TAA3x-1N + NDX-VXN 70:30', GV = 'TAA3x-1N + NDX-VXN 60:40 | def2@36', G3 = 'TAA3x + NDX-VXN 50:50';
+  const NAME = {
+    'acct|A+D0': 'התוכנית: אגרסיבי עם כרית + CORE5 60/BTAL 40', 'acct|B+D0': 'אגרסיבי טהור + CORE5 60/BTAL 40', 'acct|C+D0': 'מתון + CORE5 60/BTAL 40',
+    'acct|A+D2': 'אגרסיבי עם כרית + ליבה לפי תנודתיות', 'acct|A+D3': 'אגרסיבי עם כרית + ליבת היעד (DV2-IND)',
+    ['agg|' + AV]: 'אגרסיבי עם כרית', ['agg|' + AP]: 'אגרסיבי טהור', ['agg|' + GV]: 'מתון (צמיחה)', ['agg|' + G3]: 'G3 הקודם (50/50)',
+    'bench|S&P 500': 'מדד S&P 500', 'bench|60/40': 'תיק 60/40', 'bench|QQQ': 'נאסד״ק 100 (QQQ)'};
+  Object.entries(L.def).forEach(([k, v]) => NAME['def|' + k] = v);
+  Object.entries(L.pod).forEach(([k, v]) => NAME['pod|' + k] = v);
+  const nm = k => NAME[k] || k;
+  const pct = (x, d = 1) => (x === null || x === undefined || Number.isNaN(x)) ? '–' : (x * 100).toFixed(d) + '%';
+  const sg = x => (x === null || x === undefined) ? '–' : (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x * 100).toFixed(1) + '%';
+  const f2 = x => (x === null || x === undefined) ? '–' : x.toFixed(2);
+  const td = (v, cls = '') => `<td class="n ${cls}">${v}</td>`;
+  const COLS = [['cagr', 'תשואה שנתית', pct], ['net_cagr', 'נטו 2/20', pct], ['exact_cagr', 'מ־2012', pct], ['recent_cagr', '3 שנים', pct],
+    ['vol', 'תנודתיות', pct], ['sharpe', 'שארפ', f2], ['sortino', 'סורטינו', f2], ['maxdd', 'ירידה מרבית', sg], ['calmar', 'קלמר', f2],
+    ['cvar5_daily', 'CVaR 5% יומי', sg], ['cvar5_21d', 'CVaR 5% חודשי', sg], ['worst_month', 'חודש גרוע', sg], ['worst_year', 'שנה גרועה', sg],
+    ['worst_12m', '12 חודשים גרועים', sg], ['pos_months', 'חודשים חיוביים', x => pct(x, 0)], ['beta', 'בטא', f2], ['corr_spx', 'קורלציה ל־S&P', f2],
+    ['crisis_corr', 'קורלציה בנפילות', f2], ['underwater_days', 'ימים מתחת לשיא', x => x === null ? '–' : Math.round(x)]];
+  const BOOT = [['ddar10', 'תרחיש גרוע 1:10', sg], ['p10', 'סיכוי ל־10%−', x => pct(x, 0)], ['p15', 'סיכוי ל־15%−', x => pct(x, 0)], ['p20', 'סיכוי ל־20%−', x => pct(x, 0)], ['p25', 'סיכוי ל־25%−', x => pct(x, 0)]];
+  function table(id, keys, boot, hlKey) {
+    let h = `<thead><tr><th>ספר</th>${COLS.map(c => `<th class="n">${c[1]}</th>`).join('')}${boot ? BOOT.map(c => `<th class="n">${c[1]}</th>`).join('') : ''}</tr></thead><tbody>`;
+    keys.forEach(k => { const b = B[k]; if (!b) return;
+      h += `<tr class="${k === hlKey ? 'hl' : ''} ${k.startsWith('bench') ? 'dim' : ''}"><td class="nm">${nm(k)}</td>` + COLS.map(([m, , f]) => {
+        const v = b[m]; const cls = (m.includes('dd') || m.includes('cvar') || m.startsWith('worst')) && v < 0 ? 'neg' : ''; return td(f(v), cls); }).join('') +
+        (boot ? BOOT.map(([m, , f]) => td(b.boot ? f(b.boot[m]) : '–')).join('') : '') + '</tr>'; });
+    document.getElementById(id).innerHTML = h + '</tbody>';
+  }
+  table('t_acct', ['acct|A+D0', 'acct|B+D0', 'acct|C+D0', 'acct|A+D2', 'acct|A+D3', 'bench|S&P 500', 'bench|60/40'], true, 'acct|A+D0');
+  table('t_agg', ['agg|' + AV, 'agg|' + AP, 'agg|' + GV, 'agg|' + G3, 'bench|QQQ'], true, 'agg|' + AV);
+  table('t_def', ['def|D0', 'def|D2', 'def|D3', 'def|D5', 'bench|60/40'], true, 'def|D0');
+  table('t_pod', ['pod|taa3x_1n', 'pod|taa3x', 'pod|ndx_vxn', 'pod|core5', 'pod|btal_qqq', 'pod|etf_dv2', 'pod|eom_flow', 'bench|S&P 500', 'bench|QQQ'], true, null);
+
+  // Crises
+  const CRK = Object.keys(B['acct|A+D0'].crises);
+  const crLab = k => ({gfc: 'המשבר הפיננסי 2008–09', q4_2018: 'סוף 2018', covid: 'קורונה 2020', bear_2022: 'שוק דובי 2022', tariffs_2025: 'מכסים 2025'})[k] ||
+    (() => { const p = k.split('|'); return `נפילה משותפת <span class="num">${p[1].slice(5, 7)}/${p[1].slice(0, 4)}</span> (60/40 ${sg(+p[3])})`; })();
+  const CRB = ['acct|A+D0', 'agg|' + AV, 'agg|' + AP, 'def|D0', 'def|D3', 'pod|taa3x_1n', 'pod|ndx_vxn', 'pod|core5', 'pod|btal_qqq', 'bench|S&P 500', 'bench|QQQ', 'bench|60/40'];
+  let h = `<thead><tr><th>אירוע</th>${CRB.map(k => `<th class="n">${nm(k)}</th>`).join('')}</tr></thead><tbody>`;
+  CRK.forEach(k => { h += `<tr><td>${crLab(k)}</td>` + CRB.map(b => { const v = B[b].crises[k]; return td(sg(v), v < 0 ? 'neg' : 'pos'); }).join('') + '</tr>'; });
+  document.getElementById('t_cr').innerHTML = h + '</tbody>';
+
+  // Correlation heatmaps
+  const C = D.corr;
+  document.getElementById('fdays').textContent = C.falls_days;
+  const short = k => ({'pod|taa3x_1n': 'TAA3x-1N', 'pod|taa3x': 'TAA3x', 'pod|ndx_vxn': 'NDX-VXN', 'pod|core5': 'CORE5', 'pod|btal_qqq': 'BTAL_QQQ', 'pod|etf_dv2': 'DV2-IND',
+    'pod|eom_flow': 'EOM', 'bench|S&P 500': 'S&P 500', 'bench|QQQ': 'QQQ', 'def|D0': 'ליבה הגנתית', ['agg|' + AV]: 'פוד אגרסיבי'})[k] || k;
+  const css = getComputedStyle(document.documentElement);
+  const hex = v => { const s = css.getPropertyValue(v).trim(); return [parseInt(s.slice(1, 3), 16), parseInt(s.slice(3, 5), 16), parseInt(s.slice(5, 7), 16)]; };
+  const mixc = (a, b, t) => `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * t)).join(',')})`;
+  function heat(id, M, title) {
+    const mid = hex('--mid'), pos = hex('--pos-pole'), neg = hex('--neg-pole');
+    let h = `<thead><tr><th>${title}</th>${C.names.map(n => `<th class="rot">${short(n)}</th>`).join('')}</tr></thead><tbody>`;
+    C.names.forEach((r, i) => { h += `<tr><td style="white-space:nowrap">${short(r)}</td>` + M[i].map((v, j) => {
+      const bg = i === j ? 'var(--surface-2)' : (v >= 0 ? mixc(mid, pos, Math.min(1, v) * 0.85) : mixc(mid, neg, Math.min(1, -v) * 0.85));
+      const ink = Math.abs(v) > 0.6 && i !== j ? 'color:#fff' : '';
+      return `<td class="c" style="background:${bg};${ink}">${i === j ? '' : v.toFixed(2)}</td>`; }).join('') + '</tr>'; });
+    document.getElementById(id).innerHTML = h + '</tbody>';
+  }
+  heat('h_all', C.all, 'כל הימים');
+  heat('h_fall', C.falls, 'ימי נפילה');
+  const P = D.pair;
+  document.getElementById('pair').innerHTML = `<b>שימו לב: הפוד האגרסיבי והליבה ההגנתית קשורים יותר ממה שנראה</b>
+    <p>הקורלציה בין הפוד לליבה היא <span class="num">${f2(P.corr_all)}</span> בכל הימים, ו־<span class="num">${f2(P.corr_spx_falls)}</span> בימי נפילה. יש לכך שתי סיבות. הרוטציה הטקטית בפוד ו־BTAL_QQQ בליבה בנויות על אותו מנוע, "הגנה קודם", שמחזיק את אותם נכסי הגנה ונבדל רק בנכס הצמיחה (TQQQ או QQQ). בנוסף, הפוד מחזיק כרית מאותם פודים.</p>
+    <p>ההגנה בפועל עובדת בזכות הגודל, לא בזכות עצמאות. בימי הנפילה של S&amp;P 500 הפוד ירד בממוצע <span class="num">${sg(P.agg_on_spx_falls_mean)}</span> והליבה רק <span class="num">${sg(P.def_on_spx_falls_mean)}</span>, מול כ־<span class="num">−3%</span> לשוק. המשמעות: אם מנוע "הגנה קודם" ייכשל, הוא יפגע בשני החלקים יחד. זה סיכון מודל שהדגימה לא רואה, והוא עוד טיעון לליבת היעד עם DV2-IND, שמוסיפה מנוע אחר.</p>`;
+
+  // NAV chart
+  const S = [['acct|A+D0', 'var(--s1)', false], ['agg|' + AV, 'var(--s3)', false], ['def|D0', 'var(--s2)', false], ['bench|S&P 500', 'var(--bench)', true], ['bench|QQQ', 'var(--s4)', true]]
+    .map(([k, c, d]) => [nm(k), B[k].nav, c, d]);
+  document.getElementById('cl').innerHTML = S.map(([l, , c]) => `<span><i style="background:${c}"></i>${l}</span>`).join('') + '<span style="color:var(--ink-3)">צמיחה של דולר, סולם לוגריתמי; מתחת: ירידה מהשיא</span>';
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (t, a, p) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); p && p.appendChild(e); return e; };
+  function chart(host, series, H, log, ticks, fmt) {
+    const Wd = 900, m = {l: 52, r: 12, t: 10, b: 24};
+    const svg = el('svg', {viewBox: `0 0 ${Wd} ${H}`, role: 'img', 'aria-label': 'מהלך ההון'}, host);
+    const dates = series[0][1].map(p => p[0]);
+    const f = v => log ? Math.log(v) : v;
+    let lo = Infinity, hi = -Infinity; series.forEach(s => s[1].forEach(p => { lo = Math.min(lo, f(p[1])); hi = Math.max(hi, f(p[1])); }));
+    if (!log) hi = 0;
+    const X = i => m.l + i / (dates.length - 1) * (Wd - m.l - m.r), Y = v => H - m.b - (f(v) - lo) / (hi - lo) * (H - m.t - m.b);
+    ticks.filter(v => f(v) >= lo - 1e-9 && f(v) <= hi + 1e-9).forEach(v => { el('line', {x1: m.l, x2: Wd - m.r, y1: Y(v), y2: Y(v), class: 'gl'}, svg); el('text', {x: m.l - 8, y: Y(v) + 4, 'text-anchor': 'end'}, svg).textContent = fmt(v); });
+    dates.forEach((d, i) => { if (d.endsWith('-01') && (+d.slice(0, 4)) % 3 === 2) el('text', {x: X(i), y: H - 6, 'text-anchor': 'middle'}, svg).textContent = d.slice(0, 4); });
+    series.slice().reverse().forEach(([, pts, c, dsh]) => el('path', {d: pts.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(''), fill: 'none', stroke: c, 'stroke-width': dsh ? 1.6 : 2.2, 'stroke-dasharray': dsh ? '5 4' : 'none'}, svg));
+    const tip = document.createElement('div'); tip.className = 'tip'; tip.hidden = true; host.appendChild(tip);
+    const cross = el('line', {y1: m.t, y2: H - m.b, stroke: 'var(--ink-3)', visibility: 'hidden'}, svg);
+    svg.addEventListener('pointermove', e => { const r = svg.getBoundingClientRect(); const i = Math.max(0, Math.min(dates.length - 1, Math.round(((e.clientX - r.left) / r.width * Wd - m.l) / (Wd - m.l - m.r) * (dates.length - 1))));
+      cross.setAttribute('x1', X(i)); cross.setAttribute('x2', X(i)); cross.setAttribute('visibility', 'visible');
+      tip.innerHTML = `<div><b class="num">${dates[i]}</b></div>` + series.map(([l, pts]) => `<div class="r"><span>${l}</span><b>${pts[i] ? fmt(pts[i][1]) : '–'}</b></div>`).join('');
+      tip.hidden = false; const hr = host.getBoundingClientRect(); let x = e.clientX - hr.left + 12; if (x + 230 > hr.width) x -= 250; tip.style.left = x + 'px'; tip.style.top = (e.clientY - hr.top - 10) + 'px'; });
+    svg.addEventListener('pointerleave', () => { tip.hidden = true; cross.setAttribute('visibility', 'hidden'); });
+  }
+  chart(document.getElementById('nav'), S, 330, true, [1, 2, 4, 8, 16, 32], v => v.toFixed(v < 10 ? 2 : 1) + '×');
+  const DDS = S.map(([l, pts, c, d]) => { let pk = 0; return [l, pts.map(([t, v]) => { pk = Math.max(pk, v); return [t, v / pk - 1]; }), c, d]; });
+  chart(document.getElementById('dd'), DDS, 180, false, [0, -0.1, -0.2, -0.3, -0.4, -0.5], v => Math.round(v * 100) + '%');
+
+  // Years
+  const YB = ['acct|A+D0', 'acct|A+D3', 'agg|' + AV, 'agg|' + AP, 'agg|' + GV, 'def|D0', 'def|D3', 'bench|S&P 500', 'bench|QQQ'];
+  const yrs = Object.keys(B['acct|A+D0'].years);
+  h = `<thead><tr><th>שנה</th>${YB.map(k => `<th class="n">${nm(k)}</th>`).join('')}</tr></thead><tbody>`;
+  yrs.forEach(y => { h += `<tr><td class="n">${y}${y === '2008' || y === '2026' ? '*' : ''}</td>` + YB.map(k => { const v = B[k].years[y]; return td(sg(v), v < 0 ? 'neg' : ''); }).join('') + '</tr>'; });
+  document.getElementById('t_years').innerHTML = h + '</tbody>';
+})();
+</script>

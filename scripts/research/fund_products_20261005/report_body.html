@@ -1,0 +1,256 @@
+.prod5 { display: grid; grid-template-columns: repeat(auto-fit, minmax(195px, 1fr)); gap: 10px; }
+.card { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 12px 14px; display: grid; gap: 6px; align-content: start; min-width: 0; }
+.card.d { border-top: 3px solid var(--def); } .card.g { border-top: 3px solid var(--gro); } .card.m { border-top: 3px solid var(--bench); }
+.card.pick { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--good) 55%, transparent); }
+.card h3 { font-size: 17px; }
+.tiles { direction: ltr; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.tile { background: var(--surface-2); border-radius: 8px; padding: 6px 8px; text-align: left; min-width: 0; }
+.tile span { display: block; font-size: 10.5px; letter-spacing: .02em; color: var(--ink-3); white-space: nowrap; }
+.tile b { font-family: var(--mono); font-weight: 500; font-size: 15.5px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.kv { direction: ltr; display: grid; font-size: 12.5px; }
+.kv .r { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; column-gap: 10px; padding: 3px 0; border-top: 1px solid var(--rule); }
+.kv .r span { color: var(--ink-2); white-space: nowrap; }
+.kv .r b { margin-inline-start: auto; text-align: right; font-family: var(--mono); font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }
+.kv .kvn { font-size: 11.5px; color: var(--ink-3); padding-bottom: 3px; text-align: left; }
+.card > .code { direction: ltr; text-align: left; font-size: 12px; color: var(--ink-3); overflow-wrap: anywhere; }
+.card > * { min-width: 0; }
+.pie { direction: ltr; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-block: 2px 4px; }
+.pie svg { width: 92px; height: 92px; flex: none; }
+.pie ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 12.5px; color: var(--ink-2); min-width: 0; }
+.pie li { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.pie li i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.pie li b { font-family: var(--mono); font-weight: 500; color: var(--ink); min-width: 2.6em; text-align: right; }
+.card .mix, .card .kpi { direction: ltr; text-align: left; font-size: 12px; color: var(--ink-2); }
+.card .kpi { display: grid; gap: 2px; font-size: 12.5px; }
+.card .kpi b { font-family: var(--mono); font-weight: 500; color: var(--ink); }
+ul.why { list-style: disc; margin: 0; padding: 6px 16px 0 0; display: grid; gap: 3px; font-size: 12.5px; line-height: 1.45; color: var(--ink-2); border-top: 1px dashed var(--rule); }
+ul.why li { padding: 0; }
+.chip.stage { background: var(--surface-2); color: var(--ink-2); }
+.chip.bad { background: var(--bad-soft); color: var(--bad); }
+.tbl { direction: ltr; }
+.tbl table { direction: ltr; }
+section > *, details, details > * { min-width: 0; }
+.kicker.ltr, .eyebrow.ltr { text-align: right; }
+.tbl th, .tbl td { text-align: left; }
+.tbl td.nm { direction: rtl; text-align: right; min-width: 170px; }
+.tbl td.nm .cap { direction: ltr; text-align: left; }
+.tbl td.he { direction: rtl; text-align: right; min-width: 220px; white-space: normal; }
+.tbl td.c { text-align: center; font-family: var(--mono); font-size: 12px; min-width: 46px; }
+.yes { color: var(--good); font-weight: 600; } .no { color: var(--bad); font-weight: 600; }
+.ltr { direction: ltr; unicode-bidi: isolate; }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(430px, 100%), 1fr)); gap: 12px; }
+.two > * { min-width: 0; }
+.dir { display: inline-block; font-size: 11.5px; font-weight: 600; border-radius: 6px; padding: 0 7px; white-space: nowrap; }
+.dir.con { background: var(--good-soft); color: var(--good); } .dir.opt { background: var(--bad-soft); color: var(--bad); }
+.dir.unk { background: var(--warn-soft); color: var(--warn); } .dir.neu { background: var(--surface-2); color: var(--ink-2); }
+details .tbl { margin-block-start: 8px; }
+details p { margin-block-end: 6px; }
+h3.sub { font-family: var(--body); font-size: 14.5px; font-weight: 600; color: var(--ink-2); }
+/* Text blocks use the full content width; long captions are bullet lists (ul.notes), one idea per bullet. */
+p.cap, ul.plain, ol.plain, .note p, details p { max-width: none; }
+ul.notes { direction: rtl; margin: 0; padding-inline-start: 20px; display: grid; gap: 5px; max-width: none; font-size: 13px; line-height: 1.7; color: var(--ink-2); overflow-wrap: anywhere; }
+ul.notes b { font-weight: 600; color: var(--ink); }
+ul.notes li::marker { color: var(--ink-3); }
+ul.plain li, ol.plain li { overflow-wrap: anywhere; }
+</style>
+
+<main dir="rtl" lang="he">
+<header>
+  <h1>מוצרי הקרן: הגנתי וצמיחה</h1>
+</header>
+
+<section>
+  <div class="kicker">בקצרה</div>
+  <h2>מה החלטתי</h2>
+  <ul class="plain"><!--SUMMARY--></ul>
+</section>
+
+<section>
+  <div class="kicker ltr">DEFENSIVE</div>
+  <h2>הגנתי: נשאר כמו שהוא</h2>
+  <div class="prod5"><!--DEF_CARDS--></div>
+  <!--DEF_MENU-->
+  <!--DEF_CAP-->
+  <details><summary>שתי שורות שתלויות בצמיחה או בהיפוך לממוצע</summary><!--DEF_REFRESH--></details>
+</section>
+
+<section>
+  <div class="kicker ltr">GROWTH</div>
+  <h2>צמיחה: שלוש קפסולות, סולם אחד, ושני תיקים חודשיים</h2>
+  <!--GRO_INTRO-->
+  <div class="prod5"><!--GRO_CARDS--></div>
+  <!--GRO_MENU-->
+  <!--GRO_CAP-->
+  <details><summary>למה שני פודים בתיק החודשי</summary><!--MONTHLY_WHY--></details>
+  <h3 class="sub">מול התיק החודשי: לפי עלות ולפי תקופה</h3>
+  <!--VERSUS-->
+  <details><summary>סטטיסטיקה מלאה</summary><!--GRO_FULL--></details>
+</section>
+
+<section>
+  <div class="kicker ltr">THE BLEND DIAL</div>
+  <!--BLEND-->
+</section>
+
+<section>
+  <div class="kicker ltr">WHAT IS INSIDE</div>
+  <h2>מה באמת יש בפנים</h2>
+  <!--STRUCT_INTRO-->
+  <!--STRUCT-->
+  <div class="chart"><div class="legend ltr" id="l_nq"></div><div class="svgwrap" id="c_nq"></div></div>
+  <!--GAP-->
+</section>
+
+<section>
+  <div class="kicker ltr">THE RETURN LADDER</div>
+  <h2>כמה עולה כל צעד בסולם המוצרים</h2>
+  <!--DIAL_INTRO-->
+  <!--DIAL-->
+  <details><summary>חלופה: מינוף על התיק המאוזן (צריך חשבון מרג׳ין אחד)</summary><!--MARGIN--></details>
+</section>
+
+<section>
+  <div class="kicker ltr">ROBUSTNESS</div>
+  <h2>האם שלוש הקפסולות מחזיקות</h2>
+  <!--ROB_INTRO-->
+  <h3 class="sub">מה קורה אם מנוע אחד מפסיק לעבוד</h3>
+  <!--DECAY-->
+  <h3 class="sub">האם כל קפסולה מרוויחה את המקום שלה</h3>
+  <!--SLOTS-->
+  <details><summary>חלופות למבנה: המתחרים ושבע הבדיקות</summary><!--CHALLENGERS--></details>
+  <details><summary>רגישות למשקלים, לאיפוס השנתי ולתאריך ההתחלה</summary><!--PLATEAU--></details>
+</section>
+
+<section>
+  <div class="kicker ltr">DEPENDENCE</div>
+  <h2>כמה הקפסולות באמת שונות</h2>
+  <!--DEP_INTRO-->
+  <div class="two"><!--DEP_HEAT--></div>
+  <!--DEP_NOTE-->
+  <div class="chart"><div class="legend ltr" id="l_rc"></div><div class="svgwrap" id="c_rc"></div></div>
+  <details><summary>יציבות הפיזור, זנבות ותקופות גרועות</summary><!--DEP_MORE--></details>
+</section>
+
+<section>
+  <div class="kicker ltr">HOW MUCH TO BELIEVE</div>
+  <h2>כמה להאמין למספרים</h2>
+  <!--BELIEVE_INTRO-->
+  <!--BELIEVE-->
+  <details><summary>איך לקרוא את מספר החריגה מהירידה</summary><!--RUNG--></details>
+</section>
+
+<section>
+  <div class="kicker ltr">EQUITY CURVE</div>
+  <div class="chart">
+    <div class="legend ltr" id="l_nav"></div>
+    <div class="svgwrap" id="c_nav"></div>
+    <div class="svgwrap" id="c_dd"></div>
+  </div>
+  <div class="chart"><div class="legend ltr" id="l_rs"></div><div class="svgwrap" id="c_rs"></div></div>
+</section>
+
+<section>
+  <div class="kicker ltr">CRISES AND YEARS</div>
+  <h2>משברים ושנים</h2>
+  <!--CRISES-->
+  <details><summary>שנים קלנדריות</summary><!--YEARS--></details>
+</section>
+
+<section>
+  <div class="kicker ltr">ALPHA</div>
+  <h2>אלפא</h2>
+  <!--ALPHA_INTRO-->
+  <!--ALPHA-->
+</section>
+
+<section>
+  <div class="kicker ltr">CAPACITY AND EASE</div>
+  <h2>גודל ותפעול</h2>
+  <!--CAP_INTRO-->
+  <!--CAPACITY-->
+  <!--EASE-->
+</section>
+
+<section>
+  <div class="kicker">חשוב לדעת</div>
+  <h2>הנחות והסתייגויות, עם כיוון וגודל</h2>
+  <!--KNOW-->
+</section>
+
+<section>
+  <div class="kicker">מה צריך ממך</div>
+  <ol class="plain"><!--TODO--></ol>
+  <!--TRIGGERS-->
+</section>
+
+<section>
+  <div class="kicker ltr">VERIFICATION</div>
+  <h2>בדיקת הנתונים</h2>
+  <!--VERIFY-->
+</section>
+
+<section>
+  <div class="kicker ltr">HEDGE FUND · FEES</div>
+  <h2>כמה עמלה, ומה כדאי לגבות</h2>
+  <!--FEES-->
+</section>
+
+<section>
+  <div class="kicker ltr">INDEPENDENT REVIEW</div>
+  <!--REVIEW-->
+</section>
+
+<div class="note">
+  <b>הסתייגות כללית</b>
+  <!--CAVEAT-->
+</div>
+</main>
+
+<script type="application/json" id="ch">/*CHARTS*/null</script>
+<script>
+(function () {
+  const CH = JSON.parse(document.getElementById('ch').textContent);
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (t, a, p) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); p && p.appendChild(e); return e; };
+  // One scale per chart: series share the date grid of the chart; null = no value (the line breaks there).
+  function chart(host, dates, series, o) {
+    const Wd = 900, H = o.h, m = {l: 54, r: 12, t: 10, b: 24};
+    const svg = el('svg', {viewBox: `0 0 ${Wd} ${H}`, role: 'img', 'aria-label': o.label}, host);
+    const f = v => o.log ? Math.log(v) : v;
+    let lo = Infinity, hi = -Infinity;
+    series.forEach(s => s.pts.forEach(v => { if (v !== null) { lo = Math.min(lo, f(v)); hi = Math.max(hi, f(v)); } }));
+    if (o.top !== undefined) hi = Math.max(hi, f(o.top));
+    if (o.bottom !== undefined) lo = Math.min(lo, f(o.bottom));
+    const X = i => m.l + i / (dates.length - 1) * (Wd - m.l - m.r), Y = v => H - m.b - (f(v) - lo) / (hi - lo) * (H - m.t - m.b);
+    o.ticks.filter(v => f(v) >= lo - 1e-9 && f(v) <= hi + 1e-9).forEach(v => {
+      el('line', {x1: m.l, x2: Wd - m.r, y1: Y(v), y2: Y(v), class: 'gl'}, svg);
+      el('text', {x: m.l - 8, y: Y(v) + 4, 'text-anchor': 'end'}, svg).textContent = o.fmt(v); });
+    dates.forEach((d, i) => { if (d.endsWith('-01') && (+d.slice(0, 4)) % 3 === 2) el('text', {x: X(i), y: H - 6, 'text-anchor': 'middle'}, svg).textContent = d.slice(0, 4); });
+    series.slice().reverse().forEach(s => { let d = '', pen = false;
+      s.pts.forEach((v, i) => { if (v === null) { pen = false; return; } d += `${pen ? 'L' : 'M'}${X(i).toFixed(1)},${Y(v).toFixed(1)}`; pen = true; });
+      el('path', {d, fill: 'none', stroke: s.c, 'stroke-width': s.dash ? 1.6 : 2.2, 'stroke-dasharray': s.dash ? '5 4' : 'none'}, svg); });
+    const tip = document.createElement('div'); tip.className = 'tip'; tip.hidden = true; tip.style.direction = 'ltr'; host.appendChild(tip);
+    const cross = el('line', {y1: m.t, y2: H - m.b, stroke: 'var(--ink-3)', visibility: 'hidden'}, svg);
+    svg.addEventListener('pointermove', e => { const r = svg.getBoundingClientRect();
+      const i = Math.max(0, Math.min(dates.length - 1, Math.round(((e.clientX - r.left) / r.width * Wd - m.l) / (Wd - m.l - m.r) * (dates.length - 1))));
+      cross.setAttribute('x1', X(i)); cross.setAttribute('x2', X(i)); cross.setAttribute('visibility', 'visible');
+      tip.innerHTML = `<div><b class="num">${dates[i]}</b></div>` + series.map(s => `<div class="r"><span>${s.l}</span><b>${s.pts[i] === null ? '–' : o.fmt(s.pts[i])}</b></div>`).join('');
+      tip.hidden = false; const hr = host.getBoundingClientRect(); let x = e.clientX - hr.left + 12; if (x + 230 > hr.width) x -= 250; x = Math.max(0, Math.min(x, hr.width - tip.offsetWidth));
+      tip.style.left = x + 'px'; tip.style.top = (e.clientY - hr.top - 10) + 'px'; });
+    svg.addEventListener('pointerleave', () => { tip.hidden = true; cross.setAttribute('visibility', 'hidden'); });
+  }
+  const legend = (id, series, note) => { document.getElementById(id).innerHTML = series.map(s => `<span><i style="background:${s.c}"></i>${s.l}</span>`).join('') + `<span style="color:var(--ink-3)">${note}</span>`; };
+  const x2 = v => v.toFixed(v < 10 ? 2 : 1) + '×', pc = v => Math.round(v * 100) + '%', n2 = v => v.toFixed(2);
+
+  legend('l_nav', CH.nav.series, 'Growth of $1, gross, fair cash (log scale); below: drawdown from month-end values');
+  chart(document.getElementById('c_nav'), CH.nav.dates, CH.nav.series, {h: 330, log: true, ticks: [1, 2, 4, 8, 16, 32, 64], fmt: x2, label: 'equity curves'});
+  const dd = CH.nav.series.map(s => { let pk = 0; return {l: s.l, c: s.c, dash: s.dash, pts: s.pts.map(v => { pk = Math.max(pk, v); return v / pk - 1; })}; });
+  chart(document.getElementById('c_dd'), CH.nav.dates, dd, {h: 180, ticks: [0, -0.1, -0.2, -0.3, -0.4, -0.5], fmt: pc, top: 0, label: 'drawdowns'});
+  legend('l_rs', CH.roll.series, 'Rolling 3-year excess Sharpe over BIL');
+  chart(document.getElementById('c_rs'), CH.roll.dates, CH.roll.series, {h: 230, ticks: [-1, -0.5, 0, 0.5, 1, 1.5, 2, 2.5, 3], fmt: n2, bottom: 0, label: 'rolling excess Sharpe'});
+  legend('l_rc', CH.corr.series, 'Rolling 252-session correlation between capsules');
+  chart(document.getElementById('c_rc'), CH.corr.dates, CH.corr.series, {h: 220, ticks: [-0.25, 0, 0.25, 0.5, 0.75, 1], fmt: n2, bottom: 0, top: 1, label: 'rolling correlations'});
+  legend('l_nq', CH.nasdaq.series, 'Nasdaq-100 look-through notional per $1 of product (3 × TQQQ + momentum stocks), month end, 2012-10 on');
+  chart(document.getElementById('c_nq'), CH.nasdaq.dates, CH.nasdaq.series, {h: 220, ticks: [0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2], fmt: x2, bottom: 0, label: 'Nasdaq look-through'});
+})();
+</script>
