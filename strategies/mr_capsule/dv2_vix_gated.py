@@ -1,4 +1,4 @@
-"""DV2-G pod of the MR capsule: DV2 (wired rules) behind the shared VIX stress gate, idle cash parked (PM_READY, no live route).
+"""DV2-G pod of the MR capsule: DV2 rules behind the shared VIX stress gate, idle cash parked.
 
 Shared code of the Bench entry points strategy_mr_dv2_vix_gated_spmo.py (the capsule spec: SPMO while the gate is
 closed, BIL otherwise) and strategy_mr_dv2_vix_gated_bil.py (idle cash all in BIL).
@@ -115,6 +115,35 @@ def load_pricing_data(end_date_str: str | None = None) -> tuple[pd.DataFrame, pd
     return pricing_data_df, universe_df
 
 
+def build_dv2_capsule_strategy(
+    *,
+    strategy_name_str: str,
+    parking_enabled_bool: bool,
+    spmo_parking_enabled_bool: bool,
+    universe_df: pd.DataFrame,
+    vix_close_ser: pd.Series,
+    capital_base_float: float = 100_000.0,
+    slippage_float: float = 0.00025,
+) -> DV2VixGatedStrategy:
+    """One configured DV2-G object: the backtest, the analysis hooks and the live adapter all build it here."""
+    strategy = DV2VixGatedStrategy(
+        name=strategy_name_str,
+        benchmarks=BENCHMARK_LIST,
+        capital_base=capital_base_float,
+        slippage=slippage_float,
+        commission_per_share=0.005,
+        commission_minimum=1.0,
+        performance_benchmark_adjustment_str=TOTALRETURN_ADJUSTMENT_STR,
+    )
+    strategy.universe_df = universe_df
+    strategy.trade_id = 0
+    strategy.current_trade = defaultdict(default_trade_id_int)
+    strategy.vix_close_ser = vix_close_ser
+    strategy.parking_enabled_bool = parking_enabled_bool
+    strategy.spmo_parking_enabled_bool = spmo_parking_enabled_bool
+    return strategy
+
+
 def run_dv2_capsule_pod(
     *,
     strategy_name_str: str,
@@ -130,21 +159,15 @@ def run_dv2_capsule_pod(
 ) -> DV2VixGatedStrategy:
     """Run DV2-G with the given parking (the Bench entry points fix it; parking off = idle cash at 0%)."""
     pricing_data_df, universe_df = load_pricing_data(end_date_str)
-    strategy = DV2VixGatedStrategy(
-        name=strategy_name_str,
-        benchmarks=BENCHMARK_LIST,
-        capital_base=capital_base_float,
-        slippage=slippage_float,
-        commission_per_share=0.005,
-        commission_minimum=1.0,
-        performance_benchmark_adjustment_str=TOTALRETURN_ADJUSTMENT_STR,
+    strategy = build_dv2_capsule_strategy(
+        strategy_name_str=strategy_name_str,
+        parking_enabled_bool=parking_enabled_bool,
+        spmo_parking_enabled_bool=spmo_parking_enabled_bool,
+        universe_df=universe_df,
+        vix_close_ser=load_vix_close_ser(end_date_str),
+        capital_base_float=capital_base_float,
+        slippage_float=slippage_float,
     )
-    strategy.universe_df = universe_df
-    strategy.trade_id = 0
-    strategy.current_trade = defaultdict(default_trade_id_int)
-    strategy.vix_close_ser = load_vix_close_ser(end_date_str)
-    strategy.parking_enabled_bool = parking_enabled_bool
-    strategy.spmo_parking_enabled_bool = spmo_parking_enabled_bool
     # *** CRITICAL*** full pre-start history stays in the frame for indicators; trading starts at the first
     # deployment fill session (same convention as DVO2Strategy.run_variant).
     calendar_idx = pricing_data_df.index[pricing_data_df.index >= pd.Timestamp(backtest_start_date_str)]
@@ -156,3 +179,72 @@ def run_dv2_capsule_pod(
     if save_results_bool:
         save_results(strategy, output_dir=output_dir_str)
     return strategy
+
+
+def build_dv2_capsule_capacity_analysis_inputs(
+    *,
+    strategy_name_str: str,
+    parking_enabled_bool: bool,
+    spmo_parking_enabled_bool: bool,
+    show_display_bool: bool = False,
+    backtest_start_date_str: str = "2004-01-01",
+    capital_base_float: float = 100_000.0,
+    end_date_str: str | None = None,
+) -> dict[str, object]:
+    """One completed DV2-G run for CapacityAnalysis (the order ledger includes the BIL / SPMO parking orders)."""
+    pricing_data_df, universe_df = load_pricing_data(end_date_str)
+    strategy = build_dv2_capsule_strategy(
+        strategy_name_str=strategy_name_str,
+        parking_enabled_bool=parking_enabled_bool,
+        spmo_parking_enabled_bool=spmo_parking_enabled_bool,
+        universe_df=universe_df,
+        vix_close_ser=load_vix_close_ser(end_date_str),
+        capital_base_float=capital_base_float,
+    )
+    # *** CRITICAL*** CapacityAnalysis must assess the same completed order ledger as the Bench run:
+    # pre-start history for indicators, execution on the requested calendar only.
+    calendar_idx = pricing_data_df.index[pricing_data_df.index >= pd.Timestamp(backtest_start_date_str)]
+    run_daily(strategy, pricing_data_df, calendar_idx, show_progress=show_display_bool, show_signal_progress_bool=show_display_bool)
+    strategy.universe_df = None
+    strategy._performance_benchmark_symbol_str = BENCHMARK_LIST[0]
+    strategy._performance_benchmark_adjustment_str = TOTALRETURN_ADJUSTMENT_STR
+    return {
+        "strategy_obj": strategy,
+        "pricing_data_df": pricing_data_df,
+        "execution_policy_str": "MOO",
+        "impact_profile_str": "MOO_LARGE_MIXED",
+    }
+
+
+def build_dv2_capsule_execution_timing_analysis_inputs(
+    *,
+    strategy_name_str: str,
+    parking_enabled_bool: bool,
+    spmo_parking_enabled_bool: bool,
+) -> dict[str, object]:
+    """Inputs for ExecutionTimingAnalysis; a timing variant moves the stock and the parking fills alike."""
+    pricing_data_df, universe_df = load_pricing_data(None)
+    vix_close_ser = load_vix_close_ser(None)
+    # *** CRITICAL*** the same post-warm-up execution calendar as the Bench run (2004 onward).
+    calendar_idx = pricing_data_df.index[pricing_data_df.index >= pd.Timestamp("2004-01-01")]
+
+    def strategy_factory_fn() -> DV2VixGatedStrategy:
+        return build_dv2_capsule_strategy(
+            strategy_name_str=strategy_name_str,
+            parking_enabled_bool=parking_enabled_bool,
+            spmo_parking_enabled_bool=spmo_parking_enabled_bool,
+            universe_df=universe_df,
+            vix_close_ser=vix_close_ser,
+        )
+
+    return {
+        "strategy_factory_fn": strategy_factory_fn,
+        "pricing_data_df": pricing_data_df,
+        "calendar_idx": pd.DatetimeIndex(calendar_idx),
+        "order_generation_mode_str": "signal_bar",
+        "risk_model_str": "daily_ohlc_signal",
+        "entry_timing_str_tuple": ("same_close_moc", "next_open", "next_close"),
+        "exit_timing_str_tuple": ("same_close_moc", "next_open", "next_close"),
+        "default_entry_timing_str": "next_open",
+        "default_exit_timing_str": "next_open",
+    }

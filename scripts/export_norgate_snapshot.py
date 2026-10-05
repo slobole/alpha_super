@@ -26,10 +26,18 @@ from data.norgate_snapshot_store import (
     CORE5_TOTAL_RETURN_SYMBOL_TUPLE,
     HPI_SP500_DATA_CONTRACT_DICT,
     HPI_SP500_PROFILE_STR,
+    MR_CAPSULE_DATA_CONTRACT_BY_PROFILE_DICT,
+    MR_CAPSULE_DV2_PROFILE_STR,
+    MR_CAPSULE_HPI_PROFILE_STR,
+    MR_CAPSULE_PROFILE_SET,
+    MR_CAPSULE_PRICE_HISTORY_START_DATE_STR,
+    MR_CAPSULE_EMPTY_HISTORY_FALLBACK_START_DATE_STR,
+    MR_CAPSULE_VIX_HISTORY_START_DATE_STR,
     SNAPSHOT_SCHEMA_VERSION_INT,
     TOTALRETURN_ADJUSTMENT_STR,
     core5_price_coverage_dict,
     load_valid_snapshot_manifest,
+    mr_capsule_price_coverage_dict,
     write_snapshot_files,
 )
 
@@ -62,6 +70,15 @@ PROFILE_EXPORT_SPEC_DICT: dict[str, NorgateExportProfileSpec] = {
         total_return_symbol_tuple=("$SPX", "$SPXTR"),
         padding_type_name_str="NONE",
         trim_past_member_tail_bool=False,
+    ),
+    MR_CAPSULE_DV2_PROFILE_STR: NorgateExportProfileSpec(
+        indexname_str="S&P 500", capital_symbol_tuple=("BIL", "SPMO"),
+        total_return_symbol_tuple=("$SPX", "$SPXTR"), helper_symbol_tuple=("$VIX",),
+    ),
+    MR_CAPSULE_HPI_PROFILE_STR: NorgateExportProfileSpec(
+        indexname_str="S&P 500", capital_symbol_tuple=("BIL", "SPMO"),
+        total_return_symbol_tuple=("$SPX", "$SPXTR"), helper_symbol_tuple=("$VIX",),
+        padding_type_name_str="NONE",
     ),
     "norgate_eod_etf_plus_vix_helper": NorgateExportProfileSpec(
         capital_symbol_tuple=("GLD", "UUP", "TLT", "DBC", "BTAL", "SPY", "QQQ", "TQQQ"),
@@ -157,6 +174,7 @@ def _load_price_frame_df(
     start_date_str: str,
     end_date_str: str,
     padding_type_name_str: str = "ALLMARKETDAYS",
+    empty_history_fallback_start_date_str: str | None = None,
 ) -> pd.DataFrame:
     norgatedata_module = _load_direct_norgate_module()
     padding_type_obj = getattr(
@@ -171,6 +189,20 @@ def _load_price_frame_df(
         end_date=end_date_str,
         timeseriesformat="pandas-dataframe",
     )
+    effective_start_date_str = start_date_str
+    empty_primary_request_bool = raw_price_df is None or len(raw_price_df.index) == 0
+    if empty_primary_request_bool and empty_history_fallback_start_date_str is not None:
+        # Preserve a retired symbol's pre-window history only after the exact
+        # research-window request returned empty. Never substitute another
+        # request window for observed dividends in the strategy's history.
+        effective_start_date_str = empty_history_fallback_start_date_str
+        raw_price_df = norgatedata_module.price_timeseries(
+            symbol_str, stock_price_adjustment_setting=_adjustment_type_obj(adjustment_str),
+            padding_setting=padding_type_obj, start_date=effective_start_date_str,
+            end_date=end_date_str, timeseriesformat="pandas-dataframe",
+        )
+        if raw_price_df is not None and len(raw_price_df.index) and not (pd.to_datetime(raw_price_df.index) < pd.Timestamp(start_date_str)).all():
+            raise RuntimeError(f"Pre-window fallback for {symbol_str} unexpectedly contains rows in the empty primary request window.")
     if raw_price_df is None or len(raw_price_df.index) == 0:
         raise RuntimeError(f"Norgate returned no price data for {symbol_str} ({adjustment_str}).")
 
@@ -189,6 +221,11 @@ def _load_price_frame_df(
     price_df.attrs["source_field_list"] = source_field_list
     price_df.attrs["source_index_name_str"] = raw_price_df.index.name
     price_df.attrs["source_dtype_dict"] = {field_str: str(dtype_obj) for field_str, dtype_obj in raw_price_df.dtypes.items()}
+    price_df.attrs["source_request_dict"] = {
+        "requested_start_date_str": start_date_str, "effective_start_date_str": effective_start_date_str,
+        "end_date_str": end_date_str, "padding_type_name_str": padding_type_name_str,
+        "empty_primary_request_bool": empty_primary_request_bool,
+    }
     return price_df
 
 
@@ -199,6 +236,9 @@ def _build_price_snapshot_df(
     start_date_str: str,
     end_date_str: str,
     padding_type_name_str: str = "ALLMARKETDAYS",
+    padding_type_by_symbol_dict: dict[str, str] | None = None,
+    start_date_by_symbol_dict: dict[str, str] | None = None,
+    empty_history_fallback_by_symbol_dict: dict[str, str] | None = None,
 ) -> pd.DataFrame:
     price_frame_list: list[pd.DataFrame] = []
     for symbol_str in tqdm(list(dict.fromkeys(capital_symbol_list)), desc="exporting CAPITALSPECIAL prices"):
@@ -206,9 +246,11 @@ def _build_price_snapshot_df(
             _load_price_frame_df(
                 symbol_str=symbol_str,
                 adjustment_str=CAPITALSPECIAL_ADJUSTMENT_STR,
-                start_date_str=start_date_str,
+                start_date_str=(start_date_by_symbol_dict or {}).get(symbol_str, start_date_str),
                 end_date_str=end_date_str,
-                padding_type_name_str=padding_type_name_str,
+                padding_type_name_str=(padding_type_by_symbol_dict or {}).get(symbol_str, padding_type_name_str),
+                **({"empty_history_fallback_start_date_str": empty_history_fallback_by_symbol_dict[symbol_str]}
+                   if empty_history_fallback_by_symbol_dict and symbol_str in empty_history_fallback_by_symbol_dict else {}),
             )
         )
     for symbol_str in tqdm(list(dict.fromkeys(total_return_symbol_list)), desc="exporting TOTALRETURN prices"):
@@ -233,6 +275,11 @@ def _build_price_snapshot_df(
         f"{frame_df['symbol_str'].iloc[0]}|{frame_df['adjustment_str'].iloc[0]}": frame_df.attrs["source_dtype_dict"]
         for frame_df in price_frame_list
     }
+    if empty_history_fallback_by_symbol_dict is not None:
+        price_df.attrs["source_request_by_pair_dict"] = {
+            f"{frame_df['symbol_str'].iloc[0]}|{frame_df['adjustment_str'].iloc[0]}": frame_df.attrs["source_request_dict"]
+            for frame_df in price_frame_list
+        }
     return price_df
 
 
@@ -285,12 +332,24 @@ def _export_profile_to_root_path(
     symbol_list = list(dict.fromkeys(pit_symbol_list + list(profile_spec_obj.capital_symbol_tuple)))
     helper_symbol_list = list(profile_spec_obj.helper_symbol_tuple)
     benchmark_symbol_list = list(profile_spec_obj.total_return_symbol_tuple)
+    capsule_override_dict = {}
+    if profile_str in MR_CAPSULE_PROFILE_SET:
+        if end_date_str != snapshot_date_str:
+            raise ValueError("MR capsule export must end on the snapshot session.")
+        # *** CRITICAL*** stock padding stays parent-specific; ETFs retain their
+        # historical contract, while the VIX gate needs unpadded 1990-through-T closes.
+        capsule_override_dict = {
+            "padding_type_by_symbol_dict": MR_CAPSULE_DATA_CONTRACT_BY_PROFILE_DICT[profile_str]["price_padding_by_symbol_dict"],
+            "start_date_by_symbol_dict": {"$VIX": MR_CAPSULE_VIX_HISTORY_START_DATE_STR},
+            "empty_history_fallback_by_symbol_dict": {symbol_str: MR_CAPSULE_EMPTY_HISTORY_FALLBACK_START_DATE_STR for symbol_str in pit_symbol_list},
+        }
     price_df = _build_price_snapshot_df(
         capital_symbol_list=symbol_list + helper_symbol_list,
         total_return_symbol_list=benchmark_symbol_list,
-        start_date_str=start_date_str,
+        start_date_str=MR_CAPSULE_PRICE_HISTORY_START_DATE_STR if profile_str in MR_CAPSULE_PROFILE_SET else start_date_str,
         end_date_str=end_date_str,
         padding_type_name_str=profile_spec_obj.padding_type_name_str,
+        **capsule_override_dict,
     )
 
     required_symbol_list = list(dict.fromkeys(symbol_list + benchmark_symbol_list))
@@ -308,6 +367,15 @@ def _export_profile_to_root_path(
             else "exact"
         ),
     }
+    if profile_str in MR_CAPSULE_PROFILE_SET:
+        data_contract_dict.update(MR_CAPSULE_DATA_CONTRACT_BY_PROFILE_DICT[profile_str])
+        data_contract_dict["source_field_by_pair_dict"] = price_df.attrs["source_field_by_pair_dict"]
+        data_contract_dict["source_dtype_by_pair_dict"] = price_df.attrs["source_dtype_by_pair_dict"]
+        data_contract_dict["source_index_name_str"] = price_df.attrs["source_index_name_str"]
+        data_contract_dict["source_request_by_pair_dict"] = price_df.attrs["source_request_by_pair_dict"]
+        data_contract_dict["series_coverage_dict"] = mr_capsule_price_coverage_dict(
+            price_df, pd.Timestamp(snapshot_date_str),
+        )
     if profile_str == CORE5_PROFILE_STR:
         data_contract_dict.update(CORE5_DATA_CONTRACT_DICT)
         data_contract_dict["source_field_by_pair_dict"] = price_df.attrs["source_field_by_pair_dict"]
@@ -343,7 +411,7 @@ def _export_profile_to_root_path(
         raise RuntimeError(
             "HPI snapshot export contract drifted from the strict HPI data contract."
         )
-    # Transport-only field provenance belongs in the CORE5 manifest, not in
+    # Transport-only field provenance belongs in the qualified manifest, not in
     # pandas attrs propagated to strategy inputs or existing profile payloads.
     price_df.attrs.clear()
     return write_snapshot_files(
@@ -382,7 +450,7 @@ def export_profile_snapshot(
     if final_snapshot_dir_path_obj.exists() and not overwrite_bool:
         manifest_path_obj = final_snapshot_dir_path_obj / "manifest.json"
         if manifest_path_obj.exists():
-            if profile_str == CORE5_PROFILE_STR:
+            if profile_str == CORE5_PROFILE_STR or profile_str in MR_CAPSULE_PROFILE_SET:
                 load_valid_snapshot_manifest(
                     profile_str, snapshot_date_str=resolved_snapshot_date_str,
                     snapshot_root_str=str(snapshot_root_path_obj),
@@ -408,7 +476,7 @@ def export_profile_snapshot(
             end_date_str=resolved_end_date_str,
             overwrite_bool=False,
         )
-        if profile_str == CORE5_PROFILE_STR:
+        if profile_str == CORE5_PROFILE_STR or profile_str in MR_CAPSULE_PROFILE_SET:
             load_valid_snapshot_manifest(
                 profile_str, snapshot_date_str=resolved_snapshot_date_str,
                 snapshot_root_str=str(staging_root_path_obj),

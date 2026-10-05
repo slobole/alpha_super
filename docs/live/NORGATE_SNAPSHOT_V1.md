@@ -402,6 +402,42 @@ uv run python -m alpha.live.runner status `
 
 ## Current Supported Profiles
 
+The MR capsule additionally uses `norgate_eod_sp500_mr_capsule_pit` (DV2)
+and `norgate_eod_sp500_hpi_mr_capsule_pit` (HPI). These require schema v2,
+the historical S&P 500 PIT universe, and CAPITALSPECIAL stocks, BIL, SPMO
+and $VIX. DV2 stocks use ALLMARKETDAYS padding; HPI stocks use NONE.
+BIL/SPMO retain ALLMARKETDAYS padding in both profiles. $VIX is unpadded
+and must cover XNYS sessions from 1990-01-02 through the exact snapshot date,
+except the explicitly recorded 1991-03-01 gap in the qualified native history.
+That observation is not imputed: the frozen gate uses the mean of observed
+closes. Any additional missing session or a later backfill of that historical
+gap requires investigation and requalification. BIL/SPMO require native Dividend provenance; SPMO additionally requires
+native, finite, nonnegative Volume. Zero volume is a valid no-trade observation.
+ETF/benchmark history must be continuous from its first exported observation,
+with coverage recorded in the manifest; the full export window is checked in
+qualification. VIX alone has the fixed 1990-01-02 inception requirement. No stale
+gate fallback is allowed. Benchmark rows use TOTALRETURN: the DV2 `$SPX` label resolves
+to `$SPXTR`, matching its direct research loader.
+
+Non-VIX native requests use the frozen research boundary 1998-01-01. This is
+part of the data contract: native VLO ALLMARKETDAYS dividend output differs
+when an earlier request boundary is used. No dividend series is repaired.
+Only a PIT stock with an empty primary request may preserve native history
+requested from 1990; those fallback rows must all be strictly before 1998.
+Requested/effective dates, padding and the empty-primary result are recorded
+and validated per symbol/adjustment. The HPI capsule reader selects members
+within its requested dates, including former members in that window.
+
+The manifest also records native fields and numeric dtypes per symbol and
+adjustment. Readers restore those dtypes losslessly before indicator arithmetic;
+equal stored values alone do not preserve float32 threshold decisions. Real-data
+qualification requires matching observed decision-field dtypes as well as values.
+
+These profiles are isolated from the existing DV2/HPI profiles. Their local
+qualification tool writes only below `results/research` and runs Norgate loads
+sequentially. See [MR capsule wiring review](../plans/MR_CAPSULE_WIRING_REVIEW_20261005.md)
+for the qualification evidence, disabled templates, and activation prerequisites.
+
 ```text
 norgate_eod_sp500_pit
 norgate_eod_sp500_hpi_pit
@@ -419,8 +455,9 @@ strict HPI features and order intent.
 `intraday_1m_plus_daily_pit` is intentionally unsupported in Snapshot V1.
 
 `norgate_eod_core5` supplies the dedicated Adaptive Macro CORE5 data contract.
-Its addition qualifies local data transport; the strategy is not enabled in
-the LIVE strategy allowlist. See [CORE5 data qualification](CORE5_DATA_QUALIFICATION.md).
+Its data transport qualification is recorded in [CORE5 data qualification](CORE5_DATA_QUALIFICATION.md).
+The strategy now has a gated LIVE route; no deployment is enabled by this profile.
+See [CORE5 wiring](CORE5_WIRING_20261005.md) for account and execution prerequisites.
 
 ## Verification
 

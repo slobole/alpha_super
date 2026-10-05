@@ -43,6 +43,7 @@ from data.norgate_loader import (
 )
 from data.norgate_snapshot_store import (
     HPI_SP500_PROFILE_STR,
+    MR_CAPSULE_HPI_PROFILE_STR,
     get_active_data_profile_str,
     is_snapshot_mode_enabled_bool,
 )
@@ -168,14 +169,23 @@ def load_exact_hpi_inputs(
 
     if is_snapshot_mode_enabled_bool():
         active_profile_str = get_active_data_profile_str()
-        if active_profile_str != HPI_SP500_PROFILE_STR:
+        if active_profile_str not in (HPI_SP500_PROFILE_STR, MR_CAPSULE_HPI_PROFILE_STR):
             raise RuntimeError(
                 "Strict HPI snapshot mode requires data profile "
-                f"'{HPI_SP500_PROFILE_STR}', got {active_profile_str!r}."
+                f"'{HPI_SP500_PROFILE_STR}' or '{MR_CAPSULE_HPI_PROFILE_STR}', got {active_profile_str!r}."
             )
         symbol_list, universe_df = build_index_constituent_matrix(
             indexname=indexname_str
         )
+        if active_profile_str == MR_CAPSULE_HPI_PROFILE_STR:
+            # *** CRITICAL *** Match the direct loader's requested-window PIT
+            # set: {s: any membership(s, t) == 1 for start <= t <= end}.
+            # Keep former members in that window; never select only today's members.
+            universe_df = universe_df.loc[start_date_str:end_date_str]
+            symbol_list = universe_df.columns[universe_df.eq(1).any(axis=0)].tolist()
+            if not symbol_list:
+                raise RuntimeError(f"No PIT members found for {indexname_str}.")
+            universe_df = universe_df.loc[:, symbol_list]
         pricing_data_df = load_raw_prices(
             symbol_list,
             [benchmark_symbol_str],
@@ -624,6 +634,8 @@ class HPIStatefulLongStrategy(Strategy):
 
         for asset_obj in active_position_ser.index:
             asset_str = str(asset_obj)
+            if self._is_missing_price_liquidation_exempt(asset_str):
+                continue
             current_open_key = (asset_str, "Open")
             current_open_float = np.nan
             if current_open_key in prices.columns:

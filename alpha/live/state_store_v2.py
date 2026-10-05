@@ -50,6 +50,7 @@ class LiveStateStore(CoreLiveStateStore):
                     decision_book_type_str TEXT NOT NULL DEFAULT 'incremental_entry_exit_book',
                     entry_target_weight_json_str TEXT NOT NULL DEFAULT '{}',
                     full_target_weight_json_str TEXT NOT NULL DEFAULT '{}',
+                    target_share_json_str TEXT NOT NULL DEFAULT '{}',
                     target_weight_json_str TEXT NOT NULL,
                     exit_asset_json_str TEXT NOT NULL,
                     entry_priority_json_str TEXT NOT NULL,
@@ -356,6 +357,9 @@ class LiveStateStore(CoreLiveStateStore):
                     """
                 )
 
+            # Serialize the schema check and additions across startup workers.
+            # Otherwise two readers of an old DB can both add the same column.
+            connection_obj.execute("BEGIN IMMEDIATE")
             decision_plan_column_name_list = [
                 row_obj["name"]
                 for row_obj in connection_obj.execute("PRAGMA table_info(decision_plan)").fetchall()
@@ -372,6 +376,13 @@ class LiveStateStore(CoreLiveStateStore):
                     """
                     ALTER TABLE decision_plan
                     ADD COLUMN entry_target_weight_json_str TEXT NOT NULL DEFAULT '{}'
+                    """
+                )
+            if "target_share_json_str" not in decision_plan_column_name_list:
+                connection_obj.execute(
+                    """
+                    ALTER TABLE decision_plan
+                    ADD COLUMN target_share_json_str TEXT NOT NULL DEFAULT '{}'
                     """
                 )
             if "full_target_weight_json_str" not in decision_plan_column_name_list:
@@ -521,6 +532,11 @@ class LiveStateStore(CoreLiveStateStore):
                     """
                 )
 
+            from alpha.live.mr_capsule_recovery import ensure_capsule_recovery_schema
+            from alpha.live.mr_capsule_notifications import ensure_execution_alert_schema
+            ensure_capsule_recovery_schema(connection_obj)
+            ensure_execution_alert_schema(connection_obj)
+
     def upsert_release(self, release_obj: LiveRelease) -> None:
         with self._connect() as connection_obj:
             connection_obj.execute(
@@ -665,6 +681,40 @@ class LiveStateStore(CoreLiveStateStore):
             ).fetchone()
         return int(row_obj["active_count_int"]) > 0
 
+    def block_unsubmitted_core5_vplan(self, vplan_id_int: int, status_str: str = "blocked") -> bool:
+        """Do not let a late failing preflight overwrite another submitter's claim."""
+        from alpha.live.core5_adapter import CORE5_CONTRACT_STR
+
+        if status_str not in {"blocked", "expired"}:
+            raise ValueError("CORE5 pre-submit status must be blocked or expired.")
+        with self._connect() as connection_obj:
+            connection_obj.execute("BEGIN IMMEDIATE")
+            plan_row_obj = connection_obj.execute(
+                "SELECT v.status_str AS vplan_status_str, v.decision_plan_id_int, "
+                "d.status_str AS decision_status_str, d.snapshot_metadata_json_str "
+                "FROM vplan v JOIN decision_plan d ON d.decision_plan_id_int = v.decision_plan_id_int "
+                "WHERE v.vplan_id_int = ?", (int(vplan_id_int),),
+            ).fetchone()
+            if plan_row_obj is None or json.loads(plan_row_obj["snapshot_metadata_json_str"]).get("sizing_contract_str") != CORE5_CONTRACT_STR:
+                raise ValueError("CORE5 pre-submit block requires its persisted decision and VPlan.")
+            if plan_row_obj["vplan_status_str"] != "ready" or plan_row_obj["decision_status_str"] not in {"planned", "vplan_ready"}:
+                return False
+            for table_str in ("vplan_broker_order", "vplan_broker_order_event", "vplan_broker_ack", "vplan_fill"):
+                if connection_obj.execute(
+                    f"SELECT 1 FROM {table_str} WHERE vplan_id_int = ? LIMIT 1", (int(vplan_id_int),),
+                ).fetchone() is not None:
+                    return False
+            updated_timestamp_str = _serialize_timestamp_str(_utc_now_ts())
+            connection_obj.execute(
+                "UPDATE vplan SET status_str = ?, updated_timestamp_str = ? WHERE vplan_id_int = ? AND status_str = 'ready'",
+                (status_str, updated_timestamp_str, int(vplan_id_int)),
+            )
+            connection_obj.execute(
+                "UPDATE decision_plan SET status_str = ?, updated_timestamp_str = ? WHERE decision_plan_id_int = ?",
+                (status_str, updated_timestamp_str, plan_row_obj["decision_plan_id_int"]),
+            )
+            return True
+
     def complete_core5_cycle(self, decision_plan_id_int: int, vplan_id_int: int | None = None) -> None:
         """Atomically commit CORE5 strategy memory with the completed cycle.
 
@@ -739,6 +789,112 @@ class LiveStateStore(CoreLiveStateStore):
                     (completed_timestamp_str, int(vplan_id_int)),
                 )
 
+    def abandon_unsubmitted_mr_capsule_cycle(self, decision_plan_id_int: int, status_str: str) -> bool:
+        """Mark a capsule cycle safe to skip only while its submission claim is provably untouched."""
+        from alpha.live.mr_capsule_adapter import MR_CAPSULE_CONTRACT_STR
+
+        if status_str not in {"expired", "blocked"}:
+            raise ValueError("Unsubmitted capsule abandonment requires expired or blocked status.")
+        with self._connect() as connection_obj:
+            # The submission claim also updates this database. This lock makes ready->terminal
+            # exclusive with ready->submitting, including a process that has not received any ACK yet.
+            connection_obj.execute("BEGIN IMMEDIATE")
+            decision_row_obj = connection_obj.execute(
+                "SELECT * FROM decision_plan WHERE decision_plan_id_int = ?", (int(decision_plan_id_int),),
+            ).fetchone()
+            if decision_row_obj is None:
+                raise ValueError("Capsule abandonment requires a persisted decision.")
+            metadata_dict = json.loads(decision_row_obj["snapshot_metadata_json_str"])
+            if metadata_dict.get("sizing_contract_str") != MR_CAPSULE_CONTRACT_STR:
+                raise ValueError("Capsule abandonment cannot update another strategy.")
+            if metadata_dict.get("mr_capsule_unsubmitted_cycle_abandoned_bool") is True:
+                return decision_row_obj["status_str"] in {"expired", "blocked"}
+            if decision_row_obj["status_str"] not in {"planned", "vplan_ready"}:
+                return False
+            vplan_row_list = connection_obj.execute(
+                "SELECT * FROM vplan WHERE decision_plan_id_int = ?", (int(decision_plan_id_int),),
+            ).fetchall()
+            if any(
+                row_obj["status_str"] != "ready" or row_obj["submit_ack_status_str"] != "not_checked"
+                or row_obj["submit_ack_checked_timestamp_str"] is not None
+                or row_obj["ack_coverage_ratio_float"] is not None or row_obj["missing_ack_count_int"] != 0
+                for row_obj in vplan_row_list
+            ):
+                return False
+            for table_str in ("vplan_broker_order", "vplan_broker_order_event", "vplan_broker_ack", "vplan_fill"):
+                evidence_row_obj = connection_obj.execute(
+                    f"SELECT 1 FROM {table_str} WHERE decision_plan_id_int = ? OR vplan_id_int IN "
+                    "(SELECT vplan_id_int FROM vplan WHERE decision_plan_id_int = ?) LIMIT 1",
+                    (int(decision_plan_id_int), int(decision_plan_id_int)),
+                ).fetchone()
+                if evidence_row_obj is not None:
+                    return False
+            if connection_obj.execute(
+                "SELECT 1 FROM cash_ledger_entry WHERE vplan_id_int IN "
+                "(SELECT vplan_id_int FROM vplan WHERE decision_plan_id_int = ?) LIMIT 1", (int(decision_plan_id_int),),
+            ).fetchone() is not None:
+                return False
+            metadata_dict["mr_capsule_unsubmitted_cycle_abandoned_bool"] = True
+            terminal_timestamp_str = _serialize_timestamp_str(_utc_now_ts())
+            vplan_cursor_obj = connection_obj.execute(
+                "UPDATE vplan SET status_str = ?, updated_timestamp_str = ? "
+                "WHERE decision_plan_id_int = ? AND status_str = 'ready'",
+                (status_str, terminal_timestamp_str, int(decision_plan_id_int)),
+            )
+            decision_cursor_obj = connection_obj.execute(
+                "UPDATE decision_plan SET status_str = ?, snapshot_metadata_json_str = ?, updated_timestamp_str = ? "
+                "WHERE decision_plan_id_int = ? AND status_str IN ('planned', 'vplan_ready')",
+                (status_str, json.dumps(metadata_dict, sort_keys=True), terminal_timestamp_str, int(decision_plan_id_int)),
+            )
+            # *** CRITICAL *** Defence in depth behind BEGIN IMMEDIATE: never overwrite a VPlan that left 'ready'
+            # (claimed for submission) or a decision that left planned/vplan_ready; undo and report not abandoned.
+            if vplan_cursor_obj.rowcount != len(vplan_row_list) or decision_cursor_obj.rowcount != 1:
+                connection_obj.rollback()
+                return False
+            return True
+
+    def complete_mr_capsule_cycle(self, decision_plan_id_int: int, vplan_id_int: int, *, connection_obj=None) -> None:
+        """Complete both reconciled capsule plans atomically so restart cannot strand one status."""
+        from alpha.live.mr_capsule_adapter import MR_CAPSULE_CONTRACT_STR
+
+        with (self._connect() if connection_obj is None else nullcontext(connection_obj)) as connection_obj:
+            if not connection_obj.in_transaction:
+                connection_obj.execute("BEGIN IMMEDIATE")
+            decision_row_obj = connection_obj.execute(
+                "SELECT * FROM decision_plan WHERE decision_plan_id_int = ?", (int(decision_plan_id_int),),
+            ).fetchone()
+            vplan_row_obj = connection_obj.execute(
+                "SELECT * FROM vplan WHERE vplan_id_int = ? AND decision_plan_id_int = ?",
+                (int(vplan_id_int), int(decision_plan_id_int)),
+            ).fetchone()
+            if decision_row_obj is None or vplan_row_obj is None:
+                raise ValueError("Capsule completion requires a matching persisted decision and VPlan.")
+            metadata_dict = json.loads(decision_row_obj["snapshot_metadata_json_str"])
+            if metadata_dict.get("sizing_contract_str") != MR_CAPSULE_CONTRACT_STR:
+                raise ValueError("Capsule completion cannot update another strategy.")
+            if decision_row_obj["status_str"] == vplan_row_obj["status_str"] == "completed":
+                return
+            reconciliation_row_obj = connection_obj.execute(
+                "SELECT status_str FROM vplan_reconciliation_snapshot WHERE vplan_id_int = ? "
+                "AND decision_plan_id_int = ? AND stage_str = 'post_execution' "
+                "ORDER BY vplan_reconciliation_snapshot_id_int DESC LIMIT 1",
+                (int(vplan_id_int), int(decision_plan_id_int)),
+            ).fetchone()
+            if (
+                vplan_row_obj["status_str"] not in {"submitted", "submitting"}
+                or reconciliation_row_obj is None or reconciliation_row_obj["status_str"] != "passed"
+            ):
+                raise ValueError("Capsule cannot complete an unexecuted or unreconciled VPlan.")
+            completed_timestamp_str = _serialize_timestamp_str(_utc_now_ts())
+            connection_obj.execute(
+                "UPDATE vplan SET status_str = 'completed', updated_timestamp_str = ? WHERE vplan_id_int = ?",
+                (completed_timestamp_str, int(vplan_id_int)),
+            )
+            connection_obj.execute(
+                "UPDATE decision_plan SET status_str = 'completed', updated_timestamp_str = ? WHERE decision_plan_id_int = ?",
+                (completed_timestamp_str, int(decision_plan_id_int)),
+            )
+
     def insert_decision_plan(self, decision_plan_obj: DecisionPlan) -> DecisionPlan:
         created_timestamp_str = _serialize_timestamp_str(_utc_now_ts())
         with self._connect() as connection_obj:
@@ -757,6 +913,7 @@ class LiveStateStore(CoreLiveStateStore):
                     decision_book_type_str,
                     entry_target_weight_json_str,
                     full_target_weight_json_str,
+                    target_share_json_str,
                     target_weight_json_str,
                     exit_asset_json_str,
                     entry_priority_json_str,
@@ -768,7 +925,7 @@ class LiveStateStore(CoreLiveStateStore):
                     status_str,
                     created_timestamp_str,
                     updated_timestamp_str
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     decision_plan_obj.release_id_str,
@@ -783,6 +940,7 @@ class LiveStateStore(CoreLiveStateStore):
                     decision_plan_obj.decision_book_type_str,
                     json.dumps(decision_plan_obj.entry_target_weight_map_dict, sort_keys=True),
                     json.dumps(decision_plan_obj.full_target_weight_map_dict, sort_keys=True),
+                    json.dumps(decision_plan_obj.target_share_map_dict, sort_keys=True),
                     json.dumps(decision_plan_obj.target_weight_map, sort_keys=True),
                     json.dumps(sorted(decision_plan_obj.exit_asset_set)),
                     json.dumps(decision_plan_obj.entry_priority_list),
@@ -896,6 +1054,8 @@ class LiveStateStore(CoreLiveStateStore):
         return expirable_decision_plan_list
 
     def insert_vplan(self, vplan_obj: VPlan) -> VPlan:
+        from alpha.live.mr_capsule_adapter import MR_CAPSULE_CONTRACT_STR
+
         created_timestamp_str = _serialize_timestamp_str(_utc_now_ts())
         live_reference_source_map_dict = (
             {
@@ -917,6 +1077,24 @@ class LiveStateStore(CoreLiveStateStore):
                 for asset_str in vplan_obj.live_reference_price_map
             }
         with self._connect() as connection_obj:
+            decision_row_obj = connection_obj.execute(
+                "SELECT snapshot_metadata_json_str FROM decision_plan WHERE decision_plan_id_int = ?",
+                (int(vplan_obj.decision_plan_id_int),),
+            ).fetchone()
+            capsule_bool = decision_row_obj is not None and json.loads(
+                decision_row_obj["snapshot_metadata_json_str"]
+            ).get("sizing_contract_str") == MR_CAPSULE_CONTRACT_STR
+            if capsule_bool:
+                # Serialize creation with abandonment and another worker's creation.
+                connection_obj.execute("BEGIN IMMEDIATE")
+                decision_row_obj = connection_obj.execute(
+                    "SELECT status_str, snapshot_metadata_json_str FROM decision_plan WHERE decision_plan_id_int = ?",
+                    (int(vplan_obj.decision_plan_id_int),),
+                ).fetchone()
+                if decision_row_obj["status_str"] != "planned" or json.loads(
+                    decision_row_obj["snapshot_metadata_json_str"]
+                ).get("mr_capsule_unsubmitted_cycle_abandoned_bool") is True:
+                    raise ValueError("Capsule VPlan creation requires an active planned decision.")
             cursor_obj = connection_obj.execute(
                 """
                 INSERT INTO vplan (
@@ -1017,6 +1195,11 @@ class LiveStateStore(CoreLiveStateStore):
                         str(vplan_row_obj.live_reference_source_str or vplan_obj.live_price_source_str),
                     ),
                 )
+            if capsule_bool:
+                connection_obj.execute(
+                    "UPDATE decision_plan SET status_str = 'vplan_ready', updated_timestamp_str = ? WHERE decision_plan_id_int = ?",
+                    (created_timestamp_str, int(vplan_obj.decision_plan_id_int)),
+                )
         return VPlan(
             **{
                 **vplan_obj.__dict__,
@@ -1071,7 +1254,28 @@ class LiveStateStore(CoreLiveStateStore):
         return self._row_to_vplan(row_obj)
 
     def claim_vplan_for_submission(self, vplan_id_int: int) -> bool:
+        from alpha.live.mr_capsule_adapter import MR_CAPSULE_CONTRACT_STR
+
         with self._connect() as connection_obj:
+            decision_row_obj = connection_obj.execute(
+                "SELECT d.snapshot_metadata_json_str FROM decision_plan d JOIN vplan v "
+                "ON d.decision_plan_id_int = v.decision_plan_id_int WHERE v.vplan_id_int = ?",
+                (int(vplan_id_int),),
+            ).fetchone()
+            capsule_bool = decision_row_obj is not None and json.loads(
+                decision_row_obj["snapshot_metadata_json_str"]
+            ).get("sizing_contract_str") == MR_CAPSULE_CONTRACT_STR
+            if capsule_bool:
+                connection_obj.execute("BEGIN IMMEDIATE")
+                decision_row_obj = connection_obj.execute(
+                    "SELECT d.status_str, d.snapshot_metadata_json_str FROM decision_plan d JOIN vplan v "
+                    "ON d.decision_plan_id_int = v.decision_plan_id_int WHERE v.vplan_id_int = ?",
+                    (int(vplan_id_int),),
+                ).fetchone()
+                if decision_row_obj["status_str"] != "vplan_ready" or json.loads(
+                    decision_row_obj["snapshot_metadata_json_str"]
+                ).get("mr_capsule_unsubmitted_cycle_abandoned_bool") is True:
+                    return False
             cursor_obj = connection_obj.execute(
                 """
                 UPDATE vplan
@@ -1257,8 +1461,9 @@ class LiveStateStore(CoreLiveStateStore):
         vplan_id_int: int | None,
         stage_str: str,
         reconciliation_result_obj: ReconciliationResult,
+        *, connection_obj=None,
     ) -> None:
-        with self._connect() as connection_obj:
+        with (self._connect() if connection_obj is None else nullcontext(connection_obj)) as connection_obj:
             connection_obj.execute(
                 """
                 INSERT INTO vplan_reconciliation_snapshot (
@@ -1900,11 +2105,12 @@ class LiveStateStore(CoreLiveStateStore):
             ).fetchone()
         return float(row_obj["cash_delta_sum_float"])
 
-    def get_fill_row_dict_list_for_vplan(self, vplan_id_int: int, *, include_order_identity_bool: bool = False) -> list[dict]:
+    def get_fill_row_dict_list_for_vplan(self, vplan_id_int: int, *, include_order_identity_bool: bool = False, include_evidence_bool: bool = False) -> list[dict]:
         with self._connect() as connection_obj:
             row_list = connection_obj.execute(
                 """
                 SELECT
+                    account_route_str, raw_payload_json_str,
                     broker_order_id_str,
                     asset_str,
                     fill_amount_float,
@@ -1921,6 +2127,8 @@ class LiveStateStore(CoreLiveStateStore):
         return [
             {
                 **({"broker_order_id_str": str(row_obj["broker_order_id_str"])} if include_order_identity_bool else {}),
+                **({"account_route_str": row_obj["account_route_str"],
+                    "raw_payload_dict": json.loads(row_obj["raw_payload_json_str"])} if include_evidence_bool else {}),
                 "asset_str": row_obj["asset_str"],
                 "fill_amount_float": float(row_obj["fill_amount_float"]),
                 "fill_price_float": float(row_obj["fill_price_float"]),
@@ -1933,11 +2141,12 @@ class LiveStateStore(CoreLiveStateStore):
             for row_obj in row_list
         ]
 
-    def get_broker_order_row_dict_list_for_vplan(self, vplan_id_int: int) -> list[dict]:
+    def get_broker_order_row_dict_list_for_vplan(self, vplan_id_int: int, *, include_evidence_bool: bool = False) -> list[dict]:
         with self._connect() as connection_obj:
             row_list = connection_obj.execute(
                 """
                 SELECT
+                    account_route_str, raw_payload_json_str,
                     broker_order_id_str,
                     asset_str,
                     order_request_key_str,
@@ -1960,6 +2169,8 @@ class LiveStateStore(CoreLiveStateStore):
         return [
             {
                 "broker_order_id_str": str(row_obj["broker_order_id_str"]),
+                **({"account_route_str": row_obj["account_route_str"],
+                    "raw_payload_dict": json.loads(row_obj["raw_payload_json_str"])} if include_evidence_bool else {}),
                 "asset_str": str(row_obj["asset_str"]),
                 "order_request_key_str": row_obj["order_request_key_str"],
                 "broker_order_type_str": str(row_obj["broker_order_type_str"]),
@@ -2120,6 +2331,11 @@ class LiveStateStore(CoreLiveStateStore):
                 else {}
             ),
             target_weight_map=json.loads(row_obj["target_weight_json_str"]),
+            target_share_map_dict=(
+                json.loads(row_obj["target_share_json_str"])
+                if "target_share_json_str" in row_obj.keys()
+                else {}
+            ),
             exit_asset_set=set(json.loads(row_obj["exit_asset_json_str"])),
             entry_priority_list=list(json.loads(row_obj["entry_priority_json_str"])),
             cash_reserve_weight_float=float(row_obj["cash_reserve_weight_float"]),

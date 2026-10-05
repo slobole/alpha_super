@@ -49,12 +49,104 @@ def _build_live_reference_source_map_dict(
     }
 
 
+def validate_mr_capsule_execution_contract(
+    release_obj: LiveRelease,
+    decision_plan_obj: DecisionPlan,
+    broker_snapshot_obj: BrokerSnapshot,
+    live_price_snapshot_obj: LivePriceSnapshot | None = None,
+) -> float | None:
+    """Validate frozen Close-T sizing and holdings; cash postings may change."""
+    if not release_obj.strategy_import_str.startswith("strategies.mr_capsule."):
+        if decision_plan_obj.target_share_map_dict:
+            raise ValueError("Explicit target shares are supported only for MR capsule releases.")
+        return None
+    for field_str in ("release_id_str", "user_id_str", "pod_id_str", "account_route_str"):
+        if getattr(release_obj, field_str) != getattr(decision_plan_obj, field_str):
+            raise ValueError(f"MR capsule decision identity mismatch: {field_str}.")
+    if (
+        broker_snapshot_obj.account_route_str != release_obj.account_route_str
+        or (
+            live_price_snapshot_obj is not None
+            and live_price_snapshot_obj.account_route_str != release_obj.account_route_str
+        )
+    ):
+        raise ValueError("MR capsule broker and quote account routes must match the release.")
+    if (
+        decision_plan_obj.execution_policy_str != "next_open_moo"
+        or release_obj.execution_policy_str != "next_open_moo"
+        or decision_plan_obj.decision_book_type_str != "incremental_entry_exit_book"
+        or not decision_plan_obj.preserve_untouched_positions_bool
+        or decision_plan_obj.rebalance_omitted_assets_to_zero_bool
+    ):
+        raise ValueError("MR capsule requires an incremental next_open_moo decision.")
+    if float(release_obj.pod_budget_fraction_float) != 1.0:
+        raise ValueError("MR capsule requires a dedicated full-account pod budget of 1.0.")
+    metadata_dict = decision_plan_obj.snapshot_metadata_dict
+    if (
+        metadata_dict.get("sizing_contract_str") != "mr_capsule_close_targets_v1"
+        or metadata_dict.get("strategy_import_str") != release_obj.strategy_import_str
+    ):
+        raise ValueError("MR capsule decision must prove its Close-T sizing contract and strategy identity.")
+    parking_mode_str = str(metadata_dict.get("mr_capsule_parking_mode_str", ""))
+    allowed_parking_map_dict = {"cash": set(), "bil": {"BIL"}, "spmo": {"BIL", "SPMO"}}
+    if (
+        parking_mode_str not in allowed_parking_map_dict
+        or not release_obj.strategy_import_str.endswith(f"_{parking_mode_str}")
+    ):
+        raise ValueError("MR capsule parking mode must match the named strategy.")
+    allowed_parking_set = allowed_parking_map_dict[parking_mode_str]
+    if set(decision_plan_obj.target_share_map_dict) - allowed_parking_set:
+        raise ValueError("MR capsule explicit targets contain an asset outside the parking mode.")
+    if set(decision_plan_obj.entry_target_weight_map_dict) & {"BIL", "SPMO"}:
+        raise ValueError("MR capsule parking orders must use explicit share targets.")
+    touched_parking_set = set(decision_plan_obj.exit_asset_set) & {"BIL", "SPMO"}
+    if touched_parking_set - allowed_parking_set:
+        raise ValueError("MR capsule parking exits contain an asset outside the parking mode.")
+    try:
+        decision_nav_float = float(metadata_dict["decision_nav_float"])
+        decision_cash_float = float(metadata_dict["decision_cash_float"])
+    except (KeyError, TypeError, ValueError) as exception_obj:
+        raise ValueError("MR capsule requires numeric decision NAV and cash.") from exception_obj
+    if (
+        not math.isfinite(decision_nav_float)
+        or decision_nav_float <= 0.0
+        or not math.isfinite(decision_cash_float)
+        or not math.isfinite(float(broker_snapshot_obj.net_liq_float))
+        or float(broker_snapshot_obj.net_liq_float) <= 0.0
+    ):
+        raise ValueError("MR capsule requires finite cash and positive finite decision/broker NAV.")
+    # Cash postings do not invalidate frozen intent. Keep broker cash truthful
+    # without resizing Close-T entry dollars or ETF share targets.
+    if not math.isfinite(float(broker_snapshot_obj.cash_float)):
+        raise ValueError("MR capsule requires finite broker cash.")
+    position_map_list: list[dict[str, float]] = []
+    for position_dict in (decision_plan_obj.decision_base_position_map, broker_snapshot_obj.position_amount_map):
+        normalized_position_dict: dict[str, float] = {}
+        for asset_str, share_float in position_dict.items():
+            share_float = float(share_float)
+            if not math.isfinite(share_float) or share_float < 0.0 or not share_float.is_integer():
+                raise ValueError("MR capsule positions must be finite, nonnegative whole shares.")
+            if share_float > 0.0:
+                normalized_position_dict[str(asset_str)] = share_float
+        if (set(normalized_position_dict) & {"BIL", "SPMO"}) - allowed_parking_set:
+            raise ValueError("MR capsule holdings contain parking outside the named mode.")
+        position_map_list.append(normalized_position_dict)
+    if position_map_list[0] != position_map_list[1]:
+        raise ValueError("MR capsule broker positions changed after the decision; rebuild from trusted state.")
+    if broker_snapshot_obj.open_order_id_list:
+        raise ValueError("MR capsule account has outstanding broker orders.")
+    return decision_nav_float
+
+
 def _build_incremental_entry_exit_vplan(
     release_obj: LiveRelease,
     decision_plan_obj: DecisionPlan,
     broker_snapshot_obj: BrokerSnapshot,
     live_price_snapshot_obj: LivePriceSnapshot,
 ) -> VPlan:
+    capsule_nav_float = validate_mr_capsule_execution_contract(
+        release_obj, decision_plan_obj, broker_snapshot_obj, live_price_snapshot_obj
+    )
     touched_asset_list = get_touched_asset_list_for_decision_plan(decision_plan_obj)
     missing_asset_list = sorted(
         asset_str
@@ -68,6 +160,7 @@ def _build_incremental_entry_exit_vplan(
         )
 
     pod_budget_float = float(broker_snapshot_obj.net_liq_float) * float(release_obj.pod_budget_fraction_float)
+    entry_sizing_value_float = pod_budget_float if capsule_nav_float is None else capsule_nav_float
     target_share_map: dict[str, float] = {}
     order_delta_map: dict[str, float] = {}
     vplan_row_list: list[VPlanRow] = []
@@ -83,19 +176,26 @@ def _build_incremental_entry_exit_vplan(
                 live_price_snapshot_obj.price_source_str,
             )
         )
-        if live_reference_price_float <= 0.0:
+        if not math.isfinite(live_reference_price_float) or live_reference_price_float <= 0.0:
             raise ValueError(
-                f"Live reference price must be positive for asset '{asset_str}'."
+                f"Live reference price must be finite and positive for asset '{asset_str}'."
             )
 
         if asset_str in decision_plan_obj.exit_asset_set:
             target_share_float = 0.0
+        elif asset_str in decision_plan_obj.target_share_map_dict:
+            # *** CRITICAL *** The ETF whole-share target was frozen at Close_T.
+            # TargetShares_i = N_i,T; OrderDelta_i = N_i,T - BrokerShares_i,submit.
+            # A pre-submit quote values that target; it must never resize it.
+            target_share_float = float(decision_plan_obj.target_share_map_dict[asset_str])
         else:
             target_weight_float = float(decision_plan_obj.entry_target_weight_map_dict.get(asset_str, 0.0))
-            # TargetDollar_i = EntryWeight_i * PodBudget
+            # *** CRITICAL *** Capsule EntryDollar_i = EntryWeight_i * NAV_Close_T:
+            # preserve the stock order_value amount alongside fixed parking shares.
+            # Existing strategies retain EntryWeight_i * BrokerNAV_submit * BudgetFraction.
             # TargetShares_i = floor(TargetDollar_i / P_i^{live_ref})
             target_share_float = float(
-                math.floor((target_weight_float * pod_budget_float) / live_reference_price_float)
+                math.floor((target_weight_float * entry_sizing_value_float) / live_reference_price_float)
             )
 
         estimated_target_notional_float = target_share_float * live_reference_price_float
@@ -276,6 +376,11 @@ def build_vplan(
     broker_snapshot_obj: BrokerSnapshot,
     live_price_snapshot_obj: LivePriceSnapshot,
 ) -> VPlan:
+    if (
+        release_obj.strategy_import_str.startswith("strategies.mr_capsule.")
+        and decision_plan_obj.decision_book_type_str != "incremental_entry_exit_book"
+    ):
+        raise ValueError("MR capsule requires an incremental next_open_moo decision.")
     if decision_plan_obj.decision_book_type_str == "incremental_entry_exit_book":
         return _build_incremental_entry_exit_vplan(
             release_obj=release_obj,

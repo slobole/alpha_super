@@ -140,6 +140,27 @@ class BrokerAdapter(ABC):
     def get_account_snapshot(self, account_route_str: str) -> BrokerSnapshot:
         raise NotImplementedError
 
+    def get_capsule_account_snapshot(self, account_route_str: str) -> BrokerSnapshot:
+        return self.get_account_snapshot(account_route_str)
+
+    def get_core5_account_snapshot(self, account_route_str: str, *, include_portfolio_valuation_bool: bool = False) -> BrokerSnapshot:
+        raise NotImplementedError("This broker adapter does not provide strict CORE5 account evidence.")
+
+    def get_core5_funding_evidence(self, account_route_str: str,
+            broker_order_request_list: list[BrokerOrderRequest], current_position_dict: dict[str, float]) -> dict[str, object]:
+        raise NotImplementedError("This broker adapter does not provide CORE5 margin/shortability evidence.")
+
+    def get_capsule_order_state_snapshot(
+        self, account_route_str: str, since_timestamp_ts: datetime,
+        submission_key_str: str | None = None, allowed_broker_order_id_set: set[str] | None = None,
+    ) -> tuple[list[BrokerOrderRecord], list[BrokerOrderEvent], list[BrokerOrderFill]]:
+        return self.get_recent_order_state_snapshot(account_route_str, since_timestamp_ts,
+            submission_key_str=submission_key_str, allowed_broker_order_id_set=allowed_broker_order_id_set)
+
+    def get_capsule_funding_evidence(self, account_route_str: str,
+            broker_order_request_list: list[BrokerOrderRequest]) -> dict[str, object]:
+        raise NotImplementedError("This broker adapter does not support capsule margin verification.")
+
     def get_eod_account_snapshot(self, account_route_str: str) -> BrokerSnapshot:
         """Adapters without portfolio marks keep their existing account snapshot."""
         return self.get_account_snapshot(account_route_str)
@@ -227,6 +248,31 @@ class IBKRGatewayBrokerAdapter(BrokerAdapter):
 
     def get_account_snapshot(self, account_route_str: str) -> BrokerSnapshot:
         return self.socket_client_obj.get_account_snapshot(account_route_str)
+
+    def get_capsule_account_snapshot(self, account_route_str: str) -> BrokerSnapshot:
+        return self.socket_client_obj.get_capsule_account_snapshot(account_route_str)
+
+    def get_core5_account_snapshot(self, account_route_str: str, *, include_portfolio_valuation_bool: bool = False) -> BrokerSnapshot:
+        from alpha.live.core5_broker import get_core5_account_snapshot
+        return get_core5_account_snapshot(self.socket_client_obj, account_route_str,
+            include_portfolio_valuation_bool=include_portfolio_valuation_bool)
+
+    def get_core5_funding_evidence(self, account_route_str: str,
+            broker_order_request_list: list[BrokerOrderRequest], current_position_dict: dict[str, float]) -> dict[str, object]:
+        from alpha.live.core5_broker import get_core5_funding_evidence
+        return get_core5_funding_evidence(self.socket_client_obj, account_route_str,
+            broker_order_request_list, current_position_dict)
+
+    def get_capsule_order_state_snapshot(
+        self, account_route_str: str, since_timestamp_ts: datetime,
+        submission_key_str: str | None = None, allowed_broker_order_id_set: set[str] | None = None,
+    ) -> tuple[list[BrokerOrderRecord], list[BrokerOrderEvent], list[BrokerOrderFill]]:
+        return self.socket_client_obj.get_capsule_order_state_snapshot(account_route_str, since_timestamp_ts,
+            submission_key_str=submission_key_str, allowed_broker_order_id_set=allowed_broker_order_id_set)
+
+    def get_capsule_funding_evidence(self, account_route_str: str,
+            broker_order_request_list: list[BrokerOrderRequest]) -> dict[str, object]:
+        return self.socket_client_obj.get_capsule_funding_evidence(account_route_str, broker_order_request_list)
 
     def get_eod_account_snapshot(self, account_route_str: str) -> BrokerSnapshot:
         return self.socket_client_obj.get_account_snapshot(
@@ -426,10 +472,28 @@ class StubBrokerAdapter(BrokerAdapter):
     def is_session_ready(self, account_route_str: str) -> bool:
         return account_route_str in self._snapshot_map
 
+    def get_capsule_funding_evidence(self, account_route_str: str,
+            broker_order_request_list: list[BrokerOrderRequest]) -> dict[str, object]:
+        # Synthetic broker only: no real account margin or leverage claim.
+        self.get_account_snapshot(account_route_str)
+        return {"simulated_bool": True, "account_route_str": account_route_str,
+            "required_bool": any(request_obj.amount_float > 0 for request_obj in broker_order_request_list),
+            "total_buy_notional_float": sum(request_obj.amount_float * request_obj.sizing_reference_price_float
+                for request_obj in broker_order_request_list if request_obj.amount_float > 0),
+            "pending_sell_credit_float": 0.0, "basket_margin_guaranteed_bool": False}
+
     def get_account_snapshot(self, account_route_str: str) -> BrokerSnapshot:
         if account_route_str not in self._snapshot_map:
             raise RuntimeError(f"No stub account snapshot seeded for {account_route_str}.")
         return self._snapshot_map[account_route_str]
+
+    def get_core5_account_snapshot(self, account_route_str: str, *, include_portfolio_valuation_bool: bool = False) -> BrokerSnapshot:
+        return self.get_account_snapshot(account_route_str)
+
+    def get_core5_funding_evidence(self, account_route_str: str,
+            broker_order_request_list: list[BrokerOrderRequest], current_position_dict: dict[str, float]) -> dict[str, object]:
+        self.get_account_snapshot(account_route_str)
+        return {"simulated_bool": True, "source_str": "stub", "account_route_str": account_route_str}
 
     def get_live_price_snapshot(
         self,

@@ -1161,6 +1161,10 @@ class Strategy(ABC):
         open_trade_amount_ser.name = 'open_trade_amount_ser'
         return open_trade_amount_ser
 
+    def _is_missing_price_liquidation_exempt(self, asset_str: str) -> bool:
+        """Subclasses may retain identified non-index holdings through a missing open."""
+        return False
+
     def _liquidate_missing_price_positions(
         self,
         prices: pd.DataFrame,
@@ -1192,6 +1196,8 @@ class Strategy(ABC):
 
         for asset_obj in active_position_ser.index:
             asset_str = str(asset_obj)
+            if self._is_missing_price_liquidation_exempt(asset_str):
+                continue
             current_open_key = (asset_str, 'Open')
             current_close_key = (asset_str, 'Close')
 
@@ -1319,7 +1325,7 @@ class Strategy(ABC):
 
             # check if the asset has valid market data; if not, close the position
             if pd.isna(current_open):
-                if not np.isclose(float(position), 0.0):
+                if not np.isclose(float(position), 0.0) and not self._is_missing_price_liquidation_exempt(str(order.asset)):
                     raise RuntimeError(
                         f"Asset {order.asset} still has an open position after missing-price "
                         "liquidation. Engine state is inconsistent."

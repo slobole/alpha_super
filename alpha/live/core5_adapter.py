@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -21,7 +21,7 @@ CORE5_CONTRACT_STR = "core5_close_target_shares_v1"
 CORE5_ASSET_TUPLE = ("SPY", "IEF", "GLD", "DBC", "UUP", "BIL")
 
 
-def validate_core5_release(release_obj: LiveRelease) -> None:
+def validate_core5_release(release_obj: LiveRelease, *, require_live_qualification_bool: bool = True) -> None:
     required_field_dict = {
         "data_profile_str": snapshot_module.CORE5_PROFILE_STR,
         "session_calendar_id_str": "XNYS",
@@ -32,10 +32,36 @@ def validate_core5_release(release_obj: LiveRelease) -> None:
     for field_str, expected_value_obj in required_field_dict.items():
         if getattr(release_obj, field_str) != expected_value_obj:
             raise ValueError(f"CORE5 requires {field_str}={expected_value_obj!r}.")
-    if set(release_obj.params_dict) - {"capital_base_float"}:
+    if set(release_obj.params_dict) - {"capital_base_float", "core5_live_qualification_dict"}:
         raise ValueError("CORE5 uses the approved default strategy parameters; overrides require separate parity qualification.")
-    if release_obj.mode_str == "live":
-        raise ValueError("CORE5 physical LIVE activation requires forward-execution and account borrow/margin qualification; local incubation and paper probes are supported.")
+    if require_live_qualification_bool and release_obj.mode_str == "live" and release_obj.enabled_bool:
+        # Operator evidence is a deployment prerequisite, not current borrow or
+        # funding proof. runner also requires fresh core5_broker account-wide,
+        # USD cash, margin previews and incremental shortability before submit.
+        qualification_dict = release_obj.params_dict.get("core5_live_qualification_dict")
+        if not isinstance(qualification_dict, dict):
+            raise ValueError("CORE5 LIVE requires an account-bound qualification record.")
+        for field_str in ("release_id_str", "account_route_str"):
+            if qualification_dict.get(field_str) != getattr(release_obj, field_str):
+                raise ValueError(f"CORE5 LIVE qualification {field_str} does not match this release.")
+        for field_str in (
+            "margin_account_confirmed_bool", "dbc_borrow_and_recall_policy_confirmed_bool",
+            "forward_execution_qualified_bool", "operator_approved_bool",
+        ):
+            if qualification_dict.get(field_str) is not True:
+                raise ValueError(f"CORE5 LIVE qualification requires {field_str}=true.")
+        if not isinstance(qualification_dict.get("evidence_reference_str"), str) or not qualification_dict["evidence_reference_str"].strip():
+            raise ValueError("CORE5 LIVE qualification requires an evidence reference.")
+        try:
+            approved_timestamp_ts = datetime.fromisoformat(qualification_dict["approved_at_str"])
+            expiry_timestamp_ts = datetime.fromisoformat(qualification_dict["expires_at_str"])
+        except (KeyError, TypeError, ValueError) as exception_obj:
+            raise ValueError("CORE5 LIVE qualification requires valid approval/expiry timestamps.") from exception_obj
+        if (
+            approved_timestamp_ts.tzinfo is None or expiry_timestamp_ts.tzinfo is None
+            or not approved_timestamp_ts <= datetime.now(UTC) < expiry_timestamp_ts
+        ):
+            raise ValueError("CORE5 LIVE qualification is future-dated, expired or lacks a timezone.")
 
 
 def is_core5_decision_bool(decision_plan_obj: DecisionPlan | None) -> bool:
@@ -91,6 +117,8 @@ def build_core5_decision_from_prices(
     from strategies.taa_beyond_6040 import strategy_taa_adaptive_macro_core5 as core5_module
 
     validate_core5_release(release_obj)
+    if release_obj.mode_str == "live" and not release_obj.enabled_bool:
+        raise ValueError("CORE5 disabled LIVE templates cannot build operational decisions.")
     signal_date_ts = scheduler_utils.get_latest_completed_session_label_ts(as_of_ts, "XNYS")
     if signal_date_ts is None:
         raise ValueError("CORE5 has no completed signal session.")

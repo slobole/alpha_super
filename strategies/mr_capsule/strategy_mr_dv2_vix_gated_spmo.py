@@ -1,4 +1,4 @@
-"""DV2-G (MR capsule) with SPMO parking while the VIX gate is closed, BIL otherwise (PM_READY, no live route).
+"""DV2-G (MR capsule) with SPMO parking while the VIX gate is closed, BIL otherwise.
 
 DV2 wired rules (S&P 500, DV2 < 10, Close > SMA200, 126-day return > 5%, NATR rank, 10 slots, exit Close > prior
 High); new entries only while the shared VIX stress gate is open; exits never gated.
@@ -14,7 +14,11 @@ Variant caveat: from 2018 (SPMO tradable) SPMO parking adds about 0.5 pp/yr of C
 
 from __future__ import annotations
 
-from strategies.mr_capsule.dv2_vix_gated import run_dv2_capsule_pod
+from strategies.mr_capsule.dv2_vix_gated import (
+    build_dv2_capsule_capacity_analysis_inputs,
+    build_dv2_capsule_execution_timing_analysis_inputs,
+    run_dv2_capsule_pod,
+)
 
 STRATEGY_NAME_STR = "strategy_mr_dv2_vix_gated_spmo"
 
@@ -39,6 +43,31 @@ def run_variant(
         capital_base_float=capital_base_float,
         end_date_str=end_date_str,
         slippage_float=slippage_float,
+    )
+
+
+def build_capacity_analysis_inputs(
+    show_display_bool: bool = False,
+    backtest_start_date_str: str = "2004-01-01",
+    capital_base_float: float = 100_000.0,
+    end_date_str: str | None = None,
+) -> dict[str, object]:
+    return build_dv2_capsule_capacity_analysis_inputs(
+        strategy_name_str=STRATEGY_NAME_STR,
+        parking_enabled_bool=True,
+        spmo_parking_enabled_bool=True,
+        show_display_bool=show_display_bool,
+        backtest_start_date_str=backtest_start_date_str,
+        capital_base_float=capital_base_float,
+        end_date_str=end_date_str,
+    )
+
+
+def build_execution_timing_analysis_inputs() -> dict[str, object]:
+    return build_dv2_capsule_execution_timing_analysis_inputs(
+        strategy_name_str=STRATEGY_NAME_STR,
+        parking_enabled_bool=True,
+        spmo_parking_enabled_bool=True,
     )
 
 

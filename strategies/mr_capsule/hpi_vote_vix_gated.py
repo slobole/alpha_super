@@ -1,4 +1,4 @@
-"""HPI-G pod of the MR capsule: HPI 2/3/5 vote behind the shared VIX stress gate, idle cash parked (PM_READY, no live route).
+"""HPI-G pod of the MR capsule: HPI 2/3/5 vote behind the shared VIX stress gate, idle cash parked.
 
 Shared code of the Bench entry points strategy_mr_hpi_vote_vix_gated_spmo.py (the capsule spec: SPMO while the gate
 is closed, BIL otherwise) and strategy_mr_hpi_vote_vix_gated_bil.py (idle cash all in BIL).
@@ -149,6 +149,49 @@ def append_parking_prices(pricing_data_df: pd.DataFrame, start_date_str: str, en
     return combined_df
 
 
+def load_hpi_capsule_pricing_data(end_date_str: str | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """HPI's exact S&P 500 inputs from 1998 plus SPMO / BIL, with every symbol's adjustment declared for the engine."""
+    _, universe_df, pricing_data_df = load_exact_hpi_inputs(
+        indexname_str="S&P 500", benchmark_symbol_str=BENCHMARK_SYMBOL_STR, start_date_str="1998-01-01", end_date_str=end_date_str
+    )
+    pricing_data_df = append_parking_prices(pricing_data_df, "1998-01-01", end_date_str)
+    pricing_symbol_list = pricing_data_df.columns.get_level_values(0).unique().astype(str)
+    # *** CRITICAL*** the engine's dividend guard needs every traded symbol declared CAPITALSPECIAL (concat drops attrs).
+    pricing_data_df.attrs["norgate_adjustment_by_symbol_dict"] = {
+        symbol_str: (TOTALRETURN_ADJUSTMENT_STR if symbol_str == BENCHMARK_SYMBOL_STR else CAPITALSPECIAL_ADJUSTMENT_STR)
+        for symbol_str in pricing_symbol_list
+    }
+    return pricing_data_df, universe_df
+
+
+def build_hpi_capsule_strategy(
+    *,
+    strategy_name_str: str,
+    parking_enabled_bool: bool,
+    spmo_parking_enabled_bool: bool,
+    universe_df: pd.DataFrame,
+    vix_close_ser: pd.Series,
+    capital_base_float: float = 100_000.0,
+    slippage_float: float = 0.00025,
+    backtest_start_date_str: str = "2004-01-01",
+) -> HPIVoteVixGatedStrategy:
+    """One configured HPI-G object: the backtest, the analysis hooks and the live adapter all build it here."""
+    strategy_obj = HPIVoteVixGatedStrategy(
+        name=strategy_name_str,
+        benchmarks=[BENCHMARK_SYMBOL_STR],
+        ranking_field_str=TURNOVER_FIELD_STR,
+        capital_base=capital_base_float,
+        slippage=slippage_float,
+        entry_mode_str=ENTRY_HORIZON_VOTE_STR,
+        backtest_start_date_str=backtest_start_date_str,
+    )
+    strategy_obj.universe_df = universe_df
+    strategy_obj.vix_close_ser = vix_close_ser
+    strategy_obj.parking_enabled_bool = parking_enabled_bool
+    strategy_obj.spmo_parking_enabled_bool = spmo_parking_enabled_bool
+    return strategy_obj
+
+
 def run_hpi_capsule_pod(
     *,
     strategy_name_str: str,
@@ -163,29 +206,17 @@ def run_hpi_capsule_pod(
     slippage_float: float = 0.00025,
 ) -> HPIVoteVixGatedStrategy:
     """Run HPI-G with the given parking (the Bench entry points fix it; parking off = idle cash at 0%)."""
-    _, universe_df, pricing_data_df = load_exact_hpi_inputs(
-        indexname_str="S&P 500", benchmark_symbol_str=BENCHMARK_SYMBOL_STR, start_date_str="1998-01-01", end_date_str=end_date_str
-    )
-    pricing_data_df = append_parking_prices(pricing_data_df, "1998-01-01", end_date_str)
-    pricing_symbol_list = pricing_data_df.columns.get_level_values(0).unique().astype(str)
-    # *** CRITICAL*** the engine's dividend guard needs every traded symbol declared CAPITALSPECIAL (concat drops attrs).
-    pricing_data_df.attrs["norgate_adjustment_by_symbol_dict"] = {
-        symbol_str: (TOTALRETURN_ADJUSTMENT_STR if symbol_str == BENCHMARK_SYMBOL_STR else CAPITALSPECIAL_ADJUSTMENT_STR)
-        for symbol_str in pricing_symbol_list
-    }
-    strategy_obj = HPIVoteVixGatedStrategy(
-        name=strategy_name_str,
-        benchmarks=[BENCHMARK_SYMBOL_STR],
-        ranking_field_str=TURNOVER_FIELD_STR,
-        capital_base=capital_base_float,
-        slippage=slippage_float,
-        entry_mode_str=ENTRY_HORIZON_VOTE_STR,
+    pricing_data_df, universe_df = load_hpi_capsule_pricing_data(end_date_str)
+    strategy_obj = build_hpi_capsule_strategy(
+        strategy_name_str=strategy_name_str,
+        parking_enabled_bool=parking_enabled_bool,
+        spmo_parking_enabled_bool=spmo_parking_enabled_bool,
+        universe_df=universe_df,
+        vix_close_ser=load_vix_close_ser(end_date_str),
+        capital_base_float=capital_base_float,
+        slippage_float=slippage_float,
         backtest_start_date_str=backtest_start_date_str,
     )
-    strategy_obj.universe_df = universe_df
-    strategy_obj.vix_close_ser = load_vix_close_ser(end_date_str)
-    strategy_obj.parking_enabled_bool = parking_enabled_bool
-    strategy_obj.spmo_parking_enabled_bool = spmo_parking_enabled_bool
     # *** CRITICAL*** pre-start history is kept for the 1,260-observation HPI warm-up; trading starts on the
     # requested execution calendar (same convention as run_hpi_variant).
     calendar_idx = pricing_data_df.index[pricing_data_df.index >= pd.Timestamp(backtest_start_date_str)]
@@ -197,4 +228,74 @@ def run_hpi_capsule_pod(
     if save_results_bool:
         save_results(strategy_obj, output_dir=output_dir_str)
     return strategy_obj
+
+
+def build_hpi_capsule_capacity_analysis_inputs(
+    *,
+    strategy_name_str: str,
+    parking_enabled_bool: bool,
+    spmo_parking_enabled_bool: bool,
+    show_display_bool: bool = False,
+    backtest_start_date_str: str = "2004-01-01",
+    capital_base_float: float = 100_000.0,
+    end_date_str: str | None = None,
+) -> dict[str, object]:
+    """One completed HPI-G run for CapacityAnalysis (the order ledger includes the BIL / SPMO parking orders)."""
+    pricing_data_df, universe_df = load_hpi_capsule_pricing_data(end_date_str)
+    strategy_obj = build_hpi_capsule_strategy(
+        strategy_name_str=strategy_name_str,
+        parking_enabled_bool=parking_enabled_bool,
+        spmo_parking_enabled_bool=spmo_parking_enabled_bool,
+        universe_df=universe_df,
+        vix_close_ser=load_vix_close_ser(end_date_str),
+        capital_base_float=capital_base_float,
+        backtest_start_date_str=backtest_start_date_str,
+    )
+    # *** CRITICAL*** CapacityAnalysis must assess the same completed order ledger as the Bench run:
+    # the 1,260-observation warm-up stays in the frame, execution runs on the requested calendar only.
+    calendar_idx = pricing_data_df.index[pricing_data_df.index >= pd.Timestamp(backtest_start_date_str)]
+    run_daily(strategy_obj, pricing_data_df, calendar_idx, show_progress=show_display_bool, show_signal_progress_bool=show_display_bool)
+    strategy_obj.universe_df = None
+    strategy_obj._performance_benchmark_symbol_str = BENCHMARK_SYMBOL_STR
+    strategy_obj._performance_benchmark_adjustment_str = TOTALRETURN_ADJUSTMENT_STR
+    return {
+        "strategy_obj": strategy_obj,
+        "pricing_data_df": pricing_data_df,
+        "execution_policy_str": "MOO",
+        "impact_profile_str": "MOO_LARGE_MIXED",
+    }
+
+
+def build_hpi_capsule_execution_timing_analysis_inputs(
+    *,
+    strategy_name_str: str,
+    parking_enabled_bool: bool,
+    spmo_parking_enabled_bool: bool,
+) -> dict[str, object]:
+    """Inputs for ExecutionTimingAnalysis; a timing variant moves the stock and the parking fills alike."""
+    pricing_data_df, universe_df = load_hpi_capsule_pricing_data(None)
+    vix_close_ser = load_vix_close_ser(None)
+    # *** CRITICAL*** the same post-warm-up execution calendar as the Bench run (2004 onward).
+    calendar_idx = pricing_data_df.index[pricing_data_df.index >= pd.Timestamp("2004-01-01")]
+
+    def strategy_factory_fn() -> HPIVoteVixGatedStrategy:
+        return build_hpi_capsule_strategy(
+            strategy_name_str=strategy_name_str,
+            parking_enabled_bool=parking_enabled_bool,
+            spmo_parking_enabled_bool=spmo_parking_enabled_bool,
+            universe_df=universe_df,
+            vix_close_ser=vix_close_ser,
+        )
+
+    return {
+        "strategy_factory_fn": strategy_factory_fn,
+        "pricing_data_df": pricing_data_df,
+        "calendar_idx": pd.DatetimeIndex(calendar_idx),
+        "order_generation_mode_str": "signal_bar",
+        "risk_model_str": "daily_ohlc_signal",
+        "entry_timing_str_tuple": ("same_close_moc", "next_open", "next_close"),
+        "exit_timing_str_tuple": ("same_close_moc", "next_open", "next_close"),
+        "default_entry_timing_str": "next_open",
+        "default_exit_timing_str": "next_open",
+    }
 

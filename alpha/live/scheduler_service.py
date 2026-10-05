@@ -174,6 +174,7 @@ def get_scheduler_decision(
     manual_review_pod_id_list: list[str] = []
     parked_manual_review_pod_id_list: list[str] = []
     idle_probe_pod_id_list: list[str] = []
+    capsule_eod_review_pod_id_list: list[str] = []
 
     for release_obj in enabled_release_list:
         latest_decision_plan_obj = state_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str)
@@ -202,6 +203,58 @@ def get_scheduler_decision(
             if not same_session_eod_bool or already_completed_bool:
                 # CORE5 freezes Close_T account equity. Its EOD prerequisite
                 # must run before a build, and a completed day must stay idle.
+                build_gate_dict = {**build_gate_dict, "due_bool": False}
+        if release_obj.strategy_import_str.startswith("strategies.mr_capsule."):
+            # *** CRITICAL *** New capsule intent needs pricing and broker EOD
+            # from the same completed T. Do not pair today's early data with
+            # yesterday's EOD, or rebuild a completed/abandoned signal day.
+            capsule_signal_ts = scheduler_utils.get_latest_completed_session_label_ts(as_of_ts, "XNYS")
+            capsule_state_obj = state_store_obj.get_pod_state(release_obj.pod_id_str)
+            capsule_market_ts = scheduler_utils.to_market_timestamp_ts(as_of_ts, "XNYS")
+            capsule_state_ts = (
+                scheduler_utils.to_market_timestamp_ts(capsule_state_obj.updated_timestamp_ts, "XNYS")
+                if capsule_state_obj is not None else None
+            )
+            capsule_eod_ready_bool = (
+                capsule_signal_ts is not None and capsule_state_obj is not None
+                and capsule_state_obj.snapshot_stage_str == "eod"
+                and capsule_state_obj.snapshot_source_str == runner._snapshot_source_str_for_mode(release_obj.mode_str)
+                and capsule_state_obj.account_route_str == release_obj.account_route_str
+                and capsule_state_obj.user_id_str == release_obj.user_id_str
+                and capsule_state_ts.date() == capsule_signal_ts.date()
+                and scheduler_utils.get_session_close_timestamp_ts(capsule_signal_ts, "XNYS") <= capsule_state_ts <= capsule_market_ts
+            )
+            capsule_prior_ready_bool = latest_decision_plan_obj is None or (
+                capsule_signal_ts is not None
+                and (
+                    latest_decision_plan_obj.status_str == "completed"
+                    or (latest_decision_plan_obj.status_str in {"expired", "blocked"}
+                        and latest_decision_plan_obj.snapshot_metadata_dict.get("mr_capsule_unsubmitted_cycle_abandoned_bool") is True)
+                )
+                and scheduler_utils.session_label_from_timestamp_ts(latest_decision_plan_obj.signal_timestamp_ts, "XNYS") < capsule_signal_ts
+            )
+            if (
+                latest_decision_plan_obj is not None
+                and latest_decision_plan_obj.status_str in {"expired", "blocked"}
+                and latest_decision_plan_obj.snapshot_metadata_dict.get("mr_capsule_unsubmitted_cycle_abandoned_bool") is not True
+            ):
+                parked_manual_review_pod_id_list.append(release_obj.pod_id_str)
+            if (
+                capsule_prior_ready_bool and not capsule_eod_ready_bool and capsule_signal_ts is not None
+                and runner._pod_has_stage_snapshot_for_market_date_bool(
+                    state_store_obj=state_store_obj, release_obj=release_obj,
+                    snapshot_stage_str="eod", market_date_str=capsule_signal_ts.date().isoformat(),
+                )
+            ):
+                # Date-only deduplication will not replace a saved EOD. Expose
+                # the invalid prerequisite instead of reporting ordinary idle.
+                capsule_eod_review_pod_id_list.append(release_obj.pod_id_str)
+            if (
+                not capsule_eod_ready_bool or not capsule_prior_ready_bool
+                or build_gate_dict.get("latest_heartbeat_session_date_str") != capsule_signal_ts.date().isoformat()
+            ):
+                # Suppress only NEW decisions. Existing VPlans keep their usual
+                # expiry/submit/reconcile route; all shared priorities stay put.
                 build_gate_dict = {**build_gate_dict, "due_bool": False}
         eod_due_timestamp_ts = runner._eod_snapshot_due_timestamp_ts(
             release_obj=release_obj,
@@ -269,6 +322,11 @@ def get_scheduler_decision(
 
         if (
             latest_decision_plan_obj.status_str in ("planned", "vplan_ready")
+            and not (
+                release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR
+                and current_vplan_obj is not None
+                and current_vplan_obj.status_str in ("submitted", "submitting")
+            )
             and scheduler_utils.is_execution_window_expired_bool(
                 latest_decision_plan_obj.execution_policy_str,
                 latest_decision_plan_obj.target_execution_timestamp_ts,
@@ -448,6 +506,18 @@ def get_scheduler_decision(
             reason_code_str="manual_review_required",
             next_due_timestamp_ts=as_of_ts + timedelta(seconds=idle_max_sleep_seconds_int),
             related_pod_id_list=sorted(set(manual_review_pod_id_list)),
+        )
+
+    if capsule_eod_review_pod_id_list:
+        return SchedulerDecision(
+            as_of_timestamp_ts=as_of_ts,
+            env_mode_str=env_mode_str,
+            due_now_bool=False,
+            active_poll_bool=False,
+            next_phase_str="manual_review_pending",
+            reason_code_str="mr_capsule_eod_snapshot_untrusted",
+            next_due_timestamp_ts=as_of_ts + timedelta(seconds=idle_max_sleep_seconds_int),
+            related_pod_id_list=sorted(set(capsule_eod_review_pod_id_list)),
         )
 
     return SchedulerDecision(

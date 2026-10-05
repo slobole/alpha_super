@@ -111,7 +111,11 @@ def test_supported_deployment_strategies_expose_auto_reference_contract():
 
         support_dict = reference_compare.inspect_auto_reference_support_dict(release_obj)
 
-        assert support_dict["supported_bool"] is True
+        if strategy_import_str == "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5":
+            assert support_dict["supported_bool"] is False
+            assert support_dict["reason_str"] == "core5_accounting_bridge_required"
+        else:
+            assert support_dict["supported_bool"] is True
         assert support_dict["missing_parameter_list"] == []
 
 

@@ -1,5 +1,9 @@
 # MR capsule — review handoff (for Codex)
 
+Implementation follow-up: the owner subsequently authorized local WIRED code
+and tests after this review. See [the 2026-10-05 review and wiring record](MR_CAPSULE_WIRING_REVIEW_20261005.md).
+The original scope and prerequisites below are preserved as historical context.
+
 Date: 2026-10-04, updated 2026-10-05. Base: `main` at the commit that carries this revision. Author: Claude, with the owner.
 
 Capsule commits:

@@ -160,6 +160,9 @@ class IncubationBrokerAdapter(BrokerAdapter):
             open_order_id_list=[],
         )
 
+    def get_core5_account_snapshot(self, account_route_str: str, *, include_portfolio_valuation_bool: bool = False) -> BrokerSnapshot:
+        return self.get_account_snapshot(account_route_str)
+
     def get_live_price_snapshot(
         self,
         account_route_str: str,

@@ -16,7 +16,7 @@ be written down.
     PM_READY  the engine contract holds — a common run_variant, honoured
               capital, a truthfully declared benchmark — so a portfolio book
               may allocate to it.
-    WIRED     connected to a live account.
+    WIRED     connected to the live execution path; deployment is separate.
 
 *** CRITICAL*** A tier is a claim about plumbing, not about edge. PM_READY says
 the harness will not silently misreport the strategy; it says nothing about
@@ -99,9 +99,10 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     "strategies.taa_beyond_6040.strategy_taa_trinity_vol_control_8_bil": MaturityTier.PM_READY,
     # Five fixed macro sleeves independently gated by a drawdown-adaptive
     # moving average, with inactive sleeves in BIL and a capped DBC short.
-    # PM-only: a fixed 1% annual DBC borrow baseline and restricted proceeds are
-    # modeled; account-specific borrow availability/rates and live routing remain unwired.
-    "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5": MaturityTier.PM_READY,
+    # Daily Close_T fixed shares, next-open MOO, dedicated USD margin account.
+    # Activation requires account-bound qualification plus fresh funding/borrow
+    # checks; the example remains disabled. Research borrow remains fixed at 1%.
+    "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5": MaturityTier.WIRED,
     # Monthly four-regime Inflation Compass using SPY SMA200, FRED T5YIE,
     # sector-ratio confirmation, and causal next-open ETF rebalancing. PM-only:
     # current-vintage FRED data is not PAPER/LIVE release evidence. Re-checked
@@ -131,16 +132,16 @@ STRATEGY_TIER_DICT: dict[str, MaturityTier] = {
     "strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled_sector_cap:SectorCapVxnScaledAtrNormalizedNdxStrategy": MaturityTier.PM_READY,
     "strategies.momentum.strategy_mo_natr20_ndx_vxn_scaled_sector_cap:SectorCapNatr20VxnScaledNdxStrategy": MaturityTier.PM_READY,
     # MR capsule pods (docs/research/MR_CAPSULE_20261003.md, build record 2026-10-04): DV2 and the HPI 2/3/5
-    # vote behind one shared VIX stress gate, idle cash parked in SPMO + BIL (_spmo, the owner's 2026-10-04
-    # spec) or BIL only (_bil, Claude's recommendation); books portfolios/mr_capsule_{spmo,bil}.yaml (50/50,
-    # annual reset). Owner request 2026-10-04. Capital, total-return benchmark and determinism checks passed
-    # 2026-10-04 (results/research/pm_readiness/). PM-only: the live DV2/HPI pods are unchanged and these have
-    # no live route (the live order contract cannot yet express the parking orders; docs/plans/
-    # MR_CAPSULE_REVIEW_HANDOFF.md, section 9).
-    "strategies.mr_capsule.strategy_mr_dv2_vix_gated_spmo": MaturityTier.PM_READY,
-    "strategies.mr_capsule.strategy_mr_dv2_vix_gated_bil": MaturityTier.PM_READY,
-    "strategies.mr_capsule.strategy_mr_hpi_vote_vix_gated_spmo": MaturityTier.PM_READY,
-    "strategies.mr_capsule.strategy_mr_hpi_vote_vix_gated_bil": MaturityTier.PM_READY,
+    # vote behind one shared VIX gate. BIL is primary; SPMO is the alternative.
+    # Separate cash identities provide the gate-only stage. WIRED routes require
+    # exact-session account/data state and a dedicated full-account budget.
+    # Templates remain disabled. See docs/plans/MR_CAPSULE_WIRING_REVIEW_20261005.md.
+    "strategies.mr_capsule.strategy_mr_dv2_vix_gated_spmo": MaturityTier.WIRED,
+    "strategies.mr_capsule.strategy_mr_dv2_vix_gated_bil": MaturityTier.WIRED,
+    "strategies.mr_capsule.strategy_mr_dv2_vix_gated_cash": MaturityTier.WIRED,
+    "strategies.mr_capsule.strategy_mr_hpi_vote_vix_gated_spmo": MaturityTier.WIRED,
+    "strategies.mr_capsule.strategy_mr_hpi_vote_vix_gated_bil": MaturityTier.WIRED,
+    "strategies.mr_capsule.strategy_mr_hpi_vote_vix_gated_cash": MaturityTier.WIRED,
     # MOSAIC was demoted to RESEARCH on 2026-09-28 by owner decision: its
     # 2026-07-31 validation was invalidated by the split-price fix and it left
     # the recommended books (readiness audit, section 10). Committed YAMLs that

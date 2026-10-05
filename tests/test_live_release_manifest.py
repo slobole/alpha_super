@@ -38,6 +38,12 @@ RELEASE_TEMPLATE_PATH_TUPLE: tuple[Path, ...] = (
         "docs/live/release_templates/"
         "pod_ndx_atr_normalized_vxn_scaled_monthly_open.yaml.example"
     ),
+    Path("docs/live/release_templates/pod_mr_dv2_vix_gated_cash_daily_moo.yaml.example"),
+    Path("docs/live/release_templates/pod_mr_dv2_vix_gated_bil_daily_moo.yaml.example"),
+    Path("docs/live/release_templates/pod_mr_dv2_vix_gated_spmo_daily_moo.yaml.example"),
+    Path("docs/live/release_templates/pod_mr_hpi_vote_vix_gated_cash_daily_moo.yaml.example"),
+    Path("docs/live/release_templates/pod_mr_hpi_vote_vix_gated_bil_daily_moo.yaml.example"),
+    Path("docs/live/release_templates/pod_mr_hpi_vote_vix_gated_spmo_daily_moo.yaml.example"),
 )
 
 
@@ -189,13 +195,30 @@ def test_release_template_parses_and_starts_disabled(template_path_obj: Path):
     assert release_obj.user_id_str == "your_user"
     assert release_obj.release_id_str.startswith("your_user.")
     assert release_obj.broker_host_str == "127.0.0.1"
-    assert release_obj.broker_port_int == 7497
-    assert release_obj.broker_client_id_int == 31
+    core5_template_bool = (
+        release_obj.strategy_import_str
+        == "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5"
+    )
+    assert release_obj.broker_port_int == (7496 if core5_template_bool else 7497)
+    if core5_template_bool:
+        assert release_obj.mode_str == "live"
+        assert release_obj.account_route_str == "YOUR_CORE5_ACCOUNT"
+    if release_obj.strategy_import_str.startswith("strategies.mr_capsule."):
+        assert release_obj.broker_client_id_int in range(41, 47)
+    else:
+        assert release_obj.broker_client_id_int == 31
     assert release_obj.broker_timeout_seconds_float == 4.0
     assert release_obj.session_calendar_id_str == "XNYS"
-    expected_budget_float = 1.0 if release_obj.strategy_import_str == "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5" else 0.03
+    expected_budget_float = 1.0 if release_obj.strategy_import_str == "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5" or release_obj.strategy_import_str.startswith("strategies.mr_capsule.") else 0.03
     assert release_obj.pod_budget_fraction_float == expected_budget_float
-    assert release_obj.params_dict["capital_base_float"] == 100000.0
+    if core5_template_bool:
+        assert "capital_base_float" not in release_obj.params_dict
+        qualification_dict = release_obj.params_dict["core5_live_qualification_dict"]
+        assert qualification_dict["operator_approved_bool"] is False
+        assert qualification_dict["forward_execution_qualified_bool"] is False
+        assert qualification_dict["evidence_reference_str"] == ""
+    else:
+        assert release_obj.params_dict["capital_base_float"] == 100000.0
 
 
 def test_retired_qpi_release_is_rejected():

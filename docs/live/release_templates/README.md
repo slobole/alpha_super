@@ -57,11 +57,12 @@ alpha/live/releases/<client_id>/*.yaml
 
 ## Wired Templates
 
-CORE5 is a qualification-only exception to the generic workflow above: its
-template uses `incubation` with a dedicated `SIM_` route, full account budget
-`1.0`, and disabled submission. `paper` requires its own paper account. Physical
-`live` is rejected pending forward/account qualification. See
-[CORE5 adapter qualification](../CORE5_ADAPTER_QUALIFICATION.md).
+CORE5 uses a disabled `live` template with a dedicated USD margin account,
+full account budget `1.0`, and disabled submission. Enabling requires an
+account-bound, time-valid qualification record; each submission also checks
+current margin and incremental DBC short availability. For local forward tests,
+use `incubation` and a `SIM_` route; `paper` requires its own paper account.
+See [CORE5 wiring and deployment prerequisites](../CORE5_WIRING_20261005.md).
 
 | Template | Wired strategy | Data profile |
 |---|---|---|

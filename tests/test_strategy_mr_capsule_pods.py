@@ -396,9 +396,90 @@ def test_gate_switch_is_read_from_the_gate_series():
     expected_list = [False, False, True, False, False, True, False, False]  # opening close, then closing close
     for decision_ts, expected_bool in zip(index, expected_list):
         strategy.previous_bar = decision_ts
-        assert strategy._gate_switched_at_decision(strategy._gate_open_at_decision()) is expected_bool
+        assert strategy._gate_switched_at_decision(strategy._gate_open_at_decision(), pd.DataFrame(index=index)) is expected_bool
     strategy.previous_bar = pd.Timestamp("2019-12-20")  # before the first gate row
-    assert strategy._gate_switched_at_decision(False) is False
+    assert strategy._gate_switched_at_decision(False, pd.DataFrame(index=index)) is False
+
+
+def test_gate_switch_uses_previous_pricing_session_when_vix_is_stale():
+    pricing_df = _synthetic_market(2, 8, 48, with_parking_bool=True)
+    calendar_idx = pricing_df.index
+    gate_ser = pd.Series([False, True], index=calendar_idx[:2])
+    strategy_obj = _dv2(DV2VixGatedStrategy, pricing_df, gate_ser, True)
+    strategy_obj._prepare_capsule_state()
+    strategy_obj.previous_bar = calendar_idx[2]
+    # *** CRITICAL *** the opening close was yesterday, not the stale current decision close.
+    assert strategy_obj._gate_open_at_decision() is True
+    assert strategy_obj._gate_switched_at_decision(True, pricing_df.loc[:calendar_idx[2]]) is False
+    strategy_obj.require_current_gate_observation_bool = True
+    with pytest.raises(RuntimeError, match="no observation for decision close"):
+        strategy_obj._gate_open_at_decision()
+
+
+def test_gate_switch_calendar_matches_complete_history():
+    pricing_df = _synthetic_market(2, 80, 49, with_parking_bool=True)
+    gate_ser = _alternating_gate(pricing_df.index, block_int=7)
+    strategy_obj = _dv2(DV2VixGatedStrategy, pricing_df, gate_ser, True)
+    strategy_obj._prepare_capsule_state()
+    for session_int, decision_date_ts in enumerate(pricing_df.index):
+        strategy_obj.previous_bar = decision_date_ts
+        gate_open_bool = strategy_obj._gate_open_at_decision()
+        expected_bool = session_int > 0 and bool(gate_ser.iloc[session_int - 1]) != gate_open_bool
+        assert strategy_obj._gate_switched_at_decision(gate_open_bool, pricing_df.loc[:decision_date_ts]) == expected_bool
+
+
+@pytest.mark.parametrize("pod_str", ["dv2", "hpi"])
+def test_missing_parking_open_preserves_holding_and_cancels_order(pod_str):
+    pricing_df = _synthetic_market(1, 3, 50, with_parking_bool=True)
+    gate_ser = pd.Series(False, index=pricing_df.index)
+    strategy_obj = (_dv2(DV2VixGatedStrategy, pricing_df, gate_ser, True) if pod_str == "dv2"
+                    else _hpi(HPIVoteVixGatedStrategy, pricing_df, gate_ser, True))
+    strategy_obj._prepare_capsule_state()
+    decision_date_ts, execution_date_ts = pricing_df.index[:2]
+    strategy_obj.previous_bar, strategy_obj.current_bar = decision_date_ts, execution_date_ts
+    strategy_obj.universe_df.loc[execution_date_ts:, "S000"] = 0
+    for trade_id_int, symbol_str in enumerate(["S000", "BIL", "SPMO"], start=1):
+        close_float = float(pricing_df.loc[decision_date_ts, (symbol_str, "Close")])
+        strategy_obj.add_transaction(trade_id_int, decision_date_ts, symbol_str, 10, close_float, 10 * close_float, trade_id_int, 0.0)
+        pricing_df.loc[execution_date_ts, [(symbol_str, field_str) for field_str in ("Open", "High", "Low")]] = np.nan
+        pricing_df.loc[execution_date_ts, (symbol_str, "Close")] = close_float  # disclosed prior-close valuation
+        strategy_obj.order_target(symbol_str, 0, trade_id=trade_id_int)
+    original_pricing_df = pricing_df.copy(deep=True)
+    strategy_obj.process_orders(pricing_df)
+    assert strategy_obj.get_position("S000") == 0  # ordinary removed-stock semantics are unchanged
+    assert strategy_obj.get_position("BIL") == 10
+    assert strategy_obj.get_position("SPMO") == 10
+    assert strategy_obj.get_orders() == []
+    transaction_df = strategy_obj.get_transactions()
+    assert transaction_df.loc[transaction_df["amount"] < 0, "asset"].tolist() == ["S000"]
+    pd.testing.assert_frame_equal(pricing_df, original_pricing_df)
+
+
+@pytest.mark.parametrize("pod_str", ["dv2", "hpi"])
+def test_parent_missing_price_liquidation_still_includes_nonmember_etfs(pod_str):
+    pricing_df = _synthetic_market(1, 3, 51, with_parking_bool=True)
+    strategy_obj = _dv2(DVO2Strategy, pricing_df) if pod_str == "dv2" else _hpi(HPIStatefulLongStrategy, pricing_df)
+    decision_date_ts, execution_date_ts = pricing_df.index[:2]
+    strategy_obj.previous_bar, strategy_obj.current_bar = decision_date_ts, execution_date_ts
+    close_float = float(pricing_df.loc[decision_date_ts, ("BIL", "Close")])
+    strategy_obj.add_transaction(1, decision_date_ts, "BIL", 10, close_float, 10 * close_float, 1, 0.0)
+    pricing_df.loc[execution_date_ts, ("BIL", "Open")] = np.nan
+    strategy_obj.process_orders(pricing_df)
+    assert strategy_obj.get_position("BIL") == 0
+    assert strategy_obj.get_transactions().iloc[-1]["order_id"] == -1
+
+
+def test_missing_parking_close_fails_instead_of_inventing_a_valuation():
+    pricing_df = _synthetic_market(1, 3, 52, with_parking_bool=True)
+    strategy_obj = _dv2(DV2VixGatedStrategy, pricing_df, pd.Series(False, index=pricing_df.index), True)
+    strategy_obj._prepare_capsule_state()
+    decision_date_ts, execution_date_ts = pricing_df.index[:2]
+    strategy_obj.previous_bar, strategy_obj.current_bar = decision_date_ts, execution_date_ts
+    close_float = float(pricing_df.loc[decision_date_ts, ("BIL", "Close")])
+    strategy_obj.add_transaction(1, decision_date_ts, "BIL", 10, close_float, 10 * close_float, 1, 0.0)
+    pricing_df.loc[execution_date_ts, ("BIL", "Close")] = np.nan
+    with pytest.raises(RuntimeError, match="Active positions still contain missing close prices"):
+        strategy_obj.process_orders(pricing_df)
 
 
 def test_parking_etfs_must_carry_dividends():
@@ -434,36 +515,73 @@ def test_append_parking_prices_keeps_padding_dividends_and_attrs(monkeypatch):
 
 # ----------------------------------------------------------------------------------------------- Bench entry points
 ENTRY_POINT_LIST = [
-    ("strategy_mr_dv2_vix_gated_spmo", "run_dv2_capsule_pod", True),
-    ("strategy_mr_dv2_vix_gated_bil", "run_dv2_capsule_pod", False),
-    ("strategy_mr_hpi_vote_vix_gated_spmo", "run_hpi_capsule_pod", True),
-    ("strategy_mr_hpi_vote_vix_gated_bil", "run_hpi_capsule_pod", False),
+    ("strategy_mr_dv2_vix_gated_spmo", "dv2", True, True),
+    ("strategy_mr_dv2_vix_gated_bil", "dv2", True, False),
+    ("strategy_mr_dv2_vix_gated_cash", "dv2", False, False),
+    ("strategy_mr_hpi_vote_vix_gated_spmo", "hpi", True, True),
+    ("strategy_mr_hpi_vote_vix_gated_bil", "hpi", True, False),
+    ("strategy_mr_hpi_vote_vix_gated_cash", "hpi", False, False),
 ]
 
 
-@pytest.mark.parametrize("module_name_str,helper_str,spmo_bool", ENTRY_POINT_LIST)
-def test_bench_entry_points_fix_the_parking_and_the_name(monkeypatch, module_name_str, helper_str, spmo_bool):
+@pytest.mark.parametrize("module_name_str,pod_str,parking_bool,spmo_bool", ENTRY_POINT_LIST)
+def test_bench_entry_points_fix_the_parking_and_the_name(monkeypatch, module_name_str, pod_str, parking_bool, spmo_bool):
     module_obj = importlib.import_module(f"strategies.mr_capsule.{module_name_str}")
     captured_dict = {}
-    monkeypatch.setattr(module_obj, helper_str, lambda **kwarg_dict: captured_dict.update(kwarg_dict) or "ran")
+    monkeypatch.setattr(module_obj, f"run_{pod_str}_capsule_pod", lambda **kwarg_dict: captured_dict.update(kwarg_dict) or "ran")
     assert module_obj.run_variant(show_display_bool=False, save_results_bool=False, end_date_str="2026-01-02") == "ran"
-    assert captured_dict["parking_enabled_bool"] is True and captured_dict["spmo_parking_enabled_bool"] is spmo_bool
+    assert captured_dict["parking_enabled_bool"] is parking_bool and captured_dict["spmo_parking_enabled_bool"] is spmo_bool
     assert captured_dict["strategy_name_str"] == module_name_str == module_obj.STRATEGY_NAME_STR
     assert captured_dict["end_date_str"] == "2026-01-02" and captured_dict["save_results_bool"] is False
 
 
+@pytest.mark.parametrize("module_name_str,pod_str,parking_bool,spmo_bool", ENTRY_POINT_LIST)
+def test_entry_point_analysis_hooks_keep_the_fixed_parking_and_name(monkeypatch, module_name_str, pod_str, parking_bool, spmo_bool):
+    """WIRED modules expose the capacity and timing hooks with the same identity as run_variant."""
+    module_obj = importlib.import_module(f"strategies.mr_capsule.{module_name_str}")
+    capacity_dict, timing_dict = {}, {}
+    monkeypatch.setattr(module_obj, f"build_{pod_str}_capsule_capacity_analysis_inputs",
+                        lambda **kwarg_dict: capacity_dict.update(kwarg_dict) or "capacity")
+    monkeypatch.setattr(module_obj, f"build_{pod_str}_capsule_execution_timing_analysis_inputs",
+                        lambda **kwarg_dict: timing_dict.update(kwarg_dict) or "timing")
+    assert module_obj.build_capacity_analysis_inputs(capital_base_float=250_000.0, end_date_str="2026-01-02") == "capacity"
+    assert module_obj.build_execution_timing_analysis_inputs() == "timing"
+    for captured_dict in (capacity_dict, timing_dict):
+        assert captured_dict["strategy_name_str"] == module_obj.STRATEGY_NAME_STR
+        assert captured_dict["parking_enabled_bool"] is parking_bool and captured_dict["spmo_parking_enabled_bool"] is spmo_bool
+    assert capacity_dict["capital_base_float"] == 250_000.0 and capacity_dict["end_date_str"] == "2026-01-02"
+    assert capacity_dict["backtest_start_date_str"] == "2004-01-01" and capacity_dict["show_display_bool"] is False
+
+
+@pytest.mark.parametrize("pod_str", ["dv2", "hpi"])
+def test_live_adapter_and_backtest_share_one_strategy_builder(pod_str):
+    """The live adapter must build the pod with the backtest's builder, not its own constructor call."""
+    import inspect
+
+    from alpha.live import mr_capsule_adapter
+
+    source_str = inspect.getsource(mr_capsule_adapter.build_mr_capsule_decision_plan)
+    builder_str = f"build_{pod_str}_capsule_strategy"
+    assert builder_str in source_str
+    assert "VixGatedStrategy(" not in source_str
+    pod_module_obj = importlib.import_module(
+        "strategies.mr_capsule.dv2_vix_gated" if pod_str == "dv2" else "strategies.mr_capsule.hpi_vote_vix_gated"
+    )
+    assert builder_str in inspect.getsource(getattr(pod_module_obj, f"run_{pod_str}_capsule_pod"))
+
+
 @pytest.mark.parametrize("module_name_str", [entry[0] for entry in ENTRY_POINT_LIST])
-def test_capsule_pods_are_pm_ready_but_not_wired(module_name_str):
-    """Owner request 2026-10-04: PM_READY after check_pm_readiness passed; no live route (handoff section 9)."""
+def test_capsule_pods_have_matching_wired_routes(module_name_str):
+    """A WIRED capsule identity must have a real host and release route."""
     module_str = f"strategies.mr_capsule.{module_name_str}"
     entry_obj = catalog.get_strategy_by_module(module_str)
-    assert entry_obj is not None and entry_obj.has_run_variant_bool and not entry_obj.is_wired_bool
+    assert entry_obj is not None and entry_obj.has_run_variant_bool and entry_obj.is_wired_bool
     # Bench offers no parking switch: the parking is fixed by the module (and so is the results name)
     assert not {p.name_str for p in entry_obj.run_variant_param_tuple} & {"parking_enabled_bool", "spmo_parking_enabled_bool"}
-    assert tier_for(module_str) is MaturityTier.PM_READY
+    assert tier_for(module_str) is MaturityTier.WIRED
     assert module_str in portfolio_manager.SUPPORTED_STRATEGY_IMPORT_TUPLE
-    assert module_str not in release_manifest.SUPPORTED_STRATEGY_IMPORT_TUPLE
-    assert module_str not in strategy_host.INCREMENTAL_DECISION_STRATEGY_IMPORT_SET | strategy_host.FULL_TARGET_DECISION_STRATEGY_IMPORT_SET
+    assert module_str in release_manifest.SUPPORTED_STRATEGY_IMPORT_TUPLE
+    assert module_str in strategy_host.INCREMENTAL_DECISION_STRATEGY_IMPORT_SET
 
 
 @pytest.mark.parametrize("suffix_str", ["spmo", "bil"])

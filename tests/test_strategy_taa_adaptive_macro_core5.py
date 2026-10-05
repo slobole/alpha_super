@@ -738,10 +738,10 @@ def test_data_loader_keeps_total_return_signals_separate_from_execution_prices()
 def test_pm_ready_and_all_bench_hooks_are_registered():
     strategy_entry_obj = catalog.get_strategy_by_module(core5_module.__name__)
 
-    assert tier_for(core5_module.__name__) is MaturityTier.PM_READY
+    assert tier_for(core5_module.__name__) is MaturityTier.WIRED
     assert strategy_entry_obj is not None
     assert strategy_entry_obj.is_pm_ready_bool is True
-    assert strategy_entry_obj.is_wired_bool is False
+    assert strategy_entry_obj.is_wired_bool is True
     assert strategy_entry_obj.has_run_variant_bool is True
     assert strategy_entry_obj.has_capacity_analysis_bool is True
     assert strategy_entry_obj.has_timing_analysis_bool is True

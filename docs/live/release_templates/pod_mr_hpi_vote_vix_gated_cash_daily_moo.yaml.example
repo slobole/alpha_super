@@ -1,0 +1,40 @@
+# Disabled MR capsule cash template; one dedicated account per pod.
+# No deployment is enabled by this file. Complete MR_CAPSULE_WIRING_REVIEW_20261005.md prerequisites first.
+identity:
+  release_id: your_user.pod_mr_hpi_vote_vix_gated_cash.daily_moo.v1
+  user_id: your_user
+  pod_id: pod_mr_hpi_vote_vix_gated_cash_01
+
+deployment:
+  mode: paper
+  enabled_bool: false
+
+broker:
+  account_route: DU_YOUR_PAPER_ACCOUNT
+  host_str: 127.0.0.1
+  port_int: 7497
+  client_id_int: 45 # Keep unique across processes connected to this Gateway.
+  timeout_seconds_float: 4.0
+
+strategy:
+  strategy_import_str: strategies.mr_capsule.strategy_mr_hpi_vote_vix_gated_cash
+  data_profile_str: norgate_eod_sp500_hpi_mr_capsule_pit
+  params:
+    margin_account_confirmed_bool: false
+
+market:
+  session_calendar_id_str: XNYS
+
+schedule:
+  signal_clock_str: eod_snapshot_ready
+  execution_policy_str: next_open_moo
+
+execution:
+  pod_budget_fraction_float: 1.0
+  auto_submit_enabled_bool: false
+
+bootstrap:
+  initial_cash_float: 100000.0
+
+risk:
+  risk_profile_str: standard_equity_mr

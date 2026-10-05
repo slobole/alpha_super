@@ -45,6 +45,13 @@ def strategy_module_import_str_from_release(release_obj: LiveRelease) -> str:
 
 def inspect_auto_reference_support_dict(release_obj: LiveRelease) -> dict[str, object]:
     module_import_str = strategy_module_import_str_from_release(release_obj)
+    if module_import_str == "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5":
+        return {
+            "supported_bool": False,
+            "module_import_str": module_import_str,
+            "missing_parameter_list": [],
+            "reason_str": "core5_accounting_bridge_required",
+        }
     strategy_module_obj = importlib.import_module(module_import_str)
     run_variant_fn = getattr(strategy_module_obj, "run_variant", None)
     if run_variant_fn is None:
@@ -87,6 +94,11 @@ def run_auto_reference_strategy(
         )
 
     support_dict = inspect_auto_reference_support_dict(release_obj)
+    if support_dict["reason_str"] == "core5_accounting_bridge_required":
+        raise ValueError(
+            "CORE5 automatic reference requires an explicit broker cash/dividend/borrow accounting bridge; "
+            "use the conditional decision/order parity checker instead."
+        )
     missing_parameter_list = list(support_dict["missing_parameter_list"])
     if len(missing_parameter_list) > 0:
         raise AttributeError(

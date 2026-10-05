@@ -1,4 +1,4 @@
-"""Shared gate-and-parking behaviour of the two MR capsule pods (PM_READY, no live route; mixin).
+"""Shared gate-and-parking behaviour of the two MR capsule pods (research and live adapter mixin).
 
 The mixin adds, to an existing stock-reversal pod:
 - the shared VIX stress gate (strategies/mr_capsule/vix_stress_gate.py), read at the decision close;
@@ -34,6 +34,7 @@ class CapsulePodMixin:
     parking_enabled_bool: bool = True
     spmo_parking_enabled_bool: bool = True  # False: the research reference "BIL only" (idle cash all in BIL)
     gate_override_ser: pd.Series | None = None  # tests only: replaces the VIX gate
+    require_current_gate_observation_bool: bool = False  # live decisions fail closed on a stale VIX row
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -77,18 +78,26 @@ class CapsulePodMixin:
         position_ser = position_ser[position_ser > 0]
         return position_ser.drop(labels=[s for s in PARKING_SYMBOL_TUPLE if s in position_ser.index])
 
+    def _is_missing_price_liquidation_exempt(self, asset_str: str) -> bool:
+        # Parking ETFs are never S&P 500 members. An absent next open does not mean index removal.
+        return asset_str in PARKING_SYMBOL_TUPLE
+
     def _gate_open_at_decision(self) -> bool:
         # *** CRITICAL*** the decision is taken after Close(previous_bar); read the gate state of that close only.
-        return gate_state_at(self.gate_open_ser, pd.Timestamp(self.previous_bar))
+        decision_date_ts = pd.Timestamp(self.previous_bar)
+        if self.require_current_gate_observation_bool and decision_date_ts not in self.gate_open_ser.index:
+            raise RuntimeError(f"MR capsule gate has no observation for decision close {decision_date_ts.date()}.")
+        return gate_state_at(self.gate_open_ser, decision_date_ts)
 
-    def _gate_switched_at_decision(self, gate_open_bool: bool) -> bool:
-        # Read from the gate series (the session before the decision close vs the decision close), never from state
-        # kept between iterate calls: a live host builds a fresh strategy object for each decision, so stored state
-        # would turn every live decision into a re-target. Uses closes <= Close(previous_bar) only.
-        position_int = int(self.gate_open_ser.index.searchsorted(pd.Timestamp(self.previous_bar), side="right")) - 1
-        if position_int < 1:
+    def _gate_switched_at_decision(self, gate_open_bool: bool, data_df: pd.DataFrame) -> bool:
+        # *** CRITICAL *** compare gate(Close_T) with gate(Close_previous_pricing_session), using only rows <= T.
+        # A missing VIX session must not move that calendar boundary or replay an older switch on the next day.
+        decision_date_ts = pd.Timestamp(self.previous_bar)
+        previous_position_int = int(data_df.index.searchsorted(decision_date_ts, side="left")) - 1
+        if previous_position_int < 0:
             return False
-        return bool(self.gate_open_ser.iloc[position_int - 1]) != bool(gate_open_bool)
+        previous_pricing_date_ts = pd.Timestamp(data_df.index[previous_position_int])
+        return gate_state_at(self.gate_open_ser, previous_pricing_date_ts) != bool(gate_open_bool)
 
     def _parking_trade_id(self, symbol_str: str, target_share_int: int) -> int:
         held_share_int = int(self.get_position(symbol_str))
@@ -106,7 +115,7 @@ class CapsulePodMixin:
         # *** CRITICAL*** "last session of the ISO week" is read from the trading calendar (the execution session is
         # known in advance), never from prices after Close(previous_bar).
         week_end_bool = tuple(decision_ts.isocalendar())[:2] != tuple(execution_ts.isocalendar())[:2]
-        gate_switched_bool = self._gate_switched_at_decision(gate_open_bool)
+        gate_switched_bool = self._gate_switched_at_decision(gate_open_bool, data_df)
         spmo_close_key, spmo_volume_key = (SPMO_SYMBOL_STR, "Close"), (SPMO_SYMBOL_STR, "Volume")
         spmo_weight_float = 0.0
         if self.spmo_parking_enabled_bool and spmo_close_key in data_df.columns and spmo_volume_key in data_df.columns:

@@ -45,7 +45,7 @@ Do not assign two different live strategies to the same `account_route`, and do 
 
 ### 2. The Strategy Decides, The Broker State Sizes
 
-The strategy decides what it wants from approved prior data. Near execution time, the system reads the broker account and live prices, then prepares the exact orders — nothing is frozen overnight:
+The strategy decides what it wants from approved prior data. For the standard weight-based route, the system reads the broker account and live prices near execution time, then prepares the exact orders:
 
 ```text
 PodBudget = BrokerNetLiq_at_VPlan * pod_budget_fraction
@@ -53,6 +53,21 @@ TargetShares_i = floor(TargetWeight_i * PodBudget / LiveReferencePrice_i)
 ```
 
 `pod_budget_fraction` is a per-pod sizing cap on that pod's own linked account, not a shared-account allocation mechanism.
+
+CORE5 freezes all six ETF targets as whole shares from Close_T cash and prices,
+including signed DBC quantities. It evaluates daily, uses a dedicated USD
+standard-margin account and full-account budget, and checks current funding and
+incremental borrow availability before MOO submission. Its disabled template
+requires account-bound qualification before activation; portfolio-margin accounts
+are not supported by this preflight. See [CORE5 wiring](docs/live/CORE5_WIRING_20261005.md).
+
+MR capsule uses an explicit exception: its stock entry dollars and BIL/SPMO
+whole-share targets are frozen against Close_T NAV. Live stock quantities still
+use the pre-submit reference quote; ETF quantities stay fixed. Changed broker
+holdings or outstanding orders block submission. Finite cash postings, including
+dividends, fees and margin debits, do not block or resize the frozen plan. This
+cash policy does not establish sufficient buying power. Capsule releases require one dedicated account
+and budget fraction 1.0. See the [capsule wiring contract and prerequisites](docs/plans/MR_CAPSULE_WIRING_REVIEW_20261005.md).
 
 ### 3. `tick` Is One Live Pass
 

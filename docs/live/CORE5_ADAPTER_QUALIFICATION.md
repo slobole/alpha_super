@@ -2,6 +2,11 @@
 
 ## Verdict and scope
 
+**Current status (2026-10-05):** [the WIRED deployment path](CORE5_WIRING_20261005.md)
+supersedes the unconditional LIVE block described in this dated qualification.
+It adds strict account/funding checks and an account-bound activation record;
+no physical deployment or forward broker qualification is implied.
+
 Step 3 wires CORE5 into the existing local decision, execution-plan and state
 lifecycle. It supports incubation and PAPER qualification. Physical `mode=live`
 is deliberately rejected until forward execution and account borrow/margin
@@ -83,9 +88,10 @@ A rebalance happens on initialization, a change in any of the five long
 states versus the preceding exchange session, or the actual last exchange
 session of the month. A short-state-only or volatility-only change does not
 trigger a rebalance. Equality means neither a fresh long nor a fresh short;
-an existing short can remain until another rebalance trigger. The operational
-adapter corrects the research endpoint artifact: the final available price row
-is not automatically month-end. The historical strategy itself is unchanged.
+an existing short can remain until another rebalance trigger. Both the current
+adapter and research strategy use the full XNYS calendar: the final available
+price row is not automatically month-end. The research endpoint correction was
+completed after this original qualification.
 
 Sizing uses CAPITALSPECIAL closes and signed whole-share positions:
 

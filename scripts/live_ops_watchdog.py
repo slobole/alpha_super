@@ -43,6 +43,7 @@ if str(REPO_ROOT_PATH) not in sys.path:
 
 import alpha.live.dashboard as dashboard_module
 import alpha.live.dashboard_v3.notifications as notifications_module
+import alpha.live.mr_capsule_notifications as capsule_notifications_module
 import alpha.live.ops_report as ops_report_module
 from scripts.norgate_config_env import load_config_env_file
 
@@ -52,6 +53,8 @@ WATCHDOG_NOTIFICATION_STATE_PATH_STR = "alpha/live/logs/watchdog_notification_st
 HEARTBEAT_URL_ENV_VAR_NAME_STR = "ALPHA_INSPECTOR_HEARTBEAT_URL"
 FATAL_EXIT_CODE_INT = 2
 RUN_RECEIPT_SCHEMA_STR = "live_ops_watchdog_run.v1"
+CAPSULE_RECEIPT_FIELD_TUPLE = ("capsule_notification_attempt_count_int",
+    "capsule_notification_pending_count_int", "capsule_notification_pending_live_count_int")
 RECEIPT_IDENTITY_FIELD_TUPLE = ("mode_str", "user_id_str", "pod_id_str", "account_route_str", "release_id_str")
 RECEIPT_IDENTITY_PATTERN_OBJ = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}\Z")
 
@@ -117,7 +120,7 @@ def _completed_run_receipt_dict(report_dict, fired_list, receipt_context_dict, *
     # from fired_list alone, so retain unknown instead of inventing zero.
     pending_live_int = sum(record_obj.delivered_bool is False for record_obj in fired_list
         if record_obj.mode_str == "live" and record_obj.pod_id_str != notifications_module.INSPECTOR_NOTIFICATION_KEY_STR) if configured_bool else None
-    return {"schema_version_str": RUN_RECEIPT_SCHEMA_STR, "completed_at_utc_str": completed_ts.isoformat(),
+    receipt_dict = {"schema_version_str": RUN_RECEIPT_SCHEMA_STR, "completed_at_utc_str": completed_ts.isoformat(),
         "report_generated_at_utc_str": report_timestamp_str,
         "report_sha256_str": hashlib.sha256(json.dumps(report_dict, sort_keys=True,
             separators=(",", ":"), ensure_ascii=True).encode("utf-8")).hexdigest(),
@@ -125,6 +128,9 @@ def _completed_run_receipt_dict(report_dict, fired_list, receipt_context_dict, *
             identity_dict["mode_str"], identity_dict["pod_id_str"], identity_dict["release_id_str"])),
         "heartbeat_status_str": heartbeat_status_str, "heartbeat_fail_signal_bool": heartbeat_fail_signal_bool,
         "notification_configured_bool": configured_bool, "notification_pending_live_count_int": pending_live_int}
+    receipt_dict.update({field_str: receipt_context_dict[field_str] for field_str in CAPSULE_RECEIPT_FIELD_TUPLE
+        if field_str in receipt_context_dict})
+    return receipt_dict
 
 
 def _write_run_receipt_atomic(receipt_dict, output_path_str):
@@ -191,8 +197,21 @@ def _run_report_pipeline_tuple(
         webhook_url_str=webhook_url_str,
         webhook_poster_fn=notifications_module.post_discord_webhook_bool,
     )
-    return report_dict, fired_list, {"summary_dict": summary_dict,
+    receipt_context_dict = {"summary_dict": summary_dict,
         "notification_configured_bool": bool(webhook_url_str)}
+    if capsule_notifications_module._configured_scope_list(summary_dict, parsed_args_obj.mode_str):
+        capsule_delivery_list = capsule_notifications_module.deliver_execution_alerts(
+            summary_dict, webhook_url_str=webhook_url_str,
+            webhook_poster_fn=notifications_module.post_discord_webhook_bool, mode_str=parsed_args_obj.mode_str,
+        )
+        receipt_context_dict.update(
+            capsule_notification_attempt_count_int=len(capsule_delivery_list),
+            capsule_notification_pending_count_int=capsule_notifications_module.pending_execution_alert_count_int(
+                summary_dict, mode_str=parsed_args_obj.mode_str),
+            capsule_notification_pending_live_count_int=(capsule_notifications_module.pending_execution_alert_count_int(
+                summary_dict, mode_str="live") if parsed_args_obj.mode_str in {None, "live"} else 0),
+        )
+    return report_dict, fired_list, receipt_context_dict
 
 
 def main(argv_list: list[str] | None = None) -> int:
@@ -305,6 +324,8 @@ def main(argv_list: list[str] | None = None) -> int:
             "overall_reason_str": str(report_dict.get("overall_reason_str") or ""),
             "report_output_path_str": parsed_args_obj.output_path_str,
             "notification_fired_count_int": len(fired_list),
+            **{field_str: receipt_context_dict[field_str] for field_str in CAPSULE_RECEIPT_FIELD_TUPLE
+                if field_str in receipt_context_dict},
             "heartbeat_status_str": heartbeat_status_str,
             "heartbeat_fail_signal_bool": heartbeat_fail_signal_bool,
             "vps_id_str": str(report_dict.get("vps_id_str") or ""),

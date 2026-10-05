@@ -13,6 +13,7 @@ PodState = saved live memory of the pod
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -71,6 +72,7 @@ class DecisionPlan:
     rebalance_omitted_assets_to_zero_bool: bool = False  # True if omitted held assets should be liquidated in a full rebalance book.
     status_str: str = "planned"  # planned / vplan_ready / submitted / completed / expired / blocked.
     decision_plan_id_int: int | None = None  # Database primary key.
+    target_share_map_dict: dict[str, float] = field(default_factory=dict)  # Explicit incremental whole-share targets; omitted assets stay untouched.
 
     def __post_init__(self) -> None:
         if self.decision_book_type_str not in SUPPORTED_DECISION_BOOK_TYPE_TUPLE:
@@ -94,6 +96,19 @@ class DecisionPlan:
             for asset_str, target_weight_float in dict(self.target_weight_map).items()
             if abs(float(target_weight_float)) > 1e-12
         }
+        target_share_map_dict = {
+            str(asset_str): float(target_share_float)
+            for asset_str, target_share_float in dict(self.target_share_map_dict).items()
+        }
+        if any(
+            not math.isfinite(target_share_float)
+            or target_share_float < 0.0
+            or not target_share_float.is_integer()
+            for target_share_float in target_share_map_dict.values()
+        ):
+            raise ValueError("Explicit target shares must be finite, nonnegative whole shares.")
+        if target_share_map_dict and self.decision_book_type_str != "incremental_entry_exit_book":
+            raise ValueError("Explicit target shares require incremental_entry_exit_book.")
 
         if self.decision_book_type_str == "incremental_entry_exit_book":
             if len(entry_target_weight_map_dict) == 0 and len(legacy_target_weight_map_dict) > 0:
@@ -110,9 +125,12 @@ class DecisionPlan:
             if len(legacy_target_weight_map_dict) == 0 and len(full_target_weight_map_dict) > 0:
                 legacy_target_weight_map_dict = dict(full_target_weight_map_dict)
 
+        if set(target_share_map_dict) & (set(entry_target_weight_map_dict) | set(self.exit_asset_set)):
+            raise ValueError("Explicit target shares must not overlap entry or exit intents.")
         object.__setattr__(self, "entry_target_weight_map_dict", entry_target_weight_map_dict)
         object.__setattr__(self, "full_target_weight_map_dict", full_target_weight_map_dict)
         object.__setattr__(self, "target_weight_map", legacy_target_weight_map_dict)
+        object.__setattr__(self, "target_share_map_dict", target_share_map_dict)
 
     def get_execution_touched_asset_list(
         self,
@@ -120,7 +138,7 @@ class DecisionPlan:
         position_tolerance_float: float = 1e-9,
     ) -> list[str]:
         if self.decision_book_type_str == "incremental_entry_exit_book":
-            touched_asset_set = set(self.entry_target_weight_map_dict) | set(self.exit_asset_set)
+            touched_asset_set = set(self.entry_target_weight_map_dict) | set(self.exit_asset_set) | set(self.target_share_map_dict)
             entry_rank_map_dict = {
                 asset_str: rank_idx_int
                 for rank_idx_int, asset_str in enumerate(self.entry_priority_list)
@@ -237,6 +255,8 @@ class BrokerOrderRequest:
     decision_plan_id_int: int | None = None  # Parent decision plan id in v2 flows.
     vplan_id_int: int | None = None  # Parent VPlan id in v2 flows.
     limit_price_float: float | None = None  # Required only for LMT manual broker tickets.
+    execution_deadline_timestamp_str: str | None = None  # Optional aware ISO expiry for recovery MKT orders.
+    submission_deadline_timestamp_str: str | None = None  # Latest local dispatch time; does not change broker TIF.
 
 
 @dataclass(frozen=True)

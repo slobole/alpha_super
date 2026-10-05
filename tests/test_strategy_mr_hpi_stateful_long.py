@@ -511,6 +511,40 @@ def test_exact_loader_reads_dedicated_hpi_snapshot(tmp_path, monkeypatch):
     ] == pytest.approx(10.5)
 
 
+@pytest.mark.parametrize("capsule_bool", [False, True])
+def test_exact_loader_capsule_selects_members_within_requested_window(monkeypatch, capsule_bool):
+    import strategies.hpi.stateful_long as hpi_module
+    from data.norgate_snapshot_store import HPI_SP500_PROFILE_STR, MR_CAPSULE_HPI_PROFILE_STR
+
+    date_idx = pd.DatetimeIndex(["2023-12-29", "2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"])
+    source_universe_df = pd.DataFrame({
+        "PAST_ONLY": [1, 0, 0, 0, 0],
+        "MEMBER_DURING": [0, 1, 0, 0, 0],
+        "FUTURE_ONLY": [0, 0, 0, 0, 1],
+        "NEVER_MEMBER": [0, 0, 0, 0, 0],
+    }, index=date_idx)
+    loaded_symbol_list = []
+
+    def load_prices(symbol_list, benchmark_list, **_kwargs):
+        loaded_symbol_list.extend(symbol_list)
+        return pd.DataFrame(
+            100.0, index=date_idx[1:4],
+            columns=pd.MultiIndex.from_product([symbol_list + benchmark_list, ["Open", "High", "Low", "Close"]]),
+        )
+
+    monkeypatch.setattr(hpi_module, "is_snapshot_mode_enabled_bool", lambda: True)
+    monkeypatch.setattr(hpi_module, "get_active_data_profile_str", lambda: MR_CAPSULE_HPI_PROFILE_STR if capsule_bool else HPI_SP500_PROFILE_STR)
+    monkeypatch.setattr(hpi_module, "build_index_constituent_matrix", lambda **_: (list(source_universe_df.columns), source_universe_df.copy()))
+    monkeypatch.setattr(hpi_module, "load_raw_prices", load_prices)
+    symbol_list, universe_df, pricing_data_df = load_exact_hpi_inputs(
+        indexname_str="S&P 500", benchmark_symbol_str="$SPXTR", start_date_str="2024-01-02", end_date_str="2024-01-04",
+    )
+    expected_symbol_list = ["MEMBER_DURING"] if capsule_bool else list(source_universe_df.columns)
+    assert symbol_list == loaded_symbol_list == expected_symbol_list
+    pd.testing.assert_frame_equal(universe_df, source_universe_df.loc[date_idx[1:4], expected_symbol_list] if capsule_bool else source_universe_df)
+    assert list(pricing_data_df.columns.get_level_values(0).unique()) == expected_symbol_list + ["$SPXTR"]
+
+
 def test_exact_loader_rejects_shared_snapshot_profile(monkeypatch):
     from data.norgate_snapshot_store import use_norgate_data_profile
 

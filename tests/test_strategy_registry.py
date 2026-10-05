@@ -86,27 +86,21 @@ def test_portfolio_manager_allowlist_is_the_registry():
 
 
 def test_release_manifest_allowlist_matches_the_registry():
-    """Keep physical LIVE wiring distinct from the explicit forward-only pod."""
-    forward_only_import_set = {release_manifest.CORE5_STRATEGY_IMPORT_STR}
-    assert forward_only_import_set <= set(PM_READY_IMPORT_TUPLE)
-    assert forward_only_import_set.isdisjoint(WIRED_IMPORT_TUPLE)
-    assert set(release_manifest.SUPPORTED_STRATEGY_IMPORT_TUPLE) == (
-        set(WIRED_IMPORT_TUPLE) | forward_only_import_set
-    )
+    assert set(release_manifest.SUPPORTED_STRATEGY_IMPORT_TUPLE) == set(WIRED_IMPORT_TUPLE)
 
 
-def test_forward_only_core5_remains_pm_ready_and_rejects_physical_live():
+def test_core5_is_wired_but_live_activation_requires_qualification():
     assert strategy_registry.tier_for(
         release_manifest.CORE5_STRATEGY_IMPORT_STR
-    ) is MaturityTier.PM_READY
+    ) is MaturityTier.WIRED
     release_obj = release_manifest.parse_release_manifest(str(
         REPO_ROOT_PATH / "docs/live/release_templates/"
         "pod_taa_adaptive_macro_core5_daily_moo.yaml.example"
     ))
     release_manifest.validate_release_manifest(release_obj)
-    with pytest.raises(ValueError, match="physical LIVE activation requires"):
+    with pytest.raises(ValueError, match="qualification"):
         release_manifest.validate_release_manifest(replace(
-            release_obj, mode_str="live", account_route_str="U1234567"
+            release_obj, mode_str="live", account_route_str="U1234567", enabled_bool=True
         ))
 
 

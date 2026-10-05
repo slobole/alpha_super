@@ -1,4 +1,4 @@
-"""Idle-cash parking for the MR capsule pods: SPMO while the gate is closed, BIL otherwise (PM_READY, no live route).
+"""Idle-cash parking for the MR capsule pods: SPMO while the gate is closed, BIL otherwise.
 
 Decided 2026-10-04 (docs/research/MR_CAPSULE_20261003.md, "Final parking decision"). After the pod has placed its
 stock orders for the decision close T (fills at Open_(T+1)):

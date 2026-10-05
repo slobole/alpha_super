@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from typing import Any, Iterable, Iterator, Sequence
 
 import numpy as np
@@ -43,6 +44,31 @@ HPI_SP500_PROFILE_STR = "norgate_eod_sp500_hpi_pit"
 HPI_SP500_DATA_CONTRACT_DICT: dict[str, str] = {
     "price_padding_setting_str": "NONE",
     "past_member_tail_policy_str": "exact",
+}
+MR_CAPSULE_DV2_PROFILE_STR = "norgate_eod_sp500_mr_capsule_pit"
+MR_CAPSULE_HPI_PROFILE_STR = "norgate_eod_sp500_hpi_mr_capsule_pit"
+MR_CAPSULE_PROFILE_SET = {MR_CAPSULE_DV2_PROFILE_STR, MR_CAPSULE_HPI_PROFILE_STR}
+MR_CAPSULE_VIX_HISTORY_START_DATE_STR = "1990-01-02"
+MR_CAPSULE_PRICE_HISTORY_START_DATE_STR = "1998-01-01"
+MR_CAPSULE_EMPTY_HISTORY_FALLBACK_START_DATE_STR = "1990-01-01"
+# Frozen vendor-history exception observed in the 2026-10-02 qualification.
+# A newly backfilled observation changes the expanding gate and requires requalification.
+MR_CAPSULE_VIX_KNOWN_MISSING_SESSION_TUPLE = ("1991-03-01",)
+MR_CAPSULE_DATA_CONTRACT_BY_PROFILE_DICT = {
+    profile_str: {
+        "price_padding_setting_str": padding_str,
+        "past_member_tail_policy_str": "exact",
+        "price_padding_by_symbol_dict": {"$VIX": "NONE", "BIL": "ALLMARKETDAYS", "SPMO": "ALLMARKETDAYS"},
+        "vix_history_start_date_str": MR_CAPSULE_VIX_HISTORY_START_DATE_STR,
+        "vix_known_missing_session_list": list(MR_CAPSULE_VIX_KNOWN_MISSING_SESSION_TUPLE),
+        "price_history_start_date_str": MR_CAPSULE_PRICE_HISTORY_START_DATE_STR,
+        "empty_pre_history_fallback_start_date_str": MR_CAPSULE_EMPTY_HISTORY_FALLBACK_START_DATE_STR,
+        "parking_dividend_source_str": "native",
+    }
+    for profile_str, padding_str in (
+        (MR_CAPSULE_DV2_PROFILE_STR, "ALLMARKETDAYS"),
+        (MR_CAPSULE_HPI_PROFILE_STR, "NONE"),
+    )
 }
 
 PIT_PROFILE_BY_INDEX_NAME_DICT: dict[str, str] = {
@@ -408,6 +434,170 @@ def _validate_core5_snapshot_contract(
                 raise NorgateSnapshotValidationError(f"CORE5 native dtype is invalid or lossy for {pair_str}/{field_str}.") from error_obj
 
 
+def mr_capsule_price_coverage_dict(
+    price_df: pd.DataFrame,
+    snapshot_date_ts: pd.Timestamp,
+) -> dict[str, dict[str, object]]:
+    """Validate capsule helper/parking history without inventing observed closes."""
+    import exchange_calendars
+
+    required_field_set = {"date", "symbol_str", "adjustment_str", "Open", "High", "Low", "Close", "Volume", "Dividend"}
+    if not required_field_set.issubset(price_df.columns):
+        raise NorgateSnapshotValidationError("MR capsule prices are missing required fields.")
+    calendar_idx = exchange_calendars.get_calendar(
+        "XNYS", start=MR_CAPSULE_VIX_HISTORY_START_DATE_STR, end=snapshot_date_ts,
+    ).sessions.tz_localize(None)
+    coverage_dict: dict[str, dict[str, object]] = {}
+    for symbol_str in ("$VIX", "BIL", "SPMO", "$SPX", "$SPXTR"):
+        adjustment_str = TOTALRETURN_ADJUSTMENT_STR if symbol_str in {"$SPX", "$SPXTR"} else CAPITALSPECIAL_ADJUSTMENT_STR
+        symbol_price_df = price_df.loc[price_df["symbol_str"].eq(symbol_str)].copy()
+        if symbol_price_df.empty or set(symbol_price_df["adjustment_str"]) != {adjustment_str}:
+            raise NorgateSnapshotValidationError(f"MR capsule is missing the required adjustment for {symbol_str}.")
+        symbol_price_df["date"] = pd.to_datetime(symbol_price_df["date"])
+        date_ser = symbol_price_df["date"]
+        if (
+            date_ser.isna().any() or date_ser.duplicated().any()
+            or not date_ser.equals(date_ser.dt.normalize()) or date_ser.gt(snapshot_date_ts).any()
+        ):
+            raise NorgateSnapshotValidationError(f"MR capsule has invalid or duplicate dates for {symbol_str}.")
+        symbol_price_df = symbol_price_df.sort_values("date")
+        observed_price_df = symbol_price_df.loc[symbol_price_df["Close"].notna()]
+        if observed_price_df.empty:
+            raise NorgateSnapshotValidationError(f"MR capsule has no observed prices for {symbol_str}.")
+        field_list = ["Close", "Dividend"] if symbol_str.startswith("$") else ["Open", "High", "Low", "Close", "Dividend"]
+        numeric_price_mat = observed_price_df[field_list].to_numpy(dtype=float)
+        if not np.isfinite(numeric_price_mat).all() or (numeric_price_mat[:, :-1] <= 0.0).any():
+            raise NorgateSnapshotValidationError(f"MR capsule has nonfinite prices/dividends for {symbol_str}.")
+        if symbol_str == "SPMO":
+            # *** CRITICAL *** Volume certifies whether SPMO traded before
+            # Close_T. Missing volume cannot masquerade as a padded zero day.
+            volume_vec = pd.to_numeric(observed_price_df["Volume"], errors="coerce").to_numpy(dtype=float)
+            if not np.isfinite(volume_vec).all() or (volume_vec < 0.0).any():
+                raise NorgateSnapshotValidationError("MR capsule requires finite nonnegative SPMO Volume.")
+        first_observed_ts = pd.Timestamp(observed_price_df["date"].iloc[0])
+        # *** CRITICAL*** the VIX mean uses every OBSERVED close through Close_T.
+        # The frozen vendor gap 1991-03-01 contributes neither a value nor a count:
+        # mean_T = sum(observed closes <= T) / count(observed closes <= T).
+        # Do not pad that gap or accept another gap; a later backfill changes the gate.
+        known_missing_date_idx = pd.DatetimeIndex(MR_CAPSULE_VIX_KNOWN_MISSING_SESSION_TUPLE)
+        expected_date_idx = (calendar_idx.difference(known_missing_date_idx) if symbol_str == "$VIX"
+                             else calendar_idx[calendar_idx >= first_observed_ts])
+        observed_date_idx = pd.DatetimeIndex(observed_price_df["date"])
+        if symbol_str == "$VIX" and observed_date_idx.isin(known_missing_date_idx).any():
+            raise NorgateSnapshotValidationError("MR capsule known VIX vendor gap was backfilled; historical gate requalification is required.")
+        if (
+            observed_date_idx[-1] != snapshot_date_ts
+            or not observed_date_idx.equals(expected_date_idx)
+            or (symbol_str == "$VIX" and len(observed_price_df) != len(symbol_price_df))
+        ):
+            raise NorgateSnapshotValidationError(f"MR capsule has stale or incomplete history for {symbol_str}.")
+        coverage_dict[f"{symbol_str}|{adjustment_str}"] = {
+            "first_observed_date_str": first_observed_ts.date().isoformat(),
+            "last_observed_date_str": observed_date_idx[-1].date().isoformat(),
+            "observed_row_count_int": len(observed_price_df),
+        }
+    return coverage_dict
+
+
+def _validate_mr_capsule_snapshot_contract(
+    snapshot_dir_path_obj: Path,
+    manifest_dict: dict[str, Any],
+    snapshot_date_ts: pd.Timestamp,
+) -> None:
+    if int(manifest_dict["schema_version"]) != SNAPSHOT_SCHEMA_VERSION_INT:
+        raise NorgateSnapshotValidationError("MR capsule requires snapshot schema v2 with native dividends.")
+    data_contract_dict = manifest_dict.get("data_contract", {})
+    expected_contract_dict = MR_CAPSULE_DATA_CONTRACT_BY_PROFILE_DICT[manifest_dict["profile"]]
+    if any(data_contract_dict.get(key_str) != value_obj for key_str, value_obj in expected_contract_dict.items()):
+        raise NorgateSnapshotValidationError("MR capsule padding/history data contract mismatch.")
+    _validate_file_hash(snapshot_dir_path_obj, manifest_dict, UNIVERSE_FILE_NAME_STR)
+    universe_df = pd.read_parquet(snapshot_dir_path_obj / UNIVERSE_FILE_NAME_STR)
+    if universe_df.empty or snapshot_date_ts not in universe_df.index:
+        raise NorgateSnapshotValidationError("MR capsule requires a current PIT universe.")
+    capital_symbol_set = set(universe_df.columns.astype(str)) | {"BIL", "SPMO", "$VIX"}
+    benchmark_symbol_set = {"$SPX", "$SPXTR"}
+    required_symbol_set = (capital_symbol_set - {"$VIX"}) | benchmark_symbol_set
+    if (
+        set(manifest_dict.get("required_symbols", [])) != required_symbol_set
+        or set(manifest_dict.get("required_helpers", [])) != {"$VIX"}
+    ):
+        raise NorgateSnapshotValidationError("MR capsule manifest symbols are incomplete.")
+    expected_adjustment_dict = {symbol_str: CAPITALSPECIAL_ADJUSTMENT_STR for symbol_str in capital_symbol_set}
+    expected_adjustment_dict.update({symbol_str: TOTALRETURN_ADJUSTMENT_STR for symbol_str in benchmark_symbol_set})
+    if manifest_dict.get("adjustment_modes") != expected_adjustment_dict:
+        raise NorgateSnapshotValidationError("MR capsule manifest adjustments are incomplete.")
+    price_path_obj = snapshot_dir_path_obj / PRICE_FILE_NAME_STR
+    pair_df = pd.read_parquet(price_path_obj, columns=["symbol_str", "adjustment_str"]).drop_duplicates()
+    if set(pair_df.itertuples(index=False, name=None)) != set(expected_adjustment_dict.items()):
+        raise NorgateSnapshotValidationError("MR capsule price adjustments differ from the manifest.")
+    helper_price_df = pd.read_parquet(price_path_obj, filters=[("symbol_str", "in", ["$VIX", "BIL", "SPMO", "$SPX", "$SPXTR"])])
+    actual_coverage_dict = mr_capsule_price_coverage_dict(helper_price_df, snapshot_date_ts)
+    if data_contract_dict.get("series_coverage_dict") != actual_coverage_dict:
+        raise NorgateSnapshotValidationError("MR capsule exported history differs from declared source coverage.")
+    source_field_dict = data_contract_dict.get("source_field_by_pair_dict", {})
+    for symbol_str in ("BIL", "SPMO"):
+        required_source_field_set = {"Dividend", "Volume"} if symbol_str == "SPMO" else {"Dividend"}
+        if not required_source_field_set.issubset(source_field_dict.get(f"{symbol_str}|{CAPITALSPECIAL_ADJUSTMENT_STR}", [])):
+            raise NorgateSnapshotValidationError(f"MR capsule requires native {sorted(required_source_field_set)} provenance for {symbol_str}.")
+    source_dtype_dict = data_contract_dict.get("source_dtype_by_pair_dict", {})
+    expected_pair_set = {f"{symbol_str}|{adjustment_str}" for symbol_str, adjustment_str in expected_adjustment_dict.items()}
+    if set(source_field_dict) != expected_pair_set or set(source_dtype_dict) != expected_pair_set:
+        raise NorgateSnapshotValidationError("MR capsule native source field/dtype provenance is incomplete.")
+    request_by_pair_dict = data_contract_dict.get("source_request_by_pair_dict", {})
+    if set(request_by_pair_dict) != expected_pair_set:
+        raise NorgateSnapshotValidationError("MR capsule native request provenance is incomplete.")
+    fallback_symbol_set = set()
+    for pair_str, request_dict in request_by_pair_dict.items():
+        symbol_str = pair_str.split("|")[0]
+        primary_start_date_str = MR_CAPSULE_VIX_HISTORY_START_DATE_STR if symbol_str == "$VIX" else MR_CAPSULE_PRICE_HISTORY_START_DATE_STR
+        expected_request_dict = {
+            "requested_start_date_str": primary_start_date_str, "effective_start_date_str": primary_start_date_str,
+            "end_date_str": snapshot_date_ts.date().isoformat(),
+            "padding_type_name_str": expected_contract_dict["price_padding_by_symbol_dict"].get(symbol_str, expected_contract_dict["price_padding_setting_str"]),
+            "empty_primary_request_bool": False,
+        }
+        if isinstance(request_dict, dict) and request_dict.get("empty_primary_request_bool") is True and symbol_str in set(universe_df.columns.astype(str)):
+            expected_request_dict.update(effective_start_date_str=MR_CAPSULE_EMPTY_HISTORY_FALLBACK_START_DATE_STR, empty_primary_request_bool=True)
+            fallback_symbol_set.add(symbol_str)
+        if request_dict != expected_request_dict:
+            raise NorgateSnapshotValidationError(f"MR capsule native request contract differs for {pair_str}.")
+    if fallback_symbol_set:
+        fallback_price_df = pd.read_parquet(price_path_obj, columns=["date", "symbol_str"], filters=[("symbol_str", "in", sorted(fallback_symbol_set))])
+        if not pd.to_datetime(fallback_price_df["date"]).lt(pd.Timestamp(MR_CAPSULE_PRICE_HISTORY_START_DATE_STR)).all():
+            raise NorgateSnapshotValidationError("MR capsule pre-window fallback contains rows in the primary request window.")
+    available_field_set = set(helper_price_df.columns) - {"date", "symbol_str", "adjustment_str"}
+    for pair_str, field_list in source_field_dict.items():
+        if (not isinstance(field_list, list) or not field_list or len(set(field_list)) != len(field_list)
+                or not set(field_list).issubset(available_field_set) or "Close" not in field_list
+                or not isinstance(source_dtype_dict[pair_str], dict) or set(source_dtype_dict[pair_str]) != set(field_list)):
+            raise NorgateSnapshotValidationError(f"MR capsule native source fields/dtypes are invalid for {pair_str}.")
+        for dtype_str in source_dtype_dict[pair_str].values():
+            try:
+                if np.dtype(dtype_str).kind not in "fiu":
+                    raise ValueError("Native price fields must be numeric.")
+            except (TypeError, ValueError) as error_obj:
+                raise NorgateSnapshotValidationError(f"MR capsule native dtype is invalid for {pair_str}.") from error_obj
+
+
+def _restore_mr_capsule_native_fields(symbol_price_df: pd.DataFrame, data_contract_dict: dict, pair_str: str) -> pd.DataFrame:
+    # *** CRITICAL *** Restoring float32 before arithmetic preserves the direct
+    # Close_T signal semantics: float32(105)/float32(100)-1 is below 5%, while
+    # promoted float64 arithmetic is above 5%. Equal stored values are insufficient.
+    field_list = data_contract_dict["source_field_by_pair_dict"][pair_str]
+    source_price_df = symbol_price_df[field_list]
+    try:
+        restored_price_df = source_price_df.astype(data_contract_dict["source_dtype_by_pair_dict"][pair_str])
+        for field_str in field_list:
+            if (source_price_df[field_str].dtype.kind in "iu" and restored_price_df[field_str].dtype.kind == "f"
+                    and (source_price_df[field_str].gt(2**53) | source_price_df[field_str].lt(-(2**53))).any()):
+                raise ValueError("Integer source exceeds the exact floating comparison range.")
+            if not np.array_equal(source_price_df[field_str].to_numpy(), restored_price_df[field_str].to_numpy(), equal_nan=True):
+                raise ValueError("Restoring the native dtype would change values.")
+    except (TypeError, ValueError, OverflowError) as error_obj:
+        raise NorgateSnapshotValidationError(f"MR capsule native dtype restoration is invalid or lossy for {pair_str}.") from error_obj
+    return restored_price_df
+
+
 @lru_cache(maxsize=128)
 def _load_valid_snapshot_manifest_cached(
     snapshot_root_str: str,
@@ -487,6 +677,8 @@ def _load_valid_snapshot_manifest_cached(
     )
     if profile_str == CORE5_PROFILE_STR:
         _validate_core5_snapshot_contract(snapshot_dir_path_obj, manifest_dict, snapshot_date_ts)
+    if profile_str in MR_CAPSULE_PROFILE_SET:
+        _validate_mr_capsule_snapshot_contract(snapshot_dir_path_obj, manifest_dict, snapshot_date_ts)
     files_dict = manifest_dict.get("files", {})
     file_hashes_dict = manifest_dict.get("file_hashes", {})
     has_universe_entry_bool = (
@@ -533,6 +725,8 @@ def load_valid_snapshot_manifest(
 
 def clear_snapshot_manifest_cache() -> None:
     _load_valid_snapshot_manifest_cached.cache_clear()
+    with _MR_CAPSULE_PRICE_CACHE_LOCK_OBJ:
+        _MR_CAPSULE_PRICE_CACHE_DICT.clear()
 
 
 def load_latest_snapshot_session_label_ts(profile_str: str) -> pd.Timestamp | None:
@@ -543,9 +737,11 @@ def load_latest_snapshot_session_label_ts(profile_str: str) -> pd.Timestamp | No
     return snapshot_manifest_obj.snapshot_date_ts
 
 
-@lru_cache(maxsize=32)
-def _read_prices_cached_df(snapshot_dir_str: str, manifest_hash_str: str) -> pd.DataFrame:
-    del manifest_hash_str
+_MR_CAPSULE_PRICE_CACHE_LOCK_OBJ = Lock()
+_MR_CAPSULE_PRICE_CACHE_DICT: dict[str, tuple[tuple[str, str], pd.DataFrame]] = {}
+
+
+def _read_prices_uncached_df(snapshot_dir_str: str) -> pd.DataFrame:
     price_df = pd.read_parquet(Path(snapshot_dir_str) / PRICE_FILE_NAME_STR)
     required_column_set = {"date", "symbol_str", "adjustment_str"}
     missing_column_set = required_column_set.difference(price_df.columns)
@@ -561,7 +757,26 @@ def _read_prices_cached_df(snapshot_dir_str: str, manifest_hash_str: str) -> pd.
     return price_df
 
 
+@lru_cache(maxsize=32)
+def _read_prices_cached_df(snapshot_dir_str: str, manifest_hash_str: str) -> pd.DataFrame:
+    del manifest_hash_str
+    return _read_prices_uncached_df(snapshot_dir_str)
+
+
 def _read_prices_df(snapshot_manifest_obj: NorgateSnapshotManifest) -> pd.DataFrame:
+    if snapshot_manifest_obj.profile_str in MR_CAPSULE_PROFILE_SET:
+        cache_key_tuple = (str(snapshot_manifest_obj.snapshot_dir_path_obj), snapshot_manifest_obj.manifest_hash_str)
+        # Each large capsule profile retains only its last requested snapshot.
+        # Lock loading and copying together: concurrent pods cannot duplicate
+        # the retained load or mutate a frame while another caller copies it.
+        with _MR_CAPSULE_PRICE_CACHE_LOCK_OBJ:
+            cached_entry_tuple = _MR_CAPSULE_PRICE_CACHE_DICT.get(snapshot_manifest_obj.profile_str)
+            if cached_entry_tuple is None or cached_entry_tuple[0] != cache_key_tuple:
+                _MR_CAPSULE_PRICE_CACHE_DICT.pop(snapshot_manifest_obj.profile_str, None)
+                cached_entry_tuple = None
+                cached_entry_tuple = (cache_key_tuple, _read_prices_uncached_df(cache_key_tuple[0]))
+                _MR_CAPSULE_PRICE_CACHE_DICT[snapshot_manifest_obj.profile_str] = cached_entry_tuple
+            return cached_entry_tuple[1].copy()
     return _read_prices_cached_df(
         str(snapshot_manifest_obj.snapshot_dir_path_obj),
         snapshot_manifest_obj.manifest_hash_str,
@@ -624,6 +839,9 @@ def load_price_timeseries_df(
 
     symbol_price_df = symbol_price_df.set_index("date").sort_index()
     symbol_price_df.index.name = None
+    if profile_str in MR_CAPSULE_PROFILE_SET:
+        symbol_price_df.index.name = snapshot_manifest_obj.manifest_dict["data_contract"].get("source_index_name_str")
+        return _restore_mr_capsule_native_fields(symbol_price_df, snapshot_manifest_obj.manifest_dict["data_contract"], f"{symbol_str}|{normalized_adjustment_str}")
     if profile_str == CORE5_PROFILE_STR:
         symbol_price_df.index.name = snapshot_manifest_obj.manifest_dict["data_contract"].get("source_index_name_str")
         field_name_list = snapshot_manifest_obj.manifest_dict["data_contract"]["source_field_by_pair_dict"][
@@ -669,11 +887,11 @@ def load_raw_prices_df(
         )
         for symbol_str in symbol_list
     }
-    # CORE5 alone uses the same true total-return benchmark as the direct
-    # loader. Existing live profiles retain their historical loading contract.
+    # CORE5 and the new capsule profiles use the same true total-return
+    # benchmark as the direct loader. Older live profiles retain their contract.
     data_symbol_dict = {
         symbol_str: (
-            "$SPXTR" if profile_str == CORE5_PROFILE_STR and symbol_str == "$SPX"
+            "$SPXTR" if (profile_str == CORE5_PROFILE_STR or profile_str in MR_CAPSULE_PROFILE_SET) and symbol_str == "$SPX"
             and symbol_str in benchmark_set else symbol_str
         )
         for symbol_str in symbol_list
@@ -755,6 +973,9 @@ def load_raw_prices_df(
             symbol_price_df = symbol_price_df.astype(
                 snapshot_manifest_obj.manifest_dict["data_contract"]["source_dtype_by_pair_dict"][f"{data_symbol_dict[symbol_str]}|{adjustment_str}"]
             )
+        elif profile_str in MR_CAPSULE_PROFILE_SET:
+            symbol_price_df.index.name = snapshot_manifest_obj.manifest_dict["data_contract"].get("source_index_name_str")
+            symbol_price_df = _restore_mr_capsule_native_fields(symbol_price_df, snapshot_manifest_obj.manifest_dict["data_contract"], f"{data_symbol_dict[symbol_str]}|{adjustment_str}")
         symbol_price_df.columns = pd.MultiIndex.from_tuples(
             [(symbol_str, field_str) for field_str in symbol_price_df.columns]
         )

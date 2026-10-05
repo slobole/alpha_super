@@ -69,6 +69,7 @@ from alpha.engine.strategy import Strategy
 from alpha.live import scheduler_utils
 from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR, build_core5_decision_plan
 from alpha.live.models import DecisionPlan, LiveRelease, PodState
+from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE, build_mr_capsule_decision_plan
 from data.norgate_loader import build_data_source_metadata_dict, use_norgate_data_profile
 
 
@@ -79,6 +80,7 @@ HPI_LIVE_TRADABLE_OPEN_MARKER_FLOAT = 1.0
 
 
 INCREMENTAL_DECISION_STRATEGY_IMPORT_SET: set[str] = {
+    *MR_CAPSULE_STRATEGY_IMPORT_TUPLE,
     "strategies.dv2.strategy_mr_dv2:DVO2Strategy",
     "strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote",
 }
@@ -97,6 +99,7 @@ class CanonicalDecisionIntent:
     asset_str: str
     intent_kind_str: str
     entry_value_float: float | None = None
+    target_share_float: float | None = None
 
 
 def _seed_strategy_state(strategy_obj: Strategy, pod_state_obj: PodState | None) -> None:
@@ -213,6 +216,17 @@ def _classify_incremental_order_shape(
     amount_float = float(order_shape_dict["amount_float"])
 
     if (
+        release_obj.strategy_import_str in MR_CAPSULE_STRATEGY_IMPORT_TUPLE
+        and order_shape_dict["asset_str"] in ("BIL", "SPMO")
+        and order_class_str == "MarketOrder" and target_bool and unit_str == "shares"
+        and np.isfinite(amount_float) and amount_float > 0.0 and amount_float.is_integer()
+    ):
+        return CanonicalDecisionIntent(
+            asset_str=str(order_shape_dict["asset_str"]), intent_kind_str="target_shares",
+            target_share_float=amount_float,
+        )
+
+    if (
         order_class_str == "MarketOrder"
         and not target_bool
         and unit_str == "value"
@@ -311,6 +325,7 @@ def _build_decision_plan_from_orders(
     }
     previous_total_value_float = float(strategy_obj.previous_total_value)
     entry_target_weight_map_dict: dict[str, float] = {}
+    target_share_map_dict: dict[str, float] = {}
     exit_asset_set: set[str] = set()
     entry_priority_list: list[str] = []
     contract_audit_dict = _audit_incremental_order_shape_list(
@@ -327,6 +342,14 @@ def _build_decision_plan_from_orders(
         )
 
     for canonical_decision_intent_obj in contract_audit_dict["canonical_decision_intent_list"]:
+        asset_str = str(canonical_decision_intent_obj.asset_str)
+        if release_obj.strategy_import_str in MR_CAPSULE_STRATEGY_IMPORT_TUPLE and (
+            asset_str in exit_asset_set or asset_str in entry_target_weight_map_dict or asset_str in target_share_map_dict
+        ):
+            raise ValueError(f"Conflicting duplicate strategy orders for {asset_str}.")
+        if canonical_decision_intent_obj.intent_kind_str == "target_shares":
+            target_share_map_dict[asset_str] = float(canonical_decision_intent_obj.target_share_float)
+            continue
         if canonical_decision_intent_obj.intent_kind_str == "exit_to_zero":
             exit_asset_set.add(str(canonical_decision_intent_obj.asset_str))
             continue
@@ -359,6 +382,7 @@ def _build_decision_plan_from_orders(
         strategy_state_dict=_extract_strategy_state_dict(strategy_obj),
         decision_book_type_str="incremental_entry_exit_book",
         entry_target_weight_map_dict=entry_target_weight_map_dict,
+        target_share_map_dict=target_share_map_dict,
         target_weight_map=entry_target_weight_map_dict,
         exit_asset_set=exit_asset_set,
         entry_priority_list=entry_priority_list,
@@ -1218,6 +1242,8 @@ def build_decision_plan_for_release(
     pod_state_obj: PodState | None,
 ) -> DecisionPlan:
     with use_norgate_data_profile(release_obj.data_profile_str):
+        if release_obj.strategy_import_str in MR_CAPSULE_STRATEGY_IMPORT_TUPLE:
+            return build_mr_capsule_decision_plan(release_obj, as_of_ts, pod_state_obj)
         if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
             return build_core5_decision_plan(release_obj, as_of_ts, pod_state_obj)
         if release_obj.strategy_import_str == "strategies.dv2.strategy_mr_dv2:DVO2Strategy":

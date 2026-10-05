@@ -1,4 +1,4 @@
-"""Shared VIX stress gate and SPMO parking weight for the MR capsule (PM_READY, no live route).
+"""Shared VIX stress gate and SPMO parking weight for the MR capsule.
 
 Research record: docs/research/MR_CAPSULE_20261003.md ("Final capsule specification"), gate studies
 docs/research/MR_GATE_*_20261003.md. Both capsule pods (DV2 and HPI 2/3/5 vote) read the SAME gate.

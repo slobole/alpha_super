@@ -180,7 +180,13 @@ def test_catalog_lists_strategies_and_flags_wired():
     # 41 + the five modules added with the corporate-action fix (fb81e86):
     # two NATR20 NDX variants and three DV2 liquidity/industry-ETF variants;
     # + the sector-capped NDX VXN pair (Scout A15 design of record, 2026-10-04).
-    assert len(capacity_entry_list) == 48
+    # The six DV2/HPI capsule cash/BIL/SPMO entry points expose the same hooks.
+    assert len(capacity_entry_list) == 54
+    assert {
+        f"strategies.mr_capsule.strategy_mr_{family_str}_{parking_str}"
+        for family_str in ("dv2_vix_gated", "hpi_vote_vix_gated")
+        for parking_str in ("cash", "bil", "spmo")
+    }.issubset({entry_obj.module_import_str for entry_obj in capacity_entry_list})
     assert (
         "strategies.mean_reversion.strategy_mr_sector_dispersion_ibs_kie_ihi"
         in {entry_obj.module_import_str for entry_obj in capacity_entry_list}
