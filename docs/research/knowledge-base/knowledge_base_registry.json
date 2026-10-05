@@ -15,9 +15,9 @@
     }
   ],
   "feature_catalog": "pakal-research/knowledge/STRATEGY_FEATURE_CATALOG.md",
-  "record_count": 140,
+  "record_count": 153,
   "schema_version": "quant-research-knowledge-base-v1",
-  "source_record_count": 143,
+  "source_record_count": 156,
   "source_registry_schema": "quant-research-registry-v1",
   "studies": [
     {
@@ -12007,6 +12007,172 @@
       }
     },
     {
+      "CAGR": 0.0540922251434159,
+      "Sharpe": 0.5688599129646511,
+      "adaptive_lineage": null,
+      "artifacts": {
+        "concise_report": "pakal-research/reports/concretum_etf_trend_study/REPORT.md",
+        "frozen_specification": "pakal-research/reports/concretum_etf_trend_study/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/concretum_etf_trend_study/REPORT_FULL.md",
+        "manifest": "pakal-research/reports/concretum_etf_trend_study/run_manifest.json",
+        "notebook": "pakal-research/reports/concretum_etf_trend_study/concretum_etf_trend_study.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/concretum_etf_trend_study/charts/equity_and_drawdown.png",
+          "pakal-research/reports/concretum_etf_trend_study/charts/crisis_windows.png",
+          "pakal-research/reports/concretum_etf_trend_study/charts/down_months_2008_2026.png",
+          "pakal-research/reports/concretum_etf_trend_study/charts/exposure_stack.png",
+          "pakal-research/reports/concretum_etf_trend_study/charts/decomposition.png",
+          "pakal-research/reports/concretum_etf_trend_study/charts/placebo_timing.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/concretum_etf_trend_study/cet_data.py",
+          "pakal-research/concretum_etf_trend_study/cet_lib.py",
+          "pakal-research/concretum_etf_trend_study/cet_run.py",
+          "pakal-research/concretum_etf_trend_study/cet_book.py",
+          "pakal-research/concretum_etf_trend_study/cet_charts.py",
+          "pakal-research/concretum_etf_trend_study/test_cet_timing.py",
+          "pakal-research/concretum_etf_trend_study/cet_build_artifacts.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/concretum_etf_trend_study/tables/snapshot_order_replication.csv",
+          "pakal-research/reports/concretum_etf_trend_study/tables/reproduction_article_window.csv",
+          "pakal-research/reports/concretum_etf_trend_study/tables/main_periods.csv",
+          "pakal-research/reports/concretum_etf_trend_study/tables/crisis_windows.csv",
+          "pakal-research/reports/concretum_etf_trend_study/tables/tests.json",
+          "pakal-research/reports/concretum_etf_trend_study/tables/gates.json",
+          "pakal-research/reports/concretum_etf_trend_study/tables/book_integration.csv"
+        ]
+      },
+      "comfortable_capacity": "~$2.7M (DBE binds)",
+      "concise_report": "pakal-research/reports/concretum_etf_trend_study/REPORT.md",
+      "cost_capacity": {
+        "capacity_impact_separate": true,
+        "central_research_round_trip_bps": 4,
+        "comfortable_capacity": "~$2.7M (DBE binds)",
+        "conservative_survival_round_trip_bps": 10,
+        "hard_capacity": "~$54M",
+        "note": "cost drag 0.12%/yr central, 0.25% conservative; ~4x NAV turnover a year",
+        "paper_like_round_trip_bps": 0,
+        "soft_capacity": "~$13M",
+        "strained_capacity": "~$27M"
+      },
+      "created_at": "2026-10-02T00:00:00+03:00",
+      "decision_timing": "Donchian state and 63d vol at Wednesday Close_T",
+      "disposition": "not_promoted_redundant_with_book",
+      "feature_findings": [
+        {
+          "feature": "Donchian 6/9/12m ensemble with midline exit (k/3 scaling)",
+          "finding": "timing adds down-month defense and ~+0.24-0.31 Sharpe over the same assets untimed at equal exposure; placebo 100th pct"
+        },
+        {
+          "feature": "inverse 63d vol sizing with equal per-ETF risk budget",
+          "finding": "keeps equity ~30% on average but peaks before calm-break shocks (Volmageddon 101% equity in the 150% version)"
+        },
+        {
+          "feature": "inflation-sensitive sleeve replacing bonds",
+          "finding": "small positive in down months (+0.18%/month); adding trend-filtered IEF/TLT is neutral to slightly positive (Sharpe 0.60 vs 0.57); premise 'bonds not needed' not supported"
+        },
+        {
+          "feature": "25% delta-to-target band",
+          "finding": "cuts turnover ~22% (article ~20%) at no performance cost"
+        },
+        {
+          "feature": "150% leverage cap in the text",
+          "finding": "published numbers match a 100% cap; 150% deepens DD -9% -> -13%"
+        },
+        {
+          "feature": "raw Sharpe 1.13 (CAGR/vol, no risk-free)",
+          "finding": "excess Sharpe over SHV is 0.80 on the article window"
+        }
+      ],
+      "fill_timing": "MOC at Close_(T+1) (Thursday); weekday 0-4 and daily signal tested",
+      "hard_capacity": "~$54M",
+      "knowledge_record": "pakal-research/reports/concretum_etf_trend_study/knowledge_record.json",
+      "last_reviewed_at": "2026-10-02T00:00:00+03:00",
+      "limitations": [
+        "budget and band calibrated from one snapshot and one chart",
+        "effective cap differs from the text",
+        "VOO spliced with SPY pre-2010",
+        "post-publication sample one month",
+        "taxes ignored"
+      ],
+      "maximum_drawdown": -0.1296851403424693,
+      "next_test": "none for the book; if wanted as investor-level core, shadow the 100%-cap version with the crisis pod 80/20",
+      "next_tests": [
+        "none for the book; if wanted as investor-level core, shadow the 100%-cap version with the crisis pod 80/20"
+      ],
+      "notebook": "pakal-research/reports/concretum_etf_trend_study/concretum_etf_trend_study.ipynb",
+      "objective": "Reproduce the article's ETF Trend portfolio and test its defensive claim: does it cut losses when equities fall, where does that come from (lower exposure, timing, inflation sleeve, cash), is it a hedge, and does it add anything to the existing book and crisis-trend pod.",
+      "portal_images": [
+        "assets/concretum_etf_trend_study/01-equity_and_drawdown.png",
+        "assets/concretum_etf_trend_study/02-crisis_windows.png"
+      ],
+      "primary_cost_layer": "central_research",
+      "primary_metrics": {
+        "CAGR": 0.0540922251434159,
+        "Sharpe": 0.5688599129646511,
+        "annualized_volatility": 0.0726045863659165,
+        "benchmark": "AOR (spliced proxy before 2008-11)",
+        "benchmark_down_month_mean": -0.0310521386563777,
+        "benchmark_sharpe": 0.4674815965392294,
+        "cost_layer": "central_research (commission + 2 bps per side)",
+        "down_month_mean": -0.0082831443948436,
+        "maximum_drawdown": -0.1296851403424693,
+        "n_trials": 540,
+        "period": "2008-01-03..2026-10-01",
+        "reconciled_CAGR": 0.0543276665988965,
+        "reconciled_Sharpe": 0.6197702455536614,
+        "reconciled_down_month_mean": -0.006868657266204,
+        "reconciled_maxdd": -0.0929605711817997,
+        "turnover": 4.153631719119511,
+        "universe": "article universe; text rule (150% cap) and reconciled 100% cap"
+      },
+      "replication_outcome": "reproduced",
+      "research_status": "diagnostic",
+      "signal_family": "time_series_trend_donchian_ensemble_vol_scaled",
+      "soft_capacity": "~$13M",
+      "sources": [
+        "Concretum Research, Build Your Own ETF Trend Portfolio, Substack 2026-09-04 (paid; PDF in source/)",
+        "pakal-research/reports/crisis_trend_pod_study (crisis windows, pod stream, book streams)"
+      ],
+      "study_id": "concretum_etf_trend_study",
+      "tags": [
+        "etf_trend",
+        "donchian",
+        "inverse_vol",
+        "60_40_replacement",
+        "defensive",
+        "article_audit",
+        "concretum",
+        "diagnostic"
+      ],
+      "timing_attribution": {
+        "artifact": "pakal-research/reports/concretum_etf_trend_study/tables/tests.json",
+        "diagnostic_path": "article monthly table and snapshot orders",
+        "executable_path": "stateful daily engine, MOC next session, 25% band, commission + 2 bps",
+        "headline_result": "D0 vs exposure-matched static in down months +0.73 pp/month (Holm p 0.014); vs AOR +2.3 pp (p<0.001); Sharpe diff +0.24 (p 0.084)",
+        "method": "frozen spec v1/v1.1; T1/T2/T4 bootstrap with Holm; 500-draw circular-shift placebo",
+        "metrics": {
+          "T2_p_holm": 0.0136,
+          "T4_p_holm": 0.0844,
+          "placebo_pct_down": 1.0
+        },
+        "status": "tested",
+        "unavailable_reason": null
+      },
+      "title": "Concretum 'Build Your Own ETF Trend Portfolio' (Donchian 6/9/12m ensemble, inverse-vol global equity + inflation sleeves, SHV cash): replication and defensive-side audit",
+      "universes": [
+        "XLE FEZ VOO EEM EWJ | DBA DBC DBE GLD SLV TIP | SHV cash (VOO=SPY before 2010-09)"
+      ],
+      "verdict": "REPRODUCED; DEFENSIVE ALLOCATION, NOT A HEDGE; REDUNDANT WITH THE BOOK. Rules reproduce the article's 2026-09-03 orders share-for-share and its headline numbers (with a 100% effective leverage cap: 7.6%/6.6% vol/-9.0% DD vs 7.7/6.8/-8.8; monthly corr 0.99). 2008-2026 out of the article window the defense holds: avg -0.7% in SPY<=-2% months vs -3.1% AOR; 2008 +3%, 2022 +4%. Timing adds defense beyond lower exposure (Holm p 0.014, placebo 100th pct). But it loses like the market in fast shocks after calm markets (Feb 2018 -7..-11%, Aug 2024 -5%) because inverse-vol sizing peaks just before them; hit rate on worst 5% SPY days 33%. Pre-2016 excess Sharpe 0.34-0.40 vs 0.55 for 60/40 SPY/IEF. Correlation 0.66 with Defense First and 0.71 with BOOK-A; adding 20% lowers BOOK-A Sharpe 1.13 -> 1.10, while 20% crisis pod raises it to 1.16.",
+      "verdicts": {
+        "economic_value": "standalone 60/40 replacement for a plain investor; no marginal value next to Defense First / BOOK-A",
+        "predictive_value": "trend timing reduces down-month losses beyond exposure (T2 Holm p 0.014; placebo 100th pct)",
+        "promotion": "none for the book; optional as an investor-level 60/40 replacement with the crisis pod (80/20)",
+        "source_replication": "reproduced (orders, weights, correlations, headline stats with 100% effective cap)"
+      }
+    },
+    {
       "CAGR": 0.011471401390131142,
       "Sharpe": 0.17047583202427105,
       "adaptive_lineage": null,
@@ -15230,6 +15396,364 @@
       }
     },
     {
+      "CAGR": 0.07653360130900522,
+      "Sharpe": 0.6321890546949818,
+      "adaptive_lineage": null,
+      "artifacts": {
+        "concise_report": "pakal-research/reports/evrp_dual_signal_vol_sleeve_study/REPORT.md",
+        "frozen_specification": "pakal-research/reports/evrp_dual_signal_vol_sleeve_study/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/evrp_dual_signal_vol_sleeve_study/REPORT_FULL.md",
+        "manifest": "pakal-research/reports/evrp_dual_signal_vol_sleeve_study/run_manifest.json",
+        "notebook": "pakal-research/evrp_dual_signal_vol_sleeve_study.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/evrp_dual_signal_vol_sleeve_study/charts/equity_growth.png",
+          "pakal-research/reports/evrp_dual_signal_vol_sleeve_study/charts/crisis_windows.png",
+          "pakal-research/reports/evrp_dual_signal_vol_sleeve_study/charts/calendar_years_vs_paper.png",
+          "pakal-research/reports/evrp_dual_signal_vol_sleeve_study/charts/book_a_drawdown.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/evrp_dual_signal_vol_sleeve_study.py",
+          "pakal-research/build_evrp_dual_signal_vol_sleeve_artifacts.py",
+          "tests/test_evrp_dual_signal_vol_sleeve_study.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/evrp_dual_signal_vol_sleeve_study/tables/grid_all_cells.csv",
+          "pakal-research/reports/evrp_dual_signal_vol_sleeve_study/tables/comparators.csv",
+          "pakal-research/reports/evrp_dual_signal_vol_sleeve_study/tables/book_integration.csv",
+          "pakal-research/reports/evrp_dual_signal_vol_sleeve_study/tables/calendar_years.csv",
+          "pakal-research/reports/evrp_dual_signal_vol_sleeve_study/tables/gate_evaluation.json"
+        ]
+      },
+      "comfortable_capacity": "SVXY/VIXY ADV is tens of millions USD; a 10% sleeve of a sub-$10M book is far below 1% ADV",
+      "concise_report": "pakal-research/reports/evrp_dual_signal_vol_sleeve_study/REPORT.md",
+      "cost_capacity": {
+        "central_research_one_way_bps": 10,
+        "comfortable_capacity": "SVXY/VIXY ADV is tens of millions USD; a 10% sleeve of a sub-$10M book is far below 1% ADV",
+        "conservative_survival_one_way_bps": 25,
+        "hard_capacity": "not modelled",
+        "paper_like_one_way_bps": 5,
+        "soft_capacity": "not modelled"
+      },
+      "created_at": "2026-10-02T13:38:07+00:00",
+      "decision_timing": "After official Close_T (source: 15:45 snapshot, not reproducible from daily data)",
+      "disposition": "diversifying_sleeve_candidate_not_hedge",
+      "feature_findings": [
+        "The R4 'cash' state (eVRP>0 but VIX>VIX3M) is what avoided Volmageddon and April 2025; the long-vol leg contributed in COVID only.",
+        "VIX/100 sizing of the long leg put 66-78% of NAV in VIXY in March 2020, producing both the +37% window and the two worst days.",
+        "The paper's reported numbers correspond to an effective short-vol exposure of VIX/100 (the Concretum 'x2 on SVXY' convention), not the literal VIX% of a -0.5x index.",
+        "Synthetic -0.5x VIXY tracks real SVXY after 2018-03 with daily corr 0.997 but ~2%/yr lower CAGR (conservative)."
+      ],
+      "fill_timing": "Open_(T+1) primary; Close_(T+1) MOC and same-close diagnostic reported",
+      "hard_capacity": "not modelled",
+      "knowledge_record": "pakal-research/reports/evrp_dual_signal_vol_sleeve_study/knowledge_record.json",
+      "last_reviewed_at": "2026-10-02T13:38:07+00:00",
+      "limitations": [
+        "Paper data (2008-May 2025) overlaps almost the whole test window; only Jun 2025-Sep 2026 is post-publication.",
+        "No 2008: no investable VIX ETP in Norgate before 2011, and the paper's 2008 (+87%) is its largest year.",
+        "Book streams come from crisis_trend_pod_study; BOOK-B contains the NDX-VXN reconstruction with the known split look-ahead and covers only 2019-06..2022-12.",
+        "Cash earns SHY (lost ~4% inside 2022); a T-bill sweep would be slightly better.",
+        "Volmageddon avoidance rests on a 0.28-point VIX/VIX3M margin (luck, not demonstrated edge)."
+      ],
+      "maximum_drawdown": -0.3283971231825601,
+      "next_test": "12-month forward shadow of S4 P at Open_(T+1) next to the crisis pod, logged daily",
+      "next_tests": [
+        "12-month forward shadow of S4 P at Open_(T+1) next to the crisis pod, logged daily",
+        "If shadowed: true 15:45 signal + MOC capture to measure the X0/X2 gap",
+        "Decide sizing convention (P vs Concretum x2) before any shadow starts; do not tune on history"
+      ],
+      "notebook": "pakal-research/evrp_dual_signal_vol_sleeve_study.ipynb",
+      "objective": null,
+      "portal_images": [
+        "assets/evrp_dual_signal_vol_sleeve_study/01-equity_growth.png",
+        "assets/evrp_dual_signal_vol_sleeve_study/02-book_a_drawdown.png"
+      ],
+      "primary_cost_layer": "central_research",
+      "primary_metrics": {
+        "CAGR": 0.07653360130900522,
+        "Sharpe": 0.6321890546949818,
+        "annual_volatility": 0.1298080004988313,
+        "corr_SPY_daily": 0.04443798163448015,
+        "crises_evaluated": "8",
+        "crises_positive": "2",
+        "first_half_CAGR": 0.048861067210969056,
+        "maximum_drawdown": -0.3283971231825601,
+        "noncrisis_CAGR": 0.07153271014963347,
+        "second_half_CAGR": 0.10558668383627423,
+        "turnover_per_year": 5.782031438248389,
+        "worst_1pct_spy_days_mean": 0.012395468093303616,
+        "worst_day": -0.17902759930776016
+      },
+      "replication_outcome": null,
+      "research_status": "forward_hypothesis",
+      "signal_family": "volatility_risk_premium_short_vol_with_term_structure_switch",
+      "soft_capacity": "not modelled",
+      "sources": [
+        "SSRN 5316487 (Aziz, Zarattini et al., The Volatility Edge, 2025-06-23)",
+        "Concretum Research, Automating a Volatility Strategy (2026-06-14)",
+        "pakal-research/reports/crisis_trend_pod_study",
+        "pakal-research/reports/evrp_crisis_tail_hedge_study"
+      ],
+      "study_id": "evrp_dual_signal_vol_sleeve_study",
+      "tags": [
+        "vix",
+        "volatility risk premium",
+        "short volatility",
+        "SVXY",
+        "VXX",
+        "VIXY",
+        "term structure",
+        "tail hedge",
+        "Concretum",
+        "diversifier"
+      ],
+      "timing_attribution": null,
+      "title": "eVRP + VIX term-structure + VIX-sizing volatility sleeve (Aziz/Zarattini, Concretum 2026-06-14): full-strategy replication as crisis hedge and diversifying sleeve",
+      "universes": [
+        "SVXY-like -0.5x short VIX futures (synthetic from VIXY), VIXY; signals SPY, $VIX, $VIX3M; cash SHY"
+      ],
+      "verdict": "NOT A CRISIS HEDGE; DIVERSIFYING SLEEVE CANDIDATE (forward hypothesis). Full eVRP + VIX/VIX3M + VIX-sizing strategy (short a -0.5x VIX-futures product ~92% of days, long VIXY ~3%, cash ~5%) on 2011-02..2026-09, Open_(T+1), 10 bps: CAGR 7.7%, Sharpe 0.63, MDD -32.8%, corr SPY 0.04. Positive in 2 of 8 post-2011 crisis windows (COVID +36.6%, Euro 2011 +4.0%); lost in Volmageddon (-1.0%), Q4 2018, China 2015, 2022 (-8.3%), yen carry (-3.0%) and tariffs 2025 (-2.3%). It sidestepped Volmageddon and April 2025 through the 'cash when premium positive but curve inverted' state, by a 0.28-point VIX/VIX3M margin in Feb 2018; the long-vol leg fired late in April 2025 and in March 2020 produced the worst days (-17.9%, -14.7%). Gates: hedge H1/H2 fail, H3 passes; sleeve D1-D3 pass. Adding 10% improves Sharpe in BOOK-A (1.23->1.29), BOOK-B (1.68->1.75) and BOOK-C (1.22->1.27) with shallower MDD, and keeps more return than 10% of the crisis pod; ex-COVID the improvement shrinks but stays (BOOK-A 1.30->1.34). Concretum notebook sizing (x2 on SVXY) matches the paper's yearly table best (corr 0.95; 11.7%/yr 2012-2025 vs paper 10.5%) and earns 11.9% CAGR, but with corr SPY 0.26 and -12% in 2022. Post-publication (Jun 2025-Sep 2026) +6.6%. Research only; no PAPER/LIVE/allocation.",
+      "verdicts": null
+    },
+    {
+      "CAGR": 0.01657615078656316,
+      "Sharpe": 0.27557309252526296,
+      "adaptive_lineage": {
+        "active_minutes_used": 162,
+        "actual_total_variants": 21919,
+        "declared_total_variants": 21919,
+        "profile": "standard",
+        "rounds_completed": 1,
+        "stop_reason": "Faithful literal baseline plus mechanism controls show no information; the only cost-adjusted gain is turnover, reproduced by shifted gates. No in-scope alternative can change the decision."
+      },
+      "artifacts": {
+        "concise_report": "pakal-research/reports/fh_market_meanness_index_study/REPORT.md",
+        "decision_log": "pakal-research/reports/fh_market_meanness_index_study/decision_log.jsonl",
+        "experiment_ledger": "pakal-research/reports/fh_market_meanness_index_study/experiment_ledger.jsonl",
+        "frozen_specification": "pakal-research/reports/fh_market_meanness_index_study/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/fh_market_meanness_index_study/REPORT_FULL.md",
+        "hypothesis_registry": "pakal-research/reports/fh_market_meanness_index_study/hypothesis_registry.json",
+        "manifest": "pakal-research/reports/fh_market_meanness_index_study/run_manifest.json",
+        "notebook": "pakal-research/reports/fh_market_meanness_index_study/fh_market_meanness_index_study.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/fh_market_meanness_index_study/charts/math_what_mmi_measures.png",
+          "pakal-research/reports/fh_market_meanness_index_study/charts/real_vs_shuffled_mmi.png",
+          "pakal-research/reports/fh_market_meanness_index_study/charts/intraday_h1_placebo.png",
+          "pakal-research/reports/fh_market_meanness_index_study/charts/intraday_success_rate.png",
+          "pakal-research/reports/fh_market_meanness_index_study/charts/intraday_reality_check.png",
+          "pakal-research/reports/fh_market_meanness_index_study/charts/es_h1_mmi_gate_example.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/fh_market_meanness_index/mmi_lib.py",
+          "pakal-research/fh_market_meanness_index/mmi_data.py",
+          "pakal-research/fh_market_meanness_index/mmi_sim.py",
+          "pakal-research/fh_market_meanness_index/mmi_run_cells.py",
+          "pakal-research/fh_market_meanness_index/mmi_analyze.py",
+          "pakal-research/fh_market_meanness_index/mmi_econ_placebo.py",
+          "pakal-research/fh_market_meanness_index/mmi_charts.py",
+          "pakal-research/fh_market_meanness_index/test_mmi_timing.py",
+          "pakal-research/fh_market_meanness_index/mmi_build_artifacts.py",
+          "pakal-research/fh_market_meanness_index/mmi_lineage.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/fh_market_meanness_index_study/tables/math_mmi_simulations.csv",
+          "pakal-research/reports/fh_market_meanness_index_study/tables/math_real_vs_surrogate.csv",
+          "pakal-research/reports/fh_market_meanness_index_study/tables/intraday_h1_h2_placebo.csv",
+          "pakal-research/reports/fh_market_meanness_index_study/tables/intraday_success_rate.csv",
+          "pakal-research/reports/fh_market_meanness_index_study/tables/intraday_reality_check.csv",
+          "pakal-research/reports/fh_market_meanness_index_study/tables/intraday_econ_placebo.csv",
+          "pakal-research/reports/fh_market_meanness_index_study/tables/daily_h1_h2_placebo.csv",
+          "pakal-research/reports/fh_market_meanness_index_study/tables/spx_h1_h2_placebo.csv",
+          "pakal-research/reports/fh_market_meanness_index_study/tables/intraday_timing_attribution.csv"
+        ],
+        "research_state": "pakal-research/reports/fh_market_meanness_index_study/research_state.json",
+        "source_rule_map": "pakal-research/reports/fh_market_meanness_index_study/SOURCE_RULE_MAP.md"
+      },
+      "comfortable_capacity": "not applicable (rejected)",
+      "concise_report": "pakal-research/reports/fh_market_meanness_index_study/REPORT.md",
+      "cost_capacity": {
+        "capacity_impact_separate": true,
+        "central_research_round_trip_bps": 1.5,
+        "comfortable_capacity": "not applicable (rejected)",
+        "conservative_survival_round_trip_bps": 3,
+        "hard_capacity": "not applicable",
+        "note": "round trips in ES-equivalent bps; per asset: futures 1 (2) tick + $2.5 per side, BTC 5 (10) bps, ETFs 2 (5) bps per side; most M15 systems lose at central cost with or without MMI",
+        "paper_like_round_trip_bps": 0,
+        "soft_capacity": "not applicable",
+        "strained_capacity": "not applicable"
+      },
+      "created_at": "2026-10-03T00:00:00+03:00",
+      "decision_timing": "filter, MMI and gate from bars completed at Close_t",
+      "disposition": "rejected",
+      "feature_findings": [
+        {
+          "corrected_significance": "not applicable (math identity)",
+          "direction": "none",
+          "economic_mechanism": "rank estimate of lag-1 autocorrelation: 50 + 100*arccos(rho)/2pi",
+          "effect_size": "0.8 pts per 0.05 lag-1 autocorrelation vs 2.2 pts sampling sd (N=300)",
+          "feature": "MMI of returns",
+          "period_consistency": "real = shuffled in every asset/timeframe",
+          "recommended_action": "do not use as a regime input",
+          "role": "regime",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "not applicable (math)",
+          "direction": "none",
+          "economic_mechanism": "share of steps toward the window median; blind to drift",
+          "effect_size": "50-53% for any random walk incl. drift; momentum rho 0.3 -> -0.7 pts",
+          "feature": "MMI of prices",
+          "period_consistency": "real = shuffled",
+          "recommended_action": "do not use as a trend detector",
+          "role": "regime",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "Holm p 1.0 vs 100 time-shifted gates; RC MMI-only p 0.26",
+          "direction": "negative",
+          "economic_mechanism": "no trend-regime information; gate only changes holding periods",
+          "effect_size": "median PF -1.5..-3.4%; profitable share 67.0% -> 51.4%",
+          "feature": "falling(LowPass(MMI(price),N)) gate on 840 intraday trend systems",
+          "period_consistency": "negative in both halves (2017-21, 2022-26)",
+          "recommended_action": "reject; do not re-test variants on the same panels",
+          "role": "filter",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "Holm p >= 0.48",
+          "direction": "none",
+          "economic_mechanism": "noisy lag-1 autocorrelation",
+          "effect_size": "median PF -1.6..+0.5%",
+          "feature": "falling MMI gate on price differences",
+          "period_consistency": "mixed",
+          "recommended_action": "reject",
+          "role": "filter",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "real beats shifted median in 25-50% of cells",
+          "direction": "positive",
+          "economic_mechanism": "~57% fewer trades, not timing",
+          "effect_size": "ensemble Sharpe +0.04..+0.15 at central cost (shifted gates +0.01..+0.11)",
+          "feature": "cost saving of a 50%-duty trade gate",
+          "period_consistency": "cell-dependent",
+          "recommended_action": "use slower filters if turnover is the issue",
+          "role": "turnover_control",
+          "status": "diagnostic"
+        },
+        {
+          "corrected_significance": "RC base family p 0.007 gross; 0.30 at central cost",
+          "direction": "positive",
+          "economic_mechanism": "short-horizon crypto trend before costs",
+          "effect_size": "gross detrended Sharpe ~1.1 (t 3.9)",
+          "feature": "BTC 15m peak/valley trend (LinearReg 100), unfiltered",
+          "period_consistency": "not assessed by half",
+          "recommended_action": "not tradable at 5 bps per side; no follow-up",
+          "role": "signal",
+          "status": "diagnostic"
+        }
+      ],
+      "fill_timing": "Open_(t+1) of the same timeframe ($SPX diagnostic: Close_(t+1))",
+      "hard_capacity": "not applicable",
+      "knowledge_record": "pakal-research/reports/fh_market_meanness_index_study/knowledge_record.json",
+      "last_reviewed_at": "2026-10-04T03:10:00+03:00",
+      "limitations": [
+        "EUR/USD and silver intraday unavailable; ES/NQ/GC/BTC substituted",
+        "source window 2010-2015 not rebuildable intraday",
+        "Zorro 'most robust' parameter selection approximated by a neighbourhood-PF rule",
+        "price() proxied by OHLC4; Laguerre alpha 4/Period",
+        "roll detection misses small zero-rate rolls"
+      ],
+      "maximum_drawdown": -0.08658509847826756,
+      "next_test": "none; do not re-test MMI variants (level thresholds, other smoothers) on the same panels",
+      "next_tests": [
+        "none; do not re-test MMI variants (level thresholds, other smoothers) on the same panels"
+      ],
+      "notebook": "pakal-research/reports/fh_market_meanness_index_study/fh_market_meanness_index_study.ipynb",
+      "objective": "Test whether the MMI (share of consecutive pairs reverting toward the window median; trade only while LowPass(MMI) is falling) identifies trend regimes and improves trend-following systems, as claimed for 2010-2015 (success rate +2..+9 pts everywhere, best system passes White's Reality Check at p 0.02).",
+      "portal_images": [
+        "assets/fh_market_meanness_index_study/01-es_h1_mmi_gate_example.png",
+        "assets/fh_market_meanness_index_study/02-intraday_h1_placebo.png"
+      ],
+      "primary_cost_layer": "paper_like",
+      "primary_metrics": {
+        "CAGR": 0.01657615078656316,
+        "Sharpe": 0.27557309252526296,
+        "annualized_volatility": 0.05965845875501009,
+        "central_gated_CAGR": -0.08992386932531504,
+        "central_gated_Sharpe": -1.5734185519241006,
+        "central_ungated_CAGR": -0.16338291474329425,
+        "central_ungated_Sharpe": -1.449238790306098,
+        "cost_layer": "paper_like (gross, detrended; source convention)",
+        "maximum_drawdown": -0.08658509847826756,
+        "median_pf_ratio_mmi_price": 0.975,
+        "n_trials": 21919,
+        "period": "2017-06-01..2026-08-19 (BTC 2018-09-01..2026-09-30)",
+        "share_systems_improved_mmi_price": 0.378,
+        "turnover": 277.5037150335962,
+        "turnover_unit": "round trips per system per year",
+        "ungated_CAGR": 0.07016400851196325,
+        "ungated_Sharpe": 0.5546793382654311,
+        "ungated_maximum_drawdown": -0.1326418454371171,
+        "ungated_turnover": 623.082557869354,
+        "universe": "equal-weight book of all eligible intraday peak/valley systems (12 cells), MMI(price) gated, 4 windows equal-weighted"
+      },
+      "replication_outcome": "not_reproducible",
+      "research_status": "diagnostic",
+      "signal_family": "regime_filter_serial_correlation_median_reversion",
+      "soft_capacity": "not applicable",
+      "sources": [
+        "https://financial-hacker.com/the-market-meanness-index/ (2015-09-21, addendum 2022) with 139 comments",
+        "https://financial-hacker.com/boosting-systems-by-trade-filtering/ (2015-09-28) with 34 comments",
+        "https://financial-hacker.com/trend-delusion-or-reality/ (2015-09-04)"
+      ],
+      "study_id": "fh_market_meanness_index_study",
+      "tags": [
+        "market_meanness_index",
+        "regime_filter",
+        "trend_following",
+        "autocorrelation",
+        "financial_hacker",
+        "zorro",
+        "white_reality_check",
+        "article_audit",
+        "rejected"
+      ],
+      "timing_attribution": {
+        "artifact": "pakal-research/reports/fh_market_meanness_index_study/tables/intraday_timing_attribution.csv",
+        "diagnostic_path": "math simulations and real-vs-shuffled MMI distributions",
+        "executable_path": "gated peak/valley engine, next-open fills, gross detrended (source convention) plus central/conservative costs",
+        "headline_result": "MMI(price) median PF change -1.5..-3.4%, placebo percentile 3-29%, Holm p 1.0; success rate 67.0% -> 51.4%",
+        "method": "frozen spec v1; paired delta log PF; 100 circular-shift placebo gates per gate x cell with Holm across 4 gates; conditional edge of ungated systems; White Reality Check (studentized, stationary bootstrap B=1000); 20-shift placebo for cost-adjusted ensembles",
+        "metrics": {
+          "close_fill_median_pf_ratio_price": 0.974,
+          "h1_price_median_dlogpf_max": -0.0153,
+          "h1_price_median_dlogpf_min": -0.0337,
+          "h1_price_p_holm_min": 1.0,
+          "h2_price_p_holm_min": 1.0,
+          "open_fill_median_pf_ratio_price": 0.975,
+          "rc_p_base_central": 0.303,
+          "rc_p_base_gross": 0.007,
+          "rc_p_mmi_only_price_gross": 0.258,
+          "success_rate_base": 0.67,
+          "success_rate_mmi_price": 0.514
+        },
+        "status": "tested",
+        "unavailable_reason": null
+      },
+      "title": "Market Meanness Index (financial-hacker.com, jcl 2015): trend-regime filter for 900-style peak/valley trend systems - math audit and post-publication replication",
+      "universes": [
+        "ES, NQ, GC 15-minute continuous futures (roll-adjusted) 2017-06-01..2026-08-19; BTC/USDT 15m 2018-09-01..2026-09-30; M15/H1/H4",
+        "SPY QQQ IWM EFA EEM TLT IEF GLD SLV USO DBC FXE FXY VNQ daily (inception+2y..2026-10-02); $SPX 1930..2026 diagnostic"
+      ],
+      "verdict": "REJECTED. The 75% rule is correct, but MMI(returns) is exactly 50 + 100*arccos(rho1)/(2*pi) of the lag-1 autocorrelation (sampling sd 2.2 pts at N=300 vs 0.8 pts per 0.05 of rho) and MMI(price) is ~50-53% for any random walk with or without drift; on ES/NQ/GC/BTC it is indistinguishable from shuffled returns. Post-publication replication 2017-2026 on 840 intraday trend systems (10 filters x M15/H1/H4 x ES/NQ/GC/BTC, literal Zorro ports, detrended, gross): the MMI(price) gate lowers median profit factor by 1.5-3.4%, improves 32-43% of systems, ranks at the 3rd-29th percentile of 100 time-shifted copies of itself (Holm p 1.0), carries no conditional information (Holm p 1.0), and cuts the share of profitable systems from 67.0% to 51.4% (source claimed +2..+9 pts). No MMI family passes the reality check (p 0.26 gross); the only gross pass is an unfiltered BTC 15m trend system that fails at central cost. Daily ETFs (700 systems) and $SPX 1930+ show the same null with sign flips across MMI windows. Cost-adjusted ensemble gains (+0.04..+0.15 Sharpe) equal those of shifted gates: they come from ~57% fewer trades, not timing.",
+      "verdicts": {
+        "economic_value": "none beyond trading less (placebo gates give the same cost saving)",
+        "predictive_value": "none: real gate below median of time-shifted placebo; conditional edge ~0 sd (slightly negative for N=400/500)",
+        "promotion": "none; do not use as a trend filter; no shadow",
+        "source_replication": "not reproducible out of sample; success-rate claim reversed (-15.7 pts); three reader replications in the comments (2017, 2019) also failed"
+      }
+    },
+    {
       "CAGR": 0.005501334999409968,
       "Sharpe": 0.29190914830861836,
       "adaptive_lineage": null,
@@ -15832,6 +16356,160 @@
         "predictive_value": "residual vs raw reversal: small gain in 2013-19 only; negative in 2000-12 (REV5) and 2020-26 (all); the industry component of the 5-day move reverts in all periods",
         "promotion": "none; optional forward paper test of VIX-gated weekly sector-ETF reversal with MOC fills",
         "source_replication": "directionally_replicated (Close 18.2%/1.18 vs source 18.5%/1.33; EW benchmark exact; next-open 16.1%/1.06; 1999-2018 0.79 vs EW 0.51)"
+      }
+    },
+    {
+      "CAGR": 0.1842279455766191,
+      "Sharpe": 1.2026057908625114,
+      "adaptive_lineage": null,
+      "artifacts": {
+        "concise_report": "pakal-research/reports/gqr_dual_momentum_audit/REPORT.md",
+        "frozen_specification": "pakal-research/reports/gqr_dual_momentum_audit/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/gqr_dual_momentum_audit/REPORT_FULL.md",
+        "manifest": "pakal-research/reports/gqr_dual_momentum_audit/run_manifest.json",
+        "notebook": "pakal-research/reports/gqr_dual_momentum_audit/gqr_dual_momentum_audit.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/gqr_dual_momentum_audit/charts/equity_drawdown_splice.png",
+          "pakal-research/reports/gqr_dual_momentum_audit/charts/equity_drawdown_spot.png",
+          "pakal-research/reports/gqr_dual_momentum_audit/charts/schedule_sweep.png",
+          "pakal-research/reports/gqr_dual_momentum_audit/charts/cap_raw_vs_excess.png",
+          "pakal-research/reports/gqr_dual_momentum_audit/charts/holdout_2026.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/gqr_dual_momentum_audit/gdm_data.py",
+          "pakal-research/gqr_dual_momentum_audit/gdm_lib.py",
+          "pakal-research/gqr_dual_momentum_audit/gdm_run.py",
+          "pakal-research/gqr_dual_momentum_audit/gdm_charts.py",
+          "pakal-research/gqr_dual_momentum_audit/test_gdm_timing.py",
+          "pakal-research/gqr_dual_momentum_audit/gdm_build_artifacts.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/gqr_dual_momentum_audit/tables/reproduction_paper.csv",
+          "pakal-research/reports/gqr_dual_momentum_audit/tables/main_periods.csv",
+          "pakal-research/reports/gqr_dual_momentum_audit/tables/bootstrap_family.csv",
+          "pakal-research/reports/gqr_dual_momentum_audit/tables/schedule_sweep.csv",
+          "pakal-research/reports/gqr_dual_momentum_audit/tables/cap_grid.csv"
+        ]
+      },
+      "comfortable_capacity": "~$31M AUM (1% of IBIT ADV63 at p99 daily turnover)",
+      "concise_report": "pakal-research/reports/gqr_dual_momentum_audit/REPORT.md",
+      "cost_capacity": {
+        "capacity_impact_separate": true,
+        "central_research_round_trip_bps": 20,
+        "comfortable_capacity": "~$31M AUM (1% of IBIT ADV63 at p99 daily turnover)",
+        "conservative_survival_round_trip_bps": 40,
+        "hard_capacity": "~$313M",
+        "note": "~9x NAV one-way turnover a year; daily cap resizing drives it",
+        "paper_like_round_trip_bps": 0,
+        "soft_capacity": "~$78M",
+        "strained_capacity": "~$157M"
+      },
+      "created_at": "2026-10-01T00:00:00+03:00",
+      "decision_timing": "signal at Close_T on weekly Monday decision closes (32 schedules swept); vol cap recomputed every Close_T",
+      "disposition": "rejected",
+      "feature_findings": [
+        {
+          "feature": "relative ranking between two assets",
+          "finding": "removing it lowers vol and DD, lowers CAGR ~2.6 pp; Sharpe gain not significant"
+        },
+        {
+          "feature": "absolute 21/42/63d trend filter (hold-both)",
+          "finding": "beats static capped 50/50 in-sample on GBTC splice (P=0.82), not on spot (P=0.49)"
+        },
+        {
+          "feature": "per-asset 20% vol cap",
+          "finding": "main value: excess Sharpe ~0.94 -> ~1.19 and DD -63% -> -20%; cap level 10-25% flat on excess Sharpe"
+        },
+        {
+          "feature": "max(21d,63d) vol estimator",
+          "finding": "no effect (+0.01 / -0.02 Sharpe)"
+        },
+        {
+          "feature": "raw Sharpe without risk-free",
+          "finding": "inflates cash-heavy variants; tighter caps look better only on raw Sharpe"
+        }
+      ],
+      "fill_timing": "Open_(T+1) primary; Close_(T+1) and paper Close_T as robustness",
+      "hard_capacity": "~$313M",
+      "knowledge_record": "pakal-research/reports/gqr_dual_momentum_audit/knowledge_record.json",
+      "last_reviewed_at": "2026-10-01T00:00:00+03:00",
+      "limitations": [
+        "rebalance weekday, cap scope and lag unspecified by source",
+        "fifth article rule row unreadable (assumed static 50/50)",
+        "spot BTC is an index proxy before 2024",
+        "holdout only 187 sessions",
+        "taxes ignored"
+      ],
+      "maximum_drawdown": -0.1761910507444455,
+      "next_test": "optional monthly shadow log of original / improved / static capped through 2027",
+      "next_tests": [
+        "optional monthly shadow log of original / improved / static capped through 2027"
+      ],
+      "notebook": "pakal-research/reports/gqr_dual_momentum_audit/gqr_dual_momentum_audit.ipynb",
+      "objective": "Reproduce the article's Bitcoin/gold dual-momentum decomposition, test its 'improved' hold-both + max(21,63)d vol rule, and add the missing control: a static 50/50 with the same cap.",
+      "portal_images": [
+        "assets/gqr_dual_momentum_audit/01-equity_drawdown_splice.png",
+        "assets/gqr_dual_momentum_audit/02-equity_drawdown_spot.png"
+      ],
+      "primary_cost_layer": "central_research",
+      "primary_metrics": {
+        "CAGR": 0.1842279455766191,
+        "Sharpe": 1.2026057908625114,
+        "annualized_volatility": 0.1272804616105488,
+        "benchmark": "original rule, same fills and costs",
+        "benchmark_sharpe": 1.151429519556423,
+        "cost_layer": "central_research (10 bps one-way)",
+        "holdout_2026_return_improved": -0.031,
+        "holdout_2026_return_original": 0.066,
+        "maximum_drawdown": -0.1761910507444455,
+        "n_trials": 866,
+        "period": "2018-01-02..2025-12-31",
+        "turnover": 9.453227608078857,
+        "universe": "GBTC->IBIT, GLD, BIL; improved rule (hold-both 21/42/63, max(21,63)d vol, 20% per-asset cap)"
+      },
+      "replication_outcome": "reproduced_with_material_caveats",
+      "research_status": "diagnostic",
+      "signal_family": "cross_asset_absolute_momentum_vol_capped",
+      "soft_capacity": "~$78M",
+      "sources": [
+        "GQResearch, Dual Momentum Without the Dual, Substack 2026-09-09",
+        "Valuelytica, Golden Dual-Momentum Rotation",
+        "Vojtko & Dujava, Quantpedia, Dual Momentum Allocation Between Physical Gold and Bitcoin",
+        "pakal-research/reports/bitcoin_gold_dual_momentum_signal_study (prior internal study)"
+      ],
+      "study_id": "gqr_dual_momentum_audit",
+      "tags": [
+        "bitcoin",
+        "gold",
+        "dual_momentum",
+        "absolute_momentum",
+        "vol_cap",
+        "article_audit",
+        "diagnostic"
+      ],
+      "timing_attribution": {
+        "artifact": "pakal-research/reports/gqr_dual_momentum_audit/tables/bootstrap_family.csv",
+        "diagnostic_path": "paper Close_T fills (article convention)",
+        "executable_path": "stateful daily engine, Open_(T+1), 10 bps per unit one-way turnover",
+        "headline_result": "improved vs original P=0.55 (splice) / 0.80 (spot); improved vs static capped P=0.82 / 0.49",
+        "method": "frozen spec v1, 866 engine runs, primary family H1-H6 paired block bootstrap with Holm",
+        "metrics": {
+          "H2_p_a_gt_b_splice": 0.5501,
+          "H5_p_a_gt_b_spot": 0.4931
+        },
+        "status": "tested",
+        "unavailable_reason": null
+      },
+      "title": "GQResearch 'Dual Momentum Without the Dual' audit: Bitcoin/gold trend filter + per-asset 20% vol cap",
+      "universes": [
+        "BTC leg (GBTC->IBIT splice; Binance spot 16:00 ET), GLD, BIL cash"
+      ],
+      "verdict": "DIAGNOSTIC - risk transformation, not alpha. The source reproduces closely (original 21.8%/1.34 raw/-19% vs 20.4%/1.28/-21%). Hold-both beats winner-take-all on 30-32 of 32 schedules in-sample but with lower CAGR (18.4% vs 21.0% executable) and only 55-80% bootstrap wins (claimed 96%); the faster vol estimator adds nothing. On spot BTC the original does not beat a static 50/50 with the same cap. The 'tighter cap is better' result is a raw-Sharpe artefact. In the Jan-Sep 2026 holdout the improved rule lost 3.1% while the original gained 6.6%. Pre-registered rule failed (a) and (b).",
+      "verdicts": {
+        "economic_value": "per-asset vol cap is the value; signal choice is noise-level",
+        "predictive_value": "trend filter reduces drawdown; incremental Sharpe over a capped static mix not significant",
+        "promotion": "none; optional shadow log of original / improved / static capped",
+        "source_replication": "reproduced (paper fills); vol estimator claim not reproduced"
       }
     },
     {
@@ -19915,6 +20593,208 @@
       }
     },
     {
+      "CAGR": 0.1494282975751704,
+      "Sharpe": 0.7080281230069728,
+      "adaptive_lineage": {
+        "active_minutes_used": 150,
+        "actual_total_variants": 91,
+        "declared_total_variants": 91,
+        "profile": "standard",
+        "rounds_completed": 0,
+        "stop_reason": "primary statistical, economic and risk rules failed out of sample; no materially different mechanism with untouched data",
+        "unique_variants": 45
+      },
+      "artifacts": {
+        "concise_report": "pakal-research/reports/moving_average_distance_study/REPORT.md",
+        "decision_log": "pakal-research/reports/moving_average_distance_study/decision_log.jsonl",
+        "experiment_ledger": "pakal-research/reports/moving_average_distance_study/experiment_ledger.jsonl",
+        "frozen_specification": "pakal-research/reports/moving_average_distance_study/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/moving_average_distance_study/REPORT_FULL.md",
+        "hypothesis_registry": "pakal-research/reports/moving_average_distance_study/hypothesis_registry.json",
+        "manifest": "pakal-research/reports/moving_average_distance_study/run_manifest.json",
+        "notebook": "pakal-research/moving_average_distance_study.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/moving_average_distance_study/charts/fm_tstats_by_period.png",
+          "pakal-research/reports/moving_average_distance_study/charts/r1000_books_equity_drawdown.png",
+          "pakal-research/reports/moving_average_distance_study/charts/spread_cumulative.png",
+          "pakal-research/reports/moving_average_distance_study/charts/yearly_excess_vs_ew.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/moving_average_distance/mad_lib.py",
+          "pakal-research/moving_average_distance/mad_stage1_diagnostics.py",
+          "pakal-research/moving_average_distance/mad_stage2_books.py",
+          "pakal-research/moving_average_distance/mad_stage3_concentration.py",
+          "pakal-research/moving_average_distance/mad_multiplicity.py",
+          "pakal-research/moving_average_distance/mad_charts.py",
+          "pakal-research/moving_average_distance/mad_record.py",
+          "pakal-research/moving_average_distance/mad_build_artifacts.py",
+          "pakal-research/moving_average_distance/test_mad_timing.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/moving_average_distance_study/tables/f1_f2_fama_macbeth_all.csv",
+          "pakal-research/reports/moving_average_distance_study/tables/f1_f2_holm.csv",
+          "pakal-research/reports/moving_average_distance_study/tables/f4_book_stats_all.csv",
+          "pakal-research/reports/moving_average_distance_study/tables/stage3_suddenness_concentration.csv"
+        ],
+        "research_state": "pakal-research/reports/moving_average_distance_study/research_state.json",
+        "source_rule_map": "pakal-research/reports/moving_average_distance_study/SOURCE_RULE_MAP.md"
+      },
+      "comfortable_capacity": "up to about $10M (P90 participation 0.3%)",
+      "concise_report": "pakal-research/reports/moving_average_distance_study/REPORT.md",
+      "cost_capacity": {
+        "capacity_impact_separate": true,
+        "central_research_round_trip_bps": 20,
+        "comfortable_capacity": "up to about $10M (P90 participation 0.3%)",
+        "conservative_survival_round_trip_bps": 50,
+        "hard_capacity": null,
+        "note": "hypothetical square-root stress; strategy rejected on edge, not cost",
+        "paper_like_round_trip_bps": 4,
+        "soft_capacity": "about $100M (P99 participation 12%)",
+        "strained_capacity": null
+      },
+      "created_at": "2026-10-02T00:05:00+03:00",
+      "decision_timing": "Close_t, last session of each month",
+      "disposition": "rejected",
+      "feature_findings": [
+        {
+          "corrected_significance": "Holm p 0.011 discovery, 1.0 validation",
+          "direction": "positive",
+          "economic_mechanism": "trend/momentum restatement",
+          "effect_size": "0.29%/month per sd 1991-2018, 0.14 2019-2026",
+          "feature": "MRAT = MA21/MA200 (continuous)",
+          "period_consistency": "1991-2000 only",
+          "recommended_action": "do not use beyond 12-1 momentum",
+          "role": "rank",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "Holm p 0.019 discovery, 1.0 validation",
+          "direction": "positive",
+          "economic_mechanism": "anchoring claimed; behaves like momentum",
+          "effect_size": "0.30%/month 1991-2018 with controls; 0.15 2019-2026",
+          "feature": "MAD discrete (decile + 1 sigma)",
+          "period_consistency": "1991-2000 only",
+          "recommended_action": "none",
+          "role": "signal",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "not significant after correction",
+          "direction": "positive",
+          "economic_mechanism": "bubble/meme participation more than underreaction",
+          "effect_size": "+0.25%/month (t 1.4) and +0.61%/month (t 1.6) EW",
+          "feature": "SuddenUp / sudden-minus-gradual",
+          "period_consistency": "1990s and 2019-2026, flat 2001-2018",
+          "recommended_action": "forward diagnostic only",
+          "role": "filter",
+          "status": "forward_hypothesis"
+        },
+        {
+          "corrected_significance": "Holm p 0.23 / 1.0",
+          "direction": "positive",
+          "economic_mechanism": "short-horizon jump",
+          "effect_size": "t 1.7 discovery, 0.46 validation",
+          "feature": "dMRAT (user x2)",
+          "period_consistency": "1990s only",
+          "recommended_action": "none",
+          "role": "signal",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "Holm p 0.13 / 1.0",
+          "direction": "positive",
+          "economic_mechanism": "coarse trend exposure",
+          "effect_size": "t 2.4 discovery, 1.4 validation",
+          "feature": "Golden cross level dummy",
+          "period_consistency": "weak",
+          "recommended_action": "none",
+          "role": "diagnostic",
+          "status": "diagnostic"
+        }
+      ],
+      "fill_timing": "Open_T+1",
+      "hard_capacity": null,
+      "knowledge_record": "pakal-research/reports/moving_average_distance_study/knowledge_record.json",
+      "last_reviewed_at": "2026-10-02T00:38:51+03:00",
+      "limitations": [
+        "paper text inaccessible; rules from commentary",
+        "R3000 instead of all CRSP, sample from 1991",
+        "no market cap (ADV-weighted VW proxy)",
+        "no accounting controls",
+        "FF3 + own UMD instead of FF5 + UMD",
+        "2019-2026 previously seen for related momentum signals in this workspace"
+      ],
+      "maximum_drawdown": -0.6005678190831938,
+      "next_test": "optional forward diagnostic: EW sudden-minus-gradual inside the top MRAT decile from 2026-10; kill if 24-month t < 1",
+      "next_tests": [
+        "optional forward diagnostic: EW sudden-minus-gradual inside the top MRAT decile from 2026-10; kill if 24-month t < 1"
+      ],
+      "notebook": "pakal-research/moving_average_distance_study.ipynb",
+      "objective": "Does MRAT/MAD predict US stock returns beyond momentum and the 52-week high, out of the paper's sample, and does a liquid long-only top-MRAT book beat EW and momentum after costs?",
+      "portal_images": [
+        "assets/moving_average_distance_study/01-r1000_books_equity_drawdown.png",
+        "assets/moving_average_distance_study/02-fm_tstats_by_period.png"
+      ],
+      "primary_cost_layer": "central_research",
+      "primary_metrics": {
+        "CAGR": 0.1494282975751704,
+        "Sharpe": 0.7080281230069728,
+        "annualized_volatility": 0.2363561240912647,
+        "cost_layer": "central_research 10 bps per side",
+        "maximum_drawdown": -0.6005678190831938,
+        "period": "1991-07..2026-09 (validation 2019-01..2026-09)",
+        "primary_fm_test_validation_t": 0.67,
+        "turnover": 2.563846084640548,
+        "universe": "U_R1000L, MRAT top decile, 3-month tranches",
+        "validation_alpha_t": 0.1344317244582145,
+        "validation_alpha_vs_ew_mom": 0.0032961966159926,
+        "validation_sharpe": 0.8005888065804498
+      },
+      "replication_outcome": "directionally_replicated",
+      "research_status": "diagnostic",
+      "signal_family": "cross_sectional_momentum_trend",
+      "soft_capacity": "about $100M (P99 participation 12%)",
+      "sources": [
+        "https://aligrithm.com/moving-average-distance-the-technical-indicator-that-passed-the-cross-section/",
+        "Avramov, Kaplanski, Subrahmanyam (2021) Review of Financial Economics 39(2):127-145, SSRN 3111334",
+        "user note 2026-10-01"
+      ],
+      "study_id": "moving_average_distance_study",
+      "tags": [
+        "momentum",
+        "moving_average",
+        "trend",
+        "paper_replication",
+        "us_equities",
+        "rejected"
+      ],
+      "timing_attribution": {
+        "artifact": "pakal-research/reports/moving_average_distance_study/tables/timing_attribution_all.csv",
+        "diagnostic_path": "Close_t to Open_(t'+1)",
+        "executable_path": "Open_(t+1) to Open_(t'+1)",
+        "headline_result": "about 0.13%/month of the top-decile return is the entry overnight gap; excess over the universe changes little (0.50 vs 0.44%/month full period)",
+        "method": "same-exit comparison of the EW top decile and its excess over the universe",
+        "metrics": {
+          "d10_minus_univ_diag_full": 0.504,
+          "d10_minus_univ_exec_full": 0.442,
+          "overnight_gap_pct_month_full": 0.127
+        },
+        "status": "tested"
+      },
+      "title": "Moving Average Distance (MA21/MA200, Avramov-Kaplanski-Subrahmanyam) on US PIT universes",
+      "universes": [
+        "Russell 3000 PIT $5+ (diagnostics)",
+        "S&P 500, Russell 1000, Russell 3000 PIT with ADV >= $5M (books)"
+      ],
+      "verdict": "REJECTED. MRAT reproduces in construction and works in 1991-2000, is flat 2001-2018, and fails out of sample 2019-2026 (primary FM t 0.67). The R1000 top-decile book is ~0.85x a momentum book: Sharpe 0.80 vs momentum 0.83 vs EW 0.66 OOS; alpha vs [EW, MOM] +0.3%/yr (t 0.13). Suddenness is weakly positive but concentrated in bubble names/years; forward hypothesis only.",
+      "verdicts": {
+        "economic_value": "none beyond 12-1 momentum after costs in S&P 500, R1000 or liquid R3000",
+        "predictive_value": "positive 1991-2000, flat 2001-2018, insignificant 2019-2026 (all 11 family tests Holm p = 1)",
+        "promotion": "none; suddenness frozen as forward diagnostic only",
+        "source_replication": "directionally replicated: same construction (mean 1.04, turnover 34%) and sign; momentum not subsumed; suddenness explains less"
+      }
+    },
+    {
       "CAGR": 0.0019,
       "Sharpe": 0.136,
       "adaptive_lineage": null,
@@ -20986,6 +21866,194 @@
         "predictive_value": "PC1 concentration was real but matrix-dependent; correlation PCA explained about 52%-53%, while covariance PCA explained about 61%-69%.",
         "promotion": "Diagnostic only. No PAPER, LIVE, broker, scheduler, allocation, release, or capital authority.",
         "source_replication": "Directionally replicated only: the tactical ETF proxy beat its local offense and defense sleeves, but 9.56% optimistic next-open CAGR did not match the source's 14.1% and exact index extensions were unavailable."
+      }
+    },
+    {
+      "CAGR": 0.044642301947685814,
+      "Sharpe": 0.4407424474020706,
+      "adaptive_lineage": {
+        "active_minutes_used": 85,
+        "actual_total_variants": 83,
+        "declared_total_variants": 83,
+        "profile": "standard",
+        "rounds_completed": 0,
+        "stop_reason": "Frozen tests decisive; economics gate fails; prior August studies already closed the tradable routes."
+      },
+      "artifacts": {
+        "concise_report": "pakal-research/reports/ppc_spanning_oos/REPORT.md",
+        "decision_log": "pakal-research/reports/ppc_spanning_oos/decision_log.jsonl",
+        "experiment_ledger": "pakal-research/reports/ppc_spanning_oos/experiment_ledger.jsonl",
+        "frozen_specification": "pakal-research/reports/ppc_spanning_oos/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/ppc_spanning_oos/REPORT_FULL.md",
+        "hypothesis_registry": "pakal-research/reports/ppc_spanning_oos/hypothesis_registry.json",
+        "manifest": "pakal-research/reports/ppc_spanning_oos/run_manifest.json",
+        "notebook": "pakal-research/reports/ppc_spanning_oos/ppc_spanning_oos.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/ppc_spanning_oos/charts/quintile_returns.png",
+          "pakal-research/reports/ppc_spanning_oos/charts/cumulative_long_short.png",
+          "pakal-research/reports/ppc_spanning_oos/charts/fama_macbeth_convexity.png",
+          "pakal-research/reports/ppc_spanning_oos/charts/decomposition_a_b.png",
+          "pakal-research/reports/ppc_spanning_oos/charts/spanning_alphas.png",
+          "pakal-research/reports/ppc_spanning_oos/charts/rolling_36m.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/ppc_spanning_oos/ppc_lib.py",
+          "pakal-research/ppc_spanning_oos/ppc_run.py",
+          "pakal-research/ppc_spanning_oos/ppc_charts.py",
+          "pakal-research/ppc_spanning_oos/test_ppc_timing.py",
+          "pakal-research/ppc_spanning_oos/ppc_build_artifacts.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/ppc_spanning_oos/tables/gates.csv",
+          "pakal-research/reports/ppc_spanning_oos/tables/t1_replication_longshort.csv",
+          "pakal-research/reports/ppc_spanning_oos/tables/t2_fama_macbeth.csv",
+          "pakal-research/reports/ppc_spanning_oos/tables/t3_spanning.csv",
+          "pakal-research/reports/ppc_spanning_oos/tables/t5_subperiods.csv",
+          "pakal-research/reports/ppc_spanning_oos/tables/t7_cost_performance.csv"
+        ],
+        "research_state": "pakal-research/reports/ppc_spanning_oos/research_state.json",
+        "source_rule_map": "pakal-research/reports/ppc_spanning_oos/SOURCE_RULE_MAP.md"
+      },
+      "comfortable_capacity": null,
+      "concise_report": "pakal-research/reports/ppc_spanning_oos/REPORT.md",
+      "cost_capacity": {
+        "borrow_bps_per_year": {
+          "central": 200,
+          "conservative": 500,
+          "paper_like": 0
+        },
+        "breakeven_one_way_bps_2023_2026": 4.379083801299334,
+        "breakeven_one_way_bps_full": 18.364528975882127,
+        "capacity_impact_separate": true,
+        "central_research_round_trip_bps": 10,
+        "comfortable_capacity": null,
+        "conservative_survival_round_trip_bps": 25,
+        "hard_capacity": "USD 10m and above for R3000 tails (inherited)",
+        "paper_like_round_trip_bps": 2,
+        "soft_capacity": "USD 1m (inherited from price_path_convexity_5d_liq30_long_short)",
+        "strained_capacity": null,
+        "unresolved_reason": "not re-estimated; no tradable candidate"
+      },
+      "created_at": "2026-10-01T21:32:07+00:00",
+      "decision_timing": "after final Close_T of each month (all formation-month closes)",
+      "disposition": "rejected",
+      "feature_findings": [
+        {
+          "corrected_significance": "full-period BH q < 0.01; post-2013 not significant",
+          "direction": "low convexity long",
+          "economic_mechanism": "short-term overreaction to where the month ended relative to its average (paper: extrapolation)",
+          "effect_size": "-0.26%/sd (t -4.2) R3000 EW FM; -0.15 after last-day return; -0.08 (t -1.1) liquidity-weighted",
+          "feature": "conv_1m",
+          "period_consistency": "-0.42 1993-2002, -0.29 2003-2012, -0.12 2013-2022, -0.12 2023-2026",
+          "recommended_action": "diagnostic only; do not trade stand-alone",
+          "role": "signal",
+          "status": "diagnostic"
+        },
+        {
+          "corrected_significance": "full-period q < 0.01",
+          "direction": "low A long",
+          "economic_mechanism": "1-month moving-average distance reversal",
+          "effect_size": "-0.31%/sd (t -5.5) with B and controls; stand-alone MAD factor 0.56%/month (t 3.3)",
+          "feature": "a_end (P_N / month mean - 1)",
+          "period_consistency": "strong to 2012, weak 2013-2022, positive 2023-2026",
+          "recommended_action": "already the dominant half; any future reversal feature should use it directly",
+          "role": "diagnostic",
+          "status": "diagnostic"
+        },
+        {
+          "corrected_significance": "full-period q < 0.05",
+          "direction": "low B long",
+          "economic_mechanism": "the part that makes convexity 'shape' rather than reversal; small-cap only",
+          "effect_size": "-0.14%/sd (t -2.8) R3000; ~0 in R1000/S&P 500",
+          "feature": "b_start (P_1 / month mean - 1)",
+          "period_consistency": "small in every decade; large in 2023-2026 (-0.35, t -2.8; unplanned sub-sample)",
+          "recommended_action": "forward observation only",
+          "role": "diagnostic",
+          "status": "diagnostic"
+        }
+      ],
+      "fill_timing": "Open_(T+1) to Open_(T'+1); Close_T paths diagnostic",
+      "hard_capacity": "USD 10m and above for R3000 tails (inherited)",
+      "knowledge_record": "pakal-research/reports/ppc_spanning_oos/knowledge_record.json",
+      "last_reviewed_at": "2026-10-01T21:32:07+00:00",
+      "limitations": [
+        "no PIT market cap: ADV63 weighting is a value-weight proxy",
+        "FM lacks B/M, profitability, asset growth, FF3-IV, skewness",
+        "RMW, CMA, LREV, LIQ factors not available locally",
+        "PIT index universes 1993+, not CRSP 1963+",
+        "plain spread through 2026-06 seen by the August studies; post-paper is OOS for the paper only"
+      ],
+      "maximum_drawdown": -0.3121472591891339,
+      "next_test": "none planned; optionally log the B (start-vs-average) post-2023 pattern forward without trading",
+      "next_tests": [
+        "none planned; optionally log the B (start-vs-average) post-2023 pattern forward without trading"
+      ],
+      "notebook": "pakal-research/reports/ppc_spanning_oos/ppc_spanning_oos.ipynb",
+      "objective": "Test the article's untested claims (about -0.45% per sd in Fama-MacBeth, no factor explains it, distinct from reversal) plus post-2022 out-of-sample, liquidity weighting and same-exit timing.",
+      "portal_images": [
+        "assets/ppc_spanning_oos/01-cumulative_long_short.png",
+        "assets/ppc_spanning_oos/02-decomposition_a_b.png"
+      ],
+      "primary_cost_layer": "central_research",
+      "primary_metrics": {
+        "CAGR": 0.044642301947685814,
+        "Sharpe": 0.4407424474020706,
+        "annualized_volatility": 0.11384556148174772,
+        "cost_layer": "central_research: 5 bp one-way per unit traded + 200 bp/yr borrow",
+        "gross_mean_monthly_pct": 0.741,
+        "maximum_drawdown": -0.3121472591891339,
+        "period": "formation 1993-01 to 2026-07",
+        "post_paper_central_mean_monthly_pct": -0.0196011275241948,
+        "turnover": 3.12871554021083,
+        "turnover_unit": "monthly traded notional, both legs, per unit gross per side (max 4)",
+        "universe": "R3000 PIT, equal-weight quintile long-short"
+      },
+      "replication_outcome": "replicated",
+      "research_status": "diagnostic",
+      "signal_family": "price_path_convexity_short_horizon_reversal",
+      "soft_capacity": "USD 1m (inherited from price_path_convexity_5d_liq30_long_short)",
+      "sources": [
+        "pakal-research/sources/price_path_convexity/aligrithm_ppc_article_2026-07-09.html | sha256:3b9d5e3dcf3814c5ef82588c198c52068e70dcbd3c98a42acbc917d903ddabf5",
+        "pakal-research/sources/price_path_convexity/gulen_woeppel_price_path_convexity.pdf | sha256:ac22533436b5cb268e96e8f079e87f4ab85c8332d6588ffdcb7f69bd8cf60425",
+        "pakal-research/sources/price_path_convexity/gulen_woeppel_supplementary.pdf | sha256:f328a7d3079857ea68473fba48b30ba0db9a8c1eb9d0f1407253e6eb227c5630",
+        "pakal-research/reports/price_path_convexity_signal_study (prior internal study)"
+      ],
+      "study_id": "ppc_spanning_oos",
+      "tags": [
+        "price_path_convexity",
+        "short_term_reversal",
+        "moving_average_distance",
+        "fama_macbeth",
+        "factor_spanning",
+        "article_audit",
+        "diagnostic"
+      ],
+      "timing_attribution": {
+        "artifact": "pakal-research/reports/ppc_spanning_oos/tables/t5_subperiods.csv",
+        "diagnostic_path": "Close_T -> Open_(T'+1)",
+        "executable_path": "Open_(T+1) -> Open_(T'+1) (same exit)",
+        "headline_result": "overnight leg 0.30%/month in 1993-2002, 0.03-0.07% since 2003; the executable spread is the bulk of the effect",
+        "method": "exact compounded split per stock: (1+diag) = (1+overnight)(1+exec)",
+        "metrics": {
+          "ls_on_1993_2002_pct": 0.304,
+          "ls_on_2023_2026_pct": 0.035
+        },
+        "status": "tested"
+      },
+      "title": "Price-path convexity: factor spanning, A/B decomposition and post-paper test (Aligrithm 10.14 / Gulen-Woeppel)",
+      "universes": [
+        "r3000 PIT (primary)",
+        "r1000",
+        "r2000",
+        "sp500",
+        "ndx"
+      ],
+      "verdict": "The headline spread reproduces (R3000 equal-weight 0.87%/month vs paper 0.84%), standard factors including 1-month reversal do not explain it (alpha 0.79%, t 4.0), and both halves of the shape matter in the broad universe. But the per-sd slope is -0.26% not -0.45%, it halves after the last-day return, it is mostly a small-cap effect (liquidity-weighted and large-cap versions are weak and negative since 2023), it has been fading since 2013, and after central costs it earns 0.42%/month with Sharpe 0.44 over 1993-2026 and about zero since 2023. Convexity is a recombination of 'distance from the 1-month average' and the 1-month return (MA-distance + reversal hedge -> alpha 0.18%). Not tradable; keep as a diagnostic feature.",
+      "verdicts": {
+        "economic_value": "fails: central-cost Sharpe 0.44, ~0 since 2023, breakeven one-way cost 4 bp in 2023-2026",
+        "predictive_value": "real but smaller than claimed (-0.26%/sd vs -0.42) and decaying (1993-2002 -0.42, 2013-2026 -0.12)",
+        "promotion": "none",
+        "source_replication": "replicated in R3000 EW (0.87 vs 0.84%/month); liquidity-weighted proxy 0.55%"
       }
     },
     {
@@ -22514,6 +23582,1023 @@
       ],
       "verdict": "Keep the frozen 50/50 ensemble as a research risk smoother, not as a new alpha source or a live strategy. NATR remains a soft Nasdaq rank vote, while opening-auction liquidity and empirical capacity are the next binding gates.",
       "verdicts": null
+    },
+    {
+      "CAGR": 0.1021,
+      "Sharpe": 0.85,
+      "adaptive_lineage": {
+        "active_minutes_used": 300,
+        "actual_total_variants": 407,
+        "declared_total_variants": 412,
+        "profile": "standard",
+        "rounds_completed": 1,
+        "stop_reason": "faithful baselines plus one executable pass show no promotable edge"
+      },
+      "artifacts": {
+        "concise_report": "pakal-research/reports/quantseeker_mean_reversion_study/REPORT.md",
+        "decision_log": "pakal-research/reports/quantseeker_mean_reversion_study/decision_log.jsonl",
+        "experiment_ledger": "pakal-research/reports/quantseeker_mean_reversion_study/experiment_ledger.jsonl",
+        "frozen_specification": "pakal-research/reports/quantseeker_mean_reversion_study/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/quantseeker_mean_reversion_study/REPORT_FULL.md",
+        "hypothesis_registry": "pakal-research/reports/quantseeker_mean_reversion_study/hypothesis_registry.json",
+        "manifest": "pakal-research/reports/quantseeker_mean_reversion_study/run_manifest.json",
+        "notebook": "pakal-research/reports/quantseeker_mean_reversion_study/quantseeker_mean_reversion_study.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/quantseeker_mean_reversion_study/charts/A_spy_tlt_equity.png",
+          "pakal-research/reports/quantseeker_mean_reversion_study/charts/B_ibs_1545_vs_close.png",
+          "pakal-research/reports/quantseeker_mean_reversion_study/charts/B_ibs_overnight_vs_intraday.png",
+          "pakal-research/reports/quantseeker_mean_reversion_study/charts/D_asymmetry_cost_curve.png",
+          "pakal-research/reports/quantseeker_mean_reversion_study/charts/E_metals_by_period.png",
+          "pakal-research/reports/quantseeker_mean_reversion_study/charts/F_btd_risk_return.png",
+          "pakal-research/reports/quantseeker_mean_reversion_study/charts/G_gatev_equity.png",
+          "pakal-research/reports/quantseeker_mean_reversion_study/charts/S_beta_matched.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/quantseeker_mean_reversion/qmr_build_artifacts.py",
+          "pakal-research/quantseeker_mean_reversion/qmr_charts.py",
+          "pakal-research/quantseeker_mean_reversion/qmr_combine.py",
+          "pakal-research/quantseeker_mean_reversion/qmr_data.py",
+          "pakal-research/quantseeker_mean_reversion/qmr_lib.py",
+          "pakal-research/quantseeker_mean_reversion/qmr_lineage.py",
+          "pakal-research/quantseeker_mean_reversion/qmr_pairs.py",
+          "pakal-research/quantseeker_mean_reversion/qmr_run.py",
+          "pakal-research/quantseeker_mean_reversion/test_qmr_timing.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/quantseeker_mean_reversion_study/tables/S_component_gates.csv",
+          "pakal-research/reports/quantseeker_mean_reversion_study/tables/B_ibs_event_table.csv",
+          "pakal-research/reports/quantseeker_mean_reversion_study/tables/B_basket_1545_vs_final.csv",
+          "pakal-research/reports/quantseeker_mean_reversion_study/tables/S_beta_check.csv",
+          "pakal-research/reports/quantseeker_mean_reversion_study/tables/F_btd_spy_agg.csv",
+          "pakal-research/reports/quantseeker_mean_reversion_study/tables/S_capacity_bands.csv"
+        ],
+        "research_state": "pakal-research/reports/quantseeker_mean_reversion_study/research_state.json",
+        "source_rule_map": "pakal-research/reports/quantseeker_mean_reversion_study/SOURCE_RULE_MAP.md"
+      },
+      "comfortable_capacity": "$1M (SPY/QQQ 15:45 basket)",
+      "concise_report": "pakal-research/reports/quantseeker_mean_reversion_study/REPORT.md",
+      "cost_capacity": {
+        "capacity_impact_separate": true,
+        "central_research_round_trip_bps": 4,
+        "comfortable_capacity": "$1M (SPY/QQQ 15:45 basket)",
+        "conservative_survival_round_trip_bps": 10,
+        "hard_capacity": "$1B",
+        "note": "Participation is versus full-day ADV; closing-auction volume is ~5-10% of ADV, so MOC capacity is 10-20x tighter than shown.",
+        "paper_like_round_trip_bps": 10,
+        "soft_capacity": "$10M",
+        "strained_capacity": "$100M (impact 4 bps median, Sharpe 0.37)"
+      },
+      "created_at": "2026-10-02T15:28:59+03:00",
+      "decision_timing": "Close_T (daily-bar signals); 15:45 ET for the pre-close protocol",
+      "disposition": "rejected",
+      "feature_findings": [
+        {
+          "corrected_significance": "22/78 cross-asset variants pass BH 10%; 13 pass Bonferroni",
+          "direction": "low IBS -> higher next-day return (long only)",
+          "economic_mechanism": "late-day liquidity demand reverses overnight (dealer inventory)",
+          "effect_size": "SPY 13 bp, QQQ 22 bp, IWM 15 bp, EEM 22 bp, VNQ 22 bp per event (IBS<0.3, gross)",
+          "feature": "IBS (final close)",
+          "period_consistency": "positive in all four eras for SPY/QQQ; IWM/EEM/VNQ weak 2013-2024",
+          "recommended_action": "use only with a pre-close (15:45) snapshot and MOC; useless at next open",
+          "role": "signal",
+          "status": "replicated_diagnostic"
+        },
+        {
+          "corrected_significance": "not corrected (single frozen ensemble)",
+          "direction": "long when <0.1/0.2/0.3",
+          "economic_mechanism": "same as IBS, captured before the close",
+          "effect_size": "Sharpe 0.85 central (2016-26), alpha vs SPY 3.9%/yr t 1.6",
+          "feature": "IBS 15:45 snapshot",
+          "period_consistency": "0.30 / 1.01 / 1.20 in 2016-19 / 2020-24 / 2025-26",
+          "recommended_action": "shadow log with real ETF 15:45 high/low snapshots",
+          "role": "signal",
+          "status": "forward_hypothesis"
+        },
+        {
+          "corrected_significance": "117/144 C-family variants pass BH, but they are timed beta",
+          "direction": "low -> long",
+          "economic_mechanism": "close below day's average price",
+          "effect_size": "QQQ L30/L40 Hold1 Sharpe ~1.0 in article window (matches source)",
+          "feature": "MTSI (typical-price VWAP proxy)",
+          "period_consistency": "no better than IBS outside 2014-2025",
+          "recommended_action": "no superiority shown with daily data; true VWAP not tested",
+          "role": "signal",
+          "status": "diagnostic"
+        },
+        {
+          "corrected_significance": "7/24 pass BH; 0 Bonferroni",
+          "direction": "fade large differences",
+          "economic_mechanism": "rebalancing flows",
+          "effect_size": "slope t -2.6 to -4.2",
+          "feature": "SPY-TLT one-day return difference",
+          "period_consistency": "2013-19 negative at next open; carried by 2008 and 2020",
+          "recommended_action": "reject standalone; crisis payoff noted",
+          "role": "signal",
+          "status": "diagnostic"
+        },
+        {
+          "corrected_significance": "0/16 pass BH",
+          "direction": "fade",
+          "economic_mechanism": "same-day intraday reversal (subsumes it)",
+          "effect_size": "gross Sharpe 0.55; break-even ~1.4 bps/side",
+          "feature": "Intraday asymmetry ln(H/O)+ln(L/O)",
+          "period_consistency": "negative at 2 bps in every era before 2025",
+          "recommended_action": "reject",
+          "role": "signal",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "27/242 pass BH",
+          "direction": "fade 5-60d spread drift",
+          "economic_mechanism": "junior miner overshoot",
+          "effect_size": "silver3 Sharpe 0.46 paper (2015-26); 0.07 central",
+          "feature": "Silver ETF spread reversal (horizon ensemble)",
+          "period_consistency": "only 2020-24 positive",
+          "recommended_action": "reject",
+          "role": "signal",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "n/a",
+          "direction": "adds equity after declines",
+          "economic_mechanism": "path-dependent exposure ramp spends dry powder early",
+          "effect_size": "every variant below an exposure-matched static mix (2003-26 and 1871-2025)",
+          "feature": "Monthly buy-the-dip transfer",
+          "period_consistency": "consistent",
+          "recommended_action": "do not use",
+          "role": "exposure",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "0/4 pass BH at central",
+          "direction": "convergence",
+          "economic_mechanism": "liquidity provision; decayed",
+          "effect_size": "0.09-0.17%/month gross (Zhu: 0.46%)",
+          "feature": "Gatev distance pairs",
+          "period_consistency": "1999-2002 strong, ~0 after 2013 net",
+          "recommended_action": "reject",
+          "role": "signal",
+          "status": "rejected"
+        }
+      ],
+      "fill_timing": "Open_T+1 (primary executable); MOC at Close_T only for 15:45 signals",
+      "hard_capacity": "$1B",
+      "knowledge_record": "pakal-research/reports/quantseeker_mean_reversion_study/knowledge_record.json",
+      "last_reviewed_at": "2026-10-02T15:28:59+03:00",
+      "limitations": [
+        "No ETF intraday data before 2021; 15:45 IBS is proxied from ES/NQ/GC futures RTH bars (2016-06+) and BTC from Binance.",
+        "MTSI uses a typical-price VWAP proxy.",
+        "Shiller bond returns approximated from GS10 duration.",
+        "Holdout 2025+ columns were printed in family tables before the combined-sleeve rule was set; not a clean confirmation.",
+        "Gatev on S&P 500 only (Zhu used the broad CRSP universe)."
+      ],
+      "maximum_drawdown": -0.1251,
+      "next_test": "Shadow-log SPY/QQQ 15:45 IBS from real ETF 15:45 snapshots with MOC fills and measured auction basis for >= 6 months.",
+      "next_tests": [
+        "Shadow-log SPY/QQQ 15:45 IBS from real ETF 15:45 snapshots with MOC fills and measured auction basis for >= 6 months.",
+        "Test IBS 15:45 with intraday VWAP (true MTSI) once ETF minute data is available.",
+        "Check overlap of the 15:45 IBS basket with the C_main EOM flow line and the Connors/RSI2 shadows before any paper trial."
+      ],
+      "notebook": "pakal-research/reports/quantseeker_mean_reversion_study/quantseeker_mean_reversion_study.ipynb",
+      "objective": "Replicate eight QuantSeeker MR articles, test executable versions (Open_T+1 vs 15:45/MOC) with three cost tiers and capacity, and decide whether a combined MR sleeve adds value beyond existing MR candidates and trend.",
+      "portal_images": [
+        "assets/quantseeker_mean_reversion_study/01-A_spy_tlt_equity.png",
+        "assets/quantseeker_mean_reversion_study/02-G_gatev_equity.png"
+      ],
+      "primary_cost_layer": "central_research",
+      "primary_metrics": {
+        "CAGR": 0.1021,
+        "Sharpe": 0.85,
+        "annualized_volatility": 0.0916,
+        "breakeven_bps_per_side": 11.6,
+        "cost_layer": "central_research (2 bps per side)",
+        "maximum_drawdown": -0.1251,
+        "period": "2016-06-01 to 2026-08-19",
+        "turnover": 81.0,
+        "universe": "SPY/QQQ, signal from ES/NQ 15:45 bars, MOC fill"
+      },
+      "replication_outcome": "replicated",
+      "research_status": "forward_hypothesis",
+      "signal_family": "mean_reversion",
+      "soft_capacity": "$10M",
+      "sources": [
+        "QS-2025-02-18",
+        "QS-2025-03-09",
+        "QS-2025-04-03",
+        "QS-2025-05-09",
+        "QS-2026-02-08",
+        "QS-2026-04-20",
+        "QS-2026-06-26",
+        "QS-2026-08-27"
+      ],
+      "study_id": "quantseeker_mean_reversion_study",
+      "tags": [
+        "quantseeker",
+        "mean_reversion",
+        "IBS",
+        "MTSI",
+        "pairs",
+        "buy_the_dip",
+        "stock_bond",
+        "MOC",
+        "timing_attribution"
+      ],
+      "timing_attribution": {
+        "artifact": "pakal-research/reports/quantseeker_mean_reversion_study/tables/B_ibs_event_table.csv",
+        "diagnostic_path": "Close_T fill from a final-close signal to the declared exit",
+        "executable_path": "Open_T+1 to the same declared exit; and 15:45 signal -> MOC",
+        "headline_result": "Overnight share of the IBS<0.3 next-day return: SPY 48%, QQQ 43%, IWM 57%, EEM 63%, VNQ 53%. The 4-ETF basket falls from Sharpe 0.85 (close fill) to 0.04 (next open) at central cost; the 15:45->MOC SPY/QQQ protocol keeps 0.85.",
+        "method": "Compounded overnight and executable-return decomposition per event and per book",
+        "metrics": {
+          "basket_close_fill_central_sharpe": 0.845,
+          "basket_open_fill_central_sharpe": 0.044,
+          "spyqqq_1545_moc_central_sharpe_2016_2026": 0.85
+        },
+        "status": "tested"
+      },
+      "title": "QuantSeeker short-term mean reversion: stock-bond spread, IBS/MTSI, cross-asset IBS, intraday asymmetry, metals pairs, buy-the-dip, Gatev pairs",
+      "universes": [
+        "Fixed article ETFs (SPY, QQQ, IWM, EEM, VNQ, TLT, UUP, DBC, GLD, SLV, USO, IBIT, AGG, GDX, GDXJ, SIL, SILJ, SPXL, TQQQ, UDOW, DIA)",
+        "S&P 500 point-in-time members (Gatev pairs)",
+        "BTCUSDT US-session bars",
+        "ES/NQ/GC 5-minute RTH bars (signals only)"
+      ],
+      "verdict": "Most claims replicate as paper-like diagnostics, but almost all of the index-level reversal is earned from Close_T to Open_T+1. At the next open the IBS basket, SPY-TLT spread, intraday asymmetry, silver spreads and Gatev pairs fail; the multi-day IBS/MTSI percentile ensembles that pass the gates are timed equity beta with no alpha versus a beta-matched SPY since 2013. Only a true 15:45 IBS -> MOC trade on SPY/QQQ (signal from ES/NQ bars) keeps the edge (Sharpe 0.85 central 2016-06..2026-08, alpha vs SPY 3.9%/yr t 1.6) and is kept as a shadow forward hypothesis; it misses the frozen validation gate by 0.003 Sharpe. No combined MR sleeve is promoted.",
+      "verdicts": {
+        "economic_value": "Executable at Open_T+1: none beyond beta. Executable with a 15:45 snapshot + MOC: SPY/QQQ IBS basket positive in 2020-24 and 2025-26, weak 2016-19.",
+        "predictive_value": "Low IBS predicts next-day equity-ETF returns (t 4-5), not bonds/FX/commodities/BTC-2018+; asymmetry is subsumed by same-day intraday reversal; futures 5-60 min autocorrelation ~0.",
+        "promotion": "No paper trial. Shadow only: SPY/QQQ 15:45 IBS -> MOC basket. Everything else rejected or diagnostic.",
+        "source_replication": "replicated: SPY-TLT slopes negative (t -2 to -4) and gross Sharpe 0.61 vs 0.78; cross-asset IBS bp match per ETF; IBS basket gross Sharpe 1.03 vs 1.01; MTSI-proxy QQQ table within 0.05 Sharpe; asymmetry gross 9.6%/0.55 vs 8.0%/0.51; metals in-window Sharpe within 0.05 except SILJ-SIL; buy-the-dip matches to 0.01 Sharpe; Gatev directionally (much smaller than Zhu)."
+      }
+    },
+    {
+      "CAGR": 0.041,
+      "Sharpe": 0.37,
+      "adaptive_lineage": {
+        "active_minutes_used": 330,
+        "actual_total_variants": 236,
+        "declared_total_variants": 240,
+        "profile": "deep",
+        "rounds_completed": 1,
+        "stop_reason": "all 15 articles assessed (A05 not assessable); one declared round plus labelled post-hoc diagnostics (French MOM IQR 1995+, long-only IQR overlay, book integration, leave-one-year-out)"
+      },
+      "artifacts": {
+        "concise_report": "pakal-research/reports/quantseeker_momentum_trend_study/REPORT.md",
+        "decision_log": "not_applicable: non-adaptive frozen study (single declared round); lineage = research_spec_frozen.json amendments + tables/primary_contrasts.csv",
+        "experiment_ledger": "not_applicable: non-adaptive frozen study (single declared round); lineage = research_spec_frozen.json amendments + tables/primary_contrasts.csv",
+        "frozen_specification": "pakal-research/reports/quantseeker_momentum_trend_study/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/quantseeker_momentum_trend_study/REPORT_FULL.md",
+        "hypothesis_registry": "not_applicable: non-adaptive frozen study (single declared round); lineage = research_spec_frozen.json amendments + tables/primary_contrasts.csv",
+        "manifest": "pakal-research/reports/quantseeker_momentum_trend_study/run_manifest.json",
+        "notebook": "pakal-research/reports/quantseeker_momentum_trend_study/quantseeker_momentum_trend_study.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/quantseeker_momentum_trend_study/charts/m08_iqr_timing.png",
+          "pakal-research/reports/quantseeker_momentum_trend_study/charts/m16_book_integration.png",
+          "pakal-research/reports/quantseeker_momentum_trend_study/charts/m01_momentum_vol_targeting.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/quantseeker_momentum_trend/qmt_stock_engine.py",
+          "pakal-research/quantseeker_momentum_trend/qmt_stock_signals.py",
+          "pakal-research/quantseeker_momentum_trend/qmt_m_stock_modules.py",
+          "pakal-research/quantseeker_momentum_trend/qmt_m16_integration.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/quantseeker_momentum_trend_study/tables/primary_contrasts.csv",
+          "pakal-research/reports/quantseeker_momentum_trend_study/tables/stock_ls_stats.csv",
+          "pakal-research/reports/quantseeker_momentum_trend_study/tables/m16_book_integration.csv"
+        ],
+        "research_state": "not_applicable: non-adaptive frozen study (single declared round); lineage = research_spec_frozen.json amendments + tables/primary_contrasts.csv",
+        "source_rule_map": "not_applicable: non-adaptive frozen study (single declared round); lineage = research_spec_frozen.json amendments + tables/primary_contrasts.csv"
+      },
+      "comfortable_capacity": "up to ~$10M (P90 participation 0.35%)",
+      "concise_report": "pakal-research/reports/quantseeker_momentum_trend_study/REPORT.md",
+      "cost_capacity": {
+        "artifact": "tables/capacity_ls_iqr_vol10.csv",
+        "capacity_impact_separate": true,
+        "central_research_round_trip_bps": 40,
+        "comfortable_capacity": "up to ~$10M (P90 participation 0.35%)",
+        "component_notes": "stocks 10/20/40 bps per side + 0/50/200 bps borrow; ETFs 5/5/15; crypto 25/25/50; BTC hourly 5/10/20; intraday ETF 0/1/2.5",
+        "conservative_survival_round_trip_bps": 80,
+        "hard_capacity": "$1B (P90 35%, Sharpe 0.04)",
+        "paper_like_round_trip_bps": 20,
+        "soft_capacity": "~$100M (P90 3.5%, Sharpe 0.26 after impact)",
+        "strained_capacity": "between $100M and $1B"
+      },
+      "created_at": "2026-10-02T19:00:00+03:00",
+      "decision_timing": "Close_T (month-end for monthly books; hourly bar close for BTC; 15:45 ET cutoff for intraday momentum)",
+      "disposition": "promising_component",
+      "feature_findings": [
+        {
+          "corrected_significance": "BH q 0.00 (full), 0.25 (post-2015)",
+          "direction": "positive",
+          "economic_mechanism": "momentum crashes follow high-vol bear markets when the loser leg is loaded with high-beta names; vol predicts both risk and the crash",
+          "effect_size": "French MOM Sharpe +0.31 (0.51 -> 0.82, 1963-2026), +0.20 after 2015; stock L/S max DD -78% -> -29%",
+          "feature": "volatility scaling of momentum (21d realized vol, 10% target)",
+          "period_consistency": "positive pre and post publication; holdout positive",
+          "recommended_action": "keep as the default overlay for any momentum sleeve",
+          "role": "sizing",
+          "status": "confirmed"
+        },
+        {
+          "corrected_significance": "study-wide BH q 0.32 (p 0.055)",
+          "direction": "cash when high",
+          "economic_mechanism": "high return dispersion = disagreement/uncertainty; beaten-down losers snap back",
+          "effect_size": "+0.21 Sharpe on 12-1 L/S central; +0.10 on top of vol scaling; French MOM 1995-2026 0.32 -> 0.53",
+          "feature": "IQR dispersion switch (Liu et al. 2025)",
+          "period_consistency": "1995-99, 2000-24 and 2025+ all positive; 2000-2014 weak",
+          "recommended_action": "shadow-log monthly; combine with vol scaling, never replace it",
+          "role": "regime",
+          "status": "forward_hypothesis"
+        },
+        {
+          "corrected_significance": "only USO survives BH",
+          "direction": "mixed",
+          "economic_mechanism": "momentum crash risk lives in total (incl. upside) vol after rebounds; separating up/down discards it",
+          "effect_size": "R3 up/down ratio beats variance scaling only for USO (+0.47) and marginally BTC; worse for momentum (-0.51), GLD, TLT, SPY",
+          "feature": "semivolatility scaling (Batista & Fernandes)",
+          "period_consistency": "asset-specific",
+          "recommended_action": "do not replace plain vol scaling",
+          "role": "sizing",
+          "status": "rejected_as_general"
+        },
+        {
+          "corrected_significance": "n.s.",
+          "direction": "crash protection",
+          "economic_mechanism": "removes loser-rebound exposure, but vol scaling already does that more cheaply",
+          "effect_size": "raw skew -0.65 -> +0.89, DD -75% -> -50%, Sharpe +0.06 gross; after vol scaling and costs -0.15",
+          "feature": "nearness to 52-week high neutralization (Byun & Jeon)",
+          "period_consistency": "consistent",
+          "recommended_action": "none",
+          "role": "neutralizer",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "n.s.",
+          "direction": "HTP for L/S, PTH for long-only",
+          "economic_mechanism": "higher turnover; 52w-high anchoring decayed",
+          "effect_size": "HTP +0.06 gross (0.48 vs 0.42), 0 after costs; PTH long-only +0.08 pre-2021, -0.58 after",
+          "feature": "HTP / PTH decomposition (Busing et al.)",
+          "period_consistency": "PTH reverses post publication",
+          "recommended_action": "none",
+          "role": "signal",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "p 0.13, BH q 0.37",
+          "direction": "positive long-only",
+          "economic_mechanism": "post-earnings drift on the long side",
+          "effect_size": "long-only top 50 Sharpe 0.45 vs 0.29 (article 0.49 vs 0.31); L/S worse than MOM; event-weighted momentum worse",
+          "feature": "earnings-announcement-day momentum (SEC 8-K Item 2.02)",
+          "period_consistency": "reverses in 2025+ holdout",
+          "recommended_action": "record; no build",
+          "role": "signal",
+          "status": "diagnostic"
+        },
+        {
+          "corrected_significance": "n.s.",
+          "direction": "positive",
+          "economic_mechanism": "continuous information / underreaction",
+          "effect_size": "+0.07 Sharpe long-only",
+          "feature": "smoothness (t-stat, R2*slope, ID combo)",
+          "period_consistency": "positive",
+          "recommended_action": "minor rank component only (prior study agrees)",
+          "role": "rank",
+          "status": "diagnostic (already known)"
+        },
+        {
+          "corrected_significance": "n.s.",
+          "direction": "none",
+          "economic_mechanism": "value tilt lost to growth 2010-2026",
+          "effect_size": "+0.02 / 0.00 Sharpe (article +40%)",
+          "feature": "FCF yield + momentum (Fu et al.)",
+          "period_consistency": "2010-2026 XBRL sample",
+          "recommended_action": "none",
+          "role": "rank",
+          "status": "not_reproducible"
+        },
+        {
+          "corrected_significance": "n.s.",
+          "direction": "lower drawdown",
+          "economic_mechanism": "smoother trends reduce whipsaw entries",
+          "effect_size": "Sharpe +0.05 (n.s.), max DD -13.9% -> -10.3% (SPY fallback), -23.9% -> -17.9% (SPXL)",
+          "feature": "R2*slope trend score in Defense First + BTAL",
+          "period_consistency": "worse after the article (Oct 2025+)",
+          "recommended_action": "optional drawdown tweak; not a Sharpe improvement",
+          "role": "signal",
+          "status": "diagnostic"
+        },
+        {
+          "corrected_significance": "n.s.",
+          "direction": "negative after costs",
+          "economic_mechanism": "the daily filter carries the edge; hourly flips add cost",
+          "effect_size": "S2 vs S1 +0.34 Sharpe (claim reproduced), but S2 vs daily-only -0.28 at central cost; 160 vs 11 trades/yr",
+          "feature": "hourly timing inside a daily BTC trend",
+          "period_consistency": "worse post paper",
+          "recommended_action": "use daily trend + vol cap (GQR result) if any",
+          "role": "filter",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "n.s.",
+          "direction": "none",
+          "economic_mechanism": "dispersion is real but not persistent",
+          "effect_size": "top-half vs bottom-half trailing-Sharpe spread -0.02%/m (t -0.07); rank IC to next 12m Sharpe -0.15",
+          "feature": "managed-futures ETF selection by track record",
+          "period_consistency": "2015-2026",
+          "recommended_action": "if MF exposure is wanted, hold the category replicator (DBMF) rather than picking winners",
+          "role": "universe",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "n.s.",
+          "direction": "weak",
+          "economic_mechanism": "hedging flows; edge below ETF costs",
+          "effect_size": "SPY gross 0.4 bps per trade, Sharpe 0.29 (2021-24 0.82, 2025+ -1.0); SMA200 condition no help",
+          "feature": "intraday market momentum (Baltussen et al.), 15:45->close proxy",
+          "period_consistency": "decaying",
+          "recommended_action": "none",
+          "role": "signal",
+          "status": "rejected"
+        }
+      ],
+      "fill_timing": "Open_(T+1) (stocks, ETFs); next hourly open (BTC); 15:45 price -> MOC official close (intraday, explicit pre-close protocol); French factors paper-like close-to-close",
+      "hard_capacity": "$1B (P90 35%, Sharpe 0.04)",
+      "knowledge_record": "pakal-research/reports/quantseeker_momentum_trend_study/knowledge_record.json",
+      "last_reviewed_at": "2026-10-02T19:00:00+03:00",
+      "limitations": [
+        "No intraday ETF history before 2021; A14 uses the last 15 minutes instead of 30 and only 2021-2026.",
+        "A03/A15 ETF realized variance from daily returns (5-minute only for BTC).",
+        "Norgate has no delisting returns; positions are truncated at the last close.",
+        "SEC CIK mapping covers 52-69% of names before 2005 and > 90% after 2010; FCF frames lack filing dates (120-day lag assumption).",
+        "Crypto universe from Binance only (2017-08+); pairs removed from exchangeInfo are missing.",
+        "Several holdout/post-publication windows are short (IQR post-publication 15 months; MF ETF post-article 8 months).",
+        "The IQR L/S book needs ~120 short positions; borrow availability and recalls are not modelled beyond a flat fee.",
+        "Post-hoc analyses (French MOM IQR 1995+, long-only IQR overlay, book integration) are labelled and cannot confirm the hypothesis."
+      ],
+      "maximum_drawdown": -0.323,
+      "next_test": "Shadow-log monthly from 2026-10: IQR flag, vol-scaled 12-1 L/S and the IQR+vol L/S book; decide after 12 months.",
+      "next_tests": [
+        "Shadow-log monthly from 2026-10: IQR flag, vol-scaled 12-1 L/S and the IQR+vol L/S book; decide after 12 months.",
+        "Test the IQR flag on the live NDX long-only pod (switch to index in high-IQR months) on point-in-time NDX data, as a fresh pre-registered hypothesis.",
+        "If an L/S sleeve is ever considered: Russell 1000-only variant, measured borrow fees, and a cheaper implementation via factor ETFs (MTUM vs USMV/IWB)."
+      ],
+      "notebook": "pakal-research/reports/quantseeker_momentum_trend_study/quantseeker_momentum_trend_study.ipynb",
+      "objective": "Replicate each article's core claim with point-in-time split-safe data, test the promising ones as executable portfolios with three cost layers, and decide whether any momentum/trend construction beats or adds to what the workspace already holds (Concretum ETF trend, crisis-trend pod, Defense First / BOOK-A, GQR dual momentum).",
+      "portal_images": [
+        "assets/quantseeker_momentum_trend_study/01-m01_momentum_vol_targeting.png",
+        "assets/quantseeker_momentum_trend_study/02-m08_iqr_timing.png"
+      ],
+      "primary_cost_layer": "central_research",
+      "primary_metrics": {
+        "CAGR": 0.041,
+        "Sharpe": 0.37,
+        "annualized_volatility": 0.132,
+        "book_effect": "BOOK-A monthly Sharpe 1.14 -> 1.21 (2007-10..2026-06) and 1.38 -> 1.53 (2019-07..2026-06) with a 20% unfunded overlay; correlation with BOOK-A 0.07",
+        "candidate": "12-1 momentum decile L/S (Russell 3000 liquid half), IQR cash rule + 10% vol scaling, monthly, Open(T+1)",
+        "conservative_sharpe": 0.15,
+        "cost_layer": "central_research: 20 bps per side + 50 bps/yr borrow on shorts",
+        "holdout_2025plus_central_sharpe": 1.29,
+        "maximum_drawdown": -0.323,
+        "paper_like_sharpe": 0.47,
+        "period": "2000-02 .. 2026-09 (monthly)",
+        "turnover": "10.7x per year one-way (sum of both legs, scaled)",
+        "universe": "Russell 3000 PIT liquid half"
+      },
+      "replication_outcome": "directionally_replicated",
+      "research_status": "forward_hypothesis",
+      "signal_family": "momentum_and_trend_overlays",
+      "soft_capacity": "~$100M (P90 3.5%, Sharpe 0.26 after impact)",
+      "sources": [
+        "QuantSeeker archive (15 articles listed in research_spec_frozen.json), 0_papers/Articles/quantseeker_archive",
+        "Barroso & Santa-Clara 2015; Daniel & Moskowitz 2016; Byun & Jeon 2023; Liu, Zhang, Zhang & Zhao 2025 (SSRN 5287301); Busing, Mohrschladt & Siedhoff 2024; Beckmeyer & Wiedemann 2025; Cai, Li & Keasey 2024; Fu et al. 2024; Batista & Fernandes 2026; Baltussen, Da, Lammers & Martens 2021; Mesicek & Vojtko 2025; Akbari & Ekponon 2024; Carlson 2025"
+      ],
+      "study_id": "quantseeker_momentum_trend_study",
+      "tags": [
+        "momentum",
+        "trend",
+        "volatility_scaling",
+        "semivolatility",
+        "momentum_timing",
+        "iqr_dispersion",
+        "52_week_high",
+        "earnings_days",
+        "managed_futures",
+        "bitcoin",
+        "intraday_momentum",
+        "quantseeker"
+      ],
+      "timing_attribution": {
+        "artifact": "tables/m10_taa_stats.csv; tables/m15_semivol_stats.csv; tables/m06_crypto_stats.csv",
+        "diagnostic_path": "article timing (signals to T-1 and trade at Close_T for TAA; next-day close for crypto; first-day close for semivol ETFs)",
+        "executable_path": "Open_(T+1) to the same exit",
+        "headline_result": "TAA: ROR Sharpe 0.93 (article timing) vs 0.85 (Open T+1), LIN 0.94 vs 0.90; semivol ETFs: open vs first-close differences <= 0.1 Sharpe; crypto open vs close fill immaterial. No conclusion depends on same-close execution.",
+        "method": "same rules run with both fills",
+        "metrics": {},
+        "status": "tested"
+      },
+      "title": "QuantSeeker momentum & trend archive (15 articles): vol/semivol scaling, IQR momentum timing, 52-week-high neutral, HTP/PTH, informative (earnings) days, smoothness, FCF, linearity TAA, managed-futures ETFs, multi-timeframe BTC, crypto rotation, intraday momentum",
+      "universes": [
+        "Russell 3000 point-in-time members, raw close >= $5, ADV63 >= $1M, liquid half by 21d turnover (stock modules, 2000-2026)",
+        "Kenneth French daily factors 1963-2026",
+        "SPY QQQ JNK GLD TLT USO; TLT GLD DBC UUP BTAL SPY SPXL; managed-futures ETFs live + delisted (Norgate TR)",
+        "Binance BTCUSDT 5m/1h 2017-08..2026-09; Binance USDT pairs incl. delisted (status BREAK) daily",
+        "26 liquid ETFs, Alpaca SIP 15-minute session panel 2021-01..2026-08"
+      ],
+      "verdict": "Most article claims reproduce in direction, but every 'better momentum ranking' (smoothness, 52-week-high neutral, HTP/PTH, FCF, earnings-day or event-weighted returns, R2*slope in TAA, hourly BTC timing, semivolatility) is either not significant, eaten by costs, or reversed after publication. What survives is the WHEN layer: (1) volatility scaling of momentum (French MOM Sharpe 0.51->0.82 since 1963, still +0.20 after 2015; stock L/S max DD -78% -> -29%), and (2) the Liu et al. IQR dispersion switch (cash when last month's cross-sectional return IQR > 80th pct of the prior 60 months): +0.21 Sharpe on 12-1 L/S at central cost (p 0.055), adds +0.10 on top of vol scaling (p 0.09), holds 1995-99 on the French factor, pre-publication and in the 2025+ holdout, leave-one-year-out 0.31-0.42. The vol+IQR 12-1 L/S book is weak standalone (central Sharpe 0.37, CAGR 4.1%, DD -32%) but nearly uncorrelated with BOOK-A (0.07) and raises its monthly Sharpe 1.14 -> 1.21 (2007+) / 1.38 -> 1.53 (2019+) at a 20% overlay. Study-wide BH q for IQR is 0.32: a coherent forward hypothesis, not a confirmed edge. Status: shadow (paper-log the IQR flag and the L/S book), no allocation.",
+      "verdicts": {
+        "economic_value": "only the vol + IQR overlay on 12-1 L/S momentum has positive central-cost value that is stable across subperiods; managed-futures ETFs and BTC daily trend add small diversification already covered by the crisis pod / GQR work",
+        "predictive_value": "vol of momentum predicts its next-month Sharpe; IQR state predicts momentum returns (French MOM next-month mean +0.68%/m low-IQR vs -0.14%/m high-IQR, 1995-2026); ranking refinements add no robust predictive value net of plain 12-1",
+        "promotion": "no paper trial; shadow-log the IQR flag and the vol+IQR 12-1 L/S book for 12 months; everything else rejected or diagnostic",
+        "source_replication": "directionally replicated for A01, A02, A03, A06, A07 (crash protection), A08, A09 (gross), A10 (drawdown only), A11 (long-only, earnings days), A12, A13, A15; not reproduced for A04 (FCF) and A11 L/S; A14 tested only 2021-2026 with a 15:45 proxy (edge < costs); A05 not assessed (no sentiment data)"
+      }
+    },
+    {
+      "CAGR": 0.0791997587930062,
+      "Sharpe": 0.8593653712897266,
+      "adaptive_lineage": {
+        "active_minutes_used": 150,
+        "actual_total_variants": 899,
+        "declared_total_variants": 899,
+        "note": "798 variants frozen + 101 added by dated amendments after results were seen; ledger total 899 incl. the one G3 holdout evaluation",
+        "profile": "deep",
+        "rounds_completed": 2,
+        "stop_reason": "all frozen families evaluated; holdout opened once; verdict reached"
+      },
+      "artifacts": {
+        "concise_report": "pakal-research/reports/quantseeker_taa_study/REPORT.md",
+        "decision_log": "pakal-research/reports/quantseeker_taa_study/decision_log.jsonl",
+        "experiment_ledger": "pakal-research/reports/quantseeker_taa_study/experiment_ledger.jsonl",
+        "frozen_specification": "pakal-research/reports/quantseeker_taa_study/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/quantseeker_taa_study/REPORT_FULL.md",
+        "hypothesis_registry": "pakal-research/reports/quantseeker_taa_study/hypothesis_registry.json",
+        "manifest": "pakal-research/reports/quantseeker_taa_study/run_manifest.json",
+        "notebook": "pakal-research/reports/quantseeker_taa_study/quantseeker_taa_study.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/quantseeker_taa_study/charts/replication_qs_vs_ours.png",
+          "pakal-research/reports/quantseeker_taa_study/charts/equity_drawdown_2012_2026.png",
+          "pakal-research/reports/quantseeker_taa_study/charts/offset_fragility.png",
+          "pakal-research/reports/quantseeker_taa_study/charts/component_main_effects.png",
+          "pakal-research/reports/quantseeker_taa_study/charts/neighbourhood_dev_vs_proxy.png",
+          "pakal-research/reports/quantseeker_taa_study/charts/addons_delta_sharpe.png",
+          "pakal-research/reports/quantseeker_taa_study/charts/posthoc_df_ivol_drawdown.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/quantseeker_taa/qtaa_data.py",
+          "pakal-research/quantseeker_taa/qtaa_lib.py",
+          "pakal-research/quantseeker_taa/qtaa_overlays.py",
+          "pakal-research/quantseeker_taa/qtaa_jobs.py",
+          "pakal-research/quantseeker_taa/qtaa_run.py",
+          "pakal-research/quantseeker_taa/qtaa_stages.py",
+          "pakal-research/quantseeker_taa/qtaa_decisions.py",
+          "pakal-research/quantseeker_taa/qtaa_holdout.py",
+          "pakal-research/quantseeker_taa/qtaa_posthoc.py",
+          "pakal-research/quantseeker_taa/qtaa_report.py",
+          "pakal-research/quantseeker_taa/test_qtaa_timing.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/quantseeker_taa_study/tables/replication_vs_qs.csv",
+          "pakal-research/reports/quantseeker_taa_study/tables/headline_metrics.csv",
+          "pakal-research/reports/quantseeker_taa_study/tables/component_survival.csv",
+          "pakal-research/reports/quantseeker_taa_study/tables/addon_survival.csv",
+          "pakal-research/reports/quantseeker_taa_study/tables/decisions.json",
+          "pakal-research/reports/quantseeker_taa_study/tables/holdout_and_post_publication.csv",
+          "pakal-research/reports/quantseeker_taa_study/tables/book_integration_2012_2026.csv",
+          "pakal-research/reports/quantseeker_taa_study/tables/posthoc_df_conventions.csv"
+        ],
+        "research_state": "pakal-research/reports/quantseeker_taa_study/research_state.json",
+        "source_rule_map": "pakal-research/reports/quantseeker_taa_study/source_rule_map.json"
+      },
+      "comfortable_capacity": "<= $1M (BTAL P90 2.5% of ADV63, 2023-26)",
+      "concise_report": "pakal-research/reports/quantseeker_taa_study/REPORT.md",
+      "cost_capacity": {
+        "capacity_impact_separate": true,
+        "central_research_round_trip_bps": 20,
+        "comfortable_capacity": "<= $1M (BTAL P90 2.5% of ADV63, 2023-26)",
+        "conservative_survival_round_trip_bps": 50,
+        "hard_capacity": ">= $50M; and any size in 2012-2016 (BTAL ADV ~$0.1-0.6M, 13 fills on no-trade sessions)",
+        "paper_like_round_trip_bps": 10,
+        "soft_capacity": "$1-5M (BTAL P90 13%)",
+        "strained_capacity": "~$10M (BTAL P90 25%, UUP 12%)"
+      },
+      "created_at": "2026-10-02T14:26:02+00:00",
+      "decision_timing": "Month-end Close_T (primary); Close_(T-1) for QS protocol",
+      "disposition": "rejected",
+      "feature_findings": [
+        {
+          "corrected_significance": "Holm p 1.000; 33% of 21 rebalance days better",
+          "direction": "negative",
+          "economic_mechanism": "anti-beta equity hedge",
+          "effect_size": "main effect Sharpe ETF -0.024, proxy -0.039; LOO from V5 -0.004",
+          "feature": "BTAL",
+          "period_consistency": "both eras",
+          "recommended_action": "do not add",
+          "role": "universe",
+          "status": "not_supported"
+        },
+        {
+          "corrected_significance": "Holm p 1.000; 43% of 21 rebalance days better",
+          "direction": "positive",
+          "economic_mechanism": "smooth trends persist",
+          "effect_size": "main effect Sharpe ETF +0.041, proxy +0.177; LOO from V5 +0.040",
+          "feature": "linearity",
+          "period_consistency": "both eras",
+          "recommended_action": "do not add",
+          "role": "signal",
+          "status": "not_supported"
+        },
+        {
+          "corrected_significance": "Holm p 0.052; 100% of 21 rebalance days better",
+          "direction": "positive",
+          "economic_mechanism": "risk balance across defensives (UUP/TLT/GLD vol differs 3x)",
+          "effect_size": "main effect Sharpe ETF +0.225, proxy +0.055; LOO from V5 +0.261",
+          "feature": "inverse-vol weights",
+          "period_consistency": "both eras",
+          "recommended_action": "use (forward test)",
+          "role": "sizing",
+          "status": "survives"
+        },
+        {
+          "corrected_significance": "Holm p 1.000; 5% of 21 rebalance days better",
+          "direction": "negative",
+          "economic_mechanism": "avoid equities in downtrends - pays in 2000-02/2008, costs in 2012-24",
+          "effect_size": "main effect Sharpe ETF -0.149, proxy +0.044; LOO from V5 -0.167",
+          "feature": "fallback trend filter",
+          "period_consistency": "flips between eras",
+          "recommended_action": "do not add",
+          "role": "regime",
+          "status": "not_supported"
+        },
+        {
+          "corrected_significance": "Holm p 1.000; 19% of 21 rebalance days better",
+          "direction": "positive",
+          "economic_mechanism": "realised > implied vol flags stress",
+          "effect_size": "main effect Sharpe ETF +0.041, proxy -0.059; LOO from V5 +0.003",
+          "feature": "VIX ladder",
+          "period_consistency": "flips between eras",
+          "recommended_action": "do not add",
+          "role": "regime",
+          "status": "not_supported"
+        }
+      ],
+      "fill_timing": "Open_(T+1) primary; MOC Close_T paper-like",
+      "hard_capacity": ">= $50M; and any size in 2012-2016 (BTAL ADV ~$0.1-0.6M, 13 fills on no-trade sessions)",
+      "knowledge_record": "pakal-research/reports/quantseeker_taa_study/knowledge_record.json",
+      "last_reviewed_at": "2026-10-02T14:26:02+00:00",
+      "limitations": [
+        "Quant Seeker's tables are images inside the PDFs; numbers transcribed visually from the archived PDFs.",
+        "Annualisation convention for the momentum score is not stated precisely ('annualized returns'): compound primary, simple and raw as neighbourhood/V0.",
+        "VIX-ladder fractions lost in PDF text extraction; 1/3 and 2/3 inferred.",
+        "Stop re-entry multiple not stated; assumed equal to the stop multiple.",
+        "BTAL had 338 no-trade sessions (2011-2014): stale prices carried; early BTAL fills may be unexecutable at size.",
+        "Futures: only &ES in the local Norgate subscription; GC/DX/UB/CL legs not testable; CL-for-DBC substitution cannot be evaluated.",
+        "Proxy era uses index/spot/yield-model proxies with synthetic opens (close fills only); USD carry ignored in the UUP proxy; BTAL proxy is not sector-neutral.",
+        "SPF dispersion uses the individual-response file; SPF release dates approximated (20th of 2nd month).",
+        "HY OAS (Uyar drawdown model) unavailable beyond 3 years on FRED; drawdown overlay limited to the univariate VIX probit and NFCI.",
+        "Zakamulin similarity sector rotation: the article does not state the similarity window/neighbour count; not tested (QS's own test was negative).",
+        "Holdout 2025-01..2025-10 overlaps Quant Seeker's own design window; only 2025-11..2026-09 is untouched by every QS choice."
+      ],
+      "maximum_drawdown": -0.1061292394849009,
+      "next_test": "Shadow-log inverse-vol weights inside the book's Defense First sleeve versus the current rank weights for 12 months (forward only)",
+      "next_tests": [
+        "Shadow-log inverse-vol weights inside the book's Defense First sleeve versus the current rank weights for 12 months (forward only)",
+        "If ever reconsidered: run any TAA as 21 rebalance-day tranches, never a single month-end"
+      ],
+      "notebook": "pakal-research/reports/quantseeker_taa_study/quantseeker_taa_study.ipynb",
+      "objective": "Does QS's step-by-step Defense First TAA beat simple baselines and the book's Defense First sleeve after costs, robustly?",
+      "portal_images": [
+        "assets/quantseeker_taa_study/01-equity_drawdown_2012_2026.png",
+        "assets/quantseeker_taa_study/02-posthoc_df_ivol_drawdown.png"
+      ],
+      "primary_cost_layer": "central_research",
+      "primary_metrics": {
+        "CAGR": 0.0791997587930062,
+        "Sharpe": 0.8593653712897266,
+        "annualized_volatility": 0.0730482089205061,
+        "cost_layer": "central 10 bps one-way",
+        "maximum_drawdown": -0.1061292394849009,
+        "period": "2012-10-01..2026-09-30",
+        "turnover": "7.4x NAV per year (sum |dw|)",
+        "universe": "V5-SPY ETF"
+      },
+      "replication_outcome": "replicated",
+      "research_status": "diagnostic",
+      "signal_family": "defensive_tactical_allocation",
+      "soft_capacity": "$1-5M (BTAL P90 13%)",
+      "sources": [
+        "0_papers/Articles/quantseeker_archive/2025-07-18_weekly-research-insights-a-simple.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2025-08-31_tactical-allocation-20-lower-drawdowns.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2025-09-06_replicating-an-asset-allocation-model.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2025-09-13_tactical-allocation-and-market-regimes.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2025-09-19_stress-testing-a-tactical-allocation.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2025-09-28_timing-leveraged-equity-exposure.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2025-10-04_linearity-in-momentum-a-smarter-trend.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2025-10-20_building-a-smarter-taa-model-for.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2025-10-27_do-stop-loss-rules-add-value-in-tactical.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2025-11-03_sector-timing-with-interest-rates.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2025-01-26_interest-rates-and-sector-rotation.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2025-11-10_combining-taa-with-sector-timing.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2025-11-17_implementing-a-taa-model-using-futures.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2025-04-21_what-works-below-the-200-day-moving.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2025-05-27_market-timing-with-macro-surveys.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2024-08-19_recessions-and-market-timing.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2024-11-18_a-market-timing-indicator.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2026-04-30_which-macro-indicators-actually-predict.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2026-05-10_dont-be-too-smart-about-history.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2026-06-02_a-simpler-way-to-rotate-across-sectors.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2026-04-12_does-optimal-portfolio-construction.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2026-09-15_improving-fixed-weight-portfolios.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2024-11-06_the-value-of-stop-loss-strategies.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2025-02-02_exploring-stock-bond-correlations.pdf (+ text cache)",
+        "0_papers/Articles/quantseeker_archive/2024-10-25_vol-estimators-and-vol-targeting.pdf (+ text cache)"
+      ],
+      "study_id": "quantseeker_taa_study",
+      "tags": [
+        "quantseeker",
+        "taa",
+        "defense_first",
+        "btal",
+        "replication_artifact",
+        "rebalance_timing_luck",
+        "research_only"
+      ],
+      "timing_attribution": {
+        "artifact": "pakal-research/reports/quantseeker_taa_study/tables/timing_costs_raw.csv",
+        "diagnostic_path": "Close_T info -> Close_T fill (look-ahead)",
+        "executable_path": "Close_T -> Open_(T+1); Close_(T-1) -> Close_T",
+        "headline_result": "V5-SPY Sharpe 0.83 (Open T+1) / 0.94 (QS MOC) / 0.89 (look-ahead close): differences are rebalance-day luck, not look-ahead",
+        "method": "same rules, three fill paths, 2012-10..2024-12",
+        "metrics": {},
+        "status": "tested"
+      },
+      "title": "Quant Seeker TAA lineage (Defense First -> +BTAL -> VIX filter -> linearity -> inverse-vol -> fallback filter; stops, sector timing, macro overlays, futures): replication, fragility and book value",
+      "universes": [
+        "SPY SSO SPXL TLT GLD DBC UUP BTAL BIL (ETF era 2008/2012-2026)",
+        "1994-2011 proxies (yield-model TLT, XAUUSD, USDX, BCOMTR, LowVol-HighBeta)"
+      ],
+      "verdict": "Reject V5 (QS final). Its published numbers are reproduced only on a calendar that drops BTAL's 338 no-trade days; on the true calendar CAGR/Sharpe are ~2.5 pp / ~0.25 lower (V5-SPY 9.5%/1.06 vs 11.9%/1.31 in QS's window). Executable V5-SPY 2012-10..2024-12: Sharpe 0.83 vs 60/40 0.80 and book DF 0.84; rebalance-day range 0.60-1.05; only inverse-vol weighting survives as a component; no add-on survives.",
+      "verdicts": {
+        "economic_value": "V5-SPY Sharpe 0.83 (dev, Open T+1, 10 bps) = 60/40 and book DF; G1, G2, G4 fail; holdout positive (12.4%/yr) but behind simpler V2/V1/DF (22-27%).",
+        "predictive_value": "Lineage components mostly era-dependent; inverse-vol weights positive in both eras (Holm p 0.053, 21/21 rebalance days); BTAL, VIX ladder, fallback filter, stops, macro gates, sector sleeves not supported.",
+        "promotion": "Reject V5. Forward hypothesis only: inverse-vol weights inside the book's Defense First sleeve (post-hoc).",
+        "source_replication": "Replicated: v1 exactly on the true calendar (raw momentum vs T-bill); v2-v8 within ~0.5 pp CAGR once BTAL no-trade rows are dropped (QS clock artefact)."
+      }
+    },
+    {
+      "CAGR": 0.1414748929643956,
+      "Sharpe": 0.6276312841364924,
+      "adaptive_lineage": {
+        "active_minutes_used": 105,
+        "actual_total_variants": 194,
+        "declared_total_variants": 240,
+        "profile": "standard",
+        "rounds_completed": 1,
+        "stop_reason": "frozen candidates evaluated; one post-hoc pod hypothesis recorded for forward shadow; no further rounds on seen data"
+      },
+      "artifacts": {
+        "concise_report": "pakal-research/reports/quantseeker_volatility_study/REPORT.md",
+        "decision_log": "pakal-research/reports/quantseeker_volatility_study/decision_log.jsonl",
+        "experiment_ledger": "pakal-research/reports/quantseeker_volatility_study/experiment_ledger.jsonl",
+        "frozen_specification": "pakal-research/reports/quantseeker_volatility_study/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/quantseeker_volatility_study/REPORT_FULL.md",
+        "hypothesis_registry": "pakal-research/reports/quantseeker_volatility_study/hypothesis_registry.json",
+        "manifest": "pakal-research/reports/quantseeker_volatility_study/run_manifest.json",
+        "notebook": "pakal-research/reports/quantseeker_volatility_study/quantseeker_volatility_study.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/quantseeker_volatility_study/charts/beta_by_vix_quintile.png",
+          "pakal-research/reports/quantseeker_volatility_study/charts/books_with_pod.png",
+          "pakal-research/reports/quantseeker_volatility_study/charts/crisis_only_payoff_vs_bleed.png",
+          "pakal-research/reports/quantseeker_volatility_study/charts/crisis_windows_heatmap.png",
+          "pakal-research/reports/quantseeker_volatility_study/charts/har_vx_by_period.png",
+          "pakal-research/reports/quantseeker_volatility_study/charts/replication_scorecard.png",
+          "pakal-research/reports/quantseeker_volatility_study/charts/shortvol_episodes.png",
+          "pakal-research/reports/quantseeker_volatility_study/charts/shortvol_equity_drawdown.png",
+          "pakal-research/reports/quantseeker_volatility_study/charts/shortvol_timing_attribution.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/quantseeker_volatility/qsv_amend_spec.py",
+          "pakal-research/quantseeker_volatility/qsv_build_bundle.py",
+          "pakal-research/quantseeker_volatility/qsv_build_notebook.py",
+          "pakal-research/quantseeker_volatility/qsv_charts.py",
+          "pakal-research/quantseeker_volatility/qsv_context.py",
+          "pakal-research/quantseeker_volatility/qsv_data.py",
+          "pakal-research/quantseeker_volatility/qsv_extra_tables.py",
+          "pakal-research/quantseeker_volatility/qsv_freeze_spec.py",
+          "pakal-research/quantseeker_volatility/qsv_lib.py",
+          "pakal-research/quantseeker_volatility/qsv_lineage.py",
+          "pakal-research/quantseeker_volatility/qsv_recap_scan.py",
+          "pakal-research/quantseeker_volatility/qsv_replicate.py",
+          "pakal-research/quantseeker_volatility/qsv_run.py",
+          "pakal-research/quantseeker_volatility/qsv_strategies.py",
+          "pakal-research/quantseeker_volatility/test_qsv_timing.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/quantseeker_volatility_study/tables/gates.json",
+          "pakal-research/reports/quantseeker_volatility_study/tables/famA_summary.csv",
+          "pakal-research/reports/quantseeker_volatility_study/tables/famB_summary.csv",
+          "pakal-research/reports/quantseeker_volatility_study/tables/pod_integration_books.csv",
+          "pakal-research/reports/quantseeker_volatility_study/tables/crisis_windows_2011plus.csv"
+        ],
+        "research_state": "pakal-research/reports/quantseeker_volatility_study/research_state.json",
+        "source_rule_map": "pakal-research/reports/quantseeker_volatility_study/SOURCE_RULE_MAP.md"
+      },
+      "comfortable_capacity": "SVXY sleeve ~$0.7M per full switch (1% of $67M ADV); VIXM only ~$32k per switch",
+      "concise_report": "pakal-research/reports/quantseeker_volatility_study/REPORT.md",
+      "cost_capacity": {
+        "capacity_impact_separate": true,
+        "central_research_round_trip_bps": 20,
+        "comfortable_capacity": "SVXY sleeve ~$0.7M per full switch (1% of $67M ADV); VIXM only ~$32k per switch",
+        "conservative_survival_round_trip_bps": 50,
+        "hard_capacity": "SVXY ~$13M; VIXM ~$0.65M",
+        "note": "VIXM liquidity is thin: the pod's VIXM leg should be implemented with VX months 4-7 above a few hundred thousand dollars",
+        "paper_like_round_trip_bps": 10,
+        "soft_capacity": "SVXY ~$3.4M; VIXM ~$0.16M",
+        "strained_capacity": "SVXY ~$6.7M; VIXM ~$0.32M"
+      },
+      "created_at": "2026-10-02T15:44:41+03:00",
+      "decision_timing": "Close_T (Cboe index closes; month-end for QS4/QS8; FOMC calendar known in advance)",
+      "disposition": "promising_component",
+      "feature_findings": [
+        {
+          "corrected_significance": "Holm p=1 vs buy-and-hold",
+          "direction": "short vol only in contango",
+          "economic_mechanism": "backwardation marks stress where the roll yield flips",
+          "effect_size": "MDD -75% -> -45%, Sharpe 0.56 -> 0.68 (n.s.)",
+          "feature": "VIX3M/VIX level (contango)",
+          "period_consistency": "positive all subperiods; fails Aug 2024 (-38%) when VIX jumped from contango overnight",
+          "recommended_action": "keep as the base gate of any short-vol sleeve",
+          "role": "regime",
+          "status": "replicated"
+        },
+        {
+          "corrected_significance": "not significant vs level",
+          "direction": "short vol when spread VIX3M-VIX rising",
+          "economic_mechanism": "path to contango vs path to backwardation",
+          "effect_size": "MDD -27%, contango+pos 12 bps/day vs 7.5",
+          "feature": "VIX curve momentum (QS9)",
+          "period_consistency": "single-horizon neighbours unstable (k=5 Sharpe 0.21, k=21 0.73); holdout 2025-26 Sharpe 0.04",
+          "recommended_action": "use only inside an ensemble; 42 switches/yr make it cost-fragile (0.34 at 25 bps)",
+          "role": "signal",
+          "status": "replicated"
+        },
+        {
+          "corrected_significance": "t>5",
+          "direction": "inversion -> higher 1-4 week realized vol",
+          "economic_mechanism": "9-day options price imminent shocks",
+          "effect_size": "+6.5-6.9 pp in-sample R2 at h=5, OOS CW t 4.9",
+          "feature": "VIX9D/VIX front-end inversion",
+          "period_consistency": "strong 2019-2026",
+          "recommended_action": "alarm/diagnostic; as a long-VIXY trigger it pays +60% Volmageddon, +86% Aug 2024 but bleeds ~33%/yr in calm years",
+          "role": "signal/diagnostic",
+          "status": "replicated (QS6)"
+        },
+        {
+          "corrected_significance": "horizon grid 1-60: median pre-2020 Sharpe -0.05",
+          "direction": "long VX if forecast > VIX",
+          "economic_mechanism": "none robust; the post-2020 window is a single volatility regime",
+          "effect_size": "VX Sharpe 0.47-0.79 in 2020-04..2026-04 only",
+          "feature": "HAR VIX forecast with VXTLT / MOVE / VIX9D",
+          "period_consistency": "2008-2020: -100% for every model; 2025-26 negative executable",
+          "recommended_action": "do not trade",
+          "role": "signal",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "n.s.",
+          "direction": "short vol Close_(D-2)..Close_D",
+          "economic_mechanism": "uncertainty resolution",
+          "effect_size": "SVXY Sharpe 0.64 raw (article 0.78)",
+          "feature": "FOMC short-vol window",
+          "period_consistency": "2025-26 holdout Sharpe -1.3 (7 of last 8 meetings lost)",
+          "recommended_action": "reject",
+          "role": "exposure",
+          "status": "directionally replicated, decaying"
+        },
+        {
+          "corrected_significance": "alpha vs SPY+pod layer 7.5%/yr, t 2.6 (post-hoc)",
+          "direction": "always on",
+          "economic_mechanism": "credit pair (long Treasuries / short mortgage REITs) dominates crisis returns",
+          "effect_size": "8.4% gross, 6.4% central, corr -0.49; positive in all 5 article crises and 8/8 pod windows 2011+",
+          "feature": "crisis-alpha L/S (GLD/GDXJ, IEI/REM, XLE/IEZ)",
+          "period_consistency": "-41% drawdown 2020-04..2021-06 (post-crash giveback)",
+          "recommended_action": "shadow as an extra 10% sleeve (post-hoc result)",
+          "role": "risk_overlay",
+          "status": "replicated"
+        },
+        {
+          "corrected_significance": "n.s.",
+          "direction": "high beta after top-quintile VIX",
+          "economic_mechanism": "rebound after fear",
+          "effect_size": "EW Hi-Lo +1.9%/month in Q5 (t 1.5)",
+          "feature": "VIX quintile beta timing (QS3)",
+          "period_consistency": "pre-2000 weaker",
+          "recommended_action": "diagnostic only",
+          "role": "diagnostic",
+          "status": "directionally replicated"
+        },
+        {
+          "corrected_significance": "in-sample p 0.04-0.10",
+          "direction": "higher z -> higher P(next-month <= -5%)",
+          "economic_mechanism": "persistence of stress",
+          "effect_size": "OOS AUC avg3 0.64 (article 0.65), 9 events",
+          "feature": "vol-index drawdown probit (QS8)",
+          "period_consistency": "too few events",
+          "recommended_action": "monitoring only; as a VIXM trigger it is flat",
+          "role": "diagnostic",
+          "status": "directionally replicated (with reconciled event definition)"
+        }
+      ],
+      "fill_timing": "Open_(T+1) for ETPs; next settlement for VX; MOC for the FOMC calendar trade",
+      "hard_capacity": "SVXY ~$13M; VIXM ~$0.65M",
+      "knowledge_record": "pakal-research/reports/quantseeker_volatility_study/knowledge_record.json",
+      "last_reviewed_at": "2026-10-02T15:44:41+03:00",
+      "limitations": [
+        "no 15:45 intraday data; same-close results are diagnostic",
+        "VX futures settlements only (no opens) and a constant-maturity approximation of the S&P VIX futures indices",
+        "SVXY pre-2018 scaled x0.5 (article convention)",
+        "2011+ ETP sample contains few independent crises; holdout overlaps the articles' own windows",
+        "GDXJ proxied by GDX before 2009-11",
+        "QS8 event definition reconciled post-hoc",
+        "crisis-alpha additive sleeve result is post-hoc"
+      ],
+      "maximum_drawdown": -0.3130867465382491,
+      "next_test": "if a short-vol sleeve is wanted, paper-trade EVRP-S01 (already studied, corr 0.06 to SPY) rather than A5; keep A5 as the drawdown-control reference for any naked SVXY holding",
+      "next_tests": [
+        "if a short-vol sleeve is wanted, paper-trade EVRP-S01 (already studied, corr 0.06 to SPY) rather than A5; keep A5 as the drawdown-control reference for any naked SVXY holding",
+        "shadow-log crisis-alpha L/S (10% sleeve) with real borrow quotes for REM/GDXJ/IEZ",
+        "log VIX9D>VIX as a pod alarm (no position) and compare its lead time with the VIXM leg",
+        "replace VIXM in the pod leg with VX months 4-7 above ~$0.3M sleeve size"
+      ],
+      "notebook": "pakal-research/reports/quantseeker_volatility_study/quantseeker_volatility_study.ipynb",
+      "objective": "Reproduce the Quant Seeker VIX-timing claims and test (a) a short-vol timing sleeve and (b) crisis-only sleeves against the existing crisis-trend pod (core + VIXM-in-backwardation).",
+      "portal_images": [
+        "assets/quantseeker_volatility_study/01-shortvol_equity_drawdown.png",
+        "assets/quantseeker_volatility_study/02-replication_scorecard.png"
+      ],
+      "primary_cost_layer": "central_research",
+      "primary_metrics": {
+        "CAGR": 0.1414748929643956,
+        "Sharpe": 0.6276312841364924,
+        "annualized_volatility": 0.225472683920438,
+        "buyhold_mdd": -0.748,
+        "buyhold_sharpe": 0.555,
+        "cost_layer": "central_research (10 bps one-way)",
+        "gates_all_pass": true,
+        "holdout_2025_2026_sharpe": 0.253,
+        "maximum_drawdown": -0.3130867465382491,
+        "period": "2011-10-04..2026-10-01",
+        "turnover": 29.67851458885941,
+        "universe": "SVXY scaled -0.5x (A5 SV-ENS frozen candidate)"
+      },
+      "replication_outcome": "directionally_replicated",
+      "research_status": "forward_hypothesis",
+      "signal_family": "volatility_term_structure_timing_and_crisis_hedging",
+      "soft_capacity": "SVXY ~$3.4M; VIXM ~$0.16M",
+      "sources": [
+        "Quant Seeker articles 2025-03-25, 2025-06-18, 2025-07-04, 2026-02-19, 2026-03-05, 2026-05-18, 2026-05-25, 2026-07-06, 2026-09-23 (archive PDFs and text)",
+        "Cooper 2013; Simon & Campasano 2014; Sadik 2023; Lucca & Moench 2015; Bansal & Stivers 2025; Dimitriadis 2026; Degiannakis et al. 2025; Lim 2026; Uyar 2026 (as summarized by the articles)",
+        "pakal-research/reports/crisis_trend_pod_study (pod rules reused unchanged)"
+      ],
+      "study_id": "quantseeker_volatility_study",
+      "tags": [
+        "vix",
+        "volatility",
+        "short-vol",
+        "tail-hedge",
+        "crisis-alpha",
+        "term-structure",
+        "quantseeker",
+        "replication"
+      ],
+      "timing_attribution": {
+        "artifact": "pakal-research/reports/quantseeker_volatility_study/tables/famA_timing_attribution.csv",
+        "diagnostic_path": "Close_T same-close fill (approximates the articles' 15:45 signal + MOC)",
+        "executable_path": "Open_(T+1) open-to-open; also MOC at Close_(T+1)",
+        "headline_result": "next-open keeps the same-close Sharpe (A5 0.65 -> 0.63, A1 0.69 -> 0.68); a full day of delay loses ~25% (A1 0.50, A5 0.51); SVXY tends to gain overnight after a switch-off (+18 bps), so open execution is not penalised",
+        "method": "same rule, three fill paths; overnight return after switches",
+        "metrics": {
+          "A1_moc_next": 0.495,
+          "A1_open": 0.682,
+          "A1_sameclose": 0.691,
+          "A5_moc_next": 0.509,
+          "A5_open": 0.628,
+          "A5_sameclose": 0.654
+        },
+        "status": "tested"
+      },
+      "title": "Quant Seeker VIX / volatility-timing archive (9 articles): replication, executable short-vol timing, crisis-only sleeves vs the crisis-trend pod",
+      "universes": [
+        "SVXY (scaled -0.5x), VIXY, VIXM, VXX; Cboe VX futures constant-maturity indices 2004+",
+        "GLD/GDXJ, IEI/REM, XLE/IEZ",
+        "Ken French beta deciles",
+        "crisis-trend pod 17-ETF universe"
+      ],
+      "verdict": "Signal claims mostly reproduce (QS9 curve momentum, QS1 slope switch, QS4 crisis-alpha L/S, QS6 front-end inversion forecasts RV: replicated; QS2 FOMC, QS3 VIX-timed beta, QS8 drawdown probit: directional; QS5 bond-vol HAR improvement: not reproduced). Executable: VIX-curve timing of short vol halves the drawdown (A5 SV-ENS MDD -31% vs -75% buy-and-hold) but does not raise Sharpe vs holding SVXY or the plain level rule; HAR VX-futures timing is a post-2020 artefact (loses 100% on 2008-2020, negative in 2025-26). No VIX/MOVE trigger adds to the pod at equal budget: faster triggers (VIX9D>VIX, negative curve momentum) pay 2-4x more in shocks but bleed 12-33%/yr in calm years; VIX hedges lose in 2022. Crisis-alpha L/S replicates (+4%/yr net, positive in 8/8 stress windows incl. 2022) and improves an 80/20 book only as an extra sleeve (post-hoc).",
+      "verdicts": {
+        "economic_value": "short-vol timing = drawdown control, not alpha (no Sharpe gain vs A0 or A1, Holm p=1); crisis-only VIX triggers do not beat the existing VIXM leg; crisis-alpha L/S is the only additive candidate",
+        "predictive_value": "VIX-curve level/momentum/front end carry real state information for next-day short-vol returns and for 1-4 week realized vol; not for VX direction pre-2020",
+        "promotion": "A5 SV-ENS passes the frozen standalone gates (formal status: paper-trial candidate) but is 0.63 correlated with SPY and lowers an 80/20 SPY+pod book Sharpe at 10% (0.979 vs 0.986) while the already-studied EVRP-S01 sleeve raises it (1.028): recommendation = do not use a paper slot on A5; crisis-alpha L/S -> shadow; all other rules rejected or diagnostic",
+        "source_replication": "QS1, QS4, QS6, QS9 replicated; QS2, QS3, QS7, QS8 directionally replicated; QS5 VXTLT gain not reproducible on our data"
+      }
     },
     {
       "CAGR": 0.10703015661833226,
@@ -27607,6 +29692,142 @@
       ],
       "verdict": "The fixed 12/VIX throttle did not pass every predeclared validation and confirmation gate. Keep VIX diagnostic only for this signal.",
       "verdicts": null
+    },
+    {
+      "CAGR": 0.092318591541709,
+      "Sharpe": 0.4683894043043523,
+      "adaptive_lineage": null,
+      "artifacts": {
+        "concise_report": "pakal-research/reports/ta125_momentum_us_port/REPORT.md",
+        "frozen_specification": "pakal-research/reports/ta125_momentum_us_port/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/ta125_momentum_us_port/REPORT_FULL.md",
+        "manifest": "pakal-research/reports/ta125_momentum_us_port/run_manifest.json",
+        "notebook": "pakal-research/reports/ta125_momentum_us_port/ta125_momentum_us_port.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/ta125_momentum_us_port/charts/sp500_growth_of_1.png",
+          "pakal-research/reports/ta125_momentum_us_port/charts/alpha_by_universe_era.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/ta125_momentum_us_port/t125us_lib.py",
+          "pakal-research/ta125_momentum_us_port/t125us_run.py",
+          "pakal-research/ta125_momentum_us_port/t125us_charts.py",
+          "pakal-research/ta125_momentum_us_port/t125us_build_artifacts.py",
+          "pakal-research/ta125_momentum_us_port/test_t125us_timing.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/ta125_momentum_us_port/tables/primary_family_holm.csv",
+          "pakal-research/reports/ta125_momentum_us_port/tables/stats_all.csv",
+          "pakal-research/reports/ta125_momentum_us_port/tables/paired_differences.csv",
+          "pakal-research/reports/ta125_momentum_us_port/tables/sp500_yearly_returns.csv"
+        ]
+      },
+      "comfortable_capacity": null,
+      "concise_report": "pakal-research/reports/ta125_momentum_us_port/REPORT.md",
+      "cost_capacity": {
+        "capacity_impact_separate": true,
+        "central_research_round_trip_bps": 20,
+        "comfortable_capacity": null,
+        "conservative_survival_round_trip_bps": 40,
+        "hard_capacity": null,
+        "note": "Capacity not modelled because the strategy is rejected; turnover 7-10x NAV/yr two-sided",
+        "paper_like_round_trip_bps": 0,
+        "soft_capacity": null,
+        "strained_capacity": null
+      },
+      "created_at": "2026-09-30T00:00:00+03:00",
+      "decision_timing": "Close_t at month end (selection) and week end (exposure check); signals are trailing ratios of TR-adjusted closes",
+      "disposition": "rejected",
+      "feature_findings": [
+        {
+          "feature": "12-1 + 6-1 percentile blend, top 20 with buffer 10, 5 per sector",
+          "finding": "US large-cap alpha +3.6%/yr 1991-2008, -2.0%/yr 2009-2026 (S&P 500)"
+        },
+        {
+          "feature": "15% ex-ante vol target, weekly 5 pp band",
+          "finding": "drawdown control only; Sharpe unchanged vs fully invested"
+        },
+        {
+          "feature": "SMA200 half exposure",
+          "finding": "DD -41% -> -31%, -0.7%/yr, Sharpe flat"
+        }
+      ],
+      "fill_timing": "Close_(t+1) MOC; robustness Open_(t+1)",
+      "hard_capacity": null,
+      "knowledge_record": "pakal-research/reports/ta125_momentum_us_port/knowledge_record.json",
+      "last_reviewed_at": "2026-09-30T00:00:00+03:00",
+      "limitations": [
+        "GICS sector last-known, not PIT",
+        "TASE break filter replaced by glitch guard",
+        "delisting returns after the last bar not modelled",
+        "TA-125 source result not re-audited"
+      ],
+      "maximum_drawdown": -0.4102264059097812,
+      "next_test": null,
+      "next_tests": [],
+      "notebook": "pakal-research/reports/ta125_momentum_us_port/ta125_momentum_us_port.ipynb",
+      "objective": "Test whether the user's TA-125 momentum recipe (alpha t=4.0 on the TASE) earns alpha on US PIT universes, and separate momentum selection from the vol-target machinery.",
+      "portal_images": [
+        "assets/ta125_momentum_us_port/01-alpha_by_universe_era.png",
+        "assets/ta125_momentum_us_port/02-sp500_growth_of_1.png"
+      ],
+      "primary_cost_layer": "central_research",
+      "primary_metrics": {
+        "CAGR": 0.092318591541709,
+        "Sharpe": 0.4683894043043523,
+        "alpha_ann": 0.0091795947266482,
+        "alpha_t_nw": 0.551086611889732,
+        "annualized_volatility": 0.1586322564867421,
+        "benchmark_sharpe": 0.5364893386382579,
+        "best_family_member": "r1000 B, Holm p 0.069",
+        "cost_layer": "central_research (5/10/20/40 bps per side by turnover tier)",
+        "maximum_drawdown": -0.4102264059097812,
+        "n_trials": 54,
+        "period": "1991-02-01..2026-09-25",
+        "turnover": 8.30085515948195,
+        "universe": "S&P 500, recipe A (N=20, B=10, 15% vol target)"
+      },
+      "replication_outcome": "not_transferable",
+      "research_status": "diagnostic",
+      "signal_family": "cross_sectional_momentum_vol_targeted",
+      "soft_capacity": null,
+      "sources": [
+        "User-supplied TA-125 recipe (chat, 2026-09-30)",
+        "Barroso & Santa-Clara 2015",
+        "Moreira & Muir 2017"
+      ],
+      "study_id": "ta125_momentum_us_port",
+      "tags": [
+        "momentum",
+        "vol_target",
+        "transfer_test",
+        "tase",
+        "us_equities",
+        "rejected"
+      ],
+      "timing_attribution": {
+        "artifact": "pakal-research/reports/ta125_momentum_us_port/tables/primary_family_holm.csv",
+        "diagnostic_path": "none (portfolio test of a fixed recipe)",
+        "executable_path": "stateful daily engine with weekly exposure resizing, MOC fills",
+        "headline_result": "S&P 500 alpha +0.9%/yr t 0.55; 2009-2026 -2.0%/yr",
+        "method": "frozen v1 spec, 54 runs, primary family 12 alpha tests with Holm",
+        "metrics": {
+          "sp500_A_alpha_t_nw": 0.551086611889732,
+          "sp500_A_sharpe": 0.4683894043043523
+        },
+        "status": "tested",
+        "unavailable_reason": null
+      },
+      "title": "TA-125 momentum recipe (12-1/6-1 blend, top-N buffer, inverse-vol, 15% vol target) ported to US PIT universes",
+      "universes": [
+        "S&P 500, S&P 100, Nasdaq-100, Russell 1000, S&P 400, S&P 600 PIT (Norgate) incl. delisted; $5 raw floor; $1M median-63d turnover"
+      ],
+      "verdict": "REJECTED FOR THE US. On the S&P 500 the recipe earns Sharpe 0.47 vs 0.54 for the index; alpha is +0.9%/yr with t 0.55, positive only before 2009 and negative after. An equal-weight, vol-targeted S&P 500 without momentum does better (0.57). The only hint is the Russell 1000 (alpha +4.5%, t 2.4, Holm p 0.10), and it is almost entirely from 1991-2008. The vol target is useful risk control (DD -62% -> -41%) but not alpha.",
+      "verdicts": {
+        "economic_value": "none in the US after costs; the machinery adds no value over an equal-weight control",
+        "predictive_value": "12-1/6-1 momentum positive in US large caps 1991-2008, zero or negative 2009-2026",
+        "promotion": "none",
+        "source_replication": "not re-audited; transfer test only"
+      }
     },
     {
       "CAGR": 0.042342086786826494,
@@ -33238,6 +35459,361 @@
       }
     },
     {
+      "CAGR": 0.113388908474113,
+      "Sharpe": 0.9461824318256898,
+      "adaptive_lineage": null,
+      "artifacts": {
+        "catalog_entry": "pakal-research/reports/trend_breakout_momentum_candidates_study/catalog_entry.md",
+        "concise_report": "pakal-research/reports/trend_breakout_momentum_candidates_study/REPORT.md",
+        "frozen_specification": "pakal-research/reports/trend_breakout_momentum_candidates_study/research_spec_frozen.json",
+        "frozen_specification_md": "pakal-research/reports/trend_breakout_momentum_candidates_study/SPEC_v1_frozen.md",
+        "full_report": "pakal-research/reports/trend_breakout_momentum_candidates_study/REPORT_FULL.md",
+        "manifest": "pakal-research/reports/trend_breakout_momentum_candidates_study/run_manifest.json",
+        "notebook": "pakal-research/reports/trend_breakout_momentum_candidates_study/trend_breakout_momentum_candidates_study.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/trend_breakout_momentum_candidates_study/charts/A1_french_growth.png",
+          "pakal-research/reports/trend_breakout_momentum_candidates_study/charts/A2_etf_growth.png",
+          "pakal-research/reports/trend_breakout_momentum_candidates_study/charts/B_growth_by_universe.png",
+          "pakal-research/reports/trend_breakout_momentum_candidates_study/charts/D_growth.png",
+          "pakal-research/reports/trend_breakout_momentum_candidates_study/charts/E_growth.png",
+          "pakal-research/reports/trend_breakout_momentum_candidates_study/charts/overview_g3_window.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/trend_breakout_momentum_candidates/tbmc_lib.py",
+          "pakal-research/trend_breakout_momentum_candidates/tbmc_industry_trend.py",
+          "pakal-research/trend_breakout_momentum_candidates/tbmc_smooth_momentum.py",
+          "pakal-research/trend_breakout_momentum_candidates/tbmc_daily_engine.py",
+          "pakal-research/trend_breakout_momentum_candidates/tbmc_two_factor.py",
+          "pakal-research/trend_breakout_momentum_candidates/tbmc_ipo_breakout.py",
+          "pakal-research/trend_breakout_momentum_candidates/tbmc_charts.py",
+          "pakal-research/trend_breakout_momentum_candidates/tbmc_d_robustness.py",
+          "pakal-research/trend_breakout_momentum_candidates/tbmc_build_artifacts.py",
+          "tests/test_trend_breakout_momentum_candidates.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/trend_breakout_momentum_candidates_study/tables/A_stats.csv",
+          "pakal-research/reports/trend_breakout_momentum_candidates_study/tables/A_summary.json",
+          "pakal-research/reports/trend_breakout_momentum_candidates_study/tables/B_stats.csv",
+          "pakal-research/reports/trend_breakout_momentum_candidates_study/tables/B_primary_family.csv",
+          "pakal-research/reports/trend_breakout_momentum_candidates_study/tables/B_summary.json",
+          "pakal-research/reports/trend_breakout_momentum_candidates_study/tables/D_stats.csv",
+          "pakal-research/reports/trend_breakout_momentum_candidates_study/tables/D_summary.json",
+          "pakal-research/reports/trend_breakout_momentum_candidates_study/tables/D_rob_summary.json",
+          "pakal-research/reports/trend_breakout_momentum_candidates_study/tables/D_rob_grid.csv",
+          "pakal-research/reports/trend_breakout_momentum_candidates_study/tables/D_rob_universe.csv",
+          "pakal-research/reports/trend_breakout_momentum_candidates_study/tables/E_stats.csv",
+          "pakal-research/reports/trend_breakout_momentum_candidates_study/tables/E_summary.json"
+        ]
+      },
+      "comfortable_capacity": null,
+      "concise_report": "pakal-research/reports/trend_breakout_momentum_candidates_study/REPORT.md",
+      "cost_capacity": {
+        "capacity_note": "Sector SPDRs and S&P 100/NDX names are deep; E is limited by young listings and is not promoted.",
+        "central_research_round_trip_bps": 10,
+        "comfortable_capacity_usd": 100000000,
+        "conservative_survival_round_trip_bps": 20,
+        "hard_capacity_usd": 5000000000,
+        "paper_like_round_trip_bps": 0,
+        "soft_capacity_usd": 500000000,
+        "strained_capacity_usd": 2000000000
+      },
+      "created_at": "2026-10-02T00:00:00+03:00",
+      "decision_timing": "Close_t (daily for A, D, E; month end for B); all scores scale-free",
+      "disposition": "D robust at Sharpe ~0.9 (SPEC v2 suite passed); shadow log only; A, B, E rejected",
+      "feature_findings": [
+        {
+          "corrected_significance": "replication gate passed on the paper window; executable fails every frozen gate",
+          "direction": "positive 1927-1989, about zero vs market after 2000",
+          "economic_mechanism": "slow industry trends; arbitraged once sector ETFs made them tradable",
+          "effect_size": "French: decade Sharpe 1.4-2.3 to 1990, 0.7 after 2000 (market 0.8-0.9); ETFs 1999-2026 Sharpe 0.49, 2012-26 0.68 vs SPY 0.94",
+          "feature": "Industry breakout entry: close > min(EMA20 + 2 ATR20, 20-day high); ratcheted stop = max(EMA40 - 2 ATR40, 40-day low)",
+          "period_consistency": "unstable (decay)",
+          "recommended_action": "do not implement; do not re-tune",
+          "role": "entry/exit",
+          "status": "rejected for the current era"
+        },
+        {
+          "corrected_significance": "not_applicable",
+          "direction": "raises CAGR 12% -> 18% at equal Sharpe in the century run",
+          "economic_mechanism": "leverage on a diversified trend book",
+          "effect_size": "A1 cap 200% vs 100%: CAGR 17.8% vs 12.8%, Sharpe 1.15 vs 1.05, DD -32% vs -31%",
+          "feature": "Equal-volatility-contribution sizing (1.5%/N per industry) with 200% gross cap and 20% name cap",
+          "period_consistency": "consistent",
+          "recommended_action": "not available in the stack (no account leverage); irrelevant since the signal decayed",
+          "role": "sizing",
+          "status": "diagnostic"
+        },
+        {
+          "corrected_significance": "Holm-significant only in r1000",
+          "direction": "positive vs plain 12-1 momentum",
+          "economic_mechanism": "retail extrapolation of smooth paths (paper); long leg only here",
+          "effect_size": "+3.3 / +4.1 / +3.1 %/yr vs mom12_1 top quintile in sp500 / r1000 / ndx (t 1.75 / 2.44 / 1.69; Holm p 0.20 / 0.044 / 0.20); same -69% DD",
+          "feature": "Trend-smoothness conditional double sort: R^2 quintile first, slope quintile within (Schmerling 2026), long top cell",
+          "period_consistency": "positive in 1996-2011, about zero in 2012-2026",
+          "recommended_action": "possible score ingredient for an NDX sleeve; not a standalone strategy",
+          "role": "cross-sectional selection",
+          "status": "diagnostic (weak)"
+        },
+        {
+          "corrected_significance": "Holm p 0.75",
+          "direction": "about zero vs plain momentum",
+          "economic_mechanism": "same information as 12-1 momentum (rank corr 0.8-0.9)",
+          "effect_size": "+0.2 / +0.7 / +1.1 %/yr (t 0.2 / 0.7 / 0.6)",
+          "feature": "Smoothness rank blend (slope t-stat, log-price slope x R^2, minus information discreteness), top quintile",
+          "period_consistency": "unstable",
+          "recommended_action": "reject",
+          "role": "cross-sectional selection",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "not_applicable",
+          "direction": "era-dependent",
+          "economic_mechanism": "whipsaws in a fast-recovering market",
+          "effect_size": "+0.3..+0.4 Sharpe in 1996-2011, -0.2..-0.3 in 2012-2026 across 12 sleeves",
+          "feature": "SPXTR > SMA200 else cash gate on monthly momentum sleeves",
+          "period_consistency": "unstable",
+          "recommended_action": "consistent with the mtus 'dual' half-brake finding; do not use a full-off SMA200 gate",
+          "role": "exposure",
+          "status": "diagnostic (known)"
+        },
+        {
+          "corrected_significance": "single pre-declared run; alpha t 4.1",
+          "direction": "positive",
+          "economic_mechanism": "trend exit removes the left tail; low-vol and momentum tilts in mega-caps",
+          "effect_size": "1994-2026: CAGR 11.3%, Sharpe 0.95 (0.89 / 1.01), DD -25% vs SPY -55%; alpha 5.7%/yr t 4.1, beta 0.48; G3 30% mix 1.30 -> 1.35",
+          "feature": "Two-factor rotation: low-vol (C/ATR blend) and vol-normalised multi-horizon momentum (ROC/NATR), 10 + 10 slots, vol sizing min(2%/sigma, 10%) x 0.5, entries only when SPX or NDX > 200 sessions ago, 25% trailing stop on closes",
+          "period_consistency": "consistent across halves and 16 post-publication months (Sharpe 1.26)",
+          "recommended_action": "12-month shadow log beside the live pods; no promotion; a vol-targeted or NDX-only variant needs a new frozen spec",
+          "role": "cross-sectional rotation with trend exit",
+          "status": "diagnostic candidate (defensive growth)"
+        },
+        {
+          "corrected_significance": "not_applicable",
+          "direction": "not_applicable",
+          "economic_mechanism": "scale-free ratio",
+          "effect_size": "keeps the score invariant to future splits (synthetic test passes)",
+          "feature": "ROC / NATR (normalised ATR) instead of ROC / dollar ATR",
+          "period_consistency": "not_applicable",
+          "recommended_action": "use in every vol-normalised momentum score",
+          "role": "signal hygiene",
+          "status": "supported"
+        },
+        {
+          "corrected_significance": "single run; not significant at the gates",
+          "direction": "weakly positive, negative since publication",
+          "economic_mechanism": "attention and lock-up effects in young listings; thin after costs and close-based brackets",
+          "effect_size": "2001-2026 Sharpe 0.62, CAGR 7.2%, DD -39%, 115 trades/yr, win 40%; post-pub -9%/yr; alpha 5.4%/yr t 2.2",
+          "feature": "Recent-IPO all-time-high breakout (age <= 90 sessions, new high close, 20 slots, +20% target / -10% trailing stop, turnover priority)",
+          "period_consistency": "unstable (2001-2012 Sharpe 0.83, 2013-26 0.52)",
+          "recommended_action": "reject; do not build intraday brackets for it",
+          "role": "event breakout",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "frozen gates, all pass",
+          "direction": "robust",
+          "economic_mechanism": "most Sharpe from trailing stops + market filter + vol sizing in large caps; ranking adds ~0.15",
+          "effect_size": "grid 0.86-0.98; noise median 0.90 (baseline pct 86); random median 0.79 (baseline pct 99); universes 0.83-1.06; alpha vs exposure-timed SPY 4.7%/yr t 3.8; bootstrap 0.99 full / 0.67 since 2012",
+          "feature": "D robustness suite (SPEC v2): 16-cell parameter grid, 100 rank-noise and 100 random-rank runs, lag/MOC, 20/40 bps, filter off/SPX-only, 4 universes, exposure-timed SPY control, block bootstrap",
+          "period_consistency": "consistent; edge vs SPY concentrated in 2000-02 and 2008",
+          "recommended_action": "shadow log; a 20-slot or 3% vol-target variant needs a new frozen spec",
+          "role": "validation",
+          "status": "supported"
+        }
+      ],
+      "fill_timing": "Open_(t+1) stateful engines (A2, B, D, E); A1 paper-like close and lagged t+2 diagnostics",
+      "hard_capacity": null,
+      "knowledge_record": "pakal-research/reports/trend_breakout_momentum_candidates_study/knowledge_record.json",
+      "last_reviewed_at": "2026-10-02T00:00:00+03:00",
+      "limitations": [
+        "A1 is paper-like (index data, no costs, daily weights, borrowing at T-bills); the lagged t+2 path is the honest one",
+        "A2 covers 1999-2026 with 9 sector ETFs until 2005-11 and 29 afterwards (the paper used 31)",
+        "B uses the mtus monthly panel conventions (last-known GICS, $5 / $1M floors, 10 bps, no vol targeting)",
+        "D deviates from the source in one declared way (ROC / NATR instead of ROC / dollar ATR); RealTest fills not reproduced",
+        "E has no market-cap field (dollar turnover proxy), close-evaluated brackets, a name-based SPAC filter",
+        "flat per-side costs, no impact model"
+      ],
+      "maximum_drawdown": -0.2479139876844218,
+      "next_test": "D only: a 12-month shadow log beside the live pods with the frozen rules (decision Close_t, next-open fills), checked in 2027-10 on Sharpe >= 0.9 and daily correlation to G3 <= 0.55; if the owner wants a vol-targeted or NDX-only variant, freeze a new spec first. Do not re-run A, B or E variants. If a genuinely new return source is wanted, look outside long-only US equity trend (EOM flow, futures carry/basis after a data purchase).",
+      "next_tests": [
+        "D only: a 12-month shadow log beside the live pods with the frozen rules (decision Close_t, next-open fills), checked in 2027-10 on Sharpe >= 0.9 and daily correlation to G3 <= 0.55; if the owner wants a vol-targeted or NDX-only variant, freeze a new spec first. Do not re-run A, B or E variants. If a genuinely new return source is wanted, look outside long-only US equity trend (EOM flow, futures carry/basis after a data purchase)."
+      ],
+      "notebook": "pakal-research/reports/trend_breakout_momentum_candidates_study/trend_breakout_momentum_candidates_study.ipynb",
+      "objective": "Owner asked for one real momentum / breakout / trend / volatility strategy with high Sharpe and CAGR, preferably cross-sectional rotational. Screen four published, fully specified rules that the Pakal registry had not tested, under one frozen spec.",
+      "portal_images": [
+        "assets/trend_breakout_momentum_candidates_study/01-A1_french_growth.png",
+        "assets/trend_breakout_momentum_candidates_study/02-A2_etf_growth.png"
+      ],
+      "primary_cost_layer": "central_research",
+      "primary_metrics": {
+        "CAGR": 0.113388908474113,
+        "Sharpe": 0.9461824318256898,
+        "a1_replication": {
+          "ours_paper_like_tv1.5_cap200": {
+            "cagr": 0.1782359215306113,
+            "maxdd": -0.3226404178287311,
+            "sharpe": 1.1508250358307217,
+            "vol": 0.12330015212438353
+          },
+          "paper": {
+            "cagr": 0.182,
+            "maxdd": -0.33,
+            "sharpe": 1.39,
+            "vol": 0.126
+          },
+          "within_gate": true
+        },
+        "a2_primary": {
+          "CAGR": 0.0472310616870821,
+          "Sharpe": 0.4902246139160395,
+          "maximum_drawdown": -0.3423777629746267,
+          "turnover": 8.455288978188577
+        },
+        "annualized_volatility": 0.1213492908055672,
+        "book_fit_a2": {
+          "candidate_same_window": {
+            "cagr": 0.06503791716318075,
+            "maxdd": -0.19251642500850108,
+            "sharpe": 0.6456541546045681
+          },
+          "corr_daily_dv2": 0.5533009324533937,
+          "corr_daily_g3_true": 0.5758610960001819,
+          "corr_daily_ndx_L": 0.5678620779386109,
+          "corr_daily_taa_rank_tqqq": 0.4349449458865916,
+          "days": 3471,
+          "g3_true": {
+            "cagr": 0.19975464147605404,
+            "maxdd": -0.1409661982221896,
+            "sharpe": 1.2976704655408078
+          },
+          "mix_10": {
+            "cagr": 0.18636813743610658,
+            "maxdd": -0.12802617361051638,
+            "sharpe": 1.287482546991934
+          },
+          "mix_20": {
+            "cagr": 0.17295078589631974,
+            "maxdd": -0.11493639184423032,
+            "sharpe": 1.2701378582753216
+          },
+          "mix_30": {
+            "cagr": 0.15950714820870115,
+            "maxdd": -0.10948369099261002,
+            "sharpe": 1.2433975753423958
+          },
+          "window": "2012-10-02..2026-07-24"
+        },
+        "cost_layer": "central_research (10 bps per side stocks; 5 bps ETFs in A2)",
+        "d_book_fit": {
+          "candidate_same_window": {
+            "cagr": 0.11876093096851426,
+            "maxdd": -0.2304016505991484,
+            "sharpe": 0.9844736746863892
+          },
+          "corr_daily_dv2": 0.5839681003877041,
+          "corr_daily_g3_true": 0.49941430501601775,
+          "corr_daily_ndx_L": 0.4870206202944485,
+          "corr_daily_taa_rank_tqqq": 0.38255207951036796,
+          "days": 3471,
+          "g3_true": {
+            "cagr": 0.19975464147605404,
+            "maxdd": -0.1409661982221896,
+            "sharpe": 1.2976704655408078
+          },
+          "mix_10": {
+            "cagr": 0.19241693972895302,
+            "maxdd": -0.13198088370125738,
+            "sharpe": 1.3231197292542776
+          },
+          "mix_20": {
+            "cagr": 0.18489904537686686,
+            "maxdd": -0.12293804747130788,
+            "sharpe": 1.342788534278804
+          },
+          "mix_30": {
+            "cagr": 0.1772049564468383,
+            "maxdd": -0.12187554725013339,
+            "sharpe": 1.353523588441233
+          },
+          "window": "2012-10-02..2026-07-24"
+        },
+        "maximum_drawdown": -0.2479139876844218,
+        "n_trials": 56,
+        "period": "1994-01-04..2026-09-25",
+        "turnover": 12.573995386669903,
+        "turnover_note": "round trips per year (D); A2 two-sided turnover 8.5x NAV/yr",
+        "universe": "D primary (the only retained candidate): PIT S&P 100 U Nasdaq-100, two sub-systems x 10 slots, 25% trailing stop, 10 bps, cash 0%"
+      },
+      "replication_outcome": "A1 century result replicated (CAGR 17.8% vs 18.2%, Sharpe 1.15 vs 1.39) but the edge decays after 1990; D source claim reproduced (S&P-like return with half the drawdown); B direction reproduced but small; E not reproduced",
+      "research_status": "forward_hypothesis",
+      "signal_family": "long_only_trend_breakout_and_cross_sectional_momentum_candidates",
+      "soft_capacity": null,
+      "sources": [
+        "Zarattini & Antonacci, A Century of Profitable Industry Trends (Dow Award 2025); Concretum 2026-09-20",
+        "Schmerling 2026, Slope, Strength and Retail Extrapolation; Quantitativo 2026-07-01; QuantSeeker 2024-10-10",
+        "TradeQuantiX, Trading System Investigation Series 3 (2025-06-03), after Bensdorp",
+        "Quantitativo 2024-06-08, The edge in trading IPOs (Marsten Parker)"
+      ],
+      "study_id": "trend_breakout_momentum_candidates_study",
+      "tags": [
+        "trend_following",
+        "breakout",
+        "sector_rotation",
+        "cross_sectional_momentum",
+        "trend_smoothness",
+        "trailing_stop",
+        "ipo",
+        "dow_award",
+        "long_only"
+      ],
+      "timing_attribution": {
+        "artifact": "pakal-research/reports/trend_breakout_momentum_candidates_study/tables/D_stats.csv",
+        "diagnostic_path": "A1 French paper-like replication (no costs) and lagged path",
+        "executable_path": "A2 ETF engine with 20% rebalance band, 5 bps; B monthly engine 10 bps; D/E slot engine 10 bps",
+        "headline_result": "A2 ETF Sharpe 0.49; B1 vs momentum +3-4%/yr with -69% DD; D Sharpe 0.95 / DD -25% / G3 mix30 1.35; E Sharpe 0.62",
+        "method": "single pass on externally specified rules; pre-declared primaries; Holm within the B family",
+        "metrics": {
+          "A1_lagged_cap100_sharpe_2012_2026": 0.622,
+          "A1_paper_like_sharpe_1926_2024": 1.151,
+          "A2_primary_sharpe_2012_2026": 0.678,
+          "A2_primary_sharpe_full": 0.49,
+          "B1_r1000_diff_vs_mom_ann": 0.041,
+          "B1_r1000_holm_p": 0.044,
+          "B1_sp500_maxdd": -0.693,
+          "D_alpha_vs_spy_t": 4.09,
+          "D_g3_mix30_sharpe": 1.354,
+          "D_maxdd": -0.248,
+          "D_rob_bootstrap_p_2012": 0.6695,
+          "D_rob_bootstrap_p_full": 0.9895,
+          "D_rob_grid_min_sharpe": 0.856,
+          "D_rob_noise_median": 0.899,
+          "D_rob_random_median": 0.786,
+          "D_sharpe_1994_2011": 0.894,
+          "D_sharpe_2012_2026": 1.012,
+          "D_sharpe_full": 0.946,
+          "E_post_pub_cagr": -0.09,
+          "E_sharpe_full": 0.624
+        },
+        "status": "tested",
+        "unavailable_reason": null
+      },
+      "title": "Trend / breakout / momentum candidates not yet tested in Pakal: industry trend-breakout (Dow Award 2025), trend-smoothness double sort, two-factor rotation with trailing stops, recent-IPO all-time-high breakout",
+      "universes": [
+        "French 48 VW industries (paper-like)",
+        "29 State Street sector/industry SPDRs",
+        "S&P 500 / Russell 1000 / Nasdaq-100 PIT",
+        "S&P 100 U Nasdaq-100 PIT",
+        "US listings aged <= 90 sessions incl. delisted"
+      ],
+      "verdict": "NO CANDIDATE PASSES THE FROZEN 'REAL HIGH-SHARPE STRATEGY' GATE. (A) The Dow-Award industry trend-breakout replicates on French industries over a century (Sharpe 1.15 vs the paper's 1.39, CAGR 17.8%) but its edge sits in 1927-1989 (decade Sharpe 1.4-2.3 vs market 0.1-1.7); since 2000 it earns Sharpe 0.7 against a market at 0.8-0.9, and the executable sector-ETF version earns Sharpe 0.49 (0.68 in 2012-2026 vs SPY 0.94). (B) The trend-smoothness double sort beats plain 12-1 momentum by 3-4%/yr (t 1.7-2.4, Holm-significant only in the Russell 1000) but inherits the same -69% drawdown and Sharpe 0.6-0.8; it is an ingredient, not a strategy. (D) The two-factor low-vol + momentum rotation with 25% trailing stops reproduces its source: CAGR 11.3%, Sharpe 0.95 (0.89 / 1.01 by half), max DD -25% vs -55% for SPY, alpha 5.7%/yr (t 4.1) at beta 0.48; it misses the Sharpe 1.0 gate by 0.05 and does not beat SPY by 0.25 after 2012, but it is the only candidate that lifts the live book (G3 1.30 -> 1.35 at a 30% mix). (E) The recent-IPO all-time-high breakout earns Sharpe 0.62 with a -39% drawdown and lost 9%/yr after publication. Bottom line: the high-Sharpe, high-CAGR, cross-sectional strategy the owner asked for does not exist among these four; D is a sound low-drawdown equity sleeve worth a 12-month shadow log, nothing more. ROBUSTNESS (SPEC v2, 230 runs): D passes all six frozen robustness gates (parameter grid Sharpe 0.86-0.98, rank-noise median 0.90, lag/MOC 0.96, 40 bps 0.93, four universes 0.83-1.06, bootstrap P(Sharpe>SPY) 0.99 full). Random stock picks with the same stops/filter/sizing already earn 0.79; ranking adds ~0.15 Sharpe (beats 99% of random runs). Versus SPY the edge is a bear-market story (bootstrap 0.67 since 2012; beats SPY in 52% of years). Robust but modest: true Sharpe ~0.9.",
+      "verdicts": {
+        "economic_value": "none at the owner's gates; D alone is a Sharpe ~1.0, half-drawdown equity sleeve and adds +0.06 Sharpe to G3 at 30%",
+        "predictive_value": "A: strong before 1990, none after 2000; B1: small positive increment over 12-1 momentum, same crashes; D: positive alpha vs SPY and vs the equal-weight universe (t 4.1) in both halves; E: positive alpha (t 2.2) but negative since publication",
+        "promotion": "none; D shadow log only",
+        "source_replication": "A1 replicated within gate (CAGR, vol, MDD; Sharpe at the low edge); D claim reproduced; B1 direction reproduced; E not reproduced (source had no costs, market-cap priority and intraday brackets)"
+      }
+    },
+    {
       "CAGR": 0.10605652725934678,
       "Sharpe": 0.5089351483151626,
       "adaptive_lineage": null,
@@ -36557,6 +39133,247 @@
         "predictive_value": "VIX-high raises weekly ETF reversal IC in both universes",
         "promotion": "rejected by the frozen rule; no paper test",
         "source_replication": "replicated: V0 reproduces the parent P-F sector book (Sharpe 0.98 vs 1.02 in 2013-19, 0.68 vs 0.67 in 2020-26)"
+      }
+    },
+    {
+      "CAGR": 0.183,
+      "Sharpe": 0.827,
+      "adaptive_lineage": {
+        "active_minutes_used": 125,
+        "actual_total_variants": 109,
+        "declared_total_variants": 109,
+        "profile": "standard",
+        "rounds_completed": 1,
+        "stop_reason": "No system meets the promotion rule; remaining questions need unavailable data (current lists, option chains)."
+      },
+      "artifacts": {
+        "concise_report": "pakal-research/reports/zorro_zsystems_daily_audit/REPORT.md",
+        "decision_log": "pakal-research/reports/zorro_zsystems_daily_audit/decision_log.jsonl",
+        "experiment_ledger": "pakal-research/reports/zorro_zsystems_daily_audit/experiment_ledger.jsonl",
+        "frozen_specification": "pakal-research/reports/zorro_zsystems_daily_audit/research_spec_frozen.json",
+        "full_report": "pakal-research/reports/zorro_zsystems_daily_audit/REPORT_FULL.md",
+        "hypothesis_registry": "pakal-research/reports/zorro_zsystems_daily_audit/hypothesis_registry.json",
+        "manifest": "pakal-research/reports/zorro_zsystems_daily_audit/run_manifest.json",
+        "notebook": "pakal-research/zorro_zsystems_daily_audit.ipynb",
+        "primary_charts": [
+          "pakal-research/reports/zorro_zsystems_daily_audit/charts/neighborhood_post_publication.png",
+          "pakal-research/reports/zorro_zsystems_daily_audit/charts/z9_equity_drawdown_l2017.png",
+          "pakal-research/reports/zorro_zsystems_daily_audit/charts/z8_equity_drawdown_l2016.png",
+          "pakal-research/reports/zorro_zsystems_daily_audit/charts/z13_proxy.png",
+          "pakal-research/reports/zorro_zsystems_daily_audit/charts/claims_history.png"
+        ],
+        "primary_source_code": [
+          "pakal-research/zorro_zsystems_daily_audit.py",
+          "pakal-research/zorro_zsystems_daily_audit_run.py",
+          "pakal-research/zorro_zsystems_daily_audit_charts.py",
+          "tests/test_zorro_zsystems_daily_audit.py"
+        ],
+        "primary_tables": [
+          "pakal-research/reports/zorro_zsystems_daily_audit/tables/variant_period_metrics.csv",
+          "pakal-research/reports/zorro_zsystems_daily_audit/tables/bootstrap_sharpe_tests.csv",
+          "pakal-research/reports/zorro_zsystems_daily_audit/tables/trade_stats.csv",
+          "pakal-research/reports/zorro_zsystems_daily_audit/tables/posthoc_diagnostics.csv",
+          "pakal-research/reports/zorro_zsystems_daily_audit/tables/claims_history.csv"
+        ],
+        "research_state": "pakal-research/reports/zorro_zsystems_daily_audit/research_state.json",
+        "source_rule_map": "pakal-research/reports/zorro_zsystems_daily_audit/SOURCE_RULE_MAP.md"
+      },
+      "comfortable_capacity": "about $1M (Z9 2017 list p99 order 0.6% of 20-day median dollar volume)",
+      "concise_report": "pakal-research/reports/zorro_zsystems_daily_audit/REPORT.md",
+      "cost_capacity": {
+        "capacity_impact_separate": true,
+        "central_research_round_trip_bps": 10,
+        "comfortable_capacity": "about $1M (Z9 2017 list p99 order 0.6% of 20-day median dollar volume)",
+        "conservative_survival_round_trip_bps": 25,
+        "hard_capacity": "above $100M for the small ETFs of the 2017 list; neutral-list ETFs about 3x larger",
+        "paper_like_round_trip_bps": 2,
+        "soft_capacity": "about $10M (p99 6%)",
+        "strained_capacity": "about $100M (p99 62%)"
+      },
+      "created_at": "2026-09-29T19:55:00+00:00",
+      "decision_timing": "Close_T",
+      "disposition": "diagnostic",
+      "feature_findings": [
+        {
+          "corrected_significance": "BH q 0.33 (2017 list), 0.85 (neutral)",
+          "direction": "long top third",
+          "economic_mechanism": "Cross-sectional and absolute momentum on a short ETF list; value comes from which trending sector is in the list",
+          "effect_size": "post-publication Sharpe minus 1/N: +0.24 on the 2017 list, -0.04 on the neutral list",
+          "feature": "200-day average-return momentum, top third, positive only (Z9)",
+          "period_consistency": "list-dependent; below 1/N before publication on the 2017 list (1.03 vs 1.31)",
+          "recommended_action": "do not implement; the dual-momentum family is already covered by other Pakal studies",
+          "role": "rank",
+          "status": "rejected_as_stand_alone_edge"
+        },
+        {
+          "corrected_significance": "not_applicable (diagnostic)",
+          "direction": "lists built from recent winners inflate the in-sample record",
+          "economic_mechanism": "Vendor lists chosen by 'fundamental criteria' after the fact",
+          "effect_size": "2017 picks at the 80-100th percentile pre-publication vs 30-100th after; neutral-list Sharpe 0.55 vs 1.03 pre-publication",
+          "feature": "Asset-list choice (hindsight selection)",
+          "period_consistency": "only SMH persisted",
+          "recommended_action": "always test vendor rotation systems on a neutral list declared in advance",
+          "role": "universe",
+          "status": "supported"
+        },
+        {
+          "corrected_significance": "BH q 0.31",
+          "direction": "low-volatility tilt",
+          "economic_mechanism": "Minimum-variance tilt into bonds and defensives; lost when bonds and low-volatility lagged",
+          "effect_size": "post-publication Sharpe -0.24 vs 1/N, -0.37 vs SPY",
+          "feature": "Markowitz frontier near minimum variance with cap 4/N, 150-day window (Z8)",
+          "period_consistency": "good 2007-2016 (incl. 2008), negative 2022-2026",
+          "recommended_action": "do not implement",
+          "role": "sizing",
+          "status": "rejected"
+        },
+        {
+          "corrected_significance": "not_tested",
+          "direction": "switch to bonds when SPY < SMA200",
+          "economic_mechanism": "Trend filter on the market",
+          "effect_size": "2017 list post-publication 0.80 vs 0.83 without; neutral 0.48 vs 0.55",
+          "feature": "Lead-index SMA200 crash filter (Z9 option)",
+          "period_consistency": "helps before publication, slightly hurts after",
+          "recommended_action": "no action",
+          "role": "regime",
+          "status": "diagnostic"
+        },
+        {
+          "corrected_significance": "not_tested",
+          "direction": "skip new puts in high volatility",
+          "economic_mechanism": "Avoid writing puts into a crash already underway",
+          "effect_size": "post-2019 Sharpe 1.01 vs 0.69 without; full-sample 0.73 vs 0.70",
+          "feature": "VIX > 30 entry filter for put selling (Z13 proxy)",
+          "period_consistency": "one event (March 2020) drives the post-publication gap",
+          "recommended_action": "revisit only with real option data",
+          "role": "regime",
+          "status": "diagnostic"
+        },
+        {
+          "corrected_significance": "not_applicable",
+          "direction": "higher CAGR, ruin risk",
+          "economic_mechanism": "Short puts at 6x notional lose about 6x the index fall",
+          "effect_size": "4 of 6 L6 proxy variants lose everything; survivors -99% drawdown",
+          "feature": "Put-write leverage 6 (Z13 Leverage 6 setting)",
+          "period_consistency": "fails in 2008 and 2020",
+          "recommended_action": "never",
+          "role": "sizing",
+          "status": "rejected"
+        }
+      ],
+      "fill_timing": "Open_T+1 (Z8/Z9); Z13 proxy at Close_T",
+      "hard_capacity": "above $100M for the small ETFs of the 2017 list; neutral-list ETFs about 3x larger",
+      "knowledge_record": "pakal-research/reports/zorro_zsystems_daily_audit/knowledge_record.json",
+      "last_reviewed_at": "2026-09-29T19:55:00+00:00",
+      "limitations": [
+        "Z systems are compiled; current asset lists and exact sizing are unknown; historical lists reconstructed",
+        "Z9 weighting and SMA length unstated",
+        "Z8 cap applied to every frontier point",
+        "Z13 is a Black-Scholes/VIX proxy (Sharpe bias ~+0.2, no bid/ask, no early exercise); replication not assessed",
+        "Black Book scripts are password-protected and were not read",
+        "Validation and confirmation were read together with the grid (audit); post-hoc diagnostics are labeled"
+      ],
+      "maximum_drawdown": -0.287,
+      "next_test": "Only if Z13 matters: rebuild it on real SPY option chains (Cboe DataShop / ORATS) and compare with the Cboe PUT index and delta-matched SPY",
+      "next_tests": [
+        "Only if Z13 matters: rebuild it on real SPY option chains (Cboe DataShop / ORATS) and compare with the Cboe PUT index and delta-matched SPY"
+      ],
+      "notebook": "pakal-research/zorro_zsystems_daily_audit.ipynb",
+      "objective": "Do the Zorro Z systems that trade on daily bars (Z8 Markowitz MVO rotation, Z9 dual-momentum rotation, Z13 in-the-money SPY put selling) deliver their advertised results when rebuilt from the published rules with Close_T decisions, Open_(T+1) fills and realistic costs, and did they beat simple benchmarks after publication?",
+      "portal_images": [
+        "assets/zorro_zsystems_daily_audit/01-z8_equity_drawdown_l2016.png",
+        "assets/zorro_zsystems_daily_audit/02-z9_equity_drawdown_l2017.png"
+      ],
+      "primary_cost_layer": "central_research",
+      "primary_metrics": {
+        "CAGR": 0.183,
+        "Sharpe": 0.827,
+        "Z13_proxy_calibrated_post_pub": {
+          "CAGR": 0.15,
+          "MaxDD": -0.172,
+          "Sharpe": 1.011,
+          "note": "proxy Sharpe biased up ~0.2"
+        },
+        "Z8_post_pub": {
+          "CAGR": 0.056,
+          "MaxDD": -0.205,
+          "Sharpe": 0.391
+        },
+        "Z9_neutral_post_pub": {
+          "CAGR": 0.098,
+          "MaxDD": -0.206,
+          "Sharpe": 0.551
+        },
+        "annualized_volatility": 0.194,
+        "benchmarks_post_Z9_pub": {
+          "1/N_2017_list_Sharpe": 0.588,
+          "SPY_Sharpe": 0.698
+        },
+        "cost_layer": "central_research (5 bps per side, cash at T-bill)",
+        "maximum_drawdown": -0.287,
+        "period": "publication date to 2026-09-28 (Z8 from 2016-07-01, Z9 from 2017-10-01, Z13 from 2019-05-01)",
+        "series": "Z9 baseline, 1x",
+        "turnover": "traded value about 4.0x equity per year (buys + sells)",
+        "universe": "Z9 2017 list (headline system); others in series",
+        "vendor_claims_2026": {
+          "Z13_CAGR": 0.45,
+          "Z8_CAGR": 0.17,
+          "Z9_CAGR": 0.25
+        }
+      },
+      "replication_outcome": "directionally_replicated",
+      "research_status": "diagnostic",
+      "signal_family": "etf_rotation_momentum_mvo_and_put_writing",
+      "soft_capacity": "about $10M (p99 6%)",
+      "sources": [
+        "https://zorro-project.com/manual/en/zsystems.htm",
+        "Wayback snapshots 2016-2026 of the same page",
+        "https://financial-hacker.com/get-rich-slowly/",
+        "https://financial-hacker.com/scripts2016.zip",
+        "https://zorro-project.com/manual/en/markowitz.htm",
+        "https://zorro-project.com/manual/en/new.htm",
+        "opserver.de Zorro forum threads on Z8/Z9/Z13 (2017-2020)",
+        "https://financial-hacker.com/algorithmic-options-trading-part-3/"
+      ],
+      "study_id": "zorro_zsystems_daily_audit",
+      "tags": [
+        "research-only",
+        "vendor-audit",
+        "zorro",
+        "etf-rotation",
+        "dual-momentum",
+        "markowitz",
+        "put-writing",
+        "hindsight-selection"
+      ],
+      "timing_attribution": {
+        "artifact": "pakal-research/reports/zorro_zsystems_daily_audit/tables/cost_layers_and_timing.csv",
+        "diagnostic_path": "Close_T fill to the next scheduled rebalance",
+        "executable_path": "Open_T+1 fill to the same rebalance",
+        "headline_result": "Fill timing changes Sharpe by at most 0.015 for every Z8/Z9 run; no overnight dependence.",
+        "method": "Same weight schedules run through the stateful engine with same-close versus next-open fills",
+        "metrics": {
+          "Z8_L2016_post_pub_next_open": 0.391,
+          "Z8_L2016_post_pub_same_close": 0.389,
+          "Z9_L2017_post_pub_next_open": 0.827,
+          "Z9_L2017_post_pub_same_close": 0.812
+        },
+        "status": "tested",
+        "unavailable_reason": null
+      },
+      "title": "Zorro Z systems on daily bars (Z8 MVO, Z9 dual momentum, Z13 SPY put selling) audit",
+      "universes": [
+        "Z8 2016 default list (24 ETFs, SMH spliced with SOXX before 2011-12)",
+        "Z9 2017 list reconstructed from forum logs: XBI ITB SMH XLV VOO AGG HYG IGSB TLT",
+        "Neutral 14-ETF list declared before results: 9 SPDR sectors, EFA, EEM, IEF, TLT, GLD",
+        "Z13 proxy: S&P 500 with VIX and T-bills; Cboe PUT index as real anchor"
+      ],
+      "verdict": "No daily Z system passes. Z8 lost to equal weight of its own 24 ETFs and to SPY after its July 2016 publication in all 16 rule variants (post-publication Sharpe 0.39 vs 0.63 / 0.76), and its advertised 17-30% is not reached even at the 4x leverage of the 2016 script. Z9 beat SPY after publication only on its 2017 list (0.83 vs 0.70, p 0.53), a list picked from 2011-2017's top sectors, and the lead is SMH plus the year 2026; on a neutral list it loses to equal weight in 22 of 24 variants. Z13 is a put-write index plus leverage: the unlevered proxy is about PUT-like after its ~0.2 Sharpe pricing bias, and the advertised 45% needs leverage that wiped out 4 of 6 proxy variants. Trade-level win rates and profit factors reproduce, but they describe holding periods, not edge.",
+      "verdicts": {
+        "economic_value": "None robust. Z9's post-publication outperformance on its own list depends on SMH (10.4 pp/yr) and 2026 (68% of excess); without SMH 0.57 < SPY 0.70. Costs are immaterial (<= 0.05 Sharpe).",
+        "predictive_value": "Z9 momentum adds nothing over equal weight on a neutral list (median post-publication Sharpe 0.47 vs 1/N 0.59); Z8 near-minimum-variance weights reduce volatility but not risk-adjusted return versus 1/N after 2016.",
+        "promotion": "Fails the frozen rule (Sharpe +0.15 over SPY and 1/N after publication, neutral list also beating 1/N, BH q < 0.10, >= 60% of the neighborhood). Diagnostic; do not implement.",
+        "source_replication": "directionally_replicated: trade statistics (Z9 69%/PF 9.6 vs 73%/9; Z8 61%/2.75 vs 62%/3) and Z9 return level (22% at 1.5x vs 25%); Z8 advertised return not reproducible (7% at 1.5x, 14% at 4x); Z13 not assessable without option chains."
       }
     }
   ]
