@@ -1,0 +1,384 @@
+<title>Defensive Shelf v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a single research-record column (~920px); wide tables scroll inside their own frame. */
+:root {
+  --bg: #f6f7f5;
+  --panel: #ffffff;
+  --ink: #15201d;
+  --ink-2: #4b5753;
+  --ink-3: #7b8682;
+  --rule: #dfe3e0;
+  --accent: #0f6b5c;
+  --accent-soft: #e2efeb;
+  --good: #1d7a3e; --good-soft: #e3f2e7;
+  --warn: #9a6200; --warn-soft: #fbf0d9;
+  --bad: #b3261e; --bad-soft: #fbe6e4;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #8a938f;
+  --display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111715; --panel: #18201d; --ink: #e8eeeb; --ink-2: #b3bfba; --ink-3: #85918c; --rule: #2b3632;
+    --accent: #4fc2a8; --accent-soft: #173029;
+    --good: #5cc57d; --good-soft: #17301f; --warn: #e0a640; --warn-soft: #33280f; --bad: #f08a80; --bad-soft: #3a1a17;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #8e9894;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111715; --panel: #18201d; --ink: #e8eeeb; --ink-2: #b3bfba; --ink-3: #85918c; --rule: #2b3632;
+  --accent: #4fc2a8; --accent-soft: #173029;
+  --good: #5cc57d; --good-soft: #17301f; --warn: #e0a640; --warn-soft: #33280f; --bad: #f08a80; --bad-soft: #3a1a17;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #8e9894;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.6 var(--body); }
+.wrap { max-width: 940px; margin: 0 auto; padding-inline: 20px; padding-block: 40px 80px; display: grid; gap: 46px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; letter-spacing: -0.005em; }
+h1 { font-size: clamp(30px, 5vw, 42px); line-height: 1.08; font-weight: 700; }
+h2 { font-size: 23px; font-weight: 600; line-height: 1.2; }
+h3 { font-size: 17px; font-weight: 600; }
+p { margin: 0; max-width: 70ch; }
+.eyebrow { font: 500 12px/1.4 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); }
+.muted { color: var(--ink-2); }
+.small { font-size: 13px; color: var(--ink-2); }
+section, header { display: grid; gap: 14px; min-width: 0; }
+.lede { font-size: 17px; max-width: 66ch; }
+.verdicts { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; }
+.verdict { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 16px 18px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.verdict p { font-size: 14px; }
+.tag { display: inline-flex; align-items: center; font: 600 12px/1 var(--mono); letter-spacing: 0.04em; text-transform: uppercase; padding: 5px 8px; border-radius: 4px; justify-self: start; }
+.tag.good, .chip.good { background: var(--good-soft); color: var(--good); }
+.tag.warn, .chip.warn { background: var(--warn-soft); color: var(--warn); }
+.tag.bad, .chip.bad { background: var(--bad-soft); color: var(--bad); }
+.tag.info, .chip.info { background: var(--accent-soft); color: var(--accent); }
+.rec { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--accent); border-radius: 8px; padding: 18px 20px; display: grid; gap: 10px; }
+.rec ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; max-width: 72ch; }
+.tablewrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { padding: 8px 11px; text-align: right; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+thead th { font: 600 11px/1.3 var(--mono); letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-2); vertical-align: bottom; white-space: normal; }
+tbody tr:last-child td { border-bottom: 0; }
+td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+tr.hl td { background: var(--accent-soft); }
+tr.sep td { border-top: 2px solid var(--rule); }
+.chip { display: inline-block; font: 500 11.5px/1 var(--mono); padding: 4px 6px; border-radius: 4px; }
+.chart { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 14px 14px 8px; position: relative; min-width: 0; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; touch-action: pan-y; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--ink-2); padding: 0 4px 8px; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.tip { position: absolute; pointer-events: none; background: var(--panel); color: var(--ink); border: 1px solid var(--rule); border-radius: 6px; padding: 8px 10px; font-size: 12.5px; box-shadow: 0 4px 16px rgba(0,0,0,.12); min-width: 180px; z-index: 2; }
+.tip b { font-family: var(--mono); font-weight: 500; }
+.tip .row { display: flex; justify-content: space-between; gap: 14px; }
+.axis text { fill: var(--ink-3); font: 11px var(--mono); }
+.grid line { stroke: var(--rule); }
+ul.plain { margin: 0; padding-left: 18px; display: grid; gap: 7px; max-width: 72ch; }
+.note { border-left: 3px solid var(--warn); padding: 4px 0 4px 14px; color: var(--ink-2); font-size: 14px; max-width: 72ch; }
+code { font-family: var(--mono); font-size: 12.5px; background: var(--accent-soft); padding: 1px 5px; border-radius: 3px; word-break: break-all; }
+footer { font-size: 13px; color: var(--ink-3); display: grid; gap: 6px; }
+@media (max-width: 520px) { .wrap { padding-inline: 16px; } th, td { padding: 7px 8px; } }
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">Research record · 30 Sep 2026 · pre-registered plan, amendments A1–A3</div>
+  <h1>Defensive shelf v2: what survives the robustness checks</h1>
+  <p class="lede" id="lede"></p>
+</header>
+
+<section><div class="verdicts" id="verdicts"></div></section>
+
+<section>
+  <div class="rec" id="rec"></div>
+</section>
+
+<section>
+  <h2>The candidates</h2>
+  <p class="muted">2008-03 to 2026-08; before Oct 2012 BTAL_QQQ uses the validated synthetic proxy and DV2-IND partly a research run. Fair cash: idle cash earns the T-bill rate less 0.5%. “P(−10%)” is the share of 2,000 resampled histories that break −10%; the gate allows 10%. Weights are averages for inverse-volatility (IV) books.</p>
+  <div class="tablewrap"><table id="t-books"></table></div>
+</section>
+
+<section>
+  <h2>Is EOM’s edge fading?</h2>
+  <p class="muted">Rolling three-year return above T-bills for the two sleeves that compete for the third slot. Each point covers the 36 months ending that month.</p>
+  <div class="chart" id="c-roll"></div>
+  <p id="roll-text"></p>
+  <h3>Does each sleeve earn its place?</h3>
+  <p class="small">The gate R4 test in each window: excess return per unit of drawdown with the sleeve, against the same book with T-bills in its place. Green means the sleeve helped.</p>
+  <div class="tablewrap"><table id="t-slot"></table></div>
+</section>
+
+<section>
+  <h2>Growth and drawdown, 2008–2026</h2>
+  <div class="chart" id="c-nav"></div>
+  <div class="chart" id="c-dd"></div>
+  <p class="small">Month-end values; the drawdown panel shows the deepest daily drawdown within each month. Hover or tap for values.</p>
+</section>
+
+<section>
+  <h2>Year by year, above T-bills</h2>
+  <div class="chart" id="c-years"></div>
+</section>
+
+<section>
+  <h2>What execution costs can the edge carry?</h2>
+  <p id="cost-text" class="muted"></p>
+  <div class="tablewrap"><table id="t-cost"></table></div>
+</section>
+
+<section>
+  <h2>Stress windows</h2>
+  <p class="muted">Five named crises and the six worst 21-day windows in which stocks ($SPXTR) and bonds (AGG) fell together, ranked by a 60/40 portfolio.</p>
+  <div class="tablewrap"><table id="t-crises"></table></div>
+</section>
+
+<section>
+  <h2>How stable is the frozen rule’s pick?</h2>
+  <p class="muted">Each row re-runs the full selection (gates, tie band, simplest-first tie-break, champion rule) under one change. “60/40 kept” means no challenger beat the champion often enough. Rows marked A3 were added after the independent review.</p>
+  <div class="tablewrap"><table id="t-robust"></table></div>
+  <div class="note" id="robust-note"></div>
+</section>
+
+<section>
+  <h2>Weights and overfitting</h2>
+  <p class="small" id="plateau-text"></p>
+  <div class="tablewrap"><table id="t-plateau"></table></div>
+</section>
+
+<section>
+  <h2>Running it: ease, capacity, small-account cost</h2>
+  <div class="tablewrap"><table id="t-ease"></table></div>
+  <p class="small">Capacity uses the growth-shelf route model on the last three years of fills: the largest AUM at which every liquidity gate passes and trading cost stays under a quarter of the excess return. Friction is the CAGR lost to whole shares and the $1 minimum commission against a $1M run (whole window / last three years).</p>
+</section>
+
+<section>
+  <h2>Independent review</h2>
+  <ul class="plain" id="review"></ul>
+</section>
+
+<section>
+  <h2>Decisions for you</h2>
+  <ul class="plain" id="decisions"></ul>
+</section>
+
+<footer>
+  <div>Plan: <code>scripts/research/defensive_v2_20260929/SPEC_FROZEN.md</code>. A1 switched the objective to Sharpe after the first results, on your instruction. A2 (these checks) was registered before it ran. A3 (review follow-ups and the DV2-IND candidate) came after the results and is labelled as such.</div>
+  <div>Code: <code>defensive_v2.py</code>, <code>reselect_sharpe.py</code>, <code>sharpe_checks.py</code>, <code>review_followups.py</code>, <code>eom_cost_breakeven.py</code>, <code>candidate_dossier.py</code>, <code>friction_v2.py</code>, <code>report_data.py</code>. Outputs: <code>results/research/portfolio/defensive_v2_20260929/</code>.</div>
+  <div>Inputs: 27 sleeve runs at HEAD f9ad358 ($1M, to 2026-08-19); BIL total return as T-bills. Backtests only; nothing here is live.</div>
+</footer>
+</div>
+
+<script>
+const D = /*DATA*/null;
+const N = D.names, X = D.dossier, G = D.gates, C = D.checks, F = D.followups;
+const pct = (v, d = 1) => v == null ? "–" : (v * 100).toFixed(d).replace("-", "−") + "%";
+const spct = (v, d = 1) => v == null ? "–" : (v >= 0 ? "+" : "−") + Math.abs(v * 100).toFixed(d) + "%";
+const f2 = v => v == null ? "–" : v.toFixed(2);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const LBL = {[N.both]: "CORE5 + BTAL_QQQ + EOM + DV2-IND", [N.rec]: "CORE5 + BTAL_QQQ + EOM", [N.dv2b]: "CORE5 + BTAL_QQQ + DV2-IND",
+  [N.pick]: "CORE5 + EOM + DISP (A1 pick)", [N.champ]: "60/40: CORE5 60 + BTAL_QQQ 40", [N.bench]: "CORE5 alone", [N.top]: "CORE5 + EOM + DV2-IND + G3 10%",
+  [N.noeom]: "BTAL_QQQ + DV2-IND", [N.dprime]: "D′: CORE5 + BTAL_QQQ (IV)"};
+const SHORT = {[N.both]: "Both edges", [N.rec]: "EOM book", [N.dv2b]: "DV2 book", [N.champ]: "60/40", [N.pick]: "A1 pick", [N.bench]: "CORE5"};
+const W = (b, w, k, cash = "fair") => X.windows[`${cash}|${b}|${w}`]?.[k];
+const POD = {core5: "CORE5", btal_qqq: "BTAL_QQQ", eom_flow: "EOM", etf_dv2: "DV2-IND", disp: "DISP"};
+
+// ── lede, verdicts, recommendation
+const champSh = W(N.champ, "LONG", "sharpe");
+document.getElementById("lede").textContent =
+  `Books that add a mostly-cash sleeve to CORE5 and BTAL_QQQ beat the 60/40 champion on Sharpe, and the fixed books we examine beat it in both halves of the history, 2008–17 and 2017–26. Which sleeve should fill that slot is the open question. EOM carries the long history but has been asleep since 2025; the industry-ETF DV2 sleeve (DV2-IND) is the mirror image. Holding both at a quarter each is the most robust book we found.`;
+const eomRoll = X.rolling["fair|eom_flow"], eomRollH = X.rolling["house|eom_flow"];
+const last = a => a[a.length - 1];
+document.getElementById("verdicts").innerHTML = [
+  ["good", "Both edges together", `CORE5 + BTAL_QQQ + EOM + DV2-IND, a quarter each: Sharpe ${f2(W(N.both, "LONG", "sharpe"))} against ${f2(champSh)} for the 60/40, max drawdown ${pct(W(N.both, "LONG", "maxdd"))}, and ahead of the 60/40 in 2008–17 (${f2(W(N.both, "H1 2008-17", "sharpe"))} vs ${f2(W(N.champ, "H1 2008-17", "sharpe"))}), in 2017–26 (${f2(W(N.both, "H2 2017-26", "sharpe"))} vs ${f2(W(N.champ, "H2 2017-26", "sharpe"))}) and, on Sharpe, in the last three years.`],
+  ["warn", "EOM: strong history, asleep now", `On a rolling three-year basis EOM beat T-bills by 5–15% a year from 2017 through 2025. By August 2026 that is ${spct(last(eomRoll.xs))} (${spct(last(eomRollH.xs))} with 0% on idle cash). In the last three years both books we tested would have done better with T-bills in EOM’s place. It turns over about ${Math.round(X.cost[N.rec].turnover_per_year_exact)} times a year, so its real close-auction cost matters.`],
+  ["warn", "DV2-IND: the mirror image", `CORE5 + BTAL_QQQ + DV2-IND has the best last-three-year Sharpe of the candidates (${f2(W(N.dv2b, "RECENT 3y", "sharpe"))}) but was weak in 2008–12 (${f2(W(N.dv2b, "A 2008-12", "sharpe"))}), so over the whole window DV2-IND fails the “earns its slot” gate. It is a shadow sleeve that trades daily at the open.`],
+  ["bad", "Neither: keep the 60/40", `Without EOM or DV2-IND no challenger is stable: the rule’s pick changes with every frame. The 60/40 itself breaks −10% on ${pct(G[N.champ].p_breach, 0)} of resampled histories, above the 10% gate.`],
+].map(([k, h, p]) => `<div class="verdict"><span class="tag ${k}">${h}</span><p>${p}</p></div>`).join("");
+
+document.getElementById("rec").innerHTML = `<span class="tag info">Recommendation (judgement, after the results)</span>
+<p>Target the four-pod book <b>CORE5 + BTAL_QQQ + EOM + DV2-IND, 25% each</b> as the defensive core. It does not depend on either edge alone: if EOM stays asleep the book behaves like CORE5 + BTAL_QQQ + DV2-IND, and if DV2-IND fades it behaves like the EOM book. Both of those still beat the 60/40 in every half of the history. It fails the frozen “earns its slot” gate by a hair on CORE5 (excess return per unit of drawdown 1.68 with CORE5 against 1.71 with T-bills): CORE5 adds safety here more than Sharpe.</p>
+<ol>
+<li>Keep the 60/40 (CORE5 + BTAL_QQQ) as the live defensive book for now.</li>
+<li>Wire EOM (month-end close-auction orders and a TLT short) and DV2-IND (daily open orders) as forward shadows, and measure their real fill costs. The edge survives up to about 15–20 basis points per side of extra cost on both sleeves.</li>
+<li>Switch to the four-pod book when both run cleanly and costs sit under that. If EOM is still asleep at that point, use CORE5 + BTAL_QQQ + DV2-IND instead.</li>
+<li>Account size matters: at $30K whole shares and minimum commissions cost this book about 1–2% a year; at $100K about 0.2–0.6%.</li>
+</ol>`;
+
+// ── candidates table
+const rows = [N.both, N.rec, N.dv2b, N.pick, N.champ, N.bench];
+const gateCell = b => { const g = G[b]; if (g.gates) return '<span class="chip good">pass</span>';
+  const fail = Object.entries(g.r).filter(([, v]) => !v).map(([k]) => k.toUpperCase()); const pod = g.slot_fail ? ` (${g.slot_fail.split(",").map(p => POD[p] || p).join(", ")})` : "";
+  return `<span class="chip bad">fail ${fail.join(", ")}${esc(pod)}</span>`; };
+document.getElementById("t-books").innerHTML = `<thead><tr><th>Book</th><th>CAGR</th><th>Sharpe</th><th>Excess Sharpe</th><th>Max DD</th><th>P(−10%)</th><th>Frozen gates</th><th>Sharpe 2008–17</th><th>Sharpe 2017–26</th><th>Last 3y Sharpe</th><th>Last 3y CAGR</th><th>Sharpe, 0% cash</th><th>Trade days / yr</th></tr></thead><tbody>` +
+  rows.map(b => `<tr class="${b === N.both ? "hl" : ""}${b === N.champ ? " sep" : ""}"><td>${esc(LBL[b])}</td><td class="num">${pct(W(b, "LONG", "cagr"))}</td><td class="num">${f2(W(b, "LONG", "sharpe"))}</td><td class="num">${f2(W(b, "LONG", "xs_sharpe"))}</td><td class="num">${pct(W(b, "LONG", "maxdd"))}</td><td class="num">${pct(G[b].p_breach)}</td><td>${gateCell(b)}</td><td class="num">${f2(W(b, "H1 2008-17", "sharpe"))}</td><td class="num">${f2(W(b, "H2 2017-26", "sharpe"))}</td><td class="num">${f2(W(b, "RECENT 3y", "sharpe"))}</td><td class="num">${pct(W(b, "RECENT 3y", "cagr"))}</td><td class="num">${f2(W(b, "LONG", "sharpe", "house"))}</td><td class="num">${Math.round(G[b].trade_days)}</td></tr>`).join("") + "</tbody>";
+
+// ── generic line chart
+function lineChart(el, o) {
+  const Wd = 880, H = o.height, m = {l: 52, r: 16, t: 10, b: 26}, n = o.x.length, S = o.series;
+  const lo = o.min, hi = o.max, tf = o.log ? Math.log : (v => v);
+  const y = v => m.t + (1 - (tf(v) - tf(lo)) / (tf(hi) - tf(lo))) * (H - m.t - m.b);
+  const x = i => m.l + i / (n - 1) * (Wd - m.l - m.r);
+  let g = `<g class="grid">` + o.ticks.map(t => `<line x1="${m.l}" x2="${Wd - m.r}" y1="${y(t)}" y2="${y(t)}"/>`).join("") + `</g><g class="axis">` +
+    o.ticks.map(t => `<text x="${m.l - 8}" y="${y(t) + 4}" text-anchor="end">${o.fmt(t)}</text>`).join("");
+  o.x.forEach((d, i) => { if (d.endsWith("-01") && +d.slice(0, 4) % 2 === 0) g += `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${d.slice(0, 4)}</text>`; });
+  g += `</g>`;
+  if (o.zero != null) g += `<line x1="${m.l}" x2="${Wd - m.r}" y1="${y(o.zero)}" y2="${y(o.zero)}" stroke="var(--ink-3)" stroke-width="1"/>`;
+  S.slice().reverse().forEach(s => { const d = s.values.map((v, i) => v == null ? "" : `${i && s.values[i - 1] != null ? "L" : "M"}${x(i).toFixed(1)},${y(Math.max(lo, Math.min(hi, v))).toFixed(1)}`).join("");
+    g += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.width || 2}" stroke-linejoin="round" ${s.dash ? `stroke-dasharray="${s.dash}"` : ""}/>`; });
+  S.forEach(s => { const i = n - 1, v = s.values[i]; if (v != null && o.endDots) g += `<circle cx="${x(i)}" cy="${y(v)}" r="4" fill="${s.color}" stroke="var(--panel)" stroke-width="2"/>`; });
+  g += `<line class="xh" y1="${m.t}" y2="${H - m.b}" stroke="var(--ink-3)" stroke-width="1" visibility="hidden"/>`;
+  el.innerHTML = `<div class="legend">${S.map(s => `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join("")}</div><svg viewBox="0 0 ${Wd} ${H}" role="img" aria-label="${esc(o.label)}">${g}<rect x="${m.l}" y="${m.t}" width="${Wd - m.l - m.r}" height="${H - m.t - m.b}" fill="transparent"/></svg><div class="tip" hidden></div>`;
+  const svg = el.querySelector("svg"), tip = el.querySelector(".tip"), xh = el.querySelector(".xh");
+  svg.addEventListener("pointermove", ev => {
+    const r = svg.getBoundingClientRect(), px = (ev.clientX - r.left) / r.width * Wd;
+    const i = Math.max(0, Math.min(n - 1, Math.round((px - m.l) / (Wd - m.l - m.r) * (n - 1))));
+    xh.setAttribute("x1", x(i)); xh.setAttribute("x2", x(i)); xh.setAttribute("visibility", "visible"); tip.hidden = false;
+    tip.innerHTML = `<div class="small" style="margin-bottom:4px">${o.x[i]}</div>` + S.map(s => `<div class="row"><span><i style="display:inline-block;width:10px;height:3px;background:${s.color};margin-right:6px;vertical-align:middle"></i>${esc(s.short)}</span><b>${o.tipfmt(s.values[i])}</b></div>`).join("");
+    const left = ev.clientX - el.getBoundingClientRect().left; tip.style.left = Math.min(el.clientWidth - tip.offsetWidth - 8, Math.max(8, left + 14)) + "px"; tip.style.top = "40px";
+  });
+  svg.addEventListener("pointerleave", () => { tip.hidden = true; xh.setAttribute("visibility", "hidden"); });
+}
+
+// ── rolling chart (align EOM and DV2-IND on EOM's dates)
+(function () {
+  const e = X.rolling["fair|eom_flow"], v = X.rolling["fair|etf_dv2"], eh = X.rolling["house|eom_flow"];
+  const vmap = Object.fromEntries(v.dates.map((d, i) => [d, v.xs[i]])), hmap = Object.fromEntries(eh.dates.map((d, i) => [d, eh.xs[i]]));
+  lineChart(document.getElementById("c-roll"), {height: 250, x: e.dates, min: -0.04, max: 0.24, ticks: [0, 0.05, 0.1, 0.15, 0.2], zero: 0, endDots: true,
+    fmt: t => (t * 100).toFixed(0) + "%", tipfmt: pct, label: "Rolling three-year excess return of EOM and DV2-IND",
+    series: [{name: "EOM (month-end flow)", short: "EOM", color: "var(--s2)", values: e.xs},
+             {name: "EOM, 0% on idle cash", short: "EOM, 0% cash", color: "var(--s2)", dash: "4 3", width: 1.5, values: e.dates.map(d => hmap[d] ?? null)},
+             {name: "DV2-IND (industry-ETF dip buying)", short: "DV2-IND", color: "var(--s1)", values: e.dates.map(d => vmap[d] ?? null)}]});
+  document.getElementById("roll-text").textContent = `EOM’s three-year edge fell from about 20% a year (2011) to 5–15% (2017–2025), then dropped to ${spct(last(e.xs))} by August 2026, driven by a loss against T-bills in 2026 so far and a −12% drawdown. Eight months is too short to call the edge dead, but the trend since 2011 points down. DV2-IND moved the other way: close to zero before 2013, strongest in 2021–23, and about 9% a year now.`;
+})();
+
+// ── slot table
+(function () {
+  const ws = ["LONG", "A 2008-12", "B 2012-21", "C 2022-26", "RECENT 3y", "H1 2008-17", "H2 2017-26"];
+  const wl = {"LONG": "Whole window", "A 2008-12": "2008–12", "B 2012-21": "2012–21", "C 2022-26": "2022–26", "RECENT 3y": "Last 3 years", "H1 2008-17": "2008–17", "H2 2017-26": "2017–26"};
+  const items = [[N.rec, "eom_flow"], [N.dv2b, "etf_dv2"], [N.both, "eom_flow"], [N.both, "etf_dv2"], [N.both, "core5"]];
+  const cell = (b, p, w) => { const s = X.slot[`fair|${b}|${w}`]?.[p]; if (!s) return "<td>–</td>"; const ok = s.with > s.tbills_instead;
+    return `<td class="num"><span class="chip ${ok ? "good" : "bad"}">${f2(s.with)} vs ${f2(s.tbills_instead)}</span></td>`; };
+  document.getElementById("t-slot").innerHTML = `<thead><tr><th>Sleeve, in book</th>${ws.map(w => `<th>${wl[w]}</th>`).join("")}</tr></thead><tbody>` +
+    items.map(([b, p]) => `<tr><td>${POD[p]} in ${esc(SHORT[b])}</td>${ws.map(w => cell(b, p, w)).join("")}</tr>`).join("") + "</tbody>";
+})();
+
+// ── growth and drawdown
+const cv = D.curves;
+const sDef = [{b: N.both, color: "var(--s1)", width: 2.4}, {b: N.rec, color: "var(--s2)"}, {b: N.dv2b, color: "var(--s3)"}, {b: N.champ, color: "var(--s4)", dash: "4 3", width: 1.6}]
+  .map(s => ({...s, name: LBL[s.b], short: SHORT[s.b]}));
+lineChart(document.getElementById("c-nav"), {height: 300, x: cv.dates, log: true, min: 0.9, max: 6.6, ticks: [1, 1.5, 2, 3, 4, 6], endDots: true,
+  fmt: t => "$" + t, tipfmt: v => "$" + v.toFixed(2), label: "Growth of one dollar, log scale", series: sDef.map(s => ({...s, values: cv.nav[s.b]}))});
+lineChart(document.getElementById("c-dd"), {height: 170, x: cv.dates, min: -0.08, max: 0, ticks: [0, -0.02, -0.04, -0.06, -0.08], zero: 0,
+  fmt: t => (t * 100).toFixed(0) + "%", tipfmt: pct, label: "Drawdown from prior peak", series: sDef.map(s => ({...s, values: cv.dd[s.b]}))});
+
+// ── years
+(function () {
+  const el = document.getElementById("c-years"), Y = X.years, A = Y[N.both], B = Y[N.champ], ys = Object.keys(A);
+  const Wd = 880, H = 260, m = {l: 44, r: 10, t: 12, b: 26}, lo = -0.02, hi = 0.24, y = v => m.t + (1 - (v - lo) / (hi - lo)) * (H - m.t - m.b);
+  const band = (Wd - m.l - m.r) / ys.length, bw = Math.max(4, band / 2 - 4);
+  let g = `<g class="grid">` + [0, 0.05, 0.1, 0.15, 0.2].map(t => `<line x1="${m.l}" x2="${Wd - m.r}" y1="${y(t)}" y2="${y(t)}"/>`).join("") + `</g><g class="axis">` +
+    [0, 0.05, 0.1, 0.15, 0.2].map(t => `<text x="${m.l - 8}" y="${y(t) + 4}" text-anchor="end">${(t * 100).toFixed(0)}%</text>`).join("");
+  ys.forEach((yr, i) => { if (i % 2 === 0) g += `<text x="${m.l + band * i + band / 2}" y="${H - 6}" text-anchor="middle">${yr}</text>`; });
+  g += `</g>`;
+  const bar = (v, xx, col) => { const y0 = y(0), y1 = y(v); return `<rect x="${xx}" y="${Math.min(y0, y1)}" width="${bw}" height="${Math.max(1, Math.abs(y1 - y0))}" rx="2" fill="${col}"/>`; };
+  ys.forEach((yr, i) => { const x0 = m.l + band * i + (band - 2 * bw - 2) / 2; g += bar(A[yr], x0, "var(--s1)") + bar(B[yr], x0 + bw + 2, "var(--s4)"); });
+  g += `<line x1="${m.l}" x2="${Wd - m.r}" y1="${y(0)}" y2="${y(0)}" stroke="var(--ink-3)"/>` + ys.map((yr, i) => `<rect x="${m.l + band * i}" y="${m.t}" width="${band}" height="${H - m.t - m.b}" fill="transparent" data-yr="${yr}"/>`).join("");
+  el.innerHTML = `<div class="legend"><span><i style="background:var(--s1)"></i>${esc(LBL[N.both])}</span><span><i style="background:var(--s4)"></i>${esc(LBL[N.champ])}</span></div><svg viewBox="0 0 ${Wd} ${H}" role="img" aria-label="Calendar-year return above T-bills">${g}</svg><div class="tip" hidden></div>`;
+  const tip = el.querySelector(".tip"), svg = el.querySelector("svg");
+  svg.addEventListener("pointermove", ev => { const yr = ev.target.getAttribute && ev.target.getAttribute("data-yr"); if (!yr) { tip.hidden = true; return; }
+    tip.hidden = false; tip.innerHTML = `<div class="small" style="margin-bottom:4px">${yr}${yr === "2026" ? " (to 19 Aug)" : yr === "2008" ? " (from 4 Mar)" : ""}</div>` +
+      [N.both, N.rec, N.dv2b, N.champ].map(b => `<div class="row"><span>${SHORT[b]}</span><b>${spct(Y[b][yr])}</b></div>`).join("");
+    const left = ev.clientX - el.getBoundingClientRect().left; tip.style.left = Math.min(el.clientWidth - tip.offsetWidth - 8, Math.max(8, left + 14)) + "px"; tip.style.top = "40px"; });
+  svg.addEventListener("pointerleave", () => tip.hidden = true);
+  const wins = ys.filter(yr => A[yr] > B[yr]).length;
+  el.insertAdjacentHTML("beforeend", `<p class="small" style="padding:4px 4px 6px">The four-pod book beat the 60/40 in ${wins} of ${ys.length} calendar years (2008 from 4 March, 2026 to 19 August). It gives ground in strong risk-on years such as 2017, 2024 and 2026.</p>`);
+})();
+
+// ── cost
+(function () {
+  const books = [N.both, N.rec, N.dv2b];
+  document.getElementById("cost-text").textContent = `Extra cost per side is charged on the stressed sleeve’s own fills, on top of what the backtest already charges. EOM turns over about ${Math.round(X.cost[N.rec].turnover_per_year_exact)} times its capital a year and DV2-IND about ${Math.round(X.cost[N.dv2b].turnover_per_year_exact)} times, so each basis point costs EOM roughly ${(X.cost[N.rec].turnover_per_year_exact / 100).toFixed(2)}% a year. The 60/40 has a Sharpe of ${f2(champSh)} and is not affected.`;
+  const bps = ["0", "5", "10", "20"];
+  document.getElementById("t-cost").innerHTML = `<thead><tr><th>Book (sleeves stressed)</th>${bps.map(b => `<th>+${b} bps</th>`).join("")}</tr></thead><tbody>` +
+    books.map(b => `<tr><td>${esc(LBL[b])} (${X.cost[b].third_pod.split("+").map(p => POD[p]).join(" + ")})</td>${bps.map(k => { const v = X.cost[b].by_bps[k].sharpe; return `<td class="num" style="color:${v > champSh ? "var(--ink)" : "var(--bad)"}">${f2(v)}</td>`; }).join("")}</tr>`).join("") +
+    `<tr class="sep"><td>60/40 (reference)</td>${bps.map(() => `<td class="num">${f2(champSh)}</td>`).join("")}</tr></tbody>`;
+})();
+
+// ── crises
+(function () {
+  const cr = X.crises, keys = Object.keys(cr[N.both]).filter(k => k !== "crisis_corr_spx" && k !== "worst_month");
+  const name = k => ({gfc: "GFC (May 2008 – Mar 2009)", q4_2018: "Q4 2018", covid: "COVID crash (Feb–Mar 2020)", bear_2022: "2022 bear market", tariffs_2025: "2025 tariff shock"}[k] || "Stocks and bonds fell, 21 days to " + k.split("_").pop());
+  const cols = [N.both, N.rec, N.dv2b, N.champ];
+  const cell = v => `<td class="num" style="color:${v < -0.02 ? "var(--bad)" : v > 0.005 ? "var(--good)" : "var(--ink)"}">${spct(v)}</td>`;
+  document.getElementById("t-crises").innerHTML = `<thead><tr><th>Window</th>${cols.map(c => `<th>${SHORT[c]}</th>`).join("")}</tr></thead><tbody>` +
+    keys.map(k => `<tr><td>${name(k)}</td>${cols.map(c => cell(cr[c][k])).join("")}</tr>`).join("") +
+    `<tr><td>Correlation with the S&amp;P on its worst 5% of days</td>${cols.map(c => `<td class="num">${f2(cr[c].crisis_corr_spx)}</td>`).join("")}</tr>` +
+    `<tr><td>Worst month</td>${cols.map(c => `<td class="num">${pct(cr[c].worst_month)}</td>`).join("")}</tr></tbody>`;
+})();
+
+// ── rule stability matrix
+(function () {
+  const L = b => b === N.champ ? "60/40 kept" : b.replace(" [IV]", " (IV)").replace(" [EQ]", "");
+  const hasEom = b => b.includes("EOM"), hasDv2 = b => b.includes("DV2-IND");
+  const cellA = r => { const b = r.recommendation; const k = b === N.champ ? "bad" : hasEom(b) ? "good" : "warn";
+    return `<span class="chip ${k}">${b === N.champ ? "60/40" : hasEom(b) ? "EOM book" : hasDv2(b) ? "DV2-IND book" : "other"}</span> ${esc(L(b))}`; };
+  const cellB = r => { const b = r.recommendation; return `<span class="chip ${b === N.champ ? "bad" : "warn"}">${b === N.champ ? "no winner" : "challenger"}</span> ${esc(L(b))}`; };
+  const rs = [["Sharpe, fair cash (A1 as run)", C.fair.sharpe], ["Excess Sharpe, fair cash", C.fair.xs_sharpe], ["Sharpe, 0% on idle cash", C.house.MAIN.sharpe], ["Excess Sharpe, 0% on idle cash", C.house.MAIN.xs_sharpe],
+    ...Object.entries({proxy_unscaled: "unscaled 2008 BTAL proxy", plus_5bps: "+5 bps per side, all sleeves", tfi_frozen: "Tactical FI frozen mode", etf_idle_2008_09: "DV2-IND idle before 2010"}).map(([k, n]) => [`Sharpe, ${n}`, C.fair_sensitivity[k].sharpe]),
+    ["A3 · Sharpe, DISP counted as not live", F.classification["fair|spec_literal"].sharpe], ["A3 · Sharpe, 0% cash, DISP not live", F.classification["house|spec_literal"].sharpe],
+    ["A3 · EOM +10 bps per side", F.stress.eom_plus_10bps.spec_literal.sharpe], ["A3 · EOM +20 bps per side", F.stress.eom_plus_20bps.spec_literal.sharpe],
+    ["A3 · 2012–2026 only (no 2008–11)", F.stress.exact_only.spec_literal.sharpe],
+    ["A3 · selected on 2008–17 only", F.forward.first_half.spec_literal.sharpe], ["A3 · selected on 2017–26 only", F.forward.second_half.spec_literal.sharpe]];
+  document.getElementById("t-robust").innerHTML = `<thead><tr><th>Check</th><th>Line that may use EOM</th><th>Line without EOM</th></tr></thead><tbody>` +
+    rs.map(([n, s]) => `<tr><td>${n}</td><td style="text-align:left">${cellA(s.all)}</td><td style="text-align:left">${cellB(s.no_eom)}</td></tr>`).join("") + "</tbody>";
+  const fw = F.forward;
+  document.getElementById("robust-note").textContent = `The rule lands on an EOM book in most frames, but the exact book changes, and with extra EOM cost, without 2008–11, or when selecting on 2017–26 it moves away from EOM. The forward test still favours the EOM and DV2-IND books: selected on 2008–17, the rule’s choice scored a Sharpe of ${f2(fw.first_half.out_of_sample[fw.first_half.spec_literal.sharpe.all.pick].sharpe)} in 2017–26 against ${f2(fw.first_half.out_of_sample[N.champ].sharpe)} for the 60/40. Selected on 2017–26, it chose CORE5 + DISP, which then scored only ${f2(fw.second_half.out_of_sample["CORE5 + DISP [IV]"].sharpe)} in 2008–17. The fixed books above were never chosen this way; their half-by-half Sharpes are in the candidates table.`;
+})();
+
+// ── plateau
+(function () {
+  const P = D.plateau_c.concat(D.plateau_rec.filter(r => r.book !== N.champ).map(r => ({...r}))).concat(D.plateau.filter(r => r.book.startsWith(N.pick + " |")));
+  const groups = [[N.both, "four-pod"], [N.rec, "EOM book"], [N.dv2b, "DV2 book"], [N.pick, "A1 pick"]];
+  document.getElementById("plateau-text").textContent = "Each pod’s weight moved ±10 points and the others rescaled (fixed weights). A flat range means the result does not hang on the exact weights.";
+  document.getElementById("t-plateau").innerHTML = `<thead><tr><th>Book</th><th>Sharpe range</th><th>Sharpe range, 0% cash</th><th>Worst max DD</th><th>Worst P(−10%)</th><th>Beats 60/40 on paths (worst variant)</th></tr></thead><tbody>` +
+    groups.map(([b]) => { const f = P.filter(r => r.book.startsWith(b + " |") && r.cash === "fair"), h = P.filter(r => r.book.startsWith(b + " |") && r.cash === "house");
+      const mn = (a, k) => Math.min(...a.map(r => r[k])), mx = (a, k) => Math.max(...a.map(r => r[k]));
+      return `<tr><td>${esc(LBL[b])}</td><td class="num">${f2(mn(f, "sharpe"))}–${f2(mx(f, "sharpe"))}</td><td class="num">${f2(mn(h, "sharpe"))}–${f2(mx(h, "sharpe"))}</td><td class="num">${pct(mn(f, "maxdd"))}</td><td class="num">${pct(mx(f, "p_breach10"))}</td><td class="num">${f.some(r => r.sharpe_beats_champion != null) ? pct(mn(f, "sharpe_beats_champion"), 0) : "–"}</td></tr>`; }).join("") + "</tbody>";
+})();
+
+// ── ease
+(function () {
+  const fr = (b, acct) => { const r = D.friction.filter(q => q.product === b && q.account === acct); const g = w => r.find(q => q.window === w)?.weighted_friction; return r.length ? `${pct(g("EXACT"))} / ${pct(g("RECENT"))}` : "–"; };
+  const cap = b => D.capacity_c[b] || {}, money = v => v == null ? "–" : "$" + (v / 1e6) + "M";
+  const rows = [[N.both, "4", "CORE5, BTAL_QQQ monthly; EOM month-end close auction + TLT short; DV2-IND daily at the open", "BTAL_QQQ live; CORE5 PM-ready; EOM needs a close-auction route; DV2-IND is a shadow sleeve"],
+    [N.rec, "3", "All monthly; EOM at the month-end close with a TLT short", "BTAL_QQQ live; CORE5 PM-ready; EOM needs a close-auction route"],
+    [N.dv2b, "3", "CORE5, BTAL_QQQ monthly; DV2-IND daily at the open", "BTAL_QQQ live; CORE5 PM-ready; DV2-IND is a shadow sleeve"],
+    [N.champ, "2", "Both monthly at the open", "BTAL_QQQ live; CORE5 PM-ready, not yet wired"]];
+  document.getElementById("t-ease").innerHTML = `<thead><tr><th>Book</th><th>Pods</th><th>How it trades</th><th>Live status</th><th>Trade days / yr</th><th>Capacity, open auction</th><th>Capacity, worked orders</th><th>Friction at $30K</th><th>Friction at $100K</th></tr></thead><tbody>` +
+    rows.map(([b, pods, how, live]) => `<tr class="${b === N.both ? "hl" : ""}"><td>${esc(LBL[b])}</td><td class="num">${pods}</td><td style="text-align:left;white-space:normal;min-width:220px">${how}</td><td style="text-align:left;white-space:normal;min-width:200px">${live}</td><td class="num">${Math.round(G[b].trade_days)}</td><td class="num">${money(cap(b).MOO_recommended)}</td><td class="num">${money(cap(b)["worked+blocks_recommended"])}</td><td class="num">${fr(b, 30000)}</td><td class="num">${fr(b, 100000)}</td></tr>`).join("") + "</tbody>";
+})();
+
+// ── review and decisions
+document.getElementById("review").innerHTML = [
+  "Numbers reproduced independently (series to 5e-12; Sharpe, drawdown, last-three-year CAGR). No look-ahead in the inverse-volatility weights or the cash-interest add. The selection code matches the plan.",
+  "The A1 pick (CORE5 + EOM + DISP) won only on a tie-break that counted DISP as live. The plan's wording counts it as not live, which gives CORE5 + BTAL_QQQ + EOM. Both readings are now shown (A3).",
+  "The original sensitivity frames barely touched EOM. Added: EOM +10 and +20 bps, the rule without 2008–11, and a real forward split. These show the edge is real but its exact carrier is not stable (A3).",
+  "The out-of-sample rank of a book chosen on the full history is not out of sample; replaced by the forward split.",
+  "The 60/40 champion itself fails the breach gate (13%), so “60/40 kept” means no challenger was clearly better, not that the 60/40 passes.",
+  "Minor fixes: the house-cash breach count now counts only bootstrapped books; partial years 2008 and 2026 are labelled; A1–A3 events added to the study ledger.",
+].map(s => `<li>${s}</li>`).join("");
+document.getElementById("decisions").innerHTML = [
+  "Approve the four-pod book as the target defensive core, or pick one of the three-pod books. If one: CORE5 + BTAL_QQQ + EOM for the long history, CORE5 + BTAL_QQQ + DV2-IND if you think EOM is done.",
+  "Keep the 60/40 live meanwhile, and wire CORE5 (it is the only component of the 60/40 without a live route).",
+  "Order the engineering: EOM needs a month-end close-auction route and a TLT short (gap G-032); DV2-IND needs promotion from shadow with daily open orders. Run both as forward shadows and compare real fill costs with the 15–20 bps limits.",
+  "The low-touch line (monthly pods only) has no book that passes the gates. CORE5 alone and the 60/40 break −10% on about 13–14% of resampled paths. Accept that for the low-touch product, or relax the breach gate to 15%.",
+  "Update the portfolio map (Defensive and Balanced rungs) once the core is chosen; the growth side is unchanged.",
+].map(s => `<li>${s}</li>`).join("");
+</script>
