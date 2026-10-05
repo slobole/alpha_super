@@ -54,7 +54,8 @@ HEARTBEAT_URL_ENV_VAR_NAME_STR = "ALPHA_INSPECTOR_HEARTBEAT_URL"
 FATAL_EXIT_CODE_INT = 2
 RUN_RECEIPT_SCHEMA_STR = "live_ops_watchdog_run.v1"
 CAPSULE_RECEIPT_FIELD_TUPLE = ("capsule_notification_attempt_count_int",
-    "capsule_notification_pending_count_int", "capsule_notification_pending_live_count_int")
+    "capsule_notification_pending_count_int", "capsule_notification_pending_live_count_int",
+    "capsule_notification_error_list", "capsule_notification_failure_alert_status_str")
 RECEIPT_IDENTITY_FIELD_TUPLE = ("mode_str", "user_id_str", "pod_id_str", "account_route_str", "release_id_str")
 RECEIPT_IDENTITY_PATTERN_OBJ = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}\Z")
 
@@ -80,7 +81,7 @@ def heartbeat_target_url_str(heartbeat_url_str: str, overall_severity_str: str) 
 
 def _completed_run_receipt_dict(report_dict, fired_list, receipt_context_dict, *,
         heartbeat_status_str, heartbeat_fail_signal_bool):
-    """Project this completed pass only; no URLs, errors or notification bodies."""
+    """Project this completed pass only; no URLs, raw exceptions or notification bodies."""
     completed_ts = ops_report_module.utc_now_ts()
     if completed_ts.tzinfo is None or completed_ts.utcoffset() is None:
         raise ValueError("Invalid receipt clock")
@@ -182,6 +183,82 @@ def _build_summary_and_report_tuple(
     return summary_dict, report_dict
 
 
+def _run_capsule_notifications_tuple(summary_dict, mode_str, webhook_url_str):
+    """Contain capsule failures per pod; preserve cross-pod scope validation."""
+    from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE
+
+    capsule_row_list = [row_dict for row_dict in summary_dict.get("pod_row_dict_list") or []
+        if row_dict.get("strategy_import_str") in MR_CAPSULE_STRATEGY_IMPORT_TUPLE
+        and (mode_str is None or row_dict.get("mode_str") == mode_str)]
+    if not capsule_row_list:
+        return {}, []
+    result_dict = {"capsule_notification_attempt_count_int": 0,
+        "capsule_notification_pending_count_int": 0, "capsule_notification_pending_live_count_int": 0}
+    error_list, invalid_scope_row_list, visited_pod_list = [], [], []
+    for row_dict in capsule_row_list:
+        pod_key_tuple = (row_dict.get("mode_str"), row_dict.get("pod_id_str"))
+        if pod_key_tuple in visited_pod_list:
+            continue
+        visited_pod_list.append(pod_key_tuple)
+        pod_row_list = [candidate_dict for candidate_dict in capsule_row_list
+            if (candidate_dict.get("mode_str"), candidate_dict.get("pod_id_str")) == pod_key_tuple]
+        # Include aliases during validation so splitting delivery per pod does
+        # not silently accept two different pods claiming the same account.
+        account_list = [candidate_dict.get("account_route_str") for candidate_dict in pod_row_list]
+        validation_row_list = [candidate_dict for candidate_dict in capsule_row_list
+            if candidate_dict in pod_row_list or (candidate_dict.get("mode_str") == pod_key_tuple[0]
+                and candidate_dict.get("account_route_str") in account_list)]
+        phase_str = "scope"
+        try:
+            capsule_notifications_module._configured_scope_list(
+                {"pod_row_dict_list": validation_row_list}, mode_str)
+            pod_summary_dict = {"pod_row_dict_list": pod_row_list}
+            phase_str = "delivery"
+            delivery_list = capsule_notifications_module.deliver_execution_alerts(
+                pod_summary_dict, webhook_url_str=webhook_url_str,
+                webhook_poster_fn=notifications_module.post_discord_webhook_bool, mode_str=mode_str)
+            if result_dict["capsule_notification_attempt_count_int"] is not None:
+                result_dict["capsule_notification_attempt_count_int"] += len(delivery_list)
+            phase_str = "pending"
+            pending_int = capsule_notifications_module.pending_execution_alert_count_int(
+                pod_summary_dict, mode_str=mode_str)
+            if result_dict["capsule_notification_pending_count_int"] is not None:
+                result_dict["capsule_notification_pending_count_int"] += pending_int
+            if pod_key_tuple[0] == "live" and result_dict["capsule_notification_pending_live_count_int"] is not None:
+                result_dict["capsule_notification_pending_live_count_int"] += pending_int
+        except Exception as exception_obj:
+            # A partly completed delivery/read cannot honestly report zero.
+            if phase_str != "pending":
+                result_dict["capsule_notification_attempt_count_int"] = None
+            result_dict["capsule_notification_pending_count_int"] = None
+            if pod_key_tuple[0] not in ("paper", "incubation"):
+                result_dict["capsule_notification_pending_live_count_int"] = None
+            if phase_str == "scope":
+                invalid_scope_row_list.extend(pod_row_list)
+            error_list.append({
+                field_str: value_str if isinstance(value_str, str) and RECEIPT_IDENTITY_PATTERN_OBJ.fullmatch(value_str) else "unknown"
+                for field_str, value_str in zip(("mode_str", "pod_id_str"), pod_key_tuple)
+            } | {"reason_code_str": f"capsule_notification_{phase_str}_failed",
+                 "error_type_str": type(exception_obj).__name__})
+    if error_list:
+        result_dict["capsule_notification_error_list"] = error_list
+        alert_status_str = "disabled"
+        if webhook_url_str:
+            # One bounded failure alert for this run, independent of the broken
+            # capsule DB. Never include raw exception text, paths or credentials.
+            detail_str = "; ".join(f"{error_dict['mode_str']}/{error_dict['pod_id_str']}: "
+                f"{error_dict['reason_code_str']} ({error_dict['error_type_str']})" for error_dict in error_list)
+            payload_dict = {"content": ("Capsule watchdog notification failure. Other pod monitoring continues. "
+                "Inspect capsule_notification_error_list in the saved report/receipt.\n" + detail_str)[:1900],
+                "allowed_mentions": {"parse": []}}
+            try:
+                alert_status_str = "sent" if notifications_module.post_discord_webhook_bool(webhook_url_str, payload_dict) else "failed"
+            except Exception:
+                alert_status_str = "failed"
+        result_dict["capsule_notification_failure_alert_status_str"] = alert_status_str
+    return result_dict, invalid_scope_row_list
+
+
 def _run_report_pipeline_tuple(
     parsed_args_obj: argparse.Namespace,
     as_of_ts: datetime,
@@ -199,18 +276,33 @@ def _run_report_pipeline_tuple(
     )
     receipt_context_dict = {"summary_dict": summary_dict,
         "notification_configured_bool": bool(webhook_url_str)}
-    if capsule_notifications_module._configured_scope_list(summary_dict, parsed_args_obj.mode_str):
-        capsule_delivery_list = capsule_notifications_module.deliver_execution_alerts(
-            summary_dict, webhook_url_str=webhook_url_str,
-            webhook_poster_fn=notifications_module.post_discord_webhook_bool, mode_str=parsed_args_obj.mode_str,
-        )
-        receipt_context_dict.update(
-            capsule_notification_attempt_count_int=len(capsule_delivery_list),
-            capsule_notification_pending_count_int=capsule_notifications_module.pending_execution_alert_count_int(
-                summary_dict, mode_str=parsed_args_obj.mode_str),
-            capsule_notification_pending_live_count_int=(capsule_notifications_module.pending_execution_alert_count_int(
-                summary_dict, mode_str="live") if parsed_args_obj.mode_str in {None, "live"} else 0),
-        )
+    capsule_result_dict, invalid_scope_row_list = _run_capsule_notifications_tuple(
+        summary_dict, parsed_args_obj.mode_str, webhook_url_str)
+    if capsule_result_dict:
+        receipt_context_dict.update(capsule_result_dict)
+        # An invalid DB path does not invalidate the pod's receipt identity.
+        # Preserve it (deduplicated); only truly invalid/conflicting identities
+        # are represented solely by the explicit capsule error list.
+        receipt_row_list = []
+        identity_list = [{field_str: row_dict.get(field_str) for field_str in RECEIPT_IDENTITY_FIELD_TUPLE}
+            for row_dict in summary_dict["pod_row_dict_list"]]
+        for row_dict, identity_dict in zip(summary_dict["pod_row_dict_list"], identity_list):
+            if row_dict in invalid_scope_row_list:
+                if (any(not isinstance(value_str, str) or not RECEIPT_IDENTITY_PATTERN_OBJ.fullmatch(value_str)
+                        for value_str in identity_dict.values()) or identity_dict["mode_str"] not in {"live", "paper", "incubation"}):
+                    continue
+                if any(other_dict != identity_dict and other_dict["mode_str"] == identity_dict["mode_str"]
+                        and (other_dict["pod_id_str"] == identity_dict["pod_id_str"]
+                             or other_dict["account_route_str"] == identity_dict["account_route_str"])
+                        for other_dict in identity_list):
+                    continue
+                if any(all(candidate_dict.get(field_str) == value_str for field_str, value_str in identity_dict.items())
+                        for candidate_dict in receipt_row_list):
+                    continue
+            receipt_row_list.append(row_dict)
+        receipt_context_dict["summary_dict"] = {**summary_dict, "pod_row_dict_list": receipt_row_list}
+        report_dict.update(capsule_result_dict)
+        write_report_atomic(report_dict, parsed_args_obj.output_path_str)
     return report_dict, fired_list, receipt_context_dict
 
 

@@ -199,11 +199,13 @@ def test_release_template_parses_and_starts_disabled(template_path_obj: Path):
         release_obj.strategy_import_str
         == "strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5"
     )
-    assert release_obj.broker_port_int == (7496 if core5_template_bool else 7497)
+    assert release_obj.broker_port_int == 7497
     if core5_template_bool:
         assert release_obj.mode_str == "live"
         assert release_obj.account_route_str == "YOUR_CORE5_ACCOUNT"
-    if release_obj.strategy_import_str.startswith("strategies.mr_capsule."):
+    if core5_template_bool:
+        assert release_obj.broker_client_id_int == 47
+    elif release_obj.strategy_import_str.startswith("strategies.mr_capsule."):
         assert release_obj.broker_client_id_int in range(41, 47)
     else:
         assert release_obj.broker_client_id_int == 31
@@ -219,6 +221,27 @@ def test_release_template_parses_and_starts_disabled(template_path_obj: Path):
         assert qualification_dict["evidence_reference_str"] == ""
     else:
         assert release_obj.params_dict["capital_base_float"] == 100000.0
+
+
+def test_core5_template_client_id_is_not_used_by_another_template_or_release():
+    core5_template_path_obj = Path(
+        "docs/live/release_templates/pod_taa_adaptive_macro_core5_daily_moo.yaml.example"
+    )
+    core5_release_obj = parse_release_manifest(str(core5_template_path_obj.resolve()))
+    release_root_path_obj = Path("alpha/live/releases")
+    release_path_list = [
+        *RELEASE_TEMPLATE_PATH_TUPLE,
+        *release_root_path_obj.rglob("*.yaml"),
+        *release_root_path_obj.rglob("*.yml"),
+    ]
+
+    for release_path_obj in release_path_list:
+        if release_path_obj == core5_template_path_obj:
+            continue
+        release_obj = parse_release_manifest(str(release_path_obj.resolve()))
+        assert core5_release_obj.broker_client_id_int != release_obj.broker_client_id_int, (
+            f"CORE5 client id conflicts with {release_path_obj}"
+        )
 
 
 def test_retired_qpi_release_is_rejected():

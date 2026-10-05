@@ -2,14 +2,16 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
+import hashlib
 import json
 import sqlite3
 from threading import Event
+from types import SimpleNamespace
 
 import pytest
 
 from alpha.live import mr_capsule_notifications as alert_module
-from test_live_ops_watchdog import _run_watchdog, _summary_dict, AS_OF_TS
+from test_live_ops_watchdog import _run_watchdog, _summary_dict, AS_OF_TS, HEARTBEAT_URL_STR
 
 
 NOW_TS = datetime(2026, 10, 5, 15, 0, tzinfo=UTC)
@@ -258,6 +260,129 @@ def test_watchdog_mode_filter_does_not_send_or_count_other_modes(monkeypatch, tm
     assert result_dict["capsule_notification_pending_count_int"] == 1
     assert result_dict["capsule_notification_pending_live_count_int"] == 0
     assert _read_alert_dict(db_path_obj, 2)["attempt_count_int"] == 0
+
+
+@pytest.mark.parametrize("problem_str", ["invalid_scope", "ambiguous_scope", "shared_account", "sqlite", "pending_sqlite"])
+@pytest.mark.parametrize("legacy_severity_str", ["green", "red"])
+def test_watchdog_capsule_failure_preserves_other_pods_receipt_and_heartbeat(
+        monkeypatch, tmp_path, capsys, problem_str, legacy_severity_str):
+    healthy_path_obj = _create_alert_db(tmp_path)
+    healthy_row_dict = _capsule_summary_dict(healthy_path_obj)["pod_row_dict_list"][0]
+    broken_path_obj = tmp_path / "broken.sqlite3"
+    broken_path_obj.write_bytes(b"not a sqlite database")
+    broken_row_dict = dict(healthy_row_dict, pod_id_str="capsule_broken", account_route_str="DU_BAD",
+        db_path_str=str(broken_path_obj))
+    broken_row_list = [broken_row_dict]
+    if problem_str == "invalid_scope":
+        broken_row_dict["db_path_str"] = None
+    elif problem_str == "ambiguous_scope":
+        broken_row_list.append(dict(broken_row_dict, db_path_str=str(tmp_path / "alias.sqlite3")))
+    elif problem_str == "shared_account":
+        broken_row_list.append(dict(broken_row_dict, pod_id_str="capsule_alias"))
+    elif problem_str == "pending_sqlite":
+        original_delivery_fn = alert_module.deliver_execution_alerts
+        def delivery_fn(summary_dict, **kwarg_dict):
+            if summary_dict["pod_row_dict_list"][0]["pod_id_str"] == "capsule_broken":
+                return []
+            return original_delivery_fn(summary_dict, **kwarg_dict)
+        monkeypatch.setattr(alert_module, "deliver_execution_alerts", delivery_fn)
+    summary_dict = _summary_dict(severity_str=legacy_severity_str)
+    taa_row_dict = summary_dict["pod_row_dict_list"][0]
+    ndx_row_dict = dict(taa_row_dict, pod_id_str="pod_ndx_live", account_route_str="U_NDX",
+        release_id_str="ndx_release", strategy_import_str="strategies.ndx.strategy_ndx")
+    summary_dict["pod_row_dict_list"].extend([ndx_row_dict, *broken_row_list, healthy_row_dict])
+
+    return_code_int, heartbeat_list, webhook_list, output_path_obj = _run_watchdog(
+        monkeypatch, tmp_path, summary_dict=summary_dict, discord_webhook_url_str="test",
+        heartbeat_env_url_str=HEARTBEAT_URL_STR)
+
+    assert return_code_int == (1 if legacy_severity_str == "red" else 0)
+    assert [url_str for url_str, _ in heartbeat_list] == [
+        HEARTBEAT_URL_STR + ("/fail" if legacy_severity_str == "red" else "")]
+    assert _read_alert_dict(healthy_path_obj)["delivered_timestamp_str"] is not None
+    failure_payload_list = [payload_dict for _, payload_dict in webhook_list
+        if payload_dict["content"].startswith("Capsule watchdog notification failure.")]
+    assert len(failure_payload_list) == 1
+    assert failure_payload_list[0]["allowed_mentions"] == {"parse": []}
+    assert len(webhook_list) == (4 if legacy_severity_str == "red" else 2)
+    report_dict = json.loads(output_path_obj.read_text(encoding="utf-8"))
+    receipt_dict = json.loads(output_path_obj.with_suffix(".run.json").read_text(encoding="utf-8"))
+    result_dict = json.loads(capsys.readouterr().out)
+    phase_str = "pending" if problem_str == "pending_sqlite" else "delivery" if problem_str == "sqlite" else "scope"
+    expected_error_type_str = "DatabaseError" if "sqlite" in problem_str else "ValueError"
+    for observation_dict in (report_dict, receipt_dict, result_dict):
+        error_list = observation_dict["capsule_notification_error_list"]
+        assert {error_dict["pod_id_str"] for error_dict in error_list} == (
+            {"capsule_broken", "capsule_alias"} if problem_str == "shared_account" else {"capsule_broken"})
+        assert all(error_dict["error_type_str"] == expected_error_type_str for error_dict in error_list)
+        assert all(error_dict["reason_code_str"] == f"capsule_notification_{phase_str}_failed" for error_dict in error_list)
+        assert observation_dict["capsule_notification_pending_count_int"] is None
+        assert observation_dict["capsule_notification_pending_live_count_int"] == 0
+        assert observation_dict["capsule_notification_failure_alert_status_str"] == "sent"
+    assert result_dict["notification_fired_count_int"] == (2 if legacy_severity_str == "red" else 0)
+    assert result_dict["run_receipt_status_str"] == "saved"
+    assert receipt_dict["heartbeat_status_str"] == "sent"
+    assert {row_dict["pod_id_str"] for row_dict in receipt_dict["scope_list"]}.issuperset(
+        {"pod_taa_live_01", "pod_ndx_live", "capsule_one"})
+    assert receipt_dict["report_sha256_str"] == hashlib.sha256(json.dumps(
+        report_dict, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")).hexdigest()
+    assert str(broken_path_obj) not in json.dumps(receipt_dict)
+
+
+@pytest.mark.parametrize("delivery_result_str", ["failed", "raises", "disabled"])
+def test_watchdog_capsule_failure_alert_transport_cannot_abort_run(monkeypatch, tmp_path, capsys, delivery_result_str):
+    import scripts.live_ops_watchdog as watchdog_module
+    summary_dict = _capsule_summary_dict(tmp_path / "unused.sqlite3", db_path_str=None)
+    if delivery_result_str == "raises":
+        def failure_delivery_fn(summary_dict, **kwarg_dict):
+            def failed_post_fn(*arg_list):
+                raise OSError("private webhook token")
+            monkeypatch.setattr(watchdog_module.notifications_module, "post_discord_webhook_bool", failed_post_fn)
+            return []
+        monkeypatch.setattr(watchdog_module.notifications_module, "check_and_notify_for_red_transitions", failure_delivery_fn)
+    return_code_int, heartbeat_list, webhook_list, output_path_obj = _run_watchdog(monkeypatch, tmp_path,
+        summary_dict=summary_dict, heartbeat_env_url_str=HEARTBEAT_URL_STR,
+        discord_webhook_url_str=None if delivery_result_str == "disabled" else "test", discord_delivery_bool=False)
+    assert return_code_int == 0 and len(heartbeat_list) == 1
+    assert len(webhook_list) == (1 if delivery_result_str == "failed" else 0)
+    result_dict = json.loads(capsys.readouterr().out)
+    receipt_dict = json.loads(output_path_obj.with_suffix(".run.json").read_text(encoding="utf-8"))
+    assert result_dict["run_receipt_status_str"] == "saved"
+    assert receipt_dict["capsule_notification_failure_alert_status_str"] == (
+        "disabled" if delivery_result_str == "disabled" else "failed")
+    assert "private webhook token" not in json.dumps(receipt_dict)
+
+
+@pytest.mark.parametrize("problem_str", ["invalid_scope", "ambiguous_scope", "sqlite"])
+def test_live_capsule_alert_failure_retains_dashboard_receipt_scope(monkeypatch, tmp_path, capsys, problem_str):
+    from alpha.live.dashboard_v4 import system_data
+    import scripts.live_ops_watchdog as watchdog_module
+    completed_ts = AS_OF_TS + timedelta(seconds=17)
+    monkeypatch.setattr(watchdog_module.ops_report_module, "utc_now_ts", lambda: completed_ts)
+    broken_path_obj = tmp_path / "broken.sqlite3"
+    broken_path_obj.write_bytes(b"not a sqlite database")
+    capsule_row_dict = _capsule_summary_dict(broken_path_obj, mode_str="live",
+        account_route_str="U_CAPSULE")["pod_row_dict_list"][0]
+    summary_dict = _summary_dict()
+    summary_dict["pod_row_dict_list"].append(capsule_row_dict)
+    target_list = [SimpleNamespace(release_obj=SimpleNamespace(**{
+        field_str: row_dict[field_str] for field_str in system_data.IDENTITY_FIELD_TUPLE}))
+        for row_dict in summary_dict["pod_row_dict_list"]]
+    if problem_str == "invalid_scope":
+        capsule_row_dict["db_path_str"] = None
+    elif problem_str == "ambiguous_scope":
+        summary_dict["pod_row_dict_list"].append(dict(capsule_row_dict,
+            db_path_str=str(tmp_path / "alias.sqlite3")))
+    return_code_int, heartbeat_list, webhook_list, output_path_obj = _run_watchdog(monkeypatch, tmp_path,
+        summary_dict=summary_dict, heartbeat_env_url_str=HEARTBEAT_URL_STR, discord_webhook_url_str="test")
+    assert return_code_int == 0 and len(heartbeat_list) == len(webhook_list) == 1
+    report_dict = json.loads(output_path_obj.read_text(encoding="utf-8"))
+    receipt_dict = system_data._watchdog_run_dict(output_path_obj, target_list, report_dict, completed_ts)
+    assert receipt_dict and len(receipt_dict["scope_list"]) == 2
+    assert receipt_dict["capsule_notification_pending_live_count_int"] is None
+    assert receipt_dict["capsule_notification_error_list"][0]["pod_id_str"] == "capsule_one"
+    assert system_data._deadman_dict(receipt_dict, completed_ts)["now_str"] == "Ping sent"
+    assert json.loads(capsys.readouterr().out)["run_receipt_status_str"] == "saved"
 
 
 def test_late_execution_without_residual_identifies_actual_fill(tmp_path):

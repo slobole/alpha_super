@@ -10,8 +10,8 @@ deployment:
 broker:
   account_route: YOUR_CORE5_ACCOUNT
   host_str: 127.0.0.1
-  port_int: 7496
-  client_id_int: 31
+  port_int: 7497 # Paper TWS port; choose the intended endpoint before activation.
+  client_id_int: 47 # Keep unique across processes connected to this Gateway.
   timeout_seconds_float: 4.0
 strategy:
   strategy_import_str: strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5
