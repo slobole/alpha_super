@@ -110,17 +110,55 @@ def test_single_attempt_survives_uncertain_send_and_rejection(capsule_case, monk
         broker_obj.seed_broker_order_state(record_obj)
         return SubmitBatchResult(broker_order_record_list=[record_obj])
     monkeypatch.setattr(broker_obj, "submit_order_request_list", failed_submit)
-    result_tuple = reconcile_case(capsule_case)
+    if failure_str.startswith("timeout_"):
+        with pytest.raises(TimeoutError):
+            reconcile_case(capsule_case)
+        error_dict = store_obj.get_decision_plan_by_id(vplan_obj.decision_plan_id_int).snapshot_metadata_dict[
+            "mr_capsule_completion_send_error_dict"]
+        assert error_dict["order_request_key_str"].endswith(":late:BIL")
+        assert error_dict["error_str"]
+        assert "unresolved_execution" in {row_dict["alert_kind_str"] for row_dict in alert_rows(store_obj)}
+    else:
+        result_tuple = reconcile_case(capsule_case)
     restarted_tuple = (LiveStateStore(str(tmp_path / "recovery.sqlite3")), *capsule_case[1:])
     next_result_tuple = reconcile_case(restarted_tuple)
     assert len(call_list) == 1
-    assert result_tuple[0].passed_bool == (failure_str != "timeout_before_send")
+    assert next_result_tuple[0].passed_bool == (failure_str != "timeout_before_send")
     if failure_str == "timeout_before_send":
         assert next_result_tuple[1] == "awaiting_evidence"
         assert next_result_tuple[2][0]["required_action_str"] == "VERIFY"
     if failure_str == "terminal_rejection":
         assert result_tuple[2][0]["required_action_str"] == "SELL"
         assert abs(result_tuple[2][0]["residual_amount_float"]) == 60.0
+
+
+def test_verified_sale_completes_while_unrelated_buy_remains_pending(capsule_case):
+    store_obj, broker_obj, release_obj, vplan_obj, _, _ = seed_execution(
+        capsule_case, {"AAPL": 30.0, "BIL": -40.0}, unresolved_asset_str="AAPL")
+    snapshot_obj = broker_obj.get_account_snapshot(release_obj.account_route_str)
+    broker_obj._snapshot_map[release_obj.account_route_str] = replace(
+        snapshot_obj, open_order_id_list=["original:AAPL"])
+    result_tuple = reconcile_case(capsule_case)
+    request_obj, = broker_obj.submitted_order_request_list
+    assert (request_obj.asset_str, request_obj.amount_float) == ("BIL", -60.0)
+    assert not result_tuple[0].passed_bool and result_tuple[1] == "awaiting_evidence"
+    assert store_obj.get_vplan_by_id(vplan_obj.vplan_id_int).status_str == "submitted"
+    assert broker_obj.get_account_snapshot(release_obj.account_route_str).position_amount_map["BIL"] == 880.0
+    assert any(row_dict["asset_str"] == "AAPL" and row_dict["required_action_str"] == "VERIFY"
+               for row_dict in result_tuple[2])
+
+
+def test_unexplained_other_holding_blocks_sale_even_with_known_pending_buy(capsule_case):
+    _, broker_obj, release_obj, _, _, _ = seed_execution(
+        capsule_case, {"AAPL": 30.0, "BIL": -40.0}, unresolved_asset_str="AAPL")
+    snapshot_obj = broker_obj.get_account_snapshot(release_obj.account_route_str)
+    broker_obj._snapshot_map[release_obj.account_route_str] = replace(snapshot_obj,
+        open_order_id_list=["original:AAPL"], position_amount_map={**snapshot_obj.position_amount_map, "MSFT": 9.0})
+    result_tuple = reconcile_case(capsule_case)
+    assert not result_tuple[0].passed_bool
+    assert broker_obj.submitted_order_request_list == []
+    assert any(row_dict["asset_str"] == "BIL" and row_dict["required_action_str"] == "VERIFY"
+               for row_dict in result_tuple[2])
 
 
 @pytest.mark.parametrize("block_str", ["original_open", "other_client_open", "observed_next_day", "after_close"])

@@ -10,6 +10,15 @@ from alpha.live.reconcile import reconcile_account_state
 from test_live_mr_capsule_recovery import capsule_case, SUBMIT_TIMESTAMP_TS, RECONCILE_TIMESTAMP_TS
 
 
+@pytest.fixture(autouse=True)
+def historical_dispatch_clock(monkeypatch):
+    class DispatchClock:
+        @classmethod
+        def now(cls, timezone_obj):
+            return SUBMIT_TIMESTAMP_TS.astimezone(timezone_obj)
+    monkeypatch.setattr("alpha.live.dispatch_state.datetime", DispatchClock)
+
+
 def test_capsule_funding_precedes_claim_and_dispatch_preserves_request_ids(capsule_case, monkeypatch):
     state_store_obj, broker_adapter_obj, release_obj, vplan_obj, runner_kwarg_dict, _ = capsule_case
     original_request_list = build_broker_order_request_list_from_vplan(vplan_obj)
@@ -57,19 +66,36 @@ def test_other_sales_dispatch_between_bil_and_buys_without_reassigning_ids(capsu
 
 
 @pytest.mark.parametrize("error_obj", [ValueError("Insufficient broker buying power"), TimeoutError("Account preview timeout"), NotImplementedError("Unsupported adapter")])
-def test_capsule_unverified_funding_never_claims_or_submits(capsule_case, monkeypatch, error_obj):
+def test_capsule_funding_failure_retries_transient_or_preserves_sales(capsule_case, monkeypatch, error_obj):
+    from alpha.live.execution_resolution import load_request_resolution_dict
+
     state_store_obj, broker_adapter_obj, release_obj, vplan_obj, runner_kwarg_dict, _ = capsule_case
     def fail_funding(*_):
         raise error_obj
     monkeypatch.setattr(broker_adapter_obj, "get_capsule_funding_evidence", fail_funding)
-    monkeypatch.setattr(state_store_obj, "claim_vplan_for_submission", lambda *_: pytest.fail("Unverified funding claimed a batch"))
+    transient_bool = isinstance(error_obj, TimeoutError)
+    if transient_bool:
+        monkeypatch.setattr(state_store_obj, "claim_vplan_for_submission", lambda *_: pytest.fail("Transient funding failure claimed a batch"))
     result_dict = runner_module.submit_ready_vplans(state_store_obj, broker_adapter_obj,
         SUBMIT_TIMESTAMP_TS, "paper", False, **runner_kwarg_dict)
-    assert result_dict["submitted_vplan_count_int"] == 0
-    assert result_dict["reason_count_map_dict"] == {"mr_capsule_funding_not_verified": 1}
-    assert not broker_adapter_obj.submitted_order_request_list
-    assert state_store_obj.get_vplan_by_id(vplan_obj.vplan_id_int).status_str == "blocked"
-    assert state_store_obj.get_decision_plan_by_id(vplan_obj.decision_plan_id_int).status_str == "blocked"
+    assert result_dict["submitted_vplan_count_int"] == int(not transient_bool)
+    assert result_dict["reason_count_map_dict"]["mr_capsule_funding_not_verified"] == 1
+    resolution_dict = load_request_resolution_dict(state_store_obj, vplan_obj)
+    if transient_bool:
+        assert result_dict["reason_count_map_dict"]["dispatch_retry_pending"] == 1
+        assert not broker_adapter_obj.submitted_order_request_list
+        assert state_store_obj.get_vplan_by_id(vplan_obj.vplan_id_int).status_str == "ready"
+        assert state_store_obj.get_decision_plan_by_id(vplan_obj.decision_plan_id_int).status_str == "vplan_ready"
+        assert resolution_dict == {}
+    else:
+        sale_request_obj, = broker_adapter_obj.submitted_order_request_list
+        assert (sale_request_obj.asset_str, sale_request_obj.amount_float) == ("BIL", -100.0)
+        assert state_store_obj.get_vplan_by_id(vplan_obj.vplan_id_int).status_str == "submitted"
+        assert state_store_obj.get_decision_plan_by_id(vplan_obj.decision_plan_id_int).status_str == "submitted"
+        resolution_obj, = resolution_dict.values()
+        assert resolution_obj["asset_str"] == "AAPL"
+        assert resolution_obj["resolution_str"] == "never_dispatched"
+        assert resolution_obj["reason_str"] == "funding_check_suppressed_buy"
 
 
 def test_capsule_checks_all_client_open_orders_before_funding(capsule_case, monkeypatch):

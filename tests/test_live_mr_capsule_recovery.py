@@ -1,6 +1,6 @@
 """SQL-backed capsule execution/recovery checks using only the in-memory broker stub."""
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import sqlite3
 from zoneinfo import ZoneInfo
@@ -228,7 +228,9 @@ def test_missing_ack_recovers_from_matching_broker_order_and_fill_evidence(capsu
 @pytest.mark.parametrize("cash_float", [1_010.0, 990.0, 0.0, -1_000.0, 50_000.0])
 def test_cash_change_after_vplan_submits_frozen_orders_once(capsule_case, cash_float, monkeypatch):
     state_store_obj, broker_adapter_obj, release_obj, vplan_obj, runner_kwarg_dict, tmp_path = capsule_case
-    expected_request_list = runner_module.build_broker_order_request_list_from_vplan(vplan_obj)
+    expected_request_list = [replace(request_obj, submission_deadline_timestamp_str=(
+        vplan_obj.target_execution_timestamp_ts - timedelta(minutes=2)).isoformat())
+        for request_obj in runner_module.build_broker_order_request_list_from_vplan(vplan_obj)]
     snapshot_obj = broker_adapter_obj.get_account_snapshot(release_obj.account_route_str)
     changed_nav_float = snapshot_obj.net_liq_float + cash_float - snapshot_obj.cash_float
     broker_adapter_obj._snapshot_map[release_obj.account_route_str] = replace(

@@ -21,6 +21,8 @@ from alpha.live.core5_adapter import (
     CORE5_STRATEGY_IMPORT_STR, is_core5_decision_bool, require_core5_position_match,
     validate_core5_release,
 )
+from alpha.live.dispatch_state import is_guarded_release_bool, record_dispatch_failure
+from alpha.live.guarded_dispatch import is_transient_broker_error_bool, moo_dispatch_deadline_ts
 from alpha.live.execution_engine import (
     build_broker_order_request_list_from_vplan,
     build_vplan,
@@ -35,7 +37,7 @@ from alpha.live.logging_utils import (
     log_event,
     log_pod_trace_event,
 )
-from alpha.live.models import BrokerOrderEvent, DecisionPlan, LiveRelease, PodState, VPlan
+from alpha.live.models import BrokerOrderEvent, DecisionPlan, LivePriceSnapshot, LiveRelease, PodState, SubmitBatchResult, VPlan
 from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE, validate_mr_capsule_release
 from alpha.live.mr_capsule_recovery import reconcile_capsule_cycle
 from alpha.live.norgate_snapshot_sync import ensure_norgate_snapshots_for_live_tick
@@ -2823,7 +2825,8 @@ def build_vplans(
             continue
         release_obj = state_store_obj.get_release_by_id(decision_plan_obj.release_id_str)
         latest_vplan_obj = state_store_obj.get_latest_vplan_for_decision(int(decision_plan_obj.decision_plan_id_int or 0))
-        if latest_vplan_obj is not None and latest_vplan_obj.status_str in ("ready", "submitted", "completed"):
+        if latest_vplan_obj is not None and (latest_vplan_obj.status_str in ("ready", "submitted", "completed")
+                or (is_guarded_release_bool(release_obj) and latest_vplan_obj.status_str in ("submitting", "parked"))):
             continue
         if release_obj.mode_str != env_mode_str:
             reason_counter_obj["env_mode_mismatch"] += 1
@@ -2876,7 +2879,32 @@ def build_vplans(
             )
             continue
         broker_adapter_obj = broker_adapter_resolver_obj.get_adapter(release_obj)
-        visible_account_route_set = broker_adapter_obj.get_visible_account_route_set()
+        guarded_build_bool = is_guarded_release_bool(release_obj)
+        if guarded_build_bool:
+            try:
+                if as_of_ts >= moo_dispatch_deadline_ts(decision_plan_obj):
+                    raise ValueError("Opening dispatch deadline passed; reviewed recovery is required.")
+                visible_account_route_set = broker_adapter_obj.get_visible_account_route_set()
+                guarded_session_ready_bool = broker_adapter_obj.is_session_ready(decision_plan_obj.account_route_str)
+                guarded_session_mode_str = broker_adapter_obj.get_session_mode_str(decision_plan_obj.account_route_str)
+                guarded_snapshot_obj = (
+                    broker_adapter_obj.get_core5_account_snapshot(decision_plan_obj.account_route_str)
+                    if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR
+                    else broker_adapter_obj.get_capsule_account_snapshot(decision_plan_obj.account_route_str))
+            except Exception as exception_obj:
+                retry_bool = is_transient_broker_error_bool(exception_obj) and as_of_ts < moo_dispatch_deadline_ts(decision_plan_obj)
+                reason_str = "build_retry_pending" if retry_bool else "opening_build_parked"
+                if not retry_bool:
+                    _mark_unsubmitted_decision_terminal(state_store_obj, release_obj,
+                        int(decision_plan_obj.decision_plan_id_int), "blocked")
+                blocked_action_count_int += 1
+                reason_counter_obj[reason_str] += 1
+                log_event(reason_str, _build_decision_plan_log_payload_dict(release_obj, decision_plan_obj,
+                    as_of_ts, {"error_str": str(exception_obj), "severity_str": "warning" if retry_bool else "critical"}),
+                    log_path_str=log_path_str)
+                continue
+        else:
+            visible_account_route_set = broker_adapter_obj.get_visible_account_route_set()
         if scheduler_utils.is_execution_window_expired_bool(
             decision_plan_obj.execution_policy_str,
             decision_plan_obj.target_execution_timestamp_ts,
@@ -2897,7 +2925,8 @@ def build_vplans(
                 trace_log_root_path_str=trace_log_root_path_str,
             )
             continue
-        if not broker_adapter_obj.is_session_ready(decision_plan_obj.account_route_str):
+        if not (guarded_session_ready_bool if guarded_build_bool
+                else broker_adapter_obj.is_session_ready(decision_plan_obj.account_route_str)):
             blocked_action_count_int += 1
             reason_counter_obj["broker_not_ready"] += 1
             _emit_live_trace_event(
@@ -2934,7 +2963,8 @@ def build_vplans(
                 trace_log_root_path_str=trace_log_root_path_str,
             )
             continue
-        session_mode_str = broker_adapter_obj.get_session_mode_str(decision_plan_obj.account_route_str)
+        session_mode_str = (guarded_session_mode_str if guarded_build_bool
+            else broker_adapter_obj.get_session_mode_str(decision_plan_obj.account_route_str))
         if session_mode_str is not None and session_mode_str != release_obj.mode_str:
             blocked_action_count_int += 1
             reason_counter_obj["session_mode_mismatch"] += 1
@@ -2956,11 +2986,8 @@ def build_vplans(
             )
             continue
 
-        broker_snapshot_obj = (
-            broker_adapter_obj.get_core5_account_snapshot(decision_plan_obj.account_route_str)
-            if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR
-            else broker_adapter_obj.get_account_snapshot(decision_plan_obj.account_route_str)
-        )
+        broker_snapshot_obj = (guarded_snapshot_obj if guarded_build_bool
+            else broker_adapter_obj.get_account_snapshot(decision_plan_obj.account_route_str))
         state_store_obj.upsert_broker_snapshot_cache(broker_snapshot_obj)
         reconciliation_result_obj = reconcile_account_state(
             model_position_map=decision_plan_obj.decision_base_position_map,
@@ -3031,11 +3058,22 @@ def build_vplans(
             broker_position_map_dict=broker_snapshot_obj.position_amount_map,
         )
         try:
-            live_price_snapshot_obj = broker_adapter_obj.get_live_price_snapshot(
-                decision_plan_obj.account_route_str,
-                touched_asset_list,
-                execution_policy_str=decision_plan_obj.execution_policy_str,
-            )
+            if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
+                # CORE5 quantities were frozen at Close_T. Quotes are optional
+                # diagnostics, not a dependency or a reason to resize/block them.
+                close_price_dict = dict(decision_plan_obj.snapshot_metadata_dict["sizing_close_price_map_dict"])
+                live_price_snapshot_obj = LivePriceSnapshot(
+                    account_route_str=decision_plan_obj.account_route_str,
+                    snapshot_timestamp_ts=decision_plan_obj.signal_timestamp_ts,
+                    price_source_str="core5.frozen_close_t",
+                    asset_reference_price_map=close_price_dict,
+                    asset_reference_source_map_dict={asset_str: "core5.frozen_close_t" for asset_str in close_price_dict})
+            else:
+                live_price_snapshot_obj = broker_adapter_obj.get_live_price_snapshot(
+                    decision_plan_obj.account_route_str,
+                    touched_asset_list,
+                    execution_policy_str=decision_plan_obj.execution_policy_str,
+                )
         except (RuntimeError, ValueError) as exc:
             blocked_action_count_int += 1
             reason_counter_obj["live_price_snapshot_error"] += 1
@@ -3311,6 +3349,17 @@ def submit_ready_vplans(
         if release_obj.strategy_import_str in MR_CAPSULE_STRATEGY_IMPORT_TUPLE:
             validate_mr_capsule_release(release_obj)
         broker_adapter_obj = broker_adapter_resolver_obj.get_adapter(release_obj)
+        guarded_dispatch_bool = is_guarded_release_bool(release_obj)
+        suppressed_request_list = []
+        if guarded_dispatch_bool:
+            broker_order_request_list = build_broker_order_request_list_from_vplan(vplan_obj)
+            if as_of_ts >= moo_dispatch_deadline_ts(vplan_obj):
+                reason_str = record_dispatch_failure(state_store_obj, release_obj, vplan_obj,
+                    broker_order_request_list, ValueError("MOO dispatch deadline has passed."),
+                    as_of_ts, before_send_bool=True)
+                blocked_action_count_int += 1
+                reason_counter_obj[reason_str] += 1
+                continue
         if scheduler_utils.is_execution_window_expired_bool(
             vplan_obj.execution_policy_str,
             vplan_obj.target_execution_timestamp_ts,
@@ -3390,8 +3439,9 @@ def submit_ready_vplans(
                     release_obj, vplan_obj, as_of_ts, {"funding_evidence_dict": funding_evidence_dict}), log_path_str=log_path_str)
             except Exception as exception_obj:
                 blocked_action_count_int += 1
-                reason_counter_obj[core5_block_reason_str] += 1
-                state_store_obj.block_unsubmitted_core5_vplan(int(vplan_obj.vplan_id_int))
+                reason_str = record_dispatch_failure(state_store_obj, release_obj, vplan_obj,
+                    broker_order_request_list, exception_obj, as_of_ts, before_send_bool=True)
+                reason_counter_obj[reason_str] += 1
                 log_event(core5_block_reason_str, _build_vplan_log_payload_dict(release_obj, vplan_obj, as_of_ts, {"error_str": str(exception_obj)}), log_path_str=log_path_str)
                 continue
         if release_obj.strategy_import_str.startswith("strategies.mr_capsule."):
@@ -3415,19 +3465,25 @@ def submit_ready_vplans(
             except Exception as exception_obj:
                 blocked_action_count_int += 1
                 reason_counter_obj[capsule_block_reason_str] += 1
-                state_store_obj.abandon_unsubmitted_mr_capsule_cycle(int(vplan_obj.decision_plan_id_int), "blocked")
-                log_event(
-                    capsule_block_reason_str,
-                    _build_vplan_log_payload_dict(release_obj, vplan_obj, as_of_ts, {"error_str": str(exception_obj)}),
-                    log_path_str=log_path_str,
-                )
-                _emit_live_trace_event(
-                    "vplan.submit", release_obj=release_obj, vplan_obj=vplan_obj, as_of_ts=as_of_ts,
-                    status_str="BLOCK", reason_code_str=capsule_block_reason_str,
-                    payload_dict={"error_str": str(exception_obj)}, trace_enabled_bool=trace_enabled_bool,
-                    trace_log_root_path_str=trace_log_root_path_str,
-                )
-                continue
+                if is_transient_broker_error_bool(exception_obj):
+                    reason_str = record_dispatch_failure(state_store_obj, release_obj, vplan_obj,
+                        broker_order_request_list, exception_obj, as_of_ts, before_send_bool=True)
+                    reason_counter_obj[reason_str] += 1
+                    continue
+                if capsule_block_reason_str == "mr_capsule_funding_not_verified":
+                    # Funding can suppress new risk, never a verified exit.
+                    suppressed_request_list = [request_obj for request_obj in broker_order_request_list
+                        if request_obj.amount_float > 0]
+                    broker_order_request_list = [request_obj for request_obj in broker_order_request_list
+                        if request_obj.amount_float < 0]
+                    log_event(capsule_block_reason_str, _build_vplan_log_payload_dict(
+                        release_obj, vplan_obj, as_of_ts, {"error_str": str(exception_obj),
+                        "suppressed_buy_count_int": len(suppressed_request_list)}), log_path_str=log_path_str)
+                else:
+                    state_store_obj.abandon_unsubmitted_mr_capsule_cycle(int(vplan_obj.decision_plan_id_int), "blocked")
+                    log_event(capsule_block_reason_str, _build_vplan_log_payload_dict(
+                        release_obj, vplan_obj, as_of_ts, {"error_str": str(exception_obj)}), log_path_str=log_path_str)
+                    continue
         if not state_store_obj.claim_vplan_for_submission(int(vplan_obj.vplan_id_int or 0)):
             blocked_action_count_int += 1
             reason_counter_obj["submission_claim_failed"] += 1
@@ -3444,35 +3500,54 @@ def submit_ready_vplans(
             )
             continue
 
-        broker_order_request_list = build_broker_order_request_list_from_vplan(vplan_obj)
-        if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
-            broker_order_request_list = [replace(request_obj,
-                submission_deadline_timestamp_str=(vplan_obj.target_execution_timestamp_ts - timedelta(minutes=2)).isoformat())
-                for request_obj in broker_order_request_list]
-        if release_obj.strategy_import_str in MR_CAPSULE_STRATEGY_IMPORT_TUPLE:
-            # Build identities from the original rows BEFORE reordering dispatch.
-            broker_order_request_list.sort(key=lambda request_obj: (
-                0 if request_obj.asset_str == "BIL" and request_obj.amount_float < 0
-                else 1 if request_obj.amount_float < 0 else 2))
-        _emit_live_trace_event(
-            "vplan.submit_request",
-            release_obj=release_obj,
-            vplan_obj=vplan_obj,
-            as_of_ts=as_of_ts,
-            status_str="PASS",
-            reason_code_str="submitting",
-            payload_dict=_vplan_order_intent_trace_payload_dict(
-                vplan_obj,
+        if not guarded_dispatch_bool:
+            broker_order_request_list = build_broker_order_request_list_from_vplan(vplan_obj)
+        send_started_bool = False
+        try:
+            if suppressed_request_list:
+                from alpha.live.execution_resolution import record_never_dispatched_requests
+                record_never_dispatched_requests(state_store_obj, release_obj, vplan_obj,
+                    suppressed_request_list, as_of_ts, "funding_check_suppressed_buy")
+            if guarded_dispatch_bool:
+                broker_order_request_list = [replace(request_obj,
+                    submission_deadline_timestamp_str=moo_dispatch_deadline_ts(vplan_obj).isoformat())
+                    for request_obj in broker_order_request_list]
+            if release_obj.strategy_import_str in MR_CAPSULE_STRATEGY_IMPORT_TUPLE:
+                broker_order_request_list.sort(key=lambda request_obj: (
+                    0 if request_obj.asset_str == "BIL" and request_obj.amount_float < 0
+                    else 1 if request_obj.amount_float < 0 else 2))
+            _emit_live_trace_event(
+                "vplan.submit_request",
+                release_obj=release_obj,
+                vplan_obj=vplan_obj,
+                as_of_ts=as_of_ts,
+                status_str="PASS",
+                reason_code_str="submitting",
+                payload_dict=_vplan_order_intent_trace_payload_dict(
+                    vplan_obj,
+                    broker_order_request_list=broker_order_request_list,
+                ),
+                trace_enabled_bool=trace_enabled_bool,
+                trace_log_root_path_str=trace_log_root_path_str,
+            )
+            send_started_bool = True
+            submit_batch_result_obj = (broker_adapter_obj.submit_order_request_list(
+                account_route_str=vplan_obj.account_route_str,
                 broker_order_request_list=broker_order_request_list,
-            ),
-            trace_enabled_bool=trace_enabled_bool,
-            trace_log_root_path_str=trace_log_root_path_str,
-        )
-        submit_batch_result_obj = broker_adapter_obj.submit_order_request_list(
-            account_route_str=vplan_obj.account_route_str,
-            broker_order_request_list=broker_order_request_list,
-            submitted_timestamp_ts=as_of_ts,
-        )
+                submitted_timestamp_ts=as_of_ts,
+            ) if broker_order_request_list or not guarded_dispatch_bool
+                else SubmitBatchResult(submit_ack_status_str="complete", ack_coverage_ratio_float=1.0))
+        except Exception as exception_obj:
+            if not guarded_dispatch_bool:
+                raise
+            reason_str = record_dispatch_failure(state_store_obj, release_obj, vplan_obj,
+                broker_order_request_list, exception_obj, as_of_ts, before_send_bool=not send_started_bool,
+                claim_owned_bool=True)
+            reason_counter_obj[reason_str] += 1
+            blocked_action_count_int += 1
+            log_event(reason_str, _build_vplan_log_payload_dict(release_obj, vplan_obj, as_of_ts,
+                {"error_str": str(exception_obj)}), log_path_str=log_path_str)
+            continue
         normalized_broker_order_record_list = [
             broker_order_record_obj.__class__(
                 **{
@@ -3993,12 +4068,23 @@ def post_execution_reconcile(
             )
             # *** CRITICAL*** Session-open lookup must be anchored to the target execution session,
             # never a later timestamp, or fill-vs-open slippage would leak future session context.
-            session_open_price_list = broker_adapter_obj.get_session_open_price_list(
-                account_route_str=vplan_obj.account_route_str,
-                asset_str_list=sorted(open_universe_asset_set),
-                session_open_timestamp_ts=session_open_context_dict["session_open_timestamp_ts"],
-                session_calendar_id_str=release_obj.session_calendar_id_str,
-            )
+            if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
+                try:
+                    session_open_price_list = broker_adapter_obj.get_session_open_price_list(
+                        account_route_str=vplan_obj.account_route_str, asset_str_list=sorted(open_universe_asset_set),
+                        session_open_timestamp_ts=session_open_context_dict["session_open_timestamp_ts"],
+                        session_calendar_id_str=release_obj.session_calendar_id_str)
+                except Exception as exception_obj:
+                    session_open_price_list = []
+                    log_event("core5_open_price_diagnostic_unavailable", _build_vplan_log_payload_dict(
+                        release_obj, vplan_obj, as_of_ts, {"error_str": str(exception_obj)}), log_path_str=log_path_str)
+            else:
+                session_open_price_list = broker_adapter_obj.get_session_open_price_list(
+                    account_route_str=vplan_obj.account_route_str,
+                    asset_str_list=sorted(open_universe_asset_set),
+                    session_open_timestamp_ts=session_open_context_dict["session_open_timestamp_ts"],
+                    session_calendar_id_str=release_obj.session_calendar_id_str,
+                )
         except Exception as exception_obj:
             # Record the actual failed Pod/VPlan; a shared scheduler tick may
             # contain several Pods. Preserve its existing exception/retry path.
@@ -4015,6 +4101,10 @@ def post_execution_reconcile(
                 # The scheduler must still receive the original failure if
                 # the event log cannot be written (for example a full disk).
                 pass
+            if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
+                from alpha.live.core5_recovery import record_core5_unresolved_cycle
+                record_core5_unresolved_cycle(state_store_obj, release_obj, vplan_obj, as_of_ts, str(exception_obj))
+                continue
             raise
         state_store_obj.upsert_session_open_price_list(session_open_price_list)
         session_open_price_map_dict = state_store_obj.get_session_open_price_map_dict(
@@ -4075,6 +4165,20 @@ def post_execution_reconcile(
         state_store_obj.upsert_vplan_broker_order_record_list(normalized_broker_order_record_list)
         state_store_obj.insert_vplan_broker_order_event_list(normalized_broker_order_event_list)
         state_store_obj.upsert_vplan_fill_list(normalized_fill_list)
+        core5_evidence_dict = None
+        if release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR:
+            from alpha.live.core5_recovery import refresh_core5_cycle_evidence
+            try:
+                core5_evidence_dict = refresh_core5_cycle_evidence(state_store_obj,
+                    broker_adapter_obj, release_obj, vplan_obj, as_of_ts)
+                broker_snapshot_obj = core5_evidence_dict["broker_snapshot_obj"]
+            except Exception as exception_obj:
+                from alpha.live.core5_recovery import record_core5_unresolved_cycle
+                record_core5_unresolved_cycle(state_store_obj, release_obj, vplan_obj, as_of_ts, str(exception_obj))
+                log_event("core5_execution_evidence_unavailable", _build_vplan_log_payload_dict(
+                    release_obj, vplan_obj, as_of_ts, {"severity_str": "critical", "error_str": str(exception_obj)}),
+                    log_path_str=log_path_str)
+                continue
         expected_broker_position_map_dict = _build_expected_broker_position_map_dict(
             vplan_obj,
             tolerance_float=tolerance_float,
@@ -4105,6 +4209,14 @@ def post_execution_reconcile(
                 evidence_key_str = "mr_capsule_incomplete_order_evidence_bool" if capsule_bool else "core5_incomplete_order_evidence_bool"
                 reconciliation_result_obj = replace(reconciliation_result_obj, passed_bool=False, status_str="blocked",
                     mismatch_dict={**reconciliation_result_obj.mismatch_dict, evidence_key_str: True})
+        if core5_evidence_dict is not None and (not core5_evidence_dict["complete_bool"]
+                or decision_plan_obj.snapshot_metadata_dict.get("opening_dispatch_parked_bool")):
+            reconciliation_result_obj = replace(reconciliation_result_obj, passed_bool=False, status_str="blocked",
+                mismatch_dict={**reconciliation_result_obj.mismatch_dict, "core5_reviewed_resume_required_bool": True})
+            if not core5_evidence_dict["terminal_bool"]:
+                from alpha.live.core5_recovery import record_core5_unresolved_cycle
+                record_core5_unresolved_cycle(state_store_obj, release_obj, vplan_obj, as_of_ts,
+                    "Original opening requests still lack complete terminal broker evidence.")
         state_store_obj.insert_vplan_reconciliation_snapshot(
             pod_id_str=vplan_obj.pod_id_str,
             decision_plan_id_int=int(vplan_obj.decision_plan_id_int),
@@ -4130,6 +4242,12 @@ def post_execution_reconcile(
             snapshot_stage_str="post_execution",
             snapshot_source_str=("virtual_broker" if env_mode_str == "incubation" else "broker"),
         )
+        if core5_evidence_dict is not None and core5_evidence_dict["terminal_bool"] and not reconciliation_result_obj.passed_bool:
+            from alpha.live.core5_recovery import park_core5_cycle
+            park_core5_cycle(state_store_obj, release_obj, vplan_obj, as_of_ts, core5_evidence_dict)
+            log_event("core5_reviewed_resume_required", _build_vplan_log_payload_dict(
+                release_obj, vplan_obj, as_of_ts, {"severity_str": "critical"}), log_path_str=log_path_str)
+            continue
         persisted_broker_order_row_dict_list = state_store_obj.get_broker_order_row_dict_list_for_vplan(
             int(vplan_obj.vplan_id_int or 0)
         )
@@ -4369,7 +4487,11 @@ def get_status_summary(
                 next_action_str = "post_execution_reconcile"
                 reason_code_str = "waiting_for_post_execution_reconcile"
         elif latest_decision_plan_obj.status_str in ("completed", "expired", "blocked"):
-            if bool(build_gate_dict["due_bool"]):
+            if (release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR
+                    and latest_decision_plan_obj.status_str != "completed"):
+                next_action_str = "resume_core5"
+                reason_code_str = "core5_reviewed_resume_required"
+            elif bool(build_gate_dict["due_bool"]):
                 next_action_str = "build_decision_plan"
                 reason_code_str = "ready_to_build_decision_plan"
 
@@ -5051,6 +5173,7 @@ def get_compare_reference_summary(
             else decision_plan_obj.entry_target_weight_map_dict
         )
 
+        core5_reference_bool = release_obj.strategy_import_str == CORE5_STRATEGY_IMPORT_STR
         compare_row_dict_list: list[dict[str, object]] = []
         for execution_row_dict in execution_row_dict_list:
             asset_str = str(execution_row_dict["asset_str"])
@@ -5082,7 +5205,10 @@ def get_compare_reference_summary(
             official_open_slippage_notional_float = None
             vplan_reference_slippage_bps_float = None
             vplan_reference_slippage_notional_float = None
-            if avg_fill_price_float is not None and reference_price_float is not None:
+            if (avg_fill_price_float is not None and reference_price_float is not None
+                    and (not core5_reference_bool or official_open_price_float is not None)):
+                # CORE5's optional quote replacement is Close_T. Its overnight
+                # gap to the fill must not masquerade as opening slippage.
                 fill_slippage_bps_float = _compute_execution_cost_bps_float(
                     execution_price_float=float(avg_fill_price_float),
                     official_open_price_float=float(reference_price_float),
@@ -5108,6 +5234,27 @@ def get_compare_reference_summary(
                     vplan_reference_slippage_notional_float = abs(filled_share_float) * side_float * (
                         float(avg_fill_price_float) - float(vplan_reference_price_float)
                     )
+
+            core5_reference_dict = {}
+            if core5_reference_bool:
+                frozen_close_float = decision_plan_obj.snapshot_metadata_dict.get(
+                    "sizing_close_price_map_dict", {}).get(asset_str)
+                frozen_close_deviation_bps_float = None
+                if (avg_fill_price_float is not None and frozen_close_float is not None
+                        and float(frozen_close_float) > 0.0):
+                    frozen_close_deviation_bps_float = _compute_execution_cost_bps_float(
+                        execution_price_float=float(avg_fill_price_float),
+                        official_open_price_float=float(frozen_close_float),
+                        signed_execution_direction_float=side_float,
+                    )
+                core5_reference_dict = {
+                    "reference_price_source_str": (
+                        "official_session_open" if official_open_price_float is not None
+                        else latest_vplan_obj.live_price_source_str if vplan_reference_price_float is not None
+                        else None
+                    ),
+                    "frozen_close_deviation_bps_float": frozen_close_deviation_bps_float,
+                }
 
             reference_transaction_dict = transaction_map_dict.get(
                 (target_session_date_str, asset_str),
@@ -5166,6 +5313,7 @@ def get_compare_reference_summary(
                     "vplan_reference_slippage_notional_float": vplan_reference_slippage_notional_float,
                     "backtest_quantity_diff_float": backtest_quantity_diff_float,
                     "backtest_fill_price_diff_float": backtest_fill_price_diff_float,
+                    **core5_reference_dict,
                 }
             )
 
@@ -5541,6 +5689,31 @@ def _execute_runner_command_detail_dict(
 ) -> dict[str, object]:
     broker_adapter_obj = None
 
+    if parsed_args_obj.command_name_str == "resume_core5":
+        from alpha.live.core5_resume import preview_core5_resume, apply_core5_resume
+        if not parsed_args_obj.pod_id_str:
+            raise ValueError("resume_core5 requires --pod-id.")
+        release_list = load_release_list(parsed_args_obj.releases_root_path_str)
+        validate_enabled_deployment_for_mode(release_list, parsed_args_obj.env_mode_str)
+        release_list = _filter_release_list_for_pod(release_list, parsed_args_obj.pod_id_str)
+        _validate_selected_pod_enabled_for_mode(release_list, parsed_args_obj.env_mode_str, parsed_args_obj.pod_id_str)
+        assert_authorized_release_list(release_list)
+        if len(release_list) != 1:
+            raise ValueError("resume_core5 requires exactly one configured release for the pod.")
+        release_obj = release_list[0]
+        resolver_obj = _coerce_broker_adapter_resolver_obj(broker_adapter_obj=None,
+            broker_adapter_resolver_obj=None,
+            broker_host_str=parsed_args_obj.broker_host_str, broker_port_int=parsed_args_obj.broker_port_int,
+            broker_client_id_int=parsed_args_obj.broker_client_id_int,
+            broker_timeout_seconds_float=parsed_args_obj.broker_timeout_seconds_float,
+            state_store_obj=state_store_obj, as_of_ts=as_of_ts)
+        broker_adapter_obj = resolver_obj.get_adapter(release_obj)
+        if parsed_args_obj.review_hash_str:
+            return apply_core5_resume(state_store_obj, broker_adapter_obj, release_obj, as_of_ts,
+                review_hash_str=parsed_args_obj.review_hash_str, reason_str=parsed_args_obj.reason_str,
+                operator_str=parsed_args_obj.operator_str)
+        return preview_core5_resume(state_store_obj, broker_adapter_obj, release_obj, as_of_ts)
+
     if parsed_args_obj.command_name_str == "build_decision_plans":
         return build_decision_plans(
             state_store_obj=state_store_obj,
@@ -5820,6 +5993,7 @@ def main(argv_list: list[str] | None = None) -> int:
             "show_decision_plan",
             "show_vplan",
             "submit_vplan",
+            "resume_core5",
             "post_execution_reconcile",
             "eod_snapshot",
             "tick",
@@ -5841,6 +6015,9 @@ def main(argv_list: list[str] | None = None) -> int:
     parser_obj.add_argument("--decision-plan-id", dest="decision_plan_id_int", type=int, default=None)
     parser_obj.add_argument("--vplan-id", dest="vplan_id_int", type=int, default=None)
     parser_obj.add_argument("--pod-id", dest="pod_id_str", default=None)
+    parser_obj.add_argument("--review-hash", dest="review_hash_str", default=None)
+    parser_obj.add_argument("--reason", dest="reason_str", default="")
+    parser_obj.add_argument("--operator", dest="operator_str", default="")
     parser_obj.add_argument("--broker-host", dest="broker_host_str", default=None)
     parser_obj.add_argument("--broker-port", dest="broker_port_int", type=int, default=None)
     parser_obj.add_argument("--broker-client-id", dest="broker_client_id_int", type=int, default=None)

@@ -1,6 +1,7 @@
 """CORE5 deployment gates and lifecycle with fake accounts only; no broker access."""
 from dataclasses import asdict, replace
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
+import json
 
 import pytest
 import yaml
@@ -12,6 +13,15 @@ from alpha.live.release_manifest import load_release_list, validate_release_list
 from alpha.live.state_store_v2 import LiveStateStore
 import test_live_core5_adapter as core5_helper
 from test_live_ibkr_socket_client import _ExpirySubmitIB, _expiry_client_obj
+
+
+@pytest.fixture(autouse=True)
+def historical_dispatch_clock(monkeypatch):
+    class DispatchClock:
+        @classmethod
+        def now(cls, timezone_obj):
+            return datetime(2026, 9, 14, 13, 22, tzinfo=UTC).astimezone(timezone_obj)
+    monkeypatch.setattr("alpha.live.dispatch_state.datetime", DispatchClock)
 
 
 @pytest.fixture
@@ -179,8 +189,11 @@ def test_qualified_live_fake_cycle_preserves_intent_and_commits_after_fills(
         assert dbc_request_list[1].amount_float == vplan_obj.target_share_map["DBC"]
         assert dbc_request_list[0].order_request_key_str != dbc_request_list[1].order_request_key_str
     restarted_store_obj = LiveStateStore(str(tmp_path / "core5.sqlite3"))
+    reconcile_ts = decision_obj.target_execution_timestamp_ts + timedelta(minutes=10)
+    broker_obj._snapshot_map[release_obj.account_route_str] = replace(
+        broker_obj.get_account_snapshot(release_obj.account_route_str), snapshot_timestamp_ts=reconcile_ts)
     result_dict = runner.post_execution_reconcile(restarted_store_obj, broker_obj,
-        decision_obj.target_execution_timestamp_ts + timedelta(minutes=10), mode_str, **runner_kwarg_dict)
+        reconcile_ts, mode_str, **runner_kwarg_dict)
     assert result_dict["completed_vplan_count_int"] == 1
     assert restarted_store_obj.get_pod_state(release_obj.pod_id_str).strategy_state_dict == decision_obj.strategy_state_dict
     assert restarted_store_obj.get_latest_decision_plan_for_pod(release_obj.pod_id_str).status_str == "completed"
@@ -206,7 +219,8 @@ def test_unverified_funding_never_claims_or_submits(
         mode_str, False, vplan_id_int=vplan_obj.vplan_id_int, **runner_kwarg_dict)
     assert result_dict["submitted_vplan_count_int"] == 0
     assert not broker_obj.submitted_order_request_list
-    assert store_obj.get_vplan_by_id(vplan_obj.vplan_id_int).status_str == "blocked"
+    assert store_obj.get_vplan_by_id(vplan_obj.vplan_id_int).status_str == (
+        "ready" if isinstance(error_obj, TimeoutError) else "blocked")
     assert store_obj.get_pod_state(release_obj.pod_id_str).strategy_state_dict == prior_state_dict
 
 
@@ -332,6 +346,8 @@ def test_actual_yaml_with_invalid_qualification_still_recovers_sent_cycle(
     schedule_obj = scheduler_service.get_scheduler_decision(restarted_store_obj,
         after_open_ts, str(release_dir_path), "live")
     assert schedule_obj.next_phase_str == "post_execution_reconcile"
+    broker_obj._snapshot_map[qualified_release_obj.account_route_str] = replace(
+        broker_obj.get_account_snapshot(qualified_release_obj.account_route_str), snapshot_timestamp_ts=after_open_ts)
     result_dict = runner.post_execution_reconcile(restarted_store_obj, broker_obj, after_open_ts,
         "live", releases_root_path_str=str(release_dir_path), **runner_kwarg_dict)
     assert result_dict["completed_vplan_count_int"] == 1
@@ -378,9 +394,10 @@ def test_socket_cutoff_stops_dispatch_and_preserves_claimed_cycle_for_recovery(
 
         monkeypatch.setattr(ib_obj, "placeOrder", place_then_cross_cutoff_fn)
     monkeypatch.setattr(broker_obj, "submit_order_request_list", socket_obj.submit_order_request_list)
-    with pytest.raises(ValueError, match="submission deadline"):
-        runner.submit_ready_vplans(store_obj, broker_obj, decision_obj.submission_timestamp_ts,
-            "paper", False, vplan_id_int=vplan_obj.vplan_id_int, **runner_kwarg_dict)
+    result_dict = runner.submit_ready_vplans(store_obj, broker_obj, decision_obj.submission_timestamp_ts,
+        "paper", False, vplan_id_int=vplan_obj.vplan_id_int, **runner_kwarg_dict)
+    assert result_dict["submitted_vplan_count_int"] == 0
+    assert result_dict["reason_count_map_dict"]["opening_dispatch_parked"] == 1
     if cutoff_phase_str == "after_qualification":
         assert not ib_obj.placed_order_list
     else:
@@ -390,8 +407,25 @@ def test_socket_cutoff_stops_dispatch_and_preserves_claimed_cycle_for_recovery(
         assert len(placed_dbc_order_list) == 1
         assert placed_dbc_order_list[0].orderRef == expected_dbc_request_list[0].order_request_key_str
     restarted_store_obj = LiveStateStore(str(tmp_path / "core5.sqlite3"))
-    assert restarted_store_obj.get_vplan_by_id(vplan_obj.vplan_id_int).status_str == "submitting"
-    assert restarted_store_obj.get_decision_plan_by_id(decision_obj.decision_plan_id_int).status_str == "vplan_ready"
+    assert restarted_store_obj.get_vplan_by_id(vplan_obj.vplan_id_int).status_str == "submitted"
+    persisted_decision_obj = restarted_store_obj.get_decision_plan_by_id(decision_obj.decision_plan_id_int)
+    assert persisted_decision_obj.status_str == "submitted"
+    assert persisted_decision_obj.snapshot_metadata_dict["opening_dispatch_parked_bool"]
+    placed_key_set = {order_obj.orderRef for order_obj in ib_obj.placed_order_list}
+    all_key_set = {request_obj.order_request_key_str for request_obj in build_broker_order_request_list_from_vplan(vplan_obj)}
+    with restarted_store_obj._connect() as connection_obj:
+        resolved_key_set = {row_obj[0] for row_obj in connection_obj.execute(
+            "SELECT order_request_key_str FROM vplan_execution_resolution WHERE vplan_id_int=? AND resolution_str='never_dispatched'",
+            (vplan_obj.vplan_id_int,))}
+        alert_row_obj, = connection_obj.execute("SELECT payload_json_str FROM mr_capsule_execution_alert").fetchall()
+    assert resolved_key_set == all_key_set - placed_key_set
+    assert json.loads(alert_row_obj[0])["severity_str"] == "critical"
+    assert restarted_store_obj.count_broker_orders_for_vplan(vplan_obj.vplan_id_int) == len(ib_obj.placed_order_list)
+    placed_count_int = len(ib_obj.placed_order_list)
+    retry_dict = runner.submit_ready_vplans(restarted_store_obj, broker_obj, decision_obj.submission_timestamp_ts,
+        "paper", False, vplan_id_int=vplan_obj.vplan_id_int, **runner_kwarg_dict)
+    assert retry_dict["submitted_vplan_count_int"] == 0
+    assert len(ib_obj.placed_order_list) == placed_count_int
     after_open_ts = decision_obj.target_execution_timestamp_ts + timedelta(minutes=10)
     result_dict = runner.expire_stale_decision_plans(restarted_store_obj, after_open_ts,
         "unused", "paper", **runner_kwarg_dict)

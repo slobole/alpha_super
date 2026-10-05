@@ -848,6 +848,35 @@ class IBKRSocketClient:
         broker_order_request_list: list[BrokerOrderRequest],
         submitted_timestamp_ts: datetime,
     ) -> SubmitBatchResult:
+        if not any(request_obj.submission_deadline_timestamp_str is not None or request_obj.execution_deadline_timestamp_str is not None
+                for request_obj in broker_order_request_list):
+            return self._submit_order_request_list(account_route_str, broker_order_request_list, submitted_timestamp_ts)
+        from alpha.live.guarded_dispatch import DispatchFailure, partial_submit_result_obj
+        progress_dict = {"attempted_key_list": []}
+        try:
+            return self._submit_order_request_list(account_route_str, broker_order_request_list,
+                submitted_timestamp_ts, progress_dict=progress_dict)
+        except Exception as exception_obj:
+            raise DispatchFailure(exception_obj, broker_order_request_list,
+                progress_dict["attempted_key_list"], partial_submit_result_obj(progress_dict)) from exception_obj
+
+    @contextmanager
+    def _guarded_dispatch_connection(self):
+        # Keep body errors out of connect's host-fallback loop. A placeOrder
+        # exception is an uncertain send, never permission to reconnect/replay it.
+        dispatch_exception_obj = None
+        with self.connect() as ib_obj:
+            try:
+                yield ib_obj
+            except Exception as exception_obj:
+                dispatch_exception_obj = exception_obj
+        if dispatch_exception_obj is not None:
+            raise dispatch_exception_obj
+
+    def _submit_order_request_list(
+        self, account_route_str: str, broker_order_request_list: list[BrokerOrderRequest],
+        submitted_timestamp_ts: datetime, *, progress_dict=None,
+    ) -> SubmitBatchResult:
         # Validate the whole batch before connecting. Absolute broker expiry keeps
         # a delayed recovery ticket from becoming a new-session DAY market order.
         expiry_fields_by_request_key_dict = {}
@@ -878,7 +907,7 @@ class IBKRSocketClient:
                 "goodTillDate": deadline_ts.astimezone(UTC).strftime("%Y%m%d-%H:%M:%S"),
                 "outsideRth": False,
             }
-        with self.connect() as ib_obj:
+        with (self.connect() if progress_dict is None else self._guarded_dispatch_connection()) as ib_obj:
             contract_map = self._build_stock_contract_map(
                 ib_obj,
                 [broker_order_request_obj.asset_str for broker_order_request_obj in broker_order_request_list],
@@ -886,6 +915,9 @@ class IBKRSocketClient:
             local_broker_order_record_list: list[BrokerOrderRecord] = []
             local_broker_order_event_list: list[BrokerOrderEvent] = []
             local_broker_order_fill_list: list[BrokerOrderFill] = []
+            if progress_dict is not None:
+                progress_dict.update(record_list=local_broker_order_record_list,
+                    event_list=local_broker_order_event_list, fill_list=local_broker_order_fill_list)
             local_broker_order_id_alias_set_by_request_key_map_dict: dict[str, set[str]] = {}
 
             for broker_order_request_obj in broker_order_request_list:
@@ -947,6 +979,8 @@ class IBKRSocketClient:
                 # immediately before EACH dispatch. Preserve MKT/OPG semantics.
                 if submission_deadline_ts is not None and datetime.now(UTC) >= submission_deadline_ts:
                     raise ValueError("MOO submission deadline passed before broker dispatch; reconcile any earlier legs.")
+                if progress_dict is not None:
+                    progress_dict["attempted_key_list"].append(broker_order_request_obj.order_request_key_str)
                 trade_obj = ib_obj.placeOrder(
                     contract_map[broker_order_request_obj.asset_str],
                     broker_order_obj,

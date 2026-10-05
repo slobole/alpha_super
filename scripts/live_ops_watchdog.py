@@ -186,9 +186,10 @@ def _build_summary_and_report_tuple(
 def _run_capsule_notifications_tuple(summary_dict, mode_str, webhook_url_str):
     """Contain capsule failures per pod; preserve cross-pod scope validation."""
     from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE
+    from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR
 
     capsule_row_list = [row_dict for row_dict in summary_dict.get("pod_row_dict_list") or []
-        if row_dict.get("strategy_import_str") in MR_CAPSULE_STRATEGY_IMPORT_TUPLE
+        if row_dict.get("strategy_import_str") in (*MR_CAPSULE_STRATEGY_IMPORT_TUPLE, CORE5_STRATEGY_IMPORT_STR)
         and (mode_str is None or row_dict.get("mode_str") == mode_str)]
     if not capsule_row_list:
         return {}, []

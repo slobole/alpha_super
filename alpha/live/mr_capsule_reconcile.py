@@ -10,7 +10,7 @@ TERMINAL_SHORTFALL_STATUS_SET = {"Cancelled", "ApiCancelled", "Rejected", "Expir
 
 
 def classify_capsule_execution(vplan_obj, broker_snapshot_obj, order_row_list, fill_row_list,
-        tolerance_float=1e-9, supplemental_request_list=()):
+        tolerance_float=1e-9, supplemental_request_list=(), resolved_request_dict=None):
     """Expected actual shares = pre-submit shares + correlated signed fills.
 
     A terminal residual is accepted, including parking sales. Missing/open evidence
@@ -20,9 +20,8 @@ def classify_capsule_execution(vplan_obj, broker_snapshot_obj, order_row_list, f
     original_request_list = build_broker_order_request_list_from_vplan(vplan_obj)
     request_list = [*original_request_list, *supplemental_request_list]
     expected_position_dict = dict(vplan_obj.current_broker_position_map)
-    uncertain_bool = (
+    invalid_account_bool = (
         broker_snapshot_obj.account_route_str != vplan_obj.account_route_str
-        or bool(broker_snapshot_obj.open_order_id_list)
         or broker_snapshot_obj.snapshot_timestamp_ts < vplan_obj.target_execution_timestamp_ts
         or not math.isfinite(float(broker_snapshot_obj.cash_float))
         or not math.isfinite(float(broker_snapshot_obj.net_liq_float))
@@ -30,6 +29,12 @@ def classify_capsule_execution(vplan_obj, broker_snapshot_obj, order_row_list, f
         or any(not math.isfinite(float(amount_float)) or float(amount_float) < 0
                for amount_float in [*expected_position_dict.values(), *broker_snapshot_obj.position_amount_map.values()])
     )
+    # A known pending request blocks its own asset, not an unrelated verified
+    # exit. Unknown order identities can affect any holding and block all sales.
+    known_order_id_set = {str(row_dict["broker_order_id_str"]) for row_dict in order_row_list}
+    unknown_open_order_bool = bool(set(map(str, broker_snapshot_obj.open_order_id_list)) - known_order_id_set)
+    global_uncertainty_bool = invalid_account_bool or unknown_open_order_bool
+    uncertain_bool = global_uncertainty_bool or bool(broker_snapshot_obj.open_order_id_list)
     matched_order_id_set = set()
     filled_by_asset_dict = {}
     status_by_asset_dict = {}
@@ -37,6 +42,14 @@ def classify_capsule_execution(vplan_obj, broker_snapshot_obj, order_row_list, f
     for request_obj in request_list:
         matching_order_list = [row_dict for row_dict in order_row_list
             if row_dict.get("order_request_key_str") == request_obj.order_request_key_str]
+        resolution_dict = (resolved_request_dict or {}).get(request_obj.order_request_key_str, {})
+        if (not matching_order_list and resolution_dict.get("asset_str") == request_obj.asset_str
+                and resolution_dict.get("resolution_str") in {"never_sent", "never_dispatched"}):
+            evidence_dict = resolution_dict.get("evidence_dict") or {}
+            proof_timestamp_str = evidence_dict.get("refreshed_timestamp_str", resolution_dict.get("created_timestamp_str"))
+            if proof_timestamp_str and broker_snapshot_obj.snapshot_timestamp_ts >= datetime.fromisoformat(proof_timestamp_str):
+                status_by_asset_dict[request_obj.asset_str] = (resolution_dict["resolution_str"], "")
+                continue
         if len(matching_order_list) != 1:
             uncertain_bool = True
             uncertain_asset_set.add(request_obj.asset_str)
@@ -58,6 +71,7 @@ def classify_capsule_execution(vplan_obj, broker_snapshot_obj, order_row_list, f
             or not math.isfinite(float(order_dict["amount_float"]))
             or abs(float(order_dict["amount_float"]) - requested_float) > tolerance_float
             or payload_dict.get("open_order_observed_bool") is True
+            or order_id_str in set(map(str, broker_snapshot_obj.open_order_id_list))
             or payload_dict.get("snapshot_source_str") == "open_order"
             or payload_dict.get("completed_quantity_verified_bool") is False
             or not math.isfinite(filled_float) or not math.isfinite(reported_filled_float)
@@ -88,20 +102,26 @@ def classify_capsule_execution(vplan_obj, broker_snapshot_obj, order_row_list, f
     if len(matched_order_id_set) != len(order_row_list) or any(
             str(row_dict["broker_order_id_str"]) not in matched_order_id_set for row_dict in fill_row_list):
         uncertain_bool = True
+        global_uncertainty_bool = True
     reconciliation_obj = reconcile_account_state(
         model_position_map=expected_position_dict, model_cash_float=broker_snapshot_obj.cash_float,
         broker_snapshot_obj=broker_snapshot_obj, tolerance_float=tolerance_float)
+    # Pending fills on a known other asset cannot change this exit's quantity.
+    # An unexplained change outside those pending assets remains account-wide
+    # uncertainty and requires manual review before any completion sale.
+    unexplained_holdings_bool = bool(set(reconciliation_obj.mismatch_dict) - uncertain_asset_set)
     outcome_str = "awaiting_evidence" if uncertain_bool else (
         "unexplained_positions" if not reconciliation_obj.passed_bool else "completed")
     residual_row_list = []
     for request_obj in original_request_list:
         filled_float = filled_by_asset_dict.get(request_obj.asset_str, 0.0)
         residual_float = request_obj.amount_float - filled_float
-        uncertain_asset_bool = uncertain_bool or request_obj.asset_str in uncertain_asset_set
+        uncertain_asset_bool = (global_uncertainty_bool or request_obj.asset_str in uncertain_asset_set
+            or request_obj.asset_str in reconciliation_obj.mismatch_dict)
         if abs(residual_float) <= tolerance_float and not uncertain_asset_bool:
             continue
         status_str, order_id_str = status_by_asset_dict.get(request_obj.asset_str, ("Unknown", ""))
-        action_str = "VERIFY" if uncertain_asset_bool or outcome_str == "unexplained_positions" else (
+        action_str = "VERIFY" if uncertain_asset_bool or unexplained_holdings_bool else (
             "SELL" if residual_float < 0 else "NONE")
         residual_row_list.append({"asset_str": request_obj.asset_str,
             "requested_amount_float": request_obj.amount_float, "filled_amount_float": filled_float,

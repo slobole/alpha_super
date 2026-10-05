@@ -107,12 +107,60 @@ def _validate_target_weight_dict(target_weight_dict: dict[str, float]) -> None:
         raise ValueError("CORE5 must preserve the 100% long/BIL book and restricted short proceeds.")
 
 
-def build_core5_decision_from_prices(
+def _replay_core5_state_dict(strategy_obj, pricing_data_df: pd.DataFrame, signal_df: pd.DataFrame) -> tuple[dict, dict]:
+    """Replay signal memory only; never invent account cash, positions or fills."""
+    from strategies.taa_beyond_6040 import strategy_taa_adaptive_macro_core5 as core5_module
+
+    execution_calendar_idx = core5_module.build_execution_calendar_idx(pricing_data_df)
+    first_execution_position_int = int(pricing_data_df.index.get_loc(execution_calendar_idx[0]))
+    if first_execution_position_int < 1:
+        raise ValueError("CORE5 resync requires an observed decision before its first backtest execution.")
+    decision_idx = pricing_data_df.index[first_execution_position_int - 1:]
+    expected_session_idx = scheduler_utils.get_exchange_calendar_obj("XNYS").sessions_in_range(
+        decision_idx[0], decision_idx[-1])
+    if not decision_idx.equals(expected_session_idx):
+        raise ValueError("CORE5 resync requires every exchange session in its replay history.")
+    target_weight_dict = {}
+    last_rebalance_date_str = None
+    for decision_date_ts in decision_idx:
+        # *** CRITICAL *** Features were truncated at Close_T before computation.
+        # Replay the engine's event rule; between events retain the last weights,
+        # including the DBC short weight fixed at its last rebalance volatility.
+        close_row_ser = signal_df.loc[decision_date_ts]
+        strategy_obj.previous_bar = decision_date_ts
+        strategy_obj._validate_required_close_prices(close_row_ser)
+        long_state_ser = strategy_obj._long_state_ser(close_row_ser)
+        rebalance_bool = (
+            not target_weight_dict
+            or bool(close_row_ser[(core5_module.PORTFOLIO_NAMESPACE_STR, core5_module.LONG_STATE_CHANGED_FIELD_STR)])
+            or bool(close_row_ser[(core5_module.PORTFOLIO_NAMESPACE_STR, core5_module.MONTH_END_REBALANCE_FIELD_STR)])
+        )
+        if rebalance_bool:
+            target_weight_dict = strategy_obj._target_weight_ser(close_row_ser, long_state_ser).to_dict()
+            _validate_target_weight_dict(target_weight_dict)
+            last_rebalance_date_str = decision_date_ts.date().isoformat()
+    replay_state_dict = {
+        "core5_state_version_int": 1,
+        "initialized_bool": True,
+        "last_signal_date_str": decision_idx[-1].date().isoformat(),
+        "last_long_state_map_dict": {asset_str: int(value_float) for asset_str, value_float in long_state_ser.items()},
+        "last_target_weight_map_dict": target_weight_dict,
+        "last_rebalance_date_str": last_rebalance_date_str,
+    }
+    return replay_state_dict, {
+        "core5_resync_replay_start_date_str": decision_idx[0].date().isoformat(),
+        "core5_resync_replay_decision_count_int": len(decision_idx),
+    }
+
+
+def _build_core5_decision_from_prices(
     release_obj: LiveRelease,
     as_of_ts: datetime,
     pod_state_obj: PodState,
     pricing_data_df: pd.DataFrame,
     snapshot_metadata_dict: dict[str, object],
+    *,
+    resync_bool: bool,
 ) -> DecisionPlan:
     from strategies.taa_beyond_6040 import strategy_taa_adaptive_macro_core5 as core5_module
 
@@ -159,7 +207,7 @@ def build_core5_decision_from_prices(
         raise ValueError("CORE5 requires a trusted EOD account snapshot from the signal session; bootstrap/default or stale NAV is insufficient.")
     position_map_dict = _whole_position_map_dict(pod_state_obj.position_amount_map)
     prior_state_dict = dict(pod_state_obj.strategy_state_dict)
-    if prior_state_dict:
+    if prior_state_dict and not resync_bool:
         if prior_state_dict.get("core5_state_version_int") != 1 or prior_state_dict.get("initialized_bool") is not True:
             raise ValueError("CORE5 saved strategy state is invalid or belongs to another strategy.")
         if prior_state_dict.get("last_signal_date_str") != previous_session_ts.date().isoformat():
@@ -169,18 +217,21 @@ def build_core5_decision_from_prices(
         if pd.Timestamp(prior_state_dict["last_rebalance_date_str"]) > previous_session_ts:
             raise ValueError("CORE5 last rebalance cannot follow its committed signal date.")
         _validate_target_weight_dict(prior_state_dict.get("last_target_weight_map_dict", {}))
-    elif position_map_dict:
+    elif position_map_dict and not resync_bool:
         raise ValueError("CORE5 cannot initialize over unexplained existing positions.")
 
     strategy_obj = core5_module.AdaptiveMacroCore5Strategy()
     signal_df = strategy_obj.compute_signals(pricing_data_df)
+    replay_state_dict, replay_metadata_dict = (
+        _replay_core5_state_dict(strategy_obj, pricing_data_df, signal_df) if resync_bool else ({}, {})
+    )
     close_row_ser = signal_df.loc[signal_date_ts]
     strategy_obj.previous_bar = signal_date_ts
     strategy_obj._validate_required_close_prices(close_row_ser)
     long_state_ser = strategy_obj._long_state_ser(close_row_ser)
     current_long_state_dict = {asset_str: int(value_float) for asset_str, value_float in long_state_ser.items()}
     changed_bool = False
-    if prior_state_dict:
+    if prior_state_dict and not resync_bool:
         previous_long_state_ser = strategy_obj._long_state_ser(signal_df.loc[previous_session_ts])
         if prior_state_dict.get("last_long_state_map_dict") != {
             asset_str: int(value_float) for asset_str, value_float in previous_long_state_ser.items()
@@ -188,7 +239,7 @@ def build_core5_decision_from_prices(
             raise ValueError("CORE5 previous-session signal differs from committed state; historical revision requires review.")
         changed_bool = bool(long_state_ser.ne(previous_long_state_ser).any())
     month_end_bool = scheduler_utils.is_last_session_of_month_bool(signal_date_ts, "XNYS")
-    rebalance_bool = not prior_state_dict or changed_bool or month_end_bool
+    rebalance_bool = resync_bool or not prior_state_dict or changed_bool or month_end_bool
     close_price_dict = {asset_str: float(close_row_ser[(asset_str, "Close")]) for asset_str in CORE5_ASSET_TUPLE}
     # NAV_Close_T = EOD cash + sum(signed shares_i * Close_T_i).
     # Short proceeds are already in cash; subtracting them again is incorrect.
@@ -198,7 +249,10 @@ def build_core5_decision_from_prices(
     if not math.isfinite(close_nav_float) or close_nav_float <= 0.0:
         raise ValueError("CORE5 Close_T NAV must be finite and positive.")
     if rebalance_bool:
-        target_weight_ser = strategy_obj._target_weight_ser(close_row_ser, long_state_ser)
+        target_weight_ser = (
+            pd.Series(replay_state_dict["last_target_weight_map_dict"])
+            if resync_bool else strategy_obj._target_weight_ser(close_row_ser, long_state_ser)
+        )
         target_weight_dict = {asset_str: float(weight_float) for asset_str, weight_float in target_weight_ser.items()}
         # *** CRITICAL*** q_i = trunc(NAV_Close_T * w_i / Close_T_i).
         # int truncates shorts toward zero; next-open prices cannot resize q_i.
@@ -219,6 +273,10 @@ def build_core5_decision_from_prices(
         "last_target_weight_map_dict": target_weight_dict,
         "last_rebalance_date_str": signal_date_str if rebalance_bool else prior_state_dict["last_rebalance_date_str"],
     }
+    if resync_bool:
+        # The physical resume alignment is separate from the backtest's last
+        # scheduled rebalance; do not refresh its retained DBC volatility weight.
+        next_state_dict = replay_state_dict
     metadata_dict = dict(snapshot_metadata_dict)
     metadata_dict.update({
         "strategy_family_str": "adaptive_macro_core5",
@@ -237,6 +295,14 @@ def build_core5_decision_from_prices(
         "research_borrow_rate_float": core5_module.DEFAULT_ANNUAL_DBC_BORROW_RATE_FLOAT,
         "borrow_accounting_str": "observed_account_cash_only_no_synthetic_research_fee",
     })
+    if resync_bool:
+        metadata_dict.update({
+            **replay_metadata_dict,
+            "core5_resync_bool": True,
+            "core5_resync_signal_date_str": signal_date_str,
+            "core5_resync_basis_str": "current_snapshot_signal_memory_no_historical_account_reconstruction",
+            "core5_replayed_strategy_state_dict": replay_state_dict,
+        })
     return DecisionPlan(
         release_id_str=release_obj.release_id_str, user_id_str=release_obj.user_id_str,
         pod_id_str=release_obj.pod_id_str, account_route_str=release_obj.account_route_str,
@@ -254,7 +320,24 @@ def build_core5_decision_from_prices(
     )
 
 
-def build_core5_decision_plan(release_obj: LiveRelease, as_of_ts: datetime, pod_state_obj: PodState | None) -> DecisionPlan:
+def build_core5_decision_from_prices(
+    release_obj: LiveRelease, as_of_ts: datetime, pod_state_obj: PodState,
+    pricing_data_df: pd.DataFrame, snapshot_metadata_dict: dict[str, object],
+) -> DecisionPlan:
+    return _build_core5_decision_from_prices(release_obj, as_of_ts, pod_state_obj,
+        pricing_data_df, snapshot_metadata_dict, resync_bool=False)
+
+
+def build_core5_resync_decision_from_prices(
+    release_obj: LiveRelease, as_of_ts: datetime, pod_state_obj: PodState,
+    pricing_data_df: pd.DataFrame, snapshot_metadata_dict: dict[str, object],
+) -> DecisionPlan:
+    """Prepare reviewed resume intent; the caller owns approval and persistence."""
+    return _build_core5_decision_from_prices(release_obj, as_of_ts, pod_state_obj,
+        pricing_data_df, snapshot_metadata_dict, resync_bool=True)
+
+
+def _load_core5_decision_prices(release_obj: LiveRelease, as_of_ts: datetime) -> tuple[pd.DataFrame, dict]:
     from strategies.taa_beyond_6040 import strategy_taa_adaptive_macro_core5 as core5_module
 
     validate_core5_release(release_obj)
@@ -270,7 +353,17 @@ def build_core5_decision_plan(release_obj: LiveRelease, as_of_ts: datetime, pod_
     metadata_dict = snapshot_module.build_data_source_metadata_dict(snapshot_module.CORE5_PROFILE_STR)
     if metadata_dict.get("norgate_manifest_hash_str") != initial_manifest_obj.manifest_hash_str:
         raise ValueError("CORE5 snapshot changed while preparing decision metadata.")
+    return pricing_data_df, metadata_dict
+
+
+def build_core5_decision_plan(release_obj: LiveRelease, as_of_ts: datetime, pod_state_obj: PodState | None) -> DecisionPlan:
+    pricing_data_df, metadata_dict = _load_core5_decision_prices(release_obj, as_of_ts)
     return build_core5_decision_from_prices(release_obj, as_of_ts, pod_state_obj, pricing_data_df, metadata_dict)
+
+
+def build_core5_resync_decision_plan(release_obj: LiveRelease, as_of_ts: datetime, pod_state_obj: PodState) -> DecisionPlan:
+    pricing_data_df, metadata_dict = _load_core5_decision_prices(release_obj, as_of_ts)
+    return build_core5_resync_decision_from_prices(release_obj, as_of_ts, pod_state_obj, pricing_data_df, metadata_dict)
 
 
 def validated_core5_target_share_dict(decision_plan_obj: DecisionPlan, release_obj: LiveRelease, actual_position_dict: dict[str, float]) -> dict[str, float]:

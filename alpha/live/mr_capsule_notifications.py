@@ -15,7 +15,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 
-ALERT_KIND_SET = frozenset({"accepted_residual", "unresolved_execution", "late_execution"})
+ALERT_KIND_SET = frozenset({"accepted_residual", "unresolved_execution", "late_execution", "dispatch_failed"})
 DELIVERY_LEASE_SECONDS_INT = 300
 
 
@@ -74,13 +74,14 @@ class ExecutionAlertDelivery:
 def _configured_scope_list(summary_dict: dict[str, Any], mode_str: str | None) -> list[tuple]:
     # Reuse DashboardApp's configured paths; do not instantiate a mutable store.
     from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE
+    from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR
 
     scope_list: list[tuple] = []
     scope_set: set[tuple] = set()
     pod_scope_dict: dict[tuple, tuple] = {}
     account_scope_dict: dict[tuple, tuple] = {}
     for row_dict in summary_dict.get("pod_row_dict_list") or []:
-        if row_dict.get("strategy_import_str") not in MR_CAPSULE_STRATEGY_IMPORT_TUPLE:
+        if row_dict.get("strategy_import_str") not in (*MR_CAPSULE_STRATEGY_IMPORT_TUPLE, CORE5_STRATEGY_IMPORT_STR):
             continue
         if mode_str not in {None, "all"} and row_dict.get("mode_str") != mode_str:
             continue
@@ -149,7 +150,8 @@ def _current_cycle_context_dict(connection_obj: sqlite3.Connection, alert_dict: 
     if row_obj is None:
         return None
     from alpha.live.mr_capsule_adapter import MR_CAPSULE_STRATEGY_IMPORT_TUPLE
-    if row_obj[3] not in MR_CAPSULE_STRATEGY_IMPORT_TUPLE:
+    from alpha.live.core5_adapter import CORE5_STRATEGY_IMPORT_STR
+    if row_obj[3] not in (*MR_CAPSULE_STRATEGY_IMPORT_TUPLE, CORE5_STRATEGY_IMPORT_STR):
         return None
     result_dict = json.loads(row_obj[2]).get("mr_capsule_execution_result_dict")
     return {"completed_bool": row_obj[0] == row_obj[1] == "completed",
@@ -164,9 +166,17 @@ def _build_payload_dict(alert_dict: dict[str, Any]) -> dict[str, Any]:
         "accepted_residual": "HISTORICAL execution observation: terminal residual accepted. VERIFY current broker holdings before any manual action. Missed buys receive no replacement order.",
         "unresolved_execution": "Execution unresolved; verify broker orders and fills before any manual action.",
         "late_execution": "Late execution recorded separately from the opening auction.",
+        "dispatch_failed": "CRITICAL: opening dispatch failed or missed its deadline. Pod parked; review broker orders/fills before resuming.",
     }[alert_dict["alert_kind_str"]]
     current_context_dict = alert_dict.get("current_cycle_context_dict")
     context_line_list = []
+    if alert_dict["alert_kind_str"] == "dispatch_failed":
+        if current_context_dict and (current_context_dict["completed_bool"]
+                or current_context_dict["decision_status_str"] == "superseded"):
+            description_str = "HISTORICAL dispatch failure: this cycle is now completed or superseded by reviewed recovery. Verify current state before acting."
+        for field_str in ("reason_code_str", "error_type_str", "dispatch_deadline_timestamp_str"):
+            if field_str in payload_dict:
+                context_line_list.append(f"{field_str}={payload_dict[field_str]}")
     if alert_dict["alert_kind_str"] == "unresolved_execution":
         if current_context_dict and current_context_dict["completed_bool"]:
             description_str = "HISTORICAL alert: this cycle is now recorded completed. No action from this old warning."

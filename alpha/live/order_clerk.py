@@ -124,6 +124,9 @@ def _compute_submit_ack_summary(
 
 
 class BrokerAdapter(ABC):
+    def get_refreshed_order_evidence(self, account_route_str: str, since_timestamp_ts: datetime) -> dict:
+        raise NotImplementedError("This adapter cannot prove broker order absence.")
+
     @abstractmethod
     def get_visible_account_route_set(self) -> set[str] | None:
         raise NotImplementedError
@@ -214,6 +217,10 @@ class BrokerAdapter(ABC):
 
 
 class IBKRGatewayBrokerAdapter(BrokerAdapter):
+    def get_refreshed_order_evidence(self, account_route_str: str, since_timestamp_ts: datetime) -> dict:
+        from alpha.live.order_evidence import refreshed_order_evidence_dict
+        return refreshed_order_evidence_dict(self.socket_client_obj, account_route_str, since_timestamp_ts)
+
     def __init__(
         self,
         host_str: str = "127.0.0.1",

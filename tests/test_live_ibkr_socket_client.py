@@ -745,23 +745,28 @@ def test_recovery_mkt_uses_fixed_utc_broker_expiry(monkeypatch, deadline_str, ex
 @pytest.mark.parametrize("deadline_str", ["", "bad-date", "2024-11-29", "2024-11-29T18:00:00", 123])
 def test_recovery_expiry_rejects_invalid_or_naive_timestamp_before_connect(monkeypatch, deadline_str):
     from dataclasses import replace
+    from alpha.live.guarded_dispatch import DispatchFailure
     client_obj = IBKRSocketClient()
     monkeypatch.setattr(client_obj, "connect", lambda: pytest.fail("Invalid expiry must not connect"))
     request_obj = replace(_funding_request_obj(), broker_order_type_str="MKT",
         execution_deadline_timestamp_str=deadline_str)
-    with pytest.raises(ValueError, match="aware ISO timestamp"):
+    with pytest.raises(DispatchFailure, match="aware ISO timestamp") as failure_info_obj:
         client_obj.submit_order_request_list("SIM_pod", [request_obj], datetime(2024, 11, 29, tzinfo=UTC))
+    assert failure_info_obj.value.attempted_key_list == []
+    assert failure_info_obj.value.never_dispatched_request_list == [request_obj]
 
 
 @pytest.mark.parametrize("order_type_str", ["MOO", "MOC", "LMT"])
 def test_recovery_expiry_rejects_non_mkt_before_connect(monkeypatch, order_type_str):
     from dataclasses import replace
+    from alpha.live.guarded_dispatch import DispatchFailure
     client_obj = IBKRSocketClient()
     monkeypatch.setattr(client_obj, "connect", lambda: pytest.fail("Invalid expiry must not connect"))
     request_obj = replace(_funding_request_obj(), broker_order_type_str=order_type_str,
         execution_deadline_timestamp_str="2024-11-29T18:00:00Z")
-    with pytest.raises(ValueError, match="only for MKT"):
+    with pytest.raises(DispatchFailure, match="only for MKT") as failure_info_obj:
         client_obj.submit_order_request_list("SIM_pod", [request_obj], datetime(2024, 11, 29, tzinfo=UTC))
+    assert failure_info_obj.value.attempted_key_list == []
 
 
 def test_recovery_qualification_delay_cannot_roll_expiry_into_next_session(monkeypatch):
@@ -782,13 +787,16 @@ def test_recovery_qualification_delay_cannot_roll_expiry_into_next_session(monke
 
 def test_recovery_expiry_submission_error_never_falls_back_to_day(monkeypatch):
     from dataclasses import replace
+    from alpha.live.guarded_dispatch import DispatchFailure
     clock_list = [datetime(2024, 11, 29, 17, 59, tzinfo=UTC)]
     ib_obj = _ExpirySubmitIB(clock_list, raise_bool=True)
     client_obj = _expiry_client_obj(monkeypatch, ib_obj)
     request_obj = replace(_funding_request_obj(amount_float=-6), broker_order_type_str="MKT",
         execution_deadline_timestamp_str="2024-11-29T18:00:00Z")
-    with pytest.raises(ValueError, match="Simulated unsupported"):
+    with pytest.raises(DispatchFailure, match="Simulated unsupported") as failure_info_obj:
         client_obj.submit_order_request_list("SIM_pod", [request_obj], clock_list[0])
+    assert failure_info_obj.value.attempted_key_list == [request_obj.order_request_key_str]
+    assert failure_info_obj.value.never_dispatched_request_list == []
     assert len(ib_obj.placed_order_list) == 1
     assert ib_obj.placed_order_list[0].tif == "GTD"
 

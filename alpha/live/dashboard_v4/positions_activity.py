@@ -160,7 +160,7 @@ def _cycle_dict(connection_obj, plan_id_int, identity_dict, release_id_set, day_
         ack_key_set.add(request_key_str)
     if sparse_cycle_bool and ack_key_set != set(request_map_dict):
         raise ValueError("Sparse orders lack complete acknowledgements")
-    today_fill_list, fill_key_set = [], set()
+    today_fill_list = []
     for fill_dict in fill_list:
         order_dict = order_map_dict.get(fill_dict["broker_order_id_str"])
         if order_dict is None or any(fill_dict[field_str] != order_dict[field_str] for field_str in ("decision_plan_id_int", "account_route_str", "asset_str")):
@@ -170,13 +170,11 @@ def _cycle_dict(connection_obj, plan_id_int, identity_dict, release_id_set, day_
         request_obj = request_map_dict[order_dict["order_request_key_str"]]
         payload_dict = json.loads(fill_dict["raw_payload_json_str"], object_pairs_hook=_unique_dict)
         execution_id_str = payload_dict.get("exec_id_str")
-        fill_key_tuple = (fill_dict["broker_order_id_str"], fill_ts, amount_float, price_float)
         if (fill_ts < order_dict["submitted_ts"] or amount_float * request_obj.amount_float <= 0 or price_float <= 0
                 or not isinstance(execution_id_str, str) or not execution_id_str.strip()
-                or execution_id_str in execution_id_set or fill_key_tuple in fill_key_set):
+                or execution_id_str.strip() in execution_id_set):
             raise ValueError("Unverified or duplicate execution")
-        execution_id_set.add(execution_id_str)
-        fill_key_set.add(fill_key_tuple)
+        execution_id_set.add(execution_id_str.strip())
         order_dict["verified_filled_float"] += amount_float
         fill_dict.update(timestamp_ts=fill_ts, amount_float=amount_float)
         if day_start_ts <= fill_ts < day_end_ts:

@@ -203,6 +203,7 @@ class LiveStateStore(CoreLiveStateStore):
 
                 CREATE TABLE IF NOT EXISTS vplan_fill (
                     fill_record_id_int INTEGER PRIMARY KEY AUTOINCREMENT,
+                    broker_execution_id_str TEXT,
                     broker_order_id_str TEXT NOT NULL,
                     decision_plan_id_int INTEGER,
                     vplan_id_int INTEGER NOT NULL,
@@ -243,7 +244,6 @@ class LiveStateStore(CoreLiveStateStore):
             )
             connection_obj.execute("DROP INDEX IF EXISTS vplan_broker_order_unique_order_idx")
             connection_obj.execute("DROP INDEX IF EXISTS vplan_broker_order_event_unique_idx")
-            connection_obj.execute("DROP INDEX IF EXISTS vplan_fill_unique_event_idx")
             connection_obj.execute("DROP INDEX IF EXISTS vplan_broker_ack_unique_idx")
             connection_obj.execute(
                 """
@@ -260,18 +260,6 @@ class LiveStateStore(CoreLiveStateStore):
                     status_str,
                     event_timestamp_str,
                     message_str
-                )
-                """
-            )
-            connection_obj.execute(
-                """
-                CREATE UNIQUE INDEX IF NOT EXISTS vplan_fill_unique_event_idx
-                ON vplan_fill (
-                    vplan_id_int,
-                    broker_order_id_str,
-                    fill_timestamp_str,
-                    fill_amount_float,
-                    fill_price_float
                 )
                 """
             )
@@ -517,6 +505,51 @@ class LiveStateStore(CoreLiveStateStore):
                 row_obj["name"]
                 for row_obj in connection_obj.execute("PRAGMA table_info(vplan_fill)").fetchall()
             ]
+            if "broker_execution_id_str" not in vplan_fill_column_name_list:
+                connection_obj.execute("ALTER TABLE vplan_fill ADD COLUMN broker_execution_id_str TEXT")
+                # Retain row IDs and legacy evidence, recovering identity already
+                # captured by IBKR ingestion before this column existed.
+                fill_identity_kind_dict = {}
+                for fill_row_obj in connection_obj.execute(
+                    "SELECT * FROM vplan_fill"
+                ).fetchall():
+                    payload_dict = json.loads(fill_row_obj["raw_payload_json_str"])
+                    execution_id_str = str(payload_dict.get("exec_id_str") or "").strip() or None
+                    fill_key_tuple = (fill_row_obj["account_route_str"], fill_row_obj["vplan_id_int"],
+                        fill_row_obj["broker_order_id_str"], _deserialize_timestamp_ts(fill_row_obj["fill_timestamp_str"]),
+                        float(fill_row_obj["fill_amount_float"]), float(fill_row_obj["fill_price_float"]))
+                    identified_bool = execution_id_str is not None
+                    if fill_key_tuple in fill_identity_kind_dict and fill_identity_kind_dict[fill_key_tuple] != identified_bool:
+                        raise RuntimeError("Ambiguous identified and legacy fill observations; review their execution identity.")
+                    fill_identity_kind_dict[fill_key_tuple] = identified_bool
+                    connection_obj.execute(
+                        "UPDATE vplan_fill SET broker_execution_id_str = ? WHERE fill_record_id_int = ?",
+                        (execution_id_str, fill_row_obj["fill_record_id_int"]),
+                    )
+                connection_obj.execute("DROP INDEX IF EXISTS vplan_fill_unique_event_idx")
+            try:
+                connection_obj.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS vplan_fill_unique_execution_idx
+                    ON vplan_fill (account_route_str, broker_execution_id_str)
+                    WHERE broker_execution_id_str IS NOT NULL
+                    """
+                )
+            except sqlite3.IntegrityError as error_obj:
+                # Do not discard or silently reassign conflicting historical
+                # evidence. The surrounding transaction rolls migration back.
+                raise RuntimeError(
+                    "Duplicate broker execution IDs in saved fills; review their account and VPlan lineage."
+                ) from error_obj
+            connection_obj.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS vplan_fill_unique_event_idx
+                ON vplan_fill (
+                    vplan_id_int, broker_order_id_str, fill_timestamp_str,
+                    fill_amount_float, fill_price_float
+                ) WHERE broker_execution_id_str IS NULL
+                """
+            )
             if "official_open_price_float" not in vplan_fill_column_name_list:
                 connection_obj.execute(
                     """
@@ -536,6 +569,10 @@ class LiveStateStore(CoreLiveStateStore):
             from alpha.live.mr_capsule_notifications import ensure_execution_alert_schema
             ensure_capsule_recovery_schema(connection_obj)
             ensure_execution_alert_schema(connection_obj)
+            from alpha.live.execution_resolution import ensure_execution_resolution_schema
+            ensure_execution_resolution_schema(connection_obj)
+            from alpha.live.decision_revision import migrate_decision_revisions
+            migrate_decision_revisions(connection_obj)
 
     def upsert_release(self, release_obj: LiveRelease) -> None:
         with self._connect() as connection_obj:
@@ -705,13 +742,15 @@ class LiveStateStore(CoreLiveStateStore):
                 ).fetchone() is not None:
                     return False
             updated_timestamp_str = _serialize_timestamp_str(_utc_now_ts())
+            metadata_dict = json.loads(plan_row_obj["snapshot_metadata_json_str"])
+            metadata_dict["core5_unclaimed_terminal_bool"] = True
             connection_obj.execute(
                 "UPDATE vplan SET status_str = ?, updated_timestamp_str = ? WHERE vplan_id_int = ? AND status_str = 'ready'",
                 (status_str, updated_timestamp_str, int(vplan_id_int)),
             )
             connection_obj.execute(
-                "UPDATE decision_plan SET status_str = ?, updated_timestamp_str = ? WHERE decision_plan_id_int = ?",
-                (status_str, updated_timestamp_str, plan_row_obj["decision_plan_id_int"]),
+                "UPDATE decision_plan SET status_str = ?, updated_timestamp_str = ?, snapshot_metadata_json_str = ? WHERE decision_plan_id_int = ?",
+                (status_str, updated_timestamp_str, json.dumps(metadata_dict, sort_keys=True), plan_row_obj["decision_plan_id_int"]),
             )
             return True
 
@@ -895,9 +934,9 @@ class LiveStateStore(CoreLiveStateStore):
                 (completed_timestamp_str, int(decision_plan_id_int)),
             )
 
-    def insert_decision_plan(self, decision_plan_obj: DecisionPlan) -> DecisionPlan:
+    def insert_decision_plan(self, decision_plan_obj: DecisionPlan, *, connection_obj=None, intent_revision_int=0) -> DecisionPlan:
         created_timestamp_str = _serialize_timestamp_str(_utc_now_ts())
-        with self._connect() as connection_obj:
+        with (self._connect() if connection_obj is None else nullcontext(connection_obj)) as connection_obj:
             cursor_obj = connection_obj.execute(
                 """
                 INSERT INTO decision_plan (
@@ -924,8 +963,9 @@ class LiveStateStore(CoreLiveStateStore):
                     strategy_state_json_str,
                     status_str,
                     created_timestamp_str,
-                    updated_timestamp_str
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    updated_timestamp_str,
+                    intent_revision_int
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     decision_plan_obj.release_id_str,
@@ -952,6 +992,7 @@ class LiveStateStore(CoreLiveStateStore):
                     decision_plan_obj.status_str,
                     created_timestamp_str,
                     created_timestamp_str,
+                    int(intent_revision_int),
                 ),
             )
             decision_plan_id_int = int(cursor_obj.lastrowid)
@@ -1055,6 +1096,7 @@ class LiveStateStore(CoreLiveStateStore):
 
     def insert_vplan(self, vplan_obj: VPlan) -> VPlan:
         from alpha.live.mr_capsule_adapter import MR_CAPSULE_CONTRACT_STR
+        from alpha.live.core5_adapter import CORE5_CONTRACT_STR
 
         created_timestamp_str = _serialize_timestamp_str(_utc_now_ts())
         live_reference_source_map_dict = (
@@ -1084,7 +1126,9 @@ class LiveStateStore(CoreLiveStateStore):
             capsule_bool = decision_row_obj is not None and json.loads(
                 decision_row_obj["snapshot_metadata_json_str"]
             ).get("sizing_contract_str") == MR_CAPSULE_CONTRACT_STR
-            if capsule_bool:
+            core5_bool = decision_row_obj is not None and json.loads(
+                decision_row_obj["snapshot_metadata_json_str"]).get("sizing_contract_str") == CORE5_CONTRACT_STR
+            if capsule_bool or core5_bool:
                 # Serialize creation with abandonment and another worker's creation.
                 connection_obj.execute("BEGIN IMMEDIATE")
                 decision_row_obj = connection_obj.execute(
@@ -1094,7 +1138,7 @@ class LiveStateStore(CoreLiveStateStore):
                 if decision_row_obj["status_str"] != "planned" or json.loads(
                     decision_row_obj["snapshot_metadata_json_str"]
                 ).get("mr_capsule_unsubmitted_cycle_abandoned_bool") is True:
-                    raise ValueError("Capsule VPlan creation requires an active planned decision.")
+                    raise ValueError("Capsule/CORE5 VPlan creation requires an active planned decision.")
             cursor_obj = connection_obj.execute(
                 """
                 INSERT INTO vplan (
@@ -1195,7 +1239,7 @@ class LiveStateStore(CoreLiveStateStore):
                         str(vplan_row_obj.live_reference_source_str or vplan_obj.live_price_source_str),
                     ),
                 )
-            if capsule_bool:
+            if capsule_bool or core5_bool:
                 connection_obj.execute(
                     "UPDATE decision_plan SET status_str = 'vplan_ready', updated_timestamp_str = ? WHERE decision_plan_id_int = ?",
                     (created_timestamp_str, int(vplan_obj.decision_plan_id_int)),
@@ -1255,6 +1299,7 @@ class LiveStateStore(CoreLiveStateStore):
 
     def claim_vplan_for_submission(self, vplan_id_int: int) -> bool:
         from alpha.live.mr_capsule_adapter import MR_CAPSULE_CONTRACT_STR
+        from alpha.live.core5_adapter import CORE5_CONTRACT_STR
 
         with self._connect() as connection_obj:
             decision_row_obj = connection_obj.execute(
@@ -1265,7 +1310,9 @@ class LiveStateStore(CoreLiveStateStore):
             capsule_bool = decision_row_obj is not None and json.loads(
                 decision_row_obj["snapshot_metadata_json_str"]
             ).get("sizing_contract_str") == MR_CAPSULE_CONTRACT_STR
-            if capsule_bool:
+            core5_bool = decision_row_obj is not None and json.loads(
+                decision_row_obj["snapshot_metadata_json_str"]).get("sizing_contract_str") == CORE5_CONTRACT_STR
+            if capsule_bool or core5_bool:
                 connection_obj.execute("BEGIN IMMEDIATE")
                 decision_row_obj = connection_obj.execute(
                     "SELECT d.status_str, d.snapshot_metadata_json_str FROM decision_plan d JOIN vplan v "
@@ -1969,10 +2016,38 @@ class LiveStateStore(CoreLiveStateStore):
         self, fill_list: Iterable[BrokerOrderFill], *, connection_obj: sqlite3.Connection | None = None,
     ) -> None:
         with (nullcontext(connection_obj) if connection_obj is not None else self._connect()) as connection_obj:
+            if not connection_obj.in_transaction:
+                connection_obj.execute("BEGIN IMMEDIATE")
             for fill_obj in fill_list:
-                connection_obj.execute(
+                execution_id_str = str(fill_obj.raw_payload_dict.get("exec_id_str") or "").strip() or None
+                fill_timestamp_ts = _deserialize_timestamp_ts(_serialize_timestamp_str(fill_obj.fill_timestamp_ts))
+                identity_filter_str = "IS NULL" if execution_id_str is not None else "IS NOT NULL"
+                overlapping_row_list = connection_obj.execute(
+                    "SELECT fill_timestamp_str FROM vplan_fill WHERE account_route_str=? AND vplan_id_int=? "
+                    "AND broker_order_id_str=? AND fill_amount_float=? AND fill_price_float=? "
+                    f"AND broker_execution_id_str {identity_filter_str}",
+                    (fill_obj.account_route_str, fill_obj.vplan_id_int, fill_obj.broker_order_id_str,
+                        float(fill_obj.fill_amount_float), float(fill_obj.fill_price_float)),
+                ).fetchall()
+                if any(_deserialize_timestamp_ts(row_obj["fill_timestamp_str"]) == fill_timestamp_ts for row_obj in overlapping_row_list):
+                    raise ValueError("Ambiguous identified and legacy fill observations; review their execution identity.")
+                if execution_id_str is not None:
+                    existing_row_obj = connection_obj.execute(
+                        "SELECT * FROM vplan_fill WHERE account_route_str=? AND broker_execution_id_str=?",
+                        (fill_obj.account_route_str, execution_id_str),
+                    ).fetchone()
+                    if existing_row_obj is not None and (
+                        existing_row_obj["broker_order_id_str"] != fill_obj.broker_order_id_str
+                        or float(existing_row_obj["fill_amount_float"]) != float(fill_obj.fill_amount_float)
+                        or float(existing_row_obj["fill_price_float"]) != float(fill_obj.fill_price_float)
+                        or _deserialize_timestamp_ts(existing_row_obj["fill_timestamp_str"])
+                            != fill_timestamp_ts
+                    ):
+                        raise ValueError("Broker execution fill conflicts with saved order or execution economics.")
+                cursor_obj = connection_obj.execute(
                     """
                     INSERT INTO vplan_fill (
+                        broker_execution_id_str,
                         broker_order_id_str,
                         decision_plan_id_int,
                         vplan_id_int,
@@ -1984,18 +2059,11 @@ class LiveStateStore(CoreLiveStateStore):
                         open_price_source_str,
                         fill_timestamp_str,
                         raw_payload_json_str
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(
-                        vplan_id_int,
-                        broker_order_id_str,
-                        fill_timestamp_str,
-                        fill_amount_float,
-                        fill_price_float
-                    ) DO UPDATE SET
-                        decision_plan_id_int = excluded.decision_plan_id_int,
-                        vplan_id_int = excluded.vplan_id_int,
-                        account_route_str = excluded.account_route_str,
-                        asset_str = excluded.asset_str,
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT DO UPDATE SET
+                        decision_plan_id_int = COALESCE(
+                            excluded.decision_plan_id_int, vplan_fill.decision_plan_id_int
+                        ),
                         official_open_price_float = COALESCE(
                             excluded.official_open_price_float,
                             vplan_fill.official_open_price_float
@@ -2005,8 +2073,15 @@ class LiveStateStore(CoreLiveStateStore):
                             vplan_fill.open_price_source_str
                         ),
                         raw_payload_json_str = excluded.raw_payload_json_str
+                    WHERE vplan_fill.vplan_id_int = excluded.vplan_id_int
+                        AND vplan_fill.account_route_str = excluded.account_route_str
+                        AND vplan_fill.asset_str = excluded.asset_str
+                        AND (vplan_fill.decision_plan_id_int IS NULL
+                            OR excluded.decision_plan_id_int IS NULL
+                            OR vplan_fill.decision_plan_id_int = excluded.decision_plan_id_int)
                     """,
                     (
+                        execution_id_str,
                         fill_obj.broker_order_id_str,
                         fill_obj.decision_plan_id_int,
                         fill_obj.vplan_id_int,
@@ -2022,6 +2097,10 @@ class LiveStateStore(CoreLiveStateStore):
                         json.dumps(fill_obj.raw_payload_dict, sort_keys=True),
                     ),
                 )
+                if cursor_obj.rowcount != 1:
+                    raise ValueError(
+                        "Broker execution fill conflicts with saved account, VPlan, decision or asset lineage."
+                    )
 
     def insert_cash_ledger_entry_list(
         self,

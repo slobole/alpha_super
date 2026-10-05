@@ -9,6 +9,7 @@ import math
 
 from alpha.live import scheduler_utils
 from alpha.live.execution_engine import build_broker_order_request_list_from_vplan
+from alpha.live.execution_resolution import load_request_resolution_dict, resolve_never_sent_requests
 from alpha.live.models import BrokerOrderRequest, PodState
 from alpha.live.mr_capsule_reconcile import classify_capsule_execution, TERMINAL_SHORTFALL_STATUS_SET
 
@@ -110,7 +111,8 @@ def _classify(state_store_obj, vplan_obj, snapshot_obj):
         state_store_obj.get_broker_order_row_dict_list_for_vplan(vplan_obj.vplan_id_int, include_evidence_bool=True),
         state_store_obj.get_fill_row_dict_list_for_vplan(vplan_obj.vplan_id_int,
             include_order_identity_bool=True, include_evidence_bool=True),
-        supplemental_request_list=load_supplemental_requests(state_store_obj, vplan_obj))
+        supplemental_request_list=load_supplemental_requests(state_store_obj, vplan_obj),
+        resolved_request_dict=load_request_resolution_dict(state_store_obj, vplan_obj))
 
 
 def _refresh(state_store_obj, broker_adapter_obj, vplan_obj):
@@ -200,6 +202,8 @@ def record_capsule_result(state_store_obj, release_obj, vplan_obj, decision_plan
         "cash_float": snapshot_obj.cash_float, "net_liq_float": snapshot_obj.net_liq_float,
         "available_funds_float": snapshot_obj.available_funds_float,
         "excess_liquidity_float": snapshot_obj.excess_liquidity_float}
+    if "mr_capsule_completion_send_error_dict" in decision_plan_obj.snapshot_metadata_dict:
+        payload_dict["completion_send_error_dict"] = decision_plan_obj.snapshot_metadata_dict["mr_capsule_completion_send_error_dict"]
     # Optional margin diagnostics must not strand an otherwise resolved cycle.
     # Invalid core observations are reported, but never saved as trusted state.
     for field_str in ("cash_float", "net_liq_float", "available_funds_float", "excess_liquidity_float"):
@@ -280,26 +284,33 @@ def reconcile_capsule_cycle(state_store_obj, broker_adapter_obj, release_obj, vp
                 **decision_plan_obj.snapshot_metadata_dict,
                 "mr_capsule_open_reference_error_str": str(exception_obj) or type(exception_obj).__name__})
     snapshot_obj = _refresh(state_store_obj, broker_adapter_obj, vplan_obj)
+    prior_resolution_dict = load_request_resolution_dict(state_store_obj, vplan_obj)
+    resolution_dict = resolve_never_sent_requests(state_store_obj, broker_adapter_obj, release_obj, vplan_obj,
+        [*build_broker_order_request_list_from_vplan(vplan_obj), *load_supplemental_requests(state_store_obj, vplan_obj)], as_of_ts)
+    if resolution_dict != prior_resolution_dict:
+        # *** CRITICAL *** A never-sent resolution uses holdings observed after
+        # the post-close proof, never an older snapshot from before the refresh.
+        snapshot_obj = _refresh(state_store_obj, broker_adapter_obj, vplan_obj)
     reconciliation_obj, outcome_str, residual_list = _classify(state_store_obj, vplan_obj, snapshot_obj)
     if outcome_str == "unexplained_positions":
         _adopt_manual_repairs(state_store_obj, broker_adapter_obj, vplan_obj, snapshot_obj, residual_list, as_of_ts)
         snapshot_obj = _refresh(state_store_obj, broker_adapter_obj, vplan_obj)
         reconciliation_obj, outcome_str, residual_list = _classify(state_store_obj, vplan_obj, snapshot_obj)
-    if outcome_str == "accepted_residual" and _same_session_recovery_allowed(release_obj, vplan_obj, as_of_ts, snapshot_obj):
+    if any(row_dict["required_action_str"] == "SELL" for row_dict in residual_list) and _same_session_recovery_allowed(release_obj, vplan_obj, as_of_ts, snapshot_obj):
         request_by_asset_dict = {request_obj.asset_str: request_obj for request_obj in build_broker_order_request_list_from_vplan(vplan_obj)}
         for residual_dict in residual_list:
             asset_str = residual_dict["asset_str"]
-            if residual_dict["residual_amount_float"] >= 0 or (
+            if residual_dict["required_action_str"] != "SELL" or residual_dict["residual_amount_float"] >= 0 or (
                 asset_str != "BIL" and abs(vplan_obj.target_share_map.get(asset_str, 0)) > 1e-9):
                 continue
             # Refresh before EACH new sale: another fill/manual trade may have
             # changed holdings while an earlier network request was in flight.
             snapshot_obj = _refresh(state_store_obj, broker_adapter_obj, vplan_obj)
             reconciliation_obj, outcome_str, current_residual_list = _classify(state_store_obj, vplan_obj, snapshot_obj)
-            if outcome_str != "accepted_residual" or not _same_session_recovery_allowed(release_obj, vplan_obj, as_of_ts, snapshot_obj):
+            if not _same_session_recovery_allowed(release_obj, vplan_obj, as_of_ts, snapshot_obj):
                 break
             residual_float = next((row_dict["residual_amount_float"] for row_dict in current_residual_list
-                if row_dict["asset_str"] == asset_str), 0.0)
+                if row_dict["asset_str"] == asset_str and row_dict["required_action_str"] == "SELL"), 0.0)
             # Q_sell = min(original unfilled sale, max(actual shares - frozen target, 0)).
             remainder_float = min(max(-residual_float, 0.0), max(
                 snapshot_obj.position_amount_map.get(asset_str, 0.0) - vplan_obj.target_share_map.get(asset_str, 0.0), 0.0))
@@ -319,10 +330,19 @@ def reconcile_capsule_cycle(state_store_obj, broker_adapter_obj, release_obj, vp
                     broker_order_request_list=[recovery_request_obj], submitted_timestamp_ts=snapshot_obj.snapshot_timestamp_ts)
                 _persist_observations(state_store_obj, vplan_obj, result_obj.broker_order_record_list,
                     result_obj.broker_order_event_list, result_obj.broker_order_fill_list, late_bool=True)
-            except Exception:
+            except Exception as exception_obj:
                 # Claim remains durable. The next observation must prove what
                 # happened; a timeout is not permission to send again.
-                pass
+                decision_plan_obj = replace(decision_plan_obj, snapshot_metadata_dict={
+                    **decision_plan_obj.snapshot_metadata_dict,
+                    "mr_capsule_completion_send_error_dict": {
+                        "order_request_key_str": recovery_request_obj.order_request_key_str,
+                        "error_str": str(exception_obj) or type(exception_obj).__name__,
+                        "as_of_timestamp_str": as_of_ts.isoformat()}})
+                reconciliation_obj, outcome_str, residual_list = _classify(state_store_obj, vplan_obj, snapshot_obj)
+                record_capsule_result(state_store_obj, release_obj, vplan_obj, decision_plan_obj,
+                    snapshot_obj, reconciliation_obj, outcome_str, residual_list, as_of_ts)
+                raise
         snapshot_obj = _refresh(state_store_obj, broker_adapter_obj, vplan_obj)
         reconciliation_obj, outcome_str, residual_list = _classify(state_store_obj, vplan_obj, snapshot_obj)
     record_capsule_result(state_store_obj, release_obj, vplan_obj, decision_plan_obj,

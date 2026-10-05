@@ -505,3 +505,47 @@ def test_no_orders_rejects_unverifiable_aggregate_intent(tmp_path, delta_json_st
     target_obj, row_dict = build_fixture_tuple(tmp_path, amount_list=[])
     update_db(target_obj, "UPDATE vplan SET order_delta_json_str=?", (delta_json_str,))
     assert load_cycle_evidence_dict(target_obj, row_dict, as_of_ts=NOW_TS)["state_str"] == "unknown"
+
+
+def test_identical_execution_tuples_with_distinct_broker_ids_prove_full_fill(tmp_path):
+    from alpha.live.dashboard_v4.positions_activity import load_position_activity_dict
+
+    target_obj, row_dict = build_fixture_tuple(tmp_path, amount_list=[10.0], filled_fraction_float=0.5)
+    store_obj = LiveStateStore(target_obj.db_path_str)
+    store_obj.upsert_vplan_fill_list([BrokerOrderFill(
+        broker_order_id_str="order-0", decision_plan_id_int=1, vplan_id_int=1,
+        account_route_str="U111", asset_str="SPY", fill_amount_float=5.0, fill_price_float=100.0,
+        fill_timestamp_ts=FILL_TS, raw_payload_dict={"exec_id_str": "exec-second"},
+    )])
+    update_db(target_obj, "UPDATE vplan_broker_order SET filled_amount_float=10, remaining_amount_float=0, status_str='Filled'")
+    row_dict["fill_count_int"] = 2
+    evidence_dict = load_cycle_evidence_dict(target_obj, row_dict, as_of_ts=NOW_TS)
+    assert evidence_dict["state_str"] == "complete"
+    assert evidence_dict["order_list"][0]["filled_share_float"] == 10.0
+    assert evidence_dict["fill_record_count_int"] == 2
+    activity_dict = load_position_activity_dict(target_obj, as_of_ts=NOW_TS)
+    assert activity_dict["available_bool"]
+    assert activity_dict["symbol_dict"]["SPY"]["bought_float"] == 10.0
+    assert activity_dict["symbol_dict"]["SPY"]["filled_delta_float"] == 10.0
+
+
+@pytest.mark.parametrize("known_first_bool", [False, True])
+def test_mixed_identified_and_legacy_equal_fills_cannot_prove_completion(tmp_path, known_first_bool):
+    target_obj, row_dict = build_fixture_tuple(tmp_path, amount_list=[10.0], filled_fraction_float=0.5)
+    # Represent a legacy/corrupt source directly; production ingestion now rejects
+    # this ambiguity before writing. Neither row can establish a distinct fill.
+    with sqlite3.connect(target_obj.db_path_str) as connection_obj:
+        connection_obj.row_factory = sqlite3.Row
+        fill_dict = dict(connection_obj.execute("SELECT * FROM vplan_fill").fetchone())
+        fill_dict.pop("fill_record_id_int")
+        if known_first_bool:
+            fill_dict["broker_execution_id_str"] = None
+            fill_dict["raw_payload_json_str"] = "{}"
+        else:
+            connection_obj.execute("UPDATE vplan_fill SET broker_execution_id_str=NULL, raw_payload_json_str='{}'")
+        connection_obj.execute("INSERT INTO vplan_fill (" + ",".join(fill_dict) + ") VALUES ("
+            + ",".join("?" for _ in fill_dict) + ")", tuple(fill_dict.values()))
+    row_dict["fill_count_int"] = 2
+    evidence_dict = load_cycle_evidence_dict(target_obj, row_dict, as_of_ts=NOW_TS)
+    assert evidence_dict["state_str"] == "unknown"
+    assert "ambiguous" in evidence_dict["reason_str"]

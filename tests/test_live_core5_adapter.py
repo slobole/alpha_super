@@ -247,6 +247,9 @@ def test_runner_full_cycle_commits_state_once_after_reconcile(release_obj, price
     assert store_obj.get_pod_state(release_obj.pod_id_str).strategy_state_dict == {}
     assert all(request_obj.broker_order_type_str == "MOO" and request_obj.unit_str == "shares" for request_obj in broker_obj.submitted_order_request_list)
     restarted_store_obj = LiveStateStore(str(tmp_path / "core5.sqlite3"))
+    broker_obj._snapshot_map[release_obj.account_route_str] = replace(
+        broker_obj.get_core5_account_snapshot(release_obj.account_route_str),
+        snapshot_timestamp_ts=decision_obj.target_execution_timestamp_ts + timedelta(minutes=10))
     detail_dict = runner_module.post_execution_reconcile(restarted_store_obj, broker_obj,
         decision_obj.target_execution_timestamp_ts + timedelta(minutes=10), "paper", log_path_str=str(tmp_path / "ops.log"), trace_enabled_bool=False)
     assert detail_dict["completed_vplan_count_int"] == 1
@@ -444,6 +447,8 @@ def test_incomplete_flip_does_not_commit_even_if_positions_match(release_obj, pr
         position_dict["DBC"] = state_obj.position_amount_map["DBC"] + dbc_record_list[1].amount_float
         broker_obj._snapshot_map[route_str] = replace(broker_obj._snapshot_map[route_str], position_amount_map=position_dict)
     store_obj = LiveStateStore(str(tmp_path / "core5.sqlite3"))
+    broker_obj._snapshot_map[route_str] = replace(broker_obj._snapshot_map[route_str],
+        snapshot_timestamp_ts=decision_obj.target_execution_timestamp_ts + timedelta(minutes=10))
     detail_dict = runner_module.post_execution_reconcile(store_obj, broker_obj, decision_obj.target_execution_timestamp_ts + timedelta(minutes=10),
         "paper", log_path_str=str(tmp_path / "ops.log"), trace_enabled_bool=False)
     assert detail_dict["completed_vplan_count_int"] == 0
