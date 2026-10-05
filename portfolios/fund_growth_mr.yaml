@@ -1,0 +1,44 @@
+# GROWTH, stock mean-reversion target (gated: live slippage <= 3-4 bps/side; HPI-RSI demoted to PM_READY on 2026-09-30, needs re-wiring): taa_btal_tqqq 27.0% / taa_btal_1n_tqqq 27.0% / dv2 9.0% / hpi_vote 9.0% / hpi_ibs_rsi 9.0% / ndx_vxn 7.0% / tbill_bil 6.0% / taa_btal_lin_qqq 3.0% / core5 3.0%.
+# Study (LONG 2008-03..2026-08, gross): 20.0%/yr, max DD -15.7%, excess Sharpe 1.22, P(DD < -10%) 100.0%, P(DD < -20%) 9.5%.
+# Source: fund products study, amendments A6 / A6-c / A6-d (2026-10-01), scripts/research/fund_products_20260930/a6.py, a6d.py.
+# Research configuration only: not an allocation approval and not wired to LIVE. Simulation, before fees.
+# Starts 2012-10-02 (TQQQ/BTAL real history); the study's 2008 proxy is not used by the bench.
+name_str: fund_growth_mr
+capital_base_float: 1000000.0
+backtest_start_date_str: '2012-10-02'
+end_date_str: null
+allocation_policy_str: fixed
+max_workers_int: null
+rebalance:
+  frequency_str: annually
+  policy_str: fixed
+save_pod_artifacts_bool: true
+regression_benchmark_symbol_str: $SPX
+pods:
+- pod_id_str: pod_taa_btal_tqqq
+  strategy_import_str: strategies.taa_df.strategy_taa_df_btal_fallback_tqqq_vix_cash
+  weight_float: 0.27
+- pod_id_str: pod_taa_btal_1n_tqqq
+  strategy_import_str: strategies.taa_df.strategy_taa_df_btal_1n_fallback_tqqq_vix_cash
+  weight_float: 0.27
+- pod_id_str: pod_dv2
+  strategy_import_str: strategies.dv2.strategy_mr_dv2:DVO2Strategy
+  weight_float: 0.09
+- pod_id_str: pod_hpi_vote
+  strategy_import_str: strategies.hpi.strategy_mr_hpi_sp500_2_3_5_vote
+  weight_float: 0.09
+- pod_id_str: pod_hpi_ibs_rsi
+  strategy_import_str: strategies.hpi.strategy_mr_hpi_sp500_ibs_rsi_exit
+  weight_float: 0.09
+- pod_id_str: pod_ndx_vxn
+  strategy_import_str: strategies.momentum.strategy_mo_atr_normalized_ndx_vxn_scaled:VxnScaledAtrNormalizedNdxStrategy
+  weight_float: 0.07
+- pod_id_str: pod_tbill_bil
+  strategy_import_str: strategies.portfolio_controls.strategy_passive_bil
+  weight_float: 0.06
+- pod_id_str: pod_taa_btal_lin_qqq
+  strategy_import_str: strategies.taa_df.strategy_taa_df_btal_linearity_1n_fallback_qqq_vix_cash
+  weight_float: 0.03
+- pod_id_str: pod_core5
+  strategy_import_str: strategies.taa_beyond_6040.strategy_taa_adaptive_macro_core5
+  weight_float: 0.03
